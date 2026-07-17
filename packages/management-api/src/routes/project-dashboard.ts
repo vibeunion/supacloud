@@ -4,6 +4,7 @@ import { requireProjectOrAdminAuth } from "../middleware/auth";
 import { edgeFunctionService } from "../services/edge-function.service";
 import { taskRepository } from "../repositories/task.repository";
 import { logger } from "../utils/logger";
+import { getAuthRuntimeDescriptor } from "../services/auth-runtime.service";
 
 type DashboardRow = Record<string, unknown>;
 
@@ -65,6 +66,8 @@ export const projectDashboardRoutes = new Elysia({ prefix: "/v1/projects" })
         String(project.db_user),
         String(project.db_password),
       );
+      const authRuntime = getAuthRuntimeDescriptor(params.ref);
+      const sharedAuth = authRuntime.mode === "shared";
 
       const [
         dbInfoRows,
@@ -92,9 +95,11 @@ export const projectDashboardRoutes = new Elysia({ prefix: "/v1/projects" })
             (SELECT count(*)::int FROM pg_stat_activity WHERE backend_type = 'client backend') AS active,
             (SELECT setting::int FROM pg_settings WHERE name = 'max_connections') AS max
         `),
-        safeRead<DashboardRow[]>("auth user count", [], () => projectDb`
-          SELECT count(*)::int AS total FROM auth.users
-        `),
+        sharedAuth
+          ? Promise.resolve<DashboardRow[]>([])
+          : safeRead<DashboardRow[]>("auth user count", [], () => projectDb`
+              SELECT count(*)::int AS total FROM auth.users
+            `),
         safeRead<DashboardRow[]>("table count", [], () => projectDb`
           SELECT count(*)::int AS cnt FROM pg_stat_user_tables
         `),
@@ -110,12 +115,14 @@ export const projectDashboardRoutes = new Elysia({ prefix: "/v1/projects" })
           ), 0)) AS size
           FROM storage.objects
         `),
-        safeRead<DashboardRow[]>("recent users", [], () => projectDb`
-          SELECT email, created_at::text
-          FROM auth.users
-          ORDER BY created_at DESC
-          LIMIT 5
-        `),
+        sharedAuth
+          ? Promise.resolve<DashboardRow[]>([])
+          : safeRead<DashboardRow[]>("recent users", [], () => projectDb`
+              SELECT email, created_at::text
+              FROM auth.users
+              ORDER BY created_at DESC
+              LIMIT 5
+            `),
         safeRead<DashboardRow[]>("active queries", [], () => projectDb`
           SELECT pid, usename, state, left(query, 80) AS query
           FROM pg_stat_activity
@@ -143,8 +150,10 @@ export const projectDashboardRoutes = new Elysia({ prefix: "/v1/projects" })
           index_count: numberValue(indexInfo.cnt),
         },
         auth: {
-          total_users: numberValue(userInfo.total),
+          total_users: sharedAuth ? null : numberValue(userInfo.total),
           recent_users: recentUsers,
+          source: sharedAuth ? "supauth" : "local",
+          managed_by_ref: sharedAuth ? authRuntime.authority_project_ref : null,
         },
         storage: {
           size: String(storageInfo.size || "0 bytes"),

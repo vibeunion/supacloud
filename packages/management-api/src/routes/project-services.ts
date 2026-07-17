@@ -4,10 +4,18 @@
  */
 import { Elysia, t, status } from "elysia";
 import { projectService } from "../services";
-import { getAuthContext, requireProjectOrAdminAuth } from "../middleware/auth";
+import {
+  getAuthContext,
+  requireAdminAuth,
+  requireProjectOrAdminAuth,
+} from "../middleware/auth";
 import { $ } from "bun";
 import { tenantRuntimeService } from "../services/tenant-runtime.service";
 import { config } from "../config";
+import {
+  getAuthRuntimeDescriptor,
+  getAuthRuntimeManagedError,
+} from "../services/auth-runtime.service";
 
 export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
   // Get project health status
@@ -97,13 +105,18 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
           /* storage schema may not exist */
         }
 
-        // Auth user count
+        const authRuntime = getAuthRuntimeDescriptor(params.ref);
+
+        // In SupAuth shared mode auth.users in the tenant database is not the
+        // identity authority and must not be presented as the global user count.
         let userCount = 0;
-        try {
-          const [authStats] = await db`SELECT count(*) as cnt FROM auth.users`;
-          userCount = Number(authStats.cnt);
-        } catch {
-          /* auth schema may not exist */
+        if (authRuntime.mode !== "shared") {
+          try {
+            const [authStats] = await db`SELECT count(*) as cnt FROM auth.users`;
+            userCount = Number(authStats.cnt);
+          } catch {
+            /* auth schema may not exist */
+          }
         }
 
         return {
@@ -115,7 +128,13 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
               limit: 0,
               unit: "count",
             },
-            auth_users: { usage: userCount, limit: 0, unit: "count" },
+            auth_users: {
+              usage: authRuntime.mode === "shared" ? null : userCount,
+              limit: 0,
+              unit: "count",
+              source: authRuntime.mode === "shared" ? "supauth" : "local",
+              managed_by_ref: authRuntime.mode === "shared" ? authRuntime.authority_project_ref : null,
+            },
             tables: { usage: Number(tableCount.cnt), limit: 0, unit: "count" },
             connections: {
               usage: Number(connCount.cnt),
@@ -145,10 +164,22 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
   // Restart project
   .post(
     "/:ref/restart",
-    async ({ params, set }) => {
-      const restarted = await projectService.restartProject(params.ref);
-      if (!restarted) {
-        return status(404, { message: "Project not found", code: "404" });
+    async ({ params, request }) => {
+      const authRuntime = getAuthRuntimeDescriptor(params.ref);
+      const authError = authRuntime.mode === "owner"
+        ? await requireAdminAuth(request)
+        : await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
+      try {
+        const restarted = await projectService.restartProject(params.ref);
+        if (!restarted) {
+          return status(404, { message: "Project not found", code: "404" });
+        }
+      } catch (error: unknown) {
+        return status(503, {
+          message: `Project restart failed: ${error instanceof Error ? error.message : String(error)}`,
+          code: "PROJECT_RESTART_FAILED",
+        });
       }
       return { ref: params.ref, message: "Project restart initiated" };
     },
@@ -207,6 +238,18 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
       const auth = await getAuthContext(request);
       if ("status" in auth) return status(auth.status, auth.body);
 
+      const authRuntime = getAuthRuntimeDescriptor(ref);
+      if (
+        authRuntime.mode === "owner"
+        && auth.role !== "admin"
+        && (service === "gotrue" || service === "auth")
+      ) {
+        return status(403, {
+          message: "Admin privileges required to control the SupAuth owner runtime",
+          code: "403",
+        });
+      }
+
       const validActions = ["start", "stop", "restart", "pause", "resume", "status"];
       if (!validActions.includes(action)) {
         set.status = 400;
@@ -220,6 +263,7 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
         postgrest: `supacloud-pgrst@${ref}`,
         rest: `supacloud-pgrst@${ref}`,
         gotrue: `supacloud-gotrue@${ref}`,
+        auth: `supacloud-gotrue@${ref}`,
         storage: "supacloud-storage",
       };
       const sharedUnitMap: Record<string, string> = {
@@ -232,6 +276,11 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
 
       if (auth.role === "project" && !(service in projectUnitMap)) {
         return status(403, { message: "Admin privileges required for shared services", code: "403" });
+      }
+
+      if (service === "gotrue" || service === "auth") {
+        const managedError = getAuthRuntimeManagedError(ref, "service_control");
+        if (managedError) return status(409, managedError);
       }
 
       if (service === "postgrest" || service === "rest") {

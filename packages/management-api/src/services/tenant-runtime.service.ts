@@ -10,6 +10,7 @@ import { tenantOAuthService } from "./tenant-oauth.service";
 import { resolveProjectApiUrl, resolveProjectAuthUrl, resolveProjectStudioUrl } from "../utils/project-routing";
 import { normalizeOAuthServerConfig, normalizeProjectConfig } from "../utils/project-config";
 import {
+    buildSharedProjectJwtVerificationMaterial,
     normalizeProjectJwtKeys,
     resolveProjectJwtVerificationMaterial,
     type ThirdPartyJwtPolicy,
@@ -32,6 +33,8 @@ import {
 } from "./tenant-runtime-config";
 import type { PostgresConnectionConfig } from "./tenant-runtime-config";
 import { decryptSecretIfNeeded } from "../utils/secret-crypto";
+import { getAuthRuntimeDescriptor, isSharedAuthRuntime } from "./auth-runtime.service";
+import { runtimeCacheService } from "./runtime-cache.service";
 
 export {
     renderGoTrueAuthEnv,
@@ -42,6 +45,11 @@ export {
 } from "./tenant-runtime-config";
 export type { GoTrueWebAuthnDefaults } from "./tenant-runtime-config";
 
+function quoteSqlLiteral(value: string): string {
+    assertSafeConfigValue("PostgreSQL literal", value);
+    return `'${value.replace(/'/g, "''")}'`;
+}
+
 export interface RuntimeStatus {
     status: "running" | "stopped" | "starting" | "error";
     port: number;
@@ -50,11 +58,6 @@ export interface RuntimeStatus {
 }
 
 export type RuntimeDesiredState = "running" | "stopped";
-
-function quoteSqlLiteral(value: string): string {
-    assertSafeConfigValue("PostgreSQL literal", value);
-    return `'${value.replace(/'/g, "''")}'`;
-}
 
 export interface PostgrestRuntimeStatus {
     component: "postgrest";
@@ -83,6 +86,9 @@ export interface ProjectServiceStatus {
     last_error?: string | null;
     updated_at?: string | null;
     last_reconciled_at?: string | null;
+    runtime_mode?: "local" | "owner" | "shared";
+    managed_by_ref?: string;
+    local_runtime_enabled?: boolean;
 }
 
 const POSTGREST_HEALTH_PATHS = ["/live", "/ready", "/"] as const;
@@ -354,12 +360,8 @@ class TenantRuntimeService {
     private readonly postgrestController = new PostgrestRuntimeController();
     private readonly gotrueController = new GotrueRuntimeController();
 
-    private usesSharedAuthRuntime(ref: string): boolean {
-        return Boolean(config.authRuntimeOwnerRef && config.authRuntimeOwnerRef !== ref);
-    }
-
     private async effectiveGoTruePort(ref: string, localPort: number): Promise<number> {
-        if (!this.usesSharedAuthRuntime(ref)) return localPort;
+        if (!isSharedAuthRuntime(ref)) return localPort;
         const [owner] = await metaSql`
           SELECT ref, status, config FROM projects
           WHERE ref=${config.authRuntimeOwnerRef} AND deleted_at IS NULL
@@ -387,6 +389,26 @@ class TenantRuntimeService {
 
     private deriveAuthUrl(ref: string, projectConfig: Record<string, unknown> | null | undefined): string {
         return resolveProjectAuthUrl(ref, projectConfig);
+    }
+
+    private async sharedAuthIssuer(ref: string): Promise<string | null> {
+        const runtime = getAuthRuntimeDescriptor(ref);
+        if (runtime.mode !== "shared") return null;
+        const [owner] = await metaSql`
+          SELECT config
+          FROM projects
+          WHERE ref=${runtime.authority_project_ref}
+            AND deleted_at IS NULL
+            AND lower(status) = 'active'
+          LIMIT 1
+        `;
+        if (!owner) throw new Error(`Cannot find active SupAuth owner project ${runtime.authority_project_ref}`);
+        const ownerConfig = normalizeProjectConfig(owner.config);
+        const ownerAuth = (ownerConfig.auth as Record<string, unknown>) || {};
+        const oauthServer = normalizeOAuthServerConfig(ownerAuth.oauth_server);
+        return typeof oauthServer.issuer === "string" && oauthServer.issuer.trim()
+            ? oauthServer.issuer.trim().replace(/\/+$/, "")
+            : `${this.deriveAuthUrl(runtime.authority_project_ref, ownerConfig)}/auth/v1`;
     }
 
     private async readPersistedTenantPort(ref: string, type: "pgrst" | "gotrue"): Promise<number | null> {
@@ -501,11 +523,36 @@ class TenantRuntimeService {
         const authConfig = (projectConfig.auth as Record<string, unknown>) || {};
         const oauthServerConfig = normalizeOAuthServerConfig(authConfig.oauth_server);
         const jwtKeys = stringifyJsonConfig(normalizeProjectJwtKeys(oauthServerConfig.jwt_keys));
-        const jwtMaterial = resolveProjectJwtVerificationMaterial(projectConfig, project.jwt_secret);
-        const jwtJwks = stringifyJsonConfig(jwtMaterial.jwtJwks);
-        const localJwtIssuer = typeof oauthServerConfig.issuer === "string" && oauthServerConfig.issuer.trim()
+        let jwtMaterial = resolveProjectJwtVerificationMaterial(projectConfig, project.jwt_secret);
+        let localJwtIssuer = typeof oauthServerConfig.issuer === "string" && oauthServerConfig.issuer.trim()
             ? oauthServerConfig.issuer.trim().replace(/\/+$/, "")
             : null;
+        const authRuntime = getAuthRuntimeDescriptor(ref);
+        if (authRuntime.mode === "shared") {
+            const [owner] = await metaSql`
+              SELECT config
+              FROM projects
+              WHERE ref=${authRuntime.authority_project_ref}
+                AND deleted_at IS NULL
+                AND lower(status) = 'active'
+              LIMIT 1
+            `;
+            if (!owner) {
+                throw new Error(`Cannot find active SupAuth owner project ${authRuntime.authority_project_ref}`);
+            }
+            const ownerConfig = normalizeProjectConfig(owner.config);
+            jwtMaterial = buildSharedProjectJwtVerificationMaterial({
+                projectJwtSecret: String(project.jwt_secret),
+                projectConfig: project.config,
+                ownerConfig: owner.config,
+            });
+            const ownerAuth = (ownerConfig.auth as Record<string, unknown>) || {};
+            const ownerOauthServer = normalizeOAuthServerConfig(ownerAuth.oauth_server);
+            localJwtIssuer = typeof ownerOauthServer.issuer === "string" && ownerOauthServer.issuer.trim()
+                ? ownerOauthServer.issuer.trim().replace(/\/+$/, "")
+                : `${this.deriveAuthUrl(authRuntime.authority_project_ref, ownerConfig)}/auth/v1`;
+        }
+        const jwtJwks = stringifyJsonConfig(jwtMaterial.jwtJwks);
         return {
             dbPassword: project.db_password,
             jwtSecret: project.jwt_secret,
@@ -757,13 +804,19 @@ class TenantRuntimeService {
             database: creds.dbName,
         });
 
+        const sharedAuthRuntime = isSharedAuthRuntime(ref);
         const jwtVerifierSecret = creds.jwtJwks || creds.jwtSecret;
         const jwtJwksEnv = creds.jwtJwks ? renderSystemdEnvLine("JWT_JWKS", creds.jwtJwks) : "";
         const jwtKeysEnv = creds.jwtKeys ? renderSystemdEnvLine("JWT_KEYS", creds.jwtKeys) : "";
         const thirdPartyJwtPolicyEnv = creds.thirdPartyJwtPolicy
             ? renderSystemdEnvLine("SUPACLOUD_THIRD_PARTY_JWT_POLICY", JSON.stringify(creds.thirdPartyJwtPolicy))
             : "";
-        const postgrestJwtAudience = creds.thirdPartyJwtPolicy?.audience[0] || "";
+        // Shared mode accepts both SupAuth owner tokens and an optional scoped
+        // third-party issuer. A single global jwt-aud would reject one side;
+        // the pre-request guard validates each issuer's audience instead.
+        const postgrestJwtAudience = sharedAuthRuntime
+            ? ""
+            : (creds.thirdPartyJwtPolicy?.audience[0] || "");
         const postgrestJwtAudienceConfig = postgrestJwtAudience
             ? `jwt-aud = ${quoteTomlBasicString(postgrestJwtAudience)}`
             : "";
@@ -784,10 +837,12 @@ class TenantRuntimeService {
             renderSystemdEnvLine("SUPABASE_PUBLISHABLE_KEY", String(creds.publishableKey || "")),
             renderSystemdEnvLine("SUPABASE_SECRET_KEY", String(creds.secretKey || "")),
             renderSystemdEnvLine("SUPABASE_DB_URL", edgeDbUri),
-            renderSystemdEnvLine("JWT_SECRET", creds.jwtSecret),
+            sharedAuthRuntime ? "" : renderSystemdEnvLine("JWT_SECRET", creds.jwtSecret),
+            renderSystemdEnvLine("SUPACLOUD_AUTH_RUNTIME_MODE", sharedAuthRuntime ? "shared" : "local"),
+            renderSystemdEnvLine("SUPACLOUD_AUTH_AUTHORITY_REF", getAuthRuntimeDescriptor(ref).authority_project_ref),
             renderTenantInternalRuntimeEnv(pgrstPort, runtimeGoTruePort),
             jwtJwksEnv,
-            jwtKeysEnv,
+            sharedAuthRuntime ? "" : jwtKeysEnv,
             thirdPartyJwtPolicyEnv,
         ].filter(Boolean).join("\n");
         await this.writeTenantSecretFile(
@@ -834,7 +889,7 @@ db-channel = ${quoteTomlBasicString(resolvePgrstChannel(ref))}
         );
 
         // 共享认证模式下从项目只使用主项目 GoTrue，不再生成本地认证运行时。
-        if (this.usesSharedAuthRuntime(ref)) {
+        if (sharedAuthRuntime) {
             await this.gotrueController.stopAndDisable(ref);
             await this.persistTenantPortConfig(ref, pgrstPort, gotruePort);
             logger.info(`Config generated for ${ref} with shared GoTrue owner ${config.authRuntimeOwnerRef}`);
@@ -1562,6 +1617,27 @@ GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pgmq_public TO anon, authenticated, ser
         // runTenantPsqlOrThrow performs `throw new Error(`psql exited with code ...`)`.
         const dbName = await resolveDbName(ref);
         const connection = this.adminPsqlConnection(dbName);
+        const supauthIssuer = await this.sharedAuthIssuer(ref);
+        const issuerLiteral = supauthIssuer ? quoteSqlLiteral(supauthIssuer) : "NULL";
+        const thirdPartyIssuerBranch = thirdPartyPolicy
+            ? `ELSIF claims ->> 'iss' = ${quoteSqlLiteral(thirdPartyPolicy.issuer)} THEN\n    NULL;`
+            : "";
+        const sharedAuthGuard = supauthIssuer
+            ? `
+  IF claims ->> 'iss' = ${issuerLiteral} THEN
+    IF role_claim <> 'authenticated' THEN
+      RAISE insufficient_privilege USING MESSAGE = 'SupAuth owner tokens may only use the authenticated role';
+    END IF;
+  ${thirdPartyIssuerBranch}
+  ELSIF claims ->> 'iss' = 'supabase' THEN
+    IF role_claim NOT IN ('anon', 'service_role') THEN
+      RAISE insufficient_privilege USING MESSAGE = 'Dependent legacy user sessions are disabled while SupAuth is active';
+    END IF;
+  ELSE
+    RAISE insufficient_privilege USING MESSAGE = 'JWT issuer is not allowed for this SupAuth dependent project';
+  END IF;
+`
+            : "";
 
         const thirdPartyGate = thirdPartyPolicy
             ? `
@@ -1593,6 +1669,7 @@ GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pgmq_public TO anon, authenticated, ser
   END IF;
 `.trimEnd()
             : "";
+
         const fnSql = `
 CREATE OR REPLACE FUNCTION public.set_request_context() RETURNS void AS $$
 DECLARE
@@ -1619,6 +1696,7 @@ BEGIN
 
 ${thirdPartyGate}
 
+${sharedAuthGuard}
   PERFORM set_config('request.jwt.claims', claims::text, true);
   PERFORM set_config('request.jwt.claim.sub', coalesce(claims ->> 'sub', ''), true);
   PERFORM set_config('request.jwt.claim.email', coalesce(claims ->> 'email', ''), true);
@@ -1661,7 +1739,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
         await this.postgrestController.enable(ref);
         await this.postgrestController.start(ref);
 
-        if (!this.usesSharedAuthRuntime(ref)) {
+        if (!isSharedAuthRuntime(ref)) {
             await this.gotrueController.enable(ref);
             await this.gotrueController.start(ref);
         }
@@ -1677,14 +1755,14 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
                 pgrstOk = status.health === "healthy";
             }
 
-            if (!gotrueOk && !this.usesSharedAuthRuntime(ref)) {
+            if (!gotrueOk && !isSharedAuthRuntime(ref)) {
                 try {
                     const res = await fetch(`http://127.0.0.1:${gotruePort}/health`);
                     if (res.ok) gotrueOk = true;
                 } catch (e: unknown) { logger.debug("[services/tenant-runtime.service] suppressed error", { error: e instanceof Error ? e.message : String(e) }); }
             }
 
-            if (pgrstOk && (gotrueOk || this.usesSharedAuthRuntime(ref))) {
+            if (pgrstOk && (gotrueOk || isSharedAuthRuntime(ref))) {
                 await this.setPostgrestDesiredState(ref, "running");
                 await this.recordPostgrestObservation(ref, {
                     actual: "running",
@@ -2115,16 +2193,18 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
         ref: string,
         mode: "studio" | "detail" = "studio",
     ): Promise<ProjectServiceStatus[]> {
+        const authRuntime = getAuthRuntimeDescriptor(ref);
+        const authRuntimeRef = authRuntime.authority_project_ref;
         const serviceDefs = mode === "studio"
             ? [
                 { id: "db", name: "db", unit: "patroni" },
-                { id: "auth", name: "auth", unit: `supacloud-gotrue@${ref}` },
+                { id: "auth", name: "auth", unit: `supacloud-gotrue@${authRuntimeRef}` },
                 { id: "realtime", name: "realtime", unit: "supacloud-realtime", container: "supacloud-realtime" },
                 { id: "storage", name: "storage", unit: "supacloud-storage" },
             ]
             : [
                 { id: "postgresql", name: "PostgreSQL", unit: "patroni" },
-                { id: "gotrue", name: "GoTrue", unit: `supacloud-gotrue@${ref}` },
+                { id: "gotrue", name: "GoTrue", unit: `supacloud-gotrue@${authRuntimeRef}` },
                 { id: "realtime", name: "Realtime", unit: "supacloud-realtime", container: "supacloud-realtime" },
                 { id: "storage", name: "Storage", unit: "supacloud-storage" },
                 {
@@ -2171,24 +2251,36 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
                 const serviceStatus = result?.status === "fulfilled" ? result.value : "INACTIVE";
                 return this.systemServiceEntry(ref, service.id, service.name, serviceStatus);
             });
+        const [rawAuthCandidate, ...remainingEntries] = otherEntries;
+        const authId = mode === "studio" ? "auth" : "gotrue";
+        const authName = mode === "studio" ? "auth" : "GoTrue";
+        const rawAuth = rawAuthCandidate ?? this.unhealthyService(ref, authId, authName);
+        const authEntry: ProjectServiceStatus = {
+            ...rawAuth,
+            service_host_ids: [`${authRuntimeRef}-${authId}`],
+            unit: `supacloud-gotrue@${authRuntimeRef}`,
+            runtime_mode: authRuntime.mode,
+            managed_by_ref: authRuntime.mode === "local" ? undefined : authRuntimeRef,
+            local_runtime_enabled: authRuntime.local_gotrue_enabled,
+        };
 
         if (mode === "studio") {
             const db = this.systemServiceEntry(ref, "db", "db", dbStatus);
             const storage = this.systemServiceEntry(ref, "storage", "storage", storageStatus);
-            const [auth, realtime] = otherEntries;
-            return [db, postgrestEntry, auth, realtime, storage];
+            const [realtime] = remainingEntries;
+            return [db, postgrestEntry, authEntry, realtime, storage];
         }
 
         const postgresql = this.systemServiceEntry(ref, "postgresql", "PostgreSQL", dbStatus);
         const storage = this.systemServiceEntry(ref, "storage", "Storage", storageStatus);
-        const [gotrue, realtime, gateway] = otherEntries;
-        return [postgresql, postgrestEntry, gotrue, realtime, storage, gateway];
+        const [realtime, gateway] = remainingEntries;
+        return [postgresql, postgrestEntry, authEntry, realtime, storage, gateway];
     }
 
     public async restartRuntime(ref: string): Promise<RuntimeStatus> {
         const pgrstActive = await this.postgrestController.isActive(ref);
         const gotrueActive = await this.gotrueController.isActive(ref);
-        const sharedAuthRuntime = this.usesSharedAuthRuntime(ref);
+        const sharedAuthRuntime = isSharedAuthRuntime(ref);
 
         if (pgrstActive || gotrueActive) {
             await this.ensureBinaries();
@@ -2210,9 +2302,56 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
                 port: postgrestStatus.port,
                 last_error: postgrestStatus.health === "healthy" ? null : "PostgREST health check did not become healthy after runtime restart",
             });
-            return await this.checkStatus(ref);
+            const status = await this.checkStatus(ref);
+            if (!sharedAuthRuntime && getAuthRuntimeDescriptor(ref).mode === "owner") {
+                await this.refreshSharedAuthDependents(ref);
+            }
+            return status;
         } else {
-            return await this.startRuntime(ref);
+            const status = await this.startRuntime(ref);
+            if (!sharedAuthRuntime && getAuthRuntimeDescriptor(ref).mode === "owner") {
+                await this.refreshSharedAuthDependents(ref);
+            }
+            return status;
+        }
+    }
+
+    private async refreshSharedAuthDependents(ownerRef: string): Promise<void> {
+        const dependents = await metaSql`
+          SELECT ref
+          FROM projects
+          WHERE ref <> ${ownerRef}
+            AND deleted_at IS NULL
+            AND lower(status) IN ('active', 'creating')
+        `;
+        const failures: string[] = [];
+        for (const dependent of dependents) {
+            const ref = String(dependent.ref || "");
+            if (!ref) continue;
+            try {
+                const pgrstPort = await this.getTenantPort(ref, "pgrst");
+                const gotruePort = await this.getTenantPort(ref, "gotrue");
+                await this.generateTenantConfig(ref, pgrstPort, gotruePort);
+                const jwtPolicy = await this.getTenantCredentials(ref);
+                await this.ensurePostgrestPrerequest(
+                    ref,
+                    jwtPolicy.thirdPartyJwtPolicy,
+                    jwtPolicy.localJwtIssuer,
+                );
+                await runtimeCacheService.invalidateProjectRuntimeEnv(ref);
+                if (await this.postgrestController.isActive(ref)) {
+                    await this.postgrestController.restart(ref);
+                }
+            } catch (error: unknown) {
+                failures.push(ref);
+                logger.error(`[TenantRuntime] Failed to refresh shared auth dependent ${ref}`, {
+                    ownerRef,
+                    error: error instanceof Error ? error.message : String(error),
+                });
+            }
+        }
+        if (failures.length > 0) {
+            throw new Error(`Failed to refresh SupAuth dependents: ${failures.join(", ")}`);
         }
     }
 
@@ -2224,7 +2363,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
         const localGoTruePort = await this.getTenantPort(ref, "gotrue");
         const gotruePort = await this.effectiveGoTruePort(ref, localGoTruePort);
 
-        if (pgrstActive || gotrueActive || this.usesSharedAuthRuntime(ref)) {
+        if (pgrstActive || gotrueActive || isSharedAuthRuntime(ref)) {
             let pgrstOk = false;
             let gotrueOk = false;
 
@@ -2318,7 +2457,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
                 }
 
                 // --- GoTrue reconcile ---
-                const sharedAuthRuntime = this.usesSharedAuthRuntime(ref);
+                const sharedAuthRuntime = isSharedAuthRuntime(ref);
                 const gotrueActive = await this.gotrueController.isActive(ref);
                 const gotruePort = await this.getTenantPort(ref, "gotrue");
                 const gotrueObserved = await this.gotrueController.observe(ref, gotruePort);

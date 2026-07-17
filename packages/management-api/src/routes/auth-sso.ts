@@ -6,6 +6,7 @@ import { requireProjectOrAdminAuth } from "../middleware/auth";
 import { sql as metaSql } from "../db";
 import { resolveTenantPorts, normalizeProjectRoutingConfig } from "../utils/project-routing";
 import { normalizeProjectConfig } from "../utils/project-config";
+import { requireAuthRuntimeManagement } from "./auth-runtime";
 
 async function getGoTrueHeaders(ref: string) {
   const project = await projectService.getProject(ref);
@@ -33,6 +34,7 @@ async function getGoTrueHeaders(ref: string) {
 }
 
 export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
+  .onBeforeHandle(requireAuthRuntimeManagement("sso"))
 
   .get(
     "/:ref/auth/sso/providers",

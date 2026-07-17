@@ -579,6 +579,7 @@ export class ProjectService {
         `[ProjectService] Service restart partial failure for ${ref}`,
         { error: err },
       );
+      throw err;
     }
 
     return true;

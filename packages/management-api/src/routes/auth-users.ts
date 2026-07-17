@@ -6,6 +6,7 @@ import { requireProjectOrAdminAuth } from "../middleware/auth";
 import { sql as metaSql } from "../db";
 import { resolveTenantPorts, normalizeProjectRoutingConfig } from "../utils/project-routing";
 import { normalizeProjectConfig } from "../utils/project-config";
+import { requireAuthRuntimeManagement } from "./auth-runtime";
 
 async function getGoTrueAdminContext(ref: string) {
   const project = await projectService.getProject(ref);
@@ -79,6 +80,7 @@ function readOptionalString(value: unknown): string | undefined {
  * User Management routes — Admin API proxy to GoTrue
  */
 export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
+  .onBeforeHandle(requireAuthRuntimeManagement("users"))
   .get(
     "/users",
     async ({ params, query, set, request }) => {

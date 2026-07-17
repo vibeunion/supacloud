@@ -1,6 +1,7 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
 
+  import { resolve } from "$app/paths";
   import { page } from "$app/state";
   import { Loader2, Play, Square, RotateCw, Activity, Server, Shield, Database, Radio, HardDrive, AlertTriangle } from "lucide-svelte";
   import { toast } from "svelte-sonner";
@@ -12,6 +13,10 @@
     icon: typeof Server;
     status: string;
     systemdUnit: string;
+    controlName: string;
+    runtimeMode?: "local" | "owner" | "shared";
+    managedByRef?: string;
+    localRuntimeEnabled?: boolean;
   }
 
   let actionInProgress = $state<string | null>(null);
@@ -28,15 +33,44 @@
   const services = $derived.by(() => {
     const data = query.data?.data as Record<string, any>;
     const svcArr = data?.services || [];
+    const findService = (name: string) => svcArr.find((service: Record<string, unknown>) => service.name === name);
+    const authService = svcArr.find((service: Record<string, unknown>) =>
+      service.id === "gotrue"
+      || service.id === "auth"
+      || service.name === "GoTrue"
+      || service.name === "auth"
+    );
+    const authRuntimeMode = authService?.runtime_mode === "shared"
+      ? "shared"
+      : authService?.runtime_mode === "owner"
+        ? "owner"
+        : "local";
+    const authOwnerRef = typeof authService?.managed_by_ref === "string" ? authService.managed_by_ref : undefined;
     return [
-      { name: "PostgreSQL", icon: Database, status: svcArr.find((s: Record<string, unknown>) => s.name === "PostgreSQL")?.status || "INACTIVE", systemdUnit: "patroni" },
-      { name: "PostgREST", icon: Server, status: svcArr.find((s: Record<string, unknown>) => s.name === "PostgREST")?.status || "INACTIVE", systemdUnit: `supacloud-pgrst@${projectRef}` },
-      { name: "GoTrue", icon: Shield, status: svcArr.find((s: Record<string, unknown>) => s.name === "GoTrue")?.status || "INACTIVE", systemdUnit: `supacloud-gotrue@${projectRef}` },
-      { name: "Realtime", icon: Radio, status: svcArr.find((s: Record<string, unknown>) => s.name === "Realtime")?.status || "INACTIVE", systemdUnit: `supacloud-realtime@${projectRef}` },
-      { name: "Storage", icon: HardDrive, status: svcArr.find((s: Record<string, unknown>) => s.name === "Storage")?.status || "INACTIVE", systemdUnit: `supacloud-storage@${projectRef}` },
-      { name: "Caddy", icon: Activity, status: svcArr.find((s: Record<string, unknown>) => s.name === "Caddy")?.status || "INACTIVE", systemdUnit: "supacloud-caddy" },
+      { name: "PostgreSQL", controlName: "postgresql", icon: Database, status: findService("PostgreSQL")?.status || "INACTIVE", systemdUnit: "patroni" },
+      { name: "PostgREST", controlName: "postgrest", icon: Server, status: findService("PostgREST")?.status || "INACTIVE", systemdUnit: `supacloud-pgrst@${projectRef}` },
+      {
+        name: authRuntimeMode === "shared"
+          ? "SupAuth（共享）"
+          : authRuntimeMode === "owner"
+            ? "SupAuth（权威）"
+            : "GoTrue",
+        controlName: "gotrue",
+        icon: Shield,
+        status: authService?.status || "INACTIVE",
+        systemdUnit: authService?.unit || `supacloud-gotrue@${authOwnerRef || projectRef}`,
+        runtimeMode: authRuntimeMode,
+        managedByRef: authOwnerRef,
+        localRuntimeEnabled: authService?.local_runtime_enabled !== false,
+      },
+      { name: "Realtime", controlName: "realtime", icon: Radio, status: findService("Realtime")?.status || "INACTIVE", systemdUnit: `supacloud-realtime@${projectRef}` },
+      { name: "Storage", controlName: "storage", icon: HardDrive, status: findService("Storage")?.status || "INACTIVE", systemdUnit: `supacloud-storage@${projectRef}` },
+      { name: "Caddy", controlName: "caddy", icon: Activity, status: findService("Caddy")?.status || "INACTIVE", systemdUnit: "supacloud-caddy" },
     ];
   });
+
+  const sharedAuthService = $derived(services.find((service) => service.runtimeMode === "shared"));
+  const ownerAuthService = $derived(services.find((service) => service.runtimeMode === "owner"));
 
   const isLoading = $derived(query.isLoading);
 
@@ -149,6 +183,32 @@
     </p>
   </div>
 
+  {#if sharedAuthService}
+    <div class="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 flex items-start gap-2">
+      <Shield size={14} class="text-amber-700 mt-0.5 shrink-0" />
+      <p class="text-xs leading-5 text-amber-950">
+        本项目使用 SupAuth 共享认证，本地 GoTrue 已停用。公开认证流量与认证状态来自权威项目
+        {#if sharedAuthService.managedByRef}
+          <a
+            class="font-mono font-semibold underline underline-offset-2"
+            href={resolve("/project/[ref]/auth", { ref: sharedAuthService.managedByRef })}
+          >
+            {sharedAuthService.managedByRef}
+          </a>
+        {:else}
+          <span class="font-semibold">SupAuth 权威项目</span>
+        {/if}；启动全部、重启全部和暂停项目不会控制该共享认证服务。
+      </p>
+    </div>
+  {:else if ownerAuthService}
+    <div class="rounded-lg border border-blue-500/30 bg-blue-500/5 p-3 flex items-start gap-2">
+      <Shield size={14} class="text-blue-700 mt-0.5 shrink-0" />
+      <p class="text-xs leading-5 text-blue-950">
+        本项目运行 SupAuth 权威 GoTrue。对该服务及认证设置的操作会影响所有从属项目，请按共享基础设施变更处理。
+      </p>
+    </div>
+  {/if}
+
   <div class="flex-1 rounded-xl border border-border/50 bg-background shadow-sm overflow-hidden">
     {#if isLoading}
       <div class="flex flex-col items-center justify-center py-24 text-muted-foreground gap-3">
@@ -166,14 +226,21 @@
               <div>
                 <span class="font-semibold text-sm">{svc.name}</span>
                 <p class="text-[10px] font-mono text-muted-foreground">{svc.systemdUnit}</p>
+                {#if svc.runtimeMode === "shared"}
+                  <p class="text-[10px] text-amber-700">由项目 {svc.managedByRef} 统一管理，本地实例不可操作</p>
+                {:else if svc.runtimeMode === "owner"}
+                  <p class="text-[10px] text-blue-700">共享认证权威实例，变更会影响所有从属项目</p>
+                {/if}
               </div>
             </div>
             <div class="flex items-center gap-3">
               <span class="px-2.5 py-1 rounded-full text-[10px] font-bold {statusColor(svc.status)}">{statusLabel(svc.status)}</span>
-              <div class="flex items-center gap-1">
-                {#if svc.status === "ACTIVE_HEALTHY"}
+              <div class="flex items-center gap-1 min-w-14 justify-end">
+                {#if svc.runtimeMode === "shared"}
+                  <span class="text-[10px] font-semibold text-muted-foreground">只读</span>
+                {:else if svc.status === "ACTIVE_HEALTHY"}
                   <button
-                    onclick={() => controlService("restart", svc.name.toLowerCase())}
+                    onclick={() => controlService("restart", svc.controlName)}
                     disabled={!!actionInProgress}
                     class="p-1.5 hover:bg-brand/10 hover:text-brand rounded transition-colors disabled:opacity-50"
                     title="重启"
@@ -181,7 +248,7 @@
                     <RotateCw size={14} />
                   </button>
                   <button
-                    onclick={() => controlService("stop", svc.name.toLowerCase())}
+                    onclick={() => controlService("stop", svc.controlName)}
                     disabled={!!actionInProgress}
                     class="p-1.5 hover:bg-destructive/10 hover:text-destructive rounded transition-colors disabled:opacity-50"
                     title="停止"
@@ -190,7 +257,7 @@
                   </button>
                 {:else}
                   <button
-                    onclick={() => controlService("start", svc.name.toLowerCase())}
+                    onclick={() => controlService("start", svc.controlName)}
                     disabled={!!actionInProgress}
                     class="p-1.5 hover:bg-green-500/10 hover:text-green-600 rounded transition-colors disabled:opacity-50"
                     title="启动"

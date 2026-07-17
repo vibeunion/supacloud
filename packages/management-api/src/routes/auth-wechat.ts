@@ -6,11 +6,13 @@ import { edgeFunctionService } from "../services/edge-function.service";
 import { runtimeCacheService } from "../services/runtime-cache.service";
 import { WECHAT_PROVIDER_INFO } from "../types/oauth";
 import type { WeChatProviderType } from "../types/oauth";
+import { requireAuthRuntimeManagement } from "./auth-runtime";
 
 /**
  * WeChat OAuth routes — miniprogram, official account (mp), and open platform
  */
 export const wechatAuthRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
+  .onBeforeHandle(requireAuthRuntimeManagement("providers"))
   .post(
     "/wechat/miniprogram",
     async ({ params, body, set }) => {

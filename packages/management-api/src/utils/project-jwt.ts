@@ -11,7 +11,12 @@ import {
   type JWTPayload,
 } from "jose";
 import { sql as metaSql } from "../db";
-import { normalizeProjectConfig, normalizeThirdPartyAuthConfig } from "./project-config";
+import {
+  normalizeOAuthServerConfig,
+  normalizeProjectConfig,
+  normalizeThirdPartyAuthConfig,
+} from "./project-config";
+import { getAuthRuntimeDescriptor } from "../services/auth-runtime.service";
 
 export type OidcJwtKeyMaterial = {
   key_id: string;
@@ -139,6 +144,17 @@ export function normalizeProjectJwtJwks(value: unknown): { keys: JWK[] } | null 
   const keys = (parsed as { keys?: unknown }).keys;
   if (!Array.isArray(keys) || keys.length === 0) return null;
   return { keys: keys as JWK[] };
+}
+
+export function extractJwtJwksFromConfig(config: unknown): { keys: JWK[] } | null {
+  const projectConfig = normalizeProjectConfig(config);
+  const auth = (projectConfig.auth || {}) as Record<string, unknown>;
+  const oauthServer = (auth.oauth_server || {}) as Record<string, unknown>;
+  try {
+    return normalizeProjectJwtJwks(oauthServer.jwt_jwks);
+  } catch {
+    return null;
+  }
 }
 
 function jwkIdentity(key: JWK): string {
@@ -292,6 +308,66 @@ export function resolveProjectJwtVerificationMaterial(
   };
 }
 
+function publicAsymmetricKeys(jwks: { keys: JWK[] } | null): JWK[] {
+  return (jwks?.keys || [])
+    .filter((key) =>
+      ((key.kty === "EC" && key.alg === "ES256") || (key.kty === "RSA" && key.alg === "RS256"))
+      && typeof key.d !== "string"
+    )
+    .map((key) => {
+      const publicKey = { ...key } as JWK & Record<string, unknown>;
+      for (const field of ["d", "p", "q", "dp", "dq", "qi", "oth", "aws:kms:arn"]) {
+        delete publicKey[field];
+      }
+      publicKey.key_ops = ["verify"];
+      return publicKey;
+    });
+}
+
+export function buildSharedProjectJwtVerificationMaterial(input: {
+  projectJwtSecret: string;
+  projectConfig: unknown;
+  ownerConfig: unknown;
+}): ProjectJwtVerificationMaterial {
+  const ownerConfig = normalizeProjectConfig(input.ownerConfig);
+  const ownerAuth = (ownerConfig.auth || {}) as Record<string, unknown>;
+  const ownerOauthServer = normalizeOAuthServerConfig(ownerAuth.oauth_server);
+  const signingAlg = ownerOauthServer.signing_alg;
+  const ownerSigningKeys = normalizeProjectJwtKeys(ownerOauthServer.jwt_keys);
+  const signingEnabled = ownerOauthServer.enabled === true
+    && (signingAlg === "ES256" || signingAlg === "RS256")
+    && ownerSigningKeys?.some((key) => key.alg === signingAlg);
+  const ownerKeys = publicAsymmetricKeys(extractJwtJwksFromConfig(ownerConfig));
+  if (!signingEnabled || ownerKeys.length === 0) {
+    throw new Error(
+      "SupAuth owner must enable asymmetric ES256 or RS256 JWT signing before dependent projects can use shared authentication",
+    );
+  }
+
+  // SupAuth shared mode has a single authentication authority. A dependent's
+  // third-party issuer is intentionally not admitted into the shared verifier:
+  // PostgREST cannot bind a payload issuer to the key that verified it, so
+  // mixing external keys with owner/legacy keys would create an issuer-confusion
+  // path. Third-party auth remains available in local/owner mode.
+  const thirdParty: ThirdPartyJwtPolicy | null = null;
+  const localJwks = { keys: ownerKeys };
+  const jwtJwks = mergeVerificationJwks([
+    [buildLegacyHs256Jwk(input.projectJwtSecret)],
+    ownerKeys,
+  ]);
+  if (!jwtJwks) throw new Error("SupAuth shared JWT verification material is empty");
+
+  return { jwtJwks, localJwks, thirdParty };
+}
+
+export function buildSharedProjectJwtVerifierJwks(input: {
+  projectJwtSecret: string;
+  projectConfig: unknown;
+  ownerConfig: unknown;
+}): { keys: JWK[] } {
+  return buildSharedProjectJwtVerificationMaterial(input).jwtJwks!;
+}
+
 /**
  * Resolve every public key accepted by a project's runtime JWT consumers.
  *
@@ -442,7 +518,7 @@ export async function verifyProjectJwtPayload(
   const cleanToken = token.replace(/^Bearer\s+/i, "");
   const [project] = options.includeProvisioning
     ? await metaSql`
-      SELECT jwt_secret, service_role_key, config
+      SELECT jwt_secret, anon_key, service_role_key, config
       FROM projects
       WHERE ref = ${ref}
         AND deleted_at IS NULL
@@ -450,7 +526,7 @@ export async function verifyProjectJwtPayload(
       LIMIT 1
     `
     : await metaSql`
-      SELECT jwt_secret, service_role_key, config
+      SELECT jwt_secret, anon_key, service_role_key, config
       FROM projects
       WHERE ref = ${ref}
         AND deleted_at IS NULL
@@ -465,9 +541,27 @@ export async function verifyProjectJwtPayload(
   const payload = decodeJwtPart(parts[1]);
   if (!header || !payload || typeof header.alg !== "string") return null;
 
+  const authRuntime = getAuthRuntimeDescriptor(ref);
   let material: ProjectJwtVerificationMaterial;
   try {
-    material = resolveProjectJwtVerificationMaterial(project.config, String(project.jwt_secret));
+    if (authRuntime.mode === "shared") {
+      const [owner] = await metaSql`
+        SELECT config
+        FROM projects
+        WHERE ref = ${authRuntime.authority_project_ref}
+          AND deleted_at IS NULL
+          AND lower(status) = 'active'
+        LIMIT 1
+      `;
+      if (!owner) return null;
+      material = buildSharedProjectJwtVerificationMaterial({
+        projectJwtSecret: String(project.jwt_secret),
+        projectConfig: project.config,
+        ownerConfig: owner.config,
+      });
+    } else {
+      material = resolveProjectJwtVerificationMaterial(project.config, String(project.jwt_secret));
+    }
   } catch {
     return null;
   }
@@ -477,7 +571,14 @@ export async function verifyProjectJwtPayload(
     result = await verifyThirdPartyJwt(cleanToken, material.thirdParty);
   } else {
     result = await verifyLocalAsymmetricJwt(cleanToken, material.localJwks);
-    if (!result) {
+    if (result && authRuntime.mode === "shared" && result.payload.role !== "authenticated") {
+      return null;
+    }
+    if (!result && authRuntime.mode === "shared") {
+      const isLegacyApiKey = cleanToken === project.anon_key || cleanToken === project.service_role_key;
+      if (!isLegacyApiKey) return null;
+      result = await verifyLegacyHs256Jwt(cleanToken, String(project.jwt_secret), header);
+    } else if (!result) {
       result = await verifyLegacyHs256Jwt(cleanToken, String(project.jwt_secret), header);
     }
   }

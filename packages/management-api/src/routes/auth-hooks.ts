@@ -3,6 +3,7 @@ import { projectService } from "../services";
 import { resolveDbName, getProjectDb } from "../db";
 import { logger } from "../utils/logger";
 import { requireProjectOrAdminAuth } from "../middleware/auth";
+import { getAuthRuntimeManagedError } from "../services/auth-runtime.service";
 
 export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
 
@@ -172,7 +173,11 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
 
   .get(
     "/:ref/auth/hooks",
-    async ({ params }) => {
+    async ({ params, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
+      const managedError = getAuthRuntimeManagedError(params.ref, "configuration");
+      if (managedError) return status(409, managedError);
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) return status(404, { message: "Project not found", code: "404" });
 
@@ -195,6 +200,8 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, body, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
+      const managedError = getAuthRuntimeManagedError(params.ref, "configuration");
+      if (managedError) return status(409, managedError);
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) return status(404, { message: "Project not found", code: "404" });
 

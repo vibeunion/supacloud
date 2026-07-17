@@ -30,15 +30,32 @@
 > **Note**: SupaCloud natively relies on **Caddy** running as a systemd service.
 > All tenant routing, rate limiting, CORS, and TLS are managed via the Caddy Admin API — no manual config file edits needed.
 
-### 1. PostgREST & GoTrue (Per-Tenant Processes) ⭐ Implemented
-These core REST, GraphQL, and Authentication services are extremely lightweight (20-50MB RAM). 
-We spin up a unique `postgrest` AND `gotrue` process for *every* tenant dynamically using `systemd` templates (`supacloud-pgrst@.service` and `supacloud-gotrue@.service`):
+### 1. PostgREST & Authentication Runtime ⭐ Implemented
+PostgREST remains a per-tenant process. Authentication supports two explicit product modes:
+
+- **Local mode (default):** the project owns its own `gotrue` process and `auth` schema.
+- **SupAuth shared mode:** `SUPACLOUD_AUTH_RUNTIME_OWNER_REF=<owner-ref>` designates one project as the authentication authority. Other projects do not start local GoTrue; their public `/auth/v1` traffic is routed to the owner's GoTrue runtime.
+
+In local mode, we spin up unique `postgrest` and `gotrue` processes dynamically using `systemd` templates (`supacloud-pgrst@.service` and `supacloud-gotrue@.service`):
 - They bind to unique deterministically generated ports (e.g., PostgREST starts from 3100, GoTrue starts from 4100).
 - They connect securely to the tenant's isolated Postgres database (`supa_<ref>`) using unique credentials.
 - They possess isolated `JWT_SECRET`s to ensure cryptographic boundary security (users from Tenant A cannot authenticate into Tenant B).
 - PostgREST now has a component-level lifecycle controller in Management API: `pausePostgrest`, `resumePostgrest`, `statusPostgrest`, and `restartPostgrest`.
 - Desired state is stored per project in dedicated `projects.postgrest_*` metadata columns and is reconciled to actual systemd state in the runtime worker.
 - PostgREST-only lifecycle actions do not restart GoTrue, so REST-only repairs do not disturb authentication traffic.
+
+In SupAuth shared mode:
+
+- only the owner project can manage users, providers, OAuth clients, MFA, SSO, email templates, hooks, rate limits, and other GoTrue configuration
+- dependent Studio projects expose local RLS policy management, but hide and server-side block GoTrue user/configuration pages
+- service status points to `supacloud-gotrue@<owner-ref>` and is read-only from dependent projects; project-wide start/stop/restart does not control the shared owner runtime
+- local project databases remain the authority for business data, project membership, profiles, and RLS; application tables should reference the verified JWT `sub` as an external identity rather than treating local `auth.users` as the user authority
+- disabling shared mode restores per-project GoTrue only after the operator has planned user/config migration; SupaCloud does not silently copy global users into tenant databases
+- the owner must use ES256 or RS256 signing so dependents can verify public JWKS without receiving the owner's private key; enabling shared mode with HS256-only owner signing is rejected
+- shared dependents use only the SupAuth owner plus their legacy API-key verification material; a dependent `third_party_auth` issuer is not admitted while shared mode is enabled because PostgREST cannot bind payload claims to key provenance
+- official Realtime tenant auth currently accepts a single HS256 secret rather than JWKS, so authenticated Realtime subscriptions are explicitly unsupported for shared dependents until the upstream runtime supports asymmetric JWKS
+
+This prevents duplicate authentication authorities and avoids exposing the shared global user directory through every tenant's Studio panel.
 
 ### 2. Caddy API-Driven Gateway ⭐ Implemented
 Caddy runs as a native systemd service, fully managed via the Caddy Admin API:

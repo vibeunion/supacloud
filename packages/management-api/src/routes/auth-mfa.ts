@@ -5,6 +5,7 @@ import { logger } from "../utils/logger";
 import { projectService } from "../services";
 import { resolveTenantPorts } from "../utils/project-routing";
 import { resolveProjectServiceRoleKey } from "../utils/service-role";
+import { requireAuthRuntimeManagement } from "./auth-runtime";
 
 async function getGotruePort(ref: string): Promise<number | null> {
     try {
@@ -21,6 +22,7 @@ async function getGotruePort(ref: string): Promise<number | null> {
 }
 
 export const authMfaRoutes = new Elysia({ prefix: "/v1/projects" })
+  .onBeforeHandle(requireAuthRuntimeManagement("mfa"))
 
   .get(
     "/:ref/auth/factors",

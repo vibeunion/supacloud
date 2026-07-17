@@ -15,6 +15,7 @@ import {
 } from "../utils/project-auth";
 import { isOpaqueApiKey } from "../utils/api-keys";
 import { verifyProjectJwtPayload } from "../utils/project-jwt";
+import { getAuthRuntimeDescriptor } from "../services/auth-runtime.service";
 
 const MAX_ASYNC_BODY_BYTES = 256 * 1024;
 type SdkProxySql = (
@@ -269,27 +270,49 @@ export const sdkProxyInternals = {
     buildEncryptedBackgroundAuth,
 };
 
-async function translateOpaqueApiKeyHeaders(headers: Headers, ref: string): Promise<boolean> {
+async function getUpstreamApiKey(ref: string, role: "anon" | "service_role"): Promise<string | null> {
+    const keys = await projectService.getApiKeys(ref);
+    if (!keys) return null;
+    return role === "service_role" ? keys.service_role_key : keys.anon_key;
+}
+
+async function translateOpaqueApiKeyHeaders(
+    headers: Headers,
+    ref: string,
+    authAuthorityRef = ref,
+): Promise<boolean> {
     const apikey = headers.get("apikey")?.trim() || "";
     const authorization = headers.get("authorization")?.trim() || "";
     const bearerToken = authorization.replace(/^Bearer\s+/i, "");
-    const candidate = isOpaqueApiKey(apikey)
-        ? apikey
-        : isOpaqueApiKey(bearerToken)
-            ? bearerToken
-            : "";
-    if (!candidate) return true;
+    let rewrittenApiKey: string | null = null;
 
-    const resolved = await sdkProxyInternals.resolveProjectApiKey(candidate, { includeProvisioning: true });
-    if (!resolved || resolved.ref !== ref || !resolved.upstreamKey) return false;
+    const resolveUpstream = async (candidate: string): Promise<string | null | undefined> => {
+        if (!candidate) return undefined;
+        const resolved = await sdkProxyInternals.resolveProjectApiKey(candidate, { includeProvisioning: true });
+        if (!resolved) return isOpaqueApiKey(candidate) ? null : undefined;
+        if (resolved.ref !== ref || !resolved.upstreamKey) return null;
+        if (authAuthorityRef === ref) return resolved.upstreamKey;
+        // 从属项目只能借用 SupAuth owner 的匿名入口。绝不能把从属项目的
+        // service_role/secret 凭据升级为 owner 的全局管理员凭据。
+        if (resolved.role === "service_role") return null;
+        return getUpstreamApiKey(authAuthorityRef, resolved.role);
+    };
 
-    if (apikey === candidate) {
-        headers.set("apikey", resolved.upstreamKey);
+    if (apikey) {
+        const upstream = await resolveUpstream(apikey);
+        if (upstream === null) return false;
+        if (upstream) {
+            rewrittenApiKey = upstream;
+            headers.set("apikey", upstream);
+        }
     }
-    if (bearerToken === candidate) {
-        headers.set("authorization", `Bearer ${resolved.upstreamKey}`);
-    } else if (apikey === candidate && !authorization) {
-        headers.set("authorization", `Bearer ${resolved.upstreamKey}`);
+
+    if (bearerToken && (isOpaqueApiKey(bearerToken) || bearerToken === apikey)) {
+        const upstream = await resolveUpstream(bearerToken);
+        if (upstream === null) return false;
+        if (upstream) headers.set("authorization", `Bearer ${upstream}`);
+    } else if (rewrittenApiKey && !authorization) {
+        headers.set("authorization", `Bearer ${rewrittenApiKey}`);
     }
     return true;
 }
@@ -416,8 +439,10 @@ async function getTenantPorts(ref: string): Promise<{ gotruePort: number, pgrstP
 type ProxyInterceptors = {
     linkOrigin?: string;
     ref?: string;
+    upstreamRef?: string;
     host?: string;
     extraHeaders?: Record<string, string>;
+    authAuthorityRef?: string;
     timeoutMs?: number;
 };
 
@@ -430,7 +455,11 @@ async function executeProxy(request: Request, targetUrl: string, interceptors: P
         const body = ["GET", "HEAD"].includes(request.method) ? undefined : request.body;
         
         const reqHeaders = new Headers(request.headers);
-        if (!(await translateOpaqueApiKeyHeaders(reqHeaders, interceptors.ref || ""))) {
+        if (!(await translateOpaqueApiKeyHeaders(
+            reqHeaders,
+            interceptors.ref || "",
+            interceptors.authAuthorityRef,
+        ))) {
             return new Response(JSON.stringify({ message: "Invalid API key" }), {
                 status: 401,
                 headers: { "Content-Type": "application/json" },
@@ -452,7 +481,7 @@ async function executeProxy(request: Request, targetUrl: string, interceptors: P
         reqHeaders.set('x-forwarded-for', '127.0.0.1');
         
         if (interceptors.ref) {
-            reqHeaders.set('x-project-ref', interceptors.ref);
+            reqHeaders.set('x-project-ref', interceptors.upstreamRef || interceptors.ref);
         }
         if (interceptors.extraHeaders) {
             for (const [k, v] of Object.entries(interceptors.extraHeaders)) {
@@ -534,12 +563,19 @@ const sdkProxyRoutesBase = new Elysia({ prefix: "" })
         const handler = async ({ request }: any) => {
             const ref = await getProjectRef(request);
             if (!ref) return new Response(JSON.stringify({ message: 'Missing tenant reference' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
-            const ports = await getTenantPorts(ref);
+            const authAuthorityRef = getAuthRuntimeDescriptor(ref).authority_project_ref;
+            const ports = await getTenantPorts(authAuthorityRef);
             if (!ports) return new Response(JSON.stringify({ message: 'Tenant backend not active' }), { status: 502, headers: { 'Content-Type': 'application/json' } });
             
             const url = new URL(request.url);
             const targetUrl = `http://127.0.0.1:${ports.gotruePort}${url.pathname.replace(/^\/auth\/v1/, '')}${url.search}`;
-            return executeProxy(request, targetUrl, { linkOrigin: url.origin, ref, host: resolveProjectApiHost(ref, undefined) });
+            return executeProxy(request, targetUrl, {
+                linkOrigin: url.origin,
+                ref,
+                upstreamRef: authAuthorityRef,
+                authAuthorityRef,
+                host: resolveProjectApiHost(ref, undefined),
+            });
         };
         return app.get("/*", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy Auth request" } }).post("/*", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy Auth request" } }).put("/*", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy Auth request" } }).patch("/*", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy Auth request" } }).delete("/*", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy Auth request" } }).options("/*", handler)
                   .get("", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy Auth request" } }).post("", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy Auth request" } }).put("", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy Auth request" } }).patch("", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy Auth request" } }).delete("", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy Auth request" } }).options("", handler);

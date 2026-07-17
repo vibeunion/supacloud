@@ -4,6 +4,7 @@ import { projectService } from "../services";
 import { edgeFunctionService } from "../services/edge-function.service";
 import { CHINA_OAUTH_PROVIDER_INFO } from "../types/oauth";
 import type { ChinaOAuthProvider } from "../types/oauth";
+import { requireAuthRuntimeManagement } from "./auth-runtime";
 
 const CHINA_PROVIDERS: ChinaOAuthProvider[] = ["qq", "weibo", "alipay", "dingtalk", "douyin", "baidu", "huawei", "xiaomi", "kuaishou", "bilibili"];
 
@@ -11,6 +12,7 @@ const CHINA_PROVIDERS: ChinaOAuthProvider[] = ["qq", "weibo", "alipay", "dingtal
  * China OAuth provider routes — QQ, Weibo, Alipay, DingTalk, Douyin, etc.
  */
 export const chinaAuthRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
+  .onBeforeHandle(requireAuthRuntimeManagement("providers"))
   .get(
     "/china/providers",
     async ({ params, set }) => {
