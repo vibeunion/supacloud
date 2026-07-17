@@ -47,6 +47,40 @@ const finalState = await task.wait();
 console.log(finalState.status);
 ```
 
+## SupAuth OAuth refresh with `supabase-js`
+
+SupAuth OAuth public clients can require `client_id` on refresh-token requests.
+Keep using `@supabase/supabase-js` for session storage, locking, and automatic
+refresh, and provide the SupaCloud transport adapter when creating the client:
+
+```ts
+import { createClient } from "@supabase/supabase-js";
+import { createSupaCloudOAuthFetch } from "@supacloud/js";
+
+const supabase = createClient("https://auth.example.com", "anon-key", {
+  global: {
+    fetch: createSupaCloudOAuthFetch({
+      clientId: "public-oauth-client-id",
+      tokenEndpoint: "https://auth.example.com/auth/v1/oauth/token",
+    }),
+  },
+});
+```
+
+For a standard single-project Supabase app without SupAuth, omit `clientId` (or
+omit the adapter entirely). With no `clientId`, the returned transport is a
+transparent pass-through, so the regular `/auth/v1/token` refresh flow remains
+unchanged. This allows shared application setup to enable SupAuth by
+environment configuration without maintaining a second session implementation.
+
+The adapter only transforms `POST /auth/v1/token?grant_type=refresh_token`:
+it sends the same refresh token as an OAuth form request, moves
+`grant_type=refresh_token` into the form body, and adds `client_id` when the
+request does not already contain one. Rewritten refresh requests reject HTTP
+redirects instead of forwarding the refresh token to a second endpoint. All
+other Supabase Auth, Database, Storage, Realtime, and Functions requests pass
+through unchanged. Never pass a client secret to browser code.
+
 ## SupAuth Management
 
 `supacloud.supauth` is a management-plane helper for provisioning and verifying a SupAuth/SupaOAuth runtime on SupaCloud. It is intended for trusted server-side tools, CI jobs, or admin backends that can call the SupaCloud Management API.

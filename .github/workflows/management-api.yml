@@ -137,7 +137,9 @@ jobs:
           bun install --frozen-lockfile
           bun run typecheck
           bun run typecheck:test
-          bun test src/index.test.ts
+          bun run build
+          bun run typecheck:consumer
+          bun test src/index.test.ts src/auth-fetch.test.ts
           bun audit --audit-level high
 
       - name: Check edge runtime

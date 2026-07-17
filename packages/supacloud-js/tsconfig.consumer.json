@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "paths": {
+      "@supabase/supabase-js": ["./test/supabase-js-stub.d.ts"]
+    },
+    "strict": true,
+    "skipLibCheck": false,
+    "noEmit": true
+  },
+  "include": [
+    "test/consumer-node-next.ts"
+  ]
+}
