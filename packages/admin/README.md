@@ -59,6 +59,9 @@ Gateway / Caddy commands (config is injected via the Caddy JSON Admin API; requi
 supacloud-admin gateway routes --ref abc123
 supacloud-admin gateway upsert_route --ref abc123 --route_id webhook \
   --hosts "api.example.com" --paths "/webhook/*" --upstream 10.0.0.5:8080
+supacloud-admin gateway upsert_route --ref abc123 --route_id canonical-https \
+  --hosts "www.example.com" --paths "/*" --protocol http \
+  --redirect_to 'https://www.example.com{http.request.uri}' --redirect_status 308
 supacloud-admin gateway config --ref abc123 --rate_limit_tier pro
 supacloud-admin gateway rebuild --ref abc123 --clean
 ```

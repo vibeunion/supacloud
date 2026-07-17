@@ -3,7 +3,7 @@
  *
  * SupaCloud 把网关配置作为 JSON 通过 Caddy Admin API（POST /load）注入，
  * 而不是写 Caddyfile。本工具把这些受控端点暴露给 CLI：
- *   - 自定义网关路由（reverse_proxy / 静态站点）的增删改查
+ *   - 自定义网关路由（reverse_proxy / 静态站点 / 重定向）的增删改查
  *   - 网关配置（限流档位、CORS、JWT）
  *   - 证书自动化（lego 申请/续期、手动部署证书）
  *   - 全量重建（把模板/CORS 变更传播到所有租户）
@@ -59,6 +59,10 @@ const headersRecord = z.preprocess((value) => {
     return Object.keys(out).length > 0 ? out : undefined;
 }, z.record(z.string(), z.string()).optional());
 
+const redirectStatus = z.union([
+    z.literal(301), z.literal(302), z.literal(307), z.literal(308),
+]).optional();
+
 const ok = (res: any) => (res.ok ? JSON.stringify(res.data, null, 2) : `❌ Failed (${res.status}): ${JSON.stringify(res.data)}`);
 const simple = (res: any, msg: string) => (res.ok ? `✅ ${msg}` : `❌ Failed (${res.status}): ${JSON.stringify(res.data)}`);
 
@@ -84,7 +88,10 @@ Actions: routes, upsert_route, update_route, delete_route, config, get_certifica
             paths: stringArray.describe("[upsert_route/update_route] 路径列表，逗号分隔或 JSON 数组（1-20）"),
             upstream: z.string().optional().describe("[upsert_route/update_route] 反代上游 host:port 或 http(s)://host[:port]"),
             upstream_tls_insecure_skip_verify: z.boolean().optional().describe("[upsert_route/update_route] 上游 TLS 跳过校验"),
-            static_root: z.string().optional().describe("[upsert_route/update_route] 静态站点根目录（与 upstream 二选一）"),
+            static_root: z.string().optional().describe("[upsert_route/update_route] 静态站点根目录"),
+            protocol: z.enum(["http", "https"]).optional().describe("[upsert_route/update_route] 可选请求协议匹配"),
+            redirect_to: z.string().optional().describe("[upsert_route/update_route] 绝对 http(s) 重定向目标，可使用 {http.request.uri}"),
+            redirect_status: redirectStatus.describe("[upsert_route/update_route] 重定向状态码，默认 308"),
             rewrite_uri: z.string().optional().describe("[upsert_route/update_route] 重写 URI（以 / 开头）"),
             strip_prefix: z.string().optional().describe("[upsert_route/update_route] 去除前缀"),
             headers: headersRecord.describe("[upsert_route/update_route] 自定义请求头，JSON 或 K:V,K2:V2"),
@@ -124,7 +131,7 @@ Actions: routes, upsert_route, update_route, delete_route, config, get_certifica
 
             const {
                 action, ref, route_id, hosts, paths, upstream, upstream_tls_insecure_skip_verify,
-                static_root, rewrite_uri, strip_prefix, headers, cors, priority, enabled,
+                static_root, protocol, redirect_to, redirect_status, rewrite_uri, strip_prefix, headers, cors, priority, enabled,
                 rate_limit_tier, cors_origins, jwt_enabled, jwt_secret,
                 cert_mode, challenge, email, dns_provider, dns_env, domains, auto_renew, renew,
                 cert, key, clean, custom_hostname,
@@ -150,6 +157,9 @@ Actions: routes, upsert_route, update_route, delete_route, config, get_certifica
                     if (upstream !== undefined) body.upstream = upstream;
                     if (upstream_tls_insecure_skip_verify !== undefined) body.upstream_tls_insecure_skip_verify = upstream_tls_insecure_skip_verify;
                     if (static_root !== undefined) body.static_root = static_root;
+                    if (protocol !== undefined) body.protocol = protocol;
+                    if (redirect_to !== undefined) body.redirect_to = redirect_to;
+                    if (redirect_status !== undefined) body.redirect_status = redirect_status;
                     if (rewrite_uri !== undefined) body.rewrite_uri = rewrite_uri;
                     if (strip_prefix !== undefined) body.strip_prefix = strip_prefix;
                     if (headers !== undefined) body.headers = headers;
@@ -171,6 +181,9 @@ Actions: routes, upsert_route, update_route, delete_route, config, get_certifica
                     if (upstream !== undefined) body.upstream = upstream;
                     if (upstream_tls_insecure_skip_verify !== undefined) body.upstream_tls_insecure_skip_verify = upstream_tls_insecure_skip_verify;
                     if (static_root !== undefined) body.static_root = static_root;
+                    if (protocol !== undefined) body.protocol = protocol;
+                    if (redirect_to !== undefined) body.redirect_to = redirect_to;
+                    if (redirect_status !== undefined) body.redirect_status = redirect_status;
                     if (rewrite_uri !== undefined) body.rewrite_uri = rewrite_uri;
                     if (strip_prefix !== undefined) body.strip_prefix = strip_prefix;
                     if (headers !== undefined) body.headers = headers;
