@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.42.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.41.5...management-api-v0.42.0) (2026-07-17)
+
+
+### Features
+
+* **auth:** enforce SupAuth shared runtime boundaries ([aca9d67](https://github.com/zuohuadong/supacloud/commit/aca9d6756a550d43b06b9c1c0b3ec9a3e1cdd324))
+* **auth:** enforce SupAuth shared runtime boundaries ([285a9f5](https://github.com/zuohuadong/supacloud/commit/285a9f5053125e8ad774c12824c829863b450dc4))
+
+
+### Bug Fixes
+
+* **auth:** bind shared bearer keys to tenant ([79671dd](https://github.com/zuohuadong/supacloud/commit/79671dd8c95d247e656c890018d7598eb840c843))
+* **auth:** bind shared bearer keys to tenant ([0387f9c](https://github.com/zuohuadong/supacloud/commit/0387f9c3fc8a1849e1bc17655b12cb4dc27e8082))
+* **auth:** support shared GoTrue runtime owner ([93dd1be](https://github.com/zuohuadong/supacloud/commit/93dd1be9306d3e86ebdea024ab3ee5aa08a7c95f))
+
 ## [0.41.5](https://github.com/zuohuadong/supacloud/compare/management-api-v0.41.4...management-api-v0.41.5) (2026-07-17)
 
 
