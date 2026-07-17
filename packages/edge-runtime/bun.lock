@@ -6,7 +6,7 @@
       "name": "@supacloud/edge-runtime",
       "dependencies": {
         "@elysiajs/cors": "^1.4.2",
-        "@sinclair/typebox": "^0.34.51",
+        "@sinclair/typebox": "^0.34.52",
         "@supabase/supabase-js": "^2.110.2",
         "elysia": "^1.4.29",
         "jose": "^6.2.3",
@@ -25,7 +25,7 @@
 
     "@elysiajs/cors": ["@elysiajs/cors@1.4.2", "https://registry.npmmirror.com/@elysiajs/cors/-/cors-1.4.2.tgz", { "peerDependencies": { "elysia": ">= 1.4.0" } }, "sha512-FTCcbH35brTLigF1W7BYySRZomgI/dBEMK9BgK9RP9Nez7zmpGh4koL/Yr1BFv8nYz7CfhRvcM8d/c+XnwMaVQ=="],
 
-    "@sinclair/typebox": ["@sinclair/typebox@0.34.51", "https://registry.npmmirror.com/@sinclair/typebox/-/typebox-0.34.51.tgz", {}, "sha512-Nu4sNPT4G3QgAvxmdUCR/NBmsi23F2tEIcbMOZJVHS+qEgk+rmXxQikEeoKFyaX+UEggAoTvHUvIlj8MfYPzXQ=="],
+    "@sinclair/typebox": ["@sinclair/typebox@0.34.52", "", {}, "sha512-XiMQh7qqVlxZzcVD+kkGMNGMzcTrDMLWI7S4x7z1MkCkbDPrekpZXEUK0eZqZFMuHQg2a2DZOcDIh9o5v3Gonw=="],
 
     "@supabase/auth-js": ["@supabase/auth-js@2.110.2", "https://registry.npmmirror.com/@supabase/auth-js/-/auth-js-2.110.2.tgz", { "dependencies": { "tslib": "2.8.1" } }, "sha512-Qj7a6EDP+AMMQFWqGv+qFa8r6re//dk+qQI5bA0KK+PZmnI3JPu97TDeNt6SMiQ2FkklP79hP2yDFYSnA989OA=="],
 
