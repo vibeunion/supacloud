@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.1](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.11.0...edge-runtime-v0.11.1) (2026-07-17)
+
+
+### Bug Fixes
+
+* **auth:** isolate third-party JWT verification ([#467](https://github.com/zuohuadong/supacloud/issues/467)) ([c7dae36](https://github.com/zuohuadong/supacloud/commit/c7dae365b64bb6dd258c6a14eba3c936a636e6c0))
+
 ## [0.11.0](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.10.3...edge-runtime-v0.11.0) (2026-07-17)
 
 

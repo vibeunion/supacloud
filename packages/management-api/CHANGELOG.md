@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.41.5](https://github.com/zuohuadong/supacloud/compare/management-api-v0.41.4...management-api-v0.41.5) (2026-07-17)
+
+
+### Bug Fixes
+
+* **auth:** isolate third-party JWT verification ([#467](https://github.com/zuohuadong/supacloud/issues/467)) ([c7dae36](https://github.com/zuohuadong/supacloud/commit/c7dae365b64bb6dd258c6a14eba3c936a636e6c0))
+
 ## [0.41.4](https://github.com/zuohuadong/supacloud/compare/management-api-v0.41.3...management-api-v0.41.4) (2026-07-17)
 
 
