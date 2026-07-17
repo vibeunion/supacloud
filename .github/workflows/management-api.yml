@@ -614,7 +614,7 @@ jobs:
           bun-version: ${{ env.BUN_VERSION }}
 
       - name: Setup Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version: stable
 
