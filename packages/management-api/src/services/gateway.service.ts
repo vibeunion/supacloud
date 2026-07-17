@@ -872,7 +872,9 @@ export class CaddyGatewayProvider implements GatewayProvider {
         }
 
         const handle: Record<string, unknown>[] = [];
-        const corsSubroute = opts.corsOrigins ? makeCorsSubroute(opts.corsOrigins) : null;
+        const corsSubroute = opts.corsOrigins && !opts.preserveUpstreamCors
+            ? makeCorsSubroute(opts.corsOrigins)
+            : null;
         if (corsSubroute) handle.push(corsSubroute);
         if (opts.rewriteUri) handle.push({ handler: "rewrite", uri: opts.rewriteUri });
         else if (opts.stripPrefix) handle.push({ handler: "rewrite", strip_path_prefix: opts.stripPrefix });
