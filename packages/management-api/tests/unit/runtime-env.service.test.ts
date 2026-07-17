@@ -2,6 +2,7 @@ import { describe, expect, spyOn, test } from "bun:test";
 import { runtimeEnvService } from "../../src/services/runtime-env.service";
 import { projectRepository } from "../../src/repositories/project.repository";
 import { databaseService } from "../../src/services/database.service";
+import { config } from "../../src/config";
 
 describe("runtimeEnvService", () => {
   test("includes project JWKS for Bun Edge Runtime JWT verification", async () => {
@@ -147,6 +148,93 @@ describe("runtimeEnvService", () => {
         clientId: "business-client",
       });
     } finally {
+      findByRefSpy.mockRestore();
+      secretsSpy.mockRestore();
+    }
+  });
+
+  test("uses owner public JWKS and GoTrue port without exposing dependent signing secrets", async () => {
+    const originalOwnerRef = config.authRuntimeOwnerRef;
+    config.authRuntimeOwnerRef = "auth-owner";
+    const dependent = {
+      id: "dependent-id",
+      ref: "proj_1",
+      name: "Dependent",
+      db_name: "supa_proj_1",
+      db_user: "role_proj_1",
+      db_password: "pw",
+      jwt_secret: "dependent-secret-with-at-least-32-characters",
+      anon_key: "anon.header.signature",
+      service_role_key: "service.header.signature",
+      s3_bucket: "bucket",
+      s3_access_key: null,
+      s3_secret_key: null,
+      region: "local",
+      status: "active",
+      organization_id: "org_1",
+      config: {
+        postgrest_port: 3272,
+        gotrue_port: 4272,
+        auth: {
+          third_party_auth: {
+            enabled: true,
+            issuer: "https://business-auth.example.com/auth/v1",
+            audience: "business-audience",
+            client_id: "business-client",
+            jwt_jwks: {
+              keys: [{ kty: "EC", kid: "business-user-key", alg: "ES256", crv: "P-256", x: "business-x", y: "business-y" }],
+            },
+          },
+          oauth_server: {
+            jwt_keys: [{ kty: "EC", kid: "dependent-private", alg: "ES256", d: "private" }],
+          },
+        },
+      },
+      created_at: new Date(),
+      updated_at: new Date(),
+      deleted_at: null,
+    };
+    const owner = {
+      ...dependent,
+      id: "owner-id",
+      ref: "auth-owner",
+      name: "Auth Owner",
+      jwt_secret: "owner-secret-with-at-least-32-characters",
+      config: {
+        postgrest_port: 3372,
+        gotrue_port: 9372,
+        auth: {
+          oauth_server: {
+            enabled: true,
+            signing_alg: "ES256",
+            jwt_keys: [{ kty: "EC", kid: "owner-public", alg: "ES256", d: "private", crv: "P-256", x: "x", y: "y" }],
+            jwt_jwks: {
+              keys: [{ kty: "EC", kid: "owner-public", alg: "ES256", crv: "P-256", x: "x", y: "y" }],
+            },
+          },
+        },
+      },
+    };
+    const findByRefSpy = spyOn(projectRepository, "findByRef").mockImplementation(async (ref: string) =>
+      (ref === "auth-owner" ? owner : dependent) as never
+    );
+    const secretsSpy = spyOn(databaseService, "getSecrets").mockResolvedValue([]);
+
+    try {
+      const env = await runtimeEnvService.buildProjectRuntimeEnv("proj_1");
+      expect(env?.SUPACLOUD_AUTH_RUNTIME_MODE).toBe("shared");
+      expect(env?.SUPACLOUD_AUTH_AUTHORITY_REF).toBe("auth-owner");
+      expect(env?.SUPACLOUD_INTERNAL_POSTGREST_PORT).toBe("3272");
+      expect(env?.SUPACLOUD_INTERNAL_GOTRUE_PORT).toBe("9372");
+      expect(env?.JWT_JWKS).toContain("owner-public");
+      expect(env?.JWT_JWKS).toContain("legacy-hs256");
+      expect(env?.JWT_JWKS).not.toContain("business-user-key");
+      expect(env?.SUPACLOUD_THIRD_PARTY_JWT_POLICY).toBeUndefined();
+      expect(env?.JWT_SECRET).toBeUndefined();
+      expect(env?.JWT_KEYS).toBeUndefined();
+      expect(env?.JWT_JWKS).not.toContain("dependent-private");
+    } finally {
+      config.authRuntimeOwnerRef = originalOwnerRef;
       findByRefSpy.mockRestore();
       secretsSpy.mockRestore();
     }

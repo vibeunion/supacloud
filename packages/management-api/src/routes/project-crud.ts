@@ -9,6 +9,10 @@ import { getProjectDb, resolveDbName, resolveRoleName } from "../db";
 import { normalizeProjectConfig } from "../utils/project-config";
 import { getAuthContext, requireAdminAuth, requireProjectOrAdminAuth } from "../middleware/auth";
 import { tenantRuntimeService } from "../services/tenant-runtime.service";
+import {
+  getAuthRuntimeManagedError,
+  getAuthRuntimeOwnerProtectionError,
+} from "../services/auth-runtime.service";
 import { ScalingService } from "../services/scaling.service";
 import { listBackups } from "../services/backup.service";
 import type { BackupInfo } from "../types/backup";
@@ -500,6 +504,8 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
       if (!project) {
         return status(404, { message: "Project not found", code: "404" });
       }
+      const ownerError = getAuthRuntimeOwnerProtectionError(params.ref, "delete");
+      if (ownerError) return status(409, ownerError);
       const deleted = await projectService.deleteProject(params.ref);
       if (!deleted) {
         return status(404, { message: "Project not found", code: "404" });
@@ -520,6 +526,8 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
       if (authError) {
         return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
       }
+      const ownerError = getAuthRuntimeOwnerProtectionError(params.ref, "pause");
+      if (ownerError) return status(409, ownerError);
       const paused = await projectService.pauseProject(params.ref);
       if (!paused) {
         return status(404, { message: "Project not found", code: "404" });
@@ -817,6 +825,8 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
+      const managedError = getAuthRuntimeManagedError(params.ref, "email_templates");
+      if (managedError) return status(409, managedError);
 
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings)
@@ -839,6 +849,8 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, body, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
+      const managedError = getAuthRuntimeManagedError(params.ref, "email_templates");
+      if (managedError) return status(409, managedError);
 
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings)
@@ -884,6 +896,8 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
+      const managedError = getAuthRuntimeManagedError(params.ref, "email_templates");
+      if (managedError) return status(409, managedError);
 
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings)

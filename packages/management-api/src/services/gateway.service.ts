@@ -1082,10 +1082,30 @@ export class CaddyGatewayProvider implements GatewayProvider {
             const externalAuthUpstream = thirdPartyAuth.enabled && thirdPartyAuth.auth_endpoint_mode === "external" && thirdPartyAuth.auth_upstream
                 ? normalizeCustomUpstream(thirdPartyAuth.auth_upstream)
                 : null;
-            const authUpstream = externalAuthUpstream?.dial || `${hostIp}:${gotruePort}`;
+            let sharedAuthPort: number | null = null;
+            if (config.authRuntimeOwnerRef && config.authRuntimeOwnerRef !== projectRef) {
+                const [owner] = await sql`
+                    SELECT ref, config FROM projects
+                    WHERE ref=${config.authRuntimeOwnerRef} AND status='active' AND deleted_at IS NULL
+                `;
+                const ownerConfig = normalizeProjectConfig(owner?.config);
+                const port = Number(ownerConfig.gotrue_port);
+                if (!owner || !Number.isInteger(port) || port <= 0) {
+                    throw new Error(`shared auth runtime owner ${config.authRuntimeOwnerRef} is unavailable`);
+                }
+                sharedAuthPort = port;
+            }
+            const sharedAuthProxy = sharedAuthPort !== null && !externalAuthUpstream;
+            const directAuthUpstream = externalAuthUpstream?.dial || `${hostIp}:${sharedAuthPort ?? gotruePort}`;
+            const authUpstream = sharedAuthProxy
+                ? `${hostIp}:${config.port}`
+                : directAuthUpstream;
             const authHeaders = externalAuthUpstream && thirdPartyAuth.auth_host_header
                 ? [`Host:${thirdPartyAuth.auth_host_header}`, `X-Forwarded-Host:${thirdPartyAuth.auth_host_header}`]
-                : undefined;
+                : sharedAuthPort !== null
+                    ? [`X-Project-Ref:${config.authRuntimeOwnerRef}`, `x-project-ref:${config.authRuntimeOwnerRef}`]
+                    : undefined;
+            const authProxyHeaders = sharedAuthProxy ? undefined : authHeaders;
             const hosts = uniqueStrings(resolveProjectApiHosts(projectRef, routingConfig));
             const hostSet = new Set(hosts.map(normalizeCaddyHost));
             const authHosts = uniqueStrings([resolveProjectAuthHost(projectRef, routingConfig)])
@@ -1140,8 +1160,8 @@ export class CaddyGatewayProvider implements GatewayProvider {
                     path: "/auth/v1*",
                     upstream: authUpstream,
                     projectRef,
-                    stripPrefix: "/auth/v1",
-                    headers: authHeaders,
+                    stripPrefix: sharedAuthProxy ? undefined : "/auth/v1",
+                    headers: authProxyHeaders,
                     corsOrigins,
                     upstreamTls: externalAuthUpstream?.tls,
                     upstreamTlsInsecureSkipVerify: thirdPartyAuth.auth_upstream_tls_insecure_skip_verify,
@@ -1150,7 +1170,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
                     id: caddyRouteId(projectRef, "gotrue-well-known"),
                     hosts,
                     path: "/.well-known/oauth-authorization-server/auth/v1*",
-                    upstream: authUpstream,
+                    upstream: directAuthUpstream,
                     projectRef,
                     headers: authHeaders,
                     corsOrigins,
@@ -1229,8 +1249,8 @@ export class CaddyGatewayProvider implements GatewayProvider {
                     path: "/auth/v1*",
                     upstream: authUpstream,
                     projectRef,
-                    stripPrefix: "/auth/v1",
-                    headers: authHeaders,
+                    stripPrefix: sharedAuthProxy ? undefined : "/auth/v1",
+                    headers: authProxyHeaders,
                     corsOrigins,
                     upstreamTls: externalAuthUpstream?.tls,
                     upstreamTlsInsecureSkipVerify: thirdPartyAuth.auth_upstream_tls_insecure_skip_verify,
@@ -1239,7 +1259,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
                     id: caddyRouteId(projectRef, "auth-domain-gotrue-well-known"),
                     hosts: authHosts,
                     path: "/.well-known/oauth-authorization-server/auth/v1*",
-                    upstream: authUpstream,
+                    upstream: directAuthUpstream,
                     projectRef,
                     headers: authHeaders,
                     corsOrigins,

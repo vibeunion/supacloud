@@ -304,6 +304,98 @@ describe("sdkProxyRoutes functions proxy", () => {
     });
   });
 
+  test("shared auth proxy uses the owner GoTrue port, key, and project header", async () => {
+    const originalOwnerRef = config.authRuntimeOwnerRef;
+    const originalGetApiKeys = projectService.getApiKeys;
+    config.authRuntimeOwnerRef = "auth-owner";
+    projectService.getApiKeys = async (ref: string) => ref === "auth-owner"
+      ? {
+        anon_key: "owner-anon-jwt",
+        service_role_key: "owner-service-jwt",
+        publishable_key: "owner-publishable",
+        secret_key: "owner-secret",
+      }
+      : null;
+
+    try {
+      await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
+        trackSpy(
+          spyOn(sdkProxyInternals, "resolveProjectApiKey").mockResolvedValue({
+            ref: "proj_1",
+            kind: "publishable",
+            role: "anon",
+            upstreamKey: "dependent-anon-jwt",
+          }),
+        );
+        setSdkProxySqlForTests(async (...args: unknown[]) => {
+          const text = String(args[0] ?? "");
+          if (text.includes("SELECT config")) return [{ config: { gotrue_port: 9361, postgrest_port: 7361 } }];
+          return [];
+        });
+
+        const response = await request("/auth/v1/health", {
+          headers: {
+            apikey: "sb_publishable_client_key",
+            authorization: "Bearer sb_publishable_client_key",
+          },
+        });
+
+        expect(response.status).toBe(200);
+        expect(calls[0]?.url).toBe("http://127.0.0.1:9361/health");
+        const headers = new Headers(calls[0]?.init?.headers);
+        expect(headers.get("apikey")).toBe("owner-anon-jwt");
+        expect(headers.get("authorization")).toBe("Bearer owner-anon-jwt");
+        expect(headers.get("x-project-ref")).toBe("auth-owner");
+        expect(headers.get("host")).toBe(`proj_1.api.${config.baseDomain}`);
+      });
+    } finally {
+      config.authRuntimeOwnerRef = originalOwnerRef;
+      projectService.getApiKeys = originalGetApiKeys;
+    }
+  });
+
+  test("shared auth proxy rejects dependent service-role credentials before upstream", async () => {
+    const originalOwnerRef = config.authRuntimeOwnerRef;
+    const originalGetApiKeys = projectService.getApiKeys;
+    config.authRuntimeOwnerRef = "auth-owner";
+    projectService.getApiKeys = async () => ({
+      anon_key: "owner-anon-jwt",
+      service_role_key: "owner-service-jwt",
+    } as Awaited<ReturnType<typeof projectService.getApiKeys>>);
+
+    try {
+      await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
+        trackSpy(
+          spyOn(sdkProxyInternals, "resolveProjectApiKey").mockResolvedValue({
+            ref: "proj_1",
+            kind: "secret",
+            role: "service_role",
+            upstreamKey: "dependent-service-jwt",
+          }),
+        );
+        setSdkProxySqlForTests(async (...args: unknown[]) => {
+          const text = String(args[0] ?? "");
+          if (text.includes("SELECT config")) return [{ config: { gotrue_port: 9361, postgrest_port: 7361 } }];
+          return [];
+        });
+
+        const response = await request("/auth/v1/admin/users", {
+          headers: {
+            apikey: "sb_secret_client_key",
+            authorization: "Bearer sb_secret_client_key",
+          },
+        });
+
+        expect(response.status).toBe(401);
+        expect(await response.json()).toEqual({ message: "Invalid API key" });
+        expect(calls).toHaveLength(0);
+      });
+    } finally {
+      config.authRuntimeOwnerRef = originalOwnerRef;
+      projectService.getApiKeys = originalGetApiKeys;
+    }
+  });
+
   test("REST proxy translates a publishable key to the legacy anon JWT", async () => {
     await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
       trackSpy(

@@ -21,6 +21,10 @@ import {
 import { resolveRoleName, resolveDbName as resolveDbNameTopLevel } from "../db";
 import { requireAdminAuth, requireProjectOrAdminAuth } from "../middleware/auth";
 import { projectNetworkRestrictionRoutes } from "./project-network-restrictions";
+import {
+  getAuthRuntimeDescriptor,
+  getAuthRuntimeManagedError,
+} from "../services/auth-runtime.service";
 
 /** Map PostgreSQL column types to TypeScript types */
 function pgTypeToTs(udtName: string, dataType: string): string {
@@ -333,7 +337,6 @@ function buildAuthConfigResponse(settings: Record<string, unknown>) {
 
   const response: Record<string, unknown> = {
     ...cloneTemplate(OPENAPI_AUTH_CONFIG_RESPONSE_TEMPLATE),
-    ...authConfig,
     enable_signup: authConfig.enable_signup ?? true,
     enable_signups: authConfig.enable_signup ?? true,
     enable_confirmations: authConfig.enable_confirmations ?? false,
@@ -441,7 +444,7 @@ function buildAuthConfigResponse(settings: Record<string, unknown>) {
     response[`hook_${suffix}_enabled`] = hook.enabled ?? null;
     response[`hook_${suffix}_uri`] = hook.uri ?? null;
     if ("secrets" in hook) {
-      response[`hook_${suffix}_secrets`] = hook.secrets ?? null;
+      response[`hook_${suffix}_secrets`] = hook.secrets ? "********" : null;
     }
   }
 
@@ -747,7 +750,11 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   // Get Auth config (Studio compatible format)
   .get(
     "/:ref/config/auth",
-    async ({ params, set }) => {
+    async ({ params, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
+      const managedError = getAuthRuntimeManagedError(params.ref, "configuration");
+      if (managedError) return status(409, managedError);
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
         return status(404, { message: "Project not found", code: "404" });
@@ -770,6 +777,8 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, body, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
+      const managedError = getAuthRuntimeManagedError(params.ref, "configuration");
+      if (managedError) return status(409, managedError);
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
         return status(404, { message: "Project not found", code: "404" });
@@ -1046,6 +1055,12 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
           "[project-config] Failed to propagate auth config to runtime",
           { error: err },
         );
+        if (getAuthRuntimeDescriptor(params.ref).mode === "owner") {
+          return status(503, {
+            code: "SUPAUTH_DEPENDENT_REFRESH_FAILED",
+            message: "Auth configuration was saved, but one or more SupAuth dependents failed to refresh",
+          });
+        }
       }
 
       const freshSettings = await projectService.getProjectSettings(params.ref);
@@ -1056,7 +1071,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       const freshSmtp = (freshAuth.smtp as Record<string, unknown>) || {};
 
       const response: Record<string, unknown> = {
-        ...freshAuth,
+        ...cloneTemplate(OPENAPI_AUTH_CONFIG_RESPONSE_TEMPLATE),
         enable_signup: freshAuth.enable_signup ?? true,
         enable_signups: freshAuth.enable_signup ?? true,
         enable_confirmations: freshAuth.enable_confirmations ?? false,
@@ -1088,18 +1103,23 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         !!freshHooks.custom_access_token_hook?.enabled;
       response.hook_custom_access_token_uri =
         freshHooks.custom_access_token_hook?.uri || null;
+      response.hook_custom_access_token_secrets = freshHooks.custom_access_token_hook?.secrets ? "********" : null;
       response.hook_mfa_verification_enabled =
         !!freshHooks.mfa_verification_hook?.enabled;
       response.hook_mfa_verification_uri =
         freshHooks.mfa_verification_hook?.uri || null;
+      response.hook_mfa_verification_secrets = freshHooks.mfa_verification_hook?.secrets ? "********" : null;
       response.hook_password_verification_enabled =
         !!freshHooks.password_verification_hook?.enabled;
       response.hook_password_verification_uri =
         freshHooks.password_verification_hook?.uri || null;
+      response.hook_password_verification_secrets = freshHooks.password_verification_hook?.secrets ? "********" : null;
       response.hook_send_email_enabled = !!freshHooks.send_email_hook?.enabled;
       response.hook_send_email_uri = freshHooks.send_email_hook?.uri || null;
+      response.hook_send_email_secrets = freshHooks.send_email_hook?.secrets ? "********" : null;
       response.hook_send_sms_enabled = !!freshHooks.send_sms_hook?.enabled;
       response.hook_send_sms_uri = freshHooks.send_sms_hook?.uri || null;
+      response.hook_send_sms_secrets = freshHooks.send_sms_hook?.secrets ? "********" : null;
 
       response.smtp_admin_email = freshSmtp.admin_email || "";
       response.smtp_host = freshSmtp.host || "";

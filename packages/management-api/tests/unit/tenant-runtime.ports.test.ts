@@ -23,7 +23,10 @@ describe("TenantRuntimeService port synchronization", () => {
 
     const gotrueConfigDirWrite = source.indexOf('await this.writeTenantSecretFile(path.join(gotrueConfigDir, "runtime.env"), gotrueEnv, runtimeUser);');
     const gotrueEnvWrite = source.indexOf("await this.writeTenantSecretFile(gotrueEnvPath, gotrueEnv, runtimeUser);");
-    const persistPorts = source.indexOf("await this.persistTenantPortConfig(ref, pgrstPort, gotruePort);");
+    const persistPorts = source.indexOf(
+      "await this.persistTenantPortConfig(ref, pgrstPort, gotruePort);",
+      gotrueEnvWrite,
+    );
 
     expect(gotrueConfigDirWrite).toBeGreaterThan(0);
     expect(gotrueEnvWrite).toBeGreaterThan(gotrueConfigDirWrite);

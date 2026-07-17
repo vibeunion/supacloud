@@ -22,7 +22,7 @@ import { checkAuth } from "./middleware/auth";
 import { checkRateLimit } from "./middleware/rate-limit";
 import { logAuditEvent, shouldAuditRequest } from "./services/audit.service";
 import { closeDb } from "./db";
-import { authRoutes, deployRoutes, storageCompatRoutes } from "./routes";
+import { authRoutes, authRuntimeRoutes, deployRoutes, storageCompatRoutes } from "./routes";
 import { migrateLegacyVersionArtifacts } from "./services/edge-function.service";
 import { resolveRealtimeTenantHost } from "./utils/sdk-parity";
 import { resolveProjectApiKey } from "./utils/project-auth";
@@ -797,6 +797,7 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
       .use(taskRoutes)
       .use(databaseRoutes)
       .use(authRoutes)
+      .use(authRuntimeRoutes)
       .use(wechatAuthRoutes)
       .use(chinaAuthRoutes)
       .use(userManagementRoutes)
