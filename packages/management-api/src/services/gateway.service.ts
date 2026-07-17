@@ -1082,10 +1082,25 @@ export class CaddyGatewayProvider implements GatewayProvider {
             const externalAuthUpstream = thirdPartyAuth.enabled && thirdPartyAuth.auth_endpoint_mode === "external" && thirdPartyAuth.auth_upstream
                 ? normalizeCustomUpstream(thirdPartyAuth.auth_upstream)
                 : null;
-            const authUpstream = externalAuthUpstream?.dial || `${hostIp}:${gotruePort}`;
+            let sharedAuthPort: number | null = null;
+            if (config.authRuntimeOwnerRef && config.authRuntimeOwnerRef !== projectRef) {
+                const [owner] = await sql`
+                    SELECT ref, config FROM projects
+                    WHERE ref=${config.authRuntimeOwnerRef} AND status='active' AND deleted_at IS NULL
+                `;
+                const ownerConfig = normalizeProjectConfig(owner?.config);
+                const port = Number(ownerConfig.gotrue_port);
+                if (!owner || !Number.isInteger(port) || port <= 0) {
+                    throw new Error(`shared auth runtime owner ${config.authRuntimeOwnerRef} is unavailable`);
+                }
+                sharedAuthPort = port;
+            }
+            const authUpstream = externalAuthUpstream?.dial || `${hostIp}:${sharedAuthPort ?? gotruePort}`;
             const authHeaders = externalAuthUpstream && thirdPartyAuth.auth_host_header
                 ? [`Host:${thirdPartyAuth.auth_host_header}`, `X-Forwarded-Host:${thirdPartyAuth.auth_host_header}`]
-                : undefined;
+                : sharedAuthPort !== null
+                    ? [`X-Project-Ref:${config.authRuntimeOwnerRef}`, `x-project-ref:${config.authRuntimeOwnerRef}`]
+                    : undefined;
             const hosts = uniqueStrings(resolveProjectApiHosts(projectRef, routingConfig));
             const hostSet = new Set(hosts.map(normalizeCaddyHost));
             const authHosts = uniqueStrings([resolveProjectAuthHost(projectRef, routingConfig)])

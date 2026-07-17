@@ -354,6 +354,24 @@ class TenantRuntimeService {
     private readonly postgrestController = new PostgrestRuntimeController();
     private readonly gotrueController = new GotrueRuntimeController();
 
+    private usesSharedAuthRuntime(ref: string): boolean {
+        return Boolean(config.authRuntimeOwnerRef && config.authRuntimeOwnerRef !== ref);
+    }
+
+    private async effectiveGoTruePort(ref: string, localPort: number): Promise<number> {
+        if (!this.usesSharedAuthRuntime(ref)) return localPort;
+        const [owner] = await metaSql`
+          SELECT ref, status, config FROM projects
+          WHERE ref=${config.authRuntimeOwnerRef} AND deleted_at IS NULL
+        `;
+        const ownerConfig = normalizeProjectConfig(owner?.config);
+        const ownerPort = pickPositivePort(ownerConfig.gotrue_port);
+        if (!owner || owner.status !== "active" || !ownerPort) {
+            throw new Error(`shared auth runtime owner ${config.authRuntimeOwnerRef} is unavailable`);
+        }
+        return ownerPort;
+    }
+
     // config.portRange is a string like "3100-3200". We just need the difference as the range size.
     private readonly PORT_RANGE = (() => {
         const parts = config.portRange.split('-');
@@ -693,6 +711,7 @@ class TenantRuntimeService {
         await fs.mkdir(this.TENANT_CONFIG_DIR, { recursive: true, mode: 0o711 });
         await fs.chmod(this.TENANT_CONFIG_DIR, 0o711);
 
+        const runtimeGoTruePort = await this.effectiveGoTruePort(ref, gotruePort);
         const creds = await this.getTenantCredentials(ref);
         for (const [name, value] of Object.entries({
             dbPassword: creds.dbPassword,
@@ -766,7 +785,7 @@ class TenantRuntimeService {
             renderSystemdEnvLine("SUPABASE_SECRET_KEY", String(creds.secretKey || "")),
             renderSystemdEnvLine("SUPABASE_DB_URL", edgeDbUri),
             renderSystemdEnvLine("JWT_SECRET", creds.jwtSecret),
-            renderTenantInternalRuntimeEnv(pgrstPort, gotruePort),
+            renderTenantInternalRuntimeEnv(pgrstPort, runtimeGoTruePort),
             jwtJwksEnv,
             jwtKeysEnv,
             thirdPartyJwtPolicyEnv,
@@ -813,6 +832,14 @@ db-channel = ${quoteTomlBasicString(resolvePgrstChannel(ref))}
             pgrstConf,
             runtimeUser,
         );
+
+        // 共享认证模式下从项目只使用主项目 GoTrue，不再生成本地认证运行时。
+        if (this.usesSharedAuthRuntime(ref)) {
+            await this.gotrueController.stopAndDisable(ref);
+            await this.persistTenantPortConfig(ref, pgrstPort, gotruePort);
+            logger.info(`Config generated for ${ref} with shared GoTrue owner ${config.authRuntimeOwnerRef}`);
+            return;
+        }
 
         // Generate GoTrue .env configuration
         const hasDedicatedAuthUrl = Boolean(creds.authUrl && creds.authUrl !== creds.apiUrl);
@@ -1634,8 +1661,10 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
         await this.postgrestController.enable(ref);
         await this.postgrestController.start(ref);
 
-        await this.gotrueController.enable(ref);
-        await this.gotrueController.start(ref);
+        if (!this.usesSharedAuthRuntime(ref)) {
+            await this.gotrueController.enable(ref);
+            await this.gotrueController.start(ref);
+        }
 
         // Wait for service health checks
         logger.info(`Waiting for PostgREST(${pgrstPort}) and GoTrue(${gotruePort}) health checks...`);
@@ -1648,14 +1677,14 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
                 pgrstOk = status.health === "healthy";
             }
 
-            if (!gotrueOk) {
+            if (!gotrueOk && !this.usesSharedAuthRuntime(ref)) {
                 try {
                     const res = await fetch(`http://127.0.0.1:${gotruePort}/health`);
                     if (res.ok) gotrueOk = true;
                 } catch (e: unknown) { logger.debug("[services/tenant-runtime.service] suppressed error", { error: e instanceof Error ? e.message : String(e) }); }
             }
 
-            if (pgrstOk && gotrueOk) {
+            if (pgrstOk && (gotrueOk || this.usesSharedAuthRuntime(ref))) {
                 await this.setPostgrestDesiredState(ref, "running");
                 await this.recordPostgrestObservation(ref, {
                     actual: "running",
@@ -2159,6 +2188,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
     public async restartRuntime(ref: string): Promise<RuntimeStatus> {
         const pgrstActive = await this.postgrestController.isActive(ref);
         const gotrueActive = await this.gotrueController.isActive(ref);
+        const sharedAuthRuntime = this.usesSharedAuthRuntime(ref);
 
         if (pgrstActive || gotrueActive) {
             await this.ensureBinaries();
@@ -2169,7 +2199,8 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
             await this.generateTenantConfig(ref, pgrstPort, gotruePort);
 
             await this.postgrestController.restart(ref);
-            await this.gotrueController.restart(ref);
+            if (sharedAuthRuntime) await this.gotrueController.stopAndDisable(ref);
+            else await this.gotrueController.restart(ref);
 
             const postgrestStatus = await this.statusPostgrest(ref);
             await this.setPostgrestDesiredState(ref, "running");
@@ -2190,9 +2221,10 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
         const gotrueActive = await this.gotrueController.isActive(ref);
 
         const port = await this.getTenantPort(ref, "pgrst");
-        const gotruePort = await this.getTenantPort(ref, "gotrue");
+        const localGoTruePort = await this.getTenantPort(ref, "gotrue");
+        const gotruePort = await this.effectiveGoTruePort(ref, localGoTruePort);
 
-        if (pgrstActive || gotrueActive) {
+        if (pgrstActive || gotrueActive || this.usesSharedAuthRuntime(ref)) {
             let pgrstOk = false;
             let gotrueOk = false;
 
@@ -2286,11 +2318,24 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
                 }
 
                 // --- GoTrue reconcile ---
+                const sharedAuthRuntime = this.usesSharedAuthRuntime(ref);
                 const gotrueActive = await this.gotrueController.isActive(ref);
                 const gotruePort = await this.getTenantPort(ref, "gotrue");
                 const gotrueObserved = await this.gotrueController.observe(ref, gotruePort);
 
                 if (desired === "running" && status === "active") {
+                    if (sharedAuthRuntime) {
+                        if (gotrueActive) await this.gotrueController.stopAndDisable(ref);
+                        await this.setPostgrestDesiredState(ref, desired);
+                        await this.recordPostgrestObservation(ref, {
+                            actual: actual.actual,
+                            health: actual.health,
+                            port: actual.port,
+                            last_error: actual.health === "healthy" ? null : actual.last_error,
+                        }, { reconciled: true });
+                        updated++;
+                        continue;
+                    }
                     // Active project: ensure GoTrue is running and healthy
                     if (!gotrueActive || gotrueObserved.health !== "healthy") {
                         // Ensure config exists before starting
