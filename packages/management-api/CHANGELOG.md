@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.40.5](https://github.com/zuohuadong/supacloud/compare/management-api-v0.40.4...management-api-v0.40.5) (2026-07-17)
+
+
+### Bug Fixes
+
+* **management-api:** redact sensitive Caddy request headers ([#440](https://github.com/zuohuadong/supacloud/issues/440)) ([e83e25d](https://github.com/zuohuadong/supacloud/commit/e83e25d8bc24135da9a33a66008591284c322c47))
+
 ## [0.40.4](https://github.com/zuohuadong/supacloud/compare/management-api-v0.40.3...management-api-v0.40.4) (2026-07-16)
 
 
