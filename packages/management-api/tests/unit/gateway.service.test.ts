@@ -779,6 +779,42 @@ describe("CaddyGatewayProvider", () => {
         restore();
     });
 
+    test("setRateLimit uses production-safe defaults for every built-in tier and partial custom config", async () => {
+        const calls: Array<{ url: string; method: string; body: any }> = [];
+        const restore = captureFetch(calls);
+        const provider = new CaddyGatewayProvider();
+
+        await provider.setupUpstream("tierref", 3000, 9999);
+
+        const expected = [
+            ["free", 60, 3000, 100000],
+            ["pro", 300, 18000, 500000],
+            ["enterprise", 1500, 90000, 3000000],
+        ] as const;
+
+        for (const [tier, second, minute, hour] of expected) {
+            await provider.setRateLimit("tierref", tier);
+            expect(await provider.getRateLimit("tierref")).toEqual({
+                tier,
+                second,
+                minute,
+                hour,
+                enabled: true,
+            });
+        }
+
+        await provider.setRateLimit("tierref", { second: 75 });
+        expect(await provider.getRateLimit("tierref")).toEqual({
+            tier: "custom",
+            second: 75,
+            minute: 3000,
+            hour: 100000,
+            enabled: true,
+        });
+
+        restore();
+    });
+
     test("setRateLimit does not rehydrate stale disk routes after project routes are rebuilt", async () => {
         const calls: Array<{ url: string; method: string; body: any }> = [];
         const restore = captureFetch(calls);

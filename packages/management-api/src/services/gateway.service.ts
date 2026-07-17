@@ -55,6 +55,13 @@ interface RateLimitConfig {
     hour: number;
 }
 
+const RATE_LIMIT_TIERS: Record<"free" | "pro" | "enterprise", RateLimitConfig> = {
+    // 整体 API 限流需要容纳现代 SPA 的并发初始化请求，同时保留持续流量保护。
+    free: { second: 60, minute: 3000, hour: 100000 },
+    pro: { second: 300, minute: 18000, hour: 500000 },
+    enterprise: { second: 1500, minute: 90000, hour: 3000000 },
+};
+
 type GatewaySetupOptions = { functionsPort?: number; storagePort?: number; realtimeApiPort?: number; realtimeWsPort?: number };
 
 export interface FrontendGatewayRoute {
@@ -98,11 +105,8 @@ export interface GatewayProvider {
 }
 
 function getRateLimitConfig(tier: string): RateLimitConfig {
-    switch (tier) {
-        case "pro": return { second: 100, minute: 2000, hour: 50000 };
-        case "enterprise": return { second: 1000, minute: 50000, hour: 1000000 };
-        default: return { second: 10, minute: 100, hour: 1000 };
-    }
+    if (tier === "pro" || tier === "enterprise") return { ...RATE_LIMIT_TIERS[tier] };
+    return { ...RATE_LIMIT_TIERS.free };
 }
 
 function hashStr(str: string): string {
@@ -919,10 +923,11 @@ export class CaddyGatewayProvider implements GatewayProvider {
 
     async setRateLimit(projectRef: string, opts: string | { second?: number; minute?: number; hour?: number } = "free"): Promise<boolean> {
         await this.hydrateFromDiskIfUninitialized();
+        const defaults = RATE_LIMIT_TIERS.free;
         const limits = typeof opts === "string" ? getRateLimitConfig(opts) : {
-            second: opts.second ?? 10,
-            minute: opts.minute ?? 100,
-            hour: opts.hour ?? 1000,
+            second: opts.second ?? defaults.second,
+            minute: opts.minute ?? defaults.minute,
+            hour: opts.hour ?? defaults.hour,
         };
         this.rateLimits.set(projectRef, {
             tier: typeof opts === "string" ? opts : "custom",
