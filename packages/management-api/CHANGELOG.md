@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.42.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.42.0...management-api-v0.42.1) (2026-07-17)
+
+
+### Bug Fixes
+
+* **auth:** close SupAuth shared runtime boundary gaps ([#477](https://github.com/zuohuadong/supacloud/issues/477)) ([14d1d64](https://github.com/zuohuadong/supacloud/commit/14d1d64b1ae05fd9c9c8390d318d9d3a97c6ced6))
+
 ## [0.42.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.41.5...management-api-v0.42.0) (2026-07-17)
 
 
