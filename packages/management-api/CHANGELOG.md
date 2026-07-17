@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.41.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.41.1...management-api-v0.41.2) (2026-07-17)
+
+
+### Bug Fixes
+
+* **gateway:** allow tus preflight headers ([fbeac27](https://github.com/zuohuadong/supacloud/commit/fbeac27094e1f965eef2a72cfd0a9f7b59a0ffce))
+* **gateway:** preserve TUS CORS and capabilities ([60e48c4](https://github.com/zuohuadong/supacloud/commit/60e48c4da58d878103a0fce1b7cbccc2d0343e0a))
+* **storage:** expose TUS capability headers ([bbffc44](https://github.com/zuohuadong/supacloud/commit/bbffc44c85effaa7006ed12d708e0a5379fc6a81))
+* **storage:** preserve TUS capability responses ([0339ed6](https://github.com/zuohuadong/supacloud/commit/0339ed63091a7ca19f2f8f51a38f9301ea13d002))
+
 ## [0.41.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.41.0...management-api-v0.41.1) (2026-07-17)
 
 
