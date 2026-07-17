@@ -16,6 +16,7 @@ import {
   normalizeProjectConfig,
   normalizeThirdPartyAuthConfig,
 } from "./project-config";
+import { resolveProjectAuthUrl } from "./project-routing";
 import { getAuthRuntimeDescriptor } from "../services/auth-runtime.service";
 
 export type OidcJwtKeyMaterial = {
@@ -360,6 +361,16 @@ export function buildSharedProjectJwtVerificationMaterial(input: {
   return { jwtJwks, localJwks, thirdParty };
 }
 
+export function resolveSharedAuthIssuer(ownerRef: string, ownerConfig: unknown): string {
+  const normalizedOwnerConfig = normalizeProjectConfig(ownerConfig);
+  const ownerAuth = (normalizedOwnerConfig.auth || {}) as Record<string, unknown>;
+  const ownerOauthServer = normalizeOAuthServerConfig(ownerAuth.oauth_server);
+  const configuredIssuer = typeof ownerOauthServer.issuer === "string"
+    ? ownerOauthServer.issuer.trim().replace(/\/+$/, "")
+    : "";
+  return configuredIssuer || `${resolveProjectAuthUrl(ownerRef, normalizedOwnerConfig)}/auth/v1`;
+}
+
 export function buildSharedProjectJwtVerifierJwks(input: {
   projectJwtSecret: string;
   projectConfig: unknown;
@@ -480,6 +491,7 @@ async function verifyThirdPartyJwt(
 async function verifyLocalAsymmetricJwt(
   token: string,
   localJwks: { keys: JWK[] } | null,
+  issuer?: string,
 ): Promise<{ payload: JWTPayload; protectedHeader: JWTHeaderParameters } | null> {
   const publicKeys = (localJwks?.keys || []).filter(
     (key) => (key.kty === "EC" && key.alg === "ES256") || (key.kty === "RSA" && key.alg === "RS256"),
@@ -488,10 +500,19 @@ async function verifyLocalAsymmetricJwt(
   try {
     return await jwtVerify(token, createLocalJWKSet({ keys: publicKeys }), {
       algorithms: ["ES256", "RS256"],
+      ...(issuer ? { issuer } : {}),
     });
   } catch {
     return null;
   }
+}
+
+export async function verifyAsymmetricProjectJwt(
+  token: string,
+  localJwks: { keys: JWK[] } | null,
+  issuer?: string,
+): Promise<{ payload: JWTPayload; protectedHeader: JWTHeaderParameters } | null> {
+  return verifyLocalAsymmetricJwt(token, localJwks, issuer);
 }
 
 async function verifyLegacyHs256Jwt(
@@ -543,6 +564,7 @@ export async function verifyProjectJwtPayload(
 
   const authRuntime = getAuthRuntimeDescriptor(ref);
   let material: ProjectJwtVerificationMaterial;
+  let sharedAuthIssuer: string | undefined;
   try {
     if (authRuntime.mode === "shared") {
       const [owner] = await metaSql`
@@ -554,6 +576,7 @@ export async function verifyProjectJwtPayload(
         LIMIT 1
       `;
       if (!owner) return null;
+      sharedAuthIssuer = resolveSharedAuthIssuer(authRuntime.authority_project_ref, owner.config);
       material = buildSharedProjectJwtVerificationMaterial({
         projectJwtSecret: String(project.jwt_secret),
         projectConfig: project.config,
@@ -570,7 +593,7 @@ export async function verifyProjectJwtPayload(
   if (material.thirdParty && isThirdPartyTokenCandidate(header, payload, material.thirdParty)) {
     result = await verifyThirdPartyJwt(cleanToken, material.thirdParty);
   } else {
-    result = await verifyLocalAsymmetricJwt(cleanToken, material.localJwks);
+    result = await verifyLocalAsymmetricJwt(cleanToken, material.localJwks, sharedAuthIssuer);
     if (result && authRuntime.mode === "shared" && result.payload.role !== "authenticated") {
       return null;
     }

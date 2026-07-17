@@ -39,6 +39,7 @@ describe("TenantRuntimeService secret handling", () => {
 
   test("shared auth keeps owner private signing material out and rejects non-user owner roles", () => {
     expect(source).toContain("buildSharedProjectJwtVerificationMaterial");
+    expect(source).toContain('renderSystemdEnvLine("SUPACLOUD_AUTH_ISSUER", creds.localJwtIssuer)');
     expect(source).toContain('sharedAuthRuntime ? "" : renderSystemdEnvLine("JWT_SECRET"');
     expect(source).toContain('sharedAuthRuntime ? "" : jwtKeysEnv');
     expect(source).toContain("const postgrestJwtAudience = sharedAuthRuntime");

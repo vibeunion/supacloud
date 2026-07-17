@@ -3,9 +3,58 @@ import { createLocalJWKSet, exportJWK, generateKeyPair, jwtVerify, SignJWT } fro
 import {
   buildSharedProjectJwtVerificationMaterial,
   buildSharedProjectJwtVerifierJwks,
+  resolveSharedAuthIssuer,
+  verifyAsymmetricProjectJwt,
 } from "../../src/utils/project-jwt";
 
 describe("SupAuth shared JWT verifier material", () => {
+  test("derives the owner issuer when OAuth issuer is not explicitly configured", () => {
+    expect(resolveSharedAuthIssuer("auth-owner", {
+      api_domain: "api.example.com",
+      auth: { oauth_server: { enabled: true } },
+    })).toBe("https://api.example.com/auth/v1");
+  });
+
+  test("preserves an explicitly configured owner issuer", () => {
+    expect(resolveSharedAuthIssuer("auth-owner", {
+      auth: { oauth_server: { issuer: "https://issuer.example.com/auth" } },
+    })).toBe("https://issuer.example.com/auth");
+  });
+
+  test("management shared JWT verification requires the owner issuer", async () => {
+    const { publicKey, privateKey } = await generateKeyPair("ES256", { extractable: true });
+    const publicJwk = await exportJWK(publicKey);
+    const privateJwk = await exportJWK(privateKey);
+    const kid = "owner-issuer-key";
+    const signingKey = await crypto.subtle.importKey(
+      "jwk",
+      { ...privateJwk, kid, alg: "ES256", use: "sig" },
+      { name: "ECDSA", namedCurve: "P-256" },
+      false,
+      ["sign"],
+    );
+    const expectedIssuer = "https://auth-owner.example.com/auth/v1";
+    const valid = await new SignJWT({ role: "authenticated" })
+      .setProtectedHeader({ alg: "ES256", kid })
+      .setIssuer(expectedIssuer)
+      .setExpirationTime("5m")
+      .sign(signingKey);
+    const wrong = await new SignJWT({ role: "authenticated" })
+      .setProtectedHeader({ alg: "ES256", kid })
+      .setIssuer("https://wrong.example.com/auth/v1")
+      .setExpirationTime("5m")
+      .sign(signingKey);
+    const missing = await new SignJWT({ role: "authenticated" })
+      .setProtectedHeader({ alg: "ES256", kid })
+      .setExpirationTime("5m")
+      .sign(signingKey);
+    const jwks = { keys: [{ ...publicJwk, kid, alg: "ES256", use: "sig" }] };
+
+    expect(await verifyAsymmetricProjectJwt(valid, jwks, expectedIssuer)).not.toBeNull();
+    expect(await verifyAsymmetricProjectJwt(wrong, jwks, expectedIssuer)).toBeNull();
+    expect(await verifyAsymmetricProjectJwt(missing, jwks, expectedIssuer)).toBeNull();
+  });
+
   test("keeps dependent legacy API-key verification and owner public asymmetric keys only", () => {
     const jwks = buildSharedProjectJwtVerifierJwks({
       projectJwtSecret: "dependent-secret-with-at-least-32-characters",

@@ -224,6 +224,7 @@ describe("runtimeEnvService", () => {
       const env = await runtimeEnvService.buildProjectRuntimeEnv("proj_1");
       expect(env?.SUPACLOUD_AUTH_RUNTIME_MODE).toBe("shared");
       expect(env?.SUPACLOUD_AUTH_AUTHORITY_REF).toBe("auth-owner");
+      expect(env?.SUPACLOUD_AUTH_ISSUER).toContain("/auth/v1");
       expect(env?.SUPACLOUD_INTERNAL_POSTGREST_PORT).toBe("3272");
       expect(env?.SUPACLOUD_INTERNAL_GOTRUE_PORT).toBe("9372");
       expect(env?.JWT_JWKS).toContain("owner-public");

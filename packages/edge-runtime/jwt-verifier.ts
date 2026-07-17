@@ -21,6 +21,7 @@ export type EdgeRuntimeProjectSecrets = {
   jwtJwks?: { keys: JWK[] } | null;
   thirdParty?: EdgeRuntimeThirdPartyJwtPolicy | null;
   authRuntimeMode?: "local" | "owner" | "shared";
+  authIssuer?: string;
 };
 
 export type EdgeRuntimeThirdPartyJwtPolicy = {
@@ -162,8 +163,15 @@ export async function verifyEdgeRuntimeJwtContext(
     try {
       const localKeys = secrets.jwtJwks.keys.filter((key) => !isExternalKey(key, secrets.thirdParty ?? null));
       if (localKeys.length > 0) {
+        const sharedIssuer = secrets.authRuntimeMode === "shared"
+          ? secrets.authIssuer?.trim()
+          : undefined;
+        if (secrets.authRuntimeMode === "shared" && !sharedIssuer) {
+          return { verified: false, source: "none" };
+        }
         const verified = await jwtVerify(token, createLocalJWKSet({ keys: localKeys }), {
           algorithms: ["ES256", "RS256"],
+          ...(sharedIssuer ? { issuer: sharedIssuer } : {}),
         });
         if (secrets.authRuntimeMode === "shared" && verified.payload.role !== "authenticated") {
           return { verified: false, source: "none" };
