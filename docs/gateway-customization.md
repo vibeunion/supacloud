@@ -48,7 +48,7 @@ POST/PUT 的 body schema（字段语义与 `normalizeCustomGatewayRoute` 一致�
 | `path` | string \| string[] | 是 | 1-20 个路径，必须以 `/` 开头，不允许含 URL 或控制字符 |
 | `upstream` | string | 三选一 | 反代上游，`host:port` 或 `http(s)://host[:port]`；URL 形式不允许带 path/query/hash |
 | `static_root` | string | 三选一 | 静态文件根目录，绝对路径，禁止 `..` 与 `\0` |
-| `redirect_to` | string | 三选一 | 绝对 `http(s)` 重定向目标；可使用 `{http.request.uri}` 保留路径和查询参数 |
+| `redirect_to` | string | 三选一 | 带固定 host 的绝对 `http(s)` 重定向目标；可在末尾使用一次 `{http.request.uri}` 保留路径和查询参数 |
 | `redirect_status` | `301 \| 302 \| 307 \| 308` | 否 | 重定向状态码，默认 `308`；只能与 `redirect_to` 一起使用 |
 | `protocol` | `"http" \| "https"` | 否 | 只匹配指定请求协议；可用于将 HTTP 请求重定向到 HTTPS |
 | `upstream_tls_insecure_skip_verify` | boolean | 否 | 上游为 `https://` 时是否跳过 TLS 校验，默认 `false` |
@@ -63,7 +63,7 @@ POST/PUT 的 body schema（字段语义与 `normalizeCustomGatewayRoute` 一致�
 
 - `upstream`、`static_root` 与 `redirect_to` 必须**恰好设置一个**，否则报错。
 - `rewrite_uri` 与 `strip_prefix` 不能同时设置；redirect 路由不允许设置这两个字段。
-- `redirect_to` 只允许绝对 HTTP(S) URL 和 `{http.request.uri}` 占位符。
+- `redirect_to` 只允许绝对 HTTP(S) URL；`{http.request.uri}` 最多出现一次、只能位于末尾，且前缀必须包含固定 host，防止请求 URI 改写跳转 authority。
 - redirect 路由的 `headers` 不能包含任何大小写形式的 `Location`；跳转地址始终由 `redirect_to` 控制。
 - `headers` 的 name 必须匹配 `^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$`，value 不得含 `\r\n`。
 - `path` 不得含 `://` 或控制字符；`static_root` 不得含路径穿越。

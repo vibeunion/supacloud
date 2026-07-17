@@ -150,6 +150,8 @@ describe("gateway route builders", () => {
         for (const redirect_to of [
             "javascript:alert(1)",
             "https://user:password@www.example.com/",
+            "https://{http.request.uri}",
+            "https://{http.request.uri}.example.com/",
             "https://www.example.com/\r\nX-Injected: true",
         ]) {
             expect(() => normalizeCustomGatewayRoute({

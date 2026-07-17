@@ -163,7 +163,17 @@ function normalizeCustomRedirectTo(value: string | undefined): string | undefine
         throw new Error("Custom route redirect_to is invalid");
     }
 
-    const testableUrl = normalized.replaceAll("{http.request.uri}", "/__supacloud_request_uri__");
+    const requestUriPlaceholder = "{http.request.uri}";
+    const placeholderIndex = normalized.indexOf(requestUriPlaceholder);
+    if (placeholderIndex >= 0 && (
+        normalized.lastIndexOf(requestUriPlaceholder) !== placeholderIndex
+        || placeholderIndex + requestUriPlaceholder.length !== normalized.length
+    )) {
+        throw new Error("Custom route redirect_to only supports one trailing {http.request.uri} placeholder");
+    }
+    const testableUrl = placeholderIndex >= 0
+        ? normalized.slice(0, placeholderIndex)
+        : normalized;
     if (/[{}]/.test(testableUrl)) {
         throw new Error("Custom route redirect_to only supports the {http.request.uri} placeholder");
     }

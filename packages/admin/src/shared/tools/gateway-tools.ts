@@ -90,7 +90,7 @@ Actions: routes, upsert_route, update_route, delete_route, config, get_certifica
             upstream_tls_insecure_skip_verify: z.boolean().optional().describe("[upsert_route/update_route] 上游 TLS 跳过校验"),
             static_root: z.string().optional().describe("[upsert_route/update_route] 静态站点根目录"),
             protocol: z.enum(["http", "https"]).optional().describe("[upsert_route/update_route] 可选请求协议匹配"),
-            redirect_to: z.string().optional().describe("[upsert_route/update_route] 绝对 http(s) 重定向目标，可使用 {http.request.uri}"),
+            redirect_to: z.string().optional().describe("[upsert_route/update_route] 带固定 host 的绝对 http(s) 目标，可在末尾使用 {http.request.uri}"),
             redirect_status: redirectStatus.describe("[upsert_route/update_route] 重定向状态码，默认 308"),
             rewrite_uri: z.string().optional().describe("[upsert_route/update_route] 重写 URI（以 / 开头）"),
             strip_prefix: z.string().optional().describe("[upsert_route/update_route] 去除前缀"),
