@@ -33,7 +33,7 @@
     "tailwind-animate": "^0.2.10",
     "tailwind-merge": "^3.6.0",
     "tailwind-variants": "^3.2.2",
-    "tailwindcss": "^4.3.2",
+    "tailwindcss": "^4.3.3",
     "typescript": "^6.0.3",
     "vaul-svelte": "^0.3.2",
     "vite": "8.1.4",
