@@ -291,6 +291,77 @@ describe("projectRbacRoutes", () => {
     expect("current_org_id" in revokedSupauth).toBe(false);
   });
 
+  test("does not leak an application-scoped assignment across application contexts", async () => {
+    const role = await (await request("/v1/projects/proj_1/rbac/roles", {
+      method: "POST",
+      body: JSON.stringify({ name: "fa_engineer" }),
+    })).json() as { id: string };
+    await request(`/v1/projects/proj_1/rbac/roles/${role.id}/permissions`, {
+      method: "POST",
+      body: JSON.stringify({ name: "fa.rework.approve" }),
+    });
+    const otherRole = await (await request("/v1/projects/proj_1/rbac/roles", {
+      method: "POST",
+      body: JSON.stringify({ name: "other_app_admin" }),
+    })).json() as { id: string };
+    await request(`/v1/projects/proj_1/rbac/roles/${otherRole.id}/permissions`, {
+      method: "POST",
+      body: JSON.stringify({ name: "other.manage" }),
+    });
+
+    const first = await request(`/v1/projects/proj_1/rbac/roles/${role.id}/assign`, {
+      method: "POST",
+      body: JSON.stringify({ user_id: "user-one", application_id: "fa-app" }),
+    });
+    expect(first.status).toBe(200);
+    const second = await request(`/v1/projects/proj_1/rbac/roles/${otherRole.id}/assign`, {
+      method: "POST",
+      body: JSON.stringify({ user_id: "user-one", application_id: "other-app" }),
+    });
+    expect(second.status).toBe(200);
+
+    const faPermissions = await request(
+      "/v1/projects/proj_1/auth/users/user-one/permissions?application_id=fa-app",
+    );
+    expect(await faPermissions.json()).toEqual({
+      application_id: "fa-app",
+      roles: ["fa_engineer"],
+      permissions: ["fa.rework.approve"],
+      scopes: [],
+    });
+
+    const otherPermissions = await request(
+      "/v1/projects/proj_1/auth/users/user-one/permissions?application_id=other-app",
+    );
+    expect(await otherPermissions.json()).toEqual({
+      application_id: "other-app",
+      roles: ["other_app_admin"],
+      permissions: ["other.manage"],
+      scopes: [],
+    });
+
+    const legacyPermissions = await request(
+      "/v1/projects/proj_1/auth/users/user-one/permissions",
+    );
+    expect(await legacyPermissions.json()).toEqual({ roles: [], permissions: [], scopes: [] });
+
+    const faRoles = await request(
+      "/v1/projects/proj_1/auth/users/user-one/roles?application_id=fa-app",
+    );
+    expect(await faRoles.json()).toMatchObject({
+      total: 1,
+      items: [{ application_id: "fa-app", role: { name: "fa_engineer" } }],
+    });
+    const projectWideRoles = await request("/v1/projects/proj_1/auth/users/user-one/roles");
+    expect(await projectWideRoles.json()).toEqual({ items: [], total: 0 });
+
+    const projection = userUpdateBodies.at(-1)?.app_metadata as Record<string, unknown>;
+    expect((projection.supaoauth as Record<string, unknown>).applications).toMatchObject({
+      "fa-app": { roles: ["fa_engineer"], permissions: ["fa.rework.approve"] },
+      "other-app": { roles: ["other_app_admin"], permissions: ["other.manage"] },
+    });
+  });
+
   test("falls back to PATCH when GoTrue rejects PUT user updates", async () => {
     putUserUpdateReturns405 = true;
     const role = await (await request("/v1/projects/proj_1/rbac/roles", {

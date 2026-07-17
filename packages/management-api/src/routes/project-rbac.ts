@@ -133,25 +133,29 @@ export const projectRbacRoutes = new Elysia({ prefix: "/v1/projects/:ref" })
   }, {
     detail: { tags: ["rbac"], summary: "Revoke project RBAC role assignment" },
   })
-  .get("/auth/users/:id/roles", async ({ params }) => {
+  .get("/auth/users/:id/roles", async ({ params, query }) => {
     try {
-      const assignments = await projectRbacService.listUserRoleAssignments(params.ref, params.id);
+      const assignments = await projectRbacService.listUserRoleAssignments(params.ref, params.id, query.application_id);
       return { items: assignments, total: assignments.length };
     } catch (error) {
       return toHttpError(error);
     }
   }, {
+    query: t.Object({
+      application_id: t.Optional(t.String()),
+    }, { additionalProperties: true }),
     detail: { tags: ["rbac"], summary: "List project RBAC roles assigned to a user" },
   })
   .get("/auth/users/:id/permissions", async ({ params, query }) => {
     try {
-      return await projectRbacService.resolveUserPermissions(params.ref, params.id, query.org_id);
+      return await projectRbacService.resolveUserPermissions(params.ref, params.id, query.org_id, query.application_id);
     } catch (error) {
       return toHttpError(error);
     }
   }, {
     query: t.Object({
       org_id: t.Optional(t.String()),
+      application_id: t.Optional(t.String()),
     }, { additionalProperties: true }),
     detail: { tags: ["rbac"], summary: "Resolve project RBAC permissions for a user" },
   })
