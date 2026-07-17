@@ -6,6 +6,7 @@ import {
     DEFAULT_CORS_EXPOSED,
     DEFAULT_CORS_HEADERS,
     buildTenantCorsOrigins,
+    caddySensitiveRequestLogEncoder,
     gatewayService,
 } from "../../src/services/gateway.service";
 
@@ -122,6 +123,31 @@ describe("GatewayService provider selection", () => {
         expect(DEFAULT_CORS_EXPOSED).toContain("Content-Disposition");
     });
 
+    test("default Caddy logger redacts sensitive request headers", () => {
+        const encoder = caddySensitiveRequestLogEncoder() as {
+            format: string;
+            wrap: { format: string };
+            fields: Record<string, { filter: string; value: string }>;
+        };
+
+        expect(encoder.format).toBe("filter");
+        expect(encoder.wrap).toEqual({ format: "json" });
+        for (const header of [
+            "Apikey",
+            "Authorization",
+            "Cookie",
+            "Proxy-Authorization",
+            "X-Api-Key",
+            "X-Auth-Token",
+            "X-Supabase-Api-Key",
+        ]) {
+            expect(encoder.fields[`request>headers>${header}`]).toEqual({
+                filter: "replace",
+                value: "REDACTED",
+            });
+        }
+    });
+
     test("tenant cors origins include exact api and studio custom domains", () => {
         const origins = buildTenantCorsOrigins("dbbabyref", {
             api_domain: "sapi.dbbaby.top",
@@ -158,6 +184,13 @@ describe("CaddyGatewayProvider", () => {
         const noticeLog = load?.body?.logging?.logs?.supacloud_notice_do_not_edit_caddy_config_json_use_supacloud_cli_management_api_or_web_console;
         expect(noticeLog?.writer?.output).toBe("discard");
         expect(noticeLog?.level).toBe("INFO");
+        const defaultLogEncoder = load?.body?.logging?.logs?.default?.encoder;
+        expect(defaultLogEncoder?.format).toBe("filter");
+        expect(defaultLogEncoder?.wrap).toEqual({ format: "json" });
+        expect(defaultLogEncoder?.fields?.["request>headers>Apikey"]).toEqual({
+            filter: "replace",
+            value: "REDACTED",
+        });
         expect(load?.body?.apps?.tls?.automation?.policies?.[0]?.key_type).toBe("p256");
         const notice = await readFile("/tmp/supacloud-caddy-test/DO-NOT-EDIT.txt", "utf8");
         expect(notice).toContain("Do not edit /tmp/supacloud-caddy-test/config.json by hand.");
