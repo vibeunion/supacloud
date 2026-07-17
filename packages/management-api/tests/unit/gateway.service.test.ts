@@ -203,6 +203,7 @@ describe("CaddyGatewayProvider", () => {
         const rest = routes.find((route: any) => route["@id"] === "route-project-testref123-rest");
         const opaqueRest = routes.find((route: any) => route["@id"] === "route-project-testref123-opaque-rest");
         const storage = routes.find((route: any) => route["@id"] === "route-project-testref123-storage");
+        const storageResumable = routes.find((route: any) => route["@id"] === "route-project-testref123-storage-resumable");
         const functions = routes.find((route: any) => route["@id"] === "route-project-testref123-functions");
         const realtime = routes.find((route: any) => route["@id"] === "route-project-testref123-realtime");
         const management = routes.find((route: any) => route["@id"] === "route-project-testref123-management");
@@ -234,6 +235,8 @@ describe("CaddyGatewayProvider", () => {
         expect(routes.find((route: any) => route["@id"] === "route-project-testref123-graphql")
             ?.handle?.some((handler: any) => handler.uri === "/rpc/graphql")).toBe(true);
         expect(storage?.match?.[0]?.path).toEqual(["/storage/v1*"]);
+        expect(findCorsSubroute(storage)).toBeUndefined();
+        expect(findCorsSubroute(storageResumable)).toBeUndefined();
         const storageProxy = storage?.handle?.find((h: any) => h.handler === "reverse_proxy");
         expect(storageProxy?.flush_interval).toBeUndefined();
         const restProxy = rest?.handle?.find((h: any) => h.handler === "reverse_proxy");
@@ -1367,6 +1370,8 @@ describe("CaddyGatewayProvider route headers", () => {
         const resumableProxy = resumable?.handle?.find((h: any) => h.handler === "reverse_proxy");
         expect(storage?.handle?.some((h: any) => h.strip_path_prefix === "/storage/v1")).toBe(false);
         expect(resumable?.handle?.some((h: any) => h.strip_path_prefix === "/storage/v1")).toBe(false);
+        expect(findCorsSubroute(storage)).toBeUndefined();
+        expect(findCorsSubroute(resumable)).toBeUndefined();
         // Storage route should preserve upstream CORS without rendering an empty
         // response header block, which can break Caddy proxy responses.
         expect(storageProxy?.headers?.response).toBeUndefined();
