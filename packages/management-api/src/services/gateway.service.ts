@@ -136,6 +136,29 @@ const CADDY_GENERATED_CONFIG_NOTICE_LOG =
     "supacloud_notice_do_not_edit_caddy_config_json_use_supacloud_cli_management_api_or_web_console";
 const CADDY_UNMATCHED_HOST_ROUTE_ID = "route-system-unmatched-host-404";
 
+const CADDY_SENSITIVE_REQUEST_HEADERS = [
+    "Apikey",
+    "Authorization",
+    "Cookie",
+    "Proxy-Authorization",
+    "X-Api-Key",
+    "X-Auth-Token",
+    "X-Supabase-Api-Key",
+] as const;
+
+export function caddySensitiveRequestLogEncoder(): Record<string, unknown> {
+    return {
+        format: "filter",
+        wrap: { format: "json" },
+        fields: Object.fromEntries(
+            CADDY_SENSITIVE_REQUEST_HEADERS.map((header) => [
+                `request>headers>${header}`,
+                { filter: "replace", value: "REDACTED" },
+            ]),
+        ),
+    };
+}
+
 function caddyGeneratedConfigNoticeLog(): Record<string, unknown> {
     return {
         writer: { output: "discard" },
@@ -259,6 +282,9 @@ export class CaddyGatewayProvider implements GatewayProvider {
             admin: { listen: caddyAdminListen() },
             logging: {
                 logs: {
+                    default: {
+                        encoder: caddySensitiveRequestLogEncoder(),
+                    },
                     [CADDY_GENERATED_CONFIG_NOTICE_LOG]: caddyGeneratedConfigNoticeLog(),
                 },
             },
