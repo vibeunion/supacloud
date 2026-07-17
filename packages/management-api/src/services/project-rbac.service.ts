@@ -36,15 +36,24 @@ export interface ProjectRbacAssignment {
 export interface ProjectRbacConfig {
   roles: ProjectRbacRole[];
   assignments: ProjectRbacAssignment[];
+  application_ids: string[];
   version: number;
   updated_at?: string;
 }
 
-export interface ProjectRbacUserPermissions {
-  application_id?: string | null;
+interface ProjectRbacPermissionSet {
   roles: string[];
   permissions: string[];
   scopes: string[];
+}
+
+interface ProjectRbacApplicationPermissions extends ProjectRbacPermissionSet {
+  organization_ids: string[];
+  organizations: Record<string, ProjectRbacPermissionSet>;
+}
+
+export interface ProjectRbacUserPermissions extends ProjectRbacPermissionSet {
+  application_id?: string | null;
 }
 
 export interface AssignRoleInput {
@@ -158,9 +167,16 @@ function readRbacConfig(projectConfig: unknown): ProjectRbacConfig {
       .filter((item): item is ProjectRbacAssignment => item !== null && roleIds.has(item.role_id))
     : [];
   const version = Number(raw.version);
+  const configuredApplicationIds = Array.isArray(raw.application_ids)
+    ? raw.application_ids.map(optionalString)
+    : [];
   return {
     roles,
     assignments,
+    application_ids: uniqueSorted([
+      ...configuredApplicationIds,
+      ...assignments.map((assignment) => assignment.application_id),
+    ]),
     version: Number.isFinite(version) && version > 0 ? Math.trunc(version) : 0,
     updated_at: optionalString(raw.updated_at) ?? undefined,
   };
@@ -176,6 +192,16 @@ function getRoleOrThrow(rbac: ProjectRbacConfig, roleId: string): ProjectRbacRol
   return role;
 }
 
+function assignmentScopeMatches(
+  assignmentScope: string | null | undefined,
+  requestedScope: string | null | undefined,
+): boolean {
+  if (requestedScope === undefined || requestedScope === null) {
+    return !assignmentScope;
+  }
+  return !assignmentScope || assignmentScope === requestedScope;
+}
+
 function assignmentMatchesUser(
   assignment: ProjectRbacAssignment,
   userId: string,
@@ -183,16 +209,50 @@ function assignmentMatchesUser(
   applicationId?: string | null,
 ): boolean {
   if (assignment.user_id !== userId) return false;
-  if (orgId && assignment.organization_id && assignment.organization_id !== orgId) return false;
-  // A missing application_id is an intentional project-wide grant. Once an
-  // application context is supplied, only project-wide grants and grants for
-  // that exact application are eligible. Never carry another application's
-  // assignment into the result.
-  if (applicationId !== undefined && assignment.application_id && assignment.application_id !== applicationId) return false;
-  // Without an application context, expose only project-wide grants. This
-  // keeps legacy callers from accidentally receiving app-scoped permissions.
-  if (applicationId === undefined && assignment.application_id) return false;
-  return true;
+  return assignmentScopeMatches(assignment.organization_id, orgId)
+    && assignmentScopeMatches(assignment.application_id, applicationId);
+}
+
+function resolvePermissionSet(
+  rbac: ProjectRbacConfig,
+  assignments: ProjectRbacAssignment[],
+): ProjectRbacPermissionSet {
+  const rolesById = new Map(rbac.roles.map((role) => [role.id, role]));
+  const roles = assignments
+    .map((assignment) => rolesById.get(assignment.role_id)?.name)
+    .filter((value): value is string => Boolean(value));
+  const permissions = assignments.flatMap((assignment) => rolesById.get(assignment.role_id)?.permissions ?? []);
+
+  return {
+    roles: uniqueSorted(roles),
+    permissions: uniqueSorted(permissions.map((permission) => permission.name)),
+    scopes: uniqueSorted(permissions.map((permission) => permission.scope_id)),
+  };
+}
+
+function resolveApplicationMetadata(
+  rbac: ProjectRbacConfig,
+  userId: string,
+  applicationId: string,
+): ProjectRbacApplicationPermissions {
+  const assignments = rbac.assignments.filter((assignment) =>
+    assignment.user_id === userId
+    && (!assignment.application_id || assignment.application_id === applicationId)
+  );
+  const organizationIds = uniqueSorted(assignments.map((assignment) => assignment.organization_id));
+  const organizations = Object.fromEntries(organizationIds.map((organizationId) => [
+    organizationId,
+    resolvePermissionSet(
+      rbac,
+      assignments.filter((assignment) => !assignment.organization_id || assignment.organization_id === organizationId),
+    ),
+  ]));
+
+  return {
+    ...resolvePermissionSet(rbac, assignments.filter((assignment) => !assignment.organization_id)),
+    organization_ids: organizationIds,
+    organizations,
+  };
 }
 
 function resolvePermissionsFromConfig(
@@ -201,24 +261,21 @@ function resolvePermissionsFromConfig(
   orgId?: string | null,
   applicationId?: string | null,
 ): ProjectRbacUserPermissions {
-  const rolesById = new Map(rbac.roles.map((role) => [role.id, role]));
   const assignments = rbac.assignments.filter((assignment) => assignmentMatchesUser(assignment, userId, orgId, applicationId));
-  const roles = assignments
-    .map((assignment) => rolesById.get(assignment.role_id)?.name)
-    .filter((value): value is string => Boolean(value));
-  const permissions = assignments.flatMap((assignment) => rolesById.get(assignment.role_id)?.permissions ?? []);
 
   return {
     ...(applicationId !== undefined ? { application_id: applicationId } : {}),
-    roles: uniqueSorted(roles),
-    permissions: uniqueSorted(permissions.map((permission) => permission.name)),
-    scopes: uniqueSorted(permissions.map((permission) => permission.scope_id)),
+    ...resolvePermissionSet(rbac, assignments),
   };
 }
 
 function withNextVersion(rbac: ProjectRbacConfig): ProjectRbacConfig {
   return {
     ...rbac,
+    application_ids: uniqueSorted([
+      ...rbac.application_ids,
+      ...rbac.assignments.map((assignment) => assignment.application_id),
+    ]),
     version: rbac.version + 1,
     updated_at: nowIso(),
   };
@@ -304,31 +361,34 @@ async function syncUserMetadata(ref: string, userId: string, rbac: ProjectRbacCo
   const appMetadata = isRecord(user.app_metadata) ? user.app_metadata : {};
   const existingSupauth = isRecord(appMetadata.supaoauth) ? appMetadata.supaoauth : {};
   const resolved = resolvePermissionsFromConfig(rbac, userId);
-  const orgIds = uniqueSorted(rbac.assignments
-    .filter((assignment) => assignment.user_id === userId && !assignment.application_id)
-    .map((assignment) => assignment.organization_id));
+  const organizationAssignments = rbac.assignments.filter((assignment) =>
+    assignment.user_id === userId && !assignment.application_id,
+  );
+  const orgIds = uniqueSorted(organizationAssignments.map((assignment) => assignment.organization_id));
+  const organizations = Object.fromEntries(orgIds.map((organizationId) => [
+    organizationId,
+    resolvePermissionSet(
+      rbac,
+      organizationAssignments.filter((assignment) =>
+        !assignment.organization_id || assignment.organization_id === organizationId,
+      ),
+    ),
+  ]));
   const existingCurrentOrgId = typeof existingSupauth.current_org_id === "string"
     ? existingSupauth.current_org_id
     : undefined;
   const currentOrgId = existingCurrentOrgId && orgIds.includes(existingCurrentOrgId)
     ? existingCurrentOrgId
     : orgIds.length === 1 ? orgIds[0] : undefined;
-  const applicationIds = uniqueSorted(rbac.assignments
-    .filter((assignment) => assignment.user_id === userId && Boolean(assignment.application_id))
-    .map((assignment) => assignment.application_id));
-  const applications = Object.fromEntries(applicationIds.map((applicationId) => {
-    const applicationResolved = resolvePermissionsFromConfig(rbac, userId, undefined, applicationId);
-    const applicationOrganizationIds = uniqueSorted(rbac.assignments
-      .filter((assignment) => assignment.user_id === userId
-        && (!assignment.application_id || assignment.application_id === applicationId))
-      .map((assignment) => assignment.organization_id));
-    return [applicationId, {
-      roles: applicationResolved.roles,
-      permissions: applicationResolved.permissions,
-      scopes: applicationResolved.scopes,
-      organization_ids: applicationOrganizationIds,
-    }];
-  }));
+  // Application IDs are project-owned RBAC state. They remain known after the
+  // last user assignment is revoked, so a sync cannot erase a namespace that
+  // still carries project-wide grants. Existing user metadata is never used as
+  // an authority for namespace discovery or permission contents.
+  const applicationIds = rbac.application_ids;
+  const applications = Object.fromEntries(applicationIds.map((applicationId) => [
+    applicationId,
+    resolveApplicationMetadata(rbac, userId, applicationId),
+  ]));
 
   const updateRes = await updateGoTrueUserMetadata(ctx.apiUrl, userId, headers, {
     app_metadata: {
@@ -340,6 +400,7 @@ async function syncUserMetadata(ref: string, userId: string, rbac: ProjectRbacCo
         scopes: resolved.scopes,
         organization_ids: orgIds,
         current_org_id: currentOrgId,
+        organizations,
         applications,
         rbac_version: rbac.version,
         rbac_synced_at: nowIso(),
@@ -529,7 +590,10 @@ export const projectRbacService = {
     const rbac = readRbacConfig(project.config);
     const rolesById = new Map(rbac.roles.map((role) => [role.id, role]));
     return rbac.assignments
-      .filter((assignment) => assignmentMatchesUser(assignment, userId, undefined, applicationId))
+      .filter((assignment) =>
+        assignment.user_id === userId
+        && assignmentScopeMatches(assignment.application_id, applicationId),
+      )
       .map((assignment) => ({ ...assignment, role: rolesById.get(assignment.role_id) }));
   },
 
