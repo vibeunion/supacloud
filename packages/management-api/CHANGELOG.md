@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.41.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.40.6...management-api-v0.41.0) (2026-07-17)
+
+
+### Features
+
+* **gateway:** support protocol-scoped redirects ([62d02b7](https://github.com/zuohuadong/supacloud/commit/62d02b7eea7eb182462db7a36a3424f379923d87))
+
+
+### Bug Fixes
+
+* **gateway:** harden redirect route updates ([278c177](https://github.com/zuohuadong/supacloud/commit/278c1776742ed4530bdab0c8c234b2e59cea34b6))
+
+## [0.40.6](https://github.com/zuohuadong/supacloud/compare/management-api-v0.40.5...management-api-v0.40.6) (2026-07-17)
+
+
+### Bug Fixes
+
+* **rbac:** isolate user permissions by application ([31521a3](https://github.com/zuohuadong/supacloud/commit/31521a3a501075623baf3b61f894ae2d0f65ee75))
+* **rbac:** preserve scoped permission boundaries ([04e0216](https://github.com/zuohuadong/supacloud/commit/04e0216eb41f659c7162f56683cbca311ef321e4))
+
 ## [0.40.5](https://github.com/zuohuadong/supacloud/compare/management-api-v0.40.4...management-api-v0.40.5) (2026-07-17)
 
 

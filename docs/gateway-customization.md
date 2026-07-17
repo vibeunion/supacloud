@@ -46,11 +46,14 @@ POST/PUT 的 body schema（字段语义与 `normalizeCustomGatewayRoute` 一致�
 | `id` | string | 是 | 路由 ID，`^[A-Za-z0-9_-]{1,64}$`；POST 时作为去重主键，PUT 时必须与 `:routeId` 一致 |
 | `hosts` | string[] | 是 | 1-20 个主机名（自动 `normalizeCaddyHost`，去重） |
 | `path` | string \| string[] | 是 | 1-20 个路径，必须以 `/` 开头，不允许含 URL 或控制字符 |
-| `upstream` | string | 二选一 | 反代上游，`host:port` 或 `http(s)://host[:port]`；URL 形式不允许带 path/query/hash |
-| `static_root` | string | 二选一 | 静态文件根目录，绝对路径，禁止 `..` 与 `\0` |
+| `upstream` | string | 三选一 | 反代上游，`host:port` 或 `http(s)://host[:port]`；URL 形式不允许带 path/query/hash |
+| `static_root` | string | 三选一 | 静态文件根目录，绝对路径，禁止 `..` 与 `\0` |
+| `redirect_to` | string | 三选一 | 带固定 host 的绝对 `http(s)` 重定向目标；可在末尾使用一次 `{http.request.uri}` 保留路径和查询参数 |
+| `redirect_status` | `301 \| 302 \| 307 \| 308` | 否 | 重定向状态码，默认 `308`；只能与 `redirect_to` 一起使用 |
+| `protocol` | `"http" \| "https"` | 否 | 只匹配指定请求协议；可用于将 HTTP 请求重定向到 HTTPS |
 | `upstream_tls_insecure_skip_verify` | boolean | 否 | 上游为 `https://` 时是否跳过 TLS 校验，默认 `false` |
-| `rewrite_uri` | string | 否 | 请求改写目标 URI，必须以 `/` 开头；与 `strip_prefix` 互斥；依赖 `upstream` |
-| `strip_prefix` | string | 否 | 剥离指定路径前缀；与 `rewrite_uri` 互斥；依赖 `upstream` |
+| `rewrite_uri` | string | 否 | 请求改写目标 URI，必须以 `/` 开头；与 `strip_prefix` 互斥；用于 upstream/static 路由 |
+| `strip_prefix` | string | 否 | 剥离指定路径前缀；与 `rewrite_uri` 互斥；用于 upstream/static 路由 |
 | `headers` | Record<string,string> | 否 | upstream 模式作为请求头注入；static 模式作为响应头 |
 | `cors` | string[] | 否 | 1-50 个允许的 Origin；前缀 `~` 视为正则 |
 | `priority` | number | 否 | 整数，默认 `0`，用于多路由排序 |
@@ -58,8 +61,10 @@ POST/PUT 的 body schema（字段语义与 `normalizeCustomGatewayRoute` 一致�
 
 校验规则（来自 `normalizeCustomGatewayRoute` / `normalizeCustom*`）：
 
-- `upstream` 与 `static_root` 必须**恰好设置一个**，否则报错。
-- `rewrite_uri` 与 `strip_prefix` 不能同时设置，且只有 `upstream` 路由才允许。
+- `upstream`、`static_root` 与 `redirect_to` 必须**恰好设置一个**，否则报错。
+- `rewrite_uri` 与 `strip_prefix` 不能同时设置；redirect 路由不允许设置这两个字段。
+- `redirect_to` 只允许绝对 HTTP(S) URL；`{http.request.uri}` 最多出现一次、只能位于末尾，且前缀必须包含固定 host，防止请求 URI 改写跳转 authority。
+- redirect 路由的 `headers` 不能包含任何大小写形式的 `Location`；跳转地址始终由 `redirect_to` 控制。
 - `headers` 的 name 必须匹配 `^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$`，value 不得含 `\r\n`。
 - `path` 不得含 `://` 或控制字符；`static_root` 不得含路径穿越。
 
@@ -70,6 +75,10 @@ upstream 路由会被渲染成 Caddy 的 `reverse_proxy`，并自动注入这些
 ### static 模式渲染
 
 static 路由会被渲染成 Caddy `file_server`，`index_names` 为 `["index.html"]`，自动开启 `br`/`zstd`/`gzip` 预压缩协商，并隐藏 `.git`、`.env`、`deployment.json`。`headers` 字段作为响应头设置（注意：static 模式没有自动注入 `X-Project-Ref`）。
+
+### redirect 模式渲染
+
+redirect 路由会被渲染成 Caddy `static_response`，`Location` 来自 `redirect_to`，状态码默认 `308`。`headers` 字段在该模式下作为额外响应头；`Location` 始终由 `redirect_to` 控制。设置 `protocol: "http"` 后，HTTPS 请求不会命中该路由，可继续由同域名的其它 static 或 upstream 路由处理。
 
 ### 示例：反代一个内部服务
 
@@ -123,6 +132,25 @@ curl -X POST "$HOST/v1/projects/$REF/gateway/routes" \
 ```
 
 `~^https://.*\\.partner\\.example$` 是正则 Origin（`~` 前缀）。
+
+### 示例：HTTP 全路径永久跳转到 HTTPS
+
+```bash
+curl -X POST "$HOST/v1/projects/$REF/gateway/routes" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "www-canonical-https",
+    "hosts": ["www.example.com"],
+    "path": "/*",
+    "protocol": "http",
+    "redirect_to": "https://www.example.com{http.request.uri}",
+    "redirect_status": 308,
+    "priority": 1000
+  }'
+```
+
+请求 `/auth/callback?code=...` 时，`{http.request.uri}` 会完整保留路径和查询参数；HTTPS 请求不命中此 redirect route。
 
 ## 网关配置（tier / CORS / JWT）
 
@@ -214,7 +242,7 @@ SupaCloud 会自动为每个项目生成多个域名：API 主域（`<ref>.<base
 
 ## 排查
 
-- 自定义路由不生效：先 `GET /gateway/routes` 确认 `enabled` 不是 `false`；再确认 `upstream` / `static_root` 二选一、`hosts` 命中实际请求的 Host 头。
+- 自定义路由不生效：先 `GET /gateway/routes` 确认 `enabled` 不是 `false`；再确认 `upstream` / `static_root` / `redirect_to` 三选一、`hosts` 命中实际请求的 Host 头，且 `protocol` 与请求协议一致。
 - upsteam TLS 上游报证书错误：临时把 `upstream_tls_insecure_skip_verify` 设为 `true` 验证链路，再排查上游证书；生产环境避免长期开启。
 - 路由被系统路由覆盖：提高该路由的 `priority`，或避开系统路由前缀。
 - 校验失败导致 `/load` 拒绝：`persistAndLoad` 会抛 `Caddy config validation failed` 或 `Caddy /load failed with <status>`，错误信息会包含 Caddy 返回的具体原因。配置不会落盘，上一次成功的 JSON 仍然在 Caddy 内生效。

@@ -11,6 +11,8 @@ import { uniqueStrings } from "../utils/strings";
 export type CaddyHeaderValue = string | string[];
 export type CaddyRoute = Record<string, unknown>;
 export type CaddyMatcher = Record<string, unknown>;
+export type CustomGatewayProtocol = "http" | "https";
+export type CustomGatewayRedirectStatus = 301 | 302 | 307 | 308;
 
 export interface CustomGatewayRouteConfig {
     id: string;
@@ -19,6 +21,9 @@ export interface CustomGatewayRouteConfig {
     upstream?: string;
     upstream_tls_insecure_skip_verify?: boolean;
     static_root?: string;
+    protocol?: CustomGatewayProtocol;
+    redirect_to?: string;
+    redirect_status?: CustomGatewayRedirectStatus;
     rewrite_uri?: string;
     strip_prefix?: string;
     headers?: Record<string, string>;
@@ -143,6 +148,58 @@ function normalizeCustomStripPrefix(value: string | undefined): string | undefin
     return normalized || "/";
 }
 
+function normalizeCustomProtocol(value: CustomGatewayProtocol | undefined): CustomGatewayProtocol | undefined {
+    if (value === undefined) return undefined;
+    if (value !== "http" && value !== "https") {
+        throw new Error("Custom route protocol must be http or https");
+    }
+    return value;
+}
+
+function normalizeCustomRedirectTo(value: string | undefined): string | undefined {
+    if (value === undefined) return undefined;
+    const normalized = String(value || "").trim();
+    if (!normalized || /[\r\n\t\0]/.test(normalized)) {
+        throw new Error("Custom route redirect_to is invalid");
+    }
+
+    const requestUriPlaceholder = "{http.request.uri}";
+    const placeholderIndex = normalized.indexOf(requestUriPlaceholder);
+    if (placeholderIndex >= 0 && (
+        normalized.lastIndexOf(requestUriPlaceholder) !== placeholderIndex
+        || placeholderIndex + requestUriPlaceholder.length !== normalized.length
+    )) {
+        throw new Error("Custom route redirect_to only supports one trailing {http.request.uri} placeholder");
+    }
+    const testableUrl = placeholderIndex >= 0
+        ? normalized.slice(0, placeholderIndex)
+        : normalized;
+    if (/[{}]/.test(testableUrl)) {
+        throw new Error("Custom route redirect_to only supports the {http.request.uri} placeholder");
+    }
+    try {
+        const parsed = new URL(testableUrl);
+        if (!/^https?:$/.test(parsed.protocol) || !parsed.host || parsed.username || parsed.password) {
+            throw new Error("invalid redirect URL");
+        }
+    } catch {
+        throw new Error("Custom route redirect_to must be an absolute http(s) URL");
+    }
+    return normalized;
+}
+
+function normalizeCustomRedirectStatus(
+    value: CustomGatewayRedirectStatus | undefined,
+    hasRedirect: boolean,
+): CustomGatewayRedirectStatus | undefined {
+    if (value === undefined) return hasRedirect ? 308 : undefined;
+    if (!hasRedirect) throw new Error("Custom route redirect_status requires redirect_to");
+    if (![301, 302, 307, 308].includes(value)) {
+        throw new Error("Custom route redirect_status must be one of 301, 302, 307 or 308");
+    }
+    return value;
+}
+
 export function normalizeCustomUpstream(upstream: string): { dial: string; tls: boolean } {
     const value = String(upstream || "").trim();
     if (!value || /[\r\n\t]/.test(value)) throw new Error("Custom route upstream is invalid");
@@ -187,11 +244,21 @@ export function normalizeCustomGatewayRoute(input: CustomGatewayRouteConfig): Cu
 
     const hasUpstream = typeof input.upstream === "string" && input.upstream.trim().length > 0;
     const hasStaticRoot = typeof input.static_root === "string" && input.static_root.trim().length > 0;
-    if (hasUpstream === hasStaticRoot) throw new Error("Custom route must set exactly one of upstream or static_root");
+    const redirectTo = normalizeCustomRedirectTo(input.redirect_to);
+    const hasRedirect = typeof redirectTo === "string";
+    if ([hasUpstream, hasStaticRoot, hasRedirect].filter(Boolean).length !== 1) {
+        throw new Error("Custom route must set exactly one of upstream, static_root or redirect_to");
+    }
 
     const rewriteUri = normalizeCustomRewriteUri(input.rewrite_uri);
     const stripPrefix = normalizeCustomStripPrefix(input.strip_prefix);
     if (rewriteUri && stripPrefix) throw new Error("Custom route must not set both rewrite_uri and strip_prefix");
+    if (hasRedirect && (rewriteUri || stripPrefix)) {
+        throw new Error("Custom redirect routes must not set rewrite_uri or strip_prefix");
+    }
+    if (hasRedirect && Object.keys(input.headers || {}).some((key) => key.trim().toLowerCase() === "location")) {
+        throw new Error("Custom redirect routes must not override the Location header");
+    }
 
     return {
         id,
@@ -200,6 +267,9 @@ export function normalizeCustomGatewayRoute(input: CustomGatewayRouteConfig): Cu
         upstream: hasUpstream ? input.upstream!.trim() : undefined,
         upstream_tls_insecure_skip_verify: input.upstream_tls_insecure_skip_verify === true,
         static_root: hasStaticRoot ? normalizeCustomStaticRoot(input.static_root!) : undefined,
+        protocol: normalizeCustomProtocol(input.protocol),
+        redirect_to: redirectTo,
+        redirect_status: normalizeCustomRedirectStatus(input.redirect_status, hasRedirect),
         rewrite_uri: rewriteUri,
         strip_prefix: stripPrefix,
         headers: normalizeCustomHeaders(input.headers),
@@ -382,14 +452,30 @@ export function makeCustomGatewayRoute(projectRef: string, input: CustomGatewayR
         if (route.rewrite_uri) handle.push({ handler: "rewrite", uri: route.rewrite_uri });
         else if (route.strip_prefix) handle.push({ handler: "rewrite", strip_path_prefix: route.strip_prefix });
         handle.push(makeStaticFileServer(route.static_root));
+    } else if (route.redirect_to) {
+        const responseHeaders = Object.fromEntries(
+            Object.entries(route.headers || {}).map(([key, value]) => [key, [value]]),
+        );
+        responseHeaders.Location = [route.redirect_to];
+        handle.push({
+            handler: "static_response",
+            headers: responseHeaders,
+            status_code: route.redirect_status || 308,
+        });
     } else {
         return null;
     }
 
+    const match: CaddyMatcher = {
+        host: route.hosts,
+        path: Array.isArray(route.path) ? route.path : [route.path],
+    };
+    if (route.protocol) match.protocol = route.protocol;
+
     return {
         "@id": customGatewayRouteId(projectRef, route.id),
         __supacloud_priority: route.priority || 0,
-        match: [{ host: route.hosts, path: Array.isArray(route.path) ? route.path : [route.path] }],
+        match: [match],
         handle,
         terminal: true,
     };

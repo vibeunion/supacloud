@@ -142,16 +142,33 @@ async function applyCustomGatewayRoutes(projectRef: string, settings: Record<str
     return { ok: false, status: 400, body: { message: "Maximum of 50 custom gateway routes allowed per project", code: "400" } };
   }
 
+  const previousRoutes = readCustomGatewayRoutes(settings);
   const result = await gatewayService.configureCustomGatewayRoutes(projectRef, routes);
   if (!result.success) {
     return { ok: false, status: 500, body: { message: result.error || "Failed to update custom gateway routes", code: "500" } };
   }
 
-  const updated = await projectService.updateProjectSettings(projectRef, {
-    ...settings,
-    gateway_routes: routes,
-  });
-  return { ok: true, settings: updated };
+  try {
+    const updated = await projectService.updateProjectSettings(projectRef, {
+      ...settings,
+      gateway_routes: routes,
+    });
+    if (!updated) throw new Error("Project settings update returned no result");
+    return { ok: true, settings: updated };
+  } catch (error: unknown) {
+    const persistenceError = error instanceof Error ? error.message : String(error);
+    let rollbackError = "";
+    try {
+      const rollback = await gatewayService.configureCustomGatewayRoutes(projectRef, previousRoutes);
+      if (!rollback.success) rollbackError = rollback.error || "unknown rollback failure";
+    } catch (rollback: unknown) {
+      rollbackError = rollback instanceof Error ? rollback.message : String(rollback);
+    }
+    const message = rollbackError
+      ? `Failed to persist custom gateway routes: ${persistenceError}; Caddy rollback failed: ${rollbackError}`
+      : `Failed to persist custom gateway routes: ${persistenceError}; Caddy routes restored`;
+    return { ok: false, status: 500, body: { message, code: "500" } };
+  }
 }
 
 function buildCustomHostnameResponse(domainInfo: unknown) {
@@ -1990,6 +2007,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         upstream: t.Optional(t.String()),
         upstream_tls_insecure_skip_verify: t.Optional(t.Boolean()),
         static_root: t.Optional(t.String()),
+        protocol: t.Optional(t.Union([t.Literal("http"), t.Literal("https")])),
+        redirect_to: t.Optional(t.String()),
+        redirect_status: t.Optional(t.Union([t.Literal(301), t.Literal(302), t.Literal(307), t.Literal(308)])),
         rewrite_uri: t.Optional(t.String()),
         strip_prefix: t.Optional(t.String()),
         headers: t.Optional(t.Record(t.String(), t.String())),
@@ -2027,6 +2047,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         upstream: t.Optional(t.String()),
         upstream_tls_insecure_skip_verify: t.Optional(t.Boolean()),
         static_root: t.Optional(t.String()),
+        protocol: t.Optional(t.Union([t.Literal("http"), t.Literal("https")])),
+        redirect_to: t.Optional(t.String()),
+        redirect_status: t.Optional(t.Union([t.Literal(301), t.Literal(302), t.Literal(307), t.Literal(308)])),
         rewrite_uri: t.Optional(t.String()),
         strip_prefix: t.Optional(t.String()),
         headers: t.Optional(t.Record(t.String(), t.String())),

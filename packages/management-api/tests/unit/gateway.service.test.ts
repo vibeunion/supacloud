@@ -737,6 +737,85 @@ describe("CaddyGatewayProvider", () => {
         restore();
     });
 
+    test("configureCustomGatewayRoutes restores previous routes when Caddy rejects the candidate", async () => {
+        const originalFetch = globalThis.fetch;
+        const loads: any[] = [];
+        let loadAttempt = 0;
+        globalThis.fetch = mock((input: string | URL | Request, init?: RequestInit) => {
+            const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+            if (url.endsWith("/load") && init?.method === "POST") {
+                loadAttempt += 1;
+                loads.push(JSON.parse(String(init.body)));
+                if (loadAttempt === 2) {
+                    return Promise.resolve(Response.json({ error: "invalid candidate" }, { status: 500 }));
+                }
+            }
+            return Promise.resolve(Response.json({ ok: true }));
+        }) as unknown as typeof fetch;
+
+        try {
+            const provider = new CaddyGatewayProvider();
+            expect((await provider.configureCustomGatewayRoutes("proj123", [{
+                id: "old",
+                hosts: ["old.example.com"],
+                path: "/*",
+                static_root: "/var/supacloud/custom-sites/old",
+            }])).success).toBe(true);
+
+            expect((await provider.configureCustomGatewayRoutes("proj123", [{
+                id: "new",
+                hosts: ["new.example.com"],
+                path: "/*",
+                static_root: "/var/supacloud/custom-sites/new",
+            }])).success).toBe(false);
+
+            expect((await provider.configureCustomGatewayRoutes("other", [{
+                id: "other",
+                hosts: ["other.example.com"],
+                path: "/*",
+                static_root: "/var/supacloud/custom-sites/other",
+            }])).success).toBe(true);
+
+            const routes = loads.at(-1)?.apps?.http?.servers?.supacloud?.routes ?? [];
+            expect(routes.some((route: any) => route["@id"] === "route-custom-gateway-proj123-old")).toBe(true);
+            expect(routes.some((route: any) => route["@id"] === "route-custom-gateway-proj123-new")).toBe(false);
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+    });
+
+    test("protocol-scoped custom routes sort before generic routes with the same priority and path", async () => {
+        const calls: Array<{ url: string; method: string; body: any }> = [];
+        const restore = captureFetch(calls);
+        const provider = new CaddyGatewayProvider();
+
+        await provider.configureCustomGatewayRoutes("proj123", [
+            {
+                id: "aaa-site",
+                hosts: ["www.example.com"],
+                path: "/*",
+                static_root: "/var/supacloud/custom-sites/www",
+            },
+            {
+                id: "zzz-http-redirect",
+                hosts: ["www.example.com"],
+                path: "/*",
+                protocol: "http",
+                redirect_to: "https://www.example.com{http.request.uri}",
+            },
+        ]);
+
+        const load = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
+        const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
+        const redirectIndex = routes.findIndex((route: any) => route["@id"] === "route-custom-gateway-proj123-zzz-http-redirect");
+        const siteIndex = routes.findIndex((route: any) => route["@id"] === "route-custom-gateway-proj123-aaa-site");
+
+        expect(redirectIndex).toBeGreaterThanOrEqual(0);
+        expect(redirectIndex).toBeLessThan(siteIndex);
+
+        restore();
+    });
+
     test("upsertCertificateForSnis stores manual certificate paths in Caddy JSON", async () => {
         const calls: Array<{ url: string; method: string; body: any }> = [];
         const restore = captureFetch(calls);
