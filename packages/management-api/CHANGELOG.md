@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.41.4](https://github.com/zuohuadong/supacloud/compare/management-api-v0.41.3...management-api-v0.41.4) (2026-07-17)
+
+
+### Bug Fixes
+
+* **gateway:** reconcile managed route drift ([ddaf522](https://github.com/zuohuadong/supacloud/commit/ddaf5229f3a65bbf0127eb344539b1347f617f8c))
+
 ## [0.41.3](https://github.com/zuohuadong/supacloud/compare/management-api-v0.41.2...management-api-v0.41.3) (2026-07-17)
 
 
