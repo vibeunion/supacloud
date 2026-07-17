@@ -858,6 +858,56 @@ describe("CaddyGatewayProvider", () => {
         restore();
     });
 
+    test("bounds Caddy rate-limit ring buffers while preserving configured average rates", async () => {
+        const calls: Array<{ url: string; method: string; body: any }> = [];
+        const restore = captureFetch(calls);
+        const provider = new CaddyGatewayProvider();
+
+        await provider.setupUpstream("boundedref", 3000, 9999);
+        await provider.setRateLimit("boundedref", "enterprise");
+
+        const load = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
+        const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
+        const rest = routes.find((route: any) => route["@id"] === "route-project-boundedref-rest");
+        const rateLimit = rest?.handle?.find((handler: any) => handler.handler === "rate_limit");
+        const zones = rateLimit?.rate_limits ?? {};
+
+        expect(Object.keys(zones)).toHaveLength(3);
+        expect(zones.supacloud_boundedref_api_second_configured_1500).toMatchObject({ window: "1s", max_events: 1500 });
+        expect(zones.supacloud_boundedref_api_minute_configured_90000).toMatchObject({ window: "1000ms", max_events: 1500 });
+        expect(zones.supacloud_boundedref_api_hour_configured_3000000).toMatchObject({ window: "1800ms", max_events: 1500 });
+
+        restore();
+    });
+
+    test("hydrates bounded rate limits without dropping minute and hour protection", async () => {
+        const calls: Array<{ url: string; method: string; body: any }> = [];
+        const restore = captureFetch(calls);
+        const firstProvider = new CaddyGatewayProvider();
+
+        await firstProvider.setupUpstream("restartref", 3000, 9999);
+        await firstProvider.setRateLimit("restartref", "enterprise");
+
+        const restartedProvider = new CaddyGatewayProvider();
+        await restartedProvider.setupMasterRoutes();
+
+        expect(await restartedProvider.getRateLimit("restartref")).toEqual({
+            tier: "custom",
+            second: 1500,
+            minute: 90000,
+            hour: 3000000,
+            enabled: true,
+        });
+
+        const load = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
+        const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
+        const rest = routes.find((route: any) => route["@id"] === "route-project-restartref-rest");
+        const rateLimit = rest?.handle?.find((handler: any) => handler.handler === "rate_limit");
+        expect(Object.keys(rateLimit?.rate_limits ?? {})).toHaveLength(3);
+
+        restore();
+    });
+
     test("setRateLimit uses production-safe defaults for every built-in tier and partial custom config", async () => {
         const calls: Array<{ url: string; method: string; body: any }> = [];
         const restore = captureFetch(calls);

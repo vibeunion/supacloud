@@ -62,6 +62,18 @@ const RATE_LIMIT_TIERS: Record<"free" | "pro" | "enterprise", RateLimitConfig> =
     enterprise: { second: 1500, minute: 90000, hour: 3000000 },
 };
 
+const RATE_LIMIT_RING_CAPS: Record<keyof RateLimitConfig, number> = {
+    second: 1500,
+    minute: 1500,
+    hour: 1500,
+};
+
+const RATE_LIMIT_WINDOW_MS: Record<keyof RateLimitConfig, number> = {
+    second: 1000,
+    minute: 60_000,
+    hour: 3_600_000,
+};
+
 type GatewaySetupOptions = { functionsPort?: number; storagePort?: number; realtimeApiPort?: number; realtimeWsPort?: number };
 
 export interface FrontendGatewayRoute {
@@ -450,9 +462,18 @@ export class CaddyGatewayProvider implements GatewayProvider {
         if (!zones || typeof zones !== "object") return null;
 
         const limits = { second: 0, minute: 0, hour: 0 };
-        for (const zone of Object.values(zones as Record<string, any>)) {
+        for (const [zoneName, zone] of Object.entries(zones as Record<string, any>)) {
             const window = String(zone?.window || "");
             const maxEvents = Number(zone?.max_events || 0);
+            const encoded = zoneName.match(/_(second|minute|hour)_configured_([0-9]+(?:\.[0-9]+)?)$/);
+            if (encoded) {
+                const dimension = encoded[1] as keyof RateLimitConfig;
+                const configuredMaxEvents = Number(encoded[2]);
+                if (Number.isFinite(configuredMaxEvents) && configuredMaxEvents > 0) {
+                    limits[dimension] = configuredMaxEvents;
+                    continue;
+                }
+            }
             if (window === "1s") limits.second = maxEvents;
             if (window === "1m") limits.minute = maxEvents;
             if (window === "1h") limits.hour = maxEvents;
@@ -495,15 +516,25 @@ export class CaddyGatewayProvider implements GatewayProvider {
 
     private makeRateLimitHandler(projectRef: string, limits: { second: number; minute: number; hour: number }, suffix = "default"): Record<string, unknown> {
         const zones: Record<string, unknown> = {};
-        const entries: Array<[string, number, string]> = [
+        const entries: Array<[keyof RateLimitConfig, number, string]> = [
             ["second", limits.second, "1s"],
             ["minute", limits.minute, "1m"],
             ["hour", limits.hour, "1h"],
         ];
 
-        for (const [name, maxEvents, window] of entries) {
-            if (!Number.isFinite(maxEvents) || maxEvents <= 0) continue;
-            zones[`supacloud_${sanitizeCaddyId(projectRef)}_${sanitizeCaddyId(suffix)}_${name}`] = {
+        for (const [name, configuredMaxEvents, configuredWindow] of entries) {
+            if (!Number.isFinite(configuredMaxEvents) || configuredMaxEvents <= 0) continue;
+
+            // caddy-ratelimit stores one time.Time per max_event and client key.
+            // Bound each per-IP ring, then shorten the window proportionally so
+            // the configured sustained rate remains unchanged without OOM-sized
+            // minute/hour buffers for high-capacity tiers.
+            const ringCap = RATE_LIMIT_RING_CAPS[name];
+            const maxEvents = Math.min(configuredMaxEvents, ringCap);
+            const window = configuredMaxEvents > ringCap
+                ? `${Math.max(1, Math.round(RATE_LIMIT_WINDOW_MS[name] * ringCap / configuredMaxEvents))}ms`
+                : configuredWindow;
+            zones[`supacloud_${sanitizeCaddyId(projectRef)}_${sanitizeCaddyId(suffix)}_${name}_configured_${configuredMaxEvents}`] = {
                 key: "{http.request.remote.host}",
                 window,
                 max_events: maxEvents,
