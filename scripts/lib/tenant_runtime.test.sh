@@ -178,6 +178,10 @@ grep -Fq 'mv -f "$install_tmp" "$target_path"' "$RUNTIME_SCRIPT"
     }
     psql() { printf '0\n'; }
     chown() { printf '%s\n' "$*" >> "$tmp_dir/chown.log"; }
+    systemctl() {
+        if [ "$1" = is-active ] && [ "$2" = supacloud.service ]; then return 3; fi
+        return 0
+    }
 
     generate_tenant_config "abc123" 3101 4101 >/dev/null
 )
@@ -206,6 +210,10 @@ if (
     }
     psql() { printf '0\n'; }
     chown() { :; }
+    systemctl() {
+        if [ "$1" = is-active ] && [ "$2" = supacloud.service ]; then return 3; fi
+        return 0
+    }
     generate_tenant_config "inject" 3102 4102 >/dev/null 2>&1
 ); then
     echo "tenant config accepted an injected assignment" >&2
@@ -236,5 +244,202 @@ for owned_path in \
     "$tmp_dir/tenants/abc123_gotrue.d"; do
     grep -Fq "tenant-test:tenant-test $owned_path" "$tmp_dir/chown.log"
 done
+
+# Shared-auth tenants start only PostgREST and never download or start a local GoTrue.
+shared_runtime_log="$tmp_dir/shared-runtime.log"
+shared_runtime_output=$(
+    export TENANT_CONFIG_DIR="$tmp_dir/shared-tenants"
+    mkdir -p "$TENANT_CONFIG_DIR"
+    touch "$(shared_auth_marker_path shared123)"
+    ensure_postgrest() { printf 'ensure-postgrest\n' >> "$shared_runtime_log"; }
+    ensure_gotrue() { printf 'ensure-gotrue\n' >> "$shared_runtime_log"; return 1; }
+    install_systemd_template() { printf 'install-template\n' >> "$shared_runtime_log"; }
+    generate_tenant_config() { printf 'generate-config\n' >> "$shared_runtime_log"; }
+    get_tenant_port() { [ "$2" = pgrst ] && printf '3101' || printf '4101'; }
+    systemctl() {
+        if [ "$1" = is-active ] || [ "$1" = is-enabled ]; then return 1; fi
+        printf '%s\n' "$*" >> "$shared_runtime_log"
+    }
+    curl() { return 0; }
+    start_runtime shared123
+)
+grep -Fq 'Waiting for PostgREST(3101) with shared authentication boundary...' <<< "$shared_runtime_output"
+grep -Fq 'GOTRUE_MODE=shared' <<< "$shared_runtime_output"
+grep -Fq 'stop supacloud-gotrue@shared123' "$shared_runtime_log"
+grep -Fq 'disable supacloud-gotrue@shared123' "$shared_runtime_log"
+if grep -Fq 'ensure-gotrue' "$shared_runtime_log" \
+    || grep -Fq 'start supacloud-gotrue@shared123' "$shared_runtime_log" \
+    || grep -Fq 'enable supacloud-gotrue@shared123' "$shared_runtime_log"; then
+    echo "shared-auth runtime attempted to prepare or start local GoTrue" >&2
+    exit 1
+fi
+
+# Management API markers protect all PostgREST and GoTrue files from legacy regeneration.
+managed_dir="$tmp_dir/managed-tenants"
+mkdir -p "$managed_dir/managed123_gotrue.d"
+printf '# Managed by SupaCloud Management API.\nMANAGED_SENTINEL=pgrst-env\n' > "$managed_dir/managed123.env"
+printf '# Managed by SupaCloud Management API.\nMANAGED_SENTINEL=pgrst-conf\n' > "$managed_dir/managed123.conf"
+printf '# Managed by SupaCloud Management API.\nMANAGED_SENTINEL=outer\n' > "$managed_dir/managed123_gotrue.env"
+printf '# Managed by SupaCloud Management API.\nMANAGED_SENTINEL=runtime\n' > "$managed_dir/managed123_gotrue.d/runtime.env"
+managed_pgrst_env_before=$(sha256_file "$managed_dir/managed123.env")
+managed_pgrst_conf_before=$(sha256_file "$managed_dir/managed123.conf")
+managed_outer_before=$(sha256_file "$managed_dir/managed123_gotrue.env")
+managed_runtime_before=$(sha256_file "$managed_dir/managed123_gotrue.d/runtime.env")
+(
+    export TENANT_CONFIG_DIR="$managed_dir"
+    ensure_tenant_runtime_user() { printf 'tenant-test'; }
+    get_tenant_credentials() { echo "managed config unexpectedly queried credentials" >&2; return 1; }
+    generate_tenant_config managed123 3103 4103 >/dev/null
+)
+[[ "$(sha256_file "$managed_dir/managed123.env")" == "$managed_pgrst_env_before" ]]
+[[ "$(sha256_file "$managed_dir/managed123.conf")" == "$managed_pgrst_conf_before" ]]
+[[ "$(sha256_file "$managed_dir/managed123_gotrue.env")" == "$managed_outer_before" ]]
+[[ "$(sha256_file "$managed_dir/managed123_gotrue.d/runtime.env")" == "$managed_runtime_before" ]]
+
+# A shared marker preserves owner/JWKS PostgREST config and makes stop/disable failures fatal.
+shared_managed_dir="$tmp_dir/shared-managed-tenants"
+shared_managed_log="$tmp_dir/shared-managed-systemctl.log"
+mkdir -p "$shared_managed_dir"
+printf '# Managed by SupaCloud Management API.\nJWT_SENTINEL=owner-jwks\n' > "$shared_managed_dir/shared456.env"
+printf '# Managed by SupaCloud Management API.\njwt-secret = "owner-jwks"\n' > "$shared_managed_dir/shared456.conf"
+printf 'owner123\n' > "$shared_managed_dir/shared456_gotrue.shared"
+shared_env_before=$(sha256_file "$shared_managed_dir/shared456.env")
+shared_conf_before=$(sha256_file "$shared_managed_dir/shared456.conf")
+(
+    export TENANT_CONFIG_DIR="$shared_managed_dir"
+    ensure_tenant_runtime_user() { printf 'tenant-test'; }
+    get_tenant_credentials() { echo "shared config unexpectedly queried local credentials" >&2; return 1; }
+    systemctl() { printf '%s\n' "$*" >> "$shared_managed_log"; }
+    generate_tenant_config shared456 3104 4104 >/dev/null
+)
+[[ "$(sha256_file "$shared_managed_dir/shared456.env")" == "$shared_env_before" ]]
+[[ "$(sha256_file "$shared_managed_dir/shared456.conf")" == "$shared_conf_before" ]]
+grep -Fq 'stop supacloud-gotrue@shared456' "$shared_managed_log"
+grep -Fq 'disable supacloud-gotrue@shared456' "$shared_managed_log"
+
+if (
+    export TENANT_CONFIG_DIR="$shared_managed_dir"
+    ensure_tenant_runtime_user() { printf 'tenant-test'; }
+    systemctl() { return 1; }
+    generate_tenant_config shared456 3104 4104 >/dev/null 2>&1
+); then
+    echo "shared GoTrue stop/disable failure was ignored" >&2
+    exit 1
+fi
+
+# Environment-only shared detection cannot invent verifier config; a marker is required.
+mkdir -p "$tmp_dir/unmarked-shared/shared789_gotrue.d"
+printf '# Managed by SupaCloud Management API.\nLOCAL_SENTINEL=pgrst-env\n' > "$tmp_dir/unmarked-shared/shared789.env"
+printf '# Managed by SupaCloud Management API.\njwt-secret = "dependent-local-secret"\n' > "$tmp_dir/unmarked-shared/shared789.conf"
+printf '# Managed by SupaCloud Management API.\nLOCAL_SENTINEL=gotrue\n' > "$tmp_dir/unmarked-shared/shared789_gotrue.env"
+printf '# Managed by SupaCloud Management API.\nLOCAL_SENTINEL=runtime\n' > "$tmp_dir/unmarked-shared/shared789_gotrue.d/runtime.env"
+if (
+    export TENANT_CONFIG_DIR="$tmp_dir/unmarked-shared"
+    export SUPACLOUD_AUTH_RUNTIME_OWNER_REF="owner123"
+    ensure_tenant_runtime_user() { printf 'tenant-test'; }
+    get_tenant_credentials() { echo "unmarked shared config queried credentials" >&2; return 1; }
+    generate_tenant_config shared789 3105 4105 >/dev/null 2>&1
+); then
+    echo "unmarked shared runtime was regenerated by legacy shell" >&2
+    exit 1
+fi
+grep -Fq 'dependent-local-secret' "$tmp_dir/unmarked-shared/shared789.conf"
+
+# Unknown systemctl/control-plane state is not equivalent to an inactive owner.
+if (
+    export TENANT_CONFIG_DIR="$tmp_dir/unknown-control-plane"
+    unset SUPACLOUD_AUTH_RUNTIME_OWNER_REF
+    ensure_tenant_runtime_user() { printf 'tenant-test'; }
+    systemctl() { return 1; }
+    get_tenant_credentials() { echo "unknown control plane queried credentials" >&2; return 1; }
+    generate_tenant_config uncertain123 3106 4106 >/dev/null 2>&1
+); then
+    echo "unknown control-plane state allowed legacy regeneration" >&2
+    exit 1
+fi
+[[ ! -e "$tmp_dir/unknown-control-plane/uncertain123.conf" ]]
+
+# A missing systemctl binary is also unknown, so stop cleanup must fail closed.
+mkdir -p "$tmp_dir/no-systemctl-path"
+if ! (
+    export PATH="$tmp_dir/no-systemctl-path"
+    export TENANT_CONFIG_DIR="$tmp_dir/no-systemctl-tenants"
+    should_preserve_runtime_config_on_stop nosystemctl
+); then
+    echo "missing systemctl was treated as a known-inactive Management API" >&2
+    exit 1
+fi
+
+# Stopping a Management API managed runtime must preserve its restartable config and runtime user.
+managed_stop_dir="$tmp_dir/managed-stop"
+managed_stop_log="$tmp_dir/managed-stop.log"
+mkdir -p "$managed_stop_dir/managedstop_gotrue.d"
+for managed_stop_file in \
+    "$managed_stop_dir/managedstop.env" \
+    "$managed_stop_dir/managedstop.conf" \
+    "$managed_stop_dir/managedstop_gotrue.env" \
+    "$managed_stop_dir/managedstop_gotrue.d/runtime.env"; do
+    printf '# Managed by SupaCloud Management API.\nPRESERVE=true\n' > "$managed_stop_file"
+done
+(
+    export TENANT_CONFIG_DIR="$managed_stop_dir"
+    systemctl() { printf 'systemctl %s\n' "$*" >> "$managed_stop_log"; }
+    userdel() { printf 'userdel %s\n' "$*" >> "$managed_stop_log"; }
+    stop_runtime managedstop >/dev/null
+)
+for managed_stop_file in \
+    "$managed_stop_dir/managedstop.env" \
+    "$managed_stop_dir/managedstop.conf" \
+    "$managed_stop_dir/managedstop_gotrue.env" \
+    "$managed_stop_dir/managedstop_gotrue.d/runtime.env"; do
+    [[ -f "$managed_stop_file" ]]
+done
+if grep -Fq 'userdel ' "$managed_stop_log"; then
+    echo "managed runtime stop deleted the runtime user" >&2
+    exit 1
+fi
+
+# Shared owner/JWKS config and its marker survive the same legacy stop path.
+shared_stop_dir="$tmp_dir/shared-stop"
+shared_stop_log="$tmp_dir/shared-stop.log"
+mkdir -p "$shared_stop_dir"
+printf '# Managed by SupaCloud Management API.\nJWT_SENTINEL=owner-jwks\n' > "$shared_stop_dir/sharedstop.env"
+printf '# Managed by SupaCloud Management API.\njwt-secret = "owner-jwks"\n' > "$shared_stop_dir/sharedstop.conf"
+printf 'owner123\n' > "$shared_stop_dir/sharedstop_gotrue.shared"
+(
+    export TENANT_CONFIG_DIR="$shared_stop_dir"
+    systemctl() { printf 'systemctl %s\n' "$*" >> "$shared_stop_log"; }
+    userdel() { printf 'userdel %s\n' "$*" >> "$shared_stop_log"; }
+    stop_runtime sharedstop >/dev/null
+)
+grep -Fq 'owner-jwks' "$shared_stop_dir/sharedstop.conf"
+[[ -f "$shared_stop_dir/sharedstop_gotrue.shared" ]]
+if grep -Fq 'userdel ' "$shared_stop_log"; then
+    echo "shared runtime stop deleted the runtime user" >&2
+    exit 1
+fi
+
+# Legacy-owned config is still removed when the Management API is known inactive.
+legacy_stop_dir="$tmp_dir/legacy-stop"
+legacy_stop_log="$tmp_dir/legacy-stop.log"
+mkdir -p "$legacy_stop_dir/legacystop_gotrue.d"
+printf 'LEGACY=true\n' > "$legacy_stop_dir/legacystop.env"
+printf 'legacy=true\n' > "$legacy_stop_dir/legacystop.conf"
+printf 'LEGACY=true\n' > "$legacy_stop_dir/legacystop_gotrue.env"
+printf 'LEGACY=true\n' > "$legacy_stop_dir/legacystop_gotrue.d/runtime.env"
+(
+    export TENANT_CONFIG_DIR="$legacy_stop_dir"
+    systemctl() {
+        if [ "$1" = is-active ] && [ "$2" = supacloud.service ]; then return 3; fi
+        printf 'systemctl %s\n' "$*" >> "$legacy_stop_log"
+    }
+    userdel() { printf 'userdel %s\n' "$*" >> "$legacy_stop_log"; }
+    stop_runtime legacystop >/dev/null
+)
+[[ ! -e "$legacy_stop_dir/legacystop.env" ]]
+[[ ! -e "$legacy_stop_dir/legacystop.conf" ]]
+[[ ! -e "$legacy_stop_dir/legacystop_gotrue.env" ]]
+[[ ! -e "$legacy_stop_dir/legacystop_gotrue.d" ]]
+grep -Fq 'userdel supacloud-legacystop' "$legacy_stop_log"
 
 echo "tenant runtime security checks passed"
