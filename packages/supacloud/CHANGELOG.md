@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/zuohuadong/supacloud/compare/supacloud-v0.6.0...supacloud-v0.6.1) (2026-07-18)
+
+
+### Miscellaneous Chores
+
+* **packages:** sync supacloud lockfile ([#482](https://github.com/zuohuadong/supacloud/issues/482)) ([7553428](https://github.com/zuohuadong/supacloud/commit/7553428301f2502dcc0c317fa5578b6eea1291d5))
+
 ## [0.6.0](https://github.com/zuohuadong/supacloud/compare/supacloud-v0.5.4...supacloud-v0.6.0) (2026-07-18)
 
 
