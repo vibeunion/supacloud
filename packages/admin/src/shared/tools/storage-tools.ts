@@ -1,7 +1,8 @@
 /**
  * Storage — Compound tool (5→1)
  */
-import { z } from "zod";
+import { Type } from "@sinclair/typebox";
+import { optional, stringEnum, withDescription } from "../schema";
 import type { HttpTransport } from "../transports/http";
 
 export function registerStorageTools(server: { tool: (...args: any[]) => void }, http: HttpTransport): void {
@@ -10,12 +11,12 @@ export function registerStorageTools(server: { tool: (...args: any[]) => void },
         `S3/MinIO storage management.
 Actions: status, list_buckets, list_files, upload_base64, delete_file`,
         {
-            action: z.enum(["status", "list_buckets", "list_files", "upload_base64", "delete_file"]).describe("Action"),
-            ref: z.string().optional().describe("Project ref (required except for 'status')"),
-            bucket: z.string().optional().describe("[list_files/upload/delete] Bucket name"),
-            filename: z.string().optional().describe("[upload/delete] File name/path"),
-            base64_content: z.string().optional().describe("[upload_base64] Base64 encoded content"),
-            mime_type: z.string().optional().describe("[upload_base64] MIME type (default: application/octet-stream)"),
+            action: withDescription(stringEnum(["status", "list_buckets", "list_files", "upload_base64", "delete_file"]), "Action"),
+            ref: optional(Type.String(), "Project ref (required except for 'status')"),
+            bucket: optional(Type.String(), "[list_files/upload/delete] Bucket name"),
+            filename: optional(Type.String(), "[upload/delete] File name/path"),
+            base64_content: optional(Type.String(), "[upload_base64] Base64 encoded content"),
+            mime_type: optional(Type.String(), "[upload_base64] MIME type (default: application/octet-stream)"),
         },
         async (args: any) => {
             const { action, ref, bucket, filename, base64_content, mime_type } = args;

@@ -17,7 +17,6 @@ describe("resolveSupaCloudContext", () => {
         const context = resolveSupaCloudContext({
             SUPABASE_URL: "https://abc123.api.example.com/",
             SUPABASE_SERVICE_ROLE_KEY: "service-role",
-            SUPACLOUD_PROJECT_REF: "abc123",
         }, "/tmp/no-such-supacloud-context");
 
         expect(context.apiUrl).toBe("https://studio-abc123.example.com");
@@ -33,6 +32,17 @@ describe("resolveSupaCloudContext", () => {
 
         expect(context.apiUrl).toBe("https://management.example.com");
         expect(context.apiToken).toBe("token");
+    });
+
+    test("explicit project ref wins over managed hostname inference", () => {
+        const context = resolveSupaCloudContext({
+            SUPABASE_URL: "https://inferred.api.example.com",
+            SUPABASE_SERVICE_ROLE_KEY: "service-role",
+            SUPACLOUD_PROJECT_REF: "explicit-ref",
+        }, "/tmp/no-such-supacloud-context");
+
+        expect(context.projectRef).toBe("explicit-ref");
+        expect(context.apiUrl).toBe("https://studio-inferred.example.com");
     });
 
     test("invalid placeholder Supabase URL does not throw", () => {

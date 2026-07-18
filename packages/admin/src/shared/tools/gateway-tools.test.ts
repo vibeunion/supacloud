@@ -1,15 +1,16 @@
 import { describe, expect, test } from "bun:test";
-import { z } from "zod";
 import { registerGatewayTools } from "./gateway-tools";
+import { parseToolArguments } from "../schema";
+import type { ToolSchema } from "../schema";
 
 type Callback = (args: Record<string, unknown>) => Promise<{ content: Array<{ text: string }> }>;
 
 function captureGatewayTool(http: Record<string, (...args: any[]) => Promise<any>>) {
-    let schema: Record<string, unknown> | undefined;
+    let schema: ToolSchema | undefined;
     let callback: Callback | undefined;
     registerGatewayTools(
         {
-            tool(name: string, _description: string, toolSchema: Record<string, unknown>, toolCallback: Callback) {
+            tool(name: string, _description: string, toolSchema: ToolSchema, toolCallback: Callback) {
                 if (name !== "gateway") return;
                 schema = toolSchema;
                 callback = toolCallback;
@@ -104,7 +105,7 @@ describe("admin gateway CLI tool", () => {
 
     test("schema coercion handles comma-separated hosts/paths", () => {
         const { schema } = captureGatewayTool({});
-        const parsed = z.object(schema as any).parse({
+        const parsed = parseToolArguments(schema, {
             action: "upsert_route",
             ref: "tenant-a",
             route_id: "webhook",

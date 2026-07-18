@@ -11,45 +11,53 @@
  *
  * 注意：相关端点均要求 admin 权限，需使用管理员 API Token。
  */
-import { z } from "zod";
+import { Type } from "@sinclair/typebox";
+import { decodedSchema, optional, stringEnum, withDescription } from "../schema";
+import type { ToolSchema } from "../schema";
 import type { HttpTransport } from "../transports/http";
 
 type ToolServer = {
     tool: (
         name: string,
         description: string,
-        schema: Record<string, z.ZodTypeAny>,
+        schema: ToolSchema,
         callback: (args: any) => Promise<any>,
     ) => void;
 };
 
-// 逗号分隔或 JSON 数组 → string[]，便于命令行传参
-const stringArray = z.preprocess((value) => {
-    if (value === undefined || value === null) return undefined;
+type CliScalar = string | number | boolean;
+
+function parseCliStringArray(value: CliScalar | string[]): unknown {
     if (Array.isArray(value)) return value;
     const text = String(value).trim();
     if (!text) return [];
     if (text.startsWith("[")) {
         try {
             return JSON.parse(text);
-        } catch {
+        } catch (error) {
+            if (!(error instanceof SyntaxError)) throw error;
             return [text];
         }
     }
     return text.split(",").map((item) => item.trim()).filter(Boolean);
-}, z.array(z.string()).optional());
+}
 
-// JSON 对象或 KEY:VALUE,KEY2:VALUE2 → Record<string,string>
-const headersRecord = z.preprocess((value) => {
-    if (value === undefined || value === null) return undefined;
+const cliScalar = Type.Union([Type.String(), Type.Number(), Type.Boolean()]);
+const stringArray = Type.Optional(decodedSchema(
+    Type.Union([cliScalar, Type.Array(Type.String())]),
+    Type.Array(Type.String()),
+    parseCliStringArray,
+));
+
+function parseCliHeaders(value: CliScalar | Record<string, unknown>): unknown {
     if (typeof value === "object" && !Array.isArray(value)) return value;
     const text = String(value).trim();
     if (!text) return undefined;
     try {
         const parsed = JSON.parse(text);
         if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
-    } catch {
-        // fall through to KEY:VALUE 解析
+    } catch (error) {
+        if (!(error instanceof SyntaxError)) throw error;
     }
     const out: Record<string, string> = {};
     for (const part of text.split(",")) {
@@ -57,11 +65,18 @@ const headersRecord = z.preprocess((value) => {
         if (idx > 0) out[part.slice(0, idx).trim()] = part.slice(idx + 1).trim();
     }
     return Object.keys(out).length > 0 ? out : undefined;
-}, z.record(z.string(), z.string()).optional());
+}
 
-const redirectStatus = z.union([
-    z.literal(301), z.literal(302), z.literal(307), z.literal(308),
-]).optional();
+const stringRecord = Type.Record(Type.String(), Type.String());
+const headersRecord = Type.Optional(decodedSchema(
+    Type.Union([cliScalar, Type.Record(Type.String(), Type.Unknown())]),
+    Type.Union([stringRecord, Type.Undefined()]),
+    parseCliHeaders,
+));
+
+const redirectStatus = Type.Optional(Type.Union([
+    Type.Literal(301), Type.Literal(302), Type.Literal(307), Type.Literal(308),
+]));
 
 const ok = (res: any) => (res.ok ? JSON.stringify(res.data, null, 2) : `❌ Failed (${res.status}): ${JSON.stringify(res.data)}`);
 const simple = (res: any, msg: string) => (res.ok ? `✅ ${msg}` : `❌ Failed (${res.status}): ${JSON.stringify(res.data)}`);
@@ -74,50 +89,50 @@ export function registerGatewayTools(server: ToolServer, http: HttpTransport, op
         `Gateway / Caddy 配置（通过 JSON Admin API 注入）。要求 admin 权限。
 Actions: routes, upsert_route, update_route, delete_route, config, get_certificate, update_certificate, issue_certificate, deploy_certificate, rebuild, custom_hostname, set_custom_hostname, delete_custom_hostname, verify_custom_hostname`,
         {
-            action: z.enum([
+            action: withDescription(stringEnum([
                 "routes", "upsert_route", "update_route", "delete_route",
                 "config", "get_certificate", "update_certificate",
                 "issue_certificate", "deploy_certificate", "rebuild",
                 "custom_hostname", "set_custom_hostname",
                 "delete_custom_hostname", "verify_custom_hostname",
-            ]).describe("Action"),
-            ref: z.string().optional().describe(projectRef ? "可选：覆盖自动关联的项目 ref" : "项目 ref"),
+            ]), "Action"),
+            ref: optional(Type.String(), projectRef ? "可选：覆盖自动关联的项目 ref" : "项目 ref"),
             // 路由参数
-            route_id: z.string().optional().describe("[upsert_route/update_route/delete_route] 路由 ID（字母/数字/_/-，1-64）"),
-            hosts: stringArray.describe("[upsert_route/update_route] 主机名列表，逗号分隔或 JSON 数组（1-20）"),
-            paths: stringArray.describe("[upsert_route/update_route] 路径列表，逗号分隔或 JSON 数组（1-20）"),
-            upstream: z.string().optional().describe("[upsert_route/update_route] 反代上游 host:port 或 http(s)://host[:port]"),
-            upstream_tls_insecure_skip_verify: z.boolean().optional().describe("[upsert_route/update_route] 上游 TLS 跳过校验"),
-            static_root: z.string().optional().describe("[upsert_route/update_route] 静态站点根目录"),
-            protocol: z.enum(["http", "https"]).optional().describe("[upsert_route/update_route] 可选请求协议匹配"),
-            redirect_to: z.string().optional().describe("[upsert_route/update_route] 带固定 host 的绝对 http(s) 目标，可在末尾使用 {http.request.uri}"),
-            redirect_status: redirectStatus.describe("[upsert_route/update_route] 重定向状态码，默认 308"),
-            rewrite_uri: z.string().optional().describe("[upsert_route/update_route] 重写 URI（以 / 开头）"),
-            strip_prefix: z.string().optional().describe("[upsert_route/update_route] 去除前缀"),
-            headers: headersRecord.describe("[upsert_route/update_route] 自定义请求头，JSON 或 K:V,K2:V2"),
-            cors: stringArray.describe("[upsert_route/update_route] 额外 CORS 源，逗号分隔"),
-            priority: z.number().optional().describe("[upsert_route/update_route] 路由优先级"),
-            enabled: z.boolean().optional().describe("[upsert_route/update_route] 是否启用"),
+            route_id: optional(Type.String(), "[upsert_route/update_route/delete_route] 路由 ID（字母/数字/_/-，1-64）"),
+            hosts: withDescription(stringArray, "[upsert_route/update_route] 主机名列表，逗号分隔或 JSON 数组（1-20）"),
+            paths: withDescription(stringArray, "[upsert_route/update_route] 路径列表，逗号分隔或 JSON 数组（1-20）"),
+            upstream: optional(Type.String(), "[upsert_route/update_route] 反代上游 host:port 或 http(s)://host[:port]"),
+            upstream_tls_insecure_skip_verify: optional(Type.Boolean(), "[upsert_route/update_route] 上游 TLS 跳过校验"),
+            static_root: optional(Type.String(), "[upsert_route/update_route] 静态站点根目录"),
+            protocol: optional(stringEnum(["http", "https"]), "[upsert_route/update_route] 可选请求协议匹配"),
+            redirect_to: optional(Type.String(), "[upsert_route/update_route] 带固定 host 的绝对 http(s) 目标，可在末尾使用 {http.request.uri}"),
+            redirect_status: withDescription(redirectStatus, "[upsert_route/update_route] 重定向状态码，默认 308"),
+            rewrite_uri: optional(Type.String(), "[upsert_route/update_route] 重写 URI（以 / 开头）"),
+            strip_prefix: optional(Type.String(), "[upsert_route/update_route] 去除前缀"),
+            headers: withDescription(headersRecord, "[upsert_route/update_route] 自定义请求头，JSON 或 K:V,K2:V2"),
+            cors: withDescription(stringArray, "[upsert_route/update_route] 额外 CORS 源，逗号分隔"),
+            priority: optional(Type.Number(), "[upsert_route/update_route] 路由优先级"),
+            enabled: optional(Type.Boolean(), "[upsert_route/update_route] 是否启用"),
             // 网关配置
-            rate_limit_tier: z.enum(["free", "pro", "enterprise"]).optional().describe("[config] 限流档位"),
-            cors_origins: z.string().optional().describe("[config] CORS 源（逗号分隔）"),
-            jwt_enabled: z.boolean().optional().describe("[config] 是否启用 JWT"),
-            jwt_secret: z.string().optional().describe("[config] JWT 密钥"),
+            rate_limit_tier: optional(stringEnum(["free", "pro", "enterprise"]), "[config] 限流档位"),
+            cors_origins: optional(Type.String(), "[config] CORS 源（逗号分隔）"),
+            jwt_enabled: optional(Type.Boolean(), "[config] 是否启用 JWT"),
+            jwt_secret: optional(Type.String(), "[config] JWT 密钥"),
             // 证书
-            cert_mode: z.enum(["lego", "manual"]).optional().describe("[update_certificate] 证书模式"),
-            challenge: z.enum(["dns-01", "http-01"]).optional().describe("[update_certificate/issue_certificate] ACME challenge"),
-            email: z.string().optional().describe("[update_certificate/issue_certificate] ACME 邮箱"),
-            dns_provider: z.string().optional().describe("[update_certificate/issue_certificate] DNS 提供商"),
-            dns_env: stringArray.describe("[update_certificate/issue_certificate] DNS 环境变量 KEY=VALUE 列表"),
-            domains: stringArray.describe("[update_certificate/issue_certificate/deploy_certificate] 域名列表"),
-            auto_renew: z.boolean().optional().describe("[update_certificate/issue_certificate] 自动续期"),
-            renew: z.boolean().optional().describe("[issue_certificate] 仅续期已有证书"),
-            cert: z.string().optional().describe("[deploy_certificate] PEM 证书内容"),
-            key: z.string().optional().describe("[deploy_certificate] PEM 私钥内容"),
+            cert_mode: optional(stringEnum(["lego", "manual"]), "[update_certificate] 证书模式"),
+            challenge: optional(stringEnum(["dns-01", "http-01"]), "[update_certificate/issue_certificate] ACME challenge"),
+            email: optional(Type.String(), "[update_certificate/issue_certificate] ACME 邮箱"),
+            dns_provider: optional(Type.String(), "[update_certificate/issue_certificate] DNS 提供商"),
+            dns_env: withDescription(stringArray, "[update_certificate/issue_certificate] DNS 环境变量 KEY=VALUE 列表"),
+            domains: withDescription(stringArray, "[update_certificate/issue_certificate/deploy_certificate] 域名列表"),
+            auto_renew: optional(Type.Boolean(), "[update_certificate/issue_certificate] 自动续期"),
+            renew: optional(Type.Boolean(), "[issue_certificate] 仅续期已有证书"),
+            cert: optional(Type.String(), "[deploy_certificate] PEM 证书内容"),
+            key: optional(Type.String(), "[deploy_certificate] PEM 私钥内容"),
             // 重建
-            clean: z.boolean().optional().describe("[rebuild] 清理后全量重建"),
+            clean: optional(Type.Boolean(), "[rebuild] 清理后全量重建"),
             // 自定义域名
-            custom_hostname: z.string().optional().describe("[set_custom_hostname] 自定义域名"),
+            custom_hostname: optional(Type.String(), "[set_custom_hostname] 自定义域名"),
         },
         async (args: any) => {
             const resolveRef = (override?: string) => {

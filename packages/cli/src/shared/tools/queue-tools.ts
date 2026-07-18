@@ -1,7 +1,8 @@
 /**
  * Queue — Compound tool for message queue operations
  */
-import { z } from "zod";
+import { Type } from "@sinclair/typebox";
+import { optional, stringEnum, withDescription } from "../schema";
 import type { HttpTransport } from "../transports/http";
 
 export interface QueueToolsConfig {
@@ -74,36 +75,36 @@ export function registerQueueTools(
         `Message queue operations for task-based messaging.
 Actions: list, stats, list_messages, dlq, get_message, send, receive, ack, release, fail, retry, delete_message, get_settings, update_settings`,
         {
-            action: z.enum([
+            action: withDescription(stringEnum([
                 "list", "stats", "list_messages", "dlq", "get_message",
                 "send", "receive", "ack", "release", "fail", "retry", "delete_message",
                 "get_settings", "update_settings",
-            ]).describe("Action"),
-            ref: z.string().optional().describe("Project ref"),
-            queue: z.string().optional().describe("[list/stats/list_messages/dlq/get_message/send/receive/ack/release/fail/retry/delete_message/get_settings/update_settings] Queue name"),
-            message_id: z.string().optional().describe("[get_message/ack/release/fail/retry/delete_message] Message ID"),
+            ]), "Action"),
+            ref: optional(Type.String(), "Project ref"),
+            queue: optional(Type.String(), "[list/stats/list_messages/dlq/get_message/send/receive/ack/release/fail/retry/delete_message/get_settings/update_settings] Queue name"),
+            message_id: optional(Type.String(), "[get_message/ack/release/fail/retry/delete_message] Message ID"),
             // send
-            payload: z.record(z.string(), z.unknown()).optional().describe("[send] Message payload"),
-            delay_ms: z.number().optional().describe("[send] Delay in ms before message becomes visible"),
-            max_attempts: z.number().optional().describe("[send] Max delivery attempts"),
-            idempotency_key: z.string().optional().describe("[send] Idempotency key for dedup"),
-            correlation_id: z.string().optional().describe("[send] Correlation ID for tracing"),
-            business_task_id: z.string().optional().describe("[send] Business task ID for cross-system mapping"),
-            metadata: z.record(z.string(), z.unknown()).optional().describe("[send] Arbitrary metadata attached to the message"),
+            payload: optional(Type.Record(Type.String(), Type.Unknown()), "[send] Message payload"),
+            delay_ms: optional(Type.Number(), "[send] Delay in ms before message becomes visible"),
+            max_attempts: optional(Type.Number(), "[send] Max delivery attempts"),
+            idempotency_key: optional(Type.String(), "[send] Idempotency key for dedup"),
+            correlation_id: optional(Type.String(), "[send] Correlation ID for tracing"),
+            business_task_id: optional(Type.String(), "[send] Business task ID for cross-system mapping"),
+            metadata: optional(Type.Record(Type.String(), Type.Unknown()), "[send] Arbitrary metadata attached to the message"),
             // receive
-            visibility_timeout_sec: z.number().optional().describe("[receive] Visibility timeout in seconds"),
+            visibility_timeout_sec: optional(Type.Number(), "[receive] Visibility timeout in seconds"),
             // list_messages / dlq
-            status: z.string().optional().describe("[list_messages] Filter by status (comma-separated)"),
-            limit: z.number().optional().describe("[list_messages/dlq] Max messages to return"),
+            status: optional(Type.String(), "[list_messages] Filter by status (comma-separated)"),
+            limit: optional(Type.Number(), "[list_messages/dlq] Max messages to return"),
             // ack / release / fail
-            result: z.record(z.string(), z.unknown()).optional().describe("[ack] Ack result payload"),
-            error: z.string().optional().describe("[release/fail] Error description"),
-            delay_ms_release: z.number().optional().describe("[release] Delay before message becomes visible again"),
+            result: optional(Type.Record(Type.String(), Type.Unknown()), "[ack] Ack result payload"),
+            error: optional(Type.String(), "[release/fail] Error description"),
+            delay_ms_release: optional(Type.Number(), "[release] Delay before message becomes visible again"),
             // update_settings
-            max_in_flight: z.number().optional().describe("[update_settings] Max concurrent in-flight messages"),
-            default_visibility_timeout: z.number().optional().describe("[update_settings] Default visibility timeout (sec)"),
-            max_attempts_setting: z.number().optional().describe("[update_settings] Max delivery attempts"),
-            rate_limit: z.number().optional().describe("[update_settings] Rate limit per minute"),
+            max_in_flight: optional(Type.Number(), "[update_settings] Max concurrent in-flight messages"),
+            default_visibility_timeout: optional(Type.Number(), "[update_settings] Default visibility timeout (sec)"),
+            max_attempts_setting: optional(Type.Number(), "[update_settings] Max delivery attempts"),
+            rate_limit: optional(Type.Number(), "[update_settings] Rate limit per minute"),
         },
         async (args: any) => {
             const resolvedRef = resolveRef(args.ref, projectRef);

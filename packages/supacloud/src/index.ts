@@ -6,7 +6,7 @@
  *   supacloudctl cli   <args...>   → @supacloud/cli   （项目级开发工具）
  *   supacloudctl admin <args...>   → @supacloud/admin （平台运维工具）
  *
- * 默认只检查 npm latest dist-tag 并提示更新；始终执行随包安装的固定版本。
+ * 普通分发默认完全离线；仅在显式请求时检查 npm latest dist-tag。
  */
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
@@ -45,6 +45,13 @@ interface LaunchPlanOptions {
     fetchLatest?: (pkgName: string, env?: Record<string, string | undefined>) => Promise<string | null>;
     resolveInstalled?: (pkgName: string) => InstalledPackage | null;
     nodePath?: string;
+}
+
+export interface UpdateCheckResult {
+    packageName: string;
+    currentVersion: string | null;
+    latestVersion: string | null;
+    status: "update_available" | "up_to_date" | "registry_unavailable" | "not_installed";
 }
 
 type FetchLike = (input: string, init?: RequestInit) => Promise<Pick<Response, "ok" | "status" | "json">>;
@@ -127,6 +134,11 @@ export function isAutoUpdateDisabled(env: Record<string, string | undefined> = p
     return Boolean(autoUpdate && ["0", "false", "no", "off"].includes(autoUpdate.toLowerCase()));
 }
 
+export function isAutoUpdateEnabled(env: Record<string, string | undefined> = process.env): boolean {
+    if (isAutoUpdateDisabled(env)) return false;
+    return Boolean(env.SUPACLOUD_AUTO_UPDATE);
+}
+
 export function getNpmRegistry(env: Record<string, string | undefined> = process.env): string {
     const registry =
         env.SUPACLOUD_NPM_REGISTRY ||
@@ -202,6 +214,20 @@ export function isNewerVersion(latestVersion: string, currentVersion: string | n
     return compareSemver(latestVersion, currentVersion) > 0;
 }
 
+async function updateNoticeForLaunch(
+    target: Subcommand,
+    installed: InstalledPackage,
+    env: Record<string, string | undefined>,
+    fetchLatest: NonNullable<LaunchPlanOptions["fetchLatest"]>,
+): Promise<string | undefined> {
+    if (!isAutoUpdateEnabled(env)) return undefined;
+    const latestVersion = await fetchLatest(target.pkg, env);
+    if (!latestVersion || !isNewerVersion(latestVersion, installed.version)) return undefined;
+    return installed.version
+        ? `${target.pkg} ${latestVersion} 可用；当前固定使用已安装版本 ${installed.version}。请显式运行包管理器更新。`
+        : `${target.pkg} ${latestVersion} 可用；已安装版本无法识别，请通过包管理器检查锁定版本。`;
+}
+
 export async function createLaunchPlan(
     target: Subcommand,
     forwardedArgs: string[],
@@ -211,20 +237,12 @@ export async function createLaunchPlan(
     const resolveInstalled = options.resolveInstalled ?? resolveInstalledPackage;
     const fetchLatest = options.fetchLatest ?? fetchLatestVersion;
     const installed = resolveInstalled(target.pkg);
-    let updateNotice: string | undefined;
-
-    if (!isAutoUpdateDisabled(env)) {
-        const latestVersion = await fetchLatest(target.pkg, env);
-        if (latestVersion && isNewerVersion(latestVersion, installed?.version ?? null)) {
-            updateNotice = installed?.version
-                ? `${target.pkg} ${latestVersion} 可用；当前固定使用已安装版本 ${installed.version}。请显式运行包管理器更新。`
-                : `${target.pkg} ${latestVersion} 可用；请先通过包管理器显式安装。`;
-        }
-    }
 
     if (!installed) {
         throw new Error(`${target.pkg} 未安装。请先通过包管理器显式安装固定版本。`);
     }
+
+    const updateNotice = await updateNoticeForLaunch(target, installed, env, fetchLatest);
 
     return {
         mode: "local",
@@ -235,8 +253,49 @@ export async function createLaunchPlan(
     };
 }
 
+export async function checkUpdate(
+    target: Subcommand,
+    options: LaunchPlanOptions = {},
+): Promise<UpdateCheckResult> {
+    const env = options.env ?? process.env;
+    const resolveInstalled = options.resolveInstalled ?? resolveInstalledPackage;
+    const fetchLatest = options.fetchLatest ?? fetchLatestVersion;
+    const installed = resolveInstalled(target.pkg);
+    if (!installed) return missingPackageCheck(target.pkg);
+
+    const latestVersion = await fetchLatest(target.pkg, env);
+    if (!latestVersion) return unavailableRegistryCheck(target.pkg, installed.version);
+    return completedUpdateCheck(target.pkg, installed.version, latestVersion);
+}
+
+function missingPackageCheck(packageName: string): UpdateCheckResult {
+    return { packageName, currentVersion: null, latestVersion: null, status: "not_installed" };
+}
+
+function unavailableRegistryCheck(packageName: string, currentVersion: string | null): UpdateCheckResult {
+    return { packageName, currentVersion, latestVersion: null, status: "registry_unavailable" };
+}
+
+function completedUpdateCheck(packageName: string, currentVersion: string | null, latestVersion: string): UpdateCheckResult {
+    const status = isNewerVersion(latestVersion, currentVersion) ? "update_available" : "up_to_date";
+    return { packageName, currentVersion, latestVersion, status };
+}
+
+function formatUpdateCheck(check: UpdateCheckResult): string {
+    switch (check.status) {
+        case "update_available":
+            return `${check.packageName}: ${check.latestVersion} 可用（当前 ${check.currentVersion ?? "未知"}）`;
+        case "up_to_date":
+            return `${check.packageName}: 已是最新版本 ${check.currentVersion ?? check.latestVersion ?? "未知"}`;
+        case "not_installed":
+            return `${check.packageName}: 未安装`;
+        case "registry_unavailable":
+            return `${check.packageName}: 无法从 npm registry 获取版本信息`;
+    }
+}
+
 export function buildHelp(): string {
-    const subs = Object.entries(SUBCOMMANDS)
+    const subcommandHelp = Object.entries(SUBCOMMANDS)
         .map(([name, sub]) => `  ${name.padEnd(6)} ${sub.desc}`)
         .join("\n");
     return `
@@ -248,11 +307,12 @@ export function buildHelp(): string {
 用法
 
   ${COMMAND} <子命令> [args...]
+  ${COMMAND} check-update [cli|admin]
   ${COMMAND} --help
 
 子命令
 
-${subs}
+${subcommandHelp}
 
 示例
 
@@ -262,43 +322,58 @@ ${subs}
   ${COMMAND} admin status
   ${COMMAND} admin project list
   ${COMMAND} admin ssh ping
+  ${COMMAND} check-update
+  ${COMMAND} check-update cli
 
-每次执行子命令时默认检查 npm latest；发现新版本时只输出更新提示，
-始终运行已安装的固定版本。设置 SUPACLOUD_NO_AUTO_UPDATE=1 可禁用检查。
+普通分发默认不访问 npm，始终运行已安装的固定版本。
+使用 check-update 显式查询更新；SUPACLOUD_AUTO_UPDATE=1 可选择恢复分发前提示。
 `;
 }
 
-async function run(args: string[]): Promise<void> {
-    const sub = args[0];
+async function runUpdateCheckCommand(args: string[]): Promise<never> {
+    const targetName = args[1];
+    if (args.length > 2 || (targetName && !SUBCOMMANDS[targetName])) {
+        console.error(`❌ 未知更新检查目标: ${targetName ?? ""}`);
+        process.exit(1);
+    }
+    const targets = targetName ? [SUBCOMMANDS[targetName]] : Object.values(SUBCOMMANDS);
+    const checks = await Promise.all(targets.map((target) => checkUpdate(target)));
+    for (const check of checks) console.log(formatUpdateCheck(check));
+    const failed = checks.some((check) => ["registry_unavailable", "not_installed"].includes(check.status));
+    process.exit(failed ? 1 : 0);
+}
 
-    if (!sub || sub === "--help" || sub === "-h" || sub === "help") {
+async function dispatchSubcommand(target: Subcommand, forwardedArgs: string[]): Promise<void> {
+    const launchPlan = await createLaunchPlan(target, forwardedArgs);
+    if (launchPlan.updateNotice) console.error(`ℹ️ ${launchPlan.updateNotice}`);
+    const childProcess = spawn(launchPlan.command, launchPlan.args, {
+        stdio: "inherit",
+        shell: launchPlan.shell,
+    });
+    childProcess.on("close", (code) => process.exit(code ?? 1));
+    childProcess.on("error", (error) => {
+        console.error(`❌ 启动 ${target.pkg} 失败: ${error.message}`);
+        process.exit(1);
+    });
+}
+
+async function run(args: string[]): Promise<void> {
+    const subcommandName = args[0];
+
+    if (!subcommandName || subcommandName === "--help" || subcommandName === "-h" || subcommandName === "help") {
         console.error(buildHelp());
         process.exit(0);
     }
 
-    const target = SUBCOMMANDS[sub];
+    if (subcommandName === "check-update") await runUpdateCheckCommand(args);
+
+    const target = SUBCOMMANDS[subcommandName];
     if (!target) {
-        console.error(`❌ 未知子命令: ${sub}\n`);
+        console.error(`❌ 未知子命令: ${subcommandName}\n`);
         console.error(buildHelp());
         process.exit(1);
     }
-
-    const plan = await createLaunchPlan(target, args.slice(1));
-    if (plan.updateNotice) {
-        console.error(`ℹ️ ${plan.updateNotice}`);
-    }
-
-    // 把子命令之后的参数原样透传给子包入口
-    const child = spawn(plan.command, plan.args, {
-        stdio: "inherit",
-        shell: plan.shell,
-    });
-
-    child.on("close", (code) => process.exit(code ?? 1));
-    child.on("error", (err) => {
-        console.error(`❌ 启动 ${target.pkg} 失败: ${err.message}`);
-        process.exit(1);
-    });
+    await dispatchSubcommand(target, args.slice(1));
 }
 
 export function isMainModule(moduleUrl: string, argvEntry = process.argv[1]): boolean {

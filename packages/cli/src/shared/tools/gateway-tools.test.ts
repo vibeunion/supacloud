@@ -1,15 +1,16 @@
 import { describe, expect, test } from "bun:test";
-import { z } from "zod";
 import { registerGatewayTools } from "./gateway-tools";
+import { parseToolArguments } from "../schema";
+import type { ToolSchema } from "../schema";
 
 type Callback = (args: Record<string, unknown>) => Promise<{ content: Array<{ text: string }> }>;
 
 function captureGatewayTool(http: Record<string, (...args: any[]) => Promise<any>>, projectRef = "proj") {
-    let schema: Record<string, unknown> | undefined;
+    let schema: ToolSchema | undefined;
     let callback: Callback | undefined;
     registerGatewayTools(
         {
-            tool(name: string, _description: string, toolSchema: Record<string, unknown>, toolCallback: Callback) {
+            tool(name: string, _description: string, toolSchema: ToolSchema, toolCallback: Callback) {
                 if (name !== "gateway") return;
                 schema = toolSchema;
                 callback = toolCallback;
@@ -25,7 +26,7 @@ function captureGatewayTool(http: Record<string, (...args: any[]) => Promise<any
 describe("gateway CLI tool — schema coercion", () => {
     test("parses comma-separated hosts/paths and KEY:VALUE headers from CLI input", () => {
         const { schema } = captureGatewayTool({});
-        const parsed = z.object(schema as any).parse({
+        const parsed = parseToolArguments(schema, {
             action: "upsert_route",
             route_id: "webhook",
             hosts: "api.example.com,api.example.cn",
@@ -40,7 +41,7 @@ describe("gateway CLI tool — schema coercion", () => {
 
     test("accepts JSON-array and JSON-object inputs", () => {
         const { schema } = captureGatewayTool({});
-        const parsed = z.object(schema as any).parse({
+        const parsed = parseToolArguments(schema, {
             action: "upsert_route",
             route_id: "webhook",
             hosts: '["api.example.com"]',

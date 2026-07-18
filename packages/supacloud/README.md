@@ -25,19 +25,22 @@ npx --package supacloud supacloudctl admin status
 it gives you the full toolset. You can still install either CLI on its own
 (`@supacloud/cli` exposes `supacloud-cli`, `@supacloud/admin` exposes `supacloud-admin`).
 
-## 更新提示
+## 更新检查
 
-`supacloudctl cli ...` and `supacloudctl admin ...` check the npm `latest` dist-tag before dispatch.
-When a newer package exists, the dispatcher prints an update notice but still runs the dependency
-version bundled with the installed `supacloud` package. It never downloads or executes a newer
-operator CLI implicitly.
-
-Disable the latest check when you need a pinned local version:
+Normal `supacloudctl cli ...` and `supacloudctl admin ...` dispatch is local-only and does not
+contact npm. Run an explicit check when needed:
 
 ```bash
-SUPACLOUD_NO_AUTO_UPDATE=1 supacloudctl cli status
-# or
-SUPACLOUD_AUTO_UPDATE=0 supacloudctl admin status
+supacloudctl check-update
+supacloudctl check-update cli
+supacloudctl check-update admin
+```
+
+The dispatcher never downloads or executes a newer operator CLI implicitly. To opt into the old
+notify-before-dispatch behavior, set:
+
+```bash
+SUPACLOUD_AUTO_UPDATE=1 supacloudctl cli status
 ```
 
 Use `SUPACLOUD_NPM_REGISTRY` or `npm_config_registry` to point the check at a registry mirror.
@@ -67,10 +70,11 @@ supacloudctl admin --help
 
 - `SUPABASE_URL` / `SUPACLOUD_API_URL`
 - `SUPABASE_SERVICE_ROLE_KEY` / `SUPACLOUD_API_TOKEN`
+- `SUPACLOUD_PROJECT_REF` when it cannot be inferred from a managed `<ref>.api.*` hostname
 
 `supacloudctl admin` expects platform context:
 
-- `SUPACLOUD_HOST` + `SUPACLOUD_SSH_KEY` / `SUPACLOUD_SSH_PASS`
+- `SUPACLOUD_HOST` + `SUPACLOUD_SSH_KEY` / `SUPACLOUD_SSH_PASS` + `SUPACLOUD_SSH_HOST_FINGERPRINT`
 - `SUPACLOUD_API_URL` + `SUPACLOUD_API_TOKEN`
 
 > Note: `/usr/local/bin/supacloud` is the compiled management-api server binary.

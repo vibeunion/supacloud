@@ -7,9 +7,11 @@ import {
     SUBCOMMANDS,
     buildHelp,
     buildLatestMetadataUrl,
+    checkUpdate,
     createLaunchPlan,
     fetchLatestVersion,
     isAutoUpdateDisabled,
+    isAutoUpdateEnabled,
     isMainModule,
     resolveSubpackageEntry,
 } from "./index";
@@ -37,6 +39,8 @@ describe("supacloud dispatcher", () => {
         expect(help).toContain("admin");
         expect(help).toContain("@supacloud/cli");
         expect(help).toContain("@supacloud/admin");
+        expect(help).toContain("check-update");
+        expect(help).toContain("普通分发默认不访问 npm");
     });
 
     test("resolveSubpackageEntry returns a path for an installed package", () => {
@@ -93,9 +97,16 @@ describe("supacloud dispatcher", () => {
         expect(isAutoUpdateDisabled({ SUPACLOUD_AUTO_UPDATE: "0" })).toBe(true);
     });
 
+    test("automatic update checks are opt-in", () => {
+        expect(isAutoUpdateEnabled({})).toBe(false);
+        expect(isAutoUpdateEnabled({ SUPACLOUD_AUTO_UPDATE: "1" })).toBe(true);
+        expect(isAutoUpdateEnabled({ SUPACLOUD_AUTO_UPDATE: "true" })).toBe(true);
+        expect(isAutoUpdateEnabled({ SUPACLOUD_AUTO_UPDATE: "1", SUPACLOUD_NO_AUTO_UPDATE: "1" })).toBe(false);
+    });
+
     test("createLaunchPlan only reports a newer package and still runs the installed version", async () => {
         const plan = await createLaunchPlan(SUBCOMMANDS.cli, ["status"], {
-            env: {},
+            env: { SUPACLOUD_AUTO_UPDATE: "1" },
             fetchLatest: async () => "0.8.0",
             resolveInstalled: () => ({ entry: "/local/cli.js", version: "0.7.0" }),
             nodePath: "/usr/bin/node",
@@ -110,9 +121,20 @@ describe("supacloud dispatcher", () => {
         });
     });
 
+    test("createLaunchPlan does not claim an installed package is missing when its version metadata is unreadable", async () => {
+        const plan = await createLaunchPlan(SUBCOMMANDS.cli, ["status"], {
+            env: { SUPACLOUD_AUTO_UPDATE: "1" },
+            fetchLatest: async () => "0.8.0",
+            resolveInstalled: () => ({ entry: "/local/cli.js", version: null }),
+        });
+
+        expect(plan.updateNotice).toContain("已安装版本无法识别");
+        expect(plan.updateNotice).not.toContain("请先通过包管理器显式安装");
+    });
+
     test("createLaunchPlan uses local package when registry is not newer", async () => {
         const plan = await createLaunchPlan(SUBCOMMANDS.admin, ["status"], {
-            env: {},
+            env: { SUPACLOUD_AUTO_UPDATE: "1" },
             fetchLatest: async () => "0.2.0",
             resolveInstalled: () => ({ entry: "/local/admin.js", version: "0.2.0" }),
             nodePath: "/usr/bin/node",
@@ -128,7 +150,7 @@ describe("supacloud dispatcher", () => {
 
     test("createLaunchPlan falls back to local package when registry is unreachable", async () => {
         const plan = await createLaunchPlan(SUBCOMMANDS.cli, ["project", "get"], {
-            env: {},
+            env: { SUPACLOUD_AUTO_UPDATE: "1" },
             fetchLatest: async () => null,
             resolveInstalled: () => ({ entry: "/local/cli.js", version: "0.7.0" }),
             nodePath: "/usr/bin/node",
@@ -154,12 +176,67 @@ describe("supacloud dispatcher", () => {
         expect(plan.mode).toBe("local");
     });
 
+    test("createLaunchPlan is local-only by default", async () => {
+        let fetchCalls = 0;
+        const plan = await createLaunchPlan(SUBCOMMANDS.cli, ["status"], {
+            env: {},
+            fetchLatest: async () => {
+                fetchCalls += 1;
+                return "9.9.9";
+            },
+            resolveInstalled: () => ({ entry: "/local/cli.js", version: "0.7.0" }),
+            nodePath: "/usr/bin/node",
+        });
+
+        expect(fetchCalls).toBe(0);
+        expect(plan.updateNotice).toBeUndefined();
+        expect(plan.args).toEqual(["/local/cli.js", "status"]);
+    });
+
+    test("checkUpdate explicitly queries the registry", async () => {
+        let fetchCalls = 0;
+        const result = await checkUpdate(SUBCOMMANDS.cli, {
+            env: {},
+            fetchLatest: async () => {
+                fetchCalls += 1;
+                return "0.8.0";
+            },
+            resolveInstalled: () => ({ entry: "/local/cli.js", version: "0.7.0" }),
+        });
+
+        expect(fetchCalls).toBe(1);
+        expect(result).toEqual({
+            packageName: "@supacloud/cli",
+            currentVersion: "0.7.0",
+            latestVersion: "0.8.0",
+            status: "update_available",
+        });
+    });
+
+    test("checkUpdate reports registry and installation failures", async () => {
+        const unavailable = await checkUpdate(SUBCOMMANDS.admin, {
+            fetchLatest: async () => null,
+            resolveInstalled: () => ({ entry: "/local/admin.js", version: "0.4.0" }),
+        });
+        const missing = await checkUpdate(SUBCOMMANDS.cli, {
+            fetchLatest: async () => "9.9.9",
+            resolveInstalled: () => null,
+        });
+
+        expect(unavailable.status).toBe("registry_unavailable");
+        expect(missing.status).toBe("not_installed");
+    });
+
     test("createLaunchPlan reports a clear error when latest and local package are unavailable", async () => {
         let message = "";
+        let fetchCalls = 0;
         try {
             await createLaunchPlan(SUBCOMMANDS.cli, ["status"], {
                 env: {},
-                fetchLatest: async () => null,
+                fetchLatest: async () => {
+                    fetchCalls += 1;
+                    return null;
+                },
                 resolveInstalled: () => null,
             });
         } catch (err) {
@@ -167,5 +244,6 @@ describe("supacloud dispatcher", () => {
         }
 
         expect(message).toContain("@supacloud/cli 未安装");
+        expect(fetchCalls).toBe(0);
     });
 });

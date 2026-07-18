@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
-import { z } from "zod";
+import { Type } from "@sinclair/typebox";
+import { stringEnum } from "./shared/schema";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { runCli } from "./shared/cli";
@@ -15,17 +16,17 @@ import { registerGatewayTools } from "./shared/tools/gateway-tools";
 type ToolEntry = { schema: any; callback: (args: any) => Promise<any> };
 type ToolMap = Record<string, ToolEntry>;
 
-const adminProjectActionSchema = z.enum([
+const adminProjectActionSchema = stringEnum([
     "list", "create", "get", "delete", "pause", "restore",
     "restart", "settings", "update_settings", "api_keys",
     "health", "logs", "tasks",
 ]);
-const platformActionSchema = z.enum([
+const platformActionSchema = stringEnum([
     "metrics", "list_backups", "create_backup",
     "network", "update_network",
     "list_orgs", "get_org",
 ]);
-const sshActionSchema = z.enum([
+const sshActionSchema = stringEnum([
     "ping", "setup", "install", "upgrade", "diagnose", "exec",
     "troubleshoot", "container_logs",
     "tenant_manage", "tenant_list", "tenant_inspect", "tenant_diagnose", "tenant_migrate",
@@ -117,6 +118,7 @@ export function createAdminTools(context: ResolvedContext = resolveSupaCloudCont
         tools.project = {
             schema: { action: adminProjectActionSchema },
             callback: async () => ({
+                isError: true,
                 content: [
                     {
                         type: "text" as const,
@@ -128,6 +130,7 @@ export function createAdminTools(context: ResolvedContext = resolveSupaCloudCont
         tools.platform = {
             schema: { action: platformActionSchema },
             callback: async () => ({
+                isError: true,
                 content: [
                     {
                         type: "text" as const,
@@ -139,6 +142,7 @@ export function createAdminTools(context: ResolvedContext = resolveSupaCloudCont
         tools.ssh = {
             schema: { action: sshActionSchema },
             callback: async () => ({
+                isError: true,
                 content: [
                     {
                         type: "text" as const,
@@ -148,8 +152,9 @@ export function createAdminTools(context: ResolvedContext = resolveSupaCloudCont
             }),
         };
         tools.gateway = {
-            schema: { action: z.string() },
+            schema: { action: Type.String() },
             callback: async () => ({
+                isError: true,
                 content: [
                     {
                         type: "text" as const,
@@ -178,6 +183,7 @@ export function createAdminTools(context: ResolvedContext = resolveSupaCloudCont
             tools.ssh = {
                 schema: { action: sshActionSchema },
                 callback: async () => ({
+                    isError: true,
                     content: [{
                         type: "text" as const,
                         text: `⚠️ SSH host fingerprint is invalid; SSH actions remain disabled. ${message}`,
@@ -189,6 +195,7 @@ export function createAdminTools(context: ResolvedContext = resolveSupaCloudCont
         tools.ssh = {
             schema: { action: sshActionSchema },
             callback: async () => ({
+                isError: true,
                 content: [{
                     type: "text" as const,
                     text: [
@@ -220,6 +227,7 @@ export function createAdminTools(context: ResolvedContext = resolveSupaCloudCont
         tools.setup_help = {
             schema: {},
             callback: async () => ({
+                isError: true,
                 content: [
                     {
                         type: "text" as const,
@@ -258,6 +266,7 @@ async function main() {
                     console.log(chunk.text);
                 }
             }
+            if (result.isError === true) process.exitCode = 1;
             return;
         }
         console.log(JSON.stringify(result, null, 2));

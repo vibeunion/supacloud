@@ -14,7 +14,7 @@
 - **Multi-Tenant Architecture**: Run multiple isolated Supabase projects with shared infrastructure
 - **Management API**: Full REST API (60+ endpoints) for complete project lifecycle management
 - **Web Console**: Modern SvelteKit management dashboard with authentication
-- **CLI Compatibility**: Native support for the official `supabase` CLI (login, gen types, edge functions)
+- **Official Supabase CLI Database Workflows**: The compatibility harness exercises direct `--db-url` flows including `db push`, `migration list`, `db pull`, and `gen types`
 - **CLI Tools**: `supacloud-cli` for project users, `supacloud-admin` for server operators, and optional `supacloudctl` as the local unified dispatcher
 - **SupaCloud Pages**: Frontend static site hosting with GitHub webhook auto-deploy
 - **Pigsty Powered**: Enterprise-grade PostgreSQL with built-in monitoring (Grafana)
@@ -108,6 +108,13 @@ There is no project-CLI compatibility alias named `supacloud`: that name is rese
 
 - `SUPABASE_URL` or `SUPACLOUD_API_URL`
 - `SUPABASE_SERVICE_ROLE_KEY` or `SUPACLOUD_API_TOKEN`
+
+AI agents should install the migration-first Skill shipped with the CLI:
+
+```bash
+supacloud-cli ai install_skill --dry_run
+supacloud-cli ai install_skill
+```
 
 **Server admin CLI**
 
@@ -325,7 +332,6 @@ curl http://localhost:9090/v1/projects/<ref>/api-keys \
 | GET | `/v1/projects/:ref/secrets` | List Edge Function Secrets |
 | POST | `/v1/projects/:ref/secrets` | Upsert Secrets |
 | DELETE | `/v1/projects/:ref/secrets/:name` | Delete Secret |
-| GET | `/v1/oauth/authorize` | CLI OAuth Login |
 
 Function management read endpoints under `/v1/projects/:ref/functions*` require project service-role or admin authentication. Public runtime invokes remain on `/functions/v1/*` and continue to use the normal Supabase function auth model.
 
@@ -483,9 +489,9 @@ The desired state is stored in dedicated project metadata columns (`postgrest_de
 For human operators, the CLI split is now:
 
 - `@supacloud/cli` / `supacloud-cli`: project-scoped user CLI with `.env` auto-link defaults
-- `supacloudctl cli ...`: unified local entrypoint. It checks the npm `latest` dist-tag only to print an update notice and always runs the installed `@supacloud/cli` version.
+- `supacloudctl cli ...`: unified local entrypoint. Normal dispatch is local-only and does not contact npm; use `supacloudctl check-update cli` explicitly when needed.
 - `@supacloud/admin` / `supacloud-admin`: server and platform administration CLI
-- `supacloudctl admin ...`: unified local entrypoint with the same notify-only latest check for `@supacloud/admin`.
+- `supacloudctl admin ...`: unified local entrypoint with the same offline-by-default behavior; use `supacloudctl check-update admin` explicitly.
 - On installed servers, `/usr/local/bin/supacloud` remains the compiled server binary; server upgrades still use `sudo supacloud upgrade --yes`.
 
 
@@ -591,7 +597,7 @@ Key installation settings:
 - **多租户架构**: 共享基础设施，运行多个隔离的 Supabase 项目
 - **Management API**: 完整的 REST API（60+ 个端点）管理项目及周边配置生命周期
 - **Web 管理面板**: 现代 SvelteKit 管理面板，内置登录认证
-- **CLI 生态兼容**: 完全兼容 Supabase 官方命令行体系（登录鉴权、数据库类型推导、云函数发布）
+- **Supabase 官方 CLI 数据库工作流**: 兼容性脚本会执行 `db push`、`migration list`、`db pull` 和 `gen types` 等直连 `--db-url` 流程
 - **CLI 工具**: `supacloud-cli` 面向项目使用者，`supacloud-admin` 面向服务器管理员；可选用 `supacloudctl` 作为本地统一分发入口
 - **SupaCloud Pages**: 前端静态站点托管，支持 GitHub Webhook 自动部署
 - **Pigsty 驱动**: 企业级 PostgreSQL，内置 Grafana 监控
@@ -685,6 +691,13 @@ supacloud-cli frontend list --ref <project-ref>
 
 - `SUPABASE_URL` 或 `SUPACLOUD_API_URL`
 - `SUPABASE_SERVICE_ROLE_KEY` 或 `SUPACLOUD_API_TOKEN`
+
+AI Agent 应安装 CLI 随包提供的 migration-first Skill：
+
+```bash
+supacloud-cli ai install_skill --dry_run
+supacloud-cli ai install_skill
+```
 
 **服务器管理员 CLI**
 
@@ -884,7 +897,6 @@ curl http://localhost:9090/v1/projects/<ref>/api-keys \
 | GET | `/v1/projects/:ref/types/typescript` | 自动生成 TypeScript 类型 |
 | PATCH | `/v1/projects/:ref/config/auth` | 自定义鉴权及三方 OAuth |
 | GET | `/v1/projects/:ref/secrets` | 管理 Edge Functions Secrets |
-| GET | `/v1/oauth/authorize` | 授权官方 CLI OAuth 登录 |
 
 `/v1/projects/:ref/functions*` 下的函数管理读取接口需要 project service role 或 admin 鉴权。公开函数调用仍走 `/functions/v1/*`，继续使用标准 Supabase 函数鉴权模型。
 
@@ -1005,9 +1017,9 @@ desired state 保存在项目专用元数据列里（`postgrest_desired`、`post
 面向真人操作者的命令行现已拆分为：
 
 - `@supacloud/cli` / `supacloud-cli`：项目使用者 CLI，默认从当前目录 `.env` 自动绑定项目
-- `supacloudctl cli ...`：统一本地入口，执行前只检查 npm `latest` 并提示更新，始终运行已安装的 `@supacloud/cli` 版本
+- `supacloudctl cli ...`：统一本地入口，普通分发默认离线且不访问 npm；需要时显式运行 `supacloudctl check-update cli`
 - `@supacloud/admin` / `supacloud-admin`：服务器管理员 CLI，处理 SSH、安装、升级、租户运维
-- `supacloudctl admin ...`：统一本地入口，对 `@supacloud/admin` 使用相同的仅提示更新策略
+- `supacloudctl admin ...`：统一本地入口，同样默认离线；需要时显式运行 `supacloudctl check-update admin`
 - 已安装服务器上的 `/usr/local/bin/supacloud` 仍是编译后的服务端二进制，服务端升级继续使用 `sudo supacloud upgrade --yes`
 
 

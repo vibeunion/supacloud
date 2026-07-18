@@ -3,7 +3,8 @@
  * Install, upgrade, diagnose, exec, tenant mgmt — all via SSH
  */
 import { randomUUID } from "node:crypto";
-import { z } from "zod";
+import { Type } from "@sinclair/typebox";
+import { decodedSchema, optional, stringEnum, withDescription } from "../schema";
 import type { SshTransport } from "../transports/ssh";
 
 const SAFE_CONTAINER_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/;
@@ -15,21 +16,22 @@ const SAFE_SYSTEMD_UNIT = /^[a-zA-Z0-9][a-zA-Z0-9_.@:-]{0,127}$/;
 const SAFE_DB_IDENTIFIER = /^[a-zA-Z_][a-zA-Z0-9_-]{0,62}$/;
 
 function hostnameSchema(fieldName: string) {
-    return z.string()
-        .trim()
-        .min(1)
-        .max(253)
-        .refine(value => SAFE_HOSTNAME.test(value), { message: `Invalid ${fieldName}` })
-        .transform(value => value.toLowerCase());
+    return decodedSchema(Type.String(), Type.String({ minLength: 1, maxLength: 253 }), (value) => {
+        const normalized = value.trim();
+        if (!SAFE_HOSTNAME.test(normalized)) throw new Error(`Invalid ${fieldName}`);
+        return normalized.toLowerCase();
+    });
 }
 
 function secretSchema(fieldName: string) {
-    return z.string()
-        .min(12, `${fieldName} must contain at least 12 characters`)
-        .max(256, `${fieldName} must contain at most 256 characters`)
-        .refine(value => value === value.trim() && !/[\u0000-\u001f\u007f]/.test(value), {
-            message: `Invalid ${fieldName}`,
-        });
+    return decodedSchema(Type.String(), Type.String({ minLength: 12, maxLength: 256 }), (value) => {
+        if (value.length < 12) throw new Error(`${fieldName} must contain at least 12 characters`);
+        if (value.length > 256) throw new Error(`${fieldName} must contain at most 256 characters`);
+        if (value !== value.trim() || /[\u0000-\u001f\u007f]/.test(value)) {
+            throw new Error(`Invalid ${fieldName}`);
+        }
+        return value;
+    });
 }
 
 function quoteEnvValue(value: string): string {
@@ -209,30 +211,30 @@ export function registerSshTools(server: { tool: (...args: any[]) => void }, ssh
         `Server management via SSH. Available before & after SupaCloud installation.
 Actions: ping, setup, install, upgrade, diagnose, exec, troubleshoot, container_logs, tenant_manage, tenant_list, tenant_inspect, tenant_diagnose, tenant_migrate`,
         {
-            action: z.enum([
+            action: withDescription(stringEnum([
                 "ping", "setup", "install", "upgrade", "diagnose", "exec",
                 "troubleshoot", "container_logs",
                 "tenant_manage", "tenant_list", "tenant_inspect", "tenant_diagnose", "tenant_migrate",
-            ]).describe("Action to perform"),
-            command: z.string().optional().describe("[exec] Restricted shell command to execute"),
-            timeout_seconds: z.number().optional().describe("[exec] Timeout in seconds (default: 60)"),
-            public_domain: hostnameSchema("public_domain").optional().describe("[install] API domain, e.g. api.example.com"),
-            studio_domain: hostnameSchema("studio_domain").optional().describe("[install] Studio domain"),
-            postgres_password: secretSchema("postgres_password").optional().describe("[install] DB password (auto-generated if empty)"),
-            dashboard_password: secretSchema("dashboard_password").optional().describe("[install] Console password"),
-            edge_runtime: z.enum(["bun"]).optional().describe("[install] Runtime (default: bun)"),
-            storage_type: z.enum(["juicefs", "minio"]).optional().describe("[install] Storage backend configurable through Admin"),
-            version: z.string().optional().describe("[upgrade] Specific version"),
-            github_proxy: z.string().optional().describe("[install/upgrade] Explicit GitHub proxy prefix, or direct/none"),
-            focus: z.enum(["all", "containers", "database", "network", "disk", "logs"]).optional().describe("[troubleshoot] Focus area"),
-            container: z.string().optional().describe("[container_logs] Container name"),
-            lines: z.number().optional().describe("[container_logs] Number of log lines (default: 100)"),
-            project_ref: z.string().optional().describe("[tenant_*] Project reference ID"),
-            tenant_action: z.enum(["start", "stop", "restart", "status"]).optional().describe("[tenant_manage] Action"),
-            source_ref: z.string().optional().describe("[tenant_migrate] Source tenant"),
-            target_ref: z.string().optional().describe("[tenant_migrate] Target tenant"),
-            schemas: z.string().optional().describe("[tenant_migrate] Schemas (default: public,auth,storage)"),
-            data_only: z.boolean().optional().describe("[tenant_migrate] Data only, no structure"),
+            ]), "Action to perform"),
+            command: optional(Type.String(), "[exec] Restricted shell command to execute"),
+            timeout_seconds: optional(Type.Number(), "[exec] Timeout in seconds (default: 60)"),
+            public_domain: optional(hostnameSchema("public_domain"), "[install] API domain, e.g. api.example.com"),
+            studio_domain: optional(hostnameSchema("studio_domain"), "[install] Studio domain"),
+            postgres_password: optional(secretSchema("postgres_password"), "[install] DB password (auto-generated if empty)"),
+            dashboard_password: optional(secretSchema("dashboard_password"), "[install] Console password"),
+            edge_runtime: optional(stringEnum(["bun"]), "[install] Runtime (default: bun)"),
+            storage_type: optional(stringEnum(["juicefs", "minio"]), "[install] Storage backend configurable through Admin"),
+            version: optional(Type.String(), "[upgrade] Specific version"),
+            github_proxy: optional(Type.String(), "[install/upgrade] Explicit GitHub proxy prefix, or direct/none"),
+            focus: optional(stringEnum(["all", "containers", "database", "network", "disk", "logs"]), "[troubleshoot] Focus area"),
+            container: optional(Type.String(), "[container_logs] Container name"),
+            lines: optional(Type.Number(), "[container_logs] Number of log lines (default: 100)"),
+            project_ref: optional(Type.String(), "[tenant_*] Project reference ID"),
+            tenant_action: optional(stringEnum(["start", "stop", "restart", "status"]), "[tenant_manage] Action"),
+            source_ref: optional(Type.String(), "[tenant_migrate] Source tenant"),
+            target_ref: optional(Type.String(), "[tenant_migrate] Target tenant"),
+            schemas: optional(Type.String(), "[tenant_migrate] Schemas (default: public,auth,storage)"),
+            data_only: optional(Type.Boolean(), "[tenant_migrate] Data only, no structure"),
         },
         async (args: any) => {
             const { action } = args;

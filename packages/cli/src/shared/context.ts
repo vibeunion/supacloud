@@ -83,6 +83,14 @@ function hostFromUrl(value: string): string {
     }
 }
 
+function inferProjectRefFromSupabaseUrl(value: string): string {
+    const normalized = normalizeUrl(value);
+    if (!normalized) return "";
+
+    const match = new URL(normalized).hostname.match(/^([a-z0-9-]+)\.api\./i);
+    return match?.[1] ?? "";
+}
+
 function inferManagementApiUrlFromSupabaseUrl(value: string, projectRef = ""): string {
     const normalized = normalizeUrl(value);
     if (!normalized) return "";
@@ -117,10 +125,11 @@ export function resolveSupaCloudContext(
     const supabaseUrl = pickValue(env, dotenv, ["SUPABASE_URL"]);
     const explicitApiUrl = pickValue(env, dotenv, ["SUPACLOUD_API_URL", "SUPACLOUD_MANAGEMENT_API_URL", "MANAGEMENT_API_URL"]);
     const inferredToken = pickValue(env, dotenv, ["SUPABASE_SERVICE_ROLE_KEY", "SUPACLOUD_API_TOKEN"]);
-    const projectRef = pickValue(env, dotenv, ["SUPACLOUD_PROJECT_REF", "X_PROJECT_REF"]).value;
+    const explicitProjectRef = pickValue(env, dotenv, ["SUPACLOUD_PROJECT_REF", "X_PROJECT_REF"]).value;
 
     const hostFromEnv = env.SUPACLOUD_HOST;
     const normalizedSupabaseUrl = normalizeUrl(supabaseUrl.value);
+    const projectRef = explicitProjectRef || inferProjectRefFromSupabaseUrl(normalizedSupabaseUrl);
     const apiUrl = normalizeUrl(explicitApiUrl.value)
         || inferManagementApiUrlFromSupabaseUrl(normalizedSupabaseUrl, projectRef)
         || (hostFromEnv ? `http://${hostFromEnv}:9090` : "");

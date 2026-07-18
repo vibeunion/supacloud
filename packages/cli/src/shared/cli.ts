@@ -1,11 +1,30 @@
-import { z } from "zod";
+import type { TSchema } from "@sinclair/typebox";
+import {
+    parseToolArguments,
+    schemaDescription,
+    schemaEnumValues,
+    schemaProperties,
+} from "./schema";
+import type { ToolSchema } from "./schema";
 
 interface CliRunOptions {
     commandName?: string;
 }
 
+interface CliToolResult {
+    content?: Array<{ type: string; text?: string }>;
+    isError?: boolean;
+}
+
+function coerceCliValue(value: string): string | number | boolean {
+    if (value === "true") return true;
+    if (value === "false") return false;
+    if (value.trim() !== "" && !Number.isNaN(Number(value))) return Number(value);
+    return value;
+}
+
 export async function runCli(
-    cliTools: Record<string, { schema: any; callback: (args: any) => Promise<any> }>,
+    cliTools: Record<string, { schema: ToolSchema; callback: (args: any) => Promise<any> }>,
     args: string[],
     options: CliRunOptions = {}
 ) {
@@ -15,40 +34,11 @@ export async function runCli(
             .filter((k) => !["setup_help", "deploy_web_console"].includes(k))
             .join("\n  ");
 
-    const getSchemaShape = (schema: any): Record<string, any> => {
-        if (!schema) return {};
-        if (typeof schema?.safeParse === "function") {
-            const shape = schema?._def?.shape;
-            if (typeof shape === "function") return shape();
-            return shape || {};
-        }
-        if (
-            typeof schema === "object" &&
-            !Array.isArray(schema) &&
-            !schema.shape &&
-            !schema._def
-        ) {
-            return schema;
-        }
-        if (schema.shape) return schema.shape;
-        if (schema._def?.shape) {
-            return typeof schema._def.shape === "function" ? schema._def.shape() : schema._def.shape;
-        }
-        return {};
-    };
+    const getSchemaShape = (schema: ToolSchema) => schemaProperties(schema);
+    const getEnumOptions = (field: TSchema) => schemaEnumValues(field);
+    const getDescription = (field: TSchema) => schemaDescription(field);
 
-    const getEnumOptions = (field: any): string[] => {
-        if (Array.isArray(field?.options)) return field.options;
-        if (Array.isArray(field?._def?.values)) return field._def.values;
-        if (Array.isArray(field?._def?.entries)) return field._def.entries;
-        return [];
-    };
-
-    const unwrapField = (field: any): any => field?._def?.innerType ?? field;
-
-    const getDescription = (field: any): string => field?.description ?? field?._def?.description ?? "";
-
-    const formatToolHelp = (toolName: string, tool: { schema: any }) => {
+    const formatToolHelp = (toolName: string, tool: { schema: ToolSchema }) => {
         const shape = getSchemaShape(tool.schema);
         const actionField = shape.action;
         const actionOptions = getEnumOptions(actionField);
@@ -80,7 +70,7 @@ export async function runCli(
     const formatActionHelp = (
         toolName: string,
         action: string,
-        tool: { schema: any }
+        tool: { schema: ToolSchema }
     ) => {
         const shape = getSchemaShape(tool.schema);
         const otherFields = Object.entries(shape).filter(([name]) => name !== "action");
@@ -138,44 +128,23 @@ export async function runCli(
     for (let i = startIdx; i < args.length; i++) {
         const arg = args[i];
         if (arg.startsWith("--") && arg.length > 2) {
-            const key = arg.slice(2);
-            let val: any = true;
-            if (i + 1 < args.length && !args[i+1].startsWith("--")) {
-                val = args[++i];
-                // basic coercion
-                if (val === "true") val = true;
-                else if (val === "false") val = false;
-                else if (!isNaN(Number(val)) && val.trim() !== '') val = Number(val);
+            const rawFlag = arg.slice(2);
+            const equalsIndex = rawFlag.indexOf("=");
+            const key = equalsIndex >= 0 ? rawFlag.slice(0, equalsIndex) : rawFlag;
+            let val: string | number | boolean = true;
+            if (equalsIndex >= 0) {
+                val = coerceCliValue(rawFlag.slice(equalsIndex + 1));
+            } else if (i + 1 < args.length && !args[i + 1].startsWith("--")) {
+                val = coerceCliValue(args[++i]);
             }
             parsedArgs[key] = val;
         }
     }
     
     try {
-        const validator = (() => {
-            if (!tool.schema) return null;
-            if (typeof tool.schema.safeParse === "function") return tool.schema;
-            if (typeof tool.schema === "object" && !Array.isArray(tool.schema)) {
-                return z.object(tool.schema).strict();
-            }
-            return null;
-        })();
+        const validatedArgs = parseToolArguments(tool.schema, parsedArgs);
 
-        const validatedArgs = validator
-            ? (() => {
-                const result = validator.safeParse(parsedArgs);
-                if (!result.success) {
-                    const details = result.error.issues.map((issue: { path: Array<string | number>; message: string }) => {
-                        const path = issue.path.length ? issue.path.join(".") : "args";
-                        return `- ${path}: ${issue.message}`;
-                    }).join("\n");
-                    throw new Error(`Invalid arguments:\n${details}`);
-                }
-                return result.data;
-            })()
-            : parsedArgs;
-
-        const result = await tool.callback(validatedArgs);
+        const result = await tool.callback(validatedArgs) as CliToolResult;
         if (result && result.content && Array.isArray(result.content)) {
             for (const c of result.content) {
                 if (c.type === "text") {
@@ -185,10 +154,11 @@ export async function runCli(
         } else {
             console.log(JSON.stringify(result, null, 2));
         }
-        process.exit(0);
-    } catch (err: any) {
-        console.error(`❌ Error: ${err.message}`);
-        if (err.message?.includes("required")) {
+        process.exit(result && typeof result === "object" && "isError" in result && result.isError === true ? 1 : 0);
+    } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(`❌ Error: ${message}`);
+        if (message.includes("required")) {
             console.error(`Hint: Pass arguments like --ref YOUR_REF`);
         }
         process.exit(1);
