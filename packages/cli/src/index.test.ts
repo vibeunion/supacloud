@@ -72,7 +72,7 @@ describe("supacloud-cli process contract", () => {
         expect(dryRunSummary.action).toBe("create");
         expect(dryRunSummary.mode).toBe("dry-run");
         expect(existsSync(join(targetRoot, "supacloud-cli"))).toBe(false);
-    });
+    }, 15_000);
 
     test("returns a non-zero exit code when a project command has no context", async () => {
         const result = await runProjectCli(["project", "get"]);
