@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.20.0](https://github.com/zuohuadong/supacloud/compare/web-console-v0.19.0...web-console-v0.20.0) (2026-07-18)
+
+
+### Features
+
+* **cli:** restore adoption tooling and AI skill ([f562cf0](https://github.com/zuohuadong/supacloud/commit/f562cf0c55003c26ede796ffa060e7014392691c))
+
+
+### Bug Fixes
+
+* **web:** restore session redirect and SDK alignment ([975694f](https://github.com/zuohuadong/supacloud/commit/975694f962e9cd96e60e99b1dae76f53b728cd5f))
+
 ## [0.19.0](https://github.com/zuohuadong/supacloud/compare/web-console-v0.18.2...web-console-v0.19.0) (2026-07-17)
 
 

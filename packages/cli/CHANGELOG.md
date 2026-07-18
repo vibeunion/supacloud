@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/zuohuadong/supacloud/compare/cli-v0.10.0...cli-v0.11.0) (2026-07-18)
+
+
+### Features
+
+* **cli:** restore adoption tooling and AI skill ([f562cf0](https://github.com/zuohuadong/supacloud/commit/f562cf0c55003c26ede796ffa060e7014392691c))
+
 ## [0.10.0](https://github.com/zuohuadong/supacloud/compare/cli-v0.9.2...cli-v0.10.0) (2026-07-17)
 
 

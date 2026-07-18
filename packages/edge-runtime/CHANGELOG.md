@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.2](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.12.1...edge-runtime-v0.12.2) (2026-07-18)
+
+
+### Bug Fixes
+
+* **edge:** fail closed shared JWT verification ([5b5df99](https://github.com/zuohuadong/supacloud/commit/5b5df991ecf5da446af9c9dae462d34c7cc285db))
+
 ## [0.12.1](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.12.0...edge-runtime-v0.12.1) (2026-07-17)
 
 

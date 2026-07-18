@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.5](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.19.4...supacloud-js-v0.19.5) (2026-07-18)
+
+
+### Bug Fixes
+
+* **web:** restore session redirect and SDK alignment ([975694f](https://github.com/zuohuadong/supacloud/commit/975694f962e9cd96e60e99b1dae76f53b728cd5f))
+
 ## [0.19.4](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.19.3...supacloud-js-v0.19.4) (2026-07-17)
 
 

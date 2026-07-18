@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.43.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.42.1...management-api-v0.43.0) (2026-07-18)
+
+
+### Features
+
+* **cli:** restore adoption tooling and AI skill ([f562cf0](https://github.com/zuohuadong/supacloud/commit/f562cf0c55003c26ede796ffa060e7014392691c))
+
+
+### Bug Fixes
+
+* **web:** restore session redirect and SDK alignment ([975694f](https://github.com/zuohuadong/supacloud/commit/975694f962e9cd96e60e99b1dae76f53b728cd5f))
+
 ## [0.42.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.42.0...management-api-v0.42.1) (2026-07-17)
 
 
