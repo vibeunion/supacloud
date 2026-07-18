@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.0](https://github.com/zuohuadong/supacloud/compare/web-console-v0.20.0...web-console-v0.21.0) (2026-07-18)
+
+
+### Features
+
+* **console:** surface canonical auth sessions and safe JWT truth ([#481](https://github.com/zuohuadong/supacloud/issues/481)) ([c6b7475](https://github.com/zuohuadong/supacloud/commit/c6b7475e7727088d7d149c05fd587222789fdddc))
+
 ## [0.20.0](https://github.com/zuohuadong/supacloud/compare/web-console-v0.19.0...web-console-v0.20.0) (2026-07-18)
 
 

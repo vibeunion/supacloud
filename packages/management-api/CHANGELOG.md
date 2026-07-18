@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.44.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.43.0...management-api-v0.44.0) (2026-07-18)
+
+
+### Features
+
+* **auth:** apply canonical session policies through managed runtimes ([#480](https://github.com/zuohuadong/supacloud/issues/480)) ([8982f47](https://github.com/zuohuadong/supacloud/commit/8982f47551b794569f61012758dddc362b317711))
+
 ## [0.43.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.42.1...management-api-v0.43.0) (2026-07-18)
 
 
