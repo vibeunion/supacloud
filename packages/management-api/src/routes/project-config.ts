@@ -22,9 +22,18 @@ import { resolveRoleName, resolveDbName as resolveDbNameTopLevel } from "../db";
 import { requireAdminAuth, requireProjectOrAdminAuth } from "../middleware/auth";
 import { projectNetworkRestrictionRoutes } from "./project-network-restrictions";
 import {
-  getAuthRuntimeDescriptor,
   getAuthRuntimeManagedError,
 } from "../services/auth-runtime.service";
+import {
+  applyAuthSessionPolicyPatch,
+  AuthSessionPolicyValidationError,
+  normalizeAuthSessionPolicyPatch,
+  readAuthSessionPolicy,
+} from "../services/auth-session-policy";
+import {
+  buildAuthRuntimeApplyFailureBody,
+  buildAuthSessionPolicyErrorBody,
+} from "./auth-config-responses";
 
 /** Map PostgreSQL column types to TypeScript types */
 function pgTypeToTs(udtName: string, dataType: string): string {
@@ -330,6 +339,7 @@ function buildRealtimeConfigResponse(raw: Record<string, unknown>) {
 
 function buildAuthConfigResponse(settings: Record<string, unknown>) {
   const authConfig = (settings.auth as Record<string, unknown>) || {};
+  const sessionPolicy = readAuthSessionPolicy(authConfig);
   const externalConfig =
     (authConfig.external as Record<string, unknown>) || {};
   const hooksConfig = (authConfig.hooks as Record<string, unknown>) || {};
@@ -345,7 +355,8 @@ function buildAuthConfigResponse(settings: Record<string, unknown>) {
       authConfig.manual_linking_enabled ??
       authConfig.enable_manual_linking ??
       false,
-    jwt_expiry: authConfig.jwt_expiry ?? authConfig.jwt_exp ?? 3600,
+    jwt_exp: sessionPolicy.jwt_expiry,
+    jwt_expiry: sessionPolicy.jwt_expiry,
     disable_signup: authConfig.disable_signup ?? false,
     mailer_autoconfirm: authConfig.mailer_autoconfirm ?? false,
     mail_autoconfirm: authConfig.mailer_autoconfirm ?? false,
@@ -353,21 +364,20 @@ function buildAuthConfigResponse(settings: Record<string, unknown>) {
     phone_autoconfirm: authConfig.sms_autoconfirm ?? false,
     uri_allow_list: authConfig.uri_allow_list ?? null,
     site_url: authConfig.site_url ?? null,
-    password_min_length: authConfig.password_min_length ?? null,
+    password_min_length: sessionPolicy.password_min_length,
     refresh_token_rotation_enabled:
-      authConfig.refresh_token_rotation_enabled ??
-      authConfig.security_refresh_token_rotation_enabled ??
-      null,
+      sessionPolicy.refresh_token_rotation_enabled,
     security_refresh_token_reuse_interval:
-      authConfig.security_refresh_token_reuse_interval ??
-      authConfig.security_refresh_token_rotation_reuse_interval ??
-      null,
+      sessionPolicy.security_refresh_token_reuse_interval,
     mfa_max_enrolled_factors:
       authConfig.mfa_max_enrolled_factors ??
       authConfig.max_enrolled_factors ??
       null,
     security_update_password_require_reauthentication:
-      authConfig.security_update_password_require_reauthentication ?? null,
+      sessionPolicy.security_update_password_require_reauthentication,
+    sessions_inactivity_timeout: sessionPolicy.sessions_inactivity_timeout,
+    sessions_single_per_user: sessionPolicy.sessions_single_per_user,
+    sessions_timebox: sessionPolicy.sessions_timebox,
     external_anonymous_users_enabled:
       authConfig.external_anonymous_users_enabled ?? null,
     external_email_enabled: authConfig.external_email_enabled ?? null,
@@ -818,11 +828,21 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
 
       const currentAuth = (settings.auth as Record<string, unknown>) || {};
       const newAuth = typeof body === "object" ? body : {};
+      let sessionPolicyPatch: ReturnType<typeof normalizeAuthSessionPolicyPatch>;
+      try {
+        sessionPolicyPatch = normalizeAuthSessionPolicyPatch(newAuth);
+      } catch (error: unknown) {
+        if (error instanceof AuthSessionPolicyValidationError) {
+          return status(400, buildAuthSessionPolicyErrorBody(error));
+        }
+        throw error;
+      }
 
       // Parse external_* keys back into nested external config
       const externalUpdates: Record<string, unknown> = {};
       const otherUpdates: Record<string, unknown> = {};
       for (const [key, val] of Object.entries(newAuth)) {
+        if (sessionPolicyPatch.consumedKeys.has(key)) continue;
         if (key.startsWith("EXTERNAL_") && key.endsWith("_ENABLED")) {
           const provider = key
             .replace(/^EXTERNAL_/, "")
@@ -1022,7 +1042,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         ...externalUpdates,
       };
 
-      const mergedAuth = {
+      let mergedAuth = {
         ...currentAuth,
         ...otherUpdates,
         ...(Object.keys(externalUpdates).length > 0
@@ -1072,96 +1092,31 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
           ...(otherUpdates.saml as Record<string, unknown>),
         };
 
+      mergedAuth = applyAuthSessionPolicyPatch(mergedAuth, sessionPolicyPatch);
+
       const updated = await projectService.updateProjectSettings(params.ref, {
         ...settings,
         auth: mergedAuth,
       });
 
-      // Propagate config to running services
+      // Apply only the owner/local GoTrue runtime. Shared dependents are
+      // refreshed by the owner-aware service path after GoTrue is healthy.
       try {
         const { tenantRuntimeService } =
           await import("../services/tenant-runtime.service");
-        await tenantRuntimeService.restartRuntime(params.ref);
-      } catch (err) {
+        await tenantRuntimeService.applyAuthConfig(params.ref, currentAuth, mergedAuth);
+      } catch (error: unknown) {
         logger.warn(
           "[project-config] Failed to propagate auth config to runtime",
-          { error: err },
+          { error },
         );
-        if (getAuthRuntimeDescriptor(params.ref).mode === "owner") {
-          return status(503, {
-            code: "SUPAUTH_DEPENDENT_REFRESH_FAILED",
-            message: "Auth configuration was saved, but one or more SupAuth dependents failed to refresh",
-          });
-        }
+        return status(503, buildAuthRuntimeApplyFailureBody(params.ref, error));
       }
 
       const freshSettings = await projectService.getProjectSettings(params.ref);
-      const freshAuth = (freshSettings?.auth as Record<string, unknown>) || {};
-      const freshExternal =
-        (freshAuth.external as Record<string, unknown>) || {};
-      const freshHooks = (freshAuth.hooks as Record<string, any>) || {};
-      const freshSmtp = (freshAuth.smtp as Record<string, unknown>) || {};
-
-      const response: Record<string, unknown> = {
-        ...cloneTemplate(OPENAPI_AUTH_CONFIG_RESPONSE_TEMPLATE),
-        enable_signup: freshAuth.enable_signup ?? true,
-        enable_signups: freshAuth.enable_signup ?? true,
-        enable_confirmations: freshAuth.enable_confirmations ?? false,
-        double_confirm_changes: freshAuth.double_confirm_changes ?? true,
-        manual_linking_enabled:
-          freshAuth.manual_linking_enabled ??
-          freshAuth.enable_manual_linking ??
-          false,
-        mfa_max_enrolled_factors:
-          freshAuth.mfa_max_enrolled_factors ??
-          freshAuth.max_enrolled_factors ??
-          10,
-      };
-      delete response.external;
-      delete response.hooks;
-
-      for (const [key, val] of Object.entries(freshExternal)) {
-        const providerConfig = val as Record<string, unknown>;
-        const upperKey = key.toUpperCase();
-        response[`EXTERNAL_${upperKey}_ENABLED`] = !!providerConfig?.client_id;
-        response[`EXTERNAL_${upperKey}_CLIENT_ID`] =
-          providerConfig?.client_id || "";
-        response[`EXTERNAL_${upperKey}_SECRET`] = providerConfig?.client_secret
-          ? "********"
-          : "";
-      }
-
-      response.hook_custom_access_token_enabled =
-        !!freshHooks.custom_access_token_hook?.enabled;
-      response.hook_custom_access_token_uri =
-        freshHooks.custom_access_token_hook?.uri || null;
-      response.hook_custom_access_token_secrets = freshHooks.custom_access_token_hook?.secrets ? "********" : null;
-      response.hook_mfa_verification_enabled =
-        !!freshHooks.mfa_verification_hook?.enabled;
-      response.hook_mfa_verification_uri =
-        freshHooks.mfa_verification_hook?.uri || null;
-      response.hook_mfa_verification_secrets = freshHooks.mfa_verification_hook?.secrets ? "********" : null;
-      response.hook_password_verification_enabled =
-        !!freshHooks.password_verification_hook?.enabled;
-      response.hook_password_verification_uri =
-        freshHooks.password_verification_hook?.uri || null;
-      response.hook_password_verification_secrets = freshHooks.password_verification_hook?.secrets ? "********" : null;
-      response.hook_send_email_enabled = !!freshHooks.send_email_hook?.enabled;
-      response.hook_send_email_uri = freshHooks.send_email_hook?.uri || null;
-      response.hook_send_email_secrets = freshHooks.send_email_hook?.secrets ? "********" : null;
-      response.hook_send_sms_enabled = !!freshHooks.send_sms_hook?.enabled;
-      response.hook_send_sms_uri = freshHooks.send_sms_hook?.uri || null;
-      response.hook_send_sms_secrets = freshHooks.send_sms_hook?.secrets ? "********" : null;
-
-      response.smtp_admin_email = freshSmtp.admin_email || "";
-      response.smtp_host = freshSmtp.host || "";
-      response.smtp_port = freshSmtp.port || 587;
-      response.smtp_user = freshSmtp.user || "";
-      response.smtp_pass = freshSmtp.pass ? "********" : "";
-      response.smtp_max_frequency = freshSmtp.max_frequency || "1m0s";
-      response.smtp_sender_name = freshSmtp.sender_name || "";
-
-      return response;
+      return buildAuthConfigResponse(
+        (freshSettings || updated || { ...settings, auth: mergedAuth }) as Record<string, unknown>,
+      );
     },
     {
       params: t.Object({

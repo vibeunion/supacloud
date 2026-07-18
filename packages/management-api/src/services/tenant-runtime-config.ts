@@ -1,5 +1,7 @@
 import { AUTH_EMAIL_TEMPLATE_DEFINITIONS } from "../utils/auth-email-templates";
 
+export { renderGoTrueSessionPolicyEnv } from "./auth-session-policy";
+
 const CONFIG_CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/;
 const ENVIRONMENT_NAME = /^[A-Z][A-Z0-9_]*$/;
 

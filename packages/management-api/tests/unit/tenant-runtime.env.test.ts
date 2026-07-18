@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { quoteSystemdEnvValue } from "../../src/utils/systemd-env";
 import {
   buildPostgresUri,
@@ -8,9 +10,16 @@ import {
   renderGoTrueAuthEnv,
   renderGoTruePasskeyEnv,
   renderGoTrueSamlEnv,
+  renderGoTrueSessionPolicyEnv,
   renderPostgrestDbSchemas,
   renderTenantInternalRuntimeEnv,
 } from "../../src/services/tenant-runtime-config";
+import {
+  applyAuthSessionPolicyPatch,
+  normalizeAuthSessionPolicyPatch,
+  readAuthSessionPolicy,
+} from "../../src/services/auth-session-policy";
+import { authConfigChangesPostgrestVerifier } from "../../src/services/auth-runtime-impact";
 
 describe("TenantRuntimeService safe config serialization", () => {
   const special = `p@:/#?% space '\"\\`;
@@ -103,6 +112,82 @@ describe("TenantRuntimeService PostgREST schema rendering", () => {
 });
 
 describe("TenantRuntimeService GoTrue auth env rendering", () => {
+  test("uses current session-policy defaults and official GoTrue env names", () => {
+    // Names are verified against supabase/auth v2.191.0 configuration.go.
+    const env = renderGoTrueSessionPolicyEnv({});
+    expect(env).toBe([
+      "GOTRUE_JWT_EXP=3600",
+      "GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION=true",
+      "GOTRUE_PASSWORD_MIN_LENGTH=8",
+      "GOTRUE_SECURITY_REFRESH_TOKEN_ROTATION_ENABLED=true",
+      "GOTRUE_SECURITY_REFRESH_TOKEN_REUSE_INTERVAL=10",
+      "GOTRUE_SESSIONS_SINGLE_PER_USER=false",
+    ].join("\n"));
+    expect(env).not.toContain("GOTRUE_SECURITY_REFRESH_TOKEN_ROTATION_REUSE_INTERVAL");
+    expect(env).not.toContain("GOTRUE_SESSIONS_INACTIVITY_TIMEOUT");
+    expect(env).not.toContain("GOTRUE_SESSIONS_TIMEBOX");
+  });
+
+  test("maps canonical policy fields and compatibility aliases into GoTrue env", () => {
+    expect(renderGoTrueSessionPolicyEnv({
+      jwt_exp: 7200,
+      security_refresh_token_rotation_enabled: false,
+      security_refresh_token_rotation_reuse_interval: 0,
+      security_update_password_require_reauthentication: false,
+      password_min_length: 12,
+      sessions_inactivity_timeout: "30m",
+      sessions_single_per_user: true,
+      sessions_timebox: 86_400,
+    })).toBe([
+      "GOTRUE_JWT_EXP=7200",
+      "GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION=false",
+      "GOTRUE_PASSWORD_MIN_LENGTH=12",
+      "GOTRUE_SECURITY_REFRESH_TOKEN_ROTATION_ENABLED=false",
+      "GOTRUE_SECURITY_REFRESH_TOKEN_REUSE_INTERVAL=0",
+      "GOTRUE_SESSIONS_SINGLE_PER_USER=true",
+      "GOTRUE_SESSIONS_INACTIVITY_TIMEOUT=1800s",
+      "GOTRUE_SESSIONS_TIMEBOX=86400s",
+    ].join("\n"));
+  });
+
+  test("canonicalizes aliases, resets nullable values, and rejects invalid policy input", () => {
+    const patch = normalizeAuthSessionPolicyPatch({
+      jwt_exp: 5400,
+      security_refresh_token_rotation_reuse_interval: 15,
+      sessions_timebox: "1h30m",
+      sessions_inactivity_timeout: 0,
+    });
+    const auth = applyAuthSessionPolicyPatch({
+      jwt_exp: 3600,
+      security_refresh_token_rotation_reuse_interval: 10,
+      sessions_inactivity_timeout: 600,
+    }, patch);
+
+    expect(auth).toEqual({
+      jwt_expiry: 5400,
+      security_refresh_token_reuse_interval: 15,
+      sessions_timebox: 5400,
+    });
+    expect(readAuthSessionPolicy(auth)).toMatchObject({
+      jwt_expiry: 5400,
+      security_refresh_token_reuse_interval: 15,
+      sessions_inactivity_timeout: null,
+      sessions_timebox: 5400,
+    });
+    expect(readAuthSessionPolicy({
+      jwt_expiry: 3600,
+      jwt_exp: "malformed-legacy-value",
+    }).jwt_expiry).toBe(3600);
+    expect(() => normalizeAuthSessionPolicyPatch({ password_min_length: 5 }))
+      .toThrow(/password_min_length.*between 6 and 32767/);
+    expect(() => normalizeAuthSessionPolicyPatch({ sessions_timebox: "tomorrow" }))
+      .toThrow(/sessions_timebox.*Go duration/);
+    expect(() => normalizeAuthSessionPolicyPatch({
+      jwt_expiry: 3600,
+      jwt_exp: 7200,
+    })).toThrow(/conflicting values/);
+  });
+
   test("defaults signup-related runtime flags to the current permissive behavior", () => {
     expect(renderGoTrueAuthEnv({})).toBe([
       "GOTRUE_DISABLE_SIGNUP=false",
@@ -212,5 +297,68 @@ describe("TenantRuntimeService GoTrue auth env rendering", () => {
       'GOTRUE_SAML_RELAY_STATE_VALIDITY_PERIOD="5m"',
       "GOTRUE_SAML_RATE_LIMIT_ASSERTION=20",
     ].join("\n"));
+  });
+});
+
+describe("Auth config PostgREST verifier impact", () => {
+  test("keeps session and GoTrue-only OAuth settings on the GoTrue apply path", () => {
+    expect(authConfigChangesPostgrestVerifier(
+      { jwt_expiry: 3600, oauth_server: { authorization_path: "/old" } },
+      { jwt_expiry: 7200, oauth_server: { authorization_path: "/new" } },
+    )).toBe(false);
+    expect(authConfigChangesPostgrestVerifier(
+      { third_party_auth: { auth_endpoint_mode: "external", auth_upstream: "https://old.example.com" } },
+      { third_party_auth: { auth_endpoint_mode: "local", auth_upstream: "http://127.0.0.1:9999" } },
+    )).toBe(false);
+  });
+
+  test.each([
+    ["enabled state", { enabled: false }, { enabled: true }],
+    ["issuer", { issuer: "https://old.example.com/auth/v1" }, { issuer: "https://new.example.com/auth/v1" }],
+    ["signing algorithm", { signing_alg: "ES256" }, { signing_alg: "RS256" }],
+    ["signing keys", { jwt_keys: [{ kid: "old" }] }, { jwt_keys: [{ kid: "new" }] }],
+    ["verification JWKS", { jwt_jwks: { keys: [{ kid: "old" }] } }, { jwt_jwks: { keys: [{ kid: "new" }] } }],
+  ])("detects OAuth server %s changes", (_label, previousOauth, nextOauth) => {
+    expect(authConfigChangesPostgrestVerifier(
+      { oauth_server: previousOauth },
+      { oauth_server: nextOauth },
+    )).toBe(true);
+  });
+
+  test("detects third-party verifier policy changes after compatibility normalization", () => {
+    expect(authConfigChangesPostgrestVerifier(
+      { third_party_auth: { enabled: true, issuer: "https://issuer.example.com", audience: "old", client_id: "client", jwtJwks: { keys: [{ kid: "one" }] } } },
+      { third_party_auth: { enabled: true, issuer: "https://issuer.example.com", audience: ["new"], client_id: "client", jwt_jwks: { keys: [{ kid: "one" }] } } },
+    )).toBe(true);
+  });
+
+  test("ignores object key ordering in equivalent verifier material", () => {
+    expect(authConfigChangesPostgrestVerifier(
+      { oauth_server: { jwt_jwks: { keys: [{ kty: "EC", kid: "same", alg: "ES256" }] } } },
+      { oauth_server: { jwt_jwks: { keys: [{ alg: "ES256", kid: "same", kty: "EC" }] } } },
+    )).toBe(false);
+  });
+});
+
+describe("TenantRuntimeService auth-only apply boundary", () => {
+  test("uses checked systemctl calls only in the auth apply path", () => {
+    const source = readFileSync(
+      join(import.meta.dir, "../../src/services/tenant-runtime.service.ts"),
+      "utf8",
+    );
+    const restartSection = source.slice(
+      source.indexOf("public async restartRuntime"),
+      source.indexOf("private async applyGotrueAuthConfig"),
+    );
+    const authApplySection = source.slice(
+      source.indexOf("private async applyGotrueAuthConfig"),
+      source.indexOf("private async refreshSharedAuthDependents"),
+    );
+
+    expect(restartSection).not.toContain("runSystemctlOrThrow");
+    expect(authApplySection).toContain('runSystemctlOrThrow("restart", unit)');
+    expect(authApplySection).toContain('runSystemctlOrThrow("start", unit)');
+    expect(authApplySection).toContain('runSystemctlOrThrow("restart", this.postgrestController.unit(ref))');
+    expect(authApplySection).toContain("waitForHealthy");
   });
 });
