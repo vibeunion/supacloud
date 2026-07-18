@@ -26,6 +26,7 @@ import {
     renderGoTrueAuthEnv,
     renderGoTruePasskeyEnv,
     renderGoTrueSamlEnv,
+    renderGoTrueSessionPolicyEnv,
     renderPostgrestDbSchemas,
     renderSystemdEnvLine,
     renderTenantInternalRuntimeEnv,
@@ -34,16 +35,50 @@ import {
 import type { PostgresConnectionConfig } from "./tenant-runtime-config";
 import { decryptSecretIfNeeded } from "../utils/secret-crypto";
 import { getAuthRuntimeDescriptor, isSharedAuthRuntime } from "./auth-runtime.service";
+import { authConfigChangesPostgrestVerifier } from "./auth-runtime-impact";
 import { runtimeCacheService } from "./runtime-cache.service";
 
 export {
     renderGoTrueAuthEnv,
     renderGoTruePasskeyEnv,
     renderGoTrueSamlEnv,
+    renderGoTrueSessionPolicyEnv,
     renderPostgrestDbSchemas,
     renderTenantInternalRuntimeEnv,
 } from "./tenant-runtime-config";
 export type { GoTrueWebAuthnDefaults } from "./tenant-runtime-config";
+
+export class SupAuthDependentRefreshError extends Error {
+    readonly code = "SUPAUTH_DEPENDENT_REFRESH_FAILED";
+
+    constructor(
+        readonly failedRefs: string[],
+        options: { cause?: unknown } = {},
+    ) {
+        super(
+            failedRefs.length > 0
+                ? `Failed to refresh SupAuth dependents: ${failedRefs.join(", ")}`
+                : "Failed to enumerate SupAuth dependents",
+            options.cause === undefined ? undefined : { cause: options.cause },
+        );
+        this.name = "SupAuthDependentRefreshError";
+    }
+}
+
+type SystemctlAction = "daemon-reload" | "disable" | "enable" | "reset-failed" | "restart" | "start" | "stop";
+type SystemctlExecutionMode = "best-effort" | "checked";
+
+async function runSystemctlOrThrow(action: SystemctlAction, unit?: string): Promise<void> {
+    const result = unit
+        ? await $`systemctl ${action} ${unit}`.nothrow().quiet()
+        : await $`systemctl ${action}`.nothrow().quiet();
+    if (result.exitCode === 0) return;
+
+    const detail = result.stderr.toString().trim()
+        || result.stdout.toString().trim()
+        || `exit code ${result.exitCode}`;
+    throw new Error(`systemctl ${action}${unit ? ` ${unit}` : ""} failed: ${detail.slice(0, 300)}`);
+}
 
 function quoteSqlLiteral(value: string): string {
     assertSafeConfigValue("PostgreSQL literal", value);
@@ -225,6 +260,12 @@ export interface GotrueRuntimeStatus {
     updated_at: string | null;
     last_reconciled_at: string | null;
 }
+
+type AppliedGotrueAuthConfig = {
+    authRuntime: ReturnType<typeof getAuthRuntimeDescriptor>;
+    pgrstPort: number;
+    status: GotrueRuntimeStatus;
+};
 
 class GotrueRuntimeController {
     unit(ref: string): string {
@@ -753,7 +794,12 @@ class TenantRuntimeService {
         return result.stdout.trim() === "1";
     }
 
-    private async generateTenantConfig(ref: string, pgrstPort: number, gotruePort: number) {
+    private async generateTenantConfig(
+        ref: string,
+        pgrstPort: number,
+        gotruePort: number,
+        systemctlMode: SystemctlExecutionMode = "best-effort",
+    ) {
         const runtimeUser = await this.ensureTenantRuntimeUser(ref);
         await fs.mkdir(this.TENANT_CONFIG_DIR, { recursive: true, mode: 0o711 });
         await fs.chmod(this.TENANT_CONFIG_DIR, 0o711);
@@ -825,6 +871,7 @@ class TenantRuntimeService {
         // Edge runtime and other services consume these env vars
         const pgrstEnv = [
             `
+# Managed by SupaCloud Management API. Legacy shell tooling must not overwrite this file.
 # SupaCloud Tenant PostgREST Runtime: ${ref}
 # PGRST_* variables have been removed to avoid duplicate configuration (P2-2)
 # PostgREST configuration is now single-sourced from the .conf file.
@@ -856,6 +903,7 @@ class TenantRuntimeService {
 
         // Generate PostgREST .conf configuration (single source of truth for all settings)
         const pgrstConf = `
+# Managed by SupaCloud Management API. Legacy shell tooling must not overwrite this file.
 # PostgREST config for tenant: ${ref}
 db-uri = ${quoteTomlBasicString(postgrestDbUri)}
 db-schemas = ${quoteTomlBasicString(dbSchemas)}
@@ -893,11 +941,25 @@ db-channel = ${quoteTomlBasicString(resolvePgrstChannel(ref))}
 
         // 共享认证模式下从项目只使用主项目 GoTrue，不再生成本地认证运行时。
         if (sharedAuthRuntime) {
-            await this.gotrueController.stopAndDisable(ref);
+            const sharedMarkerPath = path.join(this.TENANT_CONFIG_DIR, `${ref}_gotrue.shared`);
+            await this.writeTenantSecretFile(
+                sharedMarkerPath,
+                `${config.authRuntimeOwnerRef}\n`,
+                runtimeUser,
+            );
+            if (systemctlMode === "checked") {
+                const unit = this.gotrueController.unit(ref);
+                await runSystemctlOrThrow("stop", unit);
+                await runSystemctlOrThrow("disable", unit);
+            } else {
+                await this.gotrueController.stopAndDisable(ref);
+            }
             await this.persistTenantPortConfig(ref, pgrstPort, gotruePort);
             logger.info(`Config generated for ${ref} with shared GoTrue owner ${config.authRuntimeOwnerRef}`);
             return;
         }
+
+        await fs.rm(path.join(this.TENANT_CONFIG_DIR, `${ref}_gotrue.shared`), { force: true });
 
         // Generate GoTrue .env configuration
         const hasDedicatedAuthUrl = Boolean(creds.authUrl && creds.authUrl !== creds.apiUrl);
@@ -916,6 +978,7 @@ db-channel = ${quoteTomlBasicString(resolvePgrstChannel(ref))}
 
         const gotrueEnvLines = [
             `
+# Managed by SupaCloud Management API. Legacy shell tooling must not overwrite this file.
 # SupaCloud Tenant GoTrue Runtime: ${ref}
 `.trim(),
             renderSystemdEnvLine("GOTRUE_API_HOST", "0.0.0.0"),
@@ -927,22 +990,18 @@ db-channel = ${quoteTomlBasicString(resolvePgrstChannel(ref))}
             renderSystemdEnvLine("GOTRUE_DB_DATABASE_URL", authDbUri),
             renderSystemdEnvLine("GOTRUE_JWT_SECRET", creds.jwtSecret),
             `
-GOTRUE_JWT_EXP=3600
 GOTRUE_JWT_AUD=authenticated
 GOTRUE_JWT_DEFAULT_GROUP_NAME=authenticated
 GOTRUE_LOG_LEVEL=info
 GOTRUE_SERVER_READ_TIMEOUT=20
 GOTRUE_RELOADING_SIGNAL_ENABLED=true
 GOTRUE_RELOADING_POLLER_ENABLED=true
-GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION=true
-GOTRUE_PASSWORD_MIN_LENGTH=8
-GOTRUE_SECURITY_REFRESH_TOKEN_ROTATION_ENABLED=true
-GOTRUE_SECURITY_REFRESH_TOKEN_ROTATION_REUSE_INTERVAL=10
 GOTRUE_MAILER_URLPATHS_CONFIRMATION=/auth/v1/verify
 GOTRUE_MAILER_URLPATHS_INVITE=/auth/v1/verify
 GOTRUE_MAILER_URLPATHS_RECOVERY=/auth/v1/verify
 GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE=/auth/v1/verify
 `.trim(),
+            renderGoTrueSessionPolicyEnv(creds.authConfig),
             renderGoTrueAuthEnv(creds.authConfig),
             renderGoTruePasskeyEnv(creds.authConfig, {
                 rpId: siteHost,
@@ -1029,7 +1088,7 @@ GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE=/auth/v1/verify
         }
     }
 
-    private async installSystemdTemplate() {
+    private async installSystemdTemplate(systemctlMode: SystemctlExecutionMode = "best-effort") {
         const pgrstUnitPath = "/etc/systemd/system/supacloud-pgrst@.service";
         const gotrueUnitPath = "/etc/systemd/system/supacloud-gotrue@.service";
 
@@ -1120,7 +1179,11 @@ WantedBy=multi-user.target
         }
 
         if (shouldWritePgrstUnit || shouldWriteGotrueUnit) {
-            await $`systemctl daemon-reload`.nothrow().quiet();
+            if (systemctlMode === "checked") {
+                await runSystemctlOrThrow("daemon-reload");
+            } else {
+                await $`systemctl daemon-reload`.nothrow().quiet();
+            }
             logger.info("systemd template units installed");
         }
     }
@@ -2319,22 +2382,107 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
         }
     }
 
-    private async refreshSharedAuthDependents(ownerRef: string): Promise<void> {
-        const dependents = await metaSql`
-          SELECT ref
-          FROM projects
-          WHERE ref <> ${ownerRef}
-            AND deleted_at IS NULL
-            AND lower(status) IN ('active', 'creating')
-        `;
+    private async applyGotrueAuthConfig(ref: string): Promise<AppliedGotrueAuthConfig> {
+        const authRuntime = getAuthRuntimeDescriptor(ref);
+        if (authRuntime.mode === "shared") {
+            throw new Error(`Auth configuration for ${ref} is managed by ${authRuntime.authority_project_ref}`);
+        }
+
+        await this.ensureGotrueBinary();
+        await this.installSystemdTemplate("checked");
+
+        const pgrstPort = await this.getTenantPort(ref, "pgrst");
+        const gotruePort = await this.getTenantPort(ref, "gotrue");
+        await this.generateTenantConfig(ref, pgrstPort, gotruePort);
+
+        const unit = this.gotrueController.unit(ref);
+        const active = await this.gotrueController.isActive(ref);
+        if (await this.gotrueController.isFailed(ref)) {
+            await runSystemctlOrThrow("reset-failed", unit);
+        }
+        if (active) {
+            await runSystemctlOrThrow("restart", unit);
+        } else {
+            await this.ensureAuthSchema(ref);
+            await runSystemctlOrThrow("enable", unit);
+            await runSystemctlOrThrow("start", unit);
+        }
+
+        const status = await this.gotrueController.waitForHealthy(ref, gotruePort, 20, 500);
+        if (status.health !== "healthy") {
+            throw new Error(
+                status.last_error || `GoTrue runtime did not become healthy after applying auth config for ${ref}`,
+            );
+        }
+
+        return { authRuntime, pgrstPort, status };
+    }
+
+    private async restartActivePostgrestOrThrow(ref: string, pgrstPort: number): Promise<void> {
+        if (!(await this.postgrestController.isActive(ref))) return;
+
+        await this.ensurePostgrestBinary();
+        await runSystemctlOrThrow("restart", this.postgrestController.unit(ref));
+        const status = await this.postgrestController.waitForHealthy(ref, pgrstPort, 20, 500);
+        await this.recordPostgrestObservation(ref, status);
+        if (status.health !== "healthy") {
+            throw new Error(status.last_error || `PostgREST did not become healthy after refreshing ${ref}`);
+        }
+    }
+
+    private async refreshProjectPostgrestVerifier(ref: string, pgrstPort: number): Promise<void> {
+        const jwtPolicy = await this.getTenantCredentials(ref);
+        await this.ensurePostgrestPrerequest(
+            ref,
+            jwtPolicy.thirdPartyJwtPolicy,
+            jwtPolicy.localJwtIssuer,
+        );
+        await runtimeCacheService.invalidateProjectRuntimeEnv(ref);
+        await this.restartActivePostgrestOrThrow(ref, pgrstPort);
+    }
+
+    public async applyAuthConfig(
+        ref: string,
+        previousAuth: Record<string, unknown>,
+        nextAuth: Record<string, unknown>,
+    ): Promise<GotrueRuntimeStatus> {
+        const applied = await this.applyGotrueAuthConfig(ref);
+        if (!authConfigChangesPostgrestVerifier(previousAuth, nextAuth)) return applied.status;
+
+        await this.refreshProjectPostgrestVerifier(ref, applied.pgrstPort);
+        if (applied.authRuntime.mode === "owner") {
+            await this.refreshSharedAuthDependents(ref, "checked");
+        }
+        return applied.status;
+    }
+
+    private async listSharedAuthDependentRefs(ownerRef: string): Promise<string[]> {
+        try {
+            const dependents = await metaSql`
+              SELECT ref
+              FROM projects
+              WHERE ref <> ${ownerRef}
+                AND deleted_at IS NULL
+                AND lower(status) IN ('active', 'creating')
+            `;
+            return dependents
+                .map((dependent: Record<string, unknown>) => String(dependent.ref || ""))
+                .filter(Boolean);
+        } catch (error) {
+            throw new SupAuthDependentRefreshError([], { cause: error });
+        }
+    }
+
+    private async refreshSharedAuthDependents(
+        ownerRef: string,
+        systemctlMode: SystemctlExecutionMode = "best-effort",
+    ): Promise<void> {
         const failures: string[] = [];
-        for (const dependent of dependents) {
-            const ref = String(dependent.ref || "");
-            if (!ref) continue;
+        for (const ref of await this.listSharedAuthDependentRefs(ownerRef)) {
             try {
                 const pgrstPort = await this.getTenantPort(ref, "pgrst");
                 const gotruePort = await this.getTenantPort(ref, "gotrue");
-                await this.generateTenantConfig(ref, pgrstPort, gotruePort);
+                await this.generateTenantConfig(ref, pgrstPort, gotruePort, systemctlMode);
                 const jwtPolicy = await this.getTenantCredentials(ref);
                 await this.ensurePostgrestPrerequest(
                     ref,
@@ -2342,7 +2490,9 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
                     jwtPolicy.localJwtIssuer,
                 );
                 await runtimeCacheService.invalidateProjectRuntimeEnv(ref);
-                if (await this.postgrestController.isActive(ref)) {
+                if (systemctlMode === "checked") {
+                    await this.restartActivePostgrestOrThrow(ref, pgrstPort);
+                } else if (await this.postgrestController.isActive(ref)) {
                     await this.postgrestController.restart(ref);
                 }
             } catch (error: unknown) {
@@ -2354,7 +2504,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
             }
         }
         if (failures.length > 0) {
-            throw new Error(`Failed to refresh SupAuth dependents: ${failures.join(", ")}`);
+            throw new SupAuthDependentRefreshError(failures);
         }
     }
 

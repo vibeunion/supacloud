@@ -17,7 +17,15 @@ import {
   CHINA_OAUTH_PROVIDER_INFO,
 } from "../types/oauth";
 import { requireAuthRuntimeManagement } from "./auth-runtime";
-import { getAuthRuntimeDescriptor } from "../services/auth-runtime.service";
+import {
+  applyAuthSessionPolicyPatch,
+  AuthSessionPolicyValidationError,
+  normalizeAuthSessionPolicyPatch,
+} from "../services/auth-session-policy";
+import {
+  buildAuthRuntimeApplyFailureBody,
+  buildAuthSessionPolicyErrorBody,
+} from "./auth-config-responses";
 
 function generateGoTrueOAuthEnv(provider: OAuthProvider, config: OAuthProviderConfig): string {
   const mapping = OAUTH_ENV_MAPPINGS[provider];
@@ -396,10 +404,23 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
       }
 
       const currentAuth = (settings.auth as Record<string, unknown>) || {};
-      const updatedAuth = {
+      let sessionPolicyPatch: ReturnType<typeof normalizeAuthSessionPolicyPatch>;
+      try {
+        sessionPolicyPatch = normalizeAuthSessionPolicyPatch(body);
+      } catch (error: unknown) {
+        if (error instanceof AuthSessionPolicyValidationError) {
+          return status(400, buildAuthSessionPolicyErrorBody(error));
+        }
+        throw error;
+      }
+
+      const nonPolicyUpdates = Object.fromEntries(
+        Object.entries(body).filter(([key]) => !sessionPolicyPatch.consumedKeys.has(key)),
+      );
+      const updatedAuth = applyAuthSessionPolicyPatch({
         ...currentAuth,
-        ...body,
-      };
+        ...nonPolicyUpdates,
+      }, sessionPolicyPatch);
 
       const updated = await projectService.updateProjectSettings(params.ref, {
         ...settings,
@@ -407,15 +428,10 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
       });
 
       try {
-        await tenantRuntimeService.restartRuntime(params.ref);
+        await tenantRuntimeService.applyAuthConfig(params.ref, currentAuth, updatedAuth);
       } catch (error: unknown) {
-        logger.error("Failed to restart GoTrue after config update:", { error: error instanceof Error ? error.message : String(error) });
-        if (getAuthRuntimeDescriptor(params.ref).mode === "owner") {
-          return status(503, {
-            code: "SUPAUTH_DEPENDENT_REFRESH_FAILED",
-            message: "Auth configuration was saved, but one or more SupAuth dependents failed to refresh",
-          });
-        }
+        logger.error("Failed to apply GoTrue auth config:", { error: error instanceof Error ? error.message : String(error) });
+        return status(503, buildAuthRuntimeApplyFailureBody(params.ref, error));
       }
 
       return updated?.auth || {};
