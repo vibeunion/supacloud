@@ -268,6 +268,7 @@ export const sdkProxyInternals = {
     resolveProjectApiKey,
     maybeEnqueueAsyncFunction,
     buildEncryptedBackgroundAuth,
+    translateOpaqueApiKeyHeaders,
 };
 
 async function getUpstreamApiKey(ref: string, role: "anon" | "service_role"): Promise<string | null> {

@@ -41,11 +41,11 @@
     "directory": "packages/supacloud-js"
   },
   "peerDependencies": {
-    "@supabase/supabase-js": "^2.103.0"
+    "@supabase/supabase-js": "^2.110.7"
   },
   "devDependencies": {
     "@types/bun": "^1.3.14",
-    "@supabase/supabase-js": "^2.108.2",
+    "@supabase/supabase-js": "^2.110.7",
     "typescript": "^7.0.2"
   }
 }

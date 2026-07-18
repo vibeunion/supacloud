@@ -95,6 +95,10 @@ async function withSdkProxyTestContext(
 }
 
 describe("sdkProxyRoutes functions proxy", () => {
+  test("exposes tenant-bound API key header translation through the internal test seam", () => {
+    expect(typeof sdkProxyInternals.translateOpaqueApiKeyHeaders).toBe("function");
+  });
+
   test("resolves an opaque Secret Key through its hash without storing plaintext", async () => {
     const lookup = projectAuthInternals.buildApiKeyLookup("sb_secret_server_key", {
       includeProvisioning: true,
