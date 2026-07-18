@@ -14,13 +14,15 @@ export type EdgeRuntimeJwtVerificationResult =
     payload: JWTPayload;
   };
 
+export type EdgeRuntimeAuthRuntimeMode = "local" | "owner" | "shared" | "unknown";
+
 export type EdgeRuntimeProjectSecrets = {
   anonKey?: string;
   serviceRoleKey?: string;
   jwtSecret?: string;
   jwtJwks?: { keys: JWK[] } | null;
   thirdParty?: EdgeRuntimeThirdPartyJwtPolicy | null;
-  authRuntimeMode?: "local" | "owner" | "shared";
+  authRuntimeMode?: EdgeRuntimeAuthRuntimeMode;
   authIssuer?: string;
 };
 
@@ -30,6 +32,15 @@ export type EdgeRuntimeThirdPartyJwtPolicy = {
   clientId: string;
   jwtJwks: { keys: JWK[] };
 };
+
+export function normalizeEdgeRuntimeAuthRuntimeMode(
+  value: unknown,
+): EdgeRuntimeAuthRuntimeMode {
+  if (value === "local" || value === "owner" || value === "shared") {
+    return value;
+  }
+  return "unknown";
+}
 
 export function normalizeJwtJwks(value: unknown): { keys: JWK[] } | null {
   let parsed = value;
@@ -76,6 +87,28 @@ export function normalizeThirdPartyJwtPolicy(value: unknown): EdgeRuntimeThirdPa
   return { issuer, clientId, audience, jwtJwks };
 }
 
+export function readEdgeRuntimeProjectSecrets(
+  env: Record<string, string>,
+): EdgeRuntimeProjectSecrets | null {
+  const authRuntimeMode = normalizeEdgeRuntimeAuthRuntimeMode(
+    env.SUPACLOUD_AUTH_RUNTIME_MODE,
+  );
+  if (authRuntimeMode === "unknown") return null;
+  const jwtJwks = normalizeJwtJwks(env.JWT_JWKS);
+  if (!env.SUPABASE_ANON_KEY && !env.SUPABASE_SERVICE_ROLE_KEY && !env.JWT_SECRET && !jwtJwks) {
+    return null;
+  }
+  return {
+    anonKey: env.SUPABASE_ANON_KEY || "",
+    serviceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY || "",
+    jwtSecret: env.JWT_SECRET || "",
+    jwtJwks,
+    thirdParty: normalizeThirdPartyJwtPolicy(env.SUPACLOUD_THIRD_PARTY_JWT_POLICY),
+    authRuntimeMode,
+    authIssuer: env.SUPACLOUD_AUTH_ISSUER || "",
+  };
+}
+
 function decodeJwtPart(value: string): Record<string, unknown> | null {
   try {
     const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
@@ -111,6 +144,7 @@ export async function verifyEdgeRuntimeJwtContext(
 ): Promise<EdgeRuntimeJwtVerificationResult> {
   const anonKey = secrets.anonKey || "";
   const serviceRoleKey = secrets.serviceRoleKey || "";
+  const authRuntimeMode = secrets.authRuntimeMode ?? "unknown";
 
   if (!authHeader) {
     if (apikeyHeader && apikeyHeader === anonKey) {
@@ -132,6 +166,10 @@ export async function verifyEdgeRuntimeJwtContext(
     };
   }
 
+  if (authRuntimeMode === "unknown") {
+    return { verified: false, source: "none" };
+  }
+
   const parts = token.split(".");
   if (parts.length !== 3) return { verified: false, source: "none" };
   const header = decodeJwtPart(parts[0]);
@@ -140,7 +178,11 @@ export async function verifyEdgeRuntimeJwtContext(
     return { verified: false, source: "none" };
   }
 
-  if (secrets.thirdParty && isThirdPartyCandidate(header, payload, secrets.thirdParty)) {
+  if (
+    authRuntimeMode !== "shared"
+    && secrets.thirdParty
+    && isThirdPartyCandidate(header, payload, secrets.thirdParty)
+  ) {
     try {
       const verified = await jwtVerify(token, createLocalJWKSet(secrets.thirdParty.jwtJwks), {
         algorithms: ["ES256", "RS256"],
@@ -163,26 +205,29 @@ export async function verifyEdgeRuntimeJwtContext(
     try {
       const localKeys = secrets.jwtJwks.keys.filter((key) => !isExternalKey(key, secrets.thirdParty ?? null));
       if (localKeys.length > 0) {
-        const sharedIssuer = secrets.authRuntimeMode === "shared"
+        const sharedIssuer = authRuntimeMode === "shared"
           ? secrets.authIssuer?.trim()
           : undefined;
-        if (secrets.authRuntimeMode === "shared" && !sharedIssuer) {
+        if (authRuntimeMode === "shared" && !sharedIssuer) {
           return { verified: false, source: "none" };
         }
         const verified = await jwtVerify(token, createLocalJWKSet({ keys: localKeys }), {
           algorithms: ["ES256", "RS256"],
           ...(sharedIssuer ? { issuer: sharedIssuer } : {}),
         });
-        if (secrets.authRuntimeMode === "shared" && verified.payload.role !== "authenticated") {
+        if (authRuntimeMode === "shared" && verified.payload.role !== "authenticated") {
           return { verified: false, source: "none" };
         }
         return { verified: true, source: "jwt", payload: verified.payload };
       }
     } catch {
-      // Fall through to legacy HS256 verification for old tokens without kid.
+      // Local/owner modes may fall through to legacy HS256 for old tokens.
     }
   }
 
+  if (authRuntimeMode === "shared") {
+    return { verified: false, source: "none" };
+  }
   if (!secrets.jwtSecret) return { verified: false, source: "none" };
   if (header.alg !== "HS256" || (header.kid !== undefined && header.kid !== "legacy-hs256")) {
     return { verified: false, source: "none" };
@@ -209,21 +254,34 @@ export async function verifyEdgeRuntimeJwt(
   )).verified;
 }
 
+const UNSAFE_VERIFIED_JWT_SUBJECT =
+  /[\u0000-\u001F\u007F-\u009F\u0100-\u{10FFFF}]/u;
+
+function verifiedJwtSubjectHeaderValue(
+  subject: unknown,
+): string | null {
+  if (typeof subject !== "string" || subject.length === 0) return null;
+  if (subject.trim() !== subject) return null;
+  if (UNSAFE_VERIFIED_JWT_SUBJECT.test(subject)) return null;
+  return subject;
+}
+
 /**
- * Only the Edge Runtime may set this header. Incoming values are always removed,
- * then replaced with the subject from the JWT payload verified by the gateway.
+ * Incoming values are always removed. A verified subject is forwarded only when
+ * HTTP header encoding can preserve the exact signed value.
  */
 export function withVerifiedJwtContext(
   request: Request,
-  payload?: Pick<JWTPayload, "sub">,
+  subject?: string,
 ): Request {
-  const headers = new Headers(request.headers);
+  const trustedRequest = request.clone();
+  const headers = trustedRequest.headers;
   headers.delete(VERIFIED_JWT_SUB_HEADER);
 
-  const subject = typeof payload?.sub === "string" ? payload.sub.trim() : "";
-  if (subject) {
-    headers.set(VERIFIED_JWT_SUB_HEADER, subject);
+  const headerValue = verifiedJwtSubjectHeaderValue(subject);
+  if (headerValue !== null) {
+    headers.set(VERIFIED_JWT_SUB_HEADER, headerValue);
   }
 
-  return new Request(request, { headers });
+  return trustedRequest;
 }

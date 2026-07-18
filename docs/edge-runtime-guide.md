@@ -133,6 +133,10 @@ exposes its verified subject through
 replaced by the runtime, so functions may use it as the authenticated user ID
 without calling GoTrue `getUser()` again.
 
+The runtime emits this header only when the signed `sub` value is non-empty and
+can be represented exactly as an HTTP header value. Otherwise the header stays
+absent while the original `Authorization` header remains available.
+
 The original `Authorization` header is preserved. Use that user JWT with a
 user-scoped Supabase client so PostgREST applies RLS when loading the local
 membership/profile record:

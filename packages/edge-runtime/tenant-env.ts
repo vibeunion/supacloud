@@ -11,6 +11,62 @@ const envInflightLoads = new Map<string, Promise<Record<string, string>>>();
 const ENV_CACHE_TTL = 5_000;
 const ENV_FALLBACK_CACHE_TTL = 30_000;
 const MASKED_SECRET_VALUE = "********";
+const SHARED_FORBIDDEN_AUTH_ENV_KEYS = [
+  "JWT_SECRET",
+  "JWT_KEYS",
+  "SUPACLOUD_THIRD_PARTY_JWT_POLICY",
+] as const;
+const FILE_AUTH_VERIFIER_ENV_KEYS = [
+  ...SHARED_FORBIDDEN_AUTH_ENV_KEYS,
+  "JWT_JWKS",
+] as const;
+const LEGACY_AUTH_ENV_KEYS = [
+  ...FILE_AUTH_VERIFIER_ENV_KEYS,
+  "SUPACLOUD_AUTH_RUNTIME_MODE",
+  "SUPACLOUD_AUTH_AUTHORITY_REF",
+  "SUPACLOUD_AUTH_ISSUER",
+] as const;
+
+function stripEnvKeys(
+  env: Record<string, string>,
+  keys: readonly string[],
+): Record<string, string> {
+  const clean = { ...env };
+  for (const key of keys) delete clean[key];
+  return clean;
+}
+
+function prepareFallbackFileEnv(
+  fileEnv: Record<string, string>,
+  hasCachedEnv: boolean,
+): Record<string, string> {
+  if (hasCachedEnv) return stripEnvKeys(fileEnv, FILE_AUTH_VERIFIER_ENV_KEYS);
+  const mode = fileEnv.SUPACLOUD_AUTH_RUNTIME_MODE;
+  if (mode === "local" || mode === "owner") return { ...fileEnv };
+  return stripEnvKeys(fileEnv, FILE_AUTH_VERIFIER_ENV_KEYS);
+}
+
+export function buildFallbackTenantEnv(
+  ref: string,
+  fileEnv: Record<string, string>,
+  cachedEnv?: Record<string, string>,
+): Record<string, string> {
+  return normalizeTenantEnv(ref, {
+    ...prepareFallbackFileEnv(fileEnv, cachedEnv !== undefined),
+    ...(cachedEnv ? stripEnvKeys(cachedEnv, LEGACY_AUTH_ENV_KEYS) : {}),
+  });
+}
+
+export function mergeTenantRuntimeEnv(
+  ref: string,
+  fileEnv: Record<string, string>,
+  apiEnv: Record<string, string>,
+): Record<string, string> {
+  return normalizeTenantEnv(ref, {
+    ...stripEnvKeys(fileEnv, LEGACY_AUTH_ENV_KEYS),
+    ...apiEnv,
+  });
+}
 
 export function isMaskedSecretValue(value: unknown): boolean {
   return typeof value === "string" && value.trim() === MASKED_SECRET_VALUE;
@@ -110,6 +166,13 @@ export function normalizeTenantEnv(ref: string, env: Record<string, string>): Re
   normalized.SUPACLOUD_INTERNAL_REST_URL ||= tenantLocalPostgrestUrl(normalized) || `${internalSupabaseUrl}/rest/v1`;
   if (apiHost) normalized.SUPACLOUD_PROJECT_API_HOST = apiHost;
 
+  const authRuntimeMode = normalized.SUPACLOUD_AUTH_RUNTIME_MODE;
+  if (authRuntimeMode === "shared") {
+    for (const key of SHARED_FORBIDDEN_AUTH_ENV_KEYS) delete normalized[key];
+  } else if (authRuntimeMode !== "local" && authRuntimeMode !== "owner") {
+    for (const key of FILE_AUTH_VERIFIER_ENV_KEYS) delete normalized[key];
+  }
+
   return normalized;
 }
 
@@ -203,7 +266,7 @@ async function loadEnvFromLegacySecretsApi(ref: string): Promise<Record<string, 
         env[secret.name] = secret.value;
       }
     }
-    return stripMaskedSecretValues(env);
+    return stripEnvKeys(stripMaskedSecretValues(env), LEGACY_AUTH_ENV_KEYS);
   } catch (err) {
     console.warn(
       `[tenant-env] legacy secrets API error for ${ref}:`,
@@ -223,15 +286,12 @@ async function loadTenantEnvUncached(ref: string): Promise<Record<string, string
 
   const apiEnv = await loadEnvFromApi(ref);
   if (apiEnv === null) {
-    const fallback = normalizeTenantEnv(ref, cached ? { ...fileEnv, ...cached.env } : fileEnv);
+    const fallback = buildFallbackTenantEnv(ref, fileEnv, cached?.env);
     envCache.set(ref, { env: fallback, expiresAt: Date.now() + ENV_FALLBACK_CACHE_TTL });
-    if (cached) {
-      return fallback;
-    }
     return fallback;
   }
 
-  const merged = normalizeTenantEnv(ref, { ...fileEnv, ...apiEnv });
+  const merged = mergeTenantRuntimeEnv(ref, fileEnv, apiEnv);
 
   envCache.set(ref, { env: merged, expiresAt: Date.now() + ENV_CACHE_TTL });
   return merged;
