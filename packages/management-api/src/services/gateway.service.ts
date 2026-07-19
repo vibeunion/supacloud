@@ -11,6 +11,7 @@ import {
 } from "../utils/project-routing";
 import { normalizeProjectConfig, normalizeThirdPartyAuthConfig } from "../utils/project-config";
 import { uniqueStrings } from "../utils/strings";
+import { assertUniqueCaddyIds, runCaddyStartupPreflight } from "./caddy-startup-preflight";
 import {
     type CaddyHeaderValue,
     type CaddyRoute,
@@ -345,7 +346,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
             if (Array.isArray(routes)) {
                 for (const route of routes) {
                     const id = typeof route?.["@id"] === "string" ? route["@id"] : "";
-                    if (!id) continue;
+                    if (!id || id === CADDY_UNMATCHED_HOST_ROUTE_ID) continue;
                     if (!this.routesById.has(id)) this.routesById.set(id, this.migrateHydratedRoute(id, route));
                     this.hydrateRateLimitFromRoute(id, route);
                 }
@@ -592,7 +593,8 @@ export class CaddyGatewayProvider implements GatewayProvider {
         };
     }
 
-    private async validateCandidateConfig(candidatePath: string): Promise<void> {
+    private async validateCandidateConfig(candidatePath: string, candidateConfig: CaddyConfig): Promise<void> {
+        assertUniqueCaddyIds(candidateConfig);
         try {
             await fs.access(config.caddyBinaryPath);
         } catch {
@@ -604,6 +606,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
             const detail = result.stderr.toString() || result.stdout.toString();
             throw new Error(`Caddy config validation failed: ${detail.slice(0, 1000)}`);
         }
+        await runCaddyStartupPreflight(config.caddyBinaryPath, candidatePath, candidateConfig);
     }
 
     private async writeAndLoadCurrentConfig(): Promise<void> {
@@ -613,7 +616,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
         await fs.writeFile(tmpPath, JSON.stringify(next, null, 2));
 
         try {
-            await this.validateCandidateConfig(tmpPath);
+            await this.validateCandidateConfig(tmpPath, next);
             const res = await this.caddyRequest("/load", "POST", next);
             if (!res.ok) {
                 const text = await res.text().catch(() => "");

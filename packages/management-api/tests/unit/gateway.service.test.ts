@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import { config } from "../../src/config";
 import {
     CaddyGatewayProvider,
@@ -617,6 +618,32 @@ describe("CaddyGatewayProvider", () => {
         restore();
     });
 
+    test("blocks publishing when Caddy validate passes but the startup preflight fails", async () => {
+        const binaryPath = resolve(import.meta.dir, "../fixtures/caddy/fake-startup-rejects.sh");
+        await chmod(binaryPath, 0o755);
+
+        const originalBinaryPath = config.caddyBinaryPath;
+        const calls: Array<{ url: string; method: string; body: any }> = [];
+        const restoreFetch = captureFetch(calls);
+        config.caddyBinaryPath = binaryPath;
+
+        try {
+            const provider = new CaddyGatewayProvider();
+            await expect(provider.configureFrontendRoute({
+                projectRef: "proj123",
+                deploymentId: "preflight",
+                hosts: ["preflight.example.com"],
+                root: "/tmp/supacloud-caddy-test/frontend",
+                mode: "static",
+            })).rejects.toThrow("Caddy startup preflight failed");
+
+            expect(calls.some((call) => call.method === "POST" && call.url.endsWith("/load"))).toBe(false);
+        } finally {
+            config.caddyBinaryPath = originalBinaryPath;
+            restoreFetch();
+        }
+    });
+
     test("configureCustomGatewayRoutes renders controlled proxy and static Caddy routes", async () => {
         const calls: Array<{ url: string; method: string; body: any }> = [];
         const restore = captureFetch(calls);
@@ -1167,8 +1194,11 @@ describe("CaddyGatewayProvider", () => {
         const load = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
         const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
         const certs = load?.body?.apps?.tls?.certificates?.load_files ?? [];
+        const routeIds = routes.map((route: any) => route["@id"]).filter(Boolean);
 
         expect(routes.some((route: any) => route["@id"] === "route-project-persistref-rest")).toBe(true);
+        expect(routeIds.filter((routeId: string) => routeId === "route-system-unmatched-host-404")).toHaveLength(1);
+        expect(new Set(routeIds).size).toBe(routeIds.length);
         expect(certs.length).toBeGreaterThan(0);
 
         restore();
