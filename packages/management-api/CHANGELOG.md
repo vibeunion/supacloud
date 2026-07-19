@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.45.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.45.0...management-api-v0.45.1) (2026-07-19)
+
+
+### Bug Fixes
+
+* harden Caddy config publishing ([d727840](https://github.com/zuohuadong/supacloud/commit/d727840c55cb8b51a17c0a8979e14d3080866ec3))
+
 ## [0.45.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.44.0...management-api-v0.45.0) (2026-07-19)
 
 
