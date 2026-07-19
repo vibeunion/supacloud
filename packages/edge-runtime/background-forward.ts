@@ -46,6 +46,7 @@ export function buildBackgroundForwardedRequest(
     headers,
     body: ["GET", "HEAD"].includes(request.method) ? undefined : request.body,
     duplex: ["GET", "HEAD"].includes(request.method) ? undefined : "half",
+    signal: request.signal,
   } as RequestInit & { duplex?: "half" });
 }
 

@@ -7,6 +7,7 @@ import {
 
 describe("background forwarded request", () => {
   test("uses a tenant-scoped background token without forwarding the master token", async () => {
+    const controller = new AbortController();
     const request = new Request("http://edge-runtime/internal/background/proj/fn", {
       method: "POST",
       headers: {
@@ -19,6 +20,7 @@ describe("background forwarded request", () => {
         "x-supacloud-jwt-sub": "attacker-controlled",
       },
       body: JSON.stringify({ ok: true }),
+      signal: controller.signal,
     });
 
     const forwarded = buildBackgroundForwardedRequest(request, "background-token");
@@ -30,6 +32,8 @@ describe("background forwarded request", () => {
     expect(forwarded.headers.get("x-supacloud-auth-authorization")).toBeNull();
     expect(forwarded.headers.get("x-supacloud-auth-apikey")).toBeNull();
     expect(forwarded.headers.get("x-supacloud-jwt-sub")).toBeNull();
+    controller.abort();
+    expect(forwarded.signal.aborted).toBe(true);
     expect(await forwarded.text()).toBe(JSON.stringify({ ok: true }));
   });
 

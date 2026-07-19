@@ -364,6 +364,7 @@ async function dispatchFunction(
         : tenantEnv,
       request,
       cancelKey: opts?.cancelKey,
+      signal: request.signal,
       onLog: (entry) => {
         void appendFunctionRuntimeLog(projectRef, functionName, entry, runtimeLogContext);
         opts?.onLog?.(entry);

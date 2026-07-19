@@ -153,6 +153,344 @@ describe("WorkerPool framework routing", () => {
   });
 });
 
+describe("WorkerPool cancellation and replacement", () => {
+  test("replaces a timed-out worker and immediately serves the queued request", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-timeout-replace-"));
+    const functionPath = join(projectRoot, "fn.ts");
+    await Bun.write(functionPath, `
+      export default {
+        async fetch(request) {
+          if (new URL(request.url).pathname.endsWith("/slow")) {
+            await new Promise(() => {});
+          }
+          return new Response("fast", { status: 200 });
+        }
+      }
+    `);
+
+    const pool = new WorkerPool({ size: 1, requestTimeout: 100 });
+    pools.push(pool);
+
+    try {
+      const slowResponse = pool.dispatch({
+        functionId: "proj_timeout_fn",
+        functionPath,
+        projectRoot,
+        env: {},
+        request: new Request("http://edge.local/functions/v1/fn/slow"),
+      });
+      await Bun.sleep(20);
+      const fastResponse = pool.dispatch({
+        functionId: "proj_timeout_fn",
+        functionPath,
+        projectRoot,
+        env: {},
+        request: new Request("http://edge.local/functions/v1/fn/fast"),
+      });
+
+      expect((await slowResponse).status).toBe(504);
+      expect(await (await fastResponse).text()).toBe("fast");
+      const metrics = pool.snapshotMetrics("timeout");
+      expect(metrics["timeout_total_worker_replacements"]).toBe(1);
+      expect(metrics["timeout_total_queued_requests"]).toBe(1);
+      expect(metrics["timeout_idle_workers"]).toBe(1);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("propagates an in-flight AbortSignal and releases the worker", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-signal-cancel-"));
+    const startedPath = join(projectRoot, "started.txt");
+    const functionPath = join(projectRoot, "fn.ts");
+    await Bun.write(functionPath, `
+      export default {
+        async fetch(request) {
+          if (new URL(request.url).pathname.endsWith("/slow")) {
+            await Bun.write(process.env.STARTED_PATH, "started");
+            await new Promise((_, reject) => {
+              request.signal.addEventListener("abort", () => reject(request.signal.reason), { once: true });
+            });
+          }
+          return new Response("fast", { status: 200 });
+        }
+      }
+    `);
+
+    const pool = new WorkerPool({ size: 1, requestTimeout: 5_000 });
+    const controller = new AbortController();
+    pools.push(pool);
+
+    try {
+      const slowResponse = pool.dispatch({
+        functionId: "proj_cancel_fn",
+        functionPath,
+        projectRoot,
+        env: { STARTED_PATH: startedPath },
+        request: new Request("http://edge.local/functions/v1/fn/slow", {
+          signal: controller.signal,
+        }),
+      });
+      await waitForFile(startedPath);
+      const fastResponse = pool.dispatch({
+        functionId: "proj_cancel_fn",
+        functionPath,
+        projectRoot,
+        env: { STARTED_PATH: startedPath },
+        request: new Request("http://edge.local/functions/v1/fn/fast"),
+      });
+
+      controller.abort();
+
+      expect((await slowResponse).status).toBe(499);
+      expect(await (await fastResponse).text()).toBe("fast");
+      expect(pool.snapshotMetrics("cancel")["cancel_idle_workers"]).toBe(1);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("isolates HTTP aborts when requests share an external cancel key", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-duplicate-cancel-key-"));
+    const firstStartedPath = join(projectRoot, "first-started.txt");
+    const secondStartedPath = join(projectRoot, "second-started.txt");
+    const functionPath = join(projectRoot, "fn.ts");
+    await Bun.write(functionPath, `
+      export default {
+        async fetch(request) {
+          await Bun.write(process.env.STARTED_PATH, "started");
+          await new Promise((_, reject) => {
+            request.signal.addEventListener("abort", () => reject(request.signal.reason), { once: true });
+          });
+        }
+      }
+    `);
+
+    const pool = new WorkerPool({ size: 2, requestTimeout: 5_000 });
+    const firstController = new AbortController();
+    const secondController = new AbortController();
+    pools.push(pool);
+
+    try {
+      const firstResponse = pool.dispatch({
+        functionId: "proj_duplicate_first",
+        functionPath,
+        projectRoot,
+        cancelKey: "shared-task-id",
+        env: { STARTED_PATH: firstStartedPath },
+        request: new Request("http://edge.local/functions/v1/fn/first", {
+          signal: firstController.signal,
+        }),
+      });
+      const secondResponse = pool.dispatch({
+        functionId: "proj_duplicate_second",
+        functionPath,
+        projectRoot,
+        cancelKey: "shared-task-id",
+        env: { STARTED_PATH: secondStartedPath },
+        request: new Request("http://edge.local/functions/v1/fn/second", {
+          signal: secondController.signal,
+        }),
+      });
+      await Promise.all([
+        waitForFile(firstStartedPath),
+        waitForFile(secondStartedPath),
+      ]);
+
+      firstController.abort();
+
+      expect((await firstResponse).status).toBe(499);
+      const secondSettled = await Promise.race([
+        secondResponse.then(() => true),
+        Bun.sleep(50).then(() => false),
+      ]);
+      expect(secondSettled).toBe(false);
+
+      expect(pool.cancel("shared-task-id")).toBe(true);
+      expect((await secondResponse).status).toBe(499);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("removes an aborted queued request before it occupies a worker", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-queued-cancel-"));
+    const functionPath = join(projectRoot, "fn.ts");
+    await Bun.write(functionPath, `
+      export default {
+        async fetch(request) {
+          if (new URL(request.url).pathname.endsWith("/slow")) await Bun.sleep(100);
+          return new Response("done", { status: 200 });
+        }
+      }
+    `);
+
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    const controller = new AbortController();
+    pools.push(pool);
+
+    try {
+      const slowResponse = pool.dispatch({
+        functionId: "proj_queue_fn",
+        functionPath,
+        projectRoot,
+        env: {},
+        request: new Request("http://edge.local/functions/v1/fn/slow"),
+      });
+      const queuedResponse = pool.dispatch({
+        functionId: "proj_queue_fn",
+        functionPath,
+        projectRoot,
+        env: {},
+        request: new Request("http://edge.local/functions/v1/fn/cancel", {
+          signal: controller.signal,
+        }),
+      });
+
+      controller.abort();
+
+      expect((await queuedResponse).status).toBe(499);
+      expect((await slowResponse).status).toBe(200);
+      expect(pool.snapshotMetrics("queue")["queue_total_queued_requests"]).toBe(1);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("replaces a cancelled streaming worker before serving the queue", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-stream-cancel-"));
+    const functionPath = join(projectRoot, "fn.ts");
+    await Bun.write(functionPath, `
+      export default {
+        async fetch(request) {
+          if (!new URL(request.url).pathname.endsWith("/stream")) {
+            return Response.json({ overlap: false });
+          }
+          return new Response(new ReadableStream({
+            start(controller) {
+              const timer = setInterval(() => controller.enqueue(new TextEncoder().encode("tick\\n")), 10);
+              request.signal.addEventListener("abort", () => clearInterval(timer), { once: true });
+            }
+          }), { headers: { "content-type": "text/event-stream" } });
+        }
+      }
+    `);
+
+    const pool = new WorkerPool({ size: 1, requestTimeout: 5_000 });
+    pools.push(pool);
+
+    try {
+      const streamResponse = await pool.dispatch({
+        functionId: "proj_stream_fn",
+        functionPath,
+        projectRoot,
+        env: {},
+        request: new Request("http://edge.local/functions/v1/fn/stream"),
+      });
+      const reader = streamResponse.body!.getReader();
+      expect((await reader.read()).done).toBe(false);
+
+      const queuedResponse = pool.dispatch({
+        functionId: "proj_stream_fn",
+        functionPath,
+        projectRoot,
+        env: {},
+        request: new Request("http://edge.local/functions/v1/fn/fast"),
+      });
+      await reader.cancel();
+
+      expect(await (await queuedResponse).json()).toEqual({ overlap: false });
+      const metrics = pool.snapshotMetrics("stream");
+      expect(metrics["stream_total_worker_replacements"]).toBe(1);
+      expect(metrics["stream_idle_workers"]).toBe(1);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("drain waits for ordinary requests without an external cancel key", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-drain-active-"));
+    const functionPath = join(projectRoot, "fn.ts");
+    await Bun.write(functionPath, `
+      export default {
+        async fetch() {
+          await Bun.sleep(120);
+          return new Response("done", { status: 200 });
+        }
+      }
+    `);
+
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    try {
+      const responsePromise = pool.dispatch({
+        functionId: "proj_drain_fn",
+        functionPath,
+        projectRoot,
+        env: {},
+        request: new Request("http://edge.local/functions/v1/fn"),
+      });
+      await Bun.sleep(20);
+      let drained = false;
+      const drainPromise = pool.drain().then(() => {
+        drained = true;
+      });
+
+      await Bun.sleep(40);
+      expect(drained).toBe(false);
+      expect((await responsePromise).status).toBe(200);
+      await drainPromise;
+      expect(drained).toBe(true);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("drain waits for EdgeRuntime.waitUntil after the response", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-drain-waituntil-"));
+    const completedPath = join(projectRoot, "waituntil-complete.txt");
+    const functionPath = join(projectRoot, "fn.ts");
+    await Bun.write(functionPath, `
+      export default {
+        async fetch() {
+          EdgeRuntime.waitUntil((async () => {
+            await Bun.sleep(120);
+            await Bun.write(process.env.COMPLETED_PATH, "done");
+          })());
+          return new Response("accepted", { status: 202 });
+        }
+      }
+    `);
+
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    try {
+      const response = await pool.dispatch({
+        functionId: "proj_waituntil_drain_fn",
+        functionPath,
+        projectRoot,
+        env: { COMPLETED_PATH: completedPath },
+        request: new Request("http://edge.local/functions/v1/fn"),
+      });
+      expect(response.status).toBe(202);
+
+      let drained = false;
+      const drainPromise = pool.drain().then(() => {
+        drained = true;
+      });
+      await Bun.sleep(40);
+      expect(drained).toBe(false);
+      expect(await waitForFile(completedPath)).toBe("done");
+      await drainPromise;
+      expect(drained).toBe(true);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("WorkerPool TLS policy handoff", () => {
   test("passes host TLS policy into smol workers for HTTPS fetch", async () => {
     const openssl = Bun.spawnSync(["openssl", "version"], { stdout: "pipe", stderr: "pipe" });

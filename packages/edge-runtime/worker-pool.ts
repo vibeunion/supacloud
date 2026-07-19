@@ -15,6 +15,7 @@ interface DispatchOptions {
   env: Record<string, string>;
   request: Request;
   cancelKey?: string;
+  signal?: AbortSignal;
   envLoadMs?: number;
   onLog?: (entry: {
     timestamp: string;
@@ -23,6 +24,17 @@ interface DispatchOptions {
     message: string;
   }) => void;
 }
+
+type ScheduledDispatch = DispatchOptions & {
+  executionKey: string;
+};
+
+type QueuedDispatch = {
+  opts: ScheduledDispatch;
+  enqueuedAt: number;
+  resolve: (response: Response) => void;
+  reject: (error: unknown) => void;
+};
 
 const DEFAULT_MAX_BODY_SIZE_MB = 30;
 function resolveMaxBodySizeBytes(value = process.env.EDGE_MAX_BODY_SIZE_MB): number {
@@ -37,6 +49,13 @@ const MAX_BODY_SIZE = resolveMaxBodySizeBytes();
 const MAX_QUEUE_SIZE = Number(process.env.MAX_QUEUE_SIZE) || 200;
 const WAIT_UNTIL_TIMEOUT_MS = Number(process.env.EDGE_WAIT_UNTIL_TIMEOUT_MS) || 300_000;
 const CONTROL_MESSAGE_TIMEOUT_MS = Number(process.env.EDGE_CONTROL_MESSAGE_TIMEOUT_MS) || 1_000;
+
+function cancelledResponse(): Response {
+  return new Response(JSON.stringify({ error: "Task cancelled" }), {
+    status: 499,
+    headers: { "Content-Type": "application/json" },
+  });
+}
 
 type WorkerControlMessage =
   | { type: "invalidate_module"; functionId: string }
@@ -106,15 +125,13 @@ function resolveWorkerEntry(): string | URL {
 export class WorkerPool {
   private workers: Worker[] = [];
   private idle: Worker[] = [];
-  private queue: Array<{
-    opts: DispatchOptions;
-    resolve: (r: Response) => void;
-  }> = [];
-  private inFlight = new Map<string, { cancel: () => void }>();
+  private queue: QueuedDispatch[] = [];
+  private inFlight = new Map<string, { cancel: () => void; cancelKey?: string }>();
   private totalRequests = 0;
   private totalInvalidations = 0;
   private totalEnvLoadMs = 0;
   private totalQueueWaitMs = 0;
+  private totalQueuedRequests = 0;
   private totalWorkerExecMs = 0;
   private totalModuleCacheHits = 0;
   private totalModuleCacheMisses = 0;
@@ -128,7 +145,6 @@ export class WorkerPool {
   private workerMetadata = new Map<
     Worker,
     {
-      cancelKey?: string;
       replacementTimer?: ReturnType<typeof setTimeout>;
       isCancelling?: boolean;
     }
@@ -170,7 +186,26 @@ export class WorkerPool {
 
     this.totalRequests++;
     if (opts.envLoadMs) this.totalEnvLoadMs += opts.envLoadMs;
-    const queueStart = performance.now();
+    const executionKey = crypto.randomUUID();
+    const signal = opts.signal ?? opts.request.signal;
+    if (signal.aborted) return cancelledResponse();
+
+    const responsePromise = this.enqueue({ ...opts, executionKey });
+    const cancelDispatch = () => {
+      this.cancelExecution(executionKey);
+    };
+    signal.addEventListener("abort", cancelDispatch, { once: true });
+    if (signal.aborted) cancelDispatch();
+
+    try {
+      return await responsePromise;
+    } finally {
+      signal.removeEventListener("abort", cancelDispatch);
+    }
+  }
+
+  private enqueue(opts: ScheduledDispatch): Promise<Response> {
+    const enqueuedAt = performance.now();
     return new Promise<Response>((resolve, reject) => {
       if (this.queue.length >= MAX_QUEUE_SIZE) {
         resolve(new Response(JSON.stringify({ error: "Too many concurrent requests, please retry" }), {
@@ -180,30 +215,25 @@ export class WorkerPool {
         return;
       }
 
-      (opts as any)._queueStart = queueStart;
       const worker = this.idle.pop();
       if (worker) {
-        this.execute(worker, opts, resolve).catch(reject);
+        this.execute(worker, opts, enqueuedAt, resolve).catch(reject);
       } else {
-        this.queue.push({ opts, resolve });
+        this.totalQueuedRequests++;
+        this.queue.push({ opts, enqueuedAt, resolve, reject });
       }
     });
   }
 
   private async execute(
     worker: Worker,
-    opts: DispatchOptions,
+    opts: ScheduledDispatch,
+    enqueuedAt: number,
     resolve: (r: Response) => void,
   ) {
-    const queueStart = (opts as any)._queueStart as number | undefined;
-    const queueWaitMs = queueStart ? Math.round(performance.now() - queueStart) : 0;
+    const queueWaitMs = Math.round(performance.now() - enqueuedAt);
     this.totalQueueWaitMs += queueWaitMs;
     const cancelGraceMs = 3_000;
-    const cancelledResponse = () =>
-      new Response(JSON.stringify({ error: "Task cancelled" }), {
-        status: 499,
-        headers: { "Content-Type": "application/json" },
-      });
 
     let resolved = false;
     const safeResolve = (r: Response) => {
@@ -212,10 +242,9 @@ export class WorkerPool {
       resolve(r);
     };
     const cleanupInFlight = () => {
-      if (opts.cancelKey) this.inFlight.delete(opts.cancelKey);
+      this.inFlight.delete(opts.executionKey);
     };
     const metadata = this.workerMetadata.get(worker) || {};
-    metadata.cancelKey = opts.cancelKey;
     metadata.isCancelling = false;
     if (metadata.replacementTimer) {
       clearTimeout(metadata.replacementTimer);
@@ -225,7 +254,6 @@ export class WorkerPool {
     const clearCancellationState = () => {
       const current = this.workerMetadata.get(worker);
       if (!current) return;
-      current.cancelKey = undefined;
       current.isCancelling = false;
       if (current.replacementTimer) {
         clearTimeout(current.replacementTimer);
@@ -233,12 +261,62 @@ export class WorkerPool {
       }
     };
 
+    let executionStarted = false;
+    let cancellationRequested = false;
+    let detachResponseListeners = () => {};
+
     const timeout = setTimeout(() => {
+      detachResponseListeners();
       cleanupInFlight();
       clearCancellationState();
       safeResolve(new Response("Gateway Timeout", { status: 504 }));
-      this.recycle(worker);
+      this.replaceWorker(worker);
     }, this.config.requestTimeout);
+
+    const replaceCancelledWorker = () => {
+      detachResponseListeners();
+      cleanupInFlight();
+      clearCancellationState();
+      safeResolve(cancelledResponse());
+      this.replaceWorker(worker);
+    };
+
+    const cancelExecution = () => {
+      cancellationRequested = true;
+      if (!executionStarted) return;
+      const current = this.workerMetadata.get(worker);
+      if (!current || current.isCancelling) return;
+      current.isCancelling = true;
+      clearTimeout(timeout);
+      try {
+        worker.postMessage({ type: "cancel_current" });
+      } catch (error) {
+        console.warn("[Pool] Failed to signal worker cancellation; replacing worker", error);
+        replaceCancelledWorker();
+        return;
+      }
+      current.replacementTimer = setTimeout(replaceCancelledWorker, cancelGraceMs);
+    };
+
+    this.inFlight.set(opts.executionKey, {
+      cancel: cancelExecution,
+      cancelKey: opts.cancelKey,
+    });
+
+    const releaseBeforeExecution = () => {
+      clearTimeout(timeout);
+      cleanupInFlight();
+      clearCancellationState();
+      this.recycle(worker);
+    };
+
+    const finishCancelledBeforeExecution = () => {
+      if (resolved) return true;
+      if (!cancellationRequested) return false;
+      releaseBeforeExecution();
+      safeResolve(cancelledResponse());
+      return true;
+    };
 
     const headers: Record<string, string | string[]> = {};
     opts.request.headers.forEach((v, k) => {
@@ -257,7 +335,7 @@ export class WorkerPool {
     if (opts.request.body && !["GET", "HEAD"].includes(opts.request.method)) {
       const contentLength = opts.request.headers.get("content-length");
       if (contentLength && parseInt(contentLength) > MAX_BODY_SIZE) {
-        clearCancellationState();
+        releaseBeforeExecution();
         safeResolve(
           new Response(
             JSON.stringify({
@@ -269,13 +347,18 @@ export class WorkerPool {
             },
           ),
         );
-        this.recycle(worker);
-        clearTimeout(timeout);
         return;
       }
-      body = await opts.request.arrayBuffer();
+      try {
+        body = await opts.request.arrayBuffer();
+      } catch (error) {
+        if (finishCancelledBeforeExecution()) return;
+        releaseBeforeExecution();
+        throw error;
+      }
+      if (finishCancelledBeforeExecution()) return;
       if (body.byteLength > MAX_BODY_SIZE) {
-        clearCancellationState();
+        releaseBeforeExecution();
         safeResolve(
           new Response(
             JSON.stringify({
@@ -287,54 +370,23 @@ export class WorkerPool {
             },
           ),
         );
-        this.recycle(worker);
-        clearTimeout(timeout);
         return;
       }
     }
 
     const execStart = performance.now();
-    const tlsPolicy = await this.resolveTlsPolicy(opts.env);
-    worker.postMessage({
-      functionId: opts.functionId,
-      functionPath: opts.functionPath,
-      projectRoot: opts.projectRoot,
-      projectRef: opts.projectRef,
-      moduleVersion: opts.moduleVersion,
-      env: opts.env,
-      tlsPolicy,
-      url: opts.request.url,
-      method: opts.request.method,
-      headers,
-      body,
-    });
-
-    if (opts.cancelKey) {
-      this.inFlight.set(opts.cancelKey, {
-        cancel: () => {
-          const current = this.workerMetadata.get(worker);
-          if (current?.isCancelling) return;
-          if (current) current.isCancelling = true;
-          clearTimeout(timeout);
-          try {
-            worker.postMessage({ type: "cancel_current" });
-          } catch {
-          }
-          cleanupInFlight();
-          if (current) {
-            current.replacementTimer = setTimeout(() => {
-              worker.removeListener("message", onMsg);
-              worker.removeListener("error", onErr);
-              clearCancellationState();
-              safeResolve(cancelledResponse());
-              this.replaceWorker(worker);
-            }, cancelGraceMs);
-          }
-        },
-      });
+    let tlsPolicy: EdgeFetchTlsPolicy;
+    try {
+      tlsPolicy = await this.resolveTlsPolicy(opts.env);
+    } catch (error) {
+      if (finishCancelledBeforeExecution()) return;
+      releaseBeforeExecution();
+      throw error;
     }
+    if (finishCancelledBeforeExecution()) return;
 
     let waitUntilTimeout: ReturnType<typeof setTimeout> | undefined;
+    let failActiveStream: ((error: Error) => void) | undefined;
 
     const onMsg = (msg: {
       type?: string;
@@ -384,20 +436,24 @@ export class WorkerPool {
       this.totalWorkerExecMs += workerExecMs;
       this.recordModuleCacheStats(msg);
       clearTimeout(timeout);
-      cleanupInFlight();
-      clearCancellationState();
       const waitUntilPending = msg.waitUntilPending === true;
-      if (!waitUntilPending) {
+      const streamPending = msg.type === "stream_start" && !!msg.streamId;
+      if (!waitUntilPending && !streamPending) {
+        cleanupInFlight();
+        clearCancellationState();
         worker.removeListener("error", onErr);
         worker.removeListener("message", onMsg);
-      } else {
+      } else if (waitUntilPending) {
         waitUntilTimeout = setTimeout(() => {
           worker.removeAllListeners("message");
           worker.removeListener("error", onErr);
+          cleanupInFlight();
           clearCancellationState();
           console.error("[Pool] EdgeRuntime.waitUntil timed out; replacing worker");
           this.replaceWorker(worker);
         }, WAIT_UNTIL_TIMEOUT_MS);
+      } else {
+        worker.removeListener("message", onMsg);
       }
 
       const resHeaders = new Headers();
@@ -411,18 +467,34 @@ export class WorkerPool {
 
       if (msg.type === "stream_start" && msg.streamId) {
         const streamId = msg.streamId;
-        let recycled = false;
-        const recycle = () => {
-          if (!recycled) {
-            recycled = true;
-            clearCancellationState();
-            this.recycle(worker);
-          }
+        let streamFinished = false;
+        let streamListener: ((streamMsg: any) => void) | undefined;
+        const clearStreamState = () => {
+          streamFinished = true;
+          if (streamListener) worker.removeListener("message", streamListener);
+          worker.removeListener("error", onErr);
+          cleanupInFlight();
+          clearCancellationState();
+          failActiveStream = undefined;
+        };
+        const completeStream = () => {
+          if (streamFinished) return;
+          clearStreamState();
+          this.recycle(worker);
+        };
+        const abandonStream = () => {
+          if (streamFinished) return;
+          clearStreamState();
+          this.replaceWorker(worker);
         };
 
         const bodyStream = new ReadableStream<Uint8Array>({
           start(controller) {
-            const streamListener = (streamMsg: any) => {
+            failActiveStream = (error) => {
+              controller.error(error);
+              abandonStream();
+            };
+            streamListener = (streamMsg: any) => {
               if (streamMsg.type === "stream_chunk" && streamMsg.streamId === streamId) {
                 if (streamMsg.done) {
                   if (streamMsg.error) {
@@ -430,8 +502,7 @@ export class WorkerPool {
                   } else {
                     controller.close();
                   }
-                  worker.removeListener("message", streamListener);
-                  recycle();
+                  completeStream();
                 } else if (streamMsg.chunk) {
                   controller.enqueue(new Uint8Array(streamMsg.chunk));
                 }
@@ -440,7 +511,7 @@ export class WorkerPool {
             worker.on("message", streamListener);
           },
           cancel() {
-            recycle();
+            abandonStream();
           },
         });
 
@@ -473,6 +544,8 @@ export class WorkerPool {
             if (waitUntilTimeout) clearTimeout(waitUntilTimeout);
             worker.removeListener("message", waitUntilListener);
             worker.removeListener("error", onErr);
+            cleanupInFlight();
+            clearCancellationState();
             this.recycle(worker);
           };
           worker.on("message", waitUntilListener);
@@ -485,48 +558,76 @@ export class WorkerPool {
     const onErr = (err: Error) => {
       clearTimeout(timeout);
       if (waitUntilTimeout) clearTimeout(waitUntilTimeout);
+      console.error("[Pool] Worker error:", err);
+      if (failActiveStream) {
+        failActiveStream(err);
+        return;
+      }
       cleanupInFlight();
       clearCancellationState();
-      worker.removeListener("message", onMsg);
-      console.error("[Pool] Worker error:", err);
+      detachResponseListeners();
       safeResolve(new Response("Internal Error", { status: 500 }));
       this.replaceWorker(worker);
     };
 
+    detachResponseListeners = () => {
+      worker.removeListener("message", onMsg);
+      worker.removeListener("error", onErr);
+    };
     worker.on("message", onMsg);
     worker.once("error", onErr);
+    try {
+      worker.postMessage({
+        functionId: opts.functionId,
+        functionPath: opts.functionPath,
+        projectRoot: opts.projectRoot,
+        projectRef: opts.projectRef,
+        moduleVersion: opts.moduleVersion,
+        env: opts.env,
+        tlsPolicy,
+        url: opts.request.url,
+        method: opts.request.method,
+        headers,
+        body,
+      });
+    } catch (error) {
+      onErr(error instanceof Error ? error : new Error(String(error)));
+      return;
+    }
+    executionStarted = true;
+    if (cancellationRequested) cancelExecution();
   }
 
   private recycle(worker: Worker) {
+    if (!this.activeWorkers.has(worker)) return;
     const metadata = this.workerMetadata.get(worker);
     if (metadata?.replacementTimer) {
       clearTimeout(metadata.replacementTimer);
       metadata.replacementTimer = undefined;
     }
     if (metadata) {
-      metadata.cancelKey = undefined;
       metadata.isCancelling = false;
     }
     if (this.tainted.has(worker)) {
       this.tainted.delete(worker);
       this.replaceWorker(worker);
-      if (this.queue.length > 0 && this.idle.length > 0) {
-        const fresh = this.idle.pop()!;
-        const next = this.queue.shift()!;
-        this.execute(fresh, next.opts, next.resolve);
-      }
       return;
     }
 
-    if (this.queue.length > 0) {
-      const next = this.queue.shift()!;
-      this.execute(worker, next.opts, next.resolve);
-    } else {
+    this.schedule(worker);
+  }
+
+  private schedule(worker: Worker) {
+    const next = this.queue.shift();
+    if (!next) {
       this.idle.push(worker);
+      return;
     }
+    this.execute(worker, next.opts, next.enqueuedAt, next.resolve).catch(next.reject);
   }
 
   private replaceWorker(dead: Worker) {
+    if (!this.activeWorkers.delete(dead)) return;
     this.totalWorkerReplacements++;
     const metadata = this.workerMetadata.get(dead);
     if (metadata?.replacementTimer) clearTimeout(metadata.replacementTimer);
@@ -535,14 +636,12 @@ export class WorkerPool {
     if (idleIdx !== -1) this.idle.splice(idleIdx, 1);
     const idx = this.workers.indexOf(dead);
     if (idx !== -1) this.workers.splice(idx, 1);
-    this.activeWorkers.delete(dead);
-    try {
-      dead.terminate();
-    } catch {
-    }
+    void dead.terminate().catch((error) => {
+      console.warn("[Pool] Failed to terminate replaced worker", error);
+    });
     const w = this.createWorker();
     this.activeWorkers.add(w);
-    this.idle.push(w);
+    this.schedule(w);
   }
 
   getMetrics(): string {
@@ -779,27 +878,37 @@ export class WorkerPool {
       [`${prefix}_total_preheat_ms`]: this.totalPreheatMs,
       [`${prefix}_avg_env_load_ms`]: this.totalRequests > 0 ? Math.round(this.totalEnvLoadMs / this.totalRequests) : 0,
       [`${prefix}_avg_queue_wait_ms`]: this.totalRequests > 0 ? Math.round(this.totalQueueWaitMs / this.totalRequests) : 0,
-      [`${prefix}_total_queued_requests`]: this.totalQueueWaitMs > 0 ? this.totalRequests : 0,
+      [`${prefix}_total_queued_requests`]: this.totalQueuedRequests,
       [`${prefix}_avg_worker_exec_ms`]: this.totalRequests > 0 ? Math.round(this.totalWorkerExecMs / this.totalRequests) : 0,
     };
   }
 
   cancel(cancelKey: string): boolean {
     const queuedIndex = this.queue.findIndex((entry) => entry.opts.cancelKey === cancelKey);
-    if (queuedIndex >= 0) {
-      const [queued] = this.queue.splice(queuedIndex, 1);
-      queued.resolve(
-        new Response(JSON.stringify({ error: "Task cancelled" }), {
-          status: 499,
-          headers: { "Content-Type": "application/json" },
-        }),
-      );
-      return true;
-    }
+    if (queuedIndex >= 0) return this.cancelQueued(queuedIndex);
 
-    const inFlight = this.inFlight.get(cancelKey);
+    const inFlight = [...this.inFlight.values()]
+      .find((execution) => execution.cancelKey === cancelKey);
     if (!inFlight) return false;
     inFlight.cancel();
+    return true;
+  }
+
+  private cancelExecution(executionKey: string): boolean {
+    const queuedIndex = this.queue.findIndex(
+      (entry) => entry.opts.executionKey === executionKey,
+    );
+    if (queuedIndex >= 0) return this.cancelQueued(queuedIndex);
+
+    const inFlight = this.inFlight.get(executionKey);
+    if (!inFlight) return false;
+    inFlight.cancel();
+    return true;
+  }
+
+  private cancelQueued(queuedIndex: number): boolean {
+    const [queued] = this.queue.splice(queuedIndex, 1);
+    queued.resolve(cancelledResponse());
     return true;
   }
 
