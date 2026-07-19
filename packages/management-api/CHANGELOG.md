@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.45.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.44.0...management-api-v0.45.0) (2026-07-19)
+
+
+### Features
+
+* complete safe database promotion workflow ([6763d10](https://github.com/zuohuadong/supacloud/commit/6763d10eb4e6b715259a1e445c5921dc276d6dfd))
+* improve frontend hosting and console experience ([dc8422c](https://github.com/zuohuadong/supacloud/commit/dc8422c1c15be3c01b73ddb90d12b835c674880f))
+
+
+### Bug Fixes
+
+* backfill migration ledger timestamps ([710f29a](https://github.com/zuohuadong/supacloud/commit/710f29a11a97b29ea731c57aa77bec5ad5f25249))
+* support bigint migration ledgers ([6e63228](https://github.com/zuohuadong/supacloud/commit/6e63228e09541d73bedbf82fcff93f0152a68e62))
+
+
+### Miscellaneous Chores
+
+* upgrade platform component baselines ([ef35d38](https://github.com/zuohuadong/supacloud/commit/ef35d38dc9975e5832c80ee477820351b6a40606))
+
 ## [0.44.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.43.0...management-api-v0.44.0) (2026-07-18)
 
 

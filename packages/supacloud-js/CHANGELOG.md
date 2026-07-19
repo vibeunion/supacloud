@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.0](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.19.5...supacloud-js-v0.20.0) (2026-07-19)
+
+
+### Features
+
+* complete safe database promotion workflow ([6763d10](https://github.com/zuohuadong/supacloud/commit/6763d10eb4e6b715259a1e445c5921dc276d6dfd))
+
 ## [0.19.5](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.19.4...supacloud-js-v0.19.5) (2026-07-18)
 
 

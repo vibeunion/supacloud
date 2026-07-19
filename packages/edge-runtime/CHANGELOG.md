@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.13.0](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.12.2...edge-runtime-v0.13.0) (2026-07-19)
+
+
+### Features
+
+* complete safe database promotion workflow ([6763d10](https://github.com/zuohuadong/supacloud/commit/6763d10eb4e6b715259a1e445c5921dc276d6dfd))
+* improve frontend hosting and console experience ([dc8422c](https://github.com/zuohuadong/supacloud/commit/dc8422c1c15be3c01b73ddb90d12b835c674880f))
+
 ## [0.12.2](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.12.1...edge-runtime-v0.12.2) (2026-07-18)
 
 
