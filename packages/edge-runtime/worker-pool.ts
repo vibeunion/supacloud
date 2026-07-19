@@ -49,7 +49,7 @@ const MAX_BODY_SIZE = resolveMaxBodySizeBytes();
 const MAX_QUEUE_SIZE = Number(process.env.MAX_QUEUE_SIZE) || 200;
 const WAIT_UNTIL_TIMEOUT_MS = Number(process.env.EDGE_WAIT_UNTIL_TIMEOUT_MS) || 300_000;
 const CONTROL_MESSAGE_TIMEOUT_MS = Number(process.env.EDGE_CONTROL_MESSAGE_TIMEOUT_MS) || 1_000;
-const DEFAULT_MAX_RETIREMENT_AGE_MS = 30_000;
+const DEFAULT_MAX_RETIREMENT_AGE_MS = 60_000;
 const DEFAULT_PREHEAT_TIMEOUT_MS = 10_000;
 
 function cancelledResponse(): Response {
