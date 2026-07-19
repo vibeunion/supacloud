@@ -49,6 +49,8 @@ const MAX_BODY_SIZE = resolveMaxBodySizeBytes();
 const MAX_QUEUE_SIZE = Number(process.env.MAX_QUEUE_SIZE) || 200;
 const WAIT_UNTIL_TIMEOUT_MS = Number(process.env.EDGE_WAIT_UNTIL_TIMEOUT_MS) || 300_000;
 const CONTROL_MESSAGE_TIMEOUT_MS = Number(process.env.EDGE_CONTROL_MESSAGE_TIMEOUT_MS) || 1_000;
+const DEFAULT_MAX_RETIREMENT_AGE_MS = 60_000;
+const DEFAULT_PREHEAT_TIMEOUT_MS = 10_000;
 
 function cancelledResponse(): Response {
   return new Response(JSON.stringify({ error: "Task cancelled" }), {
@@ -91,6 +93,29 @@ export type WorkerPoolPreheatResult = {
   cacheHits: number;
   cacheMisses: number;
   durationMs: number;
+};
+
+type RetirementBudgetExceeded = {
+  limit: "count" | "age";
+  retiredWorkers: number;
+  oldestRetirementAgeMs: number;
+};
+
+type WorkerPoolConfig = {
+  size: number;
+  requestTimeout: number;
+  smol?: boolean;
+  preheatTimeoutMs?: number;
+  retirementBudget?: {
+    maxRetiredWorkers: number;
+    maxRetirementAgeMs: number;
+  };
+  onRetirementBudgetExceeded?: (exceeded: RetirementBudgetExceeded) => void;
+};
+
+type RetiredWorker = {
+  retiredAt: number;
+  ageTimer: ReturnType<typeof setTimeout>;
 };
 
 function extractProjectRef(functionId: string): string | null {
@@ -141,7 +166,11 @@ export class WorkerPool {
   private totalPreheatAttempts = 0;
   private totalPreheatSucceeded = 0;
   private totalPreheatMs = 0;
+  private totalWorkerRetirements = 0;
+  private totalNaturalWorkerExits = 0;
+  private retirementBudgetExceeded = false;
   private activeWorkers = new Set<Worker>();
+  private retiredWorkers = new Map<Worker, RetiredWorker>();
   private workerMetadata = new Map<
     Worker,
     {
@@ -152,7 +181,21 @@ export class WorkerPool {
   private tainted = new Set<Worker>();
   private draining = false;
 
-  constructor(private config: { size: number; requestTimeout: number; smol?: boolean }) {
+  private readonly retirementBudget: {
+    maxRetiredWorkers: number;
+    maxRetirementAgeMs: number;
+  };
+  private readonly onRetirementBudgetExceeded: (exceeded: RetirementBudgetExceeded) => void;
+
+  constructor(private config: WorkerPoolConfig) {
+    this.retirementBudget = config.retirementBudget ?? {
+      maxRetiredWorkers: Math.max(config.size * 2, 8),
+      maxRetirementAgeMs: DEFAULT_MAX_RETIREMENT_AGE_MS,
+    };
+    this.onRetirementBudgetExceeded = config.onRetirementBudgetExceeded ?? ((exceeded) => {
+      console.error("[Pool] Worker retirement budget exceeded; restarting Edge Runtime", exceeded);
+      process.exit(1);
+    });
     for (let i = 0; i < config.size; i++) {
       const w = this.createWorker();
       this.idle.push(w);
@@ -167,6 +210,7 @@ export class WorkerPool {
     } as any);
     this.workers.push(w);
     this.workerMetadata.set(w, {});
+    w.once("exit", () => this.onWorkerExit(w));
     return w;
   }
 
@@ -270,7 +314,7 @@ export class WorkerPool {
       cleanupInFlight();
       clearCancellationState();
       safeResolve(new Response("Gateway Timeout", { status: 504 }));
-      this.replaceWorker(worker);
+      this.retireWorker(worker);
     }, this.config.requestTimeout);
 
     const replaceCancelledWorker = () => {
@@ -278,7 +322,7 @@ export class WorkerPool {
       cleanupInFlight();
       clearCancellationState();
       safeResolve(cancelledResponse());
-      this.replaceWorker(worker);
+      this.retireWorker(worker);
     };
 
     const cancelExecution = () => {
@@ -450,7 +494,7 @@ export class WorkerPool {
           cleanupInFlight();
           clearCancellationState();
           console.error("[Pool] EdgeRuntime.waitUntil timed out; replacing worker");
-          this.replaceWorker(worker);
+          this.retireWorker(worker);
         }, WAIT_UNTIL_TIMEOUT_MS);
       } else {
         worker.removeListener("message", onMsg);
@@ -485,7 +529,7 @@ export class WorkerPool {
         const abandonStream = () => {
           if (streamFinished) return;
           clearStreamState();
-          this.replaceWorker(worker);
+          this.retireWorker(worker);
         };
 
         const bodyStream = new ReadableStream<Uint8Array>({
@@ -567,7 +611,7 @@ export class WorkerPool {
       clearCancellationState();
       detachResponseListeners();
       safeResolve(new Response("Internal Error", { status: 500 }));
-      this.replaceWorker(worker);
+      this.retireWorker(worker);
     };
 
     detachResponseListeners = () => {
@@ -610,7 +654,7 @@ export class WorkerPool {
     }
     if (this.tainted.has(worker)) {
       this.tainted.delete(worker);
-      this.replaceWorker(worker);
+      this.retireWorker(worker);
       return;
     }
 
@@ -626,22 +670,98 @@ export class WorkerPool {
     this.execute(worker, next.opts, next.enqueuedAt, next.resolve).catch(next.reject);
   }
 
-  private replaceWorker(dead: Worker) {
-    if (!this.activeWorkers.delete(dead)) return;
-    this.totalWorkerReplacements++;
-    const metadata = this.workerMetadata.get(dead);
+  private retireWorker(worker: Worker) {
+    if (!this.activeWorkers.delete(worker)) return;
+    this.totalWorkerRetirements++;
+    const metadata = this.workerMetadata.get(worker);
     if (metadata?.replacementTimer) clearTimeout(metadata.replacementTimer);
-    this.workerMetadata.delete(dead);
-    const idleIdx = this.idle.indexOf(dead);
+    this.workerMetadata.delete(worker);
+    this.tainted.delete(worker);
+    const idleIdx = this.idle.indexOf(worker);
     if (idleIdx !== -1) this.idle.splice(idleIdx, 1);
-    const idx = this.workers.indexOf(dead);
-    if (idx !== -1) this.workers.splice(idx, 1);
-    void dead.terminate().catch((error) => {
-      console.warn("[Pool] Failed to terminate replaced worker", error);
+    this.trackRetiredWorker(worker);
+
+    try {
+      worker.postMessage({ type: "retire" });
+    } catch (error) {
+      console.warn("[Pool] Failed to signal cooperative worker retirement", error);
+    }
+    worker.unref();
+
+    if (!this.draining) {
+      this.totalWorkerReplacements++;
+      const replacement = this.createWorker();
+      this.activeWorkers.add(replacement);
+      this.schedule(replacement);
+    }
+  }
+
+  private trackRetiredWorker(worker: Worker) {
+    const retiredAt = Date.now();
+    const ageTimer = setTimeout(() => {
+      if (!this.retiredWorkers.has(worker)) return;
+      this.triggerRetirementFailSafe("age");
+    }, this.retirementBudget.maxRetirementAgeMs);
+    this.retiredWorkers.set(worker, { retiredAt, ageTimer });
+    if (this.retiredWorkers.size > this.retirementBudget.maxRetiredWorkers) {
+      this.triggerRetirementFailSafe("count");
+    }
+  }
+
+  private onWorkerExit(worker: Worker) {
+    const retired = this.retiredWorkers.get(worker);
+    if (retired) {
+      clearTimeout(retired.ageTimer);
+      this.retiredWorkers.delete(worker);
+      this.totalNaturalWorkerExits++;
+    }
+
+    this.removeWorkerReferences(worker);
+    if (!this.activeWorkers.delete(worker) || this.draining) return;
+
+    this.totalWorkerReplacements++;
+    const replacement = this.createWorker();
+    this.activeWorkers.add(replacement);
+    this.schedule(replacement);
+  }
+
+  private removeWorkerReferences(worker: Worker) {
+    this.workerMetadata.delete(worker);
+    this.tainted.delete(worker);
+    const idleIndex = this.idle.indexOf(worker);
+    if (idleIndex !== -1) this.idle.splice(idleIndex, 1);
+    const workerIndex = this.workers.indexOf(worker);
+    if (workerIndex !== -1) this.workers.splice(workerIndex, 1);
+  }
+
+  private triggerRetirementFailSafe(limit: "count" | "age") {
+    if (this.retirementBudgetExceeded) return;
+    this.retirementBudgetExceeded = true;
+    this.stopDispatching();
+    this.onRetirementBudgetExceeded({
+      limit,
+      retiredWorkers: this.retiredWorkers.size,
+      oldestRetirementAgeMs: this.oldestRetirementAgeMs(),
     });
-    const w = this.createWorker();
-    this.activeWorkers.add(w);
-    this.schedule(w);
+  }
+
+  private oldestRetirementAgeMs(): number {
+    let oldestRetiredAt = Date.now();
+    for (const retired of this.retiredWorkers.values()) {
+      oldestRetiredAt = Math.min(oldestRetiredAt, retired.retiredAt);
+    }
+    return this.retiredWorkers.size === 0 ? 0 : Date.now() - oldestRetiredAt;
+  }
+
+  private stopDispatching() {
+    this.draining = true;
+    for (const entry of this.queue) {
+      entry.resolve(new Response(JSON.stringify({ error: "Server shutting down" }), {
+        status: 503,
+        headers: { "Content-Type": "application/json" },
+      }));
+    }
+    this.queue = [];
   }
 
   getMetrics(): string {
@@ -714,7 +834,7 @@ export class WorkerPool {
     for (const { worker, result } of results) {
       if (result.acked) continue;
       if (this.idle.includes(worker)) {
-        this.replaceWorker(worker);
+        this.retireWorker(worker);
       } else {
         this.tainted.add(worker);
       }
@@ -755,8 +875,9 @@ export class WorkerPool {
     return new Promise((resolve) => {
       const timeout = setTimeout(() => {
         worker.removeListener("message", onMsg);
+        this.retireWorker(worker);
         resolve({ success: false, cacheHit: null, moduleCacheSize: this.lastModuleCacheEntries });
-      }, 10000);
+      }, this.config.preheatTimeoutMs ?? DEFAULT_PREHEAT_TIMEOUT_MS);
 
       const onMsg = (msg: {
         type?: string;
@@ -784,16 +905,24 @@ export class WorkerPool {
       };
 
       worker.on("message", onMsg);
-      worker.postMessage({
-        type: "preheat",
-        functionId,
-        functionPath,
-        projectRoot,
-        projectRef,
-        moduleVersion: options.moduleVersion,
-        env,
-        tlsPolicy,
-      });
+      try {
+        worker.postMessage({
+          type: "preheat",
+          functionId,
+          functionPath,
+          projectRoot,
+          projectRef,
+          moduleVersion: options.moduleVersion,
+          env,
+          tlsPolicy,
+        });
+      } catch (error) {
+        clearTimeout(timeout);
+        worker.removeListener("message", onMsg);
+        console.warn("[Pool] Failed to dispatch worker preheat", error);
+        this.retireWorker(worker);
+        resolve({ success: false, cacheHit: null, moduleCacheSize: this.lastModuleCacheEntries });
+      }
     });
   }
 
@@ -873,6 +1002,11 @@ export class WorkerPool {
       [`${prefix}_total_module_cache_invalidated`]: this.totalModuleCacheInvalidated,
       [`${prefix}_module_cache_entries_last_worker`]: this.lastModuleCacheEntries,
       [`${prefix}_total_worker_replacements`]: this.totalWorkerReplacements,
+      [`${prefix}_retired_workers`]: this.retiredWorkers.size,
+      [`${prefix}_total_worker_retirements`]: this.totalWorkerRetirements,
+      [`${prefix}_total_natural_worker_exits`]: this.totalNaturalWorkerExits,
+      [`${prefix}_oldest_retired_worker_age_ms`]: this.oldestRetirementAgeMs(),
+      [`${prefix}_retirement_budget_exceeded`]: this.retirementBudgetExceeded ? 1 : 0,
       [`${prefix}_total_preheat_attempts`]: this.totalPreheatAttempts,
       [`${prefix}_total_preheat_succeeded`]: this.totalPreheatSucceeded,
       [`${prefix}_total_preheat_ms`]: this.totalPreheatMs,
@@ -917,14 +1051,7 @@ export class WorkerPool {
   }
 
   drain(): Promise<void> {
-    this.draining = true;
-    for (const entry of this.queue) {
-      entry.resolve(new Response(JSON.stringify({ error: "Server shutting down" }), {
-        status: 503,
-        headers: { "Content-Type": "application/json" },
-      }));
-    }
-    this.queue = [];
+    this.stopDispatching();
 
     return new Promise((resolve) => {
       const check = () => {
@@ -936,5 +1063,20 @@ export class WorkerPool {
       };
       check();
     });
+  }
+
+  async shutdown(): Promise<void> {
+    const maxDrainMs = Math.min(this.config.requestTimeout + 100, 5_000);
+    const drained = await Promise.race([
+      this.drain().then(() => true),
+      Bun.sleep(maxDrainMs).then(() => false),
+    ]);
+    if (!drained) {
+      console.error(`[Pool] Cooperative shutdown drain exceeded ${maxDrainMs}ms`);
+    }
+    for (const worker of [...this.activeWorkers]) {
+      this.retireWorker(worker);
+    }
+    await Bun.sleep(0);
   }
 }

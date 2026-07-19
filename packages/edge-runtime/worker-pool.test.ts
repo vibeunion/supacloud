@@ -9,9 +9,7 @@ const pools: WorkerPool[] = [];
 
 afterEach(async () => {
   for (const pool of pools.splice(0)) {
-    for (const worker of (pool as any).workers || []) {
-      await worker.terminate();
-    }
+    await pool.shutdown();
   }
 });
 
@@ -22,6 +20,20 @@ async function waitForFile(path: string, timeoutMs = 2_000): Promise<string> {
     await Bun.sleep(20);
   }
   throw new Error(`Timed out waiting for ${path}`);
+}
+
+async function waitForMetric(
+  pool: WorkerPool,
+  metric: string,
+  expected: number,
+  timeoutMs = 2_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (pool.snapshotMetrics("test")[`test_${metric}`] === expected) return;
+    await Bun.sleep(10);
+  }
+  throw new Error(`Timed out waiting for ${metric}=${expected}`);
 }
 
 describe("WorkerPool EdgeRuntime.waitUntil", () => {
@@ -192,8 +204,11 @@ describe("WorkerPool cancellation and replacement", () => {
       expect(await (await fastResponse).text()).toBe("fast");
       const metrics = pool.snapshotMetrics("timeout");
       expect(metrics["timeout_total_worker_replacements"]).toBe(1);
+      expect(metrics["timeout_total_worker_retirements"]).toBe(1);
       expect(metrics["timeout_total_queued_requests"]).toBe(1);
       expect(metrics["timeout_idle_workers"]).toBe(1);
+      await waitForMetric(pool, "total_natural_worker_exits", 1);
+      expect(pool.snapshotMetrics("timeout")["timeout_retired_workers"]).toBe(0);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
@@ -485,6 +500,137 @@ describe("WorkerPool cancellation and replacement", () => {
       expect(await waitForFile(completedPath)).toBe("done");
       await drainPromise;
       expect(drained).toBe(true);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("WorkerPool cooperative retirement", () => {
+  test("triggers the count budget once and stops accepting requests", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-retirement-count-"));
+    const functionPath = join(projectRoot, "slow.ts");
+    await Bun.write(functionPath, `
+      export default async function fetch(request) {
+        await new Promise((resolve) => {
+          const keepAlive = setInterval(() => {}, 10);
+          request.signal.addEventListener("abort", () => {
+            setTimeout(() => {
+              clearInterval(keepAlive);
+              resolve();
+            }, 150);
+          }, { once: true });
+        });
+        return new Response("retired");
+      }
+    `);
+
+    const exceeded: string[] = [];
+    const pool = new WorkerPool({
+      size: 1,
+      requestTimeout: 25,
+      retirementBudget: { maxRetiredWorkers: 1, maxRetirementAgeMs: 1_000 },
+      onRetirementBudgetExceeded: (event) => exceeded.push(event.limit),
+    });
+    pools.push(pool);
+
+    try {
+      const dispatchSlow = () => pool.dispatch({
+        functionId: "proj_retirement_count",
+        functionPath,
+        projectRoot,
+        env: {},
+        request: new Request("http://edge.local/functions/v1/slow"),
+      });
+      expect((await dispatchSlow()).status).toBe(504);
+      expect((await dispatchSlow()).status).toBe(504);
+      expect(exceeded).toEqual(["count"]);
+      expect(pool.snapshotMetrics("retirement")["retirement_retirement_budget_exceeded"]).toBe(1);
+      expect((await dispatchSlow()).status).toBe(503);
+      await waitForMetric(pool, "total_natural_worker_exits", 2);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("triggers the age budget once for a worker that cannot drain promptly", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-retirement-age-"));
+    const functionPath = join(projectRoot, "slow.ts");
+    await Bun.write(functionPath, `
+      export default async function fetch(request) {
+        await new Promise((resolve) => {
+          const keepAlive = setInterval(() => {}, 10);
+          request.signal.addEventListener("abort", () => {
+            setTimeout(() => {
+              clearInterval(keepAlive);
+              resolve();
+            }, 150);
+          }, { once: true });
+        });
+        return new Response("retired");
+      }
+    `);
+
+    const exceeded: string[] = [];
+    const pool = new WorkerPool({
+      size: 1,
+      requestTimeout: 25,
+      retirementBudget: { maxRetiredWorkers: 8, maxRetirementAgeMs: 30 },
+      onRetirementBudgetExceeded: (event) => exceeded.push(event.limit),
+    });
+    pools.push(pool);
+
+    try {
+      const response = await pool.dispatch({
+        functionId: "proj_retirement_age",
+        functionPath,
+        projectRoot,
+        env: {},
+        request: new Request("http://edge.local/functions/v1/slow"),
+      });
+      expect(response.status).toBe(504);
+      await waitForMetric(pool, "retirement_budget_exceeded", 1);
+      expect(exceeded).toEqual(["age"]);
+      await Bun.sleep(50);
+      expect(exceeded).toEqual(["age"]);
+      await waitForMetric(pool, "total_natural_worker_exits", 1);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("never returns a timed-out preheat worker to the idle pool", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-preheat-retirement-"));
+    const slowFunctionPath = join(projectRoot, "slow-preheat.ts");
+    const fastFunctionPath = join(projectRoot, "fast.ts");
+    await Bun.write(slowFunctionPath, `
+      await Bun.sleep(150);
+      export default () => new Response("late");
+    `);
+    await Bun.write(fastFunctionPath, `export default () => new Response("replacement");`);
+
+    const pool = new WorkerPool({ size: 1, requestTimeout: 1_000, preheatTimeoutMs: 25 });
+    pools.push(pool);
+
+    try {
+      expect(await pool.preheat(
+        "proj_preheat_slow",
+        slowFunctionPath,
+        projectRoot,
+        {},
+        { moduleVersion: "v1" },
+      )).toBe(false);
+      const response = await pool.dispatch({
+        functionId: "proj_preheat_fast",
+        functionPath: fastFunctionPath,
+        projectRoot,
+        env: {},
+        request: new Request("http://edge.local/functions/v1/fast"),
+      });
+      expect(await response.text()).toBe("replacement");
+      expect(pool.snapshotMetrics("preheat")["preheat_total_worker_retirements"]).toBe(1);
+      await waitForMetric(pool, "total_natural_worker_exits", 1);
+      expect(pool.snapshotMetrics("preheat")["preheat_idle_workers"]).toBe(1);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
