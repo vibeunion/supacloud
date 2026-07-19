@@ -22,12 +22,12 @@ SUPACLOUD_META_DB="${SUPACLOUD_META_DB:-supacloud_meta}"
 POSTGREST_RTS="${POSTGREST_RTS:--N1 -M256m -I0.5 -A4m}"
 POSTGREST_MEMORY_MAX="${POSTGREST_MEMORY_MAX:-384M}"
 POSTGREST_CPU_WEIGHT="${POSTGREST_CPU_WEIGHT:-40}"
-POSTGREST_DEFAULT_VERSION="v14.13"
-POSTGREST_X86_64_SHA256="2a0537411cd79c7180f8669a6488d5813b89f93fa7e486915512aca96f1a9bcf"
-POSTGREST_ARM64_SHA256="d100eec50ec02f3811679847b2c90d08e178b2123c1f079eadddb8a920bcde2a"
-GOTRUE_DEFAULT_VERSION="v2.191.0"
-GOTRUE_AMD64_SHA256="32da8473b79de594ea4c2b6023f3d34901b99e846dc1fce71dfd8fd3a65e0b72"
-GOTRUE_ARM64_SHA256="f24d79edc35ec33b78f1c9ee02909a002a2ac49ac071a82b51fb80eae1bdfb42"
+POSTGREST_DEFAULT_VERSION="v14.15"
+POSTGREST_X86_64_SHA256="4e78c7f065a6c36f350c7177f5fa9bb77ea380c67b8bf40f2fc9130d857678dc"
+POSTGREST_ARM64_SHA256="1eb007298c1536ba865e741da7eece6fba6db3da904c599abd15d9c3debe6c2f"
+GOTRUE_DEFAULT_VERSION="v2.193.0"
+GOTRUE_AMD64_SHA256="c991b6fb8747bbcbcef40701177234f152cea28a108a481bae917bacc1a522c5"
+GOTRUE_ARM64_SHA256="432fa68ef58afac8665d45537d8adbba5756b01829f175ed7ef6314b3ca59995"
 
 # Validate parameters
 validate_params() {
@@ -562,7 +562,7 @@ ensure_postgrest() {
         *) echo "ERROR: Unsupported architecture: $machine" >&2; exit 1 ;;
     esac
 
-    local version="${POSTGREST_VERSION:-v14.13}"
+    local version="${POSTGREST_VERSION:-v14.15}"
     local expected_sha256
     assert_safe_config_value "POSTGREST_VERSION" "$version" || exit 1
     case "$version" in *[!A-Za-z0-9._-]*|"") echo "ERROR: Invalid POSTGREST_VERSION" >&2; exit 1 ;; esac
@@ -602,7 +602,7 @@ ensure_gotrue() {
         *) echo "ERROR: Unsupported architecture: $machine" >&2; exit 1 ;;
     esac
 
-    local version="${GOTRUE_VERSION:-v2.191.0}"
+    local version="${GOTRUE_VERSION:-v2.193.0}"
     local archive_ext="tar.xz"
     local expected_sha256
     assert_safe_config_value "GOTRUE_VERSION" "$version" || exit 1

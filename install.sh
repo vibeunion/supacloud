@@ -1194,7 +1194,7 @@ EOF
 install_juicefs() {
     log_step "Preparing JuiceFS (Postgres LO)..."
     
-    local JFS_VER="1.2.2"
+    local JFS_VER="1.4.0"
     local ARCH=$(uname -m)
     local OS=$(uname -s | tr '[:upper:]' '[:lower:]')
     local JFS_URL=""
@@ -1332,10 +1332,13 @@ PGCONF
 install_docker_compose() {
     log_step "Checking Docker Compose..."
     
-    COMPOSE_VERSION="v2.29.2"
+    COMPOSE_VERSION="v5.3.1"
     
     # If using Podman, always install standalone docker-compose binary
-    # (instead of relying on 'podman compose' which might have different behavior)
+    # (instead of relying on 'podman compose' which might have different behavior).
+    # Compose v5 delegates BuildKit builds to Docker Buildx/Bake; this installer
+    # only uses the Podman-compatible binary for pull/up and does not pretend it
+    # provides a Podman image builder.
     if [[ "${CONTAINER_RUNTIME:-}" != "podman" ]] && command -v docker-compose &> /dev/null; then
         log_info "Docker Compose already installed: $(docker-compose --version)"
         return
@@ -1363,6 +1366,9 @@ EOF
     
     chmod +x /usr/local/bin/docker-compose
     log_info "Docker Compose installation complete: $(/usr/local/bin/docker-compose --version)"
+    if [[ "${CONTAINER_RUNTIME:-}" == "podman" ]]; then
+        log_warn "Docker Compose ${COMPOSE_VERSION} requires Docker Buildx >= 0.17 for 'compose build'; use podman build or pre-built images on Podman hosts."
+    fi
 }
 
 supacloud_atomic_install_binary() (
@@ -1716,7 +1722,7 @@ install_caddy_gateway() {
         rm -rf /tmp/supacloud-caddy-build
     elif [[ "${SUPACLOUD_ALLOW_STOCK_CADDY_FALLBACK:-false}" == "true" ]]; then
         log_warn "Installing stock Caddy fallback without SupaCloud rate-limit module. Do not use this for production rate limits."
-        local caddy_version="${CADDY_VERSION:-2.10.2}"
+        local caddy_version="${CADDY_VERSION:-2.11.4}"
         local caddy_url="https://github.com/caddyserver/caddy/releases/download/v${caddy_version}/caddy_${caddy_version}_linux_${arch}.tar.gz"
         mkdir -p /tmp/supacloud-caddy
         supacloud_download_url "$caddy_url" /tmp/supacloud-caddy/caddy.tar.gz
@@ -2757,7 +2763,7 @@ install_management_api() {
         REALTIME_SECRET_KEY_BASE "$REALTIME_SECRET_KEY_BASE" \
         REALTIME_DB_ENC_KEY "$REALTIME_DB_ENC_KEY" \
         REALTIME_API_SECRET "$JWT_SECRET" \
-        REALTIME_IMAGE "${REALTIME_IMAGE:-public.ecr.aws/supabase/realtime:v2.111.4}" \
+        REALTIME_IMAGE "${REALTIME_IMAGE:-public.ecr.aws/supabase/realtime:v2.116.1}" \
         REALTIME_CONTAINER_NAME "${REALTIME_CONTAINER_NAME:-supacloud-realtime}" \
         REALTIME_DB_USER supabase_admin \
         PG_HOST 127.0.0.1 \
@@ -2833,20 +2839,20 @@ EOF
     # 7b. Ensure GoTrue binary and systemd template are deployed
     local GOTRUE_BIN="${GOTRUE_BIN:-/usr/local/bin/gotrue}"
     if [[ ! -x "$GOTRUE_BIN" ]]; then
-        local GOTRUE_VERSION="${GOTRUE_VERSION:-v2.191.0}"
+        local GOTRUE_VERSION="${GOTRUE_VERSION:-v2.193.0}"
         local GOTRUE_ARCH GOTRUE_SHA256_VALUE
         local GOTRUE_EXT="tar.xz"
         GOTRUE_ARCH=$(uname -m)
         case "$GOTRUE_ARCH" in
             x86_64)
                 GOTRUE_ARCH="amd64"
-                [[ "$GOTRUE_VERSION" != "v2.191.0" ]] || \
-                    GOTRUE_SHA256_VALUE="32da8473b79de594ea4c2b6023f3d34901b99e846dc1fce71dfd8fd3a65e0b72"
+                [[ "$GOTRUE_VERSION" != "v2.193.0" ]] || \
+                    GOTRUE_SHA256_VALUE="c991b6fb8747bbcbcef40701177234f152cea28a108a481bae917bacc1a522c5"
                 ;;
             aarch64)
                 GOTRUE_ARCH="arm64"
-                [[ "$GOTRUE_VERSION" != "v2.191.0" ]] || \
-                    GOTRUE_SHA256_VALUE="f24d79edc35ec33b78f1c9ee02909a002a2ac49ac071a82b51fb80eae1bdfb42"
+                [[ "$GOTRUE_VERSION" != "v2.193.0" ]] || \
+                    GOTRUE_SHA256_VALUE="432fa68ef58afac8665d45537d8adbba5756b01829f175ed7ef6314b3ca59995"
                 ;;
             *) log_error "Unsupported architecture for GoTrue: $GOTRUE_ARCH"; exit 1 ;;
         esac
@@ -3133,7 +3139,7 @@ deploy_service_containers() {
 
     # --- 2. Deploy Supabase Realtime (Multi-tenant WebSocket) ---
     local REALTIME_UNIT_SRC="${SCRIPT_DIR}/infrastructure/systemd/supacloud-realtime.service"
-    local REALTIME_IMAGE_VALUE="${REALTIME_IMAGE:-public.ecr.aws/supabase/realtime:v2.111.4}"
+    local REALTIME_IMAGE_VALUE="${REALTIME_IMAGE:-public.ecr.aws/supabase/realtime:v2.116.1}"
     local REALTIME_CONTAINER_ENV_FILE="${SUPACLOUD_REALTIME_CONTAINER_ENV_FILE:-/etc/supabase/realtime-container.env}"
     if [[ -f "$REALTIME_UNIT_SRC" ]]; then
         log_info "Registering SupaCloud Realtime systemd unit..."

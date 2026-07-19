@@ -134,7 +134,7 @@ describe("Pigsty 4.4 compatibility upgrade", () => {
     expect(devCompose).not.toContain("pgdata:/var/lib/postgresql");
     expect(devCompose).not.toContain("supabase/postgres:17.6.1.143");
     expect(workflow).toContain("postgres-18-compatibility:");
-    expect(workflow).toContain("image: supabase/postgres:17.6.1.107");
+    expect(workflow).toContain("image: supabase/postgres:17.6.1.143");
     expect(workflow).toContain("Wait for SupaCloud PostgreSQL 18");
     expect(workflow).toContain("docker inspect --format '{{.State.Health.Status}}'");
     expect(workflow).toContain("env -u CI -u GITHUB_ACTIONS bun src/db/init.ts");

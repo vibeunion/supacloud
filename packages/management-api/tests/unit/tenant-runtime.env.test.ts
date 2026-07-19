@@ -113,7 +113,7 @@ describe("TenantRuntimeService PostgREST schema rendering", () => {
 
 describe("TenantRuntimeService GoTrue auth env rendering", () => {
   test("uses current session-policy defaults and official GoTrue env names", () => {
-    // Names are verified against supabase/auth v2.191.0 configuration.go.
+    // Names are verified against supabase/auth v2.193.0 configuration.go.
     const env = renderGoTrueSessionPolicyEnv({});
     expect(env).toBe([
       "GOTRUE_JWT_EXP=3600",

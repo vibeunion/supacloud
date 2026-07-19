@@ -798,15 +798,15 @@ describe("runtime companion version assets", () => {
   test("installer downloads the current GoTrue release asset names", () => {
     const installer = readRepoFile("install.sh");
 
-    expect(installer).toContain('GOTRUE_VERSION="${GOTRUE_VERSION:-v2.191.0}"');
+    expect(installer).toContain('GOTRUE_VERSION="${GOTRUE_VERSION:-v2.193.0}"');
     expect(installer).toContain('GOTRUE_ARCH="amd64"');
     expect(installer).toContain('GOTRUE_ARCH="arm64"');
     expect(installer).toContain('local GOTRUE_EXT="tar.xz"');
     expect(installer).toContain(
       'auth-${GOTRUE_VERSION}-${GOTRUE_ARCH}.${GOTRUE_EXT}',
     );
-    expect(installer).toContain("32da8473b79de594ea4c2b6023f3d34901b99e846dc1fce71dfd8fd3a65e0b72");
-    expect(installer).toContain("f24d79edc35ec33b78f1c9ee02909a002a2ac49ac071a82b51fb80eae1bdfb42");
+    expect(installer).toContain("c991b6fb8747bbcbcef40701177234f152cea28a108a481bae917bacc1a522c5");
+    expect(installer).toContain("432fa68ef58afac8665d45537d8adbba5756b01829f175ed7ef6314b3ca59995");
     expect(installer).toContain("supacloud_download_url");
     expect(installer).toContain("supacloud_install_pinned_tar_xz_binary");
     expect(installer).not.toContain("auth-${GOTRUE_VERSION}-${GOTRUE_ARCH}.tar.gz");
@@ -816,12 +816,12 @@ describe("runtime companion version assets", () => {
   test("tenant runtime installs the current PostgREST and GoTrue releases", () => {
     const runtime = readRepoFile("scripts/lib/tenant_runtime.sh");
 
-    expect(runtime).toContain('local version="${POSTGREST_VERSION:-v14.13}"');
+    expect(runtime).toContain('local version="${POSTGREST_VERSION:-v14.15}"');
     expect(runtime).toContain('x86_64) arch="linux-static-x86-64"');
     expect(runtime).toContain('aarch64) arch="ubuntu-aarch64"');
     expect(runtime).toContain("postgrest-${version}-${arch}.tar.xz");
 
-    expect(runtime).toContain('local version="${GOTRUE_VERSION:-v2.191.0}"');
+    expect(runtime).toContain('local version="${GOTRUE_VERSION:-v2.193.0}"');
     expect(runtime).toContain('x86_64) arch="amd64"');
     expect(runtime).toContain('aarch64) arch="arm64"');
     expect(runtime).toContain('local archive_ext="tar.xz"');
@@ -830,5 +830,47 @@ describe("runtime companion version assets", () => {
     expect(runtime).not.toContain('local version="v12.2.3"');
     expect(runtime).not.toContain('local version="v2.189.0"');
     expect(runtime).not.toContain("linux-static-x64");
+  });
+
+  test("platform component defaults stay aligned across installers, CI, and Compose", () => {
+    const installer = readRepoFile("install.sh");
+    const caddyBuilder = readRepoFile("scripts/build_supacloud_caddy.sh");
+    const runtime = readRepoFile("scripts/lib/tenant_runtime.sh");
+    const realtimeUnit = readRepoFile("infrastructure/systemd/supacloud-realtime.service");
+    const workflow = readRepoFile(".github/workflows/management-api.yml");
+    const devCompose = readRepoFile("docker/dev/docker-compose.yml");
+    const selfHostCompose = readRepoFile("docker/self-host/docker-compose.yml");
+    const postgresDockerfile = readRepoFile("docker/self-host/postgres/Dockerfile");
+
+    expect(installer).toContain('local JFS_VER="1.4.0"');
+    expect(installer).toContain('COMPOSE_VERSION="v5.3.1"');
+    expect(installer).toContain("Docker Buildx >= 0.17 for 'compose build'");
+    expect(installer).toContain('CADDY_VERSION:-2.11.4');
+    expect(caddyBuilder).toContain('CADDY_VERSION="${CADDY_VERSION:-v2.11.4}"');
+
+    expect(runtime).toContain('POSTGREST_DEFAULT_VERSION="v14.15"');
+    expect(runtime).toContain('GOTRUE_DEFAULT_VERSION="v2.193.0"');
+    for (const source of [installer, realtimeUnit, workflow]) {
+      expect(source).toContain("public.ecr.aws/supabase/realtime:v2.116.1");
+    }
+    for (const compose of [devCompose, selfHostCompose]) {
+      expect(compose).toContain("caddy:2.11.4");
+      expect(compose).toContain("supabase/gotrue:v2.193.0");
+      expect(compose).toContain("postgrest/postgrest:v14.15");
+    }
+    expect(workflow).toContain("postgrest/postgrest:v14.15");
+    expect(workflow).toContain("supabase/gotrue:v2.193.0");
+    expect(postgresDockerfile).toContain("FROM postgres:18-bookworm");
+    expect(devCompose).toContain("context: ../self-host/postgres");
+    expect(selfHostCompose).toContain("context: ./postgres");
+    expect(workflow).toContain("SupaCloud deployment remains PostgreSQL 18");
+    expect(workflow).toContain("image: supabase/postgres:17.6.1.143");
+
+    const upgradeNotes = readRepoFile("docs/platform-component-upgrade-notes.md");
+    expect(upgradeNotes).toContain("v5 删除内部构建器");
+    expect(upgradeNotes).toContain("Docker Buildx >= 0.17");
+    expect(upgradeNotes).toContain("postgres:18-bookworm");
+    expect(upgradeNotes).toContain("custom_oauth_providers.custom_claims_allowlist");
+    expect(upgradeNotes).toContain("storage tiers");
   });
 });

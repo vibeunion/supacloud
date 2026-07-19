@@ -7,12 +7,12 @@ RUNTIME_SCRIPT="${SCRIPT_DIR}/tenant_runtime.sh"
 
 grep -Eq '^umask 077$' "$RUNTIME_SCRIPT"
 grep -Fq 'PGPASSWORD="$db_password" psql' "$RUNTIME_SCRIPT"
-grep -Fq 'v14.13' "$RUNTIME_SCRIPT"
-grep -Fq '2a0537411cd79c7180f8669a6488d5813b89f93fa7e486915512aca96f1a9bcf' "$RUNTIME_SCRIPT"
-grep -Fq 'd100eec50ec02f3811679847b2c90d08e178b2123c1f079eadddb8a920bcde2a' "$RUNTIME_SCRIPT"
-grep -Fq 'v2.191.0' "$RUNTIME_SCRIPT"
-grep -Fq '32da8473b79de594ea4c2b6023f3d34901b99e846dc1fce71dfd8fd3a65e0b72' "$RUNTIME_SCRIPT"
-grep -Fq 'f24d79edc35ec33b78f1c9ee02909a002a2ac49ac071a82b51fb80eae1bdfb42' "$RUNTIME_SCRIPT"
+grep -Fq 'v14.15' "$RUNTIME_SCRIPT"
+grep -Fq '4e78c7f065a6c36f350c7177f5fa9bb77ea380c67b8bf40f2fc9130d857678dc' "$RUNTIME_SCRIPT"
+grep -Fq '1eb007298c1536ba865e741da7eece6fba6db3da904c599abd15d9c3debe6c2f' "$RUNTIME_SCRIPT"
+grep -Fq 'v2.193.0' "$RUNTIME_SCRIPT"
+grep -Fq 'c991b6fb8747bbcbcef40701177234f152cea28a108a481bae917bacc1a522c5' "$RUNTIME_SCRIPT"
+grep -Fq '432fa68ef58afac8665d45537d8adbba5756b01829f175ed7ef6314b3ca59995' "$RUNTIME_SCRIPT"
 
 if grep -Fq 'gh-proxy.net' "$RUNTIME_SCRIPT"; then
     echo "tenant_runtime.sh must not default to a third-party GitHub proxy" >&2
@@ -114,12 +114,12 @@ fi
 unset -f curl
 unset SUPACLOUD_GITHUB_PROXY
 
-if resolve_release_sha256 "PostgREST" "v99.0.0" "v14.13" "default-digest" "" >/dev/null 2>&1; then
+if resolve_release_sha256 "PostgREST" "v99.0.0" "v14.15" "default-digest" "" >/dev/null 2>&1; then
     echo "non-default PostgREST version reused the default digest" >&2
     exit 1
 fi
 explicit_digest=$(printf 'e%.0s' {1..64})
-[[ "$(resolve_release_sha256 "PostgREST" "v99.0.0" "v14.13" "$(printf 'd%.0s' {1..64})" "$explicit_digest")" == "$explicit_digest" ]]
+[[ "$(resolve_release_sha256 "PostgREST" "v99.0.0" "v14.15" "$(printf 'd%.0s' {1..64})" "$explicit_digest")" == "$explicit_digest" ]]
 
 # Archive validation rejects digest mismatches and link/special-file payloads.
 mkdir -p "$tmp_dir/archive/valid" "$tmp_dir/archive/link"

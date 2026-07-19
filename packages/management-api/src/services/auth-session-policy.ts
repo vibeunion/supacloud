@@ -252,7 +252,7 @@ function renderGoDurationSeconds(seconds: number): string {
 }
 
 /**
- * Environment names verified against supabase/auth v2.191.0 and v2.193.0.
+ * Environment names verified against supabase/auth v2.193.0.
  * In particular, the supported reuse variable omits the historical, invalid
  * "ROTATION" segment: GOTRUE_SECURITY_REFRESH_TOKEN_REUSE_INTERVAL.
  */

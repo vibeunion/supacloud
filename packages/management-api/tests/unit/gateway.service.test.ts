@@ -669,6 +669,9 @@ describe("CaddyGatewayProvider", () => {
         expect(rewrite?.uri).toBe("/functions/v1/supauth{http.request.uri.path}");
         expect(proxy?.upstreams?.[0]?.dial).toBe("10.20.0.12:4001");
         expect(proxy?.transport?.tls).toEqual({ insecure_skip_verify: true });
+        // Caddy 2.11 rewrites Host for HTTPS upstreams unless the route sets it.
+        expect(proxy?.headers?.request?.set?.Host).toEqual(["{http.request.host}"]);
+        expect(Object.keys(proxy?.headers?.request?.set ?? {}).every((header) => !header.includes("_"))).toBe(true);
         expect(proxy?.headers?.request?.set?.["X-Custom-Upstream"]).toEqual(["ocr"]);
         expect(docs?.handle?.at(-1)?.handler).toBe("file_server");
         expect(docs?.handle?.at(-1)?.root).toBe("/var/supacloud/custom-sites/docs");

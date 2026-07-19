@@ -65,7 +65,7 @@ After migration, tenant runtime generation injects:
 
 ## RS256 AWS KMS Signing
 
-GoTrue v2.191.0 supports RS256 signing through AWS KMS-backed JWKs. SupaCloud stores the KMS signing JWK in the project-scoped `auth.oauth_server.jwt_keys` config and exposes only the public RSA JWK through `jwt_jwks`.
+GoTrue v2.193.0 supports RS256 signing through AWS KMS-backed JWKs. SupaCloud stores the KMS signing JWK in the project-scoped `auth.oauth_server.jwt_keys` config and exposes only the public RSA JWK through `jwt_jwks`.
 
 ```http
 POST /v1/projects/:ref/auth/oauth-server/kms-rs256
