@@ -45,6 +45,38 @@ describe("migration ledger compatibility", () => {
     expect(legacyInsertSeen).toBe(true);
   });
 
+  test("backfills missing legacy timestamps for the canonical ledger", async () => {
+    let canonicalInsertSeen = false;
+    let canonicalUpdateSeen = false;
+
+    await ensureMigrationLedgerMetadata({
+      unsafe: async (query: string) => {
+        if (query.includes("UPDATE supabase_migrations.schema_migrations canonical")) {
+          canonicalUpdateSeen = true;
+          if (!query.includes("inserted_at = COALESCE(legacy.inserted_at, canonical.inserted_at, now())")) {
+            throw postgresError(
+              "23502",
+              'null value in column "inserted_at" violates not-null constraint',
+            );
+          }
+        }
+        if (query.includes("INSERT INTO supabase_migrations.schema_migrations")) {
+          canonicalInsertSeen = true;
+          if (!query.includes("COALESCE(inserted_at, now())")) {
+            throw postgresError(
+              "23502",
+              'null value in column "inserted_at" violates not-null constraint',
+            );
+          }
+        }
+        return [];
+      },
+    });
+
+    expect(canonicalUpdateSeen).toBe(true);
+    expect(canonicalInsertSeen).toBe(true);
+  });
+
   test("uses legacy history when the canonical table exists but is empty", async () => {
     const database = {
       unsafe: async (query: string) => query.includes("supabase_migrations")

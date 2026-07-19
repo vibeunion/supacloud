@@ -162,7 +162,7 @@ export async function reconcileMigrationLedgerVersions(database: MigrationLedger
     SET statements = legacy.statements,
         name = legacy.name,
         checksum = legacy.checksum,
-        inserted_at = legacy.inserted_at
+        inserted_at = COALESCE(legacy.inserted_at, canonical.inserted_at, now())
     FROM public.schema_migrations legacy
     WHERE canonical.version = legacy.version::text
       AND canonical.checksum IS NULL
@@ -184,7 +184,7 @@ export async function reconcileMigrationLedgerVersions(database: MigrationLedger
   await database.unsafe(`
     INSERT INTO supabase_migrations.schema_migrations
       (version, statements, name, checksum, inserted_at)
-    SELECT version::text, statements, name, checksum, inserted_at
+    SELECT version::text, statements, name, checksum, COALESCE(inserted_at, now())
     FROM public.schema_migrations
     ON CONFLICT (version) DO NOTHING
   `);
