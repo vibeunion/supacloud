@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.1](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.13.0...edge-runtime-v0.13.1) (2026-07-19)
+
+
+### Bug Fixes
+
+* **edge-runtime:** release workers after proxy disconnects ([#488](https://github.com/zuohuadong/supacloud/issues/488)) ([0188d07](https://github.com/zuohuadong/supacloud/commit/0188d07cb720c6ef48be224fac6133cfc8f75478))
+
 ## [0.13.0](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.12.2...edge-runtime-v0.13.0) (2026-07-19)
 
 
