@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/zuohuadong/supacloud/compare/supacloud-v0.6.1...supacloud-v0.7.0) (2026-07-19)
+
+
+### Features
+
+* complete safe database promotion workflow ([6763d10](https://github.com/zuohuadong/supacloud/commit/6763d10eb4e6b715259a1e445c5921dc276d6dfd))
+
 ## [0.6.1](https://github.com/zuohuadong/supacloud/compare/supacloud-v0.6.0...supacloud-v0.6.1) (2026-07-18)
 
 
