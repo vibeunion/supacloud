@@ -1,8 +1,14 @@
 import { $ } from "bun";
-import { ProjectService } from "../../src/services/project.service";
 import { sql } from "../../src/db";
+import { projectRepository } from "../../src/repositories/project.repository";
+import { randomBytes } from "crypto";
 import { join } from "path";
 import { writeFileSync, existsSync, rmSync, mkdirSync } from "fs";
+import {
+    buildCliMigrationHistoryFixtures,
+    CLI_HARNESS_MIGRATION_VERSION,
+    parseCliHarnessDatabaseUrl,
+} from "./official-cli-compliance-harness";
 
 const CLI_VERSION = "2.20.5";
 
@@ -45,68 +51,42 @@ async function runCliWithRetry(
     return lastResult!;
 }
 
-async function rekeyCliHarnessProject(projectId: string, originalRef: string, targetRef: string): Promise<void> {
-    const maxAttempts = 10;
-
-    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-        try {
-            // createProject() kicks off saga provisioning in the background. That saga can
-            // enqueue a project_tasks row after we create the project but before we rewrite
-            // the ref to the fixed 20-char value required by the official CLI harness.
-            await sql`DELETE FROM project_tasks WHERE project_ref = ${originalRef}`;
-            await sql`UPDATE projects SET ref = ${targetRef} WHERE id = ${projectId}`;
-            return;
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            const code = typeof error === "object" && error && "code" in error ? String((error as { code?: unknown }).code ?? "") : "";
-            const isProjectTaskFkRace =
-                code === "ERR_POSTGRES_SERVER_ERROR" &&
-                message.includes("project_tasks_project_ref_fkey");
-
-            if (!isProjectTaskFkRace || attempt === maxAttempts) {
-                throw error;
-            }
-
-            await new Promise((resolve) => setTimeout(resolve, 250 * attempt));
-        }
-    }
-}
-
 async function run() {
     console.log("\n🚀 [CLI Compliance] Starting Supabase Official CLI Validation Protocol...");
 
-    const projectService = new ProjectService();
     const rawRef = "clicompliancetestref";
-
-    // Direct DB URL for self-hosted CLI operations
     const dbUrl = process.env.DATABASE_URL || "postgresql://supabase_admin:postgres@127.0.0.1:5432/postgres";
+    const testDir = join(process.cwd(), '.cache', `cli-harness-${process.pid}`);
+    let totalFailures = 0;
+    let projectId: string | null = null;
 
-    let project;
     try {
-        project = await projectService.createProject({
+        const { dbName, dbUser, dbPassword } = parseCliHarnessDatabaseUrl(dbUrl);
+        const randomSecret = () => randomBytes(32).toString("base64url");
+        const project = await projectRepository.create({
+            ref: rawRef,
             name: "cli_compliance_harness",
-            region: "local"
+            db_name: dbName,
+            db_user: dbUser,
+            db_password: dbPassword,
+            jwt_secret: randomSecret(),
+            anon_key: randomSecret(),
+            service_role_key: randomSecret(),
+            s3_bucket: `cli-${rawRef}`,
+            region: "local",
         });
+        projectId = project.id;
+        await projectRepository.updateStatus(rawRef, "active");
 
-        await rekeyCliHarnessProject(project.id, project.ref, rawRef);
-        project.ref = rawRef;
+        console.log(`✅ Created metadata-only 20-char CLI Project Ref [${rawRef}]`);
 
-        console.log(`✅ Provisioned 20-char CLI Project Ref [${rawRef}]`);
-    } catch (e: any) {
-        console.error("Failed to provision CLI test tenant:", e);
-        process.exit(1);
-    }
+        if (existsSync(testDir)) rmSync(testDir, { recursive: true, force: true });
+        mkdirSync(testDir, { recursive: true });
 
-    await new Promise(r => setTimeout(r, 2000));
+        const configDir = join(testDir, 'supabase');
+        mkdirSync(configDir, { recursive: true });
 
-    const testDir = join(process.cwd(), '.cache', 'cli-harness');
-    if (existsSync(testDir)) rmSync(testDir, { recursive: true, force: true });
-    mkdirSync(testDir, { recursive: true });
-
-    const configDir = join(testDir, 'supabase');
-    mkdirSync(configDir, { recursive: true });
-
-    writeFileSync(join(configDir, 'config.toml'), `
+        writeFileSync(join(configDir, 'config.toml'), `
 [api]
 port = 9090
 schemas = ["public"]
@@ -123,21 +103,26 @@ site_url = "http://127.0.0.1:9090"
 file_size_limit = "50MiB"
 `);
 
-    const migrationDir = join(configDir, 'migrations');
-    mkdirSync(migrationDir, { recursive: true });
-    writeFileSync(
-        join(migrationDir, '20230101000000_dummy_migration.sql'),
-        `CREATE TABLE IF NOT EXISTS public.cli_test_harness (id SERIAL PRIMARY KEY, note TEXT);`
-    );
+        const migrationDir = join(configDir, 'migrations');
+        mkdirSync(migrationDir, { recursive: true });
+        const remoteMigrations = await sql<{ version: string }[]>`
+            SELECT version::text AS version
+            FROM supabase_migrations.schema_migrations
+            ORDER BY version ASC
+        `;
+        for (const fixture of buildCliMigrationHistoryFixtures(remoteMigrations)) {
+            writeFileSync(join(migrationDir, fixture.fileName), fixture.contents);
+        }
+        writeFileSync(
+            join(migrationDir, `${CLI_HARNESS_MIGRATION_VERSION}_dummy_migration.sql`),
+            `CREATE TABLE IF NOT EXISTS public.cli_test_harness (id SERIAL PRIMARY KEY, note TEXT);`
+        );
 
-    console.log(`✅ Injecting CLI config and migration payload...`);
+        console.log(`✅ Injecting CLI config and migration payload...`);
 
-    const SUPER_TOKEN = process.env.MASTER_TOKEN ?? (() => { throw new Error('MASTER_TOKEN env var is required'); })();
-    const cliBin = `supabase@${CLI_VERSION}`;
+        const SUPER_TOKEN = process.env.MASTER_TOKEN ?? (() => { throw new Error('MASTER_TOKEN env var is required'); })();
+        const cliBin = `supabase@${CLI_VERSION}`;
 
-    let totalFailures = 0;
-
-    try {
         // Test 1: supabase db push --db-url (self-hosted mode, no link needed)
         console.log(`\n⬆️  Test 1: [supabase db push --db-url]...`);
         const pushResult = await runCliWithRetry(
@@ -224,16 +209,33 @@ file_size_limit = "50MiB"
                 console.log(`✅ Management API [database/query] Success! Rows:`, data.rows?.[0] || "ok");
             } else {
                 console.warn("⚠️  Management API [database/query] returned:", queryRes.status);
+                totalFailures++;
             }
         } catch (e: any) {
             console.warn("⚠️  Management API [database/query] failed:", e.message);
+            totalFailures++;
         }
 
+    } catch (error) {
+        totalFailures++;
+        console.error("❌ CLI compliance harness failed:", error instanceof Error ? error.message : String(error));
     } finally {
-        console.log(`\n🧹 Tearing down tenant [${project.id}]...`);
-        await sql`DELETE FROM project_tasks WHERE project_ref = ${rawRef}`;
-        await sql`DELETE FROM projects WHERE id = ${project.id}`;
-        rmSync(testDir, { recursive: true, force: true });
+        console.log(`\n🧹 Tearing down metadata-only tenant [${projectId ?? rawRef}]...`);
+        if (projectId !== null) {
+            try {
+                await sql`DELETE FROM project_tasks WHERE project_ref = ${rawRef}`;
+                await sql`DELETE FROM projects WHERE id = ${projectId}`;
+            } catch (error) {
+                totalFailures++;
+                console.error("❌ CLI harness metadata cleanup failed:", error instanceof Error ? error.message : String(error));
+            }
+        }
+        try {
+            rmSync(testDir, { recursive: true, force: true });
+        } catch (error) {
+            totalFailures++;
+            console.error("❌ CLI harness cache cleanup failed:", error instanceof Error ? error.message : String(error));
+        }
 
         // NOTE: Do NOT call sql.end() here — the OpenAPI compliance script runs next.
         // Closing the shared connection pool would crash the background API server.
