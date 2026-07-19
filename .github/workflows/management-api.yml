@@ -172,17 +172,9 @@ jobs:
         env:
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
         run: |
-          if [[ "$PR_AUTHOR" == "github-actions[bot]" && "${GITHUB_HEAD_REF:-}" == release-please--branches--* ]]; then
-            # Release Please 会在发布前先提升 sibling 包版本；此时 registry 与锁文件尚未包含候选版本。
-            bun -e '
-              const pkg = await Bun.file("package.json").json();
-              const cli = await Bun.file("../cli/package.json").json();
-              const admin = await Bun.file("../admin/package.json").json();
-              if (pkg.dependencies["@supacloud/cli"] !== `^${cli.version}` ||
-                  pkg.dependencies["@supacloud/admin"] !== `^${admin.version}`) {
-                throw new Error("supacloud dependency versions do not match local release candidates");
-              }
-            '
+          install_mode="$(node ../../.github/scripts/supacloud-install-mode.mjs)"
+          if [[ "$install_mode" == "local-candidate" ]]; then
+            # Release 提升 sibling 包版本时，锁文件会暂时落后；使用同一提交中的候选包验证。
             bun add --no-save '@supacloud/cli@file:../cli' '@supacloud/admin@file:../admin'
             git diff --exit-code -- package.json bun.lock
           else
@@ -221,10 +213,12 @@ jobs:
           find scripts -name "*.sh" -print0 | xargs -0 -n1 bash -n
           bash scripts/lib/tenant_runtime.test.sh
 
-      - name: Validate AI review script
+      - name: Validate CI scripts
         run: |
           node --check .github/scripts/ai-review-merge.mjs
           node --test .github/scripts/ai-review-merge.test.mjs
+          node --check .github/scripts/supacloud-install-mode.mjs
+          node --test .github/scripts/supacloud-install-mode.test.mjs
 
   unit-test:
     name: Unit Tests
