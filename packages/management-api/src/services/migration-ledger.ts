@@ -191,7 +191,7 @@ export async function reconcileMigrationLedgerVersions(database: MigrationLedger
   await database.unsafe(`
     INSERT INTO public.schema_migrations
       (version, statements, name, checksum, inserted_at)
-    SELECT version::text, statements, name, checksum, inserted_at
+    SELECT version::bigint, statements, name, checksum, inserted_at
     FROM supabase_migrations.schema_migrations
     ON CONFLICT (version) DO NOTHING
   `);

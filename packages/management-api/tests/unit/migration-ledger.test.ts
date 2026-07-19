@@ -24,6 +24,27 @@ describe("migration ledger compatibility", () => {
     expect(calls.some((query) => query.includes("INSERT INTO public.schema_migrations"))).toBe(true);
   });
 
+  test("casts canonical versions for Supabase BIGINT legacy ledgers", async () => {
+    let legacyInsertSeen = false;
+
+    await ensureMigrationLedgerMetadata({
+      unsafe: async (query: string) => {
+        if (query.includes("INSERT INTO public.schema_migrations")) {
+          legacyInsertSeen = true;
+          if (!query.includes("SELECT version::bigint")) {
+            throw postgresError(
+              "42804",
+              'column "version" is of type bigint but expression is of type text',
+            );
+          }
+        }
+        return [];
+      },
+    });
+
+    expect(legacyInsertSeen).toBe(true);
+  });
+
   test("uses legacy history when the canonical table exists but is empty", async () => {
     const database = {
       unsafe: async (query: string) => query.includes("supabase_migrations")
