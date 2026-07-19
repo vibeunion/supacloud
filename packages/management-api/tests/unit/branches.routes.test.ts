@@ -4,9 +4,25 @@ import { Elysia } from "elysia";
 const findByRef = mock(() => Promise.resolve(null));
 const updateConfig = mock(() => Promise.resolve(null));
 const requireProjectOrAdminAuth = mock(() => Promise.resolve(null));
+const requireAdminAuth = mock(() => Promise.resolve(null));
 const createBranch = mock(() => Promise.resolve(undefined));
 const deleteBranch = mock(() => Promise.resolve(undefined));
-const promoteBranch = mock(() => Promise.resolve(undefined));
+const promotionPlan = {
+  mode: "migrations" as const,
+  parent_ref: "parent",
+  branch_ref: "b3",
+  safe_to_apply: true,
+  plan_checksum: "a".repeat(64),
+  pending: [],
+  applied: [],
+  blocked: [],
+  warnings: [],
+  requires_destructive_confirmation: false,
+  ignored_branch_data: true,
+};
+const planBranchPromotion = mock(() => Promise.resolve(promotionPlan));
+const promoteBranch = mock(() => Promise.resolve({ applied: [], plan: promotionPlan }));
+const replaceParentDatabaseFromBranch = mock(() => Promise.resolve({ backupDatabase: "supa_parent_backup" }));
 
 const { projectRepository } = await import("../../src/repositories/project.repository");
 const authModule = await import("../../src/middleware/auth");
@@ -21,14 +37,23 @@ const updateConfigSpy = spyOn(projectRepository, "updateConfig").mockImplementat
 const requireProjectOrAdminAuthSpy = spyOn(authModule, "requireProjectOrAdminAuth").mockImplementation(
   requireProjectOrAdminAuth as typeof authModule.requireProjectOrAdminAuth,
 );
+const requireAdminAuthSpy = spyOn(authModule, "requireAdminAuth").mockImplementation(
+  requireAdminAuth as typeof authModule.requireAdminAuth,
+);
 const createBranchSpy = spyOn(branchServiceModule.branchService, "createBranch").mockImplementation(
   createBranch as typeof branchServiceModule.branchService.createBranch,
 );
 const deleteBranchSpy = spyOn(branchServiceModule.branchService, "deleteBranch").mockImplementation(
   deleteBranch as typeof branchServiceModule.branchService.deleteBranch,
 );
+const planBranchPromotionSpy = spyOn(branchServiceModule.branchService, "planBranchPromotion").mockImplementation(
+  planBranchPromotion as typeof branchServiceModule.branchService.planBranchPromotion,
+);
 const promoteBranchSpy = spyOn(branchServiceModule.branchService, "promoteBranch").mockImplementation(
   promoteBranch as typeof branchServiceModule.branchService.promoteBranch,
+);
+const replaceParentDatabaseFromBranchSpy = spyOn(branchServiceModule.branchService, "replaceParentDatabaseFromBranch").mockImplementation(
+  replaceParentDatabaseFromBranch as typeof branchServiceModule.branchService.replaceParentDatabaseFromBranch,
 );
 
 const { branchRoutes } = await import("../../src/routes/branches");
@@ -59,9 +84,12 @@ describe("branchRoutes", () => {
     findByRefSpy.mockRestore();
     updateConfigSpy.mockRestore();
     requireProjectOrAdminAuthSpy.mockRestore();
+    requireAdminAuthSpy.mockRestore();
     createBranchSpy.mockRestore();
     deleteBranchSpy.mockRestore();
+    planBranchPromotionSpy.mockRestore();
     promoteBranchSpy.mockRestore();
+    replaceParentDatabaseFromBranchSpy.mockRestore();
   });
 
   beforeEach(() => {
@@ -69,12 +97,18 @@ describe("branchRoutes", () => {
     updateConfig.mockReset();
     requireProjectOrAdminAuth.mockReset();
     requireProjectOrAdminAuth.mockResolvedValue(null);
+    requireAdminAuth.mockReset();
+    requireAdminAuth.mockResolvedValue(null);
     createBranch.mockReset();
     deleteBranch.mockReset();
+    planBranchPromotion.mockReset();
     promoteBranch.mockReset();
+    replaceParentDatabaseFromBranch.mockReset();
     createBranch.mockResolvedValue(undefined);
     deleteBranch.mockResolvedValue(undefined);
-    promoteBranch.mockResolvedValue(undefined);
+    planBranchPromotion.mockResolvedValue(promotionPlan);
+    promoteBranch.mockResolvedValue({ applied: [], plan: promotionPlan });
+    replaceParentDatabaseFromBranch.mockResolvedValue({ backupDatabase: "supa_parent_backup" });
   });
 
   test("GET returns empty list when no branches", async () => {
@@ -115,7 +149,11 @@ describe("branchRoutes", () => {
     // Wait a tick for the async createBranch promise.
     await new Promise((r) => setTimeout(r, 50));
     expect(createBranch).toHaveBeenCalledTimes(1);
-    expect(createBranch.mock.calls[0][0]).toMatchObject({ parentRef: "parent", name: "feature-x" });
+    expect(createBranch.mock.calls[0][0]).toMatchObject({
+      parentRef: "parent",
+      name: "feature-x",
+      dataMode: "schema_only",
+    });
   });
 
   test("POST rejects duplicate branch name", async () => {
@@ -131,6 +169,21 @@ describe("branchRoutes", () => {
       body: JSON.stringify({ name: "feature-x" }),
     });
     expect(res.status).toBe(409);
+  });
+
+  test("POST keeps full data cloning explicit", async () => {
+    findByRef.mockResolvedValue({ ref: "parent", config: {} } as never);
+    updateConfig.mockImplementation(async (ref, next) => ({ ref, config: next }) as never);
+
+    const res = await request("/v1/projects/parent/branches", {
+      method: "POST",
+      body: JSON.stringify({ name: "debug-data", data_mode: "full_clone" }),
+    });
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).branch.data_mode).toBe("full_clone");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(createBranch).toHaveBeenCalledWith(expect.objectContaining({ dataMode: "full_clone" }));
   });
 
   test("POST rejects branching from a branch (parent_ref present)", async () => {
@@ -201,7 +254,7 @@ describe("branchRoutes", () => {
     expect(storedBranches[0].error).toContain("DROP DATABASE failed");
   });
 
-  test("POST promote calls service.promoteBranch", async () => {
+  test("GET promote plan returns controlled pending migrations", async () => {
     findByRef.mockResolvedValue({
       ref: "parent",
       config: {
@@ -209,8 +262,187 @@ describe("branchRoutes", () => {
       },
     } as never);
 
-    const res = await request("/v1/projects/parent/branches/b3/promote", { method: "POST" });
+    const res = await request("/v1/projects/parent/branches/b3/promote/plan");
     expect(res.status).toBe(200);
-    expect(promoteBranch).toHaveBeenCalledWith({ parentRef: "parent", branchRef: "b3" });
+    expect(planBranchPromotion).toHaveBeenCalledWith({ parentRef: "parent", branchRef: "b3" });
+    expect((await res.json()).ignored_branch_data).toBe(true);
+  });
+
+  test("POST promote requires a reviewed plan checksum", async () => {
+    findByRef.mockResolvedValue({
+      ref: "parent",
+      config: {
+        branches: [{ ref: "b3", name: "ready", parent_ref: "parent", status: "active", created_at: "" }],
+      },
+    } as never);
+
+    const res = await request("/v1/projects/parent/branches/b3/promote", {
+      method: "POST",
+      body: JSON.stringify({ mode: "migrations" }),
+    });
+    expect(res.status).toBe(409);
+    expect((await res.json()).code).toBe("promotion_plan_required");
+    expect(promoteBranch).not.toHaveBeenCalled();
+  });
+
+  test("POST promote applies only reviewed migrations", async () => {
+    findByRef.mockResolvedValue({
+      ref: "parent",
+      config: {
+        branches: [{ ref: "b3", name: "ready", parent_ref: "parent", status: "active", created_at: "" }],
+      },
+    } as never);
+
+    const checksum = "a".repeat(64);
+    const res = await request("/v1/projects/parent/branches/b3/promote", {
+      method: "POST",
+      body: JSON.stringify({ mode: "migrations", plan_checksum: checksum, confirm_destructive: true }),
+    });
+    expect(res.status).toBe(200);
+    expect(promoteBranch).toHaveBeenCalledWith({
+      parentRef: "parent",
+      branchRef: "b3",
+      expectedPlanChecksum: checksum,
+      confirmDestructive: true,
+    });
+    expect(replaceParentDatabaseFromBranch).not.toHaveBeenCalled();
+  });
+
+  test("POST promote preserves partial application evidence", async () => {
+    findByRef.mockResolvedValue({
+      ref: "parent",
+      config: {
+        branches: [{ ref: "b3", name: "ready", parent_ref: "parent", status: "active", created_at: "" }],
+      },
+    } as never);
+    const applied = [{
+      version: "202607180001",
+      name: "one",
+      checksum: "b".repeat(64),
+      statement_count: 1,
+      statements: ["select 1"],
+      destructive: false,
+    }];
+    promoteBranch.mockRejectedValue(new branchServiceModule.BranchPromotionError(
+      "promotion_readback_failed",
+      500,
+      "read-back failed",
+      promotionPlan,
+      applied,
+    ));
+
+    const res = await request("/v1/projects/parent/branches/b3/promote", {
+      method: "POST",
+      body: JSON.stringify({ mode: "migrations", plan_checksum: "a".repeat(64) }),
+    });
+    const body = await res.json();
+    expect(res.status).toBe(500);
+    expect(body).toMatchObject({ code: "promotion_readback_failed", applied });
+  });
+
+  test("whole-database replacement requires admin auth and exact confirmation", async () => {
+    findByRef.mockResolvedValue({
+      ref: "parent",
+      config: {
+        branches: [{ ref: "b3", name: "ready", parent_ref: "parent", status: "active", created_at: "" }],
+      },
+    } as never);
+
+    const denied = await request("/v1/projects/parent/branches/b3/promote", {
+      method: "POST",
+      body: JSON.stringify({ mode: "replace_database", confirmation: "yes" }),
+    });
+    expect(denied.status).toBe(400);
+    expect(replaceParentDatabaseFromBranch).not.toHaveBeenCalled();
+
+    const confirmation = "REPLACE parent WITH b3";
+    const allowed = await request("/v1/projects/parent/branches/b3/promote", {
+      method: "POST",
+      body: JSON.stringify({ mode: "replace_database", confirmation }),
+    });
+    expect(allowed.status).toBe(200);
+    expect(requireAdminAuth).toHaveBeenCalled();
+    expect(replaceParentDatabaseFromBranch).toHaveBeenCalledWith({ parentRef: "parent", branchRef: "b3" });
+  });
+
+  test("whole-database replacement rejects project credentials without admin authority", async () => {
+    findByRef.mockResolvedValue({
+      ref: "parent",
+      config: {
+        branches: [{ ref: "b3", name: "ready", parent_ref: "parent", status: "active", created_at: "" }],
+      },
+    } as never);
+    requireAdminAuth.mockResolvedValue({ status: 403, body: { error: "Admin token required" } });
+
+    const res = await request("/v1/projects/parent/branches/b3/promote", {
+      method: "POST",
+      body: JSON.stringify({ mode: "replace_database", confirmation: "REPLACE parent WITH b3" }),
+    });
+
+    expect(res.status).toBe(403);
+    expect(replaceParentDatabaseFromBranch).not.toHaveBeenCalled();
+  });
+
+  test("replacement runtime failure returns committed state and backup evidence", async () => {
+    findByRef.mockResolvedValue({
+      ref: "parent",
+      config: {
+        branches: [{ ref: "b3", name: "ready", parent_ref: "parent", status: "active", created_at: "" }],
+      },
+    } as never);
+    replaceParentDatabaseFromBranch.mockRejectedValue(
+      new branchServiceModule.BranchReplacementError(
+        "replacement_runtime_unavailable",
+        503,
+        "Database replacement committed, but runtime is unhealthy",
+        true,
+        "supa_parent_backup_1",
+      ),
+    );
+
+    const res = await request("/v1/projects/parent/branches/b3/promote", {
+      method: "POST",
+      body: JSON.stringify({ mode: "replace_database", confirmation: "REPLACE parent WITH b3" }),
+    });
+    const body = await res.json();
+    expect(res.status).toBe(503);
+    expect(body).toMatchObject({
+      code: "replacement_runtime_unavailable",
+      replacement_committed: true,
+      backup_database: "supa_parent_backup_1",
+      recovery_required: true,
+    });
+  });
+
+  test("replacement rollback failure returns manual recovery state without claiming commit", async () => {
+    findByRef.mockResolvedValue({
+      ref: "parent",
+      config: {
+        branches: [{ ref: "b3", name: "ready", parent_ref: "parent", status: "active", created_at: "" }],
+      },
+    } as never);
+    replaceParentDatabaseFromBranch.mockRejectedValue(
+      new branchServiceModule.BranchReplacementError(
+        "replacement_switch_failed",
+        500,
+        "Replacement failed and rollback could not be verified",
+        false,
+        "supa_parent_backup_1",
+        true,
+        "supa_parent_backup_1",
+      ),
+    );
+
+    const res = await request("/v1/projects/parent/branches/b3/promote", {
+      method: "POST",
+      body: JSON.stringify({ mode: "replace_database", confirmation: "REPLACE parent WITH b3" }),
+    });
+    expect(res.status).toBe(500);
+    expect(await res.json()).toMatchObject({
+      replacement_committed: false,
+      recovery_required: true,
+      backup_database: "supa_parent_backup_1",
+      recovery_database: "supa_parent_backup_1",
+    });
   });
 });

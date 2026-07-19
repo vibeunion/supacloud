@@ -16,7 +16,23 @@
 
 -- Tenant database
 
--- Platform background task mirror table
+-- supacloud:sql-module:background-task-mirror-up:start
+DO $migration$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM pg_proc p
+    WHERE p.oid = to_regprocedure('public.has_active_background_tasks(uuid)')
+      AND p.prorettype <> 'text'::regtype
+  ) THEN
+    DROP TRIGGER IF EXISTS auth_users_delete_fence ON auth.users;
+    DROP FUNCTION IF EXISTS public.soft_delete_user_if_no_active_tasks();
+    DROP FUNCTION IF EXISTS public.hard_delete_soft_deleted_users();
+    DROP FUNCTION IF EXISTS public.has_active_background_tasks(UUID);
+  END IF;
+END
+$migration$;
+
 CREATE TABLE IF NOT EXISTS public.background_task_mirrors (
   id               UUID PRIMARY KEY,
   project_ref      TEXT NOT NULL,
@@ -35,32 +51,25 @@ CREATE TABLE IF NOT EXISTS public.background_task_mirrors (
 
 ALTER TABLE public.background_task_mirrors ENABLE ROW LEVEL SECURITY;
 
--- Grant access to platform roles (postgres, supabase_auth_admin, supabase_admin)
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.background_task_mirrors
   TO postgres, supabase_auth_admin, supabase_admin;
 
--- Index for fence lookups: find active tasks by invoker user
 CREATE INDEX IF NOT EXISTS idx_bg_task_mirrors_invoker_active
   ON public.background_task_mirrors(invoker_user_id, status)
   WHERE status IN ('pending','leased','running','retry_scheduled');
 
--- Index for task status lookups
 CREATE INDEX IF NOT EXISTS idx_bg_task_mirrors_status
   ON public.background_task_mirrors(status);
 
--- Drop the old mirror function that queried the incompatible public.tasks
--- (will be replaced below)
 CREATE OR REPLACE FUNCTION public.has_active_background_tasks(p_user_id UUID)
 RETURNS TEXT AS $$
 DECLARE
   v_count INTEGER;
 BEGIN
-  -- Check whether the platform mirror table exists
   IF NOT EXISTS (
     SELECT 1 FROM information_schema.tables
     WHERE table_schema = 'public' AND table_name = 'background_task_mirrors'
   ) THEN
-    -- Mirror table not yet provisioned — report unknown, do NOT silently return FALSE
     RAISE NOTICE 'has_active_background_tasks: background_task_mirrors table missing for user %', p_user_id;
     RETURN 'unknown';
   END IF;
@@ -76,14 +85,13 @@ BEGIN
 
   RETURN 'inactive';
 EXCEPTION WHEN OTHERS THEN
-  -- Do NOT silently return FALSE. Log the error and return 'unknown' so callers
-  -- can make an informed decision (e.g., prevent hard deletion).
   RAISE NOTICE 'has_active_background_tasks: exception for user % — %', p_user_id, SQLERRM;
   RETURN 'unknown';
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
+$$ LANGUAGE plpgsql SECURITY DEFINER STABLE SET search_path = pg_catalog;
 
--- Update soft_delete trigger to handle three-state result
+REVOKE ALL ON FUNCTION public.has_active_background_tasks(UUID) FROM PUBLIC;
+
 CREATE OR REPLACE FUNCTION public.soft_delete_user_if_no_active_tasks()
 RETURNS TRIGGER AS $$
 DECLARE
@@ -96,39 +104,28 @@ BEGIN
   v_task_state := public.has_active_background_tasks(OLD.id);
 
   IF v_task_state = 'inactive' THEN
-    -- No active tasks: allow the original DELETE without touching the row first.
     RETURN OLD;
   END IF;
 
-  -- Active or unknown state: soft-delete and cancel the original hard DELETE.
   UPDATE auth.users SET deleted_at = NOW() WHERE id = OLD.id;
 
   IF v_task_state = 'unknown' THEN
-    -- Degraded state: DB error or mirror table missing. Conservative choice: block hard deletion
-    -- and log a degraded-warning so operators can investigate.
     RAISE NOTICE 'soft_delete_user_if_no_active_tasks: degraded/unknown for user %, blocking hard delete', OLD.id;
     RETURN NULL;
   END IF;
 
   RETURN NULL;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
 
--- Ensure the trigger exists (idempotent)
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_trigger WHERE tgname = 'auth_users_delete_fence'
-  ) THEN
-    CREATE TRIGGER auth_users_delete_fence
-      BEFORE DELETE ON auth.users
-      FOR EACH ROW
-      EXECUTE FUNCTION public.soft_delete_user_if_no_active_tasks();
-  END IF;
-EXCEPTION WHEN OTHERS THEN NULL;
-END $$;
+REVOKE ALL ON FUNCTION public.soft_delete_user_if_no_active_tasks() FROM PUBLIC;
 
--- Update hard_delete cleanup to handle three-state result
+DROP TRIGGER IF EXISTS auth_users_delete_fence ON auth.users;
+CREATE TRIGGER auth_users_delete_fence
+  BEFORE DELETE ON auth.users
+  FOR EACH ROW
+  EXECUTE FUNCTION public.soft_delete_user_if_no_active_tasks();
+
 CREATE OR REPLACE FUNCTION public.hard_delete_soft_deleted_users()
 RETURNS INT AS $$
 DECLARE
@@ -146,36 +143,49 @@ BEGIN
       DELETE FROM auth.users WHERE id = user_record.id;
       deleted_count := deleted_count + 1;
     END IF;
-    -- 'active' or 'unknown' → skip, keep soft-deleted
   END LOOP;
   RETURN deleted_count;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
+
+REVOKE ALL ON FUNCTION public.hard_delete_soft_deleted_users() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.hard_delete_soft_deleted_users() TO service_role;
 
 NOTIFY pgrst, 'reload schema';
+-- supacloud:sql-module:background-task-mirror-up:end
 
 -- migrate:down
 -- Rollback: restore original two-state function on public.tasks and drop mirror table.
 -- WARNING: rollback loses mirror data; fence will query the incompatible public.tasks again.
 
+-- supacloud:sql-module:background-task-mirror-down:start
+DROP TRIGGER IF EXISTS auth_users_delete_fence ON auth.users;
+DROP FUNCTION IF EXISTS public.soft_delete_user_if_no_active_tasks();
+DROP FUNCTION IF EXISTS public.hard_delete_soft_deleted_users();
+DROP FUNCTION IF EXISTS public.has_active_background_tasks(UUID);
 DROP TABLE IF EXISTS public.background_task_mirrors;
 
 CREATE OR REPLACE FUNCTION public.has_active_background_tasks(p_user_id UUID)
 RETURNS BOOLEAN AS $$
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'tasks') THEN
-    RETURN FALSE;
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'tasks'
+  ) THEN
+    RETURN TRUE;
   END IF;
 
   RETURN EXISTS (
     SELECT 1 FROM public.tasks
     WHERE created_by = p_user_id
-      AND status IN ('pending', 'leased', 'running', 'retry_scheduled')
+      AND status IN ('pending', 'leased', 'running', 'retry_scheduled', 'queued', 'processing')
   );
 EXCEPTION WHEN OTHERS THEN
-  RETURN FALSE;
+  RETURN TRUE;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
+$$ LANGUAGE plpgsql SECURITY DEFINER STABLE SET search_path = pg_catalog;
+
+REVOKE ALL ON FUNCTION public.has_active_background_tasks(UUID) FROM PUBLIC;
 
 CREATE OR REPLACE FUNCTION public.soft_delete_user_if_no_active_tasks()
 RETURNS TRIGGER AS $$
@@ -191,7 +201,14 @@ BEGIN
   UPDATE auth.users SET deleted_at = NOW() WHERE id = OLD.id;
   RETURN NULL;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
+
+REVOKE ALL ON FUNCTION public.soft_delete_user_if_no_active_tasks() FROM PUBLIC;
+
+CREATE TRIGGER auth_users_delete_fence
+  BEFORE DELETE ON auth.users
+  FOR EACH ROW
+  EXECUTE FUNCTION public.soft_delete_user_if_no_active_tasks();
 
 CREATE OR REPLACE FUNCTION public.hard_delete_soft_deleted_users()
 RETURNS INT AS $$
@@ -210,6 +227,10 @@ BEGIN
   END LOOP;
   RETURN deleted_count;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
+
+REVOKE ALL ON FUNCTION public.hard_delete_soft_deleted_users() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.hard_delete_soft_deleted_users() TO service_role;
 
 NOTIFY pgrst, 'reload schema';
+-- supacloud:sql-module:background-task-mirror-down:end

@@ -58,6 +58,19 @@ export function getAuthRuntimeDescriptor(ref: string): AuthRuntimeDescriptor {
   };
 }
 
+export function sanitizeSharedProjectConfig(
+  ref: string,
+  projectConfig: unknown,
+): Record<string, unknown> {
+  if (!projectConfig || typeof projectConfig !== "object" || Array.isArray(projectConfig)) {
+    return {};
+  }
+  const configRecord = projectConfig as Record<string, unknown>;
+  if (getAuthRuntimeDescriptor(ref).mode !== "shared") return { ...configRecord };
+  const { auth: _auth, ...safeConfig } = configRecord;
+  return safeConfig;
+}
+
 export function getAuthRuntimeManagedError(
   ref: string,
   resource: AuthRuntimeManagedResource,

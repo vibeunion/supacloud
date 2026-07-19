@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { z } from "zod";
 
 import { registerSshTools } from "./ssh-tools";
+import { parseToolArguments } from "../schema";
+import type { ToolSchema } from "../schema";
 
 type ToolHandler = (args: Record<string, unknown>) => Promise<{ content: Array<{ type: "text"; text: string }> }>;
 
@@ -58,13 +59,13 @@ function captureSshTool(ssh: FakeSsh): {
     parse: (args: Record<string, unknown>) => Record<string, unknown>;
     invoke: (args: Record<string, unknown>) => ReturnType<ToolHandler>;
 } {
-    let schema: Record<string, z.ZodType> | undefined;
+    let schema: ToolSchema | undefined;
     let handler: ToolHandler | undefined;
     const server = {
         tool: (
             _name: string,
             _description: string,
-            toolSchema: Record<string, z.ZodType>,
+            toolSchema: ToolSchema,
             toolHandler: ToolHandler,
         ) => {
             schema = toolSchema;
@@ -74,11 +75,10 @@ function captureSshTool(ssh: FakeSsh): {
 
     registerSshTools(server, ssh as never);
     if (!schema || !handler) throw new Error("ssh tool was not registered");
-    const validator = z.object(schema).strict();
-
+    const registeredSchema = schema;
     return {
-        parse: (args) => validator.parse(args),
-        invoke: (args) => handler!(validator.parse(args)),
+        parse: (args) => parseToolArguments(registeredSchema, args),
+        invoke: (args) => handler!(parseToolArguments(registeredSchema, args)),
     };
 }
 

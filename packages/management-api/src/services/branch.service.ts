@@ -9,14 +9,51 @@
  * This avoids depending on a template DB and works on any Postgres the
  * platform already manages.
  */
-import { sql, removeProjectDbCache } from "../db";
+import {
+  generateDbName,
+  getProjectDb,
+  getProjectRoleDb,
+  removeProjectDbCache,
+  resolveAuthenticatorName,
+  resolveBucketName,
+  resolveRoleName,
+  sql,
+} from "../db";
 import { databaseService } from "./database.service";
 import { projectRepository } from "../repositories/project.repository";
-import { generateDbName, resolveRoleName, resolveBucketName, resolveAuthenticatorName } from "../db";
 import { tenantRuntimeService } from "./tenant-runtime.service";
 import { logger } from "../utils/logger";
 import { mergeProjectConfig, normalizeProjectConfig } from "../utils/project-config";
 import { createHash, createHmac, pbkdf2Sync, randomBytes } from "node:crypto";
+import {
+  buildBranchMigrationPromotionPlan,
+  detectUnsupportedMigrationOperations,
+  summarizeMigrationLedgerEntry,
+  type BranchMigrationPromotionPlan,
+  type MigrationLedgerEntry,
+  type MigrationPromotionSummary,
+} from "./migration-promotion";
+import {
+  ensureMigrationLedgerMetadata as ensureLedgerMetadata,
+  readMigrationLedger,
+} from "./migration-ledger";
+import {
+  ProjectMigrationLockError,
+  withProjectMigrationLocks,
+} from "./migration-lock";
+import { prepareProjectMigrationRole } from "./project-migration-role";
+import {
+  BranchReplacementJournalActiveError,
+  branchReplacementJournal,
+  type BranchReplacementJournalEntry,
+} from "./branch-replacement-journal";
+import {
+  issueMigrationLedgerLease,
+  releaseMigrationLedgerLease,
+} from "./migration-ledger-lease";
+
+type ProjectSql = ReturnType<typeof getProjectDb>;
+type ReservedProjectSql = Awaited<ReturnType<ProjectSql["reserve"]>>;
 
 interface ParsedPostgresConnection {
   username: string;
@@ -183,11 +220,73 @@ export interface CreateBranchInput {
   parentRef: string;
   branchRef: string;
   name: string;
+  dataMode?: BranchDataMode;
+}
+
+export type BranchDataMode = "schema_only" | "full_clone";
+
+export type BranchPromotionErrorCode =
+  | "promotion_locked"
+  | "promotion_plan_changed"
+  | "promotion_blocked"
+  | "destructive_confirmation_required"
+  | "promotion_apply_failed"
+  | "promotion_readback_failed";
+
+export class BranchPromotionError extends Error {
+  constructor(
+    public readonly code: BranchPromotionErrorCode,
+    public readonly httpStatus: 409 | 423 | 500,
+    message: string,
+    public readonly plan?: BranchMigrationPromotionPlan,
+    public readonly applied: MigrationPromotionSummary[] = [],
+  ) {
+    super(message);
+    this.name = "BranchPromotionError";
+  }
+}
+
+export type BranchReplacementErrorCode =
+  | "replacement_locked"
+  | "replacement_switch_failed"
+  | "replacement_runtime_unavailable";
+
+export class BranchReplacementError extends Error {
+  constructor(
+    public readonly code: BranchReplacementErrorCode,
+    public readonly httpStatus: 423 | 500 | 503,
+    message: string,
+    public readonly replacementCommitted: boolean,
+    public readonly backupDatabase?: string,
+    public readonly recoveryRequired: boolean = replacementCommitted,
+    public readonly recoveryDatabase?: string,
+  ) {
+    super(message);
+    this.name = "BranchReplacementError";
+  }
+}
+
+interface BranchPromotionState {
+  plan: BranchMigrationPromotionPlan;
+  pendingEntries: MigrationLedgerEntry[];
+}
+
+interface ReplacementDatabaseNames {
+  parentDb: string;
+  branchDb: string;
+  tempDb: string;
+  backupDb: string;
+}
+
+interface ReplacementRecoveryResult {
+  succeeded: boolean;
+  recoveryDatabase: string;
 }
 
 class BranchService {
   async createBranch(input: CreateBranchInput): Promise<void> {
     const { parentRef, branchRef, name } = input;
+    const dataMode = input.dataMode ?? "schema_only";
     const parent = await projectRepository.findByRef(parentRef);
     if (!parent) throw new Error("Parent project not found");
 
@@ -219,19 +318,47 @@ class BranchService {
         parent_ref: parentRef,
         branch_name: name,
         is_branch: true,
+        branch_data_mode: dataMode,
       },
     });
     if (!branchProject) throw new Error("Failed to create branch project record");
 
-    // 2. Clone the parent database into a fresh, empty branch database.
-    await this.createEmptyTenantDatabase(branchDbName, branchRef, dbPassword);
-    await this.cloneDatabase(parentDbName, branchDbName);
-    await this.applyRuntimeGrants(branchDbName, branchRef, dbPassword);
+    // 2. Hold the same control-plane lock used by migrations while taking the
+    // schema snapshot and copying its ledger. This prevents a migration from
+    // committing between pg_dump and the ledger read.
+    await this.withBranchProvisionLock({ parentRef, branchRef }, async () => {
+      await this.createEmptyTenantDatabase(branchDbName, branchRef, dbPassword);
+      await this.cloneDatabase(parentDbName, branchDbName, dataMode);
+      if (dataMode === "schema_only") {
+        await this.copyMigrationLedgerHistory(parentDbName, branchDbName);
+      }
+      await this.applyRuntimeGrants(branchDbName, branchRef, dbPassword);
+      await this.prepareMigrationDatabaseRole(branchDbName, branchDbUser);
+    });
 
     // 3. Start tenant runtime (PostgREST + GoTrue) for the branch.
     await tenantRuntimeService.restartRuntime(branchRef);
 
     logger.info(`[branch] created ${branchRef} from ${parentRef}`);
+  }
+
+  private async prepareMigrationDatabaseRole(dbName: string, dbUser: string): Promise<void> {
+    const adminDb = getProjectDb(dbName);
+    await this.ensureMigrationLedgerMetadata(adminDb);
+    await prepareProjectMigrationRole(adminDb, dbName, dbUser);
+  }
+
+  private async withBranchProvisionLock<T>(
+    input: { parentRef: string; branchRef: string },
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    return withProjectMigrationLocks(
+      { projectRefs: [input.parentRef, input.branchRef] },
+      async () => {
+        await branchReplacementJournal.assertInactive([input.parentRef, input.branchRef]);
+        return operation();
+      },
+    );
   }
 
   private async createEmptyTenantDatabase(
@@ -290,7 +417,11 @@ class BranchService {
     await sql.unsafe(statement);
   }
 
-  private async cloneDatabase(sourceDb: string, targetDb: string): Promise<void> {
+  private async cloneDatabase(
+    sourceDb: string,
+    targetDb: string,
+    dataMode: BranchDataMode = "full_clone",
+  ): Promise<void> {
     // The platform admin DB credentials are used for both sides of the dump/restore.
     const adminDbUrl = process.env.DATABASE_URL;
     if (!adminDbUrl) throw new Error("DATABASE_URL is not set; cannot clone branch database");
@@ -304,6 +435,7 @@ class BranchService {
         "pg_dump",
         "--no-owner",
         "--no-privileges",
+        ...(dataMode === "schema_only" ? ["--schema-only"] : []),
         "--host", connection.hostname,
         "--port", connection.port,
         "--username", connection.username,
@@ -403,6 +535,317 @@ class BranchService {
     return { username, password, hostname, port, database, environment };
   }
 
+  private async readMigrationLedger(database: ProjectSql | ReservedProjectSql): Promise<MigrationLedgerEntry[]> {
+    return readMigrationLedger(database);
+  }
+
+  private async buildPromotionState(
+    parentRef: string,
+    branchRef: string,
+  ): Promise<BranchPromotionState> {
+    const [parentProject, branchProject] = await Promise.all([
+      projectRepository.findByRef(parentRef),
+      projectRepository.findByRef(branchRef),
+    ]);
+    if (!parentProject || !branchProject) {
+      throw new BranchPromotionError("promotion_apply_failed", 500, "Parent or branch project not found");
+    }
+    const parentDatabase = getProjectDb(parentProject.db_name);
+    const branchDatabase = getProjectDb(branchProject.db_name);
+    await Promise.all([
+      this.ensureMigrationLedgerMetadata(parentDatabase),
+      this.ensureMigrationLedgerMetadata(branchDatabase),
+    ]);
+    await Promise.all([
+      prepareProjectMigrationRole(parentDatabase, parentProject.db_name, parentProject.db_user),
+      prepareProjectMigrationRole(branchDatabase, branchProject.db_name, branchProject.db_user),
+    ]);
+    const [parent, branch] = await Promise.all([
+      this.readMigrationLedger(parentDatabase),
+      this.readMigrationLedger(branchDatabase),
+    ]);
+    const plan = buildBranchMigrationPromotionPlan({ parentRef, branchRef, parent, branch });
+    const pendingVersions = new Set(plan.pending.map((entry) => entry.version));
+    return {
+      plan,
+      pendingEntries: branch.filter((entry) => pendingVersions.has(entry.version)),
+    };
+  }
+
+  async planBranchPromotion(input: { parentRef: string; branchRef: string }): Promise<BranchMigrationPromotionPlan> {
+    return this.withPromotionLock(input, async () =>
+      (await this.buildPromotionState(input.parentRef, input.branchRef)).plan,
+    );
+  }
+
+  private async withPromotionLock<T>(
+    input: { parentRef: string; branchRef: string },
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    try {
+      return await withProjectMigrationLocks(
+        { projectRefs: [input.parentRef, input.branchRef] },
+        async () => {
+          await branchReplacementJournal.assertInactive([input.parentRef, input.branchRef]);
+          return operation();
+        },
+      );
+    } catch (error: unknown) {
+      if (!(error instanceof ProjectMigrationLockError) && !(error instanceof BranchReplacementJournalActiveError)) {
+        throw error;
+      }
+      throw new BranchPromotionError("promotion_locked", 423, error.message);
+    }
+  }
+
+  private async ensureMigrationLedgerMetadata(connection: ProjectSql | ReservedProjectSql): Promise<void> {
+    await ensureLedgerMetadata(connection);
+  }
+
+  private async copyMigrationLedgerHistory(sourceDbName: string, targetDbName: string): Promise<void> {
+    const source = getProjectDb(sourceDbName);
+    const target = getProjectDb(targetDbName);
+    const sourceEntries = await this.readMigrationLedger(source);
+    if (sourceEntries.length === 0) return;
+
+    const connection = await target.reserve();
+    try {
+      await this.ensureMigrationLedgerMetadata(connection);
+      await connection.begin(async (tx) => {
+        for (const entry of sourceEntries) {
+          const statements = tx.array(entry.statements, "TEXT");
+          await tx`
+            INSERT INTO supabase_migrations.schema_migrations
+              (version, statements, name, checksum, inserted_at)
+            VALUES
+              (${entry.version}, ${statements}, ${entry.name}, ${entry.checksum}, COALESCE(CAST(${entry.applied_at} AS TIMESTAMPTZ), now()))
+            ON CONFLICT (version) DO NOTHING
+          `;
+          await tx`
+            INSERT INTO public.schema_migrations
+              (version, statements, name, checksum, inserted_at)
+            VALUES
+              (${entry.version}, ${statements}, ${entry.name}, ${entry.checksum}, COALESCE(CAST(${entry.applied_at} AS TIMESTAMPTZ), now()))
+            ON CONFLICT (version) DO NOTHING
+          `;
+        }
+      });
+    } finally {
+      connection.release();
+    }
+  }
+
+  private async applyMigrationBatch(
+    parentRef: string,
+    entries: readonly MigrationLedgerEntry[],
+  ): Promise<MigrationPromotionSummary[]> {
+    if (entries.length === 0) return [];
+    const parent = await projectRepository.findByRef(parentRef);
+    if (!parent) throw new BranchPromotionError("promotion_apply_failed", 500, "Parent project not found");
+
+    const adminDb = getProjectDb(parent.db_name);
+    await this.ensureMigrationLedgerMetadata(adminDb);
+    await prepareProjectMigrationRole(adminDb, parent.db_name, parent.db_user);
+    const migrationDb = getProjectRoleDb(parent.db_name, parent.db_user, parent.db_password);
+    const connection = await migrationDb.reserve();
+    const applied: MigrationPromotionSummary[] = [];
+    try {
+      for (const entry of entries) {
+        this.assertPromotionSqlSupported(entry, applied);
+        try {
+          await this.applyMigrationEntry(connection, adminDb, entry);
+          applied.push(summarizeMigrationLedgerEntry(entry));
+        } catch (error: unknown) {
+          this.throwPromotionApplyError(error, entry, applied);
+        }
+      }
+    } finally {
+      await this.releaseMigrationSession(connection, parentRef, parent.db_name);
+    }
+    await this.ensureOptionalRealtimePublication(adminDb);
+    return applied;
+  }
+
+  private assertPromotionSqlSupported(
+    entry: MigrationLedgerEntry,
+    applied: readonly MigrationPromotionSummary[],
+  ): void {
+    const unsupported = detectUnsupportedMigrationOperations(entry.statements);
+    if (unsupported.length === 0) return;
+    throw new BranchPromotionError(
+      "promotion_plan_changed",
+      409,
+      `Migration ${entry.version} contains unsupported SQL: ${unsupported.join(", ")}`,
+      undefined,
+      [...applied],
+    );
+  }
+
+  private async applyMigrationEntry(
+    connection: ReservedProjectSql,
+    adminDb: ProjectSql,
+    entry: MigrationLedgerEntry,
+  ): Promise<void> {
+    const leaseHolder: { current?: Awaited<ReturnType<typeof issueMigrationLedgerLease>> } = {};
+    try {
+      await connection.begin(async (tx) => {
+        const existing = await tx<{ version: string }[]>`
+          SELECT version::text AS version
+          FROM supabase_migrations.schema_migrations
+          WHERE version = ${entry.version}
+        `;
+        if (existing.length > 0) {
+          throw new BranchPromotionError(
+            "promotion_plan_changed",
+            409,
+            `Migration ${entry.version} was applied after the promotion plan was created`,
+          );
+        }
+        for (const statement of entry.statements) await tx.unsafe(statement);
+        const issuedLease = await issueMigrationLedgerLease(adminDb, entry.version, entry.checksum);
+        leaseHolder.current = issuedLease;
+        const statements = tx.array(entry.statements, "TEXT");
+        await tx`
+          SELECT supabase_migrations.record_schema_migration(
+            ${entry.version},
+            ${statements},
+            ${entry.name},
+            ${entry.checksum},
+            ${issuedLease.token}
+          )
+        `;
+      });
+    } finally {
+      const lease = leaseHolder.current;
+      if (lease) {
+        try {
+          await releaseMigrationLedgerLease(adminDb, lease.tokenHash);
+        } catch (error: unknown) {
+          logger.warn(`[branch] failed to clean migration ledger lease for ${entry.version}`, {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+    }
+  }
+
+  private throwPromotionApplyError(
+    error: unknown,
+    entry: MigrationLedgerEntry,
+    applied: readonly MigrationPromotionSummary[],
+  ): never {
+    if (error instanceof BranchPromotionError) {
+      if (applied.length === 0 || error.applied.length > 0) throw error;
+      throw new BranchPromotionError(error.code, error.httpStatus, error.message, error.plan, [...applied]);
+    }
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new BranchPromotionError(
+      "promotion_apply_failed",
+      500,
+      `Failed to apply migration ${entry.version}: ${detail}`,
+      undefined,
+      [...applied],
+    );
+  }
+
+  private async releaseMigrationSession(
+    connection: ReservedProjectSql,
+    parentRef: string,
+    dbName: string,
+  ): Promise<void> {
+    let reset = true;
+    try {
+      await connection.unsafe("DISCARD ALL");
+    } catch (error: unknown) {
+      reset = false;
+      logger.warn(`[branch] failed to reset migration session for ${parentRef}`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    connection.release();
+    if (!reset) await removeProjectDbCache(dbName);
+  }
+
+  private async ensureOptionalRealtimePublication(adminDb: ProjectSql): Promise<void> {
+    try {
+      await adminDb`SELECT realtime.ensure_tasks_publication()`;
+    } catch {
+      // Realtime is optional for older or deliberately minimal tenants.
+    }
+  }
+
+  async promoteBranch(input: {
+    parentRef: string;
+    branchRef: string;
+    expectedPlanChecksum: string;
+    confirmDestructive?: boolean;
+  }): Promise<{ applied: MigrationPromotionSummary[]; plan: BranchMigrationPromotionPlan }> {
+    return this.withPromotionLock(input, async () => {
+      const state = await this.buildPromotionState(input.parentRef, input.branchRef);
+      this.assertReviewedPromotionPlan(state.plan, input);
+      const applied = await this.applyMigrationBatch(input.parentRef, state.pendingEntries);
+      const readback = await this.readBackPromotionState(input, applied);
+      if (readback.plan.pending.length > 0 || !readback.plan.safe_to_apply) {
+        throw new BranchPromotionError(
+          "promotion_readback_failed",
+          500,
+          "Migration promotion completed but ledger read-back did not converge",
+          readback.plan,
+          applied,
+        );
+      }
+      return { applied, plan: readback.plan };
+    });
+  }
+
+  private assertReviewedPromotionPlan(
+    plan: BranchMigrationPromotionPlan,
+    input: { expectedPlanChecksum: string; confirmDestructive?: boolean },
+  ): void {
+    if (plan.plan_checksum !== input.expectedPlanChecksum) {
+      throw new BranchPromotionError(
+        "promotion_plan_changed",
+        409,
+        "The migration plan changed; review the latest plan before promoting",
+        plan,
+      );
+    }
+    if (!plan.safe_to_apply) {
+      throw new BranchPromotionError(
+        "promotion_blocked",
+        409,
+        "The migration plan contains blocking conflicts",
+        plan,
+      );
+    }
+    if (plan.requires_destructive_confirmation && !input.confirmDestructive) {
+      throw new BranchPromotionError(
+        "destructive_confirmation_required",
+        409,
+        "The migration plan contains destructive SQL and requires explicit confirmation",
+        plan,
+      );
+    }
+  }
+
+  private async readBackPromotionState(
+    input: { parentRef: string; branchRef: string },
+    applied: readonly MigrationPromotionSummary[],
+  ): Promise<BranchPromotionState> {
+    try {
+      return await this.buildPromotionState(input.parentRef, input.branchRef);
+    } catch (error: unknown) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new BranchPromotionError(
+        "promotion_readback_failed",
+        500,
+        `Migration promotion committed, but ledger read-back failed: ${detail}`,
+        undefined,
+        [...applied],
+      );
+    }
+  }
+
   async deleteBranch(branchRef: string): Promise<void> {
     // Stop runtime first.
     try {
@@ -427,70 +870,365 @@ class BranchService {
     await projectRepository.softDelete(branchRef);
   }
 
-  async promoteBranch(input: { parentRef: string; branchRef: string }): Promise<void> {
+  async replaceParentDatabaseFromBranch(input: {
+    parentRef: string;
+    branchRef: string;
+  }): Promise<{ backupDatabase: string }> {
+    try {
+      return await withProjectMigrationLocks(
+        { projectRefs: [input.parentRef, input.branchRef] },
+        () => this.replaceParentDatabaseUnderLock(input),
+      );
+    } catch (error: unknown) {
+      if (error instanceof ProjectMigrationLockError) {
+        throw new BranchReplacementError("replacement_locked", 423, error.message, false);
+      }
+      throw error;
+    }
+  }
+
+  private async replaceParentDatabaseUnderLock(input: {
+    parentRef: string;
+    branchRef: string;
+  }): Promise<{ backupDatabase: string }> {
     const { parentRef, branchRef } = input;
+    await this.recoverExistingReplacement(parentRef);
     const parent = await projectRepository.findByRef(parentRef);
     if (!parent) throw new Error("Parent project not found");
-
-    const parentDb = generateDbName(parentRef);
-    const branchDb = generateDbName(branchRef);
-    const suffix = Date.now().toString(36);
-    const tempDb = this.derivedDbName(parentDb, `promote_${suffix}`);
-    const backupDb = this.derivedDbName(parentDb, `backup_${suffix}`);
-
-    await this.createEmptyTenantDatabase(tempDb, parentRef, parent.db_password);
-    await this.cloneDatabase(branchDb, tempDb);
-    await this.applyRuntimeGrants(tempDb, parentRef, parent.db_password);
-    await this.validateRestoredDatabase(tempDb);
-
-    let parentRenamed = false;
-    let tempRenamed = false;
+    const names = this.replacementDatabaseNames(parentRef, branchRef);
+    await branchReplacementJournal.begin({
+      parentRef,
+      branchRef,
+      parentDb: names.parentDb,
+      branchDb: names.branchDb,
+      tempDb: names.tempDb,
+      backupDb: names.backupDb,
+    });
     try {
-      // Stop parent runtime only after the replacement database has restored successfully.
-      try {
-        await tenantRuntimeService.stopRuntime(parentRef);
-      } catch (err: unknown) {
-        logger.warn(`[branch] failed to stop parent runtime before promote ${parentRef}`, {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
+      await this.prepareReplacementDatabase(parentRef, parent.db_password, names);
+      await branchReplacementJournal.setPhase(parentRef, "prepared");
+    } catch (error: unknown) {
+      await this.clearReplacementJournalBestEffort(parentRef);
+      throw error;
+    }
+    await this.switchParentDatabase(parentRef, names);
+    await this.restartReplacedParentRuntime(parentRef, names);
+    await this.clearReplacementJournalBestEffort(parentRef);
+    logger.info(`[branch] replaced ${parentRef} from ${branchRef}; previous parent kept as ${names.backupDb}`);
+    return { backupDatabase: names.backupDb };
+  }
 
-      await removeProjectDbCache(parentDb);
-      await this.terminateDatabaseConnections(parentDb);
-      await this.terminateDatabaseConnections(tempDb);
-      await sql.unsafe(`ALTER DATABASE ${this.identQuote(parentDb)} RENAME TO ${this.identQuote(backupDb)}`);
-      parentRenamed = true;
-      await sql.unsafe(`ALTER DATABASE ${this.identQuote(tempDb)} RENAME TO ${this.identQuote(parentDb)}`);
-      tempRenamed = true;
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      if (parentRenamed && !tempRenamed) {
-        try {
-          await sql.unsafe(`ALTER DATABASE ${this.identQuote(backupDb)} RENAME TO ${this.identQuote(parentDb)}`);
-        } catch (rollbackErr: unknown) {
-          logger.error(`[branch] failed to roll back promote rename for ${parentRef}`, {
-            error: rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr),
-          });
-        }
-      }
-      await this.dropDatabaseIfExists(tempDb).catch((dropErr: unknown) => {
-        logger.warn(`[branch] failed to drop promote temp DB ${tempDb}`, {
-          error: dropErr instanceof Error ? dropErr.message : String(dropErr),
-        });
-      });
-      throw new Error(`Promote failed before parent database switch completed: ${message}`);
-    } finally {
+  private async recoverExistingReplacement(parentRef: string): Promise<void> {
+    const entry = await branchReplacementJournal.get(parentRef);
+    if (!entry) return;
+    if (await this.recoverReplacementJournalEntry(entry)) return;
+    throw new BranchReplacementError(
+      "replacement_switch_failed",
+      503,
+      `An interrupted database replacement for ${parentRef} still requires manual recovery`,
+      entry.replacement_committed,
+      entry.backup_db,
+      true,
+      entry.recovery_database ?? entry.backup_db,
+    );
+  }
+
+  async recoverInterruptedReplacements(): Promise<{ checked: number; recovered: number; pending: number }> {
+    const entries = await branchReplacementJournal.list();
+    let recovered = 0;
+    let pending = 0;
+    for (const entry of entries) {
       try {
-        await removeProjectDbCache(parentDb);
-        await tenantRuntimeService.restartRuntime(parentRef);
-      } catch (err: unknown) {
-        logger.warn(`[branch] failed to restart parent runtime after promote attempt ${parentRef}`, {
-          error: err instanceof Error ? err.message : String(err),
+        const didRecover = await withProjectMigrationLocks(
+          { projectRefs: [entry.parent_ref, entry.branch_ref] },
+          async () => {
+            const current = await branchReplacementJournal.get(entry.parent_ref);
+            return current ? this.recoverReplacementJournalEntry(current) : true;
+          },
+        );
+        if (didRecover) recovered += 1;
+        else pending += 1;
+      } catch (error: unknown) {
+        pending += 1;
+        logger.error(`[branch] interrupted replacement recovery failed for ${entry.parent_ref}`, {
+          error: error instanceof Error ? error.message : String(error),
         });
       }
     }
+    return { checked: entries.length, recovered, pending };
+  }
 
-    logger.info(`[branch] promoted ${branchRef} into ${parentRef}; previous parent kept as ${backupDb}`);
+  private replacementDatabaseNames(parentRef: string, branchRef: string): ReplacementDatabaseNames {
+    const parentDb = generateDbName(parentRef);
+    const suffix = Date.now().toString(36);
+    return {
+      parentDb,
+      branchDb: generateDbName(branchRef),
+      tempDb: this.derivedDbName(parentDb, `promote_${suffix}`),
+      backupDb: this.derivedDbName(parentDb, `backup_${suffix}`),
+    };
+  }
+
+  private async prepareReplacementDatabase(
+    parentRef: string,
+    password: string,
+    names: ReplacementDatabaseNames,
+  ): Promise<void> {
+    try {
+      await this.createEmptyTenantDatabase(names.tempDb, parentRef, password);
+      await this.cloneDatabase(names.branchDb, names.tempDb);
+      await this.applyRuntimeGrants(names.tempDb, parentRef, password);
+      await this.validateRestoredDatabase(names.tempDb);
+    } catch (error: unknown) {
+      await this.dropDatabaseWithWarning(names.tempDb, "replacement temp DB");
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new BranchReplacementError("replacement_switch_failed", 500, `Replacement database preparation failed: ${detail}`, false);
+    }
+  }
+
+  private async switchParentDatabase(parentRef: string, names: ReplacementDatabaseNames): Promise<void> {
+    let parentRenamed = false;
+    let tempRenamed = false;
+    let connectionsDisabled = false;
+    try {
+      await tenantRuntimeService.stopRuntime(parentRef);
+      await this.setDatabaseConnectionsAllowed(names.parentDb, false);
+      connectionsDisabled = true;
+      await branchReplacementJournal.setPhase(parentRef, "connections_disabled", names.parentDb);
+      await removeProjectDbCache(names.parentDb);
+      await this.terminateDatabaseConnections(names.parentDb);
+      await this.terminateDatabaseConnections(names.tempDb);
+      await this.renameDatabase(names.parentDb, names.backupDb);
+      parentRenamed = true;
+      await branchReplacementJournal.setPhase(parentRef, "parent_renamed", names.backupDb);
+      await this.renameDatabase(names.tempDb, names.parentDb);
+      tempRenamed = true;
+      await branchReplacementJournal.setPhase(parentRef, "replacement_committed", names.backupDb, true);
+    } catch (error: unknown) {
+      if (tempRenamed) {
+        const detail = error instanceof Error ? error.message : String(error);
+        try {
+          await this.restartParentRuntimeAndVerify(parentRef, names.parentDb);
+        } catch (runtimeError: unknown) {
+          logger.error(`[branch] committed replacement runtime recovery failed for ${parentRef}`, {
+            error: runtimeError instanceof Error ? runtimeError.message : String(runtimeError),
+          });
+        }
+        await this.markReplacementRecoveryRequiredBestEffort(parentRef, names.backupDb, true);
+        throw new BranchReplacementError(
+          "replacement_switch_failed",
+          503,
+          `Database replacement committed, but its durable phase could not be recorded: ${detail}`,
+          true,
+          names.backupDb,
+          true,
+          names.backupDb,
+        );
+      }
+      const recovery = await this.recoverReplacementSwitch(parentRef, names, {
+        parentRenamed,
+        tempRenamed,
+        connectionsDisabled,
+      });
+      const detail = error instanceof Error ? error.message : String(error);
+      if (recovery.succeeded) {
+        await this.clearReplacementJournalBestEffort(parentRef);
+      } else {
+        await this.markReplacementRecoveryRequiredBestEffort(parentRef, recovery.recoveryDatabase, false);
+      }
+      throw new BranchReplacementError(
+        "replacement_switch_failed",
+        500,
+        recovery.succeeded
+          ? `Replacement failed before the parent database switch completed: ${detail}`
+          : `Replacement failed and rollback could not be verified: ${detail}`,
+        false,
+        recovery.recoveryDatabase === names.backupDb ? names.backupDb : undefined,
+        !recovery.succeeded,
+        recovery.succeeded ? undefined : recovery.recoveryDatabase,
+      );
+    }
+  }
+
+  private async recoverReplacementSwitch(
+    parentRef: string,
+    names: ReplacementDatabaseNames,
+    state: { parentRenamed: boolean; tempRenamed: boolean; connectionsDisabled: boolean },
+  ): Promise<ReplacementRecoveryResult> {
+    let rollbackSucceeded = true;
+    let recoveryDatabase = state.parentRenamed ? names.backupDb : names.parentDb;
+    if (state.parentRenamed && !state.tempRenamed) {
+      rollbackSucceeded = await this.restoreParentDatabaseName(parentRef, names);
+      if (rollbackSucceeded) recoveryDatabase = names.parentDb;
+    }
+    if (!state.tempRenamed && state.connectionsDisabled && rollbackSucceeded) {
+      rollbackSucceeded = await this.reenableParentConnections(parentRef, names.parentDb);
+    }
+    if (!state.tempRenamed) await this.dropDatabaseWithWarning(names.tempDb, "promote temp DB");
+    await this.restartParentRuntimeBestEffort(parentRef, names.parentDb);
+    return { succeeded: rollbackSucceeded, recoveryDatabase };
+  }
+
+  private async restoreParentDatabaseName(
+    parentRef: string,
+    names: ReplacementDatabaseNames,
+  ): Promise<boolean> {
+    try {
+      await this.renameDatabase(names.backupDb, names.parentDb);
+      return true;
+    } catch (error: unknown) {
+      logger.error(`[branch] failed to roll back promote rename for ${parentRef}`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return false;
+    }
+  }
+
+  private async reenableParentConnections(parentRef: string, parentDb: string): Promise<boolean> {
+    try {
+      await this.setDatabaseConnectionsAllowed(parentDb, true);
+      return true;
+    } catch (error: unknown) {
+      logger.error(`[branch] failed to re-enable parent database connections for ${parentRef}`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return false;
+    }
+  }
+
+  private async restartParentRuntimeBestEffort(parentRef: string, parentDb: string): Promise<void> {
+    try {
+      await removeProjectDbCache(parentDb);
+      await tenantRuntimeService.restartRuntime(parentRef);
+    } catch (error: unknown) {
+      logger.warn(`[branch] failed to restart parent runtime after replacement attempt ${parentRef}`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  private async restartReplacedParentRuntime(
+    parentRef: string,
+    names: ReplacementDatabaseNames,
+  ): Promise<void> {
+    try {
+      await this.restartParentRuntimeAndVerify(parentRef, names.parentDb);
+    } catch (error: unknown) {
+      const detail = error instanceof Error ? error.message : String(error);
+      await this.markReplacementRecoveryRequiredBestEffort(parentRef, names.backupDb, true);
+      throw new BranchReplacementError(
+        "replacement_runtime_unavailable",
+        503,
+        `Database replacement committed, but the parent runtime is not healthy: ${detail}`,
+        true,
+        names.backupDb,
+        true,
+        names.backupDb,
+      );
+    }
+  }
+
+  private async restartParentRuntimeAndVerify(parentRef: string, parentDb: string): Promise<void> {
+    await removeProjectDbCache(parentDb);
+    const runtimeStatus = await tenantRuntimeService.restartRuntime(parentRef);
+    if (runtimeStatus.status !== "running" || runtimeStatus.health !== "healthy") {
+      throw new Error(`runtime status is ${runtimeStatus.status}/${runtimeStatus.health}`);
+    }
+  }
+
+  private async recoverReplacementJournalEntry(entry: BranchReplacementJournalEntry): Promise<boolean> {
+    const names: ReplacementDatabaseNames = {
+      parentDb: entry.parent_db,
+      branchDb: entry.branch_db,
+      tempDb: entry.temp_db,
+      backupDb: entry.backup_db,
+    };
+    const [parentExists, backupExists, tempExists] = await Promise.all([
+      this.databaseExists(names.parentDb),
+      this.databaseExists(names.backupDb),
+      this.databaseExists(names.tempDb),
+    ]);
+
+    try {
+      if (parentExists && backupExists && !tempExists) {
+        await this.restartParentRuntimeAndVerify(entry.parent_ref, names.parentDb);
+        await branchReplacementJournal.remove(entry.parent_ref);
+        return true;
+      }
+
+      if (parentExists && !backupExists) {
+        await this.setDatabaseConnectionsAllowed(names.parentDb, true);
+        if (tempExists) await this.dropDatabaseIfExists(names.tempDb);
+        await this.restartParentRuntimeAndVerify(entry.parent_ref, names.parentDb);
+        await branchReplacementJournal.remove(entry.parent_ref);
+        return true;
+      }
+
+      if (!parentExists && backupExists) {
+        await this.renameDatabase(names.backupDb, names.parentDb);
+        await this.setDatabaseConnectionsAllowed(names.parentDb, true);
+        if (tempExists) await this.dropDatabaseIfExists(names.tempDb);
+        await this.restartParentRuntimeAndVerify(entry.parent_ref, names.parentDb);
+        await branchReplacementJournal.remove(entry.parent_ref);
+        return true;
+      }
+    } catch (error: unknown) {
+      logger.error(`[branch] failed to recover interrupted replacement for ${entry.parent_ref}`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    const recoveryDatabase = backupExists ? names.backupDb : parentExists ? names.parentDb : undefined;
+    const replacementCommitted = entry.replacement_committed || (parentExists && backupExists && !tempExists);
+    await this.markReplacementRecoveryRequiredBestEffort(
+      entry.parent_ref,
+      recoveryDatabase,
+      replacementCommitted,
+    );
+    return false;
+  }
+
+  private async markReplacementRecoveryRequiredBestEffort(
+    parentRef: string,
+    recoveryDatabase?: string,
+    replacementCommitted?: boolean,
+  ): Promise<void> {
+    try {
+      await branchReplacementJournal.setPhase(
+        parentRef,
+        "recovery_required",
+        recoveryDatabase,
+        replacementCommitted,
+      );
+    } catch (error: unknown) {
+      logger.error(`[branch] failed to persist recovery-required state for ${parentRef}`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  private async clearReplacementJournalBestEffort(parentRef: string): Promise<void> {
+    try {
+      await branchReplacementJournal.remove(parentRef);
+    } catch (error: unknown) {
+      logger.warn(`[branch] failed to clear replacement journal for ${parentRef}`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  private async renameDatabase(source: string, target: string): Promise<void> {
+    await sql.unsafe(`ALTER DATABASE ${this.identQuote(source)} RENAME TO ${this.identQuote(target)}`);
+  }
+
+  private async dropDatabaseWithWarning(dbName: string, label: string): Promise<void> {
+    try {
+      await this.dropDatabaseIfExists(dbName);
+    } catch (error: unknown) {
+      logger.warn(`[branch] failed to drop ${label} ${dbName}`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   private async applyRuntimeGrants(dbName: string, projectRef: string, password: string): Promise<void> {
@@ -600,6 +1338,12 @@ class BranchService {
       WHERE datname = ${dbName}
         AND pid <> pg_backend_pid()
     `;
+  }
+
+  private async setDatabaseConnectionsAllowed(dbName: string, allowed: boolean): Promise<void> {
+    await sql.unsafe(
+      `ALTER DATABASE ${this.identQuote(dbName)} WITH ALLOW_CONNECTIONS ${allowed ? "true" : "false"}`,
+    );
   }
 
   private async dropDatabaseIfExists(dbName: string): Promise<void> {

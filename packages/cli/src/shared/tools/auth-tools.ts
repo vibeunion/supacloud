@@ -1,7 +1,8 @@
 /**
  * Auth — Compound tool (10→1)
  */
-import { z } from "zod";
+import { Type } from "@sinclair/typebox";
+import { optional, stringEnum, withDescription } from "../schema";
 import type { HttpTransport } from "../transports/http";
 
 function formatProviders(data: unknown): string {
@@ -24,22 +25,22 @@ export function registerAuthTools(server: { tool: (...args: any[]) => void }, ht
         `Auth & OAuth provider management.
 Actions: list_providers, get_provider, configure_provider, update_provider, disable_provider, supported_providers, wechat_mini, wechat_open, get_settings, update_settings, get_config, update_config`,
         {
-            action: z.enum([
+            action: withDescription(stringEnum([
                 "list_providers", "get_provider", "configure_provider", "update_provider",
                 "disable_provider", "supported_providers",
                 "wechat_mini", "wechat_open",
                 "get_settings", "update_settings",
                 "get_config", "update_config",
-            ]).describe("Action to perform"),
-            ref: z.string().optional().describe("Project ref (required for most actions)"),
-            provider: z.string().optional().describe("[*_provider] Provider name (github, google, wechat, etc.)"),
-            client_id: z.string().optional().describe("[configure/update] OAuth Client ID"),
-            client_secret: z.string().optional().describe("[configure/update] OAuth Client Secret"),
-            redirect_uri: z.string().optional().describe("[configure/update/wechat_open] Redirect URI"),
-            url: z.string().optional().describe("[configure] Custom OAuth URL"),
-            app_id: z.string().optional().describe("[wechat_*] WeChat App ID"),
-            app_secret: z.string().optional().describe("[wechat_*] WeChat App Secret"),
-            config: z.record(z.string(), z.unknown()).optional().describe("[update_settings/update_config] Config fields"),
+            ]), "Action to perform"),
+            ref: optional(Type.String(), "Project ref (required for most actions)"),
+            provider: optional(Type.String(), "[*_provider] Provider name (github, google, wechat, etc.)"),
+            client_id: optional(Type.String(), "[configure/update] OAuth Client ID"),
+            client_secret: optional(Type.String(), "[configure/update] OAuth Client Secret"),
+            redirect_uri: optional(Type.String(), "[configure/update/wechat_open] Redirect URI"),
+            url: optional(Type.String(), "[configure] Custom OAuth URL"),
+            app_id: optional(Type.String(), "[wechat_*] WeChat App ID"),
+            app_secret: optional(Type.String(), "[wechat_*] WeChat App Secret"),
+            config: optional(Type.Record(Type.String(), Type.Unknown()), "[update_settings/update_config] Config fields"),
         },
         async (args: any) => {
             const { action, ref, provider, client_id, client_secret, redirect_uri, url, app_id, app_secret, config } = args;

@@ -39,10 +39,25 @@ describe("TenantRuntimeService secret handling", () => {
 
   test("shared auth keeps owner private signing material out and rejects non-user owner roles", () => {
     expect(source).toContain("buildSharedProjectJwtVerificationMaterial");
+    expect(source).toContain("buildSharedPostgrestJwtVerifierJwks");
+    expect(source).toContain('renderSystemdEnvLine("SUPACLOUD_AUTH_ISSUER", creds.acceptedAuthIssuer)');
     expect(source).toContain('sharedAuthRuntime ? "" : renderSystemdEnvLine("JWT_SECRET"');
     expect(source).toContain('sharedAuthRuntime ? "" : jwtKeysEnv');
+    expect(source).toContain("!sharedAuthRuntime && creds.postgrestJwtJwks");
     expect(source).toContain("const postgrestJwtAudience = sharedAuthRuntime");
     expect(source).toContain("SupAuth owner tokens may only use the authenticated role");
     expect(source).toContain("Dependent legacy user sessions are disabled while SupAuth is active");
+  });
+
+  test("shared auth selects the owner before parsing dormant dependent JWT config", () => {
+    const start = source.indexOf("private async getTenantCredentials");
+    const end = source.indexOf("private async ensurePostgrestBinary", start);
+    const credentialsSource = source.slice(start, end);
+
+    expect(credentialsSource.indexOf("const authRuntime = getAuthRuntimeDescriptor(ref)")).toBeGreaterThan(0);
+    expect(credentialsSource.indexOf("if (authRuntime.mode === \"shared\")")).toBeGreaterThan(0);
+    expect(credentialsSource.indexOf("resolveProjectJwtVerificationMaterial(projectConfig")).toBeGreaterThan(
+      credentialsSource.indexOf("if (authRuntime.mode === \"shared\")"),
+    );
   });
 });

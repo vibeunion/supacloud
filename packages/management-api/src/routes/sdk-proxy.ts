@@ -124,10 +124,21 @@ function isTestTenantAuthAllowed(request: Request): boolean {
 }
 
 async function verifyJwtPayload(ref: string, token: string): Promise<Record<string, unknown> | null> {
+    const result = await verifyProjectJwtPayload(ref, token);
+    return result?.payload as Record<string, unknown> | null;
+}
+
+async function tryReadJwtPayloadForBackground(
+    ref: string,
+    token: string,
+): Promise<Record<string, unknown> | null> {
     try {
-        const result = await verifyProjectJwtPayload(ref, token);
-        return result?.payload as Record<string, unknown> | null;
-    } catch {
+        return await sdkProxyInternals.verifyJwtPayload(ref, token);
+    } catch (error: unknown) {
+        logger.warn("[SDK Proxy] Optional background JWT metadata unavailable", {
+            ref,
+            error: error instanceof Error ? error.message : String(error),
+        });
         return null;
     }
 }
@@ -202,7 +213,7 @@ async function maybeEnqueueAsyncFunction(request: Request, ref: string): Promise
         ? await projectService.getApiKeys(ref)
         : null;
     const authPayload = authorization?.startsWith("Bearer ")
-        ? await verifyJwtPayload(ref, authorization.replace(/^Bearer\s+/i, ""))
+        ? await tryReadJwtPayloadForBackground(ref, authorization.replace(/^Bearer\s+/i, ""))
         : null;
     const authKind = authorization
         ? "jwt"
@@ -266,8 +277,10 @@ async function maybeEnqueueAsyncFunction(request: Request, ref: string): Promise
 export const sdkProxyInternals = {
     resolveProjectRefFromApiKey,
     resolveProjectApiKey,
+    verifyJwtPayload,
     maybeEnqueueAsyncFunction,
     buildEncryptedBackgroundAuth,
+    translateOpaqueApiKeyHeaders,
 };
 
 async function getUpstreamApiKey(ref: string, role: "anon" | "service_role"): Promise<string | null> {
@@ -289,7 +302,13 @@ async function translateOpaqueApiKeyHeaders(
     const resolveUpstream = async (candidate: string): Promise<string | null | undefined> => {
         if (!candidate) return undefined;
         const resolved = await sdkProxyInternals.resolveProjectApiKey(candidate, { includeProvisioning: true });
-        if (!resolved) return isOpaqueApiKey(candidate) ? null : undefined;
+        if (!resolved) {
+            if (authAuthorityRef !== ref && candidate.split(".").length === 3) {
+                const payload = await sdkProxyInternals.verifyJwtPayload(ref, candidate);
+                return payload?.role === "authenticated" ? undefined : null;
+            }
+            return isOpaqueApiKey(candidate) ? null : undefined;
+        }
         if (resolved.ref !== ref || !resolved.upstreamKey) return null;
         if (authAuthorityRef === ref) return resolved.upstreamKey;
         // 从属项目只能借用 SupAuth owner 的匿名入口。绝不能把从属项目的

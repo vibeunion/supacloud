@@ -2,11 +2,14 @@ import { describe, expect, mock, test } from "bun:test";
 import {
   invalidateTenantEnvCache,
   isMaskedSecretValue,
+  buildFallbackTenantEnv,
   loadTenantEnv,
+  mergeTenantRuntimeEnv,
   normalizeTenantEnv,
   stripMaskedSecretValues,
   withBackgroundInternalToken,
 } from "./tenant-env";
+import { readEdgeRuntimeProjectSecrets } from "./jwt-verifier";
 
 describe("tenant env masking guard", () => {
   test("recognizes masked secret placeholders", () => {
@@ -36,6 +39,110 @@ describe("tenant env masking guard", () => {
       SUPACLOUD_INTERNAL_AUTH_URL: "http://127.0.0.1/auth/v1",
       SUPACLOUD_INTERNAL_REST_URL: "http://127.0.0.1/rest/v1",
     }));
+  });
+
+  test("shared mode drops stale verifier secrets before function injection", () => {
+    const env = normalizeTenantEnv("proj_1", {
+      SUPACLOUD_AUTH_RUNTIME_MODE: "shared",
+      SUPACLOUD_AUTH_ISSUER: "https://auth-owner.example.com/auth/v1",
+      JWT_JWKS: '{"keys":[{"kid":"owner-key"}]}',
+      JWT_SECRET: "stale-dependent-secret",
+      JWT_KEYS: "stale-private-keys",
+      SUPACLOUD_THIRD_PARTY_JWT_POLICY: "stale-dependent-policy",
+    });
+
+    expect(env.JWT_SECRET).toBeUndefined();
+    expect(env.JWT_KEYS).toBeUndefined();
+    expect(env.SUPACLOUD_THIRD_PARTY_JWT_POLICY).toBeUndefined();
+    expect(env.JWT_JWKS).toContain("owner-key");
+    expect(env.SUPACLOUD_AUTH_RUNTIME_MODE).toBe("shared");
+    expect(env.SUPACLOUD_AUTH_ISSUER).toBe("https://auth-owner.example.com/auth/v1");
+  });
+
+  test("unknown runtime mode strips verifier material from function env", () => {
+    const env = normalizeTenantEnv("proj_1", {
+      SUPACLOUD_AUTH_RUNTIME_MODE: "unexpected",
+      SUPABASE_ANON_KEY: "anon-key",
+      JWT_SECRET: "untrusted-secret",
+      JWT_JWKS: '{"keys":[{"kid":"untrusted-key"}]}',
+    });
+
+    expect(env.SUPABASE_ANON_KEY).toBe("anon-key");
+    expect(env.JWT_SECRET).toBeUndefined();
+    expect(env.JWT_JWKS).toBeUndefined();
+    expect(readEdgeRuntimeProjectSecrets(env)).toBeNull();
+  });
+
+  test("treats a successful runtime API response as authoritative for auth mode", () => {
+    const env = mergeTenantRuntimeEnv("proj_1", {
+      SUPACLOUD_AUTH_RUNTIME_MODE: "local",
+      SUPACLOUD_AUTH_AUTHORITY_REF: "proj_1",
+      JWT_SECRET: "stale-file-secret",
+      JWT_JWKS: '{"keys":[{"kid":"stale-file-key"}]}',
+    }, {
+      SUPACLOUD_AUTH_ISSUER: "https://auth-owner.example.com/auth/v1",
+      JWT_JWKS: '{"keys":[{"kid":"owner-key"}]}',
+    });
+
+    expect(env.SUPACLOUD_AUTH_RUNTIME_MODE).toBeUndefined();
+    expect(env.SUPACLOUD_AUTH_AUTHORITY_REF).toBeUndefined();
+    expect(env.JWT_SECRET).toBeUndefined();
+    expect(env.JWT_JWKS).toBeUndefined();
+    expect(readEdgeRuntimeProjectSecrets(env)).toBeNull();
+  });
+
+  test("uses only API verifier material when the API provides an explicit mode", () => {
+    const env = mergeTenantRuntimeEnv("proj_1", {
+      SUPACLOUD_AUTH_RUNTIME_MODE: "local",
+      JWT_SECRET: "stale-file-secret",
+    }, {
+      SUPACLOUD_AUTH_RUNTIME_MODE: "owner",
+      JWT_SECRET: "current-api-secret",
+    });
+
+    expect(env.SUPACLOUD_AUTH_RUNTIME_MODE).toBe("owner");
+    expect(env.JWT_SECRET).toBe("current-api-secret");
+  });
+
+  test("does not reuse cached verifier material when the runtime API is unavailable", () => {
+    const env = buildFallbackTenantEnv("proj_1", {
+      SUPACLOUD_AUTH_RUNTIME_MODE: "shared",
+      SUPACLOUD_AUTH_ISSUER: "https://auth-owner.example.com/auth/v1",
+      JWT_JWKS: '{"keys":[{"kid":"stale-file"}]}',
+    }, {
+      SUPACLOUD_AUTH_RUNTIME_MODE: "local",
+      JWT_SECRET: "stale-cached-secret",
+      JWT_JWKS: '{"keys":[{"kid":"stale-cache"}]}',
+      SUPABASE_ANON_KEY: "cached-anon-key",
+    });
+
+    expect(env.SUPACLOUD_AUTH_RUNTIME_MODE).toBe("shared");
+    expect(env.SUPACLOUD_AUTH_ISSUER).toBe("https://auth-owner.example.com/auth/v1");
+    expect(env.JWT_SECRET).toBeUndefined();
+    expect(env.JWT_JWKS).toBeUndefined();
+    expect(env.SUPABASE_ANON_KEY).toBe("cached-anon-key");
+  });
+
+  test("keeps a trusted local file verifier when no stale cache is present", () => {
+    const env = buildFallbackTenantEnv("proj_1", {
+      SUPACLOUD_AUTH_RUNTIME_MODE: "local",
+      JWT_SECRET: "local-file-secret",
+      JWT_JWKS: '{"keys":[{"kid":"local-key"}]}',
+    });
+
+    expect(env.JWT_SECRET).toBe("local-file-secret");
+    expect(env.JWT_JWKS).toContain("local-key");
+  });
+
+  test("does not expose the shared PostgREST legacy JWK through file fallback", () => {
+    const env = buildFallbackTenantEnv("proj_1", {
+      SUPACLOUD_AUTH_RUNTIME_MODE: "shared",
+      SUPACLOUD_AUTH_ISSUER: "https://auth-owner.example.com/auth/v1",
+      JWT_JWKS: '{"keys":[{"kty":"oct","kid":"legacy-hs256","k":"dependent"},{"kty":"EC","kid":"owner-key"}]}',
+    });
+
+    expect(env.JWT_JWKS).toBeUndefined();
+    expect(env.SUPACLOUD_AUTH_RUNTIME_MODE).toBe("shared");
   });
 
   test("prefers tenant-local PostgREST port for internal REST fallback", () => {
@@ -107,6 +214,9 @@ describe("tenant env masking guard", () => {
 
       return Promise.resolve(Response.json([
         { name: "RESULT_S3_ENDPOINT", value: "http://legacy-s3.local" },
+        { name: "SUPABASE_ANON_KEY", value: "stale-anon-key" },
+        { name: "JWT_SECRET", value: "stale-legacy-secret" },
+        { name: "SUPACLOUD_AUTH_RUNTIME_MODE", value: "local" },
         { name: "MASKED_SECRET", value: "********" },
       ]));
     }) as unknown as typeof fetch;
@@ -116,6 +226,9 @@ describe("tenant env masking guard", () => {
       const cached = await loadTenantEnv(ref);
 
       expect(env.RESULT_S3_ENDPOINT).toBe("http://legacy-s3.local");
+      expect(env.SUPABASE_ANON_KEY).toBe("stale-anon-key");
+      expect(env.JWT_SECRET).toBeUndefined();
+      expect(env.SUPACLOUD_AUTH_RUNTIME_MODE).toBeUndefined();
       expect(env.MASKED_SECRET).toBeUndefined();
       expect(cached.RESULT_S3_ENDPOINT).toBe("http://legacy-s3.local");
       expect(urls).toEqual([

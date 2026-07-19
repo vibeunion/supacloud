@@ -22,8 +22,10 @@ import { resolveRoleName, resolveDbName as resolveDbNameTopLevel } from "../db";
 import { requireAdminAuth, requireProjectOrAdminAuth } from "../middleware/auth";
 import { projectNetworkRestrictionRoutes } from "./project-network-restrictions";
 import {
+  type AuthRuntimeDescriptor,
   getAuthRuntimeDescriptor,
   getAuthRuntimeManagedError,
+  sanitizeSharedProjectConfig,
 } from "../services/auth-runtime.service";
 
 /** Map PostgreSQL column types to TypeScript types */
@@ -459,6 +461,20 @@ function buildAuthConfigResponse(settings: Record<string, unknown>) {
   return response;
 }
 
+function buildSharedSettingsResponse(
+  settings: Record<string, unknown>,
+  authRuntime: AuthRuntimeDescriptor,
+) {
+  return {
+    ...sanitizeSharedProjectConfig(authRuntime.project_ref, settings),
+    auth_runtime: {
+      mode: "shared",
+      authority_project_ref: authRuntime.authority_project_ref,
+      configuration_management: "owner_only",
+    },
+  };
+}
+
 export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   // Get project settings
   .get(
@@ -469,6 +485,10 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       const settings = await projectService.getProjectSettings(params.ref);
       if (settings === null) {
         return status(404, { message: "Project not found", code: "404" });
+      }
+      const authRuntime = getAuthRuntimeDescriptor(params.ref);
+      if (authRuntime.mode === "shared") {
+        return buildSharedSettingsResponse(settings, authRuntime);
       }
       return settings;
     },
@@ -487,12 +507,20 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, body, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
+      const managedError = getAuthRuntimeManagedError(params.ref, "configuration");
+      if (managedError && Object.prototype.hasOwnProperty.call(body, "auth")) {
+        return status(409, managedError);
+      }
       const settings = await projectService.updateProjectSettings(
         params.ref,
         body,
       );
       if (settings === null) {
         return status(404, { message: "Project not found", code: "404" });
+      }
+      const authRuntime = getAuthRuntimeDescriptor(params.ref);
+      if (authRuntime.mode === "shared") {
+        return buildSharedSettingsResponse(settings, authRuntime);
       }
       return settings;
     },

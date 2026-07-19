@@ -1,6 +1,12 @@
 import { SQL } from "bun";
 import { config } from "../config";
 import { logger } from "../utils/logger";
+import {
+  isDangerousSQL,
+  MULTI_STATEMENT_PATTERN,
+  normalizeSqlForPolicy,
+  WRITE_SQL_PATTERN,
+} from "./sql-policy";
 
 function parseDatabaseUrl(url: string) {
   const urlMatch = url.match(/postgresql?:\/\/([^:]+)(?::([^@]*))?@([^:]*):(\d+)\/(.+)/);
@@ -215,52 +221,6 @@ export class PgError extends Error {
 }
 
 export type SqlExecutionMode = "read" | "migration" | "admin";
-
-const WRITE_SQL_PATTERN = /^\s*(INSERT|UPDATE|DELETE|MERGE|UPSERT|CREATE|ALTER|DROP|TRUNCATE|GRANT|REVOKE|COMMENT|REINDEX|VACUUM|ANALYZE|REFRESH|CALL|DO|COPY|SET|RESET|LOCK)\b/i;
-const MULTI_STATEMENT_PATTERN = /;\s*\S/;
-
-const DANGEROUS_SQL_PATTERNS = [
-  /\bDROP\s+DATABASE\b/i,
-  /\bDROP\s+SCHEMA\s+public\b/i,
-  /\bDROP\s+OWNED\b/i,
-  /\bDROP\s+(TABLE|ROLE|USER)\b/i,
-  /\bREASSIGN\s+OWNED\b/i,
-  /\bTRUNCATE\b/i,
-  /\bGRANT\b/i,
-  /\bREVOKE\b/i,
-  /\bALTER\s+(ROLE|USER|SYSTEM)\b/i,
-  /\bCREATE\s+(FUNCTION|PROCEDURE|RULE)\b/i,
-  /\bDO\s+\$[^$]*\$/i,
-  /\bCOPY\s+.*\bTO\s+PROGRAM\b/i,
-  /\bCOPY\s+.*\bFROM\s+PROGRAM\b/i,
-  /\bdblink_(connect|exec|open|fetch|send_query)\b/i,
-  /\blo_import\b/i,
-  /\blo_export\b/i,
-  /\bLOAD\b/i,
-  /\bpg_execute_server_program\b/i,
-  /\bpg_read_file\b/i,
-  /\bpg_write_file\b/i,
-  /\bpg_ls_dir\b/i,
-  /\bpg_stat_file\b/i,
-  /\bpg_terminate_backend\b/i,
-  /\bpg_cancel_backend\b/i,
-  /\bpg_catalog\b.*\bpg_read_file\b/i,
-  /\bpg_catalog\b.*\bpg_write_file\b/i,
-  /\bpg_catalog\b.*\bpg_execute_server_program\b/i,
-];
-
-function normalizeSqlForPolicy(sqlQuery: string): string {
-  return sqlQuery
-    .replace(/\/\*[\s\S]*?\*\//g, " ")
-    .replace(/--.*$/gm, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function isDangerousSQL(sqlQuery: string): boolean {
-  const normalized = normalizeSqlForPolicy(sqlQuery);
-  return DANGEROUS_SQL_PATTERNS.some(pattern => pattern.test(normalized));
-}
 
 function assertSqlExecutionAllowed(sqlQuery: string, mode: SqlExecutionMode) {
   const normalized = normalizeSqlForPolicy(sqlQuery);

@@ -7,6 +7,7 @@ import {
   buildCreateMaterializedViewSql,
   buildDropMaterializedViewSql,
   buildRefreshMaterializedViewSql,
+  normalizeMigrationVersion,
   resetEnsuredMigrationTablesForTests,
   resolveMigrationStatements,
   sqlRouteResponse,
@@ -45,16 +46,19 @@ describe("database route helpers", () => {
         statements: [],
       }),
     ).toEqual([]);
+    expect(resolveMigrationStatements({ query: "   " })).toEqual([]);
+  });
+
+  test("preserves bigint migration versions without Number precision loss", () => {
+    expect(normalizeMigrationVersion("20260718000123")).toBe("20260718000123");
+    expect(normalizeMigrationVersion("0001")).toBe("1");
+    expect(() => normalizeMigrationVersion("9223372036854775808")).toThrow("outside");
+    expect(() => normalizeMigrationVersion(Number.MAX_SAFE_INTEGER + 1)).toThrow("bigint");
   });
 
   test("ensures migration tables only once per database", async () => {
     const calls: string[] = [];
-    const projectDb = ((strings: TemplateStringsArray) => {
-      const sql = strings.join("?");
-      calls.push(sql);
-      if (sql.includes("SELECT EXISTS")) return Promise.resolve([{ exists: false }]);
-      return Promise.resolve([]);
-    }) as any;
+    const projectDb = (() => Promise.resolve([])) as any;
     projectDb.unsafe = (sql: string) => {
       calls.push(sql);
       return Promise.resolve([]);
@@ -64,17 +68,13 @@ describe("database route helpers", () => {
     await ensureMigrationTables("db1", projectDb);
 
     expect(calls.filter((sql) => sql.includes("CREATE TABLE IF NOT EXISTS")).length).toBe(2);
-    expect(calls.filter((sql) => sql.includes("SELECT EXISTS")).length).toBe(1);
+    expect(calls.filter((sql) => sql.includes("INSERT INTO supabase_migrations.schema_migrations")).length).toBe(2);
+    expect(calls.some((sql) => sql.includes("version TEXT PRIMARY KEY"))).toBe(true);
   });
 
-  test("skips supabase migration DDL when table already exists", async () => {
+  test("ensures metadata columns and reconciles both ledger tables", async () => {
     const calls: string[] = [];
-    const projectDb = ((strings: TemplateStringsArray) => {
-      const sql = strings.join("?");
-      calls.push(sql);
-      if (sql.includes("SELECT EXISTS")) return Promise.resolve([{ exists: true }]);
-      return Promise.resolve([]);
-    }) as any;
+    const projectDb = (() => Promise.resolve([])) as any;
     projectDb.unsafe = (sql: string) => {
       calls.push(sql);
       return Promise.resolve([]);
@@ -82,8 +82,12 @@ describe("database route helpers", () => {
 
     await ensureMigrationTables("db2", projectDb);
 
-    expect(calls.some((sql) => sql.includes("CREATE SCHEMA IF NOT EXISTS supabase_migrations"))).toBe(false);
-    expect(calls.filter((sql) => sql.includes("CREATE TABLE IF NOT EXISTS")).length).toBe(1);
+    expect(calls.some((sql) => sql.includes("CREATE SCHEMA IF NOT EXISTS supabase_migrations"))).toBe(true);
+    expect(calls.filter((sql) => sql.includes("CREATE TABLE IF NOT EXISTS")).length).toBe(2);
+    expect(calls.some((sql) => sql.includes("supabase_migrations.schema_migrations ADD COLUMN IF NOT EXISTS checksum"))).toBe(true);
+    expect(calls.some((sql) => sql.includes("public.schema_migrations ADD COLUMN IF NOT EXISTS inserted_at"))).toBe(true);
+    expect(calls.some((sql) => sql.includes("FROM public.schema_migrations"))).toBe(true);
+    expect(calls.some((sql) => sql.includes("FROM supabase_migrations.schema_migrations"))).toBe(true);
   });
 
   test("sqlRouteResponse returns stable SQL shape without legacy aliases", () => {

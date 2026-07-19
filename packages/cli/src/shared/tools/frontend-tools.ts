@@ -3,7 +3,8 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import { basename } from "node:path";
-import { z } from "zod";
+import { Type } from "@sinclair/typebox";
+import { optional, stringEnum, withDescription } from "../schema";
 import type { HttpTransport } from "../transports/http";
 
 export function registerFrontendTools(server: { tool: (...args: any[]) => void }, http: HttpTransport): void {
@@ -12,27 +13,27 @@ export function registerFrontendTools(server: { tool: (...args: any[]) => void }
         `Frontend hosting (static sites & SSR). Supports: static, react, vue, svelte, sveltekit, nextjs, nuxt, astro.
 Actions: list, get, create, update, delete, deploy_git, deploy_upload, redeploy, build_logs, add_domain, remove_domain, set_env, list_frameworks, list_records`,
         {
-            action: z.enum([
+            action: withDescription(stringEnum([
                 "list", "get", "create", "update", "delete",
                 "deploy_git", "deploy_upload", "redeploy", "build_logs",
                 "add_domain", "remove_domain", "set_env",
                 "list_frameworks", "list_records",
-            ]).describe("Action"),
-            ref: z.string().optional().describe("Project ref"),
-            id: z.string().optional().describe("Deployment ID"),
+            ]), "Action"),
+            ref: optional(Type.String(), "Project ref"),
+            id: optional(Type.String(), "Deployment ID"),
             // create/update params
-            name: z.string().optional().describe("[create] Deployment name"),
-            framework: z.string().optional().describe("[create] Framework (static|react|vue|svelte|sveltekit|nextjs|nuxt|astro)"),
-            domain: z.string().optional().describe("[create/update/add_domain/remove_domain] Custom domain"),
-            build_command: z.string().optional().describe("[create/update] Build command override"),
-            output_dir: z.string().optional().describe("[create/update] Output directory override"),
-            install_command: z.string().optional().describe("[create/update] Install command override"),
-            node_version: z.string().optional().describe("[create/update] Node.js version"),
-            env_vars: z.record(z.string(), z.string()).optional().describe("[create/update/set_env] Environment variables"),
+            name: optional(Type.String(), "[create] Deployment name"),
+            framework: optional(Type.String(), "[create] Framework (static|react|vue|svelte|sveltekit|nextjs|nuxt|astro)"),
+            domain: optional(Type.String(), "[create/update/add_domain/remove_domain] Custom domain"),
+            build_command: optional(Type.String(), "[create/update] Build command override"),
+            output_dir: optional(Type.String(), "[create/update] Output directory override"),
+            install_command: optional(Type.String(), "[create/update] Install command override"),
+            node_version: optional(Type.String(), "[create/update] Node.js version"),
+            env_vars: optional(Type.Record(Type.String(), Type.String()), "[create/update/set_env] Environment variables"),
             // deploy_git params
-            git_url: z.string().optional().describe("[deploy_git] Git repository URL"),
-            branch: z.string().optional().describe("[deploy_git] Branch (default: main)"),
-            zip_path: z.string().optional().describe("[deploy_upload] Local zip file path"),
+            git_url: optional(Type.String(), "[deploy_git] Git repository URL"),
+            branch: optional(Type.String(), "[deploy_git] Branch (default: main)"),
+            zip_path: optional(Type.String(), "[deploy_upload] Local zip file path"),
         },
         async (args: any) => {
             const { action, ref, id, name, framework, domain, build_command, output_dir, install_command, node_version, env_vars, git_url, branch, zip_path } = args;

@@ -95,6 +95,10 @@ async function withSdkProxyTestContext(
 }
 
 describe("sdkProxyRoutes functions proxy", () => {
+  test("exposes tenant-bound API key header translation through the internal test seam", () => {
+    expect(typeof sdkProxyInternals.translateOpaqueApiKeyHeaders).toBe("function");
+  });
+
   test("resolves an opaque Secret Key through its hash without storing plaintext", async () => {
     const lookup = projectAuthInternals.buildApiKeyLookup("sb_secret_server_key", {
       includeProvisioning: true,
@@ -202,6 +206,11 @@ describe("sdkProxyRoutes functions proxy", () => {
         attempt: 1,
         max_attempts: 3,
       } as Awaited<ReturnType<typeof backgroundTaskService.enqueueBackgroundFunctionTask>>));
+      trackSpy(
+        spyOn(sdkProxyInternals, "verifyJwtPayload").mockRejectedValue(
+          new Error("optional JWT metadata store unavailable"),
+        ),
+      );
 
       const response = await request("/functions/v1/aorist-ai/generate/crop", {
         method: "POST",
@@ -209,7 +218,7 @@ describe("sdkProxyRoutes functions proxy", () => {
           "Content-Type": "application/json",
           "x-project-ref": "proj_1",
           apikey: "anon",
-          authorization: "Bearer jwt-token",
+          authorization: "Bearer eyJhbGciOiJIUzI1NiJ9.eyJyb2xlIjoiYXV0aGVudGljYXRlZCJ9.signature",
         },
         body: JSON.stringify({ ping: true }),
       });
@@ -448,6 +457,120 @@ describe("sdkProxyRoutes functions proxy", () => {
         expect(response.status).toBe(401);
         expect(await response.json()).toEqual({ message: "Invalid API key" });
         expect(calls).toHaveLength(0);
+      });
+    } finally {
+      config.authRuntimeOwnerRef = originalOwnerRef;
+      projectService.getApiKeys = originalGetApiKeys;
+    }
+  });
+
+  test("shared auth proxy rejects an unrecognized JWT bearer before owner GoTrue", async () => {
+    const originalOwnerRef = config.authRuntimeOwnerRef;
+    const originalGetApiKeys = projectService.getApiKeys;
+    config.authRuntimeOwnerRef = "auth-owner";
+    projectService.getApiKeys = async (ref: string) => ref === "auth-owner"
+      ? {
+        anon_key: "owner-anon-jwt",
+        service_role_key: "owner-service-jwt",
+        publishable_key: "owner-publishable",
+        secret_key: "owner-secret",
+      }
+      : null;
+
+    try {
+      await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
+        trackSpy(spyOn(sdkProxyInternals, "resolveProjectApiKey").mockImplementation(async (candidate: string) =>
+          candidate === "sb_publishable_client_key"
+            ? {
+              ref: "proj_1",
+              kind: "publishable",
+              role: "anon",
+              upstreamKey: "dependent-anon-jwt",
+            }
+            : null
+        ));
+        const verifyJwtSpy = trackSpy(
+          spyOn(sdkProxyInternals, "verifyJwtPayload").mockResolvedValue(null),
+        );
+        setSdkProxySqlForTests(async (...args: unknown[]) => {
+          const text = String(args[0] ?? "");
+          if (text.includes("SELECT config")) return [{ config: { gotrue_port: 9361, postgrest_port: 7361 } }];
+          return [];
+        });
+
+        const response = await request("/auth/v1/admin/users", {
+          headers: {
+            apikey: "sb_publishable_client_key",
+            authorization: "Bearer forged.header.signature",
+          },
+        });
+
+        expect(response.status).toBe(401);
+        expect(await response.json()).toEqual({ message: "Invalid API key" });
+        expect(calls).toHaveLength(0);
+
+        verifyJwtSpy.mockRejectedValueOnce(new Error("owner JWKS unavailable"));
+        const unavailable = await request("/auth/v1/admin/users", {
+          headers: {
+            apikey: "sb_publishable_client_key",
+            authorization: "Bearer unavailable.header.signature",
+          },
+        });
+        expect(unavailable.status).toBe(500);
+        expect(calls).toHaveLength(0);
+      });
+    } finally {
+      config.authRuntimeOwnerRef = originalOwnerRef;
+      projectService.getApiKeys = originalGetApiKeys;
+    }
+  });
+
+  test("shared auth proxy preserves a verified owner user JWT", async () => {
+    const originalOwnerRef = config.authRuntimeOwnerRef;
+    const originalGetApiKeys = projectService.getApiKeys;
+    config.authRuntimeOwnerRef = "auth-owner";
+    projectService.getApiKeys = async (ref: string) => ref === "auth-owner"
+      ? {
+        anon_key: "owner-anon-jwt",
+        service_role_key: "owner-service-jwt",
+        publishable_key: "owner-publishable",
+        secret_key: "owner-secret",
+      }
+      : null;
+
+    try {
+      await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
+        trackSpy(spyOn(sdkProxyInternals, "resolveProjectApiKey").mockImplementation(async (candidate: string) =>
+          candidate === "sb_publishable_client_key"
+            ? {
+              ref: "proj_1",
+              kind: "publishable",
+              role: "anon",
+              upstreamKey: "dependent-anon-jwt",
+            }
+            : null
+        ));
+        trackSpy(spyOn(sdkProxyInternals, "verifyJwtPayload").mockResolvedValue({
+          role: "authenticated",
+          sub: "user_1",
+        }));
+        setSdkProxySqlForTests(async (...args: unknown[]) => {
+          const text = String(args[0] ?? "");
+          if (text.includes("SELECT config")) return [{ config: { gotrue_port: 9361, postgrest_port: 7361 } }];
+          return [];
+        });
+
+        const response = await request("/auth/v1/user", {
+          headers: {
+            apikey: "sb_publishable_client_key",
+            authorization: "Bearer owner.user.signature",
+          },
+        });
+
+        expect(response.status).toBe(200);
+        const headers = new Headers(calls[0]?.init?.headers);
+        expect(headers.get("apikey")).toBe("owner-anon-jwt");
+        expect(headers.get("authorization")).toBe("Bearer owner.user.signature");
       });
     } finally {
       config.authRuntimeOwnerRef = originalOwnerRef;

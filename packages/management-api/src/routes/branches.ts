@@ -12,7 +12,12 @@ import { Elysia, status, t } from "elysia";
 import * as authMiddleware from "../middleware/auth";
 import { projectRepository } from "../repositories/project.repository";
 import { mergeProjectConfig, normalizeProjectConfig } from "../utils/project-config";
-import { branchService } from "../services/branch.service";
+import {
+  BranchPromotionError,
+  BranchReplacementError,
+  branchService,
+  type BranchDataMode,
+} from "../services/branch.service";
 import { logger } from "../utils/logger";
 
 export interface BranchRecord {
@@ -21,6 +26,7 @@ export interface BranchRecord {
   parent_ref: string;
   status: "creating" | "active" | "deleting" | "error";
   created_at: string;
+  data_mode?: BranchDataMode;
   error?: string;
 }
 
@@ -57,11 +63,12 @@ export const branchRoutes = new Elysia({ prefix: "/v1/projects/:ref/branches" })
     detail: { tags: ["branches"], summary: "List project branches" },
   })
   .post("", async ({ params, body }) => {
-    const input = body as { name: string };
+    const input = body as { name: string; data_mode?: BranchDataMode };
     if (!input.name?.trim()) {
       return status(400, { error: "Branch name is required" });
     }
     const name = input.name.trim().slice(0, 80);
+    const dataMode = input.data_mode ?? "schema_only";
     if (!/^[a-zA-Z0-9._-]+$/.test(name)) {
       return status(400, { error: "Branch name may only contain letters, numbers, dots, dashes, underscores" });
     }
@@ -88,13 +95,14 @@ export const branchRoutes = new Elysia({ prefix: "/v1/projects/:ref/branches" })
       parent_ref: params.ref,
       status: "creating",
       created_at: now,
+      data_mode: dataMode,
     };
 
     await saveBranches(params.ref, [...existing, record]);
 
     // Provision the branch asynchronously (DB clone + runtime).
     branchService
-      .createBranch({ parentRef: params.ref, branchRef, name })
+      .createBranch({ parentRef: params.ref, branchRef, name, dataMode })
       .then(async () => {
         const current = await projectRepository.findByRef(params.ref);
         if (!current) return;
@@ -118,6 +126,7 @@ export const branchRoutes = new Elysia({ prefix: "/v1/projects/:ref/branches" })
   }, {
     body: t.Object({
       name: t.String(),
+      data_mode: t.Optional(t.Union([t.Literal("schema_only"), t.Literal("full_clone")])),
     }),
     detail: { tags: ["branches"], summary: "Create a preview branch" },
   })
@@ -162,23 +171,139 @@ export const branchRoutes = new Elysia({ prefix: "/v1/projects/:ref/branches" })
   }, {
     detail: { tags: ["branches"], summary: "Delete a preview branch" },
   })
-  .post("/:branchRef/promote", async ({ params }) => {
-    // Promote: dump branch DB schema+data and restore into parent.
+  .get("/:branchRef/promote/plan", async ({ params }) => {
     const parent = await projectRepository.findByRef(params.ref);
     if (!parent) return status(404, { error: "Parent project not found" });
 
     const branches = readBranches(parent.config);
     const target = branches.find((b) => b.ref === params.branchRef);
     if (!target) return status(404, { error: "Branch not found" });
+    if (target.status !== "active") {
+      return status(409, { error: "Branch must be active before promotion", code: "branch_not_active" });
+    }
 
     try {
-      await branchService.promoteBranch({ parentRef: params.ref, branchRef: params.branchRef });
-      return { promoted: true, project_ref: params.ref, branch_ref: params.branchRef };
+      return await branchService.planBranchPromotion({ parentRef: params.ref, branchRef: params.branchRef });
     } catch (err: unknown) {
+      if (err instanceof BranchPromotionError) {
+        return status(err.httpStatus, { error: err.message, code: err.code, plan: err.plan });
+      }
       const message = err instanceof Error ? err.message : String(err);
-      logger.error(`[branches] failed to promote branch ${params.branchRef}`, { error: message });
+      logger.error(`[branches] failed to plan branch promotion ${params.branchRef}`, { error: message });
       return status(500, { error: message });
     }
   }, {
-    detail: { tags: ["branches"], summary: "Promote a branch back to parent (overwrite parent DB)" },
+    detail: { tags: ["branches"], summary: "Plan safe migration promotion from a preview branch" },
+  })
+  .post("/:branchRef/promote", async ({ params, body, request }) => {
+    const parent = await projectRepository.findByRef(params.ref);
+    if (!parent) return status(404, { error: "Parent project not found" });
+
+    const branches = readBranches(parent.config);
+    const target = branches.find((b) => b.ref === params.branchRef);
+    if (!target) return status(404, { error: "Branch not found" });
+    if (target.status !== "active") {
+      return status(409, { error: "Branch must be active before promotion", code: "branch_not_active" });
+    }
+
+    const input = (body ?? {}) as {
+      mode?: "migrations" | "replace_database";
+      plan_checksum?: string;
+      confirm_destructive?: boolean;
+      confirmation?: string;
+    };
+    const mode = input.mode ?? "migrations";
+
+    if (mode === "replace_database") {
+      const adminError = await authMiddleware.requireAdminAuth(request);
+      if (adminError) return status(adminError.status, adminError.body);
+      const expectedConfirmation = `REPLACE ${params.ref} WITH ${params.branchRef}`;
+      if (input.confirmation !== expectedConfirmation) {
+        return status(400, {
+          error: `Whole-database replacement requires exact confirmation: ${expectedConfirmation}`,
+          code: "replace_confirmation_required",
+          expected_confirmation: expectedConfirmation,
+        });
+      }
+      try {
+        const result = await branchService.replaceParentDatabaseFromBranch({
+          parentRef: params.ref,
+          branchRef: params.branchRef,
+        });
+        return {
+          promoted: true,
+          mode,
+          project_ref: params.ref,
+          branch_ref: params.branchRef,
+          backup_database: result.backupDatabase,
+        };
+      } catch (err: unknown) {
+        if (err instanceof BranchReplacementError) {
+          return status(err.httpStatus, {
+            error: err.message,
+            code: err.code,
+            replacement_committed: err.replacementCommitted,
+            backup_database: err.backupDatabase,
+            recovery_required: err.recoveryRequired,
+            recovery_database: err.recoveryDatabase,
+          });
+        }
+        const message = err instanceof Error ? err.message : String(err);
+        logger.error(`[branches] failed destructive database replacement ${params.branchRef}`, { error: message });
+        return status(500, { error: message, code: "replace_database_failed" });
+      }
+    }
+
+    if (!input.plan_checksum) {
+      try {
+        const plan = await branchService.planBranchPromotion({ parentRef: params.ref, branchRef: params.branchRef });
+        return status(409, {
+          error: "Review the migration promotion plan before applying it",
+          code: "promotion_plan_required",
+          plan,
+        });
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        logger.error(`[branches] failed to build required promotion plan ${params.branchRef}`, { error: message });
+        return status(500, { error: message, code: "promotion_plan_failed" });
+      }
+    }
+
+    try {
+      const result = await branchService.promoteBranch({
+        parentRef: params.ref,
+        branchRef: params.branchRef,
+        expectedPlanChecksum: input.plan_checksum,
+        confirmDestructive: input.confirm_destructive,
+      });
+      return {
+        promoted: true,
+        mode: "migrations" as const,
+        project_ref: params.ref,
+        branch_ref: params.branchRef,
+        applied: result.applied,
+        plan: result.plan,
+        branch_data_copied: false,
+      };
+    } catch (err: unknown) {
+      if (err instanceof BranchPromotionError) {
+        return status(err.httpStatus, {
+          error: err.message,
+          code: err.code,
+          plan: err.plan,
+          applied: err.applied,
+        });
+      }
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error(`[branches] failed to promote migrations from ${params.branchRef}`, { error: message });
+      return status(500, { error: message, code: "promotion_failed" });
+    }
+  }, {
+    body: t.Optional(t.Object({
+      mode: t.Optional(t.Union([t.Literal("migrations"), t.Literal("replace_database")])),
+      plan_checksum: t.Optional(t.String({ minLength: 64, maxLength: 64 })),
+      confirm_destructive: t.Optional(t.Boolean()),
+      confirmation: t.Optional(t.String()),
+    })),
+    detail: { tags: ["branches"], summary: "Promote reviewed migrations or explicitly replace the parent database" },
   });

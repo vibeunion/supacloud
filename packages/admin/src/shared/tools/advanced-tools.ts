@@ -1,7 +1,8 @@
 /**
  * Advanced — Split into 3 compound tools: edge_functions, secrets, platform
  */
-import { z } from "zod";
+import { Type } from "@sinclair/typebox";
+import { optional, stringEnum, withDescription } from "../schema";
 import type { HttpTransport } from "../transports/http";
 
 export function registerAdvancedTools(server: { tool: (...args: any[]) => void }, http: HttpTransport): void {
@@ -12,14 +13,14 @@ export function registerAdvancedTools(server: { tool: (...args: any[]) => void }
         `Edge Function management (Deno/Bun serverless). Server auto-bundles dependencies.
 Actions: list, deploy, deploy_bundle, source, delete, check`,
         {
-            action: z.enum(["list", "deploy", "deploy_bundle", "source", "delete", "check"]).describe("Action"),
-            ref: z.string().describe("Project ref"),
-            slug: z.string().optional().describe("[deploy/deploy_bundle/source/delete/check] Function name"),
-            code: z.string().optional().describe("[deploy/check] Function source code (TypeScript)"),
-            path: z.string().optional().describe("[deploy/check] Local file path to read code from (alternative to code)"),
-            files: z.record(z.string(), z.string()).optional().describe("[deploy_bundle] File map: { 'index.ts': '...', '_shared/x.ts': '...' }"),
-            entrypoint: z.string().optional().describe("[deploy_bundle] Entrypoint file (default: index.ts)"),
-            minify: z.boolean().optional().describe("[deploy/deploy_bundle] Minify bundle"),
+            action: withDescription(stringEnum(["list", "deploy", "deploy_bundle", "source", "delete", "check"]), "Action"),
+            ref: withDescription(Type.String(), "Project ref"),
+            slug: optional(Type.String(), "[deploy/deploy_bundle/source/delete/check] Function name"),
+            code: optional(Type.String(), "[deploy/check] Function source code (TypeScript)"),
+            path: optional(Type.String(), "[deploy/check] Local file path to read code from (alternative to code)"),
+            files: optional(Type.Record(Type.String(), Type.String()), "[deploy_bundle] File map: { 'index.ts': '...', '_shared/x.ts': '...' }"),
+            entrypoint: optional(Type.String(), "[deploy_bundle] Entrypoint file (default: index.ts)"),
+            minify: optional(Type.Boolean(), "[deploy/deploy_bundle] Minify bundle"),
         },
         async (args: any) => {
             const { action, ref, slug, path: pathArg, files, entrypoint, minify } = args;
@@ -127,11 +128,13 @@ Actions: list, deploy, deploy_bundle, source, delete, check`,
         `Project secrets (environment variables for Edge Functions).
 Actions: list, upsert, delete`,
         {
-            action: z.enum(["list", "upsert", "delete"]).describe("Action"),
-            ref: z.string().describe("Project ref"),
-            secrets: z.array(z.object({ name: z.string(), value: z.string() })).optional()
-                .describe("[upsert] Secret list: [{name:'KEY', value:'...'}]"),
-            name: z.string().optional().describe("[delete] Secret name to delete"),
+            action: withDescription(stringEnum(["list", "upsert", "delete"]), "Action"),
+            ref: withDescription(Type.String(), "Project ref"),
+            secrets: optional(
+                Type.Array(Type.Object({ name: Type.String(), value: Type.String() })),
+                "[upsert] Secret list: [{name:'KEY', value:'...'}]",
+            ),
+            name: optional(Type.String(), "[delete] Secret name to delete"),
         },
         async (args: any) => {
             const { action, ref, secrets, name } = args;
@@ -162,14 +165,14 @@ Actions: list, upsert, delete`,
         `Platform monitoring, backups, network, and organizations.
 Actions: metrics, list_backups, create_backup, network, update_network, list_orgs, get_org`,
         {
-            action: z.enum([
+            action: withDescription(stringEnum([
                 "metrics", "list_backups", "create_backup",
                 "network", "update_network",
                 "list_orgs", "get_org",
-            ]).describe("Action"),
-            ref: z.string().optional().describe("Project ref (for backup/network actions)"),
-            slug: z.string().optional().describe("[get_org] Organization slug"),
-            allowed_cidrs: z.array(z.string()).optional().describe("[update_network] Allowed CIDRs"),
+            ]), "Action"),
+            ref: optional(Type.String(), "Project ref (for backup/network actions)"),
+            slug: optional(Type.String(), "[get_org] Organization slug"),
+            allowed_cidrs: optional(Type.Array(Type.String()), "[update_network] Allowed CIDRs"),
         },
         async (args: any) => {
             const { action, ref, slug, allowed_cidrs } = args;

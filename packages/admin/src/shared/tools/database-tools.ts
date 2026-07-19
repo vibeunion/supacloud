@@ -2,7 +2,8 @@
  * Database — Compound tool (18→1)
  * SQL execution, schema introspection, RLS, migrations, stats
  */
-import { z } from "zod";
+import { Type } from "@sinclair/typebox";
+import { optional, stringEnum, withDescription } from "../schema";
 import type { HttpTransport } from "../transports/http";
 
 export interface DatabaseToolsConfig {
@@ -33,24 +34,24 @@ export function registerDatabaseTools(
         `Database operations: query, schema, RLS, migrations, stats.
 Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
         {
-            action: z.enum(allActions as unknown as [string, ...string[]]).describe("Action"),
-            ref: projectRef ? z.string().optional() : z.string().optional().describe("Project ref"),
+            action: withDescription(stringEnum(allActions as unknown as [string, ...string[]]), "Action"),
+            ref: projectRef ? Type.Optional(Type.String()) : optional(Type.String(), "Project ref"),
             // query
-            sql: z.string().optional().describe("[query/apply_migration] SQL statement"),
-            file: z.string().optional().describe("[query/apply_migration] Read SQL from local file path (avoids shell escaping issues with $$ and multi-statement DDL)"),
+            sql: optional(Type.String(), "[query/apply_migration] SQL statement"),
+            file: optional(Type.String(), "[query/apply_migration] Read SQL from local file path (avoids shell escaping issues with $$ and multi-statement DDL)"),
             // schema
-            schema: z.string().optional().describe("[*] Schema name (default: public)"),
-            table: z.string().optional().describe("[describe_columns/indexes/constraints/rls_*] Table name"),
-            schemas: z.array(z.string()).optional().describe("[list_tables/generate_types] Schemas array"),
+            schema: optional(Type.String(), "[*] Schema name (default: public)"),
+            table: optional(Type.String(), "[describe_columns/indexes/constraints/rls_*] Table name"),
+            schemas: optional(Type.Array(Type.String()), "[list_tables/generate_types] Schemas array"),
             // auth users
-            user_id: z.string().optional().describe("[get_auth_user] User UUID"),
-            limit: z.number().optional().describe("[list_auth_users] Max users (default: 20)"),
+            user_id: optional(Type.String(), "[get_auth_user] User UUID"),
+            limit: optional(Type.Number(), "[list_auth_users] Max users (default: 20)"),
             // migration
-            name: z.string().optional().describe("[apply_migration] Migration name"),
+            name: optional(Type.String(), "[apply_migration] Migration name"),
             // create_table_rls
-            columns: z.string().optional().describe("[create_table_rls] Column definitions"),
-            policy_mode: z.enum(["deny_all", "owner"]).optional().describe("[create_table_rls] RLS policy mode (default: deny_all)"),
-            owner_column: z.string().optional().describe("[create_table_rls owner] UUID owner column matched to auth.uid()"),
+            columns: optional(Type.String(), "[create_table_rls] Column definitions"),
+            policy_mode: optional(stringEnum(["deny_all", "owner"]), "[create_table_rls] RLS policy mode (default: deny_all)"),
+            owner_column: optional(Type.String(), "[create_table_rls owner] UUID owner column matched to auth.uid()"),
         },
         async (args: any) => {
             const { action } = args;

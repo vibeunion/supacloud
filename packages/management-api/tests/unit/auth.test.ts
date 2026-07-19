@@ -111,6 +111,50 @@ describe("Auth Middleware Logic", () => {
     expect(result).toEqual({ status: 401, body: { error: "Invalid token" } });
   });
 
+  test("accepts only the exact stored service-role JWT for project administration", async () => {
+    const request = new Request("https://console.example.com/v1/projects/proj_1/settings", {
+      headers: { authorization: "Bearer forged.jwt.token" },
+    });
+    const forgedResolver = createAuthResolver({
+      studioSessions: { verify: async () => null },
+      findStoredServiceRoleRef: async () => null,
+      verifyProjectJwt: async () => ({
+        role: "service_role",
+        ref: "proj_1",
+        isServiceRole: false,
+      }),
+    });
+    const exactResolver = createAuthResolver({
+      studioSessions: { verify: async () => null },
+      findStoredServiceRoleRef: async () => null,
+      verifyProjectJwt: async () => ({
+        role: "service_role",
+        ref: "proj_1",
+        isServiceRole: true,
+      }),
+    });
+
+    expect(await forgedResolver(request)).toEqual({
+      status: 401,
+      body: { error: "Invalid token" },
+    });
+    expect(await exactResolver(request)).toEqual({ role: "project", ref: "proj_1" });
+  });
+
+  test("does not convert project JWT infrastructure failures into invalid-token responses", async () => {
+    const resolver = createAuthResolver({
+      studioSessions: { verify: async () => null },
+      findStoredServiceRoleRef: async () => null,
+      verifyProjectJwt: async () => {
+        throw new Error("owner JWKS unavailable");
+      },
+    });
+
+    await expect(resolver(new Request("https://console.example.com/v1/projects/proj_1/settings", {
+      headers: { authorization: "Bearer forged.jwt.token" },
+    }))).rejects.toThrow("owner JWKS unavailable");
+  });
+
   test("same-origin checks ignore a forged forwarded host", () => {
     const request = new Request("https://console.example.com/v1/projects", {
       method: "POST",

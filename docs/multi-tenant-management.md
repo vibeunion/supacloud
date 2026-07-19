@@ -160,11 +160,6 @@ Caddy dynamically routes requests for different projects based on `Host` header 
 | PATCH| `/v1/projects/:ref/config/auth` | Set Auth/OAuth/SMTP providers |
 | GET | `/v1/projects/:ref/secrets` | Control sensitive variables like edge functions |
 
-#### CLI Ecosystem (Supabase CLI)
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/v1/oauth/authorize` | Token issuance page compatible with `supabase login` |
-
 #### Key Management
 
 | Method | Endpoint | Description |

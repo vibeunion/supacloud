@@ -5,6 +5,7 @@ import {
   getAuthRuntimeManagedError,
   getAuthRuntimeOwnerProtectionError,
   isSharedAuthRuntime,
+  sanitizeSharedProjectConfig,
 } from "../../src/services/auth-runtime.service";
 
 const originalOwnerRef = config.authRuntimeOwnerRef;
@@ -68,6 +69,20 @@ describe("SupAuth runtime ownership", () => {
       public_auth_route: "owner_proxy",
       local_membership_source: "project_database",
       realtime_auth_supported: false,
+    });
+  });
+
+  test("removes auth configuration from shared dependent project responses", () => {
+    config.authRuntimeOwnerRef = "auth-owner";
+
+    expect(sanitizeSharedProjectConfig("tenant-a", {
+      api_url: "https://api.example.com",
+      auth: { smtp: { pass: "private" }, oauth_server: { jwt_keys: ["private"] } },
+    })).toEqual({ api_url: "https://api.example.com" });
+    expect(sanitizeSharedProjectConfig("auth-owner", {
+      auth: { oauth_server: { issuer: "https://auth-owner.example.com" } },
+    })).toEqual({
+      auth: { oauth_server: { issuer: "https://auth-owner.example.com" } },
     });
   });
 

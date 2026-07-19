@@ -4,6 +4,7 @@ import { requireProjectOrAdminAuth } from "../middleware/auth";
 import { getAuthContext } from "../middleware/auth";
 import { runtimeEnvService } from "../services/runtime-env.service";
 import { runtimeCacheService } from "../services/runtime-cache.service";
+import { isRuntimeOwnedSecretName } from "../utils/runtime-secrets";
 
 export const projectSecretsRoutes = new Elysia({ prefix: "/v1/projects" })
   .get(
@@ -54,11 +55,11 @@ export const projectSecretsRoutes = new Elysia({ prefix: "/v1/projects" })
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
       const reserved = (body as { name: string; value: string }[]).filter((s) =>
-        s.name.toUpperCase().startsWith("SUPABASE_"),
+        isRuntimeOwnedSecretName(s.name),
       );
       if (reserved.length > 0) {
         return status(400, {
-          message: `Secret names starting with SUPABASE_ are reserved: ${reserved.map((s) => s.name).join(", ")}`,
+          message: `Runtime-owned secret names are reserved: ${reserved.map((s) => s.name).join(", ")}`,
           code: "400",
         });
       }

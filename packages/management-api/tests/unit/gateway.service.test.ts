@@ -1,6 +1,7 @@
-import { afterEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { config } from "../../src/config";
+import * as dbModule from "../../src/db";
 import {
     CaddyGatewayProvider,
     DEFAULT_CORS_EXPOSED,
@@ -344,6 +345,50 @@ describe("CaddyGatewayProvider", () => {
         expect(authProxy?.headers?.request?.set?.["X-Forwarded-Host"]).toEqual(["auth.example.com"]);
 
         restore();
+    });
+
+    test("shared auth ignores an invalid dependent external auth upstream", async () => {
+        const originalOwnerRef = config.authRuntimeOwnerRef;
+        config.authRuntimeOwnerRef = "auth-owner";
+        const sqlSpy = spyOn(dbModule, "sql").mockResolvedValue([{
+            ref: "auth-owner",
+            config: { gotrue_port: 9372 },
+        }] as never);
+        const calls: Array<{ url: string; method: string; body: any }> = [];
+        const restore = captureFetch(calls);
+        const provider = new CaddyGatewayProvider();
+
+        try {
+            const result = await provider.setupUpstream("tenant-a", 3000, 4272, {
+                api_domain: "tenant-a.api.example.com",
+                auth: {
+                    third_party_auth: {
+                        enabled: true,
+                        auth_endpoint_mode: "external",
+                        auth_upstream: "https://stale-dependent.example.com/invalid-path",
+                    },
+                },
+            });
+
+            expect(result.success).toBe(true);
+            const load = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
+            const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
+            const auth = routes.find((route: any) => route["@id"] === "route-project-tenant-a-auth");
+            const wellKnown = routes.find((route: any) => route["@id"] === "route-project-tenant-a-gotrue-well-known");
+            const authProxy = auth?.handle?.find((handler: any) => handler.handler === "reverse_proxy");
+            const wellKnownProxy = wellKnown?.handle?.find((handler: any) => handler.handler === "reverse_proxy");
+
+            expect(authProxy?.upstreams?.[0]?.dial).toBe(`127.0.0.1:${config.port}`);
+            expect(authProxy?.headers?.request?.set?.["X-Project-Ref"]).toEqual(["tenant-a"]);
+            expect(wellKnownProxy?.upstreams?.[0]?.dial).toBe("127.0.0.1:9372");
+            expect(wellKnownProxy?.headers?.request?.set?.["X-Project-Ref"]).toEqual(["auth-owner"]);
+            expect(authProxy?.transport?.tls).toBeUndefined();
+            expect(wellKnownProxy?.transport?.tls).toBeUndefined();
+        } finally {
+            restore();
+            sqlSpy.mockRestore();
+            config.authRuntimeOwnerRef = originalOwnerRef;
+        }
     });
 
     test("setupUpstream does not render duplicate auth-domain routes without a dedicated auth domain", async () => {

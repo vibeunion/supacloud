@@ -8,33 +8,22 @@
 
   interface Migration {
     version: string;
-    name: string;
-    statements: number;
-    executed_at: string;
+    name: string | null;
+    statements: string[];
+    statement_count: number;
+    checksum: string;
+    applied_at: string | null;
   }
 
   const projectRef = $derived(page.params.ref);
 
-  const MIGRATIONS_SQL = `
-    SELECT 
-      version::text,
-      name,
-      statements_applied as statements,
-      inserted_at::text as executed_at
-    FROM supabase_migrations.schema_migrations
-    ORDER BY version DESC;
-  `;
-
   const migrationsQuery = createQuery(() => ({
     queryKey: ["database_migrations", projectRef],
     queryFn: async () => {
-      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sql: MIGRATIONS_SQL })
-      });
+      const res = await apiClient(`/v1/projects/${projectRef}/database/migrations`);
       const data = await res.json();
-      if (data.error) throw new Error(data.message || data.error);
-      return (data.rows || []) as Migration[];
+      if (!res.ok) throw new Error(data.message || data.error || "Failed to load migration history");
+      return (Array.isArray(data) ? data : []) as Migration[];
     }
   }));
 
@@ -43,8 +32,10 @@
   const error = $derived(migrationsQuery.error?.message || null);
   const fallbackMsg = $derived(!isLoading && !error && migrations.length === 0 ? "暂无迁移历史" : null);
 
-  function formatTime(ts: string): string {
-    try { return new Date(ts).toLocaleString(); } catch { return ts; }
+  function formatTime(ts: string | null): string {
+    if (!ts) return "—";
+    const timestamp = new Date(ts);
+    return Number.isNaN(timestamp.getTime()) ? ts : timestamp.toLocaleString();
   }
 </script>
 
@@ -80,6 +71,7 @@
               <th class="px-4 py-2.5 font-semibold text-muted-foreground">{$t("Migrations.version")}</th>
               <th class="px-3 py-2.5 font-semibold text-muted-foreground">{$t("Migrations.name")}</th>
               <th class="px-3 py-2.5 font-semibold text-muted-foreground text-right">{$t("Migrations.statements")}</th>
+              <th class="px-3 py-2.5 font-semibold text-muted-foreground">Checksum</th>
               <th class="px-4 py-2.5 font-semibold text-muted-foreground">{$t("Migrations.applied_at")}</th>
             </tr>
           </thead>
@@ -94,9 +86,12 @@
                 </td>
                 <td class="px-3 py-2.5 text-muted-foreground">{mig.name || "—"}</td>
                 <td class="px-3 py-2.5 text-right">
-                  <span class="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-bold tabular-nums">{mig.statements ?? "—"}</span>
+                  <span class="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-bold tabular-nums">{mig.statement_count}</span>
                 </td>
-                <td class="px-4 py-2.5 text-muted-foreground text-[11px]">{formatTime(mig.executed_at)}</td>
+                <td class="px-3 py-2.5 text-muted-foreground" title={mig.checksum}>
+                  <span class="font-mono text-[10px]">{mig.checksum.slice(0, 12)}</span>
+                </td>
+                <td class="px-4 py-2.5 text-muted-foreground text-[11px]">{formatTime(mig.applied_at)}</td>
               </tr>
             {/each}
           </tbody>

@@ -254,6 +254,18 @@ jobs:
         working-directory: packages/management-api
         run: bun install --frozen-lockfile
 
+      - name: Check canonical SQL modules
+        working-directory: packages/management-api
+        run: bun run sql:check
+
+      - name: Enforce canonical SQL module coverage
+        working-directory: packages/management-api
+        run: bun run test:sql-modules
+
+      - name: Compile management API
+        working-directory: packages/management-api
+        run: bun run build:amd64
+
       - name: Run unit tests
         working-directory: packages/management-api
         run: bun run test:unit

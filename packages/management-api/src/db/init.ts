@@ -134,6 +134,20 @@ export async function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_projects_ref ON projects(ref);
     CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);
 
+    CREATE TABLE IF NOT EXISTS branch_replacement_journal (
+      parent_ref TEXT PRIMARY KEY,
+      branch_ref TEXT NOT NULL,
+      parent_db TEXT NOT NULL,
+      branch_db TEXT NOT NULL,
+      temp_db TEXT NOT NULL,
+      backup_db TEXT NOT NULL,
+      phase TEXT NOT NULL,
+      replacement_committed BOOLEAN NOT NULL DEFAULT FALSE,
+      recovery_database TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
     CREATE TABLE IF NOT EXISTS project_tasks (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       project_ref VARCHAR(20) REFERENCES projects(ref) ON DELETE CASCADE,
@@ -394,6 +408,26 @@ export async function initDatabase() {
       { statement: 'ALTER TABLE projects ADD COLUMN IF NOT EXISTS postgrest_last_error TEXT', description: "projects.postgrest_last_error" },
       { statement: 'ALTER TABLE projects ADD COLUMN IF NOT EXISTS postgrest_updated_at TIMESTAMPTZ', description: "projects.postgrest_updated_at" },
       { statement: 'ALTER TABLE projects ADD COLUMN IF NOT EXISTS postgrest_last_reconciled_at TIMESTAMPTZ', description: "projects.postgrest_last_reconciled_at" },
+      {
+        statement: `
+          CREATE TABLE IF NOT EXISTS branch_replacement_journal (
+            parent_ref TEXT PRIMARY KEY,
+            branch_ref TEXT NOT NULL,
+            parent_db TEXT NOT NULL,
+            branch_db TEXT NOT NULL,
+            temp_db TEXT NOT NULL,
+            backup_db TEXT NOT NULL,
+            phase TEXT NOT NULL,
+            replacement_committed BOOLEAN NOT NULL DEFAULT FALSE,
+            recovery_database TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          )
+        `,
+        description: "branch_replacement_journal table",
+      },
+      { statement: 'ALTER TABLE branch_replacement_journal ADD COLUMN IF NOT EXISTS recovery_database TEXT', description: "branch_replacement_journal.recovery_database" },
+      { statement: 'ALTER TABLE branch_replacement_journal ADD COLUMN IF NOT EXISTS replacement_committed BOOLEAN NOT NULL DEFAULT FALSE', description: "branch_replacement_journal.replacement_committed" },
       {
         statement: `
           CREATE TABLE IF NOT EXISTS audit_logs (

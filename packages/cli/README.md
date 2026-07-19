@@ -2,9 +2,8 @@
 
 Project-scoped CLI for SupaCloud users.
 
-Use the explicit `supacloud-cli` command for project workflows. The old `supacloud`
-binary name is kept as a compatibility alias only; it is easy to confuse with the
-server binary installed at `/usr/local/bin/supacloud`.
+This package exposes only `supacloud-cli`. The bare `supacloud` name is reserved
+for the compiled server binary installed at `/usr/local/bin/supacloud`.
 
 Install:
 
@@ -19,10 +18,34 @@ One-off execution:
 npm exec --package @supacloud/cli -- supacloud-cli status
 ```
 
+Install the packaged AI Skill:
+
+```bash
+supacloud-cli ai show_skill
+supacloud-cli ai install_skill --dry_run
+supacloud-cli ai install_skill
+```
+
+The default destination is `$CODEX_HOME/skills/supacloud-cli` or
+`~/.codex/skills/supacloud-cli`. Use `--target /path/to/skills` for an explicit
+Skill root. Different existing content is preserved unless `--force` is passed;
+forced replacement creates a timestamped adjacent backup first.
+
+The Skill directs agents to keep schema, functions/RPC, triggers, RLS, indexes,
+grants, extensions, and reference-data changes in migrations; use read-only SQL
+for ordinary inspection; dry-run remote migrations; and reconcile existing
+remote drift before touching migration history.
+
 `supacloud-cli` defaults to the current workspace's project context. If you do not pass explicit flags, it tries to auto-link from `.env`:
 
 - `SUPABASE_URL` or `SUPACLOUD_API_URL`
 - `SUPABASE_SERVICE_ROLE_KEY` or `SUPACLOUD_API_TOKEN`
+- `SUPACLOUD_PROJECT_REF` when the project ref cannot be inferred from a managed `<ref>.api.*` hostname
+
+Both `--key value` and `--key=value` flag syntax are accepted. `--ref` can
+override the auto-linked project for an individual command. `status` checks
+configuration, Management API connectivity, and authentication; it exits
+non-zero when any required check fails.
 
 Examples:
 
@@ -38,8 +61,88 @@ supacloud-cli task_events inspect_webhook --ref abc123
 supacloud-cli database query --sql "select now()"
 supacloud-cli database query --ref abc123 --file ./queries/vector-search.sql
 supacloud-cli database push_migrations --ref abc123 --dir supabase/migrations --dry_run
+supacloud-cli supabase migration_new --name add_accounts
+supacloud-cli supabase db_diff --schema public --name add_accounts
+supacloud-cli supabase push --ref abc123 --dir supabase/migrations --dry_run
 supacloud-cli frontend list --ref abc123
+supacloud-cli branch create --name feature-orders --data_mode schema_only
+supacloud-cli branch promotion_plan --branch_ref preview123
+supacloud-cli branch promote --branch_ref preview123 --plan_checksum <sha256>
 ```
+
+Branch promotion is migration-first. `branch promotion_plan` prints pending
+versions, names, statement counts, and checksums without echoing SQL into terminal
+logs; review the migration files or the Web Console SQL view before approval.
+`branch promote` requires the reviewed checksum, executes with the project-scoped
+database role, and does not automatically copy branch data.
+Use `--data_mode full_clone` only for an explicitly approved non-sensitive or
+masked debugging dataset. Whole-database replacement is an administrator-only
+break-glass API mode and is intentionally not exposed by this project CLI.
+
+## Official Supabase CLI adapter
+
+The `supabase` command group is a thin, allowlisted adapter around the official
+open-source Supabase CLI. It is not a fork. Local authoring commands work without
+SupaCloud credentials:
+
+```bash
+supacloud-cli supabase version
+supacloud-cli supabase migration_new --name add_accounts
+supacloud-cli supabase db_diff --schema public --name add_accounts
+supacloud-cli supabase db_reset --no_seed
+```
+
+Remote inspection and backup commands require an explicit, percent-encoded
+Postgres DSN:
+
+```bash
+supacloud-cli supabase db_pull --db_url "$SUPACLOUD_DB_URL" --declarative
+supacloud-cli supabase migration_list --db_url "$SUPACLOUD_DB_URL"
+supacloud-cli supabase db_dump --db_url "$SUPACLOUD_DB_URL" --file backups/schema.sql
+supacloud-cli supabase gen_types --db_url "$SUPACLOUD_DB_URL" --schema public --file src/database.types.ts
+```
+
+Remote migration application intentionally stays on SupaCloud's existing
+project-authenticated API:
+
+```bash
+supacloud-cli supabase push --ref abc123 --dir supabase/migrations --dry_run
+supacloud-cli supabase push --ref abc123 --dir supabase/migrations
+```
+
+`push` uses `SUPABASE_SERVICE_ROLE_KEY` or `SUPACLOUD_API_TOKEN` only for the
+SupaCloud Management API. Those credentials, upstream access tokens, database
+passwords, and secret/key environment variables are removed from the official
+CLI child process, and command output is redacted.
+
+`push` requires a resolved project ref; pass `--ref` explicitly or set
+`SUPACLOUD_PROJECT_REF`. Relative migration directories are resolved against
+`--workdir` (or the current directory).
+
+Executable resolution order:
+
+1. `SUPACLOUD_SUPABASE_CLI_BIN`
+2. exact `SUPABASE_CLI_VERSION` through an explicit Bun/npm package runner
+3. `<workdir>/node_modules/supabase`
+4. `supabase` on `PATH`
+
+Windows under Node.js requires an installed official CLI or
+`SUPACLOUD_SUPABASE_CLI_BIN`; the adapter does not execute `.cmd` through a shell.
+
+Direct SQL/console changes do not automatically create migrations or migration
+history. Keep migration files in version control and run `supabase push --dry_run`
+before applying them.
+
+If the live database already contains reviewed historical changes, first pull,
+back up, and prove schema equivalence. Then preview the controlled tracking sync:
+
+```bash
+supacloud-cli database baseline_migrations --ref abc123 --dir supabase/migrations --dry_run
+```
+
+Only after explicit approval, rerun without `--dry_run`. This records migration
+files as applied without executing their DDL; never edit migration-history tables
+through `database query`.
 
 Use `database query --file` for complex SQL, pgvector queries, and single-request transaction blocks.
 
@@ -77,6 +180,7 @@ Project commands owned by this CLI:
 
 Queue commands:
 
+- `queue list`
 - `queue send`
 - `queue receive`
 - `queue ack`
@@ -85,6 +189,7 @@ Queue commands:
 - `queue retry`
 - `queue delete_message`
 - `queue list_messages`
+- `queue get_message`
 - `queue stats`
 - `queue dlq`
 - `queue get_settings`
@@ -95,6 +200,13 @@ Task event commands:
 - `task_events register_webhook`
 - `task_events unregister_webhook`
 - `task_events inspect_webhook`
+
+Diagnostic commands:
+
+- `diagnostics list_checks`
+- `diagnostics run_checks`
+- `diagnostics get_run`
+- `diagnostics repair`
 
 Gateway / Caddy commands (require admin privileges; config is injected via the Caddy JSON Admin API):
 

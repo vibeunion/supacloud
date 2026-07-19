@@ -16,6 +16,7 @@ import {
   normalizeProjectConfig,
   normalizeThirdPartyAuthConfig,
 } from "./project-config";
+import { resolveProjectAuthUrl } from "./project-routing";
 import { getAuthRuntimeDescriptor } from "../services/auth-runtime.service";
 
 export type OidcJwtKeyMaterial = {
@@ -24,6 +25,12 @@ export type OidcJwtKeyMaterial = {
   jwt_keys: JWK[];
   jwt_jwks: { keys: JWK[] };
 };
+
+export function normalizeJwtIssuer(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().replace(/\/+$/, "");
+  return normalized || null;
+}
 
 type AwsKmsSigningJwk = JWK & {
   "aws:kms:arn": string;
@@ -325,8 +332,6 @@ function publicAsymmetricKeys(jwks: { keys: JWK[] } | null): JWK[] {
 }
 
 export function buildSharedProjectJwtVerificationMaterial(input: {
-  projectJwtSecret: string;
-  projectConfig: unknown;
   ownerConfig: unknown;
 }): ProjectJwtVerificationMaterial {
   const ownerConfig = normalizeProjectConfig(input.ownerConfig);
@@ -347,25 +352,43 @@ export function buildSharedProjectJwtVerificationMaterial(input: {
   // SupAuth shared mode has a single authentication authority. A dependent's
   // third-party issuer is intentionally not admitted into the shared verifier:
   // PostgREST cannot bind a payload issuer to the key that verified it, so
-  // mixing external keys with owner/legacy keys would create an issuer-confusion
+  // mixing external keys with owner keys would create an issuer-confusion
   // path. Third-party auth remains available in local/owner mode.
   const thirdParty: ThirdPartyJwtPolicy | null = null;
   const localJwks = { keys: ownerKeys };
-  const jwtJwks = mergeVerificationJwks([
-    [buildLegacyHs256Jwk(input.projectJwtSecret)],
-    ownerKeys,
-  ]);
+  const jwtJwks = mergeVerificationJwks([ownerKeys]);
   if (!jwtJwks) throw new Error("SupAuth shared JWT verification material is empty");
 
   return { jwtJwks, localJwks, thirdParty };
 }
 
+export function resolveSharedAuthIssuer(ownerRef: string, ownerConfig: unknown): string {
+  const normalizedOwnerConfig = normalizeProjectConfig(ownerConfig);
+  const ownerAuth = (normalizedOwnerConfig.auth || {}) as Record<string, unknown>;
+  const ownerOauthServer = normalizeOAuthServerConfig(ownerAuth.oauth_server);
+  return normalizeJwtIssuer(ownerOauthServer.issuer)
+    || `${resolveProjectAuthUrl(ownerRef, normalizedOwnerConfig)}/auth/v1`;
+}
+
 export function buildSharedProjectJwtVerifierJwks(input: {
-  projectJwtSecret: string;
-  projectConfig: unknown;
   ownerConfig: unknown;
 }): { keys: JWK[] } {
   return buildSharedProjectJwtVerificationMaterial(input).jwtJwks!;
+}
+
+export function buildSharedPostgrestJwtVerifierJwks(input: {
+  projectJwtSecret: string;
+  ownerConfig: unknown;
+}): { keys: JWK[] } {
+  const ownerJwks = buildSharedProjectJwtVerifierJwks({
+    ownerConfig: input.ownerConfig,
+  });
+  const jwtJwks = mergeVerificationJwks([
+    [buildLegacyHs256Jwk(input.projectJwtSecret)],
+    ownerJwks.keys,
+  ]);
+  if (!jwtJwks) throw new Error("SupAuth shared PostgREST JWT verification material is empty");
+  return jwtJwks;
 }
 
 /**
@@ -477,9 +500,10 @@ async function verifyThirdPartyJwt(
   }
 }
 
-async function verifyLocalAsymmetricJwt(
+export async function verifyAsymmetricProjectJwt(
   token: string,
   localJwks: { keys: JWK[] } | null,
+  issuer?: string,
 ): Promise<{ payload: JWTPayload; protectedHeader: JWTHeaderParameters } | null> {
   const publicKeys = (localJwks?.keys || []).filter(
     (key) => (key.kty === "EC" && key.alg === "ES256") || (key.kty === "RSA" && key.alg === "RS256"),
@@ -488,6 +512,7 @@ async function verifyLocalAsymmetricJwt(
   try {
     return await jwtVerify(token, createLocalJWKSet({ keys: publicKeys }), {
       algorithms: ["ES256", "RS256"],
+      ...(issuer ? { issuer } : {}),
     });
   } catch {
     return null;
@@ -516,6 +541,12 @@ export async function verifyProjectJwtPayload(
   options: { includeProvisioning?: boolean } = {},
 ): Promise<ProjectJwtVerification | null> {
   const cleanToken = token.replace(/^Bearer\s+/i, "");
+  const parts = cleanToken.split(".");
+  if (parts.length !== 3) return null;
+  const header = decodeJwtPart(parts[0]);
+  const payload = decodeJwtPart(parts[1]);
+  if (!header || !payload || typeof header.alg !== "string") return null;
+
   const [project] = options.includeProvisioning
     ? await metaSql`
       SELECT jwt_secret, anon_key, service_role_key, config
@@ -535,42 +566,33 @@ export async function verifyProjectJwtPayload(
     `;
 
   if (!project?.jwt_secret) return null;
-  const parts = cleanToken.split(".");
-  if (parts.length !== 3) return null;
-  const header = decodeJwtPart(parts[0]);
-  const payload = decodeJwtPart(parts[1]);
-  if (!header || !payload || typeof header.alg !== "string") return null;
 
   const authRuntime = getAuthRuntimeDescriptor(ref);
   let material: ProjectJwtVerificationMaterial;
-  try {
-    if (authRuntime.mode === "shared") {
-      const [owner] = await metaSql`
-        SELECT config
-        FROM projects
-        WHERE ref = ${authRuntime.authority_project_ref}
-          AND deleted_at IS NULL
-          AND lower(status) = 'active'
-        LIMIT 1
-      `;
-      if (!owner) return null;
-      material = buildSharedProjectJwtVerificationMaterial({
-        projectJwtSecret: String(project.jwt_secret),
-        projectConfig: project.config,
-        ownerConfig: owner.config,
-      });
-    } else {
-      material = resolveProjectJwtVerificationMaterial(project.config, String(project.jwt_secret));
-    }
-  } catch {
-    return null;
+  let sharedAuthIssuer: string | undefined;
+  if (authRuntime.mode === "shared") {
+    const [owner] = await metaSql`
+      SELECT config
+      FROM projects
+      WHERE ref = ${authRuntime.authority_project_ref}
+        AND deleted_at IS NULL
+        AND lower(status) = 'active'
+      LIMIT 1
+    `;
+    if (!owner) return null;
+    sharedAuthIssuer = resolveSharedAuthIssuer(authRuntime.authority_project_ref, owner.config);
+    material = buildSharedProjectJwtVerificationMaterial({
+      ownerConfig: owner.config,
+    });
+  } else {
+    material = resolveProjectJwtVerificationMaterial(project.config, String(project.jwt_secret));
   }
 
   let result: { payload: JWTPayload; protectedHeader: JWTHeaderParameters } | null = null;
   if (material.thirdParty && isThirdPartyTokenCandidate(header, payload, material.thirdParty)) {
     result = await verifyThirdPartyJwt(cleanToken, material.thirdParty);
   } else {
-    result = await verifyLocalAsymmetricJwt(cleanToken, material.localJwks);
+    result = await verifyAsymmetricProjectJwt(cleanToken, material.localJwks, sharedAuthIssuer);
     if (result && authRuntime.mode === "shared" && result.payload.role !== "authenticated") {
       return null;
     }

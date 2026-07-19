@@ -12,6 +12,7 @@ import { tenantRuntimeService } from "../services/tenant-runtime.service";
 import {
   getAuthRuntimeManagedError,
   getAuthRuntimeOwnerProtectionError,
+  sanitizeSharedProjectConfig,
 } from "../services/auth-runtime.service";
 import { ScalingService } from "../services/scaling.service";
 import { listBackups } from "../services/backup.service";
@@ -124,7 +125,7 @@ export function toPublicV1ProjectWithDatabaseResponse(p: any) {
     },
     api: p.api,
     studio: p.studio,
-    config: p.config,
+    config: sanitizeSharedProjectConfig(String(p.ref || ""), p.config),
     anon_key: p.anon_key,
     services: p.services,
   };
@@ -288,7 +289,7 @@ async function buildProjectResponse(
     anon_key: project.anon_key,
     api: project.api,
     studio: project.studio,
-    config: normalizeProjectConfig(project.config),
+    config: sanitizeSharedProjectConfig(ref, normalizeProjectConfig(project.config)),
   };
 }
 

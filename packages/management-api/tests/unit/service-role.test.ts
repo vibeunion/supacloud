@@ -28,6 +28,27 @@ describe("service-role utils", () => {
     expect(payload.role).toBe("service_role");
   });
 
+  test("canonicalizes the configured issuer before signing service-role JWTs", async () => {
+    const keyMaterial = await generateOidcJwtKeyMaterial("legacy-jwt-secret");
+    const key = await resolveProjectServiceRoleKey({
+      ref: "proj_1",
+      jwt_secret: "legacy-jwt-secret",
+      config: {
+        auth: {
+          oauth_server: {
+            issuer: "  https://auth.example.com/auth/v1///  ",
+            jwt_keys: keyMaterial.jwt_keys,
+          },
+        },
+      },
+    });
+
+    const payload = JSON.parse(
+      Buffer.from(String(key).split(".")[1], "base64url").toString("utf8"),
+    );
+    expect(payload.iss).toBe("https://auth.example.com/auth/v1");
+  });
+
   test("prefers the stored canonical service_role_key when no OIDC signing key exists", async () => {
     await expect(
       resolveProjectServiceRoleKey({

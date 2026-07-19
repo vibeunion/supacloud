@@ -2,6 +2,7 @@ import { $ } from "bun";
 import { logger } from "../utils/logger";
 import { config } from "../config";
 import { sql as metaSql, resolveDbName, resolveAuthenticatorName, resolvePgrstChannel } from "../db";
+import { SQL_MODULES } from "../db/sql-modules";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { OAuthProvider, OAuthProviderConfig } from "../types/oauth";
@@ -11,8 +12,11 @@ import { resolveProjectApiUrl, resolveProjectAuthUrl, resolveProjectStudioUrl } 
 import { normalizeOAuthServerConfig, normalizeProjectConfig } from "../utils/project-config";
 import {
     buildSharedProjectJwtVerificationMaterial,
+    buildSharedPostgrestJwtVerifierJwks,
     normalizeProjectJwtKeys,
+    normalizeJwtIssuer,
     resolveProjectJwtVerificationMaterial,
+    resolveSharedAuthIssuer,
     type ThirdPartyJwtPolicy,
 } from "../utils/project-jwt";
 import { uniqueStrings } from "../utils/strings";
@@ -403,12 +407,7 @@ class TenantRuntimeService {
           LIMIT 1
         `;
         if (!owner) throw new Error(`Cannot find active SupAuth owner project ${runtime.authority_project_ref}`);
-        const ownerConfig = normalizeProjectConfig(owner.config);
-        const ownerAuth = (ownerConfig.auth as Record<string, unknown>) || {};
-        const oauthServer = normalizeOAuthServerConfig(ownerAuth.oauth_server);
-        return typeof oauthServer.issuer === "string" && oauthServer.issuer.trim()
-            ? oauthServer.issuer.trim().replace(/\/+$/, "")
-            : `${this.deriveAuthUrl(runtime.authority_project_ref, ownerConfig)}/auth/v1`;
+        return resolveSharedAuthIssuer(runtime.authority_project_ref, owner.config);
     }
 
     private async readPersistedTenantPort(ref: string, type: "pgrst" | "gotrue"): Promise<number | null> {
@@ -520,14 +519,12 @@ class TenantRuntimeService {
         }
 
         const projectConfig = normalizeProjectConfig(project.config);
-        const authConfig = (projectConfig.auth as Record<string, unknown>) || {};
-        const oauthServerConfig = normalizeOAuthServerConfig(authConfig.oauth_server);
-        const jwtKeys = stringifyJsonConfig(normalizeProjectJwtKeys(oauthServerConfig.jwt_keys));
-        let jwtMaterial = resolveProjectJwtVerificationMaterial(projectConfig, project.jwt_secret);
-        let localJwtIssuer = typeof oauthServerConfig.issuer === "string" && oauthServerConfig.issuer.trim()
-            ? oauthServerConfig.issuer.trim().replace(/\/+$/, "")
-            : null;
         const authRuntime = getAuthRuntimeDescriptor(ref);
+        let authConfig: Record<string, unknown> = {};
+        let jwtKeys: string | null = null;
+        let jwtMaterial: ReturnType<typeof resolveProjectJwtVerificationMaterial>;
+        let postgrestJwtJwks: ReturnType<typeof buildSharedPostgrestJwtVerifierJwks> | null;
+        let acceptedAuthIssuer: string | null;
         if (authRuntime.mode === "shared") {
             const [owner] = await metaSql`
               SELECT config
@@ -540,26 +537,30 @@ class TenantRuntimeService {
             if (!owner) {
                 throw new Error(`Cannot find active SupAuth owner project ${authRuntime.authority_project_ref}`);
             }
-            const ownerConfig = normalizeProjectConfig(owner.config);
             jwtMaterial = buildSharedProjectJwtVerificationMaterial({
-                projectJwtSecret: String(project.jwt_secret),
-                projectConfig: project.config,
                 ownerConfig: owner.config,
             });
-            const ownerAuth = (ownerConfig.auth as Record<string, unknown>) || {};
-            const ownerOauthServer = normalizeOAuthServerConfig(ownerAuth.oauth_server);
-            localJwtIssuer = typeof ownerOauthServer.issuer === "string" && ownerOauthServer.issuer.trim()
-                ? ownerOauthServer.issuer.trim().replace(/\/+$/, "")
-                : `${this.deriveAuthUrl(authRuntime.authority_project_ref, ownerConfig)}/auth/v1`;
+            postgrestJwtJwks = buildSharedPostgrestJwtVerifierJwks({
+                projectJwtSecret: String(project.jwt_secret),
+                ownerConfig: owner.config,
+            });
+            acceptedAuthIssuer = resolveSharedAuthIssuer(authRuntime.authority_project_ref, owner.config);
+        } else {
+            authConfig = (projectConfig.auth as Record<string, unknown>) || {};
+            const oauthServerConfig = normalizeOAuthServerConfig(authConfig.oauth_server);
+            jwtKeys = stringifyJsonConfig(normalizeProjectJwtKeys(oauthServerConfig.jwt_keys));
+            jwtMaterial = resolveProjectJwtVerificationMaterial(projectConfig, project.jwt_secret);
+            postgrestJwtJwks = jwtMaterial.jwtJwks;
+            acceptedAuthIssuer = normalizeJwtIssuer(oauthServerConfig.issuer);
         }
-        const jwtJwks = stringifyJsonConfig(jwtMaterial.jwtJwks);
+        const postgrestJwtJwksConfig = stringifyJsonConfig(postgrestJwtJwks);
         return {
             dbPassword: project.db_password,
             jwtSecret: project.jwt_secret,
             jwtKeys,
-            jwtJwks,
+            postgrestJwtJwks: postgrestJwtJwksConfig,
             thirdPartyJwtPolicy: jwtMaterial.thirdParty,
-            localJwtIssuer,
+            acceptedAuthIssuer,
             dbName: await resolveDbName(ref),
             apiUrl: this.deriveApiUrl(ref, projectConfig),
             authUrl: this.deriveAuthUrl(ref, projectConfig),
@@ -764,9 +765,9 @@ class TenantRuntimeService {
             dbPassword: creds.dbPassword,
             jwtSecret: creds.jwtSecret,
             jwtKeys: creds.jwtKeys || "",
-            jwtJwks: creds.jwtJwks || "",
+            postgrestJwtJwks: creds.postgrestJwtJwks || "",
             thirdPartyJwtPolicy: creds.thirdPartyJwtPolicy ? JSON.stringify(creds.thirdPartyJwtPolicy) : "",
-            localJwtIssuer: creds.localJwtIssuer || "",
+            acceptedAuthIssuer: creds.acceptedAuthIssuer || "",
             dbName: creds.dbName,
             apiUrl: creds.apiUrl,
             authUrl: creds.authUrl,
@@ -805,15 +806,16 @@ class TenantRuntimeService {
         });
 
         const sharedAuthRuntime = isSharedAuthRuntime(ref);
-        const jwtVerifierSecret = creds.jwtJwks || creds.jwtSecret;
-        const jwtJwksEnv = creds.jwtJwks ? renderSystemdEnvLine("JWT_JWKS", creds.jwtJwks) : "";
+        const jwtVerifierSecret = creds.postgrestJwtJwks || creds.jwtSecret;
+        const edgeRuntimeJwtJwksEnv = !sharedAuthRuntime && creds.postgrestJwtJwks
+            ? renderSystemdEnvLine("JWT_JWKS", creds.postgrestJwtJwks)
+            : "";
         const jwtKeysEnv = creds.jwtKeys ? renderSystemdEnvLine("JWT_KEYS", creds.jwtKeys) : "";
         const thirdPartyJwtPolicyEnv = creds.thirdPartyJwtPolicy
             ? renderSystemdEnvLine("SUPACLOUD_THIRD_PARTY_JWT_POLICY", JSON.stringify(creds.thirdPartyJwtPolicy))
             : "";
-        // Shared mode accepts both SupAuth owner tokens and an optional scoped
-        // third-party issuer. A single global jwt-aud would reject one side;
-        // the pre-request guard validates each issuer's audience instead.
+        // Shared mode accepts only SupAuth owner tokens. Third-party trust is
+        // intentionally disabled because the owner is the single authority.
         const postgrestJwtAudience = sharedAuthRuntime
             ? ""
             : (creds.thirdPartyJwtPolicy?.audience[0] || "");
@@ -840,8 +842,11 @@ class TenantRuntimeService {
             sharedAuthRuntime ? "" : renderSystemdEnvLine("JWT_SECRET", creds.jwtSecret),
             renderSystemdEnvLine("SUPACLOUD_AUTH_RUNTIME_MODE", sharedAuthRuntime ? "shared" : "local"),
             renderSystemdEnvLine("SUPACLOUD_AUTH_AUTHORITY_REF", getAuthRuntimeDescriptor(ref).authority_project_ref),
+            sharedAuthRuntime && creds.acceptedAuthIssuer
+                ? renderSystemdEnvLine("SUPACLOUD_AUTH_ISSUER", creds.acceptedAuthIssuer)
+                : "",
             renderTenantInternalRuntimeEnv(pgrstPort, runtimeGoTruePort),
-            jwtJwksEnv,
+            edgeRuntimeJwtJwksEnv,
             sharedAuthRuntime ? "" : jwtKeysEnv,
             thirdPartyJwtPolicyEnv,
         ].filter(Boolean).join("\n");
@@ -956,9 +961,8 @@ GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE=/auth/v1/verify
             const authorizationPath = typeof oauthServerConfig.authorization_path === "string"
                 ? oauthServerConfig.authorization_path
                 : "";
-            const issuer = typeof oauthServerConfig.issuer === "string" && oauthServerConfig.issuer
-                ? oauthServerConfig.issuer
-                : `${apiExternalUrl}/auth/v1`;
+            const issuer = normalizeJwtIssuer(oauthServerConfig.issuer)
+                || `${apiExternalUrl}/auth/v1`;
             gotrueEnvLines.push(
                 "# OAuth 2.1 / OIDC Provider Configuration",
                 "GOTRUE_OAUTH_SERVER_ENABLED=true",
@@ -1388,8 +1392,7 @@ BEGIN
 END;
 $graphql_fallback$;
 
-CREATE OR REPLACE FUNCTION auth.uid() returns uuid as $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid; $$ language sql stable;
-CREATE OR REPLACE FUNCTION auth.role() returns text as $$ select nullif(current_setting('request.jwt.claim.role', true), '')::text; $$ language sql stable;
+${SQL_MODULES["auth-jwt-helpers"]}
 
 GRANT ALL ON ALL TABLES IN SCHEMA auth TO supabase_auth_admin;
 GRANT ALL ON ALL SEQUENCES IN SCHEMA auth TO supabase_auth_admin;
@@ -1537,59 +1540,7 @@ BEGIN
 END;
 $graphql_fallback$;
 
-CREATE EXTENSION IF NOT EXISTS pgmq;
-CREATE SCHEMA IF NOT EXISTS pgmq_public;
-GRANT USAGE ON SCHEMA pgmq_public TO anon, authenticated, service_role;
-
-CREATE OR REPLACE FUNCTION pgmq_public.send(queue_name text, message jsonb, sleep_seconds integer DEFAULT 0)
-RETURNS SETOF bigint
-LANGUAGE sql
-VOLATILE
-SECURITY DEFINER
-SET search_path = pgmq, public
-AS $$ SELECT * FROM pgmq.send(queue_name, message, sleep_seconds); $$;
-
-CREATE OR REPLACE FUNCTION pgmq_public.send_batch(queue_name text, messages jsonb[], sleep_seconds integer DEFAULT 0)
-RETURNS SETOF bigint
-LANGUAGE sql
-VOLATILE
-SECURITY DEFINER
-SET search_path = pgmq, public
-AS $$ SELECT * FROM pgmq.send_batch(queue_name, messages, sleep_seconds); $$;
-
-CREATE OR REPLACE FUNCTION pgmq_public.read(queue_name text, sleep_seconds integer, n integer)
-RETURNS SETOF pgmq.message_record
-LANGUAGE sql
-VOLATILE
-SECURITY DEFINER
-SET search_path = pgmq, public
-AS $$ SELECT * FROM pgmq.read(queue_name, sleep_seconds, n); $$;
-
-CREATE OR REPLACE FUNCTION pgmq_public.pop(queue_name text)
-RETURNS SETOF pgmq.message_record
-LANGUAGE sql
-VOLATILE
-SECURITY DEFINER
-SET search_path = pgmq, public
-AS $$ SELECT * FROM pgmq.pop(queue_name); $$;
-
-CREATE OR REPLACE FUNCTION pgmq_public.archive(queue_name text, message_id bigint)
-RETURNS boolean
-LANGUAGE sql
-VOLATILE
-SECURITY DEFINER
-SET search_path = pgmq, public
-AS $$ SELECT pgmq.archive(queue_name, message_id); $$;
-
-CREATE OR REPLACE FUNCTION pgmq_public."delete"(queue_name text, message_id bigint)
-RETURNS boolean
-LANGUAGE sql
-VOLATILE
-SECURITY DEFINER
-SET search_path = pgmq, public
-AS $$ SELECT pgmq.delete(queue_name, message_id); $$;
-
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pgmq_public TO anon, authenticated, service_role;
+${SQL_MODULES["pgmq-public"]}
 `.trim();
         const temporary = await this.writeTemporaryTenantSql(ref, "ott-graphql-migration", migrationSql);
         try {
@@ -1611,7 +1562,7 @@ GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pgmq_public TO anon, authenticated, ser
     private async ensurePostgrestPrerequest(
         ref: string,
         thirdPartyPolicy: ThirdPartyJwtPolicy | null,
-        localJwtIssuer: string | null,
+        acceptedAuthIssuer: string | null,
     ): Promise<void> {
         // Error contract: `-v ON_ERROR_STOP=1` is passed as a structured arg and
         // runTenantPsqlOrThrow performs `throw new Error(`psql exited with code ...`)`.
@@ -1654,8 +1605,8 @@ GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pgmq_public TO anon, authenticated, ser
   IF issuer_claim = ${quoteSqlLiteral(thirdPartyPolicy.issuer)}
      OR (
        client_id_claim IS NOT NULL
-       AND ${localJwtIssuer
-           ? `issuer_claim IS DISTINCT FROM ${quoteSqlLiteral(localJwtIssuer)}`
+       AND ${acceptedAuthIssuer
+           ? `issuer_claim IS DISTINCT FROM ${quoteSqlLiteral(acceptedAuthIssuer)}`
            : "true"}
      ) THEN
     IF issuer_claim IS DISTINCT FROM ${quoteSqlLiteral(thirdPartyPolicy.issuer)}
@@ -1727,7 +1678,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
         await this.ensurePostgrestPrerequest(
             ref,
             jwtPolicy.thirdPartyJwtPolicy,
-            jwtPolicy.localJwtIssuer,
+            jwtPolicy.acceptedAuthIssuer,
         );
 
         const pgrstPort = await this.getTenantPort(ref, "pgrst");
@@ -1921,7 +1872,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
         await this.ensurePostgrestPrerequest(
             ref,
             jwtPolicy.thirdPartyJwtPolicy,
-            jwtPolicy.localJwtIssuer,
+            jwtPolicy.acceptedAuthIssuer,
         );
 
         const pgrstPort = await this.getTenantPort(ref, "pgrst");
@@ -2336,7 +2287,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
                 await this.ensurePostgrestPrerequest(
                     ref,
                     jwtPolicy.thirdPartyJwtPolicy,
-                    jwtPolicy.localJwtIssuer,
+                    jwtPolicy.acceptedAuthIssuer,
                 );
                 await runtimeCacheService.invalidateProjectRuntimeEnv(ref);
                 if (await this.postgrestController.isActive(ref)) {

@@ -1,12 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { z } from "zod";
 import { registerAdvancedTools } from "./advanced-tools";
+import { parseToolArguments } from "../schema";
+import type { ToolSchema } from "../schema";
 
 function captureEdgeFunctionsTool(http: Record<string, unknown>) {
-    let schema: Record<string, unknown> | undefined;
+    let schema: ToolSchema | undefined;
     let callback: ((args: Record<string, unknown>) => Promise<{ content: Array<{ text: string }> }>) | undefined;
     registerAdvancedTools({
-        tool(name: string, _description: string, toolSchema: Record<string, unknown>, toolCallback: typeof callback) {
+        tool(name: string, _description: string, toolSchema: ToolSchema, toolCallback: typeof callback) {
             if (name !== "edge_functions") return;
             schema = toolSchema;
             callback = toolCallback;
@@ -18,10 +19,10 @@ function captureEdgeFunctionsTool(http: Record<string, unknown>) {
 }
 
 function captureSecretsTool(http: Record<string, unknown>) {
-    let schema: Record<string, unknown> | undefined;
+    let schema: ToolSchema | undefined;
     let callback: ((args: Record<string, unknown>) => Promise<{ content: Array<{ text: string }> }>) | undefined;
     registerAdvancedTools({
-        tool(name: string, _description: string, toolSchema: Record<string, unknown>, toolCallback: typeof callback) {
+        tool(name: string, _description: string, toolSchema: ToolSchema, toolCallback: typeof callback) {
             if (name !== "secrets") return;
             schema = toolSchema;
             callback = toolCallback;
@@ -33,10 +34,10 @@ function captureSecretsTool(http: Record<string, unknown>) {
 }
 
 function captureTaskEventsTool(http: Record<string, unknown>) {
-    let schema: Record<string, unknown> | undefined;
+    let schema: ToolSchema | undefined;
     let callback: ((args: Record<string, unknown>) => Promise<{ content: Array<{ text: string }> }>) | undefined;
     registerAdvancedTools({
-        tool(name: string, _description: string, toolSchema: Record<string, unknown>, toolCallback: typeof callback) {
+        tool(name: string, _description: string, toolSchema: ToolSchema, toolCallback: typeof callback) {
             if (name !== "task_events") return;
             schema = toolSchema;
             callback = toolCallback;
@@ -50,7 +51,7 @@ function captureTaskEventsTool(http: Record<string, unknown>) {
 describe("edge_functions CLI tool", () => {
     test("parses background routes from CLI-friendly comma-separated input", () => {
         const { schema } = captureEdgeFunctionsTool({});
-        const parsed = z.object(schema as any).parse({
+        const parsed = parseToolArguments(schema, {
             action: "config",
             ref: "proj",
             slug: "render",
@@ -63,7 +64,7 @@ describe("edge_functions CLI tool", () => {
 
     test("parses background routes from JSON array input", () => {
         const { schema } = captureEdgeFunctionsTool({});
-        const parsed = z.object(schema as any).parse({
+        const parsed = parseToolArguments(schema, {
             action: "config",
             ref: "proj",
             slug: "render",
@@ -75,15 +76,12 @@ describe("edge_functions CLI tool", () => {
 
     test("returns a friendly error for invalid background route JSON", () => {
         const { schema } = captureEdgeFunctionsTool({});
-        const result = z.object(schema as any).safeParse({
+        expect(() => parseToolArguments(schema, {
             action: "config",
             ref: "proj",
             slug: "render",
             background_routes: "[invalid",
-        });
-
-        expect(result.success).toBe(false);
-        expect(result.error?.issues[0]?.message).toContain("Invalid background_routes JSON array");
+        })).toThrow("Invalid background_routes JSON array");
     });
 
     test("updates Edge Function config through the management API", async () => {
@@ -154,7 +152,7 @@ describe("edge_functions CLI tool", () => {
 describe("secrets CLI tool", () => {
     test("parses JSON array secrets passed as a CLI string", () => {
         const { schema } = captureSecretsTool({});
-        const parsed = z.object(schema as any).parse({
+        const parsed = parseToolArguments(schema, {
             action: "upsert",
             ref: "proj",
             secrets: '[{"name":"API_KEY","value":"secret"}]',
@@ -165,7 +163,7 @@ describe("secrets CLI tool", () => {
 
     test("parses comma-separated KEY=VALUE secrets", () => {
         const { schema } = captureSecretsTool({});
-        const parsed = z.object(schema as any).parse({
+        const parsed = parseToolArguments(schema, {
             action: "upsert",
             ref: "proj",
             secrets: "API_KEY=secret,OTHER=value=with=equals",

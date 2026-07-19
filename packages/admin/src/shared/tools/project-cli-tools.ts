@@ -1,11 +1,13 @@
-import { z } from "zod";
+import { Type } from "@sinclair/typebox";
+import { optional, stringEnum, withDescription } from "../schema";
+import type { ToolSchema } from "../schema";
 import type { HttpTransport } from "../transports/http";
 
 type ToolServer = {
     tool: (
         name: string,
         description: string,
-        schema: Record<string, z.ZodTypeAny>,
+        schema: ToolSchema,
         callback: (args: any) => Promise<any>,
     ) => void;
 };
@@ -53,9 +55,9 @@ export function registerUserProjectCliTools(
         "project",
         "Project-scoped inspection and developer operations. Actions: get, health, logs, api_keys, settings, tasks",
         {
-            action: z.enum(["get", "health", "logs", "api_keys", "settings", "tasks"]).describe("Action to perform"),
-            ref: z.string().optional().describe(projectRef ? "Optional override when not auto-linked" : "Project ref"),
-            log_type: z.enum(["all", "auth", "database", "api"]).optional().describe("[logs] Filter by service"),
+            action: withDescription(stringEnum(["get", "health", "logs", "api_keys", "settings", "tasks"]), "Action to perform"),
+            ref: optional(Type.String(), projectRef ? "Optional override when not auto-linked" : "Project ref"),
+            log_type: optional(stringEnum(["all", "auth", "database", "api"]), "[logs] Filter by service"),
         },
         async ({ action, ref, log_type }) => {
             const resolvedRef = resolveRef(ref, projectRef);
@@ -98,17 +100,17 @@ export function registerAdminProjectCliTools(server: ToolServer, http: HttpTrans
         "project",
         "Platform-level project lifecycle management. Actions: list, create, get, delete, pause, restore, restart, settings, update_settings, api_keys, health, logs, tasks",
         {
-            action: z.enum([
+            action: withDescription(stringEnum([
                 "list", "create", "get", "delete", "pause", "restore",
                 "restart", "settings", "update_settings", "api_keys",
                 "health", "logs", "tasks",
-            ]).describe("Action to perform"),
-            ref: z.string().optional().describe("Project ref (required for most actions except 'list' and 'create')"),
-            name: z.string().optional().describe("[create] Project name"),
-            region: z.string().optional().describe("[create] Region (default: local)"),
-            organization_id: z.string().optional().describe("[create] Organization ID"),
-            settings: z.record(z.string(), z.unknown()).optional().describe("[update_settings] Config fields to update"),
-            log_type: z.enum(["all", "auth", "database", "api"]).optional().describe("[logs] Filter by service"),
+            ]), "Action to perform"),
+            ref: optional(Type.String(), "Project ref (required for most actions except 'list' and 'create')"),
+            name: optional(Type.String(), "[create] Project name"),
+            region: optional(Type.String(), "[create] Region (default: local)"),
+            organization_id: optional(Type.String(), "[create] Organization ID"),
+            settings: optional(Type.Record(Type.String(), Type.Unknown()), "[update_settings] Config fields to update"),
+            log_type: optional(stringEnum(["all", "auth", "database", "api"]), "[logs] Filter by service"),
         },
         async ({ action, ref, name, region, organization_id, settings, log_type }) => {
             let text: string;

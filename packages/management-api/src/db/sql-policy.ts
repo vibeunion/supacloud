@@ -1,0 +1,85 @@
+export const WRITE_SQL_PATTERN = /^\s*(INSERT|UPDATE|DELETE|MERGE|UPSERT|CREATE|ALTER|DROP|TRUNCATE|GRANT|REVOKE|COMMENT|REINDEX|VACUUM|ANALYZE|REFRESH|CALL|DO|COPY|SET|RESET|LOCK)\b/i;
+export const MULTI_STATEMENT_PATTERN = /;\s*\S/;
+
+interface SqlPattern {
+  label: string;
+  pattern: RegExp;
+}
+
+const PRIVILEGED_MIGRATION_PATTERNS: readonly SqlPattern[] = [
+  { label: "database management", pattern: /\b(?:CREATE|ALTER|DROP)\s+DATABASE\b/i },
+  { label: "public schema removal", pattern: /\bDROP\s+SCHEMA\s+(?:IF\s+EXISTS\s+)?public\b/i },
+  { label: "cluster ownership management", pattern: /\b(?:DROP|REASSIGN)\s+OWNED\b/i },
+  { label: "cluster role management", pattern: /\b(?:CREATE|ALTER|DROP)\s+(?:ROLE|USER)\b/i },
+  { label: "server configuration", pattern: /\bALTER\s+SYSTEM\b/i },
+  { label: "server-side program execution", pattern: /\bCOPY\b[\s\S]*?\b(?:TO|FROM)\s+PROGRAM\b/i },
+  { label: "server file access", pattern: /\b(?:lo_import|lo_export|pg_read_file|pg_write_file|pg_ls_dir|pg_stat_file|pg_execute_server_program)\s*\(/i },
+  { label: "backend control", pattern: /\bpg_(?:terminate|cancel)_backend\s*\(/i },
+  { label: "external database access", pattern: /\bdblink(?:_[a-z_]+)?\s*\(|\b(?:CREATE|ALTER|DROP)\s+(?:SERVER|USER\s+MAPPING|FOREIGN\s+DATA\s+WRAPPER)\b|\bIMPORT\s+FOREIGN\s+SCHEMA\b|\bCREATE\s+FOREIGN\s+TABLE\b/i },
+  { label: "tablespace management", pattern: /\b(?:CREATE|DROP)\s+TABLESPACE\b/i },
+  { label: "subscription management", pattern: /\b(?:CREATE|ALTER|DROP)\s+SUBSCRIPTION\b/i },
+  { label: "dynamic library loading", pattern: /\bLOAD\b/i },
+  { label: "opaque procedural SQL", pattern: /\bDO\s+\$/i },
+  { label: "transaction control", pattern: /(?:^|;)\s*(?:BEGIN|START\s+TRANSACTION|COMMIT|END|ROLLBACK|SAVEPOINT|RELEASE\s+SAVEPOINT|PREPARE\s+TRANSACTION)\b/i },
+  { label: "session role control", pattern: /\b(?:SET\s+(?:(?:LOCAL|SESSION)\s+)?(?:ROLE|SESSION\s+AUTHORIZATION)|RESET\s+(?:ROLE|SESSION\s+AUTHORIZATION)|DISCARD\s+ALL)\b/i },
+  { label: "advisory lock control", pattern: /\bpg_(?:try_)?advisory_(?:xact_)?(?:lock|unlock)(?:_shared|_all)?\s*\(/i },
+  {
+    label: "migration ledger modification",
+    pattern: /\b(?:CREATE\s+TABLE|INSERT\s+INTO|UPDATE|DELETE\s+FROM|MERGE\s+INTO|TRUNCATE(?:\s+TABLE)?|ALTER\s+TABLE|DROP\s+TABLE|COPY|GRANT[\s\S]*?\bON\s+(?:TABLE\s+)?|REVOKE[\s\S]*?\bON\s+(?:TABLE\s+)?)\s+(?:(?:"?(?:supabase_migrations|public)"?)\s*\.\s*)?"?schema_migrations"?\b/i,
+  },
+  {
+    label: "migration ledger recorder access",
+    pattern: /"?supabase_migrations"?\s*\.\s*"?record_schema_migration"?\s*\(/i,
+  },
+];
+
+const LEGACY_DANGEROUS_SQL_PATTERNS: readonly RegExp[] = [
+  /\bDROP\s+DATABASE\b/i,
+  /\bDROP\s+SCHEMA\s+public\b/i,
+  /\bDROP\s+OWNED\b/i,
+  /\bDROP\s+(TABLE|ROLE|USER)\b/i,
+  /\bREASSIGN\s+OWNED\b/i,
+  /\bTRUNCATE\b/i,
+  /\bGRANT\b/i,
+  /\bREVOKE\b/i,
+  /\bALTER\s+(ROLE|USER|SYSTEM)\b/i,
+  /\bCREATE\s+(FUNCTION|PROCEDURE|RULE)\b/i,
+  /\bDO\s+\$[^$]*\$/i,
+  /\bCOPY\s+.*\bTO\s+PROGRAM\b/i,
+  /\bCOPY\s+.*\bFROM\s+PROGRAM\b/i,
+  /\bdblink_(connect|exec|open|fetch|send_query)\b/i,
+  /\blo_import\b/i,
+  /\blo_export\b/i,
+  /\bLOAD\b/i,
+  /\bpg_execute_server_program\b/i,
+  /\bpg_read_file\b/i,
+  /\bpg_write_file\b/i,
+  /\bpg_ls_dir\b/i,
+  /\bpg_stat_file\b/i,
+  /\bpg_terminate_backend\b/i,
+  /\bpg_cancel_backend\b/i,
+  /\bpg_catalog\b.*\bpg_read_file\b/i,
+  /\bpg_catalog\b.*\bpg_write_file\b/i,
+  /\bpg_catalog\b.*\bpg_execute_server_program\b/i,
+];
+
+export function normalizeSqlForPolicy(sqlQuery: string): string {
+  return sqlQuery
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/--.*$/gm, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function isDangerousSQL(sqlQuery: string): boolean {
+  const normalized = normalizeSqlForPolicy(sqlQuery);
+  return LEGACY_DANGEROUS_SQL_PATTERNS.some((pattern) => pattern.test(normalized))
+    || PRIVILEGED_MIGRATION_PATTERNS.some(({ pattern }) => pattern.test(normalized));
+}
+
+export function projectMigrationSqlViolations(statements: readonly string[]): string[] {
+  const normalized = statements.map(normalizeSqlForPolicy).join("; ");
+  return PRIVILEGED_MIGRATION_PATTERNS
+    .filter(({ pattern }) => pattern.test(normalized))
+    .map(({ label }) => label);
+}

@@ -8,10 +8,13 @@ import {
   withBackgroundInternalToken,
 } from "./tenant-env";
 import {
+  normalizeEdgeRuntimeAuthRuntimeMode,
   normalizeJwtJwks,
   normalizeThirdPartyJwtPolicy,
+  readEdgeRuntimeProjectSecrets,
   verifyEdgeRuntimeJwtContext,
   withVerifiedJwtContext,
+  type EdgeRuntimeAuthRuntimeMode,
   type EdgeRuntimeJwtVerificationResult,
 } from "./jwt-verifier";
 import {
@@ -500,41 +503,26 @@ interface ProjectSecrets {
   jwtSecret: string;
   jwtJwks: ReturnType<typeof normalizeJwtJwks>;
   thirdParty: ReturnType<typeof normalizeThirdPartyJwtPolicy>;
-  authRuntimeMode: "local" | "owner" | "shared";
-  expiresAt: number;
+  authRuntimeMode: EdgeRuntimeAuthRuntimeMode;
+  authIssuer: string;
 }
-const secretsCache = new Map<string, ProjectSecrets>();
-const SECRETS_CACHE_TTL = 300_000;
 
 async function getProjectSecrets(
   projectRef: string,
 ): Promise<ProjectSecrets | null> {
-  const cached = secretsCache.get(projectRef);
-  if (cached && cached.expiresAt > Date.now()) return cached;
-
   try {
     const runtimeEnv = await loadTenantEnv(projectRef);
-    if (
-      runtimeEnv.SUPABASE_ANON_KEY ||
-      runtimeEnv.SUPABASE_SERVICE_ROLE_KEY ||
-      runtimeEnv.JWT_SECRET ||
-      runtimeEnv.JWT_JWKS
-    ) {
-      const secrets: ProjectSecrets = {
-        anonKey: runtimeEnv.SUPABASE_ANON_KEY || "",
-        serviceRoleKey: runtimeEnv.SUPABASE_SERVICE_ROLE_KEY || "",
-        jwtSecret: runtimeEnv.JWT_SECRET || "",
-        jwtJwks: normalizeJwtJwks(runtimeEnv.JWT_JWKS),
-        thirdParty: normalizeThirdPartyJwtPolicy(runtimeEnv.SUPACLOUD_THIRD_PARTY_JWT_POLICY),
-        authRuntimeMode: runtimeEnv.SUPACLOUD_AUTH_RUNTIME_MODE === "shared"
-          ? "shared"
-          : runtimeEnv.SUPACLOUD_AUTH_RUNTIME_MODE === "owner"
-            ? "owner"
-            : "local",
-        expiresAt: Date.now() + SECRETS_CACHE_TTL,
+    const runtimeSecrets = readEdgeRuntimeProjectSecrets(runtimeEnv);
+    if (runtimeSecrets) {
+      return {
+        anonKey: runtimeSecrets.anonKey || "",
+        serviceRoleKey: runtimeSecrets.serviceRoleKey || "",
+        jwtSecret: runtimeSecrets.jwtSecret || "",
+        jwtJwks: runtimeSecrets.jwtJwks || null,
+        thirdParty: runtimeSecrets.thirdParty || null,
+        authRuntimeMode: runtimeSecrets.authRuntimeMode || "unknown",
+        authIssuer: runtimeSecrets.authIssuer || "",
       };
-      secretsCache.set(projectRef, secrets);
-      return secrets;
     }
 
     const [keysRes, detailRes, authRuntimeRes] = await Promise.all([
@@ -556,7 +544,6 @@ async function getProjectSecrets(
       console.warn(
         `[verifyJwt] Failed to fetch secrets for ${projectRef}: keys=${keysRes.status} detail=${detailRes.status} authRuntime=${authRuntimeRes.status}`,
       );
-      if (cached) return cached;
       return null;
     }
 
@@ -579,24 +566,21 @@ async function getProjectSecrets(
       return null;
     }
 
-    const secrets: ProjectSecrets = {
+    return {
       anonKey: keysArray?.find?.((k) => k.name === "anon")?.api_key || "",
       serviceRoleKey:
         keysArray?.find?.((k) => k.name === "service_role")?.api_key || "",
       jwtSecret: detail.jwt_secret || "",
       jwtJwks: normalizeJwtJwks(detail.config?.auth?.oauth_server?.jwt_jwks),
       thirdParty: normalizeThirdPartyJwtPolicy(detail.config?.auth?.third_party_auth),
-      authRuntimeMode: authRuntime.mode === "owner" ? "owner" : "local",
-      expiresAt: Date.now() + SECRETS_CACHE_TTL,
+      authRuntimeMode: normalizeEdgeRuntimeAuthRuntimeMode(authRuntime.mode),
+      authIssuer: "",
     };
-    secretsCache.set(projectRef, secrets);
-    return secrets;
   } catch (err) {
     console.warn(
       `[verifyJwt] Error fetching secrets for ${projectRef}:`,
       err instanceof Error ? err.message : err,
     );
-    if (cached) return cached;
     return null;
   }
 }
@@ -642,7 +626,7 @@ async function handleFunctionRequest(
 
   const projectRoot = await resolveProjectRoot(projectRef);
   const fnConfig = await getFunctionConfig(projectRef, functionName, projectRoot);
-  let functionRequest = withVerifiedJwtContext(c.request);
+  let verifiedSubject: string | undefined;
   if (c.request.method !== "OPTIONS" && fnConfig.verify_jwt) {
     const verification = await verifyJwt(
       projectRef,
@@ -660,12 +644,12 @@ async function handleFunctionRequest(
         },
       });
     }
-    functionRequest = withVerifiedJwtContext(
-      c.request,
-      verification.source === "jwt" ? verification.payload : undefined,
-    );
+    verifiedSubject = verification.source === "jwt"
+      ? verification.payload.sub
+      : undefined;
   }
 
+  const functionRequest = withVerifiedJwtContext(c.request, verifiedSubject);
   c.set.headers["x-sb-execution-id"] = crypto.randomUUID();
   const response = await dispatchFunction(
     projectRef,
@@ -709,7 +693,6 @@ const app = new Elysia()
 
     const functionId = `${c.params.ref}_${c.params.slug}`;
     invalidateTenantEnvCache(c.params.ref);
-    secretsCache.delete(c.params.ref);
     const [foreground, background] = await Promise.all([
       pool.invalidateModule(functionId),
       backgroundPool.invalidateModule(functionId),
@@ -725,7 +708,6 @@ const app = new Elysia()
     }
 
     invalidateTenantEnvCache(c.params.ref);
-    secretsCache.delete(c.params.ref);
     const moduleEpoch = bumpProjectModuleEpoch(c.params.ref);
     const [foreground, background] = await Promise.all([
       pool.invalidateProject(c.params.ref),

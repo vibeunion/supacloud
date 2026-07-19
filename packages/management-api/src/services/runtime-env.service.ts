@@ -13,9 +13,11 @@ import { logger } from "../utils/logger";
 import {
   buildSharedProjectJwtVerificationMaterial,
   normalizeProjectJwtKeys,
+  resolveSharedAuthIssuer,
   resolveProjectJwtVerificationMaterial,
 } from "../utils/project-jwt";
 import { getAuthRuntimeDescriptor } from "./auth-runtime.service";
+import { isRuntimeOwnedSecretName } from "../utils/runtime-secrets";
 
 function isJwtLike(value: string | null | undefined): value is string {
   return typeof value === "string" && value.split(".").length === 3;
@@ -45,23 +47,26 @@ export async function buildProjectRuntimeEnv(projectRef: string): Promise<Record
   const routingConfig = normalizeProjectRoutingConfig(
     projectConfig,
   );
-  const authConfig = (projectConfig.auth || {}) as Record<string, unknown>;
-  const oauthServerConfig = (authConfig.oauth_server || {}) as Record<string, unknown>;
-  const jwtKeys = normalizeProjectJwtKeys(oauthServerConfig.jwt_keys);
-  let jwtMaterial = resolveProjectJwtVerificationMaterial(projectConfig, project.jwt_secret);
-  let authRoutingConfig = routingConfig;
   const authRuntime = getAuthRuntimeDescriptor(projectRef);
+  let jwtKeys: ReturnType<typeof normalizeProjectJwtKeys> = null;
+  let jwtMaterial: ReturnType<typeof resolveProjectJwtVerificationMaterial>;
+  let authRoutingConfig = routingConfig;
+  let sharedAuthIssuer: string | null = null;
   if (authRuntime.mode === "shared") {
     const owner = await projectRepository.findByRef(authRuntime.authority_project_ref);
     if (!owner || !["active", "creating"].includes(String(owner.status).toLowerCase())) {
       throw new Error(`Cannot find active SupAuth owner project ${authRuntime.authority_project_ref}`);
     }
     jwtMaterial = buildSharedProjectJwtVerificationMaterial({
-      projectJwtSecret: project.jwt_secret,
-      projectConfig: project.config,
       ownerConfig: owner.config,
     });
+    sharedAuthIssuer = resolveSharedAuthIssuer(authRuntime.authority_project_ref, owner.config);
     authRoutingConfig = normalizeProjectRoutingConfig(normalizeProjectConfig(owner.config));
+  } else {
+    const authConfig = (projectConfig.auth || {}) as Record<string, unknown>;
+    const oauthServerConfig = (authConfig.oauth_server || {}) as Record<string, unknown>;
+    jwtKeys = normalizeProjectJwtKeys(oauthServerConfig.jwt_keys);
+    jwtMaterial = resolveProjectJwtVerificationMaterial(projectConfig, project.jwt_secret);
   }
   const jwtJwks = jwtMaterial.jwtJwks;
   const supabaseUrl = resolveProjectApiUrl(projectRef, routingConfig);
@@ -105,6 +110,7 @@ export async function buildProjectRuntimeEnv(projectRef: string): Promise<Record
   const customSecrets = await databaseService.getSecrets(projectRef);
   const env: Record<string, string> = {};
   for (const secret of customSecrets) {
+    if (isRuntimeOwnedSecretName(secret.name)) continue;
     env[secret.name] = secret.value;
   }
 
@@ -125,6 +131,7 @@ export async function buildProjectRuntimeEnv(projectRef: string): Promise<Record
     } : {}),
     SUPACLOUD_AUTH_RUNTIME_MODE: authRuntime.mode,
     SUPACLOUD_AUTH_AUTHORITY_REF: authRuntime.authority_project_ref,
+    ...(sharedAuthIssuer ? { SUPACLOUD_AUTH_ISSUER: sharedAuthIssuer } : {}),
     SUPACLOUD_INTERNAL_SUPABASE_URL: internalSupabaseUrl,
     SUPACLOUD_INTERNAL_AUTH_URL: internalAuthUrl,
     SUPACLOUD_INTERNAL_REST_URL: internalRestUrl,

@@ -6,7 +6,8 @@ import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { execFile } from "node:child_process";
-import { z } from "zod";
+import { Type } from "@sinclair/typebox";
+import { decodedSchema, optional, stringEnum, withDescription } from "../schema";
 import type { HttpTransport } from "../transports/http";
 
 const execFileAsync = promisify(execFile);
@@ -47,38 +48,43 @@ function resolveEntrypoint(pathArg: string): string {
     return entrypoint;
 }
 
-const backgroundRoutesSchema = z.preprocess((value) => {
-    if (typeof value !== "string") return value;
+const INVALID_BACKGROUND_ROUTES_MESSAGE = "Invalid background_routes JSON array. Use a valid JSON array or comma-separated routes like /queue/*,/render/*.";
+
+function parseBackgroundRoutes(value: string | string[]): unknown {
+    if (Array.isArray(value)) return value;
     const trimmed = value.trim();
     if (!trimmed) return [];
     if (!trimmed.startsWith("[")) return trimmed.split(",").map((route) => route.trim()).filter(Boolean);
     try {
-        return JSON.parse(trimmed);
-    } catch {
-        return [trimmed];
-    }
-}, z.array(z.string()).optional().superRefine((routes, ctx) => {
-    if (!routes) return;
-    for (const route of routes) {
-        if (route.trim().startsWith("[")) {
-            ctx.addIssue({
-                code: z.ZodIssueCode.custom,
-                message: "Invalid background_routes JSON array. Use a valid JSON array or comma-separated routes like /queue/*,/render/*.",
-            });
-            return;
+        const routes = JSON.parse(trimmed);
+        if (Array.isArray(routes) && routes.some((route) => typeof route === "string" && route.trim().startsWith("["))) {
+            throw new Error(INVALID_BACKGROUND_ROUTES_MESSAGE);
         }
+        return routes;
+    } catch (error) {
+        if (!(error instanceof SyntaxError)) throw error;
+        throw new Error(INVALID_BACKGROUND_ROUTES_MESSAGE);
     }
-}));
+}
 
-const secretsSchema = z.preprocess((value) => {
-    if (typeof value !== "string") return value;
+const backgroundRoutesSchema = Type.Optional(decodedSchema(
+    Type.Union([Type.String(), Type.Array(Type.String())]),
+    Type.Array(Type.String()),
+    parseBackgroundRoutes,
+));
+
+const secretListSchema = Type.Array(Type.Object({ name: Type.String(), value: Type.String() }));
+
+function parseSecrets(value: string | Array<{ name: string; value: string }>): unknown {
+    if (Array.isArray(value)) return value;
     const trimmed = value.trim();
     if (!trimmed) return [];
     if (trimmed.startsWith("[")) {
         try {
             return JSON.parse(trimmed);
-        } catch {
-            return trimmed;
+        } catch (error) {
+            if (!(error instanceof SyntaxError)) throw error;
+            throw new Error("Invalid secrets JSON array");
         }
     }
     return trimmed.split(",").map((entry) => {
@@ -89,7 +95,13 @@ const secretsSchema = z.preprocess((value) => {
             value: entry.slice(separator + 1),
         };
     }).filter((entry) => entry.name);
-}, z.array(z.object({ name: z.string(), value: z.string() })).optional());
+}
+
+const secretsSchema = Type.Optional(decodedSchema(
+    Type.Union([Type.String(), secretListSchema]),
+    secretListSchema,
+    parseSecrets,
+));
 
 type EdgeFunctionConfigInput = {
     verify_jwt?: boolean;
@@ -104,16 +116,16 @@ export function registerAdvancedTools(server: { tool: (...args: any[]) => void }
         `Edge Function management (Deno/Bun serverless). Server auto-bundles dependencies.
 Actions: list, deploy, deploy_bundle, config, source, delete, check`,
         {
-            action: z.enum(["list", "deploy", "deploy_bundle", "config", "source", "delete", "check"]).describe("Action"),
-            ref: z.string().describe("Project ref"),
-            slug: z.string().optional().describe("[deploy/deploy_bundle/config/source/delete/check] Function name"),
-            code: z.string().optional().describe("[deploy/check] Function source code (TypeScript)"),
-            path: z.string().optional().describe("[deploy/check] Local file path to read code from (alternative to code)"),
-            files: z.record(z.string(), z.string()).optional().describe("[deploy_bundle] File map: { 'index.ts': '...', '_shared/x.ts': '...' }"),
-            entrypoint: z.string().optional().describe("[deploy_bundle] Entrypoint file (default: index.ts)"),
-            minify: z.boolean().optional().describe("[deploy/deploy_bundle] Minify bundle"),
-            verify_jwt: z.boolean().optional().describe("[deploy/deploy_bundle/config] Set JWT verification for this function"),
-            background_routes: backgroundRoutesSchema.describe("[deploy/deploy_bundle/config] Background route paths; pass comma-separated or JSON array in CLI"),
+            action: withDescription(stringEnum(["list", "deploy", "deploy_bundle", "config", "source", "delete", "check"]), "Action"),
+            ref: withDescription(Type.String(), "Project ref"),
+            slug: optional(Type.String(), "[deploy/deploy_bundle/config/source/delete/check] Function name"),
+            code: optional(Type.String(), "[deploy/check] Function source code (TypeScript)"),
+            path: optional(Type.String(), "[deploy/check] Local file path to read code from (alternative to code)"),
+            files: optional(Type.Record(Type.String(), Type.String()), "[deploy_bundle] File map: { 'index.ts': '...', '_shared/x.ts': '...' }"),
+            entrypoint: optional(Type.String(), "[deploy_bundle] Entrypoint file (default: index.ts)"),
+            minify: optional(Type.Boolean(), "[deploy/deploy_bundle] Minify bundle"),
+            verify_jwt: optional(Type.Boolean(), "[deploy/deploy_bundle/config] Set JWT verification for this function"),
+            background_routes: withDescription(backgroundRoutesSchema, "[deploy/deploy_bundle/config] Background route paths; pass comma-separated or JSON array in CLI"),
         },
         async (args: any) => {
             const { action, ref, slug, path: pathArg, files, entrypoint, minify, verify_jwt, background_routes } = args;
@@ -226,11 +238,10 @@ Actions: list, deploy, deploy_bundle, config, source, delete, check`,
         `Project secrets (environment variables for Edge Functions).
 Actions: list, upsert, delete`,
         {
-            action: z.enum(["list", "upsert", "delete"]).describe("Action"),
-            ref: z.string().describe("Project ref"),
-            secrets: secretsSchema
-                .describe("[upsert] Secret list as JSON array or KEY=VALUE,KEY2=VALUE2"),
-            name: z.string().optional().describe("[delete] Secret name to delete"),
+            action: withDescription(stringEnum(["list", "upsert", "delete"]), "Action"),
+            ref: withDescription(Type.String(), "Project ref"),
+            secrets: withDescription(secretsSchema, "[upsert] Secret list as JSON array or KEY=VALUE,KEY2=VALUE2"),
+            name: optional(Type.String(), "[delete] Secret name to delete"),
         },
         async (args: any) => {
             const { action, ref, secrets, name } = args;
@@ -261,14 +272,14 @@ Actions: list, upsert, delete`,
         `Platform monitoring, backups, network, and organizations.
 Actions: metrics, list_backups, create_backup, network, update_network, list_orgs, get_org`,
         {
-            action: z.enum([
+            action: withDescription(stringEnum([
                 "metrics", "list_backups", "create_backup",
                 "network", "update_network",
                 "list_orgs", "get_org",
-            ]).describe("Action"),
-            ref: z.string().optional().describe("Project ref (for backup/network actions)"),
-            slug: z.string().optional().describe("[get_org] Organization slug"),
-            allowed_cidrs: z.array(z.string()).optional().describe("[update_network] Allowed CIDRs"),
+            ]), "Action"),
+            ref: optional(Type.String(), "Project ref (for backup/network actions)"),
+            slug: optional(Type.String(), "[get_org] Organization slug"),
+            allowed_cidrs: optional(Type.Array(Type.String()), "[update_network] Allowed CIDRs"),
         },
         async (args: any) => {
             const { action, ref, slug, allowed_cidrs } = args;
@@ -316,10 +327,10 @@ Actions: metrics, list_backups, create_backup, network, update_network, list_org
         `Task lifecycle webhook configuration.
 Actions: register_webhook, unregister_webhook, inspect_webhook`,
         {
-            action: z.enum(["register_webhook", "unregister_webhook", "inspect_webhook"]).describe("Action"),
-            ref: z.string().describe("Project ref"),
-            url: z.string().optional().describe("[register_webhook] HTTPS webhook URL for task lifecycle events"),
-            secret: z.string().optional().describe("[register_webhook] Optional HMAC secret for webhook verification"),
+            action: withDescription(stringEnum(["register_webhook", "unregister_webhook", "inspect_webhook"]), "Action"),
+            ref: withDescription(Type.String(), "Project ref"),
+            url: optional(Type.String(), "[register_webhook] HTTPS webhook URL for task lifecycle events"),
+            secret: optional(Type.String(), "[register_webhook] Optional HMAC secret for webhook verification"),
         },
         async (args: any) => {
             const { action, ref, url, secret } = args;
@@ -362,10 +373,10 @@ Actions: register_webhook, unregister_webhook, inspect_webhook`,
         `Platform and project diagnostics: health checks, diagnostic runs, and repair.
 Actions: list_checks, run_checks, get_run, repair`,
         {
-            action: z.enum(["list_checks", "run_checks", "get_run", "repair"]).describe("Action"),
-            ref: z.string().optional().describe("Project ref (for project-scoped diagnostics)"),
-            run_id: z.string().optional().describe("[get_run/repair] Diagnostic run ID"),
-            check_id: z.string().optional().describe("[repair] Check result ID to repair"),
+            action: withDescription(stringEnum(["list_checks", "run_checks", "get_run", "repair"]), "Action"),
+            ref: optional(Type.String(), "Project ref (for project-scoped diagnostics)"),
+            run_id: optional(Type.String(), "[get_run/repair] Diagnostic run ID"),
+            check_id: optional(Type.String(), "[repair] Check result ID to repair"),
         },
         async (args: any) => {
             const { action, ref, run_id, check_id } = args;

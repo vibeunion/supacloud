@@ -153,7 +153,7 @@ describe("runtimeEnvService", () => {
     }
   });
 
-  test("uses owner public JWKS and GoTrue port without exposing dependent signing secrets", async () => {
+  test("uses owner runtime material even when dependent auth config is invalid", async () => {
     const originalOwnerRef = config.authRuntimeOwnerRef;
     config.authRuntimeOwnerRef = "auth-owner";
     const dependent = {
@@ -178,7 +178,7 @@ describe("runtimeEnvService", () => {
         auth: {
           third_party_auth: {
             enabled: true,
-            issuer: "https://business-auth.example.com/auth/v1",
+            issuer: "not-a-valid-shared-dependent-issuer",
             audience: "business-audience",
             client_id: "business-client",
             jwt_jwks: {
@@ -207,6 +207,7 @@ describe("runtimeEnvService", () => {
           oauth_server: {
             enabled: true,
             signing_alg: "ES256",
+            issuer: "  https://auth-owner.example.com/auth/v1///  ",
             jwt_keys: [{ kty: "EC", kid: "owner-public", alg: "ES256", d: "private", crv: "P-256", x: "x", y: "y" }],
             jwt_jwks: {
               keys: [{ kty: "EC", kid: "owner-public", alg: "ES256", crv: "P-256", x: "x", y: "y" }],
@@ -218,21 +219,28 @@ describe("runtimeEnvService", () => {
     const findByRefSpy = spyOn(projectRepository, "findByRef").mockImplementation(async (ref: string) =>
       (ref === "auth-owner" ? owner : dependent) as never
     );
-    const secretsSpy = spyOn(databaseService, "getSecrets").mockResolvedValue([]);
+    const secretsSpy = spyOn(databaseService, "getSecrets").mockResolvedValue([
+      { name: "JWT_SECRET", value: "stale-dependent-secret" },
+      { name: "JWT_KEYS", value: "stale-dependent-private-keys" },
+      { name: "SUPACLOUD_THIRD_PARTY_JWT_POLICY", value: "stale-dependent-policy" },
+      { name: "SAFE_CUSTOM_SECRET", value: "kept" },
+    ] as never);
 
     try {
       const env = await runtimeEnvService.buildProjectRuntimeEnv("proj_1");
       expect(env?.SUPACLOUD_AUTH_RUNTIME_MODE).toBe("shared");
       expect(env?.SUPACLOUD_AUTH_AUTHORITY_REF).toBe("auth-owner");
+      expect(env?.SUPACLOUD_AUTH_ISSUER).toBe("https://auth-owner.example.com/auth/v1");
       expect(env?.SUPACLOUD_INTERNAL_POSTGREST_PORT).toBe("3272");
       expect(env?.SUPACLOUD_INTERNAL_GOTRUE_PORT).toBe("9372");
       expect(env?.JWT_JWKS).toContain("owner-public");
-      expect(env?.JWT_JWKS).toContain("legacy-hs256");
+      expect(env?.JWT_JWKS).not.toContain("legacy-hs256");
       expect(env?.JWT_JWKS).not.toContain("business-user-key");
       expect(env?.SUPACLOUD_THIRD_PARTY_JWT_POLICY).toBeUndefined();
       expect(env?.JWT_SECRET).toBeUndefined();
       expect(env?.JWT_KEYS).toBeUndefined();
       expect(env?.JWT_JWKS).not.toContain("dependent-private");
+      expect(env?.SAFE_CUSTOM_SECRET).toBe("kept");
     } finally {
       config.authRuntimeOwnerRef = originalOwnerRef;
       findByRefSpy.mockRestore();

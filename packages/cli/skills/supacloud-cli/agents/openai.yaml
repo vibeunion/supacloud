@@ -1,0 +1,4 @@
+interface:
+  display_name: "SupaCloud CLI"
+  short_description: "安全使用 SupaCloud CLI 与数据库迁移"
+  default_prompt: "Use $supacloud-cli to manage this SupaCloud project through migrations and safe CLI workflows."

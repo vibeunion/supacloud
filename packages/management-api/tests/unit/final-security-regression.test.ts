@@ -8,6 +8,7 @@ import { runtimeEnvService } from "../../src/services/runtime-env.service";
 import { restoreLogicalBackup } from "../../src/services/backup.service";
 import { sdkProxyInternals } from "../../src/routes/sdk-proxy";
 import { decryptSecretIfNeeded, isEncryptedSecret } from "../../src/utils/secret-crypto";
+import { isRuntimeOwnedSecretName } from "../../src/utils/runtime-secrets";
 
 const masterHeaders = { Authorization: "Bearer dev-master-token" };
 
@@ -201,6 +202,35 @@ describe("final security regressions", () => {
       upsertSecretsSpy.mockRestore();
       globalThis.fetch = originalFetch;
     }
+  });
+
+  test("project secrets reject runtime-owned JWT verification variables", async () => {
+    const upsertSecretsSpy = spyOn(projectService, "upsertSecrets").mockResolvedValue(true);
+    const request = appWith(projectSecretsRoutes);
+
+    try {
+      const response = await request("/v1/projects/proj_1/secrets", {
+        method: "POST",
+        headers: { ...masterHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify([
+          { name: "JWT_SECRET", value: "attacker-controlled" },
+          { name: "SUPACLOUD_THIRD_PARTY_JWT_POLICY", value: "{}" },
+        ]),
+      });
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ code: "400" });
+      expect(upsertSecretsSpy).not.toHaveBeenCalled();
+    } finally {
+      upsertSecretsSpy.mockRestore();
+    }
+  });
+
+  test("project secrets preserve documented custom SupaCloud and JWT variables", () => {
+    expect(isRuntimeOwnedSecretName("SUPACLOUD_MANAGEMENT_API_URL")).toBe(false);
+    expect(isRuntimeOwnedSecretName("SUPACLOUD_EDGE_TLS_CA")).toBe(false);
+    expect(isRuntimeOwnedSecretName("JWT_AUDIENCE")).toBe(false);
+    expect(isRuntimeOwnedSecretName("SUPACLOUD_AUTH_RUNTIME_MODE")).toBe(true);
   });
 
   test("API keys GET requires project or admin auth", async () => {

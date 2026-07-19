@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { loginStudio } from "$lib/api";
+  import { getStudioSession, loginStudio } from "$lib/api";
+  import { onMount } from "svelte";
   import { mode, toggleMode } from "mode-watcher";
   import { t, locale } from "svelte-i18n";
   import { Loader2, Lock, Eye, EyeOff, User, Globe, Sun, Moon, Info } from "lucide-svelte";
@@ -10,6 +11,24 @@
   let error: string | null = $state.raw(null);
   let showPassword = $state(false);
   let isShaking = $state(false);
+
+  onMount(() => {
+    let isMounted = true;
+
+    void getStudioSession()
+      .then((session) => {
+        if (isMounted && session.authenticated) {
+          window.location.replace("/");
+        }
+      })
+      .catch(() => {
+        // Session 探测失败时保留登录页，让用户仍可正常登录。
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  });
 
   // 触发物理卡片抖动反馈
   function triggerShake() {

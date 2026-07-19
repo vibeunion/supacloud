@@ -1,8 +1,23 @@
 <script lang="ts">
   import { page } from "$app/state";
-  import { GitBranch, Plus, Trash2, Loader2, ArrowUpCircle, CheckCircle2, XCircle, Clock, AlertCircle } from "lucide-svelte";
+  import {
+    AlertCircle,
+    ArrowUpCircle,
+    CheckCircle2,
+    Clock,
+    Database,
+    GitBranch,
+    Loader2,
+    Plus,
+    ShieldCheck,
+    Trash2,
+    TriangleAlert,
+    XCircle,
+  } from "lucide-svelte";
   import { apiClient } from "$lib/api";
   import { createQuery, createMutation, useQueryClient } from "@tanstack/svelte-query";
+
+  type BranchDataMode = "schema_only" | "full_clone";
 
   interface Branch {
     ref: string;
@@ -10,7 +25,57 @@
     parent_ref: string;
     status: "creating" | "active" | "deleting" | "error";
     created_at: string;
+    data_mode?: BranchDataMode;
     error?: string;
+  }
+
+  interface PromotionEntry {
+    version: string;
+    name: string | null;
+    checksum: string;
+    statement_count: number;
+    statements?: string[];
+    destructive: boolean;
+  }
+
+  interface PromotionBlock {
+    code: string;
+    version: string;
+    name: string | null;
+    message: string;
+  }
+
+  interface PromotionPlan {
+    mode: "migrations";
+    parent_ref: string;
+    branch_ref: string;
+    safe_to_apply: boolean;
+    plan_checksum: string;
+    pending: PromotionEntry[];
+    applied: PromotionEntry[];
+    blocked: PromotionBlock[];
+    warnings: string[];
+    requires_destructive_confirmation: boolean;
+    ignored_branch_data: true;
+  }
+
+  interface PromotionResult {
+    applied: PromotionEntry[];
+    plan: PromotionPlan;
+  }
+
+  interface ReplacementResult {
+    backup_database: string;
+  }
+
+  class ApiOperationError extends Error {
+    payload: Record<string, unknown>;
+
+    constructor(message: string, payload: Record<string, unknown>) {
+      super(message);
+      this.name = "ApiOperationError";
+      this.payload = payload;
+    }
   }
 
   const projectRef = $derived(page.params.ref);
@@ -18,9 +83,35 @@
 
   let showCreate = $state(false);
   let branchName = $state("");
+  let dataMode = $state<BranchDataMode>("schema_only");
   let msg = $state<string | null>(null);
   let errMsg = $state<string | null>(null);
   let promoteTarget = $state<Branch | null>(null);
+  let promotionPlan = $state<PromotionPlan | null>(null);
+  let promotionError = $state<string | null>(null);
+  let promotionNeedsRefresh = $state(false);
+  let confirmDestructive = $state(false);
+  let replaceTarget = $state<Branch | null>(null);
+  let replaceConfirmation = $state("");
+  let replaceError = $state<string | null>(null);
+  let replacementRecoveryRequired = $state(false);
+  const replaceExpected = $derived(replaceTarget ? `REPLACE ${projectRef} WITH ${replaceTarget.ref}` : "");
+
+  function operationError(data: unknown, fallback: string): ApiOperationError {
+    const payload = data && typeof data === "object" ? data as Record<string, unknown> : {};
+    const lines = [typeof payload.error === "string" ? payload.error : typeof payload.message === "string" ? payload.message : fallback];
+    if (Array.isArray(payload.applied) && payload.applied.length > 0) {
+      const versions = payload.applied
+        .map((entry) => entry && typeof entry === "object" ? (entry as Record<string, unknown>).version : null)
+        .filter((version): version is string => typeof version === "string");
+      lines.push(`Applied before failure: ${versions.join(", ") || payload.applied.length}. Refresh the plan before retrying.`);
+    }
+    if (payload.recovery_required === true) {
+      const recoveryDatabase = typeof payload.recovery_database === "string" ? payload.recovery_database : null;
+      lines.push(`Manual recovery is required. Do not retry blindly${recoveryDatabase ? `; recover database: ${recoveryDatabase}` : typeof payload.backup_database === "string" ? `; backup: ${payload.backup_database}` : ""}.`);
+    }
+    return new ApiOperationError(lines.join(" "), payload);
+  }
 
   const branchesQuery = createQuery(() => ({
     queryKey: ["branches", projectRef],
@@ -42,7 +133,7 @@
       const res = await apiClient(`/v1/projects/${projectRef}/branches`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: branchName.trim() }),
+        body: JSON.stringify({ name: branchName.trim(), data_mode: dataMode }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || data.message || "Failed to create branch");
@@ -51,7 +142,8 @@
     onSuccess: () => {
       showCreate = false;
       branchName = "";
-      msg = "Branch created, provisioning database...";
+      dataMode = "schema_only";
+      msg = "Branch created, provisioning an isolated preview database...";
       setTimeout(() => (msg = null), 4000);
       queryClient.invalidateQueries({ queryKey: ["branches", projectRef] });
     },
@@ -74,23 +166,94 @@
     },
   }));
 
+  const promotionPlanMut = createMutation(() => ({
+    mutationFn: async (branchRef: string): Promise<PromotionPlan> => {
+      const res = await apiClient(`/v1/projects/${projectRef}/branches/${branchRef}/promote/plan`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || data.message || "Failed to build migration promotion plan");
+      return data as PromotionPlan;
+    },
+    onSuccess: (plan) => {
+      promotionPlan = plan;
+      promotionError = null;
+      promotionNeedsRefresh = false;
+    },
+    onError: (err: unknown) => {
+      promotionError = err instanceof Error ? err.message : String(err);
+    },
+  }));
+
   const promoteBranchMut = createMutation(() => ({
-    mutationFn: async (branchRef: string) => {
-      const res = await apiClient(`/v1/projects/${projectRef}/branches/${branchRef}/promote`, {
+    mutationFn: async (input: { branchRef: string; plan: PromotionPlan }): Promise<PromotionResult> => {
+      const res = await apiClient(`/v1/projects/${projectRef}/branches/${input.branchRef}/promote`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "migrations",
+          plan_checksum: input.plan.plan_checksum,
+          confirm_destructive: confirmDestructive,
+        }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || data.message || "Failed to promote branch");
-      return data;
+      if (!res.ok) throw operationError(data, "Failed to promote migrations");
+      return data as PromotionResult;
     },
-    onSuccess: () => {
-      promoteTarget = null;
-      msg = "Branch promoted to parent project.";
-      setTimeout(() => (msg = null), 4000);
+    onSuccess: (result) => {
+      const appliedCount = result.applied?.length || 0;
+      closePromotion();
+      msg = appliedCount > 0
+        ? `${appliedCount} migration${appliedCount === 1 ? "" : "s"} promoted. Branch data was not automatically copied.`
+        : "Parent migration history is already up to date.";
+      setTimeout(() => (msg = null), 5000);
+      queryClient.invalidateQueries({ queryKey: ["branches", projectRef] });
+      queryClient.invalidateQueries({ queryKey: ["database_migrations", projectRef] });
+    },
+    onError: (err: unknown) => {
+      promotionError = err instanceof Error ? err.message : String(err);
+      if (err instanceof ApiOperationError) {
+        const plan = err.payload.plan;
+        if (plan && typeof plan === "object") promotionPlan = plan as PromotionPlan;
+        if (Array.isArray(err.payload.applied) && err.payload.applied.length > 0) {
+          promotionNeedsRefresh = true;
+          queryClient.invalidateQueries({ queryKey: ["database_migrations", projectRef] });
+        }
+        if (err.payload.code === "promotion_plan_changed" || err.payload.code === "promotion_readback_failed") {
+          promotionNeedsRefresh = true;
+        }
+      }
+    },
+  }));
+
+  const replaceDatabaseMut = createMutation(() => ({
+    mutationFn: async (branchRef: string): Promise<ReplacementResult> => {
+      const res = await apiClient(`/v1/projects/${projectRef}/branches/${branchRef}/promote`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "replace_database", confirmation: replaceConfirmation }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw operationError(data, "Failed to replace parent database");
+      if (!data || typeof data !== "object" || typeof (data as Record<string, unknown>).backup_database !== "string") {
+        throw operationError({
+          ...(data && typeof data === "object" ? data as Record<string, unknown> : {}),
+          error: "Database replacement response did not include the required backup database name.",
+          replacement_committed: true,
+          recovery_required: true,
+        }, "Replacement completed without recoverable backup evidence");
+      }
+      return data as ReplacementResult;
+    },
+    onSuccess: (result) => {
+      replaceTarget = null;
+      replaceConfirmation = "";
+      replacementRecoveryRequired = false;
+      msg = `Parent database replaced. Backup retained as ${result.backup_database}.`;
+      setTimeout(() => (msg = null), 6000);
       queryClient.invalidateQueries({ queryKey: ["branches", projectRef] });
     },
     onError: (err: unknown) => {
-      errMsg = err instanceof Error ? err.message : String(err);
+      replaceError = err instanceof Error ? err.message : String(err);
+      replacementRecoveryRequired = err instanceof ApiOperationError && err.payload.recovery_required === true;
     },
   }));
 
@@ -105,6 +268,33 @@
       return;
     }
     createBranchMut.mutate();
+  }
+
+  function openPromotion(branch: Branch) {
+    errMsg = null;
+    promoteTarget = branch;
+    promotionPlan = null;
+    promotionError = null;
+    promotionNeedsRefresh = false;
+    confirmDestructive = false;
+    promotionPlanMut.mutate(branch.ref);
+  }
+
+  function closePromotion() {
+    promoteTarget = null;
+    promotionPlan = null;
+    promotionError = null;
+    promotionNeedsRefresh = false;
+    confirmDestructive = false;
+  }
+
+  function openReplacement(branch: Branch) {
+    closePromotion();
+    replaceTarget = branch;
+    replaceConfirmation = "";
+    replaceError = null;
+    replacementRecoveryRequired = false;
+    errMsg = null;
   }
 
   function statusBadge(status: Branch["status"]) {
@@ -124,14 +314,14 @@
 </script>
 
 <div class="space-y-6">
-  <div class="flex items-center justify-between">
+  <div class="flex items-center justify-between gap-4">
     <div>
       <h2 class="text-lg font-semibold flex items-center gap-2">
         <GitBranch class="w-5 h-5 text-brand" />
         Branches
       </h2>
       <p class="text-sm text-muted-foreground mt-1">
-        Create preview branches with cloned databases for testing schema changes and migrations.
+        Test schema changes in isolated databases, then promote reviewed migrations without automatic branch data copying.
       </p>
     </div>
     {#if !showCreate}
@@ -143,6 +333,18 @@
         New Branch
       </button>
     {/if}
+  </div>
+
+  <div class="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-4 text-sm">
+    <div class="flex items-start gap-2">
+      <ShieldCheck class="mt-0.5 h-4 w-4 shrink-0 text-emerald-500" />
+      <div>
+        <div class="font-medium text-foreground">Migration-first promotion</div>
+        <p class="mt-1 text-muted-foreground">
+          The platform will not automatically copy branch data to the parent. Only migration ledger entries with reviewed checksums are eligible.
+        </p>
+      </div>
+    </div>
   </div>
 
   {#if msg}
@@ -157,16 +359,24 @@
   {/if}
 
   {#if showCreate}
-    <div class="rounded-lg border border-border bg-card p-4 space-y-3">
+    <div class="rounded-lg border border-border bg-card p-4 space-y-4">
       <h3 class="font-medium">Create New Branch</h3>
-      <div class="flex items-center gap-2">
+      <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
         <input
           type="text"
           bind:value={branchName}
           placeholder="e.g. feature-add-auth"
-          class="flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm"
-          onkeydown={(e) => { if (e.key === "Enter") handleCreate(); }}
+          class="min-w-0 flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm"
+          onkeydown={(event) => { if (event.key === "Enter") handleCreate(); }}
         />
+        <select
+          bind:value={dataMode}
+          class="rounded-md border border-border bg-background px-3 py-2 text-sm"
+          aria-label="Branch data mode"
+        >
+          <option value="schema_only">Schema only (recommended)</option>
+          <option value="full_clone">Schema and data</option>
+        </select>
         <button
           class="rounded-md bg-brand px-3 py-2 text-sm font-medium text-white hover:bg-brand/90 disabled:opacity-50"
           onclick={handleCreate}
@@ -176,13 +386,17 @@
         </button>
         <button
           class="rounded-md border border-border px-3 py-2 text-sm text-muted-foreground hover:text-foreground"
-          onclick={() => { showCreate = false; branchName = ""; }}
+          onclick={() => { showCreate = false; branchName = ""; dataMode = "schema_only"; }}
         >
           Cancel
         </button>
       </div>
       <p class="text-xs text-muted-foreground">
-        The parent project's database (schema + data) will be cloned into a new preview database.
+        {#if dataMode === "schema_only"}
+          Creates a data-less preview database. Add deterministic seed data through your normal migration or seed workflow.
+        {:else}
+          Copies the current parent data for debugging. Restrict this mode to approved, non-sensitive or masked datasets.
+        {/if}
       </p>
     </div>
   {/if}
@@ -207,11 +421,14 @@
         <div class="rounded-lg border border-border bg-card p-4">
           <div class="flex items-start justify-between gap-4">
             <div class="min-w-0 flex-1">
-              <div class="flex items-center gap-2">
+              <div class="flex flex-wrap items-center gap-2">
                 <span class="font-mono text-sm font-medium truncate">{branch.name}</span>
                 <span class="inline-flex items-center gap-1 text-xs {badge.class}">
                   <badge.icon class="w-3.5 h-3.5" />
                   {badge.label}
+                </span>
+                <span class="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                  {branch.data_mode === "schema_only" ? "Schema only" : "Schema + data"}
                 </span>
               </div>
               <div class="mt-1 text-xs text-muted-foreground">
@@ -224,12 +441,12 @@
             <div class="flex items-center gap-2 shrink-0">
               {#if branch.status === "active"}
                 <button
-                  class="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors"
-                  onclick={() => { promoteTarget = branch; errMsg = null; }}
-                  title="Promote this branch back to the parent (overwrites parent DB)"
+                  class="inline-flex items-center gap-1 rounded-md border border-emerald-500/30 px-2.5 py-1 text-xs text-emerald-500 hover:bg-emerald-500/10 transition-colors"
+                  onclick={() => openPromotion(branch)}
+                  title="Review and promote recorded migrations only"
                 >
                   <ArrowUpCircle class="w-3.5 h-3.5" />
-                  Promote
+                  Review migrations
                 </button>
               {/if}
               <button
@@ -249,29 +466,173 @@
   {/if}
 
   {#if promoteTarget}
-    <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50" role="dialog" aria-modal="true">
-      <div class="rounded-lg border border-border bg-card p-6 max-w-md w-full mx-4 space-y-4">
-        <div class="flex items-center gap-2">
-          <ArrowUpCircle class="w-5 h-5 text-amber-400" />
-          <h3 class="font-semibold text-base">Promote "{promoteTarget.name}"?</h3>
+    <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true">
+      <div class="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg border border-border bg-card p-6 space-y-5">
+        <div class="flex items-start gap-3">
+          <ShieldCheck class="mt-0.5 h-5 w-5 shrink-0 text-emerald-500" />
+          <div>
+            <h3 class="font-semibold text-base">Promote migrations from “{promoteTarget.name}”</h3>
+            <p class="mt-1 text-sm text-muted-foreground">
+              Branch data is not automatically copied. The server will re-check this plan and serialize it with other migration writes.
+            </p>
+          </div>
         </div>
-        <p class="text-sm text-muted-foreground">
-          This will <strong class="text-foreground">overwrite</strong> the parent project's database with the branch's data.
-          The parent will be temporarily stopped during the operation. This action cannot be undone.
-        </p>
-        <div class="flex justify-end gap-2 pt-2">
+
+        {#if promotionPlanMut.isPending}
+          <div class="flex items-center justify-center gap-2 rounded-md border border-border py-10 text-sm text-muted-foreground">
+            <Loader2 class="h-4 w-4 animate-spin" />
+            Building migration plan…
+          </div>
+        {:else if promotionError}
+          <div class="space-y-3 rounded-md border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400">
+            <div>{promotionError}</div>
+            {#if promotionNeedsRefresh}
+              <button
+                class="rounded border border-red-500/30 px-2 py-1 text-xs hover:bg-red-500/10 disabled:opacity-50"
+                onclick={() => promoteTarget && promotionPlanMut.mutate(promoteTarget.ref)}
+                disabled={promotionPlanMut.isPending}
+              >Refresh and review plan</button>
+            {/if}
+          </div>
+        {:else if !promotionPlan}
+          <div class="rounded-md border border-border p-3 text-sm text-muted-foreground">
+            No migration plan is available. Close this dialog and retry.
+          </div>
+        {:else}
+          <div class="grid grid-cols-3 gap-3 text-center text-xs">
+            <div class="rounded-md border border-border p-3"><div class="text-lg font-semibold">{promotionPlan.pending.length}</div><div class="text-muted-foreground">Pending</div></div>
+            <div class="rounded-md border border-border p-3"><div class="text-lg font-semibold">{promotionPlan.applied.length}</div><div class="text-muted-foreground">Applied</div></div>
+            <div class="rounded-md border border-border p-3"><div class="text-lg font-semibold">{promotionPlan.blocked.length}</div><div class="text-muted-foreground">Blocked</div></div>
+          </div>
+
+          <div class="rounded-md border border-border bg-background/50 p-3 text-xs">
+            <div class="text-muted-foreground">Reviewed plan checksum</div>
+            <div class="mt-1 break-all font-mono">{promotionPlan.plan_checksum}</div>
+          </div>
+
+          {#if promotionPlan.pending.length > 0}
+            <div class="space-y-2">
+              <h4 class="text-sm font-medium">Pending migrations</h4>
+              {#each promotionPlan.pending as migration (migration.version)}
+                <div class="flex items-start justify-between gap-3 rounded-md border border-border p-3 text-xs">
+                  <div class="min-w-0">
+                    <div class="font-mono font-medium">{migration.version} · {migration.name || "unnamed"}</div>
+                    <div class="mt-1 text-muted-foreground">{migration.statement_count} statement(s) · {migration.checksum.slice(0, 12)}</div>
+                    <details class="mt-2">
+                      <summary class="cursor-pointer text-foreground">Review SQL</summary>
+                      <div class="mt-2 space-y-2">
+                        {#each migration.statements || [] as statement, index}
+                          <pre class="max-h-48 overflow-auto whitespace-pre-wrap rounded bg-muted/40 p-2 font-mono text-[11px]" aria-label={`Migration statement ${index + 1}`}>{statement}</pre>
+                        {/each}
+                        {#if !migration.statements?.length}
+                          <div class="text-muted-foreground">SQL is unavailable in this legacy plan. Review the migration file before continuing.</div>
+                        {/if}
+                      </div>
+                    </details>
+                  </div>
+                  {#if migration.destructive}
+                    <span class="rounded bg-red-500/10 px-2 py-0.5 text-red-400">Destructive</span>
+                  {/if}
+                </div>
+              {/each}
+            </div>
+          {/if}
+
+          {#if promotionPlan.blocked.length > 0}
+            <div class="space-y-2">
+              <h4 class="flex items-center gap-1.5 text-sm font-medium text-red-400"><TriangleAlert class="h-4 w-4" />Blocking findings</h4>
+              {#each promotionPlan.blocked as blocker (`${blocker.code}-${blocker.version}`)}
+                <div class="rounded-md border border-red-500/20 bg-red-500/5 p-3 text-xs text-red-300">
+                  <div class="font-mono">[{blocker.code}] {blocker.version}</div>
+                  <div class="mt-1">{blocker.message}</div>
+                </div>
+              {/each}
+            </div>
+          {/if}
+
+          {#if promotionPlan.warnings.length > 0}
+            <ul class="list-disc space-y-1 pl-5 text-xs text-muted-foreground">
+              {#each promotionPlan.warnings as warning}
+                <li>{warning}</li>
+              {/each}
+            </ul>
+          {/if}
+
+          {#if promotionPlan.requires_destructive_confirmation}
+            <label class="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-xs">
+              <input class="mt-0.5" type="checkbox" bind:checked={confirmDestructive} />
+              <span>I reviewed the destructive SQL and its backup/rollback plan.</span>
+            </label>
+          {/if}
+        {/if}
+
+        <div class="flex flex-col-reverse justify-between gap-3 border-t border-border pt-4 sm:flex-row">
+          <button
+            class="inline-flex items-center justify-center gap-1.5 rounded-md border border-red-500/30 px-3 py-2 text-xs text-red-400 hover:bg-red-500/10"
+            onclick={() => openReplacement(promoteTarget!)}
+            disabled={promotionPlanMut.isPending || promoteBranchMut.isPending}
+          >
+            <Database class="h-3.5 w-3.5" />
+            Replace entire database
+          </button>
+          <div class="flex justify-end gap-2">
+            <button class="rounded-md border border-border px-4 py-2 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50" onclick={closePromotion} disabled={promoteBranchMut.isPending}>Cancel</button>
+            <button
+              class="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+              onclick={() => promotionPlan && promoteBranchMut.mutate({ branchRef: promoteTarget!.ref, plan: promotionPlan })}
+              disabled={!promotionPlan || promotionNeedsRefresh || !promotionPlan.safe_to_apply || promotionPlan.pending.length === 0 || (promotionPlan.requires_destructive_confirmation && !confirmDestructive) || promoteBranchMut.isPending}
+            >
+              {#if promoteBranchMut.isPending}<Loader2 class="h-4 w-4 animate-spin" />{:else if promotionPlan?.pending.length === 0}Up to date{:else}Apply {promotionPlan?.pending.length || 0} migration(s){/if}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  {#if replaceTarget}
+    <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true">
+      <div class="w-full max-w-lg rounded-lg border border-red-500/30 bg-card p-6 space-y-4">
+        <div class="flex items-start gap-3">
+          <TriangleAlert class="mt-0.5 h-5 w-5 shrink-0 text-red-500" />
+          <div>
+            <h3 class="font-semibold text-red-400">Replace entire database</h3>
+            <p class="mt-1 text-sm text-muted-foreground">
+              This destructive break-glass action copies schema and data from the branch, stops the parent runtime, and swaps the parent database. New parent writes since branch creation may be lost. Admin authentication is required.
+            </p>
+          </div>
+        </div>
+        <div class="rounded-md bg-red-500/5 p-3 text-xs">
+          Type <code class="font-mono text-red-300">{replaceExpected}</code> to continue.
+        </div>
+        <input
+          bind:value={replaceConfirmation}
+          class="w-full rounded-md border border-red-500/30 bg-background px-3 py-2 font-mono text-sm"
+          placeholder={replaceExpected}
+          autocomplete="off"
+        />
+        {#if replaceError}
+          <div class="rounded-md border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400">{replaceError}</div>
+        {/if}
+        {#if replacementRecoveryRequired}
+          <div class="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-300">
+            The operation needs manual recovery. Keep this screen open, inspect the reported recovery database, and restore runtime health before taking another action.
+          </div>
+        {/if}
+        <div class="flex justify-end gap-2">
           <button
             class="rounded-md border border-border px-4 py-2 text-sm text-muted-foreground hover:text-foreground"
-            onclick={() => { promoteTarget = null; }}
+            onclick={() => { replaceTarget = null; replaceConfirmation = ""; replaceError = null; }}
+            disabled={replacementRecoveryRequired || replaceDatabaseMut.isPending}
           >
             Cancel
           </button>
           <button
-            class="rounded-md bg-amber-500 px-4 py-2 text-sm font-medium text-white hover:bg-amber-600 disabled:opacity-50"
-            onclick={() => promoteBranchMut.mutate(promoteTarget!.ref)}
-            disabled={promoteBranchMut.isPending}
+            class="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+            onclick={() => replaceDatabaseMut.mutate(replaceTarget!.ref)}
+            disabled={replacementRecoveryRequired || replaceConfirmation !== replaceExpected || replaceDatabaseMut.isPending}
           >
-            {#if promoteBranchMut.isPending}<Loader2 class="w-4 h-4 animate-spin" />{:else}Promote Now{/if}
+            {#if replaceDatabaseMut.isPending}<Loader2 class="h-4 w-4 animate-spin" />{:else}Replace database{/if}
           </button>
         </div>
       </div>

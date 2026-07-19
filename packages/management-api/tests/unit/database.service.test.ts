@@ -41,6 +41,8 @@ describe("DatabaseService", () => {
     // Mock applySupabaseSchema to avoid complex nested DB calls in simple tests
     applySupabaseSchemaSpy = spyOn(DatabaseService.prototype as unknown as Record<string, unknown>, "applySupabaseSchema")
       .mockResolvedValue(undefined);
+    spyOn(DatabaseService.prototype as unknown as Record<string, unknown>, "prepareMigrationRole")
+      .mockResolvedValue(undefined);
   });
 
   describe("generatePassword", () => {

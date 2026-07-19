@@ -1,4 +1,4 @@
-import { signOidcServiceRoleJwt } from "./project-jwt";
+import { normalizeJwtIssuer, signOidcServiceRoleJwt } from "./project-jwt";
 import { normalizeProjectConfig } from "./project-config";
 
 function resolveOauthServerConfig(config: unknown): Record<string, unknown> {
@@ -13,9 +13,8 @@ function resolveOauthServerConfig(config: unknown): Record<string, unknown> {
 }
 
 function resolveOauthIssuer(ref: string | undefined, oauthServer: Record<string, unknown>): string {
-  if (typeof oauthServer.issuer === "string" && oauthServer.issuer.trim()) {
-    return oauthServer.issuer.replace(/\/+$/, "");
-  }
+  const configuredIssuer = normalizeJwtIssuer(oauthServer.issuer);
+  if (configuredIssuer) return configuredIssuer;
   return ref ? `supacloud-${ref}` : "supacloud";
 }
 

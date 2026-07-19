@@ -1,4 +1,5 @@
 import { sql, resolveDbName, resolveSlotName } from '../db';
+import { SQL_MODULES } from '../db/sql-modules';
 import { databaseService } from '../services/database.service';
 import { logger } from '../utils/logger';
 
@@ -521,59 +522,10 @@ EXCEPTION WHEN insufficient_privilege THEN
 END $$;
 
 -- 12. PostgREST db-pre-request function (P0-11)
--- Sets RLS context variables from the JWT claims passed by PostgREST
-CREATE OR REPLACE FUNCTION public.set_request_context() RETURNS void AS $$
-DECLARE
-  claims jsonb;
-  role_claim text;
-BEGIN
-  BEGIN
-    claims := COALESCE(
-      nullif(current_setting('request.jwt.claims', true), '')::jsonb,
-      '{}'::jsonb
-    );
-  EXCEPTION WHEN invalid_text_representation THEN
-    claims := '{}'::jsonb;
-  END;
+${SQL_MODULES["postgrest-request-context"]}
 
-  PERFORM set_config('request.jwt.claims', claims::text, true);
-  PERFORM set_config('request.jwt.claim.sub', coalesce(claims ->> 'sub', ''), true);
-  PERFORM set_config('request.jwt.claim.email', coalesce(claims ->> 'email', ''), true);
-
-  role_claim := COALESCE(
-    nullif(current_setting('request.jwt.claim.role', true), ''),
-    claims ->> 'role',
-    'anon'
-  );
-  PERFORM set_config('request.jwt.claim.role', role_claim, true);
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
-
--- Grant execute to API roles
-GRANT EXECUTE ON FUNCTION public.set_request_context() TO anon, authenticated, service_role;
-
-CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid AS $$
-BEGIN
-  RETURN COALESCE(
-    nullif(current_setting('request.jwt.claim.sub', true), ''),
-    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')
-  )::uuid;
-EXCEPTION
-  WHEN invalid_text_representation THEN
-    RETURN NULL;
-END
-$$ LANGUAGE plpgsql STABLE;
-
-CREATE OR REPLACE FUNCTION auth.jwt() RETURNS jsonb AS $$
-  SELECT nullif(current_setting('request.jwt.claims', true), '')::jsonb;
-$$ LANGUAGE SQL STABLE;
-
-CREATE OR REPLACE FUNCTION auth.role() RETURNS text AS $$
-  SELECT COALESCE(
-    nullif(current_setting('request.jwt.claim.role', true), ''),
-    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'role')
-  )::text;
-$$ LANGUAGE SQL STABLE;
+-- Modern PostgREST JWT helper functions
+${SQL_MODULES["auth-jwt-helpers"]}
 
 -- 13. GoTrue internal tracking tables (P1-4, P2-5)
 CREATE TABLE IF NOT EXISTS auth.schema_migrations (
@@ -600,17 +552,41 @@ GRANT USAGE ON SCHEMA supabase_migrations TO postgres, anon, authenticated, serv
 CREATE TABLE IF NOT EXISTS supabase_migrations.schema_migrations (
   version text NOT NULL PRIMARY KEY,
   statements text[],
-  name text
+  name text,
+  checksum text,
+  inserted_at timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE supabase_migrations.schema_migrations ADD COLUMN IF NOT EXISTS statements text[];
+ALTER TABLE supabase_migrations.schema_migrations ADD COLUMN IF NOT EXISTS name text;
+ALTER TABLE supabase_migrations.schema_migrations ADD COLUMN IF NOT EXISTS checksum text;
+ALTER TABLE supabase_migrations.schema_migrations ADD COLUMN IF NOT EXISTS inserted_at timestamptz NOT NULL DEFAULT now();
 GRANT ALL ON ALL TABLES IN SCHEMA supabase_migrations TO postgres;
 
 -- Backfill from legacy schema_migrations table if it exists
 DO $$
 BEGIN
   IF EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'schema_migrations') THEN
-    INSERT INTO supabase_migrations.schema_migrations (version, name)
-    SELECT version, version FROM public.schema_migrations
-    ON CONFLICT DO NOTHING;
+    ALTER TABLE public.schema_migrations ADD COLUMN IF NOT EXISTS statements text[];
+    ALTER TABLE public.schema_migrations ADD COLUMN IF NOT EXISTS name text;
+    ALTER TABLE public.schema_migrations ADD COLUMN IF NOT EXISTS checksum text;
+    ALTER TABLE public.schema_migrations ADD COLUMN IF NOT EXISTS inserted_at timestamptz NOT NULL DEFAULT now();
+
+    UPDATE supabase_migrations.schema_migrations canonical
+    SET statements = legacy.statements,
+        name = legacy.name,
+        checksum = legacy.checksum,
+        inserted_at = legacy.inserted_at
+    FROM public.schema_migrations legacy
+    WHERE canonical.version = legacy.version::text
+      AND canonical.checksum IS NULL
+      AND COALESCE(cardinality(canonical.statements), 0) = 0
+      AND (canonical.name IS NULL OR canonical.name = canonical.version);
+
+    INSERT INTO supabase_migrations.schema_migrations
+      (version, statements, name, checksum, inserted_at)
+    SELECT version::text, statements, name, checksum, inserted_at
+    FROM public.schema_migrations
+    ON CONFLICT (version) DO NOTHING;
   END IF;
 END $$;
 
@@ -672,59 +648,7 @@ END;
 $graphql_fallback$;
 
 -- 17. Supabase Queues compatibility via the official PGMQ extension.
-CREATE EXTENSION IF NOT EXISTS pgmq;
-CREATE SCHEMA IF NOT EXISTS pgmq_public;
-GRANT USAGE ON SCHEMA pgmq_public TO anon, authenticated, service_role;
-
-CREATE OR REPLACE FUNCTION pgmq_public.send(queue_name text, message jsonb, sleep_seconds integer DEFAULT 0)
-RETURNS SETOF bigint
-LANGUAGE sql
-VOLATILE
-SECURITY DEFINER
-SET search_path = pgmq, public
-AS $$ SELECT * FROM pgmq.send(queue_name, message, sleep_seconds); $$;
-
-CREATE OR REPLACE FUNCTION pgmq_public.send_batch(queue_name text, messages jsonb[], sleep_seconds integer DEFAULT 0)
-RETURNS SETOF bigint
-LANGUAGE sql
-VOLATILE
-SECURITY DEFINER
-SET search_path = pgmq, public
-AS $$ SELECT * FROM pgmq.send_batch(queue_name, messages, sleep_seconds); $$;
-
-CREATE OR REPLACE FUNCTION pgmq_public.read(queue_name text, sleep_seconds integer, n integer)
-RETURNS SETOF pgmq.message_record
-LANGUAGE sql
-VOLATILE
-SECURITY DEFINER
-SET search_path = pgmq, public
-AS $$ SELECT * FROM pgmq.read(queue_name, sleep_seconds, n); $$;
-
-CREATE OR REPLACE FUNCTION pgmq_public.pop(queue_name text)
-RETURNS SETOF pgmq.message_record
-LANGUAGE sql
-VOLATILE
-SECURITY DEFINER
-SET search_path = pgmq, public
-AS $$ SELECT * FROM pgmq.pop(queue_name); $$;
-
-CREATE OR REPLACE FUNCTION pgmq_public.archive(queue_name text, message_id bigint)
-RETURNS boolean
-LANGUAGE sql
-VOLATILE
-SECURITY DEFINER
-SET search_path = pgmq, public
-AS $$ SELECT pgmq.archive(queue_name, message_id); $$;
-
-CREATE OR REPLACE FUNCTION pgmq_public."delete"(queue_name text, message_id bigint)
-RETURNS boolean
-LANGUAGE sql
-VOLATILE
-SECURITY DEFINER
-SET search_path = pgmq, public
-AS $$ SELECT pgmq.delete(queue_name, message_id); $$;
-
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pgmq_public TO anon, authenticated, service_role;
+${SQL_MODULES["pgmq-public"]}
 
 -- 18. Realtime WAL logical replication support
 DO $$
@@ -745,129 +669,7 @@ EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
 -- 18. Platform background task mirror table + User deletion fence
--- Mirror table stores platform background invocation state separately from
--- the business public.tasks table (which has incompatible columns/statuses).
-CREATE TABLE IF NOT EXISTS public.background_task_mirrors (
-  id               UUID PRIMARY KEY,
-  project_ref      TEXT NOT NULL,
-  task_type        TEXT NOT NULL DEFAULT 'edge_function',
-  function_slug    TEXT,
-  status           TEXT NOT NULL DEFAULT 'pending'
-                   CHECK (status IN ('pending','leased','running','retry_scheduled',
-                                     'succeeded','failed','dead_lettered','cancelled')),
-  invoker_user_id  UUID,
-  attempt          INTEGER NOT NULL DEFAULT 1,
-  max_attempts     INTEGER NOT NULL DEFAULT 3,
-  trace_id         TEXT,
-  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-ALTER TABLE public.background_task_mirrors ENABLE ROW LEVEL SECURITY;
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.background_task_mirrors
-  TO postgres, supabase_auth_admin, supabase_admin;
-
-CREATE INDEX IF NOT EXISTS idx_bg_task_mirrors_invoker_active
-  ON public.background_task_mirrors(invoker_user_id, status)
-  WHERE status IN ('pending','leased','running','retry_scheduled');
-
-CREATE INDEX IF NOT EXISTS idx_bg_task_mirrors_status
-  ON public.background_task_mirrors(status);
-
--- 辅助函数：检查用户是否有未终态的 platform background tasks
--- Returns 'active' | 'inactive' | 'unknown' (three-state to avoid silent false on errors)
-CREATE OR REPLACE FUNCTION public.has_active_background_tasks(p_user_id UUID)
-RETURNS TEXT AS $$
-DECLARE
-  v_count INTEGER;
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM information_schema.tables
-    WHERE table_schema = 'public' AND table_name = 'background_task_mirrors'
-  ) THEN
-    RAISE NOTICE 'has_active_background_tasks: background_task_mirrors table missing for user %', p_user_id;
-    RETURN 'unknown';
-  END IF;
-
-  SELECT COUNT(*) INTO v_count
-  FROM public.background_task_mirrors
-  WHERE invoker_user_id = p_user_id
-    AND status IN ('pending','leased','running','retry_scheduled');
-
-  IF v_count > 0 THEN
-    RETURN 'active';
-  END IF;
-
-  RETURN 'inactive';
-EXCEPTION WHEN OTHERS THEN
-  RAISE NOTICE 'has_active_background_tasks: exception for user % — %', p_user_id, SQLERRM;
-  RETURN 'unknown';
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
-
--- 辅助函数：安全软删除用户（标记 deleted_at，但不硬删）
--- 在 GoTrue DELETE 触发之前，检查是否有活跃任务
-CREATE OR REPLACE FUNCTION public.soft_delete_user_if_no_active_tasks()
-RETURNS TRIGGER AS $$
-DECLARE
-  v_task_state TEXT;
-BEGIN
-  IF OLD.deleted_at IS NOT NULL THEN
-    RETURN OLD;
-  END IF;
-
-  v_task_state := public.has_active_background_tasks(OLD.id);
-
-  IF v_task_state = 'inactive' THEN
-    RETURN OLD;
-  END IF;
-
-  UPDATE auth.users SET deleted_at = NOW() WHERE id = OLD.id;
-
-  IF v_task_state = 'unknown' THEN
-    RAISE NOTICE 'soft_delete_user_if_no_active_tasks: degraded/unknown for user %, blocking hard delete', OLD.id;
-    RETURN NULL;
-  END IF;
-
-  RETURN NULL;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
-
--- 仅在 auth.users 上无此触发器时创建
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_trigger WHERE tgname = 'auth_users_delete_fence'
-  ) THEN
-    CREATE TRIGGER auth_users_delete_fence
-      BEFORE DELETE ON auth.users
-      FOR EACH ROW
-      EXECUTE FUNCTION public.soft_delete_user_if_no_active_tasks();
-  END IF;
-EXCEPTION WHEN OTHERS THEN NULL;
-END $$;
-
--- 辅助函数：清理已无活跃任务的软删用户（定期调用）
-CREATE OR REPLACE FUNCTION public.hard_delete_soft_deleted_users()
-RETURNS INT AS $$
-DECLARE
-  deleted_count INT := 0;
-  user_record RECORD;
-  v_task_state TEXT;
-BEGIN
-  FOR user_record IN
-    SELECT id FROM auth.users
-    WHERE deleted_at IS NOT NULL
-      AND deleted_at < NOW() - INTERVAL '1 hour'
-  LOOP
-    v_task_state := public.has_active_background_tasks(user_record.id);
-    IF v_task_state = 'inactive' THEN
-      DELETE FROM auth.users WHERE id = user_record.id;
-      deleted_count := deleted_count + 1;
-    END IF;
-  END LOOP;
-  RETURN deleted_count;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+${SQL_MODULES["background-task-mirror-up"]}
 
 -- Storage RLS policies and grants migration
 -- Enable RLS on multipart upload tables

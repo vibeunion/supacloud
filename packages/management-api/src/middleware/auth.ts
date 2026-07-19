@@ -56,44 +56,45 @@ export interface ProjectJwtContext {
   role: string;
   ref: string;
   sub?: string;
+  isServiceRole: boolean;
+}
+
+function decodeProjectJwtCandidate(token: string): Record<string, unknown> | null {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return null;
+    const header = JSON.parse(Buffer.from(parts[0], "base64url").toString("utf8")) as Record<string, unknown>;
+    const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8")) as Record<string, unknown>;
+    if (typeof header.alg !== "string") return null;
+    if (typeof payload.role !== "string" || !payload.role) return null;
+    if (typeof payload.exp === "number" && payload.exp < Date.now() / 1000) return null;
+    return payload;
+  } catch {
+    return null;
+  }
 }
 
 export async function verifyProjectJwt(
   token: string,
   scopedRef?: string | null,
 ): Promise<ProjectJwtContext | null> {
-  try {
-    const parts = token.split(".");
-    if (parts.length !== 3) return null;
+  const payload = decodeProjectJwtCandidate(token);
+  if (!payload) return null;
+  const candidateRefs = extractProjectRefCandidates(payload, scopedRef);
+  if (candidateRefs.length === 0) return null;
 
-    const header = JSON.parse(Buffer.from(parts[0], "base64url").toString("utf8")) as Record<string, unknown>;
-    if (typeof header.alg !== "string") return null;
-
-    const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8")) as Record<string, unknown>;
-    if (typeof payload.role !== "string" || !payload.role) return null;
-
-    if (typeof payload.exp === "number" && payload.exp < Date.now() / 1000) {
-      return null;
+  for (const ref of candidateRefs) {
+    const verification = await verifyProjectJwtPayload(ref, token);
+    if (verification) {
+      return {
+        role: String(verification.payload.role),
+        ref,
+        sub: typeof verification.payload.sub === "string" ? verification.payload.sub : undefined,
+        isServiceRole: verification.isServiceRole,
+      };
     }
-
-    const candidateRefs = extractProjectRefCandidates(payload, scopedRef);
-    if (candidateRefs.length === 0) return null;
-
-    for (const ref of candidateRefs) {
-      const verification = await verifyProjectJwtPayload(ref, token);
-      if (verification) {
-        return {
-          role: String(verification.payload.role),
-          ref,
-          sub: typeof verification.payload.sub === "string" ? verification.payload.sub : undefined,
-        };
-      }
-    }
-
-    return null;
-  } catch {
-    return null;
   }
+  return null;
 }
 
 export type AuthContext =
@@ -101,12 +102,37 @@ export type AuthContext =
   | { role: "admin"; source: "bearer" | "cookie" }
   | { role: "project"; ref: string };
 
+async function findStoredServiceRoleRef(
+  token: string,
+  scopedRef: string | null,
+): Promise<string | null> {
+  const [project] = scopedRef
+    ? await metaSql`
+        SELECT ref FROM projects
+        WHERE ref = ${scopedRef}
+          AND service_role_key = ${token}
+          AND lower(status) = 'active'
+        LIMIT 1
+      `
+    : await metaSql`
+        SELECT ref FROM projects
+        WHERE service_role_key = ${token}
+          AND lower(status) = 'active'
+        LIMIT 1
+      `;
+  return typeof project?.ref === "string" ? project.ref : null;
+}
+
 type AuthResolverDependencies = {
   studioSessions?: Pick<StudioSessionService, "verify">;
+  verifyProjectJwt?: typeof verifyProjectJwt;
+  findStoredServiceRoleRef?: typeof findStoredServiceRoleRef;
 };
 
 export function createAuthResolver(dependencies: AuthResolverDependencies = {}) {
   const studioSessions = dependencies.studioSessions ?? studioSessionService;
+  const verifyJwt = dependencies.verifyProjectJwt ?? verifyProjectJwt;
+  const resolveStoredServiceRoleRef = dependencies.findStoredServiceRoleRef ?? findStoredServiceRoleRef;
 
   return async function resolveAuthContext(
     request: Request,
@@ -161,28 +187,15 @@ export function createAuthResolver(dependencies: AuthResolverDependencies = {}) 
   }
 
   if (!mcpPayload && token.split(".").length === 3) {
-    const [project] = scopedRef
-      ? await metaSql`
-          SELECT ref FROM projects
-          WHERE ref = ${scopedRef}
-            AND service_role_key = ${token}
-            AND lower(status) = 'active'
-          LIMIT 1
-        `
-      : await metaSql`
-          SELECT ref FROM projects
-          WHERE service_role_key = ${token}
-            AND lower(status) = 'active'
-          LIMIT 1
-        `;
-    if (project) {
+    const storedServiceRoleRef = await resolveStoredServiceRoleRef(token, scopedRef);
+    if (storedServiceRoleRef) {
       role = "project";
-      ref = project.ref as string;
+      ref = storedServiceRoleRef;
     }
 
     if (!role) {
-      const jwtResult = await verifyProjectJwt(token, scopedRef);
-      if (jwtResult?.role === "service_role") {
+      const jwtResult = await verifyJwt(token, scopedRef);
+      if (jwtResult?.role === "service_role" && jwtResult.isServiceRole) {
         role = "project";
         ref = jwtResult.ref;
       }
