@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/zuohuadong/supacloud/compare/supacloud-v0.7.0...supacloud-v0.7.1) (2026-07-19)
+
+
+### Miscellaneous Chores
+
+* sync supacloud release lockfile ([792e0f7](https://github.com/zuohuadong/supacloud/commit/792e0f7fb9c68a95a6f529844df82a8a8f5b90bc))
+
 ## [0.7.0](https://github.com/zuohuadong/supacloud/compare/supacloud-v0.6.1...supacloud-v0.7.0) (2026-07-19)
 
 
