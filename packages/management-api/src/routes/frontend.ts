@@ -159,6 +159,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
         output_dir: body.output_dir,
         install_command: body.install_command,
         node_version: body.node_version,
+        health_check_path: body.health_check_path,
         env_vars: body.env_vars,
       });
 
@@ -178,6 +179,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
         output_dir: t.Optional(t.String()),
         install_command: t.Optional(t.String()),
         node_version: t.Optional(t.String()),
+        health_check_path: t.Optional(t.String()),
         env_vars: t.Optional(t.Record(t.String(), t.String())),
       }),
       detail: { tags: ["frontend"], summary: "Create a frontend deployment" },
@@ -195,6 +197,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
         output_dir: body.output_dir,
         install_command: body.install_command,
         node_version: body.node_version,
+        health_check_path: body.health_check_path,
         env_vars: body.env_vars,
       });
 
@@ -217,6 +220,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
         output_dir: t.Optional(t.String()),
         install_command: t.Optional(t.String()),
         node_version: t.Optional(t.String()),
+        health_check_path: t.Optional(t.String()),
         env_vars: t.Optional(t.Record(t.String(), t.String())),
       }),
       detail: { tags: ["frontend"], summary: "Update a frontend deployment" },

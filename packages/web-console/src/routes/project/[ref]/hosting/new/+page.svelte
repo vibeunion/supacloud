@@ -3,9 +3,10 @@
 
   import { page } from "$app/state";
   import { goto } from "$app/navigation";
+  import { resolve } from "$app/paths";
   import { Loader2, Rocket, FolderGit2, Upload, AlertTriangle } from "lucide-svelte";
 
-  const projectRef = $derived(page.params.ref);
+  const projectRef = $derived(page.params.ref ?? "");
 
   const FRAMEWORKS = [
     { id: "static", label: "静态站点", desc: "纯 HTML/CSS/JS", ssr: false },
@@ -14,7 +15,8 @@
     { id: "svelte", label: "Svelte (Vite)", desc: "npm run build → dist", ssr: false },
     { id: "nextjs", label: "Next.js", desc: "SSR/SSG/ISR", ssr: true },
     { id: "nuxt", label: "Nuxt", desc: "SSR · npm run build → .output", ssr: true },
-    { id: "sveltekit", label: "SvelteKit", desc: "SSR · npm run build → build", ssr: true },
+    { id: "sveltekit", label: "SvelteKit SSR", desc: "adapter-node → build", ssr: true },
+    { id: "sveltekit-static", label: "SvelteKit Static", desc: "adapter-static → build", ssr: false },
     { id: "astro", label: "Astro", desc: "SSG/SSR · npm run build → dist", ssr: false },
     { id: "remix", label: "Remix", desc: "SSR · npm run build → build", ssr: true },
   ];
@@ -26,6 +28,7 @@
   let buildCommand = $state("");
   let outputDir = $state("");
   let installCommand = $state("");
+  let healthCheckPath = $state("/");
   let deployMode = $state<"git" | "upload">("git");
   let isCreating = $state(false);
   let error: string | null = $state.raw(null);
@@ -38,7 +41,6 @@
     error = null;
 
     try {
-      // Step 1: Create deployment
       const res = await apiClient(`/v1/projects/${projectRef}/frontend/deployments`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -48,21 +50,19 @@
           build_command: buildCommand || undefined,
           output_dir: outputDir || undefined,
           install_command: installCommand || undefined,
+          health_check_path: selectedFw?.ssr ? healthCheckPath || "/" : undefined,
         })
       });
       const dep = await res.json();
       if (!res.ok) { error = dep.error || "创建失败"; isCreating = false; return; }
 
-      // Step 2: If git mode, trigger git deploy
       if (deployMode === "git" && gitUrl.trim()) {
-        // Set git config
         await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${dep.id}/git`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ git_url: gitUrl.trim(), branch: gitBranch || "main" })
         });
 
-        // Trigger deploy
         await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${dep.id}/deploy/git`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -70,7 +70,7 @@
         });
       }
 
-      goto(`/project/${projectRef}/hosting`);
+      goto(resolve("/project/[ref]/hosting", { ref: projectRef }));
     } catch (err: unknown) {
       error = err instanceof Error ? err.message : String(err);
     } finally {
@@ -101,7 +101,7 @@
   <div class="rounded-xl border bg-card p-5">
     <h3 class="text-sm font-semibold mb-3">选择框架</h3>
     <div class="grid grid-cols-3 gap-2">
-      {#each FRAMEWORKS as fw}
+      {#each FRAMEWORKS as fw (fw.id)}
         <button
           onclick={() => framework = fw.id}
           class="flex flex-col items-start p-3 rounded-lg border transition-all text-left {framework === fw.id ? 'border-brand bg-brand/5 ring-1 ring-brand' : 'hover:border-brand/30 hover:bg-muted/30'}"
@@ -164,6 +164,13 @@
         <label for="install-cmd" class="text-xs font-semibold text-muted-foreground block mb-1">安装命令</label>
         <input id="install-cmd" bind:value={installCommand} placeholder="npm install" class="w-full px-3 py-2 text-xs font-mono rounded-md border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand" />
       </div>
+      {#if selectedFw?.ssr}
+        <div>
+          <label for="health-check-path" class="text-xs font-semibold text-muted-foreground block mb-1">健康检查路径</label>
+          <input id="health-check-path" bind:value={healthCheckPath} placeholder="/" class="w-full px-3 py-2 text-xs font-mono rounded-md border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand" />
+          <p class="text-[10px] text-muted-foreground mt-1">收到任意非 5xx HTTP 响应即视为就绪</p>
+        </div>
+      {/if}
     </div>
   </details>
 

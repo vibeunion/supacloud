@@ -27,6 +27,10 @@ import {
 } from "../types/frontend";
 import { FrontendDomainService } from "./frontend-domain.service";
 import { FrontendRecordService } from "./frontend-record.service";
+import {
+  prepareSvelteKitRuntime,
+  renderSvelteKitSystemdUnit,
+} from "./frontend-runtime";
 
 const FRONTEND_BASE_DIR = "/var/supacloud/frontends";
 const READINESS_TIMEOUT_MS = 30_000;
@@ -47,6 +51,18 @@ const STATIC_PRECOMPRESS_EXTENSIONS = new Set([
   ".xml",
 ]);
 const STATIC_IMAGE_OPTIMIZE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png"]);
+
+function normalizeHealthCheckPath(value: string | undefined): string {
+  const path = value?.trim() || "/";
+  if (!path.startsWith("/") || path.startsWith("//") || /[\r\n]/.test(path)) {
+    throw new Error("Health check path must be an absolute path on the frontend origin");
+  }
+  const url = new URL(path, "http://127.0.0.1");
+  if (url.origin !== "http://127.0.0.1") {
+    throw new Error("Health check path must stay on the frontend origin");
+  }
+  return `${url.pathname}${url.search}`;
+}
 
 function assertSafeBuildCommand(command: string): void {
   if (process.env.SUPACLOUD_RESTRICT_BUILD_COMMANDS !== "true") return;
@@ -132,17 +148,21 @@ export class FrontendService {
   // ── Readiness Gate ──────────────────────────────────────────────
 
   /**
-   * Poll /healthz on the frontend process until it responds 200 or timeout.
+   * Poll the configured path until the frontend process returns a non-5xx response.
    * Returns true if ready, false if timed out.
    */
-  private async waitForReadiness(port: number, timeoutMs: number = READINESS_TIMEOUT_MS): Promise<boolean> {
+  private async waitForReadiness(
+    port: number,
+    healthCheckPath: string,
+    timeoutMs: number = READINESS_TIMEOUT_MS,
+  ): Promise<boolean> {
     const deadline = Date.now() + timeoutMs;
-    const url = `http://127.0.0.1:${port}/healthz`;
+    const url = `http://127.0.0.1:${port}${normalizeHealthCheckPath(healthCheckPath)}`;
 
     while (Date.now() < deadline) {
       try {
         const res = await fetch(url, { signal: AbortSignal.timeout(2000) });
-        if (res.ok) {
+        if (res.status < 500) {
           logger.info(`[FrontendService] Readiness confirmed on port ${port}`);
           return true;
         }
@@ -267,6 +287,9 @@ export class FrontendService {
       output_dir: deploymentConfig.output_dir || defaults.output_dir,
       install_command: deploymentConfig.install_command || defaults.install_command,
       node_version: deploymentConfig.node_version || defaults.node_version,
+      health_check_path: normalizeHealthCheckPath(
+        deploymentConfig.health_check_path || defaults.health_check_path,
+      ),
       env_vars: deploymentConfig.env_vars || {},
       status: "pending",
       created_at: new Date().toISOString(),
@@ -294,9 +317,18 @@ export class FrontendService {
     const deployment = await this.getDeployment(projectRef, deploymentId);
     if (!deployment) return null;
 
+    const definedUpdates = Object.fromEntries(
+      Object.entries(updates).filter(([, value]) => value !== undefined),
+    ) as Partial<FrontendDeploymentConfig>;
+    const normalizedUpdates = definedUpdates.health_check_path === undefined
+      ? definedUpdates
+      : {
+          ...definedUpdates,
+          health_check_path: normalizeHealthCheckPath(definedUpdates.health_check_path),
+        };
     const updated = {
       ...deployment,
-      ...updates,
+      ...normalizedUpdates,
       updated_at: new Date().toISOString(),
     };
 
@@ -505,6 +537,9 @@ export class FrontendService {
       const defaults = FRAMEWORK_DEFAULTS[deployment.framework];
       const outputDir = this.joinPath(sourceDir, deployment.output_dir);
       await $`rm -rf ${buildDir} && cp -r ${outputDir} ${buildDir}`.quiet();
+      if (deployment.framework === "sveltekit") {
+        await prepareSvelteKitRuntime(sourceDir, buildDir);
+      }
       if (!defaults.is_ssr) {
         await this.precompressStaticAssets(buildDir);
       }
@@ -513,8 +548,7 @@ export class FrontendService {
         // Blue-green: start process FIRST, but do NOT route traffic yet
         const port = await this.startProcess(projectRef, deploymentId, deployment, buildDir, defaults.is_ssr);
 
-        // Readiness gate: wait for /healthz before switching gateway route
-        const ready = await this.waitForReadiness(port);
+        const ready = await this.waitForReadiness(port, deployment.health_check_path || defaults.health_check_path);
         if (!ready) {
           // Rollback: stop the process, leave the gateway pointing at old state (or nothing)
           logger.error(`[FrontendService] Readiness failed for ${projectRef}/${deploymentId}, stopping process`);
@@ -580,7 +614,8 @@ export class FrontendService {
 
   /**
    * Start the frontend process and return the port.
-   * SSR: bun run buildDir/index.js (user must expose /healthz or rely on process start)
+   * SvelteKit SSR uses the official adapter-node entrypoint. Other legacy SSR
+   * framework profiles keep their existing Bun launch behavior.
    */
   private async startProcess(
     projectRef: string,
@@ -602,8 +637,15 @@ export class FrontendService {
       throw new Error("Static frontend deployments are served directly by Caddy");
     }
 
-    const bunPath = config.bunPath;
-    const systemdUnit = `[Unit]
+    const systemdUnit = deployment.framework === "sveltekit"
+      ? renderSvelteKitSystemdUnit({
+          serviceName,
+          description: `${deployment.name} (${projectRef}/${deploymentId})`,
+          buildDir,
+          envFile,
+          port,
+        })
+      : `[Unit]
 Description=SupaCloud Frontend SSR: ${deployment.name} (${projectRef}/${deploymentId})
 After=network.target
 
@@ -615,7 +657,7 @@ Environment="PORT=${port}"
 Environment="NODE_ENV=production"
 EnvironmentFile=-/etc/supabase/management-api.env
 EnvironmentFile=${envFile}
-ExecStart=${bunPath} run ${buildDir}/index.js
+ExecStart=${config.bunPath} run ${buildDir}/index.js
 Restart=always
 RestartSec=5
 LimitNOFILE=65536

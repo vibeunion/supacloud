@@ -25,6 +25,10 @@ type LoadModuleResult = {
   moduleCacheSize: number;
 };
 
+type FrameworkRouterHandler = Record<string, unknown> & {
+  routes: unknown[];
+};
+
 const moduleCache = new Map<string, ModuleCacheEntry>();
 
 function evictOldestModule() {
@@ -243,6 +247,28 @@ async function executeFunction(handler: any, request: Request): Promise<Response
   );
 }
 
+function isFrameworkRouterHandler(handler: unknown): handler is FrameworkRouterHandler {
+  if (!handler || typeof handler !== "object") return false;
+  const candidate = handler as Record<string, unknown>;
+  return Array.isArray(candidate.routes)
+    && (typeof candidate.handle === "function" || typeof candidate.fetch === "function");
+}
+
+function toFunctionLocalUrl(requestUrl: string): string {
+  const url = new URL(requestUrl);
+  const publicRoute = url.pathname.match(/^\/functions\/v1\/[^/]+(\/.*)?$/);
+  if (publicRoute) {
+    url.pathname = publicRoute[1] || "/";
+    return url.toString();
+  }
+
+  const internalRoute = url.pathname.match(/^\/[^/]+(\/.*)?$/);
+  if (internalRoute) {
+    url.pathname = internalRoute[1] || "/";
+  }
+  return url.toString();
+}
+
 function extractProjectRef(functionId: string): string | null {
   const idx = functionId.indexOf("_");
   if (idx === -1) return null;
@@ -343,7 +369,10 @@ parentPort.on("message", async (msg: any) => {
     const handler = moduleLoad.handler;
     currentAbortController = new AbortController();
 
-    const req = new Request(url, {
+    const handlerUrl = isFrameworkRouterHandler(handler)
+      ? toFunctionLocalUrl(url)
+      : url;
+    const req = new Request(handlerUrl, {
       method,
       headers: new Headers(headers as Record<string, string>),
       body: body ? Buffer.from(body) : undefined,

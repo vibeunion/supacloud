@@ -16,6 +16,7 @@
   let outputDir = $state("");
   let installCommand = $state("");
   let nodeVersion = $state("");
+  let healthCheckPath = $state("/");
   let gitUrl = $state("");
   let gitBranch = $state("");
   let envPairs: { key: string; value: string }[] = $state([]);
@@ -64,6 +65,7 @@
       outputDir = String(d.output_dir || "");
       installCommand = String(d.install_command || "");
       nodeVersion = String(d.node_version || "20");
+      healthCheckPath = String(d.health_check_path || "/");
       gitUrl = String(d.git_url || "");
       gitBranch = String(d.git_branch || "main");
       if (envPairs.length === 0) {
@@ -79,17 +81,19 @@
 
   const saveConfigMutation = createMutation(() => ({
     mutationFn: async () => {
-      await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}`, {
+      const updateResponse = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ build_command: buildCommand, output_dir: outputDir, install_command: installCommand, node_version: nodeVersion })
+        body: JSON.stringify({ build_command: buildCommand, output_dir: outputDir, install_command: installCommand, node_version: nodeVersion, health_check_path: healthCheckPath || "/" })
       });
+      if (!updateResponse.ok) throw new Error("Failed to save build configuration");
       if (gitUrl) {
-        await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/git`, {
+        const gitResponse = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/git`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ git_url: gitUrl, branch: gitBranch || "main" })
         });
+        if (!gitResponse.ok) throw new Error("Failed to save Git configuration");
       }
       return true;
     },
@@ -208,7 +212,14 @@
     deleteTokenMutation.mutate(tokenId);
   }
 
-  async function copyText(text: string) { try { await navigator.clipboard.writeText(text); } catch {} }
+  async function copyText(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch (error: unknown) {
+      actionMsg = `❌ ${(error instanceof Error ? error.message : String(error))}`;
+      setTimeout(() => actionMsg = null, 4000);
+    }
+  }
 
   const webhookBase = $derived(typeof window !== 'undefined' ? window.location.origin : '');
 </script>
@@ -248,6 +259,9 @@
         <div><span class="text-xs font-semibold text-muted-foreground block mb-1">输出目录</span><input bind:value={outputDir} placeholder="dist" class="w-full px-3 py-2 text-xs font-mono rounded-md border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand" /></div>
         <div><span class="text-xs font-semibold text-muted-foreground block mb-1">安装命令</span><input bind:value={installCommand} placeholder="npm install" class="w-full px-3 py-2 text-xs font-mono rounded-md border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand" /></div>
         <div><span class="text-xs font-semibold text-muted-foreground block mb-1">Node 版本</span><input bind:value={nodeVersion} placeholder="20" class="w-full px-3 py-2 text-xs font-mono rounded-md border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand" /></div>
+        {#if dep.framework === 'sveltekit'}
+          <div><span class="text-xs font-semibold text-muted-foreground block mb-1">健康检查路径</span><input bind:value={healthCheckPath} placeholder="/" class="w-full px-3 py-2 text-xs font-mono rounded-md border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand" /></div>
+        {/if}
       </div>
     </div>
 
@@ -263,7 +277,7 @@
         </div>
       </div>
       <div class="p-4 space-y-2">
-        {#each envPairs as pair, i}
+        {#each envPairs as pair, i (pair)}
           <div class="flex items-center gap-2">
             <input bind:value={pair.key} placeholder="KEY" class="w-40 px-2 py-1.5 text-xs font-mono rounded border bg-muted/30" />
             <span class="text-muted-foreground">=</span>
@@ -281,7 +295,7 @@
         <h3 class="text-sm font-semibold flex items-center gap-2"><Globe size={16} /> 自定义域名</h3>
       </div>
       <div class="p-4">
-        {#each (dep.custom_domains || []) as string[] as domain}
+        {#each (dep.custom_domains || []) as string[] as domain (domain)}
           <div class="flex items-center justify-between py-1.5">
             <span class="text-xs font-mono">{domain}</span>
             <button onclick={() => removeDomain(domain)} class="text-red-500 text-[10px] hover:bg-red-500/10 rounded px-2 py-0.5">移除</button>
@@ -300,7 +314,7 @@
         <h3 class="text-sm font-semibold">🔗 Webhook URL（设置到 Git 平台）</h3>
       </div>
       <div class="p-4 space-y-2">
-        {#each [{ platform: 'GitHub', path: 'github' }, { platform: 'GitLab', path: 'gitlab' }, { platform: 'Gitee', path: 'gitee' }, { platform: 'GitCode', path: 'gitcode' }] as wh}
+        {#each [{ platform: 'GitHub', path: 'github' }, { platform: 'GitLab', path: 'gitlab' }, { platform: 'Gitee', path: 'gitee' }, { platform: 'GitCode', path: 'gitcode' }] as wh (wh.platform)}
           <div class="flex items-center justify-between">
             <div>
               <span class="text-xs font-semibold">{wh.platform}</span>
@@ -325,7 +339,7 @@
             <button onclick={() => { copyText(lastCreatedToken || ''); lastCreatedToken = null; }} class="mt-1 text-brand text-[10px] font-semibold">复制并关闭</button>
           </div>
         {/if}
-        {#each tokens as token}
+        {#each tokens as token (String((token as Record<string, unknown>).id))}
           <div class="flex items-center justify-between py-1.5">
             <div><span class="text-xs font-medium">{(token as Record<string, unknown>).name}</span><span class="text-[10px] text-muted-foreground ml-2">创建于 {(token as Record<string, unknown>).created_at}</span></div>
             <button onclick={() => deleteToken(String((token as Record<string, unknown>).id))} class="text-red-500 text-[10px]">删除</button>

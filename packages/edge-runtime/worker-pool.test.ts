@@ -65,6 +65,94 @@ describe("WorkerPool EdgeRuntime.waitUntil", () => {
   });
 });
 
+describe("WorkerPool framework routing", () => {
+  test("routes public Function URLs through Elysia using function-local paths", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-elysia-routing-"));
+    const functionPath = join(projectRoot, "elysia.ts");
+    const elysiaEntry = Bun.resolveSync("elysia", import.meta.dir);
+    await Bun.write(functionPath, `
+      import { Elysia } from ${JSON.stringify(elysiaEntry)};
+
+      export default new Elysia()
+        .get("/", ({ request }) => {
+          const url = new URL(request.url);
+          return { pathname: url.pathname, query: url.searchParams.get("source") };
+        })
+        .get("/users/:id", ({ params, request }) => {
+          const url = new URL(request.url);
+          return { id: params.id, pathname: url.pathname, active: url.searchParams.get("active") };
+        });
+    `);
+
+    const pool = new WorkerPool({ size: 1, requestTimeout: 10_000 });
+    pools.push(pool);
+
+    try {
+      const root = await pool.dispatch({
+        functionId: "proj_elysia_api",
+        functionPath,
+        projectRoot,
+        projectRef: "proj_elysia",
+        env: {},
+        request: new Request("http://edge.local/functions/v1/api?source=sdk"),
+      });
+      expect(root.status).toBe(200);
+      expect(await root.json()).toEqual({ pathname: "/", query: "sdk" });
+
+      const nested = await pool.dispatch({
+        functionId: "proj_elysia_api",
+        functionPath,
+        projectRoot,
+        projectRef: "proj_elysia",
+        env: {},
+        request: new Request("http://edge.local/functions/v1/api/users/42?active=true"),
+      });
+      expect(nested.status).toBe(200);
+      expect(await nested.json()).toEqual({
+        id: "42",
+        pathname: "/users/42",
+        active: "true",
+      });
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("preserves the public URL for Supabase-style fetch handlers", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-fetch-routing-"));
+    const functionPath = join(projectRoot, "fetch.ts");
+    await Bun.write(functionPath, `
+      export default {
+        fetch(request) {
+          const url = new URL(request.url);
+          return Response.json({ pathname: url.pathname, query: url.searchParams.get("source") });
+        }
+      };
+    `);
+
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    try {
+      const response = await pool.dispatch({
+        functionId: "proj_fetch_api",
+        functionPath,
+        projectRoot,
+        projectRef: "proj_fetch",
+        env: {},
+        request: new Request("http://edge.local/functions/v1/api/users?source=sdk"),
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        pathname: "/functions/v1/api/users",
+        query: "sdk",
+      });
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("WorkerPool TLS policy handoff", () => {
   test("passes host TLS policy into smol workers for HTTPS fetch", async () => {
     const openssl = Bun.spawnSync(["openssl", "version"], { stdout: "pipe", stderr: "pipe" });

@@ -75,6 +75,82 @@ describe("Frontend deployment upload routes", () => {
     expect(data.deployment_id).toBe("dep123");
   });
 
+  test("passes the SvelteKit readiness path through create and update APIs", async () => {
+    const createDeployment = spyOn(frontendService, "createDeployment").mockImplementation(
+      async (ref, input) => ({
+        id: "dep-sveltekit",
+        project_ref: ref,
+        name: input.name,
+        framework: input.framework,
+        domain: "sveltekit.example.com",
+        custom_domains: [],
+        build_command: "npm run build",
+        output_dir: "build",
+        install_command: "npm install",
+        node_version: "20",
+        health_check_path: input.health_check_path,
+        env_vars: {},
+        status: "pending",
+        created_at: "2026-07-19T00:00:00.000Z",
+        updated_at: "2026-07-19T00:00:00.000Z",
+        deployment_url: "https://sveltekit.example.com",
+      }),
+    );
+    const updateDeployment = spyOn(frontendService, "updateDeployment").mockImplementation(
+      async () => ({
+        id: "dep-sveltekit",
+        project_ref: "proj123",
+        name: "sveltekit-app",
+        framework: "sveltekit",
+        domain: "sveltekit.example.com",
+        custom_domains: [],
+        build_command: "npm run build",
+        output_dir: "build",
+        install_command: "npm install",
+        node_version: "20",
+        health_check_path: "/ready",
+        env_vars: {},
+        status: "pending",
+        created_at: "2026-07-19T00:00:00.000Z",
+        updated_at: "2026-07-19T00:00:00.000Z",
+        deployment_url: "https://sveltekit.example.com",
+      }),
+    );
+
+    const createResponse = await app.handle(new Request(
+      "http://localhost/v1/projects/proj123/frontend/deployments",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "sveltekit-app",
+          framework: "sveltekit",
+          health_check_path: "/ready",
+        }),
+      },
+    ));
+    expect(createResponse.status).toBe(201);
+    expect(createDeployment).toHaveBeenCalledWith(
+      "proj123",
+      expect.objectContaining({ health_check_path: "/ready" }),
+    );
+
+    const updateResponse = await app.handle(new Request(
+      "http://localhost/v1/projects/proj123/frontend/deployments/dep-sveltekit",
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ health_check_path: "/ready" }),
+      },
+    ));
+    expect(updateResponse.status).toBe(200);
+    expect(updateDeployment).toHaveBeenCalledWith(
+      "proj123",
+      "dep-sveltekit",
+      expect.objectContaining({ health_check_path: "/ready" }),
+    );
+  });
+
   test("supports multipart/form-data upload when parsed by Elysia (mocked body.file)", async () => {
     // 模拟 Elysia 已经内置解析为 body: { file: Blob } 的对象形式
     const mockFile = new Blob([testZipBytes], { type: "application/zip" });

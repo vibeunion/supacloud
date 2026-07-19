@@ -73,7 +73,11 @@
   let isCoreLoading = $derived(projectsLoading || ($isLoading && !i18nLoadGuardExpired));
 
   // Route Detection
-  let isRawPage = $derived(($page.url.pathname as string) === "/login" || ($page.url.pathname as string) === "/register");
+  let isRawPage = $derived(
+    ($page.url.pathname as string) === "/" ||
+    ($page.url.pathname as string) === "/login" ||
+    ($page.url.pathname as string) === "/register"
+  );
   let isPlatformRoute = $derived($page.url.pathname.startsWith("/platform"));
 
   let refFromUrl = $derived.by(() => {
@@ -229,9 +233,9 @@
 <Toaster richColors position="top-right" />
 
 <QueryClientProvider client={queryClient}>
-  <div class="flex h-screen overflow-hidden bg-background">
+  <div class={isRawPage ? "flex min-h-screen bg-background" : "flex h-screen overflow-hidden bg-background"}>
     {#if isRawPage}
-      <div class="flex-1 w-full relative">
+      <div class="min-h-screen flex-1 w-full relative">
         {@render children()}
       </div>
     {:else if isCoreLoading}
@@ -278,7 +282,9 @@
     {/if}
   </div>
 
-  <SvadminToast />
-  <ChatDialog />
-  <DevTools />
+  {#if !isRawPage}
+    <SvadminToast />
+    <ChatDialog />
+    <DevTools />
+  {/if}
 </QueryClientProvider>

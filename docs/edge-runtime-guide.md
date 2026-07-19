@@ -105,14 +105,31 @@ PostgREST/GoTrue services, or other host processes.
 // Option A: Bare handler (zero deps)
 export default (req: Request) => new Response("hello");
 
-// Option B: Elysia (recommended, best performance)
+// Option B: Elysia (recommended for multi-route functions)
 import { Elysia } from "elysia";
-export default new Elysia().get("/", () => "hello");
+export default new Elysia()
+  .get("/", () => "hello")
+  .get("/users/:id", ({ params }) => ({ id: params.id }));
 
 // Option C: Any framework (Hono, itty-router, etc.)
 import { Hono } from "hono";
 export default new Hono().get("/", (c) => c.text("hello"));
 ```
+
+Framework router instances expose a `routes` collection plus `handle()` or
+`fetch()`. SupaCloud gives those routers a function-local URL so public requests
+map as follows:
+
+```text
+/functions/v1/catalog                 -> /
+/functions/v1/catalog/users/42?full=1 -> /users/42?full=1
+```
+
+This avoids hard-coding the deployed function slug into Elysia or Hono route
+definitions. Plain functions and Supabase-style `{ fetch(request) {} }` exports
+continue to receive the original public URL for compatibility. Edge Functions
+must export a handler or router instance; do not call `.listen()` or bind a
+TCP/UDP port inside a function.
 
 ## SDK Compatibility
 

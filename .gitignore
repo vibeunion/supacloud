@@ -149,6 +149,7 @@ test-gotrue.sh
 .npm-cache/
 .roo/
 .DS_Store
+output/playwright/
 
 progress.md
 

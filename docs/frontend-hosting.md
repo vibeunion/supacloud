@@ -14,7 +14,8 @@ SupaCloud 提供内置的前端托管服务，支持多种前端框架：
 | Svelte | `svelte` | ❌ | `npm run build` | `dist` |
 | Next.js | `nextjs` | ✅ | `npm run build` | `.next` |
 | Nuxt | `nuxt` | ✅ | `npm run build` | `.output` |
-| SvelteKit | `sveltekit` | ✅ | `npm run build` | `build` |
+| SvelteKit SSR (`adapter-node`) | `sveltekit` | ✅ | `npm run build` | `build` |
+| SvelteKit Static (`adapter-static`) | `sveltekit-static` | ❌ | `npm run build` | `build` |
 | Astro | `astro` | ❌ | `npm run build` | `dist` |
 | Remix | `remix` | ✅ | `npm run build` | `build` |
 
@@ -41,6 +42,7 @@ GET /v1/projects/:ref/frontend/deployments
       "output_dir": "dist",
       "install_command": "npm install",
       "node_version": "20",
+      "health_check_path": "/",
       "env_vars": {
         "VITE_API_URL": "https://my-project.supabase.co"
       },
@@ -71,6 +73,7 @@ POST /v1/projects/:ref/frontend/deployments
   "output_dir": "dist",
   "install_command": "npm install",
   "node_version": "20",
+  "health_check_path": "/",
   "env_vars": {
     "VITE_API_URL": "https://my-project.supabase.co",
     "VITE_ANON_KEY": "your-anon-key"
@@ -183,6 +186,7 @@ GET /v1/projects/:ref/frontend/frameworks
         "output_dir": "dist",
         "install_command": "npm install",
         "node_version": "20",
+        "health_check_path": "/",
         "is_ssr": false
       }
     },
@@ -202,6 +206,19 @@ GET /v1/projects/:ref/frontend/frameworks
 ```
 
 ## 部署示例
+
+### SvelteKit 部署模式
+
+- SSR 项目使用 `framework: "sveltekit"`，并在 `svelte.config.js` 中配置
+  `@sveltejs/adapter-node`。SupaCloud 会校验 `build/index.js`，保留
+  `package.json` 与已安装的生产依赖，并通过 Node 启动服务。
+- SSG/SPA 项目使用 `framework: "sveltekit-static"`，并配置
+  `@sveltejs/adapter-static`。产物由 Caddy 直接托管，不启动 SSR 进程。
+- SSR 默认探测 `/`；可以通过 `health_check_path` 改成 `/healthz`、
+  `/ready` 等应用路由。任意非 5xx 响应表示进程已经就绪。
+- SvelteKit SSR service 会信任 Caddy 注入的 `x-forwarded-proto`、
+  `x-forwarded-host` 和 `x-forwarded-port`，以便 form actions、重定向和
+  服务端 URL 推导使用外部访问地址。
 
 ### 1. 创建并部署 React 应用
 

@@ -1,4 +1,4 @@
-export type FrontendFramework = "static" | "react" | "vue" | "svelte" | "nextjs" | "nuxt" | "sveltekit" | "astro" | "remix";
+export type FrontendFramework = "static" | "react" | "vue" | "svelte" | "nextjs" | "nuxt" | "sveltekit" | "sveltekit-static" | "astro" | "remix";
 
 export type BuildStatus = "pending" | "building" | "success" | "failed";
 
@@ -13,6 +13,7 @@ export interface FrontendDeployment {
   output_dir: string;
   install_command: string;
   node_version: string;
+  health_check_path?: string;
   env_vars: Record<string, string>;
   status: BuildStatus;
   created_at: string;
@@ -82,6 +83,7 @@ export interface FrontendDeploymentConfig {
   output_dir?: string;
   install_command?: string;
   node_version?: string;
+  health_check_path?: string;
   env_vars?: Record<string, string>;
 }
 
@@ -98,6 +100,7 @@ export const FRAMEWORK_DEFAULTS: Record<FrontendFramework, {
   output_dir: string;
   install_command: string;
   node_version: string;
+  health_check_path: string;
   is_ssr: boolean;
 }> = {
   static: {
@@ -105,6 +108,7 @@ export const FRAMEWORK_DEFAULTS: Record<FrontendFramework, {
     output_dir: ".",
     install_command: "",
     node_version: "20",
+    health_check_path: "/",
     is_ssr: false,
   },
   react: {
@@ -112,6 +116,7 @@ export const FRAMEWORK_DEFAULTS: Record<FrontendFramework, {
     output_dir: "dist",
     install_command: "npm install",
     node_version: "20",
+    health_check_path: "/",
     is_ssr: false,
   },
   vue: {
@@ -119,6 +124,7 @@ export const FRAMEWORK_DEFAULTS: Record<FrontendFramework, {
     output_dir: "dist",
     install_command: "npm install",
     node_version: "20",
+    health_check_path: "/",
     is_ssr: false,
   },
   svelte: {
@@ -126,6 +132,7 @@ export const FRAMEWORK_DEFAULTS: Record<FrontendFramework, {
     output_dir: "dist",
     install_command: "npm install",
     node_version: "20",
+    health_check_path: "/",
     is_ssr: false,
   },
   nextjs: {
@@ -133,6 +140,7 @@ export const FRAMEWORK_DEFAULTS: Record<FrontendFramework, {
     output_dir: ".next",
     install_command: "npm install",
     node_version: "20",
+    health_check_path: "/",
     is_ssr: true,
   },
   nuxt: {
@@ -140,6 +148,7 @@ export const FRAMEWORK_DEFAULTS: Record<FrontendFramework, {
     output_dir: ".output",
     install_command: "npm install",
     node_version: "20",
+    health_check_path: "/",
     is_ssr: true,
   },
   sveltekit: {
@@ -147,13 +156,23 @@ export const FRAMEWORK_DEFAULTS: Record<FrontendFramework, {
     output_dir: "build",
     install_command: "npm install",
     node_version: "20",
+    health_check_path: "/",
     is_ssr: true,
+  },
+  "sveltekit-static": {
+    build_command: "npm run build",
+    output_dir: "build",
+    install_command: "npm install",
+    node_version: "20",
+    health_check_path: "/",
+    is_ssr: false,
   },
   astro: {
     build_command: "npm run build",
     output_dir: "dist",
     install_command: "npm install",
     node_version: "20",
+    health_check_path: "/",
     is_ssr: false,
   },
   remix: {
@@ -161,6 +180,7 @@ export const FRAMEWORK_DEFAULTS: Record<FrontendFramework, {
     output_dir: "build",
     install_command: "npm install",
     node_version: "20",
+    health_check_path: "/",
     is_ssr: true,
   },
 };

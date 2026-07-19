@@ -9,7 +9,7 @@
         "@elysiajs/cors": "^1.4.2",
         "@elysiajs/swagger": "^1.3.1",
         "@sinclair/typebox": "^0.34.52",
-        "@svadmin/core": "^0.31.0",
+        "@svadmin/core": "^0.32.1",
         "@svadmin/elysia": "^0.10.7",
         "aws4fetch": "^1.0.20",
         "elysia": "^1.4.29",
@@ -64,7 +64,7 @@
 
     "@supabase/supabase-js": ["@supabase/supabase-js@2.110.7", "", { "dependencies": { "@supabase/auth-js": "2.110.7", "@supabase/functions-js": "2.110.7", "@supabase/postgrest-js": "2.110.7", "@supabase/realtime-js": "2.110.7", "@supabase/storage-js": "2.110.7" } }, "sha512-AnfO3A230Shy6RMO7cya3Wl1OcXnABJrzH8vP+fY7/RFjhzcchB7DjKkkTIAntlwekD+GkSFzEvt2tC+D4Fp8w=="],
 
-    "@svadmin/core": ["@svadmin/core@0.31.0", "", { "peerDependencies": { "@tanstack/svelte-query": "^6.1.29", "svelte": "^5.0.0" }, "optionalPeers": ["@tanstack/svelte-query", "svelte"] }, "sha512-bd0k0GayYfUdAo1+z0DB1N2WqoyCtq1ELIe2BnWiaSyy/gPmjUVX2f8OwzBEhEUu/JWeHhu3cg+nxqDBt/+fkw=="],
+    "@svadmin/core": ["@svadmin/core@0.32.1", "", { "peerDependencies": { "@tanstack/svelte-query": "^6.1.29", "svelte": "^5.0.0" }, "optionalPeers": ["@tanstack/svelte-query", "svelte"] }, "sha512-wqc6ndNpep6s3Tf/CHHd9Cp2N9m4p7SnYS+TWCWM+6yg0mmy1nslXJu8MNIHccCBz7OfZiUqtmoN4v0qqbCaAQ=="],
 
     "@svadmin/elysia": ["@svadmin/elysia@0.10.7", "", { "peerDependencies": { "@elysiajs/eden": ">=1.0.0", "@svadmin/core": "^0.27.1", "elysia": ">=1.0.0" }, "optionalPeers": ["@elysiajs/eden", "@svadmin/core", "elysia"] }, "sha512-vVpEdofjj+9zbbo7eUmyhi5aC1W4LYIDmjFdLOFWl++V8iVhr10Vx7eafMnIkFbSV06CkFdegKyhheMF4FQQCg=="],
 

@@ -10,7 +10,7 @@ import type { HttpTransport } from "../transports/http";
 export function registerFrontendTools(server: { tool: (...args: any[]) => void }, http: HttpTransport): void {
     server.tool(
         "frontend",
-        `Frontend hosting (static sites & SSR). Supports: static, react, vue, svelte, sveltekit, nextjs, nuxt, astro.
+        `Frontend hosting (static sites & SSR). Supports: static, react, vue, svelte, sveltekit, sveltekit-static, nextjs, nuxt, astro.
 Actions: list, get, create, update, delete, deploy_git, deploy_upload, redeploy, build_logs, add_domain, remove_domain, set_env, list_frameworks, list_records`,
         {
             action: withDescription(stringEnum([
@@ -23,12 +23,13 @@ Actions: list, get, create, update, delete, deploy_git, deploy_upload, redeploy,
             id: optional(Type.String(), "Deployment ID"),
             // create/update params
             name: optional(Type.String(), "[create] Deployment name"),
-            framework: optional(Type.String(), "[create] Framework (static|react|vue|svelte|sveltekit|nextjs|nuxt|astro)"),
+            framework: optional(Type.String(), "[create] Framework (static|react|vue|svelte|sveltekit|sveltekit-static|nextjs|nuxt|astro)"),
             domain: optional(Type.String(), "[create/update/add_domain/remove_domain] Custom domain"),
             build_command: optional(Type.String(), "[create/update] Build command override"),
             output_dir: optional(Type.String(), "[create/update] Output directory override"),
             install_command: optional(Type.String(), "[create/update] Install command override"),
             node_version: optional(Type.String(), "[create/update] Node.js version"),
+            health_check_path: optional(Type.String(), "[create/update] SSR readiness path (default: /)"),
             env_vars: optional(Type.Record(Type.String(), Type.String()), "[create/update/set_env] Environment variables"),
             // deploy_git params
             git_url: optional(Type.String(), "[deploy_git] Git repository URL"),
@@ -36,7 +37,7 @@ Actions: list, get, create, update, delete, deploy_git, deploy_upload, redeploy,
             zip_path: optional(Type.String(), "[deploy_upload] Local zip file path"),
         },
         async (args: any) => {
-            const { action, ref, id, name, framework, domain, build_command, output_dir, install_command, node_version, env_vars, git_url, branch, zip_path } = args;
+            const { action, ref, id, name, framework, domain, build_command, output_dir, install_command, node_version, health_check_path, env_vars, git_url, branch, zip_path } = args;
             const need = (f: string, v: any) => { if (!v) throw new Error(`'${f}' required for '${action}'`); };
             const ok = (res: any) => res.ok ? JSON.stringify(res.data, null, 2) : `❌ Failed (${res.status}): ${JSON.stringify(res.data)}`;
 
@@ -53,13 +54,13 @@ Actions: list, get, create, update, delete, deploy_git, deploy_upload, redeploy,
                 case "create":
                     need("ref", ref); need("name", name); need("framework", framework);
                     text = ok(await http.post(`/v1/projects/${ref}/frontend/deployments`, {
-                        name, framework, domain, build_command, output_dir, install_command, node_version, env_vars,
+                        name, framework, domain, build_command, output_dir, install_command, node_version, health_check_path, env_vars,
                     }));
                     break;
                 case "update":
                     need("ref", ref); need("id", id);
                     text = ok(await http.patch(`/v1/projects/${ref}/frontend/deployments/${id}`, {
-                        name, domain, build_command, output_dir, install_command, node_version, env_vars,
+                        name, domain, build_command, output_dir, install_command, node_version, health_check_path, env_vars,
                     }));
                     break;
                 case "delete":
