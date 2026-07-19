@@ -172,8 +172,30 @@ jobs:
         env:
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
         run: |
-          if [[ "$PR_AUTHOR" == "github-actions[bot]" && "${GITHUB_HEAD_REF:-}" == release-please--branches--* ]]; then
-            # Release Please 会在发布前先提升 sibling 包版本；此时 registry 与锁文件尚未包含候选版本。
+          content_install_mode="$(bun -e '
+            const pkg = await Bun.file("package.json").json();
+            const cli = await Bun.file("../cli/package.json").json();
+            const admin = await Bun.file("../admin/package.json").json();
+            const lock = await Bun.file("bun.lock").text();
+            const dependenciesMatchCandidates =
+              pkg.dependencies["@supacloud/cli"] === `^${cli.version}` &&
+              pkg.dependencies["@supacloud/admin"] === `^${admin.version}`;
+            const lockHasCandidates =
+              lock.includes(`@supacloud/cli@${cli.version}`) &&
+              lock.includes(`@supacloud/admin@${admin.version}`);
+            console.log(dependenciesMatchCandidates && !lockHasCandidates ? "local-candidate" : "frozen");
+          ')"
+          trusted_release_context=false
+          if [[ "$GITHUB_EVENT_NAME" == "push" && "$GITHUB_REF" == "refs/heads/main" ]] ||
+             [[ "$GITHUB_EVENT_NAME" == "pull_request" && "$PR_AUTHOR" == "github-actions[bot]" && "${GITHUB_HEAD_REF:-}" == release-please--branches--* ]]; then
+            trusted_release_context=true
+          fi
+          install_mode="frozen"
+          if [[ "$trusted_release_context" == "true" && "$content_install_mode" == "local-candidate" ]]; then
+            install_mode="local-candidate"
+          fi
+          if [[ "$install_mode" == "local-candidate" ]]; then
+            # Release 提升 sibling 包版本时，锁文件会暂时落后；使用同一提交中的候选包验证。
             bun -e '
               const pkg = await Bun.file("package.json").json();
               const cli = await Bun.file("../cli/package.json").json();
