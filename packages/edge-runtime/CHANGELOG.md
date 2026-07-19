@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.2](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.13.1...edge-runtime-v0.13.2) (2026-07-19)
+
+
+### Bug Fixes
+
+* **edge-runtime:** retire workers without unsafe termination ([#490](https://github.com/zuohuadong/supacloud/issues/490)) ([61706da](https://github.com/zuohuadong/supacloud/commit/61706da0d0a7782c2c7a2df263e7f9bc3b73bc74))
+
 ## [0.13.1](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.13.0...edge-runtime-v0.13.1) (2026-07-19)
 
 
