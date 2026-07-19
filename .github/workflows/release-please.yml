@@ -71,6 +71,10 @@ jobs:
         working-directory: packages/management-api
         run: bun install --frozen-lockfile
 
+      - name: Install edge-runtime dependencies
+        working-directory: packages/edge-runtime
+        run: bun install --frozen-lockfile
+
       - name: Build web console static artifact
         run: |
           cd packages/web-console
@@ -96,6 +100,9 @@ jobs:
 
       - name: Build Caddy edge binaries
         run: OUT_DIR=packages/management-api/dist bash scripts/build_supacloud_caddy.sh
+
+      - name: Smoke Caddy to Edge Runtime proxy
+        run: CADDY_BINARY=packages/management-api/dist/supacloud-caddy-linux-amd64 bash scripts/test_supacloud_caddy_edge_proxy.sh
 
       - name: Generate SHA256SUMS
         run: |

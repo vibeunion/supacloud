@@ -602,9 +602,41 @@ jobs:
           done
           shellcheck -s bash -e "$ignored_rules" "${root_scripts[@]}"
 
+  caddy-edge-proxy-smoke:
+    name: Caddy Edge Proxy Smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: stable
+
+      - name: Install edge-runtime dependencies
+        working-directory: packages/edge-runtime
+        run: bun install --frozen-lockfile
+
+      - name: Install xcaddy
+        run: go install github.com/caddyserver/xcaddy/cmd/xcaddy@${XCADDY_VERSION}
+
+      - name: Build Caddy Linux amd64 binary
+        run: CADDY_BUILD_TARGETS=linux-amd64 OUT_DIR=packages/management-api/dist bash scripts/build_supacloud_caddy.sh
+
+      - name: Test Caddy to Edge Runtime cancellation and proxying
+        run: CADDY_BINARY=packages/management-api/dist/supacloud-caddy-linux-amd64 bash scripts/test_supacloud_caddy_edge_proxy.sh
+
   build-binaries:
     name: Build Binaries
-    needs: [lint-and-typecheck, package-checks, docker-and-scripts-checks, unit-test, integration-test, shell-scripts-lint]
+    needs: [lint-and-typecheck, package-checks, docker-and-scripts-checks, unit-test, integration-test, shell-scripts-lint, caddy-edge-proxy-smoke]
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
 
