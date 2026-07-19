@@ -557,6 +557,7 @@ check_pg_stat_compat() {
 apply_postgrest_prerequest_compat() {
   local database="$1"
   run_psql "$database" <<'SQL'
+-- supacloud:sql-module:postgrest-request-context:start
 CREATE OR REPLACE FUNCTION public.set_request_context() RETURNS void AS $$
 DECLARE
   claims jsonb;
@@ -580,10 +581,13 @@ BEGIN
     claims ->> 'role',
     'anon'
   );
+
   PERFORM set_config('request.jwt.claim.role', role_claim, true);
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
+
 GRANT EXECUTE ON FUNCTION public.set_request_context() TO anon, authenticated, service_role;
+-- supacloud:sql-module:postgrest-request-context:end
 COMMENT ON FUNCTION public.set_request_context() IS 'supacloud:pigsty-4.4-postgrest-prerequest:v1';
 SQL
 }
@@ -595,6 +599,7 @@ check_postgrest_prerequest_compat() {
       WHEN p.oid IS NULL THEN 'missing'
       WHEN p.provolatile = 'v'
        AND p.prosecdef
+       AND coalesce(p.proconfig, ARRAY[]::text[]) @> ARRAY['search_path=pg_catalog']
        AND obj_description(p.oid, 'pg_proc') = 'supacloud:pigsty-4.4-postgrest-prerequest:v1'
        AND position('perform set_config(''request.jwt.claim.sub'', coalesce(claims ->> ''sub'', ''''), true);' IN
          regexp_replace(lower(p.prosrc), '[[:space:]]+', ' ', 'g')) > 0
@@ -616,6 +621,7 @@ apply_auth_jwt_helpers_compat() {
   [[ "$(query_scalar "$database" "SELECT to_regnamespace('auth') IS NOT NULL")" == "t" ]] || return 0
 
   run_psql "$database" <<'SQL'
+-- supacloud:sql-module:auth-jwt-helpers:start
 CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid AS $$
 BEGIN
   RETURN COALESCE(
@@ -638,7 +644,7 @@ CREATE OR REPLACE FUNCTION auth.role() RETURNS text AS $$
     (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'role')
   )::text;
 $$ LANGUAGE SQL STABLE;
-
+-- supacloud:sql-module:auth-jwt-helpers:end
 COMMENT ON FUNCTION auth.uid() IS 'supacloud:pigsty-4.4-auth-jwt-helpers:v1';
 COMMENT ON FUNCTION auth.jwt() IS 'supacloud:pigsty-4.4-auth-jwt-helpers:v1';
 COMMENT ON FUNCTION auth.role() IS 'supacloud:pigsty-4.4-auth-jwt-helpers:v1';
@@ -687,20 +693,89 @@ apply_auth_delete_fence_compat() {
   local applicable
   applicable="$(query_scalar "$database" "
     SELECT CASE
-      WHEN to_regclass('auth.users') IS NOT NULL
-       AND EXISTS (
-         SELECT 1
-         FROM pg_proc p
-         WHERE p.oid = to_regprocedure('public.has_active_background_tasks(uuid)')
-           AND p.prorettype = 'text'::regtype
-       )
-        THEN 'yes'
+      WHEN to_regclass('auth.users') IS NOT NULL THEN 'yes'
       ELSE 'no'
     END")"
   [[ "$applicable" == "yes" ]] || return 0
 
   run_psql "$database" <<'SQL'
 BEGIN;
+
+-- supacloud:sql-module:background-task-mirror-up:start
+DO $migration$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM pg_proc p
+    WHERE p.oid = to_regprocedure('public.has_active_background_tasks(uuid)')
+      AND p.prorettype <> 'text'::regtype
+  ) THEN
+    DROP TRIGGER IF EXISTS auth_users_delete_fence ON auth.users;
+    DROP FUNCTION IF EXISTS public.soft_delete_user_if_no_active_tasks();
+    DROP FUNCTION IF EXISTS public.hard_delete_soft_deleted_users();
+    DROP FUNCTION IF EXISTS public.has_active_background_tasks(UUID);
+  END IF;
+END
+$migration$;
+
+CREATE TABLE IF NOT EXISTS public.background_task_mirrors (
+  id               UUID PRIMARY KEY,
+  project_ref      TEXT NOT NULL,
+  task_type        TEXT NOT NULL DEFAULT 'edge_function',
+  function_slug    TEXT,
+  status           TEXT NOT NULL DEFAULT 'pending'
+                   CHECK (status IN ('pending','leased','running','retry_scheduled',
+                                     'succeeded','failed','dead_lettered','cancelled')),
+  invoker_user_id  UUID,
+  attempt          INTEGER NOT NULL DEFAULT 1,
+  max_attempts     INTEGER NOT NULL DEFAULT 3,
+  trace_id         TEXT,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE public.background_task_mirrors ENABLE ROW LEVEL SECURITY;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.background_task_mirrors
+  TO postgres, supabase_auth_admin, supabase_admin;
+
+CREATE INDEX IF NOT EXISTS idx_bg_task_mirrors_invoker_active
+  ON public.background_task_mirrors(invoker_user_id, status)
+  WHERE status IN ('pending','leased','running','retry_scheduled');
+
+CREATE INDEX IF NOT EXISTS idx_bg_task_mirrors_status
+  ON public.background_task_mirrors(status);
+
+CREATE OR REPLACE FUNCTION public.has_active_background_tasks(p_user_id UUID)
+RETURNS TEXT AS $$
+DECLARE
+  v_count INTEGER;
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'background_task_mirrors'
+  ) THEN
+    RAISE NOTICE 'has_active_background_tasks: background_task_mirrors table missing for user %', p_user_id;
+    RETURN 'unknown';
+  END IF;
+
+  SELECT COUNT(*) INTO v_count
+  FROM public.background_task_mirrors
+  WHERE invoker_user_id = p_user_id
+    AND status IN ('pending','leased','running','retry_scheduled');
+
+  IF v_count > 0 THEN
+    RETURN 'active';
+  END IF;
+
+  RETURN 'inactive';
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'has_active_background_tasks: exception for user % — %', p_user_id, SQLERRM;
+  RETURN 'unknown';
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER STABLE SET search_path = pg_catalog;
+
+REVOKE ALL ON FUNCTION public.has_active_background_tasks(UUID) FROM PUBLIC;
 
 CREATE OR REPLACE FUNCTION public.soft_delete_user_if_no_active_tasks()
 RETURNS TRIGGER AS $$
@@ -714,29 +789,58 @@ BEGIN
   v_task_state := public.has_active_background_tasks(OLD.id);
 
   IF v_task_state = 'inactive' THEN
-    -- 未发现活跃任务时，允许原 DELETE 继续，禁止先更新同一行。
     RETURN OLD;
   END IF;
 
-  -- 活跃或未知状态采取保守策略：软删除并取消原硬删除。
   UPDATE auth.users SET deleted_at = NOW() WHERE id = OLD.id;
 
   IF v_task_state = 'unknown' THEN
     RAISE NOTICE 'soft_delete_user_if_no_active_tasks: degraded/unknown for user %, blocking hard delete', OLD.id;
+    RETURN NULL;
   END IF;
 
   RETURN NULL;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
 
-COMMENT ON FUNCTION public.soft_delete_user_if_no_active_tasks()
-  IS 'supacloud:pigsty-4.4-auth-delete-fence:v1';
+REVOKE ALL ON FUNCTION public.soft_delete_user_if_no_active_tasks() FROM PUBLIC;
 
 DROP TRIGGER IF EXISTS auth_users_delete_fence ON auth.users;
 CREATE TRIGGER auth_users_delete_fence
   BEFORE DELETE ON auth.users
   FOR EACH ROW
   EXECUTE FUNCTION public.soft_delete_user_if_no_active_tasks();
+
+CREATE OR REPLACE FUNCTION public.hard_delete_soft_deleted_users()
+RETURNS INT AS $$
+DECLARE
+  deleted_count INT := 0;
+  user_record RECORD;
+  v_task_state TEXT;
+BEGIN
+  FOR user_record IN
+    SELECT id FROM auth.users
+    WHERE deleted_at IS NOT NULL
+      AND deleted_at < NOW() - INTERVAL '1 hour'
+  LOOP
+    v_task_state := public.has_active_background_tasks(user_record.id);
+    IF v_task_state = 'inactive' THEN
+      DELETE FROM auth.users WHERE id = user_record.id;
+      deleted_count := deleted_count + 1;
+    END IF;
+  END LOOP;
+  RETURN deleted_count;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
+
+REVOKE ALL ON FUNCTION public.hard_delete_soft_deleted_users() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.hard_delete_soft_deleted_users() TO service_role;
+
+NOTIFY pgrst, 'reload schema';
+-- supacloud:sql-module:background-task-mirror-up:end
+
+COMMENT ON FUNCTION public.soft_delete_user_if_no_active_tasks()
+  IS 'supacloud:pigsty-4.4-auth-delete-fence:v2';
 
 COMMIT;
 SQL
@@ -750,6 +854,12 @@ check_auth_delete_fence_compat() {
         p.proname,
         p.prorettype,
         p.prosecdef,
+        p.proconfig,
+        NOT EXISTS (
+          SELECT 1
+          FROM aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) acl
+          WHERE acl.grantee = 0 AND acl.privilege_type = 'EXECUTE'
+        ) AS public_execute_revoked,
         t.tgenabled,
         t.tgtype,
         position('/*' IN lower(p.prosrc)) > 0 AS has_block_comment,
@@ -765,28 +875,65 @@ check_auth_delete_fence_compat() {
         AND t.tgname = 'auth_users_delete_fence'
         AND NOT t.tgisinternal
     ), helper AS (
-      SELECT p.prorettype = 'text'::regtype AS returns_text
+      SELECT p.oid,
+        p.prorettype = 'text'::regtype AS returns_text,
+        p.prosecdef,
+        p.proconfig,
+        NOT EXISTS (
+          SELECT 1
+          FROM aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) acl
+          WHERE acl.grantee = 0 AND acl.privilege_type = 'EXECUTE'
+        ) AS public_execute_revoked
       FROM pg_proc p
       WHERE p.oid = to_regprocedure('public.has_active_background_tasks(uuid)')
+    ), cleanup AS (
+      SELECT p.oid,
+        p.prosecdef,
+        p.proconfig,
+        NOT EXISTS (
+          SELECT 1
+          FROM aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) acl
+          WHERE acl.grantee = 0 AND acl.privilege_type = 'EXECUTE'
+        ) AS public_execute_revoked,
+        EXISTS (
+          SELECT 1
+          FROM aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) acl
+          JOIN pg_roles role_grantee ON role_grantee.oid = acl.grantee
+          WHERE role_grantee.rolname = 'service_role'
+            AND acl.privilege_type = 'EXECUTE'
+        ) AS service_role_execute
+      FROM pg_proc p
+      WHERE p.oid = to_regprocedure('public.hard_delete_soft_deleted_users()')
     )
     SELECT CASE
-      WHEN to_regclass('auth.users') IS NULL
-        OR NOT COALESCE((SELECT returns_text FROM helper), false)
-        THEN 'not-applicable'
-      WHEN NOT EXISTS (SELECT 1 FROM target) THEN 'incompatible'
+      WHEN to_regclass('auth.users') IS NULL THEN 'not-applicable'
+      WHEN NOT EXISTS (SELECT 1 FROM target)
+        OR NOT EXISTS (SELECT 1 FROM helper)
+        OR NOT EXISTS (SELECT 1 FROM cleanup)
+        THEN 'incompatible'
       WHEN (SELECT proname FROM target) = 'soft_delete_user_if_no_active_tasks'
        AND (SELECT prorettype FROM target) = 'trigger'::regtype
        AND (SELECT prosecdef FROM target)
+       AND coalesce((SELECT proconfig FROM target), ARRAY[]::text[]) @> ARRAY['search_path=pg_catalog']
+       AND (SELECT public_execute_revoked FROM target)
        AND (SELECT t.tgenabled IN ('O', 'A') FROM target t)
        AND (SELECT t.tgtype = 11 FROM target t)
        AND NOT (SELECT has_block_comment FROM target)
-       AND obj_description((SELECT oid FROM target), 'pg_proc') = 'supacloud:pigsty-4.4-auth-delete-fence:v1'
+       AND obj_description((SELECT oid FROM target), 'pg_proc') = 'supacloud:pigsty-4.4-auth-delete-fence:v2'
        AND position('v_task_state := public.has_active_background_tasks(old.id);' IN (SELECT source FROM target)) > 0
        AND (SELECT source FROM target) ~ 'if v_task_state = ''inactive'' then return old; end if; update auth[.]users set deleted_at = now[(][)] where id = old[.]id;'
        AND position('update auth.users set deleted_at = now() where id = old.id;' IN (SELECT source FROM target))
          > position('v_task_state := public.has_active_background_tasks(old.id);' IN (SELECT source FROM target))
        AND position('return null;' IN (SELECT source FROM target))
          > position('update auth.users set deleted_at = now() where id = old.id;' IN (SELECT source FROM target))
+       AND (SELECT returns_text FROM helper)
+       AND (SELECT prosecdef FROM helper)
+       AND coalesce((SELECT proconfig FROM helper), ARRAY[]::text[]) @> ARRAY['search_path=pg_catalog']
+       AND (SELECT public_execute_revoked FROM helper)
+       AND (SELECT prosecdef FROM cleanup)
+       AND coalesce((SELECT proconfig FROM cleanup), ARRAY[]::text[]) @> ARRAY['search_path=pg_catalog']
+       AND (SELECT public_execute_revoked FROM cleanup)
+       AND (SELECT service_role_execute FROM cleanup)
         THEN 'compatible'
       ELSE 'incompatible'
     END"

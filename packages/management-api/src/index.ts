@@ -881,6 +881,23 @@ async function cleanupOrphanServices() {
   }
 }
 
+async function recoverDatabaseReplacementsBeforeServe(): Promise<void> {
+  const { branchService } = await import("./services/branch.service");
+  let lastResult = { checked: 0, recovered: 0, pending: 0 };
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    lastResult = await branchService.recoverInterruptedReplacements();
+    if (lastResult.pending === 0) break;
+    logger.warn("[Bootstrap] Database replacement recovery still pending", {
+      attempt,
+      ...lastResult,
+    });
+    if (attempt < 3) await Bun.sleep(attempt * 500);
+  }
+  if (lastResult.checked > 0) {
+    logger.info("[Bootstrap] Database replacement recovery sweep completed", lastResult);
+  }
+}
+
 /**
  * Core logic: Based on command line arguments, decide whether to execute a single task or start the API server.
  */
@@ -1072,6 +1089,8 @@ async function bootstrap() {
       });
       process.exit(1);
     }
+
+    await recoverDatabaseReplacementsBeforeServe();
 
     Bun.serve({
       port: config.port,
@@ -1275,6 +1294,10 @@ async function bootstrap() {
       await import("./workers/runtime-reconcile.worker");
     startRuntimeReconcileWorker();
 
+    const { startBranchReplacementRecoveryWorker } =
+      await import("./workers/branch-replacement-recovery.worker");
+    startBranchReplacementRecoveryWorker();
+
     const { scheduledFunctionWorker } = await import("./workers/scheduled-function.worker");
     scheduledFunctionWorker.start();
 
@@ -1350,6 +1373,9 @@ if (import.meta.main) {
       const { stopRuntimeReconcileWorker } =
         await import("./workers/runtime-reconcile.worker");
       stopRuntimeReconcileWorker();
+      const { stopBranchReplacementRecoveryWorker } =
+        await import("./workers/branch-replacement-recovery.worker");
+      stopBranchReplacementRecoveryWorker();
 
     const { scheduledFunctionWorker } =
       await import("./workers/scheduled-function.worker");

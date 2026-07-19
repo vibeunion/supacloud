@@ -65,7 +65,19 @@ supacloud-cli supabase migration_new --name add_accounts
 supacloud-cli supabase db_diff --schema public --name add_accounts
 supacloud-cli supabase push --ref abc123 --dir supabase/migrations --dry_run
 supacloud-cli frontend list --ref abc123
+supacloud-cli branch create --name feature-orders --data_mode schema_only
+supacloud-cli branch promotion_plan --branch_ref preview123
+supacloud-cli branch promote --branch_ref preview123 --plan_checksum <sha256>
 ```
+
+Branch promotion is migration-first. `branch promotion_plan` prints pending
+versions, names, statement counts, and checksums without echoing SQL into terminal
+logs; review the migration files or the Web Console SQL view before approval.
+`branch promote` requires the reviewed checksum, executes with the project-scoped
+database role, and does not automatically copy branch data.
+Use `--data_mode full_clone` only for an explicitly approved non-sensitive or
+masked debugging dataset. Whole-database replacement is an administrator-only
+break-glass API mode and is intentionally not exposed by this project CLI.
 
 ## Official Supabase CLI adapter
 

@@ -13,6 +13,7 @@ import { registerFrontendTools } from "./shared/tools/frontend-tools";
 import { registerUserProjectCliTools } from "./shared/tools/project-cli-tools";
 import { registerQueueTools } from "./shared/tools/queue-tools";
 import { registerGatewayTools } from "./shared/tools/gateway-tools";
+import { registerBranchTools } from "./shared/tools/branch-tools";
 import { registerSupabaseCliTools } from "./shared/tools/supabase-cli-tools";
 import { registerAiTools } from "./shared/tools/ai-tools";
 
@@ -194,6 +195,9 @@ EXAMPLES
   ${preferredCommand} supabase db_diff --schema public --name add_accounts
   ${preferredCommand} supabase push --ref abc123 --dir supabase/migrations --dry_run
   ${preferredCommand} supabase db_dump --db_url "postgresql://..." --file backups/schema.sql
+  ${preferredCommand} branch create --name feature-auth --data_mode schema_only
+  ${preferredCommand} branch promotion_plan --branch_ref preview123
+  ${preferredCommand} branch promote --branch_ref preview123 --plan_checksum <sha256>
   ${preferredCommand} ai show_skill
   ${preferredCommand} ai install_skill --dry_run
   ${preferredCommand} edge_functions deploy --ref abc123 --slug hello --path ./supabase/functions/hello
@@ -252,7 +256,7 @@ function createCliTools(): ToolMap {
                 ],
             }),
         };
-        for (const name of ["database", "auth", "storage", "edge_functions", "secrets", "frontend", "queue", "task_events", "diagnostics", "gateway"]) {
+        for (const name of ["database", "auth", "storage", "edge_functions", "secrets", "frontend", "queue", "task_events", "diagnostics", "gateway", "branch"]) {
             tools[name] = {
                 schema: { action: genericActionSchema },
                 callback: async () => ({
@@ -265,6 +269,13 @@ function createCliTools(): ToolMap {
                     ],
                 }),
             };
+        }
+        const branchContextCallback = tools.branch.callback;
+        const branchHelpTool = captureTools((server) => registerBranchTools(server as any, {} as any, {
+            readOnly: true,
+        })).branch;
+        if (branchHelpTool) {
+            tools.branch = { schema: branchHelpTool.schema, callback: branchContextCallback };
         }
     };
 
@@ -323,6 +334,10 @@ function createCliTools(): ToolMap {
     assign(captureTools((server) => registerFrontendTools(server as any, http)));
     assign(captureTools((server) => registerGatewayTools(server as any, http, {
         projectRef: context.projectRef || undefined,
+    })));
+    assign(captureTools((server) => registerBranchTools(server as any, http, {
+        projectRef: context.projectRef || undefined,
+        readOnly: context.readOnly,
     })));
     assign(captureTools((server) => registerQueueTools(server as any, http, {
         projectRef: context.projectRef || undefined,

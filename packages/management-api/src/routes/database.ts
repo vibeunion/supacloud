@@ -1,26 +1,104 @@
 import { Elysia, t } from "elysia";
+import type { TransactionSQL } from "bun";
 import { projectService } from "../services";
-import { db, getProjectDb, getProjectRoleDb, resolveDbName, sql as metaSql, type SqlExecutionMode } from "../db";
+import { db, getProjectDb, getProjectRoleDb, removeProjectDbCache, resolveDbName, sql as metaSql, type SqlExecutionMode } from "../db";
 import { requireAdminAuth, requireProjectOrAdminAuth } from "../middleware/auth";
+import {
+  calculateMigrationChecksum,
+  detectUnsupportedMigrationOperations,
+} from "../services/migration-promotion";
+import {
+  ensureMigrationLedgerMetadata,
+  MigrationLedgerDivergenceError,
+  readMigrationLedger,
+  reconcileMigrationLedgerVersions,
+} from "../services/migration-ledger";
+import {
+  ProjectMigrationLockError,
+  withProjectMigrationLocks,
+} from "../services/migration-lock";
+import { prepareProjectMigrationRole } from "../services/project-migration-role";
+import {
+  issueMigrationLedgerLease,
+  releaseMigrationLedgerLease,
+} from "../services/migration-ledger-lease";
+import {
+  BranchReplacementJournalActiveError,
+  branchReplacementJournal,
+} from "../services/branch-replacement-journal";
+import { logger } from "../utils/logger";
 
 export type MigrationBody =
   | { query: string; version?: number | string }
   | { name: string; sql?: string; statements?: string[]; version?: number | string };
 
+type ProjectSql = ReturnType<typeof getProjectDb>;
+type ReservedProjectSql = Awaited<ReturnType<ProjectSql["reserve"]>>;
+type ProjectTransaction = TransactionSQL;
+
+class MigrationRouteError extends Error {
+  constructor(
+    readonly httpStatus: 400 | 409 | 423,
+    readonly code: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "MigrationRouteError";
+  }
+}
+
 export function resolveMigrationStatements(body: MigrationBody): string[] {
   if ("query" in body && typeof body.query === "string") {
-    return [body.query];
+    return body.query.trim() ? [body.query.trim()] : [];
   }
 
   if ("statements" in body && Array.isArray(body.statements) && body.statements.length > 0) {
-    return body.statements.filter((statement: unknown): statement is string => typeof statement === "string" && statement.trim().length > 0);
+    return body.statements
+      .filter((statement: unknown): statement is string => typeof statement === "string")
+      .map((statement) => statement.trim())
+      .filter(Boolean);
   }
 
   if ("sql" in body && typeof body.sql === "string" && body.sql.trim().length > 0) {
-    return [body.sql];
+    return [body.sql.trim()];
   }
 
   return [];
+}
+
+const MAX_MIGRATION_VERSION = 9_223_372_036_854_775_807n;
+
+export function normalizeMigrationVersion(rawVersion: unknown, now = Date.now()): string {
+  if (rawVersion === undefined || rawVersion === null || rawVersion === "") {
+    return String(Math.floor(now / 1000));
+  }
+  const normalized = typeof rawVersion === "bigint"
+    ? rawVersion.toString()
+    : typeof rawVersion === "number" && Number.isSafeInteger(rawVersion)
+      ? String(rawVersion)
+      : typeof rawVersion === "string"
+        ? rawVersion.trim()
+        : "";
+  if (!/^\d{1,19}$/.test(normalized)) {
+    throw new MigrationRouteError(400, "invalid_migration_version", "Migration version must be a positive PostgreSQL bigint value");
+  }
+  const version = BigInt(normalized);
+  if (version < 1n || version > MAX_MIGRATION_VERSION) {
+    throw new MigrationRouteError(400, "invalid_migration_version", "Migration version is outside the supported PostgreSQL bigint range");
+  }
+  return version.toString();
+}
+
+function normalizeMigrationName(rawName: unknown, fallback: string): string {
+  if (rawName === undefined || rawName === null) return fallback;
+  if (typeof rawName !== "string" || !rawName.trim()) {
+    throw new MigrationRouteError(400, "invalid_migration_name", "Migration name must be a non-empty string");
+  }
+  const name = rawName.trim();
+  if (name.length > 255) {
+    throw new MigrationRouteError(400, "invalid_migration_name", "Migration name must be at most 255 characters");
+  }
+  return name;
 }
 
 export function sqlRouteResponse(result: Awaited<ReturnType<typeof db.executeQuery>>) {
@@ -131,37 +209,12 @@ export function buildDropMaterializedViewSql(input: {
 }
 
 export async function ensureMigrationTables(dbName: string, projectDb: ReturnType<typeof getProjectDb>): Promise<void> {
-  if (ensuredMigrationTables.has(dbName)) return;
-
-  const existing = await projectDb<{ exists: boolean }[]>`
-    SELECT EXISTS (
-      SELECT 1
-      FROM information_schema.tables
-      WHERE table_schema = 'supabase_migrations'
-        AND table_name = 'schema_migrations'
-    ) AS exists
-  `;
-
-  if (!existing[0]?.exists) {
-    await projectDb.unsafe(`CREATE SCHEMA IF NOT EXISTS supabase_migrations`);
-    await projectDb`
-      CREATE TABLE IF NOT EXISTS supabase_migrations.schema_migrations (
-        version BIGINT PRIMARY KEY,
-        statements TEXT[],
-        name TEXT
-      )
-    `;
+  if (!ensuredMigrationTables.has(dbName)) {
+    await ensureMigrationLedgerMetadata(projectDb);
+    ensuredMigrationTables.add(dbName);
+    return;
   }
-
-  await projectDb`
-    CREATE TABLE IF NOT EXISTS public.schema_migrations (
-      version VARCHAR(255) PRIMARY KEY,
-      statements TEXT[],
-      name TEXT
-    )
-  `;
-
-  ensuredMigrationTables.add(dbName);
+  await reconcileMigrationLedgerVersions(projectDb);
 }
 
 export async function ensureTasksRealtimePublication(projectDb: ReturnType<typeof getProjectDb>): Promise<void> {
@@ -171,6 +224,165 @@ export async function ensureTasksRealtimePublication(projectDb: ReturnType<typeo
     // Older tenants may not have the helper yet, and some deployments run without
     // logical Realtime enabled. Migrations must remain authoritative even then.
   }
+}
+
+interface ProjectMigrationCredentials {
+  db_name: string;
+  db_user: string;
+  db_password: string;
+}
+
+interface RecordedMigrationInput {
+  projectRef: string;
+  credentials: ProjectMigrationCredentials;
+  version: string;
+  name: string;
+  statements: readonly string[];
+  conflictOnName: boolean;
+}
+
+function existingMigrationChecksum(
+  row: Record<string, unknown>,
+  fallback: { version: string; name: string },
+): string {
+  if (typeof row.checksum === "string") return row.checksum;
+  return calculateMigrationChecksum({
+    version: String(row.version ?? fallback.version),
+    name: typeof row.name === "string" ? row.name : fallback.name,
+    statements: Array.isArray(row.statements)
+      ? row.statements.filter((statement: unknown): statement is string => typeof statement === "string")
+      : [],
+  });
+}
+
+async function resetMigrationSession(connection: ReservedProjectSql, dbName: string): Promise<boolean> {
+  try {
+    await connection.unsafe("DISCARD ALL");
+    return true;
+  } catch (error: unknown) {
+    logger.warn(`[database] failed to reset migration session for ${dbName}`, {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
+}
+
+async function findExistingMigration(
+  tx: ProjectTransaction,
+  input: RecordedMigrationInput,
+): Promise<Record<string, unknown>[]> {
+  if (input.conflictOnName) {
+    return tx<Record<string, unknown>[]>`
+      SELECT version, statements, name, checksum
+      FROM supabase_migrations.schema_migrations
+      WHERE version = ${input.version} OR name = ${input.name}
+    `;
+  }
+  return tx<Record<string, unknown>[]>`
+    SELECT version, statements, name, checksum
+    FROM supabase_migrations.schema_migrations
+    WHERE version = ${input.version}
+  `;
+}
+
+async function insertMigrationLedger(
+  tx: ProjectTransaction,
+  input: RecordedMigrationInput,
+  checksum: string,
+  leaseToken: string,
+): Promise<void> {
+  const statementArray = tx.array([...input.statements], "TEXT");
+  await tx`
+    SELECT supabase_migrations.record_schema_migration(
+      ${input.version},
+      ${statementArray},
+      ${input.name},
+      ${checksum},
+      ${leaseToken}
+    )
+  `;
+}
+
+async function executeMigrationTransaction(
+  connection: ReservedProjectSql,
+  adminDb: ProjectSql,
+  input: RecordedMigrationInput,
+  checksum: string,
+): Promise<boolean> {
+  const leaseHolder: { current?: Awaited<ReturnType<typeof issueMigrationLedgerLease>> } = {};
+  try {
+    return await connection.begin(async (tx) => {
+      const existing = await findExistingMigration(tx, input);
+      if (existing.length > 0) {
+        if (existingMigrationChecksum(existing[0]!, input) !== checksum) {
+          throw new MigrationRouteError(
+            409,
+            "migration_checksum_conflict",
+            `Migration ${input.name} conflicts with an existing version, name, or checksum`,
+          );
+        }
+        return true;
+      }
+      for (const statement of input.statements) await tx.unsafe(statement);
+      const issuedLease = await issueMigrationLedgerLease(adminDb, input.version, checksum);
+      leaseHolder.current = issuedLease;
+      await insertMigrationLedger(tx, input, checksum, issuedLease.token);
+      return false;
+    });
+  } finally {
+    const lease = leaseHolder.current;
+    if (lease) {
+      try {
+        await releaseMigrationLedgerLease(adminDb, lease.tokenHash);
+      } catch (error: unknown) {
+        logger.warn(`[database] failed to clean migration ledger lease for ${input.projectRef}`, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  }
+}
+
+async function withMigrationRoleSession<T>(
+  input: RecordedMigrationInput,
+  operation: (connection: ReservedProjectSql, adminDb: ProjectSql) => Promise<T>,
+): Promise<T> {
+  const adminDb = getProjectDb(input.credentials.db_name);
+  await ensureMigrationTables(input.credentials.db_name, adminDb);
+  await prepareProjectMigrationRole(adminDb, input.credentials.db_name, input.credentials.db_user);
+  const roleDb = getProjectRoleDb(input.credentials.db_name, input.credentials.db_user, input.credentials.db_password);
+  const connection = await roleDb.reserve();
+  try {
+    return await operation(connection, adminDb);
+  } finally {
+    const reset = await resetMigrationSession(connection, input.credentials.db_name);
+    connection.release();
+    if (!reset) await removeProjectDbCache(input.credentials.db_name);
+  }
+}
+
+async function applyRecordedMigration(input: RecordedMigrationInput): Promise<{
+  checksum: string;
+  alreadyApplied: boolean;
+}> {
+  const unsupported = detectUnsupportedMigrationOperations(input.statements);
+  if (unsupported.length > 0) {
+    throw new MigrationRouteError(
+      400,
+      "unsupported_migration_sql",
+      `Migration contains SQL outside the project-scoped path: ${unsupported.join(", ")}`,
+    );
+  }
+  const checksum = calculateMigrationChecksum(input);
+
+  return withProjectMigrationLocks({ projectRefs: [input.projectRef] }, async () => {
+    await branchReplacementJournal.assertInactive([input.projectRef]);
+    return withMigrationRoleSession(input, async (connection, adminDb) => {
+      const alreadyApplied = await executeMigrationTransaction(connection, adminDb, input, checksum);
+      await ensureTasksRealtimePublication(adminDb);
+      return { checksum, alreadyApplied };
+    });
+  });
 }
 
 function projectAuthResponse(authError: { status: number; body: { error: string } }, set: { status?: number | string }) {
@@ -635,12 +847,28 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                     return { message: "Project database credentials not found", code: "404", status: 404 };
                 }
                 const useRoleConnection = mode !== "admin";
-                const result = await db.executeQuery(credentials.db_name, sqlQuery, {
+                const execute = async () => {
+                  if (mode === "migration") {
+                    await branchReplacementJournal.assertInactive([params.ref]);
+                  }
+                  return db.executeQuery(credentials.db_name, sqlQuery, {
                     mode,
                     ...(useRoleConnection ? { username: credentials.db_user, password: credentials.db_password } : {}),
-                });
+                  });
+                };
+                const result = mode === "migration"
+                  ? await withProjectMigrationLocks({ projectRefs: [params.ref] }, execute)
+                  : await execute();
                 return sqlRouteResponse(result);
             } catch (error: unknown) {
+                if (error instanceof ProjectMigrationLockError) {
+                    set.status = error.httpStatus;
+                    return { message: error.message, code: error.code, status: error.httpStatus };
+                }
+                if (error instanceof BranchReplacementJournalActiveError) {
+                    set.status = error.httpStatus;
+                    return { message: error.message, code: error.code, status: error.httpStatus };
+                }
                 set.status = 400;
                 const pgErr = error as Record<string, unknown>;
                 return {
@@ -678,82 +906,52 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                 return { message: "Project not found", code: "404", status: 404 };
             }
 
-            const dbName = await resolveDbName(params.ref);
-            const projectDb = getProjectDb(dbName);
-
             try {
-                await ensureMigrationTables(dbName, projectDb);
-
-                const isCliFormat = 'query' in body && typeof (body as Record<string, unknown>).query === 'string';
-                const isStructuredFormat = ('name' in body && 'sql' in body) || ('name' in body && 'statements' in body);
-
-                if (isCliFormat) {
-                    const query = (body as Record<string, unknown>).query as string;
-                    const version = (body as Record<string, unknown>).version
-                        ? Number((body as Record<string, unknown>).version)
-                        : Math.floor(Date.now() / 1000);
-                    const statements = resolveMigrationStatements(body as MigrationBody);
-
-                    const txnResult = await projectDb.begin(async (tx) => {
-                        const existing = await tx`
-                            SELECT version FROM supabase_migrations.schema_migrations WHERE version = ${version}
-                        `;
-                        if (existing.length) {
-                            return { conflict: true as const };
-                        }
-
-                        await tx.unsafe(query);
-                        await tx`INSERT INTO supabase_migrations.schema_migrations (version, statements, name) VALUES (${version}, ARRAY[${statements[0]}]::text[], 'cli_push')`;
-                        await tx`INSERT INTO public.schema_migrations (version, statements, name) VALUES (${String(version)}, ARRAY[${statements[0]}]::text[], 'cli_push')`.catch(() => {});
-                        return { conflict: false as const };
-                    });
-
-                    if (txnResult.conflict) {
-                        set.status = 409;
-                        return { message: "Migration already applied", code: "409", version };
-                    }
-
-                    await ensureTasksRealtimePublication(projectDb);
-
-                    return { version, statements };
+                const rawBody = body as Record<string, unknown>;
+                const isCliFormat = typeof rawBody.query === "string";
+                const isStructuredFormat = typeof rawBody.name === "string"
+                    && (typeof rawBody.sql === "string" || Array.isArray(rawBody.statements));
+                if (!isCliFormat && !isStructuredFormat) {
+                    throw new MigrationRouteError(400, "invalid_migration_body", "Body must contain {query} or {name, sql/statements}");
                 }
 
-                if (isStructuredFormat) {
-                    const { name } = body as { name: string; version?: number | string; statements?: string[]; sql?: string };
-                    const statements = resolveMigrationStatements(body as MigrationBody);
-                    const sql = statements.join(';');
-                    const version = (body as Record<string, unknown>).version
-                        ? Number((body as Record<string, unknown>).version)
-                        : Math.floor(Date.now() / 1000);
-
-                    const txnResult = await projectDb.begin(async (tx) => {
-                        const existingMigration = await tx`
-                            SELECT version FROM supabase_migrations.schema_migrations WHERE name = ${name}
-                        `;
-
-                        if (existingMigration.length) {
-                            return { conflict: true as const };
-                        }
-
-                        await tx.unsafe(sql);
-                        await tx`INSERT INTO supabase_migrations.schema_migrations (version, statements, name) VALUES (${version}, ARRAY[${sql}]::text[], ${name})`;
-                        await tx`INSERT INTO public.schema_migrations (version, statements, name) VALUES (${String(version)}, ARRAY[${sql}]::text[], ${name})`.catch(() => {});
-                        return { conflict: false as const };
-                    });
-
-                    if (txnResult.conflict) {
-                        set.status = 409;
-                        return { message: "Migration already applied", code: "409", name };
-                    }
-
-                    await ensureTasksRealtimePublication(projectDb);
-
-                    return { version, name };
+                const statements = resolveMigrationStatements(body as MigrationBody);
+                if (statements.length === 0) {
+                    throw new MigrationRouteError(400, "empty_migration", "Migration contains no executable statements");
                 }
-
-                set.status = 400;
-                return { message: "Body must contain {query} or {name, sql}", code: "400", status: 400 };
+                const version = normalizeMigrationVersion(rawBody.version);
+                const name = isCliFormat ? "cli_push" : normalizeMigrationName(rawBody.name, "cli_push");
+                const credentials = await getProjectDatabaseCredentials(params.ref);
+                if (!credentials) {
+                    set.status = 404;
+                    return { message: "Project database credentials not found", code: "404", status: 404 };
+                }
+                const result = await applyRecordedMigration({
+                    projectRef: params.ref,
+                    credentials,
+                    version,
+                    name,
+                    statements,
+                    conflictOnName: isStructuredFormat,
+                });
+                if (result.alreadyApplied) {
+                    set.status = 409;
+                    return { message: "Migration already applied", code: "409", version, name, checksum: result.checksum };
+                }
+                return { version, ...(isStructuredFormat ? { name } : {}), statements, checksum: result.checksum };
             } catch (error: unknown) {
+                if (error instanceof MigrationRouteError) {
+                    set.status = error.httpStatus;
+                    return { message: error.message, code: error.code, status: error.httpStatus };
+                }
+                if (error instanceof ProjectMigrationLockError) {
+                    set.status = error.httpStatus;
+                    return { message: error.message, code: error.code, status: error.httpStatus };
+                }
+                if (error instanceof BranchReplacementJournalActiveError) {
+                    set.status = error.httpStatus;
+                    return { message: error.message, code: error.code, status: error.httpStatus };
+                }
                 set.status = 500;
                 const detail = error instanceof Error ? error.message : String(error);
                 return {
@@ -783,28 +981,29 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
             }
 
             try {
-                const projectDb = await getProjectSql(params.ref);
-                if (!projectDb) {
-                    set.status = 404;
-                    return { message: "Project database credentials not found", code: "404", status: 404 };
-                }
-                let rows: Array<Record<string, unknown>> = [];
-                try {
-                    rows = await projectDb`
-                        SELECT version, statements, name FROM supabase_migrations.schema_migrations ORDER BY version ASC
-                    ` as Array<Record<string, unknown>>;
-                } catch {
-                    rows = await projectDb`
-                        SELECT version, statements, name FROM public.schema_migrations ORDER BY version ASC
-                    ` as Array<Record<string, unknown>>;
-                }
+                const dbName = await resolveDbName(params.ref);
+                const projectDb = getProjectDb(dbName);
+                await ensureMigrationTables(dbName, projectDb);
+                const rows = await readMigrationLedger(projectDb);
                 return rows.map((row) => ({
-                    version: String(row.version),
-                    statements: row.statements || [],
-                    name: row.name || null,
+                    version: row.version,
+                    statements: row.statements,
+                    statement_count: row.statements.length,
+                    name: row.name,
+                    checksum: row.checksum,
+                    applied_at: row.applied_at,
                 }));
             } catch (error: unknown) {
-                return [];
+                if (error instanceof MigrationLedgerDivergenceError) {
+                    set.status = 409;
+                    return { message: error.message, code: error.code, status: 409 };
+                }
+                set.status = 503;
+                return {
+                    message: "Migration ledger is temporarily unavailable; retry without assuming it is empty",
+                    code: "migration_ledger_unavailable",
+                    status: 503,
+                };
             }
         },
         {

@@ -343,6 +343,7 @@ GRANT ALL ON ALL TABLES IN SCHEMA auth TO supabase_auth_admin;
 GRANT ALL ON ALL SEQUENCES IN SCHEMA auth TO supabase_auth_admin;
 GRANT SELECT ON ALL TABLES IN SCHEMA auth TO service_role;
 
+-- supacloud:sql-module:auth-jwt-helpers:start
 CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid AS $$
 BEGIN
   RETURN COALESCE(
@@ -354,6 +355,18 @@ EXCEPTION
     RETURN NULL;
 END
 $$ LANGUAGE plpgsql STABLE;
+
+CREATE OR REPLACE FUNCTION auth.jwt() RETURNS jsonb AS $$
+  SELECT nullif(current_setting('request.jwt.claims', true), '')::jsonb;
+$$ LANGUAGE SQL STABLE;
+
+CREATE OR REPLACE FUNCTION auth.role() RETURNS text AS $$
+  SELECT COALESCE(
+    nullif(current_setting('request.jwt.claim.role', true), ''),
+    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'role')
+  )::text;
+$$ LANGUAGE SQL STABLE;
+-- supacloud:sql-module:auth-jwt-helpers:end
 
 -- 3. Storage Schema
 CREATE SCHEMA IF NOT EXISTS storage AUTHORIZATION supabase_storage_admin;
@@ -390,29 +403,31 @@ CREATE INDEX IF NOT EXISTS objects_bucket_id_idx ON storage.objects (bucket_id);
 CREATE UNIQUE INDEX IF NOT EXISTS objects_bucket_name_idx ON storage.objects (bucket_id, name);
 CREATE INDEX IF NOT EXISTS btree_path_tokens ON storage.objects USING GIN (path_tokens);
 
-CREATE OR REPLACE FUNCTION storage.foldername(name text)
-RETURNS text[]
-LANGUAGE plpgsql
-AS $$
-DECLARE
-    _parts text[];
-BEGIN
-    _parts := string_to_array(name, '/');
-    RETURN _parts[1:array_length(_parts,1)-1];
-END
-$$;
+-- supacloud:sql-module:storage-path-helpers:start
+CREATE OR REPLACE FUNCTION storage.foldername(name text) RETURNS text[] AS $$
+  WITH parts AS (
+    SELECT string_to_array(name, '/') AS arr
+  )
+  SELECT arr[1:array_length(arr, 1)-1] FROM parts;
+$$ LANGUAGE SQL STABLE;
 
-CREATE OR REPLACE FUNCTION storage.filename(name text)
-RETURNS text
-LANGUAGE plpgsql
-AS $$
-DECLARE
-    _parts text[];
-BEGIN
-    _parts := string_to_array(name, '/');
-    RETURN _parts[array_length(_parts,1)];
-END
-$$;
+CREATE OR REPLACE FUNCTION storage.filename(name text) RETURNS text AS $$
+  WITH parts AS (
+    SELECT string_to_array(name, '/') AS arr
+  )
+  SELECT arr[array_length(arr, 1)] FROM parts;
+$$ LANGUAGE SQL STABLE;
+
+CREATE OR REPLACE FUNCTION storage.extension(name text) RETURNS text AS $$
+  WITH parts AS (
+    SELECT string_to_array(name, '/') AS arr
+  ),
+  filename AS (
+    SELECT arr[array_length(arr, 1)] AS f FROM parts
+  )
+  SELECT substring(f FROM '\.([^\.]*)$') FROM filename;
+$$ LANGUAGE SQL STABLE;
+-- supacloud:sql-module:storage-path-helpers:end
 
 CREATE TABLE IF NOT EXISTS storage.s3_multipart_uploads (
     id TEXT PRIMARY KEY,
@@ -4004,54 +4019,9 @@ GRANT ALL PRIVILEGES ON ALL ROUTINES IN SCHEMA public TO service_role;
 -- Tenants must grant anon/authenticated/service_role privileges explicitly in migrations.
 
 -- 6. Supabase SQL Helpers
-CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid AS $$
-BEGIN
-  RETURN COALESCE(
-    nullif(current_setting('request.jwt.claim.sub', true), ''),
-    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')
-  )::uuid;
-EXCEPTION
-  WHEN invalid_text_representation THEN
-    RETURN NULL;
-END
-$$ LANGUAGE plpgsql STABLE;
-
-CREATE OR REPLACE FUNCTION auth.jwt() RETURNS jsonb AS $$
-  SELECT nullif(current_setting('request.jwt.claims', true), '')::jsonb;
-$$ LANGUAGE SQL STABLE;
-
-CREATE OR REPLACE FUNCTION auth.role() RETURNS text AS $$
-  SELECT COALESCE(
-    nullif(current_setting('request.jwt.claim.role', true), ''),
-    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'role')
-  )::text;
-$$ LANGUAGE SQL STABLE;
-
-CREATE OR REPLACE FUNCTION storage.foldername(name text) RETURNS text[] AS $$
-  WITH parts AS (
-    SELECT string_to_array(name, '/') AS arr
-  )
-  SELECT arr[1:array_length(arr, 1)-1] FROM parts;
-$$ LANGUAGE SQL STABLE;
-
-CREATE OR REPLACE FUNCTION storage.filename(name text) RETURNS text AS $$
-  WITH parts AS (
-    SELECT string_to_array(name, '/') AS arr
-  )
-  SELECT arr[array_length(arr, 1)] FROM parts;
-$$ LANGUAGE SQL STABLE;
-
-CREATE OR REPLACE FUNCTION storage.extension(name text) RETURNS text AS $$
-  WITH parts AS (
-    SELECT string_to_array(name, '/') AS arr
-  ),
-  filename AS (
-    SELECT arr[array_length(arr, 1)] AS f FROM parts
-  )
-  SELECT substring(f FROM '\.([^\.]*)$') FROM filename;
-$$ LANGUAGE SQL STABLE;
 
 -- PostgREST pre-request function: sets JWT claims for RLS context
+-- supacloud:sql-module:postgrest-request-context:start
 CREATE OR REPLACE FUNCTION public.set_request_context() RETURNS void AS $$
 DECLARE
   claims jsonb;
@@ -4076,11 +4046,12 @@ BEGIN
     'anon'
   );
 
-  -- PostgREST and RLS rely on request.jwt.claim.role; switching the SQL role
-  -- here breaks SECURITY DEFINER functions on newer Postgres versions.
   PERFORM set_config('request.jwt.claim.role', role_claim, true);
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
+
+GRANT EXECUTE ON FUNCTION public.set_request_context() TO anon, authenticated, service_role;
+-- supacloud:sql-module:postgrest-request-context:end
 
 -- 7. GraphQL Schema
 CREATE SCHEMA IF NOT EXISTS graphql_public;
@@ -4134,6 +4105,7 @@ END;
 $graphql_fallback$;
 
 -- 7b. Supabase Queues compatibility via the official PGMQ extension.
+-- supacloud:sql-module:pgmq-public:start
 CREATE EXTENSION IF NOT EXISTS pgmq;
 CREATE SCHEMA IF NOT EXISTS pgmq_public;
 GRANT USAGE ON SCHEMA pgmq_public TO anon, authenticated, service_role;
@@ -4187,6 +4159,7 @@ SET search_path = pgmq, public
 AS $$ SELECT pgmq.delete(queue_name, message_id); $$;
 
 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pgmq_public TO anon, authenticated, service_role;
+-- supacloud:sql-module:pgmq-public:end
 
 -- 8. Functions Schema (Webhooks)
 CREATE SCHEMA IF NOT EXISTS supabase_functions;

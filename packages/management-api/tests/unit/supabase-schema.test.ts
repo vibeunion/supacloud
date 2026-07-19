@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { SQL_MODULES } from "../../src/db/sql-modules";
 import { ALTER_TENANT_SQL } from "../../src/services/tenant-runtime-migration";
 
 function readRepoFile(relativePath: string): string {
@@ -21,23 +22,18 @@ describe("supabase bootstrap schema", () => {
   });
 
   test("does not switch SQL role inside set_request_context", () => {
-    for (const filePath of [
-      "src/db/schemas/supabase.sql",
-      "src/services/tenant-runtime-migration.ts",
-      "src/services/tenant-runtime.service.ts",
-      "src/scripts/migrate-tenant-schema.ts",
-    ]) {
-      const schema = readRepoFile(filePath);
+    const functionSources = [
+      SQL_MODULES["postgrest-request-context"],
+      ALTER_TENANT_SQL,
+      readRepoFile("src/db/schemas/supabase.sql"),
+      readRepoFile("src/services/tenant-runtime.service.ts"),
+    ];
+    for (const schema of functionSources) {
       const start = schema.indexOf(
         "CREATE OR REPLACE FUNCTION public.set_request_context()",
       );
-      const end = [
-        "$$ LANGUAGE plpgsql SECURITY DEFINER;",
-        "$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;",
-      ]
-        .map((marker) => schema.indexOf(marker, start))
-        .filter((index) => index >= 0)
-        .sort((a, b) => a - b)[0] ?? -1;
+      const securityClause = "$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;";
+      const end = schema.indexOf(securityClause, start);
 
       expect(start).toBeGreaterThanOrEqual(0);
       expect(end).toBeGreaterThan(start);
@@ -54,16 +50,23 @@ describe("supabase bootstrap schema", () => {
       );
       expect(fnBody).not.toContain("SET LOCAL ROLE");
       expect(fnBody).not.toContain("LANGUAGE plpgsql STABLE SECURITY DEFINER");
+      expect(schema.slice(start, end + securityClause.length)).toContain(securityClause);
+    }
+
+    for (const filePath of [
+      "src/services/tenant-runtime-migration.ts",
+      "src/scripts/migrate-tenant-schema.ts",
+    ]) {
+      expect(readRepoFile(filePath)).toContain('${SQL_MODULES["postgrest-request-context"]}');
     }
   });
 
   test("auth helpers preserve claims-only user identity for modern PostgREST", () => {
-    for (const filePath of [
-      "src/db/schemas/supabase.sql",
-      "src/services/tenant-runtime-migration.ts",
-      "src/scripts/migrate-tenant-schema.ts",
+    for (const schema of [
+      SQL_MODULES["auth-jwt-helpers"],
+      ALTER_TENANT_SQL,
+      readRepoFile("src/db/schemas/supabase.sql"),
     ]) {
-      const schema = readRepoFile(filePath);
       const helperStart = schema.lastIndexOf("CREATE OR REPLACE FUNCTION auth.uid()");
       const helperEnd = schema.indexOf("$$ LANGUAGE plpgsql STABLE;", helperStart);
       const helperBody = schema.slice(helperStart, helperEnd);
@@ -75,6 +78,13 @@ describe("supabase bootstrap schema", () => {
       expect(helperBody).toContain("->> 'sub'");
       expect(schema).toContain("CREATE OR REPLACE FUNCTION auth.jwt()");
       expect(schema).toContain("CREATE OR REPLACE FUNCTION auth.role()");
+    }
+
+    for (const filePath of [
+      "src/services/tenant-runtime-migration.ts",
+      "src/scripts/migrate-tenant-schema.ts",
+    ]) {
+      expect(readRepoFile(filePath)).toContain('${SQL_MODULES["auth-jwt-helpers"]}');
     }
   });
 
@@ -94,6 +104,23 @@ describe("supabase bootstrap schema", () => {
       expect(userIdAlter).toBeGreaterThanOrEqual(0);
       expect(userIdIndex).toBeGreaterThanOrEqual(0);
       expect(userIdAlter).toBeLessThan(userIdIndex);
+    }
+  });
+
+  test("tenant migration preserves complete legacy migration ledger metadata", () => {
+    const runtimeMigration = readFileSync(
+      new URL("../../src/services/tenant-runtime-migration.ts", import.meta.url),
+      "utf8",
+    );
+    const scriptMigration = readFileSync(
+      new URL("../../src/scripts/migrate-tenant-schema.ts", import.meta.url),
+      "utf8",
+    );
+
+    for (const source of [runtimeMigration, scriptMigration]) {
+      expect(source).toContain("SELECT version::text, statements, name, checksum, inserted_at");
+      expect(source).toContain("canonical.checksum IS NULL");
+      expect(source).not.toContain("SELECT version, version FROM public.schema_migrations");
     }
   });
 
@@ -123,16 +150,18 @@ describe("supabase bootstrap schema", () => {
   });
 
   test("auth user delete fence mutates the row only when hard deletion is blocked", () => {
-    for (const filePath of [
-      "src/services/tenant-runtime-migration.ts",
-      "src/scripts/migrate-tenant-schema.ts",
-      "../../scripts/004_background_task_mirror_migration.sql",
+    for (const source of [
+      SQL_MODULES["background-task-mirror-up"],
+      ALTER_TENANT_SQL,
+      readRepoFile("../../scripts/004_background_task_mirror_migration.sql"),
     ]) {
-      const source = readRepoFile(filePath);
       const start = source.indexOf(
         "CREATE OR REPLACE FUNCTION public.soft_delete_user_if_no_active_tasks()",
       );
-      const end = source.indexOf("$$ LANGUAGE plpgsql SECURITY DEFINER;", start);
+      const end = source.indexOf(
+        "$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;",
+        start,
+      );
       const functionBody = source.slice(start, end);
       const taskState = functionBody.indexOf(
         "v_task_state := public.has_active_background_tasks(OLD.id);",
@@ -155,19 +184,53 @@ describe("supabase bootstrap schema", () => {
       expect(functionBody).toContain("RETURN NULL;");
     }
 
-    const migration = readRepoFile("../../scripts/004_background_task_mirror_migration.sql");
-    const rollbackStart = migration.lastIndexOf(
+    for (const filePath of [
+      "src/services/tenant-runtime-migration.ts",
+      "src/scripts/migrate-tenant-schema.ts",
+    ]) {
+      expect(readRepoFile(filePath)).toContain('${SQL_MODULES["background-task-mirror-up"]}');
+    }
+
+    const rollback = SQL_MODULES["background-task-mirror-down"];
+    const rollbackStart = rollback.lastIndexOf(
       "CREATE OR REPLACE FUNCTION public.soft_delete_user_if_no_active_tasks()",
     );
-    const rollbackEnd = migration.indexOf(
-      "$$ LANGUAGE plpgsql SECURITY DEFINER;",
+    const rollbackEnd = rollback.indexOf(
+      "$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;",
       rollbackStart,
     );
-    const rollbackBody = migration.slice(rollbackStart, rollbackEnd);
+    const rollbackBody = rollback.slice(rollbackStart, rollbackEnd);
     expect(rollbackBody.indexOf("IF NOT public.has_active_background_tasks(OLD.id) THEN"))
       .toBeGreaterThanOrEqual(0);
     expect(rollbackBody.indexOf("UPDATE auth.users SET deleted_at = NOW() WHERE id = OLD.id;"))
       .toBeGreaterThan(rollbackBody.indexOf("IF NOT public.has_active_background_tasks(OLD.id) THEN"));
+
+    const pigstyUpgrade = readRepoFile("../../scripts/upgrade_pigsty_4_4_compat.sh");
+    expect(pigstyUpgrade).toContain(
+      "$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;",
+    );
+    expect(pigstyUpgrade).toContain(
+      "REVOKE ALL ON FUNCTION public.soft_delete_user_if_no_active_tasks() FROM PUBLIC;",
+    );
+    expect(pigstyUpgrade).toContain("supacloud:pigsty-4.4-auth-delete-fence:v2");
+    expect(pigstyUpgrade).toContain(
+      "-- supacloud:sql-module:background-task-mirror-up:start",
+    );
+    expect(pigstyUpgrade).toContain(
+      "coalesce((SELECT proconfig FROM target), ARRAY[]::text[]) @> ARRAY['search_path=pg_catalog']",
+    );
+    expect(pigstyUpgrade).toContain("public_execute_revoked");
+    expect(pigstyUpgrade).toContain("service_role_execute");
+    expect(pigstyUpgrade).toContain("NOT EXISTS (SELECT 1 FROM helper)");
+    expect(pigstyUpgrade).toContain("NOT EXISTS (SELECT 1 FROM cleanup)");
+  });
+
+  test("tenant auth bootstrap reuses the canonical JWT helper module", () => {
+    const runtimeSource = readRepoFile("src/services/tenant-runtime.service.ts");
+    expect(runtimeSource).toContain('${SQL_MODULES["auth-jwt-helpers"]}');
+    expect(runtimeSource).not.toContain(
+      "CREATE OR REPLACE FUNCTION auth.uid() returns uuid as $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid;",
+    );
   });
 
   test("one_time_tokens user_id migration adds the foreign key separately", () => {
@@ -263,19 +326,23 @@ describe("supabase bootstrap schema", () => {
   });
 
   test("tenant schema exposes Supabase Queues PGMQ public RPCs", () => {
-    for (const filePath of [
-      "src/db/schemas/supabase.sql",
-      "src/services/tenant-runtime.service.ts",
-      "src/scripts/migrate-tenant-schema.ts",
+    for (const source of [
+      SQL_MODULES["pgmq-public"],
+      readRepoFile("src/db/schemas/supabase.sql"),
     ]) {
-      const source = readRepoFile(filePath);
-
       expect(source).toContain("CREATE EXTENSION IF NOT EXISTS pgmq");
       expect(source).toContain("CREATE SCHEMA IF NOT EXISTS pgmq_public");
       expect(source).toContain("CREATE OR REPLACE FUNCTION pgmq_public.send(queue_name text, message jsonb, sleep_seconds integer DEFAULT 0)");
       expect(source).toContain("CREATE OR REPLACE FUNCTION pgmq_public.pop(queue_name text)");
       expect(source).toContain('CREATE OR REPLACE FUNCTION pgmq_public."delete"(queue_name text, message_id bigint)');
       expect(source).toContain("GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pgmq_public TO anon, authenticated, service_role");
+    }
+
+    for (const filePath of [
+      "src/services/tenant-runtime.service.ts",
+      "src/scripts/migrate-tenant-schema.ts",
+    ]) {
+      expect(readRepoFile(filePath)).toContain('${SQL_MODULES["pgmq-public"]}');
     }
   });
 

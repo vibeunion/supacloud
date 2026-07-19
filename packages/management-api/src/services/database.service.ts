@@ -14,6 +14,8 @@ import {
 import { $ } from "bun";
 import * as path from "node:path";
 import { assertValidIdentifier, assertValidDbName } from "../utils/validation";
+import { ensureMigrationLedgerMetadata } from "./migration-ledger";
+import { prepareProjectMigrationRole } from "./project-migration-role";
 
 /** Escape a string value for use inside PostgreSQL dollar-quoted strings */
 function pgEscapePassword(password: string): string {
@@ -312,6 +314,7 @@ export class DatabaseService {
 
       // Apply schema independently
       await this.applySupabaseSchema(dbName, projectRef, password);
+      await this.prepareMigrationRole(dbName, dbUser);
 
       await this.withAdminDb(async (adminDb) => {
         const authenticatorRole = resolveAuthenticatorName(projectRef);
@@ -330,6 +333,12 @@ export class DatabaseService {
         error: error instanceof Error ? error.message : String(error),
       };
     }
+  }
+
+  private async prepareMigrationRole(dbName: string, dbUser: string): Promise<void> {
+    const tenantDb = getProjectDb(dbName);
+    await ensureMigrationLedgerMetadata(tenantDb);
+    await prepareProjectMigrationRole(tenantDb, dbName, dbUser);
   }
 
   // Apply Supabase Schema

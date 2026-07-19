@@ -110,8 +110,8 @@ SupaCloud does not try to replace Supabase Cloud on those hosted platform dimens
 
 ### 2. Branching
 
-Supabase Cloud provides branch environments and preview branches as a fully managed product. SupaCloud now ships full branching support:
-- Branching API (`/v1/projects/:ref/branches`) with create/promote/delete via `pg_dump | psql` DB clone
+Supabase Cloud provides branch environments and preview branches as a fully managed product. SupaCloud now ships branching support:
+- Branching API (`/v1/projects/:ref/branches`) with schema-only preview branches by default, controlled migration promotion, and an explicit administrator-only `pg_dump | psql` replacement break-glass path
 - Web console UI for branch management (create, delete, promote with confirmation)
 - Git auto-branching: configure auto-branch rules per project, and Git push events automatically create preview branches for non-base branches
 - Auto-branching config API (`/v1/projects/:ref/auto-branching`) with exclude patterns and branch prefix support

@@ -76,7 +76,9 @@ export async function runCli(
         const otherFields = Object.entries(shape).filter(([name]) => name !== "action");
         const relevantFields = otherFields.filter(([, field]) => {
             const description = getDescription(field);
-            return description.includes(`[${action}]`) || description.includes("[*]");
+            const scopes = [...description.matchAll(/\[([^\]]+)\]/g)]
+                .flatMap((match) => match[1]?.split("/") || []);
+            return scopes.includes(action) || scopes.includes("*");
         });
 
         const argLines = relevantFields.length

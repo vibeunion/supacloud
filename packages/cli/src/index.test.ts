@@ -54,6 +54,14 @@ async function runProjectCli(
 }
 
 describe("supacloud-cli process contract", () => {
+    test("shows branch action flags even before project context is configured", async () => {
+        const result = await runProjectCli(["branch", "promotion_plan", "--help"]);
+
+        expect(result.exitCode).toBe(0);
+        expect(result.stderr).toContain("--branch_ref");
+        expect(result.stderr).toContain("--ref");
+    });
+
     test("shows and dry-runs the bundled AI skill without project credentials", async () => {
         const targetRoot = mkdtempSync(join(tmpdir(), "supacloud-cli-ai-target-"));
         temporaryDirectories.push(targetRoot);

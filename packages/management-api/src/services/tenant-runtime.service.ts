@@ -2,6 +2,7 @@ import { $ } from "bun";
 import { logger } from "../utils/logger";
 import { config } from "../config";
 import { sql as metaSql, resolveDbName, resolveAuthenticatorName, resolvePgrstChannel } from "../db";
+import { SQL_MODULES } from "../db/sql-modules";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { OAuthProvider, OAuthProviderConfig } from "../types/oauth";
@@ -1454,8 +1455,7 @@ BEGIN
 END;
 $graphql_fallback$;
 
-CREATE OR REPLACE FUNCTION auth.uid() returns uuid as $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid; $$ language sql stable;
-CREATE OR REPLACE FUNCTION auth.role() returns text as $$ select nullif(current_setting('request.jwt.claim.role', true), '')::text; $$ language sql stable;
+${SQL_MODULES["auth-jwt-helpers"]}
 
 GRANT ALL ON ALL TABLES IN SCHEMA auth TO supabase_auth_admin;
 GRANT ALL ON ALL SEQUENCES IN SCHEMA auth TO supabase_auth_admin;
@@ -1603,59 +1603,7 @@ BEGIN
 END;
 $graphql_fallback$;
 
-CREATE EXTENSION IF NOT EXISTS pgmq;
-CREATE SCHEMA IF NOT EXISTS pgmq_public;
-GRANT USAGE ON SCHEMA pgmq_public TO anon, authenticated, service_role;
-
-CREATE OR REPLACE FUNCTION pgmq_public.send(queue_name text, message jsonb, sleep_seconds integer DEFAULT 0)
-RETURNS SETOF bigint
-LANGUAGE sql
-VOLATILE
-SECURITY DEFINER
-SET search_path = pgmq, public
-AS $$ SELECT * FROM pgmq.send(queue_name, message, sleep_seconds); $$;
-
-CREATE OR REPLACE FUNCTION pgmq_public.send_batch(queue_name text, messages jsonb[], sleep_seconds integer DEFAULT 0)
-RETURNS SETOF bigint
-LANGUAGE sql
-VOLATILE
-SECURITY DEFINER
-SET search_path = pgmq, public
-AS $$ SELECT * FROM pgmq.send_batch(queue_name, messages, sleep_seconds); $$;
-
-CREATE OR REPLACE FUNCTION pgmq_public.read(queue_name text, sleep_seconds integer, n integer)
-RETURNS SETOF pgmq.message_record
-LANGUAGE sql
-VOLATILE
-SECURITY DEFINER
-SET search_path = pgmq, public
-AS $$ SELECT * FROM pgmq.read(queue_name, sleep_seconds, n); $$;
-
-CREATE OR REPLACE FUNCTION pgmq_public.pop(queue_name text)
-RETURNS SETOF pgmq.message_record
-LANGUAGE sql
-VOLATILE
-SECURITY DEFINER
-SET search_path = pgmq, public
-AS $$ SELECT * FROM pgmq.pop(queue_name); $$;
-
-CREATE OR REPLACE FUNCTION pgmq_public.archive(queue_name text, message_id bigint)
-RETURNS boolean
-LANGUAGE sql
-VOLATILE
-SECURITY DEFINER
-SET search_path = pgmq, public
-AS $$ SELECT pgmq.archive(queue_name, message_id); $$;
-
-CREATE OR REPLACE FUNCTION pgmq_public."delete"(queue_name text, message_id bigint)
-RETURNS boolean
-LANGUAGE sql
-VOLATILE
-SECURITY DEFINER
-SET search_path = pgmq, public
-AS $$ SELECT pgmq.delete(queue_name, message_id); $$;
-
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pgmq_public TO anon, authenticated, service_role;
+${SQL_MODULES["pgmq-public"]}
 `.trim();
         const temporary = await this.writeTemporaryTenantSql(ref, "ott-graphql-migration", migrationSql);
         try {
