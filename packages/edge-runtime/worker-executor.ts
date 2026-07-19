@@ -29,6 +29,33 @@ type FrameworkRouterHandler = Record<string, unknown> & {
   routes: unknown[];
 };
 
+type InvalidateModuleMessage = { type: "invalidate_module"; functionId: string };
+type InvalidateProjectMessage = { type: "invalidate_project"; projectRef: string };
+type WorkerLifecycleMessage = { type: "cancel_current" } | { type: "retire" };
+type PreheatMessage = {
+  type: "preheat";
+  functionId: string;
+  functionPath: string;
+  projectRoot: string;
+  projectRef?: string;
+  moduleVersion?: string;
+  env: Record<string, string>;
+  tlsPolicy?: EdgeFetchTlsPolicy;
+};
+type ExecuteMessage = Omit<PreheatMessage, "type"> & {
+  type?: undefined;
+  url: string;
+  method: string;
+  headers: Record<string, string | string[]>;
+  body?: ArrayBuffer | null;
+};
+type ParentMessage =
+  | InvalidateModuleMessage
+  | InvalidateProjectMessage
+  | WorkerLifecycleMessage
+  | PreheatMessage
+  | ExecuteMessage;
+
 const moduleCache = new Map<string, ModuleCacheEntry>();
 
 function evictOldestModule() {
@@ -75,6 +102,7 @@ let envSnapshotActive = false;
 let currentAbortController: AbortController | null = null;
 let currentInjectedEnv: Record<string, string> = {};
 let currentWaitUntilTasks: Promise<unknown>[] = [];
+let retiring = false;
 
 async function resolveMessageTlsPolicy(
   tlsPolicy: EdgeFetchTlsPolicy | undefined,
@@ -124,7 +152,7 @@ const originalConsole = {
 function setupConsoleCapture(functionId: string) {
   const sendLog = (stream: "stdout" | "stderr", level: string, ...args: any[]) => {
     try {
-      parentPort!.postMessage({
+      postToParent({
         type: "log",
         timestamp: new Date().toISOString(),
         stream,
@@ -168,7 +196,7 @@ async function flushWaitUntilTasks(functionId: string) {
     const tasks = currentWaitUntilTasks.splice(0);
     await Promise.allSettled(tasks);
   }
-  parentPort!.postMessage({
+  postToParent({
     type: "wait_until_done",
     functionId,
   });
@@ -275,10 +303,82 @@ function extractProjectRef(functionId: string): string | null {
   return functionId.substring(0, idx);
 }
 
-parentPort.on("message", async (msg: any) => {
+function isStringRecord(candidate: unknown): candidate is Record<string, string> {
+  if (!candidate || typeof candidate !== "object") return false;
+  return Object.values(candidate).every((entry) => typeof entry === "string");
+}
+
+function isHeaderRecord(candidate: unknown): candidate is Record<string, string | string[]> {
+  if (!candidate || typeof candidate !== "object") return false;
+  return Object.values(candidate).every((header) =>
+    typeof header === "string"
+      || Array.isArray(header) && header.every((entry) => typeof entry === "string")
+  );
+}
+
+function isTlsPolicy(candidate: unknown): candidate is EdgeFetchTlsPolicy {
+  if (!candidate || typeof candidate !== "object") return false;
+  const policy = candidate as Record<string, unknown>;
+  return typeof policy.source === "string"
+    && ["none", "ca-inline", "ca-file", "insecure"].includes(policy.source)
+    && (policy.ca === undefined || typeof policy.ca === "string")
+    && (policy.rejectUnauthorized === undefined || typeof policy.rejectUnauthorized === "boolean");
+}
+
+function hasPreheatFields(candidate: Record<string, unknown>): boolean {
+  return typeof candidate.functionId === "string"
+    && typeof candidate.functionPath === "string"
+    && typeof candidate.projectRoot === "string"
+    && (candidate.projectRef === undefined || typeof candidate.projectRef === "string")
+    && (candidate.moduleVersion === undefined || typeof candidate.moduleVersion === "string")
+    && isStringRecord(candidate.env)
+    && (candidate.tlsPolicy === undefined || isTlsPolicy(candidate.tlsPolicy));
+}
+
+function isExecuteMessage(candidate: Record<string, unknown>): boolean {
+  return candidate.type === undefined
+    && hasPreheatFields(candidate)
+    && typeof candidate.url === "string"
+    && typeof candidate.method === "string"
+    && isHeaderRecord(candidate.headers)
+    && (candidate.body == null || candidate.body instanceof ArrayBuffer);
+}
+
+function isParentMessage(message: unknown): message is ParentMessage {
+  if (!message || typeof message !== "object") return false;
+  const candidate = message as Record<string, unknown>;
+  if (candidate.type === "retire" || candidate.type === "cancel_current") return true;
+  if (candidate.type === "invalidate_module") return typeof candidate.functionId === "string";
+  if (candidate.type === "invalidate_project") return typeof candidate.projectRef === "string";
+  if (candidate.type === "preheat") return hasPreheatFields(candidate);
+  return isExecuteMessage(candidate);
+}
+
+function postToParent(message: unknown) {
+  if (retiring) return;
+  parentPort!.postMessage(message);
+}
+
+async function onParentMessage(msg: unknown): Promise<void> {
+  if (!isParentMessage(msg)) {
+    console.warn("[Worker] Ignoring invalid parent message");
+    return;
+  }
+
+  if (msg.type === "retire") {
+    if (retiring) return;
+    retiring = true;
+    currentAbortController?.abort(new DOMException("Worker retiring", "AbortError"));
+    parentPort!.off("message", onParentMessage);
+    parentPort!.close();
+    return;
+  }
+
+  if (retiring) return;
+
   if (msg.type === "invalidate_module") {
     const invalidated = invalidateCachedModules((entry) => entry.functionId === msg.functionId);
-    parentPort!.postMessage({
+    postToParent({
       type: "invalidate_done",
       functionId: msg.functionId,
       invalidated,
@@ -289,7 +389,7 @@ parentPort.on("message", async (msg: any) => {
 
   if (msg.type === "invalidate_project") {
     const invalidated = invalidateCachedModules((entry) => entry.projectRef === msg.projectRef);
-    parentPort!.postMessage({
+    postToParent({
       type: "invalidate_done",
       projectRef: msg.projectRef,
       invalidated,
@@ -316,7 +416,7 @@ parentPort.on("message", async (msg: any) => {
           moduleVersion: msg.moduleVersion,
           projectRef: ref,
         });
-        parentPort!.postMessage({
+        postToParent({
           type: "preheat_done",
           functionId: msg.functionId,
           moduleCacheHit: moduleLoad.cacheHit,
@@ -326,7 +426,7 @@ parentPort.on("message", async (msg: any) => {
         restoreFetchTlsPolicy();
       }
     } catch (err: any) {
-      parentPort!.postMessage({
+      postToParent({
         type: "preheat_error",
         functionId: msg.functionId,
         error: err.message,
@@ -342,7 +442,7 @@ parentPort.on("message", async (msg: any) => {
 
   if (msg.type === "cancel_current") {
     currentAbortController?.abort(new DOMException("Task cancelled", "AbortError"));
-    parentPort!.postMessage({ type: "cancel_ack" });
+    postToParent({ type: "cancel_ack" });
     return;
   }
 
@@ -386,7 +486,7 @@ parentPort.on("message", async (msg: any) => {
       response.headers.get("content-type")?.includes("text/event-stream")
     ) {
       const streamId = crypto.randomUUID();
-      parentPort!.postMessage({
+      postToParent({
         type: "stream_start",
         streamId,
         status: response.status,
@@ -400,14 +500,14 @@ parentPort.on("message", async (msg: any) => {
         while (true) {
           const { done, value } = await reader.read();
           if (done) {
-            parentPort!.postMessage({
+            postToParent({
               type: "stream_chunk",
               streamId,
               done: true,
             });
             break;
           }
-          parentPort!.postMessage({
+          postToParent({
             type: "stream_chunk",
             streamId,
             chunk: Buffer.from(value).buffer,
@@ -415,7 +515,7 @@ parentPort.on("message", async (msg: any) => {
           });
         }
       } catch (err: any) {
-        parentPort!.postMessage({
+        postToParent({
           type: "stream_chunk",
           streamId,
           done: true,
@@ -442,7 +542,7 @@ parentPort.on("message", async (msg: any) => {
       resHeaders[k] = v;
     });
 
-    parentPort!.postMessage({
+    postToParent({
       status: response.status,
       headers: resHeaders,
       body: resBody,
@@ -454,7 +554,7 @@ parentPort.on("message", async (msg: any) => {
   } catch (err: any) {
     const aborted = currentAbortController?.signal.aborted || err?.name === "AbortError";
     const message = err instanceof Error ? err.message : String(err);
-    parentPort!.postMessage({
+    postToParent({
       status: aborted ? 499 : 500,
       headers: { "Content-Type": "application/json" },
       body: Buffer.from(
@@ -471,4 +571,6 @@ parentPort.on("message", async (msg: any) => {
     setProjectRoot(null);
     setInjectedEnv({});
   }
-});
+}
+
+parentPort.on("message", onParentMessage);
