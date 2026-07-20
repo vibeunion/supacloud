@@ -37,6 +37,15 @@ function publicDatabaseHook(value: unknown) {
   return hook;
 }
 
+const DATABASE_WEBHOOK_UNAVAILABLE_CODES = new Set(["3F000", "42P01"]);
+
+function isDatabaseWebhookCapabilityUnavailable(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const databaseError = error as { code?: unknown; errno?: unknown };
+  return [databaseError.code, databaseError.errno]
+    .some((value) => DATABASE_WEBHOOK_UNAVAILABLE_CODES.has(String(value || "")));
+}
+
 export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
 
   .get(
@@ -58,8 +67,7 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
         return rows.map(publicDatabaseHook);
       } catch (err) {
         logger.warn("[auth-hooks] Failed to list webhooks", { error: err });
-        const code = typeof err === "object" && err !== null ? String((err as { code?: unknown }).code || "") : "";
-        return status(code === "42P01" || code === "3F000" ? 501 : 503, {
+        return status(isDatabaseWebhookCapabilityUnavailable(err) ? 501 : 503, {
           message: "Database webhook capability is unavailable",
           code: "CAPABILITY_UNAVAILABLE",
           reason_code: "database_webhooks_not_available",

@@ -357,7 +357,7 @@ describe("API Structural Snapshot Compliance", () => {
     expect(Array.isArray(data)).toBe(true);
   });
 
-  test("Management API - GET /v1/projects/:ref/database/webhooks returns array", async () => {
+  test("Management API - GET /v1/projects/:ref/database/webhooks reports unavailable fixture capability", async () => {
     const res = await fetch(
       `${PROXY_URL}/v1/projects/${tenantRef}/database/webhooks`,
       {
@@ -365,9 +365,11 @@ describe("API Structural Snapshot Compliance", () => {
       },
     );
 
-    expect(res.status).toBe(200);
-    const data = await res.json();
-    expect(Array.isArray(data)).toBe(true);
+    expect(res.status).toBe(501);
+    expect(await res.json()).toMatchObject({
+      code: "CAPABILITY_UNAVAILABLE",
+      reason_code: "database_webhooks_not_available",
+    });
   });
 
   test("Management API - GET /v1/projects/:ref/services returns array", async () => {
