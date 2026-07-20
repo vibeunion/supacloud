@@ -2760,7 +2760,7 @@ install_management_api() {
     local SCHEMA_DST="/opt/supacloud/packages/management-api/src/db/schemas"
     if [[ -d "$SCHEMA_SRC" ]]; then
         mkdir -p "$SCHEMA_DST"
-        cp -rf "$SCHEMA_SRC"/* "$SCHEMA_DST/"
+        [[ "$(realpath "$SCHEMA_SRC" 2>/dev/null)" == "$(realpath "$SCHEMA_DST" 2>/dev/null)" ]] && log_info "Schema src=dst in-place, skipping copy" || cp -rf "$SCHEMA_SRC"/* "$SCHEMA_DST/"
         log_info "Database schema files deployed to $SCHEMA_DST"
     else
         log_warn "Schema source directory not found: $SCHEMA_SRC"
