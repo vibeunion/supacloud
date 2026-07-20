@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.47.3](https://github.com/zuohuadong/supacloud/compare/management-api-v0.47.2...management-api-v0.47.3) (2026-07-20)
+
+
+### Bug Fixes
+
+* **storage:** expose ETag through CORS ([f78ba5f](https://github.com/zuohuadong/supacloud/commit/f78ba5f197a17a6d1ecfbad7e84e0be17a75ebf3))
+* **storage:** expose ETag through CORS ([0e02eff](https://github.com/zuohuadong/supacloud/commit/0e02eff6c66cb651064e3aed85a3add6ec79894e))
+
 ## [0.47.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.47.1...management-api-v0.47.2) (2026-07-20)
 
 
