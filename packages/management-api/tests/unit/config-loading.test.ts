@@ -20,6 +20,8 @@ function cleanEnv(overrides: Record<string, string>) {
     "STORAGE_TYPE",
     "NODE_ENV",
     "BUN_ENV",
+    "CI",
+    "GITHUB_ACTIONS",
     "SUPACLOUD_LOAD_LEGACY_CONFIG_ENV",
     "SUPACLOUD_MANAGEMENT_ENV_FILE",
     "SUPACLOUD_LEGACY_CONFIG_ENV_FILE",

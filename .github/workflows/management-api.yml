@@ -449,6 +449,12 @@ jobs:
         run: bun src/db/init.ts
         env:
           DATABASE_URL: postgresql://supabase_admin:postgres@localhost:5432/postgres
+          # Test-only values must remain independent so production validation stays fail-closed.
+          MASTER_TOKEN: ci-integration-master-token-0123456789abcdef
+          JWT_SECRET: ci-integration-jwt-secret-0123456789abcdef
+          SECRETS_ENCRYPTION_KEY: ci-integration-encryption-key-0123456789abcdef
+          SUPAOAUTH_BFF_SIGNING_SECRET: ci-integration-bff-signing-secret-0123456789abcdef
+          DASHBOARD_PASSWORD: ci-integration-dashboard-password-0123456789abcdef
 
       - name: Wait for CI services
         run: |
