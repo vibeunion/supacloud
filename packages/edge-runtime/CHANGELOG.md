@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.14.0](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.13.2...edge-runtime-v0.14.0) (2026-07-20)
+
+
+### Features
+
+* **auth:** complete GoTrue platform controls ([5e5483e](https://github.com/zuohuadong/supacloud/commit/5e5483e91420ba240814cf7c85787c1cdebd7453))
+* **auth:** complete GoTrue platform controls ([bc71998](https://github.com/zuohuadong/supacloud/commit/bc719989a5e28381f73a069df3d9fc03ca124bd3))
+
 ## [0.13.2](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.13.1...edge-runtime-v0.13.2) (2026-07-19)
 
 
