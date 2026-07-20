@@ -582,11 +582,18 @@ def replace_scalar(pattern: str, value: str, source: str) -> str:
 text = replace_scalar(r"^(\s*DASHBOARD_PASSWORD:\s*).*$", dashboard, text)
 text = replace_scalar(r"^(\s*POSTGRES_PASSWORD:\s*).*$", postgres, text)
 if postgres:
+    # Match DBUser.Supa whether it sits alone on a line (original MULTILINE $ form)
+    # or is embedded inline in Pigsty flow-mappings, e.g.
+    #   password: 'DBUser.Supa' ,pgbouncer: ...
+    # The previous `^...$` + re.MULTILINE anchor only matched the standalone form and
+    # silently skipped inline occurrences, leaving the placeholder in place. The rotated
+    # POSTGRES_PASSWORD then never reached JuiceFS pgpass, breaking PostgreSQL SASL auth
+    # (28P01) during management-api activation. Lookahead `(?=[\s,])` keeps the match
+    # scoped to a password literal (followed by whitespace/comma) without an end anchor.
     text = re.sub(
-        r"^(\s*password:\s*)['\"]?DBUser\.Supa['\"]?\s*$",
-        lambda match: f"{match.group(1)}{json.dumps(postgres, ensure_ascii=False)}",
+        r"(password:\s*)'DBUser\.Supa'(?=[\s,])|(password:\s*)DBUser\.Supa(?=[\s,])",
+        lambda match: f"{(match.group(1) or match.group(2))}{json.dumps(postgres, ensure_ascii=False)}",
         text,
-        flags=re.MULTILINE,
     )
 text = replace_scalar(r"^(\s*grafana_admin_password:\s*).*$", grafana, text)
 text = replace_scalar(r"^(\s*JWT_SECRET:\s*).*$", jwt_secret, text)
