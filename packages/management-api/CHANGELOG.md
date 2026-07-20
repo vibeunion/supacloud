@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.47.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.47.0...management-api-v0.47.1) (2026-07-20)
+
+
+### Bug Fixes
+
+* **management-api:** make bootstrap migrations reliable ([51dbecc](https://github.com/zuohuadong/supacloud/commit/51dbecc88286933049835e5d8c89ed9ab22881e1))
+* **management-api:** prevent false-active bootstrap hangs ([04b41df](https://github.com/zuohuadong/supacloud/commit/04b41df53639c9b15b43620652ad74cb16d4f7d8))
+
 ## [0.47.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.46.0...management-api-v0.47.0) (2026-07-20)
 
 
