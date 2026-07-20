@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.47.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.47.1...management-api-v0.47.2) (2026-07-20)
+
+
+### Bug Fixes
+
+* **management-api:** move audit backfill out of startup ([0650894](https://github.com/zuohuadong/supacloud/commit/0650894cde8a8fbf83a0e2130cd4679dd54de88f))
+* **management-api:** move audit backfill out of startup ([c9d163f](https://github.com/zuohuadong/supacloud/commit/c9d163f17c92068b21584e684d396f6e726fdf21))
+
 ## [0.47.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.47.0...management-api-v0.47.1) (2026-07-20)
 
 
