@@ -456,6 +456,12 @@ jobs:
           SUPAOAUTH_BFF_SIGNING_SECRET: ci-integration-bff-signing-secret-0123456789abcdef
           DASHBOARD_PASSWORD: ci-integration-dashboard-password-0123456789abcdef
 
+      - name: Verify Realtime auto-attach DDL
+        working-directory: packages/management-api
+        run: bun test tests/integration/realtime-auto-attach-trigger.test.ts
+        env:
+          DATABASE_URL: postgresql://supabase_admin:postgres@localhost:5432/postgres
+
       - name: Wait for CI services
         run: |
           echo "Waiting for Realtime container to be ready..."
