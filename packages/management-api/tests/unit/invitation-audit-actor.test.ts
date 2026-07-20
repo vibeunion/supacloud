@@ -1,8 +1,10 @@
 import { describe, expect, mock, test } from "bun:test";
 
 let persistedActor: { id: string; type: string } | null = null;
+const transactionQueries: string[] = [];
 const transaction = mock((strings: TemplateStringsArray, ...values: unknown[]) => {
   const query = strings.join("?");
+  transactionQueries.push(query);
   if (query.includes("SELECT last_event_hash")) return Promise.resolve([]);
   if (query.includes("INSERT INTO audit_logs")) {
     persistedActor = { id: String(values[2]), type: String(values[3]) };
@@ -39,5 +41,9 @@ describe("invitation acceptance audit actor", () => {
 
     expect(persistedActor).toEqual({ id: "gotrue-user", type: "user" });
     expect(persistedActor?.id).not.toBe("anonymous");
+    expect(transactionQueries[0]).toContain("pg_advisory_xact_lock_shared");
+    expect(transactionQueries[1]).toContain("pg_advisory_xact_lock(hashtext(");
+    expect(transactionQueries.findIndex((query) => query.includes("INSERT INTO audit_logs")))
+      .toBeGreaterThan(1);
   });
 });

@@ -153,6 +153,12 @@ export async function ensurePlatformV2Schema(transaction: SQL): Promise<void> {
       PRIMARY KEY (scheme, key_fingerprint)
     );
 
+    CREATE TABLE IF NOT EXISTS platform_schema_migrations (
+      migration_key TEXT PRIMARY KEY,
+      completed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      details JSONB NOT NULL DEFAULT '{}'::jsonb
+    );
+
     CREATE TABLE IF NOT EXISTS supaoauth_bff_proof_nonces (
       nonce VARCHAR(128) PRIMARY KEY,
       expires_at TIMESTAMPTZ NOT NULL,
@@ -419,39 +425,25 @@ export async function ensurePlatformV2Schema(transaction: SQL): Promise<void> {
     CREATE INDEX IF NOT EXISTS audit_exports_project_idx
       ON audit_exports(project_ref, created_at DESC);
 
-    DROP TRIGGER IF EXISTS audit_logs_append_only ON audit_logs;
-    WITH RECURSIVE linked_audit_events AS (
-      SELECT id, project_ref, event_hash, 1::bigint AS chain_sequence, ARRAY[id] AS path
-      FROM audit_logs
-      WHERE event_hash IS NOT NULL AND previous_hash IS NULL
-      UNION ALL
-      SELECT child.id, child.project_ref, child.event_hash,
-             parent.chain_sequence + 1, parent.path || child.id
-      FROM linked_audit_events parent
-      JOIN audit_logs child
-        ON child.project_ref IS NOT DISTINCT FROM parent.project_ref
-       AND child.previous_hash = parent.event_hash
-       AND child.event_hash IS NOT NULL
-       AND NOT child.id = ANY(parent.path)
-    ), resolved_sequences AS (
-      SELECT id, MIN(chain_sequence) AS chain_sequence
-      FROM linked_audit_events
-      GROUP BY id
-    )
-    UPDATE audit_logs audit
-    SET chain_sequence = resolved.chain_sequence
-    FROM resolved_sequences resolved
-    WHERE audit.id = resolved.id
-      AND audit.chain_sequence IS DISTINCT FROM resolved.chain_sequence;
-
     CREATE OR REPLACE FUNCTION prevent_audit_log_mutation() RETURNS trigger AS $$
     BEGIN
       RAISE EXCEPTION 'audit_logs is append-only';
     END;
     $$ LANGUAGE plpgsql;
-    CREATE TRIGGER audit_logs_append_only
-      BEFORE UPDATE OR DELETE ON audit_logs
-      FOR EACH ROW EXECUTE FUNCTION prevent_audit_log_mutation();
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgrelid = 'audit_logs'::regclass
+          AND tgname = 'audit_logs_append_only'
+          AND NOT tgisinternal
+      ) THEN
+        CREATE TRIGGER audit_logs_append_only
+          BEFORE UPDATE OR DELETE ON audit_logs
+          FOR EACH ROW EXECUTE FUNCTION prevent_audit_log_mutation();
+      END IF;
+    END;
+    $$;
   `);
 
   await transaction`

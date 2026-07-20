@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { sql } from "../db";
+import { acquireAuditChainAppendLock } from "../db/audit-chain-lock";
 import { getVerifiedRequestPrincipal } from "../middleware/auth";
 import { extractProjectRefFromPath } from "../utils/project-auth";
 import { resolveProxyClientIp } from "../utils/client-ip";
@@ -260,6 +261,7 @@ export async function appendAuditEvent(input: AppendAuditEventInput) {
   const source = input.source || "management-api";
 
   return sql.begin(async (tx) => {
+    await acquireAuditChainAppendLock(tx);
     await tx`SELECT pg_advisory_xact_lock(hashtext(${`audit-chain:${projectChainKey}`}))`;
     const [checkpoint] = await tx`
       SELECT last_event_hash, event_count
