@@ -101,12 +101,14 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
       },
     });
 
-    const exposedHeaders = res.headers.get("Access-Control-Expose-Headers");
-    expect(exposedHeaders).toContain("ETag");
-    expect(exposedHeaders).toContain("Tus-Resumable");
-    expect(exposedHeaders).toContain("Tus-Version");
-    expect(exposedHeaders).toContain("Tus-Extension");
-    expect(exposedHeaders).toContain("Tus-Max-Size");
+    const exposedHeaderTokens = (res.headers.get("Access-Control-Expose-Headers") ?? "")
+      .split(",")
+      .map((header) => header.trim().toLowerCase());
+    expect(exposedHeaderTokens).toContain("etag");
+    expect(exposedHeaderTokens).toContain("tus-resumable");
+    expect(exposedHeaderTokens).toContain("tus-version");
+    expect(exposedHeaderTokens).toContain("tus-extension");
+    expect(exposedHeaderTokens).toContain("tus-max-size");
   });
 
   test("accepts project header on loopback health checks without apikey", async () => {
