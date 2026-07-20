@@ -174,8 +174,8 @@ supacloud_install_pinned_tar_xz_binary() (
     fi
 
     member_count=$(tar -tJf "$archive" | grep -Fxc "$member" || true)
-    if [[ "$member_count" != "1" || "$(tar -tJf "$archive" | wc -l | tr -d ' ')" != "1" ]]; then
-        echo "Pinned archive must contain only the exact member: $member" >&2
+    if [[ "$member_count" != "1" ]]; then
+        echo "Pinned archive must contain the exact member once: $member" >&2
         return 1
     fi
     member_details=$(tar -tvJf "$archive" "$member") || return 1

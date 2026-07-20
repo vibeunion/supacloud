@@ -22,7 +22,9 @@ make_gotrue_archive() {
     payload_dir=$(mktemp -d "${tmp_dir}/payload.XXXXXX")
     printf '#!/bin/sh\n[ "$1" = version ] && printf "%s\\n"\n' "$version" > "${payload_dir}/auth"
     chmod 755 "${payload_dir}/auth"
-    tar -cJf "$archive" -C "$payload_dir" auth
+    printf 'official sibling fixture\n' > "${payload_dir}/gotrue"
+    printf 'official sibling fixture\n' > "${payload_dir}/migrations"
+    tar -cJf "$archive" -C "$payload_dir" auth gotrue migrations
 }
 
 old_binary="${tmp_dir}/gotrue"
