@@ -40,7 +40,7 @@ export function encryptSecretWithKey(value: string, encryptionKey: string): stri
 export function decryptSecretWithKey(value: string, encryptionKey: string): string {
   if (!isEncryptedSecret(value)) return value;
   const raw = Buffer.from(value.slice(PREFIX.length), "base64url");
-  if (raw.length < 29) throw new Error("Invalid encrypted secret payload");
+  if (raw.length < 28) throw new Error("Invalid encrypted secret payload");
   const iv = raw.subarray(0, 12);
   const tag = raw.subarray(12, 28);
   const ciphertext = raw.subarray(28);

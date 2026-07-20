@@ -124,7 +124,7 @@ function migrationState(): MigrationState {
       secret_key_encrypted: null,
       s3_secret_key_encrypted: legacyCiphertext("s3-secret"),
     }],
-    projectSecrets: [{ id: "project-secret", value: legacyCiphertext("edge-secret") }],
+    projectSecrets: [{ id: "project-secret", value: legacyCiphertext("") }],
     controlSecrets: [{
       project_ref: "project-one",
       scope: "captcha",
@@ -160,6 +160,24 @@ function decryptCurrent(value: unknown): string {
   return decryptSecretWithKey(String(value), CURRENT_KEY);
 }
 
+describe("secret encryption payload boundaries", () => {
+  // AES-GCM payload boundary: 28 bytes is IV + tag with empty ciphertext; 27 bytes is truncated.
+  test("round-trips empty plaintext at the minimum valid payload length", () => {
+    const encrypted = encryptSecretWithKey("", CURRENT_KEY);
+    const raw = Buffer.from(encrypted.slice("enc:v1:".length), "base64url");
+
+    expect(raw).toHaveLength(28);
+    expect(decryptSecretWithKey(encrypted, CURRENT_KEY)).toBe("");
+  });
+
+  test("fails closed for a truncated encrypted payload", () => {
+    const truncated = `enc:v1:${Buffer.alloc(27).toString("base64url")}`;
+
+    expect(() => decryptSecretWithKey(truncated, CURRENT_KEY))
+      .toThrow("Invalid encrypted secret payload");
+  });
+});
+
 describe("legacy secret encryption key migration", () => {
   test("rotates every authoritative secret source and persists a verified checkpoint", async () => {
     const state = migrationState();
@@ -171,7 +189,7 @@ describe("legacy secret encryption key migration", () => {
     expect(decryptCurrent(state.projects[0]?.db_password_encrypted)).toBe("database-password");
     expect(decryptCurrent(state.projects[0]?.jwt_secret_encrypted)).toBe("jwt-secret");
     expect(decryptCurrent(state.projects[0]?.service_role_key_encrypted)).toBe("plaintext-service-role");
-    expect(decryptCurrent(state.projectSecrets[0]?.value)).toBe("edge-secret");
+    expect(decryptCurrent(state.projectSecrets[0]?.value)).toBe("");
     expect(decryptCurrent(state.controlSecrets[0]?.value_encrypted)).toBe("captcha-secret");
     expect(decryptCurrent(state.platformSettings[0]?.value)).toBe("plaintext-ai-secret");
     expect(state.platformSettings[0]?.is_secret).toBe(true);
