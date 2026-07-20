@@ -1546,6 +1546,23 @@ install_edge_runtime() {
     if [[ -d "$EDGE_RT_SRC" ]]; then
         cp -rf "$EDGE_RT_SRC"/* /opt/supacloud/edge-runtime/
 
+        # The Edge Runtime source is always deployed under /opt/supacloud/edge-runtime
+        # and the management API always spawns it via `bun run .../server.ts` when
+        # EDGE_RUNTIME_MODE=embedded (see packages/management-api/src/plugins/edge-runtime-manager.ts).
+        # The compiled supacloud-edge-runtime binary is only used by the standalone
+        # supacloud-edge-runtime.service in external mode, so installing it does NOT
+        # remove the embedded path's dependency on node_modules. Previously bun install
+        # was skipped whenever USE_COMPILED_BINARY=true, leaving the embedded runner
+        # without elysia/@elysiajs/cors and causing a crash loop
+        # ("Cannot find package elysia from .../server.ts") right after install.
+        if command -v bun &> /dev/null; then
+            ensure_bun_version
+            (cd /opt/supacloud/edge-runtime && bun install --frozen-lockfile 2>/dev/null) || \
+                (cd /opt/supacloud/edge-runtime && bun install)
+        else
+            log_warn "Bun not found; Edge Runtime dependencies not installed. Embedded mode will fail to start until Bun is available and bun install is run in /opt/supacloud/edge-runtime"
+        fi
+
         if [[ "$USE_COMPILED_BINARY" == "false" ]]; then
             if [[ "$EDGE_RUNTIME_MODE" == "external" ]]; then
                 log_info "External Edge Runtime mode requires Bun $BUN_VERSION"
