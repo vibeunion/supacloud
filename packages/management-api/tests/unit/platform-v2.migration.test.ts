@@ -89,15 +89,16 @@ describe("platform v2 migrations", () => {
 
   test("seeds owners only from verifiable organization members", async () => {
     let ownerSeedQuery = "";
-    const database = Object.assign(
+    const unsafe = mock(() => Promise.resolve([]));
+    const transaction = Object.assign(
       mock((strings: TemplateStringsArray) => {
         ownerSeedQuery = strings.join("?");
         return Promise.resolve([]);
       }),
-      { unsafe: mock(() => Promise.resolve([])) },
+      { unsafe },
     );
 
-    await ensurePlatformV2Schema(database as unknown as SQL);
+    await ensurePlatformV2Schema(transaction as unknown as SQL);
 
     expect(ownerSeedQuery).toContain("JOIN organization_members owner_member");
     expect(ownerSeedQuery).toContain("owner_member.user_id = o.owner_id");
