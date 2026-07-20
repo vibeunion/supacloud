@@ -101,7 +101,11 @@ describe("SupAuth auth config boundary", () => {
           totp: { enroll_enabled: true },
           webauthn: { enroll_enabled: true },
         },
+        mfa_web_authn_enroll_enabled: true,
         mfa_web_authn_verify_enabled: true,
+        webauthn_rp_display_name: "Stored RP",
+        webauthn_rp_id: "login.example.com",
+        webauthn_rp_origins: ["https://login.example.com"],
         MFA: { Web_Authn: { verify_enabled: true } },
       },
     } as never);
@@ -112,16 +116,27 @@ describe("SupAuth auth config boundary", () => {
     expect(rawBody.passkey).toBeUndefined();
     expect(rawBody.passkey_enabled).toBeUndefined();
     expect(rawBody.webauthn).toBeUndefined();
+    expect(rawBody.mfa_web_authn_enroll_enabled).toBeUndefined();
     expect(rawBody.mfa_web_authn_verify_enabled).toBeUndefined();
+    expect(rawBody.webauthn_rp_display_name).toBeUndefined();
+    expect(rawBody.webauthn_rp_id).toBeUndefined();
+    expect(rawBody.webauthn_rp_origins).toBeUndefined();
     expect(rawBody.MFA).toEqual({});
     expect(rawBody.mfa).toEqual({ totp: { enroll_enabled: true } });
 
     const studioResponse = await request("/v1/projects/tenant-a/config/auth");
     const studioBody = await studioResponse.json();
     expect(studioResponse.status).toBe(200);
-    expect(JSON.stringify(studioBody).toLowerCase()).not.toContain("passkey");
-    expect(JSON.stringify(studioBody).toLowerCase()).not.toContain("webauthn");
-    expect(JSON.stringify(studioBody).toLowerCase()).not.toContain("web_authn");
+    expect(studioBody).toMatchObject({
+      mfa_web_authn_enroll_enabled: null,
+      mfa_web_authn_verify_enabled: null,
+      passkey_enabled: false,
+      webauthn_rp_display_name: null,
+      webauthn_rp_id: null,
+      webauthn_rp_origins: null,
+    });
+    expect(JSON.stringify(studioBody)).not.toContain("Stored RP");
+    expect(JSON.stringify(studioBody)).not.toContain("login.example.com");
   });
 
   test("rejects every public Passkey and WebAuthn config shape", async () => {
