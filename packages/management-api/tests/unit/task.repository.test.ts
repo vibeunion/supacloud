@@ -4,7 +4,7 @@ const repo = await import(
   new URL("../../src/repositories/task.repository.ts?task-repository-test", import.meta.url).href
 );
 
-const { buildTaskListQuery } = repo;
+const { buildTaskListQuery, retryTask } = repo;
 
 describe("TaskRepository query builders", () => {
   test("buildTaskListQuery includes function_slug filter when provided", () => {
@@ -80,5 +80,45 @@ describe("TaskRepository query builders", () => {
     expect(source).toContain("options.concurrencyByProject");
     expect(source).toContain("LEAST(");
     expect(source).toContain("p.config->'background_tasks'->>'concurrency'");
+  });
+
+  test("retryTask only reactivates failed, dead-lettered, or cancelled tasks", () => {
+    const source = retryTask.toString();
+
+    expect(source).toContain("TaskStatuses.FAILED");
+    expect(source).toContain("TaskStatuses.DEAD_LETTERED");
+    expect(source).toContain("TaskStatuses.CANCELLED");
+    expect(source).not.toContain("TaskStatuses.SUCCEEDED");
+  });
+
+  test("uses the authoritative invoker column with a validated rolling-upgrade fallback", () => {
+    const source = repo.countActiveTasksByInvoker.toString();
+
+    expect(source).toContain("invoker_user_id = $6::uuid");
+    expect(source).toContain("payload_invoker_user_id = $6::uuid");
+    expect(source).toContain("TASK_INVOKER_MISMATCH");
+  });
+
+  test("counts a whitespace-normalized invoker across every child of one auth authority", async () => {
+    const unsafe = mock(async () => [{
+      count: 1,
+      id: "task-child",
+      task_type: "edge_function",
+      status: "running",
+      invoker_consistent: true,
+    }]);
+    const userId = "00000000-0000-4000-8000-000000000001";
+
+    await expect(repo.countActiveTasksByInvoker(
+      "auth-owner",
+      userId,
+      { unsafe } as never,
+    )).resolves.toMatchObject({ count: 1 });
+
+    const [query, params] = unsafe.mock.calls[0] as [string, unknown[]];
+    expect(query).toContain("WHERE auth_authority_ref = $1");
+    expect(query).not.toContain("WHERE project_ref = $1");
+    expect(query).toContain("BTRIM(payload->'auth'->>'invoker_user_id')");
+    expect(params[0]).toBe("auth-owner");
   });
 });

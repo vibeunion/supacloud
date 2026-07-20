@@ -34,6 +34,15 @@ import {
   buildAuthRuntimeApplyFailureBody,
   buildAuthSessionPolicyErrorBody,
 } from "./auth-config-responses";
+import { projectControlSecretsService } from "../services/project-control-secrets.service";
+import {
+  passkeyCapabilityUnavailableBody,
+  requestsUnavailablePasskeyConfig,
+} from "../services/auth-product-boundary";
+import {
+  canonicalAuthProviderLinkingConfig,
+  ProviderLinkingDomainsValidationError,
+} from "../utils/provider-linking";
 
 /** Map PostgreSQL column types to TypeScript types */
 function pgTypeToTs(udtName: string, dataType: string): string {
@@ -337,13 +346,74 @@ function buildRealtimeConfigResponse(raw: Record<string, unknown>) {
   };
 }
 
-function buildAuthConfigResponse(settings: Record<string, unknown>) {
-  const authConfig = (settings.auth as Record<string, unknown>) || {};
+function isNewControlSecret(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && value !== "********" && value !== "****";
+}
+
+function recordSetting(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function containsEmbeddedAuthSecret(value: unknown): boolean {
+  const auth = recordSetting(value);
+  if ("security_captcha_secret" in auth && isNewControlSecret(auth.security_captcha_secret)) return true;
+  for (const provider of Object.values(recordSetting(auth.external))) {
+    if (isNewControlSecret(recordSetting(provider).client_secret)) return true;
+  }
+  for (const hook of Object.values(recordSetting(auth.hooks))) {
+    if (isNewControlSecret(recordSetting(hook).secrets)) return true;
+  }
+  return false;
+}
+
+async function moveEmbeddedAuthSecrets(
+  ref: string,
+  value: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const auth = structuredClone(value);
+  const external = recordSetting(auth.external);
+  for (const [provider, rawConfig] of Object.entries(external)) {
+    const providerConfig = recordSetting(rawConfig);
+    if (isNewControlSecret(providerConfig.client_secret)) {
+      await projectControlSecretsService.upsert(ref, "connector", provider, providerConfig.client_secret);
+    }
+    delete providerConfig.client_secret;
+  }
+
+  if (isNewControlSecret(auth.security_captcha_secret)) {
+    const provider = String(auth.security_captcha_provider ?? "default").toLowerCase();
+    await projectControlSecretsService.upsert(ref, "captcha", provider, auth.security_captcha_secret);
+  }
+  delete auth.security_captcha_secret;
+
+  const hooks = recordSetting(auth.hooks);
+  for (const [hookName, rawHook] of Object.entries(hooks)) {
+    const hook = recordSetting(rawHook);
+    if (isNewControlSecret(hook.secrets)) {
+      await projectControlSecretsService.upsert(ref, "auth-hook", hookName, hook.secrets);
+    }
+    delete hook.secrets;
+  }
+  return auth;
+}
+
+async function buildAuthConfigResponse(ref: string, settings: Record<string, unknown>) {
+  const authConfig = canonicalAuthProviderLinkingConfig(
+    (settings.auth as Record<string, unknown>) || {},
+  );
   const sessionPolicy = readAuthSessionPolicy(authConfig);
   const externalConfig =
     (authConfig.external as Record<string, unknown>) || {};
   const hooksConfig = (authConfig.hooks as Record<string, unknown>) || {};
   const smtpConfig = (authConfig.smtp as Record<string, unknown>) || {};
+  const connectorStatuses = await projectControlSecretsService.listStatuses(ref, "connector");
+  const configuredConnectors = new Set(connectorStatuses.filter((item) => item.configured).map((item) => item.name));
+  const hookStatuses = await projectControlSecretsService.listStatuses(ref, "auth-hook");
+  const configuredHooks = new Set(hookStatuses.filter((item) => item.configured).map((item) => item.name));
+  const captchaProvider = String(authConfig.security_captcha_provider ?? "default").toLowerCase();
+  const captchaStatus = await projectControlSecretsService.getStatus(ref, "captcha", captchaProvider);
 
   const response: Record<string, unknown> = {
     ...cloneTemplate(OPENAPI_AUTH_CONFIG_RESPONSE_TEMPLATE),
@@ -387,15 +457,10 @@ function buildAuthConfigResponse(settings: Record<string, unknown>) {
     saml_private_key_next_configured:
       Boolean((authConfig.saml as Record<string, unknown> | undefined)?.private_key_next) ||
       Boolean(authConfig.saml_private_key_next),
-    passkey_enabled:
-      (authConfig.passkey as Record<string, unknown> | undefined)?.enabled ??
-      authConfig.passkey_enabled ??
-      false,
     security_captcha_enabled: authConfig.security_captcha_enabled ?? null,
     security_captcha_provider: authConfig.security_captcha_provider ?? "hcaptcha",
-    security_captcha_secret: authConfig.security_captcha_secret
-      ? "********"
-      : null,
+    security_captcha_secret: captchaStatus.configured ? "********" : null,
+    security_captcha_secret_configured: captchaStatus.configured,
     rate_limit_anonymous_users: authConfig.rate_limit_anonymous_users ?? null,
     rate_limit_email_sent: authConfig.rate_limit_email_sent ?? null,
     rate_limit_sms_sent: authConfig.rate_limit_sms_sent ?? null,
@@ -403,6 +468,7 @@ function buildAuthConfigResponse(settings: Record<string, unknown>) {
     rate_limit_token_refresh: authConfig.rate_limit_token_refresh ?? null,
     rate_limit_otp: authConfig.rate_limit_otp ?? null,
     sms_provider: authConfig.sms_provider ?? "twilio",
+    experimental: authConfig.experimental ?? {},
   };
 
   delete response.external;
@@ -417,10 +483,9 @@ function buildAuthConfigResponse(settings: Record<string, unknown>) {
     if ("client_id" in provider) {
       response[`external_${key}_client_id`] = provider.client_id ?? null;
     }
-    if ("client_secret" in provider) {
-      response[`external_${key}_secret`] = provider.client_secret
-        ? "********"
-        : null;
+    if ("client_secret" in provider || configuredConnectors.has(key)) {
+      response[`external_${key}_secret`] = configuredConnectors.has(key) ? "********" : null;
+      response[`external_${key}_secret_configured`] = configuredConnectors.has(key);
     }
     if ("email_optional" in provider) {
       response[`external_${key}_email_optional`] =
@@ -453,8 +518,10 @@ function buildAuthConfigResponse(settings: Record<string, unknown>) {
     const hook = (hooksConfig[hookName] as Record<string, unknown>) || {};
     response[`hook_${suffix}_enabled`] = hook.enabled ?? null;
     response[`hook_${suffix}_uri`] = hook.uri ?? null;
-    if ("secrets" in hook) {
-      response[`hook_${suffix}_secrets`] = hook.secrets ? "********" : null;
+    if ("secrets" in hook || configuredHooks.has(hookName)) {
+      const configured = configuredHooks.has(hookName);
+      response[`hook_${suffix}_secrets`] = configured ? "********" : null;
+      response[`hook_${suffix}_secrets_configured`] = configured;
     }
   }
 
@@ -522,6 +589,12 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       const managedError = getAuthRuntimeManagedError(params.ref, "configuration");
       if (managedError && Object.prototype.hasOwnProperty.call(body, "auth")) {
         return status(409, managedError);
+      }
+      if (containsEmbeddedAuthSecret((body as Record<string, unknown>).auth)) {
+        return status(400, {
+          code: "SECRET_MANAGER_REQUIRED",
+          message: "Auth credentials must be written through the project control secret API",
+        });
       }
       const settings = await projectService.updateProjectSettings(
         params.ref,
@@ -802,7 +875,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         return status(404, { message: "Project not found", code: "404" });
       }
 
-      return buildAuthConfigResponse(settings);
+      return await buildAuthConfigResponse(params.ref, settings);
     },
     {
       params: t.Object({
@@ -826,8 +899,14 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         return status(404, { message: "Project not found", code: "404" });
       }
 
-      const currentAuth = (settings.auth as Record<string, unknown>) || {};
+      const currentAuth = await moveEmbeddedAuthSecrets(
+        params.ref,
+        (settings.auth as Record<string, unknown>) || {},
+      );
       const newAuth = typeof body === "object" ? body : {};
+      if (requestsUnavailablePasskeyConfig(newAuth)) {
+        return status(501, passkeyCapabilityUnavailableBody());
+      }
       let sessionPolicyPatch: ReturnType<typeof normalizeAuthSessionPolicyPatch>;
       try {
         sessionPolicyPatch = normalizeAuthSessionPolicyPatch(newAuth);
@@ -860,7 +939,6 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
             externalUpdates[provider] = {
               ...existing,
               client_id: "",
-              client_secret: "",
             };
           } else {
             externalUpdates[provider] = { ...existing };
@@ -880,12 +958,8 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
             .replace(/^EXTERNAL_/, "")
             .replace(/_SECRET$/, "")
             .toLowerCase();
-          if (val && val !== "********") {
-            const existing =
-              ((currentAuth.external as Record<string, unknown>)?.[
-                provider
-              ] as Record<string, unknown>) || {};
-            externalUpdates[provider] = { ...existing, client_secret: val };
+          if (isNewControlSecret(val)) {
+            await projectControlSecretsService.upsert(params.ref, "connector", provider, val);
           }
         } else if (
           key.startsWith("external_") &&
@@ -905,10 +979,10 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
             ...(providerVal.client_id !== undefined
               ? { client_id: providerVal.client_id }
               : {}),
-            ...(providerVal.secret && providerVal.secret !== "********"
-              ? { client_secret: providerVal.secret }
-              : {}),
           };
+          if (isNewControlSecret(providerVal.secret)) {
+            await projectControlSecretsService.upsert(params.ref, "connector", provider, providerVal.secret);
+          }
         } else if (key.startsWith("hook_")) {
           const hookMap: Record<string, string> = {
             hook_custom_access_token_enabled: "custom_access_token_hook",
@@ -921,6 +995,12 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
             hook_send_email_uri: "send_email_hook",
             hook_send_sms_enabled: "send_sms_hook",
             hook_send_sms_uri: "send_sms_hook",
+            hook_custom_access_token_secrets: "custom_access_token_hook",
+            hook_mfa_verification_attempt_secrets: "mfa_verification_hook",
+            hook_password_verification_attempt_secrets: "password_verification_hook",
+            hook_send_email_secrets: "send_email_hook",
+            hook_send_sms_secrets: "send_sms_hook",
+            hook_before_user_created_secrets: "before_user_created_hook",
           };
           const hookName = hookMap[key];
           if (hookName) {
@@ -937,6 +1017,8 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
                 ...((otherUpdates.hooks as Record<string, any>) || {}),
                 [hookName]: { ...currentHook, uri: val },
               };
+            } else if (key.endsWith("_secrets") && isNewControlSecret(val)) {
+              await projectControlSecretsService.upsert(params.ref, "auth-hook", hookName, val);
             }
           }
         } else if (key.startsWith("smtp_")) {
@@ -983,54 +1065,12 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
               [samlField]: val,
             };
           }
-        } else if (key.startsWith("passkey_")) {
-          const passkeyKeyMap: Record<string, string> = {
-            passkey_enabled: "enabled",
-            passkey_max_passkeys_per_user: "max_passkeys_per_user",
-          };
-          const passkeyField = passkeyKeyMap[key];
-          if (passkeyField) {
-            const currentPasskey =
-              (currentAuth.passkey as Record<string, unknown>) || {};
-            otherUpdates.passkey = {
-              ...((otherUpdates.passkey as Record<string, unknown>) || currentPasskey),
-              [passkeyField]: val,
-            };
-          }
-        } else if (key.startsWith("webauthn_")) {
-          const webAuthnKeyMap: Record<string, string> = {
-            webauthn_rp_id: "rp_id",
-            webauthn_rp_display_name: "rp_display_name",
-            webauthn_rp_origins: "rp_origins",
-            webauthn_challenge_expiry_duration: "challenge_expiry_duration",
-          };
-          const webAuthnField = webAuthnKeyMap[key];
-          if (webAuthnField) {
-            const currentWebAuthn =
-              (currentAuth.webauthn as Record<string, unknown>) || {};
-            otherUpdates.webauthn = {
-              ...((otherUpdates.webauthn as Record<string, unknown>) || currentWebAuthn),
-              [webAuthnField]: val,
-            };
-          }
-        } else if (key.startsWith("mfa_webauthn_")) {
-          const mfaWebAuthnKeyMap: Record<string, string> = {
-            mfa_webauthn_enroll_enabled: "enroll_enabled",
-            mfa_webauthn_verify_enabled: "verify_enabled",
-          };
-          const mfaWebAuthnField = mfaWebAuthnKeyMap[key];
-          if (mfaWebAuthnField) {
-            const currentMfa = (currentAuth.mfa as Record<string, unknown>) || {};
-            const currentWebAuthn = (currentMfa.webauthn as Record<string, unknown>) || {};
-            const nextMfa = ((otherUpdates.mfa as Record<string, unknown>) || currentMfa);
-            otherUpdates.mfa = {
-              ...nextMfa,
-              webauthn: {
-                ...currentWebAuthn,
-                ...((nextMfa.webauthn as Record<string, unknown>) || {}),
-                [mfaWebAuthnField]: val,
-              },
-            };
+        } else if (key === "security_captcha_secret") {
+          if (isNewControlSecret(val)) {
+            const provider = String(
+              newAuth.security_captcha_provider ?? currentAuth.security_captcha_provider ?? "default",
+            ).toLowerCase();
+            await projectControlSecretsService.upsert(params.ref, "captcha", provider, val);
           }
         } else if (key !== "external_providers") {
           otherUpdates[key] = val;
@@ -1092,7 +1132,16 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
           ...(otherUpdates.saml as Record<string, unknown>),
         };
 
-      mergedAuth = applyAuthSessionPolicyPatch(mergedAuth, sessionPolicyPatch);
+      try {
+        mergedAuth = canonicalAuthProviderLinkingConfig(
+          applyAuthSessionPolicyPatch(mergedAuth, sessionPolicyPatch),
+        );
+      } catch (error: unknown) {
+        if (error instanceof ProviderLinkingDomainsValidationError) {
+          return status(400, { code: "INVALID_PROVIDER_LINKING_DOMAINS", message: error.message });
+        }
+        throw error;
+      }
 
       const updated = await projectService.updateProjectSettings(params.ref, {
         ...settings,
@@ -1114,7 +1163,8 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       }
 
       const freshSettings = await projectService.getProjectSettings(params.ref);
-      return buildAuthConfigResponse(
+      return await buildAuthConfigResponse(
+        params.ref,
         (freshSettings || updated || { ...settings, auth: mergedAuth }) as Record<string, unknown>,
       );
     },
@@ -1124,7 +1174,11 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       }),
       body: t.Record(t.String(), t.Unknown()),
     
-      detail: { tags: ["projects"], summary: "Update auth config" },
+      detail: {
+        tags: ["projects"],
+        summary: "Update auth config",
+        description: "Provider linking accepts experimental.provider_linking_domains as a validated provider-to-domain map; the deprecated provider list is normalized forward.",
+      },
 },
   )
 

@@ -209,7 +209,7 @@ function parseConnectionUrl(url: string): {
   password: string;
 } {
   const match = url.match(
-    /postgresql?:\/\/([^:]+):([^@]+)@([^:]+):(\d+)\/([^?]+)/
+    /postgres(?:ql)?:\/\/([^:]+):([^@]+)@([^:]+):(\d+)\/([^?]+)/
   );
   if (!match) throw new Error(`Invalid PostgreSQL URL: ${url}`);
   const [, username, password, hostname, port, database] = match;

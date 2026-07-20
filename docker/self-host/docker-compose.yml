@@ -99,6 +99,7 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       MASTER_TOKEN: ${MASTER_TOKEN}
       SECRETS_ENCRYPTION_KEY: ${SECRETS_ENCRYPTION_KEY}
+      SUPAOAUTH_BFF_SIGNING_SECRET: ${SUPAOAUTH_BFF_SIGNING_SECRET}
       BASE_DOMAIN: ${BASE_DOMAIN:-localhost}
       CADDY_ADMIN_URL: http://caddy:2019
       MANAGEMENT_API_INTERNAL: management-api:9090
@@ -114,6 +115,11 @@ services:
     volumes:
       - tenant-config:/etc/supabase/tenants
       - functions-data:/data/functions
+      - type: bind
+        source: ${LEGACY_SECRETS_MIGRATION_FILE}
+        target: /run/secrets/supacloud-legacy-secrets-migration
+        bind:
+          create_host_path: false
     ports:
       - "${API_PORT:-9090}:9090"
     healthcheck:

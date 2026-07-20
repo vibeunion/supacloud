@@ -18,7 +18,7 @@ DO $$ BEGIN ALTER TABLE storage.objects ADD COLUMN user_metadata JSONB; EXCEPTIO
 DO $$ BEGIN ALTER TABLE storage.objects ADD COLUMN version UUID NOT NULL DEFAULT gen_random_uuid(); EXCEPTION WHEN duplicate_column THEN NULL; END $$;
 
 -- 4. MFA schemas
-DO $$ BEGIN CREATE TYPE auth.factor_type AS ENUM('totp', 'webauthn'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE TYPE auth.factor_type AS ENUM('totp'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 DO $$ BEGIN CREATE TYPE auth.factor_status AS ENUM('unverified', 'verified'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 DO $$ BEGIN CREATE TYPE auth.aal_level AS ENUM('aal1', 'aal2', 'aal3'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
@@ -110,37 +110,8 @@ CREATE TABLE IF NOT EXISTS auth.saml_relay_states (
 );
 CREATE INDEX IF NOT EXISTS saml_relay_states_sso_provider_id_idx ON auth.saml_relay_states (sso_provider_id);
 
-CREATE TABLE IF NOT EXISTS auth.webauthn_credentials (
-    id UUID NOT NULL DEFAULT gen_random_uuid(),
-    user_id UUID NOT NULL REFERENCES auth.users (id) ON DELETE CASCADE,
-    credential_id BYTEA NOT NULL,
-    public_key BYTEA NOT NULL,
-    attestation_type TEXT NOT NULL DEFAULT '',
-    aaguid UUID,
-    sign_count BIGINT NOT NULL DEFAULT 0,
-    transports JSONB NOT NULL DEFAULT '[]'::jsonb,
-    backup_eligible BOOLEAN NOT NULL DEFAULT false,
-    backed_up BOOLEAN NOT NULL DEFAULT false,
-    friendly_name TEXT NOT NULL DEFAULT '',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    last_used_at TIMESTAMPTZ,
-    CONSTRAINT webauthn_credentials_pkey PRIMARY KEY (id)
-);
-CREATE UNIQUE INDEX IF NOT EXISTS webauthn_credentials_credential_id_key ON auth.webauthn_credentials (credential_id);
-CREATE INDEX IF NOT EXISTS webauthn_credentials_user_id_idx ON auth.webauthn_credentials (user_id);
-
-CREATE TABLE IF NOT EXISTS auth.webauthn_challenges (
-    id UUID NOT NULL DEFAULT gen_random_uuid(),
-    user_id UUID REFERENCES auth.users (id) ON DELETE CASCADE,
-    challenge_type TEXT NOT NULL CHECK (challenge_type IN ('signup', 'registration', 'authentication')),
-    session_data JSONB NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    expires_at TIMESTAMPTZ NOT NULL,
-    CONSTRAINT webauthn_challenges_pkey PRIMARY KEY (id)
-);
-CREATE INDEX IF NOT EXISTS webauthn_challenges_user_id_idx ON auth.webauthn_challenges (user_id);
-CREATE INDEX IF NOT EXISTS webauthn_challenges_expires_at_idx ON auth.webauthn_challenges (expires_at);
+-- Historical WebAuthn artifacts, when present, remain untouched. This
+-- migration no longer creates or consumes them in the TOTP-only runtime.
 
 CREATE TABLE IF NOT EXISTS auth.sso_sessions (
 	id UUID NOT NULL,
@@ -207,9 +178,6 @@ CREATE TABLE IF NOT EXISTS auth.one_time_tokens (
 -- auth.mfa_factors: add columns needed by GoTrue v2.x
 DO $$ BEGIN ALTER TABLE auth.mfa_factors ADD COLUMN IF NOT EXISTS phone TEXT; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
 DO $$ BEGIN ALTER TABLE auth.mfa_factors ADD COLUMN IF NOT EXISTS last_challenged_at TIMESTAMPTZ; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
-DO $$ BEGIN ALTER TABLE auth.mfa_factors ADD COLUMN IF NOT EXISTS web_authn_credential JSONB; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
-DO $$ BEGIN ALTER TABLE auth.mfa_factors ADD COLUMN IF NOT EXISTS web_authn_aaguid UUID; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
-DO $$ BEGIN ALTER TABLE auth.mfa_factors ADD COLUMN IF NOT EXISTS last_webauthn_challenge_data JSONB; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
 
 -- auth.mfa_amr_claims: add id and factor_id columns (old schema only had session_id + authentication_method composite PK)
 DO $$
@@ -668,7 +636,7 @@ BEGIN
 EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
--- 18. Platform background task mirror table + User deletion fence
+-- 18. Platform background task mirror table; GoTrue remains the auth.users writer
 ${SQL_MODULES["background-task-mirror-up"]}
 
 -- Storage RLS policies and grants migration

@@ -206,6 +206,7 @@ describe("CaddyGatewayProvider", () => {
         const storage = routes.find((route: any) => route["@id"] === "route-project-testref123-storage");
         const storageResumable = routes.find((route: any) => route["@id"] === "route-project-testref123-storage-resumable");
         const functions = routes.find((route: any) => route["@id"] === "route-project-testref123-functions");
+        const adminUserDelete = routes.find((route: any) => route["@id"] === "route-project-testref123-auth-admin-user-delete");
         const realtime = routes.find((route: any) => route["@id"] === "route-project-testref123-realtime");
         const management = routes.find((route: any) => route["@id"] === "route-project-testref123-management");
 
@@ -217,6 +218,12 @@ describe("CaddyGatewayProvider", () => {
         expect(opaqueRest?.match?.[0]?.header_regexp?.apikey?.pattern).toContain("sb_(publishable|secret)_");
         expect(opaqueRest?.match?.[1]?.header_regexp?.Authorization?.pattern).toContain("Bearer");
         expect(opaqueRest?.handle?.at(-1)?.upstreams?.[0]?.dial).toBe("127.0.0.1:9090");
+        expect(adminUserDelete?.match?.[0]?.method).toEqual(["DELETE"]);
+        expect(adminUserDelete?.match?.[0]?.path_regexp?.pattern).toContain("/auth/v1/admin/users/");
+        expect(adminUserDelete?.handle?.at(-1)?.upstreams?.[0]?.dial).toBe("127.0.0.1:9090");
+        expect(routes.indexOf(adminUserDelete)).toBeLessThan(
+            routes.findIndex((route: any) => route["@id"] === "route-project-testref123-auth"),
+        );
         const reverseProxyHandlers = findReverseProxyHandlers(routes);
         expect(reverseProxyHandlers.every((handler: any) => !handler.upstreams?.[0]?.dial?.includes("/"))).toBe(true);
         for (const handler of reverseProxyHandlers) {
@@ -282,6 +289,7 @@ describe("CaddyGatewayProvider", () => {
         const rest = routes.find((route: any) => route["@id"] === "route-project-proj123-rest");
         const auth = routes.find((route: any) => route["@id"] === "route-project-proj123-auth-domain-auth");
         const wellKnown = routes.find((route: any) => route["@id"] === "route-project-proj123-auth-domain-gotrue-well-known");
+        const adminUserDelete = routes.find((route: any) => route["@id"] === "route-project-proj123-auth-admin-user-delete");
 
         expect(rest?.match?.[0]?.host).not.toContain("auth.example.com");
         expect(auth?.match?.[0]?.host).toEqual(["auth.example.com"]);
@@ -289,6 +297,7 @@ describe("CaddyGatewayProvider", () => {
         expect(auth?.handle?.some((handler: any) => handler.strip_path_prefix === "/auth/v1")).toBe(true);
         expect(wellKnown?.match?.[0]?.host).toEqual(["auth.example.com"]);
         expect(wellKnown?.match?.[0]?.path).toEqual(["/.well-known/oauth-authorization-server/auth/v1*"]);
+        expect(adminUserDelete?.match?.[0]?.host).toContain("auth.example.com");
 
         restore();
     });
@@ -329,6 +338,7 @@ describe("CaddyGatewayProvider", () => {
         const auth = routes.find((route: any) => route["@id"] === "route-project-bizproj-auth");
         const wellKnown = routes.find((route: any) => route["@id"] === "route-project-bizproj-gotrue-well-known");
         const authDomain = routes.find((route: any) => route["@id"] === "route-project-bizproj-auth-domain-auth");
+        const adminUserDelete = routes.find((route: any) => route["@id"] === "route-project-bizproj-auth-admin-user-delete");
 
         const restProxy = rest?.handle?.find((handler: any) => handler.handler === "reverse_proxy");
         const functionsProxy = functions?.handle?.find((handler: any) => handler.handler === "reverse_proxy");
@@ -341,6 +351,21 @@ describe("CaddyGatewayProvider", () => {
         expect(authProxy?.upstreams?.[0]?.dial).toBe("127.0.0.1:3367");
         expect(wellKnownProxy?.upstreams?.[0]?.dial).toBe("127.0.0.1:3367");
         expect(authDomainProxy?.upstreams?.[0]?.dial).toBe("127.0.0.1:3367");
+        expect(adminUserDelete?.handle?.at(-1)?.upstreams?.[0]?.dial).toBe("127.0.0.1:9090");
+        const deletePattern = String(adminUserDelete?.match?.[0]?.path_regexp?.pattern || "").replace("(?i)", "");
+        expect(new RegExp(deletePattern, "i").test(
+            "/auth/v1/admin/users/00000000-0000-4000-8000-000000000001",
+        )).toBe(true);
+        expect(new RegExp(deletePattern, "i").test(
+            "/auth/v1/admin/users/00000000-0000-4000-8000-000000000001/",
+        )).toBe(true);
+        expect(new RegExp(deletePattern, "i").test(
+            "/auth/v1/admin/users/00000000-0000-4000-8000-000000000001//",
+        )).toBe(false);
+        expect(new RegExp(deletePattern, "i").test(
+            "/auth/v1/admin/users/00000000-0000-4000-8000-000000000001/factors/factor-1",
+        )).toBe(false);
+        expect(routes.indexOf(adminUserDelete)).toBeLessThan(routes.indexOf(auth));
         expect(authProxy?.headers?.request?.set?.Host).toEqual(["auth.example.com"]);
         expect(authProxy?.headers?.request?.set?.["X-Forwarded-Host"]).toEqual(["auth.example.com"]);
 

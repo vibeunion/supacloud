@@ -151,6 +151,8 @@ export interface Config {
   sdkProxyTimeoutMs: number;
   restProxyTimeoutMs: number;
   secretsEncryptionKey: string;
+  legacySecretsEncryptionKey: string;
+  supaoauthBffSigningSecret: string;
   caddyTlsBlockedDomains: string[];
   hostedAuthPageEnabled: boolean;
   hostedAuthPageHost: string;
@@ -293,7 +295,19 @@ export const config: Config = {
   bunPath: getEnv("BUN_PATH", "bun"),
   sdkProxyTimeoutMs: Number(getEnv("SDK_PROXY_TIMEOUT_MS", "30000")),
   restProxyTimeoutMs: Number(getEnv("REST_PROXY_TIMEOUT_MS", "300000")),
-  secretsEncryptionKey: getEnv("SECRETS_ENCRYPTION_KEY", getEnv("MASTER_TOKEN", "")),
+  secretsEncryptionKey: getEnv(
+    "SECRETS_ENCRYPTION_KEY",
+    process.env.NODE_ENV === "test" || process.env.BUN_ENV === "test"
+      ? "dev-secrets-encryption-key-change-me"
+      : "",
+  ),
+  legacySecretsEncryptionKey: getEnv("LEGACY_SECRETS_ENCRYPTION_KEY"),
+  supaoauthBffSigningSecret: getEnv(
+    "SUPAOAUTH_BFF_SIGNING_SECRET",
+    process.env.NODE_ENV === "test" || process.env.BUN_ENV === "test"
+      ? "dev-supaoauth-bff-signing-secret-change-me"
+      : "",
+  ),
   caddyTlsBlockedDomains: getEnv("CADDY_TLS_BLOCKED_DOMAINS").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
 
   hostedAuthPageEnabled: getEnv("HOSTED_AUTH_PAGE_ENABLED", getEnv("SUPAUTH_HOSTED_LOGIN_ENABLED", "false")) === "true",
@@ -302,7 +316,7 @@ export const config: Config = {
 };
 
 function validateConfig() {
-  if (!config.databaseUrl || !/^postgresql?:\/\//.test(config.databaseUrl)) {
+  if (!config.databaseUrl || !/^postgres(?:ql)?:\/\//.test(config.databaseUrl)) {
     throw new Error("Invalid or missing DATABASE_URL configuration. Must be a valid postgres DSN string.");
   }
   if (!Number.isFinite(config.maxRequestBodySize) || config.maxRequestBodySize <= 0) {
@@ -319,7 +333,18 @@ function validateConfig() {
   const weakMasterToken = !config.masterToken || config.masterToken.length < 32 || config.masterToken === "dev-master-token";
   const weakJwtSecret = !config.jwtSecret || config.jwtSecret.length < 32 || config.jwtSecret === DEFAULT_JWT_SECRET;
   const weakDashboardPassword = !config.dashboardPassword || config.dashboardPassword.length < 12 || DEFAULT_DASHBOARD_PASSWORDS.has(config.dashboardPassword.toLowerCase());
-  const weakSecretsEncryptionKey = !config.secretsEncryptionKey || config.secretsEncryptionKey.length < 32 || config.secretsEncryptionKey === "dev-master-token";
+  const weakSecretsEncryptionKey = !config.secretsEncryptionKey
+    || config.secretsEncryptionKey.length < 32
+    || config.secretsEncryptionKey === "dev-master-token"
+    || config.secretsEncryptionKey === config.masterToken;
+  const invalidLegacyEncryptionKey = Boolean(config.legacySecretsEncryptionKey)
+    && (config.legacySecretsEncryptionKey.length < 32
+      || config.legacySecretsEncryptionKey === config.secretsEncryptionKey);
+  const weakBffSigningSecret = !config.supaoauthBffSigningSecret
+    || config.supaoauthBffSigningSecret.length < 32
+    || config.supaoauthBffSigningSecret === config.masterToken
+    || config.supaoauthBffSigningSecret === config.secretsEncryptionKey
+    || config.supaoauthBffSigningSecret === config.legacySecretsEncryptionKey;
 
   if (isDevelopment) {
     if (weakMasterToken) {
@@ -332,7 +357,13 @@ function validateConfig() {
       console.warn("WARNING: DASHBOARD_PASSWORD is weak or default. Set a stronger password before production use.");
     }
     if (weakSecretsEncryptionKey) {
-      console.warn("WARNING: SECRETS_ENCRYPTION_KEY is weak or missing. Set a 32+ character random value before production use.");
+      console.warn("WARNING: SECRETS_ENCRYPTION_KEY is weak, missing, or shared with MASTER_TOKEN. Set an independent 32+ character random value before using the secret store.");
+    }
+    if (invalidLegacyEncryptionKey) {
+      console.warn("WARNING: LEGACY_SECRETS_ENCRYPTION_KEY must be a distinct value of at least 32 characters when used for migration.");
+    }
+    if (weakBffSigningSecret) {
+      console.warn("WARNING: SUPAOAUTH_BFF_SIGNING_SECRET is weak or missing. Set an independent 32+ character random value before production use.");
     }
     return;
   }
@@ -347,7 +378,13 @@ function validateConfig() {
     throw new Error("DASHBOARD_PASSWORD must be set to a non-default password of at least 12 characters in production.");
   }
   if (weakSecretsEncryptionKey) {
-    throw new Error("SECRETS_ENCRYPTION_KEY must be set to a non-default random value of at least 32 characters in production.");
+    throw new Error("SECRETS_ENCRYPTION_KEY must be an independent non-default random value of at least 32 characters in production.");
+  }
+  if (invalidLegacyEncryptionKey) {
+    throw new Error("LEGACY_SECRETS_ENCRYPTION_KEY must be a distinct value of at least 32 characters when used for migration.");
+  }
+  if (weakBffSigningSecret) {
+    throw new Error("SUPAOAUTH_BFF_SIGNING_SECRET must be set to an independent random value of at least 32 characters in production.");
   }
 }
 

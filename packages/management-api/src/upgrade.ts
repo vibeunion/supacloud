@@ -1,11 +1,12 @@
-import { $ } from "bun";
+import { $, SQL } from "bun";
 import * as p from "@clack/prompts";
 import os from "node:os";
 import path from "node:path";
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { logger } from "./utils/logger";
 import { WEB_CONSOLE_CURRENT_DIR } from "./utils/web-console-path";
+import { hasSecretEncryptionCheckpoint } from "./db/secret-key-migration";
 
 const RELEASES_API = "https://api.github.com/repos/zuohuadong/supacloud/releases";
 const RELEASE_REPOSITORY = "zuohuadong/supacloud";
@@ -379,6 +380,82 @@ export async function resolveUpgradeEnvironment(
     return { ...legacyEnv, ...managementEnv, ...explicitEnv };
 }
 
+export type PreparedUpgradeSecrets = {
+    runtimeEnv: Record<string, string>;
+    runtimeSecretsToPersist: Record<string, string>;
+};
+
+function generatedPrivilegedSecret(): string {
+    return randomBytes(48).toString("base64url");
+}
+
+function assertUpgradeSecret(name: string, value: string): void {
+    if (value.length < 32 || /[\0\r\n]/.test(value)) {
+        throw new Error(`${name} must contain at least 32 characters and no control characters`);
+    }
+}
+
+type UpgradeSecretValues = {
+    masterToken: string;
+    currentEncryptionKey: string;
+    legacyEncryptionKey: string;
+    bffSigningSecret: string;
+};
+
+function resolvedUpgradeSecretValues(env: Record<string, string>): UpgradeSecretValues {
+    const masterToken = env.MASTER_TOKEN || "";
+    const previousEncryptionKey = env.SECRETS_ENCRYPTION_KEY || "";
+    const generatedEncryptionKey = !previousEncryptionKey || previousEncryptionKey === masterToken;
+    const currentEncryptionKey = generatedEncryptionKey
+        ? generatedPrivilegedSecret()
+        : previousEncryptionKey;
+    const legacyEncryptionKey = env.LEGACY_SECRETS_ENCRYPTION_KEY
+        || (generatedEncryptionKey ? masterToken : "");
+    return {
+        masterToken,
+        currentEncryptionKey,
+        legacyEncryptionKey,
+        bffSigningSecret: env.SUPAOAUTH_BFF_SIGNING_SECRET || generatedPrivilegedSecret(),
+    };
+}
+
+function validateUpgradeSecretValues(secrets: UpgradeSecretValues): void {
+    assertUpgradeSecret("MASTER_TOKEN", secrets.masterToken);
+    assertUpgradeSecret("SECRETS_ENCRYPTION_KEY", secrets.currentEncryptionKey);
+    assertUpgradeSecret("SUPAOAUTH_BFF_SIGNING_SECRET", secrets.bffSigningSecret);
+    if (secrets.legacyEncryptionKey) {
+        assertUpgradeSecret("LEGACY_SECRETS_ENCRYPTION_KEY", secrets.legacyEncryptionKey);
+    }
+    if (new Set([secrets.masterToken, secrets.currentEncryptionKey, secrets.bffSigningSecret]).size !== 3) {
+        throw new Error("Management, encryption, and BFF signing secrets must be independent");
+    }
+    if (
+        secrets.legacyEncryptionKey === secrets.currentEncryptionKey
+        || secrets.legacyEncryptionKey === secrets.bffSigningSecret
+    ) {
+        throw new Error("LEGACY_SECRETS_ENCRYPTION_KEY must differ from current runtime secrets");
+    }
+}
+
+export function prepareUpgradeSecrets(env: Record<string, string>): PreparedUpgradeSecrets {
+    const secrets = resolvedUpgradeSecretValues(env);
+    validateUpgradeSecretValues(secrets);
+    return {
+        runtimeEnv: {
+            ...env,
+            SECRETS_ENCRYPTION_KEY: secrets.currentEncryptionKey,
+            SUPAOAUTH_BFF_SIGNING_SECRET: secrets.bffSigningSecret,
+            ...(secrets.legacyEncryptionKey
+                ? { LEGACY_SECRETS_ENCRYPTION_KEY: secrets.legacyEncryptionKey }
+                : {}),
+        },
+        runtimeSecretsToPersist: {
+            SECRETS_ENCRYPTION_KEY: secrets.currentEncryptionKey,
+            SUPAOAUTH_BFF_SIGNING_SECRET: secrets.bffSigningSecret,
+        },
+    };
+}
+
 function positiveInteger(value: string | number | undefined, fallback: number) {
     const parsed = Number(value);
     return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
@@ -629,6 +706,146 @@ async function runInitDb(binaryPath: string, env: Record<string, string | undefi
     }
 }
 
+function persistUpgradeRuntimeSecrets(secrets: Record<string, string>): void {
+    for (const [name, secret] of Object.entries(secrets)) {
+        upsertEnvFileValue(managementEnvFile(), name, secret);
+    }
+}
+
+type ServiceCommandResult = { exitCode: number; stderr: string };
+
+export type ManagementServiceControl = {
+    isActive: () => Promise<boolean>;
+    stop: () => Promise<ServiceCommandResult>;
+    start: () => Promise<ServiceCommandResult>;
+    healthCheck: () => Promise<void>;
+};
+
+function managementServiceControl(): ManagementServiceControl {
+    return {
+        isActive: async () => (await $`systemctl is-active --quiet supacloud`.nothrow().quiet()).exitCode === 0,
+        stop: async () => {
+            const output = await $`systemctl stop supacloud`.nothrow().quiet();
+            return { exitCode: output.exitCode, stderr: output.stderr.toString() };
+        },
+        start: async () => {
+            const output = await $`systemctl start supacloud`.nothrow().quiet();
+            return { exitCode: output.exitCode, stderr: output.stderr.toString() };
+        },
+        healthCheck: waitForManagementHealth,
+    };
+}
+
+async function restorePartiallyStoppedService(control: ManagementServiceControl): Promise<void> {
+    const started = await control.start();
+    if (started.exitCode !== 0) {
+        throw new Error(`Failed to restore supacloud.service after stop failure: ${started.stderr.slice(-500)}`);
+    }
+    await control.healthCheck();
+}
+
+export async function stopManagementService(
+    control: ManagementServiceControl = managementServiceControl(),
+): Promise<void> {
+    const wasActive = await control.isActive();
+    const stopped = await control.stop();
+    const activeAfterStop = await control.isActive();
+    if (stopped.exitCode === 0 && !activeAfterStop) return;
+
+    const stopError = new Error(
+        `Failed to stop supacloud.service before secret migration: ${stopped.stderr.slice(-500) || "service remained active"}`,
+    );
+    if (wasActive && !activeAfterStop) {
+        try {
+            await restorePartiallyStoppedService(control);
+        } catch (recoveryError: unknown) {
+            throw new AggregateError([stopError, recoveryError], "Service stop failed and the previous service could not be restored");
+        }
+    }
+    throw stopError;
+}
+
+async function checkpointExists(databaseUrl: string, encryptionKey: string): Promise<boolean> {
+    const database = new SQL({ url: databaseUrl, max: 1 });
+    try {
+        return await hasSecretEncryptionCheckpoint(database, encryptionKey);
+    } finally {
+        await database.close();
+    }
+}
+
+export type StagedMigrationOperations = {
+    captureRuntimeEnv: () => FileState;
+    stopService: () => Promise<void>;
+    persistSecrets: (secrets: Record<string, string>) => void;
+    runInit: (binaryPath: string, env: Record<string, string | undefined>) => Promise<void>;
+    hasCheckpoint: (databaseUrl: string, encryptionKey: string) => Promise<boolean>;
+    restoreRuntimeEnv: (state: FileState) => void;
+    restart: () => Promise<void>;
+    healthCheck: () => Promise<void>;
+};
+
+function stagedMigrationOperations(): StagedMigrationOperations {
+    return {
+        captureRuntimeEnv: () => captureFileState(managementEnvFile()),
+        stopService: () => stopManagementService(),
+        persistSecrets: persistUpgradeRuntimeSecrets,
+        runInit: runInitDb,
+        hasCheckpoint: checkpointExists,
+        restoreRuntimeEnv: restoreFileState,
+        restart: restartServices,
+        healthCheck: waitForManagementHealth,
+    };
+}
+
+async function restoreRuntimeAfterMigrationFailure(
+    runtimeEnvState: FileState,
+    keepCurrentKey: boolean,
+    operations: StagedMigrationOperations,
+): Promise<void> {
+    if (!keepCurrentKey) operations.restoreRuntimeEnv(runtimeEnvState);
+    await operations.restart();
+    await operations.healthCheck();
+}
+
+export async function runStagedDatabaseMigration(
+    binaryPath: string,
+    preparedSecrets: PreparedUpgradeSecrets,
+    operations: StagedMigrationOperations = stagedMigrationOperations(),
+): Promise<void> {
+    const databaseUrl = preparedSecrets.runtimeEnv.DATABASE_URL;
+    if (!databaseUrl) throw new Error("DATABASE_URL is required for secret migration checkpoint verification");
+    const encryptionKey = preparedSecrets.runtimeSecretsToPersist.SECRETS_ENCRYPTION_KEY;
+    const runtimeEnvState = operations.captureRuntimeEnv();
+    await operations.stopService();
+    try {
+        operations.persistSecrets(preparedSecrets.runtimeSecretsToPersist);
+        await operations.runInit(binaryPath, preparedSecrets.runtimeEnv);
+        if (!(await operations.hasCheckpoint(databaseUrl, encryptionKey))) {
+            throw new Error("Secret migration checkpoint is missing after init-db");
+        }
+    } catch (migrationError: unknown) {
+        let rotationComplete: boolean;
+        try {
+            rotationComplete = await operations.hasCheckpoint(databaseUrl, encryptionKey);
+        } catch (checkpointError: unknown) {
+            throw new AggregateError(
+                [migrationError, checkpointError],
+                "Database migration failed and key state could not be verified; the service remains stopped",
+            );
+        }
+        try {
+            await restoreRuntimeAfterMigrationFailure(runtimeEnvState, rotationComplete, operations);
+        } catch (recoveryError: unknown) {
+            throw new AggregateError(
+                [migrationError, recoveryError],
+                "Database migration failed and the management runtime could not be restored",
+            );
+        }
+        throw migrationError;
+    }
+}
+
 function upsertEnvFileValue(filePath: string, key: string, value: string) {
     mkdirSync(path.dirname(filePath), { recursive: true });
     const existing = existsSync(filePath) ? readFileSync(filePath, "utf8") : "";
@@ -831,7 +1048,8 @@ export async function runUpgrade(options: { forceYes?: boolean; targetVersion?: 
             return;
         }
 
-        const env = await resolveUpgradeEnvironment();
+        const preparedSecrets = prepareUpgradeSecrets(await resolveUpgradeEnvironment());
+        const env = preparedSecrets.runtimeEnv;
         const checksums = await downloadReleaseChecksums(release, endpoint, options.forceYes);
         let stagedBinary: StagedBinary | null = null;
         let stagedWeb: StagedWebConsole | null = null;
@@ -852,7 +1070,7 @@ export async function runUpgrade(options: { forceYes?: boolean; targetVersion?: 
             migrate: async () => {
                 if (!stagedBinary) throw new Error("Upgrade binary was not staged");
                 s.start("Applying backward-compatible metadata database migrations with the staged binary");
-                await runInitDb(stagedBinary.path, env);
+                await runStagedDatabaseMigration(stagedBinary.path, preparedSecrets);
             },
             activate: async () => {
                 if (!stagedBinary) throw new Error("Upgrade binary was not staged");

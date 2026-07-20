@@ -24,6 +24,8 @@ function cleanEnv(overrides: Record<string, string>) {
     "SUPACLOUD_MANAGEMENT_ENV_FILE",
     "SUPACLOUD_LEGACY_CONFIG_ENV_FILE",
     "SUPACLOUD_LOCAL_ENV_FILE",
+    "SUPAOAUTH_BFF_SIGNING_SECRET",
+    "LEGACY_SECRETS_ENCRYPTION_KEY",
   ]) {
     delete env[key];
   }
@@ -33,6 +35,7 @@ function cleanEnv(overrides: Record<string, string>) {
     JWT_SECRET: "production-jwt-secret-0123456789abcdef",
     DASHBOARD_PASSWORD: "production-dashboard-password",
     SECRETS_ENCRYPTION_KEY: "production-encryption-key-0123456789abcdef",
+    SUPAOAUTH_BFF_SIGNING_SECRET: "production-bff-signing-secret-0123456789abcdef",
     ...overrides,
   };
 }
@@ -55,7 +58,67 @@ function loadNodeEnvironment(env: Record<string, string>) {
   return result.stdout.match(/RESULT=([^\n]+)/)?.[1];
 }
 
+function loadDatabaseUrl(env: Record<string, string>) {
+  const result = spawnSync("bun", ["-e", [
+    'import { config } from "./src/config.ts";',
+    'console.log(`RESULT=${config.databaseUrl}`);',
+  ].join(" ")], { cwd: packageRoot, env, encoding: "utf8" });
+  expect(result.status, result.stderr).toBe(0);
+  return result.stdout.match(/RESULT=([^\n]+)/)?.[1];
+}
+
 describe("production config loading boundaries", () => {
+  test("accepts standard postgres and postgresql DSN schemes", () => {
+    for (const scheme of ["postgres", "postgresql"]) {
+      const databaseUrl = `${scheme}://postgres:secret@localhost:5432/supacloud`;
+      expect(loadDatabaseUrl(cleanEnv({ NODE_ENV: "production", DATABASE_URL: databaseUrl })))
+        .toBe(databaseUrl);
+    }
+  });
+
+  test("rejects a BFF signing secret shared with another privileged key", () => {
+    const sharedSecret = "shared-privileged-secret-0123456789abcdef";
+    const result = spawnSync("bun", ["-e", 'import "./src/config.ts";'], {
+      cwd: packageRoot,
+      env: cleanEnv({
+        NODE_ENV: "production",
+        MASTER_TOKEN: sharedSecret,
+        SUPAOAUTH_BFF_SIGNING_SECRET: sharedSecret,
+      }),
+      encoding: "utf8",
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("SUPAOAUTH_BFF_SIGNING_SECRET");
+  });
+
+  test("accepts the old master token only as a distinct migration key", () => {
+    const result = spawnSync("bun", ["-e", 'import "./src/config.ts";'], {
+      cwd: packageRoot,
+      env: cleanEnv({
+        NODE_ENV: "production",
+        LEGACY_SECRETS_ENCRYPTION_KEY: "production-master-token-0123456789abcdef",
+      }),
+      encoding: "utf8",
+    });
+    expect(result.status, result.stderr).toBe(0);
+  });
+
+  test("rejects a legacy migration key shared with the current encryption key", () => {
+    const sharedKey = "shared-encryption-key-0123456789abcdef";
+    const result = spawnSync("bun", ["-e", 'import "./src/config.ts";'], {
+      cwd: packageRoot,
+      env: cleanEnv({
+        NODE_ENV: "production",
+        SECRETS_ENCRYPTION_KEY: sharedKey,
+        LEGACY_SECRETS_ENCRYPTION_KEY: sharedKey,
+      }),
+      encoding: "utf8",
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("LEGACY_SECRETS_ENCRYPTION_KEY");
+  });
+
   test("management runtime env wins and tracked config.env is ignored in production", () => {
     const dir = mkdtempSync(join(tmpdir(), "supacloud-config-loading-"));
     tempDirs.push(dir);

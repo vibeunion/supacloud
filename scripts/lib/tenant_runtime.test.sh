@@ -11,8 +11,8 @@ grep -Fq 'v14.15' "$RUNTIME_SCRIPT"
 grep -Fq '4e78c7f065a6c36f350c7177f5fa9bb77ea380c67b8bf40f2fc9130d857678dc' "$RUNTIME_SCRIPT"
 grep -Fq '1eb007298c1536ba865e741da7eece6fba6db3da904c599abd15d9c3debe6c2f' "$RUNTIME_SCRIPT"
 grep -Fq 'v2.193.0' "$RUNTIME_SCRIPT"
-grep -Fq 'c991b6fb8747bbcbcef40701177234f152cea28a108a481bae917bacc1a522c5' "$RUNTIME_SCRIPT"
-grep -Fq '432fa68ef58afac8665d45537d8adbba5756b01829f175ed7ef6314b3ca59995' "$RUNTIME_SCRIPT"
+grep -Fq 'GOTRUE_EXPERIMENTAL_PROVIDER_LINKING_DOMAINS' "$RUNTIME_SCRIPT"
+grep -Fq 'run the explicit SupaCloud installer/upgrade' "$RUNTIME_SCRIPT"
 
 if grep -Fq 'gh-proxy.net' "$RUNTIME_SCRIPT"; then
     echo "tenant_runtime.sh must not default to a third-party GitHub proxy" >&2
@@ -67,6 +67,66 @@ for serializer in uri_percent_encode systemd_env_quote toml_basic_string; do
         exit 1
     fi
 done
+
+unset GOTRUE_EXPERIMENTAL_PROVIDER_LINKING_DOMAINS
+unset GOTRUE_EXPERIMENTAL_PROVIDERS_WITH_OWN_LINKING_DOMAIN
+[[ -z "$(render_gotrue_provider_linking_env)" ]]
+
+GOTRUE_EXPERIMENTAL_PROVIDER_LINKING_DOMAINS='custom:github=social,custom:google=social'
+provider_linking_env=$(render_gotrue_provider_linking_env)
+if [[ "$provider_linking_env" != 'GOTRUE_EXPERIMENTAL_PROVIDER_LINKING_DOMAINS="custom:github=social,custom:google=social"' ]]; then
+    echo "provider linking map was not rendered deterministically" >&2
+    exit 1
+fi
+[[ "$provider_linking_env" != *GOTRUE_EXPERIMENTAL_PROVIDERS_WITH_OWN_LINKING_DOMAIN* ]]
+
+unset GOTRUE_EXPERIMENTAL_PROVIDER_LINKING_DOMAINS
+GOTRUE_EXPERIMENTAL_PROVIDERS_WITH_OWN_LINKING_DOMAIN='github,google'
+if [[ "$(render_gotrue_provider_linking_env)" != 'GOTRUE_EXPERIMENTAL_PROVIDER_LINKING_DOMAINS="github=github,google=google"' ]]; then
+    echo "legacy provider linking input was not normalized" >&2
+    exit 1
+fi
+
+GOTRUE_EXPERIMENTAL_PROVIDER_LINKING_DOMAINS='github=default'
+provider_linking_env=$(render_gotrue_provider_linking_env)
+if [[ "$provider_linking_env" != 'GOTRUE_EXPERIMENTAL_PROVIDER_LINKING_DOMAINS="github=default,google=google"' ]]; then
+    echo "canonical provider linking input did not override the legacy entry" >&2
+    exit 1
+fi
+
+GOTRUE_EXPERIMENTAL_PROVIDER_LINKING_DOMAINS='missing-domain'
+if render_gotrue_provider_linking_env >/dev/null 2>&1; then
+    echo "provider linking accepted a mapping without provider=domain" >&2
+    exit 1
+fi
+GOTRUE_EXPERIMENTAL_PROVIDER_LINKING_DOMAINS='github=social,'
+if render_gotrue_provider_linking_env >/dev/null 2>&1; then
+    echo "provider linking accepted an empty trailing mapping" >&2
+    exit 1
+fi
+GOTRUE_EXPERIMENTAL_PROVIDER_LINKING_DOMAINS=$'github=social\nGOTRUE_OPERATOR_TOKEN=stolen'
+if render_gotrue_provider_linking_env >/dev/null 2>&1; then
+    echo "provider linking accepted a control-character injection" >&2
+    exit 1
+fi
+unset GOTRUE_EXPERIMENTAL_PROVIDER_LINKING_DOMAINS
+GOTRUE_EXPERIMENTAL_PROVIDERS_WITH_OWN_LINKING_DOMAIN='github,'
+if render_gotrue_provider_linking_env >/dev/null 2>&1; then
+    echo "legacy provider linking accepted an empty trailing entry" >&2
+    exit 1
+fi
+unset GOTRUE_EXPERIMENTAL_PROVIDERS_WITH_OWN_LINKING_DOMAIN
+
+fake_gotrue="$tmp_dir/gotrue"
+printf '#!/bin/sh\n[ "$1" = version ] && printf "v2.193.0\\n"\n' > "$fake_gotrue"
+chmod 755 "$fake_gotrue"
+GOTRUE_BIN="$fake_gotrue"
+ensure_gotrue
+printf '#!/bin/sh\n[ "$1" = version ] && printf "v2.192.0\\n"\n' > "$fake_gotrue"
+if ensure_gotrue >/dev/null 2>&1; then
+    echo "tenant start accepted an outdated GoTrue binary" >&2
+    exit 1
+fi
 
 # Database text is assigned without command-substitution trimming, so a trailing
 # or embedded newline reaches the fail-closed serializer instead of being lost.
@@ -441,5 +501,7 @@ printf 'LEGACY=true\n' > "$legacy_stop_dir/legacystop_gotrue.d/runtime.env"
 [[ ! -e "$legacy_stop_dir/legacystop_gotrue.env" ]]
 [[ ! -e "$legacy_stop_dir/legacystop_gotrue.d" ]]
 grep -Fq 'userdel supacloud-legacystop' "$legacy_stop_log"
+
+bash "${SCRIPT_DIR}/gotrue_upgrade.test.sh"
 
 echo "tenant runtime security checks passed"

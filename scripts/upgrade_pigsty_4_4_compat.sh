@@ -14,6 +14,7 @@ ANALYTICS_DB="${LOGFLARE_DB:-_supabase}"
 ANALYTICS_SCHEMA="${LOGFLARE_SCHEMA:-_analytics}"
 ANALYTICS_OWNER="${LOGFLARE_DB_OWNER:-supabase_admin}"
 META_DB="${SUPACLOUD_META_DB:-supacloud_meta}"
+MANAGEMENT_BINARY="${SUPACLOUD_MANAGEMENT_BINARY:-supacloud}"
 ANALYTICS_MIGRATION_ID="pigsty-4.4-postgres-analytics-to-${ANALYTICS_DB}"
 ANALYTICS_STOPPED_BY_SCRIPT=false
 ANALYTICS_PREPARE_COMPLETED=false
@@ -85,8 +86,8 @@ Rollback guidance:
 5. Recreate the Analytics service after restoring its environment so Docker applies the restored values.
 6. Do not drop ${ANALYTICS_DB} automatically. Restore or remove it only after confirming its backup.
 7. Before --apply, save pg_get_functiondef output for public.set_request_context(), auth.uid(),
-   auth.jwt(), auth.role(), and public.soft_delete_user_if_no_active_tasks(), plus the auth.users
-   trigger definition. Reapply those definitions to undo compatibility function changes.
+   and auth.jwt()/auth.role(), plus the public.background_task_mirrors schema. The upgrade
+   permanently removes the legacy auth.users delete fence so GoTrue remains authoritative.
 8. Restore ${PGBOUNCER_AUTH_FILE}.pre-pigsty-4.4-* only after checking that its saved structure is valid.
 9. Revoke dbuser_monitor CONNECT only on databases where the saved privilege baseline proves it was absent.
 EOF
@@ -688,7 +689,7 @@ check_auth_jwt_helpers_compat() {
     FROM source"
 }
 
-apply_auth_delete_fence_compat() {
+apply_background_task_mirror_compat() {
   local database="$1"
   local applicable
   applicable="$(query_scalar "$database" "
@@ -702,21 +703,10 @@ apply_auth_delete_fence_compat() {
 BEGIN;
 
 -- supacloud:sql-module:background-task-mirror-up:start
-DO $migration$
-BEGIN
-  IF EXISTS (
-    SELECT 1
-    FROM pg_proc p
-    WHERE p.oid = to_regprocedure('public.has_active_background_tasks(uuid)')
-      AND p.prorettype <> 'text'::regtype
-  ) THEN
-    DROP TRIGGER IF EXISTS auth_users_delete_fence ON auth.users;
-    DROP FUNCTION IF EXISTS public.soft_delete_user_if_no_active_tasks();
-    DROP FUNCTION IF EXISTS public.hard_delete_soft_deleted_users();
-    DROP FUNCTION IF EXISTS public.has_active_background_tasks(UUID);
-  END IF;
-END
-$migration$;
+DROP TRIGGER IF EXISTS auth_users_delete_fence ON auth.users;
+DROP FUNCTION IF EXISTS public.soft_delete_user_if_no_active_tasks();
+DROP FUNCTION IF EXISTS public.hard_delete_soft_deleted_users();
+DROP FUNCTION IF EXISTS public.has_active_background_tasks(UUID);
 
 CREATE TABLE IF NOT EXISTS public.background_task_mirrors (
   id               UUID PRIMARY KEY,
@@ -746,196 +736,61 @@ CREATE INDEX IF NOT EXISTS idx_bg_task_mirrors_invoker_active
 CREATE INDEX IF NOT EXISTS idx_bg_task_mirrors_status
   ON public.background_task_mirrors(status);
 
-CREATE OR REPLACE FUNCTION public.has_active_background_tasks(p_user_id UUID)
-RETURNS TEXT AS $$
-DECLARE
-  v_count INTEGER;
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM information_schema.tables
-    WHERE table_schema = 'public' AND table_name = 'background_task_mirrors'
-  ) THEN
-    RAISE NOTICE 'has_active_background_tasks: background_task_mirrors table missing for user %', p_user_id;
-    RETURN 'unknown';
-  END IF;
-
-  SELECT COUNT(*) INTO v_count
-  FROM public.background_task_mirrors
-  WHERE invoker_user_id = p_user_id
-    AND status IN ('pending','leased','running','retry_scheduled');
-
-  IF v_count > 0 THEN
-    RETURN 'active';
-  END IF;
-
-  RETURN 'inactive';
-EXCEPTION WHEN OTHERS THEN
-  RAISE NOTICE 'has_active_background_tasks: exception for user % — %', p_user_id, SQLERRM;
-  RETURN 'unknown';
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER STABLE SET search_path = pg_catalog;
-
-REVOKE ALL ON FUNCTION public.has_active_background_tasks(UUID) FROM PUBLIC;
-
-CREATE OR REPLACE FUNCTION public.soft_delete_user_if_no_active_tasks()
-RETURNS TRIGGER AS $$
-DECLARE
-  v_task_state TEXT;
-BEGIN
-  IF OLD.deleted_at IS NOT NULL THEN
-    RETURN OLD;
-  END IF;
-
-  v_task_state := public.has_active_background_tasks(OLD.id);
-
-  IF v_task_state = 'inactive' THEN
-    RETURN OLD;
-  END IF;
-
-  UPDATE auth.users SET deleted_at = NOW() WHERE id = OLD.id;
-
-  IF v_task_state = 'unknown' THEN
-    RAISE NOTICE 'soft_delete_user_if_no_active_tasks: degraded/unknown for user %, blocking hard delete', OLD.id;
-    RETURN NULL;
-  END IF;
-
-  RETURN NULL;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
-
-REVOKE ALL ON FUNCTION public.soft_delete_user_if_no_active_tasks() FROM PUBLIC;
-
-DROP TRIGGER IF EXISTS auth_users_delete_fence ON auth.users;
-CREATE TRIGGER auth_users_delete_fence
-  BEFORE DELETE ON auth.users
-  FOR EACH ROW
-  EXECUTE FUNCTION public.soft_delete_user_if_no_active_tasks();
-
-CREATE OR REPLACE FUNCTION public.hard_delete_soft_deleted_users()
-RETURNS INT AS $$
-DECLARE
-  deleted_count INT := 0;
-  user_record RECORD;
-  v_task_state TEXT;
-BEGIN
-  FOR user_record IN
-    SELECT id FROM auth.users
-    WHERE deleted_at IS NOT NULL
-      AND deleted_at < NOW() - INTERVAL '1 hour'
-  LOOP
-    v_task_state := public.has_active_background_tasks(user_record.id);
-    IF v_task_state = 'inactive' THEN
-      DELETE FROM auth.users WHERE id = user_record.id;
-      deleted_count := deleted_count + 1;
-    END IF;
-  END LOOP;
-  RETURN deleted_count;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
-
-REVOKE ALL ON FUNCTION public.hard_delete_soft_deleted_users() FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.hard_delete_soft_deleted_users() TO service_role;
-
 NOTIFY pgrst, 'reload schema';
 -- supacloud:sql-module:background-task-mirror-up:end
 
-COMMENT ON FUNCTION public.soft_delete_user_if_no_active_tasks()
-  IS 'supacloud:pigsty-4.4-auth-delete-fence:v2';
+COMMENT ON TABLE public.background_task_mirrors
+  IS 'supacloud:pigsty-4.4-background-task-mirror:v3';
 
 COMMIT;
 SQL
 }
 
-check_auth_delete_fence_compat() {
+check_background_task_mirror_compat() {
   local database="$1"
   query_scalar "$database" "
-    WITH target AS (
-      SELECT p.oid,
-        p.proname,
-        p.prorettype,
-        p.prosecdef,
-        p.proconfig,
-        NOT EXISTS (
-          SELECT 1
-          FROM aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) acl
-          WHERE acl.grantee = 0 AND acl.privilege_type = 'EXECUTE'
-        ) AS public_execute_revoked,
-        t.tgenabled,
-        t.tgtype,
-        position('/*' IN lower(p.prosrc)) > 0 AS has_block_comment,
-        regexp_replace(
-          regexp_replace(lower(p.prosrc), E'--[^\\n\\r]*', ' ', 'g'),
-          '[[:space:]]+',
-          ' ',
-          'g'
-        ) AS source
-      FROM pg_trigger t
-      JOIN pg_proc p ON p.oid = t.tgfoid
-      WHERE t.tgrelid = to_regclass('auth.users')
-        AND t.tgname = 'auth_users_delete_fence'
-        AND NOT t.tgisinternal
-    ), helper AS (
-      SELECT p.oid,
-        p.prorettype = 'text'::regtype AS returns_text,
-        p.prosecdef,
-        p.proconfig,
-        NOT EXISTS (
-          SELECT 1
-          FROM aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) acl
-          WHERE acl.grantee = 0 AND acl.privilege_type = 'EXECUTE'
-        ) AS public_execute_revoked
-      FROM pg_proc p
-      WHERE p.oid = to_regprocedure('public.has_active_background_tasks(uuid)')
-    ), cleanup AS (
-      SELECT p.oid,
-        p.prosecdef,
-        p.proconfig,
-        NOT EXISTS (
-          SELECT 1
-          FROM aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) acl
-          WHERE acl.grantee = 0 AND acl.privilege_type = 'EXECUTE'
-        ) AS public_execute_revoked,
-        EXISTS (
-          SELECT 1
-          FROM aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) acl
-          JOIN pg_roles role_grantee ON role_grantee.oid = acl.grantee
-          WHERE role_grantee.rolname = 'service_role'
-            AND acl.privilege_type = 'EXECUTE'
-        ) AS service_role_execute
-      FROM pg_proc p
-      WHERE p.oid = to_regprocedure('public.hard_delete_soft_deleted_users()')
+    WITH mirror AS (
+      SELECT c.relrowsecurity,
+        obj_description(c.oid, 'pg_class') AS object_comment
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public'
+        AND c.relname = 'background_task_mirrors'
+        AND c.relkind = 'r'
+    ), required_columns AS (
+      SELECT count(*)::int AS count
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'background_task_mirrors'
+        AND column_name IN (
+          'id', 'project_ref', 'task_type', 'function_slug', 'status', 'invoker_user_id',
+          'attempt', 'max_attempts', 'trace_id', 'created_at', 'updated_at'
+        )
+    ), required_indexes AS (
+      SELECT count(*)::int AS count
+      FROM pg_indexes
+      WHERE schemaname = 'public'
+        AND tablename = 'background_task_mirrors'
+        AND indexname IN ('idx_bg_task_mirrors_invoker_active', 'idx_bg_task_mirrors_status')
     )
     SELECT CASE
       WHEN to_regclass('auth.users') IS NULL THEN 'not-applicable'
-      WHEN NOT EXISTS (SELECT 1 FROM target)
-        OR NOT EXISTS (SELECT 1 FROM helper)
-        OR NOT EXISTS (SELECT 1 FROM cleanup)
+      WHEN NOT EXISTS (SELECT 1 FROM mirror)
+        OR NOT (SELECT relrowsecurity FROM mirror)
+        OR (SELECT object_comment FROM mirror) IS DISTINCT FROM 'supacloud:pigsty-4.4-background-task-mirror:v3'
+        OR (SELECT count FROM required_columns) <> 11
+        OR (SELECT count FROM required_indexes) <> 2
+        OR EXISTS (
+          SELECT 1 FROM pg_trigger
+          WHERE tgrelid = to_regclass('auth.users')
+            AND tgname = 'auth_users_delete_fence'
+            AND NOT tgisinternal
+        )
+        OR to_regprocedure('public.soft_delete_user_if_no_active_tasks()') IS NOT NULL
+        OR to_regprocedure('public.hard_delete_soft_deleted_users()') IS NOT NULL
+        OR to_regprocedure('public.has_active_background_tasks(uuid)') IS NOT NULL
         THEN 'incompatible'
-      WHEN (SELECT proname FROM target) = 'soft_delete_user_if_no_active_tasks'
-       AND (SELECT prorettype FROM target) = 'trigger'::regtype
-       AND (SELECT prosecdef FROM target)
-       AND coalesce((SELECT proconfig FROM target), ARRAY[]::text[]) @> ARRAY['search_path=pg_catalog']
-       AND (SELECT public_execute_revoked FROM target)
-       AND (SELECT t.tgenabled IN ('O', 'A') FROM target t)
-       AND (SELECT t.tgtype = 11 FROM target t)
-       AND NOT (SELECT has_block_comment FROM target)
-       AND obj_description((SELECT oid FROM target), 'pg_proc') = 'supacloud:pigsty-4.4-auth-delete-fence:v2'
-       AND position('v_task_state := public.has_active_background_tasks(old.id);' IN (SELECT source FROM target)) > 0
-       AND (SELECT source FROM target) ~ 'if v_task_state = ''inactive'' then return old; end if; update auth[.]users set deleted_at = now[(][)] where id = old[.]id;'
-       AND position('update auth.users set deleted_at = now() where id = old.id;' IN (SELECT source FROM target))
-         > position('v_task_state := public.has_active_background_tasks(old.id);' IN (SELECT source FROM target))
-       AND position('return null;' IN (SELECT source FROM target))
-         > position('update auth.users set deleted_at = now() where id = old.id;' IN (SELECT source FROM target))
-       AND (SELECT returns_text FROM helper)
-       AND (SELECT prosecdef FROM helper)
-       AND coalesce((SELECT proconfig FROM helper), ARRAY[]::text[]) @> ARRAY['search_path=pg_catalog']
-       AND (SELECT public_execute_revoked FROM helper)
-       AND (SELECT prosecdef FROM cleanup)
-       AND coalesce((SELECT proconfig FROM cleanup), ARRAY[]::text[]) @> ARRAY['search_path=pg_catalog']
-       AND (SELECT public_execute_revoked FROM cleanup)
-       AND (SELECT service_role_execute FROM cleanup)
-        THEN 'compatible'
-      ELSE 'incompatible'
+      ELSE 'compatible'
     END"
 }
 
@@ -1223,8 +1078,108 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_secret_key_hash
 SQL
 }
 
+check_control_user_deletion_fence() {
+  query_scalar "$META_DB" "
+    SELECT CASE
+      WHEN to_regclass('public.project_user_deletion_fences') IS NULL
+        THEN 'missing-fence-table'
+      WHEN to_regclass('public.project_tasks') IS NULL
+        THEN 'missing-project-tasks'
+      WHEN NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'project_user_deletion_fences'
+          AND column_name IN ('operation_id', 'operation_expires_at')
+        GROUP BY table_schema, table_name
+        HAVING count(*) = 2
+      ) THEN 'missing-operation-columns'
+      WHEN NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'project_tasks'
+          AND column_name = 'invoker_user_id'
+      ) THEN 'missing-invoker-column'
+      WHEN NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'project_tasks'
+          AND column_name = 'auth_authority_ref'
+          AND is_nullable = 'NO'
+      ) THEN 'missing-auth-authority-column'
+      WHEN NOT EXISTS (
+        SELECT 1
+        FROM pg_index index_meta
+        JOIN pg_class index_relation ON index_relation.oid = index_meta.indexrelid
+        JOIN pg_class task_relation ON task_relation.oid = index_meta.indrelid
+        JOIN pg_namespace task_namespace ON task_namespace.oid = task_relation.relnamespace
+        WHERE task_namespace.nspname = 'public'
+          AND task_relation.relname = 'project_tasks'
+          AND index_relation.relname = 'idx_project_tasks_authority_invoker_active'
+          AND index_meta.indnkeyatts = 3
+          AND ARRAY(
+            SELECT attribute.attname
+            FROM unnest(index_meta.indkey) WITH ORDINALITY AS key_column(attnum, position)
+            JOIN pg_attribute attribute
+              ON attribute.attrelid = task_relation.oid
+             AND attribute.attnum = key_column.attnum
+            WHERE key_column.position <= index_meta.indnkeyatts
+            ORDER BY key_column.position
+          ) = ARRAY['auth_authority_ref', 'invoker_user_id', 'status']::name[]
+          AND pg_get_expr(index_meta.indpred, index_meta.indrelid) ILIKE '%pending%'
+          AND pg_get_expr(index_meta.indpred, index_meta.indrelid) ILIKE '%leased%'
+          AND pg_get_expr(index_meta.indpred, index_meta.indrelid) ILIKE '%running%'
+          AND pg_get_expr(index_meta.indpred, index_meta.indrelid) ILIKE '%retry_scheduled%'
+      ) THEN 'missing-auth-authority-index'
+      WHEN to_regprocedure('public.enforce_project_user_deletion_fence()') IS NULL
+        THEN 'missing-fence-function'
+      WHEN POSITION('NEW.auth_authority_ref' IN pg_get_functiondef(
+        to_regprocedure('public.enforce_project_user_deletion_fence()')
+      )) = 0
+        OR POSITION('pg_advisory_xact_lock' IN pg_get_functiondef(
+          to_regprocedure('public.enforce_project_user_deletion_fence()')
+        )) = 0
+        OR POSITION('project_user_deletion_fences' IN pg_get_functiondef(
+          to_regprocedure('public.enforce_project_user_deletion_fence()')
+        )) = 0
+        THEN 'stale-fence-function'
+      WHEN NOT EXISTS (
+        SELECT 1
+        FROM pg_trigger
+        WHERE tgrelid = 'public.project_tasks'::regclass
+          AND tgname = 'project_tasks_user_deletion_fence'
+          AND NOT tgisinternal
+          AND tgenabled <> 'D'
+      ) THEN 'missing-fence-trigger'
+      ELSE 'compatible'
+    END"
+}
+
+run_management_init_and_verify_user_deletion_fence() {
+  if ! command -v "$MANAGEMENT_BINARY" >/dev/null 2>&1; then
+    printf '[FAIL] Matching SupaCloud management binary is required before tenant delete-fence cleanup: %s\n' "$MANAGEMENT_BINARY" >&2
+    return 1
+  fi
+
+  "$MANAGEMENT_BINARY" --init-db
+  local fence_result
+  fence_result="$(check_control_user_deletion_fence)"
+  if [[ "$fence_result" != "compatible" ]]; then
+    printf '[FAIL] Control-plane user deletion fence verification failed after --init-db: %s\n' "$fence_result" >&2
+    return 1
+  fi
+  printf '[PASS] Control-plane user deletion fence is active before tenant legacy cleanup\n'
+}
+
 check_all() {
   local failed=0
+  local control_fence_result
+  control_fence_result="$(check_control_user_deletion_fence)"
+  if [[ "$control_fence_result" == "compatible" ]]; then
+    printf '[PASS] Control-plane user deletion fence is compatible\n'
+  else
+    printf '[FAIL] Control-plane user deletion fence: %s\n' "$control_fence_result"
+    failed=1
+  fi
   if database_exists "$ANALYTICS_DB"; then
     if [[ "$(query_scalar "$ANALYTICS_DB" "SELECT 1 FROM pg_namespace WHERE nspname = '$ANALYTICS_SCHEMA'")" != "1" ]]; then
       printf '[FAIL] Analytics schema missing: %s.%s\n' "$ANALYTICS_DB" "$ANALYTICS_SCHEMA"
@@ -1280,14 +1235,14 @@ check_all() {
           printf '[FAIL] Auth JWT helper compatibility: %s (%s)\n' "$database" "$auth_jwt_helpers_result"
           failed=1
         fi
-        local auth_delete_fence_result
-        auth_delete_fence_result="$(check_auth_delete_fence_compat "$database")"
-        if [[ "$auth_delete_fence_result" == "compatible" ]]; then
-          printf '[PASS] Auth user delete fence compatibility: %s\n' "$database"
-        elif [[ "$auth_delete_fence_result" == "not-applicable" ]]; then
-          printf '[PASS] Auth user delete fence not applicable: %s\n' "$database"
+        local background_task_mirror_result
+        background_task_mirror_result="$(check_background_task_mirror_compat "$database")"
+        if [[ "$background_task_mirror_result" == "compatible" ]]; then
+          printf '[PASS] Background task mirror compatibility: %s\n' "$database"
+        elif [[ "$background_task_mirror_result" == "not-applicable" ]]; then
+          printf '[PASS] Background task mirror not applicable: %s\n' "$database"
         else
-          printf '[FAIL] Auth user delete fence compatibility: %s (%s)\n' "$database" "$auth_delete_fence_result"
+          printf '[FAIL] Background task mirror compatibility: %s (%s)\n' "$database" "$background_task_mirror_result"
           failed=1
         fi
       fi
@@ -1421,7 +1376,8 @@ if [[ "$MODE" == "dry-run" ]]; then
   printf '%s\n' "$target_databases" | sed 's/^/  - /'
   printf 'Would repair PostgREST pre-request compatibility in active tenant databases.\n'
   printf 'Would repair auth.uid/auth.jwt/auth.role for claims-only modern Session JWTs.\n'
-  printf 'Would repair the Auth user delete fence without mutating rows before an allowed hard DELETE.\n'
+  printf 'Would require the matching management binary, run --init-db, and verify the control-plane deletion fence.\n'
+  printf 'Would only then remove the legacy auth.users delete fence and reconcile the background task mirror.\n'
   printf 'Would reconcile active tenant authenticator roles and their canonical passwords.\n'
   if is_pigsty_profile; then
     printf 'Would reconcile an empty PGPASSWORD alias from PG_PASSWORD without printing either value.\n'
@@ -1479,6 +1435,7 @@ if [[ "$MODE" == "apply" ]]; then
   migrate_legacy_analytics
   grant_analytics_owner_privileges
   is_pigsty_profile && patch_pigsty_env
+  run_management_init_and_verify_user_deletion_fence
   apply_metadata_columns
   if is_pigsty_profile; then
     reconcile_management_pgpassword_alias
@@ -1493,15 +1450,10 @@ if [[ "$MODE" == "apply" ]]; then
     if [[ "$database" != "postgres" ]]; then
       apply_postgrest_prerequest_compat "$database"
       apply_auth_jwt_helpers_compat "$database"
-      apply_auth_delete_fence_compat "$database"
+      apply_background_task_mirror_compat "$database"
     fi
   done <<< "$target_databases"
 
-  if command -v supacloud >/dev/null 2>&1; then
-    supacloud --init-db
-  else
-    printf '[WARN] supacloud binary not found; opaque keys will be encrypted/backfilled when the new management binary runs --init-db.\n' >&2
-  fi
 fi
 
 check_all

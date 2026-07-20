@@ -12,6 +12,12 @@ function readRepoFile(path: string): string {
   return readFileSync(join(repoRoot, path), "utf8");
 }
 
+function readShellConstant(script: string, name: string): string {
+  const assignment = script.match(new RegExp(`^${name}="([^"]+)"$`, "m"));
+  if (!assignment) throw new Error(`Missing shell constant: ${name}`);
+  return assignment[1];
+}
+
 describe("runtime companion version assets", () => {
   test("release resolver falls back to the latest component release containing every requested asset", () => {
     const releases = JSON.stringify([
@@ -795,37 +801,44 @@ describe("runtime companion version assets", () => {
     }
   });
 
-  test("installer downloads the current GoTrue release asset names", () => {
+  test("installer upgrades GoTrue from the current pinned release", () => {
     const installer = readRepoFile("install.sh");
+    const upgrade = readRepoFile("scripts/lib/gotrue_upgrade.sh");
 
-    expect(installer).toContain('GOTRUE_VERSION="${GOTRUE_VERSION:-v2.193.0}"');
-    expect(installer).toContain('GOTRUE_ARCH="amd64"');
-    expect(installer).toContain('GOTRUE_ARCH="arm64"');
-    expect(installer).toContain('local GOTRUE_EXT="tar.xz"');
+    expect(readShellConstant(upgrade, "SUPACLOUD_GOTRUE_DEFAULT_VERSION")).toBe("v2.193.0");
+    expect(installer).toContain('source "${SCRIPT_DIR}/scripts/lib/gotrue_upgrade.sh"');
     expect(installer).toContain(
-      'auth-${GOTRUE_VERSION}-${GOTRUE_ARCH}.${GOTRUE_EXT}',
+      'local GOTRUE_VERSION="${GOTRUE_VERSION:-$SUPACLOUD_GOTRUE_DEFAULT_VERSION}"',
     );
-    expect(installer).toContain("c991b6fb8747bbcbcef40701177234f152cea28a108a481bae917bacc1a522c5");
-    expect(installer).toContain("432fa68ef58afac8665d45537d8adbba5756b01829f175ed7ef6314b3ca59995");
-    expect(installer).toContain("supacloud_download_url");
-    expect(installer).toContain("supacloud_install_pinned_tar_xz_binary");
-    expect(installer).not.toContain("auth-${GOTRUE_VERSION}-${GOTRUE_ARCH}.tar.gz");
-    expect(installer).not.toContain('GOTRUE_ARCH="linux-amd64"');
+    expect(installer).toContain('supacloud_upgrade_gotrue_binary "$GOTRUE_BIN"');
+    expect(upgrade).toContain('SUPACLOUD_GOTRUE_RELEASE_ARCH="amd64"');
+    expect(upgrade).toContain('SUPACLOUD_GOTRUE_RELEASE_ARCH="arm64"');
+    expect(upgrade).toContain(
+      'SUPACLOUD_GOTRUE_RELEASE_ASSET="auth-${target_version}-${SUPACLOUD_GOTRUE_RELEASE_ARCH}.tar.xz"',
+    );
+    expect(upgrade).toContain("c991b6fb8747bbcbcef40701177234f152cea28a108a481bae917bacc1a522c5");
+    expect(upgrade).toContain("432fa68ef58afac8665d45537d8adbba5756b01829f175ed7ef6314b3ca59995");
+    expect(upgrade).toContain("supacloud_download_url");
+    expect(upgrade).toContain("supacloud_install_pinned_tar_xz_binary");
+    expect(upgrade).not.toContain(".tar.gz");
   });
 
-  test("tenant runtime installs the current PostgREST and GoTrue releases", () => {
+  test("tenant runtime installs PostgREST and requires the pinned GoTrue release", () => {
     const runtime = readRepoFile("scripts/lib/tenant_runtime.sh");
+    const upgrade = readRepoFile("scripts/lib/gotrue_upgrade.sh");
 
     expect(runtime).toContain('local version="${POSTGREST_VERSION:-v14.15}"');
     expect(runtime).toContain('x86_64) arch="linux-static-x86-64"');
     expect(runtime).toContain('aarch64) arch="ubuntu-aarch64"');
     expect(runtime).toContain("postgrest-${version}-${arch}.tar.xz");
 
-    expect(runtime).toContain('local version="${GOTRUE_VERSION:-v2.193.0}"');
-    expect(runtime).toContain('x86_64) arch="amd64"');
-    expect(runtime).toContain('aarch64) arch="arm64"');
-    expect(runtime).toContain('local archive_ext="tar.xz"');
-    expect(runtime).toContain("auth-${version}-${arch}.${archive_ext}");
+    expect(readShellConstant(runtime, "GOTRUE_DEFAULT_VERSION")).toBe(
+      readShellConstant(upgrade, "SUPACLOUD_GOTRUE_DEFAULT_VERSION"),
+    );
+    expect(runtime).toContain('local required_version="${GOTRUE_VERSION:-$GOTRUE_DEFAULT_VERSION}"');
+    expect(runtime).toContain('installed_version=$(gotrue_binary_version "$GOTRUE_BIN")');
+    expect(runtime).toContain("run the explicit SupaCloud installer/upgrade");
+    expect(runtime).not.toContain("github.com/supabase/auth/releases/download");
 
     expect(runtime).not.toContain('local version="v12.2.3"');
     expect(runtime).not.toContain('local version="v2.189.0"');

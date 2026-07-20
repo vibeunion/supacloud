@@ -1,6 +1,6 @@
 import { Elysia, t } from "elysia";
 import { logger } from "../utils/logger";
-import { getPlatformSetting } from "./platform-settings";
+import { getPlatformSetting } from "../services/platform-settings.service";
 
 /**
  * Chat Proxy Routes

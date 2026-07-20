@@ -47,23 +47,27 @@ describe("Pigsty 4.4 compatibility upgrade", () => {
     expect(script).toContain("check_auth_jwt_helpers_compat");
     expect(script).toContain("supacloud:pigsty-4.4-auth-jwt-helpers:v1");
     expect(script).toContain("current_setting('request.jwt.claims', true)");
-    expect(script).toContain("apply_auth_delete_fence_compat");
-    expect(script).toContain("check_auth_delete_fence_compat");
-    expect(script).toContain("supacloud:pigsty-4.4-auth-delete-fence:v2");
-    expect(script).toContain("SET search_path = pg_catalog");
-    expect(script).toContain(
-      "REVOKE ALL ON FUNCTION public.soft_delete_user_if_no_active_tasks() FROM PUBLIC",
+    expect(script).toContain("apply_background_task_mirror_compat");
+    expect(script).toContain("check_background_task_mirror_compat");
+    expect(script).toContain("run_management_init_and_verify_user_deletion_fence");
+    expect(script).toContain("check_control_user_deletion_fence");
+    expect(script).toContain("idx_project_tasks_authority_invoker_active");
+    expect(script).toContain("NEW.auth_authority_ref");
+    expect(script).toContain("missing-auth-authority-column");
+    expect(script).toContain("Matching SupaCloud management binary is required");
+    expect(script).not.toContain("supacloud binary not found; opaque keys will be encrypted/backfilled");
+    expect(script.lastIndexOf("run_management_init_and_verify_user_deletion_fence")).toBeLessThan(
+      script.lastIndexOf("apply_background_task_mirror_compat \"$database\""),
     );
-    expect(script).toContain("public_execute_revoked");
-    expect(script).toContain("service_role_execute");
+    expect(script).toContain("supacloud:pigsty-4.4-background-task-mirror:v3");
+    expect(script).toContain("SET search_path = pg_catalog");
     expect(script).toContain("-- supacloud:sql-module:background-task-mirror-up:start");
-    expect(script).toContain("IF v_task_state = 'inactive' THEN");
+    expect(script).toContain("DROP TRIGGER IF EXISTS auth_users_delete_fence ON auth.users");
+    expect(script).toContain("to_regprocedure('public.soft_delete_user_if_no_active_tasks()') IS NOT NULL");
     expect(script).toContain("BEGIN;");
     expect(script).toContain("COMMIT;");
-    expect(script).toContain("t.tgenabled IN ('O', 'A')");
-    expect(script).toContain("t.tgtype = 11");
-    expect(script).toContain("WHEN NOT EXISTS (SELECT 1 FROM target)");
-    expect(script).toContain("return old; end if; update auth[.]users");
+    expect(script).not.toContain("CREATE TRIGGER auth_users_delete_fence");
+    expect(script).not.toMatch(/(?:UPDATE|DELETE\s+FROM)\s+auth\.users/i);
     expect(script).toContain("apply_tenant_authenticator_compat");
     expect(script).toContain("check_tenant_authenticator_compat");
     expect(script).toContain("reconcile_management_pgpassword_alias");

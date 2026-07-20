@@ -11,8 +11,15 @@ import { decryptSecretIfNeeded } from "../utils/secret-crypto";
 import { createHmac } from "node:crypto";
 import { availableParallelism } from "node:os";
 import { getProjectDb, resolveDbName } from "../db";
-import { createBackgroundTaskMirrorIfUserExists } from "../services/background-task.service";
+import {
+  createBackgroundTaskMirrorIfUserExists,
+  removeBackgroundTaskMirror,
+} from "../services/background-task.service";
 import { createPgListener, type PgListenerHandle } from "../lib/pg-listen";
+import {
+  normalizedGoTrueUserId,
+} from "../utils/project-user-lifecycle";
+import { getAuthRuntimeDescriptor } from "./auth-runtime.service";
 
 interface InvocationEnvelope {
   method?: string;
@@ -46,18 +53,6 @@ const DEFAULT_CONCURRENCY_PER_PROJECT = resolveBackgroundConcurrencyPerProject(
 );
 const WORKER_ID = `bgw-${process.pid}`;
 
-// ─── Invoker existence cache + in-flight coalescing ─────────────────────
-interface InvokerCacheEntry {
-  exists: boolean;
-  expiresAt: number;
-}
-
-const invokerCache = new Map<string, InvokerCacheEntry>();
-const INVOKER_POSITIVE_TTL = 15_000;  // 用户存在时缓存 15s
-const INVOKER_NEGATIVE_TTL = 2_000;   // 用户不存在时缓存 2s（快速重试）
-
-const invokerInflight = new Map<string, Promise<boolean>>();
-
 // ─── Invoker DB unknown (degraded) tracking + circuit breaker ──────────────
 const INVOKER_UNKNOWN_WINDOW_MS = 60_000;   // 1-minute sliding window
 const INVOKER_UNKNOWN_THRESHOLD = 10;       // 10 unknowns in window → circuit open
@@ -66,15 +61,16 @@ const INVOKER_CIRCUIT_OPEN_DURATION_MS = 30_000; // 30s cooldown when circuit is
 interface UnknownEvent {
   timestamp: number;
   projectRef: string;
+  authorityProjectRef: string;
   error: string;
 }
 
 const invokerUnknownEvents: UnknownEvent[] = [];
 let invokerCircuitOpenUntil = 0;  // 0 = circuit closed
 
-function recordInvokerUnknown(projectRef: string, error: string): void {
+function recordInvokerUnknown(projectRef: string, authorityProjectRef: string, error: string): void {
   const now = Date.now();
-  invokerUnknownEvents.push({ timestamp: now, projectRef, error });
+  invokerUnknownEvents.push({ timestamp: now, projectRef, authorityProjectRef, error });
 
   // Prune events outside the sliding window
   const cutoff = now - INVOKER_UNKNOWN_WINDOW_MS;
@@ -84,6 +80,7 @@ function recordInvokerUnknown(projectRef: string, error: string): void {
 
   logger.warn("[BackgroundFunctionWorker] invoker DB unknown (degraded)", {
     projectRef,
+    authorityProjectRef,
     error,
     windowCount: invokerUnknownEvents.length,
     threshold: INVOKER_UNKNOWN_THRESHOLD,
@@ -125,73 +122,70 @@ class NonRetryableBackgroundInvocationError extends Error {
   }
 }
 
-function isUuid(value: string | null | undefined): boolean {
-  return !!value && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+class RetryableBackgroundInvocationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RetryableBackgroundInvocationError";
+  }
 }
 
 function backgroundInvokerUserId(task: ProjectTask): string | null {
   const payload = (task.payload || {}) as InvocationEnvelope;
-  const userId = payload.auth?.invoker_user_id;
-  return typeof userId === "string" && userId.trim().length > 0 ? userId.trim() : null;
+  const payloadUserId = payload.auth?.invoker_user_id;
+  const authoritativeUserId = task.invoker_user_id;
+  if (authoritativeUserId) {
+    if (typeof payloadUserId !== "string") {
+      throw new NonRetryableBackgroundInvocationError("Background task invoker identity is inconsistent", 422);
+    }
+    const normalizedPayloadUserId = normalizedGoTrueUserId(payloadUserId);
+    if (normalizedPayloadUserId !== normalizedGoTrueUserId(authoritativeUserId)) {
+      throw new NonRetryableBackgroundInvocationError("Background task invoker identity is inconsistent", 422);
+    }
+    return authoritativeUserId;
+  }
+  if (payloadUserId === undefined || payloadUserId === null) return null;
+  if (typeof payloadUserId !== "string") {
+    throw new NonRetryableBackgroundInvocationError("Background task invoker identity is inconsistent", 422);
+  }
+  return payloadUserId.trim() || null;
+}
+
+function backgroundAuthAuthorityRef(task: ProjectTask): string {
+  const configuredAuthorityRef = getAuthRuntimeDescriptor(task.project_ref).authority_project_ref;
+  const storedAuthorityRef = task.auth_authority_ref;
+  if (storedAuthorityRef && storedAuthorityRef !== configuredAuthorityRef) {
+    throw new NonRetryableBackgroundInvocationError("Background task auth authority is inconsistent", 422);
+  }
+  return storedAuthorityRef || configuredAuthorityRef;
 }
 
 async function assertBackgroundInvokerUserExists(task: ProjectTask): Promise<void> {
   const userId = backgroundInvokerUserId(task);
   if (!userId) return;
-  if (!isUuid(userId)) {
+  const normalizedUserId = normalizedGoTrueUserId(userId);
+  if (!normalizedUserId) {
     throw new NonRetryableBackgroundInvocationError("Background invoker user id is invalid", 400);
   }
 
-  const cacheKey = `${task.project_ref}:${userId}`;
-
-  // 检查缓存
-  const cached = invokerCache.get(cacheKey);
-  if (cached) {
-    if (cached.expiresAt > Date.now()) {
-      if (!cached.exists) {
-        throw new NonRetryableBackgroundInvocationError("Background invoker user no longer exists", 410);
-      }
-      return;
-    }
-    // 过期条目清除
-    invokerCache.delete(cacheKey);
-  }
-
-  // In-flight coalescing: 同一用户的并发校验共用一个 Promise
-  const inflight = invokerInflight.get(cacheKey);
-  if (inflight) {
-    const exists = await inflight;
-    if (!exists) {
-      throw new NonRetryableBackgroundInvocationError("Background invoker user no longer exists", 410);
-    }
-    return;
-  }
-
-  const promise = _checkInvokerExists(task.project_ref, userId);
-  invokerInflight.set(cacheKey, promise);
-
-  try {
-    const exists = await promise;
-    if (!exists) {
-      throw new NonRetryableBackgroundInvocationError("Background invoker user no longer exists", 410);
-    }
-  } finally {
-    invokerInflight.delete(cacheKey);
+  const authorityProjectRef = backgroundAuthAuthorityRef(task);
+  const exists = await checkInvokerExists(task.project_ref, authorityProjectRef, normalizedUserId);
+  if (!exists) {
+    throw new NonRetryableBackgroundInvocationError("Background invoker user no longer exists", 410);
   }
 }
 
-async function _checkInvokerExists(projectRef: string, userId: string): Promise<boolean> {
-  const cacheKey = `${projectRef}:${userId}`;
-
-  // Circuit breaker: if DB is down system-wide, skip checks and fail-open
+async function checkInvokerExists(
+  projectRef: string,
+  authorityProjectRef: string,
+  userId: string,
+): Promise<boolean> {
   if (isInvokerCircuitOpen()) {
-    recordInvokerUnknown(projectRef, "circuit_breaker_open");
-    // Fail-open during circuit: assume user exists to avoid mass dead-lettering
-    return true;
+    recordInvokerUnknown(projectRef, authorityProjectRef, "circuit_breaker_open");
+    throw new RetryableBackgroundInvocationError("Background invoker state is unavailable while the safety circuit is open");
   }
 
   try {
-    const dbName = await resolveDbName(projectRef);
+    const dbName = await resolveDbName(authorityProjectRef);
     const projectDb = getProjectDb(dbName);
     const rows = await projectDb`
       SELECT 1
@@ -200,40 +194,11 @@ async function _checkInvokerExists(projectRef: string, userId: string): Promise<
         AND deleted_at IS NULL
       LIMIT 1
     `;
-    const exists = rows.length > 0;
-
-    invokerCache.set(cacheKey, {
-      exists,
-      expiresAt: Date.now() + (exists ? INVOKER_POSITIVE_TTL : INVOKER_NEGATIVE_TTL),
-    });
-
-    return exists;
+    return rows.length > 0;
   } catch (error: unknown) {
-    // DB 查询失败 → record as unknown for circuit breaker tracking
     const errMsg = error instanceof Error ? error.message : String(error);
-    recordInvokerUnknown(projectRef, errMsg);
-
-    // Short-term fail-open: assume user exists to avoid mass dead-lettering
-    // during transient DB failures. Long-term protection via circuit breaker.
-    return true;
-  }
-}
-
-function invalidateInvokerCache(projectRef: string, userId?: string): void {
-  if (userId) {
-    invokerCache.delete(`${projectRef}:${userId}`);
-    invokerInflight.delete(`${projectRef}:${userId}`);
-  } else {
-    for (const key of invokerCache.keys()) {
-      if (key.startsWith(`${projectRef}:`)) {
-        invokerCache.delete(key);
-      }
-    }
-    for (const key of invokerInflight.keys()) {
-      if (key.startsWith(`${projectRef}:`)) {
-        invokerInflight.delete(key);
-      }
-    }
+    recordInvokerUnknown(projectRef, authorityProjectRef, errMsg);
+    throw new RetryableBackgroundInvocationError(`Background invoker state is unavailable: ${errMsg}`);
   }
 }
 
@@ -258,6 +223,34 @@ function scheduleLeaseHeartbeat(taskId: string, leaseSeconds: number): Timer {
       });
     });
   }, intervalMs);
+}
+
+function isUserDeletionFenceError(error: unknown): boolean {
+  return error instanceof Error && error.message.includes("USER_DELETION_FENCED");
+}
+
+async function cleanupBackgroundTaskMirrorEvidence(task: ProjectTask): Promise<void> {
+  if (await removeBackgroundTaskMirror(task)) return;
+  logger.error("[BackgroundFunctionWorker] terminal mirror evidence cleanup remains pending", {
+    taskId: task.id,
+    projectRef: task.project_ref,
+  });
+}
+
+function preflightFailure(task: ProjectTask, error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  const attempt = task.attempt || 1;
+  const maxAttempts = task.max_attempts || 3;
+  const nonRetryable = error instanceof NonRetryableBackgroundInvocationError
+    || isUserDeletionFenceError(error);
+  return {
+    message,
+    attempt,
+    deadLetter: nonRetryable || attempt >= maxAttempts,
+    responseStatus: error instanceof NonRetryableBackgroundInvocationError
+      ? error.responseStatus
+      : null,
+  };
 }
 
 function signBackgroundInvocation(input: {
@@ -492,6 +485,33 @@ export class BackgroundFunctionWorker {
     }
   }
 
+  private async finishPreflightFailure(task: ProjectTask, error: unknown): Promise<void> {
+    const failure = preflightFailure(task, error);
+    await taskRepository.startTaskAttempt(task);
+    await taskRepository.completeTaskAttempt(task.id, failure.attempt, {
+      status: failure.deadLetter ? "dead_lettered" : "retry_scheduled",
+      error: failure.message,
+      responseStatus: failure.responseStatus,
+      durationMs: 0,
+      logs: [],
+    });
+
+    if (failure.deadLetter) {
+      await taskRepository.markTaskFailed(task.id, failure.message, true);
+    } else {
+      const nextRunAt = new Date(Date.now() + computeRetryDelayMs(failure.attempt));
+      await taskRepository.scheduleRetry(task.id, failure.message, nextRunAt);
+    }
+
+    broadcastTaskUpdate({
+      taskId: task.id,
+      projectRef: task.project_ref,
+      taskType: task.task_type,
+      status: failure.deadLetter ? TaskStatus.DEAD_LETTERED : TaskStatus.RETRY_SCHEDULED,
+      error: failure.message,
+    });
+  }
+
   private async execute(task: ProjectTask) {
     const project = await projectRepository.findByRef(task.project_ref);
     if (!project || project.status !== "active") {
@@ -506,7 +526,6 @@ export class BackgroundFunctionWorker {
       return;
     }
 
-    // extendLease 确认租约，然后并行：状态转换 + invoker 校验 + mirror insert
     const leaseSeconds = computeLeaseSeconds(task.timeout_sec);
     const lease = await taskRepository.extendLease(task.id, leaseSeconds);
     if (!lease) {
@@ -520,12 +539,42 @@ export class BackgroundFunctionWorker {
       return;
     }
 
-    // 并行执行：transitionTaskToRunning（合并 markRunning + startAttempt）+ invoker 校验 + mirror
-    const [, invokerError, mirrorResult] = await Promise.all([
-      taskRepository.transitionTaskToRunning(task.id, task, leaseSeconds),
-      assertBackgroundInvokerUserExists(task).then(() => null, (e: unknown) => e),
-      createBackgroundTaskMirrorIfUserExists(task),
-    ]);
+    try {
+      await assertBackgroundInvokerUserExists(task);
+    } catch (error) {
+      await this.finishPreflightFailure(task, error);
+      return;
+    }
+
+    const mirrorResult = await createBackgroundTaskMirrorIfUserExists(task);
+    if (mirrorResult.degraded) {
+      logger.warn("[BackgroundFunctionWorker] mirror check degraded", {
+        taskId: task.id,
+        projectRef: task.project_ref,
+      });
+    }
+
+    try {
+      const transition = await taskRepository.transitionTaskToRunning(task.id, task, leaseSeconds);
+      if (!transition.task) {
+        throw new RetryableBackgroundInvocationError(
+          "Background task could not transition to running; invocation was not dispatched",
+        );
+      }
+    } catch (error) {
+      await this.finishPreflightFailure(task, error);
+      await cleanupBackgroundTaskMirrorEvidence(task);
+      return;
+    }
+
+    // mirror 只保留证据；dispatch 前必须绕过任何正向共享缓存，直读 GoTrue。
+    try {
+      await assertBackgroundInvokerUserExists(task);
+    } catch (error) {
+      await this.finishPreflightFailure(task, error);
+      await cleanupBackgroundTaskMirrorEvidence(task);
+      return;
+    }
 
     broadcastTaskUpdate({
       taskId: task.id,
@@ -533,58 +582,6 @@ export class BackgroundFunctionWorker {
       taskType: task.task_type,
       status: TaskStatus.RUNNING,
     });
-
-    // invoker 校验失败 → dead-letter
-    if (invokerError instanceof NonRetryableBackgroundInvocationError) {
-      const heartbeat = scheduleLeaseHeartbeat(task.id, leaseSeconds);
-      clearInterval(heartbeat);
-      await taskRepository.completeTaskAttempt(task.id, task.attempt || 1, {
-        status: "dead_lettered",
-        error: invokerError.message,
-        responseStatus: invokerError.responseStatus,
-        durationMs: 0,
-        logs: [],
-      });
-      await taskRepository.markTaskFailed(task.id, invokerError.message, true);
-      broadcastTaskUpdate({
-        taskId: task.id,
-        projectRef: task.project_ref,
-        taskType: task.task_type,
-        status: TaskStatus.DEAD_LETTERED,
-        error: invokerError.message,
-      });
-      return;
-    }
-
-    // mirror degraded: log warning but continue
-    if (mirrorResult?.degraded) {
-      logger.warn("[BackgroundFunctionWorker] mirror check degraded, continuing without mirror", {
-        taskId: task.id,
-        projectRef: task.project_ref,
-      });
-    }
-
-    // mirror RPC 确认用户不存在 → dead-letter
-    if (mirrorResult && !mirrorResult.userExists) {
-      const heartbeat = scheduleLeaseHeartbeat(task.id, leaseSeconds);
-      clearInterval(heartbeat);
-      await taskRepository.completeTaskAttempt(task.id, task.attempt || 1, {
-        status: "dead_lettered",
-        error: "Background invoker user no longer exists (atomic RPC check)",
-        responseStatus: 410,
-        durationMs: 0,
-        logs: [],
-      });
-      await taskRepository.markTaskFailed(task.id, "Background invoker user no longer exists (atomic RPC check)", true);
-      broadcastTaskUpdate({
-        taskId: task.id,
-        projectRef: task.project_ref,
-        taskType: task.task_type,
-        status: TaskStatus.DEAD_LETTERED,
-        error: "Background invoker user no longer exists (atomic RPC check)",
-      });
-      return;
-    }
 
     const heartbeat = scheduleLeaseHeartbeat(task.id, leaseSeconds);
     const startedAt = Date.now();
@@ -723,6 +720,8 @@ export class BackgroundFunctionWorker {
         maxAttempts,
         error: message,
       });
+    } finally {
+      await cleanupBackgroundTaskMirrorEvidence(task);
     }
   }
 
@@ -746,5 +745,5 @@ export class BackgroundFunctionWorker {
   }
 }
 
-export { invalidateInvokerCache, getInvokerUnknownMetrics };
+export { getInvokerUnknownMetrics };
 export const backgroundFunctionWorker = new BackgroundFunctionWorker();

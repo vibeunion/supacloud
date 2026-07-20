@@ -11,6 +11,7 @@ RUN bun install
 
 COPY packages/management-api ./packages/management-api
 COPY packages/web-console ./packages/web-console
+COPY --chmod=0755 docker/self-host/management-api-entrypoint.sh /usr/local/bin/supacloud-management-entrypoint
 
 RUN cd /app/packages/web-console && bun install && bun run build
 
@@ -21,4 +22,4 @@ EXPOSE 9090
 ENV PORT=9090
 ENV NODE_ENV=production
 
-CMD ["sh", "-lc", "bun run src/index.ts --init-db && exec bun run src/index.ts"]
+ENTRYPOINT ["/usr/local/bin/supacloud-management-entrypoint"]

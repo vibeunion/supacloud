@@ -11,6 +11,9 @@ const mockSql = mock((strings: string | TemplateStringsArray) => {
     return Promise.resolve([]);
 });
 (mockSql as unknown as { unsafe: ReturnType<typeof mock> }).unsafe = mock(() => Promise.resolve([]));
+(mockSql as unknown as { begin: ReturnType<typeof mock> }).begin = mock(
+    (callback: (transaction: typeof mockSql) => Promise<unknown>) => callback(mockSql),
+);
 mock.module("../src/db", () => ({
     sql: mockSql,
 }));
@@ -27,6 +30,26 @@ describe("Management API Integration Tests", () => {
     beforeAll(async () => {
         const routes = await registerAllRoutes();
         app = baseApp.use(routes as unknown as typeof baseApp);
+    });
+
+    describe("GoTrue-only OpenAPI boundary", () => {
+        it("does not advertise removed credential or protocol capabilities", async () => {
+            const response = await app.handle(new Request(`${baseUrl}/swagger/json`));
+            expect(response.status).toBe(200);
+            const openApi = (await response.text()).toLowerCase();
+            for (const forbiddenCapability of [
+                "passkey",
+                "webauthn",
+                "personal access token",
+                "subject token",
+                "token exchange",
+                "inline hook",
+                "backup code",
+                "external_oidc",
+            ]) {
+                expect(openApi).not.toContain(forbiddenCapability);
+            }
+        });
     });
 
 

@@ -10,9 +10,30 @@ import {
   decryptSecretIfNeeded,
   encryptSecretIfNeeded,
 } from "../utils/secret-crypto";
+import {
+  ensurePlatformV2Schema,
+  migrateLegacyControlSecrets,
+  migrateLegacyProviderLinkingConfig,
+  migrateLegacyProjectWebhooks,
+  migrateUnsupportedWebAuthnConfig,
+  migrateWebhookSecretsToControlStore,
+} from "./platform-v2";
+import { migrateLegacyEncryptedSecretsInTransaction } from "./secret-key-migration";
+import { GOTRUE_USER_ID_POSTGRES_PATTERN } from "../utils/project-user-lifecycle";
 
 function sqlStringLiteral(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
+}
+
+function taskAuthAuthorityBackfillStatement(): string {
+  const authorityRef = config.authRuntimeOwnerRef.trim();
+  if (!authorityRef) {
+    return "UPDATE project_tasks SET auth_authority_ref = project_ref WHERE auth_authority_ref IS NULL";
+  }
+  if (!/^[A-Za-z0-9_-]{1,20}$/.test(authorityRef)) {
+    throw new Error("SUPACLOUD_AUTH_RUNTIME_OWNER_REF must be a valid project ref");
+  }
+  return `UPDATE project_tasks SET auth_authority_ref = ${sqlStringLiteral(authorityRef)} WHERE auth_authority_ref IS NULL`;
 }
 
 async function backfillOpaqueApiKeys(sql: SQL): Promise<number> {
@@ -29,15 +50,9 @@ async function backfillOpaqueApiKeys(sql: SQL): Promise<number> {
     const publishableKey = typeof row.publishable_key === "string" && row.publishable_key
       ? row.publishable_key
       : generatePublishableApiKey();
-    let secretKey: string | null = null;
-    if (typeof row.secret_key_encrypted === "string" && row.secret_key_encrypted) {
-      try {
-        secretKey = decryptSecretIfNeeded(row.secret_key_encrypted);
-      } catch {
-        secretKey = null;
-      }
-    }
-    secretKey ||= generateSecretApiKey();
+    const secretKey = typeof row.secret_key_encrypted === "string" && row.secret_key_encrypted
+      ? decryptSecretIfNeeded(row.secret_key_encrypted)
+      : generateSecretApiKey();
 
     await sql`
       UPDATE projects
@@ -61,7 +76,7 @@ export async function initDatabase() {
   // Parse DATABASE_URL to get components
   const dbUrl = config.databaseUrl;
   const urlMatch = dbUrl.match(
-    /postgresql?:\/\/([^:]+):([^@]+)@([^:]+):(\d+)\/(.+)/,
+    /postgres(?:ql)?:\/\/([^:]+):([^@]+)@([^:]+):(\d+)\/(.+)/,
   );
 
   if (!urlMatch) {
@@ -172,6 +187,8 @@ export async function initDatabase() {
       cancellation_reason TEXT,
       correlation_id VARCHAR(255),
       business_task_id VARCHAR(255),
+      invoker_user_id UUID,
+      auth_authority_ref VARCHAR(20),
       metadata JSONB DEFAULT '{}'::jsonb,
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -484,12 +501,32 @@ export async function initDatabase() {
       { statement: 'ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS cancellation_reason TEXT', description: "project_tasks.cancellation_reason" },
       { statement: 'ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS correlation_id VARCHAR(255)', description: "project_tasks.correlation_id" },
       { statement: 'ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS business_task_id VARCHAR(255)', description: "project_tasks.business_task_id" },
+      { statement: 'ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS invoker_user_id UUID', description: "project_tasks.invoker_user_id" },
+      { statement: 'ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS auth_authority_ref VARCHAR(20)', description: "project_tasks.auth_authority_ref" },
       { statement: "ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb", description: "project_tasks.metadata" },
       { statement: 'ALTER TABLE project_tasks ALTER COLUMN next_run_at SET DEFAULT NOW()', description: "project_tasks.next_run_at default", swallowError: true },
       { statement: 'UPDATE project_tasks SET next_run_at = COALESCE(next_run_at, created_at, NOW())', description: "project_tasks.next_run_at backfill" },
       { statement: 'UPDATE project_tasks SET max_attempts = COALESCE(max_attempts, 3)', description: "project_tasks.max_attempts backfill" },
       { statement: 'UPDATE project_tasks SET attempt = COALESCE(attempt, retries, 0)', description: "project_tasks.attempt backfill" },
       { statement: "UPDATE project_tasks SET payload = COALESCE(payload, '{}'::jsonb)", description: "project_tasks.payload backfill" },
+      {
+        statement: `
+          UPDATE project_tasks
+          SET invoker_user_id = BTRIM(payload->'auth'->>'invoker_user_id')::uuid
+          WHERE invoker_user_id IS NULL
+            AND BTRIM(payload->'auth'->>'invoker_user_id')
+              ~* '${GOTRUE_USER_ID_POSTGRES_PATTERN}'
+        `,
+        description: "project_tasks.invoker_user_id backfill",
+      },
+      {
+        statement: taskAuthAuthorityBackfillStatement(),
+        description: "project_tasks.auth_authority_ref backfill",
+      },
+      {
+        statement: 'ALTER TABLE project_tasks ALTER COLUMN auth_authority_ref SET NOT NULL',
+        description: "project_tasks.auth_authority_ref not null",
+      },
       { statement: 'CREATE INDEX IF NOT EXISTS idx_project_tasks_project_status ON project_tasks(project_ref, status)', description: "idx_project_tasks_project_status" },
       { statement: 'CREATE INDEX IF NOT EXISTS idx_project_tasks_project_created_desc ON project_tasks(project_ref, created_at DESC)', description: "idx_project_tasks_project_created_desc" },
       { statement: 'CREATE INDEX IF NOT EXISTS idx_project_tasks_next_run ON project_tasks(next_run_at)', description: "idx_project_tasks_next_run" },
@@ -515,6 +552,24 @@ export async function initDatabase() {
           ON project_tasks(project_ref, updated_at DESC, status)
         `,
         description: "idx_project_tasks_project_updated_status",
+      },
+      {
+        statement: `
+          CREATE INDEX IF NOT EXISTS idx_project_tasks_invoker_active
+          ON project_tasks(project_ref, invoker_user_id, status)
+          WHERE invoker_user_id IS NOT NULL
+            AND status IN ('pending', 'leased', 'running', 'retry_scheduled')
+        `,
+        description: "idx_project_tasks_invoker_active",
+      },
+      {
+        statement: `
+          CREATE INDEX IF NOT EXISTS idx_project_tasks_authority_invoker_active
+          ON project_tasks(auth_authority_ref, invoker_user_id, status)
+          WHERE invoker_user_id IS NOT NULL
+            AND status IN ('pending', 'leased', 'running', 'retry_scheduled')
+        `,
+        description: "idx_project_tasks_authority_invoker_active",
       },
       {
         statement: `
@@ -673,128 +728,138 @@ export async function initDatabase() {
     }
     logger.info("Schema migrations applied.");
 
-    const opaqueKeyBackfillCount = await backfillOpaqueApiKeys(sql);
-    if (opaqueKeyBackfillCount > 0) {
-      logger.info(`Opaque API keys backfilled for ${opaqueKeyBackfillCount} project(s).`);
-    }
+    await sql.begin(async (transaction) => {
+      await ensurePlatformV2Schema(transaction);
+      await migrateLegacyControlSecrets(transaction);
+      await migrateLegacyProjectWebhooks(transaction);
+      await migrateUnsupportedWebAuthnConfig(transaction);
+      await migrateLegacyProviderLinkingConfig(transaction);
+      const secretMigration = await migrateLegacyEncryptedSecretsInTransaction(transaction);
+      if (secretMigration.rotated > 0) {
+        logger.info(`Re-encrypted ${secretMigration.rotated} stored secret value(s) with SECRETS_ENCRYPTION_KEY.`);
+      }
+      await migrateWebhookSecretsToControlStore(transaction);
+      logger.info("Platform v2 control-plane schema applied.");
 
-    // Always apply trigger (idempotent: CREATE OR REPLACE + DROP IF EXISTS)
-    const notifyTriggerDDL = `
-      CREATE OR REPLACE FUNCTION notify_task_change() RETURNS trigger AS $$
-      BEGIN
-        PERFORM pg_notify(
-          'task_' || NEW.status,
-          json_build_object(
-            'id', NEW.id,
-            'project_ref', NEW.project_ref,
-            'task_type', NEW.task_type,
-            'next_run_at', NEW.next_run_at
-          )::text
-        );
-        RETURN NEW;
-      END;
-      $$ LANGUAGE plpgsql;
+      const opaqueKeyBackfillCount = await backfillOpaqueApiKeys(transaction);
+      if (opaqueKeyBackfillCount > 0) {
+        logger.info(`Opaque API keys backfilled for ${opaqueKeyBackfillCount} project(s).`);
+      }
 
-      DROP TRIGGER IF EXISTS trg_task_notify ON project_tasks;
-      CREATE TRIGGER trg_task_notify
-        AFTER INSERT OR UPDATE ON project_tasks
-        FOR EACH ROW EXECUTE FUNCTION notify_task_change();
-    `;
-    await sql.unsafe(notifyTriggerDDL);
-    logger.info("LISTEN/NOTIFY trigger applied.");
+      // Always apply trigger (idempotent: CREATE OR REPLACE + DROP IF EXISTS)
+      const notifyTriggerDDL = `
+        CREATE OR REPLACE FUNCTION notify_task_change() RETURNS trigger AS $$
+        BEGIN
+          PERFORM pg_notify(
+            'task_' || NEW.status,
+            json_build_object(
+              'id', NEW.id,
+              'project_ref', NEW.project_ref,
+              'task_type', NEW.task_type,
+              'next_run_at', NEW.next_run_at
+            )::text
+          );
+          RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
 
-    const [verify] = await sql`
-      SELECT COUNT(*) as count FROM information_schema.tables
-      WHERE table_schema = 'public' AND table_name IN ('organizations', 'organization_members', 'projects', 'project_tasks', 'platform_settings', 'project_secrets', 'deployment_history', 'system_tus_uploads', 'system_tus_chunks', 'system_signed_uploads', 'audit_logs', 'studio_sessions')
-    `;
-
-    const finalPublicCount = Number(verify?.count || 0);
-    logger.info(
-      `Database initialized successfully! Public tables verified: ${finalPublicCount}/12`,
-    );
-
-    // In CI mode where tests rewrite db_name to 'postgres', we must create Storage relations
-    let storageTableCount = 0;
-    if (process.env.CI || process.env.GITHUB_ACTIONS || process.env.TEST_FIXED_JWT_SECRET) {
-      logger.info(
-        "Initializing Storage schemas natively for E2E CI routing...",
-      );
-      const storageDDL = `
-        CREATE SCHEMA IF NOT EXISTS storage;
-        CREATE TABLE IF NOT EXISTS storage.buckets (
-            id text not null primary key,
-            name text not null,
-            owner uuid,
-            created_at timestamptz default now(),
-            updated_at timestamptz default now(),
-            public boolean default false,
-            avif_autodetection boolean default false,
-            file_size_limit bigint,
-            allowed_mime_types text[]
-        );
-        CREATE TABLE IF NOT EXISTS storage.objects (
-            id uuid not null primary key default gen_random_uuid(),
-            bucket_id text references storage.buckets,
-            name text,
-            owner uuid,
-            created_at timestamptz default now(),
-            updated_at timestamptz default now(),
-            last_accessed_at timestamptz default now(),
-            metadata jsonb,
-            path_tokens text[] generated always as (string_to_array(name, '/')) stored,
-            version text default gen_random_uuid()
-        );
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_objects_bucketid_name ON storage.objects (bucket_id, name);
-        CREATE TABLE IF NOT EXISTS storage.s3_multipart_uploads (
-            id text not null primary key,
-            in_progress_size bigint not null default 0,
-            upload_signature text not null,
-            bucket_id text not null references storage.buckets(id),
-            key text not null,
-            version text not null,
-            owner_id uuid,
-            created_at timestamptz not null default now()
-        );
-        CREATE TABLE IF NOT EXISTS storage.s3_multipart_uploads_parts (
-            id uuid not null primary key default gen_random_uuid(),
-            upload_id text not null references storage.s3_multipart_uploads(id) on delete cascade,
-            part_number integer not null,
-            size bigint not null default 0,
-            etag text not null,
-            owner_id uuid,
-            created_at timestamptz not null default now()
-        );
-        GRANT ALL PRIVILEGES ON SCHEMA storage TO postgres, supabase_admin;
-        GRANT USAGE ON SCHEMA storage TO anon, authenticated, service_role;
-        GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA storage TO postgres, supabase_admin, anon, authenticated, service_role;
-        GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA storage TO postgres, supabase_admin, anon, authenticated, service_role;
-        GRANT ALL PRIVILEGES ON ALL ROUTINES IN SCHEMA storage TO postgres, supabase_admin, anon, authenticated, service_role;
+        DROP TRIGGER IF EXISTS trg_task_notify ON project_tasks;
+        CREATE TRIGGER trg_task_notify
+          AFTER INSERT OR UPDATE ON project_tasks
+          FOR EACH ROW EXECUTE FUNCTION notify_task_change();
       `;
-      try {
-        await sql.unsafe(storageDDL);
-        const [storageVerify] = await sql`
+      await transaction.unsafe(notifyTriggerDDL);
+      logger.info("LISTEN/NOTIFY trigger applied.");
+
+      const [verify] = await transaction`
+        SELECT COUNT(*) as count FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name IN ('organizations', 'organization_members', 'projects', 'project_tasks', 'platform_settings', 'project_secrets', 'deployment_history', 'system_tus_uploads', 'system_tus_chunks', 'system_signed_uploads', 'audit_logs', 'studio_sessions')
+      `;
+
+      const finalPublicCount = Number(verify?.count || 0);
+      logger.info(
+        `Database initialized successfully! Public tables verified: ${finalPublicCount}/12`,
+      );
+
+      // In CI mode where tests rewrite db_name to 'postgres', we must create Storage relations
+      let storageTableCount = 0;
+      if (process.env.CI || process.env.GITHUB_ACTIONS || process.env.TEST_FIXED_JWT_SECRET) {
+        logger.info(
+          "Initializing Storage schemas natively for E2E CI routing...",
+        );
+        const storageDDL = `
+          CREATE SCHEMA IF NOT EXISTS storage;
+          CREATE TABLE IF NOT EXISTS storage.buckets (
+              id text not null primary key,
+              name text not null,
+              owner uuid,
+              created_at timestamptz default now(),
+              updated_at timestamptz default now(),
+              public boolean default false,
+              avif_autodetection boolean default false,
+              file_size_limit bigint,
+              allowed_mime_types text[]
+          );
+          CREATE TABLE IF NOT EXISTS storage.objects (
+              id uuid not null primary key default gen_random_uuid(),
+              bucket_id text references storage.buckets,
+              name text,
+              owner uuid,
+              created_at timestamptz default now(),
+              updated_at timestamptz default now(),
+              last_accessed_at timestamptz default now(),
+              metadata jsonb,
+              path_tokens text[] generated always as (string_to_array(name, '/')) stored,
+              version text default gen_random_uuid()
+          );
+          CREATE UNIQUE INDEX IF NOT EXISTS idx_objects_bucketid_name ON storage.objects (bucket_id, name);
+          CREATE TABLE IF NOT EXISTS storage.s3_multipart_uploads (
+              id text not null primary key,
+              in_progress_size bigint not null default 0,
+              upload_signature text not null,
+              bucket_id text not null references storage.buckets(id),
+              key text not null,
+              version text not null,
+              owner_id uuid,
+              created_at timestamptz not null default now()
+          );
+          CREATE TABLE IF NOT EXISTS storage.s3_multipart_uploads_parts (
+              id uuid not null primary key default gen_random_uuid(),
+              upload_id text not null references storage.s3_multipart_uploads(id) on delete cascade,
+              part_number integer not null,
+              size bigint not null default 0,
+              etag text not null,
+              owner_id uuid,
+              created_at timestamptz not null default now()
+          );
+          GRANT ALL PRIVILEGES ON SCHEMA storage TO postgres, supabase_admin;
+          GRANT USAGE ON SCHEMA storage TO anon, authenticated, service_role;
+          GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA storage TO postgres, supabase_admin, anon, authenticated, service_role;
+          GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA storage TO postgres, supabase_admin, anon, authenticated, service_role;
+          GRANT ALL PRIVILEGES ON ALL ROUTINES IN SCHEMA storage TO postgres, supabase_admin, anon, authenticated, service_role;
+        `;
+        await transaction.unsafe(storageDDL);
+        const [storageVerify] = await transaction`
           SELECT COUNT(*) as count FROM information_schema.tables
           WHERE table_schema = 'storage'
             AND table_name IN ('buckets', 'objects', 's3_multipart_uploads', 's3_multipart_uploads_parts')
         `;
         storageTableCount = Number(storageVerify?.count || 0);
         logger.info("Storage schema injected for CI.");
-      } catch (e: any) {
-        logger.error("Failed to inject Storage schema: " + e.message);
       }
-    }
 
-    if (finalPublicCount < 12) {
-      throw new Error(
-        `Table creation verified but failed. Expected 12 public tables, got ${finalPublicCount}`,
-      );
-    }
+      if (finalPublicCount < 12) {
+        throw new Error(
+          `Table creation verified but failed. Expected 12 public tables, got ${finalPublicCount}`,
+        );
+      }
 
-    if ((process.env.CI || process.env.GITHUB_ACTIONS || process.env.TEST_FIXED_JWT_SECRET) && storageTableCount < 4) {
-      throw new Error(
-        `Storage schema injection verified but failed. Expected 4 storage tables, got ${storageTableCount}`,
-      );
-    }
+      if ((process.env.CI || process.env.GITHUB_ACTIONS || process.env.TEST_FIXED_JWT_SECRET) && storageTableCount < 4) {
+        throw new Error(
+          `Storage schema injection verified but failed. Expected 4 storage tables, got ${storageTableCount}`,
+        );
+      }
+    });
   } catch (error: unknown) {
     logger.error("Failed to initialize database:", {
       error: error instanceof Error ? error.message : String(error),

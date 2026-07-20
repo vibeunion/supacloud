@@ -50,7 +50,7 @@ describe("final security regressions", () => {
     }
   });
 
-  test("function secrets GET requires auth and masks by default", async () => {
+  test("function secrets GET requires auth and never reveals values", async () => {
     const getSecretsSpy = spyOn(projectService, "getSecrets").mockResolvedValue([
       { name: "EDGEFN_SECRET", value: "plain-secret" },
     ] as Awaited<ReturnType<typeof projectService.getSecrets>>);
@@ -69,7 +69,26 @@ describe("final security regressions", () => {
       const reveal = await request("/v1/projects/proj_1/functions/secrets?reveal=true", { headers: masterHeaders });
       expect(reveal.status).toBe(200);
       expect(await reveal.json()).toEqual([
-        expect.objectContaining({ name: "EDGEFN_SECRET", value: "plain-secret" }),
+        expect.objectContaining({ name: "EDGEFN_SECRET", value: "********" }),
+      ]);
+    } finally {
+      getSecretsSpy.mockRestore();
+    }
+  });
+
+  test("project secrets never reveal values outside the internal runtime endpoint", async () => {
+    const getSecretsSpy = spyOn(projectService, "getSecrets").mockResolvedValue([
+      { name: "CAPTCHA_SECRET", value: "plain-secret" },
+    ] as Awaited<ReturnType<typeof projectService.getSecrets>>);
+    const request = appWith(projectSecretsRoutes);
+
+    try {
+      const response = await request("/v1/projects/proj_1/secrets?reveal=true", {
+        headers: masterHeaders,
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual([
+        { name: "CAPTCHA_SECRET", value: "********" },
       ]);
     } finally {
       getSecretsSpy.mockRestore();

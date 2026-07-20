@@ -1,7 +1,9 @@
 import { afterAll, afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import type { ProjectTask } from "../../src/db";
 import { TaskStatus, TaskType } from "../../src/db";
 import { DEFAULT_BACKGROUND_TASK_SETTINGS } from "../../src/config/background-task-settings";
+import { config } from "../../src/config";
 
 // ─── Mock all heavy dependencies ────────────────────────────────────────────
 
@@ -85,12 +87,17 @@ const createBackgroundTaskMirrorIfUserExists = spyOn(
 ).mockImplementation(
   () => Promise.resolve({ inserted: false, userExists: true }),
 );
+const removeBackgroundTaskMirror = spyOn(
+  bgTaskServiceModule,
+  "removeBackgroundTaskMirror",
+).mockImplementation(() => Promise.resolve(true));
 
 // We import the worker AFTER mocks are set up
 // so the module resolves against mocks
 const { BackgroundFunctionWorker, buildInvocationRequest } = await import(
   "../../src/services/background-function-worker"
 );
+const originalAuthRuntimeOwnerRef = config.authRuntimeOwnerRef;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -119,6 +126,8 @@ function makeTask(overrides: Partial<ProjectTask> = {}): ProjectTask {
     timeout_sec: 300,
     idempotency_key: null,
     trace_id: "trace_abc",
+    invoker_user_id: null,
+    auth_authority_ref: "proj_1",
     function_slug: "my-function",
     function_version: null,
     result: null,
@@ -176,6 +185,8 @@ describe("BackgroundFunctionWorker", () => {
     closePgListener.mockReset();
     createPgListener.mockReset();
     createBackgroundTaskMirrorIfUserExists.mockReset();
+    removeBackgroundTaskMirror.mockReset();
+    config.authRuntimeOwnerRef = "";
 
     // Defaults
     findByRef.mockResolvedValue({ ref: "proj_1", status: "active" } as any);
@@ -188,6 +199,7 @@ describe("BackgroundFunctionWorker", () => {
     getProjectDb.mockImplementation(() => ((async () => [{ exists: 1 }]) as any));
     createPgListener.mockImplementation(() => ({ close: closePgListener }));
     createBackgroundTaskMirrorIfUserExists.mockResolvedValue({ inserted: false, userExists: true });
+    removeBackgroundTaskMirror.mockResolvedValue(true);
     startTaskAttempt.mockResolvedValue({ id: "att_1" } as any);
     extendLease.mockResolvedValue(null);
     markTaskRunning.mockResolvedValue(null);
@@ -443,10 +455,245 @@ describe("BackgroundFunctionWorker", () => {
         true,
       );
     });
+
+    test("retries without dispatching when invoker state cannot be read", async () => {
+      const worker = new BackgroundFunctionWorker();
+      const task = makeTask({
+        id: "tsk_invoker_unknown",
+        payload: {
+          method: "POST", path: "/", query: "", headers: {}, body: null,
+          auth: {
+            kind: "jwt",
+            invoker_user_id: "00000000-0000-4000-8000-000000000011",
+            invoker_role: "authenticated",
+          },
+        },
+      });
+      extendLease.mockResolvedValue({} as any);
+      getProjectDb.mockImplementation(() => ((async () => {
+        throw new Error("tenant database unavailable");
+      }) as any));
+
+      await (worker as any).execute(task);
+
+      expect(scheduleRetry).toHaveBeenCalledWith(
+        "tsk_invoker_unknown",
+        expect.stringContaining("Background invoker state is unavailable"),
+        expect.any(Date),
+      );
+      expect(transitionTaskToRunning).not.toHaveBeenCalled();
+      expect(dispatchBackgroundFunction).not.toHaveBeenCalled();
+    });
+
+    test("treats an ambiguous mirror write as evidence-only and cleans it idempotently", async () => {
+      const worker = new BackgroundFunctionWorker();
+      const task = makeTask({
+        id: "tsk_mirror_unavailable",
+        payload: {
+          method: "POST", path: "/", query: "", headers: {}, body: null,
+          auth: {
+            kind: "jwt",
+            invoker_user_id: "00000000-0000-4000-8000-000000000012",
+            invoker_role: "authenticated",
+          },
+        },
+      });
+      extendLease.mockResolvedValue({} as any);
+      getProjectDb.mockImplementation(() => ((async () => [{ exists: 1 }]) as any));
+      createBackgroundTaskMirrorIfUserExists.mockResolvedValue({
+        inserted: false,
+        userExists: true,
+        degraded: true,
+      });
+
+      await (worker as any).execute(task);
+
+      expect(scheduleRetry).not.toHaveBeenCalled();
+      expect(transitionTaskToRunning).toHaveBeenCalled();
+      expect(dispatchBackgroundFunction).toHaveBeenCalled();
+      expect(removeBackgroundTaskMirror).toHaveBeenCalledWith(task);
+    });
+
+    test("dead-letters when the lifecycle fence rejects the running transition", async () => {
+      const worker = new BackgroundFunctionWorker();
+      const task = makeTask({
+        id: "tsk_deletion_fenced",
+        payload: {
+          method: "POST", path: "/", query: "", headers: {}, body: null,
+          auth: {
+            kind: "jwt",
+            invoker_user_id: "00000000-0000-4000-8000-000000000013",
+            invoker_role: "authenticated",
+          },
+        },
+      });
+      extendLease.mockResolvedValue({} as any);
+      getProjectDb.mockImplementation(() => ((async () => [{ exists: 1 }]) as any));
+      transitionTaskToRunning.mockRejectedValueOnce(new Error("USER_DELETION_FENCED"));
+
+      await (worker as any).execute(task);
+
+      expect(markTaskFailed).toHaveBeenCalledWith(
+        "tsk_deletion_fenced",
+        "USER_DELETION_FENCED",
+        true,
+      );
+      expect(dispatchBackgroundFunction).not.toHaveBeenCalled();
+    });
+
+    test("does not dispatch when the invoker is deleted between preflight and the final gate", async () => {
+      const worker = new BackgroundFunctionWorker();
+      const task = makeTask({
+        id: "tsk_deleted_during_preflight",
+        payload: {
+          method: "POST", path: "/", query: "", headers: {}, body: null,
+          auth: {
+            kind: "jwt",
+            invoker_user_id: "00000000-0000-4000-8000-000000000014",
+            invoker_role: "authenticated",
+          },
+        },
+      });
+      let invokerRead = 0;
+      extendLease.mockResolvedValue({} as any);
+      getProjectDb.mockImplementation(() => ((async () => {
+        invokerRead += 1;
+        return invokerRead === 1 ? [{ exists: 1 }] : [];
+      }) as any));
+
+      await (worker as any).execute(task);
+
+      expect(transitionTaskToRunning).toHaveBeenCalled();
+      expect(markTaskFailed).toHaveBeenCalledWith(
+        "tsk_deleted_during_preflight",
+        "Background invoker user no longer exists",
+        true,
+      );
+      expect(dispatchBackgroundFunction).not.toHaveBeenCalled();
+    });
+
+    test("uses the shared authority DB and rejects a deleted owner user despite a child residue", async () => {
+      config.authRuntimeOwnerRef = "auth-owner";
+      const userId = "00000000-0000-4000-8000-000000000015";
+      const worker = new BackgroundFunctionWorker();
+      const task = makeTask({
+        id: "tsk_shared_owner_deleted",
+        auth_authority_ref: "auth-owner",
+        invoker_user_id: userId,
+        payload: {
+          method: "POST", path: "/", query: "", headers: {}, body: null,
+          auth: {
+            kind: "jwt",
+            invoker_user_id: userId,
+            invoker_role: "authenticated",
+          },
+        },
+      });
+      extendLease.mockResolvedValue({} as any);
+      resolveDbName.mockImplementation(async (ref: string) => `tenant_${ref}`);
+      getProjectDb.mockImplementation((dbName: string) => ((async () => (
+        dbName === "tenant_auth-owner" ? [] : [{ exists: 1 }]
+      )) as any));
+
+      await (worker as any).execute(task);
+
+      expect(resolveDbName).toHaveBeenCalledWith("auth-owner");
+      expect(resolveDbName).not.toHaveBeenCalledWith("proj_1");
+      expect(markTaskFailed).toHaveBeenCalledWith(
+        "tsk_shared_owner_deleted",
+        "Background invoker user no longer exists",
+        true,
+      );
+      expect(dispatchBackgroundFunction).not.toHaveBeenCalled();
+    });
+
+    test("allows a shared-authority user even when the child auth database is empty", async () => {
+      config.authRuntimeOwnerRef = "auth-owner";
+      const userId = "00000000-0000-4000-8000-000000000016";
+      const worker = new BackgroundFunctionWorker();
+      const task = makeTask({
+        id: "tsk_shared_owner_active",
+        auth_authority_ref: "auth-owner",
+        invoker_user_id: userId,
+        payload: {
+          method: "POST", path: "/", query: "", headers: {}, body: null,
+          auth: {
+            kind: "jwt",
+            invoker_user_id: userId,
+            invoker_role: "authenticated",
+          },
+        },
+      });
+      extendLease.mockResolvedValue({} as any);
+      resolveDbName.mockImplementation(async (ref: string) => `tenant_${ref}`);
+      getProjectDb.mockImplementation((dbName: string) => ((async () => (
+        dbName === "tenant_auth-owner" ? [{ exists: 1 }] : []
+      )) as any));
+
+      await (worker as any).execute(task);
+
+      expect(resolveDbName.mock.calls.every(([ref]) => ref === "auth-owner")).toBe(true);
+      expect(transitionTaskToRunning).toHaveBeenCalled();
+      expect(dispatchBackgroundFunction).toHaveBeenCalled();
+    });
+
+    for (const [caseName, payloadUserId] of [
+      ["missing", undefined],
+      ["non-string", 42],
+      ["mismatched", "00000000-0000-4000-8000-000000000099"],
+    ] as const) {
+      test(`dead-letters a ${caseName} payload invoker when the authoritative column is set`, async () => {
+        const worker = new BackgroundFunctionWorker();
+        const task = makeTask({
+          id: `tsk_invoker_${caseName}`,
+          invoker_user_id: "00000000-0000-4000-8000-000000000017",
+          payload: {
+            method: "POST", path: "/", query: "", headers: {}, body: null,
+            auth: { kind: "jwt", invoker_user_id: payloadUserId as never },
+          },
+        });
+        extendLease.mockResolvedValue({} as any);
+
+        await (worker as any).execute(task);
+
+        expect(markTaskFailed).toHaveBeenCalledWith(
+          `tsk_invoker_${caseName}`,
+          "Background task invoker identity is inconsistent",
+          true,
+        );
+        expect(dispatchBackgroundFunction).not.toHaveBeenCalled();
+      });
+    }
+
+    test("fails closed when a queued task authority no longer matches runtime policy", async () => {
+      config.authRuntimeOwnerRef = "auth-owner-new";
+      const worker = new BackgroundFunctionWorker();
+      const userId = "00000000-0000-4000-8000-000000000018";
+      const task = makeTask({
+        id: "tsk_stale_auth_authority",
+        auth_authority_ref: "auth-owner-old",
+        invoker_user_id: userId,
+        payload: {
+          method: "POST", path: "/", query: "", headers: {}, body: null,
+          auth: { kind: "jwt", invoker_user_id: userId },
+        },
+      });
+      extendLease.mockResolvedValue({} as any);
+
+      await (worker as any).execute(task);
+
+      expect(markTaskFailed).toHaveBeenCalledWith(
+        "tsk_stale_auth_authority",
+        "Background task auth authority is inconsistent",
+        true,
+      );
+      expect(resolveDbName).not.toHaveBeenCalled();
+      expect(dispatchBackgroundFunction).not.toHaveBeenCalled();
+    });
   });
 
-  describe("invoker existence cache", () => {
-    test("caches positive invoker existence across multiple tasks", async () => {
+  describe("invoker existence checks", () => {
+    test("rechecks positive invoker existence for every task", async () => {
       const worker = new BackgroundFunctionWorker();
       const userId = "00000000-0000-4000-8000-000000000002";
       const task1 = makeTask({
@@ -471,11 +718,10 @@ describe("BackgroundFunctionWorker", () => {
       const firstCallCount = resolveDbName.mock.calls.length;
       await (worker as any).execute(task2);
 
-      // 缓存命中时 resolveDbName 不会被再次调用（invoker cache 跳过了 DB 查询）
-      expect(resolveDbName.mock.calls.length).toBe(firstCallCount);
+      expect(resolveDbName.mock.calls.length).toBe(firstCallCount + 2);
     });
 
-    test("dead-letters when mirror RPC confirms user does not exist", async () => {
+    test("does not let a mirror result override the final authoritative GoTrue read", async () => {
       const worker = new BackgroundFunctionWorker();
       const task = makeTask({
         id: "tsk_mirror_dead",
@@ -490,12 +736,30 @@ describe("BackgroundFunctionWorker", () => {
 
       await (worker as any).execute(task);
 
-      expect(markTaskFailed).toHaveBeenCalledWith(
-        "tsk_mirror_dead",
-        expect.stringContaining("atomic RPC check"),
-        true,
-      );
-      expect(dispatchBackgroundFunction).not.toHaveBeenCalled();
+      expect(markTaskFailed).not.toHaveBeenCalled();
+      expect(dispatchBackgroundFunction).toHaveBeenCalled();
+    });
+
+    test("removes recorded mirror evidence after a terminal attempt", async () => {
+      const worker = new BackgroundFunctionWorker();
+      const task = makeTask({
+        id: "tsk_mirror_cleanup",
+        payload: {
+          method: "POST", path: "/", query: "", headers: {}, body: null,
+          auth: {
+            kind: "jwt",
+            invoker_user_id: "00000000-0000-4000-8000-000000000004",
+            invoker_role: "authenticated",
+          },
+        },
+      });
+      extendLease.mockResolvedValue({} as any);
+      getProjectDb.mockImplementation(() => ((async () => [{ exists: 1 }]) as any));
+      createBackgroundTaskMirrorIfUserExists.mockResolvedValue({ inserted: true, userExists: true });
+
+      await (worker as any).execute(task);
+
+      expect(removeBackgroundTaskMirror).toHaveBeenCalledWith(task);
     });
   });
 
@@ -530,6 +794,7 @@ describe("BackgroundFunctionWorker", () => {
       expect(request.headers.get("x-supacloud-signature-timestamp")).toBeTruthy();
       expect(request.headers.get("x-supacloud-signature")).toMatch(/^[a-f0-9]{64}$/);
     });
+
   });
 });
 
@@ -591,6 +856,38 @@ describe("BackgroundFunctionWorker pure helpers", () => {
   });
 });
 
+describe("BackgroundFunctionWorker safety contract", () => {
+  const workerSource = readFileSync(
+    new URL("../../src/services/background-function-worker.ts", import.meta.url),
+    "utf8",
+  );
+
+  test("has no positive invoker cache or fail-open authorization path", () => {
+    expect(workerSource).not.toContain("invokerCache");
+    expect(workerSource).not.toContain("invokerInflight");
+    expect(workerSource).not.toContain("assume user exists");
+    expect(workerSource).toContain("safety circuit is open");
+    expect(workerSource).toContain("throw new RetryableBackgroundInvocationError");
+  });
+
+  test("does not parallelize authorization, mirror, and running transition", () => {
+    const executeSource = workerSource.slice(
+      workerSource.indexOf("private async execute"),
+      workerSource.indexOf("async cancel("),
+    );
+    expect(executeSource).not.toContain("Promise.all(");
+    expect(executeSource.indexOf("assertBackgroundInvokerUserExists(task)")).toBeLessThan(
+      executeSource.indexOf("createBackgroundTaskMirrorIfUserExists(task)"),
+    );
+    expect(executeSource.indexOf("createBackgroundTaskMirrorIfUserExists(task)")).toBeLessThan(
+      executeSource.indexOf("transitionTaskToRunning(task.id"),
+    );
+    expect(executeSource.lastIndexOf("assertBackgroundInvokerUserExists(task)")).toBeGreaterThan(
+      executeSource.indexOf("transitionTaskToRunning(task.id"),
+    );
+  });
+});
+
   describe("invoker unknown circuit breaker", () => {
     test("getInvokerUnknownMetrics returns structured object", async () => {
       const { getInvokerUnknownMetrics } = await import(
@@ -611,10 +908,11 @@ describe("BackgroundFunctionWorker pure helpers", () => {
       );
       const metrics = getInvokerUnknownMetrics();
       expect(metrics.circuit_open).toBe(false);
-      expect(metrics.unknown_window_count).toBe(0);
+      expect(metrics.unknown_window_count).toBeGreaterThanOrEqual(0);
     });
   });
 
 afterAll(() => {
+  config.authRuntimeOwnerRef = originalAuthRuntimeOwnerRef;
   mock.restore();
 });

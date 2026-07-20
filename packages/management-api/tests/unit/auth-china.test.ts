@@ -14,5 +14,10 @@ describe("china auth edge function generators", () => {
     expect(functionCode).not.toContain("Deno.serve");
     expect(functionCode).toContain("Bun.env[\"SUPABASE_URL\"]");
     expect(functionCode).toContain("JSON.stringify(finalSession)");
+    expect(functionCode).not.toContain('import { SQL } from "bun"');
+    expect(functionCode).not.toContain("SUPABASE_DB_URL");
+    expect(functionCode).not.toContain("auth.identities");
+    expect(functionCode).not.toContain("Identity linkage failed");
+    expect(functionCode).not.toContain("app_metadata:");
   });
 });

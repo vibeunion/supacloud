@@ -9,12 +9,14 @@
     value: string;
     description: string | null;
     is_secret: boolean;
+    configured: boolean;
     updated_at: string;
   }
 
   // Form state
   let aiApiBase = $state("");
   let aiApiKey = $state("");
+  let aiApiKeyConfigured = $state(false);
   let aiModel = $state("");
 
   // UI state
@@ -23,6 +25,7 @@
   let testing = $state(false);
   let testResult = $state<{ ok: boolean; message: string } | null>(null);
   let saveSuccess = $state(false);
+  let loadError = $state("");
     
   // Preset providers
   const PROVIDERS = [
@@ -35,26 +38,33 @@
 
   async function loadSettings() {
     loading = true;
+    loadError = "";
     try {
       const response = await apiClient("/v1/platform/settings");
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const res = await response.json() as { data?: SettingItem[] };
       const items: SettingItem[] = res.data || [];
       for (const item of items) {
         if (item.key === "ai_api_base") aiApiBase = item.value;
-        if (item.key === "ai_api_key") aiApiKey = item.value;
+        if (item.key === "ai_api_key") {
+          aiApiKey = "";
+          aiApiKeyConfigured = item.configured;
+        }
         if (item.key === "ai_model") aiModel = item.value;
       }
-    } catch {
-      // First time, no settings yet
+    } catch (error: unknown) {
+      loadError = error instanceof Error ? error.message : String(error);
+    } finally {
+      loading = false;
     }
-    loading = false;
   }
 
   async function saveSettings() {
     saving = true;
     saveSuccess = false;
+    const rotatesApiKey = Boolean(aiApiKey);
     try {
-      await apiClient("/v1/platform/settings", {
+      const response = await apiClient("/v1/platform/settings", {
         method: "PUT",
         body: JSON.stringify({
           items: [
@@ -64,6 +74,11 @@
           ],
         }),
       });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      if (rotatesApiKey) {
+        aiApiKey = "";
+        aiApiKeyConfigured = true;
+      }
       saveSuccess = true;
       setTimeout(() => (saveSuccess = false), 3000);
     } catch (err: unknown) {
@@ -121,6 +136,10 @@
     <div class="flex items-center justify-center py-20 text-muted-foreground">
       <RefreshCw size={20} class="animate-spin mr-2" /> {$t("PlatformSettings.loading_settings")}
     </div>
+  {:else if loadError}
+    <div class="rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
+      {loadError}
+    </div>
   {:else}
     <!-- Quick Provider Presets -->
     <div class="space-y-3">
@@ -163,7 +182,7 @@
           type="password"
           bind:value={aiApiKey}
           class="w-full px-4 py-2.5 text-sm font-mono rounded-xl border bg-background focus:outline-none focus:ring-2 focus:ring-brand/50 transition-shadow"
-          placeholder="sk-..."
+          placeholder={aiApiKeyConfigured ? "******** (unchanged)" : "sk-..."}
         />
         <p class="text-[11px] text-muted-foreground">{$t("PlatformSettings.keys_are_stored_only_in")}</p>
       </div>

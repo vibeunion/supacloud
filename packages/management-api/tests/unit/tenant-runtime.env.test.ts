@@ -8,12 +8,16 @@ import {
   quoteTomlBasicString,
   renderSystemdEnvLine,
   renderGoTrueAuthEnv,
-  renderGoTruePasskeyEnv,
+  renderGoTrueProviderLinkingEnv,
   renderGoTrueSamlEnv,
   renderGoTrueSessionPolicyEnv,
   renderPostgrestDbSchemas,
   renderTenantInternalRuntimeEnv,
 } from "../../src/services/tenant-runtime-config";
+import {
+  canonicalAuthProviderLinkingConfig,
+  normalizedProviderLinkingDomains,
+} from "../../src/utils/provider-linking";
 import {
   applyAuthSessionPolicyPatch,
   normalizeAuthSessionPolicyPatch,
@@ -229,52 +233,79 @@ describe("TenantRuntimeService GoTrue auth env rendering", () => {
     ].join("\n"));
   });
 
-  test("rejects newline injection through email, passkey, and SAML settings", () => {
+  test("keeps provider linking opt-in disabled and renders a sorted canonical map", () => {
+    expect(renderGoTrueProviderLinkingEnv({})).toBe("");
+    expect(renderGoTrueProviderLinkingEnv({ experimental: { provider_linking_domains: {} } })).toBe("");
+    expect(renderGoTrueProviderLinkingEnv({
+      experimental: {
+        provider_linking_domains: {
+          "custom:google": "social",
+          "custom:github": "social",
+        },
+      },
+    })).toBe(
+      'GOTRUE_EXPERIMENTAL_PROVIDER_LINKING_DOMAINS="custom:github=social,custom:google=social"',
+    );
+  });
+
+  test("normalizes the deprecated provider list without rendering its legacy env name", () => {
+    const canonical = canonicalAuthProviderLinkingConfig({
+      experimental: {
+        providers_with_own_linking_domain: ["github", "github", "custom:google"],
+        provider_linking_domains: { github: "social" },
+      },
+    });
+    expect(canonical).toEqual({
+      experimental: {
+        provider_linking_domains: {
+          "custom:google": "custom:google",
+          github: "social",
+        },
+      },
+    });
+    const rendered = renderGoTrueProviderLinkingEnv(canonical);
+    expect(rendered).not.toContain("PROVIDERS_WITH_OWN_LINKING_DOMAIN");
+    expect(() => renderGoTrueProviderLinkingEnv({
+      experimental: { providers_with_own_linking_domain: ["github"] },
+    })).toThrow(/must be migrated before runtime rendering/);
+  });
+
+  test.each([
+    [{ "": "social" }, /non-empty/],
+    [{ github: "" }, /non-empty/],
+    [{ "github,google": "social" }, /only letters/],
+    [{ github: "social=shared" }, /only letters/],
+    [{ " github ": "social", github: "default" }, /Duplicate/],
+    [{ github: "social\nGOTRUE_OPERATOR_TOKEN=stolen" }, /only letters/],
+  ])("rejects ambiguous or injectable provider linking maps", (providerMap, errorPattern) => {
+    expect(() => normalizedProviderLinkingDomains({ provider_linking_domains: providerMap }))
+      .toThrow(errorPattern);
+  });
+
+  test("rejects newline injection through email and SAML settings", () => {
     expect(() => renderGoTrueAuthEnv({
       mailer_subjects_confirmation: "safe\nGOTRUE_OPERATOR_TOKEN=stolen",
-    })).toThrow(/control character/i);
-    expect(() => renderGoTruePasskeyEnv({
-      passkey: { enabled: true },
-      webauthn: { rp_id: "safe\rINJECTED=value" },
-    }, {
-      rpId: "example.com",
-      rpDisplayName: "SupaCloud",
-      rpOrigins: ["https://example.com"],
     })).toThrow(/control character/i);
     expect(() => renderGoTrueSamlEnv({
       saml: { enabled: true, private_key: "safe\0INJECTED=value" },
     })).toThrow(/control character/i);
   });
 
-  test("maps passkey and WebAuthn config into GoTrue env values only when enabled", () => {
-    expect(renderGoTruePasskeyEnv({}, {
-      rpId: "example.com",
-      rpDisplayName: "SupaCloud",
-      rpOrigins: ["https://example.com"],
-    })).toBe("");
+  test("does not generate removed Passkey or WebAuthn runtime variables", () => {
+    const configSource = readFileSync(
+      join(import.meta.dir, "../../src/services/tenant-runtime-config.ts"),
+      "utf8",
+    );
+    const runtimeSource = readFileSync(
+      join(import.meta.dir, "../../src/services/tenant-runtime.service.ts"),
+      "utf8",
+    );
+    const runtimeImplementation = `${configSource}\n${runtimeSource}`;
 
-    expect(renderGoTruePasskeyEnv({
-      passkey: { enabled: true, max_passkeys_per_user: 7 },
-      webauthn: {
-        rp_id: "login.example.com",
-        rp_display_name: "Example Login",
-        rp_origins: ["https://login.example.com", "https://app.example.com"],
-      },
-      mfa: { webauthn: { enroll_enabled: true, verify_enabled: true } },
-    }, {
-      rpId: "example.com",
-      rpDisplayName: "SupaCloud",
-      rpOrigins: ["https://example.com"],
-    })).toBe([
-      "GOTRUE_PASSKEY_ENABLED=true",
-      "GOTRUE_PASSKEY_MAX_PASSKEYS_PER_USER=7",
-      "GOTRUE_MFA_WEBAUTHN_ENROLL_ENABLED=true",
-      "GOTRUE_MFA_WEBAUTHN_VERIFY_ENABLED=true",
-      'GOTRUE_WEBAUTHN_RP_ID="login.example.com"',
-      'GOTRUE_WEBAUTHN_RP_DISPLAY_NAME="Example Login"',
-      'GOTRUE_WEBAUTHN_RP_ORIGINS="https://login.example.com,https://app.example.com"',
-      'GOTRUE_WEBAUTHN_CHALLENGE_EXPIRY_DURATION="5m"',
-    ].join("\n"));
+    expect(runtimeImplementation).not.toContain("renderGoTruePasskeyEnv");
+    expect(runtimeImplementation).not.toContain("GOTRUE_PASSKEY_");
+    expect(runtimeImplementation).not.toContain("GOTRUE_MFA_WEBAUTHN_");
+    expect(runtimeImplementation).not.toContain("GOTRUE_WEBAUTHN_");
   });
 
   test("maps SAML SP key rotation config into GoTrue env values", () => {

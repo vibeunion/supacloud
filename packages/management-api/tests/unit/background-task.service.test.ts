@@ -31,6 +31,7 @@ const {
   normalizeBackgroundTaskTimeout,
   normalizeBackgroundTaskMaxAttempts,
   createBackgroundTaskMirrorIfUserExists,
+  removeBackgroundTaskMirror,
 } = backgroundTaskServiceModule;
 
 function makeTask(overrides: Partial<ProjectTask> = {}): ProjectTask {
@@ -154,7 +155,7 @@ describe("BackgroundTaskService: normalizeBackgroundTaskMaxAttempts", () => {
 });
 
 describe("BackgroundTaskService: createBackgroundTaskMirrorIfUserExists", () => {
-  let scenario: "table_exists" | "table_missing" | "user_missing" | "db_error" = "table_exists";
+  let scenario: "table_exists" | "table_missing" | "user_missing" | "db_error" | "cleanup_error" = "table_exists";
 
   const projectDb = mock((strings: TemplateStringsArray) => {
     const sql = strings.join(" ");
@@ -171,6 +172,11 @@ describe("BackgroundTaskService: createBackgroundTaskMirrorIfUserExists", () => 
 
     if (sql.includes("SELECT 1 FROM auth.users")) {
       return Promise.resolve(scenario === "user_missing" ? [] : [{ exists: 1 }]);
+    }
+
+    if (sql.includes("DELETE FROM public.background_task_mirrors")) {
+      if (scenario === "cleanup_error") throw new Error("cleanup unavailable");
+      return Promise.resolve([]);
     }
 
     throw new Error(`Unexpected SQL: ${sql}`);
@@ -235,5 +241,20 @@ describe("BackgroundTaskService: createBackgroundTaskMirrorIfUserExists", () => 
     expect(result).toEqual({ inserted: false, userExists: true });
     expect(resolveDbName).not.toHaveBeenCalled();
     expect(getProjectDb).not.toHaveBeenCalled();
+  });
+
+  test("removes terminal mirror evidence by task id", async () => {
+    await expect(removeBackgroundTaskMirror(makeTask())).resolves.toBe(true);
+    expect(resolveDbName).toHaveBeenCalledWith("proj_mirror");
+  });
+
+  test("surfaces terminal mirror cleanup failures without claiming success", async () => {
+    scenario = "cleanup_error";
+
+    await expect(removeBackgroundTaskMirror(makeTask())).resolves.toBe(false);
+    expect(loggerWarn).toHaveBeenCalledWith(
+      "[BackgroundTaskService] terminal mirror cleanup failed",
+      expect.objectContaining({ taskId: "00000000-0000-4000-8000-000000000099" }),
+    );
   });
 });

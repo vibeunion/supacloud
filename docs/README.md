@@ -25,6 +25,7 @@
 
 - [OAuth Providers](./oauth-providers.md) - OAuth provider configuration
 - [OAuth 2.1 / OIDC Provider](./oauth-oidc-provider.md) - Project-scoped OAuth server migration, discovery, JWKS, and OAuth client management
+- [GoTrue v2.193.0 Upgrade](./gotrue-v2.193-upgrade.md) - Checksums, additive migration read-back, opt-in provider linking, MFA acceptance, and rollback boundary
 - [China OAuth Integration](./china-oauth-integration.md) - China OAuth (WeChat, Alipay, DingTalk)
 - [WeChat Auth Integration](./wechat-auth-integration.md) - WeChat Mini Program login
 

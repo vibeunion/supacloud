@@ -29,6 +29,7 @@ export class AppError extends Error {
       case 422: return "VALIDATION_ERROR";
       case 429: return "RATE_LIMITED";
       case 500: return "INTERNAL_ERROR";
+      case 501: return "CAPABILITY_UNAVAILABLE";
       case 503: return "SERVICE_UNAVAILABLE";
       default: return "UNKNOWN_ERROR";
     }
@@ -82,6 +83,29 @@ export class ServiceUnavailableError extends AppError {
       "SERVICE_UNAVAILABLE",
     );
     this.name = "ServiceUnavailableError";
+  }
+}
+
+export class CapabilityUnavailableError extends AppError {
+  public readonly reasonCode: string;
+
+  constructor(capability: string, reasonCode: string = "capability_unavailable") {
+    super(
+      `Capability unavailable: ${capability}`,
+      501,
+      "CAPABILITY_UNAVAILABLE",
+      undefined,
+      reasonCode,
+    );
+    this.reasonCode = reasonCode;
+    this.name = "CapabilityUnavailableError";
+  }
+
+  override toJSON() {
+    return {
+      ...super.toJSON(),
+      reason_code: this.reasonCode,
+    };
   }
 }
 

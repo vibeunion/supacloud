@@ -27,10 +27,9 @@ export const projectSecretsRoutes = new Elysia({ prefix: "/v1/projects" })
 
   .get(
     "/:ref/secrets",
-    async ({ params, query, request }) => {
+    async ({ params, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
-      const reveal = query.reveal === "true";
 
       const secrets = await projectService.getSecrets(params.ref);
       if (!secrets) {
@@ -38,12 +37,13 @@ export const projectSecretsRoutes = new Elysia({ prefix: "/v1/projects" })
       }
       return secrets.map((s: { name: string; value: string }) => ({
         name: s.name,
-        value: reveal ? s.value : "********",
+        // 明文只允许内部 runtime-env 通道读取；兼容旧的 reveal=true
+        // 查询参数，但永远不在项目管理 API 响应中回显。
+        value: "********",
       }));
     },
     {
       params: t.Object({ ref: t.String() }),
-      query: t.Object({ reveal: t.Optional(t.String()) }),
       detail: { tags: ["projects"], summary: "List project secrets" },
     },
   )

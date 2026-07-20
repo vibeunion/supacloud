@@ -6,8 +6,12 @@ import base64
 import hashlib
 import hmac
 import json
+import os
 import secrets
+import stat
+import tempfile
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from urllib.parse import urlparse
 
 
@@ -36,6 +40,72 @@ def derive_base_domain(public_url: str) -> str:
     if host.startswith("api."):
         return host[4:]
     return host
+
+
+def read_env_value(env_path: Path | None, key: str) -> str | None:
+    if env_path is None or not env_path.exists():
+        return None
+    prefix = f"{key}="
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line.startswith(prefix):
+            continue
+        candidate = line[len(prefix):].strip()
+        if len(candidate) >= 2 and candidate[0] == candidate[-1] and candidate[0] in {'"', "'"}:
+            candidate = candidate[1:-1]
+        return candidate or None
+    return None
+
+
+def validate_bff_signing_secret(
+    candidate: str,
+    master_token: str,
+    encryption_key: str,
+    legacy_encryption_key: str,
+) -> None:
+    if len(candidate) < 32:
+        raise ValueError("SUPAOAUTH_BFF_SIGNING_SECRET must contain at least 32 characters")
+    if candidate in {master_token, encryption_key, legacy_encryption_key}:
+        raise ValueError("SUPAOAUTH_BFF_SIGNING_SECRET must be independent from management secrets")
+    if any(control in candidate for control in ("\0", "\r", "\n")):
+        raise ValueError("SUPAOAUTH_BFF_SIGNING_SECRET must not contain control characters")
+
+
+def validate_legacy_encryption_key(candidate: str, current_key: str) -> None:
+    if not candidate:
+        return
+    if len(candidate) < 32 or candidate == current_key:
+        raise ValueError("LEGACY_SECRETS_ENCRYPTION_KEY must be a distinct value of at least 32 characters")
+    if any(control in candidate for control in ("\0", "\r", "\n")):
+        raise ValueError("LEGACY_SECRETS_ENCRYPTION_KEY must not contain control characters")
+
+
+def write_private_env(output_path: Path, env_payload: str) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{output_path.name}.", dir=output_path.parent)
+    temporary_path = Path(temporary_name)
+    try:
+        os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as output_file:
+            output_file.write(env_payload)
+            output_file.flush()
+            os.fsync(output_file.fileno())
+        os.replace(temporary_path, output_path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
+
+
+def prepare_legacy_migration_file(output_path: Path, legacy_key: str) -> None:
+    if legacy_key:
+        write_private_env(output_path, f"{legacy_key}\n")
+        return
+    if not output_path.exists():
+        write_private_env(output_path, "")
+        return
+    if output_path.is_symlink() or not output_path.is_file():
+        raise ValueError("legacy migration input must be a regular file")
+    if stat.S_IMODE(output_path.stat().st_mode) & 0o077:
+        raise ValueError("legacy migration input must not be group/world accessible")
 
 
 def main() -> None:
@@ -78,11 +148,58 @@ def main() -> None:
         help="Management API secret encryption key",
     )
     parser.add_argument(
+        "--legacy-secrets-encryption-key",
+        default="",
+        help="One-shot key for migrating enc:v1 values created before key separation",
+    )
+    parser.add_argument(
+        "--legacy-secrets-output",
+        type=Path,
+        help="Root-only one-shot migration input file; kept on failure and consumed after checkpoint success",
+    )
+    parser.add_argument(
+        "--supaoauth-bff-signing-secret",
+        help="Independent BFF actor-proof signing secret",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        help="Atomically write a private 0600 env file and reuse its existing BFF secret",
+    )
+    parser.add_argument(
         "--timezone",
         default="Asia/Shanghai",
         help="Container timezone",
     )
     args = parser.parse_args()
+
+    if args.legacy_secrets_encryption_key and not (args.output or args.legacy_secrets_output):
+        parser.error("--legacy-secrets-encryption-key requires --output or --legacy-secrets-output")
+    legacy_migration_path = args.legacy_secrets_output or (
+        args.output.with_name(".legacy-secrets-migration.env")
+        if args.output
+        else Path("./.legacy-secrets-migration.env")
+    )
+
+    bff_signing_secret = (
+        args.supaoauth_bff_signing_secret
+        or read_env_value(args.output, "SUPAOAUTH_BFF_SIGNING_SECRET")
+        or os.environ.get("SUPAOAUTH_BFF_SIGNING_SECRET")
+        or secrets.token_urlsafe(32)
+    )
+    try:
+        validate_legacy_encryption_key(
+            args.legacy_secrets_encryption_key,
+            args.secrets_encryption_key,
+        )
+        validate_bff_signing_secret(
+            bff_signing_secret,
+            args.master_token,
+            args.secrets_encryption_key,
+            args.legacy_secrets_encryption_key,
+        )
+    except ValueError as error:
+        parser.error(str(error))
 
     now = datetime.now(timezone.utc)
     issued_at = int(now.timestamp())
@@ -107,40 +224,58 @@ def main() -> None:
         },
     )
 
-    print("# Generated by docker/self-host/init-env.py")
-    print(f"# Generated at {now.isoformat()}")
-    print(f"TZ={args.timezone}")
-    print("POSTGRES_USER=postgres")
-    print(f"POSTGRES_PASSWORD={args.postgres_password}")
-    print("POSTGRES_DB=postgres")
-    print("POSTGRES_PORT=5432")
-    print("ENABLE_FERRETDB=false")
-    print("FERRETDB_IMAGE=ghcr.io/ferretdb/ferretdb:2.7.0")
-    print("FERRETDB_USER=ferretdb")
-    print(f"FERRETDB_PASSWORD={args.ferretdb_password}")
-    print("FERRETDB_DATABASE=postgres")
-    print("FERRETDB_PORT=27017")
-    print("ENABLE_PGSODIUM=false")
-    print("PGSODIUM_KEY=")
-    print("PGSODIUM_KEY_FILE=/run/secrets/pgsodium_key")
-    print("PGSODIUM_ENABLE_EVENT_TRIGGER=off")
-    print("ENABLE_SUPABASE_VAULT=false")
-    print("VAULT_KEY=")
-    print("VAULT_KEY_FILE=/run/secrets/vault_key")
-    print(f"JWT_SECRET={args.jwt_secret}")
-    print(f"ANON_KEY={anon_key}")
-    print(f"SERVICE_ROLE_KEY={service_role_key}")
-    print(f"MASTER_TOKEN={args.master_token}")
-    print(f"SECRETS_ENCRYPTION_KEY={args.secrets_encryption_key}")
-    print(f"PUBLIC_URL={args.public_url}")
-    print(f"STUDIO_URL={args.studio_url}")
-    print(f"BASE_DOMAIN={derive_base_domain(args.public_url)}")
-    print("PGRST_DB_SCHEMAS=public,storage,graphql_public")
-    print("CADDY_HTTP_PORT=8000")
-    print("CADDY_HTTPS_PORT=8443")
-    print("# CADDY_ADMIN_PORT=2019 (internal only)")
-    print("API_PORT=9090")
-    print("EDGE_RUNTIME_PORT=9000")
+    env_lines = [
+        "# Generated by docker/self-host/init-env.py",
+        f"# Generated at {now.isoformat()}",
+        f"TZ={args.timezone}",
+        "POSTGRES_USER=postgres",
+        f"POSTGRES_PASSWORD={args.postgres_password}",
+        "POSTGRES_DB=postgres",
+        "POSTGRES_PORT=5432",
+        "ENABLE_FERRETDB=false",
+        "FERRETDB_IMAGE=ghcr.io/ferretdb/ferretdb:2.7.0",
+        "FERRETDB_USER=ferretdb",
+        f"FERRETDB_PASSWORD={args.ferretdb_password}",
+        "FERRETDB_DATABASE=postgres",
+        "FERRETDB_PORT=27017",
+        "ENABLE_PGSODIUM=false",
+        "PGSODIUM_KEY=",
+        "PGSODIUM_KEY_FILE=/run/secrets/pgsodium_key",
+        "PGSODIUM_ENABLE_EVENT_TRIGGER=off",
+        "ENABLE_SUPABASE_VAULT=false",
+        "VAULT_KEY=",
+        "VAULT_KEY_FILE=/run/secrets/vault_key",
+        f"JWT_SECRET={args.jwt_secret}",
+        f"ANON_KEY={anon_key}",
+        f"SERVICE_ROLE_KEY={service_role_key}",
+        f"MASTER_TOKEN={args.master_token}",
+        f"SECRETS_ENCRYPTION_KEY={args.secrets_encryption_key}",
+        f"LEGACY_SECRETS_MIGRATION_FILE={legacy_migration_path}",
+        f"SUPAOAUTH_BFF_SIGNING_SECRET={bff_signing_secret}",
+        f"PUBLIC_URL={args.public_url}",
+        f"STUDIO_URL={args.studio_url}",
+        f"BASE_DOMAIN={derive_base_domain(args.public_url)}",
+        "PGRST_DB_SCHEMAS=public,storage,graphql_public",
+        "CADDY_HTTP_PORT=8000",
+        "CADDY_HTTPS_PORT=8443",
+        "# CADDY_ADMIN_PORT=2019 (internal only)",
+        "API_PORT=9090",
+        "EDGE_RUNTIME_PORT=9000",
+    ]
+    env_payload = "\n".join(env_lines) + "\n"
+    if args.output:
+        try:
+            prepare_legacy_migration_file(legacy_migration_path, args.legacy_secrets_encryption_key)
+        except ValueError as error:
+            parser.error(str(error))
+        write_private_env(args.output, env_payload)
+        return
+    if args.legacy_secrets_output:
+        try:
+            prepare_legacy_migration_file(legacy_migration_path, args.legacy_secrets_encryption_key)
+        except ValueError as error:
+            parser.error(str(error))
+    print(env_payload, end="")
 
 
 if __name__ == "__main__":

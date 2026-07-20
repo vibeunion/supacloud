@@ -1,59 +1,292 @@
-/**
- * 用户安全删除服务 — 平台层能力
- *
- * 删除用户前检查该用户是否还有活跃的平台任务（PENDING / LEASED / RUNNING / RETRY_SCHEDULED），
- * 如有则拒绝删除并返回 409 + 活跃任务摘要。
- *
- * 设计决策：
- * - 此约束依赖平台任务状态 project_tasks，不是单纯的业务用户状态，属于平台不变量。
- * - 回滚补偿路径（注册失败后的 deleteUser）不经过此检查，因为那是事务补偿，正常不会有任务。
- */
-
+import { randomUUID } from "node:crypto";
+import type { SQL } from "bun";
+import { sql } from "../db";
 import { taskRepository } from "../repositories/task.repository";
-import { logger } from "../utils/logger";
+import {
+  normalizedGoTrueUserId,
+  projectUserLifecycleLockKey,
+} from "../utils/project-user-lifecycle";
 
 export interface ActiveTasksCheckResult {
-  /** 是否允许安全删除 */
   safe: boolean;
-  /** 活跃任务数 */
   activeTaskCount: number;
-  /** 活跃任务摘要（最多 100 条） */
   activeTasks: Array<{ id: string; task_type: string; status: string }>;
 }
 
-/**
- * 检查指定项目内某用户是否有活跃的平台任务。
- *
- * @param projectRef 项目 ref
- * @param userId 用户 ID（对应 payload.auth.invoker_user_id）
- * @returns 检查结果：safe=true 表示无活跃任务，可以安全删除
- */
-export async function checkUserActiveTasks(
-  projectRef: string,
-  userId: string,
-): Promise<ActiveTasksCheckResult> {
-  try {
-    const { count, tasks } = await taskRepository.countActiveTasksByInvoker(projectRef, userId);
-    return {
-      safe: count === 0,
-      activeTaskCount: count,
-      activeTasks: tasks,
-    };
-  } catch (err) {
-    // 查询失败时安全降级：记录警告但不阻止删除，避免因任务系统不可用而阻塞用户管理
-    logger.warn(
-      `[UserSafety] Failed to check active tasks for user ${userId} in project ${projectRef}, allowing delete (degraded): ${
-        err instanceof Error ? err.message : String(err)
-      }`,
-    );
-    return {
-      safe: true,
-      activeTaskCount: 0,
-      activeTasks: [],
-    };
-  }
+export type UserDeletionFenceStatus = "requested" | "deleting" | "deleted" | "failed";
+
+export interface BeginUserDeletionInput {
+  projectRef: string;
+  userId: string;
+  requestId: string;
+  shouldSoftDelete: boolean;
 }
 
-export const userSafetyService = {
-  checkUserActiveTasks,
+export interface UserDeletionOperationInput {
+  projectRef: string;
+  userId: string;
+  operationId: string;
+}
+
+export type BeginUserDeletionResult =
+  | ({ state: "blocked" } & ActiveTasksCheckResult)
+  | { state: "in_progress"; status: "requested" | "deleting"; requestId: string; operationId: string }
+  | {
+      state: "reconcile";
+      status: "requested" | "deleting";
+      requestId: string;
+      operationId: string;
+      shouldSoftDelete: boolean;
+    }
+  | { state: "already_deleted"; shouldSoftDelete: boolean; completedAt: Date | null }
+  | { state: "ready"; normalizedUserId: string; operationId: string };
+
+export type ResumeUserDeletionResult =
+  | ({ state: "blocked" } & ActiveTasksCheckResult)
+  | { state: "operation_changed" }
+  | { state: "ready"; normalizedUserId: string; operationId: string };
+
+type DeletionFenceRow = {
+  status: UserDeletionFenceStatus;
+  should_soft_delete: boolean;
+  request_id: string;
+  operation_id: string;
+  completed_at: Date | null;
+  operation_active: boolean;
 };
+
+async function lockUserLifecycle(transaction: SQL, projectRef: string, userId: string): Promise<void> {
+  const lockKey = projectUserLifecycleLockKey(projectRef, userId);
+  await transaction`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`;
+}
+
+async function deletionFence(
+  transaction: SQL,
+  projectRef: string,
+  userId: string,
+): Promise<DeletionFenceRow | null> {
+  const [fence] = await transaction`
+    SELECT
+      status,
+      should_soft_delete,
+      request_id,
+      operation_id,
+      completed_at,
+      operation_expires_at > NOW() AS operation_active
+    FROM project_user_deletion_fences
+    WHERE project_ref = ${projectRef}
+      AND user_id = ${userId}::uuid
+    FOR UPDATE
+  ` as DeletionFenceRow[];
+  return fence || null;
+}
+
+async function activeTasks(
+  projectRef: string,
+  userId: string,
+  transaction: SQL,
+): Promise<ActiveTasksCheckResult> {
+  const { count, tasks } = await taskRepository.countActiveTasksByInvoker(
+    projectRef,
+    userId,
+    transaction,
+  );
+  return {
+    safe: count === 0,
+    activeTaskCount: count,
+    activeTasks: tasks,
+  };
+}
+
+export async function beginUserDeletion(input: BeginUserDeletionInput): Promise<BeginUserDeletionResult> {
+  const userId = normalizedGoTrueUserId(input.userId);
+  if (!userId) throw new Error("GoTrue user id must be a UUID");
+
+  return sql.begin(async (transaction) => {
+    await lockUserLifecycle(transaction, input.projectRef, userId);
+    const existingFence = await deletionFence(transaction, input.projectRef, userId);
+    if (existingFence?.status === "deleted") {
+      return {
+        state: "already_deleted" as const,
+        shouldSoftDelete: existingFence.should_soft_delete,
+        completedAt: existingFence.completed_at,
+      };
+    }
+    if (existingFence?.status === "requested" || existingFence?.status === "deleting") {
+      if (existingFence.operation_active) {
+        return {
+          state: "in_progress" as const,
+          status: existingFence.status,
+          requestId: existingFence.request_id,
+          operationId: existingFence.operation_id,
+        };
+      }
+      return {
+        state: "reconcile" as const,
+        status: existingFence.status,
+        requestId: existingFence.request_id,
+        operationId: existingFence.operation_id,
+        shouldSoftDelete: existingFence.should_soft_delete,
+      };
+    }
+
+    const taskSafety = await activeTasks(input.projectRef, userId, transaction);
+    if (!taskSafety.safe) return { state: "blocked" as const, ...taskSafety };
+
+    const operationId = randomUUID();
+    await transaction`
+      INSERT INTO project_user_deletion_fences (
+        project_ref,
+        user_id,
+        status,
+        should_soft_delete,
+        request_id,
+        operation_id,
+        operation_expires_at,
+        last_error,
+        requested_at,
+        deletion_started_at,
+        completed_at,
+        updated_at
+      )
+      VALUES (
+        ${input.projectRef},
+        ${userId}::uuid,
+        'requested',
+        ${input.shouldSoftDelete},
+        ${input.requestId},
+        ${operationId}::uuid,
+        NOW() + INTERVAL '5 minutes',
+        NULL,
+        NOW(),
+        NULL,
+        NULL,
+        NOW()
+      )
+      ON CONFLICT (project_ref, user_id)
+      DO UPDATE SET
+        status = 'requested',
+        should_soft_delete = EXCLUDED.should_soft_delete,
+        request_id = EXCLUDED.request_id,
+        operation_id = EXCLUDED.operation_id,
+        operation_expires_at = EXCLUDED.operation_expires_at,
+        last_error = NULL,
+        requested_at = NOW(),
+        deletion_started_at = NULL,
+        completed_at = NULL,
+        updated_at = NOW()
+    `;
+    return { state: "ready" as const, normalizedUserId: userId, operationId };
+  });
+}
+
+export async function resumeUserDeletionAfterReconcile(
+  input: BeginUserDeletionInput,
+  reconciledOperationId: string,
+): Promise<ResumeUserDeletionResult> {
+  const userId = normalizedGoTrueUserId(input.userId);
+  if (!userId) throw new Error("GoTrue user id must be a UUID");
+
+  return sql.begin(async (transaction) => {
+    await lockUserLifecycle(transaction, input.projectRef, userId);
+    const fence = await deletionFence(transaction, input.projectRef, userId);
+    if (
+      !fence ||
+      fence.operation_id !== reconciledOperationId ||
+      fence.operation_active ||
+      (fence.status !== "requested" && fence.status !== "deleting")
+    ) {
+      return { state: "operation_changed" as const };
+    }
+
+    const taskSafety = await activeTasks(input.projectRef, userId, transaction);
+    if (!taskSafety.safe) return { state: "blocked" as const, ...taskSafety };
+
+    const operationId = randomUUID();
+    const rows = await transaction`
+      UPDATE project_user_deletion_fences
+      SET status = 'requested',
+          should_soft_delete = ${input.shouldSoftDelete},
+          request_id = ${input.requestId},
+          operation_id = ${operationId}::uuid,
+          operation_expires_at = NOW() + INTERVAL '5 minutes',
+          last_error = NULL,
+          requested_at = NOW(),
+          deletion_started_at = NULL,
+          completed_at = NULL,
+          updated_at = NOW()
+      WHERE project_ref = ${input.projectRef}
+        AND user_id = ${userId}::uuid
+        AND operation_id = ${reconciledOperationId}::uuid
+        AND status IN ('requested', 'deleting')
+      RETURNING id
+    `;
+    if (rows.length === 0) return { state: "operation_changed" as const };
+    return { state: "ready" as const, normalizedUserId: userId, operationId };
+  });
+}
+
+export async function markUserDeletionStarted(input: UserDeletionOperationInput): Promise<void> {
+  const rows = await sql`
+    UPDATE project_user_deletion_fences
+    SET status = 'deleting',
+        deletion_started_at = NOW(),
+        operation_expires_at = NOW() + INTERVAL '5 minutes',
+        updated_at = NOW()
+    WHERE project_ref = ${input.projectRef}
+      AND user_id = ${input.userId}::uuid
+      AND operation_id = ${input.operationId}::uuid
+      AND status = 'requested'
+      AND operation_expires_at > NOW()
+    RETURNING id
+  `;
+  if (rows.length === 0) throw new Error("GoTrue user deletion fence is no longer owned by this request");
+}
+
+export async function completeUserDeletion(input: UserDeletionOperationInput): Promise<void> {
+  const rows = await sql`
+    UPDATE project_user_deletion_fences
+    SET status = 'deleted',
+        last_error = NULL,
+        completed_at = NOW(),
+        updated_at = NOW()
+    WHERE project_ref = ${input.projectRef}
+      AND user_id = ${input.userId}::uuid
+      AND operation_id = ${input.operationId}::uuid
+      AND status IN ('requested', 'deleting')
+    RETURNING id
+  `;
+  if (rows.length === 0) throw new Error("GoTrue user deletion completion could not be persisted");
+}
+
+export async function recordUserDeletionUncertainty(
+  input: UserDeletionOperationInput,
+  error: string,
+): Promise<boolean> {
+  const rows = await sql`
+    UPDATE project_user_deletion_fences
+    SET last_error = ${error},
+        updated_at = NOW()
+    WHERE project_ref = ${input.projectRef}
+      AND user_id = ${input.userId}::uuid
+      AND operation_id = ${input.operationId}::uuid
+      AND status IN ('requested', 'deleting')
+    RETURNING id
+  `;
+  return rows.length > 0;
+}
+
+export async function failUserDeletion(input: UserDeletionOperationInput, error: string): Promise<boolean> {
+  const rows = await sql`
+    UPDATE project_user_deletion_fences
+    SET status = 'failed',
+        last_error = ${error},
+        updated_at = NOW()
+    WHERE project_ref = ${input.projectRef}
+      AND user_id = ${input.userId}::uuid
+      AND operation_id = ${input.operationId}::uuid
+      AND status IN ('requested', 'deleting')
+    RETURNING id
+  `;
+  return rows.length > 0;
+}

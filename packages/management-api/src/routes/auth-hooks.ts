@@ -4,6 +4,38 @@ import { resolveDbName, getProjectDb } from "../db";
 import { logger } from "../utils/logger";
 import { requireProjectOrAdminAuth } from "../middleware/auth";
 import { getAuthRuntimeManagedError } from "../services/auth-runtime.service";
+import { redactAuditValue } from "../services/audit.service";
+import { projectControlSecretsService } from "../services/project-control-secrets.service";
+import { tenantRuntimeService } from "../services/tenant-runtime.service";
+
+const GOTRUE_AUTH_HOOKS = [
+  "custom_access_token_hook",
+  "mfa_verification_hook",
+  "password_verification_hook",
+  "send_sms_hook",
+  "send_email_hook",
+  "before_user_created_hook",
+] as const;
+
+function hookRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function replacementSecret(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && value !== "********" && value !== "****";
+}
+
+function publicDatabaseHook(value: unknown) {
+  const hook = redactAuditValue(value) as Record<string, unknown>;
+  if (hook.request_headers && typeof hook.request_headers === "object") {
+    hook.request_headers = Object.fromEntries(
+      Object.keys(hook.request_headers as Record<string, unknown>).map((key) => [key, "********"]),
+    );
+  }
+  return hook;
+}
 
 export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
 
@@ -23,10 +55,15 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
           FROM supabase_functions.hooks
           ORDER BY created_at DESC
         `;
-        return rows;
+        return rows.map(publicDatabaseHook);
       } catch (err) {
         logger.warn("[auth-hooks] Failed to list webhooks", { error: err });
-        return [];
+        const code = typeof err === "object" && err !== null ? String((err as { code?: unknown }).code || "") : "";
+        return status(code === "42P01" || code === "3F000" ? 501 : 503, {
+          message: "Database webhook capability is unavailable",
+          code: "CAPABILITY_UNAVAILABLE",
+          reason_code: "database_webhooks_not_available",
+        });
       }
     },
     { params: t.Object({ ref: t.String() }), detail: { tags: ["auth"], summary: "List database webhooks" } }
@@ -56,7 +93,7 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
           VALUES (${hookTableId}, ${hookName}, ${hookSchema}, ${hookTable}, ${requestUrl}, ${JSON.stringify(requestHeaders)}, ${events}, ${isRlsEnabled})
           RETURNING *
         `;
-        return rows[0] || {};
+        return publicDatabaseHook(rows[0] || {});
       } catch (err: unknown) {
         return status(500, { message: "Failed to create webhook", code: "500", details: err instanceof Error ? err.message : String(err) });
       }
@@ -84,16 +121,22 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
 
   .get(
     "/:ref/database/webhooks/:id",
-    async ({ params }) => {
+    async ({ params, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const project = await projectService.getProject(params.ref);
       if (!project) return status(404, { message: "Project not found", code: "404" });
 
       try {
         const dbName = await resolveDbName(params.ref);
         const db = getProjectDb(dbName);
-        const rows = await db`SELECT * FROM supabase_functions.hooks WHERE id = ${Number(params.id)}`;
+        const rows = await db`
+          SELECT id, hook_table_id, hook_name, hook_schema, hook_table, request_url,
+                 request_headers, events, created_at, updated_at, is_rls_enabled
+          FROM supabase_functions.hooks WHERE id = ${Number(params.id)}
+        `;
         if (rows.length === 0) return status(404, { message: "Webhook not found", code: "404" });
-        return rows[0];
+        return publicDatabaseHook(rows[0]);
       } catch (err: unknown) {
         return status(500, { message: "Failed to get webhook", code: "500", details: err instanceof Error ? err.message : String(err) });
       }
@@ -129,7 +172,7 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
           WHERE id = ${Number(params.id)}
           RETURNING *
         `;
-        return updated[0];
+        return publicDatabaseHook(updated[0]);
       } catch (err: unknown) {
         return status(500, { message: "Failed to update webhook", code: "500", details: err instanceof Error ? err.message : String(err) });
       }
@@ -163,7 +206,7 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
         const db = getProjectDb(dbName);
         const [deleted] = await db`DELETE FROM supabase_functions.hooks WHERE id = ${Number(params.id)} RETURNING *`;
         if (!deleted) return status(404, { message: "Webhook not found", code: "404" });
-        return deleted;
+        return publicDatabaseHook(deleted);
       } catch (err: unknown) {
         return status(500, { message: "Failed to delete webhook", code: "500" });
       }
@@ -183,14 +226,21 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
 
       const authConfig = (settings.auth as Record<string, unknown>) || {};
       const hooks = (authConfig.hooks as Record<string, unknown>) || {};
-
-      return {
-        custom_access_token_hook: hooks.custom_access_token_hook || { enabled: false },
-        mfa_verification_hook: hooks.mfa_verification_hook || { enabled: false },
-        password_verification_hook: hooks.password_verification_hook || { enabled: false },
-        send_sms_hook: hooks.send_sms_hook || { enabled: false },
-        send_email_hook: hooks.send_email_hook || { enabled: false },
-      };
+      const statuses = await projectControlSecretsService.listStatuses(params.ref, "auth-hook");
+      const configured = new Set(statuses.filter((item) => item.configured).map((item) => item.name));
+      const response: Record<string, unknown> = {};
+      for (const hookName of GOTRUE_AUTH_HOOKS) {
+        const hook = structuredClone(hookRecord(hooks[hookName]));
+        const secretConfigured = configured.has(hookName);
+        delete hook.secrets;
+        response[hookName] = {
+          enabled: false,
+          ...hook,
+          secrets_configured: secretConfigured,
+          ...(secretConfigured ? { secrets: projectControlSecretsService.mask } : {}),
+        };
+      }
+      return redactAuditValue(response);
     },
     { params: t.Object({ ref: t.String() }), detail: { tags: ["auth"], summary: "List auth hooks" } }
   )
@@ -207,11 +257,30 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
 
       const authConfig = (settings.auth as Record<string, unknown>) || {};
       const currentHooks = (authConfig.hooks as Record<string, unknown>) || {};
+      const updates = hookRecord(body);
+      const unknownHooks = Object.keys(updates).filter(
+        (hookName) => !(GOTRUE_AUTH_HOOKS as readonly string[]).includes(hookName),
+      );
+      if (unknownHooks.length > 0) {
+        return status(400, {
+          code: "CAPABILITY_UNAVAILABLE",
+          message: `Unsupported GoTrue auth hook: ${unknownHooks.join(", ")}`,
+          reason_code: "gotrue_auth_hook_not_supported",
+        });
+      }
 
-      const updatedHooks = {
-        ...currentHooks,
-        ...(typeof body === "object" ? body : {}),
-      };
+      const updatedHooks: Record<string, unknown> = structuredClone(currentHooks);
+      for (const hookName of GOTRUE_AUTH_HOOKS) {
+        if (!(hookName in updates)) continue;
+        const incoming = hookRecord(updates[hookName]);
+        if (replacementSecret(incoming.secrets)) {
+          await projectControlSecretsService.upsert(params.ref, "auth-hook", hookName, incoming.secrets);
+        }
+        delete incoming.secrets;
+        const current = hookRecord(updatedHooks[hookName]);
+        delete current.secrets;
+        updatedHooks[hookName] = { ...current, ...incoming };
+      }
 
       await projectService.updateProjectSettings(params.ref, {
         ...settings,
@@ -221,7 +290,23 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
         },
       });
 
-      return updatedHooks;
+      await tenantRuntimeService.applyAuthConfig(params.ref, authConfig, {
+        ...authConfig,
+        hooks: updatedHooks,
+      });
+
+      const statuses = await projectControlSecretsService.listStatuses(params.ref, "auth-hook");
+      const configured = new Set(statuses.filter((item) => item.configured).map((item) => item.name));
+      return redactAuditValue(Object.fromEntries(
+        Object.entries(updatedHooks).map(([hookName, value]) => [
+          hookName,
+          {
+            ...hookRecord(value),
+            secrets_configured: configured.has(hookName),
+            ...(configured.has(hookName) ? { secrets: projectControlSecretsService.mask } : {}),
+          },
+        ]),
+      ));
     },
     {
       params: t.Object({ ref: t.String() }),

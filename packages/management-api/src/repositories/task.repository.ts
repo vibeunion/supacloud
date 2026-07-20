@@ -1,6 +1,12 @@
+import type { SQL } from "bun";
 import { sql, type ProjectTask, type ProjectTaskAttempt, type TaskStatus, type TaskType, TaskStatus as TaskStatuses } from "../db";
 import { DEFAULT_BACKGROUND_TASK_SETTINGS } from "../config/background-task-settings";
 import { withRetry } from "../utils/retry";
+import {
+  GOTRUE_USER_ID_POSTGRES_PATTERN,
+  normalizedGoTrueUserId,
+} from "../utils/project-user-lifecycle";
+import { getAuthRuntimeDescriptor } from "../services/auth-runtime.service";
 
 export interface CreateTaskInput {
   ref: string;
@@ -48,6 +54,17 @@ export interface LeasedTask extends ProjectTask {
 }
 
 const DEFAULT_LEASE_SECONDS = 330;
+
+function taskInvokerUserId(payload: Record<string, unknown>): string | null {
+  const auth = payload.auth;
+  if (!auth || typeof auth !== "object" || Array.isArray(auth)) return null;
+  const candidate = (auth as Record<string, unknown>).invoker_user_id;
+  if (candidate === undefined || candidate === null) return null;
+  if (typeof candidate !== "string") throw new Error("Task invoker user id must be a GoTrue UUID");
+  const normalized = normalizedGoTrueUserId(candidate);
+  if (!normalized) throw new Error("Task invoker user id must be a GoTrue UUID");
+  return normalized;
+}
 
 function mapTask(row: unknown): ProjectTask {
   const task = row as ProjectTask & {
@@ -138,6 +155,8 @@ export function buildTaskListQuery(projectRef: string, filters: TaskListFilters 
       trace_id,
       cancel_requested_at,
       cancellation_reason,
+      invoker_user_id,
+      auth_authority_ref,
       function_slug,
       function_version,
       created_at,
@@ -188,6 +207,9 @@ export async function createTask(inputOrRef: CreateTaskInput | string, type?: Ta
     typeof inputOrRef === "string"
       ? { ref: inputOrRef, type: type!, payload }
       : inputOrRef;
+  const taskPayload = input.payload || {};
+  const invokerUserId = taskInvokerUserId(taskPayload);
+  const authAuthorityRef = getAuthRuntimeDescriptor(input.ref).authority_project_ref;
 
   return withRetry("TaskRepository.createTask", async () => {
     const [task] = await sql`
@@ -205,6 +227,8 @@ export async function createTask(inputOrRef: CreateTaskInput | string, type?: Ta
         trace_id,
         correlation_id,
         business_task_id,
+        invoker_user_id,
+        auth_authority_ref,
         metadata
       )
       VALUES (
@@ -213,7 +237,7 @@ export async function createTask(inputOrRef: CreateTaskInput | string, type?: Ta
         ${input.functionSlug || null},
         ${input.functionVersion || null},
         ${input.status || TaskStatuses.PENDING},
-        ${JSON.stringify(input.payload || {})},
+        ${JSON.stringify(taskPayload)},
         ${input.maxAttempts || 3},
         ${input.nextRunAt || new Date()},
         ${input.timeoutSec ?? null},
@@ -221,6 +245,8 @@ export async function createTask(inputOrRef: CreateTaskInput | string, type?: Ta
         ${input.traceId || null},
         ${input.correlationId || null},
         ${input.businessTaskId || null},
+        ${invokerUserId}::uuid,
+        ${authAuthorityRef},
         ${JSON.stringify(input.metadata || {})}
       )
       ON CONFLICT (project_ref, idempotency_key)
@@ -624,6 +650,7 @@ export async function retryTask(id: string): Promise<ProjectTask | null> {
         cancellation_reason = NULL,
         updated_at = NOW()
       WHERE id = ${id}
+        AND status IN (${TaskStatuses.FAILED}, ${TaskStatuses.DEAD_LETTERED}, ${TaskStatuses.CANCELLED})
       RETURNING *
     `;
     return task ? mapTask(task) : null;
@@ -697,34 +724,64 @@ export async function countActiveTasksForProject(projectRef: string, taskTypes?:
   });
 }
 
-export async function countActiveTasksByInvoker(projectRef: string, userId: string): Promise<{
+export async function countActiveTasksByInvoker(
+  authAuthorityRef: string,
+  userId: string,
+  database: SQL = sql,
+): Promise<{
   count: number;
   tasks: Array<{ id: string; task_type: string; status: string }>;
 }> {
   return withRetry("TaskRepository.countActiveTasksByInvoker", async () => {
-    const rows = await sql.unsafe(
+    const rows = await database.unsafe(
       `
+        WITH active_tasks AS (
+          SELECT
+            id,
+            task_type,
+            status,
+            created_at,
+            project_ref,
+            auth_authority_ref,
+            invoker_user_id,
+            CASE
+              WHEN BTRIM(payload->'auth'->>'invoker_user_id') ~* $7
+                THEN BTRIM(payload->'auth'->>'invoker_user_id')::uuid
+              ELSE NULL
+            END AS payload_invoker_user_id
+          FROM project_tasks
+          WHERE auth_authority_ref = $1
+            AND status IN ($2, $3, $4, $5)
+        )
         SELECT
           COUNT(*) OVER()::int AS count,
           id::text AS id,
           task_type,
-          status
-        FROM project_tasks
-        WHERE project_ref = $1
-          AND status IN ($2, $3, $4, $5)
-          AND payload->'auth'->>'invoker_user_id' = $6
+          status,
+          (
+            (invoker_user_id IS NULL AND payload_invoker_user_id IS NOT NULL)
+            OR invoker_user_id = payload_invoker_user_id
+          ) AS invoker_consistent
+        FROM active_tasks
+        WHERE invoker_user_id = $6::uuid
+           OR payload_invoker_user_id = $6::uuid
         ORDER BY created_at ASC
         LIMIT 100
       `,
       [
-        projectRef,
+        authAuthorityRef,
         TaskStatuses.PENDING,
         TaskStatuses.LEASED,
         TaskStatuses.RUNNING,
         TaskStatuses.RETRY_SCHEDULED,
         userId,
+        GOTRUE_USER_ID_POSTGRES_PATTERN,
       ],
     );
+
+    if (rows.some((row: { invoker_consistent?: boolean }) => row.invoker_consistent !== true)) {
+      throw new Error("TASK_INVOKER_MISMATCH: project_tasks invoker columns disagree");
+    }
 
     return {
       count: Number(rows[0]?.count || 0),

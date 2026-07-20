@@ -10,13 +10,16 @@ import {
     createBinaryBackupState,
     executeUpgradeTransaction,
     normalizeManagementReleaseTag,
+    prepareUpgradeSecrets,
     resolveArtifactVerificationMode,
     resolveEdgeRuntimeCapacityConfig,
     resolveGithubEndpointPrefixes,
     resolveUpgradeEnvironment,
+    runStagedDatabaseMigration,
     restoreCurrentBinary,
     restoreFileState,
     selectManagementRelease,
+    stopManagementService,
     upsertManagementWebConsoleDir,
     validateWebConsoleArchiveEntries,
     verifyArtifactChecksum,
@@ -41,6 +44,83 @@ afterEach(() => {
 });
 
 describe("upgrade release selection", () => {
+  test("restores the old runtime key when init-db fails before the rotation checkpoint", async () => {
+    const events: string[] = [];
+    const prepared = prepareUpgradeSecrets({
+      MASTER_TOKEN: "master-token-0123456789abcdef0123456789abcdef",
+      DATABASE_URL: "postgresql://postgres:test@localhost:5432/supacloud_meta",
+    });
+
+    await expect(runStagedDatabaseMigration("/staged/supacloud", prepared, {
+      captureRuntimeEnv: () => ({ path: "/runtime.env", existed: true, content: Buffer.from("old"), mode: 0o600 }),
+      stopService: async () => { events.push("stop"); },
+      persistSecrets: () => { events.push("persist"); },
+      runInit: async () => { events.push("init"); throw new Error("init failed"); },
+      hasCheckpoint: async () => { events.push("checkpoint:false"); return false; },
+      restoreRuntimeEnv: () => { events.push("restore-env"); },
+      restart: async () => { events.push("restart"); },
+      healthCheck: async () => { events.push("health"); },
+    })).rejects.toThrow("init failed");
+
+    expect(events).toEqual(["stop", "persist", "init", "checkpoint:false", "restore-env", "restart", "health"]);
+  });
+
+  test("keeps the current runtime key when init-db reports failure after a durable rotation checkpoint", async () => {
+    const events: string[] = [];
+    const prepared = prepareUpgradeSecrets({
+      MASTER_TOKEN: "master-token-0123456789abcdef0123456789abcdef",
+      DATABASE_URL: "postgresql://postgres:test@localhost:5432/supacloud_meta",
+    });
+
+    await expect(runStagedDatabaseMigration("/staged/supacloud", prepared, {
+      captureRuntimeEnv: () => ({ path: "/runtime.env", existed: true, content: Buffer.from("old"), mode: 0o600 }),
+      stopService: async () => { events.push("stop"); },
+      persistSecrets: () => { events.push("persist"); },
+      runInit: async () => { events.push("init"); throw new Error("post-commit failure"); },
+      hasCheckpoint: async () => { events.push("checkpoint:true"); return true; },
+      restoreRuntimeEnv: () => { events.push("restore-env"); },
+      restart: async () => { events.push("restart"); },
+      healthCheck: async () => { events.push("health"); },
+    })).rejects.toThrow("post-commit failure");
+
+    expect(events).toEqual(["stop", "persist", "init", "checkpoint:true", "restart", "health"]);
+  });
+
+  test("leaves the service stopped when checkpoint state cannot be read safely", async () => {
+    const events: string[] = [];
+    const prepared = prepareUpgradeSecrets({
+      MASTER_TOKEN: "master-token-0123456789abcdef0123456789abcdef",
+      DATABASE_URL: "postgresql://postgres:test@localhost:5432/supacloud_meta",
+    });
+
+    await expect(runStagedDatabaseMigration("/staged/supacloud", prepared, {
+      captureRuntimeEnv: () => ({ path: "/runtime.env", existed: false }),
+      stopService: async () => { events.push("stop"); },
+      persistSecrets: () => { events.push("persist"); },
+      runInit: async () => { events.push("init"); throw new Error("init failed"); },
+      hasCheckpoint: async () => { events.push("checkpoint:error"); throw new Error("database unavailable"); },
+      restoreRuntimeEnv: () => { events.push("restore-env"); },
+      restart: async () => { events.push("restart"); },
+      healthCheck: async () => { events.push("health"); },
+    })).rejects.toThrow("service remains stopped");
+
+    expect(events).toEqual(["stop", "persist", "init", "checkpoint:error"]);
+  });
+
+  test("recovers a service that partially stopped before reporting a systemctl error", async () => {
+    const events: string[] = [];
+    const activeStates = [true, false];
+
+    await expect(stopManagementService({
+      isActive: async () => activeStates.shift() ?? false,
+      stop: async () => ({ exitCode: 1, stderr: "stop timed out" }),
+      start: async () => { events.push("start"); return { exitCode: 0, stderr: "" }; },
+      healthCheck: async () => { events.push("health"); },
+    })).rejects.toThrow("stop timed out");
+
+    expect(events).toEqual(["start", "health"]);
+  });
+
   test("upgrade init-db ignores tracked legacy config unless explicitly opted in", async () => {
     const reads: string[] = [];
     const readEnv = async (filePath: string) => {
@@ -69,6 +149,37 @@ describe("upgrade release selection", () => {
     expect(optedIn.LEGACY_ONLY).toBe("legacy");
     expect(optedIn.SHARED).toBe("explicit");
     expect(reads).toEqual(["/runtime.env", "/legacy.env"]);
+  });
+
+  test("prepares independent runtime secrets and keeps the old master token migration-only", () => {
+    const masterToken = "master-token-0123456789abcdef0123456789abcdef";
+    const prepared = prepareUpgradeSecrets({ MASTER_TOKEN: masterToken });
+
+    expect(prepared.runtimeEnv.LEGACY_SECRETS_ENCRYPTION_KEY).toBe(masterToken);
+    expect(prepared.runtimeEnv.SECRETS_ENCRYPTION_KEY).not.toBe(masterToken);
+    expect(prepared.runtimeEnv.SUPAOAUTH_BFF_SIGNING_SECRET).not.toBe(masterToken);
+    expect(prepared.runtimeEnv.SUPAOAUTH_BFF_SIGNING_SECRET)
+      .not.toBe(prepared.runtimeEnv.SECRETS_ENCRYPTION_KEY);
+    expect(prepared.runtimeSecretsToPersist).toEqual({
+      SECRETS_ENCRYPTION_KEY: prepared.runtimeEnv.SECRETS_ENCRYPTION_KEY,
+      SUPAOAUTH_BFF_SIGNING_SECRET: prepared.runtimeEnv.SUPAOAUTH_BFF_SIGNING_SECRET,
+    });
+    expect(prepared.runtimeSecretsToPersist).not.toHaveProperty("LEGACY_SECRETS_ENCRYPTION_KEY");
+  });
+
+  test("preserves an already separated encryption key without inventing a legacy fallback", () => {
+    const existing = {
+      MASTER_TOKEN: "master-token-0123456789abcdef0123456789abcdef",
+      SECRETS_ENCRYPTION_KEY: "encryption-key-0123456789abcdef0123456789abcdef",
+      SUPAOAUTH_BFF_SIGNING_SECRET: "bff-signing-key-0123456789abcdef0123456789abcdef",
+    };
+    const prepared = prepareUpgradeSecrets(existing);
+
+    expect(prepared.runtimeEnv).toEqual(existing);
+    expect(prepared.runtimeSecretsToPersist).toEqual({
+      SECRETS_ENCRYPTION_KEY: existing.SECRETS_ENCRYPTION_KEY,
+      SUPAOAUTH_BFF_SIGNING_SECRET: existing.SUPAOAUTH_BFF_SIGNING_SECRET,
+    });
   });
 
   test("normalizes explicit versions and ignores unrelated latest component releases", () => {

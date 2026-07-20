@@ -37,6 +37,8 @@ XCADDY_VERSION="${XCADDY_VERSION:-v0.4.5}"
 source "${SCRIPT_DIR}/scripts/lib/install_config.sh"
 # shellcheck source=scripts/lib/release_assets.sh
 source "${SCRIPT_DIR}/scripts/lib/release_assets.sh"
+# shellcheck source=scripts/lib/gotrue_upgrade.sh
+source "${SCRIPT_DIR}/scripts/lib/gotrue_upgrade.sh"
 
 # Installation values are layered deterministically:
 # explicit environment/CLI > persisted root-only input > legacy root state >
@@ -427,11 +429,11 @@ persist_resolved_install_config() {
     supacloud_atomic_remove_env_key "$INSTALL_INPUT_FILE" \
         PORT MANAGEMENT_API_URL DATABASE_URL MASTER_TOKEN SCRIPTS_PATH PIGSTY_PATH BASE_DOMAIN \
         SUPACLOUD_JWT_SECRET REALTIME_SECRET_KEY_BASE REALTIME_DB_ENC_KEY REALTIME_API_SECRET \
-        PG_HOST PG_PORT PG_USER PG_DATABASE PGPASSWORD SECRETS_ENCRYPTION_KEY SUPABASE_SCHEMA_PATH \
+        PG_HOST PG_PORT PG_USER PG_DATABASE PGPASSWORD SECRETS_ENCRYPTION_KEY SUPAOAUTH_BFF_SIGNING_SECRET SUPABASE_SCHEMA_PATH \
         IMAGINARY_URL REALTIME_ADMIN_URL
     unset PORT MANAGEMENT_API_URL DATABASE_URL MASTER_TOKEN SCRIPTS_PATH PIGSTY_PATH BASE_DOMAIN \
         SUPACLOUD_JWT_SECRET REALTIME_SECRET_KEY_BASE REALTIME_DB_ENC_KEY REALTIME_API_SECRET \
-        PG_HOST PG_PORT PG_USER PG_DATABASE PGPASSWORD SECRETS_ENCRYPTION_KEY SUPABASE_SCHEMA_PATH \
+        PG_HOST PG_PORT PG_USER PG_DATABASE PGPASSWORD SECRETS_ENCRYPTION_KEY SUPAOAUTH_BFF_SIGNING_SECRET SUPABASE_SCHEMA_PATH \
         IMAGINARY_URL REALTIME_ADMIN_URL
 }
 
@@ -2643,6 +2645,57 @@ SQL
     } | sudo -u postgres psql -X -q -v ON_ERROR_STOP=1 -d postgres -f -
 }
 
+write_management_api_systemd_unit() {
+    local binary_path="$1"
+    local systemd_src="${SCRIPT_DIR}/infrastructure/systemd"
+    if [[ -f "${systemd_src}/supacloud.service" ]]; then
+        sed "s|ExecStart=/usr/local/bin/supacloud|ExecStart=${binary_path}|" \
+            "${systemd_src}/supacloud.service" > /etc/systemd/system/supacloud.service
+        return
+    fi
+    cat > /etc/systemd/system/supacloud.service <<EOF
+[Unit]
+Description=SupaCloud Management API Server
+Documentation=https://github.com/supacloud/supacloud
+After=network.target patroni.service
+Wants=patroni.service
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/supabase/management-api.env
+ExecStartPre=/opt/supacloud/scripts/pre_start_recovery.sh
+ExecStart=${binary_path}
+Restart=always
+RestartSec=10
+StartLimitBurst=5
+StartLimitIntervalSec=60
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
+EOF
+}
+
+recover_management_api_install() {
+    local transaction_dir="$1"
+    local service_was_active="$2"
+    local keep_current_env="$3"
+    if systemctl is-active --quiet supacloud; then
+        systemctl stop supacloud >/dev/null 2>&1 || return 1
+        systemctl is-active --quiet supacloud && return 1
+    fi
+    supacloud_restore_file_snapshot /usr/local/bin/supacloud "${transaction_dir}/binary" || return 1
+    supacloud_restore_file_snapshot /etc/systemd/system/supacloud.service "${transaction_dir}/unit" || return 1
+    if [[ "$keep_current_env" != "true" ]]; then
+        supacloud_restore_file_snapshot "$MANAGEMENT_ENV_FILE" "${transaction_dir}/env" || return 1
+    fi
+    systemctl daemon-reload >/dev/null 2>&1 || return 1
+    if [[ "$service_was_active" == "true" ]]; then
+        systemctl start supacloud >/dev/null 2>&1 || return 1
+        supacloud_wait_http_health http://127.0.0.1:9090/health || return 1
+    fi
+}
+
 install_management_api() {
     log_step "Preparing to deploy SupaCloud Control Plane binary..."
 
@@ -2677,8 +2730,16 @@ install_management_api() {
         log_error "Could not find core binary file. Please ensure: 1. Locally ran bun run build or 2. Downloaded CI artifacts to dist directory."
         return 1
     }
-    log_info "Installing validated Management API binary from $SELECTED_BIN_SOURCE"
-    supacloud_atomic_install_binary "$SELECTED_BIN_SOURCE" "$CI_BIN" "$BIN_TARGET" || return 1
+    local management_transaction_dir staged_management_binary
+    management_transaction_dir=$(mktemp -d /usr/local/bin/.supacloud-install.XXXXXX)
+    chmod 700 "$management_transaction_dir"
+    trap 'rm -rf -- "$management_transaction_dir"' EXIT HUP INT TERM
+    supacloud_capture_file_snapshot "$BIN_TARGET" "${management_transaction_dir}/binary"
+    supacloud_capture_file_snapshot "$MANAGEMENT_ENV_FILE" "${management_transaction_dir}/env"
+    supacloud_capture_file_snapshot /etc/systemd/system/supacloud.service "${management_transaction_dir}/unit"
+    staged_management_binary="${management_transaction_dir}/supacloud.staged"
+    log_info "Staging validated Management API binary from $SELECTED_BIN_SOURCE"
+    supacloud_atomic_install_binary "$SELECTED_BIN_SOURCE" "$CI_BIN" "$staged_management_binary"
 
     # 2. Copy management scripts
     if [[ -d "${SCRIPT_DIR}/scripts" ]] && [[ "${SCRIPT_DIR}/scripts" != "$ROOT_SCRIPTS_INSTALL_DIR" ]]; then
@@ -2705,6 +2766,18 @@ install_management_api() {
         log_warn "Schema source directory not found: $SCHEMA_SRC"
     fi
 
+    # Capture whether this is an upgrade from the pre-separated encryption-key
+    # layout before stable_secret writes the new independent key.
+    local existing_runtime_encryption_key
+    local existing_runtime_state="false"
+    existing_runtime_encryption_key="$(supacloud_env_value "$MANAGEMENT_ENV_FILE" SECRETS_ENCRYPTION_KEY)"
+    if [[ -f "$MANAGEMENT_ENV_FILE" || -f "$MASTER_TOKEN_FILE" ]]; then
+        existing_runtime_state="true"
+    fi
+    local explicit_runtime_encryption_key="${SECRETS_ENCRYPTION_KEY:-}"
+    local migration_legacy_encryption_key="${LEGACY_SECRETS_ENCRYPTION_KEY:-}"
+    unset LEGACY_SECRETS_ENCRYPTION_KEY
+
     # 3. Generate management credentials
     MASTER_TOKEN=$(supacloud_stable_secret "$MASTER_TOKEN_FILE" MASTER_TOKEN "$(openssl rand -hex 32)")
     supacloud_write_service_env_pairs "$MASTER_TOKEN_FILE" MASTER_TOKEN "$MASTER_TOKEN"
@@ -2726,13 +2799,30 @@ install_management_api() {
 
     REALTIME_SECRET_KEY_BASE="${REALTIME_SECRET_KEY_BASE:-$(supacloud_stable_secret "$MANAGEMENT_ENV_FILE" REALTIME_SECRET_KEY_BASE "$(openssl rand -base64 48 | tr -d '\n')")}"
     SECRETS_ENCRYPTION_KEY="${SECRETS_ENCRYPTION_KEY:-$(supacloud_stable_secret "$MANAGEMENT_ENV_FILE" SECRETS_ENCRYPTION_KEY "$(openssl rand -base64 48 | tr -d "\n" | cut -c1-64)")}"
+    SUPAOAUTH_BFF_SIGNING_SECRET="$(supacloud_stable_secret "$MANAGEMENT_ENV_FILE" SUPAOAUTH_BFF_SIGNING_SECRET "$(openssl rand -hex 32)")"
     # `openssl rand -hex 16` returns 32 ASCII chars, which crashes tenant
     # registration with "Bad key size". Generate a literal 16-char secret instead.
     REALTIME_DB_ENC_KEY="${REALTIME_DB_ENC_KEY:-$(supacloud_stable_secret "$MANAGEMENT_ENV_FILE" REALTIME_DB_ENC_KEY "$(openssl rand -base64 18 | tr -d '\n=+/ ' | cut -c1-16)")}"
 
     local encoded_postgres_password
     encoded_postgres_password=$(printf '%s' "$POSTGRES_PASSWORD" | supacloud_urlencode_stdin)
-    supacloud_write_service_env_pairs "$MANAGEMENT_ENV_FILE" \
+    local management_service_was_active="false"
+    if systemctl is-active --quiet supacloud; then
+        management_service_was_active="true"
+    fi
+    if systemctl cat supacloud >/dev/null 2>&1; then
+        if ! supacloud_stop_service_for_migration supacloud "$management_service_was_active"; then
+            if [[ "$management_service_was_active" == "true" ]]; then
+                supacloud_wait_http_health http://127.0.0.1:9090/health || \
+                    log_error "SupaCloud did not recover after the failed stop attempt"
+            fi
+            log_error "Could not stop supacloud.service safely; metadata migration was not started"
+            rm -rf "$management_transaction_dir"
+            trap - EXIT HUP INT TERM
+            return 1
+        fi
+    fi
+    if ! supacloud_write_service_env_pairs "$MANAGEMENT_ENV_FILE" \
         PORT 9090 \
         MANAGEMENT_API_URL http://127.0.0.1:9090 \
         DATABASE_URL "postgresql://postgres:${encoded_postgres_password}@127.0.0.1:5432/supacloud_meta" \
@@ -2772,6 +2862,7 @@ install_management_api() {
         PG_DATABASE postgres \
         PGPASSWORD "$POSTGRES_PASSWORD" \
         SECRETS_ENCRYPTION_KEY "$SECRETS_ENCRYPTION_KEY" \
+        SUPAOAUTH_BFF_SIGNING_SECRET "$SUPAOAUTH_BFF_SIGNING_SECRET" \
         SUPABASE_SCHEMA_PATH /opt/supacloud/packages/management-api/src/db/schemas/supabase.sql \
         ACME_CLIENT lego \
         LEGO_BIN "${LEGO_BIN:-lego}" \
@@ -2782,103 +2873,120 @@ install_management_api() {
         CADDY_STATE_DIR "${CADDY_STATE_DIR:-/var/lib/supacloud/caddy}" \
         CADDY_BINARY_PATH "${CADDY_BINARY_PATH:-/usr/local/bin/supacloud-caddy}" \
         SUPACLOUD_ALERT_WEBHOOK_URL "${SUPACLOUD_ALERT_WEBHOOK_URL:-}" \
-        SUPACLOUD_WATCHDOG_JOURNAL_WINDOW "${SUPACLOUD_WATCHDOG_JOURNAL_WINDOW:-5 minutes ago}"
+        SUPACLOUD_WATCHDOG_JOURNAL_WINDOW "${SUPACLOUD_WATCHDOG_JOURNAL_WINDOW:-5 minutes ago}"; then
+        recover_management_api_install "$management_transaction_dir" "$management_service_was_active" false || \
+            log_error "Failed to restore the previous Management API after env write failure"
+        rm -rf "$management_transaction_dir"
+        trap - EXIT HUP INT TERM
+        return 1
+    fi
 
-    # 6. Execute database migration via supacloud binary itself
+    # 6. Execute database migration via supacloud binary itself. Older
+    # installations derived enc:v1 from MASTER_TOKEN; pass that value only to
+    # this one-shot migration when no independent key existed before upgrade.
     log_info "Initializing metadata database schema..."
     export DATABASE_URL="postgresql://postgres:${encoded_postgres_password}@127.0.0.1:5432/supacloud_meta"
-    $BIN_TARGET --init-db 2>/dev/null || log_warn "Database initialization failed, please execute manually: supacloud --init-db"
-    unset DATABASE_URL
-    
-    # 7. Register Systemd service (from infrastructure/systemd/ if available, else inline)
-    log_info "Registering Systemd service unit (supacloud.service)..."
-    local SYSTEMD_SRC="${SCRIPT_DIR}/infrastructure/systemd"
-    if [[ -f "${SYSTEMD_SRC}/supacloud.service" ]]; then
-        sed "s|ExecStart=/usr/local/bin/supacloud|ExecStart=$BIN_TARGET|" \
-            "${SYSTEMD_SRC}/supacloud.service" > /etc/systemd/system/supacloud.service
-        log_info "Using checked-in supacloud.service (with ExecStart patched to $BIN_TARGET)"
-    else
-        cat > /etc/systemd/system/supacloud.service <<EOF
-[Unit]
-Description=SupaCloud Management API Server
-Documentation=https://github.com/supacloud/supacloud
-After=network.target patroni.service
-Wants=patroni.service
-# Requires removed: patroni is a soft dependency (Wants= above), not a hard requirement
-
-[Service]
-Type=simple
-EnvironmentFile=/etc/supabase/management-api.env
-ExecStartPre=/opt/supacloud/scripts/pre_start_recovery.sh
-ExecStart=$BIN_TARGET
-Restart=always
-RestartSec=10
-StartLimitBurst=5
-StartLimitIntervalSec=60
-LimitNOFILE=65536
-
-[Install]
-WantedBy=multi-user.target
-EOF
+    local init_db_status=0
+    if [[ -z "$migration_legacy_encryption_key" \
+        && "$existing_runtime_state" == "true" \
+        && -z "$existing_runtime_encryption_key" \
+        && -z "$explicit_runtime_encryption_key" ]]; then
+        migration_legacy_encryption_key="$MASTER_TOKEN"
     fi
+    if [[ -n "$migration_legacy_encryption_key" ]]; then
+        LEGACY_SECRETS_ENCRYPTION_KEY="$migration_legacy_encryption_key" "$staged_management_binary" --init-db || init_db_status=$?
+    else
+        "$staged_management_binary" --init-db || init_db_status=$?
+    fi
+    unset DATABASE_URL
+    local rotation_checkpoint_status checkpoint_read_status=0
+    rotation_checkpoint_status=$( \
+        PGHOST=127.0.0.1 PGPORT=5432 PGUSER=postgres PGDATABASE=supacloud_meta \
+        PGPASSWORD="$POSTGRES_PASSWORD" \
+        supacloud_secret_rotation_checkpoint_status "$SECRETS_ENCRYPTION_KEY" \
+    ) || checkpoint_read_status=$?
+    if (( checkpoint_read_status != 0 )); then
+        log_error "Database initialization finished with an unknown key state; supacloud.service remains stopped. Recovery snapshot: ${management_transaction_dir}"
+        trap - EXIT HUP INT TERM
+        return 1
+    fi
+    if (( init_db_status != 0 )) || [[ "$rotation_checkpoint_status" != "complete" ]]; then
+        local keep_current_env="false"
+        local migration_failure_status="$init_db_status"
+        [[ "$rotation_checkpoint_status" == "complete" ]] && keep_current_env="true"
+        (( migration_failure_status != 0 )) || migration_failure_status=1
+        if ! recover_management_api_install "$management_transaction_dir" "$management_service_was_active" "$keep_current_env"; then
+            log_error "Database initialization failed and automatic Management API recovery also failed. Recovery snapshot: ${management_transaction_dir}"
+            trap - EXIT HUP INT TERM
+            return 1
+        fi
+        log_error "Database initialization failed; runtime state was restored according to the durable key checkpoint"
+        rm -rf "$management_transaction_dir"
+        trap - EXIT HUP INT TERM
+        return "$migration_failure_status"
+    fi
+    
+    # The database checkpoint is durable now. Activate the staged binary only
+    # after preserving an exact rollback copy of every runtime file it uses.
+    log_info "Activating Management API binary and systemd unit..."
+    local activation_status=0
+    write_management_api_systemd_unit "$BIN_TARGET" || activation_status=$?
+    if (( activation_status == 0 )); then
+        mv -f "$staged_management_binary" "$BIN_TARGET" || activation_status=$?
+    fi
+    if (( activation_status == 0 )); then
+        chmod 755 "$BIN_TARGET" || activation_status=$?
+    fi
+    if (( activation_status == 0 )); then
+        systemctl daemon-reload || activation_status=$?
+    fi
+    if (( activation_status == 0 )); then
+        systemctl enable supacloud || activation_status=$?
+    fi
+    if (( activation_status == 0 )); then
+        systemctl start supacloud || activation_status=$?
+    fi
+    if (( activation_status == 0 )); then
+        supacloud_wait_http_health http://127.0.0.1:9090/health || activation_status=$?
+    fi
+    if (( activation_status != 0 )); then
+        if ! recover_management_api_install "$management_transaction_dir" "$management_service_was_active" true; then
+            log_error "Management API activation failed and automatic rollback failed. Recovery snapshot: ${management_transaction_dir}"
+            trap - EXIT HUP INT TERM
+            return 1
+        fi
+        log_error "Management API activation failed; the previous binary was restored with the committed encryption key"
+        rm -rf "$management_transaction_dir"
+        trap - EXIT HUP INT TERM
+        return "$activation_status"
+    fi
+    log_info "SupaCloud Management API is healthy"
+
+    local SYSTEMD_SRC="${SCRIPT_DIR}/infrastructure/systemd"
     if [[ -f "${SYSTEMD_SRC}/supacloud-postgrest-watchdog.service" ]]; then
         cp "${SYSTEMD_SRC}/supacloud-postgrest-watchdog.service" /etc/systemd/system/supacloud-postgrest-watchdog.service
     fi
     if [[ -f "${SYSTEMD_SRC}/supacloud-postgrest-watchdog.timer" ]]; then
         cp "${SYSTEMD_SRC}/supacloud-postgrest-watchdog.timer" /etc/systemd/system/supacloud-postgrest-watchdog.timer
     fi
-    systemctl daemon-reload
-    systemctl enable supacloud
-    systemctl start supacloud || log_warn "Service start failed, please check journalctl -u supacloud"
     if [[ -f /etc/systemd/system/supacloud-postgrest-watchdog.timer ]]; then
         systemctl enable supacloud-postgrest-watchdog.timer
         systemctl start supacloud-postgrest-watchdog.timer || log_warn "PostgREST watchdog timer start failed, please check journalctl -u supacloud-postgrest-watchdog.service"
     fi
 
+    rm -rf "$management_transaction_dir"
+    trap - EXIT HUP INT TERM
 
-    # 7b. Ensure GoTrue binary and systemd template are deployed
+
+    # 7b. Upgrade GoTrue only from this explicit install/upgrade transaction.
     local GOTRUE_BIN="${GOTRUE_BIN:-/usr/local/bin/gotrue}"
-    if [[ ! -x "$GOTRUE_BIN" ]]; then
-        local GOTRUE_VERSION="${GOTRUE_VERSION:-v2.193.0}"
-        local GOTRUE_ARCH GOTRUE_SHA256_VALUE
-        local GOTRUE_EXT="tar.xz"
-        GOTRUE_ARCH=$(uname -m)
-        case "$GOTRUE_ARCH" in
-            x86_64)
-                GOTRUE_ARCH="amd64"
-                [[ "$GOTRUE_VERSION" != "v2.193.0" ]] || \
-                    GOTRUE_SHA256_VALUE="c991b6fb8747bbcbcef40701177234f152cea28a108a481bae917bacc1a522c5"
-                ;;
-            aarch64)
-                GOTRUE_ARCH="arm64"
-                [[ "$GOTRUE_VERSION" != "v2.193.0" ]] || \
-                    GOTRUE_SHA256_VALUE="432fa68ef58afac8665d45537d8adbba5756b01829f175ed7ef6314b3ca59995"
-                ;;
-            *) log_error "Unsupported architecture for GoTrue: $GOTRUE_ARCH"; exit 1 ;;
-        esac
-        GOTRUE_SHA256_VALUE="${GOTRUE_SHA256:-$GOTRUE_SHA256_VALUE}"
-        if [[ ! "$GOTRUE_SHA256_VALUE" =~ ^[0-9a-fA-F]{64}$ ]]; then
-            log_error "GOTRUE_SHA256 is required for unpinned GoTrue version ${GOTRUE_VERSION}"
-            exit 1
-        fi
-        local GOTRUE_ASSET="auth-${GOTRUE_VERSION}-${GOTRUE_ARCH}.${GOTRUE_EXT}"
-        local GOTRUE_URL="https://github.com/supabase/auth/releases/download/${GOTRUE_VERSION}/${GOTRUE_ASSET}"
-        log_info "Downloading GoTrue ${GOTRUE_VERSION}..."
-        local TMP_DIR
-        TMP_DIR=$(mktemp -d)
-        if supacloud_download_url "$GOTRUE_URL" "${TMP_DIR}/${GOTRUE_ASSET}" \
-            && supacloud_install_pinned_tar_xz_binary \
-                "${TMP_DIR}/${GOTRUE_ASSET}" auth "$GOTRUE_SHA256_VALUE" "$GOTRUE_ARCH" "$GOTRUE_BIN"; then
-            log_info "GoTrue installed to $GOTRUE_BIN"
-        else
-            log_error "GoTrue download or verification failed"
-            rm -rf "$TMP_DIR"
-            exit 1
-        fi
-        rm -rf "$TMP_DIR"
-    else
-        log_info "GoTrue binary already available at $GOTRUE_BIN"
-    fi
+    local GOTRUE_VERSION="${GOTRUE_VERSION:-$SUPACLOUD_GOTRUE_DEFAULT_VERSION}"
+    log_info "Verifying GoTrue ${GOTRUE_VERSION} with staged upgrade and rollback protection..."
+    supacloud_upgrade_gotrue_binary "$GOTRUE_BIN" || {
+        log_error "GoTrue ${GOTRUE_VERSION} upgrade failed"
+        return 1
+    }
+    log_info "GoTrue ${GOTRUE_VERSION} is installed; backup: ${SUPACLOUD_GOTRUE_LAST_BACKUP_DIR:-not-required}"
 
     if [[ ! -f /etc/systemd/system/supacloud-gotrue@.service ]] || \
        ! grep -q -- '--config-dir /etc/supabase/tenants/%i_gotrue.d' /etc/systemd/system/supacloud-gotrue@.service; then

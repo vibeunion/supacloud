@@ -1,6 +1,7 @@
 export { projectRoutes } from "./projects";
 export { projectDashboardRoutes } from "./project-dashboard";
 export { projectSecretsRoutes } from "./project-secrets";
+export { projectControlSecretsRoutes } from "./project-control-secrets";
 export { projectFunctionsRoutes } from "./project-functions";
 export { organizationRoutes } from "./organizations";
 export { userRoutes } from "./user";
@@ -42,3 +43,7 @@ export { autoBranchingRoutes } from "./auto-branching";
 export { projectRbacRoutes } from "./project-rbac";
 export { projectWebhookRoutes } from "./project-webhooks";
 export { projectAuditRoutes } from "./project-audit";
+export { projectCapabilityRoutes } from "./project-capabilities";
+export { projectAuthHookRuntimeRoutes } from "./project-auth-hook-runtime";
+export { projectOrganizationRoutes } from "./project-organizations";
+export { projectCollaboratorRoutes } from "./project-collaborators";

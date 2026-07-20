@@ -25,7 +25,7 @@ import {
     pickPositivePort,
     quoteTomlBasicString,
     renderGoTrueAuthEnv,
-    renderGoTruePasskeyEnv,
+    renderGoTrueProviderLinkingEnv,
     renderGoTrueSamlEnv,
     renderGoTrueSessionPolicyEnv,
     renderPostgrestDbSchemas,
@@ -38,16 +38,15 @@ import { decryptSecretIfNeeded } from "../utils/secret-crypto";
 import { getAuthRuntimeDescriptor, isSharedAuthRuntime } from "./auth-runtime.service";
 import { authConfigChangesPostgrestVerifier } from "./auth-runtime-impact";
 import { runtimeCacheService } from "./runtime-cache.service";
+import { projectControlSecretsService } from "./project-control-secrets.service";
 
 export {
     renderGoTrueAuthEnv,
-    renderGoTruePasskeyEnv,
     renderGoTrueSamlEnv,
     renderGoTrueSessionPolicyEnv,
     renderPostgrestDbSchemas,
     renderTenantInternalRuntimeEnv,
 } from "./tenant-runtime-config";
-export type { GoTrueWebAuthnDefaults } from "./tenant-runtime-config";
 
 export class SupAuthDependentRefreshError extends Error {
     readonly code = "SUPAUTH_DEPENDENT_REFRESH_FAILED";
@@ -68,6 +67,104 @@ export class SupAuthDependentRefreshError extends Error {
 
 type SystemctlAction = "daemon-reload" | "disable" | "enable" | "reset-failed" | "restart" | "start" | "stop";
 type SystemctlExecutionMode = "best-effort" | "checked";
+
+function recordValue(value: unknown): Record<string, unknown> {
+    return value && typeof value === "object" && !Array.isArray(value)
+        ? value as Record<string, unknown>
+        : {};
+}
+
+async function renderConnectorSecretEnv(
+    ref: string,
+    authConfig: Record<string, unknown>,
+): Promise<string[]> {
+    const lines: string[] = [];
+    const external = recordValue(authConfig.external);
+    for (const [providerName, rawConfig] of Object.entries(external)) {
+        const providerConfig = recordValue(rawConfig);
+        const mapping = OAUTH_ENV_MAPPINGS[providerName as OAuthProvider];
+        const clientId = typeof providerConfig.client_id === "string" ? providerConfig.client_id : "";
+        if (!mapping || !clientId) continue;
+        const clientSecret = await projectControlSecretsService.readRequiredValue(
+            ref,
+            "connector",
+            providerName,
+        );
+
+        lines.push(
+            `GOTRUE_EXTERNAL_${providerName.toUpperCase()}_ENABLED=true`,
+            renderSystemdEnvLine(mapping.clientId, clientId),
+            renderSystemdEnvLine(mapping.clientSecret, clientSecret),
+        );
+        if (mapping.redirectUri && typeof providerConfig.redirect_uri === "string") {
+            lines.push(renderSystemdEnvLine(mapping.redirectUri, providerConfig.redirect_uri));
+        }
+        if (mapping.url && typeof providerConfig.url === "string") {
+            lines.push(renderSystemdEnvLine(mapping.url, providerConfig.url));
+        }
+    }
+
+    return lines;
+}
+
+async function renderCaptchaSecretEnv(
+    ref: string,
+    authConfig: Record<string, unknown>,
+): Promise<string[]> {
+    const captchaEnabled = authConfig.security_captcha_enabled === true;
+    if (!captchaEnabled) return [];
+
+    const captchaProvider = typeof authConfig.security_captcha_provider === "string"
+        ? authConfig.security_captcha_provider.toLowerCase()
+        : "default";
+    const captchaSecret = await projectControlSecretsService.readRequiredValue(
+        ref,
+        "captcha",
+        captchaProvider,
+    );
+    return [
+        "GOTRUE_SECURITY_CAPTCHA_ENABLED=true",
+        renderSystemdEnvLine("GOTRUE_SECURITY_CAPTCHA_PROVIDER", captchaProvider),
+        renderSystemdEnvLine("GOTRUE_SECURITY_CAPTCHA_SECRET", captchaSecret),
+    ];
+}
+
+async function renderHookSecretEnv(
+    ref: string,
+    authConfig: Record<string, unknown>,
+): Promise<string[]> {
+    const lines: string[] = [];
+    const hookPrefixes: Record<string, string> = {
+        custom_access_token_hook: "CUSTOM_ACCESS_TOKEN",
+        mfa_verification_hook: "MFA_VERIFICATION_ATTEMPT",
+        password_verification_hook: "PASSWORD_VERIFICATION_ATTEMPT",
+        send_sms_hook: "SEND_SMS",
+        send_email_hook: "SEND_EMAIL",
+        before_user_created_hook: "BEFORE_USER_CREATED",
+    };
+    const hooks = recordValue(authConfig.hooks);
+    for (const [hookName, prefix] of Object.entries(hookPrefixes)) {
+        const hook = recordValue(hooks[hookName]);
+        if (hook.enabled !== true || typeof hook.uri !== "string" || !hook.uri) continue;
+        const secret = await projectControlSecretsService.readRequiredValue(ref, "auth-hook", hookName);
+        lines.push(
+            `GOTRUE_HOOK_${prefix}_ENABLED=true`,
+            renderSystemdEnvLine(`GOTRUE_HOOK_${prefix}_URI`, hook.uri),
+            renderSystemdEnvLine(`GOTRUE_HOOK_${prefix}_SECRETS`, secret),
+        );
+    }
+    return lines;
+}
+
+export async function renderManagedGoTrueSecretEnv(
+    ref: string,
+    authConfig: Record<string, unknown>,
+): Promise<string[]> {
+    const connectorLines = await renderConnectorSecretEnv(ref, authConfig);
+    const captchaLines = await renderCaptchaSecretEnv(ref, authConfig);
+    const hookLines = await renderHookSecretEnv(ref, authConfig);
+    return [...connectorLines, ...captchaLines, ...hookLines];
+}
 
 async function runSystemctlOrThrow(action: SystemctlAction, unit?: string): Promise<void> {
     const result = unit
@@ -966,9 +1063,6 @@ db-channel = ${quoteTomlBasicString(resolvePgrstChannel(ref))}
         const hasDedicatedAuthUrl = Boolean(creds.authUrl && creds.authUrl !== creds.apiUrl);
         const apiExternalUrl = hasDedicatedAuthUrl ? creds.authUrl : creds.apiUrl;
         const siteExternalUrl = hasDedicatedAuthUrl ? creds.authUrl : creds.siteUrl;
-        const siteHost = siteExternalUrl.replace('https://', '').replace('http://', '').split('/')[0].split(':')[0];
-        const webAuthnOrigins = uniqueStrings([siteExternalUrl, creds.apiUrl, creds.siteUrl]
-            .map((value) => this.toWebAuthnOrigin(value)));
         const redirectOrigins = uniqueStrings([
             creds.uriAllowList,
             creds.siteUrl,
@@ -976,6 +1070,7 @@ db-channel = ${quoteTomlBasicString(resolvePgrstChannel(ref))}
             creds.authUrl,
         ].flatMap((value) => String(value || "").split(",")));
         const gotrueSender = config.gotrueSmtpAdminEmail || `noreply@${apiExternalUrl.replace('https://', '').replace('http://', '')}`;
+        const managedSecretEnvLines = await renderManagedGoTrueSecretEnv(ref, creds.authConfig);
 
         const gotrueEnvLines = [
             `
@@ -1004,12 +1099,9 @@ GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE=/auth/v1/verify
 `.trim(),
             renderGoTrueSessionPolicyEnv(creds.authConfig),
             renderGoTrueAuthEnv(creds.authConfig),
-            renderGoTruePasskeyEnv(creds.authConfig, {
-                rpId: siteHost,
-                rpDisplayName: "SupaCloud",
-                rpOrigins: webAuthnOrigins,
-            }),
+            renderGoTrueProviderLinkingEnv(creds.authConfig),
             renderGoTrueSamlEnv(creds.authConfig),
+            ...managedSecretEnvLines,
             "# Admin Operator Token (P0-6)",
             renderSystemdEnvLine("GOTRUE_OPERATOR_TOKEN", String(config.masterToken || creds.serviceRoleKey || "")),
         ];
@@ -1071,22 +1163,6 @@ GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE=/auth/v1/verify
         await this.persistTenantPortConfig(ref, pgrstPort, gotruePort);
 
         logger.info(`Config generated for ${ref} (pgrst_port=${pgrstPort}, gotrue_port=${gotruePort})`);
-    }
-
-    private toWebAuthnOrigin(value: string | undefined | null): string | null {
-        const raw = String(value || "").trim();
-        if (!raw) return null;
-
-        try {
-            const parsed = new URL(raw.includes("://") ? raw : `https://${raw}`);
-            const hostname = parsed.hostname.toLowerCase();
-            const protocol = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]"
-                ? parsed.protocol
-                : "https:";
-            return `${protocol}//${parsed.host}`;
-        } catch {
-            return null;
-        }
     }
 
     private async installSystemdTemplate(systemctlMode: SystemctlExecutionMode = "best-effort") {
