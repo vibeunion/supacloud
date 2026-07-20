@@ -2910,7 +2910,7 @@ install_management_api() {
         trap - EXIT HUP INT TERM
         return 1
     fi
-    if (( init_db_status != 0 )) || [[ "$rotation_checkpoint_status" != "complete" ]]; then
+    if (( init_db_status != 0 )) || { [[ "$rotation_checkpoint_status" != "complete" ]] && [[ "$existing_runtime_state" != "false" || -n "$migration_legacy_encryption_key" ]]; }; then
         local keep_current_env="false"
         local migration_failure_status="$init_db_status"
         [[ "$rotation_checkpoint_status" == "complete" ]] && keep_current_env="true"
