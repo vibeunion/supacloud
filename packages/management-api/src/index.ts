@@ -1090,6 +1090,7 @@ async function bootstrap() {
     process.exit(0);
   } else if (args.length === 0 || args.includes("--server")) {
     const { sql: controlPlaneSql } = await import("./db");
+    const { assertPlatformMigrationCompleted } = await import("./db/audit-chain-migration");
     const {
       ensurePlatformV2SchemaInTransaction,
       migrateLegacyProjectWebhooks,
@@ -1097,6 +1098,7 @@ async function bootstrap() {
       migrateWebhookSecretsToControlStore,
     } = await import("./db/platform-v2");
     await ensurePlatformV2SchemaInTransaction(controlPlaneSql);
+    await assertPlatformMigrationCompleted(controlPlaneSql);
     await migrateLegacyProjectWebhooks(controlPlaneSql);
     await migrateWebhookSecretsToControlStore(controlPlaneSql);
     await migrateLegacyProviderLinkingConfig(controlPlaneSql);

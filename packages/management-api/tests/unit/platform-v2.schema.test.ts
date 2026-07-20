@@ -2,6 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 
 const schema = readFileSync(new URL("../../src/db/platform-v2.ts", import.meta.url), "utf8");
+const auditMigration = readFileSync(
+  new URL("../../src/db/audit-chain-migration.ts", import.meta.url),
+  "utf8",
+);
 const databaseInit = readFileSync(new URL("../../src/db/init.ts", import.meta.url), "utf8");
 const serverEntrypoint = readFileSync(new URL("../../src/index.ts", import.meta.url), "utf8");
 const userSafetyService = readFileSync(
@@ -44,19 +48,35 @@ describe("platform v2 schema contract", () => {
     expect(schema).toContain("BEFORE UPDATE OR DELETE ON audit_logs");
   });
 
-  test("keeps deleted webhook history and orders hashed audit chains explicitly", () => {
+  test("moves audit chain backfill out of server schema bootstrap", () => {
     expect(schema).toContain("ALTER TABLE project_webhooks ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ");
     expect(schema).toContain("WHERE deleted_at IS NULL");
     expect(schema).toContain("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS chain_sequence BIGINT");
-    expect(schema).toContain("WITH RECURSIVE linked_audit_events AS");
-    expect(schema).toContain("child.previous_hash = parent.event_hash");
-    expect(schema).toContain("SET chain_sequence = resolved.chain_sequence");
-    expect(schema).toContain("chain_sequence IS DISTINCT FROM resolved.chain_sequence");
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS platform_schema_migrations");
+    expect(schema).not.toContain("WITH RECURSIVE resolved_audit_chain AS");
+    expect(schema).not.toContain("UPDATE audit_logs audit");
+    expect(schema).not.toContain("audit_logs_event_hash_unique_idx");
+    expect(schema).toContain("audit_logs_project_hash_idx");
+    expect(schema).toContain("audit_logs_project_sequence_idx");
+    expect(schema).toContain("IF NOT EXISTS (");
+    expect(schema).not.toContain("DROP TRIGGER IF EXISTS audit_logs_append_only");
+    expect(auditMigration).toContain("WITH RECURSIVE resolved_audit_chain AS");
+    expect(auditMigration).toContain("child.previous_hash = parent.event_hash");
+    expect(auditMigration).toContain("UPDATE audit_logs audit");
+    expect(auditMigration).toContain("INSERT INTO platform_schema_migrations");
+    expect(auditMigration).toContain("DROP TRIGGER IF EXISTS audit_logs_append_only");
   });
 
   test("runs the provider linking forward migration before runtime config is rendered", () => {
     expect(databaseInit).toContain("await migrateLegacyProviderLinkingConfig(transaction)");
     expect(serverEntrypoint).toContain("await migrateLegacyProviderLinkingConfig(controlPlaneSql)");
+  });
+
+  test("requires the durable audit migration marker before server startup continues", () => {
+    expect(databaseInit).toContain("await migrateAuditChainSequences(transaction)");
+    expect(serverEntrypoint).toContain("await assertPlatformMigrationCompleted(controlPlaneSql)");
+    expect(serverEntrypoint.indexOf("await assertPlatformMigrationCompleted(controlPlaneSql)"))
+      .toBeLessThan(serverEntrypoint.indexOf("await migrateLegacyProjectWebhooks(controlPlaneSql)"));
   });
 
   test("serializes task activation with durable GoTrue user deletion fences", () => {

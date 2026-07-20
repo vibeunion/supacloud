@@ -314,6 +314,12 @@ jobs:
         # E2E Storage fixture that init.ts enables when CI variables are set.
         run: env -u CI -u GITHUB_ACTIONS bun src/db/init.ts
 
+      - name: Verify audit chain migration on PostgreSQL 18
+        working-directory: packages/management-api
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+        run: bun test tests/integration/audit-chain-migration.test.ts
+
       - name: Apply and verify Docker PostgreSQL compatibility
         env:
           SUPACLOUD_META_DB: postgres
