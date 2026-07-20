@@ -8,6 +8,7 @@ import {
   PROJECT_USER_LIFECYCLE_LOCK_NAMESPACE,
 } from "../utils/project-user-lifecycle";
 import { config } from "../config";
+import { executeSqlStatements } from "./sql-statements";
 
 function configuredAuthAuthoritySql(): { backfill: string; constant: string } {
   const authorityRef = config.authRuntimeOwnerRef.trim();
@@ -25,10 +26,12 @@ function configuredAuthAuthoritySql(): { backfill: string; constant: string } {
  * Authentication data (users, sessions, factors and OAuth grants) deliberately
  * remains in the tenant GoTrue database.  These tables only contain project
  * control-plane state and references to GoTrue/application identifiers.
+ * The caller supplies the transaction so canonical init can keep adjacent
+ * migrations inside the same atomic boundary.
  */
-export async function ensurePlatformV2Schema(db: SQL): Promise<void> {
+export async function ensurePlatformV2Schema(transaction: SQL): Promise<void> {
   const authAuthoritySql = configuredAuthAuthoritySql();
-  await db.unsafe(`
+  await executeSqlStatements(transaction, `
     CREATE TABLE IF NOT EXISTS project_business_organizations (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       project_ref VARCHAR(20) NOT NULL REFERENCES projects(ref) ON DELETE CASCADE,
@@ -451,7 +454,7 @@ export async function ensurePlatformV2Schema(db: SQL): Promise<void> {
       FOR EACH ROW EXECUTE FUNCTION prevent_audit_log_mutation();
   `);
 
-  await db`
+  await transaction`
     INSERT INTO project_collaborators (project_ref, principal_id, role, created_by)
     SELECT DISTINCT p.ref, o.owner_id, 'owner', 'platform-migration'
     FROM projects p
@@ -463,6 +466,10 @@ export async function ensurePlatformV2Schema(db: SQL): Promise<void> {
       AND NULLIF(o.owner_id, '') IS NOT NULL
     ON CONFLICT (project_ref, principal_id) DO NOTHING
   `;
+}
+
+export async function ensurePlatformV2SchemaInTransaction(controlPlaneDb: SQL): Promise<void> {
+  await controlPlaneDb.begin(async (transaction) => ensurePlatformV2Schema(transaction));
 }
 
 type LegacyWebhook = {

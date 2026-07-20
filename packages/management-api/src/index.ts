@@ -1,6 +1,7 @@
 import { Elysia, t } from "elysia";
 import type { AnyElysia } from "elysia";
 import { logger } from "./utils/logger";
+import { runBootstrapOrExit } from "./runtime/bootstrap-fatal";
 
 process.on("uncaughtException", (err: Error) => {
   logger.error("FATAL UNCAUGHT EXCEPTION:", {
@@ -1090,12 +1091,12 @@ async function bootstrap() {
   } else if (args.length === 0 || args.includes("--server")) {
     const { sql: controlPlaneSql } = await import("./db");
     const {
-      ensurePlatformV2Schema,
+      ensurePlatformV2SchemaInTransaction,
       migrateLegacyProjectWebhooks,
       migrateLegacyProviderLinkingConfig,
       migrateWebhookSecretsToControlStore,
     } = await import("./db/platform-v2");
-    await ensurePlatformV2Schema(controlPlaneSql);
+    await ensurePlatformV2SchemaInTransaction(controlPlaneSql);
     await migrateLegacyProjectWebhooks(controlPlaneSql);
     await migrateWebhookSecretsToControlStore(controlPlaneSql);
     await migrateLegacyProviderLinkingConfig(controlPlaneSql);
@@ -1380,7 +1381,7 @@ async function bootstrap() {
 }
 
 if (import.meta.main) {
-  bootstrap();
+  void runBootstrapOrExit(bootstrap);
 
   const shutdown = async (signal: string) => {
     logger.info(`\nReceived ${signal}. Gracefully shutting down...`);
