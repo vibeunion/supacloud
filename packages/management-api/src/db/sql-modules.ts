@@ -3,6 +3,7 @@ import backgroundTaskMirrorDownSql from "./sql-modules/background-task-mirror-do
 import backgroundTaskMirrorUpSql from "./sql-modules/background-task-mirror-up.sql" with { type: "text" };
 import pgmqPublicSql from "./sql-modules/pgmq-public.sql" with { type: "text" };
 import postgrestRequestContextSql from "./sql-modules/postgrest-request-context.sql" with { type: "text" };
+import realtimeAutoAttachTriggerSql from "./sql-modules/realtime-auto-attach-trigger.sql" with { type: "text" };
 import storagePathHelpersSql from "./sql-modules/storage-path-helpers.sql" with { type: "text" };
 
 export const SQL_MODULES = {
@@ -11,6 +12,7 @@ export const SQL_MODULES = {
   "background-task-mirror-up": backgroundTaskMirrorUpSql.trim(),
   "pgmq-public": pgmqPublicSql.trim(),
   "postgrest-request-context": postgrestRequestContextSql.trim(),
+  "realtime-auto-attach-trigger": realtimeAutoAttachTriggerSql.trim(),
   "storage-path-helpers": storagePathHelpersSql.trim(),
 } as const;
 

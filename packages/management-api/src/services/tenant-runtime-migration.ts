@@ -423,21 +423,7 @@ $fn$ LANGUAGE plpgsql SECURITY DEFINER;
 SELECT realtime.ensure_tasks_publication();
 
 -- Event Trigger: automatically attach realtime triggers to NEW tables created in public schema
-CREATE OR REPLACE FUNCTION realtime.auto_attach_notify_trigger() RETURNS event_trigger AS $fn$
-DECLARE
-  obj RECORD;
-BEGIN
-  FOR obj IN SELECT * FROM pg_event_trigger_ddl_commands() 
-    WHERE object_type = 'table' AND schema_name = 'public'
-  LOOP
-    EXECUTE format(
-      'CREATE TRIGGER realtime_notify_trigger AFTER INSERT OR UPDATE OR DELETE ON %s '
-      'FOR EACH ROW EXECUTE FUNCTION realtime.notify_postgres_changes()',
-      obj.object_identity
-    );
-  END LOOP;
-END;
-$fn$ LANGUAGE plpgsql SECURITY DEFINER;
+${SQL_MODULES["realtime-auto-attach-trigger"]}
 
 -- Event Trigger: automatically publish public.tasks when applications create it later.
 CREATE OR REPLACE FUNCTION realtime.auto_publish_tasks_table() RETURNS event_trigger AS $fn$

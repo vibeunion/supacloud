@@ -61,6 +61,36 @@ describe("supabase bootstrap schema", () => {
     }
   });
 
+  test("tenant migrations reuse the fail-closed realtime auto-attach module", () => {
+    const autoAttachSql = SQL_MODULES["realtime-auto-attach-trigger"];
+
+    for (const filePath of [
+      "src/services/tenant-runtime-migration.ts",
+      "src/scripts/migrate-tenant-schema.ts",
+    ]) {
+      expect(readRepoFile(filePath)).toContain(
+        '${SQL_MODULES["realtime-auto-attach-trigger"]}',
+      );
+    }
+
+    expect(ALTER_TENANT_SQL).toContain(autoAttachSql);
+    expect(autoAttachSql).toContain(
+      "ddl.classid = 'pg_catalog.pg_class'::pg_catalog.regclass",
+    );
+    expect(autoAttachSql).toContain("AND NOT ddl.in_extension");
+    expect(autoAttachSql).toContain("AND n.nspname = 'public'");
+    expect(autoAttachSql).toContain("AND c.relkind IN ('r', 'p')");
+    expect(autoAttachSql).toContain("AND NOT c.relispartition");
+    expect(autoAttachSql).toContain("GROUP BY c.oid, n.nspname, c.relname");
+    expect(autoAttachSql).toContain("ON %I.%I");
+    expect(autoAttachSql).toContain(
+      "LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog",
+    );
+    expect(autoAttachSql).not.toContain("DROP TRIGGER");
+    expect(autoAttachSql).not.toContain("WHEN duplicate_object");
+    expect(autoAttachSql).not.toContain("WHEN OTHERS");
+  });
+
   test("auth helpers preserve claims-only user identity for modern PostgREST", () => {
     for (const schema of [
       SQL_MODULES["auth-jwt-helpers"],
