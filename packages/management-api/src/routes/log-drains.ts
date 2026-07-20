@@ -11,8 +11,11 @@ import * as authMiddleware from "../middleware/auth";
 import { projectRepository } from "../repositories/project.repository";
 import { mergeProjectConfig, normalizeProjectConfig } from "../utils/project-config";
 import { logger } from "../utils/logger";
-import { lookup } from "node:dns/promises";
-import { isIP } from "node:net";
+import {
+  isOutboundUrlSafe,
+  safeOutboundFetch,
+  validateOutboundHttpUrl,
+} from "../utils/outbound-http";
 
 export type LogDrainType = "webhook" | "datadog" | "loki" | "elasticsearch";
 
@@ -34,94 +37,12 @@ const ALLOWED_TYPES: ReadonlySet<LogDrainType> = new Set([
 
 const MAX_DRAINS_PER_PROJECT = 10;
 
-const BLOCKED_HOSTNAMES = new Set([
-  "localhost",
-  "localhost.localdomain",
-  "metadata.google.internal",
-  "metadata",
-]);
-
-function isPrivateIPv4(ip: string): boolean {
-  const parts = ip.split(".").map((part) => Number(part));
-  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
-    return true;
-  }
-  const [a, b] = parts;
-  return (
-    a === 0 ||
-    a === 10 ||
-    a === 127 ||
-    (a === 100 && b >= 64 && b <= 127) ||
-    (a === 169 && b === 254) ||
-    (a === 172 && b >= 16 && b <= 31) ||
-    (a === 192 && b === 168) ||
-    a >= 224
-  );
-}
-
-function isPrivateIPv6(ip: string): boolean {
-  const lower = ip.toLowerCase();
-  return (
-    lower === "::" ||
-    lower === "::1" ||
-    lower.startsWith("fc") ||
-    lower.startsWith("fd") ||
-    lower.startsWith("fe80:") ||
-    lower.startsWith("::ffff:10.") ||
-    lower.startsWith("::ffff:127.") ||
-    lower.startsWith("::ffff:169.254.") ||
-    lower.startsWith("::ffff:192.168.")
-  );
-}
-
-function isBlockedAddress(address: string): boolean {
-  const family = isIP(address);
-  if (family === 4) return isPrivateIPv4(address);
-  if (family === 6) return isPrivateIPv6(address);
-  return true;
-}
-
 export function validateLogDrainUrl(urlValue: string): { ok: true; url: string } | { ok: false; error: string } {
-  let parsed: URL;
-  try {
-    parsed = new URL(urlValue.trim());
-  } catch {
-    return { ok: false, error: "url must be a valid HTTP(S) URL" };
-  }
-
-  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-    return { ok: false, error: "url must be a valid HTTP(S) URL" };
-  }
-
-  const hostname = parsed.hostname.toLowerCase();
-  if (!hostname || BLOCKED_HOSTNAMES.has(hostname) || hostname.endsWith(".localhost")) {
-    return { ok: false, error: "url host is not allowed for log drains" };
-  }
-
-  if (isIP(hostname) && isBlockedAddress(hostname)) {
-    return { ok: false, error: "url host must not resolve to a private or local address" };
-  }
-
-  return { ok: true, url: parsed.toString() };
+  return validateOutboundHttpUrl(urlValue);
 }
 
 export async function isLogDrainUrlSafeForFetch(urlValue: string): Promise<boolean> {
-  const validated = validateLogDrainUrl(urlValue);
-  if (!validated.ok) return false;
-
-  const hostname = new URL(validated.url).hostname;
-  if (isIP(hostname)) return true;
-
-  try {
-    const results = await lookup(hostname, { all: true, verbatim: true });
-    return results.length > 0 && results.every((result) => !isBlockedAddress(result.address));
-  } catch (err: unknown) {
-    logger.debug("[log-drains] failed to resolve drain host", {
-      host: hostname,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return false;
-  }
+  return isOutboundUrlSafe(urlValue);
 }
 
 function isLogDrainConfig(value: unknown): value is LogDrainConfig {
@@ -351,7 +272,7 @@ export async function forwardLogEvent(
           }
         }
 
-        await fetch(drain.url, {
+        await safeOutboundFetch(drain.url, {
           method: "POST",
           headers,
           body: basePayload,

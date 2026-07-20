@@ -14,6 +14,14 @@ function expectWechatLoginResponseContract(functionCode: string) {
   expect(functionCode).not.toContain("(finalSession as any).user");
 }
 
+function expectGoTrueOwnedIdentityContract(functionCode: string) {
+  expect(functionCode).not.toContain('import { SQL } from "bun"');
+  expect(functionCode).not.toContain("SUPABASE_DB_URL");
+  expect(functionCode).not.toContain("auth.identities");
+  expect(functionCode).not.toContain("Identity linkage failed");
+  expect(functionCode).not.toContain("app_metadata:");
+}
+
 async function expectSelfContainedBundle(functionCode: string) {
   const directory = await mkdtemp(join(tmpdir(), "supacloud-wechat-function-"));
   try {
@@ -36,6 +44,7 @@ describe("wechat auth edge function generators", () => {
     expect(functionCode).toContain("SUPACLOUD_INTERNAL_AUTH_URL");
     expect(functionCode).toContain('req?.headers?.get("x-project-ref")');
     expect(functionCode).toContain("WECHAT_MINIPROGRAM_APP_SECRET");
+    expectGoTrueOwnedIdentityContract(functionCode);
   });
 
   test("official account login success response matches supabase-mp-js contract", () => {
@@ -44,6 +53,7 @@ describe("wechat auth edge function generators", () => {
     expectWechatLoginResponseContract(functionCode);
     expect(functionCode).not.toContain("@supabase/supabase-js");
     expect(functionCode).toContain("WECHAT_MP_APP_SECRET");
+    expectGoTrueOwnedIdentityContract(functionCode);
   });
 
   test("generated login functions bundle without npm dependencies", async () => {
@@ -62,7 +72,6 @@ describe("wechat auth edge function generators", () => {
       "SUPABASE_SERVICE_ROLE_KEY",
       "X_PROJECT_REF",
       "SUPACLOUD_PROJECT_REF",
-      "SUPABASE_DB_URL",
     ] as const;
     const originalEnv = Object.fromEntries(envNames.map((name) => [name, Bun.env[name]]));
     const authRequests: Array<{ url: string; method: string; headers: Headers }> = [];
@@ -80,7 +89,6 @@ describe("wechat auth edge function generators", () => {
       Bun.env.SUPABASE_SERVICE_ROLE_KEY = "test-service-role";
       delete Bun.env.X_PROJECT_REF;
       delete Bun.env.SUPACLOUD_PROJECT_REF;
-      delete Bun.env.SUPABASE_DB_URL;
 
       globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
         const url = String(input);
@@ -156,7 +164,6 @@ describe("wechat auth edge function generators", () => {
       "SUPABASE_SERVICE_ROLE_KEY",
       "X_PROJECT_REF",
       "SUPACLOUD_PROJECT_REF",
-      "SUPABASE_DB_URL",
     ] as const;
     const originalEnv = Object.fromEntries(envNames.map((name) => [name, Bun.env[name]]));
     const authUrls: string[] = [];
@@ -174,7 +181,6 @@ describe("wechat auth edge function generators", () => {
       Bun.env.SUPABASE_SERVICE_ROLE_KEY = "test-service-role";
       delete Bun.env.X_PROJECT_REF;
       delete Bun.env.SUPACLOUD_PROJECT_REF;
-      delete Bun.env.SUPABASE_DB_URL;
 
       globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
         const url = String(input);

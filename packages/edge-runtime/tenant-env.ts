@@ -209,10 +209,11 @@ async function loadEnvFromApi(ref: string): Promise<Record<string, string> | nul
     });
 
     if (res.status === 404) {
-      console.warn(
-        `[tenant-env] runtime-env endpoint missing for ${ref}, trying legacy secrets endpoint`,
-      );
-      return await loadEnvFromLegacySecretsApi(ref);
+      // 明文运行时环境只允许通过 master-only internal/runtime-env 获取。
+      // 旧的 /secrets?reveal=true 端点现在始终掩码，不能作为运行时回退，
+      // 否则混合版本部署会把“掩码值”误注入 GoTrue/Edge Function 环境。
+      console.warn(`[tenant-env] runtime-env endpoint missing for ${ref}; refusing legacy masked secrets endpoint`);
+      return null;
     }
 
     if (!res.ok) {
@@ -230,46 +231,6 @@ async function loadEnvFromApi(ref: string): Promise<Record<string, string> | nul
   } catch (err) {
     console.warn(
       `[tenant-env] API error for ${ref}:`,
-      err instanceof Error ? err.message : err,
-    );
-    return null;
-  }
-}
-
-async function loadEnvFromLegacySecretsApi(ref: string): Promise<Record<string, string> | null> {
-  try {
-    const res = await fetch(`${MGMT_API}/v1/projects/${ref}/secrets?reveal=true`, {
-      headers: { Authorization: `Bearer ${MASTER_TOKEN}` },
-      signal: AbortSignal.timeout(5000),
-    });
-
-    if (!res.ok) {
-      console.warn(
-        `[tenant-env] legacy secrets API returned ${res.status} for ${ref}, falling back to stale cache or file`
-      );
-      return null;
-    }
-
-    const secrets = (await res.json()) as unknown;
-    if (!Array.isArray(secrets)) return null;
-
-    const env: Record<string, string> = {};
-    for (const secret of secrets) {
-      if (
-        secret &&
-        typeof secret === "object" &&
-        "name" in secret &&
-        "value" in secret &&
-        typeof secret.name === "string" &&
-        typeof secret.value === "string"
-      ) {
-        env[secret.name] = secret.value;
-      }
-    }
-    return stripEnvKeys(stripMaskedSecretValues(env), LEGACY_AUTH_ENV_KEYS);
-  } catch (err) {
-    console.warn(
-      `[tenant-env] legacy secrets API error for ${ref}:`,
       err instanceof Error ? err.message : err,
     );
     return null;

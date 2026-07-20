@@ -86,20 +86,13 @@ POST /v1/projects/:ref/auth/oauth-server/kms-rs256
 
 The GoTrue host must have AWS credentials that can call `kms:Sign` for the configured key. KMS-only projects cannot use the local Management API OAuth admin proxy until a matching KMS signer is configured for the management process; client registration and token issuance still run through GoTrue.
 
-## Passkeys and SAML Rotation
+## SAML Rotation
 
-Passkeys are enabled per project through Auth config:
-
-```json
-{
-  "passkey": { "enabled": true, "max_passkeys_per_user": 10 },
-  "webauthn": {
-    "rp_id": "login.example.com",
-    "rp_display_name": "Example",
-    "rp_origins": ["https://login.example.com"]
-  }
-}
-```
+Passkey and WebAuthn configuration is intentionally absent from the public
+management contract until its stock GoTrue ceremony has complete compatibility
+evidence. The versioned control-plane migration removes historical Passkey and
+WebAuthn settings while preserving TOTP and phone MFA; the API rejects attempts
+to recreate those settings with `CAPABILITY_UNAVAILABLE`.
 
 SAML SP key rotation uses GoTrue's dual-key window:
 

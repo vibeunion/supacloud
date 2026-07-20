@@ -26,8 +26,15 @@ POSTGREST_DEFAULT_VERSION="v14.15"
 POSTGREST_X86_64_SHA256="4e78c7f065a6c36f350c7177f5fa9bb77ea380c67b8bf40f2fc9130d857678dc"
 POSTGREST_ARM64_SHA256="1eb007298c1536ba865e741da7eece6fba6db3da904c599abd15d9c3debe6c2f"
 GOTRUE_DEFAULT_VERSION="v2.193.0"
-GOTRUE_AMD64_SHA256="c991b6fb8747bbcbcef40701177234f152cea28a108a481bae917bacc1a522c5"
-GOTRUE_ARM64_SHA256="432fa68ef58afac8665d45537d8adbba5756b01829f175ed7ef6314b3ca59995"
+
+gotrue_binary_version() {
+    local binary_path="$1"
+    local version
+    [ -x "$binary_path" ] || return 1
+    version=$("$binary_path" version 2>/dev/null | head -1) || return 1
+    [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][A-Za-z0-9._-]+)?$ ]] || return 1
+    printf '%s' "$version"
+}
 
 # Validate parameters
 validate_params() {
@@ -338,6 +345,72 @@ systemd_env_quote() {
     printf '"%s"' "$value"
 }
 
+valid_provider_linking_name() {
+    local value="${1-}"
+    [[ -n "$value" && "$value" != *[!A-Za-z0-9._:-]* ]]
+}
+
+validate_provider_linking_domains() {
+    local value="$1"
+    local pair provider domain
+    local pairs=()
+    if [[ "$value" == ,* || "$value" == *, || "$value" == *,,* ]]; then
+        echo "ERROR: Invalid provider linking domain list" >&2
+        return 1
+    fi
+    IFS=',' read -r -a pairs <<< "$value"
+    for pair in "${pairs[@]}"; do
+        case "$pair" in
+            *=*) provider=${pair%%=*}; domain=${pair#*=} ;;
+            *) echo "ERROR: Invalid provider linking domain pair: ${pair}" >&2; return 1 ;;
+        esac
+        if ! valid_provider_linking_name "$provider" || ! valid_provider_linking_name "$domain"; then
+            echo "ERROR: Invalid provider linking domain pair: ${pair}" >&2
+            return 1
+        fi
+    done
+}
+
+normalize_legacy_provider_linking_list() {
+    local value="$1"
+    local provider
+    local providers=()
+    if [[ "$value" == ,* || "$value" == *, || "$value" == *,,* ]]; then
+        echo "ERROR: Invalid legacy provider linking list" >&2
+        return 1
+    fi
+    IFS=',' read -r -a providers <<< "$value"
+    for provider in "${providers[@]}"; do
+        if ! valid_provider_linking_name "$provider"; then
+            echo "ERROR: Invalid legacy provider linking entry: ${provider}" >&2
+            return 1
+        fi
+        printf '%s=%s\n' "$provider" "$provider"
+    done
+}
+
+render_gotrue_provider_linking_env() {
+    local domains="${GOTRUE_EXPERIMENTAL_PROVIDER_LINKING_DOMAINS:-}"
+    local legacy="${GOTRUE_EXPERIMENTAL_PROVIDERS_WITH_OWN_LINKING_DOMAIN:-}"
+    local normalized
+    if [[ -n "$domains" ]]; then
+        assert_safe_config_value "GoTrue provider linking domains" "$domains" || return 1
+        validate_provider_linking_domains "$domains" || return 1
+    fi
+    if [[ -n "$legacy" ]]; then
+        assert_safe_config_value "GoTrue legacy provider linking list" "$legacy" || return 1
+        normalize_legacy_provider_linking_list "$legacy" >/dev/null || return 1
+    fi
+    [[ -n "$domains" || -n "$legacy" ]] || return 0
+    normalized=$(
+        {
+            [[ -z "$legacy" ]] || normalize_legacy_provider_linking_list "$legacy"
+            [[ -z "$domains" ]] || tr ',' '\n' <<< "$domains"
+        } | awk -F= '{ entries[$1] = $0 } END { for (provider in entries) print entries[provider] }' | LC_ALL=C sort
+    ) || return 1
+    printf 'GOTRUE_EXPERIMENTAL_PROVIDER_LINKING_DOMAINS=%s' "$(systemd_env_quote "$(paste -sd, - <<< "$normalized")")"
+}
+
 toml_basic_string() {
     local value="${1-}"
     assert_safe_config_value "TOML value" "$value" || return 1
@@ -585,41 +658,17 @@ ensure_postgrest() {
 ensure_gotrue() {
     if command -v gotrue &>/dev/null; then
         GOTRUE_BIN=$(command -v gotrue)
-        return
     fi
-
-    if [ -x "$GOTRUE_BIN" ]; then
-        return
+    local required_version="${GOTRUE_VERSION:-$GOTRUE_DEFAULT_VERSION}"
+    local installed_version
+    installed_version=$(gotrue_binary_version "$GOTRUE_BIN") || {
+        echo "ERROR: GoTrue is missing or has no readable version at $GOTRUE_BIN; run the explicit SupaCloud installer/upgrade" >&2
+        return 1
+    }
+    if [ "$installed_version" != "$required_version" ]; then
+        echo "ERROR: GoTrue $installed_version does not match required $required_version; run the explicit SupaCloud installer/upgrade" >&2
+        return 1
     fi
-
-    echo "GoTrue binary not found. Installing..."
-
-    local machine arch default_sha256
-    machine=$(uname -m)
-    case "$machine" in
-        x86_64) arch="amd64"; default_sha256="$GOTRUE_AMD64_SHA256" ;;
-        aarch64) arch="arm64"; default_sha256="$GOTRUE_ARM64_SHA256" ;;
-        *) echo "ERROR: Unsupported architecture: $machine" >&2; exit 1 ;;
-    esac
-
-    local version="${GOTRUE_VERSION:-v2.193.0}"
-    local archive_ext="tar.xz"
-    local expected_sha256
-    assert_safe_config_value "GOTRUE_VERSION" "$version" || exit 1
-    case "$version" in *[!A-Za-z0-9._-]*|"") echo "ERROR: Invalid GOTRUE_VERSION" >&2; exit 1 ;; esac
-    expected_sha256=$(resolve_release_sha256 "GoTrue" "$version" "$GOTRUE_DEFAULT_VERSION" "$default_sha256" "${GOTRUE_SHA256:-}") || exit 1
-    local url="https://github.com/supabase/auth/releases/download/${version}/auth-${version}-${arch}.${archive_ext}"
-    echo "Downloading GoTrue ${version}..."
-
-    (
-        set -e
-        local tmp_dir
-        tmp_dir=$(mktemp -d) || exit 1
-        trap 'rm -rf -- "$tmp_dir"' EXIT HUP INT TERM
-        download_release_asset "$url" "${tmp_dir}/gotrue.tar.xz" || exit 1
-        install_verified_tar_binary "${tmp_dir}/gotrue.tar.xz" "$expected_sha256" "$GOTRUE_BIN" "$machine" auth gotrue || exit 1
-    ) || { echo "ERROR: Failed to install GoTrue. Please manually place the binary at $GOTRUE_BIN" >&2; exit 1; }
-    echo "GoTrue installed to $GOTRUE_BIN"
 }
 
 # ========== Generate tenant configuration files ==========
@@ -762,6 +811,8 @@ EOF
     assert_safe_config_value "GoTrue SMTP host" "$smtp_host" || return 1
     assert_safe_config_value "GoTrue SMTP user" "$smtp_user" || return 1
     assert_safe_config_value "GoTrue SMTP password" "$smtp_pass" || return 1
+    local provider_linking_env
+    provider_linking_env=$(render_gotrue_provider_linking_env) || return 1
     
     local gotrue_config_dir="${TENANT_CONFIG_DIR}/${ref}_gotrue.d"
     mkdir -p "$gotrue_config_dir" || return 1
@@ -796,6 +847,7 @@ GOTRUE_PASSWORD_MIN_LENGTH=8
 GOTRUE_SECURITY_REFRESH_TOKEN_ROTATION_ENABLED="true"
 GOTRUE_SECURITY_REFRESH_TOKEN_REUSE_INTERVAL=10
 GOTRUE_SESSIONS_SINGLE_PER_USER="false"
+${provider_linking_env}
 EOF
 )
 

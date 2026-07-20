@@ -1,6 +1,8 @@
 import { sql, type ProjectTask, TaskStatus, TaskType, getProjectDb, resolveDbName } from "../db";
 import { withRetry } from "../utils/retry";
 import { encryptSecretIfNeeded } from "../utils/secret-crypto";
+import { normalizedGoTrueUserId } from "../utils/project-user-lifecycle";
+import { getAuthRuntimeDescriptor } from "./auth-runtime.service";
 
 export interface BackgroundFunctionAuthContext {
   kind: "jwt" | "apikey" | "none";
@@ -56,10 +58,19 @@ export async function enqueueBackgroundFunctionTask(
 ): Promise<ProjectTask> {
   const timeoutSec = normalizeBackgroundTaskTimeout(input.timeoutSec);
   const maxAttempts = normalizeBackgroundTaskMaxAttempts(input.maxAttempts);
+  const rawInvokerUserId = input.envelope.auth.invoker_user_id;
+  const invokerUserId = rawInvokerUserId
+    ? normalizedGoTrueUserId(rawInvokerUserId)
+    : null;
+  if (rawInvokerUserId && !invokerUserId) {
+    throw new Error("Background invoker user id must be a GoTrue UUID");
+  }
+  const authAuthorityRef = getAuthRuntimeDescriptor(input.projectRef).authority_project_ref;
   const envelope: BackgroundFunctionInvocationEnvelope = {
     ...input.envelope,
     auth: {
       ...input.envelope.auth,
+      invoker_user_id: invokerUserId,
       authorization: input.envelope.auth.authorization
         ? encryptSecretIfNeeded(input.envelope.auth.authorization)
         : null,
@@ -87,7 +98,9 @@ export async function enqueueBackgroundFunctionTask(
         next_run_at,
         timeout_sec,
         idempotency_key,
-        trace_id
+        trace_id,
+        invoker_user_id,
+        auth_authority_ref
       )
       VALUES (
         ${input.projectRef},
@@ -100,7 +113,9 @@ export async function enqueueBackgroundFunctionTask(
         NOW(),
         ${timeoutSec},
         ${input.idempotencyKey || null},
-        ${input.traceId}
+        ${input.traceId},
+        ${invokerUserId}::uuid,
+        ${authAuthorityRef}
       )
       ON CONFLICT (project_ref, idempotency_key)
       WHERE idempotency_key IS NOT NULL
@@ -113,10 +128,8 @@ export async function enqueueBackgroundFunctionTask(
 }
 
 /**
- * 原子 mirror insert: 在租户 DB 中创建 public.background_task_mirrors 记录,
- * 同时校验 invoker 用户是否存在（含 deleted_at IS NULL 约束）。
- * 成功返回 { inserted: true, userExists: true }; 用户不存在返回 { inserted: false, userExists: false };
- * mirror 表不存在时返回 { inserted: false, userExists: true, degraded: true }。
+ * mirror 只记录租户侧执行证据；worker 仍须在 dispatch 前直读 auth.users 授权。
+ * 这里的 userExists 仅解释为何没有写入证据，不能替代最终授权判断。
  */
 export async function createBackgroundTaskMirrorIfUserExists(
   task: ProjectTask,
@@ -124,8 +137,10 @@ export async function createBackgroundTaskMirrorIfUserExists(
   const payload = (task.payload || {}) as {
     auth?: { invoker_user_id?: string | null };
   };
-  const userId = payload.auth?.invoker_user_id;
-  if (!userId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(userId)) {
+  const userId = payload.auth?.invoker_user_id
+    ? normalizedGoTrueUserId(payload.auth.invoker_user_id)
+    : null;
+  if (!userId) {
     return { inserted: false, userExists: true };
   }
 
@@ -133,7 +148,6 @@ export async function createBackgroundTaskMirrorIfUserExists(
     const dbName = await resolveDbName(task.project_ref);
     const projectDb = getProjectDb(dbName);
 
-    // 检查平台专用 mirror 表是否存在
     const [tableCheck] = await projectDb`
       SELECT to_regclass('public.background_task_mirrors') IS NOT NULL AS exists
     `;
@@ -146,8 +160,7 @@ export async function createBackgroundTaskMirrorIfUserExists(
       return { inserted: false, userExists: true, degraded: true };
     }
 
-    // 原子 INSERT ... SELECT ... WHERE EXISTS: 一次 roundtrip 完成校验 + mirror
-    const [result] = await projectDb`
+    const [mirrorRow] = await projectDb`
       INSERT INTO public.background_task_mirrors (
         id, project_ref, task_type, function_slug, status,
         invoker_user_id, attempt, max_attempts, trace_id, created_at
@@ -166,15 +179,19 @@ export async function createBackgroundTaskMirrorIfUserExists(
       WHERE EXISTS (
         SELECT 1 FROM auth.users WHERE id = ${userId}::uuid AND deleted_at IS NULL
       )
-      ON CONFLICT (id) DO NOTHING
+      ON CONFLICT (id) DO UPDATE SET
+        status = EXCLUDED.status,
+        attempt = EXCLUDED.attempt,
+        max_attempts = EXCLUDED.max_attempts,
+        trace_id = EXCLUDED.trace_id,
+        updated_at = NOW()
       RETURNING id
     `;
 
-    if (result?.id) {
+    if (mirrorRow?.id) {
       return { inserted: true, userExists: true };
     }
 
-    // INSERT 未插入行 = 用户不存在（或 id 冲突）
     const [userCheck] = await projectDb`
       SELECT 1 FROM auth.users WHERE id = ${userId}::uuid AND deleted_at IS NULL LIMIT 1
     `;
@@ -187,8 +204,28 @@ export async function createBackgroundTaskMirrorIfUserExists(
       userId,
       error: error instanceof Error ? error.message : String(error),
     });
-    // 容错：不因 mirror 失败阻塞任务，但标记为 degraded 供上层判断
     return { inserted: false, userExists: true, degraded: true };
+  }
+}
+
+export async function removeBackgroundTaskMirror(task: ProjectTask): Promise<boolean> {
+  const payload = (task.payload || {}) as { auth?: { invoker_user_id?: string | null } };
+  if (!payload.auth?.invoker_user_id) return true;
+  try {
+    const projectDb = getProjectDb(await resolveDbName(task.project_ref));
+    await projectDb`
+      DELETE FROM public.background_task_mirrors
+      WHERE id = ${task.id}::uuid
+    `;
+    return true;
+  } catch (error: unknown) {
+    const { logger } = await import("../utils/logger");
+    logger.warn("[BackgroundTaskService] terminal mirror cleanup failed", {
+      taskId: task.id,
+      projectRef: task.project_ref,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
   }
 }
 
@@ -197,4 +234,5 @@ export const backgroundTaskService = {
   normalizeBackgroundTaskTimeout,
   normalizeBackgroundTaskMaxAttempts,
   createBackgroundTaskMirrorIfUserExists,
+  removeBackgroundTaskMirror,
 };

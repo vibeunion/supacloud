@@ -426,6 +426,92 @@ supacloud_stable_secret() {
     printf '%s' "${existing_value:-$generated_value}"
 }
 
+supacloud_capture_file_snapshot() {
+    local target_file="$1"
+    local snapshot_dir="$2"
+    mkdir -p "$snapshot_dir"
+    chmod 700 "$snapshot_dir"
+    if [[ -e "$target_file" ]]; then
+        [[ -f "$target_file" && ! -L "$target_file" ]] || return 1
+        cp -p "$target_file" "$snapshot_dir/content"
+        printf 'present\n' > "$snapshot_dir/state"
+    else
+        printf 'absent\n' > "$snapshot_dir/state"
+    fi
+}
+
+supacloud_restore_file_snapshot() {
+    local target_file="$1"
+    local snapshot_dir="$2"
+    local state temporary_file
+    state=$(<"$snapshot_dir/state")
+    if [[ "$state" == "absent" ]]; then
+        rm -f "$target_file"
+        return
+    fi
+    [[ "$state" == "present" && -f "$snapshot_dir/content" ]] || return 1
+    mkdir -p "$(dirname "$target_file")"
+    temporary_file=$(mktemp "${target_file}.restore.XXXXXX")
+    cp -p "$snapshot_dir/content" "$temporary_file"
+    mv -f "$temporary_file" "$target_file"
+}
+
+supacloud_secret_key_fingerprint() {
+    local encryption_key="$1"
+    {
+        printf 'supacloud:enc:v1:\0'
+        printf '%s' "$encryption_key"
+    } | openssl dgst -sha256 -binary | od -An -tx1 | tr -d ' \n'
+}
+
+supacloud_secret_rotation_checkpoint_status() {
+    local encryption_key="$1"
+    local fingerprint table_exists checkpoint_exists
+    fingerprint=$(supacloud_secret_key_fingerprint "$encryption_key") || return 1
+    [[ "$fingerprint" =~ ^[0-9a-f]{64}$ ]] || return 1
+    table_exists=$(psql -X -qAt \
+        -c "SELECT to_regclass('public.secret_encryption_checkpoints') IS NOT NULL") || return 1
+    if [[ "$table_exists" != "t" ]]; then
+        printf 'incomplete'
+        return
+    fi
+    checkpoint_exists=$(psql -X -qAt \
+        -c "SELECT EXISTS (SELECT 1 FROM secret_encryption_checkpoints WHERE scheme = 'enc:v1' AND key_fingerprint = '${fingerprint}')") || return 1
+    [[ "$checkpoint_exists" == "t" ]] && printf 'complete' || printf 'incomplete'
+}
+
+supacloud_stop_service_for_migration() {
+    local service_name="$1"
+    local was_active="$2"
+    local active_after_stop="false"
+    local stop_status=0
+    systemctl stop "$service_name" >/dev/null 2>&1 || stop_status=$?
+    if systemctl is-active --quiet "$service_name"; then
+        active_after_stop="true"
+    fi
+    if (( stop_status == 0 )) && [[ "$active_after_stop" == "false" ]]; then
+        return 0
+    fi
+    if [[ "$was_active" == "true" && "$active_after_stop" == "false" ]]; then
+        systemctl start "$service_name" >/dev/null 2>&1 || return 2
+    fi
+    return 1
+}
+
+supacloud_wait_http_health() {
+    local url="$1"
+    local attempts="${2:-30}"
+    local delay_seconds="${3:-1}"
+    local attempt
+    for ((attempt = 1; attempt <= attempts; attempt++)); do
+        if curl -fsS "$url" >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep "$delay_seconds"
+    done
+    return 1
+}
+
 supacloud_postgres_scram_verifier() {
     python3 -c '
 import base64

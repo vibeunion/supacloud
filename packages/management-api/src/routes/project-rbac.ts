@@ -1,12 +1,17 @@
 import { Elysia, status, t } from "elysia";
-import { requireProjectOrAdminAuth } from "../middleware/auth";
+import { getVerifiedRequestPrincipal, requireProjectOrAdminAuth } from "../middleware/auth";
 import { projectRbacService } from "../services/project-rbac.service";
+import { projectOrganizationService } from "../services/project-organization.service";
 
 function toHttpError(error: unknown) {
   const record = error && typeof error === "object" ? error as Record<string, unknown> : {};
   const statusCode = typeof record.statusCode === "number" ? record.statusCode : 500;
   const message = error instanceof Error ? error.message : "RBAC request failed";
   return status(statusCode, { message, code: String(statusCode) });
+}
+
+async function actorId(request: Request): Promise<string> {
+  return (await getVerifiedRequestPrincipal(request))!.id;
 }
 
 export const projectRbacRoutes = new Elysia({ prefix: "/v1/projects/:ref" })
@@ -106,9 +111,9 @@ export const projectRbacRoutes = new Elysia({ prefix: "/v1/projects/:ref" })
   }, {
     detail: { tags: ["rbac"], summary: "Delete project RBAC permission" },
   })
-  .post("/rbac/roles/:roleId/assign", async ({ params, body }) => {
+  .post("/rbac/roles/:roleId/assign", async ({ params, body, request }) => {
     try {
-      return await projectRbacService.assignRole(params.ref, params.roleId, body);
+      return await projectRbacService.assignRole(params.ref, params.roleId, body, await actorId(request));
     } catch (error) {
       return toHttpError(error);
     }
@@ -123,9 +128,14 @@ export const projectRbacRoutes = new Elysia({ prefix: "/v1/projects/:ref" })
     }, { additionalProperties: true }),
     detail: { tags: ["rbac"], summary: "Assign project RBAC role" },
   })
-  .delete("/rbac/roles/:roleId/assign/:assignmentId", async ({ params }) => {
+  .delete("/rbac/roles/:roleId/assign/:assignmentId", async ({ params, request }) => {
     try {
-      await projectRbacService.revokeRole(params.ref, params.roleId, params.assignmentId);
+      await projectRbacService.revokeRole(
+        params.ref,
+        params.roleId,
+        params.assignmentId,
+        await actorId(request),
+      );
       return { deleted: true, assignment_id: params.assignmentId };
     } catch (error) {
       return toHttpError(error);
@@ -158,6 +168,25 @@ export const projectRbacRoutes = new Elysia({ prefix: "/v1/projects/:ref" })
       application_id: t.Optional(t.String()),
     }, { additionalProperties: true }),
     detail: { tags: ["rbac"], summary: "Resolve project RBAC permissions for a user" },
+  })
+  .get("/auth/users/:id/organizations", async ({ params }) => {
+    try {
+      return await projectOrganizationService.listForUser(params.ref, params.id);
+    } catch (error) {
+      return toHttpError(error);
+    }
+  }, {
+    detail: { tags: ["organizations"], summary: "List business organizations for a GoTrue user" },
+  })
+  .get("/rbac/applications/:applicationId/roles", async ({ params }) => {
+    try {
+      const assignments = await projectRbacService.listApplicationRoleAssignments(params.ref, params.applicationId);
+      return { items: assignments, total: assignments.length };
+    } catch (error) {
+      return toHttpError(error);
+    }
+  }, {
+    detail: { tags: ["rbac"], summary: "List project RBAC roles assigned to an application" },
   })
   .get("/organizations/:orgId/roles", async ({ params }) => {
     try {

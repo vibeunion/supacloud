@@ -599,28 +599,19 @@ export class DatabaseService {
   async getSecrets(
     projectRef: string,
   ): Promise<{ name: string; value: string; updated_at?: string }[]> {
-    try {
-      const { sql: metaDb } = await import("../db");
-      const rows = await metaDb`
-        SELECT name, value, updated_at FROM project_secrets
-        WHERE project_ref = ${projectRef}
-        ORDER BY name
-      `;
-      return rows.map((r: Record<string, unknown>) => ({
-        name: r.name as string,
-        value: decryptSecretIfNeeded(r.value as string),
-        updated_at:
-          (r.updated_at != null
-            ? new Date(r.updated_at as string).toISOString()
-            : null) ?? new Date().toISOString(),
-      }));
-    } catch (err) {
-      logger.error("[DatabaseService] Failed to get secrets", {
-        projectRef,
-        error: err,
-      });
-      return [];
-    }
+    const { sql: metaDb } = await import("../db");
+    const rows = await metaDb`
+      SELECT name, value, updated_at FROM project_secrets
+      WHERE project_ref = ${projectRef}
+      ORDER BY name
+    `;
+    return rows.map((row: Record<string, unknown>) => ({
+      name: row.name as string,
+      value: decryptSecretIfNeeded(row.value as string),
+      updated_at: row.updated_at != null
+        ? new Date(row.updated_at as string).toISOString()
+        : new Date().toISOString(),
+    }));
   }
 
   async upsertSecret(

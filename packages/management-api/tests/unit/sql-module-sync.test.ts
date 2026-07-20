@@ -45,25 +45,24 @@ describe("canonical SQL module synchronization", () => {
       "CREATE OR REPLACE FUNCTION pgmq_public.read(queue_name text, sleep_seconds integer, n integer)",
     );
     expect(SQL_MODULES["background-task-mirror-up"]).toContain(
-      "CREATE OR REPLACE FUNCTION public.hard_delete_soft_deleted_users()",
+      "CREATE TABLE IF NOT EXISTS public.background_task_mirrors",
     );
     expect(SQL_MODULES["background-task-mirror-up"]).toContain(
-      "LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog",
+      "DROP TRIGGER IF EXISTS auth_users_delete_fence ON auth.users;",
     );
     expect(SQL_MODULES["background-task-mirror-down"]).toContain(
-      "CREATE OR REPLACE FUNCTION public.has_active_background_tasks(p_user_id UUID)",
+      "DROP TABLE IF EXISTS public.background_task_mirrors;",
     );
   });
 
-  test("drops dependent background-task objects before changing the helper return type", () => {
+  test("drops the legacy auth user fence before creating the background task mirror", () => {
     const upgradeSql = SQL_MODULES["background-task-mirror-up"];
     const upgradeStatements = [
-      "p.prorettype <> 'text'::regtype",
       "DROP TRIGGER IF EXISTS auth_users_delete_fence ON auth.users;",
       "DROP FUNCTION IF EXISTS public.soft_delete_user_if_no_active_tasks();",
       "DROP FUNCTION IF EXISTS public.hard_delete_soft_deleted_users();",
       "DROP FUNCTION IF EXISTS public.has_active_background_tasks(UUID);",
-      "CREATE OR REPLACE FUNCTION public.has_active_background_tasks(p_user_id UUID)",
+      "CREATE TABLE IF NOT EXISTS public.background_task_mirrors",
     ];
     const upgradeOffsets = upgradeStatements.map((statement) => upgradeSql.indexOf(statement));
     expect(upgradeOffsets.every((offset) => offset >= 0)).toBe(true);
@@ -76,10 +75,6 @@ describe("canonical SQL module synchronization", () => {
       "DROP FUNCTION IF EXISTS public.hard_delete_soft_deleted_users();",
       "DROP FUNCTION IF EXISTS public.has_active_background_tasks(UUID);",
       "DROP TABLE IF EXISTS public.background_task_mirrors;",
-      "CREATE OR REPLACE FUNCTION public.has_active_background_tasks(p_user_id UUID)",
-      "CREATE OR REPLACE FUNCTION public.soft_delete_user_if_no_active_tasks()",
-      "CREATE TRIGGER auth_users_delete_fence",
-      "CREATE OR REPLACE FUNCTION public.hard_delete_soft_deleted_users()",
     ];
 
     const statementOffsets = orderedStatements.map((statement) => rollbackSql.indexOf(statement));
@@ -87,36 +82,27 @@ describe("canonical SQL module synchronization", () => {
     expect(statementOffsets).toEqual([...statementOffsets].sort((left, right) => left - right));
   });
 
-  test("removes PUBLIC execution from deletion-fence functions", () => {
+  test("never reinstalls SupaCloud auth.users mutation logic", () => {
     for (const moduleId of ["background-task-mirror-up", "background-task-mirror-down"] as const) {
       const sql = SQL_MODULES[moduleId];
-      expect(sql).toContain(
-        "REVOKE ALL ON FUNCTION public.has_active_background_tasks(UUID) FROM PUBLIC;",
-      );
-      expect(sql).toContain(
-        "REVOKE ALL ON FUNCTION public.soft_delete_user_if_no_active_tasks() FROM PUBLIC;",
-      );
-      expect(sql).toContain(
-        "REVOKE ALL ON FUNCTION public.hard_delete_soft_deleted_users() FROM PUBLIC;",
-      );
-      expect(sql).toContain(
-        "GRANT EXECUTE ON FUNCTION public.hard_delete_soft_deleted_users() TO service_role;",
-      );
+      expect(sql).not.toMatch(/CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+public\.(?:soft_delete_user_if_no_active_tasks|hard_delete_soft_deleted_users|has_active_background_tasks)/i);
+      expect(sql).not.toMatch(/(?:UPDATE|DELETE\s+FROM)\s+auth\.users/i);
+      expect(sql).not.toContain("CREATE TRIGGER auth_users_delete_fence");
     }
   });
 
-  test("keeps rollback deletion checks fail-closed", () => {
+  test("keeps rollback from restoring the legacy delete fence", () => {
     const rollbackSql = SQL_MODULES["background-task-mirror-down"];
-    expect(rollbackSql).toContain("status IN ('pending', 'leased', 'running', 'retry_scheduled', 'queued', 'processing')");
-    expect(rollbackSql.match(/RETURN TRUE;/g)).toHaveLength(2);
-    expect(rollbackSql).not.toContain("EXCEPTION WHEN OTHERS THEN\n  RETURN FALSE;");
+    expect(rollbackSql).toContain("DROP TRIGGER IF EXISTS auth_users_delete_fence ON auth.users;");
+    expect(rollbackSql).not.toContain("CREATE TRIGGER auth_users_delete_fence");
+    expect(rollbackSql).not.toMatch(/(?:UPDATE|DELETE\s+FROM)\s+auth\.users/i);
   });
 
-  test("fails the migration when the delete fence cannot be installed", () => {
+  test("does not hide failure while removing the legacy fence", () => {
     const upgradeSql = SQL_MODULES["background-task-mirror-up"];
     expect(upgradeSql).not.toContain("EXCEPTION WHEN OTHERS THEN NULL");
-    expect(upgradeSql.lastIndexOf("DROP TRIGGER IF EXISTS auth_users_delete_fence ON auth.users;"))
-      .toBeLessThan(upgradeSql.indexOf("CREATE TRIGGER auth_users_delete_fence"));
+    expect(upgradeSql.indexOf("DROP TRIGGER IF EXISTS auth_users_delete_fence ON auth.users;"))
+      .toBeLessThan(upgradeSql.indexOf("CREATE TABLE IF NOT EXISTS public.background_task_mirrors"));
   });
 
   test("replaces exactly one marked block and normalizes trailing newlines", () => {

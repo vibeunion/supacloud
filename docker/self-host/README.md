@@ -60,7 +60,7 @@ Generate a production-grade `.env`:
 
 ```bash
 cd docker/self-host
-python3 init-env.py --public-url https://api.example.com --studio-url https://studio.example.com > .env
+python3 init-env.py --public-url https://api.example.com --studio-url https://studio.example.com --output .env
 ```
 
 Then boot the stack:
@@ -68,6 +68,15 @@ Then boot the stack:
 ```bash
 docker compose up -d --build
 ```
+
+When upgrading data created by a release that derived `enc:v1` values from
+`MASTER_TOKEN`, generate the new `.env` once with the old token supplied as
+`--legacy-secrets-encryption-key`. The key is written only to the root-only
+`.legacy-secrets-migration.env` one-shot file, never to the Compose environment.
+`management-api` keeps that file intact when initialization fails and truncates
+it only after the durable encryption checkpoint commits. Startup rejects
+non-regular, symbolic-link, or group/world-accessible migration inputs. New
+installations get an empty `0600` migration file.
 
 Endpoints:
 
@@ -148,3 +157,5 @@ If you enabled pgsodium on a fresh volume and need to disable it:
 - `pgsodium` and `supabase_vault` stay installed but are not created automatically in self-host mode. Set `ENABLE_PGSODIUM=true` only after providing a stable key through `PGSODIUM_KEY_FILE` or `PGSODIUM_KEY`.
 - `supabase_vault` has its own preload-time key loader. If you enable it, either set `VAULT_KEY` / `VAULT_KEY_FILE` explicitly or let it reuse the pgsodium key sources by leaving those variables empty.
 - `BASE_DOMAIN` is derived from `PUBLIC_URL` by `init-env.py`. Override it manually if you need a different wildcard routing suffix.
+- `init-env.py --output .env` replaces the file atomically with mode `0600`; reruns preserve the existing independent `SUPAOAUTH_BFF_SIGNING_SECRET` unless an explicit replacement is supplied.
+- Legacy encryption material lives only in the `0600` one-shot file named by `LEGACY_SECRETS_MIGRATION_FILE`; a rerun without a key preserves a non-empty recovery file until migration succeeds.

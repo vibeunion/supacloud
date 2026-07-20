@@ -86,6 +86,8 @@ services:
       - JWT_SECRET=${JWT_SECRET}
       - MASTER_TOKEN=${MASTER_TOKEN}
       - SECRETS_ENCRYPTION_KEY=${SECRETS_ENCRYPTION_KEY:-${JWT_SECRET}}
+      - LEGACY_SECRETS_ENCRYPTION_KEY=${LEGACY_SECRETS_ENCRYPTION_KEY:-}
+      - SUPAOAUTH_BFF_SIGNING_SECRET=${SUPAOAUTH_BFF_SIGNING_SECRET:-dev-supaoauth-bff-signing-secret-change-me}
       - CADDY_ADMIN_URL=http://caddy:2019
       - CADDY_CONFIG_PATH=/tmp/supacloud-caddy/config.json
       - CADDY_STATE_DIR=/data

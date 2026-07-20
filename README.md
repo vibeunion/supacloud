@@ -195,7 +195,7 @@ Published release assets:
 
 ```bash
 cd docker/self-host
-python3 init-env.py --public-url https://api.example.com --studio-url https://studio.example.com > .env
+python3 init-env.py --public-url https://api.example.com --studio-url https://studio.example.com --output .env
 docker compose up -d --build
 ```
 

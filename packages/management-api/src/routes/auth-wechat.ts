@@ -371,7 +371,6 @@ async function createWechatSession(req, email, userMetadata, provider) {
 
   await authRequest(req, "admin/users/" + encodeURIComponent(user.id), { method: "PUT", body: {
     user_metadata: { ...(user.user_metadata || {}), ...userMetadata, provider },
-    app_metadata: { ...(user.app_metadata || {}), provider, providers: [provider] },
   }})
 
   return { session, user }
@@ -385,9 +384,7 @@ async function getAuthUser(req, userId) {
 }
 
 function generateWeChatMiniProgramLoginFunction(): string {
-  return `import { SQL } from "bun"
-
-${generateGoTrueAdminHelpers()}
+  return `${generateGoTrueAdminHelpers()}
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "",
@@ -430,25 +427,7 @@ export default async function handler(req: Request) {
       "wechat_miniprogram",
     )
 
-    // Explicitly link physical identity row mirroring real OAuth behavior
-    const SUPABASE_DB_URL = Bun.env["SUPABASE_DB_URL"]
-    if (SUPABASE_DB_URL) {
-      const sql = new SQL(SUPABASE_DB_URL)
-      try {
-        await sql\`
-          INSERT INTO auth.identities (id, user_id, provider, identity_data, last_sign_in_at, created_at, updated_at)
-          VALUES (\${openid}, \${sessionUser.id}, 'wechat_miniprogram', \${JSON.stringify({ sub: openid, unionid })}::jsonb, NOW(), NOW(), NOW())
-          ON CONFLICT (provider, id) DO UPDATE 
-          SET identity_data = EXCLUDED.identity_data, last_sign_in_at = EXCLUDED.last_sign_in_at, updated_at = EXCLUDED.updated_at
-        \`
-      } catch (e) {
-        console.error("Identity linkage failed:", e)
-      } finally {
-        await sql.close()
-      }
-    }
-
-    // Refetch the user to bundle the completed identity payload within the first session
+    // Refresh after the GoTrue metadata update so the response carries its authoritative user.
     const finalUser = await getAuthUser(req, sessionUser.id)
     const finalSession = { ...session, user: finalUser || sessionUser }
     const responseUser = finalSession.user ?? null
@@ -466,9 +445,7 @@ export default async function handler(req: Request) {
 }
 
 function generateWeChatMPLoginFunction(): string {
-  return `import { SQL } from "bun"
-
-${generateGoTrueAdminHelpers()}
+  return `${generateGoTrueAdminHelpers()}
 
 const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -523,25 +500,7 @@ export default async function handler(req: Request) {
       "wechat_mp",
     )
 
-    // Explicitly link physical identity row mirroring real OAuth behavior
-    const SUPABASE_DB_URL = Bun.env["SUPABASE_DB_URL"]
-    if (SUPABASE_DB_URL) {
-      const sql = new SQL(SUPABASE_DB_URL)
-      try {
-        await sql\`
-          INSERT INTO auth.identities (id, user_id, provider, identity_data, last_sign_in_at, created_at, updated_at)
-          VALUES (\${openid}, \${sessionUser.id}, \${'wechat_mp'}, CAST(\${JSON.stringify({ sub: openid, unionid, nickname: userData.nickname, headimgurl: userData.headimgurl })} AS jsonb), NOW(), NOW(), NOW())
-          ON CONFLICT (provider, id) DO UPDATE 
-          SET identity_data = EXCLUDED.identity_data, last_sign_in_at = EXCLUDED.last_sign_in_at, updated_at = EXCLUDED.updated_at
-        \`
-      } catch (e) {
-        console.error("Identity linkage failed:", e)
-      } finally {
-        await sql.close()
-      }
-    }
-
-    // Refetch the user to bundle the completed identity payload within the first session
+    // Refresh after the GoTrue metadata update so the response carries its authoritative user.
     const finalUser = await getAuthUser(req, sessionUser.id)
     const finalSession = { ...session, user: finalUser || sessionUser }
     const responseUser = finalSession.user ?? null

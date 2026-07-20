@@ -9,7 +9,7 @@ import {
 } from "./sql-policy";
 
 function parseDatabaseUrl(url: string) {
-  const urlMatch = url.match(/postgresql?:\/\/([^:]+)(?::([^@]*))?@([^:]*):(\d+)\/(.+)/);
+  const urlMatch = url.match(/postgres(?:ql)?:\/\/([^:]+)(?::([^@]*))?@([^:]*):(\d+)\/(.+)/);
   if (!urlMatch) {
     throw new Error(`Invalid DATABASE_URL format: ${url}`);
   }
@@ -464,6 +464,8 @@ export interface ProjectTask {
   cancellation_reason: string | null;
   correlation_id: string | null;
   business_task_id: string | null;
+  invoker_user_id: string | null;
+  auth_authority_ref: string;
   metadata: Record<string, unknown> | null;
   function_slug: string | null;
   function_version: string | null;

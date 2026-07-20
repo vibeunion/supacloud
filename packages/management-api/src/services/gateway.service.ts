@@ -11,6 +11,7 @@ import {
 } from "../utils/project-routing";
 import { normalizeProjectConfig, normalizeThirdPartyAuthConfig } from "../utils/project-config";
 import { uniqueStrings } from "../utils/strings";
+import { GOTRUE_USER_ID_POSTGRES_PATTERN } from "../utils/project-user-lifecycle";
 import { assertUniqueCaddyIds, runCaddyStartupPreflight } from "./caddy-startup-preflight";
 import {
     type CaddyHeaderValue,
@@ -214,6 +215,7 @@ const CADDY_PROJECT_ROUTE_KINDS = [
     "opaque-graphql",
     "opaque-auth-domain",
     "opaque-auth",
+    "auth-admin-user-delete",
     "rest",
     "graphql",
     "auth-domain-auth",
@@ -861,6 +863,8 @@ export class CaddyGatewayProvider implements GatewayProvider {
         streaming?: boolean;
         upstreamTls?: boolean;
         upstreamTlsInsecureSkipVerify?: boolean;
+        methods?: string[];
+        pathRegexp?: string;
     }): CaddyRoute {
         const requestHeaders: Record<string, CaddyHeaderValue> = {
             "Host": "{http.request.host}",
@@ -888,6 +892,13 @@ export class CaddyGatewayProvider implements GatewayProvider {
             match: [{
                 host: uniqueStrings(opts.hosts.map(normalizeCaddyHost)),
                 path: Array.isArray(opts.path) ? opts.path : [opts.path],
+                ...(opts.methods && opts.methods.length > 0 ? { method: opts.methods } : {}),
+                ...(opts.pathRegexp ? {
+                    path_regexp: {
+                        name: `${sanitizeCaddyId(opts.id)}_path`,
+                        pattern: opts.pathRegexp,
+                    },
+                } : {}),
             }],
             handle,
             terminal: true,
@@ -1158,7 +1169,19 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 })] : []),
             ];
 
+            const adminUserDeleteRoute = this.makeRoute({
+                id: caddyRouteId(projectRef, "auth-admin-user-delete"),
+                hosts: [...hosts, ...authHosts],
+                path: "/auth/v1/admin/users/*",
+                methods: ["DELETE"],
+                pathRegexp: `(?i)^/auth/v1/admin/users/${GOTRUE_USER_ID_POSTGRES_PATTERN.slice(1, -1)}/?$`,
+                upstream: `${hostIp}:${config.port}`,
+                projectRef,
+                corsOrigins,
+            });
+
             const routes = [
+                adminUserDeleteRoute,
                 ...opaqueRoutes,
                 this.makeRoute({ id: caddyRouteId(projectRef, "rest"), hosts, path: "/rest/v1*", upstream: `${hostIp}:${pgrstPort}`, projectRef, stripPrefix: "/rest/v1", corsOrigins }),
                 this.makeRoute({ id: caddyRouteId(projectRef, "graphql"), hosts, path: "/graphql/v1*", upstream: `${hostIp}:${pgrstPort}`, projectRef, rewriteUri: "/rpc/graphql", headers: ["Content-Profile:graphql_public", "Accept-Profile:graphql_public"], corsOrigins }),
@@ -1291,7 +1314,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
 
     async addProjectDomains(projectRef: string, apiDomains: string[], studioDomains: string[]): Promise<boolean> {
         await this.hydrateFromDiskIfUninitialized();
-        const existingKinds = ["opaque-rest", "opaque-graphql", "opaque-auth", "rest", "graphql", "auth", "gotrue-well-known", "functions", "storage", "realtime-api", "realtime", "management", "acme"];
+        const existingKinds = ["opaque-rest", "opaque-graphql", "opaque-auth", "auth-admin-user-delete", "rest", "graphql", "auth", "gotrue-well-known", "functions", "storage", "realtime-api", "realtime", "management", "acme"];
         for (const kind of existingKinds) {
             const route = this.routesById.get(caddyRouteId(projectRef, kind));
             const matches = Array.isArray(route?.match) ? route.match as Record<string, unknown>[] : [];

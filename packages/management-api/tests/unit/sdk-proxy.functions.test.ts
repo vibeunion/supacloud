@@ -3,6 +3,7 @@ import { Elysia } from "elysia";
 import {
   sdkProxyInternals,
   sdkProxyRoutes,
+  setAdminUserDeletionDispatcherForTests,
   setSdkProxyFetchForTests,
   setSdkProxySqlForTests,
 } from "../../src/routes/sdk-proxy";
@@ -87,6 +88,7 @@ async function withSdkProxyTestContext(
     } finally {
       setSdkProxyFetchForTests();
       setSdkProxySqlForTests();
+      setAdminUserDeletionDispatcherForTests();
       while (restoredSpies.length > 0) {
         restoredSpies.pop()?.mockRestore();
       }
@@ -97,6 +99,33 @@ async function withSdkProxyTestContext(
 describe("sdkProxyRoutes functions proxy", () => {
   test("exposes tenant-bound API key header translation through the internal test seam", () => {
     expect(typeof sdkProxyInternals.translateOpaqueApiKeyHeaders).toBe("function");
+    expect(sdkProxyInternals.dispatchAdminUserDeletionThroughManagement.toString())
+      .toContain("userManagementRoutes.handle");
+  });
+
+  test("merges the soft-delete query into an object body without overriding an explicit body value", async () => {
+    const bodyFromQuery = await sdkProxyInternals.adminUserDeletionBody(new Request(
+      "http://localhost/auth/v1/admin/users/00000000-0000-4000-8000-000000000001?should_soft_delete=true",
+      { method: "DELETE", body: "{}" },
+    ));
+    const explicitFalse = await sdkProxyInternals.adminUserDeletionBody(new Request(
+      "http://localhost/auth/v1/admin/users/00000000-0000-4000-8000-000000000001?should_soft_delete=true",
+      { method: "DELETE", body: JSON.stringify({ should_soft_delete: false }) },
+    ));
+
+    expect(JSON.parse(bodyFromQuery)).toEqual({ should_soft_delete: true });
+    expect(JSON.parse(explicitFalse)).toEqual({ should_soft_delete: false });
+  });
+
+  test("rejects malformed and non-object admin deletion bodies", async () => {
+    await expect(sdkProxyInternals.adminUserDeletionBody(new Request(
+      "http://localhost/auth/v1/admin/users/00000000-0000-4000-8000-000000000001",
+      { method: "DELETE", body: "{" },
+    ))).rejects.toThrow("must be valid JSON");
+    await expect(sdkProxyInternals.adminUserDeletionBody(new Request(
+      "http://localhost/auth/v1/admin/users/00000000-0000-4000-8000-000000000001",
+      { method: "DELETE", body: "[]" },
+    ))).rejects.toThrow("must be a JSON object");
   });
 
   test("resolves an opaque Secret Key through its hash without storing plaintext", async () => {
@@ -306,6 +335,125 @@ describe("sdkProxyRoutes functions proxy", () => {
       expect(headers.get("x-project-ref")).toBe("proj_1");
       expect(sdkProxyInternals.resolveProjectRefFromApiKey).toHaveBeenCalledWith("anon", { includeProvisioning: true });
     });
+  });
+
+  test("intercepts the exact public admin-user DELETE through the shared deletion orchestrator", async () => {
+    await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
+      const deletionCalls: Array<Record<string, unknown>> = [];
+      trackSpy(
+        spyOn(sdkProxyInternals, "resolveProjectApiKey").mockResolvedValue({
+          ref: "proj_1",
+          kind: "secret",
+          role: "service_role",
+          upstreamKey: "legacy-service-role-key",
+        }),
+      );
+      setSdkProxySqlForTests(async (...args: unknown[]) => {
+        const text = String(args[0] ?? "");
+        if (text.includes("SELECT config")) {
+          return [{ config: { postgrest_port: 7361, gotrue_port: 8361 } }];
+        }
+        return [];
+      });
+      setAdminUserDeletionDispatcherForTests(async (input) => {
+        deletionCalls.push(input);
+        return Response.json({ id: input.userId, deletion_status: "deleted" });
+      });
+
+      const userId = "00000000-0000-4000-8000-000000000001";
+      const response = await request(`/auth/v1/admin/users/${userId}/`, {
+        method: "DELETE",
+        headers: {
+          apikey: "sb_secret_server_key",
+          authorization: "Bearer sb_secret_server_key",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ should_soft_delete: true }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(calls).toHaveLength(0);
+      expect(deletionCalls).toHaveLength(1);
+      expect(deletionCalls[0]).toMatchObject({
+        authorityProjectRef: "proj_1",
+        userId,
+        directGoTrueUrl: "http://127.0.0.1:8361",
+      });
+    });
+  });
+
+  test("normalizes an encoded UUID before exact admin-user deletion dispatch", async () => {
+    await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
+      const deletionUserIds: string[] = [];
+      trackSpy(spyOn(sdkProxyInternals, "resolveProjectApiKey").mockResolvedValue({
+        ref: "proj_1",
+        kind: "service_role",
+        role: "service_role",
+        upstreamKey: "legacy-service-role-key",
+      }));
+      setSdkProxySqlForTests(async (...args: unknown[]) => String(args[0] ?? "").includes("SELECT config")
+        ? [{ config: { postgrest_port: 7361, gotrue_port: 8361 } }]
+        : []);
+      setAdminUserDeletionDispatcherForTests(async (input) => {
+        deletionUserIds.push(input.userId);
+        return Response.json({ id: input.userId });
+      });
+
+      const response = await request(
+        "/auth/v1/admin/users/00000000%2D0000%2D4000%2D8000%2D000000000001",
+        {
+          method: "DELETE",
+          headers: { apikey: "legacy-service-role-key" },
+        },
+      );
+
+      expect(response.status).toBe(200);
+      expect(deletionUserIds).toEqual(["00000000-0000-4000-8000-000000000001"]);
+      expect(calls).toHaveLength(0);
+    });
+  });
+
+  test("fails closed for exact admin-user DELETE on a dependent shared-auth project", async () => {
+    const originalOwnerRef = config.authRuntimeOwnerRef;
+    config.authRuntimeOwnerRef = "auth-owner";
+    try {
+      await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
+        trackSpy(
+          spyOn(sdkProxyInternals, "resolveProjectApiKey").mockResolvedValue({
+            ref: "proj_1",
+            kind: "secret",
+            role: "service_role",
+            upstreamKey: "dependent-service-role-key",
+          }),
+        );
+        setSdkProxySqlForTests(async (...args: unknown[]) => {
+          const text = String(args[0] ?? "");
+          if (text.includes("SELECT config")) {
+            return [{ config: { postgrest_port: 7361, gotrue_port: 9361 } }];
+          }
+          return [];
+        });
+
+        const response = await request(
+          "/auth/v1/admin/users/00000000-0000-4000-8000-000000000001",
+          {
+            method: "DELETE",
+            headers: {
+              apikey: "sb_secret_dependent_key",
+              authorization: "Bearer sb_secret_dependent_key",
+            },
+          },
+        );
+
+        expect(response.status).toBe(403);
+        expect(await response.json()).toEqual({
+          message: "Admin user deletion must use the auth authority project",
+        });
+        expect(calls).toHaveLength(0);
+      });
+    } finally {
+      config.authRuntimeOwnerRef = originalOwnerRef;
+    }
   });
 
   test("shared auth proxy uses the owner GoTrue port, key, and project header", async () => {

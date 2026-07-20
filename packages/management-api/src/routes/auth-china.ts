@@ -132,7 +132,6 @@ function generateChinaOAuthFunction(provider: ChinaOAuthProvider, appId: string,
   const providerUpper = provider.toUpperCase();
 
   return `import { createClient } from "@supabase/supabase-js"
-import { SQL } from "bun"
 
 const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -210,29 +209,10 @@ export default async function handler(req: Request) {
 
     // Force update user metadata to ensure latest OAuth provider data is present
     await supabaseAdmin.auth.admin.updateUserById(sessionData.user.id, {
-      user_metadata: { ...sessionData.user.user_metadata, openid, unionid, provider: "${provider}" },
-      app_metadata: { ...sessionData.user.app_metadata, provider: "${provider}", providers: ["${provider}"] }
+      user_metadata: { ...sessionData.user.user_metadata, openid, unionid, provider: "${provider}" }
     })
 
-    // Explicitly link physical identity row mirroring real OAuth behavior
-    const SUPABASE_DB_URL = Bun.env["SUPABASE_DB_URL"]
-    if (SUPABASE_DB_URL) {
-      const sql = new SQL(SUPABASE_DB_URL)
-      try {
-        await sql\`
-          INSERT INTO auth.identities (id, user_id, provider, identity_data, last_sign_in_at, created_at, updated_at)
-          VALUES (\${openid || unionid}, \${sessionData.user.id}, \${\`\${provider}\`}, CAST(\${JSON.stringify({ sub: openid || unionid, ...tokenData })} AS jsonb), NOW(), NOW(), NOW())
-          ON CONFLICT (provider, id) DO UPDATE 
-          SET identity_data = EXCLUDED.identity_data, last_sign_in_at = EXCLUDED.last_sign_in_at, updated_at = EXCLUDED.updated_at
-        \`
-      } catch (e) {
-        console.error("Identity linkage failed:", e)
-      } finally {
-        await sql.close()
-      }
-    }
-
-    // Refetch the user to bundle the completed identity payload within the first session
+    // Refresh after the GoTrue metadata update so the response carries its authoritative user.
     const { data: finalUser } = await supabaseAdmin.auth.admin.getUserById(sessionData.user.id)
     const finalSession = finalUser?.user ? { ...sessionData.session, user: finalUser.user } : sessionData.session
     // Embed native OAuth provider tokens to complete the session payload matching Official Supabase

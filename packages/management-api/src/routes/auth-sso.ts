@@ -58,7 +58,11 @@ export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
         return res.json();
       } catch (err: unknown) {
         logger.warn("[auth-sso] Failed to list SSO providers", { error: err instanceof Error ? err.message : String(err) });
-        return [];
+        return status(503, {
+          message: "GoTrue SSO provider service is unavailable",
+          code: "SERVICE_UNAVAILABLE",
+          reason_code: "gotrue_sso_unavailable",
+        });
       }
     },
     { params: t.Object({ ref: t.String() }), detail: { tags: ["auth"], summary: "List SSO providers" } }

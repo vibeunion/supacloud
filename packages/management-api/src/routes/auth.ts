@@ -1,8 +1,11 @@
 import { Elysia, t, status } from "elysia";
 import { logger } from "../utils/logger";
+import {
+  canonicalAuthProviderLinkingConfig,
+  ProviderLinkingDomainsValidationError,
+} from "../utils/provider-linking";
 import { projectService } from "../services";
 import { tenantRuntimeService } from "../services/tenant-runtime.service";
-import { shellService } from "../services/shell.service";
 import { requireProjectOrAdminAuth } from "../middleware/auth";
 import type {
   OAuthProvider,
@@ -26,34 +29,326 @@ import {
   buildAuthRuntimeApplyFailureBody,
   buildAuthSessionPolicyErrorBody,
 } from "./auth-config-responses";
+import { projectControlSecretsService } from "../services/project-control-secrets.service";
+import {
+  passkeyCapabilityUnavailableBody,
+  requestsUnavailablePasskeyConfig,
+  withoutUnavailablePasskeyConfig,
+} from "../services/auth-product-boundary";
 
-function generateGoTrueOAuthEnv(provider: OAuthProvider, config: OAuthProviderConfig): string {
-  const mapping = OAUTH_ENV_MAPPINGS[provider];
-  if (!mapping) {
-    throw new Error(`Unsupported OAuth provider: ${provider}`);
-  }
+const MASKED_SECRET_VALUES = new Set(["********", "****"]);
+const SENSITIVE_AUTH_FIELDS = new Set([
+  "pass",
+  "password",
+  "secret",
+  "secrets",
+  "smstestotp",
+]);
+const SENSITIVE_AUTH_SUFFIXES = [
+  "secret",
+  "secrets",
+  "password",
+  "apikey",
+  "accesskey",
+  "authtoken",
+  "privatekey",
+  "privatekeynext",
+  "signingkey",
+  "encryptionkey",
+  "smtppass",
+  "token",
+];
+const JWK_PRIVATE_FIELDS = new Set(["d", "p", "q", "dp", "dq", "qi", "oth", "k"]);
+const FLAT_HOOK_SECRET_NAMES: Record<string, string> = {
+  hook_before_user_created_secrets: "before_user_created_hook",
+  hook_custom_access_token_secrets: "custom_access_token_hook",
+  hook_mfa_verification_attempt_secrets: "mfa_verification_hook",
+  hook_password_verification_attempt_secrets: "password_verification_hook",
+  hook_send_email_secrets: "send_email_hook",
+  hook_send_sms_secrets: "send_sms_hook",
+};
 
-  let envLines: string[] = [];
-
-  envLines.push(`${mapping.clientId}=${config.client_id}`);
-  envLines.push(`${mapping.clientSecret}=${config.client_secret}`);
-
-  if (config.redirect_uri) {
-    envLines.push(`${mapping.redirectUri}=${config.redirect_uri}`);
-  }
-
-  if (mapping.url && config.url) {
-    envLines.push(`${mapping.url}=${config.url}`);
-  }
-
-  return envLines.join("\n");
+function isRecord(candidate: unknown): candidate is Record<string, unknown> {
+  return typeof candidate === "object" && candidate !== null && !Array.isArray(candidate);
 }
 
-function maskSecret(value: string): string {
-  if (value.length <= 8) {
-    return "****";
+function normalizedAuthField(fieldName: string): string {
+  return fieldName.replaceAll(/[_-]/g, "").toLowerCase();
+}
+
+function isJwkPath(parentPath: string[]): boolean {
+  return parentPath.some((segment) => ["jwtkeys", "jwtjwks"].includes(normalizedAuthField(segment)));
+}
+
+function isSensitiveAuthField(fieldName: string, parentPath: string[]): boolean {
+  const normalized = normalizedAuthField(fieldName);
+  if (SENSITIVE_AUTH_FIELDS.has(normalized)) return true;
+  if (SENSITIVE_AUTH_SUFFIXES.some((suffix) => normalized.endsWith(suffix))) return true;
+  return isJwkPath(parentPath) && JWK_PRIVATE_FIELDS.has(normalized);
+}
+
+function isMaskedSecret(candidate: unknown): candidate is string {
+  return typeof candidate === "string" && MASKED_SECRET_VALUES.has(candidate);
+}
+
+function isNewSecret(candidate: unknown): candidate is string {
+  return typeof candidate === "string" && candidate.length > 0 && !isMaskedSecret(candidate);
+}
+
+function secretIsConfigured(candidate: unknown): boolean {
+  if (typeof candidate === "string") return candidate.length > 0 && !isMaskedSecret(candidate);
+  return candidate !== null && candidate !== undefined;
+}
+
+function secretStatusBase(fieldName: string, parentPath: string[]): string | null {
+  if (!fieldName.endsWith("_configured")) return null;
+  const baseField = fieldName.slice(0, -"_configured".length);
+  return isSensitiveAuthField(baseField, parentPath) ? baseField : null;
+}
+
+function connectorNameForSecretField(fieldName: string): string | null {
+  const normalized = fieldName.toLowerCase();
+  const externalMatch = normalized.match(/^external_(.+)_(?:client_)?secret$/);
+  if (externalMatch) return externalMatch[1];
+  const oauthMatch = normalized.match(/^(.+)_oauth_client_secret$/);
+  return oauthMatch?.[1] ?? null;
+}
+
+function hookNameForSecretField(fieldName: string): string | null {
+  return FLAT_HOOK_SECRET_NAMES[fieldName.toLowerCase()] ?? null;
+}
+
+function redactAuthSecrets(authSetting: unknown, parentPath: string[] = []): unknown {
+  if (Array.isArray(authSetting)) {
+    return authSetting.map((entry) => redactAuthSecrets(entry, parentPath));
   }
-  return value.substring(0, 4) + "****" + value.substring(value.length - 4);
+  if (!isRecord(authSetting)) return authSetting;
+
+  const redactedSetting: Record<string, unknown> = {};
+  for (const [fieldName, fieldSetting] of Object.entries(authSetting)) {
+    if (secretStatusBase(fieldName, parentPath)) continue;
+    if (isSensitiveAuthField(fieldName, parentPath)) {
+      const configured = secretIsConfigured(fieldSetting);
+      redactedSetting[fieldName] = configured ? projectControlSecretsService.mask : null;
+      redactedSetting[`${fieldName}_configured`] = configured;
+      continue;
+    }
+    redactedSetting[fieldName] = redactAuthSecrets(fieldSetting, [...parentPath, fieldName]);
+  }
+  return redactedSetting;
+}
+
+function preserveMaskedAuthArray(
+  incomingEntries: unknown[],
+  currentSetting: unknown,
+  parentPath: string[],
+): unknown[] {
+  const currentEntries = Array.isArray(currentSetting) ? currentSetting : [];
+  return incomingEntries.map((entry, index) => preserveMaskedAuthSecrets(entry, currentEntries[index], parentPath));
+}
+
+function preserveMaskedAuthRecord(
+  incomingSetting: Record<string, unknown>,
+  currentSetting: unknown,
+  parentPath: string[],
+): Record<string, unknown> {
+  const currentRecord = isRecord(currentSetting) ? currentSetting : {};
+  const preservedSetting: Record<string, unknown> = {};
+  for (const [fieldName, fieldSetting] of Object.entries(incomingSetting)) {
+    if (secretStatusBase(fieldName, parentPath)) continue;
+    if (isSensitiveAuthField(fieldName, parentPath) && isMaskedSecret(fieldSetting)) {
+      const currentSecret = currentRecord[fieldName];
+      if (currentSecret !== undefined && !isMaskedSecret(currentSecret)) {
+        preservedSetting[fieldName] = structuredClone(currentSecret);
+      }
+      continue;
+    }
+    preservedSetting[fieldName] = preserveMaskedAuthSecrets(
+      fieldSetting,
+      currentRecord[fieldName],
+      [...parentPath, fieldName],
+    );
+  }
+  return preservedSetting;
+}
+
+function preserveMaskedAuthSecrets(
+  incomingSetting: unknown,
+  currentSetting: unknown,
+  parentPath: string[] = [],
+): unknown {
+  if (Array.isArray(incomingSetting)) return preserveMaskedAuthArray(incomingSetting, currentSetting, parentPath);
+  if (!isRecord(incomingSetting)) return incomingSetting;
+  return preserveMaskedAuthRecord(incomingSetting, currentSetting, parentPath);
+}
+
+function mergeAuthConfig(
+  currentSetting: Record<string, unknown>,
+  incomingSetting: Record<string, unknown>,
+): Record<string, unknown> {
+  const mergedSetting = structuredClone(currentSetting);
+  for (const [fieldName, fieldSetting] of Object.entries(incomingSetting)) {
+    const currentField = mergedSetting[fieldName];
+    mergedSetting[fieldName] = isRecord(currentField) && isRecord(fieldSetting)
+      ? mergeAuthConfig(currentField, fieldSetting)
+      : structuredClone(fieldSetting);
+  }
+  return mergedSetting;
+}
+
+async function connectorSecret(ref: string, provider: string, legacyValue?: unknown): Promise<string | null> {
+  const stored = await projectControlSecretsService.readValue(ref, "connector", provider);
+  if (stored) return stored;
+  if (!isNewSecret(legacyValue)) return null;
+  await projectControlSecretsService.upsert(ref, "connector", provider, legacyValue);
+  return legacyValue;
+}
+
+async function moveFlatConnectorSecrets(ref: string, authConfig: Record<string, unknown>): Promise<void> {
+  for (const [fieldName, fieldSetting] of Object.entries(authConfig)) {
+    const provider = connectorNameForSecretField(fieldName);
+    if (!provider) continue;
+    if (isNewSecret(fieldSetting)) {
+      await projectControlSecretsService.upsert(ref, "connector", provider, fieldSetting);
+    }
+    delete authConfig[fieldName];
+  }
+}
+
+async function moveConnectorSecrets(ref: string, authConfig: Record<string, unknown>): Promise<void> {
+  const external = isRecord(authConfig.external) ? authConfig.external : null;
+  if (external) {
+    for (const [provider, rawProviderConfig] of Object.entries(external)) {
+      if (!isRecord(rawProviderConfig) || !("client_secret" in rawProviderConfig)) continue;
+      if (isNewSecret(rawProviderConfig.client_secret)) {
+        await projectControlSecretsService.upsert(ref, "connector", provider, rawProviderConfig.client_secret);
+      }
+      delete rawProviderConfig.client_secret;
+    }
+  }
+  await moveFlatConnectorSecrets(ref, authConfig);
+}
+
+async function moveCaptchaSecret(ref: string, authConfig: Record<string, unknown>): Promise<void> {
+  if (!("security_captcha_secret" in authConfig)) return;
+  const provider = String(authConfig.security_captcha_provider ?? "default").toLowerCase();
+  if (isNewSecret(authConfig.security_captcha_secret)) {
+    await projectControlSecretsService.upsert(ref, "captcha", provider, authConfig.security_captcha_secret);
+  }
+  delete authConfig.security_captcha_secret;
+}
+
+async function moveHookSecrets(ref: string, authConfig: Record<string, unknown>): Promise<void> {
+  const hooks = isRecord(authConfig.hooks) ? authConfig.hooks : null;
+  if (hooks) {
+    for (const [hookName, rawHookConfig] of Object.entries(hooks)) {
+      if (!isRecord(rawHookConfig) || !("secrets" in rawHookConfig)) continue;
+      if (isNewSecret(rawHookConfig.secrets)) {
+        await projectControlSecretsService.upsert(ref, "auth-hook", hookName, rawHookConfig.secrets);
+      }
+      delete rawHookConfig.secrets;
+    }
+  }
+  await moveFlatHookSecrets(ref, authConfig);
+}
+
+async function moveFlatHookSecrets(ref: string, authConfig: Record<string, unknown>): Promise<void> {
+  for (const [fieldName, fieldSetting] of Object.entries(authConfig)) {
+    const hookName = hookNameForSecretField(fieldName);
+    if (!hookName) continue;
+    if (isNewSecret(fieldSetting)) {
+      await projectControlSecretsService.upsert(ref, "auth-hook", hookName, fieldSetting);
+    }
+    delete authConfig[fieldName];
+  }
+}
+
+async function moveRawAuthSecrets(
+  ref: string,
+  authConfig: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const sanitized = structuredClone(authConfig);
+  await moveConnectorSecrets(ref, sanitized);
+  await moveCaptchaSecret(ref, sanitized);
+  await moveHookSecrets(ref, sanitized);
+  return sanitized;
+}
+
+function applyFlatConnectorSecretStatuses(
+  safeConfig: Record<string, unknown>,
+  configuredNames: Set<string>,
+): void {
+  for (const fieldName of Object.keys(safeConfig)) {
+    const provider = connectorNameForSecretField(fieldName);
+    if (!provider) continue;
+    const configured = configuredNames.has(provider);
+    safeConfig[fieldName] = configured ? projectControlSecretsService.mask : null;
+    safeConfig[`${fieldName}_configured`] = configured;
+  }
+}
+
+async function applyConnectorSecretStatuses(ref: string, safeConfig: Record<string, unknown>): Promise<void> {
+  const external = isRecord(safeConfig.external) ? safeConfig.external : null;
+  const secretStatuses = await projectControlSecretsService.listStatuses(ref, "connector");
+  const configuredNames = new Set(secretStatuses.filter((entry) => entry.configured).map((entry) => entry.name));
+  if (external) {
+    for (const [provider, providerConfig] of Object.entries(external)) {
+      if (!isRecord(providerConfig)) continue;
+      delete providerConfig.client_secret;
+      providerConfig.client_secret_configured = configuredNames.has(provider);
+      if (providerConfig.client_secret_configured) {
+        providerConfig.client_secret = projectControlSecretsService.mask;
+      }
+    }
+  }
+  applyFlatConnectorSecretStatuses(safeConfig, configuredNames);
+}
+
+function applyFlatHookSecretStatuses(
+  safeConfig: Record<string, unknown>,
+  configuredNames: Set<string>,
+): void {
+  for (const fieldName of Object.keys(safeConfig)) {
+    const hookName = hookNameForSecretField(fieldName);
+    if (!hookName) continue;
+    const configured = configuredNames.has(hookName);
+    safeConfig[fieldName] = configured ? projectControlSecretsService.mask : null;
+    safeConfig[`${fieldName}_configured`] = configured;
+  }
+}
+
+async function applyCaptchaSecretStatus(ref: string, safeConfig: Record<string, unknown>): Promise<void> {
+  const captchaProvider = String(safeConfig.security_captcha_provider ?? "default").toLowerCase();
+  const captchaStatus = await projectControlSecretsService.getStatus(ref, "captcha", captchaProvider);
+  delete safeConfig.security_captcha_secret;
+  safeConfig.security_captcha_secret_configured = captchaStatus.configured;
+  if (safeConfig.security_captcha_secret_configured) {
+    safeConfig.security_captcha_secret = projectControlSecretsService.mask;
+  }
+}
+
+async function applyHookSecretStatuses(ref: string, safeConfig: Record<string, unknown>): Promise<void> {
+  const hooks = isRecord(safeConfig.hooks) ? safeConfig.hooks : null;
+  const secretStatuses = await projectControlSecretsService.listStatuses(ref, "auth-hook");
+  const configuredNames = new Set(secretStatuses.filter((entry) => entry.configured).map((entry) => entry.name));
+  if (hooks) {
+    for (const [hookName, hookConfig] of Object.entries(hooks)) {
+      if (!isRecord(hookConfig)) continue;
+      delete hookConfig.secrets;
+      hookConfig.secrets_configured = configuredNames.has(hookName);
+      if (hookConfig.secrets_configured) hookConfig.secrets = projectControlSecretsService.mask;
+    }
+  }
+  applyFlatHookSecretStatuses(safeConfig, configuredNames);
+}
+
+async function safeAuthConfig(ref: string, authConfig: Record<string, unknown>) {
+  const publicConfig = withoutUnavailablePasskeyConfig(canonicalAuthProviderLinkingConfig(authConfig));
+  const safeConfig = redactAuthSecrets(publicConfig) as Record<string, unknown>;
+  await applyConnectorSecretStatuses(ref, safeConfig);
+  await applyCaptchaSecretStatus(ref, safeConfig);
+  await applyHookSecretStatuses(ref, safeConfig);
+  return safeConfig;
 }
 
 /**
@@ -76,7 +371,15 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
       }
 
       const oauthConfig = ((settings.auth as Record<string, unknown>)?.external ?? {}) as Record<string, Record<string, string>>;
-      const result: Array<{ id: string; enabled: boolean; client_id?: string; redirect_uri?: string }> = [];
+      const result: Array<{
+        id: string;
+        enabled: boolean;
+        client_id?: string;
+        redirect_uri?: string;
+        secret_configured?: boolean;
+      }> = [];
+      const secretStatuses = await projectControlSecretsService.listStatuses(params.ref, "connector");
+      const configuredSecrets = new Set(secretStatuses.filter((item) => item.configured).map((item) => item.name));
 
       for (const provider of SUPPORTED_OAUTH_PROVIDERS) {
         const providerConfig = oauthConfig[provider];
@@ -86,6 +389,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
             enabled: true,
             client_id: providerConfig.client_id,
             redirect_uri: providerConfig.redirect_uri,
+            secret_configured: configuredSecrets.has(provider),
           });
         } else {
           result.push({ id: provider, enabled: false });
@@ -121,6 +425,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
 
       const oauthConfig = ((settings.auth as Record<string, unknown>)?.external ?? {}) as Record<string, Record<string, string>>;
       const providerConfig = oauthConfig[provider];
+      const secretStatus = await projectControlSecretsService.getStatus(params.ref, "connector", provider);
 
       if (!providerConfig || !providerConfig.client_id) {
         return {
@@ -136,6 +441,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
         enabled: true,
         client_id: providerConfig.client_id,
         redirect_uri: providerConfig.redirect_uri || null,
+        secret_configured: secretStatus.configured,
       };
     },
     {
@@ -175,11 +481,12 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
         url: body.url,
       };
 
+      await projectControlSecretsService.upsert(params.ref, "connector", provider, providerConfig.client_secret);
+
       const updatedExternal = {
         ...currentExternal,
         [provider]: {
           client_id: providerConfig.client_id,
-          client_secret: providerConfig.client_secret,
           redirect_uri: providerConfig.redirect_uri,
           url: providerConfig.url,
         },
@@ -206,6 +513,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
         enabled: true,
         client_id: providerConfig.client_id,
         redirect_uri: providerConfig.redirect_uri || null,
+        secret_configured: true,
         ...(warning ? { warning } : {}),
       };
     },
@@ -245,10 +553,21 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
       const currentExternal = (currentAuth.external ?? {}) as Record<string, Record<string, string>>;
       const currentProviderConfig = currentExternal[provider] || ({} as Record<string, string>);
 
-      const updatedProviderConfig = {
+      const incomingSecret = isNewSecret(body.client_secret) ? body.client_secret : null;
+      if (incomingSecret) {
+        await projectControlSecretsService.upsert(params.ref, "connector", provider, incomingSecret);
+      }
+
+      const updatedProviderConfig: Record<string, string> = {
         ...currentProviderConfig,
         ...body,
       };
+      delete updatedProviderConfig.client_secret;
+      const effectiveSecret = incomingSecret || await connectorSecret(
+        params.ref,
+        provider,
+        currentProviderConfig.client_secret,
+      );
 
       const updatedExternal = {
         ...currentExternal,
@@ -264,12 +583,12 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
       });
 
       let warning: string | undefined;
-      if (updatedProviderConfig.client_id && updatedProviderConfig.client_secret) {
+      if (updatedProviderConfig.client_id && effectiveSecret) {
         try {
           await tenantRuntimeService.updateOAuthConfig(params.ref, provider, {
             provider,
             client_id: updatedProviderConfig.client_id,
-            client_secret: updatedProviderConfig.client_secret,
+            client_secret: effectiveSecret,
             redirect_uri: updatedProviderConfig.redirect_uri,
             url: updatedProviderConfig.url,
           });
@@ -284,6 +603,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
         enabled: true,
         client_id: updatedProviderConfig.client_id,
         redirect_uri: updatedProviderConfig.redirect_uri || null,
+        secret_configured: Boolean(effectiveSecret),
         ...(warning ? { warning } : {}),
       };
     },
@@ -345,6 +665,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
       } catch (error: unknown) {
         logger.error(`Failed to remove GoTrue OAuth config for ${provider}:`, { error: error instanceof Error ? error.message : String(error) });
       }
+      await projectControlSecretsService.remove(params.ref, "connector", provider);
 
       return {
         id: provider,
@@ -369,21 +690,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
       }
 
       const authConfig = (settings.auth as Record<string, unknown>) || {};
-      const safeConfig: Record<string, unknown> = { ...authConfig };
-
-      {
-        const ext = safeConfig.external as Record<string, Record<string, string>> | undefined;
-        if (ext) {
-          for (const provider of Object.keys(ext)) {
-            if (ext[provider].client_secret) {
-              ext[provider].client_secret = maskSecret(ext[provider].client_secret);
-            }
-          }
-          safeConfig.external = ext;
-        }
-      }
-
-      return safeConfig;
+      return safeAuthConfig(params.ref, authConfig);
     },
     {
       params: t.Object({
@@ -404,9 +711,16 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
       }
 
       const currentAuth = (settings.auth as Record<string, unknown>) || {};
+      if (requestsUnavailablePasskeyConfig(body as Record<string, unknown>)) {
+        return status(501, passkeyCapabilityUnavailableBody());
+      }
+      const sanitizedBody = preserveMaskedAuthSecrets(
+        body as Record<string, unknown>,
+        currentAuth,
+      ) as Record<string, unknown>;
       let sessionPolicyPatch: ReturnType<typeof normalizeAuthSessionPolicyPatch>;
       try {
-        sessionPolicyPatch = normalizeAuthSessionPolicyPatch(body);
+        sessionPolicyPatch = normalizeAuthSessionPolicyPatch(sanitizedBody);
       } catch (error: unknown) {
         if (error instanceof AuthSessionPolicyValidationError) {
           return status(400, buildAuthSessionPolicyErrorBody(error));
@@ -415,12 +729,21 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
       }
 
       const nonPolicyUpdates = Object.fromEntries(
-        Object.entries(body).filter(([key]) => !sessionPolicyPatch.consumedKeys.has(key)),
+        Object.entries(sanitizedBody).filter(([key]) => !sessionPolicyPatch.consumedKeys.has(key)),
       );
-      const updatedAuth = applyAuthSessionPolicyPatch({
-        ...currentAuth,
-        ...nonPolicyUpdates,
-      }, sessionPolicyPatch);
+      const mergedAuth = mergeAuthConfig(currentAuth, nonPolicyUpdates);
+      let canonicalAuth: Record<string, unknown>;
+      try {
+        canonicalAuth = canonicalAuthProviderLinkingConfig(
+          applyAuthSessionPolicyPatch(mergedAuth, sessionPolicyPatch),
+        );
+      } catch (error: unknown) {
+        if (error instanceof ProviderLinkingDomainsValidationError) {
+          return status(400, { code: "INVALID_PROVIDER_LINKING_DOMAINS", message: error.message });
+        }
+        throw error;
+      }
+      const updatedAuth = await moveRawAuthSecrets(params.ref, canonicalAuth);
 
       const updated = await projectService.updateProjectSettings(params.ref, {
         ...settings,
@@ -434,14 +757,18 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
         return status(503, buildAuthRuntimeApplyFailureBody(params.ref, error));
       }
 
-      return updated?.auth || {};
+      return safeAuthConfig(params.ref, (updated?.auth || {}) as Record<string, unknown>);
     },
     {
       params: t.Object({
         ref: t.String(),
       }),
       body: t.Record(t.String(), t.Unknown()),
-      detail: { tags: ["auth"], summary: "Update auth config" },
+      detail: {
+        tags: ["auth"],
+        summary: "Update auth config",
+        description: "Provider linking accepts experimental.provider_linking_domains as a validated provider-to-domain map; the deprecated provider list is normalized forward.",
+      },
     }
   )
 
@@ -482,6 +809,8 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
       const oauthConfig = ((settings.auth as Record<string, unknown>)?.external ?? {}) as Record<string, Record<string, string>>;
       const providers: Record<string, unknown> = {};
       const chinaProviderList: ChinaOAuthProvider[] = ["qq", "weibo", "alipay", "dingtalk", "douyin", "baidu", "huawei", "xiaomi", "kuaishou", "bilibili"];
+      const secretStatuses = await projectControlSecretsService.listStatuses(params.ref, "connector");
+      const configuredSecrets = new Set(secretStatuses.filter((item) => item.configured).map((item) => item.name));
 
       for (const provider of SUPPORTED_OAUTH_PROVIDERS) {
         const config = oauthConfig[provider];
@@ -492,6 +821,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
           enabled: !!(config && config.client_id),
           client_id: config?.client_id || null,
           redirect_uri: config?.redirect_uri || null,
+          secret_configured: configuredSecrets.has(provider),
           display_name: isWechat
             ? WECHAT_PROVIDER_INFO[provider as WeChatProviderType]?.name || provider
             : isChina
@@ -540,19 +870,27 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
       const currentAuth = (settings.auth as Record<string, unknown>) || {};
       const currentExternal = (currentAuth.external ?? {}) as Record<string, Record<string, string>>;
       const currentProviderConfig = currentExternal[provider] || ({} as Record<string, string>);
+      const incomingSecret = isNewSecret(body.client_secret) ? body.client_secret : null;
+      if (incomingSecret) {
+        await projectControlSecretsService.upsert(params.ref, "connector", provider, incomingSecret);
+      }
+      const effectiveSecret = incomingSecret || await connectorSecret(
+        params.ref,
+        provider,
+        currentProviderConfig.client_secret,
+      );
 
-      const updatedProviderConfig = {
+      const updatedProviderConfig: Record<string, string> = {
         ...currentProviderConfig,
         ...(body.enabled === false ? {} : {
           client_id: body.client_id || currentProviderConfig.client_id,
-          client_secret: body.client_secret || currentProviderConfig.client_secret,
           redirect_uri: body.redirect_uri || currentProviderConfig.redirect_uri,
         }),
       };
+      delete updatedProviderConfig.client_secret;
 
       if (body.enabled === false) {
         delete updatedProviderConfig.client_id;
-        delete updatedProviderConfig.client_secret;
       }
 
       const updatedExternal = {
@@ -569,12 +907,12 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
       });
 
       let warning: string | undefined;
-      if (body.enabled !== false && updatedProviderConfig.client_id && updatedProviderConfig.client_secret) {
+      if (body.enabled !== false && updatedProviderConfig.client_id && effectiveSecret) {
         try {
           await tenantRuntimeService.updateOAuthConfig(params.ref, provider, {
             provider,
             client_id: updatedProviderConfig.client_id,
-            client_secret: updatedProviderConfig.client_secret,
+            client_secret: effectiveSecret,
             redirect_uri: updatedProviderConfig.redirect_uri,
           });
         } catch (error: unknown) {
@@ -588,6 +926,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
         enabled: body.enabled !== false && !!updatedProviderConfig.client_id,
         client_id: updatedProviderConfig.client_id || null,
         redirect_uri: updatedProviderConfig.redirect_uri || null,
+        secret_configured: body.enabled === false ? false : Boolean(effectiveSecret),
         ...(warning ? { warning } : {}),
       };
     },

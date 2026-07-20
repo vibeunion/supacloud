@@ -29,6 +29,7 @@ describe("TaskRepository.countActiveTasksByInvoker", () => {
         id: `task-${index + 1}`,
         task_type: "edge_function",
         status: "running",
+        invoker_consistent: true,
       }));
       return rows;
     });

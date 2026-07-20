@@ -16,6 +16,7 @@ import {
 import { isOpaqueApiKey } from "../utils/api-keys";
 import { verifyProjectJwtPayload } from "../utils/project-jwt";
 import { getAuthRuntimeDescriptor } from "../services/auth-runtime.service";
+import { GOTRUE_USER_ID_PATTERN } from "../utils/project-user-lifecycle";
 
 const MAX_ASYNC_BODY_BYTES = 256 * 1024;
 type SdkProxySql = (
@@ -28,6 +29,74 @@ let sdkProxySql = defaultSdkProxySql;
 let sdkProxyFetch: typeof fetch = ((input: RequestInfo | URL, init?: RequestInit) =>
     globalThis.fetch(input, init)) as typeof fetch;
 
+type AdminUserDeletionDispatchInput = {
+    request: Request;
+    authorityProjectRef: string;
+    userId: string;
+    directGoTrueUrl: string;
+};
+
+class InvalidAdminUserDeletionBodyError extends Error {}
+
+function parsedAdminUserDeletionBody(sourceBody: string): Record<string, unknown> {
+    if (!sourceBody) return {};
+    let payload: unknown;
+    try {
+        payload = JSON.parse(sourceBody);
+    } catch (error: unknown) {
+        throw new InvalidAdminUserDeletionBodyError("Admin user deletion body must be valid JSON", { cause: error });
+    }
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+        throw new InvalidAdminUserDeletionBodyError("Admin user deletion body must be a JSON object");
+    }
+    return { ...(payload as Record<string, unknown>) };
+}
+
+async function adminUserDeletionBody(request: Request): Promise<string> {
+    const deletionBody = parsedAdminUserDeletionBody(await request.clone().text());
+    const shouldSoftDelete = new URL(request.url).searchParams.get("should_soft_delete") === "true";
+    if (shouldSoftDelete && deletionBody.should_soft_delete === undefined) {
+        deletionBody.should_soft_delete = true;
+    }
+    return JSON.stringify(deletionBody);
+}
+
+function internalDeletionHeaders(input: AdminUserDeletionDispatchInput): Headers {
+    const headers = new Headers({
+        authorization: `Bearer ${config.masterToken}`,
+        "content-type": "application/json",
+        "x-supacloud-direct-gotrue-url": input.directGoTrueUrl,
+    });
+    const requestId = input.request.headers.get("x-request-id");
+    if (requestId) headers.set("x-request-id", requestId);
+    return headers;
+}
+
+async function dispatchAdminUserDeletionThroughManagement(
+    input: AdminUserDeletionDispatchInput,
+): Promise<Response> {
+    const { userManagementRoutes } = await import("./auth-users");
+    let body: string;
+    try {
+        body = await adminUserDeletionBody(input.request);
+    } catch (error: unknown) {
+        if (!(error instanceof InvalidAdminUserDeletionBodyError)) throw error;
+        return Response.json({ message: error.message }, { status: 400 });
+    }
+    const requestInit: RequestInit & { duplex?: "half" } = {
+        method: "DELETE",
+        headers: internalDeletionHeaders(input),
+        body,
+    };
+    requestInit.duplex = "half";
+    return userManagementRoutes.handle(new Request(
+        `http://localhost/v1/projects/${input.authorityProjectRef}/auth/users/${input.userId}`,
+        requestInit,
+    ));
+}
+
+let adminUserDeletionDispatcher = dispatchAdminUserDeletionThroughManagement;
+
 export function setSdkProxySqlForTests(sqlImpl?: SdkProxySql): void {
     sdkProxySql = sqlImpl || defaultSdkProxySql;
 }
@@ -35,6 +104,12 @@ export function setSdkProxySqlForTests(sqlImpl?: SdkProxySql): void {
 export function setSdkProxyFetchForTests(fetchImpl?: typeof fetch): void {
     sdkProxyFetch = fetchImpl || (((input: RequestInfo | URL, init?: RequestInit) =>
         globalThis.fetch(input, init)) as typeof fetch);
+}
+
+export function setAdminUserDeletionDispatcherForTests(
+    dispatcher?: (input: AdminUserDeletionDispatchInput) => Promise<Response>,
+): void {
+    adminUserDeletionDispatcher = dispatcher || dispatchAdminUserDeletionThroughManagement;
 }
 
 function normalizeAsyncRoutePath(path: string): string {
@@ -269,6 +344,8 @@ export const sdkProxyInternals = {
     maybeEnqueueAsyncFunction,
     buildEncryptedBackgroundAuth,
     translateOpaqueApiKeyHeaders,
+    dispatchAdminUserDeletionThroughManagement,
+    adminUserDeletionBody,
 };
 
 async function getUpstreamApiKey(ref: string, role: "anon" | "service_role"): Promise<string | null> {
@@ -323,6 +400,32 @@ async function translateOpaqueApiKeyHeaders(
         headers.set("authorization", `Bearer ${rewrittenApiKey}`);
     }
     return true;
+}
+
+async function hasProjectServiceRoleCredential(request: Request, projectRef: string): Promise<boolean> {
+    const apiKey = request.headers.get("apikey")?.trim() || "";
+    const authorization = request.headers.get("authorization")?.trim() || "";
+    const bearerToken = authorization.replace(/^Bearer\s+/i, "");
+    const candidates = [...new Set([apiKey, bearerToken].filter(Boolean))];
+    for (const candidate of candidates) {
+        const resolved = await sdkProxyInternals.resolveProjectApiKey(candidate, { includeProvisioning: true });
+        if (resolved?.ref === projectRef && resolved.role === "service_role") return true;
+    }
+    return false;
+}
+
+function adminUserDeletionId(request: Request): string | null {
+    if (request.method !== "DELETE") return null;
+    const match = new URL(request.url).pathname.match(/^\/auth\/v1\/admin\/users\/([^/]+)\/?$/);
+    if (!match?.[1]) return null;
+    try {
+        const userId = decodeURIComponent(match[1]);
+        return !userId.includes("/") && GOTRUE_USER_ID_PATTERN.test(userId)
+            ? userId.toLowerCase()
+            : null;
+    } catch {
+        return null;
+    }
 }
 
 async function getProjectRef(request: Request): Promise<string> {
@@ -574,6 +677,28 @@ const sdkProxyRoutesBase = new Elysia({ prefix: "" })
             const authAuthorityRef = getAuthRuntimeDescriptor(ref).authority_project_ref;
             const ports = await getTenantPorts(authAuthorityRef);
             if (!ports) return new Response(JSON.stringify({ message: 'Tenant backend not active' }), { status: 502, headers: { 'Content-Type': 'application/json' } });
+
+            const deletionUserId = adminUserDeletionId(request);
+            if (deletionUserId) {
+                if (authAuthorityRef !== ref) {
+                    return new Response(JSON.stringify({ message: "Admin user deletion must use the auth authority project" }), {
+                        status: 403,
+                        headers: { "Content-Type": "application/json" },
+                    });
+                }
+                if (!(await hasProjectServiceRoleCredential(request, ref))) {
+                    return new Response(JSON.stringify({ message: "Invalid API key" }), {
+                        status: 401,
+                        headers: { "Content-Type": "application/json" },
+                    });
+                }
+                return adminUserDeletionDispatcher({
+                    request,
+                    authorityProjectRef: authAuthorityRef,
+                    userId: deletionUserId,
+                    directGoTrueUrl: `http://127.0.0.1:${ports.gotruePort}`,
+                });
+            }
             
             const url = new URL(request.url);
             const targetUrl = `http://127.0.0.1:${ports.gotruePort}${url.pathname.replace(/^\/auth\/v1/, '')}${url.search}`;

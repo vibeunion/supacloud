@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -416,7 +416,7 @@ describe("installer configuration persistence", () => {
     expect(installer).not.toContain('echo -e "  ${YELLOW}MASTER_TOKEN=${MASTER_TOKEN}${NC}"');
     expect(installer).toContain('source "${SCRIPT_DIR}/scripts/lib/release_assets.sh"');
     expect(installer).toContain('SELECTED_BIN_SOURCE=$(select_management_binary_source "$CI_BIN")');
-    expect(installer).toContain('supacloud_atomic_install_binary "$SELECTED_BIN_SOURCE" "$CI_BIN" "$BIN_TARGET"');
+    expect(installer).toContain('supacloud_atomic_install_binary "$SELECTED_BIN_SOURCE" "$CI_BIN" "$staged_management_binary"');
     expect(installer).not.toContain("releases/latest/download");
     expect(installer).not.toContain('-v realtime_password="${POSTGRES_PASSWORD}"');
     expect(installer).not.toContain("PASSWORD '$DB_PASS'");
@@ -431,6 +431,8 @@ describe("installer configuration persistence", () => {
     expect(installer).toContain('supacloud_write_shell_env_pairs "$JWT_KEYS_FILE"');
     expect(installer).toContain('supacloud_write_service_env_pairs "$CREDENTIALS_FILE"');
     expect(installer).toContain('supacloud_write_service_env_pairs "$MANAGEMENT_ENV_FILE"');
+    expect(installer).toContain('supacloud_atomic_remove_env_key "$INSTALL_INPUT_FILE"');
+    expect(installer).toContain('SECRETS_ENCRYPTION_KEY SUPAOAUTH_BFF_SIGNING_SECRET SUPABASE_SCHEMA_PATH');
     expect(installer).not.toContain('JWT_SECRET="${JWT_SECRET}"');
     expect(installer).not.toContain('PGPASSWORD=${POSTGRES_PASSWORD}');
     expect(installer).not.toContain('sed -i "s|ERL_AFLAGS=.*|ERL_AFLAGS=${LOGFLARE_ERL_FLAGS}|g"');
@@ -454,6 +456,7 @@ describe("installer configuration persistence", () => {
       "S3_REGION",
       "S3_ACCESS_KEY",
       "S3_SECRET_KEY",
+      "SUPAOAUTH_BFF_SIGNING_SECRET",
       "S3_BUCKET",
       "S3_FORCE_PATH_STYLE",
     ]) {
@@ -851,6 +854,150 @@ describe("installer configuration persistence", () => {
 
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toBe("existing-encryption-key");
+  });
+
+  test("installer passes the old master token only to an upgrade migration and fails closed", () => {
+    const installer = readFileSync(join(repoRoot, "install.sh"), "utf8");
+    const installFunction = installer.slice(
+      installer.indexOf("install_management_api() {"),
+      installer.indexOf("deploy_web_console_tar_atomic()"),
+    );
+    expect(installer).toContain('migration_legacy_encryption_key="$MASTER_TOKEN"');
+    expect(installer).toContain('LEGACY_SECRETS_ENCRYPTION_KEY="$migration_legacy_encryption_key" "$staged_management_binary" --init-db');
+    expect(installer).toContain('supacloud_secret_rotation_checkpoint_status "$SECRETS_ENCRYPTION_KEY"');
+    expect(installer).toContain('recover_management_api_install "$management_transaction_dir"');
+    expect(installer).not.toContain("--init-db 2>/dev/null || log_warn");
+    expect(installer).toContain('existing_runtime_encryption_key="$(supacloud_env_value "$MANAGEMENT_ENV_FILE" SECRETS_ENCRYPTION_KEY)"');
+    expect(installFunction.indexOf("supacloud_stop_service_for_migration")).toBeLessThan(
+      installFunction.indexOf('supacloud_write_service_env_pairs "$MANAGEMENT_ENV_FILE"'),
+    );
+    expect(installFunction.indexOf('"$staged_management_binary" --init-db')).toBeLessThan(
+      installFunction.indexOf('mv -f "$staged_management_binary" "$BIN_TARGET"'),
+    );
+  });
+
+  test("installer snapshots restore file contents, permissions, and prior absence", () => {
+    const dir = makeTempDir();
+    const existing = join(dir, "management-api.env");
+    const absent = join(dir, "missing.env");
+    const existingSnapshot = join(dir, "existing-snapshot");
+    const absentSnapshot = join(dir, "absent-snapshot");
+    writeFileSync(existing, "OLD=value\n", { mode: 0o640 });
+
+    const result = runBash([
+      "source scripts/lib/install_config.sh",
+      'supacloud_capture_file_snapshot "$EXISTING" "$EXISTING_SNAPSHOT"',
+      'supacloud_capture_file_snapshot "$ABSENT" "$ABSENT_SNAPSHOT"',
+      'printf "NEW=value\\n" > "$EXISTING"',
+      'printf "created\\n" > "$ABSENT"',
+      'supacloud_restore_file_snapshot "$EXISTING" "$EXISTING_SNAPSHOT"',
+      'supacloud_restore_file_snapshot "$ABSENT" "$ABSENT_SNAPSHOT"',
+    ].join(" && "), {
+      EXISTING: existing,
+      ABSENT: absent,
+      EXISTING_SNAPSHOT: existingSnapshot,
+      ABSENT_SNAPSHOT: absentSnapshot,
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(readFileSync(existing, "utf8")).toBe("OLD=value\n");
+    expect(statSync(existing).mode & 0o777).toBe(0o640);
+    expect(() => statSync(absent)).toThrow();
+  });
+
+  test("installer and runtime derive the same domain-separated encryption-key fingerprint", () => {
+    const encryptionKey = "current-encryption-key-0123456789abcdef";
+    const result = runBash(
+      'source scripts/lib/install_config.sh && supacloud_secret_key_fingerprint "$KEY"',
+      { KEY: encryptionKey },
+    );
+    const expected = createHash("sha256")
+      .update("supacloud:enc:v1:\0", "utf8")
+      .update(encryptionKey, "utf8")
+      .digest("hex");
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe(expected);
+  });
+
+  test("installer restores a service when systemctl reports failure after stopping it", () => {
+    const dir = makeTempDir();
+    const fakeBin = join(dir, "bin");
+    const serviceState = join(dir, "service-state");
+    const systemctl = join(fakeBin, "systemctl");
+    mkdirSync(fakeBin);
+    writeFileSync(serviceState, "active");
+    writeFileSync(systemctl, [
+      "#!/usr/bin/env bash",
+      'case "$1" in',
+      '  stop) printf inactive > "$SERVICE_STATE"; exit 1 ;;',
+      '  is-active) [[ "$(cat "$SERVICE_STATE")" == active ]] ;;',
+      '  start) printf active > "$SERVICE_STATE" ;;',
+      "esac",
+    ].join("\n"), { mode: 0o755 });
+
+    const result = runBash(
+      'source scripts/lib/install_config.sh; supacloud_stop_service_for_migration supacloud true; status=$?; printf "%s:%s" "$status" "$(cat "$SERVICE_STATE")"',
+      { PATH: `${fakeBin}:${process.env.PATH}`, SERVICE_STATE: serviceState },
+    );
+
+    expect(result.stdout).toBe("1:active");
+  });
+
+  test("installer verifies a committed checkpoint without putting the encryption key in psql arguments", () => {
+    const dir = makeTempDir();
+    const fakeBin = join(dir, "bin");
+    const psqlArgs = join(dir, "psql-args");
+    const psql = join(fakeBin, "psql");
+    const encryptionKey = "checkpoint-encryption-key-0123456789abcdef";
+    mkdirSync(fakeBin);
+    writeFileSync(psql, [
+      "#!/usr/bin/env bash",
+      'printf "%s\\n" "$*" >> "$PSQL_ARGS"',
+      'if [[ "$*" == *to_regclass* ]]; then printf "t\\n"; else printf "t\\n"; fi',
+    ].join("\n"), { mode: 0o755 });
+
+    const result = runBash(
+      'source scripts/lib/install_config.sh && supacloud_secret_rotation_checkpoint_status "$KEY"',
+      { PATH: `${fakeBin}:${process.env.PATH}`, PSQL_ARGS: psqlArgs, KEY: encryptionKey },
+    );
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe("complete");
+    expect(readFileSync(psqlArgs, "utf8")).not.toContain(encryptionKey);
+  });
+
+  test("installer persists one stable BFF signing secret only in the management runtime env", () => {
+    const dir = makeTempDir();
+    const runtimeEnv = join(dir, "management-api.env");
+    const firstGenerated = "first-generated-bff-signing-secret-0123456789abcdef";
+    const secondGenerated = "second-generated-bff-signing-secret-0123456789abcdef";
+
+    const first = runBash([
+      "source scripts/lib/install_config.sh",
+      'secret=$(supacloud_stable_secret "$RUNTIME_ENV" SUPAOAUTH_BFF_SIGNING_SECRET "$GENERATED")',
+      'supacloud_write_service_env_pairs "$RUNTIME_ENV" SUPAOAUTH_BFF_SIGNING_SECRET "$secret"',
+      'printf %s "$secret"',
+    ].join("; "), { RUNTIME_ENV: runtimeEnv, GENERATED: firstGenerated });
+    const second = runBash(
+      'source scripts/lib/install_config.sh; supacloud_stable_secret "$RUNTIME_ENV" SUPAOAUTH_BFF_SIGNING_SECRET "$GENERATED"',
+      { RUNTIME_ENV: runtimeEnv, GENERATED: secondGenerated },
+    );
+
+    expect(first.status, first.stderr).toBe(0);
+    expect(second.status, second.stderr).toBe(0);
+    expect(first.stdout).toBe(firstGenerated);
+    expect(second.stdout).toBe(firstGenerated);
+    expect(readFileSync(runtimeEnv, "utf8")).toContain(`SUPAOAUTH_BFF_SIGNING_SECRET="${firstGenerated}"`);
+
+    const installer = readFileSync(join(repoRoot, "install.sh"), "utf8");
+    const installKeyBlock = installer.slice(
+      installer.indexOf("SUPACLOUD_INSTALL_KEYS=("),
+      installer.indexOf("SUPACLOUD_EXPLICIT_INSTALL_KEYS=()"),
+    );
+    expect(installKeyBlock).not.toContain("SUPAOAUTH_BFF_SIGNING_SECRET");
+    expect(installer).toContain('supacloud_stable_secret "$MANAGEMENT_ENV_FILE" SUPAOAUTH_BFF_SIGNING_SECRET "$(openssl rand -hex 32)"');
+    expect(installer).toContain('SUPAOAUTH_BFF_SIGNING_SECRET "$SUPAOAUTH_BFF_SIGNING_SECRET"');
   });
 
   test("repairs a legacy runtime-overwritten install config from root-only credentials", () => {

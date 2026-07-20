@@ -1,10 +1,18 @@
-import { describe, test, expect, mock } from "bun:test";
+import { describe, test, expect, mock, spyOn } from "bun:test";
 import { config } from "../../src/config";
+import { sql } from "../../src/db";
+import { buildBffProofHeaders } from "../../src/services/bff-proof.service";
 import {
   extractProjectRefCandidates,
   extractProjectRefFromPath,
 } from "../../src/utils/project-auth";
-import { createAuthResolver, isSameOriginStudioRequest } from "../../src/middleware/auth";
+import {
+  createAuthResolver,
+  getAuthContext,
+  isInvitationAcceptanceRequest,
+  isSameOriginStudioRequest,
+  requireAdminAuth,
+} from "../../src/middleware/auth";
 
 describe("Auth Middleware Logic", () => {
   const masterToken = config.masterToken;
@@ -121,5 +129,69 @@ describe("Auth Middleware Logic", () => {
       },
     });
     expect(isSameOriginStudioRequest(request)).toBe(false);
+  });
+
+  test("does not bypass auth on invitation routes carrying delegated headers", () => {
+    const request = new Request(
+      "https://console.example.com/v1/projects/proj_1/collaborator-invitations/invite_1/accept",
+      { method: "POST", headers: { "x-supaoauth-actor-id": "forged-owner" } },
+    );
+    expect(isInvitationAcceptanceRequest(request)).toBe(false);
+  });
+
+  test("rejects partial delegated headers before a master token can authorize the request", async () => {
+    const result = await getAuthContext(new Request("https://console.example.com/v1/projects/proj_1/capabilities", {
+      headers: {
+        authorization: `Bearer ${masterToken}`,
+        "x-supaoauth-actor-id": "forged-owner",
+      },
+    }));
+
+    expect(result).toEqual({
+      status: 403,
+      body: { error: "A valid SupaOAuth BFF proof is required for actor delegation" },
+    });
+  });
+
+  test("keeps a valid delegated actor project-scoped instead of inheriting the master role", async () => {
+    const previousSigningSecret = config.supaoauthBffSigningSecret;
+    config.supaoauthBffSigningSecret = "test-bff-signing-secret-0123456789abcdef";
+    const nonceTransaction = mock((strings: TemplateStringsArray, ...values: unknown[]) => (
+      Promise.resolve(strings.join("?").includes("INSERT INTO supaoauth_bff_proof_nonces")
+        ? [{ nonce: values[0] }]
+        : [])
+    ));
+    const begin = spyOn(sql, "begin").mockImplementation(
+      async (callback: (database: typeof nonceTransaction) => Promise<unknown>) => callback(nonceTransaction),
+    );
+    const pathname = "/v1/projects/proj_1/capabilities";
+    const request = new Request(`https://console.example.com${pathname}`, {
+      headers: {
+        authorization: `Bearer ${masterToken}`,
+        ...buildBffProofHeaders({
+          method: "GET",
+          pathname,
+          actorId: "collaborator-one",
+          actorType: "member",
+          requestId: "request-delegated",
+          nonce: "nonce-delegated-0123456789",
+        }),
+      },
+    });
+
+    try {
+      expect(await getAuthContext(request)).toMatchObject({
+        role: "project",
+        ref: "proj_1",
+        principalId: "collaborator-one",
+      });
+      expect(await requireAdminAuth(request)).toEqual({
+        status: 403,
+        body: { error: "Admin privileges required" },
+      });
+    } finally {
+      begin.mockRestore();
+      config.supaoauthBffSigningSecret = previousSigningSecret;
+    }
   });
 });

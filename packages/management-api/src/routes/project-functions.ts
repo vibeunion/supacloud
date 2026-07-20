@@ -47,10 +47,9 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
   // Alias for secrets endpoint — Supabase Studio and some SDK versions call this path
   .get(
     "/:ref/functions/secrets",
-    async ({ params, query, request }) => {
+    async ({ params, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
-      const reveal = query.reveal === "true";
       const { projectService: svc } = await import("../services");
       const secrets = await svc.getSecrets(params.ref);
       if (!secrets) {
@@ -59,14 +58,13 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
       return secrets.map(
         (s: { name: string; value: string; updated_at?: string }) => ({
           name: s.name,
-          value: reveal ? s.value : "********",
+          value: "********",
           updated_at: s.updated_at ?? new Date().toISOString(),
         }),
       );
     },
     {
       params: t.Object({ ref: t.String() }),
-      query: t.Object({ reveal: t.Optional(t.String()) }),
       detail: { tags: ["frontend"], summary: "List function secrets (project-level)" },
     },
   )
@@ -912,10 +910,9 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
   // Function Secrets — Project-level (Studio compatibility)
   .get(
     "/:ref/functions/secrets",
-    async ({ params, query, request }) => {
+    async ({ params, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
-      const reveal = query.reveal === "true";
       const secrets = await projectService.getSecrets(params.ref);
       if (!secrets) {
         return status(404, { message: "Project not found" });
@@ -926,11 +923,11 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         updated_at?: string;
       }>).map((s) => ({
         name: s.name,
-        value: reveal ? s.value : "********",
+        value: "********",
         updated_at: s.updated_at ?? new Date().toISOString(),
       }));
     },
-    { params: t.Object({ ref: t.String() }), query: t.Object({ reveal: t.Optional(t.String()) }), detail: { tags: ["frontend"], summary: "List function secrets (project-level)" } },
+    { params: t.Object({ ref: t.String() }), detail: { tags: ["frontend"], summary: "List function secrets (project-level)" } },
   )
   .post(
     "/:ref/functions/secrets",
@@ -986,21 +983,20 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
   // Function Secrets — Per-function level
   .get(
     "/:ref/functions/:slug/secrets",
-    async ({ params, query, request }) => {
+    async ({ params, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
-      const reveal = query.reveal === "true";
       const secrets = await projectService.getSecrets(params.ref);
-      if (!secrets) return [];
+      if (!secrets) return status(404, { message: "Project not found", code: "404" });
       return (secrets as Array<{ name: string; value: string; updated_at?: string }>)
         .filter((s) => s.name.startsWith(`EDGEFN_${params.slug.toUpperCase()}_`))
         .map((s) => ({
           name: s.name,
-          value: reveal ? s.value : "********",
+          value: "********",
           updated_at: s.updated_at ?? new Date().toISOString(),
         }));
     },
-    { params: t.Object({ ref: t.String(), slug: t.String() }), query: t.Object({ reveal: t.Optional(t.String()) }), detail: { tags: ["frontend"], summary: "List per-function secrets" } },
+    { params: t.Object({ ref: t.String(), slug: t.String() }), detail: { tags: ["frontend"], summary: "List per-function secrets" } },
   )
   .post(
     "/:ref/functions/:slug/secrets",

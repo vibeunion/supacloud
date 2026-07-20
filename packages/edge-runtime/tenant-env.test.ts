@@ -199,7 +199,7 @@ describe("tenant env masking guard", () => {
     }
   });
 
-  test("falls back to legacy secrets endpoint when runtime env route is missing", async () => {
+  test("refuses the legacy public secrets endpoint when runtime env route is missing", async () => {
     const originalFetch = globalThis.fetch;
     const ref = `proj_legacy_${Date.now()}`;
     const urls: string[] = [];
@@ -212,28 +212,21 @@ describe("tenant env masking guard", () => {
         return Promise.resolve(Response.json({ message: "Route not found" }, { status: 404 }));
       }
 
-      return Promise.resolve(Response.json([
-        { name: "RESULT_S3_ENDPOINT", value: "http://legacy-s3.local" },
-        { name: "SUPABASE_ANON_KEY", value: "stale-anon-key" },
-        { name: "JWT_SECRET", value: "stale-legacy-secret" },
-        { name: "SUPACLOUD_AUTH_RUNTIME_MODE", value: "local" },
-        { name: "MASKED_SECRET", value: "********" },
-      ]));
+      throw new Error("public secrets endpoint must not be called");
     }) as unknown as typeof fetch;
 
     try {
       const env = await loadTenantEnv(ref);
       const cached = await loadTenantEnv(ref);
 
-      expect(env.RESULT_S3_ENDPOINT).toBe("http://legacy-s3.local");
-      expect(env.SUPABASE_ANON_KEY).toBe("stale-anon-key");
+      expect(env.RESULT_S3_ENDPOINT).toBeUndefined();
+      expect(env.SUPABASE_ANON_KEY).toBeUndefined();
       expect(env.JWT_SECRET).toBeUndefined();
       expect(env.SUPACLOUD_AUTH_RUNTIME_MODE).toBeUndefined();
       expect(env.MASKED_SECRET).toBeUndefined();
-      expect(cached.RESULT_S3_ENDPOINT).toBe("http://legacy-s3.local");
+      expect(cached.RESULT_S3_ENDPOINT).toBeUndefined();
       expect(urls).toEqual([
         expect.stringContaining("/internal/runtime-env"),
-        expect.stringContaining("/secrets?reveal=true"),
       ]);
     } finally {
       invalidateTenantEnvCache(ref);

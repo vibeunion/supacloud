@@ -18,7 +18,8 @@ process.on("unhandledRejection", (reason: unknown) => {
 import { swagger } from "@elysiajs/swagger";
 
 import { config } from "./config";
-import { checkAuth } from "./middleware/auth";
+import { checkAuth, isInvitationAcceptanceRequest } from "./middleware/auth";
+import { bffProofBodyCapture } from "./middleware/bff-proof-body";
 import { checkRateLimit } from "./middleware/rate-limit";
 import { logAuditEvent, shouldAuditRequest } from "./services/audit.service";
 import { closeDb } from "./db";
@@ -677,6 +678,7 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
     projectRoutes,
     projectDashboardRoutes: registeredProjectDashboardRoutes,
     projectSecretsRoutes,
+    projectControlSecretsRoutes,
     projectFunctionsRoutes,
     organizationRoutes,
     userRoutes,
@@ -718,10 +720,15 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
     projectRbacRoutes,
     projectWebhookRoutes,
     projectAuditRoutes,
+    projectCapabilityRoutes,
+    projectAuthHookRuntimeRoutes,
+    projectOrganizationRoutes,
+    projectCollaboratorRoutes,
   } = await import("./routes");
 
   return (
     new Elysia({ name: "api-routes" })
+      .use(bffProofBodyCapture)
       // Auth guard runs before every route in this group
       .onBeforeHandle(async ({ request, set }) => {
         const rateLimit = checkRateLimit(request);
@@ -736,7 +743,7 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
           return rateLimit.body;
         }
 
-        if (!isS3DataPlaneRequest(request)) {
+        if (!isS3DataPlaneRequest(request) && !isInvitationAcceptanceRequest(request)) {
           const result = await checkAuth(request);
           if (result) {
             set.status = result.status;
@@ -777,6 +784,7 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
       .use(projectRoutes)
       .use(registeredProjectDashboardRoutes)
       .use(projectSecretsRoutes)
+      .use(projectControlSecretsRoutes)
       .use(projectFunctionsRoutes)
       .use(organizationRoutes)
       .use(userRoutes)
@@ -822,6 +830,10 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
       .use(projectRbacRoutes)
       .use(projectWebhookRoutes)
       .use(projectAuditRoutes)
+      .use(projectCapabilityRoutes)
+      .use(projectAuthHookRuntimeRoutes)
+      .use(projectOrganizationRoutes)
+      .use(projectCollaboratorRoutes)
   ) as AnyElysia;
 }
 
@@ -1076,6 +1088,18 @@ async function bootstrap() {
   } else if (args.includes("--help") || args.includes("-h")) {
     process.exit(0);
   } else if (args.length === 0 || args.includes("--server")) {
+    const { sql: controlPlaneSql } = await import("./db");
+    const {
+      ensurePlatformV2Schema,
+      migrateLegacyProjectWebhooks,
+      migrateLegacyProviderLinkingConfig,
+      migrateWebhookSecretsToControlStore,
+    } = await import("./db/platform-v2");
+    await ensurePlatformV2Schema(controlPlaneSql);
+    await migrateLegacyProjectWebhooks(controlPlaneSql);
+    await migrateWebhookSecretsToControlStore(controlPlaneSql);
+    await migrateLegacyProviderLinkingConfig(controlPlaneSql);
+
     const { caddyReady: initialGatewayReady } = await initializeGatewayRoutes();
 
     try {
@@ -1307,6 +1331,9 @@ async function bootstrap() {
     const { startGatewayHealthWorker } = await import("./workers/gateway-health.worker");
     startGatewayHealthWorker();
 
+    const { startWebhookDeliveryWorker } = await import("./workers/webhook-delivery.worker");
+    startWebhookDeliveryWorker();
+
     if (config.edgeRuntimeMode === "embedded") {
       const { edgeRuntimeManager } =
         await import("./plugins/edge-runtime-manager");
@@ -1376,14 +1403,18 @@ if (import.meta.main) {
       const { stopBranchReplacementRecoveryWorker } =
         await import("./workers/branch-replacement-recovery.worker");
       stopBranchReplacementRecoveryWorker();
-
-    const { scheduledFunctionWorker } =
-      await import("./workers/scheduled-function.worker");
-    scheduledFunctionWorker.stop();
-    const { stopLogDrainForwarder } = await import("./workers/log-drain-forwarder.worker");
-    stopLogDrainForwarder();
-    const { stopGatewayHealthWorker } = await import("./workers/gateway-health.worker");
-    stopGatewayHealthWorker();
+      const { scheduledFunctionWorker } =
+        await import("./workers/scheduled-function.worker");
+      scheduledFunctionWorker.stop();
+      const { stopLogDrainForwarder } =
+        await import("./workers/log-drain-forwarder.worker");
+      stopLogDrainForwarder();
+      const { stopGatewayHealthWorker } =
+        await import("./workers/gateway-health.worker");
+      stopGatewayHealthWorker();
+      const { stopWebhookDeliveryWorker } =
+        await import("./workers/webhook-delivery.worker");
+      stopWebhookDeliveryWorker();
     } catch (e: unknown) {
       logger.debug("[index] suppressed error", {
         error: e instanceof Error ? e.message : String(e),

@@ -15,10 +15,10 @@ describe("supabase bootstrap schema", () => {
     expect(service).toContain('import { ALTER_TENANT_SQL } from "./tenant-runtime-migration"');
     expect(service).toContain("Bun.write(tmpFile, ALTER_TENANT_SQL)");
     expect(ALTER_TENANT_SQL.length).toBeGreaterThan(25_000);
-    expect(ALTER_TENANT_SQL).toContain("CREATE TABLE IF NOT EXISTS auth.webauthn_credentials");
+    expect(ALTER_TENANT_SQL).not.toContain("CREATE TABLE IF NOT EXISTS auth.webauthn_credentials");
     expect(ALTER_TENANT_SQL).toContain("CREATE OR REPLACE FUNCTION realtime.notify_postgres_changes()");
     expect(ALTER_TENANT_SQL).toContain("CREATE TABLE IF NOT EXISTS public.background_task_mirrors");
-    expect(ALTER_TENANT_SQL).toContain("CREATE TRIGGER auth_users_delete_fence");
+    expect(ALTER_TENANT_SQL).not.toContain("CREATE TRIGGER auth_users_delete_fence");
   });
 
   test("does not switch SQL role inside set_request_context", () => {
@@ -149,39 +149,17 @@ describe("supabase bootstrap schema", () => {
     }
   });
 
-  test("auth user delete fence mutates the row only when hard deletion is blocked", () => {
+  test("keeps GoTrue authoritative for auth.users while retaining task mirrors", () => {
     for (const source of [
       SQL_MODULES["background-task-mirror-up"],
       ALTER_TENANT_SQL,
       readRepoFile("../../scripts/004_background_task_mirror_migration.sql"),
     ]) {
-      const start = source.indexOf(
-        "CREATE OR REPLACE FUNCTION public.soft_delete_user_if_no_active_tasks()",
-      );
-      const end = source.indexOf(
-        "$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;",
-        start,
-      );
-      const functionBody = source.slice(start, end);
-      const taskState = functionBody.indexOf(
-        "v_task_state := public.has_active_background_tasks(OLD.id);",
-      );
-      const allowHardDelete = functionBody.indexOf("IF v_task_state = 'inactive' THEN");
-      const softDelete = functionBody.indexOf(
-        "UPDATE auth.users SET deleted_at = NOW() WHERE id = OLD.id;",
-      );
-      const allowHardDeleteReturn = functionBody.indexOf("RETURN OLD;", allowHardDelete);
-      const allowHardDeleteEnd = functionBody.indexOf("END IF;", allowHardDelete);
-
-      expect(start).toBeGreaterThanOrEqual(0);
-      expect(end).toBeGreaterThan(start);
-      expect(taskState).toBeGreaterThanOrEqual(0);
-      expect(allowHardDelete).toBeGreaterThan(taskState);
-      expect(allowHardDeleteReturn).toBeGreaterThan(allowHardDelete);
-      expect(allowHardDeleteEnd).toBeGreaterThan(allowHardDeleteReturn);
-      expect(softDelete).toBeGreaterThan(allowHardDelete);
-      expect(softDelete).toBeGreaterThan(allowHardDeleteEnd);
-      expect(functionBody).toContain("RETURN NULL;");
+      expect(source).toContain("CREATE TABLE IF NOT EXISTS public.background_task_mirrors");
+      expect(source).toContain("DROP TRIGGER IF EXISTS auth_users_delete_fence ON auth.users;");
+      expect(source).not.toContain("CREATE TRIGGER auth_users_delete_fence");
+      expect(source).not.toMatch(/(?:UPDATE|DELETE\s+FROM)\s+auth\.users/i);
+      expect(source).not.toMatch(/CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+public\.(?:soft_delete_user_if_no_active_tasks|hard_delete_soft_deleted_users|has_active_background_tasks)/i);
     }
 
     for (const filePath of [
@@ -192,37 +170,19 @@ describe("supabase bootstrap schema", () => {
     }
 
     const rollback = SQL_MODULES["background-task-mirror-down"];
-    const rollbackStart = rollback.lastIndexOf(
-      "CREATE OR REPLACE FUNCTION public.soft_delete_user_if_no_active_tasks()",
-    );
-    const rollbackEnd = rollback.indexOf(
-      "$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;",
-      rollbackStart,
-    );
-    const rollbackBody = rollback.slice(rollbackStart, rollbackEnd);
-    expect(rollbackBody.indexOf("IF NOT public.has_active_background_tasks(OLD.id) THEN"))
-      .toBeGreaterThanOrEqual(0);
-    expect(rollbackBody.indexOf("UPDATE auth.users SET deleted_at = NOW() WHERE id = OLD.id;"))
-      .toBeGreaterThan(rollbackBody.indexOf("IF NOT public.has_active_background_tasks(OLD.id) THEN"));
+    expect(rollback).toContain("DROP TABLE IF EXISTS public.background_task_mirrors;");
+    expect(rollback).not.toContain("CREATE TRIGGER auth_users_delete_fence");
+    expect(rollback).not.toMatch(/(?:UPDATE|DELETE\s+FROM)\s+auth\.users/i);
 
     const pigstyUpgrade = readRepoFile("../../scripts/upgrade_pigsty_4_4_compat.sh");
-    expect(pigstyUpgrade).toContain(
-      "$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;",
-    );
-    expect(pigstyUpgrade).toContain(
-      "REVOKE ALL ON FUNCTION public.soft_delete_user_if_no_active_tasks() FROM PUBLIC;",
-    );
-    expect(pigstyUpgrade).toContain("supacloud:pigsty-4.4-auth-delete-fence:v2");
+    expect(pigstyUpgrade).toContain("apply_background_task_mirror_compat");
+    expect(pigstyUpgrade).toContain("check_background_task_mirror_compat");
+    expect(pigstyUpgrade).toContain("supacloud:pigsty-4.4-background-task-mirror:v3");
     expect(pigstyUpgrade).toContain(
       "-- supacloud:sql-module:background-task-mirror-up:start",
     );
-    expect(pigstyUpgrade).toContain(
-      "coalesce((SELECT proconfig FROM target), ARRAY[]::text[]) @> ARRAY['search_path=pg_catalog']",
-    );
-    expect(pigstyUpgrade).toContain("public_execute_revoked");
-    expect(pigstyUpgrade).toContain("service_role_execute");
-    expect(pigstyUpgrade).toContain("NOT EXISTS (SELECT 1 FROM helper)");
-    expect(pigstyUpgrade).toContain("NOT EXISTS (SELECT 1 FROM cleanup)");
+    expect(pigstyUpgrade).toContain("to_regprocedure('public.soft_delete_user_if_no_active_tasks()') IS NOT NULL");
+    expect(pigstyUpgrade).not.toMatch(/(?:UPDATE|DELETE\s+FROM)\s+auth\.users/i);
   });
 
   test("tenant auth bootstrap reuses the canonical JWT helper module", () => {
@@ -346,7 +306,7 @@ describe("supabase bootstrap schema", () => {
     }
   });
 
-  test("tenant auth schema includes passkey WebAuthn tables and challenge state", () => {
+  test("tenant auth schema stops creating WebAuthn artifacts without destructive cleanup", () => {
     for (const filePath of [
       "src/db/schemas/supabase.sql",
       "src/services/tenant-runtime-migration.ts",
@@ -354,10 +314,13 @@ describe("supabase bootstrap schema", () => {
     ]) {
       const source = readRepoFile(filePath);
 
-      expect(source).toContain("CREATE TABLE IF NOT EXISTS auth.webauthn_credentials");
-      expect(source).toContain("CREATE TABLE IF NOT EXISTS auth.webauthn_challenges");
-      expect(source).toContain("webauthn_credentials_credential_id_key");
-      expect(source).toContain("last_webauthn_challenge_data");
+      expect(source).not.toContain("CREATE TABLE IF NOT EXISTS auth.webauthn_credentials");
+      expect(source).not.toContain("CREATE TABLE IF NOT EXISTS auth.webauthn_challenges");
+      expect(source).not.toContain("ADD COLUMN IF NOT EXISTS web_authn_credential");
+      expect(source).not.toContain("ADD COLUMN IF NOT EXISTS web_authn_aaguid");
+      expect(source).not.toContain("ADD COLUMN IF NOT EXISTS last_webauthn_challenge_data");
+      expect(source).not.toMatch(/DROP\s+(?:TABLE|COLUMN).*web_?authn/i);
+      expect(source).toContain("CREATE TABLE IF NOT EXISTS auth.mfa_factors");
     }
   });
 

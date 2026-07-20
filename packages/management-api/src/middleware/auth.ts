@@ -13,8 +13,23 @@ import {
   studioSessionService,
   type StudioSessionService,
 } from "../services/studio-session.service";
+import type { CollaboratorCapability } from "../services/project-collaborator.service";
+import { hasSupaOAuthDelegationHeaders } from "../utils/bff-proof-headers";
+import { isAppError } from "../utils/errors";
 
 export const STUDIO_SESSION_COOKIE = "__Host-supacloud_session";
+
+const INVITATION_ACCEPT_PATHS = [
+  /^\/v1\/projects\/[^/]+\/organizations\/[^/]+\/invitations\/[^/]+\/accept$/,
+  /^\/v1\/projects\/[^/]+\/collaborator-invitations\/[^/]+\/accept$/,
+] as const;
+
+export function isInvitationAcceptanceRequest(request: Request): boolean {
+  if (request.method.toUpperCase() !== "POST") return false;
+  if (hasSupaOAuthDelegationHeaders(request)) return false;
+  const pathname = new URL(request.url).pathname;
+  return INVITATION_ACCEPT_PATHS.some((pattern) => pattern.test(pathname));
+}
 
 export function readStudioSessionToken(request: Request): string | null {
   const cookie = request.headers.get("cookie") || "";
@@ -97,9 +112,128 @@ export async function verifyProjectJwt(
 }
 
 export type AuthContext =
-  | { role: "master" }
-  | { role: "admin"; source: "bearer" | "cookie" }
-  | { role: "project"; ref: string };
+  | { role: "master"; principalId: "master" }
+  | { role: "admin"; source: "bearer" | "cookie"; principalId: string }
+  | { role: "project"; ref: string; principalId: string };
+
+type AuthFailure = { status: number; body: { error: string } };
+
+type CapabilityFamily = {
+  read: CollaboratorCapability;
+  manage: CollaboratorCapability;
+};
+
+type CapabilityFamilyRule = CapabilityFamily & {
+  prefixes: readonly string[];
+  pattern?: RegExp;
+};
+
+const CAPABILITY_FAMILY_RULES: readonly CapabilityFamilyRule[] = [
+  {
+    prefixes: ["/rbac"],
+    pattern: /^\/(auth\/users\/[^/]+\/(roles|permissions|organizations)|organizations\/[^/]+\/roles)(?:\/|$)/,
+    read: "roles.read",
+    manage: "roles.manage",
+  },
+  { prefixes: ["/organizations"], read: "organizations.read", manage: "organizations.manage" },
+  { prefixes: ["/collaborators", "/collaborator-invitations"], read: "tenant.members.read", manage: "tenant.members.manage" },
+  { prefixes: ["/auth/oauth-clients"], read: "applications.read", manage: "applications.manage" },
+  { prefixes: ["/auth/users", "/auth/generate_link"], read: "users.read", manage: "users.manage" },
+  {
+    prefixes: ["/auth/providers", "/auth/supported-providers", "/auth/studio/providers", "/auth/sso", "/auth/china", "/auth/wechat"],
+    read: "connectors.read",
+    manage: "connectors.manage",
+  },
+  {
+    prefixes: ["/auth/config", "/auth/hooks", "/auth/factors", "/auth/oauth-server", "/control-secrets", "/database/webhooks", "/network-restrictions"],
+    read: "security.read",
+    manage: "security.manage",
+  },
+  { prefixes: ["/capabilities", "/auth/runtime"], read: "tenant.capabilities.read", manage: "tenant.capabilities.manage" },
+  { prefixes: ["/domains", "/custom-hostname", "/vanity-subdomain"], read: "tenant.domains.read", manage: "tenant.domains.manage" },
+  {
+    prefixes: ["/settings", "/api-keys", "/config", "/gateway", "/secrets", "/auth/template", "/postgrest", "/pgbouncer"],
+    read: "tenant.config.read",
+    manage: "tenant.config.manage",
+  },
+  { prefixes: ["/database/migrations"], read: "database.migrations.read", manage: "database.migrations.manage" },
+  {
+    prefixes: [
+      "/auto-branching", "/backups", "/branches", "/dashboard", "/database", "/diagnostics",
+      "/extensions", "/frontend", "/functions", "/log-drains", "/logs", "/pg-meta", "/scaling",
+      "/scheduled-functions", "/services", "/storage", "/task-events", "/tasks", "/types",
+    ],
+    read: "operations.read",
+    manage: "operations.manage",
+  },
+  {
+    prefixes: ["/studio-metrics", "/pause", "/restore", "/restart", "/read-replicas", "/endpoint", "/upgrade", "/upgrade-status", "/enforced"],
+    read: "project.read",
+    manage: "project.manage",
+  },
+];
+
+function pathMatchesPrefix(pathname: string, prefix: string): boolean {
+  return pathname === prefix || pathname.startsWith(`${prefix}/`);
+}
+
+function requestCapability(
+  request: Request,
+  family: CapabilityFamily,
+): CollaboratorCapability {
+  return ["GET", "HEAD"].includes(request.method.toUpperCase())
+    ? family.read
+    : family.manage;
+}
+
+function projectRelativePath(request: Request, ref: string): string | null {
+  const pathname = new URL(request.url).pathname;
+  const projectPrefix = `/v1/projects/${ref}`;
+  if (pathname === projectPrefix) return "";
+  return pathname.startsWith(`${projectPrefix}/`)
+    ? pathname.slice(projectPrefix.length)
+    : null;
+}
+
+function auditCapability(request: Request, pathname: string): CollaboratorCapability | null {
+  if (!pathMatchesPrefix(pathname, "/audit")) return null;
+  if (pathMatchesPrefix(pathname, "/audit/exports")) return "audit.export";
+  if (pathname === "/audit/events" && request.method.toUpperCase() === "POST") return "audit.write";
+  return new URL(request.url).searchParams.get("include_sensitive") === "true"
+    ? "audit.read_sensitive"
+    : "audit.read";
+}
+
+function webhookCapability(request: Request, pathname: string): CollaboratorCapability | null {
+  if (!pathMatchesPrefix(pathname, "/webhooks")) return null;
+  if (pathname.endsWith("/replay") && request.method.toUpperCase() === "POST") {
+    return "webhooks.replay";
+  }
+  return requestCapability(request, { read: "webhooks.read", manage: "webhooks.manage" });
+}
+
+function capabilityFamily(pathname: string): CapabilityFamily | null {
+  const rule = CAPABILITY_FAMILY_RULES.find((candidate) =>
+    candidate.prefixes.some((prefix) => pathMatchesPrefix(pathname, prefix))
+    || candidate.pattern?.test(pathname)
+  );
+  return rule ? { read: rule.read, manage: rule.manage } : null;
+}
+
+export function delegatedProjectCapability(
+  request: Request,
+  ref: string,
+): CollaboratorCapability | null {
+  const pathname = projectRelativePath(request, ref);
+  if (pathname === null) return null;
+  if (pathname === "" || pathname === "/") {
+    return requestCapability(request, { read: "project.read", manage: "project.manage" });
+  }
+  const exactCapability = auditCapability(request, pathname) || webhookCapability(request, pathname);
+  if (exactCapability) return exactCapability;
+  const family = capabilityFamily(pathname);
+  return family ? requestCapability(request, family) : null;
+}
 
 type AuthResolverDependencies = {
   studioSessions?: Pick<StudioSessionService, "verify">;
@@ -125,7 +259,7 @@ export function createAuthResolver(dependencies: AuthResolverDependencies = {}) 
       ) {
         return { status: 403, body: { error: "Cross-origin session request denied" } };
       }
-      return { role: "admin", source: "cookie" };
+      return { role: "admin", source: "cookie", principalId: session.username };
     }
 
     if (!authorization.startsWith("Bearer ")) {
@@ -144,7 +278,7 @@ export function createAuthResolver(dependencies: AuthResolverDependencies = {}) 
     const tokenBuf = Buffer.from(token, "utf8");
     const masterBuf = Buffer.from(config.masterToken, "utf8");
     if (tokenBuf.length === masterBuf.length && timingSafeEqual(tokenBuf, masterBuf)) {
-      return { role: "master" };
+      return { role: "master", principalId: "master" };
     }
   }
 
@@ -190,7 +324,7 @@ export function createAuthResolver(dependencies: AuthResolverDependencies = {}) 
   }
 
   if (role === "admin") {
-    return { role: "admin", source: "bearer" };
+    return { role: "admin", source: "bearer", principalId: "admin" };
   }
 
   if (role === "project" && ref) {
@@ -198,14 +332,43 @@ export function createAuthResolver(dependencies: AuthResolverDependencies = {}) 
     if (pathRef !== ref) {
       return { status: 403, body: { error: `Token scoped strictly to project ${ref}, cannot access ${url.pathname}` } };
     }
-    return { role: "project", ref };
+    return { role: "project", ref, principalId: `project:${ref}` };
   }
 
     return { status: 401, body: { error: "Invalid token" } };
   };
 }
 
-export const getAuthContext = createAuthResolver();
+export async function getVerifiedRequestPrincipal(request: Request): Promise<{
+  id: string;
+  type: "master" | "admin" | "project";
+} | null> {
+  const auth = await getAuthContext(request);
+  if ("status" in auth) return null;
+  return { id: auth.principalId, type: auth.role };
+}
+
+/** Transport authentication only; delegated actor verification must wrap this result. */
+export const getTransportAuthContextForDelegatedProof = createAuthResolver();
+
+async function delegatedAuthContext(request: Request): Promise<AuthContext | AuthFailure | undefined> {
+  if (!hasSupaOAuthDelegationHeaders(request)) return undefined;
+  const ref = extractProjectRefFromPath(new URL(request.url).pathname);
+  if (!ref) return { status: 403, body: { error: "Delegated requests require a project-scoped route" } };
+  const { resolveTrustedPrincipal } = await import("../services/bff-proof.service");
+  try {
+    const principal = await resolveTrustedPrincipal(request, ref);
+    return { role: "project", ref, principalId: principal.id };
+  } catch (error: unknown) {
+    if (!isAppError(error)) throw error;
+    return { status: error.statusCode, body: { error: error.message } };
+  }
+}
+
+export async function getAuthContext(request: Request): Promise<AuthContext | AuthFailure> {
+  const delegated = await delegatedAuthContext(request);
+  return delegated ?? getTransportAuthContextForDelegatedProof(request);
+}
 
 export async function checkAuth(request: Request): Promise<{ status: number; body: { error: string } } | undefined> {
   const auth = await getAuthContext(request);
@@ -219,9 +382,41 @@ export async function requireAdminAuth(request: Request): Promise<{ status: numb
   return { status: 403, body: { error: "Admin privileges required" } };
 }
 
+async function delegatedCapabilityFailure(
+  request: Request,
+  ref: string,
+): Promise<AuthFailure | undefined> {
+  if (!hasSupaOAuthDelegationHeaders(request)) return undefined;
+  const capability = delegatedProjectCapability(request, ref);
+  if (!capability) {
+    return { status: 403, body: { error: "Delegated access is unavailable for this project route" } };
+  }
+  try {
+    await enforceDelegatedCapability(request, ref, capability);
+    return undefined;
+  } catch (error: unknown) {
+    if (!isAppError(error)) throw error;
+    return { status: error.statusCode, body: { error: error.message } };
+  }
+}
+
+async function enforceDelegatedCapability(
+  request: Request,
+  ref: string,
+  capability: CollaboratorCapability,
+): Promise<void> {
+  const { resolveTrustedPrincipal } = await import("../services/bff-proof.service");
+  const principal = await resolveTrustedPrincipal(request, ref);
+  if (capability === "audit.write" && ["user", "system"].includes(principal.type)) return;
+  const { requireCapability } = await import("../services/project-collaborator.service");
+  await requireCapability(ref, principal, capability);
+}
+
 export async function requireProjectOrAdminAuth(request: Request, ref: string): Promise<{ status: number; body: { error: string } } | undefined> {
   const auth = await getAuthContext(request);
   if ("status" in auth) return auth;
+  const delegatedFailure = await delegatedCapabilityFailure(request, ref);
+  if (delegatedFailure) return delegatedFailure;
   if (auth.role === "master" || auth.role === "admin") return undefined;
   if (auth.role === "project" && auth.ref === ref) return undefined;
   return { status: 403, body: { error: "Project service role or admin privileges required" } };

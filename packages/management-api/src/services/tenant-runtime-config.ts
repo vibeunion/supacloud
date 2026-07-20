@@ -1,4 +1,5 @@
 import { AUTH_EMAIL_TEMPLATE_DEFINITIONS } from "../utils/auth-email-templates";
+import { serializedProviderLinkingDomains } from "../utils/provider-linking";
 
 export { renderGoTrueSessionPolicyEnv } from "./auth-session-policy";
 
@@ -141,26 +142,6 @@ function readPositiveIntegerSetting(
     return Number.isFinite(value) && value > 0 ? Math.trunc(value) : defaultValue;
 }
 
-function readStringListSetting(value: unknown, defaultValue: string[]): string[] {
-    if (Array.isArray(value)) {
-        const entries = value
-            .map((entry) => {
-                if (typeof entry !== "string") return "";
-                assertSafeConfigValue("string list entry", entry);
-                return entry.trim();
-            })
-            .filter(Boolean);
-        return entries.length > 0 ? entries : defaultValue;
-    }
-    if (typeof value === "string") {
-        assertSafeConfigValue("string list", value);
-        if (!value.trim()) return defaultValue;
-        const entries = value.split(",").map((entry) => entry.trim()).filter(Boolean);
-        return entries.length > 0 ? entries : defaultValue;
-    }
-    return defaultValue;
-}
-
 export function renderGoTrueAuthEnv(authConfig: Record<string, unknown>): string {
     const disableSignup = readBooleanSetting(authConfig, "disable_signup", false)
         || readBooleanSetting(authConfig, "enable_signup", true) === false;
@@ -193,42 +174,11 @@ GOTRUE_EXTERNAL_PHONE_ENABLED=${externalPhoneEnabled ? "true" : "false"}
     ].filter(Boolean).join("\n");
 }
 
-export type GoTrueWebAuthnDefaults = {
-    rpId: string;
-    rpDisplayName: string;
-    rpOrigins: string[];
-};
-
-export function renderGoTruePasskeyEnv(
-    authConfig: Record<string, unknown>,
-    defaults: GoTrueWebAuthnDefaults,
-): string {
-    const passkey = readRecordSetting(authConfig.passkey);
-    const webAuthn = readRecordSetting(authConfig.webauthn);
-    const mfa = readRecordSetting(authConfig.mfa ?? authConfig.MFA);
-    const mfaWebAuthn = readRecordSetting(mfa.webauthn ?? mfa.WebAuthn);
-    const passkeyEnabled = readBooleanSetting(passkey, "enabled", readBooleanSetting(authConfig, "passkey_enabled", false));
-    const mfaEnrollEnabled = readBooleanSetting(mfaWebAuthn, "enroll_enabled", readBooleanSetting(authConfig, "mfa_webauthn_enroll_enabled", false));
-    const mfaVerifyEnabled = readBooleanSetting(mfaWebAuthn, "verify_enabled", readBooleanSetting(authConfig, "mfa_webauthn_verify_enabled", false));
-
-    if (!passkeyEnabled && !mfaEnrollEnabled && !mfaVerifyEnabled) return "";
-
-    const rpId = readStringSetting(webAuthn, "rp_id", defaults.rpId);
-    const rpDisplayName = readStringSetting(webAuthn, "rp_display_name", defaults.rpDisplayName);
-    const rpOrigins = readStringListSetting(webAuthn.rp_origins, defaults.rpOrigins);
-    const challengeExpiry = readStringSetting(webAuthn, "challenge_expiry_duration", "5m");
-    const maxPasskeysPerUser = readPositiveIntegerSetting(passkey, "max_passkeys_per_user", 10);
-
-    return [
-        `GOTRUE_PASSKEY_ENABLED=${passkeyEnabled ? "true" : "false"}`,
-        `GOTRUE_PASSKEY_MAX_PASSKEYS_PER_USER=${maxPasskeysPerUser}`,
-        `GOTRUE_MFA_WEBAUTHN_ENROLL_ENABLED=${mfaEnrollEnabled ? "true" : "false"}`,
-        `GOTRUE_MFA_WEBAUTHN_VERIFY_ENABLED=${mfaVerifyEnabled ? "true" : "false"}`,
-        renderSystemdEnvLine("GOTRUE_WEBAUTHN_RP_ID", rpId),
-        renderSystemdEnvLine("GOTRUE_WEBAUTHN_RP_DISPLAY_NAME", rpDisplayName),
-        renderSystemdEnvLine("GOTRUE_WEBAUTHN_RP_ORIGINS", rpOrigins.join(",")),
-        renderSystemdEnvLine("GOTRUE_WEBAUTHN_CHALLENGE_EXPIRY_DURATION", challengeExpiry),
-    ].join("\n");
+export function renderGoTrueProviderLinkingEnv(authConfig: Record<string, unknown>): string {
+    const domains = serializedProviderLinkingDomains(authConfig);
+    return domains
+        ? renderSystemdEnvLine("GOTRUE_EXPERIMENTAL_PROVIDER_LINKING_DOMAINS", domains)
+        : "";
 }
 
 export function renderGoTrueSamlEnv(authConfig: Record<string, unknown>): string {
