@@ -262,7 +262,7 @@ class RealtimeBunService {
                     PERFORM realtime.notify_change_payload(payload);
                     RETURN COALESCE(NEW, OLD);
                 END;
-                $$ LANGUAGE plpgsql;
+                $$ LANGUAGE plpgsql SECURITY INVOKER;
             `);
 
             for (const sub of subscriptions) {

@@ -104,6 +104,10 @@ describe("supabase bootstrap schema", () => {
       "pg_catalog.pg_notify('realtime_changes', payload_text)",
     );
     expect(notifyPayloadSql).toContain("WHEN SQLSTATE '22023' THEN RETURN");
+    expect(notifyPayloadSql).toContain(
+      "LANGUAGE plpgsql SECURITY INVOKER SET search_path = pg_catalog",
+    );
+    expect(notifyPayloadSql).not.toContain("SECURITY DEFINER");
     expect(notifyPayloadSql).not.toContain("WHEN OTHERS");
 
     for (const filePath of migrationPaths) {
@@ -120,6 +124,15 @@ describe("supabase bootstrap schema", () => {
     const realtimeBunSource = readRepoFile("src/services/realtime-bun.service.ts");
     expect(realtimeBunSource).toContain('${SQL_MODULES["realtime-notify-payload"]}');
     expect(realtimeBunSource).toContain("PERFORM realtime.notify_change_payload(payload)");
+    const realtimeBunTriggerStart = realtimeBunSource.indexOf(
+      "CREATE OR REPLACE FUNCTION realtime_supacloud_notify()",
+    );
+    const realtimeBunTriggerEnd = realtimeBunSource.indexOf(
+      "$$ LANGUAGE plpgsql SECURITY INVOKER;",
+      realtimeBunTriggerStart,
+    );
+    expect(realtimeBunTriggerStart).toBeGreaterThanOrEqual(0);
+    expect(realtimeBunTriggerEnd).toBeGreaterThan(realtimeBunTriggerStart);
     expect(realtimeBunSource).not.toContain(
       "PERFORM pg_notify('realtime_changes', payload::text)",
     );

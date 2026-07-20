@@ -494,7 +494,7 @@ BEGIN
     WHEN SQLSTATE '22023' THEN RETURN;
   END;
 END;
-$fn$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
+$fn$ LANGUAGE plpgsql SECURITY INVOKER SET search_path = pg_catalog;
 -- supacloud:sql-module:realtime-notify-payload:end
 
 DO $$

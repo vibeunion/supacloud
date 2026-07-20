@@ -19,6 +19,11 @@ interface ServerVersion {
   versionNumber: number;
 }
 
+interface RealtimeSecurityModes {
+  helperSecurityDefiner: boolean;
+  triggerSecurityDefiner: boolean;
+}
+
 const databaseUrl = process.env.DATABASE_URL
   ?? "postgresql://postgres:postgres@127.0.0.1:5432/postgres";
 const postgresContainer = process.env.POSTGRES_CONTAINER;
@@ -127,22 +132,60 @@ async function expectBoundaryBehavior(boundary: PayloadBoundary): Promise<void> 
   )), boundary.label).toBeNull();
 }
 
-async function expectNonPayloadError(): Promise<void> {
+async function realtimeSecurityModes(): Promise<RealtimeSecurityModes> {
+  const [securityModes] = await database<RealtimeSecurityModes[]>`
+    SELECT
+      (SELECT prosecdef FROM pg_catalog.pg_proc
+        WHERE oid = 'realtime.notify_change_payload(jsonb)'::regprocedure) AS "helperSecurityDefiner",
+      (SELECT prosecdef FROM pg_catalog.pg_proc
+        WHERE oid = 'realtime.notify_postgres_changes()'::regprocedure) AS "triggerSecurityDefiner"
+  `;
+  return securityModes;
+}
+
+async function createRestrictedRole(connection: ReservedSQL): Promise<void> {
+  await connection.unsafe(`CREATE ROLE ${quoteIdentifier(fixtureRole)} NOLOGIN`);
+  await connection.unsafe(`GRANT USAGE ON SCHEMA realtime TO ${quoteIdentifier(fixtureRole)}`);
+  await connection.unsafe(
+    `GRANT INSERT ON TABLE public.${quoteIdentifier(fixtureTable)} TO ${quoteIdentifier(fixtureRole)}`,
+  );
+}
+
+async function invokeWithOrdinaryPermissions(connection: ReservedSQL): Promise<void> {
+  await connection.unsafe(`SET LOCAL ROLE ${quoteIdentifier(fixtureRole)}`);
+  await connection.unsafe("SELECT realtime.notify_change_payload('{\"ordinary\":true}'::jsonb)");
+  await connection.unsafe(
+    `INSERT INTO public.${quoteIdentifier(fixtureTable)} (id, body) VALUES (3, 'restricted caller')`,
+  );
+  await connection.unsafe("RESET ROLE");
+}
+
+async function restrictedPermissionError(connection: ReservedSQL): Promise<unknown> {
+  await connection.unsafe("REVOKE EXECUTE ON FUNCTION pg_catalog.pg_notify(text, text) FROM PUBLIC");
+  await connection.unsafe(`SET LOCAL ROLE ${quoteIdentifier(fixtureRole)}`);
+  await connection.unsafe(
+    `INSERT INTO public.${quoteIdentifier(fixtureTable)} (id, body) VALUES (4, 'definer trigger')`,
+  );
+  try {
+    await connection.unsafe("SELECT realtime.notify_change_payload('{\"small\":true}'::jsonb)");
+  } catch (error: unknown) {
+    return error;
+  }
+  return undefined;
+}
+
+async function expectInvokerSecurityAndNonPayloadError(): Promise<void> {
+  expect(await realtimeSecurityModes()).toEqual({
+    helperSecurityDefiner: false,
+    triggerSecurityDefiner: true,
+  });
+
   const connection = await database.reserve();
   await connection.unsafe("BEGIN");
   try {
-    await connection.unsafe(`CREATE ROLE ${quoteIdentifier(fixtureRole)} NOLOGIN`);
-    await connection.unsafe(`GRANT USAGE, CREATE ON SCHEMA realtime TO ${quoteIdentifier(fixtureRole)}`);
-    await connection.unsafe(
-      `ALTER FUNCTION realtime.notify_change_payload(jsonb) OWNER TO ${quoteIdentifier(fixtureRole)}`,
-    );
-    await connection.unsafe("REVOKE EXECUTE ON FUNCTION pg_catalog.pg_notify(text, text) FROM PUBLIC");
-    let permissionError: unknown;
-    try {
-      await connection.unsafe("SELECT realtime.notify_change_payload('{\"small\":true}'::jsonb)");
-    } catch (error: unknown) {
-      permissionError = error;
-    }
+    await createRestrictedRole(connection);
+    await invokeWithOrdinaryPermissions(connection);
+    const permissionError = await restrictedPermissionError(connection);
     expect(permissionError).toBeInstanceOf(Error);
     expect((permissionError as Error).message).toContain("permission denied for function pg_notify");
   } finally {
@@ -224,7 +267,7 @@ describe("realtime NOTIFY payload safety on PostgreSQL 18", () => {
     expect(await database`SELECT id FROM ${database(fixtureTable)} WHERE id = 2`).toHaveLength(0);
   });
 
-  test("propagates errors other than SQLSTATE 22023", async () => {
-    await expectNonPayloadError();
+  test("uses invoker rights and propagates errors other than SQLSTATE 22023", async () => {
+    await expectInvokerSecurityAndNonPayloadError();
   });
 });
