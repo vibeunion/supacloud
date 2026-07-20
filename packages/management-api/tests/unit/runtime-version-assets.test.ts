@@ -743,23 +743,34 @@ describe("runtime companion version assets", () => {
     }
   });
 
-  test("pinned tar.xz binary install verifies digest, exact member, ELF architecture, and atomic target mode", () => {
+  test("pinned tar.xz binary install allows official sibling members and extracts only the exact target", () => {
     const dir = mkdtempSync(join(tmpdir(), "supacloud-pinned-binary-"));
     const payload = join(dir, "payload");
     const fakeTools = join(dir, "tools");
     const archive = join(dir, "auth.tar.xz");
-    const unsafeArchive = join(dir, "auth-extra.tar.xz");
+    const tarLog = join(dir, "tar-extract.log");
     const target = join(dir, "installed-auth");
     try {
       spawnSync("mkdir", ["-p", payload, fakeTools]);
       writeFileSync(join(payload, "auth"), "fixture-elf-binary");
-      writeFileSync(join(payload, "extra"), "unexpected-member");
+      writeFileSync(join(payload, "gotrue"), "official-sibling-binary");
+      writeFileSync(join(payload, "migrations"), "official-sibling-binary");
       writeFileSync(join(fakeTools, "file"), '#!/bin/sh\necho "ELF 64-bit LSB executable, x86-64"\n');
       chmodSync(join(fakeTools, "file"), 0o755);
-      expect(spawnSync("tar", ["-cJf", archive, "-C", payload, "auth"]).status).toBe(0);
-      expect(spawnSync("tar", ["-cJf", unsafeArchive, "-C", payload, "auth", "extra"]).status).toBe(0);
+      writeFileSync(join(fakeTools, "tar"), [
+        "#!/bin/sh",
+        'for argument in "$@"; do',
+        '  if [ "$argument" = "-xJf" ]; then',
+        '    printf \'%s\\n\' "$@" > "$TAR_LOG"',
+        "    break",
+        "  fi",
+        "done",
+        'exec /usr/bin/tar "$@"',
+        "",
+      ].join("\n"));
+      chmodSync(join(fakeTools, "tar"), 0o755);
+      expect(spawnSync("tar", ["-cJf", archive, "-C", payload, "auth", "gotrue", "migrations"]).status).toBe(0);
       const checksum = createHash("sha256").update(readFileSync(archive)).digest("hex");
-      const unsafeChecksum = createHash("sha256").update(readFileSync(unsafeArchive)).digest("hex");
 
       const result = spawnSync("bash", ["-c", [
         "source scripts/lib/release_assets.sh",
@@ -771,6 +782,7 @@ describe("runtime companion version assets", () => {
           PATH: `${fakeTools}:${process.env.PATH}`,
           ARCHIVE: archive,
           CHECKSUM: checksum,
+          TAR_LOG: tarLog,
           TARGET: target,
         },
         encoding: "utf8",
@@ -778,24 +790,71 @@ describe("runtime companion version assets", () => {
       expect(result.status, result.stderr).toBe(0);
       expect(readFileSync(target, "utf8")).toBe("fixture-elf-binary");
       expect(statSync(target).mode & 0o777).toBe(0o755);
+      const extractionArgs = readFileSync(tarLog, "utf8").trim().split("\n");
+      expect(extractionArgs).toContain("-xJf");
+      expect(extractionArgs.at(-1)).toBe("auth");
+      expect(extractionArgs).not.toContain("gotrue");
+      expect(extractionArgs).not.toContain("migrations");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 
-      const rejected = spawnSync("bash", ["-c", [
+  test("pinned tar.xz binary install rejects checksum, architecture, duplicate, and linked targets", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supacloud-pinned-binary-reject-"));
+    const payload = join(dir, "payload");
+    const symlinkPayload = join(dir, "symlink-payload");
+    const hardlinkPayload = join(dir, "hardlink-payload");
+    const fakeTools = join(dir, "tools");
+    const validArchive = join(dir, "auth-valid.tar.xz");
+    const duplicateArchive = join(dir, "auth-duplicate.tar.xz");
+    const symlinkArchive = join(dir, "auth-symlink.tar.xz");
+    const hardlinkArchive = join(dir, "auth-hardlink.tar.xz");
+    const target = join(dir, "installed-auth");
+    const install = (archive: string, checksum: string, arch: string) => spawnSync(
+      "bash",
+      ["-c", [
         "source scripts/lib/release_assets.sh",
-        'supacloud_install_pinned_tar_xz_binary "$ARCHIVE" auth "$CHECKSUM" amd64 "$TARGET"',
+        'supacloud_install_pinned_tar_xz_binary "$ARCHIVE" auth "$CHECKSUM" "$ARCH" "$TARGET"',
       ].join("; ")], {
         cwd: repoRoot,
         env: {
           ...process.env,
           PATH: `${fakeTools}:${process.env.PATH}`,
-          ARCHIVE: unsafeArchive,
-          CHECKSUM: unsafeChecksum,
+          ARCHIVE: archive,
+          ARCH: arch,
+          CHECKSUM: checksum,
           TARGET: target,
         },
         encoding: "utf8",
-      });
-      expect(rejected.status).not.toBe(0);
-      expect(rejected.stderr).toContain("must contain only the exact member");
-      expect(readFileSync(target, "utf8")).toBe("fixture-elf-binary");
+      },
+    );
+    try {
+      spawnSync("mkdir", ["-p", payload, symlinkPayload, hardlinkPayload, fakeTools]);
+      writeFileSync(join(payload, "auth"), "fixture-elf-binary");
+      writeFileSync(join(symlinkPayload, "gotrue"), "fixture-elf-binary");
+      writeFileSync(join(hardlinkPayload, "gotrue"), "fixture-elf-binary");
+      expect(spawnSync("ln", ["-s", "gotrue", join(symlinkPayload, "auth")]).status).toBe(0);
+      expect(spawnSync("ln", [join(hardlinkPayload, "gotrue"), join(hardlinkPayload, "auth")]).status).toBe(0);
+      writeFileSync(join(fakeTools, "file"), '#!/bin/sh\necho "ELF 64-bit LSB executable, x86-64"\n');
+      chmodSync(join(fakeTools, "file"), 0o755);
+      expect(spawnSync("tar", ["-cJf", validArchive, "-C", payload, "auth"]).status).toBe(0);
+      expect(spawnSync("tar", ["-cJf", duplicateArchive, "-C", payload, "auth", "auth"]).status).toBe(0);
+      expect(spawnSync("tar", ["-cJf", symlinkArchive, "-C", symlinkPayload, "auth"]).status).toBe(0);
+      expect(spawnSync("tar", ["-cJf", hardlinkArchive, "-C", hardlinkPayload, "gotrue", "auth"]).status).toBe(0);
+
+      const validChecksum = createHash("sha256").update(readFileSync(validArchive)).digest("hex");
+      const duplicateChecksum = createHash("sha256").update(readFileSync(duplicateArchive)).digest("hex");
+      const symlinkChecksum = createHash("sha256").update(readFileSync(symlinkArchive)).digest("hex");
+      const hardlinkChecksum = createHash("sha256").update(readFileSync(hardlinkArchive)).digest("hex");
+      expect(install(validArchive, "0".repeat(64), "amd64").status).not.toBe(0);
+      expect(install(validArchive, validChecksum, "arm64").status).not.toBe(0);
+      const duplicate = install(duplicateArchive, duplicateChecksum, "amd64");
+      expect(duplicate.status).not.toBe(0);
+      expect(duplicate.stderr).toContain("must contain the exact member once");
+      expect(install(symlinkArchive, symlinkChecksum, "amd64").status).not.toBe(0);
+      expect(install(hardlinkArchive, hardlinkChecksum, "amd64").status).not.toBe(0);
+      expect(() => statSync(target)).toThrow();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
