@@ -91,6 +91,43 @@ describe("supabase bootstrap schema", () => {
     expect(autoAttachSql).not.toContain("WHEN OTHERS");
   });
 
+  test("all realtime trigger generators reuse the byte-safe notify module", () => {
+    const notifyPayloadSql = SQL_MODULES["realtime-notify-payload"];
+    const migrationPaths = [
+      "src/services/tenant-runtime-migration.ts",
+      "src/scripts/migrate-tenant-schema.ts",
+    ];
+
+    expect(notifyPayloadSql).toContain("payload_text text := payload::text");
+    expect(notifyPayloadSql).toContain("octet_length(payload_text) >= 8000");
+    expect(notifyPayloadSql).toContain(
+      "pg_catalog.pg_notify('realtime_changes', payload_text)",
+    );
+    expect(notifyPayloadSql).toContain("WHEN SQLSTATE '22023' THEN RETURN");
+    expect(notifyPayloadSql).not.toContain("WHEN OTHERS");
+
+    for (const filePath of migrationPaths) {
+      const migrationSource = readRepoFile(filePath);
+      expect(migrationSource).toContain('${SQL_MODULES["realtime-notify-payload"]}');
+      expect(migrationSource).toContain("PERFORM realtime.notify_change_payload(payload)");
+      expect(migrationSource).not.toContain(
+        "PERFORM pg_notify('realtime_changes', payload::text)",
+      );
+    }
+
+    expect(ALTER_TENANT_SQL).toContain(notifyPayloadSql);
+
+    const realtimeBunSource = readRepoFile("src/services/realtime-bun.service.ts");
+    expect(realtimeBunSource).toContain('${SQL_MODULES["realtime-notify-payload"]}');
+    expect(realtimeBunSource).toContain("PERFORM realtime.notify_change_payload(payload)");
+    expect(realtimeBunSource).not.toContain(
+      "PERFORM pg_notify('realtime_changes', payload::text)",
+    );
+
+    const initialSchema = readRepoFile("src/db/schemas/supabase.sql");
+    expect(initialSchema).toContain(notifyPayloadSql);
+  });
+
   test("auth helpers preserve claims-only user identity for modern PostgREST", () => {
     for (const schema of [
       SQL_MODULES["auth-jwt-helpers"],

@@ -41,6 +41,9 @@ describe("canonical SQL module synchronization", () => {
     expect(SQL_MODULES["postgrest-request-context"]).toContain(
       "LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog",
     );
+    expect(SQL_MODULES["realtime-notify-payload"]).toContain(
+      "CREATE OR REPLACE FUNCTION realtime.notify_change_payload(payload jsonb)",
+    );
     expect(SQL_MODULES["pgmq-public"]).toContain(
       "CREATE OR REPLACE FUNCTION pgmq_public.read(queue_name text, sleep_seconds integer, n integer)",
     );
