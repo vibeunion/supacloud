@@ -91,6 +91,26 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
     expect(res.headers.get("Tus-Max-Size")).toBe(String(500 * 1024 * 1024));
   });
 
+  test("Storage CORS exposes ETag without dropping TUS headers", async () => {
+    const res = await request("/storage/v1/object/public/avatars/public.txt", {
+      method: "OPTIONS",
+      headers: {
+        apikey: "test-token",
+        "x-project-ref": "test_mock",
+        origin: "https://app.example.com",
+      },
+    });
+
+    const exposedHeaderTokens = (res.headers.get("Access-Control-Expose-Headers") ?? "")
+      .split(",")
+      .map((header) => header.trim().toLowerCase());
+    expect(exposedHeaderTokens).toContain("etag");
+    expect(exposedHeaderTokens).toContain("tus-resumable");
+    expect(exposedHeaderTokens).toContain("tus-version");
+    expect(exposedHeaderTokens).toContain("tus-extension");
+    expect(exposedHeaderTokens).toContain("tus-max-size");
+  });
+
   test("accepts project header on loopback health checks without apikey", async () => {
     const sqlSpy = spyOn(dbModule, "sql");
     sqlSpy.mockImplementation(async (...args: unknown[]) => {

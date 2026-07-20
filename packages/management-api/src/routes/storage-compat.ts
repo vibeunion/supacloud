@@ -258,7 +258,7 @@ const STORAGE_CORS_ALLOW_HEADERS = [
 ].join(", ");
 
 const STORAGE_CORS_EXPOSE_HEADERS = [
-    "Content-Length", "Content-Range", "X-Content-Range", "X-JSON",
+    "Content-Length", "Content-Range", "X-Content-Range", "X-JSON", "ETag",
     "x-supabase-api-version", "X-Client-Info", "Prefer",
     "Content-Profile", "accept-profile", "Range", "Range-Unit",
     "X-Relay-Error", "link", "x-total-count",
