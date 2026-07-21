@@ -2959,8 +2959,18 @@ install_management_api() {
     if (( activation_status == 0 )); then
         systemctl enable supacloud || activation_status=$?
     fi
+    # supacloud.service is Type=simple with Restart=always. The management API
+    # spawns the embedded Edge Runtime, PgListener, and several workers during boot;
+    # a transient first-exit (e.g. Edge Runtime crash before dependencies settle) makes
+    # `systemctl start` return non-zero even though systemd auto-restarts the unit and
+    # the service becomes healthy seconds later. Capturing that immediate exit code as
+    # activation_status short-circuits the 30s health retry that follows and rolls back
+    # a binary that was about to come up, leaving installs stuck on the previous version.
+    #
+    # For a Restart=always unit the authoritative readiness signal is the health probe
+    # below, so do not treat a non-zero synchronous start exit as fatal here.
     if (( activation_status == 0 )); then
-        systemctl start supacloud || activation_status=$?
+        systemctl start supacloud || log_warn "systemctl start supacloud returned non-zero (Type=simple + Restart=always); deferring readiness to the health check"
     fi
     if (( activation_status == 0 )); then
         supacloud_wait_http_health http://127.0.0.1:9090/health || activation_status=$?
