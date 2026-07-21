@@ -999,13 +999,20 @@ enable_ksm_optimization() {
 install_container_runtime() {
     log_step "Checking container runtime..."
     
-    # Check for Docker or Podman
-    if command -v docker &> /dev/null; then
-        log_info "Docker installed: $(docker --version)"
-        CONTAINER_RUNTIME="docker"
-    elif command -v podman &> /dev/null; then
+    # Check for Podman first, then Docker. The podman-docker package installs a
+    # /usr/bin/docker shim that forwards to podman, so on hosts that use podman
+    # (with the podman-docker alias for docker-CLI compatibility) `command -v docker`
+    # succeeds even though podman is the real runtime. Detecting docker first
+    # misclassifies such hosts as docker, skips setup_podman_socket, and then runs
+    # Pigsty's docker.yml which tries to install docker-ce and conflicts with the
+    # already-installed podman-docker package. Podman is the authoritative runtime
+    # whenever it is present, so check it first.
+    if command -v podman &> /dev/null; then
         log_info "Podman installed: $(podman --version)"
         CONTAINER_RUNTIME="podman"
+    elif command -v docker &> /dev/null; then
+        log_info "Docker installed: $(docker --version)"
+        CONTAINER_RUNTIME="docker"
     else
         log_warn "Container runtime not detected, installing Podman"
         install_podman
