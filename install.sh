@@ -1343,6 +1343,17 @@ install_docker_compose() {
     
     COMPOSE_VERSION="v5.3.1"
     
+    # The standalone binary is preferred on both Docker and Podman hosts. Skip
+    # re-downloading it when the target version is already present. Previously the
+    # presence-check was gated on CONTAINER_RUNTIME != podman, so every Podman install
+    # re-fetched the ~31MB binary from GitHub even when it was already installed -- and
+    # behind flaky GitHub connectivity the download (curl SSL_ERROR_SYSCALL) aborted
+    # the whole install despite docker-compose being perfectly functional.
+    if command -v docker-compose &>/dev/null && docker-compose version 2>/dev/null | grep -q "${COMPOSE_VERSION}"; then
+        log_info "Docker Compose already installed: $(docker-compose --version)"
+        return
+    fi
+    
     # If using Podman, always install standalone docker-compose binary
     # (instead of relying on 'podman compose' which might have different behavior).
     # Compose v5 delegates BuildKit builds to Docker Buildx/Bake; this installer
