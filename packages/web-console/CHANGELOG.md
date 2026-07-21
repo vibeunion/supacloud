@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.24.1](https://github.com/zuohuadong/supacloud/compare/web-console-v0.24.0...web-console-v0.24.1) (2026-07-21)
+
+
+### Bug Fixes
+
+* **realtime:** add REGION=us-east-1 to systemd template for CDC poller ([aaa32a2](https://github.com/zuohuadong/supacloud/commit/aaa32a2da12d18af71e0834e00edff57ea94c86c))
+* **supacloud:** add Idempotency-Key to CORS allowed headers ([aaa32a2](https://github.com/zuohuadong/supacloud/commit/aaa32a2da12d18af71e0834e00edff57ea94c86c))
+
 ## [0.24.0](https://github.com/zuohuadong/supacloud/compare/web-console-v0.23.0...web-console-v0.24.0) (2026-07-20)
 
 
