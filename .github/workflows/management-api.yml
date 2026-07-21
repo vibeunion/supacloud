@@ -320,6 +320,15 @@ jobs:
           DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
         run: bun test tests/integration/audit-chain-migration.test.ts
 
+      - name: Verify Realtime payload safety on PostgreSQL 18
+        working-directory: packages/management-api
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+        run: |
+          export POSTGRES_CONTAINER="$(docker compose -f ../../docker/self-host/docker-compose.yml ps -q postgres)"
+          test -n "${POSTGRES_CONTAINER}"
+          bun test tests/integration/realtime-notify-payload.test.ts
+
       - name: Apply and verify Docker PostgreSQL compatibility
         env:
           SUPACLOUD_META_DB: postgres

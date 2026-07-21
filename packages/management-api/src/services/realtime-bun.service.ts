@@ -3,6 +3,7 @@ import type { JWTPayload } from 'jose';
 import { logger } from '../utils/logger';
 import { databaseService } from './database.service';
 import { resolveDbName, getProjectDb, resolveSlotName } from '../db';
+import { SQL_MODULES } from '../db/sql-modules';
 import { verifyProjectJwtPayload } from '../utils/project-jwt';
 
 const IDENTIFIER_REGEX = /^[a-zA-Z_][a-zA-Z0-9_]{0,62}$/;
@@ -221,6 +222,8 @@ class RealtimeBunService {
 
         try {
             await db.unsafe(`
+                ${SQL_MODULES["realtime-notify-payload"]}
+
                 CREATE OR REPLACE FUNCTION realtime_supacloud_notify()
                 RETURNS TRIGGER AS $$
                 DECLARE
@@ -256,10 +259,10 @@ class RealtimeBunService {
                         'commit_timestamp', now()::text
                     );
 
-                    PERFORM pg_notify('realtime_changes', payload::text);
+                    PERFORM realtime.notify_change_payload(payload);
                     RETURN COALESCE(NEW, OLD);
                 END;
-                $$ LANGUAGE plpgsql;
+                $$ LANGUAGE plpgsql SECURITY INVOKER;
             `);
 
             for (const sub of subscriptions) {

@@ -324,6 +324,8 @@ CREATE TABLE IF NOT EXISTS supabase_functions.migrations (
 );
 
 -- 11. Native Bun Realtime LISTEN/NOTIFY Emulation Triggers (P0-16 enrichment)
+${SQL_MODULES["realtime-notify-payload"]}
+
 -- This function emulates WAL-level postgres_changes by serializing full OLD/NEW records
 CREATE OR REPLACE FUNCTION realtime.notify_postgres_changes() RETURNS trigger AS $fn$
 DECLARE
@@ -370,7 +372,7 @@ BEGIN
       )
     )
   );
-  PERFORM pg_notify('realtime_changes', payload::text);
+  PERFORM realtime.notify_change_payload(payload);
   IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
 END;
 $fn$ LANGUAGE plpgsql SECURITY DEFINER;
