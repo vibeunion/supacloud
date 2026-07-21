@@ -3139,6 +3139,27 @@ install_web_console() {
 
     if [[ -f "$WEB_CONSOLE_DIR/index.html" ]]; then
         log_info "Web Console (Studio UI) installed successfully"
+
+        # Bind the configured Studio domain to the gateway so the console is
+        # reachable at https://<SUPABASE_STUDIO_DOMAIN> without a manual
+        # `bun run src/cli.ts setup-studio-domain` step. Mirrors the CLI
+        # command (setupMasterRoutes + configureFrontendRoute for the
+        # _global/studio frontend) and is idempotent.
+        # Best-effort: a failure here only means the operator must bind by
+        # hand, so it must never abort the install.
+        if [[ -n "${SUPABASE_STUDIO_DOMAIN:-}" ]] && systemctl is-active --quiet supacloud; then
+            local mgmt_src_dir="${SCRIPT_DIR}/packages/management-api"
+            if [[ -d "$mgmt_src_dir" ]] && command -v bun &> /dev/null; then
+                log_info "Binding Studio domain ${SUPABASE_STUDIO_DOMAIN} to the gateway..."
+                if (cd "$mgmt_src_dir" && bun run src/cli.ts setup-studio-domain "$SUPABASE_STUDIO_DOMAIN"); then
+                    log_info "Studio domain ${SUPABASE_STUDIO_DOMAIN} bound"
+                else
+                    log_warn "Studio domain auto-bind failed; bind manually via setup-studio-domain"
+                fi
+            else
+                log_warn "Studio domain ${SUPABASE_STUDIO_DOMAIN} not auto-bound (management-api source or bun missing)"
+            fi
+        fi
     else
         log_warn "Web Console deployment incomplete - index.html not found"
     fi
