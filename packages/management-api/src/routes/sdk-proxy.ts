@@ -15,6 +15,7 @@ import {
 } from "../utils/project-auth";
 import { isOpaqueApiKey } from "../utils/api-keys";
 import { verifyProjectJwtPayload } from "../utils/project-jwt";
+import { resolveProjectServiceRoleKey } from "../utils/service-role";
 import { getAuthRuntimeDescriptor } from "../services/auth-runtime.service";
 import { GOTRUE_USER_ID_PATTERN } from "../utils/project-user-lifecycle";
 
@@ -341,6 +342,7 @@ async function maybeEnqueueAsyncFunction(request: Request, ref: string): Promise
 export const sdkProxyInternals = {
     resolveProjectRefFromApiKey,
     resolveProjectApiKey,
+    resolveProjectServiceRoleKey,
     maybeEnqueueAsyncFunction,
     buildEncryptedBackgroundAuth,
     translateOpaqueApiKeyHeaders,
@@ -348,10 +350,9 @@ export const sdkProxyInternals = {
     adminUserDeletionBody,
 };
 
-async function getUpstreamApiKey(ref: string, role: "anon" | "service_role"): Promise<string | null> {
+async function getUpstreamAnonKey(ref: string): Promise<string | null> {
     const keys = await projectService.getApiKeys(ref);
-    if (!keys) return null;
-    return role === "service_role" ? keys.service_role_key : keys.anon_key;
+    return keys?.anon_key || null;
 }
 
 async function translateOpaqueApiKeyHeaders(
@@ -363,17 +364,26 @@ async function translateOpaqueApiKeyHeaders(
     const authorization = headers.get("authorization")?.trim() || "";
     const bearerToken = authorization.replace(/^Bearer\s+/i, "");
     let rewrittenApiKey: string | null = null;
+    let projectServiceRoleKey: Promise<string | null> | undefined;
+
+    const resolveSameProjectServiceRoleKey = (): Promise<string | null> => {
+        projectServiceRoleKey ??= sdkProxyInternals.resolveProjectServiceRoleKey(ref);
+        return projectServiceRoleKey;
+    };
 
     const resolveUpstream = async (candidate: string): Promise<string | null | undefined> => {
         if (!candidate) return undefined;
         const resolved = await sdkProxyInternals.resolveProjectApiKey(candidate, { includeProvisioning: true });
         if (!resolved) return isOpaqueApiKey(candidate) ? null : undefined;
-        if (resolved.ref !== ref || !resolved.upstreamKey) return null;
-        if (authAuthorityRef === ref) return resolved.upstreamKey;
+        if (resolved.ref !== ref) return null;
         // 从属项目只能借用 SupAuth owner 的匿名入口。绝不能把从属项目的
         // service_role/secret 凭据升级为 owner 的全局管理员凭据。
-        if (resolved.role === "service_role") return null;
-        return getUpstreamApiKey(authAuthorityRef, resolved.role);
+        if (authAuthorityRef !== ref) {
+            if (resolved.role === "service_role") return null;
+            return getUpstreamAnonKey(authAuthorityRef);
+        }
+        if (resolved.role === "service_role") return resolveSameProjectServiceRoleKey();
+        return resolved.upstreamKey || null;
     };
 
     if (apikey) {
