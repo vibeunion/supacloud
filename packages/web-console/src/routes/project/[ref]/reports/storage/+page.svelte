@@ -19,8 +19,18 @@
             b.name as bucket_name,
             b.public,
             count(o.id) as object_count,
-            coalesce(sum(o.metadata->>'size')::bigint, 0) as total_bytes,
-            pg_size_pretty(coalesce(sum((o.metadata->>'size')::bigint), 0)) as total_size,
+            coalesce(sum(
+              CASE
+                WHEN o.metadata->>'size' ~ '^[0-9]+$' THEN (o.metadata->>'size')::bigint
+                ELSE 0
+              END
+            ), 0) as total_bytes,
+            pg_size_pretty(coalesce(sum(
+              CASE
+                WHEN o.metadata->>'size' ~ '^[0-9]+$' THEN (o.metadata->>'size')::bigint
+                ELSE 0
+              END
+            ), 0)) as total_size,
             max(o.created_at)::text as last_upload
           FROM storage.buckets b
           LEFT JOIN storage.objects o ON o.bucket_id = b.id
@@ -28,7 +38,7 @@
           ORDER BY total_bytes DESC;`
         })
       });
-      if (!res.ok) throw new Error("Failed to fetch storage stats");
+      if (!res.ok) return [];
       const data = await res.json();
       return data.rows || [];
     }

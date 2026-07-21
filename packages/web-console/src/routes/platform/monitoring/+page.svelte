@@ -4,6 +4,8 @@
   import { t } from "svelte-i18n";
 
   let grafanaHost = $state("");
+  let grafanaAvailable = $state(false);
+  let grafanaChecking = $state(false);
   let selectedDashboard = $state("pgsql-overview");
   let isFullscreen = $state(false);
     
@@ -20,7 +22,36 @@
     { id: "node", label: "Node", descZh: "操作系统 CPU/内存/磁盘/网络", descEn: "OS CPU/Memory/Disk/Network" },
   ];
 
-  function detectGrafanaHost() {
+  async function checkGrafanaHealth(url: string) {
+    const trimmed = url.trim().replace(/\/+$/, "");
+    if (!trimmed) {
+      grafanaAvailable = false;
+      return;
+    }
+
+    grafanaChecking = true;
+    try {
+      const healthUrl = new URL(`${trimmed}/api/health`);
+      const isSameOrigin = healthUrl.origin === window.location.origin;
+      if (!isSameOrigin) {
+        grafanaAvailable = true;
+        return;
+      }
+
+      const res = await fetch(healthUrl, {
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+      const contentType = res.headers.get("content-type") || "";
+      grafanaAvailable = res.ok && contentType.includes("application/json");
+    } catch {
+      grafanaAvailable = false;
+    } finally {
+      grafanaChecking = false;
+    }
+  }
+
+  async function detectGrafanaHost() {
     const protocol = window.location.protocol;
     const host = window.location.hostname;
     // In production, Grafana is reverse-proxied through /grafana/ path
@@ -30,13 +61,16 @@
     } else {
       grafanaHost = `${protocol}//${host}/grafana`;
     }
+    await checkGrafanaHealth(grafanaHost);
   }
 
   const grafanaUrl = $derived(
     `${grafanaHost}/d/${selectedDashboard}?orgId=1&kiosk=tv&theme=dark`
   );
 
-  onMount(() => detectGrafanaHost());
+  onMount(() => {
+    void detectGrafanaHost();
+  });
 </script>
 
 <div class="space-y-4">
@@ -58,7 +92,10 @@
   <!-- Grafana Host Input -->
   <div class="flex items-center gap-3">
     <label for="a11y-routes-platform-monitoring--page-svelte-53" class="text-xs font-semibold text-muted-foreground shrink-0">{$t("PlatformMonitoring.grafana_url")}</label>
-    <input id="a11y-routes-platform-monitoring--page-svelte-53" bind:value={grafanaHost} class="flex-1 max-w-md px-3 py-1.5 text-xs font-mono rounded-md border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand" placeholder="http://your-server:3000" />
+    <input id="a11y-routes-platform-monitoring--page-svelte-53" bind:value={grafanaHost} onblur={() => checkGrafanaHealth(grafanaHost)} class="flex-1 max-w-md px-3 py-1.5 text-xs font-mono rounded-md border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand" placeholder="http://your-server:3000" />
+    <button onclick={() => checkGrafanaHealth(grafanaHost)} class="flex items-center gap-2 px-3 py-1.5 text-xs rounded-md border hover:bg-muted/50 transition-colors">
+      <RefreshCw size={12} class={grafanaChecking ? "animate-spin" : ""} /> 检测
+    </button>
   </div>
 
   <!-- Dashboard Selector -->
@@ -76,7 +113,7 @@
 
   <!-- Grafana iframe -->
   <div class="rounded-xl border bg-card overflow-hidden {isFullscreen ? 'fixed inset-0 z-50' : ''}">
-    {#if grafanaHost}
+    {#if grafanaHost && grafanaAvailable}
       <iframe
         src={grafanaUrl}
         title="Grafana Dashboard"
@@ -86,8 +123,10 @@
     {:else}
       <div class="flex flex-col items-center justify-center py-24 text-muted-foreground gap-3">
         <BarChart3 size={40} class="opacity-30" />
-        <p class="text-sm">{$t("PlatformMonitoring.please_enter_the_grafana_server")}</p>
-        <p class="text-xs opacity-60">{$t("PlatformMonitoring.pigsty_is_typically_deployed_on")}</p>
+        <p class="text-sm">
+          {grafanaChecking ? "正在检测 Grafana..." : $t("PlatformMonitoring.please_enter_the_grafana_server")}
+        </p>
+        <p class="text-xs opacity-60">当前地址未返回 Grafana 健康接口，已避免加载无效 iframe。</p>
       </div>
     {/if}
   </div>

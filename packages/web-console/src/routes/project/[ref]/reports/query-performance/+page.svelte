@@ -44,6 +44,36 @@
         throw new Error("MISSING_EXTENSION");
       }
 
+      if (schemaName && !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(schemaName)) {
+        throw new Error(ACCESS_UNAVAILABLE);
+      }
+
+      if (schemaName) {
+        const schemaAccessCheck = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sql: `SELECT has_schema_privilege(current_user, '${schemaName}', 'USAGE') AS schema_usage;`
+          })
+        });
+        const schemaAccessData = await schemaAccessCheck.json();
+        if (!schemaAccessCheck.ok || !schemaAccessData?.rows?.[0]?.schema_usage) {
+          throw new Error(ACCESS_UNAVAILABLE);
+        }
+
+        const accessCheck = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sql: `SELECT has_table_privilege(to_regclass('${schemaName}.pg_stat_statements'), 'SELECT') AS can_select;`
+          })
+        });
+        const accessData = await accessCheck.json();
+        if (!accessCheck.ok || !accessData?.rows?.[0]?.can_select) {
+          throw new Error(ACCESS_UNAVAILABLE);
+        }
+      }
+
       const schemasToTry = schemaName ? [`${schemaName}.`, "monitor.", "extensions."] : ["monitor.", "extensions."];
       let sawMissingRelation = false;
       let sawPermissionDenied = false;
@@ -202,7 +232,7 @@
             </tr>
           </thead>
           <tbody class="divide-y divide-border/30">
-            {#each stats as stat}
+            {#each stats as stat (stat.query)}
               <tr class="hover:bg-muted/20 transition-colors group">
                 <td class="px-6 py-4">
                   <div class="font-mono text-xs text-foreground/80 break-all bg-muted/30 p-2 rounded border border-border/50 max-h-32 overflow-y-auto">

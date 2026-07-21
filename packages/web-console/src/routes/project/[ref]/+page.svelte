@@ -141,7 +141,7 @@
       canReadLocalAuth ? runSql(`SELECT count(*) as total FROM auth.users;`) : Promise.resolve([]),
       runSql(`SELECT count(*) as cnt FROM pg_stat_user_tables;`),
       runSql(`SELECT count(*) as cnt FROM pg_stat_user_indexes;`),
-      runSql(`SELECT pg_size_pretty(coalesce(sum((metadata->>'size')::bigint), 0)) as size FROM storage.objects;`),
+      runSql(`SELECT pg_size_pretty(coalesce(sum(CASE WHEN metadata->>'size' ~ '^[0-9]+$' THEN (metadata->>'size')::bigint ELSE 0 END), 0)) as size FROM storage.objects;`),
       canReadLocalAuth
         ? runSql(`SELECT email, created_at::text FROM auth.users ORDER BY created_at DESC LIMIT 5;`)
         : Promise.resolve([]),

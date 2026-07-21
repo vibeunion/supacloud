@@ -11,6 +11,21 @@
   const authStatsQuery = createQuery(() => ({
     queryKey: ["auth-stats", projectRef],
     queryFn: async () => {
+      const accessRes = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sql: `SELECT
+            has_schema_privilege(current_user, 'auth', 'USAGE') as schema_usage,
+            has_table_privilege('auth.users', 'SELECT') as can_select;`
+        })
+      });
+      const accessData = await accessRes.json();
+      const access = accessData.rows?.[0];
+      if (!accessRes.ok || !access?.schema_usage || !access?.can_select) {
+        return { stats: null, users: [] };
+      }
+
       // Get total user count and recent signups
       const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST",

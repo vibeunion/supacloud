@@ -23,7 +23,12 @@
       const res = await apiClient(`/v1/projects/${projectRef}/database/migrations`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || data.error || "Failed to load migration history");
-      return (Array.isArray(data) ? data : []) as Migration[];
+      return (Array.isArray(data) ? data : []).map((row: Record<string, unknown>) => ({
+        version: String(row.version || ""),
+        name: String(row.name || ""),
+        statements: Array.isArray(row.statements) ? row.statements.length : Number(row.statements || 0),
+        executed_at: String(row.executed_at || ""),
+      })) as Migration[];
     }
   }));
 
