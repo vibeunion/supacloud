@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.47.4](https://github.com/zuohuadong/supacloud/compare/management-api-v0.47.3...management-api-v0.47.4) (2026-07-21)
+
+
+### Bug Fixes
+
+* **realtime:** preserve notify invoker permissions ([eab0184](https://github.com/zuohuadong/supacloud/commit/eab01841cf87be56d839874ed468a957d20eaf9b))
+* **realtime:** prevent oversized notify rollback ([721f78e](https://github.com/zuohuadong/supacloud/commit/721f78efa0ac32d95b90c74f1148e6c758f366e3))
+* **realtime:** prevent oversized NOTIFY rollback ([9b234bd](https://github.com/zuohuadong/supacloud/commit/9b234bd5ffd2fc1a7e5ef5e23cd4b2346c08ae99))
+* **realtime:** prevent oversized NOTIFY rollback ([#504](https://github.com/zuohuadong/supacloud/issues/504)) ([9b234bd](https://github.com/zuohuadong/supacloud/commit/9b234bd5ffd2fc1a7e5ef5e23cd4b2346c08ae99))
+
 ## [0.47.3](https://github.com/zuohuadong/supacloud/compare/management-api-v0.47.2...management-api-v0.47.3) (2026-07-20)
 
 
