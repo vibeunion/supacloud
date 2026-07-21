@@ -2760,16 +2760,21 @@ install_management_api() {
     # 2. Copy management scripts
     if [[ -d "${SCRIPT_DIR}/scripts" ]] && [[ "${SCRIPT_DIR}/scripts" != "$ROOT_SCRIPTS_INSTALL_DIR" ]]; then
         find "${SCRIPT_DIR}/scripts" -maxdepth 1 -type f -name '*.sh' -exec cp {} "$ROOT_SCRIPTS_INSTALL_DIR/" \;
-        chmod +x "$ROOT_SCRIPTS_INSTALL_DIR"/*.sh
         log_info "Management scripts ready: $ROOT_SCRIPTS_INSTALL_DIR"
     fi
+    # Ensure scripts are executable regardless of the copy path: a git checkout
+    # leaves .sh files at 0644, which breaks systemd ExecStartPre for
+    # pre_start_recovery.sh (status=203/EXEC, Permission denied) in the common
+    # in-place case where SCRIPT_DIR/scripts == ROOT_SCRIPTS_INSTALL_DIR and the
+    # copy above is (correctly) skipped.
+    chmod +x "$ROOT_SCRIPTS_INSTALL_DIR"/*.sh 2>/dev/null || true
 
     # 2b. Copy management script libraries (Pigsty adapter)
     if [[ -d "${SCRIPT_DIR}/scripts/lib" ]] && [[ "${SCRIPT_DIR}/scripts/lib" != "$SCRIPTS_INSTALL_DIR" ]]; then
         cp -rf "${SCRIPT_DIR}/scripts/lib/"* "$SCRIPTS_INSTALL_DIR/"
-        chmod +x "$SCRIPTS_INSTALL_DIR"/*.sh
         log_info "Underlying script link ready: $SCRIPTS_INSTALL_DIR"
     fi
+    chmod +x "$SCRIPTS_INSTALL_DIR"/*.sh 2>/dev/null || true
 
     # 2c. Copy database schema files (required for project provisioning)
     local SCHEMA_SRC="${SCRIPT_DIR}/packages/management-api/src/db/schemas"
