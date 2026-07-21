@@ -3066,7 +3066,18 @@ GOTRUE_SVC
         log_info "supacloud-gotrue@.service template already exists"
     fi
 
-    # Ensure tenant config directory exists
+    # Ensure tenant config directory exists. A previous Pigsty/legacy-supabase
+    # install may have left /etc/supabase/tenants as a symlink whose target no
+    # longer exists (e.g. pointing at a removed /opt/supabase/volumes/... path).
+    # `mkdir -p` on a path that traverses a dangling symlink fails with
+    # "File exists" (EEXIST) and, under `set -e`, aborts the whole install right
+    # after the management API has come up. If the entry exists but is not a
+    # directory, remove it first so mkdir can create a real directory in its
+    # place; never touch an already-valid directory.
+    if [[ -e /etc/supabase/tenants || -L /etc/supabase/tenants ]] && [[ ! -d /etc/supabase/tenants ]]; then
+        log_warn "Replacing non-directory entry at /etc/supabase/tenants (likely a stale symlink) before creating the tenant config directory"
+        rm -f /etc/supabase/tenants
+    fi
     mkdir -p /etc/supabase/tenants
 
     # 8. Configure non-secret CLI conveniences without overwriting DOCKER_HOST.
