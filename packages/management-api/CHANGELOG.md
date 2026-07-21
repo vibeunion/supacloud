@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.47.5](https://github.com/zuohuadong/supacloud/compare/management-api-v0.47.4...management-api-v0.47.5) (2026-07-21)
+
+
+### Bug Fixes
+
+* **auth:** sign proxied service-role credentials ([ab4fc0b](https://github.com/zuohuadong/supacloud/commit/ab4fc0b91d132268d65680a343382eca00572380))
+* **auth:** sign proxied service-role credentials ([96bb4bd](https://github.com/zuohuadong/supacloud/commit/96bb4bd8eaae6bc84d7c81a64fe4cc036b1f79bc))
+* **auth:** validate standalone service-role bearers ([6243cdc](https://github.com/zuohuadong/supacloud/commit/6243cdcca86674c6fb3769b8c4265a69b2c701a9))
+
 ## [0.47.4](https://github.com/zuohuadong/supacloud/compare/management-api-v0.47.3...management-api-v0.47.4) (2026-07-21)
 
 
