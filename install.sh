@@ -3649,7 +3649,11 @@ main() {
     # Install Management API
     install_management_api
     if [[ -f "${SCRIPT_DIR}/scripts/upgrade_pigsty_4_4_compat.sh" ]]; then
-        PGHOST="${PGHOST:-}" PGPORT="${PGPORT:-5432}" PGUSER="${PGUSER:-postgres}" \
+        # Pigsty exports PGUSER=dbuser_dba globally; ${PGUSER:-postgres} would inherit the
+        # wrong DBA role and make the compat script authenticate as dbuser_dba (auth fail
+        # on 127.0.0.1), aborting before install_web_console ever runs. Pin the superuser
+        # explicitly so role/password checks use postgres regardless of the shell env.
+        PGHOST=127.0.0.1 PGPORT=5432 PGUSER=postgres \
             PGPASSWORD="${PGPASSWORD:-$POSTGRES_PASSWORD}" \
             bash "${SCRIPT_DIR}/scripts/upgrade_pigsty_4_4_compat.sh" --apply
     fi
