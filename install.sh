@@ -2841,6 +2841,7 @@ install_management_api() {
     if ! supacloud_write_service_env_pairs "$MANAGEMENT_ENV_FILE" \
         PORT 9090 \
         MANAGEMENT_API_URL http://127.0.0.1:9090 \
+        STUDIO_INTERNAL "${STUDIO_INTERNAL:-127.0.0.1:9090}" \
         DATABASE_URL "postgresql://postgres:${encoded_postgres_password}@127.0.0.1:5432/supacloud_meta" \
         EDGE_RUNTIME_MODE "${EDGE_RUNTIME_MODE:-embedded}" \
         MASTER_TOKEN "$MASTER_TOKEN" \
