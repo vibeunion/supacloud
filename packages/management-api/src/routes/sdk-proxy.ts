@@ -395,14 +395,9 @@ async function translateOpaqueApiKeyHeaders(
         }
     }
 
-    // Shared mode must also resolve legacy API-key bearers. Otherwise a
-    // dependent service_role JWT could reach the owner unchanged and become
-    // an owner admin credential when historical projects share a JWT secret.
-    if (bearerToken && (
-        authAuthorityRef !== ref
-        || isOpaqueApiKey(bearerToken)
-        || bearerToken === apikey
-    )) {
+    // Resolve every bearer so a legacy service_role JWT cannot bypass project
+    // binding. Unknown user JWTs return undefined and remain unchanged.
+    if (bearerToken) {
         const upstream = await resolveUpstream(bearerToken);
         if (upstream === null) return false;
         if (upstream) headers.set("authorization", `Bearer ${upstream}`);

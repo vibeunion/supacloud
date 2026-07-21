@@ -710,12 +710,15 @@ describe("sdkProxyRoutes functions proxy", () => {
   test("keeps a user bearer while signing an opaque service-role apikey", async () => {
     await withSdkProxyTestContext(async ({ trackSpy }) => {
       trackSpy(
-        spyOn(sdkProxyInternals, "resolveProjectApiKey").mockResolvedValue({
-          ref: "proj_1",
-          kind: "secret",
-          role: "service_role",
-          upstreamKey: "legacy-service-jwt",
-        }),
+        spyOn(sdkProxyInternals, "resolveProjectApiKey").mockImplementation(async (candidate: string) =>
+          candidate === "sb_secret_client_key"
+            ? {
+                ref: "proj_1",
+                kind: "secret",
+                role: "service_role",
+                upstreamKey: "legacy-service-jwt",
+              }
+            : null),
       );
       const serviceRoleSigner = trackSpy(
         spyOn(sdkProxyInternals, "resolveProjectServiceRoleKey").mockResolvedValue("short-lived-es256-jwt"),
@@ -753,6 +756,137 @@ describe("sdkProxyRoutes functions proxy", () => {
       expect(await sdkProxyInternals.translateOpaqueApiKeyHeaders(headers, "proj_1")).toBe(true);
       expect(headers.get("apikey")).toBe("short-lived-es256-jwt");
       expect(headers.get("authorization")).toBe("Bearer short-lived-es256-jwt");
+      expect(serviceRoleSigner).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  test("rejects a cross-project legacy service-role bearer paired with an anon apikey", async () => {
+    await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
+      trackSpy(
+        spyOn(sdkProxyInternals, "resolveProjectApiKey").mockImplementation(async (candidate: string) => {
+          if (candidate === "sb_publishable_project_1_key") {
+            return {
+              ref: "proj_1",
+              kind: "publishable",
+              role: "anon",
+              upstreamKey: "project-1-anon-jwt",
+            };
+          }
+          if (candidate === "project-2-legacy-service-jwt") {
+            return {
+              ref: "proj_2",
+              kind: "service_role",
+              role: "service_role",
+              upstreamKey: candidate,
+            };
+          }
+          return null;
+        }),
+      );
+      const serviceRoleSigner = trackSpy(
+        spyOn(sdkProxyInternals, "resolveProjectServiceRoleKey").mockResolvedValue("must-not-be-used"),
+      );
+      setSdkProxySqlForTests(async (...args: unknown[]) => String(args[0] ?? "").includes("SELECT config")
+        ? [{ config: { postgrest_port: 7361, gotrue_port: 8361 } }]
+        : []);
+
+      const response = await request("/rest/v1/widgets", {
+        headers: {
+          apikey: "sb_publishable_project_1_key",
+          authorization: "Bearer project-2-legacy-service-jwt",
+        },
+      });
+
+      expect(response.status).toBe(401);
+      expect(calls).toHaveLength(0);
+      expect(serviceRoleSigner).not.toHaveBeenCalled();
+    });
+  });
+
+  test("re-signs a standalone same-project legacy service-role bearer", async () => {
+    await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
+      trackSpy(
+        spyOn(sdkProxyInternals, "resolveProjectApiKey").mockImplementation(async (candidate: string) => {
+          if (candidate === "sb_publishable_project_1_key") {
+            return {
+              ref: "proj_1",
+              kind: "publishable",
+              role: "anon",
+              upstreamKey: "project-1-anon-jwt",
+            };
+          }
+          if (candidate === "project-1-legacy-service-jwt") {
+            return {
+              ref: "proj_1",
+              kind: "service_role",
+              role: "service_role",
+              upstreamKey: candidate,
+            };
+          }
+          return null;
+        }),
+      );
+      const serviceRoleSigner = trackSpy(
+        spyOn(sdkProxyInternals, "resolveProjectServiceRoleKey").mockResolvedValue("short-lived-es256-jwt"),
+      );
+      setSdkProxySqlForTests(async (...args: unknown[]) => String(args[0] ?? "").includes("SELECT config")
+        ? [{ config: { postgrest_port: 7361, gotrue_port: 8361 } }]
+        : []);
+
+      const response = await request("/rest/v1/widgets", {
+        headers: {
+          apikey: "sb_publishable_project_1_key",
+          authorization: "Bearer project-1-legacy-service-jwt",
+        },
+      });
+
+      expect(response.status).toBe(200);
+      const headers = new Headers(calls[0]?.init?.headers);
+      expect(headers.get("apikey")).toBe("project-1-anon-jwt");
+      expect(headers.get("authorization")).toBe("Bearer short-lived-es256-jwt");
+      expect(serviceRoleSigner).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  test("rejects a standalone legacy service-role bearer when signing material is unavailable", async () => {
+    await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
+      trackSpy(
+        spyOn(sdkProxyInternals, "resolveProjectApiKey").mockImplementation(async (candidate: string) => {
+          if (candidate === "sb_publishable_project_1_key") {
+            return {
+              ref: "proj_1",
+              kind: "publishable",
+              role: "anon",
+              upstreamKey: "project-1-anon-jwt",
+            };
+          }
+          if (candidate === "project-1-legacy-service-jwt") {
+            return {
+              ref: "proj_1",
+              kind: "service_role",
+              role: "service_role",
+              upstreamKey: candidate,
+            };
+          }
+          return null;
+        }),
+      );
+      const serviceRoleSigner = trackSpy(
+        spyOn(sdkProxyInternals, "resolveProjectServiceRoleKey").mockResolvedValue(null),
+      );
+      setSdkProxySqlForTests(async (...args: unknown[]) => String(args[0] ?? "").includes("SELECT config")
+        ? [{ config: { postgrest_port: 7361, gotrue_port: 8361 } }]
+        : []);
+
+      const response = await request("/rest/v1/widgets", {
+        headers: {
+          apikey: "sb_publishable_project_1_key",
+          authorization: "Bearer project-1-legacy-service-jwt",
+        },
+      });
+
+      expect(response.status).toBe(401);
+      expect(calls).toHaveLength(0);
       expect(serviceRoleSigner).toHaveBeenCalledTimes(1);
     });
   });
@@ -814,12 +948,15 @@ describe("sdkProxyRoutes functions proxy", () => {
   test("REST proxy preserves a user JWT while translating the publishable apikey", async () => {
     await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
       trackSpy(
-        spyOn(sdkProxyInternals, "resolveProjectApiKey").mockResolvedValue({
-          ref: "proj_1",
-          kind: "publishable",
-          role: "anon",
-          upstreamKey: "legacy-anon-jwt",
-        }),
+        spyOn(sdkProxyInternals, "resolveProjectApiKey").mockImplementation(async (candidate: string) =>
+          candidate === "sb_publishable_client_key"
+            ? {
+                ref: "proj_1",
+                kind: "publishable",
+                role: "anon",
+                upstreamKey: "legacy-anon-jwt",
+              }
+            : null),
       );
       setSdkProxySqlForTests(async (...args: unknown[]) => {
         const text = String(args[0] ?? "");
@@ -846,12 +983,15 @@ describe("sdkProxyRoutes functions proxy", () => {
   test("GraphQL proxy translates an opaque key and preserves the user JWT", async () => {
     await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
       trackSpy(
-        spyOn(sdkProxyInternals, "resolveProjectApiKey").mockResolvedValue({
-          ref: "proj_1",
-          kind: "publishable",
-          role: "anon",
-          upstreamKey: "legacy-anon-jwt",
-        }),
+        spyOn(sdkProxyInternals, "resolveProjectApiKey").mockImplementation(async (candidate: string) =>
+          candidate === "sb_publishable_client_key"
+            ? {
+                ref: "proj_1",
+                kind: "publishable",
+                role: "anon",
+                upstreamKey: "legacy-anon-jwt",
+              }
+            : null),
       );
       setSdkProxySqlForTests(async (...args: unknown[]) => {
         const text = String(args[0] ?? "");
