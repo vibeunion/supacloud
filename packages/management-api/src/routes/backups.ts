@@ -1,5 +1,12 @@
 import { Elysia, t, status } from "elysia";
-import { listBackups, createBackup, restore, createLogicalBackup, restoreLogicalBackup } from '../services/backup.service';
+import {
+    listBackups,
+    createBackup,
+    restore,
+    createLogicalBackup,
+    restoreLogicalBackup,
+    PgBackRestUnavailableError,
+} from '../services/backup.service';
 import type { RestoreRequest } from '../types/backup';
 import { resolveDbName } from '../db';
 import { requireAdminAuth, requireProjectOrAdminAuth } from '../middleware/auth';
@@ -12,17 +19,30 @@ export const backupRoutes = new Elysia({ prefix: "/v1/projects/:ref/database/bac
         if (authError) return status(authError.status, authError.body);
 
         const dbName = await resolveDbName(params.ref);
-        return await listBackups(dbName);
+        try {
+            return await listBackups(dbName);
+        } catch (error) {
+            if (error instanceof PgBackRestUnavailableError) {
+                return status(503, { message: "pgBackRest backup inventory is unavailable" });
+            }
+            throw error;
+        }
     }, {
-        response: { 200: t.Any() },
+        response: { 200: t.Any(), 503: ErrorResponse },
         detail: { tags: ["backups"], summary: "List project backups" },
     })
-    .post('/', async ({ params, body, request }) => {
+    .post('/', async ({ body, request }) => {
         const authError = await requireAdminAuth(request);
         if (authError) return status(authError.status, authError.body);
 
-        const dbName = await resolveDbName(params.ref);
-        return await createBackup(dbName, body.type);
+        try {
+            return await createBackup(body.type);
+        } catch (error) {
+            if (error instanceof PgBackRestUnavailableError) {
+                return status(503, { message: "pgBackRest backup failed" });
+            }
+            throw error;
+        }
     }, {
         body: t.Object({
             type: t.Optional(t.Union([
@@ -31,7 +51,7 @@ export const backupRoutes = new Elysia({ prefix: "/v1/projects/:ref/database/bac
                 t.Literal('diff'),
             ])),
         }),
-        response: { 200: t.Any() },
+        response: { 200: t.Any(), 503: ErrorResponse },
         detail: { tags: ["backups"], summary: "Create a database backup" },
     })
     .post('/restore', async ({ body, request }) => {

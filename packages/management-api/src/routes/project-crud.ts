@@ -14,7 +14,7 @@ import {
   getAuthRuntimeOwnerProtectionError,
 } from "../services/auth-runtime.service";
 import { ScalingService } from "../services/scaling.service";
-import { listBackups } from "../services/backup.service";
+import { listBackups, PgBackRestUnavailableError } from "../services/backup.service";
 import type { BackupInfo } from "../types/backup";
 import {
   applyAuthEmailTemplatePatch,
@@ -986,8 +986,15 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
       if (!project)
         return status(404, { message: "Project not found", code: "404" });
       const dbName = await resolveDbName(params.ref);
-      const backups = await listBackups(dbName);
-      return buildPitrStatus(params.ref, dbName, backups);
+      try {
+        const backups = await listBackups(dbName);
+        return buildPitrStatus(params.ref, dbName, backups);
+      } catch (error) {
+        if (error instanceof PgBackRestUnavailableError) {
+          return status(503, { message: "pgBackRest backup inventory is unavailable", code: "BACKUP_UNAVAILABLE" });
+        }
+        throw error;
+      }
     },
     {
       params: t.Object({ ref: t.String() }),

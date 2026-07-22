@@ -710,54 +710,6 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
 },
   )
 
-  // Get backup list
-  .get(
-    "/:ref/database/backups",
-    async ({ params, request }) => {
-      const authError = await requireProjectOrAdminAuth(request, params.ref);
-      if (authError) return status(authError.status, authError.body);
-      const backups = await projectService.listBackups(params.ref);
-      return backups;
-    },
-    {
-      params: t.Object({
-        ref: t.String(),
-      }),
-    
-      detail: { tags: ["projects"], summary: "List database backups" },
-},
-  )
-
-  // Restore backup
-  .post(
-    "/:ref/database/backups/restore",
-    async ({ params, body, request }) => {
-      const authError = await requireAdminAuth(request);
-      if (authError) return status(authError.status, authError.body);
-      const success = await projectService.restoreBackup(
-        params.ref,
-        body.backup_id,
-      );
-      if (!success) {
-        return status(500, {
-          message: "Failed to restore backup",
-          code: "500",
-        });
-      }
-      return { success: true };
-    },
-    {
-      params: t.Object({
-        ref: t.String(),
-      }),
-      body: t.Object({
-        backup_id: t.String(),
-      }),
-    
-      detail: { tags: ["projects"], summary: "Restore a database backup" },
-},
-  )
-
   .use(projectNetworkRestrictionRoutes)
 
   // Get custom domain
