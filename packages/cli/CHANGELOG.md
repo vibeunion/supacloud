@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.12.2](https://github.com/zuohuadong/supacloud/compare/cli-v0.12.1...cli-v0.12.2) (2026-07-22)
+
+
+### Bug Fixes
+
+* **cli:** order and validate migration versions ([9e07e2f](https://github.com/zuohuadong/supacloud/commit/9e07e2fa4ca9c026621fccc5d79c62b0352884d9))
+* **cli:** preserve migration version identity ([2a11d53](https://github.com/zuohuadong/supacloud/commit/2a11d5355c43badb7839dcb5e4011aea8703624f))
+* **cli:** skip explicit baseline migration markers ([7254552](https://github.com/zuohuadong/supacloud/commit/725455278446582663750097dd870609b36f56c1))
+* **cli:** skip explicit baseline migration markers ([756f7ec](https://github.com/zuohuadong/supacloud/commit/756f7ec20702905fe874b93f411e1bb69e6e3a30))
+
 ## [0.12.1](https://github.com/zuohuadong/supacloud/compare/cli-v0.12.0...cli-v0.12.1) (2026-07-22)
 
 
