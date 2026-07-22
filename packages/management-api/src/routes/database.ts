@@ -280,6 +280,30 @@ function existingMigrationChecksum(
   });
 }
 
+function normalizedMigrationStatements(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((statement): statement is string => typeof statement === "string")
+    .map((statement) => statement.replace(/\r\n?/g, "\n").trim())
+    .filter(Boolean);
+}
+
+/**
+ * Legacy ledgers stored a raw file SHA-256 in `checksum`, while the current
+ * route stores a structured checksum over version/name/statements. When the
+ * identity and exact normalized SQL both match, the migration is already
+ * applied even though those checksum formats differ.
+ */
+export function migrationLedgerEntryMatches(
+  row: Record<string, unknown>,
+  input: Pick<RecordedMigrationInput, "version" | "name" | "statements">,
+): boolean {
+  return String(row.version ?? "").trim() === input.version
+    && (typeof row.name === "string" ? row.name.trim() : "") === input.name
+    && JSON.stringify(normalizedMigrationStatements(row.statements))
+      === JSON.stringify(normalizedMigrationStatements(input.statements));
+}
+
 async function resetMigrationSession(connection: ReservedProjectSql, dbName: string): Promise<boolean> {
   try {
     await connection.unsafe("DISCARD ALL");
@@ -339,7 +363,8 @@ async function executeMigrationTransaction(
     return await connection.begin(async (tx) => {
       const existing = await findExistingMigration(tx, input);
       if (existing.length > 0) {
-        if (existingMigrationChecksum(existing[0]!, input) !== execution.checksum) {
+        const alreadyApplied = existing.some((row) => migrationLedgerEntryMatches(row, input));
+        if (!alreadyApplied && existingMigrationChecksum(existing[0]!, input) !== execution.checksum) {
           throw new MigrationRouteError(
             409,
             "migration_checksum_conflict",
