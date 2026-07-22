@@ -2,6 +2,7 @@
  * Database — Compound tool (18→1)
  * SQL execution, schema introspection, RLS, migrations, stats
  */
+import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { Type } from "@sinclair/typebox";
@@ -13,10 +14,51 @@ export interface DatabaseToolsConfig {
     projectRef?: string;
 }
 
-export function migrationVersionFromFilename(file: string, fallbackIndex = 0): number {
+const MAX_MIGRATION_VERSION = 9_223_372_036_854_775_807n;
+const FALLBACK_MIGRATION_VERSION_BASE = 8_000_000_000_000_000_000n;
+const FALLBACK_MIGRATION_VERSION_RANGE = 1_000_000_000_000_000_000n;
+const FALLBACK_MIGRATION_VERSION_LIMIT = FALLBACK_MIGRATION_VERSION_BASE + FALLBACK_MIGRATION_VERSION_RANGE;
+
+interface MigrationFile {
+    file: string;
+    name: string;
+    version: string;
+}
+
+export function migrationVersionFromFilename(file: string): string {
     const match = basename(file).match(/^(\d{8,20})[_-]/);
-    if (match) return Number(match[1]);
-    return Date.now() * 1000 + fallbackIndex;
+    if (match) {
+        const version = BigInt(match[1]);
+        if (version < 1n || version > MAX_MIGRATION_VERSION) {
+            throw new Error(`Invalid migration version '${match[1]}' in ${basename(file)}: expected 1..${MAX_MIGRATION_VERSION}`);
+        }
+        if (version >= FALLBACK_MIGRATION_VERSION_BASE && version < FALLBACK_MIGRATION_VERSION_LIMIT) {
+            throw new Error(`Invalid migration version '${match[1]}' in ${basename(file)}: version range ${FALLBACK_MIGRATION_VERSION_BASE}..${FALLBACK_MIGRATION_VERSION_LIMIT - 1n} is reserved for non-timestamp migrations`);
+        }
+        return version.toString();
+    }
+
+    const digest = createHash("sha256").update(basename(file)).digest("hex");
+    const offset = BigInt(`0x${digest}`) % FALLBACK_MIGRATION_VERSION_RANGE;
+    return (FALLBACK_MIGRATION_VERSION_BASE + offset).toString();
+}
+
+function sortMigrationFiles(migrations: MigrationFile[]): MigrationFile[] {
+    const sorted = [...migrations].sort((a, b) => {
+        const versionA = BigInt(a.version);
+        const versionB = BigInt(b.version);
+        if (versionA < versionB) return -1;
+        if (versionA > versionB) return 1;
+        return a.file.localeCompare(b.file);
+    });
+    for (let i = 1; i < sorted.length; i += 1) {
+        const previous = sorted[i - 1];
+        const current = sorted[i];
+        if (previous.version === current.version && (previous.file !== current.file || previous.name !== current.name)) {
+            throw new Error(`Migration version collision for ${current.version}: ${previous.file} and ${current.file}`);
+        }
+    }
+    return sorted;
 }
 
 function appliedMigrationKeys(data: unknown): Set<string> {
@@ -27,6 +69,27 @@ function appliedMigrationKeys(data: unknown): Set<string> {
         const migration = row as { version?: unknown; name?: unknown };
         if (migration.version != null) keys.add(String(migration.version));
         if (migration.name != null) keys.add(String(migration.name));
+    }
+    return keys;
+}
+
+function migrationRows(data: unknown): Array<Record<string, unknown>> {
+    const rows = Array.isArray(data) ? data : (data as { rows?: unknown[] })?.rows || [];
+    return Array.isArray(rows)
+        ? rows.filter((row): row is Record<string, unknown> => Boolean(row && typeof row === "object"))
+        : [];
+}
+
+function baselineMigrationKey(version: string, name: string): string {
+    return `${version}\u0000${name}`;
+}
+
+function baselineMigrationKeys(data: unknown): Set<string> {
+    const keys = new Set<string>();
+    for (const row of migrationRows(data)) {
+        if (row.version == null || row.name == null || !Array.isArray(row.statements)) continue;
+        if (row.statements.length !== 1 || row.statements[0] !== `baseline:${String(row.name)}`) continue;
+        keys.add(baselineMigrationKey(String(row.version), String(row.name)));
     }
     return keys;
 }
@@ -274,19 +337,20 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
                         break;
                     }
 
-                    const migrationFiles = files.map((file, i) => ({
+                    const migrationFiles = sortMigrationFiles(files.map((file) => ({
                         file,
                         name: basename(file, ".sql"),
-                        version: migrationVersionFromFilename(file, i),
-                    }));
+                        version: migrationVersionFromFilename(file),
+                    })));
+
+                    const migrationsResult = await http.get(`/v1/projects/${ref}/database/migrations`);
+                    if (!migrationsResult.ok) {
+                        text = `❌ Failed to load applied migrations (${migrationsResult.status}): ${JSON.stringify(migrationsResult.data)}`;
+                        break;
+                    }
 
                     if (args.dry_run) {
-                        const r = await http.get(`/v1/projects/${ref}/database/migrations`);
-                        if (!r.ok) {
-                            text = `❌ Failed to load applied migrations (${r.status}): ${JSON.stringify(r.data)}`;
-                            break;
-                        }
-                        const appliedKeys = appliedMigrationKeys(r.data);
+                        const appliedKeys = appliedMigrationKeys(migrationsResult.data);
                         const pending = migrationFiles.filter(({ name, version }) => !appliedKeys.has(name) && !appliedKeys.has(String(version)));
                         const alreadyApplied = migrationFiles.filter(({ name, version }) => appliedKeys.has(name) || appliedKeys.has(String(version)));
                         const pendingWithSql = pending.map((migration) => ({
@@ -317,7 +381,12 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
 
                     const applied: string[] = [];
                     const skipped: string[] = [];
+                    const baselineKeys = baselineMigrationKeys(migrationsResult.data);
                     for (const { file, name, version } of migrationFiles) {
+                        if (baselineKeys.has(baselineMigrationKey(version, name))) {
+                            skipped.push(file);
+                            continue;
+                        }
                         const sql = readFileSync(join(dir, file), "utf-8");
                         const r = await http.post(`/v1/projects/${ref}/database/migrations`, { name, sql, version });
                         if (r.ok) {
@@ -360,11 +429,11 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
                         break;
                     }
 
-                    const migrationFiles = files.map((file, i) => ({
+                    const migrationFiles = sortMigrationFiles(files.map((file) => ({
                         file,
                         name: basename(file, ".sql"),
-                        version: migrationVersionFromFilename(file, i),
-                    }));
+                        version: migrationVersionFromFilename(file),
+                    })));
 
                     const r = await http.get(`/v1/projects/${ref}/database/migrations`);
                     if (!r.ok) {
@@ -484,7 +553,7 @@ function sqlString(value: string): string {
     return `'${value.replace(/'/g, "''")}'`;
 }
 
-function buildMigrationBaselineSql(migrations: Array<{ name: string; version: number }>): string {
+function buildMigrationBaselineSql(migrations: Array<{ name: string; version: string }>): string {
     const values = migrations
         .map(({ name, version }) => `(${version}, ${sqlString(name)}, ARRAY[${sqlString(`baseline:${name}`)}]::text[])`)
         .join(",\n    ");
