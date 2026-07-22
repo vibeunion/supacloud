@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
+import { isIP } from "node:net";
 
 const MANAGEMENT_API_ENV = process.env.SUPACLOUD_MANAGEMENT_ENV_FILE
   ?? "/etc/supabase/management-api.env";
@@ -62,6 +63,8 @@ process.env.NODE_ENV ??= runtimeNodeEnv;
 if (runtimeNodeEnv === "development" || runtimeNodeEnv === "test") {
   loadEnvFile(LOCAL_ENV);
 }
+
+type CaddyTlsIssuer = "acme" | "internal";
 
 export interface Config {
   port: number;
@@ -154,8 +157,8 @@ export interface Config {
   legacySecretsEncryptionKey: string;
   supaoauthBffSigningSecret: string;
   caddyTlsBlockedDomains: string[];
-  /** TLS certificate issuer for on-demand Caddy certs: "acme" (default) or "internal". */
-  caddyTlsIssuer: "acme" | "internal";
+  /** TLS certificate issuer for on-demand Caddy certificates. */
+  caddyTlsIssuer: CaddyTlsIssuer;
   hostedAuthPageEnabled: boolean;
   hostedAuthPageHost: string;
   hostedAuthPageRoot: string;
@@ -182,20 +185,34 @@ const pgPassword = rawPgPassword === "" ? getEnv("PG_PASSWORD", "postgres") : ra
 const pgDatabase = getEnv("PG_DATABASE", "postgres");
 const edgeRuntimeInternal = getEnv("EDGE_RUNTIME_INTERNAL", `127.0.0.1:${edgeRuntimePort}`);
 
-// Whether an IPv4 string is an RFC1918 / loopback / link-local address.
-// Used to pick Caddy's on-demand TLS issuer: ACME cannot validate domains
-// that resolve to private addresses (Let's Encrypt validators cannot reach
-// them), so LAN-only hosts default to Caddy's built-in internal CA.
-function isPrivateIp(ip: string): boolean {
-    const v = ip.trim().replace(/^https?:\/\//, "").split("/")[0].split(":")[0];
-    if (v === "127.0.0.1" || v === "::1" || v === "localhost") return true;
-    const parts = v.split(".").map((n) => Number(n));
-    if (parts.length !== 4 || parts.some((n) => Number.isNaN(n) || n < 0 || n > 255)) return false;
-    const [a, b] = parts;
-    return (a === 10)
-        || (a === 172 && b >= 16 && b <= 31)
-        || (a === 192 && b === 168)
-        || (a === 169 && b === 254);
+// A private listen address indicates the common single-node LAN setup. Public
+// deployments behind NAT can explicitly force ACME with SUPACLOUD_CADDY_TLS_ISSUER.
+function isPrivateNetworkAddress(address: string): boolean {
+  const normalized = address.trim().toLowerCase();
+  if (normalized === "localhost" || normalized === "::1") return true;
+
+  const addressFamily = isIP(normalized);
+  if (addressFamily === 4) {
+    const [first, second] = normalized.split(".").map(Number);
+    return first === 10
+      || first === 127
+      || (first === 172 && second >= 16 && second <= 31)
+      || (first === 192 && second === 168)
+      || (first === 169 && second === 254);
+  }
+  if (addressFamily !== 6) return false;
+
+  const firstHextet = Number.parseInt(normalized.split(":")[0], 16);
+  return (firstHextet & 0xfe00) === 0xfc00 || (firstHextet & 0xffc0) === 0xfe80;
+}
+
+function resolveCaddyTlsIssuer(explicitIssuer: string, listenAddress: string): CaddyTlsIssuer {
+  const normalizedIssuer = explicitIssuer.trim().toLowerCase();
+  if (normalizedIssuer === "acme" || normalizedIssuer === "internal") return normalizedIssuer;
+  if (normalizedIssuer) {
+    throw new Error('Invalid SUPACLOUD_CADDY_TLS_ISSUER. Expected "acme" or "internal".');
+  }
+  return isPrivateNetworkAddress(listenAddress) ? "internal" : "acme";
 }
 
 export const config: Config = {
@@ -327,14 +344,10 @@ export const config: Config = {
       : "",
   ),
   caddyTlsBlockedDomains: getEnv("CADDY_TLS_BLOCKED_DOMAINS").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
-  // On-demand TLS issuer. Auto-detect: when the server listens on an RFC1918
-  // address, ACME (Let's Encrypt) can never validate a challenge because its
-  // validators cannot reach private IPs, so default to Caddy's internal CA.
-  // Operators can force either mode with SUPACLOUD_CADDY_TLS_ISSUER.
-  caddyTlsIssuer: ((explicit: string) => {
-    if (explicit === "acme" || explicit === "internal") return explicit;
-    return isPrivateIp(getEnv("DOCKER_HOST_IP", getEnv("INTERNAL_IP", "127.0.0.1"))) ? "internal" : "acme";
-  })(getEnv("SUPACLOUD_CADDY_TLS_ISSUER", "").trim().toLowerCase()),
+  caddyTlsIssuer: resolveCaddyTlsIssuer(
+    getEnv("SUPACLOUD_CADDY_TLS_ISSUER"),
+    getEnv("DOCKER_HOST_IP", getEnv("INTERNAL_IP", "127.0.0.1")),
+  ),
 
   hostedAuthPageEnabled: getEnv("HOSTED_AUTH_PAGE_ENABLED", getEnv("SUPAUTH_HOSTED_LOGIN_ENABLED", "false")) === "true",
   hostedAuthPageHost: getEnv("HOSTED_AUTH_PAGE_HOST", getEnv("SUPAUTH_HOSTED_LOGIN_HOST", "")),
