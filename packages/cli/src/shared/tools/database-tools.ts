@@ -23,6 +23,19 @@ interface MigrationFile {
     file: string;
     name: string;
     version: string;
+    sql: string;
+    rawBytes: Uint8Array;
+}
+
+function readMigrationFile(dir: string, file: string): MigrationFile {
+    const rawBytes = readFileSync(join(dir, file));
+    return {
+        file,
+        name: basename(file, ".sql"),
+        version: migrationVersionFromFilename(file),
+        sql: Buffer.from(rawBytes).toString("utf8"),
+        rawBytes,
+    };
 }
 
 export function migrationVersionFromFilename(file: string): string {
@@ -90,6 +103,25 @@ function baselineMigrationKeys(data: unknown): Set<string> {
         if (row.version == null || row.name == null || !Array.isArray(row.statements)) continue;
         if (row.statements.length !== 1 || row.statements[0] !== `baseline:${String(row.name)}`) continue;
         keys.add(baselineMigrationKey(String(row.version), String(row.name)));
+    }
+    return keys;
+}
+
+function historicalChecksumMarkerKeys(
+    data: unknown,
+    migrationFiles: MigrationFile[],
+): Set<string> {
+    const filesByKey = new Map(migrationFiles.map((migration) => [baselineMigrationKey(migration.version, migration.name), migration]));
+    const keys = new Set<string>();
+    for (const row of migrationRows(data)) {
+        if (row.version == null || row.name == null || !Array.isArray(row.statements) || row.statements.length !== 1) continue;
+        const marker = row.statements[0];
+        if (typeof marker !== "string" || !/^sha256:[0-9a-f]{64}$/.test(marker)) continue;
+        const key = baselineMigrationKey(String(row.version), String(row.name));
+        const migration = filesByKey.get(key);
+        if (!migration) continue;
+        const checksum = createHash("sha256").update(migration.rawBytes).digest("hex");
+        if (marker === `sha256:${checksum}`) keys.add(key);
     }
     return keys;
 }
@@ -337,11 +369,7 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
                         break;
                     }
 
-                    const migrationFiles = sortMigrationFiles(files.map((file) => ({
-                        file,
-                        name: basename(file, ".sql"),
-                        version: migrationVersionFromFilename(file),
-                    })));
+                    const migrationFiles = sortMigrationFiles(files.map((file) => readMigrationFile(dir, file)));
 
                     const migrationsResult = await http.get(`/v1/projects/${ref}/database/migrations`);
                     if (!migrationsResult.ok) {
@@ -353,10 +381,7 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
                         const appliedKeys = appliedMigrationKeys(migrationsResult.data);
                         const pending = migrationFiles.filter(({ name, version }) => !appliedKeys.has(name) && !appliedKeys.has(String(version)));
                         const alreadyApplied = migrationFiles.filter(({ name, version }) => appliedKeys.has(name) || appliedKeys.has(String(version)));
-                        const pendingWithSql = pending.map((migration) => ({
-                            ...migration,
-                            sql: readFileSync(join(dir, migration.file), "utf-8"),
-                        }));
+                        const pendingWithSql = pending;
                         let vectorEnabled: boolean | null = null;
                         if (pendingWithSql.some(({ sql }) => sqlReferencesVector(sql) || sqlCreatesVectorExtension(sql))) {
                             const extResult = await execSql("SELECT extname AS name FROM pg_extension WHERE extname = 'vector';");
@@ -382,12 +407,13 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
                     const applied: string[] = [];
                     const skipped: string[] = [];
                     const baselineKeys = baselineMigrationKeys(migrationsResult.data);
-                    for (const { file, name, version } of migrationFiles) {
-                        if (baselineKeys.has(baselineMigrationKey(version, name))) {
+                    const historicalChecksumKeys = historicalChecksumMarkerKeys(migrationsResult.data, migrationFiles);
+                    for (const { file, name, version, sql } of migrationFiles) {
+                        const migrationKey = baselineMigrationKey(version, name);
+                        if (baselineKeys.has(migrationKey) || historicalChecksumKeys.has(migrationKey)) {
                             skipped.push(file);
                             continue;
                         }
-                        const sql = readFileSync(join(dir, file), "utf-8");
                         const r = await http.post(`/v1/projects/${ref}/database/migrations`, { name, sql, version });
                         if (r.ok) {
                             applied.push(file);
@@ -429,11 +455,7 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
                         break;
                     }
 
-                    const migrationFiles = sortMigrationFiles(files.map((file) => ({
-                        file,
-                        name: basename(file, ".sql"),
-                        version: migrationVersionFromFilename(file),
-                    })));
+                    const migrationFiles = sortMigrationFiles(files.map((file) => readMigrationFile(dir, file)));
 
                     const r = await http.get(`/v1/projects/${ref}/database/migrations`);
                     if (!r.ok) {
