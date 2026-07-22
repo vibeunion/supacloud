@@ -119,6 +119,17 @@ describe("production config loading boundaries", () => {
     }))).toBe("internal");
   });
 
+  test("defaults Caddy TLS to the internal CA when configured addresses are empty", () => {
+    expect(loadCaddyTlsIssuer(cleanEnv({
+      NODE_ENV: "production",
+      DOCKER_HOST_IP: "",
+    }))).toBe("internal");
+    expect(loadCaddyTlsIssuer(cleanEnv({
+      NODE_ENV: "production",
+      INTERNAL_IP: "",
+    }))).toBe("internal");
+  });
+
   test("rejects an invalid explicit Caddy TLS issuer", () => {
     const configProcess = spawnSync("bun", ["-e", 'import "./src/config.ts";'], {
       cwd: packageRoot,

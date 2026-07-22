@@ -184,6 +184,9 @@ const rawPgPassword = getEnv("PGPASSWORD");
 const pgPassword = rawPgPassword === "" ? getEnv("PG_PASSWORD", "postgres") : rawPgPassword;
 const pgDatabase = getEnv("PG_DATABASE", "postgres");
 const edgeRuntimeInternal = getEnv("EDGE_RUNTIME_INTERNAL", `127.0.0.1:${edgeRuntimePort}`);
+const dockerHostIp = getEnv("DOCKER_HOST_IP").trim()
+  || getEnv("INTERNAL_IP").trim()
+  || "127.0.0.1";
 
 // A private listen address indicates the common single-node LAN setup. Public
 // deployments behind NAT can explicitly force ACME with SUPACLOUD_CADDY_TLS_ISSUER.
@@ -273,7 +276,7 @@ export const config: Config = {
       : "",
   ),
   logLevel: getEnv("LOG_LEVEL", "info"),
-  dockerHostIp: getEnv("DOCKER_HOST_IP", getEnv("INTERNAL_IP", "127.0.0.1")),
+  dockerHostIp,
 
   pgHost,
   pgPort,
@@ -346,7 +349,7 @@ export const config: Config = {
   caddyTlsBlockedDomains: getEnv("CADDY_TLS_BLOCKED_DOMAINS").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
   caddyTlsIssuer: resolveCaddyTlsIssuer(
     getEnv("SUPACLOUD_CADDY_TLS_ISSUER"),
-    getEnv("DOCKER_HOST_IP", getEnv("INTERNAL_IP", "127.0.0.1")),
+    dockerHostIp,
   ),
 
   hostedAuthPageEnabled: getEnv("HOSTED_AUTH_PAGE_ENABLED", getEnv("SUPAUTH_HOSTED_LOGIN_ENABLED", "false")) === "true",
