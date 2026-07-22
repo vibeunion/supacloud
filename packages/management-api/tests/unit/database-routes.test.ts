@@ -7,7 +7,6 @@ import {
   buildCreateMaterializedViewSql,
   buildDropMaterializedViewSql,
   buildRefreshMaterializedViewSql,
-  migrationExecutionStatements,
   MIGRATION_SESSION_RESET_SQL,
   migrationExecutionStatements,
   migrationLedgerEntryMatches,
