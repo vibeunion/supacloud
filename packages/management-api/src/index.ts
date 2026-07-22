@@ -1089,6 +1089,8 @@ async function bootstrap() {
   } else if (args.includes("--help") || args.includes("-h")) {
     process.exit(0);
   } else if (args.length === 0 || args.includes("--server")) {
+    const { validateRealtimeSecretConfiguration } = await import("./services/realtime.service");
+    validateRealtimeSecretConfiguration();
     const { sql: controlPlaneSql } = await import("./db");
     const { assertPlatformMigrationCompleted } = await import("./db/audit-chain-migration");
     const {

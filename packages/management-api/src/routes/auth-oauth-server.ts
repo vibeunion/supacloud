@@ -13,6 +13,10 @@ import {
 import { normalizeOAuthServerConfig, normalizeProjectConfig } from "../utils/project-config";
 import { requireAuthRuntimeManagement } from "./auth-runtime";
 import {
+  OAuthAuthorizationPathError,
+  resolveOAuthAuthorizationPath,
+} from "../utils/oauth-authorization-path";
+import {
   buildAwsKmsRs256JwtKeyMaterial,
   generateOidcJwtKeyMaterial,
   normalizeProjectJwtJwks,
@@ -81,6 +85,7 @@ type OAuthServerSettings = {
 
 type MigrateOAuthServerInput = {
   allow_dynamic_registration?: boolean;
+  authorization_path?: string;
 };
 
 type KmsRs256Input = {
@@ -139,6 +144,7 @@ function buildOAuthServerStatus(ctx: NonNullable<Awaited<ReturnType<typeof loadP
     enabled: migrated && ctx.oauthServer.enabled === true,
     allow_dynamic_registration: ctx.oauthServer.allow_dynamic_registration === true,
     issuer,
+    authorization_path: ctx.oauthServer.authorization_path,
     discovery_url: `${issuer}/.well-known/openid-configuration`,
     oauth_authorization_server_metadata_url: `${authUrl}/.well-known/oauth-authorization-server/auth/v1`,
     jwks_url: `${issuer}/.well-known/jwks.json`,
@@ -185,11 +191,16 @@ async function configureKmsRs256Signing(
 
   const currentAuth = (settings.auth || {}) as Record<string, unknown>;
   const currentOauthServer = normalizeOAuthServerConfig(currentAuth.oauth_server) as OAuthServerSettings;
+  const authorizationPath = resolveOAuthAuthorizationPath(
+    undefined,
+    currentOauthServer.authorization_path,
+  );
   const oauthServer: OAuthServerSettings = {
     ...currentOauthServer,
     enabled: true,
     allow_dynamic_registration: input.allow_dynamic_registration === true,
     issuer: ctx.issuer,
+    authorization_path: authorizationPath,
     migrated_at: new Date().toISOString(),
     signing_alg: keyMaterial.signing_alg,
     key_id: keyMaterial.key_id,
@@ -298,6 +309,18 @@ async function migrateProjectToOidc(
 
   const currentAuth = (settings.auth || {}) as Record<string, unknown>;
   const currentOauthServer = normalizeOAuthServerConfig(currentAuth.oauth_server) as OAuthServerSettings;
+  let authorizationPath: string;
+  try {
+    authorizationPath = resolveOAuthAuthorizationPath(
+      input.authorization_path,
+      currentOauthServer.authorization_path,
+    );
+  } catch (error: unknown) {
+    if (error instanceof OAuthAuthorizationPathError) {
+      return status(400, { message: error.message, code: "400" });
+    }
+    throw error;
+  }
   const existingJwtKeys = normalizeProjectJwtKeys(currentOauthServer.jwt_keys);
   const existingJwtJwks = normalizeProjectJwtJwks(currentOauthServer.jwt_jwks);
   const keyMaterial = existingJwtKeys && existingJwtJwks && typeof currentOauthServer.key_id === "string"
@@ -314,6 +337,7 @@ async function migrateProjectToOidc(
     enabled: true,
     allow_dynamic_registration: input.allow_dynamic_registration === true,
     issuer: ctx.issuer,
+    authorization_path: authorizationPath,
     migrated_at: new Date().toISOString(),
     signing_alg: keyMaterial.signing_alg,
     key_id: keyMaterial.key_id,
@@ -336,10 +360,13 @@ async function migrateProjectToOidc(
       ref,
       error: error instanceof Error ? error.message : String(error),
     });
+    return status(503, {
+      code: "SUPAUTH_DEPENDENT_REFRESH_FAILED",
+      message: "OIDC signing configuration was saved, but one or more SupAuth runtimes failed to refresh",
+    });
   }
 
-  const updatedCtx = await loadProjectContext(ref);
-  return buildOAuthServerStatus(updatedCtx || ctx);
+  return buildOAuthServerStatus({ ...ctx, oauthServer });
 }
 
 export const authOAuthServerRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
@@ -366,7 +393,10 @@ export const authOAuthServerRoutes = new Elysia({ prefix: "/v1/projects/:ref/aut
     },
     {
       params: t.Object({ ref: t.String() }),
-      body: t.Object({ allow_dynamic_registration: t.Optional(t.Boolean()) }),
+      body: t.Object({
+        allow_dynamic_registration: t.Optional(t.Boolean()),
+        authorization_path: t.Optional(t.String({ minLength: 1, maxLength: 2048 })),
+      }),
       detail: { tags: ["auth"], summary: "Migrate project auth to OIDC signing keys" },
     },
   )

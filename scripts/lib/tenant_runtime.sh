@@ -181,13 +181,15 @@ preserve_management_api_config_if_present() {
 
 ensure_tenant_runtime_user() {
     local ref="$1"
-    local runtime_user
+    local runtime_user helper
     runtime_user=$(tenant_runtime_user "$ref")
-    if ! id -u "$runtime_user" >/dev/null 2>&1; then
-        local nologin_shell
-        nologin_shell=$(command -v nologin 2>/dev/null || printf '/sbin/nologin')
-        useradd --system --user-group --no-create-home --home-dir /nonexistent --shell "$nologin_shell" "$runtime_user"
+    if [ -x /usr/local/libexec/supacloud/tenant-user ]; then
+        helper=/usr/local/libexec/supacloud/tenant-user
+    else
+        helper="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tenant_user.sh"
     fi
+    [ -f "$helper" ] || { echo "ERROR: Tenant user helper is missing" >&2; return 1; }
+    bash "$helper" "$ref" || return 1
     printf '%s' "$runtime_user"
 }
 

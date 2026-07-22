@@ -442,7 +442,10 @@ describe("@supacloud/js", () => {
     });
 
     const status = await client.auth.oauthServer.getStatus();
-    await client.auth.oauthServer.migrateToOidc({ allowDynamicRegistration: true });
+    await client.auth.oauthServer.migrateToOidc({
+      allowDynamicRegistration: true,
+      authorizationPath: "/authorize.html",
+    });
     const discovery = await client.auth.oauthServer.getDiscovery();
     const jwks = await client.auth.oauthServer.getJwks();
     const authorizeUrl = await client.auth.oauthServer.buildAuthorizeUrl({
@@ -488,6 +491,11 @@ describe("@supacloud/js", () => {
     expect(calls[0]?.init?.headers instanceof Headers || typeof calls[0]?.init?.headers === "object").toBe(true);
     expect(new Headers(calls[0]?.init?.headers).get("authorization")).toBe("Bearer token-123");
     expect(calls.some((call) => call.url.endsWith("/auth/oauth-server/migrate"))).toBe(true);
+    const migrationCall = calls.find((call) => call.url.endsWith("/auth/oauth-server/migrate"));
+    expect(JSON.parse(String(migrationCall?.init?.body))).toMatchObject({
+      allow_dynamic_registration: true,
+      authorization_path: "/authorize.html",
+    });
     expect(calls.some((call) => call.url.endsWith("/auth/oauth-clients"))).toBe(true);
     expect(calls.some((call) => call.url.endsWith("/auth/oauth-clients/client_1"))).toBe(true);
   });

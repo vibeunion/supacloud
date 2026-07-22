@@ -160,12 +160,15 @@ describe("FrontendService SvelteKit defaults", () => {
 
       const unit = renderSvelteKitSystemdUnit({
         serviceName: "supacloud-frontend-proj123-app123",
+        runtimeUser: "supacloud-proj123",
         description: "SvelteKit app",
         buildDir,
         envFile: join(deploymentDir, ".env"),
         port: 30123,
       });
       expect(unit).toContain(`WorkingDirectory=${buildDir}`);
+      expect(unit).toContain("User=supacloud-proj123");
+      expect(unit).toContain("Group=supacloud-proj123");
       expect(unit).toContain('Environment="PROTOCOL_HEADER=x-forwarded-proto"');
       expect(unit).toContain('Environment="HOST_HEADER=x-forwarded-host"');
       expect(unit).toContain('Environment="PORT_HEADER=x-forwarded-port"');

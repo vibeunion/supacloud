@@ -212,6 +212,9 @@ jobs:
           bash -n install.sh setup.sh switch.sh deploy_all.sh scripts/pre_start_recovery.sh
           find scripts -name "*.sh" -print0 | xargs -0 -n1 bash -n
           bash scripts/lib/tenant_runtime.test.sh
+          bash scripts/lib/installer_pg_hba.test.sh
+          bash scripts/lib/tenant_user.test.sh
+          bash scripts/lib/systemd_unit_broker.test.sh
 
       - name: Validate CI scripts
         run: |
@@ -558,6 +561,10 @@ jobs:
       - name: Launch API & Execute Full Defenses
         working-directory: packages/management-api
         run: |
+          realtime_container_env="$RUNNER_TEMP/realtime-container.env"
+          umask 077
+          printf 'API_JWT_SECRET=%s\n' "$TEST_FIXED_JWT_SECRET" > "$realtime_container_env"
+          export SUPACLOUD_REALTIME_CONTAINER_ENV_FILE="$realtime_container_env"
           echo "Starting Management API in background..."
           bun src/index.ts > api-server.log 2>&1 &
           PID=$!

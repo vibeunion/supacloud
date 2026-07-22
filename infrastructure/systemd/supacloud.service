@@ -37,11 +37,17 @@ SyslogIdentifier=supacloud
 NoNewPrivileges=true
 ProtectSystem=full
 ProtectHome=false
-ReadWritePaths=/etc/supabase /opt/supacloud /tmp /var/log/supacloud
+# Unit files are installed by the fixed, allow-listed systemd-unit broker. The
+# network-facing control plane can only write request files, not persistent
+# host units or arbitrary drop-ins.
+RuntimeDirectory=supacloud-unit-requests
+RuntimeDirectoryMode=0700
+ReadWritePaths=/etc/supabase /run/supacloud-unit-requests /etc/supacloud/caddy /opt/supacloud /tmp /var/log/supacloud
 
-SystemCallFilter=@system-service
-SystemCallFilter=~@mount @reboot @swap @privileged @raw-io @keyring
+SystemCallFilter=@system-service @chown
+SystemCallFilter=~@mount @reboot @swap @raw-io @keyring
 SystemCallArchitectures=native
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER
 
 MemoryMax=4G
 MemoryHigh=3G

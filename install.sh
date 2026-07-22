@@ -198,90 +198,38 @@ ensure_bun_version() {
     fi
 }
 
-ensure_pg_hba_rule() (
-    local rule="$1"
-    local pg_hba="${2:-/pg/data/pg_hba.conf}"
-    local patroni_config=""
-    local cluster_name=""
-    local tmp_before="" tmp_after=""
-    umask 077
-    trap 'rm -f "${tmp_before:-}" "${tmp_after:-}"' EXIT HUP INT TERM
-
-    if command -v patronictl >/dev/null 2>&1; then
-        for candidate in /etc/patroni/patroni.yml /etc/patroni.yml /etc/patroni.yaml; do
-            if [[ -f "$candidate" ]]; then
-                patroni_config="$candidate"
-                break
-            fi
-        done
-    fi
-
-    if [[ -n "$patroni_config" ]] && [[ -f "$pg_hba" ]] && grep -q "overwritten by Patroni" "$pg_hba" 2>/dev/null; then
-        cluster_name=$(patronictl -c "$patroni_config" list 2>/dev/null | sed -n 's/.*Cluster: \([^ ]*\).*/\1/p' | head -1)
-        cluster_name="${cluster_name:-pg-meta}"
-        tmp_before=$(mktemp) || {
-            log_warn "Failed to allocate temporary file for Patroni pg_hba update"
-            return 1
-        }
-        tmp_after=$(mktemp) || {
-            log_warn "Failed to allocate temporary file for Patroni pg_hba update"
-            rm -f "$tmp_before"
-            return 1
-        }
-        if ! patronictl -c "$patroni_config" show-config > "$tmp_before"; then
-            log_warn "Failed to read Patroni dynamic config; cannot add pg_hba rule: $rule"
-            rm -f "$tmp_before" "$tmp_after"
-            return 1
-        fi
-        if ! RULE="$rule" python3 - "$tmp_before" "$tmp_after" <<'PYCODE'
-import os
-import sys
-import yaml
-
-src, dst = sys.argv[1], sys.argv[2]
-rule = os.environ["RULE"]
-with open(src, "r", encoding="utf-8") as fh:
-    data = yaml.safe_load(fh) or {}
-postgresql = data.setdefault("postgresql", {})
-pg_hba = postgresql.setdefault("pg_hba", [])
-if rule not in pg_hba:
-    pg_hba.insert(0, rule)
-with open(dst, "w", encoding="utf-8") as fh:
-    yaml.safe_dump(data, fh, sort_keys=False)
-PYCODE
-        then
-            log_warn "Failed to render Patroni pg_hba update; cannot add rule: $rule"
-            rm -f "$tmp_before" "$tmp_after"
-            return 1
-        fi
-        if ! cmp -s "$tmp_before" "$tmp_after"; then
-            log_info "Adding Patroni pg_hba rule: $rule"
-            if ! patronictl -c "$patroni_config" edit-config --apply "$tmp_after" --force "$cluster_name"; then
-                log_warn "Failed to apply Patroni pg_hba rule: $rule"
-                rm -f "$tmp_before" "$tmp_after"
-                return 1
-            fi
-        else
-            log_info "Patroni pg_hba rule already exists: $rule"
-        fi
-        rm -f "$tmp_before" "$tmp_after"
-        sudo -u postgres psql -c "SELECT pg_reload_conf();" 2>/dev/null || true
-        return 0
-    fi
-
-    if [[ ! -f "$pg_hba" ]]; then
-        log_warn "$pg_hba not found, cannot add pg_hba rule: $rule"
-        return 1
-    fi
-
-    if grep -qF "$rule" "$pg_hba"; then
-        log_info "pg_hba rule already exists: $rule"
+# Persist the tenant HBA rule in Pigsty's inventory and render it through the
+# official pgsql role. /pg/data/pg_hba.conf is ANSIBLE MANAGED and must never be
+# edited directly: Patroni/Pigsty would overwrite a runtime-only change.
+apply_pigsty_tenant_hba_rules() (
+    local pigsty_path="$1"
+    local pigsty_config="$2"
+    local pgsql_playbook="${pigsty_path}/pgsql.yml"
+    cd "$pigsty_path"
+    if [[ -x "$pgsql_playbook" ]]; then
+        "$pgsql_playbook" -l pg-meta --tags=pg_hba -e pg_reload=true
     else
-        log_info "Adding pg_hba rule: $rule"
-        cp "$pg_hba" "${pg_hba}.bak.$(date +%s)"
-        echo "$rule" >> "$pg_hba"
+        ansible-playbook -i "$pigsty_config" "$pgsql_playbook" -l pg-meta --tags=pg_hba -e pg_reload=true
     fi
 )
+
+ensure_pigsty_tenant_hba_rule() {
+    local pigsty_path="${PIGSTY_PATH:-${HOME}/pigsty}"
+    local pigsty_config="${PIGSTY_CONFIG:-${pigsty_path}/pigsty.yml}"
+    local pgsql_playbook="${pigsty_path}/pgsql.yml"
+    local patcher="${SCRIPT_DIR}/scripts/lib/patch_pigsty_tenant_hba.py"
+
+    [[ -f "$pigsty_config" ]] || { log_warn "Pigsty inventory not found at ${pigsty_config}"; return 1; }
+    [[ -f "$pgsql_playbook" ]] || { log_warn "Pigsty pgsql playbook not found at ${pgsql_playbook}"; return 1; }
+    [[ -x "$patcher" ]] || { log_warn "Pigsty HBA patcher not found at ${patcher}"; return 1; }
+    "$patcher" "$pigsty_config" || {
+        log_warn "Pigsty inventory does not contain one unambiguous multiline pg_hba_rules section"
+        return 1
+    }
+
+    log_info "Persisted tenant authenticator HBA rule in ${pigsty_config}"
+    apply_pigsty_tenant_hba_rules "$pigsty_path" "$pigsty_config"
+}
 
 
 configure_low_memory_tcp_guardrails() {
@@ -2450,110 +2398,11 @@ fix_container_healthchecks() {
  
 # ========== Configure PG HBA Whitelist ==========
 configure_pg_hba() {
-    log_step "Configuring database access whitelist (pg_hba.conf)..."
-
-    # 1. Identify container network segment
-    # Try detecting cni-podman0 (Podman) or docker0 (Docker)
-    CONTAINER_NET=""
-    
-    if ip addr show cni-podman0 &> /dev/null; then
-        CONTAINER_NET=$(ip -o -4 addr show cni-podman0 | awk '{print $4}')
-        log_info "Found Podman network: ${CONTAINER_NET}"
-    elif ip addr show docker0 &> /dev/null; then
-        CONTAINER_NET=$(ip -o -4 addr show docker0 | awk '{print $4}')
-        log_info "Found Docker network: ${CONTAINER_NET}"
-    else
-        # Try intelligent guess, look for 10.88/16, 10.89/24 common subnets
-        CONTAINER_NET=$(ip route | grep "link src" | grep -E "10\.(88|89)\." | awk '{print $1}' | head -1)
-    fi
-
-    if [[ -z "$CONTAINER_NET" ]]; then
-        # Fallback: default Podman subnet
-        CONTAINER_NET="10.88.0.0/16" 
-        log_warn "Container network not detected, using default: ${CONTAINER_NET}"
-    fi
-
-    # 2. Locate pg_hba.conf
-    # Pigsty default path
-    PG_HBA="/pg/data/pg_hba.conf"
-    
-    if [[ ! -f "$PG_HBA" ]]; then
-        log_warn "$PG_HBA not found, attempting to find other locations..."
-        # Try searching for Debian/Ubuntu or RHEL default paths
-        POSSIBLE_PATHS=(
-            "/var/lib/postgresql/data/pg_hba.conf"
-            "/var/lib/pgsql/data/pg_hba.conf"
-            "/etc/postgresql/14/main/pg_hba.conf"
-            "/etc/postgresql/15/main/pg_hba.conf"
-        )
-        for path in "${POSSIBLE_PATHS[@]}"; do
-            if [[ -f "$path" ]]; then
-                PG_HBA="$path"
-                log_info "Found pg_hba.conf: $PG_HBA"
-                break
-            fi
-        done
-    fi
-
-    if [[ ! -f "$PG_HBA" ]]; then
-        log_warn "pg_hba.conf not found, skipping configuration"
-        return
-    fi
-    
-    # 3. Add rules.
-    # Management API and tenant runtimes usually run on the database host. Some
-    # installs set DATABASE_URL/PG_HOST to INTERNAL_IP instead of loopback, so
-    # PostgreSQL sees the connection as coming from that host IP and rejects it
-    # unless pg_hba.conf explicitly allows it.
-    CONFIG_LINE="host all all ${CONTAINER_NET} scram-sha-256"
-    LOCALHOST_RULE="host    all             all             127.0.0.1/32            scram-sha-256"
-    HOST_RULE=""
-    if [[ -n "${INTERNAL_IP:-}" && "$INTERNAL_IP" != "127.0.0.1" && "$INTERNAL_IP" != "localhost" ]]; then
-        HOST_RULE="host    all             all             ${INTERNAL_IP}/32            scram-sha-256"
-    fi
-    
-    if grep -qF "$CONTAINER_NET" "$PG_HBA"; then
-        log_info "Rule already exists: $CONFIG_LINE"
-    else
-        log_info "Adding rule: $CONFIG_LINE"
-        # Backup
-        cp "$PG_HBA" "${PG_HBA}.bak.$(date +%s)"
-        # Append to file
-        echo "$CONFIG_LINE" >> "$PG_HBA"
-    fi
-    
-    # Add localhost rule
-    if ! grep -qF "127.0.0.1/32" "$PG_HBA"; then
-        log_info "Adding localhost password authentication rule..."
-        echo "$LOCALHOST_RULE" >> "$PG_HBA"
-    fi
-
-    # Add host self-IP rule when management services use INTERNAL_IP.
-    if [[ -n "$HOST_RULE" ]]; then
-        if grep -qF "${INTERNAL_IP}/32" "$PG_HBA"; then
-            log_info "Rule already exists for host IP: ${INTERNAL_IP}/32"
-        else
-            log_info "Adding host self-IP authentication rule: ${INTERNAL_IP}/32"
-            echo "$HOST_RULE" >> "$PG_HBA"
-        fi
-    fi
-        
-    # 4. Reload configuration
-    log_info "Reloading PostgreSQL configuration..."
-    if command -v pg_ctl &> /dev/null; then
-         # Execute as postgres user
-         su - postgres -c "pg_ctl reload -D $(dirname "$PG_HBA")"
-    elif systemctl is-active --quiet postgresql; then
-         systemctl reload postgresql
-    elif systemctl is-active --quiet patroni; then
-         systemctl reload patroni
-    elif pgrep -u postgres postgres > /dev/null; then
-         # Try sending SIGHUP
-         pkill -HUP -u postgres postgres
-         log_info "Sent SIGHUP signal to postgres process"
-    else
-         log_warn "Cannot automatically reload PostgreSQL, please execute reload manually"
-    fi
+    log_step "Persisting tenant database HBA access through Pigsty..."
+    ensure_pigsty_tenant_hba_rule || {
+        log_error "Failed to persist the tenant authenticator HBA rule through Pigsty"
+        return 1
+    }
 }
 
 # ========== Save All Credentials ==========
@@ -2710,6 +2559,36 @@ WantedBy=multi-user.target
 EOF
 }
 
+install_tenant_user_helper() {
+    local helper_src="${SCRIPT_DIR}/scripts/lib/tenant_user.sh"
+    local unit_src="${SCRIPT_DIR}/infrastructure/systemd/supacloud-tenant-user@.service"
+    local helper_target="/usr/local/libexec/supacloud/tenant-user"
+    local unit_target="/etc/systemd/system/supacloud-tenant-user@.service"
+
+    if [[ ! -f "$helper_src" || ! -f "$unit_src" ]]; then
+        log_error "Tenant user helper assets are missing"
+        return 1
+    fi
+
+    install -D -m 0755 "$helper_src" "$helper_target"
+    install -m 0644 "$unit_src" "$unit_target"
+}
+
+install_systemd_unit_broker() {
+    local helper_src="${SCRIPT_DIR}/scripts/lib/systemd_unit_broker.sh"
+    local unit_src="${SCRIPT_DIR}/infrastructure/systemd/supacloud-systemd-unit@.service"
+    local helper_target="/usr/local/libexec/supacloud/systemd-unit"
+    local unit_target="/etc/systemd/system/supacloud-systemd-unit@.service"
+
+    if [[ ! -f "$helper_src" || ! -f "$unit_src" ]]; then
+        log_error "Systemd unit broker assets are missing"
+        return 1
+    fi
+
+    install -D -m 0755 "$helper_src" "$helper_target"
+    install -m 0644 "$unit_src" "$unit_target"
+}
+
 recover_management_api_install() {
     local transaction_dir="$1"
     local service_was_active="$2"
@@ -2720,6 +2599,10 @@ recover_management_api_install() {
     fi
     supacloud_restore_file_snapshot /usr/local/bin/supacloud "${transaction_dir}/binary" || return 1
     supacloud_restore_file_snapshot /etc/systemd/system/supacloud.service "${transaction_dir}/unit" || return 1
+    supacloud_restore_file_snapshot /usr/local/libexec/supacloud/tenant-user "${transaction_dir}/tenant-user-helper" || return 1
+    supacloud_restore_file_snapshot /etc/systemd/system/supacloud-tenant-user@.service "${transaction_dir}/tenant-user-unit" || return 1
+    supacloud_restore_file_snapshot /usr/local/libexec/supacloud/systemd-unit "${transaction_dir}/systemd-unit-helper" || return 1
+    supacloud_restore_file_snapshot /etc/systemd/system/supacloud-systemd-unit@.service "${transaction_dir}/systemd-unit-unit" || return 1
     if [[ "$keep_current_env" != "true" ]]; then
         supacloud_restore_file_snapshot "$MANAGEMENT_ENV_FILE" "${transaction_dir}/env" || return 1
     fi
@@ -2771,6 +2654,10 @@ install_management_api() {
     supacloud_capture_file_snapshot "$BIN_TARGET" "${management_transaction_dir}/binary"
     supacloud_capture_file_snapshot "$MANAGEMENT_ENV_FILE" "${management_transaction_dir}/env"
     supacloud_capture_file_snapshot /etc/systemd/system/supacloud.service "${management_transaction_dir}/unit"
+    supacloud_capture_file_snapshot /usr/local/libexec/supacloud/tenant-user "${management_transaction_dir}/tenant-user-helper"
+    supacloud_capture_file_snapshot /etc/systemd/system/supacloud-tenant-user@.service "${management_transaction_dir}/tenant-user-unit"
+    supacloud_capture_file_snapshot /usr/local/libexec/supacloud/systemd-unit "${management_transaction_dir}/systemd-unit-helper"
+    supacloud_capture_file_snapshot /etc/systemd/system/supacloud-systemd-unit@.service "${management_transaction_dir}/systemd-unit-unit"
     staged_management_binary="${management_transaction_dir}/supacloud.staged"
     log_info "Staging validated Management API binary from $SELECTED_BIN_SOURCE"
     supacloud_atomic_install_binary "$SELECTED_BIN_SOURCE" "$CI_BIN" "$staged_management_binary"
@@ -2893,6 +2780,7 @@ install_management_api() {
         REALTIME_SECRET_KEY_BASE "$REALTIME_SECRET_KEY_BASE" \
         REALTIME_DB_ENC_KEY "$REALTIME_DB_ENC_KEY" \
         REALTIME_API_SECRET "$JWT_SECRET" \
+        SUPACLOUD_REALTIME_CONTAINER_ENV_FILE "${SUPACLOUD_REALTIME_CONTAINER_ENV_FILE:-/etc/supabase/realtime-container.env}" \
         REALTIME_IMAGE "${REALTIME_IMAGE:-public.ecr.aws/supabase/realtime:v2.116.1}" \
         REALTIME_CONTAINER_NAME "${REALTIME_CONTAINER_NAME:-supacloud-realtime}" \
         REALTIME_DB_USER supabase_admin \
@@ -2971,6 +2859,12 @@ install_management_api() {
     log_info "Activating Management API binary and systemd unit..."
     local activation_status=0
     write_management_api_systemd_unit "$BIN_TARGET" || activation_status=$?
+    if (( activation_status == 0 )); then
+        install_tenant_user_helper || activation_status=$?
+    fi
+    if (( activation_status == 0 )); then
+        install_systemd_unit_broker || activation_status=$?
+    fi
     if (( activation_status == 0 )); then
         mv -f "$staged_management_binary" "$BIN_TARGET" || activation_status=$?
     fi
@@ -3245,6 +3139,13 @@ write_realtime_container_env() {
         RUN_JANITOR false \
         SECURE_CHANNELS false \
         DISABLE_HEALTHCHECK_LOGGING true
+
+    local rendered_api_secret
+    rendered_api_secret=$(supacloud_env_value "$target_file" API_JWT_SECRET)
+    if [[ "$rendered_api_secret" != "$JWT_SECRET" ]]; then
+        log_error "Realtime container API_JWT_SECRET does not match JWT_SECRET"
+        return 1
+    fi
 }
 
 render_realtime_systemd_unit() {

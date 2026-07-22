@@ -171,7 +171,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
         ref: t.String(),
       }),
       body: t.Object({
-        name: t.String({ minLength: 1 }),
+        name: t.String({ minLength: 1, maxLength: 100, pattern: "^[^\\r\\n]+$" }),
         framework: t.String(),
         domain: t.Optional(t.String()),
         custom_domains: t.Optional(t.Array(t.String())),
@@ -213,7 +213,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
         id: t.String(),
       }),
       body: t.Object({
-        name: t.Optional(t.String()),
+        name: t.Optional(t.String({ minLength: 1, maxLength: 100, pattern: "^[^\\r\\n]+$" })),
         domain: t.Optional(t.String()),
         custom_domains: t.Optional(t.Array(t.String())),
         build_command: t.Optional(t.String()),

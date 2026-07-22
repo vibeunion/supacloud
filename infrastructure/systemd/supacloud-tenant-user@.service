@@ -1,0 +1,28 @@
+[Unit]
+Description=Create the isolated SupaCloud runtime account for tenant %i
+Documentation=https://github.com/supacloud/supacloud
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/supacloud/tenant-user %i
+UMask=0077
+
+# This short-lived, fixed helper is the only tenant-provisioning process that
+# may update the system account database. The long-running control plane keeps
+# /etc read-only apart from its explicitly managed configuration paths.
+NoNewPrivileges=true
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+LockPersonality=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX
+SystemCallArchitectures=native
+SystemCallFilter=@system-service @chown
+SystemCallFilter=~@mount @reboot @swap @raw-io @keyring
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_SETGID CAP_SETUID

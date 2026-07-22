@@ -3,6 +3,7 @@ import { join, relative } from "node:path";
 
 type SvelteKitSystemdUnitInput = {
   serviceName: string;
+  runtimeUser: string;
   description: string;
   buildDir: string;
   envFile: string;
@@ -19,7 +20,7 @@ async function requireDirectory(path: string, message: string): Promise<void> {
   if (!entry?.isDirectory()) throw new Error(message);
 }
 
-function assertSystemdValue(value: string, label: string): string {
+export function assertSystemdValue(value: string, label: string): string {
   if (!value || /[\r\n]/.test(value)) {
     throw new Error(`${label} contains unsupported systemd characters`);
   }
@@ -54,6 +55,7 @@ export async function prepareSvelteKitRuntime(
 
 export function renderSvelteKitSystemdUnit(input: SvelteKitSystemdUnitInput): string {
   const serviceName = assertSystemdValue(input.serviceName, "Service name");
+  const runtimeUser = assertSystemdValue(input.runtimeUser, "Runtime user");
   const description = assertSystemdValue(input.description, "Description");
   const buildDir = assertSystemdValue(input.buildDir, "Build directory");
   const envFile = assertSystemdValue(input.envFile, "Environment file");
@@ -65,14 +67,15 @@ After=network.target
 
 [Service]
 Type=simple
-User=root
+User=${runtimeUser}
+Group=${runtimeUser}
 WorkingDirectory=${buildDir}
+NoNewPrivileges=true
 Environment="PORT=${input.port}"
 Environment="NODE_ENV=production"
 Environment="PROTOCOL_HEADER=x-forwarded-proto"
 Environment="HOST_HEADER=x-forwarded-host"
 Environment="PORT_HEADER=x-forwarded-port"
-EnvironmentFile=-/etc/supabase/management-api.env
 EnvironmentFile=${envFile}
 ExecStart=/usr/bin/env node ${entrypoint}
 Restart=always

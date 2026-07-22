@@ -349,6 +349,23 @@ describe("runtime companion version assets", () => {
     expect(edgeUnit).toContain("ExecStart=/usr/local/bin/supacloud-edge-runtime");
     expect(installer).toContain("render_edge_runtime_systemd_unit");
     expect(installer).not.toContain('cp "${SYSTEMD_SRC}/supacloud-edge-runtime.service" /etc/systemd/system/supacloud-edge-runtime.service');
+    expect(managementUnit).not.toContain("ReadWritePaths=/etc/supabase /etc/systemd/system ");
+    expect(managementUnit).toContain("/run/supacloud-unit-requests");
+    expect(managementUnit).toContain("CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER");
+    expect(managementUnit).toContain("SystemCallFilter=@system-service @chown");
+    expect(managementUnit).not.toContain("@privileged");
+    expect(installer).toContain("install_tenant_user_helper");
+    expect(installer).toContain("install_systemd_unit_broker");
+    expect(installer).toContain('supacloud_capture_file_snapshot /usr/local/libexec/supacloud/tenant-user');
+    expect(installer).toContain('supacloud_restore_file_snapshot /usr/local/libexec/supacloud/systemd-unit');
+    expect(readRepoFile("infrastructure/systemd/supacloud-tenant-user@.service")).toContain(
+      "ExecStart=/usr/local/libexec/supacloud/tenant-user %i",
+    );
+    expect(readRepoFile("scripts/lib/tenant_user.sh")).toContain("^[a-z0-9-]{1,20}$");
+    expect(readRepoFile("scripts/lib/tenant_user.sh")).toContain("validate_runtime_user");
+    const systemdBrokerUnit = readRepoFile("infrastructure/systemd/supacloud-systemd-unit@.service");
+    expect(systemdBrokerUnit).toContain("ExecStart=/usr/local/libexec/supacloud/systemd-unit %i");
+    expect(systemdBrokerUnit).toContain("ProtectSystem=strict");
     expect(serviceRenderer).not.toContain("/opt/supacloud/config.env");
     expect(serviceRenderer).toContain("/etc/supabase/management-api.env");
     expect(installer).toContain('XCADDY_VERSION="${XCADDY_VERSION:-v0.4.5}"');

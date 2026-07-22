@@ -190,6 +190,8 @@ describe("authOAuthServerRoutes", () => {
     expect(updatePayload.auth?.oauth_server?.enabled).toBe(true);
     expect(updatePayload.auth?.oauth_server?.allow_dynamic_registration).toBe(true);
     expect(String(updatePayload.auth?.oauth_server?.issuer)).toMatch(/\/auth\/v1$/);
+    expect(updatePayload.auth?.oauth_server?.authorization_path).toBe("/authorize.html");
+    expect(payload.authorization_path).toBe("/authorize.html");
     expect(updatePayload.auth?.oauth_server?.signing_alg).toBe("ES256");
     expect(typeof updatePayload.auth?.oauth_server?.key_id).toBe("string");
     expect(Array.isArray(updatePayload.auth?.oauth_server?.jwt_keys)).toBe(true);
@@ -208,6 +210,34 @@ describe("authOAuthServerRoutes", () => {
       key_ops: ["sign"],
     });
     expect(legacyKey).toBeUndefined();
+
+    const rejected = await request("/v1/projects/proj_1/auth/oauth-server/migrate", {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer dev-master-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        authorization_path: "https://auth.example.com/authorize.html",
+      }),
+    });
+    expect(rejected.status).toBe(400);
+    expect(updateSpy).toHaveBeenCalledTimes(1);
+    expect(restartSpy).toHaveBeenCalledTimes(1);
+
+    restartSpy.mockRejectedValueOnce(new Error("runtime restart failed"));
+    const unavailable = await request("/v1/projects/proj_1/auth/oauth-server/migrate", {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer dev-master-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ authorization_path: "/authorize.html" }),
+    });
+    expect(unavailable.status).toBe(503);
+    expect(await unavailable.json()).toMatchObject({
+      code: "SUPAUTH_DEPENDENT_REFRESH_FAILED",
+    });
 
     projectSpy.mockRestore();
     settingsSpy.mockRestore();
@@ -293,6 +323,7 @@ describe("authOAuthServerRoutes", () => {
       signing_alg: "RS256",
       key_id: "kms-key-1",
       allow_dynamic_registration: true,
+      authorization_path: "/authorize.html",
     });
     expect(jwtKeys[0]).toMatchObject({
       kty: "RSA",
