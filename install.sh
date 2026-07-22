@@ -1343,6 +1343,17 @@ install_docker_compose() {
     
     COMPOSE_VERSION="v5.3.1"
     
+    # The standalone binary is preferred on both Docker and Podman hosts. Skip
+    # re-downloading it when the target version is already present. Previously the
+    # presence-check was gated on CONTAINER_RUNTIME != podman, so every Podman install
+    # re-fetched the ~31MB binary from GitHub even when it was already installed -- and
+    # behind flaky GitHub connectivity the download (curl SSL_ERROR_SYSCALL) aborted
+    # the whole install despite docker-compose being perfectly functional.
+    if command -v docker-compose &>/dev/null && docker-compose version 2>/dev/null | grep -q "${COMPOSE_VERSION}"; then
+        log_info "Docker Compose already installed: $(docker-compose --version)"
+        return
+    fi
+    
     # If using Podman, always install standalone docker-compose binary
     # (instead of relying on 'podman compose' which might have different behavior).
     # Compose v5 delegates BuildKit builds to Docker Buildx/Bake; this installer
@@ -3066,7 +3077,18 @@ GOTRUE_SVC
         log_info "supacloud-gotrue@.service template already exists"
     fi
 
-    # Ensure tenant config directory exists
+    # Ensure tenant config directory exists. A previous Pigsty/legacy-supabase
+    # install may have left /etc/supabase/tenants as a symlink whose target no
+    # longer exists (e.g. pointing at a removed /opt/supabase/volumes/... path).
+    # `mkdir -p` on a path that traverses a dangling symlink fails with
+    # "File exists" (EEXIST) and, under `set -e`, aborts the whole install right
+    # after the management API has come up. If the entry exists but is not a
+    # directory, remove it first so mkdir can create a real directory in its
+    # place; never touch an already-valid directory.
+    if [[ -e /etc/supabase/tenants || -L /etc/supabase/tenants ]] && [[ ! -d /etc/supabase/tenants ]]; then
+        log_warn "Replacing non-directory entry at /etc/supabase/tenants (likely a stale symlink) before creating the tenant config directory"
+        rm -f /etc/supabase/tenants
+    fi
     mkdir -p /etc/supabase/tenants
 
     # 8. Configure non-secret CLI conveniences without overwriting DOCKER_HOST.
@@ -3638,7 +3660,11 @@ main() {
     # Install Management API
     install_management_api
     if [[ -f "${SCRIPT_DIR}/scripts/upgrade_pigsty_4_4_compat.sh" ]]; then
-        PGHOST="${PGHOST:-}" PGPORT="${PGPORT:-5432}" PGUSER="${PGUSER:-postgres}" \
+        # Pigsty exports PGUSER=dbuser_dba globally; ${PGUSER:-postgres} would inherit the
+        # wrong DBA role and make the compat script authenticate as dbuser_dba (auth fail
+        # on 127.0.0.1), aborting before install_web_console ever runs. Pin the superuser
+        # explicitly so role/password checks use postgres regardless of the shell env.
+        PGHOST=127.0.0.1 PGPORT=5432 PGUSER=postgres \
             PGPASSWORD="${PGPASSWORD:-$POSTGRES_PASSWORD}" \
             bash "${SCRIPT_DIR}/scripts/upgrade_pigsty_4_4_compat.sh" --apply
     fi

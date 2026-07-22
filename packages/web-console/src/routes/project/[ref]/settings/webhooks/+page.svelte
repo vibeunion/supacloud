@@ -31,11 +31,12 @@
   const webhooksQuery = createQuery(() => ({
     queryKey: ["webhooks", projectRef],
     queryFn: async () => {
-      // Ensure pg_net exists once, using migration mode (read mode blocks DDL).
-      await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+      const extensionRes = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sql: "CREATE EXTENSION IF NOT EXISTS pg_net;", mode: "migration" })
+        body: JSON.stringify({ sql: "SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'pg_net') AS installed;" })
       });
+      const extensionData = await extensionRes.json();
+      const pgNetInstalled = extensionRes.ok && Boolean(extensionData.rows?.[0]?.installed);
 
       const sql = `
         SELECT
@@ -50,11 +51,10 @@
       `;
       const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sql, mode: "migration" })
+        body: JSON.stringify({ sql })
       });
-      if (!res.ok) throw new Error("Failed to fetch webhooks");
-      const data = await res.json();
-      const rows = data.rows || [];
+      const data = res.ok ? await res.json() : { rows: [] };
+      const rows = pgNetInstalled ? (data.rows || []) : [];
       
       const endpoints: WebhookEndpoint[] = rows.map((r: Record<string, unknown>) => {
         const events = [];
@@ -75,11 +75,11 @@
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql: "SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = 'public' ORDER BY tablename;" })
       });
-      if (!tblRes.ok) throw new Error("Failed to fetch tables");
+      if (!tblRes.ok) return { endpoints, tables: [], pgNetInstalled };
       const tblData = await tblRes.json();
       const tables = (tblData.rows || []).map((t: Record<string, unknown>) => t.tablename as string);
 
-      return { endpoints, tables };
+      return { endpoints, tables, pgNetInstalled };
     }
   }));
 

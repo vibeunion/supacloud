@@ -2,6 +2,7 @@
   import { apiClient } from "$lib/api";
 
   import { page } from "$app/state";
+  import { untrack } from "svelte";
   import { Loader2, Mail, Save, ChevronDown, ChevronUp, RotateCcw } from "lucide-svelte";
   import { createQuery, createMutation, useQueryClient } from "@tanstack/svelte-query";
 
@@ -42,8 +43,9 @@
   $effect(() => {
     if (configQuery.data) {
       const config = configQuery.data.templates || {};
+      const previousTemplates = untrack(() => templates);
       // Preserve expanded state when refreshing
-      templates = templates.map(t => ({
+      templates = previousTemplates.map(t => ({
         ...t,
         subject: config[t.id]?.subject || "",
         content: config[t.id]?.content || "",

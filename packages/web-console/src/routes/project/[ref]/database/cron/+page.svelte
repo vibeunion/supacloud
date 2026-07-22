@@ -43,12 +43,25 @@
 
   const projectRef = $derived(page.params.ref);
 
+  const CRON_EXTENSION_SQL = `SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'pg_cron') AS installed;`;
   const JOBS_SQL = `SELECT * FROM cron.job ORDER BY jobid;`;
   const RUNS_SQL = `SELECT * FROM cron.job_run_details ORDER BY start_time DESC LIMIT 50;`;
 
   const cronQuery = createQuery(() => ({
     queryKey: ["database_cron", projectRef],
     queryFn: async () => {
+      const extensionRes = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sql: CRON_EXTENSION_SQL })
+      });
+      const extensionData = await extensionRes.json();
+      if (!extensionRes.ok || extensionData.error) {
+        return { jobs: [], runs: [], unavailable: extensionData.message || extensionData.error || "pg_cron 状态不可用" };
+      }
+      if (!extensionData.rows?.[0]?.installed) {
+        return { jobs: [], runs: [], unavailable: "pg_cron 未安装" };
+      }
+
       const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql: JOBS_SQL })
@@ -78,7 +91,8 @@
   const runs = $derived(cronQuery.data?.runs || []);
   const isLoading = $derived(cronQuery.isPending);
   const error = $derived(cronQuery.error?.message || null);
-  const fallbackMsg = $derived(!isLoading && !error && jobs.length === 0 ? "暂无定时任务" : null);
+  const unavailableMsg = $derived(cronQuery.data?.unavailable || null);
+  const fallbackMsg = $derived(!isLoading && !error && jobs.length === 0 ? (unavailableMsg || "暂无定时任务") : null);
 
   const createJobMutation = createMutation(() => ({
     mutationFn: async () => {
@@ -145,6 +159,7 @@
       <span class="px-2.5 py-1 rounded-full bg-brand/10 text-brand text-xs font-bold">{jobs.length} 个任务</span>
       <button 
         onclick={() => showAdd = !showAdd}
+        disabled={Boolean(unavailableMsg)}
         class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-brand text-white hover:bg-brand/90 transition-colors"
       >
         <Plus size={14} /> 新建任务

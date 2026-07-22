@@ -2,6 +2,7 @@
   import { apiClient } from "$lib/api";
 
   import { page } from "$app/state";
+  import { untrack } from "svelte";
   import { Loader2, Webhook, Zap, AlertTriangle, Save, ChevronDown, ChevronUp } from "lucide-svelte";
   import { createQuery, createMutation, useQueryClient } from "@tanstack/svelte-query";
 
@@ -44,8 +45,9 @@
   $effect(() => {
     if (configQuery.data) {
       const config = configQuery.data;
+      const previousHooks = untrack(() => hooks);
       hooks = HOOKS_DEF.map(h => {
-        const existing = hooks.find(e => e.id === h.id);
+        const existing = previousHooks.find(e => e.id === h.id);
         return {
           ...h,
           expanded: existing?.expanded || false,
@@ -53,7 +55,7 @@
           uri: config[h.uriKey] || existing?.uri || ""
         };
       });
-    } else if (configQuery.isError || (hooks.length === 0 && !configQuery.isPending)) {
+    } else if (configQuery.isError || (untrack(() => hooks.length) === 0 && !configQuery.isPending)) {
       hooks = HOOKS_DEF.map(h => ({ ...h, expanded: false, enabled: false, uri: "" }));
     }
   });
@@ -124,7 +126,7 @@
         <p class="text-xs font-mono uppercase tracking-widest">正在加载 Auth Hooks...</p>
       </div>
     {:else}
-      {#each hooks as hook}
+      {#each hooks as hook (hook.id)}
         <div class="rounded-xl border bg-card overflow-hidden">
           <button onclick={() => hook.expanded = !hook.expanded} class="w-full px-5 py-4 flex items-center justify-between hover:bg-muted/10 transition-colors">
             <div class="flex items-center gap-3">

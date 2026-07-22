@@ -2,6 +2,7 @@
   import { apiClient } from "$lib/api";
 
   import { page } from "$app/state";
+  import { untrack } from "svelte";
   import { Loader2, Check, X, Search, Shield, KeyRound, ChevronDown, ChevronUp, Save, Trash2, Eye, EyeOff } from "lucide-svelte";
   import { createQuery, createMutation, useQueryClient } from "@tanstack/svelte-query";
 
@@ -69,9 +70,10 @@
   $effect(() => {
     if (providersQuery.data) {
       const provMap = providersQuery.data.providers || {};
+      const previousProviders = untrack(() => providers);
       providers = PROVIDERS_DEF.map(def => {
         // preserve expanded state
-        const existing = providers.find(p => p.key === def.key);
+        const existing = previousProviders.find(p => p.key === def.key);
         return {
           ...def,
           enabled: provMap[def.key]?.enabled || false,
@@ -83,7 +85,7 @@
           saving: false,
         };
       });
-    } else if (providersQuery.isError || (providers.length === 0 && !providersQuery.isPending)) {
+    } else if (providersQuery.isError || (untrack(() => providers.length) === 0 && !providersQuery.isPending)) {
       providers = PROVIDERS_DEF.map(def => ({
         ...def, enabled: false, client_id: "", client_secret: "", redirect_uri: "", auth_scheme: "", expanded: false, saving: false,
       }));
@@ -264,7 +266,7 @@
       </div>
     {:else}
       <div class="overflow-auto max-h-[70vh] divide-y divide-border/20">
-        {#each filteredProviders as fp}
+        {#each filteredProviders as fp (fp.key)}
           {@const i = providers.findIndex(p => p.key === fp.key)}
           {#if i !== -1}
           <div class="group">

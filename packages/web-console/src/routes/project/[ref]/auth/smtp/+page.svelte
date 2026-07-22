@@ -2,6 +2,7 @@
   import { apiClient } from "$lib/api";
 
   import { page } from "$app/state";
+  import { untrack } from "svelte";
   import { Loader2, Mail, Server, AlertTriangle, Save } from "lucide-svelte";
   import { createQuery, createMutation, useQueryClient } from "@tanstack/svelte-query";
 
@@ -44,7 +45,8 @@
     if (configQuery.data) {
       const config = configQuery.data;
       smtpEnabled = config.SMTP_HOST ? true : false;
-      fields = fields.map(f => {
+      const previousFields = untrack(() => fields);
+      fields = previousFields.map(f => {
         if (config[f.key] !== undefined && config[f.key] !== null) {
           return { ...f, value: String(config[f.key]) };
         }
@@ -138,7 +140,7 @@
     </div>
   {:else}
     <div class="space-y-3 {smtpEnabled ? '' : 'opacity-50 pointer-events-none'}">
-      {#each fields as cfg}
+      {#each fields as cfg (cfg.key)}
         <div class="rounded-xl border bg-card p-4 flex items-center justify-between">
           <div class="flex-1">
             <span class="font-medium text-sm">{cfg.label}</span>
