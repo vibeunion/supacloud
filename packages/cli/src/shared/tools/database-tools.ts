@@ -17,6 +17,13 @@ export interface DatabaseToolsConfig {
 const MAX_MIGRATION_VERSION = 9_223_372_036_854_775_807n;
 const FALLBACK_MIGRATION_VERSION_BASE = 8_000_000_000_000_000_000n;
 const FALLBACK_MIGRATION_VERSION_RANGE = 1_000_000_000_000_000_000n;
+const FALLBACK_MIGRATION_VERSION_LIMIT = FALLBACK_MIGRATION_VERSION_BASE + FALLBACK_MIGRATION_VERSION_RANGE;
+
+interface MigrationFile {
+    file: string;
+    name: string;
+    version: string;
+}
 
 export function migrationVersionFromFilename(file: string): string {
     const match = basename(file).match(/^(\d{8,20})[_-]/);
@@ -25,12 +32,33 @@ export function migrationVersionFromFilename(file: string): string {
         if (version < 1n || version > MAX_MIGRATION_VERSION) {
             throw new Error(`Invalid migration version '${match[1]}' in ${basename(file)}: expected 1..${MAX_MIGRATION_VERSION}`);
         }
+        if (version >= FALLBACK_MIGRATION_VERSION_BASE && version < FALLBACK_MIGRATION_VERSION_LIMIT) {
+            throw new Error(`Invalid migration version '${match[1]}' in ${basename(file)}: version range ${FALLBACK_MIGRATION_VERSION_BASE}..${FALLBACK_MIGRATION_VERSION_LIMIT - 1n} is reserved for non-timestamp migrations`);
+        }
         return version.toString();
     }
 
     const digest = createHash("sha256").update(basename(file)).digest("hex");
     const offset = BigInt(`0x${digest}`) % FALLBACK_MIGRATION_VERSION_RANGE;
     return (FALLBACK_MIGRATION_VERSION_BASE + offset).toString();
+}
+
+function sortMigrationFiles(migrations: MigrationFile[]): MigrationFile[] {
+    const sorted = [...migrations].sort((a, b) => {
+        const versionA = BigInt(a.version);
+        const versionB = BigInt(b.version);
+        if (versionA < versionB) return -1;
+        if (versionA > versionB) return 1;
+        return a.file.localeCompare(b.file);
+    });
+    for (let i = 1; i < sorted.length; i += 1) {
+        const previous = sorted[i - 1];
+        const current = sorted[i];
+        if (previous.version === current.version && (previous.file !== current.file || previous.name !== current.name)) {
+            throw new Error(`Migration version collision for ${current.version}: ${previous.file} and ${current.file}`);
+        }
+    }
+    return sorted;
 }
 
 function appliedMigrationKeys(data: unknown): Set<string> {
@@ -309,11 +337,11 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
                         break;
                     }
 
-                    const migrationFiles = files.map((file) => ({
+                    const migrationFiles = sortMigrationFiles(files.map((file) => ({
                         file,
                         name: basename(file, ".sql"),
                         version: migrationVersionFromFilename(file),
-                    }));
+                    })));
 
                     const migrationsResult = await http.get(`/v1/projects/${ref}/database/migrations`);
                     if (!migrationsResult.ok) {
@@ -401,11 +429,11 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
                         break;
                     }
 
-                    const migrationFiles = files.map((file) => ({
+                    const migrationFiles = sortMigrationFiles(files.map((file) => ({
                         file,
                         name: basename(file, ".sql"),
                         version: migrationVersionFromFilename(file),
-                    }));
+                    })));
 
                     const r = await http.get(`/v1/projects/${ref}/database/migrations`);
                     if (!r.ok) {

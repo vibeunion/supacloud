@@ -24,11 +24,14 @@ describe("database migration helpers", () => {
 
     test("preserves valid 19-digit migration versions without precision loss", () => {
         expect(migrationVersionFromFilename("9007199254740993001_create_users.sql")).toBe("9007199254740993001");
+        expect(migrationVersionFromFilename("9223372036854775807_max_version.sql")).toBe("9223372036854775807");
     });
 
     test("rejects migration versions above the PostgreSQL BIGINT limit", () => {
         expect(() => migrationVersionFromFilename("20260425123000123456-create-users.sql"))
             .toThrow("expected 1..9223372036854775807");
+        expect(() => migrationVersionFromFilename("8000000000000000001-collides-with-fallback.sql"))
+            .toThrow("reserved for non-timestamp migrations");
     });
 
     test("uses a stable numeric version for non timestamp names", () => {
@@ -39,6 +42,49 @@ describe("database migration helpers", () => {
         expect(first).toMatch(/^\d+$/);
         expect(BigInt(first)).toBeGreaterThanOrEqual(8_000_000_000_000_000_000n);
         expect(BigInt(first)).toBeLessThan(9_000_000_000_000_000_000n);
+    });
+
+    test("pushes non-timestamp migrations in stable fallback-version order", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
+        const posts: Array<{ name: string; version: string }> = [];
+        try {
+            writeFileSync(join(dir, "alpha.sql"), "CREATE TABLE alpha (id uuid);\n");
+            writeFileSync(join(dir, "beta.sql"), "CREATE TABLE beta (id uuid);\n");
+            const callback = captureDatabaseTool({
+                get: async () => ({ ok: true, status: 200, data: [] }),
+                post: async (_path: string, body: { name: string; version: string }) => {
+                    posts.push({ name: body.name, version: body.version });
+                    return { ok: true, status: 200, data: {} };
+                },
+            });
+
+            await callback({ action: "push_migrations", ref: "proj", dir });
+
+            expect(posts).toHaveLength(2);
+            expect(BigInt(posts[0].version)).toBeLessThan(BigInt(posts[1].version));
+            expect(posts.map(({ name }) => name)).toEqual(
+                [...posts].sort((a, b) => BigInt(a.version) < BigInt(b.version) ? -1 : 1).map(({ name }) => name),
+            );
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    test("rejects distinct migration files with the same version", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
+        try {
+            writeFileSync(join(dir, "20260425123000_alpha.sql"), "CREATE TABLE alpha (id uuid);\n");
+            writeFileSync(join(dir, "20260425123000_beta.sql"), "CREATE TABLE beta (id uuid);\n");
+            const callback = captureDatabaseTool({
+                get: async () => ({ ok: true, status: 200, data: [] }),
+                post: async () => ({ ok: true, status: 200, data: {} }),
+            });
+
+            await expect(callback({ action: "push_migrations", ref: "proj", dir }))
+                .rejects.toThrow("Migration version collision");
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
     });
 
     test("warns when pending migrations use pgvector without enabled extension", () => {
