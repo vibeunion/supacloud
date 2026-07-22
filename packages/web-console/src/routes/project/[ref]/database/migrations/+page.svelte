@@ -23,16 +23,27 @@
       const res = await apiClient(`/v1/projects/${projectRef}/database/migrations`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || data.error || "Failed to load migration history");
-      return (Array.isArray(data) ? data : []).map((row: Record<string, unknown>) => ({
-        version: String(row.version || ""),
-        name: String(row.name || ""),
-        statements: Array.isArray(row.statements) ? row.statements.length : Number(row.statements || 0),
-        executed_at: String(row.executed_at || ""),
-      })) as Migration[];
+      return (Array.isArray(data) ? data : []).map((row: Record<string, unknown>): Migration => {
+        const statements = Array.isArray(row.statements)
+          ? row.statements.filter((statement): statement is string => typeof statement === "string")
+          : [];
+        const statementCount = typeof row.statement_count === "number" && Number.isFinite(row.statement_count)
+          ? row.statement_count
+          : statements.length;
+
+        return {
+          version: String(row.version || ""),
+          name: typeof row.name === "string" ? row.name : null,
+          statements,
+          statement_count: statementCount,
+          checksum: typeof row.checksum === "string" ? row.checksum : "",
+          applied_at: typeof row.applied_at === "string" ? row.applied_at : null,
+        };
+      });
     }
   }));
 
-  const migrations = $derived((migrationsQuery.data as Migration[]) || []);
+  const migrations = $derived(migrationsQuery.data || []);
   const isLoading = $derived(migrationsQuery.isPending);
   const error = $derived(migrationsQuery.error?.message || null);
   const fallbackMsg = $derived(!isLoading && !error && migrations.length === 0 ? "暂无迁移历史" : null);
@@ -81,7 +92,7 @@
             </tr>
           </thead>
           <tbody class="divide-y divide-border/20">
-            {#each migrations as mig}
+            {#each migrations as mig (mig.version)}
               <tr class="hover:bg-muted/10 transition-colors">
                 <td class="px-4 py-2.5">
                   <div class="flex items-center gap-2">
