@@ -23,7 +23,20 @@
       const res = await apiClient(`/v1/projects/${projectRef}/database/migrations`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || data.error || "Failed to load migration history");
-      return (Array.isArray(data) ? data : []) as Migration[];
+      return (Array.isArray(data) ? data : []).map((row: Record<string, unknown>): Migration => {
+        const statements = Array.isArray(row.statements)
+          ? row.statements.filter((statement): statement is string => typeof statement === "string")
+          : [];
+
+        return {
+          version: String(row.version || ""),
+          name: typeof row.name === "string" ? row.name : null,
+          statements,
+          statement_count: Number(row.statement_count ?? statements.length),
+          checksum: typeof row.checksum === "string" ? row.checksum : "",
+          applied_at: typeof row.applied_at === "string" ? row.applied_at : null,
+        };
+      });
     }
   }));
 
@@ -76,7 +89,7 @@
             </tr>
           </thead>
           <tbody class="divide-y divide-border/20">
-            {#each migrations as mig}
+            {#each migrations as mig (mig.version)}
               <tr class="hover:bg-muted/10 transition-colors">
                 <td class="px-4 py-2.5">
                   <div class="flex items-center gap-2">
