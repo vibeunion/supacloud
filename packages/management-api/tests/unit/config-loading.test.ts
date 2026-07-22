@@ -28,6 +28,9 @@ function cleanEnv(overrides: Record<string, string>) {
     "SUPACLOUD_LOCAL_ENV_FILE",
     "SUPAOAUTH_BFF_SIGNING_SECRET",
     "LEGACY_SECRETS_ENCRYPTION_KEY",
+    "DOCKER_HOST_IP",
+    "INTERNAL_IP",
+    "SUPACLOUD_CADDY_TLS_ISSUER",
   ]) {
     delete env[key];
   }
@@ -69,7 +72,88 @@ function loadDatabaseUrl(env: Record<string, string>) {
   return result.stdout.match(/RESULT=([^\n]+)/)?.[1];
 }
 
+function loadCaddyTlsIssuer(env: Record<string, string>) {
+  const configProcess = spawnSync("bun", ["-e", [
+    'import { config } from "./src/config.ts";',
+    'console.log(`RESULT=${config.caddyTlsIssuer}`);',
+  ].join(" ")], { cwd: packageRoot, env, encoding: "utf8" });
+  expect(configProcess.status, configProcess.stderr).toBe(0);
+  return configProcess.stdout.match(/RESULT=([^\n]+)/)?.[1];
+}
+
 describe("production config loading boundaries", () => {
+  test("defaults Caddy TLS to the internal CA for local and private addresses", () => {
+    for (const address of [
+      "127.0.0.2",
+      "localhost",
+      "::1",
+      "10.0.0.8",
+      "172.31.255.254",
+      "192.168.10.20",
+      "169.254.10.20",
+      "fd00::8",
+      "fe80::8",
+    ]) {
+      expect(loadCaddyTlsIssuer(cleanEnv({
+        NODE_ENV: "production",
+        DOCKER_HOST_IP: address,
+      }))).toBe("internal");
+    }
+  });
+
+  test("keeps public hosts on ACME and honors explicit issuer overrides", () => {
+    expect(loadCaddyTlsIssuer(cleanEnv({ NODE_ENV: "production" }))).toBe("internal");
+    expect(loadCaddyTlsIssuer(cleanEnv({
+      NODE_ENV: "production",
+      DOCKER_HOST_IP: "198.51.100.10",
+    }))).toBe("acme");
+    expect(loadCaddyTlsIssuer(cleanEnv({
+      NODE_ENV: "production",
+      DOCKER_HOST_IP: "10.0.0.8",
+      SUPACLOUD_CADDY_TLS_ISSUER: "acme",
+    }))).toBe("acme");
+    expect(loadCaddyTlsIssuer(cleanEnv({
+      NODE_ENV: "production",
+      DOCKER_HOST_IP: "198.51.100.10",
+      SUPACLOUD_CADDY_TLS_ISSUER: "internal",
+    }))).toBe("internal");
+  });
+
+  test("defaults Caddy TLS to the internal CA when configured addresses are empty", () => {
+    expect(loadCaddyTlsIssuer(cleanEnv({
+      NODE_ENV: "production",
+      DOCKER_HOST_IP: "",
+    }))).toBe("internal");
+    expect(loadCaddyTlsIssuer(cleanEnv({
+      NODE_ENV: "production",
+      INTERNAL_IP: "",
+    }))).toBe("internal");
+    expect(loadCaddyTlsIssuer(cleanEnv({
+      NODE_ENV: "production",
+      DOCKER_HOST_IP: "",
+      INTERNAL_IP: "198.51.100.10",
+    }))).toBe("acme");
+    expect(loadCaddyTlsIssuer(cleanEnv({
+      NODE_ENV: "production",
+      DOCKER_HOST_IP: "  ",
+      INTERNAL_IP: "10.0.0.8",
+    }))).toBe("internal");
+  });
+
+  test("rejects an invalid explicit Caddy TLS issuer", () => {
+    const configProcess = spawnSync("bun", ["-e", 'import "./src/config.ts";'], {
+      cwd: packageRoot,
+      env: cleanEnv({
+        NODE_ENV: "production",
+        SUPACLOUD_CADDY_TLS_ISSUER: "self-signed",
+      }),
+      encoding: "utf8",
+    });
+
+    expect(configProcess.status).not.toBe(0);
+    expect(configProcess.stderr).toContain("SUPACLOUD_CADDY_TLS_ISSUER");
+  });
+
   test("accepts standard postgres and postgresql DSN schemes", () => {
     for (const scheme of ["postgres", "postgresql"]) {
       const databaseUrl = `${scheme}://postgres:secret@localhost:5432/supacloud`;

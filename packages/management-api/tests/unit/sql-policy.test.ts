@@ -58,6 +58,17 @@ describe("project migration SQL policy", () => {
       .toContain("opaque procedural SQL");
   });
 
+  test("blocks every supported top-level DO body form", () => {
+    for (const statement of [
+      "DO LANGUAGE plpgsql $$ BEGIN PERFORM pg_advisory_lock(1); END $$;",
+      "DO /* generated */ LANGUAGE plpgsql $$ BEGIN SET ROLE postgres; END $$;",
+      "DO 'BEGIN PERFORM pg_advisory_lock(1); END';",
+      "DO LANGUAGE plpgsql 'BEGIN SET ROLE postgres; END';",
+    ]) {
+      expect(projectMigrationSqlViolations([statement])).toContain("opaque procedural SQL");
+    }
+  });
+
   test("continues to block privileged operations at the migration top level", () => {
     const violations = projectMigrationSqlViolations([
       "CREATE FUNCTION public.safe_body() RETURNS void LANGUAGE sql AS $$ SELECT 1 $$",

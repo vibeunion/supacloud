@@ -19,7 +19,7 @@ const PRIVILEGED_MIGRATION_PATTERNS: readonly SqlPattern[] = [
   { label: "tablespace management", pattern: /\b(?:CREATE|DROP)\s+TABLESPACE\b/i },
   { label: "subscription management", pattern: /\b(?:CREATE|ALTER|DROP)\s+SUBSCRIPTION\b/i },
   { label: "dynamic library loading", pattern: /\bLOAD\b/i },
-  { label: "opaque procedural SQL", pattern: /\bDO\s+\$/i },
+  { label: "opaque procedural SQL", pattern: /(?:^|;)\s*DO\b/i },
   { label: "transaction control", pattern: /(?:^|;)\s*(?:BEGIN|START\s+TRANSACTION|COMMIT|END|ROLLBACK|SAVEPOINT|RELEASE\s+SAVEPOINT|PREPARE\s+TRANSACTION)\b/i },
   { label: "session role control", pattern: /\b(?:SET\s+(?:(?:LOCAL|SESSION)\s+)?(?:ROLE|SESSION\s+AUTHORIZATION)|RESET\s+(?:ROLE|SESSION\s+AUTHORIZATION)|DISCARD\s+ALL)\b/i },
   { label: "advisory lock control", pattern: /\bpg_(?:try_)?advisory_(?:xact_)?(?:lock|unlock)(?:_shared|_all)?\s*\(/i },

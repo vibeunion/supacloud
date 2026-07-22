@@ -1,5 +1,52 @@
 # Changelog
 
+## [0.7.6](https://github.com/zuohuadong/supacloud/compare/supacloud-v0.7.5...supacloud-v0.7.6) (2026-07-22)
+
+
+### Bug Fixes
+
+* **migrations:** accept exact legacy ledger contents ([#532](https://github.com/zuohuadong/supacloud/issues/532)) ([0a86d3e](https://github.com/zuohuadong/supacloud/commit/0a86d3e00de8c9d8ca351650b97956ca4ab53ae5))
+
+## [0.7.5](https://github.com/zuohuadong/supacloud/compare/supacloud-v0.7.4...supacloud-v0.7.5) (2026-07-22)
+
+
+### Bug Fixes
+
+* **cli:** recognize direct-apply migration markers ([#530](https://github.com/zuohuadong/supacloud/issues/530)) ([33f433d](https://github.com/zuohuadong/supacloud/commit/33f433d5e4e1d132dd50a8b1d312f0485119bee0))
+
+## [0.7.4](https://github.com/zuohuadong/supacloud/compare/supacloud-v0.7.3...supacloud-v0.7.4) (2026-07-22)
+
+
+### Bug Fixes
+
+* **cli:** recognize historical migration hash markers ([a9d55ff](https://github.com/zuohuadong/supacloud/commit/a9d55ff8cce32d475ba4e270ae1c6acaf1929737))
+
+
+### Miscellaneous Chores
+
+* release main ([5833a36](https://github.com/zuohuadong/supacloud/commit/5833a36b277b5fa5e26482d39c14bd7bb5d2d4f6))
+* release main ([1c87f14](https://github.com/zuohuadong/supacloud/commit/1c87f14afda9f662cbbe9cee82eb515bd1462b81))
+* **supacloud:** sync unified CLI lockfile ([d8d7fc1](https://github.com/zuohuadong/supacloud/commit/d8d7fc1d0605f8f654d14804eca4bf6c04a0bda9))
+
+## [0.7.3](https://github.com/zuohuadong/supacloud/compare/supacloud-v0.7.2...supacloud-v0.7.3) (2026-07-22)
+
+
+### Bug Fixes
+
+* **management-api:** order migration-owned sequences after tables ([d424bd7](https://github.com/zuohuadong/supacloud/commit/d424bd7ec90c874cb8f5f21e22af0234b52da255))
+
+
+### Miscellaneous Chores
+
+* **supacloud:** sync unified package lock ([14e5637](https://github.com/zuohuadong/supacloud/commit/14e56373b088a00d1df253961ca3eacdba370db1))
+
+## [0.7.2](https://github.com/zuohuadong/supacloud/compare/supacloud-v0.7.1...supacloud-v0.7.2) (2026-07-22)
+
+
+### Miscellaneous Chores
+
+* release main ([#521](https://github.com/zuohuadong/supacloud/issues/521)) ([1230bf3](https://github.com/zuohuadong/supacloud/commit/1230bf3a6d1db6885c67da140d4ef318ec8cdec3))
+
 ## [0.7.1](https://github.com/zuohuadong/supacloud/compare/supacloud-v0.7.0...supacloud-v0.7.1) (2026-07-19)
 
 

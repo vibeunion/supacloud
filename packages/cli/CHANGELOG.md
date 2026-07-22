@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.12.4](https://github.com/zuohuadong/supacloud/compare/cli-v0.12.3...cli-v0.12.4) (2026-07-22)
+
+
+### Bug Fixes
+
+* **cli:** recognize direct-apply migration markers ([#530](https://github.com/zuohuadong/supacloud/issues/530)) ([33f433d](https://github.com/zuohuadong/supacloud/commit/33f433d5e4e1d132dd50a8b1d312f0485119bee0))
+
+## [0.12.3](https://github.com/zuohuadong/supacloud/compare/cli-v0.12.2...cli-v0.12.3) (2026-07-22)
+
+
+### Bug Fixes
+
+* **cli:** recognize historical migration hash markers ([a9d55ff](https://github.com/zuohuadong/supacloud/commit/a9d55ff8cce32d475ba4e270ae1c6acaf1929737))
+* **cli:** recognize historical migration hash markers ([b372e25](https://github.com/zuohuadong/supacloud/commit/b372e25073bc2ae54578365b524784e41610a010))
+
+## [0.12.2](https://github.com/zuohuadong/supacloud/compare/cli-v0.12.1...cli-v0.12.2) (2026-07-22)
+
+
+### Bug Fixes
+
+* **cli:** order and validate migration versions ([9e07e2f](https://github.com/zuohuadong/supacloud/commit/9e07e2fa4ca9c026621fccc5d79c62b0352884d9))
+* **cli:** preserve migration version identity ([2a11d53](https://github.com/zuohuadong/supacloud/commit/2a11d5355c43badb7839dcb5e4011aea8703624f))
+* **cli:** skip explicit baseline migration markers ([7254552](https://github.com/zuohuadong/supacloud/commit/725455278446582663750097dd870609b36f56c1))
+* **cli:** skip explicit baseline migration markers ([756f7ec](https://github.com/zuohuadong/supacloud/commit/756f7ec20702905fe874b93f411e1bb69e6e3a30))
+
+## [0.12.1](https://github.com/zuohuadong/supacloud/compare/cli-v0.12.0...cli-v0.12.1) (2026-07-22)
+
+
+### Bug Fixes
+
+* **migrations:** preserve transactional migration compatibility ([#520](https://github.com/zuohuadong/supacloud/issues/520)) ([360b6cb](https://github.com/zuohuadong/supacloud/commit/360b6cb2222e094dc8539a953503c2d03f4154a5))
+
 ## [0.12.0](https://github.com/zuohuadong/supacloud/compare/cli-v0.11.0...cli-v0.12.0) (2026-07-19)
 
 

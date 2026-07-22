@@ -8,6 +8,9 @@ import {
   buildDropMaterializedViewSql,
   buildRefreshMaterializedViewSql,
   migrationExecutionStatements,
+  MIGRATION_SESSION_RESET_SQL,
+  migrationExecutionStatements,
+  migrationLedgerEntryMatches,
   normalizeMigrationVersion,
   resetEnsuredMigrationTablesForTests,
   resolveMigrationStatements,
@@ -128,6 +131,37 @@ describe("database route helpers", () => {
     expect(checksumConflict).toBeGreaterThan(checksumCheck);
     expect(alreadyAppliedReturn).toBeGreaterThan(checksumConflict);
     expect(policyCheck).toBeGreaterThan(alreadyAppliedReturn);
+  });
+
+  test("accepts exact legacy ledger SQL when its stored checksum uses the raw file format", () => {
+    const input = {
+      version: "20260720111000",
+      name: "20260720111000_accept_linked_rework_case_on_scope_approval",
+      statements: ["CREATE FUNCTION demo() RETURNS void LANGUAGE sql AS $$ SELECT 1 $$;\n"],
+    };
+    expect(migrationLedgerEntryMatches({
+      version: input.version,
+      name: input.name,
+      checksum: "raw-file-sha256",
+      statements: ["CREATE FUNCTION demo() RETURNS void LANGUAGE sql AS $$ SELECT 1 $$;"],
+    }, input)).toBe(true);
+    expect(migrationLedgerEntryMatches({
+      version: input.version,
+      name: "different-name",
+      checksum: "raw-file-sha256",
+      statements: input.statements,
+    }, input)).toBe(false);
+    expect(migrationLedgerEntryMatches({
+      version: input.version,
+      name: input.name,
+      checksum: "raw-file-sha256",
+      statements: ["CREATE FUNCTION demo() RETURNS void LANGUAGE sql AS $$ SELECT 2 $$;"],
+    }, input)).toBe(false);
+  });
+
+  test("resets migration sessions without deallocating pooled prepared statements", () => {
+    expect(MIGRATION_SESSION_RESET_SQL).toBe("RESET ALL; DISCARD TEMP; DISCARD PLANS");
+    expect(MIGRATION_SESSION_RESET_SQL).not.toContain("DISCARD ALL");
   });
 
   test("does not let quoted dollar markers hide top-level policy controls", () => {

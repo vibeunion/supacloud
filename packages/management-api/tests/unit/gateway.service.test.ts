@@ -173,6 +173,30 @@ describe("CaddyGatewayProvider", () => {
         await cleanCaddyTmp();
     });
 
+    test("renders the selected on-demand TLS issuer", async () => {
+        const originalIssuer = config.caddyTlsIssuer;
+        try {
+            for (const [issuer, expectedIssuers] of [
+                ["internal", [{ module: "internal" }]],
+                ["acme", undefined],
+            ] as const) {
+                config.caddyTlsIssuer = issuer;
+                const calls: Parameters<typeof captureFetch>[0] = [];
+                const restore = captureFetch(calls);
+                try {
+                    const setupResult = await new CaddyGatewayProvider().setupUpstream("tlsissuer", 3000, 9999);
+                    expect(setupResult.success).toBe(true);
+                    const load = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
+                    expect(load?.body?.apps?.tls?.automation?.policies?.[0]?.issuers).toEqual(expectedIssuers);
+                } finally {
+                    restore();
+                }
+            }
+        } finally {
+            config.caddyTlsIssuer = originalIssuer;
+        }
+    });
+
     test("setupUpstream renders Caddy JSON routes for Supabase-compatible APIs", async () => {
         const calls: Array<{ url: string; method: string; body: any }> = [];
         const restore = captureFetch(calls);

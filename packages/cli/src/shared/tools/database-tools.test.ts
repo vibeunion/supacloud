@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -19,14 +20,72 @@ function captureDatabaseTool(http: Record<string, unknown>) {
 
 describe("database migration helpers", () => {
     test("uses Supabase timestamp prefix as migration version", () => {
-        expect(migrationVersionFromFilename("20260425123000_create_users.sql")).toBe(20260425123000);
-        expect(migrationVersionFromFilename("20260425123000123456-create-users.sql")).toBe(20260425123000123456);
+        expect(migrationVersionFromFilename("20260425123000_create_users.sql")).toBe("20260425123000");
     });
 
-    test("falls back to a generated numeric version for non timestamp names", () => {
-        const version = migrationVersionFromFilename("create_users.sql", 2);
-        expect(Number.isFinite(version)).toBe(true);
-        expect(version).toBeGreaterThan(Date.now() * 1000 - 60_000_000);
+    test("preserves valid 19-digit migration versions without precision loss", () => {
+        expect(migrationVersionFromFilename("9007199254740993001_create_users.sql")).toBe("9007199254740993001");
+        expect(migrationVersionFromFilename("9223372036854775807_max_version.sql")).toBe("9223372036854775807");
+    });
+
+    test("rejects migration versions above the PostgreSQL BIGINT limit", () => {
+        expect(() => migrationVersionFromFilename("20260425123000123456-create-users.sql"))
+            .toThrow("expected 1..9223372036854775807");
+        expect(() => migrationVersionFromFilename("8000000000000000001-collides-with-fallback.sql"))
+            .toThrow("reserved for non-timestamp migrations");
+    });
+
+    test("uses a stable numeric version for non timestamp names", () => {
+        const first = migrationVersionFromFilename("create_users.sql");
+        const second = migrationVersionFromFilename("create_users.sql");
+
+        expect(second).toBe(first);
+        expect(first).toMatch(/^\d+$/);
+        expect(BigInt(first)).toBeGreaterThanOrEqual(8_000_000_000_000_000_000n);
+        expect(BigInt(first)).toBeLessThan(9_000_000_000_000_000_000n);
+    });
+
+    test("pushes non-timestamp migrations in stable fallback-version order", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
+        const posts: Array<{ name: string; version: string }> = [];
+        try {
+            writeFileSync(join(dir, "alpha.sql"), "CREATE TABLE alpha (id uuid);\n");
+            writeFileSync(join(dir, "beta.sql"), "CREATE TABLE beta (id uuid);\n");
+            const callback = captureDatabaseTool({
+                get: async () => ({ ok: true, status: 200, data: [] }),
+                post: async (_path: string, body: { name: string; version: string }) => {
+                    posts.push({ name: body.name, version: body.version });
+                    return { ok: true, status: 200, data: {} };
+                },
+            });
+
+            await callback({ action: "push_migrations", ref: "proj", dir });
+
+            expect(posts).toHaveLength(2);
+            expect(BigInt(posts[0].version)).toBeLessThan(BigInt(posts[1].version));
+            expect(posts.map(({ name }) => name)).toEqual(
+                [...posts].sort((a, b) => BigInt(a.version) < BigInt(b.version) ? -1 : 1).map(({ name }) => name),
+            );
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    test("rejects distinct migration files with the same version", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
+        try {
+            writeFileSync(join(dir, "20260425123000_alpha.sql"), "CREATE TABLE alpha (id uuid);\n");
+            writeFileSync(join(dir, "20260425123000_beta.sql"), "CREATE TABLE beta (id uuid);\n");
+            const callback = captureDatabaseTool({
+                get: async () => ({ ok: true, status: 200, data: [] }),
+                post: async () => ({ ok: true, status: 200, data: {} }),
+            });
+
+            await expect(callback({ action: "push_migrations", ref: "proj", dir }))
+                .rejects.toThrow("Migration version collision");
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
     });
 
     test("warns when pending migrations use pgvector without enabled extension", () => {
@@ -91,6 +150,7 @@ describe("database migration helpers", () => {
         try {
             writeFileSync(join(dir, "20260425123000_create_users.sql"), "CREATE TABLE users (id uuid);\n");
             const callback = captureDatabaseTool({
+                get: async () => ({ ok: true, status: 200, data: [] }),
                 post: async () => ({
                     ok: false,
                     status: 409,
@@ -112,6 +172,7 @@ describe("database migration helpers", () => {
         try {
             writeFileSync(join(dir, "20260425123000_create_users.sql"), "CREATE TABLE users (id uuid);\n");
             const callback = captureDatabaseTool({
+                get: async () => ({ ok: true, status: 200, data: [] }),
                 post: async () => ({
                     ok: false,
                     status: 409,
@@ -127,6 +188,169 @@ describe("database migration helpers", () => {
             expect(toolResult.content[0].text).toContain("migration_checksum_conflict");
             expect(toolResult.content[0].text).toContain("Skipped before failure: 0");
             expect(toolResult.content[0].text).not.toContain("Migration push completed");
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    test("skips baseline markers before POST but still POSTs ordinary existing migrations", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
+        const posts: Array<{ path: string; body: unknown }> = [];
+        try {
+            writeFileSync(join(dir, "20260425123000_create_users.sql"), "CREATE TABLE users (id uuid);\n");
+            writeFileSync(join(dir, "20260425124000_create_tasks.sql"), "CREATE TABLE tasks (id uuid);\n");
+            const callback = captureDatabaseTool({
+                get: async () => ({
+                    ok: true,
+                    status: 200,
+                    data: [
+                        {
+                            version: "20260425123000",
+                            name: "20260425123000_create_users",
+                            statements: ["baseline:20260425123000_create_users"],
+                        },
+                        {
+                            version: "20260425124000",
+                            name: "20260425124000_create_tasks",
+                            statements: ["CREATE TABLE tasks (id uuid);"],
+                        },
+                    ],
+                }),
+                post: async (path: string, body: unknown) => {
+                    posts.push({ path, body });
+                    return { ok: true, status: 200, data: {} };
+                },
+            });
+
+            const toolResult = await callback({ action: "push_migrations", ref: "proj", dir });
+            const text = toolResult.content[0].text;
+
+            expect(text).toContain("Migration push completed");
+            expect(text).toContain("Applied: 1");
+            expect(text).toContain("Skipped: 1");
+            expect(posts).toHaveLength(1);
+            expect(posts[0].path).toBe("/v1/projects/proj/database/migrations");
+            expect((posts[0].body as { name: string }).name).toBe("20260425124000_create_tasks");
+            expect((posts[0].body as { version: string }).version).toBe("20260425124000");
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    test("skips only exact historical direct-apply markers before POST", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
+        const postedNames: string[] = [];
+        try {
+            writeFileSync(join(dir, "20260425123000_create_users.sql"), "CREATE TABLE users (id uuid);\n");
+            writeFileSync(join(dir, "20260425124000_create_tasks.sql"), "CREATE TABLE tasks (id uuid);\n");
+            writeFileSync(join(dir, "20260425125000_create_reports.sql"), "CREATE TABLE reports (id uuid);\n");
+            writeFileSync(join(dir, "20260425126000_create_audits.sql"), "CREATE TABLE audits (id uuid);\n");
+            writeFileSync(join(dir, "20260425127000_create_metrics.sql"), "CREATE TABLE metrics (id uuid);\n");
+            writeFileSync(join(dir, "20260425128000_create_events.sql"), "CREATE TABLE events (id uuid);\n");
+            const callback = captureDatabaseTool({
+                get: async () => ({
+                    ok: true,
+                    status: 200,
+                    data: [
+                        {
+                            version: "20260425123000",
+                            name: "20260425123000_create_users",
+                            statements: ["direct-apply:20260425123000_create_users"],
+                        },
+                        {
+                            version: "20260425124000",
+                            name: "20260425124000_create_tasks",
+                            statements: ["direct-apply:20260425123000_create_users"],
+                        },
+                        {
+                            version: "20260425125000",
+                            name: "20260425125000_renamed_reports",
+                            statements: ["direct-apply:20260425125000_renamed_reports"],
+                        },
+                        {
+                            version: "20260425126000",
+                            name: "20260425126000_create_audits",
+                            statements: ["direct-apply:20260425126000_create_audits", "extra"],
+                        },
+                        {
+                            version: "20260425127001",
+                            name: "20260425127000_create_metrics",
+                            statements: ["direct-apply:20260425127000_create_metrics"],
+                        },
+                        {
+                            version: "20260425128000",
+                            name: "20260425128000_create_events",
+                            statements: ["direct-apply:20260425128000_create_events "],
+                        },
+                    ],
+                }),
+                post: async (_path: string, body: { name: string }) => {
+                    postedNames.push(body.name);
+                    return { ok: true, status: 200, data: {} };
+                },
+            });
+
+            const toolResult = await callback({ action: "push_migrations", ref: "proj", dir });
+
+            expect(toolResult.content[0].text).toContain("Applied: 5");
+            expect(toolResult.content[0].text).toContain("Skipped: 1");
+            expect(postedNames).toEqual([
+                "20260425124000_create_tasks",
+                "20260425125000_create_reports",
+                "20260425126000_create_audits",
+                "20260425127000_create_metrics",
+                "20260425128000_create_events",
+            ]);
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    test("skips only matching historical sha256 markers before POST", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
+        const posts: Array<{ name: string }> = [];
+        try {
+            const sql = "CREATE TABLE users (id uuid);\n";
+            const rawLegacyBytes = new Uint8Array([...new TextEncoder().encode("-- legacy bytes\r\n"), 0xff, 0x0a]);
+            writeFileSync(join(dir, "20260425123000_create_users.sql"), sql);
+            writeFileSync(join(dir, "20260425124000_create_tasks.sql"), "CREATE TABLE tasks (id uuid);\n");
+            writeFileSync(join(dir, "20260425125000_legacy_bytes.sql"), rawLegacyBytes);
+            const checksum = createHash("sha256").update(sql).digest("hex");
+            const rawChecksum = createHash("sha256").update(rawLegacyBytes).digest("hex");
+            const callback = captureDatabaseTool({
+                get: async () => ({
+                    ok: true,
+                    status: 200,
+                    data: [
+                        {
+                            version: "20260425123000",
+                            name: "20260425123000_create_users",
+                            statements: [`sha256:${checksum}`],
+                        },
+                        {
+                            version: "20260425124000",
+                            name: "20260425124000_create_tasks",
+                            statements: ["sha256:0000000000000000000000000000000000000000000000000000000000000000"],
+                        },
+                        {
+                            version: "20260425125000",
+                            name: "20260425125000_legacy_bytes",
+                            statements: [`sha256:${rawChecksum}`],
+                        },
+                    ],
+                }),
+                post: async (_path: string, body: { name: string }) => {
+                    posts.push({ name: body.name });
+                    return { ok: true, status: 200, data: {} };
+                },
+            });
+
+            const toolResult = await callback({ action: "push_migrations", ref: "proj", dir });
+            const text = toolResult.content[0].text;
+
+            expect(text).toContain("Applied: 1");
+            expect(text).toContain("Skipped: 2");
+            expect(posts).toEqual([{ name: "20260425124000_create_tasks" }]);
         } finally {
             rmSync(dir, { recursive: true, force: true });
         }

@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.47.10](https://github.com/zuohuadong/supacloud/compare/management-api-v0.47.9...management-api-v0.47.10) (2026-07-22)
+
+
+### Bug Fixes
+
+* **gateway:** preserve internal TLS for empty LAN address ([#536](https://github.com/zuohuadong/supacloud/issues/536)) ([96830c3](https://github.com/zuohuadong/supacloud/commit/96830c3c9afc15fec336401ebffdd0b378652e69))
+* **migrations:** preserve pooled prepared statements ([#537](https://github.com/zuohuadong/supacloud/issues/537)) ([5c56b9f](https://github.com/zuohuadong/supacloud/commit/5c56b9f602a3506426646877aaf008855de0308f))
+
+## [0.47.9](https://github.com/zuohuadong/supacloud/compare/management-api-v0.47.8...management-api-v0.47.9) (2026-07-22)
+
+
+### Bug Fixes
+
+* **migrations:** accept exact legacy ledger contents ([#532](https://github.com/zuohuadong/supacloud/issues/532)) ([0a86d3e](https://github.com/zuohuadong/supacloud/commit/0a86d3e00de8c9d8ca351650b97956ca4ab53ae5))
+
+## [0.47.8](https://github.com/zuohuadong/supacloud/compare/management-api-v0.47.7...management-api-v0.47.8) (2026-07-22)
+
+
+### Bug Fixes
+
+* **management-api:** order migration-owned sequences after tables ([d424bd7](https://github.com/zuohuadong/supacloud/commit/d424bd7ec90c874cb8f5f21e22af0234b52da255))
+* **management-api:** order migration-owned sequences after tables ([35a05dd](https://github.com/zuohuadong/supacloud/commit/35a05dd6a80f4fbf49cf56e28567590fde03e34f))
+
+## [0.47.7](https://github.com/zuohuadong/supacloud/compare/management-api-v0.47.6...management-api-v0.47.7) (2026-07-22)
+
+
+### Bug Fixes
+
+* **migrations:** preserve transactional migration compatibility ([#520](https://github.com/zuohuadong/supacloud/issues/520)) ([360b6cb](https://github.com/zuohuadong/supacloud/commit/360b6cb2222e094dc8539a953503c2d03f4154a5))
+
 ## [0.47.6](https://github.com/zuohuadong/supacloud/compare/management-api-v0.47.5...management-api-v0.47.6) (2026-07-22)
 
 
