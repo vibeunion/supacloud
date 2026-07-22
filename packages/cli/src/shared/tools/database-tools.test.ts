@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -231,6 +232,56 @@ describe("database migration helpers", () => {
             expect(posts[0].path).toBe("/v1/projects/proj/database/migrations");
             expect((posts[0].body as { name: string }).name).toBe("20260425124000_create_tasks");
             expect((posts[0].body as { version: string }).version).toBe("20260425124000");
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    test("skips only matching historical sha256 markers before POST", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
+        const posts: Array<{ name: string }> = [];
+        try {
+            const sql = "CREATE TABLE users (id uuid);\n";
+            const rawLegacyBytes = new Uint8Array([...new TextEncoder().encode("-- legacy bytes\r\n"), 0xff, 0x0a]);
+            writeFileSync(join(dir, "20260425123000_create_users.sql"), sql);
+            writeFileSync(join(dir, "20260425124000_create_tasks.sql"), "CREATE TABLE tasks (id uuid);\n");
+            writeFileSync(join(dir, "20260425125000_legacy_bytes.sql"), rawLegacyBytes);
+            const checksum = createHash("sha256").update(sql).digest("hex");
+            const rawChecksum = createHash("sha256").update(rawLegacyBytes).digest("hex");
+            const callback = captureDatabaseTool({
+                get: async () => ({
+                    ok: true,
+                    status: 200,
+                    data: [
+                        {
+                            version: "20260425123000",
+                            name: "20260425123000_create_users",
+                            statements: [`sha256:${checksum}`],
+                        },
+                        {
+                            version: "20260425124000",
+                            name: "20260425124000_create_tasks",
+                            statements: ["sha256:0000000000000000000000000000000000000000000000000000000000000000"],
+                        },
+                        {
+                            version: "20260425125000",
+                            name: "20260425125000_legacy_bytes",
+                            statements: [`sha256:${rawChecksum}`],
+                        },
+                    ],
+                }),
+                post: async (_path: string, body: { name: string }) => {
+                    posts.push({ name: body.name });
+                    return { ok: true, status: 200, data: {} };
+                },
+            });
+
+            const toolResult = await callback({ action: "push_migrations", ref: "proj", dir });
+            const text = toolResult.content[0].text;
+
+            expect(text).toContain("Applied: 1");
+            expect(text).toContain("Skipped: 2");
+            expect(posts).toEqual([{ name: "20260425124000_create_tasks" }]);
         } finally {
             rmSync(dir, { recursive: true, force: true });
         }
