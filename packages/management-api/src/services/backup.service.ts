@@ -11,6 +11,8 @@ const BACKUP_USER_PATTERN = /^[a-z_][a-z0-9_-]{0,31}$/;
 const BACKUP_BINARY_PATTERN = /^(?:[A-Za-z0-9_.-]+|\/[A-Za-z0-9_./-]+)$/;
 const INFO_TIMEOUT_MS = 5_000;
 const BACKUP_TIMEOUT_MS = 30 * 60_000;
+const PITR_TIMEOUT_MS = 30 * 60_000;
+const TIMEOUT_KILL_AFTER = "--kill-after=30s";
 
 interface PgBackRestCommandResult {
   exitCode: number;
@@ -22,6 +24,13 @@ export class PgBackRestUnavailableError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "PgBackRestUnavailableError";
+  }
+}
+
+export class PitrRestoreUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PitrRestoreUnavailableError";
   }
 }
 
@@ -43,6 +52,14 @@ function readPgBackRestConfiguration(environment: Record<string, string | undefi
   return { stanza, user, binary };
 }
 
+export function getPgBackRestStanza(environment: Record<string, string | undefined> = process.env): string {
+  return readPgBackRestConfiguration(environment).stanza;
+}
+
+export function isPitrEnabled(environment: Record<string, string | undefined> = process.env): boolean {
+  return environment.SUPACLOUD_PITR_ENABLED === "true" || environment.PITR_ENABLED === "true";
+}
+
 function pgBackRestCommand(
   pgBackRestArguments: string[],
   timeoutMs = pgBackRestArguments.includes("backup") ? BACKUP_TIMEOUT_MS : INFO_TIMEOUT_MS,
@@ -50,6 +67,7 @@ function pgBackRestCommand(
   const configuration = readPgBackRestConfiguration();
   return [
     "timeout",
+    TIMEOUT_KILL_AFTER,
     String(Math.ceil(timeoutMs / 1000)),
     "sudo",
     "-n",
@@ -124,7 +142,8 @@ function backupInfoFromEntry(serializedBackupEntry: unknown, database?: string):
   const start = timestamp?.start;
   const stop = timestamp?.stop;
   const size = backupSizeFromMetadata(backupMetadata);
-  if (typeof id !== "string" || !PGBACKREST_NAME_PATTERN.test(id)
+  if (backupEntry.error === true
+    || typeof id !== "string" || !PGBACKREST_NAME_PATTERN.test(id)
     || (type !== "full" && type !== "incr" && type !== "diff")
     || typeof start !== "number" || !Number.isFinite(start)
     || typeof stop !== "number" || !Number.isFinite(stop) || size === null) {
@@ -136,9 +155,18 @@ function backupInfoFromEntry(serializedBackupEntry: unknown, database?: string):
 function parseBackups(inventoryJson: string, database?: string): BackupInfo[] {
   try {
     const inventory = JSON.parse(inventoryJson);
-    if (!Array.isArray(inventory) || inventory.length === 0) return [];
+    if (!Array.isArray(inventory) || inventory.length !== 1) {
+      throw new PgBackRestUnavailableError("Invalid pgBackRest backup inventory");
+    }
     const cluster = inventory[0] as Record<string, unknown>;
-    const backupEntries = Array.isArray(cluster.backup) ? cluster.backup : [];
+    if (!cluster || typeof cluster !== "object" || cluster.name !== getPgBackRestStanza()) {
+      throw new PgBackRestUnavailableError("Invalid pgBackRest backup inventory");
+    }
+    if (!Array.isArray(cluster.backup)) {
+      throw new PgBackRestUnavailableError("Invalid pgBackRest backup inventory");
+    }
+    const backupEntries = cluster.backup;
+    assertInventoryReadable(cluster, backupEntries);
     // pgBackRest stanzas are PostgreSQL clusters, while this API is project scoped.
     return backupEntries.map((serializedBackupEntry) => backupInfoFromEntry(
       serializedBackupEntry,
@@ -151,6 +179,28 @@ function parseBackups(inventoryJson: string, database?: string): BackupInfo[] {
     });
     throw new PgBackRestUnavailableError("Invalid pgBackRest backup inventory");
   }
+}
+
+function assertInventoryReadable(cluster: Record<string, unknown>, backupEntries: unknown[]): void {
+  const stanzaStatus = cluster.status as Record<string, unknown> | undefined;
+  const repositories = cluster.repo;
+  const repositoryStatusesMatch = Array.isArray(repositories) && repositories.length > 0
+    && repositories.every((repository) => {
+      if (!repository || typeof repository !== "object") return false;
+      const status = (repository as Record<string, unknown>).status;
+      return Boolean(status)
+        && typeof status === "object"
+        && (status as Record<string, unknown>).code === stanzaStatus?.code;
+    });
+  const readableStatus = stanzaStatus?.code === 0
+    || (stanzaStatus?.code === 2 && backupEntries.length === 0);
+  if (readableStatus && repositoryStatusesMatch) return;
+
+  logger.error("[Backup] pgBackRest inventory reported an unhealthy stanza", {
+    stanza: cluster.name,
+    statusCode: stanzaStatus?.code,
+  });
+  throw new PgBackRestUnavailableError("pgBackRest backup inventory is unavailable");
 }
 
 /**
@@ -173,43 +223,93 @@ export async function createBackup(
 ): Promise<{ message: string }> {
   const beforeExecution = await runPgBackRest(["info", "--output=json"], INFO_TIMEOUT_MS);
   assertCommandSucceeded("backup inventory", beforeExecution);
-  const previousBackupIds = new Set(parseBackups(beforeExecution.stdout).map((backup) => backup.id));
+  const previousBackups = parseBackups(beforeExecution.stdout);
+  const previousBackupIds = new Set(previousBackups.map((backup) => backup.id));
+  const hasPreviousFullBackup = previousBackups.some((backup) => backup.type === "full");
 
   const backupExecution = await runPgBackRest([`--type=${type}`, "backup"], BACKUP_TIMEOUT_MS);
   assertCommandSucceeded("backup", backupExecution);
 
   const afterExecution = await runPgBackRest(["info", "--output=json"], INFO_TIMEOUT_MS);
   assertCommandSucceeded("backup inventory", afterExecution);
-  assertNewCompletedBackup(parseBackups(afterExecution.stdout), previousBackupIds, type);
-  return { message: `${type} backup completed` };
+  const completedBackup = assertNewCompletedBackup(
+    parseBackups(afterExecution.stdout),
+    previousBackupIds,
+    type,
+    hasPreviousFullBackup,
+  );
+  return { message: `${completedBackup.type} backup completed` };
 }
 
 function assertNewCompletedBackup(
   backups: BackupInfo[],
   previousBackupIds: Set<string>,
   type: BackupInfo["type"],
-): void {
-  const completedBackup = backups.find((backup) => (
+  hasPreviousFullBackup: boolean,
+): BackupInfo {
+  const newCompletedBackups = backups.filter((backup) => (
     !previousBackupIds.has(backup.id)
-    && backup.type === type
     && backup.timestamp.stop > 0
   ));
-  if (completedBackup) return;
+  const completedBackup = newCompletedBackups.find((backup) => backup.type === type)
+    ?? (!hasPreviousFullBackup && type !== "full"
+      ? newCompletedBackups.find((backup) => backup.type === "full")
+      : undefined);
+  if (completedBackup) return completedBackup;
   logger.error("[Backup] pgBackRest completed without a new inventory record", { type });
   throw new PgBackRestUnavailableError("pgBackRest backup record is unavailable");
 }
 
 const PITR_TARGET_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/;
+let pitrRestoreInFlight = false;
 
 export async function restore(request: RestoreRequest): Promise<{ message: string }> {
-        if (!PITR_TARGET_PATTERN.test(request.target)) {
-            throw new Error("Invalid PITR target");
-        }
-        $`sudo -u postgres pig pitr ${request.target}`.nothrow().quiet().catch(err => {
-            logger.error('[Backup] Async restore task failed:', { error: err instanceof Error ? err.message : String(err) });
-        });
-        return { message: `Point-in-time recovery (PITR) task started, target: ${request.target}` };
+  if (!PITR_TARGET_PATTERN.test(request.target)) {
+    throw new Error("Invalid PITR target");
+  }
+  if (pitrRestoreInFlight) {
+    throw new PitrRestoreUnavailableError("A PITR restore is already in progress");
+  }
+  pitrRestoreInFlight = true;
+
+  try {
+    let exitCode: number;
+    try {
+      const restoreProcess = Bun.spawn([
+        "timeout",
+        TIMEOUT_KILL_AFTER,
+        String(Math.ceil(PITR_TIMEOUT_MS / 1000)),
+        "sudo",
+        "-n",
+        "-u",
+        "postgres",
+        "pig",
+        "pitr",
+        "-s",
+        getPgBackRestStanza(),
+        "-t",
+        request.target,
+        "-y",
+      ], { stdout: "pipe", stderr: "pipe" });
+      [exitCode] = await Promise.all([
+        restoreProcess.exited,
+        new Response(restoreProcess.stdout).text(),
+        new Response(restoreProcess.stderr).text(),
+      ]);
+    } catch {
+      logger.error("[Backup] PITR restore command could not start");
+      throw new PitrRestoreUnavailableError("PITR restore command is unavailable");
     }
+
+    if (exitCode !== 0) {
+      logger.error("[Backup] PITR restore failed", { exitCode, timedOut: exitCode === 124 });
+      throw new PitrRestoreUnavailableError(exitCode === 124 ? "PITR restore timed out" : "PITR restore failed");
+    }
+    return { message: `Point-in-time recovery (PITR) completed, target: ${request.target}` };
+  } finally {
+    pitrRestoreInFlight = false;
+  }
+}
 
 const LOGICAL_BACKUP_DIR = process.env.SUPACLOUD_LOGICAL_BACKUP_DIR || "/tmp/supacloud-backups";
 const LOGICAL_BACKUP_FILE_PATTERN = /^backup_[A-Za-z0-9_-]{1,64}_\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.sql\.gz$/;

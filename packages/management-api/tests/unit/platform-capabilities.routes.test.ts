@@ -70,6 +70,7 @@ describe("project platform capability endpoints", () => {
     listBackups.mockResolvedValue([]);
     resolveDbName.mockReset();
     resolveDbName.mockImplementation((ref: string) => Promise.resolve(`supa_${ref}`));
+    delete process.env.SUPACLOUD_PGBACKREST_STANZA;
     delete process.env.SUPACLOUD_PITR_ENABLED;
     delete process.env.PITR_ENABLED;
   });
@@ -127,10 +128,10 @@ describe("project platform capability endpoints", () => {
       reason: "pitr_not_enabled",
       earliest_physical_backup_date: "2026-06-21T00:00:00.000Z",
       latest_physical_backup_date: "2026-06-21T01:00:00.000Z",
-      backups: { count: 1, stanza: "supa_proj_1" },
+      backups: { count: 1, stanza: "db-main" },
       restore: {
         supported: false,
-        endpoint: "/v1/projects/proj_1/database/backups/restore",
+        endpoint: "/v1/platform/backups/restore",
         requires_admin: true,
       },
     });
@@ -159,5 +160,18 @@ describe("project platform capability endpoints", () => {
       reason: null,
       restore: { supported: true },
     });
+  });
+
+  test("GET PITR reports the configured cluster stanza instead of the tenant database", async () => {
+    process.env.SUPACLOUD_PGBACKREST_STANZA = "cluster-main";
+    try {
+      const res = await request("/v1/projects/proj_1/database/backups/pitr");
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({ backups: { stanza: "cluster-main" } });
+      expect(listBackups).toHaveBeenCalledWith("supa_proj_1");
+    } finally {
+      delete process.env.SUPACLOUD_PGBACKREST_STANZA;
+    }
   });
 });
