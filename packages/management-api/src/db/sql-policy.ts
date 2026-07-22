@@ -63,12 +63,96 @@ const LEGACY_DANGEROUS_SQL_PATTERNS: readonly RegExp[] = [
   /\bpg_catalog\b.*\bpg_execute_server_program\b/i,
 ];
 
+function startsEscapeString(sql: string, quoteIndex: number): boolean {
+  const prefixIndex = quoteIndex - 1;
+  const prefix = sql[prefixIndex] || "";
+  const preceding = sql[prefixIndex - 1] || "";
+  return /[eE]/.test(prefix) && !/[A-Za-z0-9_$]/.test(preceding);
+}
+
+function singleQuotedLiteralEnd(sql: string, start: number): number {
+  const usesBackslashEscapes = startsEscapeString(sql, start);
+  let cursor = start + 1;
+  while (cursor < sql.length) {
+    if (usesBackslashEscapes && sql[cursor] === "\\" && cursor + 1 < sql.length) cursor += 2;
+    else if (sql[cursor] === "'" && sql[cursor + 1] === "'") cursor += 2;
+    else if (sql[cursor] === "'") return cursor + 1;
+    else cursor += 1;
+  }
+  return sql.length;
+}
+
+function doubleQuotedIdentifierEnd(sql: string, start: number): number {
+  let cursor = start + 1;
+  while (cursor < sql.length) {
+    if (sql[cursor] === '"' && sql[cursor + 1] === '"') cursor += 2;
+    else if (sql[cursor] === '"') return cursor + 1;
+    else cursor += 1;
+  }
+  return sql.length;
+}
+
+function lineCommentEnd(sql: string, start: number): number {
+  const end = sql.indexOf("\n", start + 2);
+  return end === -1 ? sql.length : end;
+}
+
+function blockCommentEnd(sql: string, start: number): number {
+  let depth = 1;
+  let cursor = start + 2;
+  while (cursor < sql.length && depth > 0) {
+    if (sql.startsWith("/*", cursor)) {
+      depth += 1;
+      cursor += 2;
+    } else if (sql.startsWith("*/", cursor)) {
+      depth -= 1;
+      cursor += 2;
+    } else cursor += 1;
+  }
+  return cursor;
+}
+
+function dollarQuoteTagAt(sql: string, index: number): string {
+  if (/[A-Za-z0-9_$]/.test(sql[index - 1] || "")) return "";
+  return sql.slice(index).match(/^\$[A-Za-z_][A-Za-z0-9_]*\$|^\$\$/)?.[0] || "";
+}
+
+function maskSqlPolicyNoise(sql: string): string {
+  let maskedSql = "";
+  let cursor = 0;
+  while (cursor < sql.length) {
+    let protectedEnd = 0;
+    if (sql.startsWith("--", cursor)) protectedEnd = lineCommentEnd(sql, cursor);
+    else if (sql.startsWith("/*", cursor)) protectedEnd = blockCommentEnd(sql, cursor);
+    else if (sql[cursor] === "'") protectedEnd = singleQuotedLiteralEnd(sql, cursor);
+    else if (sql[cursor] === '"') {
+      protectedEnd = doubleQuotedIdentifierEnd(sql, cursor);
+      maskedSql += sql.slice(cursor, protectedEnd);
+      cursor = protectedEnd;
+      continue;
+    }
+    if (protectedEnd > 0) {
+      maskedSql += " ".repeat(protectedEnd - cursor);
+      cursor = protectedEnd;
+      continue;
+    }
+
+    const tag = sql[cursor] === "$" ? dollarQuoteTagAt(sql, cursor) : "";
+    if (!tag) {
+      maskedSql += sql[cursor]!;
+      cursor += 1;
+      continue;
+    }
+    const end = sql.indexOf(tag, cursor + tag.length);
+    if (end === -1) return maskedSql + sql.slice(cursor);
+    maskedSql += tag + " ".repeat(end - cursor - tag.length) + tag;
+    cursor = end + tag.length;
+  }
+  return maskedSql;
+}
+
 export function normalizeSqlForPolicy(sqlQuery: string): string {
-  return sqlQuery
-    .replace(/\/\*[\s\S]*?\*\//g, " ")
-    .replace(/--.*$/gm, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  return maskSqlPolicyNoise(sqlQuery).replace(/\s+/g, " ").trim();
 }
 
 export function isDangerousSQL(sqlQuery: string): boolean {

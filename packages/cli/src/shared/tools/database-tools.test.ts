@@ -86,6 +86,52 @@ describe("database migration helpers", () => {
         }
     });
 
+    test("skips only the exact already-applied migration response", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
+        try {
+            writeFileSync(join(dir, "20260425123000_create_users.sql"), "CREATE TABLE users (id uuid);\n");
+            const callback = captureDatabaseTool({
+                post: async () => ({
+                    ok: false,
+                    status: 409,
+                    data: { code: "409", message: "Migration already applied" },
+                }),
+            });
+
+            const toolResult = await callback({ action: "push_migrations", ref: "proj", dir });
+            expect(toolResult.content[0].text).toContain("Migration push completed");
+            expect(toolResult.content[0].text).toContain("Applied: 0");
+            expect(toolResult.content[0].text).toContain("Skipped: 1");
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    test("fails migration pushes on checksum-conflict 409 responses", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
+        try {
+            writeFileSync(join(dir, "20260425123000_create_users.sql"), "CREATE TABLE users (id uuid);\n");
+            const callback = captureDatabaseTool({
+                post: async () => ({
+                    ok: false,
+                    status: 409,
+                    data: {
+                        code: "migration_checksum_conflict",
+                        message: "Migration conflicts with an existing checksum",
+                    },
+                }),
+            });
+
+            const toolResult = await callback({ action: "push_migrations", ref: "proj", dir });
+            expect(toolResult.content[0].text).toContain("Failed to apply 20260425123000_create_users.sql (409)");
+            expect(toolResult.content[0].text).toContain("migration_checksum_conflict");
+            expect(toolResult.content[0].text).toContain("Skipped before failure: 0");
+            expect(toolResult.content[0].text).not.toContain("Migration push completed");
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
     test("previews baseline repair without executing SQL", async () => {
         const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
         const posts: Array<{ path: string; body: unknown }> = [];

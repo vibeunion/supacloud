@@ -2,6 +2,8 @@ import { Elysia, t } from "elysia";
 import type { TransactionSQL } from "bun";
 import { projectService } from "../services";
 import { db, getProjectDb, getProjectRoleDb, removeProjectDbCache, resolveDbName, sql as metaSql, type SqlExecutionMode } from "../db";
+import { normalizeSqlForPolicy } from "../db/sql-policy";
+import { splitSqlStatements } from "../db/sql-statements";
 import { requireAdminAuth, requireProjectOrAdminAuth } from "../middleware/auth";
 import {
   calculateMigrationChecksum,
@@ -64,6 +66,24 @@ export function resolveMigrationStatements(body: MigrationBody): string[] {
   }
 
   return [];
+}
+
+/**
+ * Migration clients commonly submit a file wrapped in one outer transaction.
+ * The management API already owns that transaction, so execute only the file
+ * contents while retaining the original statements for checksums and history.
+ */
+export function migrationExecutionStatements(statements: readonly string[]): string[] {
+  const normalized = statements.flatMap((statement) => splitSqlStatements(statement));
+  const executionStatements = normalized.length >= 2
+    && /^(?:BEGIN(?:\s+(?:WORK|TRANSACTION))?|START\s+TRANSACTION)$/i.test(normalizeSqlForPolicy(normalized[0]!))
+    && /^(?:COMMIT|END)(?:\s+(?:WORK|TRANSACTION))?$/i.test(normalizeSqlForPolicy(normalized[normalized.length - 1]!))
+    ? normalized.slice(1, -1)
+    : normalized;
+  if (executionStatements.length === 0) {
+    throw new MigrationRouteError(400, "empty_migration", "Migration contains no executable statements");
+  }
+  return executionStatements;
 }
 
 const MAX_MIGRATION_VERSION = 9_223_372_036_854_775_807n;
@@ -241,6 +261,11 @@ interface RecordedMigrationInput {
   conflictOnName: boolean;
 }
 
+interface MigrationExecutionPlan {
+  checksum: string;
+  statements: readonly string[];
+}
+
 function existingMigrationChecksum(
   row: Record<string, unknown>,
   fallback: { version: string; name: string },
@@ -307,14 +332,14 @@ async function executeMigrationTransaction(
   connection: ReservedProjectSql,
   adminDb: ProjectSql,
   input: RecordedMigrationInput,
-  checksum: string,
+  execution: MigrationExecutionPlan,
 ): Promise<boolean> {
   const leaseHolder: { current?: Awaited<ReturnType<typeof issueMigrationLedgerLease>> } = {};
   try {
     return await connection.begin(async (tx) => {
       const existing = await findExistingMigration(tx, input);
       if (existing.length > 0) {
-        if (existingMigrationChecksum(existing[0]!, input) !== checksum) {
+        if (existingMigrationChecksum(existing[0]!, input) !== execution.checksum) {
           throw new MigrationRouteError(
             409,
             "migration_checksum_conflict",
@@ -323,10 +348,18 @@ async function executeMigrationTransaction(
         }
         return true;
       }
-      for (const statement of input.statements) await tx.unsafe(statement);
-      const issuedLease = await issueMigrationLedgerLease(adminDb, input.version, checksum);
+      const unsupported = detectUnsupportedMigrationOperations(execution.statements);
+      if (unsupported.length > 0) {
+        throw new MigrationRouteError(
+          400,
+          "unsupported_migration_sql",
+          `Migration contains SQL outside the project-scoped path: ${unsupported.join(", ")}`,
+        );
+      }
+      for (const statement of execution.statements) await tx.unsafe(statement);
+      const issuedLease = await issueMigrationLedgerLease(adminDb, input.version, execution.checksum);
       leaseHolder.current = issuedLease;
-      await insertMigrationLedger(tx, input, checksum, issuedLease.token);
+      await insertMigrationLedger(tx, input, execution.checksum, issuedLease.token);
       return false;
     });
   } finally {
@@ -365,20 +398,18 @@ async function applyRecordedMigration(input: RecordedMigrationInput): Promise<{
   checksum: string;
   alreadyApplied: boolean;
 }> {
-  const unsupported = detectUnsupportedMigrationOperations(input.statements);
-  if (unsupported.length > 0) {
-    throw new MigrationRouteError(
-      400,
-      "unsupported_migration_sql",
-      `Migration contains SQL outside the project-scoped path: ${unsupported.join(", ")}`,
-    );
-  }
   const checksum = calculateMigrationChecksum(input);
+  const executionStatements = migrationExecutionStatements(input.statements);
 
   return withProjectMigrationLocks({ projectRefs: [input.projectRef] }, async () => {
     await branchReplacementJournal.assertInactive([input.projectRef]);
     return withMigrationRoleSession(input, async (connection, adminDb) => {
-      const alreadyApplied = await executeMigrationTransaction(connection, adminDb, input, checksum);
+      const alreadyApplied = await executeMigrationTransaction(
+        connection,
+        adminDb,
+        input,
+        { checksum, statements: executionStatements },
+      );
       await ensureTasksRealtimePublication(adminDb);
       return { checksum, alreadyApplied };
     });
