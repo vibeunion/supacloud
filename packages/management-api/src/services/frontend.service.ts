@@ -31,6 +31,7 @@ import {
   prepareSvelteKitRuntime,
   renderSvelteKitSystemdUnit,
 } from "./frontend-runtime";
+import { installManagedSystemdUnit, removeManagedSystemdUnit } from "./systemd-unit-broker";
 
 const FRONTEND_BASE_DIR = "/var/supacloud/frontends";
 const READINESS_TIMEOUT_MS = 30_000;
@@ -666,8 +667,7 @@ LimitNOFILE=65536
 WantedBy=multi-user.target
 `;
 
-    const servicePath = `/etc/systemd/system/${serviceName}.service`;
-    await Bun.write(servicePath, systemdUnit);
+    await installManagedSystemdUnit(`${serviceName}.service`, systemdUnit);
 
     await $`systemctl daemon-reload`.quiet();
     await $`systemctl enable ${serviceName}`.quiet();
@@ -681,8 +681,7 @@ WantedBy=multi-user.target
     
     await $`systemctl stop ${serviceName}`.nothrow().quiet();
     await $`systemctl disable ${serviceName}`.nothrow().quiet();
-    await $`rm -f /etc/systemd/system/${serviceName}.service`.quiet();
-    await $`systemctl daemon-reload`.quiet();
+    await removeManagedSystemdUnit(`${serviceName}.service`);
   }
 
   private async precompressStaticAssets(root: string): Promise<void> {

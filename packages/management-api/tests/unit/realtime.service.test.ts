@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { assertRealtimeSecretAlignment, RealtimeService } from "../../src/services/realtime.service";
+import { assertRealtimeSecretAlignment, RealtimeService, validateRealtimeSecretConfiguration } from "../../src/services/realtime.service";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const originalFetch = globalThis.fetch;
 
@@ -22,6 +25,30 @@ describe("RealtimeService tenant payloads", () => {
       configuredApiSecret: "canonical-realtime-secret",
       containerApiSecret: "canonical-realtime-secret",
     })).not.toThrow();
+  });
+
+  test("fails closed when the required container verification secret is missing or empty", () => {
+    for (const containerApiSecret of [undefined, "", "   "]) {
+      expect(() => assertRealtimeSecretAlignment({
+        canonicalSecret: "canonical-realtime-secret",
+        containerApiSecret,
+        requireContainerApiSecret: true,
+      })).toThrow("container API JWT secret is missing");
+    }
+  });
+
+  test("fails closed when the container env file is missing or omits API_JWT_SECRET", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supacloud-realtime-secret-"));
+    try {
+      expect(() => validateRealtimeSecretConfiguration(join(dir, "missing.env")))
+        .toThrow("container API JWT secret is missing");
+      const emptyFile = join(dir, "empty.env");
+      writeFileSync(emptyFile, "OTHER_SECRET=value\n");
+      expect(() => validateRealtimeSecretConfiguration(emptyFile))
+        .toThrow("container API JWT secret is missing");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test("registerTenant disables per-tenant postgres SSL for local service databases", async () => {

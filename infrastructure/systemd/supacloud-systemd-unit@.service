@@ -1,0 +1,21 @@
+[Unit]
+Description=Install a validated SupaCloud-managed systemd unit %i
+Documentation=https://github.com/supacloud/supacloud
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/supacloud/systemd-unit %i
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+LockPersonality=true
+RestrictSUIDSGID=true
+ReadWritePaths=/etc/systemd/system /run/supacloud-unit-requests
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER
+SystemCallArchitectures=native

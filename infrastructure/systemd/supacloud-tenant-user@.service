@@ -5,7 +5,6 @@ Documentation=https://github.com/supacloud/supacloud
 [Service]
 Type=oneshot
 ExecStart=/usr/local/libexec/supacloud/tenant-user %i
-RemainAfterExit=yes
 UMask=0077
 
 # This short-lived, fixed helper is the only tenant-provisioning process that

@@ -213,6 +213,8 @@ jobs:
           find scripts -name "*.sh" -print0 | xargs -0 -n1 bash -n
           bash scripts/lib/tenant_runtime.test.sh
           bash scripts/lib/installer_pg_hba.test.sh
+          bash scripts/lib/tenant_user.test.sh
+          bash scripts/lib/systemd_unit_broker.test.sh
 
       - name: Validate CI scripts
         run: |

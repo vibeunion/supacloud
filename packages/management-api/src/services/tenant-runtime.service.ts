@@ -39,6 +39,7 @@ import { getAuthRuntimeDescriptor, isSharedAuthRuntime } from "./auth-runtime.se
 import { authConfigChangesPostgrestVerifier } from "./auth-runtime-impact";
 import { runtimeCacheService } from "./runtime-cache.service";
 import { projectControlSecretsService } from "./project-control-secrets.service";
+import { installManagedSystemdUnit } from "./systemd-unit-broker";
 
 export {
     renderGoTrueAuthEnv,
@@ -778,23 +779,20 @@ class TenantRuntimeService {
 
     private async ensureTenantRuntimeUser(ref: string): Promise<string> {
         const runtimeUser = this.tenantRuntimeUser(ref);
-        const current = await this.runStructuredCommand(["id", "-u", runtimeUser]);
-        if (current.exitCode === 0) return runtimeUser;
-
         // ProtectSystem=full deliberately keeps the long-running control plane
-        // out of the system account database. Delegate this one fixed operation
-        // to the installer-owned, short-lived systemd helper instead.
+        // out of the system account database. Always run the fixed helper so it
+        // validates pre-existing account attributes instead of trusting a UID.
         const helperUnit = `supacloud-tenant-user@${ref}.service`;
         const created = await this.runStructuredCommand(["systemctl", "start", helperUnit]);
         if (created.exitCode !== 0) {
-            // A concurrent runtime start may have completed the same helper.
-            const raced = await this.runStructuredCommand(["id", "-u", runtimeUser]);
-            if (raced.exitCode !== 0) {
-                throw new Error(
-                    `Failed to create tenant runtime user ${runtimeUser} through ${helperUnit}: ` +
-                    created.stderr.trim().slice(0, 300),
-                );
-            }
+            throw new Error(
+                `Failed to create or validate tenant runtime user ${runtimeUser} through ${helperUnit}: ` +
+                created.stderr.trim().slice(0, 300),
+            );
+        }
+        const verified = await this.runStructuredCommand(["id", "-u", runtimeUser]);
+        if (verified.exitCode !== 0) {
+            throw new Error(`Tenant runtime user ${runtimeUser} is missing after ${helperUnit} completed`);
         }
         return runtimeUser;
     }
@@ -1207,7 +1205,7 @@ CPUWeight=${this.POSTGREST_CPU_WEIGHT}
 [Install]
 WantedBy=multi-user.target
 `.trim();
-            await Bun.write(pgrstUnitPath, pgrstUnit);
+            await installManagedSystemdUnit("supacloud-pgrst@.service", pgrstUnit);
         }
 
         const gotrueExists = await Bun.file(gotrueUnitPath).exists();
@@ -1251,7 +1249,7 @@ CPUWeight=20
 [Install]
 WantedBy=multi-user.target
 `.trim();
-            await Bun.write(gotrueUnitPath, gotrueUnit);
+            await installManagedSystemdUnit("supacloud-gotrue@.service", gotrueUnit);
         }
 
         if (shouldWritePgrstUnit || shouldWriteGotrueUnit) {

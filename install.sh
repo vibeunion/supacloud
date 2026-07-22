@@ -2574,6 +2574,21 @@ install_tenant_user_helper() {
     install -m 0644 "$unit_src" "$unit_target"
 }
 
+install_systemd_unit_broker() {
+    local helper_src="${SCRIPT_DIR}/scripts/lib/systemd_unit_broker.sh"
+    local unit_src="${SCRIPT_DIR}/infrastructure/systemd/supacloud-systemd-unit@.service"
+    local helper_target="/usr/local/libexec/supacloud/systemd-unit"
+    local unit_target="/etc/systemd/system/supacloud-systemd-unit@.service"
+
+    if [[ ! -f "$helper_src" || ! -f "$unit_src" ]]; then
+        log_error "Systemd unit broker assets are missing"
+        return 1
+    fi
+
+    install -D -m 0755 "$helper_src" "$helper_target"
+    install -m 0644 "$unit_src" "$unit_target"
+}
+
 recover_management_api_install() {
     local transaction_dir="$1"
     local service_was_active="$2"
@@ -2584,6 +2599,10 @@ recover_management_api_install() {
     fi
     supacloud_restore_file_snapshot /usr/local/bin/supacloud "${transaction_dir}/binary" || return 1
     supacloud_restore_file_snapshot /etc/systemd/system/supacloud.service "${transaction_dir}/unit" || return 1
+    supacloud_restore_file_snapshot /usr/local/libexec/supacloud/tenant-user "${transaction_dir}/tenant-user-helper" || return 1
+    supacloud_restore_file_snapshot /etc/systemd/system/supacloud-tenant-user@.service "${transaction_dir}/tenant-user-unit" || return 1
+    supacloud_restore_file_snapshot /usr/local/libexec/supacloud/systemd-unit "${transaction_dir}/systemd-unit-helper" || return 1
+    supacloud_restore_file_snapshot /etc/systemd/system/supacloud-systemd-unit@.service "${transaction_dir}/systemd-unit-unit" || return 1
     if [[ "$keep_current_env" != "true" ]]; then
         supacloud_restore_file_snapshot "$MANAGEMENT_ENV_FILE" "${transaction_dir}/env" || return 1
     fi
@@ -2635,6 +2654,10 @@ install_management_api() {
     supacloud_capture_file_snapshot "$BIN_TARGET" "${management_transaction_dir}/binary"
     supacloud_capture_file_snapshot "$MANAGEMENT_ENV_FILE" "${management_transaction_dir}/env"
     supacloud_capture_file_snapshot /etc/systemd/system/supacloud.service "${management_transaction_dir}/unit"
+    supacloud_capture_file_snapshot /usr/local/libexec/supacloud/tenant-user "${management_transaction_dir}/tenant-user-helper"
+    supacloud_capture_file_snapshot /etc/systemd/system/supacloud-tenant-user@.service "${management_transaction_dir}/tenant-user-unit"
+    supacloud_capture_file_snapshot /usr/local/libexec/supacloud/systemd-unit "${management_transaction_dir}/systemd-unit-helper"
+    supacloud_capture_file_snapshot /etc/systemd/system/supacloud-systemd-unit@.service "${management_transaction_dir}/systemd-unit-unit"
     staged_management_binary="${management_transaction_dir}/supacloud.staged"
     log_info "Staging validated Management API binary from $SELECTED_BIN_SOURCE"
     supacloud_atomic_install_binary "$SELECTED_BIN_SOURCE" "$CI_BIN" "$staged_management_binary"
@@ -2838,6 +2861,9 @@ install_management_api() {
     write_management_api_systemd_unit "$BIN_TARGET" || activation_status=$?
     if (( activation_status == 0 )); then
         install_tenant_user_helper || activation_status=$?
+    fi
+    if (( activation_status == 0 )); then
+        install_systemd_unit_broker || activation_status=$?
     fi
     if (( activation_status == 0 )); then
         mv -f "$staged_management_binary" "$BIN_TARGET" || activation_status=$?

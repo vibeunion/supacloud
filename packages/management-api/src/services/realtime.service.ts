@@ -42,10 +42,19 @@ export function assertRealtimeSecretAlignment(input: {
     canonicalSecret: string;
     configuredApiSecret?: string;
     containerApiSecret?: string;
+    requireContainerApiSecret?: boolean;
 }): void {
-    const { canonicalSecret, configuredApiSecret = "", containerApiSecret = "" } = input;
+    const {
+        canonicalSecret,
+        configuredApiSecret = "",
+        containerApiSecret = "",
+        requireContainerApiSecret = false,
+    } = input;
     if (!canonicalSecret) {
         throw new Error("Realtime canonical JWT secret is missing");
+    }
+    if (requireContainerApiSecret && !containerApiSecret.trim()) {
+        throw new Error("Realtime container API JWT secret is missing");
     }
     if (configuredApiSecret && configuredApiSecret !== canonicalSecret) {
         throw new Error("Realtime API secret does not match the canonical JWT secret");
@@ -55,13 +64,17 @@ export function assertRealtimeSecretAlignment(input: {
     }
 }
 
+export function validateRealtimeSecretConfiguration(containerEnvFile = config.realtimeContainerEnvFile): void {
+    const containerApiSecret = readEnvFileValue(containerEnvFile, "API_JWT_SECRET");
+    assertRealtimeSecretAlignment({
+        canonicalSecret: config.jwtSecret,
+        configuredApiSecret: config.realtimeApiSecret,
+        containerApiSecret,
+        requireContainerApiSecret: true,
+    });
+}
+
 const REALTIME_API_SECRET = config.jwtSecret;
-const CONTAINER_API_JWT_SECRET = readEnvFileValue(config.realtimeContainerEnvFile, "API_JWT_SECRET");
-assertRealtimeSecretAlignment({
-    canonicalSecret: REALTIME_API_SECRET,
-    configuredApiSecret: config.realtimeApiSecret,
-    containerApiSecret: CONTAINER_API_JWT_SECRET,
-});
 if (!REALTIME_API_SECRET) {
     logger.error("FATAL: REALTIME_API_SECRET or JWT_SECRET must be set for RealtimeService.");
 }
