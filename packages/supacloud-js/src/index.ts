@@ -346,6 +346,7 @@ export type SupaCloudOAuthServerStatus = {
   enabled: boolean;
   allow_dynamic_registration: boolean;
   issuer: string;
+  authorization_path?: string;
   discovery_url: string;
   oauth_authorization_server_metadata_url?: string;
   jwks_url: string;
@@ -1166,11 +1167,19 @@ class SupaCloudOAuthServerClient<TClient extends SupabaseClient = SupabaseClient
     );
   }
 
-  async migrateToOidc(options: { allowDynamicRegistration?: boolean } = {}): Promise<SupaCloudOAuthServerStatus> {
+  async migrateToOidc(options: {
+    allowDynamicRegistration?: boolean;
+    authorizationPath?: string;
+  } = {}): Promise<SupaCloudOAuthServerStatus> {
     return this.request<SupaCloudOAuthServerStatus>(
       `/v1/projects/${this.options.projectRef}/auth/oauth-server/migrate`,
       "POST",
-      { allow_dynamic_registration: options.allowDynamicRegistration === true },
+      {
+        allow_dynamic_registration: options.allowDynamicRegistration === true,
+        ...(options.authorizationPath === undefined
+          ? {}
+          : { authorization_path: options.authorizationPath }),
+      },
     );
   }
 

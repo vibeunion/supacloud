@@ -36,13 +36,14 @@ To migrate a project:
 curl -X POST "$MANAGEMENT_API_URL/v1/projects/$PROJECT_REF/auth/oauth-server/migrate" \
   -H "Authorization: Bearer $MANAGEMENT_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{ "allow_dynamic_registration": true }'
+  -d '{ "allow_dynamic_registration": true, "authorization_path": "/authorize.html" }'
 ```
 
 Migration writes project-scoped Auth config:
 
 - `auth.oauth_server.enabled = true`
 - `auth.oauth_server.issuer = <project-api-url>/auth/v1`
+- `auth.oauth_server.authorization_path = /authorize.html` (origin-relative hosted authorize page path)
 - `auth.oauth_server.signing_alg = "ES256"`
 - `auth.oauth_server.jwt_keys = [...]`
 - `auth.oauth_server.jwt_jwks = { "keys": [...] }`
@@ -165,9 +166,16 @@ Body:
 
 ```json
 {
-  "allow_dynamic_registration": true
+  "allow_dynamic_registration": true,
+  "authorization_path": "/authorize.html"
 }
 ```
+
+`authorization_path` must be an origin-relative path beginning with one `/`.
+Absolute URLs, `//` network-path references, query strings, fragments,
+backslashes, control characters, and dot-traversal segments are rejected to
+keep GoTrue redirects on the configured public host. It defaults to
+`/authorize.html` when omitted.
 
 ### OAuth Client CRUD
 
