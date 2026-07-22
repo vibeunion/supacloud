@@ -349,6 +349,14 @@ describe("runtime companion version assets", () => {
     expect(edgeUnit).toContain("ExecStart=/usr/local/bin/supacloud-edge-runtime");
     expect(installer).toContain("render_edge_runtime_systemd_unit");
     expect(installer).not.toContain('cp "${SYSTEMD_SRC}/supacloud-edge-runtime.service" /etc/systemd/system/supacloud-edge-runtime.service');
+    expect(managementUnit).toContain("ReadWritePaths=/etc/supabase /etc/systemd/system /etc/supacloud/caddy /opt/supacloud /tmp /var/log/supacloud");
+    expect(managementUnit).toContain("SystemCallFilter=@system-service @chown");
+    expect(managementUnit).not.toContain("@privileged");
+    expect(installer).toContain("install_tenant_user_helper");
+    expect(readRepoFile("infrastructure/systemd/supacloud-tenant-user@.service")).toContain(
+      "ExecStart=/usr/local/libexec/supacloud/tenant-user %i",
+    );
+    expect(readRepoFile("scripts/lib/tenant_user.sh")).toContain("^[a-z0-9-]{1,20}$");
     expect(serviceRenderer).not.toContain("/opt/supacloud/config.env");
     expect(serviceRenderer).toContain("/etc/supabase/management-api.env");
     expect(installer).toContain('XCADDY_VERSION="${XCADDY_VERSION:-v0.4.5}"');

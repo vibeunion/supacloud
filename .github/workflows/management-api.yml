@@ -212,6 +212,7 @@ jobs:
           bash -n install.sh setup.sh switch.sh deploy_all.sh scripts/pre_start_recovery.sh
           find scripts -name "*.sh" -print0 | xargs -0 -n1 bash -n
           bash scripts/lib/tenant_runtime.test.sh
+          bash scripts/lib/installer_pg_hba.test.sh
 
       - name: Validate CI scripts
         run: |

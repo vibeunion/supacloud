@@ -37,10 +37,13 @@ SyslogIdentifier=supacloud
 NoNewPrivileges=true
 ProtectSystem=full
 ProtectHome=false
-ReadWritePaths=/etc/supabase /opt/supacloud /tmp /var/log/supacloud
+# The control plane reconciles tenant units and the managed Caddy config at
+# runtime. Keep the rest of /etc read-only while allowing only these managed
+# paths to be updated.
+ReadWritePaths=/etc/supabase /etc/systemd/system /etc/supacloud/caddy /opt/supacloud /tmp /var/log/supacloud
 
-SystemCallFilter=@system-service
-SystemCallFilter=~@mount @reboot @swap @privileged @raw-io @keyring
+SystemCallFilter=@system-service @chown
+SystemCallFilter=~@mount @reboot @swap @raw-io @keyring
 SystemCallArchitectures=native
 
 MemoryMax=4G

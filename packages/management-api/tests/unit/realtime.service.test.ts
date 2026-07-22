@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { RealtimeService } from "../../src/services/realtime.service";
+import { assertRealtimeSecretAlignment, RealtimeService } from "../../src/services/realtime.service";
 
 const originalFetch = globalThis.fetch;
 
@@ -8,6 +8,22 @@ afterEach(() => {
 });
 
 describe("RealtimeService tenant payloads", () => {
+  test("fails closed when the API or container verification secret drifts", () => {
+    expect(() => assertRealtimeSecretAlignment({
+      canonicalSecret: "canonical-realtime-secret",
+      configuredApiSecret: "stale-api-secret",
+    })).toThrow("does not match");
+    expect(() => assertRealtimeSecretAlignment({
+      canonicalSecret: "canonical-realtime-secret",
+      containerApiSecret: "stale-container-secret",
+    })).toThrow("does not match");
+    expect(() => assertRealtimeSecretAlignment({
+      canonicalSecret: "canonical-realtime-secret",
+      configuredApiSecret: "canonical-realtime-secret",
+      containerApiSecret: "canonical-realtime-secret",
+    })).not.toThrow();
+  });
+
   test("registerTenant disables per-tenant postgres SSL for local service databases", async () => {
     const calls: Array<{ url: string; init?: RequestInit }> = [];
     globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {

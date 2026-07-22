@@ -781,20 +781,19 @@ class TenantRuntimeService {
         const current = await this.runStructuredCommand(["id", "-u", runtimeUser]);
         if (current.exitCode === 0) return runtimeUser;
 
-        const created = await this.runStructuredCommand([
-            "useradd",
-            "--system",
-            "--user-group",
-            "--no-create-home",
-            "--home-dir", "/nonexistent",
-            "--shell", "/usr/sbin/nologin",
-            runtimeUser,
-        ]);
+        // ProtectSystem=full deliberately keeps the long-running control plane
+        // out of the system account database. Delegate this one fixed operation
+        // to the installer-owned, short-lived systemd helper instead.
+        const helperUnit = `supacloud-tenant-user@${ref}.service`;
+        const created = await this.runStructuredCommand(["systemctl", "start", helperUnit]);
         if (created.exitCode !== 0) {
-            // A concurrent runtime start may have created the same account.
+            // A concurrent runtime start may have completed the same helper.
             const raced = await this.runStructuredCommand(["id", "-u", runtimeUser]);
             if (raced.exitCode !== 0) {
-                throw new Error(`Failed to create tenant runtime user ${runtimeUser}: ${created.stderr.trim().slice(0, 300)}`);
+                throw new Error(
+                    `Failed to create tenant runtime user ${runtimeUser} through ${helperUnit}: ` +
+                    created.stderr.trim().slice(0, 300),
+                );
             }
         }
         return runtimeUser;

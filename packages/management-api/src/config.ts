@@ -96,6 +96,7 @@ export interface Config {
   victoriaMetricsUrl: string;
   realtimeAdminUrl: string;
   realtimeApiSecret: string;
+  realtimeContainerEnvFile: string;
   managementApiInternal: string;
   storageSigningSecret: string;
   scriptsPath: string;
@@ -261,6 +262,10 @@ export const config: Config = {
   victoriaMetricsUrl: getEnv("VICTORIAMETRICS_URL", "http://127.0.0.1:8428"),
   realtimeAdminUrl: getEnv("REALTIME_ADMIN_URL", "http://127.0.0.1:4000"),
   realtimeApiSecret: getEnv("REALTIME_API_SECRET", ""),
+  realtimeContainerEnvFile: getEnv(
+    "SUPACLOUD_REALTIME_CONTAINER_ENV_FILE",
+    "/etc/supabase/realtime-container.env",
+  ),
   managementApiInternal: getEnv("MANAGEMENT_API_INTERNAL", `127.0.0.1:${port}`),
   storageSigningSecret: getEnv("STORAGE_SIGNING_SECRET", ""),
 

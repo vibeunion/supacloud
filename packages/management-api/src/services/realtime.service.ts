@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { config } from "../config";
 import { sql, resolveSlotName, resolveRoleName } from "../db";
 /**
@@ -18,7 +19,49 @@ function isConnectionError(msg: string): boolean {
 }
 
 const REALTIME_ADMIN_URL = config.realtimeAdminUrl;
-const REALTIME_API_SECRET = config.realtimeApiSecret || config.jwtSecret;
+
+function readEnvFileValue(filePath: string, key: string): string {
+    try {
+        const line = readFileSync(filePath, "utf8")
+            .split(/\r?\n/)
+            .find((candidate) => candidate.trimStart().startsWith(`${key}=`));
+        if (!line) return "";
+        const envEntry = line.slice(line.indexOf("=") + 1).trim();
+        return ((envEntry.startsWith('"') && envEntry.endsWith('"')) || (envEntry.startsWith("'") && envEntry.endsWith("'")))
+            ? envEntry.slice(1, -1)
+            : envEntry;
+    } catch (error) {
+        if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+            return "";
+        }
+        throw error;
+    }
+}
+
+export function assertRealtimeSecretAlignment(input: {
+    canonicalSecret: string;
+    configuredApiSecret?: string;
+    containerApiSecret?: string;
+}): void {
+    const { canonicalSecret, configuredApiSecret = "", containerApiSecret = "" } = input;
+    if (!canonicalSecret) {
+        throw new Error("Realtime canonical JWT secret is missing");
+    }
+    if (configuredApiSecret && configuredApiSecret !== canonicalSecret) {
+        throw new Error("Realtime API secret does not match the canonical JWT secret");
+    }
+    if (containerApiSecret && containerApiSecret !== canonicalSecret) {
+        throw new Error("Realtime container API JWT secret does not match the canonical JWT secret");
+    }
+}
+
+const REALTIME_API_SECRET = config.jwtSecret;
+const CONTAINER_API_JWT_SECRET = readEnvFileValue(config.realtimeContainerEnvFile, "API_JWT_SECRET");
+assertRealtimeSecretAlignment({
+    canonicalSecret: REALTIME_API_SECRET,
+    configuredApiSecret: config.realtimeApiSecret,
+    containerApiSecret: CONTAINER_API_JWT_SECRET,
+});
 if (!REALTIME_API_SECRET) {
     logger.error("FATAL: REALTIME_API_SECRET or JWT_SECRET must be set for RealtimeService.");
 }
