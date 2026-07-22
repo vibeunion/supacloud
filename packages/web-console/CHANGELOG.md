@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.24.2](https://github.com/zuohuadong/supacloud/compare/web-console-v0.24.1...web-console-v0.24.2) (2026-07-22)
+
+
+### Bug Fixes
+
+* **backups:** harden physical backup and PITR safety ([033a448](https://github.com/zuohuadong/supacloud/commit/033a448fcd655c3d28cf741736bb62c6c493760c))
+* **backups:** verify completed pgBackRest backups ([3cfd1a1](https://github.com/zuohuadong/supacloud/commit/3cfd1a1704df4a54eab01e13c88e502f12ed7aac))
+* **ci:** align migration contract and patch fast-uri ([7765e7f](https://github.com/zuohuadong/supacloud/commit/7765e7fe844be2f5fcab28854f83b5628b7bc552))
+* **install:** detect podman before docker to avoid podman-docker misc… ([e94268d](https://github.com/zuohuadong/supacloud/commit/e94268d258c3413b74e769b2ad32d8390ba13be2))
+* **web-console:** normalize migration counts safely ([b3abef5](https://github.com/zuohuadong/supacloud/commit/b3abef5a3a918a08649c3eb194628a8c754976de))
+
 ## [0.24.1](https://github.com/zuohuadong/supacloud/compare/web-console-v0.24.0...web-console-v0.24.1) (2026-07-21)
 
 

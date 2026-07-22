@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.47.6](https://github.com/zuohuadong/supacloud/compare/management-api-v0.47.5...management-api-v0.47.6) (2026-07-22)
+
+
+### Bug Fixes
+
+* **backups:** harden physical backup and PITR safety ([033a448](https://github.com/zuohuadong/supacloud/commit/033a448fcd655c3d28cf741736bb62c6c493760c))
+* **backups:** verify completed pgbackrest backups ([da0ac82](https://github.com/zuohuadong/supacloud/commit/da0ac821305c51e430706cb6da793aef1c25a720))
+* **backups:** verify completed pgBackRest backups ([3cfd1a1](https://github.com/zuohuadong/supacloud/commit/3cfd1a1704df4a54eab01e13c88e502f12ed7aac))
+* **ci:** align migration contract and patch fast-uri ([7765e7f](https://github.com/zuohuadong/supacloud/commit/7765e7fe844be2f5fcab28854f83b5628b7bc552))
+* **install:** detect podman before docker to avoid podman-docker misc… ([e94268d](https://github.com/zuohuadong/supacloud/commit/e94268d258c3413b74e769b2ad32d8390ba13be2))
+
 ## [0.47.5](https://github.com/zuohuadong/supacloud/compare/management-api-v0.47.4...management-api-v0.47.5) (2026-07-21)
 
 
