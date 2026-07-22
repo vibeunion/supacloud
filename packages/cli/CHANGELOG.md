@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.1](https://github.com/zuohuadong/supacloud/compare/cli-v0.12.0...cli-v0.12.1) (2026-07-22)
+
+
+### Bug Fixes
+
+* **migrations:** preserve transactional migration compatibility ([#520](https://github.com/zuohuadong/supacloud/issues/520)) ([360b6cb](https://github.com/zuohuadong/supacloud/commit/360b6cb2222e094dc8539a953503c2d03f4154a5))
+
 ## [0.12.0](https://github.com/zuohuadong/supacloud/compare/cli-v0.11.0...cli-v0.12.0) (2026-07-19)
 
 

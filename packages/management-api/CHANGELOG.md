@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.47.7](https://github.com/zuohuadong/supacloud/compare/management-api-v0.47.6...management-api-v0.47.7) (2026-07-22)
+
+
+### Bug Fixes
+
+* **migrations:** preserve transactional migration compatibility ([#520](https://github.com/zuohuadong/supacloud/issues/520)) ([360b6cb](https://github.com/zuohuadong/supacloud/commit/360b6cb2222e094dc8539a953503c2d03f4154a5))
+
 ## [0.47.6](https://github.com/zuohuadong/supacloud/compare/management-api-v0.47.5...management-api-v0.47.6) (2026-07-22)
 
 
