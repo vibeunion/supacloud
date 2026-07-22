@@ -31,6 +31,12 @@ function appliedMigrationKeys(data: unknown): Set<string> {
     return keys;
 }
 
+function isAlreadyAppliedMigrationResponse(response: { status: number; data: unknown }): boolean {
+    if (response.status !== 409 || !response.data || typeof response.data !== "object") return false;
+    const body = response.data as Record<string, unknown>;
+    return body.code === "409" && body.message === "Migration already applied";
+}
+
 function sqlReferencesVector(sql: string): boolean {
     return /\bvector\s*\(\s*\d+\s*\)/i.test(sql)
         || /::\s*vector\b/i.test(sql)
@@ -316,7 +322,7 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
                         const r = await http.post(`/v1/projects/${ref}/database/migrations`, { name, sql, version });
                         if (r.ok) {
                             applied.push(file);
-                        } else if (r.status === 409) {
+                        } else if (isAlreadyAppliedMigrationResponse(r)) {
                             skipped.push(file);
                         } else {
                             text = [

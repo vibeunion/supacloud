@@ -7,11 +7,14 @@ import {
   buildCreateMaterializedViewSql,
   buildDropMaterializedViewSql,
   buildRefreshMaterializedViewSql,
+  migrationExecutionStatements,
   normalizeMigrationVersion,
   resetEnsuredMigrationTablesForTests,
   resolveMigrationStatements,
   sqlRouteResponse,
 } from "../../src/routes/database";
+import { projectMigrationSqlViolations } from "../../src/db/sql-policy";
+import { calculateMigrationChecksum } from "../../src/services/migration-promotion";
 
 describe("database route helpers", () => {
   beforeEach(() => {
@@ -47,6 +50,102 @@ describe("database route helpers", () => {
       }),
     ).toEqual([]);
     expect(resolveMigrationStatements({ query: "   " })).toEqual([]);
+  });
+
+  test("removes only an outer transaction wrapper before execution", () => {
+    const wrappedFile = ["BEGIN;", "CREATE TABLE public.example(id integer);", "COMMIT;"];
+    expect(migrationExecutionStatements(wrappedFile)).toEqual([
+      "CREATE TABLE public.example(id integer)",
+    ]);
+    expect(migrationExecutionStatements(["BEGIN;\nCREATE TABLE public.example(id integer);\nCOMMIT;"]))
+      .toEqual(["CREATE TABLE public.example(id integer)"]);
+    expect(migrationExecutionStatements([
+      "-- generated migration\nBEGIN TRANSACTION;\nCREATE TABLE public.example(id integer);\nCOMMIT WORK;",
+    ])).toEqual(["CREATE TABLE public.example(id integer)"]);
+
+    const wrappedDoBlock = ["BEGIN;", "DO $$ BEGIN PERFORM 1; END $$;", "COMMIT;"];
+    expect(migrationExecutionStatements(wrappedDoBlock)).toEqual([
+      "DO $$ BEGIN PERFORM 1; END $$",
+    ]);
+    expect(projectMigrationSqlViolations(migrationExecutionStatements(wrappedFile)))
+      .not.toContain("transaction control");
+    expect(projectMigrationSqlViolations(migrationExecutionStatements(wrappedDoBlock)))
+      .not.toContain("transaction control");
+    expect(projectMigrationSqlViolations(migrationExecutionStatements(wrappedDoBlock)))
+      .toContain("opaque procedural SQL");
+  });
+
+  test("derives xigu-style function execution without changing ledger input", () => {
+    const wrappedSql = `
+      BEGIN;
+      CREATE OR REPLACE FUNCTION public.fa_case_member_role_compatibility_guard()
+      RETURNS trigger
+      LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $function$
+      BEGIN
+        IF NEW.membership_id IS NULL THEN
+          RAISE EXCEPTION 'FA_CASE_MEMBER_REQUIRED';
+        END IF;
+        RETURN NEW;
+      END;
+      $function$;
+      GRANT EXECUTE ON FUNCTION public.fa_case_member_role_compatibility_guard() TO service_role;
+      COMMIT;
+    `.trim();
+    const originalStatements = [wrappedSql];
+    const executionStatements = migrationExecutionStatements(originalStatements);
+
+    expect(executionStatements).toHaveLength(2);
+    expect(executionStatements[0]).toContain("BEGIN\n        IF NEW.membership_id IS NULL");
+    expect(executionStatements[0]).toContain("END;\n      $function$");
+    expect(executionStatements[1]).toStartWith("GRANT EXECUTE ON FUNCTION");
+    expect(originalStatements).toEqual([wrappedSql]);
+    expect(calculateMigrationChecksum({ version: "20260719126000", name: "xigu", statements: originalStatements }))
+      .not.toBe(calculateMigrationChecksum({ version: "20260719126000", name: "xigu", statements: executionStatements }));
+  });
+
+  test("rejects migrations that are empty after execution derivation", () => {
+    expect(() => migrationExecutionStatements(["BEGIN; COMMIT;"]))
+      .toThrow("Migration contains no executable statements");
+    expect(() => migrationExecutionStatements(["BEGIN; -- no statements\nCOMMIT;"]))
+      .toThrow("Migration contains no executable statements");
+    expect(() => migrationExecutionStatements(["-- comment only"]))
+      .toThrow("Migration contains no executable statements");
+  });
+
+  test("checks existing checksums before applying the current SQL policy", () => {
+    const source = readFileSync(join(import.meta.dirname, "../../src/routes/database.ts"), "utf8");
+    const transactionStart = source.indexOf("async function executeMigrationTransaction(");
+    const transactionEnd = source.indexOf("async function withMigrationRoleSession", transactionStart);
+    const transactionSource = source.slice(transactionStart, transactionEnd);
+    const existingLookup = transactionSource.indexOf("findExistingMigration(tx, input)");
+    const checksumCheck = transactionSource.indexOf("existingMigrationChecksum(existing[0]!, input)");
+    const checksumConflict = transactionSource.indexOf('"migration_checksum_conflict"');
+    const alreadyAppliedReturn = transactionSource.indexOf("return true;");
+    const policyCheck = transactionSource.indexOf("detectUnsupportedMigrationOperations(execution.statements)");
+
+    expect(existingLookup).toBeGreaterThan(-1);
+    expect(checksumCheck).toBeGreaterThan(existingLookup);
+    expect(checksumConflict).toBeGreaterThan(checksumCheck);
+    expect(alreadyAppliedReturn).toBeGreaterThan(checksumConflict);
+    expect(policyCheck).toBeGreaterThan(alreadyAppliedReturn);
+  });
+
+  test("does not let quoted dollar markers hide top-level policy controls", () => {
+    const adversarialCases: Array<[string, string]> = [
+      ["SELECT '$$'; COMMIT; SELECT $$x$$;", "transaction control"],
+      ["SELECT '$$'; SET ROLE postgres; SELECT $$x$$;", "session role control"],
+      [
+        "SELECT '$$'; INSERT INTO supabase_migrations.schema_migrations(version) VALUES ('1'); SELECT $$x$$;",
+        "migration ledger modification",
+      ],
+      ["SELECT '$$'; SELECT pg_advisory_lock(1); SELECT $$x$$;", "advisory lock control"],
+      ["SELECT '$$'; DO $$ BEGIN PERFORM 1; END $$;", "opaque procedural SQL"],
+    ];
+
+    for (const [sql, expectedViolation] of adversarialCases) {
+      expect(projectMigrationSqlViolations(migrationExecutionStatements([sql])))
+        .toContain(expectedViolation);
+    }
   });
 
   test("preserves bigint migration versions without Number precision loss", () => {
