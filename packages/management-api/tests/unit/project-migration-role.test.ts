@@ -21,6 +21,12 @@ describe("project migration role preparation", () => {
     expect(sql).not.toContain("CREATEROLE");
   });
 
+  test("orders tables and partitioned tables before linked sequences", () => {
+    const sql = renderProjectMigrationRoleSql("supa_parent", "role_parent");
+
+    expect(sql).toContain("ORDER BY CASE WHEN c.relkind = 'S' THEN 1 ELSE 0 END, c.oid");
+  });
+
   test("rejects unsafe database and role identifiers", () => {
     expect(() => renderProjectMigrationRoleSql("supa_parent; drop database x", "role_parent")).toThrow();
     expect(() => renderProjectMigrationRoleSql("supa_parent", "role_parent; alter role postgres")).toThrow();
