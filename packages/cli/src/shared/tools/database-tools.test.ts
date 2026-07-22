@@ -19,14 +19,26 @@ function captureDatabaseTool(http: Record<string, unknown>) {
 
 describe("database migration helpers", () => {
     test("uses Supabase timestamp prefix as migration version", () => {
-        expect(migrationVersionFromFilename("20260425123000_create_users.sql")).toBe(20260425123000);
-        expect(migrationVersionFromFilename("20260425123000123456-create-users.sql")).toBe(20260425123000123456);
+        expect(migrationVersionFromFilename("20260425123000_create_users.sql")).toBe("20260425123000");
     });
 
-    test("falls back to a generated numeric version for non timestamp names", () => {
-        const version = migrationVersionFromFilename("create_users.sql", 2);
-        expect(Number.isFinite(version)).toBe(true);
-        expect(version).toBeGreaterThan(Date.now() * 1000 - 60_000_000);
+    test("preserves valid 19-digit migration versions without precision loss", () => {
+        expect(migrationVersionFromFilename("9007199254740993001_create_users.sql")).toBe("9007199254740993001");
+    });
+
+    test("rejects migration versions above the PostgreSQL BIGINT limit", () => {
+        expect(() => migrationVersionFromFilename("20260425123000123456-create-users.sql"))
+            .toThrow("expected 1..9223372036854775807");
+    });
+
+    test("uses a stable numeric version for non timestamp names", () => {
+        const first = migrationVersionFromFilename("create_users.sql");
+        const second = migrationVersionFromFilename("create_users.sql");
+
+        expect(second).toBe(first);
+        expect(first).toMatch(/^\d+$/);
+        expect(BigInt(first)).toBeGreaterThanOrEqual(8_000_000_000_000_000_000n);
+        expect(BigInt(first)).toBeLessThan(9_000_000_000_000_000_000n);
     });
 
     test("warns when pending migrations use pgvector without enabled extension", () => {
@@ -172,6 +184,7 @@ describe("database migration helpers", () => {
             expect(posts).toHaveLength(1);
             expect(posts[0].path).toBe("/v1/projects/proj/database/migrations");
             expect((posts[0].body as { name: string }).name).toBe("20260425124000_create_tasks");
+            expect((posts[0].body as { version: string }).version).toBe("20260425124000");
         } finally {
             rmSync(dir, { recursive: true, force: true });
         }
