@@ -20,6 +20,7 @@ import {
 import {
   buildBackgroundForwardDispatch,
 } from "./background-forward";
+import { functionPathCandidates } from "./function-source";
 import path from "path";
 import fs from "fs/promises";
 
@@ -39,7 +40,6 @@ const BACKGROUND_WORKER_SMOL = resolveBooleanEnv(
 const FUNCTIONS_DIR = path.resolve(process.env.EDGE_FUNCTIONS_DIR || "./functions");
 const FUNCTIONS_BASE_DIR = path.resolve(process.env.EDGE_FUNCTIONS_BASE_DIR || FUNCTIONS_DIR);
 const MGMT_API = process.env.MANAGEMENT_API_URL || "http://127.0.0.1:9090";
-const VERSIONED_DIR = ".versions";
 const FUNCTION_REQUEST_TIMEOUT_MS = Number(process.env.EDGE_FUNCTION_TIMEOUT_MS) || 60_000;
 const BACKGROUND_FUNCTION_TIMEOUT_MS = Number(process.env.EDGE_BACKGROUND_FUNCTION_TIMEOUT_MS) || 300_000;
 const INTERNAL_TOKEN = process.env.EDGE_RUNTIME_MASTER_KEY || process.env.MASTER_TOKEN || "";
@@ -284,9 +284,7 @@ async function resolveFunctionPath(
   const projectRoot = await resolveProjectRoot(projectRef);
   const resolvedConfig = await getFunctionConfig(projectRef, functionName, projectRoot);
   const activeVersion = requestedVersion || resolvedConfig.version || null;
-  const candidates = requestedVersion
-    ? [path.resolve(projectRoot, VERSIONED_DIR, functionName, requestedVersion, "index.js")]
-    : [path.resolve(projectRoot, `${functionName}.js`), path.resolve(projectRoot, `${functionName}.ts`)];
+  const candidates = functionPathCandidates(projectRoot, functionName, requestedVersion);
 
   for (const candidate of candidates) {
     if (!isPathInside(candidate, projectRoot)) {

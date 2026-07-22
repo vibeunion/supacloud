@@ -98,6 +98,7 @@ const DEFAULT_FUNCTION_CONFIG: EdgeFunctionConfig = {
  */
 
 const VERSIONED_DIR = ".versions";
+const BUNDLED_SOURCE_RUNTIME_ENTRY = ".supacloud-entry.js";
 const SAFE_REF_REGEX = /^[a-zA-Z0-9_-]{1,64}$/;
 const SAFE_SLUG_REGEX = /^[a-zA-Z0-9_-]{1,128}$/;
 const EXTERNAL_PACKAGE_REGEX = /^(?:@[a-zA-Z0-9._-]+\/)?[a-zA-Z0-9._-]+$/;
@@ -789,6 +790,12 @@ export const edgeFunctionService = {
       }
 
       // Validate the entrypoint
+      if (Object.prototype.hasOwnProperty.call(files, BUNDLED_SOURCE_RUNTIME_ENTRY)) {
+        return {
+          success: false,
+          error: `Bundle path '${BUNDLED_SOURCE_RUNTIME_ENTRY}' is reserved by the runtime`,
+        };
+      }
       const validation = validateFunctionCode(files[entrypoint]);
       if (!validation.valid) {
         logger.error(`[EdgeFunction] Validation failed: ${validation.error}`, {
@@ -857,6 +864,7 @@ export const edgeFunctionService = {
       const srcDir = assertInside(dir, path.join(dir, `.src-${safeSlug}`));
       await fs.rm(srcDir, { recursive: true, force: true }).catch(() => {});
       await fs.rename(stageDir, srcDir);
+      await Bun.write(path.join(srcDir, BUNDLED_SOURCE_RUNTIME_ENTRY), bundle.code);
       const versionedSrcDir = assertInside(dir, path.join(dir, VERSIONED_DIR, safeSlug, version, "src"));
       await fs.rm(versionedSrcDir, {
         recursive: true,

@@ -2,6 +2,7 @@ import { afterAll, afterEach, describe, expect, mock, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 
 const functionsRoot = await mkdtemp(join(tmpdir(), "supacloud-edge-functions-"));
@@ -44,6 +45,64 @@ afterAll(async () => {
 });
 
 describe("edgeFunctionService bundle metadata", () => {
+  test("keeps multi-file runtime code beside its static assets", async () => {
+    globalThis.fetch = (() => Promise.resolve(Response.json({ ok: true }))) as typeof fetch;
+
+    const deployResult = await edgeFunctionService.deployBundleDetailed(
+      "proj_assets",
+      "asset-reader",
+      {
+        "index.ts": `
+          export default {
+            async fetch() {
+              const asset = await Bun.file(import.meta.dir + "/public/message.txt").text();
+              return new Response(asset);
+            }
+          };
+        `,
+        "public/message.txt": "asset-from-source-dir",
+      },
+    );
+
+    expect(deployResult.success).toBe(true);
+    const runtimeEntry = join(
+      functionsRoot,
+      "proj_assets",
+      ".src-asset-reader",
+      ".supacloud-entry.js",
+    );
+    const versionedRuntimeEntry = join(
+      functionsRoot,
+      "proj_assets",
+      ".versions",
+      "asset-reader",
+      "1",
+      "src",
+      ".supacloud-entry.js",
+    );
+    expect(existsSync(runtimeEntry)).toBe(true);
+    expect(existsSync(versionedRuntimeEntry)).toBe(true);
+    const runtimeModule = await import(`${pathToFileURL(runtimeEntry).href}?test=${Date.now()}`);
+    const runtimeResponse = await runtimeModule.default.fetch(new Request("http://localhost/"));
+    expect(await runtimeResponse.text()).toBe("asset-from-source-dir");
+  });
+
+  test("rejects a bundle upload that collides with the runtime entry", async () => {
+    const deployResult = await edgeFunctionService.deployBundleDetailed(
+      "proj_reserved",
+      "reserved-entry",
+      {
+        "index.ts": "export default { fetch: () => new Response('ok') };",
+        ".supacloud-entry.js": "user-controlled",
+      },
+    );
+
+    expect(deployResult).toEqual({
+      success: false,
+      error: "Bundle path '.supacloud-entry.js' is reserved by the runtime",
+    });
+  });
+
   test("writes content-addressed version artifacts and returns deploy preheat metadata", async () => {
     const metricsBefore = edgeFunctionService.deployMetrics();
     const fetchCalls: string[] = [];
