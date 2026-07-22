@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.12.3](https://github.com/zuohuadong/supacloud/compare/cli-v0.12.2...cli-v0.12.3) (2026-07-22)
+
+
+### Bug Fixes
+
+* **cli:** recognize historical migration hash markers ([a9d55ff](https://github.com/zuohuadong/supacloud/commit/a9d55ff8cce32d475ba4e270ae1c6acaf1929737))
+* **cli:** recognize historical migration hash markers ([b372e25](https://github.com/zuohuadong/supacloud/commit/b372e25073bc2ae54578365b524784e41610a010))
+
 ## [0.12.2](https://github.com/zuohuadong/supacloud/compare/cli-v0.12.1...cli-v0.12.2) (2026-07-22)
 
 

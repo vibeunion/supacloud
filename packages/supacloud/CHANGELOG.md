@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.7.4](https://github.com/zuohuadong/supacloud/compare/supacloud-v0.7.3...supacloud-v0.7.4) (2026-07-22)
+
+
+### Bug Fixes
+
+* **cli:** recognize historical migration hash markers ([a9d55ff](https://github.com/zuohuadong/supacloud/commit/a9d55ff8cce32d475ba4e270ae1c6acaf1929737))
+
+
+### Miscellaneous Chores
+
+* release main ([5833a36](https://github.com/zuohuadong/supacloud/commit/5833a36b277b5fa5e26482d39c14bd7bb5d2d4f6))
+* release main ([1c87f14](https://github.com/zuohuadong/supacloud/commit/1c87f14afda9f662cbbe9cee82eb515bd1462b81))
+* **supacloud:** sync unified CLI lockfile ([d8d7fc1](https://github.com/zuohuadong/supacloud/commit/d8d7fc1d0605f8f654d14804eca4bf6c04a0bda9))
+
 ## [0.7.3](https://github.com/zuohuadong/supacloud/compare/supacloud-v0.7.2...supacloud-v0.7.3) (2026-07-22)
 
 
