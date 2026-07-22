@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.6](https://github.com/zuohuadong/supacloud/compare/supacloud-v0.7.5...supacloud-v0.7.6) (2026-07-22)
+
+
+### Bug Fixes
+
+* **migrations:** accept exact legacy ledger contents ([#532](https://github.com/zuohuadong/supacloud/issues/532)) ([0a86d3e](https://github.com/zuohuadong/supacloud/commit/0a86d3e00de8c9d8ca351650b97956ca4ab53ae5))
+
 ## [0.7.5](https://github.com/zuohuadong/supacloud/compare/supacloud-v0.7.4...supacloud-v0.7.5) (2026-07-22)
 
 
