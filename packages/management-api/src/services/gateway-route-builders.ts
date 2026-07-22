@@ -13,6 +13,9 @@ export type CaddyRoute = Record<string, unknown>;
 export type CaddyMatcher = Record<string, unknown>;
 export type CustomGatewayProtocol = "http" | "https";
 export type CustomGatewayRedirectStatus = 301 | 302 | 307 | 308;
+export const MAX_CUSTOM_GATEWAY_HOSTS = 20;
+// Hosted applications can exceed twenty exact paths; keep the larger Caddy matcher bounded.
+export const MAX_CUSTOM_GATEWAY_PATHS = 32;
 
 export interface CustomGatewayRouteConfig {
     id: string;
@@ -239,9 +242,13 @@ export function normalizeCustomGatewayRoute(input: CustomGatewayRouteConfig): Cu
     }
 
     const hosts = uniqueStrings((input.hosts || []).map(normalizeCaddyHost).filter(Boolean));
-    if (hosts.length === 0 || hosts.length > 20) throw new Error("Custom route requires 1-20 hosts");
+    if (hosts.length === 0 || hosts.length > MAX_CUSTOM_GATEWAY_HOSTS) {
+        throw new Error(`Custom route requires 1-${MAX_CUSTOM_GATEWAY_HOSTS} hosts`);
+    }
     const normalizedPaths = uniqueStrings((Array.isArray(input.path) ? input.path : [input.path]).map(normalizeCustomPath));
-    if (normalizedPaths.length === 0 || normalizedPaths.length > 20) throw new Error("Custom route requires 1-20 paths");
+    if (normalizedPaths.length === 0 || normalizedPaths.length > MAX_CUSTOM_GATEWAY_PATHS) {
+        throw new Error(`Custom route requires 1-${MAX_CUSTOM_GATEWAY_PATHS} paths`);
+    }
 
     const hasUpstream = typeof input.upstream === "string" && input.upstream.trim().length > 0;
     const hasStaticRoot = typeof input.static_root === "string" && input.static_root.trim().length > 0;

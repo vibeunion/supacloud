@@ -805,6 +805,30 @@ describe("CaddyGatewayProvider", () => {
         restore();
     });
 
+    test("configureCustomGatewayRoutes reconciles twenty-one paths into one Caddy matcher", async () => {
+        const calls: Array<{ url: string; method: string; body: any }> = [];
+        const restore = captureFetch(calls);
+        const provider = new CaddyGatewayProvider();
+        const hostedPaths = Array.from({ length: 21 }, (_, index) => `/hosted-${index}`);
+
+        const reconcileResult = await provider.configureCustomGatewayRoutes("proj123", [{
+            id: "hosted-auth",
+            hosts: ["auth.example.com"],
+            path: hostedPaths,
+            upstream: "127.0.0.1:9000",
+        }]);
+
+        expect(reconcileResult.success).toBe(true);
+        const load = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
+        const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
+        const hostedRoute = routes.find(
+            (route: any) => route["@id"] === "route-custom-gateway-proj123-hosted-auth",
+        );
+        expect(hostedRoute?.match).toEqual([{ host: ["auth.example.com"], path: hostedPaths }]);
+
+        restore();
+    });
+
     test("configureCustomGatewayRoutes replaces stale custom routes for the project", async () => {
         const calls: Array<{ url: string; method: string; body: any }> = [];
         const restore = captureFetch(calls);

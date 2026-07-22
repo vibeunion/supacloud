@@ -100,7 +100,7 @@ Actions: routes, upsert_route, update_route, delete_route, config, get_certifica
             // 路由参数
             route_id: optional(Type.String(), "[upsert_route/update_route/delete_route] 路由 ID（字母/数字/_/-，1-64）"),
             hosts: withDescription(stringArray, "[upsert_route/update_route] 主机名列表，逗号分隔或 JSON 数组（1-20）"),
-            paths: withDescription(stringArray, "[upsert_route/update_route] 路径列表，逗号分隔或 JSON 数组（1-20）"),
+            paths: withDescription(stringArray, "[upsert_route/update_route] 路径列表，逗号分隔或 JSON 数组（1-32）"),
             upstream: optional(Type.String(), "[upsert_route/update_route] 反代上游 host:port 或 http(s)://host[:port]"),
             upstream_tls_insecure_skip_verify: optional(Type.Boolean(), "[upsert_route/update_route] 上游 TLS 跳过校验"),
             static_root: optional(Type.String(), "[upsert_route/update_route] 静态站点根目录"),
