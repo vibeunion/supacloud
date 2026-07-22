@@ -35,6 +35,8 @@ export {
     DEFAULT_CORS_EXPOSED,
     DEFAULT_CORS_HEADERS,
     DEFAULT_CORS_ORIGINS,
+    MAX_CUSTOM_GATEWAY_HOSTS,
+    MAX_CUSTOM_GATEWAY_PATHS,
     buildTenantCorsOrigins,
     normalizeCustomGatewayRoute,
     normalizeCustomGatewayRoutes,

@@ -2,7 +2,7 @@ import { describe, expect, spyOn, test } from "bun:test";
 import { Elysia } from "elysia";
 import { projectConfigRoutes } from "../../src/routes/project-config";
 import { frontendService } from "../../src/services/frontend.service";
-import { gatewayService } from "../../src/services/gateway.service";
+import { gatewayService, MAX_CUSTOM_GATEWAY_PATHS } from "../../src/services/gateway.service";
 import { projectService } from "../../src/services/project.service";
 
 const masterHeaders = { Authorization: "Bearer dev-master-token", "Content-Type": "application/json" };
@@ -175,6 +175,59 @@ describe("controlled custom gateway routes API", () => {
       updateSettings.mockRestore();
       configureRoutes.mockRestore();
     }
+  });
+
+  test("POST accepts and reconciles a hosted route with twenty-one paths", async () => {
+    const hostedPaths = Array.from({ length: 21 }, (_, index) => `/hosted-${index}`);
+    const getSettings = spyOn(projectService, "getProjectSettings").mockResolvedValue({
+      gateway_routes: [],
+    } as any);
+    const updateSettings = spyOn(projectService, "updateProjectSettings").mockResolvedValue({} as any);
+    const configureRoutes = spyOn(gatewayService, "configureCustomGatewayRoutes").mockResolvedValue({ success: true });
+
+    try {
+      const response = await request("/v1/projects/proj123/gateway/routes", {
+        method: "POST",
+        headers: masterHeaders,
+        body: JSON.stringify({
+          id: "hosted-auth",
+          hosts: ["auth.example.com"],
+          path: hostedPaths,
+          upstream: "127.0.0.1:9000",
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(configureRoutes).toHaveBeenCalledWith("proj123", [
+        expect.objectContaining({ id: "hosted-auth", path: hostedPaths }),
+      ]);
+      expect(updateSettings).toHaveBeenCalledWith("proj123", {
+        gateway_routes: [expect.objectContaining({ id: "hosted-auth", path: hostedPaths })],
+      });
+    } finally {
+      getSettings.mockRestore();
+      updateSettings.mockRestore();
+      configureRoutes.mockRestore();
+    }
+  });
+
+  test("POST rejects path arrays above the API schema limit", async () => {
+    const excessivePaths = Array.from(
+      { length: MAX_CUSTOM_GATEWAY_PATHS + 1 },
+      (_, index) => `/excessive-${index}`,
+    );
+    const response = await request("/v1/projects/proj123/gateway/routes", {
+      method: "POST",
+      headers: masterHeaders,
+      body: JSON.stringify({
+        id: "too-many-paths",
+        hosts: ["auth.example.com"],
+        path: excessivePaths,
+        upstream: "127.0.0.1:9000",
+      }),
+    });
+
+    expect(response.status).toBe(422);
   });
 
   test("rolls Caddy back to persisted routes when the project config write fails", async () => {

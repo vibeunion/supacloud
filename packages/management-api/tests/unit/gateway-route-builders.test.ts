@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+    MAX_CUSTOM_GATEWAY_PATHS,
     makeCorsSubroute,
     makeCustomGatewayRoute,
     normalizeCustomGatewayRoute,
@@ -52,6 +53,34 @@ describe("gateway route builders", () => {
         expect(subroute.routes[0].handle.at(-1)).toEqual({ handler: "static_response", status_code: 204 });
         expect(subroute.routes[0].match.some((matcher: any) => matcher.header?.Origin?.includes("https://app.example.com"))).toBe(true);
         expect(subroute.routes[0].match.some((matcher: any) => matcher.header_regexp?.Origin?.pattern?.includes("preview-"))).toBe(true);
+    });
+
+    test("accepts the maximum bounded hosted route path count", () => {
+        const hostedPaths = Array.from(
+            { length: MAX_CUSTOM_GATEWAY_PATHS },
+            (_, index) => `/hosted-${index}`,
+        );
+        const normalized = normalizeCustomGatewayRoute({
+            id: "hosted-auth",
+            hosts: ["auth.example.com"],
+            path: hostedPaths,
+            upstream: "127.0.0.1:9000",
+        });
+        const caddyRoute = makeCustomGatewayRoute("project-ref", normalized) as any;
+
+        expect(normalized.path).toEqual(hostedPaths);
+        expect(caddyRoute.match).toEqual([{ host: ["auth.example.com"], path: hostedPaths }]);
+
+        const excessivePaths = Array.from(
+            { length: MAX_CUSTOM_GATEWAY_PATHS + 1 },
+            (_, index) => `/excessive-${index}`,
+        );
+        expect(() => normalizeCustomGatewayRoute({
+            id: "too-many-paths",
+            hosts: ["auth.example.com"],
+            path: excessivePaths,
+            upstream: "127.0.0.1:9000",
+        })).toThrow(`Custom route requires 1-${MAX_CUSTOM_GATEWAY_PATHS} paths`);
     });
 
     test("renders a custom HTTPS proxy route with the existing Caddy shape", () => {

@@ -6,6 +6,8 @@ import { Elysia, t, status } from "elysia";
 import { projectService } from "../services";
 import {
   type CustomGatewayRouteConfig,
+  MAX_CUSTOM_GATEWAY_HOSTS,
+  MAX_CUSTOM_GATEWAY_PATHS,
   gatewayService,
   normalizeCustomGatewayRoute,
   normalizeCustomGatewayRoutes,
@@ -144,6 +146,15 @@ function addConfigRoutes(section: string) {
 function cloneTemplate<T>(template: T): T {
   return structuredClone(template);
 }
+
+const CustomGatewayHostsSchema = t.Array(t.String(), {
+  minItems: 1,
+  maxItems: MAX_CUSTOM_GATEWAY_HOSTS,
+});
+const CustomGatewayPathSchema = t.Union([
+  t.String(),
+  t.Array(t.String(), { minItems: 1, maxItems: MAX_CUSTOM_GATEWAY_PATHS }),
+]);
 
 function readCustomGatewayRoutes(settings: Record<string, unknown>): CustomGatewayRouteConfig[] {
   return normalizeCustomGatewayRoutes(settings.gateway_routes);
@@ -2015,8 +2026,8 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       params: t.Object({ ref: t.String() }),
       body: t.Object({
         id: t.String(),
-        hosts: t.Array(t.String()),
-        path: t.Union([t.String(), t.Array(t.String())]),
+        hosts: CustomGatewayHostsSchema,
+        path: CustomGatewayPathSchema,
         upstream: t.Optional(t.String()),
         upstream_tls_insecure_skip_verify: t.Optional(t.Boolean()),
         static_root: t.Optional(t.String()),
@@ -2055,8 +2066,8 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     {
       params: t.Object({ ref: t.String(), routeId: t.String() }),
       body: t.Object({
-        hosts: t.Array(t.String()),
-        path: t.Union([t.String(), t.Array(t.String())]),
+        hosts: CustomGatewayHostsSchema,
+        path: CustomGatewayPathSchema,
         upstream: t.Optional(t.String()),
         upstream_tls_insecure_skip_verify: t.Optional(t.Boolean()),
         static_root: t.Optional(t.String()),
