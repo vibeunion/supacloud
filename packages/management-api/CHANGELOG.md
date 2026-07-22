@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.47.10](https://github.com/zuohuadong/supacloud/compare/management-api-v0.47.9...management-api-v0.47.10) (2026-07-22)
+
+
+### Bug Fixes
+
+* **gateway:** preserve internal TLS for empty LAN address ([#536](https://github.com/zuohuadong/supacloud/issues/536)) ([96830c3](https://github.com/zuohuadong/supacloud/commit/96830c3c9afc15fec336401ebffdd0b378652e69))
+* **migrations:** preserve pooled prepared statements ([#537](https://github.com/zuohuadong/supacloud/issues/537)) ([5c56b9f](https://github.com/zuohuadong/supacloud/commit/5c56b9f602a3506426646877aaf008855de0308f))
+
 ## [0.47.9](https://github.com/zuohuadong/supacloud/compare/management-api-v0.47.8...management-api-v0.47.9) (2026-07-22)
 
 
