@@ -128,6 +128,16 @@ describe("production config loading boundaries", () => {
       NODE_ENV: "production",
       INTERNAL_IP: "",
     }))).toBe("internal");
+    expect(loadCaddyTlsIssuer(cleanEnv({
+      NODE_ENV: "production",
+      DOCKER_HOST_IP: "",
+      INTERNAL_IP: "198.51.100.10",
+    }))).toBe("acme");
+    expect(loadCaddyTlsIssuer(cleanEnv({
+      NODE_ENV: "production",
+      DOCKER_HOST_IP: "  ",
+      INTERNAL_IP: "10.0.0.8",
+    }))).toBe("internal");
   });
 
   test("rejects an invalid explicit Caddy TLS issuer", () => {
