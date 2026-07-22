@@ -665,7 +665,6 @@ WorkingDirectory=${buildDir}
 NoNewPrivileges=true
 Environment="PORT=${port}"
 Environment="NODE_ENV=production"
-EnvironmentFile=-/etc/supabase/management-api.env
 EnvironmentFile=${envFile}
 ExecStart=${config.bunPath} run ${buildDir}/index.js
 Restart=always

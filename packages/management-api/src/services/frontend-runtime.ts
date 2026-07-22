@@ -76,7 +76,6 @@ Environment="NODE_ENV=production"
 Environment="PROTOCOL_HEADER=x-forwarded-proto"
 Environment="HOST_HEADER=x-forwarded-host"
 Environment="PORT_HEADER=x-forwarded-port"
-EnvironmentFile=-/etc/supabase/management-api.env
 EnvironmentFile=${envFile}
 ExecStart=/usr/bin/env node ${entrypoint}
 Restart=always

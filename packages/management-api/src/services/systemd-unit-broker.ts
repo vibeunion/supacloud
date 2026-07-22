@@ -36,7 +36,14 @@ function allowedDirectives(section: string): ReadonlySet<string> | undefined {
   return undefined;
 }
 
-type UnitPolicyState = { section: string; sections: Set<string>; user: string; group: string; noNewPrivileges: boolean };
+type UnitPolicyState = {
+  section: string;
+  sections: Set<string>;
+  user: string;
+  group: string;
+  noNewPrivileges: boolean;
+  environmentFile: string;
+};
 
 function enterSection(unitName: string, state: UnitPolicyState, section: string): void {
   if (state.sections.has(section)) throw new Error(`Systemd unit ${unitName} repeats [${section}]`);
@@ -50,6 +57,25 @@ function recordIdentity(unitName: string, state: UnitPolicyState, key: string, v
   if (existing || !MANAGED_IDENTITY_PATTERN.test(value)) throw new Error(`Systemd unit ${unitName} has an invalid ${key}`);
   if (key === "User") state.user = value;
   else state.group = value;
+}
+
+function isAllowedEnvironmentFile(unitName: string, value: string): boolean {
+  if (unitName === "supacloud-pgrst@.service") {
+    return /^\/etc\/supabase\/[A-Za-z0-9_-]{1,64}\/%i\.env$/.test(value);
+  }
+  if (unitName === "supacloud-gotrue@.service") {
+    return /^\/etc\/supabase\/[A-Za-z0-9_-]{1,64}\/%i_gotrue\.env$/.test(value);
+  }
+  const match = value.match(/^\/var\/supacloud\/frontends\/([a-z0-9-]{1,20})\/([a-f0-9]{8})\/\.env$/);
+  return !!match && unitName === `supacloud-frontend-${match[1]}-${match[2]}.service`;
+}
+
+function recordEnvironmentFile(unitName: string, state: UnitPolicyState, key: string, value: string): void {
+  if (key !== "EnvironmentFile") return;
+  if (state.environmentFile || !isAllowedEnvironmentFile(unitName, value)) {
+    throw new Error(`Systemd unit ${unitName} has an invalid EnvironmentFile`);
+  }
+  state.environmentFile = value;
 }
 
 function validateDirective(unitName: string, state: UnitPolicyState, line: string): void {
@@ -67,11 +93,12 @@ function validateDirective(unitName: string, state: UnitPolicyState, line: strin
     state.noNewPrivileges = true;
   }
   recordIdentity(unitName, state, key, value);
+  recordEnvironmentFile(unitName, state, key, value);
 }
 
 function validateUnitIdentity(unitName: string, state: UnitPolicyState): void {
   if (!["Unit", "Service", "Install"].every((required) => state.sections.has(required))
-    || !state.user || state.user !== state.group || !state.noNewPrivileges) {
+    || !state.user || state.user !== state.group || !state.noNewPrivileges || !state.environmentFile) {
     throw new Error(`Systemd unit ${unitName} is missing its non-root runtime identity`);
   }
   if (unitName.includes("@") && state.user !== "supacloud-%i") {
@@ -83,10 +110,12 @@ function validateUnitIdentity(unitName: string, state: UnitPolicyState): void {
 }
 
 export function assertManagedSystemdUnitContent(unitName: string, content: string): void {
-  if (!content || Buffer.byteLength(content, "utf8") > MAX_UNIT_BYTES || /[\0\r]/.test(content)) {
+  if (!content || Buffer.byteLength(content, "utf8") > MAX_UNIT_BYTES || /[\x00-\x09\x0b-\x1f\x7f]/.test(content)) {
     throw new Error(`Systemd unit ${unitName} has invalid content`);
   }
-  const state: UnitPolicyState = { section: "", sections: new Set(), user: "", group: "", noNewPrivileges: false };
+  const state: UnitPolicyState = {
+    section: "", sections: new Set(), user: "", group: "", noNewPrivileges: false, environmentFile: "",
+  };
   for (const line of content.split("\n")) {
     if (!line || /^\s*[#;]/.test(line)) continue;
     if (line.endsWith("\\")) throw new Error(`Systemd unit ${unitName} uses a line continuation`);

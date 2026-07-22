@@ -34,12 +34,29 @@ if [[ ! "$unit_name" =~ ^supacloud-(pgrst|gotrue)@\.service$ \
     exit 1
 fi
 
+validate_environment_file() {
+    local value="$1"
+    case "$unit_name" in
+        supacloud-pgrst@.service)
+            [[ "$value" =~ ^/etc/supabase/[A-Za-z0-9_-]{1,64}/%i\.env$ ]]
+            ;;
+        supacloud-gotrue@.service)
+            [[ "$value" =~ ^/etc/supabase/[A-Za-z0-9_-]{1,64}/%i_gotrue\.env$ ]]
+            ;;
+        supacloud-frontend-*.service)
+            [[ "$value" =~ ^/var/supacloud/frontends/([a-z0-9-]{1,20})/([a-f0-9]{8})/\.env$ ]] || return 1
+            [[ "$unit_name" == "supacloud-frontend-${BASH_REMATCH[1]}-${BASH_REMATCH[2]}.service" ]]
+            ;;
+        *) return 1 ;;
+    esac
+}
+
 validate_unit_content() {
-    local section="" line key value user="" group="" seen_unit=0 seen_service=0 seen_install=0 seen_nnp=0
+    local section="" line key value user="" group="" seen_unit=0 seen_service=0 seen_install=0 seen_nnp=0 seen_env_file=0
     local unit_bytes
     unit_bytes=$(wc -c < "$source_file")
     (( unit_bytes > 0 && unit_bytes <= 16384 )) || return 1
-    cmp -s "$source_file" <(tr -d '\000' < "$source_file") || return 1
+    cmp -s "$source_file" <(LC_ALL=C tr -d '\000-\011\013-\037\177' < "$source_file") || return 1
     while IFS= read -r line || [[ -n "$line" ]]; do
         [[ "$line" != *$'\r'* && "$line" != *\\ ]] || return 1
         [[ -z "$line" || "$line" =~ ^[[:space:]]*[#\;] ]] && continue
@@ -72,6 +89,10 @@ validate_unit_content() {
             [[ "$value" == true && "$seen_nnp" == 0 ]] || return 1
             seen_nnp=1
         fi
+        if [[ "$key" == EnvironmentFile ]]; then
+            [[ "$seen_env_file" == 0 ]] && validate_environment_file "$value" || return 1
+            seen_env_file=1
+        fi
         if [[ "$key" == User ]]; then
             [[ -z "$user" && "$value" =~ ^supacloud-(%i|[a-z0-9-]{1,20})$ ]] || return 1
             user="$value"
@@ -80,7 +101,7 @@ validate_unit_content() {
             group="$value"
         fi
     done < "$source_file"
-    [[ "$seen_unit" == 1 && "$seen_service" == 1 && "$seen_install" == 1 && "$seen_nnp" == 1 \
+    [[ "$seen_unit" == 1 && "$seen_service" == 1 && "$seen_install" == 1 && "$seen_nnp" == 1 && "$seen_env_file" == 1 \
         && -n "$user" && "$user" == "$group" ]] || return 1
     if [[ "$unit_name" == *'@'* && "$user" != "supacloud-%i" ]]; then
         return 1
