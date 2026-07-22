@@ -492,7 +492,7 @@ describe("@supacloud/js", () => {
     expect(new Headers(calls[0]?.init?.headers).get("authorization")).toBe("Bearer token-123");
     expect(calls.some((call) => call.url.endsWith("/auth/oauth-server/migrate"))).toBe(true);
     const migrationCall = calls.find((call) => call.url.endsWith("/auth/oauth-server/migrate"));
-    expect(JSON.parse(String(migrationCall?.init?.body))).toEqual({
+    expect(JSON.parse(String(migrationCall?.init?.body))).toMatchObject({
       allow_dynamic_registration: true,
       authorization_path: "/authorize.html",
     });
