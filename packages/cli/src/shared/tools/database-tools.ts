@@ -31,6 +31,27 @@ function appliedMigrationKeys(data: unknown): Set<string> {
     return keys;
 }
 
+function migrationRows(data: unknown): Array<Record<string, unknown>> {
+    const rows = Array.isArray(data) ? data : (data as { rows?: unknown[] })?.rows || [];
+    return Array.isArray(rows)
+        ? rows.filter((row): row is Record<string, unknown> => Boolean(row && typeof row === "object"))
+        : [];
+}
+
+function baselineMigrationKey(version: number | string, name: string): string {
+    return `${String(version)}\u0000${name}`;
+}
+
+function baselineMigrationKeys(data: unknown): Set<string> {
+    const keys = new Set<string>();
+    for (const row of migrationRows(data)) {
+        if (row.version == null || row.name == null || !Array.isArray(row.statements)) continue;
+        if (row.statements.length !== 1 || row.statements[0] !== `baseline:${String(row.name)}`) continue;
+        keys.add(baselineMigrationKey(String(row.version), String(row.name)));
+    }
+    return keys;
+}
+
 function isAlreadyAppliedMigrationResponse(response: { status: number; data: unknown }): boolean {
     if (response.status !== 409 || !response.data || typeof response.data !== "object") return false;
     const body = response.data as Record<string, unknown>;
@@ -280,13 +301,14 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
                         version: migrationVersionFromFilename(file, i),
                     }));
 
+                    const migrationsResult = await http.get(`/v1/projects/${ref}/database/migrations`);
+                    if (!migrationsResult.ok) {
+                        text = `❌ Failed to load applied migrations (${migrationsResult.status}): ${JSON.stringify(migrationsResult.data)}`;
+                        break;
+                    }
+
                     if (args.dry_run) {
-                        const r = await http.get(`/v1/projects/${ref}/database/migrations`);
-                        if (!r.ok) {
-                            text = `❌ Failed to load applied migrations (${r.status}): ${JSON.stringify(r.data)}`;
-                            break;
-                        }
-                        const appliedKeys = appliedMigrationKeys(r.data);
+                        const appliedKeys = appliedMigrationKeys(migrationsResult.data);
                         const pending = migrationFiles.filter(({ name, version }) => !appliedKeys.has(name) && !appliedKeys.has(String(version)));
                         const alreadyApplied = migrationFiles.filter(({ name, version }) => appliedKeys.has(name) || appliedKeys.has(String(version)));
                         const pendingWithSql = pending.map((migration) => ({
@@ -317,7 +339,12 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
 
                     const applied: string[] = [];
                     const skipped: string[] = [];
+                    const baselineKeys = baselineMigrationKeys(migrationsResult.data);
                     for (const { file, name, version } of migrationFiles) {
+                        if (baselineKeys.has(baselineMigrationKey(version, name))) {
+                            skipped.push(file);
+                            continue;
+                        }
                         const sql = readFileSync(join(dir, file), "utf-8");
                         const r = await http.post(`/v1/projects/${ref}/database/migrations`, { name, sql, version });
                         if (r.ok) {

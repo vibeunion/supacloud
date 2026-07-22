@@ -91,6 +91,7 @@ describe("database migration helpers", () => {
         try {
             writeFileSync(join(dir, "20260425123000_create_users.sql"), "CREATE TABLE users (id uuid);\n");
             const callback = captureDatabaseTool({
+                get: async () => ({ ok: true, status: 200, data: [] }),
                 post: async () => ({
                     ok: false,
                     status: 409,
@@ -112,6 +113,7 @@ describe("database migration helpers", () => {
         try {
             writeFileSync(join(dir, "20260425123000_create_users.sql"), "CREATE TABLE users (id uuid);\n");
             const callback = captureDatabaseTool({
+                get: async () => ({ ok: true, status: 200, data: [] }),
                 post: async () => ({
                     ok: false,
                     status: 409,
@@ -127,6 +129,49 @@ describe("database migration helpers", () => {
             expect(toolResult.content[0].text).toContain("migration_checksum_conflict");
             expect(toolResult.content[0].text).toContain("Skipped before failure: 0");
             expect(toolResult.content[0].text).not.toContain("Migration push completed");
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    test("skips baseline markers before POST but still POSTs ordinary existing migrations", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
+        const posts: Array<{ path: string; body: unknown }> = [];
+        try {
+            writeFileSync(join(dir, "20260425123000_create_users.sql"), "CREATE TABLE users (id uuid);\n");
+            writeFileSync(join(dir, "20260425124000_create_tasks.sql"), "CREATE TABLE tasks (id uuid);\n");
+            const callback = captureDatabaseTool({
+                get: async () => ({
+                    ok: true,
+                    status: 200,
+                    data: [
+                        {
+                            version: "20260425123000",
+                            name: "20260425123000_create_users",
+                            statements: ["baseline:20260425123000_create_users"],
+                        },
+                        {
+                            version: "20260425124000",
+                            name: "20260425124000_create_tasks",
+                            statements: ["CREATE TABLE tasks (id uuid);"],
+                        },
+                    ],
+                }),
+                post: async (path: string, body: unknown) => {
+                    posts.push({ path, body });
+                    return { ok: true, status: 200, data: {} };
+                },
+            });
+
+            const toolResult = await callback({ action: "push_migrations", ref: "proj", dir });
+            const text = toolResult.content[0].text;
+
+            expect(text).toContain("Migration push completed");
+            expect(text).toContain("Applied: 1");
+            expect(text).toContain("Skipped: 1");
+            expect(posts).toHaveLength(1);
+            expect(posts[0].path).toBe("/v1/projects/proj/database/migrations");
+            expect((posts[0].body as { name: string }).name).toBe("20260425124000_create_tasks");
         } finally {
             rmSync(dir, { recursive: true, force: true });
         }
