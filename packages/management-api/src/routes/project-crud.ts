@@ -14,7 +14,7 @@ import {
   getAuthRuntimeOwnerProtectionError,
 } from "../services/auth-runtime.service";
 import { ScalingService } from "../services/scaling.service";
-import { listBackups } from "../services/backup.service";
+import { getPgBackRestStanza, isPitrEnabled, listBackups, PgBackRestUnavailableError } from "../services/backup.service";
 import type { BackupInfo } from "../types/backup";
 import {
   applyAuthEmailTemplatePatch,
@@ -169,7 +169,7 @@ function normalizeBackupTimestamp(value: unknown): string | null {
   return new Date(millis).toISOString();
 }
 
-function buildPitrStatus(ref: string, dbName: string, backups: BackupInfo[]) {
+function buildPitrStatus(ref: string, stanza: string, backups: BackupInfo[]) {
   const dates = backups
     .flatMap((backup) => [
       normalizeBackupTimestamp(backup.timestamp?.start),
@@ -177,9 +177,7 @@ function buildPitrStatus(ref: string, dbName: string, backups: BackupInfo[]) {
     ])
     .filter((value): value is string => Boolean(value))
     .sort();
-  const pitrEnabled =
-    process.env.SUPACLOUD_PITR_ENABLED === "true" ||
-    process.env.PITR_ENABLED === "true";
+  const pitrEnabled = isPitrEnabled();
   const hasPhysicalBackups = dates.length > 0;
   const available = pitrEnabled && hasPhysicalBackups;
 
@@ -200,14 +198,18 @@ function buildPitrStatus(ref: string, dbName: string, backups: BackupInfo[]) {
     latest_physical_backup_date: dates.at(-1) ?? null,
     backups: {
       count: backups.length,
-      stanza: dbName,
+      stanza,
+      scope: "cluster",
     },
     restore: {
       supported: available,
       method: "POST",
-      endpoint: `/v1/projects/${ref}/database/backups/restore`,
+      endpoint: "/v1/platform/backups/restore",
       requires_admin: true,
-      request_body: { target: "ISO-8601 timestamp" },
+      request_body: {
+        target: "ISO-8601 timestamp",
+        confirmation: "RESTORE_CLUSTER:<target>",
+      },
     },
   };
 }
@@ -986,8 +988,15 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
       if (!project)
         return status(404, { message: "Project not found", code: "404" });
       const dbName = await resolveDbName(params.ref);
-      const backups = await listBackups(dbName);
-      return buildPitrStatus(params.ref, dbName, backups);
+      try {
+        const backups = await listBackups(dbName);
+        return buildPitrStatus(params.ref, getPgBackRestStanza(), backups);
+      } catch (error) {
+        if (error instanceof PgBackRestUnavailableError) {
+          return status(503, { message: "pgBackRest backup inventory is unavailable", code: "BACKUP_UNAVAILABLE" });
+        }
+        throw error;
+      }
     },
     {
       params: t.Object({ ref: t.String() }),

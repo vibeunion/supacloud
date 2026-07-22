@@ -274,10 +274,12 @@ describe("Management API Integration Tests", () => {
                     headers: { Authorization: `Bearer ${masterToken}` },
                 })
             );
-            expect([200, 404, 500]).toContain(response.status);
+            expect([200, 404, 503]).toContain(response.status);
             if (response.status === 200) {
                 const data = await response.json();
                 expect(Array.isArray(data)).toBe(true);
+            } else if (response.status === 503) {
+                expect(await response.json()).toEqual({ message: "pgBackRest backup inventory is unavailable" });
             }
         });
 

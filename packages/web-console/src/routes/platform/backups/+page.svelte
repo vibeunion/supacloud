@@ -1,23 +1,18 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
+  import { toPhysicalBackupViewModel, type PhysicalBackupRecord } from "$lib/physical-backup";
 
   import { onMount } from "svelte";
   import { t } from "svelte-i18n";
   import { Loader2, HardDrive, Play, RotateCcw, Calendar, Clock, AlertTriangle, CheckCircle2, RefreshCw } from "lucide-svelte";
 
-  import { useList, type BaseRecord } from "@svadmin/core";
+  import { useList } from "@svadmin/core";
 
-  interface BackupInfo extends BaseRecord {
-    id: string;
-    type: string;
-    status: string;
-    timestamp: string;
-    size: string;
-    label: string;
-  }
-
-  const query = useList<BackupInfo>({ resource: "v1/projects/default/database/backups" });
-  const backups = $derived(Array.isArray(query.data?.data) ? query.data.data : ((query.data?.data as unknown as Record<string, unknown>)?.backups as BackupInfo[] || []));
+  const query = useList<PhysicalBackupRecord>({ resource: "v1/projects/default/database/backups" });
+  const backupRecords = $derived(Array.isArray(query.data?.data)
+    ? query.data.data
+    : ((query.data?.data as unknown as Record<string, unknown>)?.backups as PhysicalBackupRecord[] || []));
+  const backups = $derived(backupRecords.map(toPhysicalBackupViewModel));
 
   let actionMsg: string | null = $state.raw(null);
   let isCreating = $state(false);
@@ -44,6 +39,15 @@
     return Number.isNaN(value.getTime()) ? null : value.toISOString();
   }
 
+  async function readActionResponse(response: Response): Promise<Record<string, unknown>> {
+    const payload: unknown = await response.json().catch(() => ({}));
+    return payload && typeof payload === "object" ? payload as Record<string, unknown> : {};
+  }
+
+  function responseMessage(payload: Record<string, unknown>, fallback: string): string {
+    return typeof payload.message === "string" && payload.message ? payload.message : fallback;
+  }
+
   async function createBackup() {
     isCreating = true;
     actionMsg = null;
@@ -53,10 +57,11 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ type: backupType })
       });
-      const data = await res.json();
-      actionMsg = data.success !== false
-        ? `✅ ${$t("PlatformBackups.backup_triggered")} (${backupLabel(backupType)})`
-        : `❌ ${data.message || ($t("PlatformBackups.backup_failed") || "Backup failed")}`;
+      const data = await readActionResponse(res);
+      if (!res.ok) {
+        throw new Error(responseMessage(data, $t("PlatformBackups.backup_failed") || "Backup failed"));
+      }
+      actionMsg = `✅ ${responseMessage(data, `${$t("PlatformBackups.backup_triggered")} (${backupLabel(backupType)})`)}`;
       query.refetch();
     } catch (err: unknown) {
       actionMsg = `❌ ${(err instanceof Error ? err.message : String(err))}`;
@@ -82,15 +87,16 @@
     isRestoring = true;
     actionMsg = null;
     try {
-      const res = await apiClient("/v1/projects/default/database/backups/restore", {
+      const res = await apiClient("/v1/platform/backups/restore", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ target })
+        body: JSON.stringify({ target, confirmation: `RESTORE_CLUSTER:${target}` })
       });
-      const data = await res.json();
-      actionMsg = data.success !== false
-        ? `✅ ${$t("PlatformBackups.restore_sent") || "PITR restore command sent"}`
-        : `❌ ${data.message}`;
+      const data = await readActionResponse(res);
+      if (!res.ok) {
+        throw new Error(responseMessage(data, "PITR restore failed"));
+      }
+      actionMsg = `✅ ${responseMessage(data, $t("PlatformBackups.restore_sent") || "PITR restore completed")}`;
       showPitr = false;
     } catch (err: unknown) {
       actionMsg = `❌ ${(err instanceof Error ? err.message : String(err))}`;
@@ -201,6 +207,12 @@
     {#if query.isLoading}
       <div class="flex items-center justify-center py-16">
         <Loader2 size={24} class="animate-spin text-brand opacity-50" />
+      </div>
+    {:else if query.isError}
+      <div class="p-4">
+        <div class="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-xs">
+          {query.error?.message || ($t("PlatformBackups.backup_failed") || "Backup inventory is unavailable")}
+        </div>
       </div>
     {:else if backups.length === 0}
       <div class="p-8 text-center text-muted-foreground text-xs">{$t("PlatformBackups.no_history") || "No backup history yet. Run a backup above and it will appear here."}</div>

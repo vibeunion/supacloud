@@ -1,28 +1,49 @@
 import { Elysia, t, status } from "elysia";
-import { listBackups, createBackup, restore, createLogicalBackup, restoreLogicalBackup } from '../services/backup.service';
-import type { RestoreRequest } from '../types/backup';
+import {
+    listBackups,
+    createBackup,
+    restore,
+    createLogicalBackup,
+    restoreLogicalBackup,
+    PgBackRestUnavailableError,
+    PitrRestoreUnavailableError,
+    isPitrEnabled,
+} from '../services/backup.service';
 import { resolveDbName } from '../db';
 import { requireAdminAuth, requireProjectOrAdminAuth } from '../middleware/auth';
 
 const ErrorResponse = t.Object({ message: t.String() });
 
-export const backupRoutes = new Elysia({ prefix: "/v1/projects/:ref/database/backups" })
+const projectBackupRoutes = new Elysia({ prefix: "/v1/projects/:ref/database/backups" })
     .get('/', async ({ params, request }) => {
         const authError = await requireProjectOrAdminAuth(request, params.ref);
         if (authError) return status(authError.status, authError.body);
 
         const dbName = await resolveDbName(params.ref);
-        return await listBackups(dbName);
+        try {
+            return await listBackups(dbName);
+        } catch (error) {
+            if (error instanceof PgBackRestUnavailableError) {
+                return status(503, { message: "pgBackRest backup inventory is unavailable" });
+            }
+            throw error;
+        }
     }, {
-        response: { 200: t.Any() },
+        response: { 200: t.Any(), 503: ErrorResponse },
         detail: { tags: ["backups"], summary: "List project backups" },
     })
-    .post('/', async ({ params, body, request }) => {
+    .post('/', async ({ body, request }) => {
         const authError = await requireAdminAuth(request);
         if (authError) return status(authError.status, authError.body);
 
-        const dbName = await resolveDbName(params.ref);
-        return await createBackup(dbName, body.type);
+        try {
+            return await createBackup(body.type);
+        } catch (error) {
+            if (error instanceof PgBackRestUnavailableError) {
+                return status(503, { message: "pgBackRest backup failed" });
+            }
+            throw error;
+        }
     }, {
         body: t.Object({
             type: t.Optional(t.Union([
@@ -31,24 +52,8 @@ export const backupRoutes = new Elysia({ prefix: "/v1/projects/:ref/database/bac
                 t.Literal('diff'),
             ])),
         }),
-        response: { 200: t.Any() },
+        response: { 200: t.Any(), 503: ErrorResponse },
         detail: { tags: ["backups"], summary: "Create a database backup" },
-    })
-    .post('/restore', async ({ body, request }) => {
-        const authError = await requireAdminAuth(request);
-        if (authError) return status(authError.status, authError.body);
-        try {
-            return await restore(body as RestoreRequest);
-        } catch (err) {
-            return status(400, { message: err instanceof Error ? err.message : "Invalid restore request" });
-        }
-    }, {
-        body: t.Object({ target: t.String() }),
-        response: {
-            200: t.Any(),
-            400: ErrorResponse,
-        },
-        detail: { tags: ["backups"], summary: "Restore from backup" },
     })
     .post('/logical', async ({ params: { ref }, request }) => {
         const authError = await requireAdminAuth(request);
@@ -71,4 +76,41 @@ export const backupRoutes = new Elysia({ prefix: "/v1/projects/:ref/database/bac
             400: ErrorResponse,
         },
         detail: { tags: ["backups"], summary: "Restore from logical backup" },
+    });
+
+export const backupRoutes = new Elysia()
+    .use(projectBackupRoutes)
+    .post('/v1/platform/backups/restore', async ({ body, request }) => {
+        const authError = await requireAdminAuth(request);
+        if (authError) return status(authError.status, authError.body);
+        if (body.confirmation !== `RESTORE_CLUSTER:${body.target}`) {
+            return status(400, { message: "Exact cluster restore confirmation is required" });
+        }
+        if (!isPitrEnabled()) {
+            return status(409, { message: "Physical PITR is not enabled for this cluster" });
+        }
+        try {
+            const backups = await listBackups();
+            if (!backups.some((backup) => backup.timestamp.stop > 0)) {
+                return status(409, { message: "No completed physical backup is available for PITR" });
+            }
+            return await restore({ target: body.target });
+        } catch (err) {
+            if (err instanceof PgBackRestUnavailableError) {
+                return status(503, { message: "pgBackRest backup inventory is unavailable" });
+            }
+            if (err instanceof PitrRestoreUnavailableError) {
+                return status(503, { message: err.message });
+            }
+            return status(400, { message: err instanceof Error ? err.message : "Invalid restore request" });
+        }
+    }, {
+        body: t.Object({ target: t.String(), confirmation: t.String() }),
+        response: {
+            200: t.Any(),
+            400: ErrorResponse,
+            409: ErrorResponse,
+            503: ErrorResponse,
+        },
+        detail: { tags: ["backups"], summary: "Restore the physical cluster to a point in time" },
     });
