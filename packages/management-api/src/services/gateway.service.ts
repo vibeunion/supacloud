@@ -317,7 +317,20 @@ export class CaddyGatewayProvider implements GatewayProvider {
                                 endpoint: `http://${config.managementApiInternal}/v1/gateway/caddy/ask`,
                             },
                         },
-                        policies: [{ on_demand: true, key_type: "p256" }],
+                        policies: [
+                            // ACME (Let's Encrypt) cannot validate domains that resolve
+                            // to RFC1918 addresses; on LAN-only hosts the validators never
+                            // reach the server, so tls-alpn-01/http-01 fail and HTTPS hangs.
+                            // When the server listens on a private IP, use Caddy's internal
+                            // CA so on-demand TLS works without an externally reachable host.
+                            {
+                                on_demand: true,
+                                key_type: "p256",
+                                ...(config.caddyTlsIssuer === "internal"
+                                    ? { issuers: [{ module: "internal" }] }
+                                    : {}),
+                            },
+                        ],
                     },
                     certificates: {
                         load_files: Array.from(this.certsById.values()),
