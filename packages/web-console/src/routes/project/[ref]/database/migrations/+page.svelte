@@ -27,12 +27,15 @@
         const statements = Array.isArray(row.statements)
           ? row.statements.filter((statement): statement is string => typeof statement === "string")
           : [];
+        const statementCount = typeof row.statement_count === "number" && Number.isFinite(row.statement_count)
+          ? row.statement_count
+          : statements.length;
 
         return {
           version: String(row.version || ""),
           name: typeof row.name === "string" ? row.name : null,
           statements,
-          statement_count: Number(row.statement_count ?? statements.length),
+          statement_count: statementCount,
           checksum: typeof row.checksum === "string" ? row.checksum : "",
           applied_at: typeof row.applied_at === "string" ? row.applied_at : null,
         };
@@ -40,7 +43,7 @@
     }
   }));
 
-  const migrations = $derived((migrationsQuery.data as Migration[]) || []);
+  const migrations = $derived(migrationsQuery.data || []);
   const isLoading = $derived(migrationsQuery.isPending);
   const error = $derived(migrationsQuery.error?.message || null);
   const fallbackMsg = $derived(!isLoading && !error && migrations.length === 0 ? "暂无迁移历史" : null);
