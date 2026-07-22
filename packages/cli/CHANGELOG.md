@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.4](https://github.com/zuohuadong/supacloud/compare/cli-v0.12.3...cli-v0.12.4) (2026-07-22)
+
+
+### Bug Fixes
+
+* **cli:** recognize direct-apply migration markers ([#530](https://github.com/zuohuadong/supacloud/issues/530)) ([33f433d](https://github.com/zuohuadong/supacloud/commit/33f433d5e4e1d132dd50a8b1d312f0485119bee0))
+
 ## [0.12.3](https://github.com/zuohuadong/supacloud/compare/cli-v0.12.2...cli-v0.12.3) (2026-07-22)
 
 
