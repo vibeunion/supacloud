@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.20.1](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.20.0...supacloud-js-v0.20.1) (2026-07-22)
+
+
+### Bug Fixes
+
+* **auth:** persist safe oauth authorization path ([bff2259](https://github.com/zuohuadong/supacloud/commit/bff2259475cd8036f5f602b81677d493d429aff2))
+* **platform:** harden tenant provisioning and auth runtime config ([ef73fa7](https://github.com/zuohuadong/supacloud/commit/ef73fa7e0060cfe14330b98f318293d16808f533))
+
 ## [0.20.0](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.19.5...supacloud-js-v0.20.0) (2026-07-19)
 
 

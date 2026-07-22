@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.47.11](https://github.com/zuohuadong/supacloud/compare/management-api-v0.47.10...management-api-v0.47.11) (2026-07-22)
+
+
+### Bug Fixes
+
+* **auth:** persist safe oauth authorization path ([bff2259](https://github.com/zuohuadong/supacloud/commit/bff2259475cd8036f5f602b81677d493d429aff2))
+* **platform:** close tenant provisioning security gaps ([e70e7f8](https://github.com/zuohuadong/supacloud/commit/e70e7f87e0250c08dc79abc65a4332340e823e36))
+* **platform:** harden tenant provisioning and auth runtime config ([ef73fa7](https://github.com/zuohuadong/supacloud/commit/ef73fa7e0060cfe14330b98f318293d16808f533))
+* **platform:** harden tenant provisioning and realtime secrets ([fef9840](https://github.com/zuohuadong/supacloud/commit/fef984065533291ac1a36c133c556b2258f63c0a))
+* **security:** harden tenant unit provisioning ([57e3c41](https://github.com/zuohuadong/supacloud/commit/57e3c417939837a3721caefd7161aec96bbc63ea))
+* **security:** isolate frontend environment files ([cb44a69](https://github.com/zuohuadong/supacloud/commit/cb44a69b4ace2eea1d4489f73374ae470bfae5c3))
+
 ## [0.47.10](https://github.com/zuohuadong/supacloud/compare/management-api-v0.47.9...management-api-v0.47.10) (2026-07-22)
 
 
