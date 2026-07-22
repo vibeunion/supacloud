@@ -23,7 +23,7 @@ chmod 755 "$TMP_DIR/bin/"*
 
 token=01234567-89ab-cdef-0123-456789abcdef
 printf 'operation=install\nunit_name=supacloud-pgrst@.service\n' > "$TMP_DIR/requests/$token.request"
-printf '[Service]\nExecStart=/bin/true\n' > "$TMP_DIR/requests/$token.unit"
+printf '[Unit]\nDescription=test\n[Service]\nType=oneshot\nUser=supacloud-%%i\nGroup=supacloud-%%i\nNoNewPrivileges=true\nExecStart=/bin/true\n[Install]\nWantedBy=multi-user.target\n' > "$TMP_DIR/requests/$token.unit"
 
 sed \
   -e "s#request_dir=\"/run/supacloud-unit-requests\"#request_dir=\"$TMP_DIR/requests\"#" \
@@ -42,5 +42,19 @@ printf 'operation=install\nunit_name=evil.service\n' > "$TMP_DIR/requests/$token
 printf '[Service]\nExecStart=/bin/sh\n' > "$TMP_DIR/requests/$token.unit"
 if PATH="$TMP_DIR/bin:$PATH" bash "$TMP_DIR/broker.sh" "$token" >/dev/null 2>&1; then
   echo "broker accepted an unapproved unit name" >&2
+  exit 1
+fi
+
+printf 'operation=install\nunit_name=supacloud-pgrst@.service\n' > "$TMP_DIR/requests/$token.request"
+printf '[Unit]\nDescription=test\n[Service]\nType=oneshot\nUser=root\nGroup=root\nNoNewPrivileges=true\nExecStart=/bin/true\n[Install]\nWantedBy=multi-user.target\n' > "$TMP_DIR/requests/$token.unit"
+if PATH="$TMP_DIR/bin:$PATH" bash "$TMP_DIR/broker.sh" "$token" >/dev/null 2>&1; then
+  echo "broker accepted a root systemd identity" >&2
+  exit 1
+fi
+
+printf 'operation=install\nunit_name=supacloud-pgrst@.service\n' > "$TMP_DIR/requests/$token.request"
+printf '[Unit]\nDescription=test\n[Service]\nType=oneshot\nUser=supacloud-%%i\nGroup=supacloud-%%i\nNoNewPrivileges=true\nExecStartPre=/bin/sh\nExecStart=/bin/true\n[Install]\nWantedBy=multi-user.target\n' > "$TMP_DIR/requests/$token.unit"
+if PATH="$TMP_DIR/bin:$PATH" bash "$TMP_DIR/broker.sh" "$token" >/dev/null 2>&1; then
+  echo "broker accepted an unsupported systemd directive" >&2
   exit 1
 fi

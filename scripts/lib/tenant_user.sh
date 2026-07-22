@@ -46,7 +46,7 @@ validate_runtime_user() {
     }
     IFS=: read -r name _ uid gid _ home shell <<< "$passwd_entry"
     uid_max=$(system_uid_max)
-    if [[ "$name" != "$runtime_user" || ! "$uid" =~ ^[0-9]+$ || "$uid" -gt "$uid_max" \
+    if [[ "$name" != "$runtime_user" || ! "$uid" =~ ^[0-9]+$ || "$uid" -eq 0 || "$uid" -gt "$uid_max" \
         || "$home" != "/nonexistent" ]]; then
         echo "ERROR: Tenant runtime account ${runtime_user} violates the system-user contract" >&2
         return 1
@@ -64,7 +64,7 @@ validate_runtime_user() {
         return 1
     }
     IFS=: read -r group_name _ group_gid _ <<< "$group_entry"
-    if [[ "$group_name" != "$runtime_user" || "$group_gid" != "$gid" ]]; then
+    if [[ "$group_name" != "$runtime_user" || ! "$group_gid" =~ ^[0-9]+$ || "$group_gid" -eq 0 || "$group_gid" != "$gid" ]]; then
         echo "ERROR: Tenant runtime account ${runtime_user} has an unexpected primary group" >&2
         return 1
     fi

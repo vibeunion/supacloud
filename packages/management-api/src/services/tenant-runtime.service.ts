@@ -777,7 +777,7 @@ class TenantRuntimeService {
         return { exitCode, stdout, stderr };
     }
 
-    private async ensureTenantRuntimeUser(ref: string): Promise<string> {
+    async ensureTenantRuntimeUser(ref: string): Promise<string> {
         const runtimeUser = this.tenantRuntimeUser(ref);
         // ProtectSystem=full deliberately keeps the long-running control plane
         // out of the system account database. Always run the fixed helper so it

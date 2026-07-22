@@ -56,3 +56,17 @@ if run_helper \
   echo "tenant account with mismatched primary group was accepted" >&2
   exit 1
 fi
+
+if run_helper \
+  "supacloud-demo:x:0:0::/nonexistent:$TMP_DIR/bin/nologin" \
+  "supacloud-demo:x:0:" >/dev/null 2>&1; then
+  echo "root tenant account was accepted" >&2
+  exit 1
+fi
+
+if run_helper \
+  "supacloud-demo:x:998:0::/nonexistent:$TMP_DIR/bin/nologin" \
+  "supacloud-demo:x:0:" >/dev/null 2>&1; then
+  echo "tenant account with root primary group was accepted" >&2
+  exit 1
+fi

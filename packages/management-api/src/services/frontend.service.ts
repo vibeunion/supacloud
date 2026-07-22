@@ -28,10 +28,12 @@ import {
 import { FrontendDomainService } from "./frontend-domain.service";
 import { FrontendRecordService } from "./frontend-record.service";
 import {
+  assertSystemdValue,
   prepareSvelteKitRuntime,
   renderSvelteKitSystemdUnit,
 } from "./frontend-runtime";
 import { installManagedSystemdUnit, removeManagedSystemdUnit } from "./systemd-unit-broker";
+import { tenantRuntimeService } from "./tenant-runtime.service";
 
 const FRONTEND_BASE_DIR = "/var/supacloud/frontends";
 const READINESS_TIMEOUT_MS = 30_000;
@@ -627,12 +629,16 @@ export class FrontendService {
   ): Promise<number> {
     const port = 30000 + parseInt(deploymentId, 16) % 10000;
     const serviceName = `supacloud-frontend-${projectRef}-${deploymentId}`;
+    const runtimeUser = await tenantRuntimeService.ensureTenantRuntimeUser(projectRef);
+    const description = assertSystemdValue(`${deployment.name} (${projectRef}/${deploymentId})`, "Description");
 
     const envFile = this.joinPath(this.baseDir, projectRef, deploymentId, ".env");
     const envContent = Object.entries(deployment.env_vars)
       .map(([key, value]) => `${key}=${value}`)
       .join("\n");
     await Bun.write(envFile, envContent);
+    await $`chown ${runtimeUser}:${runtimeUser} ${envFile}`.quiet();
+    await $`chmod 600 ${envFile}`.quiet();
 
     if (!isSSR) {
       throw new Error("Static frontend deployments are served directly by Caddy");
@@ -641,19 +647,22 @@ export class FrontendService {
     const systemdUnit = deployment.framework === "sveltekit"
       ? renderSvelteKitSystemdUnit({
           serviceName,
-          description: `${deployment.name} (${projectRef}/${deploymentId})`,
+          runtimeUser,
+          description,
           buildDir,
           envFile,
           port,
         })
       : `[Unit]
-Description=SupaCloud Frontend SSR: ${deployment.name} (${projectRef}/${deploymentId})
+Description=SupaCloud Frontend SSR: ${description}
 After=network.target
 
 [Service]
 Type=simple
-User=root
+User=${runtimeUser}
+Group=${runtimeUser}
 WorkingDirectory=${buildDir}
+NoNewPrivileges=true
 Environment="PORT=${port}"
 Environment="NODE_ENV=production"
 EnvironmentFile=-/etc/supabase/management-api.env

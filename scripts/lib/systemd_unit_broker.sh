@@ -34,10 +34,70 @@ if [[ ! "$unit_name" =~ ^supacloud-(pgrst|gotrue)@\.service$ \
     exit 1
 fi
 
+validate_unit_content() {
+    local section="" line key value user="" group="" seen_unit=0 seen_service=0 seen_install=0 seen_nnp=0
+    local unit_bytes
+    unit_bytes=$(wc -c < "$source_file")
+    (( unit_bytes > 0 && unit_bytes <= 16384 )) || return 1
+    cmp -s "$source_file" <(tr -d '\000' < "$source_file") || return 1
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        [[ "$line" != *$'\r'* && "$line" != *\\ ]] || return 1
+        [[ -z "$line" || "$line" =~ ^[[:space:]]*[#\;] ]] && continue
+        if [[ "$line" =~ ^\[(Unit|Service|Install)\]$ ]]; then
+            section="${BASH_REMATCH[1]}"
+            case "$section" in
+                Unit) (( seen_unit += 1 )) ;;
+                Service) (( seen_service += 1 )) ;;
+                Install) (( seen_install += 1 )) ;;
+            esac
+            [[ "$seen_unit" -le 1 && "$seen_service" -le 1 && "$seen_install" -le 1 ]] || return 1
+            continue
+        fi
+        [[ "$line" =~ ^([A-Za-z][A-Za-z0-9]*)=(.*)$ ]] || return 1
+        key="${BASH_REMATCH[1]}"
+        value="${BASH_REMATCH[2]}"
+        case "$section:$key" in
+            Unit:After|Unit:Description|Unit:Documentation|Unit:Wants|\
+            Service:CPUWeight|Service:Environment|Service:EnvironmentFile|Service:ExecReload|Service:ExecStart|\
+            Service:Group|Service:LimitNOFILE|Service:MemoryMax|Service:NoNewPrivileges|Service:ProtectHome|\
+            Service:ProtectSystem|Service:ReadOnlyPaths|Service:Restart|Service:RestartSec|Service:StartLimitBurst|\
+            Service:StartLimitIntervalSec|Service:SyslogIdentifier|Service:Type|Service:User|Service:WorkingDirectory|\
+            Install:WantedBy) ;;
+            *) return 1 ;;
+        esac
+        if [[ "$key" == ExecStart || "$key" == ExecReload ]]; then
+            [[ ! "$value" =~ ^[-+!:@\|] ]] || return 1
+        fi
+        if [[ "$key" == NoNewPrivileges ]]; then
+            [[ "$value" == true && "$seen_nnp" == 0 ]] || return 1
+            seen_nnp=1
+        fi
+        if [[ "$key" == User ]]; then
+            [[ -z "$user" && "$value" =~ ^supacloud-(%i|[a-z0-9-]{1,20})$ ]] || return 1
+            user="$value"
+        elif [[ "$key" == Group ]]; then
+            [[ -z "$group" && "$value" =~ ^supacloud-(%i|[a-z0-9-]{1,20})$ ]] || return 1
+            group="$value"
+        fi
+    done < "$source_file"
+    [[ "$seen_unit" == 1 && "$seen_service" == 1 && "$seen_install" == 1 && "$seen_nnp" == 1 \
+        && -n "$user" && "$user" == "$group" ]] || return 1
+    if [[ "$unit_name" == *'@'* && "$user" != "supacloud-%i" ]]; then
+        return 1
+    fi
+    if [[ "$unit_name" == supacloud-frontend-* && "$unit_name" != supacloud-frontend-${user#supacloud-}-* ]]; then
+        return 1
+    fi
+}
+
 case "$operation" in
   install)
     [[ -f "$source_file" && ! -L "$source_file" ]] || {
         echo "ERROR: Systemd unit source is missing" >&2
+        exit 1
+    }
+    validate_unit_content || {
+        echo "ERROR: Systemd unit content is outside the managed policy" >&2
         exit 1
     }
     install -m 0644 "$source_file" "/etc/systemd/system/${unit_name}"
