@@ -110,27 +110,6 @@ restart_failed_tenants() {
     log_info "Tenant service recovery complete"
 }
 
-ensure_service_containers_running() {
-    log_info "Checking service containers (Imaginary, Realtime)..."
-
-    local RUNTIME="podman"
-    command -v podman &>/dev/null || RUNTIME="docker"
-
-    for container in supacloud-imaginary supacloud-realtime; do
-        local status
-        status=$($RUNTIME ps -a --filter "name=${container}" --format '{{.Status}}' 2>/dev/null || echo "")
-
-        if [[ -n "$status" ]]; then
-            if [[ "$status" != *"Up"* ]] && [[ "$status" != *"Running"* ]]; then
-                log_warn "${container} not running, starting..."
-                $RUNTIME start "${container}" 2>/dev/null || true
-            else
-                log_info "${container} already running"
-            fi
-        fi
-    done
-}
-
 # ── Edge Runtime Zombie Killer ──────────────────────────────────────
 # SO_REUSEPORT allows multiple processes to bind the same port.
 # If an old bun runtime survives a restart/deploy, requests get split
@@ -176,7 +155,9 @@ main() {
     fix_gotrue_search_path
     kill_edge_runtime_zombies
     ensure_gateway_running
-    ensure_service_containers_running
+    # Container recovery stays outside this sandbox. Realtime has a dedicated
+    # systemd unit, and Imaginary uses the installer-managed restart policy.
+    # Container CLIs require mount-family syscalls that this unit denies.
     restart_failed_tenants
     
     echo ""
