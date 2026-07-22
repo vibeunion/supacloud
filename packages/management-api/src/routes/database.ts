@@ -266,6 +266,8 @@ interface MigrationExecutionPlan {
   statements: readonly string[];
 }
 
+export const MIGRATION_SESSION_RESET_SQL = "RESET ALL; DISCARD TEMP; DISCARD PLANS";
+
 function existingMigrationChecksum(
   row: Record<string, unknown>,
   fallback: { version: string; name: string },
@@ -306,7 +308,8 @@ export function migrationLedgerEntryMatches(
 
 async function resetMigrationSession(connection: ReservedProjectSql, dbName: string): Promise<boolean> {
   try {
-    await connection.unsafe("DISCARD ALL");
+    // Keep the driver's prepared-statement cache valid across pooled requests.
+    await connection.unsafe(MIGRATION_SESSION_RESET_SQL);
     return true;
   } catch (error: unknown) {
     logger.warn(`[database] failed to reset migration session for ${dbName}`, {

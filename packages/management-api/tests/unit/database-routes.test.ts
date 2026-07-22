@@ -7,6 +7,7 @@ import {
   buildCreateMaterializedViewSql,
   buildDropMaterializedViewSql,
   buildRefreshMaterializedViewSql,
+  MIGRATION_SESSION_RESET_SQL,
   migrationExecutionStatements,
   migrationLedgerEntryMatches,
   normalizeMigrationVersion,
@@ -155,6 +156,11 @@ describe("database route helpers", () => {
       checksum: "raw-file-sha256",
       statements: ["CREATE FUNCTION demo() RETURNS void LANGUAGE sql AS $$ SELECT 2 $$;"],
     }, input)).toBe(false);
+  });
+
+  test("resets migration sessions without deallocating pooled prepared statements", () => {
+    expect(MIGRATION_SESSION_RESET_SQL).toBe("RESET ALL; DISCARD TEMP; DISCARD PLANS");
+    expect(MIGRATION_SESSION_RESET_SQL).not.toContain("DISCARD ALL");
   });
 
   test("does not let quoted dollar markers hide top-level policy controls", () => {
