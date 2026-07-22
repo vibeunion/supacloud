@@ -100,6 +100,7 @@ export function renderProjectMigrationRoleSql(dbName: string, dbUser: string): s
               AND d.objid = c.oid
               AND d.deptype = 'e'
           )
+        ORDER BY CASE WHEN c.relkind = 'S' THEN 1 ELSE 0 END, c.oid
       LOOP
         routine_kind := CASE object_row.relkind
           WHEN 'S' THEN 'SEQUENCE'
