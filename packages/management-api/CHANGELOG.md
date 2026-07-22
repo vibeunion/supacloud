@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.47.9](https://github.com/zuohuadong/supacloud/compare/management-api-v0.47.8...management-api-v0.47.9) (2026-07-22)
+
+
+### Bug Fixes
+
+* **migrations:** accept exact legacy ledger contents ([#532](https://github.com/zuohuadong/supacloud/issues/532)) ([0a86d3e](https://github.com/zuohuadong/supacloud/commit/0a86d3e00de8c9d8ca351650b97956ca4ab53ae5))
+
 ## [0.47.8](https://github.com/zuohuadong/supacloud/compare/management-api-v0.47.7...management-api-v0.47.8) (2026-07-22)
 
 
