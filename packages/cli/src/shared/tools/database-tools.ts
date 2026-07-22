@@ -93,16 +93,19 @@ function migrationRows(data: unknown): Array<Record<string, unknown>> {
         : [];
 }
 
-function baselineMigrationKey(version: string, name: string): string {
+function migrationIdentityKey(version: string, name: string): string {
     return `${version}\u0000${name}`;
 }
 
-function baselineMigrationKeys(data: unknown): Set<string> {
+function nameBoundMigrationMarkerKeys(data: unknown): Set<string> {
     const keys = new Set<string>();
     for (const row of migrationRows(data)) {
         if (row.version == null || row.name == null || !Array.isArray(row.statements)) continue;
-        if (row.statements.length !== 1 || row.statements[0] !== `baseline:${String(row.name)}`) continue;
-        keys.add(baselineMigrationKey(String(row.version), String(row.name)));
+        if (row.statements.length !== 1) continue;
+        const name = String(row.name);
+        const marker = row.statements[0];
+        if (marker !== `baseline:${name}` && marker !== `direct-apply:${name}`) continue;
+        keys.add(migrationIdentityKey(String(row.version), String(row.name)));
     }
     return keys;
 }
@@ -111,13 +114,13 @@ function historicalChecksumMarkerKeys(
     data: unknown,
     migrationFiles: MigrationFile[],
 ): Set<string> {
-    const filesByKey = new Map(migrationFiles.map((migration) => [baselineMigrationKey(migration.version, migration.name), migration]));
+    const filesByKey = new Map(migrationFiles.map((migration) => [migrationIdentityKey(migration.version, migration.name), migration]));
     const keys = new Set<string>();
     for (const row of migrationRows(data)) {
         if (row.version == null || row.name == null || !Array.isArray(row.statements) || row.statements.length !== 1) continue;
         const marker = row.statements[0];
         if (typeof marker !== "string" || !/^sha256:[0-9a-f]{64}$/.test(marker)) continue;
-        const key = baselineMigrationKey(String(row.version), String(row.name));
+        const key = migrationIdentityKey(String(row.version), String(row.name));
         const migration = filesByKey.get(key);
         if (!migration) continue;
         const checksum = createHash("sha256").update(migration.rawBytes).digest("hex");
@@ -406,11 +409,11 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
 
                     const applied: string[] = [];
                     const skipped: string[] = [];
-                    const baselineKeys = baselineMigrationKeys(migrationsResult.data);
+                    const nameBoundMarkerKeys = nameBoundMigrationMarkerKeys(migrationsResult.data);
                     const historicalChecksumKeys = historicalChecksumMarkerKeys(migrationsResult.data, migrationFiles);
                     for (const { file, name, version, sql } of migrationFiles) {
-                        const migrationKey = baselineMigrationKey(version, name);
-                        if (baselineKeys.has(migrationKey) || historicalChecksumKeys.has(migrationKey)) {
+                        const migrationKey = migrationIdentityKey(version, name);
+                        if (nameBoundMarkerKeys.has(migrationKey) || historicalChecksumKeys.has(migrationKey)) {
                             skipped.push(file);
                             continue;
                         }

@@ -237,6 +237,75 @@ describe("database migration helpers", () => {
         }
     });
 
+    test("skips only exact historical direct-apply markers before POST", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
+        const postedNames: string[] = [];
+        try {
+            writeFileSync(join(dir, "20260425123000_create_users.sql"), "CREATE TABLE users (id uuid);\n");
+            writeFileSync(join(dir, "20260425124000_create_tasks.sql"), "CREATE TABLE tasks (id uuid);\n");
+            writeFileSync(join(dir, "20260425125000_create_reports.sql"), "CREATE TABLE reports (id uuid);\n");
+            writeFileSync(join(dir, "20260425126000_create_audits.sql"), "CREATE TABLE audits (id uuid);\n");
+            writeFileSync(join(dir, "20260425127000_create_metrics.sql"), "CREATE TABLE metrics (id uuid);\n");
+            writeFileSync(join(dir, "20260425128000_create_events.sql"), "CREATE TABLE events (id uuid);\n");
+            const callback = captureDatabaseTool({
+                get: async () => ({
+                    ok: true,
+                    status: 200,
+                    data: [
+                        {
+                            version: "20260425123000",
+                            name: "20260425123000_create_users",
+                            statements: ["direct-apply:20260425123000_create_users"],
+                        },
+                        {
+                            version: "20260425124000",
+                            name: "20260425124000_create_tasks",
+                            statements: ["direct-apply:20260425123000_create_users"],
+                        },
+                        {
+                            version: "20260425125000",
+                            name: "20260425125000_renamed_reports",
+                            statements: ["direct-apply:20260425125000_renamed_reports"],
+                        },
+                        {
+                            version: "20260425126000",
+                            name: "20260425126000_create_audits",
+                            statements: ["direct-apply:20260425126000_create_audits", "extra"],
+                        },
+                        {
+                            version: "20260425127001",
+                            name: "20260425127000_create_metrics",
+                            statements: ["direct-apply:20260425127000_create_metrics"],
+                        },
+                        {
+                            version: "20260425128000",
+                            name: "20260425128000_create_events",
+                            statements: ["direct-apply:20260425128000_create_events "],
+                        },
+                    ],
+                }),
+                post: async (_path: string, body: { name: string }) => {
+                    postedNames.push(body.name);
+                    return { ok: true, status: 200, data: {} };
+                },
+            });
+
+            const toolResult = await callback({ action: "push_migrations", ref: "proj", dir });
+
+            expect(toolResult.content[0].text).toContain("Applied: 5");
+            expect(toolResult.content[0].text).toContain("Skipped: 1");
+            expect(postedNames).toEqual([
+                "20260425124000_create_tasks",
+                "20260425125000_create_reports",
+                "20260425126000_create_audits",
+                "20260425127000_create_metrics",
+                "20260425128000_create_events",
+            ]);
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
     test("skips only matching historical sha256 markers before POST", async () => {
         const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
         const posts: Array<{ name: string }> = [];
