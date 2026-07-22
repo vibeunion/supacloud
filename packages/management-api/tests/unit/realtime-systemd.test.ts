@@ -68,4 +68,16 @@ describe("Management API CI Realtime readiness probe", () => {
     expect(waitStep).not.toContain("Authorization: Bearer ${JWT_SECRET}");
     expect(waitStep).not.toContain("http://127.0.0.1:4000/health\"");
   });
+
+  test("starts the API with an explicit matching Realtime container secret fixture", () => {
+    const workflow = readFileSync(join(repoRoot, ".github/workflows/management-api.yml"), "utf8");
+    const launchStep = workflow.slice(
+      workflow.indexOf("Launch API & Execute Full Defenses"),
+      workflow.indexOf("Stop containers"),
+    );
+
+    expect(launchStep).toContain("SUPACLOUD_REALTIME_CONTAINER_ENV_FILE");
+    expect(launchStep).toContain("API_JWT_SECRET=%s");
+    expect(launchStep).toContain("TEST_FIXED_JWT_SECRET");
+  });
 });
