@@ -62,6 +62,7 @@ describe("Management pre-start recovery sandbox", () => {
     );
 
     expect(managementUnit).toContain("SystemCallFilter=~@mount");
+    expect(managementUnit).toContain("ExecStartPre=/opt/supacloud/scripts/pre_start_recovery.sh");
     expect(managementUnit).not.toContain("ExecStartPre=/usr/bin/podman");
     expect(realtimeUnit).toContain("ExecStart=/usr/bin/podman run");
     expect(realtimeUnit).not.toContain("SystemCallFilter=");
