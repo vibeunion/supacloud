@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.7.3](https://github.com/zuohuadong/supacloud/compare/supacloud-v0.7.2...supacloud-v0.7.3) (2026-07-22)
+
+
+### Bug Fixes
+
+* **management-api:** order migration-owned sequences after tables ([d424bd7](https://github.com/zuohuadong/supacloud/commit/d424bd7ec90c874cb8f5f21e22af0234b52da255))
+
+
+### Miscellaneous Chores
+
+* **supacloud:** sync unified package lock ([14e5637](https://github.com/zuohuadong/supacloud/commit/14e56373b088a00d1df253961ca3eacdba370db1))
+
 ## [0.7.2](https://github.com/zuohuadong/supacloud/compare/supacloud-v0.7.1...supacloud-v0.7.2) (2026-07-22)
 
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.47.8](https://github.com/zuohuadong/supacloud/compare/management-api-v0.47.7...management-api-v0.47.8) (2026-07-22)
+
+
+### Bug Fixes
+
+* **management-api:** order migration-owned sequences after tables ([d424bd7](https://github.com/zuohuadong/supacloud/commit/d424bd7ec90c874cb8f5f21e22af0234b52da255))
+* **management-api:** order migration-owned sequences after tables ([35a05dd](https://github.com/zuohuadong/supacloud/commit/35a05dd6a80f4fbf49cf56e28567590fde03e34f))
+
 ## [0.47.7](https://github.com/zuohuadong/supacloud/compare/management-api-v0.47.6...management-api-v0.47.7) (2026-07-22)
 
 
