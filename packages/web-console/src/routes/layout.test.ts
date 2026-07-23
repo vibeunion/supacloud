@@ -16,6 +16,10 @@ describe("root layout source guards", () => {
     expect(loginPageSource).toContain('import { onMount } from "svelte";');
     expect(loginPageSource).toContain("getStudioSession");
     expect(loginPageSource).toContain("session.authenticated");
-    expect(loginPageSource).toContain('window.location.replace("/")');
+    expect(loginPageSource).toContain('const CONSOLE_LANDING_PATH = "/projects";');
+    expect(loginPageSource).toContain("window.location.replace(CONSOLE_LANDING_PATH)");
+    expect(loginPageSource).toContain("window.location.href = CONSOLE_LANDING_PATH");
+    expect(loginPageSource).not.toContain('window.location.replace("/")');
+    expect(loginPageSource).not.toContain('window.location.href = "/"');
   });
 });

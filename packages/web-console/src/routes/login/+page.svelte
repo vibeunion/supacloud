@@ -5,6 +5,8 @@
   import { t, locale } from "svelte-i18n";
   import { Loader2, Lock, Eye, EyeOff, User, Globe, Sun, Moon, Info } from "lucide-svelte";
 
+  const CONSOLE_LANDING_PATH = "/projects";
+
   let username = $state("");
   let password = $state("");
   let isLoading = $state(false);
@@ -18,7 +20,7 @@
     void getStudioSession()
       .then((session) => {
         if (isMounted && session.authenticated) {
-          window.location.replace("/");
+          window.location.replace(CONSOLE_LANDING_PATH);
         }
       })
       .catch(() => {
@@ -50,7 +52,7 @@
     try {
       const result = await loginStudio(username.trim(), password);
       if (result.success) {
-        window.location.href = "/";
+        window.location.href = CONSOLE_LANDING_PATH;
       } else {
         error = result.error || "登录失败";
         triggerShake();
