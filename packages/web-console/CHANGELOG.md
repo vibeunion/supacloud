@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.3](https://github.com/zuohuadong/supacloud/compare/web-console-v0.24.2...web-console-v0.24.3) (2026-07-23)
+
+
+### Bug Fixes
+
+* **web-console:** restore platform dashboard ([#547](https://github.com/zuohuadong/supacloud/issues/547)) ([115ebfc](https://github.com/zuohuadong/supacloud/commit/115ebfc354096be08378e6317044aefd2318141d))
+
 ## [0.24.2](https://github.com/zuohuadong/supacloud/compare/web-console-v0.24.1...web-console-v0.24.2) (2026-07-22)
 
 
