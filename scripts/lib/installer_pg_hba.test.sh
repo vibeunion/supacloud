@@ -65,7 +65,10 @@ PIGSTY_CONFIG="$legacy_config" ensure_pigsty_tenant_hba_rule
 [[ "$(grep -Fc "SupaCloud tenant authenticator loopback" "$legacy_config")" == 1 ]]
 [[ "$(grep -Fc "SupaCloud tenant database role loopback" "$legacy_config")" == 1 ]]
 grep -Fq "user: '\"/^authenticator_[a-z0-9-]+$\"'" "$legacy_config"
-! grep -Fq "user: '/^authenticator_[a-z0-9-]+$/'" "$legacy_config"
+if grep -Fq "user: '/^authenticator_[a-z0-9-]+$/'" "$legacy_config"; then
+    echo "Legacy PostgreSQL HBA regex syntax was not reconciled" >&2
+    exit 1
+fi
 
 bad_config="$tmp_dir/bad.yml"
 printf 'all:\n  vars:\n    unrelated: true\n' > "$bad_config"
