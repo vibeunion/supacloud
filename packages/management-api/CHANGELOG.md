@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.47.12](https://github.com/zuohuadong/supacloud/compare/management-api-v0.47.11...management-api-v0.47.12) (2026-07-23)
+
+
+### Bug Fixes
+
+* **edge-runtime:** execute multi-file bundles from source dir ([#543](https://github.com/zuohuadong/supacloud/issues/543)) ([bc7d427](https://github.com/zuohuadong/supacloud/commit/bc7d427885abf8ca867740828aa6e5f09e18259a))
+
 ## [0.47.11](https://github.com/zuohuadong/supacloud/compare/management-api-v0.47.10...management-api-v0.47.11) (2026-07-22)
 
 

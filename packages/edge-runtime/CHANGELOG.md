@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.1](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.14.0...edge-runtime-v0.14.1) (2026-07-23)
+
+
+### Bug Fixes
+
+* **edge-runtime:** execute multi-file bundles from source dir ([#543](https://github.com/zuohuadong/supacloud/issues/543)) ([bc7d427](https://github.com/zuohuadong/supacloud/commit/bc7d427885abf8ca867740828aa6e5f09e18259a))
+
 ## [0.14.0](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.13.2...edge-runtime-v0.14.0) (2026-07-20)
 
 
