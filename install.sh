@@ -227,7 +227,7 @@ ensure_pigsty_tenant_hba_rule() {
         return 1
     }
 
-    log_info "Persisted tenant authenticator HBA rule in ${pigsty_config}"
+    log_info "Persisted tenant HBA rules in ${pigsty_config}"
     apply_pigsty_tenant_hba_rules "$pigsty_path" "$pigsty_config"
 }
 
@@ -3070,9 +3070,7 @@ install_web_console() {
 
         # Bind the configured Studio domain to the gateway so the console is
         # reachable at https://<SUPABASE_STUDIO_DOMAIN> without a manual
-        # `bun run src/cli.ts setup-studio-domain` step. Mirrors the CLI
-        # command (setupMasterRoutes + configureFrontendRoute for the
-        # _global/studio frontend) and is idempotent.
+        # `bun run src/cli.ts setup-studio-domain` step.
         # Best-effort: a failure here only means the operator must bind by
         # hand, so it must never abort the install.
         if [[ -n "${SUPABASE_STUDIO_DOMAIN:-}" ]] && systemctl is-active --quiet supacloud; then

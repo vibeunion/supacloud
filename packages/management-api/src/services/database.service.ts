@@ -157,17 +157,12 @@ export class DatabaseService {
   private readonly PG_PASSWORD = config.pgPassword;
   private readonly PG_DATABASE = config.pgDatabase;
 
-  // Generate secure random password
-  generatePassword(length = 24): string {
-    const charset =
-      "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    let ret = "";
-    const bytes = new Uint8Array(length);
+  generatePassword(length = 32): string {
+    const bytes = new Uint8Array(Math.ceil(length / 2));
     crypto.getRandomValues(bytes);
-    for (let i = 0; i < length; i++) {
-      ret += charset[bytes[i] % charset.length];
-    }
-    return ret;
+    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0"))
+      .join("")
+      .slice(0, length);
   }
 
   private async loadSupabaseSchema(): Promise<string> {
@@ -272,6 +267,7 @@ export class DatabaseService {
   ): Promise<{ success: boolean; error?: string }> {
     const dbName = generateDbName(projectRef);
     const dbUser = resolveRoleName(projectRef);
+    let databaseCreated = false;
 
     try {
       // Verify identifiers for safety to prevent SQL injection in DDL
@@ -286,19 +282,15 @@ export class DatabaseService {
           SELECT 1 FROM pg_database WHERE datname = ${dbName}
         `;
 
-        if (dbExists) {
-          return;
+        await this.reconcileProjectRole(adminDb, dbUser, password);
+
+        if (!dbExists) {
+          // Create database - use double quotes to support identifiers with hyphens
+          await adminDb.unsafe(
+            `CREATE DATABASE "${dbName}" OWNER ${this.PG_USER}`,
+          );
+          databaseCreated = true;
         }
-
-        // Create database - use double quotes to support identifiers with hyphens
-        await adminDb.unsafe(
-          `CREATE DATABASE "${dbName}" OWNER ${this.PG_USER}`,
-        );
-
-        // Create role - limit connections for low-resource environments (prevent connection exhaustion)
-        await adminDb.unsafe(
-          `CREATE ROLE "${dbUser}" LOGIN CONNECTION LIMIT 20 PASSWORD ${pgEscapePassword(password)}`,
-        );
 
         // Set kernel-level configs for resource exhaustion prevention
         await adminDb.unsafe(`
@@ -312,8 +304,11 @@ export class DatabaseService {
         await adminDb.unsafe(`GRANT ALL PRIVILEGES ON DATABASE "${dbName}" TO ${this.PG_USER}`);
       });
 
-      // Apply schema independently
-      await this.applySupabaseSchema(dbName, projectRef, password);
+      if (databaseCreated) {
+        await this.applySupabaseSchema(dbName, projectRef, password);
+      } else {
+        await this.reconcileAuthenticatorRole(dbName, projectRef, password);
+      }
       await this.prepareMigrationRole(dbName, dbUser);
 
       await this.withAdminDb(async (adminDb) => {
@@ -333,6 +328,55 @@ export class DatabaseService {
         error: error instanceof Error ? error.message : String(error),
       };
     }
+  }
+
+  private async reconcileProjectRole(
+    adminDb: SQL,
+    dbUser: string,
+    password: string,
+  ): Promise<void> {
+    const escapedPassword = pgEscapePassword(password);
+    await adminDb.unsafe(`
+      DO $$
+      BEGIN
+        IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${dbUser}') THEN
+          ALTER ROLE "${dbUser}" LOGIN CONNECTION LIMIT 20 PASSWORD ${escapedPassword};
+        ELSE
+          CREATE ROLE "${dbUser}" LOGIN CONNECTION LIMIT 20 PASSWORD ${escapedPassword};
+        END IF;
+      END
+      $$;
+    `);
+  }
+
+  private async reconcileAuthenticatorRole(
+    dbName: string,
+    projectRef: string,
+    password: string,
+  ): Promise<void> {
+    const authenticatorRole = resolveAuthenticatorName(projectRef);
+    assertValidIdentifier("authenticatorRole", authenticatorRole);
+    const escapedPassword = pgEscapePassword(password);
+
+    await this.withAdminDb(async (adminDb) => {
+      await adminDb.unsafe(`
+        DO $$
+        BEGIN
+          IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${authenticatorRole}') THEN
+            ALTER ROLE "${authenticatorRole}" CONNECTION LIMIT 30 NOINHERIT LOGIN PASSWORD ${escapedPassword};
+          ELSE
+            CREATE ROLE "${authenticatorRole}" CONNECTION LIMIT 30 NOINHERIT LOGIN PASSWORD ${escapedPassword};
+          END IF;
+        END
+        $$;
+
+        GRANT anon, authenticated, service_role TO "${authenticatorRole}";
+        ALTER ROLE "${authenticatorRole}" SET statement_timeout = '15s';
+        ALTER ROLE "${authenticatorRole}" SET idle_in_transaction_session_timeout = '30s';
+        ALTER ROLE "${authenticatorRole}" SET work_mem = '4MB';
+        GRANT CONNECT, TEMPORARY ON DATABASE "${dbName}" TO "${authenticatorRole}";
+      `);
+    });
   }
 
   private async prepareMigrationRole(dbName: string, dbUser: string): Promise<void> {

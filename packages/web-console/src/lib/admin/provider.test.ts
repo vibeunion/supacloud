@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chatProvider } from "./provider";
+import { chatProvider, parseListResponse } from "./provider";
 
 const originalFetch = globalThis.fetch;
 
@@ -33,5 +33,21 @@ describe("chatProvider", () => {
     }
 
     expect(chunks).toEqual(["hello"]);
+  });
+});
+
+describe("parseListResponse", () => {
+  test("normalizes GoTrue user lists", () => {
+    expect(parseListResponse({ users: [{ id: "user-1" }], total: 9 }, "auth/users")).toEqual({
+      data: [{ id: "user-1" }],
+      total: 9,
+    });
+  });
+
+  test("normalizes frontend deployment lists", () => {
+    expect(parseListResponse({ deployments: [{ id: "site-1" }] }, "frontend/deployments")).toEqual({
+      data: [{ id: "site-1" }],
+      total: 1,
+    });
   });
 });

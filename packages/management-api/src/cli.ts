@@ -13,19 +13,15 @@ async function setupStudioDomain(domain: string) {
     process.exit(1);
   }
 
-  const MANAGEMENT_API_INTERNAL = appConfig.managementApiInternal;
   const STUDIO_INTERNAL = appConfig.studioInternal;
   
   logger.info(`Provisioning global Studio & Management API through ${gatewayService.name} gateway for domain ${domain}...`);
 
   try {
-    await gatewayService.setupMasterRoutes();
     const studioPort = Number(STUDIO_INTERNAL.split(":").pop() || "3000");
-    await gatewayService.configureFrontendRoute({
-      projectRef: "_global",
-      deploymentId: "studio",
-      hosts: [domain],
-      port: studioPort,
+    await gatewayService.withDeferredPersist(async () => {
+      await gatewayService.setupMasterRoutes();
+      await gatewayService.configureStudioDomain(domain, studioPort);
     });
 
     logger.info(`\n\nSuccessfully bound Global Studio to: https://${domain}`);

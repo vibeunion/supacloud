@@ -474,6 +474,41 @@ describe("CaddyGatewayProvider", () => {
         restore();
     });
 
+    test("configureStudioDomain adds an HTTP-only 308 redirect without replacing custom routes", async () => {
+        const calls: Array<{ url: string; method: string; body: any }> = [];
+        const restore = captureFetch(calls);
+        const provider = new CaddyGatewayProvider();
+
+        await provider.configureCustomGatewayRoutes("_global", [{
+            id: "existing-global-route",
+            hosts: ["existing.example.com"],
+            path: "/*",
+            upstream: "127.0.0.1:8080",
+        }]);
+        await provider.configureStudioDomain("studio.example.com", 9090);
+
+        const load = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
+        const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
+        const redirect = routes.find((route: any) => route["@id"] === "route-custom-gateway-_global-studio-https-redirect");
+        const studio = routes.find((route: any) => route["@id"] === "route-frontend-_global-studio");
+
+        expect(routes.some((route: any) => route["@id"] === "route-custom-gateway-_global-existing-global-route")).toBe(true);
+        expect(redirect?.match?.[0]).toEqual({
+            host: ["studio.example.com"],
+            path: ["/*"],
+            protocol: "http",
+        });
+        expect(redirect?.handle?.[0]).toMatchObject({
+            handler: "static_response",
+            status_code: 308,
+            headers: { Location: ["https://studio.example.com{http.request.uri}"] },
+        });
+        expect(studio?.match?.[0]?.host).toEqual(["studio.example.com"]);
+        expect(studio?.handle?.at(-1)?.upstreams?.[0]?.dial).toBe("127.0.0.1:9090");
+
+        restore();
+    });
+
     test("setupUpstream preserves existing frontend hosts as allowed CORS origins", async () => {
         const calls: Array<{ url: string; method: string; body: any }> = [];
         const restore = captureFetch(calls);
@@ -1208,6 +1243,29 @@ describe("CaddyGatewayProvider", () => {
         expect(certs).toEqual([
             { certificate: "/etc/supacloud/certs/manual.crt", key: "/etc/supacloud/certs/manual.key" },
         ]);
+
+        restore();
+    });
+
+    test("clean rebuild preserves global Studio routes", async () => {
+        const calls: Array<{ url: string; method: string; body: any }> = [];
+        const restore = captureFetch(calls);
+        const configuredProvider = new CaddyGatewayProvider();
+
+        await configuredProvider.configureStudioDomain("studio.example.com", 9090);
+        calls.length = 0;
+        const restartedProvider = new CaddyGatewayProvider();
+
+        await restartedProvider.withDeferredPersist(async () => {
+            await restartedProvider.prepareCleanRebuild();
+            await restartedProvider.setupMasterRoutes();
+        });
+
+        const load = calls.find((call) => call.method === "POST" && call.url.endsWith("/load"));
+        const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
+
+        expect(routes.some((route: any) => route["@id"] === "route-custom-gateway-_global-studio-https-redirect")).toBe(true);
+        expect(routes.some((route: any) => route["@id"] === "route-frontend-_global-studio")).toBe(true);
 
         restore();
     });
