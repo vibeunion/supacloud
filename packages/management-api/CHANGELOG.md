@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.47.13](https://github.com/zuohuadong/supacloud/compare/management-api-v0.47.12...management-api-v0.47.13) (2026-07-23)
+
+
+### Bug Fixes
+
+* **studio:** repair tenant database access and routes ([#548](https://github.com/zuohuadong/supacloud/issues/548)) ([ef6eada](https://github.com/zuohuadong/supacloud/commit/ef6eada525db800973510f9e93fac3ec47698585))
+
 ## [0.47.12](https://github.com/zuohuadong/supacloud/compare/management-api-v0.47.11...management-api-v0.47.12) (2026-07-23)
 
 
