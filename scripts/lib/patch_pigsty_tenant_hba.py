@@ -10,24 +10,56 @@ import sys
 import tempfile
 
 
-RULE_MARKER = "SupaCloud tenant authenticator loopback"
+AUTHENTICATOR_RULE_MARKER = "SupaCloud tenant authenticator loopback"
+DATABASE_ROLE_RULE_MARKER = "SupaCloud tenant database role loopback"
+
+TENANT_HBA_RULES = (
+    (
+        AUTHENTICATOR_RULE_MARKER,
+        "user: '\"/^authenticator_[a-z0-9-]+$\"', db: '\"/^supa_[a-z0-9-]+$\"', "
+        "addr: 127.0.0.1/32, auth: pwd, order: 40",
+    ),
+    (
+        DATABASE_ROLE_RULE_MARKER,
+        "user: '\"/^role_[a-z0-9-]+$\"', db: '\"/^supa_[a-z0-9-]+$\"', "
+        "addr: 127.0.0.1/32, auth: pwd, order: 41",
+    ),
+)
 
 
 def render_inventory(content: str) -> str | None:
-    if RULE_MARKER in content:
-        return None
+    updated_content = content
+    missing_rules: list[tuple[str, str]] = []
+    for marker, fields in TENANT_HBA_RULES:
+        rule_pattern = re.compile(
+            rf"(?m)^(?P<indent>[ ]*)-[ ]*\{{[^\n]*title:[ ]*['\"]{re.escape(marker)}['\"][^\n]*\}}[ ]*$"
+        )
+        existing_rule = rule_pattern.search(updated_content)
+        if existing_rule:
+            rendered_rule = f"{existing_rule.group('indent')}- {{ {fields}, title: '{marker}' }}"
+            updated_content = rule_pattern.sub(rendered_rule, updated_content, count=1)
+        else:
+            missing_rules.append((marker, fields))
 
-    sections = list(re.finditer(r"(?m)^([ ]*)pg_hba_rules:[ ]*(?:#.*)?$", content))
+    if not missing_rules:
+        return updated_content if updated_content != content else None
+
+    sections = list(re.finditer(r"(?m)^([ ]*)pg_hba_rules:[ ]*(?:#.*)?$", updated_content))
     if len(sections) != 1:
         raise ValueError(f"expected one multiline pg_hba_rules section, found {len(sections)}")
 
     indent = sections[0].group(1) + "  "
-    rule = (
-        f"{indent}- {{ user: '/^authenticator_[a-z0-9-]+$/', "
-        "db: '/^supa_[a-z0-9-]+$/', addr: 127.0.0.1/32, auth: pwd, "
-        f"order: 40, title: '{RULE_MARKER}' }}"
+    rendered_rules = "\n".join(
+        f"{indent}- {{ {fields}, title: '{marker}' }}"
+        for marker, fields in missing_rules
     )
-    return content[: sections[0].end()] + "\n" + rule + content[sections[0].end() :]
+    updated_content = (
+        updated_content[: sections[0].end()]
+        + "\n"
+        + rendered_rules
+        + updated_content[sections[0].end() :]
+    )
+    return updated_content
 
 
 def atomic_write(path: str, content: str) -> None:

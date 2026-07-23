@@ -24,7 +24,7 @@ function createMockSql(): MockSql {
 describe("DatabaseService", () => {
   let databaseService: DatabaseService;
   let mockSql: MockSql;
-  let applySupabaseSchemaSpy: { mockRestore: () => void };
+  let applySupabaseSchemaSpy: { mockClear: () => void; mockRestore: () => void };
 
   beforeEach(() => {
     databaseService = new DatabaseService();
@@ -49,7 +49,7 @@ describe("DatabaseService", () => {
     test("should generate a password string", () => {
       const password = databaseService.generatePassword();
       expect(typeof password).toBe("string");
-      expect(password.length).toBe(24);
+      expect(password.length).toBe(32);
     });
 
     test("should generate unique passwords", () => {
@@ -58,9 +58,13 @@ describe("DatabaseService", () => {
       expect(password1).not.toBe(password2);
     });
 
-    test("should only contain URL-safe characters", () => {
+    test("should only contain lowercase hexadecimal characters", () => {
       const password = databaseService.generatePassword();
-      expect(password).toMatch(/^[A-Za-z0-9]+$/);
+      expect(password).toMatch(/^[a-f0-9]+$/);
+    });
+
+    test("should respect an explicit password length", () => {
+      expect(databaseService.generatePassword(17)).toMatch(/^[a-f0-9]{17}$/);
     });
   });
 
@@ -71,6 +75,22 @@ describe("DatabaseService", () => {
       expect(mockSql.unsafe).toHaveBeenCalled();
       expect(mockSql.unsafe).toHaveBeenCalledWith(expect.stringContaining(
         'GRANT CONNECT, TEMPORARY ON DATABASE "supa_testref123" TO "authenticator_testref123"',
+      ));
+    });
+
+    test("reconciles tenant login passwords when the database already exists", async () => {
+      applySupabaseSchemaSpy.mockClear();
+      (mockSql as unknown as ReturnType<typeof mock>).mockResolvedValueOnce([{ exists: 1 }]);
+
+      const result = await databaseService.createDatabase("testref123", "replacement-pass");
+
+      expect(result.success).toBe(true);
+      expect(applySupabaseSchemaSpy).not.toHaveBeenCalled();
+      expect(mockSql.unsafe).toHaveBeenCalledWith(expect.stringContaining(
+        'ALTER ROLE "role_testref123" LOGIN CONNECTION LIMIT 20 PASSWORD',
+      ));
+      expect(mockSql.unsafe).toHaveBeenCalledWith(expect.stringContaining(
+        'ALTER ROLE "authenticator_testref123" CONNECTION LIMIT 30 NOINHERIT LOGIN PASSWORD',
       ));
     });
   });

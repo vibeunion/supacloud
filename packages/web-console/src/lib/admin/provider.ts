@@ -6,21 +6,33 @@ const getApiUrl = () => {
     return window.location.origin;
 };
 
-// ... DataProvider logic ...
+export function parseListResponse(payload: unknown, resource: string) {
+    if (Array.isArray(payload)) return { data: payload, total: payload.length };
+    if (!payload || typeof payload !== "object") throw new Error(`Invalid list response for ${resource}`);
+
+    const response = payload as Record<string, unknown>;
+    if (response.error || response.message) {
+        const message = typeof response.error === "string" ? response.error : response.message;
+        throw new Error(typeof message === "string" ? message : "API Application Error");
+    }
+
+    for (const key of ["items", "data", "rows", "users", "deployments"] as const) {
+        const records = response[key];
+        if (Array.isArray(records)) {
+            const total = typeof response.total === "number" ? response.total : records.length;
+            return { data: records, total };
+        }
+    }
+
+    throw new Error(
+        `Unrecognized list response format from API for resource ${resource}. Expected an array or an object containing items, data, rows, users, or deployments.`,
+    );
+}
+
 export const dataProvider = createElysiaDataProvider({
     apiUrl: getApiUrl(),
     withCredentials: true,
-    parseListResponse: (json: any, resource: string) => {
-        if (json && (json.error || json.message)) {
-            const msg = typeof json.error === "string" ? json.error : json.message;
-            throw new Error(msg || "API Application Error");
-        }
-        if (Array.isArray(json)) return { data: json, total: json.length };
-        if (json && Array.isArray(json.items)) return { data: json.items, total: json.total ?? json.items.length };
-        if (json && Array.isArray(json.data)) return { data: json.data, total: json.total ?? json.data.length };
-        if (json && json.rows && Array.isArray(json.rows)) return { data: json.rows, total: json.total ?? json.rows.length };
-        throw new Error(`Unrecognized list response format from API for resource ${resource}. Expected { items, total }, { data, total }, or an array.`);
-    }
+    parseListResponse,
 });
 
 // Implementation of ChatProvider using Fetch API + SSE for streaming

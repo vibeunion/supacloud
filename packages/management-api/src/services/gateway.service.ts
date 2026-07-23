@@ -112,6 +112,7 @@ export interface GatewayProvider {
     withDeferredPersist<T>(fn: () => Promise<T>, shouldFlush?: (result: T) => boolean): Promise<T>;
     configureCustomGatewayRoutes(projectRef: string, routes: CustomGatewayRouteConfig[]): Promise<{ success: boolean; error?: string }>;
     setupMasterRoutes(): Promise<void>;
+    configureStudioDomain(domain: string, port: number): Promise<void>;
     upsertCertificateForSnis(opts: { projectRef: string; cert: string; key: string; snis: string[]; existingCertificateId?: string }): Promise<{ success: boolean; certificateId?: string; error?: string }>;
     configureFrontendRoute(route: FrontendGatewayRoute): Promise<void>;
     removeFrontendRoute(projectRef: string, deploymentId: string): Promise<void>;
@@ -403,8 +404,13 @@ export class CaddyGatewayProvider implements GatewayProvider {
     }
 
     async prepareCleanRebuild(): Promise<void> {
+        await this.hydrateFromDiskIfUninitialized();
         await this.hydrateCertificatesFromDisk();
+        const globalRoutes = Array.from(this.routesById.entries()).filter(([id]) =>
+            id.startsWith("route-custom-gateway-_global-") || id.startsWith("route-frontend-_global-")
+        );
         this.routesById.clear();
+        for (const [id, route] of globalRoutes) this.routesById.set(id, route);
         this.rateLimits.clear();
         this.customRateLimits.clear();
         this.hydrated = true;
@@ -1445,6 +1451,37 @@ export class CaddyGatewayProvider implements GatewayProvider {
         await this.persistAndLoad();
     }
 
+    async configureStudioDomain(domain: string, port: number): Promise<void> {
+        await this.hydrateFromDiskIfUninitialized();
+        const host = normalizeCaddyHost(domain);
+        if (!host) throw new Error("Studio domain is required");
+        if (!Number.isInteger(port) || port < 1 || port > 65535) {
+            throw new Error("Studio upstream port must be between 1 and 65535");
+        }
+
+        const redirect = makeCustomGatewayRoute("_global", {
+            id: "studio-https-redirect",
+            hosts: [host],
+            path: "/*",
+            protocol: "http",
+            redirect_to: `https://${host}{http.request.uri}`,
+            redirect_status: 308,
+            priority: 10_000,
+        });
+        if (!redirect) throw new Error("Failed to build Studio HTTPS redirect route");
+
+        this.routesById.set(String(redirect["@id"]), redirect);
+        this.routesById.set("route-frontend-_global-studio", this.makeRoute({
+            id: "route-frontend-_global-studio",
+            hosts: [host],
+            path: "/*",
+            upstream: `127.0.0.1:${port}`,
+            projectRef: "_global",
+            readTimeout: 60_000,
+        }));
+        await this.persistAndLoad();
+    }
+
     async upsertCertificateForSnis(opts: { projectRef: string; cert: string; key: string; snis: string[]; existingCertificateId?: string }): Promise<{ success: boolean; certificateId?: string; error?: string }> {
         await this.hydrateFromDiskIfUninitialized();
         const snis = uniqueStrings(opts.snis.map(normalizeCaddyHost));
@@ -1592,6 +1629,7 @@ export class GatewayService implements GatewayProvider {
     withDeferredPersist<T>(fn: () => Promise<T>, shouldFlush?: (result: T) => boolean) { return this.provider.withDeferredPersist(fn, shouldFlush); }
     configureCustomGatewayRoutes(projectRef: string, routes: CustomGatewayRouteConfig[]) { return this.provider.configureCustomGatewayRoutes(projectRef, routes); }
     setupMasterRoutes() { return this.provider.setupMasterRoutes(); }
+    configureStudioDomain(domain: string, port: number) { return this.provider.configureStudioDomain(domain, port); }
     upsertCertificateForSnis(opts: { projectRef: string; cert: string; key: string; snis: string[]; existingCertificateId?: string }) { return this.provider.upsertCertificateForSnis(opts); }
     configureFrontendRoute(route: FrontendGatewayRoute) { return this.provider.configureFrontendRoute(route); }
     removeFrontendRoute(projectRef: string, deploymentId: string) { return this.provider.removeFrontendRoute(projectRef, deploymentId); }
