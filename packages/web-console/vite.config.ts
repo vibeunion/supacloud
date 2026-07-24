@@ -9,7 +9,8 @@ export default defineConfig({
 		external: ['bun', 'bun:sql', 'monaco-editor']
 	},
 	optimizeDeps: {
-		exclude: ['bun', 'bun:sql', 'monaco-editor']
+		// @svadmin/core 发布的是 Svelte TypeScript 源码，需绕过预构建并交给 Svelte 编译器。
+		exclude: ['bun', 'bun:sql', 'monaco-editor', '@svadmin/core']
 	},
 	build: {
 		rollupOptions: {

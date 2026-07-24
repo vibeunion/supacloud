@@ -2,20 +2,42 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 
 const pageSource = readFileSync(new URL("./+page.svelte", import.meta.url), "utf8");
+const packageJson = JSON.parse(
+  readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
+) as { dependencies: Record<string, string> };
+const lockSource = readFileSync(new URL("../../bun.lock", import.meta.url), "utf8");
+const viteSource = readFileSync(new URL("../../vite.config.ts", import.meta.url), "utf8");
 
-describe("root dashboard", () => {
-  test("uses live platform data instead of a static marketing collection", () => {
+describe("SupaCloud root dashboard", () => {
+  test("keeps the root page connected to real SupaCloud data", () => {
     expect(pageSource).toContain('apiClient("/v1/projects")');
     expect(pageSource).toContain('apiClient("/v1/system/info")');
-    expect(pageSource).toContain('$t("GlobalDashboard.welcome")');
-    expect(pageSource).not.toContain("Infrastructure Collective");
-    expect(pageSource).not.toContain("Cathedral Lodge");
+    expect(pageSource).toContain("SupaCloud Console");
+    expect(pageSource).toContain("平台概览");
+    expect(pageSource).toContain("不使用演示数据");
   });
 
-  test("keeps dashboard links valid when Studio is mounted under a base path", () => {
+  test("keeps project navigation base-path safe", () => {
     expect(pageSource).toContain('import { resolve } from "$app/paths";');
     expect(pageSource).toContain('goto(resolve("/projects"))');
-    expect(pageSource).toContain("{#each projects as project (project.ref)}");
+    expect(pageSource).toContain("{#each filteredProjects.slice(0, 6) as project (project.ref)}");
     expect(pageSource).toContain('href={resolve("/project/[ref]", { ref: project.ref })}');
+  });
+
+  test("contains no unrelated demo business content", () => {
+    expect(pageSource).not.toContain("Paw Haven");
+    expect(pageSource).not.toContain("Shelter Management");
+    expect(pageSource).not.toContain("Recent Animals");
+    expect(pageSource).not.toContain("images.unsplash.com");
+  });
+
+  test("tracks the latest stable svadmin packages and Vite compatibility rule", () => {
+    expect(packageJson.dependencies["@svadmin/core"]).toBe("^0.32.2");
+    expect(packageJson.dependencies["@svadmin/ui"]).toBe("^0.38.5");
+    expect(packageJson.dependencies["@svadmin/sveltekit"]).toBe("^0.9.4");
+    expect(packageJson.dependencies["@svadmin/elysia"]).toBe("^0.10.7");
+    expect(lockSource).toContain('"@svadmin/core@0.32.2"');
+    expect(lockSource).toContain('"@svadmin/ui@0.38.5"');
+    expect(viteSource).toContain("'@svadmin/core'");
   });
 });
