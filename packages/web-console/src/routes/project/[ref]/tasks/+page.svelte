@@ -555,7 +555,7 @@
             <input
               bind:value={functionSlugFilter}
               oninput={() => scheduleTaskListRefresh()}
-              placeholder="按函数名筛选，例如 mockup-generator"
+              placeholder="按已运行函数名筛选，例如 mockup-generator"
               class="w-full sm:w-80 px-3 py-2 text-sm rounded-lg border bg-background focus:outline-none focus:ring-1 focus:ring-brand"
             />
           </div>
@@ -612,12 +612,14 @@
             <ShieldAlert size={28} />
           </div>
           <h3 class="text-lg font-medium text-foreground">
-            {activeTab === "dlq" ? "当前没有死信任务" : "暂无后台任务"}
+            {activeTab === "dlq" ? "当前没有死信任务" : functionSlugFilter ? "该函数暂无调用记录" : "暂无后台任务"}
           </h3>
           <p class="text-sm text-muted-foreground mt-1 max-w-md">
             {activeTab === "dlq"
               ? "所有后台任务目前都没有进入死信队列。这里会展示需要人工处理和重试的任务。"
-              : "当通过异步 Edge Function 调用触发后台任务后，这里会展示队列状态、attempt 记录和错误信息。"}
+              : functionSlugFilter
+                ? `“${functionSlugFilter}” 尚未触发异步调用。任务面板只展示已触发的任务；调用后，状态、日志和 attempt 会在此实时显示。`
+                : "任务面板只展示已触发的异步 Edge Function 调用，不是函数目录。部署函数本身不会生成任务记录。"}
           </p>
         </div>
       {:else}
