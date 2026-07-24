@@ -881,7 +881,7 @@ describe("runtime companion version assets", () => {
     const installer = readRepoFile("install.sh");
     const upgrade = readRepoFile("scripts/lib/gotrue_upgrade.sh");
 
-    expect(readShellConstant(upgrade, "SUPACLOUD_GOTRUE_DEFAULT_VERSION")).toBe("v2.193.0");
+    expect(readShellConstant(upgrade, "SUPACLOUD_GOTRUE_DEFAULT_VERSION")).toBe("v2.193.1");
     expect(installer).toContain('source "${SCRIPT_DIR}/scripts/lib/gotrue_upgrade.sh"');
     expect(installer).toContain(
       'local GOTRUE_VERSION="${GOTRUE_VERSION:-$SUPACLOUD_GOTRUE_DEFAULT_VERSION}"',
@@ -938,17 +938,17 @@ describe("runtime companion version assets", () => {
     expect(caddyBuilder).toContain('CADDY_VERSION="${CADDY_VERSION:-v2.11.4}"');
 
     expect(runtime).toContain('POSTGREST_DEFAULT_VERSION="v14.15"');
-    expect(runtime).toContain('GOTRUE_DEFAULT_VERSION="v2.193.0"');
+    expect(runtime).toContain('GOTRUE_DEFAULT_VERSION="v2.193.1"');
     for (const source of [installer, realtimeUnit, workflow]) {
       expect(source).toContain("public.ecr.aws/supabase/realtime:v2.116.1");
     }
     for (const compose of [devCompose, selfHostCompose]) {
       expect(compose).toContain("caddy:2.11.4");
-      expect(compose).toContain("supabase/gotrue:v2.193.0");
+      expect(compose).toContain("supabase/gotrue:v2.193.1");
       expect(compose).toContain("postgrest/postgrest:v14.15");
     }
     expect(workflow).toContain("postgrest/postgrest:v14.15");
-    expect(workflow).toContain("supabase/gotrue:v2.193.0");
+    expect(workflow).toContain("supabase/gotrue:v2.193.1");
     expect(postgresDockerfile).toContain("FROM postgres:18-bookworm");
     expect(devCompose).toContain("context: ../self-host/postgres");
     expect(selfHostCompose).toContain("context: ./postgres");
