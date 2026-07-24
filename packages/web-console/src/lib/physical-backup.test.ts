@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { toPhysicalBackupViewModel, type PhysicalBackupRecord } from "./physical-backup";
+import { backupInventoryErrorMessage, toPhysicalBackupViewModel, type PhysicalBackupRecord } from "./physical-backup";
 
 describe("physical backup view model", () => {
   test("maps the management API wire record into renderable backup history fields", () => {
@@ -32,5 +32,12 @@ describe("physical backup view model", () => {
       timestamp: "2026-07-14T03:33:20.000Z",
       size: "512 B",
     });
+  });
+
+  test("does not expose the pgBackRest 503 response body to the user", () => {
+    expect(backupInventoryErrorMessage(503)).toBe(
+      "备份服务暂未就绪，请确认 pgBackRest 已配置并运行后重试。",
+    );
+    expect(backupInventoryErrorMessage(502)).toBe("无法加载备份历史（HTTP 502）");
   });
 });
