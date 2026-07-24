@@ -19,7 +19,7 @@
     "@sinclair/typebox": "^0.34.52",
     "@supabase/supabase-js": "^2.110.7",
     "elysia": "^1.4.29",
-    "jose": "^6.2.3"
+    "jose": "^6.2.4"
   },
   "devDependencies": {
     "@types/bun": "^1.3.14",
