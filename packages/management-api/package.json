@@ -39,7 +39,7 @@
     "@svadmin/elysia": "^0.10.7",
     "aws4fetch": "^1.0.20",
     "elysia": "^1.4.29",
-    "jose": "^6.2.3",
+    "jose": "^6.2.4",
     "nanoid": "^6.0.0"
   },
   "devDependencies": {
