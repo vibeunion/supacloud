@@ -12,6 +12,49 @@ function request(path: string, init?: RequestInit) {
 }
 
 describe("storage management routes", () => {
+  test("Studio bucket creation requires auth and creates the requested bucket", async () => {
+    const createBucketSpy = spyOn(StorageService, "createBucket").mockResolvedValue({ success: true });
+
+    try {
+      const createRequest = {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "studio-assets", public: false, file_size_limit: 1024 }),
+      };
+      const unauthenticated = await request("/v1/storage/test-ref/buckets", createRequest);
+      expect(unauthenticated.status).toBe(401);
+
+      const authorized = await request("/v1/storage/test-ref/buckets", {
+        ...createRequest,
+        headers: { ...createRequest.headers, Authorization: "Bearer dev-master-token" },
+      });
+      expect(authorized.status).toBe(200);
+      expect(await authorized.json()).toEqual({ id: "studio-assets", name: "studio-assets", public: false });
+      expect(createBucketSpy).toHaveBeenCalledWith("test-ref", "studio-assets");
+    } finally {
+      createBucketSpy.mockRestore();
+    }
+  });
+
+  test("Studio bucket creation preserves storage failures", async () => {
+    const createBucketSpy = spyOn(StorageService, "createBucket").mockResolvedValue({
+      success: false,
+      error: "storage unavailable",
+    });
+
+    try {
+      const response = await request("/v1/storage/test-ref/buckets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: "Bearer dev-master-token" },
+        body: JSON.stringify({ name: "studio-assets" }),
+      });
+      expect(response.status).toBe(500);
+      expect(await response.json()).toEqual({ message: "storage unavailable", code: "500" });
+    } finally {
+      createBucketSpy.mockRestore();
+    }
+  });
+
   test("management upload accepts zero-byte files and honors explicit path", async () => {
     const uploadSpy = spyOn(StorageService, "uploadFile").mockResolvedValue(true);
     const formData = new FormData();

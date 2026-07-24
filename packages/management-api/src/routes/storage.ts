@@ -7,6 +7,19 @@ import { requireAdminAuth, requireProjectOrAdminAuth } from "../middleware/auth"
 
 const ErrorResponse = t.Object({ message: t.String() });
 const SuccessResponse = t.Object({ success: t.Boolean(), message: t.String() });
+const StorageBucketCreateBody = t.Object({
+    name: t.String(),
+    id: t.Optional(t.String()),
+    public: t.Optional(t.Boolean()),
+    file_size_limit: t.Optional(t.Number()),
+    allowed_mime_types: t.Optional(t.Array(t.String())),
+});
+
+type StorageBucketCreateInput = {
+    name: string;
+    id?: string;
+    public?: boolean;
+};
 
 // ── Imaginary Config ──────────────────────────────────────────────
 const IMAGINARY_URL = config.imaginaryUrl;
@@ -41,6 +54,12 @@ function buildSourceUrl(bucket: string, path: string): string {
     return `${base}/${encodeURIComponent(bucket)}/${normalizedPath.split("/").map(encodeURIComponent).join("/")}`;
 }
 
+async function createStorageBucket(ref: string, input: StorageBucketCreateInput) {
+    const bucketName = input.name || input.id || "";
+    const storageResult = await StorageService.createBucket(ref, bucketName);
+    return { bucketName, storageResult };
+}
+
 // ── Storage Routes ────────────────────────────────────────────────
 export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
     .get('/status', async () => {
@@ -51,6 +70,19 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
         if (authError) return status(authError.status, authError.body);
         return await StorageService.listBuckets(params.ref);
     }, { detail: { tags: ["storage"], summary: "List storage buckets for a project" } })
+    .post('/:ref/buckets', async ({ params, body, set, request }) => {
+        const authError = await requireProjectOrAdminAuth(request, params.ref);
+        if (authError) return status(authError.status, authError.body);
+        const { bucketName, storageResult } = await createStorageBucket(params.ref, body);
+        if (!storageResult.success) {
+            set.status = 500;
+            return { message: storageResult.error || "Failed to create bucket", code: "500" };
+        }
+        return { id: bucketName, name: bucketName, public: body.public || false };
+    }, {
+        body: StorageBucketCreateBody,
+        detail: { tags: ["storage"], summary: "Create a storage bucket for a project" },
+    })
     .get('/:ref/buckets/:name/files', async ({ params, request }) => {
         const authError = await requireProjectOrAdminAuth(request, params.ref);
         if (authError) return status(authError.status, authError.body);
@@ -425,21 +457,14 @@ export const projectStorageRoutes = new Elysia({ prefix: "/v1/projects/:ref/stor
     .post('/buckets', async ({ params, body, set, request }) => {
         const authError = await requireProjectOrAdminAuth(request, params.ref);
         if (authError) return status(authError.status, authError.body);
-        const bucketName = (body as Record<string, unknown>).name as string || (body as Record<string, unknown>).id as string;
-        const result = await StorageService.createBucket(params.ref, bucketName);
-        if (!result.success) {
+        const { bucketName, storageResult } = await createStorageBucket(params.ref, body);
+        if (!storageResult.success) {
             set.status = 500;
-            return { message: result.error || "Failed to create bucket", code: "500" };
+            return { message: storageResult.error || "Failed to create bucket", code: "500" };
         }
-        return { id: bucketName, name: bucketName, public: (body as Record<string, unknown>).public || false };
+        return { id: bucketName, name: bucketName, public: body.public || false };
     }, {
-        body: t.Object({
-            name: t.String(),
-            id: t.Optional(t.String()),
-            public: t.Optional(t.Boolean()),
-            file_size_limit: t.Optional(t.Number()),
-            allowed_mime_types: t.Optional(t.Array(t.String())),
-        }),
+        body: StorageBucketCreateBody,
         detail: { tags: ["storage"], summary: "Create a storage bucket" },
     })
     .get('/buckets/:id', async ({ params, set, request }) => {
