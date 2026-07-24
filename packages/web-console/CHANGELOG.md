@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.5](https://github.com/zuohuadong/supacloud/compare/web-console-v0.24.4...web-console-v0.24.5) (2026-07-24)
+
+
+### Bug Fixes
+
+* harden project secrets and studio sessions ([#550](https://github.com/zuohuadong/supacloud/issues/550)) ([bdb840b](https://github.com/zuohuadong/supacloud/commit/bdb840bb23974c1cf2a850bd4066294242ccfc75))
+
 ## [0.24.4](https://github.com/zuohuadong/supacloud/compare/web-console-v0.24.3...web-console-v0.24.4) (2026-07-23)
 
 
