@@ -5,6 +5,9 @@
  */
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 15000;
+const SESSION_REFRESH_WINDOW_MS = 2 * 60 * 1000;
+let studioSessionExpiresAtMs = 0;
+let studioSessionRefreshPromise: Promise<StudioSessionState> | null = null;
 
 export type StudioLoginResult =
   | { success: true; username?: string }
@@ -13,6 +16,7 @@ export type StudioLoginResult =
 export interface StudioSessionState {
   authenticated: boolean;
   username?: string;
+  expiresAt?: string;
 }
 
 async function readJsonObject(response: Response): Promise<Record<string, unknown>> {
@@ -20,6 +24,18 @@ async function readJsonObject(response: Response): Promise<Record<string, unknow
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {};
+}
+
+function rememberStudioSessionExpiry(candidate: unknown): string | undefined {
+  if (typeof candidate !== "string") return undefined;
+  const timestamp = Date.parse(candidate);
+  if (!Number.isFinite(timestamp)) return undefined;
+  studioSessionExpiresAtMs = timestamp;
+  return candidate;
+}
+
+function clearStudioSessionExpiry(): void {
+  studioSessionExpiresAtMs = 0;
 }
 
 export async function loginStudio(username: string, password: string): Promise<StudioLoginResult> {
@@ -31,6 +47,7 @@ export async function loginStudio(username: string, password: string): Promise<S
   });
   const data = await readJsonObject(response);
   if (response.ok && data.success === true) {
+    rememberStudioSessionExpiry(data.expires_at);
     return {
       success: true,
       ...(typeof data.username === "string" ? { username: data.username } : {}),
@@ -52,9 +69,29 @@ export async function getStudioSession(): Promise<StudioSessionState> {
   });
   const data = await readJsonObject(response);
   const authenticated = response.ok && (data.valid === true || data.authenticated === true);
+  const expiresAt = authenticated ? rememberStudioSessionExpiry(data.expires_at) : undefined;
+  if (!authenticated) clearStudioSessionExpiry();
   return {
     authenticated,
     ...(authenticated && typeof data.username === "string" ? { username: data.username } : {}),
+    ...(expiresAt ? { expiresAt } : {}),
+  };
+}
+
+export async function refreshStudioSession(): Promise<StudioSessionState> {
+  const response = await fetch("/auth/refresh", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Accept": "application/json" },
+  });
+  const data = await readJsonObject(response);
+  const authenticated = response.ok && data.success === true;
+  const expiresAt = authenticated ? rememberStudioSessionExpiry(data.expires_at) : undefined;
+  if (!authenticated) clearStudioSessionExpiry();
+  return {
+    authenticated,
+    ...(authenticated && typeof data.username === "string" ? { username: data.username } : {}),
+    ...(expiresAt ? { expiresAt } : {}),
   };
 }
 
@@ -64,7 +101,30 @@ export async function logoutStudio(): Promise<boolean> {
     credentials: "include",
     headers: { "Accept": "application/json" },
   });
+  clearStudioSessionExpiry();
   return response.ok;
+}
+
+async function refreshExpiringStudioSession(): Promise<void> {
+  if (
+    typeof window === "undefined"
+    || studioSessionExpiresAtMs === 0
+    || studioSessionExpiresAtMs - Date.now() > SESSION_REFRESH_WINDOW_MS
+  ) {
+    return;
+  }
+
+  const refreshPromise = studioSessionRefreshPromise ??= refreshStudioSession();
+  try {
+    await refreshPromise;
+  } catch (error) {
+    if (!(error instanceof TypeError)) throw error;
+    // 网络瞬断不应直接触发登出；原请求与后续 401 会话校验仍是最终依据。
+  } finally {
+    if (studioSessionRefreshPromise === refreshPromise) {
+      studioSessionRefreshPromise = null;
+    }
+  }
 }
 
 function mergeAbortSignals(signals: Array<AbortSignal | null | undefined>): AbortSignal | undefined {
@@ -108,6 +168,7 @@ async function normalizeErrorResponse(response: Response): Promise<Response> {
 }
 
 export async function apiClient(url: string, options: RequestInit = {}): Promise<Response> {
+  await refreshExpiringStudioSession();
   const headers = new Headers(options.headers || {});
   
   // Set default Content-Type for JSON requests if body is stringified JSON

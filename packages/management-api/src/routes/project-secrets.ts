@@ -4,6 +4,10 @@ import { requireProjectOrAdminAuth } from "../middleware/auth";
 import { getAuthContext } from "../middleware/auth";
 import { runtimeEnvService } from "../services/runtime-env.service";
 import { runtimeCacheService } from "../services/runtime-cache.service";
+import {
+  isSystemManagedProjectSecretName,
+  isUserManagedProjectSecretName,
+} from "../utils/project-secret-visibility";
 
 export const projectSecretsRoutes = new Elysia({ prefix: "/v1/projects" })
   .get(
@@ -35,12 +39,14 @@ export const projectSecretsRoutes = new Elysia({ prefix: "/v1/projects" })
       if (!secrets) {
         return status(404, { message: "Project not found", code: "404" });
       }
-      return secrets.map((s: { name: string; value: string }) => ({
-        name: s.name,
-        // 明文只允许内部 runtime-env 通道读取；兼容旧的 reveal=true
-        // 查询参数，但永远不在项目管理 API 响应中回显。
-        value: "********",
-      }));
+      return secrets
+        .filter((secret: { name: string }) => isUserManagedProjectSecretName(secret.name))
+        .map((secret: { name: string }) => ({
+          name: secret.name,
+          // 明文只允许内部 runtime-env 通道读取；兼容旧的 reveal=true
+          // 查询参数，但永远不在项目管理 API 响应中回显。
+          value: "********",
+        }));
     },
     {
       params: t.Object({ ref: t.String() }),
@@ -53,12 +59,12 @@ export const projectSecretsRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, body, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
-      const reserved = (body as { name: string; value: string }[]).filter((s) =>
-        s.name.toUpperCase().startsWith("SUPABASE_"),
+      const reserved = (body as { name: string; value: string }[]).filter((secret) =>
+        isSystemManagedProjectSecretName(secret.name),
       );
       if (reserved.length > 0) {
         return status(400, {
-          message: `Secret names starting with SUPABASE_ are reserved: ${reserved.map((s) => s.name).join(", ")}`,
+          message: `System-managed secret names are reserved: ${reserved.map((secret) => secret.name).join(", ")}`,
           code: "400",
         });
       }
@@ -99,6 +105,13 @@ export const projectSecretsRoutes = new Elysia({ prefix: "/v1/projects" })
       const names = (body as Array<string | { name: string }>).map((item) =>
         typeof item === "string" ? item : item.name,
       );
+      const reserved = names.filter(isSystemManagedProjectSecretName);
+      if (reserved.length > 0) {
+        return status(400, {
+          message: `System-managed secrets cannot be deleted: ${reserved.join(", ")}`,
+          code: "400",
+        });
+      }
       const results = await Promise.all(
         names.map((name) => projectService.deleteSecret(params.ref, name)),
       );
@@ -121,6 +134,12 @@ export const projectSecretsRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
+      if (isSystemManagedProjectSecretName(params.name)) {
+        return status(400, {
+          message: "System-managed secrets cannot be deleted",
+          code: "400",
+        });
+      }
       const success = await projectService.deleteSecret(params.ref, params.name);
       if (!success) {
         return status(500, { message: "Failed to delete secret", code: "500" });

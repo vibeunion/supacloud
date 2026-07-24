@@ -53,6 +53,8 @@ describe("final security regressions", () => {
   test("function secrets GET requires auth and never reveals values", async () => {
     const getSecretsSpy = spyOn(projectService, "getSecrets").mockResolvedValue([
       { name: "EDGEFN_SECRET", value: "plain-secret" },
+      { name: "SUPACLOUD_INTERNAL_TOKEN", value: "internal-secret" },
+      { name: "JWT_SECRET", value: "jwt-secret" },
     ] as Awaited<ReturnType<typeof projectService.getSecrets>>);
     const request = appWith(projectFunctionsRoutes);
 
@@ -79,6 +81,9 @@ describe("final security regressions", () => {
   test("project secrets never reveal values outside the internal runtime endpoint", async () => {
     const getSecretsSpy = spyOn(projectService, "getSecrets").mockResolvedValue([
       { name: "CAPTCHA_SECRET", value: "plain-secret" },
+      { name: "SUPACLOUD_INTERNAL_TOKEN", value: "internal-secret" },
+      { name: "ADMIN_SSO_CLIENT_ID", value: "internal-client" },
+      { name: "JWT_SECRET", value: "jwt-secret" },
     ] as Awaited<ReturnType<typeof projectService.getSecrets>>);
     const request = appWith(projectSecretsRoutes);
 
@@ -92,6 +97,38 @@ describe("final security regressions", () => {
       ]);
     } finally {
       getSecretsSpy.mockRestore();
+    }
+  });
+
+  test("project secret writes cannot overwrite or delete system-managed names", async () => {
+    const upsertSecretsSpy = spyOn(projectService, "upsertSecrets").mockResolvedValue(true);
+    const deleteSecretSpy = spyOn(projectService, "deleteSecret").mockResolvedValue(true);
+    const request = appWith(projectSecretsRoutes);
+
+    try {
+      const writeResponse = await request("/v1/projects/proj_1/secrets", {
+        method: "POST",
+        headers: { ...masterHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify([{ name: "SUPACLOUD_INTERNAL_TOKEN", value: "replacement" }]),
+      });
+      const bulkDeleteResponse = await request("/v1/projects/proj_1/secrets", {
+        method: "DELETE",
+        headers: { ...masterHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify(["JWT_SECRET"]),
+      });
+      const singleDeleteResponse = await request("/v1/projects/proj_1/secrets/JWT_SECRET", {
+        method: "DELETE",
+        headers: masterHeaders,
+      });
+
+      expect(writeResponse.status).toBe(400);
+      expect(bulkDeleteResponse.status).toBe(400);
+      expect(singleDeleteResponse.status).toBe(400);
+      expect(upsertSecretsSpy).not.toHaveBeenCalled();
+      expect(deleteSecretSpy).not.toHaveBeenCalled();
+    } finally {
+      upsertSecretsSpy.mockRestore();
+      deleteSecretSpy.mockRestore();
     }
   });
 

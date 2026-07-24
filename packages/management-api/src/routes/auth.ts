@@ -59,6 +59,22 @@ const SENSITIVE_AUTH_SUFFIXES = [
   "token",
 ];
 const JWK_PRIVATE_FIELDS = new Set(["d", "p", "q", "dp", "dq", "qi", "oth", "k"]);
+const PUBLIC_ASYMMETRIC_JWK_TYPES = new Set(["EC", "OKP", "RSA"]);
+const PUBLIC_JWK_FIELDS = [
+  "kty",
+  "crv",
+  "x",
+  "y",
+  "n",
+  "e",
+  "kid",
+  "alg",
+  "use",
+  "x5u",
+  "x5c",
+  "x5t",
+  "x5t#S256",
+] as const;
 const FLAT_HOOK_SECRET_NAMES: Record<string, string> = {
   hook_before_user_created_secrets: "before_user_created_hook",
   hook_custom_access_token_secrets: "custom_access_token_hook",
@@ -349,6 +365,45 @@ async function safeAuthConfig(ref: string, authConfig: Record<string, unknown>) 
   await applyCaptchaSecretStatus(ref, safeConfig);
   await applyHookSecretStatuses(ref, safeConfig);
   return safeConfig;
+}
+
+function publicAsymmetricJwk(candidate: unknown): Record<string, unknown> | null {
+  if (!isRecord(candidate) || !PUBLIC_ASYMMETRIC_JWK_TYPES.has(String(candidate.kty))) {
+    return null;
+  }
+  const publicJwk: Record<string, unknown> = {};
+  for (const field of PUBLIC_JWK_FIELDS) {
+    if (candidate[field] !== undefined) publicJwk[field] = structuredClone(candidate[field]);
+  }
+  return publicJwk;
+}
+
+function publicAsymmetricJwks(candidate: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(candidate)) return [];
+  return candidate
+    .map(publicAsymmetricJwk)
+    .filter((entry): entry is Record<string, unknown> => entry !== null);
+}
+
+export async function safeProjectSettingsAuthConfig(
+  ref: string,
+  authConfig: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const safeConfig = await safeAuthConfig(ref, authConfig);
+  if (!isRecord(safeConfig.oauth_server)) return safeConfig;
+
+  const oauthServer = { ...safeConfig.oauth_server };
+  if (Object.prototype.hasOwnProperty.call(oauthServer, "jwt_keys")) {
+    oauthServer.jwt_keys = publicAsymmetricJwks(oauthServer.jwt_keys);
+  }
+  if (isRecord(oauthServer.jwt_jwks)) {
+    oauthServer.jwt_jwks = {
+      ...oauthServer.jwt_jwks,
+      keys: publicAsymmetricJwks(oauthServer.jwt_jwks.keys),
+    };
+  }
+
+  return { ...safeConfig, oauth_server: oauthServer };
 }
 
 /**

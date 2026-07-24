@@ -45,6 +45,7 @@ import {
   canonicalAuthProviderLinkingConfig,
   ProviderLinkingDomainsValidationError,
 } from "../utils/provider-linking";
+import { safeProjectSettingsAuthConfig } from "./auth";
 
 /** Map PostgreSQL column types to TypeScript types */
 function pgTypeToTs(udtName: string, dataType: string): string {
@@ -562,6 +563,18 @@ function buildSharedSettingsResponse(
   };
 }
 
+async function buildProjectSettingsResponse(
+  ref: string,
+  settings: Record<string, unknown>,
+) {
+  const auth = settings.auth;
+  if (!auth || typeof auth !== "object" || Array.isArray(auth)) return settings;
+  return {
+    ...settings,
+    auth: await safeProjectSettingsAuthConfig(ref, auth as Record<string, unknown>),
+  };
+}
+
 export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   // Get project settings
   .get(
@@ -580,7 +593,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
           managedError.authority_project_ref,
         );
       }
-      return settings;
+      return buildProjectSettingsResponse(params.ref, settings);
     },
     {
       params: t.Object({
@@ -620,7 +633,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
           managedError.authority_project_ref,
         );
       }
-      return settings;
+      return buildProjectSettingsResponse(params.ref, settings);
     },
     {
       params: t.Object({

@@ -1,6 +1,7 @@
 import { Elysia, t, status } from "elysia";
 import { projectService } from "../services";
 import { requireProjectOrAdminAuth } from "../middleware/auth";
+import { isUserManagedFunctionSecretName } from "../utils/project-secret-visibility";
 
 async function requireFunctionManagementAuth(request: Request, ref: string) {
   const authError = await requireProjectOrAdminAuth(request, ref);
@@ -40,32 +41,6 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
     {
       params: t.Object({ ref: t.String() }),
       detail: { tags: ["frontend"], summary: "List edge functions" },
-    },
-  )
-
-  // GET /v1/projects/:ref/functions/secrets
-  // Alias for secrets endpoint — Supabase Studio and some SDK versions call this path
-  .get(
-    "/:ref/functions/secrets",
-    async ({ params, request }) => {
-      const authError = await requireProjectOrAdminAuth(request, params.ref);
-      if (authError) return status(authError.status, authError.body);
-      const { projectService: svc } = await import("../services");
-      const secrets = await svc.getSecrets(params.ref);
-      if (!secrets) {
-        return status(404, { message: "Project not found" });
-      }
-      return secrets.map(
-        (s: { name: string; value: string; updated_at?: string }) => ({
-          name: s.name,
-          value: "********",
-          updated_at: s.updated_at ?? new Date().toISOString(),
-        }),
-      );
-    },
-    {
-      params: t.Object({ ref: t.String() }),
-      detail: { tags: ["frontend"], summary: "List function secrets (project-level)" },
     },
   )
 
@@ -921,11 +896,13 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         name: string;
         value: string;
         updated_at?: string;
-      }>).map((s) => ({
-        name: s.name,
-        value: "********",
-        updated_at: s.updated_at ?? new Date().toISOString(),
-      }));
+      }>)
+        .filter((secret) => isUserManagedFunctionSecretName(secret.name))
+        .map((secret) => ({
+          name: secret.name,
+          value: "********",
+          updated_at: secret.updated_at ?? new Date().toISOString(),
+        }));
     },
     { params: t.Object({ ref: t.String() }), detail: { tags: ["frontend"], summary: "List function secrets (project-level)" } },
   )
