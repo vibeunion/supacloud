@@ -2,10 +2,12 @@
   import { onMount } from "svelte";
   import { BarChart3, ExternalLink, Maximize2, RefreshCw } from "lucide-svelte";
   import { t } from "svelte-i18n";
+  import { toast } from "svelte-sonner";
 
   let grafanaHost = $state("");
   let grafanaAvailable = $state(false);
   let grafanaChecking = $state(false);
+  let grafanaCheckError = $state<string | null>(null);
   let selectedDashboard = $state("pgsql-overview");
   let isFullscreen = $state(false);
     
@@ -24,8 +26,10 @@
 
   async function checkGrafanaHealth(url: string) {
     const trimmed = url.trim().replace(/\/+$/, "");
+    grafanaCheckError = null;
     if (!trimmed) {
       grafanaAvailable = false;
+      grafanaCheckError = "请输入 Grafana 地址";
       return;
     }
 
@@ -41,14 +45,35 @@
       const res = await fetch(healthUrl, {
         headers: { Accept: "application/json" },
         cache: "no-store",
+        signal: AbortSignal.timeout(5000),
       });
       const contentType = res.headers.get("content-type") || "";
       grafanaAvailable = res.ok && contentType.includes("application/json");
+      if (!grafanaAvailable) {
+        grafanaCheckError = res.ok
+          ? "Grafana 健康接口未返回 JSON"
+          : `Grafana 健康接口返回 HTTP ${res.status}`;
+      }
     } catch {
       grafanaAvailable = false;
+      grafanaCheckError = "无法连接 Grafana 服务，请检查地址和网络状态";
     } finally {
       grafanaChecking = false;
     }
+  }
+
+  async function runGrafanaHealthCheck() {
+    await checkGrafanaHealth(grafanaHost);
+    if (grafanaAvailable) {
+      toast.success("Grafana 检测成功");
+      return;
+    }
+    toast.error(grafanaCheckError || "Grafana 检测失败");
+  }
+
+  function resetGrafanaHealth() {
+    grafanaAvailable = false;
+    grafanaCheckError = null;
   }
 
   async function detectGrafanaHost() {
@@ -90,12 +115,17 @@
   </div>
 
   <!-- Grafana Host Input -->
-  <div class="flex items-center gap-3">
-    <label for="a11y-routes-platform-monitoring--page-svelte-53" class="text-xs font-semibold text-muted-foreground shrink-0">{$t("PlatformMonitoring.grafana_url")}</label>
-    <input id="a11y-routes-platform-monitoring--page-svelte-53" bind:value={grafanaHost} onblur={() => checkGrafanaHealth(grafanaHost)} class="flex-1 max-w-md px-3 py-1.5 text-xs font-mono rounded-md border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand" placeholder="http://your-server:3000" />
-    <button onclick={() => checkGrafanaHealth(grafanaHost)} class="flex items-center gap-2 px-3 py-1.5 text-xs rounded-md border hover:bg-muted/50 transition-colors">
-      <RefreshCw size={12} class={grafanaChecking ? "animate-spin" : ""} /> 检测
-    </button>
+  <div class="space-y-1">
+    <div class="flex items-center gap-3">
+      <label for="a11y-routes-platform-monitoring--page-svelte-53" class="text-xs font-semibold text-muted-foreground shrink-0">{$t("PlatformMonitoring.grafana_url")}</label>
+      <input id="a11y-routes-platform-monitoring--page-svelte-53" bind:value={grafanaHost} oninput={resetGrafanaHealth} class="flex-1 max-w-md px-3 py-1.5 text-xs font-mono rounded-md border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand" placeholder="http://your-server:3000" />
+      <button onclick={runGrafanaHealthCheck} disabled={grafanaChecking} aria-busy={grafanaChecking} class="flex items-center gap-2 px-3 py-1.5 text-xs rounded-md border hover:bg-muted/50 transition-colors disabled:opacity-50">
+        <RefreshCw size={12} class={grafanaChecking ? "animate-spin" : ""} /> {grafanaChecking ? "检测中..." : "检测"}
+      </button>
+    </div>
+    {#if grafanaCheckError}
+      <p class="text-xs text-destructive">{grafanaCheckError}</p>
+    {/if}
   </div>
 
   <!-- Dashboard Selector -->
