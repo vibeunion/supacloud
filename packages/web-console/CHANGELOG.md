@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.25.0](https://github.com/zuohuadong/supacloud/compare/web-console-v0.24.5...web-console-v0.25.0) (2026-07-24)
+
+
+### Features
+
+* **web-console:** rebuild dashboard with search, status cards, and navigation ([1b7424a](https://github.com/zuohuadong/supacloud/commit/1b7424a9c123ea39b64df08d2af6628b16c4e636))
+
+
+### Miscellaneous Chores
+
+* **deps:** bump marked from 18.0.6 to 18.0.7 in /packages/web-console ([#562](https://github.com/zuohuadong/supacloud/issues/562)) ([535f004](https://github.com/zuohuadong/supacloud/commit/535f004bc3633eef6aa46ba6bcacf09ec13bbfcd))
+
 ## [0.24.5](https://github.com/zuohuadong/supacloud/compare/web-console-v0.24.4...web-console-v0.24.5) (2026-07-24)
 
 

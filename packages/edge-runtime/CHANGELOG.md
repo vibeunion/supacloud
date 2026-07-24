@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.2](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.14.1...edge-runtime-v0.14.2) (2026-07-24)
+
+
+### Miscellaneous Chores
+
+* **deps:** bump @supabase/supabase-js in /packages/edge-runtime ([#566](https://github.com/zuohuadong/supacloud/issues/566)) ([332843f](https://github.com/zuohuadong/supacloud/commit/332843f6dc9647769672a78bbd3930ff3252db09))
+
 ## [0.14.1](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.14.0...edge-runtime-v0.14.1) (2026-07-23)
 
 

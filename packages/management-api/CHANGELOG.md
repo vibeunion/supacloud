@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.47.15](https://github.com/zuohuadong/supacloud/compare/management-api-v0.47.14...management-api-v0.47.15) (2026-07-24)
+
+
+### Miscellaneous Chores
+
+* bump supabase/gotrue from v2.193.0 to v2.193.1 ([#575](https://github.com/zuohuadong/supacloud/issues/575)) ([9b49cbb](https://github.com/zuohuadong/supacloud/commit/9b49cbb4a73c5818b05b39113261c9c57a8bc07c))
+* **deps:** bump @svadmin/core in /packages/management-api ([#568](https://github.com/zuohuadong/supacloud/issues/568)) ([ecd39c6](https://github.com/zuohuadong/supacloud/commit/ecd39c63c9e3c6792c7a6d760e459a70ff3d98ab))
+
 ## [0.47.14](https://github.com/zuohuadong/supacloud/compare/management-api-v0.47.13...management-api-v0.47.14) (2026-07-24)
 
 

@@ -1,7 +1,7 @@
 {
-  "packages/management-api": "0.47.14",
-  "packages/web-console": "0.24.5",
-  "packages/edge-runtime": "0.14.1",
+  "packages/management-api": "0.47.15",
+  "packages/web-console": "0.25.0",
+  "packages/edge-runtime": "0.14.2",
   "packages/supacloud-js": "0.20.1",
   "packages/cli": "0.12.4",
   "packages/admin": "0.6.0",
