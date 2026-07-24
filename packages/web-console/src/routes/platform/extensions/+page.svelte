@@ -157,7 +157,7 @@
     {:else}
       <div class="overflow-auto max-h-96">
         <table class="w-full text-left text-xs">
-          <thead class="bg-muted/30 border-b sticky top-0 z-10">
+          <thead class="bg-muted border-b sticky top-0 z-10">
             <tr>
               <th class="px-4 py-2.5 font-semibold text-muted-foreground">{$t("PlatformExtensions.package")}</th>
               <th class="px-3 py-2.5 font-semibold text-muted-foreground">{$t("PlatformExtensions.version")}</th>
