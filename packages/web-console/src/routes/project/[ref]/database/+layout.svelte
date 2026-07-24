@@ -39,7 +39,7 @@
         <span class="text-foreground capitalize">{activeTab?.labelKey ? $t(activeTab.labelKey) : (activeTab?.labelFallback || currentTab)}</span>
       {/if}
     </div>
-    <div class="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-hide">
+    <div class="flex flex-wrap items-center gap-2 pb-2">
       {#each TABS as tab}
         <a
           href={`/project/${projectRef}/database/${tab.id}`}
@@ -55,13 +55,3 @@
     {@render children()}
   </div>
 </div>
-
-<style>
-  .scrollbar-hide::-webkit-scrollbar {
-    display: none;
-  }
-  .scrollbar-hide {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
-  }
-</style>
