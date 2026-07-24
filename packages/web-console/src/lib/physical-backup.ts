@@ -20,6 +20,12 @@ export interface PhysicalBackupViewModel {
   label: string;
 }
 
+export function backupInventoryErrorMessage(status: number): string {
+  return status === 503
+    ? "备份服务暂未就绪，请确认 pgBackRest 已配置并运行后重试。"
+    : `无法加载备份历史（HTTP ${status}）`;
+}
+
 function formatTimestamp(epoch: number): string {
   const millis = epoch < 10_000_000_000 ? epoch * 1000 : epoch;
   return new Date(millis).toISOString();
