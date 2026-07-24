@@ -558,6 +558,10 @@ export async function waitForTask(
   <div class="flex items-center justify-between">
     <h1 class="text-2xl font-bold">{$t("Navigation.edge_functions")}</h1>
     <div class="flex items-center gap-2">
+      <a href={`/project/${projectRef}/tasks`}
+        class="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium border hover:bg-muted/50 transition-colors">
+        <Activity size={14} /> 后台任务
+      </a>
       <a href={`/project/${projectRef}/functions/secrets`}
         class="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium border hover:bg-muted/50 transition-colors">
         <KeyRound size={14} /> Secrets
@@ -569,8 +573,8 @@ export async function waitForTask(
     </div>
   </div>
 
-  <div class="rounded-2xl border border-brand/20 bg-gradient-to-br from-brand/5 via-background to-blue-500/5 p-5 space-y-4">
-    <div class="flex items-start justify-between gap-4">
+  <details class="rounded-2xl border border-brand/20 bg-gradient-to-br from-brand/5 via-background to-blue-500/5">
+    <summary class="flex cursor-pointer list-none items-start justify-between gap-4 rounded-2xl p-5 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/50">
       <div class="space-y-2">
         <div class="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-brand/10 text-brand text-[11px] font-bold uppercase tracking-[0.18em]">
           <Activity size={12} />
@@ -584,18 +588,10 @@ export async function waitForTask(
           </p>
         </div>
       </div>
-      <div class="shrink-0 flex items-center gap-2">
-        <a
-          href={`/project/${projectRef}/tasks`}
-          class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-semibold hover:bg-muted/40 transition-colors"
-        >
-          <Activity size={14} />
-          打开任务面板
-        </a>
-      </div>
-    </div>
+      <span class="shrink-0 rounded-lg border px-3 py-2 text-xs font-semibold text-muted-foreground">查看接入示例</span>
+    </summary>
 
-    <div class="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
+    <div class="grid gap-4 border-t border-brand/15 p-5 pt-4 xl:grid-cols-[1.15fr_0.85fr]">
       <div class="space-y-4">
         <div class="rounded-xl border border-border/60 bg-background/80 backdrop-blur-sm p-4 space-y-3">
           <div class="flex items-center justify-between gap-3">
@@ -701,7 +697,7 @@ export async function waitForTask(
         </div>
       </div>
     </div>
-  </div>
+  </details>
 
   {#if deployMsg}
     <div class="rounded-lg border px-4 py-2 text-xs font-medium {deployMsg.startsWith('✅') ? 'bg-green-500/5 border-green-500/20 text-green-700' : deployMsg.startsWith('❌') ? 'bg-red-500/5 border-red-500/20 text-red-700' : 'bg-blue-500/5 border-blue-500/20 text-blue-700'}">
