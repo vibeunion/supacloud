@@ -379,7 +379,7 @@ jobs:
           PGRST_DB_ANON_ROLE: anon
           PGRST_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
       gotrue:
-        image: supabase/gotrue:v2.193.0
+        image: supabase/gotrue:v2.193.1
         ports:
           - 9999:9999
         env:
@@ -554,7 +554,7 @@ jobs:
       - name: Restart flaky services
         run: |
           echo "Restarting Auth and Realtime Containers..."
-          docker start $(docker ps -a -q --filter "ancestor=supabase/gotrue:v2.193.0") || true
+          docker start $(docker ps -a -q --filter "ancestor=supabase/gotrue:v2.193.1") || true
           docker start $(docker ps -a -q --filter "ancestor=public.ecr.aws/supabase/realtime:v2.116.1") || true
           sleep 4
 
