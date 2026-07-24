@@ -1,17 +1,27 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
-  import { toPhysicalBackupViewModel, type PhysicalBackupRecord } from "$lib/physical-backup";
+  import { backupInventoryErrorMessage, toPhysicalBackupViewModel, type PhysicalBackupRecord } from "$lib/physical-backup";
 
-  import { onMount } from "svelte";
   import { t } from "svelte-i18n";
-  import { Loader2, HardDrive, Play, RotateCcw, Calendar, Clock, AlertTriangle, CheckCircle2, RefreshCw } from "lucide-svelte";
+  import { Loader2, HardDrive, Play, RotateCcw, Calendar, Clock, AlertTriangle, RefreshCw } from "lucide-svelte";
 
-  import { useList } from "@svadmin/core";
+  import { createQuery } from "@tanstack/svelte-query";
 
-  const query = useList<PhysicalBackupRecord>({ resource: "v1/projects/default/database/backups" });
-  const backupRecords = $derived(Array.isArray(query.data?.data)
-    ? query.data.data
-    : ((query.data?.data as unknown as Record<string, unknown>)?.backups as PhysicalBackupRecord[] || []));
+  async function fetchBackupInventory(): Promise<PhysicalBackupRecord[]> {
+    const response = await apiClient("/v1/projects/default/database/backups");
+    if (!response.ok) throw new Error(backupInventoryErrorMessage(response.status));
+
+    const payload: unknown = await response.json();
+    if (!Array.isArray(payload)) throw new Error("备份清单返回格式无效，请稍后重试。");
+    return payload as PhysicalBackupRecord[];
+  }
+
+  const backupHistoryQuery = createQuery(() => ({
+    queryKey: ["platform-backup-history"],
+    queryFn: fetchBackupInventory,
+    retry: false,
+  }));
+  const backupRecords = $derived(backupHistoryQuery.data || []);
   const backups = $derived(backupRecords.map(toPhysicalBackupViewModel));
 
   let actionMsg: string | null = $state.raw(null);
@@ -62,7 +72,7 @@
         throw new Error(responseMessage(data, $t("PlatformBackups.backup_failed") || "Backup failed"));
       }
       actionMsg = `✅ ${responseMessage(data, `${$t("PlatformBackups.backup_triggered")} (${backupLabel(backupType)})`)}`;
-      query.refetch();
+      backupHistoryQuery.refetch();
     } catch (err: unknown) {
       actionMsg = `❌ ${(err instanceof Error ? err.message : String(err))}`;
     } finally {
@@ -121,8 +131,8 @@
       <h2 class="text-xl font-bold">{$t("PlatformBackups.title") || "Physical Backups & PITR"}</h2>
       <p class="text-xs text-muted-foreground mt-1">{$t("PlatformBackups.subtitle") || "pgBackRest based full/incremental backups and point-in-time recovery"}</p>
     </div>
-    <button onclick={() => query.refetch()} disabled={query.isFetching} class="flex items-center gap-2 px-3 py-2 text-xs rounded-lg border hover:bg-muted/50 transition-colors disabled:opacity-50">
-      <RefreshCw size={12} class={query.isFetching ? 'animate-spin' : ''} /> {$t("Common.refresh")}
+    <button onclick={() => backupHistoryQuery.refetch()} disabled={backupHistoryQuery.isFetching} class="flex items-center gap-2 px-3 py-2 text-xs rounded-lg border hover:bg-muted/50 transition-colors disabled:opacity-50">
+      <RefreshCw size={12} class={backupHistoryQuery.isFetching ? 'animate-spin' : ''} /> {$t("Common.refresh")}
     </button>
   </div>
 
@@ -204,14 +214,14 @@
     <div class="border-b px-5 py-3 bg-muted/20">
       <h3 class="text-sm font-semibold flex items-center gap-2"><Calendar size={16} /> {$t("PlatformBackups.history") || "Backup History"}</h3>
     </div>
-    {#if query.isLoading}
+    {#if backupHistoryQuery.isLoading}
       <div class="flex items-center justify-center py-16">
         <Loader2 size={24} class="animate-spin text-brand opacity-50" />
       </div>
-    {:else if query.isError}
+    {:else if backupHistoryQuery.isError}
       <div class="p-4">
         <div class="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-xs">
-          {query.error?.message || ($t("PlatformBackups.backup_failed") || "Backup inventory is unavailable")}
+          {backupHistoryQuery.error?.message || ($t("PlatformBackups.backup_failed") || "Backup inventory is unavailable")}
         </div>
       </div>
     {:else if backups.length === 0}
