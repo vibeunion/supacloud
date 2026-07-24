@@ -99,13 +99,15 @@
 
   let draftSettings = $state<BackgroundSettings | null>(null);
 
-  function buildTaskPath(extra: string = "") {
+  function buildTaskPath(onlyDeadLettered = false) {
     const query = new URLSearchParams();
     query.set("summary", "true");
+    if (onlyDeadLettered) query.set("dlq", "true");
+    if (onlyDeadLettered) query.set("limit", "100");
     if (statusFilter) query.set("status", statusFilter);
     if (functionSlugFilter) query.set("function_slug", functionSlugFilter);
     const suffix = query.toString() ? `?${query.toString()}` : "";
-    return `/v1/projects/${projectRef}/tasks${extra}${suffix}`;
+    return `/v1/projects/${projectRef}/tasks${suffix}`;
   }
 
   async function fetchTasks(silent = false) {
@@ -115,7 +117,7 @@
     try {
       const [tasksRes, dlqRes, settingsRes] = await Promise.all([
         apiClient(buildTaskPath()),
-        apiClient(`/v1/projects/${projectRef}/tasks/dlq?summary=true`),
+        apiClient(buildTaskPath(true)),
         apiClient(`/v1/projects/${projectRef}/tasks/settings/background`)
       ]);
 
@@ -546,11 +548,13 @@
           <div class="flex flex-1 flex-wrap items-center gap-2">
             <input
               bind:value={statusFilter}
+              oninput={() => scheduleTaskListRefresh()}
               placeholder="按状态筛选，例如 pending,running"
               class="w-full sm:w-72 px-3 py-2 text-sm rounded-lg border bg-background focus:outline-none focus:ring-1 focus:ring-brand"
             />
             <input
               bind:value={functionSlugFilter}
+              oninput={() => scheduleTaskListRefresh()}
               placeholder="按函数名筛选，例如 mockup-generator"
               class="w-full sm:w-80 px-3 py-2 text-sm rounded-lg border bg-background focus:outline-none focus:ring-1 focus:ring-brand"
             />
@@ -623,7 +627,7 @@
               <tr>
                 <th class="px-5 py-3 font-semibold">任务</th>
                 <th class="px-5 py-3 font-semibold">状态</th>
-                <th class="px-5 py-3 font-semibold">尝试</th>
+                <th class="px-5 py-3 font-semibold whitespace-nowrap">尝试</th>
                 <th class="px-5 py-3 font-semibold">函数</th>
                 <th class="px-5 py-3 font-semibold">更新时间</th>
               </tr>
@@ -647,7 +651,7 @@
                       {task.status}
                     </div>
                   </td>
-                  <td class="px-5 py-4 align-top text-xs text-muted-foreground">
+                  <td class="px-5 py-4 align-top text-xs text-muted-foreground whitespace-nowrap min-w-16">
                     {task.attempt || 0} / {task.max_attempts || "-"}
                   </td>
                   <td class="px-5 py-4 align-top">
