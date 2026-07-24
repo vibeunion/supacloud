@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.47.14](https://github.com/zuohuadong/supacloud/compare/management-api-v0.47.13...management-api-v0.47.14) (2026-07-24)
+
+
+### Bug Fixes
+
+* harden project secrets and studio sessions ([#550](https://github.com/zuohuadong/supacloud/issues/550)) ([bdb840b](https://github.com/zuohuadong/supacloud/commit/bdb840bb23974c1cf2a850bd4066294242ccfc75))
+
 ## [0.47.13](https://github.com/zuohuadong/supacloud/compare/management-api-v0.47.12...management-api-v0.47.13) (2026-07-23)
 
 
