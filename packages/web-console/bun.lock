@@ -13,7 +13,7 @@
         "highlight.js": "^11.11.1",
         "isomorphic-dompurify": "^3.19.0",
         "lucide-svelte": "^1.0.1",
-        "marked": "^18.0.6",
+        "marked": "^18.0.7",
         "marked-highlight": "^2.2.4",
         "monaco-editor": "^0.56.0",
         "svelte-i18n": "^4.0.1",
@@ -489,7 +489,7 @@
 
     "magic-string": ["magic-string@0.30.21", "", { "dependencies": { "@jridgewell/sourcemap-codec": "^1.5.5" } }, "sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ=="],
 
-    "marked": ["marked@18.0.6", "", { "bin": { "marked": "bin/marked.js" } }, "sha512-MrV5puXBfuiy6wl6DLaq3BtIJQAJToAd5zt/ZKhRfGRAuFPALE7/4Y7jnxRQoEgK/pBgurGqLyAuRgZ2xOjr6w=="],
+    "marked": ["marked@18.0.7", "", { "bin": { "marked": "bin/marked.js" } }, "sha512-iDVQ5ldaiKXn6b2JroX5kgRfmwgqolW7NpaEzTl1k/2Zh1njIEN9yniyLV/mOvWwtsE8OGgkjsCYvijuPk1dtA=="],
 
     "marked-highlight": ["marked-highlight@2.2.4", "", { "peerDependencies": { "marked": ">=4 <19" } }, "sha512-PZxisNMJDduSjc0q6uvjsnqqHCXc9s0eyzxDO9sB1eNGJnd/H1/Fu+z6g/liC1dfJdFW4SftMwMlLvsBhUPrqQ=="],
 
