@@ -737,6 +737,78 @@ describe("SupAuth auth config boundary", () => {
     });
   });
 
+  test("project settings expose only public asymmetric JWK material", async () => {
+    config.authRuntimeOwnerRef = "";
+    projectService.getProjectSettings = async () => ({
+      auth: {
+        jwt_secret: "stored-jwt-secret",
+        oauth_server: {
+          enabled: true,
+          jwt_keys: [{
+            kty: "EC",
+            crv: "P-256",
+            x: "public-x",
+            y: "public-y",
+            d: "private-d",
+            kid: "ec-key",
+            alg: "ES256",
+            use: "sig",
+            key_ops: ["sign"],
+          }],
+          jwt_jwks: {
+            keys: [
+              {
+                kty: "EC",
+                crv: "P-256",
+                x: "public-x",
+                y: "public-y",
+                kid: "ec-key",
+                alg: "ES256",
+                use: "sig",
+              },
+              {
+                kty: "oct",
+                k: "symmetric-signing-secret",
+                kid: "legacy-key",
+                alg: "HS256",
+                use: "sig",
+              },
+            ],
+          },
+        },
+      },
+      api_domain: "tenant-a.api.example.com",
+    } as never);
+
+    const response = await request("/v1/projects/tenant-a/settings");
+    const body = await response.json();
+    const serialized = JSON.stringify(body);
+
+    expect(response.status).toBe(200);
+    expect(serialized).not.toContain("stored-jwt-secret");
+    expect(serialized).not.toContain("private-d");
+    expect(serialized).not.toContain("symmetric-signing-secret");
+    expect(body.auth.jwt_secret).toBe("********");
+    expect(body.auth.oauth_server.jwt_keys).toEqual([{
+      kty: "EC",
+      crv: "P-256",
+      x: "public-x",
+      y: "public-y",
+      kid: "ec-key",
+      alg: "ES256",
+      use: "sig",
+    }]);
+    expect(body.auth.oauth_server.jwt_jwks.keys).toEqual([{
+      kty: "EC",
+      crv: "P-256",
+      x: "public-x",
+      y: "public-y",
+      kid: "ec-key",
+      alg: "ES256",
+      use: "sig",
+    }]);
+  });
+
   test("shared settings alias hides auth config and rejects auth writes", async () => {
     config.authRuntimeOwnerRef = "auth-owner";
     projectService.getProjectSettings = async () => ({

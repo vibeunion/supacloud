@@ -274,19 +274,6 @@
       <Loader2 size={32} class="animate-spin text-brand opacity-50" />
     </div>
   {:else}
-    <!-- Quick Access Cards -->
-    <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
-      {#each QUICK_LINKS as link (link.route)}
-        {@const Icon = link.icon}
-        <a href={resolve(link.route, { ref: projectRef })} class="group flex flex-col items-center justify-center gap-3 p-4 rounded-xl border bg-card hover:border-brand/40 hover:shadow-sm transition-all text-center">
-          <div class={`w-10 h-10 rounded-xl flex items-center justify-center border transition-transform group-hover:scale-110 ${link.color}`}>
-            <Icon size={18} />
-          </div>
-          <span class="text-xs font-semibold text-muted-foreground group-hover:text-foreground transition-colors">{link.name}</span>
-        </a>
-      {/each}
-    </div>
-
     <!-- Stats Cards -->
     <div class="grid gap-3 grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
       <div class="rounded-xl border bg-card p-5 shadow-sm hover:shadow-md transition-shadow">
