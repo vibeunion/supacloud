@@ -468,6 +468,22 @@ function normalizePagination(
   return { limit, page, skip };
 }
 
+function tableListErrorDetails(error: unknown) {
+  const candidate = error && typeof error === "object"
+    ? error as { code?: unknown; message?: unknown }
+    : {};
+  const rawCode = typeof candidate.code === "string" ? candidate.code : "unknown";
+  const errorCode = /^[A-Za-z0-9_-]{1,64}$/.test(rawCode) ? rawCode : "unknown";
+  const rawMessage = typeof candidate.message === "string" ? candidate.message : "Unknown database error";
+  const errorMessage = rawMessage
+    .replace(/(postgres(?:ql)?:\/\/)([^@\s]+)@/gi, "$1[REDACTED]@")
+    .replace(/\b(password|passwd|secret|token|api[_-]?key)\s*=\s*\S+/gi, "$1=[REDACTED]")
+    .replace(/\s+/g, " ")
+    .slice(0, 512);
+
+  return { errorCode, errorMessage };
+}
+
 export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" })
     .get(
         "/tables",
@@ -490,31 +506,31 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                     set.status = 404;
                     return { message: "Project database credentials not found", code: "404", status: 404 };
                 }
-                let rows: any[];
-                if (search) {
-                    rows = await projectDb`
-                        SELECT table_name, table_schema, table_type,
-                        (SELECT reltuples::bigint FROM pg_class WHERE oid = ('"'||table_schema||'"."'||table_name||'"')::regclass) as row_estimate
-                        FROM information_schema.tables
-                        WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
-                        AND table_name ILIKE ${'%' + search + '%'}
-                        ORDER BY table_name
-                    `;
-                } else {
-                    rows = await projectDb`
-                        SELECT table_name, table_schema, table_type,
-                        (SELECT reltuples::bigint FROM pg_class WHERE oid = ('"'||table_schema||'"."'||table_name||'"')::regclass) as row_estimate
-                        FROM information_schema.tables
-                        WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
-                        ORDER BY table_name
-                    `;
-                }
+                const rows = await projectDb`
+                    SELECT
+                      c.relname AS table_name,
+                      n.nspname AS table_schema,
+                      'BASE TABLE' AS table_type,
+                      c.reltuples::bigint AS row_estimate
+                    FROM pg_class AS c
+                    JOIN pg_namespace AS n ON n.oid = c.relnamespace
+                    WHERE n.nspname = 'public'
+                      AND c.relkind IN ('r', 'p')
+                      AND c.relname ILIKE ${'%' + search + '%'}
+                    ORDER BY c.relname
+                `;
 
                 return {
                     data: rows.slice(skip, skip + limit),
                     total: rows.length
                 };
             } catch (error: unknown) {
+                const { errorCode, errorMessage } = tableListErrorDetails(error);
+                logger.error("[database] failed to list tables", {
+                    projectRef: params.ref,
+                    errorCode,
+                    errorMessage,
+                });
                 set.status = 500;
                 return {
                     message: "Failed to list tables",
