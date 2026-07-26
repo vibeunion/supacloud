@@ -4,6 +4,9 @@ import { config } from "../../src/config";
 import { grafanaProxyInternals, grafanaProxyRoutes } from "../../src/routes/grafana";
 
 const app = new Elysia().use(grafanaProxyRoutes);
+const appWithStaticFallback = new Elysia()
+  .use(grafanaProxyRoutes)
+  .get("*", () => new Response("studio"));
 const originalFetch = globalThis.fetch;
 
 afterEach(() => {
@@ -29,7 +32,7 @@ describe("grafana proxy routes", () => {
       });
     }) as unknown as typeof fetch;
 
-    const response = await app.handle(
+    const response = await appWithStaticFallback.handle(
       new Request("https://studio.example.com/grafana/api/search?query=pgsql", {
         headers: { authorization: `Bearer ${config.masterToken}` },
       }),

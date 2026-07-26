@@ -101,7 +101,15 @@ const handler = async ({ request, set }: { request: Request; set: { status?: num
   return proxyGrafana(request);
 };
 
+function isGrafanaRequest(request: Request): boolean {
+  const pathname = new URL(request.url).pathname;
+  return pathname === "/grafana" || pathname.startsWith("/grafana/");
+}
+
 export const grafanaProxyRoutes = new Elysia({ name: "grafana-proxy" })
+  // The Studio static-asset fallback is a GET wildcard, which takes precedence
+  // over plugin wildcard routes. Intercept Grafana before route resolution.
+  .onRequest((context) => isGrafanaRequest(context.request) ? handler(context) : undefined)
   .all("/grafana", handler, { detail: { tags: ["monitoring"], summary: "Proxy Grafana root" } })
   .all("/grafana/*", handler, { detail: { tags: ["monitoring"], summary: "Proxy Grafana assets and dashboards" } });
 
