@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.1](https://github.com/zuohuadong/supacloud/compare/web-console-v0.25.0...web-console-v0.25.1) (2026-07-26)
+
+
+### Bug Fixes
+
+* **studio:** restore Auth user management ([#577](https://github.com/zuohuadong/supacloud/issues/577)) ([d51a321](https://github.com/zuohuadong/supacloud/commit/d51a32123b489f36f0b2ca703e13f41cc4851d0c))
+
 ## [0.25.0](https://github.com/zuohuadong/supacloud/compare/web-console-v0.24.5...web-console-v0.25.0) (2026-07-24)
 
 
