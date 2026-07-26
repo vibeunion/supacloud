@@ -47,6 +47,10 @@ export const getTenantResources = (ref: string): ResourceDefinition[] => [
   {
     name: `v1/projects/${ref}/auth/users`,
     label: 'Users',
+    // The generic AutoTable routes actions to `/:id` and `/create`; this
+    // tenant API is intentionally handled by the dedicated Auth page instead.
+    canCreate: false,
+    canEdit: false,
     fields: [
       { key: 'id', label: 'UUID', type: 'text', showInForm: false },
       { key: 'email', label: 'Email', type: 'text', required: true, searchable: true },

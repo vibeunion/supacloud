@@ -356,6 +356,71 @@ async function listGoTrueUserSessions(
   };
 }
 
+type AuthUserSearchRow = {
+  id: string;
+  aud: string | null;
+  role: string | null;
+  email: string | null;
+  phone: string | null;
+  raw_app_meta_data: Record<string, unknown> | null;
+  raw_user_meta_data: Record<string, unknown> | null;
+  created_at: Date | string;
+  last_sign_in_at: Date | string | null;
+  total_count: string | number;
+};
+
+type UserListPaginationQuery = {
+  skip?: string;
+  limit?: string;
+  page?: string;
+  per_page?: string;
+  _page?: string;
+  _limit?: string;
+};
+
+function userListPagination(query: UserListPaginationQuery) {
+  // Cases: missing/non-numeric values use defaults; zero/negative values start
+  // at page one; oversized pages are bounded before the tenant query runs.
+  const requestedLimit = Number.parseInt(query.per_page || query._limit || query.limit || "50", 10);
+  const limit = Math.min(100, Math.max(1, Number.isFinite(requestedLimit) ? requestedLimit : 50));
+  const requestedPage = Number.parseInt(query.page || query._page || "", 10);
+  const skip = Math.max(0, Number.parseInt(query.skip || "0", 10) || 0);
+  const fallbackPage = Math.floor(skip / limit) + 1;
+  return { limit, page: Math.max(1, Number.isFinite(requestedPage) ? requestedPage : fallbackPage) };
+}
+
+async function searchGoTrueUsers(ref: string, search: string, page: number, limit: number) {
+  const projectDb = getProjectDb(await resolveDbName(ref));
+  const offset = (page - 1) * limit;
+  const pattern = `%${search}%`;
+  const rows = await projectDb`
+    SELECT
+      user_record.id::text AS id,
+      user_record.aud::text AS aud,
+      user_record.role::text AS role,
+      user_record.email,
+      user_record.phone,
+      user_record.raw_app_meta_data,
+      user_record.raw_user_meta_data,
+      user_record.created_at,
+      user_record.last_sign_in_at,
+      COUNT(*) OVER() AS total_count
+    FROM auth.users AS user_record
+    WHERE user_record.email ILIKE ${pattern}
+       OR user_record.phone ILIKE ${pattern}
+       OR user_record.id::text ILIKE ${pattern}
+    ORDER BY user_record.created_at DESC, user_record.id DESC
+    LIMIT ${limit} OFFSET ${offset}
+  ` as AuthUserSearchRow[];
+
+  return {
+    users: rows.map(({ total_count: _totalCount, ...user }) => user),
+    total: rows.length > 0 ? Number(rows[0].total_count) : 0,
+    page,
+    per_page: limit,
+  };
+}
+
 /**
  * User Management routes — Admin API proxy to GoTrue
  */
@@ -372,14 +437,17 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       }
       const { apiUrl, serviceRoleKey } = ctx;
 
-      const limit = Number(query.per_page || query._limit || query.limit || 50);
-      const page = Number(query.page || query._page || 1) || Math.floor(Number(query.skip || 0) / limit) + 1;
-      const q = query.q;
+      const { limit, page } = userListPagination(query);
+      // The generic data provider encodes the Auth page's email search as
+      // `email_like`, while GoTrue's Admin API has no search parameter. Search
+      // the tenant's authoritative auth.users relation instead of silently
+      // dropping the UI filter or pretending GoTrue supports `q`/`filter`.
+      const search = query.search || query.email_like;
+      if (search) return searchGoTrueUsers(params.ref, String(search), page, limit);
       
       const searchParams = new URLSearchParams();
       searchParams.set("page", String(page));
       searchParams.set("per_page", String(limit));
-      if (q) searchParams.set("q", String(q));
 
       const res = await gotrueFetch(`${apiUrl}/admin/users?${searchParams.toString()}`, {
         headers: {
@@ -401,26 +469,29 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
 
       const d = await res.json() as Record<string, unknown>;
       
-      if (Array.isArray(d)) {
-          const totalHeader = res.headers.get('x-total-count');
-          const linkHeader = res.headers.get('link');
-          let nextPage: number | null = null;
-          let lastPage: number | null = null;
-          if (linkHeader) {
-            const lastMatch = linkHeader.match(/page=(\d+)[^>]*>; rel="last"/);
-            const nextMatch = linkHeader.match(/page=(\d+)[^>]*>; rel="next"/);
-            if (lastMatch) lastPage = parseInt(lastMatch[1], 10);
-            if (nextMatch) nextPage = parseInt(nextMatch[1], 10);
-          }
-          return {
-              users: d,
-              aud: 'authenticated',
-              next_page: nextPage,
-              last_page: lastPage,
-              total: totalHeader ? Number(totalHeader) : d.length
-          };
+      const users = Array.isArray(d) ? d : d.users;
+      if (!Array.isArray(users)) return d;
+
+      const list = users as unknown[];
+      let nextPage: number | null = null;
+      let lastPage: number | null = null;
+      if (linkHeader) {
+        const lastMatch = linkHeader.match(/page=(\d+)[^>]*>; rel="last"/);
+        const nextMatch = linkHeader.match(/page=(\d+)[^>]*>; rel="next"/);
+        if (lastMatch) lastPage = Number.parseInt(lastMatch[1], 10);
+        if (nextMatch) nextPage = Number.parseInt(nextMatch[1], 10);
       }
-      return d;
+      const parsedTotal = totalHeader ? Number(totalHeader) : Number.NaN;
+
+      return {
+        ...(Array.isArray(d) ? { aud: "authenticated" } : d),
+        users: list,
+        next_page: nextPage,
+        last_page: lastPage,
+        // GoTrue exposes the count in a response header. Include it in the
+        // JSON envelope so the data provider can render pagination correctly.
+        total: Number.isFinite(parsedTotal) ? parsedTotal : list.length,
+      };
     },
     {
       params: t.Object({ ref: t.String() }),
@@ -433,6 +504,8 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
         _limit: t.Optional(t.String()),
         _sort: t.Optional(t.String()),
         _order: t.Optional(t.String()),
+        search: t.Optional(t.String()),
+        email_like: t.Optional(t.String()),
         q: t.Optional(t.String()),
       }, { additionalProperties: true }),
       detail: { tags: ["auth"], summary: "List users" },

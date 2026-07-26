@@ -19,4 +19,15 @@ describe("buildResourceRegistry", () => {
 
     expect(authResources).toHaveLength(1);
   });
+
+  test("keeps Auth user actions on the dedicated page instead of API-like routes", () => {
+    const [authUsers] = buildResourceRegistry(["alpha123"]).filter(
+      (resource) => resource.name === "v1/projects/alpha123/auth/users",
+    );
+
+    expect(authUsers).toMatchObject({
+      canCreate: false,
+      canEdit: false,
+    });
+  });
 });

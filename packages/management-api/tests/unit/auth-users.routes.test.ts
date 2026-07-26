@@ -43,8 +43,12 @@ const failUserDeletion = mock(() => Promise.resolve(true));
 const recordUserDeletionUncertainty = mock(() => Promise.resolve(true));
 
 let grantsTableAvailable = true;
+let authUserSearchRows: Array<Record<string, unknown>> = [];
 const tenantDb = mock((strings: TemplateStringsArray) => {
   const text = strings.join("?");
+  if (text.includes("COUNT(*) OVER()") && text.includes("FROM auth.users AS user_record")) {
+    return Promise.resolve(authUserSearchRows);
+  }
   if (text.includes("FROM auth.sessions AS session")) {
     return Promise.resolve([
       {
@@ -199,6 +203,18 @@ describe("userManagementRoutes", () => {
     userUpdateMethods.length = 0;
     userUpdateBodies.length = 0;
     grantsTableAvailable = true;
+    authUserSearchRows = [{
+      id: "user-one",
+      aud: "authenticated",
+      role: "authenticated",
+      email: "worker@example.test",
+      phone: null,
+      raw_app_meta_data: { provider: "email" },
+      raw_user_meta_data: {},
+      created_at: new Date("2026-07-26T00:00:00.000Z"),
+      last_sign_in_at: null,
+      total_count: "2",
+    }];
   });
 
   test("PATCH user updates proxy to GoTrue with PUT for compatibility", async () => {
@@ -286,6 +302,82 @@ describe("userManagementRoutes", () => {
 
     expect(res.status).toBe(400);
     expect(upstreamCalls).toBe(0);
+  });
+
+  test("searches auth.users for AutoTable email filters without forwarding unsupported GoTrue parameters", async () => {
+    let upstreamCalls = 0;
+    globalThis.fetch = mock(async () => {
+      upstreamCalls += 1;
+      return Response.json({ users: [] });
+    }) as unknown as typeof fetch;
+
+    const res = await request("/v1/projects/proj_1/auth/users?_page=1&_limit=1&email_like=worker");
+
+    expect(res.status).toBe(200);
+    expect(upstreamCalls).toBe(0);
+    const queryCall = tenantDb.mock.calls.find(([strings]) => strings.join("?").includes("FROM auth.users AS user_record"));
+    expect(queryCall?.slice(1)).toContain("%worker%");
+    expect(await res.json()).toEqual({
+      users: [{
+        id: "user-one",
+        aud: "authenticated",
+        role: "authenticated",
+        email: "worker@example.test",
+        phone: null,
+        raw_app_meta_data: { provider: "email" },
+        raw_user_meta_data: {},
+        created_at: "2026-07-26T00:00:00.000Z",
+        last_sign_in_at: null,
+      }],
+      total: 2,
+      page: 1,
+      per_page: 1,
+    });
+  });
+
+  test("returns an empty page when an Auth user search has no matches", async () => {
+    authUserSearchRows = [];
+    let upstreamCalls = 0;
+    globalThis.fetch = mock(async () => {
+      upstreamCalls += 1;
+      return Response.json({ users: [] });
+    }) as unknown as typeof fetch;
+
+    const res = await request("/v1/projects/proj_1/auth/users?_page=1&_limit=1&email_like=__no_match__");
+
+    expect(res.status).toBe(200);
+    expect(upstreamCalls).toBe(0);
+    expect(await res.json()).toEqual({ users: [], total: 0, page: 1, per_page: 1 });
+  });
+
+  test("bounds Auth user search pagination before querying the tenant database", async () => {
+    const res = await request("/v1/projects/proj_1/auth/users?_page=-5&_limit=0&email_like=worker");
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ page: 1, per_page: 1 });
+  });
+
+  test("keeps GoTrue list totals in the JSON envelope for pagination", async () => {
+    globalThis.fetch = mock(async () => Response.json(
+      { users: [{ id: "user-one", email: "worker@example.test" }], aud: "authenticated" },
+      {
+        headers: {
+          "link": '</admin/users?page=2&per_page=1>; rel="next", </admin/users?page=2&per_page=1>; rel="last"',
+          "x-total-count": "2",
+        },
+      },
+    )) as unknown as typeof fetch;
+
+    const res = await request("/v1/projects/proj_1/auth/users?_page=1&_limit=1");
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      users: [{ id: "user-one", email: "worker@example.test" }],
+      aud: "authenticated",
+      next_page: 2,
+      last_page: 2,
+      total: 2,
+    });
   });
 
   test("lists OAuth grants from GoTrue's authoritative tenant tables", async () => {
