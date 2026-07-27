@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.48.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.47.17...management-api-v0.48.0) (2026-07-27)
+
+
+### Features
+
+* add PostgreSQL cache data plane runtime ([f0c19f4](https://github.com/zuohuadong/supacloud/commit/f0c19f4f870bd0b26d453a67b8af76d609c53d64))
+
 ## [0.47.17](https://github.com/zuohuadong/supacloud/compare/management-api-v0.47.16...management-api-v0.47.17) (2026-07-27)
 
 

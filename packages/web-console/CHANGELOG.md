@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.3](https://github.com/zuohuadong/supacloud/compare/web-console-v0.25.2...web-console-v0.25.3) (2026-07-27)
+
+
+### Bug Fixes
+
+* **release:** preserve conventional squash titles ([#596](https://github.com/zuohuadong/supacloud/issues/596)) ([76fd5d3](https://github.com/zuohuadong/supacloud/commit/76fd5d3348f58f32d9c16362a4e05417ed3d5b06))
+
 ## [0.25.2](https://github.com/zuohuadong/supacloud/compare/web-console-v0.25.1...web-console-v0.25.2) (2026-07-27)
 
 
