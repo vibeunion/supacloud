@@ -1490,6 +1490,18 @@ ensure_edge_runtime_user() {
     fi
 }
 
+configure_edge_runtime_source_access() {
+    local source_dir="$1"
+    chmod -R g-w,g+rX "$source_dir" || {
+        log_error "Failed to grant Edge Runtime source access"
+        return 1
+    }
+    chgrp -R supacloud-edge "$source_dir" || {
+        log_error "Failed to assign Edge Runtime source group"
+        return 1
+    }
+}
+
 install_edge_runtime() {
     log_step "Installing Edge Runtime..."
     supacloud_resolve_artifact_policy || return 1
@@ -1578,6 +1590,7 @@ install_edge_runtime() {
         else
             log_info "Edge Runtime source deployed to /opt/supacloud/edge-runtime (functions directory)"
         fi
+        configure_edge_runtime_source_access /opt/supacloud/edge-runtime || return 1
         log_info "Edge Runtime deployed to /opt/supacloud/edge-runtime"
     else
         log_warn "Edge Runtime source not found at $EDGE_RT_SRC, skipping source deployment"

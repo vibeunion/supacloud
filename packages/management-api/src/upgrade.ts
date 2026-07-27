@@ -15,6 +15,7 @@ const BIN_TARGET = "/usr/local/bin/supacloud";
 const DEFAULT_MANAGEMENT_ENV_FILE = "/etc/supabase/management-api.env";
 const DEFAULT_EDGE_RUNTIME_USER = "supacloud-edge";
 const DEFAULT_EDGE_RUNTIME_GROUP = "supacloud-edge";
+const DEFAULT_EDGE_RUNTIME_SOURCE_DIR = "/opt/supacloud/edge-runtime";
 const LEGACY_CONFIG_FILE = "/opt/supacloud/config.env";
 const DEFAULT_GITHUB_PROXY = "https://ghproxy.net/";
 const WEB_CONSOLE_ASSET = "web-console-build.tar.gz";
@@ -78,6 +79,10 @@ export type EdgeRuntimeIdentity = {
 type EdgeRuntimeIdentityOptions = {
     platform?: NodeJS.Platform;
     run?: HostIdentityCommandRunner;
+};
+
+type EmbeddedEdgeSourceAccessOptions = EdgeRuntimeIdentityOptions & {
+    sourceDir?: string;
 };
 
 export function createBinaryBackupState(targetPath: string, runId = randomUUID()): BinaryBackupState {
@@ -997,6 +1002,29 @@ export async function ensurePersistedEdgeRuntimeIdentity(
     return identity;
 }
 
+async function runRequiredHostCommand(
+    command: string[],
+    failureMessage: string,
+    run: HostIdentityCommandRunner,
+): Promise<void> {
+    const completed = await run(command);
+    if (completed.exitCode !== 0) {
+        throw new Error(`${failureMessage}: ${completed.stderr.trim().slice(-300)}`);
+    }
+}
+
+export async function ensureEmbeddedEdgeRuntimeSourceAccess(
+    identity: EdgeRuntimeIdentity,
+    options: EmbeddedEdgeSourceAccessOptions = {},
+): Promise<void> {
+    if ((options.platform ?? process.platform) !== "linux") return;
+    const sourceDir = options.sourceDir || DEFAULT_EDGE_RUNTIME_SOURCE_DIR;
+    if (!existsSync(sourceDir)) throw new Error(`Embedded Edge Runtime source directory is missing: ${sourceDir}`);
+    const run = options.run ?? runHostIdentityCommand;
+    await runRequiredHostCommand(["chmod", "-R", "g-w,g+rX", sourceDir], "Failed to grant Edge Runtime source access", run);
+    await runRequiredHostCommand(["chgrp", "-R", identity.group, sourceDir], "Failed to assign Edge Runtime source group", run);
+}
+
 function edgeRuntimeCapacityDropIn() {
     return process.env.SUPACLOUD_EDGE_RUNTIME_CAPACITY_DROPIN || DEFAULT_EDGE_RUNTIME_CAPACITY_DROPIN;
 }
@@ -1035,8 +1063,9 @@ async function reloadSystemdUnits() {
     }
 }
 
-async function reconcileEmbeddedEdgePrivilegeDropIn(mode: "embedded" | "external") {
+async function reconcileEmbeddedEdgePrivilegeDropIn(mode: "embedded" | "external", identity: EdgeRuntimeIdentity) {
     if (mode === "embedded") {
+        await ensureEmbeddedEdgeRuntimeSourceAccess(identity);
         writeFileAtomically(embeddedEdgePrivilegeDropIn(), buildEmbeddedEdgePrivilegeDropIn(), 0o644);
     } else {
         rmSync(embeddedEdgePrivilegeDropIn(), { force: true });
@@ -1269,9 +1298,9 @@ export async function runUpgrade(options: { forceYes?: boolean; targetVersion?: 
                 activationState.managementEnvState = captureFileState(managementEnvFile());
                 activationState.edgeRuntimeDropInState = captureFileState(edgeRuntimeCapacityDropIn());
                 activationState.embeddedEdgePrivilegeDropInState = captureFileState(embeddedEdgePrivilegeDropIn());
-                await ensurePersistedEdgeRuntimeIdentity(managementEnvFile());
+                const edgeRuntimeIdentity = await ensurePersistedEdgeRuntimeIdentity(managementEnvFile());
                 activatedEdgeRuntimeMode = await runtimeModeForBinaryUpgrade();
-                await reconcileEmbeddedEdgePrivilegeDropIn(activatedEdgeRuntimeMode);
+                await reconcileEmbeddedEdgePrivilegeDropIn(activatedEdgeRuntimeMode, edgeRuntimeIdentity);
                 await ensureEdgeRuntimeCapacityDropIn(env);
                 upsertManagementWebConsoleDir(managementEnvFile());
                 await restartServices();
