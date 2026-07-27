@@ -52,6 +52,27 @@ describe("apiClient", () => {
     expect(headers.get("X-Test")).toBe("1");
   });
 
+  test("allows long-running requests to override the default timeout", async () => {
+    globalThis.fetch = async (_input, init) => {
+      await new Promise<void>((_resolve, reject) => {
+        init?.signal?.addEventListener(
+          "abort",
+          () => reject(new DOMException("Aborted", "AbortError")),
+          { once: true },
+        );
+      });
+      return Response.json({});
+    };
+
+    const response = await apiClient("/v1/slow-build", { timeoutMs: 1 });
+
+    expect(response.status).toBe(504);
+    expect(await response.json()).toEqual({
+      message: "Request timeout",
+      code: "TIMEOUT",
+    });
+  });
+
   test("normalizes the cookie login, session, and logout contract without returning a token", async () => {
     const calls: Array<{ input: string; init?: RequestInit }> = [];
     const responses = [

@@ -36,7 +36,7 @@ GET /v1/projects/:ref/frontend/deployments
       "project_ref": "my-project",
       "name": "my-app",
       "framework": "react",
-      "domain": "abc12345.my-project.app",
+      "domain": "abc12345.my-project.example.com",
       "custom_domains": ["www.myapp.com"],
       "build_command": "npm run build",
       "output_dir": "dist",
@@ -50,7 +50,7 @@ GET /v1/projects/:ref/frontend/deployments
       "created_at": "2024-01-01T00:00:00Z",
       "updated_at": "2024-01-01T00:00:00Z",
       "last_deployed_at": "2024-01-01T12:00:00Z",
-      "deployment_url": "https://abc12345.my-project.app"
+      "deployment_url": "https://abc12345.my-project.example.com"
     }
   ]
 }
@@ -101,7 +101,7 @@ POST /v1/projects/:ref/frontend/deployments/:id/deploy/git
 POST /v1/projects/:ref/frontend/deployments/:id/deploy/upload
 ```
 
-**请求体：** `multipart/form-data` 或 `application/octet-stream`
+**请求体：** `multipart/form-data` 的 `file` 字段，或 `application/zip`
 
 ### 重新部署
 
@@ -321,8 +321,8 @@ curl -X POST http://localhost:9090/v1/projects/my-project/frontend/deployments/a
 
 | 类型 | 主机记录 | 记录值 |
 |------|---------|---------|
-| CNAME | www | abc12345.my-project.app |
-| CNAME | @ | abc12345.my-project.app |
+| CNAME | www | abc12345.my-project.example.com |
+| CNAME | @ | abc12345.my-project.example.com |
 
 ## 构建状态
 
@@ -333,31 +333,11 @@ curl -X POST http://localhost:9090/v1/projects/my-project/frontend/deployments/a
 | `success` | 构建成功，已部署 |
 | `failed` | 构建失败 |
 
-## Nginx 配置
+## Caddy 路由
 
-系统会自动为每个部署生成 Nginx 配置：
-
-```nginx
-server {
-    listen 80;
-    server_name abc12345.my-project.app www.myapp.com;
-
-    root /var/supacloud/frontends/my-project/abc12345/build;
-    index index.html index.htm;
-
-    location / {
-        try_files $uri $uri/ /index.html;
-    }
-
-    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
-        expires 1y;
-        add_header Cache-Control "public, immutable";
-    }
-
-    gzip on;
-    gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
-}
-```
+系统会在部署构建成功后，通过 SupaCloud Caddy API 为默认域名和自定义域名创建托管路由。
+默认域名格式为 `<部署ID>.<项目ref>.<BASE_DOMAIN>`；静态站点由 Caddy 直接提供文件服务，
+SSR 站点则由 Caddy 反向代理到对应的受管进程。无需安装或维护 Nginx。
 
 ## 目录结构
 

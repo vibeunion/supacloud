@@ -19,6 +19,10 @@ export interface StudioSessionState {
   expiresAt?: string;
 }
 
+export interface ApiRequestInit extends RequestInit {
+  timeoutMs?: number;
+}
+
 async function readJsonObject(response: Response): Promise<Record<string, unknown>> {
   const value: unknown = await response.json().catch(() => ({}));
   return value && typeof value === "object" && !Array.isArray(value)
@@ -167,30 +171,31 @@ async function normalizeErrorResponse(response: Response): Promise<Response> {
   });
 }
 
-export async function apiClient(url: string, options: RequestInit = {}): Promise<Response> {
+export async function apiClient(url: string, options: ApiRequestInit = {}): Promise<Response> {
   await refreshExpiringStudioSession();
-  const headers = new Headers(options.headers || {});
+  const { timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, ...requestInit } = options;
+  const headers = new Headers(requestInit.headers || {});
   
   // Set default Content-Type for JSON requests if body is stringified JSON
-  if (options.body && typeof options.body === 'string' && options.body.startsWith('{') && !headers.has("Content-Type")) {
+  if (requestInit.body && typeof requestInit.body === 'string' && requestInit.body.startsWith('{') && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
 
   const timeoutController = new AbortController();
-  const timeout = setTimeout(() => timeoutController.abort(), DEFAULT_REQUEST_TIMEOUT_MS);
-  const signal = mergeAbortSignals([options.signal, timeoutController.signal]);
+  const timeout = setTimeout(() => timeoutController.abort(), timeoutMs);
+  const signal = mergeAbortSignals([requestInit.signal, timeoutController.signal]);
 
   let response: Response;
   try {
     response = await fetch(url, {
-      ...options,
+      ...requestInit,
       headers,
       signal,
-      credentials: options.credentials ?? "include",
+      credentials: requestInit.credentials ?? "include",
     });
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
-      if (options.signal?.aborted && !timeoutController.signal.aborted) {
+      if (requestInit.signal?.aborted && !timeoutController.signal.aborted) {
         throw error;
       }
       return new Response(JSON.stringify({

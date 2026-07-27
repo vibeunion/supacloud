@@ -22,6 +22,28 @@ afterEach(async () => {
 });
 
 describe("FrontendService DNS records", () => {
+  test("uses the normalized base domain for temporary frontend hosts", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "supacloud-frontend-domain-test-"));
+    const originalBaseDomain = config.baseDomain;
+
+    try {
+      for (const configuredBaseDomain of ["xai.xigu.team", "api.xai.xigu.team"]) {
+        config.baseDomain = configuredBaseDomain;
+        const service = new FrontendService(baseDir);
+        const deployment = await service.createDeployment("proj123", {
+          name: "site",
+          framework: "static",
+        });
+
+        expect(deployment.domain).toBe(`${deployment.id}.proj123.xai.xigu.team`);
+        expect(deployment.deployment_url).toBe(`https://${deployment.id}.proj123.xai.xigu.team`);
+      }
+    } finally {
+      config.baseDomain = originalBaseDomain;
+      await rm(baseDir, { recursive: true, force: true });
+    }
+  });
+
   test("returns managed temporary domain record and expected custom domain records", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "supacloud-frontend-test-"));
     const service = new FrontendService(baseDir);
@@ -58,6 +80,31 @@ describe("FrontendService DNS records", () => {
         source: "custom_domain",
       });
     } finally {
+      await rm(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  test("uses the configured domain when a legacy deployment has no stored host", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "supacloud-frontend-dns-fallback-test-"));
+    const originalBaseDomain = config.baseDomain;
+
+    try {
+      config.baseDomain = "api.xai.xigu.team";
+      const service = new FrontendService(baseDir);
+      const deployment = await service.createDeployment("proj123", {
+        name: "site",
+        framework: "static",
+      });
+      await writeFile(
+        join(baseDir, "proj123", deployment.id, "deployment.json"),
+        JSON.stringify({ ...deployment, domain: "" }),
+      );
+
+      const records = await service.listDnsRecords("proj123", deployment.id);
+
+      expect(records?.[0]?.hostname).toBe(`${deployment.id}.proj123.xai.xigu.team`);
+    } finally {
+      config.baseDomain = originalBaseDomain;
       await rm(baseDir, { recursive: true, force: true });
     }
   });
