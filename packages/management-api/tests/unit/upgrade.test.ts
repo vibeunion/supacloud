@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
     buildEdgeRuntimeCapacityDropIn,
+    buildEmbeddedEdgePrivilegeDropIn,
     backupCurrentBinary,
     captureFileState,
     cleanupBinaryBackup,
@@ -16,6 +17,7 @@ import {
     resolveArtifactVerificationMode,
     resolveEdgeRuntimeCapacityConfig,
     resolveGithubEndpointPrefixes,
+    resolvePersistedEdgeRuntimeMode,
     resolveUpgradeEnvironment,
     runStagedDatabaseMigration,
     restoreCurrentBinary,
@@ -27,14 +29,18 @@ import {
     validateWebConsoleArchiveEntries,
     verifyArtifactChecksum,
     waitForManagementHealth,
+    waitForEdgeRuntimeHealth,
+    waitForUpgradeHealth,
 } from "../../src/upgrade";
 
 const originalFetch = globalThis.fetch;
 
 const originalUpgradeHealthAttempts = process.env.SUPACLOUD_UPGRADE_HEALTH_ATTEMPTS;
+const originalEdgeUpgradeHealthAttempts = process.env.SUPACLOUD_UPGRADE_EDGE_HEALTH_ATTEMPTS;
 
 const ensureHealthTimeout = () => {
   process.env.SUPACLOUD_UPGRADE_HEALTH_ATTEMPTS = "1";
+  process.env.SUPACLOUD_UPGRADE_EDGE_HEALTH_ATTEMPTS = "1";
 };
 
 afterEach(() => {
@@ -43,6 +49,11 @@ afterEach(() => {
     delete process.env.SUPACLOUD_UPGRADE_HEALTH_ATTEMPTS;
   } else {
     process.env.SUPACLOUD_UPGRADE_HEALTH_ATTEMPTS = originalUpgradeHealthAttempts;
+  }
+  if (originalEdgeUpgradeHealthAttempts === undefined) {
+    delete process.env.SUPACLOUD_UPGRADE_EDGE_HEALTH_ATTEMPTS;
+  } else {
+    process.env.SUPACLOUD_UPGRADE_EDGE_HEALTH_ATTEMPTS = originalEdgeUpgradeHealthAttempts;
   }
 });
 
@@ -528,6 +539,44 @@ describe("upgrade release selection", () => {
     ]);
   });
 
+  test("post-upgrade health check rejects an unavailable Edge Runtime", async () => {
+    ensureHealthTimeout();
+    globalThis.fetch = (async () => new Response("forbidden", { status: 403 })) as typeof fetch;
+
+    await expect(waitForEdgeRuntimeHealth()).rejects.toThrow("returned HTTP 403");
+  });
+
+  test("combined upgrade and rollback health rejects an unavailable restored Edge Runtime", async () => {
+    const calls: string[] = [];
+    ensureHealthTimeout();
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      calls.push(url);
+      if (url === "http://127.0.0.1:9000/health") {
+        return new Response("unavailable", { status: 503 });
+      }
+      return new Response(url.endsWith("/") ? "<!doctype html>" : "ok", {
+        status: 200,
+        headers: { "content-type": url.endsWith("/") ? "text/html" : "application/json" },
+      });
+    }) as typeof fetch;
+
+    await expect(waitForUpgradeHealth()).rejects.toThrow("returned HTTP 503");
+    expect(calls).toEqual([
+      "http://127.0.0.1:9090/health",
+      "http://127.0.0.1:9090/",
+      "http://127.0.0.1:9000/health",
+    ]);
+  });
+
+  test("persisted Edge Runtime mode rejects invalid upgrade state", () => {
+    expect(resolvePersistedEdgeRuntimeMode(undefined)).toBe("embedded");
+    expect(resolvePersistedEdgeRuntimeMode("")).toBe("embedded");
+    expect(resolvePersistedEdgeRuntimeMode("embedded")).toBe("embedded");
+    expect(resolvePersistedEdgeRuntimeMode("external")).toBe("external");
+    expect(() => resolvePersistedEdgeRuntimeMode("externel")).toThrow("Invalid persisted EDGE_RUNTIME_MODE");
+  });
+
   test("normalizes management env WEB_CONSOLE_DIR to runtime link", () => {
     const envDir = mkdtempSync(join(tmpdir(), "supacloud-upgrade-web-console-env-"));
     const managementEnv = join(envDir, "management-api.env");
@@ -542,6 +591,12 @@ describe("upgrade release selection", () => {
 });
 
 describe("upgrade edge-runtime capacity defaults", () => {
+  test("grants only the capabilities needed for embedded privilege drop", () => {
+    const dropIn = buildEmbeddedEdgePrivilegeDropIn();
+    expect(dropIn).toContain("CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_SETGID CAP_SETUID");
+    expect(dropIn).not.toContain("@keyring");
+  });
+
   test("sizes systemd limits to sixty percent of a two-core node", () => {
     const config = resolveEdgeRuntimeCapacityConfig({
       env: {},

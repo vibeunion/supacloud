@@ -22,6 +22,7 @@ const WEB_CONSOLE_ROOT = "/opt/supacloud/web-console";
 const WEB_CONSOLE_RELEASES_DIR = `${WEB_CONSOLE_ROOT}/releases`;
 const WEB_CONSOLE_CURRENT_LINK = WEB_CONSOLE_CURRENT_DIR;
 const DEFAULT_EDGE_RUNTIME_CAPACITY_DROPIN = "/etc/systemd/system/supacloud-edge-runtime.service.d/50-edge-runtime-capacity.conf";
+const DEFAULT_EMBEDDED_EDGE_PRIVILEGE_DROPIN = "/etc/systemd/system/supacloud.service.d/50-embedded-edge-privilege.conf";
 const DEFAULT_EDGE_WORKER_POOL_SIZE = 20;
 const DEFAULT_EDGE_BACKGROUND_WORKER_POOL_SIZE = 20;
 const DEFAULT_EDGE_RESOURCE_RATIO = 0.6;
@@ -538,6 +539,15 @@ OOMPolicy=stop
 `;
 }
 
+export function buildEmbeddedEdgePrivilegeDropIn() {
+    return `[Service]
+# The embedded Edge Runtime uses setpriv to drop from the root Management API
+# account before any tenant function code starts.
+CapabilityBoundingSet=
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_SETGID CAP_SETUID
+`;
+}
+
 async function downloadAsset(downloadUrl: string, localPath: string, preferredEndpoint: GithubEndpoint, forceYes?: boolean) {
     let lastError = "";
     let endpoints = buildGithubEndpoints(preferredEndpoint.proxyPrefix || undefined);
@@ -982,6 +992,10 @@ function edgeRuntimeCapacityDropIn() {
     return process.env.SUPACLOUD_EDGE_RUNTIME_CAPACITY_DROPIN || DEFAULT_EDGE_RUNTIME_CAPACITY_DROPIN;
 }
 
+function embeddedEdgePrivilegeDropIn() {
+    return process.env.SUPACLOUD_EMBEDDED_EDGE_PRIVILEGE_DROPIN || DEFAULT_EMBEDDED_EDGE_PRIVILEGE_DROPIN;
+}
+
 function writeFileAtomically(filePath: string, content: string, mode: number) {
     mkdirSync(path.dirname(filePath), { recursive: true });
     const temporaryPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
@@ -994,12 +1008,31 @@ function writeFileAtomically(filePath: string, content: string, mode: number) {
     }
 }
 
-async function ensureRuntimeModeForBinaryUpgrade() {
-    const edgeUnit = await $`systemctl list-unit-files supacloud-edge-runtime.service --no-legend`.nothrow().quiet();
-    const edgeServiceKnown = edgeUnit.exitCode === 0 && edgeUnit.stdout.toString().includes("supacloud-edge-runtime.service");
-    if (!edgeServiceKnown) return;
+async function runtimeModeForBinaryUpgrade(): Promise<"embedded" | "external"> {
+    const persistedEnv = await readEnvFile(managementEnvFile());
+    return resolvePersistedEdgeRuntimeMode(persistedEnv.EDGE_RUNTIME_MODE);
+}
 
-    upsertEnvFileValue(managementEnvFile(), "EDGE_RUNTIME_MODE", "external");
+export function resolvePersistedEdgeRuntimeMode(persistedMode?: string): "embedded" | "external" {
+    if (persistedMode === undefined || persistedMode === "" || persistedMode === "embedded") return "embedded";
+    if (persistedMode === "external") return "external";
+    throw new Error(`Invalid persisted EDGE_RUNTIME_MODE: ${persistedMode}`);
+}
+
+async function reloadSystemdUnits() {
+    const reload = await $`systemctl daemon-reload`.nothrow().quiet();
+    if (reload.exitCode !== 0) {
+        throw new Error(`Failed to reload systemd units: ${reload.stderr.toString().trim().slice(-500)}`);
+    }
+}
+
+async function reconcileEmbeddedEdgePrivilegeDropIn(mode: "embedded" | "external") {
+    if (mode === "embedded") {
+        writeFileAtomically(embeddedEdgePrivilegeDropIn(), buildEmbeddedEdgePrivilegeDropIn(), 0o644);
+    } else {
+        rmSync(embeddedEdgePrivilegeDropIn(), { force: true });
+    }
+    await reloadSystemdUnits();
 }
 
 async function ensureEdgeRuntimeCapacityDropIn(env: Record<string, string | undefined>) {
@@ -1009,7 +1042,7 @@ async function ensureEdgeRuntimeCapacityDropIn(env: Record<string, string | unde
 
     const config = resolveEdgeRuntimeCapacityConfig({ env });
     writeFileAtomically(edgeRuntimeCapacityDropIn(), buildEdgeRuntimeCapacityDropIn(config), 0o644);
-    await $`systemctl daemon-reload`.nothrow().quiet();
+    await reloadSystemdUnits();
 }
 
 async function restartServices() {
@@ -1069,12 +1102,36 @@ export async function waitForManagementHealth() {
     throw new Error(`SupaCloud failed the post-upgrade health checks: ${lastError ?? "timeout"}`);
 }
 
+export async function waitForEdgeRuntimeHealth() {
+    const attempts = positiveInteger(process.env.SUPACLOUD_UPGRADE_EDGE_HEALTH_ATTEMPTS, 30);
+    let lastError = "timeout";
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+        try {
+            const response = await fetch("http://127.0.0.1:9000/health", {
+                signal: AbortSignal.timeout(2_000),
+            });
+            if (response.ok) return;
+            lastError = `returned HTTP ${response.status}`;
+        } catch (error: unknown) {
+            lastError = error instanceof Error ? error.message : String(error);
+        }
+        await Bun.sleep(1_000);
+    }
+    throw new Error(`Edge Runtime failed the post-upgrade health check: ${lastError}`);
+}
+
+export async function waitForUpgradeHealth() {
+    await waitForManagementHealth();
+    await waitForEdgeRuntimeHealth();
+}
+
 type UpgradeActivationState = {
     binary: BinaryBackupState;
     oldWebTarget: string | null;
     oldWebBackup: string | null;
     managementEnvState: FileState | null;
     edgeRuntimeDropInState: FileState | null;
+    embeddedEdgePrivilegeDropInState: FileState | null;
 };
 
 async function activateArtifacts(stagedBinary: StagedBinary, stagedWeb: StagedWebConsole | null, state: UpgradeActivationState) {
@@ -1118,11 +1175,14 @@ async function rollbackArtifacts(state: UpgradeActivationState, stagedWeb: Stage
     }
     if (state.edgeRuntimeDropInState) {
         restoreFileState(state.edgeRuntimeDropInState);
-        await $`systemctl daemon-reload`.nothrow().quiet();
     }
+    if (state.embeddedEdgePrivilegeDropInState) {
+        restoreFileState(state.embeddedEdgePrivilegeDropInState);
+    }
+    await reloadSystemdUnits();
 
     await restartServices();
-    await waitForManagementHealth();
+    await waitForUpgradeHealth();
 }
 
 export async function runUpgrade(options: { forceYes?: boolean; targetVersion?: string } = {}) {
@@ -1165,6 +1225,7 @@ export async function runUpgrade(options: { forceYes?: boolean; targetVersion?: 
         let committed = false;
         let downloadEndpointLabel = endpoint.label;
         let webConsoleEndpointLabel: string | null = null;
+        let activatedEdgeRuntimeMode: "embedded" | "external" | null = null;
 
         await executeUpgradeTransaction({
             stage: async () => {
@@ -1189,6 +1250,7 @@ export async function runUpgrade(options: { forceYes?: boolean; targetVersion?: 
                     oldWebBackup: null,
                     managementEnvState: null,
                     edgeRuntimeDropInState: null,
+                    embeddedEdgePrivilegeDropInState: null,
                 };
                 await activateArtifacts(stagedBinary, stagedWeb, activationState);
             },
@@ -1197,15 +1259,18 @@ export async function runUpgrade(options: { forceYes?: boolean; targetVersion?: 
                 if (!activationState) throw new Error("Upgrade activation state is unavailable");
                 activationState.managementEnvState = captureFileState(managementEnvFile());
                 activationState.edgeRuntimeDropInState = captureFileState(edgeRuntimeCapacityDropIn());
+                activationState.embeddedEdgePrivilegeDropInState = captureFileState(embeddedEdgePrivilegeDropIn());
                 await ensurePersistedEdgeRuntimeIdentity(managementEnvFile());
-                await ensureRuntimeModeForBinaryUpgrade();
+                activatedEdgeRuntimeMode = await runtimeModeForBinaryUpgrade();
+                await reconcileEmbeddedEdgePrivilegeDropIn(activatedEdgeRuntimeMode);
                 await ensureEdgeRuntimeCapacityDropIn(env);
                 upsertManagementWebConsoleDir(managementEnvFile());
                 await restartServices();
             },
             healthCheck: async () => {
                 s.start("Waiting for the SupaCloud health endpoint");
-                await waitForManagementHealth();
+                if (!activatedEdgeRuntimeMode) throw new Error("Edge Runtime mode was not resolved");
+                await waitForUpgradeHealth();
                 committed = true;
             },
             rollback: async () => {

@@ -85,7 +85,7 @@ describe("pgredis-runtime platform boundary", () => {
 
     expect(tenantRuntime).not.toContain('renderSystemdEnvLine("SUPABASE_DB_URL"');
     expect(edgeManager).not.toContain("...process.env");
-    expect(edgeManager).toContain("EDGE_RUNTIME_USER requires runuser");
+    expect(edgeManager).toContain("EDGE_RUNTIME_USER requires setpriv");
     expect(managementConfig).toContain('process.platform === "linux" ? "supacloud-edge" : ""');
     expect(denoCompat).not.toContain("kvStores");
     expect(denoCompat).toContain("Deno.openKv is disabled");

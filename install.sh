@@ -34,6 +34,7 @@ PGREDIS_RUNTIME_BIN_FILE="${SUPACLOUD_PGREDIS_RUNTIME_BIN_FILE:-/usr/local/bin/s
 PGREDIS_RUNTIME_UNIT_FILE="${SUPACLOUD_PGREDIS_RUNTIME_UNIT_FILE:-/etc/systemd/system/supacloud-pgredis-runtime.service}"
 PGREDIS_RUNTIME_SOURCE_DIR="${SUPACLOUD_PGREDIS_RUNTIME_SOURCE_DIR:-/opt/supacloud/pgredis-runtime}"
 PGREDIS_TENANT_CONFIG_DIR="${SUPACLOUD_PGREDIS_TENANT_CONFIG_DIR:-/etc/supabase/pgredis-tenants}"
+MANAGEMENT_EDGE_PRIVILEGE_DROPIN="${SUPACLOUD_EMBEDDED_EDGE_PRIVILEGE_DROPIN:-/etc/systemd/system/supacloud.service.d/50-embedded-edge-privilege.conf}"
 PGREDIS_INSTALL_TRANSACTION_DIR=""
 CREDENTIALS_FILE="${SUPACLOUD_CREDENTIALS_FILE:-/etc/supabase/supacloud-credentials.env}"
 MASTER_TOKEN_FILE="${SUPACLOUD_MASTER_TOKEN_FILE:-/etc/supabase/master-token.env}"
@@ -2827,6 +2828,7 @@ capture_management_api_install() {
         supacloud_capture_file_snapshot "$MANAGEMENT_ENV_FILE" "${transaction_dir}/env" &&
         supacloud_capture_file_snapshot "$EDGE_RUNTIME_ENV_FILE" "${transaction_dir}/edge-env" &&
         supacloud_capture_file_snapshot /etc/systemd/system/supacloud.service "${transaction_dir}/unit" &&
+        supacloud_capture_file_snapshot "$MANAGEMENT_EDGE_PRIVILEGE_DROPIN" "${transaction_dir}/edge-privilege-dropin" &&
         supacloud_capture_file_snapshot /usr/local/libexec/supacloud/tenant-user "${transaction_dir}/tenant-user-helper" &&
         supacloud_capture_file_snapshot /etc/systemd/system/supacloud-tenant-user@.service "${transaction_dir}/tenant-user-unit" &&
         supacloud_capture_file_snapshot /usr/local/libexec/supacloud/systemd-unit "${transaction_dir}/systemd-unit-helper" &&
@@ -2843,6 +2845,7 @@ recover_management_api_install() {
     fi
     supacloud_restore_file_snapshot /usr/local/bin/supacloud "${transaction_dir}/binary" || return 1
     supacloud_restore_file_snapshot /etc/systemd/system/supacloud.service "${transaction_dir}/unit" || return 1
+    supacloud_restore_file_snapshot "$MANAGEMENT_EDGE_PRIVILEGE_DROPIN" "${transaction_dir}/edge-privilege-dropin" || return 1
     supacloud_restore_file_snapshot /usr/local/libexec/supacloud/tenant-user "${transaction_dir}/tenant-user-helper" || return 1
     supacloud_restore_file_snapshot /etc/systemd/system/supacloud-tenant-user@.service "${transaction_dir}/tenant-user-unit" || return 1
     supacloud_restore_file_snapshot /usr/local/libexec/supacloud/systemd-unit "${transaction_dir}/systemd-unit-helper" || return 1
@@ -2851,11 +2854,53 @@ recover_management_api_install() {
         supacloud_restore_file_snapshot "$MANAGEMENT_ENV_FILE" "${transaction_dir}/env" || return 1
     fi
     supacloud_restore_file_snapshot "$EDGE_RUNTIME_ENV_FILE" "${transaction_dir}/edge-env" || return 1
+    local restored_edge_runtime_mode
+    restored_edge_runtime_mode=$(management_edge_runtime_mode) || return 1
+    if [[ "$keep_current_env" == "true" ]]; then
+        configure_management_edge_privilege_dropin "$restored_edge_runtime_mode" || return 1
+    fi
     systemctl daemon-reload >/dev/null 2>&1 || return 1
     if [[ "$service_was_active" == "true" ]]; then
         systemctl start supacloud >/dev/null 2>&1 || return 1
         supacloud_wait_http_health http://127.0.0.1:9090/health || return 1
+        ensure_management_edge_runtime_ready "$restored_edge_runtime_mode" || return 1
     fi
+}
+
+management_edge_runtime_mode() {
+    local persisted_mode
+    persisted_mode=$(supacloud_env_value "$MANAGEMENT_ENV_FILE" EDGE_RUNTIME_MODE) || return 1
+    case "$persisted_mode" in
+        ""|embedded) printf 'embedded' ;;
+        external) printf 'external' ;;
+        *)
+            log_error "Invalid persisted EDGE_RUNTIME_MODE: $persisted_mode"
+            return 1
+            ;;
+    esac
+}
+
+ensure_management_edge_runtime_ready() {
+    local runtime_mode="$1"
+    if [[ "$runtime_mode" == "external" ]]; then
+        systemctl restart supacloud-edge-runtime || log_warn "systemctl restart supacloud-edge-runtime returned non-zero; deferring readiness to the health check"
+    fi
+    supacloud_wait_http_health http://127.0.0.1:9000/health
+}
+
+configure_management_edge_privilege_dropin() {
+    local runtime_mode="$1"
+    if [[ "$runtime_mode" == "external" ]]; then
+        rm -f "$MANAGEMENT_EDGE_PRIVILEGE_DROPIN"
+        return
+    fi
+    install -d -m 0755 "$(dirname "$MANAGEMENT_EDGE_PRIVILEGE_DROPIN")"
+    install -m 0644 /dev/stdin "$MANAGEMENT_EDGE_PRIVILEGE_DROPIN" <<'EOF'
+[Service]
+# The embedded Edge Runtime uses setpriv to drop privileges before tenant code starts.
+CapabilityBoundingSet=
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_SETGID CAP_SETUID
+EOF
 }
 
 install_management_api() {
@@ -3120,7 +3165,14 @@ install_management_api() {
     # after preserving an exact rollback copy of every runtime file it uses.
     log_info "Activating Management API binary and systemd unit..."
     local activation_status=0
-    write_management_api_systemd_unit "$BIN_TARGET" || activation_status=$?
+    local active_edge_runtime_mode=""
+    active_edge_runtime_mode=$(management_edge_runtime_mode) || activation_status=$?
+    if (( activation_status == 0 )); then
+        write_management_api_systemd_unit "$BIN_TARGET" || activation_status=$?
+    fi
+    if (( activation_status == 0 )); then
+        configure_management_edge_privilege_dropin "$active_edge_runtime_mode" || activation_status=$?
+    fi
     if (( activation_status == 0 )); then
         install_tenant_user_helper || activation_status=$?
     fi
@@ -3155,12 +3207,15 @@ install_management_api() {
     if (( activation_status == 0 )); then
         supacloud_wait_http_health http://127.0.0.1:9090/health || activation_status=$?
     fi
+    if (( activation_status == 0 )); then
+        ensure_management_edge_runtime_ready "$active_edge_runtime_mode" || activation_status=$?
+    fi
     if (( activation_status != 0 )); then
         management_keep_current_env_on_abort="true"
         log_error "Management API activation failed; the previous binary was restored with the committed encryption key"
         abort_management_install_transaction "$management_transaction_dir" "$management_service_was_active" true "$activation_status"
     fi
-    log_info "SupaCloud Management API is healthy"
+    log_info "SupaCloud Management API and Edge Runtime are healthy"
 
     # Management and pgredis are now one healthy control-plane baseline. Commit
     # both before optional watchdog and GoTrue follow-up work can fail.
