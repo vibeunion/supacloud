@@ -356,6 +356,20 @@ describe("runtime companion version assets", () => {
     expect(managementUnit).not.toContain("ReadWritePaths=/etc/supabase /etc/systemd/system ");
     expect(managementUnit).toContain("/run/supacloud-unit-requests");
     expect(managementUnit).toContain("CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER");
+    expect(managementUnit).not.toContain("CAP_SETUID");
+    expect(installer).toContain("configure_management_edge_privilege_dropin");
+    expect(installer).toContain(
+      'MANAGEMENT_EDGE_PRIVILEGE_DROPIN="${SUPACLOUD_EMBEDDED_EDGE_PRIVILEGE_DROPIN:-/etc/systemd/system/supacloud.service.d/50-embedded-edge-privilege.conf}"',
+    );
+    expect(installer).toContain(
+      'supacloud_capture_file_snapshot "$MANAGEMENT_EDGE_PRIVILEGE_DROPIN" "${transaction_dir}/edge-privilege-dropin"',
+    );
+    expect(installer).toContain(
+      'supacloud_restore_file_snapshot "$MANAGEMENT_EDGE_PRIVILEGE_DROPIN" "${transaction_dir}/edge-privilege-dropin"',
+    );
+    expect(installer.match(/ensure_management_edge_runtime_ready/g)).toHaveLength(3);
+    expect(installer).toContain("systemctl restart supacloud-edge-runtime");
+    expect(installer).toContain("http://127.0.0.1:9000/health");
     expect(managementUnit).toContain("SystemCallFilter=@system-service @chown");
     expect(managementUnit).not.toContain("@privileged");
     expect(installer).toContain("install_tenant_user_helper");

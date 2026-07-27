@@ -926,6 +926,86 @@ describe("installer configuration persistence", () => {
     expect(() => statSync(join(runtime, "extra.ts"))).toThrow();
   });
 
+  test("management Edge readiness restarts external mode and gates every mode on port 9000", () => {
+    const dir = makeTempDir();
+    const externalCalls = join(dir, "external-calls");
+    const external = runBash([
+      "source install.sh",
+      'systemctl() { printf "systemctl:%s\\n" "$*" >> "$CALLS"; return 1; }',
+      'log_warn() { printf "warn:%s\\n" "$*" >> "$CALLS"; }',
+      'supacloud_wait_http_health() { printf "health:%s\\n" "$1" >> "$CALLS"; return 0; }',
+      "ensure_management_edge_runtime_ready external",
+    ].join("; "), { CALLS: externalCalls });
+
+    expect(external.status, external.stderr).toBe(0);
+    expect(readFileSync(externalCalls, "utf8")).toBe([
+      "systemctl:restart supacloud-edge-runtime",
+      "warn:systemctl restart supacloud-edge-runtime returned non-zero; deferring readiness to the health check",
+      "health:http://127.0.0.1:9000/health",
+      "",
+    ].join("\n"));
+
+    const embeddedCalls = join(dir, "embedded-calls");
+    const embedded = runBash([
+      "source install.sh",
+      'systemctl() { printf "unexpected-systemctl\\n" >> "$CALLS"; }',
+      'supacloud_wait_http_health() { printf "health:%s\\n" "$1" >> "$CALLS"; return 7; }',
+      "ensure_management_edge_runtime_ready embedded",
+    ].join("; "), { CALLS: embeddedCalls });
+
+    expect(embedded.status).toBe(7);
+    expect(readFileSync(embeddedCalls, "utf8")).toBe("health:http://127.0.0.1:9000/health\n");
+  });
+
+  test("management Edge mode uses the persisted service environment and fails closed", () => {
+    const dir = makeTempDir();
+    const runtimeEnv = join(dir, "management-api.env");
+    const resolveMode = () => runBash(
+      "source install.sh; management_edge_runtime_mode",
+      { SUPACLOUD_MANAGEMENT_ENV_FILE: runtimeEnv },
+    );
+
+    writeFileSync(runtimeEnv, "EDGE_RUNTIME_MODE=external\n");
+    expect(resolveMode().stdout).toBe("external");
+    writeFileSync(runtimeEnv, "OTHER=value\n");
+    expect(resolveMode().stdout).toBe("embedded");
+    writeFileSync(runtimeEnv, "EDGE_RUNTIME_MODE=invalid\n");
+    expect(resolveMode().status).not.toBe(0);
+  });
+
+  test("management recovery reconciles the privilege drop-in when the committed mode changes", () => {
+    const runRecovery = (runtimeMode: "embedded" | "external", priorDropIn: "present" | "absent") => {
+      const dir = makeTempDir();
+      const runtimeEnv = join(dir, "management-api.env");
+      const edgeRuntimeEnv = join(dir, "edge-runtime.env");
+      const privilegeDropIn = join(dir, "supacloud.service.d", "50-embedded-edge-privilege.conf");
+      writeFileSync(runtimeEnv, `EDGE_RUNTIME_MODE=${runtimeMode}\n`);
+
+      const recovery = runBash([
+        "source install.sh",
+        'supacloud_restore_file_snapshot() { if [[ "$1" == "$MANAGEMENT_EDGE_PRIVILEGE_DROPIN" ]]; then if [[ "$PRIOR_DROPIN" == "present" ]]; then install -D -m 0644 /dev/stdin "$1" <<< "old-drop-in"; else rm -f "$1"; fi; fi; return 0; }',
+        'systemctl() { [[ "$1" == "is-active" ]] && return 1; return 0; }',
+        "supacloud_wait_http_health() { return 0; }",
+        'recover_management_api_install "$SNAPSHOT" true true',
+      ].join("; "), {
+        PRIOR_DROPIN: priorDropIn,
+        SNAPSHOT: join(dir, "snapshot"),
+        SUPACLOUD_MANAGEMENT_ENV_FILE: runtimeEnv,
+        SUPACLOUD_EDGE_RUNTIME_ENV_FILE: edgeRuntimeEnv,
+        SUPACLOUD_EMBEDDED_EDGE_PRIVILEGE_DROPIN: privilegeDropIn,
+      });
+
+      expect(recovery.status, recovery.stderr).toBe(0);
+      return privilegeDropIn;
+    };
+
+    const externalDropIn = runRecovery("external", "present");
+    expect(() => statSync(externalDropIn)).toThrow();
+
+    const embeddedDropIn = runRecovery("embedded", "absent");
+    expect(readFileSync(embeddedDropIn, "utf8")).toContain("CAP_SETGID CAP_SETUID");
+  });
+
   test("pgredis transaction restores the previous data plane after a later install failure", () => {
     const dir = makeTempDir();
     const fakeBin = join(dir, "bin");
