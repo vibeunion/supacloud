@@ -103,12 +103,14 @@ interface TusUpload {
   offset: number
   chunks: Uint8Array[]
   ctx: RequestContext
+  completedAt?: number
 }
 
 const TUS_VERSION = '1.0.0'
 const DEFAULT_FILE_SIZE_LIMIT = 50 * 1024 * 1024
 const MULTIPART_OVERHEAD_LIMIT = 1024 * 1024
 const MAX_CONCURRENT_TUS_UPLOADS = 4
+const COMPLETED_TUS_RETENTION_MS = 60 * 60 * 1000
 const PREFLIGHT_ROLLBACK = Symbol('storage-preflight-rollback')
 const INTERNAL_STORAGE_BUCKET = '.supacloud-lite'
 const OBJECT_VERSION_PREFIX = 'v2-'
@@ -128,7 +130,7 @@ export class StorageHandler {
   /** Create the given buckets if they don't already exist (config.toml storage.buckets.*). */
   async ensureBuckets(buckets: BucketSeed[]): Promise<void> {
     for (const b of buckets) {
-      if (b.id === INTERNAL_STORAGE_BUCKET) {
+      if (isInternalStorageBucket(b.id)) {
         throw new Error(`storage bucket id ${INTERNAL_STORAGE_BUCKET} is reserved for internal object versions`)
       }
       await this.db.query(
@@ -284,7 +286,7 @@ export class StorageHandler {
     }
     const id = body.id ?? body.name
     if (!id) return storageError(400, 'invalid_request', 'bucket id is required')
-    if (id === INTERNAL_STORAGE_BUCKET) {
+    if (isInternalStorageBucket(id)) {
       return storageError(400, 'invalid_request', `bucket id ${INTERNAL_STORAGE_BUCKET} is reserved`)
     }
     const existing = await this.db.query(`select id from storage.buckets where id = $1`, [id])
@@ -480,6 +482,7 @@ export class StorageHandler {
       'tus-resumable': TUS_VERSION,
       ...extra,
     })
+    this.pruneTusUploads()
 
     if (method === 'OPTIONS') {
       return new Response(null, {
@@ -487,11 +490,14 @@ export class StorageHandler {
         headers: tus({ 'tus-version': TUS_VERSION, 'tus-extension': 'creation,creation-with-upload,termination' }),
       })
     }
+    if (req.headers.get('tus-resumable') !== TUS_VERSION) {
+      return new Response(null, { status: 412, headers: tus() })
+    }
 
     // POST /upload/resumable — create a new upload
     if (id === '' && method === 'POST') {
-      const length = parseInt(req.headers.get('upload-length') ?? '', 10)
-      if (!Number.isFinite(length) || length < 0) {
+      const length = parseNonNegativeIntegerHeader(req.headers.get('upload-length'))
+      if (length === null) {
         return storageError(400, 'invalid_request', 'a non-negative Upload-Length header is required')
       }
       const meta = parseTusMetadata(req.headers.get('upload-metadata'))
@@ -532,6 +538,18 @@ export class StorageHandler {
           throw error
         }
         const uploadId = crypto.randomUUID()
+        this.tusUploads.set(uploadId, {
+          bucketId,
+          key,
+          contentType,
+          cacheControl: meta.cacheControl ?? 'no-cache',
+          upsert,
+          length: 0,
+          offset: 0,
+          chunks: [],
+          ctx,
+          completedAt: Date.now(),
+        })
         return new Response(null, {
           status: 201,
           headers: tus({
@@ -541,7 +559,8 @@ export class StorageHandler {
           }),
         })
       }
-      if (this.tusUploads.size >= MAX_CONCURRENT_TUS_UPLOADS) {
+      const activeUploads = [...this.tusUploads.values()].filter((upload) => upload.completedAt === undefined).length
+      if (activeUploads >= MAX_CONCURRENT_TUS_UPLOADS) {
         return storageError(429, 'too_many_requests', 'Too many resumable uploads are active')
       }
       const preflightError = await this.preflightObjectWrite(ctx, bucketId, key, length, meta.contentType, meta.cacheControl, upsert)
@@ -597,10 +616,12 @@ export class StorageHandler {
 
     if (method === 'PATCH') {
       if (!upload) return new Response(null, { status: 404, headers: tus() })
+      if (upload.completedAt !== undefined) return new Response(null, { status: 409, headers: tus() })
       if (!(req.headers.get('content-type') ?? '').includes('application/offset+octet-stream')) {
         return new Response(null, { status: 415, headers: tus() })
       }
-      const offset = parseInt(req.headers.get('upload-offset') ?? '', 10)
+      const offset = parseNonNegativeIntegerHeader(req.headers.get('upload-offset'))
+      if (offset === null) return storageError(400, 'invalid_request', 'Upload-Offset must be a non-negative integer')
       if (offset !== upload.offset) {
         return new Response(null, { status: 409, headers: tus() }) // offset mismatch
       }
@@ -659,8 +680,16 @@ export class StorageHandler {
       if (pg.code === '23505') return storageError(409, 'Duplicate', 'The resource already exists')
       throw e
     }
-    this.tusUploads.delete(id)
+    upload.chunks = []
+    upload.completedAt = Date.now()
     return undefined
+  }
+
+  private pruneTusUploads(): void {
+    const cutoff = Date.now() - COMPLETED_TUS_RETENTION_MS
+    for (const [id, upload] of this.tusUploads) {
+      if (upload.completedAt !== undefined && upload.completedAt < cutoff) this.tusUploads.delete(id)
+    }
   }
 
   private effectiveFileSizeLimit(bucket: BucketRow): number {
@@ -803,6 +832,14 @@ export class StorageHandler {
     const sourceRow = source.rows[0] as ObjectRow
     const bytes = await this.readObjectBytes(sourceRow)
     if (bytes === null) return storageError(404, 'not_found', 'Object not found')
+    const destinationBucket = await this.loadBucket(dstBucket)
+    if (!destinationBucket) return storageError(404, 'Bucket not found', 'Bucket not found')
+    if (bytes.length > this.effectiveFileSizeLimit(destinationBucket)) {
+      return storageError(413, 'Payload too large', 'The object exceeded the maximum allowed size')
+    }
+    const contentType = String(sourceRow.metadata?.mimetype ?? 'application/octet-stream')
+    const mimeError = invalidMimeType(destinationBucket, contentType)
+    if (mimeError) return mimeError
     const version = createObjectVersion()
     const stagedKey = await this.stageObjectBytes(version, bytes)
 
@@ -1103,17 +1140,30 @@ function isVersionedObjectVersion(version: string | null): version is string {
   return version?.startsWith(OBJECT_VERSION_PREFIX) ?? false
 }
 
+function isInternalStorageBucket(bucketId: string): boolean {
+  return bucketId === INTERNAL_STORAGE_BUCKET || bucketId.startsWith(`${INTERNAL_STORAGE_BUCKET}/`)
+}
+
 function legacyObjectKey(row: ObjectRow): string {
   return `${row.bucket_id}/${row.name}`
 }
 
 function invalidMimeType(bucket: BucketRow, contentType: string): Response | null {
   if (!bucket.allowed_mime_types?.length) return null
-  const base = contentType.split(';')[0].trim()
+  const base = contentType.split(';')[0].trim().toLowerCase()
   const allowed = bucket.allowed_mime_types.some(
-    (mimeType) => mimeType === base || (mimeType.endsWith('/*') && base.startsWith(mimeType.slice(0, -1)))
+    (mimeType) => {
+      const normalized = mimeType.trim().toLowerCase()
+      return normalized === base || (normalized.endsWith('/*') && base.startsWith(normalized.slice(0, -1)))
+    }
   )
   return allowed ? null : storageError(415, 'invalid_mime_type', `mime type ${base} is not supported`)
+}
+
+function parseNonNegativeIntegerHeader(value: string | null): number | null {
+  if (value === null || !/^(0|[1-9]\d*)$/.test(value)) return null
+  const parsed = Number(value)
+  return Number.isSafeInteger(parsed) ? parsed : null
 }
 
 async function readLimitedBody(request: Request, maxBytes: number): Promise<Uint8Array | null> {

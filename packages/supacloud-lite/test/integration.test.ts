@@ -182,6 +182,8 @@ describe('SupaCloud Lite supabase-js compatibility', () => {
 
     const reservedBucket = await serviceClient.storage.createBucket('.supacloud-lite')
     expect(reservedBucket.error).not.toBeNull()
+    const reservedPrefixBucket = await serviceClient.storage.createBucket('.supacloud-lite/objects')
+    expect(reservedPrefixBucket.error).not.toBeNull()
 
     const listed = await userClient.storage.from('assets').list('docs')
     expect(listed.error).toBeNull()
@@ -221,7 +223,22 @@ describe('SupaCloud Lite supabase-js compatibility', () => {
 
     for (let index = 0; index < 5; index++) {
       const key = `empty-${index}.txt`
-      expect((await createTusUpload(0, userAccessToken, key)).status).toBe(201)
+      const emptyUpload = await createTusUpload(0, userAccessToken, key)
+      expect(emptyUpload.status).toBe(201)
+      if (index === 0) {
+        const location = emptyUpload.headers.get('location')
+        expect(location).toBeString()
+        const head = await fetch(location!, {
+          method: 'HEAD',
+          headers: {
+            apikey: project.backend.anonKey,
+            authorization: `Bearer ${userAccessToken}`,
+            'tus-resumable': '1.0.0',
+          },
+        })
+        expect(head.status).toBe(200)
+        expect(head.headers.get('upload-length')).toBe('0')
+      }
       expect(await (await userClient.storage.from('assets').download(key)).data!.text()).toBe('')
     }
 
@@ -266,6 +283,34 @@ describe('SupaCloud Lite supabase-js compatibility', () => {
       body: 'x'.repeat(64 * 1024),
     })
     expect(oversizedChunk.status).toBe(400)
+
+    const metadata = [
+      `bucketName ${btoa('assets')}`,
+      `objectName ${btoa('strict.txt')}`,
+      `contentType ${btoa('text/plain')}`,
+    ].join(',')
+    const missingVersion = await fetch(`${project.url}/storage/v1/upload/resumable`, {
+      method: 'POST',
+      headers: {
+        apikey: project.backend.anonKey,
+        authorization: `Bearer ${userAccessToken}`,
+        'upload-length': '1',
+        'upload-metadata': metadata,
+      },
+    })
+    expect(missingVersion.status).toBe(412)
+    const malformedLength = await fetch(`${project.url}/storage/v1/upload/resumable`, {
+      method: 'POST',
+      headers: {
+        apikey: project.backend.anonKey,
+        authorization: `Bearer ${userAccessToken}`,
+        'tus-resumable': '1.0.0',
+        'upload-length': '1junk',
+        'upload-metadata': metadata,
+      },
+    })
+    expect(malformedLength.status).toBe(400)
+    expect((await createTusUpload(0, userAccessToken, 'case-insensitive.txt', 'Text/Plain')).status).toBe(201)
   })
 
   test('supports Realtime postgres_changes through Bun WebSockets', async () => {
@@ -345,15 +390,18 @@ describe('SupaCloud Lite supabase-js compatibility', () => {
 
     let channel: RealtimeChannel | undefined
     try {
-      const leaked = await new Promise<boolean>((resolveLeak, rejectLeak) => {
-        const timeout = setTimeout(() => resolveLeak(false), 1_000)
+      const result = await new Promise<{ leaked: boolean; receivedCurrent: boolean }>((resolveResult, rejectLeak) => {
+        let receivedCurrent = false
+        const timeout = setTimeout(() => resolveResult({ leaked: false, receivedCurrent }), 1_000)
         channel = userClient
           .channel('realtime-snapshot')
           .on('postgres_changes', { event: '*', schema: 'public', table: 'realtime_secrets' }, (payload) => {
-            if ((payload.new as { secret?: string }).secret === 'private-before-transfer') {
+            const secret = (payload.new as { secret?: string }).secret
+            if (secret === 'private-before-transfer') {
               clearTimeout(timeout)
-              resolveLeak(true)
+              resolveResult({ leaked: true, receivedCurrent })
             }
+            if (secret === 'public-after-transfer') receivedCurrent = true
           })
           .subscribe(async (status) => {
             if (status === 'SUBSCRIBED') {
@@ -377,7 +425,8 @@ describe('SupaCloud Lite supabase-js compatibility', () => {
             }
           })
       })
-      expect(leaked).toBe(false)
+      expect(result.leaked).toBe(false)
+      expect(result.receivedCurrent).toBe(true)
     } finally {
       if (channel) await userClient.removeChannel(channel)
     }

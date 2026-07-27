@@ -112,6 +112,31 @@ describe('Storage atomicity', () => {
     }
   })
 
+  test('reads legacy object rows from their bucket path', async () => {
+    const driver = new FailingStorageDriver()
+    const { backend, client } = await createStorageHarness(driver)
+    try {
+      await driver.put('assets/legacy.txt', new TextEncoder().encode('legacy'))
+      await backend.db.query(
+        `insert into storage.objects (bucket_id, name, owner, metadata, version)
+         values ('assets', 'legacy.txt', null, $1::jsonb, $2)`,
+        [
+          JSON.stringify({
+            size: 6,
+            mimetype: 'text/plain',
+            cacheControl: 'no-cache',
+            lastModified: new Date().toISOString(),
+          }),
+          crypto.randomUUID(),
+        ]
+      )
+
+      expect(await downloadText(client, 'legacy.txt')).toBe('legacy')
+    } finally {
+      await backend.close()
+    }
+  })
+
   test('keeps deleted metadata authoritative when old-byte cleanup fails', async () => {
     const driver = new FailingStorageDriver()
     const { backend, client } = await createStorageHarness(driver)
@@ -144,6 +169,28 @@ describe('Storage atomicity', () => {
       await backend.close()
     }
   })
+
+  test('enforces destination bucket limits for cross-bucket move and copy', async () => {
+    const { backend, client } = await createStorageHarness(new FailingStorageDriver())
+    try {
+      expect(
+        (await client.storage.from('assets').upload('source.txt', 'source', { contentType: 'text/plain', upsert: true }))
+          .error
+      ).toBeNull()
+
+      expect(
+        (await client.storage.from('assets').move('source.txt', 'moved.txt', { destinationBucket: 'restricted' })).error
+      ).not.toBeNull()
+      expect(
+        (await client.storage.from('assets').copy('source.txt', 'copied.txt', { destinationBucket: 'restricted' })).error
+      ).not.toBeNull()
+      expect(await downloadText(client, 'source.txt')).toBe('source')
+      expect((await client.storage.from('restricted').download('moved.txt')).error).not.toBeNull()
+      expect((await client.storage.from('restricted').download('copied.txt')).error).not.toBeNull()
+    } finally {
+      await backend.close()
+    }
+  })
 })
 
 async function createStorageHarness(driver: StorageDriver) {
@@ -151,7 +198,10 @@ async function createStorageHarness(driver: StorageDriver) {
     jwtSecret: 'x'.repeat(64),
     vaultKey: 'y'.repeat(64),
     storageDriver: driver,
-    buckets: [{ id: 'assets', public: false, fileSizeLimit: null, allowedMimeTypes: null }],
+    buckets: [
+      { id: 'assets', public: false, fileSizeLimit: null, allowedMimeTypes: null },
+      { id: 'restricted', public: false, fileSizeLimit: 1, allowedMimeTypes: ['application/json'] },
+    ],
     log: () => {},
   })
   const client = createClient('http://local', backend.serviceRoleKey, {
