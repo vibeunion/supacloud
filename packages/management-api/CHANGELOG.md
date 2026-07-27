@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.47.17](https://github.com/zuohuadong/supacloud/compare/management-api-v0.47.16...management-api-v0.47.17) (2026-07-27)
+
+
+### Bug Fixes
+
+* **database:** add migration-backed table creation ([#590](https://github.com/zuohuadong/supacloud/issues/590)) ([c7945f5](https://github.com/zuohuadong/supacloud/commit/c7945f5a349fc23f816075f70ab11b26afd52882))
+* **storage:** complete Studio file management ([#589](https://github.com/zuohuadong/supacloud/issues/589)) ([2ad0b88](https://github.com/zuohuadong/supacloud/commit/2ad0b8865f93aab2444011ebad7cc21f6c5bca28))
+
 ## [0.47.16](https://github.com/zuohuadong/supacloud/compare/management-api-v0.47.15...management-api-v0.47.16) (2026-07-26)
 
 
