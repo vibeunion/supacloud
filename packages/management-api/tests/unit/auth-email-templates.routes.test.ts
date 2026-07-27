@@ -131,6 +131,50 @@ describe("project auth email template routes", () => {
     expect(restartRuntime).not.toHaveBeenCalled();
   });
 
+  test("PUT preserves an existing subject for content-only patches", async () => {
+    const res = await request("/v1/projects/proj_1/auth/template", {
+      method: "PUT",
+      body: JSON.stringify({
+        templates: {
+          confirmation: {
+            content: "<p>Updated {{ .ConfirmationURL }}</p>",
+          },
+        },
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(updateProjectSettings).toHaveBeenCalledWith("proj_1", {
+      auth: expect.objectContaining({
+        mailer_subjects_confirmation: "Custom confirmation",
+        mailer_templates_confirmation_content: "<p>Updated {{ .ConfirmationURL }}</p>",
+      }),
+    });
+    expect(restartRuntime).toHaveBeenCalledWith("proj_1");
+  });
+
+  test("PUT rejects blank email template subjects", async () => {
+    const res = await request("/v1/projects/proj_1/auth/template", {
+      method: "PUT",
+      body: JSON.stringify({
+        templates: {
+          confirmation: {
+            subject: "  ",
+            content: "<p>{{ .ConfirmationURL }}</p>",
+          },
+        },
+      }),
+    });
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({
+      message: "Email template subject is required",
+      code: "AUTH_TEMPLATE_SUBJECT_REQUIRED",
+    });
+    expect(updateProjectSettings).not.toHaveBeenCalled();
+    expect(restartRuntime).not.toHaveBeenCalled();
+  });
+
   test("DELETE clears canonical and legacy template keys for rollback", async () => {
     getProjectSettings.mockResolvedValue({
       auth: {

@@ -1,8 +1,10 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
+  import { authApiResponseMessage, readAuthApiPayload } from "../../auth-api-response";
 
   import { page } from "$app/state";
   import { untrack } from "svelte";
+  import { t } from "svelte-i18n";
   import { Loader2, Mail, Save, ChevronDown, ChevronUp, RotateCcw } from "lucide-svelte";
   import { createQuery, createMutation, useQueryClient } from "@tanstack/svelte-query";
 
@@ -66,8 +68,9 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ templates: payload })
       });
-      if (!res.ok) throw new Error("保存失败");
-      return res.json();
+      const responsePayload = await readAuthApiPayload(res);
+      if (!res.ok) throw new Error(authApiResponseMessage(responsePayload, $t("Auth.template_save_failed")));
+      return responsePayload;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["auth_templates", projectRef] });
@@ -101,6 +104,10 @@
 
   async function saveTemplates() {
     saveMsg = null;
+    if (templates.some((template) => !template.subject.trim())) {
+      saveMsg = `❌ ${$t("Auth.template_subject_required")}`;
+      return;
+    }
     saveMutation.mutate();
   }
 

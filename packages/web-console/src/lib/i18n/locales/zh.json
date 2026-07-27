@@ -100,6 +100,9 @@
     "verified": "已验证",
     "created": "创建时间",
     "last_sign_in": "最后登录",
+    "redirect_url_duplicate": "该重定向 URL 已存在，无需重复添加",
+    "template_subject_required": "每个邮件模板都必须填写邮件主题",
+    "template_save_failed": "邮件模板保存失败",
     "signOut": "退出登录"
   },
   "Tables": {
