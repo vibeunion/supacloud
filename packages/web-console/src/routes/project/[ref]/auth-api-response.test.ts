@@ -11,6 +11,8 @@ describe("auth API response helpers", () => {
     expect(unwrapAuthApiObject({ data: { code: "ENVELOPED" } })).toEqual({ code: "ENVELOPED" });
     expect(authApiResponseMessage({ error: { message: "managed by owner" } }, "fallback"))
       .toBe("managed by owner");
+    expect(authApiResponseMessage({ message: "SITE_URL 格式不合法" }, "fallback"))
+      .toBe("SITE_URL 格式不合法");
   });
 
   test("parses JSON and preserves plain-text error bodies", async () => {

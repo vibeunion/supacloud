@@ -1,5 +1,6 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
+  import { authApiResponseMessage, readAuthApiPayload } from "../../auth-api-response";
 
   import { page } from "$app/state";
   import { Loader2, Link2, Globe, Plus, Trash2, Save } from "lucide-svelte";
@@ -57,11 +58,9 @@
           URI_ALLOW_LIST: redirectUrls.join(","),
         })
       });
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || res.statusText);
-      }
-      return res.json();
+      const payload = await readAuthApiPayload(res);
+      if (!res.ok) throw new Error(authApiResponseMessage(payload, res.statusText || "保存失败"));
+      return payload;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["auth_config", projectRef] });
