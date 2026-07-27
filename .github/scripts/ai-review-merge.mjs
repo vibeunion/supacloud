@@ -300,8 +300,12 @@ export function validatePullRequestForMerge(prDetails, {
   const headSha = prDetails.head?.sha;
   const headRef = prDetails.head?.ref;
   const baseRef = prDetails.base?.ref;
-  if (!headSha || !headRef || !baseRef) {
+  const title = typeof prDetails.title === 'string' ? prDetails.title.trim() : '';
+  if (!headSha || !headRef || !baseRef || !title) {
     throw new Error('Pull request metadata is incomplete.');
+  }
+  if (/\r|\n/.test(title)) {
+    throw new Error('Pull request title must be a single line.');
   }
   if (!expectedHeadSha || headSha !== expectedHeadSha) {
     throw new Error(`Pull request head SHA changed (expected ${expectedHeadSha || 'missing'}, current ${headSha}).`);
@@ -316,7 +320,7 @@ export function validatePullRequestForMerge(prDetails, {
     throw new Error(`Pull request head ref changed (expected ${expectedHeadRef || 'missing'}, current ${headRef}).`);
   }
 
-  return { headSha, headRef, baseRef };
+  return { headSha, headRef, baseRef, title };
 }
 
 async function getPRComments() {
@@ -659,9 +663,9 @@ async function postComment(body) {
   });
 }
 
-export function buildMergeRequestBody({ prNumber, headRef, expectedHeadSha }) {
+export function buildMergeRequestBody({ prTitle, expectedHeadSha }) {
   return {
-    commit_title: `Merge pull request #${prNumber} from ${headRef}`,
+    commit_title: prTitle,
     merge_method: 'squash',
     sha: expectedHeadSha,
   };
@@ -680,8 +684,7 @@ async function mergePR({ expectedHeadSha, expectedHeadRef, expectedBaseRef }) {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(buildMergeRequestBody({
-      prNumber: PR_NUM,
-      headRef: current.headRef,
+      prTitle: current.title,
       expectedHeadSha,
     })),
   });
