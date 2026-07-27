@@ -88,6 +88,74 @@ describe("storage management routes", () => {
     uploadSpy.mockRestore();
   });
 
+  test("management file endpoint proxies authenticated downloads", async () => {
+    const downloadSpy = spyOn(StorageService, "getDownloadResponse").mockResolvedValue(
+      new Response("preview", { headers: { "content-type": "text/plain" } }),
+    );
+
+    try {
+      const unauthenticated = await request("/v1/storage/test-ref/buckets/manuals/files/content?path=readme.txt");
+      expect(unauthenticated.status).toBe(401);
+
+      const authorized = await request("/v1/storage/test-ref/buckets/manuals/files/content?path=folder%2Freadme.txt", {
+        headers: { Authorization: "Bearer dev-master-token" },
+      });
+      expect(authorized.status).toBe(200);
+      expect(await authorized.text()).toBe("preview");
+      expect(downloadSpy).toHaveBeenCalledWith("test-ref", "manuals", "folder/readme.txt");
+
+      const invalidPath = await request("/v1/storage/test-ref/buckets/manuals/files/content?path=..%2Fsecret.txt", {
+        headers: { Authorization: "Bearer dev-master-token" },
+      });
+      expect(invalidPath.status).toBe(400);
+    } finally {
+      downloadSpy.mockRestore();
+    }
+  });
+
+  test("management public URL is available only for public buckets", async () => {
+    const bucketSpy = spyOn(StorageRLS, "getLogicalBucket").mockImplementation(
+      async (_ref, bucketId) => ({ id: bucketId, name: bucketId, public: bucketId === "assets" }),
+    );
+
+    try {
+      const publicResponse = await request("/v1/storage/test-ref/buckets/assets/files/public-url?path=folder%2Flogo%20image.svg", {
+        headers: { Authorization: "Bearer dev-master-token", "x-forwarded-proto": "https" },
+      });
+      expect(publicResponse.status).toBe(200);
+      expect(await publicResponse.json()).toEqual({
+        public_url: "https://test-ref.api.example.com/storage/v1/object/public/assets/folder/logo%20image.svg",
+      });
+
+      const privateResponse = await request("/v1/storage/test-ref/buckets/private/files/public-url?path=secret.txt", {
+        headers: { Authorization: "Bearer dev-master-token" },
+      });
+      expect(privateResponse.status).toBe(409);
+    } finally {
+      bucketSpy.mockRestore();
+    }
+  });
+
+  test("management delete endpoint preserves nested object paths", async () => {
+    const deleteSpy = spyOn(StorageService, "deleteFile").mockResolvedValue(true);
+
+    try {
+      const unauthenticated = await request("/v1/storage/test-ref/buckets/manuals/files/content?path=old.txt", {
+        method: "DELETE",
+      });
+      expect(unauthenticated.status).toBe(401);
+
+      const response = await request("/v1/storage/test-ref/buckets/manuals/files/content?path=folder%2Fold%20file.txt", {
+        method: "DELETE",
+        headers: { Authorization: "Bearer dev-master-token" },
+      });
+      expect(response.status).toBe(200);
+      expect(deleteSpy).toHaveBeenCalledWith("test-ref", "manuals", "folder/old file.txt");
+    } finally {
+      deleteSpy.mockRestore();
+    }
+  });
+
   test("storage migration endpoints require admin auth", async () => {
     const migrateSpy = spyOn(StorageService, "startMigration").mockResolvedValue({ jobId: "job_1" });
 

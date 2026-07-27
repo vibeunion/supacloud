@@ -40,6 +40,21 @@ function normalizeObjectPath(path: string): string | null {
     return normalized;
 }
 
+function encodeObjectPath(path: string): string {
+    return path.split("/").map(encodeURIComponent).join("/");
+}
+
+function publicUrlProtocol(request: Request): "http" | "https" {
+    const forwardedProtocol = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
+    if (forwardedProtocol === "http" || forwardedProtocol === "https") return forwardedProtocol;
+    return new URL(request.url).protocol === "http:" ? "http" : "https";
+}
+
+function buildPublicObjectUrl(request: Request, projectRef: string, bucket: string, objectPath: string): string {
+    const host = `${projectRef}.api.${config.baseDomain}`;
+    return `${publicUrlProtocol(request)}://${host}/storage/v1/object/public/${encodeURIComponent(bucket)}/${encodeObjectPath(objectPath)}`;
+}
+
 async function ensureImageTransformAccess(request: Request, ref: string, bucket: string) {
     const logicalBucket = await StorageRLS.getLogicalBucket(ref, bucket, undefined, true).catch(() => null);
     if (logicalBucket?.public === true) return undefined;
@@ -88,6 +103,50 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
         if (authError) return status(authError.status, authError.body);
         return await StorageService.listFiles(params.ref, params.name);
     }, { detail: { tags: ["storage"], summary: "List files in a storage bucket" } })
+    .get('/:ref/buckets/:name/files/public-url', async ({ params, query, request }) => {
+        const authError = await requireProjectOrAdminAuth(request, params.ref);
+        if (authError) return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
+
+        const objectPath = normalizeObjectPath(query.path);
+        if (!objectPath) return status(400, { message: "Invalid object path", code: "400" });
+
+        const bucket = await StorageRLS.getLogicalBucket(params.ref, params.name, undefined, true);
+        if (!bucket) return status(404, { message: "Bucket not found", code: "404" });
+        if (bucket.public !== true) {
+            return status(409, { message: "Bucket must be public before copying a public URL", code: "409" });
+        }
+
+        return { public_url: buildPublicObjectUrl(request, params.ref, params.name, objectPath) };
+    }, {
+        query: t.Object({ path: t.String() }),
+        detail: { tags: ["storage"], summary: "Get a public URL for a file in a public bucket" },
+    })
+    .get('/:ref/buckets/:name/files/content', async ({ params, query, request }) => {
+        const authError = await requireProjectOrAdminAuth(request, params.ref);
+        if (authError) return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
+
+        const objectPath = normalizeObjectPath(query.path);
+        if (!objectPath) return status(400, { message: "Invalid object path", code: "400" });
+        const response = await StorageService.getDownloadResponse(params.ref, params.name, objectPath);
+        if (!response) return status(404, { message: "File not found", code: "404" });
+        return response;
+    }, {
+        query: t.Object({ path: t.String() }),
+        detail: { tags: ["storage"], summary: "Download or preview a storage file" },
+    })
+    .delete('/:ref/buckets/:name/files/content', async ({ params, query, request }) => {
+        const authError = await requireProjectOrAdminAuth(request, params.ref);
+        if (authError) return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
+
+        const objectPath = normalizeObjectPath(query.path);
+        if (!objectPath) return status(400, { message: "Invalid object path", code: "400" });
+        const success = await StorageService.deleteFile(params.ref, params.name, objectPath);
+        if (!success) return status(500, { message: "Delete failed", code: "500" });
+        return { success: true };
+    }, {
+        query: t.Object({ path: t.String() }),
+        detail: { tags: ["storage"], summary: "Delete a storage file" },
+    })
     .post('/:ref/buckets/:name/upload', async ({ params, body, request }) => {
         const authError = await requireProjectOrAdminAuth(request, params.ref);
         if (authError) return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
