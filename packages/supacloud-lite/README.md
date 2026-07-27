@@ -105,8 +105,8 @@ supacloud-lite version
 | --- | --- | --- |
 | `supabase.from()` | 已验证核心 | 自动测试覆盖 CRUD、过滤、RLS；嵌套关系、RPC 和高级 PostgREST 语法属于实验性兼容 |
 | `supabase.auth` | 已验证核心 | 自动测试覆盖邮箱密码、会话和 bcrypt；OTP/Magic Link、匿名用户、OAuth、MFA 属于实验性兼容 |
-| `supabase.storage` | 已验证核心 | 自动测试覆盖上传下载、列表、删除和 TUS 限制/RLS；移动复制、签名 URL 属于实验性兼容 |
-| `supabase.channel()` | 已验证核心 | 自动测试覆盖 `postgres_changes` 和 DELETE RLS 隔离；Broadcast、Presence 属于实验性兼容 |
+| `supabase.storage` | 已验证核心 | 自动测试覆盖上传下载、列表、删除、TUS 限制/RLS，以及跨 Bucket 移动复制的目标约束；签名 URL 属于实验性兼容 |
+| `supabase.channel()` | 已验证核心 | 自动测试覆盖 `postgres_changes`、DELETE RLS 隔离和事件快照校验；Broadcast、Presence 属于实验性兼容 |
 | `supabase.functions.invoke()` | 已验证核心 | 自动测试覆盖 Bun.build、`Deno.serve()`、公开函数和同进程重启 |
 | Supabase migrations | 支持 | 按文件名排序，记录到 `supabase_migrations` |
 | PostgreSQL RLS | 支持 | 使用 `anon`、`authenticated`、`service_role` 数据库角色执行 |

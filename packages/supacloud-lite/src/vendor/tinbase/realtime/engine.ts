@@ -618,8 +618,7 @@ export class RealtimeEngine {
           `select to_jsonb(visible_row) as record
            from ${quoteIdent(event.schema)}.${quoteIdent(event.table)} as visible_row
            where ${conds.join(' and ')}
-           limit 1
-           for share`,
+           limit 1`,
           params
         )
       )

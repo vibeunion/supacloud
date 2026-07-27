@@ -110,6 +110,7 @@ const TUS_VERSION = '1.0.0'
 const DEFAULT_FILE_SIZE_LIMIT = 50 * 1024 * 1024
 const MULTIPART_OVERHEAD_LIMIT = 1024 * 1024
 const MAX_CONCURRENT_TUS_UPLOADS = 4
+const MAX_COMPLETED_TUS_UPLOADS = 64
 const COMPLETED_TUS_RETENTION_MS = 60 * 60 * 1000
 const PREFLIGHT_ROLLBACK = Symbol('storage-preflight-rollback')
 const INTERNAL_STORAGE_BUCKET = '.supacloud-lite'
@@ -550,6 +551,7 @@ export class StorageHandler {
           ctx,
           completedAt: Date.now(),
         })
+        this.pruneTusUploads()
         return new Response(null, {
           status: 201,
           headers: tus({
@@ -682,6 +684,7 @@ export class StorageHandler {
     }
     upload.chunks = []
     upload.completedAt = Date.now()
+    this.pruneTusUploads()
     return undefined
   }
 
@@ -690,6 +693,10 @@ export class StorageHandler {
     for (const [id, upload] of this.tusUploads) {
       if (upload.completedAt !== undefined && upload.completedAt < cutoff) this.tusUploads.delete(id)
     }
+    const completed = [...this.tusUploads.entries()]
+      .filter((entry): entry is [string, TusUpload & { completedAt: number }] => entry[1].completedAt !== undefined)
+      .sort((left, right) => left[1].completedAt - right[1].completedAt)
+    for (const [id] of completed.slice(0, -MAX_COMPLETED_TUS_UPLOADS)) this.tusUploads.delete(id)
   }
 
   private effectiveFileSizeLimit(bucket: BucketRow): number {
