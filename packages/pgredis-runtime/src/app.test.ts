@@ -108,7 +108,7 @@ describe("pgredis-runtime internal API", () => {
     const acquiredRefs: string[] = [];
     let releases = 0;
     const cache: TenantCache = {
-      async get(key) { return `value:${key}`; },
+      async get<T = unknown>(key: string): Promise<T | null> { return `value:${key}` as T; },
       async set() { return true; },
       async delete() { return true; },
       async ttl() { return 250; },

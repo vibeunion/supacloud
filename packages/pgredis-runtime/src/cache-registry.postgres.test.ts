@@ -77,8 +77,8 @@ test.skipIf(!databaseUrl)("PostgreSQL commits notifications atomically and clear
 
       await first.cache.set("flush:a", { version: 1 });
       await first.cache.set("flush:b", { version: 1 });
-      expect(await second.cache.get("flush:a")).toEqual({ version: 1 });
-      expect(await second.cache.get("flush:b")).toEqual({ version: 1 });
+      expect(await second.cache.get<{ version: number }>("flush:a")).toEqual({ version: 1 });
+      expect(await second.cache.get<{ version: number }>("flush:b")).toEqual({ version: 1 });
       expect(await first.cache.flush()).toBe(2);
       await waitFor(() => notifications.some(({ op }) => op === "clearNamespace"));
       expect(await second.cache.get("flush:a")).toBeNull();
