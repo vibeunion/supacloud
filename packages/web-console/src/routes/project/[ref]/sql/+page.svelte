@@ -1,6 +1,8 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
   import { readDatabaseSqlResponse } from "$lib/database-sql-response";
+  import { isSqlTabNameAvailable, nextSqlTabName } from "$lib/sql-tab-names";
+  import { toast } from "svelte-sonner";
 
   import { onMount } from "svelte";
   import { page } from "$app/state";
@@ -47,7 +49,7 @@
     tabCounter++;
     return {
       id,
-      name: name || $t("SqlEditor.untitled_query"),
+      name: name?.trim() || nextSqlTabName(tabs, $t("SqlEditor.untitled_query")),
       sql: sqlContent || "",
       results: null,
       error: null,
@@ -250,9 +252,13 @@
     const tab = tabs.find(tb => tb.id === id);
     if (!tab) return;
     const newName = prompt("重命名查询 Tab：", tab.name);
-    if (newName?.trim()) {
-      tabs = tabs.map(tb => tb.id === id ? { ...tb, name: newName.trim() } : tb);
+    const trimmedName = newName?.trim();
+    if (!trimmedName) return;
+    if (!isSqlTabNameAvailable(tabs, id, trimmedName)) {
+      toast.error("查询标签名称已存在");
+      return;
     }
+    tabs = tabs.map(tb => tb.id === id ? { ...tb, name: trimmedName } : tb);
   }
 </script>
 

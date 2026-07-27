@@ -39,7 +39,13 @@
         </button>
       {/each}
       <div class="border-t my-1"></div>
-      <button class="w-full text-left px-3 py-2 text-sm hover:bg-secondary text-brand flex items-center gap-2">
+      <button
+        class="w-full text-left px-3 py-2 text-sm hover:bg-secondary text-brand flex items-center gap-2"
+        onclick={() => {
+          isOpen = false;
+          goto("/projects/create");
+        }}
+      >
         <Plus class="w-4 h-4" />
         {$t("Project.new_project")}
       </button>

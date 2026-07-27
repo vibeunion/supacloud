@@ -1,7 +1,6 @@
 <script lang="ts">
   import { useList } from "@svadmin/core";
   import { Loader2 } from "lucide-svelte";
-  import { CreateButton } from "@svadmin/ui";
 
   const query = useList({ resource: "v1/projects" });
 </script>
