@@ -8,6 +8,7 @@ const mockStorageDriver = {
   emptyBucket: mock().mockResolvedValue(true),
   listBuckets: mock().mockResolvedValue([]),
   listFiles: mock().mockResolvedValue([]),
+  isBucketEmpty: mock().mockResolvedValue(true),
   uploadFile: mock().mockResolvedValue(true),
   deleteFile: mock().mockResolvedValue(true),
   getDownloadResponse: mock().mockResolvedValue(new Response()),
@@ -53,6 +54,13 @@ describe("StorageService (using adapter)", () => {
       mockStorageDriver.deleteBucket.mockResolvedValueOnce(true);
       await storageService.deleteBucket("myproj", "bucket");
       expect(mockStorageDriver.deleteBucket).toHaveBeenCalledWith("myproj", "bucket");
+    });
+  });
+
+  describe("isBucketEmpty", () => {
+    test("should preserve strict driver failures", async () => {
+      mockStorageDriver.isBucketEmpty.mockRejectedValueOnce(new Error("storage unavailable"));
+      await expect(StorageService.isBucketEmpty("myproj", "bucket")).rejects.toThrow("storage unavailable");
     });
   });
 

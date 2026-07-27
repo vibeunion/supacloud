@@ -47,6 +47,7 @@ export interface StorageDriver {
   ): Promise<
     { id: string; name: string; updated?: string; size: string; type: string }[]
   >;
+  isBucketEmpty(projectRef: string, bucket: string): Promise<boolean>;
   getDownloadResponse(
     projectRef: string,
     bucket: string,
@@ -222,6 +223,11 @@ export class JuiceFSDriver implements StorageDriver {
     } catch (e) {
       return [];
     }
+  }
+
+  async isBucketEmpty(projectRef: string, bucket: string): Promise<boolean> {
+    const entries = await fs.readdir(this.getBasePath(projectRef, bucket));
+    return entries.length === 0;
   }
 
   async getDownloadResponse(
@@ -646,6 +652,23 @@ export class S3Driver implements StorageDriver {
     } catch (e) {
       return [];
     }
+  }
+
+  async isBucketEmpty(projectRef: string, bucket: string): Promise<boolean> {
+    const creds = await this.getCreds(projectRef);
+    if (!creds?.accessKey || !creds?.secretKey) {
+      throw new Error("Storage credentials are unavailable");
+    }
+    const s3 = this.getClient(
+      creds as {
+        accessKey: string;
+        secretKey: string;
+        endpoint: string;
+        bucket: string;
+      },
+    );
+    const response = await s3.list({ prefix: `${bucket}/`, maxKeys: 1 });
+    return (response.contents?.length ?? 0) === 0;
   }
 
   async getDownloadResponse(

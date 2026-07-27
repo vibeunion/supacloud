@@ -19,7 +19,11 @@ type StorageBucketCreateInput = {
     name: string;
     id?: string;
     public?: boolean;
+    file_size_limit?: number;
+    allowed_mime_types?: string[];
 };
+
+type StorageOperationResult = { success: boolean; error?: string };
 
 // ── Imaginary Config ──────────────────────────────────────────────
 const IMAGINARY_URL = config.imaginaryUrl;
@@ -69,10 +73,98 @@ function buildSourceUrl(bucket: string, path: string): string {
     return `${base}/${encodeURIComponent(bucket)}/${normalizedPath.split("/").map(encodeURIComponent).join("/")}`;
 }
 
+function logStorageMetadataFailure(message: string, ref: string, bucketName: string, error: unknown): void {
+    logger.error(message, {
+        ref,
+        bucketName,
+        error: error instanceof Error ? error.message : String(error),
+    });
+}
+
+async function createLogicalStorageBucket(ref: string, bucketName: string, input: StorageBucketCreateInput): Promise<StorageOperationResult> {
+    try {
+        const created = await StorageRLS.createLogicalBucketAsAdmin(ref, {
+            id: bucketName,
+            name: bucketName,
+            public: input.public ?? false,
+            fileSizeLimit: input.file_size_limit,
+            allowedMimeTypes: input.allowed_mime_types,
+        });
+        return created ? { success: true } : { success: false, error: "Bucket already exists" };
+    } catch (error: unknown) {
+        logStorageMetadataFailure("Failed to persist Studio storage bucket metadata", ref, bucketName, error);
+        return { success: false, error: "Failed to persist bucket metadata" };
+    }
+}
+
+async function rollbackLogicalStorageBucket(ref: string, bucketName: string): Promise<void> {
+    try {
+        await StorageRLS.deleteLogicalBucketAsAdmin(ref, bucketName);
+    } catch (error: unknown) {
+        logStorageMetadataFailure("Failed to roll back Studio storage bucket metadata", ref, bucketName, error);
+    }
+}
+
 async function createStorageBucket(ref: string, input: StorageBucketCreateInput) {
     const bucketName = input.name || input.id || "";
+    const logicalResult = await createLogicalStorageBucket(ref, bucketName, input);
+    if (!logicalResult.success) return { bucketName, storageResult: logicalResult };
     const storageResult = await StorageService.createBucket(ref, bucketName);
+    if (!storageResult.success) await rollbackLogicalStorageBucket(ref, bucketName);
     return { bucketName, storageResult };
+}
+
+function mergeStorageBuckets(
+    physicalBuckets: Array<Record<string, unknown>>,
+    logicalBuckets: Array<Record<string, unknown>>,
+): Record<string, unknown>[] {
+    const bucketsById = new Map<string, Record<string, unknown>>();
+    for (const bucket of physicalBuckets) bucketsById.set(String(bucket.id), bucket);
+    for (const bucket of logicalBuckets) {
+        const id = String(bucket.id);
+        bucketsById.set(id, { ...bucketsById.get(id), ...bucket, id });
+    }
+    return Array.from(bucketsById.values());
+}
+
+async function listStorageBuckets(ref: string): Promise<Record<string, unknown>[]> {
+    const [physicalBuckets, logicalBuckets] = await Promise.all([
+        StorageService.listBuckets(ref),
+        StorageRLS.listLogicalBucketsAsAdmin(ref),
+    ]);
+    return mergeStorageBuckets(physicalBuckets, logicalBuckets);
+}
+
+async function listLegacyStorageBuckets(ref: string): Promise<Record<string, unknown>[]> {
+    if (ref === "default") return await StorageService.listBuckets(ref);
+    return await listStorageBuckets(ref);
+}
+
+async function assertStorageBucketDeletable(ref: string, bucketName: string): Promise<void> {
+    if (!await StorageService.isBucketEmpty(ref, bucketName)) throw new Error("Bucket is not empty");
+    await StorageRLS.assertLogicalBucketDeletableAsAdmin(ref, bucketName);
+}
+
+async function deleteStorageBucket(ref: string, bucketName: string) {
+    try {
+        await assertStorageBucketDeletable(ref, bucketName);
+    } catch (error: unknown) {
+        return { success: false, error: error instanceof Error ? error.message : "Failed to validate bucket" };
+    }
+    const storageResult = await StorageService.deleteBucket(ref, bucketName);
+    if (!storageResult.success) return storageResult;
+
+    try {
+        await StorageRLS.deleteLogicalBucketAsAdmin(ref, bucketName);
+        return storageResult;
+    } catch (error: unknown) {
+        logger.error("Failed to delete Studio storage bucket metadata", {
+            ref,
+            bucketName,
+            error: error instanceof Error ? error.message : String(error),
+        });
+        return { success: false, error: "Failed to delete bucket metadata" };
+    }
 }
 
 // ── Storage Routes ────────────────────────────────────────────────
@@ -83,15 +175,15 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
     .get('/:ref/buckets', async ({ params, request }) => {
         const authError = await requireProjectOrAdminAuth(request, params.ref);
         if (authError) return status(authError.status, authError.body);
-        return await StorageService.listBuckets(params.ref);
+        return await listLegacyStorageBuckets(params.ref);
     }, { detail: { tags: ["storage"], summary: "List storage buckets for a project" } })
     .post('/:ref/buckets', async ({ params, body, set, request }) => {
         const authError = await requireProjectOrAdminAuth(request, params.ref);
         if (authError) return status(authError.status, authError.body);
         const { bucketName, storageResult } = await createStorageBucket(params.ref, body);
         if (!storageResult.success) {
-            set.status = 500;
-            return { message: storageResult.error || "Failed to create bucket", code: "500" };
+            set.status = storageResult.error === "Bucket already exists" ? 409 : 500;
+            return { message: storageResult.error || "Failed to create bucket", code: String(set.status) };
         }
         return { id: bucketName, name: bucketName, public: body.public || false };
     }, {
@@ -511,15 +603,15 @@ export const projectStorageRoutes = new Elysia({ prefix: "/v1/projects/:ref/stor
     .get('/buckets', async ({ params, request }) => {
         const authError = await requireProjectOrAdminAuth(request, params.ref);
         if (authError) return status(authError.status, authError.body);
-        return await StorageService.listBuckets(params.ref);
+        return await listStorageBuckets(params.ref);
     }, { detail: { tags: ["storage"], summary: "List project storage buckets" } })
     .post('/buckets', async ({ params, body, set, request }) => {
         const authError = await requireProjectOrAdminAuth(request, params.ref);
         if (authError) return status(authError.status, authError.body);
         const { bucketName, storageResult } = await createStorageBucket(params.ref, body);
         if (!storageResult.success) {
-            set.status = 500;
-            return { message: storageResult.error || "Failed to create bucket", code: "500" };
+            set.status = storageResult.error === "Bucket already exists" ? 409 : 500;
+            return { message: storageResult.error || "Failed to create bucket", code: String(set.status) };
         }
         return { id: bucketName, name: bucketName, public: body.public || false };
     }, {
@@ -529,7 +621,7 @@ export const projectStorageRoutes = new Elysia({ prefix: "/v1/projects/:ref/stor
     .get('/buckets/:id', async ({ params, set, request }) => {
         const authError = await requireProjectOrAdminAuth(request, params.ref);
         if (authError) return status(authError.status, authError.body);
-        const buckets = await StorageService.listBuckets(params.ref);
+        const buckets = await listStorageBuckets(params.ref);
         const bucket = (buckets as Array<Record<string, unknown>>).find((b: Record<string, unknown>) => b.id === params.id || b.name === params.id);
         if (!bucket) {
             set.status = 404;
@@ -563,10 +655,10 @@ export const projectStorageRoutes = new Elysia({ prefix: "/v1/projects/:ref/stor
     .delete('/buckets/:id', async ({ params, set, request }) => {
         const authError = await requireProjectOrAdminAuth(request, params.ref);
         if (authError) return status(authError.status, authError.body);
-        const result = await StorageService.deleteBucket(params.ref, params.id);
+        const result = await deleteStorageBucket(params.ref, params.id);
         if (!result.success) {
-            set.status = 500;
-            return { message: result.error || "Failed to delete bucket", code: "500" };
+            set.status = result.error === "Bucket is not empty" ? 409 : 500;
+            return { message: result.error || "Failed to delete bucket", code: String(set.status) };
         }
         return { id: params.id, deleted: true };
     }, { detail: { tags: ["storage"], summary: "Delete a storage bucket" } });

@@ -151,6 +151,10 @@ export class StorageService {
     return await getStorageDriver().listFiles(projectRef, bucketName);
   }
 
+  static async isBucketEmpty(projectRef: string, bucketName: string): Promise<boolean> {
+    return await getStorageDriver().isBucketEmpty(projectRef, bucketName);
+  }
+
   static async updateBucket(projectRef: string, bucketId: string, updates: { public?: boolean; file_size_limit?: number; allowed_mime_types?: string[] }): Promise<{ success: boolean; error?: string; bucket?: Record<string, unknown> }> {
     if (!/^[a-zA-Z0-9._-]+$/.test(bucketId)) {
       return { success: false, error: "Invalid bucket id" };
