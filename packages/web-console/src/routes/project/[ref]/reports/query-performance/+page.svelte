@@ -232,7 +232,7 @@
             </tr>
           </thead>
           <tbody class="divide-y divide-border/30">
-            {#each stats as stat (stat.query)}
+            {#each stats as stat}
               <tr class="hover:bg-muted/20 transition-colors group">
                 <td class="px-6 py-4">
                   <div class="font-mono text-xs text-foreground/80 break-all bg-muted/30 p-2 rounded border border-border/50 max-h-32 overflow-y-auto">
