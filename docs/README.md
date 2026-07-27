@@ -33,6 +33,7 @@
 
 - [CLI Guide](./cli-guide.md) - `@supacloud/cli` and `@supacloud/admin`
 - [PostgREST Runtime Lifecycle](./postgrest-runtime-lifecycle.md) - Component-level PostgREST desired state, pause/resume/status, and reconciliation
+- [pgredis Runtime](./pgredis-runtime.md) - Private cache data plane, control-plane APIs, Web Console operations, and safety boundaries
 - [Platform Component Upgrade Notes](./platform-component-upgrade-notes.md) - Breaking changes, migrations, optional features, and rollback notes for current runtime components
 - [Upgrade to Pigsty 4.4](./upgrade-to-pigsty-4.4.md) - Pigsty and Supabase compatibility upgrade guide
 - [Docker PostgreSQL 4.4 Upgrade](./upgrade-postgres-docker-4.4.md) - Docker-specific compatibility, backup, and major-version safety guide

@@ -15,6 +15,7 @@ function fakeCache(): TenantCache {
     async ttl() { return null; },
     async getset() { return null; },
     async getdel() { return null; },
+    async flush() { return 0; },
   };
 }
 
@@ -93,6 +94,44 @@ describe("TenantCacheRegistry", () => {
     tenantC.release();
     expect(closed).toEqual(["tenant-a"]);
     expect(registry.size()).toBe(2);
+    await registry.shutdown();
+  });
+
+  test("reports bounded runtime and project status without exposing credentials", async () => {
+    const registry = new TenantCacheRegistry({
+      tenantsDir: "/unused",
+      maxTenants: 4,
+      connectionsPerTenant: 2,
+      tenantIdleMs: 10_000,
+      l1MaxEntries: 250,
+      l1TtlMs: 2_000,
+      now: () => Date.parse("2026-07-27T00:00:00.000Z"),
+      loadConfig: async (_directory, ref) => ({
+        databaseUrl: `postgresql://role_${ref}:secret@postgres/db`,
+        fingerprint: ref,
+      }),
+      createBackend: async () => ({ cache: fakeCache(), async close() {} }),
+    });
+    const lease = await registry.acquire("tenant-a");
+    lease.release();
+
+    expect(registry.snapshot()).toEqual({
+      activeTenants: 1,
+      maxTenants: 4,
+      connectionsPerTenant: 2,
+      l1: { enabled: true, maxEntries: 250, ttlMs: 2_000 },
+      tenants: [{
+        projectRef: "tenant-a",
+        leases: 0,
+        lastUsedAt: "2026-07-27T00:00:00.000Z",
+      }],
+    });
+    expect(await registry.projectStatus("tenant-a")).toMatchObject({
+      projectRef: "tenant-a",
+      configured: true,
+      active: true,
+      configurationCurrent: true,
+    });
     await registry.shutdown();
   });
 
@@ -340,6 +379,7 @@ describe("createTransactionalTenantCache", () => {
         async get() { return null; },
         async ttl() { return null; },
         invalidate(key) { invalidated.push(key); },
+        invalidateAll() {},
       },
       () => fakeCache(),
     );
@@ -372,11 +412,51 @@ describe("createTransactionalTenantCache", () => {
         async get() { return null; },
         async ttl() { return null; },
         invalidate() { invalidated = true; },
+        invalidateAll() { invalidated = true; },
       },
       () => fakeCache(),
     );
 
     await expect(cache.getset("shared", "next")).rejects.toThrow("notify failed");
     expect(invalidated).toBeFalse();
+  });
+
+  test("commits namespace flush before clearing the local L1", async () => {
+    const calls: string[] = [];
+    const tx: PgSqlLike = {
+      async unsafe<T>(): Promise<T[]> { return []; },
+    };
+    const cache = createTransactionalTenantCache(
+      {
+        async unsafe<T>(): Promise<T[]> { return []; },
+        async begin<T>(operation: (transaction: PgSqlLike) => Promise<T>): Promise<T> {
+          calls.push("BEGIN");
+          const result = await operation(tx);
+          calls.push("COMMIT");
+          return result;
+        },
+      },
+      {
+        async get() { return null; },
+        async ttl() { return null; },
+        invalidate() {},
+        invalidateAll() { calls.push("INVALIDATE_ALL"); },
+      },
+      () => ({
+        ...fakeCache(),
+        async clearNamespace() {
+          calls.push("CLEAR_NAMESPACE_AND_NOTIFY");
+          return 4;
+        },
+      }),
+    );
+
+    expect(await cache.flush()).toBe(4);
+    expect(calls).toEqual([
+      "BEGIN",
+      "CLEAR_NAMESPACE_AND_NOTIFY",
+      "COMMIT",
+      "INVALIDATE_ALL",
+    ]);
   });
 });

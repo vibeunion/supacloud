@@ -21,7 +21,8 @@
     Globe,
     Glasses,
     Activity,
-    SunMoon
+    SunMoon,
+    MemoryStick
   } from "lucide-svelte";
   import { page } from "$app/stores";
   import { mode, toggleMode } from "mode-watcher";
@@ -53,6 +54,7 @@
     { titleKey: "Hosting.title", icon: Globe, href: `/project/${currentProject.ref}/hosting` },
     { titleKey: "Realtime.title", icon: Radio, href: `/project/${currentProject.ref}/realtime` },
     { titleKey: "Navigation.database", icon: Database, href: `/project/${currentProject.ref}/database` },
+    { titleKey: "Navigation.cache", icon: MemoryStick, href: `/project/${currentProject.ref}/cache` },
     { titleKey: "Navigation.api_docs", icon: Files, href: `/project/${currentProject.ref}/api` },
     { titleKey: "Navigation.query_performance", icon: LineChart, href: `/project/${currentProject.ref}/reports/query-performance` },
     { titleKey: "Navigation.database_linter", icon: ShieldCheck, href: `/project/${currentProject.ref}/reports/database-linter` },

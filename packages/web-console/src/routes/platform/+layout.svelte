@@ -1,6 +1,6 @@
 <script lang="ts">
   import { page } from "$app/state";
-  import { Package, HardDrive, Activity, SlidersHorizontal, BarChart3, Database, Wrench, Settings, ShieldCheck } from "lucide-svelte";
+  import { Package, HardDrive, Activity, SlidersHorizontal, BarChart3, Database, Wrench, Settings, ShieldCheck, MemoryStick } from "lucide-svelte";
   import { t } from "svelte-i18n";
 
   let { children } = $props();
@@ -11,6 +11,7 @@
     { id: "tuning", labelKey: "Platform.engine_tuning", icon: SlidersHorizontal },
     { id: "monitoring", labelKey: "Platform.monitoring", icon: BarChart3 },
     { id: "pooling", labelKey: "Platform.connection_pool", icon: Activity },
+    { id: "cache", labelKey: "Platform.cache_runtime", icon: MemoryStick },
     { id: "storage", labelKey: "Platform.storage_juicefs", icon: Database },
     { id: "operations", labelKey: "Platform.operations_console", icon: Wrench },
     { id: "diagnostics", labelKey: "Platform.diagnostics", icon: ShieldCheck },

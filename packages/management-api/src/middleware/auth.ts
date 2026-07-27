@@ -160,7 +160,7 @@ const CAPABILITY_FAMILY_RULES: readonly CapabilityFamilyRule[] = [
   {
     prefixes: [
       "/auto-branching", "/backups", "/branches", "/dashboard", "/database", "/diagnostics",
-      "/extensions", "/frontend", "/functions", "/log-drains", "/logs", "/pg-meta", "/scaling",
+      "/cache", "/extensions", "/frontend", "/functions", "/log-drains", "/logs", "/pg-meta", "/scaling",
       "/scheduled-functions", "/services", "/storage", "/task-events", "/tasks", "/types",
     ],
     read: "operations.read",

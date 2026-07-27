@@ -719,6 +719,7 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
     projectLogsRoutes,
     systemRoutes,
     diagnosticsRoutes,
+    pgredisRoutes,
     taskEventRoutes,
     logDrainRoutes,
     scheduledFunctionRoutes,
@@ -830,6 +831,7 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
       .use(projectLogsRoutes)
       .use(systemRoutes)
       .use(diagnosticsRoutes)
+      .use(pgredisRoutes)
       .use(taskEventRoutes)
       .use(logDrainRoutes)
       .use(scheduledFunctionRoutes)

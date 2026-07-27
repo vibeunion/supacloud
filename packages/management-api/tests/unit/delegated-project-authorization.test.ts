@@ -112,6 +112,8 @@ describe("delegated project authorization", () => {
       ["PATCH", "/settings", "tenant.config.manage"],
       ["GET", "/capabilities", "tenant.capabilities.read"],
       ["PUT", "/domains/example.test", "tenant.domains.manage"],
+      ["GET", "/cache", "operations.read"],
+      ["POST", "/cache/operations", "operations.manage"],
       ["GET", "/tasks", "operations.read"],
       ["POST", "/database/migrations", "database.migrations.manage"],
       ["GET", "", "project.read"],

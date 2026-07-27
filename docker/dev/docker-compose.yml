@@ -103,6 +103,9 @@ services:
       - TENANT_CONFIG_DIR=/etc/supabase/tenants
       - PGREDIS_TENANT_CONFIG_DIR=/etc/supabase/pgredis-tenants
       - PGREDIS_TENANT_CONFIG_OWNER=bun:bun
+      - PGREDIS_RUNTIME_INTERNAL_URL=http://pgredis-runtime:9010
+      - PGREDIS_RUNTIME_INTERNAL_TOKEN=${PGREDIS_RUNTIME_INTERNAL_TOKEN}
+      - PGREDIS_RUNTIME_INTERNAL_TIMEOUT_MS=${PGREDIS_RUNTIME_INTERNAL_TIMEOUT_MS:-5000}
     ports:
       - "${API_PORT:-9090}:9090"
     volumes:
@@ -110,6 +113,7 @@ services:
       - pgredis-tenant-config:/etc/supabase/pgredis-tenants
     networks:
       - supacloud-dev
+      - edge-pgredis
 
   edge-runtime:
     build:

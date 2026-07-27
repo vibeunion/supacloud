@@ -40,10 +40,10 @@ test.skipIf(!databaseUrl)("PostgreSQL commits notifications atomically and clear
   const tenantsDir = await mkdtemp(path.join(tmpdir(), "pgredis-postgres-"));
   const firstRegistry = registry(tenantsDir);
   const secondRegistry = registry(tenantsDir);
-  const notifications: Array<{ op: string; key: string }> = [];
+  const notifications: Array<{ op: string; key?: string }> = [];
   const observer = createPgListener(databaseUrl, [channel], (_channel, payload) => {
     const parsed = JSON.parse(payload) as { op?: string; key?: string };
-    if (parsed.op && parsed.key) notifications.push({ op: parsed.op, key: parsed.key });
+    if (parsed.op) notifications.push({ op: parsed.op, key: parsed.key });
   }, { logger: false });
   let roleLoginDisabled = false;
 
@@ -67,13 +67,22 @@ test.skipIf(!databaseUrl)("PostgreSQL commits notifications atomically and clear
       await first.cache.delete("atomic:set");
       expect(await first.cache.getset<{ version: number }>("atomic:swap", { version: 2 })).toBeNull();
       expect(await first.cache.getdel<{ version: number }>("atomic:swap")).toEqual({ version: 2 });
-      await waitFor(() => notifications.filter(({ key }) => key.startsWith("atomic:")).length === 4);
-      expect(notifications.filter(({ key }) => key.startsWith("atomic:"))).toEqual([
+      await waitFor(() => notifications.filter(({ key }) => key?.startsWith("atomic:")).length === 4);
+      expect(notifications.filter(({ key }) => key?.startsWith("atomic:"))).toEqual([
         { op: "set", key: "atomic:set" },
         { op: "delete", key: "atomic:set" },
         { op: "set", key: "atomic:swap" },
         { op: "delete", key: "atomic:swap" },
       ]);
+
+      await first.cache.set("flush:a", { version: 1 });
+      await first.cache.set("flush:b", { version: 1 });
+      expect(await second.cache.get("flush:a")).toEqual({ version: 1 });
+      expect(await second.cache.get("flush:b")).toEqual({ version: 1 });
+      expect(await first.cache.flush()).toBe(2);
+      await waitFor(() => notifications.some(({ op }) => op === "clearNamespace"));
+      expect(await second.cache.get("flush:a")).toBeNull();
+      expect(await second.cache.get("flush:b")).toBeNull();
 
       await expect(admin.begin(async (transaction) => {
         await transaction.unsafe("SELECT pg_notify($1, $2)", [

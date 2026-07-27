@@ -11,7 +11,8 @@
     Languages,
     Home,
     SunMoon,
-    ShieldCheck
+    ShieldCheck,
+    MemoryStick
   } from "lucide-svelte";
   import { page } from "$app/stores";
   import { t, locale } from "svelte-i18n";
@@ -39,6 +40,7 @@
     { titleKey: "Platform.engine_tuning", icon: Settings2, href: "/platform/tuning" },
     { titleKey: "Platform.monitoring", icon: LineChart, href: "/platform/monitoring" },
     { titleKey: "Platform.connection_pool", icon: Network, href: "/platform/pooling" },
+    { titleKey: "Platform.cache_runtime", icon: MemoryStick, href: "/platform/cache" },
     { titleKey: "Platform.storage_juicefs", icon: HardDrive, href: "/platform/storage" },
     { titleKey: "Platform.operations_console", icon: Terminal, href: "/platform/operations" },
     { titleKey: "Platform.diagnostics", icon: ShieldCheck, href: "/platform/diagnostics" },

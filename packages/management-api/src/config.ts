@@ -104,6 +104,9 @@ export interface Config {
   tenantConfigDir: string;
   pgredisTenantConfigDir: string;
   pgredisTenantConfigOwner: string;
+  pgredisRuntimeInternalUrl: string;
+  pgredisRuntimeInternalToken: string;
+  pgredisRuntimeInternalTimeoutMs: number;
   edgeFunctionsDir: string;
   homePath: string;
   masterToken: string;
@@ -278,6 +281,9 @@ export const config: Config = {
   tenantConfigDir: getEnv("TENANT_CONFIG_DIR", "/etc/supabase/tenants"),
   pgredisTenantConfigDir: getEnv("PGREDIS_TENANT_CONFIG_DIR", "/etc/supabase/pgredis-tenants"),
   pgredisTenantConfigOwner: getEnv("PGREDIS_TENANT_CONFIG_OWNER", ""),
+  pgredisRuntimeInternalUrl: getEnv("PGREDIS_RUNTIME_INTERNAL_URL", "http://127.0.0.1:9010"),
+  pgredisRuntimeInternalToken: getEnv("PGREDIS_RUNTIME_INTERNAL_TOKEN", ""),
+  pgredisRuntimeInternalTimeoutMs: Number(getEnv("PGREDIS_RUNTIME_INTERNAL_TIMEOUT_MS", "5000")),
   edgeFunctionsDir: getEnv("EDGE_FUNCTIONS_DIR", "/opt/supacloud/functions"),
   homePath: getEnv("HOME", "/root"),
   masterToken: getEnv(

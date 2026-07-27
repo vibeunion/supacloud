@@ -5,6 +5,7 @@ import { createPgKvCache, type PgKvCache } from "@postgresx/noredis/kv";
 import type { PgSqlLike } from "@postgresx/noredis";
 import {
   loadTenantDatabaseConfig,
+  TenantConfigError,
   type TenantDatabaseConfig,
 } from "./tenant-config";
 
@@ -19,6 +20,7 @@ export interface TenantCache {
   ttl(key: string): Promise<number | null>;
   getset<T = unknown>(key: string, value: T): Promise<T | null>;
   getdel<T = unknown>(key: string): Promise<T | null>;
+  flush(): Promise<number>;
 }
 
 interface TenantCacheBackend {
@@ -39,6 +41,31 @@ interface TenantCacheEntry extends TenantCacheBackend {
 export interface TenantCacheLease {
   cache: TenantCache;
   release(): void;
+}
+
+export interface TenantCacheRegistrySnapshot {
+  activeTenants: number;
+  maxTenants: number;
+  connectionsPerTenant: number;
+  l1: {
+    enabled: true;
+    maxEntries: number;
+    ttlMs: number;
+  };
+  tenants: Array<{
+    projectRef: string;
+    leases: number;
+    lastUsedAt: string;
+  }>;
+}
+
+export interface TenantCacheProjectStatus {
+  projectRef: string;
+  configured: boolean;
+  active: boolean;
+  configurationCurrent: boolean;
+  leases: number;
+  lastUsedAt: string | null;
 }
 
 export class TenantCapacityError extends Error {
@@ -102,12 +129,14 @@ interface TransactionCache {
   set<T = unknown>(key: string, value: T, options?: { ttlMs?: number | null }): Promise<boolean>;
   delete(key: string): Promise<boolean>;
   getdel<T = unknown>(key: string): Promise<T | null>;
+  clearNamespace(): Promise<number>;
 }
 
 interface LocalCache {
   get<T = unknown>(key: string): Promise<T | null>;
   ttl(key: string): Promise<number | null>;
   invalidate(key: string): void;
+  invalidateAll(): void;
 }
 
 export function createTransactionalTenantCache(
@@ -137,18 +166,18 @@ export function createTransactionalTenantCache(
     get: <T = unknown>(key: string) => cache.get<T>(key),
     ttl: (key) => cache.ttl(key),
     async set(key, value, options) {
-      const result = await transaction((_tx, txCache) => txCache.set(key, value, options));
+      const writeAccepted = await transaction((_tx, txCache) => txCache.set(key, value, options));
       cache.invalidate(key);
-      return result;
+      return writeAccepted;
     },
     async delete(key) {
-      const result = await transaction((_tx, txCache) => txCache.delete(key));
+      const deleted = await transaction((_tx, txCache) => txCache.delete(key));
       cache.invalidate(key);
-      return result;
+      return deleted;
     },
     async getset<T = unknown>(key: string, value: T) {
       const serialized = JSON.stringify(value);
-      const result = await transaction<T | null>(async (tx) => {
+      const previousValue = await transaction<T | null>(async (tx) => {
         const rows = await tx.unsafe<{ value: unknown }>(
           `SELECT value
            FROM ${CACHE_TABLE}
@@ -174,12 +203,17 @@ export function createTransactionalTenantCache(
         return rows[0] ? deserializeJsonValue<T>(rows[0].value) : null;
       }, true);
       cache.invalidate(key);
-      return result;
+      return previousValue;
     },
     async getdel<T = unknown>(key: string) {
-      const result = await transaction((_tx, txCache) => txCache.getdel<T>(key));
+      const deletedValue = await transaction((_tx, txCache) => txCache.getdel<T>(key));
       cache.invalidate(key);
-      return result;
+      return deletedValue;
+    },
+    async flush() {
+      const deleted = await transaction((_tx, txCache) => txCache.clearNamespace());
+      cache.invalidateAll();
+      return deleted;
     },
   };
 }
@@ -332,6 +366,55 @@ export class TenantCacheRegistry {
 
   size(): number {
     return this.entries.size;
+  }
+
+  snapshot(): TenantCacheRegistrySnapshot {
+    return {
+      activeTenants: this.entries.size,
+      maxTenants: this.options.maxTenants,
+      connectionsPerTenant: this.options.connectionsPerTenant,
+      l1: {
+        enabled: true,
+        maxEntries: this.options.l1MaxEntries,
+        ttlMs: this.options.l1TtlMs,
+      },
+      tenants: [...this.entries.values()]
+        .sort((left, right) => left.ref.localeCompare(right.ref))
+        .map((entry) => ({
+          projectRef: entry.ref,
+          leases: entry.leases,
+          lastUsedAt: new Date(entry.lastUsedAt).toISOString(),
+        })),
+    };
+  }
+
+  async projectStatus(ref: string): Promise<TenantCacheProjectStatus> {
+    let config: TenantDatabaseConfig;
+    try {
+      config = await this.loadConfig(this.options.tenantsDir, ref);
+    } catch (error) {
+      if (error instanceof TenantConfigError && error.status === 404) {
+        return {
+          projectRef: ref,
+          configured: false,
+          active: false,
+          configurationCurrent: false,
+          leases: 0,
+          lastUsedAt: null,
+        };
+      }
+      throw error;
+    }
+
+    const entry = this.entries.get(ref);
+    return {
+      projectRef: ref,
+      configured: true,
+      active: Boolean(entry),
+      configurationCurrent: !entry || entry.fingerprint === config.fingerprint,
+      leases: entry?.leases ?? 0,
+      lastUsedAt: entry ? new Date(entry.lastUsedAt).toISOString() : null,
+    };
   }
 
   private async acquireEntry(ref: string): Promise<TenantCacheEntry> {

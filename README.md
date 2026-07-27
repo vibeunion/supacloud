@@ -409,7 +409,7 @@ See [docs/gateway-customization.md](docs/gateway-customization.md) for the full 
 
 Default installs use `EDGE_RUNTIME_MODE=embedded`, meaning `supacloud.service` starts the Bun Edge Runtime child process itself. A separate `supacloud-edge-runtime.service` is available for `EDGE_RUNTIME_MODE=external`, but you should not run both modes at the same time.
 
-`pgredis-runtime` is a separate private data-plane service. The Edge parent mints a short-lived, project-scoped capability for each request; cached Worker modules only see the stable `globalThis.SupaCloud.pgredis` facade and never receive PostgreSQL credentials, connection pools, L1 state, or the runtime signing secret. The service is not routed by Caddy and exposes no host/container port. Its v1 surface is KV/TTL only: PGMQ remains the only platform queue, while Caddy remains the gateway rate limiter.
+`pgredis-runtime` is a separate private data-plane service. The Edge parent mints a short-lived, project-scoped capability for each request; cached Worker modules only see the stable `globalThis.SupaCloud.pgredis` facade and never receive PostgreSQL credentials, connection pools, L1 state, or the runtime signing secret. The service is not routed by Caddy and exposes no host/container port. Its Edge v1 surface is KV/TTL only. Authenticated operators use the Web Console or Management API proxy for bounded runtime status, exact-key operations, and confirmed project-namespace flushes; browsers never call port `9010` directly. PGMQ remains the only platform queue, while Caddy remains the gateway rate limiter.
 
 ### Background Function Routing
 
@@ -982,7 +982,7 @@ Caddy 网关 (Admin API 驱动):
 
 默认安装使用 `EDGE_RUNTIME_MODE=embedded`，也就是由 `supacloud.service` 直接拉起 Bun Edge Runtime 子进程。`EDGE_RUNTIME_MODE=external` 时可以改用独立的 `supacloud-edge-runtime.service`，但两种模式不能同时运行，否则会争抢 `9000` 端口。
 
-`pgredis-runtime` 是独立、仅内部可达的数据面服务。Edge 父进程为每次请求签发短时、项目级 capability；被模块缓存的 Worker 代码只看到稳定的 `globalThis.SupaCloud.pgredis` facade，不会拿到 PostgreSQL 凭据、连接池、L1 状态或 runtime 签名密钥。该服务不经过 Caddy，也不映射宿主机/容器端口；v1 只提供 KV/TTL，平台队列仍唯一使用 PGMQ，网关限流仍唯一由 Caddy 负责。
+`pgredis-runtime` 是独立、仅内部可达的数据面服务。Edge 父进程为每次请求签发短时、项目级 capability；被模块缓存的 Worker 代码只看到稳定的 `globalThis.SupaCloud.pgredis` facade，不会拿到 PostgreSQL 凭据、连接池、L1 状态或 runtime 签名密钥。该服务不经过 Caddy，也不映射宿主机/容器端口；Edge v1 只提供 KV/TTL。已认证运维人员通过 Web Console 或 Management API 代理查看有界运行状态、执行精确键操作及二次确认后的项目命名空间清空，浏览器不会直连 `9010`。平台队列仍唯一使用 PGMQ，网关限流仍唯一由 Caddy 负责。
 
 | 特性 | 当前 Bun Runtime |
 |------|------------------|
