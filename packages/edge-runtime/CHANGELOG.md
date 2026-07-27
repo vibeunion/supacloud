@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.14.3...edge-runtime-v0.15.0) (2026-07-27)
+
+
+### Features
+
+* add PostgreSQL cache data plane runtime ([f0c19f4](https://github.com/zuohuadong/supacloud/commit/f0c19f4f870bd0b26d453a67b8af76d609c53d64))
+
 ## [0.14.3](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.14.2...edge-runtime-v0.14.3) (2026-07-27)
 
 
