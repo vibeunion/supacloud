@@ -9,6 +9,14 @@ import { resolveProjectApiKey } from "../utils/project-auth";
 export const mockBuckets = new Map<string, any>();
 export const mockObjects = new Map<string, any>();
 
+type LogicalBucketInput = {
+  id: string;
+  name: string;
+  public: boolean;
+  fileSizeLimit?: number | null;
+  allowedMimeTypes?: string[] | null;
+};
+
 function normalizeSqlRole(role: unknown, allowServiceRole = false): 'anon' | 'authenticated' | 'service_role' {
   if (allowServiceRole && role === 'service_role') return 'service_role';
   return role === 'authenticated' ? 'authenticated' : 'anon';
@@ -36,6 +44,15 @@ async function applyRlsContext(tx: import("bun").SQL, payload: Record<string, un
   await tx`SELECT set_config('request.jwt.claim.role', ${role}, true)`;
 }
 
+async function upsertLogicalBucket(db: import("bun").SQL, bucket: LogicalBucketInput): Promise<void> {
+  const allowedMimeTypes = bucket.allowedMimeTypes?.length ? bucket.allowedMimeTypes : null;
+  await db`
+    INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types, created_at, updated_at)
+    VALUES (${bucket.id}, ${bucket.name}, ${bucket.public}, ${bucket.fileSizeLimit || null}, ${allowedMimeTypes}, now(), now())
+    ON CONFLICT (id) DO UPDATE SET public = EXCLUDED.public, name = EXCLUDED.name, file_size_limit = EXCLUDED.file_size_limit, allowed_mime_types = EXCLUDED.allowed_mime_types, updated_at = now()
+  `;
+}
+
 export class StorageRLS {
 
   
@@ -47,15 +64,78 @@ export class StorageRLS {
 
     try {
         await this.withBucketRLS(ref, token, async (tx) => {
-            await tx`
-              INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types, created_at, updated_at)
-              VALUES (${bucketId}, ${name}, ${isPublic}, ${fileSizeLimit || null}, ${(allowedMimeTypes && allowedMimeTypes.length > 0) ? allowedMimeTypes : null}, now(), now())
-              ON CONFLICT (id) DO UPDATE SET public = EXCLUDED.public, name = EXCLUDED.name, file_size_limit = EXCLUDED.file_size_limit, allowed_mime_types = EXCLUDED.allowed_mime_types, updated_at = now()
-            `;
+            await upsertLogicalBucket(tx, {
+              id: bucketId,
+              name,
+              public: isPublic,
+              fileSizeLimit,
+              allowedMimeTypes,
+            });
         });
     } catch (e: any) {
         throw new Error(e.message || "Failed to create bucket");
     }
+  }
+
+  static async createLogicalBucketAsAdmin(ref: string, bucket: LogicalBucketInput): Promise<boolean> {
+    if (ref === 'test_mock') {
+      if (mockBuckets.has(bucket.id)) return false;
+      mockBuckets.set(bucket.id, {
+        id: bucket.id,
+        name: bucket.name,
+        public: bucket.public,
+        file_size_limit: bucket.fileSizeLimit || null,
+        allowed_mime_types: bucket.allowedMimeTypes?.length ? bucket.allowedMimeTypes : null,
+      });
+      return true;
+    }
+    const dbName = await resolveDbName(ref);
+    const db = getProjectDb(dbName);
+    const rows = await db`
+      INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types, created_at, updated_at)
+      VALUES (${bucket.id}, ${bucket.name}, ${bucket.public}, ${bucket.fileSizeLimit || null}, ${bucket.allowedMimeTypes?.length ? bucket.allowedMimeTypes : null}, now(), now())
+      ON CONFLICT (id) DO NOTHING
+      RETURNING id
+    `;
+    return rows.length > 0;
+  }
+
+  static async listLogicalBucketsAsAdmin(ref: string): Promise<Record<string, unknown>[]> {
+    if (ref === 'test_mock') return Array.from(mockBuckets.values());
+    const dbName = await resolveDbName(ref);
+    const db = getProjectDb(dbName);
+    return await db`
+      SELECT id, name, public, created_at, updated_at, file_size_limit, allowed_mime_types
+      FROM storage.buckets
+      ORDER BY name ASC
+    `;
+  }
+
+  static async deleteLogicalBucketAsAdmin(ref: string, bucketId: string): Promise<void> {
+    if (ref === 'test_mock') {
+      mockBuckets.delete(bucketId);
+      return;
+    }
+    const dbName = await resolveDbName(ref);
+    const db = getProjectDb(dbName);
+    await db`DELETE FROM storage.buckets WHERE id = ${bucketId}`;
+  }
+
+  static async assertLogicalBucketDeletableAsAdmin(ref: string, bucketId: string): Promise<void> {
+    if (ref === 'test_mock') {
+      if (Array.from(mockObjects.keys()).some((key) => key.startsWith(`${bucketId}/`))) {
+        throw new Error("Bucket is not empty");
+      }
+      return;
+    }
+    const dbName = await resolveDbName(ref);
+    const db = getProjectDb(dbName);
+    const [row] = await db`
+      SELECT EXISTS(
+        SELECT 1 FROM storage.objects WHERE bucket_id = ${bucketId}
+      ) AS has_objects
+    `;
+    if (row?.has_objects === true) throw new Error("Bucket is not empty");
   }
 
   

@@ -69,6 +69,26 @@ describe("S3Driver uploadFile", () => {
       else process.env.GITHUB_ACTIONS = previousGithubActions;
     }
   });
+
+  test("checks bucket emptiness with a bounded prefix query", async () => {
+    const driver = new S3Driver();
+    let listOptions: unknown;
+    (driver as unknown as { getCreds: () => unknown }).getCreds = async () => ({
+      accessKey: "test-access",
+      secretKey: "test-secret",
+      endpoint: "http://127.0.0.1:9000",
+      bucket: "supa_test",
+    });
+    (driver as unknown as { getClient: () => unknown }).getClient = () => ({
+      list: async (options: unknown) => {
+        listOptions = options;
+        return { contents: [{ key: "gallery/logo.svg" }] };
+      },
+    });
+
+    expect(await driver.isBucketEmpty("testref", "gallery")).toBe(false);
+    expect(listOptions).toEqual({ prefix: "gallery/", maxKeys: 1 });
+  });
 });
 
 describe("JuiceFSDriver uploadFile", () => {
