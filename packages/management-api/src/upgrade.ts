@@ -15,7 +15,9 @@ const BIN_TARGET = "/usr/local/bin/supacloud";
 const DEFAULT_MANAGEMENT_ENV_FILE = "/etc/supabase/management-api.env";
 const DEFAULT_EDGE_RUNTIME_USER = "supacloud-edge";
 const DEFAULT_EDGE_RUNTIME_GROUP = "supacloud-edge";
+const DEFAULT_EDGE_RUNTIME_PORT = 9005;
 const DEFAULT_EDGE_RUNTIME_SOURCE_DIR = "/opt/supacloud/edge-runtime";
+const DEFAULT_EDGE_RUNTIME_ENV_FILE = "/etc/supabase/edge-runtime.env";
 const LEGACY_CONFIG_FILE = "/opt/supacloud/config.env";
 const DEFAULT_GITHUB_PROXY = "https://ghproxy.net/";
 const WEB_CONSOLE_ASSET = "web-console-build.tar.gz";
@@ -921,6 +923,37 @@ export function upsertEdgeRuntimeIdentityDefaults(filePath: string, identity: Ed
     }
 }
 
+function edgeRuntimeEnvFile() {
+    return process.env.SUPACLOUD_EDGE_RUNTIME_ENV_FILE || DEFAULT_EDGE_RUNTIME_ENV_FILE;
+}
+
+export function resolvePersistedEdgeRuntimePort(
+    managementEnvPath: string = managementEnvFile(),
+    runtimeEnvPath: string = edgeRuntimeEnvFile(),
+): number {
+    const managementEnv = existsSync(managementEnvPath) ? parseEnv(readFileSync(managementEnvPath, "utf8")) : {};
+    const runtimeEnv = existsSync(runtimeEnvPath) ? parseEnv(readFileSync(runtimeEnvPath, "utf8")) : {};
+    const persistedPort = managementEnv.EDGE_RUNTIME_PORT || runtimeEnv.EDGE_RUNTIME_PORT;
+    const port = Number(persistedPort || DEFAULT_EDGE_RUNTIME_PORT);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+        throw new Error(`Invalid persisted EDGE_RUNTIME_PORT: ${persistedPort}`);
+    }
+    return port;
+}
+
+export function upsertPersistedEdgeRuntimePort(
+    managementEnvPath: string = managementEnvFile(),
+    runtimeEnvPath: string = edgeRuntimeEnvFile(),
+) {
+    const port = resolvePersistedEdgeRuntimePort(managementEnvPath, runtimeEnvPath);
+    upsertEnvFileValue(managementEnvPath, "EDGE_RUNTIME_PORT", String(port));
+    upsertEnvFileValue(runtimeEnvPath, "EDGE_RUNTIME_PORT", String(port));
+    if (!envFileHasNonEmptyValue(managementEnvPath, "EDGE_RUNTIME_INTERNAL")) {
+        upsertEnvFileValue(managementEnvPath, "EDGE_RUNTIME_INTERNAL", `127.0.0.1:${port}`);
+    }
+    return port;
+}
+
 export function upsertManagementWebConsoleDir(managementEnvPath: string = managementEnvFile()) {
     upsertEnvFileValue(managementEnvPath, WEB_CONSOLE_DIR_ENV_KEY, WEB_CONSOLE_CURRENT_LINK);
 }
@@ -1142,10 +1175,11 @@ export async function waitForManagementHealth() {
 
 export async function waitForEdgeRuntimeHealth() {
     const attempts = positiveInteger(process.env.SUPACLOUD_UPGRADE_EDGE_HEALTH_ATTEMPTS, 30);
+    const port = resolvePersistedEdgeRuntimePort();
     let lastError = "timeout";
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
         try {
-            const response = await fetch("http://127.0.0.1:9000/health", {
+            const response = await fetch(`http://127.0.0.1:${port}/health`, {
                 signal: AbortSignal.timeout(2_000),
             });
             if (response.ok) return;
@@ -1168,6 +1202,7 @@ type UpgradeActivationState = {
     oldWebTarget: string | null;
     oldWebBackup: string | null;
     managementEnvState: FileState | null;
+    edgeRuntimeEnvState: FileState | null;
     edgeRuntimeDropInState: FileState | null;
     embeddedEdgePrivilegeDropInState: FileState | null;
 };
@@ -1210,6 +1245,9 @@ async function rollbackArtifacts(state: UpgradeActivationState, stagedWeb: Stage
 
     if (state.managementEnvState) {
         restoreFileState(state.managementEnvState);
+    }
+    if (state.edgeRuntimeEnvState) {
+        restoreFileState(state.edgeRuntimeEnvState);
     }
     if (state.edgeRuntimeDropInState) {
         restoreFileState(state.edgeRuntimeDropInState);
@@ -1287,6 +1325,7 @@ export async function runUpgrade(options: { forceYes?: boolean; targetVersion?: 
                     oldWebTarget: null,
                     oldWebBackup: null,
                     managementEnvState: null,
+                    edgeRuntimeEnvState: null,
                     edgeRuntimeDropInState: null,
                     embeddedEdgePrivilegeDropInState: null,
                 };
@@ -1296,9 +1335,11 @@ export async function runUpgrade(options: { forceYes?: boolean; targetVersion?: 
                 s.start("Applying runtime settings and restarting SupaCloud services");
                 if (!activationState) throw new Error("Upgrade activation state is unavailable");
                 activationState.managementEnvState = captureFileState(managementEnvFile());
+                activationState.edgeRuntimeEnvState = captureFileState(edgeRuntimeEnvFile());
                 activationState.edgeRuntimeDropInState = captureFileState(edgeRuntimeCapacityDropIn());
                 activationState.embeddedEdgePrivilegeDropInState = captureFileState(embeddedEdgePrivilegeDropIn());
                 const edgeRuntimeIdentity = await ensurePersistedEdgeRuntimeIdentity(managementEnvFile());
+                upsertPersistedEdgeRuntimePort(managementEnvFile(), edgeRuntimeEnvFile());
                 activatedEdgeRuntimeMode = await runtimeModeForBinaryUpgrade();
                 await reconcileEmbeddedEdgePrivilegeDropIn(activatedEdgeRuntimeMode, edgeRuntimeIdentity);
                 await ensureEdgeRuntimeCapacityDropIn(env);

@@ -926,8 +926,9 @@ describe("installer configuration persistence", () => {
     expect(() => statSync(join(runtime, "extra.ts"))).toThrow();
   });
 
-  test("management Edge readiness restarts external mode and gates every mode on port 9000", () => {
+  test("management Edge readiness restarts external mode and uses the persisted port", () => {
     const dir = makeTempDir();
+    const runtimeEnv = join(dir, "management-api.env");
     const externalCalls = join(dir, "external-calls");
     const external = runBash([
       "source install.sh",
@@ -941,7 +942,7 @@ describe("installer configuration persistence", () => {
     expect(readFileSync(externalCalls, "utf8")).toBe([
       "systemctl:restart supacloud-edge-runtime",
       "warn:systemctl restart supacloud-edge-runtime returned non-zero; deferring readiness to the health check",
-      "health:http://127.0.0.1:9000/health",
+      "health:http://127.0.0.1:9005/health",
       "",
     ].join("\n"));
 
@@ -954,7 +955,21 @@ describe("installer configuration persistence", () => {
     ].join("; "), { CALLS: embeddedCalls });
 
     expect(embedded.status).toBe(7);
-    expect(readFileSync(embeddedCalls, "utf8")).toBe("health:http://127.0.0.1:9000/health\n");
+    expect(readFileSync(embeddedCalls, "utf8")).toBe("health:http://127.0.0.1:9005/health\n");
+
+    writeFileSync(runtimeEnv, "EDGE_RUNTIME_PORT=9123\n");
+    const customCalls = join(dir, "custom-calls");
+    const custom = runBash([
+      "source install.sh",
+      'supacloud_wait_http_health() { printf "health:%s\\n" "$1" >> "$CALLS"; }',
+      "ensure_management_edge_runtime_ready embedded",
+    ].join("; "), {
+      CALLS: customCalls,
+      SUPACLOUD_MANAGEMENT_ENV_FILE: runtimeEnv,
+    });
+
+    expect(custom.status, custom.stderr).toBe(0);
+    expect(readFileSync(customCalls, "utf8")).toBe("health:http://127.0.0.1:9123/health\n");
   });
 
   test("installer grants the dedicated runtime group read-only source access", () => {
