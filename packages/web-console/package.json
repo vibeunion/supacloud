@@ -41,7 +41,7 @@
   "dependencies": {
     "@svadmin/core": "^0.32.2",
     "@svadmin/elysia": "^0.10.7",
-    "@svadmin/sveltekit": "^0.9.4",
+    "@svadmin/sveltekit": "^0.9.6",
     "@svadmin/ui": "^0.38.7",
     "@tanstack/svelte-query": "^6.1.38",
     "highlight.js": "^11.11.1",
