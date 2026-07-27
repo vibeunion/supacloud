@@ -101,6 +101,18 @@ const handler = async ({ request, set }: { request: Request; set: { status?: num
   return proxyGrafana(request);
 };
 
+// Handle a Grafana request from the SPA static-asset catch-all. The wildcard
+// `get("*")` in `registerStaticAssets` takes precedence over plugin routes in
+// Elysia, so Grafana GET requests must be delegated here instead of relying on
+// `.all("/grafana/*")` route matching.
+export async function handleGrafanaRequest(request: Request): Promise<Response> {
+  const authError = await checkAuth(request);
+  if (authError) {
+    return Response.json(authError.body, { status: authError.status });
+  }
+  return proxyGrafana(request);
+}
+
 export const grafanaProxyRoutes = new Elysia({ name: "grafana-proxy" })
   .all("/grafana", handler, { detail: { tags: ["monitoring"], summary: "Proxy Grafana root" } })
   .all("/grafana/*", handler, { detail: { tags: ["monitoring"], summary: "Proxy Grafana assets and dashboards" } });

@@ -1,9 +1,25 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import { Elysia } from "elysia";
 import { config } from "../../src/config";
-import { grafanaProxyInternals, grafanaProxyRoutes } from "../../src/routes/grafana";
+import {
+  grafanaProxyInternals,
+  grafanaProxyRoutes,
+  handleGrafanaRequest,
+} from "../../src/routes/grafana";
 
 const app = new Elysia().use(grafanaProxyRoutes);
+// Mirror `registerStaticAssets`: the SPA catch-all is a GET wildcard that
+// takes precedence over plugin routes in Elysia, so Grafana requests are
+// delegated from the catch-all instead of relying on `.all` route matching.
+const appWithStaticFallback = new Elysia()
+  .use(grafanaProxyRoutes)
+  .get("*", ({ request }) => {
+    const { pathname } = new URL(request.url);
+    if (pathname === "/grafana" || pathname.startsWith("/grafana/")) {
+      return handleGrafanaRequest(request);
+    }
+    return new Response("studio");
+  });
 const originalFetch = globalThis.fetch;
 
 afterEach(() => {
@@ -19,7 +35,7 @@ describe("grafana proxy routes", () => {
     expect(target.toString()).toBe("http://127.0.0.1:3000/d/pgsql-overview?orgId=1");
   });
 
-  test("proxies Grafana responses before the SPA catch-all can handle them", async () => {
+  test("proxies Grafana responses delegated from the SPA catch-all", async () => {
     const seen: string[] = [];
     globalThis.fetch = mock(async (input: string | URL | Request) => {
       seen.push(String(input));
@@ -29,7 +45,7 @@ describe("grafana proxy routes", () => {
       });
     }) as unknown as typeof fetch;
 
-    const response = await app.handle(
+    const response = await appWithStaticFallback.handle(
       new Request("https://studio.example.com/grafana/api/search?query=pgsql", {
         headers: { authorization: `Bearer ${config.masterToken}` },
       }),
@@ -47,7 +63,7 @@ describe("grafana proxy routes", () => {
       return new Response("unexpected upstream call");
     }) as unknown as typeof fetch;
 
-    const response = await app.handle(
+    const response = await appWithStaticFallback.handle(
       new Request("https://studio.example.com/grafana/api/search?query=pgsql"),
     );
 

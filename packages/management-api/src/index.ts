@@ -31,7 +31,7 @@ import { resolveProjectApiKey } from "./utils/project-auth";
 import { translateRealtimeProxyCredentials } from "./utils/realtime-proxy-auth";
 import { recordRequestPeerAddress } from "./utils/client-ip";
 import { resolveWebConsoleDir } from "./utils/web-console-path";
-import { grafanaProxyRoutes } from "./routes/grafana";
+import { grafanaProxyRoutes, handleGrafanaRequest } from "./routes/grafana";
 import { closeTaskWebSocket, messageTaskWebSocket, openTaskWebSocket } from "./routes/ws";
 import { isS3DataPlaneRequest } from "./utils/storage-s3-paths";
 import { studioAuthRoutes } from "./routes/studio-auth";
@@ -558,6 +558,14 @@ export function registerStaticAssets() {
     const { request, set } = context;
     const url = new URL(request.url);
     const path = url.pathname === "/" ? "/index.html" : url.pathname;
+
+    // Grafana proxy must win over the SPA catch-all. Elysia resolves `get("*")`
+    // before plugin `.all("/grafana/*")` routes, so delegate Grafana GET requests
+    // here without registering a global onRequest hook (which would force body
+    // parsing on every request and break SDK proxy streaming bodies).
+    if (url.pathname === "/grafana" || url.pathname.startsWith("/grafana/")) {
+      return handleGrafanaRequest(request);
+    }
 
     // Do NOT catch API routes
     if (path.startsWith("/api/") || path.startsWith("/v1/")) {
