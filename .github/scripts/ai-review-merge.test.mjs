@@ -174,6 +174,7 @@ describe('atomic merge preconditions', () => {
   const openPullRequest = {
     state: 'open',
     draft: false,
+    title: 'fix(release): preserve conventional commit titles',
     head: { sha: 'head-sha', ref: 'feature/harden-merge' },
     base: { ref: 'main' },
   };
@@ -187,6 +188,7 @@ describe('atomic merge preconditions', () => {
       headSha: 'head-sha',
       headRef: 'feature/harden-merge',
       baseRef: 'main',
+      title: 'fix(release): preserve conventional commit titles',
     });
 
     assert.throws(
@@ -222,15 +224,20 @@ describe('atomic merge preconditions', () => {
       }),
       /head ref changed/,
     );
+    assert.throws(
+      () => validatePullRequestForMerge({ ...openPullRequest, title: 'fix: valid\nInjected-Header: true' }, {
+        expectedHeadSha: 'head-sha', expectedHeadRef: 'feature/harden-merge', expectedBaseRef: 'main',
+      }),
+      /single line/,
+    );
   });
 
-  test('passes the expected head SHA to GitHub merge API', () => {
+  test('preserves the conventional PR title and expected SHA for squash commits', () => {
     assert.deepEqual(buildMergeRequestBody({
-      prNumber: '411',
-      headRef: 'feature/harden-merge',
+      prTitle: 'fix(console): ship svadmin upgrades',
       expectedHeadSha: 'head-sha',
     }), {
-      commit_title: 'Merge pull request #411 from feature/harden-merge',
+      commit_title: 'fix(console): ship svadmin upgrades',
       merge_method: 'squash',
       sha: 'head-sha',
     });
