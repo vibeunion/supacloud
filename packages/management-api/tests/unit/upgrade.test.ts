@@ -9,6 +9,8 @@ import {
     cleanupBinaryBackup,
     createBinaryBackupState,
     executeUpgradeTransaction,
+    ensureEdgeRuntimeIdentity,
+    ensurePersistedEdgeRuntimeIdentity,
     normalizeManagementReleaseTag,
     prepareUpgradeSecrets,
     resolveArtifactVerificationMode,
@@ -21,6 +23,7 @@ import {
     selectManagementRelease,
     stopManagementService,
     upsertManagementWebConsoleDir,
+    upsertEdgeRuntimeIdentityDefaults,
     validateWebConsoleArchiveEntries,
     verifyArtifactChecksum,
     waitForManagementHealth,
@@ -44,6 +47,127 @@ afterEach(() => {
 });
 
 describe("upgrade release selection", () => {
+  test("creates the dedicated Edge Runtime identity during a Linux upgrade", async () => {
+    const commands: string[][] = [];
+    const responses = [
+      { exitCode: 2, stdout: "", stderr: "missing group" },
+      { exitCode: 0, stdout: "", stderr: "" },
+      { exitCode: 1, stdout: "", stderr: "missing user" },
+      { exitCode: 0, stdout: "", stderr: "" },
+      { exitCode: 0, stdout: "998\n", stderr: "" },
+      { exitCode: 0, stdout: "supacloud-edge\n", stderr: "" },
+    ];
+
+    const identity = await ensureEdgeRuntimeIdentity({}, {
+      platform: "linux",
+      run: async (command) => {
+        commands.push(command);
+        const response = responses.shift();
+        if (!response) throw new Error("Unexpected identity command");
+        return response;
+      },
+    });
+
+    expect(identity).toEqual({ user: "supacloud-edge", group: "supacloud-edge" });
+    expect(commands).toEqual([
+      ["getent", "group", "supacloud-edge"],
+      ["groupadd", "--system", "supacloud-edge"],
+      ["id", "-u", "supacloud-edge"],
+      [
+        "useradd", "--system", "--no-create-home", "--home-dir", "/nonexistent",
+        "--shell", "/usr/sbin/nologin", "--gid", "supacloud-edge", "supacloud-edge",
+      ],
+      ["id", "-u", "supacloud-edge"],
+      ["id", "-gn", "supacloud-edge"],
+    ]);
+  });
+
+  test("rejects a privileged or mismatched existing Edge Runtime account", async () => {
+    const responses = [
+      { exitCode: 0, stdout: "supacloud-edge:x:998:\n", stderr: "" },
+      { exitCode: 0, stdout: "0\n", stderr: "" },
+      { exitCode: 0, stdout: "0\n", stderr: "" },
+      { exitCode: 0, stdout: "supacloud-edge\n", stderr: "" },
+    ];
+
+    await expect(ensureEdgeRuntimeIdentity({}, {
+      platform: "linux",
+      run: async () => {
+        const response = responses.shift();
+        if (!response) throw new Error("Unexpected identity command");
+        return response;
+      },
+    })).rejects.toThrow("violates the dedicated runtime-user contract");
+  });
+
+  test("keeps an existing dedicated Edge Runtime identity unchanged", async () => {
+    const commands: string[][] = [];
+    const responses = [
+      { exitCode: 0, stdout: "supacloud-edge:x:998:\n", stderr: "" },
+      { exitCode: 0, stdout: "998\n", stderr: "" },
+      { exitCode: 0, stdout: "998\n", stderr: "" },
+      { exitCode: 0, stdout: "supacloud-edge\n", stderr: "" },
+    ];
+
+    await ensureEdgeRuntimeIdentity({}, {
+      platform: "linux",
+      run: async (command) => {
+        commands.push(command);
+        const response = responses.shift();
+        if (!response) throw new Error("Unexpected identity command");
+        return response;
+      },
+    });
+
+    expect(commands.every(([command]) => command !== "groupadd" && command !== "useradd")).toBe(true);
+  });
+
+  test("adds missing Edge Runtime defaults without replacing custom account values", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supacloud-upgrade-edge-identity-"));
+    const envFile = join(dir, "management-api.env");
+    writeFileSync(envFile, "EDGE_RUNTIME_USER=custom-edge\nEDGE_RUNTIME_GROUP=\nPORT=9090\n", { mode: 0o600 });
+
+    try {
+      upsertEdgeRuntimeIdentityDefaults(envFile, {
+        user: "supacloud-edge",
+        group: "supacloud-edge",
+      });
+      expect(readFileSync(envFile, "utf8")).toBe(
+        "EDGE_RUNTIME_USER=custom-edge\nEDGE_RUNTIME_GROUP=supacloud-edge\nPORT=9090\n",
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("provisions the identity from the persistent service environment", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "supacloud-upgrade-persisted-edge-"));
+    const envFile = join(dir, "management-api.env");
+    writeFileSync(envFile, "EDGE_RUNTIME_USER=file-edge\nEDGE_RUNTIME_GROUP=file-edge-group\n", { mode: 0o600 });
+
+    try {
+      const identity = await ensurePersistedEdgeRuntimeIdentity(envFile, { platform: "darwin" });
+      expect(identity).toEqual({ user: "file-edge", group: "file-edge-group" });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("replaces empty persisted Edge Runtime identity values", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supacloud-upgrade-empty-edge-"));
+    const envFile = join(dir, "management-api.env");
+    writeFileSync(envFile, "EDGE_RUNTIME_USER=\nEDGE_RUNTIME_GROUP=\n", { mode: 0o600 });
+
+    try {
+      upsertEdgeRuntimeIdentityDefaults(envFile, { user: "supacloud-edge", group: "supacloud-edge" });
+      expect(readFileSync(envFile, "utf8")).toBe(
+        "EDGE_RUNTIME_USER=supacloud-edge\nEDGE_RUNTIME_GROUP=supacloud-edge\n",
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("restores the old runtime key when init-db fails before the rotation checkpoint", async () => {
     const events: string[] = [];
     const prepared = prepareUpgradeSecrets({

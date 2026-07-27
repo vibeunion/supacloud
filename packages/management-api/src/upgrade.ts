@@ -13,6 +13,8 @@ const RELEASE_REPOSITORY = "zuohuadong/supacloud";
 const RELEASE_SIGNER_WORKFLOW = `${RELEASE_REPOSITORY}/.github/workflows/release-please.yml`;
 const BIN_TARGET = "/usr/local/bin/supacloud";
 const DEFAULT_MANAGEMENT_ENV_FILE = "/etc/supabase/management-api.env";
+const DEFAULT_EDGE_RUNTIME_USER = "supacloud-edge";
+const DEFAULT_EDGE_RUNTIME_GROUP = "supacloud-edge";
 const LEGACY_CONFIG_FILE = "/opt/supacloud/config.env";
 const DEFAULT_GITHUB_PROXY = "https://ghproxy.net/";
 const WEB_CONSOLE_ASSET = "web-console-build.tar.gz";
@@ -25,6 +27,7 @@ const DEFAULT_EDGE_BACKGROUND_WORKER_POOL_SIZE = 20;
 const DEFAULT_EDGE_RESOURCE_RATIO = 0.6;
 const DEFAULT_EDGE_TASKS_MAX = 256;
 const WEB_CONSOLE_DIR_ENV_KEY = "WEB_CONSOLE_DIR";
+const LINUX_ACCOUNT_NAME = /^[a-z_][a-z0-9_-]{0,30}\$?$/;
 
 type GithubEndpoint = {
     label: string;
@@ -56,6 +59,24 @@ export type BinaryBackupState = {
     hadTarget: boolean;
     backupReady: boolean;
     activated: boolean;
+};
+
+type HostIdentityCommandResult = {
+    exitCode: number;
+    stdout: string;
+    stderr: string;
+};
+
+type HostIdentityCommandRunner = (command: string[]) => Promise<HostIdentityCommandResult>;
+
+export type EdgeRuntimeIdentity = {
+    user: string;
+    group: string;
+};
+
+type EdgeRuntimeIdentityOptions = {
+    platform?: NodeJS.Platform;
+    run?: HostIdentityCommandRunner;
 };
 
 export function createBinaryBackupState(targetPath: string, runId = randomUUID()): BinaryBackupState {
@@ -862,12 +883,99 @@ function upsertEnvFileValue(filePath: string, key: string, value: string) {
     }
 }
 
+function envFileHasNonEmptyValue(filePath: string, key: string): boolean {
+    if (!existsSync(filePath)) return false;
+    return Boolean(parseEnv(readFileSync(filePath, "utf8"))[key]?.trim());
+}
+
+export function upsertEdgeRuntimeIdentityDefaults(filePath: string, identity: EdgeRuntimeIdentity) {
+    if (!envFileHasNonEmptyValue(filePath, "EDGE_RUNTIME_USER")) {
+        upsertEnvFileValue(filePath, "EDGE_RUNTIME_USER", identity.user);
+    }
+    if (!envFileHasNonEmptyValue(filePath, "EDGE_RUNTIME_GROUP")) {
+        upsertEnvFileValue(filePath, "EDGE_RUNTIME_GROUP", identity.group);
+    }
+}
+
 export function upsertManagementWebConsoleDir(managementEnvPath: string = managementEnvFile()) {
     upsertEnvFileValue(managementEnvPath, WEB_CONSOLE_DIR_ENV_KEY, WEB_CONSOLE_CURRENT_LINK);
 }
 
 function managementEnvFile() {
     return process.env.SUPACLOUD_MANAGEMENT_ENV_FILE || DEFAULT_MANAGEMENT_ENV_FILE;
+}
+
+async function runHostIdentityCommand(command: string[]): Promise<HostIdentityCommandResult> {
+    const child = Bun.spawn({ cmd: command, stdout: "pipe", stderr: "pipe" });
+    const [stdout, stderr, exitCode] = await Promise.all([
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+        child.exited,
+    ]);
+    return { exitCode, stdout, stderr };
+}
+
+function validatedAccountName(value: string | undefined, fallback: string, label: string): string {
+    const accountName = value?.trim() || fallback;
+    if (!LINUX_ACCOUNT_NAME.test(accountName)) {
+        throw new Error(`${label} is not a valid Linux account name`);
+    }
+    return accountName;
+}
+
+async function ensureHostGroup(group: string, run: HostIdentityCommandRunner): Promise<void> {
+    if ((await run(["getent", "group", group])).exitCode === 0) return;
+    const created = await run(["groupadd", "--system", group]);
+    if (created.exitCode === 0 || (await run(["getent", "group", group])).exitCode === 0) return;
+    throw new Error(`Failed to create Edge Runtime group ${group}: ${created.stderr.trim().slice(-300)}`);
+}
+
+async function verifyHostUser(user: string, group: string, run: HostIdentityCommandRunner): Promise<void> {
+    const uid = await run(["id", "-u", user]);
+    const primaryGroup = await run(["id", "-gn", user]);
+    if (uid.exitCode !== 0 || primaryGroup.exitCode !== 0) {
+        throw new Error(`Failed to verify Edge Runtime user ${user}`);
+    }
+    if (uid.stdout.trim() === "0" || primaryGroup.stdout.trim() !== group) {
+        throw new Error(`Existing Edge Runtime account ${user} violates the dedicated runtime-user contract`);
+    }
+}
+
+async function ensureHostUser(user: string, group: string, run: HostIdentityCommandRunner): Promise<void> {
+    const current = await run(["id", "-u", user]);
+    if (current.exitCode !== 0) {
+        const created = await run([
+            "useradd", "--system", "--no-create-home", "--home-dir", "/nonexistent",
+            "--shell", "/usr/sbin/nologin", "--gid", group, user,
+        ]);
+        if (created.exitCode !== 0 && (await run(["id", "-u", user])).exitCode !== 0) {
+            throw new Error(`Failed to create Edge Runtime user ${user}: ${created.stderr.trim().slice(-300)}`);
+        }
+    }
+    await verifyHostUser(user, group, run);
+}
+
+export async function ensureEdgeRuntimeIdentity(
+    env: Record<string, string | undefined>,
+    options: EdgeRuntimeIdentityOptions = {},
+): Promise<EdgeRuntimeIdentity> {
+    const user = validatedAccountName(env.EDGE_RUNTIME_USER, DEFAULT_EDGE_RUNTIME_USER, "EDGE_RUNTIME_USER");
+    const group = validatedAccountName(env.EDGE_RUNTIME_GROUP, DEFAULT_EDGE_RUNTIME_GROUP, "EDGE_RUNTIME_GROUP");
+    if ((options.platform ?? process.platform) !== "linux") return { user, group };
+
+    const run = options.run ?? runHostIdentityCommand;
+    await ensureHostGroup(group, run);
+    await ensureHostUser(user, group, run);
+    return { user, group };
+}
+
+export async function ensurePersistedEdgeRuntimeIdentity(
+    filePath: string,
+    options: EdgeRuntimeIdentityOptions = {},
+): Promise<EdgeRuntimeIdentity> {
+    const identity = await ensureEdgeRuntimeIdentity(await readEnvFile(filePath), options);
+    upsertEdgeRuntimeIdentityDefaults(filePath, identity);
+    return identity;
 }
 
 function edgeRuntimeCapacityDropIn() {
@@ -1089,6 +1197,7 @@ export async function runUpgrade(options: { forceYes?: boolean; targetVersion?: 
                 if (!activationState) throw new Error("Upgrade activation state is unavailable");
                 activationState.managementEnvState = captureFileState(managementEnvFile());
                 activationState.edgeRuntimeDropInState = captureFileState(edgeRuntimeCapacityDropIn());
+                await ensurePersistedEdgeRuntimeIdentity(managementEnvFile());
                 await ensureRuntimeModeForBinaryUpgrade();
                 await ensureEdgeRuntimeCapacityDropIn(env);
                 upsertManagementWebConsoleDir(managementEnvFile());
