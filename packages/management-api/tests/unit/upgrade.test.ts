@@ -11,6 +11,7 @@ import {
     createBinaryBackupState,
     executeUpgradeTransaction,
     ensureEdgeRuntimeIdentity,
+    ensureEmbeddedEdgeRuntimeSourceAccess,
     ensurePersistedEdgeRuntimeIdentity,
     normalizeManagementReleaseTag,
     prepareUpgradeSecrets,
@@ -587,6 +588,44 @@ describe("upgrade release selection", () => {
     } finally {
       rmSync(envDir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("embedded Edge Runtime source access", () => {
+  test("grants read-only source access to the dedicated runtime group", async () => {
+    const commands: string[][] = [];
+    const sourceDir = mkdtempSync(join(tmpdir(), "supacloud-edge-source-"));
+
+    await ensureEmbeddedEdgeRuntimeSourceAccess(
+      { user: "supacloud-edge", group: "supacloud-edge" },
+      {
+        platform: "linux",
+        sourceDir,
+        run: async (command) => {
+          commands.push(command);
+          return { exitCode: 0, stdout: "", stderr: "" };
+        },
+      },
+    );
+
+    expect(commands).toEqual([
+      ["chmod", "-R", "g-w,g+rX", sourceDir],
+      ["chgrp", "-R", "supacloud-edge", sourceDir],
+    ]);
+    rmSync(sourceDir, { recursive: true, force: true });
+  });
+
+  test("fails before privilege drop when source permissions cannot be changed", async () => {
+    const sourceDir = mkdtempSync(join(tmpdir(), "supacloud-edge-source-"));
+    await expect(ensureEmbeddedEdgeRuntimeSourceAccess(
+      { user: "supacloud-edge", group: "supacloud-edge" },
+      {
+        platform: "linux",
+        sourceDir,
+        run: async () => ({ exitCode: 1, stdout: "", stderr: "permission denied" }),
+      },
+    )).rejects.toThrow("Failed to grant Edge Runtime source access: permission denied");
+    rmSync(sourceDir, { recursive: true, force: true });
   });
 });
 

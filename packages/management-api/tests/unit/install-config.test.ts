@@ -957,6 +957,27 @@ describe("installer configuration persistence", () => {
     expect(readFileSync(embeddedCalls, "utf8")).toBe("health:http://127.0.0.1:9000/health\n");
   });
 
+  test("installer grants the dedicated runtime group read-only source access", () => {
+    const dir = makeTempDir();
+    const calls = join(dir, "calls");
+    const sourceDir = join(dir, "edge-runtime");
+    mkdirSync(sourceDir);
+
+    const configured = runBash([
+      "source install.sh",
+      'chgrp() { printf "chgrp:%s\\n" "$*" >> "$CALLS"; }',
+      'chmod() { printf "chmod:%s\\n" "$*" >> "$CALLS"; }',
+      'configure_edge_runtime_source_access "$SOURCE_DIR"',
+    ].join("; "), { CALLS: calls, SOURCE_DIR: sourceDir });
+
+    expect(configured.status, configured.stderr).toBe(0);
+    expect(readFileSync(calls, "utf8")).toBe([
+      `chmod:-R g-w,g+rX ${sourceDir}`,
+      `chgrp:-R supacloud-edge ${sourceDir}`,
+      "",
+    ].join("\n"));
+  });
+
   test("management Edge mode uses the persisted service environment and fails closed", () => {
     const dir = makeTempDir();
     const runtimeEnv = join(dir, "management-api.env");
