@@ -43,7 +43,7 @@ describe("SupaCloud root dashboard", () => {
     expect(pageSource).not.toContain("images.unsplash.com");
   });
 
-  test("tracks the latest stable svadmin packages and Vite compatibility rule", () => {
+  test("locks the released svadmin adapters and Vite compatibility rule", () => {
     expect(packageJson.dependencies["@svadmin/core"]).toBe("^0.32.2");
     expect(packageJson.dependencies["@svadmin/ui"]).toBe("^0.38.7");
     expect(packageJson.dependencies["@svadmin/sveltekit"]).toBe("^0.9.6");
