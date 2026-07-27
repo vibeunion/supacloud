@@ -3,7 +3,8 @@
 
   import { page } from "$app/state";
   import { goto } from "$app/navigation";
-  import { Loader2, Globe, ExternalLink, GitBranch, Clock, CheckCircle2, XCircle, RefreshCw, Trash2, Settings, AlertTriangle } from "lucide-svelte";
+  import { t } from "svelte-i18n";
+  import { Loader2, Globe, ExternalLink, GitBranch, Clock, CheckCircle2, XCircle, RefreshCw, Trash2, Settings } from "lucide-svelte";
   import { useList, type BaseRecord } from "@svadmin/core";
   import { createMutation } from "@tanstack/svelte-query";
 
@@ -106,11 +107,13 @@
     <h2 class="text-xl font-bold">站点列表</h2>
     <div class="flex items-center gap-2">
       <button onclick={() => query.refetch()} class="flex items-center gap-2 px-3 py-2 text-xs rounded-lg border hover:bg-muted/50 transition-colors">
-        <RefreshCw size={12} /> 刷新
+        <RefreshCw size={12} /> {$t("Hosting.refresh")}
       </button>
-      <a href={`/project/${projectRef}/hosting/new`} class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-brand text-white hover:bg-brand/90 transition-colors">
-        + 新建部署
-      </a>
+      {#if deployments.length > 0}
+        <a href={`/project/${projectRef}/hosting/new`} class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-brand text-white hover:bg-brand/90 transition-colors">
+          + {$t("Hosting.new_deploy")}
+        </a>
+      {/if}
     </div>
   </div>
 
@@ -127,10 +130,10 @@
   {:else if deployments.length === 0}
     <div class="rounded-xl border bg-card p-12 text-center">
       <Globe size={48} class="mx-auto text-muted-foreground/30 mb-4" />
-      <h3 class="text-lg font-bold mb-2">还没有任何部署</h3>
-      <p class="text-xs text-muted-foreground mb-4">创建你的第一个前端部署 — 支持静态站点、React、Vue、Next.js、SvelteKit 等</p>
+      <h3 class="text-lg font-bold mb-2">{$t("Hosting.no_deployments")}</h3>
+      <p class="text-xs text-muted-foreground mb-4">{$t("Hosting.no_deployments_desc")}</p>
       <a href={`/project/${projectRef}/hosting/new`} class="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-brand text-white hover:bg-brand/90 transition-colors">
-        + 新建部署
+        + {$t("Hosting.new_deploy")}
       </a>
     </div>
   {:else}
