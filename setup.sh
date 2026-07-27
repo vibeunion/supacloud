@@ -207,16 +207,19 @@ download_binaries() {
     local ARCH=$(uname -m)
     local BIN_NAME=""
     local EDGE_RT_BIN_NAME=""
+    local PGREDIS_RT_BIN_NAME=""
     local CADDY_BIN_NAME=""
     local artifact_mode="${SUPACLOUD_SETUP_ARTIFACT_MODE:-release}"
     
     if [[ "$ARCH" == "x86_64" ]]; then
         BIN_NAME="supacloud-linux-amd64"
         EDGE_RT_BIN_NAME="supacloud-edge-runtime-linux-amd64"
+        PGREDIS_RT_BIN_NAME="supacloud-pgredis-runtime-linux-amd64"
         CADDY_BIN_NAME="supacloud-caddy-linux-amd64"
     elif [[ "$ARCH" == "aarch64" ]]; then
         BIN_NAME="supacloud-linux-arm64"
         EDGE_RT_BIN_NAME="supacloud-edge-runtime-linux-arm64"
+        PGREDIS_RT_BIN_NAME="supacloud-pgredis-runtime-linux-arm64"
         CADDY_BIN_NAME="supacloud-caddy-linux-arm64"
     else
         log_error "Unsupported CPU architecture: $ARCH"
@@ -250,10 +253,19 @@ download_binaries() {
                 return 1
             }
             supacloud_download_release_asset "$edge_release" "$EDGE_RT_BIN_NAME" "dist/${EDGE_RT_BIN_NAME}" binary || return 1
+
+            log_info "Resolving the verified pgredis-runtime component release..."
+            local pgredis_release
+            pgredis_release=$(supacloud_fetch_component_release pgredis-runtime \
+                "${SUPACLOUD_PGREDIS_RUNTIME_VERSION:-latest}" "$PGREDIS_RT_BIN_NAME") || {
+                log_error "No verified pgredis-runtime release contains $PGREDIS_RT_BIN_NAME"
+                return 1
+            }
+            supacloud_download_release_asset "$pgredis_release" "$PGREDIS_RT_BIN_NAME" "dist/${PGREDIS_RT_BIN_NAME}" binary || return 1
             ;;
         local)
             log_warn "Explicit local artifact mode enabled; network Release attestations are not used"
-            local management_source="" edge_source="" caddy_source=""
+            local management_source="" edge_source="" pgredis_source="" caddy_source=""
             for management_source in "dist/${BIN_NAME}" "./${BIN_NAME}"; do
                 [[ -f "$management_source" ]] && break
                 management_source=""
@@ -263,12 +275,23 @@ download_binaries() {
                 [[ -f "$edge_source" ]] && break
                 edge_source=""
             done
+            for pgredis_source in "dist/${PGREDIS_RT_BIN_NAME}" \
+                "packages/pgredis-runtime/dist/${PGREDIS_RT_BIN_NAME}" "./${PGREDIS_RT_BIN_NAME}"; do
+                [[ -f "$pgredis_source" ]] && break
+                pgredis_source=""
+            done
             for caddy_source in "dist/${CADDY_BIN_NAME}" "./${CADDY_BIN_NAME}"; do
                 [[ -f "$caddy_source" ]] && break
                 caddy_source=""
             done
             [[ -n "$management_source" ]] && supacloud_validate_binary "$management_source" "$BIN_NAME" || return 1
             [[ -n "$edge_source" ]] && supacloud_validate_binary "$edge_source" "$EDGE_RT_BIN_NAME" || return 1
+            if [[ -n "$pgredis_source" ]]; then
+                supacloud_validate_binary "$pgredis_source" "$PGREDIS_RT_BIN_NAME" || return 1
+            elif [[ ! -f packages/pgredis-runtime/server.ts ]]; then
+                log_error "Local artifact mode requires a pgredis-runtime binary or source package"
+                return 1
+            fi
             [[ -n "$caddy_source" ]] && supacloud_validate_binary "$caddy_source" "$CADDY_BIN_NAME" || return 1
             if [[ -f dist/web-console-build.tar.gz ]]; then
                 supacloud_validate_tar dist/web-console-build.tar.gz || return 1
@@ -278,6 +301,9 @@ download_binaries() {
             fi
             [[ "$management_source" == "dist/${BIN_NAME}" ]] || cp "$management_source" "dist/${BIN_NAME}"
             [[ "$edge_source" == "dist/${EDGE_RT_BIN_NAME}" ]] || cp "$edge_source" "dist/${EDGE_RT_BIN_NAME}"
+            if [[ -n "$pgredis_source" && "$pgredis_source" != "dist/${PGREDIS_RT_BIN_NAME}" ]]; then
+                cp "$pgredis_source" "dist/${PGREDIS_RT_BIN_NAME}"
+            fi
             [[ "$caddy_source" == "dist/${CADDY_BIN_NAME}" ]] || cp "$caddy_source" "dist/${CADDY_BIN_NAME}"
             ;;
         *)

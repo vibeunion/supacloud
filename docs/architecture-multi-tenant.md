@@ -25,6 +25,14 @@
                      │ ├─ Worker Pool   │
                      │ └─ Preheat Cache │
                      └──────────────────┘
+                              │ request-scoped internal capability
+                              ▼
+                     ┌──────────────────┐
+                     │ pgredis-runtime  │
+                     │ (:9010 private)  │
+                     │ ├─ Tenant Pools  │
+                     │ └─ L1 + NOTIFY   │
+                     └──────────────────┘
 ```
 
 > **Note**: SupaCloud natively relies on **Caddy** running as a systemd service.
@@ -100,6 +108,14 @@ When a function is deployed via the Management API:
 2. `invalidateCache()` evicts the old version from Worker thread caches
 3. `POST /preheat/:ref/:slug` → Worker imports the module ahead of time
 4. First real request hits warm LRU cache → **0ms cold-start**
+
+### 8. Private Cache Data Plane ⭐ Implemented
+
+- `pgredis-runtime` owns per-tenant PostgreSQL pools and bounded L1 caches; cross-tenant Worker singletons own neither.
+- Edge Workers call a stable `globalThis.SupaCloud.pgredis` facade. The parent runtime injects only a short-lived, project-scoped capability for the active request.
+- Tenant database credentials are loaded from the dedicated, runtime-owned `/etc/supabase/pgredis-tenants/<ref>_pgredis.env` files and must use the matching `role_<ref>` role; Edge Runtime never mounts this directory.
+- Mutations and invalidation notifications commit in the same PostgreSQL transaction. Reconnect clears the tenant L1 before reads resume.
+- The service has no Caddy route or host port and does not implement queues or platform rate limiting. PGMQ and Caddy remain the sole owners of those capabilities.
 
 ## Additional Issues Found
 

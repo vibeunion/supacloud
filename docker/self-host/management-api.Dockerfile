@@ -9,6 +9,9 @@ COPY packages/web-console/package.json ./packages/web-console/package.json
 
 RUN bun install
 
+RUN mkdir -p /etc/supabase/pgredis-tenants \
+    && chown bun:bun /etc/supabase/pgredis-tenants
+
 COPY packages/management-api ./packages/management-api
 COPY packages/web-console ./packages/web-console
 COPY --chmod=0755 docker/self-host/management-api-entrypoint.sh /usr/local/bin/supacloud-management-entrypoint

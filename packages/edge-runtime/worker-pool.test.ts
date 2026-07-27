@@ -88,6 +88,133 @@ describe("WorkerPool EdgeRuntime.waitUntil", () => {
 });
 
 describe("WorkerPool framework routing", () => {
+  test("keeps a cached binding facade tenant-scoped without exposing its token", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-pgredis-binding-"));
+    const functionPath = join(projectRoot, "cache.ts");
+    const service = Bun.serve({
+      port: 0,
+      async fetch(request) {
+        const authorization = request.headers.get("authorization") || "";
+        return Response.json({ value: authorization.endsWith("tenant-capability-a") ? "tenant-a" : "tenant-b" });
+      },
+    });
+    await Bun.write(functionPath, `
+      const cache = globalThis.SupaCloud.pgredis;
+      export default async function () {
+        return Response.json({
+          value: await cache.get("shared-key"),
+          leakedToken: process.env.PGREDIS_RUNTIME_INTERNAL_TOKEN || null,
+          leakedUrl: process.env.PGREDIS_RUNTIME_INTERNAL_URL || null,
+        });
+      }
+    `);
+
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+    const endpoint = {
+      baseUrl: `http://127.0.0.1:${service.port}`,
+      timeoutMs: 1_000,
+    };
+
+    try {
+      const tenantA = await pool.dispatch({
+        functionId: "tenant-a_cache",
+        functionPath,
+        projectRoot,
+        projectRef: "tenant-a",
+        moduleVersion: "shared-module",
+        env: {},
+        internalBindings: { ...endpoint, capabilityToken: "tenant-capability-a" },
+        request: new Request("http://edge.local/functions/v1/cache"),
+      });
+      const tenantB = await pool.dispatch({
+        functionId: "tenant-b_cache",
+        functionPath,
+        projectRoot,
+        projectRef: "tenant-b",
+        moduleVersion: "shared-module",
+        env: {},
+        internalBindings: { ...endpoint, capabilityToken: "tenant-capability-b" },
+        request: new Request("http://edge.local/functions/v1/cache"),
+      });
+
+      expect(await tenantA.json()).toEqual({ value: "tenant-a", leakedToken: null, leakedUrl: null });
+      expect(await tenantB.json()).toEqual({ value: "tenant-b", leakedToken: null, leakedUrl: null });
+    } finally {
+      service.stop(true);
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("does not let detached work inherit the next tenant binding", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-pgredis-detached-"));
+    const functionPath = join(projectRoot, "cache.ts");
+    const detachedPath = join(projectRoot, "detached.txt");
+    const service = Bun.serve({
+      port: 0,
+      async fetch(request) {
+        await Bun.sleep(150);
+        return Response.json({ value: request.headers.get("authorization") });
+      },
+    });
+    await Bun.write(functionPath, `
+      const cache = globalThis.SupaCloud.pgredis;
+      export default async function () {
+        if (process.env.DETACHED_FILE) {
+          const outputFile = process.env.DETACHED_FILE;
+          void Bun.sleep(40).then(async () => {
+            try {
+              const value = await cache.get("late");
+              await Bun.write(outputFile, "unexpected:" + value);
+            } catch (error) {
+              await Bun.write(outputFile, error.message);
+            }
+          });
+          return new Response("scheduled", { status: 202 });
+        }
+        return Response.json({ value: await cache.get("live") });
+      }
+    `);
+
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+    const endpoint = {
+      baseUrl: `http://127.0.0.1:${service.port}`,
+      timeoutMs: 1_000,
+    };
+
+    try {
+      const first = await pool.dispatch({
+        functionId: "tenant-a_cache",
+        functionPath,
+        projectRoot,
+        projectRef: "tenant-a",
+        moduleVersion: "shared-module",
+        env: { DETACHED_FILE: detachedPath },
+        internalBindings: { ...endpoint, capabilityToken: "tenant-capability-a" },
+        request: new Request("http://edge.local/functions/v1/cache"),
+      });
+      expect(first.status).toBe(202);
+
+      const second = await pool.dispatch({
+        functionId: "tenant-b_cache",
+        functionPath,
+        projectRoot,
+        projectRef: "tenant-b",
+        moduleVersion: "shared-module",
+        env: {},
+        internalBindings: { ...endpoint, capabilityToken: "tenant-capability-b" },
+        request: new Request("http://edge.local/functions/v1/cache"),
+      });
+
+      expect(second.status).toBe(200);
+      expect(await waitForFile(detachedPath)).toContain("unavailable outside a request");
+    } finally {
+      service.stop(true);
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   test("routes public Function URLs through Elysia using function-local paths", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-elysia-routing-"));
     const functionPath = join(projectRoot, "elysia.ts");

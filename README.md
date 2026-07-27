@@ -151,11 +151,13 @@ Production hosts should use the verified one-click `setup.sh` flow above. A sour
 git clone https://github.com/zuohuadong/supacloud.git
 cd supacloud
 
-# 2. Build Management API, Edge Runtime, Caddy, and Web Console artifacts
+# 2. Build Management API, Edge Runtime, pgredis-runtime, Caddy, and Web Console artifacts
 bun --cwd packages/management-api install
 bun --cwd packages/management-api run build:linux
 bun --cwd packages/edge-runtime install
 bun --cwd packages/edge-runtime run build:linux
+bun --cwd packages/pgredis-runtime install
+bun --cwd packages/pgredis-runtime run build:linux
 bun --cwd packages/web-console install --frozen-lockfile
 bun --cwd packages/web-console run build
 mkdir -p .local/bin dist
@@ -381,6 +383,10 @@ SupaCloud (:9090)          Edge Runtime (:9000)
 └── Static Assets (ETag)   ├── URL Import Plugin
                            └── /preheat (zero cold-start)
 
+Edge Runtime parent ── internal capability ──► pgredis-runtime (:9010)
+                                             ├── per-tenant PostgreSQL pool
+                                             └── bounded L1 + LISTEN/NOTIFY
+
 Caddy Gateway (Admin API-driven):
   Automatic HTTPS, route JSON publishing, security headers, rate limiting, CORS
   /api/*        → :9090
@@ -402,6 +408,8 @@ Additionally, the Management API runs a periodic `gateway-health.worker` that po
 See [docs/gateway-customization.md](docs/gateway-customization.md) for the full field reference, curl examples (reverse proxy, static hosting, HTTPS upstream), rate-limit tiers, custom path rate limits, and how custom routes compose with tenant CORS.
 
 Default installs use `EDGE_RUNTIME_MODE=embedded`, meaning `supacloud.service` starts the Bun Edge Runtime child process itself. A separate `supacloud-edge-runtime.service` is available for `EDGE_RUNTIME_MODE=external`, but you should not run both modes at the same time.
+
+`pgredis-runtime` is a separate private data-plane service. The Edge parent mints a short-lived, project-scoped capability for each request; cached Worker modules only see the stable `globalThis.SupaCloud.pgredis` facade and never receive PostgreSQL credentials, connection pools, L1 state, or the runtime signing secret. The service is not routed by Caddy and exposes no host/container port. Its v1 surface is KV/TTL only: PGMQ remains the only platform queue, while Caddy remains the gateway rate limiter.
 
 ### Background Function Routing
 
@@ -734,11 +742,13 @@ curl -fsSL https://raw.githubusercontent.com/zuohuadong/supacloud/main/setup.sh 
 git clone https://github.com/zuohuadong/supacloud.git
 cd supacloud
 
-# 2. 构建 Management API、Edge Runtime、Caddy 与 Web Console
+# 2. 构建 Management API、Edge Runtime、pgredis-runtime、Caddy 与 Web Console
 bun --cwd packages/management-api install
 bun --cwd packages/management-api run build:linux
 bun --cwd packages/edge-runtime install
 bun --cwd packages/edge-runtime run build:linux
+bun --cwd packages/pgredis-runtime install
+bun --cwd packages/pgredis-runtime run build:linux
 bun --cwd packages/web-console install --frozen-lockfile
 bun --cwd packages/web-console run build
 mkdir -p .local/bin dist
@@ -946,6 +956,10 @@ SupaCloud (:9090)          Edge Runtime (:9000)
 └── 静态资源 (ETag/304)    ├── URL Import 插件
                            └── /preheat (零冷启动预热)
 
+Edge Runtime 父进程 ── 内部 capability ──► pgredis-runtime (:9010)
+                                         ├── 每租户 PostgreSQL 连接池
+                                         └── 有界 L1 + LISTEN/NOTIFY
+
 Caddy 网关 (Admin API 驱动):
   Automatic HTTPS、动态路由 JSON 发布、安全响应头、限流、CORS
   /api/*        → :9090 (管理 API)
@@ -967,6 +981,8 @@ Caddy 网关 (Admin API 驱动):
 完整字段说明、curl 示例（反代、静态托管、HTTPS 上游）、限流 tier、单路径自定义限流，以及自定义路由与租户 CORS 的组合行为，见 [docs/gateway-customization.md](docs/gateway-customization.md)。
 
 默认安装使用 `EDGE_RUNTIME_MODE=embedded`，也就是由 `supacloud.service` 直接拉起 Bun Edge Runtime 子进程。`EDGE_RUNTIME_MODE=external` 时可以改用独立的 `supacloud-edge-runtime.service`，但两种模式不能同时运行，否则会争抢 `9000` 端口。
+
+`pgredis-runtime` 是独立、仅内部可达的数据面服务。Edge 父进程为每次请求签发短时、项目级 capability；被模块缓存的 Worker 代码只看到稳定的 `globalThis.SupaCloud.pgredis` facade，不会拿到 PostgreSQL 凭据、连接池、L1 状态或 runtime 签名密钥。该服务不经过 Caddy，也不映射宿主机/容器端口；v1 只提供 KV/TTL，平台队列仍唯一使用 PGMQ，网关限流仍唯一由 Caddy 负责。
 
 | 特性 | 当前 Bun Runtime |
 |------|------------------|

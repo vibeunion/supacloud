@@ -102,6 +102,8 @@ export interface Config {
   scriptsPath: string;
   pigstyPath: string;
   tenantConfigDir: string;
+  pgredisTenantConfigDir: string;
+  pgredisTenantConfigOwner: string;
   edgeFunctionsDir: string;
   homePath: string;
   masterToken: string;
@@ -151,6 +153,8 @@ export interface Config {
   edgeRuntimeInternal: string;
   edgeRuntimeBackgroundInternal: string;
   edgeRuntimeMasterKey: string;
+  edgeRuntimeUser: string;
+  edgeRuntimeGroup: string;
   bunPath: string;
   sdkProxyTimeoutMs: number;
   restProxyTimeoutMs: number;
@@ -272,6 +276,8 @@ export const config: Config = {
   scriptsPath: getEnv("SCRIPTS_PATH", "/opt/supacloud/scripts/lib"),
   pigstyPath: getEnv("PIGSTY_PATH", "/root/pigsty"),
   tenantConfigDir: getEnv("TENANT_CONFIG_DIR", "/etc/supabase/tenants"),
+  pgredisTenantConfigDir: getEnv("PGREDIS_TENANT_CONFIG_DIR", "/etc/supabase/pgredis-tenants"),
+  pgredisTenantConfigOwner: getEnv("PGREDIS_TENANT_CONFIG_OWNER", ""),
   edgeFunctionsDir: getEnv("EDGE_FUNCTIONS_DIR", "/opt/supacloud/functions"),
   homePath: getEnv("HOME", "/root"),
   masterToken: getEnv(
@@ -335,6 +341,8 @@ export const config: Config = {
         : "",
     ),
   ),
+  edgeRuntimeUser: getEnv("EDGE_RUNTIME_USER", process.platform === "linux" ? "supacloud-edge" : "").trim(),
+  edgeRuntimeGroup: getEnv("EDGE_RUNTIME_GROUP", process.platform === "linux" ? "supacloud-edge" : "").trim(),
   bunPath: getEnv("BUN_PATH", "bun"),
   sdkProxyTimeoutMs: Number(getEnv("SDK_PROXY_TIMEOUT_MS", "30000")),
   restProxyTimeoutMs: Number(getEnv("REST_PROXY_TIMEOUT_MS", "300000")),

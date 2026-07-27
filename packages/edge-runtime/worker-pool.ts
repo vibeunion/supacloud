@@ -4,6 +4,7 @@ import { tmpdir } from "os";
 import path from "path";
 import { resolveEdgeFetchTlsPolicy } from "./fetch-tls-policy";
 import type { EdgeFetchTlsPolicy } from "./fetch-tls-policy";
+import type { PgredisRuntimeBindingConfig } from "./internal-bindings";
 import { EMBEDDED_WORKER_HASH, EMBEDDED_WORKER_SOURCE } from "./generated/embedded-worker";
 
 interface DispatchOptions {
@@ -13,6 +14,7 @@ interface DispatchOptions {
   projectRef?: string;
   moduleVersion?: string;
   env: Record<string, string>;
+  internalBindings?: Omit<PgredisRuntimeBindingConfig, "signal">;
   request: Request;
   cancelKey?: string;
   signal?: AbortSignal;
@@ -672,6 +674,7 @@ export class WorkerPool {
         projectRef: opts.projectRef,
         moduleVersion: opts.moduleVersion,
         env: opts.env,
+        internalBindings: opts.internalBindings,
         tlsPolicy,
         url: opts.request.url,
         method: opts.request.method,

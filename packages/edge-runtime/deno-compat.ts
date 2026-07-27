@@ -8,13 +8,8 @@ export function clearCapturedServeHandler() {
   capturedServeHandler = null;
 }
 
-let currentTenantRef: string | null = null;
 let currentProjectRoot: string | null = null;
 let injectedEnvRef: Record<string, string> = {};
-
-export function setTenantRef(ref: string | null) {
-  currentTenantRef = ref;
-}
 
 export function setProjectRoot(root: string | null) {
   currentProjectRoot = root;
@@ -419,85 +414,10 @@ const envWriteLog: Set<string> = new Set();
   revoke: async (_desc: unknown) => ({ state: "denied" as const }),
 };
 
-const kvStores = new Map<string, Map<string, { value: unknown; versionstamp: string }>>();
-let globalVersionCounter = 0;
-
 (globalThis as any).Deno.openKv = async (_path?: string) => {
-  const tenantPrefix = currentTenantRef || "__default";
-  const storeKey = `__kv_${tenantPrefix}_${_path || "__default"}`;
-  if (!kvStores.has(storeKey)) {
-    kvStores.set(storeKey, new Map());
-  }
-  const store = kvStores.get(storeKey)!;
-
-  return {
-    get: async (key: unknown[]) => {
-      const k = JSON.stringify(key);
-      const entry = store.get(k);
-      return entry
-        ? { key, value: entry.value, versionstamp: entry.versionstamp }
-        : { key, value: null, versionstamp: null };
-    },
-    set: async (key: unknown[], value: unknown) => {
-      const k = JSON.stringify(key);
-      const versionstamp = String(++globalVersionCounter).padStart(20, "0");
-      store.set(k, { value, versionstamp });
-      return { ok: true, versionstamp };
-    },
-    delete: async (key: unknown[]) => {
-      store.delete(JSON.stringify(key));
-    },
-    list: async function* ({ prefix }: { prefix: unknown[] }) {
-      const prefixStr = JSON.stringify(prefix).slice(0, -1);
-      for (const [k, v] of store) {
-        if (k.startsWith(prefixStr)) {
-          yield {
-            key: JSON.parse(k),
-            value: v.value,
-            versionstamp: v.versionstamp,
-          };
-        }
-      }
-    },
-    getMany: async (keys: unknown[][]) => {
-      return keys.map((key) => {
-        const k = JSON.stringify(key);
-        const entry = store.get(k);
-        return entry
-          ? { key, value: entry.value, versionstamp: entry.versionstamp }
-          : { key, value: null, versionstamp: null };
-      });
-    },
-    atomic: () => {
-      const ops: Array<() => void> = [];
-      const tx = {
-        set: (key: unknown[], value: unknown) => {
-          ops.push(() => {
-            store.set(JSON.stringify(key), {
-              value,
-              versionstamp: String(++globalVersionCounter).padStart(20, "0"),
-            });
-          });
-          return tx;
-        },
-        delete: (key: unknown[]) => {
-          ops.push(() => store.delete(JSON.stringify(key)));
-          return tx;
-        },
-        check: (..._checks: unknown[]) => tx,
-        commit: async () => {
-          for (const op of ops) op();
-          return {
-            ok: true,
-            versionstamp: String(globalVersionCounter).padStart(20, "0"),
-          };
-        },
-      };
-      return tx;
-    },
-    close: () => {},
-    [Symbol.asyncDispose]: async () => {},
-  };
+  throw new (globalThis as any).Deno.errors.NotSupported(
+    "Deno.openKv is disabled; use the request-scoped SupaCloud.pgredis binding",
+  );
 };
 
 export { envWriteLog };

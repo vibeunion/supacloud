@@ -1,8 +1,10 @@
 import { parentPort } from "worker_threads";
 import path from "path";
-import { getCapturedServeHandler, clearCapturedServeHandler, setTenantRef, setProjectRoot, setInjectedEnv, envWriteLog } from "./deno-compat";
+import { getCapturedServeHandler, clearCapturedServeHandler, setProjectRoot, setInjectedEnv, envWriteLog } from "./deno-compat";
 import { installEdgeFetchTlsPolicy, resolveEdgeFetchTlsPolicy } from "./fetch-tls-policy";
 import type { EdgeFetchTlsPolicy } from "./fetch-tls-policy";
+import { runWithPgredisBinding } from "./internal-bindings";
+import type { PgredisRuntimeBindingConfig } from "./internal-bindings";
 
 export function getInjectedEnv(): Record<string, string> {
   return currentInjectedEnv;
@@ -48,6 +50,7 @@ type ExecuteMessage = Omit<PreheatMessage, "type"> & {
   method: string;
   headers: Record<string, string | string[]>;
   body?: ArrayBuffer | null;
+  internalBindings?: Omit<PgredisRuntimeBindingConfig, "signal">;
 };
 type ParentMessage =
   | InvalidateModuleMessage
@@ -176,6 +179,13 @@ function restoreConsole() {
   console.error = originalConsole.error;
   console.info = originalConsole.info;
   console.debug = originalConsole.debug;
+}
+
+function runCleanup(cleanup: () => void): void {
+  try {
+    cleanup();
+  } catch {
+  }
 }
 
 function setupEdgeRuntimeCompat() {
@@ -341,7 +351,16 @@ function isExecuteMessage(candidate: Record<string, unknown>): boolean {
     && typeof candidate.url === "string"
     && typeof candidate.method === "string"
     && isHeaderRecord(candidate.headers)
-    && (candidate.body == null || candidate.body instanceof ArrayBuffer);
+    && (candidate.body == null || candidate.body instanceof ArrayBuffer)
+    && (candidate.internalBindings === undefined || isInternalBindings(candidate.internalBindings));
+}
+
+function isInternalBindings(candidate: unknown): candidate is Omit<PgredisRuntimeBindingConfig, "signal"> {
+  if (!candidate || typeof candidate !== "object") return false;
+  const value = candidate as Record<string, unknown>;
+  return typeof value.baseUrl === "string"
+    && typeof value.capabilityToken === "string"
+    && typeof value.timeoutMs === "number";
 }
 
 function isParentMessage(message: unknown): message is ParentMessage {
@@ -402,7 +421,6 @@ async function onParentMessage(msg: unknown): Promise<void> {
     try {
       const ref = msg.projectRef || extractProjectRef(msg.functionId);
       const env = msg.env || {};
-      setTenantRef(ref);
       setProjectRoot(msg.projectRoot || path.dirname(msg.functionPath));
       injectEnv(env);
       setInjectedEnv(env);
@@ -433,7 +451,6 @@ async function onParentMessage(msg: unknown): Promise<void> {
       });
     } finally {
       restoreEnv();
-      setTenantRef(null);
       setProjectRoot(null);
       setInjectedEnv({});
     }
@@ -446,20 +463,20 @@ async function onParentMessage(msg: unknown): Promise<void> {
     return;
   }
 
-  const { functionId, functionPath, projectRoot, env, tlsPolicy, url, method, headers, body } = msg;
+  const { functionId, functionPath, projectRoot, env, tlsPolicy, url, method, headers, body, internalBindings } = msg;
 
   const projectRef = msg.projectRef || extractProjectRef(functionId);
-  setTenantRef(projectRef);
-  setProjectRoot(projectRoot || path.dirname(functionPath));
-  injectEnv(env);
-  setInjectedEnv(env);
-  setupConsoleCapture(functionId);
-  setupEdgeRuntimeCompat();
-  const restoreFetchTlsPolicy = installEdgeFetchTlsPolicy(
-    await resolveMessageTlsPolicy(tlsPolicy),
-  );
+  let restoreFetchTlsPolicy = () => {};
 
   try {
+    setProjectRoot(projectRoot || path.dirname(functionPath));
+    injectEnv(env);
+    setInjectedEnv(env);
+    setupConsoleCapture(functionId);
+    setupEdgeRuntimeCompat();
+    restoreFetchTlsPolicy = installEdgeFetchTlsPolicy(
+      await resolveMessageTlsPolicy(tlsPolicy),
+    );
     const moduleLoad = await loadModule({
       functionId,
       functionPath,
@@ -467,90 +484,94 @@ async function onParentMessage(msg: unknown): Promise<void> {
       projectRef,
     });
     const handler = moduleLoad.handler;
-    currentAbortController = new AbortController();
+    const requestAbortController = new AbortController();
+    currentAbortController = requestAbortController;
+    await runWithPgredisBinding(internalBindings
+      ? { ...internalBindings, signal: requestAbortController.signal }
+      : undefined, async () => {
+        const handlerUrl = isFrameworkRouterHandler(handler)
+          ? toFunctionLocalUrl(url)
+          : url;
+        const req = new Request(handlerUrl, {
+          method,
+          headers: new Headers(headers as Record<string, string>),
+          body: body ? Buffer.from(body) : undefined,
+          signal: requestAbortController.signal,
+        });
 
-    const handlerUrl = isFrameworkRouterHandler(handler)
-      ? toFunctionLocalUrl(url)
-      : url;
-    const req = new Request(handlerUrl, {
-      method,
-      headers: new Headers(headers as Record<string, string>),
-      body: body ? Buffer.from(body) : undefined,
-      signal: currentAbortController.signal,
-    });
+        const response = await executeFunction(handler, req);
 
-    const response = await executeFunction(handler, req);
+        if (
+          response.body &&
+          response.headers.get("content-type")?.includes("text/event-stream")
+        ) {
+          const streamId = crypto.randomUUID();
+          postToParent({
+            type: "stream_start",
+            streamId,
+            status: response.status,
+            headers: Object.fromEntries(response.headers.entries()),
+            moduleCacheHit: moduleLoad.cacheHit,
+            moduleCacheSize: moduleLoad.moduleCacheSize,
+          });
 
-    if (
-      response.body &&
-      response.headers.get("content-type")?.includes("text/event-stream")
-    ) {
-      const streamId = crypto.randomUUID();
-      postToParent({
-        type: "stream_start",
-        streamId,
-        status: response.status,
-        headers: Object.fromEntries(response.headers.entries()),
-        moduleCacheHit: moduleLoad.cacheHit,
-        moduleCacheSize: moduleLoad.moduleCacheSize,
-      });
-
-      try {
-        const reader = response.body.getReader();
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) {
+          try {
+            const reader = response.body.getReader();
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) {
+                postToParent({
+                  type: "stream_chunk",
+                  streamId,
+                  done: true,
+                });
+                break;
+              }
+              postToParent({
+                type: "stream_chunk",
+                streamId,
+                chunk: Buffer.from(value).buffer,
+                done: false,
+              });
+            }
+          } catch (err: any) {
             postToParent({
               type: "stream_chunk",
               streamId,
               done: true,
+              error: err.message,
             });
-            break;
           }
-          postToParent({
-            type: "stream_chunk",
-            streamId,
-            chunk: Buffer.from(value).buffer,
-            done: false,
-          });
-        }
-      } catch (err: any) {
-        postToParent({
-          type: "stream_chunk",
-          streamId,
-          done: true,
-          error: err.message,
-        });
-      }
 
-      return;
-    }
-
-    const resBody = response.body
-      ? Buffer.from(await response.arrayBuffer()).buffer
-      : null;
-
-    const resHeaders: Record<string, string | string[]> = {};
-    response.headers.forEach((v, k) => {
-      if (k.toLowerCase() === "set-cookie") {
-        const cookies = (response.headers as any).getSetCookie?.();
-        if (cookies && cookies.length > 1) {
-          resHeaders[k] = cookies;
           return;
         }
-      }
-      resHeaders[k] = v;
-    });
 
-    postToParent({
-      status: response.status,
-      headers: resHeaders,
-      body: resBody,
-      waitUntilPending: currentWaitUntilTasks.length > 0,
-      moduleCacheHit: moduleLoad.cacheHit,
-      moduleCacheSize: moduleLoad.moduleCacheSize,
-    });
-    await flushWaitUntilTasks(functionId);
+        const resBody = response.body
+          ? Buffer.from(await response.arrayBuffer()).buffer
+          : null;
+
+        const resHeaders: Record<string, string | string[]> = {};
+        response.headers.forEach((v, k) => {
+          if (k.toLowerCase() === "set-cookie") {
+            const cookies = (response.headers as any).getSetCookie?.();
+            if (cookies && cookies.length > 1) {
+              resHeaders[k] = cookies;
+              return;
+            }
+          }
+          resHeaders[k] = v;
+        });
+
+        postToParent({
+          status: response.status,
+          headers: resHeaders,
+          body: resBody,
+          waitUntilPending: currentWaitUntilTasks.length > 0,
+          moduleCacheHit: moduleLoad.cacheHit,
+          moduleCacheSize: moduleLoad.moduleCacheSize,
+        });
+        await flushWaitUntilTasks(functionId);
+      });
   } catch (err: any) {
     const aborted = currentAbortController?.signal.aborted || err?.name === "AbortError";
     const message = err instanceof Error ? err.message : String(err);
@@ -562,14 +583,13 @@ async function onParentMessage(msg: unknown): Promise<void> {
       ).buffer,
     });
   } finally {
-    restoreFetchTlsPolicy();
+    runCleanup(restoreFetchTlsPolicy);
     currentAbortController = null;
-    clearEdgeRuntimeCompat();
-    restoreEnv();
-    restoreConsole();
-    setTenantRef(null);
-    setProjectRoot(null);
-    setInjectedEnv({});
+    runCleanup(clearEdgeRuntimeCompat);
+    runCleanup(restoreEnv);
+    runCleanup(restoreConsole);
+    runCleanup(() => setProjectRoot(null));
+    runCleanup(() => setInjectedEnv({}));
   }
 }
 

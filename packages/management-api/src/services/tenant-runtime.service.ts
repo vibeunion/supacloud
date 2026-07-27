@@ -1,7 +1,7 @@
 import { $ } from "bun";
 import { logger } from "../utils/logger";
 import { config } from "../config";
-import { sql as metaSql, resolveDbName, resolveAuthenticatorName, resolvePgrstChannel } from "../db";
+import { sql as metaSql, resolveDbName, resolveAuthenticatorName, resolvePgrstChannel, resolveRoleName } from "../db";
 import { SQL_MODULES } from "../db/sql-modules";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
@@ -486,6 +486,8 @@ class GotrueRuntimeController {
 
 class TenantRuntimeService {
     private readonly TENANT_CONFIG_DIR = config.tenantConfigDir;
+    private readonly PGREDIS_CONFIG_DIR = config.pgredisTenantConfigDir;
+    private readonly PGREDIS_CONFIG_OWNER = config.pgredisTenantConfigOwner;
     private readonly POSTGREST_BIN = config.postgrestBin;
     private readonly POSTGREST_RTS = config.postgrestRts;
     private readonly POSTGREST_MEMORY_MAX = config.postgrestMemoryMax;
@@ -804,13 +806,26 @@ class TenantRuntimeService {
         }
     }
 
-    private async writeTenantSecretFile(targetPath: string, content: string, runtimeUser: string): Promise<void> {
+    private async chownPath(targetPath: string, owner: string): Promise<void> {
+        const result = await this.runStructuredCommand(["chown", owner, targetPath]);
+        if (result.exitCode !== 0) {
+            throw new Error(`Failed to set ownership on ${path.basename(targetPath)}: ${result.stderr.trim().slice(0, 300)}`);
+        }
+    }
+
+    private async writeTenantSecretFile(
+        targetPath: string,
+        content: string,
+        runtimeUser?: string,
+        owner?: string,
+    ): Promise<void> {
         const directory = path.dirname(targetPath);
         const tempPath = path.join(directory, `.${path.basename(targetPath)}.${crypto.randomUUID()}.tmp`);
         try {
             await fs.writeFile(tempPath, `${content}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
             await fs.chmod(tempPath, 0o600);
-            await this.chownTenantPath(tempPath, runtimeUser);
+            if (owner) await this.chownPath(tempPath, owner);
+            else if (runtimeUser) await this.chownTenantPath(tempPath, runtimeUser);
             await fs.rename(tempPath, targetPath);
             await fs.chmod(targetPath, 0o600);
         } finally {
@@ -898,6 +913,11 @@ class TenantRuntimeService {
         const runtimeUser = await this.ensureTenantRuntimeUser(ref);
         await fs.mkdir(this.TENANT_CONFIG_DIR, { recursive: true, mode: 0o711 });
         await fs.chmod(this.TENANT_CONFIG_DIR, 0o711);
+        await fs.mkdir(this.PGREDIS_CONFIG_DIR, { recursive: true, mode: 0o700 });
+        await fs.chmod(this.PGREDIS_CONFIG_DIR, 0o700);
+        if (this.PGREDIS_CONFIG_OWNER) {
+            await this.chownPath(this.PGREDIS_CONFIG_DIR, this.PGREDIS_CONFIG_OWNER);
+        }
 
         const runtimeGoTruePort = await this.effectiveGoTruePort(ref, gotruePort);
         const creds = await this.getTenantCredentials(ref);
@@ -928,9 +948,9 @@ class TenantRuntimeService {
             port: this.PG_PORT,
             database: creds.dbName,
         });
-        const edgeDbUri = buildPostgresUri({
+        const pgredisDbUri = buildPostgresUri({
             protocol: "postgresql",
-            user: resolveAuthenticatorName(ref),
+            user: resolveRoleName(ref),
             password: creds.dbPassword,
             host: this.PG_HOST,
             port: this.PG_PORT,
@@ -978,7 +998,6 @@ class TenantRuntimeService {
             renderSystemdEnvLine("SUPABASE_SERVICE_ROLE_KEY", String(creds.serviceRoleKey || "")),
             renderSystemdEnvLine("SUPABASE_PUBLISHABLE_KEY", String(creds.publishableKey || "")),
             renderSystemdEnvLine("SUPABASE_SECRET_KEY", String(creds.secretKey || "")),
-            renderSystemdEnvLine("SUPABASE_DB_URL", edgeDbUri),
             sharedAuthRuntime ? "" : renderSystemdEnvLine("JWT_SECRET", creds.jwtSecret),
             renderSystemdEnvLine("SUPACLOUD_AUTH_RUNTIME_MODE", sharedAuthRuntime ? "shared" : "local"),
             renderSystemdEnvLine("SUPACLOUD_AUTH_AUTHORITY_REF", getAuthRuntimeDescriptor(ref).authority_project_ref),
@@ -994,6 +1013,12 @@ class TenantRuntimeService {
             path.join(this.TENANT_CONFIG_DIR, `${ref}.env`),
             pgrstEnv,
             runtimeUser,
+        );
+        await this.writeTenantSecretFile(
+            path.join(this.PGREDIS_CONFIG_DIR, `${ref}_pgredis.env`),
+            renderSystemdEnvLine("PGREDIS_DATABASE_URL", pgredisDbUri),
+            undefined,
+            this.PGREDIS_CONFIG_OWNER || undefined,
         );
 
         // Generate PostgREST .conf configuration (single source of truth for all settings)
@@ -1884,11 +1909,13 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
         const pgrstEnvFile = Bun.file(path.join(this.TENANT_CONFIG_DIR, `${ref}.env`));
         const pgrstConfFile = Bun.file(path.join(this.TENANT_CONFIG_DIR, `${ref}.conf`));
         const gotrueEnvFile = Bun.file(path.join(this.TENANT_CONFIG_DIR, `${ref}_gotrue.env`));
+        const pgredisEnvFile = Bun.file(path.join(this.PGREDIS_CONFIG_DIR, `${ref}_pgredis.env`));
         const gotrueConfigDir = path.join(this.TENANT_CONFIG_DIR, `${ref}_gotrue.d`);
 
         if (await pgrstEnvFile.exists()) await fs.unlink(pgrstEnvFile.name!);
         if (await pgrstConfFile.exists()) await fs.unlink(pgrstConfFile.name!);
         if (await gotrueEnvFile.exists()) await fs.unlink(gotrueEnvFile.name!);
+        if (await pgredisEnvFile.exists()) await fs.unlink(pgredisEnvFile.name!);
         await fs.rm(gotrueConfigDir, { recursive: true, force: true });
     }
 

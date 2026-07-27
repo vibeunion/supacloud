@@ -10,6 +10,9 @@ COPY packages/management-api/package.json ./packages/management-api/
 # Install dependencies
 RUN bun install
 
+RUN mkdir -p /etc/supabase/pgredis-tenants \
+    && chown bun:bun /etc/supabase/pgredis-tenants
+
 # Copy source code
 COPY packages/management-api ./packages/management-api
 

@@ -69,8 +69,10 @@ class InitEnvTests(unittest.TestCase):
 
             first_run = subprocess.run(command, check=True, capture_output=True, text=True)
             first_secret = parsed_env(env_path)["SUPAOAUTH_BFF_SIGNING_SECRET"]
+            first_pgredis_token = parsed_env(env_path)["PGREDIS_RUNTIME_INTERNAL_TOKEN"]
             second_run = subprocess.run(command, check=True, capture_output=True, text=True)
             second_secret = parsed_env(env_path)["SUPAOAUTH_BFF_SIGNING_SECRET"]
+            second_pgredis_token = parsed_env(env_path)["PGREDIS_RUNTIME_INTERNAL_TOKEN"]
 
             self.assertEqual(first_run.stdout, "")
             self.assertEqual(second_run.stdout, "")
@@ -78,6 +80,9 @@ class InitEnvTests(unittest.TestCase):
             self.assertGreaterEqual(len(first_secret), 32)
             self.assertNotIn(first_secret, {master_token, encryption_key})
             self.assertEqual(second_secret, first_secret)
+            self.assertGreaterEqual(len(first_pgredis_token), 32)
+            self.assertNotIn(first_pgredis_token, {master_token, encryption_key, first_secret})
+            self.assertEqual(second_pgredis_token, first_pgredis_token)
             self.assertNotIn("LEGACY_SECRETS_ENCRYPTION_KEY", parsed_env(env_path))
             migration_path = Path(parsed_env(env_path)["LEGACY_SECRETS_MIGRATION_FILE"])
             self.assertTrue(migration_path.exists())

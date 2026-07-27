@@ -22,6 +22,16 @@ describe("TenantRuntimeService secret handling", () => {
     expect(source).toContain("rename");
   });
 
+  test("separates the pgredis owner connection from the Edge Function environment", () => {
+    expect(source).toContain('path.join(this.PGREDIS_CONFIG_DIR, `${ref}_pgredis.env`)');
+    expect(source).toContain('renderSystemdEnvLine("PGREDIS_DATABASE_URL", pgredisDbUri)');
+    expect(source).toContain("user: resolveRoleName(ref)");
+    expect(source).toContain("owner?: string");
+    expect(source).toContain("if (owner) await this.chownPath(tempPath, owner)");
+    expect(source).toContain("this.PGREDIS_CONFIG_OWNER || undefined");
+    expect(source).not.toContain('renderSystemdEnvLine("PGREDIS_DATABASE_URL", pgredisDbUri),\n            renderSystemdEnvLine("SUPABASE_URL"');
+  });
+
   test("missing binary guidance points only to the pinned verified runtime installer", () => {
     expect(source).not.toContain("releases/latest");
     expect(source).not.toContain("Install it manually: curl");

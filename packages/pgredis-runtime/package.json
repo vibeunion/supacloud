@@ -1,0 +1,28 @@
+{
+  "name": "@supacloud/pgredis-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun run --watch server.ts",
+    "start": "bun run server.ts",
+    "test": "bun test",
+    "test:postgres": "bun test src/cache-registry.postgres.test.ts",
+    "typecheck": "bun x tsc --noEmit -p tsconfig.json",
+    "build:amd64": "bun build server.ts --compile --target=bun-linux-x64 --outfile=supacloud-pgredis-runtime-linux-amd64",
+    "build:arm64": "bun build server.ts --compile --target=bun-linux-arm64 --outfile=supacloud-pgredis-runtime-linux-arm64",
+    "build:linux": "bun run build:amd64 && bun run build:arm64",
+    "build:macos-amd64": "bun build server.ts --compile --target=bun-macos-x64 --outfile=supacloud-pgredis-runtime-macos-amd64",
+    "build:macos-arm64": "bun build server.ts --compile --target=bun-macos-arm64 --outfile=supacloud-pgredis-runtime-macos-arm64",
+    "build:macos": "bun run build:macos-amd64 && bun run build:macos-arm64"
+  },
+  "dependencies": {
+    "@postgresx/bun-listen": "0.3.1",
+    "@postgresx/noredis": "0.6.1",
+    "elysia": "^1.4.29"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.14",
+    "typescript": "^7.0.2"
+  }
+}

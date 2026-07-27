@@ -17,8 +17,9 @@
 [Unit]
 Description=SupaCloud Management API Server
 Documentation=https://github.com/supacloud/supacloud
-After=network.target patroni.service
+After=network.target patroni.service supacloud-pgredis-runtime.service
 Wants=patroni.service
+Requires=supacloud-pgredis-runtime.service
 
 [Service]
 Type=simple

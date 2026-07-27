@@ -29,6 +29,9 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+    networks:
+      - default
+      - pgredis-database
 
   gotrue:
     image: supabase/gotrue:v2.193.1
@@ -110,10 +113,13 @@ services:
       EDGE_RUNTIME_MASTER_KEY: ${MASTER_TOKEN}
       EDGE_FUNCTIONS_DIR: /data/functions
       TENANT_CONFIG_DIR: /etc/supabase/tenants
+      PGREDIS_TENANT_CONFIG_DIR: /etc/supabase/pgredis-tenants
+      PGREDIS_TENANT_CONFIG_OWNER: bun:bun
       DASHBOARD_USERNAME: supabase
       DASHBOARD_PASSWORD: supacloud
     volumes:
       - tenant-config:/etc/supabase/tenants
+      - pgredis-tenant-config:/etc/supabase/pgredis-tenants
       - functions-data:/data/functions
       - type: bind
         source: ${LEGACY_SECRETS_MIGRATION_FILE}
@@ -136,6 +142,8 @@ services:
     depends_on:
       management-api:
         condition: service_healthy
+      pgredis-runtime:
+        condition: service_healthy
     environment:
       PORT: 9000
       NODE_ENV: production
@@ -144,6 +152,9 @@ services:
       EDGE_RUNTIME_MASTER_KEY: ${MASTER_TOKEN}
       EDGE_FUNCTIONS_DIR: /data/functions
       TENANTS_DIR: /etc/supabase/tenants
+      PGREDIS_RUNTIME_INTERNAL_URL: http://pgredis-runtime:9010
+      PGREDIS_RUNTIME_INTERNAL_TOKEN: ${PGREDIS_RUNTIME_INTERNAL_TOKEN}
+      PGREDIS_RUNTIME_CAPABILITY_TTL_MS: ${PGREDIS_RUNTIME_CAPABILITY_TTL_MS:-600000}
     volumes:
       - tenant-config:/etc/supabase/tenants
       - functions-data:/data/functions
@@ -154,6 +165,38 @@ services:
       interval: 15s
       timeout: 5s
       retries: 10
+    networks:
+      - default
+      - edge-pgredis
+
+  pgredis-runtime:
+    build:
+      context: ../..
+      dockerfile: docker/self-host/pgredis-runtime.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PGREDIS_RUNTIME_HOST: 0.0.0.0
+      PGREDIS_RUNTIME_PORT: 9010
+      PGREDIS_RUNTIME_INTERNAL_TOKEN: ${PGREDIS_RUNTIME_INTERNAL_TOKEN}
+      PGREDIS_RUNTIME_CAPABILITY_MAX_TTL_MS: ${PGREDIS_RUNTIME_CAPABILITY_TTL_MS:-600000}
+      PGREDIS_RUNTIME_TENANTS_DIR: /etc/supabase/pgredis-tenants
+      PGREDIS_RUNTIME_CONNECTIONS_PER_TENANT: ${PGREDIS_RUNTIME_CONNECTIONS_PER_TENANT:-2}
+      PGREDIS_RUNTIME_L1_MAX_ENTRIES: ${PGREDIS_RUNTIME_L1_MAX_ENTRIES:-1000}
+      PGREDIS_RUNTIME_L1_TTL_MS: ${PGREDIS_RUNTIME_L1_TTL_MS:-30000}
+    volumes:
+      - pgredis-tenant-config:/etc/supabase/pgredis-tenants:ro
+    healthcheck:
+      test: ["CMD", "bun", "-e", "const r=await fetch('http://127.0.0.1:9010/health'); if(!r.ok) process.exit(1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    networks:
+      - pgredis-database
+      - edge-pgredis
 
   caddy:
     image: caddy:2.11.4
@@ -174,6 +217,13 @@ services:
 volumes:
   postgres-data:
   tenant-config:
+  pgredis-tenant-config:
   functions-data:
   caddy-data:
   caddy-config:
+
+networks:
+  pgredis-database:
+    internal: true
+  edge-pgredis:
+    internal: true

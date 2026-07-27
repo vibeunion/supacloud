@@ -8,6 +8,7 @@ on:
       - "packages/web-console/**"
       - "packages/supacloud-js/**"
       - "packages/edge-runtime/**"
+      - "packages/pgredis-runtime/**"
       - "packages/admin/**"
       - "packages/cli/**"
       - "packages/supacloud/**"
@@ -27,6 +28,7 @@ on:
       - "packages/web-console/**"
       - "packages/supacloud-js/**"
       - "packages/edge-runtime/**"
+      - "packages/pgredis-runtime/**"
       - "packages/admin/**"
       - "packages/cli/**"
       - "packages/supacloud/**"
@@ -147,6 +149,15 @@ jobs:
         run: |
           bun install --frozen-lockfile
           bun run typecheck
+          bun test internal-bindings.test.ts pgredis-capability.test.ts worker-pool.test.ts
+          bun audit --audit-level high
+
+      - name: Check pgredis runtime
+        working-directory: packages/pgredis-runtime
+        run: |
+          bun install --frozen-lockfile
+          bun run typecheck
+          bun test
           bun audit --audit-level high
 
       - name: Check project CLI
@@ -707,6 +718,10 @@ jobs:
         working-directory: packages/edge-runtime
         run: bun install --frozen-lockfile
 
+      - name: Install pgredis-runtime dependencies
+        working-directory: packages/pgredis-runtime
+        run: bun install --frozen-lockfile
+
       - name: Build Linux primary binaries
         working-directory: packages/management-api
         run: |
@@ -765,6 +780,46 @@ jobs:
           mv supacloud-edge-runtime-macos-amd64 dist/
           mv supacloud-edge-runtime-macos-arm64 dist/
 
+      - name: Build pgredis-runtime binaries
+        working-directory: packages/pgredis-runtime
+        run: |
+          mkdir -p dist
+          bun run build:linux
+          bun run build:macos
+          mv supacloud-pgredis-runtime-linux-amd64 dist/
+          mv supacloud-pgredis-runtime-linux-arm64 dist/
+          mv supacloud-pgredis-runtime-macos-amd64 dist/
+          mv supacloud-pgredis-runtime-macos-arm64 dist/
+
+      - name: Smoke pgredis-runtime Linux amd64 binary
+        working-directory: packages/pgredis-runtime
+        run: |
+          tenants_dir="$(mktemp -d)"
+          PGREDIS_RUNTIME_HOST=127.0.0.1 \
+          PGREDIS_RUNTIME_PORT=19010 \
+          PGREDIS_RUNTIME_TENANTS_DIR="$tenants_dir" \
+          PGREDIS_RUNTIME_INTERNAL_TOKEN="$(openssl rand -hex 32)" \
+            ./dist/supacloud-pgredis-runtime-linux-amd64 > /tmp/supacloud-pgredis-runtime-smoke.log 2>&1 &
+          pid=$!
+          cleanup() {
+            kill "$pid" 2>/dev/null || true
+            rm -rf "$tenants_dir"
+          }
+          trap cleanup EXIT
+          for _ in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:19010/health >/tmp/supacloud-pgredis-runtime-health.json; then
+              cat /tmp/supacloud-pgredis-runtime-health.json
+              exit 0
+            fi
+            if ! kill -0 "$pid" 2>/dev/null; then
+              cat /tmp/supacloud-pgredis-runtime-smoke.log
+              exit 1
+            fi
+            sleep 0.5
+          done
+          cat /tmp/supacloud-pgredis-runtime-smoke.log
+          exit 1
+
       - name: Install xcaddy
         run: go install github.com/caddyserver/xcaddy/cmd/xcaddy@${XCADDY_VERSION}
 
@@ -778,4 +833,5 @@ jobs:
           path: |
             packages/management-api/dist/*
             packages/edge-runtime/dist/*
+            packages/pgredis-runtime/dist/*
           retention-days: 7

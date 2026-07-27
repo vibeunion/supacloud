@@ -865,7 +865,8 @@ describe("installer configuration persistence", () => {
     expect(installer).toContain('migration_legacy_encryption_key="$MASTER_TOKEN"');
     expect(installer).toContain('LEGACY_SECRETS_ENCRYPTION_KEY="$migration_legacy_encryption_key" "$staged_management_binary" --init-db');
     expect(installer).toContain('supacloud_secret_rotation_checkpoint_status "$SECRETS_ENCRYPTION_KEY"');
-    expect(installer).toContain('recover_management_api_install "$management_transaction_dir"');
+    expect(installer).toContain('abort_management_install_transaction "$management_transaction_dir"');
+    expect(installer).toContain('abort_management_install_transaction "$management_transaction_dir" "$management_service_was_active" true 1');
     expect(installer).not.toContain("--init-db 2>/dev/null || log_warn");
     expect(installer).toContain('existing_runtime_encryption_key="$(supacloud_env_value "$MANAGEMENT_ENV_FILE" SECRETS_ENCRYPTION_KEY)"');
     expect(installFunction.indexOf("supacloud_stop_service_for_migration")).toBeLessThan(
@@ -903,6 +904,184 @@ describe("installer configuration persistence", () => {
     expect(readFileSync(existing, "utf8")).toBe("OLD=value\n");
     expect(statSync(existing).mode & 0o777).toBe(0o640);
     expect(() => statSync(absent)).toThrow();
+  });
+
+  test("installer snapshots restore runtime directories", () => {
+    const dir = makeTempDir();
+    const runtime = join(dir, "runtime");
+    const snapshot = join(dir, "snapshot");
+    mkdirSync(runtime);
+    writeFileSync(join(runtime, "server.ts"), "old\n");
+
+    const result = runBash([
+      "source scripts/lib/install_config.sh",
+      'supacloud_capture_directory_snapshot "$RUNTIME" "$SNAPSHOT"',
+      'printf "new\\n" > "$RUNTIME/server.ts"',
+      'printf "extra\\n" > "$RUNTIME/extra.ts"',
+      'supacloud_restore_directory_snapshot "$RUNTIME" "$SNAPSHOT"',
+    ].join(" && "), { RUNTIME: runtime, SNAPSHOT: snapshot });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(readFileSync(join(runtime, "server.ts"), "utf8")).toBe("old\n");
+    expect(() => statSync(join(runtime, "extra.ts"))).toThrow();
+  });
+
+  test("pgredis transaction restores the previous data plane after a later install failure", () => {
+    const dir = makeTempDir();
+    const fakeBin = join(dir, "bin");
+    const binary = join(dir, "pgredis-runtime");
+    const runtimeEnv = join(dir, "pgredis-runtime.env");
+    const unit = join(dir, "pgredis-runtime.service");
+    const sourceDir = join(dir, "source");
+    const serviceState = join(dir, "service-state");
+    const enabledState = join(dir, "enabled-state");
+    mkdirSync(fakeBin);
+    mkdirSync(sourceDir);
+    writeFileSync(binary, "old-binary\n", { mode: 0o755 });
+    writeFileSync(runtimeEnv, "OLD_TOKEN=one\n", { mode: 0o600 });
+    writeFileSync(unit, "old-unit\n");
+    writeFileSync(join(sourceDir, "server.ts"), "old-source\n");
+    writeFileSync(serviceState, "active");
+    writeFileSync(enabledState, "enabled");
+    writeFileSync(join(fakeBin, "curl"), "#!/usr/bin/env bash\nexit 0\n", { mode: 0o755 });
+    writeFileSync(join(fakeBin, "systemctl"), [
+      "#!/usr/bin/env bash",
+      'case "$1" in',
+      '  is-active) [[ "$(cat "$SERVICE_STATE")" == active ]] ;;',
+      '  is-enabled) [[ "$(cat "$ENABLED_STATE")" == enabled ]] ;;',
+      '  stop) printf inactive > "$SERVICE_STATE" ;;',
+      '  start) printf active > "$SERVICE_STATE" ;;',
+      '  enable) printf enabled > "$ENABLED_STATE" ;;',
+      '  disable) printf disabled > "$ENABLED_STATE" ;;',
+      '  daemon-reload) exit 0 ;;',
+      "esac",
+    ].join("\n"), { mode: 0o755 });
+
+    const result = runBash([
+      "source install.sh",
+      "begin_pgredis_install_transaction",
+      'printf "new-binary\\n" > "$PGREDIS_RUNTIME_BIN_FILE"',
+      'printf "NEW_TOKEN=two\\n" > "$PGREDIS_RUNTIME_ENV_FILE"',
+      'printf "new-unit\\n" > "$PGREDIS_RUNTIME_UNIT_FILE"',
+      'printf "new-source\\n" > "$PGREDIS_RUNTIME_SOURCE_DIR/server.ts"',
+      "rollback_pgredis_install_transaction",
+    ].join(" && "), {
+      PATH: `${fakeBin}:${process.env.PATH}`,
+      SERVICE_STATE: serviceState,
+      ENABLED_STATE: enabledState,
+      SUPACLOUD_PGREDIS_RUNTIME_BIN_FILE: binary,
+      SUPACLOUD_PGREDIS_RUNTIME_ENV_FILE: runtimeEnv,
+      SUPACLOUD_PGREDIS_RUNTIME_UNIT_FILE: unit,
+      SUPACLOUD_PGREDIS_RUNTIME_SOURCE_DIR: sourceDir,
+      SUPACLOUD_PGREDIS_TRANSACTION_PARENT: dir,
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(readFileSync(binary, "utf8")).toBe("old-binary\n");
+    expect(readFileSync(runtimeEnv, "utf8")).toBe("OLD_TOKEN=one\n");
+    expect(readFileSync(unit, "utf8")).toBe("old-unit\n");
+    expect(readFileSync(join(sourceDir, "server.ts"), "utf8")).toBe("old-source\n");
+    expect(readFileSync(serviceState, "utf8")).toBe("active");
+    expect(readFileSync(enabledState, "utf8")).toBe("enabled");
+  });
+
+  test("pgredis transaction restores the previous data plane on SIGTERM", () => {
+    const dir = makeTempDir();
+    const fakeBin = join(dir, "bin");
+    const binary = join(dir, "pgredis-runtime");
+    const runtimeEnv = join(dir, "pgredis-runtime.env");
+    const unit = join(dir, "pgredis-runtime.service");
+    const sourceDir = join(dir, "source");
+    mkdirSync(fakeBin);
+    mkdirSync(sourceDir);
+    writeFileSync(binary, "old-binary\n", { mode: 0o755 });
+    writeFileSync(runtimeEnv, "OLD_TOKEN=one\n", { mode: 0o600 });
+    writeFileSync(unit, "old-unit\n");
+    writeFileSync(join(sourceDir, "server.ts"), "old-source\n");
+    writeFileSync(join(fakeBin, "systemctl"), [
+      "#!/usr/bin/env bash",
+      'case "$1" in',
+      '  is-active|is-enabled) exit 1 ;;',
+      '  daemon-reload|disable|stop) exit 0 ;;',
+      "esac",
+    ].join("\n"), { mode: 0o755 });
+
+    const result = runBash([
+      "source install.sh",
+      "begin_pgredis_install_transaction",
+      'printf "new-binary\\n" > "$PGREDIS_RUNTIME_BIN_FILE"',
+      'printf "NEW_TOKEN=two\\n" > "$PGREDIS_RUNTIME_ENV_FILE"',
+      'trap \'abort_pgredis_install_transaction 143\' TERM',
+      'kill -TERM $$',
+    ].join(" && "), {
+      PATH: `${fakeBin}:${process.env.PATH}`,
+      SUPACLOUD_PGREDIS_RUNTIME_BIN_FILE: binary,
+      SUPACLOUD_PGREDIS_RUNTIME_ENV_FILE: runtimeEnv,
+      SUPACLOUD_PGREDIS_RUNTIME_UNIT_FILE: unit,
+      SUPACLOUD_PGREDIS_RUNTIME_SOURCE_DIR: sourceDir,
+      SUPACLOUD_PGREDIS_TRANSACTION_PARENT: dir,
+    });
+
+    expect(result.status).toBe(143);
+    expect(readFileSync(binary, "utf8")).toBe("old-binary\n");
+    expect(readFileSync(runtimeEnv, "utf8")).toBe("OLD_TOKEN=one\n");
+  });
+
+  test("management transaction signals restore Management before pgredis", () => {
+    for (const [signal, status] of [["HUP", 129], ["INT", 130], ["TERM", 143]] as const) {
+      const dir = makeTempDir();
+      const snapshot = join(dir, "management-snapshot");
+      const order = join(dir, "order");
+      mkdirSync(snapshot);
+      const result = runBash([
+        "source install.sh",
+        'recover_management_api_install() { printf "management\\n" >> "$ORDER"; [[ -d "$1" ]]; }',
+        'rollback_pgredis_install_transaction() { printf "pgredis\\n" >> "$ORDER"; return 0; }',
+        'trap \'abort_management_install_transaction "$SNAPSHOT" true false "$STATUS"\' ' + signal,
+        'kill -' + signal + ' $$',
+      ].join("; "), {
+        ORDER: order,
+        SNAPSHOT: snapshot,
+        STATUS: String(status),
+      });
+
+      expect(result.status, result.stderr).toBe(status);
+      expect(readFileSync(order, "utf8")).toBe("management\npgredis\n");
+      expect(() => statSync(snapshot)).toThrow();
+    }
+
+    const dir = makeTempDir();
+    const snapshot = join(dir, "management-snapshot");
+    const order = join(dir, "order");
+    mkdirSync(snapshot);
+    const result = runBash([
+      "source install.sh",
+      'recover_management_api_install() { printf "management\\n" >> "$ORDER"; return 0; }',
+      'rollback_pgredis_install_transaction() { printf "pgredis\\n" >> "$ORDER"; return 0; }',
+      'trap \'abort_management_install_transaction "$SNAPSHOT" true false "$?"\' ERR EXIT',
+      "false",
+    ].join("; "), { ORDER: order, SNAPSHOT: snapshot });
+
+    expect(result.status, result.stderr).toBe(1);
+    expect(readFileSync(order, "utf8")).toBe("management\npgredis\n");
+    expect(() => statSync(snapshot)).toThrow();
+  });
+
+  test("management transaction retains its snapshot when recovery fails", () => {
+    const dir = makeTempDir();
+    const snapshot = join(dir, "management-snapshot");
+    const order = join(dir, "order");
+    mkdirSync(snapshot);
+    const result = runBash([
+      "source install.sh",
+      'recover_management_api_install() { printf "management\\n" >> "$ORDER"; return 1; }',
+      'rollback_pgredis_install_transaction() { printf "pgredis\\n" >> "$ORDER"; return 0; }',
+      'abort_management_install_transaction "$SNAPSHOT" true false 1',
+    ].join("; "), { ORDER: order, SNAPSHOT: snapshot });
+
+    expect(result.status).toBe(1);
+    expect(readFileSync(order, "utf8")).toBe("management\npgredis\n");
+    expect(statSync(snapshot).isDirectory()).toBeTrue();
   });
 
   test("installer and runtime derive the same domain-separated encryption-key fingerprint", () => {

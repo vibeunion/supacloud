@@ -25,7 +25,7 @@ function isLocalHost(hostname: string): boolean {
 registerCheck({
   id: "platform-service-status",
   name: "Platform Services",
-  description: "Check critical systemd services: supacloud, gateway, supacloud-edge-runtime",
+  description: "Check critical systemd services: supacloud, gateway, edge-runtime, pgredis-runtime",
   category: "service",
   scope: "platform",
   severity: "critical",
@@ -36,6 +36,7 @@ registerCheck({
       { unit: "supacloud", label: "Management API" },
       gateway,
       { unit: "supacloud-edge-runtime", label: "Edge Runtime" },
+      { unit: "supacloud-pgredis-runtime", label: "pgredis Runtime" },
     ];
     const optionalSkipped: string[] = [];
 
@@ -84,7 +85,7 @@ registerCheck({
 registerCheck({
   id: "platform-port-listeners",
   name: "Port Listeners",
-  description: "Verify expected ports are listening: 9090 (API), 80/443 (Gateway), 9000 (Edge Runtime)",
+  description: "Verify expected ports are listening: 9090 (API), 80/443 (Gateway), 9000 (Edge), 9010 (pgredis)",
   category: "service",
   scope: "platform",
   severity: "critical",
@@ -96,6 +97,7 @@ registerCheck({
       { port: 80, label: "Gateway HTTP" },
       { port: 443, label: "Gateway HTTPS" },
       { port: 9000, label: "Edge Runtime" },
+      { port: 9010, label: "pgredis Runtime" },
     ];
     const skipped: string[] = [];
 

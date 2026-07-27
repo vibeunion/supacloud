@@ -81,7 +81,7 @@ supported control surface for user function `fetch()` calls.
 For private/self-signed services, prefer adding the issuing CA:
 
 ```bash
-# Host-level CA bundle, read by supacloud-edge-runtime.service through /etc/supabase/management-api.env
+# Host-level CA bundle, read by supacloud-edge-runtime.service through /etc/supabase/edge-runtime.env
 SUPACLOUD_EDGE_TLS_CA_FILE=/etc/supacloud/edge-runtime/ca.pem
 
 # Or project/function-level inline PEM through Edge Function secrets

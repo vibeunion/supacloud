@@ -80,6 +80,15 @@ def validate_legacy_encryption_key(candidate: str, current_key: str) -> None:
         raise ValueError("LEGACY_SECRETS_ENCRYPTION_KEY must not contain control characters")
 
 
+def validate_pgredis_runtime_token(candidate: str, reserved: set[str]) -> None:
+    if len(candidate) < 32:
+        raise ValueError("PGREDIS_RUNTIME_INTERNAL_TOKEN must contain at least 32 characters")
+    if candidate in reserved:
+        raise ValueError("PGREDIS_RUNTIME_INTERNAL_TOKEN must be independent from management secrets")
+    if any(control in candidate for control in ("\0", "\r", "\n")):
+        raise ValueError("PGREDIS_RUNTIME_INTERNAL_TOKEN must not contain control characters")
+
+
 def write_private_env(output_path: Path, env_payload: str) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary_name = tempfile.mkstemp(prefix=f".{output_path.name}.", dir=output_path.parent)
@@ -162,6 +171,10 @@ def main() -> None:
         help="Independent BFF actor-proof signing secret",
     )
     parser.add_argument(
+        "--pgredis-runtime-internal-token",
+        help="Independent token for the Edge to pgredis-runtime binding",
+    )
+    parser.add_argument(
         "--output",
         type=Path,
         help="Atomically write a private 0600 env file and reuse its existing BFF secret",
@@ -187,6 +200,12 @@ def main() -> None:
         or os.environ.get("SUPAOAUTH_BFF_SIGNING_SECRET")
         or secrets.token_urlsafe(32)
     )
+    pgredis_runtime_token = (
+        args.pgredis_runtime_internal_token
+        or read_env_value(args.output, "PGREDIS_RUNTIME_INTERNAL_TOKEN")
+        or os.environ.get("PGREDIS_RUNTIME_INTERNAL_TOKEN")
+        or secrets.token_urlsafe(32)
+    )
     try:
         validate_legacy_encryption_key(
             args.legacy_secrets_encryption_key,
@@ -197,6 +216,15 @@ def main() -> None:
             args.master_token,
             args.secrets_encryption_key,
             args.legacy_secrets_encryption_key,
+        )
+        validate_pgredis_runtime_token(
+            pgredis_runtime_token,
+            {
+                args.master_token,
+                args.secrets_encryption_key,
+                args.legacy_secrets_encryption_key,
+                bff_signing_secret,
+            },
         )
     except ValueError as error:
         parser.error(str(error))
@@ -249,6 +277,7 @@ def main() -> None:
         f"ANON_KEY={anon_key}",
         f"SERVICE_ROLE_KEY={service_role_key}",
         f"MASTER_TOKEN={args.master_token}",
+        f"PGREDIS_RUNTIME_INTERNAL_TOKEN={pgredis_runtime_token}",
         f"SECRETS_ENCRYPTION_KEY={args.secrets_encryption_key}",
         f"LEGACY_SECRETS_MIGRATION_FILE={legacy_migration_path}",
         f"SUPAOAUTH_BFF_SIGNING_SECRET={bff_signing_secret}",
@@ -261,6 +290,11 @@ def main() -> None:
         "# CADDY_ADMIN_PORT=2019 (internal only)",
         "API_PORT=9090",
         "EDGE_RUNTIME_PORT=9000",
+        "PGREDIS_RUNTIME_PORT=9010",
+        "PGREDIS_RUNTIME_CAPABILITY_TTL_MS=600000",
+        "PGREDIS_RUNTIME_CONNECTIONS_PER_TENANT=2",
+        "PGREDIS_RUNTIME_L1_MAX_ENTRIES=1000",
+        "PGREDIS_RUNTIME_L1_TTL_MS=30000",
     ]
     env_payload = "\n".join(env_lines) + "\n"
     if args.output:

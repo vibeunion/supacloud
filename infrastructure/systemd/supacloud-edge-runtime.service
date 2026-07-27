@@ -1,12 +1,13 @@
 [Unit]
 Description=SupaCloud Edge Runtime
 Documentation=https://github.com/supacloud/supacloud
-After=network.target supacloud.service
-Wants=supacloud.service
+After=network.target supacloud.service supacloud-pgredis-runtime.service
+Requires=supacloud.service supacloud-pgredis-runtime.service
 
 [Service]
 Type=simple
-User=root
+User=supacloud-edge
+Group=supacloud-edge
 WorkingDirectory=/opt/supacloud/edge-runtime
 ExecStartPre=/bin/bash -c 'for pid in $(lsof -iTCP:9000 -sTCP:LISTEN -t 2>/dev/null); do echo "[EdgeRT] Killing stale pid=$pid"; kill -9 $pid 2>/dev/null || true; done; sleep 0.3; true'
 ExecStart=/usr/local/bin/supacloud-edge-runtime
@@ -22,12 +23,14 @@ Environment=EDGE_RUNTIME_HOST=127.0.0.1
 Environment=EDGE_FUNCTIONS_DIR=/opt/supacloud/functions
 Environment=EDGE_FUNCTIONS_BASE_DIR=/opt/supacloud/functions
 Environment=MANAGEMENT_API_URL=http://127.0.0.1:9090
-EnvironmentFile=-/etc/supabase/management-api.env
+EnvironmentFile=-/etc/supabase/edge-runtime.env
 
 NoNewPrivileges=true
 ProtectSystem=full
 ProtectHome=false
-ReadWritePaths=/etc/supabase /opt/supacloud /tmp /var/log/supacloud
+ReadOnlyPaths=/etc/supabase/tenants
+InaccessiblePaths=/etc/supabase/pgredis-tenants
+ReadWritePaths=/opt/supacloud /tmp /var/log/supacloud
 
 SystemCallFilter=@system-service
 SystemCallFilter=~@mount @reboot @swap @privileged @raw-io @keyring

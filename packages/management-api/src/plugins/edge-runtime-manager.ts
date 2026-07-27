@@ -1,9 +1,100 @@
 import type { Subprocess } from "bun";
 import { logger } from "../utils/logger";
 import path from "node:path";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { config } from "../config";
+
+const EDGE_RUNTIME_CHILD_ENV_KEYS = [
+  "PATH",
+  "TMPDIR",
+  "TZ",
+  "NODE_ENV",
+  "BUN_ENV",
+  "EDGE_RUNTIME_HOST",
+  "EDGE_RUNTIME_PORT",
+  "EDGE_RUNTIME_VERSION",
+  "EDGE_RUNTIME_WORKER_PATH",
+  "EDGE_FUNCTION_TIMEOUT_MS",
+  "EDGE_BACKGROUND_FUNCTION_TIMEOUT_MS",
+  "EDGE_BACKGROUND_PREHEAT_MODE",
+  "EDGE_FOREGROUND_WORKER_SMOL",
+  "EDGE_BACKGROUND_WORKER_SMOL",
+  "EDGE_CONTROL_MESSAGE_TIMEOUT_MS",
+  "EDGE_MAX_BODY_SIZE_MB",
+  "EDGE_WAIT_UNTIL_TIMEOUT_MS",
+  "EDGE_AUTH_FAILURE_WINDOW_MS",
+  "EDGE_AUTH_FAILURE_LIMIT",
+  "EDGE_AUTH_FAILURE_COOLDOWN_MS",
+  "EDGE_AUTH_FAILURE_MAX_ENTRIES",
+  "MAX_QUEUE_SIZE",
+  "WORKER_POOL_SIZE",
+  "BACKGROUND_WORKER_POOL_SIZE",
+  "WORKER_SMOL",
+  "TENANTS_DIR",
+  "INTERNAL_SUPABASE_URL",
+  "SUPACLOUD_INTERNAL_SUPABASE_URL",
+  "SUPACLOUD_EDGE_TLS_CA",
+  "SUPACLOUD_EDGE_TLS_CA_FILE",
+  "SUPACLOUD_EDGE_TLS_INSECURE_SKIP_VERIFY",
+  "PGREDIS_RUNTIME_INTERNAL_URL",
+  "PGREDIS_RUNTIME_INTERNAL_TOKEN",
+  "PGREDIS_RUNTIME_INTERNAL_TIMEOUT_MS",
+  "PGREDIS_RUNTIME_CAPABILITY_TTL_MS",
+] as const;
+
+export function buildEdgeRuntimeChildEnv(
+  source: Record<string, string | undefined>,
+  overrides: Record<string, string>,
+): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const key of EDGE_RUNTIME_CHILD_ENV_KEYS) {
+    const value = source[key];
+    if (value !== undefined) env[key] = value;
+  }
+  return { ...env, ...overrides };
+}
+
+export function buildEdgeRuntimeCommand(
+  runnerPath: string,
+  options: {
+    bunPath: string;
+    user: string;
+    group: string;
+    isRoot: boolean;
+    runuserPath?: string;
+  },
+): string[] {
+  const command = [options.bunPath, "run", runnerPath];
+  if (!options.isRoot) return command;
+  if (!options.user) {
+    throw new Error("EDGE_RUNTIME_USER is required when Management API runs as root");
+  }
+
+  const runuser = options.runuserPath;
+  if (!runuser) {
+    throw new Error("EDGE_RUNTIME_USER requires runuser for embedded privilege separation");
+  }
+  return [
+    runuser,
+    "--user",
+    options.user,
+    "--group",
+    options.group || options.user,
+    "--",
+    ...command,
+  ];
+}
+
+function edgeRuntimeCommand(runnerPath: string): string[] {
+  return buildEdgeRuntimeCommand(runnerPath, {
+    bunPath: config.bunPath,
+    user: config.edgeRuntimeUser,
+    group: config.edgeRuntimeGroup,
+    isRoot: process.getuid?.() === 0,
+    runuserPath: ["/usr/sbin/runuser", "/sbin/runuser"].find(existsSync),
+  });
+}
 
 /**
  * Manages the Edge Function Runner as a child Bun process.
@@ -102,16 +193,15 @@ export class EdgeRuntimeManager {
     const edgeFunctionsDir = this.resolveFunctionsDir();
     mkdirSync(edgeFunctionsDir, { recursive: true });
 
-    this.proc = Bun.spawn(["bun", "run", runnerPath], {
-      env: {
-        ...process.env,
+    this.proc = Bun.spawn(edgeRuntimeCommand(runnerPath), {
+      env: buildEdgeRuntimeChildEnv(process.env, {
+        HOME: process.getuid?.() === 0 && config.edgeRuntimeUser ? "/nonexistent" : (process.env.HOME || ""),
         PORT: String(this.config.port),
         EDGE_FUNCTIONS_DIR: edgeFunctionsDir,
         EDGE_FUNCTIONS_BASE_DIR: process.env.EDGE_FUNCTIONS_BASE_DIR || edgeFunctionsDir,
         EDGE_RUNTIME_MASTER_KEY: config.edgeRuntimeMasterKey,
-        MASTER_TOKEN: config.masterToken,
         MANAGEMENT_API_URL: `http://127.0.0.1:${config.port || 9090}`,
-      },
+      }),
       stdout: "inherit",
       stderr: "inherit",
       onExit: (_proc, code, signal) => {

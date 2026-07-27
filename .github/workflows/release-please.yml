@@ -31,6 +31,8 @@ jobs:
       management_api_tag_name: ${{ steps.release.outputs['packages/management-api--tag_name'] }}
       edge_runtime_released: ${{ steps.release.outputs['packages/edge-runtime--release_created'] }}
       edge_runtime_tag_name: ${{ steps.release.outputs['packages/edge-runtime--tag_name'] }}
+      pgredis_runtime_released: ${{ steps.release.outputs['packages/pgredis-runtime--release_created'] }}
+      pgredis_runtime_tag_name: ${{ steps.release.outputs['packages/pgredis-runtime--tag_name'] }}
       supacloud_js_released: ${{ steps.release.outputs['packages/supacloud-js--release_created'] }}
       cli_released: ${{ steps.release.outputs['packages/cli--release_created'] }}
       admin_released: ${{ steps.release.outputs['packages/admin--release_created'] }}
@@ -200,6 +202,86 @@ jobs:
           GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
           RELEASE_TAG: ${{ needs.release-please.outputs.edge_runtime_tag_name }}
         run: gh release upload "$RELEASE_TAG" packages/edge-runtime/dist/* --clobber
+
+
+  publish-pgredis-runtime-binaries:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.pgredis_runtime_released == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.release-please.outputs.pgredis_runtime_tag_name }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Install dependencies
+        working-directory: packages/pgredis-runtime
+        run: bun install --frozen-lockfile
+
+      - name: Build release binaries
+        working-directory: packages/pgredis-runtime
+        run: |
+          mkdir -p dist
+          bun run build:linux
+          bun run build:macos
+          mv supacloud-pgredis-runtime-linux-amd64 dist/
+          mv supacloud-pgredis-runtime-linux-arm64 dist/
+          mv supacloud-pgredis-runtime-macos-amd64 dist/
+          mv supacloud-pgredis-runtime-macos-arm64 dist/
+          chmod 0755 dist/supacloud-pgredis-runtime-*
+
+      - name: Smoke pgredis-runtime Linux amd64 binary
+        working-directory: packages/pgredis-runtime
+        run: |
+          tenants_dir="$(mktemp -d)"
+          PGREDIS_RUNTIME_HOST=127.0.0.1 \
+          PGREDIS_RUNTIME_PORT=19010 \
+          PGREDIS_RUNTIME_TENANTS_DIR="$tenants_dir" \
+          PGREDIS_RUNTIME_INTERNAL_TOKEN="$(openssl rand -hex 32)" \
+            ./dist/supacloud-pgredis-runtime-linux-amd64 > /tmp/supacloud-pgredis-runtime-smoke.log 2>&1 &
+          pid=$!
+          cleanup() {
+            kill "$pid" 2>/dev/null || true
+            rm -rf "$tenants_dir"
+          }
+          trap cleanup EXIT
+          for _ in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:19010/health >/tmp/supacloud-pgredis-runtime-health.json; then
+              cat /tmp/supacloud-pgredis-runtime-health.json
+              exit 0
+            fi
+            if ! kill -0 "$pid" 2>/dev/null; then
+              cat /tmp/supacloud-pgredis-runtime-smoke.log
+              exit 1
+            fi
+            sleep 0.5
+          done
+          cat /tmp/supacloud-pgredis-runtime-smoke.log
+          exit 1
+
+      - name: Generate SHA256SUMS
+        working-directory: packages/pgredis-runtime/dist
+        run: sha256sum * > SHA256SUMS
+
+      - name: Attest pgredis-runtime release artifacts
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: packages/pgredis-runtime/dist/*
+
+      - name: Upload binaries to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+          RELEASE_TAG: ${{ needs.release-please.outputs.pgredis_runtime_tag_name }}
+        run: gh release upload "$RELEASE_TAG" packages/pgredis-runtime/dist/* --clobber
 
 
   publish-npm:

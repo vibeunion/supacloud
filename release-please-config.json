@@ -24,6 +24,11 @@
       "component": "edge-runtime",
       "changelog-path": "CHANGELOG.md"
     },
+    "packages/pgredis-runtime": {
+      "release-type": "node",
+      "component": "pgredis-runtime",
+      "changelog-path": "CHANGELOG.md"
+    },
     "packages/supacloud-js": {
       "release-type": "node",
       "component": "supacloud-js",

@@ -39,6 +39,7 @@ services:
       retries: 10
     networks:
       - supacloud-dev
+      - pgredis-database
 
   gotrue:
     image: supabase/gotrue:v2.193.1
@@ -83,6 +84,11 @@ services:
       - NODE_ENV=development
       - DATABASE_URL=postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/postgres
       - SUPACLOUD_POSTGRES_URL=postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/postgres
+      - PG_HOST=postgres
+      - PG_PORT=5432
+      - PG_USER=postgres
+      - PG_DATABASE=postgres
+      - PGPASSWORD=${POSTGRES_PASSWORD:-postgres}
       - JWT_SECRET=${JWT_SECRET}
       - MASTER_TOKEN=${MASTER_TOKEN}
       - SECRETS_ENCRYPTION_KEY=${SECRETS_ENCRYPTION_KEY:-${JWT_SECRET}}
@@ -94,8 +100,14 @@ services:
       # The development management-api image does not bundle supacloud-caddy.
       # Caddy validates and applies config through the Admin API in the caddy container.
       - CADDY_BINARY_PATH=/bin/true
+      - TENANT_CONFIG_DIR=/etc/supabase/tenants
+      - PGREDIS_TENANT_CONFIG_DIR=/etc/supabase/pgredis-tenants
+      - PGREDIS_TENANT_CONFIG_OWNER=bun:bun
     ports:
       - "${API_PORT:-9090}:9090"
+    volumes:
+      - tenant-config:/etc/supabase/tenants
+      - pgredis-tenant-config:/etc/supabase/pgredis-tenants
     networks:
       - supacloud-dev
 
@@ -104,11 +116,17 @@ services:
       context: ../../
       dockerfile: packages/edge-runtime/Dockerfile
     restart: always
+    depends_on:
+      pgredis-runtime:
+        condition: service_healthy
     environment:
       - PORT=9000
       - WORKER_POOL_SIZE=${WORKER_POOL_SIZE:-2}
       - MANAGEMENT_API_URL=http://management-api:9090
       - MASTER_TOKEN=${MASTER_TOKEN}
+      - PGREDIS_RUNTIME_INTERNAL_URL=http://pgredis-runtime:9010
+      - PGREDIS_RUNTIME_INTERNAL_TOKEN=${PGREDIS_RUNTIME_INTERNAL_TOKEN}
+      - PGREDIS_RUNTIME_CAPABILITY_TTL_MS=${PGREDIS_RUNTIME_CAPABILITY_TTL_MS:-600000}
     ports:
       - "${EDGE_RUNTIME_PORT:-9000}:9000"
     volumes:
@@ -116,12 +134,47 @@ services:
       - ../../supabase/functions:/app/supabase/functions
     networks:
       - supacloud-dev
+      - edge-pgredis
+
+  pgredis-runtime:
+    build:
+      context: ../../
+      dockerfile: packages/pgredis-runtime/Dockerfile
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - PGREDIS_RUNTIME_HOST=0.0.0.0
+      - PGREDIS_RUNTIME_PORT=9010
+      - PGREDIS_RUNTIME_INTERNAL_TOKEN=${PGREDIS_RUNTIME_INTERNAL_TOKEN}
+      - PGREDIS_RUNTIME_CAPABILITY_MAX_TTL_MS=${PGREDIS_RUNTIME_CAPABILITY_TTL_MS:-600000}
+      - PGREDIS_RUNTIME_TENANTS_DIR=/etc/supabase/pgredis-tenants
+      - PGREDIS_RUNTIME_CONNECTIONS_PER_TENANT=${PGREDIS_RUNTIME_CONNECTIONS_PER_TENANT:-2}
+      - PGREDIS_RUNTIME_L1_MAX_ENTRIES=${PGREDIS_RUNTIME_L1_MAX_ENTRIES:-1000}
+      - PGREDIS_RUNTIME_L1_TTL_MS=${PGREDIS_RUNTIME_L1_TTL_MS:-30000}
+    volumes:
+      - pgredis-tenant-config:/etc/supabase/pgredis-tenants:ro
+    healthcheck:
+      test: ["CMD", "bun", "-e", "const r=await fetch('http://127.0.0.1:9010/health'); if(!r.ok) process.exit(1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - pgredis-database
+      - edge-pgredis
 
 volumes:
   pgdata18:
+  tenant-config:
+  pgredis-tenant-config:
   caddy-data:
   caddy-config:
 
 networks:
   supacloud-dev:
     driver: bridge
+  pgredis-database:
+    internal: true
+  edge-pgredis:
+    internal: true

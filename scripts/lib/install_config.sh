@@ -456,6 +456,35 @@ supacloud_restore_file_snapshot() {
     mv -f "$temporary_file" "$target_file"
 }
 
+supacloud_capture_directory_snapshot() {
+    local target_dir="$1"
+    local snapshot_dir="$2"
+    mkdir -p "$snapshot_dir"
+    chmod 700 "$snapshot_dir"
+    if [[ -e "$target_dir" || -L "$target_dir" ]]; then
+        [[ -d "$target_dir" && ! -L "$target_dir" ]] || return 1
+        mkdir -p "$snapshot_dir/content"
+        cp -a "$target_dir"/. "$snapshot_dir/content"/
+        printf 'present\n' > "$snapshot_dir/state"
+    else
+        printf 'absent\n' > "$snapshot_dir/state"
+    fi
+}
+
+supacloud_restore_directory_snapshot() {
+    local target_dir="$1"
+    local snapshot_dir="$2"
+    local state
+    state=$(<"$snapshot_dir/state")
+    rm -rf -- "$target_dir"
+    if [[ "$state" == "absent" ]]; then
+        return
+    fi
+    [[ "$state" == "present" && -d "$snapshot_dir/content" ]] || return 1
+    mkdir -p "$target_dir"
+    cp -a "$snapshot_dir/content"/. "$target_dir"/
+}
+
 supacloud_secret_key_fingerprint() {
     local encryption_key="$1"
     {

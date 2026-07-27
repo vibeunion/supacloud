@@ -23,6 +23,8 @@ import {
 import { functionPathCandidates } from "./function-source";
 import path from "path";
 import fs from "fs/promises";
+import type { PgredisRuntimeEndpointConfig } from "./internal-bindings";
+import { createPgredisCapability } from "./pgredis-capability";
 
 const PORT = Number(process.env.EDGE_RUNTIME_PORT) || Number(process.env.PORT) || 9000;
 const HOST = process.env.EDGE_RUNTIME_HOST || process.env.HOST || "127.0.0.1";
@@ -50,6 +52,21 @@ const AUTH_FAILURE_WINDOW_MS = Number(process.env.EDGE_AUTH_FAILURE_WINDOW_MS) |
 const AUTH_FAILURE_LIMIT = Number(process.env.EDGE_AUTH_FAILURE_LIMIT) || 8;
 const AUTH_FAILURE_COOLDOWN_MS = Number(process.env.EDGE_AUTH_FAILURE_COOLDOWN_MS) || 60_000;
 const AUTH_FAILURE_MAX_ENTRIES = Number(process.env.EDGE_AUTH_FAILURE_MAX_ENTRIES) || 2_048;
+const PGREDIS_RUNTIME_INTERNAL_URL = process.env.PGREDIS_RUNTIME_INTERNAL_URL?.trim() || "";
+const PGREDIS_RUNTIME_INTERNAL_TOKEN = process.env.PGREDIS_RUNTIME_INTERNAL_TOKEN?.trim() || "";
+const PGREDIS_RUNTIME_INTERNAL_TIMEOUT_MS = Number(process.env.PGREDIS_RUNTIME_INTERNAL_TIMEOUT_MS) || 5_000;
+const PGREDIS_RUNTIME_CAPABILITY_TTL_MS = Number(process.env.PGREDIS_RUNTIME_CAPABILITY_TTL_MS) || 600_000;
+if (Boolean(PGREDIS_RUNTIME_INTERNAL_URL) !== Boolean(PGREDIS_RUNTIME_INTERNAL_TOKEN)) {
+  throw new Error("PGREDIS_RUNTIME_INTERNAL_URL and PGREDIS_RUNTIME_INTERNAL_TOKEN must be configured together");
+}
+const PGREDIS_RUNTIME_ENDPOINT: PgredisRuntimeEndpointConfig | undefined = PGREDIS_RUNTIME_INTERNAL_URL
+  ? {
+      baseUrl: PGREDIS_RUNTIME_INTERNAL_URL,
+      signingSecret: PGREDIS_RUNTIME_INTERNAL_TOKEN,
+      timeoutMs: PGREDIS_RUNTIME_INTERNAL_TIMEOUT_MS,
+      capabilityTtlMs: PGREDIS_RUNTIME_CAPABILITY_TTL_MS,
+    }
+  : undefined;
 
 // 空集群和 CI 环境可能尚未创建函数目录，启动时先落盘以避免健康检查前崩溃。
 async function ensureDir(dir: string): Promise<string> {
@@ -356,6 +373,17 @@ async function dispatchFunction(
       functionPath,
       projectRoot,
       projectRef,
+      internalBindings: PGREDIS_RUNTIME_ENDPOINT
+        ? {
+            baseUrl: PGREDIS_RUNTIME_ENDPOINT.baseUrl,
+            capabilityToken: createPgredisCapability(PGREDIS_RUNTIME_ENDPOINT.signingSecret, {
+              projectRef,
+              subject: functionId,
+              ttlMs: PGREDIS_RUNTIME_ENDPOINT.capabilityTtlMs,
+            }),
+            timeoutMs: PGREDIS_RUNTIME_ENDPOINT.timeoutMs,
+          }
+        : undefined,
       moduleVersion,
       env: opts?.background
         ? withBackgroundInternalToken(tenantEnv, backgroundInternalToken)

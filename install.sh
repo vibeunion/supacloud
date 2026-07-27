@@ -28,6 +28,13 @@ TEMPLATE_CONFIG_FILE="${SUPACLOUD_TEMPLATE_CONFIG_FILE:-${SCRIPT_DIR}/config.env
 INSTALL_INPUT_FILE="${SUPACLOUD_INSTALL_CONFIG_FILE:-/etc/supabase/install.env}"
 JWT_KEYS_FILE="${SUPACLOUD_JWT_KEYS_FILE:-/etc/supabase/jwt-keys.env}"
 MANAGEMENT_ENV_FILE="${SUPACLOUD_MANAGEMENT_ENV_FILE:-/etc/supabase/management-api.env}"
+EDGE_RUNTIME_ENV_FILE="${SUPACLOUD_EDGE_RUNTIME_ENV_FILE:-/etc/supabase/edge-runtime.env}"
+PGREDIS_RUNTIME_ENV_FILE="${SUPACLOUD_PGREDIS_RUNTIME_ENV_FILE:-/etc/supabase/pgredis-runtime.env}"
+PGREDIS_RUNTIME_BIN_FILE="${SUPACLOUD_PGREDIS_RUNTIME_BIN_FILE:-/usr/local/bin/supacloud-pgredis-runtime}"
+PGREDIS_RUNTIME_UNIT_FILE="${SUPACLOUD_PGREDIS_RUNTIME_UNIT_FILE:-/etc/systemd/system/supacloud-pgredis-runtime.service}"
+PGREDIS_RUNTIME_SOURCE_DIR="${SUPACLOUD_PGREDIS_RUNTIME_SOURCE_DIR:-/opt/supacloud/pgredis-runtime}"
+PGREDIS_TENANT_CONFIG_DIR="${SUPACLOUD_PGREDIS_TENANT_CONFIG_DIR:-/etc/supabase/pgredis-tenants}"
+PGREDIS_INSTALL_TRANSACTION_DIR=""
 CREDENTIALS_FILE="${SUPACLOUD_CREDENTIALS_FILE:-/etc/supabase/supacloud-credentials.env}"
 MASTER_TOKEN_FILE="${SUPACLOUD_MASTER_TOKEN_FILE:-/etc/supabase/master-token.env}"
 BUN_VERSION="${BUN_VERSION:-1.3.14}"
@@ -1392,6 +1399,13 @@ select_edge_runtime_binary_source() {
         "${SCRIPT_DIR}/packages/edge-runtime/${asset_name}"
 }
 
+select_pgredis_runtime_binary_source() {
+    local asset_name="$1"
+    supacloud_select_binary_source "$asset_name" \
+        "${SCRIPT_DIR}/packages/pgredis-runtime/dist/${asset_name}" \
+        "${SCRIPT_DIR}/packages/pgredis-runtime/${asset_name}"
+}
+
 select_caddy_binary_source() {
     local asset_name="$1"
     supacloud_select_binary_source "$asset_name" \
@@ -1461,6 +1475,20 @@ PY
 }
 
 # ========== Edge Functions Runtime Configuration ==========
+ensure_edge_runtime_user() {
+    if ! getent group supacloud-edge >/dev/null 2>&1; then
+        groupadd --system supacloud-edge || return 1
+    fi
+    if ! id supacloud-edge >/dev/null 2>&1; then
+        useradd --system --no-create-home --home-dir /nonexistent \
+            --shell /usr/sbin/nologin --gid supacloud-edge supacloud-edge || return 1
+    fi
+    if [[ "$(id -u supacloud-edge)" == "0" || "$(id -gn supacloud-edge)" != "supacloud-edge" ]]; then
+        log_error "Existing supacloud-edge account violates the dedicated runtime-user contract"
+        return 1
+    fi
+}
+
 install_edge_runtime() {
     log_step "Installing Edge Runtime..."
     supacloud_resolve_artifact_policy || return 1
@@ -1477,7 +1505,8 @@ install_edge_runtime() {
         EDGE_RT_BIN_NAME="supacloud-edge-runtime-linux-arm64"
     fi
 
-    # 1. Create directories
+    # 1. Create the unprivileged runtime identity and directories.
+    ensure_edge_runtime_user || return 1
     mkdir -p /var/supacloud/frontends /opt/supacloud/edge-runtime /opt/supacloud/functions /etc/supabase
 
     # 2. Select the compiled artifact. Forced release mode is fail-closed and
@@ -1580,6 +1609,8 @@ Wants=supacloud.service
 
 [Service]
 Type=simple
+User=supacloud-edge
+Group=supacloud-edge
 WorkingDirectory=/opt/supacloud/edge-runtime
 ExecStartPre=/bin/bash -c 'for pid in \$(lsof -iTCP:9000 -sTCP:LISTEN -t 2>/dev/null); do echo "[EdgeRT] Killing stale pid=\$pid"; kill -9 \$pid 2>/dev/null || true; done; sleep 0.3; true'
 ExecStart=${EXEC_START_CMD}
@@ -1591,7 +1622,8 @@ Environment=EDGE_FUNCTIONS_DIR=/opt/supacloud/functions
 Environment=EDGE_FUNCTIONS_BASE_DIR=/opt/supacloud/functions
 Environment=MANAGEMENT_API_URL=http://127.0.0.1:9090
 Environment=WORKER_POOL_SIZE=4
-EnvironmentFile=-/etc/supabase/management-api.env
+EnvironmentFile=-/etc/supabase/edge-runtime.env
+InaccessiblePaths=/etc/supabase/pgredis-tenants
 LimitNOFILE=65536
 
 [Install]
@@ -1612,9 +1644,209 @@ SVCEOF
     fi
 }
 
+# ========== PostgreSQL Cache Data Plane ==========
+begin_pgredis_install_transaction() {
+    if [[ -n "$PGREDIS_INSTALL_TRANSACTION_DIR" ]]; then
+        return 0
+    fi
+    local transaction_parent="${SUPACLOUD_PGREDIS_TRANSACTION_PARENT:-/usr/local/bin}"
+    mkdir -p "$transaction_parent"
+    PGREDIS_INSTALL_TRANSACTION_DIR=$(mktemp -d "${transaction_parent}/.supacloud-pgredis-install.XXXXXX")
+    chmod 700 "$PGREDIS_INSTALL_TRANSACTION_DIR"
+    if ! supacloud_capture_file_snapshot "$PGREDIS_RUNTIME_BIN_FILE" "${PGREDIS_INSTALL_TRANSACTION_DIR}/binary" \
+        || ! supacloud_capture_file_snapshot "$PGREDIS_RUNTIME_ENV_FILE" "${PGREDIS_INSTALL_TRANSACTION_DIR}/env" \
+        || ! supacloud_capture_file_snapshot "$PGREDIS_RUNTIME_UNIT_FILE" "${PGREDIS_INSTALL_TRANSACTION_DIR}/unit" \
+        || ! supacloud_capture_directory_snapshot "$PGREDIS_RUNTIME_SOURCE_DIR" "${PGREDIS_INSTALL_TRANSACTION_DIR}/source"; then
+        rm -rf -- "$PGREDIS_INSTALL_TRANSACTION_DIR"
+        PGREDIS_INSTALL_TRANSACTION_DIR=""
+        return 1
+    fi
+    if systemctl is-active --quiet supacloud-pgredis-runtime; then
+        printf 'true\n' > "${PGREDIS_INSTALL_TRANSACTION_DIR}/was-active"
+    else
+        printf 'false\n' > "${PGREDIS_INSTALL_TRANSACTION_DIR}/was-active"
+    fi
+    if systemctl is-enabled --quiet supacloud-pgredis-runtime; then
+        printf 'true\n' > "${PGREDIS_INSTALL_TRANSACTION_DIR}/was-enabled"
+    else
+        printf 'false\n' > "${PGREDIS_INSTALL_TRANSACTION_DIR}/was-enabled"
+    fi
+}
 
+rollback_pgredis_install_transaction() {
+    [[ -n "$PGREDIS_INSTALL_TRANSACTION_DIR" && -d "$PGREDIS_INSTALL_TRANSACTION_DIR" ]] || return 0
+    local rollback_status=0
+    local was_active was_enabled
+    was_active=$(<"${PGREDIS_INSTALL_TRANSACTION_DIR}/was-active")
+    was_enabled=$(<"${PGREDIS_INSTALL_TRANSACTION_DIR}/was-enabled")
+    if systemctl is-active --quiet supacloud-pgredis-runtime; then
+        systemctl stop supacloud-pgredis-runtime >/dev/null 2>&1 || rollback_status=1
+    fi
+    supacloud_restore_file_snapshot "$PGREDIS_RUNTIME_BIN_FILE" "${PGREDIS_INSTALL_TRANSACTION_DIR}/binary" || rollback_status=1
+    supacloud_restore_file_snapshot "$PGREDIS_RUNTIME_ENV_FILE" "${PGREDIS_INSTALL_TRANSACTION_DIR}/env" || rollback_status=1
+    supacloud_restore_file_snapshot "$PGREDIS_RUNTIME_UNIT_FILE" "${PGREDIS_INSTALL_TRANSACTION_DIR}/unit" || rollback_status=1
+    supacloud_restore_directory_snapshot "$PGREDIS_RUNTIME_SOURCE_DIR" "${PGREDIS_INSTALL_TRANSACTION_DIR}/source" || rollback_status=1
+    systemctl daemon-reload >/dev/null 2>&1 || rollback_status=1
+    if [[ "$was_enabled" == "true" ]]; then
+        systemctl enable supacloud-pgredis-runtime >/dev/null 2>&1 || rollback_status=1
+    else
+        systemctl disable supacloud-pgredis-runtime >/dev/null 2>&1 || true
+    fi
+    if [[ "$was_active" == "true" ]]; then
+        systemctl start supacloud-pgredis-runtime >/dev/null 2>&1 || rollback_status=1
+        supacloud_wait_http_health http://127.0.0.1:9010/health || rollback_status=1
+    else
+        systemctl stop supacloud-pgredis-runtime >/dev/null 2>&1 || true
+    fi
+    if (( rollback_status == 0 )); then
+        rm -rf -- "$PGREDIS_INSTALL_TRANSACTION_DIR"
+        PGREDIS_INSTALL_TRANSACTION_DIR=""
+    fi
+    return "$rollback_status"
+}
 
+commit_pgredis_install_transaction() {
+    [[ -z "$PGREDIS_INSTALL_TRANSACTION_DIR" ]] || rm -rf -- "$PGREDIS_INSTALL_TRANSACTION_DIR"
+    PGREDIS_INSTALL_TRANSACTION_DIR=""
+}
 
+abort_pgredis_install_transaction() {
+    local exit_status="$1"
+    if ! rollback_pgredis_install_transaction; then
+        log_error "pgredis-runtime rollback failed; snapshot: ${PGREDIS_INSTALL_TRANSACTION_DIR}"
+    fi
+    exit "$exit_status"
+}
+
+abort_management_install_transaction() {
+    local transaction_dir="$1"
+    local service_was_active="$2"
+    local keep_current_env="$3"
+    local exit_status="$4"
+    local rollback_status=0
+    trap - ERR EXIT HUP INT TERM
+    if ! recover_management_api_install "$transaction_dir" "$service_was_active" "$keep_current_env"; then
+        rollback_status=1
+        log_error "Management API rollback failed; snapshot retained: $transaction_dir"
+    else
+        rm -rf -- "$transaction_dir" || {
+            rollback_status=1
+            log_error "Unable to remove Management API rollback snapshot: $transaction_dir"
+        }
+    fi
+    if ! rollback_pgredis_install_transaction; then
+        rollback_status=1
+        log_error "pgredis-runtime rollback failed; snapshot: ${PGREDIS_INSTALL_TRANSACTION_DIR}"
+    fi
+    if (( exit_status == 0 && rollback_status != 0 )); then
+        exit_status=1
+    fi
+    exit "$exit_status"
+}
+
+ensure_pgredis_runtime_user() {
+    if ! getent group supacloud-pgredis >/dev/null 2>&1; then
+        groupadd --system supacloud-pgredis || return 1
+    fi
+    if ! id supacloud-pgredis >/dev/null 2>&1; then
+        useradd --system --no-create-home --home-dir /nonexistent \
+            --shell /usr/sbin/nologin --gid supacloud-pgredis supacloud-pgredis || return 1
+    fi
+    if [[ "$(id -gn supacloud-pgredis)" != "supacloud-pgredis" ]]; then
+        log_error "Existing supacloud-pgredis user does not use the dedicated supacloud-pgredis group"
+        return 1
+    fi
+}
+
+install_pgredis_runtime() {
+    log_step "Installing pgredis-runtime data plane..."
+    supacloud_resolve_artifact_policy || return 1
+    local PGR_BIN_NAME=""
+    local PGR_BIN_SOURCE=""
+    local PGR_BIN_TARGET="$PGREDIS_RUNTIME_BIN_FILE"
+    local USE_COMPILED_BINARY=false
+    local ARCH
+    ARCH=$(uname -m)
+    if [[ "$ARCH" == "x86_64" ]]; then
+        PGR_BIN_NAME="supacloud-pgredis-runtime-linux-amd64"
+    elif [[ "$ARCH" == "aarch64" ]]; then
+        PGR_BIN_NAME="supacloud-pgredis-runtime-linux-arm64"
+    fi
+
+    ensure_pgredis_runtime_user || return 1
+    mkdir -p "$PGREDIS_RUNTIME_SOURCE_DIR"
+    install -d -o supacloud-pgredis -g supacloud-pgredis -m 0700 \
+        "$PGREDIS_TENANT_CONFIG_DIR"
+    if [[ -z "$PGR_BIN_NAME" && "$SUPACLOUD_RESOLVED_ARTIFACT_MODE" == "release" ]]; then
+        log_error "Forced release mode does not support architecture: $ARCH"
+        return 1
+    fi
+    if [[ -n "$PGR_BIN_NAME" ]]; then
+        if [[ "$SUPACLOUD_RESOLVED_ARTIFACT_MODE" == "release" ]]; then
+            PGR_BIN_SOURCE=$(select_pgredis_runtime_binary_source "$PGR_BIN_NAME") || return 1
+        else
+            PGR_BIN_SOURCE=$(select_pgredis_runtime_binary_source "$PGR_BIN_NAME" || true)
+        fi
+    fi
+
+    if [[ -n "$PGR_BIN_SOURCE" ]]; then
+        supacloud_atomic_install_binary "$PGR_BIN_SOURCE" "$PGR_BIN_NAME" "$PGR_BIN_TARGET" || return 1
+        USE_COMPILED_BINARY=true
+        log_info "Compiled pgredis-runtime binary installed to $PGR_BIN_TARGET"
+    fi
+    if [[ "$USE_COMPILED_BINARY" == "false" && "$SUPACLOUD_RESOLVED_ARTIFACT_MODE" != "local" ]]; then
+        log_error "Release mode requires a compiled pgredis-runtime binary"
+        return 1
+    fi
+
+    local PGR_EXEC_START
+    if [[ "$USE_COMPILED_BINARY" == "true" ]]; then
+        PGR_EXEC_START="$PGR_BIN_TARGET"
+    else
+        local PGR_SRC="${SCRIPT_DIR}/packages/pgredis-runtime"
+        if [[ ! -d "$PGR_SRC" ]]; then
+            log_error "Local pgredis-runtime source is missing: $PGR_SRC"
+            return 1
+        fi
+        cp -rf "$PGR_SRC"/* "$PGREDIS_RUNTIME_SOURCE_DIR"/
+        if ! command -v bun >/dev/null 2>&1; then
+            ensure_bun_version
+        fi
+        (cd "$PGREDIS_RUNTIME_SOURCE_DIR" && bun install --frozen-lockfile 2>/dev/null) || \
+            (cd "$PGREDIS_RUNTIME_SOURCE_DIR" && bun install) || return 1
+        PGR_EXEC_START="/usr/local/bin/bun server.ts"
+    fi
+
+    local pgredis_token
+    local edge_tls_ca_file edge_tls_insecure_skip_verify
+    pgredis_token="$(supacloud_stable_secret "$PGREDIS_RUNTIME_ENV_FILE" PGREDIS_RUNTIME_INTERNAL_TOKEN "$(openssl rand -hex 32)")"
+    edge_tls_ca_file="${SUPACLOUD_EDGE_TLS_CA_FILE:-$(supacloud_env_value "$MANAGEMENT_ENV_FILE" SUPACLOUD_EDGE_TLS_CA_FILE)}"
+    edge_tls_insecure_skip_verify="${SUPACLOUD_EDGE_TLS_INSECURE_SKIP_VERIFY:-$(supacloud_env_value "$MANAGEMENT_ENV_FILE" SUPACLOUD_EDGE_TLS_INSECURE_SKIP_VERIFY)}"
+    supacloud_write_service_env_pairs "$PGREDIS_RUNTIME_ENV_FILE" \
+        PGREDIS_RUNTIME_INTERNAL_TOKEN "$pgredis_token" \
+        PGREDIS_RUNTIME_HOST 127.0.0.1 \
+        PGREDIS_RUNTIME_PORT 9010 \
+        PGREDIS_RUNTIME_TENANTS_DIR "$PGREDIS_TENANT_CONFIG_DIR" \
+        PGREDIS_RUNTIME_CAPABILITY_MAX_TTL_MS "${PGREDIS_RUNTIME_CAPABILITY_MAX_TTL_MS:-600000}" \
+        PGREDIS_RUNTIME_MAX_TENANTS "${PGREDIS_RUNTIME_MAX_TENANTS:-128}" \
+        PGREDIS_RUNTIME_CONNECTIONS_PER_TENANT "${PGREDIS_RUNTIME_CONNECTIONS_PER_TENANT:-2}" \
+        PGREDIS_RUNTIME_TENANT_IDLE_MS "${PGREDIS_RUNTIME_TENANT_IDLE_MS:-300000}" \
+        PGREDIS_RUNTIME_L1_MAX_ENTRIES "${PGREDIS_RUNTIME_L1_MAX_ENTRIES:-1000}" \
+        PGREDIS_RUNTIME_L1_TTL_MS "${PGREDIS_RUNTIME_L1_TTL_MS:-30000}" || return 1
+    chmod 600 "$PGREDIS_RUNTIME_ENV_FILE"
+
+    local systemd_src="${SCRIPT_DIR}/infrastructure/systemd/supacloud-pgredis-runtime.service"
+    if [[ ! -f "$systemd_src" ]]; then
+        log_error "Missing pgredis-runtime systemd unit: $systemd_src"
+        return 1
+    fi
+    render_edge_runtime_systemd_unit "$systemd_src" \
+        "$PGREDIS_RUNTIME_UNIT_FILE" "$PGR_EXEC_START"
+    systemctl daemon-reload || return 1
+    systemctl enable --now supacloud-pgredis-runtime || return 1
+    supacloud_wait_http_health http://127.0.0.1:9010/health || return 1
+    log_info "pgredis-runtime is ready on 127.0.0.1:9010"
+}
 # ========== S3 Storage Installation ==========
 install_s3_storage() {
     log_step "Configuring S3 storage (${S3_STORAGE_TYPE:-juicefs})..."
@@ -2589,6 +2821,18 @@ install_systemd_unit_broker() {
     install -m 0644 "$unit_src" "$unit_target"
 }
 
+capture_management_api_install() {
+    local transaction_dir="$1"
+    supacloud_capture_file_snapshot /usr/local/bin/supacloud "${transaction_dir}/binary" &&
+        supacloud_capture_file_snapshot "$MANAGEMENT_ENV_FILE" "${transaction_dir}/env" &&
+        supacloud_capture_file_snapshot "$EDGE_RUNTIME_ENV_FILE" "${transaction_dir}/edge-env" &&
+        supacloud_capture_file_snapshot /etc/systemd/system/supacloud.service "${transaction_dir}/unit" &&
+        supacloud_capture_file_snapshot /usr/local/libexec/supacloud/tenant-user "${transaction_dir}/tenant-user-helper" &&
+        supacloud_capture_file_snapshot /etc/systemd/system/supacloud-tenant-user@.service "${transaction_dir}/tenant-user-unit" &&
+        supacloud_capture_file_snapshot /usr/local/libexec/supacloud/systemd-unit "${transaction_dir}/systemd-unit-helper" &&
+        supacloud_capture_file_snapshot /etc/systemd/system/supacloud-systemd-unit@.service "${transaction_dir}/systemd-unit-unit"
+}
+
 recover_management_api_install() {
     local transaction_dir="$1"
     local service_was_active="$2"
@@ -2606,6 +2850,7 @@ recover_management_api_install() {
     if [[ "$keep_current_env" != "true" ]]; then
         supacloud_restore_file_snapshot "$MANAGEMENT_ENV_FILE" "${transaction_dir}/env" || return 1
     fi
+    supacloud_restore_file_snapshot "$EDGE_RUNTIME_ENV_FILE" "${transaction_dir}/edge-env" || return 1
     systemctl daemon-reload >/dev/null 2>&1 || return 1
     if [[ "$service_was_active" == "true" ]]; then
         systemctl start supacloud >/dev/null 2>&1 || return 1
@@ -2648,16 +2893,22 @@ install_management_api() {
         return 1
     }
     local management_transaction_dir staged_management_binary
+    local management_service_was_active="false"
+    local management_keep_current_env_on_abort="false"
     management_transaction_dir=$(mktemp -d /usr/local/bin/.supacloud-install.XXXXXX)
     chmod 700 "$management_transaction_dir"
-    trap 'rm -rf -- "$management_transaction_dir"' EXIT HUP INT TERM
-    supacloud_capture_file_snapshot "$BIN_TARGET" "${management_transaction_dir}/binary"
-    supacloud_capture_file_snapshot "$MANAGEMENT_ENV_FILE" "${management_transaction_dir}/env"
-    supacloud_capture_file_snapshot /etc/systemd/system/supacloud.service "${management_transaction_dir}/unit"
-    supacloud_capture_file_snapshot /usr/local/libexec/supacloud/tenant-user "${management_transaction_dir}/tenant-user-helper"
-    supacloud_capture_file_snapshot /etc/systemd/system/supacloud-tenant-user@.service "${management_transaction_dir}/tenant-user-unit"
-    supacloud_capture_file_snapshot /usr/local/libexec/supacloud/systemd-unit "${management_transaction_dir}/systemd-unit-helper"
-    supacloud_capture_file_snapshot /etc/systemd/system/supacloud-systemd-unit@.service "${management_transaction_dir}/systemd-unit-unit"
+    if systemctl is-active --quiet supacloud; then
+        management_service_was_active="true"
+    fi
+    if ! capture_management_api_install "$management_transaction_dir"; then
+        log_error "Could not capture a complete Management API rollback snapshot"
+        rm -rf "$management_transaction_dir"
+        return 1
+    fi
+    trap 'abort_management_install_transaction "$management_transaction_dir" "$management_service_was_active" "$management_keep_current_env_on_abort" "$?"' ERR EXIT
+    trap 'abort_management_install_transaction "$management_transaction_dir" "$management_service_was_active" "$management_keep_current_env_on_abort" 129' HUP
+    trap 'abort_management_install_transaction "$management_transaction_dir" "$management_service_was_active" "$management_keep_current_env_on_abort" 130' INT
+    trap 'abort_management_install_transaction "$management_transaction_dir" "$management_service_was_active" "$management_keep_current_env_on_abort" 143' TERM
     staged_management_binary="${management_transaction_dir}/supacloud.staged"
     log_info "Staging validated Management API binary from $SELECTED_BIN_SOURCE"
     supacloud_atomic_install_binary "$SELECTED_BIN_SOURCE" "$CI_BIN" "$staged_management_binary"
@@ -2729,13 +2980,11 @@ install_management_api() {
     # `openssl rand -hex 16` returns 32 ASCII chars, which crashes tenant
     # registration with "Bad key size". Generate a literal 16-char secret instead.
     REALTIME_DB_ENC_KEY="${REALTIME_DB_ENC_KEY:-$(supacloud_stable_secret "$MANAGEMENT_ENV_FILE" REALTIME_DB_ENC_KEY "$(openssl rand -base64 18 | tr -d '\n=+/ ' | cut -c1-16)")}"
+    local pgredis_token
+    pgredis_token="$(supacloud_stable_secret "$PGREDIS_RUNTIME_ENV_FILE" PGREDIS_RUNTIME_INTERNAL_TOKEN "$(openssl rand -hex 32)")"
 
     local encoded_postgres_password
     encoded_postgres_password=$(printf '%s' "$POSTGRES_PASSWORD" | supacloud_urlencode_stdin)
-    local management_service_was_active="false"
-    if systemctl is-active --quiet supacloud; then
-        management_service_was_active="true"
-    fi
     if systemctl cat supacloud >/dev/null 2>&1; then
         if ! supacloud_stop_service_for_migration supacloud "$management_service_was_active"; then
             if [[ "$management_service_was_active" == "true" ]]; then
@@ -2743,9 +2992,7 @@ install_management_api() {
                     log_error "SupaCloud did not recover after the failed stop attempt"
             fi
             log_error "Could not stop supacloud.service safely; metadata migration was not started"
-            rm -rf "$management_transaction_dir"
-            trap - EXIT HUP INT TERM
-            return 1
+            abort_management_install_transaction "$management_transaction_dir" "$management_service_was_active" false 1
         fi
     fi
     if ! supacloud_write_service_env_pairs "$MANAGEMENT_ENV_FILE" \
@@ -2754,6 +3001,14 @@ install_management_api() {
         STUDIO_INTERNAL "${STUDIO_INTERNAL:-127.0.0.1:9090}" \
         DATABASE_URL "postgresql://postgres:${encoded_postgres_password}@127.0.0.1:5432/supacloud_meta" \
         EDGE_RUNTIME_MODE "${EDGE_RUNTIME_MODE:-embedded}" \
+        EDGE_RUNTIME_USER supacloud-edge \
+        EDGE_RUNTIME_GROUP supacloud-edge \
+        PGREDIS_RUNTIME_INTERNAL_URL "${PGREDIS_RUNTIME_INTERNAL_URL:-http://127.0.0.1:9010}" \
+        PGREDIS_RUNTIME_INTERNAL_TOKEN "$pgredis_token" \
+        PGREDIS_RUNTIME_INTERNAL_TIMEOUT_MS "${PGREDIS_RUNTIME_INTERNAL_TIMEOUT_MS:-5000}" \
+        PGREDIS_RUNTIME_CAPABILITY_TTL_MS "${PGREDIS_RUNTIME_CAPABILITY_TTL_MS:-600000}" \
+        PGREDIS_TENANT_CONFIG_DIR "$PGREDIS_TENANT_CONFIG_DIR" \
+        PGREDIS_TENANT_CONFIG_OWNER supacloud-pgredis:supacloud-pgredis \
         MASTER_TOKEN "$MASTER_TOKEN" \
         SCRIPTS_PATH "$SCRIPTS_INSTALL_DIR" \
         PIGSTY_PATH "${HOME}/pigsty" \
@@ -2802,11 +3057,21 @@ install_management_api() {
         CADDY_BINARY_PATH "${CADDY_BINARY_PATH:-/usr/local/bin/supacloud-caddy}" \
         SUPACLOUD_ALERT_WEBHOOK_URL "${SUPACLOUD_ALERT_WEBHOOK_URL:-}" \
         SUPACLOUD_WATCHDOG_JOURNAL_WINDOW "${SUPACLOUD_WATCHDOG_JOURNAL_WINDOW:-5 minutes ago}"; then
-        recover_management_api_install "$management_transaction_dir" "$management_service_was_active" false || \
-            log_error "Failed to restore the previous Management API after env write failure"
-        rm -rf "$management_transaction_dir"
-        trap - EXIT HUP INT TERM
-        return 1
+        log_error "Failed to write the Management API environment"
+        abort_management_install_transaction "$management_transaction_dir" "$management_service_was_active" false 1
+    fi
+    if ! supacloud_write_service_env_pairs "$EDGE_RUNTIME_ENV_FILE" \
+        EDGE_RUNTIME_MASTER_KEY "$MASTER_TOKEN" \
+        MANAGEMENT_API_URL http://127.0.0.1:9090 \
+        TENANTS_DIR /etc/supabase/tenants \
+        SUPACLOUD_EDGE_TLS_CA_FILE "$edge_tls_ca_file" \
+        SUPACLOUD_EDGE_TLS_INSECURE_SKIP_VERIFY "$edge_tls_insecure_skip_verify" \
+        PGREDIS_RUNTIME_INTERNAL_URL "${PGREDIS_RUNTIME_INTERNAL_URL:-http://127.0.0.1:9010}" \
+        PGREDIS_RUNTIME_INTERNAL_TOKEN "$pgredis_token" \
+        PGREDIS_RUNTIME_INTERNAL_TIMEOUT_MS "${PGREDIS_RUNTIME_INTERNAL_TIMEOUT_MS:-5000}" \
+        PGREDIS_RUNTIME_CAPABILITY_TTL_MS "${PGREDIS_RUNTIME_CAPABILITY_TTL_MS:-600000}"; then
+        log_error "Failed to write the isolated Edge Runtime environment"
+        abort_management_install_transaction "$management_transaction_dir" "$management_service_was_active" false 1
     fi
 
     # 6. Execute database migration via supacloud binary itself. Older
@@ -2834,24 +3099,21 @@ install_management_api() {
         supacloud_secret_rotation_checkpoint_status "$SECRETS_ENCRYPTION_KEY" \
     ) || checkpoint_read_status=$?
     if (( checkpoint_read_status != 0 )); then
-        log_error "Database initialization finished with an unknown key state; supacloud.service remains stopped. Recovery snapshot: ${management_transaction_dir}"
-        trap - EXIT HUP INT TERM
-        return 1
+        log_error "Database initialization finished with an unknown key state; attempting Management API recovery with the committed environment"
+        management_keep_current_env_on_abort="true"
+        abort_management_install_transaction "$management_transaction_dir" "$management_service_was_active" true 1
+    fi
+    if [[ "$rotation_checkpoint_status" == "complete" ]]; then
+        management_keep_current_env_on_abort="true"
     fi
     if (( init_db_status != 0 )) || { [[ "$rotation_checkpoint_status" != "complete" ]] && [[ "$existing_runtime_state" != "false" || -n "$migration_legacy_encryption_key" ]]; }; then
         local keep_current_env="false"
         local migration_failure_status="$init_db_status"
         [[ "$rotation_checkpoint_status" == "complete" ]] && keep_current_env="true"
         (( migration_failure_status != 0 )) || migration_failure_status=1
-        if ! recover_management_api_install "$management_transaction_dir" "$management_service_was_active" "$keep_current_env"; then
-            log_error "Database initialization failed and automatic Management API recovery also failed. Recovery snapshot: ${management_transaction_dir}"
-            trap - EXIT HUP INT TERM
-            return 1
-        fi
+        management_keep_current_env_on_abort="$keep_current_env"
         log_error "Database initialization failed; runtime state was restored according to the durable key checkpoint"
-        rm -rf "$management_transaction_dir"
-        trap - EXIT HUP INT TERM
-        return "$migration_failure_status"
+        abort_management_install_transaction "$management_transaction_dir" "$management_service_was_active" "$keep_current_env" "$migration_failure_status"
     fi
     
     # The database checkpoint is durable now. Activate the staged binary only
@@ -2894,17 +3156,18 @@ install_management_api() {
         supacloud_wait_http_health http://127.0.0.1:9090/health || activation_status=$?
     fi
     if (( activation_status != 0 )); then
-        if ! recover_management_api_install "$management_transaction_dir" "$management_service_was_active" true; then
-            log_error "Management API activation failed and automatic rollback failed. Recovery snapshot: ${management_transaction_dir}"
-            trap - EXIT HUP INT TERM
-            return 1
-        fi
+        management_keep_current_env_on_abort="true"
         log_error "Management API activation failed; the previous binary was restored with the committed encryption key"
-        rm -rf "$management_transaction_dir"
-        trap - EXIT HUP INT TERM
-        return "$activation_status"
+        abort_management_install_transaction "$management_transaction_dir" "$management_service_was_active" true "$activation_status"
     fi
     log_info "SupaCloud Management API is healthy"
+
+    # Management and pgredis are now one healthy control-plane baseline. Commit
+    # both before optional watchdog and GoTrue follow-up work can fail.
+    commit_pgredis_install_transaction
+    trap - ERR
+    rm -rf "$management_transaction_dir"
+    trap - ERR EXIT HUP INT TERM
 
     local SYSTEMD_SRC="${SCRIPT_DIR}/infrastructure/systemd"
     if [[ -f "${SYSTEMD_SRC}/supacloud-postgrest-watchdog.service" ]]; then
@@ -2917,10 +3180,6 @@ install_management_api() {
         systemctl enable supacloud-postgrest-watchdog.timer
         systemctl start supacloud-postgrest-watchdog.timer || log_warn "PostgREST watchdog timer start failed, please check journalctl -u supacloud-postgrest-watchdog.service"
     fi
-
-    rm -rf "$management_transaction_dir"
-    trap - EXIT HUP INT TERM
-
 
     # 7b. Upgrade GoTrue only from this explicit install/upgrade transaction.
     local GOTRUE_BIN="${GOTRUE_BIN:-/usr/local/bin/gotrue}"
@@ -3548,7 +3807,7 @@ main() {
 
     # Performance tuning after Pigsty PG initialization
     tune_postgres
-    
+
     # [NEW] Initialize JuiceFS S3 Gateway if needed (PG is ready now)
     if [[ -f /etc/supabase/.init_juicefs ]] && [[ "$S3_STORAGE_TYPE" == "juicefs" ]]; then
         init_juicefs_s3_gateway
@@ -3556,7 +3815,15 @@ main() {
         configure_pgbackrest_juicefs
     fi
 
-    # Install Management API
+    # Install the cache data plane and Management API as one rollback boundary.
+    # If control-plane activation fails after the data plane is ready, restore
+    # the prior pgredis binary, env, unit, source tree, and service state.
+    begin_pgredis_install_transaction
+    trap 'abort_pgredis_install_transaction "$?"' ERR EXIT
+    trap 'abort_pgredis_install_transaction 129' HUP
+    trap 'abort_pgredis_install_transaction 130' INT
+    trap 'abort_pgredis_install_transaction 143' TERM
+    install_pgredis_runtime
     install_management_api
     if [[ -f "${SCRIPT_DIR}/scripts/upgrade_pigsty_4_4_compat.sh" ]]; then
         # Pigsty exports PGUSER=dbuser_dba globally; ${PGUSER:-postgres} would inherit the

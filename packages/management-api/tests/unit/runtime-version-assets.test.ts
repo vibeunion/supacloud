@@ -81,6 +81,7 @@ describe("runtime companion version assets", () => {
     expect(setup).toContain('source "${SCRIPT_DIR}/scripts/lib/release_assets.sh"');
     expect(setup).toContain("supacloud_fetch_component_release management-api");
     expect(setup).toContain("supacloud_fetch_component_release edge-runtime");
+    expect(setup).toContain("supacloud_fetch_component_release pgredis-runtime");
     expect(setup).toContain("supacloud_download_release_asset");
     expect(setup).toContain("ensure_release_attestation_verifier");
     expect(setup).not.toContain("releases/latest/download");
@@ -342,10 +343,13 @@ describe("runtime companion version assets", () => {
     const caddyBuilder = readRepoFile("scripts/build_supacloud_caddy.sh");
     const workflow = readRepoFile(".github/workflows/release-please.yml");
 
-    for (const unit of [managementUnit, edgeUnit, realtimeUnit]) {
+    for (const unit of [managementUnit, realtimeUnit]) {
       expect(unit).not.toContain("/opt/supacloud/config.env");
       expect(unit).toContain("/etc/supabase/management-api.env");
     }
+    expect(edgeUnit).not.toContain("/opt/supacloud/config.env");
+    expect(edgeUnit).toContain("/etc/supabase/edge-runtime.env");
+    expect(edgeUnit).not.toContain("/etc/supabase/management-api.env");
     expect(edgeUnit).toContain("ExecStart=/usr/local/bin/supacloud-edge-runtime");
     expect(installer).toContain("render_edge_runtime_systemd_unit");
     expect(installer).not.toContain('cp "${SYSTEMD_SRC}/supacloud-edge-runtime.service" /etc/systemd/system/supacloud-edge-runtime.service');
@@ -407,11 +411,13 @@ describe("runtime companion version assets", () => {
       const invocations = readFileSync(calls, "utf8").trim().split("\n");
       expect(invocations.filter((line) => line === "fetch:management-api")).toHaveLength(2);
       expect(invocations.filter((line) => line === "fetch:edge-runtime")).toHaveLength(2);
+      expect(invocations.filter((line) => line === "fetch:pgredis-runtime")).toHaveLength(2);
       for (const asset of [
         "supacloud-linux-amd64",
         "web-console-build.tar.gz",
         "supacloud-caddy-linux-amd64",
         "supacloud-edge-runtime-linux-amd64",
+        "supacloud-pgredis-runtime-linux-amd64",
       ]) {
         expect(invocations.filter((line) => line === `asset:${asset}`)).toHaveLength(2);
       }

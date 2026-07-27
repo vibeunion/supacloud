@@ -1,0 +1,45 @@
+[Unit]
+Description=SupaCloud PostgreSQL Cache Data Plane
+Documentation=https://github.com/zuohuadong/supacloud
+After=network-online.target patroni.service
+Wants=network-online.target
+Requires=patroni.service
+Before=supacloud.service supacloud-edge-runtime.service
+
+[Service]
+Type=simple
+User=supacloud-pgredis
+Group=supacloud-pgredis
+WorkingDirectory=/opt/supacloud/pgredis-runtime
+ExecStart=/usr/local/bin/supacloud-pgredis-runtime
+ExecStartPost=/usr/bin/curl --fail --silent --show-error --max-time 5 --retry 10 --retry-connrefused --retry-delay 1 http://127.0.0.1:9010/health
+Restart=on-failure
+RestartSec=5
+EnvironmentFile=-/etc/supabase/pgredis-runtime.env
+Environment=PGREDIS_RUNTIME_HOST=127.0.0.1
+TimeoutStartSec=30
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=supacloud-pgredis
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/etc/supabase/pgredis-tenants
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+LockPersonality=true
+SystemCallFilter=@system-service
+SystemCallFilter=~@mount @reboot @swap @privileged @raw-io @keyring
+SystemCallArchitectures=native
+
+MemoryMax=2G
+MemoryHigh=1536M
+TasksMax=2048
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

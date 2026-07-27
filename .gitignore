@@ -115,6 +115,7 @@ bun.lock
 !packages/*/bun.lock
 !packages/edge-runtime/
 packages/edge-runtime/supacloud-edge-runtime-*
+packages/pgredis-runtime/supacloud-pgredis-runtime-*
 !packages/edge-runtime/bun.lock
 config.env.deploy
 
