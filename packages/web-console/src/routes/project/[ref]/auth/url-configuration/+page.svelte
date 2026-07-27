@@ -3,6 +3,7 @@
   import { authApiResponseMessage, readAuthApiPayload } from "../../auth-api-response";
 
   import { page } from "$app/state";
+  import { t } from "svelte-i18n";
   import { Loader2, Link2, Globe, Plus, Trash2, Save } from "lucide-svelte";
   import { createQuery, createMutation, useQueryClient } from "@tanstack/svelte-query";
 
@@ -38,10 +39,14 @@
   const isLoading = $derived(urlConfigQuery.isPending);
   function addUrl() {
     const url = newUrl.trim();
-    if (url && !redirectUrls.includes(url)) {
-      redirectUrls = [...redirectUrls, url];
-      newUrl = "";
+    if (!url) return;
+    if (redirectUrls.includes(url)) {
+      saveMsg = `❌ ${$t("Auth.redirect_url_duplicate")}`;
+      setTimeout(() => saveMsg = null, 4000);
+      return;
     }
+    redirectUrls = [...redirectUrls, url];
+    newUrl = "";
   }
 
   function removeUrl(index: number) {

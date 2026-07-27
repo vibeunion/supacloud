@@ -100,6 +100,9 @@
     "verified": "Verified",
     "created": "Created",
     "last_sign_in": "Last Sign In",
+    "redirect_url_duplicate": "This redirect URL already exists",
+    "template_subject_required": "Every email template must have a subject",
+    "template_save_failed": "Failed to save email templates",
     "signOut": "Sign Out"
   },
   "Tables": {
