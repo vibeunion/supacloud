@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.26.1](https://github.com/zuohuadong/supacloud/compare/web-console-v0.26.0...web-console-v0.26.1) (2026-07-27)
+
+
+### Bug Fixes
+
+* **console:** render duplicate query statistics safely ([069095d](https://github.com/zuohuadong/supacloud/commit/069095d9c36508d844f8c080985e94771b0a9a8b))
+* **pages:** enable zip uploads and managed domains ([#611](https://github.com/zuohuadong/supacloud/issues/611)) ([eec9656](https://github.com/zuohuadong/supacloud/commit/eec9656c96f029ff24a267da6c2133cf8b35b84d))
+
 ## [0.26.0](https://github.com/zuohuadong/supacloud/compare/web-console-v0.25.3...web-console-v0.26.0) (2026-07-27)
 
 
