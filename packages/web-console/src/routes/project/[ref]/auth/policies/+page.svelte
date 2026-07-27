@@ -1,5 +1,6 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
+  import { readDatabaseSqlResponse } from "$lib/database-sql-response";
 
   import { page } from "$app/state";
   import { Loader2, Shield, Table, Plus, Search, Trash2 } from "lucide-svelte";
@@ -62,9 +63,8 @@
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql: POLICIES_SQL })
       });
-      const data = await res.json();
-      if (data.error) throw new Error(data.message || data.error);
-      return (data.rows || []) as RlsPolicy[];
+      const data = await readDatabaseSqlResponse(res);
+      return data.rows as RlsPolicy[];
     }
   }));
 
@@ -115,16 +115,15 @@
 
       const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sql })
+        body: JSON.stringify({ sql, mode: "migration" })
       });
-      const data = await res.json();
-      if (data.error) throw new Error(data.message || data.error);
-      return data;
+      return readDatabaseSqlResponse(res);
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["auth_policies", projectRef] });
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["auth_policies", projectRef] });
       showAdd = false;
       newPolName = ""; newPolUsing = ""; newPolWithCheck = "";
+      toast.success("RLS 策略已创建");
     },
     onError: (err: unknown) => {
       addError = (err instanceof Error ? err.message : String(err)) || "创建失败";
@@ -145,11 +144,9 @@
       const sql = `DROP POLICY "${policy.policyname}" ON "${policy.schemaname}"."${policy.tablename}";`;
       const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sql })
+        body: JSON.stringify({ sql, mode: "migration" })
       });
-      const data = await res.json();
-      if (data.error) throw new Error(data.message || data.error);
-      return data;
+      return readDatabaseSqlResponse(res);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["auth_policies", projectRef] });
