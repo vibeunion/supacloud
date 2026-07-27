@@ -861,6 +861,15 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
       if (Object.keys(patch).length === 0) {
         return status(400, { message: "No email templates provided", code: "400" });
       }
+      const emptySubject = Object.entries(patch).find(
+        ([, template]) => template.subject !== undefined && !template.subject.trim(),
+      );
+      if (emptySubject) {
+        return status(400, {
+          message: `Email subject for template '${emptySubject[0]}' must not be empty`,
+          code: "400",
+        });
+      }
 
       const currentAuth = (settings.auth as Record<string, unknown>) || {};
       const nextAuth = applyAuthEmailTemplatePatch(currentAuth, patch);

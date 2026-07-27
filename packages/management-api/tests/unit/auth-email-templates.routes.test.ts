@@ -131,6 +131,27 @@ describe("project auth email template routes", () => {
     expect(restartRuntime).not.toHaveBeenCalled();
   });
 
+  test("PUT rejects empty email subjects before persisting or restarting", async () => {
+    const res = await request("/v1/projects/proj_1/auth/template", {
+      method: "PUT",
+      body: JSON.stringify({
+        templates: {
+          confirmation: {
+            subject: "   ",
+            content: "<p>{{ .ConfirmationURL }}</p>",
+          },
+        },
+      }),
+    });
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({
+      message: "Email subject for template 'confirmation' must not be empty",
+    });
+    expect(updateProjectSettings).not.toHaveBeenCalled();
+    expect(restartRuntime).not.toHaveBeenCalled();
+  });
+
   test("DELETE clears canonical and legacy template keys for rollback", async () => {
     getProjectSettings.mockResolvedValue({
       auth: {

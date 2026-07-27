@@ -4,6 +4,7 @@
 
   import { page } from "$app/state";
   import { Loader2, Link2, Globe, Plus, Trash2, Save } from "lucide-svelte";
+  import { toast } from "svelte-sonner";
   import { createQuery, createMutation, useQueryClient } from "@tanstack/svelte-query";
 
   let newUrl = $state("");
@@ -38,10 +39,13 @@
   const isLoading = $derived(urlConfigQuery.isPending);
   function addUrl() {
     const url = newUrl.trim();
-    if (url && !redirectUrls.includes(url)) {
-      redirectUrls = [...redirectUrls, url];
-      newUrl = "";
+    if (!url) return;
+    if (redirectUrls.includes(url)) {
+      toast.warning("该重定向 URL 已存在，无需重复添加");
+      return;
     }
+    redirectUrls = [...redirectUrls, url];
+    newUrl = "";
   }
 
   function removeUrl(index: number) {

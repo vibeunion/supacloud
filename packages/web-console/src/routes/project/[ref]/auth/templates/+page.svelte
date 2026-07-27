@@ -101,6 +101,12 @@
 
   async function saveTemplates() {
     saveMsg = null;
+    const emptySubject = templates.find((template) => !template.subject.trim());
+    if (emptySubject) {
+      saveMsg = `❌ ${emptySubject.name}的邮件主题不能为空`;
+      setTimeout(() => saveMsg = null, 4000);
+      return;
+    }
     saveMutation.mutate();
   }
 
