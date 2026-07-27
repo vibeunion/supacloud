@@ -7,7 +7,7 @@ import {
   type TenantCache,
 } from "./cache-registry";
 
-function fakeCache(): TenantCache {
+function fakeCache(): TenantCache & { clearNamespace(): Promise<number> } {
   return {
     async get() { return null; },
     async set() { return true; },
@@ -16,6 +16,7 @@ function fakeCache(): TenantCache {
     async getset() { return null; },
     async getdel() { return null; },
     async flush() { return 0; },
+    async clearNamespace() { return 0; },
   };
 }
 
