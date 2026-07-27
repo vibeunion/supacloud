@@ -36,6 +36,16 @@ async function waitForMetric(
   throw new Error(`Timed out waiting for ${metric}=${expected}`);
 }
 
+async function waitForResponse(
+  responsePromise: Promise<Response>,
+  timeoutMs: number,
+): Promise<Response | null> {
+  return Promise.race([
+    responsePromise,
+    Bun.sleep(timeoutMs).then(() => null),
+  ]);
+}
+
 describe("WorkerPool EdgeRuntime.waitUntil", () => {
   test("keeps tenant env available after the HTTP response is returned", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-waituntil-"));
@@ -1049,6 +1059,87 @@ describe("WorkerPool module cache", () => {
       expect(result.invalidated).toBe(1);
 
       expect(await (await dispatch("env:1:stat:same", "new")).text()).toBe("new");
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("schedules a queued request when a single worker finishes preheating", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-preheat-queue-"));
+    const slowFunctionPath = join(projectRoot, "slow-preheat.ts");
+    const fastFunctionPath = join(projectRoot, "fast.ts");
+    await Bun.write(slowFunctionPath, `
+      await Bun.sleep(150);
+      export default () => new Response("preheated");
+    `);
+    await Bun.write(fastFunctionPath, `export default () => new Response("queued");`);
+
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    try {
+      const preheatPromise = pool.preheat(
+        "proj_preheat_slow",
+        slowFunctionPath,
+        projectRoot,
+        {},
+        { projectRef: "proj_preheat", moduleVersion: "v1" },
+      );
+      const responsePromise = pool.dispatch({
+        functionId: "proj_preheat_fast",
+        functionPath: fastFunctionPath,
+        projectRoot,
+        projectRef: "proj_preheat",
+        env: {},
+        request: new Request("http://edge.local/functions/v1/fast"),
+      });
+
+      await waitForMetric(pool, "queue_length", 1);
+      expect(await preheatPromise).toBe(true);
+      const response = await waitForResponse(responsePromise, 500);
+      expect(response).not.toBeNull();
+      expect(await response!.text()).toBe("queued");
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("schedules queued requests when multiple workers finish preheating", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-preheat-queue-all-"));
+    const slowFunctionPath = join(projectRoot, "slow-preheat.ts");
+    const fastFunctionPath = join(projectRoot, "fast.ts");
+    await Bun.write(slowFunctionPath, `
+      await Bun.sleep(150);
+      export default () => new Response("preheated");
+    `);
+    await Bun.write(fastFunctionPath, `export default () => new Response("queued");`);
+
+    const pool = new WorkerPool({ size: 2, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    try {
+      const preheatPromise = pool.preheatIdleWorkers(
+        "proj_preheat_slow",
+        slowFunctionPath,
+        projectRoot,
+        {},
+        { projectRef: "proj_preheat", moduleVersion: "v1" },
+      );
+      const responsePromise = pool.dispatch({
+        functionId: "proj_preheat_fast",
+        functionPath: fastFunctionPath,
+        projectRoot,
+        projectRef: "proj_preheat",
+        env: {},
+        request: new Request("http://edge.local/functions/v1/fast"),
+      });
+
+      await waitForMetric(pool, "queue_length", 1);
+      const result = await preheatPromise;
+      expect(result.succeeded).toBe(2);
+      const response = await waitForResponse(responsePromise, 500);
+      expect(response).not.toBeNull();
+      expect(await response!.text()).toBe("queued");
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }

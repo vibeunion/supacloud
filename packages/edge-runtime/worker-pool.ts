@@ -990,7 +990,7 @@ export class WorkerPool {
       .then((result) => result.success)
       .finally(() => {
         if (!this.draining && this.activeWorkers.has(worker)) {
-          this.idle.push(worker);
+          this.schedule(worker);
         }
       });
   }
@@ -1028,7 +1028,9 @@ export class WorkerPool {
       };
     } finally {
       if (!this.draining) {
-        this.idle.push(...workers.filter((worker) => this.activeWorkers.has(worker)));
+        for (const worker of workers) {
+          if (this.activeWorkers.has(worker)) this.schedule(worker);
+        }
       }
     }
   }
