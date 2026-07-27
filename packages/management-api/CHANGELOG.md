@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.49.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.49.1...management-api-v0.49.2) (2026-07-27)
+
+
+### Bug Fixes
+
+* **storage:** persist Studio bucket metadata ([d4ec9f0](https://github.com/zuohuadong/supacloud/commit/d4ec9f0e6d2b61eef817e79ee44094a5c23284b7))
+* **storage:** persist Studio bucket metadata ([e4e3139](https://github.com/zuohuadong/supacloud/commit/e4e3139aa7bdf4642a50bd7f74cfcec01532a40d))
+
 ## [0.49.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.49.0...management-api-v0.49.1) (2026-07-27)
 
 
