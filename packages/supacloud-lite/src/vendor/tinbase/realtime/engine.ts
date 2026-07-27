@@ -1,0 +1,721 @@
+/**
+ * Realtime engine speaking the Phoenix-channel protocol that
+ * @supabase/realtime-js uses (vsn=1.0.0 JSON serialization): channel
+ * join/leave, heartbeat, broadcast, presence, and postgres_changes fed by
+ * the trigger-based CDC pipeline in the database layer.
+ *
+ * Transport-agnostic: sockets are anything with send()/close(), so the same
+ * engine works over Node WebSockets today and an in-process pair in the
+ * browser.
+ */
+import type { CdcEvent, Database } from '../db/database.js'
+import { quoteIdent } from '../db/database.js'
+import { verifyJwt } from '../jwt.js'
+import type { RequestContext } from '../types.js'
+
+/** The minimal socket surface the engine needs; any transport can supply it. */
+export interface RealtimeSocketLike {
+  /** send a text or binary frame to the client */
+  send(data: string | Uint8Array): void
+  /** close the connection with an optional WebSocket close code/reason */
+  close(code?: number, reason?: string): void
+}
+
+/** A decoded Phoenix channel message (normalized from either serializer version). */
+interface PhoenixMessage {
+  /** channel topic the message targets */
+  topic: string
+  /** Phoenix event name, e.g. phx_join, heartbeat, broadcast, presence */
+  event: string
+  /** event-specific payload object */
+  payload: Record<string, unknown>
+  /** client message ref, echoed on the phx_reply; null for server-initiated pushes */
+  ref: string | null
+  /** ref of the join that owns this message; present on the v2 array serializer */
+  join_ref?: string | null
+}
+
+interface PostgresBinding {
+  /** server-assigned id echoed to the client so it can route matching events */
+  id: number
+  /** change type to match: INSERT, UPDATE, DELETE, or `*` for all */
+  event: string
+  /** schema to watch */
+  schema: string
+  /** table to watch, or `*` for every table in the schema */
+  table: string
+  /** optional `col=op.value` row filter (see {@link matchFilter}) */
+  filter?: string
+}
+
+interface Channel {
+  /** Phoenix topic, e.g. `realtime:room-1` */
+  topic: string
+  /** the join message's ref, echoed back on replies for this channel */
+  joinRef: string | null
+  /** postgres_changes subscriptions requested on join */
+  bindings: PostgresBinding[]
+  /** echo broadcasts back to the sender (config.broadcast.self) */
+  broadcastSelf: boolean
+  /** ack a broadcast with a phx_reply (config.broadcast.ack) */
+  broadcastAck: boolean
+  /** presence identity key; defaults to a random uuid when the client sends none */
+  presenceKey: string
+  /** whether the client opted into presence tracking */
+  presenceEnabled: boolean
+  /** subscriber auth (from the join's access_token), used to filter by RLS */
+  ctx: RequestContext
+  /** private channel (RLS-authorized via realtime.messages) */
+  private: boolean
+  /** whether the subscriber passed the INSERT (write) authorization check */
+  canBroadcast: boolean
+}
+
+interface Connection {
+  /** the underlying transport socket */
+  socket: RealtimeSocketLike
+  /** channels this connection has joined, keyed by topic */
+  channels: Map<string, Channel>
+  /** Phoenix serializer version: "1.0.0" = JSON objects, "2.0.0" = JSON arrays */
+  vsn: string
+}
+
+type PresenceMetas = { metas: Record<string, unknown>[] }
+
+/** Holds all live connections and fans database changes and broadcasts out to them. */
+export class RealtimeEngine {
+  private connections = new Set<Connection>()
+  private bindingCounter = 1
+  private phxRefCounter = 1
+  /** topic → key → metas */
+  private presence = new Map<string, Map<string, PresenceMetas>>()
+  private stopCdc: (() => void) | null = null
+  private stopDbBroadcast: (() => void) | null = null
+
+  constructor(
+    private db: Database,
+    private jwtSecret?: string
+  ) {}
+
+  /** Resolve a subscriber's access token to a role/claims context. */
+  private async contextFromToken(token: string | undefined): Promise<RequestContext> {
+    if (!token || !this.jwtSecret) return { role: 'anon', claims: null }
+    const claims = await verifyJwt(token, this.jwtSecret)
+    if (!claims) return { role: 'anon', claims: null }
+    const role = typeof claims.role === 'string' ? claims.role : 'authenticated'
+    return { role, claims }
+  }
+
+  /**
+   * Authorize a private channel against RLS on realtime.messages, as the
+   * subscriber. read = a SELECT policy lets them receive; write = an INSERT
+   * policy lets them broadcast. Runs in a transaction that always rolls back so
+   * the probe rows never persist.
+   */
+  private async authorizePrivate(subTopic: string, ctx: RequestContext): Promise<{ read: boolean; write: boolean }> {
+    const claims = ctx.claims ? JSON.stringify(ctx.claims) : ''
+    try {
+      return await this.db.engine.transaction(async (tx) => {
+        // seed a probe row for the topic with RLS bypassed (service_role)
+        await tx.query(`select set_config('role', 'service_role', true)`)
+        await tx.query(
+          `insert into realtime.messages (topic, extension, event, payload, private) values ($1, 'broadcast', 'authz', '{}'::jsonb, true)`,
+          [subTopic]
+        )
+        // become the subscriber and set the topic being authorized
+        await tx.query(
+          `select set_config('role', $1, true), set_config('request.jwt.claims', $2, true), set_config('realtime.topic', $3, true)`,
+          [ctx.role, claims, subTopic]
+        )
+        // read: does a SELECT policy let them see the probe row for this topic?
+        const rd = await tx.query<{ n: number }>(
+          `select count(*)::int as n from realtime.messages where topic = $1`,
+          [subTopic]
+        )
+        const read = ((rd.rows[0]?.n ?? 0) as number) > 0
+        // write: does an INSERT policy let them broadcast? (last query - a
+        // failure aborts the tx, which we roll back anyway)
+        let write = true
+        try {
+          await tx.query(
+            `insert into realtime.messages (topic, extension, event, payload, private) values ($1, 'broadcast', 'authz-w', '{}'::jsonb, true)`,
+            [subTopic]
+          )
+        } catch {
+          write = false
+        }
+        throw { __authz: { read, write } }
+      })
+    } catch (e) {
+      const authz = (e as { __authz?: { read: boolean; write: boolean } }).__authz
+      if (authz) return authz
+      // realtime schema missing / unexpected error → deny (safe default)
+      return { read: false, write: false }
+    }
+  }
+
+  /** Fan a realtime.send() database broadcast out to a topic's subscribers. */
+  private dispatchDbBroadcast(msg: { topic: string; event: string; payload: unknown }): void {
+    const full = `realtime:${msg.topic}`
+    for (const conn of this.connections) {
+      const channel = conn.channels.get(full) ?? conn.channels.get(msg.topic)
+      if (!channel) continue
+      this.send(conn, {
+        topic: channel.topic,
+        event: 'broadcast',
+        payload: { type: 'broadcast', event: msg.event, payload: msg.payload },
+        ref: null,
+      })
+    }
+  }
+
+  /** Wire up the CDC and database-broadcast listeners; idempotent once started. */
+  async start(): Promise<void> {
+    if (this.stopCdc) return
+    this.stopCdc = await this.db.onCdcEvent((e) => this.dispatchCdc(e))
+    // broadcast-from-database: realtime.send() → pg_notify → fan out to topic
+    this.stopDbBroadcast = await this.db.engine.listen('tinbase_realtime_broadcast', (payload) => {
+      try {
+        this.dispatchDbBroadcast(JSON.parse(payload) as { topic: string; event: string; payload: unknown })
+      } catch {
+        // malformed payload - drop
+      }
+    })
+  }
+
+  /** Detach listeners and close every open socket (server shutdown). */
+  stop(): void {
+    this.stopCdc?.()
+    this.stopCdc = null
+    this.stopDbBroadcast?.()
+    this.stopDbBroadcast = null
+    for (const conn of this.connections) conn.socket.close(1001, 'server shutting down')
+    this.connections.clear()
+  }
+
+  /** Attach a socket. Returns callbacks the transport must wire up. */
+  connect(socket: RealtimeSocketLike, opts: { vsn?: string } = {}): {
+    onMessage: (data: string | Uint8Array) => void
+    onClose: () => void
+  } {
+    const conn: Connection = { socket, channels: new Map(), vsn: opts.vsn ?? '1.0.0' }
+    this.connections.add(conn)
+    return {
+      onMessage: (data) => {
+        void this.handleMessage(conn, data)
+      },
+      onClose: () => {
+        for (const topic of conn.channels.keys()) this.leaveChannel(conn, topic)
+        this.connections.delete(conn)
+      },
+    }
+  }
+
+  private send(conn: Connection, msg: PhoenixMessage): void {
+    try {
+      const encoded =
+        conn.vsn === '2.0.0'
+          ? JSON.stringify([msg.join_ref ?? null, msg.ref ?? null, msg.topic, msg.event, msg.payload])
+          : JSON.stringify(msg)
+      conn.socket.send(encoded)
+    } catch {
+      // transport already closed
+    }
+  }
+
+  private reply(conn: Connection, orig: PhoenixMessage, status: 'ok' | 'error', response: unknown): void {
+    this.send(conn, {
+      topic: orig.topic,
+      event: 'phx_reply',
+      payload: { status, response },
+      ref: orig.ref,
+      join_ref: orig.join_ref ?? null,
+    })
+  }
+
+  private async handleMessage(conn: Connection, data: string | Uint8Array): Promise<void> {
+    if (typeof data !== 'string') {
+      this.handleBinary(conn, data)
+      return
+    }
+    let msg: PhoenixMessage
+    try {
+      const parsed = JSON.parse(data) as unknown
+      if (Array.isArray(parsed)) {
+        // Phoenix v2 serializer: [join_ref, ref, topic, event, payload]
+        const [join_ref, ref, topic, event, payload] = parsed as [
+          string | null,
+          string | null,
+          string,
+          string,
+          Record<string, unknown>,
+        ]
+        msg = { join_ref, ref, topic, event, payload }
+      } else {
+        msg = parsed as PhoenixMessage
+      }
+    } catch {
+      return
+    }
+    if (msg.topic === 'phoenix' && msg.event === 'heartbeat') {
+      this.reply(conn, msg, 'ok', {})
+      return
+    }
+
+    // A handler throwing (e.g. an engine error while resolving the join's
+    // schema) must never become an unhandled rejection out of the floated
+    // onMessage call - reply with a Phoenix error and keep the socket alive.
+    try {
+      switch (msg.event) {
+        case 'phx_join':
+          await this.handleJoin(conn, msg)
+          break
+        case 'phx_leave':
+          this.leaveChannel(conn, msg.topic)
+          this.reply(conn, msg, 'ok', {})
+          break
+        case 'broadcast':
+          this.handleBroadcast(conn, msg)
+          break
+        case 'presence':
+          this.handlePresence(conn, msg)
+          break
+        case 'access_token':
+          {
+            // supabase-js setAuth() refreshes the subscriber's token; re-derive ctx
+            const ctx = await this.contextFromToken(msg.payload?.access_token as string | undefined)
+            const channel = conn.channels.get(msg.topic)
+            if (channel) channel.ctx = ctx
+            else for (const c of conn.channels.values()) c.ctx = ctx
+          }
+          break
+        default:
+          break
+      }
+    } catch (e) {
+      this.reply(conn, msg, 'error', { reason: e instanceof Error ? e.message : String(e) })
+    }
+  }
+
+  private async handleJoin(conn: Connection, msg: PhoenixMessage): Promise<void> {
+    const config = (msg.payload?.config ?? {}) as {
+      private?: boolean
+      broadcast?: { self?: boolean; ack?: boolean }
+      presence?: { key?: string; enabled?: boolean }
+      postgres_changes?: { event?: string; schema?: string; table?: string; filter?: string }[]
+    }
+
+    const ctx = await this.contextFromToken(msg.payload?.access_token as string | undefined)
+    const isPrivate = config.private === true
+    let canBroadcast = true
+    // Private channels are RLS-authorized against realtime.messages (skipped on
+    // subset engines with no RLS). No read policy → join is rejected.
+    if (isPrivate && !this.db.engine.minimalBootstrap) {
+      const sub = msg.topic.replace(/^realtime:/, '')
+      const authz = await this.authorizePrivate(sub, ctx)
+      if (!authz.read) {
+        this.reply(conn, msg, 'error', {
+          reason: `You do not have permissions to read from this Channel topic: ${sub}`,
+        })
+        return
+      }
+      canBroadcast = authz.write
+    }
+
+    const bindings: PostgresBinding[] = []
+    for (const spec of config.postgres_changes ?? []) {
+      const binding: PostgresBinding = {
+        id: this.bindingCounter++,
+        event: (spec.event ?? '*').toUpperCase(),
+        schema: spec.schema ?? 'public',
+        table: spec.table ?? '*',
+        filter: spec.filter,
+      }
+      bindings.push(binding)
+      if (binding.table !== '*') {
+        try {
+          await this.db.ensureCdcTrigger(binding.schema, binding.table)
+        } catch {
+          this.reply(conn, msg, 'error', {
+            reason: `unable to subscribe to changes on ${binding.schema}.${binding.table}`,
+          })
+          return
+        }
+      } else {
+        // wildcard table: attach triggers to every table currently in the schema
+        const info = await this.db.getSchemaInfo(binding.schema)
+        for (const table of info.tables.keys()) {
+          await this.db.ensureCdcTrigger(binding.schema, table).catch(() => {})
+        }
+      }
+    }
+
+    const channel: Channel = {
+      topic: msg.topic,
+      joinRef: msg.join_ref ?? msg.ref ?? null,
+      bindings,
+      broadcastSelf: config.broadcast?.self ?? false,
+      broadcastAck: config.broadcast?.ack ?? false,
+      presenceKey: config.presence?.key || crypto.randomUUID(),
+      presenceEnabled: config.presence?.enabled ?? true,
+      ctx,
+      private: isPrivate,
+      canBroadcast,
+    }
+    conn.channels.set(msg.topic, channel)
+
+    this.reply(conn, msg, 'ok', {
+      postgres_changes: bindings.map((b) => ({
+        id: b.id,
+        event: b.event,
+        schema: b.schema,
+        table: b.table,
+        ...(b.filter ? { filter: b.filter } : {}),
+      })),
+    })
+
+    // initial presence snapshot
+    const state = this.presence.get(msg.topic)
+    this.send(conn, {
+      topic: msg.topic,
+      event: 'presence_state',
+      payload: state ? Object.fromEntries(state) : {},
+      ref: null,
+    })
+
+    // postgres_changes readiness signal (realtime-js listens for this)
+    if (bindings.length > 0) {
+      this.send(conn, {
+        topic: msg.topic,
+        event: 'system',
+        payload: {
+          status: 'ok',
+          extension: 'postgres_changes',
+          message: 'Subscribed to PostgreSQL',
+          channel: msg.topic.replace(/^realtime:/, ''),
+        },
+        ref: null,
+      })
+    }
+  }
+
+  private leaveChannel(conn: Connection, topic: string): void {
+    const channel = conn.channels.get(topic)
+    if (!channel) return
+    conn.channels.delete(topic)
+    // presence leave
+    const state = this.presence.get(topic)
+    if (state?.has(channel.presenceKey)) {
+      const metas = state.get(channel.presenceKey)!
+      state.delete(channel.presenceKey)
+      if (state.size === 0) this.presence.delete(topic)
+      this.broadcastToTopic(topic, {
+        topic,
+        event: 'presence_diff',
+        payload: { joins: {}, leaves: { [channel.presenceKey]: metas } },
+        ref: null,
+      })
+    }
+  }
+
+  /**
+   * Phoenix binary serializer, kind 3 (userBroadcastPush):
+   * [3, joinRefLen, refLen, topicLen, eventLen, metaLen, encoding,
+   *  joinRef, ref, topic, event, meta, payloadBytes]
+   * encoding: 0 = raw binary payload, 1 = JSON payload
+   */
+  private handleBinary(conn: Connection, bytes: Uint8Array): void {
+    if (bytes.length < 7 || bytes[0] !== 3) return
+    const [, joinRefLen, refLen, topicLen, eventLen, metaLen, encoding] = bytes
+    let offset = 7
+    const decoder = new TextDecoder()
+    const read = (len: number) => {
+      const out = decoder.decode(bytes.subarray(offset, offset + len))
+      offset += len
+      return out
+    }
+    const joinRef = read(joinRefLen)
+    const ref = read(refLen)
+    const topic = read(topicLen)
+    const userEvent = read(eventLen)
+    read(metaLen) // metadata - not relayed
+    const payloadBytes = bytes.subarray(offset)
+
+    const payload: Record<string, unknown> = {
+      type: 'broadcast',
+      event: userEvent,
+      payload: encoding === 1 ? safeJsonParse(decoder.decode(payloadBytes)) : payloadBytes,
+    }
+    this.handleBroadcast(conn, {
+      topic,
+      event: 'broadcast',
+      payload,
+      ref: ref || null,
+      join_ref: joinRef || null,
+    })
+  }
+
+  private handleBroadcast(conn: Connection, msg: PhoenixMessage): void {
+    const sender = conn.channels.get(msg.topic)
+    if (!sender) return
+    // private channels require INSERT (write) authorization to broadcast
+    if (sender.private && !sender.canBroadcast) {
+      if (sender.broadcastAck && msg.ref) this.reply(conn, msg, 'error', { reason: 'unauthorized' })
+      return
+    }
+    const userPayload = (msg.payload as { payload?: unknown }).payload
+    const binaryFrame =
+      userPayload instanceof Uint8Array
+        ? encodeUserBroadcast(msg.topic, String((msg.payload as { event?: unknown }).event ?? ''), userPayload)
+        : null
+    for (const other of this.connections) {
+      const channel = other.channels.get(msg.topic)
+      if (!channel) continue
+      if (other === conn && !sender.broadcastSelf) continue
+      if (binaryFrame) {
+        try {
+          other.socket.send(binaryFrame)
+        } catch {
+          // transport already closed
+        }
+      } else {
+        this.send(other, { topic: msg.topic, event: 'broadcast', payload: msg.payload, ref: null })
+      }
+    }
+    if (sender.broadcastAck && msg.ref) this.reply(conn, msg, 'ok', {})
+  }
+
+  private handlePresence(conn: Connection, msg: PhoenixMessage): void {
+    const channel = conn.channels.get(msg.topic)
+    if (!channel) return
+    const event = String((msg.payload?.event ?? '')).toLowerCase()
+
+    if (event === 'track') {
+      const meta = {
+        ...((msg.payload?.payload as Record<string, unknown>) ?? {}),
+        phx_ref: `F${this.phxRefCounter++}`,
+      }
+      let state = this.presence.get(msg.topic)
+      if (!state) {
+        state = new Map()
+        this.presence.set(msg.topic, state)
+      }
+      const previous = state.get(channel.presenceKey)
+      state.set(channel.presenceKey, { metas: [meta] })
+      this.broadcastToTopic(msg.topic, {
+        topic: msg.topic,
+        event: 'presence_diff',
+        payload: {
+          joins: { [channel.presenceKey]: { metas: [meta] } },
+          leaves: previous ? { [channel.presenceKey]: previous } : {},
+        },
+        ref: null,
+      })
+      if (msg.ref) this.reply(conn, msg, 'ok', {})
+      return
+    }
+
+    if (event === 'untrack') {
+      const state = this.presence.get(msg.topic)
+      const metas = state?.get(channel.presenceKey)
+      if (state && metas) {
+        state.delete(channel.presenceKey)
+        if (state.size === 0) this.presence.delete(msg.topic)
+        this.broadcastToTopic(msg.topic, {
+          topic: msg.topic,
+          event: 'presence_diff',
+          payload: { joins: {}, leaves: { [channel.presenceKey]: metas } },
+          ref: null,
+        })
+      }
+      if (msg.ref) this.reply(conn, msg, 'ok', {})
+    }
+  }
+
+  private broadcastToTopic(topic: string, msg: PhoenixMessage): void {
+    for (const conn of this.connections) {
+      if (conn.channels.has(topic)) this.send(conn, msg)
+    }
+  }
+
+  // ── postgres_changes fan-out ──────────────────────────────────────────
+
+  private async dispatchCdc(event: CdcEvent): Promise<void> {
+    // column metadata lets realtime-js run its type conversion
+    let columns: { name: string; type: string }[] = []
+    try {
+      const info = await this.db.getSchemaInfo(event.schema)
+      columns = (info.tables.get(event.table)?.columns ?? []).map((c) => ({
+        name: c.name,
+        type: c.udtName,
+      }))
+    } catch {
+      // schema went away - still deliver the event without columns
+    }
+
+    // RLS: only deliver a change to a subscriber if their role/claims would let
+    // them see the row. INSERT/UPDATE are re-checked by primary key as that
+    // subscriber; DELETE cannot be re-queried (the row is gone) - see note below.
+    const rlsTables = await this.db.getRlsTables(event.schema).catch(() => new Set<string>())
+    const rlsEnabled = rlsTables.has(event.table)
+    const pk = rlsEnabled ? (await this.db.getSchemaInfo(event.schema)).tables.get(event.table)?.primaryKey ?? [] : []
+
+    for (const conn of this.connections) {
+      for (const channel of conn.channels.values()) {
+        const ids = channel.bindings
+          .filter((b) => this.bindingMatches(b, event))
+          .map((b) => b.id)
+        if (ids.length === 0) continue
+
+        if (!(await this.canSee(channel.ctx, event, rlsEnabled, pk))) continue
+
+        // A DELETE on an RLS table can't be re-checked per row (the row is
+        // gone), so we can't confirm this subscriber was allowed to see it.
+        // Non-service subscribers therefore get only the primary key of the
+        // deleted row, never the full old_record - otherwise every other
+        // tenant's deleted-row contents would leak. (service_role/bypassrls and
+        // non-RLS tables still get the full old_record.)
+        const redactOld =
+          event.type === 'DELETE' && rlsEnabled && channel.ctx.role !== 'service_role'
+        const oldRecord = redactOld
+          ? pkOnly(event.old_record ?? {}, pk)
+          : event.old_record ?? {}
+
+        this.send(conn, {
+          topic: channel.topic,
+          event: 'postgres_changes',
+          payload: {
+            ids,
+            data: {
+              schema: event.schema,
+              table: event.table,
+              commit_timestamp: event.commit_timestamp,
+              eventType: event.type,
+              type: event.type,
+              columns,
+              record: event.record ?? {},
+              old_record: oldRecord,
+              errors: event.errors ?? null,
+            },
+          },
+          ref: null,
+        })
+      }
+    }
+  }
+
+  /**
+   * Whether a subscriber may receive a given change event under RLS.
+   * - service_role (bypassrls) and non-RLS tables: always.
+   * - INSERT/UPDATE on an RLS table: re-query the row by PK as the subscriber;
+   *   deliver only if it is visible to them.
+   * - DELETE on an RLS table: the row no longer exists to re-query, so per-row
+   *   filtering isn't possible without WAL-level policy evaluation (WALRUS).
+   *   We deliver DELETEs to authenticated/service subscribers only, never anon.
+   */
+  private async canSee(ctx: RequestContext, event: CdcEvent, rlsEnabled: boolean, pk: string[]): Promise<boolean> {
+    if (!rlsEnabled) return true
+    if (ctx.role === 'service_role') return true
+
+    if (event.type === 'DELETE') return ctx.role !== 'anon'
+    if (pk.length === 0) return ctx.role !== 'anon' // can't PK-filter; conservative
+
+    const record = event.record ?? {}
+    const conds = pk.map((c, i) => `${quoteIdent(c)} = $${i + 1}`)
+    const params = pk.map((c) => record[c])
+    if (params.some((v) => v === undefined)) return ctx.role !== 'anon'
+
+    try {
+      const res = await this.db.withContext(ctx, (q) =>
+        q(
+          `select 1 from ${quoteIdent(event.schema)}.${quoteIdent(event.table)} where ${conds.join(' and ')} limit 1`,
+          params
+        )
+      )
+      return res.rows.length > 0
+    } catch {
+      return false
+    }
+  }
+
+  private bindingMatches(b: PostgresBinding, e: CdcEvent): boolean {
+    if (b.schema !== '*' && b.schema !== e.schema) return false
+    if (b.table !== '*' && b.table !== e.table) return false
+    if (b.event !== '*' && b.event !== e.type) return false
+    if (b.filter) {
+      const row = e.type === 'DELETE' ? e.old_record : e.record
+      if (!row || !matchFilter(b.filter, row)) return false
+    }
+    return true
+  }
+}
+
+/** Project a row down to just its primary-key columns (empty pk → empty row). */
+function pkOnly(row: Record<string, unknown>, pk: string[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const c of pk) if (c in row) out[c] = row[c]
+  return out
+}
+
+/** Evaluate a realtime filter string ("col=eq.value") against a row. */
+export function matchFilter(filter: string, row: Record<string, unknown>): boolean {
+  const m = filter.match(/^([^=]+)=(eq|neq|lt|lte|gt|gte|in)\.(.*)$/s)
+  if (!m) return false
+  const [, column, op, rawValue] = m
+  const actual = row[column.trim()]
+
+  if (op === 'in') {
+    const list = rawValue.replace(/^\(/, '').replace(/\)$/, '').split(',').map((s) => s.trim())
+    return list.some((v) => looseEquals(actual, v))
+  }
+  if (op === 'eq') return looseEquals(actual, rawValue)
+  if (op === 'neq') return !looseEquals(actual, rawValue)
+
+  const a = Number(actual)
+  const b = Number(rawValue)
+  if (Number.isNaN(a) || Number.isNaN(b)) return false
+  switch (op) {
+    case 'lt':
+      return a < b
+    case 'lte':
+      return a <= b
+    case 'gt':
+      return a > b
+    case 'gte':
+      return a >= b
+  }
+  return false
+}
+
+function looseEquals(actual: unknown, expected: string): boolean {
+  if (actual === null || actual === undefined) return expected === 'null'
+  return String(actual) === expected
+}
+
+function safeJsonParse(text: string): unknown {
+  try {
+    return JSON.parse(text)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Phoenix binary serializer, kind 4 (userBroadcast):
+ * [4, topicLen, eventLen, metaLen, encoding, topic, event, meta, payloadBytes]
+ */
+function encodeUserBroadcast(topic: string, event: string, payload: Uint8Array): Uint8Array {
+  const enc = new TextEncoder()
+  const topicBytes = enc.encode(topic)
+  const eventBytes = enc.encode(event)
+  const out = new Uint8Array(5 + topicBytes.length + eventBytes.length + payload.length)
+  out[0] = 4
+  out[1] = topicBytes.length
+  out[2] = eventBytes.length
+  out[3] = 0
+  out[4] = 0
+  out.set(topicBytes, 5)
+  out.set(eventBytes, 5 + topicBytes.length)
+  out.set(payload, 5 + topicBytes.length + eventBytes.length)
+  return out
+}

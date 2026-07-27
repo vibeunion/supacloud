@@ -155,7 +155,7 @@ describe('trusted review workflow', () => {
     assert.match(releaseWorkflow, /npm --version/);
     assert.equal(
       releaseWorkflow.match(/npm publish --provenance --access public/g)?.length,
-      4,
+      5,
       'all npm packages must publish with the setup-node npm binary',
     );
     for (const packageName of ['management-api', 'web-console', 'supacloud-js', 'edge-runtime', 'admin', 'cli', 'supacloud']) {

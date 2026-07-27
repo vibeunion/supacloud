@@ -29,6 +29,11 @@
       "component": "pgredis-runtime",
       "changelog-path": "CHANGELOG.md"
     },
+    "packages/supacloud-lite": {
+      "release-type": "node",
+      "component": "supacloud-lite",
+      "changelog-path": "CHANGELOG.md"
+    },
     "packages/supacloud-js": {
       "release-type": "node",
       "component": "supacloud-js",

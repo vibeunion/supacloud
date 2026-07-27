@@ -33,6 +33,7 @@ jobs:
       edge_runtime_tag_name: ${{ steps.release.outputs['packages/edge-runtime--tag_name'] }}
       pgredis_runtime_released: ${{ steps.release.outputs['packages/pgredis-runtime--release_created'] }}
       pgredis_runtime_tag_name: ${{ steps.release.outputs['packages/pgredis-runtime--tag_name'] }}
+      supacloud_lite_released: ${{ steps.release.outputs['packages/supacloud-lite--release_created'] }}
       supacloud_js_released: ${{ steps.release.outputs['packages/supacloud-js--release_created'] }}
       cli_released: ${{ steps.release.outputs['packages/cli--release_created'] }}
       admin_released: ${{ steps.release.outputs['packages/admin--release_created'] }}
@@ -316,6 +317,14 @@ jobs:
         run: |
           bun install --frozen-lockfile
           bun run build
+          npm publish --provenance --access public
+
+      - name: Publish SupaCloud Lite to NPM
+        if: ${{ needs.release-please.outputs.supacloud_lite_released == 'true' }}
+        working-directory: packages/supacloud-lite
+        run: |
+          bun install --frozen-lockfile
+          bun run check
           npm publish --provenance --access public
 
       - name: Publish cli to NPM

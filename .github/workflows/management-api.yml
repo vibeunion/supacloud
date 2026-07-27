@@ -9,6 +9,7 @@ on:
       - "packages/supacloud-js/**"
       - "packages/edge-runtime/**"
       - "packages/pgredis-runtime/**"
+      - "packages/supacloud-lite/**"
       - "packages/admin/**"
       - "packages/cli/**"
       - "packages/supacloud/**"
@@ -29,6 +30,7 @@ on:
       - "packages/supacloud-js/**"
       - "packages/edge-runtime/**"
       - "packages/pgredis-runtime/**"
+      - "packages/supacloud-lite/**"
       - "packages/admin/**"
       - "packages/cli/**"
       - "packages/supacloud/**"
@@ -158,6 +160,13 @@ jobs:
           bun install --frozen-lockfile
           bun run typecheck
           bun test
+          bun audit --audit-level high
+
+      - name: Check SupaCloud Lite
+        working-directory: packages/supacloud-lite
+        run: |
+          bun install --frozen-lockfile
+          bun run check
           bun audit --audit-level high
 
       - name: Check project CLI

@@ -1,0 +1,61 @@
+{
+  "name": "@supacloud/lite",
+  "version": "0.1.0",
+  "description": "Bun-native, single-project Supabase-compatible backend powered by PGlite",
+  "type": "module",
+  "license": "Apache-2.0",
+  "bin": {
+    "supacloud-lite": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "THIRD_PARTY_NOTICES.md",
+    "LICENSES"
+  ],
+  "scripts": {
+    "build": "bun run build:js && bun run build:types",
+    "build:js": "bun build src/index.ts --target=bun --format=esm --outdir=dist --external @electric-sql/pglite && bun build src/cli.ts --target=bun --format=esm --outdir=dist --external @electric-sql/pglite --banner '#!/usr/bin/env bun'",
+    "build:types": "bun x tsc --emitDeclarationOnly -p tsconfig.build.json",
+    "check": "bun run typecheck && bun test && bun run build",
+    "dev": "bun run src/cli.ts start",
+    "start": "bun run src/cli.ts start",
+    "test": "bun test",
+    "typecheck": "bun x tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "0.5.4"
+  },
+  "devDependencies": {
+    "@supabase/supabase-js": "^2.57.4",
+    "@types/bun": "^1.3.14",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "bun": ">=1.3.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zuohuadong/supacloud.git",
+    "directory": "packages/supacloud-lite"
+  },
+  "keywords": [
+    "supabase",
+    "pglite",
+    "bun",
+    "postgres",
+    "local-first"
+  ]
+}
