@@ -13,6 +13,7 @@
 import { sql } from "../db";
 import { config } from "../config";
 import { logger } from "../utils/logger";
+import { normalizeProjectConfig } from "../utils/project-config";
 import { projectRepository } from "../repositories/project.repository";
 import type { ScheduledFunctionConfig } from "../routes/scheduled-functions";
 
@@ -22,6 +23,25 @@ const INVOKE_TIMEOUT_MS = 30_000;
 interface DueSchedule {
   ref: string;
   schedule: ScheduledFunctionConfig;
+}
+
+export function scheduledFunctionsDueAt(
+  rows: { ref: string; config: unknown }[],
+  now: Date,
+): DueSchedule[] {
+  const due: DueSchedule[] = [];
+  for (const row of rows) {
+    const projectConfig = normalizeProjectConfig(row.config);
+    const rawSchedules = projectConfig.scheduled_functions;
+    if (!Array.isArray(rawSchedules)) continue;
+    for (const item of rawSchedules) {
+      if (!item || typeof item !== "object") continue;
+      const schedule = item as ScheduledFunctionConfig;
+      if (schedule.enabled === false || !schedule.cron || !schedule.slug) continue;
+      if (isDue(schedule.cron, now)) due.push({ ref: row.ref, schedule });
+    }
+  }
+  return due;
 }
 
 function parseField(field: string, min: number, max: number): Set<number> {
@@ -99,23 +119,7 @@ async function loadAllSchedules(): Promise<DueSchedule[]> {
     return [];
   }
 
-  const due: DueSchedule[] = [];
-  const now = new Date();
-  for (const row of rows) {
-    const cfg = (row.config && typeof row.config === "object" ? row.config : {}) as Record<string, unknown>;
-    const raw = cfg.scheduled_functions;
-    if (!Array.isArray(raw)) continue;
-    for (const item of raw) {
-      if (!item || typeof item !== "object") continue;
-      const schedule = item as ScheduledFunctionConfig;
-      if (schedule.enabled === false) continue;
-      if (!schedule.cron || !schedule.slug) continue;
-      if (isDue(schedule.cron, now)) {
-        due.push({ ref: row.ref, schedule });
-      }
-    }
-  }
-  return due;
+  return scheduledFunctionsDueAt(rows, new Date());
 }
 
 export interface TriggerResult {

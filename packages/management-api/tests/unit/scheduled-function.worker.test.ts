@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { isDue } from "../../src/workers/scheduled-function.worker";
+import { isDue, scheduledFunctionsDueAt } from "../../src/workers/scheduled-function.worker";
 
 describe("scheduled-function cron parser (isDue)", () => {
   test("wildcard expression fires every minute", () => {
@@ -56,5 +56,33 @@ describe("scheduled-function cron parser (isDue)", () => {
     const date = new Date("2026-06-15T10:00:00Z");
     expect(isDue("not a cron", date)).toBe(false);
     expect(isDue("* * *", date)).toBe(false);
+  });
+});
+
+describe("scheduled-function selection", () => {
+  test("reads schedules from legacy JSON-string project config", () => {
+    const now = new Date("2026-06-15T10:30:00Z");
+    const due = scheduledFunctionsDueAt([
+      {
+        ref: "proj_1",
+        config: JSON.stringify({
+          scheduled_functions: [
+            {
+              id: "schedule_1",
+              name: "Every minute",
+              slug: "cleanup",
+              cron: "* * * * *",
+              method: "POST",
+              enabled: true,
+              created_at: "",
+              updated_at: "",
+            },
+          ],
+        }),
+      },
+    ], now);
+
+    expect(due).toHaveLength(1);
+    expect(due[0]).toMatchObject({ ref: "proj_1", schedule: { slug: "cleanup" } });
   });
 });
