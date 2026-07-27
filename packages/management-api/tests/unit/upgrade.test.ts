@@ -63,12 +63,13 @@ describe("upgrade release selection", () => {
   test("pins secret checkpoint verification to DATABASE_URL despite ambient PGDATABASE", async () => {
     const originalPgDatabase = process.env.PGDATABASE;
     process.env.PGDATABASE = "postgres";
-    const options = buildCheckpointDatabaseOptions(
-      "postgresql://postgres:placeholder@127.0.0.1:5432/supacloud_meta?sslmode=disable",
-    );
-    const database = new SQL(options);
+    let database: SQL | undefined;
 
     try {
+      const options = buildCheckpointDatabaseOptions(
+        "postgresql://postgres:placeholder@127.0.0.1:5432/supacloud_meta?sslmode=disable",
+      );
+      database = new SQL(options);
       expect(options).toEqual({
         url: "postgresql://postgres:placeholder@127.0.0.1:5432/supacloud_meta?sslmode=disable",
         database: "supacloud_meta",
@@ -76,7 +77,7 @@ describe("upgrade release selection", () => {
       });
       expect(database.options.database).toBe("supacloud_meta");
     } finally {
-      await database.close();
+      if (database) await database.close();
       if (originalPgDatabase === undefined) delete process.env.PGDATABASE;
       else process.env.PGDATABASE = originalPgDatabase;
     }
