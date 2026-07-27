@@ -150,7 +150,11 @@ function resolveWorkerEntry(): string | URL {
 export class WorkerPool {
   private workers: Worker[] = [];
   private idle: Worker[] = [];
-  private queue: QueuedDispatch[] = [];
+  // Keep each project FIFO while rotating projects through the shared pool.
+  private queuedDispatches = new Map<string, QueuedDispatch[]>();
+  private queuedProjects: string[] = [];
+  private queuedCount = 0;
+  private lastDispatchedProjectRef: string | null = null;
   private inFlight = new Map<string, { cancel: () => void; cancelKey?: string }>();
   private totalRequests = 0;
   private totalInvalidations = 0;
@@ -251,7 +255,7 @@ export class WorkerPool {
   private enqueue(opts: ScheduledDispatch): Promise<Response> {
     const enqueuedAt = performance.now();
     return new Promise<Response>((resolve, reject) => {
-      if (this.queue.length >= MAX_QUEUE_SIZE) {
+      if (this.queuedCount >= MAX_QUEUE_SIZE) {
         resolve(new Response(JSON.stringify({ error: "Too many concurrent requests, please retry" }), {
           status: 503,
           headers: { "Content-Type": "application/json", "Retry-After": "5" },
@@ -261,12 +265,52 @@ export class WorkerPool {
 
       const worker = this.idle.pop();
       if (worker) {
+        this.lastDispatchedProjectRef = this.projectKey(opts);
         this.execute(worker, opts, enqueuedAt, resolve).catch(reject);
       } else {
         this.totalQueuedRequests++;
-        this.queue.push({ opts, enqueuedAt, resolve, reject });
+        this.enqueueQueued({ opts, enqueuedAt, resolve, reject });
       }
     });
+  }
+
+  private projectKey(opts: DispatchOptions): string {
+    return opts.projectRef ?? extractProjectRef(opts.functionId) ?? opts.functionId;
+  }
+
+  private enqueueQueued(entry: QueuedDispatch): void {
+    const projectRef = this.projectKey(entry.opts);
+    const projectQueue = this.queuedDispatches.get(projectRef);
+    if (projectQueue) {
+      projectQueue.push(entry);
+    } else {
+      this.queuedDispatches.set(projectRef, [entry]);
+      this.queuedProjects.push(projectRef);
+    }
+    this.queuedCount++;
+  }
+
+  private dequeueQueued(): QueuedDispatch | null {
+    if (this.queuedCount === 0) return null;
+
+    const preferredIndex = this.queuedProjects.findIndex(
+      (projectRef) => projectRef !== this.lastDispatchedProjectRef,
+    );
+    const projectIndex = preferredIndex >= 0 ? preferredIndex : 0;
+    const [projectRef] = this.queuedProjects.splice(projectIndex, 1);
+    const projectQueue = this.queuedDispatches.get(projectRef);
+    if (!projectQueue) throw new Error(`Missing dispatch queue for project ${projectRef}`);
+    const entry = projectQueue.shift();
+    if (!entry) throw new Error(`Empty dispatch queue for project ${projectRef}`);
+
+    this.queuedCount--;
+    if (projectQueue.length > 0) {
+      this.queuedProjects.push(projectRef);
+    } else {
+      this.queuedDispatches.delete(projectRef);
+    }
+    this.lastDispatchedProjectRef = projectRef;
+    return entry;
   }
 
   private async execute(
@@ -662,7 +706,7 @@ export class WorkerPool {
   }
 
   private schedule(worker: Worker) {
-    const next = this.queue.shift();
+    const next = this.dequeueQueued();
     if (!next) {
       this.idle.push(worker);
       return;
@@ -755,13 +799,17 @@ export class WorkerPool {
 
   private stopDispatching() {
     this.draining = true;
-    for (const entry of this.queue) {
-      entry.resolve(new Response(JSON.stringify({ error: "Server shutting down" }), {
-        status: 503,
-        headers: { "Content-Type": "application/json" },
-      }));
+    for (const projectQueue of this.queuedDispatches.values()) {
+      for (const entry of projectQueue) {
+        entry.resolve(new Response(JSON.stringify({ error: "Server shutting down" }), {
+          status: 503,
+          headers: { "Content-Type": "application/json" },
+        }));
+      }
     }
-    this.queue = [];
+    this.queuedDispatches.clear();
+    this.queuedProjects = [];
+    this.queuedCount = 0;
   }
 
   getMetrics(): string {
@@ -990,7 +1038,7 @@ export class WorkerPool {
       [`${prefix}_active_workers`]: this.config.size - this.idle.length,
       [`${prefix}_idle_workers`]: this.idle.length,
       [`${prefix}_worker_smol`]: this.config.smol ? 1 : 0,
-      [`${prefix}_queue_length`]: this.queue.length,
+      [`${prefix}_queue_length`]: this.queuedCount,
       [`${prefix}_total_requests`]: this.totalRequests,
       [`${prefix}_total_invalidations`]: this.totalInvalidations,
       [`${prefix}_tainted_workers`]: this.tainted.size,
@@ -1018,8 +1066,8 @@ export class WorkerPool {
   }
 
   cancel(cancelKey: string): boolean {
-    const queuedIndex = this.queue.findIndex((entry) => entry.opts.cancelKey === cancelKey);
-    if (queuedIndex >= 0) return this.cancelQueued(queuedIndex);
+    const queued = this.findQueued((entry) => entry.opts.cancelKey === cancelKey);
+    if (queued) return this.cancelQueued(queued.projectRef, queued.index);
 
     const inFlight = [...this.inFlight.values()]
       .find((execution) => execution.cancelKey === cancelKey);
@@ -1029,10 +1077,8 @@ export class WorkerPool {
   }
 
   private cancelExecution(executionKey: string): boolean {
-    const queuedIndex = this.queue.findIndex(
-      (entry) => entry.opts.executionKey === executionKey,
-    );
-    if (queuedIndex >= 0) return this.cancelQueued(queuedIndex);
+    const queued = this.findQueued((entry) => entry.opts.executionKey === executionKey);
+    if (queued) return this.cancelQueued(queued.projectRef, queued.index);
 
     const inFlight = this.inFlight.get(executionKey);
     if (!inFlight) return false;
@@ -1040,8 +1086,26 @@ export class WorkerPool {
     return true;
   }
 
-  private cancelQueued(queuedIndex: number): boolean {
-    const [queued] = this.queue.splice(queuedIndex, 1);
+  private findQueued(
+    predicate: (entry: QueuedDispatch) => boolean,
+  ): { projectRef: string; index: number } | null {
+    for (const [projectRef, projectQueue] of this.queuedDispatches) {
+      const index = projectQueue.findIndex(predicate);
+      if (index >= 0) return { projectRef, index };
+    }
+    return null;
+  }
+
+  private cancelQueued(projectRef: string, queuedIndex: number): boolean {
+    const projectQueue = this.queuedDispatches.get(projectRef);
+    if (!projectQueue) return false;
+    const [queued] = projectQueue.splice(queuedIndex, 1);
+    if (!queued) return false;
+    this.queuedCount--;
+    if (projectQueue.length === 0) {
+      this.queuedDispatches.delete(projectRef);
+      this.queuedProjects = this.queuedProjects.filter((queuedProject) => queuedProject !== projectRef);
+    }
     queued.resolve(cancelledResponse());
     return true;
   }

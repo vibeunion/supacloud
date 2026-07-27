@@ -811,6 +811,52 @@ describe("WorkerPool metrics NaN fix", () => {
   });
 });
 
+describe("WorkerPool project fairness", () => {
+  test("serves a newly queued project before the same-project backlog", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-fair-"));
+    const functionPath = join(projectRoot, "fn.ts");
+    const orderPath = join(projectRoot, "order.txt");
+    await Bun.write(orderPath, "");
+    await Bun.write(functionPath, `
+      export default {
+        async fetch(request) {
+          const label = new URL(request.url).pathname.slice(1);
+          const previous = await Bun.file(process.env.ORDER_FILE).text();
+          await Bun.write(process.env.ORDER_FILE, previous + label + "\\n");
+          if (label === "a1") await Bun.sleep(100);
+          return new Response(label);
+        }
+      }
+    `);
+
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+    const dispatch = (projectRef: string, label: string) => pool.dispatch({
+      functionId: `${projectRef}_fn`,
+      projectRef,
+      functionPath,
+      projectRoot,
+      env: { ORDER_FILE: orderPath },
+      request: new Request(`http://edge.local/${label}`),
+    });
+
+    try {
+      const first = dispatch("project-a", "a1");
+      await waitForMetric(pool, "active_workers", 1);
+      const queued = [
+        dispatch("project-a", "a2"),
+        dispatch("project-a", "a3"),
+        dispatch("project-b", "b1"),
+      ];
+      await Promise.all([first, ...queued]);
+      const order = (await Bun.file(orderPath).text()).trim().split("\n");
+      expect(order).toEqual(["a1", "b1", "a2", "a3"]);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("WorkerPool module cache", () => {
   function moduleLoadCounterSource(counterPath: string): string {
     return `
