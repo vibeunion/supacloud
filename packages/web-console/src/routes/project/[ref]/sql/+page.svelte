@@ -1,5 +1,6 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
+  import { readDatabaseSqlResponse } from "$lib/database-sql-response";
 
   import { onMount } from "svelte";
   import { page } from "$app/state";
@@ -192,10 +193,7 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql: wrappedSql })
       });
-      const data = await res.json();
-      if (data.error) throw new Error(data.message || data.error);
-      const rows = data.rows || [];
-      return { rows, command: data.command || null, rowCount: data.rowCount ?? rows.length };
+      return readDatabaseSqlResponse(res);
     },
     onMutate: () => { isRunning = true; },
     onSuccess: (result, variables) => {
