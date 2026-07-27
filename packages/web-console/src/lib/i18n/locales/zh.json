@@ -117,7 +117,13 @@
   "Functions": {
     "create_new": "创建新函数",
     "no_functions": "暂无已部署的函数",
-    "description": "边缘函数允许您在靠近用户的位置运行服务端逻辑。"
+    "description": "边缘函数允许您在靠近用户的位置运行服务端逻辑。",
+    "jwt_verification": "JWT 验证",
+    "jwt_enabled": "JWT 验证已开启",
+    "jwt_disabled": "JWT 验证已关闭",
+    "jwt_enable_action": "JWT 验证已关闭，点击开启",
+    "jwt_disable_action": "JWT 验证已开启，点击关闭",
+    "jwt_update_failed": "无法修改 {slug} 的 JWT 配置"
   },
   "Database": {
     "backups": "备份",

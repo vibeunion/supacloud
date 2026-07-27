@@ -117,7 +117,13 @@
   "Functions": {
     "create_new": "Create New Function",
     "no_functions": "No functions deployed",
-    "description": "Edge Functions allow you to run server-side logic close to your users."
+    "description": "Edge Functions allow you to run server-side logic close to your users.",
+    "jwt_verification": "JWT Verification",
+    "jwt_enabled": "JWT verification enabled",
+    "jwt_disabled": "JWT verification disabled",
+    "jwt_enable_action": "JWT verification is disabled; click to enable",
+    "jwt_disable_action": "JWT verification is enabled; click to disable",
+    "jwt_update_failed": "Unable to update JWT settings for {slug}"
   },
   "Database": {
     "backups": "Backups",

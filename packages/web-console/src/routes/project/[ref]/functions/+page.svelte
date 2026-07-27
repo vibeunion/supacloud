@@ -60,12 +60,23 @@
     source_code: string | null;
   }
 
+  interface VerifyJwtRequest {
+    slug: string;
+    verifyJwt: boolean;
+  }
+
+  interface VerifyJwtResponse {
+    verify_jwt: boolean;
+  }
+
   const projectRef = $derived(page.params.ref);
   const query = useList<EdgeFunction>({ get resource() { return `v1/projects/${projectRef}/functions`; } });
-  const functions = $derived(Array.isArray(query.data?.data) ? query.data.data : ((query.data?.data as unknown as Record<string, unknown>)?.functions as EdgeFunction[] || []));
+  const fetchedFunctions = $derived(Array.isArray(query.data?.data) ? query.data.data : ((query.data?.data as unknown as Record<string, unknown>)?.functions as EdgeFunction[] || []));
+  let functions = $state<EdgeFunction[]>([]);
   let showCreate = $state(false);
   let selectedFunction = $state<EdgeFunction | null>(null);
   let drawerOpen = $state(false);
+  let jwtUpdatingSlug = $state<string | null>(null);
   let functionTasks = $state<FunctionTaskRecord[]>([]);
   let taskDetails = $state<Record<string, {
     id: string;
@@ -126,6 +137,10 @@
 }`);
   let deploying = $state(false);
   let deployMsg = $state<string | null>(null);
+
+  $effect(() => {
+    functions = fetchedFunctions;
+  });
 
   const invokeAsyncHelperCode = `import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -535,22 +550,52 @@ export async function waitForTask(
     deleteMutation.mutate(slug);
   }
 
-  // Toggle verify_jwt config
-  async function toggleVerifyJwt(fn: EdgeFunction) {
-    const newValue = !fn.verify_jwt;
-    try {
-      const res = await apiClient(`/v1/projects/${projectRef}/functions/${fn.slug}/config`, {
+  function requireVerifyJwtResponse(payload: unknown): VerifyJwtResponse {
+    if (
+      typeof payload !== "object"
+      || payload === null
+      || !("verify_jwt" in payload)
+      || typeof payload.verify_jwt !== "boolean"
+    ) {
+      throw new Error("Invalid function configuration response");
+    }
+    return { verify_jwt: payload.verify_jwt };
+  }
+
+  const verifyJwtMutation = createMutation(() => ({
+    mutationFn: async ({ slug, verifyJwt }: VerifyJwtRequest) => {
+      const res = await apiClient(`/v1/projects/${projectRef}/functions/${slug}/config`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ verify_jwt: newValue }),
+        body: JSON.stringify({ verify_jwt: verifyJwt }),
       });
-      if (!res.ok) throw new Error("Failed");
-      fn.verify_jwt = newValue;
-      toast.success(`${fn.slug}: JWT 验证已${newValue ? '开启' : '关闭'}`);
-      query.refetch();
-    } catch {
-      toast.error(`无法修改 ${fn.slug} 的 JWT 配置`);
-    }
+      if (!res.ok) throw new Error("Function configuration update failed");
+      const config = requireVerifyJwtResponse(await res.json());
+      return { slug, verifyJwt: config.verify_jwt };
+    },
+    onMutate: ({ slug }) => {
+      jwtUpdatingSlug = slug;
+    },
+    onSuccess: ({ slug, verifyJwt }) => {
+      functions = functions.map((fn) => (
+        fn.slug === slug ? { ...fn, verify_jwt: verifyJwt } : fn
+      ));
+      if (selectedFunction?.slug === slug) {
+        selectedFunction = { ...selectedFunction, verify_jwt: verifyJwt };
+      }
+      toast.success(`${slug}: ${$t(verifyJwt ? "Functions.jwt_enabled" : "Functions.jwt_disabled")}`);
+      void query.refetch();
+    },
+    onError: (_error, { slug }) => {
+      toast.error($t("Functions.jwt_update_failed", { values: { slug } }));
+    },
+    onSettled: () => {
+      jwtUpdatingSlug = null;
+    },
+  }));
+
+  function toggleVerifyJwt(fn: EdgeFunction) {
+    verifyJwtMutation.mutate({ slug: fn.slug, verifyJwt: !fn.verify_jwt });
   }
 </script>
 
@@ -759,7 +804,7 @@ export async function waitForTask(
             <tr>
               <th class="px-5 py-3 font-semibold text-muted-foreground text-xs">函数名</th>
               <th class="px-5 py-3 font-semibold text-muted-foreground text-xs">状态</th>
-              <th class="px-5 py-3 font-semibold text-muted-foreground text-xs">JWT 验证</th>
+              <th class="px-5 py-3 font-semibold text-muted-foreground text-xs">{$t("Functions.jwt_verification")}</th>
               <th class="px-5 py-3 font-semibold text-muted-foreground text-xs">端点</th>
               <th class="px-5 py-3 font-semibold text-muted-foreground text-xs">创建时间</th>
               <th class="px-5 py-3"></th>
@@ -781,10 +826,21 @@ export async function waitForTask(
                   <span class="px-2 py-0.5 rounded-full text-[9px] font-bold {fn.status === 'ACTIVE' ? 'text-green-600 bg-green-500/10' : 'text-amber-600 bg-amber-500/10'}">{fn.status}</span>
                 </td>
                 <td class="px-5 py-3">
-                  <button onclick={() => toggleVerifyJwt(fn)}
-                    class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors {fn.verify_jwt ? 'bg-brand' : 'bg-muted-foreground/30'}"
-                    title={fn.verify_jwt ? 'JWT 验证已开启（点击关闭）' : 'JWT 验证已关闭（点击开启）'}>
-                    <span class="inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform shadow-sm {fn.verify_jwt ? 'translate-x-[18px]' : 'translate-x-[3px]'}"></span>
+                  <button
+                    type="button"
+                    onclick={() => toggleVerifyJwt(fn)}
+                    disabled={verifyJwtMutation.isPending}
+                    aria-busy={jwtUpdatingSlug === fn.slug}
+                    aria-pressed={fn.verify_jwt}
+                    aria-label={$t(fn.verify_jwt ? "Functions.jwt_disable_action" : "Functions.jwt_enable_action")}
+                    class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors disabled:cursor-wait disabled:opacity-70 {fn.verify_jwt ? 'bg-brand' : 'bg-muted-foreground/30'}"
+                    title={$t(fn.verify_jwt ? "Functions.jwt_disable_action" : "Functions.jwt_enable_action")}
+                  >
+                    {#if jwtUpdatingSlug === fn.slug}
+                      <Loader2 size={12} class="absolute left-3 animate-spin text-white" />
+                    {:else}
+                      <span class="inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform shadow-sm {fn.verify_jwt ? 'translate-x-[18px]' : 'translate-x-[3px]'}"></span>
+                    {/if}
                   </button>
                 </td>
                 <td class="px-5 py-3">
@@ -850,7 +906,7 @@ export async function waitForTask(
           <div class="mt-2 text-sm font-semibold">v{selectedFunction.version || 1}</div>
         </div>
         <div class="rounded-xl border border-border/60 bg-muted/20 p-4">
-          <div class="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-foreground">JWT</div>
+          <div class="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-foreground">{$t("Functions.jwt_verification")}</div>
           <div class="mt-2 text-sm font-semibold">{selectedFunction.verify_jwt ? "Enabled" : "Disabled"}</div>
         </div>
         <div class="rounded-xl border border-border/60 bg-muted/20 p-4">

@@ -2,8 +2,7 @@
   import { apiClient } from "$lib/api";
 
   import { page } from "$app/state";
-  import { Loader2, Database, ArrowLeft, HardDrive, Activity } from "lucide-svelte";
-  import { toast } from "svelte-sonner";
+  import { Loader2, ArrowLeft, HardDrive } from "lucide-svelte";
   import { createQuery } from "@tanstack/svelte-query";
 
   const projectRef = $derived(page.params.ref);
@@ -119,7 +118,7 @@
       </div>
       <div class="overflow-auto max-h-[55vh]">
         <table class="w-full text-left text-xs">
-          <thead class="bg-muted/30 border-b sticky top-0">
+          <thead class="bg-card border-b sticky top-0 z-10">
             <tr>
               <th class="px-4 py-2 font-semibold text-muted-foreground">Schema</th>
               <th class="px-4 py-2 font-semibold text-muted-foreground">表名</th>
