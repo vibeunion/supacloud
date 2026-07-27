@@ -1,4 +1,4 @@
-import { quoteSystemdEnvValue } from "./systemd-env";
+import { quoteSystemdEnvValue, renderSystemdEnvLine } from "./systemd-env";
 
 export const AUTH_EMAIL_TEMPLATE_DEFINITIONS = [
   {
@@ -199,7 +199,7 @@ export function renderGoTrueEmailTemplateEnv(authConfig: Record<string, unknown>
     const subject = readString(authConfig, definition.subjectKey);
     const content = readString(authConfig, definition.contentKey);
     if (subject !== null) {
-      lines.push(`${definition.envSubject}=${quoteSystemdEnvValue(subject)}`);
+      lines.push(renderSystemdEnvLine(definition.envSubject, subject));
     }
     if (content !== null) {
       lines.push(`${definition.envContent}=${quoteSystemdEnvValue(content)}`);

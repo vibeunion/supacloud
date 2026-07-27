@@ -95,6 +95,13 @@ describe("TenantRuntimeService systemd env quoting", () => {
   test("double-quotes and escapes values containing both single and double quotes", () => {
     expect(quoteSystemdEnvValue(`{"name":"can't"}`)).toBe(`"{\\"name\\":\\"can't\\"}"`);
   });
+
+  test.each(["bad\rINJECTED=value", "bad\0INJECTED=value"])(
+    "rejects unsupported EnvironmentFile control characters (%j)",
+    (value) => {
+      expect(() => quoteSystemdEnvValue(value)).toThrow(/control character/i);
+    },
+  );
 });
 
 describe("TenantRuntimeService PostgREST schema rendering", () => {
@@ -228,8 +235,18 @@ describe("TenantRuntimeService GoTrue auth env rendering", () => {
       MAILER_SUBJECTS_RECOVERY: "Reset your password",
     })).toContain([
       "GOTRUE_MAILER_SUBJECTS_CONFIRMATION=\"欢迎确认\"",
-      "GOTRUE_MAILER_TEMPLATES_CONFIRMATION_CONTENT=\"<p>Hi {{ .Email }}</p><a href=\\\"{{ .ConfirmationURL }}\\\">Confirm</a>\"",
+      "GOTRUE_MAILER_TEMPLATES_CONFIRMATION_CONTENT='<p>Hi {{ .Email }}</p><a href=\"{{ .ConfirmationURL }}\">Confirm</a>'",
       "GOTRUE_MAILER_SUBJECTS_RECOVERY=\"Reset your password\"",
+    ].join("\n"));
+  });
+
+  test("preserves multiline email templates in a systemd-compatible value", () => {
+    expect(renderGoTrueAuthEnv({
+      mailer_templates_confirmation_content: `<p>Hi {{ .Email }}</p>
+<a href="{{ .ConfirmationURL }}">Confirm</a>`,
+    })).toContain([
+      "GOTRUE_MAILER_TEMPLATES_CONFIRMATION_CONTENT='<p>Hi {{ .Email }}</p>",
+      '<a href="{{ .ConfirmationURL }}">Confirm</a>\'',
     ].join("\n"));
   });
 

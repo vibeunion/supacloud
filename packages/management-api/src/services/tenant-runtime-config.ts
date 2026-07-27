@@ -1,10 +1,11 @@
-import { AUTH_EMAIL_TEMPLATE_DEFINITIONS } from "../utils/auth-email-templates";
+import { renderGoTrueEmailTemplateEnv } from "../utils/auth-email-templates";
 import { serializedProviderLinkingDomains } from "../utils/provider-linking";
+import { renderSystemdEnvLine } from "../utils/systemd-env";
 
 export { renderGoTrueSessionPolicyEnv } from "./auth-session-policy";
+export { renderSystemdEnvLine } from "../utils/systemd-env";
 
 const CONFIG_CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/;
-const ENVIRONMENT_NAME = /^[A-Z][A-Z0-9_]*$/;
 
 export function assertSafeConfigValue(name: string, value: string): void {
     if (CONFIG_CONTROL_CHARACTERS.test(value)) {
@@ -17,14 +18,6 @@ function encodeUriComponent(value: string): string {
     return encodeURIComponent(value).replace(/[!'()*]/g, (character) =>
         `%${character.charCodeAt(0).toString(16).toUpperCase()}`
     );
-}
-
-export function renderSystemdEnvLine(name: string, value: string): string {
-    if (!ENVIRONMENT_NAME.test(name)) {
-        throw new Error(`Invalid EnvironmentFile variable name: ${name}`);
-    }
-    assertSafeConfigValue(`${name} EnvironmentFile value`, value);
-    return `${name}=${JSON.stringify(value)}`;
 }
 
 export function quoteTomlBasicString(value: string): string {
@@ -149,20 +142,6 @@ export function renderGoTrueAuthEnv(authConfig: Record<string, unknown>): string
     const externalEmailEnabled = readBooleanSetting(authConfig, "external_email_enabled", true);
     const externalPhoneEnabled = readBooleanSetting(authConfig, "external_phone_enabled", true);
 
-    const emailTemplateLines: string[] = [];
-    for (const definition of AUTH_EMAIL_TEMPLATE_DEFINITIONS) {
-        const upperSubjectKey = definition.subjectKey.toUpperCase();
-        const upperContentKey = definition.contentKey.toUpperCase();
-        const subject = authConfig[definition.subjectKey] ?? authConfig[upperSubjectKey];
-        const content = authConfig[definition.contentKey] ?? authConfig[upperContentKey];
-        if (typeof subject === "string") {
-            emailTemplateLines.push(renderSystemdEnvLine(definition.envSubject, subject));
-        }
-        if (typeof content === "string") {
-            emailTemplateLines.push(renderSystemdEnvLine(definition.envContent, content));
-        }
-    }
-
     return [
 `
 GOTRUE_DISABLE_SIGNUP=${disableSignup ? "true" : "false"}
@@ -170,7 +149,7 @@ GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED=${externalAnonymousUsersEnabled ? "true"
 GOTRUE_EXTERNAL_EMAIL_ENABLED=${externalEmailEnabled ? "true" : "false"}
 GOTRUE_EXTERNAL_PHONE_ENABLED=${externalPhoneEnabled ? "true" : "false"}
 `.trim(),
-        emailTemplateLines.join("\n"),
+        renderGoTrueEmailTemplateEnv(authConfig),
     ].filter(Boolean).join("\n");
 }
 
