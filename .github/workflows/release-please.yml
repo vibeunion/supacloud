@@ -322,6 +322,8 @@ jobs:
       - name: Publish SupaCloud Lite to NPM
         if: ${{ needs.release-please.outputs.supacloud_lite_released == 'true' }}
         working-directory: packages/supacloud-lite
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
         run: |
           bun install --frozen-lockfile
           bun run check

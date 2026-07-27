@@ -2,7 +2,7 @@
  * Filesystem-backed storage driver (Node only). Persists object bytes as files
  * under a single root directory, with path-traversal protection on every key.
  */
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, normalize, sep } from 'node:path'
 import type { StorageDriver } from '../types.js'
 
@@ -33,7 +33,14 @@ export class FsStorageDriver implements StorageDriver {
   async put(key: string, data: Uint8Array): Promise<void> {
     const path = this.resolve(key)
     await mkdir(dirname(path), { recursive: true })
-    await writeFile(path, data)
+    const temporaryPath = `${path}.${crypto.randomUUID()}.tmp`
+    try {
+      await writeFile(temporaryPath, data)
+      await rename(temporaryPath, path)
+    } catch (error) {
+      await rm(temporaryPath, { force: true }).catch(() => {})
+      throw error
+    }
   }
 
   /** Read object bytes, or null if the key does not exist. */

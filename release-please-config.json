@@ -32,6 +32,7 @@
     "packages/supacloud-lite": {
       "release-type": "node",
       "component": "supacloud-lite",
+      "initial-version": "0.1.0",
       "changelog-path": "CHANGELOG.md"
     },
     "packages/supacloud-js": {

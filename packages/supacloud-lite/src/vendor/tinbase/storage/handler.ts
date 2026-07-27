@@ -47,6 +47,7 @@ interface ObjectRow {
   bucket_id: string
   name: string
   owner: string | null
+  version: string | null
   metadata: Record<string, unknown> | null
   created_at: Date | string | null
   updated_at: Date | string | null
@@ -100,16 +101,20 @@ interface TusUpload {
   upsert: boolean
   length: number
   offset: number
-  data: Uint8Array
+  chunks: Uint8Array[]
   ctx: RequestContext
 }
 
 const TUS_VERSION = '1.0.0'
+const DEFAULT_FILE_SIZE_LIMIT = 50 * 1024 * 1024
+const MAX_CONCURRENT_TUS_UPLOADS = 4
+const PREFLIGHT_ROLLBACK = Symbol('storage-preflight-rollback')
 
 /** Routes /storage/v1/* requests to bucket and object operations. */
 export class StorageHandler {
   private tusUploads = new Map<string, TusUpload>()
   private warnedTransform = false
+  private mutationTail = Promise.resolve()
 
   constructor(
     private db: Database,
@@ -142,14 +147,16 @@ export class StorageHandler {
       if (bucketMatch && method === 'PUT') return await this.updateBucket(req, ctx, dec(bucketMatch[1]))
       if (bucketMatch && method === 'DELETE') return await this.deleteBucket(ctx, dec(bucketMatch[1]))
       const emptyMatch = rest.match(/^bucket\/([^/]+)\/empty$/)
-      if (emptyMatch && method === 'POST') return await this.emptyBucket(ctx, dec(emptyMatch[1]))
+      if (emptyMatch && method === 'POST') {
+        return await this.withMutation(() => this.emptyBucket(ctx, dec(emptyMatch[1])))
+      }
 
       // ── objects ──
       const parts = rest.split('/').map(dec)
 
       // ── resumable (TUS) uploads: /upload/resumable[/:id] ──
       if (parts[0] === 'upload' && parts[1] === 'resumable') {
-        return await this.handleTus(req, ctx, url, parts.slice(2).join('/'), method)
+        return await this.withMutation(() => this.handleTus(req, ctx, url, parts.slice(2).join('/'), method))
       }
 
       // ── image transforms: /render/image/{authenticated,public,sign}/:bucket/:path ──
@@ -174,8 +181,12 @@ export class StorageHandler {
 
       if (parts[0] !== 'object') return storageError(404, 'not_found', `unknown storage endpoint: ${rest}`)
 
-      if (parts[1] === 'move' && method === 'POST') return await this.moveOrCopy(req, ctx, 'move')
-      if (parts[1] === 'copy' && method === 'POST') return await this.moveOrCopy(req, ctx, 'copy')
+      if (parts[1] === 'move' && method === 'POST') {
+        return await this.withMutation(() => this.moveOrCopy(req, ctx, 'move'))
+      }
+      if (parts[1] === 'copy' && method === 'POST') {
+        return await this.withMutation(() => this.moveOrCopy(req, ctx, 'copy'))
+      }
 
       if (parts[1] === 'list' && parts.length === 3 && method === 'POST') {
         return await this.listObjects(req, ctx, parts[2])
@@ -208,11 +219,15 @@ export class StorageHandler {
       // plain /object/:bucket[/:path...]
       const bucket = parts[1]
       const key = parts.slice(2).join('/')
-      if (key === '' && method === 'DELETE') return await this.removeObjects(req, ctx, bucket)
+      if (key === '' && method === 'DELETE') {
+        return await this.withMutation(() => this.removeObjects(req, ctx, bucket))
+      }
       if (key !== '') {
-        if (method === 'POST' || method === 'PUT') return await this.upload(req, ctx, bucket, key)
+        if (method === 'POST' || method === 'PUT') {
+          return await this.withMutation(() => this.upload(req, ctx, bucket, key))
+        }
         if (method === 'GET' || method === 'HEAD') return await this.download(ctx, bucket, key, method === 'HEAD')
-        if (method === 'DELETE') return await this.removeOne(ctx, bucket, key)
+        if (method === 'DELETE') return await this.withMutation(() => this.removeOne(ctx, bucket, key))
       }
       return storageError(404, 'not_found', `unknown storage endpoint: ${rest}`)
     } catch (e) {
@@ -225,6 +240,20 @@ export class StorageHandler {
       }
       const msg = e instanceof Error ? e.message : String(e)
       return storageError(500, 'internal', msg)
+    }
+  }
+
+  private async withMutation<T>(operation: () => Promise<T>): Promise<T> {
+    const previous = this.mutationTail
+    let release!: () => void
+    this.mutationTail = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    await previous
+    try {
+      return await operation()
+    } finally {
+      release()
     }
   }
 
@@ -308,9 +337,20 @@ export class StorageHandler {
   private async emptyBucket(ctx: RequestContext, id: string): Promise<Response> {
     const denied = this.requireService(ctx)
     if (denied) return denied
-    const res = await this.db.query(`delete from storage.objects where bucket_id = $1 returning name`, [id])
-    await this.driver.deleteMany((res.rows as { name: string }[]).map((r) => `${id}/${r.name}`))
-    return json(200, { message: 'Successfully emptied' })
+    const selected = await this.db.query<ObjectRow>(`select * from storage.objects where bucket_id = $1`, [id])
+    const snapshots = await this.snapshotBytes(selected.rows.map((row) => `${id}/${row.name}`))
+    try {
+      await this.driver.deleteMany([...snapshots.keys()])
+      await this.db.query(`delete from storage.objects where bucket_id = $1 returning name`, [id])
+      return json(200, { message: 'Successfully emptied' })
+    } catch (error) {
+      try {
+        await this.restoreBytes(snapshots)
+      } catch (rollbackError) {
+        throw new AggregateError([error, rollbackError], 'storage empty failed and byte rollback did not complete')
+      }
+      throw error
+    }
   }
 
   // ── objects ─────────────────────────────────────────────────────────────
@@ -349,16 +389,12 @@ export class StorageHandler {
 
     // Per-bucket limit, falling back to the project-wide default (config.toml
     // storage.file_size_limit) when the bucket sets none.
-    const sizeLimit = bucket.file_size_limit != null ? Number(bucket.file_size_limit) : this.config.defaultFileSizeLimit
-    if (sizeLimit != null && bytes.length > sizeLimit) {
+    const sizeLimit = this.effectiveFileSizeLimit(bucket)
+    if (bytes.length > sizeLimit) {
       return storageError(413, 'Payload too large', 'The object exceeded the maximum allowed size')
     }
-    if (bucket.allowed_mime_types && bucket.allowed_mime_types.length > 0) {
-      const base = contentType.split(';')[0].trim()
-      if (!bucket.allowed_mime_types.some((m) => m === base || (m.endsWith('/*') && base.startsWith(m.slice(0, -1))))) {
-        return storageError(415, 'invalid_mime_type', `mime type ${base} is not supported`)
-      }
-    }
+    const mimeError = invalidMimeType(bucket, contentType)
+    if (mimeError) return mimeError
 
     try {
       const id = await this.persistObject(ctx, bucketId, key, bytes, contentType, cacheControl, upsert)
@@ -392,15 +428,12 @@ export class StorageHandler {
     cacheControl: string,
     upsert: boolean
   ): Promise<string> {
-    const metadata = {
-      eTag: `"${crypto.randomUUID()}"`,
-      size: bytes.length,
-      mimetype: contentType,
-      cacheControl,
-      lastModified: new Date().toISOString(),
-      contentLength: bytes.length,
-      httpStatusCode: 200,
-    }
+    const metadata = objectMetadata(bytes.length, contentType, cacheControl)
+    const previous = (
+      await this.db.query<ObjectRow>(`select * from storage.objects where bucket_id = $1 and name = $2`, [bucketId, key])
+    ).rows[0]
+    const objectKey = `${bucketId}/${key}`
+    const previousBytes = upsert && previous ? await this.driver.get(objectKey) : null
     const conflictClause = upsert
       ? `on conflict (bucket_id, name) do update
            set metadata = excluded.metadata, owner = excluded.owner, updated_at = now(), version = excluded.version`
@@ -417,10 +450,51 @@ export class StorageHandler {
     // would 404 ("Object not found").
     const insertedId = (res.rows[0] as { id: string }).id
     try {
-      await this.driver.put(`${bucketId}/${key}`, bytes)
-    } catch (e) {
-      await this.db.query(`delete from storage.objects where id = $1`, [insertedId]).catch(() => {})
-      throw e
+      await this.driver.put(objectKey, bytes)
+    } catch (error) {
+      let metadataRollbackError: unknown
+      try {
+        if (previous) {
+          await this.db.query(
+            `update storage.objects
+             set owner = $2, version = $3, metadata = $4::jsonb, updated_at = $5, last_accessed_at = $6
+             where id = $1`,
+            [
+              previous.id,
+              previous.owner,
+              previous.version,
+              JSON.stringify(previous.metadata ?? {}),
+              previous.updated_at,
+              previous.last_accessed_at,
+            ]
+          )
+        } else {
+          await this.db.query(`delete from storage.objects where id = $1`, [insertedId])
+        }
+      } catch (rollbackError) {
+        metadataRollbackError = rollbackError
+      }
+      if (metadataRollbackError !== undefined) {
+        try {
+          await this.driver.put(objectKey, bytes)
+        } catch (alignmentError) {
+          throw new AggregateError(
+            [error, metadataRollbackError, alignmentError],
+            'storage write failed and metadata rollback could not preserve a consistent object'
+          )
+        }
+        throw new AggregateError(
+          [error, metadataRollbackError],
+          'storage write failed and metadata rollback did not complete'
+        )
+      }
+      try {
+        if (previousBytes !== null) await this.driver.put(objectKey, previousBytes)
+        else await this.driver.delete(objectKey)
+      } catch (rollbackError) {
+        throw new AggregateError([error, rollbackError], 'storage write failed and byte rollback did not complete')
+      }
+      throw error
     }
     return insertedId
   }
@@ -461,21 +535,62 @@ export class StorageHandler {
       if (!bucketId || !key) {
         return storageError(400, 'invalid_request', 'bucketName and objectName upload metadata are required')
       }
+      const keyError = invalidObjectKey(key)
+      if (keyError) return storageError(400, 'invalid_key', keyError)
       const bucket = await this.loadBucket(bucketId)
       if (!bucket) return storageError(404, 'Bucket not found', 'Bucket not found')
-      if (bucket.file_size_limit != null && length > Number(bucket.file_size_limit)) {
+      if (length > this.effectiveFileSizeLimit(bucket)) {
         return storageError(413, 'Payload too large', 'The object exceeded the maximum allowed size')
       }
+      const contentType = meta.contentType ?? 'application/octet-stream'
+      const mimeError = invalidMimeType(bucket, contentType)
+      if (mimeError) return mimeError
+      const upsert = (req.headers.get('x-upsert') ?? 'false').toLowerCase() === 'true'
+      if (length === 0) {
+        if ((req.headers.get('content-type') ?? '').includes('application/offset+octet-stream')) {
+          const body = new Uint8Array(await req.arrayBuffer())
+          if (body.length > 0) return storageError(400, 'invalid_request', 'zero-length uploads cannot carry a chunk')
+        }
+        try {
+          await this.persistObject(
+            ctx,
+            bucketId,
+            key,
+            new Uint8Array(),
+            contentType,
+            meta.cacheControl ?? 'no-cache',
+            upsert
+          )
+        } catch (error) {
+          const pg = error as { code?: string }
+          if (pg.code === '23505') return storageError(409, 'Duplicate', 'The resource already exists')
+          throw error
+        }
+        const uploadId = crypto.randomUUID()
+        return new Response(null, {
+          status: 201,
+          headers: tus({
+            location: `${url.origin}/storage/v1/upload/resumable/${uploadId}`,
+            'upload-offset': '0',
+            'upload-length': '0',
+          }),
+        })
+      }
+      if (this.tusUploads.size >= MAX_CONCURRENT_TUS_UPLOADS) {
+        return storageError(429, 'too_many_requests', 'Too many resumable uploads are active')
+      }
+      const preflightError = await this.preflightObjectWrite(ctx, bucketId, key, length, meta.contentType, meta.cacheControl, upsert)
+      if (preflightError) return preflightError
       const uploadId = crypto.randomUUID()
       const upload: TusUpload = {
         bucketId,
         key,
-        contentType: meta.contentType ?? 'application/octet-stream',
+        contentType,
         cacheControl: meta.cacheControl ?? 'no-cache',
-        upsert: (req.headers.get('x-upsert') ?? 'false').toLowerCase() === 'true',
+        upsert,
         length,
         offset: 0,
-        data: new Uint8Array(length),
+        chunks: [],
         ctx,
       }
       this.tusUploads.set(uploadId, upload)
@@ -545,16 +660,22 @@ export class StorageHandler {
       this.tusUploads.delete(id)
       return storageError(400, 'invalid_request', 'chunk exceeds the declared Upload-Length')
     }
-    upload.data.set(chunk, offset)
+    upload.chunks.push(chunk.slice())
     upload.offset = offset + chunk.length
     if (upload.offset < upload.length) return undefined
 
     try {
+      const data = new Uint8Array(upload.length)
+      let cursor = 0
+      for (const part of upload.chunks) {
+        data.set(part, cursor)
+        cursor += part.length
+      }
       await this.persistObject(
         upload.ctx,
         upload.bucketId,
         upload.key,
-        upload.data,
+        data,
         upload.contentType,
         upload.cacheControl,
         upload.upsert
@@ -567,6 +688,55 @@ export class StorageHandler {
     }
     this.tusUploads.delete(id)
     return undefined
+  }
+
+  private effectiveFileSizeLimit(bucket: BucketRow): number {
+    return bucket.file_size_limit != null
+      ? Number(bucket.file_size_limit)
+      : this.config.defaultFileSizeLimit ?? DEFAULT_FILE_SIZE_LIMIT
+  }
+
+  private async preflightObjectWrite(
+    ctx: RequestContext,
+    bucketId: string,
+    key: string,
+    size: number,
+    contentType: string | undefined,
+    cacheControl: string | undefined,
+    upsert: boolean
+  ): Promise<Response | null> {
+    const conflictClause = upsert
+      ? `on conflict (bucket_id, name) do update
+           set metadata = excluded.metadata, owner = excluded.owner, updated_at = now(), version = excluded.version`
+      : ''
+    try {
+      await this.db.withContext(ctx, async (query) => {
+        await query(
+          `insert into storage.objects (bucket_id, name, owner, metadata, version)
+           values ($1, $2, $3, $4::jsonb, $5) ${conflictClause} returning id`,
+          [
+            bucketId,
+            key,
+            ctx.claims?.sub ?? null,
+            JSON.stringify(objectMetadata(size, contentType ?? 'application/octet-stream', cacheControl ?? 'no-cache')),
+            crypto.randomUUID(),
+          ]
+        )
+        throw PREFLIGHT_ROLLBACK
+      })
+    } catch (error) {
+      if (error === PREFLIGHT_ROLLBACK) return null
+      const pg = error as { code?: string }
+      if (pg.code === '23505') return storageError(409, 'Duplicate', 'The resource already exists')
+      if (
+        pg.code === '42501' ||
+        (error instanceof Error && /row-level security|permission denied/i.test(error.message))
+      ) {
+        return storageError(403, 'Unauthorized', 'new row violates row-level security policy')
+      }
+      throw error
+    }
+    return null
   }
 
   private async download(ctx: RequestContext, bucketId: string, key: string, head: boolean): Promise<Response> {
@@ -614,24 +784,58 @@ export class StorageHandler {
     const body = (await req.json().catch(() => ({}))) as { prefixes?: string[] }
     const prefixes = body.prefixes ?? []
     if (prefixes.length === 0) return json(200, [])
-    const res = await this.db.withContext(ctx, (q) =>
-      q(`delete from storage.objects where bucket_id = $1 and name = any($2::text[]) returning *`, [
+    const selected = await this.db.withContext(ctx, (q) =>
+      q(`select * from storage.objects where bucket_id = $1 and name = any($2::text[])`, [
         bucketId,
         `{${prefixes.map((p) => `"${p.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`).join(',')}}`,
       ])
     )
-    const rows = res.rows as ObjectRow[]
-    await this.driver.deleteMany(rows.map((r) => `${bucketId}/${r.name}`))
-    return json(200, rows.map((r) => objectJson(r)))
+    const rows = selected.rows as ObjectRow[]
+    const snapshots = await this.snapshotBytes(rows.map((row) => `${bucketId}/${row.name}`))
+    try {
+      await this.driver.deleteMany([...snapshots.keys()])
+      const res = await this.db.withContext(ctx, (q) =>
+        q(`delete from storage.objects where bucket_id = $1 and name = any($2::text[]) returning *`, [
+          bucketId,
+          `{${prefixes.map((p) => `"${p.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`).join(',')}}`,
+        ])
+      )
+      return json(200, (res.rows as ObjectRow[]).map((row) => objectJson(row)))
+    } catch (error) {
+      try {
+        await this.restoreBytes(snapshots)
+      } catch (rollbackError) {
+        throw new AggregateError([error, rollbackError], 'storage remove failed and byte rollback did not complete')
+      }
+      throw error
+    }
   }
 
   private async removeOne(ctx: RequestContext, bucketId: string, key: string): Promise<Response> {
-    const res = await this.db.withContext(ctx, (q) =>
-      q(`delete from storage.objects where bucket_id = $1 and name = $2 returning *`, [bucketId, key])
+    const selected = await this.db.withContext(ctx, (q) =>
+      q(`select * from storage.objects where bucket_id = $1 and name = $2`, [bucketId, key])
     )
-    if (res.rows.length === 0) return storageError(404, 'not_found', 'Object not found')
-    await this.driver.delete(`${bucketId}/${key}`)
-    return json(200, { message: 'Successfully deleted' })
+    if (selected.rows.length === 0) return storageError(404, 'not_found', 'Object not found')
+    const objectKey = `${bucketId}/${key}`
+    const snapshots = await this.snapshotBytes([objectKey])
+    try {
+      await this.driver.delete(objectKey)
+      const res = await this.db.withContext(ctx, (q) =>
+        q(`delete from storage.objects where bucket_id = $1 and name = $2 returning *`, [bucketId, key])
+      )
+      if (res.rows.length === 0) {
+        await this.restoreBytes(snapshots)
+        return storageError(404, 'not_found', 'Object not found')
+      }
+      return json(200, { message: 'Successfully deleted' })
+    } catch (error) {
+      try {
+        await this.restoreBytes(snapshots)
+      } catch (rollbackError) {
+        throw new AggregateError([error, rollbackError], 'storage delete failed and byte rollback did not complete')
+      }
+      throw error
+    }
   }
 
   private async moveOrCopy(req: Request, ctx: RequestContext, mode: 'move' | 'copy'): Promise<Response> {
@@ -649,15 +853,26 @@ export class StorageHandler {
     const dstErr = invalidObjectKey(body.destinationKey)
     if (dstErr) return storageError(400, 'invalid_key', dstErr)
     const dstBucket = body.destinationBucket ?? body.bucketId
-    const bytes = await this.driver.get(`${body.bucketId}/${body.sourceKey}`)
+    if (dstBucket === body.bucketId && body.destinationKey === body.sourceKey) {
+      return storageError(400, 'invalid_request', 'source and destination must be different')
+    }
+    const source = await this.db.withContext(ctx, (q) =>
+      q(`select * from storage.objects where bucket_id = $1 and name = $2`, [body.bucketId, body.sourceKey])
+    )
+    if (source.rows.length === 0) return storageError(404, 'not_found', 'Object not found')
+    const sourceRow = source.rows[0] as ObjectRow
+    const sourceKey = `${body.bucketId}/${body.sourceKey}`
+    const destinationKey = `${dstBucket}/${body.destinationKey}`
+    const bytes = await this.driver.get(sourceKey)
     if (bytes === null) return storageError(404, 'not_found', 'Object not found')
+    const destinationBytes = await this.driver.get(destinationKey)
 
     if (mode === 'move') {
       // Write the destination bytes first so the row never points at a missing
       // key; if the RLS-checked update fails, remove the bytes we just wrote.
-      await this.driver.put(`${dstBucket}/${body.destinationKey}`, bytes)
       let res
       try {
+        await this.driver.put(destinationKey, bytes)
         res = await this.db.withContext(ctx, (q) =>
           q(
             `update storage.objects set bucket_id = $3, name = $4, updated_at = now()
@@ -665,15 +880,54 @@ export class StorageHandler {
             [body.bucketId, body.sourceKey, dstBucket, body.destinationKey]
           )
         )
-      } catch (e) {
-        await this.driver.delete(`${dstBucket}/${body.destinationKey}`).catch(() => {})
-        throw e
+      } catch (error) {
+        try {
+          await this.restoreBytes(new Map([[destinationKey, destinationBytes]]))
+        } catch (rollbackError) {
+          throw new AggregateError([error, rollbackError], 'storage move failed and destination rollback did not complete')
+        }
+        throw error
       }
       if (res.rows.length === 0) {
-        await this.driver.delete(`${dstBucket}/${body.destinationKey}`).catch(() => {})
+        await this.restoreBytes(new Map([[destinationKey, destinationBytes]]))
         return storageError(404, 'not_found', 'Object not found')
       }
-      await this.driver.delete(`${body.bucketId}/${body.sourceKey}`).catch(() => {})
+      try {
+        await this.driver.delete(sourceKey)
+      } catch (error) {
+        let rollbackError: unknown
+        try {
+          await this.db.query(`update storage.objects set bucket_id = $2, name = $3, updated_at = now() where id = $1`, [
+            sourceRow.id,
+            body.bucketId,
+            body.sourceKey,
+          ])
+        } catch (rollbackFailure) {
+          rollbackError = rollbackFailure
+        }
+        if (rollbackError !== undefined) {
+          try {
+            await this.driver.put(destinationKey, bytes)
+          } catch (alignmentError) {
+            throw new AggregateError(
+              [error, rollbackError, alignmentError],
+              'storage move failed and metadata rollback could not preserve destination bytes'
+            )
+          }
+          throw new AggregateError([error, rollbackError], 'storage move failed and metadata rollback did not complete')
+        }
+        try {
+          await this.restoreBytes(
+            new Map([
+              [sourceKey, bytes],
+              [destinationKey, destinationBytes],
+            ])
+          )
+        } catch (restoreError) {
+          throw new AggregateError([error, restoreError], 'storage move failed and byte rollback did not complete')
+        }
+        throw error
+      }
       return json(200, { message: 'Successfully moved' })
     }
 
@@ -690,11 +944,47 @@ export class StorageHandler {
     const copyId = (res.rows[0] as { id: string }).id
     try {
       await this.driver.put(`${dstBucket}/${body.destinationKey}`, bytes)
-    } catch (e) {
-      await this.db.query(`delete from storage.objects where id = $1`, [copyId]).catch(() => {})
-      throw e
+    } catch (error) {
+      try {
+        await this.db.query(`delete from storage.objects where id = $1`, [copyId])
+      } catch (rollbackError) {
+        try {
+          await this.driver.put(destinationKey, bytes)
+        } catch (alignmentError) {
+          throw new AggregateError(
+            [error, rollbackError, alignmentError],
+            'storage copy failed and metadata rollback could not preserve destination bytes'
+          )
+        }
+        throw new AggregateError([error, rollbackError], 'storage copy failed and metadata rollback did not complete')
+      }
+      try {
+        await this.restoreBytes(new Map([[destinationKey, destinationBytes]]))
+      } catch (rollbackError) {
+        throw new AggregateError([error, rollbackError], 'storage copy failed and destination rollback did not complete')
+      }
+      throw error
     }
     return json(200, { Id: copyId, Key: `${dstBucket}/${body.destinationKey}` })
+  }
+
+  private async snapshotBytes(keys: string[]): Promise<Map<string, Uint8Array | null>> {
+    const snapshots = new Map<string, Uint8Array | null>()
+    for (const key of keys) snapshots.set(key, await this.driver.get(key))
+    return snapshots
+  }
+
+  private async restoreBytes(snapshots: Map<string, Uint8Array | null>): Promise<void> {
+    const errors: unknown[] = []
+    for (const [key, bytes] of snapshots) {
+      try {
+        if (bytes === null) await this.driver.delete(key)
+        else await this.driver.put(key, bytes)
+      } catch (error) {
+        errors.push(error)
+      }
+    }
+    if (errors.length > 0) throw new AggregateError(errors, 'one or more storage byte rollbacks failed')
   }
 
   private async listObjects(req: Request, ctx: RequestContext, bucketId: string): Promise<Response> {
@@ -770,7 +1060,7 @@ export class StorageHandler {
       created_at: iso(row.created_at),
       updated_at: iso(row.updated_at),
       last_modified: meta.lastModified ?? null,
-      version: null,
+      version: row.version,
     })
   }
 
@@ -896,6 +1186,27 @@ function parseSizeLimit(v: number | string | null | undefined): number | null {
   if (!m) throw new StorageValidationError(`invalid file_size_limit: ${v}`)
   const mult = { b: 1, kb: 1024, mb: 1024 ** 2, gb: 1024 ** 3 }[(m[2] ?? 'b').toLowerCase()]!
   return Math.floor(parseFloat(m[1]) * mult)
+}
+
+function objectMetadata(size: number, contentType: string, cacheControl: string): Record<string, unknown> {
+  return {
+    eTag: `"${crypto.randomUUID()}"`,
+    size,
+    mimetype: contentType,
+    cacheControl,
+    lastModified: new Date().toISOString(),
+    contentLength: size,
+    httpStatusCode: 200,
+  }
+}
+
+function invalidMimeType(bucket: BucketRow, contentType: string): Response | null {
+  if (!bucket.allowed_mime_types?.length) return null
+  const base = contentType.split(';')[0].trim()
+  const allowed = bucket.allowed_mime_types.some(
+    (mimeType) => mimeType === base || (mimeType.endsWith('/*') && base.startsWith(mimeType.slice(0, -1)))
+  )
+  return allowed ? null : storageError(415, 'invalid_mime_type', `mime type ${base} is not supported`)
 }
 
 interface MultipartPart {

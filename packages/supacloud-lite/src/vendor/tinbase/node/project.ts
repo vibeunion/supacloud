@@ -15,7 +15,7 @@ export interface SupabaseProject {
 export interface SeedOptions {
   /** whether seeding runs; only `false` disables it (undefined means enabled) */
   enabled?: boolean
-  /** Files relative to supabase/, applied in order. Defaults to ['seed.sql']. Globs are not expanded. */
+  /** Files or Bun glob patterns relative to supabase/, applied in order. Defaults to ['seed.sql']. */
   paths?: string[]
 }
 
@@ -30,8 +30,8 @@ export async function loadSupabaseProject(projectDir: string, seed: SeedOptions 
   let entries: string[] = []
   try {
     entries = await readdir(migrationsDir)
-  } catch {
-    // no migrations directory - that's fine
+  } catch (error) {
+    if (!isNotFound(error)) throw error
   }
   for (const entry of entries.sort()) {
     if (!entry.endsWith('.sql')) continue
@@ -41,17 +41,27 @@ export async function loadSupabaseProject(projectDir: string, seed: SeedOptions 
 
   let seedSql: string | undefined
   if (seed.enabled !== false) {
-    const paths = (seed.paths ?? ['seed.sql']).filter((p) => !/[*?[\]]/.test(p)) // globs unsupported; skip them
     const parts: string[] = []
-    for (const rel of paths) {
-      try {
-        parts.push(await readFile(join(projectDir, 'supabase', rel), 'utf8'))
-      } catch {
-        // missing seed file - skip
+    const supabaseDir = join(projectDir, 'supabase')
+    for (const configuredPath of seed.paths ?? ['seed.sql']) {
+      const pattern = configuredPath.replace(/^\.\//, '')
+      const matches = /[*?[\]{}]/.test(pattern)
+        ? [...new Bun.Glob(pattern).scanSync({ cwd: supabaseDir, onlyFiles: true })].sort()
+        : [pattern]
+      for (const relativePath of matches) {
+        try {
+          parts.push(await readFile(join(supabaseDir, relativePath), 'utf8'))
+        } catch (error) {
+          if (!isNotFound(error)) throw error
+        }
       }
     }
     if (parts.length) seedSql = parts.join('\n')
   }
 
   return { migrations, seedSql }
+}
+
+function isNotFound(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException).code === 'ENOENT'
 }

@@ -7,6 +7,7 @@ import { computeDbDiff, pullSchema } from './vendor/tinbase/node/db-diff.js'
 import { loadSupabaseProject } from './vendor/tinbase/node/project.js'
 import {
   createProjectBackend,
+  assertResetPathsSafe,
   ensureProjectSecrets,
   mintProjectKeys,
   resolveProjectPaths,
@@ -151,7 +152,7 @@ async function main(): Promise<void> {
        Migrations: ${project.migrationCount} file(s)
         Functions: ${project.functionNames.length ? project.functionNames.join(', ') : 'none'}
           Webhooks: ${project.webhookCount}
-       Email inbox: ${project.backend.inbox ? `${project.url}/inbox` : 'custom mailer'}
+       Email inbox: ${project.backend.inbox ? `${project.url}/inbox` : 'disabled on network-exposed host'}
 
   Run "supacloud-lite keys" for the anon key.
   Run "supacloud-lite keys --service-role" only when privileged access is required.
@@ -165,6 +166,7 @@ async function runDbCommand(options: CliOptions): Promise<void> {
   const subcommand = options.positionals[0]
   const paths = resolveProjectPaths(options)
   if (subcommand === 'reset') {
+    assertResetPathsSafe(paths)
     if (paths.dataDir) await rm(paths.dataDir, { recursive: true, force: true })
     await rm(paths.storageDir, { recursive: true, force: true })
     const project = await createProjectBackend({ ...options, includeFunctions: false, includeWebhooks: false, log: quietLog })

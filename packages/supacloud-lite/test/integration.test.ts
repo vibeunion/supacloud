@@ -33,6 +33,18 @@ create policy todos_delete on public.todos
   for delete to authenticated
   using (auth.uid() = user_id);
 
+create table public.realtime_secrets (
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid not null,
+  secret text not null
+);
+
+alter table public.realtime_secrets enable row level security;
+
+create policy realtime_secrets_select on public.realtime_secrets
+  for select to authenticated
+  using (auth.uid() = owner_id);
+
 create policy assets_select on storage.objects
   for select to authenticated
   using (bucket_id = 'assets' and owner = auth.uid());
@@ -52,6 +64,7 @@ create policy assets_delete on storage.objects
 
 grant usage on schema public to anon, authenticated, service_role;
 grant all on public.todos to authenticated, service_role;
+grant all on public.realtime_secrets to authenticated, service_role;
 grant usage, select on sequence public.todos_id_seq to authenticated, service_role;
 `
 
@@ -73,6 +86,8 @@ let project: RunningProjectServer
 let anonClient: SupabaseClient
 let userClient: SupabaseClient
 let serviceClient: SupabaseClient
+let userAccessToken: string
+let userId: string
 
 describe('SupaCloud Lite supabase-js compatibility', () => {
   beforeAll(async () => {
@@ -82,7 +97,7 @@ describe('SupaCloud Lite supabase-js compatibility', () => {
     await writeFile(join(rootDir, 'supabase', 'migrations', '20260727000000_create_todos.sql'), migration)
     await writeFile(
       join(rootDir, 'supabase', 'config.toml'),
-      `[auth.email]\nenable_confirmations = false\n\n[storage.buckets.assets]\npublic = false\n`
+      `[auth.email]\nenable_confirmations = false\n\n[storage]\nfile_size_limit = "16B"\n\n[storage.buckets.assets]\npublic = false\nallowed_mime_types = ["text/plain"]\n\n[functions.hello]\nverify_jwt = false\n`
     )
     await writeFile(join(rootDir, 'supabase', 'functions', '.env'), 'FUNCTION_SECRET=lite-secret\n')
     await writeFile(join(rootDir, 'supabase', 'functions', 'hello', 'index.ts'), functionSource)
@@ -97,6 +112,8 @@ describe('SupaCloud Lite supabase-js compatibility', () => {
     })
     expect(error).toBeNull()
     expect(data.session?.access_token).toBeString()
+    userId = data.user!.id
+    userAccessToken = data.session!.access_token
     userClient = anonClient
     anonClient = createClient(project.url, project.backend.anonKey, clientOptions('anonymous'))
   }, 60_000)
@@ -173,6 +190,56 @@ describe('SupaCloud Lite supabase-js compatibility', () => {
     const result = await userClient.functions.invoke('hello', { body: { name: 'SupaCloud' } })
     expect(result.error).toBeNull()
     expect(result.data).toEqual({ ok: true, name: 'SupaCloud', secret: 'lite-secret' })
+
+    const publicResponse = await fetch(`${project.url}/functions/v1/hello`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Public' }),
+    })
+    expect(publicResponse.status).toBe(200)
+    expect(await publicResponse.json()).toEqual({ ok: true, name: 'Public', secret: 'lite-secret' })
+  })
+
+  test('enforces TUS limits and RLS before buffering upload data', async () => {
+    const oversized = await createTusUpload(1024, userAccessToken, 'oversized.bin')
+    expect(oversized.status).toBe(413)
+
+    const unauthorized = await createTusUpload(5, project.backend.anonKey, 'anonymous.txt')
+    expect(unauthorized.status).toBe(403)
+
+    expect((await createTusUpload(1, userAccessToken, '../escape.txt')).status).toBe(400)
+    expect((await createTusUpload(1, userAccessToken, 'image.png', 'image/png')).status).toBe(415)
+
+    for (let index = 0; index < 5; index++) {
+      const key = `empty-${index}.txt`
+      expect((await createTusUpload(0, userAccessToken, key)).status).toBe(201)
+      expect(await (await userClient.storage.from('assets').download(key)).data!.text()).toBe('')
+    }
+
+    const created = await createTusUpload(5, userAccessToken, 'resumable.txt')
+    expect(created.status).toBe(201)
+    const location = created.headers.get('location')
+    expect(location).toBeString()
+    const patched = await fetch(location!, {
+      method: 'PATCH',
+      headers: {
+        apikey: project.backend.anonKey,
+        authorization: `Bearer ${userAccessToken}`,
+        'content-type': 'application/offset+octet-stream',
+        'tus-resumable': '1.0.0',
+        'upload-offset': '0',
+      },
+      body: 'hello',
+    })
+    expect(patched.status).toBe(204)
+    const downloaded = await userClient.storage.from('assets').download('resumable.txt')
+    expect(downloaded.error).toBeNull()
+    expect(await downloaded.data!.text()).toBe('hello')
+  })
+
+  test('rejects unsafe TUS object paths and disallowed MIME types before upload allocation', async () => {
+    expect((await createTusUpload(5, userAccessToken, '../escape.txt')).status).toBe(400)
+    expect((await createTusUpload(5, userAccessToken, 'payload.json', 'application/json')).status).toBe(415)
   })
 
   test('supports Realtime postgres_changes through Bun WebSockets', async () => {
@@ -202,6 +269,93 @@ describe('SupaCloud Lite supabase-js compatibility', () => {
       if (channel) await userClient.removeChannel(channel)
     }
   }, 20_000)
+
+  test('does not leak RLS-protected DELETE events to ordinary subscribers', async () => {
+    const secondAuth = createClient(project.url, project.backend.anonKey, clientOptions('delete-observer'))
+    const second = await secondAuth.auth.signUp({
+      email: 'observer@example.com',
+      password: 'correct-horse-battery-staple',
+    })
+    expect(second.error).toBeNull()
+
+    let channel: RealtimeChannel | undefined
+    try {
+      const leaked = await new Promise<boolean>((resolveLeak, rejectLeak) => {
+        const timeout = setTimeout(() => resolveLeak(false), 750)
+        channel = secondAuth
+          .channel('delete-observer')
+          .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'todos' }, () => {
+            clearTimeout(timeout)
+            resolveLeak(true)
+          })
+          .subscribe(async (status) => {
+            if (status === 'SUBSCRIBED') {
+              const inserted = await userClient.from('todos').insert({ title: 'private delete' }).select().single()
+              if (inserted.error) rejectLeak(inserted.error)
+              const deleted = await userClient.from('todos').delete().eq('id', inserted.data.id)
+              if (deleted.error) rejectLeak(deleted.error)
+            }
+            if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+              clearTimeout(timeout)
+              rejectLeak(new Error(`realtime channel status: ${status}`))
+            }
+          })
+      })
+      expect(leaked).toBe(false)
+    } finally {
+      if (channel) await secondAuth.removeChannel(channel)
+    }
+  }, 20_000)
+
+  test('does not authorize an old RLS event from a newer row state', async () => {
+    const other = await serviceClient.auth.admin.createUser({
+      email: 'snapshot-owner@example.com',
+      password: 'correct-horse-battery-staple',
+      email_confirm: true,
+    })
+    expect(other.error).toBeNull()
+    const otherUser = other.data.user
+    if (!otherUser) throw new Error('admin createUser returned no user')
+
+    let channel: RealtimeChannel | undefined
+    try {
+      const leaked = await new Promise<boolean>((resolveLeak, rejectLeak) => {
+        const timeout = setTimeout(() => resolveLeak(false), 1_000)
+        channel = userClient
+          .channel('realtime-snapshot')
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'realtime_secrets' }, (payload) => {
+            if ((payload.new as { secret?: string }).secret === 'private-before-transfer') {
+              clearTimeout(timeout)
+              resolveLeak(true)
+            }
+          })
+          .subscribe(async (status) => {
+            if (status === 'SUBSCRIBED') {
+              try {
+                await project.backend.db.exec(`
+                  begin;
+                  insert into public.realtime_secrets (owner_id, secret)
+                  values ('${otherUser.id}', 'private-before-transfer');
+                  update public.realtime_secrets
+                  set owner_id = '${userId}', secret = 'public-after-transfer';
+                  commit;
+                `)
+              } catch (error) {
+                clearTimeout(timeout)
+                rejectLeak(error)
+              }
+            }
+            if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+              clearTimeout(timeout)
+              rejectLeak(new Error(`realtime channel status: ${status}`))
+            }
+          })
+      })
+      expect(leaked).toBe(false)
+    } finally {
+      if (channel) await userClient.removeChannel(channel)
+    }
+  }, 20_000)
 })
 
 function clientOptions(storageKey: string) {
@@ -209,4 +363,22 @@ function clientOptions(storageKey: string) {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false, storageKey },
     realtime: { params: { eventsPerSecond: 20 } },
   }
+}
+
+function createTusUpload(length: number, token: string, key: string, contentType = 'text/plain'): Promise<Response> {
+  const metadata = [
+    `bucketName ${btoa('assets')}`,
+    `objectName ${btoa(key)}`,
+    `contentType ${btoa(contentType)}`,
+  ].join(',')
+  return fetch(`${project.url}/storage/v1/upload/resumable`, {
+    method: 'POST',
+    headers: {
+      apikey: project.backend.anonKey,
+      authorization: `Bearer ${token}`,
+      'tus-resumable': '1.0.0',
+      'upload-length': String(length),
+      'upload-metadata': metadata,
+    },
+  })
 }

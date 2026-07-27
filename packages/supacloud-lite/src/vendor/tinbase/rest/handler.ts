@@ -5,7 +5,8 @@
  * counts, singular-object media type, Prefer handling).
  */
 import { quoteIdent, quoteLiteral, type Database, type FunctionInfo } from '../db/database.js'
-import { ApiError, TINBASE_VERSION, type RequestContext } from '../types.js'
+import { ApiError, type RequestContext } from '../types.js'
+import { SUPACLOUD_LITE_VERSION } from '../../../version.js'
 import { QueryBuilder, pgArrayLiteral, renderColumnExpr, sanitizeCast } from './build.js'
 import { errorToResponse, jsonResponse } from './errors.js'
 import { ParseError, parseQuery, type ParsedQuery } from './parse.js'
@@ -96,7 +97,7 @@ export class RestHandler {
   async handle(req: Request, ctx: RequestContext, url: URL): Promise<Response> {
     try {
       const rest = url.pathname.replace(/^\/rest\/v1\/?/, '')
-      if (rest === '') return jsonResponse(200, { info: { title: 'supacloud-lite', version: TINBASE_VERSION } })
+      if (rest === '') return jsonResponse(200, { info: { title: 'supacloud-lite', version: SUPACLOUD_LITE_VERSION } })
 
       const method = req.method.toUpperCase()
       const schema =

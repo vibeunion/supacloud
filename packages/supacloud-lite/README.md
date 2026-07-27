@@ -103,17 +103,19 @@ supacloud-lite version
 
 | 能力 | V1 状态 | 说明 |
 | --- | --- | --- |
-| `supabase.from()` | 支持 | CRUD、过滤、排序、分页、嵌套关系、RPC 和 RLS |
-| `supabase.auth` | 支持 | 邮箱密码、会话、OTP/Magic Link、匿名用户、OAuth、MFA 子集 |
-| `supabase.storage` | 支持 | Bucket、上传下载、列表、移动复制、签名 URL、TUS 子集；对象访问需显式 RLS policy |
-| `supabase.channel()` | 支持 | Phoenix WebSocket、Broadcast、Presence、`postgres_changes` |
-| `supabase.functions.invoke()` | 支持 | Bun.build 加载 TypeScript，兼容 `Deno.serve()` 常见写法 |
+| `supabase.from()` | 已验证核心 | 自动测试覆盖 CRUD、过滤、RLS；嵌套关系、RPC 和高级 PostgREST 语法属于实验性兼容 |
+| `supabase.auth` | 已验证核心 | 自动测试覆盖邮箱密码、会话和 bcrypt；OTP/Magic Link、匿名用户、OAuth、MFA 属于实验性兼容 |
+| `supabase.storage` | 已验证核心 | 自动测试覆盖上传下载、列表、删除和 TUS 限制/RLS；移动复制、签名 URL 属于实验性兼容 |
+| `supabase.channel()` | 已验证核心 | 自动测试覆盖 `postgres_changes` 和 DELETE RLS 隔离；Broadcast、Presence 属于实验性兼容 |
+| `supabase.functions.invoke()` | 已验证核心 | 自动测试覆盖 Bun.build、`Deno.serve()`、公开函数和同进程重启 |
 | Supabase migrations | 支持 | 按文件名排序，记录到 `supabase_migrations` |
 | PostgreSQL RLS | 支持 | 使用 `anon`、`authenticated`、`service_role` 数据库角色执行 |
 | PostgREST 完整线协议 | 部分支持 | 目标是常用 `supabase-js` 行为，不承诺所有 PostgREST 边角行为 |
 | PostgreSQL 扩展 | 部分支持 | 仅支持 PGlite 内置或 Lite 模拟的扩展能力 |
 | Supabase Studio | 不支持 | V1 不提供管理 UI |
 | 多项目控制面 | 不支持 | V1 每个进程只运行一个项目，可通过多个进程部署多个项目 |
+
+RLS 表的 Realtime DELETE 无法在行删除后安全重放 SELECT policy，因此 V1 只向 `service_role` 订阅者发送这类 DELETE 事件。普通用户仍可收到通过逐行 RLS 校验的 INSERT/UPDATE 事件。
 
 ## 从 Supabase 迁移
 

@@ -25,12 +25,15 @@ export interface ConfigTable {
   children: Map<string, ConfigTable>
 }
 
+/** Environment values accepted by config.toml's env(VAR) substitution. */
+export type Environment = Record<string, string | undefined>
+
 function emptyTable(): ConfigTable {
   return { values: new Map(), children: new Map() }
 }
 
 /** Parse config.toml at `projectDir/supabase/config.toml`; empty root if absent/unreadable. */
-export function loadConfigToml(projectDir: string, env: NodeJS.ProcessEnv = process.env): ConfigTable {
+export function loadConfigToml(projectDir: string, env: Environment = process.env): ConfigTable {
   let text: string
   try {
     text = readFileSync(join(projectDir, 'supabase', 'config.toml'), 'utf8')
@@ -41,7 +44,7 @@ export function loadConfigToml(projectDir: string, env: NodeJS.ProcessEnv = proc
 }
 
 /** Parse TOML `text` into a table tree, resolving `env(VAR)` references. */
-export function parseConfigToml(text: string, env: NodeJS.ProcessEnv = process.env): ConfigTable {
+export function parseConfigToml(text: string, env: Environment = process.env): ConfigTable {
   const root = emptyTable()
   let current = root
   for (const rawLine of text.split('\n')) {
@@ -91,7 +94,7 @@ function stripComment(line: string): string {
 }
 
 /** Parse a scalar or single-line array value, resolving env() and stripping quotes. */
-function parseValue(raw: string, env: NodeJS.ProcessEnv): string | string[] | undefined {
+function parseValue(raw: string, env: Environment): string | string[] | undefined {
   if (raw.startsWith('[') && raw.endsWith(']')) {
     const inner = raw.slice(1, -1).trim()
     if (inner === '') return []
@@ -104,7 +107,7 @@ function parseValue(raw: string, env: NodeJS.ProcessEnv): string | string[] | un
 }
 
 /** Strip quotes and expand an `env(VAR)` reference to its value. */
-function resolveScalar(raw: string, env: NodeJS.ProcessEnv): string | undefined {
+function resolveScalar(raw: string, env: Environment): string | undefined {
   const v = raw.trim().replace(/^["']|["']$/g, '')
   const m = v.match(/^env\(\s*"?([A-Za-z0-9_]+)"?\s*\)$/)
   if (m) return env[m[1]]

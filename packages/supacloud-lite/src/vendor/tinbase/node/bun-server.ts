@@ -10,8 +10,13 @@ export interface ServeOptions {
   host?: string
 }
 
+export interface ServerHandle {
+  readonly port?: number
+  stop(closeActiveConnections?: boolean): void | Promise<void>
+}
+
 export interface RunningServer {
-  server: Bun.Server<WsData>
+  server: ServerHandle
   port: number
   url: string
   close: () => Promise<void>
@@ -73,7 +78,7 @@ export async function serveBun(backend: SupaliteBackendShape, opts: ServeOptions
     port: server.port ?? opts.port ?? 54321,
     url: `http://${host}:${server.port ?? opts.port ?? 54321}`,
     close: async () => {
-      server.stop(true)
+      await server.stop(true)
     },
   }
 }

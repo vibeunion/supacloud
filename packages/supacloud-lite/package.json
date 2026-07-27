@@ -18,17 +18,20 @@
     "dist",
     "README.md",
     "CHANGELOG.md",
+    "RELEASING.md",
     "THIRD_PARTY_NOTICES.md",
     "LICENSES"
   ],
   "scripts": {
     "build": "bun run build:js && bun run build:types",
-    "build:js": "bun build src/index.ts --target=bun --format=esm --outdir=dist --external @electric-sql/pglite && bun build src/cli.ts --target=bun --format=esm --outdir=dist --external @electric-sql/pglite --banner '#!/usr/bin/env bun'",
+    "build:js": "bun build src/index.ts --target=bun --format=esm --outdir=dist --external @electric-sql/pglite && bun build src/cli.ts --target=bun --format=esm --outdir=dist --external @electric-sql/pglite",
     "build:types": "bun x tsc --emitDeclarationOnly -p tsconfig.build.json",
-    "check": "bun run typecheck && bun test && bun run build",
+    "check": "bun run typecheck && bun run test && bun run build && bun run test:package",
     "dev": "bun run src/cli.ts start",
     "start": "bun run src/cli.ts start",
-    "test": "bun test",
+    "test": "bun test --timeout 20000",
+    "test:package": "bun run scripts/package-smoke.ts",
+    "prepack": "bun run build",
     "typecheck": "bun x tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {

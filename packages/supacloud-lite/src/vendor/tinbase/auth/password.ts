@@ -44,9 +44,17 @@ export async function verifyPassword(password: string, stored: string): Promise<
   const parts = stored.split('$')
   if (parts.length !== 4 || parts[0] !== 'pbkdf2') return false
   const iterations = parseInt(parts[1], 10)
+  if (!Number.isSafeInteger(iterations) || iterations <= 0 || iterations > 1_000_000) return false
+  if (parts[2].length === 0 || parts[2].length % 2 !== 0 || !/^[0-9a-f]+$/i.test(parts[2])) return false
+  if (!/^[0-9a-f]{64}$/i.test(parts[3])) return false
   const salt = fromHex(parts[2])
   const expected = parts[3]
-  const hash = await derive(password, salt, iterations)
+  let hash: Uint8Array
+  try {
+    hash = await derive(password, salt, iterations)
+  } catch {
+    return false
+  }
   const actual = toHex(hash)
   if (actual.length !== expected.length) return false
   // SECURITY: constant-time compare over the full hash to avoid leaking a

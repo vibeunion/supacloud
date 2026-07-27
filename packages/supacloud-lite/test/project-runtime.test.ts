@@ -1,9 +1,16 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdtemp, rm, stat } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { decodeJwt } from '../src/vendor/tinbase/jwt.js'
-import { ensureProjectSecrets, mintProjectKeys, resolveProjectPaths } from '../src/project-runtime.js'
+import { loadSupabaseProject } from '../src/vendor/tinbase/node/project.js'
+import {
+  createProjectBackend,
+  assertResetPathsSafe,
+  ensureProjectSecrets,
+  mintProjectKeys,
+  resolveProjectPaths,
+} from '../src/project-runtime.js'
 
 const temporaryDirectories: string[] = []
 
@@ -17,8 +24,10 @@ describe('project runtime', () => {
     temporaryDirectories.push(projectDir)
     const paths = resolveProjectPaths({ projectDir })
 
-    const [first, second] = await Promise.all([ensureProjectSecrets(paths), ensureProjectSecrets(paths)])
-    expect(second).toEqual(first)
+    const secrets = await Promise.all(Array.from({ length: 8 }, () => ensureProjectSecrets(paths)))
+    const first = secrets[0]!
+    expect(secrets.every((candidate) => candidate.jwtSecret === first.jwtSecret)).toBe(true)
+    expect(secrets.every((candidate) => candidate.vaultKey === first.vaultKey)).toBe(true)
     expect(first.jwtSecret.length).toBeGreaterThanOrEqual(64)
     expect(first.vaultKey.length).toBeGreaterThanOrEqual(64)
     expect((await stat(paths.secretsFile)).mode & 0o777).toBe(0o600)
@@ -37,5 +46,58 @@ describe('project runtime', () => {
     expect(paths.stateDir).toBe(join(projectDir, '.supacloud-lite'))
     expect(paths.dataDir).toBe(join(projectDir, '.supacloud-lite', 'db'))
     expect(paths.storageDir).toBe(join(projectDir, '.supacloud-lite', 'storage'))
+  })
+
+  test('refuses destructive reset targets outside the state directory', async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), 'supacloud-lite-reset-paths-'))
+    temporaryDirectories.push(projectDir)
+    const safePaths = resolveProjectPaths({ projectDir })
+    expect(() => assertResetPathsSafe(safePaths)).not.toThrow()
+
+    const unsafePaths = resolveProjectPaths({ projectDir, dataDir: join(projectDir, 'database') })
+    expect(() => assertResetPathsSafe(unsafePaths)).toThrow('outside the state directory')
+  })
+
+  test('does not mount the default email inbox on network-exposed hosts', async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), 'supacloud-lite-exposed-inbox-'))
+    temporaryDirectories.push(projectDir)
+    const project = await createProjectBackend({
+      projectDir,
+      host: '0.0.0.0',
+      includeFunctions: false,
+      includeWebhooks: false,
+    })
+    try {
+      expect(project.backend.inbox).toBeNull()
+      const response = await project.backend.fetch(new Request('http://127.0.0.1/inbox/api/messages'))
+      expect(response.status).toBe(401)
+    } finally {
+      await project.backend.close()
+    }
+  })
+
+  test('locks persistent PGlite data directories and releases the lock on idempotent close', async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), 'supacloud-lite-lock-'))
+    temporaryDirectories.push(projectDir)
+    const first = await createProjectBackend({ projectDir, includeFunctions: false, includeWebhooks: false })
+    await expect(
+      createProjectBackend({ projectDir, includeFunctions: false, includeWebhooks: false })
+    ).rejects.toThrow('already in use')
+    await Promise.all([first.backend.close(), first.backend.close()])
+    const reopened = await createProjectBackend({ projectDir, includeFunctions: false, includeWebhooks: false })
+    await reopened.backend.close()
+  })
+
+  test('expands seed globs deterministically and surfaces migration directory errors', async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), 'supacloud-lite-project-loader-'))
+    temporaryDirectories.push(projectDir)
+    await mkdir(join(projectDir, 'supabase', 'seeds'), { recursive: true })
+    await writeFile(join(projectDir, 'supabase', 'seeds', '02.sql'), "insert into test values ('second');\n")
+    await writeFile(join(projectDir, 'supabase', 'seeds', '01.sql'), "insert into test values ('first');\n")
+    const loaded = await loadSupabaseProject(projectDir, { paths: ['seeds/*.sql'] })
+    expect(loaded.seedSql).toBe("insert into test values ('first');\n\ninsert into test values ('second');\n")
+
+    await writeFile(join(projectDir, 'supabase', 'migrations'), 'not a directory')
+    await expect(loadSupabaseProject(projectDir)).rejects.toThrow()
   })
 })

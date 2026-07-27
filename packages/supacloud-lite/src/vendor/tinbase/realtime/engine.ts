@@ -569,18 +569,6 @@ export class RealtimeEngine {
 
         if (!(await this.canSee(channel.ctx, event, rlsEnabled, pk))) continue
 
-        // A DELETE on an RLS table can't be re-checked per row (the row is
-        // gone), so we can't confirm this subscriber was allowed to see it.
-        // Non-service subscribers therefore get only the primary key of the
-        // deleted row, never the full old_record - otherwise every other
-        // tenant's deleted-row contents would leak. (service_role/bypassrls and
-        // non-RLS tables still get the full old_record.)
-        const redactOld =
-          event.type === 'DELETE' && rlsEnabled && channel.ctx.role !== 'service_role'
-        const oldRecord = redactOld
-          ? pkOnly(event.old_record ?? {}, pk)
-          : event.old_record ?? {}
-
         this.send(conn, {
           topic: channel.topic,
           event: 'postgres_changes',
@@ -594,7 +582,7 @@ export class RealtimeEngine {
               type: event.type,
               columns,
               record: event.record ?? {},
-              old_record: oldRecord,
+              old_record: event.old_record ?? {},
               errors: event.errors ?? null,
             },
           },
@@ -608,31 +596,35 @@ export class RealtimeEngine {
    * Whether a subscriber may receive a given change event under RLS.
    * - service_role (bypassrls) and non-RLS tables: always.
    * - INSERT/UPDATE on an RLS table: re-query the row by PK as the subscriber;
-   *   deliver only if it is visible to them.
-   * - DELETE on an RLS table: the row no longer exists to re-query, so per-row
-   *   filtering isn't possible without WAL-level policy evaluation (WALRUS).
-   *   We deliver DELETEs to authenticated/service subscribers only, never anon.
+   *   deliver only if the currently visible row still matches the event snapshot.
+   * - DELETE on an RLS table: only service_role receives it because the deleted
+   *   row can no longer be re-queried safely as an ordinary subscriber.
    */
   private async canSee(ctx: RequestContext, event: CdcEvent, rlsEnabled: boolean, pk: string[]): Promise<boolean> {
     if (!rlsEnabled) return true
     if (ctx.role === 'service_role') return true
 
-    if (event.type === 'DELETE') return ctx.role !== 'anon'
-    if (pk.length === 0) return ctx.role !== 'anon' // can't PK-filter; conservative
+    if (event.type === 'DELETE') return false
+    if (pk.length === 0) return false
 
     const record = event.record ?? {}
     const conds = pk.map((c, i) => `${quoteIdent(c)} = $${i + 1}`)
     const params = pk.map((c) => record[c])
-    if (params.some((v) => v === undefined)) return ctx.role !== 'anon'
+    if (params.some((v) => v === undefined)) return false
 
     try {
       const res = await this.db.withContext(ctx, (q) =>
         q(
-          `select 1 from ${quoteIdent(event.schema)}.${quoteIdent(event.table)} where ${conds.join(' and ')} limit 1`,
+          `select to_jsonb(visible_row) as record
+           from ${quoteIdent(event.schema)}.${quoteIdent(event.table)} as visible_row
+           where ${conds.join(' and ')}
+           limit 1
+           for share`,
           params
         )
       )
-      return res.rows.length > 0
+      const visibleRecord = (res.rows[0] as { record?: unknown } | undefined)?.record
+      return visibleRecord !== undefined && sameJsonValue(visibleRecord, record)
     } catch {
       return false
     }
@@ -650,11 +642,20 @@ export class RealtimeEngine {
   }
 }
 
-/** Project a row down to just its primary-key columns (empty pk → empty row). */
-function pkOnly(row: Record<string, unknown>, pk: string[]): Record<string, unknown> {
-  const out: Record<string, unknown> = {}
-  for (const c of pk) if (c in row) out[c] = row[c]
-  return out
+function sameJsonValue(left: unknown, right: unknown): boolean {
+  return JSON.stringify(sortJsonValue(left)) === JSON.stringify(sortJsonValue(right))
+}
+
+function sortJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortJsonValue)
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
+        .map(([key, entry]) => [key, sortJsonValue(entry)])
+    )
+  }
+  return value
 }
 
 /** Evaluate a realtime filter string ("col=eq.value") against a row. */

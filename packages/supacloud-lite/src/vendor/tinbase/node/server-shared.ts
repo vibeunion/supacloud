@@ -4,7 +4,7 @@ import type { RealtimeEngine } from '../realtime/engine.js'
 /** The slice of a backend that servers need - keeps bun/node servers decoupled. */
 export interface SupaliteBackendShape {
   /** HTTP request handler; the server forwards every non-upgrade request here */
-  fetch: (req: Request) => Promise<Response>
+  fetch: typeof fetch
   /** realtime engine the server hands accepted websocket connections to */
   realtime: RealtimeEngine
 }

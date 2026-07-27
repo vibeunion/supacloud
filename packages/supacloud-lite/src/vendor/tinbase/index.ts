@@ -53,7 +53,7 @@ export { inspectDb, type TableInfo } from './db/inspect.js'
  */
 export interface TinbaseBackend {
   /** The whole backend as a fetch handler. Pass to supabase-js as global.fetch for in-process use. */
-  fetch: (req: Request) => Promise<Response>
+  fetch: typeof fetch
   /** The database engine wrapper - run raw SQL, inspect schema, apply migrations. */
   db: Database
   /** Realtime (Postgres CDC → WebSocket) engine backing supabase.channel(). */
@@ -76,7 +76,7 @@ export interface TinbaseBackend {
   jwtSecret: string
   /** Recent server logs (also surfaced in the Studio Logs pane). */
   logs: LogBuffer
-  /** Captured dev email inbox (mounted at /inbox), or null if a custom mailer was provided. */
+  /** Captured dev email inbox mounted only on loopback, or null when disabled or replaced. */
   inbox: InboxMailer | null
   /** Apply additional migrations at runtime. */
   migrate: (migrations: MigrationFile[], seedSql?: string) => Promise<string[]>
@@ -165,14 +165,8 @@ export async function createBackend(config: BackendConfig = {}): Promise<Tinbase
   )
 
   const rest = new RestHandler(db, { exposedSchemas: config.dbSchemas, maxRows: config.maxRows })
-  // With no custom mailer, capture auth emails in an in-memory inbox (viewable
-  // at /inbox) and log a metadata-only line. A provided mailer takes over and no
-  // inbox is mounted.
-  //
-  // The server log records only the recipient and subject - never the body,
-  // which carries OTP codes and magic links. Set logMailBody: true to also log
-  // the full body for local debugging (the /inbox UI always shows it in full).
-  const inbox = config.mailer
+  const exposed = isNetworkExposed(config.host)
+  const inbox = config.mailer || exposed
     ? null
     : new InboxMailer((msg) =>
         log(
@@ -181,7 +175,11 @@ export async function createBackend(config: BackendConfig = {}): Promise<Tinbase
             : `[mail] to=${msg.to} subject="${msg.subject}"`
         )
       )
-  const mailer: Mailer = config.mailer ?? inbox!
+  const mailer: Mailer = config.mailer ?? inbox ?? {
+    async send(msg) {
+      log(`[mail] to=${msg.to} subject="${msg.subject}"`)
+    },
+  }
   // one shared runtime-settings object: config.toml [auth] provides the
   // committed defaults, the persisted auth.config row layers live studio edits
   // on top, and the auth handler reads the merged object per request
@@ -198,6 +196,7 @@ export async function createBackend(config: BackendConfig = {}): Promise<Tinbase
     siteUrl,
     jwtExpiry,
     sessionTimeboxSeconds: config.sessionTimeboxSeconds,
+    sessionInactivitySeconds: config.sessionInactivitySeconds,
     mailer,
     oauthProviders: config.oauthProviders,
     oauthFetch: config.oauthFetch,
@@ -303,7 +302,6 @@ export async function createBackend(config: BackendConfig = {}): Promise<Tinbase
       )
     }
 
-    // local email inbox (dev-only; mounted only when using the default mailer)
     if (inbox && (path === '/inbox' || path.startsWith('/inbox/'))) {
       return withCors(inbox.serve(req, url))
     }
@@ -348,6 +346,13 @@ export async function createBackend(config: BackendConfig = {}): Promise<Tinbase
       }
       const ctx: RequestContext = { role: String(keyClaims.role ?? 'anon'), claims: keyClaims }
       return withCors(await auth.handle(req, ctx, url))
+    }
+
+    if (path.startsWith('/functions/v1/')) {
+      const functionName = path.replace(/^\/functions\/v1\/?/, '').split('/')[0]
+      if (functionName && config.functionVerifyJwt?.[functionName] === false) {
+        return withCors(await functions.handle(req, { role: 'anon', claims: null }, url))
+      }
     }
 
     const ctx = await resolveContext(req, url)
@@ -406,8 +411,17 @@ export async function createBackend(config: BackendConfig = {}): Promise<Tinbase
     return res
   }
 
+  let closePromise: Promise<void> | null = null
+  const publicFetch: typeof fetch = Object.assign(
+    (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const request = input instanceof Request && init === undefined ? input : new Request(input, init)
+      return loggedFetch(request)
+    },
+    { preconnect: fetch.preconnect }
+  )
+
   return {
-    fetch: loggedFetch,
+    fetch: publicFetch,
     db,
     realtime,
     functions,
@@ -421,14 +435,26 @@ export async function createBackend(config: BackendConfig = {}): Promise<Tinbase
     logs,
     inbox,
     migrate: (migrations, seedSql) => db.runMigrations(migrations, seedSql),
-    close: async () => {
-      auth.stop()
-      await cron.stop()
-      await net.stop()
-      await retention.stop()
-      webhooks.stopService()
-      realtime.stop()
-      await db.close()
+    close: () => {
+      closePromise ??= (async () => {
+        let firstError: unknown
+        const stop = async (operation: () => void | Promise<void>) => {
+          try {
+            await operation()
+          } catch (error) {
+            firstError ??= error
+          }
+        }
+        await stop(() => auth.stop())
+        await stop(() => cron.stop())
+        await stop(() => net.stop())
+        await stop(() => retention.stop())
+        await stop(() => webhooks.stopService())
+        await stop(() => realtime.stop())
+        await stop(() => db.close())
+        if (firstError !== undefined) throw firstError
+      })()
+      return closePromise
     },
   }
 }

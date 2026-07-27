@@ -1,5 +1,5 @@
 /** Loads edge functions from supabase/functions/<name>/index.{ts,js,mjs} (Node only). */
-import { readdir, readFile, stat } from 'node:fs/promises'
+import { readdir, readFile, realpath, rm, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { EdgeFunction } from '../functions/handler.js'
@@ -42,6 +42,8 @@ export interface LoadFunctionOptions {
   entrypoint?: string
 }
 
+let loadQueue: Promise<void> = Promise.resolve()
+
 /**
  * Discover and load every edge function under supabase/functions/, keyed by
  * directory name. Dirs starting with `_` or `.` are skipped (shared code), as
@@ -53,6 +55,23 @@ export interface LoadFunctionOptions {
 export async function loadFunctions(
   projectDir: string,
   options: Record<string, LoadFunctionOptions> = {}
+): Promise<Map<string, EdgeFunction>> {
+  let releaseQueue!: () => void
+  const previous = loadQueue
+  loadQueue = new Promise<void>((resolveQueue) => {
+    releaseQueue = resolveQueue
+  })
+  await previous
+  try {
+    return await loadFunctionsUnlocked(projectDir, options)
+  } finally {
+    releaseQueue()
+  }
+}
+
+async function loadFunctionsUnlocked(
+  projectDir: string,
+  options: Record<string, LoadFunctionOptions>
 ): Promise<Map<string, EdgeFunction>> {
   const functions = new Map<string, EdgeFunction>()
   const root = join(projectDir, 'supabase', 'functions')
@@ -82,13 +101,15 @@ export async function loadFunctions(
       } catch {
         continue
       }
+      let bundledPath: string | undefined
       try {
         // Bundle with esbuild so TS, relative imports, and npm:/jsr:/URL
         // specifiers resolve. If esbuild isn't installed, import the file
         // directly (Web-API / Deno.serve functions still work).
         let importUrl: string
         try {
-          importUrl = pathToFileURL(await bundleFunction(path, name)).href
+          bundledPath = await realpath(await bundleFunction(path, `${name}-${crypto.randomUUID()}`))
+          importUrl = pathToFileURL(bundledPath).href
         } catch (e) {
           if ((e as Error).message !== 'esbuild-not-available') throw e
           importUrl = pathToFileURL(path).href
@@ -107,10 +128,12 @@ export async function loadFunctions(
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
         if (/Unknown file extension|Cannot find module/.test(msg)) {
-          console.warn(`  warning: function "${name}" could not be bundled by Bun`)
+          console.warn(`  warning: function "${name}" could not be bundled by Bun: ${msg}`)
         } else {
           console.warn(`  warning: failed to load function "${name}": ${msg}`)
         }
+      } finally {
+        if (bundledPath) await rm(bundledPath, { force: true }).catch(() => {})
       }
       break
     }

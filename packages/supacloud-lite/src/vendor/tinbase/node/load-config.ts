@@ -22,6 +22,7 @@ import {
   getByteSize,
   getDurationSeconds,
   type ConfigTable,
+  type Environment,
 } from './config-toml.js'
 
 /** The project's config.toml, projected into the shapes tinbase consumes. */
@@ -95,7 +96,7 @@ export interface FunctionOptions {
 }
 
 /** Parse supabase/config.toml once and project it into a {@link ProjectConfig}. */
-export function loadProjectConfig(projectDir: string, env: NodeJS.ProcessEnv = process.env): ProjectConfig {
+export function loadProjectConfig(projectDir: string, env: Environment = process.env): ProjectConfig {
   const root = loadConfigToml(projectDir, env)
   return {
     auth: readAuth(root, env),
@@ -108,7 +109,7 @@ export function loadProjectConfig(projectDir: string, env: NodeJS.ProcessEnv = p
 
 // ── [auth] ─────────────────────────────────────────────────────────────────
 
-function readAuth(root: ConfigTable, env: NodeJS.ProcessEnv): AuthConfig {
+function readAuth(root: ConfigTable, env: Environment): AuthConfig {
   const auth = tableAt(root, 'auth')
   const out: AuthConfig = { settings: readAuthSettings(root), oauthProviders: readOAuthProviders(root, env) }
 
@@ -203,7 +204,7 @@ function readRateLimits(root: ConfigTable): Record<string, RateLimitRule> | unde
  *   3. SUPACLOUD_LITE_OAUTH_<PROVIDER>_CLIENT_ID / _CLIENT_SECRET / _ENABLED
  * Endpoints come from presets in oauth.ts; only real overrides are passed.
  */
-function readOAuthProviders(root: ConfigTable, env: NodeJS.ProcessEnv): Record<string, OAuthProviderConfig> {
+function readOAuthProviders(root: ConfigTable, env: Environment): Record<string, OAuthProviderConfig> {
   const out: Record<string, OAuthProviderConfig> = {}
 
   const external = tableAt(root, 'auth.external')
@@ -232,7 +233,7 @@ function readOAuthProviders(root: ConfigTable, env: NodeJS.ProcessEnv): Record<s
 
 /** Collect providers declared via `<prefix><NAME>_CLIENT_ID/_<secretKey>/_ENABLED` env vars. */
 function collectEnvProviders(
-  env: NodeJS.ProcessEnv,
+  env: Environment,
   out: Record<string, OAuthProviderConfig>,
   prefix: string,
   secretKey: string

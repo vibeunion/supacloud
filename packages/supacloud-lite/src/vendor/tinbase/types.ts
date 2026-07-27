@@ -79,6 +79,8 @@ export interface BackendConfig {
   storageDriver?: StorageDriver
   /** Edge functions: name → fetch handler, served at /functions/v1/<name>. */
   functions?: Map<string, import('./functions/handler.js').EdgeFunction> | Record<string, import('./functions/handler.js').EdgeFunction>
+  /** Per-function JWT verification setting from config.toml; false makes the function public. */
+  functionVerifyJwt?: Record<string, boolean>
   /** Extra env/secrets exposed to functions via Deno.env and ctx.env (e.g. from supabase/functions/.env). */
   functionEnv?: Record<string, string>
   /** Mail transport for OTP/magic-link/recovery emails. Default: console logger. */
@@ -140,9 +142,6 @@ export interface Mailer {
  * network-exposed host while still using it - see {@link import('./security.js').assertSecretsSafe}.
  */
 export const DEFAULT_JWT_SECRET = ''
-
-/** tinbase package version, surfaced in health/root responses. Keep in sync with package.json. */
-export const TINBASE_VERSION = '0.1.0'
 
 /** Per-request execution context derived from apikey/Authorization headers. */
 export interface RequestContext {

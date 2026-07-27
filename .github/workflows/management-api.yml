@@ -22,6 +22,8 @@ on:
       - ".github/workflows/ai-review-merge.yml"
       - ".github/workflows/management-api.yml"
       - ".github/workflows/release-please.yml"
+      - "release-please-config.json"
+      - ".release-please-manifest.json"
   pull_request:
     branches: ["main", "dev"]
     paths:
@@ -43,6 +45,8 @@ on:
       - ".github/workflows/ai-review-merge.yml"
       - ".github/workflows/management-api.yml"
       - ".github/workflows/release-please.yml"
+      - "release-please-config.json"
+      - ".release-please-manifest.json"
   workflow_dispatch:
 
 permissions:

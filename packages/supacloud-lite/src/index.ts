@@ -20,9 +20,10 @@ export type {
   StorageDriver,
 } from './vendor/tinbase/types.js'
 export type { EdgeFunction, FunctionContext } from './vendor/tinbase/functions/handler.js'
+export { SUPACLOUD_LITE_VERSION } from './version.js'
 export { FsStorageDriver } from './vendor/tinbase/node/fs-driver.js'
 export { serveBun } from './vendor/tinbase/node/bun-server.js'
-export type { RunningServer, ServeOptions } from './vendor/tinbase/node/bun-server.js'
+export type { RunningServer, ServerHandle, ServeOptions } from './vendor/tinbase/node/bun-server.js'
 export {
   createProjectBackend,
   ensureProjectSecrets,

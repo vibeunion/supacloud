@@ -1,4 +1,6 @@
 /** PGlite (WASM) engine - imported dynamically so native mode never loads the WASM bundle. */
+import { mkdir, open, readFile, stat, unlink, type FileHandle } from 'node:fs/promises'
+import { dirname, resolve } from 'node:path'
 import type { DbEngine, EngineResults, EngineTx } from './engine.js'
 
 /**
@@ -8,6 +10,7 @@ import type { DbEngine, EngineResults, EngineTx } from './engine.js'
  * @throws if the PGlite WASM bundle isn't available in this build (use the native engine instead).
  */
 export async function createPgliteEngine(dataDir?: string): Promise<DbEngine> {
+  const releaseLock = await acquireDataDirLock(dataDir)
   let PGlite, extensions
   try {
     ;({ PGlite } = await import('@electric-sql/pglite'))
@@ -24,11 +27,19 @@ export async function createPgliteEngine(dataDir?: string): Promise<DbEngine> {
     ])
     extensions = { uuid_ossp, pgcrypto, citext, pg_trgm, ltree, hstore, fuzzystrmatch }
   } catch (e) {
+    await releaseLock()
     if (e instanceof Error && /wasm/.test(e.message)) throw e
     throw new Error('the PGlite WASM engine is not available in this build')
   }
-  const pg = new PGlite({ dataDir, extensions })
-  await pg.waitReady
+  let pg: InstanceType<typeof PGlite>
+  try {
+    pg = new PGlite({ dataDir, extensions })
+    await pg.waitReady
+  } catch (error) {
+    await releaseLock()
+    throw error
+  }
+  let closed = false
 
   return {
     async query<T>(sql: string, params?: unknown[]): Promise<EngineResults<T>> {
@@ -54,6 +65,81 @@ export async function createPgliteEngine(dataDir?: string): Promise<DbEngine> {
     async listen(channel: string, cb: (payload: string) => void): Promise<() => void> {
       return pg.listen(channel, cb)
     },
-    close: () => pg.close(),
+    close: async () => {
+      if (closed) return
+      closed = true
+      try {
+        await pg.close()
+      } finally {
+        await releaseLock()
+      }
+    },
+  }
+}
+
+async function acquireDataDirLock(dataDir?: string): Promise<() => Promise<void>> {
+  if (!dataDir || dataDir.includes('://')) return async () => {}
+  const absoluteDataDir = resolve(dataDir)
+  const lockPath = `${absoluteDataDir}.supacloud-lite.lock`
+  await mkdir(dirname(absoluteDataDir), { recursive: true, mode: 0o700 })
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let handle: FileHandle | undefined
+    try {
+      handle = await open(lockPath, 'wx', 0o600)
+      await handle.writeFile(`${JSON.stringify({ pid: process.pid, createdAt: new Date().toISOString() })}\n`)
+      let released = false
+      return async () => {
+        if (released) return
+        released = true
+        await handle?.close().catch(() => {})
+        await unlink(lockPath).catch((error) => {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        })
+      }
+    } catch (error) {
+      await handle?.close().catch(() => {})
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+      const owner = await readLockOwner(lockPath)
+      if (owner && isProcessAlive(owner.pid)) {
+        throw new Error(
+          `PGlite data directory is already in use: ${absoluteDataDir} (pid ${owner.pid})`
+        )
+      }
+      if (!owner && !(await isUnknownLockStale(lockPath))) {
+        throw new Error(`PGlite data directory is already in use: ${absoluteDataDir}`)
+      }
+      await unlink(lockPath).catch((unlinkError) => {
+        if ((unlinkError as NodeJS.ErrnoException).code !== 'ENOENT') throw unlinkError
+      })
+    }
+  }
+  throw new Error(`Unable to acquire PGlite data directory lock: ${absoluteDataDir}`)
+}
+
+async function isUnknownLockStale(lockPath: string): Promise<boolean> {
+  try {
+    return Date.now() - (await stat(lockPath)).mtimeMs > 30_000
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return true
+    throw error
+  }
+}
+
+async function readLockOwner(lockPath: string): Promise<{ pid: number } | null> {
+  try {
+    const value = JSON.parse(await readFile(lockPath, 'utf8')) as { pid?: unknown }
+    return typeof value.pid === 'number' && Number.isInteger(value.pid) ? { pid: value.pid } : null
+  } catch {
+    return null
+  }
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM'
   }
 }

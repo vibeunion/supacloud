@@ -13,4 +13,15 @@ describe('Auth password compatibility', () => {
     const imported = await Bun.password.hash('imported-user-password', { algorithm: 'bcrypt', cost: 10 })
     expect(await verifyPassword('imported-user-password', imported)).toBe(true)
   })
+
+  test('retains verification for legacy PBKDF2 hashes', async () => {
+    const fixture =
+      'pbkdf2$100000$000102030405060708090a0b0c0d0e0f$ebc912e03a48689698c21563a3f9c36e5c67d4c830f463de3b147ea1bf038166'
+    expect(await verifyPassword('legacy-password', fixture)).toBe(true)
+    expect(await verifyPassword('wrong-password', fixture)).toBe(false)
+  })
+
+  test('rejects malformed PBKDF2 hashes without throwing', async () => {
+    expect(await verifyPassword('password', 'pbkdf2$bad$zz$00')).toBe(false)
+  })
 })

@@ -1,5 +1,5 @@
-import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
-import { isAbsolute, join, resolve } from 'node:path'
+import { chmod, link, mkdir, readFile, unlink, writeFile } from 'node:fs/promises'
+import { isAbsolute, join, relative, resolve } from 'node:path'
 import { createBackend, signJwt, type TinbaseBackend } from './vendor/tinbase/index.js'
 import type { WebhookConfig } from './vendor/tinbase/webhooks/service.js'
 import { serveBun, type RunningServer } from './vendor/tinbase/node/bun-server.js'
@@ -75,6 +75,21 @@ export function resolveProjectPaths(options: ProjectRuntimeOptions = {}): Projec
   }
 }
 
+export function assertResetPathsSafe(paths: ProjectPaths): void {
+  const stateDir = resolve(paths.stateDir)
+  const targets = [
+    ...(paths.dataDir ? [['database', paths.dataDir] as const] : []),
+    ['storage', paths.storageDir] as const,
+  ]
+  for (const [label, targetPath] of targets) {
+    const target = resolve(targetPath)
+    const relativePath = relative(stateDir, target)
+    if (!relativePath || relativePath.startsWith('..') || isAbsolute(relativePath)) {
+      throw new Error(`refusing to reset ${label} path outside the state directory: ${target}`)
+    }
+  }
+}
+
 export async function ensureProjectSecrets(paths: ProjectPaths): Promise<ProjectSecrets> {
   const envJwt = process.env.SUPACLOUD_LITE_JWT_SECRET
   const envVault = process.env.SUPACLOUD_LITE_VAULT_KEY
@@ -87,16 +102,23 @@ export async function ensureProjectSecrets(paths: ProjectPaths): Promise<Project
     stored = validateSecrets(JSON.parse(await readFile(paths.secretsFile, 'utf8')) as Partial<ProjectSecrets>)
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-    stored = {
+    const candidate = {
       jwtSecret: randomHex(48),
       vaultKey: randomHex(32),
       createdAt: new Date().toISOString(),
     }
+    const temporaryFile = `${paths.secretsFile}.${crypto.randomUUID()}.tmp`
     try {
-      await writeFile(paths.secretsFile, `${JSON.stringify(stored, null, 2)}\n`, { mode: 0o600, flag: 'wx' })
+      await writeFile(temporaryFile, `${JSON.stringify(candidate, null, 2)}\n`, { mode: 0o600, flag: 'wx' })
+      await link(temporaryFile, paths.secretsFile)
+      stored = candidate
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
       stored = validateSecrets(JSON.parse(await readFile(paths.secretsFile, 'utf8')) as Partial<ProjectSecrets>)
+    } finally {
+      await unlink(temporaryFile).catch((error) => {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      })
     }
   }
   await chmod(paths.secretsFile, 0o600)
@@ -161,6 +183,9 @@ export async function createProjectBackend(options: ProjectRuntimeOptions = {}):
     migrations: options.applyMigrations === false ? [] : project.migrations,
     seedSql: options.applyMigrations === false || options.includeSeed === false ? undefined : project.seedSql,
     functions,
+    functionVerifyJwt: Object.fromEntries(
+      Object.entries(config.functions).map(([name, functionOptions]) => [name, functionOptions.verifyJwt !== false])
+    ),
     functionEnv,
     webhooks,
     storageDriver: new FsStorageDriver(paths.storageDir),
@@ -185,14 +210,28 @@ export async function startProjectServer(options: ProjectRuntimeOptions = {}): P
   const project = await createProjectBackend(resolvedOptions)
   try {
     const server = await serveBun(project.backend, { host: project.host, port: project.port })
+    let closePromise: Promise<void> | null = null
     return {
       ...project,
       server,
       port: server.port,
       url: server.url,
-      close: async () => {
-        await server.close()
-        await project.backend.close()
+      close: () => {
+        closePromise ??= (async () => {
+          let firstError: unknown
+          try {
+            await server.close()
+          } catch (error) {
+            firstError = error
+          }
+          try {
+            await project.backend.close()
+          } catch (error) {
+            firstError ??= error
+          }
+          if (firstError !== undefined) throw firstError
+        })()
+        return closePromise
       },
     }
   } catch (error) {
@@ -249,7 +288,7 @@ function displayHost(host: string): string {
 async function findEphemeralPort(host = '127.0.0.1'): Promise<number> {
   const server = Bun.serve({ hostname: host, port: 0, fetch: () => new Response(null, { status: 204 }) })
   const port = server.port
-  server.stop(true)
+  await server.stop(true)
   if (port === undefined) throw new Error('Bun did not allocate an ephemeral port')
   return port
 }

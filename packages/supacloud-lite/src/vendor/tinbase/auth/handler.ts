@@ -4,7 +4,8 @@
  */
 import type { Database } from '../db/database.js'
 import { randomToken, signJwt, verifyJwt, type JwtClaims } from '../jwt.js'
-import { TINBASE_VERSION, type Mailer, type RequestContext } from '../types.js'
+import type { Mailer, RequestContext } from '../types.js'
+import { SUPACLOUD_LITE_VERSION } from '../../../version.js'
 import { OAuthService, type OAuthProviderConfig } from './oauth.js'
 import { hashPassword, verifyPassword } from './password.js'
 import { qrSvgDataUri } from './qr.js'
@@ -25,6 +26,8 @@ export interface AuthConfig {
   jwtExpiry: number
   /** Force sign-out after this many seconds (config.toml auth.sessions.timebox). Caps session lifetime. */
   sessionTimeboxSeconds?: number
+  /** Reject refresh after this many seconds without refresh activity. */
+  sessionInactivitySeconds?: number
   /** sends outgoing auth email (magic links, OTP codes, recovery) */
   mailer: Mailer
   /** OAuth providers to enable, keyed by provider name (google, github, …) */
@@ -98,6 +101,12 @@ function iso(v: Date | string | null): string | null {
   return v instanceof Date ? v.toISOString() : new Date(v).toISOString()
 }
 
+function timestampMs(value: Date | string | null): number | null {
+  if (value === null || value === undefined) return null
+  const timestamp = value instanceof Date ? value.getTime() : Date.parse(value)
+  return Number.isFinite(timestamp) ? timestamp : null
+}
+
 /** Routes and services the GoTrue-compatible `/auth/v1/*` endpoints. */
 export class AuthHandler {
   private oauth: OAuthService
@@ -148,7 +157,7 @@ export class AuthHandler {
     const method = req.method.toUpperCase()
 
     try {
-      if (path === 'health') return json(200, { name: 'supacloud-lite-auth', version: TINBASE_VERSION, description: 'GoTrue-compatible auth' })
+      if (path === 'health') return json(200, { name: 'supacloud-lite-auth', version: SUPACLOUD_LITE_VERSION, description: 'GoTrue-compatible auth' })
       if (path === 'settings') {
         const providers = Object.keys(this.config.oauthProviders ?? {})
         return json(200, {
@@ -168,7 +177,7 @@ export class AuthHandler {
       if (path === 'token' && method === 'POST') return this.limit('token', req) ?? (await this.token(req, url))
       if (path === 'user' && method === 'GET') return await this.getUser(req)
       if (path === 'user' && method === 'PUT') return await this.updateUser(req)
-      if (path === 'logout' && method === 'POST') return await this.logout(req)
+      if (path === 'logout' && method === 'POST') return await this.logout(req, url)
       if (path === 'otp' && method === 'POST') return this.limit('otp', req) ?? (await this.sendOtp(req))
       if (path === 'recover' && method === 'POST') return this.limit('recover', req) ?? (await this.sendRecovery(req))
       if (['magiclink', 'resend'].includes(path) && method === 'POST')
@@ -297,13 +306,54 @@ export class AuthHandler {
          where rt.token = $1`,
         [token]
       )
-      const row = res.rows[0] as { revoked: boolean; user_id: string } | undefined
+      const row = res.rows[0] as
+        | {
+            revoked: boolean
+            user_id: string
+            session_id: string | null
+            created_at: Date | string | null
+          }
+        | undefined
       if (!row || row.revoked) {
         return authError(400, 'refresh_token_not_found', 'Invalid Refresh Token: Refresh Token Not Found')
       }
+      const now = Date.now()
+      const lastActivity = timestampMs(row.created_at)
+      if (
+        this.config.sessionInactivitySeconds &&
+        lastActivity !== null &&
+        now - lastActivity >= this.config.sessionInactivitySeconds * 1000
+      ) {
+        await this.db.query(`update auth.refresh_tokens set revoked = true, updated_at = now() where token = $1`, [token])
+        return authError(400, 'session_expired', 'Session expired due to inactivity')
+      }
+      const sessionStartedAt = row.session_id
+        ? timestampMs(
+            (
+              await this.db.query<{ started_at: Date | string | null }>(
+                `select min(created_at) as started_at from auth.refresh_tokens where session_id = $1`,
+                [row.session_id]
+              )
+            ).rows[0]?.started_at ?? null
+          )
+        : lastActivity
+      if (
+        this.config.sessionTimeboxSeconds &&
+        sessionStartedAt !== null &&
+        now - sessionStartedAt >= this.config.sessionTimeboxSeconds * 1000
+      ) {
+        await this.db.query(`update auth.refresh_tokens set revoked = true, updated_at = now() where token = $1`, [token])
+        return authError(400, 'session_expired', 'Session expired')
+      }
       await this.db.query(`update auth.refresh_tokens set revoked = true, updated_at = now() where token = $1`, [token])
       const ures = await this.db.query(`select * from auth.users where id = $1`, [row.user_id])
-      return json(200, await this.sessionFor(ures.rows[0] as UserRow, token))
+      return json(
+        200,
+        await this.sessionFor(ures.rows[0] as UserRow, token, {
+          sessionId: row.session_id ?? undefined,
+          sessionStartedAt: sessionStartedAt === null ? undefined : Math.floor(sessionStartedAt / 1000),
+        })
+      )
     }
 
     if (grantType === 'pkce') {
@@ -335,6 +385,13 @@ export class AuthHandler {
     }
     const sets: string[] = []
     const params: unknown[] = []
+    if (body.email && !this.settings.autoconfirm) {
+      return authError(
+        501,
+        'email_change_confirmation_not_supported',
+        'Email changes that require confirmation are not supported by SupaCloud Lite V1'
+      )
+    }
     // Upgrading an anonymous user to a permanent one: adding an email (and
     // usually a password) keeps the same id + data, flips is_anonymous off, and
     // records an email identity - matching supabase.auth.updateUser({ email }).
@@ -382,11 +439,24 @@ export class AuthHandler {
     return json(200, this.userJson(updated))
   }
 
-  private async logout(req: Request): Promise<Response> {
-    const user = await this.userFromBearer(req)
-    if (user) {
-      await this.db.query(`update auth.refresh_tokens set revoked = true where user_id = $1`, [user.id])
-      await this.audit('logout', { actorId: user.id, actorEmail: user.email })
+  private async logout(req: Request, url: URL): Promise<Response> {
+    const claims = await this.claimsFromBearer(req)
+    if (claims?.sub) {
+      const scope = url.searchParams.get('scope') ?? 'global'
+      const sessionId = typeof claims.session_id === 'string' ? claims.session_id : null
+      if (scope === 'local' && sessionId) {
+        await this.db.query(`update auth.refresh_tokens set revoked = true where session_id = $1`, [sessionId])
+      } else if (scope === 'others' && sessionId) {
+        await this.db.query(`update auth.refresh_tokens set revoked = true where user_id = $1 and session_id <> $2`, [
+          claims.sub,
+          sessionId,
+        ])
+      } else {
+        await this.db.query(`update auth.refresh_tokens set revoked = true where user_id = $1`, [claims.sub])
+      }
+      const result = await this.db.query<UserRow>(`select * from auth.users where id = $1`, [claims.sub])
+      const user = result.rows[0]
+      if (user) await this.audit('logout', { actorId: user.id, actorEmail: user.email })
     }
     return new Response(null, { status: 204 })
   }
@@ -889,12 +959,16 @@ export class AuthHandler {
   // ── helpers ───────────────────────────────────────────────────────────
 
   private async userFromBearer(req: Request): Promise<UserRow | null> {
-    const authz = req.headers.get('authorization') ?? ''
-    if (!authz.toLowerCase().startsWith('bearer ')) return null
-    const claims = await verifyJwt(authz.slice(7), this.config.jwtSecret)
+    const claims = await this.claimsFromBearer(req)
     if (!claims?.sub) return null
     const res = await this.db.query(`select * from auth.users where id = $1`, [claims.sub])
     return (res.rows[0] as UserRow) ?? null
+  }
+
+  private async claimsFromBearer(req: Request): Promise<JwtClaims | null> {
+    const authz = req.headers.get('authorization') ?? ''
+    if (!authz.toLowerCase().startsWith('bearer ')) return null
+    return verifyJwt(authz.slice(7), this.config.jwtSecret)
   }
 
   /** Shape a user row into the GoTrue user object supabase-js expects. */
@@ -936,16 +1010,24 @@ export class AuthHandler {
   private async sessionFor(
     user: UserRow,
     parentToken?: string,
-    opts?: { aal?: string; amr?: { method: string; timestamp: number }[] }
+    opts?: {
+      aal?: string
+      amr?: { method: string; timestamp: number }[]
+      sessionId?: string
+      sessionStartedAt?: number
+    }
   ): Promise<Record<string, unknown>> {
     const now = Math.floor(Date.now() / 1000)
     // Cap the access-token lifetime at the session timebox so a timeboxed
     // session can't outlive its absolute deadline (config.toml auth.sessions.timebox).
-    const lifetime = this.config.sessionTimeboxSeconds
-      ? Math.min(this.config.jwtExpiry, this.config.sessionTimeboxSeconds)
+    const timeboxRemaining = this.config.sessionTimeboxSeconds
+      ? opts?.sessionStartedAt !== undefined
+        ? opts.sessionStartedAt + this.config.sessionTimeboxSeconds - now
+        : this.config.sessionTimeboxSeconds
       : this.config.jwtExpiry
+    const lifetime = Math.max(1, Math.min(this.config.jwtExpiry, timeboxRemaining))
     const expiresAt = now + lifetime
-    const sessionId = crypto.randomUUID()
+    const sessionId = opts?.sessionId ?? crypto.randomUUID()
     const claims: JwtClaims = {
       iss: `${this.config.apiUrl}/auth/v1`,
       sub: user.id,
