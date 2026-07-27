@@ -112,7 +112,22 @@
     "name": "Table Name",
     "schema": "Schema",
     "type": "Type",
-    "rows": "Rows (est.)"
+    "rows": "Rows (est.)",
+    "description": "View tables and create new ones in the public schema through controlled migrations.",
+    "create_title": "Create table",
+    "create_description": "The operation will be recorded as a database migration.",
+    "table_name": "Table name",
+    "columns": "Columns",
+    "add_column": "Add column",
+    "column_name_aria": "Column {index} name",
+    "column_type_aria": "Column {index} type",
+    "primary_key": "Primary key",
+    "remove_column_aria": "Remove column {name}",
+    "nullable": "Nullable",
+    "create_action": "Create table",
+    "create_success": "Table {name} created",
+    "create_failed": "Failed to create table",
+    "estimated_rows": "About {count} rows"
   },
   "Functions": {
     "create_new": "Create New Function",

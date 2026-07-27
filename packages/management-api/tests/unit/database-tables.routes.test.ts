@@ -50,8 +50,8 @@ const { databaseRoutes } = await import(
 );
 const app = new Elysia().use(databaseRoutes);
 
-function request(query = "") {
-  return app.handle(new Request(`http://localhost/v1/projects/proj_1/database/tables${query}`));
+function request(query = "", init?: RequestInit) {
+  return app.handle(new Request(`http://localhost/v1/projects/proj_1/database/tables${query}`, init));
 }
 
 describe("database table list route", () => {
@@ -114,5 +114,24 @@ describe("database table list route", () => {
       errorCode: "08006",
       errorMessage: "connection failed password=[REDACTED]",
     });
+  });
+
+  test("rejects invalid table definitions before opening a database connection", async () => {
+    const response = await request("", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "orders; drop table users",
+        columns: [{ name: "id", type: "bigint", primaryKey: true, identity: true }],
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      message: "name must be a PostgreSQL identifier",
+      code: "invalid_table_definition",
+      status: 400,
+    });
+    expect(managementDb).not.toHaveBeenCalled();
   });
 });

@@ -37,6 +37,9 @@ export const getTenantResources = (ref: string): ResourceDefinition[] => [
   {
     name: `v1/projects/${ref}/database/tables`,
     label: 'Tables',
+    // Table creation uses the dedicated, migration-backed form on the Tables page.
+    canCreate: false,
+    canEdit: false,
     fields: [
       { key: 'table_name', label: 'Name', type: 'text', required: true, searchable: true },
       { key: 'table_schema', label: 'Schema', type: 'select', showInForm: false },

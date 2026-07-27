@@ -112,7 +112,22 @@
     "name": "表名",
     "schema": "Schema",
     "type": "类型",
-    "rows": "行数 (估算)"
+    "rows": "行数 (估算)",
+    "description": "查看数据表，并通过受控迁移在 public schema 中创建新表。",
+    "create_title": "新建数据表",
+    "create_description": "创建操作会记录为数据库迁移。",
+    "table_name": "表名",
+    "columns": "字段",
+    "add_column": "添加字段",
+    "column_name_aria": "字段 {index} 名称",
+    "column_type_aria": "字段 {index} 类型",
+    "primary_key": "主键",
+    "remove_column_aria": "删除字段 {name}",
+    "nullable": "允许为空",
+    "create_action": "创建表",
+    "create_success": "数据表 {name} 已创建",
+    "create_failed": "创建数据表失败",
+    "estimated_rows": "约 {count} 行"
   },
   "Functions": {
     "create_new": "创建新函数",
