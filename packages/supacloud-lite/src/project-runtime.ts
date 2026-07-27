@@ -1,5 +1,5 @@
-import { chmod, link, mkdir, readFile, unlink, writeFile } from 'node:fs/promises'
-import { isAbsolute, join, relative, resolve } from 'node:path'
+import { chmod, link, lstat, mkdir, readFile, realpath, unlink, writeFile } from 'node:fs/promises'
+import { dirname, isAbsolute, join, parse, relative, resolve } from 'node:path'
 import { createBackend, signJwt, type TinbaseBackend } from './vendor/tinbase/index.js'
 import type { WebhookConfig } from './vendor/tinbase/webhooks/service.js'
 import { serveBun, type RunningServer } from './vendor/tinbase/node/bun-server.js'
@@ -75,8 +75,22 @@ export function resolveProjectPaths(options: ProjectRuntimeOptions = {}): Projec
   }
 }
 
-export function assertResetPathsSafe(paths: ProjectPaths): void {
+export async function assertResetPathsSafe(paths: ProjectPaths): Promise<void> {
   const stateDir = resolve(paths.stateDir)
+  if (stateDir === parse(stateDir).root) throw new Error('refusing to use the filesystem root as the state directory')
+  const stateInfo = await lstat(stateDir)
+  if (!stateInfo.isDirectory() || stateInfo.isSymbolicLink()) {
+    throw new Error(`refusing to reset through an invalid state directory: ${stateDir}`)
+  }
+  const canonicalStateDir = await realpath(stateDir)
+  const secretsFile = resolve(paths.secretsFile)
+  if (secretsFile !== join(stateDir, 'secrets.json')) {
+    throw new Error(`refusing to reset a state directory with an invalid secrets marker path: ${secretsFile}`)
+  }
+  const markerInfo = await lstat(secretsFile)
+  if (!markerInfo.isFile() || markerInfo.isSymbolicLink()) {
+    throw new Error(`refusing to reset a state directory without a valid secrets marker: ${stateDir}`)
+  }
   const targets = [
     ...(paths.dataDir ? [['database', paths.dataDir] as const] : []),
     ['storage', paths.storageDir] as const,
@@ -87,6 +101,49 @@ export function assertResetPathsSafe(paths: ProjectPaths): void {
     if (!relativePath || relativePath.startsWith('..') || isAbsolute(relativePath)) {
       throw new Error(`refusing to reset ${label} path outside the state directory: ${target}`)
     }
+    await assertResetTargetCanonical(stateDir, canonicalStateDir, target, label)
+  }
+}
+
+async function assertResetTargetCanonical(
+  stateDir: string,
+  canonicalStateDir: string,
+  target: string,
+  label: string
+): Promise<void> {
+  let current = target
+  while (current !== stateDir) {
+    try {
+      if ((await lstat(current)).isSymbolicLink()) {
+        throw new Error(`refusing to reset ${label} path through a symbolic link: ${current}`)
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
+    const parent = dirname(current)
+    if (parent === current) throw new Error(`refusing to reset ${label} path outside the state directory: ${target}`)
+    current = parent
+  }
+  const existingAncestor = await nearestExistingAncestor(target)
+  const canonicalTarget = resolve(await realpath(existingAncestor), relative(existingAncestor, target))
+  const canonicalRelative = relative(canonicalStateDir, canonicalTarget)
+  if (!canonicalRelative || canonicalRelative.startsWith('..') || isAbsolute(canonicalRelative)) {
+    throw new Error(`refusing to reset ${label} path outside the canonical state directory: ${target}`)
+  }
+}
+
+async function nearestExistingAncestor(target: string): Promise<string> {
+  let current = target
+  while (true) {
+    try {
+      await lstat(current)
+      return current
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
+    const parent = dirname(current)
+    if (parent === current) throw new Error(`unable to resolve an existing ancestor for ${target}`)
+    current = parent
   }
 }
 

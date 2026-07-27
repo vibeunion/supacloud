@@ -166,7 +166,7 @@ async function runDbCommand(options: CliOptions): Promise<void> {
   const subcommand = options.positionals[0]
   const paths = resolveProjectPaths(options)
   if (subcommand === 'reset') {
-    assertResetPathsSafe(paths)
+    await assertResetPathsSafe(paths)
     if (paths.dataDir) await rm(paths.dataDir, { recursive: true, force: true })
     await rm(paths.storageDir, { recursive: true, force: true })
     const project = await createProjectBackend({ ...options, includeFunctions: false, includeWebhooks: false, log: quietLog })

@@ -1,5 +1,5 @@
 /** PGlite (WASM) engine - imported dynamically so native mode never loads the WASM bundle. */
-import { mkdir, open, readFile, stat, unlink, type FileHandle } from 'node:fs/promises'
+import { mkdir, open, readFile, unlink, type FileHandle } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import type { DbEngine, EngineResults, EngineTx } from './engine.js'
 
@@ -82,54 +82,42 @@ async function acquireDataDirLock(dataDir?: string): Promise<() => Promise<void>
   const absoluteDataDir = resolve(dataDir)
   const lockPath = `${absoluteDataDir}.supacloud-lite.lock`
   await mkdir(dirname(absoluteDataDir), { recursive: true, mode: 0o700 })
-
-  for (let attempt = 0; attempt < 2; attempt++) {
-    let handle: FileHandle | undefined
-    try {
-      handle = await open(lockPath, 'wx', 0o600)
-      await handle.writeFile(`${JSON.stringify({ pid: process.pid, createdAt: new Date().toISOString() })}\n`)
-      let released = false
-      return async () => {
-        if (released) return
-        released = true
-        await handle?.close().catch(() => {})
-        await unlink(lockPath).catch((error) => {
-          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-        })
-      }
-    } catch (error) {
-      await handle?.close().catch(() => {})
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-      const owner = await readLockOwner(lockPath)
-      if (owner && isProcessAlive(owner.pid)) {
-        throw new Error(
-          `PGlite data directory is already in use: ${absoluteDataDir} (pid ${owner.pid})`
-        )
-      }
-      if (!owner && !(await isUnknownLockStale(lockPath))) {
-        throw new Error(`PGlite data directory is already in use: ${absoluteDataDir}`)
-      }
-      await unlink(lockPath).catch((unlinkError) => {
-        if ((unlinkError as NodeJS.ErrnoException).code !== 'ENOENT') throw unlinkError
-      })
-    }
-  }
-  throw new Error(`Unable to acquire PGlite data directory lock: ${absoluteDataDir}`)
-}
-
-async function isUnknownLockStale(lockPath: string): Promise<boolean> {
+  const nonce = crypto.randomUUID()
+  let handle: FileHandle | undefined
   try {
-    return Date.now() - (await stat(lockPath)).mtimeMs > 30_000
+    handle = await open(lockPath, 'wx', 0o600)
+    await handle.writeFile(`${JSON.stringify({ pid: process.pid, nonce, createdAt: new Date().toISOString() })}\n`)
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return true
-    throw error
+    await handle?.close().catch(() => {})
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+    const owner = await readLockOwner(lockPath)
+    if (owner && isProcessAlive(owner.pid)) {
+      throw new Error(`PGlite data directory is already in use: ${absoluteDataDir} (pid ${owner.pid})`)
+    }
+    throw new Error(
+      `PGlite data directory has a stale or unreadable lock: ${lockPath}. ` +
+        'Confirm no SupaCloud Lite process is using it, then remove the lock manually.'
+    )
+  }
+  let released = false
+  return async () => {
+    if (released) return
+    released = true
+    await handle?.close()
+    const owner = await readLockOwner(lockPath)
+    if (owner?.nonce !== nonce) return
+    await unlink(lockPath).catch((error) => {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    })
   }
 }
 
-async function readLockOwner(lockPath: string): Promise<{ pid: number } | null> {
+async function readLockOwner(lockPath: string): Promise<{ pid: number; nonce: string } | null> {
   try {
-    const value = JSON.parse(await readFile(lockPath, 'utf8')) as { pid?: unknown }
-    return typeof value.pid === 'number' && Number.isInteger(value.pid) ? { pid: value.pid } : null
+    const value = JSON.parse(await readFile(lockPath, 'utf8')) as { pid?: unknown; nonce?: unknown }
+    return typeof value.pid === 'number' && Number.isInteger(value.pid) && typeof value.nonce === 'string'
+      ? { pid: value.pid, nonce: value.nonce }
+      : null
   } catch {
     return null
   }

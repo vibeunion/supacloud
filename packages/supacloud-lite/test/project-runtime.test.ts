@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, parse } from 'node:path'
 import { decodeJwt } from '../src/vendor/tinbase/jwt.js'
 import { loadSupabaseProject } from '../src/vendor/tinbase/node/project.js'
 import {
@@ -52,10 +52,23 @@ describe('project runtime', () => {
     const projectDir = await mkdtemp(join(tmpdir(), 'supacloud-lite-reset-paths-'))
     temporaryDirectories.push(projectDir)
     const safePaths = resolveProjectPaths({ projectDir })
-    expect(() => assertResetPathsSafe(safePaths)).not.toThrow()
+    await ensureProjectSecrets(safePaths)
+    await expect(assertResetPathsSafe(safePaths)).resolves.toBeUndefined()
 
     const unsafePaths = resolveProjectPaths({ projectDir, dataDir: join(projectDir, 'database') })
-    expect(() => assertResetPathsSafe(unsafePaths)).toThrow('outside the state directory')
+    await expect(assertResetPathsSafe(unsafePaths)).rejects.toThrow('outside the state directory')
+
+    const externalDir = await mkdtemp(join(tmpdir(), 'supacloud-lite-reset-external-'))
+    temporaryDirectories.push(externalDir)
+    await symlink(externalDir, join(safePaths.stateDir, 'linked'))
+    await expect(
+      assertResetPathsSafe({ ...safePaths, storageDir: join(safePaths.stateDir, 'linked', 'storage') })
+    ).rejects.toThrow('symbolic link')
+
+    const root = parse(projectDir).root
+    await expect(
+      assertResetPathsSafe({ ...safePaths, stateDir: root, dataDir: join(root, 'db'), storageDir: join(root, 'storage') })
+    ).rejects.toThrow('filesystem root')
   })
 
   test('does not mount the default email inbox on network-exposed hosts', async () => {
@@ -86,6 +99,12 @@ describe('project runtime', () => {
     await Promise.all([first.backend.close(), first.backend.close()])
     const reopened = await createProjectBackend({ projectDir, includeFunctions: false, includeWebhooks: false })
     await reopened.backend.close()
+
+    const paths = resolveProjectPaths({ projectDir })
+    await writeFile(`${paths.dataDir}.supacloud-lite.lock`, JSON.stringify({ pid: 999_999, nonce: 'stale' }))
+    await expect(
+      createProjectBackend({ projectDir, includeFunctions: false, includeWebhooks: false })
+    ).rejects.toThrow('remove the lock manually')
   })
 
   test('expands seed globs deterministically and surfaces migration directory errors', async () => {

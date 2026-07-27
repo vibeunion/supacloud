@@ -174,6 +174,15 @@ describe('SupaCloud Lite supabase-js compatibility', () => {
     })
     expect(upload.error).toBeNull()
 
+    const oversized = await userClient.storage.from('assets').upload('docs/oversized.txt', 'x'.repeat(64 * 1024), {
+      contentType: 'text/plain',
+      upsert: true,
+    })
+    expect(oversized.error).not.toBeNull()
+
+    const reservedBucket = await serviceClient.storage.createBucket('.supacloud-lite')
+    expect(reservedBucket.error).not.toBeNull()
+
     const listed = await userClient.storage.from('assets').list('docs')
     expect(listed.error).toBeNull()
     expect(listed.data?.map((item) => item.name)).toContain('hello.txt')
@@ -240,6 +249,23 @@ describe('SupaCloud Lite supabase-js compatibility', () => {
   test('rejects unsafe TUS object paths and disallowed MIME types before upload allocation', async () => {
     expect((await createTusUpload(5, userAccessToken, '../escape.txt')).status).toBe(400)
     expect((await createTusUpload(5, userAccessToken, 'payload.json', 'application/json')).status).toBe(415)
+    const oversizedChunk = await fetch(`${project.url}/storage/v1/upload/resumable`, {
+      method: 'POST',
+      headers: {
+        apikey: project.backend.anonKey,
+        authorization: `Bearer ${userAccessToken}`,
+        'content-type': 'application/offset+octet-stream',
+        'tus-resumable': '1.0.0',
+        'upload-length': '1',
+        'upload-metadata': [
+          `bucketName ${btoa('assets')}`,
+          `objectName ${btoa('bounded.txt')}`,
+          `contentType ${btoa('text/plain')}`,
+        ].join(','),
+      },
+      body: 'x'.repeat(64 * 1024),
+    })
+    expect(oversizedChunk.status).toBe(400)
   })
 
   test('supports Realtime postgres_changes through Bun WebSockets', async () => {

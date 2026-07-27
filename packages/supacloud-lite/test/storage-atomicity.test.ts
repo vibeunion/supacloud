@@ -6,7 +6,6 @@ class FailingStorageDriver implements StorageDriver {
   private objects = new Map<string, Uint8Array>()
   failAfterWrite = false
   failOnTextAfterWrite: string | null = null
-  failAfterDelete = false
   failAfterDeleteMany = false
 
   async put(key: string, data: Uint8Array): Promise<void> {
@@ -24,10 +23,6 @@ class FailingStorageDriver implements StorageDriver {
 
   async delete(key: string): Promise<void> {
     this.objects.delete(key)
-    if (this.failAfterDelete) {
-      this.failAfterDelete = false
-      throw new Error('simulated delete failure')
-    }
   }
 
   async deleteMany(keys: string[]): Promise<void> {
@@ -60,6 +55,9 @@ describe('Storage atomicity', () => {
         upsert: true,
       })
       expect(initial.error).toBeNull()
+      const initialMetadata = await backend.db.query<{ version: string }>(
+        `select version from storage.objects where bucket_id = 'assets' and name = 'atomic.txt'`
+      )
 
       driver.failAfterWrite = true
       const failed = await client.storage.from('assets').upload('atomic.txt', new TextEncoder().encode('new-value'), {
@@ -71,10 +69,11 @@ describe('Storage atomicity', () => {
       const downloaded = await client.storage.from('assets').download('atomic.txt')
       expect(downloaded.error).toBeNull()
       expect(await downloaded.data!.text()).toBe('old')
-      const metadata = await backend.db.query<{ metadata: { size: number } }>(
-        `select metadata from storage.objects where bucket_id = 'assets' and name = 'atomic.txt'`
+      const metadata = await backend.db.query<{ metadata: { size: number }; version: string }>(
+        `select metadata, version from storage.objects where bucket_id = 'assets' and name = 'atomic.txt'`
       )
       expect(metadata.rows[0]?.metadata.size).toBe(3)
+      expect(metadata.rows[0]?.version).toBe(initialMetadata.rows[0]?.version)
     } finally {
       await backend.close()
     }
@@ -113,34 +112,34 @@ describe('Storage atomicity', () => {
     }
   })
 
-  test('restores bytes and metadata when remove fails after deleting bytes', async () => {
+  test('keeps deleted metadata authoritative when old-byte cleanup fails', async () => {
     const driver = new FailingStorageDriver()
     const { backend, client } = await createStorageHarness(driver)
     try {
       expect((await client.storage.from('assets').upload('delete.txt', 'keep-me', { upsert: true })).error).toBeNull()
 
       driver.failAfterDeleteMany = true
-      expect((await client.storage.from('assets').remove(['delete.txt'])).error).not.toBeNull()
-      expect(await downloadText(client, 'delete.txt')).toBe('keep-me')
+      expect((await client.storage.from('assets').remove(['delete.txt'])).error).toBeNull()
+      expect((await client.storage.from('assets').download('delete.txt')).error).not.toBeNull()
       const metadata = await backend.db.query(
         `select 1 from storage.objects where bucket_id = 'assets' and name = 'delete.txt'`
       )
-      expect(metadata.rows).toHaveLength(1)
+      expect(metadata.rows).toHaveLength(0)
     } finally {
       await backend.close()
     }
   })
 
-  test('rolls a move back when source deletion fails after deleting bytes', async () => {
+  test('keeps a moved object readable when old-byte cleanup fails', async () => {
     const driver = new FailingStorageDriver()
     const { backend, client } = await createStorageHarness(driver)
     try {
       expect((await client.storage.from('assets').upload('source.txt', 'source', { upsert: true })).error).toBeNull()
 
-      driver.failAfterDelete = true
-      expect((await client.storage.from('assets').move('source.txt', 'moved.txt')).error).not.toBeNull()
-      expect(await downloadText(client, 'source.txt')).toBe('source')
-      expect((await client.storage.from('assets').download('moved.txt')).error).not.toBeNull()
+      driver.failAfterDeleteMany = true
+      expect((await client.storage.from('assets').move('source.txt', 'moved.txt')).error).toBeNull()
+      expect((await client.storage.from('assets').download('source.txt')).error).not.toBeNull()
+      expect(await downloadText(client, 'moved.txt')).toBe('source')
     } finally {
       await backend.close()
     }
