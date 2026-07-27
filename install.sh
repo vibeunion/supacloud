@@ -61,7 +61,7 @@ SUPACLOUD_INSTALL_KEYS=(
     S3_ENDPOINT S3_PROTOCOL S3_REGION S3_BUCKET S3_ACCESS_KEY S3_SECRET_KEY
     S3_FORCE_PATH_STYLE
     EXTERNAL_S3_ENDPOINT EXTERNAL_S3_REGION EXTERNAL_S3_BUCKET
-    EXTERNAL_S3_ACCESS_KEY EXTERNAL_S3_SECRET_KEY IMAGINARY_IMAGE EDGE_RUNTIME
+    EXTERNAL_S3_ACCESS_KEY EXTERNAL_S3_SECRET_KEY IMAGINARY_IMAGE EDGE_RUNTIME EDGE_RUNTIME_PORT
     ENABLE_ANALYTICS ANALYTICS_BACKEND LOGFLARE_DB LOGFLARE_SCHEMA LOGFLARE_ERL_FLAGS
 )
 SUPACLOUD_EXPLICIT_INSTALL_KEYS=()
@@ -408,6 +408,7 @@ recover_legacy_install_config() {
     apply_recovered_env_value POSTGRES_PASSWORD "$MANAGEMENT_ENV_FILE" PGPASSWORD
     apply_recovered_env_value JWT_SECRET "$MANAGEMENT_ENV_FILE" JWT_SECRET
     apply_recovered_env_value S3_STORAGE_TYPE "$MANAGEMENT_ENV_FILE" S3_STORAGE_TYPE
+    apply_recovered_env_value EDGE_RUNTIME_PORT "$MANAGEMENT_ENV_FILE" EDGE_RUNTIME_PORT
     apply_recovered_env_value IMAGINARY_IMAGE "$MANAGEMENT_ENV_FILE" IMAGINARY_IMAGE
     local recovered_base_domain
     recovered_base_domain=$(supacloud_env_value "$MANAGEMENT_ENV_FILE" BASE_DOMAIN)
@@ -1440,7 +1441,8 @@ render_edge_runtime_systemd_unit() {
     local source_file="$1"
     local target_file="$2"
     local exec_start="$3"
-    python3 - "$source_file" "$target_file" "$exec_start" <<'PY'
+    local runtime_port="$4"
+    python3 - "$source_file" "$target_file" "$exec_start" "$runtime_port" <<'PY'
 import os
 import sys
 import tempfile
@@ -1449,10 +1451,12 @@ from pathlib import Path
 source = Path(sys.argv[1])
 target = Path(sys.argv[2])
 exec_start = sys.argv[3]
+runtime_port = sys.argv[4]
 lines = source.read_text().splitlines()
 rendered = []
 replaced = False
 for line in lines:
+    line = line.replace("@EDGE_RUNTIME_PORT@", runtime_port)
     if line.startswith("ExecStart="):
         rendered.append(f"ExecStart={exec_start}")
         replaced = True
@@ -1612,7 +1616,8 @@ install_edge_runtime() {
         render_edge_runtime_systemd_unit \
             "${SYSTEMD_SRC}/supacloud-edge-runtime.service" \
             /etc/systemd/system/supacloud-edge-runtime.service \
-            "$EXEC_START_CMD"
+            "$EXEC_START_CMD" \
+            "${EDGE_RUNTIME_PORT:-9005}"
         log_info "Rendered checked-in supacloud-edge-runtime.service with $EXEC_START_CMD"
     else
         cat > /etc/systemd/system/supacloud-edge-runtime.service <<SVCEOF
@@ -1626,12 +1631,13 @@ Type=simple
 User=supacloud-edge
 Group=supacloud-edge
 WorkingDirectory=/opt/supacloud/edge-runtime
-ExecStartPre=/bin/bash -c 'for pid in \$(lsof -iTCP:9000 -sTCP:LISTEN -t 2>/dev/null); do echo "[EdgeRT] Killing stale pid=\$pid"; kill -9 \$pid 2>/dev/null || true; done; sleep 0.3; true'
+ExecStartPre=/bin/bash -c 'for pid in \$(lsof -iTCP:${EDGE_RUNTIME_PORT:-9005} -sTCP:LISTEN -t 2>/dev/null); do echo "[EdgeRT] Killing stale pid=\$pid"; kill -9 \$pid 2>/dev/null || true; done; sleep 0.3; true'
 ExecStart=${EXEC_START_CMD}
-ExecStopPost=/bin/bash -c 'for pid in \$(lsof -iTCP:9000 -sTCP:LISTEN -t 2>/dev/null); do kill -9 \$pid 2>/dev/null || true; done; true'
+ExecStopPost=/bin/bash -c 'for pid in \$(lsof -iTCP:${EDGE_RUNTIME_PORT:-9005} -sTCP:LISTEN -t 2>/dev/null); do kill -9 \$pid 2>/dev/null || true; done; true'
 Restart=always
 RestartSec=5
-Environment=PORT=9000
+Environment=PORT=${EDGE_RUNTIME_PORT:-9005}
+Environment=EDGE_RUNTIME_PORT=${EDGE_RUNTIME_PORT:-9005}
 Environment=EDGE_FUNCTIONS_DIR=/opt/supacloud/functions
 Environment=EDGE_FUNCTIONS_BASE_DIR=/opt/supacloud/functions
 Environment=MANAGEMENT_API_URL=http://127.0.0.1:9090
@@ -1647,7 +1653,7 @@ SVCEOF
     systemctl daemon-reload
     if [[ "$EDGE_RUNTIME_MODE" == "external" ]]; then
         systemctl enable supacloud-edge-runtime 2>/dev/null || true
-        log_info "Edge Runtime on port 9000 (standalone systemd service mode)"
+        log_info "Edge Runtime on port ${EDGE_RUNTIME_PORT:-9005} (standalone systemd service mode)"
     else
         systemctl disable --now supacloud-edge-runtime 2>/dev/null || true
         if [[ "$USE_COMPILED_BINARY" == "true" ]]; then
@@ -1855,7 +1861,7 @@ install_pgredis_runtime() {
         return 1
     fi
     render_edge_runtime_systemd_unit "$systemd_src" \
-        "$PGREDIS_RUNTIME_UNIT_FILE" "$PGR_EXEC_START"
+        "$PGREDIS_RUNTIME_UNIT_FILE" "$PGR_EXEC_START" 9010
     systemctl daemon-reload || return 1
     systemctl enable --now supacloud-pgredis-runtime || return 1
     supacloud_wait_http_health http://127.0.0.1:9010/health || return 1
@@ -2682,6 +2688,7 @@ save_all_credentials() {
         LOGFLARE_DB "${LOGFLARE_DB:-_supabase}" \
         LOGFLARE_SCHEMA "${LOGFLARE_SCHEMA:-_analytics}" \
         S3_STORAGE_TYPE "$S3_STORAGE_TYPE" \
+        EDGE_RUNTIME_PORT "${EDGE_RUNTIME_PORT:-9005}" \
         JUICEFS_BACKEND "${JUICEFS_BACKEND:-}" \
         S3_ENDPOINT "${S3_ENDPOINT:-}" \
         S3_PROTOCOL "${S3_PROTOCOL:-}" \
@@ -2895,10 +2902,17 @@ management_edge_runtime_mode() {
 
 ensure_management_edge_runtime_ready() {
     local runtime_mode="$1"
+    local runtime_port
+    runtime_port=$(supacloud_env_value "$MANAGEMENT_ENV_FILE" EDGE_RUNTIME_PORT)
+    runtime_port="${runtime_port:-9005}"
+    if [[ ! "$runtime_port" =~ ^[0-9]+$ ]] || (( runtime_port < 1 || runtime_port > 65535 )); then
+        log_error "Invalid persisted EDGE_RUNTIME_PORT: $runtime_port"
+        return 1
+    fi
     if [[ "$runtime_mode" == "external" ]]; then
         systemctl restart supacloud-edge-runtime || log_warn "systemctl restart supacloud-edge-runtime returned non-zero; deferring readiness to the health check"
     fi
-    supacloud_wait_http_health http://127.0.0.1:9000/health
+    supacloud_wait_http_health "http://127.0.0.1:${runtime_port}/health"
 }
 
 configure_management_edge_privilege_dropin() {
@@ -3059,6 +3073,8 @@ install_management_api() {
         STUDIO_INTERNAL "${STUDIO_INTERNAL:-127.0.0.1:9090}" \
         DATABASE_URL "postgresql://postgres:${encoded_postgres_password}@127.0.0.1:5432/supacloud_meta" \
         EDGE_RUNTIME_MODE "${EDGE_RUNTIME_MODE:-embedded}" \
+        EDGE_RUNTIME_PORT "${EDGE_RUNTIME_PORT:-9005}" \
+        EDGE_RUNTIME_INTERNAL "${EDGE_RUNTIME_INTERNAL:-127.0.0.1:${EDGE_RUNTIME_PORT:-9005}}" \
         EDGE_RUNTIME_USER supacloud-edge \
         EDGE_RUNTIME_GROUP supacloud-edge \
         PGREDIS_RUNTIME_INTERNAL_URL "${PGREDIS_RUNTIME_INTERNAL_URL:-http://127.0.0.1:9010}" \
@@ -3119,6 +3135,7 @@ install_management_api() {
         abort_management_install_transaction "$management_transaction_dir" "$management_service_was_active" false 1
     fi
     if ! supacloud_write_service_env_pairs "$EDGE_RUNTIME_ENV_FILE" \
+        EDGE_RUNTIME_PORT "${EDGE_RUNTIME_PORT:-9005}" \
         EDGE_RUNTIME_MASTER_KEY "$MASTER_TOKEN" \
         MANAGEMENT_API_URL http://127.0.0.1:9090 \
         TENANTS_DIR /etc/supabase/tenants \

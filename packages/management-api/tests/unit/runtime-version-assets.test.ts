@@ -369,7 +369,7 @@ describe("runtime companion version assets", () => {
     );
     expect(installer.match(/ensure_management_edge_runtime_ready/g)).toHaveLength(3);
     expect(installer).toContain("systemctl restart supacloud-edge-runtime");
-    expect(installer).toContain("http://127.0.0.1:9000/health");
+    expect(installer).toContain('http://127.0.0.1:${runtime_port}/health');
     expect(managementUnit).toContain("SystemCallFilter=@system-service @chown");
     expect(managementUnit).not.toContain("@privileged");
     expect(installer).toContain("install_tenant_user_helper");

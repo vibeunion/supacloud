@@ -114,10 +114,10 @@ restart_failed_tenants() {
 # SO_REUSEPORT allows multiple processes to bind the same port.
 # If an old bun runtime survives a restart/deploy, requests get split
 # 50/50 between old and new code — causing phantom failures.
-# This function kills ALL processes listening on port 9000 so that
+# This function kills stale processes listening on the Edge Runtime port so that
 # only the newly started runtime claims the port.
 kill_edge_runtime_zombies() {
-    local EDGE_PORT="${EDGE_RUNTIME_PORT:-9000}"
+    local EDGE_PORT="${EDGE_RUNTIME_PORT:-9005}"
     local EDGE_MODE="${EDGE_RUNTIME_MODE:-embedded}"
 
     if [[ "$EDGE_MODE" == "external" ]]; then

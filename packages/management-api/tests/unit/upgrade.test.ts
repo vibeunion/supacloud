@@ -20,6 +20,7 @@ import {
     resolveArtifactVerificationMode,
     resolveEdgeRuntimeCapacityConfig,
     resolveGithubEndpointPrefixes,
+    resolvePersistedEdgeRuntimePort,
     resolvePersistedEdgeRuntimeMode,
     resolveUpgradeEnvironment,
     runStagedDatabaseMigration,
@@ -28,6 +29,7 @@ import {
     selectManagementRelease,
     stopManagementService,
     upsertManagementWebConsoleDir,
+    upsertPersistedEdgeRuntimePort,
     upsertEdgeRuntimeIdentityDefaults,
     validateWebConsoleArchiveEntries,
     verifyArtifactChecksum,
@@ -590,7 +592,7 @@ describe("upgrade release selection", () => {
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       const url = String(input);
       calls.push(url);
-      if (url === "http://127.0.0.1:9000/health") {
+      if (url === "http://127.0.0.1:9005/health") {
         return new Response("unavailable", { status: 503 });
       }
       return new Response(url.endsWith("/") ? "<!doctype html>" : "ok", {
@@ -603,7 +605,7 @@ describe("upgrade release selection", () => {
     expect(calls).toEqual([
       "http://127.0.0.1:9090/health",
       "http://127.0.0.1:9090/",
-      "http://127.0.0.1:9000/health",
+      "http://127.0.0.1:9005/health",
     ]);
   });
 
@@ -613,6 +615,50 @@ describe("upgrade release selection", () => {
     expect(resolvePersistedEdgeRuntimeMode("embedded")).toBe("embedded");
     expect(resolvePersistedEdgeRuntimeMode("external")).toBe("external");
     expect(() => resolvePersistedEdgeRuntimeMode("externel")).toThrow("Invalid persisted EDGE_RUNTIME_MODE");
+  });
+
+  test("upgrade persists a non-conflicting native Edge Runtime port", () => {
+    const envDir = mkdtempSync(join(tmpdir(), "supacloud-upgrade-edge-port-"));
+    const managementEnv = join(envDir, "management-api.env");
+    const runtimeEnv = join(envDir, "edge-runtime.env");
+    try {
+      writeFileSync(managementEnv, "EDGE_RUNTIME_MODE=embedded\n");
+
+      expect(upsertPersistedEdgeRuntimePort(managementEnv, runtimeEnv)).toBe(9005);
+      expect(readFileSync(managementEnv, "utf8")).toContain("EDGE_RUNTIME_PORT=9005\n");
+      expect(readFileSync(managementEnv, "utf8")).toContain("EDGE_RUNTIME_INTERNAL=127.0.0.1:9005\n");
+      expect(readFileSync(runtimeEnv, "utf8")).toContain("EDGE_RUNTIME_PORT=9005\n");
+    } finally {
+      rmSync(envDir, { recursive: true, force: true });
+    }
+  });
+
+  test("upgrade preserves an explicit valid Edge Runtime port", () => {
+    const envDir = mkdtempSync(join(tmpdir(), "supacloud-upgrade-custom-edge-port-"));
+    const managementEnv = join(envDir, "management-api.env");
+    const runtimeEnv = join(envDir, "edge-runtime.env");
+    try {
+      writeFileSync(managementEnv, "EDGE_RUNTIME_PORT=9123\n");
+
+      expect(upsertPersistedEdgeRuntimePort(managementEnv, runtimeEnv)).toBe(9123);
+      expect(resolvePersistedEdgeRuntimePort(managementEnv, runtimeEnv)).toBe(9123);
+      expect(readFileSync(runtimeEnv, "utf8")).toContain("EDGE_RUNTIME_PORT=9123\n");
+    } finally {
+      rmSync(envDir, { recursive: true, force: true });
+    }
+  });
+
+  test("upgrade rejects an invalid persisted Edge Runtime port", () => {
+    const envDir = mkdtempSync(join(tmpdir(), "supacloud-upgrade-invalid-edge-port-"));
+    const managementEnv = join(envDir, "management-api.env");
+    const runtimeEnv = join(envDir, "edge-runtime.env");
+    try {
+      writeFileSync(managementEnv, "EDGE_RUNTIME_PORT=70000\n");
+      expect(() => resolvePersistedEdgeRuntimePort(managementEnv, runtimeEnv))
+        .toThrow("Invalid persisted EDGE_RUNTIME_PORT");
+    } finally {
+      rmSync(envDir, { recursive: true, force: true });
+    }
   });
 
   test("normalizes management env WEB_CONSOLE_DIR to runtime link", () => {

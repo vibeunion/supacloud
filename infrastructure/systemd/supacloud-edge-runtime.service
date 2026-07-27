@@ -9,16 +9,17 @@ Type=simple
 User=supacloud-edge
 Group=supacloud-edge
 WorkingDirectory=/opt/supacloud/edge-runtime
-ExecStartPre=/bin/bash -c 'for pid in $(lsof -iTCP:9000 -sTCP:LISTEN -t 2>/dev/null); do echo "[EdgeRT] Killing stale pid=$pid"; kill -9 $pid 2>/dev/null || true; done; sleep 0.3; true'
+ExecStartPre=/bin/bash -c 'for pid in $(lsof -iTCP:@EDGE_RUNTIME_PORT@ -sTCP:LISTEN -t 2>/dev/null); do echo "[EdgeRT] Killing stale pid=$pid"; kill -9 $pid 2>/dev/null || true; done; sleep 0.3; true'
 ExecStart=/usr/local/bin/supacloud-edge-runtime
-ExecStopPost=/bin/bash -c 'for pid in $(lsof -iTCP:9000 -sTCP:LISTEN -t 2>/dev/null); do kill -9 $pid 2>/dev/null || true; done; true'
+ExecStopPost=/bin/bash -c 'for pid in $(lsof -iTCP:@EDGE_RUNTIME_PORT@ -sTCP:LISTEN -t 2>/dev/null); do kill -9 $pid 2>/dev/null || true; done; true'
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=supacloud-edge
 
-Environment=PORT=9000
+Environment=PORT=@EDGE_RUNTIME_PORT@
+Environment=EDGE_RUNTIME_PORT=@EDGE_RUNTIME_PORT@
 Environment=EDGE_RUNTIME_HOST=127.0.0.1
 Environment=EDGE_FUNCTIONS_DIR=/opt/supacloud/functions
 Environment=EDGE_FUNCTIONS_BASE_DIR=/opt/supacloud/functions
