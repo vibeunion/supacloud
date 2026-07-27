@@ -2,6 +2,9 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 
 const pageSource = readFileSync(new URL("./+page.svelte", import.meta.url), "utf8");
+const projectsPageSource = readFileSync(new URL("./projects/+page.svelte", import.meta.url), "utf8");
+const createProjectPageSource = readFileSync(new URL("./projects/create/+page.svelte", import.meta.url), "utf8");
+const projectSwitcherSource = readFileSync(new URL("../lib/components/ProjectSwitcher.svelte", import.meta.url), "utf8");
 const packageJson = JSON.parse(
   readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
 ) as { dependencies: Record<string, string> };
@@ -22,6 +25,15 @@ describe("SupaCloud root dashboard", () => {
     expect(pageSource).toContain('goto(resolve("/projects"))');
     expect(pageSource).toContain("{#each filteredProjects.slice(0, 6) as project (project.ref)}");
     expect(pageSource).toContain('href={resolve("/project/[ref]", { ref: project.ref })}');
+  });
+
+  test("keeps every new-project entrypoint connected to the creation form", () => {
+    expect(projectsPageSource).toContain('href="/projects/create"');
+    expect(projectSwitcherSource).toContain('goto("/projects/create")');
+    expect(createProjectPageSource).toContain('apiClient("/v1/projects"');
+    expect(createProjectPageSource).toContain("method: \"POST\"");
+    expect(createProjectPageSource).toContain("window.location.assign");
+    expect(createProjectPageSource).toContain("encodeURIComponent(ref)");
   });
 
   test("contains no unrelated demo business content", () => {
