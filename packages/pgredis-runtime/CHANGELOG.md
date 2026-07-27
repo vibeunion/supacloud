@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.3.0](https://github.com/zuohuadong/supacloud/compare/pgredis-runtime-v0.2.0...pgredis-runtime-v0.3.0) (2026-07-27)
+
+
+### Features
+
+* **cache:** add pgredis control plane and console ([76000b8](https://github.com/zuohuadong/supacloud/commit/76000b862f0dda088244012f4915da9f9a1bd57a))
+
+
+### Bug Fixes
+
+* **pgredis:** align test cache doubles with interfaces ([bb68c0f](https://github.com/zuohuadong/supacloud/commit/bb68c0f9f2b3ec8fc797254bf0001ac6a9e7cd3a))
+
+
+### Miscellaneous Chores
+
+* **release:** clean pgredis release notes ([e78a311](https://github.com/zuohuadong/supacloud/commit/e78a311ad9d69435c8bd86f81747c93899b4d6ca))
+
 ## [0.2.0](https://github.com/zuohuadong/supacloud/compare/pgredis-runtime-v0.1.0...pgredis-runtime-v0.2.0) (2026-07-27)
 
 

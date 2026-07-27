@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.26.0](https://github.com/zuohuadong/supacloud/compare/web-console-v0.25.3...web-console-v0.26.0) (2026-07-27)
+
+
+### Features
+
+* **cache:** add pgredis control plane and console ([76000b8](https://github.com/zuohuadong/supacloud/commit/76000b862f0dda088244012f4915da9f9a1bd57a))
+
 ## [0.25.3](https://github.com/zuohuadong/supacloud/compare/web-console-v0.25.2...web-console-v0.25.3) (2026-07-27)
 
 
