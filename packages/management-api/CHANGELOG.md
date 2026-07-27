@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.49.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.48.0...management-api-v0.49.0) (2026-07-27)
+
+
+### Features
+
+* **cache:** add pgredis control plane and console ([76000b8](https://github.com/zuohuadong/supacloud/commit/76000b862f0dda088244012f4915da9f9a1bd57a))
+
+
+### Bug Fixes
+
+* **edge:** harden embedded runtime privilege drop ([#600](https://github.com/zuohuadong/supacloud/issues/600)) ([38f5ad5](https://github.com/zuohuadong/supacloud/commit/38f5ad560e5603eaf26577e279474534e0ac2faa))
+* run scheduled functions from serialized project config ([bff3423](https://github.com/zuohuadong/supacloud/commit/bff3423a43c27792bd74a20dda97dafa8a0948f5))
+* **upgrade:** provision Edge Runtime account ([2d6f1ba](https://github.com/zuohuadong/supacloud/commit/2d6f1ba68edec48c9e594e5da612c6a8fe23f8da))
+
 ## [0.48.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.47.17...management-api-v0.48.0) (2026-07-27)
 
 
