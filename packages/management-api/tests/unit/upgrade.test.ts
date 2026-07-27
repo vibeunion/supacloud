@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { SQL } from "bun";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
     buildEdgeRuntimeCapacityDropIn,
     buildEmbeddedEdgePrivilegeDropIn,
+    buildCheckpointDatabaseOptions,
     backupCurrentBinary,
     captureFileState,
     cleanupBinaryBackup,
@@ -58,6 +60,41 @@ afterEach(() => {
 });
 
 describe("upgrade release selection", () => {
+  test("pins secret checkpoint verification to DATABASE_URL despite ambient PGDATABASE", async () => {
+    const originalPgDatabase = process.env.PGDATABASE;
+    process.env.PGDATABASE = "postgres";
+    let database: SQL | undefined;
+
+    try {
+      const options = buildCheckpointDatabaseOptions(
+        "postgresql://postgres:placeholder@127.0.0.1:5432/supacloud_meta?sslmode=disable",
+      );
+      database = new SQL(options);
+      expect(options).toEqual({
+        url: "postgresql://postgres:placeholder@127.0.0.1:5432/supacloud_meta?sslmode=disable",
+        database: "supacloud_meta",
+        max: 1,
+      });
+      expect(database.options.database).toBe("supacloud_meta");
+    } finally {
+      if (database) await database.close();
+      if (originalPgDatabase === undefined) delete process.env.PGDATABASE;
+      else process.env.PGDATABASE = originalPgDatabase;
+    }
+  });
+
+  test("decodes an escaped database name for checkpoint verification", () => {
+    expect(buildCheckpointDatabaseOptions(
+      "postgresql://postgres:placeholder@127.0.0.1:5432/tenant%5Fmeta",
+    ).database).toBe("tenant_meta");
+  });
+
+  test("rejects checkpoint verification without an explicit database name", () => {
+    expect(() => buildCheckpointDatabaseOptions(
+      "postgresql://postgres:placeholder@127.0.0.1:5432",
+    )).toThrow("DATABASE_URL must include a database name");
+  });
+
   test("creates the dedicated Edge Runtime identity during a Linux upgrade", async () => {
     const commands: string[][] = [];
     const responses = [

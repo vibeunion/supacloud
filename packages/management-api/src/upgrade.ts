@@ -796,8 +796,17 @@ export async function stopManagementService(
     throw stopError;
 }
 
+export function buildCheckpointDatabaseOptions(databaseUrl: string) {
+    const parsed = new URL(databaseUrl);
+    const database = decodeURIComponent(parsed.pathname.replace(/^\/+/, ""));
+    if (!database) {
+        throw new Error("DATABASE_URL must include a database name for secret migration checkpoint verification");
+    }
+    return { url: databaseUrl, database, max: 1 };
+}
+
 async function checkpointExists(databaseUrl: string, encryptionKey: string): Promise<boolean> {
-    const database = new SQL({ url: databaseUrl, max: 1 });
+    const database = new SQL(buildCheckpointDatabaseOptions(databaseUrl));
     try {
         return await hasSecretEncryptionCheckpoint(database, encryptionKey);
     } finally {
