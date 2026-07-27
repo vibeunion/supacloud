@@ -3,7 +3,7 @@
 
   import { page } from "$app/state";
   import { untrack } from "svelte";
-  import { Loader2, Check, X, Search, Shield, KeyRound, ChevronDown, ChevronUp, Save, Trash2, Eye, EyeOff } from "lucide-svelte";
+  import { Loader2, X, Search, Shield, KeyRound, ChevronDown, ChevronUp, Save, Trash2, Eye, EyeOff } from "lucide-svelte";
   import { createQuery, createMutation, useQueryClient } from "@tanstack/svelte-query";
 
   interface ProviderConfig {
@@ -304,9 +304,8 @@
                     <span class="pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transform ring-0 transition duration-200 ease-in-out {providers[i].enabled ? 'translate-x-4' : 'translate-x-0'}"></span>
                   </button>
                 {:else}
-                  <div class="flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-green-500/30 bg-green-500/10">
-                    <Check size={12} class="text-green-600" />
-                    <span class="text-[10px] font-bold text-green-600">内置</span>
+                  <div class="px-2.5 py-1 rounded-full border border-blue-500/30 bg-blue-500/10">
+                    <span class="text-[10px] font-bold text-blue-600">内置方式</span>
                   </div>
                 {/if}
                 {#if providers[i].expanded}

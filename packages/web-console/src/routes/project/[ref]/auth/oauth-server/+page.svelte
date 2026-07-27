@@ -166,6 +166,8 @@
   async function deleteClient(client: OAuthClient) {
     const clientId = client.client_id || client.id;
     if (!clientId) return;
+    const clientName = client.client_name || client.name || clientId;
+    if (!confirm(`确定要删除 OAuth Client “${clientName}”吗？此操作不可恢复。`)) return;
     saving = true;
     try {
       const res = await apiClient(`/v1/projects/${projectRef}/auth/oauth-clients/${encodeURIComponent(clientId)}`, {
