@@ -48,7 +48,7 @@ ReadWritePaths=/etc/supabase /run/supacloud-unit-requests /etc/supacloud/caddy /
 SystemCallFilter=@system-service @chown
 SystemCallFilter=~@mount @reboot @swap @raw-io @keyring
 SystemCallArchitectures=native
-CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_SETGID CAP_SETUID
 
 MemoryMax=4G
 MemoryHigh=3G

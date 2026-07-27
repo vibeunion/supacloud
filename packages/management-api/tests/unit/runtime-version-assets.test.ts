@@ -355,7 +355,9 @@ describe("runtime companion version assets", () => {
     expect(installer).not.toContain('cp "${SYSTEMD_SRC}/supacloud-edge-runtime.service" /etc/systemd/system/supacloud-edge-runtime.service');
     expect(managementUnit).not.toContain("ReadWritePaths=/etc/supabase /etc/systemd/system ");
     expect(managementUnit).toContain("/run/supacloud-unit-requests");
-    expect(managementUnit).toContain("CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER");
+    expect(managementUnit).toContain(
+      "CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_SETGID CAP_SETUID",
+    );
     expect(managementUnit).toContain("SystemCallFilter=@system-service @chown");
     expect(managementUnit).not.toContain("@privileged");
     expect(installer).toContain("install_tenant_user_helper");

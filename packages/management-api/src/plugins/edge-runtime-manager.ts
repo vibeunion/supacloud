@@ -62,7 +62,7 @@ export function buildEdgeRuntimeCommand(
     user: string;
     group: string;
     isRoot: boolean;
-    runuserPath?: string;
+    setprivPath?: string;
   },
 ): string[] {
   const command = [options.bunPath, "run", runnerPath];
@@ -71,16 +71,17 @@ export function buildEdgeRuntimeCommand(
     throw new Error("EDGE_RUNTIME_USER is required when Management API runs as root");
   }
 
-  const runuser = options.runuserPath;
-  if (!runuser) {
-    throw new Error("EDGE_RUNTIME_USER requires runuser for embedded privilege separation");
+  const setpriv = options.setprivPath;
+  if (!setpriv) {
+    throw new Error("EDGE_RUNTIME_USER requires setpriv for embedded privilege separation");
   }
   return [
-    runuser,
-    "--user",
+    setpriv,
+    "--reuid",
     options.user,
-    "--group",
+    "--regid",
     options.group || options.user,
+    "--init-groups",
     "--",
     ...command,
   ];
@@ -92,7 +93,7 @@ function edgeRuntimeCommand(runnerPath: string): string[] {
     user: config.edgeRuntimeUser,
     group: config.edgeRuntimeGroup,
     isRoot: process.getuid?.() === 0,
-    runuserPath: ["/usr/sbin/runuser", "/sbin/runuser"].find(existsSync),
+    setprivPath: ["/usr/bin/setpriv", "/bin/setpriv"].find(existsSync),
   });
 }
 

@@ -35,23 +35,24 @@ describe("embedded Edge Runtime process boundary", () => {
       user: "",
       group: "",
       isRoot: true,
-      runuserPath: "/usr/sbin/runuser",
+      setprivPath: "/usr/bin/setpriv",
     })).toThrow("EDGE_RUNTIME_USER is required");
   });
 
-  test("uses runuser for an embedded runtime launched by root", () => {
+  test("uses setpriv for an embedded runtime launched by root", () => {
     expect(buildEdgeRuntimeCommand("/opt/supacloud/edge-runtime/server.ts", {
       bunPath: "/usr/local/bin/bun",
       user: "supacloud-edge",
       group: "supacloud-edge",
       isRoot: true,
-      runuserPath: "/usr/sbin/runuser",
+      setprivPath: "/usr/bin/setpriv",
     })).toEqual([
-      "/usr/sbin/runuser",
-      "--user",
+      "/usr/bin/setpriv",
+      "--reuid",
       "supacloud-edge",
-      "--group",
+      "--regid",
       "supacloud-edge",
+      "--init-groups",
       "--",
       "/usr/local/bin/bun",
       "run",
