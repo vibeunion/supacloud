@@ -16,6 +16,7 @@ import { readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { brotliCompressSync, constants as zlibConstants, gzipSync } from "node:zlib";
 import { logger } from "../utils/logger";
 import { config } from "../config";
+import { normalizeBaseDomain } from "../utils/project-routing";
 import type {
   FrontendDeployment,
   FrontendDeploymentConfig,
@@ -101,6 +102,14 @@ function assertSafeGitBranch(branch: string): void {
   if (!/^[A-Za-z0-9._/-]{1,128}$/.test(branch) || branch.includes("..") || branch.startsWith("-")) {
     throw new Error("Invalid git branch");
   }
+}
+
+function defaultFrontendDomain(projectRef: string, deploymentId: string): string {
+  const baseDomain = normalizeBaseDomain(config.baseDomain).replace(/^\.+|\.+$/g, "");
+  if (!baseDomain) {
+    throw new Error("BASE_DOMAIN must be configured for frontend deployments");
+  }
+  return `${deploymentId}.${projectRef}.${baseDomain}`;
 }
 
 export class FrontendService {
@@ -277,7 +286,7 @@ export class FrontendService {
   async createDeployment(projectRef: string, deploymentConfig: FrontendDeploymentConfig): Promise<FrontendDeployment> {
     const deploymentId = this.generateId();
     const defaults = FRAMEWORK_DEFAULTS[deploymentConfig.framework];
-    const domain = deploymentConfig.domain || `${deploymentId}.${projectRef}.app`;
+    const domain = deploymentConfig.domain || defaultFrontendDomain(projectRef, deploymentId);
 
     const deployment: FrontendDeployment = {
       id: deploymentId,
@@ -366,7 +375,7 @@ export class FrontendService {
 
     const records: FrontendDnsRecord[] = [];
     const apexValue = config.dockerHostIp || config.baseDomain;
-    const temporaryHost = deployment.domain || `${deployment.id}.${deployment.project_ref}.app`;
+    const temporaryHost = deployment.domain || defaultFrontendDomain(projectRef, deployment.id);
 
     records.push({
       id: `${deployment.id}-temporary-domain`,
