@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.3](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.14.2...edge-runtime-v0.14.3) (2026-07-27)
+
+
+### Bug Fixes
+
+* **edge-runtime:** fairly schedule queued projects ([#580](https://github.com/zuohuadong/supacloud/issues/580)) ([e122747](https://github.com/zuohuadong/supacloud/commit/e12274770e67f7183a614960e5a173b0ca3481aa))
+
 ## [0.14.2](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.14.1...edge-runtime-v0.14.2) (2026-07-24)
 
 
