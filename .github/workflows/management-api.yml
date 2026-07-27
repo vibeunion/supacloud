@@ -9,6 +9,7 @@ on:
       - "packages/supacloud-js/**"
       - "packages/edge-runtime/**"
       - "packages/pgredis-runtime/**"
+      - "packages/supacloud-lite/**"
       - "packages/admin/**"
       - "packages/cli/**"
       - "packages/supacloud/**"
@@ -21,6 +22,8 @@ on:
       - ".github/workflows/ai-review-merge.yml"
       - ".github/workflows/management-api.yml"
       - ".github/workflows/release-please.yml"
+      - "release-please-config.json"
+      - ".release-please-manifest.json"
   pull_request:
     branches: ["main", "dev"]
     paths:
@@ -29,6 +32,7 @@ on:
       - "packages/supacloud-js/**"
       - "packages/edge-runtime/**"
       - "packages/pgredis-runtime/**"
+      - "packages/supacloud-lite/**"
       - "packages/admin/**"
       - "packages/cli/**"
       - "packages/supacloud/**"
@@ -41,6 +45,8 @@ on:
       - ".github/workflows/ai-review-merge.yml"
       - ".github/workflows/management-api.yml"
       - ".github/workflows/release-please.yml"
+      - "release-please-config.json"
+      - ".release-please-manifest.json"
   workflow_dispatch:
 
 permissions:
@@ -158,6 +164,13 @@ jobs:
           bun install --frozen-lockfile
           bun run typecheck
           bun test
+          bun audit --audit-level high
+
+      - name: Check SupaCloud Lite
+        working-directory: packages/supacloud-lite
+        run: |
+          bun install --frozen-lockfile
+          bun run check
           bun audit --audit-level high
 
       - name: Check project CLI
