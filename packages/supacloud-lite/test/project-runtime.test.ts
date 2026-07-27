@@ -11,6 +11,7 @@ import {
   mintProjectKeys,
   resolveProjectPaths,
 } from '../src/project-runtime.js'
+import type { StorageDriver } from '../src/vendor/tinbase/types.js'
 
 const temporaryDirectories: string[] = []
 
@@ -87,6 +88,53 @@ describe('project runtime', () => {
     } finally {
       await project.backend.close()
     }
+  })
+
+  test('selects explicit and custom storage backends', async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), 'supacloud-lite-storage-backend-'))
+    temporaryDirectories.push(projectDir)
+    const memoryProject = await createProjectBackend({
+      projectDir,
+      storageBackend: 'memory',
+      includeFunctions: false,
+      includeWebhooks: false,
+    })
+    try {
+      expect(memoryProject.storageBackend).toBe('memory')
+    } finally {
+      await memoryProject.backend.close()
+    }
+
+    const driver: StorageDriver = {
+      async put() {},
+      async get() { return null },
+      async delete() {},
+      async deleteMany() {},
+    }
+    const customProject = await createProjectBackend({
+      projectDir,
+      storageDriver: driver,
+      includeFunctions: false,
+      includeWebhooks: false,
+    })
+    try {
+      expect(customProject.storageBackend).toBe('custom')
+    } finally {
+      await customProject.backend.close()
+    }
+  })
+
+  test('rejects unknown storage backends', async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), 'supacloud-lite-storage-invalid-'))
+    temporaryDirectories.push(projectDir)
+    await expect(
+      createProjectBackend({
+        projectDir,
+        storageBackend: 'unknown' as never,
+        includeFunctions: false,
+        includeWebhooks: false,
+      })
+    ).rejects.toThrow('unsupported SUPACLOUD_LITE_STORAGE_BACKEND')
   })
 
   test('locks persistent PGlite data directories and releases the lock on idempotent close', async () => {

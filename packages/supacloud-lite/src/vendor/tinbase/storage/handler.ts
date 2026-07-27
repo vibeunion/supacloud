@@ -5,6 +5,12 @@
  */
 import type { Database } from '../db/database.js'
 import { signJwt, verifyJwt } from '../jwt.js'
+import {
+  imageTransformToSearchParams,
+  parseImageTransform,
+  transformImage,
+  type ImageTransformRequestOptions,
+} from './image-transform.js'
 import type { BucketSeed, RequestContext, StorageDriver } from '../types.js'
 
 /** Construction options for {@link StorageHandler}. */
@@ -119,7 +125,6 @@ const OBJECT_VERSION_PREFIX = 'v2-'
 /** Routes /storage/v1/* requests to bucket and object operations. */
 export class StorageHandler {
   private tusUploads = new Map<string, TusUpload>()
-  private warnedTransform = false
   private mutationTail = Promise.resolve()
 
   constructor(
@@ -169,21 +174,21 @@ export class StorageHandler {
       }
 
       // ── image transforms: /render/image/{authenticated,public,sign}/:bucket/:path ──
-      // Not supported yet — serve the ORIGINAL object as a no-op (with a warning)
-      // rather than 404, so apps requesting a transform still get their image.
       if (parts[0] === 'render' && parts[1] === 'image' && parts.length >= 5) {
-        this.warnTransformUnsupported()
         const kind = parts[2]
         const bucket = parts[3]
         const key = parts.slice(4).join('/')
         if (kind === 'public' && (method === 'GET' || method === 'HEAD')) {
-          return await this.downloadPublic(bucket, key, method === 'HEAD')
+          const source = await this.downloadPublic(bucket, key, false)
+          return await this.transformImageResponse(source, url, method === 'HEAD')
         }
         if (kind === 'authenticated' && (method === 'GET' || method === 'HEAD')) {
-          return await this.download(ctx, bucket, key, method === 'HEAD')
+          const source = await this.download(ctx, bucket, key, false)
+          return await this.transformImageResponse(source, url, method === 'HEAD')
         }
         if (kind === 'sign' && method === 'GET') {
-          return await this.redeemSignedUrl(url, bucket, key)
+          const source = await this.redeemSignedUrl(url, bucket, key)
+          return await this.transformImageResponse(source, url, false)
         }
         return storageError(404, 'not_found', `unknown render endpoint: ${rest}`)
       }
@@ -418,14 +423,20 @@ export class StorageHandler {
     }
   }
 
-  /** Warn once that image transforms are unsupported (the original is served). */
-  private warnTransformUnsupported(): void {
-    if (this.warnedTransform) return
-    this.warnedTransform = true
-    this.config.log?.(
-      '[storage] image transformations are not supported yet — serving the original object unchanged ' +
-        '(this warning is shown once per process).'
-    )
+  private async transformImageResponse(source: Response, url: URL, head: boolean): Promise<Response> {
+    if (!source.ok) return source
+    const parsed = parseImageTransform(url.searchParams)
+    if (!parsed.ok) return storageError(parsed.status, parsed.error, parsed.message)
+
+    const result = await transformImage(new Uint8Array(await source.arrayBuffer()), parsed.value)
+    if (!result.ok) return storageError(result.status, result.error, result.message)
+
+    const headers = new Headers(source.headers)
+    headers.delete('content-disposition')
+    headers.delete('etag')
+    headers.set('content-type', result.contentType)
+    headers.set('content-length', String(result.bytes.length))
+    return new Response(head ? null : (result.bytes as BodyInit), { status: source.status, headers })
   }
 
   /** Write immutable bytes first, then atomically switch the metadata pointer. */
@@ -919,6 +930,7 @@ export class StorageHandler {
       await this.driver.deleteMany([...new Set(keys)])
     } catch (error) {
       this.config.log?.(`[storage] unreferenced object cleanup failed: ${error instanceof Error ? error.message : String(error)}`)
+      if (this.driver.cleanupFailureMode === 'propagate') throw error
     }
   }
 
@@ -1002,14 +1014,22 @@ export class StorageHandler {
   // ── signed URLs ─────────────────────────────────────────────────────────
 
   private async signUrl(req: Request, ctx: RequestContext, bucketId: string, key: string): Promise<Response> {
-    const body = (await req.json().catch(() => ({}))) as { expiresIn?: number }
+    const body = (await req.json().catch(() => ({}))) as {
+      expiresIn?: number
+      transform?: ImageTransformRequestOptions
+    }
     // visibility check under the caller's role
     const res = await this.db.withContext(ctx, (q) =>
       q(`select id from storage.objects where bucket_id = $1 and name = $2`, [bucketId, key])
     )
     if (res.rows.length === 0) return storageError(404, 'not_found', 'Object not found')
     const token = await this.makeSignToken('download', bucketId, key, body.expiresIn ?? 3600)
-    return json(200, { signedURL: `/object/sign/${bucketId}/${encPath(key)}?token=${token}` })
+    const transformQuery = imageTransformToSearchParams(body.transform)
+    const renderPath = transformQuery.size > 0 ? 'render/image/sign' : 'object/sign'
+    transformQuery.set('token', token)
+    return json(200, {
+      signedURL: `/${renderPath}/${bucketId}/${encPath(key)}?${transformQuery.toString()}`,
+    })
   }
 
   private async signUrls(req: Request, ctx: RequestContext, bucketId: string): Promise<Response> {

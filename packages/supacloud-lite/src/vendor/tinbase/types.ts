@@ -167,6 +167,8 @@ export interface StorageDriver {
   get(key: string): Promise<Uint8Array | null>
   delete(key: string): Promise<void>
   deleteMany(keys: string[]): Promise<void>
+  /** Remote drivers can require cleanup failures to reach the API caller. */
+  cleanupFailureMode?: 'ignore' | 'propagate'
 }
 
 /** Error carrying an HTTP status + JSON body, thrown by handlers and rendered as-is to the client. */

@@ -7,6 +7,9 @@ import { FsStorageDriver } from './vendor/tinbase/node/fs-driver.js'
 import { loadProjectConfig, type ProjectConfig } from './vendor/tinbase/node/load-config.js'
 import { loadFunctionEnv, loadFunctions } from './vendor/tinbase/node/load-functions.js'
 import { loadSupabaseProject } from './vendor/tinbase/node/project.js'
+import { MemoryStorageDriver } from './vendor/tinbase/storage/driver.js'
+import { S3StorageDriver, type S3StorageDriverOptions } from './vendor/tinbase/storage/s3-driver.js'
+import type { StorageDriver } from './vendor/tinbase/types.js'
 
 export interface ProjectSecrets {
   jwtSecret: string
@@ -27,6 +30,9 @@ export interface ProjectRuntimeOptions {
   stateDir?: string
   dataDir?: string
   storageDir?: string
+  storageBackend?: ConfiguredStorageBackend
+  storageDriver?: StorageDriver
+  s3?: S3StorageDriverOptions
   host?: string
   port?: number
   apiUrl?: string
@@ -49,7 +55,11 @@ export interface ProjectBackend {
   migrationCount: number
   functionNames: string[]
   webhookCount: number
+  storageBackend: StorageBackend
 }
+
+export type StorageBackend = 'fs' | 'memory' | 's3' | 'custom'
+export type ConfiguredStorageBackend = Exclude<StorageBackend, 'custom'>
 
 export interface RunningProjectServer extends ProjectBackend {
   server: RunningServer
@@ -210,6 +220,8 @@ export async function createProjectBackend(options: ProjectRuntimeOptions = {}):
   const functionEnv = options.includeFunctions === false ? {} : await loadFunctionEnv(paths.projectDir)
   const secrets = await ensureProjectSecrets(paths)
   const webhooks = options.includeWebhooks === false ? [] : await loadWebhooks(paths.projectDir)
+  const configuredStorageBackend = options.storageDriver ? 'fs' : resolveStorageBackend(options.storageBackend)
+  const storageBackend: StorageBackend = options.storageDriver ? 'custom' : configuredStorageBackend
 
   if (paths.dataDir) {
     await mkdir(paths.dataDir, { recursive: true, mode: 0o700 })
@@ -245,7 +257,7 @@ export async function createProjectBackend(options: ProjectRuntimeOptions = {}):
     ),
     functionEnv,
     webhooks,
-    storageDriver: new FsStorageDriver(paths.storageDir),
+    storageDriver: options.storageDriver ?? createStorageDriver(configuredStorageBackend, paths.storageDir, options.s3),
     log: options.log,
   })
 
@@ -259,7 +271,29 @@ export async function createProjectBackend(options: ProjectRuntimeOptions = {}):
     migrationCount: project.migrations.length,
     functionNames: [...functions.keys()],
     webhookCount: webhooks.length,
+    storageBackend,
   }
+}
+
+export function resolveStorageBackend(value?: ConfiguredStorageBackend): ConfiguredStorageBackend {
+  const configured = value ?? process.env.SUPACLOUD_LITE_STORAGE_BACKEND ?? 'fs'
+  if (configured === 'fs' || configured === 'memory' || configured === 's3') return configured
+  throw new Error(`unsupported SUPACLOUD_LITE_STORAGE_BACKEND: ${configured}`)
+}
+
+function createStorageDriver(
+  backend: ConfiguredStorageBackend,
+  storageDir: string,
+  s3Options?: S3StorageDriverOptions
+): StorageDriver {
+  if (backend === 'memory') return new MemoryStorageDriver()
+  if (backend === 's3') {
+    return new S3StorageDriver({
+      ...s3Options,
+      prefix: s3Options?.prefix ?? process.env.SUPACLOUD_LITE_S3_PREFIX,
+    })
+  }
+  return new FsStorageDriver(storageDir)
 }
 
 export async function startProjectServer(options: ProjectRuntimeOptions = {}): Promise<RunningProjectServer> {

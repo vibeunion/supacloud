@@ -7,6 +7,7 @@ class FailingStorageDriver implements StorageDriver {
   failAfterWrite = false
   failOnTextAfterWrite: string | null = null
   failAfterDeleteMany = false
+  cleanupFailureMode: 'ignore' | 'propagate' = 'ignore'
 
   async put(key: string, data: Uint8Array): Promise<void> {
     this.objects.set(key, data.slice())
@@ -148,6 +149,25 @@ describe('Storage atomicity', () => {
       expect((await client.storage.from('assets').download('delete.txt')).error).not.toBeNull()
       const metadata = await backend.db.query(
         `select 1 from storage.objects where bucket_id = 'assets' and name = 'delete.txt'`
+      )
+      expect(metadata.rows).toHaveLength(0)
+    } finally {
+      await backend.close()
+    }
+  })
+
+  test('surfaces strict remote cleanup failures after metadata deletion', async () => {
+    const driver = new FailingStorageDriver()
+    driver.cleanupFailureMode = 'propagate'
+    const { backend, client } = await createStorageHarness(driver)
+    try {
+      expect((await client.storage.from('assets').upload('remote-delete.txt', 'keep-me', { upsert: true })).error).toBeNull()
+
+      driver.failAfterDeleteMany = true
+      const removed = await client.storage.from('assets').remove(['remote-delete.txt'])
+      expect(removed.error).not.toBeNull()
+      const metadata = await backend.db.query(
+        `select 1 from storage.objects where bucket_id = 'assets' and name = 'remote-delete.txt'`
       )
       expect(metadata.rows).toHaveLength(0)
     } finally {

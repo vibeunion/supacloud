@@ -10,6 +10,7 @@ import {
   assertResetPathsSafe,
   ensureProjectSecrets,
   mintProjectKeys,
+  resolveStorageBackend,
   resolveProjectPaths,
   startProjectServer,
   type ProjectRuntimeOptions,
@@ -52,6 +53,8 @@ function parseArgs(argv: string[]): CliOptions {
     else if (argument === '--state-dir') options.stateDir = resolve(next())
     else if (argument === '--data-dir') options.dataDir = resolve(next())
     else if (argument === '--storage-dir') options.storageDir = resolve(next())
+    else if (argument === '--storage-backend') options.storageBackend = next() as ProjectRuntimeOptions['storageBackend']
+    else if (argument === '--s3-prefix') options.s3 = { ...options.s3, prefix: next() }
     else if (argument === '--memory') options.memory = true
     else if (argument === '--output' || argument === '-o') options.output = resolve(next())
     else if (argument === '--file' || argument === '-f') options.diffFile = next()
@@ -148,7 +151,7 @@ async function main(): Promise<void> {
 
           API URL: ${project.url}
            Engine: PGlite${paths.dataDir ? ` (${paths.dataDir})` : ' (memory)'}
-          Storage: ${paths.storageDir}
+          Storage: ${formatStorage(project.storageBackend, paths.storageDir)}
        Migrations: ${project.migrationCount} file(s)
         Functions: ${project.functionNames.length ? project.functionNames.join(', ') : 'none'}
           Webhooks: ${project.webhookCount}
@@ -166,6 +169,9 @@ async function runDbCommand(options: CliOptions): Promise<void> {
   const subcommand = options.positionals[0]
   const paths = resolveProjectPaths(options)
   if (subcommand === 'reset') {
+    if (resolveStorageBackend(options.storageBackend) === 's3') {
+      throw new Error('db reset refuses the s3 storage backend because remote objects cannot be deleted atomically')
+    }
     await assertResetPathsSafe(paths)
     if (paths.dataDir) await rm(paths.dataDir, { recursive: true, force: true })
     await rm(paths.storageDir, { recursive: true, force: true })
@@ -263,10 +269,19 @@ Options:
       --state-dir <p>     state root (default .supacloud-lite)
       --data-dir <p>      PGlite data directory
       --storage-dir <p>   object storage directory
+      --storage-backend <b> fs, memory, or s3 (default fs)
+      --s3-prefix <p>      optional key prefix for the s3 backend
       --memory            use an in-memory PGlite database
   -o, --output <p>        output file for gen types
   -f, --file <name>       migration suffix for db diff
 `)
+}
+
+function formatStorage(backend: ProjectRuntimeOptions['storageBackend'] | 'custom', storageDir: string): string {
+  if (backend === 's3') return 'S3 remote (S3_*/AWS_* credentials)'
+  if (backend === 'memory') return 'in-memory'
+  if (backend === 'custom') return 'custom driver'
+  return storageDir
 }
 
 main().catch((error) => {

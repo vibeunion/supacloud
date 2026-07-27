@@ -11,7 +11,7 @@ V1 的目标不是复刻完整 Supabase 平台控制面，而是让现有应用�
 - 项目模型：单进程、单项目，内部 project ref 固定为 `local`
 - 客户端：直接使用官方 `@supabase/supabase-js`
 - 数据目录：`.supacloud-lite/db`
-- 对象目录：`.supacloud-lite/storage`
+- 对象存储：默认使用 `.supacloud-lite/storage`，也可切换为内存或远端 S3
 - 密钥文件：`.supacloud-lite/secrets.json`，权限为 `0600`
 
 ## 快速开始
@@ -83,6 +83,8 @@ supacloud-lite version
 - `--state-dir`：Lite 状态根目录
 - `--data-dir`：PGlite 数据目录
 - `--storage-dir`：对象存储目录
+- `--storage-backend`：`fs`、`memory` 或 `s3`
+- `--s3-prefix`：远端 S3 对象 key 前缀
 - `--memory`：使用内存数据库
 
 环境变量：
@@ -94,8 +96,14 @@ supacloud-lite version
 - `SUPACLOUD_LITE_STATE_DIR`
 - `SUPACLOUD_LITE_DATA_DIR`
 - `SUPACLOUD_LITE_STORAGE_DIR`
+- `SUPACLOUD_LITE_STORAGE_BACKEND`：`fs`（默认）、`memory` 或 `s3`
+- `SUPACLOUD_LITE_S3_PREFIX`：S3 对象 key 前缀，可被 `--s3-prefix` 覆盖
 - `SUPACLOUD_LITE_JWT_SECRET`
 - `SUPACLOUD_LITE_VAULT_KEY`
+
+使用远端 S3 时，启动前设置 `SUPACLOUD_LITE_STORAGE_BACKEND=s3`，并按 Bun S3 约定提供 `S3_BUCKET`、`S3_ACCESS_KEY_ID`、`S3_SECRET_ACCESS_KEY`、`S3_ENDPOINT`、`S3_REGION` 等变量；也支持对应的 `AWS_*` 变量。CLI 不接受密钥参数，避免凭据出现在进程列表中。
+
+S3 模式下 `db reset` 会被拒绝，因为 Lite 不能把数据库元数据清理与远端对象删除做成原子操作；需要先明确处理远端 bucket/prefix，再切回本地或内存存储执行重置。
 
 网络暴露时必须提供足够强的 JWT secret 和独立 vault key。默认生成的密钥适合单机项目；不要把 `.supacloud-lite/secrets.json` 提交到版本库。
 
@@ -105,7 +113,7 @@ supacloud-lite version
 | --- | --- | --- |
 | `supabase.from()` | 已验证核心 | 自动测试覆盖 CRUD、过滤、RLS；嵌套关系、RPC 和高级 PostgREST 语法属于实验性兼容 |
 | `supabase.auth` | 已验证核心 | 自动测试覆盖邮箱密码、会话和 bcrypt；OTP/Magic Link、匿名用户、OAuth、MFA 属于实验性兼容 |
-| `supabase.storage` | 已验证核心 | 自动测试覆盖上传下载、列表、删除、TUS 限制/RLS，以及跨 Bucket 移动复制的目标约束；签名 URL 属于实验性兼容 |
+| `supabase.storage` | 已验证核心 | 覆盖上传下载、列表、删除、TUS/RLS、远端 S3 驱动，以及 Bun.Image 的 `contain`/`fill`、格式和质量变换子集；`cover` 明确不支持 |
 | `supabase.channel()` | 已验证核心 | 自动测试覆盖 `postgres_changes`、DELETE RLS 隔离和事件快照校验；Broadcast、Presence 属于实验性兼容 |
 | `supabase.functions.invoke()` | 已验证核心 | 自动测试覆盖 Bun.build、`Deno.serve()`、公开函数和同进程重启 |
 | Supabase migrations | 支持 | 按文件名排序，记录到 `supabase_migrations` |
@@ -147,10 +155,13 @@ const running = await startProjectServer({
   projectDir: process.cwd(),
   host: '127.0.0.1',
   port: 54321,
+  storageBackend: 's3',
 })
 
 await running.close()
 ```
+
+图片变换目前提供 Bun.Image 的兼容子集：`width`、`height`、`resize=fill|contain`，以及 `format=origin|jpeg|png|webp` 和 JPEG/WebP `quality`。`resize=cover` 需要裁剪能力，当前 Bun 运行时没有对应 API，因此会明确返回不支持错误，不会错误地把图片拉伸成 `cover`。
 
 也可以使用 `createLiteBackend()` 直接创建内存或自定义目录的嵌入式后端，并把它的 `fetch` 传给自定义宿主。
 
