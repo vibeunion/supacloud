@@ -20,6 +20,15 @@ describe("buildResourceRegistry", () => {
     expect(authResources).toHaveLength(1);
   });
 
+  test("keeps table creation on the dedicated migration-backed page", () => {
+    const tableResource = buildResourceRegistry(["alpha123"]).find(
+      (resource) => resource.name === "v1/projects/alpha123/database/tables",
+    );
+
+    expect(tableResource?.canCreate).toBe(false);
+    expect(tableResource?.canEdit).toBe(false);
+  });
+
   test("keeps Auth user actions on the dedicated page instead of API-like routes", () => {
     const [authUsers] = buildResourceRegistry(["alpha123"]).filter(
       (resource) => resource.name === "v1/projects/alpha123/auth/users",
