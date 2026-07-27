@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.49.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.49.0...management-api-v0.49.1) (2026-07-27)
+
+
+### Bug Fixes
+
+* **edge:** avoid native storage port collision ([#609](https://github.com/zuohuadong/supacloud/issues/609)) ([4336832](https://github.com/zuohuadong/supacloud/commit/4336832e8038d945addcae4d59d295959b8b3edd))
+* **edge:** preserve source access for embedded privilege drop ([52875ea](https://github.com/zuohuadong/supacloud/commit/52875ea4650e0b66a2fabf4099b41123482e66a9))
+* **pages:** enable zip uploads and managed domains ([#611](https://github.com/zuohuadong/supacloud/issues/611)) ([eec9656](https://github.com/zuohuadong/supacloud/commit/eec9656c96f029ff24a267da6c2133cf8b35b84d))
+* **upgrade:** pin checkpoint verification to metadata database ([e5574e9](https://github.com/zuohuadong/supacloud/commit/e5574e91cbd1a90fc86a6712cec46623db685f11))
+
 ## [0.49.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.48.0...management-api-v0.49.0) (2026-07-27)
 
 
