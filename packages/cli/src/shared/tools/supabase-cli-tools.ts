@@ -228,7 +228,7 @@ export function resolveOfficialSupabaseCommand(
 
     const version = environment.SUPABASE_CLI_VERSION?.trim();
     if (version) {
-        if (!VALID_VERSION.test(version)) throw new Error("Invalid SUPABASE_CLI_VERSION; use an exact version such as 2.109.1");
+        if (!VALID_VERSION.test(version)) throw new Error("Invalid SUPABASE_CLI_VERSION; use an exact version such as 2.110.0");
         if (process.versions.bun) return [process.execPath, "x", `supabase@${version}`];
         if (process.platform === "win32") {
             throw new Error("SUPABASE_CLI_VERSION bootstrap is unavailable under Node on Windows; install the official CLI or set SUPACLOUD_SUPABASE_CLI_BIN");

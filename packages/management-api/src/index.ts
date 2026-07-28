@@ -703,6 +703,7 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
     scalingRoutes,
     taskRoutes,
     databaseRoutes,
+    databaseJitRoutes,
     authRoutes,
     wechatAuthRoutes,
     chinaAuthRoutes,
@@ -710,6 +711,7 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
     authHooksRoutes,
     authSsoRoutes,
     authOAuthServerRoutes,
+    authCustomProviderRoutes,
     authMfaRoutes,
     frontendRoutes,
     webhookRoutes,
@@ -734,6 +736,8 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
     projectAuthHookRuntimeRoutes,
     projectOrganizationRoutes,
     projectCollaboratorRoutes,
+    pipelineRoutes,
+    databaseWrapperRoutes,
   } = await import("./routes");
 
   return (
@@ -814,6 +818,7 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
       .use(scalingRoutes)
       .use(taskRoutes)
       .use(databaseRoutes)
+      .use(databaseJitRoutes)
       .use(authRoutes)
       .use(authRuntimeRoutes)
       .use(wechatAuthRoutes)
@@ -822,6 +827,7 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
       .use(authHooksRoutes)
       .use(authSsoRoutes)
       .use(authOAuthServerRoutes)
+      .use(authCustomProviderRoutes)
       .use(authMfaRoutes)
       .use(frontendRoutes)
       .use(webhookRoutes)
@@ -845,6 +851,8 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
       .use(projectAuthHookRuntimeRoutes)
       .use(projectOrganizationRoutes)
       .use(projectCollaboratorRoutes)
+      .use(pipelineRoutes)
+      .use(databaseWrapperRoutes)
   ) as AnyElysia;
 }
 
@@ -1117,6 +1125,15 @@ async function bootstrap() {
 
     const { caddyReady: initialGatewayReady } = await initializeGatewayRoutes();
 
+    const { jitDatabaseAccessService } = await import("./services/jit-database-access.service");
+    const jitGatewayState = await jitDatabaseAccessService.startGateway();
+    if (jitGatewayState.errors.length > 0) {
+      logger.error("[JitDatabaseGateway] Some persisted bindings were not restored", {
+        started: jitGatewayState.started,
+        errors: jitGatewayState.errors,
+      });
+    }
+
     try {
       const { moved } = await migrateLegacyVersionArtifacts();
       if (moved > 0) {
@@ -1343,11 +1360,17 @@ async function bootstrap() {
     const { startLogDrainForwarder } = await import("./workers/log-drain-forwarder.worker");
     startLogDrainForwarder();
 
+    const { startLocalLogCollector } = await import("./workers/local-log-collector.worker");
+    startLocalLogCollector();
+
     const { startGatewayHealthWorker } = await import("./workers/gateway-health.worker");
     startGatewayHealthWorker();
 
     const { startWebhookDeliveryWorker } = await import("./workers/webhook-delivery.worker");
     startWebhookDeliveryWorker();
+
+    const { postgresMajorUpgradeService } = await import("./services/postgres-major-upgrade.service");
+    postgresMajorUpgradeService.startWorker();
 
     if (config.edgeRuntimeMode === "embedded") {
       const { edgeRuntimeManager } =
@@ -1424,12 +1447,19 @@ if (import.meta.main) {
       const { stopLogDrainForwarder } =
         await import("./workers/log-drain-forwarder.worker");
       stopLogDrainForwarder();
+      const { stopLocalLogCollector } =
+        await import("./workers/local-log-collector.worker");
+      stopLocalLogCollector();
       const { stopGatewayHealthWorker } =
         await import("./workers/gateway-health.worker");
       stopGatewayHealthWorker();
       const { stopWebhookDeliveryWorker } =
         await import("./workers/webhook-delivery.worker");
       stopWebhookDeliveryWorker();
+      const { postgresMajorUpgradeService } = await import("./services/postgres-major-upgrade.service");
+      postgresMajorUpgradeService.stopWorker();
+      const { jitDatabaseAccessService } = await import("./services/jit-database-access.service");
+      jitDatabaseAccessService.stopGateway();
     } catch (e: unknown) {
       logger.debug("[index] suppressed error", {
         error: e instanceof Error ? e.message : String(e),

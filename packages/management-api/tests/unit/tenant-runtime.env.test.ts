@@ -1,3 +1,4 @@
+// @supacloud-test-isolate
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -8,6 +9,7 @@ import {
   quoteTomlBasicString,
   renderSystemdEnvLine,
   renderGoTrueAuthEnv,
+  renderGoTruePasskeyEnv,
   renderGoTrueProviderLinkingEnv,
   renderGoTrueSamlEnv,
   renderGoTrueSessionPolicyEnv,
@@ -24,7 +26,7 @@ import {
   readAuthSessionPolicy,
 } from "../../src/services/auth-session-policy";
 import { authConfigChangesPostgrestVerifier } from "../../src/services/auth-runtime-impact";
-import { resolveTenantAuthUrlSettings } from "../../src/services/tenant-runtime.service";
+import { isGoTruePasskeyVersionSupported, resolveTenantAuthUrlSettings } from "../../src/services/tenant-runtime.service";
 
 describe("TenantRuntimeService safe config serialization", () => {
   const special = `p@:/#?% space '\"\\`;
@@ -321,7 +323,7 @@ describe("TenantRuntimeService GoTrue auth env rendering", () => {
     })).toThrow(/control character/i);
   });
 
-  test("does not generate removed Passkey or WebAuthn runtime variables", () => {
+  test("wires Passkey and WebAuthn runtime variables into the managed GoTrue service", () => {
     const configSource = readFileSync(
       join(import.meta.dir, "../../src/services/tenant-runtime-config.ts"),
       "utf8",
@@ -332,10 +334,51 @@ describe("TenantRuntimeService GoTrue auth env rendering", () => {
     );
     const runtimeImplementation = `${configSource}\n${runtimeSource}`;
 
-    expect(runtimeImplementation).not.toContain("renderGoTruePasskeyEnv");
-    expect(runtimeImplementation).not.toContain("GOTRUE_PASSKEY_");
-    expect(runtimeImplementation).not.toContain("GOTRUE_MFA_WEBAUTHN_");
-    expect(runtimeImplementation).not.toContain("GOTRUE_WEBAUTHN_");
+    expect(runtimeImplementation).toContain("renderGoTruePasskeyEnv");
+    expect(runtimeImplementation).toContain("GOTRUE_PASSKEY_");
+    expect(runtimeImplementation).toContain("GOTRUE_WEBAUTHN_");
+  });
+
+  test("renders the official GoTrue Passkey configuration shape", () => {
+    expect(renderGoTruePasskeyEnv({
+      passkey_enabled: true,
+      passkey_max_passkeys_per_user: 6,
+      webauthn_rp_id: "example.com",
+      webauthn_rp_display_name: "Example App",
+      webauthn_rp_origins: ["https://example.com", "https://app.example.com"],
+    })).toBe([
+      "GOTRUE_PASSKEY_ENABLED=true",
+      "GOTRUE_PASSKEY_MAX_PASSKEYS_PER_USER=6",
+      'GOTRUE_WEBAUTHN_RP_ID="example.com"',
+      'GOTRUE_WEBAUTHN_RP_DISPLAY_NAME="Example App"',
+      'GOTRUE_WEBAUTHN_RP_ORIGINS="https://example.com,https://app.example.com"',
+    ].join("\n"));
+  });
+
+  test.each([
+    [{ passkey_enabled: true, webauthn_rp_id: "https://example.com", webauthn_rp_display_name: "Example", webauthn_rp_origins: ["https://example.com"] }, /bare domain/],
+    [{ passkey_enabled: true, webauthn_rp_id: "example.com", webauthn_rp_display_name: "Example", webauthn_rp_origins: ["http://example.com"] }, /HTTPS/],
+    [{ passkey_enabled: true, webauthn_rp_id: "example.com", webauthn_rp_display_name: "Example", webauthn_rp_origins: ["https://other.example"] }, /match or be a subdomain/],
+    [{ passkey_enabled: true, webauthn_rp_id: "example.com", webauthn_rp_display_name: "Example", webauthn_rp_origins: ["https://example.com", "https://a.example.com", "https://b.example.com", "https://c.example.com", "https://d.example.com", "https://e.example.com"] }, /at most 5/],
+  ])("rejects invalid Passkey relying-party configuration", (authConfig, errorPattern) => {
+    expect(() => renderGoTruePasskeyEnv(authConfig)).toThrow(errorPattern);
+  });
+
+  test("accepts the official comma-separated Management API origin format", () => {
+    expect(renderGoTruePasskeyEnv({
+      passkey_enabled: true,
+      webauthn_rp_id: "localhost",
+      webauthn_rp_display_name: "Local",
+      webauthn_rp_origins: "http://localhost:3000,http://localhost:5173",
+    })).toContain('GOTRUE_WEBAUTHN_RP_ORIGINS="http://localhost:3000,http://localhost:5173"');
+  });
+
+  test("requires a GoTrue version that includes the stock Passkey routes", () => {
+    expect(isGoTruePasskeyVersionSupported("v2.193.1")).toBe(false);
+    expect(isGoTruePasskeyVersionSupported("v2.194.0")).toBe(true);
+    expect(isGoTruePasskeyVersionSupported("v2.194.0+supacloud")).toBe(true);
+    expect(isGoTruePasskeyVersionSupported("v3.0.0")).toBe(false);
+    expect(isGoTruePasskeyVersionSupported("gotrue dev")).toBe(false);
   });
 
   test("maps SAML SP key rotation config into GoTrue env values", () => {

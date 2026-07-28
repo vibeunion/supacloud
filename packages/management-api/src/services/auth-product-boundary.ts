@@ -1,54 +1,59 @@
-const PASSKEY_CAPABILITY_REASON = "gotrue_passkey_ceremony_unavailable";
+import { renderGoTruePasskeyEnv } from "./tenant-runtime-config";
 
-function normalizedAuthFieldName(fieldName: string): string {
-  return fieldName.replaceAll(/[_-]/g, "").toLowerCase();
+export class PasskeyConfigValidationError extends Error {
+  readonly code = "INVALID_PASSKEY_CONFIG";
+
+  constructor(message: string) {
+    super(message);
+    this.name = "PasskeyConfigValidationError";
+  }
 }
 
-function isUnavailableWebAuthnField(fieldName: string): boolean {
-  const normalized = normalizedAuthFieldName(fieldName);
-  return normalized.startsWith("passkey")
-    || normalized.startsWith("webauthn")
-    || normalized.startsWith("mfawebauthn");
-}
-
-function isRecord(candidate: unknown): candidate is Record<string, unknown> {
-  return typeof candidate === "object" && candidate !== null && !Array.isArray(candidate);
-}
-
-function hasNestedMfaWebAuthn(candidate: unknown): boolean {
-  return isRecord(candidate)
-    && Object.keys(candidate).some((fieldName) => normalizedAuthFieldName(fieldName).startsWith("webauthn"));
-}
-
-export function requestsUnavailablePasskeyConfig(authConfig: Record<string, unknown>): boolean {
-  return Object.entries(authConfig).some(([fieldName, fieldSetting]) =>
-    isUnavailableWebAuthnField(fieldName)
-      || (normalizedAuthFieldName(fieldName) === "mfa" && hasNestedMfaWebAuthn(fieldSetting)),
-  );
-}
-
-export function withoutUnavailablePasskeyConfig(
+export function canonicalizeStockPasskeyConfig(
   authConfig: Record<string, unknown>,
 ): Record<string, unknown> {
-  const publicConfig = structuredClone(authConfig);
-  for (const [fieldName, fieldSetting] of Object.entries(publicConfig)) {
-    if (isUnavailableWebAuthnField(fieldName)) {
-      delete publicConfig[fieldName];
-      continue;
-    }
-    if (normalizedAuthFieldName(fieldName) === "mfa" && isRecord(fieldSetting)) {
-      for (const mfaFieldName of Object.keys(fieldSetting)) {
-        if (normalizedAuthFieldName(mfaFieldName).startsWith("webauthn")) delete fieldSetting[mfaFieldName];
+  const canonical = structuredClone(authConfig);
+  if (Array.isArray(canonical.webauthn_rp_origins)) {
+    canonical.webauthn_rp_origins = [...new Set(canonical.webauthn_rp_origins.map((origin) => {
+      if (typeof origin !== "string") {
+        throw new PasskeyConfigValidationError("webauthn_rp_origins must contain only strings");
       }
-    }
+      return origin.trim();
+    }).filter(Boolean))].join(",");
   }
-  return publicConfig;
+  return canonical;
 }
 
-export function passkeyCapabilityUnavailableBody() {
+export function readStockPasskeyConfig(authConfig: Record<string, unknown>) {
+  const passkey = authConfig.passkey && typeof authConfig.passkey === "object" && !Array.isArray(authConfig.passkey)
+    ? authConfig.passkey as Record<string, unknown>
+    : {};
+  const webauthn = authConfig.webauthn && typeof authConfig.webauthn === "object" && !Array.isArray(authConfig.webauthn)
+    ? authConfig.webauthn as Record<string, unknown>
+    : {};
+  const origins = authConfig.webauthn_rp_origins ?? webauthn.rp_origins ?? null;
   return {
-    code: "CAPABILITY_UNAVAILABLE",
-    message: "Passkey and WebAuthn configuration is unavailable until a stock GoTrue ceremony is verified",
-    reason_code: PASSKEY_CAPABILITY_REASON,
+    passkey_enabled: authConfig.passkey_enabled ?? passkey.enabled ?? false,
+    webauthn_rp_display_name: authConfig.webauthn_rp_display_name ?? webauthn.rp_display_name ?? null,
+    webauthn_rp_id: authConfig.webauthn_rp_id ?? webauthn.rp_id ?? null,
+    webauthn_rp_origins: Array.isArray(origins) ? origins.join(",") : origins,
+  };
+}
+
+export function validateStockPasskeyConfig(authConfig: Record<string, unknown>): void {
+  try {
+    renderGoTruePasskeyEnv(authConfig);
+  } catch (error: unknown) {
+    throw new PasskeyConfigValidationError(
+      error instanceof Error ? error.message : "Invalid Passkey configuration",
+    );
+  }
+}
+
+export function passkeyConfigValidationBody(error: PasskeyConfigValidationError) {
+  return {
+    code: error.code,
+    message: error.message,
+    experimental: true,
   };
 }

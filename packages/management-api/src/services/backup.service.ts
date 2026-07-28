@@ -221,6 +221,13 @@ export async function listBackups(database?: string): Promise<BackupInfo[]> {
 export async function createBackup(
   type: "full" | "incr" | "diff" = "incr",
 ): Promise<{ message: string }> {
+  const result = await createBackupWithEvidence(type);
+  return { message: result.message };
+}
+
+export async function createBackupWithEvidence(
+  type: "full" | "incr" | "diff" = "incr",
+): Promise<{ message: string; backup: BackupInfo }> {
   const beforeExecution = await runPgBackRest(["info", "--output=json"], INFO_TIMEOUT_MS);
   assertCommandSucceeded("backup inventory", beforeExecution);
   const previousBackups = parseBackups(beforeExecution.stdout);
@@ -238,7 +245,7 @@ export async function createBackup(
     type,
     hasPreviousFullBackup,
   );
-  return { message: `${completedBackup.type} backup completed` };
+  return { message: `${completedBackup.type} backup completed`, backup: completedBackup };
 }
 
 function assertNewCompletedBackup(

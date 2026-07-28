@@ -34,6 +34,39 @@
 - **CI/CD Integration**: GitHub webhook for automated deployments
 - **Comprehensive Tests**: 400+ unit, integration, and structural regression tests
 
+### SupaCloud Lite
+
+**SupaCloud Lite** is the Bun-native, single-project edition of SupaCloud. It runs PostgreSQL-compatible workloads in-process with PGlite and exposes the Supabase protocols used by `@supabase/supabase-js`: REST, Auth, Storage, Realtime, and Edge Functions. It is intended for local development, small single-project deployments, and applications that want a Docker-free Supabase-compatible backend.
+
+Lite Auth is built into the same Bun process; it does not install or launch a GoTrue sidecar. It is enabled by default and can be disabled with `[auth] enabled = false` in `supabase/config.toml`, which turns off `/auth/v1/*`. Use the full platform when an independent GoTrue runtime or full GoTrue compatibility is required.
+
+Use the full SupaCloud platform when you need multi-project tenancy, a management API or web console, shared Pigsty infrastructure, platform operations, and hosted frontend lifecycle management. Lite deliberately does not provide a multi-project control plane or Supabase Studio; each Lite process owns one project and its own state directory.
+
+| Need | Choose |
+| --- | --- |
+| Local-first or single-project runtime without Docker | SupaCloud Lite |
+| Multi-tenant platform, operator controls, or production infrastructure management | SupaCloud |
+
+Lite requires Bun 1.3+ and keeps its default database, storage, and generated secrets under `.supacloud-lite/` in the project directory. Start it with the existing Supabase CLI project layout:
+
+```bash
+bun add @supacloud/lite
+bunx supacloud-lite start
+bunx supacloud-lite keys
+```
+
+Then use the printed anonymous key with the standard client:
+
+```ts
+import { createClient } from '@supabase/supabase-js'
+
+const supabase = createClient('http://127.0.0.1:54321', process.env.SUPACLOUD_LITE_ANON_KEY!)
+```
+
+See [SupaCloud Lite documentation](./packages/supacloud-lite/README.md) for CLI commands, storage/S3 configuration, compatibility limits, migration guidance, and deployment boundaries.
+
+For persistent Lite deployments, update the pinned `@supacloud/lite` dependency and run `supacloud-lite upgrade`. The command creates a portable database/storage/secrets snapshot before applying pending migrations. `snapshot create` and fail-closed `snapshot restore` are also available for host migration and rollback preparation.
+
 ### SupaCloud vs Supabase
 
 SupaCloud is best understood as a **self-hosted multi-tenant control plane for Supabase-style projects**, not as a clone of Supabase Cloud.
@@ -529,6 +562,8 @@ supacloud/
 │   │   └── src/
 │   ├── admin/                  # Platform admin CLI
 │   │   └── src/
+│   ├── supacloud-lite/          # Bun + PGlite single-project Supabase-compatible runtime
+│   │   └── README.md            # Lite usage, migration, and compatibility guide
 │   ├── edge-runtime/           # Bun Edge Functions runtime
 │   │   ├── server.ts           # Elysia server (:9000) + /preheat endpoint
 │   │   ├── worker-pool.ts      # Fixed-size Worker Thread Pool + preheat()
@@ -581,7 +616,8 @@ Key installation settings:
 | `EDGE_RUNTIME` | Functions runtime | `bun` |
 | `PG_VERSION` | PostgreSQL version | `18` |
 | `PIGSTY_VERSION` | Pigsty version | `v4.4.0` |
-| `ENABLE_ANALYTICS` | Logflare analytics | `true` |
+| `SUPACLOUD_LOGS_ENABLED` | 内置采集器 + VictoriaLogs 项目日志（不使用 Logflare） | `true` |
+| `SUPACLOUD_PIPELINES_ENABLED` | Pinned Supabase ETL runtime for BigQuery CDC Pipelines | `true` |
 
 ### Documentation
 
@@ -624,6 +660,39 @@ Key installation settings:
 - **国内 OAuth**: 内置微信、支付宝、钉钉登录集成
 - **CI/CD 集成**: GitHub Webhook 自动化部署
 - **完善测试**: 400+ 单元、集成和结构回归测试
+
+### SupaCloud Lite
+
+**SupaCloud Lite** 是 SupaCloud 的 Bun 原生单项目版本：它使用 PGlite 在进程内运行兼容 PostgreSQL 的工作负载，并实现 `@supabase/supabase-js` 所需的 REST、Auth、Storage、Realtime 与 Edge Functions 协议。它适合本地开发、小型单项目部署，以及希望获得 Supabase 兼容后端但不想引入 Docker 的应用。
+
+Lite 的 Auth 内置在同一个 Bun 进程中，不会安装或启动 GoTrue sidecar。它默认启用；在 `supabase/config.toml` 设置 `[auth] enabled = false` 可关闭 `/auth/v1/*`。需要独立 GoTrue 运行时或完整 GoTrue 兼容性时，应使用完整平台。
+
+需要多项目租户、Management API 或 Web 管理面板、共享 Pigsty 基础设施、平台运维或前端托管生命周期时，应使用完整的 SupaCloud 平台。Lite 有意不提供多项目控制面和 Supabase Studio；每个 Lite 进程只负责一个项目及其独立状态目录。
+
+| 需求 | 选择 |
+| --- | --- |
+| 无 Docker 的本地优先或单项目运行时 | SupaCloud Lite |
+| 多租户平台、运维控制面或生产基础设施管理 | SupaCloud |
+
+Lite 需要 Bun 1.3+，默认会把数据库、对象存储和生成的密钥保存在项目目录下的 `.supacloud-lite/`。可直接使用现有 Supabase CLI 项目结构启动：
+
+```bash
+bun add @supacloud/lite
+bunx supacloud-lite start
+bunx supacloud-lite keys
+```
+
+将输出的匿名 key 直接交给标准客户端：
+
+```ts
+import { createClient } from '@supabase/supabase-js'
+
+const supabase = createClient('http://127.0.0.1:54321', process.env.SUPACLOUD_LITE_ANON_KEY!)
+```
+
+CLI 命令、存储/S3 配置、兼容性边界、迁移方式和部署注意事项请参阅 [SupaCloud Lite 完整文档](./packages/supacloud-lite/README.md)。
+
+持久化部署升级时，先更新项目锁定的 `@supacloud/lite` 依赖，再运行 `supacloud-lite upgrade`。该命令会在执行待应用 migration 前自动创建包含数据库、对象存储和密钥的可移植快照；跨机器迁移还可以直接使用 `snapshot create` 和默认拒绝覆盖的 `snapshot restore`。
 
 ### SupaCloud 与 Supabase 的区别
 
@@ -1065,6 +1134,8 @@ supacloud/
 │   │   └── src/
 │   ├── admin/                  # 服务器管理员 CLI
 │   │   └── src/
+│   ├── supacloud-lite/          # Bun + PGlite 单项目 Supabase 兼容运行时
+│   │   └── README.md            # Lite 使用、迁移与兼容性说明
 │   ├── edge-runtime/           # Bun 云函数运行时
 │   │   ├── server.ts           # Elysia 服务 (:9000) + /preheat 预热端点
 │   │   ├── worker-pool.ts      # 固定大小 Worker 线程池 + preheat()
@@ -1117,7 +1188,8 @@ supacloud/
 | `EDGE_RUNTIME` | 云函数运行时 | `bun` |
 | `PG_VERSION` | PostgreSQL 版本 | `18` |
 | `PIGSTY_VERSION` | Pigsty 版本 | `v4.4.0` |
-| `ENABLE_ANALYTICS` | Logflare 分析 | `true` |
+| `SUPACLOUD_LOGS_ENABLED` | 内置采集器 + VictoriaLogs 项目日志（不使用 Logflare） | `true` |
+| `SUPACLOUD_PIPELINES_ENABLED` | 用于 BigQuery CDC Pipelines 的固定版本 Supabase ETL 运行时 | `true` |
 
 ### 参考文档
 

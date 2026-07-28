@@ -135,6 +135,99 @@ function readPositiveIntegerSetting(
     return Number.isFinite(value) && value > 0 ? Math.trunc(value) : defaultValue;
 }
 
+function readStringArraySetting(authConfig: Record<string, unknown>, key: string): string[] {
+    const value = authConfig[key];
+    const entries = typeof value === "string"
+        ? value.split(",")
+        : Array.isArray(value)
+            ? value
+            : [];
+    return [...new Set(entries.map((entry) => {
+        if (typeof entry !== "string") throw new Error(`${key} must contain only strings`);
+        const normalized = entry.trim();
+        assertSafeConfigValue(key, normalized);
+        return normalized;
+    }).filter(Boolean))];
+}
+
+const PASSKEY_ANDROID_ORIGIN_PATTERN = /^android:apk-key-hash:[A-Za-z0-9_-]+$/;
+const PASSKEY_DOMAIN_PATTERN = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+
+function normalizePasskeyRpId(value: string): string {
+    const rpId = value.trim().toLowerCase();
+    if (rpId === "[::1]") return rpId;
+    if (rpId.length > 253 || !PASSKEY_DOMAIN_PATTERN.test(rpId)) {
+        throw new Error("webauthn_rp_id must be a bare domain without a scheme, port, or path");
+    }
+    return rpId;
+}
+
+function isLoopbackPasskeyHost(hostname: string): boolean {
+    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
+}
+
+function validatePasskeyOrigin(origin: string, rpId: string): void {
+    if (PASSKEY_ANDROID_ORIGIN_PATTERN.test(origin)) return;
+
+    let parsed: URL;
+    try {
+        parsed = new URL(origin);
+    } catch {
+        throw new Error(`Invalid WebAuthn origin: ${origin}`);
+    }
+    if (parsed.origin !== origin || parsed.username || parsed.password || parsed.pathname !== "/" || parsed.search || parsed.hash) {
+        throw new Error(`WebAuthn origin must contain only scheme, host, and optional port: ${origin}`);
+    }
+    const hostname = parsed.hostname.toLowerCase();
+    if (parsed.protocol !== "https:" && !(parsed.protocol === "http:" && isLoopbackPasskeyHost(hostname))) {
+        throw new Error(`WebAuthn origin must use HTTPS except for loopback hosts: ${origin}`);
+    }
+    if (hostname !== rpId && !hostname.endsWith(`.${rpId}`)) {
+        throw new Error(`WebAuthn origin hostname must match or be a subdomain of the RP ID: ${origin}`);
+    }
+}
+
+export function renderGoTruePasskeyEnv(authConfig: Record<string, unknown>): string {
+    const passkey = readRecordSetting(authConfig.passkey);
+    const enabled = readBooleanSetting(
+        authConfig,
+        "passkey_enabled",
+        readBooleanSetting(passkey, "enabled", false),
+    );
+    if (!enabled) return "GOTRUE_PASSKEY_ENABLED=false";
+
+    const webauthn = readRecordSetting(authConfig.webauthn);
+    const rawRpId = readStringSetting(authConfig, "webauthn_rp_id", readStringSetting(webauthn, "rp_id"));
+    const rpDisplayName = readStringSetting(
+        authConfig,
+        "webauthn_rp_display_name",
+        readStringSetting(webauthn, "rp_display_name"),
+    );
+    const flatOrigins = readStringArraySetting(authConfig, "webauthn_rp_origins");
+    const nestedOrigins = readStringArraySetting(webauthn, "rp_origins");
+    const origins = flatOrigins.length > 0 ? flatOrigins : nestedOrigins;
+    if (!rawRpId || !rpDisplayName || origins.length === 0) {
+        throw new Error("Passkey requires webauthn_rp_id, webauthn_rp_display_name, and webauthn_rp_origins");
+    }
+    if (origins.length > 5) throw new Error("webauthn_rp_origins supports at most 5 origins");
+
+    const rpId = normalizePasskeyRpId(rawRpId);
+    origins.forEach((origin) => validatePasskeyOrigin(origin, rpId));
+    const rawMaxPasskeys = authConfig.passkey_max_passkeys_per_user ?? passkey.max_passkeys_per_user ?? 10;
+    const maxPasskeys = Number(rawMaxPasskeys);
+    if (!Number.isSafeInteger(maxPasskeys) || maxPasskeys < 1) {
+        throw new Error("passkey_max_passkeys_per_user must be a positive integer");
+    }
+
+    return [
+        "GOTRUE_PASSKEY_ENABLED=true",
+        `GOTRUE_PASSKEY_MAX_PASSKEYS_PER_USER=${maxPasskeys}`,
+        renderSystemdEnvLine("GOTRUE_WEBAUTHN_RP_ID", rpId),
+        renderSystemdEnvLine("GOTRUE_WEBAUTHN_RP_DISPLAY_NAME", rpDisplayName),
+        renderSystemdEnvLine("GOTRUE_WEBAUTHN_RP_ORIGINS", origins.join(",")),
+    ].join("\n");
+}
+
 export function renderGoTrueAuthEnv(authConfig: Record<string, unknown>): string {
     const disableSignup = readBooleanSetting(authConfig, "disable_signup", false)
         || readBooleanSetting(authConfig, "enable_signup", true) === false;

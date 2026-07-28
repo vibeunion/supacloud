@@ -108,6 +108,9 @@ export interface Config {
   pgredisRuntimeInternalToken: string;
   pgredisRuntimeInternalTimeoutMs: number;
   edgeFunctionsDir: string;
+  logsEnabled: boolean;
+  victoriaLogsUrl: string;
+  logCollectorStateDir: string;
   homePath: string;
   masterToken: string;
   logLevel: string;
@@ -118,6 +121,9 @@ export interface Config {
   pgPassword: string;
   pgDatabase: string;
   pgDataDir: string;
+  jitDatabaseGatewayBindHost: string;
+  jitDatabaseGatewayPublicHost: string;
+  jitDatabaseGatewayPortRange: string;
   minDiskGb: number;
   postgrestBin: string;
   postgrestRts: string;
@@ -285,6 +291,9 @@ export const config: Config = {
   pgredisRuntimeInternalToken: getEnv("PGREDIS_RUNTIME_INTERNAL_TOKEN", ""),
   pgredisRuntimeInternalTimeoutMs: Number(getEnv("PGREDIS_RUNTIME_INTERNAL_TIMEOUT_MS", "5000")),
   edgeFunctionsDir: getEnv("EDGE_FUNCTIONS_DIR", "/opt/supacloud/functions"),
+  logsEnabled: getEnv("SUPACLOUD_LOGS_ENABLED", "true") === "true",
+  victoriaLogsUrl: getEnv("VICTORIALOGS_URL", "http://127.0.0.1:9428"),
+  logCollectorStateDir: getEnv("SUPACLOUD_LOG_COLLECTOR_STATE_DIR", "/var/lib/supacloud/log-collector"),
   homePath: getEnv("HOME", "/root"),
   masterToken: getEnv(
     "MASTER_TOKEN",
@@ -301,6 +310,9 @@ export const config: Config = {
   pgPassword,
   pgDatabase,
   pgDataDir: getEnv("PG_DATA_DIR", "/var/lib/pgsql/data"),
+  jitDatabaseGatewayBindHost: getEnv("JIT_DATABASE_GATEWAY_BIND_HOST", "::"),
+  jitDatabaseGatewayPublicHost: getEnv("JIT_DATABASE_GATEWAY_PUBLIC_HOST", pgHost),
+  jitDatabaseGatewayPortRange: getEnv("JIT_DATABASE_GATEWAY_PORT_RANGE", "6600-6699"),
   minDiskGb: Number(getEnv("MIN_DISK_GB", "10")),
   postgrestBin: getEnv("POSTGREST_BIN", "/usr/local/bin/postgrest"),
   postgrestRts: getEnv("POSTGREST_RTS", "-N1 -M256m -I0.5 -A4m"),

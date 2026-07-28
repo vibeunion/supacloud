@@ -1,6 +1,7 @@
 import { Elysia, t, status } from "elysia";
 import { StorageService, migrationJobs } from '../services/storage.service';
 import { StorageRLS } from "../services/storage-rls";
+import { StorageVectorError, StorageVectorService } from "../services/storage-vector.service";
 import { logger } from "../utils/logger";
 import { config } from "../config";
 import { requireAdminAuth, requireProjectOrAdminAuth } from "../middleware/auth";
@@ -24,6 +25,39 @@ type StorageBucketCreateInput = {
 };
 
 type StorageOperationResult = { success: boolean; error?: string };
+
+async function runProjectVectorOperation(ref: string, operation: string, body: Record<string, unknown>) {
+    switch (operation) {
+        case "CreateVectorBucket":
+            return StorageVectorService.createBucket(ref, String(body.vectorBucketName || ""));
+        case "DeleteVectorBucket":
+            return StorageVectorService.deleteBucket(ref, String(body.vectorBucketName || ""));
+        case "GetVectorBucket":
+            return StorageVectorService.getBucket(ref, String(body.vectorBucketName || ""));
+        case "ListVectorBuckets":
+            return StorageVectorService.listBuckets(ref, body);
+        case "CreateIndex":
+            return StorageVectorService.createIndex(ref, body as Parameters<typeof StorageVectorService.createIndex>[1]);
+        case "DeleteIndex":
+            return StorageVectorService.deleteIndex(ref, String(body.vectorBucketName || ""), String(body.indexName || ""));
+        case "GetIndex":
+            return StorageVectorService.getIndex(ref, String(body.vectorBucketName || ""), String(body.indexName || ""));
+        case "ListIndexes":
+            return StorageVectorService.listIndexes(ref, body as Parameters<typeof StorageVectorService.listIndexes>[1]);
+        case "PutVectors":
+            return StorageVectorService.putVectors(ref, body as Parameters<typeof StorageVectorService.putVectors>[1]);
+        case "DeleteVectors":
+            return StorageVectorService.deleteVectors(ref, body as Parameters<typeof StorageVectorService.deleteVectors>[1]);
+        case "GetVectors":
+            return StorageVectorService.getVectors(ref, body as Parameters<typeof StorageVectorService.getVectors>[1]);
+        case "ListVectors":
+            return StorageVectorService.listVectors(ref, body as Parameters<typeof StorageVectorService.listVectors>[1]);
+        case "QueryVectors":
+            return StorageVectorService.queryVectors(ref, body as Parameters<typeof StorageVectorService.queryVectors>[1]);
+        default:
+            throw new StorageVectorError(`Unknown vector operation '${operation}'`, 404, "ResourceNotFoundException");
+    }
+}
 
 // ── Imaginary Config ──────────────────────────────────────────────
 const IMAGINARY_URL = config.imaginaryUrl;
@@ -652,6 +686,36 @@ export const projectStorageRoutes = new Elysia({ prefix: "/v1/projects/:ref/stor
         }),
         detail: { tags: ["storage"], summary: "Update a storage bucket" },
     })
+    .post('/vector/:operation', async ({ params, body, request, set }) => {
+        const authError = await requireProjectOrAdminAuth(request, params.ref);
+        if (authError) return status(authError.status, authError.body);
+        try {
+            const result = await runProjectVectorOperation(
+                params.ref,
+                params.operation,
+                (body && typeof body === 'object' ? body : {}) as Record<string, unknown>,
+            );
+            if (result === undefined) {
+                set.status = 200;
+                return '';
+            }
+            return result;
+        } catch (error: unknown) {
+            if (error instanceof StorageVectorError) {
+                return status(error.statusCode, {
+                    statusCode: String(error.statusCode),
+                    error: error.code,
+                    message: error.message,
+                });
+            }
+            logger.error('[Storage] Project vector operation failed', {
+                ref: params.ref,
+                operation: params.operation,
+                error: error instanceof Error ? error.message : String(error),
+            });
+            return status(500, { statusCode: "500", error: "InternalError", message: "Vector storage operation failed" });
+        }
+    }, { detail: { tags: ["storage", "vector"], summary: "Manage project vector storage" } })
     .delete('/buckets/:id', async ({ params, set, request }) => {
         const authError = await requireProjectOrAdminAuth(request, params.ref);
         if (authError) return status(authError.status, authError.body);

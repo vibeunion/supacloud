@@ -2,7 +2,7 @@
   import { apiClient } from "$lib/api";
 
   import { page } from "$app/state";
-  import { Loader2, Globe, Database, Settings, AlertTriangle } from "lucide-svelte";
+  import { Loader2, Globe, Plus, X } from "lucide-svelte";
   import { toast } from "svelte-sonner";
   import { createQuery } from "@tanstack/svelte-query";
 
@@ -31,6 +31,7 @@
         WHEN f.fdwname ILIKE '%s3%' THEN 'S3'
         WHEN f.fdwname ILIKE '%clickhouse%' THEN 'ClickHouse'
         WHEN f.fdwname ILIKE '%bigquery%' THEN 'BigQuery'
+        WHEN f.fdwname ILIKE '%mongodb%' THEN 'MongoDB'
         ELSE 'Custom'
       END as fdw_type
     FROM pg_foreign_data_wrapper f
@@ -53,6 +54,46 @@
 
   const wrappers = $derived((wrappersQuery.data as Wrapper[]) || []);
   const isLoading = $derived(wrappersQuery.isPending);
+  let showCreate = $state(false);
+  let wrapperType = $state<"stripe" | "mongodb">("stripe");
+  let serverName = $state("stripe_server");
+  let schemaName = $state("stripe");
+  let credential = $state("");
+  let apiVersion = $state("");
+  let saving = $state(false);
+
+  function selectType(type: "stripe" | "mongodb") {
+    wrapperType = type;
+    serverName = type === "stripe" ? "stripe_server" : "mongodb_server";
+    schemaName = type === "stripe" ? "stripe" : "mongo";
+  }
+
+  async function createWrapper() {
+    saving = true;
+    try {
+      const res = await apiClient(`/v1/projects/${projectRef}/database/wrappers`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: wrapperType,
+          server_name: serverName,
+          schema_name: schemaName,
+          credential,
+          ...(wrapperType === "stripe" && apiVersion ? { api_version: apiVersion } : {}),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Wrapper 配置失败");
+      credential = "";
+      showCreate = false;
+      await wrappersQuery.refetch();
+      toast.success(wrapperType === "stripe" ? "Stripe 数据表已导入" : "MongoDB Server 已配置，可创建 Foreign Table");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Wrapper 配置失败");
+    } finally {
+      saving = false;
+    }
+  }
 
   function getTypeIcon(type: string): string {
     if (type === "PostgreSQL") return "🐘";
@@ -61,20 +102,40 @@
     if (type === "S3") return "📦";
     if (type === "ClickHouse") return "🏠";
     if (type === "BigQuery") return "📊";
+    if (type === "MongoDB") return "🍃";
     return "🔗";
   }
 </script>
 
 <div class="h-full flex flex-col space-y-4">
-  <div>
-    <h1 class="text-2xl font-bold">Foreign Data Wrappers</h1>
-    <p class="text-sm text-muted-foreground mt-1">使用 Wrappers 连接外部数据源，直接在 SQL 中查询第三方服务</p>
+  <div class="flex flex-wrap items-start justify-between gap-3">
+    <div>
+      <h1 class="text-2xl font-bold">Foreign Data Wrappers</h1>
+      <p class="text-sm text-muted-foreground mt-1">使用 Wrappers 连接外部数据源，直接在 SQL 中查询第三方服务</p>
+    </div>
+    <button onclick={() => showCreate = !showCreate} class="inline-flex h-9 items-center gap-2 rounded-md bg-brand px-4 text-sm font-medium text-white">{#if showCreate}<X size={15} />取消{:else}<Plus size={15} />配置 Wrapper{/if}</button>
   </div>
 
   <div class="rounded-lg border bg-blue-500/5 border-blue-500/20 p-3 flex items-start gap-2">
     <Globe size={14} class="text-blue-600 mt-0.5 shrink-0" />
     <p class="text-xs text-blue-700">Foreign Data Wrappers (FDW) 允许你将外部数据源（如 Stripe、Firebase、S3、其他 PostgreSQL 等）映射为本地表进行查询。</p>
   </div>
+
+  {#if showCreate}
+    <section class="space-y-4 rounded-xl border bg-card p-5">
+      <div class="flex gap-2">
+        <button onclick={() => selectType("stripe")} class={`rounded-md border px-3 py-2 text-sm ${wrapperType === "stripe" ? "border-brand bg-brand/10 text-brand" : ""}`}>Stripe Sync</button>
+        <button onclick={() => selectType("mongodb")} class={`rounded-md border px-3 py-2 text-sm ${wrapperType === "mongodb" ? "border-brand bg-brand/10 text-brand" : ""}`}>MongoDB</button>
+      </div>
+      <div class="grid gap-3 md:grid-cols-2">
+        <label class="space-y-1 text-xs"><span>Server 名称</span><input bind:value={serverName} class="h-9 w-full rounded-md border bg-background px-3 font-mono" /></label>
+        <label class="space-y-1 text-xs"><span>Schema</span><input bind:value={schemaName} class="h-9 w-full rounded-md border bg-background px-3 font-mono" /></label>
+        {#if wrapperType === "stripe"}<label class="space-y-1 text-xs"><span>Stripe API Version（可选）</span><input bind:value={apiVersion} class="h-9 w-full rounded-md border bg-background px-3 font-mono" placeholder="2024-06-20" /></label>{/if}
+      </div>
+      <label class="block space-y-1 text-xs"><span>{wrapperType === "stripe" ? "Stripe Secret / Restricted Key" : "MongoDB Connection String"}</span><input bind:value={credential} type="password" class="h-9 w-full rounded-md border bg-background px-3 font-mono" autocomplete="off" /></label>
+      <div class="flex items-center justify-between gap-3"><p class="text-xs text-muted-foreground">凭据写入 Supabase Vault；Foreign Server 仅保存 Vault secret ID。</p><button onclick={createWrapper} disabled={saving || !credential || !serverName || !schemaName} class="inline-flex h-9 items-center gap-2 rounded-md bg-brand px-4 text-sm font-medium text-white disabled:opacity-50">{#if saving}<Loader2 size={15} class="animate-spin" />{/if}创建</button></div>
+    </section>
+  {/if}
 
   <div class="flex-1 rounded-xl border border-border/50 bg-background shadow-sm overflow-hidden">
     {#if isLoading}
@@ -91,7 +152,7 @@
     {:else}
       <div class="overflow-auto">
         <div class="divide-y divide-border/20">
-          {#each wrappers as wrapper}
+          {#each wrappers as wrapper (`${wrapper.id}:${wrapper.server}`)}
             <div class="flex items-center justify-between px-5 py-4 hover:bg-muted/10 transition-colors">
               <div class="flex items-center gap-3">
                 <div class="w-9 h-9 rounded-lg bg-brand/10 text-brand flex items-center justify-center text-lg">

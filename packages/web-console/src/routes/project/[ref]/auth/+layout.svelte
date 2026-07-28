@@ -3,7 +3,7 @@
   import { resolve } from "$app/paths";
   import { page } from "$app/state";
   import { apiClient } from "$lib/api";
-  import { Users, Shield, KeyRound, Link2, Mail, Clock, Webhook, BadgeCheck } from "lucide-svelte";
+  import { Users, Shield, KeyRound, Link2, Mail, Clock, Webhook, BadgeCheck, Fingerprint } from "lucide-svelte";
 
   type AuthRuntimeDescriptor = {
     project_ref: string;
@@ -28,6 +28,8 @@
   const AUTH_TABS = [
     { name: "用户", path: "", route: "/project/[ref]/auth", icon: Users },
     { name: "提供者", path: "providers", route: "/project/[ref]/auth/providers", icon: KeyRound },
+    { name: "Custom OAuth", path: "custom-providers", route: "/project/[ref]/auth/custom-providers", icon: KeyRound },
+    { name: "Passkeys", path: "passkeys", route: "/project/[ref]/auth/passkeys", icon: Fingerprint },
     { name: "OAuth Server", path: "oauth-server", route: "/project/[ref]/auth/oauth-server", icon: BadgeCheck },
     { name: "RLS 策略", path: "policies", route: "/project/[ref]/auth/policies", icon: Shield },
     { name: "URL 配置", path: "url-configuration", route: "/project/[ref]/auth/url-configuration", icon: Link2 },

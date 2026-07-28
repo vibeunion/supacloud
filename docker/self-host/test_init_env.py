@@ -83,6 +83,13 @@ class InitEnvTests(unittest.TestCase):
             self.assertGreaterEqual(len(first_pgredis_token), 32)
             self.assertNotIn(first_pgredis_token, {master_token, encryption_key, first_secret})
             self.assertEqual(second_pgredis_token, first_pgredis_token)
+            generated = parsed_env(env_path)
+            self.assertRegex(generated["GOTRUE_DB_ENCRYPTION_KEY_ID"], r"^supacloud-[0-9a-f]{16}$")
+            self.assertRegex(generated["GOTRUE_DB_ENCRYPTION_KEY"], r"^[A-Za-z0-9_-]{43}$")
+            self.assertEqual(
+                generated["GOTRUE_DB_DECRYPTION_KEYS"],
+                f'{generated["GOTRUE_DB_ENCRYPTION_KEY_ID"]}:{generated["GOTRUE_DB_ENCRYPTION_KEY"]}',
+            )
             self.assertNotIn("LEGACY_SECRETS_ENCRYPTION_KEY", parsed_env(env_path))
             migration_path = Path(parsed_env(env_path)["LEGACY_SECRETS_MIGRATION_FILE"])
             self.assertTrue(migration_path.exists())
@@ -181,6 +188,18 @@ class InitEnvTests(unittest.TestCase):
         self.assertIn("LEGACY_SECRETS_MIGRATION_FILE", self_host_compose)
         self.assertNotIn("GOTRUE_EXPERIMENTAL_PROVIDER_LINKING_DOMAINS", self_host_compose)
         self.assertNotIn("GOTRUE_EXPERIMENTAL_PROVIDERS_WITH_OWN_LINKING_DOMAIN", self_host_compose)
+
+    def test_compose_exposes_gotrue_at_the_supabase_auth_path(self) -> None:
+        self_host_compose = (SELF_HOST_DIR / "docker-compose.yml").read_text(encoding="utf-8")
+        dev_compose = (REPO_ROOT / "docker/dev/docker-compose.yml").read_text(encoding="utf-8")
+
+        self.assertIn("API_EXTERNAL_URL: ${PUBLIC_URL}/auth/v1", self_host_compose)
+        self.assertIn("API_EXTERNAL_URL: http://localhost:${CADDY_HTTP_PORT:-8000}/auth/v1", dev_compose)
+        for compose in (self_host_compose, dev_compose):
+            self.assertIn("GOTRUE_CUSTOM_OAUTH_ENABLED:", compose)
+            self.assertIn("GOTRUE_SECURITY_DATABASE_ENCRYPTION_ENCRYPT:", compose)
+            self.assertIn("GOTRUE_PASSKEY_ENABLED:", compose)
+            self.assertIn("GOTRUE_WEBAUTHN_RP_ID:", compose)
 
     @unittest.skipUnless(shutil.which("docker"), "docker compose is not installed")
     def test_compose_scopes_bff_secret_to_management_api(self) -> None:

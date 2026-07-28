@@ -14,6 +14,7 @@ RUN mkdir -p /etc/supabase/pgredis-tenants \
 
 COPY packages/management-api ./packages/management-api
 COPY packages/web-console ./packages/web-console
+COPY --chmod=0755 scripts/lib/postgres_major_upgrade_executor.sh /opt/supacloud/scripts/lib/postgres_major_upgrade_executor.sh
 COPY --chmod=0755 docker/self-host/management-api-entrypoint.sh /usr/local/bin/supacloud-management-entrypoint
 
 RUN cd /app/packages/web-console && bun install && bun run build

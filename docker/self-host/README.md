@@ -33,7 +33,6 @@ The PostgreSQL image stays on `postgres:18-bookworm` and installs PGDG, Pigsty/P
 - `wrappers`
 - `index_advisor`
 - `pg_net`
-- `pgjwt`
 - `wal2json`
 
 It also packages these PostgreSQL libraries and optional extensions:

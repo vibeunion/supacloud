@@ -1,0 +1,22 @@
+[Unit]
+Description=SupaCloud VictoriaLogs
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/supabase/victorialogs.env
+ExecStartPre=/usr/bin/test -x ${VICTORIALOGS_BINARY}
+ExecStart=${VICTORIALOGS_BINARY} -storageDataPath=${VICTORIALOGS_DATA_DIR} -retentionPeriod=${VICTORIALOGS_RETENTION} -httpListenAddr=127.0.0.1:9428
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/supacloud
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+MemoryHigh=512M
+MemoryMax=1G
+
+[Install]
+WantedBy=multi-user.target

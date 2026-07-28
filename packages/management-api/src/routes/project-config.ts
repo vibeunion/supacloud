@@ -39,8 +39,11 @@ import {
 } from "./auth-config-responses";
 import { projectControlSecretsService } from "../services/project-control-secrets.service";
 import {
-  passkeyCapabilityUnavailableBody,
-  requestsUnavailablePasskeyConfig,
+  canonicalizeStockPasskeyConfig,
+  PasskeyConfigValidationError,
+  passkeyConfigValidationBody,
+  readStockPasskeyConfig,
+  validateStockPasskeyConfig,
 } from "../services/auth-product-boundary";
 import {
   canonicalAuthProviderLinkingConfig,
@@ -276,7 +279,9 @@ function buildStorageConfigResponse(raw: Record<string, unknown>) {
     vectorBuckets: {
       ...((response.features as Record<string, any>).vectorBuckets || {}),
       ...((features.vectorBuckets as Record<string, unknown>) || {}),
-      enabled: false,
+      enabled: true,
+      maxBuckets: 100,
+      maxIndexes: 10,
     },
   };
   response.capabilities = {
@@ -287,7 +292,7 @@ function buildStorageConfigResponse(raw: Record<string, unknown>) {
     >),
     iceberg_catalog: false,
     storage_iceberg: false,
-    storage_vectors: false,
+    storage_vectors: true,
   };
   response.external = {
     ...(response.external as Record<string, unknown>),
@@ -486,6 +491,7 @@ async function buildAuthConfigResponse(ref: string, settings: Record<string, unk
     rate_limit_otp: authConfig.rate_limit_otp ?? null,
     sms_provider: authConfig.sms_provider ?? "twilio",
     experimental: authConfig.experimental ?? {},
+    ...readStockPasskeyConfig(authConfig),
   };
 
   delete response.external;
@@ -882,10 +888,13 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
 
       let newAuth: Record<string, unknown>;
       try {
-        newAuth = canonicalizeAuthUrlConfig(
+        newAuth = canonicalizeStockPasskeyConfig(canonicalizeAuthUrlConfig(
           typeof body === "object" && body !== null ? body : {},
-        );
+        ));
       } catch (error: unknown) {
+        if (error instanceof PasskeyConfigValidationError) {
+          return status(400, passkeyConfigValidationBody(error));
+        }
         if (error instanceof AuthUrlConfigValidationError) {
           return status(400, buildAuthUrlConfigErrorBody(error));
         }
@@ -895,9 +904,6 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         params.ref,
         (settings.auth as Record<string, unknown>) || {},
       );
-      if (requestsUnavailablePasskeyConfig(newAuth)) {
-        return status(501, passkeyCapabilityUnavailableBody());
-      }
       let sessionPolicyPatch: ReturnType<typeof normalizeAuthSessionPolicyPatch>;
       try {
         sessionPolicyPatch = normalizeAuthSessionPolicyPatch(newAuth);
@@ -1131,7 +1137,11 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         mergedAuth = canonicalAuthProviderLinkingConfig(
           applyAuthSessionPolicyPatch(mergedAuth, sessionPolicyPatch),
         );
+        validateStockPasskeyConfig(mergedAuth);
       } catch (error: unknown) {
+        if (error instanceof PasskeyConfigValidationError) {
+          return status(400, passkeyConfigValidationBody(error));
+        }
         if (error instanceof ProviderLinkingDomainsValidationError) {
           return status(400, { code: "INVALID_PROVIDER_LINKING_DOMAINS", message: error.message });
         }

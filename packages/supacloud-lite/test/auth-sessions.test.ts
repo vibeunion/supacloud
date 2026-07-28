@@ -3,6 +3,22 @@ import { createClient } from '@supabase/supabase-js'
 import { createLiteBackend } from '../src/index.js'
 
 describe('Auth session limits', () => {
+  test('keeps Auth in-process and can disable only its public routes', async () => {
+    const backend = await createLiteBackend({
+      authEnabled: false,
+      jwtSecret: 'x'.repeat(64),
+      vaultKey: 'y'.repeat(64),
+      log: () => {},
+    })
+    try {
+      const response = await backend.fetch('http://local/auth/v1/health')
+      expect(response.status).toBe(404)
+      expect(await response.json()).toEqual({ message: 'Auth service is disabled' })
+    } finally {
+      await backend.close()
+    }
+  })
+
   test('does not reset the absolute session timebox during refresh', async () => {
     const backend = await createLiteBackend({
       jwtSecret: 'x'.repeat(64),

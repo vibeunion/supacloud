@@ -1,18 +1,18 @@
 import { Elysia, t, status } from "elysia";
 import { projectService } from "../services";
 import { logger } from "../utils/logger";
+import { requireProjectOrAdminAuth } from "../middleware/auth";
+import { victoriaLogsService } from "../services/victorialogs.service";
 
 const activeStreams = new Map<string, number>();
 const MAX_STREAMS_PER_PROJECT = 5;
 
-function getUnits(ref: string, service?: string): string[] {
+export function getProjectLogUnits(ref: string, service?: string): string[] {
     const all = [
         `supacloud-gotrue@${ref}`,
         `supacloud-pgrst@${ref}`,
         `supacloud-postgres@${ref}`,
-        "supacloud-realtime",
         `supacloud-storage@${ref}`,
-        "supacloud-caddy",
     ];
     if (!service || service === "all") return all;
     const map: Record<string, string> = {
@@ -22,83 +22,92 @@ function getUnits(ref: string, service?: string): string[] {
         postgrest: `supacloud-pgrst@${ref}`,
         database: `supacloud-postgres@${ref}`,
         db: `supacloud-postgres@${ref}`,
-        realtime: "supacloud-realtime",
         storage: `supacloud-storage@${ref}`,
-        caddy: "supacloud-caddy",
     };
     const unit = map[service];
-    return unit ? [unit] : all;
+    if (!unit) throw new Error("Live log streaming only supports project-isolated auth, api, database, and storage services");
+    return [unit];
 }
 
 export const projectLogsRoutes = new Elysia({ prefix: "/v1/projects/:ref/logs" })
     .get(
         "",
-        async ({ params, query, set }) => {
+        async ({ params, query, request }) => {
+            const authError = await requireProjectOrAdminAuth(request, params.ref);
+            if (authError) return status(authError.status, authError.body);
             const project = await projectService.getProject(params.ref);
             if (!project) {
                 return status(404, { message: "Project not found", code: "404" });
             }
 
             try {
-                const limit = Math.max(1, Math.min(1000, Number.parseInt(query.limit || "200", 10) || 200));
-                const units = getUnits(params.ref, query.service);
-                const unitArgs = units.flatMap(u => ["-u", u]);
-                const proc = Bun.spawn(
-                    ["journalctl", ...unitArgs, "-n", String(limit), "--output", "short-iso", "--no-pager"],
-                    { stdout: "pipe", stderr: "ignore" },
-                );
-                const output = await new Response(proc.stdout).text();
-                await proc.exited;
-                const lines = output.split('\n').filter(line => line.trim() !== '' && !line.startsWith('-- '));
-
-                const parsedLogs = lines.map((line, idx) => {
-                    const match = line.match(/^([0-9-T:+.]+)\s+\S+\s+([^:]+):\s+(.*)$/);
-                    if (match) {
-                        const ts = new Date(match[1]).getTime() || Date.now();
-                        const svc = match[2].trim();
-                        return {
-                            id: `${params.ref}-${idx}`,
-                            timestamp: ts,
-                            event_message: match[3],
-                            metadata: { service: svc },
-                        };
-                    }
-                    return {
-                        id: `${params.ref}-${idx}`,
-                        timestamp: Date.now(),
-                        event_message: line,
-                        metadata: { service: "system" },
-                    };
+                const limit = query.limit === undefined ? 200 : Number(query.limit);
+                const offset = query.offset === undefined ? 0 : Number(query.offset);
+                const parsedLogs = await victoriaLogsService.queryProjectLogs(params.ref, {
+                    limit,
+                    offset,
+                    service: query.service,
+                    search: query.search,
+                    start: query.start,
+                    end: query.end,
                 });
-
                 return {
+                    backend: "victorialogs",
                     result: parsedLogs,
                     pagination: {
-                        offset: 0,
+                        offset,
                         limit,
                         total: parsedLogs.length,
                     },
                 };
             } catch (error: unknown) {
-                set.status = 500;
-                return { message: "Failed to fetch logs", code: "500" };
+                const message = error instanceof Error ? error.message : String(error);
+                if (/^(Invalid|Log query|start |end )/.test(message)) {
+                    return status(400, { message, code: "VALIDATION_ERROR", backend: "victorialogs" });
+                }
+                logger.warn("[ProjectLogs] VictoriaLogs query failed", { ref: params.ref, error: message });
+                return status(503, {
+                    message: "Persistent project logs are temporarily unavailable",
+                    code: "LOG_STORE_UNAVAILABLE",
+                    backend: "victorialogs",
+                });
             }
         },
         {
             params: t.Object({ ref: t.String({ minLength: 1 }) }),
-            query: t.Object({ limit: t.Optional(t.String()), service: t.Optional(t.String()) }),
+            query: t.Object({
+                limit: t.Optional(t.String()),
+                offset: t.Optional(t.String()),
+                service: t.Optional(t.String()),
+                search: t.Optional(t.String()),
+                start: t.Optional(t.String()),
+                end: t.Optional(t.String()),
+            }),
             detail: { tags: ["projects"], summary: "Get project logs" }
         }
     )
 
     .get(
         "/stream",
-        async ({ params, query, set }) => {
+        async ({ params, query, set, request }) => {
             const { ref } = params;
+
+            const authError = await requireProjectOrAdminAuth(request, ref);
+            if (authError) return status(authError.status, authError.body);
 
             const project = await projectService.getProject(ref);
             if (!project) {
                 return status(404, { message: "Project not found", code: "404" });
+            }
+
+            let units: string[];
+            try {
+                units = getProjectLogUnits(ref, query.service);
+            } catch (error: unknown) {
+                return status(400, {
+                    message: error instanceof Error ? error.message : String(error),
+                    code: "INVALID_LOG_SERVICE",
+                });
             }
 
             const current = activeStreams.get(ref) || 0;
@@ -108,7 +117,6 @@ export const projectLogsRoutes = new Elysia({ prefix: "/v1/projects/:ref/logs" }
             }
             activeStreams.set(ref, current + 1);
 
-            const units = getUnits(ref, query.service);
             const unitArgs = units.flatMap(u => ["-u", u]);
 
             const proc = Bun.spawn(

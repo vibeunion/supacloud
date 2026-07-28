@@ -31,7 +31,9 @@ describe('project runtime', () => {
     expect(secrets.every((candidate) => candidate.vaultKey === first.vaultKey)).toBe(true)
     expect(first.jwtSecret.length).toBeGreaterThanOrEqual(64)
     expect(first.vaultKey.length).toBeGreaterThanOrEqual(64)
-    expect((await stat(paths.secretsFile)).mode & 0o777).toBe(0o600)
+    const secretsFile = await stat(paths.secretsFile)
+    expect(secretsFile.isFile()).toBe(true)
+    if (process.platform !== 'win32') expect(secretsFile.mode & 0o777).toBe(0o600)
   })
 
   test('mints fixed local-project anon and service role keys', async () => {
@@ -85,6 +87,26 @@ describe('project runtime', () => {
       expect(project.backend.inbox).toBeNull()
       const response = await project.backend.fetch(new Request('http://127.0.0.1/inbox/api/messages'))
       expect(response.status).toBe(401)
+    } finally {
+      await project.backend.close()
+    }
+  })
+
+  test('reads auth.enabled=false from the project config without a GoTrue sidecar', async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), 'supacloud-lite-auth-disabled-'))
+    temporaryDirectories.push(projectDir)
+    await mkdir(join(projectDir, 'supabase'), { recursive: true })
+    await writeFile(join(projectDir, 'supabase', 'config.toml'), '[auth]\nenabled = false\n')
+    const project = await createProjectBackend({
+      projectDir,
+      includeFunctions: false,
+      includeWebhooks: false,
+    })
+    try {
+      expect(project.config.auth.enabled).toBe(false)
+      const response = await project.backend.fetch('http://local/auth/v1/health')
+      expect(response.status).toBe(404)
+      expect(await response.json()).toEqual({ message: 'Auth service is disabled' })
     } finally {
       await project.backend.close()
     }

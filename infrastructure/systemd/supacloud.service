@@ -43,7 +43,7 @@ ProtectHome=false
 # host units or arbitrary drop-ins.
 RuntimeDirectory=supacloud-unit-requests
 RuntimeDirectoryMode=0700
-ReadWritePaths=/etc/supabase /run/supacloud-unit-requests /etc/supacloud/caddy /opt/supacloud /tmp /var/log/supacloud
+ReadWritePaths=/etc/supabase /run/supacloud-unit-requests /etc/supacloud/caddy /opt/supacloud /tmp /var/log/supacloud /var/lib/supacloud
 
 SystemCallFilter=@system-service @chown
 SystemCallFilter=~@mount @reboot @swap @raw-io @keyring

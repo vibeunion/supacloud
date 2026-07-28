@@ -4,6 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODE="check"
+SKIP_ANALYTICS=false
 COMPAT_PROFILE="${SUPACLOUD_COMPAT_PROFILE:-pigsty}"
 MANAGEMENT_ENV_FILE="${SUPACLOUD_MANAGEMENT_ENV_FILE:-/etc/supabase/management-api.env}"
 COMPAT_PG_ENV_FILE="${SUPACLOUD_COMPAT_PG_ENV_FILE:-$MANAGEMENT_ENV_FILE}"
@@ -37,7 +38,7 @@ is_pigsty_profile() {
 
 usage() {
   cat <<'EOF'
-Usage: bash scripts/upgrade_pigsty_4_4_compat.sh [--check|--apply|--prepare-analytics|--dry-run|--rollback-plan]
+Usage: bash scripts/upgrade_pigsty_4_4_compat.sh [--check|--apply|--prepare-analytics|--dry-run|--rollback-plan] [--skip-analytics]
 
   --check          Read-only verification of Pigsty 4.4 compatibility objects.
   --apply          Idempotently create/repair Analytics, Studio views, and metadata columns.
@@ -45,6 +46,9 @@ Usage: bash scripts/upgrade_pigsty_4_4_compat.sh [--check|--apply|--prepare-anal
                    Move legacy Analytics before starting the Pigsty 4.4 Logflare stack.
   --dry-run        Print the planned targets without changing PostgreSQL or files.
   --rollback-plan  Print safe rollback guidance. It never drops Analytics data automatically.
+  --skip-analytics Skip all Logflare/Analytics creation, migration, and checks.
+                   Used by the default new-install path; historical migrations
+                   must use --prepare-analytics explicitly instead.
 
 Run --apply after installing the matching SupaCloud management binary so
 `supacloud --init-db` can encrypt and backfill opaque Secret Keys.
@@ -61,6 +65,10 @@ while [[ $# -gt 0 ]]; do
       MODE="${1#--}"
       shift
       ;;
+    --skip-analytics)
+      SKIP_ANALYTICS=true
+      shift
+      ;;
     --help|-h)
       usage
       exit 0
@@ -72,6 +80,11 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ "$SKIP_ANALYTICS" == "true" && "$MODE" == "prepare-analytics" ]]; then
+  printf '%s\n' '--skip-analytics cannot be combined with --prepare-analytics' >&2
+  exit 2
+fi
 
 if [[ "$MODE" == "rollback-plan" ]]; then
   cat <<EOF
@@ -1180,7 +1193,9 @@ check_all() {
     printf '[FAIL] Control-plane user deletion fence: %s\n' "$control_fence_result"
     failed=1
   fi
-  if database_exists "$ANALYTICS_DB"; then
+  if [[ "$SKIP_ANALYTICS" == "true" ]]; then
+    printf '[PASS] Analytics compatibility is skipped by request\n'
+  elif database_exists "$ANALYTICS_DB"; then
     if [[ "$(query_scalar "$ANALYTICS_DB" "SELECT 1 FROM pg_namespace WHERE nspname = '$ANALYTICS_SCHEMA'")" != "1" ]]; then
       printf '[FAIL] Analytics schema missing: %s.%s\n' "$ANALYTICS_DB" "$ANALYTICS_SCHEMA"
       failed=1
@@ -1364,13 +1379,15 @@ check_all() {
 
 if [[ "$MODE" == "dry-run" ]]; then
   target_databases="$(list_target_databases | awk '!seen[$0]++')"
-  printf 'Would ensure Analytics database/schema: %s.%s (owner %s)\n' "$ANALYTICS_DB" "$ANALYTICS_SCHEMA" "$ANALYTICS_OWNER"
-  printf 'Would copy a non-empty legacy postgres.%s schema only when the destination is empty.\n' "$ANALYTICS_SCHEMA"
-  if is_pigsty_profile; then
-    printf 'Would stop the legacy Analytics container before copying data.\n'
-    printf 'Would patch Pigsty environment: %s\n' "$PIGSTY_ENV_FILE"
-  else
-    printf 'Would require explicit confirmation that any external Analytics writer is stopped before copying legacy data.\n'
+  if [[ "$SKIP_ANALYTICS" != "true" ]]; then
+    printf 'Would ensure Analytics database/schema: %s.%s (owner %s)\n' "$ANALYTICS_DB" "$ANALYTICS_SCHEMA" "$ANALYTICS_OWNER"
+    printf 'Would copy a non-empty legacy postgres.%s schema only when the destination is empty.\n' "$ANALYTICS_SCHEMA"
+    if is_pigsty_profile; then
+      printf 'Would stop the legacy Analytics container before copying data.\n'
+      printf 'Would patch Pigsty environment: %s\n' "$PIGSTY_ENV_FILE"
+    else
+      printf 'Would require explicit confirmation that any external Analytics writer is stopped before copying legacy data.\n'
+    fi
   fi
   printf 'Would ensure Studio compatibility in databases:\n'
   printf '%s\n' "$target_databases" | sed 's/^/  - /'
@@ -1426,15 +1443,17 @@ if [[ "$MODE" == "prepare-analytics" ]]; then
 fi
 
 if [[ "$MODE" == "apply" ]]; then
-  apply_analytics_database
-  if analytics_migration_required; then
-    printf '[FAIL] Legacy Analytics data still needs an offline migration.\n' >&2
-    printf '       Run --prepare-analytics before --apply so the writer is stopped and verified.\n' >&2
-    exit 1
+  if [[ "$SKIP_ANALYTICS" != "true" ]]; then
+    apply_analytics_database
+    if analytics_migration_required; then
+      printf '[FAIL] Legacy Analytics data still needs an offline migration.\n' >&2
+      printf '       Run --prepare-analytics before --apply so the writer is stopped and verified.\n' >&2
+      exit 1
+    fi
+    migrate_legacy_analytics
+    grant_analytics_owner_privileges
+    is_pigsty_profile && patch_pigsty_env
   fi
-  migrate_legacy_analytics
-  grant_analytics_owner_privileges
-  is_pigsty_profile && patch_pigsty_env
   run_management_init_and_verify_user_deletion_fence
   apply_metadata_columns
   if is_pigsty_profile; then

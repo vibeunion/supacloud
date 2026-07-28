@@ -5,7 +5,6 @@ import {
   migrateLegacyControlSecrets,
   migrateLegacyProviderLinkingConfig,
   migrateLegacyProjectWebhooks,
-  migrateUnsupportedWebAuthnConfig,
   migrateWebhookSecretsToControlStore,
 } from "../../src/db/platform-v2";
 
@@ -161,45 +160,6 @@ describe("platform v2 migrations", () => {
     expect(await migrateWebhookSecretsToControlStore(database)).toBe(0);
   });
 
-  test("removes every unsupported WebAuthn shape while preserving TOTP and phone MFA", async () => {
-    const project: ProjectState = {
-      ref: "proj_webauthn",
-      config: {
-        auth: {
-          passkey_enabled: true,
-          passkeyPolicy: { resident_key: true },
-          webauthn: { rp_id: "example.test" },
-          webauthn_timeout: 30,
-          mfa_web_authn_enabled: true,
-          mfa_webauthn_capacity: 5,
-          password_min_length: 12,
-          mfa: {
-            totp: { enabled: true },
-            phone: { enabled: true },
-            webauthn: { enabled: true },
-            web_authn: { enabled: true },
-          },
-        },
-      },
-    };
-    const { database } = migrationDatabase(project);
-
-    expect(await migrateUnsupportedWebAuthnConfig(database)).toBe(1);
-    const auth = (project.config as { auth: Record<string, unknown> }).auth;
-    expect(auth.password_min_length).toBe(12);
-    expect(auth.passkey_enabled).toBeUndefined();
-    expect(auth.passkeyPolicy).toBeUndefined();
-    expect(auth.webauthn).toBeUndefined();
-    expect(auth.webauthn_timeout).toBeUndefined();
-    expect(auth.mfa_web_authn_enabled).toBeUndefined();
-    expect(auth.mfa_webauthn_capacity).toBeUndefined();
-    expect(auth.mfa).toEqual({
-      totp: { enabled: true },
-      phone: { enabled: true },
-    });
-    expect(await migrateUnsupportedWebAuthnConfig(database)).toBe(0);
-  });
-
   test("migrates legacy provider linking into the sorted canonical map exactly once", async () => {
     const project: ProjectState = {
       ref: "proj_provider_linking",
@@ -244,22 +204,4 @@ describe("platform v2 migrations", () => {
     await expect(migrateLegacyProviderLinkingConfig(database)).rejects.toThrow("non-empty strings");
   });
 
-  test("scrubs a legacy JSON-string config and rejects malformed JSON", async () => {
-    const project: ProjectState = {
-      ref: "proj_legacy_webauthn",
-      config: JSON.stringify({
-        auth: JSON.stringify({
-          webauthn_enabled: true,
-          mfa: { web_authn: { enabled: true }, totp: { enabled: true } },
-        }),
-      }),
-    };
-    const { database } = migrationDatabase(project);
-
-    expect(await migrateUnsupportedWebAuthnConfig(database)).toBe(1);
-    expect(project.config).toEqual({ auth: { mfa: { totp: { enabled: true } } } });
-
-    project.config = "{not-json";
-    await expect(migrateUnsupportedWebAuthnConfig(database)).rejects.toThrow("contains invalid JSON");
-  });
 });

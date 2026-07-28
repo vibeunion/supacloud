@@ -7,10 +7,10 @@ RUNTIME_SCRIPT="${SCRIPT_DIR}/tenant_runtime.sh"
 
 grep -Eq '^umask 077$' "$RUNTIME_SCRIPT"
 grep -Fq 'PGPASSWORD="$db_password" psql' "$RUNTIME_SCRIPT"
-grep -Fq 'v14.15' "$RUNTIME_SCRIPT"
-grep -Fq '4e78c7f065a6c36f350c7177f5fa9bb77ea380c67b8bf40f2fc9130d857678dc' "$RUNTIME_SCRIPT"
-grep -Fq '1eb007298c1536ba865e741da7eece6fba6db3da904c599abd15d9c3debe6c2f' "$RUNTIME_SCRIPT"
-grep -Fq 'v2.193.1' "$RUNTIME_SCRIPT"
+grep -Fq 'v14.16' "$RUNTIME_SCRIPT"
+grep -Fq '36b8ae140f188cfcd6003494805bf35a41e895f88c12be9183d60f91782145c6' "$RUNTIME_SCRIPT"
+grep -Fq '086f58dfa090ef0ed7e30ca5c0b49f937a9586d77e5ce372f6a34f249370e37d' "$RUNTIME_SCRIPT"
+grep -Fq 'v2.194.0' "$RUNTIME_SCRIPT"
 grep -Fq 'GOTRUE_EXPERIMENTAL_PROVIDER_LINKING_DOMAINS' "$RUNTIME_SCRIPT"
 grep -Fq 'run the explicit SupaCloud installer/upgrade' "$RUNTIME_SCRIPT"
 
@@ -48,6 +48,7 @@ trap 'rm -rf "$tmp_dir"' EXIT
 
 # shellcheck source=tenant_runtime.sh
 source "$RUNTIME_SCRIPT"
+export SECRETS_ENCRYPTION_KEY='tenant-runtime-test-encryption-key-0123456789abcdef'
 
 special=$'p@:/#?% space \'"\\'
 encoded_special='p%40%3A%2F%23%3F%25%20space%20%27%22%5C'
@@ -56,6 +57,12 @@ encoded_special='p%40%3A%2F%23%3F%25%20space%20%27%22%5C'
 [[ "$(systemd_env_quote 'a"b')" == '"a\"b"' ]]
 [[ "$(systemd_env_quote 'a\b')" == '"a\\b"' ]]
 [[ "$(toml_basic_string 'a"b\c')" == '"a\"b\\c"' ]]
+[[ "$(ensure_auth_api_path 'https://api.example.com')" == 'https://api.example.com/auth/v1' ]]
+[[ "$(ensure_auth_api_path 'https://api.example.com/auth/v1/')" == 'https://api.example.com/auth/v1' ]]
+encryption_env=$(render_gotrue_database_encryption_env 'super-secret-jwt-token-with-at-least-32-characters-long')
+grep -Fq 'GOTRUE_SECURITY_DATABASE_ENCRYPTION_ENCRYPT="true"' <<< "$encryption_env"
+grep -Fq 'GOTRUE_SECURITY_DATABASE_ENCRYPTION_ENCRYPTION_KEY_ID="supacloud-fd3cb19a4dff25ba"' <<< "$encryption_env"
+grep -Fq 'GOTRUE_SECURITY_DATABASE_ENCRYPTION_ENCRYPTION_KEY="ZyjoMd1c1UJgtJhRIsP3MSEpBbXtKHTKN0P7rZQO7WQ"' <<< "$encryption_env"
 
 for serializer in uri_percent_encode systemd_env_quote toml_basic_string; do
     if "$serializer" $'safe\nINJECTED=value' >/dev/null 2>&1; then
@@ -118,7 +125,7 @@ fi
 unset GOTRUE_EXPERIMENTAL_PROVIDERS_WITH_OWN_LINKING_DOMAIN
 
 fake_gotrue="$tmp_dir/gotrue"
-printf '#!/bin/sh\n[ "$1" = version ] && printf "v2.193.1\\n"\n' > "$fake_gotrue"
+printf '#!/bin/sh\n[ "$1" = version ] && printf "v2.194.0\\n"\n' > "$fake_gotrue"
 chmod 755 "$fake_gotrue"
 GOTRUE_BIN="$fake_gotrue"
 ensure_gotrue
@@ -174,12 +181,12 @@ fi
 unset -f curl
 unset SUPACLOUD_GITHUB_PROXY
 
-if resolve_release_sha256 "PostgREST" "v99.0.0" "v14.15" "default-digest" "" >/dev/null 2>&1; then
+if resolve_release_sha256 "PostgREST" "v99.0.0" "v14.16" "default-digest" "" >/dev/null 2>&1; then
     echo "non-default PostgREST version reused the default digest" >&2
     exit 1
 fi
 explicit_digest=$(printf 'e%.0s' {1..64})
-[[ "$(resolve_release_sha256 "PostgREST" "v99.0.0" "v14.15" "$(printf 'd%.0s' {1..64})" "$explicit_digest")" == "$explicit_digest" ]]
+[[ "$(resolve_release_sha256 "PostgREST" "v99.0.0" "v14.16" "$(printf 'd%.0s' {1..64})" "$explicit_digest")" == "$explicit_digest" ]]
 
 # Archive validation rejects digest mismatches and link/special-file payloads.
 mkdir -p "$tmp_dir/archive/valid" "$tmp_dir/archive/link"
@@ -252,6 +259,9 @@ grep -Fqx "GOTRUE_DB_DATABASE_URL=\"postgres://supabase_auth_admin:${encoded_spe
 grep -Fq 'PGRST_JWT_SECRET="p@:/#?% space '\''\"\\"' "$tmp_dir/tenants/abc123.env"
 grep -Fq 'GOTRUE_SMTP_USER="p@:/#?% space '\''\"\\"' "$tmp_dir/tenants/abc123_gotrue.env"
 grep -Fqx 'GOTRUE_SMTP_SENDER_NAME="SupaCloud"' "$tmp_dir/tenants/abc123_gotrue.env"
+grep -Fqx 'GOTRUE_CUSTOM_OAUTH_ENABLED="true"' "$tmp_dir/tenants/abc123_gotrue.env"
+grep -Fqx 'GOTRUE_PASSKEY_ENABLED="false"' "$tmp_dir/tenants/abc123_gotrue.env"
+grep -Fq 'GOTRUE_SECURITY_DATABASE_ENCRYPTION_ENCRYPTION_KEY_ID=' "$tmp_dir/tenants/abc123_gotrue.env"
 
 # Reject injected assignments before any tenant config is written.
 if (

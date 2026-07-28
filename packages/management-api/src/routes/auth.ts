@@ -32,9 +32,10 @@ import {
 } from "./auth-config-responses";
 import { projectControlSecretsService } from "../services/project-control-secrets.service";
 import {
-  passkeyCapabilityUnavailableBody,
-  requestsUnavailablePasskeyConfig,
-  withoutUnavailablePasskeyConfig,
+  canonicalizeStockPasskeyConfig,
+  PasskeyConfigValidationError,
+  passkeyConfigValidationBody,
+  validateStockPasskeyConfig,
 } from "../services/auth-product-boundary";
 import {
   AuthUrlConfigValidationError,
@@ -364,7 +365,7 @@ async function applyHookSecretStatuses(ref: string, safeConfig: Record<string, u
 }
 
 async function safeAuthConfig(ref: string, authConfig: Record<string, unknown>) {
-  const publicConfig = withoutUnavailablePasskeyConfig(canonicalAuthProviderLinkingConfig(authConfig));
+  const publicConfig = canonicalAuthProviderLinkingConfig(authConfig);
   const safeConfig = redactAuthSecrets(publicConfig) as Record<string, unknown>;
   if (safeConfig.site_url === undefined && safeConfig.SITE_URL !== undefined) {
     safeConfig.site_url = safeConfig.SITE_URL;
@@ -777,17 +778,17 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
       }
 
       const currentAuth = (settings.auth as Record<string, unknown>) || {};
-      if (requestsUnavailablePasskeyConfig(body as Record<string, unknown>)) {
-        return status(501, passkeyCapabilityUnavailableBody());
-      }
       const sanitizedBody = preserveMaskedAuthSecrets(
         body as Record<string, unknown>,
         currentAuth,
       ) as Record<string, unknown>;
       let canonicalBody: Record<string, unknown>;
       try {
-        canonicalBody = canonicalizeAuthUrlConfig(sanitizedBody);
+        canonicalBody = canonicalizeStockPasskeyConfig(canonicalizeAuthUrlConfig(sanitizedBody));
       } catch (error: unknown) {
+        if (error instanceof PasskeyConfigValidationError) {
+          return status(400, passkeyConfigValidationBody(error));
+        }
         if (error instanceof AuthUrlConfigValidationError) {
           return status(400, buildAuthUrlConfigErrorBody(error));
         }
@@ -815,7 +816,11 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
         canonicalAuth = canonicalAuthProviderLinkingConfig(
           applyAuthSessionPolicyPatch(mergedAuth, sessionPolicyPatch),
         );
+        validateStockPasskeyConfig(canonicalAuth);
       } catch (error: unknown) {
+        if (error instanceof PasskeyConfigValidationError) {
+          return status(400, passkeyConfigValidationBody(error));
+        }
         if (error instanceof ProviderLinkingDomainsValidationError) {
           return status(400, { code: "INVALID_PROVIDER_LINKING_DOMAINS", message: error.message });
         }

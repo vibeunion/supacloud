@@ -29,10 +29,12 @@ import { TusStore, SignedStore, startStorageCleanupJob } from "../services/stora
  */
 import { Elysia, t, status } from "elysia";
 import { StorageService } from "../services/storage.service";
+import { StorageVectorError, StorageVectorService } from "../services/storage-vector.service";
 import { StorageRLS, mockObjects, normalizeStorageObjectSize } from "../services/storage-rls";
 import { logger } from "../utils/logger";
 import { config } from "../config";
 import { matchProjectRefFromHost } from "../utils/project-routing";
+import { resolveProjectApiKey } from "../utils/project-auth";
 import {
     buildSignedPath,
     getRequestOrigin,
@@ -238,6 +240,68 @@ async function getProjectRef(headers: Record<string, string | undefined>): Promi
     }
 
     return apiKeyRef;
+}
+
+async function requireVectorServiceRole(
+    ref: string,
+    headers: Record<string, string | undefined>,
+): Promise<void> {
+    const bearer = (headers.authorization || '').replace(/^Bearer\s+/i, '');
+    const candidates = [headers.apikey, bearer].filter((value): value is string => Boolean(value));
+    if (
+        ref === 'test_mock' &&
+        (process.env.BUN_ENV === 'test' || process.env.NODE_ENV === 'test') &&
+        candidates.includes('test-token')
+    ) {
+        return;
+    }
+
+    for (const candidate of candidates) {
+        const apiKey = await resolveProjectApiKey(candidate, { includeProvisioning: true });
+        if (apiKey?.ref === ref && (apiKey.kind === 'service_role' || apiKey.kind === 'secret')) return;
+    }
+
+    if (bearer) {
+        try {
+            const payload = await StorageRLS.verifyToken(ref, bearer) as Record<string, unknown>;
+            if (payload.role === 'service_role' && payload.__allow_service_role === true) return;
+        } catch {}
+    }
+
+    throw new StorageVectorError(
+        'Vector storage requires a service_role or secret API key',
+        403,
+        'AccessDeniedException',
+    );
+}
+
+async function runVectorOperation<T>(
+    headers: Record<string, string | undefined>,
+    operation: (ref: string) => Promise<T>,
+): Promise<any> {
+    const ref = await getProjectRef(headers);
+    if (!ref) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing tenant reference' });
+    try {
+        await requireVectorServiceRole(ref, headers);
+        return await operation(ref);
+    } catch (error: unknown) {
+        if (error instanceof StorageVectorError) {
+            return status(error.statusCode, {
+                statusCode: String(error.statusCode),
+                error: error.code,
+                message: error.message,
+            });
+        }
+        logger.error('[StorageCompat] Vector operation failed', {
+            ref,
+            error: error instanceof Error ? error.message : String(error),
+        });
+        return status(500, {
+            statusCode: "500",
+            error: 'InternalError',
+            message: 'Vector storage operation failed',
+        });
+    }
 }
 
 // ── Supabase SDK-Compatible Routes ────────────────────────────────
@@ -1643,23 +1707,165 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     })
 
     // ════════════════════════════════════════════════════════
-    // Optional enterprise surfaces are explicit capabilities, not hidden product promises.
+    // Supabase Storage Vector API (service-role / secret-key only)
     // ════════════════════════════════════════════════════════
-    .all('/vector/*', async ({ set }) => {
-        set.status = 501;
-        return {
-            statusCode: "501",
-            error: 'Not Implemented',
-            feature: 'storage_vectors',
-            capability: false,
-            available: false,
-            status: 'unsupported',
-            reason: 'storage_vectors_not_enabled',
-            message: 'Storage vectors are not available on this SupaCloud cluster.',
-        };
-    }, {
-        detail: { tags: ["storage"], summary: "Vector search stub" },
-    })
+    .post('/vector/CreateVectorBucket', async ({ headers, body, set }) => {
+        const input = body as Record<string, unknown>;
+        const result = await runVectorOperation(headers as Record<string, string | undefined>, (ref) =>
+            StorageVectorService.createBucket(ref, String(input.vectorBucketName || '')),
+        );
+        if (result === undefined) {
+            set.status = 200;
+            return '';
+        }
+        return result;
+    }, { detail: { tags: ["storage", "vector"], summary: "Create a vector bucket" } })
+    .post('/vector/DeleteVectorBucket', async ({ headers, body, set }) => {
+        const input = body as Record<string, unknown>;
+        const result = await runVectorOperation(headers as Record<string, string | undefined>, (ref) =>
+            StorageVectorService.deleteBucket(ref, String(input.vectorBucketName || '')),
+        );
+        if (result === undefined) {
+            set.status = 200;
+            return '';
+        }
+        return result;
+    }, { detail: { tags: ["storage", "vector"], summary: "Delete a vector bucket" } })
+    .post('/vector/GetVectorBucket', async ({ headers, body }) => {
+        const input = body as Record<string, unknown>;
+        return runVectorOperation(headers as Record<string, string | undefined>, (ref) =>
+            StorageVectorService.getBucket(ref, String(input.vectorBucketName || '')),
+        );
+    }, { detail: { tags: ["storage", "vector"], summary: "Get a vector bucket" } })
+    .post('/vector/ListVectorBuckets', async ({ headers, body }) => {
+        const input = body as Record<string, unknown>;
+        return runVectorOperation(headers as Record<string, string | undefined>, (ref) =>
+            StorageVectorService.listBuckets(ref, {
+                maxResults: input.maxResults as number | undefined,
+                nextToken: input.nextToken as string | undefined,
+                prefix: input.prefix as string | undefined,
+            }),
+        );
+    }, { detail: { tags: ["storage", "vector"], summary: "List vector buckets" } })
+    .post('/vector/CreateIndex', async ({ headers, body, set }) => {
+        const input = body as Record<string, unknown>;
+        const result = await runVectorOperation(headers as Record<string, string | undefined>, (ref) =>
+            StorageVectorService.createIndex(ref, {
+                vectorBucketName: String(input.vectorBucketName || ''),
+                indexName: String(input.indexName || ''),
+                dataType: input.dataType as 'float32',
+                dimension: Number(input.dimension),
+                distanceMetric: input.distanceMetric as 'cosine' | 'euclidean',
+                metadataConfiguration: input.metadataConfiguration as { nonFilterableMetadataKeys: string[] } | undefined,
+            }),
+        );
+        if (result === undefined) {
+            set.status = 200;
+            return '';
+        }
+        return result;
+    }, { detail: { tags: ["storage", "vector"], summary: "Create a vector index" } })
+    .post('/vector/DeleteIndex', async ({ headers, body, set }) => {
+        const input = body as Record<string, unknown>;
+        const result = await runVectorOperation(headers as Record<string, string | undefined>, (ref) =>
+            StorageVectorService.deleteIndex(ref, String(input.vectorBucketName || ''), String(input.indexName || '')),
+        );
+        if (result === undefined) {
+            set.status = 200;
+            return '';
+        }
+        return result;
+    }, { detail: { tags: ["storage", "vector"], summary: "Delete a vector index" } })
+    .post('/vector/GetIndex', async ({ headers, body }) => {
+        const input = body as Record<string, unknown>;
+        return runVectorOperation(headers as Record<string, string | undefined>, (ref) =>
+            StorageVectorService.getIndex(ref, String(input.vectorBucketName || ''), String(input.indexName || '')),
+        );
+    }, { detail: { tags: ["storage", "vector"], summary: "Get a vector index" } })
+    .post('/vector/ListIndexes', async ({ headers, body }) => {
+        const input = body as Record<string, unknown>;
+        return runVectorOperation(headers as Record<string, string | undefined>, (ref) =>
+            StorageVectorService.listIndexes(ref, {
+                vectorBucketName: String(input.vectorBucketName || ''),
+                maxResults: input.maxResults as number | undefined,
+                nextToken: input.nextToken as string | undefined,
+                prefix: input.prefix as string | undefined,
+            }),
+        );
+    }, { detail: { tags: ["storage", "vector"], summary: "List vector indexes" } })
+    .post('/vector/PutVectors', async ({ headers, body, set }) => {
+        const input = body as Record<string, unknown>;
+        const result = await runVectorOperation(headers as Record<string, string | undefined>, (ref) =>
+            StorageVectorService.putVectors(ref, {
+                vectorBucketName: String(input.vectorBucketName || ''),
+                indexName: String(input.indexName || ''),
+                vectors: input.vectors as Parameters<typeof StorageVectorService.putVectors>[1]['vectors'],
+            }),
+        );
+        if (result === undefined) {
+            set.status = 200;
+            return '';
+        }
+        return result;
+    }, { detail: { tags: ["storage", "vector"], summary: "Put vectors" } })
+    .post('/vector/DeleteVectors', async ({ headers, body, set }) => {
+        const input = body as Record<string, unknown>;
+        const result = await runVectorOperation(headers as Record<string, string | undefined>, (ref) =>
+            StorageVectorService.deleteVectors(ref, {
+                vectorBucketName: String(input.vectorBucketName || ''),
+                indexName: String(input.indexName || ''),
+                keys: input.keys as string[],
+            }),
+        );
+        if (result === undefined) {
+            set.status = 200;
+            return '';
+        }
+        return result;
+    }, { detail: { tags: ["storage", "vector"], summary: "Delete vectors" } })
+    .post('/vector/GetVectors', async ({ headers, body }) => {
+        const input = body as Record<string, unknown>;
+        return runVectorOperation(headers as Record<string, string | undefined>, (ref) =>
+            StorageVectorService.getVectors(ref, {
+                vectorBucketName: String(input.vectorBucketName || ''),
+                indexName: String(input.indexName || ''),
+                keys: input.keys as string[],
+                returnData: input.returnData === true,
+                returnMetadata: input.returnMetadata === true,
+            }),
+        );
+    }, { detail: { tags: ["storage", "vector"], summary: "Get vectors" } })
+    .post('/vector/ListVectors', async ({ headers, body }) => {
+        const input = body as Record<string, unknown>;
+        return runVectorOperation(headers as Record<string, string | undefined>, (ref) =>
+            StorageVectorService.listVectors(ref, {
+                vectorBucketName: String(input.vectorBucketName || ''),
+                indexName: String(input.indexName || ''),
+                maxResults: input.maxResults as number | undefined,
+                nextToken: input.nextToken as string | undefined,
+                segmentCount: input.segmentCount as number | undefined,
+                segmentIndex: input.segmentIndex as number | undefined,
+                returnData: input.returnData === true,
+                returnMetadata: input.returnMetadata === true,
+            }),
+        );
+    }, { detail: { tags: ["storage", "vector"], summary: "List vectors" } })
+    .post('/vector/QueryVectors', async ({ headers, body }) => {
+        const input = body as Record<string, unknown>;
+        return runVectorOperation(headers as Record<string, string | undefined>, (ref) =>
+            StorageVectorService.queryVectors(ref, {
+                vectorBucketName: String(input.vectorBucketName || ''),
+                indexName: String(input.indexName || ''),
+                queryVector: input.queryVector as { float32: number[] },
+                topK: Number(input.topK),
+                filter: input.filter,
+                returnDistance: input.returnDistance === true,
+                returnMetadata: input.returnMetadata === true,
+            }),
+        );
+    }, { detail: { tags: ["storage", "vector"], summary: "Query vectors" } })
+
+    // Analytics Buckets remain explicitly unavailable until their query/data plane is implemented.
     .all('/iceberg/*', async ({ set }) => {
         set.status = 501;
         return {

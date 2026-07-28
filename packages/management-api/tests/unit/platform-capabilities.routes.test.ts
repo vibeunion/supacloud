@@ -6,11 +6,22 @@ const requireProjectOrAdminAuth = mock(() => Promise.resolve(null));
 const getProject = mock(() => Promise.resolve(null));
 const listBackups = mock(() => Promise.resolve([]));
 const resolveDbName = mock((ref: string) => Promise.resolve(`supa_${ref}`));
+const getUpgradeStatus = mock(() => Promise.resolve({
+  status: "available",
+  capability: true,
+  available: true,
+  scope: "cluster",
+  current_version: "15",
+  target_version: null,
+  upgrade_status: "not_started",
+}));
+const requestUpgrade = mock(() => Promise.resolve({ id: "upgrade-1", status: "awaiting_approval", scope: "cluster" }));
 
 const authModule = await import("../../src/middleware/auth");
 const servicesModule = await import("../../src/services");
 const backupModule = await import("../../src/services/backup.service");
 const dbModule = await import("../../src/db");
+const upgradeModule = await import("../../src/services/postgres-major-upgrade.service");
 
 const requireAdminAuthSpy = spyOn(authModule, "requireAdminAuth").mockImplementation(
   requireAdminAuth as typeof authModule.requireAdminAuth,
@@ -26,6 +37,12 @@ const listBackupsSpy = spyOn(backupModule, "listBackups").mockImplementation(
 );
 const resolveDbNameSpy = spyOn(dbModule, "resolveDbName").mockImplementation(
   resolveDbName as typeof dbModule.resolveDbName,
+);
+const getUpgradeStatusSpy = spyOn(upgradeModule.postgresMajorUpgradeService, "get").mockImplementation(
+  getUpgradeStatus as typeof upgradeModule.postgresMajorUpgradeService.get,
+);
+const requestUpgradeSpy = spyOn(upgradeModule.postgresMajorUpgradeService, "request").mockImplementation(
+  requestUpgrade as typeof upgradeModule.postgresMajorUpgradeService.request,
 );
 
 const { projectCrudRoutes } = await import("../../src/routes/project-crud");
@@ -52,6 +69,8 @@ describe("project platform capability endpoints", () => {
     getProjectSpy.mockRestore();
     listBackupsSpy.mockRestore();
     resolveDbNameSpy.mockRestore();
+    getUpgradeStatusSpy.mockRestore();
+    requestUpgradeSpy.mockRestore();
   });
 
   beforeEach(() => {
@@ -70,41 +89,53 @@ describe("project platform capability endpoints", () => {
     listBackups.mockResolvedValue([]);
     resolveDbName.mockReset();
     resolveDbName.mockImplementation((ref: string) => Promise.resolve(`supa_${ref}`));
+    getUpgradeStatus.mockReset();
+    getUpgradeStatus.mockResolvedValue({
+      status: "available",
+      capability: true,
+      available: true,
+      scope: "cluster",
+      current_version: "15",
+      target_version: null,
+      upgrade_status: "not_started",
+    });
+    requestUpgrade.mockReset();
+    requestUpgrade.mockResolvedValue({ id: "upgrade-1", status: "awaiting_approval", scope: "cluster" });
     delete process.env.SUPACLOUD_PGBACKREST_STANZA;
     delete process.env.SUPACLOUD_PITR_ENABLED;
     delete process.env.PITR_ENABLED;
   });
 
-  test("GET upgrade-status returns explicit unsupported capability state", async () => {
+  test("GET upgrade-status returns the durable cluster upgrade capability state", async () => {
     const res = await request("/v1/projects/proj_1/upgrade-status");
     expect(res.status).toBe(200);
 
     expect(await res.json()).toMatchObject({
-      upgrade_status: "unsupported",
-      status: "unsupported",
-      capability: false,
-      available: false,
-      current_version: "15.7",
+      upgrade_status: "not_started",
+      status: "available",
+      capability: true,
+      available: true,
+      current_version: "15",
       target_version: null,
-      reason: "postgres_major_upgrade_not_supported",
+      scope: "cluster",
     });
     expect(requireProjectOrAdminAuth).toHaveBeenCalledWith(expect.any(Request), "proj_1");
   });
 
-  test("POST upgrade rejects unsupported operation without returning a legacy 501 stub", async () => {
+  test("POST upgrade starts preflight without executing the destructive phase", async () => {
     const res = await request("/v1/projects/proj_1/upgrade", {
       method: "POST",
       body: JSON.stringify({ target_version: "16" }),
     });
-    expect(res.status).toBe(409);
+    expect(res.status).toBe(202);
 
     expect(await res.json()).toMatchObject({
-      status: "unsupported",
-      capability: false,
-      available: false,
-      reason: "postgres_major_upgrade_not_supported",
+      id: "upgrade-1",
+      status: "awaiting_approval",
+      scope: "cluster",
     });
     expect(requireAdminAuth).toHaveBeenCalledTimes(1);
+    expect(requestUpgrade).toHaveBeenCalledWith("proj_1", "16");
   });
 
   test("GET PITR returns disabled capability state when cluster PITR is not enabled", async () => {

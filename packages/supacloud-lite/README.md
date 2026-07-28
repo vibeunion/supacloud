@@ -59,6 +59,19 @@ supabase/
 
 `config.toml` 当前支持 Auth、API schema/max rows、Storage bucket/size limit、seed 和 function entrypoint 等常用配置。
 
+### Auth 运行方式
+
+Lite 不下载、安装或启动独立的 GoTrue 进程。`/auth/v1/*` 由同一个 Bun 进程中的内置 Auth 实现处理，并与该 Lite 项目的 PGlite `auth` schema 共享生命周期；这避免了 sidecar 的配置、端口和会话一致性负担。
+
+Auth 默认启用。如项目不需要客户端登录接口，可在 `supabase/config.toml` 中关闭该路由：
+
+```toml
+[auth]
+enabled = false
+```
+
+关闭后 `/auth/v1/*` 返回 `404`，但不会把 Lite 变成完整 GoTrue 运行时，也不会自动移除已有的 `auth` schema 或 API key。需要完整 GoTrue 行为、多项目鉴权或独立鉴权进程时，应使用完整 SupaCloud 平台。
+
 ## CLI
 
 ```text
@@ -70,6 +83,9 @@ supacloud-lite gen types [-o database.types.ts]
 supacloud-lite db reset
 supacloud-lite db diff [-f migration_name]
 supacloud-lite db pull [migration_name]
+supacloud-lite snapshot create [-o backup.tar.gz]
+supacloud-lite snapshot restore <backup.tar.gz> [--force]
+supacloud-lite upgrade [-o pre-upgrade.tar.gz]
 supacloud-lite inspect
 supacloud-lite version
 ```
@@ -107,12 +123,65 @@ S3 模式下 `db reset` 会被拒绝，因为 Lite 不能把数据库元数据�
 
 网络暴露时必须提供足够强的 JWT secret 和独立 vault key。默认生成的密钥适合单机项目；不要把 `.supacloud-lite/secrets.json` 提交到版本库。
 
+## 升级、快照与恢复
+
+生产或持久化环境升级时，先更新项目锁定的 npm 依赖，再运行 Lite 的受控升级命令：
+
+```bash
+# 明确指定目标版本；不要在生产启动命令中隐式使用 @latest
+bun add @supacloud/lite@0.2.0
+
+# 自动创建升级前快照，然后执行尚未应用的 supabase/migrations
+bunx supacloud-lite upgrade
+```
+
+`upgrade` 不会自行修改 `package.json` 或联网更新 npm 包。它使用当前项目已经安装并锁定的 Lite 版本，默认把升级前快照写入 `.supacloud-lite/backups/pre-upgrade-<timestamp>.tar.gz`，快照成功后才执行 migrations。升级失败时，快照会保留，并打印恢复命令。
+
+也可以单独创建可移植快照：
+
+```bash
+# 使用默认文件名和目录
+bunx supacloud-lite snapshot create
+
+# 指定输出位置
+bunx supacloud-lite snapshot create -o ./backups/project-a.tar.gz
+```
+
+快照是一个 gzip 压缩的 tar 文件，包含：
+
+- PGlite 数据目录；
+- `fs` 模式的对象文件；
+- `secrets.json`，用于保持 JWT、会话和 Vault 解密兼容；
+- 快照格式、Lite 版本和 Storage backend 清单。
+
+快照包含敏感密钥，输出文件在 Unix 系统上会设置为 `0600`；仍应按数据库备份级别加密、限制访问并设置保留周期。创建快照前必须停止 Lite。若检测到数据目录锁，命令会拒绝继续；只有确认进程已退出后才能人工删除陈旧锁。
+
+恢复到新项目或空状态目录：
+
+```bash
+bunx supacloud-lite snapshot restore ./backups/project-a.tar.gz
+```
+
+目标状态目录非空时默认拒绝覆盖。确认要替换现有状态时显式使用：
+
+```bash
+bunx supacloud-lite snapshot restore ./backups/project-a.tar.gz --force
+```
+
+`--force` 不会直接删除旧数据，而是把旧状态目录重命名为 `.supacloud-lite.restore-<id>` 形式的回滚副本，并在输出中打印完整路径。验证新状态后再由运维人员清理该目录。
+
+使用自定义 `--state-dir`、`--data-dir` 或 `--storage-dir` 时，创建和恢复必须传入相同参数。数据库与 Storage 目录不得重叠，也不能指向文件系统根目录或符号链接。
+
+S3 模式的快照只包含数据库中的 Storage 元数据和密钥，不复制远端对象，也不会读取或保存 S3 凭据。恢复时必须传入 `--storage-backend s3`，并重新提供原 bucket/prefix 的环境变量；跨 bucket 迁移仍需使用对象存储自身的复制工具。
+
+内存数据库没有可持久化的数据，因此 `snapshot` 和 `upgrade` 会拒绝 `--memory`。
+
 ## 兼容范围
 
 | 能力 | V1 状态 | 说明 |
 | --- | --- | --- |
 | `supabase.from()` | 已验证核心 | 自动测试覆盖 CRUD、过滤、RLS；嵌套关系、RPC 和高级 PostgREST 语法属于实验性兼容 |
-| `supabase.auth` | 已验证核心 | 自动测试覆盖邮箱密码、会话和 bcrypt；OTP/Magic Link、匿名用户、OAuth、MFA 属于实验性兼容 |
+| `supabase.auth` | 已验证核心 | 由内置 Auth 实现而非独立 GoTrue 进程提供；自动测试覆盖邮箱密码、会话和 bcrypt；OTP/Magic Link、匿名用户、OAuth、MFA 属于实验性兼容 |
 | `supabase.storage` | 已验证核心 | 覆盖上传下载、列表、删除、TUS/RLS、远端 S3 驱动，以及 Bun.Image 的 `contain`/`fill`、格式和质量变换子集；`cover` 明确不支持 |
 | `supabase.channel()` | 已验证核心 | 自动测试覆盖 `postgres_changes`、DELETE RLS 隔离和事件快照校验；Broadcast、Presence 属于实验性兼容 |
 | `supabase.functions.invoke()` | 已验证核心 | 自动测试覆盖 Bun.build、`Deno.serve()`、公开函数和同进程重启 |

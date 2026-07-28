@@ -1,8 +1,8 @@
 import { Elysia, t } from "elysia";
-import type { TransactionSQL } from "bun";
+import type { SQL, TransactionSQL } from "bun";
 import { projectService } from "../services";
-import { db, getProjectDb, getProjectRoleDb, removeProjectDbCache, resolveDbName, sql as metaSql, type SqlExecutionMode } from "../db";
-import { normalizeSqlForPolicy } from "../db/sql-policy";
+import { db, getProjectDb, getProjectRoleDb, removeProjectDbCache, resolveAuthenticatorName, resolveDbName, sql as metaSql, type SqlExecutionMode } from "../db";
+import { isDangerousSQL, normalizeSqlForPolicy } from "../db/sql-policy";
 import { cancelActiveSqlQuery } from "../db/sql-query-registry";
 import { splitSqlStatements } from "../db/sql-statements";
 import { requireAdminAuth, requireProjectOrAdminAuth } from "../middleware/auth";
@@ -151,6 +151,197 @@ export function sqlRouteErrorResponse(error: unknown) {
     hint: typeof pgError.hint === "string" ? pgError.hint : null,
     durationMs: typeof pgError.durationMs === "number" ? pgError.durationMs : 0,
     status: 400 as const,
+  };
+}
+
+const RLS_TESTER_MUTATION_PATTERN = /\b(?:INSERT|UPDATE|DELETE|MERGE|UPSERT|CREATE|ALTER|DROP|TRUNCATE|GRANT|REVOKE|COPY|CALL|DO|LOCK|VACUUM|ANALYZE|REFRESH)\b/i;
+const RLS_TESTER_ROW_LOCK_PATTERN = /\bFOR\s+(?:UPDATE|NO\s+KEY\s+UPDATE|SHARE|KEY\s+SHARE)\b/i;
+const RLS_TESTER_SELECT_INTO_PATTERN = /\bSELECT\b[\s\S]*?\bINTO\s+(?:TEMP(?:ORARY)?\s+|UNLOGGED\s+)?(?:TABLE\s+)?/i;
+const RLS_TESTER_EXTERNAL_EFFECT_PATTERN = /\b(?:net\s*\.\s*http_[a-z_]+|(?:extensions\s*\.\s*)?http_(?:get|post|put|patch|delete|head)|pgmq\s*\.\s*send|pg_notify|pg_sleep|pg_advisory_[a-z_]+|dblink(?:_[a-z_]+)?|lo_(?:create|creat|open|write|put|import|export|unlink)|pg_(?:read|write)_file|pg_ls_dir|pg_logical_emit_message|set_config|setval|nextval)\s*\(/i;
+
+export function assertRlsTesterQuery(query: string): string {
+  const statements = splitSqlStatements(query);
+  if (statements.length !== 1) throw new Error("RLS Tester accepts a single statement");
+  const trimmed = statements[0]!;
+  const normalized = normalizeSqlForPolicy(trimmed);
+  const normalizedFunctionIdentifiers = normalized.replace(/"([A-Za-z_][A-Za-z0-9_$]*)"/g, "$1");
+  if (!normalized || !/^\s*(?:SELECT|WITH)\b/i.test(normalized)) throw new Error("RLS Tester only supports SELECT queries");
+  if (RLS_TESTER_ROW_LOCK_PATTERN.test(normalized)) {
+    throw new Error("RLS Tester does not allow row locks");
+  }
+  if (RLS_TESTER_EXTERNAL_EFFECT_PATTERN.test(normalizedFunctionIdentifiers)) {
+    throw new Error("RLS Tester blocks known functions with side effects or unbounded resource use");
+  }
+  if (RLS_TESTER_MUTATION_PATTERN.test(normalized) || RLS_TESTER_SELECT_INTO_PATTERN.test(normalized) || isDangerousSQL(normalized)) {
+    throw new Error("RLS Tester only supports SELECT queries without mutations or privileged operations");
+  }
+  return trimmed;
+}
+
+export function buildRlsTesterLimitedQuery(query: string): string {
+  return `SELECT * FROM (\n${query}\n) AS "__supacloud_rls_test" LIMIT 501`;
+}
+
+export function collectRlsPlanRelations(plan: unknown): Array<{ schema: string; table: string }> {
+  const relations = new Map<string, { schema: string; table: string }>();
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    if (!value || typeof value !== "object") return;
+    const node = value as Record<string, unknown>;
+    const schema = typeof node.Schema === "string" ? node.Schema : undefined;
+    const table = typeof node["Relation Name"] === "string" ? node["Relation Name"] : undefined;
+    if (schema && table) relations.set(`${schema}\0${table}`, { schema, table });
+    Object.values(node).forEach(visit);
+  };
+  visit(plan);
+  return [...relations.values()].sort((left, right) =>
+    left.schema.localeCompare(right.schema) || left.table.localeCompare(right.table));
+}
+
+type RlsTesterInput = {
+  dbName: string;
+  authenticatorRole: string;
+  password: string;
+  query: string;
+  role: "anon" | "authenticated";
+  userId?: string;
+  email?: string;
+};
+
+type RlsTesterConnection = Awaited<ReturnType<SQL["reserve"]>>;
+
+function buildRlsTesterClaims(input: RlsTesterInput) {
+  return {
+    role: input.role,
+    ...(input.userId ? { sub: input.userId } : {}),
+    ...(input.email ? { email: input.email } : {}),
+  };
+}
+
+async function configureRlsTesterConnection(
+  connection: RlsTesterConnection,
+  input: RlsTesterInput,
+  claims: ReturnType<typeof buildRlsTesterClaims>,
+) {
+  await connection.unsafe("BEGIN TRANSACTION READ ONLY");
+  await connection.unsafe("SET LOCAL row_security = on");
+  await connection.unsafe("SET LOCAL statement_timeout = '10s'");
+  await connection.unsafe("SET LOCAL lock_timeout = '1s'");
+  await connection.unsafe("SET LOCAL idle_in_transaction_session_timeout = '15s'");
+  await connection.unsafe(`SET LOCAL ROLE ${input.role}`);
+  await connection`SELECT set_config('request.jwt.claims', ${JSON.stringify(claims)}, true)`;
+  await connection`SELECT set_config('request.jwt.claim.role', ${input.role}, true)`;
+  await connection`SELECT set_config('request.jwt.claim.sub', ${input.userId ?? ""}, true)`;
+  await connection`SELECT set_config('request.jwt.claim.email', ${input.email ?? ""}, true)`;
+}
+
+async function runRlsTesterQuery(connection: RlsTesterConnection, query: string) {
+  const explained = await connection.unsafe(`EXPLAIN (FORMAT JSON, VERBOSE TRUE) ${query}`);
+  const first = Array.isArray(explained) ? explained[0] as Record<string, unknown> | undefined : undefined;
+  const result = await connection.unsafe(buildRlsTesterLimitedQuery(query));
+  return { plan: first?.["QUERY PLAN"], rows: Array.isArray(result) ? result : [] };
+}
+
+async function rollbackRlsTesterTransaction(
+  connection: RlsTesterConnection,
+  dbName: string,
+  transactionOpen: boolean,
+): Promise<boolean> {
+  if (!transactionOpen) return false;
+  try {
+    await connection.unsafe("ROLLBACK");
+    return false;
+  } catch (rollbackError: unknown) {
+    logger.error("[database] failed to roll back RLS Tester transaction", {
+      dbName,
+      error: rollbackError instanceof Error ? rollbackError.message : String(rollbackError),
+    });
+    return true;
+  }
+}
+
+async function runRlsTesterTransaction(roleDb: SQL, input: RlsTesterInput) {
+  const connection = await roleDb.reserve();
+  const claims = buildRlsTesterClaims(input);
+  let rows: unknown[] = [];
+  let plan: unknown;
+  let transactionOpen = false;
+  let rollbackFailed = false;
+  try {
+    await configureRlsTesterConnection(connection, input, claims);
+    transactionOpen = true;
+    ({ plan, rows } = await runRlsTesterQuery(connection, input.query));
+    await connection.unsafe("ROLLBACK");
+    transactionOpen = false;
+  } catch (error) {
+    rollbackFailed = await rollbackRlsTesterTransaction(connection, input.dbName, transactionOpen);
+    throw error;
+  } finally {
+    connection.release();
+    if (rollbackFailed) await removeProjectDbCache(input.dbName);
+  }
+  return { claims, plan, rows };
+}
+
+async function executeRlsTest(input: RlsTesterInput) {
+  const projectDb = getProjectDb(input.dbName);
+  const roleDb = getProjectRoleDb(input.dbName, input.authenticatorRole, input.password);
+  const { claims, plan, rows: rawRows } = await runRlsTesterTransaction(roleDb, input);
+  let rows = rawRows;
+
+  const truncated = rows.length > 500;
+  rows = rows.slice(0, 500);
+  const relations = collectRlsPlanRelations(plan);
+  const catalogRows = relations.length === 0 ? [] : await projectDb`
+    SELECT schemaname, tablename, policyname, permissive, roles, cmd, qual, with_check
+    FROM pg_policies
+    ORDER BY schemaname, tablename, policyname
+  `;
+  const relationKeys = new Set(relations.map((relation) => `${relation.schema}\0${relation.table}`));
+  const policies = catalogRows
+    .filter((row: Record<string, unknown>) => relationKeys.has(`${String(row.schemaname)}\0${String(row.tablename)}`))
+    .map((row: Record<string, unknown>) => {
+      const roles = Array.isArray(row.roles) ? row.roles.map(String) : [];
+      return {
+        schema: String(row.schemaname),
+        table: String(row.tablename),
+        name: String(row.policyname),
+        permissive: String(row.permissive),
+        roles,
+        command: String(row.cmd),
+        using: row.qual ?? null,
+        check: row.with_check ?? null,
+        appliesToRole: roles.includes("public") || roles.includes(input.role),
+      };
+    });
+  const relationCatalogRows = relations.length === 0 ? [] : await projectDb`
+    SELECT n.nspname AS schemaname, c.relname AS tablename,
+           c.relrowsecurity, c.relforcerowsecurity
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f')
+  `;
+  const relationSecurity = relationCatalogRows
+    .filter((row: Record<string, unknown>) => relationKeys.has(`${String(row.schemaname)}\0${String(row.tablename)}`))
+    .map((row: Record<string, unknown>) => ({
+      schema: String(row.schemaname),
+      table: String(row.tablename),
+      rlsEnabled: row.relrowsecurity === true,
+      rlsForced: row.relforcerowsecurity === true,
+    }));
+  return {
+    role: input.role,
+    claims,
+    rows,
+    rowCount: rows.length,
+    truncated,
+    fields: rows[0] && typeof rows[0] === "object" ? Object.keys(rows[0] as Record<string, unknown>) : [],
+    relations,
+    relationSecurity,
+    policies,
   };
 }
 
@@ -1021,6 +1212,49 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
             }),
             detail: { tags: ["projects"], summary: "Drop materialized view" },
         }
+    )
+    .post(
+        "/rls-test",
+        async ({ params, body, set, request }) => {
+            const authError = await requireProjectOrAdminAuth(request, params.ref);
+            if (authError) return projectAuthResponse(authError, set);
+            const credentials = await getProjectDatabaseCredentials(params.ref);
+            if (!credentials) {
+                set.status = 404;
+                return { message: "Project database credentials not found", code: "404", status: 404 };
+            }
+            if (body.role === "authenticated" && body.user_id &&
+                !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(body.user_id)) {
+                set.status = 400;
+                return { message: "user_id must be a UUID", code: "400", status: 400 };
+            }
+            try {
+                const query = assertRlsTesterQuery(body.query);
+                return await executeRlsTest({
+                    dbName: credentials.db_name,
+                    authenticatorRole: resolveAuthenticatorName(params.ref),
+                    password: credentials.db_password,
+                    query,
+                    role: body.role,
+                    userId: body.user_id,
+                    email: body.email,
+                });
+            } catch (error: unknown) {
+                set.status = 400;
+                const pgError = error as Record<string, unknown>;
+                return { message: pgError.message || "RLS test failed", code: pgError.code || "400", details: pgError.details || null, hint: pgError.hint || null, status: 400 };
+            }
+        },
+        {
+            params: t.Object({ ref: t.String({ minLength: 1 }) }),
+            body: t.Object({
+                query: t.String({ minLength: 1, maxLength: 100_000 }),
+                role: t.Union([t.Literal("anon"), t.Literal("authenticated")]),
+                user_id: t.Optional(t.String()),
+                email: t.Optional(t.String({ maxLength: 320 })),
+            }),
+            detail: { tags: ["projects", "database"], summary: "Test a SELECT query with RLS role impersonation" },
+        },
     )
     .post(
         "/query",

@@ -112,7 +112,7 @@ open-source Supabase CLI. SupaCloud does not fork or vendor the upstream CLI.
 The adapter resolves the executable in this order:
 
 1. `SUPACLOUD_SUPABASE_CLI_BIN` (an explicit executable path)
-2. `SUPABASE_CLI_VERSION=2.109.1` (explicit opt-in to a pinned Bun/npm package runner)
+2. `SUPABASE_CLI_VERSION=2.110.0` (explicit opt-in to a pinned Bun/npm package runner)
 3. `<workdir>/node_modules/supabase`
 4. `supabase` on `PATH`
 

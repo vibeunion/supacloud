@@ -419,6 +419,21 @@ async function hasProjectServiceRoleCredential(request: Request, projectRef: str
     return false;
 }
 
+function isOpenApiSchemaRequest(request: Request): boolean {
+    if (!["GET", "HEAD"].includes(request.method.toUpperCase())) return false;
+    return new URL(request.url).pathname.replace(/\/+$/, "") === "/rest/v1";
+}
+
+function openApiSchemaForbiddenResponse(): Response {
+    return new Response(JSON.stringify({
+        message: "Access to schema is forbidden",
+        hint: "Accessing the schema via the Data API is only allowed using a secret API key.",
+    }), {
+        status: 403,
+        headers: { "Content-Type": "application/json" },
+    });
+}
+
 function adminUserDeletionId(request: Request): string | null {
     if (request.method !== "DELETE") return null;
     const match = new URL(request.url).pathname.match(/^\/auth\/v1\/admin\/users\/([^/]+)\/?$/);
@@ -722,6 +737,9 @@ const sdkProxyRoutesBase = new Elysia({ prefix: "" })
         const handler = async ({ request }: any) => {
             const ref = await getProjectRef(request);
             if (!ref) return new Response(JSON.stringify({ message: 'Missing tenant reference' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+            if (isOpenApiSchemaRequest(request) && !(await hasProjectServiceRoleCredential(request, ref))) {
+                return openApiSchemaForbiddenResponse();
+            }
             const ports = await getTenantPorts(ref);
             if (!ports) return new Response(JSON.stringify({ message: 'Tenant backend not active' }), { status: 502, headers: { 'Content-Type': 'application/json' } });
             

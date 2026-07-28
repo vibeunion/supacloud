@@ -42,6 +42,7 @@
 ## Development
 
 - [Edge Runtime Guide](./edge-runtime-guide.md) - Bun + Elysia Edge Functions runtime architecture
+- [Observability](./observability.md) - VictoriaLogs + 内置采集器基线、Grafana 可选运行方式，以及禁止 Logflare 的规范
 - [Background Functions](./background-functions.md) - Async Edge Function tasks, retries, logs, and cancellation
 - [Background Functions With supabase-js](./background-functions-supabase-js-tutorial.md) - Tenant SDK tutorial for invoke, polling, cancel, DLQ, lifecycle webhooks, and queues
 - [Background Functions API Reference](./background-functions-api-reference.md) - Headers, task states, control-plane endpoints, and runtime semantics

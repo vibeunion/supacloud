@@ -15,6 +15,7 @@ import {
   startProjectServer,
   type ProjectRuntimeOptions,
 } from './project-runtime.js'
+import { createSnapshot, restoreSnapshot } from './snapshot.js'
 
 interface CliOptions extends ProjectRuntimeOptions {
   command: string
@@ -22,6 +23,7 @@ interface CliOptions extends ProjectRuntimeOptions {
   output?: string
   diffFile?: string
   serviceRole: boolean
+  force: boolean
 }
 
 function parseArgs(argv: string[]): CliOptions {
@@ -36,6 +38,7 @@ function parseArgs(argv: string[]): CliOptions {
       ? Number.parseInt(process.env.SUPACLOUD_LITE_PORT ?? process.env.PORT!, 10)
       : 54321,
     serviceRole: false,
+    force: false,
   }
 
   for (let index = 0; index < args.length; index++) {
@@ -59,6 +62,7 @@ function parseArgs(argv: string[]): CliOptions {
     else if (argument === '--output' || argument === '-o') options.output = resolve(next())
     else if (argument === '--file' || argument === '-f') options.diffFile = next()
     else if (argument === '--service-role') options.serviceRole = true
+    else if (argument === '--force') options.force = true
     else if (argument === '--version') {
       console.log(packageJson.version)
       process.exit(0)
@@ -92,6 +96,16 @@ async function main(): Promise<void> {
 
   if (options.command === 'db') {
     await runDbCommand(options)
+    return
+  }
+
+  if (options.command === 'snapshot') {
+    await runSnapshotCommand(options)
+    return
+  }
+
+  if (options.command === 'upgrade') {
+    await runUpgradeCommand(options)
     return
   }
 
@@ -218,6 +232,66 @@ async function runDbCommand(options: CliOptions): Promise<void> {
   throw new Error(`unknown db subcommand: ${subcommand ?? '(none)'}`)
 }
 
+async function runSnapshotCommand(options: CliOptions): Promise<void> {
+  const subcommand = options.positionals[0]
+  const paths = resolveProjectPaths(options)
+  const storageBackend = resolveStorageBackend(options.storageBackend)
+  if (options.memory) throw new Error('snapshot does not support --memory because the database is not durable')
+
+  if (subcommand === 'create') {
+    await ensureProjectSecrets(paths)
+    const output = options.output ?? join(paths.stateDir, 'backups', `snapshot-${timestamp()}.tar.gz`)
+    const manifest = await createSnapshot({ paths, packageVersion: packageJson.version, storageBackend, output })
+    console.log(`Snapshot created: ${output}`)
+    if (manifest.storageBackend === 's3') console.log('S3 objects were not copied; the snapshot contains database metadata and secrets only.')
+    return
+  }
+
+  if (subcommand === 'restore') {
+    const input = options.positionals[1]
+    if (!input) throw new Error('snapshot restore requires a snapshot file')
+    const result = await restoreSnapshot({ paths, storageBackend, input, force: options.force })
+    console.log(`Snapshot restored from ${resolve(input)}`)
+    for (const rollbackPath of result.rollbackPaths) console.log(`Previous state retained at ${rollbackPath}`)
+    if (result.manifest.storageBackend === 's3') console.log('Reconnect the original S3 bucket/prefix before starting Lite.')
+    return
+  }
+
+  throw new Error(`unknown snapshot subcommand: ${subcommand ?? '(none)'}`)
+}
+
+async function runUpgradeCommand(options: CliOptions): Promise<void> {
+  if (options.memory) throw new Error('upgrade does not support --memory because there is no durable database to back up')
+  const paths = resolveProjectPaths(options)
+  const storageBackend = resolveStorageBackend(options.storageBackend)
+  await ensureProjectSecrets(paths)
+  const output = options.output ?? join(paths.stateDir, 'backups', `pre-upgrade-${timestamp()}.tar.gz`)
+  await createSnapshot({ paths, packageVersion: packageJson.version, storageBackend, output })
+  console.log(`Pre-upgrade snapshot: ${output}`)
+
+  try {
+    const project = await createProjectBackend({
+      ...options,
+      applyMigrations: true,
+      includeFunctions: false,
+      includeWebhooks: false,
+      includeSeed: true,
+      log: quietLog,
+    })
+    try {
+      const applied = await project.backend.db.listAppliedMigrations()
+      console.log(`Upgrade complete on @supacloud/lite ${packageJson.version}: ${applied.length} migration(s) recorded.`)
+    } finally {
+      await project.backend.close()
+    }
+  } catch (error) {
+    throw new Error(
+      `upgrade failed; snapshot retained at ${output}. Restore it with ` +
+      `"supacloud-lite snapshot restore ${output} --force". ${error instanceof Error ? error.message : String(error)}`
+    )
+  }
+}
+
 function printInspection(rows: Awaited<ReturnType<typeof inspectDb>>): void {
   if (rows.length === 0) {
     console.log('No tables in schema "public".')
@@ -257,6 +331,9 @@ Commands:
   db reset              wipe database and storage, then re-run migrations
   db diff               print schema changes outside migrations
   db pull [name]        write live schema changes as an applied migration
+  snapshot create       create a compressed database/storage/secrets snapshot
+  snapshot restore <f>  restore a snapshot into an empty target
+  upgrade               snapshot first, then apply pending migrations
   inspect               show table rows and sizes
   version               print the package version
 
@@ -274,6 +351,7 @@ Options:
       --memory            use an in-memory PGlite database
   -o, --output <p>        output file for gen types
   -f, --file <name>       migration suffix for db diff
+      --force             replace non-empty restore targets and retain rollback copies
 `)
 }
 

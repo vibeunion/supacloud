@@ -23,7 +23,6 @@ RUN set -eux; \
       postgresql-18-pg-net \
       postgresql-18-pgvector \
       postgresql-18-postgis-3 \
-      postgresql-18-pgjwt \
       postgresql-18-pgsodium \
       postgresql-18-hypopg \
       postgresql-18-index-advisor \

@@ -39,6 +39,14 @@ export {
   resolveProjectPaths,
   startProjectServer,
 } from './project-runtime.js'
+export {
+  createSnapshot,
+  restoreSnapshot,
+  type CreateSnapshotOptions,
+  type RestoreSnapshotOptions,
+  type RestoreSnapshotResult,
+  type SnapshotManifest,
+} from './snapshot.js'
 export type {
   ConfiguredStorageBackend,
   ProjectBackend,

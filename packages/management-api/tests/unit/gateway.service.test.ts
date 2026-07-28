@@ -226,6 +226,7 @@ describe("CaddyGatewayProvider", () => {
         expect(notice).toContain("Change via: supacloud CLI, SupaCloud management API, SupaCloud web console.");
         const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
         const rest = routes.find((route: any) => route["@id"] === "route-project-testref123-rest");
+        const restOpenApi = routes.find((route: any) => route["@id"] === "route-project-testref123-rest-openapi");
         const opaqueRest = routes.find((route: any) => route["@id"] === "route-project-testref123-opaque-rest");
         const storage = routes.find((route: any) => route["@id"] === "route-project-testref123-storage");
         const storageResumable = routes.find((route: any) => route["@id"] === "route-project-testref123-storage-resumable");
@@ -235,6 +236,10 @@ describe("CaddyGatewayProvider", () => {
         const management = routes.find((route: any) => route["@id"] === "route-project-testref123-management");
 
         expect(rest?.match?.[0]?.path).toEqual(["/rest/v1*"]);
+        expect(restOpenApi?.match?.[0]?.path).toEqual(["/rest/v1", "/rest/v1/"]);
+        expect(restOpenApi?.match?.[0]?.method).toEqual(["GET", "HEAD"]);
+        expect(restOpenApi?.handle?.at(-1)?.upstreams?.[0]?.dial).toBe("127.0.0.1:9090");
+        expect(routes.indexOf(restOpenApi)).toBeLessThan(routes.indexOf(rest));
         expect(rest?.handle?.some((handler: any) => handler.strip_path_prefix === "/rest/v1")).toBe(true);
         expect(rest?.handle?.at(-1)?.headers?.request?.set?.["X-Project-Ref"]).toEqual(["testref123"]);
         expect(opaqueRest?.__supacloud_priority).toBeUndefined();

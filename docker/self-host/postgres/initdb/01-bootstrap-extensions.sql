@@ -15,11 +15,9 @@ BEGIN
     'pg_stat_kcache',
     'http',
     'pg_net',
-    'pg_graphql',
     'pg_jsonschema',
     'pgmq',
-    'wrappers',
-    'pgjwt'
+    'wrappers'
   ] LOOP
     IF EXISTS (
       SELECT 1

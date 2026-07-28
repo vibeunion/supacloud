@@ -338,6 +338,36 @@ describe("sdkProxyRoutes functions proxy", () => {
     });
   });
 
+  test("forwards stock GoTrue Passkey ceremonies without path or token rewriting", async () => {
+    await withSdkProxyTestContext(async ({ calls }) => {
+      setSdkProxySqlForTests(async (...args: unknown[]) => {
+        const text = String(args[0] ?? "");
+        if (text.includes("FROM projects")) {
+          return [{ config: { postgrest_port: 7361, gotrue_port: 8361 } }];
+        }
+        return [];
+      });
+
+      const response = await request("/auth/v1/passkeys/registration/options", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-project-ref": "proj_1",
+          apikey: "anon",
+          authorization: "Bearer user.session.jwt",
+        },
+        body: JSON.stringify({ friendly_name: "MacBook" }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.url).toBe("http://127.0.0.1:8361/passkeys/registration/options");
+      const headers = new Headers(calls[0]?.init?.headers);
+      expect(headers.get("authorization")).toBe("Bearer user.session.jwt");
+      expect(calls[0]?.init?.method).toBe("POST");
+    });
+  });
+
   test("intercepts the exact public admin-user DELETE through the shared deletion orchestrator", async () => {
     await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
       const deletionCalls: Array<Record<string, unknown>> = [];
@@ -645,6 +675,68 @@ describe("sdkProxyRoutes functions proxy", () => {
       const headers = new Headers(calls[0]?.init?.headers);
       expect(headers.get("apikey")).toBe("legacy-anon-jwt");
       expect(headers.get("authorization")).toBe("Bearer legacy-anon-jwt");
+    });
+  });
+
+  test("REST OpenAPI root rejects anon and publishable credentials with the Supabase error shape", async () => {
+    await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
+      trackSpy(
+        spyOn(sdkProxyInternals, "resolveProjectApiKey").mockResolvedValue({
+          ref: "proj_1",
+          kind: "publishable",
+          role: "anon",
+          upstreamKey: "legacy-anon-jwt",
+        }),
+      );
+      setSdkProxySqlForTests(async (...args: unknown[]) => {
+        const text = String(args[0] ?? "");
+        if (text.includes("SELECT config")) {
+          return [{ config: { postgrest_port: 7361, gotrue_port: 8361 } }];
+        }
+        return [];
+      });
+
+      const response = await request("/rest/v1/", {
+        headers: { apikey: "sb_publishable_client_key" },
+      });
+
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({
+        message: "Access to schema is forbidden",
+        hint: "Accessing the schema via the Data API is only allowed using a secret API key.",
+      });
+      expect(calls).toHaveLength(0);
+    });
+  });
+
+  test("REST OpenAPI root remains available to service-role and secret credentials", async () => {
+    await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
+      trackSpy(
+        spyOn(sdkProxyInternals, "resolveProjectApiKey").mockResolvedValue({
+          ref: "proj_1",
+          kind: "secret",
+          role: "service_role",
+          upstreamKey: "legacy-service-jwt",
+        }),
+      );
+      trackSpy(
+        spyOn(sdkProxyInternals, "resolveProjectServiceRoleKey").mockResolvedValue("short-lived-es256-jwt"),
+      );
+      setSdkProxySqlForTests(async (...args: unknown[]) => {
+        const text = String(args[0] ?? "");
+        if (text.includes("SELECT config")) {
+          return [{ config: { postgrest_port: 7361, gotrue_port: 8361 } }];
+        }
+        return [];
+      });
+
+      const response = await request("/rest/v1", {
+        headers: { apikey: "sb_secret_client_key" },
+      });
+
+      expect(response.status).toBe(200);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.url).toBe("http://127.0.0.1:7361/");
     });
   });
 

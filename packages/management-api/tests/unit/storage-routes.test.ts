@@ -3,6 +3,7 @@ import { Elysia } from "elysia";
 import { projectStorageRoutes, storageRoutes } from "../../src/routes/storage";
 import { StorageService } from "../../src/services/storage.service";
 import { mockBuckets, StorageRLS } from "../../src/services/storage-rls";
+import { storageVectorInternals } from "../../src/services/storage-vector.service";
 
 const BASE = "http://localhost";
 const app = new Elysia().use(storageRoutes).use(projectStorageRoutes);
@@ -12,6 +13,28 @@ function request(path: string, init?: RequestInit) {
 }
 
 describe("storage management routes", () => {
+  test("Web Console can manage vector buckets through project-scoped routes", async () => {
+    storageVectorInternals.resetMockStore();
+    const headers = { "Content-Type": "application/json", Authorization: "Bearer dev-master-token" };
+
+    const create = await request("/v1/projects/test_mock/storage/vector/CreateVectorBucket", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ vectorBucketName: "embeddings" }),
+    });
+    expect(create.status).toBe(200);
+
+    const list = await request("/v1/projects/test_mock/storage/vector/ListVectorBuckets", {
+      method: "POST",
+      headers,
+      body: "{}",
+    });
+    expect(list.status).toBe(200);
+    expect(await list.json()).toMatchObject({
+      vectorBuckets: [{ vectorBucketName: "embeddings" }],
+    });
+  });
+
   test("Studio bucket creation requires auth and creates the requested bucket", async () => {
     const createBucketSpy = spyOn(StorageService, "createBucket").mockResolvedValue({ success: true });
     const registerBucketSpy = spyOn(StorageRLS, "createLogicalBucketAsAdmin").mockResolvedValue(true);

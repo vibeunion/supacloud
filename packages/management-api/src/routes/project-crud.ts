@@ -15,6 +15,10 @@ import {
 } from "../services/auth-runtime.service";
 import { ScalingService } from "../services/scaling.service";
 import { getPgBackRestStanza, isPitrEnabled, listBackups, PgBackRestUnavailableError } from "../services/backup.service";
+import {
+  PostgresMajorUpgradeError,
+  postgresMajorUpgradeService,
+} from "../services/postgres-major-upgrade.service";
 import type { BackupInfo } from "../types/backup";
 import {
   applyAuthEmailTemplatePatch,
@@ -142,23 +146,18 @@ function mapStatus(rawStatus: string | undefined): string {
   return rawStatus.toUpperCase();
 }
 
-function buildPostgresUpgradeStatus(currentVersion: string | null = null) {
-  return {
-    upgrade_status: "unsupported",
-    status: "unsupported",
-    capability: false,
-    available: false,
-    current_version: currentVersion,
-    target_version: null,
-    reason: "postgres_major_upgrade_not_supported",
-    message:
-      "Automated Postgres major version upgrades are not supported on this SupaCloud cluster. Use a planned backup/restore maintenance workflow instead.",
-  };
-}
-
-function getProjectDatabaseVersion(project: unknown): string | null {
-  const database = (project as { database?: Record<string, unknown> } | null)?.database;
-  return typeof database?.version === "string" ? database.version : null;
+async function runPostgresUpgradeRoute<T>(operation: () => Promise<T>) {
+  try {
+    return await operation();
+  } catch (error) {
+    if (error instanceof PostgresMajorUpgradeError) {
+      return status(error.statusCode as 400 | 404 | 409 | 503, {
+        message: error.message,
+        code: error.code,
+      });
+    }
+    throw error;
+  }
 }
 
 function normalizeBackupTimestamp(value: unknown): string | null {
@@ -790,18 +789,53 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
   // Postgres Upgrade — explicit capability endpoint
   .post(
     "/:ref/upgrade",
-    async ({ params, request }) => {
+    async ({ params, request, body, set }) => {
       const authError = await requireAdminAuth(request);
       if (authError) return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
 
       const project = await projectService.getProject(params.ref);
       if (!project)
         return status(404, { message: "Project not found", code: "404" });
-      return status(409, buildPostgresUpgradeStatus(getProjectDatabaseVersion(project)));
+      const result = await runPostgresUpgradeRoute(() => postgresMajorUpgradeService.request(params.ref, body.target_version));
+      set.status = 202;
+      return result;
     },
     {
       params: t.Object({ ref: t.String() }),
+      body: t.Object({ target_version: t.Union([t.String(), t.Number()]) }),
       detail: { tags: ["projects"], summary: "Upgrade Postgres version" },
+    },
+  )
+  .post(
+    "/:ref/upgrade/:upgradeId/approve",
+    async ({ params, request, body, set }) => {
+      const authError = await requireAdminAuth(request);
+      if (authError) return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
+      const project = await projectService.getProject(params.ref);
+      if (!project) return status(404, { message: "Project not found", code: "404" });
+      set.status = 202;
+      return runPostgresUpgradeRoute(() => postgresMajorUpgradeService.approve(params.upgradeId, body.confirmation, params.ref));
+    },
+    {
+      params: t.Object({ ref: t.String(), upgradeId: t.String() }),
+      body: t.Object({ confirmation: t.String({ minLength: 20, maxLength: 200 }) }),
+      detail: { tags: ["projects"], summary: "Approve and start a PostgreSQL major upgrade" },
+    },
+  )
+  .post(
+    "/:ref/upgrade/:upgradeId/rollback",
+    async ({ params, request, body, set }) => {
+      const authError = await requireAdminAuth(request);
+      if (authError) return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
+      const project = await projectService.getProject(params.ref);
+      if (!project) return status(404, { message: "Project not found", code: "404" });
+      set.status = 202;
+      return runPostgresUpgradeRoute(() => postgresMajorUpgradeService.rollback(params.upgradeId, body.confirmation, params.ref));
+    },
+    {
+      params: t.Object({ ref: t.String(), upgradeId: t.String() }),
+      body: t.Object({ confirmation: t.String({ minLength: 20, maxLength: 200 }) }),
+      detail: { tags: ["projects"], summary: "Rollback a PostgreSQL major upgrade" },
     },
   )
   .get(
@@ -813,7 +847,7 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
       const project = await projectService.getProject(params.ref);
       if (!project)
         return status(404, { message: "Project not found", code: "404" });
-      return buildPostgresUpgradeStatus(getProjectDatabaseVersion(project));
+      return runPostgresUpgradeRoute(() => postgresMajorUpgradeService.get(params.ref));
     },
     {
       params: t.Object({ ref: t.String() }),

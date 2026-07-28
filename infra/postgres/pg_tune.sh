@@ -160,6 +160,7 @@ alter_system "default_statistics_target" "100"   true    # 更精确的统计信
 log "应用连接及日志参数..."
 alter_system "max_connections"          "200"              false  # 根据实际需求调整
 alter_system "log_min_duration_statement" "1000"           true   # 记录 >1s 的慢查询
+alter_system "log_connections"          "off"              true   # 对齐 Supabase 2026 新项目默认值，减少连接日志噪声
 
 # ── 热重载（对支持热重载的参数立即生效）──────────────────────────────────────
 if [[ "${DRY_RUN}" == "false" ]]; then
@@ -182,7 +183,7 @@ if [[ "${DRY_RUN}" == "false" ]]; then
       'shared_buffers','effective_cache_size','work_mem',
       'maintenance_work_mem','effective_io_concurrency',
       'maintenance_io_concurrency','io_method','io_combine_limit',
-      'wal_compression','random_page_cost','max_connections'
+      'wal_compression','random_page_cost','max_connections','log_connections'
     )
     ORDER BY name;
   "

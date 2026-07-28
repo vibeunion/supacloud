@@ -55,11 +55,10 @@ export const INSTALL_INPUT_KEYS = [
     "EXTERNAL_S3_SECRET_KEY",
     "IMAGINARY_IMAGE",
     "EDGE_RUNTIME",
-    "ENABLE_ANALYTICS",
-    "ANALYTICS_BACKEND",
-    "LOGFLARE_DB",
-    "LOGFLARE_SCHEMA",
-    "LOGFLARE_ERL_FLAGS",
+    "SUPACLOUD_LOGS_ENABLED",
+    "VICTORIALOGS_VERSION",
+    "VICTORIALOGS_DATA_DIR",
+    "VICTORIALOGS_RETENTION",
 ] as const;
 
 export type InstallInputKey = typeof INSTALL_INPUT_KEYS[number];
@@ -574,11 +573,10 @@ async function runInteractiveConfig(
         S3_STORAGE_TYPE: storageType,
         JUICEFS_BACKEND: configured.JUICEFS_BACKEND || "postgres",
         IMAGINARY_IMAGE: configured.IMAGINARY_IMAGE || "h2non/imaginary:1.2.4",
-        ENABLE_ANALYTICS: configured.ENABLE_ANALYTICS || "true",
-        ANALYTICS_BACKEND: configured.ANALYTICS_BACKEND || "postgres",
-        LOGFLARE_DB: configured.LOGFLARE_DB || "_supabase",
-        LOGFLARE_SCHEMA: configured.LOGFLARE_SCHEMA || "_analytics",
-        LOGFLARE_ERL_FLAGS: configured.LOGFLARE_ERL_FLAGS || "+P 32768 +Q 4096 +S 2:2 +hms 64 +hmbs 64 +e 128 +L",
+        SUPACLOUD_LOGS_ENABLED: configured.SUPACLOUD_LOGS_ENABLED || "true",
+        VICTORIALOGS_VERSION: configured.VICTORIALOGS_VERSION || "v1.52.0",
+        VICTORIALOGS_DATA_DIR: configured.VICTORIALOGS_DATA_DIR || "/var/lib/supacloud/victorialogs",
+        VICTORIALOGS_RETENTION: configured.VICTORIALOGS_RETENTION || "7d",
     };
     const resolvedInput = mergeInstallInputValues(persisted, {
         ...explicit,

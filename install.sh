@@ -34,6 +34,9 @@ PGREDIS_RUNTIME_BIN_FILE="${SUPACLOUD_PGREDIS_RUNTIME_BIN_FILE:-/usr/local/bin/s
 PGREDIS_RUNTIME_UNIT_FILE="${SUPACLOUD_PGREDIS_RUNTIME_UNIT_FILE:-/etc/systemd/system/supacloud-pgredis-runtime.service}"
 PGREDIS_RUNTIME_SOURCE_DIR="${SUPACLOUD_PGREDIS_RUNTIME_SOURCE_DIR:-/opt/supacloud/pgredis-runtime}"
 PGREDIS_TENANT_CONFIG_DIR="${SUPACLOUD_PGREDIS_TENANT_CONFIG_DIR:-/etc/supabase/pgredis-tenants}"
+SUPACLOUD_LOGS_ENV_FILE="${SUPACLOUD_LOGS_ENV_FILE:-/etc/supabase/victorialogs.env}"
+SUPACLOUD_VICTORIALOGS_UNIT_FILE="${SUPACLOUD_VICTORIALOGS_UNIT_FILE:-/etc/systemd/system/supacloud-victorialogs.service}"
+VICTORIALOGS_BINARY_FILE="${VICTORIALOGS_BINARY_FILE:-/usr/local/bin/victoria-logs-prod}"
 MANAGEMENT_EDGE_PRIVILEGE_DROPIN="${SUPACLOUD_EMBEDDED_EDGE_PRIVILEGE_DROPIN:-/etc/systemd/system/supacloud.service.d/50-embedded-edge-privilege.conf}"
 PGREDIS_INSTALL_TRANSACTION_DIR=""
 CREDENTIALS_FILE="${SUPACLOUD_CREDENTIALS_FILE:-/etc/supabase/supacloud-credentials.env}"
@@ -62,7 +65,10 @@ SUPACLOUD_INSTALL_KEYS=(
     S3_FORCE_PATH_STYLE
     EXTERNAL_S3_ENDPOINT EXTERNAL_S3_REGION EXTERNAL_S3_BUCKET
     EXTERNAL_S3_ACCESS_KEY EXTERNAL_S3_SECRET_KEY IMAGINARY_IMAGE EDGE_RUNTIME EDGE_RUNTIME_PORT
-    ENABLE_ANALYTICS ANALYTICS_BACKEND LOGFLARE_DB LOGFLARE_SCHEMA LOGFLARE_ERL_FLAGS
+    SUPACLOUD_LOGS_ENABLED VICTORIALOGS_VERSION VICTORIALOGS_DATA_DIR VICTORIALOGS_RETENTION
+    SUPACLOUD_PIPELINES_ENABLED SUPACLOUD_ETL_COMMIT SUPACLOUD_ETL_IMAGE
+    JIT_DATABASE_GATEWAY_PUBLIC_HOST JIT_DATABASE_GATEWAY_PORT_RANGE
+    SUPACLOUD_POSTGRES_MAJOR_UPGRADE_PROVIDER_EXECUTOR
 )
 SUPACLOUD_EXPLICIT_INSTALL_KEYS=()
 SUPACLOUD_EXPLICIT_INSTALL_VALUES=()
@@ -361,15 +367,44 @@ validate_install_network_inputs() {
     fi
 }
 
-validate_logflare_erl_flags() {
-    local flags="${LOGFLARE_ERL_FLAGS:-}"
-    local LC_ALL=C
-    [[ -z "$flags" ]] && return 0
-    if [[ ${#flags} -gt 512 ]] \
-        || [[ ! "$flags" =~ ^[+A-Za-z0-9_.:=,-]+(\ +[+A-Za-z0-9_.:=,-]+)*$ ]]; then
-        log_error "LOGFLARE_ERL_FLAGS contains unsupported BEAM flag syntax"
+# The native VictoriaLogs service writes to this directory. Keep it inside the
+# dedicated SupaCloud state tree and reject
+# symlink traversal before creating or changing any host path.
+validate_victorialogs_data_dir() {
+    local data_dir="${VICTORIALOGS_DATA_DIR:-/var/lib/supacloud/victorialogs}"
+    local relative_path current_path component
+    local components=()
+    local IFS='/'
+
+    case "$data_dir" in
+        /var/lib/supacloud/*) ;;
+        *)
+            log_error "VICTORIALOGS_DATA_DIR must be a non-root directory under /var/lib/supacloud"
+            return 1
+            ;;
+    esac
+
+    relative_path="${data_dir#/var/lib/supacloud/}"
+    [[ -n "$relative_path" && "$data_dir" != *"//"* ]] || {
+        log_error "VICTORIALOGS_DATA_DIR must not contain an empty path component"
         return 1
-    fi
+    }
+
+    read -r -a components <<< "$relative_path"
+    current_path="/var/lib/supacloud"
+    for component in "${components[@]}"; do
+        case "$component" in
+            ''|.|..)
+                log_error "VICTORIALOGS_DATA_DIR must not contain dot path components"
+                return 1
+                ;;
+        esac
+        current_path="${current_path}/${component}"
+        if [[ -L "$current_path" ]]; then
+            log_error "VICTORIALOGS_DATA_DIR must not traverse a symbolic link"
+            return 1
+        fi
+    done
 }
 
 persist_resolved_install_config() {
@@ -477,7 +512,11 @@ check_config() {
     log_step "Checking configuration..."
     load_install_config_layers
     validate_install_network_inputs
-    validate_logflare_erl_flags
+    validate_victorialogs_data_dir
+    if [[ "${SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK:-false}" == "true" ]]; then
+        log_error "SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK=true is not supported: the legacy stack installs Supabase Analytics (Logflare)."
+        return 1
+    fi
     
     # 1. Validate/Get INTERNAL_IP
     if [[ -z "$INTERNAL_IP" || "$INTERNAL_IP" == "10.6.0.9" ]]; then
@@ -2509,76 +2548,115 @@ configure_s3_in_pigsty() {
     log_info "  Type: ${S3_STORAGE_TYPE}"
     log_info "  Endpoint: ${S3_ENDPOINT}"
 }
- 
-# ========== Configure Analytics ==========
-configure_analytics() {
-    log_step "Configuring Analytics (Logflare)..."
-    
-    SUPABASE_ENV=~/pigsty/app/supabase/.env
 
-    if [[ "${SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK:-false}" != "true" ]]; then
-        log_info "Skipping Pigsty Logflare compose configuration; legacy Supabase compose stack is disabled by default."
-        return
+install_victorialogs_binary() {
+    local version="${VICTORIALOGS_VERSION:-v1.52.0}"
+    local asset_arch asset_name archive_url checksums_url
+    local temp_dir archive_file checksums_file member member_count member_details candidate
+
+    [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+        log_error "VICTORIALOGS_VERSION must be a pinned vMAJOR.MINOR.PATCH release"
+        return 1
+    }
+    case "$(uname -m)" in
+        x86_64|amd64) asset_arch="amd64" ;;
+        aarch64|arm64) asset_arch="arm64" ;;
+        *)
+            log_error "VictoriaLogs has no supported native release for architecture: $(uname -m)"
+            return 1
+            ;;
+    esac
+
+    asset_name="victoria-logs-linux-${asset_arch}-${version}.tar.gz"
+    archive_url="https://github.com/VictoriaMetrics/VictoriaLogs/releases/download/${version}/${asset_name}"
+    checksums_url="https://github.com/VictoriaMetrics/VictoriaLogs/releases/download/${version}/${asset_name%.tar.gz}_checksums.txt"
+    temp_dir=$(mktemp -d)
+    trap 'rm -rf "${temp_dir:-}"' RETURN
+    archive_file="${temp_dir}/${asset_name}"
+    checksums_file="${temp_dir}/checksums.txt"
+
+    log_info "Installing VictoriaLogs ${version} native binary..."
+    supacloud_download_url "$archive_url" "$archive_file" || {
+        log_error "Failed to download VictoriaLogs release archive"
+        return 1
+    }
+    supacloud_download_url "$checksums_url" "$checksums_file" || {
+        log_error "Failed to download VictoriaLogs release checksums"
+        return 1
+    }
+    supacloud_verify_checksum "$archive_file" "$asset_name" "$checksums_file" || return 1
+
+    member=$(tar -tzf "$archive_file" | awk '/(^|\/)victoria-logs-prod$/ { print; exit }')
+    member_count=$(tar -tzf "$archive_file" | awk '/(^|\/)victoria-logs-prod$/ { count++ } END { print count + 0 }')
+    [[ "$member_count" == "1" && -n "$member" ]] || {
+        log_error "VictoriaLogs release archive must contain exactly one victoria-logs-prod binary"
+        return 1
+    }
+    member_details=$(tar -tvzf "$archive_file" "$member") || return 1
+    [[ "${member_details:0:1}" == "-" ]] || {
+        log_error "VictoriaLogs archive member is not a regular file"
+        return 1
+    }
+    candidate="${temp_dir}/victoria-logs-prod"
+    tar -xOzf "$archive_file" "$member" > "$candidate" || return 1
+    supacloud_atomic_install_binary "$candidate" "victoria-logs-linux-${asset_arch}" "$VICTORIALOGS_BINARY_FILE"
+}
+ 
+install_observability() {
+    log_step "Installing independent log storage (VictoriaLogs)..."
+
+    if [[ "${SUPACLOUD_LOGS_ENABLED:-true}" != "true" ]]; then
+        log_info "Independent log collection is disabled by SUPACLOUD_LOGS_ENABLED=false"
+        systemctl disable --now supacloud-victorialogs 2>/dev/null || true
+        rm -f /etc/systemd/system/supacloud-vector.service /etc/supabase/vector.yaml
+        return 0
     fi
-    
-    if [[ "${ENABLE_ANALYTICS:-true}" == "true" ]]; then
-        log_info "Enabling Analytics..."
-        
-        # Ensure .env file exists
-        if [[ ! -f "$SUPABASE_ENV" ]]; then
-            log_warn "Supabase .env file not found, skipping Analytics configuration"
-            return
-        fi
-        
-        # Enable Logflare container
-        sed -i "s|ENABLE_ANALYTICS=.*|ENABLE_ANALYTICS=true|g" "$SUPABASE_ENV" 2>/dev/null || echo "ENABLE_ANALYTICS=true" >> "$SUPABASE_ENV"
-        
-        # Configure BEAM VM memory optimization parameters (reduce Logflare memory usage)
-        # Default: +P 32768 +Q 4096 +S 2:2 +hms 64 +hmbs 64 +e 128 +L
-        # Expected memory usage: 400-600MB (default 2GB+)
-        if [[ -n "${LOGFLARE_ERL_FLAGS:-}" ]]; then
-            log_info "Configuring Logflare BEAM VM memory optimization..."
-            supacloud_write_raw_env_pairs "$SUPABASE_ENV" \
-                ERL_AFLAGS "$LOGFLARE_ERL_FLAGS"
-            log_info "  ERL_AFLAGS: ${LOGFLARE_ERL_FLAGS}"
-        fi
-        
-        # Configure backend
-        if [[ "${ANALYTICS_BACKEND:-postgres}" == "postgres" ]]; then
-            log_info "Configuring Analytics backend to Postgres (Lightweight)..."
-            # Set Logflare backend type
-            sed -i "s|LOGFLARE_BACKEND_TYPE=.*|LOGFLARE_BACKEND_TYPE=postgres|g" "$SUPABASE_ENV" 2>/dev/null || echo "LOGFLARE_BACKEND_TYPE=postgres" >> "$SUPABASE_ENV"
-            
-            # Ensure Postgres connection info is correct (usually reuses POSTGRES_URL)
-            # Logflare requires DB connection string
-            # Use Pigsty's DBUser.Supa default password or generated password
-            # Note: If POSTGRES_PASSWORD is the default 'DBUser.Supa', ensure it is set correctly
-            local encoded_logflare_password
-            encoded_logflare_password=$(printf '%s' "$POSTGRES_PASSWORD" | supacloud_urlencode_stdin)
-            LOGFLARE_DB="${LOGFLARE_DB:-_supabase}"
-            LOGFLARE_SCHEMA="${LOGFLARE_SCHEMA:-_analytics}"
-            LOGFLARE_DB_URL="postgresql://postgres:${encoded_logflare_password}@${INTERNAL_IP}:5432/${LOGFLARE_DB}"
-            supacloud_write_raw_env_pairs "$SUPABASE_ENV" \
-                LOGFLARE_DB "$LOGFLARE_DB" \
-                LOGFLARE_SCHEMA "$LOGFLARE_SCHEMA" \
-                LOGFLARE_DATABASE_URL "$LOGFLARE_DB_URL"
-            
-        elif [[ "${ANALYTICS_BACKEND}" == "bigquery" ]]; then
-            log_info "Configuring Analytics backend to BigQuery..."
-            sed -i "s|LOGFLARE_BACKEND_TYPE=.*|LOGFLARE_BACKEND_TYPE=bigquery|g" "$SUPABASE_ENV"
-            # BigQuery requires additional credential configuration, assuming manual setup or other injection
-            log_warn "Using BigQuery requires Google Cloud credentials, please check .env file"
-        fi
-        
-    else
-        log_info "Disabling Analytics (Logflare)..."
-        # Disable in .env
-        sed -i "s|ENABLE_ANALYTICS=.*|ENABLE_ANALYTICS=false|g" "$SUPABASE_ENV" 2>/dev/null || echo "ENABLE_ANALYTICS=false" >> "$SUPABASE_ENV"
-        
-        # For docker-compose, services may need to be commented out (depends on template)
-        # Simply set environment variables, assuming docker-compose.yml has corresponding conditional logic
-        # Or manually stop containers after start
+
+    local systemd_src="${SCRIPT_DIR}/infrastructure/systemd"
+    local victorialogs_src="${systemd_src}/supacloud-victorialogs.service"
+    [[ -f "$victorialogs_src" ]] || {
+        log_error "Missing checked-in VictoriaLogs systemd unit"
+        return 1
+    }
+
+    validate_victorialogs_data_dir
+    local victorialogs_data_dir="${VICTORIALOGS_DATA_DIR:-/var/lib/supacloud/victorialogs}"
+    mkdir -p "$victorialogs_data_dir" /var/lib/supacloud/log-collector
+    [[ -d "$victorialogs_data_dir" && ! -L "$victorialogs_data_dir" ]] || {
+        log_error "VictoriaLogs data path is not a safe directory"
+        return 1
+    }
+    chmod 750 "$victorialogs_data_dir" /var/lib/supacloud/log-collector
+    install_victorialogs_binary
+    supacloud_write_service_env_pairs "$SUPACLOUD_LOGS_ENV_FILE" \
+        VICTORIALOGS_BINARY "$VICTORIALOGS_BINARY_FILE" \
+        VICTORIALOGS_DATA_DIR "$victorialogs_data_dir" \
+        VICTORIALOGS_RETENTION "${VICTORIALOGS_RETENTION:-7d}"
+    chmod 600 "$SUPACLOUD_LOGS_ENV_FILE"
+
+    install -m 644 "$victorialogs_src" "$SUPACLOUD_VICTORIALOGS_UNIT_FILE"
+    systemctl disable --now supacloud-vector 2>/dev/null || true
+    rm -f /etc/systemd/system/supacloud-vector.service /etc/supabase/vector.yaml
+
+    systemctl daemon-reload
+    systemctl enable --now supacloud-victorialogs
+    log_info "VictoriaLogs runs as one native systemd service on 127.0.0.1:9428; SupaCloud performs log collection."
+}
+
+install_supabase_pipelines() {
+    if [[ "${SUPACLOUD_PIPELINES_ENABLED:-true}" != "true" ]]; then
+        log_info "Supabase Pipelines runtime is disabled by SUPACLOUD_PIPELINES_ENABLED=false"
+        return 0
     fi
+
+    log_step "Installing pinned Supabase ETL runtime for CDC Pipelines..."
+    [[ -x "${SCRIPT_DIR}/scripts/install_supabase_etl.sh" ]] || {
+        log_error "Missing scripts/install_supabase_etl.sh"
+        return 1
+    }
+    SUPACLOUD_ETL_COMMIT="${SUPACLOUD_ETL_COMMIT:-cd49f6f8355c75c30c0d191542677bf6bc155607}" \
+    SUPACLOUD_ETL_IMAGE="${SUPACLOUD_ETL_IMAGE:-}" \
+        bash "${SCRIPT_DIR}/scripts/install_supabase_etl.sh"
 }
  
 # ========== Manually Start Supabase ==========
@@ -2605,9 +2683,9 @@ manual_start_supabase() {
     # Fix container healthchecks
     fix_container_healthchecks
     
-    # Restart affected containers to apply healthcheck fixes
-    log_info "Restarting legacy Studio and Analytics containers to apply healthcheck fixes..."
-    docker restart supabase-studio supabase-analytics 2>/dev/null || true
+    # Restart Studio after its healthcheck has been updated.
+    log_info "Restarting legacy Studio container to apply healthcheck fixes..."
+    docker restart supabase-studio 2>/dev/null || true
 }
  
 # ========== Fix Container Healthchecks ==========
@@ -2632,17 +2710,6 @@ fix_container_healthchecks() {
         # Replace with healthcheck not using arrow functions
         sed -i "s|http://studio:3000|http://localhost:3000|g" "$COMPOSE_FILE"
         log_info "  Studio healthcheck URL fixed"
-    fi
-    
-    # 2. Fix Analytics healthcheck
-    # Issue: Logflare container lacks curl/wget/nc
-    # Solution: Use simple file check or process check
-    log_info "Fixing Analytics healthcheck..."
-    if grep -q "curl.*localhost:4000/health" "$COMPOSE_FILE" 2>/dev/null; then
-        # Logflare container lacks curl, use simple port listening check
-        # Check if /proc/net/tcp has listening port 4000 (0x0FA0)
-        sed -i 's|test: \["CMD", "curl", "-f", "http://localhost:4000/health"\]|test: ["CMD-SHELL", "cat /proc/net/tcp | grep -q 0FA0"]|g' "$COMPOSE_FILE"
-        log_info "  Analytics healthcheck command fixed"
     fi
     
     log_info "Healthcheck fixes complete"
@@ -2683,10 +2750,12 @@ save_all_credentials() {
         SERVICE_ROLE_KEY "$SERVICE_ROLE_KEY" \
         SUPABASE_PUBLISHABLE_KEY "$SUPABASE_PUBLISHABLE_KEY" \
         SUPABASE_SECRET_KEY "$SUPABASE_SECRET_KEY" \
-        ENABLE_ANALYTICS "${ENABLE_ANALYTICS:-true}" \
-        ANALYTICS_BACKEND "${ANALYTICS_BACKEND:-postgres}" \
-        LOGFLARE_DB "${LOGFLARE_DB:-_supabase}" \
-        LOGFLARE_SCHEMA "${LOGFLARE_SCHEMA:-_analytics}" \
+        SUPACLOUD_LOGS_ENABLED "${SUPACLOUD_LOGS_ENABLED:-true}" \
+        VICTORIALOGS_VERSION "${VICTORIALOGS_VERSION:-v1.52.0}" \
+        VICTORIALOGS_DATA_DIR "${VICTORIALOGS_DATA_DIR:-/var/lib/supacloud/victorialogs}" \
+        VICTORIALOGS_RETENTION "${VICTORIALOGS_RETENTION:-7d}" \
+        SUPACLOUD_PIPELINES_ENABLED "${SUPACLOUD_PIPELINES_ENABLED:-true}" \
+        SUPACLOUD_ETL_COMMIT "${SUPACLOUD_ETL_COMMIT:-cd49f6f8355c75c30c0d191542677bf6bc155607}" \
         S3_STORAGE_TYPE "$S3_STORAGE_TYPE" \
         EDGE_RUNTIME_PORT "${EDGE_RUNTIME_PORT:-9005}" \
         JUICEFS_BACKEND "${JUICEFS_BACKEND:-}" \
@@ -3083,6 +3152,9 @@ install_management_api() {
         PGREDIS_RUNTIME_CAPABILITY_TTL_MS "${PGREDIS_RUNTIME_CAPABILITY_TTL_MS:-600000}" \
         PGREDIS_TENANT_CONFIG_DIR "$PGREDIS_TENANT_CONFIG_DIR" \
         PGREDIS_TENANT_CONFIG_OWNER supacloud-pgredis:supacloud-pgredis \
+        SUPACLOUD_LOGS_ENABLED "${SUPACLOUD_LOGS_ENABLED:-true}" \
+        VICTORIALOGS_URL "${VICTORIALOGS_URL:-http://127.0.0.1:9428}" \
+        SUPACLOUD_LOG_COLLECTOR_STATE_DIR /var/lib/supacloud/log-collector \
         MASTER_TOKEN "$MASTER_TOKEN" \
         SCRIPTS_PATH "$SCRIPTS_INSTALL_DIR" \
         PIGSTY_PATH "${HOME}/pigsty" \
@@ -3110,7 +3182,7 @@ install_management_api() {
         REALTIME_DB_ENC_KEY "$REALTIME_DB_ENC_KEY" \
         REALTIME_API_SECRET "$JWT_SECRET" \
         SUPACLOUD_REALTIME_CONTAINER_ENV_FILE "${SUPACLOUD_REALTIME_CONTAINER_ENV_FILE:-/etc/supabase/realtime-container.env}" \
-        REALTIME_IMAGE "${REALTIME_IMAGE:-public.ecr.aws/supabase/realtime:v2.116.1}" \
+        REALTIME_IMAGE "${REALTIME_IMAGE:-public.ecr.aws/supabase/realtime:v2.121.0}" \
         REALTIME_CONTAINER_NAME "${REALTIME_CONTAINER_NAME:-supacloud-realtime}" \
         REALTIME_DB_USER supabase_admin \
         PG_HOST 127.0.0.1 \
@@ -3118,6 +3190,11 @@ install_management_api() {
         PG_USER postgres \
         PG_DATABASE postgres \
         PGPASSWORD "$POSTGRES_PASSWORD" \
+        JIT_DATABASE_GATEWAY_BIND_HOST "${JIT_DATABASE_GATEWAY_BIND_HOST:-::}" \
+        JIT_DATABASE_GATEWAY_PUBLIC_HOST "${JIT_DATABASE_GATEWAY_PUBLIC_HOST:-$INTERNAL_IP}" \
+        JIT_DATABASE_GATEWAY_PORT_RANGE "${JIT_DATABASE_GATEWAY_PORT_RANGE:-6600-6699}" \
+        SUPACLOUD_POSTGRES_MAJOR_UPGRADE_EXECUTOR /opt/supacloud/scripts/lib/postgres_major_upgrade_executor.sh \
+        SUPACLOUD_POSTGRES_MAJOR_UPGRADE_PROVIDER_EXECUTOR "${SUPACLOUD_POSTGRES_MAJOR_UPGRADE_PROVIDER_EXECUTOR:-}" \
         SECRETS_ENCRYPTION_KEY "$SECRETS_ENCRYPTION_KEY" \
         SUPAOAUTH_BFF_SIGNING_SECRET "$SUPAOAUTH_BFF_SIGNING_SECRET" \
         SUPABASE_SCHEMA_PATH /opt/supacloud/packages/management-api/src/db/schemas/supabase.sql \
@@ -3572,7 +3649,7 @@ deploy_service_containers() {
 
     # --- 2. Deploy Supabase Realtime (Multi-tenant WebSocket) ---
     local REALTIME_UNIT_SRC="${SCRIPT_DIR}/infrastructure/systemd/supacloud-realtime.service"
-    local REALTIME_IMAGE_VALUE="${REALTIME_IMAGE:-public.ecr.aws/supabase/realtime:v2.116.1}"
+    local REALTIME_IMAGE_VALUE="${REALTIME_IMAGE:-public.ecr.aws/supabase/realtime:v2.121.0}"
     local REALTIME_CONTAINER_ENV_FILE="${SUPACLOUD_REALTIME_CONTAINER_ENV_FILE:-/etc/supabase/realtime-container.env}"
     if [[ -f "$REALTIME_UNIT_SRC" ]]; then
         log_info "Registering SupaCloud Realtime systemd unit..."
@@ -3883,7 +3960,8 @@ main() {
     install_s3_storage
     install_edge_runtime
     install_pigsty      # Pigsty nginx suppressed via nginx_enabled: false
-    configure_analytics
+    install_observability
+    install_supabase_pipelines
     configure_pg_hba
     configure_low_memory_tcp_guardrails
     
@@ -3917,7 +3995,7 @@ main() {
         # explicitly so role/password checks use postgres regardless of the shell env.
         PGHOST=127.0.0.1 PGPORT=5432 PGUSER=postgres \
             PGPASSWORD="${PGPASSWORD:-$POSTGRES_PASSWORD}" \
-            bash "${SCRIPT_DIR}/scripts/upgrade_pigsty_4_4_compat.sh" --apply
+            bash "${SCRIPT_DIR}/scripts/upgrade_pigsty_4_4_compat.sh" --apply --skip-analytics
     fi
     install_web_console
 

@@ -42,7 +42,7 @@ services:
       - pgredis-database
 
   gotrue:
-    image: supabase/gotrue:v2.193.1
+    image: supabase/gotrue:v2.194.0
     restart: always
     environment:
       GOTRUE_SITE_URL: http://localhost:${CADDY_HTTP_PORT:-8000}
@@ -50,18 +50,30 @@ services:
       GOTRUE_JWT_AUD: authenticated
       GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
       GOTRUE_JWT_EXP: 3600
-      API_EXTERNAL_URL: http://localhost:${CADDY_HTTP_PORT:-8000}
+      API_EXTERNAL_URL: http://localhost:${CADDY_HTTP_PORT:-8000}/auth/v1
       GOTRUE_OPERATOR_TOKEN: ${MASTER_TOKEN:-${JWT_SECRET}}
       GOTRUE_DB_DRIVER: postgres
       GOTRUE_DB_DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/postgres
       GOTRUE_MAILER_AUTOCONFIRM: "true"
       GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED: "true"
       GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION: "true"
+      GOTRUE_CUSTOM_OAUTH_ENABLED: "true"
+      GOTRUE_CUSTOM_OAUTH_MAX_PROVIDERS: "0"
+      GOTRUE_CUSTOM_OAUTH_EXTERNAL_URL: http://localhost:${CADDY_HTTP_PORT:-8000}/auth/v1
+      GOTRUE_SECURITY_DATABASE_ENCRYPTION_ENCRYPT: "true"
+      GOTRUE_SECURITY_DATABASE_ENCRYPTION_ENCRYPTION_KEY_ID: ${GOTRUE_DB_ENCRYPTION_KEY_ID}
+      GOTRUE_SECURITY_DATABASE_ENCRYPTION_ENCRYPTION_KEY: ${GOTRUE_DB_ENCRYPTION_KEY}
+      GOTRUE_SECURITY_DATABASE_ENCRYPTION_DECRYPTION_KEYS: ${GOTRUE_DB_DECRYPTION_KEYS}
+      GOTRUE_PASSKEY_ENABLED: ${PASSKEY_ENABLED:-false}
+      GOTRUE_PASSKEY_MAX_PASSKEYS_PER_USER: ${PASSKEY_MAX_PASSKEYS_PER_USER:-10}
+      GOTRUE_WEBAUTHN_RP_ID: ${WEBAUTHN_RP_ID:-localhost}
+      GOTRUE_WEBAUTHN_RP_DISPLAY_NAME: ${WEBAUTHN_RP_DISPLAY_NAME:-SupaCloud Local}
+      GOTRUE_WEBAUTHN_RP_ORIGINS: ${WEBAUTHN_RP_ORIGINS:-http://localhost:${CADDY_HTTP_PORT:-8000}}
     networks:
       - supacloud-dev
 
   postgrest:
-    image: postgrest/postgrest:v14.15
+    image: postgrest/postgrest:v14.16
     restart: always
     environment:
       PGRST_DB_URI: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/postgres
@@ -88,6 +100,11 @@ services:
       - PG_PORT=5432
       - PG_USER=postgres
       - PG_DATABASE=postgres
+      - JIT_DATABASE_GATEWAY_BIND_HOST=${JIT_DATABASE_GATEWAY_BIND_HOST:-::}
+      - JIT_DATABASE_GATEWAY_PUBLIC_HOST=${JIT_DATABASE_GATEWAY_PUBLIC_HOST:-localhost}
+      - JIT_DATABASE_GATEWAY_PORT_RANGE=${JIT_DATABASE_GATEWAY_PORT_RANGE:-6600-6699}
+      - SUPACLOUD_POSTGRES_MAJOR_UPGRADE_EXECUTOR=/opt/supacloud/scripts/lib/postgres_major_upgrade_executor.sh
+      - SUPACLOUD_POSTGRES_MAJOR_UPGRADE_PROVIDER_EXECUTOR=${SUPACLOUD_POSTGRES_MAJOR_UPGRADE_PROVIDER_EXECUTOR:-}
       - PGPASSWORD=${POSTGRES_PASSWORD:-postgres}
       - JWT_SECRET=${JWT_SECRET}
       - MASTER_TOKEN=${MASTER_TOKEN}
@@ -108,6 +125,7 @@ services:
       - PGREDIS_RUNTIME_INTERNAL_TIMEOUT_MS=${PGREDIS_RUNTIME_INTERNAL_TIMEOUT_MS:-5000}
     ports:
       - "${API_PORT:-9090}:9090"
+      - "${JIT_DATABASE_GATEWAY_PORT_RANGE:-6600-6699}:${JIT_DATABASE_GATEWAY_PORT_RANGE:-6600-6699}"
     volumes:
       - tenant-config:/etc/supabase/tenants
       - pgredis-tenant-config:/etc/supabase/pgredis-tenants

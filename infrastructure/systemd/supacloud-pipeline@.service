@@ -1,0 +1,39 @@
+[Unit]
+Description=SupaCloud Supabase ETL Pipeline %i
+Documentation=https://github.com/supabase/etl
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=120
+Environment=SUPACLOUD_ETL_IMAGE=supacloud/etl-replicator:cd49f6f8355c
+Environment=APP_ENVIRONMENT=prod
+ExecStartPre=/usr/bin/test -s /etc/supabase/pipelines/%i/prod.json
+ExecStartPre=/usr/bin/podman image exists ${SUPACLOUD_ETL_IMAGE}
+ExecStartPre=-/usr/bin/podman rm -f supacloud-pipeline-%i
+ExecStart=/usr/bin/podman run --rm --name supacloud-pipeline-%i --network slirp4netns:allow_host_loopback=true --user 65532:65532 \
+  --cap-drop=ALL --read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m --security-opt=no-new-privileges \
+  -e APP_ENVIRONMENT=prod -e APP_CONFIG_DIR=/config \
+  -v /etc/supabase/pipelines/%i:/config:ro,Z \
+  ${SUPACLOUD_ETL_IMAGE}
+ExecStop=/usr/bin/podman stop -t 30 supacloud-pipeline-%i
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=supacloud-pipeline-%i
+
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+ReadOnlyPaths=/etc/supabase/pipelines/%i
+PrivateTmp=true
+MemoryMax=2G
+MemoryHigh=1536M
+CPUQuota=200%
+TasksMax=1024
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

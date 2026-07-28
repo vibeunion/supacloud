@@ -15,6 +15,7 @@ RUN mkdir -p /etc/supabase/pgredis-tenants \
 
 # Copy source code
 COPY packages/management-api ./packages/management-api
+COPY --chmod=0755 scripts/lib/postgres_major_upgrade_executor.sh /opt/supacloud/scripts/lib/postgres_major_upgrade_executor.sh
 
 WORKDIR /app/packages/management-api
 

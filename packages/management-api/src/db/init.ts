@@ -15,7 +15,6 @@ import {
   migrateLegacyControlSecrets,
   migrateLegacyProviderLinkingConfig,
   migrateLegacyProjectWebhooks,
-  migrateUnsupportedWebAuthnConfig,
   migrateWebhookSecretsToControlStore,
 } from "./platform-v2";
 import { migrateAuditChainSequences } from "./audit-chain-migration";
@@ -163,6 +162,37 @@ export async function initDatabase() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+
+    CREATE TABLE IF NOT EXISTS postgres_major_upgrades (
+      id UUID PRIMARY KEY,
+      requested_project_ref TEXT NOT NULL REFERENCES projects(ref) ON DELETE RESTRICT,
+      scope TEXT NOT NULL DEFAULT 'cluster' CHECK (scope = 'cluster'),
+      current_major INTEGER NOT NULL,
+      target_major INTEGER NOT NULL,
+      status TEXT NOT NULL,
+      strategy TEXT NOT NULL DEFAULT 'provider_executor_backup_restore',
+      preflight JSONB NOT NULL DEFAULT '{}'::jsonb,
+      backup_id TEXT,
+      backup_evidence JSONB NOT NULL DEFAULT '{}'::jsonb,
+      scope_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+      executor_evidence JSONB NOT NULL DEFAULT '{}'::jsonb,
+      error_code TEXT,
+      error_message TEXT,
+      approved_at TIMESTAMPTZ,
+      started_at TIMESTAMPTZ,
+      completed_at TIMESTAMPTZ,
+      lease_owner TEXT,
+      lease_token UUID,
+      lease_expires_at TIMESTAMPTZ,
+      heartbeat_at TIMESTAMPTZ,
+      fencing_epoch BIGINT NOT NULL DEFAULT 0,
+      rollback_requested_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS postgres_major_upgrades_one_active_idx
+      ON postgres_major_upgrades(scope)
+      WHERE status IN ('draft','preflight_running','awaiting_approval','backup_running','upgrade_running','validating','rollback_running');
 
     CREATE TABLE IF NOT EXISTS project_tasks (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -734,7 +764,6 @@ export async function initDatabase() {
       await migrateAuditChainSequences(transaction);
       await migrateLegacyControlSecrets(transaction);
       await migrateLegacyProjectWebhooks(transaction);
-      await migrateUnsupportedWebAuthnConfig(transaction);
       await migrateLegacyProviderLinkingConfig(transaction);
       const secretMigration = await migrateLegacyEncryptedSecretsInTransaction(transaction);
       if (secretMigration.rotated > 0) {

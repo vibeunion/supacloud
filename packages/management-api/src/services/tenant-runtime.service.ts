@@ -26,6 +26,7 @@ import {
     quoteTomlBasicString,
     renderGoTrueAuthEnv,
     renderGoTrueProviderLinkingEnv,
+    renderGoTruePasskeyEnv,
     renderGoTrueSamlEnv,
     renderGoTrueSessionPolicyEnv,
     renderPostgrestDbSchemas,
@@ -43,11 +44,20 @@ import { installManagedSystemdUnit } from "./systemd-unit-broker";
 
 export {
     renderGoTrueAuthEnv,
+    renderGoTruePasskeyEnv,
     renderGoTrueSamlEnv,
     renderGoTrueSessionPolicyEnv,
     renderPostgrestDbSchemas,
     renderTenantInternalRuntimeEnv,
 } from "./tenant-runtime-config";
+
+export function isGoTruePasskeyVersionSupported(version: string): boolean {
+    const match = version.trim().match(/^v(\d+)\.(\d+)\.(\d+)(?:[-+][A-Za-z0-9._-]+)?$/);
+    if (!match) return false;
+    const major = Number(match[1]);
+    const minor = Number(match[2]);
+    return major === 2 && minor >= 194;
+}
 
 export class SupAuthDependentRefreshError extends Error {
     readonly code = "SUPAUTH_DEPENDENT_REFRESH_FAILED";
@@ -779,6 +789,18 @@ class TenantRuntimeService {
         }
     }
 
+    private async ensurePasskeyGoTrueVersion(authConfig: Record<string, unknown>): Promise<void> {
+        if (renderGoTruePasskeyEnv(authConfig) === "GOTRUE_PASSKEY_ENABLED=false") return;
+        await this.ensureGotrueBinary();
+        const configuredBinaryExists = await Bun.file(this.GOTRUE_BIN).exists();
+        const binary = configuredBinaryExists ? this.GOTRUE_BIN : "gotrue";
+        const versionResult = await this.runStructuredCommand([binary, "version"]);
+        const version = versionResult.stdout.trim().split(/\s+/)[0] || "";
+        if (versionResult.exitCode !== 0 || !isGoTruePasskeyVersionSupported(version)) {
+            throw new Error(`Passkey requires GoTrue v2.194.0 or newer; detected ${version || "unknown"}`);
+        }
+    }
+
     private async ensureBinaries() {
         await this.ensurePostgrestBinary();
         await this.ensureGotrueBinary();
@@ -936,6 +958,7 @@ class TenantRuntimeService {
         gotruePort: number,
         systemctlMode: SystemctlExecutionMode = "best-effort",
     ) {
+        const creds = await this.getTenantCredentials(ref);
         const runtimeUser = await this.ensureTenantRuntimeUser(ref);
         await fs.mkdir(this.TENANT_CONFIG_DIR, { recursive: true, mode: 0o711 });
         await fs.chmod(this.TENANT_CONFIG_DIR, 0o711);
@@ -946,7 +969,6 @@ class TenantRuntimeService {
         }
 
         const runtimeGoTruePort = await this.effectiveGoTruePort(ref, gotruePort);
-        const creds = await this.getTenantCredentials(ref);
         for (const [name, value] of Object.entries({
             dbPassword: creds.dbPassword,
             jwtSecret: creds.jwtSecret,
@@ -1106,6 +1128,7 @@ db-channel = ${quoteTomlBasicString(resolvePgrstChannel(ref))}
         }
 
         await fs.rm(path.join(this.TENANT_CONFIG_DIR, `${ref}_gotrue.shared`), { force: true });
+        await this.ensurePasskeyGoTrueVersion(creds.authConfig);
 
         // Generate GoTrue .env configuration
         const hasDedicatedAuthUrl = Boolean(creds.authUrl && creds.authUrl !== creds.apiUrl);
@@ -1147,6 +1170,7 @@ GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE=/auth/v1/verify
 `.trim(),
             renderGoTrueSessionPolicyEnv(creds.authConfig),
             renderGoTrueAuthEnv(creds.authConfig),
+            renderGoTruePasskeyEnv(creds.authConfig),
             renderGoTrueProviderLinkingEnv(creds.authConfig),
             renderGoTrueSamlEnv(creds.authConfig),
             ...managedSecretEnvLines,

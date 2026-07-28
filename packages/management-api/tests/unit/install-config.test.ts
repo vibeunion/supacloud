@@ -163,7 +163,6 @@ describe("installer configuration persistence", () => {
       "POSTGRES_PASSWORD=stable-database-secret",
       "DASHBOARD_PASSWORD=stable-dashboard-secret",
       "GRAFANA_PASSWORD=stable-grafana-secret",
-      'LOGFLARE_ERL_FLAGS="+P 32768 +Q 4096 +S 2:2 +L"',
       "",
     ].join("\n");
     const invalidInputs = [
@@ -206,13 +205,11 @@ describe("installer configuration persistence", () => {
     }
   }, 30_000);
 
-  test("check_config rejects unsafe Logflare BEAM flags before persistence", () => {
+  test("install input rejects removed Logflare configuration before persistence", () => {
     const dir = makeTempDir();
-    const installInput = join(dir, "unsafe-logflare.env");
-    const jwtKeys = join(dir, "unsafe-logflare-jwt.env");
-    const marker = join(dir, "logflare-flags-must-not-run");
-    const downstreamMarker = join(dir, "unsafe-logflare-downstream");
-    const unsafeFlags = `+P 32768|$(touch ${marker})`;
+    const installInput = join(dir, "removed-logflare.env");
+    const jwtKeys = join(dir, "removed-logflare-jwt.env");
+    const downstreamMarker = join(dir, "removed-logflare-downstream");
     const originalConfig = [
       "INTERNAL_IP=10.20.30.40",
       "SUPABASE_PUBLIC_DOMAIN=api.safe.example",
@@ -220,7 +217,7 @@ describe("installer configuration persistence", () => {
       "POSTGRES_PASSWORD=stable-database-secret",
       "DASHBOARD_PASSWORD=stable-dashboard-secret",
       "GRAFANA_PASSWORD=stable-grafana-secret",
-      'LOGFLARE_ERL_FLAGS="+P 32768 +Q 4096 +S 2:2 +L"',
+      "ENABLE_ANALYTICS=true",
       "",
     ].join("\n");
     writeFileSync(installInput, originalConfig, { mode: 0o600 });
@@ -232,15 +229,71 @@ describe("installer configuration persistence", () => {
       SUPACLOUD_MANAGEMENT_ENV_FILE: join(dir, "missing-runtime.env"),
       SUPACLOUD_JWT_KEYS_FILE: jwtKeys,
       DOWNSTREAM_MARKER: downstreamMarker,
-      LOGFLARE_ERL_FLAGS: unsafeFlags,
     });
 
     expect(result.status, `${result.stdout}\n${result.stderr}`).not.toBe(0);
-    expect(`${result.stdout}\n${result.stderr}`).not.toContain(unsafeFlags);
+    expect(`${result.stdout}\n${result.stderr}`).toContain("unsupported key: ENABLE_ANALYTICS");
     expect(readFileSync(installInput, "utf8")).toBe(originalConfig);
     expect(() => statSync(jwtKeys)).toThrow();
-    expect(() => statSync(marker)).toThrow();
     expect(() => statSync(downstreamMarker)).toThrow();
+  });
+
+  test("check_config rejects the legacy Supabase compose stack before installation", () => {
+    const dir = makeTempDir();
+    const installInput = join(dir, "legacy-compose.env");
+    const jwtKeys = join(dir, "legacy-compose-jwt.env");
+    const originalConfig = [
+      "INTERNAL_IP=10.20.30.40",
+      "SUPABASE_PUBLIC_DOMAIN=api.safe.example",
+      "SUPABASE_STUDIO_DOMAIN=studio.safe.example",
+      "POSTGRES_PASSWORD=stable-database-secret",
+      "DASHBOARD_PASSWORD=stable-dashboard-secret",
+      "GRAFANA_PASSWORD=stable-grafana-secret",
+      "SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK=true",
+      "",
+    ].join("\n");
+    writeFileSync(installInput, originalConfig, { mode: 0o600 });
+
+    const result = runBash("source install.sh; check_config", {
+      SUPACLOUD_INSTALL_CONFIG_FILE: installInput,
+      SUPACLOUD_TEMPLATE_CONFIG_FILE: join(dir, "missing-template.env"),
+      SUPACLOUD_CREDENTIALS_FILE: join(dir, "missing-credentials.env"),
+      SUPACLOUD_MANAGEMENT_ENV_FILE: join(dir, "missing-runtime.env"),
+      SUPACLOUD_JWT_KEYS_FILE: jwtKeys,
+    });
+
+    expect(result.status, `${result.stdout}\n${result.stderr}`).not.toBe(0);
+    expect(`${result.stdout}\n${result.stderr}`).toContain("legacy stack installs Supabase Analytics (Logflare)");
+    expect(readFileSync(installInput, "utf8")).toBe(originalConfig);
+    expect(() => statSync(jwtKeys)).toThrow();
+  });
+
+  test("check_config rejects an unsafe VictoriaLogs data directory before installation", () => {
+    const dir = makeTempDir();
+    const installInput = join(dir, "unsafe-victorialogs-path.env");
+    const jwtKeys = join(dir, "unsafe-victorialogs-path-jwt.env");
+    writeFileSync(installInput, [
+      "INTERNAL_IP=10.20.30.40",
+      "SUPABASE_PUBLIC_DOMAIN=api.safe.example",
+      "SUPABASE_STUDIO_DOMAIN=studio.safe.example",
+      "POSTGRES_PASSWORD=stable-database-secret",
+      "DASHBOARD_PASSWORD=stable-dashboard-secret",
+      "GRAFANA_PASSWORD=stable-grafana-secret",
+      "VICTORIALOGS_DATA_DIR=/",
+      "",
+    ].join("\n"), { mode: 0o600 });
+
+    const result = runBash("source install.sh; check_config", {
+      SUPACLOUD_INSTALL_CONFIG_FILE: installInput,
+      SUPACLOUD_TEMPLATE_CONFIG_FILE: join(dir, "missing-template.env"),
+      SUPACLOUD_CREDENTIALS_FILE: join(dir, "missing-credentials.env"),
+      SUPACLOUD_MANAGEMENT_ENV_FILE: join(dir, "missing-runtime.env"),
+      SUPACLOUD_JWT_KEYS_FILE: jwtKeys,
+    });
+
+    expect(result.status, `${result.stdout}\n${result.stderr}`).not.toBe(0);
+    expect(`${result.stdout}\n${result.stderr}`).toContain("VICTORIALOGS_DATA_DIR must be a non-root directory");
+    expect(() => statSync(jwtKeys)).toThrow();
   });
 
   test("check_config preserves valid IPv4 and nip.io domains across consecutive runs", () => {
@@ -254,7 +307,6 @@ describe("installer configuration persistence", () => {
       "POSTGRES_PASSWORD=stable-database-secret",
       "DASHBOARD_PASSWORD=stable-dashboard-secret",
       "GRAFANA_PASSWORD=stable-grafana-secret",
-      'LOGFLARE_ERL_FLAGS="+P 32768 +Q 4096 +S 2:2 +hms 64 +hmbs 64 +e 128 +L"',
       "",
     ].join("\n"), { mode: 0o600 });
     const env = {

@@ -1,6 +1,6 @@
 # SupaCloud vs Supabase
 
-This document compares **SupaCloud**, **Supabase Cloud**, and **Supabase Self-Hosted** from an operator and product-integration perspective.
+This document compares **SupaCloud**, **Supabase Cloud**, and **Supabase Self-Hosted** from an operator and product-integration perspective. SupaCloud's product target is project-level functional and protocol compatibility with Supabase Cloud.
 
 It is intentionally focused on what each option **ships as a built-in capability**, not what can theoretically be assembled with extra tooling.
 
@@ -9,6 +9,8 @@ It is intentionally focused on what each option **ships as a built-in capability
 - **Choose SupaCloud** when you want to run **many isolated Supabase-style projects on your own servers** with a built-in control plane, web console, operator CLI, tenant routing, background task orchestration, and integrated frontend hosting.
 - **Choose Supabase Cloud** when you want the most complete **managed** Supabase experience, including hosted branching, managed backups/PITR, hosted logs explorer, and multi-region managed operations.
 - **Choose Supabase Self-Hosted** when you want the official Supabase stack on your own infrastructure and are willing to operate Docker/services directly. Supabase Self-Hosted gives you the core products, but not a multi-tenant control plane out of the box.
+
+Current scope exclusions are deliberate: organization/team governance, platform billing, Supabase Analytics/Logflare, and Analytics/Iceberg buckets. Project logs remain in scope, implemented independently with the embedded collector and VictoriaLogs.
 
 ## Positioning
 
@@ -43,6 +45,7 @@ Legend:
 | Git webhook deploy pipeline for hosted frontends | **Built-in** | External / manual | External / manual |
 | Built-in China-focused OAuth integrations (WeChat / Alipay / DingTalk) | **Built-in** | Partial via generic auth providers, no equivalent China-focused operator surface documented as built-in | Partial / manual |
 | Runtime log streaming in the self-host control plane | **Built-in** | **Built-in** in hosted dashboard/log explorer | External / manual |
+| Persistent project logs explorer | **Built-in** (embedded collector + VictoriaLogs; no Analytics/Logflare) | **Built-in** | Partial / Analytics-based |
 | Configurable log drains (forward to webhook / Datadog / Loki / Elasticsearch) | **Built-in** | **Built-in** | External / manual |
 | S3-compatible storage API with SigV4 (ListBuckets / PutObject / GetObject / DeleteObject / HeadObject) | **Built-in** (SigV4 + Bearer) | Partial (via extensions) | External / manual |
 | Scheduled Edge Functions (cron-based triggers) | **Built-in** | **Built-in** (pg_cron + pg_net) | Manual (pg_cron) |
@@ -50,6 +53,16 @@ Legend:
 | Built-in platform backups / restore surface | **Built-in** | **Built-in** | Operator responsibility |
 | Built-in PITR-style restore API surface | **Built-in** (platform-managed in control plane) | **Built-in** | Operator responsibility |
 | Managed branching / preview environments | **Built-in** (API + UI + Git auto-branch) | **Built-in** | Cloud only |
+| Passkey sign-in | **Built-in** (experimental, GoTrue v2.194+; not Lite) | **Built-in** (experimental) | Version/config dependent |
+| Custom OAuth/OIDC providers | **Built-in** | **Built-in** | Version/config dependent |
+| Storage Vector Buckets API + current `supabase-js` client | **Built-in** | **Built-in** (alpha) | External / manual |
+| RLS Tester | **Built-in** (experimental, bounded read-only role impersonation + policy trace) | **Built-in** (preview) | External / manual |
+| Temporary database access | **Built-in** (expiring isolated login roles + IPv4/IPv6 CIDR TCP gateway + branch inheritance) | **Built-in** (preview, PAT/JWT JIT) | External / manual |
+| Declarative schema / pg-delta CLI workflow | **Built-in** through official CLI adapter | **Built-in** (alpha) | CLI-dependent |
+| CDC Pipelines to BigQuery | **Built-in** (pinned official Supabase ETL runtime) | **Built-in** (public alpha) | External / manual |
+| Stripe and MongoDB Wrappers | **Built-in** (Vault-backed setup) | **Built-in** | Extension/manual SQL |
+| AWS PrivateLink project connectivity | **Not yet implemented** | **Built-in** (AWS projects) | External / manual |
+| Automated PostgreSQL major version upgrades | **Workflow built-in** (cluster-scoped preflight, full-backup gate, approval, provider executor, validation and rollback journal; executor must be configured per deployment) | **Built-in** | Operator responsibility |
 | Shared-infra multi-tenancy to improve self-host density | **Built-in** | N/A to end users | External / manual |
 | Official Docker self-host quickstart | **Built-in** (`docker/self-host`) | N/A | **Built-in** |
 
@@ -106,7 +119,7 @@ Supabase Cloud has the clear advantage whenever the requirement is:
 - fully managed Git-based branching with deeper CI integration
 - hosted SLA/operational ownership
 
-SupaCloud does not try to replace Supabase Cloud on those hosted platform dimensions. Its value is in **self-hosted control plane + multi-tenant operations**.
+SupaCloud targets the same project-level product functions, while hosted SLA, global infrastructure ownership, capacity guarantees, and vendor-operated incident response remain operational differences rather than API features.
 
 ### 2. Branching
 
@@ -118,7 +131,7 @@ Supabase Cloud provides branch environments and preview branches as a fully mana
 
 ### 3. Hosted observability ergonomics
 
-Supabase Cloud documents a Logs Explorer and product-specific logs surfaces in the hosted dashboard. SupaCloud provides logs and streaming in its own control plane, plus a persistent log-drains API for forwarding events to external sinks (webhook, Datadog, Grafana Loki, Elasticsearch). It is not, however, equivalent to Supabase Cloud
+Supabase Cloud documents a hosted Logs Explorer. SupaCloud provides the corresponding project-scoped query, search, time-range and service filtering surface using its embedded collector and VictoriaLogs, plus live journald streaming and log drains. It intentionally does not install or depend on Supabase Analytics/Logflare.
 
 ## Where Supabase Self-Hosted is still the right answer
 
@@ -157,13 +170,9 @@ In that model, adding your own project control plane, routing model, logs UI, te
 
 ## Important nuance
 
-This is **not** a claim that SupaCloud replaces every Supabase Cloud capability.
+The compatibility target covers Supabase Cloud's project products and project management workflows. Organization/team governance, billing, Analytics/Logflare, and Analytics/Iceberg buckets are explicitly out of the current implementation scope. Hosted SLA and globally managed infrastructure are service-delivery properties and are not represented as local feature parity.
 
-A more precise statement is:
-
-- **SupaCloud extends the self-hosted Supabase model**
-- it adds a **self-hosted multi-tenant control plane**
-- it also adds operator workflows that are usually externalized in the official self-hosted stack
+Known project-level gaps are tracked rather than treated as exclusions: AWS PrivateLink needs provider-side provisioning, and PostgreSQL major-upgrade execution still requires a deployment-specific provider executor; the control-plane workflow fails closed until that executor passes preflight.
 
 ## Source basis
 
@@ -180,6 +189,10 @@ A more precise statement is:
 - [Webhook deployment routes](../packages/management-api/src/routes/webhook.ts)
 - [Task routes](../packages/management-api/src/routes/tasks.ts)
 - [OAuth/OIDC Provider routes](../packages/management-api/src/routes/auth-oauth-server.ts)
+- [RLS Tester and database routes](../packages/management-api/src/routes/database.ts)
+- [Temporary database access routes](../packages/management-api/src/routes/database-jit.ts)
+- [Pipelines routes](../packages/management-api/src/routes/pipelines.ts)
+- [Storage Vector compatibility routes](../packages/management-api/src/routes/storage-compat.ts)
 
 ### Supabase official documentation
 

@@ -90,7 +90,7 @@ describe("SupAuth auth config boundary", () => {
     expect(response.status).toBe(401);
   });
 
-  test("does not advertise stored Passkey or WebAuthn configuration", async () => {
+  test("exposes stored Passkey configuration through the official Management API shape", async () => {
     config.authRuntimeOwnerRef = "";
     projectService.getProjectSettings = async () => ({
       auth: {
@@ -113,16 +113,9 @@ describe("SupAuth auth config boundary", () => {
     const rawResponse = await rawAuthRequest("/v1/projects/tenant-a/auth/config");
     const rawBody = await rawResponse.json();
     expect(rawResponse.status).toBe(200);
-    expect(rawBody.passkey).toBeUndefined();
-    expect(rawBody.passkey_enabled).toBeUndefined();
-    expect(rawBody.webauthn).toBeUndefined();
-    expect(rawBody.mfa_web_authn_enroll_enabled).toBeUndefined();
-    expect(rawBody.mfa_web_authn_verify_enabled).toBeUndefined();
-    expect(rawBody.webauthn_rp_display_name).toBeUndefined();
-    expect(rawBody.webauthn_rp_id).toBeUndefined();
-    expect(rawBody.webauthn_rp_origins).toBeUndefined();
-    expect(rawBody.MFA).toEqual({});
-    expect(rawBody.mfa).toEqual({ totp: { enroll_enabled: true } });
+    expect(rawBody.passkey_enabled).toBe(true);
+    expect(rawBody.webauthn_rp_display_name).toBe("Stored RP");
+    expect(rawBody.webauthn_rp_id).toBe("login.example.com");
 
     const studioResponse = await request("/v1/projects/tenant-a/config/auth");
     const studioBody = await studioResponse.json();
@@ -130,16 +123,62 @@ describe("SupAuth auth config boundary", () => {
     expect(studioBody).toMatchObject({
       mfa_web_authn_enroll_enabled: null,
       mfa_web_authn_verify_enabled: null,
-      passkey_enabled: false,
-      webauthn_rp_display_name: null,
-      webauthn_rp_id: null,
-      webauthn_rp_origins: null,
+      passkey_enabled: true,
+      webauthn_rp_display_name: "Stored RP",
+      webauthn_rp_id: "login.example.com",
+      webauthn_rp_origins: "https://login.example.com",
     });
-    expect(JSON.stringify(studioBody)).not.toContain("Stored RP");
-    expect(JSON.stringify(studioBody)).not.toContain("login.example.com");
   });
 
-  test("rejects every public Passkey and WebAuthn config shape", async () => {
+  test("accepts official experimental Passkey configuration on both auth config routes", async () => {
+    config.authRuntimeOwnerRef = "";
+    let settings: Record<string, unknown> = { auth: {} };
+    let updateCalls = 0;
+    let applyCalls = 0;
+    projectService.getProjectSettings = async () => settings as never;
+    projectService.updateProjectSettings = async (_ref, next) => {
+      updateCalls += 1;
+      settings = next as Record<string, unknown>;
+      return settings as never;
+    };
+    tenantRuntimeService.applyAuthConfig = async () => {
+      applyCalls += 1;
+      return {} as never;
+    };
+
+    const passkeyConfig = {
+      passkey_enabled: true,
+      passkey_max_passkeys_per_user: 8,
+      webauthn_rp_display_name: "Example App",
+      webauthn_rp_id: "example.com",
+      webauthn_rp_origins: ["https://example.com", "https://app.example.com"],
+    };
+
+    const configEndpoints = [
+      { send: request, path: "/v1/projects/tenant-a/config/auth" },
+      { send: rawAuthRequest, path: "/v1/projects/tenant-a/auth/config" },
+    ];
+    for (const endpoint of configEndpoints) {
+      const response = await endpoint.send(endpoint.path, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(passkeyConfig),
+      });
+      const body = await response.json();
+      expect(response.status).toBe(200);
+      expect(body).toMatchObject({
+        passkey_enabled: true,
+        webauthn_rp_id: "example.com",
+        webauthn_rp_origins: "https://example.com,https://app.example.com",
+      });
+    }
+    expect(updateCalls).toBe(2);
+    expect(applyCalls).toBe(2);
+    expect((settings.auth as Record<string, unknown>).webauthn_rp_origins)
+      .toBe("https://example.com,https://app.example.com");
+  });
+
+  test("rejects invalid Passkey relying-party settings before persistence", async () => {
     config.authRuntimeOwnerRef = "";
     let updateCalls = 0;
     projectService.getProjectSettings = async () => ({ auth: {} } as never);
@@ -149,33 +188,25 @@ describe("SupAuth auth config boundary", () => {
     };
     tenantRuntimeService.applyAuthConfig = async () => ({} as never);
 
-    const unavailableConfigs = [
-      { passkey: { enabled: true } },
-      { passkey_enabled: true },
-      { webauthn_rp_id: "login.example.com" },
-      { mfa_webauthn_enroll_enabled: true },
-      { mfa_web_authn_verify_enabled: true },
-      { mfa: { web_authn: { enroll_enabled: true } } },
-    ];
-
-    const configEndpoints = [
+    for (const endpoint of [
       { send: request, path: "/v1/projects/tenant-a/config/auth" },
       { send: rawAuthRequest, path: "/v1/projects/tenant-a/auth/config" },
-    ];
-    for (const authConfig of unavailableConfigs) {
-      for (const endpoint of configEndpoints) {
-        const response = await endpoint.send(endpoint.path, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(authConfig),
-        });
-        const body = await response.json();
-        expect(response.status).toBe(501);
-        expect(body).toMatchObject({
-          code: "CAPABILITY_UNAVAILABLE",
-          reason_code: "gotrue_passkey_ceremony_unavailable",
-        });
-      }
+    ]) {
+      const response = await endpoint.send(endpoint.path, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          passkey_enabled: true,
+          webauthn_rp_display_name: "Example App",
+          webauthn_rp_id: "example.com",
+          webauthn_rp_origins: "http://example.com",
+        }),
+      });
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        code: "INVALID_PASSKEY_CONFIG",
+        experimental: true,
+      });
     }
     expect(updateCalls).toBe(0);
   });

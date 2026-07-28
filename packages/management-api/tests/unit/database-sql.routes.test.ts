@@ -28,12 +28,38 @@ const requireProjectOrAdminAuth = mock(async () => undefined as undefined | {
   status: number;
   body: { error: string };
 });
+const rlsUnsafe = mock(async (query: string) => {
+  if (query.startsWith("EXPLAIN")) {
+    return [{ "QUERY PLAN": [{ Plan: { "Node Type": "Seq Scan", Schema: "public", "Relation Name": "todos" } }] }];
+  }
+  return Array.from({ length: 501 }, (_, index) => ({ id: index + 1 }));
+});
+const rlsConnection = Object.assign(
+  ((..._args: unknown[]) => Promise.resolve([])) as unknown as Record<string, unknown>,
+  { unsafe: rlsUnsafe, release: mock(() => undefined) },
+);
+const rlsDb = Object.assign(
+  ((strings: TemplateStringsArray) => {
+    const sql = strings.join(" ");
+    if (sql.includes("pg_policies")) {
+      return Promise.resolve([{ schemaname: "public", tablename: "todos", policyname: "owner", permissive: "PERMISSIVE", roles: ["authenticated"], cmd: "SELECT", qual: "(owner_id = auth.uid())", with_check: null }]);
+    }
+    if (sql.includes("pg_class")) {
+      return Promise.resolve([{ schemaname: "public", tablename: "todos", relrowsecurity: true, relforcerowsecurity: false }]);
+    }
+    return Promise.resolve([]);
+  }) as unknown as Record<string, unknown>,
+  { reserve: mock(async () => rlsConnection) },
+);
+const getProjectRoleDb = mock(() => rlsDb);
 
 const actualDb = await import("../../src/db");
 mock.module("../../src/db", () => ({
   ...actualDb,
   db: { ...actualDb.db, executeQuery },
   sql: managementDb,
+  getProjectDb: () => rlsDb,
+  getProjectRoleDb,
 }));
 mock.module("../../src/services", () => ({ projectService: { getProject } }));
 mock.module("../../src/middleware/auth", () => ({
@@ -72,6 +98,10 @@ describe("database SQL routes", () => {
     clearActiveSqlQueriesForTests();
     executeQuery.mockClear();
     managementDb.mockClear();
+    rlsUnsafe.mockClear();
+    rlsConnection.release.mockClear();
+    rlsDb.reserve.mockClear();
+    getProjectRoleDb.mockClear();
     getProject.mockClear();
     requireProjectOrAdminAuth.mockReset();
     requireProjectOrAdminAuth.mockResolvedValue(undefined);
@@ -230,5 +260,47 @@ describe("database SQL routes", () => {
     expect(requireProjectOrAdminAuth).not.toHaveBeenCalled();
     expect(getProject).not.toHaveBeenCalled();
     expect(executeQuery).not.toHaveBeenCalled();
+  });
+
+  test("runs RLS Tester with bounded results and transaction safety settings", async () => {
+    const response = await request("project-a", "/rls-test", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        query: "select * from public.todos",
+        role: "authenticated",
+        user_id: "00000000-0000-4000-8000-000000000001",
+        email: "user@example.com",
+      }),
+    });
+    const body = await response.json() as Record<string, unknown>;
+
+    expect(response.status).toBe(200);
+    expect((body.rows as unknown[]).length).toBe(500);
+    expect(body.truncated).toBe(true);
+    expect(body.relationSecurity).toEqual([{ schema: "public", table: "todos", rlsEnabled: true, rlsForced: false }]);
+    expect(getProjectRoleDb).toHaveBeenCalledWith("shared_tenant_db", "authenticator_project-a", "test-password");
+    expect(rlsUnsafe.mock.calls.map(([query]) => query)).toEqual([
+      "BEGIN TRANSACTION READ ONLY",
+      "SET LOCAL row_security = on",
+      "SET LOCAL statement_timeout = '10s'",
+      "SET LOCAL lock_timeout = '1s'",
+      "SET LOCAL idle_in_transaction_session_timeout = '15s'",
+      "SET LOCAL ROLE authenticated",
+      "EXPLAIN (FORMAT JSON, VERBOSE TRUE) select * from public.todos",
+      'SELECT * FROM (\nselect * from public.todos\n) AS "__supacloud_rls_test" LIMIT 501',
+      "ROLLBACK",
+    ]);
+    expect(rlsConnection.release).toHaveBeenCalledTimes(1);
+  });
+
+  test("rejects unsafe RLS SQL before opening a tenant connection", async () => {
+    const response = await request("project-a", "/rls-test", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ query: "select pg_sleep(30)", role: "anon" }),
+    });
+    expect(response.status).toBe(400);
+    expect(rlsDb.reserve).not.toHaveBeenCalled();
   });
 });

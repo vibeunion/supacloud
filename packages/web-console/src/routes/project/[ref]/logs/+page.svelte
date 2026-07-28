@@ -3,12 +3,14 @@
   import { page } from "$app/state";
   import { apiClient } from "$lib/api";
   import { t } from "svelte-i18n";
-  import { AlertTriangle, Loader2, RefreshCw, ScrollText } from "lucide-svelte";
+  import { AlertTriangle, Loader2, RefreshCw, Search, ScrollText } from "lucide-svelte";
 
   type LogEntry = {
     id?: string;
     timestamp?: string | number;
     event_message?: string;
+    service?: string;
+    severity?: string;
     metadata?: {
       service?: string;
       items?: Array<{ source?: string; severity?: string }>;
@@ -19,6 +21,8 @@
 
   let logs = $state<LogEntry[]>([]);
   let selectedService = $state("all");
+  let searchText = $state("");
+  let timeRange = $state("1h");
   let isLoading = $state(false);
   let error = $state<string | null>(null);
 
@@ -31,12 +35,22 @@
     { value: "database", label: "Database" }
   ];
 
+  const timeRanges = [
+    { value: "15m", label: "15 minutes", milliseconds: 15 * 60 * 1000 },
+    { value: "1h", label: "1 hour", milliseconds: 60 * 60 * 1000 },
+    { value: "24h", label: "24 hours", milliseconds: 24 * 60 * 60 * 1000 },
+    { value: "7d", label: "7 days", milliseconds: 7 * 24 * 60 * 60 * 1000 },
+  ];
+
   async function fetchLogs() {
     if (!projectRef) return;
     isLoading = true;
     error = null;
     try {
       const params = new URLSearchParams({ limit: "200", service: selectedService });
+      const range = timeRanges.find((item) => item.value === timeRange);
+      if (range) params.set("start", new Date(Date.now() - range.milliseconds).toISOString());
+      if (searchText.trim()) params.set("search", searchText.trim());
       const res = await apiClient(`/v1/projects/${projectRef}/logs?${params.toString()}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || "Failed to load logs");
@@ -55,11 +69,11 @@
   }
 
   function getService(entry: LogEntry): string {
-    return entry.metadata?.service || entry.metadata?.items?.[0]?.source || "system";
+    return entry.service || entry.metadata?.service || entry.metadata?.items?.[0]?.source || "system";
   }
 
   function getSeverity(entry: LogEntry): string {
-    return entry.metadata?.items?.[0]?.severity || "info";
+    return entry.severity || entry.metadata?.items?.[0]?.severity || "info";
   }
 
   onMount(() => {
@@ -76,7 +90,16 @@
       </h1>
       <p class="text-sm text-muted-foreground mt-1">{$t("ProjectLogs.subtitle")}</p>
     </div>
-    <div class="flex items-center gap-2">
+    <div class="flex flex-wrap items-center gap-2">
+      <label class="relative">
+        <Search size={13} class="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+        <input
+          bind:value={searchText}
+          onkeydown={(event) => event.key === "Enter" && void fetchLogs()}
+          placeholder="Search persisted logs"
+          class="h-9 w-56 rounded-lg border bg-background pl-8 pr-3 text-xs"
+        />
+      </label>
       <select
         bind:value={selectedService}
         onchange={() => void fetchLogs()}
@@ -84,6 +107,11 @@
       >
         {#each services as service (service.value)}
           <option value={service.value}>{service.label}</option>
+        {/each}
+      </select>
+      <select bind:value={timeRange} onchange={() => void fetchLogs()} class="h-9 rounded-lg border bg-background px-3 text-xs">
+        {#each timeRanges as range (range.value)}
+          <option value={range.value}>{range.label}</option>
         {/each}
       </select>
       <button

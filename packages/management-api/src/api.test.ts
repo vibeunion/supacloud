@@ -38,8 +38,6 @@ describe("Management API Integration Tests", () => {
             expect(response.status).toBe(200);
             const openApi = (await response.text()).toLowerCase();
             for (const forbiddenCapability of [
-                "passkey",
-                "webauthn",
                 "personal access token",
                 "subject token",
                 "token exchange",

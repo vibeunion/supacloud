@@ -28,10 +28,10 @@ make_gotrue_archive() {
 }
 
 old_binary="${tmp_dir}/gotrue"
-good_archive="${tmp_dir}/auth-v2.193.1.tar.xz"
-wrong_version_archive="${tmp_dir}/auth-v2.194.0.tar.xz"
-make_gotrue_archive v2.193.1 "$good_archive"
-make_gotrue_archive v2.194.0 "$wrong_version_archive"
+good_archive="${tmp_dir}/auth-v2.194.0.tar.xz"
+wrong_version_archive="${tmp_dir}/auth-v2.194.1.tar.xz"
+make_gotrue_archive v2.194.0 "$good_archive"
+make_gotrue_archive v2.194.1 "$wrong_version_archive"
 good_checksum=$(sha256sum "$good_archive" | awk '{print $1}')
 
 tenant_dir="${tmp_dir}/tenants"
@@ -75,7 +75,7 @@ systemctl() {
 curl() {
     local installed
     installed=$("$old_binary" version)
-    if [[ "${FORCE_NEW_HEALTH_MISMATCH:-false}" == true && "$installed" == v2.193.1 ]]; then
+    if [[ "${FORCE_NEW_HEALTH_MISMATCH:-false}" == true && "$installed" == v2.194.0 ]]; then
         printf '{"version":"v9.9.9"}\n'
     else
         printf '{"version":"%s"}\n' "$installed"
@@ -118,14 +118,14 @@ export SUPACLOUD_GOTRUE_UNIT_PATH="$unit_path"
 export CADDY_CONFIG_PATH="$caddy_path"
 export SUPACLOUD_GOTRUE_HEALTH_ATTEMPTS=1
 export SUPACLOUD_GOTRUE_HEALTH_DELAY_SECONDS=0
-export GOTRUE_VERSION=v2.193.1
+export GOTRUE_VERSION=v2.194.0
 export GOTRUE_SHA256="$good_checksum"
 export POSTGRES_PASSWORD=test-only-password
 
 # An existing v2.192 runtime is backed up, atomically upgraded, restarted, and read back through /health.
 write_binary v2.192.0
 supacloud_upgrade_gotrue_binary "$old_binary"
-[[ "$("$old_binary" version)" == v2.193.1 ]]
+[[ "$("$old_binary" version)" == v2.194.0 ]]
 grep -Fq 'stop supacloud-gotrue@tenant1.service' "$systemctl_log"
 grep -Fq 'start supacloud-gotrue@tenant1.service' "$systemctl_log"
 [[ -f "${SUPACLOUD_GOTRUE_LAST_BACKUP_DIR}/auth-tenantdb.dump" ]]

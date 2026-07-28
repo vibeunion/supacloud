@@ -1,9 +1,10 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
+  import { resolve } from "$app/paths";
 
   import { t } from "svelte-i18n";
   import { page } from "$app/state";
-  import { Copy, Database, Download, Eye, Folder, Loader2, Plus, Save, Search, Trash2, X } from "lucide-svelte";
+  import { BrainCircuit, Copy, Database, Download, Eye, Folder, Loader2, Plus, Save, Search, Trash2, X } from "lucide-svelte";
   import { toast } from "svelte-sonner";
   import { createMutation } from "@tanstack/svelte-query";
   import { useList, type BaseRecord } from "@svadmin/core";
@@ -238,9 +239,12 @@
     <aside class="w-64 border-r bg-muted/20 flex flex-col">
       <div class="p-4 border-b flex items-center justify-between bg-muted/30">
         <h2 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{$t("Storage.buckets")}</h2>
-        <button onclick={() => showCreateBucket = !showCreateBucket} class="p-1 hover:bg-muted rounded transition-colors" title={$t("Storage.new_bucket")}>
-          <Plus size={16} class="text-brand" />
-        </button>
+        <div class="flex items-center gap-1">
+          <a href={resolve(`/project/${projectRef}/storage/vectors`)} class="p-1 hover:bg-muted rounded transition-colors" title="Vector Buckets"><BrainCircuit size={16} class="text-brand" /></a>
+          <button onclick={() => showCreateBucket = !showCreateBucket} class="p-1 hover:bg-muted rounded transition-colors" title={$t("Storage.new_bucket")}>
+            <Plus size={16} class="text-brand" />
+          </button>
+        </div>
       </div>
 
       {#if showCreateBucket}
@@ -278,7 +282,7 @@
             <span class="text-[10px] uppercase tracking-tighter">{$t("Storage.scanning")}</span>
           </div>
         {:else}
-          {#each buckets as bucket}
+          {#each buckets as bucket (bucket.id || bucket.name)}
             <div class="group flex items-center rounded-md transition-all
               {selectedBucketId === String(bucket.id || bucket.name) ? 'bg-brand/10 text-brand font-medium' : 'hover:bg-muted/50 text-foreground'}">
               <button
@@ -370,7 +374,7 @@
                 </tr>
               </thead>
               <tbody class="divide-y divide-border/50">
-                {#each visibleFiles as file}
+              {#each visibleFiles as file (file.id || file.name)}
                   <tr class="hover:bg-muted/10 group transition-colors">
                     <td class="px-6 py-4">
                       <div class="flex items-center gap-3">

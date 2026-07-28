@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import { chmod, mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createClient, type RealtimeChannel, type SupabaseClient } from '@supabase/supabase-js'
@@ -123,14 +123,15 @@ describe('SupaCloud Lite supabase-js compatibility', () => {
     if (rootDir) await rm(rootDir, { recursive: true, force: true })
   })
 
-  test('exposes a healthy single-project endpoint and protected secrets file', async () => {
+  test('exposes a healthy single-project endpoint and secrets file', async () => {
     const response = await fetch(`${project.url}/health`)
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({ name: 'supacloud-lite', project_ref: 'local', status: 'healthy' })
 
     const secretsPath = join(rootDir, '.supacloud-lite', 'secrets.json')
-    await chmod(secretsPath, 0o600)
-    expect((await stat(secretsPath)).mode & 0o777).toBe(0o600)
+    const secretsFile = await stat(secretsPath)
+    expect(secretsFile.isFile()).toBe(true)
+    if (process.platform !== 'win32') expect(secretsFile.mode & 0o777).toBe(0o600)
   })
 
   test('supports Auth sign-in with the official SDK', async () => {

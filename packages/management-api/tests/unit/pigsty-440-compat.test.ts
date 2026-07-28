@@ -10,12 +10,13 @@ function readRepoFile(path: string): string {
 }
 
 describe("Pigsty 4.4 compatibility upgrade", () => {
-  test("uses a dedicated Analytics database and schema", () => {
+  test("does not configure legacy Analytics during a new installation", () => {
     const installer = readRepoFile("install.sh");
 
-    expect(installer).toContain('LOGFLARE_DB="${LOGFLARE_DB:-_supabase}"');
-    expect(installer).toContain('LOGFLARE_SCHEMA="${LOGFLARE_SCHEMA:-_analytics}"');
-    expect(installer).toContain('/${LOGFLARE_DB}');
+    expect(installer).not.toContain("configure_analytics");
+    expect(installer).not.toContain("ENABLE_ANALYTICS");
+    expect(installer).toContain("legacy stack installs Supabase Analytics (Logflare)");
+    expect(installer).toContain("upgrade_pigsty_4_4_compat.sh\" --apply --skip-analytics");
   });
 
   test("ships an idempotent compatibility upgrade entrypoint", () => {

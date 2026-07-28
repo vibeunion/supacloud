@@ -63,21 +63,21 @@ describe("project storage config routes", () => {
     updateProjectSettings.mockImplementation(async (_ref, settings) => settings as never);
   });
 
-  test("GET marks vector and Iceberg storage surfaces as unavailable capabilities", async () => {
+  test("GET advertises vectors while keeping Iceberg unavailable", async () => {
     const res = await request("/v1/projects/proj_1/config/storage");
     expect(res.status).toBe(200);
 
     const body = await res.json();
     expect(body.features.icebergCatalog).toMatchObject({ enabled: false, maxTables: 99 });
-    expect(body.features.vectorBuckets).toMatchObject({ enabled: false, maxBuckets: 12 });
+    expect(body.features.vectorBuckets).toMatchObject({ enabled: true, maxBuckets: 100, maxIndexes: 10 });
     expect(body.capabilities).toMatchObject({
       iceberg_catalog: false,
       storage_iceberg: false,
-      storage_vectors: false,
+      storage_vectors: true,
     });
   });
 
-  test("PATCH response uses the same unavailable capability normalization", async () => {
+  test("PATCH response preserves the implemented vector capability", async () => {
     const res = await request("/v1/projects/proj_1/config/storage", {
       method: "PATCH",
       body: JSON.stringify({
@@ -92,8 +92,8 @@ describe("project storage config routes", () => {
     expect(res.status).toBe(200);
 
     const body = await res.json();
-    expect(body.features.vectorBuckets).toMatchObject({ enabled: false, maxIndexes: 3 });
-    expect(body.capabilities.storage_vectors).toBe(false);
+    expect(body.features.vectorBuckets).toMatchObject({ enabled: true, maxBuckets: 100, maxIndexes: 10 });
+    expect(body.capabilities.storage_vectors).toBe(true);
     expect(requireProjectOrAdminAuth).toHaveBeenCalledWith(expect.any(Request), "proj_1");
   });
 });

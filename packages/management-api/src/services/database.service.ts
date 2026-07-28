@@ -399,7 +399,10 @@ export class DatabaseService {
 
       // Graciously attempt to create Supabase-specific extensions
       // Core Supabase extensions
-      const coreExts = ["pgjwt", "pg_net", "pgsodium", "vault", "pg_graphql"];
+      // pg_graphql intentionally stays opt-in through ExtensionService. Enabling
+      // it by default exposes an additional API surface that Supabase disabled
+      // for new projects in 2026.
+      const coreExts = ["pg_net", "pgsodium", "vault"];
       // Ecosystem extensions (P1-1 ~ P1-4): available if host PostgreSQL has the packages installed
       const ecosystemExts = [
         "pg_cron",

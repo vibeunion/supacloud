@@ -320,7 +320,7 @@ supacloud_consume_protected_install_input() (
         S3_ENDPOINT S3_PROTOCOL S3_REGION S3_BUCKET S3_ACCESS_KEY S3_SECRET_KEY
         S3_FORCE_PATH_STYLE EXTERNAL_S3_ENDPOINT EXTERNAL_S3_REGION EXTERNAL_S3_BUCKET
         EXTERNAL_S3_ACCESS_KEY EXTERNAL_S3_SECRET_KEY IMAGINARY_IMAGE EDGE_RUNTIME
-        ENABLE_ANALYTICS ANALYTICS_BACKEND LOGFLARE_DB LOGFLARE_SCHEMA LOGFLARE_ERL_FLAGS
+        SUPACLOUD_LOGS_ENABLED VICTORIALOGS_VERSION VICTORIALOGS_DATA_DIR VICTORIALOGS_RETENTION
     )
 
     [[ -f "$source_file" && ! -L "$source_file" ]] || {
@@ -682,10 +682,10 @@ supacloud_write_install_input_config() (
         printf '%s=%q\n' EXTERNAL_S3_ACCESS_KEY "${EXTERNAL_S3_ACCESS_KEY:-}"
         printf '%s=%q\n' EXTERNAL_S3_SECRET_KEY "${EXTERNAL_S3_SECRET_KEY:-}"
         printf '%s=%q\n' EDGE_RUNTIME "${EDGE_RUNTIME:-bun}"
-        printf '%s=%q\n' ENABLE_ANALYTICS "${ENABLE_ANALYTICS:-true}"
-        printf '%s=%q\n' ANALYTICS_BACKEND "${ANALYTICS_BACKEND:-postgres}"
-        printf '%s=%q\n' LOGFLARE_DB "${LOGFLARE_DB:-_supabase}"
-        printf '%s=%q\n' LOGFLARE_SCHEMA "${LOGFLARE_SCHEMA:-_analytics}"
+        printf '%s=%q\n' SUPACLOUD_LOGS_ENABLED "${SUPACLOUD_LOGS_ENABLED:-true}"
+        printf '%s=%q\n' VICTORIALOGS_VERSION "${VICTORIALOGS_VERSION:-v1.52.0}"
+        printf '%s=%q\n' VICTORIALOGS_DATA_DIR "${VICTORIALOGS_DATA_DIR:-/var/lib/supacloud/victorialogs}"
+        printf '%s=%q\n' VICTORIALOGS_RETENTION "${VICTORIALOGS_RETENTION:-7d}"
     } > "$desired_file"
     supacloud_atomic_merge_env "$target_file" "$desired_file"
 )

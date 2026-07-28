@@ -22,10 +22,10 @@ SUPACLOUD_META_DB="${SUPACLOUD_META_DB:-supacloud_meta}"
 POSTGREST_RTS="${POSTGREST_RTS:--N1 -M256m -I0.5 -A4m}"
 POSTGREST_MEMORY_MAX="${POSTGREST_MEMORY_MAX:-384M}"
 POSTGREST_CPU_WEIGHT="${POSTGREST_CPU_WEIGHT:-40}"
-POSTGREST_DEFAULT_VERSION="v14.15"
-POSTGREST_X86_64_SHA256="4e78c7f065a6c36f350c7177f5fa9bb77ea380c67b8bf40f2fc9130d857678dc"
-POSTGREST_ARM64_SHA256="1eb007298c1536ba865e741da7eece6fba6db3da904c599abd15d9c3debe6c2f"
-GOTRUE_DEFAULT_VERSION="v2.193.1"
+POSTGREST_DEFAULT_VERSION="v14.16"
+POSTGREST_X86_64_SHA256="36b8ae140f188cfcd6003494805bf35a41e895f88c12be9183d60f91782145c6"
+POSTGREST_ARM64_SHA256="086f58dfa090ef0ed7e30ca5c0b49f937a9586d77e5ce372f6a34f249370e37d"
+GOTRUE_DEFAULT_VERSION="v2.194.0"
 
 gotrue_binary_version() {
     local binary_path="$1"
@@ -317,6 +317,16 @@ assert_safe_config_value() {
     fi
 }
 
+ensure_auth_api_path() {
+    local value="${1-}"
+    assert_safe_config_value "GoTrue external API URL" "$value" || return 1
+    value="${value%/}"
+    case "$value" in
+        */auth/v1) printf '%s' "$value" ;;
+        *) printf '%s/auth/v1' "$value" ;;
+    esac
+}
+
 uri_percent_encode() {
     local value="${1-}"
     assert_safe_config_value "URI component" "$value" || return 1
@@ -470,6 +480,30 @@ sha256_file() {
         echo "ERROR: sha256sum or shasum is required" >&2
         return 1
     fi
+}
+
+render_gotrue_database_encryption_env() {
+    local encryption_secret="$1"
+    if [ "${#encryption_secret}" -lt 32 ]; then
+        echo "ERROR: GoTrue database encryption secret must contain at least 32 characters" >&2
+        return 1
+    fi
+    local encryption_key key_digest key_id
+    encryption_key=$(
+        { printf 'supacloud:gotrue:db-encryption:v1\0'; printf '%s' "$encryption_secret"; } \
+            | openssl dgst -sha256 -binary \
+            | openssl base64 -A \
+            | tr '+/' '-_' \
+            | tr -d '='
+    ) || return 1
+    key_digest=$(printf '%s' "$encryption_key" | openssl dgst -sha256 | awk '{print $NF}') || return 1
+    key_id="supacloud-${key_digest:0:16}"
+    cat <<EOF
+GOTRUE_SECURITY_DATABASE_ENCRYPTION_ENCRYPT="true"
+GOTRUE_SECURITY_DATABASE_ENCRYPTION_ENCRYPTION_KEY_ID=$(systemd_env_quote "$key_id")
+GOTRUE_SECURITY_DATABASE_ENCRYPTION_ENCRYPTION_KEY=$(systemd_env_quote "$encryption_key")
+GOTRUE_SECURITY_DATABASE_ENCRYPTION_DECRYPTION_KEYS=$(systemd_env_quote "${key_id}:${encryption_key}")
+EOF
 }
 
 download_release_asset() {
@@ -637,7 +671,7 @@ ensure_postgrest() {
         *) echo "ERROR: Unsupported architecture: $machine" >&2; exit 1 ;;
     esac
 
-    local version="${POSTGREST_VERSION:-v14.15}"
+    local version="${POSTGREST_VERSION:-v14.16}"
     local expected_sha256
     assert_safe_config_value "POSTGREST_VERSION" "$version" || exit 1
     case "$version" in *[!A-Za-z0-9._-]*|"") echo "ERROR: Invalid POSTGREST_VERSION" >&2; exit 1 ;; esac
@@ -750,6 +784,8 @@ generate_tenant_config() {
         echo "WARNING: API_EXTERNAL_URL not set. Set GOTRUE_API_EXTERNAL_URL env var or add api_url to supacloud_meta.projects" >&2
     fi
     assert_safe_config_value "GoTrue external URL" "$api_external_url" || return 1
+    local auth_api_external_url
+    auth_api_external_url=$(ensure_auth_api_path "$api_external_url") || return 1
 
     local authenticator_user="authenticator_${ref}"
     local encoded_authenticator_user encoded_db_password encoded_admin_user encoded_admin_password encoded_db_name
@@ -815,6 +851,8 @@ EOF
     assert_safe_config_value "GoTrue SMTP password" "$smtp_pass" || return 1
     local provider_linking_env
     provider_linking_env=$(render_gotrue_provider_linking_env) || return 1
+    local gotrue_encryption_env
+    gotrue_encryption_env=$(render_gotrue_database_encryption_env "${SECRETS_ENCRYPTION_KEY:-$jwt_secret}") || return 1
     
     local gotrue_config_dir="${TENANT_CONFIG_DIR}/${ref}_gotrue.d"
     mkdir -p "$gotrue_config_dir" || return 1
@@ -828,7 +866,7 @@ EOF
 GOTRUE_API_HOST="0.0.0.0"
 GOTRUE_API_PORT=${gotrue_port}
 # Required: external URL used for email verification links and OAuth redirects
-API_EXTERNAL_URL=$(systemd_env_quote "$api_external_url")
+API_EXTERNAL_URL=$(systemd_env_quote "$auth_api_external_url")
 # Bug Fix: SITE_URL should be the actually accessible URL
 GOTRUE_SITE_URL=$(systemd_env_quote "$api_external_url")
 GOTRUE_DB_DRIVER="postgres"
@@ -849,6 +887,11 @@ GOTRUE_PASSWORD_MIN_LENGTH=8
 GOTRUE_SECURITY_REFRESH_TOKEN_ROTATION_ENABLED="true"
 GOTRUE_SECURITY_REFRESH_TOKEN_REUSE_INTERVAL=10
 GOTRUE_SESSIONS_SINGLE_PER_USER="false"
+GOTRUE_CUSTOM_OAUTH_ENABLED="true"
+GOTRUE_CUSTOM_OAUTH_MAX_PROVIDERS=0
+GOTRUE_CUSTOM_OAUTH_EXTERNAL_URL=$(systemd_env_quote "$auth_api_external_url")
+${gotrue_encryption_env}
+GOTRUE_PASSKEY_ENABLED="false"
 ${provider_linking_env}
 EOF
 )

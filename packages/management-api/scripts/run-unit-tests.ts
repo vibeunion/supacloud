@@ -25,6 +25,12 @@ export function usesProcessGlobalModuleMock(source: string): boolean {
   return /\bmock\.module\s*\(/.test(source);
 }
 
+export function requiresProcessIsolation(source: string): boolean {
+  return usesProcessGlobalModuleMock(source)
+    || source.includes("@supacloud-test-isolate")
+    || /spyOn\(\s*(?:Bun|process|globalThis)\s*,/.test(source);
+}
+
 async function runTestBatch(files: string[], label: string): Promise<void> {
   if (files.length === 0) return;
 
@@ -46,7 +52,7 @@ export async function runUnitTests(): Promise<void> {
   const unitFiles = await listTestFiles(unitRoot);
   const classified = await Promise.all(unitFiles.map(async (file) => ({
     file,
-    isolated: usesProcessGlobalModuleMock(await readFile(file, "utf8")),
+    isolated: requiresProcessIsolation(await readFile(file, "utf8")),
   })));
   const sharedFiles = classified.filter((entry) => !entry.isolated).map((entry) => entry.file);
   const isolatedFiles = classified.filter((entry) => entry.isolated).map((entry) => entry.file);

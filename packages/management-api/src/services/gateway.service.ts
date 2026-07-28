@@ -219,6 +219,7 @@ const CADDY_PROJECT_ROUTE_KINDS = [
     "opaque-auth-domain",
     "opaque-auth",
     "auth-admin-user-delete",
+    "rest-openapi",
     "rest",
     "graphql",
     "auth-domain-auth",
@@ -1161,6 +1162,18 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 ...this.hostsForProjectRoutes(projectRef),
             ]);
 
+            const restOpenApiRoute = this.makeRoute({
+                id: caddyRouteId(projectRef, "rest-openapi"),
+                hosts,
+                path: ["/rest/v1", "/rest/v1/"],
+                methods: ["GET", "HEAD"],
+                upstream: `${hostIp}:${config.port}`,
+                projectRef,
+                corsOrigins,
+                readTimeout: config.restProxyTimeoutMs,
+            });
+            restOpenApiRoute.__supacloud_priority = 200;
+
             const opaqueRoutes = [
                 this.makeOpaqueApiKeyProxyRoute({
                     id: caddyRouteId(projectRef, "opaque-rest"),
@@ -1203,6 +1216,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
 
             const routes = [
                 adminUserDeleteRoute,
+                restOpenApiRoute,
                 ...opaqueRoutes,
                 this.makeRoute({ id: caddyRouteId(projectRef, "rest"), hosts, path: "/rest/v1*", upstream: `${hostIp}:${pgrstPort}`, projectRef, stripPrefix: "/rest/v1", corsOrigins }),
                 this.makeRoute({ id: caddyRouteId(projectRef, "graphql"), hosts, path: "/graphql/v1*", upstream: `${hostIp}:${pgrstPort}`, projectRef, rewriteUri: "/rpc/graphql", headers: ["Content-Profile:graphql_public", "Accept-Profile:graphql_public"], corsOrigins }),

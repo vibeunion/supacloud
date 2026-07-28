@@ -165,8 +165,8 @@ describe("official Supabase CLI adapter", () => {
         })).toEqual(["/opt/bin/supabase"]);
 
         expect(resolveOfficialSupabaseCommand("/workspace/project", {
-            SUPABASE_CLI_VERSION: "2.109.1",
-        })).toEqual([process.execPath, "x", "supabase@2.109.1"]);
+            SUPABASE_CLI_VERSION: "2.110.0",
+        })).toEqual([process.execPath, "x", "supabase@2.110.0"]);
 
         expect(() => resolveOfficialSupabaseCommand("/workspace/project", {
             SUPABASE_CLI_VERSION: "latest; echo unsafe",

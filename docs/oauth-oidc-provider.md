@@ -89,11 +89,16 @@ The GoTrue host must have AWS credentials that can call `kms:Sign` for the confi
 
 ## SAML Rotation
 
-Passkey and WebAuthn configuration is intentionally absent from the public
-management contract until its stock GoTrue ceremony has complete compatibility
-evidence. The versioned control-plane migration removes historical Passkey and
-WebAuthn settings while preserving TOTP and phone MFA; the API rejects attempts
-to recreate those settings with `CAPABILITY_UNAVAILABLE`.
+Passkey/WebAuthn configuration is available as an experimental GoTrue v2.194+
+capability. The Management API follows Supabase's flat contract:
+`passkey_enabled`, `webauthn_rp_display_name`, `webauthn_rp_id`, and the
+comma-separated string `webauthn_rp_origins`. The control plane validates the
+RP ID and origins before persisting, and checks the installed GoTrue version
+before restarting it. Applications must use
+a compatible Supabase SDK and explicitly opt in with
+`auth.experimental.passkey = true`. This capability applies to the GoTrue-based
+main/self-hosted runtime; SupaCloud Lite has a separate Tinbase/PGlite auth
+runtime and does not inherit it automatically.
 
 SAML SP key rotation uses GoTrue's dual-key window:
 

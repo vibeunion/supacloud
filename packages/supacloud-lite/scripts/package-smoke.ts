@@ -1,6 +1,6 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import packageJson from '../package.json' with { type: 'json' }
 
 const packageDir = resolve(import.meta.dir, '..')
@@ -8,7 +8,7 @@ const packDir = await mkdtemp(join(tmpdir(), 'supacloud-lite-pack-'))
 const consumerDir = await mkdtemp(join(tmpdir(), 'supacloud-lite-consumer-'))
 
 try {
-  const packOutput = await run(['npm', 'pack', '--json', '--pack-destination', packDir], packageDir)
+  const packOutput = await run(npmPackCommand(packDir), packageDir)
   const jsonStart = packOutput.lastIndexOf('[\n  {')
   if (jsonStart === -1) throw new Error(`npm pack did not emit JSON:\n${packOutput}`)
   const packed = JSON.parse(packOutput.slice(jsonStart)) as {
@@ -60,6 +60,16 @@ console.log('package-smoke-ok')
     rm(packDir, { recursive: true, force: true }),
     rm(consumerDir, { recursive: true, force: true }),
   ])
+}
+
+function npmPackCommand(packDir: string): string[] {
+  const args = ['pack', '--json', '--pack-destination', packDir]
+  if (process.platform !== 'win32') return ['npm', ...args]
+
+  const node = Bun.which('node')
+  const npm = Bun.which('npm')
+  if (!node || !npm) throw new Error('Windows package smoke requires node and npm on PATH')
+  return [node, join(dirname(npm), 'node_modules', 'npm', 'bin', 'npm-cli.js'), ...args]
 }
 
 async function run(command: string[], cwd: string): Promise<string> {

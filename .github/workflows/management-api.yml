@@ -217,6 +217,37 @@ jobs:
           output-file: supacloud-sbom.cdx.json
           upload-artifact: true
 
+  supacloud-lite-windows:
+    name: SupaCloud Lite (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Show runtime versions
+        run: |
+          node --version
+          bun --version
+
+      - name: Check SupaCloud Lite on Windows
+        working-directory: packages/supacloud-lite
+        run: |
+          bun install --frozen-lockfile
+          bun run check
+          bun audit --audit-level high
+
   docker-and-scripts-checks:
     name: Docker & Scripts Checks
     runs-on: ubuntu-latest
@@ -394,7 +425,7 @@ jobs:
           --health-timeout 5s
           --health-retries 5
       postgrest:
-        image: postgrest/postgrest:v14.15
+        image: postgrest/postgrest:v14.16
         ports:
           - 3000:3000
         env:
@@ -403,7 +434,7 @@ jobs:
           PGRST_DB_ANON_ROLE: anon
           PGRST_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
       gotrue:
-        image: supabase/gotrue:v2.193.1
+        image: supabase/gotrue:v2.194.0
         ports:
           - 9999:9999
         env:
@@ -426,7 +457,7 @@ jobs:
           API_EXTERNAL_URL: http://127.0.0.1:9090
           GOTRUE_OPERATOR_TOKEN: super-secret-jwt-token-with-at-least-32-characters-long
       realtime:
-        image: public.ecr.aws/supabase/realtime:v2.116.1
+        image: public.ecr.aws/supabase/realtime:v2.121.0
         ports:
           - 4000:4000
         env:
@@ -528,8 +559,8 @@ jobs:
           done
           if [ "${realtime_ready}" != "true" ]; then
             echo "::error title=Realtime service not ready::Realtime did not become reachable on :4000"
-            docker ps -a --filter "ancestor=public.ecr.aws/supabase/realtime:v2.116.1" || true
-            realtime_container_id="$(docker ps -a -q --filter "ancestor=public.ecr.aws/supabase/realtime:v2.116.1" | head -n1)"
+            docker ps -a --filter "ancestor=public.ecr.aws/supabase/realtime:v2.121.0" || true
+            realtime_container_id="$(docker ps -a -q --filter "ancestor=public.ecr.aws/supabase/realtime:v2.121.0" | head -n1)"
             if [ -n "${realtime_container_id}" ]; then
               echo "--- Realtime container status ---"
               docker inspect --format='{{.State.Status}} exit={{.State.ExitCode}} err={{.State.Error}} oom={{.State.OOMKilled}} restart={{.RestartCount}}' "${realtime_container_id}" || true
@@ -578,8 +609,8 @@ jobs:
       - name: Restart flaky services
         run: |
           echo "Restarting Auth and Realtime Containers..."
-          docker start $(docker ps -a -q --filter "ancestor=supabase/gotrue:v2.193.1") || true
-          docker start $(docker ps -a -q --filter "ancestor=public.ecr.aws/supabase/realtime:v2.116.1") || true
+          docker start $(docker ps -a -q --filter "ancestor=supabase/gotrue:v2.194.0") || true
+          docker start $(docker ps -a -q --filter "ancestor=public.ecr.aws/supabase/realtime:v2.121.0") || true
           sleep 4
 
       - name: Launch API & Execute Full Defenses

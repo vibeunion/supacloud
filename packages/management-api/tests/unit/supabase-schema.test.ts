@@ -416,6 +416,16 @@ describe("supabase bootstrap schema", () => {
     expect(schema).toContain("Tenants must grant anon/authenticated/service_role privileges explicitly in migrations.");
   });
 
+  test("pg_graphql is opt-in and introspection is not enabled by bootstrap", () => {
+    const databaseService = readRepoFile("src/services/database.service.ts");
+    const bootstrap = readRepoFile("../../docker/self-host/postgres/initdb/01-bootstrap-extensions.sql");
+    const schema = readRepoFile("src/db/schemas/supabase.sql");
+
+    expect(databaseService).not.toMatch(/coreExts\s*=\s*\[[^\]]*pg_graphql/s);
+    expect(bootstrap).not.toMatch(/FOREACH extension_name[\s\S]*?'pg_graphql'/);
+    expect(schema).not.toContain('@graphql({"introspection": true})');
+  });
+
   test("PostgREST tenant config keeps pgmq_public out of safe defaults", () => {
     for (const filePath of [
       "../../docker/dev/docker-compose.yml",

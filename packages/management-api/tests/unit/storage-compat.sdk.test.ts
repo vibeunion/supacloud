@@ -6,6 +6,8 @@ import { StorageRLS, mockBuckets, mockObjects } from "../../src/services/storage
 import * as dbModule from "../../src/db";
 import { StorageService } from "../../src/services/storage.service";
 import { SignedStore, TusStore } from "../../src/services/storage-store";
+import { storageVectorInternals } from "../../src/services/storage-vector.service";
+import { createClient } from "@supabase/supabase-js";
 
 const BASE = "http://localhost";
 
@@ -18,6 +20,7 @@ function request(path: string, init?: RequestInit) {
 beforeEach(() => {
   mockBuckets.clear();
   mockObjects.clear();
+  storageVectorInternals.resetMockStore();
   config.storageSigningSecret = "test-storage-signing-secret";
 
   spyOn(SignedStore, "set").mockResolvedValue(undefined);
@@ -44,19 +47,7 @@ afterEach(() => {
 });
 
 describe("storageCompatRoutes supabase-js compatibility", () => {
-  test("vector and iceberg surfaces expose explicit unavailable capabilities", async () => {
-    const vectorRes = await request("/storage/v1/vector/indexes", {
-      headers: { "x-project-ref": "test_mock", apikey: "test-token" },
-    });
-    expect(vectorRes.status).toBe(501);
-    expect(await vectorRes.json()).toMatchObject({
-      feature: "storage_vectors",
-      capability: false,
-      available: false,
-      status: "unsupported",
-      reason: "storage_vectors_not_enabled",
-    });
-
+  test("iceberg surfaces expose an explicit unavailable capability", async () => {
     const icebergRes = await request("/storage/v1/iceberg/tables", {
       headers: { "x-project-ref": "test_mock", apikey: "test-token" },
     });
@@ -68,6 +59,87 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
       status: "unsupported",
       reason: "storage_iceberg_not_enabled",
     });
+  });
+
+  test("implements the Supabase Storage Vector API surface", async () => {
+    const headers = {
+      "x-project-ref": "test_mock",
+      apikey: "test-token",
+      authorization: "Bearer test-token",
+      "content-type": "application/json",
+    };
+    const post = (operation: string, body: Record<string, unknown>) => request(`/storage/v1/vector/${operation}`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+    });
+
+    expect((await post("CreateVectorBucket", { vectorBucketName: "embeddings" })).status).toBe(200);
+    expect(await (await post("ListVectorBuckets", {})).json()).toMatchObject({
+      vectorBuckets: [{ vectorBucketName: "embeddings" }],
+    });
+    expect((await post("CreateIndex", {
+      vectorBucketName: "embeddings",
+      indexName: "documents-openai",
+      dataType: "float32",
+      dimension: 3,
+      distanceMetric: "cosine",
+    })).status).toBe(200);
+    expect((await post("PutVectors", {
+      vectorBucketName: "embeddings",
+      indexName: "documents-openai",
+      vectors: [
+        { key: "a", data: { float32: [1, 0, 0] }, metadata: { kind: "docs" } },
+        { key: "b", data: { float32: [0, 1, 0] }, metadata: { kind: "images" } },
+      ],
+    })).status).toBe(200);
+
+    expect(await (await post("QueryVectors", {
+      vectorBucketName: "embeddings",
+      indexName: "documents-openai",
+      queryVector: { float32: [1, 0, 0] },
+      topK: 1,
+      returnDistance: true,
+      returnMetadata: true,
+    })).json()).toEqual({ vectors: [{ key: "a", distance: 0, metadata: { kind: "docs" } }] });
+    expect(await (await post("GetVectors", {
+      vectorBucketName: "embeddings",
+      indexName: "documents-openai",
+      keys: ["a"],
+      returnData: true,
+      returnMetadata: true,
+    })).json()).toEqual({ vectors: [{ key: "a", data: { float32: [1, 0, 0] }, metadata: { kind: "docs" } }] });
+  });
+
+  test("works through the current official supabase-js vector client", async () => {
+    const client = createClient(BASE, "test-token", {
+      auth: { persistSession: false, autoRefreshToken: false },
+      global: {
+        fetch: (input, init) => testApp.handle(new Request(input, init)),
+      },
+    });
+
+    expect((await client.storage.vectors.createBucket("embeddings")).error).toBeNull();
+    const bucket = client.storage.vectors.from("embeddings");
+    expect((await bucket.createIndex({
+      indexName: "documents-openai",
+      dataType: "float32",
+      dimension: 3,
+      distanceMetric: "cosine",
+    })).error).toBeNull();
+
+    const index = bucket.index("documents-openai");
+    expect((await index.putVectors({
+      vectors: [{ key: "doc-1", data: { float32: [1, 0, 0] }, metadata: { title: "One" } }],
+    })).error).toBeNull();
+    const query = await index.queryVectors({
+      queryVector: { float32: [1, 0, 0] },
+      topK: 1,
+      returnDistance: true,
+      returnMetadata: true,
+    });
+    expect(query.error).toBeNull();
+    expect(query.data?.vectors).toEqual([{ key: "doc-1", distance: 0, metadata: { title: "One" } }]);
   });
 
   test("TUS capabilities advertise the default 500 MiB upload limit", async () => {

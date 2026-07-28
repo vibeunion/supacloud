@@ -1,3 +1,4 @@
+// @supacloud-test-isolate — loads large generated SQL/script fixtures.
 import { beforeEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "fs";
 import { join } from "path";
@@ -8,6 +9,9 @@ import {
   buildCreateTableSql,
   buildDropMaterializedViewSql,
   buildRefreshMaterializedViewSql,
+  assertRlsTesterQuery,
+  buildRlsTesterLimitedQuery,
+  collectRlsPlanRelations,
   MIGRATION_SESSION_RESET_SQL,
   migrationExecutionStatements,
   migrationLedgerEntryMatches,
@@ -23,6 +27,58 @@ import { calculateMigrationChecksum } from "../../src/services/migration-promoti
 describe("database route helpers", () => {
   beforeEach(() => {
     resetEnsuredMigrationTablesForTests();
+  });
+
+  test("RLS tester accepts one SELECT and rejects mutations or external side effects", () => {
+    expect(assertRlsTesterQuery("select * from public.todos where owner_id = auth.uid()"))
+      .toBe("select * from public.todos where owner_id = auth.uid()");
+    expect(assertRlsTesterQuery("with visible as (select * from public.todos) select * from visible"))
+      .toStartWith("with visible");
+    expect(() => assertRlsTesterQuery("with removed as (delete from public.todos returning *) select * from removed"))
+      .toThrow("SELECT queries");
+    expect(() => assertRlsTesterQuery("select net.http_get('https://example.com')"))
+      .toThrow("side effects or unbounded resource use");
+    expect(() => assertRlsTesterQuery("select 1; select 2"))
+      .toThrow("single statement");
+    expect(assertRlsTesterQuery("select ';' as separator /* ; */"))
+      .toBe("select ';' as separator /* ; */");
+    expect(() => assertRlsTesterQuery("select * into temporary leaked from public.todos"))
+      .toThrow("SELECT queries");
+    expect(() => assertRlsTesterQuery("select * from public.todos for update"))
+      .toThrow("row locks");
+    expect(() => assertRlsTesterQuery("select pg_sleep(30)"))
+      .toThrow("side effects or unbounded resource use");
+    expect(() => assertRlsTesterQuery("select dblink_exec('remote', 'delete from x')"))
+      .toThrow("side effects or unbounded resource use");
+    expect(() => assertRlsTesterQuery("select pg_advisory_lock(1)"))
+      .toThrow("side effects or unbounded resource use");
+    expect(() => assertRlsTesterQuery('select "pg_sleep"(30)'))
+      .toThrow("side effects or unbounded resource use");
+    expect(() => assertRlsTesterQuery('select "net"."http_get"(\'https://example.com\')'))
+      .toThrow("side effects or unbounded resource use");
+  });
+
+  test("wraps RLS test results with a server-side 501 row limit", () => {
+    expect(buildRlsTesterLimitedQuery("select * from public.todos order by id"))
+      .toBe('SELECT * FROM (\nselect * from public.todos order by id\n) AS "__supacloud_rls_test" LIMIT 501');
+    expect(buildRlsTesterLimitedQuery("select 1 -- keep this comment\n"))
+      .toContain("\n) AS");
+  });
+
+  test("collects unique schema and table names from nested EXPLAIN JSON plans", () => {
+    expect(collectRlsPlanRelations([{
+      Plan: {
+        "Node Type": "Nested Loop",
+        Plans: [
+          { "Node Type": "Seq Scan", "Schema": "public", "Relation Name": "todos" },
+          { "Node Type": "Index Scan", "Schema": "private", "Relation Name": "profiles" },
+          { "Node Type": "Seq Scan", "Schema": "public", "Relation Name": "todos" },
+        ],
+      },
+    }])).toEqual([
+      { schema: "private", table: "profiles" },
+      { schema: "public", table: "todos" },
+    ]);
   });
 
   test("extracts a single statement from cli query format", () => {

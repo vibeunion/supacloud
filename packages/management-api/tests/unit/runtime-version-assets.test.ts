@@ -1,3 +1,4 @@
+// @supacloud-test-isolate — compiles and validates multiple release fixtures.
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -6,7 +7,7 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 
 const repoRoot = join(import.meta.dir, "../../..", "..");
-setDefaultTimeout(30_000);
+setDefaultTimeout(60_000);
 
 function readRepoFile(path: string): string {
   return readFileSync(join(repoRoot, path), "utf8");
@@ -901,7 +902,7 @@ describe("runtime companion version assets", () => {
     const installer = readRepoFile("install.sh");
     const upgrade = readRepoFile("scripts/lib/gotrue_upgrade.sh");
 
-    expect(readShellConstant(upgrade, "SUPACLOUD_GOTRUE_DEFAULT_VERSION")).toBe("v2.193.1");
+    expect(readShellConstant(upgrade, "SUPACLOUD_GOTRUE_DEFAULT_VERSION")).toBe("v2.194.0");
     expect(installer).toContain('source "${SCRIPT_DIR}/scripts/lib/gotrue_upgrade.sh"');
     expect(installer).toContain(
       'local GOTRUE_VERSION="${GOTRUE_VERSION:-$SUPACLOUD_GOTRUE_DEFAULT_VERSION}"',
@@ -912,8 +913,8 @@ describe("runtime companion version assets", () => {
     expect(upgrade).toContain(
       'SUPACLOUD_GOTRUE_RELEASE_ASSET="auth-${target_version}-${SUPACLOUD_GOTRUE_RELEASE_ARCH}.tar.xz"',
     );
-    expect(upgrade).toContain("c991b6fb8747bbcbcef40701177234f152cea28a108a481bae917bacc1a522c5");
-    expect(upgrade).toContain("432fa68ef58afac8665d45537d8adbba5756b01829f175ed7ef6314b3ca59995");
+    expect(upgrade).toContain("ecb60cc55e5644c39c2319b73ebb348623ee98f968465590c4829ce853870db5");
+    expect(upgrade).toContain("d3237193f8af323f6d0a4315ae09d77d5b54acddeba1a6a0bf385e36c25451a4");
     expect(upgrade).toContain("supacloud_download_url");
     expect(upgrade).toContain("supacloud_install_pinned_tar_xz_binary");
     expect(upgrade).not.toContain(".tar.gz");
@@ -923,7 +924,7 @@ describe("runtime companion version assets", () => {
     const runtime = readRepoFile("scripts/lib/tenant_runtime.sh");
     const upgrade = readRepoFile("scripts/lib/gotrue_upgrade.sh");
 
-    expect(runtime).toContain('local version="${POSTGREST_VERSION:-v14.15}"');
+    expect(runtime).toContain('local version="${POSTGREST_VERSION:-v14.16}"');
     expect(runtime).toContain('x86_64) arch="linux-static-x86-64"');
     expect(runtime).toContain('aarch64) arch="ubuntu-aarch64"');
     expect(runtime).toContain("postgrest-${version}-${arch}.tar.xz");
@@ -957,18 +958,18 @@ describe("runtime companion version assets", () => {
     expect(installer).toContain('CADDY_VERSION:-2.11.4');
     expect(caddyBuilder).toContain('CADDY_VERSION="${CADDY_VERSION:-v2.11.4}"');
 
-    expect(runtime).toContain('POSTGREST_DEFAULT_VERSION="v14.15"');
-    expect(runtime).toContain('GOTRUE_DEFAULT_VERSION="v2.193.1"');
+    expect(runtime).toContain('POSTGREST_DEFAULT_VERSION="v14.16"');
+    expect(runtime).toContain('GOTRUE_DEFAULT_VERSION="v2.194.0"');
     for (const source of [installer, realtimeUnit, workflow]) {
-      expect(source).toContain("public.ecr.aws/supabase/realtime:v2.116.1");
+      expect(source).toContain("public.ecr.aws/supabase/realtime:v2.121.0");
     }
     for (const compose of [devCompose, selfHostCompose]) {
       expect(compose).toContain("caddy:2.11.4");
-      expect(compose).toContain("supabase/gotrue:v2.193.1");
-      expect(compose).toContain("postgrest/postgrest:v14.15");
+      expect(compose).toContain("supabase/gotrue:v2.194.0");
+      expect(compose).toContain("postgrest/postgrest:v14.16");
     }
-    expect(workflow).toContain("postgrest/postgrest:v14.15");
-    expect(workflow).toContain("supabase/gotrue:v2.193.1");
+    expect(workflow).toContain("postgrest/postgrest:v14.16");
+    expect(workflow).toContain("supabase/gotrue:v2.194.0");
     expect(postgresDockerfile).toContain("FROM postgres:18-bookworm");
     expect(devCompose).toContain("context: ../self-host/postgres");
     expect(selfHostCompose).toContain("context: ./postgres");

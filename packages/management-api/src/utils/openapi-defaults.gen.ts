@@ -294,16 +294,16 @@ export const OPENAPI_STORAGE_CONFIG_RESPONSE_TEMPLATE = {
       "maxCatalogs": 0
     },
     "vectorBuckets": {
-      "enabled": false,
-      "maxBuckets": 0,
-      "maxIndexes": 0
+      "enabled": true,
+      "maxBuckets": 100,
+      "maxIndexes": 10
     }
   },
   "capabilities": {
     "list_v2": false,
     "iceberg_catalog": false,
     "storage_iceberg": false,
-    "storage_vectors": false
+    "storage_vectors": true
   },
   "external": {
     "upstreamTarget": "main"

@@ -1,3 +1,4 @@
+// @supacloud-test-isolate — static source scans contend with the shared fixture batch.
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";

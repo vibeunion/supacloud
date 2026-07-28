@@ -220,7 +220,7 @@ async function updatePigstyConfig(config: PigstyConfig, ymlPath: string) {
         if (process.env.SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK === "true") {
             // [ROBUST FIX] Only use simple regex to fix some clearly defined Supabase domain parameters
             yml = yml.replace(/SITE_URL: https:\/\/supa.pigsty/g, `SITE_URL: https://${config.studioDomain}`);
-            yml = yml.replace(/API_EXTERNAL_URL: https:\/\/supa.pigsty/g, `API_EXTERNAL_URL: https://${config.publicDomain}`);
+            yml = yml.replace(/API_EXTERNAL_URL: https:\/\/supa.pigsty/g, `API_EXTERNAL_URL: https://${config.publicDomain}/auth/v1`);
             yml = yml.replace(/SUPABASE_PUBLIC_URL: https:\/\/supa.pigsty/g, `SUPABASE_PUBLIC_URL: https://${config.publicDomain}`);
             yml = yml.replace(/domain: supa.pigsty/g, `domain: ${config.publicDomain}`);
 
