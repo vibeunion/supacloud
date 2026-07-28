@@ -22,3 +22,11 @@ SupaCloud Lite 使用 ElectricSQL PGlite 作为嵌入式 PostgreSQL 引擎。
 ## Supabase JavaScript SDK
 
 `@supabase/supabase-js` 仅作为开发和兼容性测试依赖使用，没有 vendored 到发布产物中。
+
+## node-tar
+
+SupaCloud Lite 使用 `tar` 作为跨平台流式快照归档依赖，避免把完整 PGlite 数据目录加载到内存。
+
+- License: ISC
+- Upstream: `https://github.com/isaacs/node-tar`
+- Distribution: 作为独立 npm 依赖安装，许可证随依赖包分发
