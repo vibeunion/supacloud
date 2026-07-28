@@ -15,6 +15,8 @@ describe("SupAuth gateway routing", () => {
   test("keeps well-known metadata on the direct owner runtime", () => {
     expect(source).toContain("const directAuthUpstream = sharedAuthPort !== null");
     expect(source).toContain('id: caddyRouteId(projectRef, "gotrue-well-known")');
+    expect(source).toContain('id: caddyRouteId(projectRef, "auth-domain-gotrue-well-known")');
+    expect(source).toContain('rewriteUri: "/.well-known/oauth-authorization-server"');
     expect(source).toContain("upstream: directAuthUpstream");
   });
 

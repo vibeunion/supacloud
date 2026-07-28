@@ -23,6 +23,7 @@ import {
   normalizeProjectJwtKeys,
   signOidcServiceRoleJwt,
 } from "../utils/project-jwt";
+import { buildAuthRuntimeApplyFailureBody } from "./auth-config-responses";
 
 const OAUTH_CLIENT_BODY = t.Object({
   redirect_uris: t.Array(t.String()),
@@ -208,25 +209,23 @@ async function configureKmsRs256Signing(
     jwt_jwks: keyMaterial.jwt_jwks,
   };
 
+  const nextAuth = {
+    ...currentAuth,
+    oauth_server: oauthServer,
+  };
   await projectService.updateProjectSettings(ref, {
     ...settings,
-    auth: {
-      ...currentAuth,
-      oauth_server: oauthServer,
-    },
+    auth: nextAuth,
   });
 
   try {
-    await tenantRuntimeService.restartRuntime(ref);
+    await tenantRuntimeService.applyAuthConfig(ref, currentAuth, nextAuth);
   } catch (error: unknown) {
-    logger.warn("[auth-oauth-server] Failed to restart runtime after RS256 KMS signing config", {
+    logger.warn("[auth-oauth-server] Failed to apply RS256 KMS signing config", {
       ref,
       error: error instanceof Error ? error.message : String(error),
     });
-    return status(503, {
-      code: "SUPAUTH_DEPENDENT_REFRESH_FAILED",
-      message: "JWT signing configuration was saved, but one or more SupAuth runtimes failed to refresh",
-    });
+    return status(503, buildAuthRuntimeApplyFailureBody(ref, error));
   }
 
   return buildOAuthServerStatus({
@@ -282,10 +281,6 @@ async function proxyGoTrueAdmin(
       ref: ctx.project.ref,
       path,
       error: error instanceof Error ? error.message : String(error),
-    });
-    return status(503, {
-      code: "SUPAUTH_DEPENDENT_REFRESH_FAILED",
-      message: "OIDC signing configuration was saved, but one or more SupAuth runtimes failed to refresh",
     });
     return new Response(JSON.stringify({ message: "GoTrue OAuth admin endpoint unavailable", code: "502" }), {
       status: 502,
@@ -345,25 +340,23 @@ async function migrateProjectToOidc(
     jwt_jwks: keyMaterial.jwt_jwks,
   }
 
+  const nextAuth = {
+    ...currentAuth,
+    oauth_server: oauthServer,
+  };
   await projectService.updateProjectSettings(ref, {
     ...settings,
-    auth: {
-      ...currentAuth,
-      oauth_server: oauthServer,
-    },
+    auth: nextAuth,
   });
 
   try {
-    await tenantRuntimeService.restartRuntime(ref);
+    await tenantRuntimeService.applyAuthConfig(ref, currentAuth, nextAuth);
   } catch (error: unknown) {
-    logger.warn("[auth-oauth-server] Failed to restart runtime after OAuth/OIDC migration", {
+    logger.warn("[auth-oauth-server] Failed to apply OAuth/OIDC migration", {
       ref,
       error: error instanceof Error ? error.message : String(error),
     });
-    return status(503, {
-      code: "SUPAUTH_DEPENDENT_REFRESH_FAILED",
-      message: "OIDC signing configuration was saved, but one or more SupAuth runtimes failed to refresh",
-    });
+    return status(503, buildAuthRuntimeApplyFailureBody(ref, error));
   }
 
   return buildOAuthServerStatus({ ...ctx, oauthServer });

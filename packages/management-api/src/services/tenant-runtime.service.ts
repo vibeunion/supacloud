@@ -75,6 +75,36 @@ function recordValue(value: unknown): Record<string, unknown> {
         : {};
 }
 
+function firstNonEmptyString(...values: unknown[]): string | undefined {
+    return values.find((value): value is string => typeof value === "string" && value.trim().length > 0);
+}
+
+function firstDefinedString(...values: unknown[]): string | undefined {
+    return values.find((value): value is string => typeof value === "string");
+}
+
+export function resolveTenantAuthUrlSettings(ref: string, projectConfig: Record<string, unknown>) {
+    const authConfig = recordValue(projectConfig.auth);
+    const legacyRedirectUrls = Array.isArray(projectConfig.additional_redirect_urls)
+        ? projectConfig.additional_redirect_urls.join(",")
+        : (Array.isArray(projectConfig.additionalRedirectUrls)
+            ? projectConfig.additionalRedirectUrls.join(",")
+            : "");
+    return {
+        authConfig,
+        siteUrl: firstNonEmptyString(
+            authConfig.site_url,
+            authConfig.SITE_URL,
+            projectConfig.site_url,
+            projectConfig.siteUrl,
+        ) || resolveProjectStudioUrl(ref, projectConfig),
+        uriAllowList: firstDefinedString(
+            authConfig.uri_allow_list,
+            authConfig.URI_ALLOW_LIST,
+        ) ?? legacyRedirectUrls,
+    };
+}
+
 async function renderConnectorSecretEnv(
     ref: string,
     authConfig: Record<string, unknown>,
@@ -662,7 +692,7 @@ class TenantRuntimeService {
         }
 
         const projectConfig = normalizeProjectConfig(project.config);
-        const authConfig = (projectConfig.auth as Record<string, unknown>) || {};
+        const { authConfig, siteUrl, uriAllowList } = resolveTenantAuthUrlSettings(ref, projectConfig);
         const oauthServerConfig = normalizeOAuthServerConfig(authConfig.oauth_server);
         const jwtKeys = stringifyJsonConfig(normalizeProjectJwtKeys(oauthServerConfig.jwt_keys));
         let jwtMaterial = resolveProjectJwtVerificationMaterial(projectConfig, project.jwt_secret);
@@ -711,12 +741,8 @@ class TenantRuntimeService {
             secretKey: project.secret_key_encrypted
                 ? decryptSecretIfNeeded(String(project.secret_key_encrypted))
                 : "",
-            siteUrl: typeof projectConfig.site_url === "string"
-                ? projectConfig.site_url
-                : (typeof projectConfig.siteUrl === "string"
-                    ? projectConfig.siteUrl
-                    : resolveProjectStudioUrl(ref, projectConfig)),
-            uriAllowList: Array.isArray(projectConfig.additional_redirect_urls) ? projectConfig.additional_redirect_urls.join(',') : (Array.isArray(projectConfig.additionalRedirectUrls) ? projectConfig.additionalRedirectUrls.join(',') : ""),
+            siteUrl,
+            uriAllowList,
             authConfig
         };
     }

@@ -3,10 +3,11 @@ import { config } from "../config";
 import { logger } from "../utils/logger";
 import {
   isDangerousSQL,
-  MULTI_STATEMENT_PATTERN,
   normalizeSqlForPolicy,
   WRITE_SQL_PATTERN,
 } from "./sql-policy";
+import { runRegisteredSqlQuery } from "./sql-query-registry";
+import { splitSqlStatements } from "./sql-statements";
 
 function parseDatabaseUrl(url: string) {
   const urlMatch = url.match(/postgres(?:ql)?:\/\/([^:]+)(?::([^@]*))?@([^:]*):(\d+)\/(.+)/);
@@ -43,6 +44,26 @@ const projectRoleConnections: Map<string, { sql: SQL; lastUsed: number }> = new 
 
 const IDLE_SWEEP_INTERVAL = 60_000;
 const MAX_CONNECTION_AGE = 30 * 60_000;
+
+interface ProjectSqlOptions {
+  dbName: string;
+  username: string | undefined;
+  password: string | undefined;
+  max: number;
+}
+
+function createProjectSql(options: ProjectSqlOptions): SQL {
+  return new SQL({
+    hostname: dbConfig.hostname,
+    port: dbConfig.port,
+    database: options.dbName,
+    username: options.username,
+    password: options.password,
+    max: options.max,
+    idleTimeout: 30,
+    connectTimeout: 5000,
+  });
+}
 
 setInterval(() => {
   const now = Date.now();
@@ -98,15 +119,11 @@ export function getProjectDb(dbName: string): SQL {
 
   evictOldestConnection(projectConnections, "project admin");
 
-  const projectSql = new SQL({
-    hostname: dbConfig.hostname,
-    port: dbConfig.port,
-    database: dbName,
+  const projectSql = createProjectSql({
+    dbName,
     username: dbConfig.username,
     password: dbConfig.password,
     max: 10,
-    idleTimeout: 30,
-    connectTimeout: 5000,
   });
 
   projectConnections.set(dbName, { sql: projectSql, lastUsed: Date.now() });
@@ -123,15 +140,11 @@ export function getProjectRoleDb(dbName: string, username: string, password: str
 
   evictOldestConnection(projectRoleConnections, "project role");
 
-  const projectSql = new SQL({
-    hostname: dbConfig.hostname,
-    port: dbConfig.port,
-    database: dbName,
+  const projectSql = createProjectSql({
+    dbName,
     username,
     password,
     max: 5,
-    idleTimeout: 30,
-    connectTimeout: 5000,
   });
 
   projectRoleConnections.set(key, { sql: projectSql, lastUsed: Date.now() });
@@ -211,6 +224,7 @@ export class PgError extends Error {
   code?: string;
   details?: string;
   hint?: string;
+  durationMs?: number;
   constructor(message: string, code?: string, details?: string, hint?: string) {
     super(message);
     this.name = "PgError";
@@ -222,14 +236,20 @@ export class PgError extends Error {
 
 export type SqlExecutionMode = "read" | "migration" | "admin";
 
-function assertSqlExecutionAllowed(sqlQuery: string, mode: SqlExecutionMode) {
-  const normalized = normalizeSqlForPolicy(sqlQuery);
+export function assertSqlExecutionAllowed(sqlQuery: string, mode: SqlExecutionMode) {
+  const statements = mode === "read" ? splitSqlStatements(sqlQuery) : [];
+  if (statements.length > 1) throw new PgError(
+    "SQL editor supports one statement at a time. Run each statement separately.",
+    "MULTIPLE_SQL_STATEMENTS_NOT_SUPPORTED",
+  );
+
+  const normalized = normalizeSqlForPolicy(mode === "read" ? statements[0] || "" : sqlQuery);
   if (!normalized) {
     throw new PgError("Query is empty", "42601");
   }
 
   if (mode === "read") {
-    if (MULTI_STATEMENT_PATTERN.test(normalized) || WRITE_SQL_PATTERN.test(normalized) || !/^\s*(SELECT|WITH|EXPLAIN|SHOW)\b/i.test(normalized)) {
+    if (WRITE_SQL_PATTERN.test(normalized) || !/^\s*(SELECT|WITH|EXPLAIN|SHOW)\b/i.test(normalized)) {
       throw new PgError("Read-only SQL endpoint only allows SELECT, WITH, EXPLAIN, or SHOW statements. Use the migration endpoint for schema/data changes.", "42501");
     }
   }
@@ -248,13 +268,17 @@ export type SqlExecutionResult = {
   command: string;
   fields?: string[];
   notices?: string[];
+  durationMs: number;
 };
 
 function inferSqlCommand(sqlQuery: string): string {
   return sqlQuery.trim().split(/\s+/)[0]?.toUpperCase() || "SQL";
 }
 
-function normalizeSqlExecutionResult(sqlQuery: string, result: unknown): SqlExecutionResult {
+function normalizeSqlExecutionResult(
+  sqlQuery: string,
+  result: unknown,
+): Omit<SqlExecutionResult, "durationMs"> {
   const rows = Array.isArray(result) ? result as unknown[] : [];
   const metadata = result as {
     command?: unknown;
@@ -279,28 +303,170 @@ function normalizeSqlExecutionResult(sqlQuery: string, result: unknown): SqlExec
   };
 }
 
+function elapsedSqlMilliseconds(startedAt: number): number {
+  return Math.max(0, Math.round(performance.now() - startedAt));
+}
+
+interface CancellableSqlExecution {
+  queryDb: SQL;
+  cancellationDb: SQL;
+  projectRef: string;
+  queryId: string;
+  sqlQuery: string;
+  startedAt: number;
+}
+
+async function cancelPostgresBackend(cancellationDb: SQL, backendPid: number): Promise<boolean> {
+  const [cancellation] = await cancellationDb<{ cancelled: boolean }[]>`
+    SELECT CASE
+      WHEN EXISTS (
+        SELECT 1
+        FROM pg_stat_activity
+        WHERE pid = ${backendPid}
+          AND state = 'active'
+      ) THEN pg_cancel_backend(${backendPid})
+      ELSE FALSE
+    END AS cancelled
+  `;
+  return cancellation?.cancelled === true;
+}
+
+export async function executeCancellableSqlQuery(input: CancellableSqlExecution): Promise<unknown> {
+  const queryConnection = await input.queryDb.reserve();
+  try {
+    const [backend] = await queryConnection<{ backendPid: number }[]>`
+      SELECT pg_backend_pid() AS "backendPid"
+    `;
+    if (!backend) throw new Error("PostgreSQL backend PID is unavailable");
+    const query = queryConnection.unsafe(input.sqlQuery);
+    return await runRegisteredSqlQuery({
+      projectRef: input.projectRef,
+      queryId: input.queryId,
+      query,
+      startedAt: input.startedAt,
+      cancel: () => cancelPostgresBackend(input.cancellationDb, backend.backendPid),
+    });
+  } finally {
+    queryConnection.release();
+  }
+}
+
+export function sqlExecutionError(error: unknown, durationMs: number): PgError {
+  const pgError = error && typeof error === "object"
+    ? error as Record<string, unknown>
+    : {};
+  const originalCode = typeof pgError.code === "string" ? pgError.code : undefined;
+  const sqlState = typeof pgError.errno === "string" ? pgError.errno : undefined;
+  const originalMessage = typeof pgError.message === "string" ? pgError.message : "Unknown error";
+  const wasCancelled = originalCode === "QUERY_CANCELLED";
+  const wasStatementTimeout = !wasCancelled
+    && (originalCode === "57014" || sqlState === "57014")
+    && /statement timeout/i.test(originalMessage);
+  const normalizedError = new PgError(
+    wasCancelled
+      ? "Query cancelled"
+      : wasStatementTimeout ? "Query timed out" : originalMessage,
+    wasCancelled ? "QUERY_CANCELLED" : wasStatementTimeout ? "QUERY_TIMEOUT" : originalCode,
+    typeof pgError.details === "string" ? pgError.details : undefined,
+    typeof pgError.hint === "string" ? pgError.hint : undefined,
+  );
+  normalizedError.durationMs = durationMs;
+  return normalizedError;
+}
+
+interface RegisteredProjectSqlExecution {
+  dbName: string;
+  queryDb: SQL;
+  username: string | undefined;
+  password: string | undefined;
+  projectRef: string;
+  queryId: string;
+  sqlQuery: string;
+  startedAt: number;
+}
+
+async function executeRegisteredProjectSql(input: RegisteredProjectSqlExecution): Promise<unknown> {
+  const cancellationDb = createProjectSql({
+    dbName: input.dbName,
+    username: input.username,
+    password: input.password,
+    max: 1,
+  });
+  try {
+    return await executeCancellableSqlQuery({
+      queryDb: input.queryDb,
+      cancellationDb,
+      projectRef: input.projectRef,
+      queryId: input.queryId,
+      sqlQuery: input.sqlQuery,
+      startedAt: input.startedAt,
+    });
+  } finally {
+    await cancellationDb.close({ timeout: 1 });
+  }
+}
+
+interface SqlExecutionOptions {
+  mode?: SqlExecutionMode;
+  username?: string;
+  password?: string;
+  projectRef?: string;
+  queryId?: string;
+}
+
+function cancellableQueryScope(options: SqlExecutionOptions) {
+  if (options.queryId && !options.projectRef) {
+    throw new PgError(
+      "projectRef is required when registering a cancellable SQL query",
+      "SQL_QUERY_PROJECT_SCOPE_REQUIRED",
+    );
+  }
+  return options.queryId && options.projectRef
+    ? { projectRef: options.projectRef, queryId: options.queryId }
+    : null;
+}
+
+async function executeProjectSql(
+  dbName: string,
+  sqlQuery: string,
+  options: SqlExecutionOptions,
+  startedAt: number,
+): Promise<unknown> {
+  const scope = cancellableQueryScope(options);
+  const roleCredentials = options.username && options.password
+    ? { username: options.username, password: options.password }
+    : null;
+  const queryDb = roleCredentials
+    ? getProjectRoleDb(dbName, roleCredentials.username, roleCredentials.password)
+    : getProjectDb(dbName);
+  if (!scope) return queryDb.unsafe(sqlQuery).execute();
+  return executeRegisteredProjectSql({
+    dbName,
+    queryDb,
+    username: roleCredentials?.username ?? dbConfig.username,
+    password: roleCredentials?.password ?? dbConfig.password,
+    ...scope,
+    sqlQuery,
+    startedAt,
+  });
+}
+
 export async function executeQuery(
   dbName: string,
   sqlQuery: string,
-  opts: { mode?: SqlExecutionMode; username?: string; password?: string } = {},
+  opts: SqlExecutionOptions = {},
 ): Promise<SqlExecutionResult> {
-  const mode = opts.mode || "read";
-  assertSqlExecutionAllowed(sqlQuery, mode);
-
-  const projectDb = opts.username && opts.password
-    ? getProjectRoleDb(dbName, opts.username, opts.password)
-    : getProjectDb(dbName);
+  const startedAt = performance.now();
   try {
-    const result = await projectDb.unsafe(sqlQuery);
-    return normalizeSqlExecutionResult(sqlQuery, result);
+    const mode = opts.mode || "read";
+    assertSqlExecutionAllowed(sqlQuery, mode);
+    const result = await executeProjectSql(dbName, sqlQuery, opts, startedAt);
+    return {
+      ...normalizeSqlExecutionResult(sqlQuery, result),
+      durationMs: elapsedSqlMilliseconds(startedAt),
+    };
   } catch (error: unknown) {
-    const pgError = error as Record<string, unknown>;
-    throw new PgError(
-      (pgError.message as string) || "Unknown error",
-      pgError.code as string | undefined,
-      pgError.details as string | undefined,
-      pgError.hint as string | undefined,
-    );
+    throw sqlExecutionError(error, elapsedSqlMilliseconds(startedAt));
   }
 }
 

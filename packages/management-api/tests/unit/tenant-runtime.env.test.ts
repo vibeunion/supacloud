@@ -24,6 +24,7 @@ import {
   readAuthSessionPolicy,
 } from "../../src/services/auth-session-policy";
 import { authConfigChangesPostgrestVerifier } from "../../src/services/auth-runtime-impact";
+import { resolveTenantAuthUrlSettings } from "../../src/services/tenant-runtime.service";
 
 describe("TenantRuntimeService safe config serialization", () => {
   const special = `p@:/#?% space '\"\\`;
@@ -123,6 +124,18 @@ describe("TenantRuntimeService PostgREST schema rendering", () => {
 });
 
 describe("TenantRuntimeService GoTrue auth env rendering", () => {
+  test("keeps an explicitly cleared canonical allowlist ahead of legacy redirects", () => {
+    const settings = resolveTenantAuthUrlSettings("project-a", {
+      auth: {
+        uri_allow_list: "",
+        URI_ALLOW_LIST: "https://uppercase-legacy.example.com/callback",
+      },
+      additional_redirect_urls: ["https://legacy.example.com/callback"],
+    });
+
+    expect(settings.uriAllowList).toBe("");
+  });
+
   test("uses current session-policy defaults and official GoTrue env names", () => {
     // Names are verified against supabase/auth v2.193.0 configuration.go.
     const env = renderGoTrueSessionPolicyEnv({});

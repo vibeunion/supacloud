@@ -1,5 +1,14 @@
 import { getAuthRuntimeDescriptor } from "../services/auth-runtime.service";
 import type { AuthSessionPolicyValidationError } from "../services/auth-session-policy";
+import type { AuthUrlConfigValidationError } from "../utils/auth-url-config";
+
+export function buildAuthUrlConfigErrorBody(error: AuthUrlConfigValidationError) {
+  return {
+    code: "INVALID_AUTH_URL_CONFIG",
+    field: error.field,
+    message: error.message,
+  };
+}
 
 export function buildAuthSessionPolicyErrorBody(error: AuthSessionPolicyValidationError) {
   return {

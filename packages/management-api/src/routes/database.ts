@@ -3,6 +3,7 @@ import type { TransactionSQL } from "bun";
 import { projectService } from "../services";
 import { db, getProjectDb, getProjectRoleDb, removeProjectDbCache, resolveDbName, sql as metaSql, type SqlExecutionMode } from "../db";
 import { normalizeSqlForPolicy } from "../db/sql-policy";
+import { cancelActiveSqlQuery } from "../db/sql-query-registry";
 import { splitSqlStatements } from "../db/sql-statements";
 import { requireAdminAuth, requireProjectOrAdminAuth } from "../middleware/auth";
 import {
@@ -135,6 +136,21 @@ export function sqlRouteResponse(result: Awaited<ReturnType<typeof db.executeQue
     command: result.command,
     fields: result.fields || [],
     notices: result.notices || [],
+    durationMs: result.durationMs,
+  };
+}
+
+export function sqlRouteErrorResponse(error: unknown) {
+  const pgError = error && typeof error === "object"
+    ? error as Record<string, unknown>
+    : {};
+  return {
+    code: typeof pgError.code === "string" ? pgError.code : "42601",
+    message: typeof pgError.message === "string" ? pgError.message : "SQL execution failed",
+    details: typeof pgError.details === "string" ? pgError.details : null,
+    hint: typeof pgError.hint === "string" ? pgError.hint : null,
+    durationMs: typeof pgError.durationMs === "number" ? pgError.durationMs : 0,
+    status: 400 as const,
   };
 }
 
@@ -1032,14 +1048,7 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                 return sqlRouteResponse(result);
             } catch (error: unknown) {
                 set.status = 400;
-                const pgErr = error as Record<string, unknown>;
-                return {
-                    code: pgErr.code || "42601",
-                    message: pgErr.message || "SQL execution failed",
-                    details: pgErr.details || null,
-                    hint: pgErr.hint || null,
-                    status: 400,
-                };
+                return sqlRouteErrorResponse(error);
             }
         },
         {
@@ -1053,6 +1062,9 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
     .post(
         "/sql",
         async ({ params, body, set, request }) => {
+            const authError = await requireProjectOrAdminAuth(request, params.ref);
+            if (authError) return projectAuthResponse(authError, set);
+
             const project = await projectService.getProject(params.ref);
             if (!project) {
                 set.status = 404;
@@ -1066,8 +1078,6 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                     return { message: "query or sql is required", code: "400", status: 400 };
                 }
                 const mode = resolveSqlMode(body as Record<string, unknown>);
-                const authError = await requireProjectOrAdminAuth(request, params.ref);
-                if (authError) return projectAuthResponse(authError, set);
 
                 if (mode === "admin") {
                     if (!requireAdminMode(body as Record<string, unknown>)) {
@@ -1092,6 +1102,9 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                   }
                   return db.executeQuery(credentials.db_name, sqlQuery, {
                     mode,
+                    ...(typeof body.query_id === "string"
+                      ? { projectRef: params.ref, queryId: body.query_id }
+                      : {}),
                     ...(useRoleConnection ? { username: credentials.db_user, password: credentials.db_password } : {}),
                   });
                 };
@@ -1109,14 +1122,7 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                     return { message: error.message, code: error.code, status: error.httpStatus };
                 }
                 set.status = 400;
-                const pgErr = error as Record<string, unknown>;
-                return {
-                    code: pgErr.code || "42601",
-                    message: pgErr.message || "SQL execution failed",
-                    details: pgErr.details || null,
-                    hint: pgErr.hint || null,
-                    status: 400,
-                };
+                return sqlRouteErrorResponse(error);
             }
         },
         {
@@ -1126,8 +1132,57 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                 query: t.Optional(t.String()),
                 mode: t.Optional(t.Union([t.Literal("read"), t.Literal("migration"), t.Literal("admin")])),
                 admin: t.Optional(t.Boolean()),
+                query_id: t.Optional(t.String({ minLength: 16, maxLength: 128, pattern: "^[A-Za-z0-9_-]+$" })),
             }),
             detail: { tags: ["projects"], summary: "Execute a SQL statement with mode control" },
+        }
+    )
+    .post(
+        "/sql/:query_id/cancel",
+        async ({ params, set, request }) => {
+            const authError = await requireProjectOrAdminAuth(request, params.ref);
+            if (authError) return projectAuthResponse(authError, set);
+
+            const project = await projectService.getProject(params.ref);
+            if (!project) {
+                set.status = 404;
+                return { message: "Project not found", code: "404", status: 404 };
+            }
+
+            try {
+                const cancellation = await cancelActiveSqlQuery(params.ref, params.query_id);
+                if (!cancellation) {
+                    set.status = 404;
+                    return { message: "SQL query is not running", code: "QUERY_NOT_RUNNING", status: 404 };
+                }
+                if (!cancellation.cancelled) {
+                    set.status = 409;
+                    return {
+                        message: "PostgreSQL did not confirm query cancellation",
+                        code: "QUERY_CANCEL_NOT_CONFIRMED",
+                        status: 409,
+                        durationMs: cancellation.durationMs,
+                    };
+                }
+                return {
+                    query_id: params.query_id,
+                    ...cancellation,
+                };
+            } catch (error: unknown) {
+                logger.error("[database] failed to cancel SQL query", {
+                    projectRef: params.ref,
+                    error: error instanceof Error ? error.message : String(error),
+                });
+                set.status = 500;
+                return { message: "Failed to cancel SQL query", code: "QUERY_CANCEL_FAILED", status: 500 };
+            }
+        },
+        {
+            params: t.Object({
+                ref: t.String({ minLength: 1 }),
+                query_id: t.String({ minLength: 16, maxLength: 128, pattern: "^[A-Za-z0-9_-]+$" }),
+            }),
+            detail: { tags: ["projects"], summary: "Cancel a running SQL query" },
         }
     )
     .post(

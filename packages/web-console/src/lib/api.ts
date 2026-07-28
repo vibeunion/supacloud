@@ -181,9 +181,11 @@ export async function apiClient(url: string, options: ApiRequestInit = {}): Prom
     headers.set("Content-Type", "application/json");
   }
 
-  const timeoutController = new AbortController();
-  const timeout = setTimeout(() => timeoutController.abort(), timeoutMs);
-  const signal = mergeAbortSignals([requestInit.signal, timeoutController.signal]);
+  const timeoutController = timeoutMs === 0 ? null : new AbortController();
+  const timeout = timeoutController
+    ? setTimeout(() => timeoutController.abort(), timeoutMs)
+    : undefined;
+  const signal = mergeAbortSignals([requestInit.signal, timeoutController?.signal]);
 
   let response: Response;
   try {
@@ -195,20 +197,19 @@ export async function apiClient(url: string, options: ApiRequestInit = {}): Prom
     });
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
-      if (requestInit.signal?.aborted && !timeoutController.signal.aborted) {
-        throw error;
+      if (timeoutController?.signal.aborted) {
+        return new Response(JSON.stringify({
+          message: "Request timeout",
+          code: "TIMEOUT",
+        }), {
+          status: 504,
+          headers: { "Content-Type": "application/json" },
+        });
       }
-      return new Response(JSON.stringify({
-        message: "Request timeout",
-        code: "TIMEOUT",
-      }), {
-        status: 504,
-        headers: { "Content-Type": "application/json" },
-      });
     }
     throw error;
   } finally {
-    clearTimeout(timeout);
+    if (timeout !== undefined) clearTimeout(timeout);
   }
 
   response = await normalizeErrorResponse(response);

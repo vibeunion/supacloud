@@ -573,6 +573,207 @@ describe("SupAuth auth config boundary", () => {
     expect(applyCalls).toBe(0);
   });
 
+  test("rejects invalid SITE_URL values before persistence or runtime apply", async () => {
+    config.authRuntimeOwnerRef = "";
+    projectService.getProjectSettings = async () => ({ auth: {} } as never);
+    let updateCalls = 0;
+    let applyCalls = 0;
+    projectService.updateProjectSettings = async () => {
+      updateCalls += 1;
+      return { auth: {} } as never;
+    };
+    tenantRuntimeService.applyAuthConfig = async () => {
+      applyCalls += 1;
+      return {} as never;
+    };
+
+    const response = await request("/v1/projects/tenant-a/config/auth", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ SITE_URL: "https://app.example.com/?next=unsafe" }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      code: "INVALID_AUTH_URL_CONFIG",
+      field: "SITE_URL",
+    });
+    expect(updateCalls).toBe(0);
+    expect(applyCalls).toBe(0);
+  });
+
+  test("persists valid intranet URLs under canonical auth keys", async () => {
+    config.authRuntimeOwnerRef = "";
+    let settings: Record<string, unknown> = {
+      auth: {
+        SITE_URL: "https://legacy.example.com",
+        URI_ALLOW_LIST: "https://legacy.example.com/callback",
+      },
+    };
+    let applyCalls = 0;
+    projectService.getProjectSettings = async () => settings as never;
+    projectService.updateProjectSettings = async (_ref, next) => {
+      settings = next as Record<string, unknown>;
+      return settings as never;
+    };
+    tenantRuntimeService.applyAuthConfig = async () => {
+      applyCalls += 1;
+      return {} as never;
+    };
+
+    const response = await request("/v1/projects/tenant-a/config/auth", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        site_url: "http://192.168.200.112:3010",
+        uri_allow_list: "http://192.168.200.112:3010/callback",
+      }),
+    });
+
+    const persistedAuth = settings.auth as Record<string, unknown>;
+    expect(response.status).toBe(200);
+    expect(applyCalls).toBe(1);
+    expect(persistedAuth).toMatchObject({
+      site_url: "http://192.168.200.112:3010",
+      uri_allow_list: "http://192.168.200.112:3010/callback",
+    });
+    expect(persistedAuth.SITE_URL).toBeUndefined();
+    expect(persistedAuth.URI_ALLOW_LIST).toBeUndefined();
+  });
+
+  test("rejects invalid URL config on the Studio PATCH route before any write or apply", async () => {
+    config.authRuntimeOwnerRef = "";
+    projectService.getProjectSettings = async () => ({ auth: {} } as never);
+    let settingsWrites = 0;
+    let secretWrites = 0;
+    let applyCalls = 0;
+    projectService.updateProjectSettings = async () => {
+      settingsWrites += 1;
+      return { auth: {} } as never;
+    };
+    projectControlSecretsService.upsert = async (_ref, scope, name) => {
+      secretWrites += 1;
+      return { scope, name, configured: true, value: "********", updated_at: null };
+    };
+    tenantRuntimeService.applyAuthConfig = async () => {
+      applyCalls += 1;
+      return {} as never;
+    };
+
+    const response = await rawAuthRequest("/v1/projects/tenant-a/auth/config", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        uri_allow_list: ["https://app.example.com/callback"],
+        external: { github: { client_id: "client", client_secret: "must-not-write" } },
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      code: "INVALID_AUTH_URL_CONFIG",
+      field: "URI_ALLOW_LIST",
+    });
+    expect(settingsWrites).toBe(0);
+    expect(secretWrites).toBe(0);
+    expect(applyCalls).toBe(0);
+  });
+
+  test("normalizes URL aliases before the Studio PATCH persists and applies them", async () => {
+    config.authRuntimeOwnerRef = "";
+    let settings: Record<string, unknown> = {
+      auth: {
+        SITE_URL: "https://legacy.example.com",
+        URI_ALLOW_LIST: "https://legacy.example.com/callback",
+      },
+    };
+    let appliedAuth: Record<string, unknown> | null = null;
+    projectService.getProjectSettings = async () => settings as never;
+    projectService.updateProjectSettings = async (_ref, next) => {
+      settings = next as Record<string, unknown>;
+      return settings as never;
+    };
+    tenantRuntimeService.applyAuthConfig = async (_ref, _currentAuth, nextAuth) => {
+      appliedAuth = nextAuth;
+      return {} as never;
+    };
+
+    const response = await rawAuthRequest("/v1/projects/tenant-a/auth/config", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        SITE_URL: " http://192.168.200.112:3010 ",
+        URI_ALLOW_LIST: " http://192.168.200.112:3010/callback, https://*.example.com/** ",
+      }),
+    });
+    const persistedAuth = settings.auth as Record<string, unknown>;
+
+    expect(response.status).toBe(200);
+    expect(persistedAuth).toMatchObject({
+      site_url: "http://192.168.200.112:3010",
+      uri_allow_list: "http://192.168.200.112:3010/callback,https://*.example.com/**",
+    });
+    expect(persistedAuth.SITE_URL).toBeUndefined();
+    expect(persistedAuth.URI_ALLOW_LIST).toBeUndefined();
+    expect(appliedAuth).toEqual(persistedAuth);
+  });
+
+  test("reads canonical URL fields from lowercase and legacy uppercase settings", async () => {
+    config.authRuntimeOwnerRef = "";
+    const storedAuthConfigs = [
+      {
+        site_url: "https://canonical.example.com",
+        uri_allow_list: "https://canonical.example.com/callback",
+      },
+      {
+        SITE_URL: "https://legacy.example.com",
+        URI_ALLOW_LIST: "https://legacy.example.com/callback",
+      },
+    ];
+
+    for (const storedAuth of storedAuthConfigs) {
+      projectService.getProjectSettings = async () => ({ auth: storedAuth } as never);
+      const studioResponse = await rawAuthRequest("/v1/projects/tenant-a/auth/config");
+      const studioBody = await studioResponse.json();
+      const compatibilityResponse = await request("/v1/projects/tenant-a/config/auth");
+      const compatibilityBody = await compatibilityResponse.json();
+      const expectedSiteUrl = storedAuth.site_url ?? storedAuth.SITE_URL;
+      const expectedAllowList = storedAuth.uri_allow_list ?? storedAuth.URI_ALLOW_LIST;
+
+      expect(studioResponse.status).toBe(200);
+      expect(compatibilityResponse.status).toBe(200);
+      expect(studioBody.site_url).toBe(expectedSiteUrl);
+      expect(studioBody.uri_allow_list).toBe(expectedAllowList);
+      expect(compatibilityBody.site_url).toBe(expectedSiteUrl);
+      expect(compatibilityBody.uri_allow_list).toBe(expectedAllowList);
+    }
+  });
+
+  test("does not block unrelated auth updates on existing legacy URL aliases", async () => {
+    config.authRuntimeOwnerRef = "";
+    let settings: Record<string, unknown> = {
+      auth: {
+        site_url: "https://canonical.example.com",
+        SITE_URL: "https://legacy.example.com",
+      },
+    };
+    projectService.getProjectSettings = async () => settings as never;
+    projectService.updateProjectSettings = async (_ref, next) => {
+      settings = next as Record<string, unknown>;
+      return settings as never;
+    };
+    tenantRuntimeService.applyAuthConfig = async () => ({} as never);
+
+    const response = await request("/v1/projects/tenant-a/config/auth", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enable_signup: false }),
+    });
+
+    expect(response.status).toBe(200);
+    expect((settings.auth as Record<string, unknown>).enable_signup).toBe(false);
+  });
+
   test("canonicalizes the legacy auth config PATCH route through the same apply path", async () => {
     config.authRuntimeOwnerRef = "";
     let settings: Record<string, unknown> = { auth: {} };
