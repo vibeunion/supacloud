@@ -628,6 +628,7 @@ describe("upgrade release selection", () => {
       "restart-management",
       "restart-external-edge-runtime",
     ]);
+    expect(buildRuntimeServiceRestartPlan("external", false)).toEqual(["restart-management"]);
   });
 
   test("upgrade persists a non-conflicting native Edge Runtime port", () => {

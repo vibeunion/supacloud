@@ -699,6 +699,7 @@ const app = new Elysia()
   .use(cors())
   .get("/health", () => ({
     status: "ok",
+    instanceId: process.env.EDGE_RUNTIME_INSTANCE_ID || null,
   }))
   .get("/metrics", (c) => {
     const authError = requireInternalAuth(c.request);

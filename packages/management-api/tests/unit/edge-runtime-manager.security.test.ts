@@ -4,6 +4,7 @@ import { join } from "node:path";
 import {
   buildEdgeRuntimeChildEnv,
   buildEdgeRuntimeCommand,
+  isEdgeRuntimeReadyResponse,
 } from "../../src/plugins/edge-runtime-manager";
 
 const repoRoot = join(import.meta.dir, "../../..", "..");
@@ -71,5 +72,14 @@ describe("embedded Edge Runtime process boundary", () => {
     expect(manager).not.toContain("process.kill(");
     expect(manager).not.toContain("lsof -iTCP");
     expect(manager).toContain("port may be occupied by another service");
+  });
+
+  test("accepts readiness only from the child instance that was launched", () => {
+    const instanceId = "edge-instance-expected";
+
+    expect(isEdgeRuntimeReadyResponse({ status: "ok", instanceId }, instanceId)).toBe(true);
+    expect(isEdgeRuntimeReadyResponse({ status: "ok" }, instanceId)).toBe(false);
+    expect(isEdgeRuntimeReadyResponse({ status: "ok", instanceId: "unrelated-listener" }, instanceId)).toBe(false);
+    expect(isEdgeRuntimeReadyResponse("ok", instanceId)).toBe(false);
   });
 });

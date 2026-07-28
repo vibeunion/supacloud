@@ -54,6 +54,15 @@ export function buildEdgeRuntimeChildEnv(
   return { ...env, ...overrides };
 }
 
+export function isEdgeRuntimeReadyResponse(
+  payload: unknown,
+  expectedInstanceId: string,
+): boolean {
+  if (!payload || typeof payload !== "object") return false;
+  const response = payload as Record<string, unknown>;
+  return response.status === "ok" && response.instanceId === expectedInstanceId;
+}
+
 export function buildEdgeRuntimeCommand(
   runnerPath: string,
   options: {
@@ -143,6 +152,7 @@ export class EdgeRuntimeManager {
 
     const edgeFunctionsDir = this.resolveFunctionsDir();
     mkdirSync(edgeFunctionsDir, { recursive: true });
+    const instanceId = crypto.randomUUID();
 
     this.proc = Bun.spawn(edgeRuntimeCommand(runnerPath), {
       env: buildEdgeRuntimeChildEnv(process.env, {
@@ -151,6 +161,7 @@ export class EdgeRuntimeManager {
         EDGE_FUNCTIONS_DIR: edgeFunctionsDir,
         EDGE_FUNCTIONS_BASE_DIR: process.env.EDGE_FUNCTIONS_BASE_DIR || edgeFunctionsDir,
         EDGE_RUNTIME_MASTER_KEY: config.edgeRuntimeMasterKey,
+        EDGE_RUNTIME_INSTANCE_ID: instanceId,
         MANAGEMENT_API_URL: `http://127.0.0.1:${config.port || 9090}`,
       }),
       stdout: "inherit",
@@ -183,7 +194,7 @@ export class EdgeRuntimeManager {
       `[EdgeRuntime] Started pid=${this.proc.pid} port=${this.config.port}`,
     );
 
-    await this.waitForReady();
+    await this.waitForReady(instanceId);
     this.restartCount = 0;
     this.restartDelay = 500;
   }
@@ -196,7 +207,7 @@ export class EdgeRuntimeManager {
     return config.edgeFunctionsDir;
   }
 
-  private async waitForReady(timeout = 15_000) {
+  private async waitForReady(expectedInstanceId: string, timeout = 15_000) {
     const start = Date.now();
     while (Date.now() - start < timeout) {
       const child = this.proc;
@@ -209,7 +220,12 @@ export class EdgeRuntimeManager {
         const res = await fetch(
           `http://127.0.0.1:${this.config.port}/health`,
         );
-        if (res.ok && this.proc === child && child.exitCode === null) return;
+        const payload: unknown = res.ok ? await res.json() : null;
+        if (
+          isEdgeRuntimeReadyResponse(payload, expectedInstanceId)
+          && this.proc === child
+          && child.exitCode === null
+        ) return;
       } catch {
         // Not ready yet
       }

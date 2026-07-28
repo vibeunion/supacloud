@@ -1135,7 +1135,9 @@ export function buildRuntimeServiceRestartPlan(
             ? ["disable-external-edge-runtime", "restart-management"]
             : ["restart-management"];
     }
-    return ["restart-management", "restart-external-edge-runtime"];
+    return externalEdgeRuntimeServiceInstalled
+        ? ["restart-management", "restart-external-edge-runtime"]
+        : ["restart-management"];
 }
 
 async function runRuntimeServiceRestartAction(action: RuntimeServiceRestartAction) {
@@ -1155,7 +1157,7 @@ async function runRuntimeServiceRestartAction(action: RuntimeServiceRestartActio
 }
 
 async function restartServices(mode: EdgeRuntimeMode) {
-    const externalEdgeRuntimeServiceInstalled = mode === "embedded" && await edgeRuntimeServiceIsInstalled();
+    const externalEdgeRuntimeServiceInstalled = await edgeRuntimeServiceIsInstalled();
     for (const action of buildRuntimeServiceRestartPlan(mode, externalEdgeRuntimeServiceInstalled)) {
         await runRuntimeServiceRestartAction(action);
     }
