@@ -992,8 +992,8 @@ describe("installer configuration persistence", () => {
 
     expect(external.status, external.stderr).toBe(0);
     expect(readFileSync(externalCalls, "utf8")).toBe([
-      "systemctl:restart supacloud-edge-runtime",
-      "warn:systemctl restart supacloud-edge-runtime returned non-zero; deferring readiness to the health check",
+      "systemctl:enable --now supacloud-edge-runtime",
+      "warn:systemctl enable --now supacloud-edge-runtime returned non-zero; deferring readiness to the health check",
       "health:http://127.0.0.1:9005/health",
       "",
     ].join("\n"));
@@ -1092,6 +1092,71 @@ describe("installer configuration persistence", () => {
 
     const embeddedDropIn = runRecovery("embedded", "absent");
     expect(readFileSync(embeddedDropIn, "utf8")).toContain("CAP_SETGID CAP_SETUID");
+  });
+
+  test("management recovery disables an installed external runtime before restarting embedded mode", () => {
+    const dir = makeTempDir();
+    const runtimeEnv = join(dir, "management-api.env");
+    const edgeRuntimeEnv = join(dir, "edge-runtime.env");
+    const privilegeDropIn = join(dir, "supacloud.service.d", "50-embedded-edge-privilege.conf");
+    const calls = join(dir, "calls");
+    writeFileSync(runtimeEnv, "EDGE_RUNTIME_MODE=embedded\n");
+
+    const recovery = runBash([
+      "source install.sh",
+      'supacloud_restore_file_snapshot() { return 0; }',
+      'systemctl() { printf "systemctl:%s\\n" "$*" >> "$CALLS"; case "$1" in is-active) return 1 ;; list-unit-files) printf "supacloud-edge-runtime.service disabled\\n" ;; esac; }',
+      'supacloud_wait_http_health() { printf "health:%s\\n" "$1" >> "$CALLS"; }',
+      'recover_management_api_install "$SNAPSHOT" true true',
+    ].join("; "), {
+      CALLS: calls,
+      SNAPSHOT: join(dir, "snapshot"),
+      SUPACLOUD_MANAGEMENT_ENV_FILE: runtimeEnv,
+      SUPACLOUD_EDGE_RUNTIME_ENV_FILE: edgeRuntimeEnv,
+      SUPACLOUD_EMBEDDED_EDGE_PRIVILEGE_DROPIN: privilegeDropIn,
+    });
+
+    expect(recovery.status, recovery.stderr).toBe(0);
+    expect(readFileSync(calls, "utf8")).toContain([
+      "systemctl:daemon-reload",
+      "systemctl:list-unit-files supacloud-edge-runtime.service --no-legend",
+      "systemctl:disable --now supacloud-edge-runtime",
+      "systemctl:start supacloud",
+      "health:http://127.0.0.1:9090/health",
+      "health:http://127.0.0.1:9005/health",
+      "",
+    ].join("\n"));
+    expect(readFileSync(calls, "utf8").indexOf("systemctl:disable --now supacloud-edge-runtime"))
+      .toBeLessThan(readFileSync(calls, "utf8").indexOf("systemctl:start supacloud"));
+  });
+
+  test("management recovery enables external mode after restoring the management service", () => {
+    const dir = makeTempDir();
+    const runtimeEnv = join(dir, "management-api.env");
+    const edgeRuntimeEnv = join(dir, "edge-runtime.env");
+    const privilegeDropIn = join(dir, "supacloud.service.d", "50-embedded-edge-privilege.conf");
+    const calls = join(dir, "calls");
+    writeFileSync(runtimeEnv, "EDGE_RUNTIME_MODE=external\n");
+
+    const recovery = runBash([
+      "source install.sh",
+      'supacloud_restore_file_snapshot() { return 0; }',
+      'systemctl() { printf "systemctl:%s\\n" "$*" >> "$CALLS"; if [[ "$1" == "is-active" ]]; then return 1; fi; return 0; }',
+      'supacloud_wait_http_health() { printf "health:%s\\n" "$1" >> "$CALLS"; }',
+      'recover_management_api_install "$SNAPSHOT" true true',
+    ].join("; "), {
+      CALLS: calls,
+      SNAPSHOT: join(dir, "snapshot"),
+      SUPACLOUD_MANAGEMENT_ENV_FILE: runtimeEnv,
+      SUPACLOUD_EDGE_RUNTIME_ENV_FILE: edgeRuntimeEnv,
+      SUPACLOUD_EMBEDDED_EDGE_PRIVILEGE_DROPIN: privilegeDropIn,
+    });
+
+    expect(recovery.status, recovery.stderr).toBe(0);
+    const recoveryCalls = readFileSync(calls, "utf8");
+    expect(recoveryCalls).toContain("systemctl:enable --now supacloud-edge-runtime");
+    expect(recoveryCalls.indexOf("systemctl:start supacloud"))
+      .toBeLessThan(recoveryCalls.indexOf("systemctl:enable --now supacloud-edge-runtime"));
   });
 
   test("pgredis transaction restores the previous data plane after a later install failure", () => {

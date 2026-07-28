@@ -170,7 +170,7 @@ describe("sdkProxyRoutes functions proxy", () => {
 
       expect(response.status).toBe(200);
       expect(calls).toHaveLength(1);
-      expect(calls[0]?.url).toBe("http://127.0.0.1:9000/functions/v1/hello");
+      expect(calls[0]?.url).toBe("http://127.0.0.1:9005/functions/v1/hello");
       expect(calls[0]?.init?.duplex).toBe("half");
     });
   });
@@ -188,7 +188,7 @@ describe("sdkProxyRoutes functions proxy", () => {
 
       expect(response.status).toBe(200);
       expect(calls).toHaveLength(1);
-      expect(calls[0]?.url).toBe("http://127.0.0.1:9000/functions/v1/health");
+      expect(calls[0]?.url).toBe("http://127.0.0.1:9005/functions/v1/health");
     });
   });
 
@@ -1309,7 +1309,7 @@ describe("sdkProxyRoutes functions proxy", () => {
 
       expect(response.status).toBe(200);
       expect(calls).toHaveLength(1);
-      expect(calls[0]?.url).toBe("http://127.0.0.1:9000/functions/v1/aorist-platform/me/identity");
+      expect(calls[0]?.url).toBe("http://127.0.0.1:9005/functions/v1/aorist-platform/me/identity");
       expect(sawProjectLookup).toBe(true);
     });
   });

@@ -2,7 +2,6 @@ import type { Subprocess } from "bun";
 import { logger } from "../utils/logger";
 import path from "node:path";
 import { existsSync, mkdirSync } from "node:fs";
-import { execSync } from "node:child_process";
 import { config } from "../config";
 
 const EDGE_RUNTIME_CHILD_ENV_KEYS = [
@@ -102,7 +101,6 @@ function edgeRuntimeCommand(runnerPath: string): string[] {
  * The runner uses deno-compat shim to execute user-authored Deno-style functions.
  *
  * Handles lifecycle: start, health check, crash recovery with exponential backoff.
- * Includes port-exclusivity guard to prevent SO_REUSEPORT ghost processes.
  */
 export class EdgeRuntimeManager {
   private proc: Subprocess | null = null;
@@ -138,58 +136,10 @@ export class EdgeRuntimeManager {
     );
   }
 
-  /**
-   * Kill any stale processes listening on our target port.
-   * Prevents SO_REUSEPORT ghost processes from co-existing with the new runtime,
-   * which would cause ~50% of requests to be routed to the old (stale) process.
-   */
-  private killStaleListeners(): void {
-    const port = this.config.port;
-    try {
-      // Use fuser (part of psmisc, widely available) or fall back to lsof
-      const out = execSync(
-        `lsof -iTCP:${port} -sTCP:LISTEN -t 2>/dev/null || fuser ${port}/tcp 2>/dev/null || true`,
-        { encoding: "utf-8" },
-      ).trim();
-      if (!out) return;
-
-      const myPid = process.pid;
-      const childPid = this.proc?.pid;
-      const pids = out
-        .split(/[\s\n]+/)
-        .map((s) => parseInt(s.trim(), 10))
-        .filter((p) => !isNaN(p) && p !== myPid && p !== childPid);
-
-      for (const pid of pids) {
-        logger.warn(`[EdgeRuntime] Killing stale listener pid=${pid} on port ${port}`);
-        try { process.kill(pid, "SIGTERM"); } catch { /* already dead */ }
-      }
-
-      if (pids.length > 0) {
-        // Brief wait for graceful shutdown
-        execSync("sleep 0.5");
-        // Force-kill survivors
-        for (const pid of pids) {
-          try {
-            process.kill(pid, 0); // alive check
-            process.kill(pid, "SIGKILL");
-            logger.warn(`[EdgeRuntime] Force-killed stale pid=${pid}`);
-          } catch { /* already gone */ }
-        }
-        logger.info(`[EdgeRuntime] Cleared ${pids.length} stale process(es) on port ${port}`);
-      }
-    } catch {
-      // lsof/fuser may not be installed — best-effort guard
-    }
-  }
-
   async start() {
     this.stopping = false;
 
     const runnerPath = await this.resolveRunnerPath();
-
-    // Kill any orphan processes on the port BEFORE spawning
-    this.killStaleListeners();
 
     const edgeFunctionsDir = this.resolveFunctionsDir();
     mkdirSync(edgeFunctionsDir, { recursive: true });
@@ -249,11 +199,17 @@ export class EdgeRuntimeManager {
   private async waitForReady(timeout = 15_000) {
     const start = Date.now();
     while (Date.now() - start < timeout) {
+      const child = this.proc;
+      if (!child) {
+        throw new Error(
+          `Edge Runtime exited before becoming ready on port ${this.config.port}; the port may be occupied by another service`,
+        );
+      }
       try {
         const res = await fetch(
           `http://127.0.0.1:${this.config.port}/health`,
         );
-        if (res.ok) return;
+        if (res.ok && this.proc === child && child.exitCode === null) return;
       } catch {
         // Not ready yet
       }
@@ -268,7 +224,7 @@ export class EdgeRuntimeManager {
   }
 }
 
-const [, edgeRuntimePortStr] = (config.edgeRuntimeInternal || "127.0.0.1:9000").split(":");
-const edgeRuntimePort = parseInt(edgeRuntimePortStr, 10) || 9000;
+const [, edgeRuntimePortStr] = (config.edgeRuntimeInternal || "127.0.0.1:9005").split(":");
+const edgeRuntimePort = parseInt(edgeRuntimePortStr, 10) || 9005;
 
 export const edgeRuntimeManager = new EdgeRuntimeManager({ port: edgeRuntimePort });

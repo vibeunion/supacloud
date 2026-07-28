@@ -52,6 +52,14 @@ describe("Management pre-start recovery sandbox", () => {
     expect(preStart).not.toContain("ensure_service_containers_running");
   });
 
+  test("does not terminate listeners while recovering the management service", () => {
+    const preStart = readRepoFile("scripts/pre_start_recovery.sh");
+
+    expect(preStart).not.toContain("kill_edge_runtime_zombies");
+    expect(preStart).not.toContain("lsof -iTCP");
+    expect(preStart).not.toContain("kill -9");
+  });
+
   test("keeps container ownership outside the management sandbox", () => {
     const managementUnit = readRepoFile("infrastructure/systemd/supacloud.service");
     const realtimeUnit = readRepoFile("infrastructure/systemd/supacloud-realtime.service");

@@ -187,7 +187,7 @@ const DEFAULT_JWT_SECRET = "super-secret-jwt-token-with-at-least-32-characters-l
 const DEFAULT_DASHBOARD_PASSWORDS = new Set(["supabase", "supacloud", "admin", "password", "changeme"]);
 const DEVELOPMENT_ENVS = new Set(["development", "test"]);
 const isGithubActions = getEnv("GITHUB_ACTIONS") === "true";
-const edgeRuntimePort = Number(getEnv("EDGE_RUNTIME_PORT", "9000"));
+const edgeRuntimePort = Number(getEnv("EDGE_RUNTIME_PORT", "9005"));
 const edgeRuntimeMode = getEnv("EDGE_RUNTIME_MODE", "embedded") === "external" ? "external" : "embedded";
 const dashboardUsername = getEnv("DASHBOARD_USERNAME", getEnv("STUDIO_USERNAME", "admin"));
 const dashboardPassword = getEnv("DASHBOARD_PASSWORD", getEnv("STUDIO_PASSWORD", "supabase"));

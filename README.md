@@ -408,7 +408,7 @@ Function management read endpoints under `/v1/projects/:ref/functions*` require 
 **Edge Runtime Architecture:**
 
 ```
-SupaCloud (:9090)          Edge Runtime (:9000)
+SupaCloud (:9090)          Edge Runtime (EDGE_RUNTIME_PORT, default :9005)
 ├── Management API    ←──  supacloud.service manages by default
 ├── Web Console            ├── Elysia Server
 ├── SSE Log Stream         ├── Worker Thread Pool (4 threads)
@@ -565,7 +565,7 @@ supacloud/
 │   ├── supacloud-lite/          # Bun + PGlite single-project Supabase-compatible runtime
 │   │   └── README.md            # Lite usage, migration, and compatibility guide
 │   ├── edge-runtime/           # Bun Edge Functions runtime
-│   │   ├── server.ts           # Elysia server (:9000) + /preheat endpoint
+│   │   ├── server.ts           # Elysia server (EDGE_RUNTIME_PORT, default :9005) + /preheat endpoint
 │   │   ├── worker-pool.ts      # Fixed-size Worker Thread Pool + preheat()
 │   │   ├── worker-executor.ts  # Function loader + LRU cache + preheat msg
 │   │   ├── deno-compat.ts      # Deno API compatibility shim
@@ -1017,7 +1017,7 @@ curl http://localhost:9090/v1/projects/<ref>/api-keys \
 **Edge Runtime 架构 (Bun 模式):**
 
 ```
-SupaCloud (:9090)          Edge Runtime (:9000)
+SupaCloud (:9090)          Edge Runtime（EDGE_RUNTIME_PORT，默认 :9005）
 ├── Management API    ←──  默认由 supacloud.service 管理
 ├── Web Console            ├── Elysia Server
 ├── SSE 日志流              ├── Worker 线程池 (4 线程，固定)
@@ -1049,7 +1049,7 @@ Caddy 网关 (Admin API 驱动):
 
 完整字段说明、curl 示例（反代、静态托管、HTTPS 上游）、限流 tier、单路径自定义限流，以及自定义路由与租户 CORS 的组合行为，见 [docs/gateway-customization.md](docs/gateway-customization.md)。
 
-默认安装使用 `EDGE_RUNTIME_MODE=embedded`，也就是由 `supacloud.service` 直接拉起 Bun Edge Runtime 子进程。`EDGE_RUNTIME_MODE=external` 时可以改用独立的 `supacloud-edge-runtime.service`，但两种模式不能同时运行，否则会争抢 `9000` 端口。
+默认安装使用 `EDGE_RUNTIME_MODE=embedded`，也就是由 `supacloud.service` 直接拉起 Bun Edge Runtime 子进程。`EDGE_RUNTIME_MODE=external` 时可以改用独立的 `supacloud-edge-runtime.service`，但两种模式不能同时运行，否则会争抢 `EDGE_RUNTIME_PORT`（默认 `9005`）。
 
 `pgredis-runtime` 是独立、仅内部可达的数据面服务。Edge 父进程为每次请求签发短时、项目级 capability；被模块缓存的 Worker 代码只看到稳定的 `globalThis.SupaCloud.pgredis` facade，不会拿到 PostgreSQL 凭据、连接池、L1 状态或 runtime 签名密钥。该服务不经过 Caddy，也不映射宿主机/容器端口；Edge v1 只提供 KV/TTL。已认证运维人员通过 Web Console 或 Management API 代理查看有界运行状态、执行精确键操作及二次确认后的项目命名空间清空，浏览器不会直连 `9010`。平台队列仍唯一使用 PGMQ，网关限流仍唯一由 Caddy 负责。
 
@@ -1137,7 +1137,7 @@ supacloud/
 │   ├── supacloud-lite/          # Bun + PGlite 单项目 Supabase 兼容运行时
 │   │   └── README.md            # Lite 使用、迁移与兼容性说明
 │   ├── edge-runtime/           # Bun 云函数运行时
-│   │   ├── server.ts           # Elysia 服务 (:9000) + /preheat 预热端点
+│   │   ├── server.ts           # Elysia 服务（EDGE_RUNTIME_PORT，默认 :9005）+ /preheat 预热端点
 │   │   ├── worker-pool.ts      # 固定大小 Worker 线程池 + preheat()
 │   │   ├── worker-executor.ts  # 函数加载器 + LRU 缓存 + 预热消息
 │   │   ├── deno-compat.ts      # Deno API 兼容层

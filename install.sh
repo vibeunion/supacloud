@@ -1670,9 +1670,7 @@ Type=simple
 User=supacloud-edge
 Group=supacloud-edge
 WorkingDirectory=/opt/supacloud/edge-runtime
-ExecStartPre=/bin/bash -c 'for pid in \$(lsof -iTCP:${EDGE_RUNTIME_PORT:-9005} -sTCP:LISTEN -t 2>/dev/null); do echo "[EdgeRT] Killing stale pid=\$pid"; kill -9 \$pid 2>/dev/null || true; done; sleep 0.3; true'
 ExecStart=${EXEC_START_CMD}
-ExecStopPost=/bin/bash -c 'for pid in \$(lsof -iTCP:${EDGE_RUNTIME_PORT:-9005} -sTCP:LISTEN -t 2>/dev/null); do kill -9 \$pid 2>/dev/null || true; done; true'
 Restart=always
 RestartSec=5
 Environment=PORT=${EDGE_RUNTIME_PORT:-9005}
@@ -2924,6 +2922,14 @@ capture_management_api_install() {
         supacloud_capture_file_snapshot /etc/systemd/system/supacloud-systemd-unit@.service "${transaction_dir}/systemd-unit-unit"
 }
 
+disable_external_edge_runtime_for_embedded_mode() {
+    if ! systemctl list-unit-files supacloud-edge-runtime.service --no-legend 2>/dev/null \
+        | grep -q '^supacloud-edge-runtime\.service'; then
+        return 0
+    fi
+    systemctl disable --now supacloud-edge-runtime || return 1
+}
+
 recover_management_api_install() {
     local transaction_dir="$1"
     local service_was_active="$2"
@@ -2949,6 +2955,9 @@ recover_management_api_install() {
         configure_management_edge_privilege_dropin "$restored_edge_runtime_mode" || return 1
     fi
     systemctl daemon-reload >/dev/null 2>&1 || return 1
+    if [[ "$restored_edge_runtime_mode" == "embedded" ]]; then
+        disable_external_edge_runtime_for_embedded_mode || return 1
+    fi
     if [[ "$service_was_active" == "true" ]]; then
         systemctl start supacloud >/dev/null 2>&1 || return 1
         supacloud_wait_http_health http://127.0.0.1:9090/health || return 1
@@ -2979,7 +2988,7 @@ ensure_management_edge_runtime_ready() {
         return 1
     fi
     if [[ "$runtime_mode" == "external" ]]; then
-        systemctl restart supacloud-edge-runtime || log_warn "systemctl restart supacloud-edge-runtime returned non-zero; deferring readiness to the health check"
+        systemctl enable --now supacloud-edge-runtime || log_warn "systemctl enable --now supacloud-edge-runtime returned non-zero; deferring readiness to the health check"
     fi
     supacloud_wait_http_health "http://127.0.0.1:${runtime_port}/health"
 }

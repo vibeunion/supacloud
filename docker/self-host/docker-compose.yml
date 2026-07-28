@@ -126,9 +126,9 @@ services:
       CADDY_ADMIN_URL: http://caddy:2019
       MANAGEMENT_API_INTERNAL: management-api:9090
       EDGE_RUNTIME_MODE: external
-      EDGE_RUNTIME_URL: http://edge-runtime:9000
-      EDGE_RUNTIME_INTERNAL: edge-runtime:9000
-      EDGE_RUNTIME_BACKGROUND_INTERNAL: edge-runtime:9000
+      EDGE_RUNTIME_URL: http://edge-runtime:9005
+      EDGE_RUNTIME_INTERNAL: edge-runtime:9005
+      EDGE_RUNTIME_BACKGROUND_INTERNAL: edge-runtime:9005
       EDGE_RUNTIME_MASTER_KEY: ${MASTER_TOKEN}
       EDGE_FUNCTIONS_DIR: /data/functions
       TENANT_CONFIG_DIR: /etc/supabase/tenants
@@ -188,7 +188,7 @@ services:
       pgredis-runtime:
         condition: service_healthy
     environment:
-      PORT: 9000
+      PORT: 9005
       NODE_ENV: production
       MANAGEMENT_API_URL: http://management-api:9090
       MASTER_TOKEN: ${MASTER_TOKEN}
@@ -202,9 +202,9 @@ services:
       - tenant-config:/etc/supabase/tenants
       - functions-data:/data/functions
     ports:
-      - "127.0.0.1:${EDGE_RUNTIME_PORT:-9000}:9000"
+      - "127.0.0.1:${EDGE_RUNTIME_PORT:-9005}:9005"
     healthcheck:
-      test: ["CMD", "bun", "-e", "const r=await fetch('http://127.0.0.1:9000/health'); if(!r.ok) process.exit(1)"]
+      test: ["CMD", "bun", "-e", "const r=await fetch('http://127.0.0.1:9005/health'); if(!r.ok) process.exit(1)"]
       interval: 15s
       timeout: 5s
       retries: 10

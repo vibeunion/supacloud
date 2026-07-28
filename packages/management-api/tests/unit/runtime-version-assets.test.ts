@@ -341,6 +341,17 @@ describe("runtime companion version assets", () => {
     const edgeUnit = readRepoFile("infrastructure/systemd/supacloud-edge-runtime.service");
     const realtimeUnit = readRepoFile("infrastructure/systemd/supacloud-realtime.service");
     const serviceRenderer = readRepoFile("packages/management-api/src/infra/service.ts");
+    const managementConfig = readRepoFile("packages/management-api/src/config.ts");
+    const edgeRuntimeManager = readRepoFile("packages/management-api/src/plugins/edge-runtime-manager.ts");
+    const edgeRuntimeServer = readRepoFile("packages/edge-runtime/server.ts");
+    const sdkProxy = readRepoFile("packages/management-api/src/routes/sdk-proxy.ts");
+    const devCompose = readRepoFile("docker/dev/docker-compose.yml");
+    const devEnv = readRepoFile("docker/dev/.env.example");
+    const selfHostCompose = readRepoFile("docker/self-host/docker-compose.yml");
+    const selfHostEnv = readRepoFile("docker/self-host/.env.example");
+    const selfHostEnvGenerator = readRepoFile("docker/self-host/init-env.py");
+    const edgeDockerfile = readRepoFile("packages/edge-runtime/Dockerfile");
+    const selfHostEdgeDockerfile = readRepoFile("docker/self-host/edge-runtime.Dockerfile");
     const caddyBuilder = readRepoFile("scripts/build_supacloud_caddy.sh");
     const workflow = readRepoFile(".github/workflows/release-please.yml");
 
@@ -352,8 +363,25 @@ describe("runtime companion version assets", () => {
     expect(edgeUnit).toContain("/etc/supabase/edge-runtime.env");
     expect(edgeUnit).not.toContain("/etc/supabase/management-api.env");
     expect(edgeUnit).toContain("ExecStart=/usr/local/bin/supacloud-edge-runtime");
+    expect(edgeUnit).not.toContain("lsof -iTCP");
+    expect(edgeUnit).not.toContain("kill -9");
     expect(installer).toContain("render_edge_runtime_systemd_unit");
     expect(installer).not.toContain('cp "${SYSTEMD_SRC}/supacloud-edge-runtime.service" /etc/systemd/system/supacloud-edge-runtime.service');
+    expect(installer).not.toContain("lsof -iTCP");
+    expect(installer).not.toContain("kill -9 \\${pid}");
+    expect(managementConfig).toContain('getEnv("EDGE_RUNTIME_PORT", "9005")');
+    expect(edgeRuntimeManager).toContain('"127.0.0.1:9005"');
+    expect(edgeRuntimeServer).toContain("|| 9005");
+    expect(sdkProxy).toContain('"127.0.0.1:9005"');
+    expect(devCompose).toContain("- PORT=9005");
+    expect(devCompose).toContain('"${EDGE_RUNTIME_PORT:-9005}:9005"');
+    expect(devEnv).toContain("EDGE_RUNTIME_PORT=9005");
+    expect(selfHostCompose).toContain("EDGE_RUNTIME_INTERNAL: edge-runtime:9005");
+    expect(selfHostCompose).toContain('"127.0.0.1:${EDGE_RUNTIME_PORT:-9005}:9005"');
+    expect(selfHostEnv).toContain("EDGE_RUNTIME_PORT=9005");
+    expect(selfHostEnvGenerator).toContain('"EDGE_RUNTIME_PORT=9005"');
+    expect(edgeDockerfile).toContain("EXPOSE 9005");
+    expect(selfHostEdgeDockerfile).toContain("EXPOSE 9005");
     expect(managementUnit).not.toContain("ReadWritePaths=/etc/supabase /etc/systemd/system ");
     expect(managementUnit).toContain("/run/supacloud-unit-requests");
     expect(managementUnit).toContain("CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER");
@@ -369,7 +397,7 @@ describe("runtime companion version assets", () => {
       'supacloud_restore_file_snapshot "$MANAGEMENT_EDGE_PRIVILEGE_DROPIN" "${transaction_dir}/edge-privilege-dropin"',
     );
     expect(installer.match(/ensure_management_edge_runtime_ready/g)).toHaveLength(3);
-    expect(installer).toContain("systemctl restart supacloud-edge-runtime");
+    expect(installer).toContain("systemctl enable --now supacloud-edge-runtime");
     expect(installer).toContain('http://127.0.0.1:${runtime_port}/health');
     expect(managementUnit).toContain("SystemCallFilter=@system-service @chown");
     expect(managementUnit).not.toContain("@privileged");

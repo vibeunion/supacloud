@@ -791,8 +791,8 @@ const functionsHandler = async ({ request }: any) => {
     if (asyncResponse) return asyncResponse;
 
     const { config } = await import("../config");
-    const [edgeHost, edgePortStr] = (config.edgeRuntimeInternal || "127.0.0.1:9000").split(':');
-    const edgePort = parseInt(edgePortStr, 10) || 9000;
+    const [edgeHost, edgePortStr] = (config.edgeRuntimeInternal || "127.0.0.1:9005").split(':');
+    const edgePort = parseInt(edgePortStr, 10) || 9005;
 
     const url = new URL(request.url);
     // Preserve the /functions/v1 prefix when forwarding to edge-runtime.
