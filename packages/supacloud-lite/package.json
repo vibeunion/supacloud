@@ -5,7 +5,7 @@
   "type": "module",
   "license": "Apache-2.0",
   "bin": {
-    "supacloud-lite": "./dist/cli.js"
+    "supacloud-lite": "dist/cli.js"
   },
   "exports": {
     ".": {
