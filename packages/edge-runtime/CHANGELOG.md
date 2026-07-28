@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.1](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.16.0...edge-runtime-v0.16.1) (2026-07-28)
+
+
+### Bug Fixes
+
+* **edge-runtime:** preserve listener ownership ([71ce079](https://github.com/zuohuadong/supacloud/commit/71ce079729fc9141bdb783d22c6b9ff5e39db0fd))
+
 ## [0.16.0](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.15.0...edge-runtime-v0.16.0) (2026-07-28)
 
 

@@ -90,7 +90,13 @@ describe("PgredisRuntimeService", () => {
       leases: 0,
       lastUsedAt: null,
     });
-    await expect(service.execute("tenant-a", { op: "get", key: "one" })).rejects.toMatchObject({
+    expect(fetchImpl).not.toHaveBeenCalled();
+
+    await expect(service.execute("tenant-a", { op: "get", key: "key-a" })).rejects.toMatchObject({
+      statusCode: 503,
+      code: "PGREDIS_RUNTIME_NOT_CONFIGURED",
+    });
+    await expect(service.flush("tenant-a")).rejects.toMatchObject({
       statusCode: 503,
       code: "PGREDIS_RUNTIME_NOT_CONFIGURED",
     });
@@ -99,11 +105,14 @@ describe("PgredisRuntimeService", () => {
 
   test("does not expose upstream authentication failures", async () => {
     const { service } = serviceWith(() => Response.json({ error: "Unauthorized" }, { status: 401 }));
-    await expect(service.platformStatus()).rejects.toMatchObject({
+    const expectedError = {
       statusCode: 502,
       code: "PGREDIS_UPSTREAM_ERROR",
       message: "Cache data plane proxy failed",
-    });
+    };
+
+    await expect(service.platformStatus()).rejects.toMatchObject(expectedError);
+    await expect(service.projectStatus("tenant-a")).rejects.toMatchObject(expectedError);
   });
 
   test("maps transport failures without swallowing unexpected errors", async () => {
@@ -112,8 +121,13 @@ describe("PgredisRuntimeService", () => {
       statusCode: 503,
       code: "PGREDIS_RUNTIME_UNAVAILABLE",
     });
+    await expect(transportFailure.projectStatus("tenant-a")).rejects.toMatchObject({
+      statusCode: 503,
+      code: "PGREDIS_RUNTIME_UNAVAILABLE",
+    });
 
     const unexpectedFailure = serviceWith(() => { throw new Error("programmer error"); }).service;
     await expect(unexpectedFailure.platformStatus()).rejects.toThrow("programmer error");
+    await expect(unexpectedFailure.projectStatus("tenant-a")).rejects.toThrow("programmer error");
   });
 });

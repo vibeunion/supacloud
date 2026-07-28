@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.8.0](https://github.com/zuohuadong/supacloud/compare/supacloud-v0.7.6...supacloud-v0.8.0) (2026-07-28)
+
+
+### Features
+
+* **console:** reorganize navigation hierarchy ([303326c](https://github.com/zuohuadong/supacloud/commit/303326cfa8ebb5df860c77f21fbad15bc799e0bb))
+
+
+### Miscellaneous Chores
+
+* release main ([#617](https://github.com/zuohuadong/supacloud/issues/617)) ([45e6527](https://github.com/zuohuadong/supacloud/commit/45e6527d49329903237a6298bfefce27ed1466d4))
+
 ## [0.7.6](https://github.com/zuohuadong/supacloud/compare/supacloud-v0.7.5...supacloud-v0.7.6) (2026-07-22)
 
 
