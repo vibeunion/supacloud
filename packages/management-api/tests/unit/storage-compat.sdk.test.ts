@@ -74,6 +74,8 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
       body: JSON.stringify(body),
     });
 
+    expect((await post("CreateVectorBucket", { vectorBucketName: 12345 })).status).toBe(400);
+    expect((await post("CreateVectorBucket", null as unknown as Record<string, unknown>)).status).toBe(400);
     expect((await post("CreateVectorBucket", { vectorBucketName: "embeddings" })).status).toBe(200);
     expect(await (await post("ListVectorBuckets", {})).json()).toMatchObject({
       vectorBuckets: [{ vectorBucketName: "embeddings" }],
@@ -85,6 +87,41 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
       dimension: 3,
       distanceMetric: "cosine",
     })).status).toBe(200);
+    expect((await post("CreateIndex", {
+      vectorBucketName: "embeddings",
+      indexName: "bad-metadata-null",
+      dataType: "float32",
+      dimension: 3,
+      distanceMetric: "cosine",
+      metadataConfiguration: null,
+    })).status).toBe(400);
+    expect((await post("CreateIndex", {
+      vectorBucketName: "embeddings",
+      indexName: "bad-metadata-string",
+      dataType: "float32",
+      dimension: 3,
+      distanceMetric: "cosine",
+      metadataConfiguration: "invalid",
+    })).status).toBe(400);
+    expect((await post("QueryVectors", {
+      vectorBucketName: "embeddings",
+      indexName: "documents-openai",
+      queryVector: { float32: [1, 0, 0] },
+      filter: [],
+    })).status).toBe(400);
+    expect((await post("QueryVectors", {
+      vectorBucketName: "embeddings",
+      indexName: "documents-openai",
+      queryVector: { float32: [1, 0, 0] },
+      filter: { $wat: 1 },
+    })).status).toBe(400);
+    expect((await post("CreateIndex", {
+      vectorBucketName: "embeddings",
+      indexName: "numeric-dimension",
+      dataType: "float32",
+      dimension: "3",
+      distanceMetric: "cosine",
+    })).status).toBe(400);
     expect((await post("PutVectors", {
       vectorBucketName: "embeddings",
       indexName: "documents-openai",
@@ -102,6 +139,12 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
       returnDistance: true,
       returnMetadata: true,
     })).json()).toEqual({ vectors: [{ key: "a", distance: 0, metadata: { kind: "docs" } }] });
+    expect((await post("QueryVectors", {
+      vectorBucketName: "embeddings",
+      indexName: "documents-openai",
+      queryVector: { float32: [1, 0, 0] },
+      topK: "1",
+    })).status).toBe(400);
     expect(await (await post("GetVectors", {
       vectorBucketName: "embeddings",
       indexName: "documents-openai",
@@ -109,6 +152,17 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
       returnData: true,
       returnMetadata: true,
     })).json()).toEqual({ vectors: [{ key: "a", data: { float32: [1, 0, 0] }, metadata: { kind: "docs" } }] });
+    expect((await post("GetVectors", {
+      vectorBucketName: "embeddings",
+      indexName: "documents-openai",
+      keys: [1],
+    })).status).toBe(400);
+    expect((await post("GetVectors", {
+      vectorBucketName: "embeddings",
+      indexName: "documents-openai",
+      keys: ["a"],
+      returnData: "true",
+    })).status).toBe(400);
   });
 
   test("works through the current official supabase-js vector client", async () => {
@@ -140,6 +194,35 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
     });
     expect(query.error).toBeNull();
     expect(query.data?.vectors).toEqual([{ key: "doc-1", distance: 0, metadata: { title: "One" } }]);
+  });
+
+  test("accepts the official optional topK and dotproduct index contract", async () => {
+    storageVectorInternals.resetMockStore();
+    const client = createClient(BASE, "test-token", {
+      auth: { persistSession: false, autoRefreshToken: false },
+      global: {
+        fetch: (input, init) => testApp.handle(new Request(input, init)),
+      },
+    });
+    expect((await client.storage.vectors.createBucket("dot-bucket")).error).toBeNull();
+    const bucket = client.storage.vectors.from("dot-bucket");
+    expect((await bucket.createIndex({
+      indexName: "dot-index",
+      dataType: "float32",
+      dimension: 2,
+      distanceMetric: "dotproduct",
+    })).error).toBeNull();
+
+    const index = bucket.index("dot-index");
+    expect((await index.putVectors({
+      vectors: [{ key: "doc-1", data: { float32: [1, 0] } }],
+    })).error).toBeNull();
+    const query = await index.queryVectors({
+      queryVector: { float32: [1, 0] },
+      returnDistance: true,
+    });
+    expect(query.error).toBeNull();
+    expect(query.data?.vectors).toEqual([{ key: "doc-1", distance: 0 }]);
   });
 
   test("TUS capabilities advertise the default 500 MiB upload limit", async () => {

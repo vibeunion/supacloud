@@ -50,6 +50,39 @@ export function validateStockPasskeyConfig(authConfig: Record<string, unknown>):
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizedConfigKey(key: string): string {
+  return key.toLowerCase().replace(/[\s_-]/g, "");
+}
+
+/**
+ * The local runtime supports stock GoTrue Passkeys, but not MFA WebAuthn
+ * enrollment/verification. Reject those write shapes instead of persisting
+ * settings that GoTrue will silently ignore.
+ */
+export function requestsUnavailableWebAuthnMfaConfig(authConfig: Record<string, unknown>): boolean {
+  for (const [key, value] of Object.entries(authConfig)) {
+    const normalizedKey = normalizedConfigKey(key);
+    if (normalizedKey.startsWith("mfawebauthn")) return true;
+    if (normalizedKey === "mfa" && isRecord(value)) {
+      if (Object.keys(value).some((nestedKey) => normalizedConfigKey(nestedKey) === "webauthn")) return true;
+    }
+  }
+  return false;
+}
+
+export function unavailableWebAuthnMfaConfigBody() {
+  return {
+    code: "CAPABILITY_UNAVAILABLE",
+    feature: "auth_webauthn_mfa",
+    message: "MFA WebAuthn enrollment and verification are not available in this runtime",
+    experimental: true,
+  };
+}
+
 export function passkeyConfigValidationBody(error: PasskeyConfigValidationError) {
   return {
     code: error.code,

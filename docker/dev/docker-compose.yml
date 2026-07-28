@@ -90,6 +90,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      victorialogs:
+        condition: service_started
     command: ["sh", "-lc", "bun run src/index.ts --init-db && exec bun run src/index.ts"]
     environment:
       - PORT=9090
@@ -123,15 +125,34 @@ services:
       - PGREDIS_RUNTIME_INTERNAL_URL=http://pgredis-runtime:9010
       - PGREDIS_RUNTIME_INTERNAL_TOKEN=${PGREDIS_RUNTIME_INTERNAL_TOKEN}
       - PGREDIS_RUNTIME_INTERNAL_TIMEOUT_MS=${PGREDIS_RUNTIME_INTERNAL_TIMEOUT_MS:-5000}
+      - SUPACLOUD_LOGS_ENABLED=true
+      - SUPACLOUD_LOG_COLLECTOR_JOURNAL_ENABLED=false
+      - EDGE_FUNCTIONS_DIR=/opt/supacloud/functions
+      - VICTORIALOGS_URL=http://victorialogs:9428
+      - SUPACLOUD_PIPELINE_RUNTIME_MODE=unavailable
     ports:
       - "${API_PORT:-9090}:9090"
       - "${JIT_DATABASE_GATEWAY_PORT_RANGE:-6600-6699}:${JIT_DATABASE_GATEWAY_PORT_RANGE:-6600-6699}"
     volumes:
       - tenant-config:/etc/supabase/tenants
       - pgredis-tenant-config:/etc/supabase/pgredis-tenants
+      - ../../supabase/functions:/opt/supacloud/functions:ro
+      - log-collector-state:/var/lib/supacloud/log-collector
     networks:
       - supacloud-dev
       - edge-pgredis
+
+  victorialogs:
+    image: victoriametrics/victoria-logs:v1.52.0
+    restart: always
+    command:
+      - -storageDataPath=/victoria-logs-data
+      - -retentionPeriod=${VICTORIALOGS_RETENTION:-7d}
+      - -httpListenAddr=:9428
+    volumes:
+      - victorialogs-data:/victoria-logs-data
+    networks:
+      - supacloud-dev
 
   edge-runtime:
     build:
@@ -192,6 +213,8 @@ volumes:
   pgredis-tenant-config:
   caddy-data:
   caddy-config:
+  victorialogs-data:
+  log-collector-state:
 
 networks:
   supacloud-dev:

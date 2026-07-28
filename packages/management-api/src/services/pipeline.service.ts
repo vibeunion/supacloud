@@ -1,4 +1,4 @@
-import { mkdir, rm } from "node:fs/promises";
+import { chmod, chown, mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { config } from "../config";
 import { getProjectDb, sql } from "../db";
@@ -9,6 +9,8 @@ const NAME = /^[A-Za-z0-9][A-Za-z0-9 _.-]{0,99}$/;
 const GCP_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const PIPELINE_ROOT = process.env.SUPACLOUD_PIPELINE_CONFIG_DIR || "/etc/supabase/pipelines";
 const PIPELINE_UNIT = "supacloud-pipeline@";
+const PIPELINE_CONTAINER_UID = 65_532;
+const PIPELINE_RUNTIME_MODE = process.env.SUPACLOUD_PIPELINE_RUNTIME_MODE || "systemd";
 let schemaReady: Promise<void> | null = null;
 
 export type PipelineInput = ReturnType<typeof normalizePipelineInput>;
@@ -190,6 +192,22 @@ export function buildReplicationRoleStatement(username: string) {
   return `ALTER ROLE "${username}" WITH REPLICATION`;
 }
 
+export function pipelineContainerDatabaseHost(host: string): string {
+  return ["127.0.0.1", "localhost", "::1", "[::1]"].includes(host.trim().toLowerCase())
+    ? "host.containers.internal"
+    : host;
+}
+
+export function assertPipelineRuntimeAvailable(mode = PIPELINE_RUNTIME_MODE): void {
+  if (mode !== "systemd") {
+    throw new PipelineError(
+      "Pipelines require the host systemd/Podman runtime and are unavailable in this deployment profile",
+      501,
+      "pipeline_runtime_unavailable",
+    );
+  }
+}
+
 async function ensureReplicationRole(database: string, username: string) {
   const projectDb = getProjectDb(database);
   const [role] = await projectDb`SELECT rolreplication FROM pg_roles WHERE rolname = ${username}`;
@@ -200,6 +218,7 @@ async function ensureReplicationRole(database: string, username: string) {
 }
 
 async function runSystemctl(action: "start" | "stop" | "restart" | "is-active", runtimeId: number) {
+  assertPipelineRuntimeAvailable();
   const unit = `${PIPELINE_UNIT}${runtimeId}.service`;
   const process = Bun.spawn(["systemctl", action, unit], { stdout: "pipe", stderr: "pipe" });
   const [exitCode, stderr] = await Promise.all([process.exited, new Response(process.stderr).text()]);
@@ -225,16 +244,17 @@ async function writeRuntimeConfig(row: Record<string, unknown>) {
     slot_recovery: settings.slot_recovery as "error" | "recreate" | undefined,
   });
   const directory = join(PIPELINE_ROOT, String(row.runtime_id));
-  await mkdir(directory, { recursive: true, mode: 0o700 });
+  await mkdir(directory, { recursive: true, mode: 0o750 });
   const target = join(directory, "prod.json");
   await Bun.write(target, renderSupabaseEtlConfig({
     runtimeId: Number(row.runtime_id),
-    source: { host: config.pgHost, port: config.pgPort, ...credentials },
+    source: { host: pipelineContainerDatabaseHost(config.pgHost), port: config.pgPort, ...credentials },
     input: normalized,
   }));
-  await Bun.spawn(["chmod", "600", target]).exited;
-  const chown = Bun.spawn(["chown", "-R", "supacloud-edge:supacloud-edge", directory], { stdout: "ignore", stderr: "ignore" });
-  await chown.exited;
+  await chmod(directory, 0o750);
+  await chmod(target, 0o640);
+  await chown(directory, PIPELINE_CONTAINER_UID, PIPELINE_CONTAINER_UID);
+  await chown(target, PIPELINE_CONTAINER_UID, PIPELINE_CONTAINER_UID);
 }
 
 function publicPipeline(row: Record<string, unknown>, runtimeState?: string) {
@@ -260,6 +280,7 @@ export const pipelineService = {
 
   async create(ref: string, raw: Parameters<typeof normalizePipelineInput>[0]) {
     await ensureSchema();
+    assertPipelineRuntimeAvailable();
     const input = normalizePipelineInput(raw);
     const credentials = await projectCredentials(ref);
     await assertPublicationReady(credentials.database, input.publication_name);

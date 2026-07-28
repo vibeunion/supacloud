@@ -1,9 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
+  assertPostgresUpgradeScopeUnchanged,
   buildPostgresMajorUpgradePlan,
   buildPostgresUpgradeScopeSnapshot,
   canTransitionPostgresUpgrade,
   normalizePostgresMajor,
+  parsePostgresUpgradeScopeDatabases,
+  publicPostgresUpgradeStatus,
   summarizePostgresUpgradePreflight,
   isTrustedExecutorMetadata,
   shouldRecoverPostgresUpgrade,
@@ -43,6 +46,8 @@ describe("PostgreSQL major upgrade workflow", () => {
     expect(canTransitionPostgresUpgrade("preflight_running", "awaiting_approval")).toBe(true);
     expect(canTransitionPostgresUpgrade("awaiting_approval", "backup_running")).toBe(true);
     expect(canTransitionPostgresUpgrade("upgrade_running", "rollback_running")).toBe(true);
+    expect(canTransitionPostgresUpgrade("manual_recovery_required", "rollback_requested")).toBe(true);
+    expect(canTransitionPostgresUpgrade("rollback_requested", "rollback_running")).toBe(true);
     expect(canTransitionPostgresUpgrade("succeeded", "upgrade_running")).toBe(false);
     expect(canTransitionPostgresUpgrade("draft", "succeeded")).toBe(false);
   });
@@ -56,9 +61,37 @@ describe("PostgreSQL major upgrade workflow", () => {
 
   test("never blindly resumes an interrupted provider execution", () => {
     expect(shouldRecoverPostgresUpgrade("backup_running")).toBe(true);
+    expect(shouldRecoverPostgresUpgrade("rollback_requested")).toBe(true);
     expect(shouldRecoverPostgresUpgrade("upgrade_running")).toBe(false);
     expect(shouldRecoverPostgresUpgrade("validating")).toBe(true);
     expect(shouldRecoverPostgresUpgrade("rollback_running")).toBe(false);
+  });
+
+  test("redacts cluster-wide upgrade evidence from project-scoped status", () => {
+    const status = publicPostgresUpgradeStatus({
+      id: "upgrade-1",
+      requested_project_ref: "project-a",
+      current_major: 15,
+      target_major: 17,
+      status: "manual_recovery_required",
+      scope_snapshot: { projects: [{ ref: "project-b", database_name: "secret-db" }] },
+      backup_evidence: { backup_id: "secret-backup" },
+      executor_evidence: { stdout: "secret" },
+      error_message: "secret failure details",
+      lease_token: "secret-token",
+    }, "project-a");
+
+    expect(status).toEqual({
+      id: "upgrade-1",
+      status: "manual_recovery_required",
+      capability: true,
+      available: true,
+      scope: "cluster",
+      current_version: "15",
+      target_version: "17",
+      upgrade_status: "manual_recovery_required",
+      requested_by_current_project: true,
+    });
   });
 
   test("captures every active project in the cluster backup scope", () => {
@@ -74,5 +107,32 @@ describe("PostgreSQL major upgrade workflow", () => {
       ],
       captured_at: "2026-07-28T00:00:00.000Z",
     });
+  });
+
+  test("requires a complete unique per-project validation scope", () => {
+    expect(parsePostgresUpgradeScopeDatabases({
+      project_count: 2,
+      projects: [
+        { ref: "project-a", database_name: "supa_project_a" },
+        { ref: "project-b", database_name: "supa_project_b" },
+      ],
+    })).toEqual([
+      { ref: "project-a", databaseName: "supa_project_a" },
+      { ref: "project-b", databaseName: "supa_project_b" },
+    ]);
+    expect(() => parsePostgresUpgradeScopeDatabases({
+      project_count: 2,
+      projects: [
+        { ref: "project-a", database_name: "supa_project_a" },
+        { ref: "project-b", database_name: "supa_project_a" },
+      ],
+    })).toThrow("duplicate");
+    expect(() => assertPostgresUpgradeScopeUnchanged({
+      project_count: 1,
+      projects: [{ ref: "project-a", database_name: "supa_project_a" }],
+    }, [
+      { ref: "project-a", db_name: "supa_project_a" },
+      { ref: "project-new", db_name: "supa_project_new" },
+    ])).toThrow("scope changed");
   });
 });

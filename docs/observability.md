@@ -1,6 +1,6 @@
 # 可选 Grafana 的日志基线
 
-SupaCloud 的默认日志基线是 **VictoriaLogs + 内置采集器**。VictoriaLogs 是单个原生 systemd 服务；日志采集运行在既有的 SupaCloud 管理进程中，不新增 Vector、Logflare、Analytics 或日志采集容器。它独立于 PostgreSQL、Pigsty 和 Grafana，适用于完整平台安装以及单独部署 PostgreSQL 的主机。
+SupaCloud 的默认日志基线是 **VictoriaLogs + 内置采集器**。主机安装使用单个原生 systemd 服务；Docker Compose 部署使用固定版本的独立 VictoriaLogs 容器和持久卷。日志采集仍运行在既有的 SupaCloud 管理进程中，不新增 Vector、Logflare、Analytics 或日志采集容器。它独立于 PostgreSQL、Pigsty 和 Grafana。
 
 ```text
 systemd journal
@@ -33,7 +33,7 @@ Edge Function .logs
 
 `VICTORIALOGS_DATA_DIR` 只能设置为 `/var/lib/supacloud/` 下的非符号链接目录；安装器会拒绝根目录、`..` 路径和符号链接。管理 API 仅读取允许的 unit 和函数日志文件，不挂载或运行任何额外日志采集容器。
 
-安装器只注册 `supacloud-victorialogs.service` 这一个新增日志服务。可用以下命令检查：
+主机安装器只注册 `supacloud-victorialogs.service` 这一个新增日志服务。Compose 则通过内部地址 `http://victorialogs:9428` 连接同版本日志库，且不向宿主机暴露 9428。Compose 不读取容器内不存在的 systemd journal；管理 API 继续独立轮询共享的项目函数日志目录，并把游标保存在持久卷中。可用以下命令检查主机服务：
 
 ```bash
 systemctl status supacloud-victorialogs

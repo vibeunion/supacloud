@@ -35,6 +35,8 @@ import {
   canonicalizeStockPasskeyConfig,
   PasskeyConfigValidationError,
   passkeyConfigValidationBody,
+  requestsUnavailableWebAuthnMfaConfig,
+  unavailableWebAuthnMfaConfigBody,
   validateStockPasskeyConfig,
 } from "../services/auth-product-boundary";
 import {
@@ -778,6 +780,9 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
       }
 
       const currentAuth = (settings.auth as Record<string, unknown>) || {};
+      if (requestsUnavailableWebAuthnMfaConfig(body as Record<string, unknown>)) {
+        return status(501, unavailableWebAuthnMfaConfigBody());
+      }
       const sanitizedBody = preserveMaskedAuthSecrets(
         body as Record<string, unknown>,
         currentAuth,

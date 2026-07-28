@@ -1,7 +1,7 @@
 import type { SQL } from "bun";
 import { getProjectDb, resolveDbName } from "../db";
 
-type DistanceMetric = "cosine" | "euclidean";
+type DistanceMetric = "cosine" | "euclidean" | "dotproduct";
 type VectorMetadata = Record<string, string | number | boolean | Array<string | number | boolean>>;
 type VectorData = { float32: number[] };
 
@@ -64,9 +64,27 @@ const initializedDatabases = new Map<string, Promise<void>>();
 const MAX_BUCKETS = 100;
 const MAX_INDEXES_PER_BUCKET = 10;
 const MAX_BATCH_SIZE = 500;
-const MAX_PAGE_SIZE = 500;
+const DEFAULT_LIST_PAGE_SIZE = 100;
+const DEFAULT_VECTOR_PAGE_SIZE = 500;
+const MAX_PAGE_SIZE = 1000;
 const MAX_DIMENSION = 4096;
-const INDEX_NAME = /^[a-z0-9](?:[a-z0-9.-]{1,43})?[a-z0-9]$/;
+export const MAX_VECTOR_VALUES_PER_INDEX = 1_000_000;
+const INDEX_NAME = /^[a-z0-9](?:[a-z0-9.-]{1,61})?[a-z0-9]$/;
+
+export function maxVectorsForDimension(dimension: number): number {
+  return Math.max(1, Math.floor(MAX_VECTOR_VALUES_PER_INDEX / dimension));
+}
+
+function ensureVectorCapacity(currentCount: number, newKeyCount: number, dimension: number): void {
+  const limit = maxVectorsForDimension(dimension);
+  if (currentCount + newKeyCount > limit) {
+    throw new StorageVectorError(
+      `Vector index capacity exceeded: dimension ${dimension} supports at most ${limit} vectors in the experimental exact-scan data plane`,
+      409,
+      "MaxVectorsExceededException",
+    );
+  }
+}
 
 function badRequest(message: string): never {
   throw new StorageVectorError(message, 400, "ValidationException");
@@ -94,10 +112,18 @@ function validateIndexInput(input: CreateVectorIndexInput): void {
   if (!Number.isInteger(input.dimension) || input.dimension < 1 || input.dimension > MAX_DIMENSION) {
     badRequest(`dimension must be an integer between 1 and ${MAX_DIMENSION}`);
   }
-  if (input.distanceMetric !== "cosine" && input.distanceMetric !== "euclidean") {
-    badRequest("distanceMetric must be 'cosine' or 'euclidean'");
+  if (!["cosine", "euclidean", "dotproduct"].includes(input.distanceMetric)) {
+    badRequest("distanceMetric must be 'cosine', 'euclidean', or 'dotproduct'");
   }
-  const keys = input.metadataConfiguration?.nonFilterableMetadataKeys;
+  const metadataConfiguration = input.metadataConfiguration as unknown;
+  if (metadataConfiguration !== undefined && (
+    metadataConfiguration === null
+    || typeof metadataConfiguration !== "object"
+    || Array.isArray(metadataConfiguration)
+  )) {
+    badRequest("metadataConfiguration must be an object");
+  }
+  const keys = (metadataConfiguration as { nonFilterableMetadataKeys?: unknown } | undefined)?.nonFilterableMetadataKeys;
   if (keys !== undefined) {
     if (!Array.isArray(keys) || keys.length < 1 || keys.length > 10 || new Set(keys).size !== keys.length) {
       badRequest("nonFilterableMetadataKeys must contain 1-10 unique keys");
@@ -105,6 +131,58 @@ function validateIndexInput(input: CreateVectorIndexInput): void {
     if (keys.some((key) => typeof key !== "string" || key.length < 1 || key.length > 63)) {
       badRequest("non-filterable metadata keys must contain 1-63 characters");
     }
+  }
+}
+
+type FilterPrimitive = string | number | boolean;
+
+function isFilterPrimitive(value: unknown): value is FilterPrimitive {
+  return typeof value === "string"
+    || typeof value === "boolean"
+    || (typeof value === "number" && Number.isFinite(value));
+}
+
+function validateFilter(filter: unknown, allowAbsent = true): void {
+  if (filter === undefined || filter === null) {
+    if (allowAbsent) return;
+    badRequest("filter conditions must be non-null objects");
+  }
+  if (typeof filter !== "object" || Array.isArray(filter)) badRequest("filter must be an object");
+  const entries = Object.entries(filter as Record<string, unknown>);
+  if (entries.length === 0) badRequest("filter must contain at least one condition");
+  for (const [key, condition] of entries) {
+    if (key === "$and" || key === "$or") {
+      if (!Array.isArray(condition) || condition.length === 0) badRequest(`${key} must be a non-empty array`);
+      condition.forEach((child) => validateFilter(child, false));
+      continue;
+    }
+    if (key.startsWith("$")) badRequest(`Unsupported metadata filter operator '${key}'`);
+    if (condition && typeof condition === "object" && !Array.isArray(condition)) {
+      const operators = Object.entries(condition as Record<string, unknown>);
+      if (operators.length === 0) badRequest("metadata filter condition must not be empty");
+      for (const [operator, expected] of operators) {
+        if (!["$eq", "$ne", "$gt", "$gte", "$lt", "$lte", "$in", "$nin", "$exists"].includes(operator)) {
+          badRequest(`Unsupported metadata filter operator '${operator}'`);
+        }
+        if (["$eq", "$ne"].includes(operator) && !isFilterPrimitive(expected)) {
+          badRequest(`${operator} must contain a string, number, or boolean`);
+        }
+        if (["$gt", "$gte", "$lt", "$lte"].includes(operator)
+          && (typeof expected !== "number" || !Number.isFinite(expected))) {
+          badRequest(`${operator} must contain a finite number`);
+        }
+        if (operator === "$in" || operator === "$nin") {
+          if (!Array.isArray(expected) || expected.length === 0 || expected.some((value) => !isFilterPrimitive(value))) {
+            badRequest(`${operator} must contain a non-empty array of strings, numbers, or booleans`);
+          }
+        }
+        if (operator === "$exists" && typeof expected !== "boolean") {
+          badRequest("$exists must contain a boolean");
+        }
+      }
+      continue;
+    }
+    if (!isFilterPrimitive(condition)) badRequest("metadata filter values must be strings, numbers, or booleans");
   }
 }
 
@@ -117,6 +195,15 @@ function validateVectorData(data: unknown, dimension: number, field: string): nu
     badRequest(`${field}.float32 must contain only finite numbers`);
   }
   return values;
+}
+
+function validateVectorKeys(keys: unknown): asserts keys is string[] {
+  if (!Array.isArray(keys) || keys.length < 1 || keys.length > MAX_BATCH_SIZE) {
+    badRequest(`keys must contain 1-${MAX_BATCH_SIZE} items`);
+  }
+  if (keys.some((key) => typeof key !== "string" || key.length < 1 || key.length > 1024)) {
+    badRequest("keys must contain only 1-1024 character strings");
+  }
 }
 
 function validateMetadata(metadata: unknown): asserts metadata is VectorMetadata | undefined {
@@ -140,12 +227,16 @@ function validateMetadata(metadata: unknown): asserts metadata is VectorMetadata
   }
 }
 
-function normalizePageSize(value: unknown): number {
-  if (value === undefined) return MAX_PAGE_SIZE;
+function normalizePageSize(value: unknown, defaultValue: number): number {
+  if (value === undefined) return defaultValue;
   if (!Number.isInteger(value) || Number(value) < 1 || Number(value) > MAX_PAGE_SIZE) {
     badRequest(`maxResults must be an integer between 1 and ${MAX_PAGE_SIZE}`);
   }
   return Number(value);
+}
+
+function normalizeStoredDistanceMetric(value: unknown): DistanceMetric {
+  return value === "euclidean" || value === "dotproduct" ? value : "cosine";
 }
 
 function normalizeSegment(input: SegmentInput): { count: number; index: number } | undefined {
@@ -269,7 +360,7 @@ async function getDatabaseIndex(ref: string, bucketName: string, indexName: stri
     name: String(row.name),
     dataType: "float32",
     dimension: Number(row.dimension),
-    distanceMetric: row.distance_metric === "euclidean" ? "euclidean" : "cosine",
+    distanceMetric: normalizeStoredDistanceMetric(row.distance_metric),
     metadataConfiguration: row.metadata_configuration as IndexRecord["metadataConfiguration"],
     createdAt: new Date(row.created_at as string | number | Date),
     vectors: new Map(),
@@ -283,15 +374,16 @@ async function getIndex(ref: string, bucketName: string, indexName: string): Pro
 }
 
 function comparePrimitive(left: unknown, operator: string, right: unknown): boolean {
+  const leftValues = Array.isArray(left) ? left : [left];
   switch (operator) {
-    case "$eq": return left === right;
-    case "$ne": return left !== right;
-    case "$gt": return typeof left === typeof right && (left as number | string) > (right as number | string);
-    case "$gte": return typeof left === typeof right && (left as number | string) >= (right as number | string);
-    case "$lt": return typeof left === typeof right && (left as number | string) < (right as number | string);
-    case "$lte": return typeof left === typeof right && (left as number | string) <= (right as number | string);
-    case "$in": return Array.isArray(right) && right.includes(left);
-    case "$nin": return Array.isArray(right) && !right.includes(left);
+    case "$eq": return leftValues.some((value) => value === right);
+    case "$ne": return leftValues.every((value) => value !== right);
+    case "$gt": return !Array.isArray(left) && typeof left === "number" && typeof right === "number" && left > right;
+    case "$gte": return !Array.isArray(left) && typeof left === "number" && typeof right === "number" && left >= right;
+    case "$lt": return !Array.isArray(left) && typeof left === "number" && typeof right === "number" && left < right;
+    case "$lte": return !Array.isArray(left) && typeof left === "number" && typeof right === "number" && left <= right;
+    case "$in": return Array.isArray(right) && leftValues.some((value) => right.includes(value));
+    case "$nin": return Array.isArray(right) && leftValues.every((value) => !right.includes(value));
     case "$exists": return Boolean(right) === (left !== undefined);
     default: badRequest(`Unsupported metadata filter operator '${operator}'`);
   }
@@ -310,7 +402,6 @@ function matchesFilter(metadata: VectorMetadata | undefined, filter: unknown): b
       if (!Array.isArray(condition)) badRequest("$or must be an array");
       return condition.some((child) => matchesFilter(metadata, child));
     }
-    if (key === "$not") return !matchesFilter(metadata, condition);
     if (key.startsWith("$")) badRequest(`Unsupported metadata filter operator '${key}'`);
 
     const value = metadata?.[key];
@@ -318,7 +409,7 @@ function matchesFilter(metadata: VectorMetadata | undefined, filter: unknown): b
       return Object.entries(condition as Record<string, unknown>)
         .every(([operator, expected]) => comparePrimitive(value, operator, expected));
     }
-    return value === condition;
+    return comparePrimitive(value, "$eq", condition);
   });
 }
 
@@ -348,6 +439,7 @@ function distance(metric: DistanceMetric, left: number[], right: number[]): numb
     leftNorm += left[index]! ** 2;
     rightNorm += right[index]! ** 2;
   }
+  if (metric === "dotproduct") return 1 - dot;
   if (leftNorm === 0 || rightNorm === 0) return 1;
   return 1 - dot / (Math.sqrt(leftNorm) * Math.sqrt(rightNorm));
 }
@@ -434,7 +526,7 @@ export class StorageVectorService {
   }
 
   static async listBuckets(ref: string, input: PageInput) {
-    const maxResults = normalizePageSize(input.maxResults);
+    const maxResults = normalizePageSize(input.maxResults, DEFAULT_LIST_PAGE_SIZE);
     const after = decodeNextToken(input.nextToken);
     const prefix = typeof input.prefix === "string" ? input.prefix : "";
     let buckets: Array<{ name: string; createdAt: Date }>;
@@ -527,7 +619,7 @@ export class StorageVectorService {
 
   static async listIndexes(ref: string, input: PageInput & { vectorBucketName: string }) {
     validateResourceName(input.vectorBucketName, "vectorBucketName");
-    const maxResults = normalizePageSize(input.maxResults);
+    const maxResults = normalizePageSize(input.maxResults, DEFAULT_LIST_PAGE_SIZE);
     const after = decodeNextToken(input.nextToken);
     const prefix = typeof input.prefix === "string" ? input.prefix : "";
     let indexes: IndexRecord[];
@@ -547,7 +639,7 @@ export class StorageVectorService {
       `;
       indexes = rows.map((row: Record<string, unknown>) => ({
         bucketName: String(row.bucket_name), name: String(row.name), dataType: "float32",
-        dimension: Number(row.dimension), distanceMetric: row.distance_metric === "euclidean" ? "euclidean" : "cosine",
+        dimension: Number(row.dimension), distanceMetric: normalizeStoredDistanceMetric(row.distance_metric),
         metadataConfiguration: row.metadata_configuration as IndexRecord["metadataConfiguration"],
         createdAt: new Date(row.created_at as Date), vectors: new Map(),
       }));
@@ -576,12 +668,30 @@ export class StorageVectorService {
     });
     if (new Set(normalized.map((vector) => vector.key)).size !== normalized.length) badRequest("vector keys must be unique within a batch");
     if (ref === "test_mock") {
+      const newKeyCount = normalized.filter((vector) => !index.vectors.has(vector.key)).length;
+      ensureVectorCapacity(index.vectors.size, newKeyCount, index.dimension);
       const now = new Date();
       normalized.forEach((vector) => index.vectors.set(vector.key, { ...vector, updatedAt: now }));
       return;
     }
     const db = await projectDb(ref);
     await db.begin(async (tx) => {
+      await tx`
+        SELECT 1 FROM storage.vector_indexes
+        WHERE bucket_name = ${input.vectorBucketName} AND name = ${input.indexName}
+        FOR UPDATE
+      `;
+      const [{ count }] = await tx`
+        SELECT count(*)::integer AS count FROM storage.vectors
+        WHERE bucket_name = ${input.vectorBucketName} AND index_name = ${input.indexName}
+      `;
+      const existingRows = await tx`
+        SELECT key FROM storage.vectors
+        WHERE bucket_name = ${input.vectorBucketName}
+          AND index_name = ${input.indexName}
+          AND key IN ${tx(normalized.map((vector) => vector.key))}
+      `;
+      ensureVectorCapacity(Number(count), normalized.length - existingRows.length, index.dimension);
       for (const vector of normalized) {
         await tx`
           INSERT INTO storage.vectors (bucket_name, index_name, key, data, metadata, updated_at)
@@ -594,7 +704,7 @@ export class StorageVectorService {
   }
 
   static async deleteVectors(ref: string, input: VectorLocation & { keys: string[] }): Promise<void> {
-    if (!Array.isArray(input.keys) || input.keys.length < 1 || input.keys.length > MAX_BATCH_SIZE) badRequest(`keys must contain 1-${MAX_BATCH_SIZE} items`);
+    validateVectorKeys(input.keys);
     const index = await getIndex(ref, input.vectorBucketName, input.indexName);
     if (ref === "test_mock") {
       input.keys.forEach((key) => index.vectors.delete(key));
@@ -605,7 +715,7 @@ export class StorageVectorService {
   }
 
   static async getVectors(ref: string, input: VectorLocation & { keys: string[]; returnData?: boolean; returnMetadata?: boolean }) {
-    if (!Array.isArray(input.keys) || input.keys.length < 1 || input.keys.length > MAX_BATCH_SIZE) badRequest(`keys must contain 1-${MAX_BATCH_SIZE} items`);
+    validateVectorKeys(input.keys);
     const wanted = new Set(input.keys);
     const vectors = (await loadVectors(ref, input)).filter((vector) => wanted.has(vector.key));
     const order = new Map(input.keys.map((key, index) => [key, index]));
@@ -614,7 +724,7 @@ export class StorageVectorService {
   }
 
   static async listVectors(ref: string, input: VectorLocation & PageInput & SegmentInput & { returnData?: boolean; returnMetadata?: boolean }) {
-    const maxResults = normalizePageSize(input.maxResults);
+    const maxResults = normalizePageSize(input.maxResults, DEFAULT_VECTOR_PAGE_SIZE);
     const after = decodeNextToken(input.nextToken);
     const segment = normalizeSegment(input);
     const vectors = (await loadVectors(ref, input))
@@ -630,14 +740,16 @@ export class StorageVectorService {
 
   static async queryVectors(ref: string, input: VectorLocation & {
     queryVector: VectorData;
-    topK: number;
+    topK?: number;
     filter?: unknown;
     returnDistance?: boolean;
     returnMetadata?: boolean;
   }) {
     const index = await getIndex(ref, input.vectorBucketName, input.indexName);
     const query = validateVectorData(input.queryVector, index.dimension, "queryVector");
-    if (!Number.isInteger(input.topK) || input.topK < 1 || input.topK > 100) badRequest("topK must be an integer between 1 and 100");
+    validateFilter(input.filter);
+    const topK = input.topK ?? 10;
+    if (!Number.isInteger(topK) || topK < 1 || topK > 100) badRequest("topK must be an integer between 1 and 100");
     const nonFilterable = new Set(index.metadataConfiguration?.nonFilterableMetadataKeys ?? []);
     for (const key of collectFilterKeys(input.filter)) {
       if (nonFilterable.has(key)) badRequest(`Metadata key '${key}' is configured as non-filterable`);
@@ -646,7 +758,7 @@ export class StorageVectorService {
       .filter((vector) => matchesFilter(vector.metadata, input.filter))
       .map((vector) => ({ vector, distance: distance(index.distanceMetric, query, vector.data) }))
       .sort((a, b) => a.distance - b.distance || a.vector.key.localeCompare(b.vector.key))
-      .slice(0, input.topK);
+      .slice(0, topK);
     return {
       vectors: vectors.map(({ vector, distance: vectorDistance }) => ({
         key: vector.key,

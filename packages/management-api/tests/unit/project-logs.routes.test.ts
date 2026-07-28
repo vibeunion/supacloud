@@ -1,6 +1,7 @@
 // @supacloud-test-isolate
 import { afterAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Elysia } from "elysia";
+import { config } from "../../src/config";
 import { projectService } from "../../src/services";
 import { victoriaLogsService } from "../../src/services/victorialogs.service";
 import { getProjectLogUnits, projectLogsRoutes } from "../../src/routes/project-logs";
@@ -34,7 +35,7 @@ describe("project persisted log routes", () => {
   });
 
   test("requires project auth and queries VictoriaLogs with filters", async () => {
-    const path = "/v1/projects/proj_1/logs?limit=25&offset=5&service=postgrest&search=failed&start=2026-07-28T00%3A00%3A00Z";
+    const path = "/v1/projects/proj_1/logs?limit=25&offset=5&service=api&search=failed&start=2026-07-28T00%3A00%3A00Z";
     expect((await request(path)).status).toBe(401);
 
     const response = await request(path, { headers: { authorization: "Bearer dev-master-token" } });
@@ -84,6 +85,20 @@ describe("project persisted log routes", () => {
       });
       expect(response.status).toBe(400);
       expect(await response.json()).toMatchObject({ code: "INVALID_LOG_SERVICE" });
+    }
+  });
+
+  test("fails closed for live streams when the profile has no journald", async () => {
+    const previous = config.logCollectorJournalEnabled;
+    config.logCollectorJournalEnabled = false;
+    try {
+      const response = await request("/v1/projects/proj_1/logs/stream", {
+        headers: { authorization: "Bearer dev-master-token" },
+      });
+      expect(response.status).toBe(501);
+      expect(await response.json()).toMatchObject({ capability: false, reason: "journald_unavailable" });
+    } finally {
+      config.logCollectorJournalEnabled = previous;
     }
   });
 });

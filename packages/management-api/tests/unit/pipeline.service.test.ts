@@ -3,7 +3,9 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   buildReplicationRoleStatement,
+  assertPipelineRuntimeAvailable,
   normalizePipelineInput,
+  pipelineContainerDatabaseHost,
   renderSupabaseEtlConfig,
 } from "../../src/services/pipeline.service";
 
@@ -61,6 +63,17 @@ describe("Supabase ETL pipeline configuration", () => {
   test("quotes the validated source replication role", () => {
     expect(buildReplicationRoleStatement("supa_demo")).toBe('ALTER ROLE "supa_demo" WITH REPLICATION');
     expect(() => buildReplicationRoleStatement('demo" SUPERUSER')).toThrow("safe PostgreSQL identifier");
+  });
+
+  test("uses the Podman host gateway instead of container loopback", () => {
+    expect(pipelineContainerDatabaseHost("127.0.0.1")).toBe("host.containers.internal");
+    expect(pipelineContainerDatabaseHost("postgres.internal")).toBe("postgres.internal");
+  });
+
+  test("fails closed outside the host systemd pipeline profile", () => {
+    expect(() => assertPipelineRuntimeAvailable("systemd")).not.toThrow();
+    expect(() => assertPipelineRuntimeAvailable("unavailable"))
+      .toThrow("unavailable in this deployment profile");
   });
 
   test("runs the ETL container without root or host networking", () => {

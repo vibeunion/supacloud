@@ -140,7 +140,7 @@ const CAPABILITY_FAMILY_RULES: readonly CapabilityFamilyRule[] = [
   { prefixes: ["/auth/oauth-clients"], read: "applications.read", manage: "applications.manage" },
   { prefixes: ["/auth/users", "/auth/generate_link"], read: "users.read", manage: "users.manage" },
   {
-    prefixes: ["/auth/providers", "/auth/supported-providers", "/auth/studio/providers", "/auth/sso", "/auth/china", "/auth/wechat"],
+    prefixes: ["/auth/providers", "/auth/custom-providers", "/auth/supported-providers", "/auth/studio/providers", "/auth/sso", "/auth/china", "/auth/wechat"],
     read: "connectors.read",
     manage: "connectors.manage",
   },
@@ -161,7 +161,7 @@ const CAPABILITY_FAMILY_RULES: readonly CapabilityFamilyRule[] = [
     prefixes: [
       "/auto-branching", "/backups", "/branches", "/dashboard", "/database", "/diagnostics",
       "/cache", "/extensions", "/frontend", "/functions", "/log-drains", "/logs", "/pg-meta", "/scaling",
-      "/scheduled-functions", "/services", "/storage", "/task-events", "/tasks", "/types",
+      "/pipelines", "/scheduled-functions", "/services", "/storage", "/task-events", "/tasks", "/types",
     ],
     read: "operations.read",
     manage: "operations.manage",

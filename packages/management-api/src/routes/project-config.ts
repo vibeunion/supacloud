@@ -43,6 +43,8 @@ import {
   PasskeyConfigValidationError,
   passkeyConfigValidationBody,
   readStockPasskeyConfig,
+  requestsUnavailableWebAuthnMfaConfig,
+  unavailableWebAuthnMfaConfigBody,
   validateStockPasskeyConfig,
 } from "../services/auth-product-boundary";
 import {
@@ -280,8 +282,11 @@ function buildStorageConfigResponse(raw: Record<string, unknown>) {
       ...((response.features as Record<string, any>).vectorBuckets || {}),
       ...((features.vectorBuckets as Record<string, unknown>) || {}),
       enabled: true,
+      experimental: true,
+      dataPlane: "bounded_exact_scan",
       maxBuckets: 100,
       maxIndexes: 10,
+      maxValuesPerIndex: 1_000_000,
     },
   };
   response.capabilities = {
@@ -293,6 +298,7 @@ function buildStorageConfigResponse(raw: Record<string, unknown>) {
     iceberg_catalog: false,
     storage_iceberg: false,
     storage_vectors: true,
+    storage_vectors_experimental: true,
   };
   response.external = {
     ...(response.external as Record<string, unknown>),
@@ -884,6 +890,13 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
         return status(404, { message: "Project not found", code: "404" });
+      }
+
+      const rawAuthPatch = typeof body === "object" && body !== null
+        ? body as Record<string, unknown>
+        : {};
+      if (requestsUnavailableWebAuthnMfaConfig(rawAuthPatch)) {
+        return status(501, unavailableWebAuthnMfaConfigBody());
       }
 
       let newAuth: Record<string, unknown>;

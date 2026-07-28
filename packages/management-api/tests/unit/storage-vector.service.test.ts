@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import {
+  MAX_VECTOR_VALUES_PER_INDEX,
   StorageVectorError,
   StorageVectorService,
+  maxVectorsForDimension,
   storageVectorInternals,
 } from "../../src/services/storage-vector.service";
 
@@ -63,7 +65,7 @@ describe("StorageVectorService", () => {
       vectorBucketName: "embeddings",
       indexName: "documents-openai",
       vectors: [
-        { key: "a", data: { float32: [1, 0, 0] }, metadata: { category: "docs", score: 10 } },
+        { key: "a", data: { float32: [1, 0, 0] }, metadata: { category: "docs", score: 10, tags: ["laptop", "portable"] } },
         { key: "b", data: { float32: [0, 1, 0] }, metadata: { category: "images", score: 5 } },
         { key: "c", data: { float32: [0.8, 0.2, 0] }, metadata: { category: "docs", score: 20 } },
       ],
@@ -76,7 +78,7 @@ describe("StorageVectorService", () => {
       returnData: true,
       returnMetadata: true,
     })).toEqual({
-      vectors: [{ key: "a", data: { float32: [1, 0, 0] }, metadata: { category: "docs", score: 10 } }],
+      vectors: [{ key: "a", data: { float32: [1, 0, 0] }, metadata: { category: "docs", score: 10, tags: ["laptop", "portable"] } }],
     });
 
     const firstPage = await StorageVectorService.listVectors(REF, {
@@ -133,7 +135,14 @@ describe("StorageVectorService", () => {
     });
     expect(query.vectors.map((vector) => vector.key)).toEqual(["a", "c"]);
     expect(query.vectors[0]?.distance).toBe(0);
-    expect(query.vectors[0]?.metadata).toEqual({ category: "docs", score: 10 });
+    expect(query.vectors[0]?.metadata).toEqual({ category: "docs", score: 10, tags: ["laptop", "portable"] });
+
+    expect((await StorageVectorService.queryVectors(REF, {
+      vectorBucketName: "embeddings",
+      indexName: "documents-openai",
+      queryVector: { float32: [1, 0, 0] },
+      filter: { tags: "laptop" },
+    })).vectors.map((vector) => vector.key)).toEqual(["a"]);
 
     await StorageVectorService.deleteVectors(REF, {
       vectorBucketName: "embeddings",
@@ -147,7 +156,51 @@ describe("StorageVectorService", () => {
     })).vectors).toEqual([]);
   });
 
+  test("matches the official dot-product, default topK, and list limit contract", async () => {
+    await StorageVectorService.createBucket(REF, "embeddings");
+    await StorageVectorService.createIndex(REF, {
+      vectorBucketName: "embeddings",
+      indexName: "dot-products",
+      dataType: "float32",
+      dimension: 2,
+      distanceMetric: "dotproduct",
+    });
+    await StorageVectorService.putVectors(REF, {
+      vectorBucketName: "embeddings",
+      indexName: "dot-products",
+      vectors: [
+        { key: "highest", data: { float32: [2, 0] } },
+        { key: "lower", data: { float32: [1, 0] } },
+      ],
+    });
+
+    expect((await StorageVectorService.listVectors(REF, {
+      vectorBucketName: "embeddings",
+      indexName: "dot-products",
+      maxResults: 1000,
+    })).vectors).toHaveLength(2);
+
+    const query = await StorageVectorService.queryVectors(REF, {
+      vectorBucketName: "embeddings",
+      indexName: "dot-products",
+      queryVector: { float32: [1, 0] },
+      returnDistance: true,
+    });
+    expect(query.vectors).toEqual([
+      { key: "highest", distance: -1 },
+      { key: "lower", distance: 0 },
+    ]);
+  });
+
   test("validates dimensions, limits, duplicate resources, and non-filterable metadata", async () => {
+    expect(maxVectorsForDimension(1)).toBe(MAX_VECTOR_VALUES_PER_INDEX);
+    expect(maxVectorsForDimension(4096)).toBe(244);
+
+    const longestValidName = `a${"b".repeat(61)}c`;
+    await StorageVectorService.createBucket(REF, longestValidName);
+    await expect(StorageVectorService.createBucket(REF, `${longestValidName}d`))
+      .rejects.toMatchObject({ statusCode: 400 });
+
     await StorageVectorService.createBucket(REF, "embeddings");
     await expect(StorageVectorService.createBucket(REF, "embeddings")).rejects.toMatchObject({ statusCode: 409 });
 
@@ -173,5 +226,20 @@ describe("StorageVectorService", () => {
       topK: 5,
       filter: { private: { $eq: "secret" } },
     })).rejects.toMatchObject({ statusCode: 400 });
+
+    for (const filter of [
+      { $and: [] },
+      { $and: [null] },
+      { $or: [{}] },
+      { score: { $in: [] } },
+      { score: { $gt: "not-a-number" } },
+    ]) {
+      await expect(StorageVectorService.queryVectors(REF, {
+        vectorBucketName: "embeddings",
+        indexName: "documents-openai",
+        queryVector: { float32: [1, 2, 3] },
+        filter,
+      })).rejects.toMatchObject({ statusCode: 400 });
+    }
   });
 });

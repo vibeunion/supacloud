@@ -70,9 +70,13 @@ class InitEnvTests(unittest.TestCase):
             first_run = subprocess.run(command, check=True, capture_output=True, text=True)
             first_secret = parsed_env(env_path)["SUPAOAUTH_BFF_SIGNING_SECRET"]
             first_pgredis_token = parsed_env(env_path)["PGREDIS_RUNTIME_INTERNAL_TOKEN"]
+            first_pgsodium_key = parsed_env(env_path)["PGSODIUM_KEY"]
+            first_vault_key = parsed_env(env_path)["VAULT_KEY"]
             second_run = subprocess.run(command, check=True, capture_output=True, text=True)
             second_secret = parsed_env(env_path)["SUPAOAUTH_BFF_SIGNING_SECRET"]
             second_pgredis_token = parsed_env(env_path)["PGREDIS_RUNTIME_INTERNAL_TOKEN"]
+            second_pgsodium_key = parsed_env(env_path)["PGSODIUM_KEY"]
+            second_vault_key = parsed_env(env_path)["VAULT_KEY"]
 
             self.assertEqual(first_run.stdout, "")
             self.assertEqual(second_run.stdout, "")
@@ -83,6 +87,12 @@ class InitEnvTests(unittest.TestCase):
             self.assertGreaterEqual(len(first_pgredis_token), 32)
             self.assertNotIn(first_pgredis_token, {master_token, encryption_key, first_secret})
             self.assertEqual(second_pgredis_token, first_pgredis_token)
+            self.assertEqual(parsed_env(env_path)["ENABLE_PGSODIUM"], "true")
+            self.assertEqual(parsed_env(env_path)["ENABLE_SUPABASE_VAULT"], "true")
+            self.assertRegex(first_pgsodium_key, r"^[0-9a-f]{64}$")
+            self.assertRegex(first_vault_key, r"^[0-9a-f]{64}$")
+            self.assertEqual(second_pgsodium_key, first_pgsodium_key)
+            self.assertEqual(second_vault_key, first_vault_key)
             generated = parsed_env(env_path)
             self.assertRegex(generated["GOTRUE_DB_ENCRYPTION_KEY_ID"], r"^supacloud-[0-9a-f]{16}$")
             self.assertRegex(generated["GOTRUE_DB_ENCRYPTION_KEY"], r"^[A-Za-z0-9_-]{43}$")

@@ -15,7 +15,7 @@ ExecStartPre=/usr/bin/test -s /etc/supabase/pipelines/%i/prod.json
 ExecStartPre=/usr/bin/podman image exists ${SUPACLOUD_ETL_IMAGE}
 ExecStartPre=-/usr/bin/podman rm -f supacloud-pipeline-%i
 ExecStart=/usr/bin/podman run --rm --name supacloud-pipeline-%i --network slirp4netns:allow_host_loopback=true --user 65532:65532 \
-  --cap-drop=ALL --read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m --security-opt=no-new-privileges \
+  --add-host host.containers.internal:host-gateway --cap-drop=ALL --read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m --security-opt=no-new-privileges \
   -e APP_ENVIRONMENT=prod -e APP_CONFIG_DIR=/config \
   -v /etc/supabase/pipelines/%i:/config:ro,Z \
   ${SUPACLOUD_ETL_IMAGE}

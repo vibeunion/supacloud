@@ -32,8 +32,10 @@
     { value: "api", label: "PostgREST" },
     { value: "realtime", label: "Realtime" },
     { value: "storage", label: "Storage" },
-    { value: "database", label: "Database" }
+    { value: "database", label: "Database" },
+    { value: "functions", label: "Functions" }
   ];
+  let visibleServices = $state(services);
 
   const timeRanges = [
     { value: "15m", label: "15 minutes", milliseconds: 15 * 60 * 1000 },
@@ -54,6 +56,10 @@
       const res = await apiClient(`/v1/projects/${projectRef}/logs?${params.toString()}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || "Failed to load logs");
+      if (Array.isArray(data.sources)) {
+        visibleServices = services.filter((service) => service.value === "all" || data.sources.includes(service.value));
+        if (!visibleServices.some((service) => service.value === selectedService)) selectedService = "all";
+      }
       logs = Array.isArray(data.result) ? data.result : [];
     } catch (err: unknown) {
       error = err instanceof Error ? err.message : String(err);
@@ -105,7 +111,7 @@
         onchange={() => void fetchLogs()}
         class="h-9 rounded-lg border bg-background px-3 text-xs"
       >
-        {#each services as service (service.value)}
+        {#each visibleServices as service (service.value)}
           <option value={service.value}>{service.label}</option>
         {/each}
       </select>

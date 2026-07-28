@@ -70,11 +70,19 @@ describe("project storage config routes", () => {
 
     const body = await res.json();
     expect(body.features.icebergCatalog).toMatchObject({ enabled: false, maxTables: 99 });
-    expect(body.features.vectorBuckets).toMatchObject({ enabled: true, maxBuckets: 100, maxIndexes: 10 });
+    expect(body.features.vectorBuckets).toMatchObject({
+      enabled: true,
+      experimental: true,
+      dataPlane: "bounded_exact_scan",
+      maxBuckets: 100,
+      maxIndexes: 10,
+      maxValuesPerIndex: 1_000_000,
+    });
     expect(body.capabilities).toMatchObject({
       iceberg_catalog: false,
       storage_iceberg: false,
       storage_vectors: true,
+      storage_vectors_experimental: true,
     });
   });
 
@@ -93,7 +101,14 @@ describe("project storage config routes", () => {
     expect(res.status).toBe(200);
 
     const body = await res.json();
-    expect(body.features.vectorBuckets).toMatchObject({ enabled: true, maxBuckets: 100, maxIndexes: 10 });
+    expect(body.features.vectorBuckets).toMatchObject({
+      enabled: true,
+      experimental: true,
+      dataPlane: "bounded_exact_scan",
+      maxBuckets: 100,
+      maxIndexes: 10,
+      maxValuesPerIndex: 1_000_000,
+    });
     expect(body.capabilities.storage_vectors).toBe(true);
     expect(requireProjectOrAdminAuth).toHaveBeenCalledWith(expect.any(Request), "proj_1");
   });

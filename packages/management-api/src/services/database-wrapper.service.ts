@@ -31,8 +31,20 @@ function quoteIdentifier(value: string): string {
 
 async function ensureWrapperBase(ref: string) {
   const database = getProjectDb(await resolveDbName(ref));
-  await database.unsafe("CREATE EXTENSION IF NOT EXISTS wrappers WITH SCHEMA extensions");
-  await database.unsafe("CREATE EXTENSION IF NOT EXISTS supabase_vault CASCADE");
+  try {
+    await database.unsafe("CREATE EXTENSION IF NOT EXISTS wrappers WITH SCHEMA extensions");
+    await database.unsafe("CREATE EXTENSION IF NOT EXISTS supabase_vault CASCADE");
+    const [vaultFunction] = await database`
+      SELECT to_regprocedure('vault.create_secret(text,text,text)') AS function_name
+    `;
+    if (!vaultFunction?.function_name) throw new Error("vault.create_secret is unavailable");
+  } catch (error: unknown) {
+    throw new DatabaseWrapperError(
+      `Wrappers require pgsodium and Supabase Vault to be initialized: ${error instanceof Error ? error.message : String(error)}`,
+      501,
+      "wrapper_vault_unavailable",
+    );
+  }
   return database;
 }
 
@@ -75,36 +87,39 @@ export const databaseWrapperService = {
     }
     const database = await ensureWrapperBase(ref);
 
-    const [existingServer] = await database`SELECT 1 FROM pg_foreign_server WHERE srvname = ${serverName}`;
-    if (existingServer) throw new DatabaseWrapperError(`Foreign server '${serverName}' already exists`, 409, "wrapper_server_conflict");
-    const [secret] = await database`
-      SELECT vault.create_secret(
-        ${input.credential},
-        ${`wrapper_${input.type}_${serverName}`},
-        ${`${input.type} credential managed by SupaCloud Wrappers`}
-      )::text AS id
-    `;
-    const secretId = String(secret.id);
-    const [fdw] = await database`SELECT 1 FROM pg_foreign_data_wrapper WHERE fdwname = ${definition.fdw}`;
-    if (!fdw) {
-      await database.unsafe(
-        `CREATE FOREIGN DATA WRAPPER ${quoteIdentifier(definition.fdw)} HANDLER extensions.${quoteIdentifier(definition.handler)} VALIDATOR extensions.${quoteIdentifier(definition.validator)}`,
-      );
-    }
-    await database.unsafe(`CREATE SCHEMA IF NOT EXISTS ${quoteIdentifier(schemaName)}`);
-    if (input.type === "stripe") {
-      const apiVersionOption = apiVersion ? `, api_version '${apiVersion}'` : "";
-      await database.unsafe(
-        `CREATE SERVER ${quoteIdentifier(serverName)} FOREIGN DATA WRAPPER ${quoteIdentifier(definition.fdw)} OPTIONS (api_key_id '${secretId}'${apiVersionOption})`,
-      );
-      await database.unsafe(
-        `IMPORT FOREIGN SCHEMA ${quoteIdentifier(definition.importSchema!)} FROM SERVER ${quoteIdentifier(serverName)} INTO ${quoteIdentifier(schemaName)}`,
-      );
-    } else {
-      await database.unsafe(
-        `CREATE SERVER ${quoteIdentifier(serverName)} FOREIGN DATA WRAPPER ${quoteIdentifier(definition.fdw)} OPTIONS (conn_string_id '${secretId}')`,
-      );
-    }
-    return { type: input.type, server_name: serverName, schema_name: schemaName, credential: "********", imported: input.type === "stripe" };
+    return database.begin(async (transaction) => {
+      const tx = transaction as typeof database;
+      const [existingServer] = await tx`SELECT 1 FROM pg_foreign_server WHERE srvname = ${serverName}`;
+      if (existingServer) throw new DatabaseWrapperError(`Foreign server '${serverName}' already exists`, 409, "wrapper_server_conflict");
+      const [secret] = await tx`
+        SELECT vault.create_secret(
+          ${input.credential},
+          ${`wrapper_${input.type}_${serverName}`},
+          ${`${input.type} credential managed by SupaCloud Wrappers`}
+        )::text AS id
+      `;
+      const secretId = String(secret.id);
+      const [fdw] = await tx`SELECT 1 FROM pg_foreign_data_wrapper WHERE fdwname = ${definition.fdw}`;
+      if (!fdw) {
+        await tx.unsafe(
+          `CREATE FOREIGN DATA WRAPPER ${quoteIdentifier(definition.fdw)} HANDLER extensions.${quoteIdentifier(definition.handler)} VALIDATOR extensions.${quoteIdentifier(definition.validator)}`,
+        );
+      }
+      await tx.unsafe(`CREATE SCHEMA IF NOT EXISTS ${quoteIdentifier(schemaName)}`);
+      if (input.type === "stripe") {
+        const apiVersionOption = apiVersion ? `, api_version '${apiVersion}'` : "";
+        await tx.unsafe(
+          `CREATE SERVER ${quoteIdentifier(serverName)} FOREIGN DATA WRAPPER ${quoteIdentifier(definition.fdw)} OPTIONS (api_key_id '${secretId}'${apiVersionOption})`,
+        );
+        await tx.unsafe(
+          `IMPORT FOREIGN SCHEMA ${quoteIdentifier(definition.importSchema!)} FROM SERVER ${quoteIdentifier(serverName)} INTO ${quoteIdentifier(schemaName)}`,
+        );
+      } else {
+        await tx.unsafe(
+          `CREATE SERVER ${quoteIdentifier(serverName)} FOREIGN DATA WRAPPER ${quoteIdentifier(definition.fdw)} OPTIONS (conn_string_id '${secretId}')`,
+        );
+      }
+      return { type: input.type, server_name: serverName, schema_name: schemaName, credential: "********", imported: input.type === "stripe" };
+    });
   },
 };

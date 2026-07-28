@@ -101,6 +101,7 @@ describe("delegated project authorization", () => {
       ["POST", "/auth/users", "users.manage"],
       ["GET", "/rbac/roles", "roles.read"],
       ["PATCH", "/auth/providers/github", "connectors.manage"],
+      ["POST", "/auth/custom-providers", "connectors.manage"],
       ["GET", "/auth/hooks", "security.read"],
       ["POST", "/organizations", "organizations.manage"],
       ["POST", "/webhooks/one/replay", "webhooks.replay"],
@@ -115,6 +116,7 @@ describe("delegated project authorization", () => {
       ["GET", "/cache", "operations.read"],
       ["POST", "/cache/operations", "operations.manage"],
       ["GET", "/tasks", "operations.read"],
+      ["POST", "/pipelines", "operations.manage"],
       ["POST", "/database/migrations", "database.migrations.manage"],
       ["GET", "", "project.read"],
     ] as const;

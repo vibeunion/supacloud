@@ -161,6 +161,7 @@ export class LocalLogCollector {
     private readonly options: {
       stateDirectory?: string;
       functionsDirectory?: string;
+      journalEnabled?: boolean;
       write?: (events: readonly VictoriaLogWrite[]) => Promise<void>;
     } = {},
   ) {
@@ -171,18 +172,22 @@ export class LocalLogCollector {
     return this.options.functionsDirectory || config.edgeFunctionsDir;
   }
 
+  private get journalEnabled(): boolean {
+    return this.options.journalEnabled ?? config.logCollectorJournalEnabled;
+  }
+
   private async write(events: readonly VictoriaLogWrite[]): Promise<void> {
     await (this.options.write || ((input) => victoriaLogsService.ingest(input)))(events);
   }
 
   async start(): Promise<void> {
-    if (this.journalProcess || this.stopped) return;
+    if (this.journalProcess || this.functionTimer || this.stopped) return;
     this.state = await loadState(this.stateFile);
-    this.startJournalLoop();
+    if (this.journalEnabled) this.startJournalLoop();
     void this.collectFunctionLogs();
     this.functionTimer = setInterval(() => void this.collectFunctionLogs(), FUNCTION_POLL_MS);
     this.functionTimer.unref?.();
-    logger.info("[LocalLogCollector] started", { stateFile: this.stateFile });
+    logger.info("[LocalLogCollector] started", { stateFile: this.stateFile, journalEnabled: this.journalEnabled });
   }
 
   stop(): void {
@@ -196,7 +201,15 @@ export class LocalLogCollector {
 
   private startJournalLoop(): void {
     if (this.stopped) return;
-    const proc = Bun.spawn(journalctlArgs(this.state.journalCursor), { stdout: "pipe", stderr: "pipe" });
+    let proc: ReturnType<typeof Bun.spawn>;
+    try {
+      proc = Bun.spawn(journalctlArgs(this.state.journalCursor), { stdout: "pipe", stderr: "pipe" });
+    } catch (error) {
+      logger.warn("[LocalLogCollector] journald is unavailable; function log collection remains active", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return;
+    }
     this.journalProcess = proc;
     void this.readJournal(proc);
     void proc.exited.then(async (exitCode) => {

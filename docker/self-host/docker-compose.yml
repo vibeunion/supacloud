@@ -100,6 +100,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      victorialogs:
+        condition: service_started
     environment:
       PORT: 9090
       NODE_ENV: production
@@ -137,10 +139,15 @@ services:
       PGREDIS_RUNTIME_INTERNAL_TIMEOUT_MS: ${PGREDIS_RUNTIME_INTERNAL_TIMEOUT_MS:-5000}
       DASHBOARD_USERNAME: supabase
       DASHBOARD_PASSWORD: supacloud
+      SUPACLOUD_LOGS_ENABLED: "true"
+      SUPACLOUD_LOG_COLLECTOR_JOURNAL_ENABLED: "false"
+      VICTORIALOGS_URL: http://victorialogs:9428
+      SUPACLOUD_PIPELINE_RUNTIME_MODE: unavailable
     volumes:
       - tenant-config:/etc/supabase/tenants
       - pgredis-tenant-config:/etc/supabase/pgredis-tenants
       - functions-data:/data/functions
+      - log-collector-state:/var/lib/supacloud/log-collector
       - type: bind
         source: ${LEGACY_SECRETS_MIGRATION_FILE}
         target: /run/secrets/supacloud-legacy-secrets-migration
@@ -157,6 +164,18 @@ services:
     networks:
       - default
       - edge-pgredis
+
+  victorialogs:
+    image: victoriametrics/victoria-logs:v1.52.0
+    restart: unless-stopped
+    command:
+      - -storageDataPath=/victoria-logs-data
+      - -retentionPeriod=${VICTORIALOGS_RETENTION:-7d}
+      - -httpListenAddr=:9428
+    volumes:
+      - victorialogs-data:/victoria-logs-data
+    networks:
+      - default
 
   edge-runtime:
     build:
@@ -245,6 +264,8 @@ volumes:
   functions-data:
   caddy-data:
   caddy-config:
+  victorialogs-data:
+  log-collector-state:
 
 networks:
   pgredis-database:

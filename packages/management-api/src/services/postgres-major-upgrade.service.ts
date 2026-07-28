@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { access, realpath, stat, statfs } from "node:fs/promises";
 import { constants } from "node:fs";
 import { config } from "../config";
-import { sql } from "../db";
+import { getProjectDb, sql } from "../db";
 import { createBackupWithEvidence, getPgBackRestStanza, listBackups } from "./backup.service";
 import { logger } from "../utils/logger";
 
@@ -17,7 +17,22 @@ export function isTrustedExecutorMetadata(metadata: { isFile: boolean; uid?: num
 }
 
 export function shouldRecoverPostgresUpgrade(status: PostgresUpgradeStatus): boolean {
-  return status === "backup_running" || status === "validating";
+  return status === "backup_running" || status === "validating" || status === "rollback_requested";
+}
+
+export function publicPostgresUpgradeStatus(row: Record<string, unknown>, ref: string) {
+  const upgradeStatus = String(row.status);
+  return {
+    id: String(row.id),
+    status: upgradeStatus,
+    capability: true,
+    available: true,
+    scope: "cluster" as const,
+    current_version: String(row.current_major),
+    target_version: String(row.target_major),
+    upgrade_status: upgradeStatus,
+    requested_by_current_project: String(row.requested_project_ref) === ref,
+  };
 }
 
 export function buildPostgresUpgradeScopeSnapshot(
@@ -36,6 +51,51 @@ export function buildPostgresUpgradeScopeSnapshot(
   };
 }
 
+export function parsePostgresUpgradeScopeDatabases(snapshot: unknown) {
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) {
+    throw new PostgresMajorUpgradeError("PostgreSQL upgrade scope snapshot is missing", 503, "postgres_upgrade_scope_invalid");
+  }
+  const record = snapshot as Record<string, unknown>;
+  if (!Array.isArray(record.projects) || Number(record.project_count) !== record.projects.length) {
+    throw new PostgresMajorUpgradeError("PostgreSQL upgrade scope snapshot is incomplete", 503, "postgres_upgrade_scope_invalid");
+  }
+  const seenRefs = new Set<string>();
+  const seenDatabases = new Set<string>();
+  return record.projects.map((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new PostgresMajorUpgradeError("PostgreSQL upgrade scope contains an invalid project", 503, "postgres_upgrade_scope_invalid");
+    }
+    const project = entry as Record<string, unknown>;
+    const ref = typeof project.ref === "string" ? project.ref : "";
+    const databaseName = typeof project.database_name === "string" ? project.database_name : "";
+    if (!ref || !databaseName || seenRefs.has(ref) || seenDatabases.has(databaseName)) {
+      throw new PostgresMajorUpgradeError("PostgreSQL upgrade scope contains missing or duplicate databases", 503, "postgres_upgrade_scope_invalid");
+    }
+    seenRefs.add(ref);
+    seenDatabases.add(databaseName);
+    return { ref, databaseName };
+  });
+}
+
+export function assertPostgresUpgradeScopeUnchanged(
+  snapshot: unknown,
+  currentProjects: Array<Record<string, unknown>>,
+): void {
+  const expected = parsePostgresUpgradeScopeDatabases(snapshot)
+    .map((project) => `${project.ref}\0${project.databaseName}`)
+    .sort();
+  const current = currentProjects
+    .map((project) => `${String(project.ref || "")}\0${String(project.db_name || "")}`)
+    .sort();
+  if (expected.length !== current.length || expected.some((entry, index) => entry !== current[index])) {
+    throw new PostgresMajorUpgradeError(
+      "The active project database scope changed after the upgrade backup",
+      503,
+      "postgres_upgrade_scope_changed",
+    );
+  }
+}
+
 export type PostgresUpgradeStatus =
   | "draft"
   | "preflight_running"
@@ -45,6 +105,7 @@ export type PostgresUpgradeStatus =
   | "upgrade_running"
   | "validating"
   | "succeeded"
+  | "rollback_requested"
   | "rollback_running"
   | "rolled_back"
   | "failed"
@@ -121,7 +182,8 @@ const TRANSITIONS: Record<PostgresUpgradeStatus, ReadonlySet<PostgresUpgradeStat
   rollback_running: new Set(["rolled_back", "manual_recovery_required"]),
   rolled_back: new Set([]),
   failed: new Set([]),
-  manual_recovery_required: new Set(["rollback_running"]),
+  manual_recovery_required: new Set(["rollback_requested"]),
+  rollback_requested: new Set(["rollback_running", "manual_recovery_required"]),
   cancelled: new Set([]),
 };
 
@@ -164,6 +226,9 @@ async function ensureSchema(): Promise<void> {
       CREATE UNIQUE INDEX IF NOT EXISTS postgres_major_upgrades_one_active_idx
         ON postgres_major_upgrades(scope)
         WHERE status IN ('draft','preflight_running','awaiting_approval','backup_running','upgrade_running','validating','rollback_running');
+      CREATE UNIQUE INDEX IF NOT EXISTS postgres_major_upgrades_cluster_fence_v2_idx
+        ON postgres_major_upgrades(scope)
+        WHERE status IN ('draft','preflight_running','awaiting_approval','backup_running','upgrade_running','validating','rollback_requested','rollback_running','manual_recovery_required');
       ALTER TABLE postgres_major_upgrades ADD COLUMN IF NOT EXISTS backup_evidence jsonb NOT NULL DEFAULT '{}'::jsonb;
       ALTER TABLE postgres_major_upgrades ADD COLUMN IF NOT EXISTS scope_snapshot jsonb NOT NULL DEFAULT '{}'::jsonb;
       ALTER TABLE postgres_major_upgrades ADD COLUMN IF NOT EXISTS executor_evidence jsonb NOT NULL DEFAULT '{}'::jsonb;
@@ -348,7 +413,11 @@ async function runPreflight(id: string, requestedRef: string, currentMajor: numb
   }
 
   try {
-    const [size] = await sql`SELECT pg_database_size(current_database())::bigint AS bytes`;
+    const [size] = await sql`
+      SELECT COALESCE(sum(pg_database_size(datname)), 0)::bigint AS bytes
+      FROM pg_database
+      WHERE datallowconn = true AND datistemplate = false
+    `;
     const fs = await statfs(config.pgDataDir);
     const availableBytes = Number(fs.bavail) * Number(fs.bsize);
     const databaseBytes = Number(size?.bytes || 0);
@@ -410,7 +479,7 @@ async function claimNextWork() {
     WITH candidate AS (
       SELECT id
       FROM postgres_major_upgrades
-      WHERE status IN ('backup_running','upgrade_running','validating','rollback_running')
+      WHERE status IN ('backup_running','upgrade_running','validating','rollback_requested','rollback_running')
         AND (lease_expires_at IS NULL OR lease_expires_at < now())
       ORDER BY created_at
       FOR UPDATE SKIP LOCKED
@@ -439,14 +508,90 @@ async function heartbeat(id: string, token: string): Promise<boolean> {
   return Boolean(row);
 }
 
-async function validateUpgrade(target: number) {
+async function validateUpgrade(target: number, scopeSnapshot: unknown) {
   const [version] = await sql`SHOW server_version_num`;
   const observed = currentMajorFromServerVersionNum(version?.server_version_num);
   if (observed !== target) {
     throw new PostgresMajorUpgradeError(`Post-upgrade validation observed PostgreSQL ${observed}, expected ${target}`, 503, "postgres_upgrade_validation_failed");
   }
-  const [count] = await sql`SELECT count(*)::integer AS count FROM projects WHERE status <> 'deleted' AND deleted_at IS NULL`;
-  return { observed_major: observed, project_count: Number(count?.count || 0), validated_at: new Date().toISOString() };
+  const scopedDatabases = parsePostgresUpgradeScopeDatabases(scopeSnapshot);
+  const currentProjects = await sql`
+    SELECT ref, db_name FROM projects
+    WHERE status <> 'deleted' AND deleted_at IS NULL
+    ORDER BY ref
+  `;
+  assertPostgresUpgradeScopeUnchanged(scopeSnapshot, currentProjects as Array<Record<string, unknown>>);
+  const databaseEvidence = [];
+  for (const scoped of scopedDatabases) {
+    const [metadata] = await sql`
+      SELECT ref, db_name FROM projects
+      WHERE ref = ${scoped.ref} AND status <> 'deleted' AND deleted_at IS NULL
+      LIMIT 1
+    `;
+    if (!metadata || String(metadata.db_name) !== scoped.databaseName) {
+      throw new PostgresMajorUpgradeError(
+        `Project ${scoped.ref} no longer matches the backed-up cluster scope`,
+        503,
+        "postgres_upgrade_scope_changed",
+      );
+    }
+    const projectDb = getProjectDb(scoped.databaseName);
+    const [databaseVersion] = await projectDb`SHOW server_version_num`;
+    const [probe] = await projectDb`SELECT current_database() AS database_name`;
+    const projectObserved = currentMajorFromServerVersionNum(databaseVersion?.server_version_num);
+    if (projectObserved !== target || String(probe?.database_name) !== scoped.databaseName) {
+      throw new PostgresMajorUpgradeError(
+        `Project ${scoped.ref} database validation failed after cutover`,
+        503,
+        "postgres_upgrade_project_validation_failed",
+      );
+    }
+    databaseEvidence.push({
+      ref: scoped.ref,
+      database_name: scoped.databaseName,
+      observed_major: projectObserved,
+      reachable: true,
+    });
+  }
+  return {
+    observed_major: observed,
+    project_count: databaseEvidence.length,
+    databases: databaseEvidence,
+    validated_at: new Date().toISOString(),
+  };
+}
+
+async function executeRollback(
+  id: string,
+  current: number,
+  target: number,
+  token: string,
+  originalErrorCode: string,
+  originalErrorMessage: string,
+): Promise<void> {
+  try {
+    const rollbackOutput = await runExecutor("rollback", id, current, target, token);
+    const rollbackEvidence = parseExecutorEvidence(rollbackOutput);
+    if (rollbackEvidence.rollback_verified !== true || rollbackEvidence.fencing_token !== token) {
+      throw new PostgresMajorUpgradeError(
+        "Provider rollback evidence is incomplete",
+        503,
+        "postgres_upgrade_rollback_evidence_missing",
+      );
+    }
+    await transition(id, "rolled_back", {
+      executor_evidence: rollbackEvidence,
+      error_code: originalErrorCode,
+      error_message: originalErrorMessage,
+      clear_lease: true,
+    }, token);
+  } catch (rollbackError) {
+    await transition(id, "manual_recovery_required", {
+      error_code: "postgres_upgrade_rollback_failed",
+      error_message: `${originalErrorMessage}; rollback: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
+      clear_lease: true,
+    }, token).catch(() => undefined);
+  }
 }
 
 async function processClaimedWork(row: Record<string, unknown>, token: string): Promise<void> {
@@ -462,6 +607,18 @@ async function processClaimedWork(row: Record<string, unknown>, token: string): 
     }, token).catch(() => undefined);
     return;
   }
+  if (status === "rollback_requested") {
+    await transition(id, "rollback_running", {}, token);
+    await executeRollback(
+      id,
+      current,
+      target,
+      token,
+      String(row.error_code || "postgres_upgrade_manual_rollback"),
+      String(row.error_message || "Manual rollback requested"),
+    );
+    return;
+  }
   if (status === "rollback_running") {
     await transition(id, "manual_recovery_required", {
       error_code: "postgres_upgrade_rollback_state_unknown",
@@ -472,7 +629,7 @@ async function processClaimedWork(row: Record<string, unknown>, token: string): 
   }
   if (status === "validating") {
     try {
-      const validation = await validateUpgrade(target);
+      const validation = await validateUpgrade(target, row.scope_snapshot);
       const existingEvidence = row.executor_evidence && typeof row.executor_evidence === "object"
         ? row.executor_evidence as Record<string, unknown>
         : {};
@@ -515,7 +672,8 @@ async function processClaimedWork(row: Record<string, unknown>, token: string): 
       throw new PostgresMajorUpgradeError("Provider executor must return cluster cutover evidence", 503, "postgres_upgrade_executor_evidence_missing");
     }
     await transition(id, "validating", { executor_evidence: executorEvidence }, token);
-    const validation = await validateUpgrade(target);
+    const latest = await readUpgrade(id);
+    const validation = await validateUpgrade(target, latest.scope_snapshot);
     await transition(id, "succeeded", { executor_evidence: { ...executorEvidence, validation }, clear_lease: true }, token);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -524,21 +682,11 @@ async function processClaimedWork(row: Record<string, unknown>, token: string): 
       await transition(id, "failed", { error_code: code, error_message: message, clear_lease: true }, token).catch(() => undefined);
       return;
     }
-    await transition(id, "rollback_running", { error_code: code, error_message: message }, token).catch(() => undefined);
-    try {
-      const rollbackOutput = await runExecutor("rollback", id, current, target, token);
-      const rollbackEvidence = parseExecutorEvidence(rollbackOutput);
-      if (rollbackEvidence.rollback_verified !== true || rollbackEvidence.fencing_token !== token) {
-        throw new PostgresMajorUpgradeError("Provider rollback evidence is incomplete", 503, "postgres_upgrade_rollback_evidence_missing");
-      }
-      await transition(id, "rolled_back", { executor_evidence: rollbackEvidence, error_code: code, error_message: message, clear_lease: true }, token);
-    } catch (rollbackError) {
-      await transition(id, "manual_recovery_required", {
-        error_code: "postgres_upgrade_rollback_failed",
-        error_message: `${message}; rollback: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
-        clear_lease: true,
-      }, token).catch(() => undefined);
-    }
+    await transition(id, "manual_recovery_required", {
+      error_code: code,
+      error_message: `${message}; automatic rollback is blocked until post-cutover writes and tenant validation are reconciled`,
+      clear_lease: true,
+    }, token).catch(() => undefined);
   }
 }
 
@@ -619,7 +767,7 @@ export const postgresMajorUpgradeService = {
         upgrade_status: "not_started",
       };
     }
-    return row;
+    return publicPostgresUpgradeStatus(row as Record<string, unknown>, ref);
   },
 
   async approve(id: string, confirmation: string, requestedRef?: string) {
@@ -657,6 +805,10 @@ export const postgresMajorUpgradeService = {
     if (!["manual_recovery_required"].includes(current)) {
       throw new PostgresMajorUpgradeError("PostgreSQL upgrade is not rollbackable in its current state", 409, "postgres_upgrade_not_rollbackable");
     }
-    return transition(id, "rollback_running", { rollback_requested_at: new Date().toISOString() });
+    return transition(id, "rollback_requested", {
+      rollback_requested_at: new Date().toISOString(),
+      error_code: row.error_code ? String(row.error_code) : undefined,
+      error_message: row.error_message ? String(row.error_message) : undefined,
+    });
   },
 };

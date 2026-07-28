@@ -160,7 +160,13 @@ export async function restoreSnapshot(options: RestoreSnapshotOptions): Promise<
       throw error
     }
     rollbackPaths.push(...swaps.flatMap((swap) => swap.rollbackPath ? [swap.rollbackPath] : []))
-    if (process.platform !== 'win32') await chmod(paths.secretsFile, 0o600)
+    if (process.platform !== 'win32') {
+      await hardenRestoredTree(paths.stateDir)
+      if (paths.dataDir && !isWithin(paths.stateDir, paths.dataDir)) await hardenRestoredTree(paths.dataDir)
+      if (options.storageBackend === 'fs' && !isWithin(paths.stateDir, paths.storageDir)) {
+        await hardenRestoredTree(paths.storageDir)
+      }
+    }
     return { manifest, rollbackPaths }
   } catch (error) {
     throw error instanceof Error ? error : new Error(String(error))
@@ -386,6 +392,21 @@ async function copyEntry(source: string, target: string): Promise<void> {
     await mkdir(dirname(target), { recursive: true })
     await Bun.write(target, Bun.file(source))
   } else throw new Error(`snapshot refuses unsupported filesystem entry: ${source}`)
+}
+
+async function hardenRestoredTree(root: string): Promise<void> {
+  const info = await lstat(root)
+  if (info.isSymbolicLink()) throw new Error(`snapshot refuses symbolic link: ${root}`)
+  if (info.isDirectory()) {
+    await chmod(root, 0o700)
+    for (const entry of await readdir(root)) await hardenRestoredTree(join(root, entry))
+    return
+  }
+  if (info.isFile()) {
+    await chmod(root, 0o600)
+    return
+  }
+  throw new Error(`snapshot refuses unsupported filesystem entry: ${root}`)
 }
 
 async function assertNoSymlinks(root: string): Promise<void> {

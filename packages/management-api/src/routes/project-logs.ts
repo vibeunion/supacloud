@@ -1,11 +1,21 @@
 import { Elysia, t, status } from "elysia";
 import { projectService } from "../services";
+import { config } from "../config";
 import { logger } from "../utils/logger";
 import { requireProjectOrAdminAuth } from "../middleware/auth";
 import { victoriaLogsService } from "../services/victorialogs.service";
 
 const activeStreams = new Map<string, number>();
 const MAX_STREAMS_PER_PROJECT = 5;
+
+export function normalizePersistedLogService(service?: string): string | undefined {
+    const aliases: Record<string, string> = {
+        api: "postgrest",
+        gotrue: "auth",
+        db: "database",
+    };
+    return service ? aliases[service] || service : undefined;
+}
 
 export function getProjectLogUnits(ref: string, service?: string): string[] {
     const all = [
@@ -46,7 +56,7 @@ export const projectLogsRoutes = new Elysia({ prefix: "/v1/projects/:ref/logs" }
                 const parsedLogs = await victoriaLogsService.queryProjectLogs(params.ref, {
                     limit,
                     offset,
-                    service: query.service,
+                    service: normalizePersistedLogService(query.service),
                     search: query.search,
                     start: query.start,
                     end: query.end,
@@ -54,6 +64,10 @@ export const projectLogsRoutes = new Elysia({ prefix: "/v1/projects/:ref/logs" }
                 return {
                     backend: "victorialogs",
                     result: parsedLogs,
+                    sources: config.logCollectorJournalEnabled
+                        ? ["auth", "api", "database", "storage", "functions"]
+                        : ["functions"],
+                    live_stream: config.logCollectorJournalEnabled,
                     pagination: {
                         offset,
                         limit,
@@ -94,6 +108,13 @@ export const projectLogsRoutes = new Elysia({ prefix: "/v1/projects/:ref/logs" }
 
             const authError = await requireProjectOrAdminAuth(request, ref);
             if (authError) return status(authError.status, authError.body);
+            if (!config.logCollectorJournalEnabled) {
+                return status(501, {
+                    capability: false,
+                    reason: "journald_unavailable",
+                    message: "Live project log streaming requires the host systemd/journald profile",
+                });
+            }
 
             const project = await projectService.getProject(ref);
             if (!project) {

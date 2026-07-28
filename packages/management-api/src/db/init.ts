@@ -193,6 +193,9 @@ export async function initDatabase() {
     CREATE UNIQUE INDEX IF NOT EXISTS postgres_major_upgrades_one_active_idx
       ON postgres_major_upgrades(scope)
       WHERE status IN ('draft','preflight_running','awaiting_approval','backup_running','upgrade_running','validating','rollback_running');
+    CREATE UNIQUE INDEX IF NOT EXISTS postgres_major_upgrades_cluster_fence_v2_idx
+      ON postgres_major_upgrades(scope)
+      WHERE status IN ('draft','preflight_running','awaiting_approval','backup_running','upgrade_running','validating','rollback_requested','rollback_running','manual_recovery_required');
 
     CREATE TABLE IF NOT EXISTS project_tasks (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

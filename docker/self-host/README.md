@@ -10,6 +10,7 @@ This stack is isolated from `docker/dev` and is intended for one-command self-ho
 - PostgREST
 - SupaCloud Management API
 - SupaCloud Bun Edge Runtime
+- VictoriaLogs (persistent project logs)
 - FerretDB MongoDB wire protocol gateway, optional through the `ferretdb` Compose profile
 
 The Caddy gateway starts with a bootstrap-only Caddyfile that returns `503` until the real routing config is published. Because the `caddy` service depends on `management-api` being healthy, the Management API begins listening on `:9090` first; it then publishes the full route config as JSON via the Caddy Admin API (`POST /load` on `http://caddy:2019`), with a backoff retry loop until Caddy is reachable. Tenant routes (`/rest/v1`, `/auth/v1`, `/functions/v1`, `/platform/v1`) are owned entirely by that injected JSON, not by the Caddyfile.
@@ -98,9 +99,11 @@ The profile creates a separate FerretDB database user and installs `documentdb` 
 
 If `postgres-data` already exists, Docker entrypoint init scripts will not run again. Enable FerretDB on a fresh volume or create the FerretDB role/database and `documentdb` extension manually.
 
-## Optional pgsodium runtime
+## PgSodium and Vault runtime
 
-`pgsodium` is disabled by default because it requires a stable server key before PostgreSQL starts. To enable it on a fresh database volume, set:
+The recommended `init-env.py` quickstart enables `pgsodium` and Supabase Vault and generates independent, stable 64-character hex keys. Rerunning the generator preserves those keys. This makes the built-in Stripe and MongoDB Wrappers usable on a fresh standard installation.
+
+The manual `.env.example` template remains fail-closed with both extensions disabled because PostgreSQL must never start encrypted storage with a placeholder or ephemeral key. If you use that template instead of the generator, enable the extensions on a fresh database volume only after setting stable keys:
 
 ```bash
 ENABLE_PGSODIUM=true
@@ -153,7 +156,7 @@ If you enabled pgsodium on a fresh volume and need to disable it:
 ## Notes
 
 - This stack is for self-host bootstrap and small deployments. It borrows Pigsty/PGEXT packages for extension coverage, but it does not replace a full Pigsty HA production deployment.
-- `pgsodium` and `supabase_vault` stay installed but are not created automatically in self-host mode. Set `ENABLE_PGSODIUM=true` only after providing a stable key through `PGSODIUM_KEY_FILE` or `PGSODIUM_KEY`.
+- The generated quickstart creates `pgsodium` and `supabase_vault`; the manual `.env.example` template keeps both disabled until stable keys are supplied.
 - `supabase_vault` has its own preload-time key loader. If you enable it, either set `VAULT_KEY` / `VAULT_KEY_FILE` explicitly or let it reuse the pgsodium key sources by leaving those variables empty.
 - `BASE_DOMAIN` is derived from `PUBLIC_URL` by `init-env.py`. Override it manually if you need a different wildcard routing suffix.
 - `init-env.py --output .env` replaces the file atomically with mode `0600`; reruns preserve the existing independent `SUPAOAUTH_BFF_SIGNING_SECRET` unless an explicit replacement is supplied.

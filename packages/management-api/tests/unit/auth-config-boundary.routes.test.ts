@@ -212,6 +212,45 @@ describe("SupAuth auth config boundary", () => {
     expect(updateCalls).toBe(0);
   });
 
+  test("fails closed for unsupported WebAuthn MFA settings before persistence", async () => {
+    config.authRuntimeOwnerRef = "";
+    let updateCalls = 0;
+    let applyCalls = 0;
+    projectService.getProjectSettings = async () => ({ auth: {} } as never);
+    projectService.updateProjectSettings = async () => {
+      updateCalls += 1;
+      return { auth: {} } as never;
+    };
+    tenantRuntimeService.applyAuthConfig = async () => {
+      applyCalls += 1;
+      return {} as never;
+    };
+
+    const unsupportedConfigs = [
+      { mfa_web_authn_enroll_enabled: true },
+      { mfa: { webauthn: { verify_enabled: true } } },
+    ];
+    for (const endpoint of [
+      { send: request, path: "/v1/projects/tenant-a/config/auth" },
+      { send: rawAuthRequest, path: "/v1/projects/tenant-a/auth/config" },
+    ]) {
+      for (const unsupportedConfig of unsupportedConfigs) {
+        const response = await endpoint.send(endpoint.path, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(unsupportedConfig),
+        });
+        expect(response.status).toBe(501);
+        expect(await response.json()).toMatchObject({
+          code: "CAPABILITY_UNAVAILABLE",
+          feature: "auth_webauthn_mfa",
+        });
+      }
+    }
+    expect(updateCalls).toBe(0);
+    expect(applyCalls).toBe(0);
+  });
+
   test("blocks dependent auth config reads and writes", async () => {
     config.authRuntimeOwnerRef = "auth-owner";
 

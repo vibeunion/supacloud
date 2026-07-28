@@ -44,8 +44,8 @@ Legend:
 | Frontend hosting / Pages-style deployment | **Built-in** | External product choice (not a core Supabase product) | External / manual |
 | Git webhook deploy pipeline for hosted frontends | **Built-in** | External / manual | External / manual |
 | Built-in China-focused OAuth integrations (WeChat / Alipay / DingTalk) | **Built-in** | Partial via generic auth providers, no equivalent China-focused operator surface documented as built-in | Partial / manual |
-| Runtime log streaming in the self-host control plane | **Built-in** | **Built-in** in hosted dashboard/log explorer | External / manual |
-| Persistent project logs explorer | **Built-in** (embedded collector + VictoriaLogs; no Analytics/Logflare) | **Built-in** | Partial / Analytics-based |
+| Runtime log streaming in the self-host control plane | **Built-in on host systemd profile**; unavailable in Compose | **Built-in** in hosted dashboard/log explorer | External / manual |
+| Persistent project logs explorer | **Built-in** on host systemd profile; Compose persists Edge Function logs only (embedded collector + VictoriaLogs; no Analytics/Logflare) | **Built-in** | Partial / Analytics-based |
 | Configurable log drains (forward to webhook / Datadog / Loki / Elasticsearch) | **Built-in** | **Built-in** | External / manual |
 | S3-compatible storage API with SigV4 (ListBuckets / PutObject / GetObject / DeleteObject / HeadObject) | **Built-in** (SigV4 + Bearer) | Partial (via extensions) | External / manual |
 | Scheduled Edge Functions (cron-based triggers) | **Built-in** | **Built-in** (pg_cron + pg_net) | Manual (pg_cron) |
@@ -55,12 +55,12 @@ Legend:
 | Managed branching / preview environments | **Built-in** (API + UI + Git auto-branch) | **Built-in** | Cloud only |
 | Passkey sign-in | **Built-in** (experimental, GoTrue v2.194+; not Lite) | **Built-in** (experimental) | Version/config dependent |
 | Custom OAuth/OIDC providers | **Built-in** | **Built-in** | Version/config dependent |
-| Storage Vector Buckets API + current `supabase-js` client | **Built-in** | **Built-in** (alpha) | External / manual |
+| Storage Vector Buckets API + current `supabase-js` client | **Experimental** (bounded JSONB exact scan; 1,000,000 scalar values/index, not ANN) | **Built-in** (alpha) | External / manual |
 | RLS Tester | **Built-in** (experimental, bounded read-only role impersonation + policy trace) | **Built-in** (preview) | External / manual |
 | Temporary database access | **Built-in** (expiring isolated login roles + IPv4/IPv6 CIDR TCP gateway + branch inheritance) | **Built-in** (preview, PAT/JWT JIT) | External / manual |
 | Declarative schema / pg-delta CLI workflow | **Built-in** through official CLI adapter | **Built-in** (alpha) | CLI-dependent |
-| CDC Pipelines to BigQuery | **Built-in** (pinned official Supabase ETL runtime) | **Built-in** (public alpha) | External / manual |
-| Stripe and MongoDB Wrappers | **Built-in** (Vault-backed setup) | **Built-in** | Extension/manual SQL |
+| CDC Pipelines to BigQuery | **Built-in on host systemd/Podman installs** (pinned official Supabase ETL runtime; explicit 501 in Compose profiles) | **Built-in** (public alpha) | External / manual |
+| Stripe and MongoDB Wrappers | **Built-in** in the generated self-host profile (Vault-backed; explicit 501 when Vault is unavailable) | **Built-in** | Extension/manual SQL |
 | AWS PrivateLink project connectivity | **Not yet implemented** | **Built-in** (AWS projects) | External / manual |
 | Automated PostgreSQL major version upgrades | **Workflow built-in** (cluster-scoped preflight, full-backup gate, approval, provider executor, validation and rollback journal; executor must be configured per deployment) | **Built-in** | Operator responsibility |
 | Shared-infra multi-tenancy to improve self-host density | **Built-in** | N/A to end users | External / manual |
@@ -131,7 +131,7 @@ Supabase Cloud provides branch environments and preview branches as a fully mana
 
 ### 3. Hosted observability ergonomics
 
-Supabase Cloud documents a hosted Logs Explorer. SupaCloud provides the corresponding project-scoped query, search, time-range and service filtering surface using its embedded collector and VictoriaLogs, plus live journald streaming and log drains. It intentionally does not install or depend on Supabase Analytics/Logflare.
+Supabase Cloud documents a hosted Logs Explorer. SupaCloud provides the corresponding project-scoped query, search, time-range and service filtering surface using its embedded collector and VictoriaLogs. The host systemd profile also provides live journald streaming; Compose deliberately exposes only persistent Edge Function logs because it has no trusted tenant-scoped journal source. It intentionally does not install or depend on Supabase Analytics/Logflare.
 
 ## Where Supabase Self-Hosted is still the right answer
 

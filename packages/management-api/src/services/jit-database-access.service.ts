@@ -21,6 +21,11 @@ const FORBIDDEN_ROLES = new Set([
   "authenticator",
 ]);
 const MAX_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+const MIN_TTL_MS = 5 * 60 * 1000;
+const MAX_ACTIVE_CREDENTIALS_PER_USER = 5;
+const MAX_ACTIVE_CREDENTIALS_PER_PROJECT = 100;
+const MAX_ISSUED_CREDENTIALS_PER_USER_HOUR = 10;
+const MAX_ISSUED_CREDENTIALS_PER_PROJECT_HOUR = 100;
 const gatewayPortRange = normalizeGatewayPortRange(config.jitDatabaseGatewayPortRange);
 export const jitDatabaseGateway = new JitDatabaseGateway(
   config.jitDatabaseGatewayBindHost,
@@ -50,6 +55,9 @@ export function normalizeJitExpiry(value: unknown, now = Date.now()): Date {
   const timestamp = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(timestamp) || timestamp <= now) {
     throw new JitDatabaseAccessError("expires_at must be a future Unix timestamp in milliseconds");
+  }
+  if (timestamp - now < MIN_TTL_MS) {
+    throw new JitDatabaseAccessError("expires_at must be at least 5 minutes in the future");
   }
   if (timestamp - now > MAX_TTL_MS) {
     throw new JitDatabaseAccessError("expires_at must not exceed 90 days");
@@ -81,6 +89,49 @@ export function isJitTargetRoleAllowed(role: JitTargetRoleInfo): boolean {
     && !role.rolreplication
     && !role.rolbypassrls
     && !role.inheritsPrivilegedRole;
+}
+
+export function assertJitCredentialCapacity(userActive: number, projectActive: number): void {
+  if (userActive >= MAX_ACTIVE_CREDENTIALS_PER_USER) {
+    throw new JitDatabaseAccessError(
+      `A user may have at most ${MAX_ACTIVE_CREDENTIALS_PER_USER} active temporary credentials per project`,
+      429,
+      "jit_user_credential_capacity",
+    );
+  }
+  if (projectActive >= MAX_ACTIVE_CREDENTIALS_PER_PROJECT) {
+    throw new JitDatabaseAccessError(
+      `A project may have at most ${MAX_ACTIVE_CREDENTIALS_PER_PROJECT} active temporary credentials`,
+      429,
+      "jit_project_credential_capacity",
+    );
+  }
+}
+
+export function assertJitIssuanceRate(userIssued: number, projectIssued: number): void {
+  if (userIssued >= MAX_ISSUED_CREDENTIALS_PER_USER_HOUR) {
+    throw new JitDatabaseAccessError(
+      `A user may issue at most ${MAX_ISSUED_CREDENTIALS_PER_USER_HOUR} temporary credentials per hour`,
+      429,
+      "jit_user_issuance_rate",
+    );
+  }
+  if (projectIssued >= MAX_ISSUED_CREDENTIALS_PER_PROJECT_HOUR) {
+    throw new JitDatabaseAccessError(
+      `A project may issue at most ${MAX_ISSUED_CREDENTIALS_PER_PROJECT_HOUR} temporary credentials per hour`,
+      429,
+      "jit_project_issuance_rate",
+    );
+  }
+}
+
+export function jitRuleCoversCredential(
+  credential: { expiresAt: Date; allowedNetworks: NormalizedAllowedNetworks },
+  rule: { expiresAt: Date; allowedNetworks: NormalizedAllowedNetworks } | null,
+): boolean {
+  if (!rule || credential.expiresAt.getTime() > rule.expiresAt.getTime()) return false;
+  return JSON.stringify(serializeAllowedNetworks(credential.allowedNetworks))
+    === JSON.stringify(serializeAllowedNetworks(rule.allowedNetworks));
 }
 
 function quoteIdentifier(value: string): string {
@@ -149,12 +200,62 @@ async function revokeLoginRole(ref: string, loginRole: string): Promise<void> {
   await projectDb.unsafe(`DROP ROLE IF EXISTS ${quoteIdentifier(loginRole)}`);
 }
 
-async function resolveParentProjectRef(ref: string): Promise<string | null> {
-  const [project] = await sql`
+async function resolveParentProjectRef(ref: string, controlDb: typeof sql = sql): Promise<string | null> {
+  const [project] = await controlDb`
     SELECT NULLIF(config->>'parent_ref', '') AS parent_ref
     FROM projects WHERE ref = ${ref} LIMIT 1
   `;
   return project?.parent_ref ? String(project.parent_ref) : null;
+}
+
+async function withJitProjectLocks<T>(
+  refs: Array<string | null>,
+  operation: (tx: typeof sql) => Promise<T>,
+): Promise<T> {
+  return sql.begin(async (transaction) => {
+    const tx = transaction as typeof sql;
+    for (const ref of [...new Set(refs.filter((value): value is string => Boolean(value)))].sort()) {
+      await tx`SELECT pg_advisory_xact_lock(hashtext(${`supacloud-jit:${ref}`}))`;
+    }
+    return operation(tx);
+  });
+}
+
+async function readJitState(ref: string, parentRef: string | null, controlDb: typeof sql) {
+  const [local] = await controlDb`
+    SELECT state, updated_at FROM project_jit_access_settings WHERE project_ref = ${ref}
+  `;
+  if (local) return { state: local.state as JitAccessState, updated_at: local.updated_at || null, inherited_from: null };
+  if (parentRef) {
+    const [parent] = await controlDb`
+      SELECT state, updated_at FROM project_jit_access_settings WHERE project_ref = ${parentRef}
+    `;
+    if (parent) return { state: parent.state as JitAccessState, updated_at: parent.updated_at || null, inherited_from: parentRef };
+  }
+  return { state: "disabled" as JitAccessState, updated_at: null, inherited_from: null };
+}
+
+async function readEffectiveJitRule(
+  ref: string,
+  parentRef: string | null,
+  userId: string,
+  role: string,
+  controlDb: typeof sql,
+) {
+  let [rule] = await controlDb`
+    SELECT expires_at, allowed_networks, branches_only FROM project_jit_access_rules
+    WHERE project_ref = ${ref} AND user_id = ${userId} AND role = ${role} AND expires_at > now()
+    LIMIT 1
+  `;
+  if (!rule && parentRef) {
+    [rule] = await controlDb`
+      SELECT expires_at, allowed_networks, branches_only FROM project_jit_access_rules
+      WHERE project_ref = ${parentRef} AND user_id = ${userId} AND role = ${role}
+        AND branches_only = true AND expires_at > now()
+      LIMIT 1
+    `;
+  }
+  return rule || null;
 }
 
 async function assertUserIsActiveCollaborator(ref: string, userId: string): Promise<void> {
@@ -218,11 +319,7 @@ function hasAllowedNetworks(value: NormalizedAllowedNetworks): boolean {
 
 async function allocateGatewayPort(tx: typeof sql): Promise<number> {
   await tx.unsafe("SELECT pg_advisory_xact_lock(hashtext('supacloud-jit-database-gateway-port'))");
-  await tx`
-    UPDATE project_jit_credentials
-    SET revoked_at = now()
-    WHERE revoked_at IS NULL AND expires_at <= now()
-  `;
+  await cleanupExpiredCredentials(tx);
   const usedRows = await tx`
     SELECT gateway_port FROM project_jit_credentials
     WHERE revoked_at IS NULL AND gateway_port IS NOT NULL
@@ -234,43 +331,84 @@ async function allocateGatewayPort(tx: typeof sql): Promise<number> {
   throw new JitDatabaseAccessError("No JIT database gateway ports are available", 503, "jit_gateway_capacity");
 }
 
+async function cleanupExpiredCredentials(controlDb: typeof sql, projectRef?: string): Promise<void> {
+  const expired = await controlDb`
+    SELECT id, project_ref, login_role FROM project_jit_credentials
+    WHERE revoked_at IS NULL AND expires_at <= now()
+      AND (${projectRef ?? null}::text IS NULL OR project_ref = ${projectRef ?? null})
+  `;
+  for (const credential of expired) {
+    jitDatabaseGateway.release(String(credential.id));
+    await revokeLoginRole(String(credential.project_ref), String(credential.login_role));
+  }
+  if (expired.length > 0) {
+    await controlDb`
+      UPDATE project_jit_credentials SET revoked_at = now()
+      WHERE revoked_at IS NULL AND id IN ${controlDb(expired.map((credential: { id: unknown }) => credential.id))}
+    `;
+  }
+
+  const retired = await controlDb`
+    SELECT id, project_ref, login_role FROM project_jit_credentials
+    WHERE revoked_at < now() - interval '30 days'
+      AND (${projectRef ?? null}::text IS NULL OR project_ref = ${projectRef ?? null})
+  `;
+  for (const credential of retired) {
+    jitDatabaseGateway.release(String(credential.id));
+    await revokeLoginRole(String(credential.project_ref), String(credential.login_role));
+  }
+  if (retired.length > 0) {
+    await controlDb`
+      DELETE FROM project_jit_credentials
+      WHERE id IN ${controlDb(retired.map((credential: { id: unknown }) => credential.id))}
+    `;
+  }
+}
+
 export const jitDatabaseAccessService = {
   async state(ref: string) {
     await ensureSchema();
-    const [row] = await sql`SELECT state, updated_at FROM project_jit_access_settings WHERE project_ref = ${ref}`;
-    if (row) return { state: row.state as JitAccessState, updated_at: row.updated_at || null, inherited_from: null };
     const parentRef = await resolveParentProjectRef(ref);
-    if (parentRef) {
-      const [parent] = await sql`SELECT state, updated_at FROM project_jit_access_settings WHERE project_ref = ${parentRef}`;
-      if (parent) return { state: parent.state as JitAccessState, updated_at: parent.updated_at || null, inherited_from: parentRef };
-    }
-    return { state: "disabled" as JitAccessState, updated_at: null, inherited_from: null };
+    return readJitState(ref, parentRef, sql);
   },
 
   async setState(ref: string, state: JitAccessState) {
     await ensureSchema();
     if (state !== "enabled" && state !== "disabled") throw new JitDatabaseAccessError("state must be enabled or disabled");
-    if (state === "disabled") {
-      const active = await sql`
-        SELECT id, login_role FROM project_jit_credentials
-        WHERE project_ref = ${ref} AND revoked_at IS NULL
-      `;
-      for (const credential of active) {
-        jitDatabaseGateway.release(String(credential.id));
-        await revokeLoginRole(ref, String(credential.login_role));
+    return withJitProjectLocks([ref], async (tx) => {
+      if (state === "disabled") {
+        const active = await tx`
+          SELECT id, project_ref, login_role FROM project_jit_credentials
+          WHERE revoked_at IS NULL AND (
+            project_ref = ${ref}
+            OR project_ref IN (
+              SELECT child.ref
+              FROM projects child
+              LEFT JOIN project_jit_access_settings local_state ON local_state.project_ref = child.ref
+              WHERE NULLIF(child.config->>'parent_ref', '') = ${ref}
+                AND COALESCE(local_state.state, 'disabled') <> 'enabled'
+            )
+          )
+        `;
+        for (const credential of active) {
+          jitDatabaseGateway.release(String(credential.id));
+          await revokeLoginRole(String(credential.project_ref), String(credential.login_role));
+        }
+        if (active.length > 0) {
+          await tx`
+            UPDATE project_jit_credentials SET revoked_at = now()
+            WHERE revoked_at IS NULL AND id IN ${tx(active.map((credential: { id: unknown }) => credential.id))}
+          `;
+        }
       }
-      await sql`
-        UPDATE project_jit_credentials SET revoked_at = now()
-        WHERE project_ref = ${ref} AND revoked_at IS NULL
+      const [row] = await tx`
+        INSERT INTO project_jit_access_settings (project_ref, state, updated_at)
+        VALUES (${ref}, ${state}, now())
+        ON CONFLICT (project_ref) DO UPDATE SET state = EXCLUDED.state, updated_at = now()
+        RETURNING state, updated_at
       `;
-    }
-    const [row] = await sql`
-      INSERT INTO project_jit_access_settings (project_ref, state, updated_at)
-      VALUES (${ref}, ${state}, now())
-      ON CONFLICT (project_ref) DO UPDATE SET state = EXCLUDED.state, updated_at = now()
-      RETURNING state, updated_at
-    `;
-    return row;
+      return row;
+    });
   },
 
   async listRules(ref: string) {
@@ -312,12 +450,59 @@ export const jitDatabaseAccessService = {
       return { role, expiresAt: normalizeJitExpiry(rule.expires_at), allowedNetworks, branchesOnly: rule.branches_only === true };
     }));
 
-    await sql.begin(async (tx) => {
+    const childRows = await sql`
+      SELECT ref FROM projects WHERE NULLIF(config->>'parent_ref', '') = ${ref}
+    `;
+    await withJitProjectLocks(
+      [ref, ...childRows.map((row: { ref: unknown }) => String(row.ref))],
+      async (tx) => {
       await tx`DELETE FROM project_jit_access_rules WHERE project_ref = ${ref} AND user_id = ${input.user_id}`;
       for (const rule of normalized) {
         await tx`
           INSERT INTO project_jit_access_rules (project_ref, user_id, role, allowed_networks, branches_only, expires_at)
           VALUES (${ref}, ${input.user_id}, ${rule.role}, ${JSON.stringify(serializeAllowedNetworks(rule.allowedNetworks))}::jsonb, ${rule.branchesOnly}, ${rule.expiresAt})
+        `;
+      }
+      const active = await tx`
+        SELECT credential.id, credential.project_ref, credential.target_role, credential.login_role,
+          credential.allowed_networks, credential.expires_at,
+          NULLIF(project.config->>'parent_ref', '') AS parent_ref
+        FROM project_jit_credentials credential
+        JOIN projects project ON project.ref = credential.project_ref
+        WHERE credential.user_id = ${input.user_id}
+          AND credential.revoked_at IS NULL
+          AND credential.expires_at > now()
+          AND (credential.project_ref = ${ref} OR NULLIF(project.config->>'parent_ref', '') = ${ref})
+      `;
+      const revokedIds: unknown[] = [];
+      for (const credential of active) {
+        const credentialRef = String(credential.project_ref);
+        const effectiveRule = await readEffectiveJitRule(
+          credentialRef,
+          credential.parent_ref ? String(credential.parent_ref) : null,
+          input.user_id,
+          String(credential.target_role),
+          tx,
+        );
+        const applicableRule = effectiveRule?.branches_only === true && !credential.parent_ref
+          ? null
+          : effectiveRule;
+        const covered = jitRuleCoversCredential({
+          expiresAt: new Date(credential.expires_at as Date),
+          allowedNetworks: parseStoredNetworks(credential.allowed_networks),
+        }, applicableRule ? {
+          expiresAt: new Date(applicableRule.expires_at as Date),
+          allowedNetworks: parseStoredNetworks(applicableRule.allowed_networks),
+        } : null);
+        if (covered) continue;
+        jitDatabaseGateway.release(String(credential.id));
+        await revokeLoginRole(credentialRef, String(credential.login_role));
+        revokedIds.push(credential.id);
+      }
+      if (revokedIds.length > 0) {
+        await tx`
+          UPDATE project_jit_credentials SET revoked_at = now()
+          WHERE revoked_at IS NULL AND id IN ${tx(revokedIds)}
         `;
       }
     });
@@ -326,85 +511,88 @@ export const jitDatabaseAccessService = {
 
   async issueCredential(ref: string, input: { user_id: string; role: string }) {
     await ensureSchema();
-    const state = await this.state(ref);
-    if (state.state !== "enabled") throw new JitDatabaseAccessError("Temporary database access is disabled", 409, "jit_access_disabled");
     const role = normalizeJitRole(input.role);
-    let [rule] = await sql`
-      SELECT expires_at, allowed_networks, branches_only FROM project_jit_access_rules
-      WHERE project_ref = ${ref} AND user_id = ${input.user_id} AND role = ${role} AND expires_at > now()
-      LIMIT 1
-    `;
     const parentRef = await resolveParentProjectRef(ref);
-    if (!rule && parentRef) {
-      [rule] = await sql`
-        SELECT expires_at, allowed_networks, branches_only FROM project_jit_access_rules
-        WHERE project_ref = ${parentRef} AND user_id = ${input.user_id} AND role = ${role}
-          AND branches_only = true AND expires_at > now()
-        LIMIT 1
+    return withJitProjectLocks([ref, parentRef], async (tx) => {
+      const lockedParentRef = await resolveParentProjectRef(ref, tx);
+      const state = await readJitState(ref, lockedParentRef, tx);
+      if (state.state !== "enabled") {
+        throw new JitDatabaseAccessError("Temporary database access is disabled", 409, "jit_access_disabled");
+      }
+      const rule = await readEffectiveJitRule(ref, lockedParentRef, input.user_id, role, tx);
+      if (!rule) throw new JitDatabaseAccessError("No active temporary access rule matches this user and role", 403, "jit_rule_denied");
+      if (rule.branches_only === true && !lockedParentRef) {
+        throw new JitDatabaseAccessError("This temporary access rule is restricted to branch projects", 403, "jit_branches_only");
+      }
+      await assertUserIsActiveCollaborator(ref, input.user_id);
+      await assertTargetRole(ref, role);
+      await cleanupExpiredCredentials(tx, ref);
+      const [capacity] = await tx`
+        SELECT count(*)::integer AS project_active,
+          count(*) FILTER (WHERE user_id = ${input.user_id})::integer AS user_active
+        FROM project_jit_credentials
+        WHERE project_ref = ${ref} AND revoked_at IS NULL AND expires_at > now()
       `;
-    }
-    if (!rule) throw new JitDatabaseAccessError("No active temporary access rule matches this user and role", 403, "jit_rule_denied");
-    if (rule.branches_only === true && !parentRef) {
-      throw new JitDatabaseAccessError("This temporary access rule is restricted to branch projects", 403, "jit_branches_only");
-    }
-    await assertUserIsActiveCollaborator(ref, input.user_id);
-    await assertTargetRole(ref, role);
+      assertJitCredentialCapacity(Number(capacity?.user_active || 0), Number(capacity?.project_active || 0));
+      const [issuance] = await tx`
+        SELECT count(*)::integer AS project_issued,
+          count(*) FILTER (WHERE user_id = ${input.user_id})::integer AS user_issued
+        FROM project_jit_credentials
+        WHERE project_ref = ${ref} AND created_at > now() - interval '1 hour'
+      `;
+      assertJitIssuanceRate(Number(issuance?.user_issued || 0), Number(issuance?.project_issued || 0));
 
-    const credentialId = randomUUID();
-    const loginRole = buildJitLoginRole(ref, input.user_id, role, credentialId);
-    const token = `supac_jit_${randomBytes(32).toString("base64url")}`;
-    const expiresAt = new Date(rule.expires_at as Date);
-    const allowedNetworks = parseStoredNetworks(rule.allowed_networks);
-    const gatewayRequired = hasAllowedNetworks(allowedNetworks);
-    const projectDb = getProjectDb(await resolveDbName(ref));
-    await projectDb.unsafe(
-      `CREATE ROLE ${quoteIdentifier(loginRole)} LOGIN NOINHERIT CONNECTION LIMIT 5 PASSWORD '${token.replaceAll("'", "''")}' VALID UNTIL '${expiresAt.toISOString()}'`,
-    );
-    try {
-      await projectDb.unsafe(`GRANT ${quoteIdentifier(role)} TO ${quoteIdentifier(loginRole)}`);
-      await projectDb.unsafe(`ALTER ROLE ${quoteIdentifier(loginRole)} SET role = ${quoteIdentifier(role)}`);
-      let gatewayPort: number | null = null;
-      await sql.begin(async (tx) => {
-        gatewayPort = gatewayRequired ? await allocateGatewayPort(tx as typeof sql) : null;
+      const credentialId = randomUUID();
+      const loginRole = buildJitLoginRole(ref, input.user_id, role, credentialId);
+      const token = `supac_jit_${randomBytes(32).toString("base64url")}`;
+      const expiresAt = normalizeJitExpiry(rule.expires_at);
+      const allowedNetworks = parseStoredNetworks(rule.allowed_networks);
+      const gatewayRequired = hasAllowedNetworks(allowedNetworks);
+      const projectDb = getProjectDb(await resolveDbName(ref));
+      await projectDb.unsafe(
+        `CREATE ROLE ${quoteIdentifier(loginRole)} LOGIN NOINHERIT CONNECTION LIMIT 5 PASSWORD '${token.replaceAll("'", "''")}' VALID UNTIL '${expiresAt.toISOString()}'`,
+      );
+      try {
+        await projectDb.unsafe(`GRANT ${quoteIdentifier(role)} TO ${quoteIdentifier(loginRole)}`);
+        await projectDb.unsafe(`ALTER ROLE ${quoteIdentifier(loginRole)} SET role = ${quoteIdentifier(role)}`);
+        const gatewayPort = gatewayRequired ? await allocateGatewayPort(tx) : null;
         await tx`
           INSERT INTO project_jit_credentials
             (id, project_ref, user_id, target_role, login_role, token_hash, gateway_port, allowed_networks, expires_at)
           VALUES
             (${credentialId}, ${ref}, ${input.user_id}, ${role}, ${loginRole}, ${createHash("sha256").update(token).digest("hex")}, ${gatewayPort}, ${JSON.stringify(serializeAllowedNetworks(allowedNetworks))}::jsonb, ${expiresAt})
         `;
-      });
-
-      if (gatewayPort !== null) {
-        try {
-          jitDatabaseGateway.bind({ credentialId, port: gatewayPort, expiresAt, allowedNetworks });
-        } catch (error) {
-          await sql`UPDATE project_jit_credentials SET revoked_at = now() WHERE id = ${credentialId}`;
-          throw new JitDatabaseAccessError(
-            `JIT database gateway could not bind port ${gatewayPort}: ${error instanceof Error ? error.message : String(error)}`,
-            503,
-            "jit_gateway_bind_failed",
-          );
+        if (gatewayPort !== null) {
+          try {
+            jitDatabaseGateway.bind({ credentialId, port: gatewayPort, expiresAt, allowedNetworks });
+          } catch (error) {
+            throw new JitDatabaseAccessError(
+              `JIT database gateway could not bind port ${gatewayPort}: ${error instanceof Error ? error.message : String(error)}`,
+              503,
+              "jit_gateway_bind_failed",
+            );
+          }
         }
-      }
 
-      const dbName = await resolveDbName(ref);
-      const host = gatewayPort === null ? config.pgHost : config.jitDatabaseGatewayPublicHost;
-      const port = gatewayPort === null ? config.pgPort : gatewayPort;
-      return {
-        id: credentialId,
-        user_id: input.user_id,
-        role,
-        login_role: loginRole,
-        password: token,
-        expires_at: expiresAt.getTime(),
-        allowed_networks: serializeAllowedNetworks(allowedNetworks),
-        connection_string: `postgresql://${encodeURIComponent(loginRole)}:${encodeURIComponent(token)}@${host}:${port}/${encodeURIComponent(dbName)}?sslmode=require`,
-      };
-    } catch (error) {
-      jitDatabaseGateway.release(credentialId);
-      await revokeLoginRole(ref, loginRole).catch(() => undefined);
-      throw error;
-    }
+        const dbName = await resolveDbName(ref);
+        const host = gatewayPort === null ? config.pgHost : config.jitDatabaseGatewayPublicHost;
+        const port = gatewayPort === null ? config.pgPort : gatewayPort;
+        return {
+          id: credentialId,
+          user_id: input.user_id,
+          role,
+          login_role: loginRole,
+          password: token,
+          expires_at: expiresAt.getTime(),
+          allowed_networks: serializeAllowedNetworks(allowedNetworks),
+          connection_string: `postgresql://${encodeURIComponent(loginRole)}:${encodeURIComponent(token)}@${host}:${port}/${encodeURIComponent(dbName)}?sslmode=require`,
+        };
+      } catch (error) {
+        jitDatabaseGateway.release(credentialId);
+        await revokeLoginRole(ref, loginRole).catch(() => undefined);
+        throw error;
+      }
+    });
   },
 
   async revokeCredential(ref: string, credentialId: string) {
@@ -423,10 +611,7 @@ export const jitDatabaseAccessService = {
 
   async startGateway() {
     await ensureSchema();
-    await sql`
-      UPDATE project_jit_credentials SET revoked_at = now()
-      WHERE revoked_at IS NULL AND expires_at <= now()
-    `;
+    await sql.begin(async (transaction) => cleanupExpiredCredentials(transaction as typeof sql));
     const active = await sql`
       SELECT id, project_ref, login_role, gateway_port, allowed_networks, expires_at
       FROM project_jit_credentials

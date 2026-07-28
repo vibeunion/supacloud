@@ -46,6 +46,14 @@ describe('Lite snapshots', () => {
     expect(await Bun.file(join(targetPaths.dataDir!, 'database.bin')).bytes()).toEqual(new Uint8Array([1, 2, 3, 4]))
     expect(await readFile(join(targetPaths.storageDir, 'avatar.txt'), 'utf8')).toBe('storage-bytes')
     expect(await readFile(targetPaths.secretsFile, 'utf8')).toBe(originalSecrets)
+    if (process.platform !== 'win32') {
+      expect((await stat(targetPaths.stateDir)).mode & 0o777).toBe(0o700)
+      expect((await stat(targetPaths.dataDir!)).mode & 0o777).toBe(0o700)
+      expect((await stat(targetPaths.storageDir)).mode & 0o777).toBe(0o700)
+      expect((await stat(targetPaths.secretsFile)).mode & 0o777).toBe(0o600)
+      expect((await stat(join(targetPaths.dataDir!, 'database.bin'))).mode & 0o777).toBe(0o600)
+      expect((await stat(join(targetPaths.storageDir, 'avatar.txt'))).mode & 0o777).toBe(0o600)
+    }
   })
 
   test('refuses non-empty restore targets unless force retains a rollback copy', async () => {

@@ -304,6 +304,49 @@ async function runVectorOperation<T>(
     }
 }
 
+function vectorInputRecord(input: unknown): Record<string, unknown> {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) {
+        throw new StorageVectorError('request body must be an object', 400, 'ValidationException');
+    }
+    return input as Record<string, unknown>;
+}
+
+function requiredVectorString(input: unknown, key: string): string {
+    const value = vectorInputRecord(input)[key];
+    if (typeof value !== 'string') {
+        throw new StorageVectorError(`${key} must be a string`, 400, 'ValidationException');
+    }
+    return value;
+}
+
+function optionalVectorString(input: unknown, key: string): string | undefined {
+    const value = vectorInputRecord(input)[key];
+    if (value === undefined) return undefined;
+    return requiredVectorString(input, key);
+}
+
+function requiredVectorNumber(input: unknown, key: string): number {
+    const value = vectorInputRecord(input)[key];
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+        throw new StorageVectorError(`${key} must be a finite number`, 400, 'ValidationException');
+    }
+    return value;
+}
+
+function optionalVectorNumber(input: unknown, key: string): number | undefined {
+    if (vectorInputRecord(input)[key] === undefined) return undefined;
+    return requiredVectorNumber(input, key);
+}
+
+function optionalVectorBoolean(input: unknown, key: string): boolean {
+    const value = vectorInputRecord(input)[key];
+    if (value === undefined) return false;
+    if (typeof value !== 'boolean') {
+        throw new StorageVectorError(`${key} must be a boolean`, 400, 'ValidationException');
+    }
+    return value;
+}
+
 // ── Supabase SDK-Compatible Routes ────────────────────────────────
 // These are mounted directly by the public gateway at /storage/v1.
 // So these routes see paths starting from /object/..., /bucket/..., /render/...
@@ -1712,7 +1755,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     .post('/vector/CreateVectorBucket', async ({ headers, body, set }) => {
         const input = body as Record<string, unknown>;
         const result = await runVectorOperation(headers as Record<string, string | undefined>, (ref) =>
-            StorageVectorService.createBucket(ref, String(input.vectorBucketName || '')),
+            StorageVectorService.createBucket(ref, requiredVectorString(input, 'vectorBucketName')),
         );
         if (result === undefined) {
             set.status = 200;
@@ -1723,7 +1766,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     .post('/vector/DeleteVectorBucket', async ({ headers, body, set }) => {
         const input = body as Record<string, unknown>;
         const result = await runVectorOperation(headers as Record<string, string | undefined>, (ref) =>
-            StorageVectorService.deleteBucket(ref, String(input.vectorBucketName || '')),
+            StorageVectorService.deleteBucket(ref, requiredVectorString(input, 'vectorBucketName')),
         );
         if (result === undefined) {
             set.status = 200;
@@ -1734,16 +1777,16 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     .post('/vector/GetVectorBucket', async ({ headers, body }) => {
         const input = body as Record<string, unknown>;
         return runVectorOperation(headers as Record<string, string | undefined>, (ref) =>
-            StorageVectorService.getBucket(ref, String(input.vectorBucketName || '')),
+            StorageVectorService.getBucket(ref, requiredVectorString(input, 'vectorBucketName')),
         );
     }, { detail: { tags: ["storage", "vector"], summary: "Get a vector bucket" } })
     .post('/vector/ListVectorBuckets', async ({ headers, body }) => {
         const input = body as Record<string, unknown>;
         return runVectorOperation(headers as Record<string, string | undefined>, (ref) =>
             StorageVectorService.listBuckets(ref, {
-                maxResults: input.maxResults as number | undefined,
-                nextToken: input.nextToken as string | undefined,
-                prefix: input.prefix as string | undefined,
+                maxResults: optionalVectorNumber(input, 'maxResults'),
+                nextToken: optionalVectorString(input, 'nextToken'),
+                prefix: optionalVectorString(input, 'prefix'),
             }),
         );
     }, { detail: { tags: ["storage", "vector"], summary: "List vector buckets" } })
@@ -1751,11 +1794,11 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const input = body as Record<string, unknown>;
         const result = await runVectorOperation(headers as Record<string, string | undefined>, (ref) =>
             StorageVectorService.createIndex(ref, {
-                vectorBucketName: String(input.vectorBucketName || ''),
-                indexName: String(input.indexName || ''),
-                dataType: input.dataType as 'float32',
-                dimension: Number(input.dimension),
-                distanceMetric: input.distanceMetric as 'cosine' | 'euclidean',
+                vectorBucketName: requiredVectorString(input, 'vectorBucketName'),
+                indexName: requiredVectorString(input, 'indexName'),
+                dataType: requiredVectorString(input, 'dataType') as 'float32',
+                dimension: requiredVectorNumber(input, 'dimension'),
+                distanceMetric: requiredVectorString(input, 'distanceMetric') as 'cosine' | 'euclidean' | 'dotproduct',
                 metadataConfiguration: input.metadataConfiguration as { nonFilterableMetadataKeys: string[] } | undefined,
             }),
         );
@@ -1768,7 +1811,11 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     .post('/vector/DeleteIndex', async ({ headers, body, set }) => {
         const input = body as Record<string, unknown>;
         const result = await runVectorOperation(headers as Record<string, string | undefined>, (ref) =>
-            StorageVectorService.deleteIndex(ref, String(input.vectorBucketName || ''), String(input.indexName || '')),
+            StorageVectorService.deleteIndex(
+                ref,
+                requiredVectorString(input, 'vectorBucketName'),
+                requiredVectorString(input, 'indexName'),
+            ),
         );
         if (result === undefined) {
             set.status = 200;
@@ -1779,17 +1826,21 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     .post('/vector/GetIndex', async ({ headers, body }) => {
         const input = body as Record<string, unknown>;
         return runVectorOperation(headers as Record<string, string | undefined>, (ref) =>
-            StorageVectorService.getIndex(ref, String(input.vectorBucketName || ''), String(input.indexName || '')),
+            StorageVectorService.getIndex(
+                ref,
+                requiredVectorString(input, 'vectorBucketName'),
+                requiredVectorString(input, 'indexName'),
+            ),
         );
     }, { detail: { tags: ["storage", "vector"], summary: "Get a vector index" } })
     .post('/vector/ListIndexes', async ({ headers, body }) => {
         const input = body as Record<string, unknown>;
         return runVectorOperation(headers as Record<string, string | undefined>, (ref) =>
             StorageVectorService.listIndexes(ref, {
-                vectorBucketName: String(input.vectorBucketName || ''),
-                maxResults: input.maxResults as number | undefined,
-                nextToken: input.nextToken as string | undefined,
-                prefix: input.prefix as string | undefined,
+                vectorBucketName: requiredVectorString(input, 'vectorBucketName'),
+                maxResults: optionalVectorNumber(input, 'maxResults'),
+                nextToken: optionalVectorString(input, 'nextToken'),
+                prefix: optionalVectorString(input, 'prefix'),
             }),
         );
     }, { detail: { tags: ["storage", "vector"], summary: "List vector indexes" } })
@@ -1797,8 +1848,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const input = body as Record<string, unknown>;
         const result = await runVectorOperation(headers as Record<string, string | undefined>, (ref) =>
             StorageVectorService.putVectors(ref, {
-                vectorBucketName: String(input.vectorBucketName || ''),
-                indexName: String(input.indexName || ''),
+                vectorBucketName: requiredVectorString(input, 'vectorBucketName'),
+                indexName: requiredVectorString(input, 'indexName'),
                 vectors: input.vectors as Parameters<typeof StorageVectorService.putVectors>[1]['vectors'],
             }),
         );
@@ -1812,8 +1863,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const input = body as Record<string, unknown>;
         const result = await runVectorOperation(headers as Record<string, string | undefined>, (ref) =>
             StorageVectorService.deleteVectors(ref, {
-                vectorBucketName: String(input.vectorBucketName || ''),
-                indexName: String(input.indexName || ''),
+                vectorBucketName: requiredVectorString(input, 'vectorBucketName'),
+                indexName: requiredVectorString(input, 'indexName'),
                 keys: input.keys as string[],
             }),
         );
@@ -1827,11 +1878,11 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const input = body as Record<string, unknown>;
         return runVectorOperation(headers as Record<string, string | undefined>, (ref) =>
             StorageVectorService.getVectors(ref, {
-                vectorBucketName: String(input.vectorBucketName || ''),
-                indexName: String(input.indexName || ''),
+                vectorBucketName: requiredVectorString(input, 'vectorBucketName'),
+                indexName: requiredVectorString(input, 'indexName'),
                 keys: input.keys as string[],
-                returnData: input.returnData === true,
-                returnMetadata: input.returnMetadata === true,
+                returnData: optionalVectorBoolean(input, 'returnData'),
+                returnMetadata: optionalVectorBoolean(input, 'returnMetadata'),
             }),
         );
     }, { detail: { tags: ["storage", "vector"], summary: "Get vectors" } })
@@ -1839,14 +1890,14 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const input = body as Record<string, unknown>;
         return runVectorOperation(headers as Record<string, string | undefined>, (ref) =>
             StorageVectorService.listVectors(ref, {
-                vectorBucketName: String(input.vectorBucketName || ''),
-                indexName: String(input.indexName || ''),
-                maxResults: input.maxResults as number | undefined,
-                nextToken: input.nextToken as string | undefined,
-                segmentCount: input.segmentCount as number | undefined,
-                segmentIndex: input.segmentIndex as number | undefined,
-                returnData: input.returnData === true,
-                returnMetadata: input.returnMetadata === true,
+                vectorBucketName: requiredVectorString(input, 'vectorBucketName'),
+                indexName: requiredVectorString(input, 'indexName'),
+                maxResults: optionalVectorNumber(input, 'maxResults'),
+                nextToken: optionalVectorString(input, 'nextToken'),
+                segmentCount: optionalVectorNumber(input, 'segmentCount'),
+                segmentIndex: optionalVectorNumber(input, 'segmentIndex'),
+                returnData: optionalVectorBoolean(input, 'returnData'),
+                returnMetadata: optionalVectorBoolean(input, 'returnMetadata'),
             }),
         );
     }, { detail: { tags: ["storage", "vector"], summary: "List vectors" } })
@@ -1854,13 +1905,13 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const input = body as Record<string, unknown>;
         return runVectorOperation(headers as Record<string, string | undefined>, (ref) =>
             StorageVectorService.queryVectors(ref, {
-                vectorBucketName: String(input.vectorBucketName || ''),
-                indexName: String(input.indexName || ''),
+                vectorBucketName: requiredVectorString(input, 'vectorBucketName'),
+                indexName: requiredVectorString(input, 'indexName'),
                 queryVector: input.queryVector as { float32: number[] },
-                topK: Number(input.topK),
+                topK: optionalVectorNumber(input, 'topK'),
                 filter: input.filter,
-                returnDistance: input.returnDistance === true,
-                returnMetadata: input.returnMetadata === true,
+                returnDistance: optionalVectorBoolean(input, 'returnDistance'),
+                returnMetadata: optionalVectorBoolean(input, 'returnMetadata'),
             }),
         );
     }, { detail: { tags: ["storage", "vector"], summary: "Query vectors" } })
