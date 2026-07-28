@@ -3,7 +3,8 @@
   import { resolve } from "$app/paths";
   import { page } from "$app/state";
   import { apiClient } from "$lib/api";
-  import { Users, Shield, KeyRound, Link2, Mail, Clock, Webhook, BadgeCheck, Fingerprint } from "lucide-svelte";
+  import { t } from "svelte-i18n";
+  import { Users, Shield, KeyRound, Link2, Mail, Clock, Webhook, BadgeCheck, ChevronDown, Fingerprint } from "lucide-svelte";
 
   type AuthRuntimeDescriptor = {
     project_ref: string;
@@ -25,31 +26,62 @@
   let authRuntimeError = $state<string | null>(null);
   let authRuntimeLoading = $state(true);
 
-  const AUTH_TABS = [
-    { name: "用户", path: "", route: "/project/[ref]/auth", icon: Users },
-    { name: "提供者", path: "providers", route: "/project/[ref]/auth/providers", icon: KeyRound },
-    { name: "Custom OAuth", path: "custom-providers", route: "/project/[ref]/auth/custom-providers", icon: KeyRound },
-    { name: "Passkeys", path: "passkeys", route: "/project/[ref]/auth/passkeys", icon: Fingerprint },
-    { name: "OAuth Server", path: "oauth-server", route: "/project/[ref]/auth/oauth-server", icon: BadgeCheck },
-    { name: "RLS 策略", path: "policies", route: "/project/[ref]/auth/policies", icon: Shield },
-    { name: "URL 配置", path: "url-configuration", route: "/project/[ref]/auth/url-configuration", icon: Link2 },
-    { name: "邮件模板", path: "templates", route: "/project/[ref]/auth/templates", icon: Mail },
-    { name: "SMTP", path: "smtp", route: "/project/[ref]/auth/smtp", icon: Mail },
-    { name: "Hooks", path: "hooks", route: "/project/[ref]/auth/hooks", icon: Webhook },
-    { name: "会话", path: "sessions", route: "/project/[ref]/auth/sessions", icon: Clock },
-    { name: "MFA", path: "mfa", route: "/project/[ref]/auth/mfa", icon: Shield },
-    { name: "限频", path: "rate-limits", route: "/project/[ref]/auth/rate-limits", icon: Shield },
-    { name: "安全防护", path: "protection", route: "/project/[ref]/auth/protection", icon: Shield },
+  const AUTH_GROUPS = [
+    {
+      labelKey: "AuthNav.users",
+      tabs: [
+        { labelKey: "AuthNav.tabs.users", path: "", route: "/project/[ref]/auth", icon: Users },
+      ],
+    },
+    {
+      labelKey: "AuthNav.sign_in",
+      tabs: [
+        { labelKey: "AuthNav.tabs.providers", path: "providers", route: "/project/[ref]/auth/providers", icon: KeyRound },
+        { labelKey: "AuthNav.tabs.custom_oauth", path: "custom-providers", route: "/project/[ref]/auth/custom-providers", icon: KeyRound },
+        { labelKey: "AuthNav.tabs.passkeys", path: "passkeys", route: "/project/[ref]/auth/passkeys", icon: Fingerprint },
+        { labelKey: "AuthNav.tabs.oauth_server", path: "oauth-server", route: "/project/[ref]/auth/oauth-server", icon: BadgeCheck },
+      ],
+    },
+    {
+      labelKey: "AuthNav.security",
+      tabs: [
+        { labelKey: "AuthNav.tabs.rls_policies", path: "policies", route: "/project/[ref]/auth/policies", icon: Shield },
+        { labelKey: "AuthNav.tabs.sessions", path: "sessions", route: "/project/[ref]/auth/sessions", icon: Clock },
+        { labelKey: "AuthNav.tabs.mfa", path: "mfa", route: "/project/[ref]/auth/mfa", icon: Shield },
+        { labelKey: "AuthNav.tabs.rate_limits", path: "rate-limits", route: "/project/[ref]/auth/rate-limits", icon: Shield },
+        { labelKey: "AuthNav.tabs.protection", path: "protection", route: "/project/[ref]/auth/protection", icon: Shield },
+      ],
+    },
+    {
+      labelKey: "AuthNav.messaging",
+      tabs: [
+        { labelKey: "AuthNav.tabs.url_configuration", path: "url-configuration", route: "/project/[ref]/auth/url-configuration", icon: Link2 },
+        { labelKey: "AuthNav.tabs.email_templates", path: "templates", route: "/project/[ref]/auth/templates", icon: Mail },
+        { labelKey: "AuthNav.tabs.smtp", path: "smtp", route: "/project/[ref]/auth/smtp", icon: Mail },
+      ],
+    },
+    {
+      labelKey: "AuthNav.advanced",
+      tabs: [
+        { labelKey: "AuthNav.tabs.hooks", path: "hooks", route: "/project/[ref]/auth/hooks", icon: Webhook },
+      ],
+    },
   ] as const;
 
-  const visibleTabs = $derived(
-    authRuntime?.mode === "local" || authRuntime?.mode === "owner"
-      ? AUTH_TABS
-      : AUTH_TABS.filter((tab) => tab.path === "policies"),
+  const visibleGroups = $derived(
+    AUTH_GROUPS
+      .map((group) => ({
+        ...group,
+        tabs: group.tabs.filter((tab) =>
+          authRuntime?.mode === "local" || authRuntime?.mode === "owner" || tab.path === "policies"
+        ),
+      }))
+      .filter((group) => group.tabs.length > 0),
   );
   const ownerManagedPage = $derived(
     authRuntime?.mode === "shared" && !currentPath.endsWith("/policies"),
   );
+  let menuBar = $state<HTMLDivElement>();
 
   onMount(() => {
     let cancelled = false;
@@ -79,20 +111,56 @@
     return currentPath === `${base}/${tabPath}`;
   }
 
+  function groupIsActive(tabs: readonly { path: string }[]) {
+    return tabs.some((tab) => isActive(tab.path));
+  }
+
+  function closeMenusOnOutsideClick(event: MouseEvent) {
+    if (!(event.target instanceof Node)) return;
+    for (const details of menuBar?.querySelectorAll<HTMLDetailsElement>("details[open]") ?? []) {
+      if (!details.contains(event.target)) details.open = false;
+    }
+  }
+
+  function handleMenuKeydown(event: KeyboardEvent) {
+    if (event.key !== "Escape" || !(event.currentTarget instanceof HTMLElement)) return;
+    const details = event.currentTarget.closest("details");
+    if (!(details instanceof HTMLDetailsElement)) return;
+    event.preventDefault();
+    details.open = false;
+    event.currentTarget.focus();
+  }
+
+  function closeMenuFromLink(event: MouseEvent) {
+    if (!(event.currentTarget instanceof HTMLElement)) return;
+    const details = event.currentTarget.closest("details");
+    if (details instanceof HTMLDetailsElement) details.open = false;
+  }
+
   let { children } = $props();
 </script>
 
+<svelte:window onclick={closeMenusOnOutsideClick} />
+
 <div class="h-full flex flex-col space-y-4">
-  <!-- Auth Tab Navigation -->
-  <div class="flex items-center gap-1 px-1 overflow-x-auto border-b border-border/30 pb-0">
-    {#each visibleTabs as tab (tab.path)}
-      <a
-        href={resolve(tab.route, { ref: projectRef })}
-        class="flex items-center gap-1.5 px-3 py-2 text-xs font-medium border-b-2 transition-colors whitespace-nowrap {isActive(tab.path) ? 'border-brand text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}"
-      >
-        <tab.icon size={12} />
-        {tab.name}
-      </a>
+  <!-- 按用户任务分组，避免十多个认证入口在窄屏横向溢出。 -->
+  <div bind:this={menuBar} class="flex flex-wrap items-center gap-2 border-b border-border/30 px-1 pb-3">
+    {#each visibleGroups as group (group.labelKey)}
+      <details name="auth-navigation" class="group/details relative">
+        <summary onkeydown={handleMenuKeydown} class="flex cursor-pointer list-none items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold transition-colors [&::-webkit-details-marker]:hidden {groupIsActive(group.tabs) ? 'border-brand/30 bg-brand/10 text-brand' : 'bg-background text-muted-foreground hover:bg-muted hover:text-foreground'}">
+          {$t(group.labelKey)}
+          <ChevronDown class="h-3.5 w-3.5 transition-transform group-open/details:rotate-180" />
+        </summary>
+        <div class="absolute left-0 z-30 mt-2 w-56 overflow-hidden rounded-xl border bg-popover p-1.5 text-popover-foreground shadow-xl">
+          {#each group.tabs as tab (tab.path)}
+            {@const Icon = tab.icon}
+            <a href={resolve(tab.route, { ref: projectRef })} onclick={closeMenuFromLink} class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium transition-colors {isActive(tab.path) ? 'bg-brand/10 text-brand' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}">
+              <Icon class="h-4 w-4" />
+              {$t(tab.labelKey)}
+            </a>
+          {/each}
+        </div>
+      </details>
     {/each}
   </div>
 
