@@ -30,15 +30,18 @@
     "storage": "存储",
     "edge_functions": "边缘函数",
     "database": "数据库",
-    "cache": "项目缓存",
+    "database_objects": "对象与运维",
+    "cache": "缓存",
     "api_docs": "API 文档",
+    "connect_api": "连接 / API",
     "query_performance": "慢查询看板",
     "database_linter": "表结构体检",
     "diagnostics": "项目自检",
     "logs": "日志",
     "settings": "项目设置",
-    "reports": "各类监控报表",
-    "tasks": "后台任务"
+    "reports": "监控与诊断",
+    "realtime_inspector": "Realtime 调试器",
+    "tasks": "任务中心"
   },
   "Project": {
     "home": "首页",
@@ -473,7 +476,9 @@
     "storage_juicefs": "存储 (JuiceFS)",
     "operations_console": "运维控制",
     "diagnostics": "自检中心",
-    "settings": "AI 服务配置",
+    "settings": "平台设置",
+    "performance_runtime": "性能与运行时",
+    "operations": "运维与诊断",
     "subtitle": "数据库基础设施与 SupaCloud 服务的全局控制台"
   },
   "Cache": {
@@ -534,9 +539,43 @@
   "Sidebar": {
     "platform_admin": "平台管理",
     "infrastructure": "基础设施",
+    "build": "构建",
+    "observe": "观测",
+    "configure": "配置",
+    "open_navigation": "打开导航",
+    "close_navigation": "关闭导航",
     "back_to_projects": "返回项目列表",
     "return_to_projects": "返回项目列表",
     "database_advisor": "数据库顾问"
+  },
+  "DatabaseNav": {
+    "build": "开发对象",
+    "access": "访问与安全",
+    "data_flow": "性能与数据流",
+    "operations": "运维"
+  },
+  "AuthNav": {
+    "users": "用户",
+    "sign_in": "登录方式",
+    "security": "安全",
+    "messaging": "邮件与链接",
+    "advanced": "高级",
+    "tabs": {
+      "users": "用户",
+      "providers": "提供者",
+      "custom_oauth": "自定义 OAuth",
+      "passkeys": "通行密钥",
+      "oauth_server": "OAuth 服务器",
+      "rls_policies": "RLS 策略",
+      "sessions": "会话",
+      "mfa": "多因素认证",
+      "rate_limits": "限频",
+      "protection": "安全防护",
+      "url_configuration": "URL 配置",
+      "email_templates": "邮件模板",
+      "smtp": "SMTP",
+      "hooks": "Hooks"
+    }
   },
   "Reports": {
     "title": "报表与分析",

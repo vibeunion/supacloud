@@ -30,15 +30,18 @@
     "storage": "Storage",
     "edge_functions": "Edge Functions",
     "database": "Database",
-    "cache": "Project Cache",
+    "database_objects": "Objects & Operations",
+    "cache": "Cache",
     "api_docs": "API Docs",
+    "connect_api": "Connect / API",
     "query_performance": "Query Performance",
     "database_linter": "Database Linter",
     "diagnostics": "Project Diagnostics",
     "logs": "Logs",
-    "settings": "Settings",
-    "reports": "Reports & Analytics",
-    "tasks": "Tasks"
+    "settings": "Project Settings",
+    "reports": "Monitoring & Diagnostics",
+    "realtime_inspector": "Realtime Inspector",
+    "tasks": "Task Center"
   },
   "Project": {
     "home": "Home",
@@ -473,7 +476,9 @@
     "storage_juicefs": "Storage (JuiceFS)",
     "operations_console": "Operations Console",
     "diagnostics": "Diagnostics Center",
-    "settings": "AI Service Settings",
+    "settings": "Platform Settings",
+    "performance_runtime": "Performance & Runtime",
+    "operations": "Operations & Diagnostics",
     "subtitle": "Global control panel for database infrastructure and SupaCloud services."
   },
   "Cache": {
@@ -534,9 +539,43 @@
   "Sidebar": {
     "platform_admin": "Platform Admin",
     "infrastructure": "Infrastructure",
+    "build": "Build",
+    "observe": "Observe",
+    "configure": "Configure",
+    "open_navigation": "Open navigation",
+    "close_navigation": "Close navigation",
     "back_to_projects": "Back to Projects",
     "return_to_projects": "Back to Projects",
     "database_advisor": "Database Advisor"
+  },
+  "DatabaseNav": {
+    "build": "Development Objects",
+    "access": "Access & Security",
+    "data_flow": "Performance & Data Flow",
+    "operations": "Operations"
+  },
+  "AuthNav": {
+    "users": "Users",
+    "sign_in": "Sign-in Methods",
+    "security": "Security",
+    "messaging": "Email & Links",
+    "advanced": "Advanced",
+    "tabs": {
+      "users": "Users",
+      "providers": "Providers",
+      "custom_oauth": "Custom OAuth",
+      "passkeys": "Passkeys",
+      "oauth_server": "OAuth Server",
+      "rls_policies": "RLS Policies",
+      "sessions": "Sessions",
+      "mfa": "MFA",
+      "rate_limits": "Rate Limits",
+      "protection": "Security Protection",
+      "url_configuration": "URL Configuration",
+      "email_templates": "Email Templates",
+      "smtp": "SMTP",
+      "hooks": "Hooks"
+    }
   },
   "Reports": {
     "title": "Reports & Analytics",
