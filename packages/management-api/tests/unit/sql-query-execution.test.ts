@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   assertSqlExecutionAllowed,
+  executeSqlBatchOnConnection,
   executeQuery,
   PgError,
   sqlExecutionError,
@@ -23,6 +24,62 @@ describe("SQL query execution policy", () => {
   test("keeps migration and admin multi-statement behavior unchanged", () => {
     expect(() => assertSqlExecutionAllowed("SELECT 1; SELECT 2;", "migration")).not.toThrow();
     expect(() => assertSqlExecutionAllowed("SELECT 1; SELECT 2;", "admin")).not.toThrow();
+  });
+
+  test("executes migration batches atomically and reports every statement", async () => {
+    const calls: string[] = [];
+    const connection = {
+      unsafe(statement: string) {
+        calls.push(statement);
+        if (statement === "BEGIN" || statement === "COMMIT" || statement === "ROLLBACK") {
+          return Promise.resolve([]);
+        }
+        return {
+          execute: async () => Object.assign(
+            statement.startsWith("SELECT") ? [{ answer: 42 }] : [],
+            { command: statement.split(/\s+/)[0], count: statement.startsWith("SELECT") ? 1 : 0 },
+          ),
+        };
+      },
+    } as never;
+
+    const batch = await executeSqlBatchOnConnection(connection, [
+      "CREATE TABLE public.todos (id bigint)",
+      "SELECT 42 AS answer",
+    ]);
+    expect(batch.command).toBe("BATCH");
+    expect(batch.rows).toEqual([{ answer: 42 }]);
+    expect(batch.rowCount).toBe(1);
+    expect(batch.statements).toMatchObject([
+      { index: 1, command: "CREATE", rowCount: 0 },
+      { index: 2, command: "SELECT", rowCount: 1 },
+    ]);
+    expect(calls).toEqual([
+      "BEGIN",
+      "CREATE TABLE public.todos (id bigint)",
+      "SELECT 42 AS answer",
+      "COMMIT",
+    ]);
+  });
+
+  test("rolls back a migration batch after the first failing statement", async () => {
+    const calls: string[] = [];
+    const connection = {
+      unsafe(statement: string) {
+        calls.push(statement);
+        if (statement === "BEGIN" || statement === "ROLLBACK") return Promise.resolve([]);
+        return {
+          execute: async () => {
+            if (statement.includes("FAIL")) throw new Error("fixture failure");
+            return [];
+          },
+        };
+      },
+    } as never;
+
+    await expect(executeSqlBatchOnConnection(connection, ["SELECT 1", "SELECT FAIL", "SELECT 3"]))
+      .rejects.toThrow("fixture failure");
+    expect(calls).toEqual(["BEGIN", "SELECT 1", "SELECT FAIL", "ROLLBACK"]);
   });
 
   test("allows semicolons inside a single read-mode SQL statement", () => {

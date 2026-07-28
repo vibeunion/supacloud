@@ -10,12 +10,14 @@ type DatabaseSqlPayload = {
   message?: unknown;
   details?: unknown;
   hint?: unknown;
+  statements?: unknown;
 };
 
 export type DatabaseSqlResponse = {
   rows: unknown[];
   rowCount: number;
   command: string | null;
+  statementCount: number;
   durationMs: number | null;
 };
 
@@ -81,6 +83,7 @@ export async function readDatabaseSqlResponse(response: Response): Promise<Datab
     rows,
     rowCount,
     command: typeof payload.command === "string" ? payload.command : null,
+    statementCount: Array.isArray(payload.statements) ? payload.statements.length : 1,
     durationMs: responseDuration(payload),
   };
 }

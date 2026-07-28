@@ -4,7 +4,7 @@ import { projectService } from "../services";
 import { db, getProjectDb, getProjectRoleDb, removeProjectDbCache, resolveAuthenticatorName, resolveDbName, sql as metaSql, type SqlExecutionMode } from "../db";
 import { isDangerousSQL, normalizeSqlForPolicy } from "../db/sql-policy";
 import { cancelActiveSqlQuery } from "../db/sql-query-registry";
-import { splitSqlStatements } from "../db/sql-statements";
+import { splitSqlStatements, stripOuterTransactionStatements } from "../db/sql-statements";
 import { requireAdminAuth, requireProjectOrAdminAuth } from "../middleware/auth";
 import {
   calculateMigrationChecksum,
@@ -83,11 +83,7 @@ export function resolveMigrationStatements(body: MigrationBody): string[] {
  */
 export function migrationExecutionStatements(statements: readonly string[]): string[] {
   const normalized = statements.flatMap((statement) => splitSqlStatements(statement));
-  const executionStatements = normalized.length >= 2
-    && /^(?:BEGIN(?:\s+(?:WORK|TRANSACTION))?|START\s+TRANSACTION)$/i.test(normalizeSqlForPolicy(normalized[0]!))
-    && /^(?:COMMIT|END)(?:\s+(?:WORK|TRANSACTION))?$/i.test(normalizeSqlForPolicy(normalized[normalized.length - 1]!))
-    ? normalized.slice(1, -1)
-    : normalized;
+  const executionStatements = stripOuterTransactionStatements(normalized);
   if (executionStatements.length === 0) {
     throw new MigrationRouteError(400, "empty_migration", "Migration contains no executable statements");
   }
@@ -136,6 +132,7 @@ export function sqlRouteResponse(result: Awaited<ReturnType<typeof db.executeQue
     command: result.command,
     fields: result.fields || [],
     notices: result.notices || [],
+    ...(result.statements ? { statements: result.statements } : {}),
     durationMs: result.durationMs,
   };
 }
@@ -855,7 +852,7 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                       c.relname AS table_name,
                       n.nspname AS table_schema,
                       'BASE TABLE' AS table_type,
-                      c.reltuples::bigint AS row_estimate
+                      GREATEST(c.reltuples::bigint, 0) AS row_estimate
                     FROM pg_class AS c
                     JOIN pg_namespace AS n ON n.oid = c.relnamespace
                     WHERE n.nspname = 'public'

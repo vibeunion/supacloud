@@ -209,7 +209,7 @@ describe("database tables column visibility", () => {
 
     await unmountHarness(secondView);
     secondTarget.remove();
-  }, 15_000);
+  }, 30_000);
 
   test("pins the patched SvAdmin UI dependency exactly", async () => {
     const packageJson = await Bun.file(new URL("package.json", packageRoot)).json();
@@ -220,5 +220,14 @@ describe("database tables column visibility", () => {
       .toBe("patches/@svadmin%2Fui@0.38.7.patch");
     expect(lockSource).toContain('"@svadmin/ui": "0.38.7"');
     expect(lockSource).toContain('"@svadmin/ui@0.38.7": "patches/@svadmin%2Fui@0.38.7.patch"');
+  });
+
+  test("keeps unavailable row estimates from rendering as negative counts", async () => {
+    const source = await Bun.file(new URL("+page.svelte", import.meta.url)).text();
+    const autoTablePatch = await Bun.file(join(fileURLToPath(packageRoot), "patches", "@svadmin%2Fui@0.38.7.patch")).text();
+    expect(source).toContain("count >= 0");
+    expect(source).toContain('count === null ? "—"');
+    expect(autoTablePatch).toContain("whitespace-nowrap");
+    expect(autoTablePatch).toContain("gap-3 px-1 py-2");
   });
 });

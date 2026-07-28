@@ -65,3 +65,18 @@ index 49cb46df0e122312763c56f2bb6a9d78978c8dc6..73cbf16ca2e8e15cf772a423603c543c
                    {@const value = record[field.key]}
                    <div class="flex items-start justify-between gap-4">
                      <span class="text-xs font-medium text-muted-foreground shrink-0">{field.label}</span>
+@@ -933,10 +937,10 @@
+   <!-- Pagination (shadcn) -->
+   {#if totalPages > 0}
+-  <div class="flex flex-col sm:flex-row items-center justify-between gap-2 text-sm text-muted-foreground">
+-    <div class="flex items-center gap-2">
+-      <span>{i18n.t('common.total', { total: query.data?.total ?? 0 })}</span>
++  <div class="flex flex-col sm:flex-row items-center justify-between gap-3 px-1 py-2 text-sm text-muted-foreground">
++    <div class="flex shrink-0 items-center gap-3 leading-8">
++      <span class="shrink-0 whitespace-nowrap">{i18n.t('common.total', { total: query.data?.total ?? 0 })}</span>
+       <select
+-        class="h-8 w-[70px] px-1 py-1 flex items-center justify-between rounded-md border border-input bg-background text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
++        class="h-8 w-[70px] shrink-0 px-1 py-1 flex items-center justify-between rounded-md border border-input bg-background text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+         value={String(pagination.pageSize ?? 10)}
+         onchange={(e) => {
+           const size = Number((e.target as HTMLSelectElement).value);

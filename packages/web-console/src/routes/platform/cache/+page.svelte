@@ -17,6 +17,7 @@
   import { toast } from "svelte-sonner";
 
   type PlatformCacheStatus = {
+    configured: boolean;
     ok: boolean;
     service: string;
     namespace: string;
@@ -26,7 +27,7 @@
     maxTenants: number;
     connectionsPerTenant: number;
     l1: {
-      enabled: true;
+      enabled: boolean;
       maxEntries: number;
       ttlMs: number;
     };
@@ -107,6 +108,14 @@
     <div class="flex items-start gap-3 rounded-xl border border-destructive/30 bg-destructive/5 p-5 text-sm text-destructive">
       <AlertTriangle class="mt-0.5 h-5 w-5 shrink-0" />
       <span>{loadError}</span>
+    </div>
+  {:else if status && !status.configured}
+    <div class="flex items-start gap-3 rounded-xl border border-amber-500/30 bg-amber-500/5 p-5 text-sm text-amber-700 dark:text-amber-300">
+      <AlertTriangle class="mt-0.5 h-5 w-5 shrink-0" />
+      <div>
+        <p class="font-semibold">{$t("Cache.not_configured")}</p>
+        <p class="mt-1 text-xs opacity-80">{$t("Cache.not_configured_desc")}</p>
+      </div>
     </div>
   {:else if status}
     <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">

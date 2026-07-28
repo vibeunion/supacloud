@@ -22,6 +22,7 @@
     error: string | null;
     explainResults: unknown[] | null;
     command: string | null;
+    statementCount: number | null;
     rowCount: number | null;
     durationMs: number | null;
   }
@@ -71,6 +72,7 @@
       error: null,
       explainResults: null,
       command: null,
+      statementCount: null,
       rowCount: null,
       durationMs: null,
     };
@@ -232,7 +234,7 @@
       const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sql: wrappedSql, query_id: queryId }),
+        body: JSON.stringify({ sql: wrappedSql, mode: "migration", query_id: queryId }),
         timeoutMs: 0,
       });
       return readDatabaseSqlResponse(res);
@@ -249,9 +251,9 @@
       tabs = tabs.map(tb => {
         if (tb.id !== variables.tabId) return tb;
         if (variables.explainMode) {
-          return { ...tb, explainResults: result.rows, results: null, error: null, command: result.command, rowCount: result.rowCount, durationMs: result.durationMs };
+          return { ...tb, explainResults: result.rows, results: null, error: null, command: result.command, statementCount: result.statementCount, rowCount: result.rowCount, durationMs: result.durationMs };
         } else {
-          return { ...tb, results: result.rows, explainResults: null, error: null, command: result.command, rowCount: result.rowCount, durationMs: result.durationMs };
+          return { ...tb, results: result.rows, explainResults: null, error: null, command: result.command, statementCount: result.statementCount, rowCount: result.rowCount, durationMs: result.durationMs };
         }
       });
     },
@@ -263,7 +265,7 @@
         ? "查询已取消"
         : error instanceof Error ? error.message : String(error);
       tabs = tabs.map(tab => tab.id === variables.tabId
-        ? { ...tab, error: message, results: null, explainResults: null, command: null, rowCount: null, durationMs }
+        ? { ...tab, error: message, results: null, explainResults: null, command: null, statementCount: null, rowCount: null, durationMs }
         : tab);
     },
     onSettled: () => {
@@ -393,7 +395,7 @@
 
   <!-- Tab Bar -->
   <div class="flex items-center gap-0.5 border-b border-border/50 overflow-x-auto">
-    {#each tabs as tab}
+    {#each tabs as tab (tab.id)}
       <div class="flex items-center group relative">
         <button
           onclick={() => activeTabId = tab.id}
@@ -450,7 +452,7 @@
 
         {#if showRoleMenu}
           <div class="absolute right-0 top-full mt-1 w-56 bg-popover rounded-lg border shadow-lg z-50 py-1 animate-in fade-in slide-in-from-top-2 duration-150">
-            {#each PRESET_ROLES as role}
+            {#each PRESET_ROLES as role (role)}
               <button
                 onclick={() => selectRole(role)}
                 class="flex items-center gap-2 w-full px-4 py-2 text-xs text-left hover:bg-muted/50 transition-colors {selectedRole === role ? 'bg-muted/80 font-semibold text-brand' : 'text-foreground'}"
@@ -521,6 +523,9 @@
           {#if activeTab.command && activeTab.results.length === 0}
             <span class="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 text-[10px] font-semibold">
               ✓ {activeTab.command} {$t("SqlEditor.complete")}
+              {#if activeTab.statementCount && activeTab.statementCount > 1}
+                · {activeTab.statementCount} {$t("SqlEditor.statements_executed")}
+              {/if}
             </span>
           {:else}
             <div class="flex items-center gap-2">
@@ -577,17 +582,17 @@
                 <tr>
                   <th class="px-2 py-2 font-bold text-muted-foreground/60 text-center border-r border-border/40 w-12 bg-muted/60 dark:bg-muted/30">#</th>
                   {#if activeTab.results.length > 0}
-                    {#each Object.keys(activeTab.results[0] as Record<string, unknown>) as key}
+                    {#each Object.keys(activeTab.results[0] as Record<string, unknown>) as key (key)}
                       <th class="px-3 py-2 font-semibold text-foreground/70 border-r border-border/40 whitespace-nowrap bg-muted/60 dark:bg-muted/30">{key}</th>
                     {/each}
                   {/if}
                 </tr>
               </thead>
               <tbody class="divide-y divide-border/30 dark:divide-border/20">
-                {#each activeTab.results as row, idx}
+                {#each activeTab.results as row, idx (`${idx}-${JSON.stringify(row)}`)}
                   <tr class="hover:bg-muted/30 dark:hover:bg-muted/10 transition-colors group">
                     <td class="px-2 py-1.5 text-center text-muted-foreground/50 border-r border-border/30 dark:border-border/20 tabular-nums select-none text-[10px]">{idx + 1}</td>
-                    {#each Object.values(row as Record<string, unknown>) as value}
+                    {#each Object.values(row as Record<string, unknown>) as value, valueIndex (`${idx}-${valueIndex}`)}
                       <td class="px-3 py-1.5 border-r border-border/20 dark:border-border/10 max-w-[300px] truncate {getCellClass(value)}" title={formatCellValue(value)}>
                         {formatCellValue(value)}
                       </td>
@@ -600,7 +605,7 @@
         {:else if activeTab?.explainResults}
           <!-- Explain Visualizer -->
           <div class="space-y-0 font-mono text-xs">
-            {#each activeTab.explainResults as row}
+            {#each activeTab.explainResults as row, idx (`${idx}-${String((row as Record<string, unknown>)["QUERY PLAN"] || "")}`)}
               {@const planLine = String((row as Record<string, unknown>)["QUERY PLAN"] || Object.values(row as Record<string, unknown>)[0] || "")}
               {@const indent = planLine.match(/^(\s*)/)?.[1]?.length || 0}
               {@const isSeqScan = planLine.toLowerCase().includes("seq scan")}

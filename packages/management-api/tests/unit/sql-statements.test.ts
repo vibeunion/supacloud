@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { executeSqlStatements, splitSqlStatements } from "../../src/db/sql-statements";
+import {
+  executeSqlStatements,
+  splitSqlStatements,
+  stripOuterTransactionStatements,
+} from "../../src/db/sql-statements";
 
 describe("PostgreSQL statement splitter", () => {
   test("keeps quoted literals, comments, and dollar-quoted bodies intact", () => {
@@ -55,5 +59,15 @@ describe("PostgreSQL statement splitter", () => {
 
     await expect(executeSqlStatements(transaction, "SELECT 1; SELECT FAIL; SELECT 3;")).rejects.toThrow("fixture failure");
     expect(calls).toHaveLength(2);
+  });
+
+  test("strips one matching outer transaction owned by the batch executor", () => {
+    expect(stripOuterTransactionStatements([
+      "-- migration wrapper\nBEGIN",
+      "CREATE TABLE public.todos (id bigint)",
+      "COMMIT",
+    ])).toEqual(["CREATE TABLE public.todos (id bigint)"]);
+    expect(stripOuterTransactionStatements(["BEGIN", "SELECT 1", "ROLLBACK"]))
+      .toEqual(["BEGIN", "SELECT 1", "ROLLBACK"]);
   });
 });

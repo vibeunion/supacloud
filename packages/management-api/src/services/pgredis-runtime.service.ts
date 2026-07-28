@@ -7,6 +7,7 @@ export type PgredisCacheOperationRequest =
   | { op: "getset"; key: string; value: unknown };
 
 export interface PgredisPlatformStatus {
+  configured: boolean;
   ok: boolean;
   service: string;
   namespace: string;
@@ -16,7 +17,7 @@ export interface PgredisPlatformStatus {
   maxTenants: number;
   connectionsPerTenant: number;
   l1: {
-    enabled: true;
+    enabled: boolean;
     maxEntries: number;
     ttlMs: number;
   };
@@ -69,10 +70,38 @@ export class PgredisRuntimeService {
   }
 
   async platformStatus(): Promise<PgredisPlatformStatus> {
-    return this.request<PgredisPlatformStatus>("/internal/v1/admin/status");
+    if (!this.isConfigured()) {
+      return {
+        configured: false,
+        ok: false,
+        service: "pgredis-runtime",
+        namespace: "unconfigured",
+        queue: false,
+        rateLimit: false,
+        activeTenants: 0,
+        maxTenants: 0,
+        connectionsPerTenant: 0,
+        l1: { enabled: false, maxEntries: 0, ttlMs: 0 },
+        tenants: [],
+      };
+    }
+    return {
+      ...await this.request<Omit<PgredisPlatformStatus, "configured">>("/internal/v1/admin/status"),
+      configured: true,
+    };
   }
 
   async projectStatus(projectRef: string): Promise<PgredisProjectStatus> {
+    if (!this.isConfigured()) {
+      return {
+        projectRef,
+        configured: false,
+        active: false,
+        configurationCurrent: false,
+        leases: 0,
+        lastUsedAt: null,
+      };
+    }
     return this.request<PgredisProjectStatus>(
       `/internal/v1/admin/projects/${encodeURIComponent(projectRef)}/status`,
     );
@@ -100,7 +129,7 @@ export class PgredisRuntimeService {
   }
 
   private async request<T>(pathname: string, init: RequestInit = {}): Promise<T> {
-    if (new TextEncoder().encode(this.options.internalToken).byteLength < 32) {
+    if (!this.isConfigured()) {
       throw new AppError(
         "Cache data plane is not configured",
         503,
@@ -138,6 +167,10 @@ export class PgredisRuntimeService {
     const payload = jsonObject(await response.json().catch(() => ({})));
     if (!response.ok) throw upstreamError(response.status, payload);
     return payload as T;
+  }
+
+  private isConfigured(): boolean {
+    return new TextEncoder().encode(this.options.internalToken).byteLength >= 32;
   }
 }
 

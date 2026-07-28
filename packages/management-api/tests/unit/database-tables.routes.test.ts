@@ -80,7 +80,7 @@ describe("database table list route", () => {
     expect(tableQueries[0]).toMatchObject({ values: ["%%"] });
     expect(tableQueries[0]?.text).toContain("FROM pg_class AS c");
     expect(tableQueries[0]?.text).toContain("JOIN pg_namespace AS n ON n.oid = c.relnamespace");
-    expect(tableQueries[0]?.text).toContain("c.reltuples::bigint AS row_estimate");
+    expect(tableQueries[0]?.text).toContain("GREATEST(c.reltuples::bigint, 0) AS row_estimate");
     expect(tableQueries[0]?.text).not.toContain("::regclass");
     expect(tableQueries[0]?.text).not.toContain("information_schema.tables");
   });
