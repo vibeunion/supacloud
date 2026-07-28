@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.28.1](https://github.com/zuohuadong/supacloud/compare/web-console-v0.28.0...web-console-v0.28.1) (2026-07-28)
+
+
+### Bug Fixes
+
+* **console:** resolve CNB issues 47 through 49 ([db734f1](https://github.com/zuohuadong/supacloud/commit/db734f17c68334b28bf7246289e616420e55f291))
+
 ## [0.28.0](https://github.com/zuohuadong/supacloud/compare/web-console-v0.27.0...web-console-v0.28.0) (2026-07-28)
 
 
