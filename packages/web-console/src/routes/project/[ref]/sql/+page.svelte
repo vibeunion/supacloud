@@ -1,6 +1,10 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
-  import { readDatabaseSqlResponse } from "$lib/database-sql-response";
+  import {
+    DatabaseSqlError,
+    readDatabaseSqlCancellationResponse,
+    readDatabaseSqlResponse,
+  } from "$lib/database-sql-response";
   import { isSqlTabNameAvailable, nextSqlTabName } from "$lib/sql-tab-names";
   import { toast } from "svelte-sonner";
 
@@ -19,13 +23,25 @@
     explainResults: unknown[] | null;
     command: string | null;
     rowCount: number | null;
+    durationMs: number | null;
+  }
+
+  interface SqlMutationVariables {
+    rawSql: string;
+    explainMode: boolean;
+    tabId: string;
+    queryId: string;
+    startedAt: number;
   }
 
   let tabs = $state<QueryTab[]>([]);
   let activeTabId = $state("");
-  let isRunning = $state(false);
   let isSaving = $state(false);
+  let isCancelling = $state(false);
   let saveTimeout: ReturnType<typeof setTimeout> | undefined;
+  let elapsedTimer: ReturnType<typeof setInterval> | undefined;
+  let elapsedMs = $state(0);
+  let activeQuery = $state<Pick<SqlMutationVariables, "tabId" | "queryId" | "startedAt"> | null>(null);
   let tabCounter = $state(1);
 
   // Explain mode state
@@ -56,6 +72,7 @@
       explainResults: null,
       command: null,
       rowCount: null,
+      durationMs: null,
     };
   }
 
@@ -128,7 +145,11 @@
       }
     }
     document.addEventListener("click", handleClickOutside);
-    return () => document.removeEventListener("click", handleClickOutside);
+    return () => {
+      document.removeEventListener("click", handleClickOutside);
+      clearTimeout(saveTimeout);
+      clearInterval(elapsedTimer);
+    };
   });
 
   function saveTabs() {
@@ -147,6 +168,24 @@
   function wrapWithRole(rawSql: string): string {
     if (selectedRole === "postgres") return rawSql;
     return `SET ROLE '${selectedRole}';\n${rawSql}\nRESET ROLE;`;
+  }
+
+  function formatDuration(durationMs: number): string {
+    if (durationMs < 1000) return `${Math.round(durationMs)} ms`;
+    return `${(durationMs / 1000).toFixed(durationMs < 10_000 ? 2 : 1)} s`;
+  }
+
+  function startElapsedTimer(): void {
+    clearInterval(elapsedTimer);
+    elapsedMs = 0;
+    elapsedTimer = setInterval(() => {
+      if (activeQuery) elapsedMs = performance.now() - activeQuery.startedAt;
+    }, 100);
+  }
+
+  function stopElapsedTimer(): void {
+    clearInterval(elapsedTimer);
+    elapsedTimer = undefined;
   }
 
   function exportToCsv() {
@@ -184,7 +223,7 @@
   }
 
   const runQueryMutation = createMutation(() => ({
-    mutationFn: async ({ rawSql, explainMode }: { rawSql: string, explainMode: boolean }) => {
+    mutationFn: async ({ rawSql, explainMode, queryId }: SqlMutationVariables) => {
       let queryToRun = rawSql;
       if (explainMode) {
         queryToRun = `EXPLAIN (ANALYZE, COSTS, VERBOSE, FORMAT TEXT) ${rawSql}`;
@@ -193,30 +232,74 @@
       const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sql: wrappedSql })
+        body: JSON.stringify({ sql: wrappedSql, query_id: queryId }),
+        timeoutMs: 0,
       });
       return readDatabaseSqlResponse(res);
     },
-    onMutate: () => { isRunning = true; },
+    onMutate: (variables) => {
+      activeQuery = variables;
+      isCancelling = false;
+      tabs = tabs.map(tab => tab.id === variables.tabId
+        ? { ...tab, error: null, durationMs: null }
+        : tab);
+      startElapsedTimer();
+    },
     onSuccess: (result, variables) => {
       tabs = tabs.map(tb => {
-        if (tb.id !== activeTabId) return tb;
+        if (tb.id !== variables.tabId) return tb;
         if (variables.explainMode) {
-          return { ...tb, explainResults: result.rows, results: null, error: null, command: result.command, rowCount: result.rowCount };
+          return { ...tb, explainResults: result.rows, results: null, error: null, command: result.command, rowCount: result.rowCount, durationMs: result.durationMs };
         } else {
-          return { ...tb, results: result.rows, explainResults: null, error: null, command: result.command, rowCount: result.rowCount };
+          return { ...tb, results: result.rows, explainResults: null, error: null, command: result.command, rowCount: result.rowCount, durationMs: result.durationMs };
         }
       });
     },
-    onError: (err: unknown) => {
-      tabs = tabs.map(tb => tb.id === activeTabId ? { ...tb, error: (err instanceof Error ? err.message : String(err)), results: null, explainResults: null, command: null, rowCount: null } : tb);
+    onError: (error: unknown, variables) => {
+      const durationMs = error instanceof DatabaseSqlError && error.durationMs !== null
+        ? error.durationMs
+        : Math.max(0, Math.round(performance.now() - variables.startedAt));
+      const message = error instanceof DatabaseSqlError && error.code === "QUERY_CANCELLED"
+        ? "查询已取消"
+        : error instanceof Error ? error.message : String(error);
+      tabs = tabs.map(tab => tab.id === variables.tabId
+        ? { ...tab, error: message, results: null, explainResults: null, command: null, rowCount: null, durationMs }
+        : tab);
     },
-    onSettled: () => { isRunning = false; }
+    onSettled: () => {
+      stopElapsedTimer();
+      activeQuery = null;
+      isCancelling = false;
+    },
   }));
 
   function runQuery() {
     if (!activeTab || !activeTab.sql || runQueryMutation.isPending) return;
-    runQueryMutation.mutate({ rawSql: activeTab.sql, explainMode });
+    runQueryMutation.mutate({
+      rawSql: activeTab.sql,
+      explainMode,
+      tabId: activeTab.id,
+      queryId: crypto.randomUUID(),
+      startedAt: performance.now(),
+    });
+  }
+
+  async function cancelQuery() {
+    const runningQuery = activeQuery;
+    if (!runningQuery || isCancelling) return;
+    isCancelling = true;
+    try {
+      const response = await apiClient(
+        `/v1/projects/${projectRef}/database/sql/${encodeURIComponent(runningQuery.queryId)}/cancel`,
+        { method: "POST" },
+      );
+      await readDatabaseSqlCancellationResponse(response);
+      toast.success("服务器已确认取消请求");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "取消查询失败");
+    } finally {
+      if (activeQuery?.queryId === runningQuery.queryId) isCancelling = false;
+    }
   }
 
   function selectRole(role: string) {
@@ -281,19 +364,30 @@
         <Microscope size={13} />
         Explain
       </button>
-      <button
-        onclick={runQuery}
-        disabled={runQueryMutation.isPending || !activeTab?.sql}
-        class="flex items-center gap-2 px-4 py-1.5 bg-brand text-white text-xs font-semibold rounded-md shadow-lg shadow-brand/20 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:grayscale transition-all"
-      >
-        {#if runQueryMutation.isPending}
-          <Loader2 size={14} class="animate-spin" />
-          执行中...
-        {:else}
+      {#if runQueryMutation.isPending}
+        <button
+          onclick={cancelQuery}
+          disabled={isCancelling}
+          class="flex items-center gap-2 px-4 py-1.5 bg-destructive text-destructive-foreground text-xs font-semibold rounded-md shadow-lg hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 transition-all"
+        >
+          {#if isCancelling}
+            <Loader2 size={14} class="animate-spin" />
+            取消中...
+          {:else}
+            <X size={14} />
+            取消查询 · {formatDuration(elapsedMs)}
+          {/if}
+        </button>
+      {:else}
+        <button
+          onclick={runQuery}
+          disabled={!activeTab?.sql}
+          class="flex items-center gap-2 px-4 py-1.5 bg-brand text-white text-xs font-semibold rounded-md shadow-lg shadow-brand/20 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:grayscale transition-all"
+        >
           <Play size={14} fill="currentColor" />
           {explainMode ? "Explain Analyze" : "运行查询"}
-        {/if}
-      </button>
+        </button>
+      {/if}
     </div>
   </div>
 
@@ -417,6 +511,11 @@
               {selectedRole}
             </span>
           {/if}
+          {#if activeTab?.durationMs !== null && activeTab?.durationMs !== undefined}
+            <span class="text-[10px] text-muted-foreground tabular-nums">
+              耗时 {formatDuration(activeTab.durationMs)}
+            </span>
+          {/if}
         </div>
         {#if activeTab?.results}
           {#if activeTab.command && activeTab.results.length === 0}
@@ -447,10 +546,12 @@
           <div class="p-4 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-xs font-mono">
             <strong>执行错误：</strong> {activeTab.error}
           </div>
-        {:else if runQueryMutation.isPending}
+        {:else if runQueryMutation.isPending && activeQuery?.tabId === activeTabId}
            <div class="h-full flex flex-col items-center justify-center text-muted-foreground gap-2 opacity-50">
              <Loader2 size={24} class="animate-spin text-brand" />
-             <p class="text-[10px] uppercase font-bold tracking-[0.2em]">正在执行查询...</p>
+             <p class="text-[10px] uppercase font-bold tracking-[0.2em]">
+               正在执行查询... {formatDuration(elapsedMs)}
+             </p>
            </div>
         {:else if activeTab?.results && activeTab.results.length === 0 && activeTab.command}
           <!-- DDL/DML Success: No rows returned (matches Supabase Studio behavior) -->

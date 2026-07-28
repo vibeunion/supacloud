@@ -35,6 +35,7 @@ import {
 import {
   buildAuthRuntimeApplyFailureBody,
   buildAuthSessionPolicyErrorBody,
+  buildAuthUrlConfigErrorBody,
 } from "./auth-config-responses";
 import { projectControlSecretsService } from "../services/project-control-secrets.service";
 import {
@@ -45,6 +46,10 @@ import {
   canonicalAuthProviderLinkingConfig,
   ProviderLinkingDomainsValidationError,
 } from "../utils/provider-linking";
+import {
+  AuthUrlConfigValidationError,
+  canonicalizeAuthUrlConfig,
+} from "../utils/auth-url-config";
 import { safeProjectSettingsAuthConfig } from "./auth";
 
 /** Map PostgreSQL column types to TypeScript types */
@@ -444,8 +449,8 @@ async function buildAuthConfigResponse(ref: string, settings: Record<string, unk
     mail_autoconfirm: authConfig.mailer_autoconfirm ?? false,
     sms_autoconfirm: authConfig.sms_autoconfirm ?? false,
     phone_autoconfirm: authConfig.sms_autoconfirm ?? false,
-    uri_allow_list: authConfig.uri_allow_list ?? null,
-    site_url: authConfig.site_url ?? null,
+    uri_allow_list: authConfig.uri_allow_list ?? authConfig.URI_ALLOW_LIST ?? null,
+    site_url: authConfig.site_url ?? authConfig.SITE_URL ?? null,
     password_min_length: sessionPolicy.password_min_length,
     refresh_token_rotation_enabled:
       sessionPolicy.refresh_token_rotation_enabled,
@@ -875,11 +880,21 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         return status(404, { message: "Project not found", code: "404" });
       }
 
+      let newAuth: Record<string, unknown>;
+      try {
+        newAuth = canonicalizeAuthUrlConfig(
+          typeof body === "object" && body !== null ? body : {},
+        );
+      } catch (error: unknown) {
+        if (error instanceof AuthUrlConfigValidationError) {
+          return status(400, buildAuthUrlConfigErrorBody(error));
+        }
+        throw error;
+      }
       const currentAuth = await moveEmbeddedAuthSecrets(
         params.ref,
         (settings.auth as Record<string, unknown>) || {},
       );
-      const newAuth = typeof body === "object" ? body : {};
       if (requestsUnavailablePasskeyConfig(newAuth)) {
         return status(501, passkeyCapabilityUnavailableBody());
       }
@@ -1053,13 +1068,17 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         }
       }
 
+      const mergeBaseAuth = { ...currentAuth };
+      if ("site_url" in newAuth) delete mergeBaseAuth.SITE_URL;
+      if ("uri_allow_list" in newAuth) delete mergeBaseAuth.URI_ALLOW_LIST;
+
       const mergedExternal = {
-        ...((currentAuth.external as Record<string, unknown>) || {}),
+        ...((mergeBaseAuth.external as Record<string, unknown>) || {}),
         ...externalUpdates,
       };
 
       let mergedAuth = {
-        ...currentAuth,
+        ...mergeBaseAuth,
         ...otherUpdates,
         ...(Object.keys(externalUpdates).length > 0
           ? { external: mergedExternal }
@@ -1067,7 +1086,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         ...(otherUpdates.hooks
           ? {
               hooks: {
-                ...((currentAuth.hooks as Record<string, any>) || {}),
+                ...((mergeBaseAuth.hooks as Record<string, any>) || {}),
                 ...(otherUpdates.hooks as Record<string, any>),
               },
             }
@@ -1075,7 +1094,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         ...(otherUpdates.smtp
           ? {
               smtp: {
-                ...((currentAuth.smtp as Record<string, unknown>) || {}),
+                ...((mergeBaseAuth.smtp as Record<string, unknown>) || {}),
                 ...(otherUpdates.smtp as Record<string, unknown>),
               },
             }
@@ -1083,7 +1102,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         ...(otherUpdates.saml
           ? {
               saml: {
-                ...((currentAuth.saml as Record<string, unknown>) || {}),
+                ...((mergeBaseAuth.saml as Record<string, unknown>) || {}),
                 ...(otherUpdates.saml as Record<string, unknown>),
               },
             }
@@ -1094,17 +1113,17 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       delete mergedAuth.smtp;
       if (otherUpdates.hooks)
         mergedAuth.hooks = {
-          ...((currentAuth.hooks as Record<string, any>) || {}),
+          ...((mergeBaseAuth.hooks as Record<string, any>) || {}),
           ...(otherUpdates.hooks as Record<string, any>),
         };
       if (otherUpdates.smtp)
         mergedAuth.smtp = {
-          ...((currentAuth.smtp as Record<string, unknown>) || {}),
+          ...((mergeBaseAuth.smtp as Record<string, unknown>) || {}),
           ...(otherUpdates.smtp as Record<string, unknown>),
         };
       if (otherUpdates.saml)
         mergedAuth.saml = {
-          ...((currentAuth.saml as Record<string, unknown>) || {}),
+          ...((mergeBaseAuth.saml as Record<string, unknown>) || {}),
           ...(otherUpdates.saml as Record<string, unknown>),
         };
 

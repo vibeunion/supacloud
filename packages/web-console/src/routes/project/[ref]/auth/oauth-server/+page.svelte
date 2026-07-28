@@ -3,6 +3,10 @@
   import { page } from "$app/state";
   import { apiClient } from "$lib/api";
   import {
+    migrateOAuthServerWithReadback,
+    type OAuthServerStatus,
+  } from "./oauth-server-migration";
+  import {
     AlertTriangle,
     CheckCircle2,
     Copy,
@@ -14,22 +18,6 @@
     Trash2,
   } from "lucide-svelte";
   import { toast } from "svelte-sonner";
-
-  type OAuthServerStatus = {
-    enabled: boolean;
-    allow_dynamic_registration: boolean;
-    issuer: string;
-    discovery_url: string;
-    oauth_authorization_server_metadata_url: string;
-    jwks_url: string;
-    authorization_endpoint: string;
-    token_endpoint: string;
-    registration_endpoint: string;
-    signing_alg: string;
-    oidc_id_token_ready: boolean;
-    migration_status: string;
-    warnings?: string[];
-  };
 
   type OAuthClient = {
     id?: string;
@@ -113,13 +101,19 @@
   async function migrate() {
     saving = true;
     try {
-      const res = await apiClient(`/v1/projects/${projectRef}/auth/oauth-server/migrate`, {
-        method: "POST",
-        body: JSON.stringify({ allow_dynamic_registration: allowDynamicRegistration }),
-      });
-      const payload = await readJson(res);
-      if (!res.ok) throw new Error(payload.message || "迁移失败");
-      statusData = payload;
+      statusData = await migrateOAuthServerWithReadback(
+        async () => {
+          const response = await apiClient(`/v1/projects/${projectRef}/auth/oauth-server/migrate`, {
+            method: "POST",
+            body: JSON.stringify({ allow_dynamic_registration: allowDynamicRegistration }),
+          });
+          return { response, payload: await readJson(response) };
+        },
+        async () => {
+          const response = await apiClient(`/v1/projects/${projectRef}/auth/oauth-server`);
+          return { response, payload: await readJson(response) };
+        },
+      );
       toast.success("OAuth Server 已启用");
       await loadClients();
     } catch (error) {

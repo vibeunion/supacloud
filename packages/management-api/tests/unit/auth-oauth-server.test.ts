@@ -3,7 +3,10 @@ import { Elysia } from "elysia";
 import { authOAuthServerRoutes } from "../../src/routes/auth-oauth-server";
 import { projectService } from "../../src/services";
 import * as dbModule from "../../src/db";
-import { tenantRuntimeService } from "../../src/services/tenant-runtime.service";
+import {
+  SupAuthDependentRefreshError,
+  tenantRuntimeService,
+} from "../../src/services/tenant-runtime.service";
 import { buildAwsKmsRs256JwtKeyMaterial, generateOidcJwtKeyMaterial } from "../../src/utils/project-jwt";
 
 const migratedJwtKeys = [{
@@ -121,7 +124,7 @@ describe("authOAuthServerRoutes", () => {
     sqlSpy.mockRestore();
   });
 
-  test("POST /oauth-server/migrate stores scoped ES256 config and restarts runtime", async () => {
+  test("POST /oauth-server/migrate stores scoped ES256 config and applies auth runtime", async () => {
     const projectSpy = spyOn(projectService, "getProject").mockResolvedValue({
       id: "proj_id",
       ref: "proj_1",
@@ -156,7 +159,7 @@ describe("authOAuthServerRoutes", () => {
         },
       },
     } as never);
-    const restartSpy = spyOn(tenantRuntimeService, "restartRuntime").mockResolvedValue(undefined);
+    const applySpy = spyOn(tenantRuntimeService, "applyAuthConfig").mockResolvedValue({} as never);
     const sqlSpy = spyOn(dbModule, "sql");
     sqlSpy.mockImplementation(async (...args: unknown[]) => {
       const text = String(args[0] ?? "");
@@ -197,7 +200,7 @@ describe("authOAuthServerRoutes", () => {
     expect(Array.isArray(updatePayload.auth?.oauth_server?.jwt_keys)).toBe(true);
     expect(updatePayload.auth?.oauth_server?.jwt_jwks).toMatchObject({ keys: expect.any(Array) });
     expect(typeof updatePayload.auth?.oauth_server?.migrated_at).toBe("string");
-    expect(restartSpy).toHaveBeenCalledWith("proj_1");
+    expect(applySpy).toHaveBeenCalledWith("proj_1", {}, updatePayload.auth);
 
     const jwtKeys = updatePayload.auth?.oauth_server?.jwt_keys as Array<Record<string, unknown>>;
     const signingKey = jwtKeys.find((key) => key.alg === "ES256");
@@ -223,9 +226,9 @@ describe("authOAuthServerRoutes", () => {
     });
     expect(rejected.status).toBe(400);
     expect(updateSpy).toHaveBeenCalledTimes(1);
-    expect(restartSpy).toHaveBeenCalledTimes(1);
+    expect(applySpy).toHaveBeenCalledTimes(1);
 
-    restartSpy.mockRejectedValueOnce(new Error("runtime restart failed"));
+    applySpy.mockRejectedValueOnce(new Error("runtime apply failed"));
     const unavailable = await request("/v1/projects/proj_1/auth/oauth-server/migrate", {
       method: "POST",
       headers: {
@@ -236,13 +239,32 @@ describe("authOAuthServerRoutes", () => {
     });
     expect(unavailable.status).toBe(503);
     expect(await unavailable.json()).toMatchObject({
+      code: "AUTH_RUNTIME_APPLY_FAILED",
+      persisted: true,
+      runtime_applied: false,
+    });
+
+    applySpy.mockRejectedValueOnce(new SupAuthDependentRefreshError(["dependent-project"]));
+    const dependentUnavailable = await request("/v1/projects/proj_1/auth/oauth-server/migrate", {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer dev-master-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ authorization_path: "/authorize.html" }),
+    });
+    expect(dependentUnavailable.status).toBe(503);
+    expect(await dependentUnavailable.json()).toMatchObject({
       code: "SUPAUTH_DEPENDENT_REFRESH_FAILED",
+      persisted: true,
+      runtime_applied: true,
+      failed_dependents: ["dependent-project"],
     });
 
     projectSpy.mockRestore();
     settingsSpy.mockRestore();
     updateSpy.mockRestore();
-    restartSpy.mockRestore();
+    applySpy.mockRestore();
     sqlSpy.mockRestore();
   });
 
@@ -274,7 +296,7 @@ describe("authOAuthServerRoutes", () => {
     const updateSpy = spyOn(projectService, "updateProjectSettings").mockResolvedValue({
       auth: {},
     } as never);
-    const restartSpy = spyOn(tenantRuntimeService, "restartRuntime").mockResolvedValue(undefined);
+    const applySpy = spyOn(tenantRuntimeService, "applyAuthConfig").mockResolvedValue({} as never);
     const sqlSpy = spyOn(dbModule, "sql");
     sqlSpy.mockImplementation(async (...args: unknown[]) => {
       const text = String(args[0] ?? "");
@@ -339,12 +361,32 @@ describe("authOAuthServerRoutes", () => {
       key_ops: ["verify"],
     });
     expect(jwtJwks.keys[0]["aws:kms:arn"]).toBeUndefined();
-    expect(restartSpy).toHaveBeenCalledWith("proj_1");
+    expect(applySpy).toHaveBeenCalledWith("proj_1", {}, updatePayload.auth);
+
+    applySpy.mockRejectedValueOnce(new Error("runtime apply failed"));
+    const unavailable = await request("/v1/projects/proj_1/auth/oauth-server/kms-rs256", {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer dev-master-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        aws_kms_arn: "arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-000000000000",
+        key_id: "kms-key-1",
+        public_jwk: { kty: "RSA", n: "sXch7w", e: "AQAB" },
+      }),
+    });
+    expect(unavailable.status).toBe(503);
+    expect(await unavailable.json()).toMatchObject({
+      code: "AUTH_RUNTIME_APPLY_FAILED",
+      persisted: true,
+      runtime_applied: false,
+    });
 
     projectSpy.mockRestore();
     settingsSpy.mockRestore();
     updateSpy.mockRestore();
-    restartSpy.mockRestore();
+    applySpy.mockRestore();
     sqlSpy.mockRestore();
   });
 

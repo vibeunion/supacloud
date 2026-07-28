@@ -28,6 +28,7 @@ import {
 import {
   buildAuthRuntimeApplyFailureBody,
   buildAuthSessionPolicyErrorBody,
+  buildAuthUrlConfigErrorBody,
 } from "./auth-config-responses";
 import { projectControlSecretsService } from "../services/project-control-secrets.service";
 import {
@@ -35,6 +36,10 @@ import {
   requestsUnavailablePasskeyConfig,
   withoutUnavailablePasskeyConfig,
 } from "../services/auth-product-boundary";
+import {
+  AuthUrlConfigValidationError,
+  canonicalizeAuthUrlConfig,
+} from "../utils/auth-url-config";
 
 const MASKED_SECRET_VALUES = new Set(["********", "****"]);
 const SENSITIVE_AUTH_FIELDS = new Set([
@@ -361,6 +366,12 @@ async function applyHookSecretStatuses(ref: string, safeConfig: Record<string, u
 async function safeAuthConfig(ref: string, authConfig: Record<string, unknown>) {
   const publicConfig = withoutUnavailablePasskeyConfig(canonicalAuthProviderLinkingConfig(authConfig));
   const safeConfig = redactAuthSecrets(publicConfig) as Record<string, unknown>;
+  if (safeConfig.site_url === undefined && safeConfig.SITE_URL !== undefined) {
+    safeConfig.site_url = safeConfig.SITE_URL;
+  }
+  if (safeConfig.uri_allow_list === undefined && safeConfig.URI_ALLOW_LIST !== undefined) {
+    safeConfig.uri_allow_list = safeConfig.URI_ALLOW_LIST;
+  }
   await applyConnectorSecretStatuses(ref, safeConfig);
   await applyCaptchaSecretStatus(ref, safeConfig);
   await applyHookSecretStatuses(ref, safeConfig);
@@ -773,9 +784,18 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
         body as Record<string, unknown>,
         currentAuth,
       ) as Record<string, unknown>;
+      let canonicalBody: Record<string, unknown>;
+      try {
+        canonicalBody = canonicalizeAuthUrlConfig(sanitizedBody);
+      } catch (error: unknown) {
+        if (error instanceof AuthUrlConfigValidationError) {
+          return status(400, buildAuthUrlConfigErrorBody(error));
+        }
+        throw error;
+      }
       let sessionPolicyPatch: ReturnType<typeof normalizeAuthSessionPolicyPatch>;
       try {
-        sessionPolicyPatch = normalizeAuthSessionPolicyPatch(sanitizedBody);
+        sessionPolicyPatch = normalizeAuthSessionPolicyPatch(canonicalBody);
       } catch (error: unknown) {
         if (error instanceof AuthSessionPolicyValidationError) {
           return status(400, buildAuthSessionPolicyErrorBody(error));
@@ -784,9 +804,12 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
       }
 
       const nonPolicyUpdates = Object.fromEntries(
-        Object.entries(sanitizedBody).filter(([key]) => !sessionPolicyPatch.consumedKeys.has(key)),
+        Object.entries(canonicalBody).filter(([key]) => !sessionPolicyPatch.consumedKeys.has(key)),
       );
-      const mergedAuth = mergeAuthConfig(currentAuth, nonPolicyUpdates);
+      const mergeBaseAuth = { ...currentAuth };
+      if ("site_url" in canonicalBody) delete mergeBaseAuth.SITE_URL;
+      if ("uri_allow_list" in canonicalBody) delete mergeBaseAuth.URI_ALLOW_LIST;
+      const mergedAuth = mergeAuthConfig(mergeBaseAuth, nonPolicyUpdates);
       let canonicalAuth: Record<string, unknown>;
       try {
         canonicalAuth = canonicalAuthProviderLinkingConfig(

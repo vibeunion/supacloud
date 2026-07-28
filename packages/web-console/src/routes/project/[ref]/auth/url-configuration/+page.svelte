@@ -9,6 +9,7 @@
 
   let newUrl = $state("");
   let saveMsg = $state<string | null>(null);
+  let siteUrlError = $state<string | null>(null);
 
   const projectRef = $derived(page.params.ref);
   const queryClient = useQueryClient();
@@ -19,8 +20,8 @@
       const res = await apiClient(`/v1/projects/${projectRef}/auth/config`);
       if (!res.ok) throw new Error("Failed to fetch auth config");
       const config = await res.json();
-      const siteUrlValue = config.SITE_URL || config.site_url || "";
-      const uris = config.URI_ALLOW_LIST || config.REDIRECT_URLS || "";
+      const siteUrlValue = config.site_url || config.SITE_URL || "";
+      const uris = config.uri_allow_list || config.URI_ALLOW_LIST || config.REDIRECT_URLS || "";
       const redirectUrlsValue = uris ? uris.split(",").map((u: string) => u.trim()).filter(Boolean) : [];
       return { siteUrl: siteUrlValue, redirectUrls: redirectUrlsValue };
     }
@@ -59,8 +60,8 @@
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          SITE_URL: siteUrl,
-          URI_ALLOW_LIST: redirectUrls.join(","),
+          site_url: siteUrl,
+          uri_allow_list: redirectUrls.join(","),
         })
       });
       const payload = await readAuthApiPayload(res);
@@ -69,17 +70,21 @@
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["auth_config", projectRef] });
+      siteUrlError = null;
       saveMsg = "✅ URL 配置已保存（GoTrue 已重启）";
       setTimeout(() => saveMsg = null, 4000);
     },
     onError: (err: unknown) => {
-      saveMsg = `❌ 保存失败: ${(err instanceof Error ? err.message : String(err))}`;
+      const message = err instanceof Error ? err.message : String(err);
+      siteUrlError = message.includes("site_url") ? message : null;
+      saveMsg = `❌ 保存失败: ${message}`;
       setTimeout(() => saveMsg = null, 4000);
     }
   }));
 
   async function saveConfig() {
     saveMsg = null;
+    siteUrlError = null;
     saveConfigMutation.mutate();
   }
 </script>
@@ -115,8 +120,11 @@
         <h2 class="font-semibold text-sm">站点 URL (SITE_URL)</h2>
       </div>
       <p class="text-xs text-muted-foreground">你的应用的默认 URL。用于认证邮件中的链接。</p>
-      <input type="text" bind:value={siteUrl} placeholder="https://your-app.com"
+      <input type="text" bind:value={siteUrl} placeholder="https://your-app.com" aria-invalid={siteUrlError ? "true" : undefined}
         class="w-full px-3 py-2 text-xs font-mono rounded-lg border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand" />
+      {#if siteUrlError}
+        <p class="text-xs text-destructive">{siteUrlError}</p>
+      {/if}
     </div>
 
     <!-- Redirect URLs -->

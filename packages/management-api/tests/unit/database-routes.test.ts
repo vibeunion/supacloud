@@ -14,6 +14,7 @@ import {
   normalizeMigrationVersion,
   resetEnsuredMigrationTablesForTests,
   resolveMigrationStatements,
+  sqlRouteErrorResponse,
   sqlRouteResponse,
 } from "../../src/routes/database";
 import { projectMigrationSqlViolations } from "../../src/db/sql-policy";
@@ -230,6 +231,7 @@ describe("database route helpers", () => {
       command: "SELECT",
       fields: ["ok"],
       notices: [],
+      durationMs: 12,
     });
 
     expect(response).toEqual({
@@ -238,6 +240,21 @@ describe("database route helpers", () => {
       command: "SELECT",
       fields: ["ok"],
       notices: [],
+      durationMs: 12,
+    });
+  });
+
+  test("sqlRouteErrorResponse preserves SQL error code and duration", () => {
+    expect(sqlRouteErrorResponse(Object.assign(new Error("Query cancelled"), {
+      code: "QUERY_CANCELLED",
+      durationMs: 34,
+    }))).toEqual({
+      code: "QUERY_CANCELLED",
+      message: "Query cancelled",
+      details: null,
+      hint: null,
+      durationMs: 34,
+      status: 400,
     });
   });
 

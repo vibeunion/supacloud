@@ -22,6 +22,7 @@
     "autoprefixer": "^10.5.4",
     "bits-ui": "^2.18.1",
     "clsx": "^2.1.1",
+    "jsdom": "29.1.1",
     "mode-watcher": "^1.1.0",
     "next-themes": "^0.4.6",
     "paneforge": "^1.0.2",
@@ -42,7 +43,7 @@
     "@svadmin/core": "^0.32.2",
     "@svadmin/elysia": "^0.10.7",
     "@svadmin/sveltekit": "^0.9.6",
-    "@svadmin/ui": "^0.38.7",
+    "@svadmin/ui": "0.38.7",
     "@tanstack/svelte-query": "^6.1.38",
     "highlight.js": "^11.11.1",
     "isomorphic-dompurify": "^3.19.0",
@@ -58,5 +59,8 @@
     "esbuild": "0.28.1",
     "joi": "17.13.4",
     "undici": "7.28.0"
+  },
+  "patchedDependencies": {
+    "@svadmin/ui@0.38.7": "patches/@svadmin%2Fui@0.38.7.patch"
   }
 }

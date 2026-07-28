@@ -73,6 +73,21 @@ describe("apiClient", () => {
     });
   });
 
+  test("allows SQL requests to disable the client timeout", async () => {
+    globalThis.fetch = async (_input, init) => new Promise<Response>((resolve, reject) => {
+      const completion = setTimeout(() => resolve(Response.json({ ok: true })), 5);
+      init?.signal?.addEventListener("abort", () => {
+        clearTimeout(completion);
+        reject(new DOMException("Aborted", "AbortError"));
+      }, { once: true });
+    });
+
+    const response = await apiClient("/v1/projects/proj/database/sql", { timeoutMs: 0 });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
+  });
+
   test("normalizes the cookie login, session, and logout contract without returning a token", async () => {
     const calls: Array<{ input: string; init?: RequestInit }> = [];
     const responses = [
