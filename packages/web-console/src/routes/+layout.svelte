@@ -37,6 +37,7 @@
   import { createSvelteKitRouterProvider } from "@svadmin/sveltekit";
   import { Toast as SvadminToast, DevTools, setComponentRegistry, ChatDialog } from "@svadmin/ui";
   import { QueryClient, QueryClientProvider } from "@tanstack/svelte-query";
+  import { Menu, Plug } from "lucide-svelte";
   import { dataProvider, chatProvider } from "$lib/admin/provider";
   import { authProvider } from "$lib/admin/auth";
   import { buildResourceRegistry } from "$lib/admin/resources";
@@ -69,6 +70,7 @@
   let projectsLoading = $state(true);
   let isAuthenticated = $state(false);
   let i18nLoadGuardExpired = $state(false);
+  let mobileNavOpen = $state(false);
   
   let isCoreLoading = $derived(projectsLoading || ($isLoading && !i18nLoadGuardExpired));
 
@@ -127,6 +129,16 @@
     } finally {
       window.location.href = "/login";
     }
+  }
+
+  function handleMobileNavigation(event: MouseEvent) {
+    if ((event.target as HTMLElement).closest("a")) {
+      mobileNavOpen = false;
+    }
+  }
+
+  function handleNavigationKeydown(event: KeyboardEvent) {
+    if (event.key === "Escape") mobileNavOpen = false;
   }
 
   $effect(() => {
@@ -228,6 +240,8 @@
   });
 </script>
 
+<svelte:window onkeydown={handleNavigationKeydown} />
+
 <ModeWatcher defaultMode="light" />
 <!-- Alias Toaster as SonnerToaster in script but use the original name in markup if not aliased -->
 <Toaster richColors position="top-right" />
@@ -249,13 +263,41 @@
       </div>
     {:else}
       {#if isPlatformRoute}
-        <PlatformSidebar />
+        <PlatformSidebar className="hidden lg:flex" />
       {:else}
-        <Sidebar {projects} {currentProject} />
+        <Sidebar className="hidden lg:flex" {projects} {currentProject} />
+      {/if}
+
+      {#if mobileNavOpen}
+        <div class="fixed inset-0 z-50 lg:hidden">
+          <button
+            type="button"
+            class="absolute inset-0 bg-black/50 backdrop-blur-sm"
+            aria-label={$t("Sidebar.close_navigation") || "Close navigation"}
+            onclick={() => (mobileNavOpen = false)}
+          ></button>
+          <div id="mobile-navigation" class="relative z-10 w-fit shadow-2xl" onclick={handleMobileNavigation} role="presentation">
+            {#if isPlatformRoute}
+              <PlatformSidebar />
+            {:else}
+              <Sidebar {projects} {currentProject} />
+            {/if}
+          </div>
+        </div>
       {/if}
       
       <main class="flex-1 overflow-y-auto relative bg-muted/30">
         <div class="sticky top-0 z-40 flex h-16 shrink-0 items-center gap-x-4 border-b bg-background px-4 shadow-sm sm:gap-x-6 sm:px-6 lg:px-8">
+          <button
+            type="button"
+            class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:hidden"
+            aria-label={$t("Sidebar.open_navigation") || "Open navigation"}
+            aria-controls="mobile-navigation"
+            aria-expanded={mobileNavOpen}
+            onclick={() => (mobileNavOpen = true)}
+          >
+            <Menu class="h-5 w-5" />
+          </button>
           <div class="flex flex-1 gap-x-4 self-stretch lg:gap-x-6">
             <div class="flex items-center gap-2 text-sm text-muted-foreground">
               <span class="hover:text-foreground cursor-pointer transition-colors">{$t("Dashboard.org_default") || "Default Organization"}</span>
@@ -263,6 +305,15 @@
               <span class="text-foreground font-medium">{isPlatformRoute ? ($t("Sidebar.platform_admin") || "Platform Admin") : (currentProject?.name || ($t("Project.home") || "Home"))}</span>
             </div>
           </div>
+          {#if !isPlatformRoute && currentProject?.ref}
+            <a
+              href={`/project/${currentProject.ref}/api`}
+              class="inline-flex h-9 items-center gap-2 rounded-lg border bg-background px-3 text-xs font-semibold text-foreground transition-colors hover:border-brand/40 hover:bg-brand/5 hover:text-brand"
+            >
+              <Plug class="h-4 w-4" />
+              <span class="hidden sm:inline">{$t("Navigation.connect_api")}</span>
+            </a>
+          {/if}
           <button
             onclick={handleLogout}
             class="px-3 py-1.5 text-xs font-medium rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
