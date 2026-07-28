@@ -47,6 +47,29 @@ describe("pgredis routes", () => {
     expect(requireProject).toHaveBeenCalledTimes(1);
   });
 
+  test("returns a disabled project cache status when the data plane is not configured", async () => {
+    projectStatus.mockResolvedValueOnce({
+      projectRef: "tenant-a",
+      configured: false,
+      active: false,
+      configurationCurrent: false,
+      leases: 0,
+      lastUsedAt: null,
+    });
+
+    const response = await request("/v1/projects/tenant-a/cache");
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      projectRef: "tenant-a",
+      configured: false,
+      active: false,
+      configurationCurrent: false,
+      leases: 0,
+      lastUsedAt: null,
+    });
+  });
+
   test("maps exact-key operations and keeps projectRef server-derived", async () => {
     const response = await request("/v1/projects/tenant-a/cache/operations", {
       method: "POST",
