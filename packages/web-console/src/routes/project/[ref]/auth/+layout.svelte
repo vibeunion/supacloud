@@ -131,6 +131,12 @@
     event.currentTarget.focus();
   }
 
+  function closeMenuFromLink(event: MouseEvent) {
+    if (!(event.currentTarget instanceof HTMLElement)) return;
+    const details = event.currentTarget.closest("details");
+    if (details instanceof HTMLDetailsElement) details.open = false;
+  }
+
   let { children } = $props();
 </script>
 
@@ -148,7 +154,7 @@
         <div class="absolute left-0 z-30 mt-2 w-56 overflow-hidden rounded-xl border bg-popover p-1.5 text-popover-foreground shadow-xl">
           {#each group.tabs as tab (tab.path)}
             {@const Icon = tab.icon}
-            <a href={resolve(tab.route, { ref: projectRef })} class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium transition-colors {isActive(tab.path) ? 'bg-brand/10 text-brand' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}">
+            <a href={resolve(tab.route, { ref: projectRef })} onclick={closeMenuFromLink} class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium transition-colors {isActive(tab.path) ? 'bg-brand/10 text-brand' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}">
               <Icon class="h-4 w-4" />
               {$t(tab.labelKey)}
             </a>

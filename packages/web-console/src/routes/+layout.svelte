@@ -147,6 +147,12 @@
     }
   }
 
+  function handleMobileNavigation(event: MouseEvent) {
+    if (event.target instanceof Element && event.target.closest("a")) {
+      closeMobileNavigation(false);
+    }
+  }
+
   function handleNavigationKeydown(event: KeyboardEvent) {
     if (!mobileNavOpen) return;
 
@@ -176,11 +182,6 @@
       first.focus();
     }
   }
-
-  $effect(() => {
-    $page.url.pathname;
-    mobileNavOpen = false;
-  });
 
   $effect(() => {
     const projectRefs = projects
@@ -281,8 +282,6 @@
   });
 </script>
 
-<svelte:window onkeydown={handleNavigationKeydown} />
-
 <ModeWatcher defaultMode="light" />
 <!-- Alias Toaster as SonnerToaster in script but use the original name in markup if not aliased -->
 <Toaster richColors position="top-right" />
@@ -321,6 +320,8 @@
             id="mobile-navigation"
             bind:this={mobileNavDialog}
             class="relative z-10 w-fit shadow-2xl"
+            onclick={handleMobileNavigation}
+            onkeydown={handleNavigationKeydown}
             role="dialog"
             aria-modal="true"
             aria-label={$t("Sidebar.open_navigation") || "Navigation"}

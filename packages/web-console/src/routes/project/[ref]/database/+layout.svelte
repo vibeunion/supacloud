@@ -107,6 +107,12 @@
     details.open = false;
     event.currentTarget.focus();
   }
+
+  function closeMenuFromLink(event: MouseEvent) {
+    if (!(event.currentTarget instanceof HTMLElement)) return;
+    const details = event.currentTarget.closest("details");
+    if (details instanceof HTMLDetailsElement) details.open = false;
+  }
 </script>
 
 <svelte:window onclick={closeMenusOnOutsideClick} />
@@ -134,7 +140,7 @@
           <div class="absolute left-0 z-30 mt-2 w-64 overflow-hidden rounded-xl border bg-popover p-1.5 text-popover-foreground shadow-xl">
             {#each group.items as tab (tab.id)}
               {@const Icon = tab.icon}
-              <a href={`/project/${projectRef}/database/${tab.id}`} class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium transition-colors {currentTab === tab.id ? 'bg-brand/10 text-brand' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}">
+              <a href={`/project/${projectRef}/database/${tab.id}`} onclick={closeMenuFromLink} class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium transition-colors {currentTab === tab.id ? 'bg-brand/10 text-brand' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}">
                 <Icon class="h-4 w-4" />
                 {tab.labelKey ? $t(tab.labelKey) : tab.labelFallback}
               </a>

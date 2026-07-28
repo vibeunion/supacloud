@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 const read = (relativePath: string) => readFileSync(new URL(relativePath, import.meta.url), "utf8");
 
@@ -30,7 +30,7 @@ describe("console navigation information architecture", () => {
     expect(rootLayoutSource).toContain('role="dialog"');
     expect(rootLayoutSource).toContain("mobileNavCloseButton?.focus()");
     expect(rootLayoutSource).toContain('event.key !== "Tab"');
-    expect(rootLayoutSource).toContain("$page.url.pathname;");
+    expect(rootLayoutSource).toContain("handleMobileNavigation");
   });
 
   test("uses one grouped platform navigation instead of duplicate top tabs", () => {
@@ -53,7 +53,38 @@ describe("console navigation information architecture", () => {
     expect(authLayoutSource).toContain('name="auth-navigation"');
     expect(databaseLayoutSource).toContain("closeMenusOnOutsideClick");
     expect(authLayoutSource).toContain("closeMenusOnOutsideClick");
+    expect(databaseLayoutSource).toContain("closeMenuFromLink");
+    expect(authLayoutSource).toContain("closeMenuFromLink");
     expect(authLayoutSource).toContain("AuthNav.tabs.providers");
     expect(authLayoutSource).not.toContain('name: "提供者"');
+  });
+
+  test("keeps every grouped database navigation target reachable", () => {
+    const routeIds = [
+      "schemas",
+      "types",
+      "functions",
+      "triggers",
+      "materialized-views",
+      "roles",
+      "column-privileges",
+      "rls-tester",
+      "temporary-access",
+      "indexes",
+      "extensions",
+      "publications",
+      "hooks",
+      "pipelines",
+      "wrappers",
+      "cron",
+      "migrations",
+      "backups",
+      "upgrade",
+      "settings",
+    ];
+
+    for (const routeId of routeIds) {
+      expect(existsSync(new URL(`./project/[ref]/database/${routeId}/+page.svelte`, import.meta.url))).toBe(true);
+    }
   });
 });
