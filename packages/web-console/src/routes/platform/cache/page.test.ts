@@ -15,4 +15,9 @@ describe("platform cache runtime console", () => {
     expect(source).toContain("Cache.queue_owner_desc");
     expect(source).toContain("Cache.rate_limit_owner_desc");
   });
+
+  test("renders an expected empty state when the cache data plane is not configured", () => {
+    expect(source).toContain("!status.configured");
+    expect(source).toContain("Cache.not_configured_desc");
+  });
 });

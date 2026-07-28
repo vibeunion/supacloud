@@ -17,7 +17,26 @@ test("returns successful SQL rows, metadata, and duration", async () => {
     rows: [{ answer: 42 }],
     rowCount: 1,
     command: "SELECT",
+    statementCount: 1,
     durationMs: 17,
+  });
+});
+
+test("returns the executed statement count for an atomic SQL batch", async () => {
+  const response = Response.json({
+    rows: [],
+    rowCount: 0,
+    command: "BATCH",
+    statements: [
+      { index: 1, command: "CREATE", rowCount: 0, durationMs: 2 },
+      { index: 2, command: "ALTER", rowCount: 0, durationMs: 1 },
+    ],
+    durationMs: 4,
+  });
+
+  await expect(readDatabaseSqlResponse(response)).resolves.toMatchObject({
+    command: "BATCH",
+    statementCount: 2,
   });
 });
 

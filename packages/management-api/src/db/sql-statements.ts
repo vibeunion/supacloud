@@ -213,12 +213,33 @@ export function splitSqlStatements(sql: string): string[] {
   return new PostgreSqlStatementScanner(sql).scan();
 }
 
+function normalizedTransactionStatement(statement: string): string {
+  return statement
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/--[^\n]*(?:\n|$)/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * The executor owns the atomic transaction for a batch. Remove a matching
+ * outer BEGIN/COMMIT pair so pasted migration files cannot commit early.
+ */
+export function stripOuterTransactionStatements(statements: readonly string[]): string[] {
+  if (statements.length < 2) return [...statements];
+  const first = normalizedTransactionStatement(statements[0]!);
+  const last = normalizedTransactionStatement(statements[statements.length - 1]!);
+  const hasOuterTransaction = /^(?:BEGIN(?:\s+(?:WORK|TRANSACTION))?|START\s+TRANSACTION)$/i.test(first)
+    && /^(?:COMMIT|END)(?:\s+(?:WORK|TRANSACTION))?$/i.test(last);
+  return hasOuterTransaction ? statements.slice(1, -1) : [...statements];
+}
+
 /**
  * Execute a SQL batch on the caller-owned transaction so adjacent migrations
  * can share one atomic boundary without nesting `begin` calls.
  */
 export async function executeSqlStatements(transaction: SQL, sql: string): Promise<void> {
-  const statements = splitSqlStatements(sql);
+  const statements = stripOuterTransactionStatements(splitSqlStatements(sql));
   if (statements.length === 0) throw new Error("SQL migration contains no executable statements");
 
   for (const statement of statements) await transaction.unsafe(statement);

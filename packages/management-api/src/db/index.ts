@@ -7,7 +7,7 @@ import {
   WRITE_SQL_PATTERN,
 } from "./sql-policy";
 import { runRegisteredSqlQuery } from "./sql-query-registry";
-import { splitSqlStatements } from "./sql-statements";
+import { splitSqlStatements, stripOuterTransactionStatements } from "./sql-statements";
 
 function parseDatabaseUrl(url: string) {
   const urlMatch = url.match(/postgres(?:ql)?:\/\/([^:]+)(?::([^@]*))?@([^:]*):(\d+)\/(.+)/);
@@ -268,6 +268,14 @@ export type SqlExecutionResult = {
   command: string;
   fields?: string[];
   notices?: string[];
+  statements?: SqlStatementExecutionResult[];
+  durationMs: number;
+};
+
+export type SqlStatementExecutionResult = {
+  index: number;
+  command: string;
+  rowCount: number;
   durationMs: number;
 };
 
@@ -307,6 +315,76 @@ function elapsedSqlMilliseconds(startedAt: number): number {
   return Math.max(0, Math.round(performance.now() - startedAt));
 }
 
+type ReservedSqlConnection = Awaited<ReturnType<SQL["reserve"]>>;
+
+async function executeSqlBatchStatement(
+  connection: ReservedSqlConnection,
+  statement: string,
+  index: number,
+) {
+  const startedAt = performance.now();
+  const statementResult = normalizeSqlExecutionResult(
+    statement,
+    await connection.unsafe(statement).execute(),
+  );
+  const statementSummary: SqlStatementExecutionResult = {
+    index: index + 1,
+    command: statementResult.command,
+    rowCount: statementResult.rowCount,
+    durationMs: elapsedSqlMilliseconds(startedAt),
+  };
+  return { statementResult, statementSummary };
+}
+
+function sqlBatchResult(
+  finalStatementResult: Omit<SqlExecutionResult, "durationMs"> | null,
+  statementSummaries: SqlStatementExecutionResult[],
+): Omit<SqlExecutionResult, "durationMs"> {
+  return {
+    rows: finalStatementResult?.rows ?? [],
+    rowCount: finalStatementResult?.rowCount ?? 0,
+    command: "BATCH",
+    ...(finalStatementResult?.fields ? { fields: finalStatementResult.fields } : {}),
+    notices: finalStatementResult?.notices ?? [],
+    statements: statementSummaries,
+  };
+}
+
+async function rethrowAfterSqlBatchRollback(
+  connection: ReservedSqlConnection,
+  executionError: unknown,
+): Promise<never> {
+  try {
+    await connection.unsafe("ROLLBACK");
+  } catch (rollbackError) {
+    throw new AggregateError(
+      [executionError, rollbackError],
+      "SQL batch failed and its transaction could not be rolled back",
+    );
+  }
+  throw executionError;
+}
+
+export async function executeSqlBatchOnConnection(
+  connection: ReservedSqlConnection,
+  statements: readonly string[],
+): Promise<Omit<SqlExecutionResult, "durationMs">> {
+  await connection.unsafe("BEGIN");
+  const statementSummaries: SqlStatementExecutionResult[] = [];
+  let finalStatementResult: Omit<SqlExecutionResult, "durationMs"> | null = null;
+  try {
+    for (const [index, statement] of statements.entries()) {
+      const execution = await executeSqlBatchStatement(connection, statement, index);
+      statementSummaries.push(execution.statementSummary);
+      finalStatementResult = execution.statementResult;
+    }
+    await connection.unsafe("COMMIT");
+  } catch (error) {
+    return rethrowAfterSqlBatchRollback(connection, error);
+  }
+  return sqlBatchResult(finalStatementResult, statementSummaries);
+}
+
 interface CancellableSqlExecution {
   queryDb: SQL;
   cancellationDb: SQL;
@@ -343,6 +421,36 @@ export async function executeCancellableSqlQuery(input: CancellableSqlExecution)
       projectRef: input.projectRef,
       queryId: input.queryId,
       query,
+      startedAt: input.startedAt,
+      cancel: () => cancelPostgresBackend(input.cancellationDb, backend.backendPid),
+    });
+  } finally {
+    queryConnection.release();
+  }
+}
+
+interface CancellableSqlBatchExecution {
+  queryDb: SQL;
+  cancellationDb: SQL;
+  projectRef: string;
+  queryId: string;
+  statements: readonly string[];
+  startedAt: number;
+}
+
+export async function executeCancellableSqlBatch(
+  input: CancellableSqlBatchExecution,
+): Promise<Omit<SqlExecutionResult, "durationMs">> {
+  const queryConnection = await input.queryDb.reserve();
+  try {
+    const [backend] = await queryConnection<{ backendPid: number }[]>`
+      SELECT pg_backend_pid() AS "backendPid"
+    `;
+    if (!backend) throw new Error("PostgreSQL backend PID is unavailable");
+    return await runRegisteredSqlQuery({
+      projectRef: input.projectRef,
+      queryId: input.queryId,
+      query: { execute: () => executeSqlBatchOnConnection(queryConnection, input.statements) },
       startedAt: input.startedAt,
       cancel: () => cancelPostgresBackend(input.cancellationDb, backend.backendPid),
     });
@@ -406,6 +514,33 @@ async function executeRegisteredProjectSql(input: RegisteredProjectSqlExecution)
   }
 }
 
+interface RegisteredProjectSqlBatchExecution extends Omit<RegisteredProjectSqlExecution, "sqlQuery"> {
+  statements: readonly string[];
+}
+
+async function executeRegisteredProjectSqlBatch(
+  input: RegisteredProjectSqlBatchExecution,
+): Promise<Omit<SqlExecutionResult, "durationMs">> {
+  const cancellationDb = createProjectSql({
+    dbName: input.dbName,
+    username: input.username,
+    password: input.password,
+    max: 1,
+  });
+  try {
+    return await executeCancellableSqlBatch({
+      queryDb: input.queryDb,
+      cancellationDb,
+      projectRef: input.projectRef,
+      queryId: input.queryId,
+      statements: input.statements,
+      startedAt: input.startedAt,
+    });
+  } finally {
+    await cancellationDb.close({ timeout: 1 });
+  }
+}
+
 interface SqlExecutionOptions {
   mode?: SqlExecutionMode;
   username?: string;
@@ -451,6 +586,38 @@ async function executeProjectSql(
   });
 }
 
+async function executeProjectSqlBatch(
+  dbName: string,
+  statements: readonly string[],
+  options: SqlExecutionOptions,
+  startedAt: number,
+): Promise<Omit<SqlExecutionResult, "durationMs">> {
+  const scope = cancellableQueryScope(options);
+  const roleCredentials = options.username && options.password
+    ? { username: options.username, password: options.password }
+    : null;
+  const queryDb = roleCredentials
+    ? getProjectRoleDb(dbName, roleCredentials.username, roleCredentials.password)
+    : getProjectDb(dbName);
+  if (scope) {
+    return executeRegisteredProjectSqlBatch({
+      dbName,
+      queryDb,
+      username: roleCredentials?.username ?? dbConfig.username,
+      password: roleCredentials?.password ?? dbConfig.password,
+      ...scope,
+      statements,
+      startedAt,
+    });
+  }
+  const connection = await queryDb.reserve();
+  try {
+    return await executeSqlBatchOnConnection(connection, statements);
+  } finally {
+    connection.release();
+  }
+}
+
 export async function executeQuery(
   dbName: string,
   sqlQuery: string,
@@ -459,7 +626,19 @@ export async function executeQuery(
   const startedAt = performance.now();
   try {
     const mode = opts.mode || "read";
-    assertSqlExecutionAllowed(sqlQuery, mode);
+    const rawStatements = mode === "migration" ? splitSqlStatements(sqlQuery) : [];
+    const statements = mode === "migration" ? stripOuterTransactionStatements(rawStatements) : [];
+    assertSqlExecutionAllowed(
+      mode === "migration" && rawStatements.length > 1 ? statements.join(";\n") : sqlQuery,
+      mode,
+    );
+    if (mode === "migration" && rawStatements.length > 1) {
+      if (statements.length === 0) throw new PgError("Query is empty", "42601");
+      return {
+        ...await executeProjectSqlBatch(dbName, statements, opts, startedAt),
+        durationMs: elapsedSqlMilliseconds(startedAt),
+      };
+    }
     const result = await executeProjectSql(dbName, sqlQuery, opts, startedAt);
     return {
       ...normalizeSqlExecutionResult(sqlQuery, result),

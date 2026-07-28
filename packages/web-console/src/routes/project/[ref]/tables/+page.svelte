@@ -1,5 +1,6 @@
 <script lang="ts">
   import { page } from "$app/state";
+  import { resolve } from "$app/paths";
   import { AutoTable } from "@svadmin/ui";
   import { apiClient } from "$lib/api";
   import { createMutation } from "@tanstack/svelte-query";
@@ -50,6 +51,11 @@
     if (index > 0) columns = columns.filter((_, columnIndex) => columnIndex !== index);
   }
 
+  function normalizeRowEstimate(value: unknown): number | null {
+    const count = typeof value === "number" ? value : Number(value);
+    return Number.isFinite(count) && count >= 0 ? Math.floor(count) : null;
+  }
+
   const createTableMutation = createMutation(() => ({
     mutationFn: async () => {
       const response = await apiClient(`/v1/projects/${projectRef}/database/tables`, {
@@ -88,7 +94,11 @@
         {#snippet tableNameRenderer({ value, record }: { value: any, record: any })}
           <div class="flex items-center gap-2">
             <TableProperties size={14} class="text-brand" />
-            <a href={`/project/${projectRef}/tables/${record.table_schema}/${value}`} class="font-mono font-medium text-sm text-foreground hover:text-brand hover:underline transition-colors block py-1">
+            <a href={resolve("/project/[ref]/tables/[schema]/[table_name]", {
+              ref: projectRef,
+              schema: String(record.table_schema),
+              table_name: String(value),
+            })} class="font-mono font-medium text-sm text-foreground hover:text-brand hover:underline transition-colors block py-1">
               {value}
             </a>
           </div>
@@ -105,7 +115,10 @@
         {/snippet}
 
         {#snippet rowsRenderer({ value }: { value: any })}
-          <span class="text-xs text-muted-foreground tabular-nums">{$t("Tables.estimated_rows", { values: { count: value } })}</span>
+          {@const count = normalizeRowEstimate(value)}
+          <span class="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
+            {count === null ? "—" : $t("Tables.estimated_rows", { values: { count } })}
+          </span>
         {/snippet}
 
         <AutoTable
@@ -137,7 +150,7 @@
             <div class="grid grid-cols-[minmax(0,1fr)_112px_auto] gap-2 items-center">
               <input bind:value={column.name} required maxlength="63" pattern="[A-Za-z_][A-Za-z0-9_]*" class="min-w-0 px-2.5 py-2 rounded-md border bg-background text-xs font-mono" aria-label={$t("Tables.column_name_aria", { values: { index: index + 1 } })} />
               <select bind:value={column.type} disabled={index === 0} class="px-2 py-2 rounded-md border bg-background text-xs font-mono disabled:opacity-70" aria-label={$t("Tables.column_type_aria", { values: { index: index + 1 } })}>
-                {#each columnTypes as type}
+                {#each columnTypes as type (type)}
                   <option value={type}>{type}</option>
                 {/each}
               </select>

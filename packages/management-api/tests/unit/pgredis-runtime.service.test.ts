@@ -68,7 +68,7 @@ describe("PgredisRuntimeService", () => {
     });
   });
 
-  test("reports a disabled project cache without contacting an unconfigured data plane", async () => {
+  test("returns a bounded not-configured status without calling the data plane", async () => {
     const fetchImpl = mock(() => Promise.resolve(Response.json({ ok: true })));
     const service = new PgredisRuntimeService({
       baseUrl: "http://pgredis-runtime:9010",
@@ -77,6 +77,11 @@ describe("PgredisRuntimeService", () => {
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
 
+    await expect(service.platformStatus()).resolves.toMatchObject({
+      configured: false,
+      ok: false,
+      activeTenants: 0,
+    });
     await expect(service.projectStatus("tenant-a")).resolves.toEqual({
       projectRef: "tenant-a",
       configured: false,
@@ -87,10 +92,6 @@ describe("PgredisRuntimeService", () => {
     });
     expect(fetchImpl).not.toHaveBeenCalled();
 
-    await expect(service.platformStatus()).rejects.toMatchObject({
-      statusCode: 503,
-      code: "PGREDIS_RUNTIME_NOT_CONFIGURED",
-    });
     await expect(service.execute("tenant-a", { op: "get", key: "key-a" })).rejects.toMatchObject({
       statusCode: 503,
       code: "PGREDIS_RUNTIME_NOT_CONFIGURED",
