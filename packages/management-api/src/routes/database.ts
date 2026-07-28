@@ -286,45 +286,49 @@ async function runRlsTesterTransaction(roleDb: SQL, input: RlsTesterInput) {
   return { claims, plan, rows };
 }
 
-async function executeRlsTest(input: RlsTesterInput) {
-  const projectDb = getProjectDb(input.dbName);
-  const roleDb = getProjectRoleDb(input.dbName, input.authenticatorRole, input.password);
-  const { claims, plan, rows: rawRows } = await runRlsTesterTransaction(roleDb, input);
-  let rows = rawRows;
+function makeRlsRelationKeys(relations: Array<{ schema: string; table: string }>) {
+  return new Set(relations.map((relation) => `${relation.schema}\0${relation.table}`));
+}
 
-  const truncated = rows.length > 500;
-  rows = rows.slice(0, 500);
-  const relations = collectRlsPlanRelations(plan);
-  const catalogRows = relations.length === 0 ? [] : await projectDb`
+function mapRlsTesterPolicy(row: Record<string, unknown>, role: RlsTesterInput["role"]) {
+  const roles = Array.isArray(row.roles) ? row.roles.map(String) : [];
+  return {
+    schema: String(row.schemaname),
+    table: String(row.tablename),
+    name: String(row.policyname),
+    permissive: String(row.permissive),
+    roles,
+    command: String(row.cmd),
+    using: row.qual ?? null,
+    check: row.with_check ?? null,
+    appliesToRole: roles.includes("public") || roles.includes(role),
+  };
+}
+
+async function readRlsTesterPolicies(projectDb: SQL, relations: Array<{ schema: string; table: string }>, role: RlsTesterInput["role"]) {
+  if (relations.length === 0) return [];
+  const relationKeys = makeRlsRelationKeys(relations);
+  const catalogRows = await projectDb`
     SELECT schemaname, tablename, policyname, permissive, roles, cmd, qual, with_check
     FROM pg_policies
     ORDER BY schemaname, tablename, policyname
   `;
-  const relationKeys = new Set(relations.map((relation) => `${relation.schema}\0${relation.table}`));
-  const policies = catalogRows
+  return catalogRows
     .filter((row: Record<string, unknown>) => relationKeys.has(`${String(row.schemaname)}\0${String(row.tablename)}`))
-    .map((row: Record<string, unknown>) => {
-      const roles = Array.isArray(row.roles) ? row.roles.map(String) : [];
-      return {
-        schema: String(row.schemaname),
-        table: String(row.tablename),
-        name: String(row.policyname),
-        permissive: String(row.permissive),
-        roles,
-        command: String(row.cmd),
-        using: row.qual ?? null,
-        check: row.with_check ?? null,
-        appliesToRole: roles.includes("public") || roles.includes(input.role),
-      };
-    });
-  const relationCatalogRows = relations.length === 0 ? [] : await projectDb`
+    .map((row: Record<string, unknown>) => mapRlsTesterPolicy(row, role));
+}
+
+async function readRlsRelationSecurity(projectDb: SQL, relations: Array<{ schema: string; table: string }>) {
+  if (relations.length === 0) return [];
+  const relationKeys = makeRlsRelationKeys(relations);
+  const catalogRows = await projectDb`
     SELECT n.nspname AS schemaname, c.relname AS tablename,
            c.relrowsecurity, c.relforcerowsecurity
     FROM pg_class c
     JOIN pg_namespace n ON n.oid = c.relnamespace
     WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f')
   `;
-  const relationSecurity = relationCatalogRows
+  return catalogRows
     .filter((row: Record<string, unknown>) => relationKeys.has(`${String(row.schemaname)}\0${String(row.tablename)}`))
     .map((row: Record<string, unknown>) => ({
       schema: String(row.schemaname),
@@ -332,6 +336,17 @@ async function executeRlsTest(input: RlsTesterInput) {
       rlsEnabled: row.relrowsecurity === true,
       rlsForced: row.relforcerowsecurity === true,
     }));
+}
+
+async function executeRlsTest(input: RlsTesterInput) {
+  const projectDb = getProjectDb(input.dbName);
+  const roleDb = getProjectRoleDb(input.dbName, input.authenticatorRole, input.password);
+  const { claims, plan, rows: rawRows } = await runRlsTesterTransaction(roleDb, input);
+  const truncated = rawRows.length > 500;
+  const rows = rawRows.slice(0, 500);
+  const relations = collectRlsPlanRelations(plan);
+  const policies = await readRlsTesterPolicies(projectDb, relations, input.role);
+  const relationSecurity = await readRlsRelationSecurity(projectDb, relations);
   return {
     role: input.role,
     claims,
