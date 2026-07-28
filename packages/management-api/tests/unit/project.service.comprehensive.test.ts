@@ -224,7 +224,7 @@ describe("ProjectService - Comprehensive", () => {
       import_map: null,
     });
     edgeFunctionServiceMock.runtimeCheck.mockResolvedValue({
-      runtime_url: "http://127.0.0.1:9000",
+      runtime_url: "http://127.0.0.1:9005",
       active_version: "2",
       active_artifact_path: "/tmp/index.js",
       artifact_exists: true,
@@ -656,7 +656,7 @@ describe("ProjectService - Comprehensive", () => {
     projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);
     const result = await service.checkFunctionRuntime("test123abc", "my-func");
     expect(result).toMatchObject({
-      runtime_url: "http://127.0.0.1:9000",
+      runtime_url: "http://127.0.0.1:9005",
       active_version: "2",
       preheat_ok: true,
     });

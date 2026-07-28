@@ -163,7 +163,7 @@ services:
       pgredis-runtime:
         condition: service_healthy
     environment:
-      - PORT=9000
+      - PORT=9005
       - WORKER_POOL_SIZE=${WORKER_POOL_SIZE:-2}
       - MANAGEMENT_API_URL=http://management-api:9090
       - MASTER_TOKEN=${MASTER_TOKEN}
@@ -171,7 +171,7 @@ services:
       - PGREDIS_RUNTIME_INTERNAL_TOKEN=${PGREDIS_RUNTIME_INTERNAL_TOKEN}
       - PGREDIS_RUNTIME_CAPABILITY_TTL_MS=${PGREDIS_RUNTIME_CAPABILITY_TTL_MS:-600000}
     ports:
-      - "${EDGE_RUNTIME_PORT:-9000}:9000"
+      - "${EDGE_RUNTIME_PORT:-9005}:9005"
     volumes:
       # Automatically map user's local functions to the runtime!
       - ../../supabase/functions:/app/supabase/functions

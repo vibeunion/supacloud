@@ -12,9 +12,9 @@ COPY packages/edge-runtime ./packages/edge-runtime
 
 WORKDIR /app/packages/edge-runtime
 
-EXPOSE 9000
+EXPOSE 9005
 
-ENV PORT=9000
+ENV PORT=9005
 ENV NODE_ENV=production
 ENV EDGE_FUNCTIONS_DIR=/data/functions
 ENV TENANTS_DIR=/etc/supabase/tenants

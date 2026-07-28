@@ -8,6 +8,7 @@ import {
     buildEmbeddedEdgePrivilegeDropIn,
     buildCheckpointDatabaseOptions,
     backupCurrentBinary,
+    buildRuntimeServiceRestartPlan,
     captureFileState,
     cleanupBinaryBackup,
     createBinaryBackupState,
@@ -615,6 +616,19 @@ describe("upgrade release selection", () => {
     expect(resolvePersistedEdgeRuntimeMode("embedded")).toBe("embedded");
     expect(resolvePersistedEdgeRuntimeMode("external")).toBe("external");
     expect(() => resolvePersistedEdgeRuntimeMode("externel")).toThrow("Invalid persisted EDGE_RUNTIME_MODE");
+  });
+
+  test("restarts only the service selected by the persisted Edge Runtime mode", () => {
+    expect(buildRuntimeServiceRestartPlan("embedded", true)).toEqual([
+      "disable-external-edge-runtime",
+      "restart-management",
+    ]);
+    expect(buildRuntimeServiceRestartPlan("embedded", false)).toEqual(["restart-management"]);
+    expect(buildRuntimeServiceRestartPlan("external", true)).toEqual([
+      "restart-management",
+      "restart-external-edge-runtime",
+    ]);
+    expect(buildRuntimeServiceRestartPlan("external", false)).toEqual(["restart-management"]);
   });
 
   test("upgrade persists a non-conflicting native Edge Runtime port", () => {

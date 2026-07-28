@@ -2,12 +2,12 @@
 
 SupaCloud Edge Functions uses **Bun + Elysia Worker Thread Pool** as the runtime.
 
-By default, the runtime runs in **embedded mode** under `supacloud.service` together with the Management API. A standalone `supacloud-edge-runtime.service` is also available for **external mode**, but the two modes are mutually exclusive and must not own port `9000` at the same time.
+By default, the runtime runs in **embedded mode** under `supacloud.service` together with the Management API. A standalone `supacloud-edge-runtime.service` is also available for **external mode**, but the two modes are mutually exclusive and must not own the configured Edge Runtime port at the same time (default: `9005`).
 
 ## Architecture
 
 ```
-SupaCloud (:9090)             Edge Runtime (:9000)
+SupaCloud (:9090)             Edge Runtime (EDGE_RUNTIME_PORT, default :9005)
 ├── Management API       ←──  supacloud.service (default, embedded mode)
 ├── SSE Log Stream (/logs/stream)
 ├── WebSocket (/ws/tasks)     ├── Elysia Server
@@ -37,7 +37,7 @@ Set the mode through `EDGE_RUNTIME_MODE` in `/etc/supabase/management-api.env`.
 Important:
 - `embedded` is the installer default.
 - `external` should only be enabled if you intentionally run a dedicated `supacloud-edge-runtime.service`.
-- Do **not** run both modes at once; they will compete for port `9000`.
+- Do **not** run both modes at once; they will compete for `EDGE_RUNTIME_PORT` (default: `9005`).
 
 ## Performance
 
@@ -46,7 +46,7 @@ Important:
 | Memory (200 functions) | ~140MB |
 | Cold start (no preheat) | 8-15ms |
 | Cold start (with preheat) | **0ms** |
-| Port | :9000 |
+| Port | `EDGE_RUNTIME_PORT` (default: `9005`) |
 
 ### Function Preheating
 

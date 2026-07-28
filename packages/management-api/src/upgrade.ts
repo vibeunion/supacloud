@@ -840,7 +840,7 @@ function stagedMigrationOperations(): StagedMigrationOperations {
         runInit: runInitDb,
         hasCheckpoint: checkpointExists,
         restoreRuntimeEnv: restoreFileState,
-        restart: restartServices,
+        restart: async () => restartServices(await runtimeModeForBinaryUpgrade()),
         healthCheck: waitForManagementHealth,
     };
 }
@@ -1078,12 +1078,19 @@ function writeFileAtomically(filePath: string, content: string, mode: number) {
     }
 }
 
-async function runtimeModeForBinaryUpgrade(): Promise<"embedded" | "external"> {
+export type EdgeRuntimeMode = "embedded" | "external";
+
+export type RuntimeServiceRestartAction =
+    | "disable-external-edge-runtime"
+    | "restart-management"
+    | "restart-external-edge-runtime";
+
+async function runtimeModeForBinaryUpgrade(): Promise<EdgeRuntimeMode> {
     const persistedEnv = await readEnvFile(managementEnvFile());
     return resolvePersistedEdgeRuntimeMode(persistedEnv.EDGE_RUNTIME_MODE);
 }
 
-export function resolvePersistedEdgeRuntimeMode(persistedMode?: string): "embedded" | "external" {
+export function resolvePersistedEdgeRuntimeMode(persistedMode?: string): EdgeRuntimeMode {
     if (persistedMode === undefined || persistedMode === "" || persistedMode === "embedded") return "embedded";
     if (persistedMode === "external") return "external";
     throw new Error(`Invalid persisted EDGE_RUNTIME_MODE: ${persistedMode}`);
@@ -1106,26 +1113,54 @@ async function reconcileEmbeddedEdgePrivilegeDropIn(mode: "embedded" | "external
     await reloadSystemdUnits();
 }
 
-async function ensureEdgeRuntimeCapacityDropIn(env: Record<string, string | undefined>) {
+async function edgeRuntimeServiceIsInstalled(): Promise<boolean> {
     const edgeUnit = await $`systemctl list-unit-files supacloud-edge-runtime.service --no-legend`.nothrow().quiet();
-    const edgeServiceKnown = edgeUnit.exitCode === 0 && edgeUnit.stdout.toString().includes("supacloud-edge-runtime.service");
-    if (!edgeServiceKnown) return;
+    return edgeUnit.exitCode === 0 && edgeUnit.stdout.toString().includes("supacloud-edge-runtime.service");
+}
+
+async function ensureEdgeRuntimeCapacityDropIn(env: Record<string, string | undefined>) {
+    if (!await edgeRuntimeServiceIsInstalled()) return;
 
     const config = resolveEdgeRuntimeCapacityConfig({ env });
     writeFileAtomically(edgeRuntimeCapacityDropIn(), buildEdgeRuntimeCapacityDropIn(config), 0o644);
     await reloadSystemdUnits();
 }
 
-async function restartServices() {
-    const management = await $`systemctl restart supacloud`.nothrow().quiet();
-    if (management.exitCode !== 0) {
-        logger.warn("[Upgrade] Failed to restart supacloud.service", {
-            stderr: management.stderr.toString().slice(-500),
-        });
-        throw new Error("Failed to restart supacloud.service");
+export function buildRuntimeServiceRestartPlan(
+    mode: EdgeRuntimeMode,
+    externalEdgeRuntimeServiceInstalled: boolean,
+): RuntimeServiceRestartAction[] {
+    if (mode === "embedded") {
+        return externalEdgeRuntimeServiceInstalled
+            ? ["disable-external-edge-runtime", "restart-management"]
+            : ["restart-management"];
     }
+    return externalEdgeRuntimeServiceInstalled
+        ? ["restart-management", "restart-external-edge-runtime"]
+        : ["restart-management"];
+}
 
-    await $`systemctl try-restart supacloud-edge-runtime`.nothrow().quiet();
+async function runRuntimeServiceRestartAction(action: RuntimeServiceRestartAction) {
+    const command = action === "disable-external-edge-runtime"
+        ? $`systemctl disable --now supacloud-edge-runtime`.nothrow().quiet()
+        : action === "restart-management"
+            ? $`systemctl restart supacloud`.nothrow().quiet()
+            : $`systemctl restart supacloud-edge-runtime`.nothrow().quiet();
+    const result = await command;
+    if (result.exitCode === 0) return;
+
+    const service = action === "restart-management" ? "supacloud.service" : "supacloud-edge-runtime.service";
+    logger.warn(`[Upgrade] Failed to ${action}`, {
+        stderr: result.stderr.toString().slice(-500),
+    });
+    throw new Error(`Failed to ${action} for ${service}`);
+}
+
+async function restartServices(mode: EdgeRuntimeMode) {
+    const externalEdgeRuntimeServiceInstalled = await edgeRuntimeServiceIsInstalled();
+    for (const action of buildRuntimeServiceRestartPlan(mode, externalEdgeRuntimeServiceInstalled)) {
+        await runRuntimeServiceRestartAction(action);
+    }
 }
 
 export async function waitForManagementHealth() {
@@ -1257,7 +1292,7 @@ async function rollbackArtifacts(state: UpgradeActivationState, stagedWeb: Stage
     }
     await reloadSystemdUnits();
 
-    await restartServices();
+    await restartServices(await runtimeModeForBinaryUpgrade());
     await waitForUpgradeHealth();
 }
 
@@ -1301,7 +1336,7 @@ export async function runUpgrade(options: { forceYes?: boolean; targetVersion?: 
         let committed = false;
         let downloadEndpointLabel = endpoint.label;
         let webConsoleEndpointLabel: string | null = null;
-        let activatedEdgeRuntimeMode: "embedded" | "external" | null = null;
+        let activatedEdgeRuntimeMode: EdgeRuntimeMode | null = null;
 
         await executeUpgradeTransaction({
             stage: async () => {
@@ -1340,11 +1375,14 @@ export async function runUpgrade(options: { forceYes?: boolean; targetVersion?: 
                 activationState.embeddedEdgePrivilegeDropInState = captureFileState(embeddedEdgePrivilegeDropIn());
                 const edgeRuntimeIdentity = await ensurePersistedEdgeRuntimeIdentity(managementEnvFile());
                 upsertPersistedEdgeRuntimePort(managementEnvFile(), edgeRuntimeEnvFile());
-                activatedEdgeRuntimeMode = await runtimeModeForBinaryUpgrade();
-                await reconcileEmbeddedEdgePrivilegeDropIn(activatedEdgeRuntimeMode, edgeRuntimeIdentity);
-                await ensureEdgeRuntimeCapacityDropIn(env);
+                const edgeRuntimeMode = await runtimeModeForBinaryUpgrade();
+                activatedEdgeRuntimeMode = edgeRuntimeMode;
+                await reconcileEmbeddedEdgePrivilegeDropIn(edgeRuntimeMode, edgeRuntimeIdentity);
+                if (edgeRuntimeMode === "external") {
+                    await ensureEdgeRuntimeCapacityDropIn(env);
+                }
                 upsertManagementWebConsoleDir(managementEnvFile());
-                await restartServices();
+                await restartServices(edgeRuntimeMode);
             },
             healthCheck: async () => {
                 s.start("Waiting for the SupaCloud health endpoint");

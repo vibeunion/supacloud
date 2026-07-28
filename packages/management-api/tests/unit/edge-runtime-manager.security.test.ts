@@ -1,8 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   buildEdgeRuntimeChildEnv,
   buildEdgeRuntimeCommand,
+  isEdgeRuntimeReadyResponse,
 } from "../../src/plugins/edge-runtime-manager";
+
+const repoRoot = join(import.meta.dir, "../../..", "..");
 
 describe("embedded Edge Runtime process boundary", () => {
   test("passes only the Edge allowlist and explicit request-plane credentials", () => {
@@ -58,5 +63,23 @@ describe("embedded Edge Runtime process boundary", () => {
       "run",
       "/opt/supacloud/edge-runtime/server.ts",
     ]);
+  });
+
+  test("never terminates a process merely because it owns the configured port", () => {
+    const manager = readFileSync(join(repoRoot, "packages/management-api/src/plugins/edge-runtime-manager.ts"), "utf8");
+
+    expect(manager).not.toContain("killStaleListeners");
+    expect(manager).not.toContain("process.kill(");
+    expect(manager).not.toContain("lsof -iTCP");
+    expect(manager).toContain("port may be occupied by another service");
+  });
+
+  test("accepts readiness only from the child instance that was launched", () => {
+    const instanceId = "edge-instance-expected";
+
+    expect(isEdgeRuntimeReadyResponse({ status: "ok", instanceId }, instanceId)).toBe(true);
+    expect(isEdgeRuntimeReadyResponse({ status: "ok" }, instanceId)).toBe(false);
+    expect(isEdgeRuntimeReadyResponse({ status: "ok", instanceId: "unrelated-listener" }, instanceId)).toBe(false);
+    expect(isEdgeRuntimeReadyResponse("ok", instanceId)).toBe(false);
   });
 });

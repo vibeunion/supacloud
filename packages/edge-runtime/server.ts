@@ -26,7 +26,7 @@ import fs from "fs/promises";
 import type { PgredisRuntimeEndpointConfig } from "./internal-bindings";
 import { createPgredisCapability } from "./pgredis-capability";
 
-const PORT = Number(process.env.EDGE_RUNTIME_PORT) || Number(process.env.PORT) || 9000;
+const PORT = Number(process.env.EDGE_RUNTIME_PORT) || Number(process.env.PORT) || 9005;
 const HOST = process.env.EDGE_RUNTIME_HOST || process.env.HOST || "127.0.0.1";
 const POOL_SIZE = Number(process.env.WORKER_POOL_SIZE) || 4;
 const BACKGROUND_POOL_SIZE = Number(process.env.BACKGROUND_WORKER_POOL_SIZE) || Math.max(1, Math.min(POOL_SIZE, 2));
@@ -699,6 +699,7 @@ const app = new Elysia()
   .use(cors())
   .get("/health", () => ({
     status: "ok",
+    instanceId: process.env.EDGE_RUNTIME_INSTANCE_ID || null,
   }))
   .get("/metrics", (c) => {
     const authError = requireInternalAuth(c.request);
