@@ -13,7 +13,7 @@
 
   import "../app.css";
   import "$lib/i18n";
-  import { onMount, type Snippet, untrack } from "svelte";
+  import { onMount, tick, type Snippet, untrack } from "svelte";
   import { goto } from "$app/navigation";
   import { resolve } from "$app/paths";
   import { page } from "$app/stores";
@@ -37,7 +37,7 @@
   import { createSvelteKitRouterProvider } from "@svadmin/sveltekit";
   import { Toast as SvadminToast, DevTools, setComponentRegistry, ChatDialog } from "@svadmin/ui";
   import { QueryClient, QueryClientProvider } from "@tanstack/svelte-query";
-  import { Menu, Plug } from "lucide-svelte";
+  import { Menu, Plug, X } from "lucide-svelte";
   import { dataProvider, chatProvider } from "$lib/admin/provider";
   import { authProvider } from "$lib/admin/auth";
   import { buildResourceRegistry } from "$lib/admin/resources";
@@ -71,6 +71,9 @@
   let isAuthenticated = $state(false);
   let i18nLoadGuardExpired = $state(false);
   let mobileNavOpen = $state(false);
+  let mobileNavTrigger = $state<HTMLButtonElement>();
+  let mobileNavCloseButton = $state<HTMLButtonElement>();
+  let mobileNavDialog = $state<HTMLDivElement>();
   
   let isCoreLoading = $derived(projectsLoading || ($isLoading && !i18nLoadGuardExpired));
 
@@ -131,15 +134,53 @@
     }
   }
 
-  function handleMobileNavigation(event: MouseEvent) {
-    if ((event.target as HTMLElement).closest("a")) {
-      mobileNavOpen = false;
+  async function openMobileNavigation() {
+    mobileNavOpen = true;
+    await tick();
+    mobileNavCloseButton?.focus();
+  }
+
+  function closeMobileNavigation(restoreFocus = true) {
+    mobileNavOpen = false;
+    if (restoreFocus) {
+      void tick().then(() => mobileNavTrigger?.focus());
     }
   }
 
   function handleNavigationKeydown(event: KeyboardEvent) {
-    if (event.key === "Escape") mobileNavOpen = false;
+    if (!mobileNavOpen) return;
+
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeMobileNavigation();
+      return;
+    }
+
+    if (event.key !== "Tab" || !mobileNavDialog) return;
+
+    const focusable = Array.from(
+      mobileNavDialog.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ),
+    ).filter((element) => !element.hasAttribute("hidden"));
+    if (!focusable.length) return;
+
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const active = document.activeElement;
+    if (event.shiftKey && (active === first || !mobileNavDialog.contains(active))) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && active === last) {
+      event.preventDefault();
+      first.focus();
+    }
   }
+
+  $effect(() => {
+    $page.url.pathname;
+    mobileNavOpen = false;
+  });
 
   $effect(() => {
     const projectRefs = projects
@@ -274,9 +315,26 @@
             type="button"
             class="absolute inset-0 bg-black/50 backdrop-blur-sm"
             aria-label={$t("Sidebar.close_navigation") || "Close navigation"}
-            onclick={() => (mobileNavOpen = false)}
+            onclick={() => closeMobileNavigation()}
           ></button>
-          <div id="mobile-navigation" class="relative z-10 w-fit shadow-2xl" onclick={handleMobileNavigation} role="presentation">
+          <div
+            id="mobile-navigation"
+            bind:this={mobileNavDialog}
+            class="relative z-10 w-fit shadow-2xl"
+            role="dialog"
+            aria-modal="true"
+            aria-label={$t("Sidebar.open_navigation") || "Navigation"}
+            tabindex="-1"
+          >
+            <button
+              bind:this={mobileNavCloseButton}
+              type="button"
+              class="absolute right-3 top-3 z-20 flex h-8 w-8 items-center justify-center rounded-lg border bg-background text-muted-foreground shadow-sm transition-colors hover:bg-muted hover:text-foreground"
+              aria-label={$t("Sidebar.close_navigation") || "Close navigation"}
+              onclick={() => closeMobileNavigation()}
+            >
+              <X class="h-4 w-4" />
+            </button>
             {#if isPlatformRoute}
               <PlatformSidebar />
             {:else}
@@ -289,12 +347,13 @@
       <main class="flex-1 overflow-y-auto relative bg-muted/30">
         <div class="sticky top-0 z-40 flex h-16 shrink-0 items-center gap-x-4 border-b bg-background px-4 shadow-sm sm:gap-x-6 sm:px-6 lg:px-8">
           <button
+            bind:this={mobileNavTrigger}
             type="button"
             class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:hidden"
             aria-label={$t("Sidebar.open_navigation") || "Open navigation"}
             aria-controls="mobile-navigation"
             aria-expanded={mobileNavOpen}
-            onclick={() => (mobileNavOpen = true)}
+            onclick={openMobileNavigation}
           >
             <Menu class="h-5 w-5" />
           </button>

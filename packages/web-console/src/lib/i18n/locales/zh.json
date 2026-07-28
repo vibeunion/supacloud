@@ -559,7 +559,23 @@
     "sign_in": "登录方式",
     "security": "安全",
     "messaging": "邮件与链接",
-    "advanced": "高级"
+    "advanced": "高级",
+    "tabs": {
+      "users": "用户",
+      "providers": "提供者",
+      "custom_oauth": "自定义 OAuth",
+      "passkeys": "通行密钥",
+      "oauth_server": "OAuth 服务器",
+      "rls_policies": "RLS 策略",
+      "sessions": "会话",
+      "mfa": "多因素认证",
+      "rate_limits": "限频",
+      "protection": "安全防护",
+      "url_configuration": "URL 配置",
+      "email_templates": "邮件模板",
+      "smtp": "SMTP",
+      "hooks": "Hooks"
+    }
   },
   "Reports": {
     "title": "报表与分析",

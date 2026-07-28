@@ -27,6 +27,10 @@ describe("console navigation information architecture", () => {
     expect(rootLayoutSource).toContain('id="mobile-navigation"');
     expect(rootLayoutSource).toContain('className="hidden lg:flex"');
     expect(rootLayoutSource).toContain('aria-controls="mobile-navigation"');
+    expect(rootLayoutSource).toContain('role="dialog"');
+    expect(rootLayoutSource).toContain("mobileNavCloseButton?.focus()");
+    expect(rootLayoutSource).toContain('event.key !== "Tab"');
+    expect(rootLayoutSource).toContain("$page.url.pathname;");
   });
 
   test("uses one grouped platform navigation instead of duplicate top tabs", () => {
@@ -45,5 +49,11 @@ describe("console navigation information architecture", () => {
     expect(authLayoutSource).toContain("AuthNav.sign_in");
     expect(authLayoutSource).toContain("AuthNav.security");
     expect(authLayoutSource).toContain("AuthNav.messaging");
+    expect(databaseLayoutSource).toContain('name="database-navigation"');
+    expect(authLayoutSource).toContain('name="auth-navigation"');
+    expect(databaseLayoutSource).toContain("closeMenusOnOutsideClick");
+    expect(authLayoutSource).toContain("closeMenusOnOutsideClick");
+    expect(authLayoutSource).toContain("AuthNav.tabs.providers");
+    expect(authLayoutSource).not.toContain('name: "提供者"');
   });
 });

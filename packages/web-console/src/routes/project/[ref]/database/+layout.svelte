@@ -86,11 +86,30 @@
 
   const currentTab = $derived(page.url.pathname.split("/database/")[1]?.split("/")[0] || "");
   const activeTab = $derived(TAB_GROUPS.flatMap((group) => group.items).find((tab) => tab.id === currentTab));
+  let menuBar = $state<HTMLDivElement>();
 
   function groupIsActive(items: readonly { id: string }[]) {
     return items.some((item) => item.id === currentTab);
   }
+
+  function closeMenusOnOutsideClick(event: MouseEvent) {
+    if (!(event.target instanceof Node)) return;
+    for (const details of menuBar?.querySelectorAll<HTMLDetailsElement>("details[open]") ?? []) {
+      if (!details.contains(event.target)) details.open = false;
+    }
+  }
+
+  function handleMenuKeydown(event: KeyboardEvent) {
+    if (event.key !== "Escape" || !(event.currentTarget instanceof HTMLElement)) return;
+    const details = event.currentTarget.closest("details");
+    if (!(details instanceof HTMLDetailsElement)) return;
+    event.preventDefault();
+    details.open = false;
+    event.currentTarget.focus();
+  }
 </script>
+
+<svelte:window onclick={closeMenusOnOutsideClick} />
 
 <div class="flex h-full flex-col pt-4">
   <div class="mb-6 px-6">
@@ -102,13 +121,13 @@
       {/if}
     </div>
 
-    <div class="flex flex-wrap items-center gap-2">
+    <div bind:this={menuBar} class="flex flex-wrap items-center gap-2">
       <a href={`/project/${projectRef}/database`} class="rounded-lg px-3 py-2 text-xs font-semibold transition-colors {currentTab === '' ? 'bg-brand text-white shadow-sm' : 'border bg-background text-muted-foreground hover:bg-muted hover:text-foreground'}">
         {$t("Navigation.database_objects")}
       </a>
       {#each TAB_GROUPS as group (group.labelKey)}
-        <details class="group/details relative">
-          <summary class="flex cursor-pointer list-none items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold transition-colors [&::-webkit-details-marker]:hidden {groupIsActive(group.items) ? 'border-brand/30 bg-brand/10 text-brand' : 'bg-background text-muted-foreground hover:bg-muted hover:text-foreground'}">
+        <details name="database-navigation" class="group/details relative">
+          <summary onkeydown={handleMenuKeydown} class="flex cursor-pointer list-none items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold transition-colors [&::-webkit-details-marker]:hidden {groupIsActive(group.items) ? 'border-brand/30 bg-brand/10 text-brand' : 'bg-background text-muted-foreground hover:bg-muted hover:text-foreground'}">
             {$t(group.labelKey)}
             <ChevronDown class="h-3.5 w-3.5 transition-transform group-open/details:rotate-180" />
           </summary>

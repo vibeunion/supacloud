@@ -559,7 +559,23 @@
     "sign_in": "Sign-in Methods",
     "security": "Security",
     "messaging": "Email & Links",
-    "advanced": "Advanced"
+    "advanced": "Advanced",
+    "tabs": {
+      "users": "Users",
+      "providers": "Providers",
+      "custom_oauth": "Custom OAuth",
+      "passkeys": "Passkeys",
+      "oauth_server": "OAuth Server",
+      "rls_policies": "RLS Policies",
+      "sessions": "Sessions",
+      "mfa": "MFA",
+      "rate_limits": "Rate Limits",
+      "protection": "Security Protection",
+      "url_configuration": "URL Configuration",
+      "email_templates": "Email Templates",
+      "smtp": "SMTP",
+      "hooks": "Hooks"
+    }
   },
   "Reports": {
     "title": "Reports & Analytics",
