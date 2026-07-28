@@ -73,9 +73,23 @@ export class PgredisRuntimeService {
   }
 
   async projectStatus(projectRef: string): Promise<PgredisProjectStatus> {
-    return this.request<PgredisProjectStatus>(
-      `/internal/v1/admin/projects/${encodeURIComponent(projectRef)}/status`,
-    );
+    try {
+      return await this.request<PgredisProjectStatus>(
+        `/internal/v1/admin/projects/${encodeURIComponent(projectRef)}/status`,
+      );
+    } catch (error) {
+      if (error instanceof AppError && error.code === "PGREDIS_RUNTIME_NOT_CONFIGURED") {
+        return {
+          projectRef,
+          configured: false,
+          active: false,
+          configurationCurrent: false,
+          leases: 0,
+          lastUsedAt: null,
+        };
+      }
+      throw error;
+    }
   }
 
   async execute(
