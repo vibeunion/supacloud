@@ -54,7 +54,8 @@ console.log('package-smoke-ok')
       include: ['smoke.ts'],
     })
   )
-  await run(['bunx', 'tsc', '--noEmit', '-p', 'tsconfig.json'], consumerDir)
+  const installedTsc = join(consumerDir, 'node_modules', 'typescript', 'bin', 'tsc')
+  await run([process.execPath, installedTsc, '--noEmit', '-p', 'tsconfig.json'], consumerDir)
   process.stdout.write(await run(['bun', 'run', smokePath], consumerDir))
 } finally {
   await Promise.all([
