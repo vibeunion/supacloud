@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.3.0](https://github.com/zuohuadong/supacloud/compare/supacloud-lite-v0.2.0...supacloud-lite-v0.3.0) (2026-07-28)
+
+
+### Features
+
+* extend Supabase-compatible platform capabilities ([adef019](https://github.com/zuohuadong/supacloud/commit/adef019261f82f123043ab4c7a047e6ad6956e56))
+* harden Supabase Cloud compatibility ([ab64374](https://github.com/zuohuadong/supacloud/commit/ab643743b058ad08a0d32c124d26bed0863db397))
+
+
+### Bug Fixes
+
+* use installed TypeScript in Lite smoke ([8a64050](https://github.com/zuohuadong/supacloud/commit/8a64050833c47778e931067f8f30e541141256bf))
+
+
+### Documentation
+
+* **lite:** document snapshot archive dependency ([1c0a8cc](https://github.com/zuohuadong/supacloud/commit/1c0a8cccc4e6cbb0804c7badf6573d6d986c2528))
+
 ## [0.2.0](https://github.com/zuohuadong/supacloud/compare/supacloud-lite-v0.1.0...supacloud-lite-v0.2.0) (2026-07-28)
 
 
