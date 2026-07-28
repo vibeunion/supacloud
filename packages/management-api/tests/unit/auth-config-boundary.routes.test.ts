@@ -1,3 +1,4 @@
+// @supacloud-test-isolate
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Elysia } from "elysia";
 import { config } from "../../src/config";

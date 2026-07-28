@@ -21,7 +21,8 @@ try {
   )
   await run(['bun', 'add', archive], consumerDir)
   await run(['bun', 'add', '--dev', 'typescript@5.9.3'], consumerDir)
-  const version = (await run(['bunx', 'supacloud-lite', 'version'], consumerDir)).trim()
+  const installedCli = join(consumerDir, 'node_modules', '@supacloud', 'lite', 'dist', 'cli.js')
+  const version = (await run([process.execPath, installedCli, 'version'], consumerDir)).trim()
   if (version !== packageJson.version) throw new Error(`unexpected CLI version: ${version}`)
 
   const smokePath = join(consumerDir, 'smoke.ts')

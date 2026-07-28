@@ -1,3 +1,4 @@
+// @supacloud-test-isolate
 import { describe, expect, spyOn, test } from "bun:test";
 import { Elysia } from "elysia";
 import { projectStorageRoutes, storageRoutes } from "../../src/routes/storage";

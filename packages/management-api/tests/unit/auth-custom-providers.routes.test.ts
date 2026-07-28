@@ -1,3 +1,4 @@
+// @supacloud-test-isolate
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { Elysia } from "elysia";
 import { authCustomProviderRoutes } from "../../src/routes/auth-custom-providers";
