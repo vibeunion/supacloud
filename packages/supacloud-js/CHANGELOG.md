@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.0](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.20.1...supacloud-js-v0.21.0) (2026-07-28)
+
+
+### Features
+
+* extend Supabase-compatible platform capabilities ([adef019](https://github.com/zuohuadong/supacloud/commit/adef019261f82f123043ab4c7a047e6ad6956e56))
+
 ## [0.20.1](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.20.0...supacloud-js-v0.20.1) (2026-07-22)
 
 

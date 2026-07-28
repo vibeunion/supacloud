@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.0](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.15.0...edge-runtime-v0.16.0) (2026-07-28)
+
+
+### Features
+
+* extend Supabase-compatible platform capabilities ([adef019](https://github.com/zuohuadong/supacloud/commit/adef019261f82f123043ab4c7a047e6ad6956e56))
+
 ## [0.15.0](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.14.3...edge-runtime-v0.15.0) (2026-07-27)
 
 

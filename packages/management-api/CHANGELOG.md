@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.50.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.49.3...management-api-v0.50.0) (2026-07-28)
+
+
+### Features
+
+* extend Supabase-compatible platform capabilities ([adef019](https://github.com/zuohuadong/supacloud/commit/adef019261f82f123043ab4c7a047e6ad6956e56))
+* harden Supabase Cloud compatibility ([ab64374](https://github.com/zuohuadong/supacloud/commit/ab643743b058ad08a0d32c124d26bed0863db397))
+
+
+### Bug Fixes
+
+* harden RLS tester catalog inspection ([5ee1ff9](https://github.com/zuohuadong/supacloud/commit/5ee1ff9af894969435c6cfb7d560173fea4a09ca))
+
 ## [0.49.3](https://github.com/zuohuadong/supacloud/compare/management-api-v0.49.2...management-api-v0.49.3) (2026-07-28)
 
 

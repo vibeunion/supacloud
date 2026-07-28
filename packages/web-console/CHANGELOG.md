@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.27.0](https://github.com/zuohuadong/supacloud/compare/web-console-v0.26.2...web-console-v0.27.0) (2026-07-28)
+
+
+### Features
+
+* extend Supabase-compatible platform capabilities ([adef019](https://github.com/zuohuadong/supacloud/commit/adef019261f82f123043ab4c7a047e6ad6956e56))
+* harden Supabase Cloud compatibility ([ab64374](https://github.com/zuohuadong/supacloud/commit/ab643743b058ad08a0d32c124d26bed0863db397))
+
 ## [0.26.2](https://github.com/zuohuadong/supacloud/compare/web-console-v0.26.1...web-console-v0.26.2) (2026-07-28)
 
 
