@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.28.0](https://github.com/zuohuadong/supacloud/compare/web-console-v0.27.0...web-console-v0.28.0) (2026-07-28)
+
+
+### Features
+
+* **console:** reorganize navigation hierarchy ([303326c](https://github.com/zuohuadong/supacloud/commit/303326cfa8ebb5df860c77f21fbad15bc799e0bb))
+
 ## [0.27.0](https://github.com/zuohuadong/supacloud/compare/web-console-v0.26.2...web-console-v0.27.0) (2026-07-28)
 
 

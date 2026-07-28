@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.50.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.0...management-api-v0.50.1) (2026-07-28)
+
+
+### Bug Fixes
+
+* **cache:** return disabled status without data plane ([0332dfe](https://github.com/zuohuadong/supacloud/commit/0332dfe29f9a79fca9fc15018d53314e615d04d2))
+* **edge-runtime:** preserve listener ownership ([71ce079](https://github.com/zuohuadong/supacloud/commit/71ce079729fc9141bdb783d22c6b9ff5e39db0fd))
+
 ## [0.50.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.49.3...management-api-v0.50.0) (2026-07-28)
 
 
