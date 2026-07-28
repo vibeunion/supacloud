@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.49.3](https://github.com/zuohuadong/supacloud/compare/management-api-v0.49.2...management-api-v0.49.3) (2026-07-28)
+
+
+### Bug Fixes
+
+* resolve remaining Studio issue regressions ([#615](https://github.com/zuohuadong/supacloud/issues/615)) ([8ee3a9f](https://github.com/zuohuadong/supacloud/commit/8ee3a9f492fd32977496af5b94b4b93dddb4ba26))
+
 ## [0.49.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.49.1...management-api-v0.49.2) (2026-07-27)
 
 

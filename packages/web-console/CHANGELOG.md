@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.26.2](https://github.com/zuohuadong/supacloud/compare/web-console-v0.26.1...web-console-v0.26.2) (2026-07-28)
+
+
+### Bug Fixes
+
+* resolve remaining Studio issue regressions ([#615](https://github.com/zuohuadong/supacloud/issues/615)) ([8ee3a9f](https://github.com/zuohuadong/supacloud/commit/8ee3a9f492fd32977496af5b94b4b93dddb4ba26))
+
 ## [0.26.1](https://github.com/zuohuadong/supacloud/compare/web-console-v0.26.0...web-console-v0.26.1) (2026-07-27)
 
 
