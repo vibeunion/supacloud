@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.50.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.1...management-api-v0.50.2) (2026-07-28)
+
+
+### Bug Fixes
+
+* **console:** resolve CNB issues 47 through 49 ([db734f1](https://github.com/zuohuadong/supacloud/commit/db734f17c68334b28bf7246289e616420e55f291))
+
 ## [0.50.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.0...management-api-v0.50.1) (2026-07-28)
 
 
