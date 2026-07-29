@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.0](https://github.com/zuohuadong/supacloud/compare/cli-v0.13.0...cli-v0.14.0) (2026-07-29)
+
+
+### Features
+
+* **gateway:** add managed functions upstream ([a3f8f74](https://github.com/zuohuadong/supacloud/commit/a3f8f744dc4056d50eb70826b298e0e90a861408))
+
 ## [0.13.0](https://github.com/zuohuadong/supacloud/compare/cli-v0.12.4...cli-v0.13.0) (2026-07-28)
 
 
