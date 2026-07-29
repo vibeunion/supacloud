@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.0](https://github.com/zuohuadong/supacloud/compare/supacloud-lite-v0.3.0...supacloud-lite-v0.4.0) (2026-07-29)
+
+
+### Features
+
+* **lite:** align auth queue and cache compatibility ([f6efcd3](https://github.com/zuohuadong/supacloud/commit/f6efcd3168392f96b36ad4a9b89fafd379f523a4))
+
+
+### Bug Fixes
+
+* resolve remaining reported runtime and console issues ([5fda9f0](https://github.com/zuohuadong/supacloud/commit/5fda9f0960fe7c1a03765f69cc59ebe847016a2c))
+* resolve reported console and Lite issues ([781fba4](https://github.com/zuohuadong/supacloud/commit/781fba47412ed44272dc355d484c9d2c283151c9))
+
 ## [0.3.0](https://github.com/zuohuadong/supacloud/compare/supacloud-lite-v0.2.0...supacloud-lite-v0.3.0) (2026-07-28)
 
 

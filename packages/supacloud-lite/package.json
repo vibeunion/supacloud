@@ -1,6 +1,6 @@
 {
   "name": "@supacloud/lite",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Bun-native, single-project Supabase-compatible backend powered by PGlite",
   "type": "module",
   "license": "Apache-2.0",

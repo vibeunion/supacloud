@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.2](https://github.com/zuohuadong/supacloud/compare/supacloud-v0.8.1...supacloud-v0.8.2) (2026-07-29)
+
+
+### Bug Fixes
+
+* **cli:** synchronize unified package lockfile ([d3ea1be](https://github.com/zuohuadong/supacloud/commit/d3ea1be192ffff61c346f6050e3733d3d0d60b3b))
+
 ## [0.8.1](https://github.com/zuohuadong/supacloud/compare/supacloud-v0.8.0...supacloud-v0.8.1) (2026-07-29)
 
 
