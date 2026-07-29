@@ -301,16 +301,9 @@ GRANT ALL ON ALL TABLES IN SCHEMA storage TO supabase_storage_admin;
 
 -- 9. Realtime
 CREATE SCHEMA IF NOT EXISTS realtime;
-CREATE TABLE IF NOT EXISTS realtime.messages (
-    id BIGSERIAL PRIMARY KEY,
-    topic TEXT NOT NULL,
-    extension TEXT NOT NULL,
-    payload JSONB NULL,
-    event TEXT NULL,
-    private BOOLEAN NULL DEFAULT false,
-    updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
-    inserted_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
-);
+ALTER SCHEMA realtime OWNER TO supabase_admin;
+GRANT USAGE, CREATE ON SCHEMA realtime TO supabase_admin, supabase_realtime_admin;
+-- Official Realtime migrations own tables, types, and protocol functions in this schema.
 GRANT ALL ON ALL TABLES IN SCHEMA auth TO supabase_auth_admin;
 
 -- 10a. service_role must be able to administer existing application tables.

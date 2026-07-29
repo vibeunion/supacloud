@@ -3536,6 +3536,15 @@ persist_service_container_runtime_env() {
 write_realtime_container_env() {
     local target_file="$1"
     local secret
+    local realtime_region="${REALTIME_REGION:-us-east-1}"
+    local seed_self_host="${REALTIME_SEED_SELF_HOST:-false}"
+    case "$seed_self_host" in
+        true|false) ;;
+        *)
+            log_error "REALTIME_SEED_SELF_HOST must be true or false"
+            return 1
+            ;;
+    esac
     for secret in "${POSTGRES_PASSWORD:-}" "${JWT_SECRET:-}" \
         "${REALTIME_DB_ENC_KEY:-}" "${REALTIME_SECRET_KEY_BASE:-}"; do
         if [[ -z "$secret" || "$secret" == *$'\n'* || "$secret" == *$'\r'* ]]; then
@@ -3563,9 +3572,10 @@ write_realtime_container_env() {
         DNS_NODES "" \
         RLIMIT_NOFILE 10000 \
         APP_NAME realtime \
-        SEED_SELF_HOST true \
+        SEED_SELF_HOST "$seed_self_host" \
         RUN_JANITOR false \
         SECURE_CHANNELS false \
+        REGION "$realtime_region" \
         DISABLE_HEALTHCHECK_LOGGING true
 
     local rendered_api_secret
