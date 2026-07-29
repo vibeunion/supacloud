@@ -14,6 +14,7 @@ import { loadAuthSettings } from './auth/settings.js'
 import { LogBuffer } from './log-buffer.js'
 import { FunctionsHandler, type EdgeFunction } from './functions/handler.js'
 import { installDenoShim } from './functions/deno-shim.js'
+import { installPgredisShim, PgredisCache } from './functions/pgredis.js'
 import { Database } from './db/database.js'
 import { signJwt, verifyJwt } from './jwt.js'
 import { RealtimeEngine } from './realtime/engine.js'
@@ -36,6 +37,7 @@ export { LogBuffer, type LogEntry, type LogLevel } from './log-buffer.js'
 export { RealtimeEngine, type RealtimeSocketLike } from './realtime/engine.js'
 export { signJwt, verifyJwt, decodeJwt } from './jwt.js'
 export { FunctionsHandler, type EdgeFunction, type FunctionContext } from './functions/handler.js'
+export { type PgredisCacheBinding } from './functions/pgredis.js'
 export { generateTypes } from './gen-types.js'
 export { installDenoShim } from './functions/deno-shim.js'
 export { WebhooksService, type WebhookConfig, type WebhookDelivery } from './webhooks/service.js'
@@ -156,6 +158,8 @@ export async function createBackend(config: BackendConfig = {}): Promise<Tinbase
     await failStartup(e)
   }
 
+  const pgredis = await PgredisCache.create(db).catch(failStartup)
+
   const now = Math.floor(Date.now() / 1000)
   const tenYears = 10 * 365 * 24 * 3600
   const anonKey = await signJwt({ iss: 'supabase', ref: 'local', role: 'anon', iat: now, exp: now + tenYears }, jwtSecret)
@@ -164,7 +168,8 @@ export async function createBackend(config: BackendConfig = {}): Promise<Tinbase
     jwtSecret
   )
 
-  const rest = new RestHandler(db, { exposedSchemas: config.dbSchemas, maxRows: config.maxRows })
+  const exposedSchemas = [...new Set(config.dbSchemas ?? ['public', 'pgmq_public'])]
+  const rest = new RestHandler(db, { exposedSchemas, maxRows: config.maxRows })
   const exposed = isNetworkExposed(config.host)
   const inbox = config.mailer || exposed
     ? null
@@ -251,7 +256,12 @@ export async function createBackend(config: BackendConfig = {}): Promise<Tinbase
   // this backend's fnEnv per-invocation by FunctionsHandler (so backends don't
   // share env through the global).
   installDenoShim()
-  const functions = new FunctionsHandler(fnMap as Map<string, EdgeFunction>, fnEnv)
+  try {
+    installPgredisShim()
+  } catch (error) {
+    await failStartup(error)
+  }
+  const functions = new FunctionsHandler(fnMap as Map<string, EdgeFunction>, fnEnv, pgredis)
 
   async function resolveContext(req: Request, url: URL): Promise<RequestContext | Response> {
     const authz = req.headers.get('authorization')

@@ -79,7 +79,9 @@ export interface SchemaInfo {
 }
 
 /** A function that runs a parameterized query, e.g. one bound to a transaction. */
-export type Querier = (sql: string, params?: unknown[]) => Promise<EngineResults>
+export interface Querier {
+  <T = any>(sql: string, params?: unknown[]): Promise<EngineResults<T>>
+}
 
 /**
  * A change-data-capture event for one row, shaped like Supabase Realtime's
@@ -146,6 +148,11 @@ export class Database {
   /** Run one or more SQL statements with no params (superuser). */
   exec(sql: string): Promise<unknown> {
     return this.engine.exec(sql)
+  }
+
+  /** Expose only the bound querier so a caller cannot accidentally escape the transaction. */
+  transaction<T>(fn: (q: Querier) => Promise<T>): Promise<T> {
+    return this.engine.transaction((tx) => fn((sql, params) => tx.query(sql, params)))
   }
 
   /**

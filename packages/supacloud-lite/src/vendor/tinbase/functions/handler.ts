@@ -8,6 +8,7 @@
  */
 import type { RequestContext } from '../types.js'
 import { runWithDenoEnv } from './deno-shim.js'
+import { type PgredisCache, runWithPgredisCache } from './pgredis.js'
 
 /** An edge function: a fetch handler invoked with the resolved request context. */
 export type EdgeFunction = (req: Request, ctx: FunctionContext) => Response | Promise<Response>
@@ -29,7 +30,8 @@ export interface FunctionContext {
 export class FunctionsHandler {
   constructor(
     private functions: Map<string, EdgeFunction>,
-    private env: FunctionContext['env']
+    private env: FunctionContext['env'],
+    private pgredis: PgredisCache
   ) {}
 
   /** Register (or replace) a function under `name`, served at /functions/v1/<name>. */
@@ -56,7 +58,8 @@ export class FunctionsHandler {
       // Bind Deno.env to this backend's function env for the call so a
       // Deno.serve/Deno.env-style function reads its own secrets, not another
       // backend's or the host process.env.
-      const res = await runWithDenoEnv(this.env, () => Promise.resolve(fn(req, { auth: ctx, env: this.env })))
+      const invoke = () => Promise.resolve(fn(req, { auth: ctx, env: this.env }))
+      const res = await runWithDenoEnv(this.env, () => runWithPgredisCache(this.pgredis, invoke))
       if (!(res instanceof Response)) {
         return json(500, { error: `function "${name}" did not return a Response` })
       }

@@ -198,6 +198,8 @@ S3 模式的快照只包含数据库中的 Storage 元数据和密钥，不复�
 | `supabase.storage` | 已验证核心 | 覆盖上传下载、列表、删除、TUS/RLS、远端 S3 驱动，以及 Bun.Image 的 `contain`/`fill`、格式和质量变换子集；`cover` 明确不支持 |
 | `supabase.channel()` | 已验证核心 | 自动测试覆盖 `postgres_changes`、DELETE RLS 隔离和事件快照校验；Broadcast、Presence 属于实验性兼容 |
 | `supabase.functions.invoke()` | 已验证核心 | 自动测试覆盖 Bun.build、`Deno.serve()`、公开函数和同进程重启 |
+| Supabase Queues / PGMQ | 已验证核心 | 提供 `pgmq_public` 的 `send`、`send_batch`、`read`、`pop`、`archive`、`delete` RPC；队列数据持久化在同一 PGlite 项目中 |
+| Edge Functions `SupaCloud.pgredis` | 已验证核心 | 提供单项目持久 KV、TTL、原子 `getset`/`getdel`；绑定只在当前函数请求内可用 |
 | Supabase migrations | 支持 | 按文件名排序，记录到 `supabase_migrations` |
 | PostgreSQL RLS | 支持 | 使用 `anon`、`authenticated`、`service_role` 数据库角色执行 |
 | PostgREST 完整线协议 | 部分支持 | 目标是常用 `supabase-js` 行为，不承诺所有 PostgREST 边角行为 |
@@ -217,6 +219,44 @@ RLS 表的 Realtime DELETE 无法在行删除后安全重放 SELECT policy，因
 4. 通过真实 `@supabase/supabase-js` 集成测试验证关键查询、RLS、Storage 和 Realtime。
 
 Lite 使用 Bun 原生 bcrypt，并兼容验证常见 GoTrue bcrypt 密码散列，因此经过映射的 `auth.users` 用户可保留密码。Auth 表结构、identity、refresh token 和 provider metadata 仍需通过受控迁移脚本转换；不要直接覆盖整个 `auth` schema。迁移后必须抽样验证登录，并为无法识别的散列准备密码重置流程。
+
+## 队列与 Edge 缓存
+
+Lite 在同一个 PGlite 数据库中提供 Supabase Queues 的公开 RPC façade。应用可以直接使用官方客户端的
+`supabase.schema('pgmq_public').rpc(...)`，无需额外的队列进程：
+
+```sql
+-- 队列创建属于管理操作，应放在项目 migration 中，而不是匿名请求路径。
+select pgmq.create('emails');
+```
+
+```ts
+const queues = supabase.schema('pgmq_public')
+const { data: ids } = await queues.rpc('send_batch', {
+  queue_name: 'emails',
+  messages: [{ to: 'user@example.com' }],
+  sleep_seconds: 0,
+})
+const { data: messages } = await queues.rpc('read', {
+  queue_name: 'emails',
+  sleep_seconds: 60,
+  n: 10,
+})
+```
+
+Lite 的 `pgmq` 模拟层还提供 `set_vt`，支持直接 SQL 调整可见性超时。消息按 PGMQ 语义至少投递一次；`pop` 会立即删除消息，`archive` 是确认路径。队列创建、指标、purge、设置和管理 API 不属于 Lite 的公开 RPC façade，仍需由项目 SQL 或完整 SupaCloud 控制面处理。
+队列名遵循标准版的 1-128 位小写字母、数字、下划线和短横线规则，并且必须以字母或数字开头；Lite 会安全映射超出 PostgreSQL 63-byte 标识符上限的名称，避免截断后串队。默认 Data API 暴露 `public` 和 `pgmq_public`；如果显式设置 `dbSchemas`，Lite 会严格使用该列表，需要队列 RPC 时应把 `pgmq_public` 明确加入。
+
+Edge Function 内可使用 `globalThis.SupaCloud.pgredis`：
+
+```ts
+const cache = globalThis.SupaCloud.pgredis
+await cache.set('welcome:user:42', { rendered: true }, 60_000)
+const value = await cache.get<{ rendered: boolean }>('welcome:user:42')
+```
+
+缓存实现使用项目自己的 PGlite 表，支持 `get`、`set`、`delete`、`ttl`、原子 `getset` 和原子 `getdel`。默认边界与标准版一致：key 最长 512 个字符、JSON 值最大 1,048,576 bytes、TTL 最大 31,536,000,000ms。有 TTL 的值在读取时会惰性清理，Lite 的 retention sweeper 还会周期性删除过期行；文件数据库会跨重启保留缓存，`--memory` 数据库则随进程退出丢失。绑定按函数请求和项目隔离，函数返回后启动的 detached Promise 不能继续访问它；Lite 不提供跨项目共享、Redis 协议、队列或限流能力。
+Lite 的缓存调用是进程内数据库操作，不具备标准版跨进程 HTTP binding 的超时和请求中止传播；不要在同一 JavaScript 进程中混合加载 Lite 与标准 Edge Runtime，两者都拥有全局 `SupaCloud` binding，Lite 检测到已有其他实现时会拒绝启动。
 
 ## 多项目
 

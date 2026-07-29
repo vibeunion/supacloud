@@ -27,6 +27,7 @@ export {
   type S3StorageFileLike,
 } from './vendor/tinbase/storage/s3-driver.js'
 export type { EdgeFunction, FunctionContext } from './vendor/tinbase/functions/handler.js'
+export type { PgredisCacheBinding } from './vendor/tinbase/functions/pgredis.js'
 export { SUPACLOUD_LITE_VERSION } from './version.js'
 export { FsStorageDriver } from './vendor/tinbase/node/fs-driver.js'
 export { serveBun } from './vendor/tinbase/node/bun-server.js'

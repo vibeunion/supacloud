@@ -70,6 +70,7 @@ export class RetentionService {
     await this.run(`delete from auth.one_time_tokens where expires_at < now()`)
     await this.run(`delete from auth.mfa_challenges where expires_at < now()`)
     await this.run(`delete from auth.flow_state where expires_at < now()`)
+    await this.run(`delete from public.supacloud_pgredis_kv where expires_at <= now()`)
     if (this.refreshTokenDays > 0) {
       const cutoff = new Date(now.getTime() - this.refreshTokenDays * DAY_MS).toISOString()
       await this.run(`delete from auth.refresh_tokens where revoked = true and updated_at < $1`, [cutoff])

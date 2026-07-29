@@ -2,7 +2,7 @@
  * GoTrue-compatible auth endpoints (/auth/v1/*) - the subset supabase-js
  * uses for email/password auth, sessions, and admin user management.
  */
-import type { Database } from '../db/database.js'
+import type { Database, Querier } from '../db/database.js'
 import { randomToken, signJwt, verifyJwt, type JwtClaims } from '../jwt.js'
 import type { Mailer, RequestContext } from '../types.js'
 import { SUPACLOUD_LITE_VERSION } from '../../../version.js'
@@ -73,6 +73,12 @@ interface UserRow {
   phone: string | null
   phone_confirmed_at: Date | string | null
   is_anonymous: boolean | null
+}
+
+interface RefreshTokenRow {
+  user_id: string
+  session_id: string | null
+  created_at: Date | string | null
 }
 
 function authError(status: number, errorCode: string, msg: string): Response {
@@ -300,60 +306,7 @@ export class AuthHandler {
     if (grantType === 'refresh_token') {
       const token = body.refresh_token
       if (!token) return authError(400, 'validation_failed', 'refresh_token required')
-      const res = await this.db.query(
-        `select rt.*, u.id as uid from auth.refresh_tokens rt
-         join auth.users u on u.id = rt.user_id
-         where rt.token = $1`,
-        [token]
-      )
-      const row = res.rows[0] as
-        | {
-            revoked: boolean
-            user_id: string
-            session_id: string | null
-            created_at: Date | string | null
-          }
-        | undefined
-      if (!row || row.revoked) {
-        return authError(400, 'refresh_token_not_found', 'Invalid Refresh Token: Refresh Token Not Found')
-      }
-      const now = Date.now()
-      const lastActivity = timestampMs(row.created_at)
-      if (
-        this.config.sessionInactivitySeconds &&
-        lastActivity !== null &&
-        now - lastActivity >= this.config.sessionInactivitySeconds * 1000
-      ) {
-        await this.db.query(`update auth.refresh_tokens set revoked = true, updated_at = now() where token = $1`, [token])
-        return authError(400, 'session_expired', 'Session expired due to inactivity')
-      }
-      const sessionStartedAt = row.session_id
-        ? timestampMs(
-            (
-              await this.db.query<{ started_at: Date | string | null }>(
-                `select min(created_at) as started_at from auth.refresh_tokens where session_id = $1`,
-                [row.session_id]
-              )
-            ).rows[0]?.started_at ?? null
-          )
-        : lastActivity
-      if (
-        this.config.sessionTimeboxSeconds &&
-        sessionStartedAt !== null &&
-        now - sessionStartedAt >= this.config.sessionTimeboxSeconds * 1000
-      ) {
-        await this.db.query(`update auth.refresh_tokens set revoked = true, updated_at = now() where token = $1`, [token])
-        return authError(400, 'session_expired', 'Session expired')
-      }
-      await this.db.query(`update auth.refresh_tokens set revoked = true, updated_at = now() where token = $1`, [token])
-      const ures = await this.db.query(`select * from auth.users where id = $1`, [row.user_id])
-      return json(
-        200,
-        await this.sessionFor(ures.rows[0] as UserRow, token, {
-          sessionId: row.session_id ?? undefined,
-          sessionStartedAt: sessionStartedAt === null ? undefined : Math.floor(sessionStartedAt / 1000),
-        })
-      )
+      return this.rotateRefreshToken(token)
     }
 
     if (grantType === 'pkce') {
@@ -921,8 +874,11 @@ export class AuthHandler {
     return json(200, { id: factorId })
   }
 
-  private async getUserFactors(userId: string): Promise<Record<string, unknown>[]> {
-    const res = await this.db.query(
+  private async getUserFactors(
+    userId: string,
+    query: Querier = (sql, params) => this.db.query(sql, params)
+  ): Promise<Record<string, unknown>[]> {
+    const res = await query(
       `select id, friendly_name, factor_type, status, created_at, updated_at
        from auth.mfa_factors where user_id = $1 order by created_at`,
       [userId]
@@ -938,8 +894,11 @@ export class AuthHandler {
   }
 
   /** GoTrue-shaped identities for a user (linked providers), from auth.identities. */
-  private async getUserIdentities(userId: string): Promise<Record<string, unknown>[]> {
-    const res = await this.db.query(
+  private async getUserIdentities(
+    userId: string,
+    query: Querier = (sql, params) => this.db.query(sql, params)
+  ): Promise<Record<string, unknown>[]> {
+    const res = await query(
       `select id, provider_id, user_id, identity_data, provider, created_at, updated_at, last_sign_in_at
        from auth.identities where user_id = $1 order by created_at`,
       [userId]
@@ -957,6 +916,66 @@ export class AuthHandler {
   }
 
   // ── helpers ───────────────────────────────────────────────────────────
+
+  private async rotateRefreshToken(token: string): Promise<Response> {
+    return this.db.transaction(async (query) => {
+      const claimedToken = await this.claimRefreshToken(query, token)
+      if (!claimedToken) return authError(400, 'refresh_token_not_found', 'Invalid Refresh Token: Refresh Token Not Found')
+      const sessionStartedAt = await this.refreshSessionStartedAt(query, claimedToken)
+      const expiryError = this.refreshExpiryError(claimedToken, sessionStartedAt)
+      if (expiryError) return expiryError
+      const userResult = await query(`select * from auth.users where id = $1`, [claimedToken.user_id])
+      const session = await this.sessionFor(
+        userResult.rows[0] as UserRow,
+        token,
+        {
+          sessionId: claimedToken.session_id ?? undefined,
+          sessionStartedAt: sessionStartedAt === null ? undefined : Math.floor(sessionStartedAt / 1000),
+        },
+        query
+      )
+      return json(200, session)
+    })
+  }
+
+  private async claimRefreshToken(query: Querier, token: string): Promise<RefreshTokenRow | undefined> {
+    const claimed = await query<RefreshTokenRow>(
+      `update auth.refresh_tokens set revoked = true, updated_at = now()
+       where token = $1 and revoked is not true
+       returning user_id, session_id, created_at`,
+      [token]
+    )
+    return claimed.rows[0]
+  }
+
+  private async refreshSessionStartedAt(query: Querier, refreshToken: RefreshTokenRow): Promise<number | null> {
+    if (!refreshToken.session_id) return timestampMs(refreshToken.created_at)
+    const sessionStart = await query<{ started_at: Date | string | null }>(
+      `select min(created_at) as started_at from auth.refresh_tokens where session_id = $1`,
+      [refreshToken.session_id]
+    )
+    return timestampMs(sessionStart.rows[0]?.started_at ?? null)
+  }
+
+  private refreshExpiryError(refreshToken: RefreshTokenRow, sessionStartedAt: number | null): Response | null {
+    const now = Date.now()
+    const lastActivity = timestampMs(refreshToken.created_at)
+    if (
+      this.config.sessionInactivitySeconds &&
+      lastActivity !== null &&
+      now - lastActivity >= this.config.sessionInactivitySeconds * 1000
+    ) {
+      return authError(400, 'session_expired', 'Session expired due to inactivity')
+    }
+    if (
+      this.config.sessionTimeboxSeconds &&
+      sessionStartedAt !== null &&
+      now - sessionStartedAt >= this.config.sessionTimeboxSeconds * 1000
+    ) {
+      return authError(400, 'session_expired', 'Session expired')
+    }
+    return null
+  }
 
   private async userFromBearer(req: Request): Promise<UserRow | null> {
     const claims = await this.claimsFromBearer(req)
@@ -1015,7 +1034,8 @@ export class AuthHandler {
       amr?: { method: string; timestamp: number }[]
       sessionId?: string
       sessionStartedAt?: number
-    }
+    },
+    query: Querier = (sql, params) => this.db.query(sql, params)
   ): Promise<Record<string, unknown>> {
     const now = Math.floor(Date.now() / 1000)
     // Cap the access-token lifetime at the session timebox so a timeboxed
@@ -1046,7 +1066,7 @@ export class AuthHandler {
     }
     const accessToken = await signJwt(claims, this.config.jwtSecret)
     const refreshToken = randomToken(24)
-    await this.db.query(
+    await query(
       `insert into auth.refresh_tokens (token, user_id, parent, session_id) values ($1, $2, $3, $4)`,
       [refreshToken, user.id, parentToken ?? null, sessionId]
     )
@@ -1056,7 +1076,7 @@ export class AuthHandler {
       expires_in: lifetime,
       expires_at: expiresAt,
       refresh_token: refreshToken,
-      user: this.userJson(user, await this.getUserFactors(user.id), await this.getUserIdentities(user.id)),
+      user: this.userJson(user, await this.getUserFactors(user.id, query), await this.getUserIdentities(user.id, query)),
     }
   }
 }
