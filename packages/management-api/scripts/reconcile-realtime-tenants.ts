@@ -1,5 +1,6 @@
 import { config } from "../src/config";
-import { sql, resolveDbName } from "../src/db";
+import { sql, resolveDbName, resolveSlotName } from "../src/db";
+import { buildRealtimeTenantPayload } from "../src/services/realtime-tenant-payload";
 import { logger } from "../src/utils/logger";
 import { createHmac } from "node:crypto";
 
@@ -86,9 +87,8 @@ function pickRoutingHost(projectRef: string, projectConfig: unknown): string {
   return host;
 }
 
-async function tenantPayload(project: ProjectRow) {
+async function authoritativeTenantPayload(project: ProjectRow) {
   const dbName = project.db_name || (await resolveDbName(project.ref));
-  const dbUser = "supabase_admin";
   const dbPassword = config.pgPassword || project.db_password;
   const jwtSecret = project.jwt_secret;
 
@@ -98,35 +98,19 @@ async function tenantPayload(project: ProjectRow) {
     );
   }
 
-  return {
-    tenant: {
-      external_id: project.ref,
-      name: `Project ${project.ref}`,
-      jwt_secret: jwtSecret,
-      extensions: [
-        {
-          type: "postgres_cdc_rls",
-          settings: {
-            db_host: config.pgHost,
-            db_port: String(config.pgPort),
-            db_name: dbName,
-            db_user: dbUser,
-            db_password: dbPassword,
-            region: "us-east-1",
-            poll_interval_ms: 100,
-            poll_max_changes: 100,
-            poll_max_record_bytes: 1_048_576,
-            slot_name: `supabase_realtime_rls_${project.ref}`,
-            publication: "supabase_realtime",
-          },
-        },
-      ],
-    },
-  };
+  return buildRealtimeTenantPayload({
+    projectRef: project.ref,
+    dbHost: config.pgHost,
+    dbPort: String(config.pgPort),
+    dbName,
+    adminDbPassword: dbPassword,
+    jwtSecret,
+    slotName: resolveSlotName(project.ref),
+  });
 }
 
 async function registerTenant(project: ProjectRow): Promise<void> {
-  const payload = await tenantPayload(project);
+  const payload = await authoritativeTenantPayload(project);
 
   const res = await realtimeFetch("/api/tenants", {
     method: "POST",
@@ -146,7 +130,7 @@ async function registerTenant(project: ProjectRow): Promise<void> {
 }
 
 async function updateTenant(project: ProjectRow): Promise<void> {
-  const payload = await tenantPayload(project);
+  const payload = await authoritativeTenantPayload(project);
 
   const res = await realtimeFetch(`/api/tenants/${project.ref}`, {
     method: "PUT",

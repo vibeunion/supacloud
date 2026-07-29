@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { assertRealtimeSecretAlignment, RealtimeService, validateRealtimeSecretConfiguration } from "../../src/services/realtime.service";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { buildRealtimeTenantPayload } from "../../src/services/realtime-tenant-payload";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -11,6 +12,44 @@ afterEach(() => {
 });
 
 describe("RealtimeService tenant payloads", () => {
+  test("builds the authoritative plaintext tenant capacity contract", () => {
+    const payload = buildRealtimeTenantPayload({
+      projectRef: "testref",
+      dbHost: "postgres",
+      dbPort: "5432",
+      dbName: "supa_testref",
+      adminDbPassword: "database-secret",
+      jwtSecret: "jwt-secret",
+      slotName: "supabase_realtime_testref",
+    });
+
+    expect(payload.tenant.external_id).toBe("testref");
+    expect(payload.tenant.jwt_secret).toBe("jwt-secret");
+    expect(payload.tenant.extensions).toHaveLength(1);
+    expect(payload.tenant.extensions[0]).toEqual({
+      type: "postgres_cdc_rls",
+      settings: {
+        ssl_enforced: false,
+        region: "us-east-1",
+        poll_interval_ms: 100,
+        poll_max_changes: 100,
+        poll_max_record_bytes: 1_048_576,
+        publication: "supabase_realtime",
+        db_pool: 1,
+        subcriber_pool_size: 1,
+        subs_pool_size: 1,
+        db_host: "postgres",
+        db_port: "5432",
+        db_name: "supa_testref",
+        db_user: "supabase_admin",
+        db_password: "database-secret",
+        db_user_realtime: "supabase_realtime_admin",
+        db_pass_realtime: "database-secret",
+        slot_name: "supabase_realtime_testref",
+      },
+    });
+  });
+
   test("fails closed when the API or container verification secret drifts", () => {
     expect(() => assertRealtimeSecretAlignment({
       canonicalSecret: "canonical-realtime-secret",
@@ -51,7 +90,7 @@ describe("RealtimeService tenant payloads", () => {
     }
   });
 
-  test("registerTenant disables per-tenant postgres SSL for local service databases", async () => {
+  test("registerTenant and updateTenant send the same authoritative payload", async () => {
     const calls: Array<{ url: string; init?: RequestInit }> = [];
     globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
       calls.push({ url: String(url), init });
@@ -59,21 +98,45 @@ describe("RealtimeService tenant payloads", () => {
     }) as typeof fetch;
 
     const service = new RealtimeService();
-    const ok = await service.registerTenant({
+    const tenantConfig = {
       projectRef: "testref",
       dbName: "postgres",
       dbPassword: "postgres",
       jwtSecret: "super-secret-jwt-token-with-at-least-32-characters-long",
-    });
+    };
+    const registered = await service.registerTenant(tenantConfig);
+    const updated = await service.updateTenant(tenantConfig);
 
-    expect(ok).toBe(true);
-    const body = JSON.parse(String(calls[0]?.init?.body ?? "{}"));
-    const settings = body.tenant.extensions[0].settings;
+    expect(registered).toBe(true);
+    expect(updated).toBe(true);
+    expect(calls).toHaveLength(2);
+    const registerBody = JSON.parse(String(calls[0]?.init?.body ?? "{}"));
+    const updateBody = JSON.parse(String(calls[1]?.init?.body ?? "{}"));
+    expect(updateBody).toEqual(registerBody);
+    const settings = registerBody.tenant.extensions[0].settings;
     expect(settings.ssl_enforced).toBe(false);
     expect(settings.db_user).toBe("supabase_admin");
     expect(settings.db_password).toBe("postgres");
     expect(settings.db_user_realtime).toBe("supabase_realtime_admin");
     expect(settings.db_pass_realtime).toBe("postgres");
+    expect(settings.slot_name).toBe("supabase_realtime_testref");
+    expect(settings.publication).toBe("supabase_realtime");
+    expect(settings.db_pool).toBe(1);
+    expect(settings.subcriber_pool_size).toBe(1);
+    expect(settings.subs_pool_size).toBe(1);
+  });
+
+  test("reconcile uses the shared authoritative payload builder", () => {
+    const reconcileSource = readFileSync(
+      join(import.meta.dir, "../../scripts/reconcile-realtime-tenants.ts"),
+      "utf8",
+    );
+
+    expect(reconcileSource).toContain(
+      'import { buildRealtimeTenantPayload } from "../src/services/realtime-tenant-payload"',
+    );
+    expect(reconcileSource).toContain("return buildRealtimeTenantPayload({");
+    expect(reconcileSource).not.toContain("function tenantPayload(");
   });
 });
 
