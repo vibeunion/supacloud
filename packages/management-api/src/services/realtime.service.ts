@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { config } from "../config";
-import { sql, resolveSlotName, resolveRoleName } from "../db";
+import { sql, resolveSlotName } from "../db";
+import { buildRealtimeTenantPayload } from "./realtime-tenant-payload";
 /**
  * RealtimeService - Manages Supabase Realtime tenant registration
  * 
@@ -141,6 +142,19 @@ export class RealtimeService {
         };
     }
 
+    private async authoritativeTenantPayload(tenantConfig: RealtimeTenantConfig) {
+        const globalConfig = (await import("../config")).config;
+        return buildRealtimeTenantPayload({
+            projectRef: tenantConfig.projectRef,
+            dbHost: PG_HOST,
+            dbPort: PG_PORT,
+            dbName: tenantConfig.dbName,
+            adminDbPassword: globalConfig.pgPassword || tenantConfig.dbPassword || "postgres",
+            jwtSecret: tenantConfig.jwtSecret,
+            slotName: resolveSlotName(tenantConfig.projectRef),
+        });
+    }
+
     /**
      * Register a new tenant with the Realtime server.
      * Called during project provisioning.
@@ -150,9 +164,7 @@ export class RealtimeService {
      * 响应级错误（4xx/5xx，不含 409）不重试，那是逻辑错误需立即暴露。
      */
     async registerTenant(config: RealtimeTenantConfig): Promise<boolean> {
-        const globalConfig = (await import("../config")).config;
-        const adminDbUser = "supabase_admin";
-        const adminDbPassword = globalConfig.pgPassword || config.dbPassword || "postgres";
+        const tenantPayload = await this.authoritativeTenantPayload(config);
         // CI 冷启动 Realtime 容器常需 ~20-40s 才接受连接；给足重试窗口。
         const MAX_ATTEMPTS = Number(process.env.REALTIME_REGISTER_MAX_ATTEMPTS || 12);
         const BACKOFF_MS = Number(process.env.REALTIME_REGISTER_BACKOFF_MS || 3000);
@@ -161,31 +173,7 @@ export class RealtimeService {
                 const res = await fetch(`${this.adminUrl}/api/tenants`, {
                     method: "POST",
                     headers: await this.authHeaders(),
-                    body: JSON.stringify({
-                        tenant: {
-                            external_id: config.projectRef,
-                            name: `Project ${config.projectRef}`,
-                            jwt_secret: config.jwtSecret,
-                            extensions: [{
-                                type: "postgres_cdc_rls",
-                                settings: {
-                                    db_host: PG_HOST,
-                                    db_port: PG_PORT,
-                                    db_name: config.dbName,
-                                    db_user: adminDbUser,
-                                    db_password: adminDbPassword,
-                                    db_user_realtime: "supabase_realtime_admin",
-                                    db_pass_realtime: adminDbPassword,
-                                    ssl_enforced: false,
-                                    region: "us-east-1",
-                                    poll_interval_ms: 100,
-                                    poll_max_changes: 100,
-                                    poll_max_record_bytes: 1048576,
-                                    slot_name: resolveSlotName(config.projectRef),
-                                },
-                            }],
-                        },
-                    }),
+                    body: JSON.stringify(tenantPayload),
                 });
 
                 if (res.ok || res.status === 409) {
@@ -257,34 +245,12 @@ export class RealtimeService {
      * Update tenant configuration (e.g., after password rotation).
      */
     async updateTenant(config: RealtimeTenantConfig): Promise<boolean> {
-        const globalConfig = (await import("../config")).config;
-        const adminDbUser = "supabase_admin";
-        const adminDbPassword = globalConfig.pgPassword || config.dbPassword || "postgres";
+        const tenantPayload = await this.authoritativeTenantPayload(config);
         try {
             const res = await fetch(`${this.adminUrl}/api/tenants/${config.projectRef}`, {
                 method: "PUT",
                 headers: await this.authHeaders(),
-                body: JSON.stringify({
-                    tenant: {
-                        jwt_secret: config.jwtSecret,
-                        extensions: [{
-                            type: "postgres_cdc_rls",
-                            settings: {
-                                db_host: PG_HOST,
-                                db_port: PG_PORT,
-                                db_name: config.dbName,
-                                db_user: adminDbUser,
-                                db_password: adminDbPassword,
-                                db_user_realtime: "supabase_realtime_admin",
-                                db_pass_realtime: adminDbPassword,
-                                ssl_enforced: false,
-                                region: "us-east-1",
-                                poll_interval_ms: 100,
-                                slot_name: resolveSlotName(config.projectRef),
-                            },
-                        }],
-                    },
-                }),
+                body: JSON.stringify(tenantPayload),
             });
 
             if (res.ok) {
