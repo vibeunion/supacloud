@@ -19,6 +19,20 @@ function readShellConstant(script: string, name: string): string {
   return assignment[1];
 }
 
+function readDocumentedComponentVersion(notes: string, component: string): string {
+  const componentRow = notes.split("\n").find((line) => line.startsWith(`| ${component} |`));
+  if (!componentRow) throw new Error(`Missing component row: ${component}`);
+  const currentVersion = componentRow.split("|")[3]?.trim();
+  if (!currentVersion) throw new Error(`Missing current version for component: ${component}`);
+  return currentVersion;
+}
+
+function readRealtimeImageVersion(systemdUnit: string): string {
+  const version = systemdUnit.match(/^Environment=REALTIME_IMAGE=.*:(v[^\s]+)$/m)?.[1];
+  if (!version) throw new Error("Missing Realtime image version");
+  return version;
+}
+
 describe("runtime companion version assets", () => {
   test("release resolver falls back to the latest component release containing every requested asset", () => {
     const releases = JSON.stringify([
@@ -1010,5 +1024,22 @@ describe("runtime companion version assets", () => {
     expect(upgradeNotes).toContain("postgres:18-bookworm");
     expect(upgradeNotes).toContain("custom_oauth_providers.custom_claims_allowlist");
     expect(upgradeNotes).toContain("storage tiers");
+  });
+
+  test("platform component upgrade notes match runtime version sources", () => {
+    const upgradeNotes = readRepoFile("docs/platform-component-upgrade-notes.md");
+    const gotrueUpgrade = readRepoFile("scripts/lib/gotrue_upgrade.sh");
+    const tenantRuntime = readRepoFile("scripts/lib/tenant_runtime.sh");
+    const realtimeUnit = readRepoFile("infrastructure/systemd/supacloud-realtime.service");
+
+    expect(readDocumentedComponentVersion(upgradeNotes, "GoTrue")).toBe(
+      readShellConstant(gotrueUpgrade, "SUPACLOUD_GOTRUE_DEFAULT_VERSION"),
+    );
+    expect(readDocumentedComponentVersion(upgradeNotes, "PostgREST")).toBe(
+      readShellConstant(tenantRuntime, "POSTGREST_DEFAULT_VERSION"),
+    );
+    expect(readDocumentedComponentVersion(upgradeNotes, "Realtime")).toBe(
+      readRealtimeImageVersion(realtimeUnit),
+    );
   });
 });
