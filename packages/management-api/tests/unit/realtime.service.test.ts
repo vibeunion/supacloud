@@ -12,7 +12,7 @@ afterEach(() => {
 });
 
 describe("RealtimeService tenant payloads", () => {
-  test("builds the authoritative plaintext tenant capacity contract", () => {
+  test("builds the authoritative allow-listed tenant capacity contract", () => {
     const payload = buildRealtimeTenantPayload({
       projectRef: "testref",
       dbHost: "postgres",
@@ -26,7 +26,8 @@ describe("RealtimeService tenant payloads", () => {
     expect(payload.tenant.external_id).toBe("testref");
     expect(payload.tenant.jwt_secret).toBe("jwt-secret");
     expect(payload.tenant.extensions).toHaveLength(1);
-    expect(payload.tenant.extensions[0]).toEqual({
+    const extension = payload.tenant.extensions[0];
+    expect(extension).toEqual({
       type: "postgres_cdc_rls",
       settings: {
         ssl_enforced: false,
@@ -43,11 +44,13 @@ describe("RealtimeService tenant payloads", () => {
         db_name: "supa_testref",
         db_user: "supabase_admin",
         db_password: "database-secret",
-        db_user_realtime: "supabase_realtime_admin",
-        db_pass_realtime: "database-secret",
         slot_name: "supabase_realtime_testref",
       },
     });
+    expect(Object.entries(extension.settings)
+      .filter(([, settingValue]) => settingValue === "database-secret")
+      .map(([settingName]) => settingName))
+      .toEqual(["db_password"]);
   });
 
   test("fails closed when the API or container verification secret drifts", () => {
@@ -117,8 +120,8 @@ describe("RealtimeService tenant payloads", () => {
     expect(settings.ssl_enforced).toBe(false);
     expect(settings.db_user).toBe("supabase_admin");
     expect(settings.db_password).toBe("postgres");
-    expect(settings.db_user_realtime).toBe("supabase_realtime_admin");
-    expect(settings.db_pass_realtime).toBe("postgres");
+    expect(settings).not.toHaveProperty("db_user_realtime");
+    expect(settings).not.toHaveProperty("db_pass_realtime");
     expect(settings.slot_name).toBe("supabase_realtime_testref");
     expect(settings.publication).toBe("supabase_realtime");
     expect(settings.db_pool).toBe(1);

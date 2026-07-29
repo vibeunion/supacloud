@@ -29,8 +29,6 @@ function postgresCdcSettings(input: RealtimeTenantPayloadInput) {
         db_name: input.dbName,
         db_user: "supabase_admin",
         db_password: input.adminDbPassword,
-        db_user_realtime: "supabase_realtime_admin",
-        db_pass_realtime: input.adminDbPassword,
         slot_name: input.slotName,
     };
 }
