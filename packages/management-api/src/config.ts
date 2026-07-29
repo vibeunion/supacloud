@@ -131,6 +131,7 @@ export interface Config {
   postgrestMemoryMax: string;
   postgrestCpuWeight: number;
   postgrestDbPool: number;
+  gotrueDbPool: number;
   managementDbPool: number;
   managementProjectDbPool: number;
   managementProjectRoleDbPool: number;
@@ -325,6 +326,7 @@ export const config: Config = {
   postgrestMemoryMax: getEnv("POSTGREST_MEMORY_MAX", "384M"),
   postgrestCpuWeight: Number(getEnv("POSTGREST_CPU_WEIGHT", "40")),
   postgrestDbPool: Number(getEnv("POSTGREST_DB_POOL", "3")),
+  gotrueDbPool: Number(getEnv("GOTRUE_DB_MAX_POOL_SIZE", "2")),
   managementDbPool: Number(getEnv("MANAGEMENT_DB_POOL", "5")),
   managementProjectDbPool: Number(getEnv("MANAGEMENT_PROJECT_DB_POOL", "2")),
   managementProjectRoleDbPool: Number(getEnv("MANAGEMENT_PROJECT_ROLE_DB_POOL", "1")),
@@ -413,6 +415,9 @@ function validateConfig() {
   }
   if (!Number.isInteger(config.postgrestDbPool) || config.postgrestDbPool <= 0) {
     throw new Error("Invalid POSTGREST_DB_POOL configuration. Must be a positive integer.");
+  }
+  if (!Number.isInteger(config.gotrueDbPool) || config.gotrueDbPool <= 0) {
+    throw new Error("Invalid GOTRUE_DB_MAX_POOL_SIZE configuration. Must be a positive integer.");
   }
   if (!Number.isInteger(config.managementDbPool) || config.managementDbPool <= 0) {
     throw new Error("Invalid MANAGEMENT_DB_POOL configuration. Must be a positive integer.");

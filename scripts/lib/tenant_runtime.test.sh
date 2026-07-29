@@ -61,6 +61,17 @@ if resolve_postgrest_db_pool >/dev/null 2>&1; then
 fi
 unset POSTGREST_DB_POOL
 
+unset GOTRUE_DB_MAX_POOL_SIZE
+[[ "$(resolve_gotrue_db_pool)" == "2" ]]
+GOTRUE_DB_MAX_POOL_SIZE=4
+[[ "$(resolve_gotrue_db_pool)" == "4" ]]
+GOTRUE_DB_MAX_POOL_SIZE=0
+if resolve_gotrue_db_pool >/dev/null 2>&1; then
+    echo "GOTRUE_DB_MAX_POOL_SIZE accepted a non-positive value" >&2
+    exit 1
+fi
+unset GOTRUE_DB_MAX_POOL_SIZE
+
 special=$'p@:/#?% space \'"\\'
 encoded_special='p%40%3A%2F%23%3F%25%20space%20%27%22%5C'
 [[ "$(uri_percent_encode "$special")" == "$encoded_special" ]]
@@ -269,6 +280,7 @@ grep -Fqx "PGRST_DB_POOL=3" "$tmp_dir/tenants/abc123.env"
 grep -Fqx "db-uri = \"postgres://authenticator_abc123:${encoded_special}@localhost:6432/supa_abc123\"" "$tmp_dir/tenants/abc123.conf"
 grep -Fqx "db-pool = 3" "$tmp_dir/tenants/abc123.conf"
 grep -Fqx "GOTRUE_DB_DATABASE_URL=\"postgres://supabase_auth_admin:${encoded_special}@localhost:6432/supa_abc123\"" "$tmp_dir/tenants/abc123_gotrue.env"
+grep -Fqx "GOTRUE_DB_MAX_POOL_SIZE=2" "$tmp_dir/tenants/abc123_gotrue.env"
 grep -Fq 'PGRST_JWT_SECRET="p@:/#?% space '\''\"\\"' "$tmp_dir/tenants/abc123.env"
 grep -Fq 'GOTRUE_SMTP_USER="p@:/#?% space '\''\"\\"' "$tmp_dir/tenants/abc123_gotrue.env"
 grep -Fqx 'GOTRUE_SMTP_SENDER_NAME="SupaCloud"' "$tmp_dir/tenants/abc123_gotrue.env"
