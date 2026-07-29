@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.50.6](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.5...management-api-v0.50.6) (2026-07-29)
+
+
+### Bug Fixes
+
+* baseline migrations through authorized ledger API ([5cb9518](https://github.com/zuohuadong/supacloud/commit/5cb9518b9eccce5501acd79c65784a0f9ca879d4))
+* **platform:** baseline migrations through authorized ledger route ([d494cca](https://github.com/zuohuadong/supacloud/commit/d494cca0d80573ff904d37a08ed72e11f10bb46b))
+* **runtime:** bound gotrue database pool ([c651bc5](https://github.com/zuohuadong/supacloud/commit/c651bc5661976fa947906237e237e874cfe87005))
+* **runtime:** bound gotrue database pool ([1413dcd](https://github.com/zuohuadong/supacloud/commit/1413dcd313dfcc8373bf44cc55d47b7d1d809c00))
+
+
+### Miscellaneous Chores
+
+* release main ([5e20533](https://github.com/zuohuadong/supacloud/commit/5e2053310cfb324629932caa8b246cb154159281))
+* release main ([23d96d9](https://github.com/zuohuadong/supacloud/commit/23d96d96b1b6391faf61c010ae5543b8cde2623b))
+
 ## [0.50.5](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.4...management-api-v0.50.5) (2026-07-29)
 
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.14.1](https://github.com/zuohuadong/supacloud/compare/cli-v0.14.0...cli-v0.14.1) (2026-07-29)
+
+
+### Bug Fixes
+
+* baseline migrations through authorized ledger API ([5cb9518](https://github.com/zuohuadong/supacloud/commit/5cb9518b9eccce5501acd79c65784a0f9ca879d4))
+* **platform:** baseline migrations through authorized ledger route ([d494cca](https://github.com/zuohuadong/supacloud/commit/d494cca0d80573ff904d37a08ed72e11f10bb46b))
+
 ## [0.14.0](https://github.com/zuohuadong/supacloud/compare/cli-v0.13.0...cli-v0.14.0) (2026-07-29)
 
 
