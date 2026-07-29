@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.50.7](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.6...management-api-v0.50.7) (2026-07-29)
+
+
+### Bug Fixes
+
+* **runtime:** migrate canonical legacy postgrest pools ([#646](https://github.com/zuohuadong/supacloud/issues/646)) ([52704f1](https://github.com/zuohuadong/supacloud/commit/52704f1801e827879b73e43f169de75c20863498))
+
 ## [0.50.6](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.5...management-api-v0.50.6) (2026-07-29)
 
 
