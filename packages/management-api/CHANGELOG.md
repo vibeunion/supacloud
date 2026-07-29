@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.50.4](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.3...management-api-v0.50.4) (2026-07-29)
+
+
+### Bug Fixes
+
+* **upgrade:** verify the active management binary ([#626](https://github.com/zuohuadong/supacloud/issues/626)) ([c1b6d27](https://github.com/zuohuadong/supacloud/commit/c1b6d27aa0b264a999cc005f8f0e647ec1063821))
+
 ## [0.50.3](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.2...management-api-v0.50.3) (2026-07-29)
 
 
