@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.50.3](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.2...management-api-v0.50.3) (2026-07-29)
+
+
+### Bug Fixes
+
+* **gateway:** protect project-bound request headers ([#623](https://github.com/zuohuadong/supacloud/issues/623)) ([9c2dcf7](https://github.com/zuohuadong/supacloud/commit/9c2dcf7991df4440bc6ca4997592506b7ef73d85))
+
 ## [0.50.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.1...management-api-v0.50.2) (2026-07-28)
 
 
