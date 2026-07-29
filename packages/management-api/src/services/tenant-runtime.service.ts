@@ -2578,6 +2578,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
         return this.withTenantConfigLock(ref, () =>
             reconcileManagedPostgrestPool({
                 configPath: path.join(this.TENANT_CONFIG_DIR, `${ref}.conf`),
+                projectRef: ref,
                 desiredPool: this.POSTGREST_DB_POOL,
                 projectStatus,
                 desiredState: desired,
