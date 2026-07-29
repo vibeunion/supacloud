@@ -10,12 +10,43 @@ import {
 } from "../../src/services/postgrest-pool-reconcile";
 
 const temporaryDirectories: string[] = [];
+const PROJECT_REF = "afemibrarjkvzuuawjfi";
 const MANAGED_CONFIG = [
   "# Managed by SupaCloud Management API. Legacy shell tooling must not overwrite this file.",
   "db-uri = \"postgres://secret@example.invalid/database\"",
   "db-pool = 10",
   "log-level = \"warn\"",
   "",
+].join("\n");
+const LEGACY_CONFIG = [
+  `# PostgREST config for tenant: ${PROJECT_REF}`,
+  "db-uri = \"postgres://authenticator:secret@example.invalid/database\"",
+  "db-schemas = \"public, storage, graphql_public\"",
+  "db-extra-search-path = \"public, extensions, auth\"",
+  "db-anon-role = \"anon\"",
+  "jwt-secret = \"sensitive-jwt-secret\"",
+  "",
+  "server-port = 54321",
+  "server-host = \"0.0.0.0\"",
+  "db-pool = 10",
+  "db-pool-acquisition-timeout = 10",
+  "log-level = \"warn\"",
+  "",
+  "# P0-10: OpenAPI spec generation (required by Studio Table Editor & API Docs)",
+  "openapi-mode = \"follow-privileges\"",
+  "openapi-server-proxy-uri = \"https://api.example.invalid/rest/v1\"",
+  "",
+  "# P0-11: Pre-request function for RLS context injection",
+  "db-pre-request = \"public.set_request_context\"",
+  "",
+  "# P1-7: Row limit protection",
+  "db-max-rows = 1000",
+  "",
+  "# P2-3: Restrict CORS to the tenant's API domain",
+  "server-cors-allowed-origins = \"https://api.example.invalid\"",
+  "",
+  "# P2-4: Tenant-specific listen channel for schema cache invalidation",
+  `db-channel = \"pgrst_${PROJECT_REF}\"`,
 ].join("\n");
 
 afterEach(async () => {
@@ -39,6 +70,7 @@ function request(
   configPath: string,
   restartAndWait: () => Promise<void>,
   overrides: Partial<{
+    projectRef: string;
     desiredPool: number;
     projectStatus: string;
     desiredState: "running" | "stopped";
@@ -46,6 +78,7 @@ function request(
 ) {
   return {
     configPath,
+    projectRef: overrides.projectRef ?? PROJECT_REF,
     desiredPool: overrides.desiredPool ?? 3,
     projectStatus: overrides.projectStatus ?? "active",
     desiredState: overrides.desiredState ?? "running",
@@ -55,23 +88,117 @@ function request(
 
 describe("managed PostgREST pool rendering", () => {
   test("changes only the managed db-pool line", () => {
-    const candidate = renderManagedPostgrestDbPool(MANAGED_CONFIG, 3);
+    const candidate = renderManagedPostgrestDbPool(MANAGED_CONFIG, 3, PROJECT_REF);
 
     expect(candidate).toBe(MANAGED_CONFIG.replace("db-pool = 10", "db-pool = 3"));
     expect(candidate).toContain("postgres://secret@example.invalid/database");
   });
 
   test("does not rewrite unmanaged, matching, or malformed config", () => {
-    expect(renderManagedPostgrestDbPool(MANAGED_CONFIG, 10)).toBeNull();
-    expect(renderManagedPostgrestDbPool("db-pool = 10\n", 3)).toBeNull();
+    expect(renderManagedPostgrestDbPool(MANAGED_CONFIG, 10, PROJECT_REF)).toBeNull();
+    expect(renderManagedPostgrestDbPool("db-pool = 10\n", 3, PROJECT_REF)).toBeNull();
     expect(() => renderManagedPostgrestDbPool(
       `${MANAGED_CONFIG}db-pool = 4\n`,
       3,
+      PROJECT_REF,
     )).toThrow("exactly one db-pool setting");
+  });
+
+  test("changes only the canonical legacy db-pool bytes", () => {
+    const candidate = renderManagedPostgrestDbPool(LEGACY_CONFIG, 3, PROJECT_REF);
+
+    expect(candidate).toBe(LEGACY_CONFIG.replace("db-pool = 10", "db-pool = 3"));
+    expect(candidate).toContain("authenticator:secret@example.invalid");
+    expect(candidate).toContain("sensitive-jwt-secret");
+    expect(candidate).toContain("P0-10: OpenAPI spec generation");
+  });
+
+  test("accepts the optional canonical jwt-aud setting", () => {
+    const withAudience = LEGACY_CONFIG.replace(
+      'jwt-secret = "sensitive-jwt-secret"',
+      'jwt-secret = "sensitive-jwt-secret"\njwt-aud = "authenticated"',
+    );
+
+    expect(renderManagedPostgrestDbPool(withAudience, 3, PROJECT_REF))
+      .toBe(withAudience.replace("db-pool = 10", "db-pool = 3"));
+  });
+
+  test("skips non-canonical legacy ownership candidates without throwing", () => {
+    const candidates = [
+      LEGACY_CONFIG.replace(PROJECT_REF, "wrong-project-ref"),
+      LEGACY_CONFIG.replace("db-max-rows = 1000\n", ""),
+      `${LEGACY_CONFIG}\ncustom-setting = \"user-owned\"`,
+      `${LEGACY_CONFIG}\ndb-pool = 4`,
+      LEGACY_CONFIG.replace(`pgrst_${PROJECT_REF}`, "pgrst_wrong-project-ref"),
+      LEGACY_CONFIG.replace('log-level = "warn"', 'log-level = "info"'),
+      LEGACY_CONFIG.replace('jwt-secret = "sensitive-jwt-secret"', "jwt-secret = unquoted"),
+      LEGACY_CONFIG.replace('db-schemas = "public, storage, graphql_public"', 'db-schemas = ""'),
+      LEGACY_CONFIG.replace("server-port = 54321", "server-port = 054321"),
+      LEGACY_CONFIG.replace("server-port = 54321", "server-port = 65536"),
+      LEGACY_CONFIG.replace("db-pool = 10", "db-pool = 9007199254740992"),
+      LEGACY_CONFIG.replace(
+        'db-pool = 10',
+        'db-pool = 10\njwt-aud = "authenticated"\njwt-aud = "other"',
+      ),
+      `# PostgREST config for tenant: ${PROJECT_REF}\ndb-pool = 10\n`,
+    ];
+
+    for (const candidate of candidates) {
+      expect(renderManagedPostgrestDbPool(candidate, 3, PROJECT_REF)).toBeNull();
+    }
+  });
+
+  test("preserves reordered comments, CRLF, and missing final newline", () => {
+    const movedPool = LEGACY_CONFIG
+      .replace("\ndb-pool = 10\n", "\n")
+      + "\n# User comment\ndb-pool = 10 # operator note";
+    const crlf = movedPool.replaceAll("\n", "\r\n");
+
+    expect(renderManagedPostgrestDbPool(crlf, 3, PROJECT_REF))
+      .toBe(crlf.replace("db-pool = 10", "db-pool = 3"));
+    expect(renderManagedPostgrestDbPool(movedPool, 3, PROJECT_REF))
+      .toBe(movedPool.replace("db-pool = 10", "db-pool = 3"));
+  });
+
+  test("distinguishes inline comments from hashes inside quoted values", () => {
+    const commented = LEGACY_CONFIG
+      .replace('jwt-secret = "sensitive-jwt-secret"', 'jwt-secret = "sensitive#jwt-secret" # secret note')
+      .replace("db-pool = 10", "db-pool = 10 # pool note");
+
+    expect(renderManagedPostgrestDbPool(commented, 3, PROJECT_REF))
+      .toBe(commented.replace("db-pool = 10", "db-pool = 3"));
   });
 });
 
 describe("managed PostgREST pool reconciliation", () => {
+  test("reconciles canonical legacy config once and remains idempotent", async () => {
+    const configPath = await temporaryConfig(LEGACY_CONFIG);
+    const restartAndWait = mock(async () => {});
+
+    expect(await reconcileManagedPostgrestPool(request(configPath, restartAndWait)))
+      .toEqual({ state: "updated" });
+    expect(await readFile(configPath, "utf8"))
+      .toBe(LEGACY_CONFIG.replace("db-pool = 10", "db-pool = 3"));
+    expect(await reconcileManagedPostgrestPool(request(configPath, restartAndWait)))
+      .toEqual({ state: "unchanged" });
+    expect(restartAndWait).toHaveBeenCalledTimes(1);
+  });
+
+  test("restores the exact canonical legacy config after health failure", async () => {
+    const configPath = await temporaryConfig(LEGACY_CONFIG);
+    const restartAndWait = mock(async () => {});
+    restartAndWait.mockRejectedValueOnce(new Error("candidate unhealthy"));
+
+    expect(await reconcileManagedPostgrestPool(request(configPath, restartAndWait)))
+      .toEqual({
+        state: "rolled_back",
+        error: "POSTGREST_POOL_UPDATE_ROLLED_BACK",
+        cause: expect.any(Error),
+      });
+    expect(await readFile(configPath, "utf8")).toBe(LEGACY_CONFIG);
+    expect(restartAndWait).toHaveBeenCalledTimes(2);
+  });
+
   test("updates, health-checks, preserves metadata, and becomes idempotent", async () => {
     const configPath = await temporaryConfig();
     const before = await stat(configPath);
