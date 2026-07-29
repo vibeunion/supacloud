@@ -56,6 +56,16 @@ import {
   canonicalizeAuthUrlConfig,
 } from "../utils/auth-url-config";
 import { safeProjectSettingsAuthConfig } from "./auth";
+import {
+  DatabaseConfigValidationError,
+  type DatabaseSettingsUpdateResult,
+  type LiveDatabaseSetting,
+  liveSettingNumber,
+  parseDatabaseConfigPatch,
+  quoteDatabaseIdentifier,
+  readLiveDatabaseSettings,
+  updateDatabaseSettings,
+} from "../services/project-database-config.service";
 
 /** Map PostgreSQL column types to TypeScript types */
 function pgTypeToTs(udtName: string, dataType: string): string {
@@ -156,6 +166,56 @@ function addConfigRoutes(section: string) {
 
 function cloneTemplate<T>(template: T): T {
   return structuredClone(template);
+}
+
+function buildDatabaseConfigResponse(
+  projectRef: string,
+  databaseName: string,
+  metadata: Record<string, unknown>,
+  settings: LiveDatabaseSetting[],
+) {
+  return {
+    pgbouncer_enabled: metadata.pgbouncer_enabled ?? false,
+    pgbouncer_settings: metadata.pgbouncer_settings || {},
+    connection_string: `postgresql://${resolveRoleName(projectRef)}:[YOUR-PASSWORD]@localhost:5432/${databaseName}`,
+    max_connections: liveSettingNumber(settings, "max_connections"),
+    statement_timeout: liveSettingNumber(settings, "statement_timeout"),
+    idle_in_transaction_session_timeout: liveSettingNumber(
+      settings,
+      "idle_in_transaction_session_timeout",
+    ),
+    settings,
+  };
+}
+
+function databaseUpdateFailureBody(
+  update: Extract<DatabaseSettingsUpdateResult<unknown>, { ok: false }>,
+) {
+  const applyFailed = update.stage === "apply";
+  return {
+    code: applyFailed
+      ? "DATABASE_SETTINGS_APPLY_FAILED"
+      : "DATABASE_SETTINGS_PERSIST_FAILED",
+    message: applyFailed
+      ? "Failed to apply database settings; persisted configuration was not changed"
+      : update.restoreAttempted
+        ? "Database settings were applied but configuration persistence failed; restoration was attempted"
+        : "Failed to persist database configuration",
+    rollback: {
+      attempted: update.restoreAttempted,
+      succeeded: update.restoreAttempted
+        ? update.restoreFailures.length === 0
+        : null,
+      failed_settings: update.restoreFailures.map((failure) => failure.name),
+    },
+  };
+}
+
+async function projectDatabaseConnection(projectRef: string) {
+  const { getProjectDb, resolveDbName } = await import("../db");
+  const databaseName = await resolveDbName(projectRef);
+  quoteDatabaseIdentifier(databaseName);
+  return { databaseName, database: getProjectDb(databaseName) };
 }
 
 const CustomGatewayHostsSchema = t.Array(t.String(), {
@@ -1204,43 +1264,34 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   .get(
     "/:ref/config/database",
     async ({ params }) => {
-      const settings = await projectService.getProjectSettings(params.ref);
-      if (!settings)
+      const projectSettings = await projectService.getProjectSettings(params.ref);
+      if (!projectSettings)
         return status(404, { message: "Project not found", code: "404" });
-      const dbSettings = (settings as Record<string, unknown>).database || {};
+      const databaseMetadata =
+        ((projectSettings as Record<string, unknown>).database as Record<
+          string,
+          unknown
+        >) || {};
       try {
-        const { getProjectDb, resolveDbName } = await import("../db");
-        const dbName = await resolveDbName(params.ref);
-        const db = getProjectDb(dbName);
-        const rows = await db`
-            SELECT name, setting FROM pg_settings
-            WHERE name IN ('max_connections', 'statement_timeout', 'idle_in_transaction_session_timeout')
-        `;
-        const pgMap: Record<string, string> = {};
-        for (const row of rows) {
-          pgMap[row.name] = row.setting;
-        }
-        return {
-          pgbouncer_enabled:
-            (dbSettings as Record<string, unknown>).pgbouncer_enabled ?? false,
-          pgbouncer_settings:
-            (dbSettings as Record<string, unknown>).pgbouncer_settings || {},
-          connection_string: `postgresql://${resolveRoleName(params.ref)}:[YOUR-PASSWORD]@localhost:5432/${dbName}`,
-          max_connections: parseInt(pgMap.max_connections || "100"),
-          statement_timeout: parseInt(pgMap.statement_timeout || "0"),
-          idle_in_transaction_session_timeout: parseInt(
-            pgMap.idle_in_transaction_session_timeout || "0",
-          ),
-        };
-      } catch {
-        return {
-          pgbouncer_enabled: false,
-          pgbouncer_settings: {},
-          connection_string: `postgresql://${resolveRoleName(params.ref)}:[YOUR-PASSWORD]@localhost:5432/postgres`,
-          max_connections: 100,
-          statement_timeout: 0,
-          idle_in_transaction_session_timeout: 0,
-        };
+        const { database, databaseName } = await projectDatabaseConnection(
+          params.ref,
+        );
+        const liveSettings = await readLiveDatabaseSettings(database);
+        return buildDatabaseConfigResponse(
+          params.ref,
+          databaseName,
+          databaseMetadata,
+          liveSettings,
+        );
+      } catch (error: unknown) {
+        logger.warn("[project-config] Failed to read live database settings", {
+          errorType: error instanceof Error ? error.name : typeof error,
+          projectRef: params.ref,
+        });
+        return status(503, {
+          message: "Failed to read live database settings",
+          code: "DATABASE_SETTINGS_READ_FAILED",
+        });
       }
     },
     {
@@ -1364,68 +1415,93 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, body, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
-      const settings = await projectService.getProjectSettings(params.ref);
-      if (!settings)
+
+      let patch;
+      try {
+        patch = parseDatabaseConfigPatch(body);
+      } catch (error: unknown) {
+        if (error instanceof DatabaseConfigValidationError) {
+          return status(400, { code: error.code, message: error.message });
+        }
+        throw error;
+      }
+
+      const projectSettings = await projectService.getProjectSettings(params.ref);
+      if (!projectSettings)
         return status(404, { message: "Project not found", code: "404" });
       const current =
-        ((settings as Record<string, unknown>).database as Record<
+        ((projectSettings as Record<string, unknown>).database as Record<
           string,
           unknown
         >) || {};
-      const merged = { ...current, ...(typeof body === "object" ? body : {}) };
-      const updated = await projectService.updateProjectSettings(params.ref, {
-        ...settings,
-        database: merged,
+      let databaseConnection;
+      try {
+        databaseConnection = await projectDatabaseConnection(params.ref);
+      } catch (error: unknown) {
+        logger.warn("[project-config] Failed to resolve project database", {
+          errorType: error instanceof Error ? error.name : typeof error,
+          projectRef: params.ref,
+        });
+        return status(503, {
+          code: "DATABASE_SETTINGS_APPLY_FAILED",
+          message: "Failed to resolve the project database; persisted configuration was not changed",
+          rollback: { attempted: false, succeeded: null, failed_settings: [] },
+        });
+      }
+      const { database, databaseName } = databaseConnection;
+      const update = await updateDatabaseSettings({
+        database,
+        databaseName,
+        patch,
+        persist: async () => {
+          const persisted = await projectService.updateProjectSettings(params.ref, {
+            ...projectSettings,
+            database: { ...current, ...patch },
+          });
+          if (!persisted) throw new Error("Project settings update returned no result");
+          return persisted;
+        },
       });
 
-      try {
-        const { getProjectDb, resolveDbName } = await import("../db");
-        const dbName = await resolveDbName(params.ref);
-        const db = getProjectDb(dbName);
-        if (merged.statement_timeout !== undefined) {
-          await db.unsafe(
-            `ALTER DATABASE "${dbName}" SET statement_timeout = '${merged.statement_timeout}'`,
-          );
-        }
-        if (merged.max_connections !== undefined) {
-          await db.unsafe(
-            `ALTER DATABASE "${dbName}" SET max_connections = '${merged.max_connections}'`,
-          );
-        }
-      } catch (err) {
-        logger.warn(
-          "[project-config] Failed to apply database config to PostgreSQL",
-          { error: err },
+      if (!update.ok) {
+        logger.warn(`[project-config] Database settings ${update.stage} failed`, {
+          errorType: update.error instanceof Error
+            ? update.error.name
+            : typeof update.error,
+          projectRef: params.ref,
+          restoreFailedSettings: update.restoreFailures.map(
+            (failure) => failure.name,
+          ),
+        });
+        return status(
+          update.stage === "apply" ? 503 : 500,
+          databaseUpdateFailureBody(update),
         );
       }
 
       try {
-        const { tenantRuntimeService } =
-          await import("../services/tenant-runtime.service");
-        await tenantRuntimeService.restartRuntime(params.ref);
-      } catch (err) {
-        logger.warn(
-          "[project-config] Failed to propagate database config to runtime",
-          { error: err },
+        const liveSettings = await readLiveDatabaseSettings(database);
+        const persistedDatabase =
+          ((update.persisted as Record<string, unknown>).database as Record<
+            string,
+            unknown
+          >) || { ...current, ...patch };
+        return buildDatabaseConfigResponse(
+          params.ref,
+          databaseName,
+          persistedDatabase,
+          liveSettings,
         );
+      } catch (error: unknown) {
+        logger.warn("[project-config] Failed to read applied database settings", {
+          errorType: error instanceof Error ? error.name : typeof error,
+          projectRef: params.ref,
+        });
+        return status(503, {
+          message: "Database settings were updated but the live read-back failed",
+          code: "DATABASE_SETTINGS_READ_FAILED",
+        });
       }
-
-      const raw =
-        ((updated as Record<string, unknown>).database as Record<
-          string,
-          unknown
-        >) || {};
-      return {
-        pgbouncer_enabled: raw.pgbouncer_enabled ?? false,
-        pgbouncer_settings: raw.pgbouncer_settings || {},
-        connection_string:
-          raw.connection_string ||
-          `postgresql://${resolveRoleName(params.ref)}:[YOUR-PASSWORD]@localhost:5432/${await resolveDbNameTopLevel(params.ref)}`,
-        max_connections: raw.max_connections ?? 100,
-        statement_timeout: raw.statement_timeout ?? 0,
-        idle_in_transaction_session_timeout:
-          raw.idle_in_transaction_session_timeout ?? 0,
-      };
     },
     {
       params: t.Object({ ref: t.String() }),
