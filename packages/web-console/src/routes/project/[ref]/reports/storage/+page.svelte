@@ -2,8 +2,8 @@
   import { apiClient } from "$lib/api";
 
   import { page } from "$app/state";
+  import { t } from "svelte-i18n";
   import { Loader2, HardDrive, ArrowLeft, Folder } from "lucide-svelte";
-  import { toast } from "svelte-sonner";
   import { createQuery } from "@tanstack/svelte-query";
 
   const projectRef = $derived(page.params.ref);
@@ -63,8 +63,8 @@
       <ArrowLeft size={18} />
     </a>
     <div>
-      <h1 class="text-2xl font-bold">Storage 报表</h1>
-      <p class="text-sm text-muted-foreground mt-1">文件存储 Bucket 使用量和对象统计</p>
+      <h1 class="text-2xl font-bold">{$t("Reports.storage_report_title")}</h1>
+      <p class="text-sm text-muted-foreground mt-1">{$t("Reports.storage_report_subtitle")}</p>
     </div>
   </div>
 
@@ -75,15 +75,15 @@
   {:else}
     <div class="grid grid-cols-3 gap-3">
       <div class="rounded-xl border bg-card p-4">
-        <div class="text-[10px] font-semibold text-muted-foreground uppercase">Buckets</div>
+        <div class="text-[10px] font-semibold text-muted-foreground uppercase">{$t("Reports.buckets")}</div>
         <div class="text-xl font-bold mt-1 text-brand">{bucketStats.length}</div>
       </div>
       <div class="rounded-xl border bg-card p-4">
-        <div class="text-[10px] font-semibold text-muted-foreground uppercase">总文件数</div>
+        <div class="text-[10px] font-semibold text-muted-foreground uppercase">{$t("Reports.total_files")}</div>
         <div class="text-xl font-bold mt-1">{formatNum(totalObjects)}</div>
       </div>
       <div class="rounded-xl border bg-card p-4">
-        <div class="text-[10px] font-semibold text-muted-foreground uppercase">总存储</div>
+        <div class="text-[10px] font-semibold text-muted-foreground uppercase">{$t("Reports.total_storage")}</div>
         <div class="text-xl font-bold mt-1">
           {totalBytes > 1073741824 ? (totalBytes / 1073741824).toFixed(2) + ' GB' :
            totalBytes > 1048576 ? (totalBytes / 1048576).toFixed(1) + ' MB' :
@@ -94,23 +94,23 @@
 
     <div class="flex-1 rounded-xl border bg-card overflow-hidden">
       <div class="border-b px-5 py-3 bg-muted/20">
-        <h2 class="text-sm font-semibold flex items-center gap-2"><Folder size={14} /> Bucket 详情</h2>
+        <h2 class="text-sm font-semibold flex items-center gap-2"><Folder size={14} /> {$t("Reports.bucket_details")}</h2>
       </div>
       {#if bucketStats.length === 0}
         <div class="flex flex-col items-center justify-center py-16 text-muted-foreground gap-2">
           <HardDrive size={32} class="opacity-20" />
-          <p class="text-xs">暂无 Storage Bucket</p>
+          <p class="text-xs">{$t("Reports.no_buckets")}</p>
         </div>
       {:else}
         <div class="overflow-auto max-h-[55vh]">
           <table class="w-full text-left text-xs">
             <thead class="bg-muted/30 border-b sticky top-0">
               <tr>
-                <th class="px-4 py-2 font-semibold text-muted-foreground">Bucket</th>
-                <th class="px-4 py-2 font-semibold text-muted-foreground">可见性</th>
-                <th class="px-4 py-2 font-semibold text-muted-foreground text-right">文件数</th>
-                <th class="px-4 py-2 font-semibold text-muted-foreground text-right">占用</th>
-                <th class="px-4 py-2 font-semibold text-muted-foreground">最后上传</th>
+                <th class="px-4 py-2 font-semibold text-muted-foreground">{$t("Reports.bucket")}</th>
+                <th class="px-4 py-2 font-semibold text-muted-foreground">{$t("Reports.visibility")}</th>
+                <th class="px-4 py-2 font-semibold text-muted-foreground text-right">{$t("Reports.file_count")}</th>
+                <th class="px-4 py-2 font-semibold text-muted-foreground text-right">{$t("Reports.storage_used")}</th>
+                <th class="px-4 py-2 font-semibold text-muted-foreground">{$t("Reports.last_upload")}</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-border/20 font-mono">
@@ -119,7 +119,7 @@
                   <td class="px-4 py-2 font-semibold">{bucket.bucket_name}</td>
                   <td class="px-4 py-2">
                     <span class="px-1.5 py-0.5 rounded text-[9px] font-bold {bucket.public ? 'bg-green-500/10 text-green-600' : 'bg-amber-500/10 text-amber-600'}">
-                      {bucket.public ? '公开' : '私有'}
+                      {bucket.public ? $t("Reports.public") : $t("Reports.private")}
                     </span>
                   </td>
                   <td class="px-4 py-2 text-right tabular-nums">{formatNum(bucket.object_count)}</td>

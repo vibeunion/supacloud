@@ -19,6 +19,15 @@
 
   let searchQuery = $state("");
 
+  const INDEX_TYPE_LABEL_KEYS: Record<string, string> = {
+    btree: "Indexes.type_btree",
+    hash: "Indexes.type_hash",
+    gist: "Indexes.type_gist",
+    spgist: "Indexes.type_spgist",
+    gin: "Indexes.type_gin",
+    brin: "Indexes.type_brin",
+  };
+
   const projectRef = $derived(page.params.ref);
 
   const INDEXES_SQL = `
@@ -67,6 +76,11 @@
     if (scans < 100) return "text-amber-500 bg-amber-500/10";
     return "text-green-500 bg-green-500/10";
   }
+
+  function indexTypeLabel(indexType: string): string {
+    const labelKey = INDEX_TYPE_LABEL_KEYS[indexType.toLowerCase()];
+    return labelKey ? `${$t(labelKey)} (${indexType})` : indexType;
+  }
 </script>
 
 <div class="h-full flex flex-col space-y-4">
@@ -74,6 +88,7 @@
     <div>
       <h1 class="text-2xl font-bold">{$t("Indexes.title")}</h1>
       <p class="text-sm text-muted-foreground mt-1">{$t("Indexes.subtitle")}</p>
+      <p class="text-xs text-muted-foreground mt-1">{$t("Indexes.type_help")}</p>
     </div>
     {#if !isLoading}
       <span class="px-2.5 py-1 rounded-full bg-brand/10 text-brand text-xs font-bold">{indexes.length}</span>
@@ -117,7 +132,7 @@
                 </td>
                 <td class="px-3 py-2.5 font-mono text-muted-foreground">{idx.tablename}</td>
                 <td class="px-3 py-2.5">
-                  <span class="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-muted text-muted-foreground">{idx.am_name}</span>
+                  <span title={idx.am_name} class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-muted text-muted-foreground">{indexTypeLabel(idx.am_name)}</span>
                 </td>
                 <td class="px-3 py-2.5 text-center">
                   {#if idx.is_unique}

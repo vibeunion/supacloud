@@ -2,8 +2,8 @@
   import { apiClient } from "$lib/api";
 
   import { page } from "$app/state";
-  import { Loader2, Shield, ArrowLeft, UserPlus, LogIn, Key } from "lucide-svelte";
-  import { toast } from "svelte-sonner";
+  import { t } from "svelte-i18n";
+  import { Loader2, Shield, ArrowLeft, UserPlus } from "lucide-svelte";
   import { createQuery } from "@tanstack/svelte-query";
 
   const projectRef = $derived(page.params.ref);
@@ -26,7 +26,6 @@
         return { stats: null, users: [] };
       }
 
-      // Get total user count and recent signups
       const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -46,13 +45,12 @@
       const rows = data.rows || [];
       const stats = rows.length > 0 ? rows[0] : null;
 
-      // Recent signups
       const res2 = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           sql: `SELECT id, email, created_at::text, last_sign_in_at::text,
-                CASE WHEN confirmed_at IS NOT NULL THEN '已验证' ELSE '未验证' END as status
+                confirmed_at IS NOT NULL as confirmed
                 FROM auth.users ORDER BY created_at DESC LIMIT 20;`
         })
       });
@@ -77,8 +75,8 @@
       <ArrowLeft size={18} />
     </a>
     <div>
-      <h1 class="text-2xl font-bold">Auth 报表</h1>
-      <p class="text-sm text-muted-foreground mt-1">用户注册、登录和认证事件统计</p>
+      <h1 class="text-2xl font-bold">{$t("Reports.auth_report_title")}</h1>
+      <p class="text-sm text-muted-foreground mt-1">{$t("Reports.auth_report_subtitle")}</p>
     </div>
   </div>
 
@@ -90,51 +88,50 @@
     {#if authStats}
       <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <div class="rounded-xl border bg-card p-4">
-          <div class="text-[10px] font-semibold text-muted-foreground uppercase">总用户</div>
+          <div class="text-[10px] font-semibold text-muted-foreground uppercase">{$t("Reports.total_users")}</div>
           <div class="text-xl font-bold mt-1 text-brand">{authStats?.total_users}</div>
         </div>
         <div class="rounded-xl border bg-card p-4">
-          <div class="text-[10px] font-semibold text-muted-foreground uppercase">24h 注册</div>
+          <div class="text-[10px] font-semibold text-muted-foreground uppercase">{$t("Reports.signups_24h")}</div>
           <div class="text-xl font-bold mt-1 text-green-600">{authStats?.signups_24h}</div>
         </div>
         <div class="rounded-xl border bg-card p-4">
-          <div class="text-[10px] font-semibold text-muted-foreground uppercase">7 天注册</div>
+          <div class="text-[10px] font-semibold text-muted-foreground uppercase">{$t("Reports.signups_7d")}</div>
           <div class="text-xl font-bold mt-1">{authStats?.signups_7d}</div>
         </div>
         <div class="rounded-xl border bg-card p-4">
-          <div class="text-[10px] font-semibold text-muted-foreground uppercase">24h 登录</div>
+          <div class="text-[10px] font-semibold text-muted-foreground uppercase">{$t("Reports.logins_24h")}</div>
           <div class="text-xl font-bold mt-1 text-blue-600">{authStats?.logins_24h}</div>
         </div>
         <div class="rounded-xl border bg-card p-4">
-          <div class="text-[10px] font-semibold text-muted-foreground uppercase">7 天登录</div>
+          <div class="text-[10px] font-semibold text-muted-foreground uppercase">{$t("Reports.logins_7d")}</div>
           <div class="text-xl font-bold mt-1">{authStats?.logins_7d}</div>
         </div>
         <div class="rounded-xl border bg-card p-4">
-          <div class="text-[10px] font-semibold text-muted-foreground uppercase">已验证</div>
+          <div class="text-[10px] font-semibold text-muted-foreground uppercase">{$t("Reports.confirmed_users")}</div>
           <div class="text-xl font-bold mt-1">{authStats?.confirmed_users}</div>
         </div>
       </div>
     {/if}
 
-    <!-- Recent Users -->
     <div class="flex-1 rounded-xl border bg-card overflow-hidden">
       <div class="border-b px-5 py-3 bg-muted/20">
-        <h2 class="text-sm font-semibold flex items-center gap-2"><UserPlus size={14} /> 最近注册用户</h2>
+        <h2 class="text-sm font-semibold flex items-center gap-2"><UserPlus size={14} /> {$t("Reports.recent_signups")}</h2>
       </div>
       {#if recentUsers.length === 0}
         <div class="flex flex-col items-center justify-center py-16 text-muted-foreground gap-2">
           <Shield size={32} class="opacity-20" />
-          <p class="text-xs">暂无用户数据</p>
+          <p class="text-xs">{$t("Reports.no_user_data")}</p>
         </div>
       {:else}
         <div class="overflow-auto max-h-[55vh]">
           <table class="w-full text-left text-xs">
             <thead class="bg-muted/30 border-b sticky top-0">
               <tr>
-                <th class="px-4 py-2 font-semibold text-muted-foreground">邮箱</th>
-                <th class="px-4 py-2 font-semibold text-muted-foreground">注册时间</th>
-                <th class="px-4 py-2 font-semibold text-muted-foreground">最后登录</th>
-                <th class="px-4 py-2 font-semibold text-muted-foreground">状态</th>
+                <th class="px-4 py-2 font-semibold text-muted-foreground">{$t("Reports.email")}</th>
+                <th class="px-4 py-2 font-semibold text-muted-foreground">{$t("Reports.signed_up_at")}</th>
+                <th class="px-4 py-2 font-semibold text-muted-foreground">{$t("Reports.last_sign_in")}</th>
+                <th class="px-4 py-2 font-semibold text-muted-foreground">{$t("Reports.status")}</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-border/20 font-mono">
@@ -144,7 +141,9 @@
                   <td class="px-4 py-2 text-[10px] text-muted-foreground">{String(user.created_at || "").substring(0, 19) || '-'}</td>
                   <td class="px-4 py-2 text-[10px] text-muted-foreground">{String(user.last_sign_in_at || "").substring(0, 19) || '-'}</td>
                   <td class="px-4 py-2">
-                    <span class="px-1.5 py-0.5 rounded text-[9px] font-bold {user.status === '已验证' ? 'bg-green-500/10 text-green-600' : 'bg-amber-500/10 text-amber-600'}">{user.status}</span>
+                    <span class="px-1.5 py-0.5 rounded text-[9px] font-bold {user.confirmed ? 'bg-green-500/10 text-green-600' : 'bg-amber-500/10 text-amber-600'}">
+                      {user.confirmed ? $t("Reports.confirmed") : $t("Reports.unconfirmed")}
+                    </span>
                   </td>
                 </tr>
               {/each}

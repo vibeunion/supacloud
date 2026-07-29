@@ -28,6 +28,16 @@
     "pgbouncer", "pgsodium_keyholder", "pgsodium_keyiduser", "pgsodium_keymaker"
   ];
 
+  const ROLE_DESCRIPTION_KEYS: Record<string, string> = {
+    anon: "Roles.role_anon",
+    authenticated: "Roles.role_authenticated",
+    authenticator: "Roles.role_authenticator",
+    dashboard_user: "Roles.role_dashboard_user",
+    postgres: "Roles.role_postgres",
+    service_role: "Roles.role_service_role",
+    supabase_read_only_user: "Roles.role_read_only",
+  };
+
   const ROLES_SQL = `
     SELECT 
       r.rolname,
@@ -67,7 +77,6 @@
   const isLoading = $derived(rolesQuery.isPending);
   const error = $derived(rolesQuery.error?.message || null);
 
-  // Create role state
   let showCreateRole = $state(false);
   let newRoleName = $state("");
   let newRoleLogin = $state(true);
@@ -78,7 +87,7 @@
   let roleMsg = $state<string | null>(null);
 
   async function createRole() {
-    if (!newRoleName.trim()) { roleMsg = "❌ 请填写角色名称"; setTimeout(() => roleMsg = null, 3000); return; }
+    if (!newRoleName.trim()) { roleMsg = `❌ ${$t("Roles.name_required")}`; setTimeout(() => roleMsg = null, 3000); return; }
     isCreating = true;
     const opts = [];
     if (newRoleLogin) opts.push("LOGIN");
@@ -94,7 +103,7 @@
       const data = await res.json();
       if (data.error) { roleMsg = `❌ ${data.message || data.error}`; }
       else { 
-        roleMsg = `✅ 角色 ${newRoleName} 已创建`; 
+        roleMsg = `✅ ${$t("Roles.created", { values: { name: newRoleName } })}`;
         showCreateRole = false; newRoleName = ""; newRolePassword = ""; 
         queryClient.invalidateQueries({ queryKey: ["database_roles", projectRef] }); 
       }
@@ -103,7 +112,7 @@
   }
 
   async function deleteRole(rolename: string) {
-    if (!confirm(`确定删除角色 ${rolename} 吗？此操作不可撤销。`)) return;
+    if (!confirm($t("Roles.delete_confirmation", { values: { name: rolename } }))) return;
     try {
       const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -112,7 +121,7 @@
       const data = await res.json();
       if (data.error) { roleMsg = `❌ ${data.message || data.error}`; }
       else { 
-        roleMsg = `角色 ${rolename} 已删除`; 
+        roleMsg = $t("Roles.deleted", { values: { name: rolename } });
         queryClient.invalidateQueries({ queryKey: ["database_roles", projectRef] }); 
       }
     } catch (err: unknown) { roleMsg = `❌ ${(err instanceof Error ? err.message : String(err))}`; }
@@ -122,6 +131,11 @@
 
   const supabaseRoles = $derived(roles.filter(r => SUPABASE_ROLES.includes(r.rolname)));
   const customRoles = $derived(roles.filter(r => !SUPABASE_ROLES.includes(r.rolname)));
+
+  function roleDescription(roleName: string): string {
+    const descriptionKey = ROLE_DESCRIPTION_KEYS[roleName];
+    return descriptionKey ? $t(descriptionKey) : $t("Roles.role_managed_generic");
+  }
 </script>
 
 <div class="h-full flex flex-col space-y-6">
@@ -132,7 +146,7 @@
     </div>
     <button onclick={() => showCreateRole = !showCreateRole}
       class="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-lg bg-brand text-white hover:bg-brand/90 transition-colors">
-      <Plus size={14} /> 创建角色
+      <Plus size={14} /> {$t("Roles.create_role")}
     </button>
   </div>
 
@@ -143,32 +157,32 @@
   {#if showCreateRole}
     <div class="rounded-xl border bg-brand/5 border-brand/20 p-4 space-y-3">
       <div class="flex items-center justify-between">
-        <span class="text-sm font-semibold text-brand">创建新角色</span>
+        <span class="text-sm font-semibold text-brand">{$t("Roles.create_new")}</span>
         <button onclick={() => showCreateRole = false} class="text-muted-foreground hover:text-foreground"><X size={14} /></button>
       </div>
       <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div>
-          <span class="text-[10px] font-semibold text-muted-foreground uppercase">角色名称 *</span>
+          <span class="text-[10px] font-semibold text-muted-foreground uppercase">{$t("Roles.name")} *</span>
           <input type="text" bind:value={newRoleName} placeholder="my_role"
             class="w-full mt-1 px-3 py-1.5 text-xs font-mono rounded-lg border bg-background focus:outline-none focus:ring-1 focus:ring-brand" />
         </div>
         <div>
-          <span class="text-[10px] font-semibold text-muted-foreground uppercase">密码（可选）</span>
-          <input type="password" bind:value={newRolePassword} placeholder="可选"
+          <span class="text-[10px] font-semibold text-muted-foreground uppercase">{$t("Roles.password_optional")}</span>
+          <input type="password" bind:value={newRolePassword} placeholder={$t("Roles.optional")}
             class="w-full mt-1 px-3 py-1.5 text-xs font-mono rounded-lg border bg-background focus:outline-none focus:ring-1 focus:ring-brand" />
         </div>
         <div class="flex flex-col gap-2 justify-end">
           <label class="flex items-center gap-2 text-xs cursor-pointer">
-            <input type="checkbox" bind:checked={newRoleLogin} class="rounded" /> 允许登录 (LOGIN)
+            <input type="checkbox" bind:checked={newRoleLogin} class="rounded" /> {$t("Roles.allow_login")} (LOGIN)
           </label>
           <label class="flex items-center gap-2 text-xs cursor-pointer">
-            <input type="checkbox" bind:checked={newRoleCreateDb} class="rounded" /> 创建数据库 (CREATEDB)
+            <input type="checkbox" bind:checked={newRoleCreateDb} class="rounded" /> {$t("Roles.create_database")} (CREATEDB)
           </label>
         </div>
         <div class="flex items-end">
           <button onclick={createRole} disabled={isCreating}
             class="flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold rounded-lg bg-brand text-white hover:bg-brand/90 disabled:opacity-50">
-            {#if isCreating}<Loader2 size={12} class="animate-spin" />{:else}<Save size={12} />{/if} 创建
+            {#if isCreating}<Loader2 size={12} class="animate-spin" />{:else}<Save size={12} />{/if} {$t("Roles.create")}
           </button>
         </div>
       </div>
@@ -183,12 +197,14 @@
   {:else if error}
     <div class="p-4 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm font-mono">{error}</div>
   {:else}
-    <!-- Supabase Managed Roles -->
     <div>
       <div class="flex items-center gap-2 px-4 py-2.5 bg-muted/30 border rounded-t-lg">
         <ShieldCheck size={14} class="text-green-500" />
-        <span class="text-sm font-medium text-muted-foreground">{$t("Roles.supabase_managed")}</span>
-        <span class="px-1.5 py-0.5 rounded-full bg-green-500/10 text-green-600 text-[10px] font-bold">Protected</span>
+        <div>
+          <span class="text-sm font-medium text-muted-foreground">{$t("Roles.supabase_managed")}</span>
+          <p class="text-[10px] text-muted-foreground">{$t("Roles.managed_description")}</p>
+        </div>
+        <span class="px-1.5 py-0.5 rounded-full bg-green-500/10 text-green-600 text-[10px] font-bold">{$t("Roles.protected")}</span>
       </div>
       <div class="border border-t-0 rounded-b-lg overflow-hidden">
         <table class="w-full text-left text-xs">
@@ -208,7 +224,10 @@
                 <td class="px-4 py-2.5">
                   <div class="flex items-center gap-2">
                     <Shield size={13} class="text-muted-foreground/50" />
-                    <span class="font-mono font-medium">{role.rolname}</span>
+                    <div>
+                      <span class="font-mono font-medium">{role.rolname}</span>
+                      <p class="mt-0.5 text-[10px] text-muted-foreground">{roleDescription(role.rolname)}</p>
+                    </div>
                   </div>
                 </td>
                 <td class="px-3 py-2.5 text-center">
@@ -233,7 +252,6 @@
       </div>
     </div>
 
-    <!-- Custom Roles -->
     {#if customRoles.length > 0}
       <div>
         <div class="flex items-center gap-2 px-4 py-2.5 bg-muted/30 border rounded-t-lg">
@@ -283,7 +301,7 @@
                   <td class="px-2 py-2.5 text-center">
                     <button onclick={() => deleteRole(role.rolname)}
                       class="p-1 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-                      title="删除角色">
+                      title={$t("Roles.delete_action")}>
                       <Trash2 size={12} />
                     </button>
                   </td>

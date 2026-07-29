@@ -27,21 +27,21 @@
   let error = $state<string | null>(null);
 
   const services = [
-    { value: "all", label: "All" },
-    { value: "auth", label: "Auth" },
-    { value: "api", label: "PostgREST" },
-    { value: "realtime", label: "Realtime" },
-    { value: "storage", label: "Storage" },
-    { value: "database", label: "Database" },
-    { value: "functions", label: "Functions" }
+    { value: "all", labelKey: "ProjectLogs.service_all" },
+    { value: "auth", labelKey: "ProjectLogs.service_auth" },
+    { value: "api", labelKey: "ProjectLogs.service_api" },
+    { value: "realtime", labelKey: "ProjectLogs.service_realtime" },
+    { value: "storage", labelKey: "ProjectLogs.service_storage" },
+    { value: "database", labelKey: "ProjectLogs.service_database" },
+    { value: "functions", labelKey: "ProjectLogs.service_functions" }
   ];
   let visibleServices = $state(services);
 
   const timeRanges = [
-    { value: "15m", label: "15 minutes", milliseconds: 15 * 60 * 1000 },
-    { value: "1h", label: "1 hour", milliseconds: 60 * 60 * 1000 },
-    { value: "24h", label: "24 hours", milliseconds: 24 * 60 * 60 * 1000 },
-    { value: "7d", label: "7 days", milliseconds: 7 * 24 * 60 * 60 * 1000 },
+    { value: "15m", labelKey: "ProjectLogs.range_15m", milliseconds: 15 * 60 * 1000 },
+    { value: "1h", labelKey: "ProjectLogs.range_1h", milliseconds: 60 * 60 * 1000 },
+    { value: "24h", labelKey: "ProjectLogs.range_24h", milliseconds: 24 * 60 * 60 * 1000 },
+    { value: "7d", labelKey: "ProjectLogs.range_7d", milliseconds: 7 * 24 * 60 * 60 * 1000 },
   ];
 
   async function fetchLogs() {
@@ -55,7 +55,7 @@
       if (searchText.trim()) params.set("search", searchText.trim());
       const res = await apiClient(`/v1/projects/${projectRef}/logs?${params.toString()}`);
       const data = await res.json();
-      if (!res.ok) throw new Error(data.message || "Failed to load logs");
+      if (!res.ok) throw new Error(data.message || $t("ProjectLogs.load_failed"));
       if (Array.isArray(data.sources)) {
         visibleServices = services.filter((service) => service.value === "all" || data.sources.includes(service.value));
         if (!visibleServices.some((service) => service.value === selectedService)) selectedService = "all";
@@ -102,22 +102,24 @@
         <input
           bind:value={searchText}
           onkeydown={(event) => event.key === "Enter" && void fetchLogs()}
-          placeholder="Search persisted logs"
+          aria-label={$t("ProjectLogs.search")}
+          placeholder={$t("ProjectLogs.search_placeholder")}
           class="h-9 w-56 rounded-lg border bg-background pl-8 pr-3 text-xs"
         />
       </label>
       <select
         bind:value={selectedService}
         onchange={() => void fetchLogs()}
+        aria-label={$t("ProjectLogs.service_filter")}
         class="h-9 rounded-lg border bg-background px-3 text-xs"
       >
         {#each visibleServices as service (service.value)}
-          <option value={service.value}>{service.label}</option>
+          <option value={service.value}>{$t(service.labelKey)}</option>
         {/each}
       </select>
-      <select bind:value={timeRange} onchange={() => void fetchLogs()} class="h-9 rounded-lg border bg-background px-3 text-xs">
+      <select bind:value={timeRange} onchange={() => void fetchLogs()} aria-label={$t("ProjectLogs.time_range")} class="h-9 rounded-lg border bg-background px-3 text-xs">
         {#each timeRanges as range (range.value)}
-          <option value={range.value}>{range.label}</option>
+          <option value={range.value}>{$t(range.labelKey)}</option>
         {/each}
       </select>
       <button

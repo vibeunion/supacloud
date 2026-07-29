@@ -4,6 +4,7 @@
   import { apiClient } from "$lib/api";
   import { onMount } from "svelte";
   import { untrack } from "svelte";
+  import { t } from "svelte-i18n";
   import {
     Activity,
     AlertCircle,
@@ -72,6 +73,17 @@
     timeout_sec_max: number;
   };
 
+  const taskStatusKeys: Record<string, string> = {
+    pending: "pending",
+    leased: "leased",
+    running: "running",
+    retry_scheduled: "retry_scheduled",
+    succeeded: "succeeded",
+    failed: "failed",
+    dead_lettered: "dead_lettered",
+    cancelled: "cancelled",
+  };
+
   let tasks = $state<TaskRecord[]>([]);
   let dlqTasks = $state<TaskRecord[]>([]);
   let selectedTask = $state<TaskRecord | null>(null);
@@ -127,9 +139,9 @@
         settingsRes.json()
       ]);
 
-      if (!tasksRes.ok) throw new Error(tasksData.message || "获取任务列表失败");
-      if (!dlqRes.ok) throw new Error(dlqData.message || "获取死信队列失败");
-      if (!settingsRes.ok) throw new Error(settingsData.message || "获取后台任务配置失败");
+      if (!tasksRes.ok) throw new Error(tasksData.message || $t("TaskCenter.load_tasks_failed"));
+      if (!dlqRes.ok) throw new Error(dlqData.message || $t("TaskCenter.load_dlq_failed"));
+      if (!settingsRes.ok) throw new Error(settingsData.message || $t("TaskCenter.load_settings_failed"));
 
       tasks = tasksData || [];
       dlqTasks = dlqData || [];
@@ -142,8 +154,8 @@
           await fetchTaskDetail(stillExists.id, true);
         }
       }
-    } catch (err: any) {
-      toast.error(err.message || "加载后台任务失败");
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : $t("TaskCenter.load_failed"));
     } finally {
       isLoading = false;
       isRefreshing = false;
@@ -280,10 +292,10 @@
     try {
       const res = await apiClient(`/v1/projects/${projectRef}/tasks/${taskId}`);
       const data = await res.json();
-      if (!res.ok) throw new Error(data.message || "获取任务详情失败");
+      if (!res.ok) throw new Error(data.message || $t("TaskCenter.load_detail_failed"));
       selectedTask = data;
-    } catch (err: any) {
-      toast.error(err.message || "获取任务详情失败");
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : $t("TaskCenter.load_detail_failed"));
     } finally {
       isLoadingDetail = false;
     }
@@ -295,12 +307,12 @@
         method: "POST"
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.message || "重试任务失败");
-      toast.success("任务已重新入队");
+      if (!res.ok) throw new Error(data.message || $t("TaskCenter.retry_failed"));
+      toast.success($t("TaskCenter.retry_success"));
       await fetchTasks(true);
       await fetchTaskDetail(taskId, true);
-    } catch (err: any) {
-      toast.error(err.message || "重试任务失败");
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : $t("TaskCenter.retry_failed"));
     }
   }
 
@@ -310,12 +322,12 @@
         method: "POST"
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.message || "取消任务失败");
-      toast.success("任务已取消");
+      if (!res.ok) throw new Error(data.message || $t("TaskCenter.cancel_failed"));
+      toast.success($t("TaskCenter.cancel_success"));
       await fetchTasks(true);
       await fetchTaskDetail(taskId, true);
-    } catch (err: any) {
-      toast.error(err.message || "取消任务失败");
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : $t("TaskCenter.cancel_failed"));
     }
   }
 
@@ -330,40 +342,40 @@
         body: JSON.stringify(draftSettings)
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.message || "保存后台任务配置失败");
+      if (!res.ok) throw new Error(data.message || $t("TaskCenter.save_settings_failed"));
       backgroundSettings = data;
       draftSettings = { ...data };
-      toast.success("后台任务配置已更新");
-    } catch (err: any) {
-      toast.error(err.message || "保存后台任务配置失败");
+      toast.success($t("TaskCenter.save_settings_success"));
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : $t("TaskCenter.save_settings_failed"));
     } finally {
       isSavingSettings = false;
     }
   }
 
-  async function copyText(text: string, message = "已复制") {
+  async function copyText(text: string, successMessage?: string) {
     try {
       await navigator.clipboard.writeText(text);
-      toast.success(message);
+      toast.success(successMessage || $t("Common.copied"));
     } catch {
-      toast.error("复制失败");
+      toast.error($t("Common.copy_failed"));
     }
   }
 
   function downloadAttemptLogs(task: TaskRecord | null) {
     if (!task?.attempts?.length) {
-      toast.error("当前任务没有可下载的日志");
+      toast.error($t("TaskCenter.no_downloadable_logs"));
       return;
     }
 
-    const payload = task.attempts
+    const downloadableLogs = task.attempts
       .flatMap((attempt) => (attempt.logs || []).map((log) => ({
         task_id: task.id,
         attempt_no: attempt.attempt_no,
         ...log,
       })));
 
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" });
+    const blob = new Blob([JSON.stringify(downloadableLogs, null, 2)], { type: "application/json;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
@@ -455,6 +467,11 @@
     }
   }
 
+  function taskStatusLabel(status: string): string {
+    const statusKey = taskStatusKeys[status];
+    return statusKey ? $t(`TaskCenter.status_${statusKey}`) : status;
+  }
+
   const filteredTasks = $derived(
     activeTab === "dlq" ? dlqTasks : tasks
   );
@@ -488,10 +505,10 @@
     <div>
       <h1 class="text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
         <Activity class="w-6 h-6 text-brand" />
-        后台任务
+        {$t("TaskCenter.title")}
       </h1>
       <p class="text-sm text-muted-foreground mt-1">
-        统一查看 Edge Background Tasks 的队列状态、死信、每次 attempt 执行记录，以及项目级后台任务设置。
+        {$t("TaskCenter.subtitle")}
       </p>
     </div>
 
@@ -501,22 +518,22 @@
       class="flex items-center gap-2 px-4 py-2 border rounded-lg bg-card hover:bg-muted/50 transition-colors text-sm font-medium disabled:opacity-50"
     >
       <RefreshCw size={16} class={isRefreshing ? "animate-spin" : ""} />
-      刷新
+      {$t("Common.refresh")}
     </button>
   </div>
 
   <div class="flex items-center gap-2 text-xs text-muted-foreground">
     <span class={`inline-block w-2 h-2 rounded-full ${liveStatus === "connected" ? "bg-emerald-500" : liveStatus === "connecting" || liveStatus === "reconnecting" ? "bg-amber-500" : liveStatus === "polling" ? "bg-sky-500" : "bg-red-500"}`}></span>
     {#if liveStatus === "connected"}
-      任务流实时连接中
+      {$t("TaskCenter.live_connected")}
     {:else if liveStatus === "connecting"}
-      正在连接任务流
+      {$t("TaskCenter.live_connecting")}
     {:else if liveStatus === "reconnecting"}
-      正在重连任务流，轮询同步中
+      {$t("TaskCenter.live_reconnecting")}
     {:else if liveStatus === "polling"}
-      实时连接暂不可用，已降级为轮询刷新
+      {$t("TaskCenter.live_polling")}
     {:else}
-      实时连接不可用
+      {$t("TaskCenter.live_disconnected")}
     {/if}
   </div>
 
@@ -528,19 +545,19 @@
             class={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${activeTab === "all" ? "bg-brand text-white border-brand" : "bg-background hover:bg-muted/50"}`}
             onclick={() => activeTab = "all"}
           >
-            全部任务
+            {$t("TaskCenter.all_tasks")}
           </button>
           <button
             class={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${activeTab === "dlq" ? "bg-red-600 text-white border-red-600" : "bg-background hover:bg-muted/50"}`}
             onclick={() => activeTab = "dlq"}
           >
-            死信队列
+            {$t("TaskCenter.dead_letter_queue")}
           </button>
           <button
             class={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${activeTab === "settings" ? "bg-foreground text-background border-foreground" : "bg-background hover:bg-muted/50"}`}
             onclick={() => activeTab = "settings"}
           >
-            后台设置
+            {$t("TaskCenter.background_settings")}
           </button>
         </div>
 
@@ -549,13 +566,13 @@
             <input
               bind:value={statusFilter}
               oninput={() => scheduleTaskListRefresh()}
-              placeholder="按状态筛选，例如 pending,running"
+              placeholder={$t("TaskCenter.status_filter_placeholder")}
               class="w-full sm:w-72 px-3 py-2 text-sm rounded-lg border bg-background focus:outline-none focus:ring-1 focus:ring-brand"
             />
             <input
               bind:value={functionSlugFilter}
               oninput={() => scheduleTaskListRefresh()}
-              placeholder="按已运行函数名筛选，例如 mockup-generator"
+              placeholder={$t("TaskCenter.function_filter_placeholder")}
               class="w-full sm:w-80 px-3 py-2 text-sm rounded-lg border bg-background focus:outline-none focus:ring-1 focus:ring-brand"
             />
           </div>
@@ -567,30 +584,30 @@
           {#if draftSettings}
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
               <label class="space-y-2">
-                <span class="text-sm font-medium text-foreground">项目后台并发</span>
+                <span class="text-sm font-medium text-foreground">{$t("TaskCenter.concurrency")}</span>
                 <input type="number" min="1" max="30" bind:value={draftSettings.concurrency} class="w-full px-3 py-2 text-sm rounded-lg border bg-background" />
               </label>
               <label class="space-y-2">
-                <span class="text-sm font-medium text-foreground">最大重试次数</span>
+                <span class="text-sm font-medium text-foreground">{$t("TaskCenter.max_attempts")}</span>
                 <input type="number" min="1" max="10" bind:value={draftSettings.max_attempts} class="w-full px-3 py-2 text-sm rounded-lg border bg-background" />
               </label>
               <label class="space-y-2">
-                <span class="text-sm font-medium text-foreground">默认超时（秒）</span>
+                <span class="text-sm font-medium text-foreground">{$t("TaskCenter.default_timeout")}</span>
                 <input type="number" min="1" max="900" bind:value={draftSettings.timeout_sec_default} class="w-full px-3 py-2 text-sm rounded-lg border bg-background" />
               </label>
               <label class="space-y-2">
-                <span class="text-sm font-medium text-foreground">最大超时（秒）</span>
+                <span class="text-sm font-medium text-foreground">{$t("TaskCenter.max_timeout")}</span>
                 <input type="number" min="1" max="1800" bind:value={draftSettings.timeout_sec_max} class="w-full px-3 py-2 text-sm rounded-lg border bg-background" />
               </label>
               <label class="space-y-2 md:col-span-2">
-                <span class="text-sm font-medium text-foreground">最大 Payload（字节）</span>
+                <span class="text-sm font-medium text-foreground">{$t("TaskCenter.max_payload")}</span>
                 <input type="number" min="1024" max="1048576" bind:value={draftSettings.max_payload_bytes} class="w-full px-3 py-2 text-sm rounded-lg border bg-background" />
               </label>
             </div>
           {/if}
 
           <div class="rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-sm text-amber-900/80">
-            项目级后台任务设置会直接影响异步 `functions.invoke()` 的入队限制和调度并发。建议先小步调高并发，再观察 DLQ 和 attempt 耗时。
+            {$t("TaskCenter.settings_warning")}
           </div>
 
           <button
@@ -599,7 +616,7 @@
             class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-brand text-white text-sm font-medium hover:bg-brand/90 disabled:opacity-50"
           >
             <Save size={16} />
-            {isSavingSettings ? "保存中..." : "保存设置"}
+            {isSavingSettings ? $t("TaskCenter.saving") : $t("TaskCenter.save_settings")}
           </button>
         </div>
       {:else if isLoading && filteredTasks.length === 0}
@@ -612,14 +629,14 @@
             <ShieldAlert size={28} />
           </div>
           <h3 class="text-lg font-medium text-foreground">
-            {activeTab === "dlq" ? "当前没有死信任务" : functionSlugFilter ? "该函数暂无调用记录" : "暂无后台任务"}
+            {activeTab === "dlq" ? $t("TaskCenter.no_dlq_tasks") : functionSlugFilter ? $t("TaskCenter.no_function_tasks") : $t("TaskCenter.no_tasks")}
           </h3>
           <p class="text-sm text-muted-foreground mt-1 max-w-md">
             {activeTab === "dlq"
-              ? "所有后台任务目前都没有进入死信队列。这里会展示需要人工处理和重试的任务。"
+              ? $t("TaskCenter.no_dlq_tasks_desc")
               : functionSlugFilter
-                ? `“${functionSlugFilter}” 尚未触发异步调用。任务面板只展示已触发的任务；调用后，状态、日志和 attempt 会在此实时显示。`
-                : "任务面板只展示已触发的异步 Edge Function 调用，不是函数目录。部署函数本身不会生成任务记录。"}
+                ? $t("TaskCenter.no_function_tasks_desc", { values: { slug: functionSlugFilter } })
+                : $t("TaskCenter.no_tasks_desc")}
           </p>
         </div>
       {:else}
@@ -627,11 +644,11 @@
           <table class="w-full text-sm text-left">
             <thead class="bg-muted/30 text-xs uppercase text-muted-foreground border-b border-border/50 sticky top-0 z-10">
               <tr>
-                <th class="px-5 py-3 font-semibold">任务</th>
-                <th class="px-5 py-3 font-semibold">状态</th>
-                <th class="px-5 py-3 font-semibold whitespace-nowrap">尝试</th>
-                <th class="px-5 py-3 font-semibold">函数</th>
-                <th class="px-5 py-3 font-semibold">更新时间</th>
+                <th class="px-5 py-3 font-semibold">{$t("TaskCenter.task")}</th>
+                <th class="px-5 py-3 font-semibold">{$t("TaskCenter.status")}</th>
+                <th class="px-5 py-3 font-semibold whitespace-nowrap">{$t("TaskCenter.attempts")}</th>
+                <th class="px-5 py-3 font-semibold">{$t("TaskCenter.function")}</th>
+                <th class="px-5 py-3 font-semibold">{$t("TaskCenter.updated_at")}</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-border/50">
@@ -650,7 +667,7 @@
                   <td class="px-5 py-4 align-top">
                     <div class={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-bold uppercase tracking-wider border ${getStatusColor(task.status)}`}>
                       <Icon size={12} class={task.status === "running" || task.status === "leased" ? "animate-spin" : ""} />
-                      {task.status}
+                      <span title={task.status}>{taskStatusLabel(task.status)}</span>
                     </div>
                   </td>
                   <td class="px-5 py-4 align-top text-xs text-muted-foreground whitespace-nowrap min-w-16">
@@ -676,8 +693,8 @@
     <div class="border rounded-xl bg-card shadow-sm overflow-hidden flex flex-col min-h-[700px]">
       <div class="border-b px-5 py-4 bg-muted/20 flex items-center justify-between">
         <div>
-          <h2 class="text-base font-semibold text-foreground">任务详情</h2>
-          <p class="text-xs text-muted-foreground mt-1">查看任务 attempt 记录、错误信息与手动操作。</p>
+          <h2 class="text-base font-semibold text-foreground">{$t("TaskCenter.task_details")}</h2>
+          <p class="text-xs text-muted-foreground mt-1">{$t("TaskCenter.task_details_desc")}</p>
         </div>
       </div>
 
@@ -690,37 +707,37 @@
           <div class="w-12 h-12 rounded-full bg-muted/40 flex items-center justify-center mb-4 text-muted-foreground">
             <ChevronDown size={22} />
           </div>
-          <p class="text-sm text-muted-foreground">从左侧选择一个任务，查看它的 attempt 记录、错误原因和手动操作。</p>
+          <p class="text-sm text-muted-foreground">{$t("TaskCenter.select_task_hint")}</p>
         </div>
       {:else}
         <div class="flex-1 overflow-auto p-5 space-y-5">
           <div class="space-y-3">
             <div>
-              <div class="text-[11px] uppercase tracking-wider text-muted-foreground">Task ID</div>
+              <div class="text-[11px] uppercase tracking-wider text-muted-foreground">{$t("TaskCenter.task_id")}</div>
               <div class="font-mono text-xs break-all text-foreground mt-1">{selectedTask.id}</div>
             </div>
             <div class="grid grid-cols-2 gap-3 text-sm">
               <div>
-                <div class="text-[11px] uppercase tracking-wider text-muted-foreground">状态</div>
-                <div class="mt-1">{selectedTask.status}</div>
+                <div class="text-[11px] uppercase tracking-wider text-muted-foreground">{$t("TaskCenter.status")}</div>
+                <div class="mt-1" title={selectedTask.status}>{taskStatusLabel(selectedTask.status)}</div>
               </div>
               <div>
-                <div class="text-[11px] uppercase tracking-wider text-muted-foreground">函数</div>
+                <div class="text-[11px] uppercase tracking-wider text-muted-foreground">{$t("TaskCenter.function")}</div>
                 <div class="mt-1">{selectedTask.function_slug || selectedTask.task_type}</div>
               </div>
               <div>
-                <div class="text-[11px] uppercase tracking-wider text-muted-foreground">创建时间</div>
+                <div class="text-[11px] uppercase tracking-wider text-muted-foreground">{$t("TaskCenter.created_at")}</div>
                 <div class="mt-1 text-xs font-mono">{dayjs(selectedTask.created_at).format("YYYY-MM-DD HH:mm:ss")}</div>
               </div>
               <div>
-                <div class="text-[11px] uppercase tracking-wider text-muted-foreground">更新时间</div>
+                <div class="text-[11px] uppercase tracking-wider text-muted-foreground">{$t("TaskCenter.updated_at")}</div>
                 <div class="mt-1 text-xs font-mono">{dayjs(selectedTask.updated_at).format("YYYY-MM-DD HH:mm:ss")}</div>
               </div>
             </div>
 
             {#if selectedTask.error}
               <div class="rounded-xl border border-red-500/20 bg-red-500/5 p-4">
-                <div class="text-[11px] uppercase tracking-wider text-red-700 font-semibold">错误信息</div>
+                <div class="text-[11px] uppercase tracking-wider text-red-700 font-semibold">{$t("TaskCenter.error_details")}</div>
                 <div class="mt-2 text-sm text-red-900/90 break-all">{selectedTask.error}</div>
               </div>
             {/if}
@@ -732,28 +749,28 @@
               class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border bg-background hover:bg-muted/50 text-sm font-medium"
             >
               <RotateCcw size={15} />
-              重新入队
+              {$t("TaskCenter.retry")}
             </button>
             <button
               onclick={() => cancelTask(selectedTask!.id)}
               class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border bg-background hover:bg-muted/50 text-sm font-medium"
             >
               <XCircle size={15} />
-              取消任务
+              {$t("TaskCenter.cancel_task")}
             </button>
             <button
-              onclick={() => copyText(selectedTask?.error || JSON.stringify(selectedTask?.latest_logs || [], null, 2), "已复制任务错误/日志")}
+              onclick={() => copyText(selectedTask?.error || JSON.stringify(selectedTask?.latest_logs || [], null, 2), $t("TaskCenter.copy_success"))}
               class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border bg-background hover:bg-muted/50 text-sm font-medium"
             >
               <Copy size={15} />
-              复制错误/日志
+              {$t("TaskCenter.copy_error_logs")}
             </button>
             <button
               onclick={() => downloadAttemptLogs(selectedTask)}
               class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border bg-background hover:bg-muted/50 text-sm font-medium"
             >
               <Download size={15} />
-              下载日志
+              {$t("TaskCenter.download_logs")}
             </button>
             {#if selectedTask?.function_slug && projectRef}
               <a
@@ -761,7 +778,7 @@
                 class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border bg-background hover:bg-muted/50 text-sm font-medium"
               >
                 <ExternalLink size={15} />
-                打开函数列表
+                {$t("TaskCenter.open_functions")}
               </a>
             {/if}
           </div>
@@ -769,23 +786,23 @@
           <div class="space-y-3">
             <div class="flex items-center gap-2">
               <Settings2 size={16} class="text-muted-foreground" />
-              <h3 class="text-sm font-semibold text-foreground">Attempt 记录</h3>
+              <h3 class="text-sm font-semibold text-foreground">{$t("TaskCenter.attempt_records")}</h3>
             </div>
 
             <div class="flex flex-wrap items-center gap-2 rounded-xl border bg-background px-3 py-2">
               <select bind:value={logFilter} class="px-2 py-1.5 text-xs rounded border bg-background">
-                <option value="all">全部日志</option>
-                <option value="stdout">仅 stdout</option>
-                <option value="stderr">仅 stderr</option>
+                <option value="all">{$t("TaskCenter.all_logs")}</option>
+                <option value="stdout">{$t("TaskCenter.stdout_only")}</option>
+                <option value="stderr">{$t("TaskCenter.stderr_only")}</option>
               </select>
               <input
                 bind:value={logSearch}
-                placeholder="搜索日志内容"
+                placeholder={$t("TaskCenter.search_logs")}
                 class="flex-1 min-w-[180px] px-3 py-1.5 text-xs rounded border bg-background"
               />
               <label class="inline-flex items-center gap-2 text-xs text-muted-foreground">
                 <input type="checkbox" bind:checked={autoScrollLogs} />
-                自动滚动
+                {$t("TaskCenter.auto_scroll")}
               </label>
             </div>
 
@@ -795,9 +812,9 @@
                   <div class="rounded-xl border border-border/60 bg-background p-4 space-y-3">
                     <div class="flex items-center justify-between gap-3">
                       <div class="flex items-center gap-2">
-                        <span class="text-xs font-semibold text-foreground">Attempt #{attempt.attempt_no}</span>
+                        <span class="text-xs font-semibold text-foreground">{$t("TaskCenter.attempt_number", { values: { count: attempt.attempt_no } })}</span>
                         <span class={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${getStatusColor(attempt.status)}`}>
-                          {attempt.status}
+                          <span title={attempt.status}>{taskStatusLabel(attempt.status)}</span>
                         </span>
                       </div>
                       {#if attempt.duration_ms != null}
@@ -807,11 +824,11 @@
 
                     <div class="grid grid-cols-2 gap-3 text-xs">
                       <div>
-                        <div class="uppercase tracking-wider text-muted-foreground">开始</div>
+                        <div class="uppercase tracking-wider text-muted-foreground">{$t("TaskCenter.started_at")}</div>
                         <div class="mt-1 font-mono text-foreground">{dayjs(attempt.started_at).format("YYYY-MM-DD HH:mm:ss")}</div>
                       </div>
                       <div>
-                        <div class="uppercase tracking-wider text-muted-foreground">结束</div>
+                        <div class="uppercase tracking-wider text-muted-foreground">{$t("TaskCenter.completed_at")}</div>
                         <div class="mt-1 font-mono text-foreground">
                           {attempt.completed_at ? dayjs(attempt.completed_at).format("YYYY-MM-DD HH:mm:ss") : "-"}
                         </div>
@@ -820,7 +837,7 @@
 
                     {#if attempt.response_status != null}
                       <div class="text-xs text-muted-foreground">
-                        HTTP 响应状态：<span class="font-mono text-foreground">{attempt.response_status}</span>
+                        {$t("TaskCenter.http_status")}：<span class="font-mono text-foreground">{attempt.response_status}</span>
                       </div>
                     {/if}
 
@@ -832,7 +849,7 @@
 
                     <div class="rounded-lg border border-border/60 overflow-hidden">
                       <div class="px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground bg-muted/30">
-                        执行日志
+                        {$t("TaskCenter.execution_logs")}
                       </div>
                       {#if getFilteredLogs(attempt).length > 0}
                         <div
@@ -853,7 +870,7 @@
                         </div>
                       {:else}
                         <div class="px-3 py-4 text-xs text-muted-foreground bg-background">
-                          该 attempt 在当前过滤条件下暂无可见日志。
+                          {$t("TaskCenter.no_filtered_logs")}
                         </div>
                       {/if}
                     </div>
@@ -862,7 +879,7 @@
               </div>
             {:else}
               <div class="rounded-xl border border-dashed p-6 text-sm text-muted-foreground text-center">
-                该任务还没有 attempt 记录。
+                {$t("TaskCenter.no_attempts")}
               </div>
             {/if}
           </div>

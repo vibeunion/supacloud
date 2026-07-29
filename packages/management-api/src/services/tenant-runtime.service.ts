@@ -265,7 +265,7 @@ export interface ProjectServiceStatus {
     local_runtime_enabled?: boolean;
 }
 
-const POSTGREST_HEALTH_PATHS = ["/live", "/ready", "/"] as const;
+const POSTGREST_HEALTH_PATHS = ["/"] as const;
 
 export async function probePostgrestHealth(
     port: number,

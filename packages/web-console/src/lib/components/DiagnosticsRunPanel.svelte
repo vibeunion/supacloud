@@ -1,6 +1,7 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
   import { onMount } from "svelte";
+  import { t } from "svelte-i18n";
   import {
     AlertTriangle,
     CheckCircle2,
@@ -54,14 +55,14 @@
   let error = $state<string | null>(null);
 
   const basePath = $derived(scope === "project" ? `/v1/projects/${projectRef}/diagnostics` : "/v1/diagnostics");
-  const title = $derived(scope === "project" ? "项目自检" : "平台自检中心");
-  const subtitle = $derived(scope === "project" ? "数据库结构、权限、运行时与可信基线检查" : "全局服务、端口、管理库、配置基线与项目运行态检查");
+  const title = $derived(scope === "project" ? $t("Diagnostics.project_title") : $t("Diagnostics.platform_title"));
+  const subtitle = $derived(scope === "project" ? $t("Diagnostics.project_subtitle") : $t("Diagnostics.platform_subtitle"));
 
   async function apiJson<T>(path: string, init: RequestInit = {}): Promise<T> {
     const res = await apiClient(`${basePath}${path}`, init);
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      throw new Error(data.message || data.error || `Request failed: ${res.status}`);
+      throw new Error(data.message || data.error || $t("Diagnostics.request_failed", { values: { status: res.status } }));
     }
     return data as T;
   }
@@ -128,16 +129,59 @@
 
   function statusLabel(status: DiagnosticResult["status"]) {
     const labels: Record<DiagnosticResult["status"], string> = {
-      pass: "通过",
-      drift: "漂移",
-      missing: "缺失",
-      tampered: "篡改",
-      unreachable: "不可达",
-      degraded: "降级",
-      error: "错误",
+      pass: "Diagnostics.status_pass",
+      drift: "Diagnostics.status_drift",
+      missing: "Diagnostics.status_missing",
+      tampered: "Diagnostics.status_tampered",
+      unreachable: "Diagnostics.status_unreachable",
+      degraded: "Diagnostics.status_degraded",
+      error: "Diagnostics.status_error",
     };
-    return labels[status];
+    return $t(labels[status]);
   }
+
+  function runStatusLabel(status: DiagnosticRun["status"]): string {
+    const labels: Record<DiagnosticRun["status"], string> = {
+      running: "Diagnostics.run_status_running",
+      completed: "Diagnostics.run_status_completed",
+      failed: "Diagnostics.run_status_failed",
+    };
+    return $t(labels[status]);
+  }
+
+  function checkDescription(check: DiagnosticCheck): string {
+    const key = CHECK_DESCRIPTION_KEYS[check.id];
+    return key ? $t(key) : check.description;
+  }
+
+  function resultSummary(result: DiagnosticResult): string {
+    const descriptionKey = CHECK_DESCRIPTION_KEYS[result.checkId];
+    if (!descriptionKey) return result.message;
+    return $t("Diagnostics.result_summary", {
+      values: { check: $t(descriptionKey), status: statusLabel(result.status) },
+    });
+  }
+
+  const CHECK_DESCRIPTION_KEYS: Record<string, string> = {
+    "project-required-schemas": "Diagnostics.check_project_required_schemas",
+    "project-rls-status": "Diagnostics.check_project_rls_status",
+    "project-primary-keys": "Diagnostics.check_project_primary_keys",
+    "project-auth-schema": "Diagnostics.check_project_auth_schema",
+    "project-storage-schema": "Diagnostics.check_project_storage_schema",
+    "project-fk-indexes": "Diagnostics.check_project_fk_indexes",
+    "project-postgrest-health": "Diagnostics.check_project_postgrest_health",
+    "project-schema-hash": "Diagnostics.check_project_schema_hash",
+    "project-functiondef-hash": "Diagnostics.check_project_functiondef_hash",
+    "project-trigger-hash": "Diagnostics.check_project_trigger_hash",
+    "project-config-hash": "Diagnostics.check_project_config_hash",
+    "platform-service-status": "Diagnostics.check_platform_service_status",
+    "platform-port-listeners": "Diagnostics.check_platform_port_listeners",
+    "platform-disk-space": "Diagnostics.check_platform_disk_space",
+    "platform-api-health": "Diagnostics.check_platform_api_health",
+    "platform-management-db": "Diagnostics.check_platform_management_db",
+    "platform-project-state-consistency": "Diagnostics.check_platform_project_state_consistency",
+    "platform-config-hash": "Diagnostics.check_platform_config_hash",
+  };
 
   function severityClass(severity: DiagnosticCheck["severity"]) {
     if (severity === "critical") return "bg-red-500/10 text-red-700 border-red-500/20";
@@ -173,7 +217,7 @@
         class="flex items-center gap-2 rounded-md border px-3 py-2 text-xs font-semibold text-muted-foreground transition-colors hover:bg-muted disabled:opacity-50"
       >
         {#if isLoading}<Loader2 size={14} class="animate-spin" />{:else}<RefreshCw size={14} />{/if}
-        刷新
+        {$t("Common.refresh")}
       </button>
       <button
         type="button"
@@ -182,7 +226,7 @@
         class="flex items-center gap-2 rounded-md bg-brand px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-brand/90 disabled:opacity-50"
       >
         {#if isRunning}<Loader2 size={14} class="animate-spin" />{:else}<ShieldCheck size={14} />{/if}
-        运行只读自检
+        {$t("Diagnostics.run_read_only")}
       </button>
     </div>
   </div>
@@ -193,23 +237,23 @@
 
   <div class="grid grid-cols-2 gap-3 lg:grid-cols-5">
     <div class="rounded-md border bg-card p-3">
-      <div class="text-[10px] font-bold uppercase text-muted-foreground">Checks</div>
+      <div class="text-[10px] font-bold uppercase text-muted-foreground">{$t("Diagnostics.checks")}</div>
       <div class="mt-1 text-2xl font-bold">{checks.length}</div>
     </div>
     <div class="rounded-md border bg-card p-3">
-      <div class="text-[10px] font-bold uppercase text-muted-foreground">Pass</div>
+      <div class="text-[10px] font-bold uppercase text-muted-foreground">{$t("Diagnostics.pass")}</div>
       <div class="mt-1 text-2xl font-bold text-emerald-600">{summaryCount("pass")}</div>
     </div>
     <div class="rounded-md border bg-card p-3">
-      <div class="text-[10px] font-bold uppercase text-muted-foreground">Tampered</div>
+      <div class="text-[10px] font-bold uppercase text-muted-foreground">{$t("Diagnostics.tampered")}</div>
       <div class="mt-1 text-2xl font-bold text-red-600">{summaryCount("tampered")}</div>
     </div>
     <div class="rounded-md border bg-card p-3">
-      <div class="text-[10px] font-bold uppercase text-muted-foreground">Degraded</div>
+      <div class="text-[10px] font-bold uppercase text-muted-foreground">{$t("Diagnostics.degraded")}</div>
       <div class="mt-1 text-2xl font-bold text-amber-600">{summaryCount("degraded") + summaryCount("drift")}</div>
     </div>
     <div class="rounded-md border bg-card p-3">
-      <div class="text-[10px] font-bold uppercase text-muted-foreground">Last Run</div>
+      <div class="text-[10px] font-bold uppercase text-muted-foreground">{$t("Diagnostics.last_run")}</div>
       <div class="mt-1 truncate text-xs font-semibold">{selectedRun ? formatTime(selectedRun.startedAt) : "-"}</div>
     </div>
   </div>
@@ -217,11 +261,11 @@
   <div class="grid grid-cols-1 gap-4 xl:grid-cols-[320px_1fr]">
     <section class="rounded-md border bg-card">
       <div class="border-b px-4 py-3">
-        <h2 class="text-sm font-semibold">最近运行</h2>
+        <h2 class="text-sm font-semibold">{$t("Diagnostics.recent_runs")}</h2>
       </div>
       <div class="max-h-[560px] overflow-y-auto p-2">
         {#if runs.length === 0}
-          <div class="px-3 py-10 text-center text-xs text-muted-foreground">暂无运行记录</div>
+          <div class="px-3 py-10 text-center text-xs text-muted-foreground">{$t("Diagnostics.no_runs")}</div>
         {:else}
           {#each runs as run (run.id)}
             <button
@@ -233,7 +277,7 @@
                 <span class="block truncate font-mono">{run.id}</span>
                 <span class="mt-0.5 block truncate">{formatTime(run.startedAt)}</span>
               </span>
-              <span class="rounded border px-1.5 py-0.5 text-[10px] uppercase">{run.status}</span>
+              <span title={run.status} class="rounded border px-1.5 py-0.5 text-[10px] uppercase">{runStatusLabel(run.status)}</span>
             </button>
           {/each}
         {/if}
@@ -242,7 +286,7 @@
 
     <section class="rounded-md border bg-card">
       <div class="flex items-center justify-between border-b px-4 py-3">
-        <h2 class="text-sm font-semibold">检查结果</h2>
+        <h2 class="text-sm font-semibold">{$t("Diagnostics.results")}</h2>
         {#if selectedRun}
           <span class="text-xs text-muted-foreground">{selectedRun.id}</span>
         {/if}
@@ -251,12 +295,12 @@
         {#if isLoading}
           <div class="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
             <Loader2 size={18} class="animate-spin" />
-            加载中
+            {$t("Common.loading")}
           </div>
         {:else if results.length === 0}
           <div class="flex flex-col items-center justify-center gap-2 py-16 text-muted-foreground">
             <FileCheck2 size={28} class="opacity-60" />
-            <span class="text-sm">暂无检查结果</span>
+            <span class="text-sm">{$t("Diagnostics.no_results")}</span>
           </div>
         {:else}
           {#each results as result (result.id)}
@@ -277,9 +321,13 @@
                       <span class="font-mono text-xs font-semibold">{result.checkId}</span>
                       <span class="rounded border px-1.5 py-0.5 text-[10px] font-bold {statusClass(result.status)}">{statusLabel(result.status)}</span>
                     </div>
-                    <p class="mt-1 text-sm">{result.message}</p>
-                    {#if result.detail}
-                      <p class="mt-1 break-all font-mono text-[11px] text-muted-foreground">{result.detail}</p>
+                    <p class="mt-1 text-sm">{resultSummary(result)}</p>
+                    {#if result.message || result.detail}
+                      <details class="mt-2 text-[11px] text-muted-foreground">
+                        <summary class="cursor-pointer select-none">{$t("Diagnostics.raw_details")}</summary>
+                        <p class="mt-1 break-all font-mono">{result.message}</p>
+                        {#if result.detail}<p class="mt-1 break-all font-mono">{result.detail}</p>{/if}
+                      </details>
                     {/if}
                   </div>
                 </div>
@@ -299,7 +347,7 @@
 
   <section class="rounded-md border bg-card">
     <div class="border-b px-4 py-3">
-      <h2 class="text-sm font-semibold">已注册检查项</h2>
+      <h2 class="text-sm font-semibold">{$t("Diagnostics.registered_checks")}</h2>
     </div>
     <div class="grid grid-cols-1 gap-2 p-3 md:grid-cols-2 xl:grid-cols-3">
       {#each checks as check (check.id)}
@@ -310,9 +358,9 @@
                 <Database size={13} class="text-muted-foreground" />
                 <span class="truncate font-mono text-xs font-semibold">{check.id}</span>
               </div>
-              <p class="mt-1 text-xs text-muted-foreground">{check.description}</p>
+              <p class="mt-1 text-xs text-muted-foreground">{checkDescription(check)}</p>
             </div>
-            <span class="shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-bold {severityClass(check.severity)}">{check.severity}</span>
+            <span title={check.severity} class="shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-bold {severityClass(check.severity)}">{$t(`Diagnostics.severity_${check.severity}`)}</span>
           </div>
         </div>
       {/each}

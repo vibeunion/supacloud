@@ -32,6 +32,9 @@ const rlsUnsafe = mock(async (query: string) => {
   if (query.startsWith("EXPLAIN")) {
     return [{ "QUERY PLAN": [{ Plan: { "Node Type": "Seq Scan", Schema: "public", "Relation Name": "todos" } }] }];
   }
+  if (query.includes("pg_stat_statements")) {
+    return [{ query: "select 1", calls: 4, total_exec_time: 12, mean_exec_time: 3, rows: 4 }];
+  }
   return Array.from({ length: 501 }, (_, index) => ({ id: index + 1 }));
 });
 const rlsConnection = Object.assign(
@@ -41,6 +44,9 @@ const rlsConnection = Object.assign(
 const rlsDb = Object.assign(
   ((strings: TemplateStringsArray) => {
     const sql = strings.join(" ");
+    if (sql.includes("FROM pg_extension")) {
+      return Promise.resolve([{ schema_name: "extensions", has_view: true }]);
+    }
     if (sql.includes("pg_policies")) {
       return Promise.resolve([{ schemaname: "public", tablename: "todos", policyname: "owner", permissive: "PERMISSIVE", roles: ["authenticated"], cmd: "SELECT", qual: "(owner_id = auth.uid())", with_check: null }]);
     }
@@ -49,8 +55,9 @@ const rlsDb = Object.assign(
     }
     return Promise.resolve([]);
   }) as unknown as Record<string, unknown>,
-  { reserve: mock(async () => rlsConnection) },
+  { reserve: mock(async () => rlsConnection), unsafe: rlsUnsafe },
 );
+const getProjectDb = mock(() => rlsDb);
 const getProjectRoleDb = mock(() => rlsDb);
 
 const actualDb = await import("../../src/db");
@@ -58,7 +65,7 @@ mock.module("../../src/db", () => ({
   ...actualDb,
   db: { ...actualDb.db, executeQuery },
   sql: managementDb,
-  getProjectDb: () => rlsDb,
+  getProjectDb,
   getProjectRoleDb,
 }));
 mock.module("../../src/services", () => ({ projectService: { getProject } }));
@@ -101,6 +108,7 @@ describe("database SQL routes", () => {
     rlsUnsafe.mockClear();
     rlsConnection.release.mockClear();
     rlsDb.reserve.mockClear();
+    getProjectDb.mockClear();
     getProjectRoleDb.mockClear();
     getProject.mockClear();
     requireProjectOrAdminAuth.mockReset();
@@ -180,6 +188,17 @@ describe("database SQL routes", () => {
         password: "test-password",
       }],
     ]);
+  });
+
+  test("reads query performance through a fixed admin-only statistics query", async () => {
+    const response = await request("project-a", "/query-performance");
+    const body = await response.json() as { installed: boolean; rows: Array<Record<string, unknown>> };
+
+    expect(response.status).toBe(200);
+    expect(body.installed).toBe(true);
+    expect(body.rows).toEqual([{ query: "select 1", calls: 4, total_exec_time: 12, mean_exec_time: 3, rows: 4 }]);
+    expect(getProjectDb).toHaveBeenCalledWith("shared_tenant_db");
+    expect(executeQuery).not.toHaveBeenCalled();
   });
 
   test("does not cancel another project query sharing the same query ID", async () => {

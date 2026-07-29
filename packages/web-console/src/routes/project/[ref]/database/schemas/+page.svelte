@@ -43,6 +43,18 @@
   const schemas = $derived((schemasQuery.data as SchemaInfo[]) || []);
   const isLoading = $derived(schemasQuery.isPending);
   const error = $derived(schemasQuery.error?.message || null);
+
+  const SCHEMA_DESCRIPTION_KEYS: Record<string, string> = {
+    public: "Schemas.public_description",
+    auth: "Schemas.auth_description",
+    storage: "Schemas.storage_description",
+    extensions: "Schemas.extensions_description",
+  };
+
+  function schemaDescription(schemaName: string): string {
+    const key = SCHEMA_DESCRIPTION_KEYS[schemaName.toLowerCase()];
+    return $t(key || "Schemas.custom_description");
+  }
 </script>
 
 <div class="h-full flex flex-col space-y-4">
@@ -67,7 +79,8 @@
               <FolderOpen size={18} />
             </div>
             <div>
-              <span class="font-mono font-semibold text-sm">{schema.schema_name}</span>
+              <span title={schema.schema_name} class="font-mono font-semibold text-sm">{schema.schema_name}</span>
+              <p class="text-[10px] text-muted-foreground">{schemaDescription(schema.schema_name)}</p>
               <p class="text-[10px] text-muted-foreground">{$t("Schemas.owner")}: {schema.schema_owner}</p>
             </div>
           </div>

@@ -83,22 +83,7 @@ async function acquireDataDirLock(dataDir?: string): Promise<() => Promise<void>
   const lockPath = `${absoluteDataDir}.supacloud-lite.lock`
   await mkdir(dirname(absoluteDataDir), { recursive: true, mode: 0o700 })
   const nonce = crypto.randomUUID()
-  let handle: FileHandle | undefined
-  try {
-    handle = await open(lockPath, 'wx', 0o600)
-    await handle.writeFile(`${JSON.stringify({ pid: process.pid, nonce, createdAt: new Date().toISOString() })}\n`)
-  } catch (error) {
-    await handle?.close().catch(() => {})
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-    const owner = await readLockOwner(lockPath)
-    if (owner && isProcessAlive(owner.pid)) {
-      throw new Error(`PGlite data directory is already in use: ${absoluteDataDir} (pid ${owner.pid})`)
-    }
-    throw new Error(
-      `PGlite data directory has a stale or unreadable lock: ${lockPath}. ` +
-        'Confirm no SupaCloud Lite process is using it, then remove the lock manually.'
-    )
-  }
+  const handle = await createDataDirLock(absoluteDataDir, lockPath, nonce)
   let released = false
   return async () => {
     if (released) return
@@ -112,10 +97,50 @@ async function acquireDataDirLock(dataDir?: string): Promise<() => Promise<void>
   }
 }
 
+async function createDataDirLock(absoluteDataDir: string, lockPath: string, nonce: string): Promise<FileHandle> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      return await writeDataDirLock(lockPath, nonce)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+      const owner = await readLockOwner(lockPath)
+      if (owner && isProcessAlive(owner.pid)) throw lockInUseError(absoluteDataDir, owner.pid)
+      if (!owner || attempt > 0) throw unreadableLockError(lockPath)
+      await unlink(lockPath).catch((unlinkError) => {
+        if ((unlinkError as NodeJS.ErrnoException).code !== 'ENOENT') throw unlinkError
+      })
+    }
+  }
+  throw unreadableLockError(lockPath)
+}
+
+async function writeDataDirLock(lockPath: string, nonce: string): Promise<FileHandle> {
+  const handle = await open(lockPath, 'wx', 0o600)
+  try {
+    await handle.writeFile(`${JSON.stringify({ pid: process.pid, nonce, createdAt: new Date().toISOString() })}\n`)
+    return handle
+  } catch (error) {
+    await handle.close().catch(() => {})
+    await unlink(lockPath).catch(() => {})
+    throw error
+  }
+}
+
+function lockInUseError(dataDir: string, pid: number): Error {
+  return new Error(`PGlite data directory is already in use: ${dataDir} (pid ${pid})`)
+}
+
+function unreadableLockError(lockPath: string): Error {
+  return new Error(
+    `PGlite data directory has an unreadable lock: ${lockPath}. ` +
+      'Confirm no SupaCloud Lite process is using it, then remove the lock manually.'
+  )
+}
+
 async function readLockOwner(lockPath: string): Promise<{ pid: number; nonce: string } | null> {
   try {
     const value = JSON.parse(await readFile(lockPath, 'utf8')) as { pid?: unknown; nonce?: unknown }
-    return typeof value.pid === 'number' && Number.isInteger(value.pid) && typeof value.nonce === 'string'
+    return typeof value.pid === 'number' && Number.isInteger(value.pid) && value.pid > 0 && typeof value.nonce === 'string'
       ? { pid: value.pid, nonce: value.nonce }
       : null
   } catch {

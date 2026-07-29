@@ -93,6 +93,12 @@
   );
 
   const enabledCount = $derived(extensions.filter(e => e.installed_version).length);
+
+  function extensionDescription(extension: Extension): string {
+    return $t("Extensions.official_description", {
+      values: { name: extension.name, description: extension.comment || "—" },
+    });
+  }
 </script>
 
 <div class="h-full flex flex-col space-y-4">
@@ -109,7 +115,6 @@
     {/if}
   </div>
 
-  <!-- Search -->
   <div class="relative w-64">
     <Search size={14} class="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
     <input
@@ -139,7 +144,7 @@
               <th class="px-3 py-2.5 font-semibold text-muted-foreground">{$t("Extensions.version")}</th>
               <th class="px-3 py-2.5 font-semibold text-muted-foreground">{$t("Extensions.schema")}</th>
               <th class="px-3 py-2.5 font-semibold text-muted-foreground">{$t("Extensions.description")}</th>
-              <th class="px-4 py-2.5 font-semibold text-muted-foreground text-right">Status / Action</th>
+              <th class="px-4 py-2.5 font-semibold text-muted-foreground text-right">{$t("Extensions.status_action")}</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-border/20">
@@ -157,7 +162,7 @@
                 <td class="px-3 py-2.5 font-mono text-muted-foreground">
                   {ext.schema || "—"}
                 </td>
-                <td class="px-3 py-2.5 text-muted-foreground max-w-sm truncate">{ext.comment || "—"}</td>
+                <td class="px-3 py-2.5 text-muted-foreground max-w-sm truncate" title={ext.comment || ""}>{extensionDescription(ext)}</td>
                 <td class="px-4 py-2.5 text-right">
                   <div class="flex items-center justify-end gap-2">
                     {#if ext.installed_version}
@@ -166,7 +171,7 @@
                       </span>
                       <button onclick={() => toggleExtension(ext)} disabled={togglingExt === ext.name}
                         class="ml-2 px-2 py-1 text-[10px] rounded border border-destructive/20 text-destructive hover:bg-destructive/10 transition-colors flex items-center gap-1 disabled:opacity-50">
-                        {#if togglingExt === ext.name}<Loader2 size={10} class="animate-spin" />{:else}<X size={10} />{/if} Disable
+                        {#if togglingExt === ext.name}<Loader2 size={10} class="animate-spin" />{:else}<X size={10} />{/if} {$t("Extensions.disable")}
                       </button>
                     {:else}
                       <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-muted text-muted-foreground text-[10px]">
@@ -174,7 +179,7 @@
                       </span>
                       <button onclick={() => toggleExtension(ext)} disabled={togglingExt === ext.name}
                         class="ml-2 px-2 py-1 text-[10px] rounded border border-brand/20 text-brand hover:bg-brand/10 transition-colors flex items-center gap-1 disabled:opacity-50">
-                        {#if togglingExt === ext.name}<Loader2 size={10} class="animate-spin" />{:else}<Check size={10} />{/if} Enable
+                        {#if togglingExt === ext.name}<Loader2 size={10} class="animate-spin" />{:else}<Check size={10} />{/if} {$t("Extensions.enable")}
                       </button>
                     {/if}
                   </div>

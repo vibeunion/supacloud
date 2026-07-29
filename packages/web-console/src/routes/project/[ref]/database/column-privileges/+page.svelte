@@ -32,6 +32,22 @@
   const projectRef = $derived(page.params.ref);
   const roles = ["anon", "authenticated", "service_role"];
 
+  const ROLE_LABEL_KEYS: Record<string, string> = {
+    anon: "ColumnPrivileges.role_anon",
+    authenticated: "ColumnPrivileges.role_authenticated",
+    service_role: "ColumnPrivileges.role_service",
+  };
+  const TYPE_LABEL_KEYS: Record<string, string> = {
+    bigint: "ColumnPrivileges.type_bigint",
+    boolean: "ColumnPrivileges.type_boolean",
+    integer: "ColumnPrivileges.type_integer",
+    jsonb: "ColumnPrivileges.type_jsonb",
+    text: "ColumnPrivileges.type_text",
+    timestamp: "ColumnPrivileges.type_timestamp",
+    "timestamp with time zone": "ColumnPrivileges.type_timestamptz",
+    uuid: "ColumnPrivileges.type_uuid",
+  };
+
   const PRIV_SQL = `
     SELECT 
       c.table_schema,
@@ -94,6 +110,16 @@
   function hasPriv(col: ColumnInfo, role: string, priv: string): boolean {
     return col.privileges[`${role}:${priv}`] === true;
   }
+
+  function roleLabel(role: string): string {
+    const labelKey = ROLE_LABEL_KEYS[role];
+    return labelKey ? `${$t(labelKey)} (${role})` : role;
+  }
+
+  function dataTypeLabel(dataType: string): string {
+    const descriptionKey = TYPE_LABEL_KEYS[dataType.toLowerCase()];
+    return descriptionKey ? `${$t(descriptionKey)} (${dataType})` : dataType;
+  }
 </script>
 
 <div class="h-full flex flex-col space-y-4">
@@ -101,6 +127,7 @@
     <div>
       <h1 class="text-2xl font-bold">{$t("ColumnPrivileges.title")}</h1>
       <p class="text-sm text-muted-foreground mt-1">{$t("ColumnPrivileges.subtitle")}</p>
+      <p class="text-xs text-muted-foreground mt-1">{$t("ColumnPrivileges.read_only_description")}</p>
     </div>
     <div class="flex items-center gap-2">
       <ShieldCheck size={14} class="text-muted-foreground" />
@@ -109,7 +136,7 @@
         <button
           onclick={() => selectedRole = role}
           class="px-2.5 py-1 text-xs rounded-md transition-colors {selectedRole === role ? 'bg-brand text-white font-bold' : 'bg-muted/50 text-muted-foreground hover:bg-muted'}"
-        >{role}</button>
+        >{roleLabel(role)}</button>
       {/each}
     </div>
   </div>
@@ -132,7 +159,8 @@
         {#each tables as tbl}
           <div class="border-b border-border/30">
             <div class="px-4 py-2 bg-muted/20 border-b border-border/20">
-              <span class="font-mono font-bold text-xs text-brand">{tbl.table_name}</span>
+              <span class="text-xs text-muted-foreground">{$t("ColumnPrivileges.technical_table")}:</span>
+              <span class="ml-1 font-mono font-bold text-xs text-brand">{tbl.table_name}</span>
             </div>
             <table class="w-full text-left text-xs">
               <thead>
@@ -147,8 +175,8 @@
               <tbody class="divide-y divide-border/10">
                 {#each tbl.columns as col}
                   <tr class="hover:bg-muted/5 transition-colors">
-                    <td class="px-4 py-1.5 font-mono text-[11px]">{col.column_name}</td>
-                    <td class="px-3 py-1.5 text-muted-foreground text-[10px]">{col.data_type}</td>
+                    <td class="px-4 py-1.5 font-mono text-[11px]" title={col.column_name}>{col.column_name}</td>
+                    <td class="px-3 py-1.5 text-muted-foreground text-[10px]" title={col.data_type}>{dataTypeLabel(col.data_type)}</td>
                     <td class="px-3 py-1.5 text-center">
                       {#if hasPriv(col, selectedRole, "SELECT")}
                         <Check size={12} class="inline text-green-500" />

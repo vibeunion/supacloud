@@ -3,6 +3,7 @@
   import { apiClient } from "$lib/api";
   import { createMutation, createQuery } from "@tanstack/svelte-query";
   import { Loader2, Plus, RefreshCw, Trash2, Layers } from "lucide-svelte";
+  import { t } from "svelte-i18n";
   import { toast } from "svelte-sonner";
 
   interface MaterializedView {
@@ -27,7 +28,7 @@
     queryFn: async () => {
       const res = await apiClient(`/v1/projects/${projectRef}/database/materialized-views`);
       const data = await res.json();
-      if (!res.ok || data.error) throw new Error(data.message || data.error || "Failed to load materialized views");
+      if (!res.ok || data.error) throw new Error(data.message || data.error || $t("MaterializedViews.load_failed"));
       return (Array.isArray(data) ? data : []) as MaterializedView[];
     }
   }));
@@ -39,11 +40,11 @@
         body: JSON.stringify({ schema, name, definition, withData })
       });
       const data = await res.json();
-      if (!res.ok || data.error) throw new Error(data.message || data.error || "Failed to create materialized view");
+      if (!res.ok || data.error) throw new Error(data.message || data.error || $t("MaterializedViews.create_failed"));
       return data;
     },
     onSuccess: () => {
-      toast.success("物化视图已创建");
+      toast.success($t("MaterializedViews.create_success"));
       name = "";
       viewsQuery.refetch();
     }
@@ -56,11 +57,11 @@
         body: JSON.stringify({})
       });
       const data = await res.json();
-      if (!res.ok || data.error) throw new Error(data.message || data.error || "Failed to refresh materialized view");
+      if (!res.ok || data.error) throw new Error(data.message || data.error || $t("MaterializedViews.refresh_failed"));
       return data;
     },
     onSuccess: () => {
-      toast.success("刷新完成");
+      toast.success($t("MaterializedViews.refresh_success"));
       viewsQuery.refetch();
     }
   }));
@@ -71,11 +72,11 @@
         method: "DELETE"
       });
       const data = await res.json();
-      if (!res.ok || data.error) throw new Error(data.message || data.error || "Failed to delete materialized view");
+      if (!res.ok || data.error) throw new Error(data.message || data.error || $t("MaterializedViews.delete_failed"));
       return data;
     },
     onSuccess: () => {
-      toast.success("已删除");
+      toast.success($t("MaterializedViews.delete_success"));
       viewsQuery.refetch();
     }
   }));
@@ -100,8 +101,8 @@
 
 <div class="h-full flex flex-col space-y-4">
   <div>
-    <h1 class="text-2xl font-bold">物化视图</h1>
-    <p class="text-sm text-muted-foreground mt-1">将复杂读查询或聚合结果落盘缓存，按业务可接受的新鲜度刷新。</p>
+    <h1 class="text-2xl font-bold">{$t("MaterializedViews.title")}</h1>
+    <p class="text-sm text-muted-foreground mt-1">{$t("MaterializedViews.subtitle")}</p>
   </div>
 
   <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
@@ -109,9 +110,9 @@
       <div class="border-b px-5 py-4 flex items-center justify-between">
         <div class="flex items-center gap-2">
           <Layers size={16} class="text-brand" />
-          <span class="font-semibold text-sm">视图列表</span>
+          <span class="font-semibold text-sm">{$t("MaterializedViews.list")}</span>
         </div>
-        <button onclick={() => viewsQuery.refetch()} class="p-2 rounded-md border hover:bg-muted/50" title="刷新列表">
+        <button onclick={() => viewsQuery.refetch()} class="p-2 rounded-md border hover:bg-muted/50" title={$t("MaterializedViews.refresh_list")}>
           <RefreshCw size={14} />
         </button>
       </div>
@@ -122,17 +123,17 @@
         </div>
       {:else if views.length === 0}
         <div class="h-64 flex items-center justify-center text-sm text-muted-foreground">
-          暂无物化视图
+          {$t("MaterializedViews.empty")}
         </div>
       {:else}
         <div class="overflow-x-auto">
           <table class="w-full text-sm">
             <thead class="bg-muted/30 border-b">
               <tr>
-                <th class="px-4 py-3 text-left font-medium text-muted-foreground">名称</th>
-                <th class="px-4 py-3 text-left font-medium text-muted-foreground">状态</th>
-                <th class="px-4 py-3 text-right font-medium text-muted-foreground">大小</th>
-                <th class="px-4 py-3 text-right font-medium text-muted-foreground">操作</th>
+                <th class="px-4 py-3 text-left font-medium text-muted-foreground">{$t("MaterializedViews.name")}</th>
+                <th class="px-4 py-3 text-left font-medium text-muted-foreground">{$t("MaterializedViews.status")}</th>
+                <th class="px-4 py-3 text-right font-medium text-muted-foreground">{$t("MaterializedViews.size")}</th>
+                <th class="px-4 py-3 text-right font-medium text-muted-foreground">{$t("MaterializedViews.action")}</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-border/40">
@@ -144,16 +145,16 @@
                   </td>
                   <td class="px-4 py-3">
                     <span class="px-2 py-0.5 rounded-full text-[10px] font-bold {view.ispopulated ? 'bg-green-500/10 text-green-600' : 'bg-amber-500/10 text-amber-600'}">
-                      {view.ispopulated ? "已填充" : "未填充"}
+                      {view.ispopulated ? $t("MaterializedViews.populated") : $t("MaterializedViews.not_populated")}
                     </span>
                   </td>
                   <td class="px-4 py-3 text-right font-mono text-xs">{formatBytes(view.total_bytes)}</td>
                   <td class="px-4 py-3">
                     <div class="flex justify-end gap-2">
-                      <button onclick={() => refreshMutation.mutate(view)} class="p-2 rounded-md border hover:bg-muted/50" title="刷新">
+                      <button onclick={() => refreshMutation.mutate(view)} class="p-2 rounded-md border hover:bg-muted/50" title={$t("MaterializedViews.refresh")}>
                         <RefreshCw size={14} />
                       </button>
-                      <button onclick={() => deleteMutation.mutate(view)} class="p-2 rounded-md border text-destructive hover:bg-destructive/10" title="删除">
+                      <button onclick={() => deleteMutation.mutate(view)} class="p-2 rounded-md border text-destructive hover:bg-destructive/10" title={$t("MaterializedViews.delete")}>
                         <Trash2 size={14} />
                       </button>
                     </div>
@@ -168,24 +169,25 @@
 
     <div class="rounded-xl border bg-card overflow-hidden">
       <div class="border-b px-5 py-4">
-        <h2 class="font-semibold text-sm flex items-center gap-2"><Plus size={16} /> 新建物化视图</h2>
+        <h2 class="font-semibold text-sm flex items-center gap-2"><Plus size={16} /> {$t("MaterializedViews.new")}</h2>
       </div>
       <form class="p-5 space-y-4" onsubmit={(event) => { event.preventDefault(); createViewMutation.mutate(); }}>
         <label class="block space-y-1.5">
-          <span class="text-xs font-medium text-muted-foreground">Schema</span>
+          <span class="text-xs font-medium text-muted-foreground">{$t("MaterializedViews.schema")}</span>
           <input bind:value={schema} class="w-full px-3 py-2 rounded-md border bg-background text-sm font-mono" />
         </label>
         <label class="block space-y-1.5">
-          <span class="text-xs font-medium text-muted-foreground">名称</span>
-          <input bind:value={name} class="w-full px-3 py-2 rounded-md border bg-background text-sm font-mono" placeholder="orders_daily" />
+          <span class="text-xs font-medium text-muted-foreground">{$t("MaterializedViews.name")}</span>
+          <input bind:value={name} class="w-full px-3 py-2 rounded-md border bg-background text-sm font-mono" placeholder={$t("MaterializedViews.name_placeholder")} />
         </label>
         <label class="block space-y-1.5">
-          <span class="text-xs font-medium text-muted-foreground">查询定义</span>
+          <span class="text-xs font-medium text-muted-foreground">{$t("MaterializedViews.definition")}</span>
           <textarea bind:value={definition} rows="8" class="w-full px-3 py-2 rounded-md border bg-background text-xs font-mono resize-y"></textarea>
+          <p class="text-[11px] text-muted-foreground">{$t("MaterializedViews.definition_help")}</p>
         </label>
         <label class="flex items-center gap-2 text-sm">
           <input type="checkbox" bind:checked={withData} class="rounded border" />
-          创建后立即填充数据
+          {$t("MaterializedViews.with_data")}
         </label>
         {#if error}
           <div class="rounded-md border border-destructive/20 bg-destructive/10 p-3 text-xs text-destructive">{error}</div>
@@ -196,7 +198,7 @@
           {:else}
             <Plus size={14} />
           {/if}
-          创建
+          {$t("MaterializedViews.create")}
         </button>
       </form>
     </div>

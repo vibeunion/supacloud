@@ -57,6 +57,28 @@
   const isLoading = $derived(triggersQuery.isPending);
   const error = $derived(triggersQuery.error?.message || null);
 
+  const TRIGGER_EVENT_KEYS: Record<string, string> = {
+    INSERT: "Triggers.event_insert",
+    UPDATE: "Triggers.event_update",
+    DELETE: "Triggers.event_delete",
+  };
+
+  const TRIGGER_TIMING_KEYS: Record<string, string> = {
+    BEFORE: "Triggers.timing_before",
+    AFTER: "Triggers.timing_after",
+    "INSTEAD OF": "Triggers.timing_instead_of",
+  };
+
+  function triggerEventLabel(event: string): string {
+    const key = TRIGGER_EVENT_KEYS[event.toUpperCase()];
+    return key ? $t(key) : event;
+  }
+
+  function triggerTimingLabel(timing: string): string {
+    const key = TRIGGER_TIMING_KEYS[timing.toUpperCase()];
+    return key ? $t(key) : timing;
+  }
+
   function getEventColor(event: string): string {
     if (event === "INSERT") return "text-green-600 bg-green-500/10";
     if (event === "UPDATE") return "text-amber-600 bg-amber-500/10";
@@ -101,7 +123,7 @@
               <th class="px-3 py-2.5 font-semibold text-muted-foreground">{$t("Triggers.event")}</th>
               <th class="px-3 py-2.5 font-semibold text-muted-foreground">{$t("Triggers.timing")}</th>
               <th class="px-3 py-2.5 font-semibold text-muted-foreground">{$t("Triggers.function")}</th>
-              <th class="px-3 py-2.5 font-semibold text-muted-foreground text-center">Status</th>
+              <th class="px-3 py-2.5 font-semibold text-muted-foreground text-center">{$t("Triggers.status")}</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-border/20">
@@ -115,17 +137,17 @@
                 </td>
                 <td class="px-3 py-2.5 font-mono text-muted-foreground">{trg.event_object_table}</td>
                 <td class="px-3 py-2.5">
-                  <span class="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase {getEventColor(trg.event_manipulation)}">
-                    {trg.event_manipulation}
+                  <span title={trg.event_manipulation} class="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase {getEventColor(trg.event_manipulation)}">
+                    {triggerEventLabel(trg.event_manipulation)}
                   </span>
                 </td>
-                <td class="px-3 py-2.5 text-muted-foreground uppercase text-[10px] font-bold tracking-wider">{trg.action_timing}</td>
+                <td title={trg.action_timing} class="px-3 py-2.5 text-muted-foreground uppercase text-[10px] font-bold tracking-wider">{triggerTimingLabel(trg.action_timing)}</td>
                 <td class="px-3 py-2.5 font-mono text-[11px] text-muted-foreground">{extractFuncName(trg.action_statement)}</td>
                 <td class="px-3 py-2.5 text-center">
                   {#if trg.is_enabled === "YES"}
-                    <span class="px-2 py-0.5 rounded-full bg-green-500/10 text-green-600 text-[10px] font-bold">{$t("Triggers.enabled")}</span>
+                    <span title={trg.is_enabled} class="px-2 py-0.5 rounded-full bg-green-500/10 text-green-600 text-[10px] font-bold">{$t("Triggers.enabled")}</span>
                   {:else}
-                    <span class="px-2 py-0.5 rounded-full bg-muted text-muted-foreground text-[10px]">{$t("Triggers.disabled")}</span>
+                    <span title={trg.is_enabled} class="px-2 py-0.5 rounded-full bg-muted text-muted-foreground text-[10px]">{$t("Triggers.disabled")}</span>
                   {/if}
                 </td>
               </tr>

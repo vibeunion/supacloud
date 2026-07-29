@@ -40,7 +40,7 @@
   import { Menu, Plug, X } from "lucide-svelte";
   import { dataProvider, chatProvider } from "$lib/admin/provider";
   import { authProvider } from "$lib/admin/auth";
-  import { buildResourceRegistry } from "$lib/admin/resources";
+  import { buildResourceRegistry, type TenantResourceLabels } from "$lib/admin/resources";
   
   import zhLocales from "$lib/i18n/locales/zh.json";
   import enLocales from "$lib/i18n/locales/en.json";
@@ -114,10 +114,18 @@
     return localStorage.getItem("selected-locale") || "zh-CN";
   };
 
-  const mapToSvadminLocale = (value: string) => {
-    const normalized = value.toLowerCase();
+  const mapToSvadminLocale = (value: string | null | undefined) => {
+    const normalized = value?.toLowerCase() ?? "zh-cn";
     return normalized.startsWith("zh") ? "zh-CN" : "en";
   };
+
+  const getTenantResourceLabels = (): TenantResourceLabels => ({
+    tables: $t("Tables.resource_label"),
+    tableName: $t("Tables.name"),
+    schema: $t("Tables.schema"),
+    type: $t("Tables.type"),
+    rows: $t("Tables.rows"),
+  });
 
   setLocale(mapToSvadminLocale(readLocale()));
   
@@ -187,8 +195,8 @@
     const projectRefs = projects
       .map((project) => String((project as Record<string, unknown>).ref ?? ""))
       .filter(Boolean);
-    const freshResources = buildResourceRegistry(projectRefs);
-    const nextKey = getResourceKey(freshResources);
+    const freshResources = buildResourceRegistry(projectRefs, getTenantResourceLabels());
+    const nextKey = `${$locale}|${getResourceKey(freshResources)}`;
 
     if (nextKey === lastResourcesKey) {
       return;
@@ -257,10 +265,10 @@
           const projectRefs = nextProjects
             .map((project: Record<string, unknown>) => String(project.ref ?? ""))
             .filter(Boolean);
-          const nextResources = buildResourceRegistry(projectRefs);
+          const nextResources = buildResourceRegistry(projectRefs, getTenantResourceLabels());
 
           projects = nextProjects;
-          lastResourcesKey = getResourceKey(nextResources);
+          lastResourcesKey = `${$locale}|${getResourceKey(nextResources)}`;
           setResources(nextResources);
         }
       } catch (err: unknown) {
