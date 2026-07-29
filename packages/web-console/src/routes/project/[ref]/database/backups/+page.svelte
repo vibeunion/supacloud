@@ -73,6 +73,17 @@
     return "text-red-500";
   }
 
+  function backupStatusLabel(status: string) {
+    if (status === "completed") return $t("Backups.status_completed");
+    if (status === "in_progress") return $t("Backups.status_in_progress");
+    if (status === "failed") return $t("Backups.status_failed");
+    return status;
+  }
+
+  function backupTypeLabel(type: string) {
+    return type === "scheduled" ? $t("Backups.type_scheduled") : type;
+  }
+
   const createLogicalBackupMutation = createMutation(() => ({
     mutationFn: async () => {
       const res = await apiClient(`/v1/projects/${projectRef}/database/backups/logical`, { method: "POST" });
@@ -125,11 +136,12 @@
     <div>
       <h1 class="text-2xl font-bold">{$t("Backups.title")}</h1>
       <p class="text-sm text-muted-foreground mt-1">{$t("Backups.subtitle")}</p>
+      <span class="mt-2 inline-flex rounded-full bg-brand/10 px-2 py-0.5 text-[10px] font-semibold text-brand">{$t("Backups.pitr")}</span>
     </div>
     <div class="flex items-center gap-3">
       <button onclick={() => showRestore = true}
         class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg border bg-background hover:bg-muted transition-colors">
-        <DownloadCloud size={14} /> 从文件还原
+        <DownloadCloud size={14} /> {$t("Backups.restore_from_file")}
       </button>
       <button onclick={createLogicalBackup} disabled={createLogicalBackupMutation.isPending}
         class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-brand text-white hover:bg-brand/90 transition-colors disabled:opacity-50">
@@ -138,7 +150,7 @@
         {:else}
           <UploadCloud size={14} />
         {/if}
-        立即执行逻辑备份
+        {$t("Backups.create_logical")}
       </button>
     </div>
   </div>
@@ -154,24 +166,24 @@
   {#if showRestore}
     <div class="rounded-xl border bg-card p-5 space-y-4">
       <div class="flex items-center justify-between">
-        <h3 class="text-sm font-semibold">还原逻辑备份</h3>
+        <h3 class="text-sm font-semibold">{$t("Backups.restore_logical")}</h3>
         <button onclick={() => showRestore = false} class="text-muted-foreground hover:text-foreground"><X size={16} /></button>
       </div>
       <div class="p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg text-amber-600 text-[11px] leading-relaxed">
         <AlertTriangle size={14} class="inline mb-0.5 mr-1" />
-        <strong>危险操作：</strong>还原期间数据库不可用，且现有数据将被抹除并覆盖为备份状态。
+        <strong>{$t("Backups.danger")}：</strong>{$t("Backups.restore_warning")}
       </div>
       <div>
-        <span class="text-xs text-muted-foreground font-semibold">备份文件 ID / 名称</span>
+        <span class="text-xs text-muted-foreground font-semibold">{$t("Backups.backup_file")}</span>
         <input type="text" bind:value={restoreFile} placeholder="例如：backup_xxx.sql.gz"
           class="w-full mt-1.5 px-3 py-2 text-xs rounded-lg border bg-background font-mono focus:outline-none focus:ring-1 focus:ring-brand" />
-        <p class="text-[10px] text-muted-foreground mt-1">请填入通过「立即执行逻辑备份」生成的完整文件名。</p>
+        <p class="text-[10px] text-muted-foreground mt-1">{$t("Backups.restore_file_hint")}</p>
       </div>
       <div class="flex justify-end gap-3 pt-2">
-        <button onclick={() => showRestore = false} class="px-4 py-2 text-xs font-medium rounded-lg hover:bg-muted/50 transition-colors">取消</button>
+        <button onclick={() => showRestore = false} class="px-4 py-2 text-xs font-medium rounded-lg hover:bg-muted/50 transition-colors">{$t("Common.cancel")}</button>
         <button onclick={restoreBackup} disabled={isRestoring || !restoreFile} 
           class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-destructive text-white hover:brightness-110 transition-colors disabled:opacity-50">
-          {#if isRestoring}<Loader2 size={12} class="animate-spin" />{/if} 确认还原
+          {#if isRestoring}<Loader2 size={12} class="animate-spin" />{/if} {$t("Backups.confirm_restore")}
         </button>
       </div>
     </div>
@@ -184,16 +196,16 @@
         <HardDrive size={20} />
       </div>
       <div>
-        <p class="text-xs text-muted-foreground">当前数据库大小</p>
+        <p class="text-xs text-muted-foreground">{$t("Backups.database_size")}</p>
         <p class="text-xl font-bold font-mono">{dbSize || "—"}</p>
       </div>
       <div class="ml-auto text-right">
-        <p class="text-xs text-muted-foreground">备份频率</p>
-        <p class="text-sm font-semibold">每日 02:00 UTC</p>
+        <p class="text-xs text-muted-foreground">{$t("Backups.frequency")}</p>
+        <p class="text-sm font-semibold">{$t("Backups.frequency_value")}</p>
       </div>
       <div class="text-right">
-        <p class="text-xs text-muted-foreground">保留期限</p>
-        <p class="text-sm font-semibold">7 天</p>
+        <p class="text-xs text-muted-foreground">{$t("Backups.retention")}</p>
+        <p class="text-sm font-semibold">{$t("Backups.retention_value")}</p>
       </div>
     </div>
   </div>
@@ -222,11 +234,11 @@
                 <td class="px-4 py-2.5">
                   <div class="flex items-center gap-2">
                     <StatusIcon size={14} class={getStatusColor(bk.status)} />
-                    <span class="capitalize font-medium {getStatusColor(bk.status)}">{bk.status.replace("_", " ")}</span>
+                    <span title={bk.status} class="capitalize font-medium {getStatusColor(bk.status)}">{backupStatusLabel(bk.status)}</span>
                   </div>
                 </td>
                 <td class="px-3 py-2.5">
-                  <span class="px-2 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-bold uppercase">{bk.type}</span>
+                  <span title={bk.type} class="px-2 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-bold uppercase">{backupTypeLabel(bk.type)}</span>
                 </td>
                 <td class="px-3 py-2.5 text-muted-foreground">{formatTime(bk.created_at)}</td>
               </tr>

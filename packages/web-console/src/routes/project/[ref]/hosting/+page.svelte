@@ -208,10 +208,10 @@
   <div class="rounded-lg border bg-blue-500/5 border-blue-500/20 p-3 flex items-start gap-2">
     <Globe size={14} class="text-blue-600 mt-0.5 shrink-0" />
     <div class="text-xs text-blue-700">
-      <b>Webhook 自动部署：</b>支持 GitHub、GitLab、Gitee、GitCode 四大平台。
-      在仓库设置中添加 Webhook URL：
-      <code class="px-1 py-0.5 rounded bg-blue-500/10">{`${typeof window !== 'undefined' ? window.location.origin : ''}/v1/webhooks/{github|gitlab|gitee|gitcode}`}</code>，
-      Push 事件将自动触发匹配的部署。
+      <b>{$t("Hosting.webhook_info")}：</b> {$t("Hosting.webhook_support")}
+      {$t("Hosting.webhook_url_label")}
+      <code class="px-1 py-0.5 rounded bg-blue-500/10">{`${typeof window !== 'undefined' ? window.location.origin : ''}/v1/webhooks/{github|gitlab|gitee|gitcode}`}</code>。
+      {$t("Hosting.webhook_trigger")}
     </div>
   </div>
 </div>

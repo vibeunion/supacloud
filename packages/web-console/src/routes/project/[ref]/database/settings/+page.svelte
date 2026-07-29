@@ -2,6 +2,7 @@
   import { apiClient } from "$lib/api";
 
   import { page } from "$app/state";
+  import { t } from "svelte-i18n";
   import { Loader2, Database, Clock, HardDrive, Shield, Cpu } from "lucide-svelte";
   import { toast } from "svelte-sonner";
   import { createQuery } from "@tanstack/svelte-query";
@@ -55,34 +56,48 @@
     if (cat.includes("Lock") || cat.includes("Security")) return Shield;
     return Clock;
   }
+
+  function categoryLabel(category: string) {
+    if (category.includes("Connection")) return $t("DatabaseSettings.category_connections");
+    if (category.includes("Memory") || category.includes("Resource")) return $t("DatabaseSettings.category_resources");
+    if (category.includes("Write-Ahead") || category.includes("WAL")) return $t("DatabaseSettings.category_wal");
+    if (category.includes("Lock") || category.includes("Security")) return $t("DatabaseSettings.category_security");
+    return $t("DatabaseSettings.category_other");
+  }
+
+  function friendlyDescription(setting: DbSetting) {
+    if (setting.name === "max_connections") return $t("DatabaseSettings.max_connections_description");
+    if (setting.name === "work_mem") return $t("DatabaseSettings.work_mem_description");
+    return $t("DatabaseSettings.generic_description", { values: { name: setting.name } });
+  }
 </script>
 
 <div class="h-full flex flex-col space-y-4">
   <div>
-    <h1 class="text-2xl font-bold">数据库设置</h1>
-    <p class="text-sm text-muted-foreground mt-1">PostgreSQL 运行时参数和性能配置</p>
+    <h1 class="text-2xl font-bold">{$t("DatabaseSettings.title")}</h1>
+    <p class="text-sm text-muted-foreground mt-1">{$t("DatabaseSettings.subtitle")}</p>
   </div>
 
   <div class="flex-1 rounded-xl border border-border/50 bg-background shadow-sm overflow-hidden">
     {#if isLoading}
       <div class="flex flex-col items-center justify-center py-24 text-muted-foreground gap-3">
         <Loader2 size={32} class="animate-spin text-brand opacity-50" />
-        <p class="text-xs font-mono uppercase tracking-widest">正在查询 pg_settings...</p>
+        <p class="text-xs font-mono uppercase tracking-widest">{$t("DatabaseSettings.loading")}</p>
       </div>
     {:else if settings.length === 0}
       <div class="flex flex-col items-center justify-center py-24 text-muted-foreground gap-3">
         <Database size={40} class="opacity-20" />
-        <p class="text-sm">无法获取数据库设置</p>
+        <p class="text-sm">{$t("DatabaseSettings.empty")}</p>
       </div>
     {:else}
       <div class="overflow-auto max-h-[70vh]">
         <table class="w-full text-left text-xs">
           <thead class="bg-muted/30 border-b sticky top-0">
             <tr>
-              <th class="px-4 py-2.5 font-semibold text-muted-foreground">参数</th>
-              <th class="px-4 py-2.5 font-semibold text-muted-foreground text-right">值</th>
-              <th class="px-4 py-2.5 font-semibold text-muted-foreground">分类</th>
-              <th class="px-4 py-2.5 font-semibold text-muted-foreground">说明</th>
+              <th class="px-4 py-2.5 font-semibold text-muted-foreground">{$t("DatabaseSettings.parameter")}</th>
+              <th class="px-4 py-2.5 font-semibold text-muted-foreground text-right">{$t("DatabaseSettings.value")}</th>
+              <th class="px-4 py-2.5 font-semibold text-muted-foreground">{$t("DatabaseSettings.category")}</th>
+              <th class="px-4 py-2.5 font-semibold text-muted-foreground">{$t("DatabaseSettings.description")}</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-border/20 font-mono">
@@ -94,9 +109,9 @@
                   <span class="px-2 py-0.5 rounded bg-brand/10 text-brand font-bold text-[11px]">{s.setting}{s.unit ? ` ${s.unit}` : ''}</span>
                 </td>
                 <td class="px-4 py-2.5">
-                  <span class="px-1.5 py-0.5 rounded text-[9px] text-muted-foreground bg-muted/50">{s.category}</span>
+                  <span title={s.category} class="px-1.5 py-0.5 rounded text-[9px] text-muted-foreground bg-muted/50">{categoryLabel(s.category)}</span>
                 </td>
-                <td class="px-4 py-2.5 text-muted-foreground text-[10px] max-w-xs truncate" title={s.description}>{s.description}</td>
+                <td class="px-4 py-2.5 text-muted-foreground text-[10px] max-w-xs truncate" title={s.description}>{friendlyDescription(s)}</td>
               </tr>
             {/each}
           </tbody>

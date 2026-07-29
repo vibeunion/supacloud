@@ -15,4 +15,13 @@ describe("edge function JWT toggle", () => {
     expect(source).toContain("disabled={verifyJwtMutation.isPending}");
     expect(source).toContain("aria-busy={jwtUpdatingSlug === fn.slug}");
   });
+
+  test("localizes known statuses while retaining their raw technical value", () => {
+    expect(source).toContain('status === "ACTIVE" ? $t("Functions.status_active") : status');
+    expect(source).toContain("title={fn.status}");
+    expect(source).toContain('$t("Functions.active_version"');
+    expect(source).toContain('$t("Functions.version")');
+    expect(source).toContain('$t("Functions.endpoint")');
+    expect(source).toContain('$t("Functions.last_deploy")');
+  });
 });

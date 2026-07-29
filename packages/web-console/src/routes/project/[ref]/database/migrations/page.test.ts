@@ -12,4 +12,8 @@ describe("database migration history page", () => {
   test("shows migration checksums", () => {
     expect(source).toContain("checksum");
   });
+
+  test("explains why migration technical names remain unchanged", () => {
+    expect(source).toContain('$t("Migrations.technical_names_note")');
+  });
 });

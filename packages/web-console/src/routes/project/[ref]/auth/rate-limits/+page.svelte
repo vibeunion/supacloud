@@ -2,29 +2,31 @@
   import { apiClient } from "$lib/api";
 
   import { page } from "$app/state";
+  import { t } from "svelte-i18n";
   import { Timer, ShieldAlert, Mail, KeyRound, Smartphone, AlertTriangle, Loader2, Save, RefreshCw } from "lucide-svelte";
   import { createQuery, createMutation, useQueryClient } from "@tanstack/svelte-query";
 
   interface RateLimit {
-    name: string;
-    description: string;
+    labelKey: string;
+    descriptionKey: string;
     value: string;
-    unit: string;
+    unitKey: string;
     icon: typeof Timer;
     category: "auth" | "email" | "sms" | "otp";
+    categoryKey: string;
     envKey: string;
   }
 
   const RATE_LIMITS_DEF: Omit<RateLimit, 'value'>[] = [
-    { name: "Rate limit for signup", description: "每个 IP 在一段时间内的最大注册请求数", unit: "请求/小时", icon: KeyRound, category: "auth", envKey: "RATE_LIMIT_SIGNUP" },
-    { name: "Rate limit for sign-in", description: "每个 IP 在一段时间内的最大登录请求数", unit: "请求/小时", icon: KeyRound, category: "auth", envKey: "RATE_LIMIT_SIGNIN" },
-    { name: "Rate limit for token refresh", description: "每个 IP 的 Token 刷新速率限制", unit: "请求/小时", icon: Timer, category: "auth", envKey: "RATE_LIMIT_TOKEN_REFRESH" },
-    { name: "Rate limit for sending emails", description: "每个用户的邮件发送速率限制", unit: "封/小时", icon: Mail, category: "email", envKey: "RATE_LIMIT_EMAIL_SENT" },
-    { name: "Rate limit for email OTP", description: "邮件 OTP 验证码的速率限制", unit: "封/小时", icon: Mail, category: "otp", envKey: "RATE_LIMIT_EMAIL_OTP" },
-    { name: "Rate limit for sending SMS", description: "每个用户的短信发送速率限制", unit: "条/小时", icon: Smartphone, category: "sms", envKey: "RATE_LIMIT_SMS_SENT" },
-    { name: "Rate limit for SMS OTP", description: "短信 OTP 验证码的速率限制", unit: "条/小时", icon: Smartphone, category: "otp", envKey: "RATE_LIMIT_SMS_OTP" },
-    { name: "Rate limit for verify", description: "验证端点的速率限制", unit: "请求/小时", icon: ShieldAlert, category: "auth", envKey: "RATE_LIMIT_VERIFY" },
-    { name: "Rate limit for anonymous sign-in", description: "匿名登录的速率限制", unit: "请求/小时", icon: KeyRound, category: "auth", envKey: "RATE_LIMIT_ANONYMOUS_SIGN_IN" },
+    { labelKey: "AuthRateLimits.signup", descriptionKey: "AuthRateLimits.signup_description", unitKey: "AuthRateLimits.requests_per_hour", icon: KeyRound, category: "auth", categoryKey: "AuthRateLimits.category_auth", envKey: "RATE_LIMIT_SIGNUP" },
+    { labelKey: "AuthRateLimits.signin", descriptionKey: "AuthRateLimits.signin_description", unitKey: "AuthRateLimits.requests_per_hour", icon: KeyRound, category: "auth", categoryKey: "AuthRateLimits.category_auth", envKey: "RATE_LIMIT_SIGNIN" },
+    { labelKey: "AuthRateLimits.token_refresh", descriptionKey: "AuthRateLimits.token_refresh_description", unitKey: "AuthRateLimits.requests_per_hour", icon: Timer, category: "auth", categoryKey: "AuthRateLimits.category_auth", envKey: "RATE_LIMIT_TOKEN_REFRESH" },
+    { labelKey: "AuthRateLimits.email_send", descriptionKey: "AuthRateLimits.email_send_description", unitKey: "AuthRateLimits.messages_per_hour", icon: Mail, category: "email", categoryKey: "AuthRateLimits.category_email", envKey: "RATE_LIMIT_EMAIL_SENT" },
+    { labelKey: "AuthRateLimits.email_otp", descriptionKey: "AuthRateLimits.email_otp_description", unitKey: "AuthRateLimits.messages_per_hour", icon: Mail, category: "otp", categoryKey: "AuthRateLimits.category_otp", envKey: "RATE_LIMIT_EMAIL_OTP" },
+    { labelKey: "AuthRateLimits.sms_send", descriptionKey: "AuthRateLimits.sms_send_description", unitKey: "AuthRateLimits.messages_per_hour", icon: Smartphone, category: "sms", categoryKey: "AuthRateLimits.category_sms", envKey: "RATE_LIMIT_SMS_SENT" },
+    { labelKey: "AuthRateLimits.sms_otp", descriptionKey: "AuthRateLimits.sms_otp_description", unitKey: "AuthRateLimits.messages_per_hour", icon: Smartphone, category: "otp", categoryKey: "AuthRateLimits.category_otp", envKey: "RATE_LIMIT_SMS_OTP" },
+    { labelKey: "AuthRateLimits.verify", descriptionKey: "AuthRateLimits.verify_description", unitKey: "AuthRateLimits.requests_per_hour", icon: ShieldAlert, category: "auth", categoryKey: "AuthRateLimits.category_auth", envKey: "RATE_LIMIT_VERIFY" },
+    { labelKey: "AuthRateLimits.anonymous_signin", descriptionKey: "AuthRateLimits.anonymous_signin_description", unitKey: "AuthRateLimits.requests_per_hour", icon: KeyRound, category: "auth", categoryKey: "AuthRateLimits.category_auth", envKey: "RATE_LIMIT_ANONYMOUS_SIGN_IN" },
   ];
 
   const DEFAULT_VALUES: Record<string, string> = {
@@ -84,11 +86,11 @@
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["auth_config", projectRef] });
-      saveMsg = "✅ 速率限制已保存（GoTrue 服务已重启）";
+      saveMsg = `✅ ${$t("AuthRateLimits.save_success")}`;
       setTimeout(() => saveMsg = null, 4000);
     },
     onError: (err: unknown) => {
-      saveMsg = `❌ 保存失败: ${(err instanceof Error ? err.message : String(err))}`;
+      saveMsg = `❌ ${$t("AuthRateLimits.save_failed")}: ${err instanceof Error ? err.message : String(err)}`;
       setTimeout(() => saveMsg = null, 4000);
     }
   }));
@@ -109,17 +111,17 @@
 <div class="h-full flex flex-col space-y-4">
   <div class="flex items-center justify-between">
     <div>
-      <h1 class="text-2xl font-bold">速率限制</h1>
-      <p class="text-sm text-muted-foreground mt-1">认证端点的速率限制配置，保护应用免受滥用</p>
+      <h1 class="text-2xl font-bold">{$t("AuthRateLimits.title")}</h1>
+      <p class="text-sm text-muted-foreground mt-1">{$t("AuthRateLimits.subtitle")}</p>
     </div>
     <div class="flex items-center gap-2">
       <button onclick={() => queryClient.invalidateQueries({ queryKey: ["auth_config", projectRef] })} class="flex items-center gap-1.5 px-3 py-2 text-xs rounded-lg border hover:bg-muted/50 transition-colors">
-        <RefreshCw size={12} /> 刷新
+        <RefreshCw size={12} /> {$t("Common.refresh")}
       </button>
       <button onclick={saveConfig} disabled={saveMutation.isPending || isLoading}
         class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-brand text-white hover:bg-brand/90 transition-colors disabled:opacity-50">
         {#if saveMutation.isPending}<Loader2 size={14} class="animate-spin" />{:else}<Save size={14} />{/if}
-        保存配置
+        {$t("AuthRateLimits.save")}
       </button>
     </div>
   </div>
@@ -130,7 +132,7 @@
 
   <div class="rounded-lg border bg-amber-500/5 border-amber-500/20 p-3 flex items-start gap-2">
     <AlertTriangle size={14} class="text-amber-600 mt-0.5 shrink-0" />
-    <p class="text-xs text-amber-700">修改速率限制后将自动更新 GoTrue 环境变量并重启服务。请谨慎设置，过低的限制可能影响正常用户体验。</p>
+    <p class="text-xs text-amber-700">{$t("AuthRateLimits.warning")}</p>
   </div>
 
   {#if isLoading}
@@ -146,16 +148,16 @@
                   <limit.icon size={14} />
                 </div>
                 <div>
-                  <span class="font-medium text-sm">{limit.name}</span>
-                  <p class="text-[10px] text-muted-foreground mt-0.5">{limit.description}</p>
+                  <span class="font-medium text-sm">{$t(limit.labelKey)}</span>
+                  <p class="text-[10px] text-muted-foreground mt-0.5">{$t(limit.descriptionKey)}</p>
                 </div>
               </div>
               <div class="flex items-center gap-3">
-                <span class="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase {getCategoryColor(limit.category)}">{limit.category}</span>
+                <span title={limit.category} class="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase {getCategoryColor(limit.category)}">{$t(limit.categoryKey)}</span>
                 <div class="flex items-center gap-1.5">
                   <input type="number" bind:value={limits[i].value} min="1" max="10000"
                     class="w-20 px-2 py-1.5 text-sm font-mono font-bold text-center rounded-lg border bg-background focus:outline-none focus:ring-1 focus:ring-brand" />
-                  <span class="text-[10px] text-muted-foreground whitespace-nowrap">{limit.unit}</span>
+                  <span class="text-[10px] text-muted-foreground whitespace-nowrap">{$t(limit.unitKey)}</span>
                 </div>
               </div>
             </div>

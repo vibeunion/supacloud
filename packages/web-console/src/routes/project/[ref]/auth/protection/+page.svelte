@@ -2,6 +2,7 @@
   import { apiClient } from "$lib/api";
 
   import { page } from "$app/state";
+  import { t } from "svelte-i18n";
   import { Shield, Ban, AlertTriangle, Globe, Lock, Loader2 } from "lucide-svelte";
   import { toast } from "svelte-sonner";
   import { createQuery, createMutation, useQueryClient } from "@tanstack/svelte-query";
@@ -11,20 +12,20 @@
 
   interface ProtectionConfig {
     key: string;
-    name: string;
-    description: string;
+    labelKey: string;
+    descriptionKey: string;
     icon: typeof import('lucide-svelte').Shield;
     enabled: boolean;
-    detail: string;
+    detailKey: string;
   }
 
   const INITIAL_CONFIGS: ProtectionConfig[] = [
-    { key: "SECURITY_CAPTCHA_ENABLED", name: "Bot Detection", description: "使用 CAPTCHA 防止自动化机器人攻击", icon: Shield, enabled: false, detail: "支持 hCaptcha 和 Cloudflare Turnstile" },
-    { key: "SECURITY_IP_RESTRICTION_ENABLED", name: "IP 限制", description: "限制特定 IP 或 CIDR 范围访问认证 API", icon: Ban, enabled: false, detail: "可设置白名单和黑名单" },
-    { key: "PASSWORD_HIBC_ENABLE", name: "泄露密码检测", description: "阻止使用已知泄露密码进行注册", icon: Lock, enabled: true, detail: "使用 HaveIBeenPwned 数据库检查" },
-    { key: "PASSWORD_STRENGTH_REQUIRE_COMPLEXITY", name: "强密码策略", description: "要求密码满足复杂度要求（长度、大小写、数字、特殊字符）", icon: Lock, enabled: true, detail: "最小 8 个字符" },
-    { key: "SECURITY_LOCKOUT_ENABLED", name: "登录失败锁定", description: "连续登录失败后临时锁定账户", icon: Ban, enabled: false, detail: "默认：5 次失败后锁定 15 分钟" },
-    { key: "SECURITY_CORS_RESTRICTION_ENABLED", name: "CORS 限制", description: "限制允许的跨域请求来源", icon: Globe, enabled: true, detail: "默认允许所有域名" },
+    { key: "SECURITY_CAPTCHA_ENABLED", labelKey: "AuthProtection.bot_detection", descriptionKey: "AuthProtection.bot_detection_description", icon: Shield, enabled: false, detailKey: "AuthProtection.bot_detection_detail" },
+    { key: "SECURITY_IP_RESTRICTION_ENABLED", labelKey: "AuthProtection.ip_restriction", descriptionKey: "AuthProtection.ip_restriction_description", icon: Ban, enabled: false, detailKey: "AuthProtection.ip_restriction_detail" },
+    { key: "PASSWORD_HIBC_ENABLE", labelKey: "AuthProtection.breached_passwords", descriptionKey: "AuthProtection.breached_passwords_description", icon: Lock, enabled: true, detailKey: "AuthProtection.breached_passwords_detail" },
+    { key: "PASSWORD_STRENGTH_REQUIRE_COMPLEXITY", labelKey: "AuthProtection.password_strength", descriptionKey: "AuthProtection.password_strength_description", icon: Lock, enabled: true, detailKey: "AuthProtection.password_strength_detail" },
+    { key: "SECURITY_LOCKOUT_ENABLED", labelKey: "AuthProtection.lockout", descriptionKey: "AuthProtection.lockout_description", icon: Ban, enabled: false, detailKey: "AuthProtection.lockout_detail" },
+    { key: "SECURITY_CORS_RESTRICTION_ENABLED", labelKey: "AuthProtection.cors", descriptionKey: "AuthProtection.cors_description", icon: Globe, enabled: true, detailKey: "AuthProtection.cors_detail" },
   ];
 
   const configQuery = createQuery(() => ({
@@ -71,13 +72,13 @@
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["auth_config", projectRef] });
-      saveMsg = `✅ ${data.cfg.name} 已${data.enabled ? '启用' : '完全禁用'} (GoTrue重启中)`;
+      saveMsg = `✅ ${$t(data.cfg.labelKey)} ${$t(data.enabled ? "AuthProtection.enabled" : "AuthProtection.disabled")}`;
       setTimeout(() => saveMsg = null, 3000);
     },
     onError: (err, variables, context) => {
       // Revert optimistic update
       configs[variables.index].enabled = !variables.enabled;
-      saveMsg = `❌ 保存失败`;
+      saveMsg = `❌ ${$t("AuthProtection.save_failed")}`;
       setTimeout(() => saveMsg = null, 3000);
     }
   }));
@@ -91,17 +92,17 @@
 
 <div class="h-full flex flex-col space-y-4">
   <div>
-    <h1 class="text-2xl font-bold">安全防护</h1>
-    <p class="text-sm text-muted-foreground mt-1">配置认证安全防护措施和攻击防御</p>
+      <h1 class="text-2xl font-bold">{$t("AuthProtection.title")}</h1>
+      <p class="text-sm text-muted-foreground mt-1">{$t("AuthProtection.subtitle")}</p>
   </div>
 
   <div class="rounded-lg border bg-amber-500/5 border-amber-500/20 p-3 flex items-start gap-2">
     <AlertTriangle size={14} class="text-amber-600 mt-0.5 shrink-0" />
-    <p class="text-xs text-amber-700">这些设置影响所有认证端点的安全行为。修改前请确保了解对现有用户的影响。</p>
+    <p class="text-xs text-amber-700">{$t("AuthProtection.warning")}</p>
   </div>
 
   {#if saveMsg}
-    <div class="rounded-lg border {saveMsg.includes('错误') || saveMsg.includes('失败') ? 'bg-red-500/10 border-red-500/20 text-red-600' : 'bg-green-500/10 border-green-500/20 text-green-600'} px-4 py-2 text-xs font-medium">
+    <div class="rounded-lg border {saveMsg.startsWith('❌') ? 'bg-red-500/10 border-red-500/20 text-red-600' : 'bg-green-500/10 border-green-500/20 text-green-600'} px-4 py-2 text-xs font-medium">
       {saveMsg}
     </div>
   {/if}
@@ -120,18 +121,18 @@
               <cfg.icon size={16} />
             </div>
             <div>
-              <span class="font-semibold text-sm">{cfg.name}</span>
-              <p class="text-[10px] text-muted-foreground">{cfg.description}</p>
+              <span class="font-semibold text-sm">{$t(cfg.labelKey)}</span>
+              <p class="text-[10px] text-muted-foreground">{$t(cfg.descriptionKey)}</p>
             </div>
           </div>
           <div class="flex items-center gap-3">
-            <span class="text-[10px] text-muted-foreground hidden md:block">{cfg.detail}</span>
+            <span class="text-[10px] text-muted-foreground hidden md:block">{$t(cfg.detailKey)}</span>
             <button 
               onclick={() => toggleConfig(i)}
               disabled={toggleMutation.isPending}
               class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full focus:outline-none focus:ring-2 focus:ring-brand focus:ring-offset-2 {cfg.enabled ? 'bg-brand' : 'bg-muted-foreground/30'} transition-colors disabled:opacity-50"
             >
-              <span class="sr-only">Use setting</span>
+              <span class="sr-only">{$t("AuthProtection.use_setting")}</span>
               <span aria-hidden="true" class="pointer-events-none absolute left-0 inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition-transform duration-200 ease-in-out {cfg.enabled ? 'translate-x-4' : 'translate-x-0.5'}"></span>
             </button>
           </div>

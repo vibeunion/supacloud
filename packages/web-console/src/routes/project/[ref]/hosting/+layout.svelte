@@ -12,10 +12,10 @@
   <div class="px-6 mb-6">
     <div class="flex items-center justify-between mb-4">
       <div>
-        <h1 class="text-2xl font-bold">SupaCloud Pages</h1>
-        <p class="text-sm text-muted-foreground mt-1">像 Vercel 一样部署前端应用 — 支持静态站点和 SSR 框架</p>
+        <h1 class="text-2xl font-bold">{$t("Hosting.pages_title")}</h1>
+        <p class="text-sm text-muted-foreground mt-1">{$t("Hosting.pages_tagline")}</p>
       </div>
-      <span class="px-2 py-1 text-[10px] font-bold rounded-full bg-brand/10 text-brand border border-brand/20">HOSTING</span>
+      <span class="px-2 py-1 text-[10px] font-bold rounded-full bg-brand/10 text-brand border border-brand/20">{$t("Hosting.tag")}</span>
     </div>
     <div class="flex items-center gap-2 overflow-x-auto pb-2">
       <a

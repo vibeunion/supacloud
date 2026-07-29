@@ -225,8 +225,19 @@
       </div>
     </div>
 
-    <div class="rounded-lg border px-4 py-3 text-sm {status.configurationCurrent ? 'border-emerald-500/20 bg-emerald-500/5 text-emerald-700 dark:text-emerald-300' : 'border-amber-500/20 bg-amber-500/5 text-amber-700 dark:text-amber-300'}">
-      {status.configurationCurrent ? $t("Cache.config_current") : $t("Cache.config_stale")}
+    <div class="flex flex-wrap items-center justify-between gap-3 rounded-lg border px-4 py-3 text-sm {status.configurationCurrent ? 'border-emerald-500/20 bg-emerald-500/5 text-emerald-700 dark:text-emerald-300' : 'border-amber-500/20 bg-amber-500/5 text-amber-700 dark:text-amber-300'}">
+      <span>{status.configurationCurrent ? $t("Cache.config_current") : $t("Cache.config_stale")}</span>
+      {#if !status.configurationCurrent}
+        <button
+          type="button"
+          onclick={() => loadStatus(true)}
+          disabled={refreshing}
+          class="inline-flex items-center gap-2 rounded-md border border-current/20 px-2.5 py-1.5 text-xs font-semibold transition-colors hover:bg-background/30 disabled:opacity-50"
+        >
+          <RefreshCw class={refreshing ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} />
+          {$t("Cache.refresh")}
+        </button>
+      {/if}
     </div>
   {/if}
 
@@ -244,12 +255,12 @@
         <label class="space-y-1.5 text-sm">
           <span class="font-medium">{$t("Cache.operation")}</span>
           <select bind:value={operation} class="w-full rounded-lg border bg-background px-3 py-2.5 font-mono text-sm">
-            <option value="get">GET</option>
-            <option value="set">SET</option>
-            <option value="delete">DELETE</option>
-            <option value="ttl">TTL</option>
-            <option value="getset">GETSET</option>
-            <option value="getdel">GETDEL</option>
+            <option value="get">{$t("Cache.operation_get")}</option>
+            <option value="set">{$t("Cache.operation_set")}</option>
+            <option value="delete">{$t("Cache.operation_delete")}</option>
+            <option value="ttl">{$t("Cache.operation_ttl")}</option>
+            <option value="getset">{$t("Cache.operation_getset")}</option>
+            <option value="getdel">{$t("Cache.operation_getdel")}</option>
           </select>
         </label>
         <label class="space-y-1.5 text-sm">

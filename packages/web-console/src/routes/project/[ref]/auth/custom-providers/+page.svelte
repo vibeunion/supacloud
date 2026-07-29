@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { apiClient } from "$lib/api";
+  import { t } from "svelte-i18n";
   import { KeyRound, Loader2, Pencil, Plus, Save, Trash2, X } from "lucide-svelte";
   import { toast } from "svelte-sonner";
 
@@ -52,11 +53,11 @@
     loading = true;
     try {
       const response = await apiClient(`/v1/projects/${projectRef}/auth/custom-providers`);
-      if (!response.ok) throw new Error(await responseMessage(response, "无法读取 Custom OAuth 提供者"));
+      if (!response.ok) throw new Error(await responseMessage(response, $t("CustomProviders.load_failed")));
       const payload = record(await response.json());
       providers = Array.isArray(payload.providers) ? payload.providers as Provider[] : [];
     } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : "无法读取 Custom OAuth 提供者");
+      toast.error(error instanceof Error ? error.message : $t("CustomProviders.load_failed"));
     } finally {
       loading = false;
     }
@@ -127,7 +128,7 @@
 
   async function saveProvider() {
     if (!identifier.trim() || !name.trim() || !clientId.trim() || (!editingIdentifier && !clientSecret)) {
-      toast.error("请填写标识、名称、Client ID 和新建时所需的 Client Secret");
+      toast.error($t("CustomProviders.required_fields"));
       return;
     }
     saving = true;
@@ -140,29 +141,29 @@
         headers: { "content-type": "application/json" },
         body: JSON.stringify(requestBody()),
       });
-      if (!response.ok) throw new Error(await responseMessage(response, "保存 Custom OAuth 提供者失败"));
-      toast.success(editingIdentifier ? "提供者已更新" : "提供者已创建");
+      if (!response.ok) throw new Error(await responseMessage(response, $t("CustomProviders.save_failed")));
+      toast.success($t(editingIdentifier ? "CustomProviders.updated" : "CustomProviders.created"));
       showForm = false;
       resetForm();
       await loadProviders();
     } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : "保存 Custom OAuth 提供者失败");
+      toast.error(error instanceof Error ? error.message : $t("CustomProviders.save_failed"));
     } finally {
       saving = false;
     }
   }
 
   async function deleteProvider(provider: Provider) {
-    if (!confirm(`确定删除 ${provider.name}（${provider.identifier}）？`)) return;
+    if (!confirm($t("CustomProviders.delete_confirmation", { values: { name: provider.name, identifier: provider.identifier } }))) return;
     const response = await apiClient(
       `/v1/projects/${projectRef}/auth/custom-providers/${encodeURIComponent(provider.identifier)}`,
       { method: "DELETE" },
     );
     if (!response.ok) {
-      toast.error(await responseMessage(response, "删除提供者失败"));
+      toast.error(await responseMessage(response, $t("CustomProviders.delete_failed")));
       return;
     }
-    toast.success("提供者已删除");
+    toast.success($t("CustomProviders.deleted"));
     await loadProviders();
   }
 
@@ -172,39 +173,39 @@
 <div class="h-full flex flex-col space-y-4">
   <div class="flex items-center justify-between gap-4">
     <div>
-      <h1 class="text-2xl font-bold">Custom OAuth / OIDC</h1>
-      <p class="text-sm text-muted-foreground mt-1">连接任意符合标准的企业或区域身份提供者，默认启用 PKCE</p>
+      <h1 class="text-2xl font-bold">{$t("CustomProviders.title")}</h1>
+      <p class="text-sm text-muted-foreground mt-1">{$t("CustomProviders.subtitle")}</p>
     </div>
     <button onclick={openCreate} class="flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-xs font-semibold text-white">
-      <Plus size={14} /> 新建提供者
+      <Plus size={14} /> {$t("CustomProviders.create")}
     </button>
   </div>
 
   {#if showForm}
     <div class="rounded-xl border bg-card p-5 space-y-4">
       <div class="flex items-center justify-between">
-        <h2 class="font-semibold">{editingIdentifier ? `编辑 ${editingIdentifier}` : "新建 Custom Provider"}</h2>
+        <h2 class="font-semibold">{editingIdentifier ? $t("CustomProviders.edit_title", { values: { identifier: editingIdentifier } }) : $t("CustomProviders.new_title")}</h2>
         <button onclick={() => { showForm = false; resetForm(); }} class="rounded p-1 text-muted-foreground hover:bg-muted"><X size={16} /></button>
       </div>
       <div class="grid gap-4 md:grid-cols-2">
-        <label class="text-xs font-medium space-y-1">协议
+        <label class="text-xs font-medium space-y-1">{$t("CustomProviders.protocol")}
           <select bind:value={providerType} disabled={Boolean(editingIdentifier)} class="w-full rounded-lg border bg-background px-3 py-2">
             <option value="oidc">OpenID Connect</option><option value="oauth2">OAuth 2.0</option>
           </select>
         </label>
-        <label class="text-xs font-medium space-y-1">标识
+        <label class="text-xs font-medium space-y-1">{$t("CustomProviders.identifier")}
           <input bind:value={identifier} disabled={Boolean(editingIdentifier)} placeholder="custom:workos" class="w-full rounded-lg border bg-muted/20 px-3 py-2 font-mono" />
         </label>
-        <label class="text-xs font-medium space-y-1">显示名称
+        <label class="text-xs font-medium space-y-1">{$t("CustomProviders.display_name")}
           <input bind:value={name} placeholder="WorkOS" class="w-full rounded-lg border bg-muted/20 px-3 py-2" />
         </label>
         <label class="text-xs font-medium space-y-1">Client ID
           <input bind:value={clientId} class="w-full rounded-lg border bg-muted/20 px-3 py-2 font-mono" />
         </label>
-        <label class="text-xs font-medium space-y-1">Client Secret {editingIdentifier ? "（留空则不变）" : ""}
+        <label class="text-xs font-medium space-y-1">Client Secret {editingIdentifier ? $t("CustomProviders.keep_existing_hint") : ""}
           <input type="password" bind:value={clientSecret} class="w-full rounded-lg border bg-muted/20 px-3 py-2 font-mono" />
         </label>
-        <label class="text-xs font-medium space-y-1">Scopes（逗号分隔）
+        <label class="text-xs font-medium space-y-1">{$t("CustomProviders.scopes")}
           <input bind:value={scopesText} class="w-full rounded-lg border bg-muted/20 px-3 py-2 font-mono" />
         </label>
         {#if providerType === "oidc"}
@@ -218,12 +219,12 @@
         {/if}
       </div>
       <div class="flex items-center gap-6 text-xs">
-        <label class="flex items-center gap-2"><input type="checkbox" bind:checked={enabled} /> 启用</label>
+        <label class="flex items-center gap-2"><input type="checkbox" bind:checked={enabled} /> {$t("CustomProviders.enabled")}</label>
         <label class="flex items-center gap-2"><input type="checkbox" bind:checked={pkceEnabled} /> PKCE</label>
       </div>
       <div class="flex justify-end">
         <button onclick={saveProvider} disabled={saving} class="flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-xs font-semibold text-white disabled:opacity-50">
-          {#if saving}<Loader2 size={14} class="animate-spin" />{:else}<Save size={14} />{/if} 保存
+          {#if saving}<Loader2 size={14} class="animate-spin" />{:else}<Save size={14} />{/if} {$t("Common.save")}
         </button>
       </div>
     </div>
@@ -233,18 +234,18 @@
     {#if loading}
       <div class="py-24 flex justify-center"><Loader2 class="animate-spin text-brand" /></div>
     {:else if providers.length === 0}
-      <div class="py-20 flex flex-col items-center gap-3 text-muted-foreground"><KeyRound size={32} /><p class="text-sm">尚未配置 Custom Provider</p></div>
+      <div class="py-20 flex flex-col items-center gap-3 text-muted-foreground"><KeyRound size={32} /><p class="text-sm">{$t("CustomProviders.empty")}</p></div>
     {:else}
       <div class="divide-y">
         {#each providers as provider (provider.identifier)}
           <div class="flex items-center justify-between gap-4 px-5 py-4">
             <div class="min-w-0">
-              <div class="flex items-center gap-2"><span class="font-semibold">{provider.name}</span><span class="rounded bg-muted px-2 py-0.5 text-[10px] uppercase">{provider.provider_type}</span>{#if provider.enabled}<span class="text-xs text-green-600">已启用</span>{/if}</div>
+              <div class="flex items-center gap-2"><span class="font-semibold">{provider.name}</span><span class="rounded bg-muted px-2 py-0.5 text-[10px] uppercase">{provider.provider_type}</span>{#if provider.enabled}<span class="text-xs text-green-600">{$t("CustomProviders.enabled")}</span>{/if}</div>
               <p class="mt-1 truncate font-mono text-xs text-muted-foreground">{provider.identifier} · {provider.client_id}</p>
             </div>
             <div class="flex items-center gap-1">
-              <button onclick={() => openEdit(provider)} aria-label={`编辑 ${provider.name}`} class="rounded p-2 text-muted-foreground hover:bg-muted"><Pencil size={14} /></button>
-              <button onclick={() => deleteProvider(provider)} aria-label={`删除 ${provider.name}`} class="rounded p-2 text-muted-foreground hover:bg-red-500/10 hover:text-red-600"><Trash2 size={14} /></button>
+              <button onclick={() => openEdit(provider)} aria-label={$t("CustomProviders.edit_aria", { values: { name: provider.name } })} class="rounded p-2 text-muted-foreground hover:bg-muted"><Pencil size={14} /></button>
+              <button onclick={() => deleteProvider(provider)} aria-label={$t("CustomProviders.delete_aria", { values: { name: provider.name } })} class="rounded p-2 text-muted-foreground hover:bg-red-500/10 hover:text-red-600"><Trash2 size={14} /></button>
             </div>
           </div>
         {/each}

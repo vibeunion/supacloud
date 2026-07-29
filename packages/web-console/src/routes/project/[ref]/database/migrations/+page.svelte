@@ -22,7 +22,7 @@
     queryFn: async () => {
       const res = await apiClient(`/v1/projects/${projectRef}/database/migrations`);
       const data = await res.json();
-      if (!res.ok) throw new Error(data.message || data.error || "Failed to load migration history");
+      if (!res.ok) throw new Error(data.message || data.error || $t("Migrations.load_failed"));
       return (Array.isArray(data) ? data : []).map((row: Record<string, unknown>): Migration => {
         const statements = Array.isArray(row.statements)
           ? row.statements.filter((statement): statement is string => typeof statement === "string")
@@ -46,7 +46,7 @@
   const migrations = $derived(migrationsQuery.data || []);
   const isLoading = $derived(migrationsQuery.isPending);
   const error = $derived(migrationsQuery.error?.message || null);
-  const fallbackMsg = $derived(!isLoading && !error && migrations.length === 0 ? "暂无迁移历史" : null);
+  const fallbackMsg = $derived(!isLoading && !error && migrations.length === 0 ? $t("Migrations.empty") : null);
 
   function formatTime(ts: string | null): string {
     if (!ts) return "—";
@@ -60,6 +60,7 @@
     <div>
       <h1 class="text-2xl font-bold">{$t("Migrations.title")}</h1>
       <p class="text-sm text-muted-foreground mt-1">{$t("Migrations.subtitle")}</p>
+      <p class="text-[11px] text-muted-foreground mt-1">{$t("Migrations.technical_names_note")}</p>
     </div>
     {#if !isLoading && migrations.length > 0}
       <span class="px-2.5 py-1 rounded-full bg-brand/10 text-brand text-xs font-bold">{migrations.length}</span>
@@ -87,7 +88,7 @@
               <th class="px-4 py-2.5 font-semibold text-muted-foreground">{$t("Migrations.version")}</th>
               <th class="px-3 py-2.5 font-semibold text-muted-foreground">{$t("Migrations.name")}</th>
               <th class="px-3 py-2.5 font-semibold text-muted-foreground text-right">{$t("Migrations.statements")}</th>
-              <th class="px-3 py-2.5 font-semibold text-muted-foreground">Checksum</th>
+              <th class="px-3 py-2.5 font-semibold text-muted-foreground">{$t("Migrations.checksum")}</th>
               <th class="px-4 py-2.5 font-semibold text-muted-foreground">{$t("Migrations.applied_at")}</th>
             </tr>
           </thead>

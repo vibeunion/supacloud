@@ -17,4 +17,15 @@ describe("project cache console", () => {
     expect(source).toContain("window.confirm");
     expect(source).toContain('postCacheRequest("flush", { confirmation: projectRef })');
   });
+
+  test("keeps operation identifiers while localizing their display labels", () => {
+    expect(source).toContain('value="get">{$t("Cache.operation_get")}');
+    expect(source).toContain('value="set">{$t("Cache.operation_set")}');
+    expect(source).toContain('value="getset">{$t("Cache.operation_getset")}');
+  });
+
+  test("offers a refresh action when the cache configuration is stale", () => {
+    expect(source).toContain("!status.configurationCurrent");
+    expect(source).toContain("onclick={() => loadStatus(true)}");
+  });
 });

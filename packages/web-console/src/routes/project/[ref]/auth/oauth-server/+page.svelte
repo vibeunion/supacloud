@@ -18,6 +18,7 @@
     Trash2,
   } from "lucide-svelte";
   import { toast } from "svelte-sonner";
+  import { t } from "svelte-i18n";
 
   type OAuthClient = {
     id?: string;
@@ -45,11 +46,11 @@
   let authMethod = $state<"client_secret_basic" | "client_secret_post" | "none">("client_secret_basic");
 
   const endpointRows = $derived(statusData ? [
-    { label: "Authorization", value: statusData.authorization_endpoint },
-    { label: "Token", value: statusData.token_endpoint },
-    { label: "JWKS", value: statusData.jwks_url },
-    { label: "Discovery", value: statusData.oauth_authorization_server_metadata_url },
-    { label: "OIDC", value: statusData.discovery_url },
+    { label: $t("OAuthServer.endpoint_authorization"), value: statusData.authorization_endpoint },
+    { label: $t("OAuthServer.endpoint_token"), value: statusData.token_endpoint },
+    { label: $t("OAuthServer.endpoint_jwks"), value: statusData.jwks_url },
+    { label: $t("OAuthServer.endpoint_discovery"), value: statusData.oauth_authorization_server_metadata_url },
+    { label: $t("OAuthServer.endpoint_oidc"), value: statusData.discovery_url },
   ] : []);
 
   function normalizeClients(payload: unknown): OAuthClient[] {
@@ -73,7 +74,7 @@
     try {
       const res = await apiClient(`/v1/projects/${projectRef}/auth/oauth-server`);
       const payload = await readJson(res);
-      if (!res.ok) throw new Error(payload.message || "无法加载 OAuth Server 状态");
+      if (!res.ok) throw new Error(payload.message || $t("OAuthServer.load_failed"));
       statusData = payload;
       allowDynamicRegistration = payload.allow_dynamic_registration === true;
       if (payload.enabled) await loadClients();
@@ -89,7 +90,7 @@
     try {
       const res = await apiClient(`/v1/projects/${projectRef}/auth/oauth-clients`);
       const payload = await readJson(res);
-      if (!res.ok) throw new Error(payload.message || "无法加载 OAuth clients");
+      if (!res.ok) throw new Error(payload.message || $t("OAuthServer.clients_load_failed"));
       clients = normalizeClients(payload);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
@@ -114,7 +115,7 @@
           return { response, payload: await readJson(response) };
         },
       );
-      toast.success("OAuth Server 已启用");
+      toast.success($t("OAuthServer.enabled_success"));
       await loadClients();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
@@ -129,7 +130,7 @@
       .map((item) => item.trim())
       .filter(Boolean);
     if (!clientName.trim() || redirectUris.length === 0) {
-      toast.error("Client 名称和 Redirect URI 必填");
+      toast.error($t("OAuthServer.client_required"));
       return;
     }
 
@@ -145,10 +146,10 @@
         }),
       });
       const payload = await readJson(res);
-      if (!res.ok) throw new Error(payload.message || "Client 创建失败");
+      if (!res.ok) throw new Error(payload.message || $t("OAuthServer.client_create_failed"));
       clientName = "";
       redirectUrisText = "";
-      toast.success("OAuth client 已创建");
+      toast.success($t("OAuthServer.client_created"));
       await loadClients();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
@@ -161,15 +162,15 @@
     const clientId = client.client_id || client.id;
     if (!clientId) return;
     const clientName = client.client_name || client.name || clientId;
-    if (!confirm(`确定要删除 OAuth Client “${clientName}”吗？此操作不可恢复。`)) return;
+    if (!confirm($t("OAuthServer.client_delete_confirmation", { values: { name: clientName } }))) return;
     saving = true;
     try {
       const res = await apiClient(`/v1/projects/${projectRef}/auth/oauth-clients/${encodeURIComponent(clientId)}`, {
         method: "DELETE",
       });
       const payload = await readJson(res);
-      if (!res.ok) throw new Error(payload.message || "Client 删除失败");
-      toast.success("OAuth client 已删除");
+      if (!res.ok) throw new Error(payload.message || $t("OAuthServer.client_delete_failed"));
+      toast.success($t("OAuthServer.client_deleted"));
       await loadClients();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
@@ -181,9 +182,9 @@
   async function copyText(value: string) {
     try {
       await navigator.clipboard.writeText(value);
-      toast.success("已复制");
+      toast.success($t("Common.copied"));
     } catch {
-      toast.error("复制失败");
+      toast.error($t("Common.copy_failed"));
     }
   }
 
@@ -193,8 +194,8 @@
 <div class="flex flex-col gap-4">
   <div class="flex items-start justify-between gap-4">
     <div>
-      <h1 class="text-2xl font-bold">OAuth 2.1 Server</h1>
-      <p class="text-sm text-muted-foreground mt-1">管理项目作为 OAuth/OIDC 授权服务器时的签名、发现端点和第三方 clients。</p>
+      <h1 class="text-2xl font-bold">{$t("OAuthServer.title")}</h1>
+      <p class="text-sm text-muted-foreground mt-1">{$t("OAuthServer.subtitle")}</p>
     </div>
     <button
       class="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-muted/50 disabled:opacity-50"
@@ -202,7 +203,7 @@
       disabled={loading || saving}
     >
       <RefreshCw size={14} class={loading ? "animate-spin" : ""} />
-      刷新
+      {$t("Common.refresh")}
     </button>
   </div>
 
@@ -220,25 +221,25 @@
         <div class="flex items-center justify-between gap-3 border-b px-5 py-4">
           <div class="flex items-center gap-2">
             <ShieldCheck size={18} class={statusData.enabled ? "text-green-600" : "text-amber-600"} />
-            <h2 class="font-semibold">服务状态</h2>
+            <h2 class="font-semibold">{$t("OAuthServer.service_status")}</h2>
           </div>
           <span class="rounded-full px-2.5 py-1 text-xs font-semibold {statusData.enabled ? 'bg-green-500/10 text-green-700' : 'bg-amber-500/10 text-amber-700'}">
-            {statusData.enabled ? "已启用" : "未启用"}
+            {statusData.enabled ? $t("OAuthServer.enabled") : $t("OAuthServer.disabled")}
           </span>
         </div>
         <div class="space-y-4 p-5">
           <div class="grid gap-3 sm:grid-cols-3">
             <div class="rounded-md border bg-muted/20 p-3">
-              <div class="text-xs text-muted-foreground">签名算法</div>
+              <div class="text-xs text-muted-foreground">{$t("OAuthServer.signing_algorithm")}</div>
               <div class="mt-1 font-mono text-sm font-semibold">{statusData.signing_alg}</div>
             </div>
             <div class="rounded-md border bg-muted/20 p-3">
               <div class="text-xs text-muted-foreground">ID Token</div>
-              <div class="mt-1 text-sm font-semibold">{statusData.oidc_id_token_ready ? "ready" : "not ready"}</div>
+              <div class="mt-1 text-sm font-semibold">{statusData.oidc_id_token_ready ? $t("OAuthServer.ready") : $t("OAuthServer.not_ready")}</div>
             </div>
             <div class="rounded-md border bg-muted/20 p-3">
-              <div class="text-xs text-muted-foreground">动态注册</div>
-              <div class="mt-1 text-sm font-semibold">{statusData.allow_dynamic_registration ? "允许" : "关闭"}</div>
+              <div class="text-xs text-muted-foreground">{$t("OAuthServer.dynamic_registration")}</div>
+              <div class="mt-1 text-sm font-semibold">{statusData.allow_dynamic_registration ? $t("OAuthServer.allowed") : $t("OAuthServer.disabled")}</div>
             </div>
           </div>
 
@@ -254,12 +255,12 @@
           {/if}
 
           <div class="rounded-md border border-amber-500/25 bg-amber-500/5 p-3 text-sm text-amber-800">
-            OAuth beta 的 scope 还不能替代 RLS。第三方授权应同时依赖 RLS、`client_id` claim 和最小权限策略。
+            {$t("OAuthServer.rls_warning")}
           </div>
 
           <label class="flex items-center gap-2 text-sm">
             <input type="checkbox" bind:checked={allowDynamicRegistration} class="h-4 w-4 rounded border" />
-            允许动态 client 注册
+            {$t("OAuthServer.allow_dynamic_registration")}
           </label>
 
           <button
@@ -268,27 +269,27 @@
             disabled={saving}
           >
             {#if saving}<Loader2 size={14} class="animate-spin" />{:else}<KeyRound size={14} />{/if}
-            {statusData.enabled ? "重新应用 ES256/JWKS 配置" : "启用 OAuth 2.1 Server"}
+            {statusData.enabled ? $t("OAuthServer.reapply_configuration") : $t("OAuthServer.enable")}
           </button>
         </div>
       </section>
 
       <section class="rounded-lg border bg-card">
         <div class="border-b px-5 py-4">
-          <h2 class="font-semibold">Bun Edge Functions 兼容性</h2>
+        <h2 class="font-semibold">{$t("OAuthServer.edge_compatibility")}</h2>
         </div>
         <div class="space-y-3 p-5 text-sm">
           <div class="flex items-start gap-2">
             <CheckCircle2 size={15} class="mt-0.5 text-green-600" />
-            <span>Runtime env 下发 `JWT_JWKS` / `JWT_KEYS`，Bun Edge Runtime 可验证 ES256 token。</span>
+            <span>{$t("OAuthServer.edge_runtime_jwks")}</span>
           </div>
           <div class="flex items-start gap-2">
             <CheckCircle2 size={15} class="mt-0.5 text-green-600" />
-            <span>GoTrue admin proxy 使用 ES256 临时 service_role token；旧 HS256 登录态如失效，请用户重新输入密码登录。</span>
+            <span>{$t("OAuthServer.gotrue_proxy_note")}</span>
           </div>
           <div class="flex items-start gap-2">
             <AlertTriangle size={15} class="mt-0.5 text-amber-600" />
-            <span>Dashboard 内编辑 Functions 没有版本回滚；生产函数继续走 Git/CI 与 SupaCloud Bun runtime。</span>
+            <span>{$t("OAuthServer.functions_note")}</span>
           </div>
         </div>
       </section>
@@ -296,14 +297,14 @@
 
     <section class="rounded-lg border bg-card">
       <div class="border-b px-5 py-4">
-        <h2 class="font-semibold">发现端点</h2>
+        <h2 class="font-semibold">{$t("OAuthServer.discovery_endpoints")}</h2>
       </div>
       <div class="divide-y">
         {#each endpointRows as row (row.label)}
           <div class="grid gap-2 px-5 py-3 text-sm md:grid-cols-[160px_1fr_auto]">
             <span class="font-medium">{row.label}</span>
             <code class="break-all rounded bg-muted/40 px-2 py-1 text-xs">{row.value}</code>
-            <button class="rounded-md border p-2 hover:bg-muted/50" title="复制" onclick={() => copyText(row.value)}>
+            <button class="rounded-md border p-2 hover:bg-muted/50" title={$t("Common.copy")} onclick={() => copyText(row.value)}>
               <Copy size={14} />
             </button>
           </div>
@@ -321,12 +322,12 @@
           <input
             class="w-full rounded-md border bg-background px-3 py-2 text-sm"
             bind:value={clientName}
-            placeholder="Client 名称"
+            placeholder={$t("OAuthServer.client_name_placeholder")}
           />
           <textarea
             class="min-h-24 w-full rounded-md border bg-background px-3 py-2 text-sm"
             bind:value={redirectUrisText}
-            placeholder="Redirect URI，每行一个"
+            placeholder={$t("OAuthServer.redirect_uri_placeholder")}
           ></textarea>
           <div class="grid gap-2 sm:grid-cols-2">
             <select class="rounded-md border bg-background px-3 py-2 text-sm" bind:value={clientType}>
@@ -345,13 +346,13 @@
             disabled={saving || !statusData.enabled}
           >
             <Plus size={14} />
-            创建 Client
+            {$t("OAuthServer.create_client")}
           </button>
         </div>
 
         <div class="overflow-hidden rounded-md border">
           {#if clients.length === 0}
-            <div class="p-6 text-sm text-muted-foreground">暂无 OAuth client</div>
+            <div class="p-6 text-sm text-muted-foreground">{$t("OAuthServer.no_clients")}</div>
           {:else}
             <div class="divide-y">
               {#each clients as client ((client.client_id || client.id) ?? client.name)}
@@ -373,7 +374,7 @@
                   </div>
                   <button
                     class="h-9 rounded-md border p-2 text-destructive hover:bg-destructive/10 disabled:opacity-50"
-                    title="删除"
+                    title={$t("Common.delete")}
                     onclick={() => deleteClient(client)}
                     disabled={saving}
                   >
