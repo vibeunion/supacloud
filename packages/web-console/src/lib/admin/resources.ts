@@ -33,18 +33,26 @@ export const resources: ResourceDefinition[] = [
   }
 ];
 
-export const getTenantResources = (ref: string): ResourceDefinition[] => [
+export interface TenantResourceLabels {
+  tables: string;
+  tableName: string;
+  schema: string;
+  type: string;
+  rows: string;
+}
+
+export const getTenantResources = (ref: string, labels: TenantResourceLabels): ResourceDefinition[] => [
   {
     name: `v1/projects/${ref}/database/tables`,
-    label: 'Tables',
+    label: labels.tables,
     // Table creation uses the dedicated, migration-backed form on the Tables page.
     canCreate: false,
     canEdit: false,
     fields: [
-      { key: 'table_name', label: 'Name', type: 'text', required: true, searchable: true },
-      { key: 'table_schema', label: 'Schema', type: 'select', showInForm: false },
-      { key: 'table_type', label: 'Type', type: 'select', showInForm: false },
-      { key: 'row_estimate', label: 'Rows', type: 'number', showInForm: false }
+      { key: 'table_name', label: labels.tableName, type: 'text', required: true, searchable: true },
+      { key: 'table_schema', label: labels.schema, type: 'select', showInForm: false },
+      { key: 'table_type', label: labels.type, type: 'select', showInForm: false },
+      { key: 'row_estimate', label: labels.rows, type: 'number', showInForm: false }
     ]
   },
   {
@@ -68,11 +76,11 @@ export const getTenantResources = (ref: string): ResourceDefinition[] => [
   }
 ];
 
-export function buildResourceRegistry(projectRefs: string[]): ResourceDefinition[] {
+export function buildResourceRegistry(projectRefs: string[], labels: TenantResourceLabels): ResourceDefinition[] {
   const uniqueRefs = [...new Set(projectRefs.filter(Boolean))];
 
   return [
     ...resources,
-    ...uniqueRefs.flatMap((ref) => getTenantResources(ref)),
+    ...uniqueRefs.flatMap((ref) => getTenantResources(ref, labels)),
   ];
 }

@@ -123,6 +123,19 @@ S3 模式下 `db reset` 会被拒绝，因为 Lite 不能把数据库元数据�
 
 网络暴露时必须提供足够强的 JWT secret 和独立 vault key。默认生成的密钥适合单机项目；不要把 `.supacloud-lite/secrets.json` 提交到版本库。
 
+## Windows 内嵌终端排障
+
+Lite 需要 Bun 读取已安装的 `dist/cli.js`、项目配置和 PGlite WASM 文件。若在 TRAE 等 IDE 内嵌 PowerShell 中出现 `EPERM reading`，先在同一终端运行最小文件读取测试：
+
+```powershell
+Set-Content .\bun-read-test.js 'console.log("ok")'
+bun .\bun-read-test.js
+```
+
+如果这个不含 Lite 的命令也返回 `EPERM`，故障发生在 Bun 启动应用之前，Lite 无法在应用代码内绕过宿主终端的文件访问限制。请切换到系统 PowerShell 或 Windows Terminal；随后升级到当前稳定版 Bun，并检查 IDE 沙箱、终端隔离和安全软件策略。`node` 能读取同一文件不代表 Bun 进程获得了相同的宿主权限。修复环境后再运行 `npx supacloud-lite --help` 验证。
+
+若最小测试成功而 Lite 仍失败，请保留完整错误、`bun --version`、终端类型和项目路径，再提交 Lite 问题。不要为绕过 `EPERM` 放宽项目目录的全局 ACL。
+
 ## 升级、快照与恢复
 
 生产或持久化环境升级时，先更新项目锁定的 npm 依赖，再运行 Lite 的受控升级命令：

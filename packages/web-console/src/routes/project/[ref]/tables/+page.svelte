@@ -56,6 +56,16 @@
     return Number.isFinite(count) && count >= 0 ? Math.floor(count) : null;
   }
 
+  function tableTypeLabel(value: unknown): string {
+    if (String(value) === "BASE TABLE") return $t("Tables.base_table");
+    return String(value || "-");
+  }
+
+  function schemaLabel(value: unknown): string {
+    if (String(value).toLowerCase() === "public") return $t("Tables.public_schema");
+    return String(value || "-");
+  }
+
   const createTableMutation = createMutation(() => ({
     mutationFn: async () => {
       const response = await apiClient(`/v1/projects/${projectRef}/database/tables`, {
@@ -106,12 +116,12 @@
 
         {#snippet schemaRenderer({ value }: { value: any })}
           <span class="px-2 py-0.5 bg-brand/10 text-brand text-[10px] rounded-full uppercase font-medium tracking-wider">
-            {value}
+            <span title={String(value)}>{schemaLabel(value)}</span>
           </span>
         {/snippet}
 
         {#snippet typeRenderer({ value }: { value: any })}
-          <span class="text-xs text-muted-foreground">{value}</span>
+          <span class="text-xs text-muted-foreground" title={String(value)}>{tableTypeLabel(value)}</span>
         {/snippet}
 
         {#snippet rowsRenderer({ value }: { value: any })}
@@ -151,7 +161,7 @@
               <input bind:value={column.name} required maxlength="63" pattern="[A-Za-z_][A-Za-z0-9_]*" class="min-w-0 px-2.5 py-2 rounded-md border bg-background text-xs font-mono" aria-label={$t("Tables.column_name_aria", { values: { index: index + 1 } })} />
               <select bind:value={column.type} disabled={index === 0} class="px-2 py-2 rounded-md border bg-background text-xs font-mono disabled:opacity-70" aria-label={$t("Tables.column_type_aria", { values: { index: index + 1 } })}>
                 {#each columnTypes as type (type)}
-                  <option value={type}>{type}</option>
+                  <option value={type}>{$t(`Tables.type_${type.replaceAll(" ", "_")}`)}</option>
                 {/each}
               </select>
               {#if index === 0}

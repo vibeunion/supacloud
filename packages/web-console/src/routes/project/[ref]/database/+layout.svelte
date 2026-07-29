@@ -31,8 +31,7 @@
 
   type DatabaseTab = {
     id: string;
-    labelKey?: string;
-    labelFallback?: string;
+    labelKey: string;
     icon: typeof FolderOpen;
   };
 
@@ -49,7 +48,7 @@
         { id: "types", labelKey: "EnumTypes.title", icon: Tag },
         { id: "functions", labelKey: "DbFunctions.title", icon: Braces },
         { id: "triggers", labelKey: "Triggers.title", icon: Zap },
-        { id: "materialized-views", labelFallback: "Materialized Views", icon: Layers },
+        { id: "materialized-views", labelKey: "DatabaseObjects.materialized_views", icon: Layers },
       ],
     },
     {
@@ -57,8 +56,8 @@
       items: [
         { id: "roles", labelKey: "Roles.title", icon: Users },
         { id: "column-privileges", labelKey: "ColumnPrivileges.title", icon: ShieldCheck },
-        { id: "rls-tester", labelFallback: "RLS Tester", icon: FlaskConical },
-        { id: "temporary-access", labelFallback: "Temporary Access", icon: KeyRound },
+        { id: "rls-tester", labelKey: "DatabaseObjects.rls_tester", icon: FlaskConical },
+        { id: "temporary-access", labelKey: "DatabaseObjects.temporary_access", icon: KeyRound },
       ],
     },
     {
@@ -68,8 +67,8 @@
         { id: "extensions", labelKey: "Extensions.title", icon: Package },
         { id: "publications", labelKey: "Publications.title", icon: Radio },
         { id: "hooks", labelKey: "Hooks.title", icon: Webhook },
-        { id: "pipelines", labelFallback: "Pipelines", icon: Workflow },
-        { id: "wrappers", labelFallback: "Wrappers", icon: Globe },
+        { id: "pipelines", labelKey: "DatabaseObjects.pipelines", icon: Workflow },
+        { id: "wrappers", labelKey: "DatabaseObjects.wrappers", icon: Globe },
         { id: "cron", labelKey: "CronJobs.title", icon: CalendarClock },
       ],
     },
@@ -123,7 +122,7 @@
       <a href={`/project/${projectRef}/database`} class="transition-colors hover:text-foreground">{$t("Navigation.database")}</a>
       {#if activeTab}
         <span>/</span>
-        <span class="text-foreground">{activeTab.labelKey ? $t(activeTab.labelKey) : activeTab.labelFallback}</span>
+        <span class="text-foreground">{$t(activeTab.labelKey)}</span>
       {/if}
     </div>
 
@@ -142,7 +141,7 @@
               {@const Icon = tab.icon}
               <a href={`/project/${projectRef}/database/${tab.id}`} onclick={closeMenuFromLink} class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium transition-colors {currentTab === tab.id ? 'bg-brand/10 text-brand' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}">
                 <Icon class="h-4 w-4" />
-                {tab.labelKey ? $t(tab.labelKey) : tab.labelFallback}
+                {$t(tab.labelKey)}
               </a>
             {/each}
           </div>

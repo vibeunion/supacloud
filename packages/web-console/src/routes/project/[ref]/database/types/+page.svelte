@@ -3,7 +3,7 @@
 
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
-  import { Loader2, Tag, ListOrdered } from "lucide-svelte";
+  import { Loader2, Tag, ListOrdered, Search } from "lucide-svelte";
   import { createQuery } from "@tanstack/svelte-query";
 
   interface EnumType {
@@ -12,6 +12,9 @@
     owner: string;
     enum_values: string;
   }
+
+  let searchQuery = $state("");
+  let schemaFilter = $state("all");
 
   const projectRef = $derived(page.params.ref);
 
@@ -46,6 +49,14 @@
   const types = $derived((typesQuery.data as EnumType[]) || []);
   const isLoading = $derived(typesQuery.isPending);
   const error = $derived(typesQuery.error?.message || null);
+  const schemaOptions = $derived([...new Set(types.map((typ) => typ.schema_name))].sort((a, b) => a.localeCompare(b)));
+  const filteredTypes = $derived(types.filter((typ) => {
+    const normalizedQuery = searchQuery.trim().toLocaleLowerCase();
+    const matchesSchema = schemaFilter === "all" || typ.schema_name === schemaFilter;
+    if (!normalizedQuery) return matchesSchema;
+    return matchesSchema && [typ.type_name, typ.schema_name, typ.owner, typ.enum_values]
+      .some((value) => value.toLocaleLowerCase().includes(normalizedQuery));
+  }));
 </script>
 
 <div class="h-full flex flex-col space-y-4">
@@ -55,8 +66,27 @@
       <p class="text-sm text-muted-foreground mt-1">{$t("EnumTypes.subtitle")}</p>
     </div>
     {#if !isLoading && types.length > 0}
-      <span class="px-2.5 py-1 rounded-full bg-brand/10 text-brand text-xs font-bold">{types.length}</span>
+      <span class="px-2.5 py-1 rounded-full bg-brand/10 text-brand text-xs font-bold">{filteredTypes.length}</span>
     {/if}
+  </div>
+
+  <div class="flex flex-wrap items-center gap-2">
+    <label class="relative block min-w-52 flex-1 sm:flex-none">
+      <Search size={14} class="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+      <input
+        bind:value={searchQuery}
+        aria-label={$t("EnumTypes.search")}
+        placeholder={$t("EnumTypes.search")}
+        class="w-full pl-9 pr-3 py-1.5 text-xs rounded-md border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand"
+      />
+    </label>
+    <select bind:value={schemaFilter} aria-label={$t("EnumTypes.schema_filter")} class="px-3 py-1.5 text-xs rounded-md border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand">
+      <option value="all">{$t("EnumTypes.all_schemas")}</option>
+      {#each schemaOptions as schemaName (schemaName)}
+        <option value={schemaName}>{schemaName}</option>
+      {/each}
+    </select>
+    <p class="w-full text-[10px] text-muted-foreground">{$t("EnumTypes.values_hint")}</p>
   </div>
 
   <div class="flex-1 rounded-xl border border-border/50 bg-background shadow-sm overflow-hidden">
@@ -67,10 +97,10 @@
       </div>
     {:else if error}
       <div class="p-4"><div class="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-xs font-mono">{error}</div></div>
-    {:else if types.length === 0}
+    {:else if filteredTypes.length === 0}
       <div class="flex flex-col items-center justify-center py-24 text-muted-foreground gap-3 opacity-40">
         <ListOrdered size={40} strokeWidth={1} />
-        <p class="text-sm">{$t("EnumTypes.no_types")}</p>
+        <p class="text-sm">{types.length === 0 ? $t("EnumTypes.no_types") : $t("EnumTypes.no_matching_types")}</p>
       </div>
     {:else}
       <div class="overflow-auto">
@@ -84,7 +114,7 @@
             </tr>
           </thead>
           <tbody class="divide-y divide-border/20">
-            {#each types as typ}
+            {#each filteredTypes as typ}
               <tr class="hover:bg-muted/10 transition-colors">
                 <td class="px-4 py-2.5">
                   <div class="flex items-center gap-2">
@@ -97,7 +127,7 @@
                 <td class="px-4 py-2.5">
                   <div class="flex gap-1 flex-wrap">
                     {#each typ.enum_values.split(", ") as val}
-                      <span class="px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-600 text-[10px] font-mono font-medium">{val}</span>
+                      <span title={val} class="px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-600 text-[10px] font-mono font-medium">{val}</span>
                     {/each}
                   </div>
                 </td>

@@ -172,9 +172,13 @@ describe('project runtime', () => {
 
     const paths = resolveProjectPaths({ projectDir })
     await writeFile(`${paths.dataDir}.supacloud-lite.lock`, JSON.stringify({ pid: 999_999, nonce: 'stale' }))
+    const recovered = await createProjectBackend({ projectDir, includeFunctions: false, includeWebhooks: false })
+    await recovered.backend.close()
+
+    await writeFile(`${paths.dataDir}.supacloud-lite.lock`, '{not-json')
     await expect(
       createProjectBackend({ projectDir, includeFunctions: false, includeWebhooks: false })
-    ).rejects.toThrow('remove the lock manually')
+    ).rejects.toThrow('unreadable lock')
   })
 
   test('expands seed globs deterministically and surfaces migration directory errors', async () => {

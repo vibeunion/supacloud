@@ -99,6 +99,9 @@
 
   <div class="rounded-lg border bg-blue-500/5 border-blue-500/20 p-3 flex items-start gap-2">
     <BarChart3 size={14} class="text-blue-600 mt-0.5 shrink-0" />
-    <p class="text-xs text-blue-700">{$t("Reports.data_sources_note")} <code class="bg-blue-500/10 px-1 rounded">pg_stat_statements</code>、<code class="bg-blue-500/10 px-1 rounded">pg_stat_user_tables</code> {$t("Reports.data_sources_note_suffix")}</p>
+    <p class="text-xs text-blue-700">
+      {$t("Reports.data_sources_note")} <code class="bg-blue-500/10 px-1 rounded">pg_stat_statements</code>、<code class="bg-blue-500/10 px-1 rounded">pg_stat_user_tables</code> {$t("Reports.data_sources_note_suffix")}
+      <a href={`/project/${projectRef}/database/extensions`} class="ml-1 font-semibold underline underline-offset-2">{$t("Reports.manage_extensions")}</a>
+    </p>
   </div>
 </div>

@@ -114,7 +114,7 @@
                   {#if pub.pubtruncate}<Check size={13} class="inline text-green-500" />{:else}<X size={13} class="inline text-muted-foreground/30" />{/if}
                 </td>
                 <td class="px-4 py-2.5 font-mono text-[11px] text-muted-foreground max-w-xs truncate">
-                  {pub.puballtables ? "ALL" : (pub.tables || "—")}
+                  {pub.puballtables ? $t("Publications.all_tables_value") : (pub.tables || "—")}
                 </td>
               </tr>
             {/each}

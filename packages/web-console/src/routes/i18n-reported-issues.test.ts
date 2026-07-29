@@ -13,6 +13,7 @@ const authPages = [
   "rate-limits",
   "sessions",
 ];
+const reportPages = ["api-overview", "auth", "database", "query-performance", "storage"];
 const hanCharacters = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/u;
 
 function leafKeys(value: unknown, path = ""): string[] {
@@ -34,10 +35,33 @@ describe("reported-issues i18n contract", () => {
     expect(leafKeys(en).sort()).toEqual(leafKeys(zh).sort());
   });
 
+  test("keeps Chinese copy out of the English locale", () => {
+    expect(JSON.stringify(en)).not.toMatch(hanCharacters);
+    expect(JSON.stringify(zh)).toMatch(hanCharacters);
+  });
+
   test("keeps reported Auth pages free of hardcoded CJK copy", () => {
     for (const page of authPages) {
       const source = readFileSync(new URL(`project/[ref]/auth/${page}/+page.svelte`, import.meta.url), "utf8");
       expect(withoutComments(source)).not.toMatch(hanCharacters);
     }
+  });
+
+  test("keeps reported monitoring pages free of hardcoded CJK copy", () => {
+    for (const page of reportPages) {
+      const source = readFileSync(new URL(`project/[ref]/reports/${page}/+page.svelte`, import.meta.url), "utf8");
+      expect(withoutComments(source)).not.toMatch(hanCharacters);
+    }
+  });
+
+  test("localizes task-center status labels while preserving technical values", () => {
+    const source = readFileSync(new URL("project/[ref]/tasks/+page.svelte", import.meta.url), "utf8");
+
+    expect(withoutComments(source)).not.toMatch(hanCharacters);
+    expect(source).toContain("taskStatusLabel(task.status)");
+    expect(source).toContain("title={task.status}");
+    expect(source).not.toContain(">{task.status}<");
+    expect(zh.TaskCenter.dead_letter_queue).toContain("死信队列");
+    expect(en.TaskCenter.max_payload).toContain("Payload");
   });
 });

@@ -378,6 +378,30 @@ async function getProjectSql(ref: string) {
   return getProjectRoleDb(credentials.db_name, credentials.db_user, credentials.db_password);
 }
 
+async function readQueryPerformanceStats(credentials: {
+  db_name: string;
+}): Promise<{ installed: boolean; rows: unknown[] }> {
+  const adminDb = getProjectDb(credentials.db_name);
+  const [extension] = await adminDb`
+    SELECT n.nspname AS schema_name,
+           to_regclass(format('%I.pg_stat_statements', n.nspname)) IS NOT NULL AS has_view
+    FROM pg_extension AS e
+    JOIN pg_namespace AS n ON n.oid = e.extnamespace
+    WHERE e.extname = 'pg_stat_statements'
+    LIMIT 1
+  `;
+  if (!extension?.schema_name || extension.has_view !== true) return { installed: false, rows: [] };
+
+  const schema = quotePgIdentifier(String(extension.schema_name), "pg_stat_statements schema");
+  const rows = await adminDb.unsafe(`
+    SELECT query, calls, total_exec_time, mean_exec_time, rows
+    FROM ${schema}.pg_stat_statements
+    ORDER BY total_exec_time DESC
+    LIMIT 100
+  `);
+  return { installed: true, rows };
+}
+
 function resolveSqlMode(body: Record<string, unknown>): SqlExecutionMode {
   const mode = typeof body.mode === "string" ? body.mode : "read";
   if (mode === "migration" || mode === "admin") return mode;
@@ -1303,6 +1327,46 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                 query: t.String(),
             }),
             detail: { tags: ["projects"], summary: "Execute a read-only SQL query" },
+        }
+    )
+    .get(
+        "/query-performance",
+        async ({ params, set, request }) => {
+            const authError = await requireProjectOrAdminAuth(request, params.ref);
+            if (authError) return projectAuthResponse(authError, set);
+
+            const project = await projectService.getProject(params.ref);
+            if (!project) {
+                set.status = 404;
+                return { message: "Project not found", code: "404", status: 404 };
+            }
+
+            const credentials = await getProjectDatabaseCredentials(params.ref);
+            if (!credentials) {
+                set.status = 404;
+                return { message: "Project database credentials not found", code: "404", status: 404 };
+            }
+
+            try {
+                return await readQueryPerformanceStats(credentials);
+            } catch (error: unknown) {
+                const { errorCode, errorMessage } = databaseErrorDetails(error);
+                logger.error("[database] failed to read query performance", {
+                    projectRef: params.ref,
+                    errorCode,
+                    errorMessage,
+                });
+                set.status = 503;
+                return {
+                    message: "Query performance statistics are temporarily unavailable",
+                    code: "QUERY_PERFORMANCE_UNAVAILABLE",
+                    status: 503,
+                };
+            }
+        },
+        {
+            params: t.Object({ ref: t.String({ minLength: 1 }) }),
+            detail: { tags: ["projects", "database"], summary: "Read query performance statistics" },
         }
     )
     .post(

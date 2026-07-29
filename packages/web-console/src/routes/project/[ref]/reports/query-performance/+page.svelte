@@ -15,115 +15,21 @@
   }
 
   const MISSING_EXTENSION = "MISSING_EXTENSION";
-  const ACCESS_UNAVAILABLE = "ACCESS_UNAVAILABLE";
 
   const projectRef = $derived(page.params.ref);
 
   const statsQuery = createQuery(() => ({
     queryKey: ["query-performance", projectRef],
     queryFn: async () => {
-      const extensionCheck = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sql: `SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_statements') AS installed,
-                       (SELECT n.nspname
-                        FROM pg_extension e
-                        JOIN pg_namespace n ON n.oid = e.extnamespace
-                        WHERE e.extname = 'pg_stat_statements'
-                        LIMIT 1) AS schema_name;`
-        })
-      });
-      const extensionData = await extensionCheck.json();
-      if (!extensionCheck.ok) {
-        throw new Error(extensionData?.message || extensionData?.error || "Failed to check extension status");
+      const response = await apiClient(`/v1/projects/${projectRef}/database/query-performance`);
+      const performanceData = await response.json();
+      if (!response.ok) {
+        throw new Error(performanceData?.message || performanceData?.error || "Failed to load query performance");
       }
-      const installed = Boolean(extensionData?.rows?.[0]?.installed);
-      const schemaName = String(extensionData?.rows?.[0]?.schema_name || "");
-      if (!installed) {
+      if (!performanceData?.installed) {
         throw new Error("MISSING_EXTENSION");
       }
-
-      if (schemaName && !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(schemaName)) {
-        throw new Error(ACCESS_UNAVAILABLE);
-      }
-
-      if (schemaName) {
-        const schemaAccessCheck = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sql: `SELECT has_schema_privilege(current_user, '${schemaName}', 'USAGE') AS schema_usage;`
-          })
-        });
-        const schemaAccessData = await schemaAccessCheck.json();
-        if (!schemaAccessCheck.ok || !schemaAccessData?.rows?.[0]?.schema_usage) {
-          throw new Error(ACCESS_UNAVAILABLE);
-        }
-
-        const accessCheck = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sql: `SELECT has_table_privilege(to_regclass('${schemaName}.pg_stat_statements'), 'SELECT') AS can_select;`
-          })
-        });
-        const accessData = await accessCheck.json();
-        if (!accessCheck.ok || !accessData?.rows?.[0]?.can_select) {
-          throw new Error(ACCESS_UNAVAILABLE);
-        }
-      }
-
-      const schemasToTry = schemaName ? [`${schemaName}.`, "monitor.", "extensions."] : ["monitor.", "extensions."];
-      let sawMissingRelation = false;
-      let sawPermissionDenied = false;
-      let lastErrorMessage: string | null = null;
-
-      for (const schemaPrefix of schemasToTry) {
-        const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sql: `SELECT query, calls, total_exec_time, mean_exec_time, rows
-                  FROM ${schemaPrefix}pg_stat_statements
-                  ORDER BY total_exec_time DESC LIMIT 100;`
-          })
-        });
-        const data = await res.json();
-
-        if (!res.ok || data.error) {
-          const message = data?.message || data?.error || "Failed to query pg_stat_statements";
-          lastErrorMessage = message;
-
-          if (message.includes("pg_stat_statements") && message.includes("does not exist")) {
-            sawMissingRelation = true;
-            continue;
-          }
-
-          if (message.includes("permission denied for schema")) {
-            sawPermissionDenied = true;
-            continue;
-          }
-
-          throw new Error(message);
-        }
-
-        return data.rows || [];
-      }
-
-      if (sawPermissionDenied) {
-        throw new Error(ACCESS_UNAVAILABLE);
-      }
-
-      if (sawMissingRelation) {
-        throw new Error(MISSING_EXTENSION);
-      }
-
-      if (lastErrorMessage) {
-        throw new Error(lastErrorMessage);
-      }
-
-      return [];
+      return performanceData.rows || [];
     }
   }));
 
@@ -154,9 +60,8 @@
   const isLoading = $derived(statsQuery.isPending);
   const isEnabling = $derived(enableMutation.isPending);
   const missingExtension = $derived(statsQuery.error?.message === MISSING_EXTENSION);
-  const accessUnavailable = $derived(statsQuery.error?.message === ACCESS_UNAVAILABLE);
   const error = $derived(
-    statsQuery.error && statsQuery.error.message !== MISSING_EXTENSION && statsQuery.error.message !== ACCESS_UNAVAILABLE
+    statsQuery.error && statsQuery.error.message !== MISSING_EXTENSION
       ? statsQuery.error.message
       : (enableMutation.error ? enableMutation.error.message : null)
   );
@@ -204,20 +109,12 @@
         >
           {#if isEnabling}
             <Loader2 size={16} class="animate-spin" />
-            <span>Enabling...</span>
+            <span>{$t("QueryPerformance.enabling")}</span>
           {:else}
             <Play size={16} />
             <span>{$t("QueryPerformance.enable_now")}</span>
           {/if}
         </button>
-      </div>
-    {:else if accessUnavailable}
-      <div class="flex-1 flex flex-col items-center justify-center text-center gap-4 py-24 max-w-md mx-auto">
-        <div class="w-16 h-16 rounded-full bg-yellow-500/10 text-yellow-600 flex items-center justify-center mb-2">
-          <AlertTriangle size={32} />
-        </div>
-        <h3 class="text-lg font-semibold">{$t("QueryPerformance.access_unavailable_title")}</h3>
-        <p class="text-sm text-muted-foreground">{$t("QueryPerformance.access_unavailable_desc")}</p>
       </div>
     {:else}
       <div class="overflow-x-auto flex-1">

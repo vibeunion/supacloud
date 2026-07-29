@@ -2,6 +2,7 @@
   import { apiClient } from "$lib/api";
 
   import { page } from "$app/state";
+  import { t } from "svelte-i18n";
   import { Loader2, ArrowLeft, HardDrive } from "lucide-svelte";
   import { createQuery } from "@tanstack/svelte-query";
 
@@ -77,8 +78,8 @@
       <ArrowLeft size={18} />
     </a>
     <div>
-      <h1 class="text-2xl font-bold">数据库报表</h1>
-      <p class="text-sm text-muted-foreground mt-1">数据库连接、缓存命中率和表级统计</p>
+      <h1 class="text-2xl font-bold">{$t("Reports.database_report_title")}</h1>
+      <p class="text-sm text-muted-foreground mt-1">{$t("Reports.database_report_subtitle")}</p>
     </div>
   </div>
 
@@ -91,21 +92,21 @@
       {@const db = dbStats[0]}
       <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div class="rounded-xl border bg-card p-4">
-          <div class="text-[10px] font-semibold text-muted-foreground uppercase">数据库大小</div>
+          <div class="text-[10px] font-semibold text-muted-foreground uppercase">{$t("Reports.database_size")}</div>
           <div class="text-xl font-bold mt-1 text-brand">{db.db_size}</div>
         </div>
         <div class="rounded-xl border bg-card p-4">
-          <div class="text-[10px] font-semibold text-muted-foreground uppercase">活跃连接</div>
+          <div class="text-[10px] font-semibold text-muted-foreground uppercase">{$t("Reports.active_connections")}</div>
           <div class="text-xl font-bold mt-1">{db.connections}</div>
         </div>
         <div class="rounded-xl border bg-card p-4">
-          <div class="text-[10px] font-semibold text-muted-foreground uppercase">缓存命中率</div>
+          <div class="text-[10px] font-semibold text-muted-foreground uppercase">{$t("Reports.cache_hit_ratio")}</div>
           <div class="text-xl font-bold mt-1 {Number(db.cache_hit_ratio) > 95 ? 'text-green-600' : Number(db.cache_hit_ratio) > 80 ? 'text-amber-600' : 'text-red-600'}">
             {db.cache_hit_ratio}%
           </div>
         </div>
         <div class="rounded-xl border bg-card p-4">
-          <div class="text-[10px] font-semibold text-muted-foreground uppercase">提交 / 回滚</div>
+          <div class="text-[10px] font-semibold text-muted-foreground uppercase">{$t("Reports.commits_rollbacks")}</div>
           <div class="text-lg font-bold mt-1">{formatNum(db.commits)} / <span class="text-red-600">{formatNum(db.rollbacks)}</span></div>
         </div>
       </div>
@@ -114,21 +115,21 @@
     <!-- Table Stats -->
     <div class="flex-1 rounded-xl border bg-card overflow-hidden">
       <div class="border-b px-5 py-3 bg-muted/20">
-        <h2 class="text-sm font-semibold flex items-center gap-2"><HardDrive size={14} /> 表级统计 (Top 30)</h2>
+        <h2 class="text-sm font-semibold flex items-center gap-2"><HardDrive size={14} /> {$t("Reports.table_stats_top")}</h2>
       </div>
       <div class="overflow-auto max-h-[55vh]">
         <table class="w-full text-left text-xs">
           <thead class="bg-card border-b sticky top-0 z-10">
             <tr>
-              <th class="px-4 py-2 font-semibold text-muted-foreground">Schema</th>
-              <th class="px-4 py-2 font-semibold text-muted-foreground">表名</th>
-              <th class="px-4 py-2 font-semibold text-muted-foreground text-right">行数</th>
-              <th class="px-4 py-2 font-semibold text-muted-foreground text-right">大小</th>
-              <th class="px-4 py-2 font-semibold text-muted-foreground text-right">Insert</th>
-              <th class="px-4 py-2 font-semibold text-muted-foreground text-right">Update</th>
-              <th class="px-4 py-2 font-semibold text-muted-foreground text-right">Delete</th>
-              <th class="px-4 py-2 font-semibold text-muted-foreground text-right">Seq Scan</th>
-              <th class="px-4 py-2 font-semibold text-muted-foreground text-right">Idx Scan</th>
+              <th class="px-4 py-2 font-semibold text-muted-foreground">{$t("Reports.schema")}</th>
+              <th class="px-4 py-2 font-semibold text-muted-foreground">{$t("Reports.table")}</th>
+              <th class="px-4 py-2 font-semibold text-muted-foreground text-right">{$t("Reports.rows")}</th>
+              <th class="px-4 py-2 font-semibold text-muted-foreground text-right">{$t("Reports.size")}</th>
+              <th class="px-4 py-2 font-semibold text-muted-foreground text-right">{$t("Reports.inserts")}</th>
+              <th class="px-4 py-2 font-semibold text-muted-foreground text-right">{$t("Reports.updates")}</th>
+              <th class="px-4 py-2 font-semibold text-muted-foreground text-right">{$t("Reports.deletes")}</th>
+              <th class="px-4 py-2 font-semibold text-muted-foreground text-right">{$t("Reports.sequential_scans")}</th>
+              <th class="px-4 py-2 font-semibold text-muted-foreground text-right">{$t("Reports.index_scans")}</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-border/20 font-mono">

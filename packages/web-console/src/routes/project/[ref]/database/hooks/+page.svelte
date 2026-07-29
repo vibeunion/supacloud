@@ -52,7 +52,7 @@
   const hooks = $derived((hooksQuery.data as DbHook[]) || []);
   const isLoading = $derived(hooksQuery.isPending);
   const error = $derived(hooksQuery.error?.message || null);
-  const fallbackMsg = $derived(!isLoading && !error && hooks.length === 0 ? "暂无 Webhooks 数据" : null);
+  const fallbackMsg = $derived(!isLoading && !error && hooks.length === 0 ? $t("Hooks.no_hooks") : null);
 
   function getEventColor(event: string): string {
     if (event.includes("INSERT")) return "text-green-600 bg-green-500/10";
@@ -115,7 +115,7 @@
                   {#if hook.is_enabled === "YES"}
                     <span class="px-2 py-0.5 rounded-full bg-green-500/10 text-green-600 text-[10px] font-bold">{$t("Hooks.enabled")}</span>
                   {:else}
-                    <span class="px-2 py-0.5 rounded-full bg-muted text-muted-foreground text-[10px]">Disabled</span>
+                    <span class="px-2 py-0.5 rounded-full bg-muted text-muted-foreground text-[10px]">{$t("Hooks.disabled")}</span>
                   {/if}
                 </td>
               </tr>

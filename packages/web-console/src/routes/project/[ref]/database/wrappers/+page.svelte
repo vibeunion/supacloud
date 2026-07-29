@@ -3,6 +3,7 @@
 
   import { page } from "$app/state";
   import { Loader2, Globe, Plus, X } from "lucide-svelte";
+  import { t } from "svelte-i18n";
   import { toast } from "svelte-sonner";
   import { createQuery } from "@tanstack/svelte-query";
 
@@ -83,13 +84,13 @@
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.message || "Wrapper 配置失败");
+      if (!res.ok) throw new Error(data.message || $t("Wrappers.configure_failed"));
       credential = "";
       showCreate = false;
       await wrappersQuery.refetch();
-      toast.success(wrapperType === "stripe" ? "Stripe 数据表已导入" : "MongoDB Server 已配置，可创建 Foreign Table");
+      toast.success($t(wrapperType === "stripe" ? "Wrappers.stripe_configured" : "Wrappers.mongodb_configured"));
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Wrapper 配置失败");
+      toast.error(error instanceof Error ? error.message : $t("Wrappers.configure_failed"));
     } finally {
       saving = false;
     }
@@ -110,30 +111,30 @@
 <div class="h-full flex flex-col space-y-4">
   <div class="flex flex-wrap items-start justify-between gap-3">
     <div>
-      <h1 class="text-2xl font-bold">Foreign Data Wrappers</h1>
-      <p class="text-sm text-muted-foreground mt-1">使用 Wrappers 连接外部数据源，直接在 SQL 中查询第三方服务</p>
+      <h1 class="text-2xl font-bold">{$t("Wrappers.title")}</h1>
+      <p class="text-sm text-muted-foreground mt-1">{$t("Wrappers.subtitle")}</p>
     </div>
-    <button onclick={() => showCreate = !showCreate} class="inline-flex h-9 items-center gap-2 rounded-md bg-brand px-4 text-sm font-medium text-white">{#if showCreate}<X size={15} />取消{:else}<Plus size={15} />配置 Wrapper{/if}</button>
+    <button onclick={() => showCreate = !showCreate} class="inline-flex h-9 items-center gap-2 rounded-md bg-brand px-4 text-sm font-medium text-white">{#if showCreate}<X size={15} />{$t("Wrappers.cancel")}{:else}<Plus size={15} />{$t("Wrappers.configure")}{/if}</button>
   </div>
 
   <div class="rounded-lg border bg-blue-500/5 border-blue-500/20 p-3 flex items-start gap-2">
     <Globe size={14} class="text-blue-600 mt-0.5 shrink-0" />
-    <p class="text-xs text-blue-700">Foreign Data Wrappers (FDW) 允许你将外部数据源（如 Stripe、Firebase、S3、其他 PostgreSQL 等）映射为本地表进行查询。</p>
+    <p class="text-xs text-blue-700">{$t("Wrappers.description")}</p>
   </div>
 
   {#if showCreate}
     <section class="space-y-4 rounded-xl border bg-card p-5">
       <div class="flex gap-2">
-        <button onclick={() => selectType("stripe")} class={`rounded-md border px-3 py-2 text-sm ${wrapperType === "stripe" ? "border-brand bg-brand/10 text-brand" : ""}`}>Stripe Sync</button>
-        <button onclick={() => selectType("mongodb")} class={`rounded-md border px-3 py-2 text-sm ${wrapperType === "mongodb" ? "border-brand bg-brand/10 text-brand" : ""}`}>MongoDB</button>
+        <button onclick={() => selectType("stripe")} class={`rounded-md border px-3 py-2 text-sm ${wrapperType === "stripe" ? "border-brand bg-brand/10 text-brand" : ""}`}>{$t("Wrappers.stripe_sync")}</button>
+        <button onclick={() => selectType("mongodb")} class={`rounded-md border px-3 py-2 text-sm ${wrapperType === "mongodb" ? "border-brand bg-brand/10 text-brand" : ""}`}>{$t("Wrappers.mongodb")}</button>
       </div>
       <div class="grid gap-3 md:grid-cols-2">
-        <label class="space-y-1 text-xs"><span>Server 名称</span><input bind:value={serverName} class="h-9 w-full rounded-md border bg-background px-3 font-mono" /></label>
-        <label class="space-y-1 text-xs"><span>Schema</span><input bind:value={schemaName} class="h-9 w-full rounded-md border bg-background px-3 font-mono" /></label>
-        {#if wrapperType === "stripe"}<label class="space-y-1 text-xs"><span>Stripe API Version（可选）</span><input bind:value={apiVersion} class="h-9 w-full rounded-md border bg-background px-3 font-mono" placeholder="2024-06-20" /></label>{/if}
+        <label class="space-y-1 text-xs"><span>{$t("Wrappers.server_name")}</span><input bind:value={serverName} class="h-9 w-full rounded-md border bg-background px-3 font-mono" /></label>
+        <label class="space-y-1 text-xs"><span>{$t("Wrappers.schema")}</span><input bind:value={schemaName} class="h-9 w-full rounded-md border bg-background px-3 font-mono" /></label>
+        {#if wrapperType === "stripe"}<label class="space-y-1 text-xs"><span>{$t("Wrappers.stripe_api_version")}</span><input bind:value={apiVersion} class="h-9 w-full rounded-md border bg-background px-3 font-mono" placeholder="2024-06-20" /></label>{/if}
       </div>
-      <label class="block space-y-1 text-xs"><span>{wrapperType === "stripe" ? "Stripe Secret / Restricted Key" : "MongoDB Connection String"}</span><input bind:value={credential} type="password" class="h-9 w-full rounded-md border bg-background px-3 font-mono" autocomplete="off" /></label>
-      <div class="flex items-center justify-between gap-3"><p class="text-xs text-muted-foreground">凭据写入 Supabase Vault；Foreign Server 仅保存 Vault secret ID。</p><button onclick={createWrapper} disabled={saving || !credential || !serverName || !schemaName} class="inline-flex h-9 items-center gap-2 rounded-md bg-brand px-4 text-sm font-medium text-white disabled:opacity-50">{#if saving}<Loader2 size={15} class="animate-spin" />{/if}创建</button></div>
+      <label class="block space-y-1 text-xs"><span>{wrapperType === "stripe" ? $t("Wrappers.stripe_credential") : $t("Wrappers.mongodb_credential")}</span><input bind:value={credential} type="password" class="h-9 w-full rounded-md border bg-background px-3 font-mono" autocomplete="off" /></label>
+      <div class="flex items-center justify-between gap-3"><p class="text-xs text-muted-foreground">{$t("Wrappers.vault_notice")}</p><button onclick={createWrapper} disabled={saving || !credential || !serverName || !schemaName} class="inline-flex h-9 items-center gap-2 rounded-md bg-brand px-4 text-sm font-medium text-white disabled:opacity-50">{#if saving}<Loader2 size={15} class="animate-spin" />{/if}{$t("Wrappers.create")}</button></div>
     </section>
   {/if}
 
@@ -141,13 +142,13 @@
     {#if isLoading}
       <div class="flex flex-col items-center justify-center py-24 text-muted-foreground gap-3">
         <Loader2 size={32} class="animate-spin text-brand opacity-50" />
-        <p class="text-xs font-mono uppercase tracking-widest">正在查询 FDW 配置...</p>
+        <p class="text-xs font-mono uppercase tracking-widest">{$t("Wrappers.loading")}</p>
       </div>
     {:else if wrappers.length === 0}
       <div class="flex flex-col items-center justify-center py-24 text-muted-foreground gap-3">
         <Globe size={40} class="opacity-20" />
-        <p class="text-sm">暂无 Foreign Data Wrappers</p>
-        <p class="text-xs">可通过 SQL 创建 FDW 来连接外部数据源</p>
+        <p class="text-sm">{$t("Wrappers.empty")}</p>
+        <p class="text-xs">{$t("Wrappers.empty_description")}</p>
       </div>
     {:else}
       <div class="overflow-auto">

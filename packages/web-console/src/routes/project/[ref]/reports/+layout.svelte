@@ -30,17 +30,19 @@
         <span class="text-foreground">{$t(TABS.find((tab) => tab.id === currentTab)?.labelKey || "Navigation.reports")}</span>
       {/if}
     </div>
-    <div class="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-hide">
-      {#each TABS as tab}
-        <a
-          href={`/project/${projectRef}/reports/${tab.id}`}
-          class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-full whitespace-nowrap transition-colors {currentTab === tab.id ? 'bg-brand text-white shadow-md' : 'bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground'}"
-        >
-          <tab.icon size={14} />
-          {$t(tab.labelKey)}
-        </a>
-      {/each}
-    </div>
+    {#if currentTab}
+      <div class="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-hide">
+        {#each TABS as tab}
+          <a
+            href={`/project/${projectRef}/reports/${tab.id}`}
+            class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-full whitespace-nowrap transition-colors {currentTab === tab.id ? 'bg-brand text-white shadow-md' : 'bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground'}"
+          >
+            <tab.icon size={14} />
+            {$t(tab.labelKey)}
+          </a>
+        {/each}
+      </div>
+    {/if}
   </div>
   <div class="flex-1 overflow-y-auto px-6 pb-6">
     {@render children()}

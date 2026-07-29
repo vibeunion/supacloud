@@ -55,6 +55,12 @@
   let showCustomInput = $state(false);
 
   const PRESET_ROLES = ["postgres", "anon", "authenticated", "service_role"];
+  const ROLE_LABEL_KEYS: Record<string, string> = {
+    postgres: "SqlEditor.role_default",
+    anon: "SqlEditor.role_anon",
+    authenticated: "SqlEditor.role_authenticated",
+    service_role: "SqlEditor.role_service",
+  };
 
   const projectRef = $derived(page.params.ref);
   const storageKey = $derived(`supacloud_${projectRef}_sql_tabs`);
@@ -262,7 +268,7 @@
         ? error.durationMs
         : Math.max(0, Math.round(performance.now() - variables.startedAt));
       const message = error instanceof DatabaseSqlError && error.code === "QUERY_CANCELLED"
-        ? "查询已取消"
+        ? $t("SqlEditor.query_cancelled")
         : error instanceof Error ? error.message : String(error);
       tabs = tabs.map(tab => tab.id === variables.tabId
         ? { ...tab, error: message, results: null, explainResults: null, command: null, statementCount: null, rowCount: null, durationMs }
@@ -296,9 +302,9 @@
         { method: "POST" },
       );
       await readDatabaseSqlCancellationResponse(response);
-      toast.success("服务器已确认取消请求");
+      toast.success($t("SqlEditor.cancel_confirmed"));
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "取消查询失败");
+      toast.error(error instanceof Error ? error.message : $t("SqlEditor.cancel_failed"));
     } finally {
       if (activeQuery?.queryId === runningQuery.queryId) isCancelling = false;
     }
@@ -320,11 +326,8 @@
   }
 
   function getRoleLabel(role: string): string {
-    if (role === "postgres") return "默认 (postgres)";
-    if (role === "anon") return "匿名 (anon)";
-    if (role === "authenticated") return "已认证 (authenticated)";
-    if (role === "service_role") return "服务角色 (service_role)";
-    return role;
+    const labelKey = ROLE_LABEL_KEYS[role];
+    return labelKey ? $t(labelKey) : role;
   }
 
   function getSeverityColor(severity?: string): string {
@@ -333,14 +336,18 @@
     return "text-muted-foreground";
   }
 
+  function sqlCommandLabel(command: string): string {
+    return command === "BATCH" ? $t("SqlEditor.batch_command") : command;
+  }
+
   function renameTab(id: string) {
     const tab = tabs.find(tb => tb.id === id);
     if (!tab) return;
-    const newName = prompt("重命名查询 Tab：", tab.name);
+    const newName = prompt($t("SqlEditor.rename_tab"), tab.name);
     const trimmedName = newName?.trim();
     if (!trimmedName) return;
     if (!isSqlTabNameAvailable(tabs, id, trimmedName)) {
-      toast.error("查询标签名称已存在");
+      toast.error($t("SqlEditor.duplicate_tab_name"));
       return;
     }
     tabs = tabs.map(tb => tb.id === id ? { ...tb, name: trimmedName } : tb);
@@ -351,20 +358,20 @@
   <div class="flex items-center justify-between">
     <div class="flex items-center gap-3">
       <h1 class="text-2xl font-bold">{$t("SqlEditor.title")}</h1>
-      <span class="px-2 py-0.5 bg-brand/10 text-brand text-[10px] font-mono rounded-full uppercase tracking-wider">v2.0 多标签</span>
+      <span class="px-2 py-0.5 bg-brand/10 text-brand text-[10px] font-mono rounded-full uppercase tracking-wider">{$t("SqlEditor.multi_tab_version")}</span>
     </div>
     <div class="flex items-center gap-3">
       {#if isSaving}
-        <span class="text-[10px] text-muted-foreground animate-pulse">正在同步...</span>
+        <span class="text-[10px] text-muted-foreground animate-pulse">{$t("SqlEditor.syncing_draft")}</span>
       {:else}
-        <span class="text-[10px] text-muted-foreground opacity-50">本地已同步</span>
+        <span class="text-[10px] text-muted-foreground opacity-50">{$t("SqlEditor.local_synced")}</span>
       {/if}
       <button
         onclick={() => { explainMode = !explainMode; }}
         class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-all border {explainMode ? 'bg-violet-500/10 border-violet-500/30 text-violet-600' : 'bg-muted/50 border-transparent text-muted-foreground hover:bg-muted'}"
       >
         <Microscope size={13} />
-        Explain
+        {$t("SqlEditor.explain_mode")}
       </button>
       {#if runQueryMutation.isPending}
         <button
@@ -374,10 +381,10 @@
         >
           {#if isCancelling}
             <Loader2 size={14} class="animate-spin" />
-            取消中...
+            {$t("SqlEditor.cancelling")}
           {:else}
             <X size={14} />
-            取消查询 · {formatDuration(elapsedMs)}
+            {$t("SqlEditor.cancel_query")} · {formatDuration(elapsedMs)}
           {/if}
         </button>
       {:else}
@@ -387,7 +394,7 @@
           class="flex items-center gap-2 px-4 py-1.5 bg-brand text-white text-xs font-semibold rounded-md shadow-lg shadow-brand/20 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:grayscale transition-all"
         >
           <Play size={14} fill="currentColor" />
-          {explainMode ? "Explain Analyze" : "运行查询"}
+          {explainMode ? $t("SqlEditor.explain_analyze") : $t("SqlEditor.run_query")}
         </button>
       {/if}
     </div>
@@ -408,14 +415,14 @@
         {#if tabs.length > 1}
           <button onclick={() => closeTab(tab.id)}
             class="absolute -right-0.5 top-1 p-0.5 rounded-sm hover:bg-destructive/10 hover:text-destructive text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity"
-            title="关闭"
+            title={$t("SqlEditor.close_tab")}
           >
             <X size={10} />
           </button>
         {/if}
       </div>
     {/each}
-    <button onclick={addTab} class="px-2 py-2 text-muted-foreground hover:text-foreground hover:bg-muted/20 rounded transition-colors" title="新建查询">
+    <button onclick={addTab} class="px-2 py-2 text-muted-foreground hover:text-foreground hover:bg-muted/20 rounded transition-colors" title={$t("SqlEditor.new_query")}>
       <Plus size={14} />
     </button>
   </div>
@@ -429,7 +436,7 @@
       </div>
       <div class="h-3 w-[1px] bg-border"></div>
       <div class="flex items-center gap-2 text-[10px] font-mono text-muted-foreground/60 uppercase tracking-widest">
-        PostgreSQL
+        {$t("SqlEditor.database_engine")}
       </div>
 
       <div class="flex-1"></div>
@@ -442,10 +449,10 @@
         >
           <Shield size={12} class={isImpersonating ? 'text-amber-500' : ''} />
           {#if isImpersonating}
-            <span class="text-[9px] font-bold uppercase tracking-wider">模拟中</span>
+            <span class="text-[9px] font-bold uppercase tracking-wider">{$t("SqlEditor.role_impersonation_active")}</span>
             <span class="font-mono">{selectedRole}</span>
           {:else}
-            <span>角色: {getRoleLabel(selectedRole)}</span>
+            <span>{$t("SqlEditor.role_label")}: {getRoleLabel(selectedRole)}</span>
           {/if}
           <ChevronDown size={12} />
         </button>
@@ -471,7 +478,7 @@
                 <input
                   bind:value={customRoleInput}
                   onkeydown={(e) => { if (e.key === 'Enter') submitCustomRole(); }}
-                  placeholder="自定义角色名"
+                  placeholder={$t("SqlEditor.role_custom")}
                   class="w-full px-2 py-1.5 text-xs font-mono rounded border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand"
  
                 />
@@ -482,7 +489,7 @@
                 class="flex items-center gap-2 w-full px-4 py-2 text-xs text-left hover:bg-muted/50 transition-colors text-muted-foreground"
               >
                 <div class="w-1.5 h-1.5 rounded-full bg-transparent"></div>
-                <span>自定义角色...</span>
+                <span>{$t("SqlEditor.role_custom")}</span>
               </button>
             {/if}
           </div>
@@ -496,7 +503,7 @@
         <textarea
           bind:value={activeTab.sql}
           spellcheck="false"
-          placeholder="-- 在这里输入 SQL 查询语句&#10;SELECT * FROM your_table LIMIT 100;"
+          placeholder={$t("SqlEditor.placeholder")}
           class="absolute inset-0 w-full h-full p-6 bg-transparent font-mono text-sm resize-none focus:outline-none leading-relaxed selection:bg-brand/20"
           onkeydown={(e) => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); runQuery(); } }}
         ></textarea>
@@ -507,7 +514,7 @@
     <div class="h-1/3 border-t flex flex-col bg-muted/5 min-h-[150px]">
       <div class="px-4 py-2 border-b flex items-center justify-between bg-muted/20">
         <div class="flex items-center gap-2">
-          <span class="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">结果</span>
+          <span class="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{$t("SqlEditor.results")}</span>
           {#if isImpersonating}
             <span class="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 text-[9px] font-bold uppercase">
               {selectedRole}
@@ -515,14 +522,14 @@
           {/if}
           {#if activeTab?.durationMs !== null && activeTab?.durationMs !== undefined}
             <span class="text-[10px] text-muted-foreground tabular-nums">
-              耗时 {formatDuration(activeTab.durationMs)}
+              {$t("SqlEditor.duration")} {formatDuration(activeTab.durationMs)}
             </span>
           {/if}
         </div>
         {#if activeTab?.results}
           {#if activeTab.command && activeTab.results.length === 0}
             <span class="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 text-[10px] font-semibold">
-              ✓ {activeTab.command} {$t("SqlEditor.complete")}
+              ✓ {sqlCommandLabel(activeTab.command)} {$t("SqlEditor.complete")}
               {#if activeTab.statementCount && activeTab.statementCount > 1}
                 · {activeTab.statementCount} {$t("SqlEditor.statements_executed")}
               {/if}
@@ -536,7 +543,7 @@
                 <button
                   onclick={exportToCsv}
                   class="p-1.5 hover:bg-muted/50 rounded-md text-muted-foreground hover:text-foreground transition-colors group relative"
-                  title="导出 CSV"
+                  title={$t("SqlEditor.export_csv")}
                 >
                   <Download size={14} />
                 </button>
@@ -549,13 +556,13 @@
       <div class="flex-1 overflow-auto p-4">
         {#if activeTab?.error}
           <div class="p-4 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-xs font-mono">
-            <strong>执行错误：</strong> {activeTab.error}
+            <strong>{$t("SqlEditor.execution_error")}</strong> {activeTab.error}
           </div>
         {:else if runQueryMutation.isPending && activeQuery?.tabId === activeTabId}
            <div class="h-full flex flex-col items-center justify-center text-muted-foreground gap-2 opacity-50">
              <Loader2 size={24} class="animate-spin text-brand" />
              <p class="text-[10px] uppercase font-bold tracking-[0.2em]">
-               正在执行查询... {formatDuration(elapsedMs)}
+               {$t("SqlEditor.executing")} {formatDuration(elapsedMs)}
              </p>
            </div>
         {:else if activeTab?.results && activeTab.results.length === 0 && activeTab.command}
@@ -567,9 +574,9 @@
             <div class="text-center">
               <p class="text-sm font-semibold text-foreground">{$t("SqlEditor.success_no_rows")}</p>
               <p class="text-xs text-muted-foreground mt-1">
-                <span class="font-mono px-1.5 py-0.5 rounded bg-muted text-[10px]">{activeTab.command}</span>
+                <span class="font-mono px-1.5 py-0.5 rounded bg-muted text-[10px]" title={activeTab.command}>{sqlCommandLabel(activeTab.command)}</span>
                 {#if activeTab.rowCount !== null && activeTab.rowCount > 0}
-                  · {activeTab.rowCount} row{activeTab.rowCount > 1 ? 's' : ''} affected
+                  · {$t("SqlEditor.rows_affected", { values: { count: activeTab.rowCount } })}
                 {/if}
               </p>
             </div>
