@@ -1,5 +1,5 @@
 {
-  "packages/management-api": "0.50.3",
+  "packages/management-api": "0.50.4",
   "packages/web-console": "0.28.1",
   "packages/edge-runtime": "0.16.1",
   "packages/pgredis-runtime": "0.3.0",
