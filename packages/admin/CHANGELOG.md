@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/zuohuadong/supacloud/compare/admin-v0.6.0...admin-v0.7.0) (2026-07-29)
+
+
+### Features
+
+* **gateway:** add managed functions upstream ([a3f8f74](https://github.com/zuohuadong/supacloud/commit/a3f8f744dc4056d50eb70826b298e0e90a861408))
+
 ## [0.6.0](https://github.com/zuohuadong/supacloud/compare/admin-v0.5.0...admin-v0.6.0) (2026-07-19)
 
 
