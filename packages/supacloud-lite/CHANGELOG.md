@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/zuohuadong/supacloud/compare/supacloud-lite-v0.4.0...supacloud-lite-v0.5.0) (2026-07-29)
+
+
+### Features
+
+* **lite:** build standalone single-file binaries with embedded PGlite assets ([#644](https://github.com/zuohuadong/supacloud/issues/644)) ([50da574](https://github.com/zuohuadong/supacloud/commit/50da574a4643fba9d5027464b501e18afe79926b))
+
 ## [0.4.0](https://github.com/zuohuadong/supacloud/compare/supacloud-lite-v0.3.0...supacloud-lite-v0.4.0) (2026-07-29)
 
 
