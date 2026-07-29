@@ -34,6 +34,7 @@ jobs:
       pgredis_runtime_released: ${{ steps.release.outputs['packages/pgredis-runtime--release_created'] }}
       pgredis_runtime_tag_name: ${{ steps.release.outputs['packages/pgredis-runtime--tag_name'] }}
       supacloud_lite_released: ${{ steps.release.outputs['packages/supacloud-lite--release_created'] }}
+      supacloud_lite_tag_name: ${{ steps.release.outputs['packages/supacloud-lite--tag_name'] }}
       supacloud_js_released: ${{ steps.release.outputs['packages/supacloud-js--release_created'] }}
       cli_released: ${{ steps.release.outputs['packages/cli--release_created'] }}
       admin_released: ${{ steps.release.outputs['packages/admin--release_created'] }}
@@ -283,6 +284,59 @@ jobs:
           GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
           RELEASE_TAG: ${{ needs.release-please.outputs.pgredis_runtime_tag_name }}
         run: gh release upload "$RELEASE_TAG" packages/pgredis-runtime/dist/* --clobber
+
+
+  publish-supacloud-lite-binaries:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.supacloud_lite_released == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.release-please.outputs.supacloud_lite_tag_name }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Install dependencies
+        working-directory: packages/supacloud-lite
+        run: bun install --frozen-lockfile
+
+      - name: Build standalone release matrix
+        working-directory: packages/supacloud-lite
+        run: bun run build:standalone:release
+
+      - name: Smoke Linux x64 standalone binary
+        working-directory: packages/supacloud-lite
+        env:
+          SUPACLOUD_LITE_STANDALONE_BINARY: dist/standalone/supacloud-lite-linux-x64
+        run: bun run test:standalone
+
+      - name: Generate SHA256SUMS
+        working-directory: packages/supacloud-lite/dist/standalone
+        run: |
+          cp ../../LICENSE SUPACLOUD-LITE-APACHE-2.0.txt
+          cp ../../THIRD_PARTY_NOTICES.md THIRD_PARTY_NOTICES.md
+          cp ../../LICENSES/*.txt .
+          sha256sum * > SHA256SUMS
+
+      - name: Attest SupaCloud Lite standalone artifacts
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: packages/supacloud-lite/dist/standalone/*
+
+      - name: Upload standalone artifacts to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+          RELEASE_TAG: ${{ needs.release-please.outputs.supacloud_lite_tag_name }}
+        run: gh release upload "$RELEASE_TAG" packages/supacloud-lite/dist/standalone/* --clobber
 
 
   publish-npm:

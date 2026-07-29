@@ -1,7 +1,12 @@
 /** PGlite (WASM) engine - imported dynamically so native mode never loads the WASM bundle. */
 import { mkdir, open, readFile, unlink, type FileHandle } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
+import type { Extension } from '@electric-sql/pglite'
 import type { DbEngine, EngineResults, EngineTx } from './engine.js'
+import {
+  STANDALONE_PGLITE_ASSETS,
+  type StandalonePgliteAssets,
+} from '../../../standalone-assets-protocol.js'
 
 /**
  * Build a {@link DbEngine} backed by PGlite (WASM Postgres) at `dataDir`, or an
@@ -12,6 +17,8 @@ import type { DbEngine, EngineResults, EngineTx } from './engine.js'
 export async function createPgliteEngine(dataDir?: string): Promise<DbEngine> {
   const releaseLock = await acquireDataDirLock(dataDir)
   let PGlite, extensions
+  const standaloneAssets = getStandaloneAssets()
+  let cleanupStandaloneBundles = async () => {}
   try {
     ;({ PGlite } = await import('@electric-sql/pglite'))
     // Supabase enables these by default; load the bundled contrib so migrations
@@ -26,18 +33,49 @@ export async function createPgliteEngine(dataDir?: string): Promise<DbEngine> {
       import('@electric-sql/pglite/contrib/fuzzystrmatch').then((m) => m.fuzzystrmatch),
     ])
     extensions = { uuid_ossp, pgcrypto, citext, pg_trgm, ltree, hstore, fuzzystrmatch }
-  } catch (e) {
+  } catch (error) {
     await releaseLock()
-    if (e instanceof Error && /wasm/.test(e.message)) throw e
+    if (error instanceof Error && /wasm/.test(error.message)) throw error
     throw new Error('the PGlite WASM engine is not available in this build')
+  }
+  if (standaloneAssets) {
+    try {
+      const standaloneBundles = await standaloneAssets.prepareExtensionBundles()
+      cleanupStandaloneBundles = standaloneBundles.cleanup
+      extensions = {
+        uuid_ossp: withEmbeddedBundle(extensions.uuid_ossp, standaloneBundles.bundles.uuid_ossp),
+        pgcrypto: withEmbeddedBundle(extensions.pgcrypto, standaloneBundles.bundles.pgcrypto),
+        citext: withEmbeddedBundle(extensions.citext, standaloneBundles.bundles.citext),
+        pg_trgm: withEmbeddedBundle(extensions.pg_trgm, standaloneBundles.bundles.pg_trgm),
+        ltree: withEmbeddedBundle(extensions.ltree, standaloneBundles.bundles.ltree),
+        hstore: withEmbeddedBundle(extensions.hstore, standaloneBundles.bundles.hstore),
+        fuzzystrmatch: withEmbeddedBundle(extensions.fuzzystrmatch, standaloneBundles.bundles.fuzzystrmatch),
+      }
+    } catch (error) {
+      await removePreparedBundles(cleanupStandaloneBundles)
+      await releaseLock()
+      throw error
+    }
   }
   let pg: InstanceType<typeof PGlite>
   try {
-    pg = new PGlite({ dataDir, extensions })
+    pg = new PGlite({
+      dataDir,
+      extensions,
+      ...(standaloneAssets
+        ? {
+            pgliteWasmModule: standaloneAssets.pgliteWasmModule,
+            initdbWasmModule: standaloneAssets.initdbWasmModule,
+            fsBundle: standaloneAssets.fsBundle,
+          }
+        : {}),
+    })
     await pg.waitReady
   } catch (error) {
     await releaseLock()
     throw error
+  } finally {
+    await removePreparedBundles(cleanupStandaloneBundles)
   }
   let closed = false
 
@@ -74,6 +112,31 @@ export async function createPgliteEngine(dataDir?: string): Promise<DbEngine> {
         await releaseLock()
       }
     },
+  }
+}
+
+function getStandaloneAssets(): StandalonePgliteAssets | undefined {
+  return (globalThis as typeof globalThis & { [key: symbol]: unknown })[STANDALONE_PGLITE_ASSETS] as
+    | StandalonePgliteAssets
+    | undefined
+}
+
+function withEmbeddedBundle<T>(extension: Extension<T>, bundlePath: URL): Extension<T> {
+  return {
+    ...extension,
+    setup: async (pg, emscriptenOpts, clientOnly) => ({
+      ...await extension.setup(pg, emscriptenOpts, clientOnly),
+      bundlePath,
+    }),
+  }
+}
+
+async function removePreparedBundles(cleanup: () => Promise<void>): Promise<void> {
+  try {
+    await cleanup()
+  } catch (error) {
+    // 扩展已载入内存，清理失败不应让可用数据库变成启动失败，但必须留下诊断。
+    console.error('Unable to remove temporary PGlite extension bundles:', error)
   }
 }
 
