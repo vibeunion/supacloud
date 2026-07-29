@@ -5,9 +5,12 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+Environment=VICTORIALOGS_BINARY=/usr/local/bin/victoria-logs-prod
+Environment=VICTORIALOGS_DATA_DIR=/var/lib/supacloud/victorialogs
+Environment=VICTORIALOGS_RETENTION=7d
 EnvironmentFile=-/etc/supabase/victorialogs.env
-ExecStartPre=/usr/bin/test -x ${VICTORIALOGS_BINARY}
-ExecStart=${VICTORIALOGS_BINARY} -storageDataPath=${VICTORIALOGS_DATA_DIR} -retentionPeriod=${VICTORIALOGS_RETENTION} -httpListenAddr=127.0.0.1:9428
+ExecStartPre=/bin/sh -ec 'test -x "$${VICTORIALOGS_BINARY}"'
+ExecStart=/bin/sh -ec 'exec "$${VICTORIALOGS_BINARY}" "-storageDataPath=$${VICTORIALOGS_DATA_DIR}" "-retentionPeriod=$${VICTORIALOGS_RETENTION}" -httpListenAddr=127.0.0.1:9428'
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true
