@@ -326,7 +326,7 @@ export const config: Config = {
   postgrestCpuWeight: Number(getEnv("POSTGREST_CPU_WEIGHT", "40")),
   postgrestDbPool: Number(getEnv("POSTGREST_DB_POOL", "3")),
   managementDbPool: Number(getEnv("MANAGEMENT_DB_POOL", "5")),
-  managementProjectDbPool: Number(getEnv("MANAGEMENT_PROJECT_DB_POOL", "1")),
+  managementProjectDbPool: Number(getEnv("MANAGEMENT_PROJECT_DB_POOL", "2")),
   managementProjectRoleDbPool: Number(getEnv("MANAGEMENT_PROJECT_ROLE_DB_POOL", "1")),
   managementProjectPoolCacheSize: Number(getEnv("MANAGEMENT_PROJECT_POOL_CACHE_SIZE", "5")),
   gotrueBin: getEnv("GOTRUE_BIN", "/usr/local/bin/gotrue"),

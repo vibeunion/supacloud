@@ -297,7 +297,7 @@ SCRIPTS_PATH=/opt/supacloud/scripts/lib
 # Capacity-safe defaults; omit both unless an operator has measured headroom.
 POSTGREST_DB_POOL=3
 MANAGEMENT_DB_POOL=5
-MANAGEMENT_PROJECT_DB_POOL=1
+MANAGEMENT_PROJECT_DB_POOL=2
 MANAGEMENT_PROJECT_ROLE_DB_POOL=1
 MANAGEMENT_PROJECT_POOL_CACHE_SIZE=5
 ```
@@ -318,7 +318,9 @@ they do not change PostgreSQL `max_connections`.
 uses separate admin and tenant-role pools capped by
 `MANAGEMENT_PROJECT_DB_POOL` and `MANAGEMENT_PROJECT_ROLE_DB_POOL`. At most
 `MANAGEMENT_PROJECT_POOL_CACHE_SIZE` pools of each kind remain cached, so the
-defaults bound cached project access to ten potential connections in total.
+defaults bound cached project access to fifteen potential connections in total.
+The admin pool retains two slots so one long-running tenant operation cannot
+starve every other Management API query for that project.
 
 ---
 

@@ -55,7 +55,7 @@ describe("Config", () => {
     expect(config.postgrestDbPool).toBe(3);
     expect(config.managementDbPool).toBe(5);
     expect(managementSql.options.max).toBe(config.managementDbPool);
-    expect(config.managementProjectDbPool).toBe(1);
+    expect(config.managementProjectDbPool).toBe(2);
     expect(config.managementProjectRoleDbPool).toBe(1);
     expect(config.managementProjectPoolCacheSize).toBe(5);
     expect(getProjectDb("capacity_test").options.max).toBe(config.managementProjectDbPool);

@@ -177,7 +177,7 @@ describe("production config loading boundaries", () => {
   });
 
   test("uses capacity-safe pool defaults and honors explicit overrides", () => {
-    expect(loadDatabasePools(cleanEnv({ NODE_ENV: "production" }))).toBe("3:5:1:1:5");
+    expect(loadDatabasePools(cleanEnv({ NODE_ENV: "production" }))).toBe("3:5:2:1:5");
     expect(loadDatabasePools(cleanEnv({
       NODE_ENV: "production",
       POSTGREST_DB_POOL: "7",
