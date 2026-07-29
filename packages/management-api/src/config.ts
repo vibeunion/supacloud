@@ -132,6 +132,9 @@ export interface Config {
   postgrestCpuWeight: number;
   postgrestDbPool: number;
   managementDbPool: number;
+  managementProjectDbPool: number;
+  managementProjectRoleDbPool: number;
+  managementProjectPoolCacheSize: number;
   gotrueBin: string;
   pgrstPortBase: number;
   gotruePortBase: number;
@@ -323,6 +326,9 @@ export const config: Config = {
   postgrestCpuWeight: Number(getEnv("POSTGREST_CPU_WEIGHT", "40")),
   postgrestDbPool: Number(getEnv("POSTGREST_DB_POOL", "3")),
   managementDbPool: Number(getEnv("MANAGEMENT_DB_POOL", "5")),
+  managementProjectDbPool: Number(getEnv("MANAGEMENT_PROJECT_DB_POOL", "1")),
+  managementProjectRoleDbPool: Number(getEnv("MANAGEMENT_PROJECT_ROLE_DB_POOL", "1")),
+  managementProjectPoolCacheSize: Number(getEnv("MANAGEMENT_PROJECT_POOL_CACHE_SIZE", "5")),
   gotrueBin: getEnv("GOTRUE_BIN", "/usr/local/bin/gotrue"),
   pgrstPortBase: Number(getEnv("PGRST_PORT_BASE", "3100")),
   gotruePortBase: Number(getEnv("GOTRUE_PORT_BASE", "3200")),
@@ -410,6 +416,15 @@ function validateConfig() {
   }
   if (!Number.isInteger(config.managementDbPool) || config.managementDbPool <= 0) {
     throw new Error("Invalid MANAGEMENT_DB_POOL configuration. Must be a positive integer.");
+  }
+  if (!Number.isInteger(config.managementProjectDbPool) || config.managementProjectDbPool <= 0) {
+    throw new Error("Invalid MANAGEMENT_PROJECT_DB_POOL configuration. Must be a positive integer.");
+  }
+  if (!Number.isInteger(config.managementProjectRoleDbPool) || config.managementProjectRoleDbPool <= 0) {
+    throw new Error("Invalid MANAGEMENT_PROJECT_ROLE_DB_POOL configuration. Must be a positive integer.");
+  }
+  if (!Number.isInteger(config.managementProjectPoolCacheSize) || config.managementProjectPoolCacheSize <= 0) {
+    throw new Error("Invalid MANAGEMENT_PROJECT_POOL_CACHE_SIZE configuration. Must be a positive integer.");
   }
 
   const isDevelopment = DEVELOPMENT_ENVS.has(config.nodeEnv) || process.env.BUN_ENV === "test" || config.isGithubActions;

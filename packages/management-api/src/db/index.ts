@@ -37,7 +37,7 @@ export const sql = new SQL({
   connectTimeout: 5000,
 });
 
-const MAX_CACHED_CONNECTIONS = 50;
+const MAX_CACHED_PROJECT_POOLS = config.managementProjectPoolCacheSize;
 
 const projectConnections: Map<string, { sql: SQL; lastUsed: number }> = new Map();
 const projectRoleConnections: Map<string, { sql: SQL; lastUsed: number }> = new Map();
@@ -88,7 +88,7 @@ setInterval(() => {
 }, IDLE_SWEEP_INTERVAL).unref();
 
 function evictOldestConnection(connections: Map<string, { sql: SQL; lastUsed: number }>, label: string) {
-  if (connections.size < MAX_CACHED_CONNECTIONS) return;
+  if (connections.size < MAX_CACHED_PROJECT_POOLS) return;
 
   let oldestKey = "";
   let oldestTime = Infinity;
@@ -123,7 +123,7 @@ export function getProjectDb(dbName: string): SQL {
     dbName,
     username: dbConfig.username,
     password: dbConfig.password,
-    max: 10,
+    max: config.managementProjectDbPool,
   });
 
   projectConnections.set(dbName, { sql: projectSql, lastUsed: Date.now() });
@@ -144,7 +144,7 @@ export function getProjectRoleDb(dbName: string, username: string, password: str
     dbName,
     username,
     password,
-    max: 5,
+    max: config.managementProjectRoleDbPool,
   });
 
   projectRoleConnections.set(key, { sql: projectSql, lastUsed: Date.now() });
