@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.28.2](https://github.com/zuohuadong/supacloud/compare/web-console-v0.28.1...web-console-v0.28.2) (2026-07-29)
+
+
+### Bug Fixes
+
+* resolve remaining reported runtime and console issues ([5fda9f0](https://github.com/zuohuadong/supacloud/commit/5fda9f0960fe7c1a03765f69cc59ebe847016a2c))
+* resolve reported console and Lite issues ([781fba4](https://github.com/zuohuadong/supacloud/commit/781fba47412ed44272dc355d484c9d2c283151c9))
+
 ## [0.28.1](https://github.com/zuohuadong/supacloud/compare/web-console-v0.28.0...web-console-v0.28.1) (2026-07-28)
 
 

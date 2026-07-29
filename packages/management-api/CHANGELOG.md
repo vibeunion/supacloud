@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.50.5](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.4...management-api-v0.50.5) (2026-07-29)
+
+
+### Bug Fixes
+
+* **management-api:** validate project database settings ([8299020](https://github.com/zuohuadong/supacloud/commit/82990208d0c77127d79d4c16f1819dec993d7444))
+* **management-api:** validate project database settings ([be0a6f9](https://github.com/zuohuadong/supacloud/commit/be0a6f93ea547325881954bca2a4fced3d52a366))
+* **observability:** expand VictoriaLogs systemd env ([#636](https://github.com/zuohuadong/supacloud/issues/636)) ([4073510](https://github.com/zuohuadong/supacloud/commit/407351066206e9d17164a5a6a510d695f6613056))
+* **realtime:** centralize tenant capacity payload ([#634](https://github.com/zuohuadong/supacloud/issues/634)) ([3f0c26f](https://github.com/zuohuadong/supacloud/commit/3f0c26f450d91bf3c3085a3f3e38972808c82a07))
+* **realtime:** delegate schema objects to upstream migrations ([4c64c6b](https://github.com/zuohuadong/supacloud/commit/4c64c6b62b0d8524ba428f31e1027032386d2db9))
+* **realtime:** delegate schema objects to upstream migrations ([8ab9a80](https://github.com/zuohuadong/supacloud/commit/8ab9a8054f759f9ea0db78976b78499c97179874))
+* resolve remaining reported runtime and console issues ([5fda9f0](https://github.com/zuohuadong/supacloud/commit/5fda9f0960fe7c1a03765f69cc59ebe847016a2c))
+
+
+### Miscellaneous Chores
+
+* **realtime:** bump image to v2.121.1 ([ac80a62](https://github.com/zuohuadong/supacloud/commit/ac80a62e6cbe7335635890d14b98a9bf0882b147))
+
 ## [0.50.4](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.3...management-api-v0.50.4) (2026-07-29)
 
 
