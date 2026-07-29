@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { config } from "../../src/config";
 import {
     MAX_CUSTOM_GATEWAY_PATHS,
     makeCorsSubroute,
@@ -21,6 +22,7 @@ describe("gateway route builders", () => {
             hosts: ["api.example.com"],
             path: ["/reports/*"],
             upstream: "https://reports.internal",
+            managed_upstream: undefined,
             upstream_tls_insecure_skip_verify: false,
             static_root: undefined,
             protocol: undefined,
@@ -57,6 +59,14 @@ describe("gateway route builders", () => {
                 headers: { [header]: "untrusted" },
             })).toThrow(`must not override reserved header: ${header}`);
         }
+
+        expect(() => normalizeCustomGatewayRoute({
+            id: "reserved-managed-header",
+            hosts: ["functions.example.com"],
+            path: "/*",
+            managed_upstream: "edge-functions",
+            headers: { "x-project-ref": "other-project" },
+        })).toThrow("must not override reserved header: x-project-ref");
     });
 
     test("keeps supported proxy overrides and response headers compatible", () => {
@@ -157,6 +167,70 @@ describe("gateway route builders", () => {
         expect(route.handle[1].headers.request.set["X-Project-Ref"]).toEqual(["project-ref"]);
     });
 
+    test("resolves the managed Edge Functions upstream from the current runtime config", () => {
+        const originalEdgeRuntimeInternal = config.edgeRuntimeInternal;
+        try {
+            for (const edgeRuntimeInternal of [
+                "127.0.0.1:9005",
+                "127.0.0.1:9000",
+                "edge-runtime:9005",
+            ]) {
+                config.edgeRuntimeInternal = edgeRuntimeInternal;
+                const normalized = normalizeCustomGatewayRoute({
+                    id: "sync-function",
+                    hosts: ["function.example.com"],
+                    path: "/invoke/*",
+                    managed_upstream: "edge-functions",
+                    rewrite_uri: "/functions/v1/example{http.request.uri.path}",
+                    headers: { "X-Service": "functions" },
+                    cors: ["https://app.example.com"],
+                });
+                const route = makeCustomGatewayRoute("project-ref", normalized) as any;
+                const proxy = route.handle.find((handler: any) => handler.handler === "reverse_proxy");
+
+                expect(normalized.upstream).toBeUndefined();
+                expect(normalized.managed_upstream).toBe("edge-functions");
+                expect(route.handle.some((handler: any) => handler.handler === "subroute")).toBe(true);
+                expect(route.handle.some((handler: any) => handler.handler === "rewrite")).toBe(true);
+                expect(proxy.upstreams).toEqual([{ dial: edgeRuntimeInternal }]);
+                expect(proxy.transport.read_timeout).toBe("500s");
+                expect(proxy.flush_interval).toBe(-1);
+                expect(proxy.headers.request.set["X-Project-Ref"]).toEqual(["project-ref"]);
+                expect(proxy.headers.request.set["x-project-ref"]).toEqual(["project-ref"]);
+                expect(proxy.headers.request.set["X-Service"]).toEqual(["functions"]);
+                expect(proxy.headers.request.set["x-supacloud-internal-auth"]).toBeUndefined();
+                expect(proxy.headers.request.set["x-supacloud-internal-token"]).toBeUndefined();
+            }
+        } finally {
+            config.edgeRuntimeInternal = originalEdgeRuntimeInternal;
+        }
+    });
+
+    test("rejects unknown or conflicting managed upstream modes", () => {
+        const base = {
+            id: "ambiguous-upstream",
+            hosts: ["api.example.com"],
+            path: "/*",
+        };
+        const conflicts = [
+            { upstream: "127.0.0.1:8080", managed_upstream: "edge-functions" },
+            { upstream: "127.0.0.1:8080", static_root: "/var/www/example" },
+            { upstream: "127.0.0.1:8080", redirect_to: "https://www.example.com{http.request.uri}" },
+            { managed_upstream: "edge-functions", static_root: "/var/www/example" },
+            { managed_upstream: "edge-functions", redirect_to: "https://www.example.com{http.request.uri}" },
+            { static_root: "/var/www/example", redirect_to: "https://www.example.com{http.request.uri}" },
+        ];
+
+        for (const conflict of conflicts) {
+            expect(() => normalizeCustomGatewayRoute({ ...base, ...conflict } as any))
+                .toThrow("exactly one of upstream, managed_upstream, static_root or redirect_to");
+        }
+        expect(() => normalizeCustomGatewayRoute({
+            ...base,
+            managed_upstream: "unknown-managed-service",
+        } as any)).toThrow("managed_upstream must be edge-functions");
+    });
+
     test("renders a protocol-scoped permanent redirect and preserves the request URI", () => {
         const normalized = normalizeCustomGatewayRoute({
             id: "canonical-https",
@@ -191,7 +265,7 @@ describe("gateway route builders", () => {
             path: "/*",
             upstream: "127.0.0.1:8080",
             redirect_to: "https://www.example.com{http.request.uri}",
-        })).toThrow("exactly one of upstream, static_root or redirect_to");
+        })).toThrow("exactly one of upstream, managed_upstream, static_root or redirect_to");
 
         expect(() => normalizeCustomGatewayRoute({
             id: "bad-placeholder",

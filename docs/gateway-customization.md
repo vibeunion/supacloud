@@ -45,10 +45,11 @@ POST/PUT 的 body schema（字段语义与 `normalizeCustomGatewayRoute` 一致�
 |------|------|------|------|
 | `id` | string | 是 | 路由 ID，`^[A-Za-z0-9_-]{1,64}$`；POST 时作为去重主键，PUT 时必须与 `:routeId` 一致 |
 | `hosts` | string[] | 是 | 1-20 个主机名（自动 `normalizeCaddyHost`，去重） |
-| `path` | string \| string[] | 是 | 1-20 个路径，必须以 `/` 开头，不允许含 URL 或控制字符 |
-| `upstream` | string | 三选一 | 反代上游，`host:port` 或 `http(s)://host[:port]`；URL 形式不允许带 path/query/hash |
-| `static_root` | string | 三选一 | 静态文件根目录，绝对路径，禁止 `..` 与 `\0` |
-| `redirect_to` | string | 三选一 | 带固定 host 的绝对 `http(s)` 重定向目标；可在末尾使用一次 `{http.request.uri}` 保留路径和查询参数 |
+| `path` | string \| string[] | 是 | 1-32 个路径，必须以 `/` 开头，不允许含 URL 或控制字符 |
+| `upstream` | string | 四选一 | 反代上游，`host:port` 或 `http(s)://host[:port]`；URL 形式不允许带 path/query/hash |
+| `managed_upstream` | `"edge-functions"` | 四选一 | 使用当前 SupaCloud 配置的 Edge Runtime 内部地址；DB/API 保留符号值，重建时动态解析 |
+| `static_root` | string | 四选一 | 静态文件根目录，绝对路径，禁止 `..` 与 `\0` |
+| `redirect_to` | string | 四选一 | 带固定 host 的绝对 `http(s)` 重定向目标；可在末尾使用一次 `{http.request.uri}` 保留路径和查询参数 |
 | `redirect_status` | `301 \| 302 \| 307 \| 308` | 否 | 重定向状态码，默认 `308`；只能与 `redirect_to` 一起使用 |
 | `protocol` | `"http" \| "https"` | 否 | 只匹配指定请求协议；可用于将 HTTP 请求重定向到 HTTPS |
 | `upstream_tls_insecure_skip_verify` | boolean | 否 | 上游为 `https://` 时是否跳过 TLS 校验，默认 `false` |
@@ -61,7 +62,7 @@ POST/PUT 的 body schema（字段语义与 `normalizeCustomGatewayRoute` 一致�
 
 校验规则（来自 `normalizeCustomGatewayRoute` / `normalizeCustom*`）：
 
-- `upstream`、`static_root` 与 `redirect_to` 必须**恰好设置一个**，否则报错。
+- `upstream`、`managed_upstream`、`static_root` 与 `redirect_to` 必须**恰好设置一个**，否则报错；`managed_upstream` 只接受 `"edge-functions"`。
 - `rewrite_uri` 与 `strip_prefix` 不能同时设置；redirect 路由不允许设置这两个字段。
 - `redirect_to` 只允许绝对 HTTP(S) URL；`{http.request.uri}` 最多出现一次、只能位于末尾，且前缀必须包含固定 host，防止请求 URI 改写跳转 authority。
 - redirect 路由的 `headers` 不能包含任何大小写形式的 `Location`；跳转地址始终由 `redirect_to` 控制。
@@ -70,7 +71,13 @@ POST/PUT 的 body schema（字段语义与 `normalizeCustomGatewayRoute` 一致�
 
 ### upstream 模式渲染
 
-upstream 路由会被渲染成 Caddy 的 `reverse_proxy`，并自动注入这些请求头：`Host`、`X-Project-Ref` / `x-project-ref`、`X-Forwarded-Host`、`X-Forwarded-Proto`。`headers` 字段会合并进去（同名覆盖）。若有 `rewrite_uri` 则前置一个 `rewrite` handler；`strip_prefix` 则用 `strip_path_prefix`。`cors` 非空时前置一个 CORS subroute（OPTIONS 预检 + 常规响应头）。
+upstream 路由会被渲染成 Caddy 的 `reverse_proxy`，并自动注入这些请求头：`Host`、`X-Project-Ref` / `x-project-ref`、`X-Forwarded-Host`、`X-Forwarded-Proto`。`headers` 字段会合并进去，但不能覆盖大小写不敏感的项目绑定头或 SupaCloud 内部认证头。若有 `rewrite_uri` 则前置一个 `rewrite` handler；`strip_prefix` 则用 `strip_path_prefix`。`cors` 非空时前置一个 CORS subroute（OPTIONS 预检 + 常规响应头）。
+
+### managed upstream 模式渲染
+
+`managed_upstream: "edge-functions"` 复用同一套 `reverse_proxy`、项目头、CORS、rewrite、strip prefix 与 timeout 渲染逻辑。路由配置和 API 返回始终保留符号值 `edge-functions`；每次创建、更新或全量重建 Caddy 路由时，Management API 才从当前 `EDGE_RUNTIME_INTERNAL`（`config.edgeRuntimeInternal`）解析实际 dial。因此 embedded、external 或 service-host 部署切换后，下一次 reconcile 会使用新地址，不依赖固定的 `9000`/`9005` 端口。
+
+该模式直接进入**同步 Edge Function** 执行，绕过 Management API `sdk-proxy`，因此不会触发 `sdk-proxy` 的异步函数自动入队。它不替代 SupaCloud 自动生成的系统 `/functions/v1` 路由，也不会注入 `x-supacloud-internal-auth`、`x-supacloud-internal-token` 或其它内部 token；请勿用它暴露 Edge Runtime 管理端点。
 
 ### static 模式渲染
 
@@ -99,6 +106,26 @@ curl -X POST "$HOST/v1/projects/$REF/gateway/routes" \
 ```
 
 效果：`billing.$BASE_DOMAIN/v1/charges` 会被剥离 `/v1` 前缀后转发到 `billing-svc.internal:8080/charges`，附带注入的 `X-Project-Ref` 与自定义 `X-Gateway-Source`，并允许来自 `https://app.$BASE_DOMAIN` 的跨域。
+
+### 示例：直接路由同步 Edge Function
+
+```bash
+curl -X POST "$HOST/v1/projects/$REF/gateway/routes" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  --data-binary @- <<JSON
+  {
+    "id": "sync-function",
+    "hosts": ["function.$BASE_DOMAIN"],
+    "path": "/invoke/*",
+    "managed_upstream": "edge-functions",
+    "rewrite_uri": "/functions/v1/example{http.request.uri.path}",
+    "cors": ["https://app.$BASE_DOMAIN"]
+  }
+JSON
+```
+
+实际 Edge Runtime 地址由 Management API 在 reconcile 时读取当前配置；API 和数据库中不会写入部署端口。
 
 ### 示例：托管静态站点
 
@@ -244,7 +271,7 @@ SupaCloud 会自动为每个项目生成多个域名：API 主域（`<ref>.<base
 
 ## 排查
 
-- 自定义路由不生效：先 `GET /gateway/routes` 确认 `enabled` 不是 `false`；再确认 `upstream` / `static_root` / `redirect_to` 三选一、`hosts` 命中实际请求的 Host 头，且 `protocol` 与请求协议一致。
+- 自定义路由不生效：先 `GET /gateway/routes` 确认 `enabled` 不是 `false`；再确认 `upstream` / `managed_upstream` / `static_root` / `redirect_to` 四选一、`hosts` 命中实际请求的 Host 头，且 `protocol` 与请求协议一致。
 - upsteam TLS 上游报证书错误：临时把 `upstream_tls_insecure_skip_verify` 设为 `true` 验证链路，再排查上游证书；生产环境避免长期开启。
 - 路由被系统路由覆盖：提高该路由的 `priority`，或避开系统路由前缀。
 - 校验失败导致 `/load` 拒绝：`persistAndLoad` 会抛 `Caddy config validation failed` 或 `Caddy /load failed with <status>`，错误信息会包含 Caddy 返回的具体原因。配置不会落盘，上一次成功的 JSON 仍然在 Caddy 内生效。
