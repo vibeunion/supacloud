@@ -6,7 +6,7 @@ V1 的目标不是复刻完整 Supabase 平台控制面，而是让现有应用�
 
 ## 状态
 
-- 运行时：Bun 1.3+
+- 运行时：npm 包需要 Bun 1.3+；单二进制发行版已内嵌 Bun 和 PGlite 资源
 - 数据库：PGlite 0.5.4
 - 项目模型：单进程、单项目，内部 project ref 固定为 `local`
 - 客户端：直接使用官方 `@supabase/supabase-js`
@@ -20,6 +20,15 @@ V1 的目标不是复刻完整 Supabase 平台控制面，而是让现有应用�
 bun add @supacloud/lite
 bunx supacloud-lite start
 ```
+
+也可以从 GitHub Release 下载当前平台的 `supacloud-lite-*` 单二进制。该文件不需要预装 Bun、Node、npm 或 Docker：
+
+```bash
+chmod +x ./supacloud-lite-linux-x64
+./supacloud-lite-linux-x64 start --project-dir /path/to/project
+```
+
+单二进制仍读取项目的 `supabase/` 目录，并在项目外部写入 `.supacloud-lite/` 持久化状态；它不包含 Web 控制台或 Supabase Studio。Linux x64/arm64、macOS x64/arm64 和 Windows x64 分别使用独立产物，不能跨操作系统或 CPU 架构混用。
 
 获取匿名 key：
 
@@ -138,7 +147,7 @@ bun .\bun-read-test.js
 
 ## 升级、快照与恢复
 
-生产或持久化环境升级时，先更新项目锁定的 npm 依赖，再运行 Lite 的受控升级命令：
+生产或持久化环境升级时，必须先停止当前 Lite 进程。npm 安装先更新项目锁定的依赖，再运行受控升级命令：
 
 ```bash
 # 明确指定目标版本；不要在生产启动命令中隐式使用 @latest
@@ -148,7 +157,15 @@ bun add @supacloud/lite@0.2.0
 bunx supacloud-lite upgrade
 ```
 
-`upgrade` 不会自行修改 `package.json` 或联网更新 npm 包。它使用当前项目已经安装并锁定的 Lite 版本，默认把升级前快照写入 `.supacloud-lite/backups/pre-upgrade-<timestamp>.tar.gz`，快照成功后才执行 migrations。升级失败时，快照会保留，并打印恢复命令。
+单二进制安装需要先下载并校验候选文件，再由候选二进制迁移现有项目：
+
+```bash
+./supacloud-lite-new version
+./supacloud-lite-new upgrade --project-dir /path/to/project
+./supacloud-lite-new start --project-dir /path/to/project
+```
+
+替换程序文件与数据库迁移是两个独立动作。`upgrade` 不会联网、自我替换二进制或修改 `package.json`；它默认先把升级前快照写入 `.supacloud-lite/backups/pre-upgrade-<timestamp>.tar.gz`，快照成功后才执行尚未记录的 migrations 和 seed。升级失败时快照会保留，并打印恢复命令。需要回滚时，停止候选进程，用升级前快照恢复状态，再重新启动上一个已验证版本。
 
 也可以单独创建可移植快照：
 
@@ -266,7 +283,7 @@ V1 不在一个进程内复用多个 PGlite 项目。需要多个项目时，为
 
 PGlite 是 WebAssembly PostgreSQL，不是 SQLite。它换来了 PostgreSQL SQL、角色、RLS 和 Supabase 迁移兼容性，但内存占用通常高于 PocketBase/SQLite。生产部署前应按真实 schema、并发和 Realtime 负载做容量测试。
 
-当前 npm 包依赖 PGlite 的 WASM 资源，不承诺 Bun `--compile` 单文件二进制可直接携带全部资源。V1 推荐通过 Bun + npm 包部署。
+npm 包继续通过依赖目录加载 PGlite。GitHub Release 的平台单二进制则内嵌 Bun、PGlite JS、核心 WASM/data 和 Lite 使用的 contrib 扩展；启动时会把扩展压缩包释放到受限的临时目录，PGlite 初始化完成后立即清理。项目配置、Functions、数据库、对象存储和密钥仍保持外置。
 
 ## API
 
