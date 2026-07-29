@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.4](https://github.com/zuohuadong/supacloud/compare/supacloud-v0.8.3...supacloud-v0.8.4) (2026-07-29)
+
+
+### Miscellaneous Chores
+
+* **deps:** update supacloud lockfile for @supacloud/cli 0.14.1 ([#647](https://github.com/zuohuadong/supacloud/issues/647)) ([d69e934](https://github.com/zuohuadong/supacloud/commit/d69e934419ab462250589cbbcbd2ef336aaf362e))
+
 ## [0.8.3](https://github.com/zuohuadong/supacloud/compare/supacloud-v0.8.2...supacloud-v0.8.3) (2026-07-29)
 
 
