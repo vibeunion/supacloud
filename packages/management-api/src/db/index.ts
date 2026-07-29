@@ -32,7 +32,7 @@ export const sql = new SQL({
   database: dbConfig.database,
   username: dbConfig.username,
   password: dbConfig.password,
-  max: 20,
+  max: config.managementDbPool,
   idleTimeout: 30,
   connectTimeout: 5000,
 });

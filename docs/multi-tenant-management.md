@@ -294,7 +294,20 @@ PORT=9090
 DATABASE_URL=postgresql://postgres:password@localhost:5432/supacloud_meta
 MASTER_TOKEN=your-secure-master-token
 SCRIPTS_PATH=/opt/supacloud/scripts/lib
+# Capacity-safe defaults; omit both unless an operator has measured headroom.
+POSTGREST_DB_POOL=3
+MANAGEMENT_DB_POOL=5
 ```
+
+`POSTGREST_DB_POOL` is also honored by the legacy tenant runtime generator,
+which uses the same default of `3`. The Management API runtime reconciler
+rolls this setting through active, running, Management-API-managed tenant
+`.conf` files one tenant at a time after an upgrade. It restarts PostgREST and
+waits for health; if the candidate is unhealthy, it restores the exact prior
+file ownership, mode, and content before restarting the prior configuration.
+Stopped projects and unmanaged configuration files are not changed. These
+pool settings budget connections within the existing PostgreSQL capacity;
+they do not change PostgreSQL `max_connections`.
 
 ---
 

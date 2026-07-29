@@ -31,6 +31,8 @@ function cleanEnv(overrides: Record<string, string>) {
     "DOCKER_HOST_IP",
     "INTERNAL_IP",
     "SUPACLOUD_CADDY_TLS_ISSUER",
+    "POSTGREST_DB_POOL",
+    "MANAGEMENT_DB_POOL",
   ]) {
     delete env[key];
   }
@@ -67,6 +69,15 @@ function loadDatabaseUrl(env: Record<string, string>) {
   const result = spawnSync("bun", ["-e", [
     'import { config } from "./src/config.ts";',
     'console.log(`RESULT=${config.databaseUrl}`);',
+  ].join(" ")], { cwd: packageRoot, env, encoding: "utf8" });
+  expect(result.status, result.stderr).toBe(0);
+  return result.stdout.match(/RESULT=([^\n]+)/)?.[1];
+}
+
+function loadDatabasePools(env: Record<string, string>) {
+  const result = spawnSync("bun", ["-e", [
+    'import { config } from "./src/config.ts";',
+    'console.log(`RESULT=${config.postgrestDbPool}:${config.managementDbPool}`);',
   ].join(" ")], { cwd: packageRoot, env, encoding: "utf8" });
   expect(result.status, result.stderr).toBe(0);
   return result.stdout.match(/RESULT=([^\n]+)/)?.[1];
@@ -160,6 +171,30 @@ describe("production config loading boundaries", () => {
       expect(loadDatabaseUrl(cleanEnv({ NODE_ENV: "production", DATABASE_URL: databaseUrl })))
         .toBe(databaseUrl);
     }
+  });
+
+  test("uses capacity-safe pool defaults and honors explicit overrides", () => {
+    expect(loadDatabasePools(cleanEnv({ NODE_ENV: "production" }))).toBe("3:5");
+    expect(loadDatabasePools(cleanEnv({
+      NODE_ENV: "production",
+      POSTGREST_DB_POOL: "7",
+      MANAGEMENT_DB_POOL: "9",
+    }))).toBe("7:9");
+  });
+
+  test.each([
+    { POSTGREST_DB_POOL: "0" },
+    { POSTGREST_DB_POOL: "1.5" },
+    { MANAGEMENT_DB_POOL: "not-a-number" },
+  ])("rejects invalid database pool capacity: %p", (poolEnv) => {
+    const result = spawnSync("bun", ["-e", 'import "./src/config.ts";'], {
+      cwd: packageRoot,
+      env: cleanEnv({ NODE_ENV: "production", ...poolEnv }),
+      encoding: "utf8",
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("DB_POOL");
   });
 
   test("rejects a BFF signing secret shared with another privileged key", () => {
