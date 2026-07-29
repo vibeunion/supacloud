@@ -16,7 +16,10 @@ import {
     ensureEdgeRuntimeIdentity,
     ensureEmbeddedEdgeRuntimeSourceAccess,
     ensurePersistedEdgeRuntimeIdentity,
+    inspectActiveManagementBinary,
     normalizeManagementReleaseTag,
+    parseSystemdExecStartPath,
+    parseSystemdMainPid,
     prepareUpgradeSecrets,
     resolveArtifactVerificationMode,
     resolveEdgeRuntimeCapacityConfig,
@@ -33,7 +36,9 @@ import {
     upsertPersistedEdgeRuntimePort,
     upsertEdgeRuntimeIdentityDefaults,
     validateWebConsoleArchiveEntries,
+    verifyActivatedManagementBinary,
     verifyArtifactChecksum,
+    verifyManagementUpgradePreflight,
     waitForManagementHealth,
     waitForEdgeRuntimeHealth,
     waitForUpgradeHealth,
@@ -43,6 +48,40 @@ const originalFetch = globalThis.fetch;
 
 const originalUpgradeHealthAttempts = process.env.SUPACLOUD_UPGRADE_HEALTH_ATTEMPTS;
 const originalEdgeUpgradeHealthAttempts = process.env.SUPACLOUD_UPGRADE_EDGE_HEALTH_ATTEMPTS;
+const canonicalManagementBinary = "/usr/local/bin/supacloud";
+const currentBinarySha256 = "a".repeat(64);
+
+type ManagementBinaryFixture = {
+  execStartPath?: string;
+  executablePath?: string;
+  mainPids?: string[];
+  sha256?: string;
+};
+
+function managementBinaryFixture(input: ManagementBinaryFixture = {}) {
+  const mainPids = input.mainPids ?? ["4242", "4242"];
+  let mainPidRead = 0;
+  return {
+    run: async (command: string[]) => {
+      if (command[3] === "--property=ExecStart") {
+        const executablePath = input.execStartPath ?? canonicalManagementBinary;
+        return {
+          exitCode: 0,
+          stdout: `{ path=${executablePath} ; argv[]=${executablePath} ; ignore_errors=no ; }\n`,
+          stderr: "",
+        };
+      }
+      if (command[3] === "--property=MainPID") {
+        const stdout = mainPids[Math.min(mainPidRead, mainPids.length - 1)] ?? "";
+        mainPidRead += 1;
+        return { exitCode: 0, stdout: `${stdout}\n`, stderr: "" };
+      }
+      throw new Error(`Unexpected command: ${command.join(" ")}`);
+    },
+    readlink: () => input.executablePath ?? canonicalManagementBinary,
+    sha256: () => input.sha256 ?? currentBinarySha256,
+  };
+}
 
 const ensureHealthTimeout = () => {
   process.env.SUPACLOUD_UPGRADE_HEALTH_ATTEMPTS = "1";
@@ -428,10 +467,163 @@ describe("upgrade release selection", () => {
     }
   });
 
+  test("parses a single canonical systemd ExecStart path", () => {
+    expect(parseSystemdExecStartPath(
+      "{ path=/usr/local/bin/supacloud ; argv[]=/usr/local/bin/supacloud --serve ; ignore_errors=no ; }\n",
+    )).toBe(canonicalManagementBinary);
+  });
+
+  test("rejects empty, relative, and ambiguous systemd ExecStart values", () => {
+    expect(() => parseSystemdExecStartPath("")).toThrow("exactly one executable path");
+    expect(() => parseSystemdExecStartPath("{ path=bin/supacloud ; argv[]=bin/supacloud ; }"))
+      .toThrow("absolute path");
+    expect(() => parseSystemdExecStartPath(
+      "{ path=/usr/local/bin/supacloud ; } ; { path=/opt/supacloud/bin/supacloud ; }",
+    )).toThrow("exactly one executable path");
+  });
+
+  test("rejects inactive, malformed, and unsafe MainPID values", () => {
+    for (const value of ["0", "1", "not-a-pid", "9007199254740992"]) {
+      expect(() => parseSystemdMainPid(value)).toThrow();
+    }
+    expect(parseSystemdMainPid("4242\n")).toBe(4242);
+  });
+
+  test("inspects a stable canonical active Management binary", async () => {
+    await expect(inspectActiveManagementBinary(managementBinaryFixture())).resolves.toEqual({
+      unit: "supacloud.service",
+      execStartPath: canonicalManagementBinary,
+      pid: 4242,
+      executablePath: canonicalManagementBinary,
+      sha256: currentBinarySha256,
+    });
+  });
+
+  test("fails closed when systemd, procfs, hashing, or PID stability cannot be verified", async () => {
+    await expect(verifyManagementUpgradePreflight({
+      ...managementBinaryFixture(),
+      run: async () => ({ exitCode: 1, stdout: "", stderr: "unit unavailable" }),
+    })).rejects.toThrow("unit unavailable");
+
+    await expect(verifyManagementUpgradePreflight({
+      ...managementBinaryFixture(),
+      readlink: () => { throw new Error("procfs unavailable"); },
+    })).rejects.toThrow("procfs unavailable");
+
+    await expect(verifyManagementUpgradePreflight({
+      ...managementBinaryFixture(),
+      sha256: () => { throw new Error("read failed"); },
+    })).rejects.toThrow("Cannot hash supacloud.service active executable");
+
+    await expect(verifyManagementUpgradePreflight(managementBinaryFixture({
+      mainPids: ["4242", "4343"],
+    }))).rejects.toThrow("MainPID changed from 4242 to 4343");
+  });
+
+  test("rejects a deleted active executable", async () => {
+    await expect(verifyManagementUpgradePreflight(managementBinaryFixture({
+      executablePath: `${canonicalManagementBinary} (deleted)`,
+    }))).rejects.toThrow(`runs ${canonicalManagementBinary} (deleted)`);
+  });
+
+  test("preflight mismatch stops before staging or database migration", async () => {
+    const events: string[] = [];
+    const customBinary = "/opt/supacloud/bin/supacloud";
+
+    await expect(executeUpgradeTransaction({
+      preflight: async () => {
+        events.push("preflight");
+        await verifyManagementUpgradePreflight(managementBinaryFixture({
+          execStartPath: customBinary,
+          executablePath: customBinary,
+        }));
+      },
+      stage: async () => { events.push("stage"); },
+      migrate: async () => { events.push("migrate"); },
+      activate: async () => { events.push("activate"); },
+      restart: async () => { events.push("restart"); },
+      healthCheck: async () => { events.push("health"); },
+      rollback: async () => { events.push("rollback"); },
+      cleanup: async () => { events.push("cleanup"); },
+    })).rejects.toThrow(`ExecStart is ${customBinary}`);
+
+    expect(events).toEqual(["preflight", "cleanup"]);
+  });
+
+  test("healthy old service with a different digest triggers rollback", async () => {
+    const events: string[] = [];
+    const stagedSha256 = "b".repeat(64);
+    ensureHealthTimeout();
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      return new Response(url.endsWith("/") ? "<!doctype html>" : "ok", {
+        status: 200,
+        headers: { "content-type": url.endsWith("/") ? "text/html" : "application/json" },
+      });
+    }) as typeof fetch;
+
+    await expect(executeUpgradeTransaction({
+      preflight: async () => { events.push("preflight"); },
+      stage: async () => { events.push("stage"); },
+      migrate: async () => { events.push("migrate"); },
+      activate: async () => { events.push("activate"); },
+      restart: async () => { events.push("restart"); },
+      healthCheck: async () => {
+        events.push("health");
+        await waitForUpgradeHealth();
+        await verifyActivatedManagementBinary(stagedSha256, managementBinaryFixture({
+          sha256: currentBinarySha256,
+        }));
+      },
+      rollback: async () => { events.push("rollback"); },
+      cleanup: async () => { events.push("cleanup"); },
+    })).rejects.toThrow("does not match the staged release binary");
+
+    expect(events).toEqual([
+      "preflight",
+      "stage",
+      "migrate",
+      "activate",
+      "restart",
+      "health",
+      "rollback",
+      "cleanup",
+    ]);
+  });
+
+  test("canonical active path with a stable PID and staged digest can commit", async () => {
+    const events: string[] = [];
+
+    await expect(executeUpgradeTransaction({
+      preflight: async () => { events.push("preflight"); },
+      stage: async () => { events.push("stage"); },
+      migrate: async () => { events.push("migrate"); },
+      activate: async () => { events.push("activate"); },
+      restart: async () => { events.push("restart"); },
+      healthCheck: async () => {
+        events.push("health");
+        await verifyActivatedManagementBinary(currentBinarySha256, managementBinaryFixture());
+      },
+      rollback: async () => { events.push("rollback"); },
+      cleanup: async () => { events.push("cleanup"); },
+    })).resolves.toBeUndefined();
+
+    expect(events).toEqual([
+      "preflight",
+      "stage",
+      "migrate",
+      "activate",
+      "restart",
+      "health",
+      "cleanup",
+    ]);
+  });
+
   test("restores activated artifacts when the post-restart health check fails", async () => {
     const events: string[] = [];
 
     await expect(executeUpgradeTransaction({
+      preflight: async () => { events.push("preflight"); },
       stage: async () => { events.push("stage"); },
       migrate: async () => { events.push("migrate"); },
       activate: async () => { events.push("activate"); },
@@ -445,6 +637,7 @@ describe("upgrade release selection", () => {
     })).rejects.toThrow("unhealthy");
 
     expect(events).toEqual([
+      "preflight",
       "stage",
       "migrate",
       "activate",

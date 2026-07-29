@@ -2,7 +2,7 @@ import { $, SQL } from "bun";
 import * as p from "@clack/prompts";
 import os from "node:os";
 import path from "node:path";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { logger } from "./utils/logger";
 import { WEB_CONSOLE_CURRENT_DIR } from "./utils/web-console-path";
@@ -12,6 +12,7 @@ const RELEASES_API = "https://api.github.com/repos/zuohuadong/supacloud/releases
 const RELEASE_REPOSITORY = "zuohuadong/supacloud";
 const RELEASE_SIGNER_WORKFLOW = `${RELEASE_REPOSITORY}/.github/workflows/release-please.yml`;
 const BIN_TARGET = "/usr/local/bin/supacloud";
+const MANAGEMENT_SERVICE_UNIT = "supacloud.service";
 const DEFAULT_MANAGEMENT_ENV_FILE = "/etc/supabase/management-api.env";
 const DEFAULT_EDGE_RUNTIME_USER = "supacloud-edge";
 const DEFAULT_EDGE_RUNTIME_GROUP = "supacloud-edge";
@@ -72,6 +73,20 @@ type HostIdentityCommandResult = {
 };
 
 type HostIdentityCommandRunner = (command: string[]) => Promise<HostIdentityCommandResult>;
+
+export type ActiveManagementBinary = {
+    unit: string;
+    execStartPath: string;
+    pid: number;
+    executablePath: string;
+    sha256: string;
+};
+
+type ManagementBinaryInspectorOptions = {
+    run?: HostIdentityCommandRunner;
+    readlink?: (filePath: string) => string;
+    sha256?: (filePath: string) => string;
+};
 
 export type EdgeRuntimeIdentity = {
     user: string;
@@ -220,10 +235,147 @@ export function verifyArtifactChecksum(filePath: string, assetName: string, chec
     if (!expected || !/^[0-9a-f]{64}$/.test(expected)) {
         throw new Error(`SHA256SUMS does not contain a valid checksum for ${assetName}`);
     }
-    const actual = createHash("sha256").update(readFileSync(filePath)).digest("hex");
+    const actual = sha256File(filePath);
     if (actual !== expected) {
         throw new Error(`SHA256 mismatch for ${assetName}`);
     }
+    return actual;
+}
+
+function sha256File(filePath: string): string {
+    return createHash("sha256").update(readFileSync(filePath)).digest("hex");
+}
+
+export function parseSystemdExecStartPath(value: string): string {
+    const matches = Array.from(value.trim().matchAll(/(?:^|[{;]\s*)path=([^;}\r\n]+?)\s*(?=;|}|$)/g));
+    if (matches.length !== 1) {
+        throw new Error("ExecStart must contain exactly one executable path");
+    }
+
+    const executablePath = matches[0]?.[1]?.trim() || "";
+    if (!path.posix.isAbsolute(executablePath) || /\s/.test(executablePath)) {
+        throw new Error("ExecStart executable path must be an unambiguous absolute path");
+    }
+    return executablePath;
+}
+
+export function parseSystemdMainPid(value: string): number {
+    const normalized = value.trim();
+    if (!/^\d+$/.test(normalized)) {
+        throw new Error("MainPID must be a decimal integer");
+    }
+    const pid = Number(normalized);
+    if (!Number.isSafeInteger(pid) || pid <= 1) {
+        throw new Error("MainPID must identify a running service process");
+    }
+    return pid;
+}
+
+async function readSystemdProperty(
+    unit: string,
+    property: "ExecStart" | "MainPID",
+    run: HostIdentityCommandRunner,
+): Promise<string> {
+    let result: HostIdentityCommandResult;
+    try {
+        result = await run(["systemctl", "show", unit, `--property=${property}`, "--value"]);
+    } catch (error: unknown) {
+        throw new Error(`Failed to inspect ${unit} ${property}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (result.exitCode !== 0) {
+        throw new Error(`Failed to inspect ${unit} ${property}: ${result.stderr.trim().slice(-300) || `systemctl exited with ${result.exitCode}`}`);
+    }
+    return result.stdout;
+}
+
+async function readManagementExecStartPath(run: HostIdentityCommandRunner): Promise<string> {
+    try {
+        const rawExecStart = await readSystemdProperty(MANAGEMENT_SERVICE_UNIT, "ExecStart", run);
+        return parseSystemdExecStartPath(rawExecStart);
+    } catch (error: unknown) {
+        throw new Error(`Cannot verify ${MANAGEMENT_SERVICE_UNIT} ExecStart: ${error instanceof Error ? error.message : String(error)}`);
+    }
+}
+
+async function readManagementMainPid(run: HostIdentityCommandRunner): Promise<number> {
+    try {
+        const rawMainPid = await readSystemdProperty(MANAGEMENT_SERVICE_UNIT, "MainPID", run);
+        return parseSystemdMainPid(rawMainPid);
+    } catch (error: unknown) {
+        throw new Error(`Cannot verify ${MANAGEMENT_SERVICE_UNIT} MainPID: ${error instanceof Error ? error.message : String(error)}`);
+    }
+}
+
+function resolveActiveExecutablePath(procExecutablePath: string, readlink: (filePath: string) => string): string {
+    try {
+        return readlink(procExecutablePath).trim();
+    } catch (error: unknown) {
+        throw new Error(`Cannot resolve ${MANAGEMENT_SERVICE_UNIT} active executable at ${procExecutablePath}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+}
+
+function hashActiveExecutable(procExecutablePath: string, sha256: (filePath: string) => string): string {
+    let digest: string;
+    try {
+        digest = sha256(procExecutablePath).trim().toLowerCase();
+    } catch (error: unknown) {
+        throw new Error(`Cannot hash ${MANAGEMENT_SERVICE_UNIT} active executable at ${procExecutablePath}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (!/^[0-9a-f]{64}$/.test(digest)) {
+        throw new Error(`Cannot verify ${MANAGEMENT_SERVICE_UNIT} active executable: invalid SHA-256 digest`);
+    }
+    return digest;
+}
+
+export async function inspectActiveManagementBinary(
+    options: ManagementBinaryInspectorOptions = {},
+): Promise<ActiveManagementBinary> {
+    const run = options.run ?? runHostIdentityCommand;
+    const readlink = options.readlink ?? ((filePath: string) => readlinkSync(filePath, "utf8"));
+    const sha256 = options.sha256 ?? sha256File;
+    const execStartPath = await readManagementExecStartPath(run);
+    const pid = await readManagementMainPid(run);
+    const procExecutablePath = `/proc/${pid}/exe`;
+    const executablePath = resolveActiveExecutablePath(procExecutablePath, readlink);
+    const digest = hashActiveExecutable(procExecutablePath, sha256);
+    const stablePid = await readManagementMainPid(run);
+    if (stablePid !== pid) {
+        throw new Error(`Cannot verify ${MANAGEMENT_SERVICE_UNIT} active executable: MainPID changed from ${pid} to ${stablePid}`);
+    }
+    return { unit: MANAGEMENT_SERVICE_UNIT, execStartPath, pid, executablePath, sha256: digest };
+}
+
+function assertCanonicalManagementBinary(snapshot: ActiveManagementBinary, phase: string): void {
+    if (snapshot.execStartPath !== BIN_TARGET) {
+        throw new Error(`${phase}: ${snapshot.unit} ExecStart is ${snapshot.execStartPath}; upgrade target is ${BIN_TARGET}`);
+    }
+    if (snapshot.executablePath !== BIN_TARGET) {
+        throw new Error(`${phase}: ${snapshot.unit} runs ${snapshot.executablePath}; expected ${BIN_TARGET}`);
+    }
+}
+
+export async function verifyManagementUpgradePreflight(
+    options: ManagementBinaryInspectorOptions = {},
+): Promise<ActiveManagementBinary> {
+    const snapshot = await inspectActiveManagementBinary(options);
+    assertCanonicalManagementBinary(snapshot, "Refusing to migrate");
+    return snapshot;
+}
+
+export async function verifyActivatedManagementBinary(
+    expectedSha256: string,
+    options: ManagementBinaryInspectorOptions = {},
+): Promise<ActiveManagementBinary> {
+    const normalizedExpected = expectedSha256.trim().toLowerCase();
+    if (!/^[0-9a-f]{64}$/.test(normalizedExpected)) {
+        throw new Error("Post-upgrade binary verification requires a valid staged SHA-256 digest");
+    }
+    const snapshot = await inspectActiveManagementBinary(options);
+    assertCanonicalManagementBinary(snapshot, "Post-upgrade binary verification failed");
+    if (snapshot.sha256 !== normalizedExpected) {
+        throw new Error(`Post-upgrade binary verification failed: ${snapshot.unit} is running a binary whose SHA-256 does not match the staged release binary`);
+    }
+    return snapshot;
 }
 
 export function validateWebConsoleArchiveEntries(entriesText: string) {
@@ -239,6 +391,7 @@ export function validateWebConsoleArchiveEntries(entriesText: string) {
 }
 
 export type UpgradeTransactionOperations = {
+    preflight: () => Promise<void>;
     stage: () => Promise<void>;
     migrate: () => Promise<void>;
     activate: () => Promise<void>;
@@ -251,6 +404,7 @@ export type UpgradeTransactionOperations = {
 export async function executeUpgradeTransaction(operations: UpgradeTransactionOperations) {
     let activationStarted = false;
     try {
+        await operations.preflight();
         await operations.stage();
         // Database migrations executed by the staged binary must remain backward
         // compatible because artifact rollback cannot reverse committed schema changes.
@@ -659,6 +813,7 @@ async function downloadReleaseChecksums(release: GithubRelease, preferredEndpoin
 type StagedBinary = {
     path: string;
     endpoint: GithubEndpoint;
+    sha256: string;
 };
 
 async function stageBinary(
@@ -672,11 +827,19 @@ async function stageBinary(
     const stagedBinary = `${BIN_TARGET}.new-${process.pid}`;
     try {
         const endpoint = await downloadAsset(downloadUrl, tmpBinary, preferredEndpoint, forceYes);
-        verifyArtifactChecksum(tmpBinary, binaryName, checksums);
+        const releaseSha256 = verifyArtifactChecksum(tmpBinary, binaryName, checksums);
         await verifyArtifactAttestation(tmpBinary);
         await validateBinaryArtifact(tmpBinary, binaryName);
         await $`install -m 0755 ${tmpBinary} ${stagedBinary}`;
-        return { path: stagedBinary, endpoint };
+        const stagedSha256 = sha256File(stagedBinary);
+        if (stagedSha256 !== releaseSha256) {
+            await $`rm -f ${stagedBinary}`.nothrow().quiet();
+            throw new Error(`SHA256 mismatch for staged ${binaryName}`);
+        }
+        return { path: stagedBinary, endpoint, sha256: stagedSha256 };
+    } catch (error: unknown) {
+        await $`rm -f ${stagedBinary}`.nothrow().quiet();
+        throw error;
     } finally {
         await $`rm -f ${tmpBinary}`.nothrow().quiet();
     }
@@ -1339,6 +1502,10 @@ export async function runUpgrade(options: { forceYes?: boolean; targetVersion?: 
         let activatedEdgeRuntimeMode: EdgeRuntimeMode | null = null;
 
         await executeUpgradeTransaction({
+            preflight: async () => {
+                s.start(`Verifying ${MANAGEMENT_SERVICE_UNIT} uses the canonical upgrade target`);
+                await verifyManagementUpgradePreflight();
+            },
             stage: async () => {
                 s.start(`Downloading, verifying, and staging ${binaryName}`);
                 stagedBinary = await stageBinary(releaseUrl, binaryName, checksums, endpoint, options.forceYes);
@@ -1388,6 +1555,8 @@ export async function runUpgrade(options: { forceYes?: boolean; targetVersion?: 
                 s.start("Waiting for the SupaCloud health endpoint");
                 if (!activatedEdgeRuntimeMode) throw new Error("Edge Runtime mode was not resolved");
                 await waitForUpgradeHealth();
+                if (!stagedBinary) throw new Error("Upgrade binary was not staged");
+                await verifyActivatedManagementBinary(stagedBinary.sha256);
                 committed = true;
             },
             rollback: async () => {
