@@ -1,6 +1,6 @@
-# GoTrue v2.193.0 Upgrade
+# GoTrue v2.191.0 to v2.193.0 Historical Upgrade Baseline
 
-SupaCloud pins the stock [`supabase/auth` v2.193.0 release](https://github.com/supabase/auth/releases/tag/v2.193.0). The release assets accepted by the installer are:
+This document preserves the historical acceptance baseline for upgrading GoTrue from v2.191.0 through the stock [`supabase/auth` v2.193.0 release](https://github.com/supabase/auth/releases/tag/v2.193.0). SupaCloud no longer uses v2.193.0 as its current pin; see the [platform component upgrade notes](./platform-component-upgrade-notes.md) for the current runtime default. The v2.193.0 release assets accepted by the historical installer were:
 
 | Architecture | Asset SHA256 |
 | --- | --- |
@@ -45,7 +45,7 @@ After rendering the tenant runtime, inspect the generated environment without pr
 
 ## MFA acceptance
 
-Run the compatibility suite against an unmodified v2.193.0 runtime. The MFA case must:
+For this historical baseline, run the compatibility suite against an unmodified v2.193.0 runtime. The MFA case must:
 
 1. Enroll, challenge, and verify a TOTP factor through GoTrue.
 2. Confirm the session reaches `aal2` and AMR records authentication methods.
@@ -57,6 +57,6 @@ Also run the full password, session, refresh, OAuth PKCE, UserInfo, JWT/RLS, Sto
 
 ## Rollback boundary
 
-Rollback restores the v2.192.0 GoTrue binary or image and the previous generated runtime manifest. The v2.192.0 `custom_claims_allowlist` column is additive and remains in place; do not drop it during application rollback. Restore the `auth` schema backup only for an actual data or schema recovery incident, after stopping writers and following the database recovery procedure.
+Rollback from this historical baseline restores the v2.192.0 GoTrue binary or image and the previous generated runtime manifest. The v2.192.0 `custom_claims_allowlist` column is additive and remains in place; do not drop it during application rollback. Restore the `auth` schema backup only for an actual data or schema recovery incident, after stopping writers and following the database recovery procedure.
 
 Provider-linking variables can be removed independently before or after the binary rollback because they are opt-in. Re-run session refresh, OAuth PKCE, TOTP, and dependent Supabase service smoke tests after rollback.
