@@ -112,6 +112,40 @@ describe("controlled custom gateway routes API", () => {
     }
   });
 
+  test("POST rejects reserved proxy request headers before changing gateway state", async () => {
+    const getSettings = spyOn(projectService, "getProjectSettings").mockResolvedValue({
+      gateway_routes: [],
+    } as any);
+    const updateSettings = spyOn(projectService, "updateProjectSettings").mockResolvedValue({} as any);
+    const configureRoutes = spyOn(gatewayService, "configureCustomGatewayRoutes").mockResolvedValue({ success: true });
+
+    try {
+      const response = await request("/v1/projects/proj123/gateway/routes", {
+        method: "POST",
+        headers: masterHeaders,
+        body: JSON.stringify({
+          id: "unsafe-project-ref",
+          hosts: ["api.example.com"],
+          path: "/*",
+          upstream: "127.0.0.1:8080",
+          headers: { "X-pRoJeCt-ReF": "other-project" },
+        }),
+      });
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        message: "Custom proxy route headers must not override reserved header: X-pRoJeCt-ReF",
+        code: "400",
+      });
+      expect(updateSettings).not.toHaveBeenCalled();
+      expect(configureRoutes).not.toHaveBeenCalled();
+    } finally {
+      getSettings.mockRestore();
+      updateSettings.mockRestore();
+      configureRoutes.mockRestore();
+    }
+  });
+
   test("PUT persists a protocol-scoped redirect route", async () => {
     const getSettings = spyOn(projectService, "getProjectSettings").mockResolvedValue({
       gateway_routes: [
@@ -170,6 +204,41 @@ describe("controlled custom gateway routes API", () => {
           }),
         ],
       });
+    } finally {
+      getSettings.mockRestore();
+      updateSettings.mockRestore();
+      configureRoutes.mockRestore();
+    }
+  });
+
+  test("PUT rejects reserved internal proxy headers before changing gateway state", async () => {
+    const getSettings = spyOn(projectService, "getProjectSettings").mockResolvedValue({
+      gateway_routes: [
+        { id: "proxy", hosts: ["api.example.com"], path: "/*", upstream: "127.0.0.1:8080" },
+      ],
+    } as any);
+    const updateSettings = spyOn(projectService, "updateProjectSettings").mockResolvedValue({} as any);
+    const configureRoutes = spyOn(gatewayService, "configureCustomGatewayRoutes").mockResolvedValue({ success: true });
+
+    try {
+      const response = await request("/v1/projects/proj123/gateway/routes/proxy", {
+        method: "PUT",
+        headers: masterHeaders,
+        body: JSON.stringify({
+          hosts: ["api.example.com"],
+          path: "/*",
+          upstream: "127.0.0.1:8080",
+          headers: { "x-SUPACLOUD-internal-token": "untrusted-token" },
+        }),
+      });
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        message: "Custom proxy route headers must not override reserved header: x-SUPACLOUD-internal-token",
+        code: "400",
+      });
+      expect(updateSettings).not.toHaveBeenCalled();
+      expect(configureRoutes).not.toHaveBeenCalled();
     } finally {
       getSettings.mockRestore();
       updateSettings.mockRestore();
