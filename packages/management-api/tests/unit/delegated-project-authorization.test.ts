@@ -118,6 +118,7 @@ describe("delegated project authorization", () => {
       ["GET", "/tasks", "operations.read"],
       ["POST", "/pipelines", "operations.manage"],
       ["POST", "/database/migrations", "database.migrations.manage"],
+      ["POST", "/database/migrations/baseline", "database.migrations.manage"],
       ["GET", "", "project.read"],
     ] as const;
 
