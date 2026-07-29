@@ -305,6 +305,8 @@ rolls this setting through active, running, Management-API-managed tenant
 `.conf` files one tenant at a time after an upgrade. It restarts PostgREST and
 waits for health; if the candidate is unhealthy, it restores the exact prior
 file ownership, mode, and content before restarting the prior configuration.
+The first failed migration stops further pool changes in that sweep and backs
+off that pool version for one hour, preventing a cross-tenant restart storm.
 Stopped projects and unmanaged configuration files are not changed. These
 pool settings budget connections within the existing PostgreSQL capacity;
 they do not change PostgreSQL `max_connections`.

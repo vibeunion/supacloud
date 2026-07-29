@@ -3,6 +3,7 @@ import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  PostgrestPoolMigrationGate,
   PostgrestPoolReconcileError,
   reconcileManagedPostgrestPool,
   renderManagedPostgrestDbPool,
@@ -206,5 +207,45 @@ describe("managed PostgREST pool reconciliation", () => {
       candidateError,
       rollbackError,
     ]);
+  });
+
+  test("does not roll back over a concurrently regenerated config", async () => {
+    const configPath = await temporaryConfig();
+    const regeneratedConfig = MANAGED_CONFIG.replace(
+      "log-level = \"warn\"",
+      "log-level = \"info\"",
+    );
+    const restartAndWait = mock(async () => {
+      await writeFile(configPath, regeneratedConfig);
+      throw new Error("restart failed");
+    });
+
+    await expect(
+      reconcileManagedPostgrestPool(request(configPath, restartAndWait)),
+    ).rejects.toBeInstanceOf(PostgrestPoolReconcileError);
+    expect(await readFile(configPath, "utf8")).toBe(regeneratedConfig);
+    expect(restartAndWait).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("PostgREST pool migration circuit breaker", () => {
+  test("stops the current multi-tenant sweep and backs off the failed pool version", () => {
+    let now = 1_000;
+    const gate = new PostgrestPoolMigrationGate(10_000, () => now);
+    const restartedRefs: string[] = [];
+
+    gate.beginSweep(3);
+    for (const ref of ["tenant-a", "tenant-b", "tenant-c"]) {
+      if (!gate.canAttempt()) continue;
+      restartedRefs.push(ref);
+      gate.recordFailure(3);
+    }
+    expect(restartedRefs).toEqual(["tenant-a"]);
+
+    expect(gate.beginSweep(3)).toBe(false);
+    now += 10_000;
+    expect(gate.beginSweep(3)).toBe(true);
+    gate.recordFailure(3);
+    expect(gate.beginSweep(4)).toBe(true);
   });
 });

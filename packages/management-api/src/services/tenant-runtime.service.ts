@@ -42,6 +42,7 @@ import { runtimeCacheService } from "./runtime-cache.service";
 import { projectControlSecretsService } from "./project-control-secrets.service";
 import { installManagedSystemdUnit } from "./systemd-unit-broker";
 import {
+    PostgrestPoolMigrationGate,
     reconcileManagedPostgrestPool,
     type PostgrestPoolReconcileResult,
 } from "./postgrest-pool-reconcile";
@@ -545,6 +546,23 @@ class TenantRuntimeService {
     private readonly GOTRUE_PORT_BASE = config.gotruePortBase;
     private readonly postgrestController = new PostgrestRuntimeController();
     private readonly gotrueController = new GotrueRuntimeController();
+    private readonly tenantConfigLocks = new Map<string, Promise<void>>();
+    private readonly postgrestPoolMigrationGate = new PostgrestPoolMigrationGate();
+
+    private async withTenantConfigLock<T>(ref: string, operation: () => Promise<T>): Promise<T> {
+        const predecessor = this.tenantConfigLocks.get(ref) || Promise.resolve();
+        let releaseLock: () => void = () => {};
+        const lock = new Promise<void>((resolve) => { releaseLock = resolve; });
+        const queuedLock = predecessor.then(() => lock);
+        this.tenantConfigLocks.set(ref, queuedLock);
+        await predecessor;
+        try {
+            return await operation();
+        } finally {
+            releaseLock();
+            if (this.tenantConfigLocks.get(ref) === queuedLock) this.tenantConfigLocks.delete(ref);
+        }
+    }
 
     private async effectiveGoTruePort(ref: string, localPort: number): Promise<number> {
         if (!isSharedAuthRuntime(ref)) return localPort;
@@ -961,6 +979,16 @@ class TenantRuntimeService {
         pgrstPort: number,
         gotruePort: number,
         systemctlMode: SystemctlExecutionMode = "best-effort",
+    ) {
+        return this.withTenantConfigLock(ref, () =>
+            this.generateTenantConfigUnlocked(ref, pgrstPort, gotruePort, systemctlMode));
+    }
+
+    private async generateTenantConfigUnlocked(
+        ref: string,
+        pgrstPort: number,
+        gotruePort: number,
+        systemctlMode: SystemctlExecutionMode,
     ) {
         const creds = await this.getTenantCredentials(ref);
         const runtimeUser = await this.ensureTenantRuntimeUser(ref);
@@ -2534,7 +2562,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
 
     private async restartPostgrestForPoolUpdate(ref: string): Promise<void> {
         const pgrstPort = await this.getTenantPort(ref, "pgrst");
-        await this.postgrestController.restart(ref);
+        await runSystemctlOrThrow("restart", this.postgrestController.unit(ref));
         const status = await this.postgrestController.waitForHealthy(ref, pgrstPort, 20, 500);
         if (status.health !== "healthy") {
             throw new Error("PostgREST did not become healthy after the pool update");
@@ -2546,13 +2574,14 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
         projectStatus: string,
         desired: RuntimeDesiredState,
     ): Promise<PostgrestPoolReconcileResult> {
-        return reconcileManagedPostgrestPool({
-            configPath: path.join(this.TENANT_CONFIG_DIR, `${ref}.conf`),
-            desiredPool: this.POSTGREST_DB_POOL,
-            projectStatus,
-            desiredState: desired,
-            restartAndWait: () => this.restartPostgrestForPoolUpdate(ref),
-        });
+        return this.withTenantConfigLock(ref, () =>
+            reconcileManagedPostgrestPool({
+                configPath: path.join(this.TENANT_CONFIG_DIR, `${ref}.conf`),
+                desiredPool: this.POSTGREST_DB_POOL,
+                projectStatus,
+                desiredState: desired,
+                restartAndWait: () => this.restartPostgrestForPoolUpdate(ref),
+            }));
     }
 
     private async refreshProjectPostgrestVerifier(ref: string, pgrstPort: number): Promise<void> {
@@ -2700,6 +2729,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
         let started = 0;
         let updated = 0;
         let errors = 0;
+        this.postgrestPoolMigrationGate.beginSweep(this.POSTGREST_DB_POOL);
         for (const ref of refs) {
             const status = projectStatus.get(ref);
             const project = projectByRef.get(ref);
@@ -2735,12 +2765,24 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
                     started++;
                 }
 
-                if (desired === "running" && status === "active" && actual.health === "healthy") {
-                    const poolReconcile = await this.reconcilePostgrestPool(ref, status, desired);
+                if (
+                    desired === "running"
+                    && status === "active"
+                    && actual.health === "healthy"
+                    && this.postgrestPoolMigrationGate.canAttempt()
+                ) {
+                    let poolReconcile: PostgrestPoolReconcileResult;
+                    try {
+                        poolReconcile = await this.reconcilePostgrestPool(ref, status, desired);
+                    } catch (error: unknown) {
+                        this.postgrestPoolMigrationGate.recordFailure(this.POSTGREST_DB_POOL);
+                        throw error;
+                    }
                     if (poolReconcile.state === "updated" || poolReconcile.state === "rolled_back") {
                         actual = await this.statusPostgrest(ref);
                     }
                     if (poolReconcile.state === "rolled_back") {
+                        this.postgrestPoolMigrationGate.recordFailure(this.POSTGREST_DB_POOL);
                         postgrestPoolError = poolReconcile.error;
                         logger.error(`[TenantRuntime] PostgREST pool update rolled back for ${ref}`, {
                             error: poolReconcile.error,

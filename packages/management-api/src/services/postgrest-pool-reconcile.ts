@@ -4,6 +4,7 @@ import { basename, dirname, join } from "node:path";
 
 const MANAGED_CONFIG_PREFIX = "# Managed by SupaCloud Management API.";
 const DB_POOL_LINE_PATTERN = /^(\s*db-pool\s*=\s*)(\d+)(\s*(?:#.*)?)$/gm;
+export const POSTGREST_POOL_RETRY_BACKOFF_MS = 60 * 60 * 1000;
 
 interface PostgrestPoolReconcileRequest {
   configPath: string;
@@ -37,6 +38,38 @@ export class PostgrestPoolReconcileError extends AggregateError {
       "PostgREST pool update failed and the previous configuration could not be restored healthy",
     );
     this.name = "PostgrestPoolReconcileError";
+  }
+}
+
+export class PostgrestPoolMigrationGate {
+  private failedDesiredPool: number | null = null;
+  private retryAt = 0;
+  private sweepBlocked = false;
+
+  constructor(
+    private readonly retryBackoffMs = POSTGREST_POOL_RETRY_BACKOFF_MS,
+    private readonly now: () => number = Date.now,
+  ) {}
+
+  beginSweep(desiredPool: number): boolean {
+    assertDesiredPool(desiredPool);
+    if (this.failedDesiredPool !== desiredPool) {
+      this.failedDesiredPool = null;
+      this.retryAt = 0;
+    }
+    this.sweepBlocked = this.failedDesiredPool === desiredPool && this.now() < this.retryAt;
+    return !this.sweepBlocked;
+  }
+
+  recordFailure(desiredPool: number): void {
+    assertDesiredPool(desiredPool);
+    this.failedDesiredPool = desiredPool;
+    this.retryAt = this.now() + this.retryBackoffMs;
+    this.sweepBlocked = true;
+  }
+
+  canAttempt(): boolean {
+    return !this.sweepBlocked;
   }
 }
 
@@ -113,6 +146,16 @@ async function writeConfigSnapshot(
   if (cleanupError) throw cleanupError;
 }
 
+async function assertCurrentConfig(
+  configPath: string,
+  expectedContent: string,
+): Promise<void> {
+  const currentContent = await readFile(configPath, "utf8");
+  if (currentContent !== expectedContent) {
+    throw new Error("PostgREST config changed concurrently; refusing to overwrite it during rollback");
+  }
+}
+
 function isEligible(request: PostgrestPoolReconcileRequest): boolean {
   return request.projectStatus === "active" && request.desiredState === "running";
 }
@@ -137,6 +180,7 @@ export async function reconcileManagedPostgrestPool(
     return { state: "updated" };
   } catch (updateError: unknown) {
     try {
+      await assertCurrentConfig(request.configPath, candidateContent);
       await writeConfigSnapshot(request.configPath, original);
       await request.restartAndWait();
       return {
