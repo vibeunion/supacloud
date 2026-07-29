@@ -5,6 +5,8 @@
 
 ### Bug Fixes
 
+* **db:** bound project connection pools ([8014961](https://github.com/zuohuadong/supacloud/commit/8014961ea91f5a4a5e8cb1a3070d71f25957c5b2))
+* **db:** retain project query headroom ([66a352a](https://github.com/zuohuadong/supacloud/commit/66a352ad21527e5623dbfc16e6cc7b60eca0ca9a))
 * **management-api:** validate project database settings ([8299020](https://github.com/zuohuadong/supacloud/commit/82990208d0c77127d79d4c16f1819dec993d7444))
 * **management-api:** validate project database settings ([be0a6f9](https://github.com/zuohuadong/supacloud/commit/be0a6f93ea547325881954bca2a4fced3d52a366))
 * **observability:** expand VictoriaLogs systemd env ([#636](https://github.com/zuohuadong/supacloud/issues/636)) ([4073510](https://github.com/zuohuadong/supacloud/commit/407351066206e9d17164a5a6a510d695f6613056))
@@ -12,6 +14,9 @@
 * **realtime:** delegate schema objects to upstream migrations ([4c64c6b](https://github.com/zuohuadong/supacloud/commit/4c64c6b62b0d8524ba428f31e1027032386d2db9))
 * **realtime:** delegate schema objects to upstream migrations ([8ab9a80](https://github.com/zuohuadong/supacloud/commit/8ab9a8054f759f9ea0db78976b78499c97179874))
 * resolve remaining reported runtime and console issues ([5fda9f0](https://github.com/zuohuadong/supacloud/commit/5fda9f0960fe7c1a03765f69cc59ebe847016a2c))
+* **runtime:** make pool reconciliation fail safe ([6489579](https://github.com/zuohuadong/supacloud/commit/6489579c2ad928cc269cb3de5df2589fda526b43))
+* **runtime:** use capacity-safe database pools ([4cb533d](https://github.com/zuohuadong/supacloud/commit/4cb533d2b46754978fdb1abf1e9263b100b124be))
+* **runtime:** use capacity-safe database pools ([deddf9f](https://github.com/zuohuadong/supacloud/commit/deddf9ff3fbf85678c422336f7ba85638125b016))
 
 
 ### Miscellaneous Chores
