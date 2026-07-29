@@ -22,4 +22,11 @@ describe("hosting deployment entrypoints", () => {
     expect(settingsSource).not.toContain('headers: { "Content-Type": "application/zip" }');
     expect(settingsSource).toContain('.resource(`v1/projects/${projectRef}/frontend/deployments`)');
   });
+
+  test("localizes the Pages header and preserves the Webhook endpoint", () => {
+    expect(layoutSource).toContain('$t("Hosting.pages_title")');
+    expect(layoutSource).toContain('$t("Hosting.pages_tagline")');
+    expect(pageSource).toContain('$t("Hosting.webhook_trigger")');
+    expect(pageSource).toContain('/v1/webhooks/{github|gitlab|gitee|gitcode}');
+  });
 });

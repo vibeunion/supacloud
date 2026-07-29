@@ -47,13 +47,13 @@
     { titleKey: "Navigation.table_editor", icon: Table, href: `/project/${projectRef}/tables` },
     { titleKey: "Navigation.sql_editor", icon: Code2, href: `/project/${projectRef}/sql` },
     { titleKey: "Navigation.database_objects", icon: Database, href: `/project/${projectRef}/database` },
-    { titleKey: "Navigation.cache", icon: MemoryStick, href: `/project/${projectRef}/cache` },
   ] : []);
 
   const buildItems = $derived(projectRef ? [
     { titleKey: "Navigation.auth", icon: Users, href: `/project/${projectRef}/auth` },
     { titleKey: "Navigation.storage", icon: Box, href: `/project/${projectRef}/storage` },
     { titleKey: "Navigation.edge_functions", icon: Zap, href: `/project/${projectRef}/functions` },
+    { titleKey: "Navigation.cache", icon: MemoryStick, href: `/project/${projectRef}/cache` },
     { titleKey: "Hosting.title", icon: Globe, href: `/project/${projectRef}/hosting` },
   ] : []);
 

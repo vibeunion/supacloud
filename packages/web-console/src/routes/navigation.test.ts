@@ -59,6 +59,14 @@ describe("console navigation information architecture", () => {
     expect(authLayoutSource).not.toContain('name: "提供者"');
   });
 
+  test("keeps Templates, SMTP, and Hooks linked to their routes and closes their menu", () => {
+    expect(authLayoutSource).toContain('path: "templates"');
+    expect(authLayoutSource).toContain('path: "smtp"');
+    expect(authLayoutSource).toContain('path: "hooks"');
+    expect(authLayoutSource).toContain("resolve(tab.route, { ref: projectRef })");
+    expect(authLayoutSource).toContain("onclick={closeMenuFromLink}");
+  });
+
   test("keeps every grouped database navigation target reachable", () => {
     const routeIds = [
       "schemas",

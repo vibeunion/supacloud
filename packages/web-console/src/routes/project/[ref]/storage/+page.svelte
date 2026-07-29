@@ -51,6 +51,10 @@
   const files = $derived(Array.isArray(filesQuery.data?.data) ? filesQuery.data.data : []);
   const visibleFiles = $derived(files.filter((file) => file.name.toLowerCase().includes(fileSearch.trim().toLowerCase())));
 
+  function bucketDisplayName(bucketName: string): string {
+    return bucketName === "bucket" ? $t("Storage.default_bucket") : bucketName;
+  }
+
   async function readJsonResponse<T>(response: Response): Promise<T> {
     if (!response.ok) throw new Error(await responseErrorMessage(response));
     return await response.json() as T;
@@ -291,7 +295,7 @@
               >
                 <span class="min-w-0 flex items-center gap-2">
                   <Database size={14} class={selectedBucketId === String(bucket.id || bucket.name) ? 'text-brand' : 'text-muted-foreground'} />
-                  <span class="truncate">{bucket.name}</span>
+                  <span class="truncate" title={bucket.name}>{bucketDisplayName(bucket.name)}</span>
                 </span>
                 {#if bucket.public}
                   <span class="text-[9px] px-1.5 py-0.5 bg-green-500/10 text-green-600 rounded">{$t("Storage.public")}</span>
@@ -318,7 +322,7 @@
         <div class="flex items-center gap-4">
           <div class="flex items-center text-sm text-muted-foreground italic">
             <Folder size={14} class="mr-2" />
-            <span>storage / {selectedBucketId}</span>
+            <span>{$t("Storage.breadcrumb", { values: { bucket: selectedBucketId ?? "" } })}</span>
           </div>
         </div>
         

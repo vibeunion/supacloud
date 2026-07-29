@@ -18,7 +18,7 @@
     queryKey: ["auth_config", projectRef],
     queryFn: async () => {
       const res = await apiClient(`/v1/projects/${projectRef}/auth/config`);
-      if (!res.ok) throw new Error("Failed to fetch auth config");
+      if (!res.ok) throw new Error($t("AuthUrlConfiguration.load_failed"));
       const config = await res.json();
       const siteUrlValue = config.site_url || config.SITE_URL || "";
       const uris = config.uri_allow_list || config.URI_ALLOW_LIST || config.REDIRECT_URLS || "";
@@ -65,19 +65,19 @@
         })
       });
       const payload = await readAuthApiPayload(res);
-      if (!res.ok) throw new Error(authApiResponseMessage(payload, res.statusText || "保存失败"));
+      if (!res.ok) throw new Error(authApiResponseMessage(payload, res.statusText || $t("AuthUrlConfiguration.save_failed")));
       return payload;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["auth_config", projectRef] });
       siteUrlError = null;
-      saveMsg = "✅ URL 配置已保存（GoTrue 已重启）";
+      saveMsg = `✅ ${$t("AuthUrlConfiguration.save_success")}`;
       setTimeout(() => saveMsg = null, 4000);
     },
     onError: (err: unknown) => {
       const message = err instanceof Error ? err.message : String(err);
       siteUrlError = message.includes("site_url") ? message : null;
-      saveMsg = `❌ 保存失败: ${message}`;
+      saveMsg = `❌ ${$t("AuthUrlConfiguration.save_failed")}: ${message}`;
       setTimeout(() => saveMsg = null, 4000);
     }
   }));
@@ -92,13 +92,13 @@
 <div class="h-full flex flex-col space-y-4">
   <div class="flex items-center justify-between">
     <div>
-      <h1 class="text-2xl font-bold">URL 配置</h1>
-      <p class="text-sm text-muted-foreground mt-1">配置认证流程中使用的重定向 URL</p>
+      <h1 class="text-2xl font-bold">{$t("AuthUrlConfiguration.title")}</h1>
+      <p class="text-sm text-muted-foreground mt-1">{$t("AuthUrlConfiguration.subtitle")}</p>
     </div>
     <button onclick={saveConfig} disabled={saveConfigMutation.isPending}
       class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-brand text-white hover:bg-brand/90 transition-colors disabled:opacity-50">
       {#if saveConfigMutation.isPending}<Loader2 size={14} class="animate-spin" />{:else}<Save size={14} />{/if}
-      保存
+      {$t("Common.save")}
     </button>
   </div>
 
@@ -117,9 +117,9 @@
     <div class="rounded-xl border bg-card p-5 space-y-3">
       <div class="flex items-center gap-2">
         <Globe size={16} class="text-brand" />
-        <h2 class="font-semibold text-sm">站点 URL (SITE_URL)</h2>
+        <h2 class="font-semibold text-sm">{$t("AuthUrlConfiguration.site_url")} (SITE_URL)</h2>
       </div>
-      <p class="text-xs text-muted-foreground">你的应用的默认 URL。用于认证邮件中的链接。</p>
+      <p class="text-xs text-muted-foreground">{$t("AuthUrlConfiguration.site_url_description")}</p>
       <input type="text" bind:value={siteUrl} placeholder="https://your-app.com" aria-invalid={siteUrlError ? "true" : undefined}
         class="w-full px-3 py-2 text-xs font-mono rounded-lg border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand" />
       {#if siteUrlError}
@@ -132,11 +132,11 @@
       <div class="flex items-center justify-between">
         <div class="flex items-center gap-2">
           <Link2 size={16} class="text-brand" />
-          <h2 class="font-semibold text-sm">重定向 URL</h2>
+          <h2 class="font-semibold text-sm">{$t("AuthUrlConfiguration.redirect_urls")}</h2>
         </div>
         <span class="px-2 py-0.5 rounded-full bg-brand/10 text-brand text-xs font-bold">{redirectUrls.length}</span>
       </div>
-      <p class="text-xs text-muted-foreground">允许作为认证后重定向目标的 URL 列表。支持通配符模式。</p>
+      <p class="text-xs text-muted-foreground">{$t("AuthUrlConfiguration.redirect_urls_description")}</p>
 
       <div class="flex items-center gap-2">
         <input type="text" bind:value={newUrl} placeholder="https://example.com/**"
@@ -144,14 +144,14 @@
           class="flex-1 px-3 py-2 text-xs font-mono rounded-lg border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand" />
         <button onclick={addUrl}
           class="flex items-center gap-1 px-3 py-2 text-xs font-semibold rounded-lg bg-brand text-white hover:bg-brand/90 disabled:opacity-50">
-          <Plus size={14} /> 添加
+          <Plus size={14} /> {$t("AuthUrlConfiguration.add")}
         </button>
       </div>
 
       {#if redirectUrls.length === 0}
         <div class="flex flex-col items-center justify-center py-8 text-muted-foreground gap-2 opacity-40">
           <Link2 size={32} strokeWidth={1} />
-          <p class="text-xs">尚未配置重定向 URL</p>
+          <p class="text-xs">{$t("AuthUrlConfiguration.empty")}</p>
         </div>
       {:else}
         <div class="space-y-1">

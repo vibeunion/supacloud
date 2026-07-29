@@ -216,6 +216,10 @@ console.log(task);
     getFunctionRuntimeSeveritySummary(functionRuntimeLogs),
   );
 
+  function functionStatusLabel(status: string) {
+    return status === "ACTIVE" ? $t("Functions.status_active") : status;
+  }
+
   const taskPollingHelperCode = `async function getTask(
   managementApiUrl: string,
   projectRef: string,
@@ -605,15 +609,15 @@ export async function waitForTask(
     <div class="flex items-center gap-2">
       <a href={`/project/${projectRef}/tasks`}
         class="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium border hover:bg-muted/50 transition-colors">
-        <Activity size={14} /> 后台任务
+        <Activity size={14} /> {$t("Functions.background_tasks")}
       </a>
       <a href={`/project/${projectRef}/functions/secrets`}
         class="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium border hover:bg-muted/50 transition-colors">
-        <KeyRound size={14} /> Secrets
+        <KeyRound size={14} /> {$t("Functions.secrets")}
       </a>
       <button onclick={() => showCreate = !showCreate}
         class="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium bg-brand text-white hover:bg-brand/90 transition-colors">
-        {#if showCreate}<X size={14} /> 取消{:else}<Plus size={14} /> 新建函数{/if}
+        {#if showCreate}<X size={14} /> {$t("Functions.cancel")}{:else}<Plus size={14} /> {$t("Functions.create_new")}{/if}
       </button>
     </div>
   </div>
@@ -623,17 +627,16 @@ export async function waitForTask(
       <div class="space-y-2">
         <div class="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-brand/10 text-brand text-[11px] font-bold uppercase tracking-[0.18em]">
           <Activity size={12} />
-          Background Functions
+          {$t("Functions.background_title")}
         </div>
         <div>
-          <h2 class="text-lg font-semibold text-foreground">直接把官方 `supabase.functions.invoke()` 接到后台任务路由</h2>
+          <h2 class="text-lg font-semibold text-foreground">{$t("Functions.background_heading")} <code>supabase.functions.invoke()</code></h2>
           <p class="text-sm text-muted-foreground mt-1 max-w-3xl">
-            更现实也更推荐的接入方式，是继续使用官方 `supabase-js`，直接请求你配置进 `background_routes` 的函数路径，再在租户侧封一层 `invokeAsync()` helper。
-            这样既兼容官方 SDK，也不会因为浏览器额外自定义 Header 触发 CORS 预检失败。
+            {$t("Functions.background_description_before")} <code>supabase-js</code>，{$t("Functions.background_description_between")} <code>background_routes</code> {$t("Functions.background_description_after")} <code>invokeAsync()</code> {$t("Functions.background_description_end")}
           </p>
         </div>
       </div>
-      <span class="shrink-0 rounded-lg border px-3 py-2 text-xs font-semibold text-muted-foreground">查看接入示例</span>
+      <span class="shrink-0 rounded-lg border px-3 py-2 text-xs font-semibold text-muted-foreground">{$t("Functions.view_examples")}</span>
     </summary>
 
     <div class="grid gap-4 border-t border-brand/15 p-5 pt-4 xl:grid-cols-[1.15fr_0.85fr]">
@@ -641,15 +644,15 @@ export async function waitForTask(
         <div class="rounded-xl border border-border/60 bg-background/80 backdrop-blur-sm p-4 space-y-3">
           <div class="flex items-center justify-between gap-3">
             <div>
-              <div class="text-sm font-semibold">复制 `invokeAsync()` helper</div>
-              <p class="text-xs text-muted-foreground mt-1">保留官方 `supabase.functions.invoke()`，把异步判定交给平台的 `background_routes`。</p>
+              <div class="text-sm font-semibold">{$t("Functions.copy_helper")} <code>invokeAsync()</code></div>
+              <p class="text-xs text-muted-foreground mt-1">{$t("Functions.copy_helper_desc_before")} <code>supabase.functions.invoke()</code>，{$t("Functions.copy_helper_desc_after")} <code>background_routes</code>。</p>
             </div>
             <button
               onclick={() => copySnippet(invokeAsyncHelperCode, "invokeAsync helper")}
               class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-semibold hover:bg-muted/40 transition-colors"
             >
               <Copy size={14} />
-              复制 Helper
+              {$t("Functions.copy")}
             </button>
           </div>
           <pre class="rounded-xl bg-slate-950 text-slate-100 p-4 text-[11px] leading-5 overflow-auto border border-slate-900/80"><code>{invokeAsyncHelperCode}</code></pre>
@@ -659,15 +662,15 @@ export async function waitForTask(
           <div class="rounded-xl border border-border/60 bg-background/80 p-4 space-y-3 w-full">
             <div class="flex items-center justify-between gap-3">
               <div>
-                <div class="text-sm font-semibold">复制任务轮询 helper</div>
-                <p class="text-xs text-muted-foreground mt-1">给你自己的管理后台或服务端用，拿 `task_id` 轮询最终状态。</p>
+                <div class="text-sm font-semibold">{$t("Functions.copy_task_helper")}</div>
+                <p class="text-xs text-muted-foreground mt-1">{$t("Functions.copy_task_helper_desc")}</p>
               </div>
               <button
                 onclick={() => copySnippet(taskPollingHelperCode, "任务轮询 helper")}
                 class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-semibold hover:bg-muted/40 transition-colors"
               >
                 <Copy size={14} />
-                复制轮询
+                {$t("Functions.copy")}
               </button>
             </div>
             <pre class="rounded-xl bg-slate-950 text-slate-100 p-4 text-[11px] leading-5 overflow-auto border border-slate-900/80"><code>{taskPollingHelperCode}</code></pre>
@@ -679,15 +682,15 @@ export async function waitForTask(
         <div class="rounded-xl border border-border/60 bg-background/80 p-4 space-y-3">
           <div class="flex items-center justify-between gap-3">
             <div>
-              <div class="text-sm font-semibold">复制示例调用</div>
-              <p class="text-xs text-muted-foreground mt-1">入队后返回 `task_id`，后续在任务面板里查看状态、日志、DLQ 和重试。</p>
+              <div class="text-sm font-semibold">{$t("Functions.copy_example")}</div>
+              <p class="text-xs text-muted-foreground mt-1">{$t("Functions.copy_example_desc")}</p>
             </div>
             <button
               onclick={() => copySnippet(invokeAsyncExampleCode, "异步调用示例")}
               class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-semibold hover:bg-muted/40 transition-colors"
             >
               <Copy size={14} />
-              复制调用
+              {$t("Functions.copy")}
             </button>
           </div>
           <pre class="rounded-xl bg-slate-950 text-slate-100 p-4 text-[11px] leading-5 overflow-auto border border-slate-900/80"><code>{invokeAsyncExampleCode}</code></pre>
@@ -696,15 +699,15 @@ export async function waitForTask(
         <div class="rounded-xl border border-border/60 bg-background/80 p-4 space-y-3">
           <div class="flex items-center justify-between gap-3">
             <div>
-              <div class="text-sm font-semibold">复制可取消函数示例</div>
-              <p class="text-xs text-muted-foreground mt-1">长任务函数要监听 `req.signal`，这样任务取消时能优雅停止，而不是只等运行时强制中断。</p>
+              <div class="text-sm font-semibold">{$t("Functions.copy_cancellable_example")}</div>
+              <p class="text-xs text-muted-foreground mt-1">{$t("Functions.copy_cancellable_example_desc")}</p>
             </div>
             <button
               onclick={() => copySnippet(cancellationAwareFunctionCode, "可取消函数示例")}
               class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-semibold hover:bg-muted/40 transition-colors"
             >
               <Copy size={14} />
-              复制函数
+              {$t("Functions.copy")}
             </button>
           </div>
           <pre class="rounded-xl bg-slate-950 text-slate-100 p-4 text-[11px] leading-5 overflow-auto border border-slate-900/80"><code>{cancellationAwareFunctionCode}</code></pre>
@@ -713,19 +716,19 @@ export async function waitForTask(
         <div class="rounded-xl border border-border/60 bg-background/80 p-4 space-y-3">
           <div class="flex items-center gap-2 text-sm font-semibold">
             <BookOpen size={15} class="text-brand" />
-            接入建议
+            {$t("Functions.integration_guidance")}
           </div>
           <div class="space-y-2 text-xs text-muted-foreground leading-5">
-            <p>1. 继续使用官方 `supabase-js`，不要 fork SDK。</p>
-            <p>2. 浏览器和前台应用优先直接命中 `background_routes`，是否入队由平台决定，避免额外 CORS 预检。</p>
-            <p>3. 长任务函数内部要监听 `req.signal`，这样任务取消时可以优雅收尾，而不是只等运行时强制中断。</p>
+            <p>1. {$t("Functions.guidance_sdk_before")} <code>supabase-js</code>，{$t("Functions.guidance_sdk_after")}</p>
+            <p>2. {$t("Functions.guidance_routes_before")} <code>background_routes</code>，{$t("Functions.guidance_routes_after")}</p>
+            <p>3. {$t("Functions.guidance_signal")}</p>
           </div>
           <div class="grid gap-2 pt-1 sm:grid-cols-2">
             <a
               href={`/project/${projectRef}/tasks`}
               class="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-brand text-white text-xs font-semibold hover:bg-brand/90 transition-colors"
             >
-              查看任务状态
+              {$t("Functions.view_task_status")}
               <ArrowRight size={14} />
             </a>
             <a
@@ -733,11 +736,11 @@ export async function waitForTask(
               class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-semibold hover:bg-muted/40 transition-colors"
             >
               <ShieldCheck size={14} />
-              管理函数 Secrets
+              {$t("Functions.manage_secrets")}
             </a>
           </div>
           <div class="rounded-lg bg-muted/40 border border-border/50 px-3 py-2 text-[11px] text-muted-foreground leading-5">
-            轮询、取消、DLQ 查询更适合放在你自己的服务端或管理后台里。前台应用负责 enqueue，控制面 API 负责任务运营。
+            {$t("Functions.guidance_footer")}
           </div>
         </div>
       </div>
@@ -802,11 +805,11 @@ export async function waitForTask(
         <table class="w-full text-left text-sm">
           <thead class="bg-muted/30 border-b">
             <tr>
-              <th class="px-5 py-3 font-semibold text-muted-foreground text-xs">函数名</th>
-              <th class="px-5 py-3 font-semibold text-muted-foreground text-xs">状态</th>
+              <th class="px-5 py-3 font-semibold text-muted-foreground text-xs">{$t("Functions.function_name")}</th>
+              <th class="px-5 py-3 font-semibold text-muted-foreground text-xs">{$t("Functions.status")}</th>
               <th class="px-5 py-3 font-semibold text-muted-foreground text-xs">{$t("Functions.jwt_verification")}</th>
-              <th class="px-5 py-3 font-semibold text-muted-foreground text-xs">端点</th>
-              <th class="px-5 py-3 font-semibold text-muted-foreground text-xs">创建时间</th>
+              <th class="px-5 py-3 font-semibold text-muted-foreground text-xs">{$t("Functions.endpoint")}</th>
+              <th class="px-5 py-3 font-semibold text-muted-foreground text-xs">{$t("Functions.created_at")}</th>
               <th class="px-5 py-3"></th>
             </tr>
           </thead>
@@ -823,7 +826,7 @@ export async function waitForTask(
                   </button>
                 </td>
                 <td class="px-5 py-3">
-                  <span class="px-2 py-0.5 rounded-full text-[9px] font-bold {fn.status === 'ACTIVE' ? 'text-green-600 bg-green-500/10' : 'text-amber-600 bg-amber-500/10'}">{fn.status}</span>
+                  <span title={fn.status} class="px-2 py-0.5 rounded-full text-[9px] font-bold {fn.status === 'ACTIVE' ? 'text-green-600 bg-green-500/10' : 'text-amber-600 bg-amber-500/10'}">{functionStatusLabel(fn.status)}</span>
                 </td>
                 <td class="px-5 py-3">
                   <button
@@ -898,27 +901,27 @@ export async function waitForTask(
     <div class="flex-1 overflow-auto px-6 py-5 space-y-5">
       <div class="grid gap-4 md:grid-cols-3">
         <div class="rounded-xl border border-border/60 bg-muted/20 p-4">
-          <div class="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-foreground">Status</div>
-          <div class="mt-2 text-sm font-semibold">{selectedFunction.status}</div>
+          <div class="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-foreground">{$t("Functions.status")}</div>
+          <div title={selectedFunction.status} class="mt-2 text-sm font-semibold">{functionStatusLabel(selectedFunction.status)}</div>
         </div>
         <div class="rounded-xl border border-border/60 bg-muted/20 p-4">
-          <div class="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-foreground">Version</div>
+          <div class="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-foreground">{$t("Functions.version")}</div>
           <div class="mt-2 text-sm font-semibold">v{selectedFunction.version || 1}</div>
         </div>
         <div class="rounded-xl border border-border/60 bg-muted/20 p-4">
           <div class="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-foreground">{$t("Functions.jwt_verification")}</div>
-          <div class="mt-2 text-sm font-semibold">{selectedFunction.verify_jwt ? "Enabled" : "Disabled"}</div>
+          <div class="mt-2 text-sm font-semibold">{selectedFunction.verify_jwt ? $t("Functions.enabled") : $t("Functions.disabled")}</div>
         </div>
         <div class="rounded-xl border border-border/60 bg-muted/20 p-4">
-          <div class="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-foreground">Endpoint</div>
+          <div class="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-foreground">{$t("Functions.endpoint")}</div>
           <div class="mt-2 text-xs font-mono text-foreground break-all">/functions/v1/{selectedFunction.slug}</div>
         </div>
         <div class="rounded-xl border border-border/60 bg-muted/20 p-4">
-          <div class="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-foreground">Last Deploy</div>
+          <div class="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-foreground">{$t("Functions.last_deploy")}</div>
           <div class="mt-2 text-sm font-semibold">{dayjs(selectedFunction.updated_at).format("YYYY-MM-DD HH:mm:ss")}</div>
         </div>
         <div class="rounded-xl border border-border/60 bg-muted/20 p-4">
-          <div class="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-foreground">Created</div>
+          <div class="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-foreground">{$t("Functions.created_at")}</div>
           <div class="mt-2 text-sm font-semibold">{dayjs(selectedFunction.created_at).format("YYYY-MM-DD HH:mm:ss")}</div>
         </div>
       </div>
@@ -933,7 +936,7 @@ export async function waitForTask(
             <p class="text-xs text-muted-foreground mt-1">查看历史版本、检查源码/编译产物，并将当前激活版本切换到任意历史版本。</p>
           </div>
           <div class="text-[11px] text-muted-foreground">
-            当前激活版本 v{selectedFunction.version || 1}
+            {$t("Functions.active_version", { values: { version: selectedFunction.version || 1 } })}
           </div>
         </div>
 
@@ -965,7 +968,7 @@ export async function waitForTask(
                         <div class="flex items-center gap-2 flex-wrap">
                           <span class="font-mono font-semibold text-sm">v{versionRecord.version}</span>
                           {#if versionRecord.is_active}
-                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-brand/10 text-brand">ACTIVE</span>
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-brand/10 text-brand">{$t("Functions.status_active")}</span>
                           {/if}
                         </div>
                         <div class="text-[11px] text-muted-foreground">

@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { access, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import packageJson from '../package.json' with { type: 'json' }
@@ -6,9 +6,16 @@ import packageJson from '../package.json' with { type: 'json' }
 const packageDir = resolve(import.meta.dir, '..')
 const packDir = await mkdtemp(join(tmpdir(), 'supacloud-lite-pack-'))
 const consumerDir = await mkdtemp(join(tmpdir(), 'supacloud-lite-consumer-'))
+const noBunPath = await mkdtemp(join(tmpdir(), 'supacloud-lite-no-bun-'))
 
 try {
-  const packOutput = await run(npmPackCommand(packDir), packageDir)
+  if (packageJson.bin['supacloud-lite'] !== 'dist/launcher.cjs') {
+    throw new Error('package bin must point to the Node launcher')
+  }
+  await access(join(packageDir, 'dist', 'cli.js'))
+  await access(join(packageDir, 'dist', 'launcher.cjs'))
+
+  const packOutput = await runCommand(npmPackCommand(packDir), packageDir)
   const jsonStart = packOutput.lastIndexOf('[\n  {')
   if (jsonStart === -1) throw new Error(`npm pack did not emit JSON:\n${packOutput}`)
   const packed = JSON.parse(packOutput.slice(jsonStart)) as {
@@ -19,11 +26,24 @@ try {
     join(consumerDir, 'package.json'),
     JSON.stringify({ name: 'supacloud-lite-consumer', private: true, type: 'module' })
   )
-  await run(['bun', 'add', archive], consumerDir)
-  await run(['bun', 'add', '--dev', 'typescript@5.9.3'], consumerDir)
-  const installedCli = join(consumerDir, 'node_modules', '@supacloud', 'lite', 'dist', 'cli.js')
-  const version = (await run([process.execPath, installedCli, 'version'], consumerDir)).trim()
+  await runCommand(npmCommand(['install', '--ignore-scripts', '--no-audit', '--no-fund', archive]), consumerDir)
+  await runCommand(npmCommand(['install', '--ignore-scripts', '--no-audit', '--no-fund', '--save-dev', 'typescript@5.9.3']), consumerDir)
+  const installedPackage = join(consumerDir, 'node_modules', '@supacloud', 'lite', 'dist')
+  const installedCli = join(installedPackage, 'cli.js')
+  const installedLauncher = join(installedPackage, 'launcher.cjs')
+  await access(installedCli)
+  await access(installedLauncher)
+  const version = (await runCommand(npxCommand(['--no-install', 'supacloud-lite', 'version']), consumerDir)).trim()
   if (version !== packageJson.version) throw new Error(`unexpected CLI version: ${version}`)
+  const noBunEnvironment: NodeJS.ProcessEnv = {
+    ...process.env,
+    PATH: noBunPath,
+  }
+  if (process.platform === 'win32') noBunEnvironment['Path'] = noBunPath
+  const missingBunOutput = await runCommandExpectingFailure([process.execPath, installedLauncher, 'version'], consumerDir, noBunEnvironment)
+  if (!missingBunOutput.includes('Bun executable not found on PATH')) {
+    throw new Error(`launcher did not explain a missing Bun executable:\n${missingBunOutput}`)
+  }
 
   const smokePath = join(consumerDir, 'smoke.ts')
   await writeFile(
@@ -55,32 +75,61 @@ console.log('package-smoke-ok')
     })
   )
   const installedTsc = join(consumerDir, 'node_modules', 'typescript', 'bin', 'tsc')
-  await run([process.execPath, installedTsc, '--noEmit', '-p', 'tsconfig.json'], consumerDir)
-  process.stdout.write(await run(['bun', 'run', smokePath], consumerDir))
+  await runCommand([process.execPath, installedTsc, '--noEmit', '-p', 'tsconfig.json'], consumerDir)
+  process.stdout.write(await runCommand(['bun', 'run', smokePath], consumerDir))
 } finally {
   await Promise.all([
     rm(packDir, { recursive: true, force: true }),
     rm(consumerDir, { recursive: true, force: true }),
+    rm(noBunPath, { recursive: true, force: true }),
   ])
 }
 
 function npmPackCommand(packDir: string): string[] {
-  const args = ['pack', '--json', '--pack-destination', packDir]
-  if (process.platform !== 'win32') return ['npm', ...args]
+  return npmCommand(['pack', '--json', '--pack-destination', packDir])
+}
 
+function npmCommand(args: string[]): string[] {
+  if (process.platform !== 'win32') return ['npm', ...args]
+  return npmCliCommand('npm-cli.js', args)
+}
+
+function npxCommand(args: string[]): string[] {
+  if (process.platform !== 'win32') return ['npx', ...args]
+  return npmCliCommand('npx-cli.js', args)
+}
+
+function npmCliCommand(script: string, args: string[]): string[] {
   const node = Bun.which('node')
   const npm = Bun.which('npm')
   if (!node || !npm) throw new Error('Windows package smoke requires node and npm on PATH')
-  return [node, join(dirname(npm), 'node_modules', 'npm', 'bin', 'npm-cli.js'), ...args]
+  return [node, join(dirname(npm), 'node_modules', 'npm', 'bin', script), ...args]
 }
 
-async function run(command: string[], cwd: string): Promise<string> {
-  const processHandle = Bun.spawn({ cmd: command, cwd, stdout: 'pipe', stderr: 'pipe', env: process.env })
+async function runCommand(command: string[], cwd: string, env = process.env): Promise<string> {
+  const execution = await executeCommand(command, cwd, env)
+  if (execution.exitCode !== 0) throw new Error(`${command.join(' ')} failed (${execution.exitCode})\n${execution.stdout}\n${execution.stderr}`)
+  return execution.stdout
+}
+
+async function runCommandExpectingFailure(command: string[], cwd: string, env: NodeJS.ProcessEnv): Promise<string> {
+  const execution = await executeCommand(command, cwd, env)
+  if (execution.exitCode === 0) throw new Error(`${command.join(' ')} unexpectedly succeeded`)
+  return `${execution.stdout}\n${execution.stderr}`
+}
+
+async function executeCommand(command: string[], cwd: string, env: NodeJS.ProcessEnv): Promise<CommandExecution> {
+  const processHandle = Bun.spawn({ cmd: command, cwd, stdout: 'pipe', stderr: 'pipe', env })
   const [exitCode, stdout, stderr] = await Promise.all([
     processHandle.exited,
     new Response(processHandle.stdout).text(),
     new Response(processHandle.stderr).text(),
   ])
-  if (exitCode !== 0) throw new Error(`${command.join(' ')} failed (${exitCode})\n${stdout}\n${stderr}`)
-  return stdout
+  return { exitCode, stdout, stderr }
+}
+
+interface CommandExecution {
+  exitCode: number
+  stdout: string
+  stderr: string
 }

@@ -78,8 +78,8 @@
       items: [
         { id: "migrations", labelKey: "Migrations.title", icon: GitCommitVertical },
         { id: "backups", labelKey: "Backups.title", icon: HardDrive },
-        { id: "upgrade", labelFallback: "PostgreSQL Upgrade", icon: ArrowUpCircle },
-        { id: "settings", labelFallback: "Settings", icon: Settings },
+        { id: "upgrade", labelKey: "DatabaseUpgrade.title", icon: ArrowUpCircle },
+        { id: "settings", labelKey: "DatabaseSettings.title", icon: Settings },
       ],
     },
   ];

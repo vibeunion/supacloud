@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { apiClient } from "$lib/api";
+  import { t } from "svelte-i18n";
   import {
     AlertTriangle,
     CheckCircle2,
@@ -71,19 +72,19 @@
   }
 
   function pageError(response: Response, payload: Record<string, unknown>): PageError {
-    if (response.status === 403) return { kind: "forbidden", message: payloadMessage(payload, "你没有查看 MFA 的权限") };
-    if (response.status === 404) return { kind: "not_found", message: payloadMessage(payload, "项目或 MFA 资源不存在") };
-    if (response.status === 501) return { kind: "unsupported", message: payloadMessage(payload, "当前 GoTrue 运行时不支持此能力") };
-    if (response.status === 503) return { kind: "unavailable", message: payloadMessage(payload, "GoTrue MFA 服务暂不可用") };
-    return { kind: "error", message: payloadMessage(payload, "无法加载 MFA 因子") };
+    if (response.status === 403) return { kind: "forbidden", message: payloadMessage(payload, $t("AuthMfa.error_forbidden")) };
+    if (response.status === 404) return { kind: "not_found", message: payloadMessage(payload, $t("AuthMfa.error_not_found")) };
+    if (response.status === 501) return { kind: "unsupported", message: payloadMessage(payload, $t("AuthMfa.error_unsupported")) };
+    if (response.status === 503) return { kind: "unavailable", message: payloadMessage(payload, $t("AuthMfa.error_unavailable")) };
+    return { kind: "error", message: payloadMessage(payload, $t("AuthMfa.error_load")) };
   }
 
   function errorTitle(kind: ErrorKind): string {
-    if (kind === "forbidden") return "无访问权限";
-    if (kind === "not_found") return "资源不存在";
-    if (kind === "unsupported") return "运行时不支持";
-    if (kind === "unavailable") return "服务暂不可用";
-    return "加载失败";
+    if (kind === "forbidden") return $t("AuthMfa.title_forbidden");
+    if (kind === "not_found") return $t("AuthMfa.title_not_found");
+    if (kind === "unsupported") return $t("AuthMfa.title_unsupported");
+    if (kind === "unavailable") return $t("AuthMfa.title_unavailable");
+    return $t("AuthMfa.title_load_failed");
   }
 
   function configuredCapacity(payload: Record<string, unknown>): number | null {
@@ -96,7 +97,7 @@
     loadError = null;
     capacityError = null;
     if (!projectRef) {
-      loadError = { kind: "not_found", message: "项目标识不存在" };
+      loadError = { kind: "not_found", message: $t("AuthMfa.project_missing") };
       loading = false;
       return;
     }
@@ -116,12 +117,12 @@
         return;
       }
       if (!Array.isArray(factorPayload.items)) {
-        loadError = { kind: "error", message: "MFA 因子响应格式无效" };
+        loadError = { kind: "error", message: $t("AuthMfa.invalid_response") };
         return;
       }
       const parsedTotal = Number(factorPayload.total ?? 0);
       if (!Number.isSafeInteger(parsedTotal) || parsedTotal < 0) {
-        loadError = { kind: "error", message: "MFA 因子总数响应格式无效" };
+        loadError = { kind: "error", message: $t("AuthMfa.invalid_total") };
         return;
       }
 
@@ -145,7 +146,7 @@
 
   async function deleteFactor(factor: TotpFactor): Promise<void> {
     const factorLabel = factor.friendly_name || factor.user_email || factor.id;
-    if (!window.confirm(`确定要从 GoTrue 中移除 TOTP 因子“${factorLabel}”吗？`)) return;
+    if (!window.confirm($t("AuthMfa.delete_confirmation", { values: { factor: factorLabel } }))) return;
 
     deletingFactorId = factor.id;
     try {
@@ -156,7 +157,7 @@
       const payload = await readPayload(response);
       if (!response.ok) throw new Error(pageError(response, payload).message);
 
-      toast.success("TOTP 因子已从 GoTrue 移除");
+      toast.success($t("AuthMfa.deleted"));
       if (factors.length === 1 && currentPage > 1) currentPage -= 1;
       await loadMfaPage();
     } catch (error) {
@@ -183,8 +184,8 @@
 <div class="flex h-full flex-col gap-4">
   <div class="flex items-start justify-between gap-4">
     <div>
-      <h1 class="text-2xl font-bold">多因素认证</h1>
-      <p class="mt-1 text-sm text-muted-foreground">查看 GoTrue 权威 TOTP 因子、用户容量和最近 Session AAL。</p>
+      <h1 class="text-2xl font-bold">{$t("AuthMfa.title")}</h1>
+      <p class="mt-1 text-sm text-muted-foreground">{$t("AuthMfa.subtitle")}</p>
     </div>
     <button
       class="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-muted/50 disabled:opacity-50"
@@ -192,37 +193,37 @@
       disabled={loading || deletingFactorId !== null}
     >
       <RefreshCw size={14} class={loading ? "animate-spin" : ""} />
-      刷新
+      {$t("Common.refresh")}
     </button>
   </div>
 
   <div class="grid gap-3 md:grid-cols-3">
     <div class="rounded-xl border bg-card p-4">
-      <div class="flex items-center gap-2 text-xs text-muted-foreground"><ShieldCheck size={14} /> 支持方式</div>
+      <div class="flex items-center gap-2 text-xs text-muted-foreground"><ShieldCheck size={14} /> {$t("AuthMfa.supported_method")}</div>
       <div class="mt-2 text-lg font-semibold">GoTrue TOTP</div>
-      <p class="mt-1 text-xs text-emerald-600">原生注册、Challenge、验证与移除</p>
+      <p class="mt-1 text-xs text-emerald-600">{$t("AuthMfa.supported_method_description")}</p>
     </div>
     <div class="rounded-xl border bg-card p-4">
-      <div class="flex items-center gap-2 text-xs text-muted-foreground"><Users size={14} /> 当前页因子</div>
+      <div class="flex items-center gap-2 text-xs text-muted-foreground"><Users size={14} /> {$t("AuthMfa.current_page_factors")}</div>
       <div class="mt-2 text-lg font-semibold">{factors.length} / {total}</div>
-      <p class="mt-1 text-xs text-muted-foreground">其中 {verifiedTotal} 个已验证</p>
+      <p class="mt-1 text-xs text-muted-foreground">{$t("AuthMfa.verified_count", { values: { count: verifiedTotal } })}</p>
     </div>
     <div class="rounded-xl border bg-card p-4">
-      <div class="flex items-center gap-2 text-xs text-muted-foreground"><KeyRound size={14} /> 每用户因子容量</div>
-      <div class="mt-2 text-lg font-semibold">{factorCapacity ?? "GoTrue 默认值"}</div>
+      <div class="flex items-center gap-2 text-xs text-muted-foreground"><KeyRound size={14} /> {$t("AuthMfa.factor_capacity")}</div>
+      <div class="mt-2 text-lg font-semibold">{factorCapacity ?? $t("AuthMfa.gotrue_default")}</div>
       {#if capacityError}
-        <p class="mt-1 text-xs text-amber-600">容量回读不可用：{capacityError}</p>
+        <p class="mt-1 text-xs text-amber-600">{$t("AuthMfa.capacity_readback_unavailable", { values: { error: capacityError } })}</p>
       {:else if factorCapacity === null}
-        <p class="mt-1 text-xs text-muted-foreground">运行时未显式配置，遵循 GoTrue 默认值</p>
+        <p class="mt-1 text-xs text-muted-foreground">{$t("AuthMfa.capacity_uses_default")}</p>
       {:else}
-        <p class="mt-1 text-xs text-muted-foreground">来自已应用的 GoTrue 配置</p>
+        <p class="mt-1 text-xs text-muted-foreground">{$t("AuthMfa.capacity_applied_config")}</p>
       {/if}
     </div>
   </div>
 
   <div class="flex items-start gap-2 rounded-lg border border-blue-500/20 bg-blue-500/5 p-3">
     <ShieldCheck size={14} class="mt-0.5 shrink-0 text-blue-600" />
-    <p class="text-xs text-blue-700">TOTP 注册属于已登录用户的 GoTrue ceremony；管理控制台只查看权威状态并执行管理员移除。</p>
+    <p class="text-xs text-blue-700">{$t("AuthMfa.ceremony_note")}</p>
   </div>
 
   {#if loading}
@@ -234,13 +235,13 @@
       <AlertTriangle size={26} class="text-destructive" />
       <h2 class="mt-3 text-sm font-semibold">{errorTitle(loadError.kind)}</h2>
       <p class="mt-1 max-w-xl text-xs text-muted-foreground">{loadError.message}</p>
-      <button class="mt-4 rounded-md border px-3 py-2 text-xs hover:bg-muted/50" onclick={loadMfaPage}>重试</button>
+      <button class="mt-4 rounded-md border px-3 py-2 text-xs hover:bg-muted/50" onclick={loadMfaPage}>{$t("Common.retry")}</button>
     </div>
   {:else if factors.length === 0}
     <div class="flex min-h-[260px] flex-col items-center justify-center rounded-xl border bg-card p-6 text-center">
       <ShieldCheck size={28} class="text-muted-foreground" />
-      <h2 class="mt-3 text-sm font-semibold">尚无 TOTP 因子</h2>
-      <p class="mt-1 text-xs text-muted-foreground">用户完成 GoTrue TOTP 注册并验证后，因子会显示在这里。</p>
+      <h2 class="mt-3 text-sm font-semibold">{$t("AuthMfa.empty")}</h2>
+      <p class="mt-1 text-xs text-muted-foreground">{$t("AuthMfa.empty_description")}</p>
     </div>
   {:else}
     <div class="overflow-hidden rounded-xl border bg-card">
@@ -248,20 +249,20 @@
         <table class="w-full text-left text-sm">
           <thead class="border-b bg-muted/30 text-xs text-muted-foreground">
             <tr>
-              <th class="px-4 py-3 font-medium">用户</th>
-              <th class="px-4 py-3 font-medium">TOTP 因子</th>
-              <th class="px-4 py-3 font-medium">状态</th>
-              <th class="px-4 py-3 font-medium">最近 Session AAL</th>
-              <th class="px-4 py-3 font-medium">用户容量</th>
-              <th class="px-4 py-3 font-medium">更新时间</th>
-              <th class="px-4 py-3 text-right font-medium">操作</th>
+              <th class="px-4 py-3 font-medium">{$t("AuthMfa.user")}</th>
+              <th class="px-4 py-3 font-medium">{$t("AuthMfa.totp_factor")}</th>
+              <th class="px-4 py-3 font-medium">{$t("AuthMfa.status")}</th>
+              <th class="px-4 py-3 font-medium">{$t("AuthMfa.latest_session_aal")}</th>
+              <th class="px-4 py-3 font-medium">{$t("AuthMfa.user_capacity")}</th>
+              <th class="px-4 py-3 font-medium">{$t("AuthMfa.updated_at")}</th>
+              <th class="px-4 py-3 text-right font-medium">{$t("AuthMfa.actions")}</th>
             </tr>
           </thead>
           <tbody class="divide-y">
             {#each factors as factor (factor.id)}
               <tr class="hover:bg-muted/20">
                 <td class="px-4 py-3">
-                  <div class="font-medium">{factor.user_email || "未设置邮箱"}</div>
+                  <div class="font-medium">{factor.user_email || $t("AuthMfa.email_not_set")}</div>
                   <div class="mt-0.5 font-mono text-[10px] text-muted-foreground">{factor.user_id}</div>
                 </td>
                 <td class="px-4 py-3">
@@ -271,18 +272,18 @@
                 <td class="px-4 py-3">
                   <span class="inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-medium {factor.status === 'verified' ? 'bg-emerald-500/10 text-emerald-700' : 'bg-amber-500/10 text-amber-700'}">
                     {#if factor.status === "verified"}<CheckCircle2 size={11} />{/if}
-                    {factor.status === "verified" ? "已验证" : "待验证"}
+                    {factor.status === "verified" ? $t("AuthMfa.verified") : $t("AuthMfa.pending_verification")}
                   </span>
                 </td>
                 <td class="px-4 py-3">
                   <span class="inline-flex rounded-full px-2 py-1 text-[10px] font-medium {factor.latest_session_aal === 'aal2' ? 'bg-emerald-500/10 text-emerald-700' : 'bg-muted text-muted-foreground'}">
-                    {factor.latest_session_aal?.toUpperCase() || "无 Session"}
+                    {factor.latest_session_aal?.toUpperCase() || $t("AuthMfa.no_session")}
                   </span>
                   <div class="mt-1 text-[10px] text-muted-foreground">{formatDate(factor.latest_session_updated_at)}</div>
                 </td>
                 <td class="px-4 py-3">
-                  <div class="font-medium">{factor.enrolled_factor_count} / {factorCapacity ?? "默认上限"}</div>
-                  <div class="mt-0.5 text-[10px] text-muted-foreground">已验证 {factor.verified_factor_count}</div>
+                  <div class="font-medium">{factor.enrolled_factor_count} / {factorCapacity ?? $t("AuthMfa.default_limit")}</div>
+                  <div class="mt-0.5 text-[10px] text-muted-foreground">{$t("AuthMfa.verified_count", { values: { count: factor.verified_factor_count } })}</div>
                 </td>
                 <td class="px-4 py-3 text-xs text-muted-foreground">{formatDate(factor.updated_at)}</td>
                 <td class="px-4 py-3 text-right">
@@ -296,7 +297,7 @@
                     {:else}
                       <Trash2 size={12} />
                     {/if}
-                    移除
+                    {$t("AuthMfa.remove")}
                   </button>
                 </td>
               </tr>
@@ -305,18 +306,18 @@
         </table>
       </div>
       <div class="flex items-center justify-between border-t px-4 py-3 text-xs text-muted-foreground">
-        <span>第 {currentPage} / {totalPages} 页，共 {total} 个 TOTP 因子</span>
+        <span>{$t("AuthMfa.pagination", { values: { currentPage, totalPages, total } })}</span>
         <div class="flex gap-2">
           <button
             class="rounded-md border px-3 py-1.5 hover:bg-muted/50 disabled:opacity-40"
             onclick={() => changePage(currentPage - 1)}
             disabled={currentPage <= 1 || loading}
-          >上一页</button>
+          >{$t("Common.previous")}</button>
           <button
             class="rounded-md border px-3 py-1.5 hover:bg-muted/50 disabled:opacity-40"
             onclick={() => changePage(currentPage + 1)}
             disabled={currentPage >= totalPages || loading}
-          >下一页</button>
+          >{$t("Common.next")}</button>
         </div>
       </div>
     </div>

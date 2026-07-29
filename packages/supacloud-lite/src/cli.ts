@@ -175,8 +175,7 @@ async function main(): Promise<void> {
   Run "supacloud-lite keys --service-role" only when privileged access is required.
 `)
 
-  await waitForShutdown()
-  await project.close()
+  await waitForShutdown(() => project.close())
 }
 
 async function runDbCommand(options: CliOptions): Promise<void> {
@@ -308,11 +307,15 @@ function timestamp(): string {
 
 function quietLog(): void {}
 
-async function waitForShutdown(): Promise<void> {
-  await new Promise<void>((resolveShutdown) => {
-    const stop = () => resolveShutdown()
-    process.once('SIGINT', stop)
-    process.once('SIGTERM', stop)
+function waitForShutdown(closeProject: () => Promise<void>): Promise<void> {
+  return new Promise<void>((resolveShutdown, rejectShutdown) => {
+    const closeOnSignal = () => {
+      process.off('SIGINT', closeOnSignal)
+      process.off('SIGTERM', closeOnSignal)
+      void closeProject().then(resolveShutdown, rejectShutdown)
+    }
+    process.once('SIGINT', closeOnSignal)
+    process.once('SIGTERM', closeOnSignal)
   })
 }
 

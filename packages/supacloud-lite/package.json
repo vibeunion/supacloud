@@ -5,7 +5,7 @@
   "type": "module",
   "license": "Apache-2.0",
   "bin": {
-    "supacloud-lite": "dist/cli.js"
+    "supacloud-lite": "dist/launcher.cjs"
   },
   "exports": {
     ".": {
@@ -24,7 +24,7 @@
   ],
   "scripts": {
     "build": "bun run build:js && bun run build:types",
-    "build:js": "bun build src/index.ts --target=bun --format=esm --outdir=dist --external @electric-sql/pglite --external tar && bun build src/cli.ts --target=bun --format=esm --outdir=dist --external @electric-sql/pglite --external tar",
+    "build:js": "bun build src/index.ts --target=bun --format=esm --outdir=dist --external @electric-sql/pglite --external tar && bun build src/cli.ts --target=bun --format=esm --outdir=dist --external @electric-sql/pglite --external tar && bun run scripts/build-launcher.ts",
     "build:types": "bun x tsc --emitDeclarationOnly -p tsconfig.build.json",
     "check": "bun run typecheck && bun run test && bun run build && bun run test:package",
     "dev": "bun run src/cli.ts start",
