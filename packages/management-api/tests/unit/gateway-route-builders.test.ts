@@ -42,6 +42,62 @@ describe("gateway route builders", () => {
         })).toThrow("control characters");
     });
 
+    test("rejects reserved proxy request headers case-insensitively", () => {
+        for (const header of [
+            "X-Project-Ref",
+            "x-SuPaBaSe-PrOjEcT",
+            "X-SupaCloud-Internal-Auth",
+            "x-SUPACLOUD-internal-token",
+        ]) {
+            expect(() => normalizeCustomGatewayRoute({
+                id: "reserved-header",
+                hosts: ["api.example.com"],
+                path: "/*",
+                upstream: "127.0.0.1:8080",
+                headers: { [header]: "untrusted" },
+            })).toThrow(`must not override reserved header: ${header}`);
+        }
+    });
+
+    test("keeps supported proxy overrides and response headers compatible", () => {
+        const proxy = makeCustomGatewayRoute("project-ref", {
+            id: "virtual-host",
+            hosts: ["api.example.com"],
+            path: "/*",
+            upstream: "127.0.0.1:8080",
+            headers: {
+                Host: "upstream.example.com",
+                "X-Forwarded-Host": "public.example.com",
+                "X-Service": "reports",
+            },
+        }) as any;
+        const proxyHeaders = proxy.handle[0].headers.request.set;
+
+        expect(proxyHeaders.Host).toEqual(["upstream.example.com"]);
+        expect(proxyHeaders["X-Forwarded-Host"]).toEqual(["public.example.com"]);
+        expect(proxyHeaders["X-Service"]).toEqual(["reports"]);
+        expect(proxyHeaders["X-Project-Ref"]).toEqual(["project-ref"]);
+        expect(proxyHeaders["x-project-ref"]).toEqual(["project-ref"]);
+
+        const staticRoute = makeCustomGatewayRoute("project-ref", {
+            id: "static-response-header",
+            hosts: ["static.example.com"],
+            path: "/*",
+            static_root: "/var/www/static",
+            headers: { "X-Project-Ref": "response-value" },
+        }) as any;
+        const redirectRoute = makeCustomGatewayRoute("project-ref", {
+            id: "redirect-response-header",
+            hosts: ["www.example.com"],
+            path: "/*",
+            redirect_to: "https://example.com{http.request.uri}",
+            headers: { "X-SupaCloud-Internal-Auth": "response-value" },
+        }) as any;
+
+        expect(staticRoute.handle[0].response.set["X-Project-Ref"]).toEqual(["response-value"]);
+        expect(redirectRoute.handle[0].headers["X-SupaCloud-Internal-Auth"]).toEqual(["response-value"]);
+    });
+
     test("builds exact and regex CORS matchers with a terminal preflight", () => {
         const subroute = makeCorsSubroute([
             "https://app.example.com",

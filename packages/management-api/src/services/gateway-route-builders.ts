@@ -69,6 +69,13 @@ const UPSTREAM_CORS_RESPONSE_HEADERS = [
     "Access-Control-Max-Age",
 ] as const;
 
+const RESERVED_CUSTOM_PROXY_REQUEST_HEADERS = new Set([
+    "x-project-ref",
+    "x-supabase-project",
+    "x-supacloud-internal-auth",
+    "x-supacloud-internal-token",
+]);
+
 function hostToCorsOrigins(host: string): string[] {
     const trimmed = host.trim();
     if (!trimmed) return [];
@@ -235,6 +242,16 @@ function normalizeCustomHeaders(headers: Record<string, string> | undefined): Re
     return Object.keys(normalized).length > 0 ? normalized : undefined;
 }
 
+function normalizeCustomProxyHeaders(headers: Record<string, string> | undefined): Record<string, string> | undefined {
+    const normalized = normalizeCustomHeaders(headers);
+    for (const header of Object.keys(normalized || {})) {
+        if (RESERVED_CUSTOM_PROXY_REQUEST_HEADERS.has(header.toLowerCase())) {
+            throw new Error(`Custom proxy route headers must not override reserved header: ${header}`);
+        }
+    }
+    return normalized;
+}
+
 export function normalizeCustomGatewayRoute(input: CustomGatewayRouteConfig): CustomGatewayRouteConfig {
     const id = String(input.id || "").trim();
     if (!/^[A-Za-z0-9_-]{1,64}$/.test(id)) {
@@ -267,6 +284,9 @@ export function normalizeCustomGatewayRoute(input: CustomGatewayRouteConfig): Cu
     if (hasRedirect && Object.keys(input.headers || {}).some((key) => key.trim().toLowerCase() === "location")) {
         throw new Error("Custom redirect routes must not override the Location header");
     }
+    const headers = hasUpstream
+        ? normalizeCustomProxyHeaders(input.headers)
+        : normalizeCustomHeaders(input.headers);
 
     return {
         id,
@@ -280,7 +300,7 @@ export function normalizeCustomGatewayRoute(input: CustomGatewayRouteConfig): Cu
         redirect_status: normalizeCustomRedirectStatus(input.redirect_status, hasRedirect),
         rewrite_uri: rewriteUri,
         strip_prefix: stripPrefix,
-        headers: normalizeCustomHeaders(input.headers),
+        headers,
         cors: input.cors ? uniqueStrings(input.cors.map((origin) => origin.trim()).filter(Boolean)).slice(0, 50) : undefined,
         priority: Number.isFinite(input.priority) ? Math.trunc(input.priority || 0) : 0,
         enabled: input.enabled ?? true,
