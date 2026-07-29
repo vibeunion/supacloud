@@ -257,6 +257,15 @@ resolve_postgrest_db_pool() {
     fi
     printf '%s' "$pool"
 }
+
+resolve_gotrue_db_pool() {
+    local pool="${GOTRUE_DB_MAX_POOL_SIZE:-2}"
+    if ! [[ "$pool" =~ ^[1-9][0-9]*$ ]]; then
+        echo "ERROR: GOTRUE_DB_MAX_POOL_SIZE must be a positive integer" >&2
+        return 1
+    fi
+    printf '%s' "$pool"
+}
 get_tenant_credentials() {
     local ref="$1"
     local field="$2"
@@ -869,7 +878,8 @@ EOF
     chown "$runtime_user:$runtime_user" "$gotrue_config_dir" || return 1
     chmod 700 "$gotrue_config_dir" || return 1
 
-    local gotrue_env
+    local gotrue_db_pool gotrue_env
+    gotrue_db_pool=$(resolve_gotrue_db_pool) || return 1
     gotrue_env=$(cat <<EOF
 # SupaCloud Tenant GoTrue Runtime: ${ref}
 # Bind to 0.0.0.0 so the host gateway can reach the tenant runtime.
@@ -881,6 +891,7 @@ API_EXTERNAL_URL=$(systemd_env_quote "$auth_api_external_url")
 GOTRUE_SITE_URL=$(systemd_env_quote "$api_external_url")
 GOTRUE_DB_DRIVER="postgres"
 GOTRUE_DB_DATABASE_URL=$(systemd_env_quote "$auth_db_uri")
+GOTRUE_DB_MAX_POOL_SIZE=${gotrue_db_pool}
 
 GOTRUE_JWT_SECRET=$(systemd_env_quote "$jwt_secret")
 GOTRUE_JWT_EXP=3600

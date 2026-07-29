@@ -1187,6 +1187,7 @@ db-channel = ${quoteTomlBasicString(resolvePgrstChannel(ref))}
             renderSystemdEnvLine("GOTRUE_URI_ALLOW_LIST", redirectOrigins.join(",")),
             renderSystemdEnvLine("GOTRUE_DB_DRIVER", "postgres"),
             renderSystemdEnvLine("GOTRUE_DB_DATABASE_URL", authDbUri),
+            `GOTRUE_DB_MAX_POOL_SIZE=${config.gotrueDbPool}`,
             renderSystemdEnvLine("GOTRUE_JWT_SECRET", creds.jwtSecret),
             `
 GOTRUE_JWT_AUD=authenticated

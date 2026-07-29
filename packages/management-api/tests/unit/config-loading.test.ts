@@ -32,6 +32,7 @@ function cleanEnv(overrides: Record<string, string>) {
     "INTERNAL_IP",
     "SUPACLOUD_CADDY_TLS_ISSUER",
     "POSTGREST_DB_POOL",
+    "GOTRUE_DB_MAX_POOL_SIZE",
     "MANAGEMENT_DB_POOL",
     "MANAGEMENT_PROJECT_DB_POOL",
     "MANAGEMENT_PROJECT_ROLE_DB_POOL",
@@ -80,7 +81,7 @@ function loadDatabaseUrl(env: Record<string, string>) {
 function loadDatabasePools(env: Record<string, string>) {
   const result = spawnSync("bun", ["-e", [
     'import { config } from "./src/config.ts";',
-    'console.log(`RESULT=${config.postgrestDbPool}:${config.managementDbPool}:${config.managementProjectDbPool}:${config.managementProjectRoleDbPool}:${config.managementProjectPoolCacheSize}`);',
+    'console.log(`RESULT=${config.postgrestDbPool}:${config.gotrueDbPool}:${config.managementDbPool}:${config.managementProjectDbPool}:${config.managementProjectRoleDbPool}:${config.managementProjectPoolCacheSize}`);',
   ].join(" ")], { cwd: packageRoot, env, encoding: "utf8" });
   expect(result.status, result.stderr).toBe(0);
   return result.stdout.match(/RESULT=([^\n]+)/)?.[1];
@@ -177,20 +178,22 @@ describe("production config loading boundaries", () => {
   });
 
   test("uses capacity-safe pool defaults and honors explicit overrides", () => {
-    expect(loadDatabasePools(cleanEnv({ NODE_ENV: "production" }))).toBe("3:5:2:1:5");
+    expect(loadDatabasePools(cleanEnv({ NODE_ENV: "production" }))).toBe("3:2:5:2:1:5");
     expect(loadDatabasePools(cleanEnv({
       NODE_ENV: "production",
       POSTGREST_DB_POOL: "7",
+      GOTRUE_DB_MAX_POOL_SIZE: "8",
       MANAGEMENT_DB_POOL: "9",
       MANAGEMENT_PROJECT_DB_POOL: "2",
       MANAGEMENT_PROJECT_ROLE_DB_POOL: "3",
       MANAGEMENT_PROJECT_POOL_CACHE_SIZE: "4",
-    }))).toBe("7:9:2:3:4");
+    }))).toBe("7:8:9:2:3:4");
   });
 
   test.each([
     { POSTGREST_DB_POOL: "0" },
     { POSTGREST_DB_POOL: "1.5" },
+    { GOTRUE_DB_MAX_POOL_SIZE: "0" },
     { MANAGEMENT_DB_POOL: "not-a-number" },
     { MANAGEMENT_PROJECT_DB_POOL: "0" },
     { MANAGEMENT_PROJECT_ROLE_DB_POOL: "1.5" },
@@ -203,7 +206,7 @@ describe("production config loading boundaries", () => {
     });
 
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("DB_POOL");
+    expect(result.stderr).toContain("POOL");
   });
 
   test("rejects a BFF signing secret shared with another privileged key", () => {
