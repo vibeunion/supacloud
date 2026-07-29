@@ -483,6 +483,22 @@ describe("TenantRuntimeService auth-only apply boundary", () => {
     expect(source).toContain("generateTenantConfigUnlocked");
   });
 
+  test("renders a bounded GoTrue database pool", () => {
+    const source = readFileSync(
+      join(import.meta.dir, "../../src/services/tenant-runtime.service.ts"),
+      "utf8",
+    );
+    const gotrueEnvStart = source.indexOf("const gotrueEnvLines = [");
+    const gotrueEnvSection = source.slice(
+      gotrueEnvStart,
+      source.indexOf("const oauthServerConfig = normalizeOAuthServerConfig", gotrueEnvStart),
+    );
+
+    expect(gotrueEnvSection).toContain("GOTRUE_DB_DATABASE_URL");
+    expect(gotrueEnvSection).toContain("GOTRUE_DB_MAX_POOL_SIZE");
+    expect(gotrueEnvSection).toContain("config.gotrueDbPool");
+  });
+
   test("prevents overlapping runtime reconciliation runs", () => {
     const workerSource = readFileSync(
       join(import.meta.dir, "../../src/workers/runtime-reconcile.worker.ts"),

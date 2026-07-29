@@ -53,6 +53,7 @@ describe("Config", () => {
     expect(config.postgrestMemoryMax).toBe("384M");
     expect(config.postgrestCpuWeight).toBeGreaterThanOrEqual(40);
     expect(config.postgrestDbPool).toBe(3);
+    expect(config.gotrueDbPool).toBe(2);
     expect(config.managementDbPool).toBe(5);
     expect(managementSql.options.max).toBe(config.managementDbPool);
     expect(config.managementProjectDbPool).toBe(2);

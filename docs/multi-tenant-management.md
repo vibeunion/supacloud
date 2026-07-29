@@ -296,6 +296,7 @@ MASTER_TOKEN=your-secure-master-token
 SCRIPTS_PATH=/opt/supacloud/scripts/lib
 # Capacity-safe defaults; omit both unless an operator has measured headroom.
 POSTGREST_DB_POOL=3
+GOTRUE_DB_MAX_POOL_SIZE=2
 MANAGEMENT_DB_POOL=5
 MANAGEMENT_PROJECT_DB_POOL=2
 MANAGEMENT_PROJECT_ROLE_DB_POOL=1
@@ -313,6 +314,11 @@ off that pool version for one hour, preventing a cross-tenant restart storm.
 Stopped projects and unmanaged configuration files are not changed. These
 pool settings budget connections within the existing PostgreSQL capacity;
 they do not change PostgreSQL `max_connections`.
+
+`GOTRUE_DB_MAX_POOL_SIZE` bounds each tenant GoTrue runtime's direct auth
+database connections. It is rendered by both the Management API runtime
+generator and the legacy shell generator so auth tenants do not fall back to
+GoTrue's unlimited pool default after provisioning or repair.
 
 `MANAGEMENT_DB_POOL` limits the `supacloud_meta` pool. Project database access
 uses separate admin and tenant-role pools capped by
