@@ -294,7 +294,33 @@ PORT=9090
 DATABASE_URL=postgresql://postgres:password@localhost:5432/supacloud_meta
 MASTER_TOKEN=your-secure-master-token
 SCRIPTS_PATH=/opt/supacloud/scripts/lib
+# Capacity-safe defaults; omit both unless an operator has measured headroom.
+POSTGREST_DB_POOL=3
+MANAGEMENT_DB_POOL=5
+MANAGEMENT_PROJECT_DB_POOL=2
+MANAGEMENT_PROJECT_ROLE_DB_POOL=1
+MANAGEMENT_PROJECT_POOL_CACHE_SIZE=5
 ```
+
+`POSTGREST_DB_POOL` is also honored by the legacy tenant runtime generator,
+which uses the same default of `3`. The Management API runtime reconciler
+rolls this setting through active, running, Management-API-managed tenant
+`.conf` files one tenant at a time after an upgrade. It restarts PostgREST and
+waits for health; if the candidate is unhealthy, it restores the exact prior
+file ownership, mode, and content before restarting the prior configuration.
+The first failed migration stops further pool changes in that sweep and backs
+off that pool version for one hour, preventing a cross-tenant restart storm.
+Stopped projects and unmanaged configuration files are not changed. These
+pool settings budget connections within the existing PostgreSQL capacity;
+they do not change PostgreSQL `max_connections`.
+
+`MANAGEMENT_DB_POOL` limits the `supacloud_meta` pool. Project database access
+uses separate admin and tenant-role pools capped by
+`MANAGEMENT_PROJECT_DB_POOL` and `MANAGEMENT_PROJECT_ROLE_DB_POOL`. At most
+`MANAGEMENT_PROJECT_POOL_CACHE_SIZE` pools of each kind remain cached, so the
+defaults bound cached project access to fifteen potential connections in total.
+The admin pool retains two slots so one long-running tenant operation cannot
+starve every other Management API query for that project.
 
 ---
 

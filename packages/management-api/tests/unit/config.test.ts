@@ -1,6 +1,11 @@
 import { describe, test, expect } from "bun:test";
 import { resolve } from "node:path";
 import { config } from "../../src/config";
+import {
+  getProjectDb,
+  getProjectRoleDb,
+  sql as managementSql,
+} from "../../src/db";
 
 describe("Config", () => {
   test("should have port configured", () => {
@@ -47,7 +52,15 @@ describe("Config", () => {
     expect(config.postgrestRts).toContain("-M256m");
     expect(config.postgrestMemoryMax).toBe("384M");
     expect(config.postgrestCpuWeight).toBeGreaterThanOrEqual(40);
-    expect(config.postgrestDbPool).toBe(10);
+    expect(config.postgrestDbPool).toBe(3);
+    expect(config.managementDbPool).toBe(5);
+    expect(managementSql.options.max).toBe(config.managementDbPool);
+    expect(config.managementProjectDbPool).toBe(2);
+    expect(config.managementProjectRoleDbPool).toBe(1);
+    expect(config.managementProjectPoolCacheSize).toBe(5);
+    expect(getProjectDb("capacity_test").options.max).toBe(config.managementProjectDbPool);
+    expect(getProjectRoleDb("capacity_test", "role", "password").options.max)
+      .toBe(config.managementProjectRoleDbPool);
   });
 
   test("empty PGPASSWORD falls back to PG_PASSWORD", () => {

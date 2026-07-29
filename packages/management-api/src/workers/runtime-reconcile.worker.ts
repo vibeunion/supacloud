@@ -5,8 +5,9 @@ const RECONCILE_INTERVAL_MS = Number(process.env.RUNTIME_RECONCILE_INTERVAL_MS |
 const INITIAL_DELAY_MS = Number(process.env.RUNTIME_RECONCILE_INITIAL_DELAY_MS || 60 * 1000);
 
 let reconcileTimer: Timer | null = null;
+let reconciliationInFlight: Promise<void> | null = null;
 
-export async function runRuntimeReconciliation(): Promise<void> {
+async function performRuntimeReconciliation(): Promise<void> {
     try {
         const stats = await tenantRuntimeService.reconcileInactiveRuntimes();
         if (stats.stopped > 0 || stats.started > 0 || stats.updated > 0 || stats.errors > 0) {
@@ -19,6 +20,16 @@ export async function runRuntimeReconciliation(): Promise<void> {
             error: error instanceof Error ? error.message : String(error),
         });
     }
+}
+
+export function runRuntimeReconciliation(): Promise<void> {
+    if (reconciliationInFlight) return reconciliationInFlight;
+
+    const run = performRuntimeReconciliation().finally(() => {
+        if (reconciliationInFlight === run) reconciliationInFlight = null;
+    });
+    reconciliationInFlight = run;
+    return run;
 }
 
 export function startRuntimeReconcileWorker(): void {

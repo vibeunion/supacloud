@@ -248,6 +248,15 @@ get_tenant_port() {
 }
 
 # ========== Query tenant credentials from supacloud_meta ==========
+
+resolve_postgrest_db_pool() {
+    local pool="${POSTGREST_DB_POOL:-3}"
+    if ! [[ "$pool" =~ ^[1-9][0-9]*$ ]]; then
+        echo "ERROR: POSTGREST_DB_POOL must be a positive integer" >&2
+        return 1
+    fi
+    printf '%s' "$pool"
+}
 get_tenant_credentials() {
     local ref="$1"
     local field="$2"
@@ -803,7 +812,8 @@ generate_tenant_config() {
     local auth_db_uri="postgres://${encoded_admin_user}:${encoded_admin_password}@${PG_HOST}:${PG_PORT}/${encoded_db_name}"
 
     # 1. Generate PostgREST .env and .conf
-    local pgrst_env
+    local postgrest_db_pool pgrst_env
+    postgrest_db_pool=$(resolve_postgrest_db_pool) || return 1
     pgrst_env=$(cat <<EOF
 # SupaCloud Tenant PostgREST Runtime: ${ref}
 PGRST_DB_URI=$(systemd_env_quote "$tenant_db_uri")
@@ -812,7 +822,7 @@ PGRST_DB_EXTRA_SEARCH_PATH="public"
 PGRST_DB_ANON_ROLE="anon"
 PGRST_JWT_SECRET=$(systemd_env_quote "$jwt_secret")
 PGRST_SERVER_PORT=${pgrst_port}
-PGRST_DB_POOL=3
+PGRST_DB_POOL=${postgrest_db_pool}
 PGRST_DB_POOL_ACQUISITION_TIMEOUT=10
 PGRST_LOG_LEVEL="warn"
 EOF
@@ -831,7 +841,7 @@ jwt-secret = $(toml_basic_string "$jwt_secret")
 server-port = ${pgrst_port}
 # Bind to 0.0.0.0 so the host gateway can reach the tenant runtime.
 server-host = "0.0.0.0"
-db-pool = 3
+db-pool = ${postgrest_db_pool}
 db-pool-acquisition-timeout = 10
 log-level = "warn"
 db-channel = $(toml_basic_string "pgrst_${ref}")

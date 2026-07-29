@@ -465,4 +465,31 @@ describe("TenantRuntimeService auth-only apply boundary", () => {
     expect(authApplySection).toContain('runSystemctlOrThrow("restart", this.postgrestController.unit(ref))');
     expect(authApplySection).toContain("waitForHealthy");
   });
+
+  test("uses checked restart and serializes PostgREST pool config changes", () => {
+    const source = readFileSync(
+      join(import.meta.dir, "../../src/services/tenant-runtime.service.ts"),
+      "utf8",
+    );
+    const poolUpdateSection = source.slice(
+      source.indexOf("private async restartPostgrestForPoolUpdate"),
+      source.indexOf("private async refreshProjectPostgrestVerifier"),
+    );
+
+    expect(poolUpdateSection).toContain(
+      'runSystemctlOrThrow("restart", this.postgrestController.unit(ref))',
+    );
+    expect(poolUpdateSection).toContain("withTenantConfigLock");
+    expect(source).toContain("generateTenantConfigUnlocked");
+  });
+
+  test("prevents overlapping runtime reconciliation runs", () => {
+    const workerSource = readFileSync(
+      join(import.meta.dir, "../../src/workers/runtime-reconcile.worker.ts"),
+      "utf8",
+    );
+
+    expect(workerSource).toContain("if (reconciliationInFlight) return reconciliationInFlight");
+    expect(workerSource).toContain("performRuntimeReconciliation().finally");
+  });
 });
