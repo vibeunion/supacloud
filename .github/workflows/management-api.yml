@@ -457,7 +457,7 @@ jobs:
           API_EXTERNAL_URL: http://127.0.0.1:9090
           GOTRUE_OPERATOR_TOKEN: super-secret-jwt-token-with-at-least-32-characters-long
       realtime:
-        image: public.ecr.aws/supabase/realtime:v2.121.0
+        image: public.ecr.aws/supabase/realtime:v2.121.1
         ports:
           - 4000:4000
         env:
@@ -559,8 +559,8 @@ jobs:
           done
           if [ "${realtime_ready}" != "true" ]; then
             echo "::error title=Realtime service not ready::Realtime did not become reachable on :4000"
-            docker ps -a --filter "ancestor=public.ecr.aws/supabase/realtime:v2.121.0" || true
-            realtime_container_id="$(docker ps -a -q --filter "ancestor=public.ecr.aws/supabase/realtime:v2.121.0" | head -n1)"
+            docker ps -a --filter "ancestor=public.ecr.aws/supabase/realtime:v2.121.1" || true
+            realtime_container_id="$(docker ps -a -q --filter "ancestor=public.ecr.aws/supabase/realtime:v2.121.1" | head -n1)"
             if [ -n "${realtime_container_id}" ]; then
               echo "--- Realtime container status ---"
               docker inspect --format='{{.State.Status}} exit={{.State.ExitCode}} err={{.State.Error}} oom={{.State.OOMKilled}} restart={{.RestartCount}}' "${realtime_container_id}" || true
@@ -610,7 +610,7 @@ jobs:
         run: |
           echo "Restarting Auth and Realtime Containers..."
           docker start $(docker ps -a -q --filter "ancestor=supabase/gotrue:v2.194.0") || true
-          docker start $(docker ps -a -q --filter "ancestor=public.ecr.aws/supabase/realtime:v2.121.0") || true
+          docker start $(docker ps -a -q --filter "ancestor=public.ecr.aws/supabase/realtime:v2.121.1") || true
           sleep 4
 
       - name: Launch API & Execute Full Defenses

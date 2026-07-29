@@ -457,21 +457,43 @@ describe("supabase bootstrap schema", () => {
     expect(bootstrap).toContain("'pgmq'");
   });
 
-  test("tenant schema migration creates realtime schema before realtime objects", () => {
-    for (const filePath of [
+  test("SupaCloud leaves official Realtime objects to the upstream migrator", () => {
+    const bootstrap = readRepoFile("src/db/schemas/supabase.sql");
+    const tenantMigrationSources = [
       "src/services/tenant-runtime-migration.ts",
       "src/scripts/migrate-tenant-schema.ts",
-    ]) {
-      const source = readRepoFile(filePath);
-      const schema = source.indexOf("CREATE SCHEMA IF NOT EXISTS realtime;");
-      const messages = source.indexOf("CREATE TABLE IF NOT EXISTS realtime.messages");
-      const notifyFn = source.indexOf(
-        "CREATE OR REPLACE FUNCTION realtime.notify_postgres_changes()",
-      );
+    ].map(readRepoFile);
+    const sources = [bootstrap, ...tenantMigrationSources];
+    const officialDefinitions = [
+      /create\s+table(?:\s+if\s+not\s+exists)?\s+realtime\.(?:messages|subscription)\b/i,
+      /create\s+type\s+realtime\.(?:equality_op|action|user_defined_filter|wal_column|wal_rls)\b/i,
+      /create\s+(?:or\s+replace\s+)?function\s+realtime\.(?:send|send_binary|topic|apply_rls|list_changes|quote_wal2json|wal2json_escape_identifier)\s*\(/i,
+    ];
+    const realtimeSchemaPrerequisites = [
+      "CREATE SCHEMA IF NOT EXISTS realtime;",
+      "ALTER SCHEMA realtime OWNER TO supabase_admin;",
+      "GRANT USAGE, CREATE ON SCHEMA realtime TO supabase_admin, supabase_realtime_admin;",
+    ];
+    const realtimeSchemaContract = realtimeSchemaPrerequisites.join("\n");
+    expect(ALTER_TENANT_SQL).toContain(realtimeSchemaContract);
 
-      expect(schema).toBeGreaterThanOrEqual(0);
-      expect(messages).toBeGreaterThan(schema);
-      expect(notifyFn).toBeGreaterThan(schema);
+    for (const source of sources) {
+      expect(source).toMatch(/create\s+schema\s+if\s+not\s+exists\s+realtime/i);
+      expect(source).toContain(realtimeSchemaContract);
+      for (const definition of officialDefinitions) {
+        expect(source).not.toMatch(definition);
+      }
+    }
+
+    expect(bootstrap).toContain("CREATE OR REPLACE FUNCTION realtime.notify_change_payload(payload jsonb)");
+    expect(bootstrap).toContain("CREATE OR REPLACE FUNCTION realtime.ensure_tasks_publication()");
+    expect(bootstrap).toContain("CREATE OR REPLACE FUNCTION realtime.auto_publish_tasks_table()");
+    for (const source of tenantMigrationSources) {
+      expect(source).toContain('${SQL_MODULES["realtime-notify-payload"]}');
+      expect(source).toContain('${SQL_MODULES["realtime-auto-attach-trigger"]}');
+      expect(source).toContain("CREATE OR REPLACE FUNCTION realtime.notify_postgres_changes()");
+      expect(source).toContain("CREATE OR REPLACE FUNCTION realtime.ensure_tasks_publication()");
+      expect(source).toContain("CREATE OR REPLACE FUNCTION realtime.auto_publish_tasks_table()");
     }
   });
 

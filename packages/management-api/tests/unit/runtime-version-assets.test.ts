@@ -1003,7 +1003,7 @@ describe("runtime companion version assets", () => {
     expect(runtime).toContain('POSTGREST_DEFAULT_VERSION="v14.16"');
     expect(runtime).toContain('GOTRUE_DEFAULT_VERSION="v2.194.0"');
     for (const source of [installer, realtimeUnit, workflow]) {
-      expect(source).toContain("public.ecr.aws/supabase/realtime:v2.121.0");
+      expect(source).toContain("public.ecr.aws/supabase/realtime:v2.121.1");
     }
     for (const compose of [devCompose, selfHostCompose]) {
       expect(compose).toContain("caddy:2.11.4");

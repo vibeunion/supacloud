@@ -3191,7 +3191,7 @@ install_management_api() {
         REALTIME_DB_ENC_KEY "$REALTIME_DB_ENC_KEY" \
         REALTIME_API_SECRET "$JWT_SECRET" \
         SUPACLOUD_REALTIME_CONTAINER_ENV_FILE "${SUPACLOUD_REALTIME_CONTAINER_ENV_FILE:-/etc/supabase/realtime-container.env}" \
-        REALTIME_IMAGE "${REALTIME_IMAGE:-public.ecr.aws/supabase/realtime:v2.121.0}" \
+        REALTIME_IMAGE "${REALTIME_IMAGE:-public.ecr.aws/supabase/realtime:v2.121.1}" \
         REALTIME_CONTAINER_NAME "${REALTIME_CONTAINER_NAME:-supacloud-realtime}" \
         REALTIME_DB_USER supabase_admin \
         PG_HOST 127.0.0.1 \
@@ -3536,6 +3536,15 @@ persist_service_container_runtime_env() {
 write_realtime_container_env() {
     local target_file="$1"
     local secret
+    local realtime_region="${REALTIME_REGION:-us-east-1}"
+    local seed_self_host="${REALTIME_SEED_SELF_HOST:-false}"
+    case "$seed_self_host" in
+        true|false) ;;
+        *)
+            log_error "REALTIME_SEED_SELF_HOST must be true or false"
+            return 1
+            ;;
+    esac
     for secret in "${POSTGRES_PASSWORD:-}" "${JWT_SECRET:-}" \
         "${REALTIME_DB_ENC_KEY:-}" "${REALTIME_SECRET_KEY_BASE:-}"; do
         if [[ -z "$secret" || "$secret" == *$'\n'* || "$secret" == *$'\r'* ]]; then
@@ -3563,9 +3572,10 @@ write_realtime_container_env() {
         DNS_NODES "" \
         RLIMIT_NOFILE 10000 \
         APP_NAME realtime \
-        SEED_SELF_HOST true \
+        SEED_SELF_HOST "$seed_self_host" \
         RUN_JANITOR false \
         SECURE_CHANNELS false \
+        REGION "$realtime_region" \
         DISABLE_HEALTHCHECK_LOGGING true
 
     local rendered_api_secret
@@ -3658,7 +3668,7 @@ deploy_service_containers() {
 
     # --- 2. Deploy Supabase Realtime (Multi-tenant WebSocket) ---
     local REALTIME_UNIT_SRC="${SCRIPT_DIR}/infrastructure/systemd/supacloud-realtime.service"
-    local REALTIME_IMAGE_VALUE="${REALTIME_IMAGE:-public.ecr.aws/supabase/realtime:v2.121.0}"
+    local REALTIME_IMAGE_VALUE="${REALTIME_IMAGE:-public.ecr.aws/supabase/realtime:v2.121.1}"
     local REALTIME_CONTAINER_ENV_FILE="${SUPACLOUD_REALTIME_CONTAINER_ENV_FILE:-/etc/supabase/realtime-container.env}"
     if [[ -f "$REALTIME_UNIT_SRC" ]]; then
         log_info "Registering SupaCloud Realtime systemd unit..."
