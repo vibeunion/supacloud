@@ -797,6 +797,42 @@ describe("CaddyGatewayProvider", () => {
         restore();
     });
 
+    test("configureCustomGatewayRoutes resolves managed functions on every reconcile", async () => {
+        const calls: Array<{ url: string; method: string; body: any }> = [];
+        const restoreFetch = captureFetch(calls);
+        const originalEdgeRuntimeInternal = config.edgeRuntimeInternal;
+        const provider = new CaddyGatewayProvider();
+        const route = {
+            id: "sync-function",
+            hosts: ["functions.example.com"],
+            path: "/invoke/*",
+            managed_upstream: "edge-functions" as const,
+        };
+
+        try {
+            config.edgeRuntimeInternal = "127.0.0.1:9005";
+            expect((await provider.configureCustomGatewayRoutes("proj123", [route])).success).toBe(true);
+            const embeddedLoad = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
+            const embeddedRoute = embeddedLoad?.body?.apps?.http?.servers?.supacloud?.routes?.find(
+                (item: any) => item["@id"] === "route-custom-gateway-proj123-sync-function",
+            );
+            expect(embeddedRoute?.handle?.find((handler: any) => handler.handler === "reverse_proxy")?.upstreams)
+                .toEqual([{ dial: "127.0.0.1:9005" }]);
+
+            config.edgeRuntimeInternal = "edge-runtime:9000";
+            expect((await provider.configureCustomGatewayRoutes("proj123", [route])).success).toBe(true);
+            const externalLoad = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
+            const externalRoute = externalLoad?.body?.apps?.http?.servers?.supacloud?.routes?.find(
+                (item: any) => item["@id"] === "route-custom-gateway-proj123-sync-function",
+            );
+            expect(externalRoute?.handle?.find((handler: any) => handler.handler === "reverse_proxy")?.upstreams)
+                .toEqual([{ dial: "edge-runtime:9000" }]);
+        } finally {
+            config.edgeRuntimeInternal = originalEdgeRuntimeInternal;
+            restoreFetch();
+        }
+    });
+
     test("configureCustomGatewayRoutes supports mounted static SPA rewrites", async () => {
         const calls: Array<{ url: string; method: string; body: any }> = [];
         const restore = captureFetch(calls);

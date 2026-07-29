@@ -112,6 +112,97 @@ describe("controlled custom gateway routes API", () => {
     }
   });
 
+  test("POST and PUT persist the managed Edge Functions symbol without resolving a port", async () => {
+    const getSettings = spyOn(projectService, "getProjectSettings").mockResolvedValue({
+      gateway_routes: [],
+    } as any);
+    const updateSettings = spyOn(projectService, "updateProjectSettings").mockResolvedValue({} as any);
+    const configureRoutes = spyOn(gatewayService, "configureCustomGatewayRoutes").mockResolvedValue({ success: true });
+
+    try {
+      const postResponse = await request("/v1/projects/proj123/gateway/routes", {
+        method: "POST",
+        headers: masterHeaders,
+        body: JSON.stringify({
+          id: "sync-function",
+          hosts: ["functions.example.com"],
+          path: "/invoke/*",
+          managed_upstream: "edge-functions",
+        }),
+      });
+
+      expect(postResponse.status).toBe(200);
+      expect(await postResponse.json()).toEqual({
+        success: true,
+        route: expect.objectContaining({
+          id: "sync-function",
+          managed_upstream: "edge-functions",
+        }),
+      });
+      expect(configureRoutes).toHaveBeenCalledWith("proj123", [
+        expect.objectContaining({ managed_upstream: "edge-functions", upstream: undefined }),
+      ]);
+      expect(updateSettings).toHaveBeenCalledWith("proj123", {
+        gateway_routes: [expect.objectContaining({ managed_upstream: "edge-functions", upstream: undefined })],
+      });
+
+      getSettings.mockResolvedValue({
+        gateway_routes: [{
+          id: "sync-function",
+          hosts: ["functions.example.com"],
+          path: "/invoke/*",
+          managed_upstream: "edge-functions",
+        }],
+      } as any);
+      updateSettings.mockClear();
+      configureRoutes.mockClear();
+
+      const putResponse = await request("/v1/projects/proj123/gateway/routes/sync-function", {
+        method: "PUT",
+        headers: masterHeaders,
+        body: JSON.stringify({
+          hosts: ["functions.example.com"],
+          path: "/invoke/*",
+          managed_upstream: "edge-functions",
+        }),
+      });
+
+      expect(putResponse.status).toBe(200);
+      expect(await putResponse.json()).toEqual({
+        success: true,
+        route: expect.objectContaining({
+          id: "sync-function",
+          managed_upstream: "edge-functions",
+        }),
+      });
+      expect(configureRoutes).toHaveBeenCalledWith("proj123", [
+        expect.objectContaining({ managed_upstream: "edge-functions", upstream: undefined }),
+      ]);
+      expect(updateSettings).toHaveBeenCalledWith("proj123", {
+        gateway_routes: [expect.objectContaining({ managed_upstream: "edge-functions", upstream: undefined })],
+      });
+    } finally {
+      getSettings.mockRestore();
+      updateSettings.mockRestore();
+      configureRoutes.mockRestore();
+    }
+  });
+
+  test("rejects an unknown managed upstream at the API schema boundary", async () => {
+    const response = await request("/v1/projects/proj123/gateway/routes", {
+      method: "POST",
+      headers: masterHeaders,
+      body: JSON.stringify({
+        id: "unknown-managed",
+        hosts: ["functions.example.com"],
+        path: "/invoke/*",
+        managed_upstream: "not-a-managed-upstream",
+      }),
+    });
+
+    expect(response.status).toBe(422);
+  });
+
   test("POST rejects reserved proxy request headers before changing gateway state", async () => {
     const getSettings = spyOn(projectService, "getProjectSettings").mockResolvedValue({
       gateway_routes: [],

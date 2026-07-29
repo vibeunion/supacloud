@@ -47,11 +47,13 @@ describe("gateway CLI tool — schema coercion", () => {
             hosts: '["api.example.com"]',
             paths: '["/a/*"]',
             headers: '{"X-Team":"core"}',
+            managed_upstream: "edge-functions",
         });
 
         expect(parsed.hosts).toEqual(["api.example.com"]);
         expect(parsed.paths).toEqual(["/a/*"]);
         expect(parsed.headers).toEqual({ "X-Team": "core" });
+        expect(parsed.managed_upstream).toBe("edge-functions");
     });
 });
 
@@ -61,7 +63,11 @@ describe("gateway CLI tool — actions", () => {
         const { callback } = captureGatewayTool({
             get: async (path: string) => {
                 calls.push(path);
-                return { ok: true, status: 200, data: { routes: [{ id: "r1", hosts: ["api.example.com"], path: "/webhook/*" }] } };
+                return {
+                    ok: true,
+                    status: 200,
+                    data: { routes: [{ id: "r1", hosts: ["api.example.com"], path: "/webhook/*", managed_upstream: "edge-functions" }] },
+                };
             },
         });
 
@@ -69,6 +75,7 @@ describe("gateway CLI tool — actions", () => {
 
         expect(calls).toEqual(["/v1/projects/proj/gateway/routes"]);
         expect(result.content[0].text).toContain("r1");
+        expect(result.content[0].text).toContain('"managed_upstream": "edge-functions"');
     });
 
     test("upsert_route posts normalized route JSON (single path collapses to string)", async () => {
@@ -149,7 +156,7 @@ describe("gateway CLI tool — actions", () => {
         });
     });
 
-    test("update_route uses PUT with routeId path param and omits id from body", async () => {
+    test("update_route forwards the managed upstream with the routeId path param", async () => {
         const calls: Array<{ path: string; body: unknown }> = [];
         const { callback } = captureGatewayTool({
             put: async (path: string, body?: unknown) => {
@@ -163,12 +170,12 @@ describe("gateway CLI tool — actions", () => {
             route_id: "webhook",
             hosts: ["api.example.com"],
             paths: ["/webhook/*"],
-            static_root: "/srv/site",
+            managed_upstream: "edge-functions",
         });
 
         expect(calls[0].path).toBe("/v1/projects/proj/gateway/routes/webhook");
         const body = calls[0].body as Record<string, unknown>;
-        expect(body.static_root).toBe("/srv/site");
+        expect(body.managed_upstream).toBe("edge-functions");
         expect(body.id).toBeUndefined();
     });
 

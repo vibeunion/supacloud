@@ -102,6 +102,7 @@ Actions: routes, upsert_route, update_route, delete_route, config, get_certifica
             hosts: withDescription(stringArray, "[upsert_route/update_route] 主机名列表，逗号分隔或 JSON 数组（1-20）"),
             paths: withDescription(stringArray, "[upsert_route/update_route] 路径列表，逗号分隔或 JSON 数组（1-32）"),
             upstream: optional(Type.String(), "[upsert_route/update_route] 反代上游 host:port 或 http(s)://host[:port]"),
+            managed_upstream: optional(stringEnum(["edge-functions"]), "[upsert_route/update_route] 托管上游（同步 Edge Function）"),
             upstream_tls_insecure_skip_verify: optional(Type.Boolean(), "[upsert_route/update_route] 上游 TLS 跳过校验"),
             static_root: optional(Type.String(), "[upsert_route/update_route] 静态站点根目录"),
             protocol: optional(stringEnum(["http", "https"]), "[upsert_route/update_route] 可选请求协议匹配"),
@@ -145,7 +146,7 @@ Actions: routes, upsert_route, update_route, delete_route, config, get_certifica
             };
 
             const {
-                action, ref, route_id, hosts, paths, upstream, upstream_tls_insecure_skip_verify,
+                action, ref, route_id, hosts, paths, upstream, managed_upstream, upstream_tls_insecure_skip_verify,
                 static_root, protocol, redirect_to, redirect_status, rewrite_uri, strip_prefix, headers, cors, priority, enabled,
                 rate_limit_tier, cors_origins, jwt_enabled, jwt_secret,
                 cert_mode, challenge, email, dns_provider, dns_env, domains, auto_renew, renew,
@@ -170,6 +171,7 @@ Actions: routes, upsert_route, update_route, delete_route, config, get_certifica
                         path: (paths as string[]).length === 1 ? (paths as string[])[0] : paths,
                     };
                     if (upstream !== undefined) body.upstream = upstream;
+                    if (managed_upstream !== undefined) body.managed_upstream = managed_upstream;
                     if (upstream_tls_insecure_skip_verify !== undefined) body.upstream_tls_insecure_skip_verify = upstream_tls_insecure_skip_verify;
                     if (static_root !== undefined) body.static_root = static_root;
                     if (protocol !== undefined) body.protocol = protocol;
@@ -194,6 +196,7 @@ Actions: routes, upsert_route, update_route, delete_route, config, get_certifica
                         path: (paths as string[]).length === 1 ? (paths as string[])[0] : paths,
                     };
                     if (upstream !== undefined) body.upstream = upstream;
+                    if (managed_upstream !== undefined) body.managed_upstream = managed_upstream;
                     if (upstream_tls_insecure_skip_verify !== undefined) body.upstream_tls_insecure_skip_verify = upstream_tls_insecure_skip_verify;
                     if (static_root !== undefined) body.static_root = static_root;
                     if (protocol !== undefined) body.protocol = protocol;

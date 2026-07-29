@@ -12,6 +12,7 @@ export type CaddyHeaderValue = string | string[];
 export type CaddyRoute = Record<string, unknown>;
 export type CaddyMatcher = Record<string, unknown>;
 export type CustomGatewayProtocol = "http" | "https";
+export type CustomGatewayManagedUpstream = "edge-functions";
 export type CustomGatewayRedirectStatus = 301 | 302 | 307 | 308;
 export const MAX_CUSTOM_GATEWAY_HOSTS = 20;
 // Hosted applications can exceed twenty exact paths; keep the larger Caddy matcher bounded.
@@ -22,6 +23,7 @@ export interface CustomGatewayRouteConfig {
     hosts: string[];
     path: string | string[];
     upstream?: string;
+    managed_upstream?: CustomGatewayManagedUpstream;
     upstream_tls_insecure_skip_verify?: boolean;
     static_root?: string;
     protocol?: CustomGatewayProtocol;
@@ -228,6 +230,16 @@ export function normalizeCustomUpstream(upstream: string): { dial: string; tls: 
     return { dial: value, tls: false };
 }
 
+function normalizeCustomManagedUpstream(
+    value: CustomGatewayManagedUpstream | undefined,
+): CustomGatewayManagedUpstream | undefined {
+    if (value === undefined) return undefined;
+    if (value !== "edge-functions") {
+        throw new Error("Custom route managed_upstream must be edge-functions");
+    }
+    return value;
+}
+
 function normalizeCustomHeaders(headers: Record<string, string> | undefined): Record<string, string> | undefined {
     if (!headers) return undefined;
     const normalized: Record<string, string> = {};
@@ -268,11 +280,13 @@ export function normalizeCustomGatewayRoute(input: CustomGatewayRouteConfig): Cu
     }
 
     const hasUpstream = typeof input.upstream === "string" && input.upstream.trim().length > 0;
+    const managedUpstream = normalizeCustomManagedUpstream(input.managed_upstream);
+    const hasManagedUpstream = managedUpstream !== undefined;
     const hasStaticRoot = typeof input.static_root === "string" && input.static_root.trim().length > 0;
     const redirectTo = normalizeCustomRedirectTo(input.redirect_to);
     const hasRedirect = typeof redirectTo === "string";
-    if ([hasUpstream, hasStaticRoot, hasRedirect].filter(Boolean).length !== 1) {
-        throw new Error("Custom route must set exactly one of upstream, static_root or redirect_to");
+    if ([hasUpstream, hasManagedUpstream, hasStaticRoot, hasRedirect].filter(Boolean).length !== 1) {
+        throw new Error("Custom route must set exactly one of upstream, managed_upstream, static_root or redirect_to");
     }
 
     const rewriteUri = normalizeCustomRewriteUri(input.rewrite_uri);
@@ -284,7 +298,7 @@ export function normalizeCustomGatewayRoute(input: CustomGatewayRouteConfig): Cu
     if (hasRedirect && Object.keys(input.headers || {}).some((key) => key.trim().toLowerCase() === "location")) {
         throw new Error("Custom redirect routes must not override the Location header");
     }
-    const headers = hasUpstream
+    const headers = hasUpstream || hasManagedUpstream
         ? normalizeCustomProxyHeaders(input.headers)
         : normalizeCustomHeaders(input.headers);
 
@@ -293,6 +307,7 @@ export function normalizeCustomGatewayRoute(input: CustomGatewayRouteConfig): Cu
         hosts,
         path: Array.isArray(input.path) ? normalizedPaths : normalizedPaths[0],
         upstream: hasUpstream ? input.upstream!.trim() : undefined,
+        managed_upstream: managedUpstream,
         upstream_tls_insecure_skip_verify: input.upstream_tls_insecure_skip_verify === true,
         static_root: hasStaticRoot ? normalizeCustomStaticRoot(input.static_root!) : undefined,
         protocol: normalizeCustomProtocol(input.protocol),
@@ -447,8 +462,10 @@ export function makeCustomGatewayRoute(projectRef: string, input: CustomGatewayR
     const corsSubroute = route.cors ? makeCorsSubroute(route.cors) : null;
     if (corsSubroute) handle.push(corsSubroute);
 
-    if (route.upstream) {
-        const upstream = normalizeCustomUpstream(route.upstream);
+    if (route.upstream || route.managed_upstream) {
+        const upstream = normalizeCustomUpstream(
+            route.managed_upstream === "edge-functions" ? config.edgeRuntimeInternal : route.upstream!,
+        );
         const headers: Record<string, CaddyHeaderValue> = {
             Host: "{http.request.host}",
             "X-Project-Ref": projectRef,
@@ -466,7 +483,7 @@ export function makeCustomGatewayRoute(projectRef: string, input: CustomGatewayR
             false,
             true,
             upstream.tls,
-            route.upstream_tls_insecure_skip_verify,
+            route.upstream ? route.upstream_tls_insecure_skip_verify : false,
         ));
     } else if (route.static_root) {
         if (route.headers && Object.keys(route.headers).length > 0) {

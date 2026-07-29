@@ -34,15 +34,19 @@ describe("admin gateway CLI tool", () => {
     test("lists routes with explicit ref", async () => {
         const calls: string[] = [];
         const { callback } = captureGatewayTool({
-            get: async (path: string) => { calls.push(path); return { ok: true, status: 200, data: { routes: [{ id: "r1" }] } }; },
+            get: async (path: string) => {
+                calls.push(path);
+                return { ok: true, status: 200, data: { routes: [{ id: "r1", managed_upstream: "edge-functions" }] } };
+            },
         });
 
         const result = await callback({ action: "routes", ref: "tenant-a" });
         expect(calls).toEqual(["/v1/projects/tenant-a/gateway/routes"]);
         expect(result.content[0].text).toContain("r1");
+        expect(result.content[0].text).toContain('"managed_upstream": "edge-functions"');
     });
 
-    test("upsert_route posts normalized JSON with single path as string", async () => {
+    test("upsert_route forwards managed upstream with a single path", async () => {
         const calls: Array<{ path: string; body: unknown }> = [];
         const { callback } = captureGatewayTool({
             post: async (path: string, body?: unknown) => { calls.push({ path, body }); return { ok: true, status: 200, data: { success: true } }; },
@@ -54,13 +58,13 @@ describe("admin gateway CLI tool", () => {
             route_id: "webhook",
             hosts: ["api.example.com"],
             paths: ["/webhook/*"],
-            upstream: "10.0.0.5:8080",
+            managed_upstream: "edge-functions",
         });
 
         expect(calls[0].path).toBe("/v1/projects/tenant-a/gateway/routes");
         const body = calls[0].body as Record<string, unknown>;
         expect(body.path).toBe("/webhook/*");
-        expect(body.upstream).toBe("10.0.0.5:8080");
+        expect(body.managed_upstream).toBe("edge-functions");
     });
 
     test("upsert_route forwards protocol-scoped redirect fields", async () => {
@@ -111,8 +115,10 @@ describe("admin gateway CLI tool", () => {
             route_id: "webhook",
             hosts: "a.com,b.com",
             paths: "/x/*,/y/*",
+            managed_upstream: "edge-functions",
         });
         expect(parsed.hosts).toEqual(["a.com", "b.com"]);
         expect(parsed.paths).toEqual(["/x/*", "/y/*"]);
+        expect(parsed.managed_upstream).toBe("edge-functions");
     });
 });
