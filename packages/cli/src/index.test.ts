@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { cliToolResultIsError } from "./shared/cli";
 
 const PACKAGE_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const CONTEXT_KEYS = new Set([
@@ -54,6 +55,13 @@ async function runProjectCli(
 }
 
 describe("supacloud-cli process contract", () => {
+    test("treats failure text as an error even when isError is false", () => {
+        expect(cliToolResultIsError({
+            isError: false,
+            content: [{ type: "text", text: "❌ Failed (400)" }],
+        })).toBe(true);
+    });
+
     test("shows branch action flags even before project context is configured", async () => {
         const result = await runProjectCli(["branch", "promotion_plan", "--help"]);
 
@@ -116,6 +124,40 @@ describe("supacloud-cli process contract", () => {
         expect(result.exitCode).toBe(0);
         expect(requestedUrl).toContain("/v1/projects/abc123/logs?");
         expect(requestedUrl).toContain("service=database");
+    });
+
+    test("returns non-zero when an HTTP tool result reports an explicit failure", async () => {
+        const migrationRoot = mkdtempSync(join(tmpdir(), "supacloud-cli-baseline-"));
+        temporaryDirectories.push(migrationRoot);
+        writeFileSync(join(migrationRoot, "20260729090000_create_orders.sql"), "CREATE TABLE orders (id uuid);\n");
+        const requestedPaths: string[] = [];
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch(request) {
+                const path = new URL(request.url).pathname;
+                requestedPaths.push(path);
+                if (request.method === "GET") return Response.json([]);
+                return Response.json({ code: "migration_baseline_rejected" }, { status: 400 });
+            },
+        });
+        servers.push(server);
+
+        const result = await runProjectCli(
+            ["database", "baseline_migrations", "--dir", migrationRoot],
+            {
+                SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+                SUPACLOUD_API_TOKEN: "test-token",
+                SUPACLOUD_PROJECT_REF: "abc123",
+            },
+        );
+
+        expect(result.exitCode).toBe(1);
+        expect(result.stdout).toContain("❌ Failed (400)");
+        expect(requestedPaths).toEqual([
+            "/v1/projects/abc123/database/migrations",
+            "/v1/projects/abc123/database/migrations/baseline",
+        ]);
     });
 
     test("status reports missing configuration and exits non-zero", async () => {

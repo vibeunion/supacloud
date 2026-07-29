@@ -2,7 +2,7 @@
 
 import { Type } from "@sinclair/typebox";
 import { stringEnum } from "./shared/schema";
-import { runCli } from "./shared/cli";
+import { cliToolResultIsError, runCli } from "./shared/cli";
 import { resolveSupaCloudContext, type ResolvedContext } from "./shared/context";
 import { HttpTransport } from "./shared/transports/http";
 import { registerDatabaseTools } from "./shared/tools/database-tools";
@@ -363,7 +363,7 @@ async function main() {
                     console.log(chunk.text);
                 }
             }
-            if (result.isError === true) process.exitCode = 1;
+            if (cliToolResultIsError(result)) process.exitCode = 1;
             return;
         }
         console.log(JSON.stringify(result, null, 2));

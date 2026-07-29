@@ -394,7 +394,7 @@ describe("database migration helpers", () => {
         }
     });
 
-  test("baselines missing migrations through migration-mode SQL", async () => {
+  test("baselines missing migrations through the dedicated ledger endpoint", async () => {
         const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
         const posts: Array<{ path: string; body: any }> = [];
         try {
@@ -408,7 +408,7 @@ describe("database migration helpers", () => {
                 },
                 post: async (path: string, body: unknown) => {
                     posts.push({ path, body });
-                    return { ok: true, status: 200, data: { rows: [] } };
+                    return { ok: true, status: 200, data: { marked: 2, already_applied: 0 } };
                 },
             });
 
@@ -422,13 +422,13 @@ describe("database migration helpers", () => {
             expect(text).toContain("Migration baseline completed");
             expect(text).toContain("Marked applied: 2");
             expect(posts).toHaveLength(1);
-            expect(posts[0].path).toBe("/v1/projects/proj/database/sql");
-            expect(posts[0].body.mode).toBe("migration");
-            expect(posts[0].body.sql).toContain("CREATE SCHEMA IF NOT EXISTS supabase_migrations");
-            expect(posts[0].body.sql).toContain("CREATE TABLE IF NOT EXISTS public.schema_migrations");
-            expect(posts[0].body.sql).toContain("20260425123000_create_users");
-            expect(posts[0].body.sql).toContain("20260425124000_create_tasks");
-            expect(posts[0].body.sql).toContain("ON CONFLICT (version) DO UPDATE");
+            expect(posts[0].path).toBe("/v1/projects/proj/database/migrations/baseline");
+            expect(posts[0].body).toEqual({
+                migrations: [
+                    { name: "20260425123000_create_users", version: "20260425123000" },
+                    { name: "20260425124000_create_tasks", version: "20260425124000" },
+                ],
+            });
         } finally {
             rmSync(dir, { recursive: true, force: true });
         }

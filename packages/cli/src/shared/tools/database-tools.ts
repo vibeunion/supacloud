@@ -492,8 +492,10 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
                         break;
                     }
 
-                    const baselineSql = buildMigrationBaselineSql(missing);
-                    const baselineResult = await execSql(baselineSql, "migration");
+                    const baselineResult = await http.post(
+                        `/v1/projects/${ref}/database/migrations/baseline`,
+                        { migrations: missing.map(({ name, version }) => ({ name, version })) },
+                    );
                     text = baselineResult.ok
                         ? [
                             `✅ Migration baseline completed for ${dir}`,
@@ -572,52 +574,6 @@ function buildRlsPolicySql(
       CREATE POLICY "SupaCloud owner insert" ON ${qualifiedTable} FOR INSERT TO authenticated WITH CHECK (${predicate});
       CREATE POLICY "SupaCloud owner update" ON ${qualifiedTable} FOR UPDATE TO authenticated USING (${predicate}) WITH CHECK (${predicate});
       CREATE POLICY "SupaCloud owner delete" ON ${qualifiedTable} FOR DELETE TO authenticated USING (${predicate});`;
-}
-
-function sqlString(value: string): string {
-    return `'${value.replace(/'/g, "''")}'`;
-}
-
-function buildMigrationBaselineSql(migrations: Array<{ name: string; version: string }>): string {
-    const values = migrations
-        .map(({ name, version }) => `(${version}, ${sqlString(name)}, ARRAY[${sqlString(`baseline:${name}`)}]::text[])`)
-        .join(",\n    ");
-
-    return `
-CREATE SCHEMA IF NOT EXISTS supabase_migrations;
-
-CREATE TABLE IF NOT EXISTS supabase_migrations.schema_migrations (
-  version BIGINT PRIMARY KEY,
-  statements TEXT[],
-  name TEXT
-);
-
-CREATE TABLE IF NOT EXISTS public.schema_migrations (
-  version VARCHAR(255) PRIMARY KEY,
-  statements TEXT[],
-  name TEXT
-);
-
-WITH baseline(version, name, statements) AS (
-  VALUES
-    ${values}
-)
-INSERT INTO supabase_migrations.schema_migrations (version, statements, name)
-SELECT version, statements, name FROM baseline
-ON CONFLICT (version) DO UPDATE
-SET statements = EXCLUDED.statements,
-    name = EXCLUDED.name;
-
-WITH baseline(version, name, statements) AS (
-  VALUES
-    ${values}
-)
-INSERT INTO public.schema_migrations (version, statements, name)
-SELECT version::text, statements, name FROM baseline
-ON CONFLICT (version) DO UPDATE
-SET statements = EXCLUDED.statements,
-    name = EXCLUDED.name;
-`.trim();
 }
 
 // ── Format Helpers ──

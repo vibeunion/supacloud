@@ -594,6 +594,20 @@ interface MigrationExecutionPlan {
   statements: readonly string[];
 }
 
+interface MigrationBaseline {
+  version: string;
+  name: string;
+}
+
+interface RecordedBaseline extends MigrationBaseline {
+  checksum: string;
+}
+
+interface MigrationBaselineSummary {
+  marked: RecordedBaseline[];
+  alreadyApplied: MigrationBaseline[];
+}
+
 export const MIGRATION_SESSION_RESET_SQL = "RESET ALL; DISCARD TEMP; DISCARD PLANS";
 
 function existingMigrationChecksum(
@@ -616,6 +630,23 @@ function normalizedMigrationStatements(value: unknown): string[] {
     .filter((statement): statement is string => typeof statement === "string")
     .map((statement) => statement.replace(/\r\n?/g, "\n").trim())
     .filter(Boolean);
+}
+
+function normalizeMigrationBaselines(
+  rawMigrations: ReadonlyArray<{ version: unknown; name: unknown }>,
+): MigrationBaseline[] {
+  const versions = new Set<string>();
+  const names = new Set<string>();
+  return rawMigrations.map((migration) => {
+    const version = normalizeMigrationVersion(migration.version);
+    const name = normalizeMigrationName(migration.name, version);
+    if (versions.has(version) || names.has(name)) {
+      throw new MigrationRouteError(400, "duplicate_migration_baseline", "Migration baseline versions and names must be unique");
+    }
+    versions.add(version);
+    names.add(name);
+    return { version, name };
+  });
 }
 
 /**
@@ -683,6 +714,20 @@ async function insertMigrationLedger(
   `;
 }
 
+async function releaseMigrationLeaseSafely(
+  adminDb: ProjectSql,
+  lease: Awaited<ReturnType<typeof issueMigrationLedgerLease>>,
+  projectRef: string,
+): Promise<void> {
+  try {
+    await releaseMigrationLedgerLease(adminDb, lease.tokenHash);
+  } catch (error: unknown) {
+    logger.warn(`[database] failed to clean migration ledger lease for ${projectRef}`, {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 async function executeMigrationTransaction(
   connection: ReservedProjectSql,
   adminDb: ProjectSql,
@@ -720,14 +765,48 @@ async function executeMigrationTransaction(
     });
   } finally {
     const lease = leaseHolder.current;
-    if (lease) {
-      try {
-        await releaseMigrationLedgerLease(adminDb, lease.tokenHash);
-      } catch (error: unknown) {
-        logger.warn(`[database] failed to clean migration ledger lease for ${input.projectRef}`, {
-          error: error instanceof Error ? error.message : String(error),
-        });
+    if (lease) await releaseMigrationLeaseSafely(adminDb, lease, input.projectRef);
+  }
+}
+
+function existingBaselineIsApplied(
+  existing: Record<string, unknown>[],
+  input: RecordedMigrationInput,
+): boolean {
+  if (existing.length === 0) return false;
+  if (existing.every((row) => migrationLedgerEntryMatches(row, input))) return true;
+  throw new MigrationRouteError(
+    409,
+    "migration_baseline_conflict",
+    `Migration ${input.name} conflicts with an existing version or name`,
+  );
+}
+
+async function recordBaselineTransaction(
+  connection: ReservedProjectSql,
+  adminDb: ProjectSql,
+  inputs: RecordedMigrationInput[],
+): Promise<MigrationBaselineSummary> {
+  const leases: Array<Awaited<ReturnType<typeof issueMigrationLedgerLease>>> = [];
+  try {
+    return await connection.begin(async (tx) => {
+      const summary: MigrationBaselineSummary = { marked: [], alreadyApplied: [] };
+      for (const input of inputs) {
+        if (existingBaselineIsApplied(await findExistingMigration(tx, input), input)) {
+          summary.alreadyApplied.push({ version: input.version, name: input.name });
+          continue;
+        }
+        const checksum = calculateMigrationChecksum(input);
+        const lease = await issueMigrationLedgerLease(adminDb, input.version, checksum);
+        leases.push(lease);
+        await insertMigrationLedger(tx, input, checksum, lease.token);
+        summary.marked.push({ version: input.version, name: input.name, checksum });
       }
+      return summary;
+    });
+  } finally {
+    for (const lease of leases) {
+      await releaseMigrationLeaseSafely(adminDb, lease, inputs[0]!.projectRef);
     }
   }
 }
@@ -770,6 +849,40 @@ async function applyRecordedMigration(input: RecordedMigrationInput): Promise<{
       return { checksum, alreadyApplied };
     });
   });
+}
+
+async function recordMigrationBaselines(
+  projectRef: string,
+  credentials: ProjectMigrationCredentials,
+  migrations: readonly MigrationBaseline[],
+): Promise<MigrationBaselineSummary> {
+  const inputs = migrations.map(({ version, name }) => ({
+    projectRef,
+    credentials,
+    version,
+    name,
+    statements: [`baseline:${name}`],
+    conflictOnName: true,
+  }));
+  return withProjectMigrationLocks({ projectRefs: [projectRef] }, async () => {
+    await branchReplacementJournal.assertInactive([projectRef]);
+    return withMigrationRoleSession(inputs[0]!, (connection, adminDb) =>
+      recordBaselineTransaction(connection, adminDb, inputs));
+  });
+}
+
+function migrationRouteFailure(error: unknown) {
+  if (error instanceof MigrationRouteError || error instanceof ProjectMigrationLockError
+    || error instanceof BranchReplacementJournalActiveError) {
+    return { message: error.message, code: error.code, status: error.httpStatus };
+  }
+  const { errorMessage } = databaseErrorDetails(error);
+  return {
+    message: "Migration failed",
+    detail: errorMessage,
+    code: "500",
+    status: 500 as const,
+  };
 }
 
 function projectAuthResponse(authError: { status: number; body: { error: string } }, set: { status?: number | string }) {
@@ -1496,6 +1609,48 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
         }
     )
     .post(
+        "/migrations/baseline",
+        async ({ params, body, request, set }) => {
+            const authError = await requireProjectOrAdminAuth(request, params.ref);
+            if (authError) return projectAuthResponse(authError, set);
+
+            const project = await projectService.getProject(params.ref);
+            if (!project) {
+                set.status = 404;
+                return { message: "Project not found", code: "404", status: 404 };
+            }
+
+            try {
+                const migrations = normalizeMigrationBaselines(body.migrations);
+                const credentials = await getProjectDatabaseCredentials(params.ref);
+                if (!credentials) {
+                    set.status = 404;
+                    return { message: "Project database credentials not found", code: "404", status: 404 };
+                }
+                const summary = await recordMigrationBaselines(params.ref, credentials, migrations);
+                return {
+                    marked: summary.marked.length,
+                    already_applied: summary.alreadyApplied.length,
+                    migrations: summary.marked,
+                };
+            } catch (error: unknown) {
+                const failure = migrationRouteFailure(error);
+                set.status = failure.status;
+                return failure;
+            }
+        },
+        {
+            params: t.Object({ ref: t.String({ minLength: 1 }) }),
+            body: t.Object({
+                migrations: t.Array(t.Object({
+                    version: t.String({ minLength: 1, maxLength: 19, pattern: "^[0-9]+$" }),
+                    name: t.String({ minLength: 1, maxLength: 255 }),
+                }), { minItems: 1, maxItems: 1000 }),
+            }),
+            detail: { tags: ["projects"], summary: "Record schema-equivalent migrations without executing DDL" },
+        },
+    )
+    .post(
         "/migrations",
         async ({ params, body, request, set }) => {
             const authError = await requireProjectOrAdminAuth(request, params.ref);
@@ -1544,26 +1699,9 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                 }
                 return { version, ...(isStructuredFormat ? { name } : {}), statements, checksum: result.checksum };
             } catch (error: unknown) {
-                if (error instanceof MigrationRouteError) {
-                    set.status = error.httpStatus;
-                    return { message: error.message, code: error.code, status: error.httpStatus };
-                }
-                if (error instanceof ProjectMigrationLockError) {
-                    set.status = error.httpStatus;
-                    return { message: error.message, code: error.code, status: error.httpStatus };
-                }
-                if (error instanceof BranchReplacementJournalActiveError) {
-                    set.status = error.httpStatus;
-                    return { message: error.message, code: error.code, status: error.httpStatus };
-                }
-                set.status = 500;
-                const detail = error instanceof Error ? error.message : String(error);
-                return {
-                    message: "Migration failed",
-                    detail,
-                    code: "500",
-                    status: 500,
-                };
+                const failure = migrationRouteFailure(error);
+                set.status = failure.status;
+                return failure;
             }
         },
         {
