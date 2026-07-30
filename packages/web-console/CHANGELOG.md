@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.28.3](https://github.com/zuohuadong/supacloud/compare/web-console-v0.28.2...web-console-v0.28.3) (2026-07-30)
+
+
+### Bug Fixes
+
+* stabilize Lite shutdown and Studio interactions ([a4d6f19](https://github.com/zuohuadong/supacloud/commit/a4d6f19db6c4aa71702fccec83bfbdd2a0c8b2b1))
+
 ## [0.28.2](https://github.com/zuohuadong/supacloud/compare/web-console-v0.28.1...web-console-v0.28.2) (2026-07-29)
 
 

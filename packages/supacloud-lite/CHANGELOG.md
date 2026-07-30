@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.1](https://github.com/zuohuadong/supacloud/compare/supacloud-lite-v0.5.0...supacloud-lite-v0.5.1) (2026-07-30)
+
+
+### Bug Fixes
+
+* make Lite Windows shutdown verification reliable ([#650](https://github.com/zuohuadong/supacloud/issues/650)) ([c208006](https://github.com/zuohuadong/supacloud/commit/c208006aa49839562dda5b0fe1419f183ceb5b12))
+* stabilize Lite shutdown and Studio interactions ([a4d6f19](https://github.com/zuohuadong/supacloud/commit/a4d6f19db6c4aa71702fccec83bfbdd2a0c8b2b1))
+
 ## [0.5.0](https://github.com/zuohuadong/supacloud/compare/supacloud-lite-v0.4.0...supacloud-lite-v0.5.0) (2026-07-29)
 
 
