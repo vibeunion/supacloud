@@ -66,9 +66,13 @@
 
   const filtered = $derived(
     searchQuery
-      ? extensions.filter((e: SystemExt) => e.name.toLowerCase().includes(searchQuery.toLowerCase()) || e.description.toLowerCase().includes(searchQuery.toLowerCase()))
+      ? extensions.filter((e: SystemExt) => e.name.toLowerCase().includes(searchQuery.toLowerCase()) || normalizeExtensionDescription(e.description).toLowerCase().includes(searchQuery.toLowerCase()))
       : extensions
   );
+
+  function normalizeExtensionDescription(description: string): string {
+    return description.replace(/^-[\w-]+\s+/, "");
+  }
 
   // Popular extensions quick-install list
   const POPULAR = [
@@ -96,7 +100,7 @@
 
   <div class="rounded-lg border bg-amber-500/5 border-amber-500/20 p-3 flex items-start gap-2">
     <AlertTriangle size={14} class="text-amber-600 mt-0.5 shrink-0" />
-    <p class="text-xs text-amber-700">{$t("PlatformExtensions.systemlevel_operation_installinguninstalling_packages_affects")}<b>{$t("PlatformExtensions.database_extensions")}</b> {$t("PlatformExtensions.with")}<code>CREATE EXTENSION</code>.</p>
+    <p class="text-xs text-amber-700">{$t("PlatformExtensions.system_operation_prefix")}<b>{$t("PlatformExtensions.database_extensions")}</b>{$t("PlatformExtensions.system_operation_before_sql")}<code class="rounded bg-amber-600/10 px-1.5 py-0.5 font-mono text-[11px] text-amber-950">CREATE EXTENSION;</code>{$t("PlatformExtensions.system_operation_suffix")}</p>
   </div>
 
   {#if actionMsg}
@@ -174,7 +178,7 @@
                 <td class="px-3 py-2.5">
                   <span class="px-2 py-0.5 rounded-full text-[10px] font-bold {ext.status === 'installed' ? 'bg-green-500/10 text-green-600' : 'bg-muted text-muted-foreground'}">{ext.status}</span>
                 </td>
-                <td class="px-3 py-2.5 text-muted-foreground max-w-xs truncate">{ext.description}</td>
+                <td class="px-3 py-2.5 text-muted-foreground max-w-xs truncate">{normalizeExtensionDescription(ext.description)}</td>
                 <td class="px-4 py-2.5 text-right">
                   <button
                     onclick={() => removeExt(ext.name)}

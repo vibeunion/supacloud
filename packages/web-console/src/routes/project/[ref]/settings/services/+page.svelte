@@ -176,11 +176,13 @@
 
   <div class="rounded-lg border bg-blue-500/5 border-blue-500/20 p-3 flex items-start gap-2">
     <AlertTriangle size={14} class="text-blue-600 mt-0.5 shrink-0" />
-    <p class="text-xs text-blue-700">
-      所有服务通过 <code class="text-[10px]">systemd</code> 管理。
-      <strong>启动全部</strong> 会调用 <code class="text-[10px]">POST /v1/projects/{projectRef}/restore</code>，
-      <strong>重启全部</strong> 会调用 <code class="text-[10px]">POST /v1/projects/{projectRef}/restart</code>。
-    </p>
+    <div class="space-y-1.5 text-xs text-blue-700">
+      <p>所有服务通过 <code class="rounded bg-blue-600/10 px-1.5 py-0.5 font-mono text-[11px] text-blue-950">systemd</code> 管理。</p>
+      <ul class="space-y-1">
+        <li><span class="font-medium">启动全部</span> 会调用 <code class="rounded bg-blue-600/10 px-1.5 py-0.5 font-mono text-[11px] text-blue-950">POST /v1/projects/{projectRef}/restore</code></li>
+        <li><span class="font-medium">重启全部</span> 会调用 <code class="rounded bg-blue-600/10 px-1.5 py-0.5 font-mono text-[11px] text-blue-950">POST /v1/projects/{projectRef}/restart</code></li>
+      </ul>
+    </div>
   </div>
 
   {#if sharedAuthService}
