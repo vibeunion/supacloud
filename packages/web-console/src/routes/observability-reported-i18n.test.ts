@@ -46,10 +46,14 @@ describe("reported observability i18n contract", () => {
   test("localizes diagnostics statuses and log filters while retaining raw values", () => {
     const logsSource = sources[2];
     const diagnosticsSource = sources[4];
+    const realtimeSource = sources[3];
 
     expect(logsSource).toContain('value: "1h", labelKey: "ProjectLogs.range_1h"');
     expect(logsSource).toContain('value: "all", labelKey: "ProjectLogs.service_all"');
     expect(diagnosticsSource).toContain("runStatusLabel(run.status)");
     expect(diagnosticsSource).toContain("title={run.status}");
+    expect(realtimeSource).toContain('value="INSERT">{$t("Realtime.event_insert")}');
+    expect(realtimeSource).toContain('value="UPDATE">{$t("Realtime.event_update")}');
+    expect(realtimeSource).toContain('value="DELETE">{$t("Realtime.event_delete")}');
   });
 });
