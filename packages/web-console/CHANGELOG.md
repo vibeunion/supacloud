@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.28.4](https://github.com/zuohuadong/supacloud/compare/web-console-v0.28.3...web-console-v0.28.4) (2026-07-30)
+
+
+### Bug Fixes
+
+* address reported Studio and platform defects ([19656bb](https://github.com/zuohuadong/supacloud/commit/19656bb19f73ec94581cf38370fffaae8321378d))
+
 ## [0.28.3](https://github.com/zuohuadong/supacloud/compare/web-console-v0.28.2...web-console-v0.28.3) (2026-07-30)
 
 

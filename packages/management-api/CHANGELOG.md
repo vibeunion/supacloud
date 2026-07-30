@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.50.8](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.7...management-api-v0.50.8) (2026-07-30)
+
+
+### Bug Fixes
+
+* address reported Studio and platform defects ([19656bb](https://github.com/zuohuadong/supacloud/commit/19656bb19f73ec94581cf38370fffaae8321378d))
+
 ## [0.50.7](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.6...management-api-v0.50.7) (2026-07-29)
 
 

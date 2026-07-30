@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/zuohuadong/supacloud/compare/pgredis-runtime-v0.3.0...pgredis-runtime-v0.3.1) (2026-07-30)
+
+
+### Bug Fixes
+
+* address reported Studio and platform defects ([19656bb](https://github.com/zuohuadong/supacloud/commit/19656bb19f73ec94581cf38370fffaae8321378d))
+
 ## [0.3.0](https://github.com/zuohuadong/supacloud/compare/pgredis-runtime-v0.2.0...pgredis-runtime-v0.3.0) (2026-07-27)
 
 
