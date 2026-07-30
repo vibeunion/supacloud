@@ -78,12 +78,26 @@
       const payload = await readPayload(response);
       if (!response.ok) throw new Error(responseMessage(payload, $t("Cache.request_failed")));
       status = payload as unknown as ProjectCacheStatus;
+      if (!status.configurationCurrent && !refreshing) void refreshConfiguration();
     } catch (error) {
       const message = errorMessage(error);
       if (!silent) loadError = message;
       toast.error(message);
     } finally {
       loading = false;
+      refreshing = false;
+    }
+  }
+
+  async function refreshConfiguration() {
+    if (refreshing) return;
+    refreshing = true;
+    try {
+      await postCacheRequest("refresh", {});
+      await loadStatus(true);
+    } catch (error) {
+      toast.error(errorMessage(error));
+    } finally {
       refreshing = false;
     }
   }
@@ -180,7 +194,7 @@
     </div>
     <button
       type="button"
-      onclick={() => loadStatus(true)}
+      onclick={() => status && !status.configurationCurrent ? void refreshConfiguration() : void loadStatus(true)}
       disabled={refreshing}
       class="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors hover:bg-muted disabled:opacity-50"
     >
@@ -226,11 +240,11 @@
     </div>
 
     <div class="flex flex-wrap items-center justify-between gap-3 rounded-lg border px-4 py-3 text-sm {status.configurationCurrent ? 'border-emerald-500/20 bg-emerald-500/5 text-emerald-700 dark:text-emerald-300' : 'border-amber-500/20 bg-amber-500/5 text-amber-700 dark:text-amber-300'}">
-      <span>{status.configurationCurrent ? $t("Cache.config_current") : $t("Cache.config_stale")}</span>
+      <span>{status.configurationCurrent ? $t("Cache.config_current") : refreshing ? $t("Cache.config_syncing") : $t("Cache.config_stale")}</span>
       {#if !status.configurationCurrent}
         <button
           type="button"
-          onclick={() => loadStatus(true)}
+          onclick={() => void refreshConfiguration()}
           disabled={refreshing}
           class="inline-flex items-center gap-2 rounded-md border border-current/20 px-2.5 py-1.5 text-xs font-semibold transition-colors hover:bg-background/30 disabled:opacity-50"
         >

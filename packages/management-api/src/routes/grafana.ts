@@ -16,6 +16,11 @@ const HOP_BY_HOP_HEADERS = new Set([
   "upgrade",
 ]);
 
+// `fetch()` may transparently decode an upstream response. Forwarding the
+// original encoding or length after that transformation makes browsers decode
+// an already-decoded body, resulting in ERR_CONTENT_DECODING_FAILED.
+const REPRESENTATION_HEADERS = new Set(["content-encoding", "content-length"]);
+
 function buildGrafanaTargetUrl(requestUrl: string): URL {
   const source = new URL(requestUrl);
   const target = new URL(config.grafanaUrl);
@@ -34,6 +39,9 @@ function buildProxyHeaders(request: Request, target: URL): Headers {
     }
   }
   headers.set("host", target.host);
+  // Request a representation that can safely travel through the Bun fetch
+  // proxy without relying on its upstream decompression behaviour.
+  headers.set("accept-encoding", "identity");
   headers.set("x-forwarded-host", new URL(request.url).host);
   headers.set("x-forwarded-proto", new URL(request.url).protocol.replace(":", ""));
   return headers;
@@ -43,7 +51,7 @@ function buildResponseHeaders(upstreamHeaders: Headers, target: URL): Headers {
   const headers = new Headers();
   for (const [key, value] of upstreamHeaders) {
     const lower = key.toLowerCase();
-    if (HOP_BY_HOP_HEADERS.has(lower)) continue;
+    if (HOP_BY_HOP_HEADERS.has(lower) || REPRESENTATION_HEADERS.has(lower)) continue;
 
     if (lower === "location") {
       try {
@@ -119,4 +127,6 @@ export const grafanaProxyRoutes = new Elysia({ name: "grafana-proxy" })
 
 export const grafanaProxyInternals = {
   buildGrafanaTargetUrl,
+  buildProxyHeaders,
+  buildResponseHeaders,
 };

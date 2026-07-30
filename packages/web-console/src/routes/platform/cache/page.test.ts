@@ -20,4 +20,8 @@ describe("platform cache runtime console", () => {
     expect(source).toContain("!status.configured");
     expect(source).toContain("Cache.not_configured_desc");
   });
+
+  test("keeps the cache service implementation name out of user-facing copy", () => {
+    expect(source).toContain('Cache.platform_title');
+  });
 });

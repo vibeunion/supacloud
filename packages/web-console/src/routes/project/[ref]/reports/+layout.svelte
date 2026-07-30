@@ -22,15 +22,13 @@
 </script>
 
 <div class="h-full flex flex-col pt-4">
-  <div class="px-6 mb-6">
-    <div class="flex items-center gap-2 text-sm text-muted-foreground mb-4">
-      <a href={`/project/${projectRef}/reports`} class="hover:text-foreground transition-colors">{$t("Navigation.reports")}</a>
-      {#if currentTab}
+  {#if currentTab}
+    <div class="px-6 mb-6">
+      <div class="flex items-center gap-2 text-sm text-muted-foreground mb-4">
+        <a href={`/project/${projectRef}/reports`} class="hover:text-foreground transition-colors">{$t("Navigation.reports")}</a>
         <span>/</span>
         <span class="text-foreground">{$t(TABS.find((tab) => tab.id === currentTab)?.labelKey || "Navigation.reports")}</span>
-      {/if}
-    </div>
-    {#if currentTab}
+      </div>
       <div class="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-hide">
         {#each TABS as tab}
           <a
@@ -42,8 +40,8 @@
           </a>
         {/each}
       </div>
-    {/if}
-  </div>
+    </div>
+  {/if}
   <div class="flex-1 overflow-y-auto px-6 pb-6">
     {@render children()}
   </div>

@@ -38,7 +38,7 @@
     { titleKey: "Platform.extensions_market", icon: Box, href: "/platform/extensions" },
     { titleKey: "Platform.backups_pitr", icon: Database, href: "/platform/backups" },
     { titleKey: "Platform.connection_pool", icon: Network, href: "/platform/pooling" },
-    { titleKey: "Platform.storage_juicefs", icon: HardDrive, href: "/platform/storage" },
+    { titleKey: "Platform.storage_management", icon: HardDrive, href: "/platform/storage" },
   ];
 
   const runtimeItems = [
@@ -50,6 +50,7 @@
   const operationsItems = [
     { titleKey: "Platform.operations_console", icon: Terminal, href: "/platform/operations" },
     { titleKey: "Platform.diagnostics", icon: ShieldCheck, href: "/platform/diagnostics" },
+    { titleKey: "Platform.settings", icon: Settings2, href: "/platform/settings" },
   ];
 
   function isActive(href: string) {
@@ -97,11 +98,6 @@
       {/each}
     </div>
 
-    <span class="mb-2 mt-6 block px-3 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50">{$t("Sidebar.configure")}</span>
-    <a href="/platform/settings" class={cn("flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors", isActive("/platform/settings") ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground")}>
-      <Settings2 class="h-[18px] w-[18px]" />
-      {$t("Platform.settings")}
-    </a>
   </nav>
 
   <div class="space-y-2 border-t p-3">
@@ -121,7 +117,7 @@
     <div class="flex w-full items-center gap-2 rounded-md border bg-muted/20 px-2.5 py-2">
       <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-tr from-brand to-emerald-400 text-[11px] font-bold text-white">SC</span>
       <span class="flex min-w-0 flex-col text-left">
-        <span class="truncate text-xs font-semibold text-foreground">Platform Admin</span>
+        <span class="truncate text-xs font-semibold text-foreground">{$t("Sidebar.platform_admin")}</span>
         <span class="truncate text-[10px] leading-tight text-muted-foreground">admin@supacloud.local</span>
       </span>
     </div>

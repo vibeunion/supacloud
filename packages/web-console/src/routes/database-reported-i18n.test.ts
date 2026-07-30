@@ -27,6 +27,7 @@ const expectedObjects = [
   "Indexes",
 ];
 const hanCharacters = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/u;
+const projectSettingsSource = readFileSync(new URL("project/[ref]/settings/+page.svelte", import.meta.url), "utf8");
 
 function withoutComments(source: string): string {
   return source
@@ -72,5 +73,12 @@ describe("reported database i18n contract", () => {
       const source = readFileSync(new URL(`project/[ref]/database/${pageName}/+page.svelte`, import.meta.url), "utf8");
       expect(source).not.toMatch(/\b(?:GRANT|REVOKE)\b/);
     }
+  });
+
+  test("renders unavailable database size without exposing NaN", () => {
+    expect(projectSettingsSource).toContain("function formatDatabaseSize(size: unknown)");
+    expect(projectSettingsSource).toContain("Number.isFinite(bytes) && bytes >= 0");
+    expect(projectSettingsSource).toContain("formatDatabaseSize(((project as Record<string, unknown>)?.database as Record<string, unknown>)?.size)");
+    expect(projectSettingsSource).not.toContain("size as number / 1024 / 1024");
   });
 });

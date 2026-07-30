@@ -36,12 +36,16 @@ describe("grafana proxy routes", () => {
   });
 
   test("proxies Grafana responses delegated from the SPA catch-all", async () => {
-    const seen: string[] = [];
-    globalThis.fetch = mock(async (input: string | URL | Request) => {
-      seen.push(String(input));
+    const seen: Request[] = [];
+    globalThis.fetch = mock(async (input: RequestInfo | URL, init?: RequestInit) => {
+      seen.push(new Request(input, init));
       return new Response("grafana", {
         status: 200,
-        headers: { "content-type": "text/plain" },
+        headers: {
+          "content-encoding": "gzip",
+          "content-length": "999",
+          "content-type": "text/plain",
+        },
       });
     }) as unknown as typeof fetch;
 
@@ -53,7 +57,10 @@ describe("grafana proxy routes", () => {
 
     expect(response.status).toBe(200);
     expect(await response.text()).toBe("grafana");
-    expect(seen[0]).toBe("http://127.0.0.1:3000/api/search?query=pgsql");
+    expect(seen[0].url).toBe("http://127.0.0.1:3000/api/search?query=pgsql");
+    expect(seen[0].headers.get("accept-encoding")).toBe("identity");
+    expect(response.headers.get("content-encoding")).toBeNull();
+    expect(response.headers.get("content-length")).toBeNull();
   });
 
   test("requires management API auth before proxying Grafana", async () => {

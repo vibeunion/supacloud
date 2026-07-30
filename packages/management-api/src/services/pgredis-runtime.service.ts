@@ -107,6 +107,13 @@ export class PgredisRuntimeService {
     );
   }
 
+  async refresh(projectRef: string): Promise<PgredisProjectStatus> {
+    return this.request<PgredisProjectStatus>(
+      `/internal/v1/admin/projects/${encodeURIComponent(projectRef)}/refresh`,
+      { method: "POST" },
+    );
+  }
+
   async execute(
     projectRef: string,
     operation: PgredisCacheOperationRequest,

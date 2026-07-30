@@ -61,6 +61,15 @@
     return normalized.length > 0 ? normalized : null;
   }
 
+  function formatDatabaseSize(size: unknown): string {
+    const bytes = typeof size === "number"
+      ? size
+      : typeof size === "string" && size.trim()
+        ? Number(size)
+        : Number.NaN;
+    return Number.isFinite(bytes) && bytes >= 0 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : "—";
+  }
+
   const routingMutation = createMutation(() => ({
     mutationFn: async () => {
       const res = await apiClient(`/v1/projects/${projectRef}/settings`, {
@@ -471,7 +480,7 @@
             </div>
             <div>
               <span class="text-xs text-muted-foreground">{$t("Settings.db_size")}</span>
-              <p class="font-mono text-xs">{(((project as Record<string, unknown>)?.database as Record<string, unknown>)?.size as number / 1024 / 1024).toFixed(1)} MB</p>
+              <p class="font-mono text-xs">{formatDatabaseSize(((project as Record<string, unknown>)?.database as Record<string, unknown>)?.size)}</p>
             </div>
           </div>
         </div>

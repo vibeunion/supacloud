@@ -2,13 +2,19 @@ import { config } from "../config";
 import { shellService } from './shell.service';
 import { logger } from "../utils/logger";
 import { getStorageDriver } from "./storage.adapter";
+import { statfs } from "node:fs/promises";
 
 export interface StorageStatus {
   status: 'mounted' | 'unmounted';
+  backend: string;
+  mountPoint?: string;
+  healthy: boolean;
   size?: string;
   used?: string;
   avail?: string;
   use_percent?: string;
+  reason?: "storage_mount_unavailable" | "object_storage_http_error" | "object_storage_unreachable";
+  reasonStatus?: number;
 }
 
 export type MigrationJob = {
@@ -24,18 +30,70 @@ export const migrationJobs = new Map<string, MigrationJob>();
 
 export class StorageService {
   /**
-   * Get storage status (JuiceFS)
+   * Get the status of the configured storage backend without assuming that it
+   * is a JuiceFS mount. Local and JuiceFS backends have a filesystem capacity;
+   * S3-compatible backends expose reachability but not a meaningful quota.
    */
   static async getStatus(): Promise<StorageStatus> {
-    const { success, output, error } = await shellService.execute('storage_manager.sh', ['status']);
-    if (!success) {
-      logger.error('Failed to get storage status:', error);
-      return { status: 'unmounted' };
-    }
+    const backend = config.storageType.toLowerCase();
+    if (backend === "local" || backend === "juicefs") return this.getFilesystemStatus(backend);
+
     try {
-      return JSON.parse(output || '{"status":"unmounted"}');
-    } catch (e: unknown) {
-      return { status: 'unmounted' };
+      const response = await fetch(`${config.s3Endpoint.replace(/\/+$/, "")}/minio/health/live`, {
+        signal: AbortSignal.timeout(3_000),
+      });
+      return {
+        status: response.ok ? "mounted" : "unmounted",
+        backend,
+        healthy: response.ok,
+        ...(response.ok ? {} : { reason: "object_storage_http_error" as const, reasonStatus: response.status }),
+      };
+    } catch (error: unknown) {
+      logger.warn("Failed to probe object storage status", {
+        backend,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return {
+        status: "unmounted",
+        backend,
+        healthy: false,
+        reason: "object_storage_unreachable",
+      };
+    }
+  }
+
+  private static async getFilesystemStatus(backend: string): Promise<StorageStatus> {
+    const mountPoint = config.storageMountPoint;
+    try {
+      const filesystem = await statfs(mountPoint);
+      const total = filesystem.blocks * filesystem.bsize;
+      const available = filesystem.bavail * filesystem.bsize;
+      const used = Math.max(total - available, 0);
+      const usePercent = total > 0 ? Math.round((used / total) * 100) : 0;
+
+      return {
+        status: "mounted",
+        backend,
+        mountPoint,
+        healthy: true,
+        size: formatBytes(total),
+        used: formatBytes(used),
+        avail: formatBytes(available),
+        use_percent: `${usePercent}%`,
+      };
+    } catch (error: unknown) {
+      logger.warn("Failed to read storage filesystem status", {
+        backend,
+        mountPoint,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return {
+        status: "unmounted",
+        backend,
+        mountPoint,
+        healthy: false,
+        reason: "storage_mount_unavailable",
+      };
     }
   }
 
@@ -206,6 +264,18 @@ export class StorageService {
   static async getDownloadResponse(projectRef: string, bucketName: string, fileName: string): Promise<Response | null> {
     return await getStorageDriver().getDownloadResponse(projectRef, bucketName, fileName);
   }
+}
+
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return "—";
+  const units = ["B", "KB", "MB", "GB", "TB", "PB"];
+  let value = bytes;
+  let index = 0;
+  while (value >= 1024 && index < units.length - 1) {
+    value /= 1024;
+    index += 1;
+  }
+  return `${value >= 10 || index === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[index]}`;
 }
 
 export const storageService = StorageService;

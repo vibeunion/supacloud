@@ -15,9 +15,23 @@ describe("SupaCloud root dashboard", () => {
   test("keeps the root page connected to real SupaCloud data", () => {
     expect(pageSource).toContain('apiClient("/v1/projects")');
     expect(pageSource).toContain('apiClient("/v1/system/info")');
-    expect(pageSource).toContain("SupaCloud Console");
-    expect(pageSource).toContain("平台概览");
-    expect(pageSource).toContain("不使用演示数据");
+    expect(pageSource).toContain('$t("Dashboard.console_name")');
+    expect(pageSource).toContain('$t("Dashboard.platform_overview")');
+    expect(pageSource).toContain('$t("Dashboard.management_api_reading")');
+  });
+
+  test("normalizes project status without exposing implementation enum values", () => {
+    expect(pageSource).toContain('["active", "active_healthy", "healthy", "running"]');
+    expect(pageSource).toContain('return $t("Dashboard.status_active")');
+    expect(pageSource).toContain('title={project.status}');
+    expect(pageSource).not.toContain('>{project.status}<');
+  });
+
+  test("keeps platform destinations in navigation instead of dashboard quick links", () => {
+    expect(pageSource).toContain('href: "/platform/operations"');
+    expect(pageSource).toContain('href: "/platform/backups"');
+    expect(pageSource).toContain('href: "/platform/settings"');
+    expect(pageSource).not.toContain('class="quick-links"');
   });
 
   test("keeps project navigation base-path safe", () => {
