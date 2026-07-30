@@ -1,6 +1,7 @@
 <script lang="ts">
   import { page } from "$app/state";
   import { apiClient } from "$lib/api";
+  import { t } from "svelte-i18n";
   import { createMutation, createQuery } from "@tanstack/svelte-query";
   import { Cpu, HardDrive, Loader2, Plus, RefreshCw, Server, Trash2 } from "lucide-svelte";
   import { toast } from "svelte-sonner";
@@ -46,7 +47,7 @@
     queryFn: async () => {
       const res = await apiClient(`/v1/projects/${projectRef}/scaling`);
       const data = await res.json();
-      if (!res.ok || data.error) throw new Error(data.message || data.error || "Failed to load scaling state");
+      if (!res.ok || data.error) throw new Error(data.message || data.error || $t("Scaling.load_failed"));
       return data as ScalingState;
     }
   }));
@@ -58,11 +59,11 @@
         body: JSON.stringify({ target_tier: targetTier })
       });
       const data = await res.json();
-      if (!res.ok || data.error || data.success === false) throw new Error(data.message || data.error || "Failed to upgrade compute");
+      if (!res.ok || data.error || data.success === false) throw new Error(data.message || data.error || $t("Scaling.compute_failed"));
       return data;
     },
     onSuccess: () => {
-      toast.success("Compute 调整已执行");
+      toast.success($t("Scaling.compute_applied"));
       scalingQuery.refetch();
     }
   }));
@@ -74,11 +75,11 @@
         body: JSON.stringify({ replica_ip: replicaIp, region: replicaRegion })
       });
       const data = await res.json();
-      if (!res.ok || data.error) throw new Error(data.message || data.error || "Failed to create read replica");
+      if (!res.ok || data.error) throw new Error(data.message || data.error || $t("Scaling.replica_create_failed"));
       return data;
     },
     onSuccess: () => {
-      toast.success("读副本已登记");
+      toast.success($t("Scaling.replica_added"));
       replicaIp = "";
       scalingQuery.refetch();
     }
@@ -90,11 +91,11 @@
         method: "DELETE"
       });
       const data = await res.json();
-      if (!res.ok || data.error) throw new Error(data.message || data.error || "Failed to delete read replica");
+      if (!res.ok || data.error) throw new Error(data.message || data.error || $t("Scaling.replica_delete_failed"));
       return data;
     },
     onSuccess: () => {
-      toast.success("读副本已移除");
+      toast.success($t("Scaling.replica_removed"));
       scalingQuery.refetch();
     }
   }));
@@ -113,8 +114,8 @@
 
 <div class="h-full flex flex-col space-y-4">
   <div>
-    <h2 class="text-xl font-bold">扩展/副本</h2>
-    <p class="text-sm text-muted-foreground mt-1">调整项目 compute 档位，登记只读副本并接入读流量入口。</p>
+    <h2 class="text-xl font-bold">{$t("Scaling.title")}</h2>
+    <p class="text-sm text-muted-foreground mt-1">{$t("Scaling.subtitle")}</p>
   </div>
 
   {#if scalingQuery.isPending}
@@ -129,15 +130,15 @@
     <div class="grid gap-4 lg:grid-cols-2">
       <div class="rounded-xl border bg-card overflow-hidden">
         <div class="border-b px-5 py-4 flex items-center justify-between">
-          <h3 class="font-semibold text-sm flex items-center gap-2"><Cpu size={16} /> Compute</h3>
-          <button onclick={() => scalingQuery.refetch()} class="p-2 rounded-md border hover:bg-muted/50" title="刷新">
+          <h3 class="font-semibold text-sm flex items-center gap-2"><Cpu size={16} /> {$t("Scaling.compute")}</h3>
+          <button onclick={() => scalingQuery.refetch()} class="p-2 rounded-md border hover:bg-muted/50" title={$t("Scaling.refresh")}>
             <RefreshCw size={14} />
           </button>
         </div>
         <div class="p-5 space-y-4">
           <div class="grid grid-cols-3 gap-3">
             <div class="rounded-lg border bg-muted/20 p-3">
-              <div class="text-[10px] text-muted-foreground uppercase font-bold">Tier</div>
+              <div class="text-[10px] text-muted-foreground uppercase font-bold">{$t("Scaling.tier")}</div>
               <div class="mt-1 font-mono text-lg">{scalingState?.compute.tier || "micro"}</div>
             </div>
             <div class="rounded-lg border bg-muted/20 p-3">
@@ -145,7 +146,7 @@
               <div class="mt-1 font-mono text-lg">{scalingState?.compute.cpu || 1}</div>
             </div>
             <div class="rounded-lg border bg-muted/20 p-3">
-              <div class="text-[10px] text-muted-foreground uppercase font-bold">Memory</div>
+              <div class="text-[10px] text-muted-foreground uppercase font-bold">{$t("Scaling.memory")}</div>
               <div class="mt-1 font-mono text-lg">{scalingState?.compute.memory || "2g"}</div>
             </div>
           </div>
@@ -172,14 +173,14 @@
             {:else}
               <HardDrive size={14} />
             {/if}
-            应用档位
+            {$t("Scaling.apply_tier")}
           </button>
         </div>
       </div>
 
       <div class="rounded-xl border bg-card overflow-hidden">
         <div class="border-b px-5 py-4">
-          <h3 class="font-semibold text-sm flex items-center gap-2"><Server size={16} /> 读副本</h3>
+          <h3 class="font-semibold text-sm flex items-center gap-2"><Server size={16} /> {$t("Scaling.read_replicas")}</h3>
         </div>
         <div class="p-5 space-y-4">
           <form class="flex flex-col sm:flex-row gap-2" onsubmit={(event) => { event.preventDefault(); replicaMutation.mutate(); }}>
@@ -191,13 +192,13 @@
               {:else}
                 <Plus size={14} />
               {/if}
-              添加
+              {$t("Scaling.add")}
             </button>
           </form>
 
           {#if replicas.length === 0}
             <div class="h-40 flex items-center justify-center rounded-lg border border-dashed text-sm text-muted-foreground">
-              暂无读副本
+              {$t("Scaling.no_replicas")}
             </div>
           {:else}
             <div class="space-y-2">
@@ -210,7 +211,7 @@
                       <div class="text-[11px] text-destructive truncate">{replica.last_error}</div>
                     {/if}
                   </div>
-                  <button onclick={() => deleteReplicaMutation.mutate(replica)} class="p-2 rounded-md border text-destructive hover:bg-destructive/10" title="移除">
+                  <button onclick={() => deleteReplicaMutation.mutate(replica)} class="p-2 rounded-md border text-destructive hover:bg-destructive/10" title={$t("Scaling.remove")}>
                     <Trash2 size={14} />
                   </button>
                 </div>

@@ -33,12 +33,12 @@
     { name: "work_mem", labelZh: "工作内存", labelEn: "Work Mem", groupZh: "内存", groupEn: "Memory", descZh: "排序和哈希操作的工作内存", descEn: "Working memory for sort and hash operations" },
     { name: "maintenance_work_mem", labelZh: "维护内存", labelEn: "Maintenance Work Mem", groupZh: "内存", groupEn: "Memory", descZh: "VACUUM、CREATE INDEX 等维护操作的内存", descEn: "Memory used for maintenance operations like VACUUM and CREATE INDEX" },
     { name: "effective_cache_size", labelZh: "有效缓存大小", labelEn: "Effective Cache Size", groupZh: "内存", groupEn: "Memory", descZh: "操作系统和 PostgreSQL 缓存的总估计大小", descEn: "Estimated total cache available to the OS and PostgreSQL" },
-    { name: "max_connections", labelZh: "最大连接数", labelEn: "Max Connections", groupZh: "连接", groupEn: "Connections", descZh: "允许的最大并发连接数（需重启）", descEn: "Maximum number of concurrent connections allowed (restart required)" },
-    { name: "max_parallel_workers_per_gather", labelZh: "并行查询工人数", labelEn: "Parallel Workers Per Gather", groupZh: "执行", groupEn: "Execution", descZh: "每个查询可使用的最大并行工人数", descEn: "Maximum parallel workers a single query can use" },
+    { name: "max_connections", labelZh: "最大连接数", labelEn: "Max Connections", groupZh: "连接", groupEn: "Connections", descZh: "允许的最大并发连接数", descEn: "Maximum number of concurrent connections allowed" },
+    { name: "max_parallel_workers_per_gather", labelZh: "并行查询工作进程", labelEn: "Parallel Workers Per Gather", groupZh: "执行", groupEn: "Execution", descZh: "每个查询可使用的最大并行工作进程数", descEn: "Maximum parallel worker processes a single query can use" },
     { name: "random_page_cost", labelZh: "随机页面代价", labelEn: "Random Page Cost", groupZh: "执行", groupEn: "Execution", descZh: "随机 I/O 的相对代价估计（SSD 建议 1.1）", descEn: "Relative cost of random I/O (1.1 recommended for SSDs)" },
     { name: "effective_io_concurrency", labelZh: "I/O 并发度", labelEn: "I/O Concurrency", groupZh: "执行", groupEn: "Execution", descZh: "磁盘 I/O 并发请求数（SSD 建议 200）", descEn: "Concurrent disk I/O requests (200 recommended for SSDs)" },
     { name: "wal_buffers", labelZh: "WAL 缓冲区", labelEn: "WAL Buffers", groupZh: "WAL", groupEn: "WAL", descZh: "WAL 日志使用的共享内存", descEn: "Shared memory used by WAL" },
-    { name: "checkpoint_completion_target", labelZh: "检查点完成目标", labelEn: "Checkpoint Completion Target", groupZh: "WAL", groupEn: "WAL", descZh: "检查点写入间隔的百分比（建议 0.9）", descEn: "Percentage of checkpoint write interval (0.9 recommended)" },
+    { name: "checkpoint_completion_target", labelZh: "检查点完成目标", labelEn: "Checkpoint Completion Target", groupZh: "WAL", groupEn: "WAL", descZh: "检查点写入在间隔中的目标比例", descEn: "Target proportion of the checkpoint write interval" },
     { name: "log_min_duration_statement", labelZh: "慢查询阈值 (ms)", labelEn: "Slow Query Threshold (ms)", groupZh: "日志", groupEn: "Logging", descZh: "超过此耗时的语句将被记录（-1 禁用）", descEn: "Statements slower than this are logged (-1 disables)" },
   ];
 
@@ -58,6 +58,30 @@
       "日志": "Logging",
     };
     return isZh ? group : (map[group] || group);
+  }
+
+  function usesPageUnits(setting: PgSetting | undefined): boolean {
+    return setting?.unit === "8kB";
+  }
+
+  function settingInputValue(setting: PgSetting): string {
+    if (!usesPageUnits(setting) || setting.setting === "-1") return setting.setting;
+    const pageCount = Number(setting.setting);
+    return Number.isSafeInteger(pageCount) && pageCount >= 0 ? String(Math.round(pageCount / 128)) : setting.setting;
+  }
+
+  function settingInputUnit(setting: PgSetting | undefined, inputValue: string): string | null {
+    if (!setting?.unit) return null;
+    return usesPageUnits(setting) && inputValue !== "-1" ? "MB" : setting.unit;
+  }
+
+  function settingSqlValue(setting: PgSetting | undefined, inputValue: string): string | null {
+    if (!usesPageUnits(setting) || inputValue === "-1") return inputValue;
+    return /^\d+$/.test(inputValue) ? `${inputValue}MB` : null;
+  }
+
+  function sqlLiteral(literalValue: string): string {
+    return literalValue.replaceAll("'", "''");
   }
 
   async function runSql(sql: string): Promise<Record<string, unknown>[]> {
@@ -85,24 +109,40 @@
     const map: Record<string, PgSetting> = {};
     const vals: Record<string, string> = {};
     for (const row of rows) {
-      map[row.name as string] = row as unknown as PgSetting;
-      vals[row.name as string] = row.setting as string;
+      const setting = row as unknown as PgSetting;
+      map[setting.name] = setting;
+      vals[setting.name] = settingInputValue(setting);
     }
     settings = map;
     editValues = vals;
     isLoading = false;
   }
 
+  function changedSettingStatements(): string[] | null {
+    const stmts: string[] = [];
+    for (const param of TUNING_PARAMS) {
+      const setting = settings[param.name];
+      const current = setting ? settingInputValue(setting) : undefined;
+      const newVal = editValues[param.name];
+      if (newVal !== undefined && newVal !== current) {
+        const sqlValue = settingSqlValue(setting, newVal);
+        if (sqlValue === null) {
+          return null;
+        }
+        stmts.push(`ALTER SYSTEM SET ${param.name} = '${sqlLiteral(sqlValue)}';`);
+      }
+    }
+    return stmts;
+  }
+
   async function saveAll() {
     isSaving = true;
     saveMsg = null;
-    const stmts: string[] = [];
-    for (const param of TUNING_PARAMS) {
-      const current = settings[param.name]?.setting;
-      const newVal = editValues[param.name];
-      if (newVal !== undefined && newVal !== current) {
-        stmts.push(`ALTER SYSTEM SET ${param.name} = '${newVal}';`);
-      }
+    const stmts = changedSettingStatements();
+    if (stmts === null) {
+      saveMsg = `❌ ${$t("PlatformTuning.memory_value_invalid")}`;
+      isSaving = false;
+      return;
     }
     if (stmts.length === 0) {
       saveMsg = `⚠️ ${$t("PlatformTuning.no_parameter_changes_detected")}`;
@@ -111,7 +151,7 @@
       return;
     }
     stmts.push("SELECT pg_reload_conf();");
-    const result = await runSql(stmts.join("\n"));
+    await runSql(stmts.join("\n"));
     saveMsg = `✅ ${$t("PlatformTuning.saved")} ${stmts.length - 1} ${$t("PlatformTuning.parameter_changes_and_reloaded_configuration")}`;
     await fetchSettings();
     isSaving = false;
@@ -164,6 +204,7 @@
         <div class="divide-y divide-border/20">
           {#each TUNING_PARAMS.filter(p => p.groupZh === group) as param}
             {@const s = settings[param.name]}
+            {@const displayedValue = s ? settingInputValue(s) : ""}
             <div class="flex items-center justify-between px-5 py-4">
               <div class="flex-1">
                 <div class="flex items-center gap-2">
@@ -176,18 +217,21 @@
                 </div>
                 <p class="text-[10px] text-muted-foreground mt-0.5">{isZh ? param.descZh : param.descEn}</p>
                 {#if s}
-                  <p class="text-[10px] text-muted-foreground/60 mt-0.5">{$t("PlatformTuning.current")}: <span class="font-mono">{s.setting}{s.unit ? ` ${s.unit}` : ''}</span></p>
+                  <p class="text-[10px] text-muted-foreground/60 mt-0.5">{$t("PlatformTuning.current")}: <span class="font-mono">{displayedValue}{settingInputUnit(s, displayedValue) ? ` ${settingInputUnit(s, displayedValue)}` : ''}</span></p>
                 {/if}
               </div>
               <div class="flex items-center gap-2">
-                <input
-                  bind:value={editValues[param.name]}
-                  class="w-32 px-3 py-1.5 text-xs font-mono rounded-md border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand text-right"
-                />
-                {#if s?.unit}
-                  <span class="text-[10px] text-muted-foreground font-mono w-8">{s.unit}</span>
-                {/if}
-                {#if editValues[param.name] !== s?.setting}
+                <div class="relative">
+                  <input
+                    bind:value={editValues[param.name]}
+                    inputmode={usesPageUnits(s) ? "numeric" : "text"}
+                    class="w-32 rounded-md border bg-muted/30 px-3 py-1.5 pr-12 text-right text-xs font-mono focus:outline-none focus:ring-1 focus:ring-brand"
+                  />
+                  {#if settingInputUnit(s, editValues[param.name] || "")}
+                    <span class="pointer-events-none absolute inset-y-0 right-0 flex items-center border-l bg-muted/40 px-2 text-[10px] font-mono text-muted-foreground">{settingInputUnit(s, editValues[param.name] || "")}</span>
+                  {/if}
+                </div>
+                {#if editValues[param.name] !== displayedValue}
                   <span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse" title={$t("PlatformTuning.modified")}></span>
                 {/if}
               </div>

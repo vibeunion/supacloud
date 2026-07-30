@@ -267,9 +267,9 @@
           <select bind:value={pgEvent}
             class="w-full mt-1 px-3 py-1.5 text-xs rounded-lg border bg-background focus:outline-none focus:ring-1 focus:ring-brand">
             <option value="*">{$t("Realtime.all_events")}</option>
-            <option value="INSERT">INSERT</option>
-            <option value="UPDATE">UPDATE</option>
-            <option value="DELETE">DELETE</option>
+            <option value="INSERT">{$t("Realtime.event_insert")}</option>
+            <option value="UPDATE">{$t("Realtime.event_update")}</option>
+            <option value="DELETE">{$t("Realtime.event_delete")}</option>
           </select>
         </div>
       {/if}

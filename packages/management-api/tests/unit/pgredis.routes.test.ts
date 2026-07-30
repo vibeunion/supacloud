@@ -5,6 +5,7 @@ import { AppError } from "../../src/utils/errors";
 
 const platformStatus = mock(() => Promise.resolve({ ok: true, activeTenants: 1 }));
 const projectStatus = mock((projectRef: string) => Promise.resolve({ projectRef, configured: true }));
+const refresh = mock((projectRef: string) => Promise.resolve({ projectRef, configured: true, configurationCurrent: true }));
 const execute = mock(() => Promise.resolve({ written: true }));
 const flush = mock(() => Promise.resolve({ deleted: 3 }));
 const requireAdmin = mock(() => Promise.resolve(undefined));
@@ -12,7 +13,7 @@ const requireProject = mock(() => Promise.resolve(undefined));
 const findProject = mock((ref: string) => Promise.resolve({ ref }));
 
 const app = new Elysia().use(createPgredisRoutes({
-  service: { platformStatus, projectStatus, execute, flush },
+  service: { platformStatus, projectStatus, refresh, execute, flush },
   requireAdmin,
   requireProject,
   findProject: findProject as never,
@@ -28,6 +29,7 @@ describe("pgredis routes", () => {
   beforeEach(() => {
     platformStatus.mockClear();
     projectStatus.mockClear();
+    refresh.mockClear();
     execute.mockClear();
     flush.mockClear();
     requireAdmin.mockReset();
@@ -94,6 +96,14 @@ describe("pgredis routes", () => {
     });
     expect(injectedRef.status).toBe(200);
     expect(execute).toHaveBeenLastCalledWith("tenant-a", { op: "get", key: "one" });
+  });
+
+  test("refreshes the authenticated project's cache configuration", async () => {
+    const response = await request("/v1/projects/tenant-a/cache/refresh", { method: "POST" });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ projectRef: "tenant-a", configured: true, configurationCurrent: true });
+    expect(refresh).toHaveBeenCalledWith("tenant-a");
   });
 
   test("requires an exact project confirmation before flush", async () => {

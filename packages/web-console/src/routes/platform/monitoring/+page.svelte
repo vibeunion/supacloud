@@ -10,18 +10,19 @@
   let grafanaCheckError = $state<string | null>(null);
   let selectedDashboard = $state("pgsql-overview");
   let isFullscreen = $state(false);
-    
+  let iframeLoadFailed = $state(false);
+
   const DASHBOARDS = [
-    { id: "pgsql-overview", label: "PG Overview", descZh: "数据库集群全局指标概览", descEn: "Cluster-wide database metrics overview" },
-    { id: "pgsql-instance", label: "PG Instance", descZh: "单实例详细指标", descEn: "Detailed metrics for a single instance" },
-    { id: "pgsql-database", label: "PG Database", descZh: "数据库级别指标", descEn: "Database-level metrics" },
-    { id: "pgsql-query", label: "PG Query", descZh: "查询性能分析", descEn: "Query performance analysis" },
-    { id: "pgsql-table", label: "PG Table", descZh: "表级别 I/O 和大小", descEn: "Table-level I/O and size" },
-    { id: "pgsql-activity", label: "PG Activity", descZh: "连接与锁活动", descEn: "Connection and lock activity" },
-    { id: "pgsql-replication", label: "PG Replication", descZh: "流式复制状态", descEn: "Streaming replication status" },
-    { id: "pgsql-persist", label: "PG Persist", descZh: "WAL 和检查点", descEn: "WAL and checkpoint metrics" },
-    { id: "pgcat-overview", label: "Pgbouncer", descZh: "连接池监控", descEn: "Connection pool monitoring" },
-    { id: "node", label: "Node", descZh: "操作系统 CPU/内存/磁盘/网络", descEn: "OS CPU/Memory/Disk/Network" },
+    { id: "pgsql-overview", label: "PG Overview" },
+    { id: "pgsql-instance", label: "PG Instance" },
+    { id: "pgsql-database", label: "PG Database" },
+    { id: "pgsql-query", label: "PG Query" },
+    { id: "pgsql-table", label: "PG Table" },
+    { id: "pgsql-activity", label: "PG Activity" },
+    { id: "pgsql-replication", label: "PG Replication" },
+    { id: "pgsql-persist", label: "PG Persist" },
+    { id: "pgcat-overview", label: "Pgbouncer" },
+    { id: "node", label: "Node" },
   ];
 
   async function checkGrafanaHealth(url: string) {
@@ -29,7 +30,7 @@
     grafanaCheckError = null;
     if (!trimmed) {
       grafanaAvailable = false;
-      grafanaCheckError = "请输入 Grafana 地址";
+      grafanaCheckError = $t("PlatformMonitoring.enter_grafana_url");
       return;
     }
 
@@ -51,12 +52,12 @@
       grafanaAvailable = res.ok && contentType.includes("application/json");
       if (!grafanaAvailable) {
         grafanaCheckError = res.ok
-          ? "Grafana 健康接口未返回 JSON"
-          : `Grafana 健康接口返回 HTTP ${res.status}`;
+          ? $t("PlatformMonitoring.health_not_json")
+          : $t("PlatformMonitoring.health_http_error", { values: { status: res.status } });
       }
     } catch {
       grafanaAvailable = false;
-      grafanaCheckError = "无法连接 Grafana 服务，请检查地址和网络状态";
+      grafanaCheckError = $t("PlatformMonitoring.connection_failed");
     } finally {
       grafanaChecking = false;
     }
@@ -65,15 +66,26 @@
   async function runGrafanaHealthCheck() {
     await checkGrafanaHealth(grafanaHost);
     if (grafanaAvailable) {
-      toast.success("Grafana 检测成功");
+      toast.success($t("PlatformMonitoring.health_check_succeeded"));
       return;
     }
-    toast.error(grafanaCheckError || "Grafana 检测失败");
+    toast.error(grafanaCheckError || $t("PlatformMonitoring.health_check_failed"));
   }
 
   function resetGrafanaHealth() {
     grafanaAvailable = false;
     grafanaCheckError = null;
+    iframeLoadFailed = false;
+  }
+
+  function selectDashboard(id: string) {
+    selectedDashboard = id;
+    iframeLoadFailed = false;
+  }
+
+  function handleGrafanaFrameError() {
+    iframeLoadFailed = true;
+    toast.error($t("PlatformMonitoring.dashboard_load_failed"));
   }
 
   async function detectGrafanaHost() {
@@ -118,9 +130,9 @@
   <div class="space-y-1">
     <div class="flex items-center gap-3">
       <label for="a11y-routes-platform-monitoring--page-svelte-53" class="text-xs font-semibold text-muted-foreground shrink-0">{$t("PlatformMonitoring.grafana_url")}</label>
-      <input id="a11y-routes-platform-monitoring--page-svelte-53" bind:value={grafanaHost} oninput={resetGrafanaHealth} class="flex-1 max-w-md px-3 py-1.5 text-xs font-mono rounded-md border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand" placeholder="http://your-server:3000" />
+      <input id="a11y-routes-platform-monitoring--page-svelte-53" bind:value={grafanaHost} oninput={resetGrafanaHealth} class="flex-1 max-w-md px-3 py-1.5 text-xs font-mono rounded-md border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand" placeholder={$t("PlatformMonitoring.grafana_url_placeholder")} />
       <button onclick={runGrafanaHealthCheck} disabled={grafanaChecking} aria-busy={grafanaChecking} class="flex items-center gap-2 px-3 py-1.5 text-xs rounded-md border hover:bg-muted/50 transition-colors disabled:opacity-50">
-        <RefreshCw size={12} class={grafanaChecking ? "animate-spin" : ""} /> {grafanaChecking ? "检测中..." : "检测"}
+        <RefreshCw size={12} class={grafanaChecking ? "animate-spin" : ""} /> {grafanaChecking ? $t("PlatformMonitoring.health_checking") : $t("PlatformMonitoring.health_check")}
       </button>
     </div>
     {#if grafanaCheckError}
@@ -132,7 +144,7 @@
   <div class="flex items-center gap-2 overflow-x-auto pb-2">
     {#each DASHBOARDS as db}
       <button
-        onclick={() => selectedDashboard = db.id}
+        onclick={() => selectDashboard(db.id)}
         class="flex flex-col items-start px-3 py-2 text-[10px] rounded-lg border whitespace-nowrap transition-all {selectedDashboard === db.id ? 'border-brand bg-brand/5 text-brand' : 'bg-muted/30 text-muted-foreground hover:bg-muted/50 hover:text-foreground'}"
       >
         <span class="font-bold">{db.label}</span>
@@ -143,20 +155,34 @@
 
   <!-- Grafana iframe -->
   <div class="rounded-xl border bg-card overflow-hidden {isFullscreen ? 'fixed inset-0 z-50' : ''}">
-    {#if grafanaHost && grafanaAvailable}
+    {#if grafanaHost && grafanaAvailable && !iframeLoadFailed}
       <iframe
         src={grafanaUrl}
-        title="Grafana Dashboard"
+        title={$t("PlatformMonitoring.grafana_monitoring_dashboard")}
         class="w-full border-0 {isFullscreen ? 'h-full' : 'h-[70vh]'}"
         allow="fullscreen"
+        onerror={handleGrafanaFrameError}
       ></iframe>
     {:else}
       <div class="flex flex-col items-center justify-center py-24 text-muted-foreground gap-3">
         <BarChart3 size={40} class="opacity-30" />
         <p class="text-sm">
-          {grafanaChecking ? "正在检测 Grafana..." : $t("PlatformMonitoring.please_enter_the_grafana_server")}
+          {grafanaChecking
+            ? $t("PlatformMonitoring.health_checking")
+            : iframeLoadFailed
+              ? $t("PlatformMonitoring.dashboard_load_failed_desc")
+              : $t("PlatformMonitoring.please_enter_the_grafana_server")}
         </p>
-        <p class="text-xs opacity-60">当前地址未返回 Grafana 健康接口，已避免加载无效 iframe。</p>
+        <p class="text-xs opacity-60">
+          {iframeLoadFailed
+            ? $t("PlatformMonitoring.dashboard_load_failed_hint")
+            : $t("PlatformMonitoring.invalid_health_hint")}
+        </p>
+        {#if iframeLoadFailed}
+          <button onclick={runGrafanaHealthCheck} class="flex items-center gap-2 px-3 py-1.5 text-xs rounded-md border hover:bg-muted/50 transition-colors">
+            <RefreshCw size={12} /> {$t("PlatformMonitoring.retry_health_check")}
+          </button>
+        {/if}
       </div>
     {/if}
   </div>

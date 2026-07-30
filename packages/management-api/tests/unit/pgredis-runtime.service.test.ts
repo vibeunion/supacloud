@@ -51,6 +51,7 @@ describe("PgredisRuntimeService", () => {
       ttlMs: 500,
     });
     await service.flush("tenant-a");
+    await service.refresh("tenant-a");
 
     expect(requests[0].url).toBe("http://pgredis-runtime:9010/internal/v1/admin/status");
     expect(requests.every((request) => request.headers.get("x-supacloud-internal-auth") === internalToken)).toBeTrue();
@@ -66,6 +67,8 @@ describe("PgredisRuntimeService", () => {
       op: "flush",
       confirmProjectRef: "tenant-a",
     });
+    expect(requests[3].url).toBe("http://pgredis-runtime:9010/internal/v1/admin/projects/tenant-a/refresh");
+    expect(requests[3].method).toBe("POST");
   });
 
   test("returns a bounded not-configured status without calling the data plane", async () => {
@@ -97,6 +100,10 @@ describe("PgredisRuntimeService", () => {
       code: "PGREDIS_RUNTIME_NOT_CONFIGURED",
     });
     await expect(service.flush("tenant-a")).rejects.toMatchObject({
+      statusCode: 503,
+      code: "PGREDIS_RUNTIME_NOT_CONFIGURED",
+    });
+    await expect(service.refresh("tenant-a")).rejects.toMatchObject({
       statusCode: 503,
       code: "PGREDIS_RUNTIME_NOT_CONFIGURED",
     });

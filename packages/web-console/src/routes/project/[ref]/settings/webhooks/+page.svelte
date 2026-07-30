@@ -2,6 +2,7 @@
   import { apiClient } from "$lib/api";
 
   import { page } from "$app/state";
+  import { t } from "svelte-i18n";
   import { Webhook, Plus, Globe, Trash2, Loader2 } from "lucide-svelte";
   import { toast } from "svelte-sonner";
   import { createQuery, createMutation, useQueryClient } from "@tanstack/svelte-query";
@@ -129,13 +130,14 @@
       queryClient.invalidateQueries({ queryKey: ["webhooks", projectRef] });
     },
     onError: (err: unknown) => {
-      addError = (err instanceof Error ? err.message : String(err)) || "创建 Webhook 失败";
+      addError = (err instanceof Error ? err.message : String(err)) || $t("Hooks.create_failed");
     }
   }));
 
   function saveWebhook() {
     if (!newName || !newUrl || !newTable || selectedEvents.length === 0) {
-      addError = "请填写真全信息并选择至少一个事件"; return;
+      addError = $t("Hooks.required_fields");
+      return;
     }
     addError = null;
     saveMutation.mutate();
@@ -158,7 +160,7 @@
       });
       if (!res.ok) {
         const data = await res.json();
-        throw new Error(data?.message || data?.error || "Delete failed");
+        throw new Error(data?.message || data?.error || $t("Hooks.delete_failed"));
       }
       return res.json();
     },
@@ -166,12 +168,12 @@
       queryClient.invalidateQueries({ queryKey: ["webhooks", projectRef] });
     },
     onError: () => {
-      alert("删除失败");
+      alert($t("Hooks.delete_failed"));
     }
   }));
 
   function deleteWebhook(id: string) {
-    if (!confirm(`确定要删除 Webhook "${id}" 吗？`)) return;
+    if (!confirm($t("Hooks.delete_confirm", { values: { name: id } }))) return;
     deleteMutation.mutate(id);
   }
 </script>
@@ -179,50 +181,50 @@
 <div class="h-full flex flex-col space-y-4">
   <div class="flex items-center justify-between">
     <div>
-      <h1 class="text-2xl font-bold">Database Webhooks</h1>
-      <p class="text-sm text-muted-foreground mt-1">当数据库表中发生变更事件时，通过 pg_net 向外部发送通知</p>
+      <h1 class="text-2xl font-bold">{$t("Hooks.title")}</h1>
+      <p class="text-sm text-muted-foreground mt-1">{$t("Hooks.subtitle")}</p>
     </div>
     <div class="flex items-center gap-3">
-      <span class="px-2.5 py-1 rounded-full bg-brand/10 text-brand text-xs font-bold">{endpoints.length} 个 Webhooks</span>
+      <span class="px-2.5 py-1 rounded-full bg-brand/10 text-brand text-xs font-bold">{$t("Hooks.count", { values: { count: endpoints.length } })}</span>
       <button 
         onclick={() => showAdd = !showAdd}
         class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-brand text-white hover:bg-brand/90 transition-colors"
       >
-        <Plus size={14} /> 添加 Webhook
+        <Plus size={14} /> {$t("Hooks.add")}
       </button>
     </div>
   </div>
 
   {#if showAdd}
     <div class="rounded-xl border bg-card p-5 space-y-4">
-      <h3 class="text-sm font-semibold">新建 Webhook</h3>
+      <h3 class="text-sm font-semibold">{$t("Hooks.new_hook")}</h3>
       {#if addError}
         <div class="p-2 bg-red-500/10 text-red-600 text-xs rounded border border-red-500/20">{addError}</div>
       {/if}
       
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
-          <span class="text-xs text-muted-foreground">名称标识 (仅字母数字，无空格)</span>
-          <input type="text" bind:value={newName} placeholder="例如：notify_slack"
+          <span class="text-xs text-muted-foreground">{$t("Hooks.identifier_hint")}</span>
+          <input type="text" bind:value={newName} placeholder={$t("Hooks.name_placeholder")}
             class="w-full mt-1 px-3 py-2 text-xs rounded-lg border bg-background focus:outline-none focus:ring-1 focus:ring-brand" />
         </div>
         <div>
-          <span class="text-xs text-muted-foreground">目标表</span>
+          <span class="text-xs text-muted-foreground">{$t("Hooks.table")}</span>
           <select bind:value={newTable} class="w-full mt-1 px-3 py-2 text-xs rounded-lg border bg-background focus:outline-none focus:ring-1 focus:ring-brand">
-            <option value="" disabled>选择数据表...</option>
+            <option value="" disabled>{$t("Hooks.table_placeholder")}</option>
             {#each tables as tbl}
               <option value={tbl}>{tbl}</option>
             {/each}
           </select>
         </div>
         <div class="md:col-span-2">
-          <span class="text-xs text-muted-foreground">URL (HTTP POST 目标)</span>
+          <span class="text-xs text-muted-foreground">{$t("Hooks.url")}</span>
           <input type="url" bind:value={newUrl} placeholder="https://your-server.com/webhook"
             class="w-full mt-1 px-3 py-2 text-xs font-mono rounded-lg border bg-background focus:outline-none focus:ring-1 focus:ring-brand" />
         </div>
       </div>
       <div>
-        <span class="text-xs text-muted-foreground">触发事件</span>
+        <span class="text-xs text-muted-foreground">{$t("Hooks.events")}</span>
         <div class="flex flex-wrap gap-2 mt-1">
           {#each AVAILABLE_EVENTS as ev}
             <button
@@ -241,9 +243,9 @@
         </div>
       </div>
       <div class="flex justify-end gap-2 pt-2">
-        <button onclick={() => showAdd = false} class="px-4 py-2 text-xs rounded-lg border hover:bg-muted/50 transition-colors">取消</button>
+        <button onclick={() => showAdd = false} class="px-4 py-2 text-xs rounded-lg border hover:bg-muted/50 transition-colors">{$t("Hooks.cancel")}</button>
         <button onclick={saveWebhook} disabled={saveMutation.isPending} class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-brand text-white hover:bg-brand/90 transition-colors disabled:opacity-50">
-          {#if saveMutation.isPending}<Loader2 size={12} class="animate-spin" />{/if} 保存
+          {#if saveMutation.isPending}<Loader2 size={12} class="animate-spin" />{/if} {$t("Hooks.save")}
         </button>
       </div>
     </div>
@@ -253,13 +255,13 @@
     {#if isLoading}
       <div class="flex flex-col items-center justify-center py-24 text-muted-foreground gap-3">
         <Loader2 size={32} class="animate-spin text-brand opacity-50" />
-        <p class="text-xs font-mono uppercase tracking-widest">加载 Webhooks...</p>
+        <p class="text-xs font-mono uppercase tracking-widest">{$t("Hooks.loading")}</p>
       </div>
     {:else if endpoints.length === 0}
       <div class="flex flex-col items-center justify-center py-24 text-muted-foreground gap-3">
         <Webhook size={40} class="opacity-20" />
-        <p class="text-sm">暂无 Database Webhook</p>
-        <p class="text-xs">添加包含 `pg_net` 请求的表级别触发器</p>
+        <p class="text-sm">{$t("Hooks.no_hooks_title")}</p>
+        <p class="text-xs">{$t("Hooks.no_hooks_description")}</p>
       </div>
     {:else}
       <div class="divide-y divide-border/20">
@@ -268,7 +270,7 @@
             <div class="flex items-center gap-3">
               <Webhook size={16} class="text-brand" />
               <div>
-                <span class="font-mono text-xs font-semibold">{endpoint.id} <span class="text-muted-foreground font-normal ml-2">on {endpoint.table}</span></span>
+                <span class="font-mono text-xs font-semibold">{endpoint.id} <span class="text-muted-foreground font-normal ml-2">{$t("Hooks.on_table", { values: { table: endpoint.table } })}</span></span>
                 <div class="flex gap-1 mt-1">
                   {#each endpoint.events as ev}
                     <span class="px-1.5 py-0.5 rounded text-[8px] bg-brand/10 text-brand">{ev}</span>
@@ -278,9 +280,9 @@
             </div>
             <div class="flex items-center gap-2">
               {#if endpoint.enabled}
-                <span class="px-2 py-0.5 rounded-full text-[9px] font-bold bg-green-500/10 text-green-600">已启用</span>
+                <span class="px-2 py-0.5 rounded-full text-[9px] font-bold bg-green-500/10 text-green-600">{$t("Hooks.enabled")}</span>
               {:else}
-                <span class="px-2 py-0.5 rounded-full text-[9px] font-bold bg-muted text-muted-foreground">已停用</span>
+                <span class="px-2 py-0.5 rounded-full text-[9px] font-bold bg-muted text-muted-foreground">{$t("Hooks.disabled")}</span>
               {/if}
               <button onclick={() => deleteWebhook(endpoint.id)} disabled={deleteMutation.isPending} class="p-1 hover:bg-red-500/10 hover:text-red-500 rounded-md text-muted-foreground transition-colors disabled:opacity-50">
                 <Trash2 size={14} />

@@ -3,7 +3,7 @@
 
   import { onMount } from "svelte";
   import { Loader2, Wrench, Play, RefreshCw, AlertTriangle, CheckCircle2, Server, ArrowRightLeft, Plus, Shield, Clock, Terminal } from "lucide-svelte";
-  import { t, locale } from "svelte-i18n";
+  import { t } from "svelte-i18n";
 
   interface Operation {
     id: string;
@@ -15,15 +15,33 @@
     action: (params: Record<string, string>) => Promise<string>;
   }
 
+  interface HealthReport {
+    status: "OK" | "WARN" | "ERROR";
+    component: string;
+    message: string;
+  }
+
   let activeOp: string | null = $state.raw(null);
   let opParams: Record<string, string> = $state.raw({});
   let isExecuting = $state(false);
   let logs: { time: string; op: string; result: string; success: boolean }[] = $state.raw([]);
 
   // Health Check
-  let healthStatus: unknown = $state.raw(null);
+  let healthStatus: HealthReport[] | null = $state.raw(null);
   let isCheckingHealth = $state(false);
-  const isZh = $derived(($locale ?? "").toLowerCase().startsWith("zh"));
+
+  const HEALTH_MESSAGE_KEYS: Record<string, string> = {
+    Running: "PlatformOperations.service_running",
+    "Service stopped": "PlatformOperations.service_stopped",
+    "System not booted by Systemd": "PlatformOperations.systemd_unavailable",
+    "Generic PostgreSQL profile active; Pigsty not configured": "PlatformOperations.generic_postgres_profile",
+    "Cloud-native storage backend not mounted": "PlatformOperations.storage_not_mounted",
+    "Cannot detect storage mount status": "PlatformOperations.storage_mount_unknown",
+    "Cannot get disk info": "PlatformOperations.disk_info_unavailable",
+    "Database not accepting connections": "PlatformOperations.database_unavailable",
+    "Cannot access service status": "PlatformOperations.service_status_unavailable",
+    "Standard Mode (Local Storage)": "PlatformOperations.standard_local_storage",
+  };
 
     
   async function apiCall(url: string, method: string = "GET", body?: unknown): Promise<Record<string, unknown>> {
@@ -31,6 +49,16 @@
     if (body) opts.body = JSON.stringify(body);
     const res = await apiClient(url, opts);
     return await res.json();
+  }
+
+  function isHealthReportList(payload: unknown): payload is HealthReport[] {
+    return Array.isArray(payload) && payload.every((report) => (
+      report
+      && typeof report === "object"
+      && ["OK", "WARN", "ERROR"].includes((report as HealthReport).status)
+      && typeof (report as HealthReport).component === "string"
+      && typeof (report as HealthReport).message === "string"
+    ));
   }
 
   const OPERATIONS: Operation[] = $derived([
@@ -103,17 +131,17 @@
     }
   }
 
-  function addLog(op: string, result: string, success: boolean) {
-    const now = new Date();
-    const time = `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}:${now.getSeconds().toString().padStart(2,'0')}`;
-    logs = [{ time, op, result, success }, ...logs].slice(0, 50);
+  function addLog(operation: string, message: string, success: boolean) {
+    logs = [{ time: new Date().toLocaleString(), op: operation, result: message, success }, ...logs].slice(0, 50);
   }
 
   async function checkHealth() {
     isCheckingHealth = true;
     try {
-      const data = await apiCall("/monitor/health");
-      healthStatus = data;
+      const response = await apiClient("/monitor/health");
+      const payload: unknown = await response.json();
+      if (!response.ok || !isHealthReportList(payload)) throw new Error($t("PlatformOperations.health_check_failed"));
+      healthStatus = payload;
       addLog($t("PlatformOperations.health_check_1"), $t("PlatformOperations.completed"), true);
     } catch (err: unknown) {
       addLog($t("PlatformOperations.health_check_1"), (err instanceof Error ? err.message : String(err)), false);
@@ -126,8 +154,16 @@
     opParams = {};
   }
 
-  // Health check translations
-  function translateComponent(name: string) {
+  function healthStatusLabel(status: HealthReport["status"]): string {
+    const labels: Record<HealthReport["status"], string> = {
+      OK: "PlatformOperations.health_ok",
+      WARN: "PlatformOperations.health_warning",
+      ERROR: "PlatformOperations.health_error",
+    };
+    return $t(labels[status]);
+  }
+
+  function localizeHealthComponent(component: string) {
     const map: Record<string, string> = {
       "Storage Space": $t("PlatformOperations.storage_space"),
       "Memory Status": $t("PlatformOperations.memory_status"),
@@ -141,37 +177,52 @@
       "Database Cluster (HA)": $t("PlatformOperations.database_cluster_ha"),
       "Pigsty Engine": $t("PlatformOperations.pigsty_engine")
     };
-    return map[name] || name;
+    return map[component] || component;
   }
 
-  function translateMessage(msg: string) {
-    if (!msg) return msg;
-    if (!isZh) return msg;
-    if (msg === "Running") return "正在运行";
-    if (msg === "Service stopped") return "服务已停止";
-    if (msg === "System not booted by Systemd") return "非 Systemd 启动环境，服务状态未知";
-    if (msg === "Generic PostgreSQL profile active; Pigsty not configured") return "当前使用通用 PostgreSQL 配置，未启用 Pigsty";
-    if (msg === "Cloud-native storage backend not mounted") return "云原生存储后端未挂载或未配置";
-    if (msg === "Cannot detect storage mount status") return "无法检测存储挂载状态";
-    if (msg === "Cannot get disk info") return "无法获取系统磁盘信息";
-    if (msg === "Database not accepting connections") return "数据库目前拒绝访问连接";
-    if (msg === "Cannot access service status") return "无法获取服务运行状态";
-    
-    // Dynamic replacements
-    let translated = msg;
-    translated = translated.replace(/^Available:\s*(.*)/, "剩余可用: $1");
-    translated = translated.replace(/^Mounted:\s*(.*)/, "已挂载: $1");
-    translated = translated.replace(/^Free (.*?) \/ Total (.*?)$/, "空闲 $1 / 总量 $2");
-    translated = translated.replace(/^PG (.*?) running in single-node mode$/, "PostgreSQL $1 - 单节点独立运行中");
-    translated = translated.replace(/^Ready \((.+?)\)$/, "目前就绪 ($1)");
+  function localizeDatabaseHealthMessage(message: string): string | null {
 
-    return translated;
+    const postgresReady = /^PostgreSQL (.+?) ready \(Active replicas: (\d+)\)$/.exec(message);
+    if (postgresReady) {
+      return $t("PlatformOperations.postgresql_ready", { values: { version: postgresReady[1], replicas: postgresReady[2] } });
+    }
+
+    const pigstyReady = /^Ready \(pig version (v?\S+) (\S+)\)$/i.exec(message);
+    if (pigstyReady) {
+      const version = pigstyReady[1].startsWith("v") ? pigstyReady[1] : `v${pigstyReady[1]}`;
+      const platform = pigstyReady[2].replace(/^linux\//i, "Linux/");
+      return $t("PlatformOperations.pigsty_ready", { values: { version, platform } });
+    }
+
+    const standalonePostgres = /^PG (.*?) running in single-node mode$/.exec(message);
+    if (standalonePostgres) return $t("PlatformOperations.postgresql_single_node", { values: { version: standalonePostgres[1] } });
+
+    return null;
+  }
+
+  function localizeResourceHealthMessage(message: string): string | null {
+    const availableSpace = /^Available:\s*(.*)/.exec(message);
+    if (availableSpace) return $t("PlatformOperations.available_space", { values: { value: availableSpace[1] } });
+    const mountedStorage = /^Mounted:\s*(.*)/.exec(message);
+    if (mountedStorage) return $t("PlatformOperations.mounted_storage", { values: { value: mountedStorage[1] } });
+    const memoryStatus = /^Free (.*?) \/ Total (.*?)$/.exec(message);
+    if (memoryStatus) return $t("PlatformOperations.memory_available", { values: { free: memoryStatus[1], total: memoryStatus[2] } });
+    const readyDetail = /^Ready \((.+?)\)$/.exec(message);
+    if (readyDetail) return $t("PlatformOperations.ready_detail", { values: { detail: readyDetail[1] } });
+
+    return null;
+  }
+
+  function localizeHealthMessage(message: string): string {
+    const exactMessageKey = HEALTH_MESSAGE_KEYS[message];
+    if (exactMessageKey) return $t(exactMessageKey);
+    return localizeDatabaseHealthMessage(message) || localizeResourceHealthMessage(message) || message;
   }
 
   onMount(() => checkHealth());
 </script>
 
-<div class="space-y-4">
+<div class="space-y-4 pb-24">
   <div class="flex items-center justify-between">
     <div>
       <h2 class="text-xl font-bold">{$t("PlatformOperations.operations")}</h2>
@@ -192,17 +243,17 @@
       {#if !healthStatus}
         <p class="text-xs text-muted-foreground">{$t("PlatformOperations.health_check_in_progress")}</p>
       {:else}
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {#each (healthStatus as any[]) as report (report.component)}
+        <div class="grid grid-cols-2 gap-3 md:grid-cols-3">
+          {#each healthStatus as report (report.component)}
             <div class="rounded-lg border p-3 flex flex-col justify-between">
-              <div class="text-[10px] font-bold uppercase text-muted-foreground mb-1">{translateComponent(report.component)}</div>
+              <div class="text-[10px] font-bold uppercase text-muted-foreground mb-1">{localizeHealthComponent(report.component)}</div>
               <div class="mt-1">
                 <span class="text-xs font-bold px-1.5 py-0.5 rounded-sm {report.status === 'OK' ? 'bg-green-100 text-green-700' : report.status === 'ERROR' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}">
-                  {report.status}
+                  {healthStatusLabel(report.status)}
                 </span>
               </div>
-              <div class="text-xs text-muted-foreground mt-2 line-clamp-2" title={translateMessage(report.message)}>
-                {translateMessage(report.message)}
+              <div class="text-xs text-muted-foreground mt-2 line-clamp-2" title={localizeHealthMessage(report.message)}>
+                {localizeHealthMessage(report.message)}
               </div>
             </div>
           {/each}

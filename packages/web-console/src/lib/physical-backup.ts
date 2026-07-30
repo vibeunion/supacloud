@@ -20,10 +20,21 @@ export interface PhysicalBackupViewModel {
   label: string;
 }
 
+export class BackupInventoryError extends Error {
+  constructor(readonly status: number) {
+    super(backupInventoryErrorMessage(status));
+    this.name = "BackupInventoryError";
+  }
+}
+
 export function backupInventoryErrorMessage(status: number): string {
   return status === 503
     ? "备份服务暂未就绪，请确认 pgBackRest 已配置并运行后重试。"
     : `无法加载备份历史（HTTP ${status}）`;
+}
+
+export function isBackupServiceUnavailable(error: unknown): boolean {
+  return error instanceof BackupInventoryError && error.status === 503;
 }
 
 function formatTimestamp(epoch: number): string {

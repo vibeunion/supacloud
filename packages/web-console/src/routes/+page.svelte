@@ -26,6 +26,7 @@
     XCircle,
   } from "lucide-svelte";
   import { onMount } from "svelte";
+  import { t } from "svelte-i18n";
 
   interface ProjectItem {
     ref: string;
@@ -44,11 +45,13 @@
   }
 
   const navigation = [
-    { label: "概览", href: "/", icon: LayoutDashboard },
-    { label: "项目", href: "/projects", icon: FolderKanban },
-    { label: "平台管理", href: "/platform", icon: Server },
-    { label: "运维操作", href: "/platform/operations", icon: Activity },
-    { label: "监控", href: "/platform/monitoring", icon: Gauge },
+    { titleKey: "Dashboard.nav_overview", href: "/", icon: LayoutDashboard },
+    { titleKey: "Dashboard.nav_projects", href: "/projects", icon: FolderKanban },
+    { titleKey: "Dashboard.nav_platform", href: "/platform", icon: Server },
+    { titleKey: "Dashboard.nav_operations", href: "/platform/operations", icon: Activity },
+    { titleKey: "Dashboard.nav_monitoring", href: "/platform/monitoring", icon: Gauge },
+    { titleKey: "Platform.backups_pitr", href: "/platform/backups", icon: Database },
+    { titleKey: "Platform.settings", href: "/platform/settings", icon: Settings },
   ] as const;
 
   let projects = $state<ProjectItem[]>([]);
@@ -57,12 +60,16 @@
   let loading = $state(true);
   let loadError = $state(false);
 
-  let activeCount = $derived(projects.filter((project) => project.status === "active").length);
-  let pausedCount = $derived(projects.filter((project) => project.status === "paused").length);
+  let activeCount = $derived(projects.filter((project) => projectStatusKind(project.status) === "active").length);
+  let pausedCount = $derived(projects.filter((project) => projectStatusKind(project.status) === "paused").length);
   let otherCount = $derived(projects.length - activeCount - pausedCount);
   let activePercent = $derived(projects.length ? Math.round((activeCount / projects.length) * 100) : 0);
   let connectionLabel = $derived(
-    loading ? "Connecting to Management API" : loadError ? "Management API unavailable" : "Management API connected",
+    loading
+      ? $t("Dashboard.management_api_connecting")
+      : loadError
+        ? $t("Dashboard.management_api_unavailable")
+        : $t("Dashboard.management_api_connected"),
   );
   let filteredProjects = $derived(
     projects.filter((project) => {
@@ -95,19 +102,34 @@
     loading = false;
   }
 
+  function projectStatusKind(status: string): "active" | "paused" | "other" {
+    const normalizedStatus = status.toLowerCase();
+    if (["active", "active_healthy", "healthy", "running"].includes(normalizedStatus)) return "active";
+    if (["paused", "suspended", "stopped"].includes(normalizedStatus)) return "paused";
+    return "other";
+  }
+
   function statusClass(status: string): string {
-    if (status === "active") return "status-active";
-    if (status === "paused") return "status-paused";
+    const kind = projectStatusKind(status);
+    if (kind === "active") return "status-active";
+    if (kind === "paused") return "status-paused";
     return "status-other";
+  }
+
+  function projectStatusLabel(status: string): string {
+    const kind = projectStatusKind(status);
+    if (kind === "active") return $t("Dashboard.status_active");
+    if (kind === "paused") return $t("Dashboard.status_paused");
+    return $t("Dashboard.status_other");
   }
 
   function timeAgo(dateTime: string): string {
     const elapsed = Date.now() - new Date(dateTime).getTime();
     const days = Math.floor(elapsed / 86_400_000);
-    if (days > 30) return `${Math.floor(days / 30)} 个月前`;
-    if (days > 0) return `${days} 天前`;
+    if (days > 30) return `${Math.floor(days / 30)} ${$t("Dashboard.months_ago")}`;
+    if (days > 0) return `${days} ${$t("Common.ago_days")}`;
     const hours = Math.floor(elapsed / 3_600_000);
-    return hours > 0 ? `${hours} 小时前` : "刚刚";
+    return hours > 0 ? `${hours} ${$t("Common.ago_hours")}` : $t("Dashboard.just_now");
   }
 
   onMount(() => {
@@ -116,39 +138,35 @@
 </script>
 
 <svelte:head>
-  <title>SupaCloud · 平台概览</title>
-  <meta name="description" content="SupaCloud 项目与平台运行状态概览" />
+  <title>SupaCloud · {$t("Dashboard.platform_overview")}</title>
+  <meta name="description" content={$t("Dashboard.platform_overview_description")} />
 </svelte:head>
 
 <div class="console-shell">
-  <aside class="console-sidebar" aria-label="SupaCloud 主导航">
+  <aside class="console-sidebar" aria-label={$t("Dashboard.main_navigation")}>
     <div class="brand-lockup">
       <span class="brand-symbol" aria-hidden="true"><Database size={20} strokeWidth={1.9} /></span>
       <span>
         <strong>SupaCloud</strong>
-        <small>Self-hosted platform</small>
+        <small>{$t("Dashboard.console_subtitle")}</small>
       </span>
     </div>
 
-    <nav class="sidebar-nav" aria-label="控制台导航">
+    <nav class="sidebar-nav" aria-label={$t("Dashboard.console_navigation")}>
       {#each navigation as entry (entry.href)}
         <a class:active={entry.href === "/"} href={resolve(entry.href)} aria-current={entry.href === "/" ? "page" : undefined}>
           <entry.icon size={16} strokeWidth={1.8} />
-          <span>{entry.label}</span>
+          <span>{$t(entry.titleKey)}</span>
         </a>
       {/each}
     </nav>
 
     <div class="sidebar-spacer"></div>
 
-    <div class="sidebar-footer-links">
-      <a href={resolve("/platform/settings")}><Settings size={16} /><span>平台设置</span></a>
-    </div>
-
     <div class="workspace-strip">
       <span class="workspace-avatar">SC</span>
-      <span><strong>Local workspace</strong><small>自托管实例</small></span>
-      <CheckCircle2 size={14} aria-label="实例在线" />
+      <span><strong>{$t("Dashboard.local_workspace")}</strong><small>{$t("Dashboard.console_subtitle")}</small></span>
+      <CheckCircle2 size={14} aria-label={$t("Dashboard.instance_online")} />
     </div>
   </aside>
 
@@ -156,21 +174,21 @@
     <header class="topbar">
       <div class="topbar-context">
         <span class="context-icon"><Boxes size={17} /></span>
-        <span><strong>SupaCloud Console</strong><small>Platform overview</small></span>
+        <span><strong>{$t("Dashboard.console_name")}</strong><small>{$t("Dashboard.platform_overview")}</small></span>
       </div>
 
       <div class="topbar-actions">
         <label class="search-field">
           <Search size={15} aria-hidden="true" />
-          <span class="sr-only">搜索项目</span>
-          <input bind:value={searchQuery} placeholder="搜索项目..." />
+          <span class="sr-only">{$t("Dashboard.search_projects")}</span>
+          <input bind:value={searchQuery} placeholder={$t("Dashboard.search_projects")} />
           <kbd>⌘ K</kbd>
         </label>
-        <button class="refresh-button" type="button" title="刷新数据" aria-label="刷新平台数据" onclick={() => void loadDashboard()}>
+        <button class="refresh-button" type="button" title={$t("Common.refresh")} aria-label={$t("Dashboard.refresh_platform_data")} onclick={() => void loadDashboard()}>
           <span class:spin={loading}><RefreshCw size={15} /></span>
         </button>
         <button class="primary-button" type="button" onclick={() => goto(resolve("/projects"))}>
-          <Plus size={15} /> 新建项目
+          <Plus size={15} /> {$t("Dashboard.create_project")}
         </button>
       </div>
     </header>
@@ -179,129 +197,129 @@
       <section class="page-intro" aria-labelledby="overview-title">
         <div>
           <p class:disconnected={loadError} class="eyebrow"><span></span> {connectionLabel}</p>
-          <h1 id="overview-title">平台概览</h1>
-          <p>集中查看 SupaCloud 项目、基础设施和运行状态。</p>
+          <h1 id="overview-title">{$t("Dashboard.platform_overview")}</h1>
+          <p>{$t("Dashboard.platform_overview_description")}</p>
         </div>
         <div class="runtime-badge">
-          <span>Runtime</span>
+          <span>{$t("Dashboard.runtime")}</span>
           <strong>{systemInfo.version || "—"}</strong>
         </div>
       </section>
 
       {#if loading && projects.length === 0}
-        <div class="loading-state"><Loader2 size={24} class="spin" /><span>正在连接 SupaCloud...</span></div>
+        <div class="loading-state"><Loader2 size={24} class="spin" /><span>{$t("Dashboard.connecting_supacloud")}</span></div>
       {:else}
         {#if loadError}
           <div class="error-banner" role="alert">
-            <XCircle size={16} /> 项目数据暂时不可用。
-            <button type="button" onclick={() => void loadDashboard()}>重试</button>
+            <XCircle size={16} /> {$t("Dashboard.project_data_unavailable")}
+            <button type="button" onclick={() => void loadDashboard()}>{$t("Common.retry")}</button>
           </div>
         {/if}
 
-        <section class="stats-grid" aria-label="平台关键指标">
+        <section class="stats-grid" aria-label={$t("Dashboard.platform_metrics")}>
           <article class="stat-card">
-            <div class="stat-heading"><span>项目总数</span><FolderKanban size={18} /></div>
+            <div class="stat-heading"><span>{$t("Dashboard.project_total")}</span><FolderKanban size={18} /></div>
             <strong>{projects.length}</strong>
-            <p>当前工作空间内全部项目</p>
+            <p>{$t("Dashboard.project_total_description")}</p>
           </article>
           <article class="stat-card">
-            <div class="stat-heading green"><span>运行中</span><CheckCircle2 size={18} /></div>
+            <div class="stat-heading green"><span>{$t("Dashboard.running")}</span><CheckCircle2 size={18} /></div>
             <strong>{activeCount}</strong>
-            <p>{activePercent}% 项目状态健康</p>
+            <p>{activePercent}% {$t("Dashboard.projects_healthy")}</p>
           </article>
           <article class="stat-card">
-            <div class="stat-heading amber"><span>已暂停</span><PauseCircle size={18} /></div>
+            <div class="stat-heading amber"><span>{$t("Dashboard.paused")}</span><PauseCircle size={18} /></div>
             <strong>{pausedCount}</strong>
-            <p>{otherCount > 0 ? `${otherCount} 个项目处于其他状态` : "没有异常状态"}</p>
+            <p>{otherCount > 0 ? `${otherCount} ${$t("Dashboard.projects_in_other_states")}` : $t("Dashboard.no_abnormal_status")}</p>
           </article>
           <article class="stat-card">
-            <div class="stat-heading blue"><span>CPU 使用率</span><Cpu size={18} /></div>
+            <div class="stat-heading blue"><span>{$t("Dashboard.cpu_usage")}</span><Cpu size={18} /></div>
             <strong>{systemInfo.cpu || "—"}</strong>
-            <p>{systemInfo.memory || "等待系统指标"}</p>
+            <p>{$t("Dashboard.cpu_usage_description")}</p>
           </article>
         </section>
 
         <section class="overview-grid">
           <article class="panel project-health-panel">
             <div class="panel-heading">
-              <div><p class="panel-kicker">Workspace health</p><h2>项目运行状态</h2></div>
-              <a href={resolve("/projects")}>查看全部 <ArrowUpRight size={13} /></a>
+              <div><p class="panel-kicker">{$t("Dashboard.workspace_health")}</p><h2>{$t("Dashboard.project_runtime_status")}</h2></div>
+              <a href={resolve("/projects")}>{$t("Dashboard.view_all")} <ArrowUpRight size={13} /></a>
             </div>
 
             <div class="health-summary">
               <div class="health-score">
                 <strong>{activePercent}%</strong>
-                <span>项目在线</span>
+                <span>{$t("Dashboard.projects_online")}</span>
               </div>
               <div class="health-visual">
-                <div class="health-track" aria-label={`${activePercent}% 的项目运行中`}>
+                <div class="health-track" aria-label={`${activePercent}% ${$t("Dashboard.projects_healthy")}`}>
                   <span class="health-active" style:width={`${activePercent}%`}></span>
                   <span class="health-paused" style:width={`${projects.length ? Math.round((pausedCount / projects.length) * 100) : 0}%`}></span>
                 </div>
                 <div class="health-legend">
-                  <span><i class="dot-active"></i>运行中 <b>{activeCount}</b></span>
-                  <span><i class="dot-paused"></i>已暂停 <b>{pausedCount}</b></span>
-                  <span><i class="dot-other"></i>其他 <b>{otherCount}</b></span>
+                  <span><i class="dot-active"></i>{$t("Dashboard.running")} <b>{activeCount}</b></span>
+                  <span><i class="dot-paused"></i>{$t("Dashboard.paused")} <b>{pausedCount}</b></span>
+                  <span><i class="dot-other"></i>{$t("Dashboard.other")} <b>{otherCount}</b></span>
                 </div>
               </div>
             </div>
 
             <div class="health-footnote">
               <ShieldCheck size={15} />
-              <span>控制台通过 Management API 读取当前实例状态，不使用演示数据。</span>
+              <span>{$t("Dashboard.management_api_reading")}</span>
             </div>
           </article>
 
           <article class="panel system-panel">
             <div class="panel-heading">
-              <div><p class="panel-kicker">Infrastructure</p><h2>系统运行时</h2></div>
+              <div><p class="panel-kicker">{$t("Dashboard.infrastructure")}</p><h2>{$t("Dashboard.system_runtime")}</h2></div>
               <Activity size={17} />
             </div>
             <dl>
-              <div><dt><Clock3 size={14} />运行时间</dt><dd>{systemInfo.uptime || "—"}</dd></div>
+              <div><dt><Clock3 size={14} />{$t("Dashboard.uptime")}</dt><dd>{systemInfo.uptime || "—"}</dd></div>
               <div><dt><Cpu size={14} />CPU</dt><dd>{systemInfo.cpu || "—"}</dd></div>
-              <div><dt><HardDrive size={14} />内存</dt><dd>{systemInfo.memory || "—"}</dd></div>
-              <div><dt><Server size={14} />版本</dt><dd>{systemInfo.version || "—"}</dd></div>
+              <div><dt><HardDrive size={14} />{$t("Dashboard.memory")}</dt><dd>{systemInfo.memory || "—"}</dd></div>
+              <div><dt><Server size={14} />{$t("Dashboard.version")}</dt><dd>{systemInfo.version || "—"}</dd></div>
             </dl>
-            <a class="system-link" href={resolve("/platform/monitoring")}>打开监控中心 <ArrowRight size={13} /></a>
+            <a class="system-link" href={resolve("/platform/monitoring")}>{$t("Dashboard.open_monitoring")} <ArrowRight size={13} /></a>
           </article>
         </section>
 
         <section class="panel projects-panel">
           <div class="panel-heading projects-heading">
-            <div><p class="panel-kicker">Projects</p><h2>最近项目</h2></div>
-            <span>{filteredProjects.length} 个项目</span>
+            <div><p class="panel-kicker">{$t("Dashboard.projects")}</p><h2>{$t("Dashboard.recent_projects")}</h2></div>
+            <span>{filteredProjects.length} {$t("Dashboard.projects")}</span>
           </div>
 
           {#if filteredProjects.length === 0}
             <div class="empty-state">
               <FolderKanban size={30} />
-              <strong>{projects.length === 0 ? "还没有项目" : "没有匹配的项目"}</strong>
-              <p>{projects.length === 0 ? "创建第一个 SupaCloud 项目开始使用。" : "尝试调整搜索关键词。"}</p>
+              <strong>{projects.length === 0 ? $t("Dashboard.no_projects") : $t("Dashboard.no_matching_projects")}</strong>
+              <p>{projects.length === 0 ? $t("Dashboard.no_projects_description") : $t("Dashboard.no_matching_projects_description")}</p>
               {#if projects.length === 0}
-                <button class="primary-button" type="button" onclick={() => goto(resolve("/projects"))}><Plus size={14} /> 创建项目</button>
+                <button class="primary-button" type="button" onclick={() => goto(resolve("/projects"))}><Plus size={14} /> {$t("Dashboard.create_first_project")}</button>
               {:else}
-                <button class="text-button" type="button" onclick={() => (searchQuery = "")}>清除搜索</button>
+                <button class="text-button" type="button" onclick={() => (searchQuery = "")}>{$t("Dashboard.clear_search")}</button>
               {/if}
             </div>
           {:else}
             <div class="table-wrap">
               <table>
-                <thead><tr><th>项目</th><th>区域</th><th>数据库</th><th>状态</th><th>创建时间</th><th><span class="sr-only">打开</span></th></tr></thead>
+              <thead><tr><th>{$t("Dashboard.project")}</th><th>{$t("Dashboard.region")}</th><th>{$t("Dashboard.database")}</th><th>{$t("Dashboard.status")}</th><th>{$t("Dashboard.created_at")}</th><th><span class="sr-only">{$t("Dashboard.open_project")}</span></th></tr></thead>
                 <tbody>
                   {#each filteredProjects.slice(0, 6) as project (project.ref)}
                     <tr>
-                      <td data-label="项目">
+                      <td data-label={$t("Dashboard.project")}>
                         <a class="project-identity" href={resolve("/project/[ref]", { ref: project.ref })}>
                           <span class="project-mark">{project.name.charAt(0).toUpperCase()}</span>
                           <span><strong>{project.name}</strong><small>{project.ref}</small></span>
                         </a>
                       </td>
-                      <td data-label="区域">{project.region || "local"}</td>
-                      <td data-label="数据库"><code>{project.db_name || "postgres"}</code></td>
-                      <td data-label="状态"><span class="status-pill {statusClass(project.status)}">{project.status}</span></td>
-                      <td data-label="创建时间">{timeAgo(project.created_at)}</td>
-                      <td class="open-cell"><a title={`打开 ${project.name}`} aria-label={`打开 ${project.name}`} href={resolve("/project/[ref]", { ref: project.ref })}><ArrowUpRight size={15} /></a></td>
+                      <td data-label={$t("Dashboard.region")}>{project.region || $t("Dashboard.local_region")}</td>
+                      <td data-label={$t("Dashboard.database")}><code>{project.db_name || "postgres"}</code></td>
+                      <td data-label={$t("Dashboard.status")}><span class="status-pill {statusClass(project.status)}" title={project.status}>{projectStatusLabel(project.status)}</span></td>
+                      <td data-label={$t("Dashboard.created_at")}>{timeAgo(project.created_at)}</td>
+                      <td class="open-cell"><a title={`${$t("Dashboard.open_project")} ${project.name}`} aria-label={`${$t("Dashboard.open_project")} ${project.name}`} href={resolve("/project/[ref]", { ref: project.ref })}><ArrowUpRight size={15} /></a></td>
                     </tr>
                   {/each}
                 </tbody>
@@ -310,11 +328,6 @@
           {/if}
         </section>
 
-        <section class="quick-links" aria-label="快捷入口">
-          <a href={resolve("/platform/operations")}><span><Activity size={17} /></span><div><strong>运维操作</strong><small>管理平台任务与维护操作</small></div><ArrowRight size={14} /></a>
-          <a href={resolve("/platform/backups")}><span><Database size={17} /></span><div><strong>备份</strong><small>查看物理备份与恢复点</small></div><ArrowRight size={14} /></a>
-          <a href={resolve("/platform/settings")}><span><Settings size={17} /></span><div><strong>平台设置</strong><small>配置基础设施与 AI 服务</small></div><ArrowRight size={14} /></a>
-        </section>
       {/if}
     </div>
   </main>
@@ -421,8 +434,7 @@
     gap: 2px;
   }
 
-  .sidebar-nav a,
-  .sidebar-footer-links a {
+  .sidebar-nav a {
     display: flex;
     align-items: center;
     min-height: 36px;
@@ -437,8 +449,7 @@
     text-decoration: none;
   }
 
-  .sidebar-nav a:hover,
-  .sidebar-footer-links a:hover {
+  .sidebar-nav a:hover {
     color: #ffffff;
     background: #222222;
   }
@@ -460,11 +471,6 @@
 
   .sidebar-spacer {
     flex: 1;
-  }
-
-  .sidebar-footer-links {
-    padding: 9px 0;
-    border-top: 1px solid #2b2b2a;
   }
 
   .workspace-strip {
@@ -750,8 +756,7 @@
   }
 
   .stat-card,
-  .panel,
-  .quick-links a {
+  .panel {
     background: var(--panel);
     border: 1px solid var(--border);
     border-radius: 5px;
@@ -951,9 +956,9 @@
   .system-panel dd {
     margin: 0;
     color: #31312e;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 9px;
     font-weight: 650;
+    font-variant-numeric: tabular-nums;
   }
 
   .system-link {
@@ -1067,7 +1072,9 @@
     overflow: hidden;
     color: #888883;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 8px;
+    font-size: 9px;
+    line-height: 1.3;
+    letter-spacing: 0;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -1146,59 +1153,6 @@
     border: 1px solid #c8dfd2;
   }
 
-  .quick-links {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 10px;
-    margin-top: 10px;
-  }
-
-  .quick-links a {
-    display: grid;
-    grid-template-columns: 32px 1fr auto;
-    align-items: center;
-    min-height: 70px;
-    gap: 10px;
-    padding: 11px 13px;
-    color: inherit;
-    text-decoration: none;
-  }
-
-  .quick-links a:hover {
-    border-color: #bcd8c8;
-    box-shadow: 0 4px 14px rgba(32, 75, 56, 0.06);
-  }
-
-  .quick-links a > span {
-    display: grid;
-    place-items: center;
-    width: 32px;
-    height: 32px;
-    color: #2c7655;
-    background: #eef6f1;
-    border: 1px solid #cfe4d8;
-    border-radius: 4px;
-  }
-
-  .quick-links a > div {
-    display: flex;
-    flex-direction: column;
-  }
-
-  .quick-links strong {
-    font-size: 10px;
-  }
-
-  .quick-links small {
-    margin-top: 3px;
-    color: #7e7e79;
-    font-size: 8px;
-  }
-
-  .quick-links a > :global(svg) {
-    color: #8a8a85;
-  }
-
   .sr-only {
     position: absolute;
     width: 1px;
@@ -1248,7 +1202,7 @@
     .sidebar-nav::-webkit-scrollbar { display: none; }
     .sidebar-nav a { width: auto; flex: 0 0 auto; min-height: 32px; padding: 0 9px; }
     .sidebar-nav a.active::before { display: none; }
-    .sidebar-spacer, .sidebar-footer-links, .workspace-strip { display: none; }
+    .sidebar-spacer, .workspace-strip { display: none; }
 
     .topbar {
       position: relative;
@@ -1265,8 +1219,7 @@
   }
 
   @media (max-width: 620px) {
-    .stats-grid,
-    .quick-links { grid-template-columns: 1fr; }
+    .stats-grid { grid-template-columns: 1fr; }
 
     .page-intro { align-items: flex-start; flex-direction: column; gap: 12px; }
     .runtime-badge { align-self: flex-start; }

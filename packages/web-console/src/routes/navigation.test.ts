@@ -9,6 +9,7 @@ const platformSidebarSource = read("../lib/components/PlatformSidebar.svelte");
 const platformLayoutSource = read("./platform/+layout.svelte");
 const databaseLayoutSource = read("./project/[ref]/database/+layout.svelte");
 const authLayoutSource = read("./project/[ref]/auth/+layout.svelte");
+const reportsLayoutSource = read("./project/[ref]/reports/+layout.svelte");
 
 describe("console navigation information architecture", () => {
   test("groups project data tools and exposes one monitoring entry", () => {
@@ -36,7 +37,8 @@ describe("console navigation information architecture", () => {
   test("uses one grouped platform navigation instead of duplicate top tabs", () => {
     expect(platformSidebarSource).toContain("Platform.performance_runtime");
     expect(platformSidebarSource).toContain("Platform.operations");
-    expect(platformSidebarSource).toContain('href="/platform/settings"');
+    expect(platformSidebarSource).toContain('href: "/platform/settings"');
+    expect(platformSidebarSource).not.toContain('$t("Sidebar.configure")');
     expect(platformLayoutSource).not.toContain("const TABS");
     expect(platformLayoutSource).not.toContain("/platform/${tab.id}");
   });
@@ -96,5 +98,10 @@ describe("console navigation information architecture", () => {
     for (const routeId of routeIds) {
       expect(existsSync(new URL(`./project/[ref]/database/${routeId}/+page.svelte`, import.meta.url))).toBe(true);
     }
+  });
+
+  test("does not duplicate the reports landing-page title in its header", () => {
+    expect(reportsLayoutSource).toContain("{#if currentTab}");
+    expect(reportsLayoutSource).not.toContain('{#if currentTab}\n      <div class="flex items-center');
   });
 });

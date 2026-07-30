@@ -160,6 +160,10 @@ describe("pgredis-runtime internal API", () => {
     });
     const projectResponse = await app.handle(adminRequest("/internal/v1/admin/projects/tenant-a/status"));
     expect(await projectResponse.json()).toMatchObject({ projectRef: "tenant-a", configured: true });
+    const refreshResponse = await app.handle(adminRequest("/internal/v1/admin/projects/tenant-a/refresh", {
+      method: "POST",
+    }));
+    expect(await refreshResponse.json()).toMatchObject({ projectRef: "tenant-a", configurationCurrent: true });
 
     const invalidGetResponse = await app.handle(adminRequest("/internal/v1/admin/cache", {
       method: "POST",
@@ -181,8 +185,8 @@ describe("pgredis-runtime internal API", () => {
       body: JSON.stringify({ projectRef: "tenant-a", op: "flush", confirmProjectRef: "tenant-a" }),
     }));
     expect(await flushResponse.json()).toEqual({ deleted: 3 });
-    expect(acquiredRefs).toEqual(["tenant-a", "tenant-a"]);
-    expect(releases).toBe(2);
+    expect(acquiredRefs).toEqual(["tenant-a", "tenant-a", "tenant-a"]);
+    expect(releases).toBe(3);
   });
 
   test("fails closed for invalid capabilities and oversized values", async () => {

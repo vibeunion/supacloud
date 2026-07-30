@@ -205,6 +205,18 @@ export function createPgredisRuntimeApp(options: PgredisRuntimeAppOptions) {
       },
     )
     .post(
+      "/internal/v1/admin/projects/:ref/refresh",
+      async ({ params, request }) => {
+        requireInternalToken(request, adminToken);
+        const lease = await options.registry.acquire(params.ref);
+        lease.release();
+        return await options.registry.projectStatus(params.ref);
+      },
+      {
+        params: t.Object({ ref: projectRefSchema }),
+      },
+    )
+    .post(
       "/internal/v1/admin/cache",
       async ({ body, request }) => {
         requireInternalToken(request, adminToken);

@@ -2,6 +2,7 @@
   import { apiClient } from "$lib/api";
 
   import { page } from "$app/state";
+  import { t } from "svelte-i18n";
   import { Loader2, Globe, Plus, Trash2, Shield, AlertTriangle, Copy, CheckCircle, XCircle, KeyRound, Save, Play } from "lucide-svelte";
   import { createQuery, createMutation, useQueryClient } from "@tanstack/svelte-query";
 
@@ -66,6 +67,18 @@
   }));
 
   const certSettings = $derived(certQuery.data || null);
+
+  function statusLabel(status: string): string {
+    const reconfigured = /^(\d+)_services_reconfigured$/i.exec(status);
+    if (reconfigured) return $t("CustomDomains.services_reconfigured", { values: { count: reconfigured[1] } });
+
+    switch (status.toLowerCase()) {
+      case "not_configured": return $t("CustomDomains.status_not_configured");
+      case "deployed": return $t("CustomDomains.status_deployed");
+      case "error": return $t("CustomDomains.status_error");
+      default: return status;
+    }
+  }
 
   $effect(() => {
     if (!certSettings) return;
@@ -254,7 +267,7 @@
               <div>
                 <span class="font-mono font-semibold">{domain.custom_hostname}</span>
                 <div class="flex items-center gap-2 mt-0.5">
-                  <span class="px-2 py-0.5 rounded-full text-[9px] font-bold bg-green-500/10 text-green-600 uppercase">{domain.status}</span>
+                  <span class="px-2 py-0.5 rounded-full text-[9px] font-bold bg-green-500/10 text-green-600">{statusLabel(domain.status)}</span>
                   <span class="text-[10px] text-muted-foreground">TLS 由 Caddy 管理</span>
                 </div>
               </div>
@@ -324,7 +337,7 @@
       <div class="border-b px-6 py-4 bg-muted/20 flex items-center justify-between gap-4">
         <h2 class="text-lg font-semibold flex items-center gap-2"><KeyRound size={18} /> Caddy 证书</h2>
         {#if certSettings}
-          <span class="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase {certSettings.status === 'deployed' ? 'bg-green-500/10 text-green-600' : certSettings.status === 'error' ? 'bg-red-500/10 text-red-600' : 'bg-muted text-muted-foreground'}">{certSettings.status}</span>
+          <span class="px-2 py-0.5 rounded-full text-[9px] font-bold {certSettings.status === 'deployed' ? 'bg-green-500/10 text-green-600' : certSettings.status === 'error' ? 'bg-red-500/10 text-red-600' : 'bg-muted text-muted-foreground'}">{statusLabel(certSettings.status)}</span>
         {/if}
       </div>
       <div class="p-6 space-y-4">
@@ -361,7 +374,7 @@
 
           <div class="space-y-3">
             <label class="space-y-1.5 block">
-              <span class="text-xs text-muted-foreground">DNS Provider</span>
+              <span class="text-xs text-muted-foreground">{$t("CustomDomains.dns_provider")}</span>
               <input bind:value={certDnsProvider} disabled={certMode === "manual" || certChallenge !== "dns-01"} placeholder="cloudflare"
                 class="w-full px-3 py-2 text-sm font-mono rounded-lg border bg-background focus:outline-none focus:ring-1 focus:ring-brand disabled:opacity-50" />
             </label>

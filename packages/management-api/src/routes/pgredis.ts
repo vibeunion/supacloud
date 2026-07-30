@@ -9,7 +9,7 @@ import {
 import { isAppError } from "../utils/errors";
 
 interface PgredisRoutesDependencies {
-  service?: Pick<PgredisRuntimeService, "platformStatus" | "projectStatus" | "execute" | "flush">;
+  service?: Pick<PgredisRuntimeService, "platformStatus" | "projectStatus" | "refresh" | "execute" | "flush">;
   requireAdmin?: typeof requireAdminAuth;
   requireProject?: typeof requireProjectOrAdminAuth;
   findProject?: typeof projectRepository.findByRef;
@@ -60,6 +60,13 @@ export function createPgredisRoutes(dependencies: PgredisRoutesDependencies = {}
       return await service.projectStatus(params.ref);
     }, {
       detail: { tags: ["cache"], summary: "Get project cache status" },
+    })
+    .post("/refresh", async ({ params }) => {
+      const project = await findProject(params.ref);
+      if (!project) return status(404, { message: "Project not found", code: "NOT_FOUND" });
+      return await service.refresh(params.ref);
+    }, {
+      detail: { tags: ["cache"], summary: "Refresh the project cache configuration" },
     })
     .post("/operations", async ({ params, body }) => {
       const project = await findProject(params.ref);

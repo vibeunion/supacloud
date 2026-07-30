@@ -24,8 +24,10 @@ describe("project cache console", () => {
     expect(source).toContain('value="getset">{$t("Cache.operation_getset")}');
   });
 
-  test("offers a refresh action when the cache configuration is stale", () => {
+  test("automatically reconciles a stale cache configuration and keeps a manual retry", () => {
     expect(source).toContain("!status.configurationCurrent");
-    expect(source).toContain("onclick={() => loadStatus(true)}");
+    expect(source).toContain("void refreshConfiguration()");
+    expect(source).toContain('postCacheRequest("refresh", {})');
+    expect(source).toContain('Cache.config_syncing');
   });
 });

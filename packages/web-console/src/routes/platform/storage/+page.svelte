@@ -11,6 +11,8 @@
     usedSize: string;
     mountPoint: string;
     healthy: boolean;
+    reason: "storage_mount_unavailable" | "object_storage_http_error" | "object_storage_unreachable" | null;
+    reasonStatus: number | null;
   }
 
   interface BucketInfo {
@@ -24,6 +26,7 @@
   let buckets: BucketInfo[] = $state.raw([]);
   let isLoading = $state(true);
   let actionMsg: string | null = $state.raw(null);
+  let statusError: string | null = $state.raw(null);
 
   // Migration form
   let showMigration = $state(false);
@@ -32,22 +35,41 @@
   let migSecretKey = $state("");
   let migBucket = $state("");
   let isMigrating = $state(false);
+
+  function storageDiagnostic(): string | null {
+    if (!status?.reason) return statusError;
+    if (status.reason === "object_storage_http_error") {
+      return $t("PlatformStorage.object_storage_http_error", { values: { status: status.reasonStatus } });
+    }
+    if (status.reason === "object_storage_unreachable") return $t("PlatformStorage.object_storage_unreachable");
+    return $t("PlatformStorage.storage_mount_unavailable");
+  }
     
   async function fetchStatus() {
     isLoading = true;
+    statusError = null;
     try {
       const res = await apiClient("/v1/storage/status");
       if (res.ok) {
         const data = await res.json();
+        const reason = ["storage_mount_unavailable", "object_storage_http_error", "object_storage_unreachable"].includes(data.reason)
+          ? data.reason as StorageStatus["reason"]
+          : null;
         status = {
           backend: data.backend || data.type || "local",
-          totalSize: data.totalSize || data.total || "-",
-          usedSize: data.usedSize || data.used || "-",
-          mountPoint: data.mountPoint || data.path || "/var/lib/supabase/storage",
-          healthy: data.healthy === true && data.status !== "unmounted"
+          totalSize: data.totalSize || data.total || data.size || "—",
+          usedSize: data.usedSize || data.used || "—",
+          mountPoint: data.mountPoint || data.path || "—",
+          healthy: typeof data.healthy === "boolean" ? data.healthy : data.status === "mounted",
+          reason,
+          reasonStatus: Number.isInteger(data.reasonStatus) ? data.reasonStatus : null,
         };
+      } else {
+        statusError = $t("PlatformStorage.status_request_failed");
       }
-    } catch {}
+    } catch {
+      statusError = $t("PlatformStorage.status_request_failed");
+    }
 
     // Fetch buckets
     try {
@@ -128,12 +150,12 @@
       </div>
       <div class="rounded-xl border bg-card p-4">
         <div class="flex items-center gap-2 text-muted-foreground mb-2"><HardDrive size={14} /><span class="text-[10px] font-bold uppercase">{$t("PlatformStorage.used_space")}</span></div>
-        <div class="text-lg font-bold">{status?.usedSize || '-'}</div>
-        <div class="text-[10px] text-muted-foreground mt-1">{$t("PlatformStorage.total")}: {status?.totalSize || '-'}</div>
+        <div class="text-lg font-bold">{status?.usedSize || "—"}</div>
+        <div class="text-[10px] text-muted-foreground mt-1">{$t("PlatformStorage.total")}: {status?.totalSize || "—"}</div>
       </div>
       <div class="rounded-xl border bg-card p-4">
         <div class="flex items-center gap-2 text-muted-foreground mb-2"><FolderOpen size={14} /><span class="text-[10px] font-bold uppercase">{$t("PlatformStorage.mount_point")}</span></div>
-        <div class="text-sm font-mono font-bold truncate">{status?.mountPoint || '-'}</div>
+        <div class="text-sm font-mono font-bold truncate">{status?.mountPoint || "—"}</div>
       </div>
       <div class="rounded-xl border bg-card p-4">
         <div class="flex items-center gap-2 text-muted-foreground mb-2">
@@ -141,6 +163,11 @@
           <span class="text-[10px] font-bold uppercase">{$t("PlatformStorage.health")}</span>
         </div>
         <div class="text-lg font-bold {status?.healthy ? 'text-green-600' : 'text-red-600'}">{status?.healthy ? $t("Common.healthy") : $t("Common.unhealthy")}</div>
+        {#if storageDiagnostic()}
+          <p class="mt-1 text-[10px] text-muted-foreground" title={storageDiagnostic() || undefined}>
+            {storageDiagnostic()}
+          </p>
+        {/if}
       </div>
     </div>
 

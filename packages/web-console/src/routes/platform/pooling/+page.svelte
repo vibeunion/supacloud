@@ -115,6 +115,24 @@
   const totalWaiting = $derived(pools.reduce((a, p) => a + parseInt(p.cl_waiting || "0"), 0));
   const totalIdle = $derived(pools.reduce((a, p) => a + parseInt(p.sv_idle || "0"), 0));
   const totalUsed = $derived(pools.reduce((a, p) => a + parseInt(p.sv_used || "0"), 0));
+
+  function poolModeLabel(mode: string): string {
+    return mode === "transaction" ? $t("PlatformPooling.transaction_mode") : mode;
+  }
+
+  function clientStateLabel(state: string): string {
+    if (state === "active") return $t("PlatformPooling.state_active");
+    if (state === "idle") return $t("PlatformPooling.state_idle");
+    if (state === "waiting") return $t("PlatformPooling.state_waiting");
+    return state;
+  }
+
+  function formatConnectionTime(connectionTime: string): string {
+    return connectionTime
+      .replace("T", " ")
+      .replace(/\.\d+(?:Z|[+-]\d{2}(?::?\d{2})?)?$/, "")
+      .replace(/(?:Z|[+-]\d{2}(?::?\d{2})?)$/, "");
+  }
 </script>
 
 <div class="space-y-4">
@@ -194,7 +212,7 @@
                   <td class="px-3 py-2.5 text-center font-bold {parseInt(pool.cl_waiting) > 0 ? 'text-amber-600' : 'text-muted-foreground'}">{pool.cl_waiting}</td>
                   <td class="px-3 py-2.5 text-center text-muted-foreground">{pool.sv_idle}</td>
                   <td class="px-3 py-2.5 text-center font-bold">{pool.sv_used}</td>
-                  <td class="px-3 py-2.5"><span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-brand/10 text-brand">{pool.pool_mode}</span></td>
+                  <td class="px-3 py-2.5"><span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-brand/10 text-brand">{poolModeLabel(pool.pool_mode)}</span></td>
                 </tr>
               {/each}
             </tbody>
@@ -229,10 +247,10 @@
                   <td class="px-4 py-2.5 font-mono">{client.user}</td>
                   <td class="px-3 py-2.5 font-mono text-muted-foreground">{client.database}</td>
                   <td class="px-3 py-2.5">
-                    <span class="px-2 py-0.5 rounded-full text-[10px] font-bold {client.state === 'active' ? 'bg-green-500/10 text-green-600' : client.state === 'idle' ? 'bg-muted text-muted-foreground' : 'bg-amber-500/10 text-amber-600'}">{client.state}</span>
+                    <span class="px-2 py-0.5 rounded-full text-[10px] font-bold {client.state === 'active' ? 'bg-green-500/10 text-green-600' : client.state === 'idle' ? 'bg-muted text-muted-foreground' : 'bg-amber-500/10 text-amber-600'}">{clientStateLabel(client.state)}</span>
                   </td>
                   <td class="px-3 py-2.5 font-mono text-muted-foreground">{client.addr || '-'}:{client.port || '-'}</td>
-                  <td class="px-3 py-2.5 text-muted-foreground text-[10px]">{client.connect_time}</td>
+                  <td class="px-3 py-2.5 text-muted-foreground text-[10px]">{formatConnectionTime(client.connect_time)}</td>
                   <td class="px-3 py-2.5 text-right">
                     {#if client.state === 'idle' && client.addr}
                       <button onclick={() => terminateConnection(client.addr, client.port)} class="px-2 py-1 text-[10px] rounded border border-red-500/20 text-red-500 hover:bg-red-500/10 transition-colors">
