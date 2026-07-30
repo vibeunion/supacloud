@@ -50,11 +50,13 @@ describe("console navigation information architecture", () => {
     expect(authLayoutSource).toContain("AuthNav.security");
     expect(authLayoutSource).toContain("AuthNav.messaging");
     expect(databaseLayoutSource).toContain('name="database-navigation"');
-    expect(authLayoutSource).toContain('name="auth-navigation"');
+    expect(authLayoutSource).toContain('aria-haspopup="menu"');
+    expect(authLayoutSource).toContain('aria-expanded={openMenu === group.labelKey}');
     expect(databaseLayoutSource).toContain("closeMenusOnOutsideClick");
     expect(authLayoutSource).toContain("closeMenusOnOutsideClick");
     expect(databaseLayoutSource).toContain("closeMenuFromLink");
     expect(authLayoutSource).toContain("closeMenuFromLink");
+    expect(authLayoutSource).toContain("closeMenuOnEscape");
     expect(authLayoutSource).toContain("AuthNav.tabs.providers");
     expect(authLayoutSource).not.toContain('name: "提供者"');
   });

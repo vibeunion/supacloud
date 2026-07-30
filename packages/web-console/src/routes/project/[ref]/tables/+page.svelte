@@ -156,7 +156,7 @@
               <Plus size={13} /> {$t("Tables.add_column")}
             </button>
           </div>
-          {#each columns as column, index (index)}
+          {#each columns as column, index (column)}
             <div class="grid grid-cols-[minmax(0,1fr)_112px_auto] gap-2 items-center">
               <input bind:value={column.name} required maxlength="63" pattern="[A-Za-z_][A-Za-z0-9_]*" class="min-w-0 px-2.5 py-2 rounded-md border bg-background text-xs font-mono" aria-label={$t("Tables.column_name_aria", { values: { index: index + 1 } })} />
               <select bind:value={column.type} disabled={index === 0} class="px-2 py-2 rounded-md border bg-background text-xs font-mono disabled:opacity-70" aria-label={$t("Tables.column_type_aria", { values: { index: index + 1 } })}>

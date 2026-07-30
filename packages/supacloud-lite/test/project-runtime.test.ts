@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdir, mkdtemp, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, parse } from 'node:path'
 import { decodeJwt } from '../src/vendor/tinbase/jwt.js'
+import { createSymlinkIfPermitted } from './support/symlink.js'
 import { loadSupabaseProject } from '../src/vendor/tinbase/node/project.js'
 import {
   createProjectBackend,
@@ -63,10 +64,11 @@ describe('project runtime', () => {
 
     const externalDir = await mkdtemp(join(tmpdir(), 'supacloud-lite-reset-external-'))
     temporaryDirectories.push(externalDir)
-    await symlink(externalDir, join(safePaths.stateDir, 'linked'))
-    await expect(
-      assertResetPathsSafe({ ...safePaths, storageDir: join(safePaths.stateDir, 'linked', 'storage') })
-    ).rejects.toThrow('symbolic link')
+    if (await createSymlinkIfPermitted(externalDir, join(safePaths.stateDir, 'linked'))) {
+      await expect(
+        assertResetPathsSafe({ ...safePaths, storageDir: join(safePaths.stateDir, 'linked', 'storage') })
+      ).rejects.toThrow('symbolic link')
+    }
 
     const root = parse(projectDir).root
     await expect(
