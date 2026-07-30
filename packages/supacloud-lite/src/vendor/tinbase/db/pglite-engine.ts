@@ -1,8 +1,9 @@
 /** PGlite (WASM) engine - imported dynamically so native mode never loads the WASM bundle. */
-import { mkdir, open, readFile, unlink, type FileHandle } from 'node:fs/promises'
+import { mkdir, open, unlink, type FileHandle } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import type { Extension } from '@electric-sql/pglite'
 import type { DbEngine, EngineResults, EngineTx } from './engine.js'
+import { readDataDirLockOwner, recoverStaleDataDirLock } from './data-dir-lock.js'
 import {
   STANDALONE_PGLITE_ASSETS,
   type StandalonePgliteAssets,
@@ -152,7 +153,7 @@ async function acquireDataDirLock(dataDir?: string): Promise<() => Promise<void>
     if (released) return
     released = true
     await handle?.close()
-    const owner = await readLockOwner(lockPath)
+    const owner = await readDataDirLockOwner(lockPath)
     if (owner?.nonce !== nonce) return
     await unlink(lockPath).catch((error) => {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
@@ -161,17 +162,14 @@ async function acquireDataDirLock(dataDir?: string): Promise<() => Promise<void>
 }
 
 async function createDataDirLock(absoluteDataDir: string, lockPath: string, nonce: string): Promise<FileHandle> {
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt = 0; attempt < 3; attempt++) {
     try {
       return await writeDataDirLock(lockPath, nonce)
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-      const owner = await readLockOwner(lockPath)
-      if (owner && isProcessAlive(owner.pid)) throw lockInUseError(absoluteDataDir, owner.pid)
-      if (!owner || attempt > 0) throw unreadableLockError(lockPath)
-      await unlink(lockPath).catch((unlinkError) => {
-        if ((unlinkError as NodeJS.ErrnoException).code !== 'ENOENT') throw unlinkError
-      })
+      const lockState = await recoverStaleDataDirLock(lockPath)
+      if (lockState.kind === 'active') throw lockInUseError(absoluteDataDir, lockState.owner.pid)
+      if (lockState.kind === 'unreadable') throw unreadableLockError(lockPath)
     }
   }
   throw unreadableLockError(lockPath)
@@ -198,24 +196,4 @@ function unreadableLockError(lockPath: string): Error {
     `PGlite data directory has an unreadable lock: ${lockPath}. ` +
       'Confirm no SupaCloud Lite process is using it, then remove the lock manually.'
   )
-}
-
-async function readLockOwner(lockPath: string): Promise<{ pid: number; nonce: string } | null> {
-  try {
-    const value = JSON.parse(await readFile(lockPath, 'utf8')) as { pid?: unknown; nonce?: unknown }
-    return typeof value.pid === 'number' && Number.isInteger(value.pid) && value.pid > 0 && typeof value.nonce === 'string'
-      ? { pid: value.pid, nonce: value.nonce }
-      : null
-  } catch {
-    return null
-  }
-}
-
-function isProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'EPERM'
-  }
 }

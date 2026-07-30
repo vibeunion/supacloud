@@ -90,12 +90,19 @@ describe('Lite snapshots', () => {
     await mkdir(paths.storageDir, { recursive: true })
     const archivePath = join(projectDir, 'guards.tar.gz')
 
+    await writeFile(`${paths.dataDir}.supacloud-lite.lock`, JSON.stringify({ pid: process.pid, nonce: 'active' }))
+    await expect(
+      createSnapshot({ paths, packageVersion: 'test-version', storageBackend: 'fs', output: archivePath })
+    ).rejects.toThrow('already in use')
+    await rm(`${paths.dataDir}.supacloud-lite.lock`)
+
     await writeFile(`${paths.dataDir}.supacloud-lite.lock`, '{}')
     await expect(
       createSnapshot({ paths, packageVersion: 'test-version', storageBackend: 'fs', output: archivePath })
-    ).rejects.toThrow('in use or has a stale lock')
+    ).rejects.toThrow('unreadable lock')
     await rm(`${paths.dataDir}.supacloud-lite.lock`)
 
+    await writeFile(`${paths.dataDir}.supacloud-lite.lock`, JSON.stringify({ pid: 999_999, nonce: 'stale' }))
     await createSnapshot({ paths, packageVersion: 'test-version', storageBackend: 'fs', output: archivePath })
     await expect(
       createSnapshot({ paths, packageVersion: 'test-version', storageBackend: 'fs', output: archivePath })

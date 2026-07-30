@@ -1,11 +1,19 @@
 import { expect, test } from 'bun:test'
-import { access, mkdtemp, readFile, rm } from 'node:fs/promises'
+import { EventEmitter } from 'node:events'
+import { access, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { waitForShutdown } from '../src/shutdown.js'
 
 const cliPath = resolve(import.meta.dir, '../src/cli.ts')
 
 test('closes the project and releases its data lock on SIGINT', async () => {
+  if (process.platform === 'win32') {
+    // Windows process.kill terminates a child instead of emulating terminal Ctrl+C.
+    await assertShutdownHandlerClosesProject('SIGINT')
+    return
+  }
+
   const projectDir = await mkdtemp(join(tmpdir(), 'supacloud-lite-cli-shutdown-'))
   const lockPath = join(projectDir, '.supacloud-lite', 'db.supacloud-lite.lock')
   const firstRun = startCli(projectDir)
@@ -42,6 +50,12 @@ test('closes the project and releases its data lock on SIGINT', async () => {
 }, 120_000)
 
 test('closes the project and releases its data lock on SIGTERM', async () => {
+  if (process.platform === 'win32') {
+    // Windows process.kill terminates a child instead of delivering SIGTERM.
+    await assertShutdownHandlerClosesProject('SIGTERM')
+    return
+  }
+
   const projectDir = await mkdtemp(join(tmpdir(), 'supacloud-lite-cli-shutdown-'))
   const lockPath = join(projectDir, '.supacloud-lite', 'db.supacloud-lite.lock')
   const cliRun = startCli(projectDir)
@@ -59,15 +73,17 @@ test('closes the project and releases its data lock on SIGTERM', async () => {
   }
 }, 60_000)
 
-test('marks direct CLI shutdown success only after close resolves', async () => {
-  const source = await readFile(cliPath, 'utf8')
-  const shutdownCall = source.indexOf("await waitForShutdown(() => project.close())")
-  const successfulExit = source.indexOf('process.exitCode = 0', shutdownCall)
+test('propagates a project cleanup failure', async () => {
+  const signalSource = new EventEmitter()
+  const expectedError = new Error('close failed')
+  const shutdown = waitForShutdown(() => Promise.reject(expectedError), signalSource)
 
-  expect(shutdownCall).toBeGreaterThan(-1)
-  expect(source.indexOf('await closeProject()')).toBeGreaterThan(shutdownCall)
-  expect(successfulExit).toBeGreaterThan(shutdownCall)
-  expect(source).toContain('process.exitCode = 1')
+  signalSource.emit('SIGINT')
+  await expect(shutdown).rejects.toBe(expectedError)
+})
+
+test('runs project cleanup once after duplicate signals', async () => {
+  await assertShutdownHandlerClosesProject('SIGINT')
 })
 
 function startCli(projectDir: string) {
@@ -106,6 +122,26 @@ async function stopCli(cliRun: ReturnType<typeof startCli>, signal: NodeJS.Signa
     if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
   }
   return await cliRun.processHandle.exited
+}
+
+async function assertShutdownHandlerClosesProject(signal: NodeJS.Signals): Promise<void> {
+  const signalSource = new EventEmitter()
+  let closeCalls = 0
+  let allowClose: (() => void) | undefined
+  const closeFinished = new Promise<void>((resolveClose) => {
+    allowClose = resolveClose
+  })
+  const shutdown = waitForShutdown(async () => {
+    closeCalls += 1
+    await closeFinished
+  }, signalSource)
+
+  signalSource.emit(signal)
+  signalSource.emit(signal)
+  await Promise.resolve()
+  expect(closeCalls).toBe(1)
+  allowClose!()
+  await shutdown
 }
 
 async function waitForStartup(logs: ReadableStream<Uint8Array>): Promise<void> {

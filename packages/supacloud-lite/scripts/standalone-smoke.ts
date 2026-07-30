@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path'
 import packageJson from '../package.json' with { type: 'json' }
 
 const packageDir = resolve(import.meta.dir, '..')
-const binary = resolve(process.env.SUPACLOUD_LITE_STANDALONE_BINARY ?? join(packageDir, 'dist', 'standalone', 'supacloud-lite'))
+const binary = resolveStandaloneBinary()
 const projectDir = await mkdtemp(join(tmpdir(), 'supacloud-lite-standalone-'))
 const emptyPath = await mkdtemp(join(tmpdir(), 'supacloud-lite-empty-path-'))
 const migrationDir = join(projectDir, 'supabase', 'migrations')
@@ -169,6 +169,13 @@ function withoutRuntimePath(path: string): NodeJS.ProcessEnv {
   return environment
 }
 
+function resolveStandaloneBinary(): string {
+  const configuredBinary = process.env.SUPACLOUD_LITE_STANDALONE_BINARY
+  if (configuredBinary) return resolve(configuredBinary)
+  const filename = process.platform === 'win32' ? 'supacloud-lite.exe' : 'supacloud-lite'
+  return join(packageDir, 'dist', 'standalone', filename)
+}
+
 interface ServerOptions {
   binary: string
   projectDir: string
@@ -196,8 +203,15 @@ async function withServer(options: ServerOptions, check: (url: string) => Promis
     processHandle.kill('SIGTERM')
     const exitCode = await processHandle.exited
     const [stdoutText, stderrText] = await Promise.all([stdout, stderr])
-    if (exitCode !== 0) throw new Error(`standalone server exited with ${exitCode}\n${stdoutText}\n${stderrText}`)
+    if (exitCode !== expectedStandaloneShutdownExitCode()) {
+      throw new Error(`standalone server exited with ${exitCode}\n${stdoutText}\n${stderrText}`)
+    }
   }
+}
+
+function expectedStandaloneShutdownExitCode(): number {
+  // Windows process kill terminates a child instead of delivering SIGTERM.
+  return process.platform === 'win32' ? 143 : 0
 }
 
 async function waitForHealth(url: string, processHandle: Bun.Subprocess): Promise<void> {

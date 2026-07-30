@@ -242,11 +242,15 @@ jobs:
           bun --version
 
       - name: Check SupaCloud Lite on Windows
+        shell: pwsh
         working-directory: packages/supacloud-lite
         run: |
           bun install --frozen-lockfile
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           bun run check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           bun audit --audit-level high
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   docker-and-scripts-checks:
     name: Docker & Scripts Checks
