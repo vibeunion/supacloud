@@ -16,6 +16,7 @@ import {
   type ProjectRuntimeOptions,
 } from './project-runtime.js'
 import { createSnapshot, restoreSnapshot } from './snapshot.js'
+import { waitForShutdown } from './shutdown.js'
 
 interface CliOptions extends ProjectRuntimeOptions {
   command: string
@@ -307,19 +308,6 @@ function timestamp(): string {
 }
 
 function quietLog(): void {}
-
-async function waitForShutdown(closeProject: () => Promise<void>): Promise<void> {
-  await new Promise<void>((resolveShutdown) => {
-    const resolveOnSignal = () => {
-      process.off('SIGINT', resolveOnSignal)
-      process.off('SIGTERM', resolveOnSignal)
-      resolveShutdown()
-    }
-    process.once('SIGINT', resolveOnSignal)
-    process.once('SIGTERM', resolveOnSignal)
-  })
-  await closeProject()
-}
 
 function printHelp(): void {
   console.log(`supacloud-lite - Bun-native Supabase-compatible backend on PGlite

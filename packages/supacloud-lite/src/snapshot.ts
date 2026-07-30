@@ -2,6 +2,7 @@ import { chmod, copyFile, link, lstat, mkdir, mkdtemp, readdir, readFile, rename
 import { dirname, join, parse, relative, resolve, sep } from 'node:path'
 import { create as createTar, extract as extractTar } from 'tar'
 import type { ConfiguredStorageBackend, ProjectPaths } from './project-runtime.js'
+import { recoverStaleDataDirLock } from './vendor/tinbase/db/data-dir-lock.js'
 
 const SNAPSHOT_FORMAT = 'supacloud-lite-snapshot'
 const SNAPSHOT_VERSION = 1
@@ -223,12 +224,10 @@ async function assertDirectoryOrMissing(path: string | undefined): Promise<void>
 async function assertNoDataDirectoryLock(paths: ProjectPaths): Promise<void> {
   if (!paths.dataDir) return
   const lockPath = `${paths.dataDir}.supacloud-lite.lock`
-  try {
-    await lstat(lockPath)
-    throw new Error(`data directory is in use or has a stale lock: ${lockPath}; stop Lite and remove the lock manually if it is stale`)
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-  }
+  const lockState = await recoverStaleDataDirLock(lockPath)
+  if (lockState.kind === 'missing') return
+  if (lockState.kind === 'active') throw new Error(`data directory is already in use: ${paths.dataDir} (pid ${lockState.owner.pid})`)
+  throw new Error(`data directory has an unreadable lock: ${lockPath}; confirm Lite is stopped, then remove the lock manually`)
 }
 
 async function stageDirectory(root: string, destination: string): Promise<void> {
