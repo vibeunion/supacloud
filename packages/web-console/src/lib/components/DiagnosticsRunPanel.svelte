@@ -154,12 +154,9 @@
     return key ? $t(key) : check.description;
   }
 
-  function resultSummary(result: DiagnosticResult): string {
-    const descriptionKey = CHECK_DESCRIPTION_KEYS[result.checkId];
-    if (!descriptionKey) return result.message;
-    return $t("Diagnostics.result_summary", {
-      values: { check: $t(descriptionKey), status: statusLabel(result.status) },
-    });
+  function checkLabel(checkId: string): string {
+    const descriptionKey = CHECK_DESCRIPTION_KEYS[checkId];
+    return descriptionKey ? $t(descriptionKey) : checkId;
   }
 
   const CHECK_DESCRIPTION_KEYS: Record<string, string> = {
@@ -189,13 +186,25 @@
     return "bg-blue-500/10 text-blue-700 border-blue-500/20";
   }
 
-  function summaryCount(status: string) {
-    return selectedRun?.summary?.[status] ?? 0;
+  function countResultsWithStatus(status: DiagnosticResult["status"]): number {
+    return results.filter((result) => result.status === status).length;
   }
 
-  function formatTime(value: string | null) {
-    if (!value) return "-";
-    return new Date(value).toLocaleString();
+  function attentionCount(): number {
+    return results.length - countResultsWithStatus("pass");
+  }
+
+  function notCheckedCount(): number {
+    return Math.max(checks.length - results.length, 0);
+  }
+
+  function formatTime(timestamp: string | null) {
+    if (!timestamp) return "-";
+    return new Date(timestamp).toLocaleString();
+  }
+
+  function runLabel(run: DiagnosticRun): string {
+    return $t("Diagnostics.run_label", { values: { time: formatTime(run.startedAt) } });
   }
 
   onMount(() => {
@@ -242,15 +251,16 @@
     </div>
     <div class="rounded-md border bg-card p-3">
       <div class="text-[10px] font-bold uppercase text-muted-foreground">{$t("Diagnostics.pass")}</div>
-      <div class="mt-1 text-2xl font-bold text-emerald-600">{summaryCount("pass")}</div>
+      <div class="mt-1 text-2xl font-bold text-emerald-600">{countResultsWithStatus("pass")}</div>
     </div>
     <div class="rounded-md border bg-card p-3">
-      <div class="text-[10px] font-bold uppercase text-muted-foreground">{$t("Diagnostics.tampered")}</div>
-      <div class="mt-1 text-2xl font-bold text-red-600">{summaryCount("tampered")}</div>
+      <div class="text-[10px] font-bold uppercase text-muted-foreground">{$t("Diagnostics.attention")}</div>
+      <div class="mt-1 text-2xl font-bold text-red-600">{attentionCount()}</div>
+      <p class="mt-1 text-[10px] text-muted-foreground">{$t("Diagnostics.tampered")}: {countResultsWithStatus("tampered")} · {$t("Diagnostics.degraded")}: {countResultsWithStatus("degraded")}</p>
     </div>
     <div class="rounded-md border bg-card p-3">
-      <div class="text-[10px] font-bold uppercase text-muted-foreground">{$t("Diagnostics.degraded")}</div>
-      <div class="mt-1 text-2xl font-bold text-amber-600">{summaryCount("degraded") + summaryCount("drift")}</div>
+      <div class="text-[10px] font-bold uppercase text-muted-foreground">{$t("Diagnostics.not_checked")}</div>
+      <div class="mt-1 text-2xl font-bold text-amber-600">{notCheckedCount()}</div>
     </div>
     <div class="rounded-md border bg-card p-3">
       <div class="text-[10px] font-bold uppercase text-muted-foreground">{$t("Diagnostics.last_run")}</div>
@@ -274,7 +284,7 @@
               class="mb-1 flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-xs transition-colors {selectedRun?.id === run.id ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/60'}"
             >
               <span class="min-w-0">
-                <span class="block truncate font-mono">{run.id}</span>
+                <span class="block truncate font-medium" title={run.id}>{runLabel(run)}</span>
                 <span class="mt-0.5 block truncate">{formatTime(run.startedAt)}</span>
               </span>
               <span title={run.status} class="rounded border px-1.5 py-0.5 text-[10px] uppercase">{runStatusLabel(run.status)}</span>
@@ -288,7 +298,7 @@
       <div class="flex items-center justify-between border-b px-4 py-3">
         <h2 class="text-sm font-semibold">{$t("Diagnostics.results")}</h2>
         {#if selectedRun}
-          <span class="text-xs text-muted-foreground">{selectedRun.id}</span>
+          <span class="text-xs text-muted-foreground" title={selectedRun.id}>{runLabel(selectedRun)}</span>
         {/if}
       </div>
       <div class="divide-y">
@@ -318,10 +328,9 @@
                   </div>
                   <div class="min-w-0">
                     <div class="flex flex-wrap items-center gap-2">
-                      <span class="font-mono text-xs font-semibold">{result.checkId}</span>
+                      <span class="text-xs font-semibold" title={result.checkId}>{checkLabel(result.checkId)}</span>
                       <span class="rounded border px-1.5 py-0.5 text-[10px] font-bold {statusClass(result.status)}">{statusLabel(result.status)}</span>
                     </div>
-                    <p class="mt-1 text-sm">{resultSummary(result)}</p>
                     {#if result.message || result.detail}
                       <details class="mt-2 text-[11px] text-muted-foreground">
                         <summary class="cursor-pointer select-none">{$t("Diagnostics.raw_details")}</summary>
@@ -356,7 +365,7 @@
             <div class="min-w-0">
               <div class="flex items-center gap-2">
                 <Database size={13} class="text-muted-foreground" />
-                <span class="truncate font-mono text-xs font-semibold">{check.id}</span>
+                <span class="truncate text-xs font-semibold" title={check.id}>{checkLabel(check.id)}</span>
               </div>
               <p class="mt-1 text-xs text-muted-foreground">{checkDescription(check)}</p>
             </div>

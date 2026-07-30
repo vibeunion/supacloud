@@ -1,6 +1,11 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
-  import { backupInventoryErrorMessage, toPhysicalBackupViewModel, type PhysicalBackupRecord } from "$lib/physical-backup";
+  import {
+    BackupInventoryError,
+    isBackupServiceUnavailable,
+    toPhysicalBackupViewModel,
+    type PhysicalBackupRecord,
+  } from "$lib/physical-backup";
 
   import { t } from "svelte-i18n";
   import { Loader2, HardDrive, Play, RotateCcw, Calendar, Clock, AlertTriangle, RefreshCw } from "lucide-svelte";
@@ -9,7 +14,7 @@
 
   async function fetchBackupInventory(): Promise<PhysicalBackupRecord[]> {
     const response = await apiClient("/v1/projects/default/database/backups");
-    if (!response.ok) throw new Error(backupInventoryErrorMessage(response.status));
+    if (!response.ok) throw new BackupInventoryError(response.status);
 
     const payload: unknown = await response.json();
     if (!Array.isArray(payload)) throw new Error("备份清单返回格式无效，请稍后重试。");
@@ -23,6 +28,7 @@
   }));
   const backupRecords = $derived(backupHistoryQuery.data || []);
   const backups = $derived(backupRecords.map(toPhysicalBackupViewModel));
+  const backupServiceUnavailable = $derived(isBackupServiceUnavailable(backupHistoryQuery.error));
 
   let actionMsg: string | null = $state.raw(null);
   let isCreating = $state(false);
@@ -56,6 +62,14 @@
 
   function responseMessage(payload: Record<string, unknown>, fallback: string): string {
     return typeof payload.message === "string" && payload.message ? payload.message : fallback;
+  }
+
+  function backupHistoryErrorMessage(error: unknown): string {
+    if (isBackupServiceUnavailable(error)) return $t("PlatformBackups.service_unavailable");
+    if (error instanceof BackupInventoryError) {
+      return $t("PlatformBackups.history_request_failed", { values: { status: error.status } });
+    }
+    return error instanceof Error ? error.message : $t("PlatformBackups.history_request_failed", { values: { status: "?" } });
   }
 
   async function createBackup() {
@@ -164,7 +178,8 @@
       </div>
       <button
         onclick={createBackup}
-        disabled={isCreating}
+        disabled={isCreating || backupServiceUnavailable}
+        title={backupServiceUnavailable ? $t("PlatformBackups.backup_disabled_tooltip") : undefined}
         class="px-4 py-2 text-xs font-semibold rounded-lg bg-brand text-white hover:bg-brand/90 transition-colors flex items-center gap-2 disabled:opacity-50"
       >
         {#if isCreating}<Loader2 size={14} class="animate-spin" />{:else}<Play size={14} />{/if}
@@ -220,8 +235,15 @@
       </div>
     {:else if backupHistoryQuery.isError}
       <div class="p-4">
-        <div class="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-xs">
-          {backupHistoryQuery.error?.message || ($t("PlatformBackups.backup_failed") || "Backup inventory is unavailable")}
+        <div class="flex gap-2 rounded-lg border border-destructive/20 bg-destructive/10 p-3 text-destructive text-xs">
+          <AlertTriangle size={14} class="mt-0.5 shrink-0" />
+          <div>
+            <p>{backupHistoryErrorMessage(backupHistoryQuery.error)}</p>
+            {#if backupServiceUnavailable}
+              <p class="mt-1 text-destructive/80">{$t("PlatformBackups.service_unavailable_guidance")}</p>
+              <a href="/platform/operations" class="mt-2 inline-block font-medium underline underline-offset-2 hover:no-underline">{$t("PlatformBackups.view_operations")}</a>
+            {/if}
+          </div>
         </div>
       </div>
     {:else if backups.length === 0}

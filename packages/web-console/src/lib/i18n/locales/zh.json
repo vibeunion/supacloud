@@ -1347,7 +1347,8 @@
     "settings": "平台设置",
     "performance_runtime": "性能与运行时",
     "operations": "运维与诊断",
-    "subtitle": "数据库基础设施与 SupaCloud 服务的全局控制台"
+    "subtitle": "数据库基础设施与 SupaCloud 服务的全局控制台",
+    "system_label": "系统"
   },
   "Cache": {
     "title": "项目缓存",
@@ -1362,6 +1363,8 @@
     "configured": "已配置",
     "not_configured": "未配置",
     "not_configured_desc": "请先配置缓存数据面，再使用缓存运行时操作。",
+    "not_configured_guidance": "该运行时是部署侧的私有服务，其连接令牌绝不会暴露给 Studio。请按部署指南安全完成配置。",
+    "configuration_guide": "打开缓存数据面部署指南",
     "active": "活跃",
     "inactive": "未激活",
     "config_current": "配置最新",
@@ -1624,6 +1627,8 @@
     "pass": "通过",
     "tampered": "已被篡改",
     "degraded": "已降级",
+    "attention": "需要关注",
+    "not_checked": "未检查",
     "last_run": "最近运行",
     "recent_runs": "最近运行记录",
     "no_runs": "暂无诊断运行记录。",
@@ -1642,6 +1647,7 @@
     "run_status_running": "运行中",
     "run_status_completed": "已完成",
     "run_status_failed": "失败",
+    "run_label": "诊断报告 — {time}",
     "severity_critical": "严重",
     "severity_warning": "警告",
     "severity_info": "提示",
@@ -1930,7 +1936,12 @@
     "backup_failed": "备份失败",
     "backup_triggered": "物理备份已触发",
     "restore_confirm": "确认将数据库恢复到 {target}？",
-    "restore_sent": "PITR 恢复命令已发送"
+    "restore_sent": "PITR 恢复命令已发送",
+    "service_unavailable": "备份服务暂未就绪。",
+    "service_unavailable_guidance": "pgBackRest 由平台运维人员在部署环境中配置。请先在该环境完成配置并启动服务，然后刷新此页面。",
+    "view_operations": "查看平台运维状态",
+    "backup_disabled_tooltip": "pgBackRest 配置并运行前，无法执行备份。",
+    "history_request_failed": "无法加载备份历史（HTTP {status}）。"
   },
   "Login": {
     "title": "登录以访问管理控制台",
@@ -2061,7 +2072,28 @@
     "result": "结果",
     "safety_note": "安全说明：",
     "only_safetyreviewed_operations_are_exposed": "这里仅暴露了经过安全评估的运维操作。完整的 Ansible Playbook 和 pigsty.yml 配置编辑请通过 SSH 终端操作。",
-    "all_actions_are_logged_above": "所有操作都会记录在上方的操作日志中以供审计。"
+    "all_actions_are_logged_above": "所有操作都会记录在上方的操作日志中以供审计。",
+    "health_check_failed": "健康检查返回了无效响应。",
+    "health_ok": "正常",
+    "health_warning": "警告",
+    "health_error": "错误",
+    "service_running": "正在运行",
+    "service_stopped": "服务已停止",
+    "systemd_unavailable": "Systemd 不可用，无法确定服务状态。",
+    "generic_postgres_profile": "当前使用通用 PostgreSQL 配置，未启用 Pigsty。",
+    "storage_not_mounted": "云原生存储未挂载或尚未配置。",
+    "storage_mount_unknown": "无法检测存储挂载状态。",
+    "disk_info_unavailable": "无法读取磁盘信息。",
+    "database_unavailable": "数据库目前拒绝访问连接。",
+    "service_status_unavailable": "无法读取服务状态。",
+    "standard_local_storage": "标准模式（本地存储）",
+    "postgresql_ready": "PostgreSQL {version} 已就绪（活跃副本：{replicas}）",
+    "pigsty_ready": "Pigsty 已就绪：{version}（{platform}）",
+    "available_space": "剩余可用：{value}",
+    "mounted_storage": "已挂载：{value}",
+    "memory_available": "空闲 {free} / 总量 {total}",
+    "postgresql_single_node": "PostgreSQL {version} 正在单节点模式运行。",
+    "ready_detail": "已就绪（{detail}）"
   },
   "PlatformPooling": {
     "disconnect_all_idle_connections_this": "确定要断开所有空闲连接吗？这不会影响正在执行查询的连接。",
@@ -2171,6 +2203,7 @@
     "hot_reload": "热加载",
     "current": "当前值",
     "modified": "已修改",
-    "after_editing_parameters_clicking_save_changes_will_execute": "修改参数后点击保存变更将执行"
+    "after_editing_parameters_clicking_save_changes_will_execute": "修改参数后点击保存变更将执行",
+    "memory_value_invalid": "以内存 MB 为单位的值必须是整数，或输入 -1 表示自动配置。"
   }
 }
