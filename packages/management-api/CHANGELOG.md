@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.50.9](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.8...management-api-v0.50.9) (2026-07-30)
+
+
+### Bug Fixes
+
+* **health:** read Patroni cluster config ([#656](https://github.com/zuohuadong/supacloud/issues/656)) ([f23dae6](https://github.com/zuohuadong/supacloud/commit/f23dae6f38e532573f6294809b9f37ea356953c1))
+
 ## [0.50.8](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.7...management-api-v0.50.8) (2026-07-30)
 
 
