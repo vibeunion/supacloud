@@ -24,11 +24,12 @@ test('closes the project and releases its data lock on SIGINT', async () => {
   try {
     await firstRun.ready
     await access(lockPath)
-    for (const command of [['inspect'], ['db', 'diff']]) {
+    for (const command of [['inspect'], ['db', 'diff'], ['db', 'pull']]) {
       const blockedRun = await runCli(projectDir, command)
       expect(blockedRun.exitCode).toBe(1)
       expect(blockedRun.stderr.match(/PGlite data directory is already in use/g)).toHaveLength(1)
       expect(blockedRun.stderr).not.toContain('\n    at ')
+      expect(blockedRun.durationMs).toBeLessThan(10_000)
     }
     expect(await stopCli(firstRun, 'SIGINT')).toBe(0)
     firstStopped = true
@@ -101,6 +102,7 @@ function startCli(projectDir: string) {
 async function runCli(projectDir: string, command: string[]) {
   const bunExecutable = Bun.which('bun')
   if (!bunExecutable) throw new Error('Bun is required to run the Lite CLI test')
+  const startedAt = performance.now()
   const processHandle = Bun.spawn({
     cmd: [bunExecutable, cliPath, ...command, '--project-dir', projectDir],
     cwd: projectDir,
@@ -112,7 +114,7 @@ async function runCli(projectDir: string, command: string[]) {
     new Response(processHandle.stdout).text(),
     new Response(processHandle.stderr).text(),
   ])
-  return { exitCode, stdout, stderr }
+  return { exitCode, stdout, stderr, durationMs: performance.now() - startedAt }
 }
 
 async function stopCli(cliRun: ReturnType<typeof startCli>, signal: NodeJS.Signals): Promise<number> {

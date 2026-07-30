@@ -38,21 +38,29 @@ export async function computeDbDiff(opts: DbDiffOptions): Promise<string[]> {
     migrations: opts.migrations,
     // no seed: seed is data, not schema
   })
-  // live = current project db (createBackend only applies *pending* migrations, so
-  // this reflects the actual current schema including out-of-migration changes)
-  const live: TinbaseBackend = await createBackend({
-    engine: opts.liveEngine,
-    dataDir: opts.liveEngine ? undefined : opts.liveDataDir,
-    migrations: opts.migrations,
-  })
+  let live: TinbaseBackend | undefined
+  let operationFailed = false
 
   try {
+    // live = current project db (createBackend only applies *pending* migrations, so
+    // this reflects the actual current schema including out-of-migration changes)
+    live = await createBackend({
+      engine: opts.liveEngine,
+      dataDir: opts.liveEngine ? undefined : opts.liveDataDir,
+      migrations: opts.migrations,
+    })
     const shadowSnap = await snapshotSchema(shadow.db, schema)
     const liveSnap = await snapshotSchema(live.db, schema)
     return diffSchemas(shadowSnap, liveSnap, schema)
+  } catch (error) {
+    operationFailed = true
+    throw error
   } finally {
-    await shadow.close()
-    await live.close()
+    try {
+      await closeBackends(live, shadow)
+    } catch (error) {
+      if (!operationFailed) throw error
+    }
   }
 }
 
@@ -94,12 +102,14 @@ export async function pullSchema(opts: DbPullOptions): Promise<DbPullResult> {
     engine: opts.makeShadowEngine ? await opts.makeShadowEngine() : undefined,
     migrations: opts.migrations,
   })
-  const live: TinbaseBackend = await createBackend({
-    engine: opts.liveEngine,
-    dataDir: opts.liveEngine ? undefined : opts.liveDataDir,
-    migrations: opts.migrations,
-  })
+  let live: TinbaseBackend | undefined
+  let operationFailed = false
   try {
+    live = await createBackend({
+      engine: opts.liveEngine,
+      dataDir: opts.liveEngine ? undefined : opts.liveDataDir,
+      migrations: opts.migrations,
+    })
     const ddl = diffSchemas(await snapshotSchema(shadow.db, schema), await snapshotSchema(live.db, schema), schema)
     if (ddl.length === 0) return { ddl, version: null, path: null }
 
@@ -119,8 +129,23 @@ export async function pullSchema(opts: DbPullOptions): Promise<DbPullResult> {
       [stamp, `${stamp}_${name}`, [body]]
     )
     return { ddl, version: stamp, path }
+  } catch (error) {
+    operationFailed = true
+    throw error
   } finally {
-    await shadow.close()
-    await live.close()
+    try {
+      await closeBackends(live, shadow)
+    } catch (error) {
+      if (!operationFailed) throw error
+    }
   }
+}
+
+/** Close every initialized backend, surfacing cleanup errors only after both close attempts. */
+async function closeBackends(...backends: Array<TinbaseBackend | undefined>): Promise<void> {
+  const results = await Promise.allSettled(
+    backends.filter((backend): backend is TinbaseBackend => backend !== undefined).map(async (backend) => await backend.close()),
+  )
+  const failed = results.find((result) => result.status === 'rejected')
+  if (failed?.status === 'rejected') throw failed.reason
 }
