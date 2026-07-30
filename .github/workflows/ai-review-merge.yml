@@ -16,6 +16,7 @@ permissions:
   pull-requests: write
   checks: read
   statuses: read
+  actions: write
 
 concurrency:
   group: ai-review-merge-${{ github.event.workflow_run.pull_requests[0].number || inputs.pr_number || github.event.workflow_run.head_sha || github.run_id }}
@@ -149,3 +150,26 @@ jobs:
           GITHUB_HEAD_REF: ${{ steps.pr-info.outputs.head_ref }}
           HEAD_SHA: ${{ steps.pr-info.outputs.head_sha }}
         run: node .github/scripts/ai-review-merge.mjs
+
+      # GITHUB_TOKEN 合并产生的 push 事件不会触发依赖 on.push 的 workflow
+      # （GitHub 对默认 token 的硬性限制）。auto-merge 合入 main 后显式
+      # dispatch release-please，确保发版 PR 正常生成；dev 分支不触发。
+      - name: Trigger release-please after auto-merge
+        if: steps.pr-info.outputs.pr_number != '' && steps.pr-info.outputs.base_ref == 'main'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.pr-info.outputs.pr_number }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          MERGED=$(curl -fsS \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${REPOSITORY}/pulls/${PR_NUMBER}" \
+            | jq -r '.merged // false')
+          if [ "$MERGED" = "true" ]; then
+            echo "PR #${PR_NUMBER} was auto-merged. Dispatching release-please."
+            gh workflow run release-please.yml --repo "${REPOSITORY}" --ref main
+          else
+            echo "PR #${PR_NUMBER} was not merged (AI did not approve, or merge failed). Skipping release-please dispatch."
+          fi
