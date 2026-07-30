@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.2](https://github.com/zuohuadong/supacloud/compare/supacloud-lite-v0.5.1...supacloud-lite-v0.5.2) (2026-07-30)
+
+
+### Bug Fixes
+
+* **lite:** release shadow backend after lock conflicts ([c44e7a3](https://github.com/zuohuadong/supacloud/commit/c44e7a3c17f3a2d1ae9f285f7f9ad5187ebd178b))
+
 ## [0.5.1](https://github.com/zuohuadong/supacloud/compare/supacloud-lite-v0.5.0...supacloud-lite-v0.5.1) (2026-07-30)
 
 
