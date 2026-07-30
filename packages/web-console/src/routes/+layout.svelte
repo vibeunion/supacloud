@@ -40,7 +40,7 @@
   import { Menu, Plug, X } from "lucide-svelte";
   import { dataProvider, chatProvider } from "$lib/admin/provider";
   import { authProvider } from "$lib/admin/auth";
-  import { buildResourceRegistry, type TenantResourceLabels } from "$lib/admin/resources";
+  import { buildResourceRegistry, type ResourceLabels } from "$lib/admin/resources";
   
   import zhLocales from "$lib/i18n/locales/zh.json";
   import enLocales from "$lib/i18n/locales/en.json";
@@ -119,7 +119,18 @@
     return normalized.startsWith("zh") ? "zh-CN" : "en";
   };
 
-  const getTenantResourceLabels = (): TenantResourceLabels => ({
+  const getResourceLabels = (): ResourceLabels => ({
+    projects: $t("ProjectSettings.resource_projects"),
+    referenceId: $t("ProjectSettings.reference_id"),
+    projectName: $t("Settings.project_name"),
+    status: $t("Settings.status"),
+    active: $t("ProjectSettings.status_active"),
+    paused: $t("ProjectSettings.status_paused"),
+    creating: $t("ProjectSettings.status_creating"),
+    region: $t("Settings.region"),
+    localDocker: $t("ProjectSettings.local_docker"),
+    databaseHost: $t("ProjectSettings.database_host"),
+    databasePort: $t("ProjectSettings.database_port"),
     tables: $t("Tables.resource_label"),
     tableName: $t("Tables.name"),
     schema: $t("Tables.schema"),
@@ -195,7 +206,7 @@
     const projectRefs = projects
       .map((project) => String((project as Record<string, unknown>).ref ?? ""))
       .filter(Boolean);
-    const freshResources = buildResourceRegistry(projectRefs, getTenantResourceLabels());
+    const freshResources = buildResourceRegistry(projectRefs, getResourceLabels());
     const nextKey = `${$locale}|${getResourceKey(freshResources)}`;
 
     if (nextKey === lastResourcesKey) {
@@ -265,7 +276,7 @@
           const projectRefs = nextProjects
             .map((project: Record<string, unknown>) => String(project.ref ?? ""))
             .filter(Boolean);
-          const nextResources = buildResourceRegistry(projectRefs, getTenantResourceLabels());
+          const nextResources = buildResourceRegistry(projectRefs, getResourceLabels());
 
           projects = nextProjects;
           lastResourcesKey = `${$locale}|${getResourceKey(nextResources)}`;

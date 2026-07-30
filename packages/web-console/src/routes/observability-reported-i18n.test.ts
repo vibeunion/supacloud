@@ -3,13 +3,20 @@ import { readFileSync } from "node:fs";
 
 const en = JSON.parse(readFileSync(new URL("../lib/i18n/locales/en.json", import.meta.url), "utf8"));
 const zh = JSON.parse(readFileSync(new URL("../lib/i18n/locales/zh.json", import.meta.url), "utf8"));
-const sources = [
+const reportedSources = [
   "project/[ref]/database/rls-tester/+page.svelte",
   "project/[ref]/database/temporary-access/+page.svelte",
   "project/[ref]/logs/+page.svelte",
   "project/[ref]/realtime/+page.svelte",
   "../lib/components/DiagnosticsRunPanel.svelte",
 ].map((path) => readFileSync(new URL(path, import.meta.url), "utf8"));
+const settingsSources = [
+  "project/[ref]/settings/+page.svelte",
+  "project/[ref]/settings/+layout.svelte",
+  "project/[ref]/settings/webhooks/+page.svelte",
+  "project/[ref]/settings/branches/+page.svelte",
+].map((path) => readFileSync(new URL(path, import.meta.url), "utf8"));
+const sources = [...reportedSources, ...settingsSources];
 const hanCharacters = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/u;
 
 function withoutComments(source: string): string {
@@ -35,7 +42,7 @@ describe("reported observability i18n contract", () => {
   });
 
   test("loads Realtime table suggestions without removing wildcard or custom input", () => {
-    const source = sources[3];
+    const source = reportedSources[3];
 
     expect(source).toContain("/database/tables?_page=1&_limit=200");
     expect(source).toContain('bind:value={pgTable} list="realtime-table-options"');
@@ -44,9 +51,9 @@ describe("reported observability i18n contract", () => {
   });
 
   test("localizes diagnostics statuses and log filters while retaining raw values", () => {
-    const logsSource = sources[2];
-    const diagnosticsSource = sources[4];
-    const realtimeSource = sources[3];
+    const logsSource = reportedSources[2];
+    const diagnosticsSource = reportedSources[4];
+    const realtimeSource = reportedSources[3];
 
     expect(logsSource).toContain('value: "1h", labelKey: "ProjectLogs.range_1h"');
     expect(logsSource).toContain('value: "all", labelKey: "ProjectLogs.service_all"');
@@ -55,5 +62,19 @@ describe("reported observability i18n contract", () => {
     expect(realtimeSource).toContain('value="INSERT">{$t("Realtime.event_insert")}');
     expect(realtimeSource).toContain('value="UPDATE">{$t("Realtime.event_update")}');
     expect(realtimeSource).toContain('value="DELETE">{$t("Realtime.event_delete")}');
+  });
+
+  test("uses locale-driven labels throughout project settings", () => {
+    const [settingsSource, layoutSource, webhooksSource, branchesSource] = settingsSources;
+
+    expect(settingsSource).toContain('$t("ProjectSettings.routing_domains")');
+    expect(settingsSource).toContain('$t("ProjectSettings.custom_domain")');
+    expect(settingsSource).toContain('$t("ProjectSettings.delete_project")');
+    expect(layoutSource).toContain('labelKey: "ProjectSettings.tab_general"');
+    expect(layoutSource).toContain('labelKey: "ProjectSettings.tab_branches"');
+    expect(webhooksSource).toContain('$t("Hooks.title")');
+    expect(webhooksSource).toContain('$t("Hooks.no_hooks_title")');
+    expect(branchesSource).toContain('$t("Branches.title")');
+    expect(branchesSource).toContain('$t("Branches.empty")');
   });
 });

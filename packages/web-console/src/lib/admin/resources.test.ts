@@ -1,8 +1,19 @@
 import { describe, expect, test } from "bun:test";
-import { buildResourceRegistry } from "./resources";
+import { buildResourceRegistry, type ResourceLabels } from "./resources";
 
 describe("buildResourceRegistry", () => {
-  const englishLabels = {
+  const englishLabels: ResourceLabels = {
+    projects: "Projects",
+    referenceId: "Reference ID",
+    projectName: "Project Name",
+    status: "Status",
+    active: "Active",
+    paused: "Paused",
+    creating: "Creating",
+    region: "Region",
+    localDocker: "Local Docker",
+    databaseHost: "PostgreSQL Host",
+    databasePort: "PostgreSQL Port",
     tables: "Tables",
     tableName: "Table Name",
     schema: "Schema",
@@ -10,7 +21,18 @@ describe("buildResourceRegistry", () => {
     rows: "Rows (est.)",
   };
 
-  const chineseLabels = {
+  const chineseLabels: ResourceLabels = {
+    projects: "项目",
+    referenceId: "引用 ID",
+    projectName: "项目名称",
+    status: "状态",
+    active: "已激活",
+    paused: "已暂停",
+    creating: "创建中",
+    region: "运行区域",
+    localDocker: "本地 Docker",
+    databaseHost: "PostgreSQL 主机",
+    databasePort: "PostgreSQL 端口",
     tables: "数据表列表",
     tableName: "表名",
     schema: "模式",
@@ -71,6 +93,19 @@ describe("buildResourceRegistry", () => {
       "模式",
       "类型",
       "行数（估算）",
+    ]);
+
+    const chineseProjects = buildResourceRegistry([], chineseLabels).find(
+      (resource) => resource.name === "v1/projects",
+    );
+    expect(chineseProjects).toMatchObject({ label: "项目" });
+    expect(chineseProjects?.fields?.map((field) => field.label)).toEqual([
+      "引用 ID",
+      "项目名称",
+      "状态",
+      "运行区域",
+      "PostgreSQL 主机",
+      "PostgreSQL 端口",
     ]);
   });
 });

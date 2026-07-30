@@ -15,6 +15,7 @@
     XCircle,
   } from "lucide-svelte";
   import { apiClient } from "$lib/api";
+  import { t } from "svelte-i18n";
   import { createQuery, createMutation, useQueryClient } from "@tanstack/svelte-query";
 
   type BranchDataMode = "schema_only" | "full_clone";
@@ -104,11 +105,14 @@
       const versions = payload.applied
         .map((entry) => entry && typeof entry === "object" ? (entry as Record<string, unknown>).version : null)
         .filter((version): version is string => typeof version === "string");
-      lines.push(`Applied before failure: ${versions.join(", ") || payload.applied.length}. Refresh the plan before retrying.`);
+      lines.push($t("Branches.applied_before_failure", { values: { versions: versions.join(", ") || payload.applied.length } }));
     }
     if (payload.recovery_required === true) {
       const recoveryDatabase = typeof payload.recovery_database === "string" ? payload.recovery_database : null;
-      lines.push(`Manual recovery is required. Do not retry blindly${recoveryDatabase ? `; recover database: ${recoveryDatabase}` : typeof payload.backup_database === "string" ? `; backup: ${payload.backup_database}` : ""}.`);
+      const recoveryTarget = recoveryDatabase || (typeof payload.backup_database === "string" ? payload.backup_database : null);
+      lines.push(recoveryTarget
+        ? $t("Branches.manual_recovery_with_database", { values: { database: recoveryTarget } })
+        : $t("Branches.manual_recovery"));
     }
     return new ApiOperationError(lines.join(" "), payload);
   }
@@ -118,7 +122,7 @@
     queryFn: async () => {
       const res = await apiClient(`/v1/projects/${projectRef}/branches`);
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || data.message || "Failed to load branches");
+      if (!res.ok) throw new Error(data.error || data.message || $t("Branches.load_failed"));
       return (data.branches || []) as Branch[];
     },
     refetchInterval: 5000,
@@ -136,14 +140,14 @@
         body: JSON.stringify({ name: branchName.trim(), data_mode: dataMode }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || data.message || "Failed to create branch");
+      if (!res.ok) throw new Error(data.error || data.message || $t("Branches.create_failed"));
       return data;
     },
     onSuccess: () => {
       showCreate = false;
       branchName = "";
       dataMode = "schema_only";
-      msg = "Branch created, provisioning an isolated preview database...";
+      msg = $t("Branches.created");
       setTimeout(() => (msg = null), 4000);
       queryClient.invalidateQueries({ queryKey: ["branches", projectRef] });
     },
@@ -158,7 +162,7 @@
         method: "DELETE",
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || data.message || "Failed to delete branch");
+      if (!res.ok) throw new Error(data.error || data.message || $t("Branches.delete_failed"));
       return data;
     },
     onSuccess: () => {
@@ -170,7 +174,7 @@
     mutationFn: async (branchRef: string): Promise<PromotionPlan> => {
       const res = await apiClient(`/v1/projects/${projectRef}/branches/${branchRef}/promote/plan`);
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || data.message || "Failed to build migration promotion plan");
+      if (!res.ok) throw new Error(data.error || data.message || $t("Branches.plan_failed"));
       return data as PromotionPlan;
     },
     onSuccess: (plan) => {
@@ -195,15 +199,15 @@
         }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw operationError(data, "Failed to promote migrations");
+      if (!res.ok) throw operationError(data, $t("Branches.promote_failed"));
       return data as PromotionResult;
     },
     onSuccess: (result) => {
       const appliedCount = result.applied?.length || 0;
       closePromotion();
       msg = appliedCount > 0
-        ? `${appliedCount} migration${appliedCount === 1 ? "" : "s"} promoted. Branch data was not automatically copied.`
-        : "Parent migration history is already up to date.";
+        ? $t("Branches.promoted", { values: { count: appliedCount } })
+        : $t("Branches.up_to_date");
       setTimeout(() => (msg = null), 5000);
       queryClient.invalidateQueries({ queryKey: ["branches", projectRef] });
       queryClient.invalidateQueries({ queryKey: ["database_migrations", projectRef] });
@@ -232,14 +236,14 @@
         body: JSON.stringify({ mode: "replace_database", confirmation: replaceConfirmation }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw operationError(data, "Failed to replace parent database");
+      if (!res.ok) throw operationError(data, $t("Branches.replace_failed"));
       if (!data || typeof data !== "object" || typeof (data as Record<string, unknown>).backup_database !== "string") {
         throw operationError({
           ...(data && typeof data === "object" ? data as Record<string, unknown> : {}),
-          error: "Database replacement response did not include the required backup database name.",
+          error: $t("Branches.backup_evidence_missing"),
           replacement_committed: true,
           recovery_required: true,
-        }, "Replacement completed without recoverable backup evidence");
+        }, $t("Branches.replace_backup_missing"));
       }
       return data as ReplacementResult;
     },
@@ -247,7 +251,7 @@
       replaceTarget = null;
       replaceConfirmation = "";
       replacementRecoveryRequired = false;
-      msg = `Parent database replaced. Backup retained as ${result.backup_database}.`;
+      msg = $t("Branches.replaced", { values: { database: result.backup_database } });
       setTimeout(() => (msg = null), 6000);
       queryClient.invalidateQueries({ queryKey: ["branches", projectRef] });
     },
@@ -260,11 +264,11 @@
   function handleCreate() {
     errMsg = null;
     if (!branchName.trim()) {
-      errMsg = "Branch name is required.";
+      errMsg = $t("Branches.name_required");
       return;
     }
     if (!/^[a-zA-Z0-9._-]+$/.test(branchName.trim())) {
-      errMsg = "Branch name may only contain letters, numbers, dots, dashes, underscores.";
+      errMsg = $t("Branches.name_invalid");
       return;
     }
     createBranchMut.mutate();
@@ -300,13 +304,13 @@
   function statusBadge(status: Branch["status"]) {
     switch (status) {
       case "active":
-        return { icon: CheckCircle2, class: "text-emerald-500", label: "Active" };
+        return { icon: CheckCircle2, class: "text-emerald-500", label: $t("Branches.status_active") };
       case "creating":
-        return { icon: Clock, class: "text-blue-400", label: "Creating" };
+        return { icon: Clock, class: "text-blue-400", label: $t("Branches.status_creating") };
       case "deleting":
-        return { icon: Clock, class: "text-amber-400", label: "Deleting" };
+        return { icon: Clock, class: "text-amber-400", label: $t("Branches.status_deleting") };
       case "error":
-        return { icon: AlertCircle, class: "text-red-500", label: "Error" };
+        return { icon: AlertCircle, class: "text-red-500", label: $t("Branches.status_error") };
       default:
         return { icon: XCircle, class: "text-muted-foreground", label: status };
     }
@@ -318,10 +322,10 @@
     <div>
       <h2 class="text-lg font-semibold flex items-center gap-2">
         <GitBranch class="w-5 h-5 text-brand" />
-        Branches
+        {$t("Branches.title")}
       </h2>
       <p class="text-sm text-muted-foreground mt-1">
-        Test schema changes in isolated databases, then promote reviewed migrations without automatic branch data copying.
+        {$t("Branches.subtitle")}
       </p>
     </div>
     {#if !showCreate}
@@ -330,7 +334,7 @@
         onclick={() => { showCreate = true; errMsg = null; }}
       >
         <Plus class="w-4 h-4" />
-        New Branch
+        {$t("Branches.new_branch")}
       </button>
     {/if}
   </div>
@@ -339,9 +343,9 @@
     <div class="flex items-start gap-2">
       <ShieldCheck class="mt-0.5 h-4 w-4 shrink-0 text-emerald-500" />
       <div>
-        <div class="font-medium text-foreground">Migration-first promotion</div>
+        <div class="font-medium text-foreground">{$t("Branches.migration_first")}</div>
         <p class="mt-1 text-muted-foreground">
-          The platform will not automatically copy branch data to the parent. Only migration ledger entries with reviewed checksums are eligible.
+          {$t("Branches.migration_first_description")}
         </p>
       </div>
     </div>
@@ -360,7 +364,7 @@
 
   {#if showCreate}
     <div class="rounded-lg border border-border bg-card p-4 space-y-4">
-      <h3 class="font-medium">Create New Branch</h3>
+      <h3 class="font-medium">{$t("Branches.create_branch")}</h3>
       <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
         <input
           type="text"
@@ -372,30 +376,30 @@
         <select
           bind:value={dataMode}
           class="rounded-md border border-border bg-background px-3 py-2 text-sm"
-          aria-label="Branch data mode"
+          aria-label={$t("Branches.data_mode")}
         >
-          <option value="schema_only">Schema only (recommended)</option>
-          <option value="full_clone">Schema and data</option>
+          <option value="schema_only">{$t("Branches.schema_only_recommended")}</option>
+          <option value="full_clone">{$t("Branches.schema_and_data")}</option>
         </select>
         <button
           class="rounded-md bg-brand px-3 py-2 text-sm font-medium text-white hover:bg-brand/90 disabled:opacity-50"
           onclick={handleCreate}
           disabled={createBranchMut.isPending}
         >
-          {#if createBranchMut.isPending}<Loader2 class="w-4 h-4 animate-spin" />{:else}Create{/if}
+          {#if createBranchMut.isPending}<Loader2 class="w-4 h-4 animate-spin" />{:else}{$t("Branches.create")}{/if}
         </button>
         <button
           class="rounded-md border border-border px-3 py-2 text-sm text-muted-foreground hover:text-foreground"
           onclick={() => { showCreate = false; branchName = ""; dataMode = "schema_only"; }}
         >
-          Cancel
+          {$t("Branches.cancel")}
         </button>
       </div>
       <p class="text-xs text-muted-foreground">
         {#if dataMode === "schema_only"}
-          Creates a data-less preview database. Add deterministic seed data through your normal migration or seed workflow.
+          {$t("Branches.schema_only_description")}
         {:else}
-          Copies the current parent data for debugging. Restrict this mode to approved, non-sensitive or masked datasets.
+          {$t("Branches.full_clone_description")}
         {/if}
       </p>
     </div>
@@ -412,7 +416,7 @@
   {:else if branches.length === 0}
     <div class="rounded-lg border border-dashed border-border py-12 text-center">
       <GitBranch class="w-8 h-8 text-muted-foreground mx-auto mb-2" />
-      <p class="text-sm text-muted-foreground">No branches yet. Create one to get started.</p>
+      <p class="text-sm text-muted-foreground">{$t("Branches.empty")}</p>
     </div>
   {:else}
     <div class="space-y-3">
@@ -428,11 +432,11 @@
                   {badge.label}
                 </span>
                 <span class="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                  {branch.data_mode === "schema_only" ? "Schema only" : "Schema + data"}
+                  {branch.data_mode === "schema_only" ? $t("Branches.schema_only") : $t("Branches.schema_and_data")}
                 </span>
               </div>
               <div class="mt-1 text-xs text-muted-foreground">
-                Created {new Date(branch.created_at).toLocaleString()}
+                {$t("Branches.created_at", { values: { timestamp: new Date(branch.created_at).toLocaleString() } })}
               </div>
               {#if branch.error}
                 <div class="mt-2 text-xs text-red-400">{branch.error}</div>
@@ -443,20 +447,20 @@
                 <button
                   class="inline-flex items-center gap-1 rounded-md border border-emerald-500/30 px-2.5 py-1 text-xs text-emerald-500 hover:bg-emerald-500/10 transition-colors"
                   onclick={() => openPromotion(branch)}
-                  title="Review and promote recorded migrations only"
+                  title={$t("Branches.review_migrations_title")}
                 >
                   <ArrowUpCircle class="w-3.5 h-3.5" />
-                  Review migrations
+                  {$t("Branches.review_migrations")}
                 </button>
               {/if}
               <button
                 class="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground hover:text-red-400 hover:border-red-400/30 transition-colors"
                 onclick={() => deleteBranchMut.mutate(branch.ref)}
                 disabled={deleteBranchMut.isPending || branch.status === "deleting"}
-                title="Delete this branch"
+                title={$t("Branches.delete_title")}
               >
                 <Trash2 class="w-3.5 h-3.5" />
-                Delete
+                {$t("Branches.delete")}
               </button>
             </div>
           </div>
@@ -471,9 +475,9 @@
         <div class="flex items-start gap-3">
           <ShieldCheck class="mt-0.5 h-5 w-5 shrink-0 text-emerald-500" />
           <div>
-            <h3 class="font-semibold text-base">Promote migrations from “{promoteTarget.name}”</h3>
+            <h3 class="font-semibold text-base">{$t("Branches.promote_title", { values: { name: promoteTarget.name } })}</h3>
             <p class="mt-1 text-sm text-muted-foreground">
-              Branch data is not automatically copied. The server will re-check this plan and serialize it with other migration writes.
+              {$t("Branches.promote_description")}
             </p>
           </div>
         </div>
@@ -481,7 +485,7 @@
         {#if promotionPlanMut.isPending}
           <div class="flex items-center justify-center gap-2 rounded-md border border-border py-10 text-sm text-muted-foreground">
             <Loader2 class="h-4 w-4 animate-spin" />
-            Building migration plan…
+            {$t("Branches.building_plan")}
           </div>
         {:else if promotionError}
           <div class="space-y-3 rounded-md border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400">
@@ -491,47 +495,47 @@
                 class="rounded border border-red-500/30 px-2 py-1 text-xs hover:bg-red-500/10 disabled:opacity-50"
                 onclick={() => promoteTarget && promotionPlanMut.mutate(promoteTarget.ref)}
                 disabled={promotionPlanMut.isPending}
-              >Refresh and review plan</button>
+              >{$t("Branches.refresh_plan")}</button>
             {/if}
           </div>
         {:else if !promotionPlan}
           <div class="rounded-md border border-border p-3 text-sm text-muted-foreground">
-            No migration plan is available. Close this dialog and retry.
+            {$t("Branches.no_plan")}
           </div>
         {:else}
           <div class="grid grid-cols-3 gap-3 text-center text-xs">
-            <div class="rounded-md border border-border p-3"><div class="text-lg font-semibold">{promotionPlan.pending.length}</div><div class="text-muted-foreground">Pending</div></div>
-            <div class="rounded-md border border-border p-3"><div class="text-lg font-semibold">{promotionPlan.applied.length}</div><div class="text-muted-foreground">Applied</div></div>
-            <div class="rounded-md border border-border p-3"><div class="text-lg font-semibold">{promotionPlan.blocked.length}</div><div class="text-muted-foreground">Blocked</div></div>
+            <div class="rounded-md border border-border p-3"><div class="text-lg font-semibold">{promotionPlan.pending.length}</div><div class="text-muted-foreground">{$t("Branches.pending")}</div></div>
+            <div class="rounded-md border border-border p-3"><div class="text-lg font-semibold">{promotionPlan.applied.length}</div><div class="text-muted-foreground">{$t("Branches.applied")}</div></div>
+            <div class="rounded-md border border-border p-3"><div class="text-lg font-semibold">{promotionPlan.blocked.length}</div><div class="text-muted-foreground">{$t("Branches.blocked")}</div></div>
           </div>
 
           <div class="rounded-md border border-border bg-background/50 p-3 text-xs">
-            <div class="text-muted-foreground">Reviewed plan checksum</div>
+            <div class="text-muted-foreground">{$t("Branches.reviewed_plan_checksum")}</div>
             <div class="mt-1 break-all font-mono">{promotionPlan.plan_checksum}</div>
           </div>
 
           {#if promotionPlan.pending.length > 0}
             <div class="space-y-2">
-              <h4 class="text-sm font-medium">Pending migrations</h4>
+              <h4 class="text-sm font-medium">{$t("Branches.pending_migrations")}</h4>
               {#each promotionPlan.pending as migration (migration.version)}
                 <div class="flex items-start justify-between gap-3 rounded-md border border-border p-3 text-xs">
                   <div class="min-w-0">
-                    <div class="font-mono font-medium">{migration.version} · {migration.name || "unnamed"}</div>
-                    <div class="mt-1 text-muted-foreground">{migration.statement_count} statement(s) · {migration.checksum.slice(0, 12)}</div>
+                    <div class="font-mono font-medium">{migration.version} · {migration.name || $t("Branches.unnamed")}</div>
+                    <div class="mt-1 text-muted-foreground">{$t("Branches.statement_count", { values: { count: migration.statement_count, checksum: migration.checksum.slice(0, 12) } })}</div>
                     <details class="mt-2">
-                      <summary class="cursor-pointer text-foreground">Review SQL</summary>
+                      <summary class="cursor-pointer text-foreground">{$t("Branches.review_sql")}</summary>
                       <div class="mt-2 space-y-2">
                         {#each migration.statements || [] as statement, index}
-                          <pre class="max-h-48 overflow-auto whitespace-pre-wrap rounded bg-muted/40 p-2 font-mono text-[11px]" aria-label={`Migration statement ${index + 1}`}>{statement}</pre>
+                          <pre class="max-h-48 overflow-auto whitespace-pre-wrap rounded bg-muted/40 p-2 font-mono text-[11px]" aria-label={$t("Branches.migration_statement", { values: { index: index + 1 } })}>{statement}</pre>
                         {/each}
                         {#if !migration.statements?.length}
-                          <div class="text-muted-foreground">SQL is unavailable in this legacy plan. Review the migration file before continuing.</div>
+                          <div class="text-muted-foreground">{$t("Branches.sql_unavailable")}</div>
                         {/if}
                       </div>
                     </details>
                   </div>
                   {#if migration.destructive}
-                    <span class="rounded bg-red-500/10 px-2 py-0.5 text-red-400">Destructive</span>
+                    <span class="rounded bg-red-500/10 px-2 py-0.5 text-red-400">{$t("Branches.destructive")}</span>
                   {/if}
                 </div>
               {/each}
@@ -540,7 +544,7 @@
 
           {#if promotionPlan.blocked.length > 0}
             <div class="space-y-2">
-              <h4 class="flex items-center gap-1.5 text-sm font-medium text-red-400"><TriangleAlert class="h-4 w-4" />Blocking findings</h4>
+              <h4 class="flex items-center gap-1.5 text-sm font-medium text-red-400"><TriangleAlert class="h-4 w-4" />{$t("Branches.blocking_findings")}</h4>
               {#each promotionPlan.blocked as blocker (`${blocker.code}-${blocker.version}`)}
                 <div class="rounded-md border border-red-500/20 bg-red-500/5 p-3 text-xs text-red-300">
                   <div class="font-mono">[{blocker.code}] {blocker.version}</div>
@@ -561,7 +565,7 @@
           {#if promotionPlan.requires_destructive_confirmation}
             <label class="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-xs">
               <input class="mt-0.5" type="checkbox" bind:checked={confirmDestructive} />
-              <span>I reviewed the destructive SQL and its backup/rollback plan.</span>
+              <span>{$t("Branches.destructive_confirmation")}</span>
             </label>
           {/if}
         {/if}
@@ -573,16 +577,16 @@
             disabled={promotionPlanMut.isPending || promoteBranchMut.isPending}
           >
             <Database class="h-3.5 w-3.5" />
-            Replace entire database
+            {$t("Branches.replace_database")}
           </button>
           <div class="flex justify-end gap-2">
-            <button class="rounded-md border border-border px-4 py-2 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50" onclick={closePromotion} disabled={promoteBranchMut.isPending}>Cancel</button>
+            <button class="rounded-md border border-border px-4 py-2 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50" onclick={closePromotion} disabled={promoteBranchMut.isPending}>{$t("Branches.cancel")}</button>
             <button
               class="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
               onclick={() => promotionPlan && promoteBranchMut.mutate({ branchRef: promoteTarget!.ref, plan: promotionPlan })}
               disabled={!promotionPlan || promotionNeedsRefresh || !promotionPlan.safe_to_apply || promotionPlan.pending.length === 0 || (promotionPlan.requires_destructive_confirmation && !confirmDestructive) || promoteBranchMut.isPending}
             >
-              {#if promoteBranchMut.isPending}<Loader2 class="h-4 w-4 animate-spin" />{:else if promotionPlan?.pending.length === 0}Up to date{:else}Apply {promotionPlan?.pending.length || 0} migration(s){/if}
+              {#if promoteBranchMut.isPending}<Loader2 class="h-4 w-4 animate-spin" />{:else if promotionPlan?.pending.length === 0}{$t("Branches.up_to_date_short")}{:else}{$t("Branches.apply_migrations", { values: { count: promotionPlan?.pending.length || 0 } })}{/if}
             </button>
           </div>
         </div>
@@ -596,14 +600,16 @@
         <div class="flex items-start gap-3">
           <TriangleAlert class="mt-0.5 h-5 w-5 shrink-0 text-red-500" />
           <div>
-            <h3 class="font-semibold text-red-400">Replace entire database</h3>
+            <h3 class="font-semibold text-red-400">{$t("Branches.replace_database")}</h3>
             <p class="mt-1 text-sm text-muted-foreground">
-              This destructive break-glass action copies schema and data from the branch, stops the parent runtime, and swaps the parent database. New parent writes since branch creation may be lost. Admin authentication is required.
+              {$t("Branches.replace_description")}
             </p>
           </div>
         </div>
         <div class="rounded-md bg-red-500/5 p-3 text-xs">
-          Type <code class="font-mono text-red-300">{replaceExpected}</code> to continue.
+          <span>{$t("Branches.replace_confirmation_prefix")}</span>
+          <code class="font-mono text-red-300">{replaceExpected}</code>
+          <span>{$t("Branches.replace_confirmation_suffix")}</span>
         </div>
         <input
           bind:value={replaceConfirmation}
@@ -616,7 +622,7 @@
         {/if}
         {#if replacementRecoveryRequired}
           <div class="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-300">
-            The operation needs manual recovery. Keep this screen open, inspect the reported recovery database, and restore runtime health before taking another action.
+            {$t("Branches.replacement_recovery_required")}
           </div>
         {/if}
         <div class="flex justify-end gap-2">
@@ -625,14 +631,14 @@
             onclick={() => { replaceTarget = null; replaceConfirmation = ""; replaceError = null; }}
             disabled={replacementRecoveryRequired || replaceDatabaseMut.isPending}
           >
-            Cancel
+            {$t("Branches.cancel")}
           </button>
           <button
             class="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
             onclick={() => replaceDatabaseMut.mutate(replaceTarget!.ref)}
             disabled={replacementRecoveryRequired || replaceConfirmation !== replaceExpected || replaceDatabaseMut.isPending}
           >
-            {#if replaceDatabaseMut.isPending}<Loader2 class="h-4 w-4 animate-spin" />{:else}Replace database{/if}
+            {#if replaceDatabaseMut.isPending}<Loader2 class="h-4 w-4 animate-spin" />{:else}{$t("Branches.replace_database")}{/if}
           </button>
         </div>
       </div>

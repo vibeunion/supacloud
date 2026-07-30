@@ -1,22 +1,47 @@
 import type { ResourceDefinition } from '@svadmin/core';
 
-export const resources: ResourceDefinition[] = [
+export interface ProjectResourceLabels {
+  projects: string;
+  referenceId: string;
+  projectName: string;
+  status: string;
+  active: string;
+  paused: string;
+  creating: string;
+  region: string;
+  localDocker: string;
+  databaseHost: string;
+  databasePort: string;
+}
+
+export interface TenantResourceLabels {
+  tables: string;
+  tableName: string;
+  schema: string;
+  type: string;
+  rows: string;
+}
+
+export type ResourceLabels = ProjectResourceLabels & TenantResourceLabels;
+
+function getPlatformResources(labels: ProjectResourceLabels): ResourceDefinition[] {
+  return [
   {
     name: 'v1/projects',
-    label: 'Projects',
+    label: labels.projects,
     fields: [
-      { key: 'ref', label: 'Reference ID', type: 'text', showInForm: false },
-      { key: 'name', label: 'Name', type: 'text', required: true, searchable: true },
-      { key: 'status', label: 'Status', type: 'select', options: [
-        { label: 'Active', value: 'active' },
-        { label: 'Paused', value: 'paused' },
-        { label: 'Creating', value: 'creating' }
+      { key: 'ref', label: labels.referenceId, type: 'text', showInForm: false },
+      { key: 'name', label: labels.projectName, type: 'text', required: true, searchable: true },
+      { key: 'status', label: labels.status, type: 'select', options: [
+        { label: labels.active, value: 'active' },
+        { label: labels.paused, value: 'paused' },
+        { label: labels.creating, value: 'creating' }
       ] },
-      { key: 'region', label: 'Region', type: 'select', options: [
-        { label: 'Local Docker', value: 'local' }
+      { key: 'region', label: labels.region, type: 'select', options: [
+        { label: labels.localDocker, value: 'local' }
       ] },
-      { key: 'db_host', label: 'PostgreSQL Host', type: 'text', showInForm: false },
-      { key: 'db_port', label: 'PostgreSQL Port', type: 'number', showInForm: false }
+      { key: 'db_host', label: labels.databaseHost, type: 'text', showInForm: false },
+      { key: 'db_port', label: labels.databasePort, type: 'number', showInForm: false }
     ],
   },
   {
@@ -31,14 +56,7 @@ export const resources: ResourceDefinition[] = [
       ]}
     ]
   }
-];
-
-export interface TenantResourceLabels {
-  tables: string;
-  tableName: string;
-  schema: string;
-  type: string;
-  rows: string;
+  ];
 }
 
 export const getTenantResources = (ref: string, labels: TenantResourceLabels): ResourceDefinition[] => [
@@ -76,11 +94,11 @@ export const getTenantResources = (ref: string, labels: TenantResourceLabels): R
   }
 ];
 
-export function buildResourceRegistry(projectRefs: string[], labels: TenantResourceLabels): ResourceDefinition[] {
+export function buildResourceRegistry(projectRefs: string[], labels: ResourceLabels): ResourceDefinition[] {
   const uniqueRefs = [...new Set(projectRefs.filter(Boolean))];
 
   return [
-    ...resources,
+    ...getPlatformResources(labels),
     ...uniqueRefs.flatMap((ref) => getTenantResources(ref, labels)),
   ];
 }
