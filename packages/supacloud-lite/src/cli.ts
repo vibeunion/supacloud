@@ -176,6 +176,7 @@ async function main(): Promise<void> {
 `)
 
   await waitForShutdown(() => project.close())
+  process.exitCode = 0
 }
 
 async function runDbCommand(options: CliOptions): Promise<void> {
@@ -307,16 +308,17 @@ function timestamp(): string {
 
 function quietLog(): void {}
 
-function waitForShutdown(closeProject: () => Promise<void>): Promise<void> {
-  return new Promise<void>((resolveShutdown, rejectShutdown) => {
-    const closeOnSignal = () => {
-      process.off('SIGINT', closeOnSignal)
-      process.off('SIGTERM', closeOnSignal)
-      void closeProject().then(resolveShutdown, rejectShutdown)
+async function waitForShutdown(closeProject: () => Promise<void>): Promise<void> {
+  await new Promise<void>((resolveShutdown) => {
+    const resolveOnSignal = () => {
+      process.off('SIGINT', resolveOnSignal)
+      process.off('SIGTERM', resolveOnSignal)
+      resolveShutdown()
     }
-    process.once('SIGINT', closeOnSignal)
-    process.once('SIGTERM', closeOnSignal)
+    process.once('SIGINT', resolveOnSignal)
+    process.once('SIGTERM', resolveOnSignal)
   })
+  await closeProject()
 }
 
 function printHelp(): void {

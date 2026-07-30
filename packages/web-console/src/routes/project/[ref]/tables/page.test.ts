@@ -230,4 +230,11 @@ describe("database tables column visibility", () => {
     expect(autoTablePatch).toContain("whitespace-nowrap");
     expect(autoTablePatch).toContain("gap-3 px-1 py-2");
   });
+
+  test("keeps each create-table draft bound to its own DOM row", async () => {
+    const source = await Bun.file(new URL("+page.svelte", import.meta.url)).text();
+
+    expect(source).toContain("{#each columns as column, index (column)}");
+    expect(source).not.toContain("{#each columns as column, index (index)}");
+  });
 });

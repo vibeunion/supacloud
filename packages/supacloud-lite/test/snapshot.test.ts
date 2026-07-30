@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ensureProjectSecrets, resolveProjectPaths } from '../src/project-runtime.js'
 import { createSnapshot, restoreSnapshot } from '../src/snapshot.js'
+import { createSymlinkIfPermitted } from './support/symlink.js'
 
 const temporaryDirectories: string[] = []
 
@@ -106,10 +107,11 @@ describe('Lite snapshots', () => {
     ).rejects.toThrow('storage backend')
 
     const external = await temporaryProject('supacloud-lite-snapshot-link-target-')
-    await symlink(external, join(paths.storageDir, 'linked'))
-    await expect(
-      createSnapshot({ paths, packageVersion: 'test-version', storageBackend: 'fs', output: join(projectDir, 'linked.tar.gz') })
-    ).rejects.toThrow('symbolic link')
+    if (await createSymlinkIfPermitted(external, join(paths.storageDir, 'linked'))) {
+      await expect(
+        createSnapshot({ paths, packageVersion: 'test-version', storageBackend: 'fs', output: join(projectDir, 'linked.tar.gz') })
+      ).rejects.toThrow('symbolic link')
+    }
   })
 
   test('restores empty database and storage directories', async () => {

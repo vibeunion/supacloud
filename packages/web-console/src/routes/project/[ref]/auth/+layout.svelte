@@ -82,6 +82,7 @@
     authRuntime?.mode === "shared" && !currentPath.endsWith("/policies"),
   );
   let menuBar = $state<HTMLDivElement>();
+  let openMenu = $state<string | null>(null);
 
   onMount(() => {
     let cancelled = false;
@@ -116,25 +117,26 @@
   }
 
   function closeMenusOnOutsideClick(event: MouseEvent) {
-    if (!(event.target instanceof Node)) return;
-    for (const details of menuBar?.querySelectorAll<HTMLDetailsElement>("details[open]") ?? []) {
-      if (!details.contains(event.target)) details.open = false;
-    }
+    if (!(event.target instanceof Node) || !menuBar?.contains(event.target)) openMenu = null;
   }
 
-  function handleMenuKeydown(event: KeyboardEvent) {
-    if (event.key !== "Escape" || !(event.currentTarget instanceof HTMLElement)) return;
-    const details = event.currentTarget.closest("details");
-    if (!(details instanceof HTMLDetailsElement)) return;
+  function toggleMenu(menuKey: string): void {
+    openMenu = openMenu === menuKey ? null : menuKey;
+  }
+
+  function menuTriggerId(menuKey: string): string {
+    return `auth-menu-trigger-${menuKey}`;
+  }
+
+  function closeMenuOnEscape(event: KeyboardEvent, menuKey: string): void {
+    if (event.key !== "Escape") return;
     event.preventDefault();
-    details.open = false;
-    event.currentTarget.focus();
+    openMenu = null;
+    document.getElementById(menuTriggerId(menuKey))?.focus();
   }
 
-  function closeMenuFromLink(event: MouseEvent) {
-    if (!(event.currentTarget instanceof HTMLElement)) return;
-    const details = event.currentTarget.closest("details");
-    if (details instanceof HTMLDetailsElement) details.open = false;
+  function closeMenuFromLink(): void {
+    openMenu = null;
   }
 
   let { children } = $props();
@@ -146,21 +148,32 @@
   <!-- 按用户任务分组，避免十多个认证入口在窄屏横向溢出。 -->
   <div bind:this={menuBar} class="flex flex-wrap items-center gap-2 border-b border-border/30 px-1 pb-3">
     {#each visibleGroups as group (group.labelKey)}
-      <details name="auth-navigation" class="group/details relative">
-        <summary onkeydown={handleMenuKeydown} class="flex cursor-pointer list-none items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold transition-colors [&::-webkit-details-marker]:hidden {groupIsActive(group.tabs) ? 'border-brand/30 bg-brand/10 text-brand' : 'bg-background text-muted-foreground hover:bg-muted hover:text-foreground'}">
+      <div class="relative">
+        <button
+          type="button"
+          id={menuTriggerId(group.labelKey)}
+          aria-haspopup="menu"
+          aria-controls={`auth-menu-${group.labelKey}`}
+          aria-expanded={openMenu === group.labelKey}
+          onclick={() => toggleMenu(group.labelKey)}
+          onkeydown={(event) => closeMenuOnEscape(event, group.labelKey)}
+          class="flex cursor-pointer list-none items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold transition-colors {groupIsActive(group.tabs) ? 'border-brand/30 bg-brand/10 text-brand' : 'bg-background text-muted-foreground hover:bg-muted hover:text-foreground'}"
+        >
           {$t(group.labelKey)}
-          <ChevronDown class="h-3.5 w-3.5 transition-transform group-open/details:rotate-180" />
-        </summary>
-        <div class="absolute left-0 z-30 mt-2 w-56 overflow-hidden rounded-xl border bg-popover p-1.5 text-popover-foreground shadow-xl">
-          {#each group.tabs as tab (tab.path)}
-            {@const Icon = tab.icon}
-            <a href={resolve(tab.route, { ref: projectRef })} onclick={closeMenuFromLink} class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium transition-colors {isActive(tab.path) ? 'bg-brand/10 text-brand' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}">
-              <Icon class="h-4 w-4" />
-              {$t(tab.labelKey)}
-            </a>
-          {/each}
-        </div>
-      </details>
+          <ChevronDown class="h-3.5 w-3.5 transition-transform {openMenu === group.labelKey ? 'rotate-180' : ''}" />
+        </button>
+        {#if openMenu === group.labelKey}
+          <div id={`auth-menu-${group.labelKey}`} role="menu" tabindex="-1" onkeydown={(event) => closeMenuOnEscape(event, group.labelKey)} class="absolute left-0 z-30 mt-2 w-56 overflow-hidden rounded-xl border bg-popover p-1.5 text-popover-foreground shadow-xl">
+            {#each group.tabs as tab (tab.path)}
+              {@const Icon = tab.icon}
+              <a role="menuitem" href={resolve(tab.route, { ref: projectRef })} onclick={closeMenuFromLink} class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium transition-colors {isActive(tab.path) ? 'bg-brand/10 text-brand' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}">
+                <Icon class="h-4 w-4" />
+                {$t(tab.labelKey)}
+              </a>
+            {/each}
+          </div>
+        {/if}
+      </div>
     {/each}
   </div>
 

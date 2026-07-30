@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { access, mkdtemp, rm } from 'node:fs/promises'
+import { access, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
@@ -31,6 +31,7 @@ test('closes the project and releases its data lock on SIGINT', async () => {
     await access(lockPath)
     expect(await stopCli(restartedRun, 'SIGINT')).toBe(0)
     restartedStopped = true
+    await expect(access(lockPath)).rejects.toMatchObject({ code: 'ENOENT' })
   } finally {
     await Promise.all([
       firstStopped ? undefined : stopCli(firstRun, 'SIGTERM'),
@@ -38,7 +39,36 @@ test('closes the project and releases its data lock on SIGINT', async () => {
     ])
     await rm(projectDir, { recursive: true, force: true })
   }
+}, 120_000)
+
+test('closes the project and releases its data lock on SIGTERM', async () => {
+  const projectDir = await mkdtemp(join(tmpdir(), 'supacloud-lite-cli-shutdown-'))
+  const lockPath = join(projectDir, '.supacloud-lite', 'db.supacloud-lite.lock')
+  const cliRun = startCli(projectDir)
+  let stopped = false
+
+  try {
+    await cliRun.ready
+    await access(lockPath)
+    expect(await stopCli(cliRun, 'SIGTERM')).toBe(0)
+    stopped = true
+    await expect(access(lockPath)).rejects.toMatchObject({ code: 'ENOENT' })
+  } finally {
+    if (!stopped) await stopCli(cliRun, 'SIGTERM')
+    await rm(projectDir, { recursive: true, force: true })
+  }
 }, 60_000)
+
+test('marks direct CLI shutdown success only after close resolves', async () => {
+  const source = await readFile(cliPath, 'utf8')
+  const shutdownCall = source.indexOf("await waitForShutdown(() => project.close())")
+  const successfulExit = source.indexOf('process.exitCode = 0', shutdownCall)
+
+  expect(shutdownCall).toBeGreaterThan(-1)
+  expect(source.indexOf('await closeProject()')).toBeGreaterThan(shutdownCall)
+  expect(successfulExit).toBeGreaterThan(shutdownCall)
+  expect(source).toContain('process.exitCode = 1')
+})
 
 function startCli(projectDir: string) {
   const bunExecutable = Bun.which('bun')
