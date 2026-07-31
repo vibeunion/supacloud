@@ -4,6 +4,12 @@ import { readFileSync } from "node:fs";
 const source = readFileSync(new URL("../../src/services/tenant-runtime.service.ts", import.meta.url), "utf8");
 const configSource = readFileSync(new URL("../../src/services/tenant-runtime-config.ts", import.meta.url), "utf8");
 
+function sourceBetween(startMarker: string, endMarker: string): string {
+  const start = source.indexOf(startMarker);
+  const end = start < 0 ? -1 : source.indexOf(endMarker, start);
+  return start < 0 || end < 0 ? "" : source.slice(start, end);
+}
+
 describe("TenantRuntimeService secret handling", () => {
   test("never puts a password-bearing database URI in psql argv", () => {
     expect(source).not.toMatch(/psql\s+\$\{dbUrl\}/);
@@ -23,13 +29,25 @@ describe("TenantRuntimeService secret handling", () => {
   });
 
   test("separates the pgredis owner connection from the Edge Function environment", () => {
-    expect(source).toContain('path.join(this.PGREDIS_CONFIG_DIR, `${ref}_pgredis.env`)');
-    expect(source).toContain('renderSystemdEnvLine("PGREDIS_DATABASE_URL", pgredisDbUri)');
+    const pgredisConfig = sourceBetween(
+      "private async writePgredisTenantConfig(",
+      "\n    public async ensurePgredisTenantConfig(",
+    );
+    const edgeFunctionEnv = sourceBetween(
+      "const pgrstEnv = [",
+      "await this.writeTenantSecretFile(\n            path.join(this.TENANT_CONFIG_DIR, `${ref}.env`)",
+    );
+
+    expect(pgredisConfig).toContain('path.join(this.PGREDIS_CONFIG_DIR, `${ref}_pgredis.env`)');
+    expect(pgredisConfig).toMatch(
+      /const\s+(\w+)\s*=\s*buildPostgresUri\(\{[\s\S]*?user:\s*resolveRoleName\(ref\),[\s\S]*?password,[\s\S]*?\}\);[\s\S]*?renderSystemdEnvLine\("PGREDIS_DATABASE_URL", \1\)/,
+    );
     expect(source).toContain("user: resolveRoleName(ref)");
     expect(source).toContain("owner?: string");
     expect(source).toContain("if (owner) await this.chownPath(tempPath, owner)");
-    expect(source).toContain("this.PGREDIS_CONFIG_OWNER || undefined");
-    expect(source).not.toContain('renderSystemdEnvLine("PGREDIS_DATABASE_URL", pgredisDbUri),\n            renderSystemdEnvLine("SUPABASE_URL"');
+    expect(pgredisConfig).toContain("this.PGREDIS_CONFIG_OWNER || undefined");
+    expect(edgeFunctionEnv).not.toContain("PGREDIS_DATABASE_URL");
+    expect(edgeFunctionEnv).not.toContain("buildPostgresUri");
   });
 
   test("missing binary guidance points only to the pinned verified runtime installer", () => {
