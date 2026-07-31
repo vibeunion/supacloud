@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { compile, compileModule, preprocess } from "svelte/compiler";
+import { initialTableColumns, tableColumnWithType } from "./table-draft";
 
 const packageRoot = new URL("../../../../../", import.meta.url);
 const visibilityStorageKey = "svadmin-columns-users";
@@ -236,5 +237,23 @@ describe("database tables column visibility", () => {
 
     expect(source).toContain("{#each columns as column, index (column)}");
     expect(source).not.toContain("{#each columns as column, index (index)}");
+  });
+
+  test("allows the default primary-key type to change without sending an invalid identity", async () => {
+    const source = await Bun.file(new URL("+page.svelte", import.meta.url)).text();
+    const initialId = initialTableColumns()[0]!;
+
+    expect(source).not.toContain("disabled={index === 0}");
+    expect(source).toContain("updateColumnType(index, event.currentTarget.value as TableColumnType)");
+    expect(tableColumnWithType(initialId, "integer")).toMatchObject({
+      type: "integer",
+      identity: true,
+      primaryKey: true,
+    });
+    expect(tableColumnWithType(initialId, "uuid")).toMatchObject({
+      type: "uuid",
+      identity: false,
+      primaryKey: true,
+    });
   });
 });

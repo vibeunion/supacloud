@@ -11,12 +11,14 @@ const flush = mock(() => Promise.resolve({ deleted: 3 }));
 const requireAdmin = mock(() => Promise.resolve(undefined));
 const requireProject = mock(() => Promise.resolve(undefined));
 const findProject = mock((ref: string) => Promise.resolve({ ref }));
+const prepareProject = mock(() => Promise.resolve());
 
 const app = new Elysia().use(createPgredisRoutes({
   service: { platformStatus, projectStatus, refresh, execute, flush },
   requireAdmin,
   requireProject,
   findProject: findProject as never,
+  prepareProject,
 }));
 
 function request(path: string, init: RequestInit = {}) {
@@ -38,6 +40,8 @@ describe("pgredis routes", () => {
     requireProject.mockResolvedValue(undefined);
     findProject.mockReset();
     findProject.mockImplementation((ref: string) => Promise.resolve({ ref }));
+    prepareProject.mockReset();
+    prepareProject.mockResolvedValue();
   });
 
   test("exposes platform and project status through authenticated routes", async () => {
@@ -103,6 +107,7 @@ describe("pgredis routes", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ projectRef: "tenant-a", configured: true, configurationCurrent: true });
+    expect(prepareProject).toHaveBeenCalledWith("tenant-a");
     expect(refresh).toHaveBeenCalledWith("tenant-a");
   });
 

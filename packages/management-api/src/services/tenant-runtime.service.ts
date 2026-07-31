@@ -994,11 +994,6 @@ class TenantRuntimeService {
         const runtimeUser = await this.ensureTenantRuntimeUser(ref);
         await fs.mkdir(this.TENANT_CONFIG_DIR, { recursive: true, mode: 0o711 });
         await fs.chmod(this.TENANT_CONFIG_DIR, 0o711);
-        await fs.mkdir(this.PGREDIS_CONFIG_DIR, { recursive: true, mode: 0o700 });
-        await fs.chmod(this.PGREDIS_CONFIG_DIR, 0o700);
-        if (this.PGREDIS_CONFIG_OWNER) {
-            await this.chownPath(this.PGREDIS_CONFIG_DIR, this.PGREDIS_CONFIG_OWNER);
-        }
 
         const runtimeGoTruePort = await this.effectiveGoTruePort(ref, gotruePort);
         for (const [name, value] of Object.entries({
@@ -1023,14 +1018,6 @@ class TenantRuntimeService {
         const postgrestDbUri = buildPostgresUri({
             protocol: "postgres",
             user: resolveAuthenticatorName(ref),
-            password: creds.dbPassword,
-            host: this.PG_HOST,
-            port: this.PG_PORT,
-            database: creds.dbName,
-        });
-        const pgredisDbUri = buildPostgresUri({
-            protocol: "postgresql",
-            user: resolveRoleName(ref),
             password: creds.dbPassword,
             host: this.PG_HOST,
             port: this.PG_PORT,
@@ -1094,12 +1081,7 @@ class TenantRuntimeService {
             pgrstEnv,
             runtimeUser,
         );
-        await this.writeTenantSecretFile(
-            path.join(this.PGREDIS_CONFIG_DIR, `${ref}_pgredis.env`),
-            renderSystemdEnvLine("PGREDIS_DATABASE_URL", pgredisDbUri),
-            undefined,
-            this.PGREDIS_CONFIG_OWNER || undefined,
-        );
+        await this.writePgredisTenantConfig(ref, creds.dbName, creds.dbPassword);
 
         // Generate PostgREST .conf configuration (single source of truth for all settings)
         const pgrstConf = `
@@ -1268,6 +1250,35 @@ GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE=/auth/v1/verify
         await this.persistTenantPortConfig(ref, pgrstPort, gotruePort);
 
         logger.info(`Config generated for ${ref} (pgrst_port=${pgrstPort}, gotrue_port=${gotruePort})`);
+    }
+
+    private async writePgredisTenantConfig(ref: string, database: string, password: string): Promise<void> {
+        await fs.mkdir(this.PGREDIS_CONFIG_DIR, { recursive: true, mode: 0o700 });
+        await fs.chmod(this.PGREDIS_CONFIG_DIR, 0o700);
+        if (this.PGREDIS_CONFIG_OWNER) {
+            await this.chownPath(this.PGREDIS_CONFIG_DIR, this.PGREDIS_CONFIG_OWNER);
+        }
+        const databaseUrl = buildPostgresUri({
+            protocol: "postgresql",
+            user: resolveRoleName(ref),
+            password,
+            host: this.PG_HOST,
+            port: this.PG_PORT,
+            database,
+        });
+        await this.writeTenantSecretFile(
+            path.join(this.PGREDIS_CONFIG_DIR, `${ref}_pgredis.env`),
+            renderSystemdEnvLine("PGREDIS_DATABASE_URL", databaseUrl),
+            undefined,
+            this.PGREDIS_CONFIG_OWNER || undefined,
+        );
+    }
+
+    public async ensurePgredisTenantConfig(ref: string): Promise<void> {
+        await this.withTenantConfigLock(ref, async () => {
+            const credentials = await this.getTenantCredentials(ref);
+            await this.writePgredisTenantConfig(ref, credentials.dbName, credentials.dbPassword);
+        });
     }
 
     private async installSystemdTemplate(systemctlMode: SystemctlExecutionMode = "best-effort") {

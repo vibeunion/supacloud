@@ -1,6 +1,7 @@
 import { Elysia, status, t } from "elysia";
 import { requireAdminAuth, requireProjectOrAdminAuth } from "../middleware/auth";
 import { projectRepository } from "../repositories/project.repository";
+import { tenantRuntimeService } from "../services/tenant-runtime.service";
 import {
   pgredisRuntimeService,
   type PgredisCacheOperationRequest,
@@ -13,6 +14,7 @@ interface PgredisRoutesDependencies {
   requireAdmin?: typeof requireAdminAuth;
   requireProject?: typeof requireProjectOrAdminAuth;
   findProject?: typeof projectRepository.findByRef;
+  prepareProject?: (projectRef: string) => Promise<void>;
 }
 
 const keySchema = t.String({ minLength: 1, maxLength: 512 });
@@ -39,6 +41,8 @@ export function createPgredisRoutes(dependencies: PgredisRoutesDependencies = {}
   const requireAdmin = dependencies.requireAdmin ?? requireAdminAuth;
   const requireProject = dependencies.requireProject ?? requireProjectOrAdminAuth;
   const findProject = dependencies.findProject ?? projectRepository.findByRef.bind(projectRepository);
+  const prepareProject = dependencies.prepareProject
+    ?? tenantRuntimeService.ensurePgredisTenantConfig.bind(tenantRuntimeService);
 
   const platformRoutes = new Elysia({ prefix: "/v1/cache" })
     .onBeforeHandle(async ({ request }) => {
@@ -64,6 +68,7 @@ export function createPgredisRoutes(dependencies: PgredisRoutesDependencies = {}
     .post("/refresh", async ({ params }) => {
       const project = await findProject(params.ref);
       if (!project) return status(404, { message: "Project not found", code: "NOT_FOUND" });
+      await prepareProject(params.ref);
       return await service.refresh(params.ref);
     }, {
       detail: { tags: ["cache"], summary: "Refresh the project cache configuration" },

@@ -9,6 +9,7 @@ import { resolveDbName, resolveRoleName } from '../db';
 const PGBACKREST_NAME_PATTERN = /^[A-Za-z0-9_.-]{1,128}$/;
 const BACKUP_USER_PATTERN = /^[a-z_][a-z0-9_-]{0,31}$/;
 const BACKUP_BINARY_PATTERN = /^(?:[A-Za-z0-9_.-]+|\/[A-Za-z0-9_./-]+)$/;
+const BACKUP_CONFIG_PATTERN = /^\/[A-Za-z0-9_./-]+$/;
 const INFO_TIMEOUT_MS = 5_000;
 const BACKUP_TIMEOUT_MS = 30 * 60_000;
 const PITR_TIMEOUT_MS = 30 * 60_000;
@@ -38,18 +39,23 @@ interface PgBackRestConfiguration {
   stanza: string;
   user: string;
   binary: string;
+  config?: string;
 }
 
 function readPgBackRestConfiguration(environment: Record<string, string | undefined> = process.env): PgBackRestConfiguration {
   const stanza = (environment.SUPACLOUD_PGBACKREST_STANZA || "db-main").trim();
   const user = (environment.SUPACLOUD_PGBACKREST_USER || "postgres").trim();
   const binary = (environment.SUPACLOUD_PGBACKREST_BIN || "pgbackrest").trim();
+  const configuredPath = environment.SUPACLOUD_PGBACKREST_CONFIG?.trim();
 
   if (!PGBACKREST_NAME_PATTERN.test(stanza)) throw new PgBackRestUnavailableError("Invalid SUPACLOUD_PGBACKREST_STANZA");
   if (!BACKUP_USER_PATTERN.test(user)) throw new PgBackRestUnavailableError("Invalid SUPACLOUD_PGBACKREST_USER");
   if (!BACKUP_BINARY_PATTERN.test(binary)) throw new PgBackRestUnavailableError("Invalid SUPACLOUD_PGBACKREST_BIN");
+  if (configuredPath && !BACKUP_CONFIG_PATTERN.test(configuredPath)) {
+    throw new PgBackRestUnavailableError("Invalid SUPACLOUD_PGBACKREST_CONFIG");
+  }
 
-  return { stanza, user, binary };
+  return { stanza, user, binary, config: configuredPath || undefined };
 }
 
 export function getPgBackRestStanza(environment: Record<string, string | undefined> = process.env): string {
@@ -65,6 +71,7 @@ function pgBackRestCommand(
   timeoutMs = pgBackRestArguments.includes("backup") ? BACKUP_TIMEOUT_MS : INFO_TIMEOUT_MS,
 ): string[] {
   const configuration = readPgBackRestConfiguration();
+  const configurationArgument = configuration.config ? [`--config=${configuration.config}`] : [];
   return [
     "timeout",
     TIMEOUT_KILL_AFTER,
@@ -74,6 +81,7 @@ function pgBackRestCommand(
     "-u",
     configuration.user,
     configuration.binary,
+    ...configurationArgument,
     `--stanza=${configuration.stanza}`,
     ...pgBackRestArguments,
   ];
@@ -88,7 +96,8 @@ async function runPgBackRest(pgBackRestArguments: string[], timeoutMs: number): 
       new Response(pgBackRestProcess.stderr).text(),
     ]);
     return { exitCode, stdout, timedOut: exitCode === 124 };
-  } catch {
+  } catch (error) {
+    if (error instanceof PgBackRestUnavailableError) throw error;
     logger.error("[Backup] pgBackRest command could not start");
     throw new PgBackRestUnavailableError("pgBackRest command is unavailable");
   }

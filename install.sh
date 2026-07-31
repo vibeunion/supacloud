@@ -34,6 +34,9 @@ PGREDIS_RUNTIME_BIN_FILE="${SUPACLOUD_PGREDIS_RUNTIME_BIN_FILE:-/usr/local/bin/s
 PGREDIS_RUNTIME_UNIT_FILE="${SUPACLOUD_PGREDIS_RUNTIME_UNIT_FILE:-/etc/systemd/system/supacloud-pgredis-runtime.service}"
 PGREDIS_RUNTIME_SOURCE_DIR="${SUPACLOUD_PGREDIS_RUNTIME_SOURCE_DIR:-/opt/supacloud/pgredis-runtime}"
 PGREDIS_TENANT_CONFIG_DIR="${SUPACLOUD_PGREDIS_TENANT_CONFIG_DIR:-/etc/supabase/pgredis-tenants}"
+PGBACKREST_CONFIG_FILE="${SUPACLOUD_PGBACKREST_CONFIG_FILE:-/etc/supabase/pgbackrest.conf}"
+PGBACKREST_REPO_DIR="${SUPACLOUD_PGBACKREST_REPO_DIR:-/var/lib/pgbackrest}"
+PGBACKREST_PGDATA_DIR="${SUPACLOUD_PGBACKREST_PGDATA_DIR:-/pg/data}"
 SUPACLOUD_LOGS_ENV_FILE="${SUPACLOUD_LOGS_ENV_FILE:-/etc/supabase/victorialogs.env}"
 SUPACLOUD_VICTORIALOGS_UNIT_FILE="${SUPACLOUD_VICTORIALOGS_UNIT_FILE:-/etc/systemd/system/supacloud-victorialogs.service}"
 VICTORIALOGS_BINARY_FILE="${VICTORIALOGS_BINARY_FILE:-/usr/local/bin/victoria-logs-prod}"
@@ -69,6 +72,9 @@ SUPACLOUD_INSTALL_KEYS=(
     SUPACLOUD_PIPELINES_ENABLED SUPACLOUD_ETL_COMMIT SUPACLOUD_ETL_IMAGE
     JIT_DATABASE_GATEWAY_PUBLIC_HOST JIT_DATABASE_GATEWAY_PORT_RANGE
     SUPACLOUD_POSTGRES_MAJOR_UPGRADE_PROVIDER_EXECUTOR
+    PGREDIS_RUNTIME_PORT PGREDIS_RUNTIME_INTERNAL_URL
+    SUPACLOUD_PGBACKREST_CONFIG SUPACLOUD_PGBACKREST_STANZA
+    SUPACLOUD_PGBACKREST_USER SUPACLOUD_PGBACKREST_BIN SUPACLOUD_PITR_ENABLED
 )
 SUPACLOUD_EXPLICIT_INSTALL_KEYS=()
 SUPACLOUD_EXPLICIT_INSTALL_VALUES=()
@@ -1298,39 +1304,76 @@ EOF
     return 0
 }
 
-# Configure pgbackrest to use JuiceFS-backed local path as repo (not S3/MinIO)
-configure_pgbackrest_juicefs() {
-    log_step "Configuring pgbackrest for JuiceFS mode..."
-    if ! command -v pgbackrest &> /dev/null; then
-        log_warn "pgbackrest not installed, skipping configuration"
+validate_pgbackrest_path() {
+    local path_value="$1"
+    local setting_name="$2"
+    if [[ "$path_value" =~ ^/[A-Za-z0-9_./-]+$ ]]; then
         return 0
     fi
+    log_error "Invalid $setting_name: $path_value"
+    return 1
+}
 
-    local PG_BACKREST_DIR="/var/lib/pgbackrest"
-    mkdir -p "${PG_BACKREST_DIR}"
-    chown -R postgres:postgres "${PG_BACKREST_DIR}"
-
-    # Create pgbackrest config for local-file repo
-    cat > /etc/pgbackrest.conf << "PGCONF"
+write_supacloud_pgbackrest_config() {
+    local config_path="$1"
+    local stanza="$2"
+    cat > "$config_path" << PGCONF
 [global]
-repo1-path=/var/lib/pgbackrest
+repo1-path=$PGBACKREST_REPO_DIR
 repo1-retention-full=2
 repo1-retention-diff=7
 
-[db-main]
-pg1-path=/pg/data
+[$stanza]
+pg1-path=$PGBACKREST_PGDATA_DIR
 pg1-port=5432
 pg1-user=postgres
 PGCONF
-    chown postgres:postgres /etc/pgbackrest.conf 2>/dev/null || true
+    chown postgres:postgres "$config_path"
+    chmod 0600 "$config_path"
+}
 
-    # Create stanza if postgres is running
-    if sudo -u postgres pg_isready &>/dev/null; then
-        log_info "Creating pgbackrest stanza db-main..."
-        sudo -u postgres pgbackrest --stanza=db-main stanza-create 2>/dev/null || log_warn "pgbackrest stanza-create failed, may need manual setup after PG is fully ready"
+activate_supacloud_pgbackrest_config() {
+    local config_path="$1"
+    local stanza="$2"
+    sudo -u postgres pg_isready &>/dev/null || {
+        log_error "PostgreSQL is not ready for pgbackrest stanza configuration"
+        return 1
+    }
+    sudo -u postgres pgbackrest --config="$config_path" --stanza="$stanza" stanza-create || return 1
+    sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d postgres \
+        -c "ALTER SYSTEM SET archive_command = 'pgbackrest --config=$config_path --stanza=$stanza archive-push %p'" \
+        -c "SELECT pg_reload_conf()" >/dev/null
+}
+
+# The explicit config path prevents Pigsty's separate pgBackRest configuration
+# from silently taking precedence on RPM-based hosts.
+configure_pgbackrest_juicefs() {
+    log_step "Configuring pgbackrest for JuiceFS mode..."
+    command -v pgbackrest &>/dev/null || {
+        log_error "pgbackrest is required for JuiceFS backup configuration"
+        return 1
+    }
+    local config_path="${SUPACLOUD_PGBACKREST_CONFIG:-$PGBACKREST_CONFIG_FILE}"
+    local stanza="${SUPACLOUD_PGBACKREST_STANZA:-db-main}"
+    [[ "$stanza" =~ ^[A-Za-z0-9_.-]{1,128}$ ]] || {
+        log_error "Invalid SUPACLOUD_PGBACKREST_STANZA: $stanza"
+        return 1
+    }
+    validate_pgbackrest_path "$config_path" SUPACLOUD_PGBACKREST_CONFIG || return 1
+    validate_pgbackrest_path "$PGBACKREST_REPO_DIR" SUPACLOUD_PGBACKREST_REPO_DIR || return 1
+    validate_pgbackrest_path "$PGBACKREST_PGDATA_DIR" SUPACLOUD_PGBACKREST_PGDATA_DIR || return 1
+    mkdir -p "$PGBACKREST_REPO_DIR"
+    chown -R postgres:postgres "$PGBACKREST_REPO_DIR"
+    install -d -m 0755 "$(dirname "$config_path")"
+    write_supacloud_pgbackrest_config "$config_path" "$stanza"
+    log_info "Creating pgbackrest stanza $stanza..."
+    if ! activate_supacloud_pgbackrest_config "$config_path" "$stanza"; then
+        log_error "pgbackrest configuration activation failed"
+        return 1
     fi
-
-    log_info "pgbackrest configured for JuiceFS local repo at ${PG_BACKREST_DIR}"
+    SUPACLOUD_PGBACKREST_CONFIG="$config_path"
+    SUPACLOUD_PGBACKREST_STANZA="$stanza"
+    log_info "pgbackrest configured for JuiceFS local repo at ${PGBACKREST_REPO_DIR}"
 }
 
 
@@ -1750,8 +1793,10 @@ rollback_pgredis_install_transaction() {
         systemctl disable supacloud-pgredis-runtime >/dev/null 2>&1 || true
     fi
     if [[ "$was_active" == "true" ]]; then
+        local rollback_port
+        rollback_port="$(supacloud_env_value "$PGREDIS_RUNTIME_ENV_FILE" PGREDIS_RUNTIME_PORT)"
         systemctl start supacloud-pgredis-runtime >/dev/null 2>&1 || rollback_status=1
-        supacloud_wait_http_health http://127.0.0.1:9010/health || rollback_status=1
+        supacloud_wait_http_health "http://127.0.0.1:${rollback_port:-9010}/health" || rollback_status=1
     else
         systemctl stop supacloud-pgredis-runtime >/dev/null 2>&1 || true
     fi
@@ -1823,6 +1868,16 @@ install_pgredis_runtime() {
     local PGR_BIN_TARGET="$PGREDIS_RUNTIME_BIN_FILE"
     local USE_COMPILED_BINARY=false
     local ARCH
+    PGREDIS_RUNTIME_PORT="${PGREDIS_RUNTIME_PORT:-9011}"
+    if [[ ! "$PGREDIS_RUNTIME_PORT" =~ ^[0-9]+$ ]] \
+        || (( PGREDIS_RUNTIME_PORT < 1 || PGREDIS_RUNTIME_PORT > 65535 )); then
+        log_error "Invalid PGREDIS_RUNTIME_PORT: $PGREDIS_RUNTIME_PORT"
+        return 1
+    fi
+    if [[ "$PGREDIS_RUNTIME_PORT" == "9010" ]]; then
+        log_error "PGREDIS_RUNTIME_PORT=9010 conflicts with the SupaCloud Imaginary service"
+        return 1
+    fi
     ARCH=$(uname -m)
     if [[ "$ARCH" == "x86_64" ]]; then
         PGR_BIN_NAME="supacloud-pgredis-runtime-linux-amd64"
@@ -1882,7 +1937,7 @@ install_pgredis_runtime() {
     supacloud_write_service_env_pairs "$PGREDIS_RUNTIME_ENV_FILE" \
         PGREDIS_RUNTIME_INTERNAL_TOKEN "$pgredis_token" \
         PGREDIS_RUNTIME_HOST 127.0.0.1 \
-        PGREDIS_RUNTIME_PORT 9010 \
+        PGREDIS_RUNTIME_PORT "$PGREDIS_RUNTIME_PORT" \
         PGREDIS_RUNTIME_TENANTS_DIR "$PGREDIS_TENANT_CONFIG_DIR" \
         PGREDIS_RUNTIME_CAPABILITY_MAX_TTL_MS "${PGREDIS_RUNTIME_CAPABILITY_MAX_TTL_MS:-600000}" \
         PGREDIS_RUNTIME_MAX_TENANTS "${PGREDIS_RUNTIME_MAX_TENANTS:-128}" \
@@ -1898,11 +1953,12 @@ install_pgredis_runtime() {
         return 1
     fi
     render_edge_runtime_systemd_unit "$systemd_src" \
-        "$PGREDIS_RUNTIME_UNIT_FILE" "$PGR_EXEC_START" 9010
+        "$PGREDIS_RUNTIME_UNIT_FILE" "$PGR_EXEC_START" "$PGREDIS_RUNTIME_PORT"
     systemctl daemon-reload || return 1
-    systemctl enable --now supacloud-pgredis-runtime || return 1
-    supacloud_wait_http_health http://127.0.0.1:9010/health || return 1
-    log_info "pgredis-runtime is ready on 127.0.0.1:9010"
+    systemctl enable supacloud-pgredis-runtime || return 1
+    systemctl restart supacloud-pgredis-runtime || return 1
+    supacloud_wait_http_health "http://127.0.0.1:${PGREDIS_RUNTIME_PORT}/health" || return 1
+    log_info "pgredis-runtime is ready on 127.0.0.1:${PGREDIS_RUNTIME_PORT}"
 }
 # ========== S3 Storage Installation ==========
 install_s3_storage() {
@@ -3130,8 +3186,12 @@ install_management_api() {
     # `openssl rand -hex 16` returns 32 ASCII chars, which crashes tenant
     # registration with "Bad key size". Generate a literal 16-char secret instead.
     REALTIME_DB_ENC_KEY="${REALTIME_DB_ENC_KEY:-$(supacloud_stable_secret "$MANAGEMENT_ENV_FILE" REALTIME_DB_ENC_KEY "$(openssl rand -base64 18 | tr -d '\n=+/ ' | cut -c1-16)")}"
-    local pgredis_token
+    local pgredis_token pgbackrest_config
     pgredis_token="$(supacloud_stable_secret "$PGREDIS_RUNTIME_ENV_FILE" PGREDIS_RUNTIME_INTERNAL_TOKEN "$(openssl rand -hex 32)")"
+    pgbackrest_config="${SUPACLOUD_PGBACKREST_CONFIG:-}"
+    if [[ -z "$pgbackrest_config" && -f "$PGBACKREST_CONFIG_FILE" ]]; then
+        pgbackrest_config="$PGBACKREST_CONFIG_FILE"
+    fi
 
     local encoded_postgres_password
     encoded_postgres_password=$(printf '%s' "$POSTGRES_PASSWORD" | supacloud_urlencode_stdin)
@@ -3155,12 +3215,17 @@ install_management_api() {
         EDGE_RUNTIME_INTERNAL "${EDGE_RUNTIME_INTERNAL:-127.0.0.1:${EDGE_RUNTIME_PORT:-9005}}" \
         EDGE_RUNTIME_USER supacloud-edge \
         EDGE_RUNTIME_GROUP supacloud-edge \
-        PGREDIS_RUNTIME_INTERNAL_URL "${PGREDIS_RUNTIME_INTERNAL_URL:-http://127.0.0.1:9010}" \
+        PGREDIS_RUNTIME_INTERNAL_URL "${PGREDIS_RUNTIME_INTERNAL_URL:-http://127.0.0.1:${PGREDIS_RUNTIME_PORT:-9011}}" \
         PGREDIS_RUNTIME_INTERNAL_TOKEN "$pgredis_token" \
         PGREDIS_RUNTIME_INTERNAL_TIMEOUT_MS "${PGREDIS_RUNTIME_INTERNAL_TIMEOUT_MS:-5000}" \
         PGREDIS_RUNTIME_CAPABILITY_TTL_MS "${PGREDIS_RUNTIME_CAPABILITY_TTL_MS:-600000}" \
         PGREDIS_TENANT_CONFIG_DIR "$PGREDIS_TENANT_CONFIG_DIR" \
         PGREDIS_TENANT_CONFIG_OWNER supacloud-pgredis:supacloud-pgredis \
+        SUPACLOUD_PGBACKREST_CONFIG "$pgbackrest_config" \
+        SUPACLOUD_PGBACKREST_STANZA "${SUPACLOUD_PGBACKREST_STANZA:-db-main}" \
+        SUPACLOUD_PGBACKREST_USER "${SUPACLOUD_PGBACKREST_USER:-postgres}" \
+        SUPACLOUD_PGBACKREST_BIN "${SUPACLOUD_PGBACKREST_BIN:-pgbackrest}" \
+        SUPACLOUD_PITR_ENABLED "${SUPACLOUD_PITR_ENABLED:-false}" \
         SUPACLOUD_LOGS_ENABLED "${SUPACLOUD_LOGS_ENABLED:-true}" \
         VICTORIALOGS_URL "${VICTORIALOGS_URL:-http://127.0.0.1:9428}" \
         SUPACLOUD_LOG_COLLECTOR_STATE_DIR /var/lib/supacloud/log-collector \
@@ -3227,7 +3292,7 @@ install_management_api() {
         TENANTS_DIR /etc/supabase/tenants \
         SUPACLOUD_EDGE_TLS_CA_FILE "$edge_tls_ca_file" \
         SUPACLOUD_EDGE_TLS_INSECURE_SKIP_VERIFY "$edge_tls_insecure_skip_verify" \
-        PGREDIS_RUNTIME_INTERNAL_URL "${PGREDIS_RUNTIME_INTERNAL_URL:-http://127.0.0.1:9010}" \
+        PGREDIS_RUNTIME_INTERNAL_URL "${PGREDIS_RUNTIME_INTERNAL_URL:-http://127.0.0.1:${PGREDIS_RUNTIME_PORT:-9011}}" \
         PGREDIS_RUNTIME_INTERNAL_TOKEN "$pgredis_token" \
         PGREDIS_RUNTIME_INTERNAL_TIMEOUT_MS "${PGREDIS_RUNTIME_INTERNAL_TIMEOUT_MS:-5000}" \
         PGREDIS_RUNTIME_CAPABILITY_TTL_MS "${PGREDIS_RUNTIME_CAPABILITY_TTL_MS:-600000}"; then
