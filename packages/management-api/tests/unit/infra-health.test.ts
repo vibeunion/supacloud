@@ -62,6 +62,7 @@ describe("platform infrastructure health checks", () => {
     expect(body).toContain('const { dbConfig } = await import("../../db");');
     expect(body).toContain('const { config } = await import("../../config");');
     expect(body).toContain('{ port: config.edgeRuntimePort, label: "Edge Runtime" },');
+    expect(body).toContain('localPortFromUrl(config.pgredisRuntimeInternalUrl, 9010)');
     expect(body).toContain("if (isLocalHost(dbConfig.hostname))");
     expect(body).toContain('ports.push({ port: dbConfig.port, label: "PostgreSQL" });');
     expect(body).not.toContain("{ port: 5432, label: \"PostgreSQL\" },");

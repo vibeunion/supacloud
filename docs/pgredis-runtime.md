@@ -114,7 +114,8 @@ PGREDIS_RUNTIME_L1_TTL_MS=30000
 
 Docker 部署中，Management API、Edge Runtime 与 `pgredis-runtime` 共享私有
 `edge-pgredis` 网络；只有 runtime 额外加入数据库私网。systemd 安装由 `install.sh` 生成并同步
-同一内部令牌。
+同一内部令牌，并默认监听 `127.0.0.1:9011`，避免与宿主机 Imaginary 的 `9010` 冲突。
+可用 `PGREDIS_RUNTIME_PORT` 覆盖 systemd 端口，但安装器会拒绝已由 Imaginary 占用的 `9010`。
 
 ## 故障与回滚
 

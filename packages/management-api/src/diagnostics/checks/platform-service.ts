@@ -21,6 +21,17 @@ function isLocalHost(hostname: string): boolean {
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "0.0.0.0";
 }
 
+function localPortFromUrl(value: string, fallback: number): number {
+  if (URL.canParse(value)) {
+    const url = new URL(value);
+    if (isLocalHost(url.hostname) && url.port) {
+      const port = Number(url.port);
+      if (Number.isInteger(port) && port > 0 && port <= 65535) return port;
+    }
+  }
+  return fallback;
+}
+
 // --- Systemd service check ---
 registerCheck({
   id: "platform-service-status",
@@ -85,7 +96,7 @@ registerCheck({
 registerCheck({
   id: "platform-port-listeners",
   name: "Port Listeners",
-  description: "Verify expected ports are listening: 9090 (API), 80/443 (Gateway), configured Edge Runtime, 9010 (pgredis)",
+  description: "Verify expected ports are listening: 9090 (API), 80/443 (Gateway), configured Edge Runtime and pgredis runtime",
   category: "service",
   scope: "platform",
   severity: "critical",
@@ -98,7 +109,7 @@ registerCheck({
       { port: 80, label: "Gateway HTTP" },
       { port: 443, label: "Gateway HTTPS" },
       { port: config.edgeRuntimePort, label: "Edge Runtime" },
-      { port: 9010, label: "pgredis Runtime" },
+      { port: localPortFromUrl(config.pgredisRuntimeInternalUrl, 9010), label: "pgredis Runtime" },
     ];
     const skipped: string[] = [];
 

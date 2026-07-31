@@ -211,16 +211,18 @@ describe("BackupService", () => {
       stanza: process.env.SUPACLOUD_PGBACKREST_STANZA,
       user: process.env.SUPACLOUD_PGBACKREST_USER,
       binary: process.env.SUPACLOUD_PGBACKREST_BIN,
+      config: process.env.SUPACLOUD_PGBACKREST_CONFIG,
     };
     process.env.SUPACLOUD_PGBACKREST_STANZA = "cluster-main";
     process.env.SUPACLOUD_PGBACKREST_USER = "pgbackrest";
     process.env.SUPACLOUD_PGBACKREST_BIN = "/usr/bin/pgbackrest";
+    process.env.SUPACLOUD_PGBACKREST_CONFIG = "/etc/supabase/pgbackrest.conf";
     try {
       commandOutcomes.push({ exitCode: 0, stdout: inventory([], 0, "cluster-main") });
       await listBackups("supa_project_a");
       expect(spawnedCommands).toEqual([[
         "timeout", "--kill-after=30s", "5", "sudo", "-n", "-u", "pgbackrest", "/usr/bin/pgbackrest",
-        "--stanza=cluster-main", "info", "--output=json",
+        "--config=/etc/supabase/pgbackrest.conf", "--stanza=cluster-main", "info", "--output=json",
       ]]);
 
       commandOutcomes.push({ exitCode: 0 });
@@ -236,6 +238,20 @@ describe("BackupService", () => {
       else process.env.SUPACLOUD_PGBACKREST_USER = previousEnvironment.user;
       if (previousEnvironment.binary === undefined) delete process.env.SUPACLOUD_PGBACKREST_BIN;
       else process.env.SUPACLOUD_PGBACKREST_BIN = previousEnvironment.binary;
+      if (previousEnvironment.config === undefined) delete process.env.SUPACLOUD_PGBACKREST_CONFIG;
+      else process.env.SUPACLOUD_PGBACKREST_CONFIG = previousEnvironment.config;
+    }
+  });
+
+  test("rejects an unsafe pgBackRest configuration path before spawning a process", async () => {
+    const previousConfig = process.env.SUPACLOUD_PGBACKREST_CONFIG;
+    process.env.SUPACLOUD_PGBACKREST_CONFIG = "relative/pgbackrest.conf";
+    try {
+      await expect(listBackups("supa_project_a")).rejects.toThrow("Invalid SUPACLOUD_PGBACKREST_CONFIG");
+      expect(spawnedCommands).toEqual([]);
+    } finally {
+      if (previousConfig === undefined) delete process.env.SUPACLOUD_PGBACKREST_CONFIG;
+      else process.env.SUPACLOUD_PGBACKREST_CONFIG = previousConfig;
     }
   });
 });

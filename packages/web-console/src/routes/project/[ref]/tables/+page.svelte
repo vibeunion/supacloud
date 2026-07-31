@@ -7,41 +7,18 @@
   import { t } from "svelte-i18n";
   import { toast } from "svelte-sonner";
   import { Loader2, Plus, TableProperties, Trash2 } from "lucide-svelte";
-
-  const columnTypes = [
-    "bigint",
-    "boolean",
-    "date",
-    "double precision",
-    "integer",
-    "jsonb",
-    "numeric",
-    "real",
-    "text",
-    "time",
-    "timestamp",
-    "timestamptz",
-    "uuid",
-  ] as const;
-
-  type TableColumnType = typeof columnTypes[number];
-
-  interface TableColumnDraft {
-    name: string;
-    type: TableColumnType;
-    nullable: boolean;
-    primaryKey?: boolean;
-    identity?: boolean;
-  }
+  import {
+    initialTableColumns,
+    tableColumnTypes,
+    tableColumnWithType,
+    type TableColumnDraft,
+    type TableColumnType,
+  } from "./table-draft";
 
   const projectRef = $derived(page.params.ref!);
   let tableName = $state("");
   let tableListEpoch = $state(0);
-  let columns = $state<TableColumnDraft[]>(initialColumns());
-
-  function initialColumns(): TableColumnDraft[] {
-    return [{ name: "id", type: "bigint", nullable: false, primaryKey: true, identity: true }];
-  }
+  let columns = $state<TableColumnDraft[]>(initialTableColumns());
 
   function addColumn(): void {
     if (columns.length < 64) columns = [...columns, { name: "", type: "text", nullable: true }];
@@ -49,6 +26,12 @@
 
   function removeColumn(index: number): void {
     if (index > 0) columns = columns.filter((_, columnIndex) => columnIndex !== index);
+  }
+
+  function updateColumnType(index: number, type: TableColumnType): void {
+    columns = columns.map((column, columnIndex) => (
+      columnIndex === index ? tableColumnWithType(column, type) : column
+    ));
   }
 
   function normalizeRowEstimate(value: unknown): number | null {
@@ -84,7 +67,7 @@
     onSuccess: () => {
       toast.success($t("Tables.create_success", { values: { name: tableName.trim() } }));
       tableName = "";
-      columns = initialColumns();
+      columns = initialTableColumns();
       tableListEpoch += 1;
     },
   }));
@@ -159,8 +142,8 @@
           {#each columns as column, index (column)}
             <div class="grid grid-cols-[minmax(0,1fr)_112px_auto] gap-2 items-center">
               <input bind:value={column.name} required maxlength="63" pattern="[A-Za-z_][A-Za-z0-9_]*" class="min-w-0 px-2.5 py-2 rounded-md border bg-background text-xs font-mono" aria-label={$t("Tables.column_name_aria", { values: { index: index + 1 } })} />
-              <select bind:value={column.type} disabled={index === 0} class="px-2 py-2 rounded-md border bg-background text-xs font-mono disabled:opacity-70" aria-label={$t("Tables.column_type_aria", { values: { index: index + 1 } })}>
-                {#each columnTypes as type (type)}
+              <select value={column.type} onchange={(event) => updateColumnType(index, event.currentTarget.value as TableColumnType)} class="px-2 py-2 rounded-md border bg-background text-xs font-mono" aria-label={$t("Tables.column_type_aria", { values: { index: index + 1 } })}>
+                {#each tableColumnTypes as type (type)}
                   <option value={type}>{$t(`Tables.type_${type.replaceAll(" ", "_")}`)}</option>
                 {/each}
               </select>

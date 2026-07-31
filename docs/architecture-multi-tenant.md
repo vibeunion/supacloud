@@ -29,7 +29,7 @@
                               ▼
                      ┌──────────────────┐
                      │ pgredis-runtime  │
-                     │ (:9010 private)  │
+                     │ (private port)   │
                      │ ├─ Tenant Pools  │
                      │ └─ L1 + NOTIFY   │
                      └──────────────────┘
@@ -115,7 +115,7 @@ When a function is deployed via the Management API:
 - Edge Workers call a stable `globalThis.SupaCloud.pgredis` facade. The parent runtime injects only a short-lived, project-scoped capability for the active request.
 - Tenant database credentials are loaded from the dedicated, runtime-owned `/etc/supabase/pgredis-tenants/<ref>_pgredis.env` files and must use the matching `role_<ref>` role; Edge Runtime never mounts this directory.
 - Mutations and invalidation notifications commit in the same PostgreSQL transaction. Reconnect clears the tenant L1 before reads resume.
-- Web Console operations go through the authenticated Management API proxy. The browser never receives the internal service token or connects to port `9010`; the proxy exposes bounded platform/project status, exact-key operations, and a project-ref-confirmed namespace flush.
+- Web Console operations go through the authenticated Management API proxy. The browser never receives the internal service token or connects to the private runtime port (Docker `9010`, systemd default `9011`); the proxy exposes bounded platform/project status, exact-key operations, and a project-ref-confirmed namespace flush.
 - Namespace flush deletes cached rows and emits the `clearNamespace` invalidation in one PostgreSQL transaction, then clears that runtime instance's L1 only after commit.
 - The service has no Caddy route or host port and does not implement queues or platform rate limiting. PGMQ and Caddy remain the sole owners of those capabilities.
 

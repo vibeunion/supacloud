@@ -29,6 +29,52 @@ function runBash(script: string, env: Record<string, string> = {}) {
 }
 
 describe("installer configuration persistence", () => {
+  test("configures a dedicated pgBackRest file and archive command without using Pigsty defaults", () => {
+    const dir = makeTempDir();
+    const fakeBin = join(dir, "bin");
+    const config = join(dir, "supabase", "pgbackrest.conf");
+    const repo = join(dir, "repo");
+    const calls = join(dir, "calls");
+    mkdirSync(fakeBin);
+    writeFileSync(join(fakeBin, "sudo"), [
+      "#!/usr/bin/env bash",
+      'if [[ "$1" == "-u" ]]; then shift 2; fi',
+      'exec "$@"',
+    ].join("\n"), { mode: 0o755 });
+    writeFileSync(join(fakeBin, "chown"), "#!/usr/bin/env bash\nexit 0\n", { mode: 0o755 });
+    writeFileSync(join(fakeBin, "pg_isready"), "#!/usr/bin/env bash\nexit 0\n", { mode: 0o755 });
+    writeFileSync(join(fakeBin, "pgbackrest"), [
+      "#!/usr/bin/env bash",
+      'printf "pgbackrest:%s\\n" "$*" >> "$CALLS"',
+      "exit 0",
+    ].join("\n"), { mode: 0o755 });
+    writeFileSync(join(fakeBin, "psql"), [
+      "#!/usr/bin/env bash",
+      'printf "psql:%s\\n" "$*" >> "$CALLS"',
+      "exit 0",
+    ].join("\n"), { mode: 0o755 });
+
+    const result = runBash([
+      "source install.sh",
+      "configure_pgbackrest_juicefs",
+    ].join("; "), {
+      PATH: `${fakeBin}:${process.env.PATH}`,
+      CALLS: calls,
+      SUPACLOUD_PGBACKREST_CONFIG_FILE: config,
+      SUPACLOUD_PGBACKREST_REPO_DIR: repo,
+      SUPACLOUD_PGBACKREST_PGDATA_DIR: join(dir, "pgdata"),
+      SUPACLOUD_PGBACKREST_STANZA: "db-main",
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(readFileSync(config, "utf8")).toContain(`repo1-path=${repo}`);
+    expect(readFileSync(config, "utf8")).toContain(`[db-main]`);
+    expect(readFileSync(config, "utf8")).toContain(`pg1-path=${join(dir, "pgdata")}`);
+    expect(readFileSync(calls, "utf8")).toContain(`--config=${config}`);
+    expect(readFileSync(calls, "utf8")).toContain(`--stanza=db-main`);
+    expect(readFileSync(calls, "utf8")).toContain("ALTER SYSTEM SET archive_command");
+  });
+
   test("atomically merges managed values while preserving operator-owned settings", () => {
     const dir = makeTempDir();
     const target = join(dir, "config.env");

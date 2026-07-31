@@ -23,13 +23,22 @@ describe("TenantRuntimeService secret handling", () => {
   });
 
   test("separates the pgredis owner connection from the Edge Function environment", () => {
-    expect(source).toContain('path.join(this.PGREDIS_CONFIG_DIR, `${ref}_pgredis.env`)');
-    expect(source).toContain('renderSystemdEnvLine("PGREDIS_DATABASE_URL", pgredisDbUri)');
+    const pgrstEnv = source.match(
+      /const\s+pgrstEnv\s*=\s*\[[\s\S]*?\]\s*\.filter\s*\(\s*Boolean\s*\)\s*\.join\s*\(\s*["']\\n["']\s*\)\s*;/,
+    );
+    const pgredisUrlRenderCalls = source.match(
+      /renderSystemdEnvLine\s*\(\s*["']PGREDIS_DATABASE_URL["']/g,
+    );
+
+    expect(pgredisUrlRenderCalls).toHaveLength(1);
+    expect(source).toMatch(
+      /this\.writeTenantSecretFile\s*\(\s*path\.join\s*\(\s*this\.PGREDIS_CONFIG_DIR\s*,\s*`\$\{ref\}_pgredis\.env`\s*\)\s*,\s*renderSystemdEnvLine\s*\(\s*["']PGREDIS_DATABASE_URL["']\s*,[\s\S]*?\)\s*,\s*undefined\s*,\s*this\.PGREDIS_CONFIG_OWNER\s*\|\|\s*undefined\s*,?\s*\)/,
+    );
     expect(source).toContain("user: resolveRoleName(ref)");
     expect(source).toContain("owner?: string");
     expect(source).toContain("if (owner) await this.chownPath(tempPath, owner)");
-    expect(source).toContain("this.PGREDIS_CONFIG_OWNER || undefined");
-    expect(source).not.toContain('renderSystemdEnvLine("PGREDIS_DATABASE_URL", pgredisDbUri),\n            renderSystemdEnvLine("SUPABASE_URL"');
+    expect(pgrstEnv).toBeDefined();
+    expect(pgrstEnv?.[0]).not.toContain("PGREDIS_DATABASE_URL");
   });
 
   test("missing binary guidance points only to the pinned verified runtime installer", () => {
