@@ -20,7 +20,7 @@ fi
 work_dir="$(mktemp -d)"
 functions_dir="$work_dir/functions"
 tenants_dir="$work_dir/tenants"
-cancel_started_path="$work_dir/slow-request-started"
+cancel_started_path=""
 edge_log="$work_dir/edge-runtime.log"
 caddy_log="$work_dir/caddy.log"
 edge_pid=""
@@ -53,6 +53,7 @@ cleanup() {
 trap cleanup EXIT
 
 mkdir -p "$functions_dir/$PROJECT_REF" "$tenants_dir"
+cancel_started_path="$(cd "$functions_dir/$PROJECT_REF" && pwd -P)/slow-request-started"
 cat >"$tenants_dir/$PROJECT_REF.env" <<EOF
 CANCEL_STARTED_PATH=$cancel_started_path
 EOF
