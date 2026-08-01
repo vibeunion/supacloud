@@ -25,6 +25,7 @@ edge_log="$work_dir/edge-runtime.log"
 caddy_log="$work_dir/caddy.log"
 edge_pid=""
 caddy_pid=""
+slow_client_pid=""
 
 terminate_process() {
   local pid="$1"
@@ -44,6 +45,7 @@ terminate_process() {
 }
 
 cleanup() {
+  terminate_process "$slow_client_pid"
   terminate_process "$caddy_pid"
   terminate_process "$edge_pid"
   rm -rf "$work_dir"
@@ -175,15 +177,29 @@ if [[ "$caddy_ready" != true ]]; then
   exit 1
 fi
 
-if curl -fsS --max-time 0.2 -H "Host: auth.edge.test" \
-  "http://127.0.0.1:$CADDY_PORT/api/v1/slow" >/dev/null 2>&1; then
-  echo "Expected the client-side timeout probe to disconnect" >&2
-  exit 1
-fi
-if [[ ! -s "$cancel_started_path" ]]; then
+curl -fsS --max-time 10 -H "Host: auth.edge.test" \
+  "http://127.0.0.1:$CADDY_PORT/api/v1/slow" >/dev/null 2>&1 &
+slow_client_pid=$!
+
+slow_started=false
+for _ in $(seq 1 100); do
+  if [[ -s "$cancel_started_path" ]]; then
+    slow_started=true
+    break
+  fi
+  if ! kill -0 "$slow_client_pid" 2>/dev/null; then
+    break
+  fi
+  sleep 0.05
+done
+if [[ "$slow_started" != true ]]; then
   echo "Client disconnected before the slow Edge Function started" >&2
+  cat "$caddy_log" >&2
+  cat "$edge_log" >&2
   exit 1
 fi
+terminate_process "$slow_client_pid"
+slow_client_pid=""
 
 cancel_released_worker=false
 for _ in $(seq 1 20); do
