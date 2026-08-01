@@ -569,6 +569,7 @@ describe("SupAuth auth config boundary", () => {
       security_refresh_token_reuse_interval: 10,
       security_update_password_require_reauthentication: true,
       password_min_length: 8,
+      password_required_characters: "",
       sessions_inactivity_timeout: null,
       sessions_single_per_user: false,
       sessions_timebox: null,
@@ -583,6 +584,7 @@ describe("SupAuth auth config boundary", () => {
         security_refresh_token_rotation_reuse_interval: 17,
         security_update_password_require_reauthentication: false,
         password_min_length: 12,
+        password_required_characters: "lower:upper:digits",
         sessions_inactivity_timeout: "30m",
         sessions_single_per_user: true,
         sessions_timebox: 86_400,
@@ -599,6 +601,7 @@ describe("SupAuth auth config boundary", () => {
       security_refresh_token_reuse_interval: 17,
       security_update_password_require_reauthentication: false,
       password_min_length: 12,
+      password_required_characters: "lower:upper:digits",
       sessions_inactivity_timeout: 1800,
       sessions_single_per_user: true,
       sessions_timebox: 86_400,
@@ -607,11 +610,19 @@ describe("SupAuth auth config boundary", () => {
       jwt_expiry: 7200,
       refresh_token_rotation_enabled: false,
       security_refresh_token_reuse_interval: 17,
+      password_required_characters: "lower:upper:digits",
       sessions_inactivity_timeout: 1800,
       sessions_timebox: 86_400,
     });
     expect((settings.auth as Record<string, unknown>).jwt_exp).toBeUndefined();
     expect((settings.auth as Record<string, unknown>).security_refresh_token_rotation_reuse_interval).toBeUndefined();
+
+    const readBack = await request("/v1/projects/tenant-a/config/auth");
+    expect(readBack.status).toBe(200);
+    expect(await readBack.json()).toMatchObject({
+      password_min_length: 12,
+      password_required_characters: "lower:upper:digits",
+    });
   });
 
   test("rejects invalid session policy before persistence or runtime apply", async () => {

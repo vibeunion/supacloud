@@ -9,6 +9,7 @@ import type { SshTransport } from "../transports/ssh";
 
 const SAFE_CONTAINER_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/;
 const SAFE_PROJECT_REF = /^[a-z0-9-]{1,20}$/;
+const SAFE_SCHEMA_IDENTIFIER = /^[a-zA-Z_][a-zA-Z0-9_]{0,62}$/;
 const SAFE_RELEASE_TAG = /^[a-zA-Z0-9._-]{1,80}$/;
 const SAFE_TIMEOUT_SECONDS = 300;
 const SAFE_HOSTNAME = /^(?=.{1,253}$)(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)(?:\.(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?))*$/;
@@ -520,10 +521,16 @@ Actions: ping, setup, install, upgrade, diagnose, exec, troubleshoot, container_
                     const targetRef = assertSafeProjectRef(args.target_ref, "target_ref");
                     if (sourceRef === targetRef) throw new Error("source_ref and target_ref must be different");
                     const s = args.schemas || "public,auth,storage";
-                    if (!/^[a-z_,\s]+$/.test(s)) throw new Error("Invalid schemas");
                     const schemas = s.split(",").map((x: string) => x.trim()).filter(Boolean);
                     if (schemas.length === 0) throw new Error("At least one schema is required");
-                    const schemaArgs = schemas.map((schema: string) => `-n ${schema}`).join(" ");
+                    // 逐项按 PostgreSQL 标识符规则校验：\s 允许换行会把 "public\nreboot"
+                    // 这类输入拆成独立的远程 shell 命令
+                    for (const schema of schemas) {
+                        if (!SAFE_SCHEMA_IDENTIFIER.test(schema)) {
+                            throw new Error(`Invalid schema identifier: ${JSON.stringify(schema)}`);
+                        }
+                    }
+                    const schemaArgs = schemas.map((schema: string) => `-n '${schema}'`).join(" ");
                     const df = args.data_only ? "--data-only" : "";
                     const cmd = [
                         "set -euo pipefail",

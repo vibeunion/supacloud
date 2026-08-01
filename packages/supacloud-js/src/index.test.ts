@@ -587,7 +587,7 @@ describe("@supacloud/js", () => {
     expect(new Headers(calls[0]?.init?.headers).get("authorization")).toBe("Bearer token-123");
   });
 
-  test("wait polls until a terminal task status is reached", async () => {
+  test("wait polls until a terminal task status is reached and cleans each delay", async () => {
     const { supabase } = createFakeSupabase();
     const client = createSupaCloudClient({
       supabase: supabase as never,
@@ -595,15 +595,88 @@ describe("@supacloud/js", () => {
       projectRef: "proj_1",
       pollingIntervalMs: 1,
     });
+    const controller = new AbortController();
+    const addListenerSpy = spyOn(controller.signal, "addEventListener");
+    const removeListenerSpy = spyOn(controller.signal, "removeEventListener");
+    const clearTimeoutSpy = spyOn(globalThis, "clearTimeout");
 
     const getSpy = spyOn(client.tasks, "get")
       .mockResolvedValueOnce({ id: "tsk_123", status: "running" })
+      .mockResolvedValueOnce({ id: "tsk_123", status: "running" })
       .mockResolvedValueOnce({ id: "tsk_123", status: "completed" });
 
-    const task = await client.tasks.wait("tsk_123");
+    const task = await client.tasks.wait("tsk_123", {
+      signal: controller.signal,
+    });
 
     expect(task.status).toBe("completed");
-    expect(getSpy).toHaveBeenCalledTimes(2);
+    expect(getSpy).toHaveBeenCalledTimes(3);
+    expect(addListenerSpy).toHaveBeenCalledTimes(2);
+    expect(removeListenerSpy).toHaveBeenCalledTimes(2);
+    expect(clearTimeoutSpy).toHaveBeenCalledTimes(2);
+  });
+
+  test("wait preserves polling errors after cleaning the completed delay", async () => {
+    const { supabase } = createFakeSupabase();
+    const client = createSupaCloudClient({
+      supabase: supabase as never,
+      managementApiUrl: "https://admin.example.com",
+      projectRef: "proj_1",
+      pollingIntervalMs: 1,
+    });
+    const controller = new AbortController();
+    const removeListenerSpy = spyOn(controller.signal, "removeEventListener");
+    const clearTimeoutSpy = spyOn(globalThis, "clearTimeout");
+    const pollingError = new Error("poll failed");
+    let rejectedWith: unknown;
+
+    spyOn(client.tasks, "get")
+      .mockResolvedValueOnce({ id: "tsk_123", status: "running" })
+      .mockImplementation(() => Promise.reject(pollingError));
+
+    try {
+      await client.tasks.wait("tsk_123", { signal: controller.signal });
+    } catch (error) {
+      rejectedWith = error;
+    }
+    expect(rejectedWith).toBe(pollingError);
+    expect(removeListenerSpy).toHaveBeenCalledTimes(1);
+    expect(clearTimeoutSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test("wait preserves the abort reason and cleans the active delay", async () => {
+    const { supabase } = createFakeSupabase();
+    const client = createSupaCloudClient({
+      supabase: supabase as never,
+      managementApiUrl: "https://admin.example.com",
+      projectRef: "proj_1",
+      pollingIntervalMs: 1000,
+    });
+    const controller = new AbortController();
+    const addListenerSpy = spyOn(controller.signal, "addEventListener");
+    const removeListenerSpy = spyOn(controller.signal, "removeEventListener");
+    const clearTimeoutSpy = spyOn(globalThis, "clearTimeout");
+    const abortReason = new Error("stop waiting");
+    const getSpy = spyOn(client.tasks, "get")
+      .mockResolvedValue({ id: "tsk_123", status: "running" });
+    let rejectedWith: unknown;
+
+    const waitPromise = client.tasks.wait("tsk_123", {
+      signal: controller.signal,
+    });
+    await Promise.resolve();
+    controller.abort(abortReason);
+
+    try {
+      await waitPromise;
+    } catch (error) {
+      rejectedWith = error;
+    }
+    expect(rejectedWith).toBe(abortReason);
+    expect(getSpy).toHaveBeenCalledTimes(1);
+    expect(addListenerSpy).toHaveBeenCalledTimes(1);
+    expect(removeListenerSpy).toHaveBeenCalledTimes(1);
+    expect(clearTimeoutSpy).toHaveBeenCalledTimes(1);
   });
 
   test("subscribe falls back to polling on channel error", async () => {

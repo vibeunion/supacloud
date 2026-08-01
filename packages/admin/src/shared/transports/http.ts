@@ -20,34 +20,54 @@ const DEFAULT_TIMEOUT = 30_000;
 const MAX_RETRIES = 2;
 const RETRY_BASE_DELAY = 500;
 
+function isRetryableMethod(method?: string): boolean {
+    const normalizedMethod = (method ?? "GET").toUpperCase();
+    return normalizedMethod === "GET" || normalizedMethod === "HEAD";
+}
+
+function isRetryableError(error: unknown): boolean {
+    if (!(error instanceof Error)) return false;
+    const networkError = error as Error & { code?: string };
+    return networkError.name === "AbortError"
+        || networkError.code === "ECONNREFUSED"
+        || networkError.code === "ECONNRESET";
+}
+
+async function fetchWithTimeout(url: string, options: RequestInit): Promise<Response> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT);
+    try {
+        return await fetch(url, {
+            ...options,
+            signal: controller.signal,
+        });
+    } finally {
+        clearTimeout(timeout);
+    }
+}
+
 async function fetchWithRetry(
     url: string,
     options: RequestInit,
-    retries = MAX_RETRIES,
 ): Promise<Response> {
+    const retries = isRetryableMethod(options.method) ? MAX_RETRIES : 0;
     for (let attempt = 0; attempt <= retries; attempt++) {
         try {
-            const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT);
-            const res = await fetch(url, {
-                ...options,
-                signal: controller.signal,
-            });
-            clearTimeout(timeout);
+            const res = await fetchWithTimeout(url, options);
 
-            if (res.status >= 500 && attempt < retries) {
+            if (res.status >= 500 && res.status < 600 && attempt < retries) {
                 const delay = RETRY_BASE_DELAY * Math.pow(2, attempt);
                 await new Promise(r => setTimeout(r, delay));
                 continue;
             }
             return res;
-        } catch (err: any) {
-            if (attempt < retries && (err.name === "AbortError" || err.code === "ECONNREFUSED" || err.code === "ECONNRESET")) {
+        } catch (error: unknown) {
+            if (attempt < retries && isRetryableError(error)) {
                 const delay = RETRY_BASE_DELAY * Math.pow(2, attempt);
                 await new Promise(r => setTimeout(r, delay));
                 continue;
             }
-            throw err;
+            throw error;
         }
     }
     throw new Error("Unreachable");

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -81,6 +81,389 @@ describe("WorkerPool EdgeRuntime.waitUntil", () => {
       expect(response.status).toBe(202);
       expect(await response.text()).toBe("queued");
       expect(await waitForFile(outputPath)).toBe("http://tenant.local");
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("WorkerPool subprocess guard", () => {
+  test("blocks direct and computed imports for every fs module alias", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-filesystem-module-"));
+    const dynamicPath = join(projectRoot, "dynamic.ts");
+    await Bun.write(dynamicPath, `
+      export default async function () {
+        Error.prepareStackTrace = () => "";
+        const moduleName = process.env.FS_MODULE;
+        const fs = await import(moduleName);
+        const contents = fs.readFileSync
+          ? fs.readFileSync("/etc/hosts", "utf8")
+          : await fs.readFile("/etc/hosts", "utf8");
+        return new Response(contents);
+      }
+    `);
+
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+    const dispatch = (functionId: string, functionPath: string, fsModule: string) => pool.dispatch({
+      functionId,
+      functionPath,
+      projectRoot,
+      env: { FS_MODULE: fsModule },
+      request: new Request(`http://edge.local/functions/v1/${functionId}`),
+    });
+
+    try {
+      for (const [index, fsModule] of [
+        "fs",
+        "node:fs",
+        "fs/promises",
+        "node:fs/promises",
+      ].entries()) {
+        const directPath = join(projectRoot, `direct-${index}.ts`);
+        await Bun.write(directPath, `
+          import * as fs from ${JSON.stringify(fsModule)};
+          export default () => new Response(String(fs));
+        `);
+        for (const response of [
+          await dispatch(`proj_fs_direct_${index}`, directPath, fsModule),
+          await dispatch(`proj_fs_dynamic_${index}`, dynamicPath, fsModule),
+        ]) {
+          expect(response.status).toBe(500);
+          expect(await response.json()).toEqual({
+            error: "Direct file system module access is disabled in the multi-tenant Edge Runtime.",
+            name: "Error",
+          });
+        }
+      }
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("allows only the explicit runtime dependency root for read-only module access", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-runtime-read-root-"));
+    const functionPath = join(projectRoot, "runtime-read.ts");
+    const dependencyPath = Bun.resolveSync("elysia", import.meta.dir);
+    const runtimePath = join(import.meta.dir, "package.json");
+    await Bun.write(functionPath, `
+      export default async function () {
+        const moduleName = ["node", "fs"].join(":");
+        const fs = await import(moduleName);
+        let runtime;
+        try {
+          runtime = fs.readFileSync(process.env.RUNTIME_PATH, "utf8");
+        } catch (error) {
+          runtime = error.message;
+        }
+        return Response.json({
+          dependency: fs.readFileSync(process.env.DEPENDENCY_PATH, "utf8"),
+          runtime,
+        });
+      }
+    `);
+
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    try {
+      const response = await pool.dispatch({
+        functionId: "proj_runtime_read_root",
+        functionPath,
+        projectRoot,
+        env: { DEPENDENCY_PATH: dependencyPath, RUNTIME_PATH: runtimePath },
+        request: new Request("http://edge.local/functions/v1/runtime-read"),
+      });
+      expect(response.status).toBe(200);
+      const body = await response.json() as { dependency: string; runtime: string };
+      expect(body.dependency.length).toBeGreaterThan(100);
+      expect(body.runtime).toBe(
+        "Direct file system module access is disabled in the multi-tenant Edge Runtime.",
+      );
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects project-external modules under untrusted node_modules directories", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-module-root-"));
+    const outsideRoot = await mkdtemp(join(tmpdir(), "supacloud-untrusted-module-"));
+    const outsideModule = join(outsideRoot, "node_modules", "untrusted", "index.ts");
+    const functionPath = join(projectRoot, "entry.ts");
+    await mkdir(join(outsideRoot, "node_modules", "untrusted"), { recursive: true });
+    await Bun.write(outsideModule, `export default "outside";`);
+    await Bun.write(functionPath, `
+      import outside from ${JSON.stringify(outsideModule)};
+      export default () => new Response(outside);
+    `);
+
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    try {
+      const response = await pool.dispatch({
+        functionId: "proj_untrusted_module_root",
+        functionPath,
+        projectRoot,
+        env: {},
+        request: new Request("http://edge.local/functions/v1/untrusted-module"),
+      });
+      expect(response.status).toBe(500);
+      expect(await response.json()).toEqual({
+        error: `Access denied: module "${outsideModule}" is outside the project directory`,
+        name: "Error",
+      });
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+      await rm(outsideRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("confines Bun file APIs to the active project including symlinks", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-bun-file-project-"));
+    const siblingRoot = await mkdtemp(join(tmpdir(), "supacloud-bun-file-sibling-"));
+    const functionPath = join(projectRoot, "files.ts");
+    const projectAsset = join(projectRoot, "asset.txt");
+    const siblingAsset = join(siblingRoot, "secret.txt");
+    const symlinkPath = join(projectRoot, "escape");
+    const symlinkAsset = join(symlinkPath, "secret.txt");
+    const symlinkWrite = join(symlinkPath, "written.txt");
+    await Bun.write(projectAsset, "project-asset");
+    await Bun.write(siblingAsset, "sibling-secret");
+    await symlink(siblingRoot, symlinkPath, "dir");
+    await Bun.write(functionPath, `
+      import { file, write } from "bun";
+
+      async function capture(read) {
+        try {
+          return await read();
+        } catch (error) {
+          return error.message;
+        }
+      }
+
+      export default async function () {
+        return Response.json({
+          project: await file(process.env.PROJECT_ASSET).text(),
+          hosts: await capture(() => file("/etc/hosts").text()),
+          sibling: await capture(() => file(process.env.SIBLING_ASSET).text()),
+          symlink: await capture(() => file(process.env.SYMLINK_ASSET).text()),
+          symlinkWrite: await capture(() => write(process.env.SYMLINK_WRITE, "escaped")),
+        });
+      }
+    `);
+
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    try {
+      const response = await pool.dispatch({
+        functionId: "proj_bun_file_boundary",
+        functionPath,
+        projectRoot,
+        env: {
+          PROJECT_ASSET: projectAsset,
+          SIBLING_ASSET: siblingAsset,
+          SYMLINK_ASSET: symlinkAsset,
+          SYMLINK_WRITE: symlinkWrite,
+        },
+        request: new Request("http://edge.local/functions/v1/files"),
+      });
+      expect(response.status).toBe(200);
+      const result = await response.json() as Record<string, string>;
+      expect(result.project).toBe("project-asset");
+      expect(result.hosts).toContain("outside the project directory");
+      expect(result.sibling).toContain("outside the project directory");
+      expect(result.symlink).toContain("escapes through a symbolic link");
+      expect(result.symlinkWrite).toContain("escapes through a symbolic link");
+      expect(await Bun.file(siblingAsset).text()).toBe("sibling-secret");
+      expect(await Bun.file(symlinkWrite).exists()).toBe(false);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+      await rm(siblingRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("blocks process native loaders and computed createRequire access", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-native-loader-"));
+    const functionPath = join(projectRoot, "native.ts");
+    await Bun.write(functionPath, `
+      function capture(call) {
+        try {
+          call();
+          return "allowed";
+        } catch (error) {
+          return error.message;
+        }
+      }
+
+      export default async function () {
+        const moduleName = ["node", "module"].join(":");
+        const moduleApi = await import(moduleName);
+        return Response.json({
+          dlopen: capture(() => process.dlopen()),
+          binding: capture(() => process.binding()),
+          linkedBinding: capture(() => process._linkedBinding()),
+          getBuiltinModule: capture(() => process.getBuiltinModule("node:fs")),
+          createRequire: capture(() => moduleApi.createRequire(import.meta.url)("node:fs")),
+        });
+      }
+    `);
+
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    try {
+      const response = await pool.dispatch({
+        functionId: "proj_native_loader",
+        functionPath,
+        projectRoot,
+        env: {},
+        request: new Request("http://edge.local/functions/v1/native"),
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        dlopen: "Native and builtin module loaders are disabled in the multi-tenant Edge Runtime.",
+        binding: "Native and builtin module loaders are disabled in the multi-tenant Edge Runtime.",
+        linkedBinding: "Native and builtin module loaders are disabled in the multi-tenant Edge Runtime.",
+        getBuiltinModule: "Native and builtin module loaders are disabled in the multi-tenant Edge Runtime.",
+        createRequire: "Native and builtin module loaders are disabled in the multi-tenant Edge Runtime.",
+      });
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("blocks Bun spawn imported by tenant code", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-subprocess-"));
+    const functionPath = join(projectRoot, "spawn.ts");
+    await Bun.write(functionPath, `
+      import { spawn } from "bun";
+      export default async function () {
+        const child = spawn(["true"]);
+        await child.exited;
+        return new Response("spawned");
+      }
+    `);
+
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    try {
+      const response = await pool.dispatch({
+        functionId: "proj_subprocess",
+        functionPath,
+        projectRoot,
+        env: {},
+        request: new Request("http://edge.local/functions/v1/spawn"),
+      });
+      expect(response.status).toBe(500);
+      expect(await response.json()).toEqual({
+        error: "Subprocess execution is disabled in the multi-tenant Edge Runtime.",
+        name: "Error",
+      });
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("blocks tenant workers before they can regain subprocess APIs", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-worker-subprocess-"));
+    const functionPath = join(projectRoot, "worker-spawn.ts");
+    await Bun.write(functionPath, `
+      export default async function () {
+        const moduleName = ["node", "worker_threads"].join(":");
+        const { Worker } = await import(moduleName);
+        const worker = new Worker(
+          'postMessage(Bun.spawnSync(["true"]).exitCode)',
+          { eval: true },
+        );
+        return new Response(String(await new Promise((resolve) => {
+          worker.once("message", resolve);
+        })));
+      }
+    `);
+
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    try {
+      const response = await pool.dispatch({
+        functionId: "proj_worker_subprocess",
+        functionPath,
+        projectRoot,
+        env: {},
+        request: new Request("http://edge.local/functions/v1/worker-spawn"),
+      });
+      expect(response.status).toBe(500);
+      expect(await response.json()).toEqual({
+        error: "Subprocess execution is disabled in the multi-tenant Edge Runtime.",
+        name: "Error",
+      });
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("blocks bun:ffi before tenant code can call native process APIs", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-ffi-subprocess-"));
+    const functionPath = join(projectRoot, "ffi.ts");
+    await Bun.write(functionPath, `
+      export default async function () {
+        const moduleName = ["bun", "ffi"].join(":");
+        const { dlopen, FFIType } = await import(moduleName);
+        const libc = dlopen("libc.so.6", {
+          system: { args: [FFIType.cstring], returns: FFIType.i32 },
+        });
+        return new Response(String(libc.symbols.system(Buffer.from("true\\0"))));
+      }
+    `);
+
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    try {
+      const response = await pool.dispatch({
+        functionId: "proj_ffi_subprocess",
+        functionPath,
+        projectRoot,
+        env: {},
+        request: new Request("http://edge.local/functions/v1/ffi"),
+      });
+      expect(response.status).toBe(500);
+      expect(await response.json()).toEqual({
+        error: "Subprocess execution is disabled in the multi-tenant Edge Runtime.",
+        name: "Error",
+      });
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("allows Bun text assets while scanning tenant module imports", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-text-import-"));
+    const functionPath = join(projectRoot, "asset.ts");
+    await Bun.write(join(projectRoot, "message.txt"), "asset-loaded");
+    await Bun.write(functionPath, `
+      import message from "./message.txt" with { type: "text" };
+      export default function () {
+        return new Response(message);
+      }
+    `);
+
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    try {
+      const response = await pool.dispatch({
+        functionId: "proj_text_import",
+        functionPath,
+        projectRoot,
+        env: {},
+        request: new Request("http://edge.local/functions/v1/text-import"),
+      });
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe("asset-loaded");
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
@@ -1012,6 +1395,111 @@ describe("WorkerPool module cache", () => {
       }
     `;
   }
+
+  test("executes Deno.serve on first load and keeps explicit exports authoritative", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-deno-serve-first-"));
+    const servePath = join(projectRoot, "serve.ts");
+    const exportedPath = join(projectRoot, "exported.ts");
+    await Bun.write(servePath, `Deno.serve(() => new Response("serve-first"));`);
+    await Bun.write(exportedPath, `
+      Deno.serve(() => new Response("captured"));
+      export default () => new Response("exported");
+    `);
+
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    try {
+      const serveResponse = await pool.dispatch({
+        functionId: "proj_serve_first",
+        functionPath: servePath,
+        projectRoot,
+        moduleVersion: "v1",
+        env: {},
+        request: new Request("http://edge.local/functions/v1/serve-first"),
+      });
+      expect(serveResponse.status).toBe(200);
+      expect(await serveResponse.text()).toBe("serve-first");
+
+      const exportedResponse = await pool.dispatch({
+        functionId: "proj_serve_exported",
+        functionPath: exportedPath,
+        projectRoot,
+        moduleVersion: "v1",
+        env: {},
+        request: new Request("http://edge.local/functions/v1/serve-exported"),
+      });
+      expect(await exportedResponse.text()).toBe("exported");
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("caches a Deno.serve handler loaded during preheat", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-deno-serve-preheat-"));
+    const functionPath = join(projectRoot, "serve.ts");
+    await Bun.write(functionPath, `Deno.serve(() => new Response("preheated-serve"));`);
+
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    try {
+      expect(await pool.preheat(
+        "proj_serve_preheat",
+        functionPath,
+        projectRoot,
+        {},
+        { moduleVersion: "v1" },
+      )).toBe(true);
+
+      const response = await pool.dispatch({
+        functionId: "proj_serve_preheat",
+        functionPath,
+        projectRoot,
+        moduleVersion: "v1",
+        env: {},
+        request: new Request("http://edge.local/functions/v1/serve-preheat"),
+      });
+      expect(await response.text()).toBe("preheated-serve");
+
+      const metrics = pool.snapshotMetrics("serve_preheat");
+      expect(metrics["serve_preheat_total_module_cache_hits"]).toBe(1);
+      expect(metrics["serve_preheat_total_module_cache_misses"]).toBe(1);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("keeps each cached Deno.serve handler isolated from later imports", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-deno-serve-cache-"));
+    const functionAPath = join(projectRoot, "serve-a.ts");
+    const functionBPath = join(projectRoot, "serve-b.ts");
+    await Bun.write(functionAPath, `Deno.serve(() => new Response("serve-a"));`);
+    await Bun.write(functionBPath, `Deno.serve(() => new Response("serve-b"));`);
+
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+    const dispatch = (functionId: string, functionPath: string) => pool.dispatch({
+      functionId,
+      functionPath,
+      projectRoot,
+      moduleVersion: "v1",
+      env: {},
+      request: new Request(`http://edge.local/functions/v1/${functionId}`),
+    });
+
+    try {
+      expect(await (await dispatch("proj_serve_a", functionAPath)).text()).toBe("serve-a");
+      expect(await (await dispatch("proj_serve_b", functionBPath)).text()).toBe("serve-b");
+      expect(await (await dispatch("proj_serve_a", functionAPath)).text()).toBe("serve-a");
+
+      const metrics = pool.snapshotMetrics("serve_cache");
+      expect(metrics["serve_cache_total_module_cache_hits"]).toBe(1);
+      expect(metrics["serve_cache_total_module_cache_misses"]).toBe(2);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
 
   test("reuses stable module versions and reloads when moduleVersion changes", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-module-cache-"));

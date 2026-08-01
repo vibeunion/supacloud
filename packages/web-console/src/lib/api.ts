@@ -13,6 +13,10 @@ export type StudioLoginResult =
   | { success: true; username?: string }
   | { success: false; error: string };
 
+export type StudioLogoutResult =
+  | { success: true }
+  | { success: false; error: string };
+
 export interface StudioSessionState {
   authenticated: boolean;
   username?: string;
@@ -21,6 +25,21 @@ export interface StudioSessionState {
 
 export interface ApiRequestInit extends RequestInit {
   timeoutMs?: number;
+}
+
+export async function ensureMutationSucceeded(response: Response, fallback: string): Promise<void> {
+  const [payload, rawBody] = await Promise.all([
+    readJsonObject(response.clone()),
+    response.text().catch(() => ""),
+  ]);
+  if (response.ok && payload.success !== false) return;
+
+  const message = typeof payload.message === "string"
+    ? payload.message
+    : typeof payload.error === "string"
+      ? payload.error
+      : rawBody.trim() || fallback;
+  throw new Error(message);
 }
 
 async function readJsonObject(response: Response): Promise<Record<string, unknown>> {
@@ -40,6 +59,18 @@ function rememberStudioSessionExpiry(candidate: unknown): string | undefined {
 
 function clearStudioSessionExpiry(): void {
   studioSessionExpiresAtMs = 0;
+}
+
+async function logoutErrorMessage(response: Response): Promise<string> {
+  const [payload, rawBody] = await Promise.all([
+    readJsonObject(response.clone()),
+    response.text().catch(() => ""),
+  ]);
+  return typeof payload.error === "string"
+    ? payload.error
+    : typeof payload.message === "string"
+      ? payload.message
+      : rawBody.trim() || response.statusText || "Logout failed";
 }
 
 export async function loginStudio(username: string, password: string): Promise<StudioLoginResult> {
@@ -99,14 +130,17 @@ export async function refreshStudioSession(): Promise<StudioSessionState> {
   };
 }
 
-export async function logoutStudio(): Promise<boolean> {
+export async function logoutStudio(): Promise<StudioLogoutResult> {
   const response = await fetch("/auth/logout", {
     method: "POST",
     credentials: "include",
     headers: { "Accept": "application/json" },
   });
+  if (!response.ok) {
+    return { success: false, error: await logoutErrorMessage(response) };
+  }
   clearStudioSessionExpiry();
-  return response.ok;
+  return { success: true };
 }
 
 async function refreshExpiringStudioSession(): Promise<void> {
@@ -131,12 +165,16 @@ async function refreshExpiringStudioSession(): Promise<void> {
   }
 }
 
-function mergeAbortSignals(signals: Array<AbortSignal | null | undefined>): AbortSignal | undefined {
+function mergeAbortSignals(signals: Array<AbortSignal | null | undefined>): {
+  signal: AbortSignal | undefined;
+  cleanup: () => void;
+} {
   const validSignals = signals.filter(Boolean) as AbortSignal[];
-  if (validSignals.length === 0) return undefined;
-  if (validSignals.length === 1) return validSignals[0];
+  if (validSignals.length === 0) return { signal: undefined, cleanup: () => {} };
+  if (validSignals.length === 1) return { signal: validSignals[0], cleanup: () => {} };
 
   const controller = new AbortController();
+  const listeningSignals: AbortSignal[] = [];
   const abort = () => {
     if (!controller.signal.aborted) controller.abort();
   };
@@ -147,9 +185,15 @@ function mergeAbortSignals(signals: Array<AbortSignal | null | undefined>): Abor
       break;
     }
     signal.addEventListener("abort", abort, { once: true });
+    listeningSignals.push(signal);
   }
 
-  return controller.signal;
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      for (const signal of listeningSignals) signal.removeEventListener("abort", abort);
+    },
+  };
 }
 
 async function normalizeErrorResponse(response: Response): Promise<Response> {
@@ -185,14 +229,14 @@ export async function apiClient(url: string, options: ApiRequestInit = {}): Prom
   const timeout = timeoutController
     ? setTimeout(() => timeoutController.abort(), timeoutMs)
     : undefined;
-  const signal = mergeAbortSignals([requestInit.signal, timeoutController?.signal]);
+  const mergedSignal = mergeAbortSignals([requestInit.signal, timeoutController?.signal]);
 
   let response: Response;
   try {
     response = await fetch(url, {
       ...requestInit,
       headers,
-      signal,
+      signal: mergedSignal.signal,
       credentials: requestInit.credentials ?? "include",
     });
   } catch (error) {
@@ -210,6 +254,7 @@ export async function apiClient(url: string, options: ApiRequestInit = {}): Prom
     throw error;
   } finally {
     if (timeout !== undefined) clearTimeout(timeout);
+    mergedSignal.cleanup();
   }
 
   response = await normalizeErrorResponse(response);

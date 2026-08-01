@@ -1,9 +1,22 @@
-import { parentPort } from "worker_threads";
 import path from "path";
-import { getCapturedServeHandler, clearCapturedServeHandler, setProjectRoot, setInjectedEnv, envWriteLog } from "./deno-compat";
+import {
+  assertPathInProject,
+  assertRuntimeDependencyPath,
+  clearCapturedServeHandler,
+  disableSubprocessApis,
+  envWriteLog,
+  FILESYSTEM_DISABLED_MESSAGE,
+  getCapturedServeHandler,
+  NATIVE_LOADER_DISABLED_MESSAGE,
+  setInjectedEnv,
+  setProjectRoot,
+  SUBPROCESS_DISABLED_MESSAGE,
+} from "./deno-compat";
 import { installEdgeFetchTlsPolicy, resolveEdgeFetchTlsPolicy } from "./fetch-tls-policy";
 import type { EdgeFetchTlsPolicy } from "./fetch-tls-policy";
 import { runWithPgredisBinding } from "./internal-bindings";
+
+const { parentPort } = require("node:worker_threads") as typeof import("node:worker_threads");
 import type { PgredisRuntimeBindingConfig } from "./internal-bindings";
 
 export function getInjectedEnv(): Record<string, string> {
@@ -11,18 +24,19 @@ export function getInjectedEnv(): Record<string, string> {
 }
 
 if (!parentPort) throw new Error("This file must be run as a Worker");
+disableSubprocessApis();
 
 const MAX_MODULE_CACHE = 20;
 
 type ModuleCacheEntry = {
-  module: any;
+  handler: unknown;
   functionId: string;
   projectRef: string | null;
   lastUsed: number;
 };
 
 type LoadModuleResult = {
-  handler: any;
+  handler: unknown;
   cacheHit: boolean;
   moduleCacheSize: number;
 };
@@ -96,6 +110,87 @@ function invalidateCachedModules(predicate: (entry: ModuleCacheEntry) => boolean
     }
   }
   return invalidated;
+}
+
+async function importModuleHandler(importUrl: string): Promise<unknown> {
+  clearCapturedServeHandler();
+  try {
+    const moduleNamespace = await import(importUrl) as Record<string, unknown>;
+    const serveHandler = getCapturedServeHandler();
+    return moduleNamespace.default
+      || moduleNamespace.handler
+      || serveHandler
+      || moduleNamespace;
+  } finally {
+    clearCapturedServeHandler();
+  }
+}
+
+const DISABLED_TENANT_MODULES = new Map([
+  ["bun:ffi", SUBPROCESS_DISABLED_MESSAGE],
+  ["child_process", SUBPROCESS_DISABLED_MESSAGE],
+  ["cluster", SUBPROCESS_DISABLED_MESSAGE],
+  ["node:child_process", SUBPROCESS_DISABLED_MESSAGE],
+  ["node:cluster", SUBPROCESS_DISABLED_MESSAGE],
+  ["node:worker_threads", SUBPROCESS_DISABLED_MESSAGE],
+  ["worker_threads", SUBPROCESS_DISABLED_MESSAGE],
+  ["fs", FILESYSTEM_DISABLED_MESSAGE],
+  ["fs/promises", FILESYSTEM_DISABLED_MESSAGE],
+  ["node:fs", FILESYSTEM_DISABLED_MESSAGE],
+  ["node:fs/promises", FILESYSTEM_DISABLED_MESSAGE],
+  ["module", NATIVE_LOADER_DISABLED_MESSAGE],
+  ["node:module", NATIVE_LOADER_DISABLED_MESSAGE],
+]);
+
+function moduleLoader(filePath: string): "js" | "jsx" | "ts" | "tsx" | null {
+  if (filePath.endsWith(".tsx")) return "tsx";
+  if (filePath.endsWith(".jsx")) return "jsx";
+  if (filePath.endsWith(".ts") || filePath.endsWith(".mts") || filePath.endsWith(".cts")) return "ts";
+  if (filePath.endsWith(".js") || filePath.endsWith(".mjs") || filePath.endsWith(".cjs")) return "js";
+  return null;
+}
+
+async function assertTenantModuleGraphSafe(
+  entryPath: string,
+  projectRoot: string,
+  visited = new Set<string>(),
+): Promise<void> {
+  const resolvedEntry = path.resolve(entryPath);
+  if (visited.has(resolvedEntry)) return;
+  visited.add(resolvedEntry);
+
+  assertPathInProject(resolvedEntry);
+  const loader = moduleLoader(resolvedEntry);
+  if (!loader) return;
+  const source = await Bun.file(resolvedEntry).text();
+  const imports = new Bun.Transpiler({ loader })
+    .scanImports(source);
+  for (const imported of imports) {
+    const disabledMessage = DISABLED_TENANT_MODULES.get(imported.path);
+    if (disabledMessage) {
+      throw new Error(disabledMessage);
+    }
+    if (!imported.path.startsWith(".") && !path.isAbsolute(imported.path)) continue;
+
+    let dependencyPath = imported.path;
+    if (!path.isAbsolute(dependencyPath)) {
+      try {
+        dependencyPath = Bun.resolveSync(imported.path, path.dirname(resolvedEntry));
+      } catch {
+        continue;
+      }
+    }
+    const relative = path.relative(projectRoot, dependencyPath);
+    if (relative !== "" && (relative.startsWith("..") || path.isAbsolute(relative))) {
+      try {
+        assertRuntimeDependencyPath(dependencyPath);
+      } catch {
+        throw new Error(`Access denied: module "${imported.path}" is outside the project directory`);
+      }
+      continue;
+    }
+    await assertTenantModuleGraphSafe(dependencyPath, projectRoot, visited);
+  }
 }
 
 const originalProcessEnv = process.env;
@@ -220,6 +315,7 @@ function clearEdgeRuntimeCompat() {
 async function loadModule(input: {
   functionId: string;
   functionPath: string;
+  projectRoot: string;
   moduleVersion?: string;
   projectRef?: string | null;
 }): Promise<LoadModuleResult> {
@@ -228,15 +324,17 @@ async function loadModule(input: {
   const cached = moduleCache.get(cacheKey);
   if (cached) {
     cached.lastUsed = Date.now();
-    return { handler: cached.module, cacheHit: true, moduleCacheSize: moduleCache.size };
+    return { handler: cached.handler, cacheHit: true, moduleCacheSize: moduleCache.size };
   }
 
   evictOldestModule();
 
-  const mod = await import(buildModuleImportUrl(input.functionPath, moduleVersion));
-  const handler = mod.default || mod.handler || mod;
+  await assertTenantModuleGraphSafe(input.functionPath, input.projectRoot);
+  const handler = await importModuleHandler(
+    buildModuleImportUrl(input.functionPath, moduleVersion),
+  );
   moduleCache.set(cacheKey, {
-    module: handler,
+    handler,
     functionId: input.functionId,
     projectRef: input.projectRef || null,
     lastUsed: Date.now(),
@@ -244,9 +342,7 @@ async function loadModule(input: {
   return { handler, cacheHit: false, moduleCacheSize: moduleCache.size };
 }
 
-async function executeFunction(handler: any, request: Request): Promise<Response> {
-  clearCapturedServeHandler();
-
+async function executeFunction(handler: unknown, request: Request): Promise<Response> {
   if (typeof handler === "function") {
     const result = await handler(request);
     if (result instanceof Response) return result;
@@ -256,32 +352,27 @@ async function executeFunction(handler: any, request: Request): Promise<Response
   }
 
   if (handler && typeof handler === "object") {
-    if (typeof handler.handle === "function") {
-      const result = await handler.handle(request);
+    const objectHandler = handler as Record<string, unknown>;
+    if (typeof objectHandler.handle === "function") {
+      const result = await objectHandler.handle(request);
       if (result instanceof Response) return result;
       return new Response(JSON.stringify(result), {
         headers: { "Content-Type": "application/json" },
       });
     }
 
-    if (typeof handler.fetch === "function") {
-      const result = await handler.fetch(request);
+    if (typeof objectHandler.fetch === "function") {
+      const result = await objectHandler.fetch(request);
       if (result instanceof Response) return result;
       return new Response(JSON.stringify(result), {
         headers: { "Content-Type": "application/json" },
       });
     }
-  }
-
-  const captured = getCapturedServeHandler();
-  if (captured) {
-    const result = await captured(request);
-    if (result instanceof Response) return result;
   }
 
   throw new Error(
-    "Function must export a default function, an object with handle(), or an object with fetch(). " +
-    "For Bun.serve() / Deno.serve(), use the fetch pattern: export default { fetch(req) { return new Response('ok') } }",
+    "Function must export a default function, an object with handle()/fetch(), " +
+    "or register a handler with Deno.serve().",
   );
 }
 
@@ -431,6 +522,7 @@ async function onParentMessage(msg: unknown): Promise<void> {
         const moduleLoad = await loadModule({
           functionId: msg.functionId,
           functionPath: msg.functionPath,
+          projectRoot: msg.projectRoot,
           moduleVersion: msg.moduleVersion,
           projectRef: ref,
         });
@@ -480,6 +572,7 @@ async function onParentMessage(msg: unknown): Promise<void> {
     const moduleLoad = await loadModule({
       functionId,
       functionPath,
+      projectRoot,
       moduleVersion: msg.moduleVersion,
       projectRef,
     });

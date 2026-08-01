@@ -152,6 +152,20 @@ describe("TenantRuntimeService GoTrue auth env rendering", () => {
     expect(env).not.toContain("GOTRUE_SECURITY_REFRESH_TOKEN_ROTATION_REUSE_INTERVAL");
     expect(env).not.toContain("GOTRUE_SESSIONS_INACTIVITY_TIMEOUT");
     expect(env).not.toContain("GOTRUE_SESSIONS_TIMEBOX");
+    expect(env).not.toContain("GOTRUE_PASSWORD_REQUIRED_CHARACTERS");
+  });
+
+  test("renders GOTRUE_PASSWORD_REQUIRED_CHARACTERS with systemd-safe quoting", () => {
+    const env = renderGoTrueSessionPolicyEnv({
+      password_required_characters: "lower:upper:!@#$%",
+    });
+    expect(env).toContain('GOTRUE_PASSWORD_REQUIRED_CHARACTERS="lower:upper:!@#$%"');
+
+    // 冒号转义与空格值必须原样传入 GoTrue 的 Decode 契约
+    const escaped = renderGoTrueSessionPolicyEnv({
+      password_required_characters: "abc\\:def:xy z",
+    });
+    expect(escaped).toContain('GOTRUE_PASSWORD_REQUIRED_CHARACTERS="abc\\\\:def:xy z"');
   });
 
   test("maps canonical policy fields and compatibility aliases into GoTrue env", () => {
@@ -212,6 +226,34 @@ describe("TenantRuntimeService GoTrue auth env rendering", () => {
       jwt_expiry: 3600,
       jwt_exp: 7200,
     })).toThrow(/conflicting values/);
+  });
+
+  test("validates password_required_characters and round-trips through the stored config", () => {
+    const patch = normalizeAuthSessionPolicyPatch({
+      password_required_characters: "lower:upper:digits",
+    });
+    const auth = applyAuthSessionPolicyPatch({ password_required_characters: "digits" }, patch);
+    expect(auth).toEqual({ password_required_characters: "lower:upper:digits" });
+    expect(readAuthSessionPolicy(auth).password_required_characters).toBe("lower:upper:digits");
+
+    // null 与空字符串都恢复为无要求
+    const reset = applyAuthSessionPolicyPatch(auth, normalizeAuthSessionPolicyPatch({
+      password_required_characters: null,
+    }));
+    expect(readAuthSessionPolicy(reset).password_required_characters).toBe("");
+    const emptied = applyAuthSessionPolicyPatch(auth, normalizeAuthSessionPolicyPatch({
+      password_required_characters: "",
+    }));
+    expect(readAuthSessionPolicy(emptied).password_required_characters).toBe("");
+
+    expect(() => normalizeAuthSessionPolicyPatch({ password_required_characters: 42 }))
+      .toThrow(/password_required_characters.*string or null/);
+    expect(readAuthSessionPolicy({ password_required_characters: "::" }).password_required_characters)
+      .toBe("::");
+    expect(readAuthSessionPolicy({ password_required_characters: "x".repeat(200) }).password_required_characters)
+      .toBe("x".repeat(200));
+    expect(() => normalizeAuthSessionPolicyPatch({ password_required_characters: "ab\ncd" }))
+      .toThrow(/password_required_characters.*control character/);
   });
 
   test("defaults signup-related runtime flags to the current permissive behavior", () => {

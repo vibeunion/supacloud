@@ -13,6 +13,7 @@ import {
 import {
   ensurePlatformV2Schema,
   migrateLegacyControlSecrets,
+  migrateLegacyDeploymentHistory,
   migrateLegacyProviderLinkingConfig,
   migrateLegacyProjectWebhooks,
   migrateWebhookSecretsToControlStore,
@@ -728,30 +729,6 @@ export async function initDatabase() {
         description: "project_tasks FK cascade",
         swallowError: true,
       },
-      {
-        statement: `DO $$
-          BEGIN
-            IF EXISTS (
-              SELECT 1 FROM information_schema.columns
-              WHERE table_schema = 'public' AND table_name = 'deployment_history' AND column_name = 'project_ref'
-            ) THEN
-              DROP TABLE IF EXISTS deployment_history CASCADE;
-              CREATE TABLE deployment_history (
-                id TEXT PRIMARY KEY,
-                app TEXT NOT NULL,
-                tenant TEXT NOT NULL,
-                version TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'success',
-                deployed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                triggered_by TEXT NOT NULL DEFAULT 'api',
-                config JSONB NOT NULL DEFAULT '{}'::jsonb,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-              );
-            END IF;
-          END
-        $$;`,
-        description: "deployment_history schema migration (legacy project_ref -> new app/tenant schema)",
-      },
     ];
 
     for (const migration of migrationStatements) {
@@ -765,6 +742,7 @@ export async function initDatabase() {
     await sql.begin(async (transaction) => {
       await ensurePlatformV2Schema(transaction);
       await migrateAuditChainSequences(transaction);
+      await migrateLegacyDeploymentHistory(transaction);
       await migrateLegacyControlSecrets(transaction);
       await migrateLegacyProjectWebhooks(transaction);
       await migrateLegacyProviderLinkingConfig(transaction);

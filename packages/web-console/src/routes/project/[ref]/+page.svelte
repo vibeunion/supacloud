@@ -1,5 +1,10 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
+  import {
+    createProjectLoadToken,
+    isCurrentProjectLoad,
+    type ProjectLoadToken,
+  } from "$lib/project-load-guard";
 
   import { onMount } from "svelte";
   import { resolve } from "$app/paths";
@@ -16,6 +21,16 @@
     status: string;
   }
 
+  type TaskStats = {
+    running: number;
+    retryScheduled: number;
+    deadLettered: number;
+    failedLast24h: number;
+    cancelledLast24h: number;
+    topFailures: Array<{ message: string; count: number }>;
+    failedTrend: Array<{ bucket: string; failures: number }>;
+  };
+
   let isLoading = $state(true);
   let dbSize = $state("-");
   let connections = $state(0);
@@ -31,16 +46,10 @@
   let activeQueries = $state<Record<string, unknown>[]>([]);
   let services = $state<ServiceInfo[]>([]);
   let servicesLoading = $state(true);
-  let taskStats = $state<{
-    running: number;
-    retryScheduled: number;
-    deadLettered: number;
-    failedLast24h: number;
-    cancelledLast24h: number;
-    topFailures: Array<{ message: string; count: number }>;
-    failedTrend: Array<{ bucket: string; failures: number }>;
-  } | null>(null);
+  let taskStats = $state<TaskStats | null>(null);
   let autoRefreshTimer: ReturnType<typeof setInterval> | null = null;
+  let loadRevision = 0;
+  let loadedProjectRef = "";
 
   const projectRef = $derived(page.params.ref ?? "");
 
@@ -65,13 +74,17 @@
     functions?: {
       count?: number;
     };
-    tasks?: typeof taskStats;
+    tasks?: TaskStats | null;
     active_queries?: Record<string, unknown>[];
   };
 
-  async function runSql(sql: string): Promise<Record<string, unknown>[]> {
+  function isCurrentLoad(loadToken: ProjectLoadToken): boolean {
+    return isCurrentProjectLoad(loadToken, projectRef, loadRevision);
+  }
+
+  async function runSql(ref: string, sql: string): Promise<Record<string, unknown>[]> {
     try {
-      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+      const res = await apiClient(`/v1/projects/${ref}/database/sql`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql })
@@ -103,9 +116,9 @@
     taskStats = summary.tasks || null;
   }
 
-  async function fetchFunctionsCountLegacy() {
+  async function fetchFunctionsCountLegacy(ref: string): Promise<number> {
     try {
-      const res = await apiClient(`/v1/projects/${projectRef}/functions`);
+      const res = await apiClient(`/v1/projects/${ref}/functions`);
       if (!res.ok) return 0;
       const data = await res.json();
       return Array.isArray(data) ? data.length : 0;
@@ -114,39 +127,44 @@
     }
   }
 
-  async function refreshAuthRuntimeOwner(): Promise<boolean> {
+  async function refreshAuthRuntimeOwner(ref: string, loadToken: ProjectLoadToken): Promise<boolean> {
     try {
-      const response = await apiClient(`/v1/projects/${projectRef}/auth/runtime`);
-      if (!response.ok) return false;
+      const response = await apiClient(`/v1/projects/${ref}/auth/runtime`);
+      if (!response.ok || !isCurrentLoad(loadToken)) return false;
       const runtime = await response.json() as {
         mode?: "local" | "owner" | "shared";
         authority_project_ref?: string;
       };
+      if (!isCurrentLoad(loadToken)) return false;
       authManagedByRef = runtime.mode === "shared" && runtime.authority_project_ref
         ? runtime.authority_project_ref
         : null;
       return true;
     } catch {
-      // Dashboard summary remains the primary source; this is only a safe fallback.
       return false;
     }
   }
 
-  async function fetchDashboardLegacy(authRuntimeKnown: boolean) {
+  async function fetchDashboardLegacy(
+    ref: string,
+    loadToken: ProjectLoadToken,
+    authRuntimeKnown: boolean,
+  ): Promise<void> {
     const canReadLocalAuth = authRuntimeKnown && !authManagedByRef;
     const [dbInfo, connInfo, userInfo, tableInfo, indexInfo, storageInfo, recentUserInfo, activeInfo] = await Promise.all([
-      runSql(`SELECT pg_size_pretty(pg_database_size(current_database())) as size,
+      runSql(ref, `SELECT pg_size_pretty(pg_database_size(current_database())) as size,
               (SELECT round(100.0 * blks_hit / NULLIF(blks_hit + blks_read, 0), 1) FROM pg_stat_database WHERE datname = current_database()) as cache_ratio;`),
-      runSql(`SELECT count(*) as active FROM pg_stat_activity WHERE backend_type = 'client backend';`),
-      canReadLocalAuth ? runSql(`SELECT count(*) as total FROM auth.users;`) : Promise.resolve([]),
-      runSql(`SELECT count(*) as cnt FROM pg_stat_user_tables;`),
-      runSql(`SELECT count(*) as cnt FROM pg_stat_user_indexes;`),
-      runSql(`SELECT pg_size_pretty(coalesce(sum(CASE WHEN metadata->>'size' ~ '^[0-9]+$' THEN (metadata->>'size')::bigint ELSE 0 END), 0)) as size FROM storage.objects;`),
+      runSql(ref, `SELECT count(*) as active FROM pg_stat_activity WHERE backend_type = 'client backend';`),
+      canReadLocalAuth ? runSql(ref, `SELECT count(*) as total FROM auth.users;`) : Promise.resolve([]),
+      runSql(ref, `SELECT count(*) as cnt FROM pg_stat_user_tables;`),
+      runSql(ref, `SELECT count(*) as cnt FROM pg_stat_user_indexes;`),
+      runSql(ref, `SELECT pg_size_pretty(coalesce(sum(CASE WHEN metadata->>'size' ~ '^[0-9]+$' THEN (metadata->>'size')::bigint ELSE 0 END), 0)) as size FROM storage.objects;`),
       canReadLocalAuth
-        ? runSql(`SELECT email, created_at::text FROM auth.users ORDER BY created_at DESC LIMIT 5;`)
+        ? runSql(ref, `SELECT email, created_at::text FROM auth.users ORDER BY created_at DESC LIMIT 5;`)
         : Promise.resolve([]),
-      runSql(`SELECT pid, usename, state, left(query, 80) as query FROM pg_stat_activity WHERE backend_type = 'client backend' AND state = 'active' LIMIT 5;`),
+      runSql(ref, `SELECT pid, usename, state, left(query, 80) as query FROM pg_stat_activity WHERE backend_type = 'client backend' AND state = 'active' LIMIT 5;`),
     ]);
+    if (!isCurrentLoad(loadToken)) return;
 
     if (dbInfo[0]) {
       dbSize = String(dbInfo[0].size || "-");
@@ -159,58 +177,97 @@
     if (storageInfo[0]) storageSize = String(storageInfo[0].size || "0 bytes");
     recentUsers = authManagedByRef ? [] : recentUserInfo;
     activeQueries = activeInfo;
-    functionsCount = await fetchFunctionsCountLegacy();
-    await fetchTaskStats();
+
+    const nextFunctionsCount = await fetchFunctionsCountLegacy(ref);
+    if (!isCurrentLoad(loadToken)) return;
+    functionsCount = nextFunctionsCount;
+    await fetchTaskStats(ref, loadToken);
   }
 
-  async function fetchDashboard() {
-    isLoading = true;
+  async function fetchDashboard(ref: string, loadToken: ProjectLoadToken): Promise<void> {
     try {
-      const res = await apiClient(`/v1/projects/${projectRef}/dashboard/summary`);
+      const res = await apiClient(`/v1/projects/${ref}/dashboard/summary`);
       if (!res.ok) throw new Error("summary unavailable");
-      applyDashboardSummary(await res.json());
+      const summary = await res.json() as DashboardSummary;
+      if (isCurrentLoad(loadToken)) applyDashboardSummary(summary);
     } catch {
-      const authRuntimeKnown = await refreshAuthRuntimeOwner();
-      await fetchDashboardLegacy(authRuntimeKnown);
+      const authRuntimeKnown = await refreshAuthRuntimeOwner(ref, loadToken);
+      if (!isCurrentLoad(loadToken)) return;
+      await fetchDashboardLegacy(ref, loadToken, authRuntimeKnown);
     } finally {
-      isLoading = false;
+      if (isCurrentLoad(loadToken)) isLoading = false;
     }
   }
 
-  async function fetchServices() {
-    servicesLoading = true;
+  async function fetchServices(ref: string, loadToken: ProjectLoadToken): Promise<void> {
     try {
-      const res = await apiClient(`/v1/projects/${projectRef}/services`);
+      const res = await apiClient(`/v1/projects/${ref}/services`);
       if (res.ok) {
         const data = await res.json();
-        services = Array.isArray(data) ? data : (data.services || []);
+        if (isCurrentLoad(loadToken)) {
+          services = Array.isArray(data) ? data : (data.services || []);
+        }
       }
-    } catch {}
-    servicesLoading = false;
+    } catch {
+      // 服务状态是次要信息；请求失败时保留最近一次可用状态。
+    }
+    if (isCurrentLoad(loadToken)) servicesLoading = false;
   }
 
-  async function fetchTaskStats() {
+  async function fetchTaskStatsValue(ref: string): Promise<TaskStats | null> {
     try {
-      const res = await apiClient(`/v1/projects/${projectRef}/tasks/stats`);
-      if (res.ok) {
-        taskStats = await res.json();
-      }
-    } catch {}
+      const res = await apiClient(`/v1/projects/${ref}/tasks/stats`);
+      return res.ok ? await res.json() as TaskStats : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function fetchTaskStats(ref: string, loadToken: ProjectLoadToken): Promise<void> {
+    const nextTaskStats = await fetchTaskStatsValue(ref);
+    if (nextTaskStats && isCurrentLoad(loadToken)) taskStats = nextTaskStats;
+  }
+
+  function resetProjectDashboardState(): void {
+    dbSize = "-";
+    connections = 0;
+    maxConnections = 100;
+    totalUsers = 0;
+    cacheHitRatio = 0;
+    storageSize = "0 bytes";
+    functionsCount = 0;
+    tableCount = 0;
+    indexCount = 0;
+    recentUsers = [];
+    activeQueries = [];
+    services = [];
+    taskStats = null;
+    authManagedByRef = null;
+  }
+
+  function loadProject(ref: string): void {
+    if (ref !== loadedProjectRef) {
+      loadedProjectRef = ref;
+      resetProjectDashboardState();
+    }
+    loadRevision += 1;
+    const loadToken = createProjectLoadToken(ref, loadRevision);
+    isLoading = true;
+    servicesLoading = true;
+    void fetchDashboard(ref, loadToken);
+    void fetchServices(ref, loadToken);
   }
 
   $effect(() => {
-    // Explicitly reference projectRef to trigger re-fetch on URL change
-    const _currentRef = projectRef;
-    if (_currentRef) {
-      fetchDashboard();
-      fetchServices();
-    }
+    const ref = projectRef;
+    if (ref) loadProject(ref);
   });
 
   onMount(() => {
     autoRefreshTimer = setInterval(() => {
       if (projectRef) {
-        fetchTaskStats();
+        const loadToken = createProjectLoadToken(projectRef, loadRevision);
+        void fetchTaskStats(projectRef, loadToken);
       }
     }, 30000);
 
@@ -262,7 +319,7 @@
       <h1 class="text-2xl font-bold">{$t("Dashboard.project_dashboard")}</h1>
       <p class="text-sm text-muted-foreground mt-1">{$t("Dashboard.subtitle") || '项目概览和快速访问导航'}</p>
     </div>
-    <button onclick={() => { fetchDashboard(); fetchServices(); }}
+    <button onclick={() => loadProject(projectRef)}
       class="flex items-center gap-2 px-3 py-2 text-xs rounded-lg border hover:bg-muted/50 transition-colors">
       <RefreshCw size={12} />
       {$t("Logs.refresh") || '刷新'}

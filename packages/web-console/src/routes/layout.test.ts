@@ -22,4 +22,11 @@ describe("root layout source guards", () => {
     expect(loginPageSource).not.toContain('window.location.replace("/")');
     expect(loginPageSource).not.toContain('window.location.href = "/"');
   });
+
+  test("logout redirects only after the backend confirms success", () => {
+    expect(layoutSource).toContain("const result = await logoutStudio();");
+    expect(layoutSource).toContain("if (!result.success)");
+    expect(layoutSource).toContain("toast.error(result.error);");
+    expect(layoutSource).not.toContain("await logoutStudio();\n    } finally {");
+  });
 });

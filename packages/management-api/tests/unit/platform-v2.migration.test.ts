@@ -3,6 +3,7 @@ import type { SQL } from "bun";
 import {
   ensurePlatformV2Schema,
   migrateLegacyControlSecrets,
+  migrateLegacyDeploymentHistory,
   migrateLegacyProviderLinkingConfig,
   migrateLegacyProjectWebhooks,
   migrateWebhookSecretsToControlStore,
@@ -84,6 +85,123 @@ describe("platform v2 migrations", () => {
     expect(storedSecrets.at(-1)?.encrypted).toStartWith("enc:v1:");
     expect(await migrateLegacyControlSecrets(database)).toBe(0);
     expect(await migrateLegacyProjectWebhooks(database)).toBe(0);
+  });
+
+  test("archives and backfills legacy deployment_history without dropping data", async () => {
+    const legacyRows = [
+      {
+        id: "22222222-2222-4222-8222-222222222222",
+        project_ref: "proj_1",
+        deploy_type: "frontend",
+        description: "v1.2.3",
+        // 真实旧 schema 没有 status/deployed_at，只有 created_at。
+        created_at: new Date("2026-05-01T00:00:00.000Z"),
+      },
+      {
+        id: "33333333-3333-4333-8333-333333333333",
+        project_ref: "proj_2",
+        deploy_type: "backend",
+        version: "v2.0.0",
+        status: "failed",
+        deployed_at: new Date("2026-05-02T00:00:00.000Z"),
+      },
+    ];
+    const migrated: Array<Record<string, unknown>> = [];
+    const statements: string[] = [];
+    const database = mock((strings: TemplateStringsArray, ...values: unknown[]) => {
+      const query = strings.join("?");
+      statements.push(query);
+      if (query.includes("information_schema.columns")) {
+        return Promise.resolve([{ "?column?": 1 }]);
+      }
+      if (query.includes("SELECT * FROM deployment_history_legacy")) {
+        return Promise.resolve(legacyRows);
+      }
+      if (query.includes("INSERT INTO deployment_history")) {
+        migrated.push({
+          id: values[0], app: values[1], tenant: values[2], version: values[3],
+          status: values[4], deployed_at: values[5], triggered_by: values[6], config: values[7],
+          created_at: values[8],
+        });
+        return Promise.resolve([]);
+      }
+      if (query.includes("SELECT COUNT(*) AS count FROM deployment_history")) {
+        return Promise.resolve([{ count: migrated.length }]);
+      }
+      return Promise.resolve([]);
+    }) as unknown as SQL;
+
+    expect(await migrateLegacyDeploymentHistory(database)).toBe(2);
+
+    // 旧表被归档而不是 DROP CASCADE，新表重新建立
+    expect(statements.some((query) => query.includes("RENAME TO deployment_history_legacy"))).toBe(true);
+    expect(statements.some((query) => query.includes("DROP TABLE"))).toBe(false);
+    expect(statements.some((query) => query.includes("CREATE TABLE deployment_history"))).toBe(true);
+
+    expect(migrated).toHaveLength(2);
+    expect(migrated[0]).toMatchObject({
+      id: "22222222-2222-4222-8222-222222222222",
+      app: "frontend",
+      tenant: "proj_1",
+      version: "v1.2.3",
+      status: "success",
+      deployed_at: new Date("2026-05-01T00:00:00.000Z"),
+      triggered_by: "legacy-migration",
+      created_at: new Date("2026-05-01T00:00:00.000Z"),
+    });
+    expect(migrated[1]).toMatchObject({ app: "backend", tenant: "proj_2", version: "v2.0.0", status: "failed" });
+  });
+
+  test("skips deployment_history migration when the table already uses the new schema", async () => {
+    const database = mock((strings: TemplateStringsArray) => {
+      const query = strings.join("?");
+      if (query.includes("information_schema.columns")) return Promise.resolve([]);
+      throw new Error(`unexpected query: ${query}`);
+    }) as unknown as SQL;
+
+    expect(await migrateLegacyDeploymentHistory(database)).toBe(0);
+  });
+
+  test("blocks the upgrade when backfill row counts do not match", async () => {
+    const database = mock((strings: TemplateStringsArray) => {
+      const query = strings.join("?");
+      if (query.includes("information_schema.columns")) return Promise.resolve([{ "?column?": 1 }]);
+      if (query.includes("SELECT * FROM deployment_history_legacy")) {
+        return Promise.resolve([{
+          id: "row-1",
+          project_ref: "proj_1",
+          deploy_type: "frontend",
+          description: "v1.0.0",
+          status: "success",
+          deployed_at: new Date("2026-05-01T00:00:00.000Z"),
+        }]);
+      }
+      if (query.includes("SELECT COUNT(*)")) return Promise.resolve([{ count: 2 }]);
+      return Promise.resolve([]);
+    }) as unknown as SQL;
+
+    await expect(migrateLegacyDeploymentHistory(database)).rejects.toThrow(/backfill mismatch/);
+  });
+
+  test("blocks migration when a legacy row cannot be mapped reliably", async () => {
+    const database = mock((strings: TemplateStringsArray, ...values: unknown[]) => {
+      const query = strings.join("?");
+      if (query.includes("information_schema.columns")) return Promise.resolve([{ "?column?": 1 }]);
+      if (query.includes("SELECT * FROM deployment_history_legacy")) {
+        return Promise.resolve([{
+          id: "row-1",
+          project_ref: "proj_1",
+          deploy_type: "frontend",
+          description: "v1.0.0",
+          status: "success",
+          deployed_at: new Date("2026-05-01T00:00:00.000Z"),
+          config: "not-json",
+        }]);
+      }
+      return Promise.resolve([]);
+    }) as unknown as SQL;
+
+    await expect(migrateLegacyDeploymentHistory(database)).rejects.toThrow(/invalid JSON/);
   });
 
   test("seeds owners only from verifiable organization members", async () => {

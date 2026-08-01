@@ -29,4 +29,17 @@ describe("hosting deployment entrypoints", () => {
     expect(pageSource).toContain('$t("Hosting.webhook_trigger")');
     expect(pageSource).toContain('/v1/webhooks/{github|gitlab|gitee|gitcode}');
   });
+
+  test("reports backend deployment deletion failures without showing false success", () => {
+    expect(pageSource).toContain('import { apiClient, ensureMutationSucceeded } from "$lib/api";');
+    expect(pageSource).toContain('await ensureMutationSucceeded(response, "删除部署失败");');
+    expect(pageSource).toContain("onError: (error: unknown) => {");
+    expect(pageSource).toContain("error instanceof Error ? error.message : String(error)");
+  });
+
+  test("checks domain and token deletion responses in deployment settings", () => {
+    expect(settingsSource).toContain('await ensureMutationSucceeded(response, "删除域名失败");');
+    expect(settingsSource).toContain('await ensureMutationSucceeded(response, "删除访问令牌失败");');
+    expect(settingsSource.match(/onError: \(error: unknown\)/g) ?? []).toHaveLength(2);
+  });
 });

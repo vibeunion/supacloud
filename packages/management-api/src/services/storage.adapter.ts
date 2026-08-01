@@ -4,6 +4,7 @@ import { normalizeCiS3Endpoint } from "../utils/sdk-parity";
 import { shellService } from "./shell.service";
 import { resolveBucketName } from "../db";
 import * as fs from "node:fs/promises";
+import * as syncFs from "node:fs";
 import * as path from "node:path";
 import { S3Client } from "bun";
 import { AwsClient } from "aws4fetch";
@@ -17,6 +18,38 @@ function normalizeObjectKey(key: string): string {
     throw new Error("Invalid object key");
   }
   return normalized;
+}
+
+const BUCKET_ID_PATTERN = /^[a-zA-Z0-9._-]+$/;
+const DOT_ONLY_PATTERN = /^\.+$/;
+
+function normalizeBucketId(bucket: string): string {
+  if (!BUCKET_ID_PATTERN.test(bucket) || DOT_ONLY_PATTERN.test(bucket)) {
+    throw new Error("Invalid bucket identifier");
+  }
+  return bucket;
+}
+
+function isOutsideRoot(root: string, candidate: string): boolean {
+  const relative = path.relative(root, candidate);
+  return relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative);
+}
+
+function resolveRealPath(p: string): string {
+  const rest: string[] = [];
+  let candidate = p;
+  for (;;) {
+    try {
+      const real = syncFs.realpathSync(candidate);
+      return rest.length > 0 ? path.join(real, ...rest) : real;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      const parent = path.dirname(candidate);
+      if (parent === candidate) return candidate;
+      rest.unshift(path.basename(candidate));
+      candidate = parent;
+    }
+  }
 }
 
 export interface StorageDriver {
@@ -61,17 +94,23 @@ export class JuiceFSDriver implements StorageDriver {
     bucket?: string,
     key?: string,
   ): string {
-    const root = path.resolve(
-      config.storageMountPoint,
-      resolveBucketName(projectRef),
-    );
+    const mountRoot = path.resolve(config.storageMountPoint);
+    const realMountRoot = resolveRealPath(mountRoot);
+    const root = path.resolve(mountRoot, resolveBucketName(projectRef));
+    const realRoot = resolveRealPath(root);
+    if (isOutsideRoot(realMountRoot, realRoot)) {
+      throw new Error(`Path traversal blocked: ${realRoot} escapes ${realMountRoot}`);
+    }
     let p = root;
-    if (bucket) p = path.join(p, bucket);
+    if (bucket) p = path.join(p, normalizeBucketId(bucket));
     if (key) p = path.join(p, normalizeObjectKey(key));
-    // Resolve to absolute path and ensure it stays within the project root (prevent .. traversal)
     const resolved = path.resolve(p);
-    if (!resolved.startsWith(root)) {
+    if (isOutsideRoot(root, resolved)) {
       throw new Error(`Path traversal blocked: ${resolved} escapes ${root}`);
+    }
+    const realResolved = resolveRealPath(resolved);
+    if (isOutsideRoot(realRoot, realResolved)) {
+      throw new Error(`Path traversal blocked: ${realResolved} escapes ${realRoot}`);
     }
     return resolved;
   }

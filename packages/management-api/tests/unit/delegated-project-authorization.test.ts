@@ -115,6 +115,8 @@ describe("delegated project authorization", () => {
       ["PUT", "/domains/example.test", "tenant.domains.manage"],
       ["GET", "/cache", "operations.read"],
       ["POST", "/cache/operations", "operations.manage"],
+      ["GET", "/frontend/deployments", "operations.read"],
+      ["POST", "/frontend/deployments", "operations.manage"],
       ["GET", "/tasks", "operations.read"],
       ["POST", "/pipelines", "operations.manage"],
       ["POST", "/database/migrations", "database.migrations.manage"],
@@ -146,6 +148,21 @@ describe("delegated project authorization", () => {
       "proj_1",
     );
     expect(organizationWrite?.body.error).toContain("organizations.manage");
+
+    // viewer 不具备 operations.read/manage，frontend 部署读写均被拒绝
+    const frontendRead = await requireProjectOrAdminAuth(
+      delegatedRequest("/v1/projects/proj_1/frontend/deployments", "GET", "viewer-one"),
+      "proj_1",
+    );
+    expect(frontendRead?.status).toBe(403);
+    expect(frontendRead?.body.error).toContain("operations.read");
+
+    const frontendWrite = await requireProjectOrAdminAuth(
+      delegatedRequest("/v1/projects/proj_1/frontend/deployments", "POST", "viewer-one"),
+      "proj_1",
+    );
+    expect(frontendWrite?.status).toBe(403);
+    expect(frontendWrite?.body.error).toContain("operations.manage");
   });
 
   test("allows owner and admin reads and writes across new capability families", async () => {

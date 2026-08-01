@@ -30,35 +30,12 @@ Environment=REALTIME_IMAGE=public.ecr.aws/supabase/realtime:v2.121.1
 Environment=REALTIME_CONTAINER_NAME=supacloud-realtime
 Environment=REALTIME_DB_USER=supabase_admin
 Environment=PG_DATABASE=supacloud_meta
+Environment=REALTIME_CONTAINER_ENV_FILE=/etc/supabase/realtime-container.env
 EnvironmentFile=-/etc/supabase/management-api.env
 
 ExecStartPre=/bin/sh -c 'test -n "$$REALTIME_SECRET_KEY_BASE" && test -n "$$REALTIME_DB_ENC_KEY" && test "$${#REALTIME_DB_ENC_KEY}" -eq 16 && test -n "$$SUPACLOUD_JWT_SECRET" && test -n "$$REALTIME_IMAGE" && test -n "$$REALTIME_CONTAINER_NAME" && test -n "$$REALTIME_DB_USER" && test -n "$$PGPASSWORD"'
 ExecStartPre=-/usr/bin/podman rm -f ${REALTIME_CONTAINER_NAME}
-ExecStart=/usr/bin/podman run --replace --name ${REALTIME_CONTAINER_NAME} --network host \
-  -e PORT=4000 \
-  -e DB_HOST=${PG_HOST} \
-  -e DB_PORT=${PG_PORT} \
-  -e DB_USER=${REALTIME_DB_USER} \
-  -e DB_NAME=${PG_DATABASE} \
-  -e DB_PASSWORD=${PGPASSWORD} \
-  -e DB_USER_REALTIME=${REALTIME_DB_USER} \
-  -e DB_PASS_REALTIME=${PGPASSWORD} \
-  -e SECRET_KEY_BASE=${REALTIME_SECRET_KEY_BASE} \
-  -e JWT_SECRET=${SUPACLOUD_JWT_SECRET} \
-  -e API_JWT_SECRET=${SUPACLOUD_JWT_SECRET} \
-  -e METRICS_JWT_SECRET=${SUPACLOUD_JWT_SECRET} \
-  -e DB_SSL=false \
-  -e RLS_ENABLED=true \
-  -e MAX_HEADER_LENGTH=8192 \
-  -e RLIMIT_NOFILE=10000 \
-  -e APP_NAME=realtime \
-  -e DB_ENC_KEY=${REALTIME_DB_ENC_KEY} \
-  -e SEED_SELF_HOST=false \
-  -e RUN_JANITOR=false \
-  -e SECURE_CHANNELS=false \
-  -e REGION=us-east-1 \
-  -e DISABLE_HEALTHCHECK_LOGGING=true \
-  ${REALTIME_IMAGE}
+ExecStart=/usr/bin/podman run --replace --name ${REALTIME_CONTAINER_NAME} --network host --env-file ${REALTIME_CONTAINER_ENV_FILE} ${REALTIME_IMAGE}
 
 ExecStop=/usr/bin/podman stop -t 10 ${REALTIME_CONTAINER_NAME}
 

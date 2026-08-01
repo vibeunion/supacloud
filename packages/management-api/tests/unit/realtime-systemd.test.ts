@@ -63,13 +63,13 @@ describe("Realtime systemd deployment", () => {
     expect(unit).toContain("Environment=REALTIME_CONTAINER_NAME=supacloud-realtime");
     expect(unit).toContain("Environment=REALTIME_DB_USER=supabase_admin");
     expect(unit).toContain("Environment=PG_DATABASE=supacloud_meta");
+    expect(unit).toContain("Environment=REALTIME_CONTAINER_ENV_FILE=/etc/supabase/realtime-container.env");
     expect(unit).toContain("$${#REALTIME_DB_ENC_KEY}");
     expect(unit).toContain("test -n \"$$PGPASSWORD\"");
-    expect(unit).toContain("-e DB_USER_REALTIME=${REALTIME_DB_USER}");
-    expect(unit).toContain("-e DB_PASS_REALTIME=${PGPASSWORD}");
-    expect(unit).toContain("-e SEED_SELF_HOST=false");
-    expect(unit).toContain("-e REGION=us-east-1");
-    expect(unit).toContain("-e RUN_JANITOR=false");
+    expect(unit).toContain("--env-file ${REALTIME_CONTAINER_ENV_FILE}");
+    expect(unit).not.toContain("-e DB_PASS_REALTIME=");
+    expect(unit).not.toContain("-e JWT_SECRET=");
+    expect(unit).not.toContain("-e SECRET_KEY_BASE=");
     expect(unit).not.toContain("SystemCallFilter=");
     expect(unit).not.toContain("DB_AFTER_CONNECT_QUERY");
   });

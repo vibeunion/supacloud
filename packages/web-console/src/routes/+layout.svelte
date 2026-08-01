@@ -147,9 +147,14 @@
 
   async function handleLogout() {
     try {
-      await logoutStudio();
-    } finally {
+      const result = await logoutStudio();
+      if (!result.success) {
+        toast.error(result.error);
+        return;
+      }
       window.location.href = "/login";
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
     }
   }
 

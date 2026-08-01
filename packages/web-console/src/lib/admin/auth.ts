@@ -18,7 +18,13 @@ export const authProvider: AuthProvider = {
   },
   
   logout: async () => {
-    await logoutStudio();
+    const result = await logoutStudio();
+    if (!result.success) {
+      return {
+        success: false,
+        error: new Error(result.error)
+      };
+    }
     return {
       success: true,
       redirectTo: '/login'

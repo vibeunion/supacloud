@@ -435,4 +435,34 @@ describe("ssh admin tool", () => {
         expect(output).toContain("Migration failed");
         expect(output).not.toContain("Migration done");
     });
+
+    test("tenant migration rejects schema lists containing shell metacharacters or newlines", async () => {
+        const ssh = new FakeSsh();
+        const tool = captureSshTool(ssh);
+
+        for (const schemas of ["public\nreboot\npublic", "public;drop", "public$(id)", "pub lic", "public,'auth"]) {
+            await expect(tool.invoke({
+                action: "tenant_migrate",
+                source_ref: "source1",
+                target_ref: "target1",
+                schemas,
+            })).rejects.toThrow(/Invalid schema identifier/);
+        }
+        // 注入载荷从未进入远程命令流
+        expect(ssh.commands.join("\n")).not.toContain("reboot");
+    });
+
+    test("tenant migration quotes validated schema identifiers", async () => {
+        const ssh = new FakeSsh();
+        const tool = captureSshTool(ssh);
+
+        await tool.invoke({
+            action: "tenant_migrate",
+            source_ref: "source1",
+            target_ref: "target1",
+            schemas: "public, auth, tenant_data",
+        });
+        const command = ssh.commands.find(candidate => candidate.includes("pg_dump")) ?? "";
+        expect(command).toContain("-n 'public' -n 'auth' -n 'tenant_data'");
+    });
 });

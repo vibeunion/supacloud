@@ -7,7 +7,6 @@ set -e
 
 COMMAND=$1
 TARGET=$2
-OPTIONS=$3
 
 MOUNT_POINT="/mnt/juicefs"
 # Default points to local Supabase-specific JuiceFS metadata database
@@ -30,7 +29,8 @@ case $COMMAND in
     migrate_to_s3)
         # Migrate to S3
         # TARGET: S3_URL (e.g., s3://mybucket)
-        # OPTIONS: JSON string with access_key and secret_key
+        # Credentials are read from stdin so they never appear in process arguments.
+        OPTIONS=$(cat)
         S3_URL=$TARGET
         ACCESS_KEY=$(echo "$OPTIONS" | jq -r .access_key)
         SECRET_KEY=$(echo "$OPTIONS" | jq -r .secret_key)
@@ -64,7 +64,7 @@ case $COMMAND in
         ;;
 
     *)
-        echo "Usage: $0 {status|migrate_to_s3} [target] [options]"
+        echo "Usage: $0 {status|migrate_to_s3} [target]"
         exit 1
         ;;
 esac

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { apiClient, getStudioSession, loginStudio, logoutStudio } from "./api";
+import { apiClient, ensureMutationSucceeded, getStudioSession, loginStudio, logoutStudio } from "./api";
 
 const originalFetch = globalThis.fetch;
 const originalWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, "window");
@@ -13,6 +13,23 @@ describe("apiClient", () => {
     } else {
       Reflect.deleteProperty(globalThis, "window");
     }
+  });
+
+  test("mutation helper rejects HTTP and business-level failures", async () => {
+    await expect(ensureMutationSucceeded(
+      Response.json({ message: "Delete denied" }, { status: 403 }),
+      "Delete failed",
+    )).rejects.toThrow("Delete denied");
+    await expect(ensureMutationSucceeded(
+      new Response("Storage unavailable", { status: 503 }),
+      "Delete failed",
+    )).rejects.toThrow("Storage unavailable");
+    await expect(ensureMutationSucceeded(
+      Response.json({ success: false, error: "Operation rejected" }),
+      "Delete failed",
+    )).rejects.toThrow("Operation rejected");
+    await expect(ensureMutationSucceeded(new Response(null, { status: 204 }), "Delete failed"))
+      .resolves.toBeUndefined();
   });
 
   test("normalizes empty error responses to JSON", async () => {
@@ -73,6 +90,33 @@ describe("apiClient", () => {
     });
   });
 
+  test("removes merged AbortSignal listeners after a normal request", async () => {
+    const controller = new AbortController();
+    const signal = controller.signal as AbortSignal & {
+      addEventListener: AbortSignal["addEventListener"];
+      removeEventListener: AbortSignal["removeEventListener"];
+    };
+    const originalAdd = signal.addEventListener.bind(signal);
+    const originalRemove = signal.removeEventListener.bind(signal);
+    let adds = 0;
+    let removes = 0;
+    signal.addEventListener = ((...args: Parameters<AbortSignal["addEventListener"]>) => {
+      adds += 1;
+      return originalAdd(...args);
+    }) as AbortSignal["addEventListener"];
+    signal.removeEventListener = ((...args: Parameters<AbortSignal["removeEventListener"]>) => {
+      removes += 1;
+      return originalRemove(...args);
+    }) as AbortSignal["removeEventListener"];
+    globalThis.fetch = async () => Response.json({ ok: true });
+
+    const response = await apiClient("/v1/projects", { signal });
+
+    expect(response.ok).toBeTrue();
+    expect(adds).toBe(1);
+    expect(removes).toBe(1);
+  });
+
   test("allows SQL requests to disable the client timeout", async () => {
     globalThis.fetch = async (_input, init) => new Promise<Response>((resolve, reject) => {
       const completion = setTimeout(() => resolve(Response.json({ ok: true })), 5);
@@ -114,13 +158,61 @@ describe("apiClient", () => {
       username: "admin",
       expiresAt: "2026-07-24T03:00:00.000Z",
     });
-    expect(logout).toBe(true);
+    expect(logout).toEqual({ success: true });
     expect(calls.map(call => [call.input, call.init?.method, call.init?.credentials])).toEqual([
       ["/auth/login", "POST", "include"],
       ["/auth/session", "GET", "include"],
       ["/auth/logout", "POST", "include"],
     ]);
     expect(JSON.stringify(login)).not.toContain("token");
+  });
+
+  test("preserves the local session state and reports the backend logout error", async () => {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { location: { pathname: "/projects", href: "https://console.example.com/projects" } },
+    });
+    const calls: string[] = [];
+    globalThis.fetch = async (input) => {
+      const url = String(input);
+      calls.push(url);
+      if (url === "/auth/session") {
+        return Response.json({
+          valid: true,
+          expires_at: new Date(Date.now() + 30_000).toISOString(),
+        });
+      }
+      if (url === "/auth/logout") {
+        return Response.json({ message: "Session store unavailable" }, { status: 503 });
+      }
+      if (url === "/auth/refresh") {
+        return Response.json({
+          success: true,
+          expires_at: new Date(Date.now() + 15 * 60_000).toISOString(),
+        });
+      }
+      return Response.json({ ok: true });
+    };
+
+    await getStudioSession();
+    const logout = await logoutStudio();
+    const response = await apiClient("/v1/projects");
+
+    expect(logout).toEqual({ success: false, error: "Session store unavailable" });
+    expect(response.ok).toBeTrue();
+    expect(calls).toEqual(["/auth/session", "/auth/logout", "/auth/refresh", "/v1/projects"]);
+  });
+
+  test("reports a plain-text backend logout error", async () => {
+    globalThis.fetch = async () => new Response("Logout service unavailable", {
+      status: 503,
+      headers: { "Content-Type": "text/plain" },
+    });
+
+    await expect(logoutStudio()).resolves.toEqual({
+      success: false,
+      error: "Logout service unavailable",
+    });
   });
 
   test("preserves a managed API 401 when the cookie session remains valid", async () => {
