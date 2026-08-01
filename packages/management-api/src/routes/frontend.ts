@@ -5,6 +5,7 @@ import path from "node:path";
 import { frontendService } from "../services/frontend.service";
 import type { FrontendFramework } from "../types/frontend";
 import { FRAMEWORK_DEFAULTS } from "../types/frontend";
+import { requireProjectOrAdminAuth } from "../middleware/auth";
 
 const FRONTEND_UPLOAD_MAX_BYTES = Number(process.env.FRONTEND_UPLOAD_MAX_BYTES || 100 * 1024 * 1024);
 const FRONTEND_UPLOAD_MAX_FILES = Number(process.env.FRONTEND_UPLOAD_MAX_FILES || 10_000);
@@ -115,6 +116,11 @@ async function readUploadedZip(request: Request, body: unknown): Promise<Uint8Ar
 }
 
 export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" })
+  // 组级守卫：委托 proof 必须通过 operations 能力检查，防止越权创建部署/修改环境变量
+  .onBeforeHandle(async ({ params, request }) => {
+    const authError = await requireProjectOrAdminAuth(request, params.ref);
+    if (authError) return status(authError.status, authError.body);
+  })
   .get(
     "/deployments",
     async ({ params }) => {

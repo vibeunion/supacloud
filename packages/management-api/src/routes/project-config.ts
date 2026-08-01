@@ -135,14 +135,10 @@ function addConfigRoutes(section: string) {
       async ({
         params,
         body,
-        request,
       }: {
         params: { ref: string };
         body: Record<string, unknown>;
-        request: Request;
       }) => {
-        const authError = await requireProjectOrAdminAuth(request, params.ref);
-        if (authError) return status(authError.status, authError.body);
         const settings = await projectService.getProjectSettings(params.ref);
         if (!settings)
           return status(404, { message: "Project not found", code: "404" });
@@ -523,6 +519,7 @@ async function buildAuthConfigResponse(ref: string, settings: Record<string, unk
     uri_allow_list: authConfig.uri_allow_list ?? authConfig.URI_ALLOW_LIST ?? null,
     site_url: authConfig.site_url ?? authConfig.SITE_URL ?? null,
     password_min_length: sessionPolicy.password_min_length,
+    password_required_characters: sessionPolicy.password_required_characters,
     refresh_token_rotation_enabled:
       sessionPolicy.refresh_token_rotation_enabled,
     security_refresh_token_reuse_interval:
@@ -653,12 +650,18 @@ async function buildProjectSettingsResponse(
 }
 
 export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
+  // 组级守卫：统一保护所有 project-scoped 路由（含 addConfigRoutes 工厂与各 .use 子路由），
+  // 避免逐接口手工遗漏导致委托 member/viewer 绕过 tenant.config.read / operations.read
+  .onBeforeHandle(async ({ params, request }) => {
+    const ref = (params as { ref?: string }).ref;
+    if (!ref) return;
+    const authError = await requireProjectOrAdminAuth(request, ref);
+    if (authError) return status(authError.status, authError.body);
+  })
   // Get project settings
   .get(
     "/:ref/settings",
-    async ({ params, request }) => {
-      const authError = await requireProjectOrAdminAuth(request, params.ref);
-      if (authError) return status(authError.status, authError.body);
+    async ({ params }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (settings === null) {
         return status(404, { message: "Project not found", code: "404" });
@@ -684,9 +687,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   // Update project settings
   .put(
     "/:ref/settings",
-    async ({ params, body, request }) => {
-      const authError = await requireProjectOrAdminAuth(request, params.ref);
-      if (authError) return status(authError.status, authError.body);
+    async ({ params, body }) => {
       const managedError = getAuthRuntimeManagedError(params.ref, "configuration");
       if (managedError && Object.prototype.hasOwnProperty.call(body, "auth")) {
         return status(409, managedError);
@@ -724,9 +725,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   // Get project API keys
   .get(
     "/:ref/api-keys",
-    async ({ params, request }) => {
-      const authError = await requireProjectOrAdminAuth(request, params.ref);
-      if (authError) return status(authError.status, authError.body);
+    async ({ params }) => {
       const keys = await projectService.getApiKeys(params.ref);
       if (!keys) {
         return status(404, { message: "Project not found", code: "404" });
@@ -918,9 +917,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   // Get Auth config (Studio compatible format)
   .get(
     "/:ref/config/auth",
-    async ({ params, request }) => {
-      const authError = await requireProjectOrAdminAuth(request, params.ref);
-      if (authError) return status(authError.status, authError.body);
+    async ({ params }) => {
       const managedError = getAuthRuntimeManagedError(params.ref, "configuration");
       if (managedError) return status(409, managedError);
       const settings = await projectService.getProjectSettings(params.ref);
@@ -942,9 +939,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   // Modify Auth config (supports deep copy override for third-party Providers)
   .patch(
     "/:ref/config/auth",
-    async ({ params, body, request }) => {
-      const authError = await requireProjectOrAdminAuth(request, params.ref);
-      if (authError) return status(authError.status, authError.body);
+    async ({ params, body }) => {
       const managedError = getAuthRuntimeManagedError(params.ref, "configuration");
       if (managedError) return status(409, managedError);
       const settings = await projectService.getProjectSettings(params.ref);
@@ -1305,9 +1300,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
 
   .patch(
     "/:ref/config/pooler",
-    async ({ params, body, request }) => {
-      const authError = await requireProjectOrAdminAuth(request, params.ref);
-      if (authError) return status(authError.status, authError.body);
+    async ({ params, body }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings)
         return status(404, { message: "Project not found", code: "404" });
@@ -1332,9 +1325,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
 
   .get(
     "/:ref/database/replication",
-    async ({ params, request }) => {
-      const authError = await requireProjectOrAdminAuth(request, params.ref);
-      if (authError) return status(authError.status, authError.body);
+    async ({ params }) => {
       const { getProjectDb, resolveDbName } = await import("../db");
       const dbName = await resolveDbName(params.ref);
       const db = getProjectDb(dbName);
@@ -1359,9 +1350,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
 
   .get(
     "/:ref/types/python",
-    async ({ params, query, request }) => {
-      const authError = await requireProjectOrAdminAuth(request, params.ref);
-      if (authError) return status(authError.status, authError.body);
+    async ({ params, query }) => {
       const { getProjectDb, resolveDbName } = await import("../db");
       const dbName = await resolveDbName(params.ref);
       const db = getProjectDb(dbName);
@@ -1412,10 +1401,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   )
   .patch(
     "/:ref/config/database",
-    async ({ params, body, request }) => {
-      const authError = await requireProjectOrAdminAuth(request, params.ref);
-      if (authError) return status(authError.status, authError.body);
-
+    async ({ params, body }) => {
       let patch;
       try {
         patch = parseDatabaseConfigPatch(body);
@@ -1536,9 +1522,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   )
   .patch(
     "/:ref/config/storage",
-    async ({ params, body, request }) => {
-      const authError = await requireProjectOrAdminAuth(request, params.ref);
-      if (authError) return status(authError.status, authError.body);
+    async ({ params, body }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings)
         return status(404, { message: "Project not found", code: "404" });
@@ -1591,9 +1575,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   )
   .patch(
     "/:ref/config/realtime",
-    async ({ params, body, request }) => {
-      const authError = await requireProjectOrAdminAuth(request, params.ref);
-      if (authError) return status(authError.status, authError.body);
+    async ({ params, body }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings)
         return status(404, { message: "Project not found", code: "404" });
@@ -1632,9 +1614,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   // Get PgBouncer config (for Studio display)
   .get(
     "/:ref/pgbouncer",
-    async ({ params, request }) => {
-      const authError = await requireProjectOrAdminAuth(request, params.ref);
-      if (authError) return status(authError.status, authError.body);
+    async ({ params }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings)
         return status(404, { message: "Project not found", code: "404" });
@@ -1869,9 +1849,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   // Get Typescript Types — Real schema reflection (P0-5)
   .get(
     "/:ref/types/typescript",
-    async ({ params, query, request }) => {
-      const authError = await requireProjectOrAdminAuth(request, params.ref);
-      if (authError) return status(authError.status, authError.body);
+    async ({ params, query }) => {
       const { getProjectDb, resolveDbName } = await import("../db");
       const dbName = await resolveDbName(params.ref);
 

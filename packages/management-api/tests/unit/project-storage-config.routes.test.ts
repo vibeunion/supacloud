@@ -64,6 +64,19 @@ describe("project storage config routes", () => {
     updateProjectSettings.mockImplementation(async (_ref, settings) => settings as never);
   });
 
+  test("GET rejects failed project authorization before reading settings", async () => {
+    requireProjectOrAdminAuth.mockResolvedValue({
+      status: 403,
+      body: { error: "Missing capability: tenant.config.read" },
+    });
+
+    const res = await request("/v1/projects/proj_1/config/storage");
+
+    expect(res.status).toBe(403);
+    expect(requireProjectOrAdminAuth).toHaveBeenCalledTimes(1);
+    expect(getProjectSettings).not.toHaveBeenCalled();
+  });
+
   test("GET advertises vectors while keeping Iceberg unavailable", async () => {
     const res = await request("/v1/projects/proj_1/config/storage");
     expect(res.status).toBe(200);
@@ -110,6 +123,7 @@ describe("project storage config routes", () => {
       maxValuesPerIndex: 1_000_000,
     });
     expect(body.capabilities.storage_vectors).toBe(true);
+    expect(requireProjectOrAdminAuth).toHaveBeenCalledTimes(1);
     expect(requireProjectOrAdminAuth).toHaveBeenCalledWith(expect.any(Request), "proj_1");
   });
 });

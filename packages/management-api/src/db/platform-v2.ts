@@ -600,6 +600,108 @@ async function persistLegacyWebhook(db: SQL, projectRef: string, webhook: Migrat
   `;
 }
 
+function requiredLegacyText(value: unknown, field: string): string {
+  if (typeof value === "string" && value.trim() !== "") return value;
+  throw new Error(`deployment_history migration blocked: legacy ${field} is missing or invalid`);
+}
+
+function requiredLegacyTimestamp(value: unknown, field: string): Date {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+  if (typeof value === "string" || typeof value === "number") {
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) return parsed;
+  }
+  throw new Error(`deployment_history migration blocked: legacy ${field} is missing or invalid`);
+}
+
+function parseLegacyDeploymentConfig(value: unknown): Record<string, unknown> {
+  if (value === null || value === undefined) return {};
+  const parsed = typeof value === "string"
+    ? (() => {
+      try {
+        return JSON.parse(value) as unknown;
+      } catch {
+        throw new Error("deployment_history migration blocked: legacy config is invalid JSON");
+      }
+    })()
+    : value;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("deployment_history migration blocked: legacy config must be an object");
+  }
+  return parsed as Record<string, unknown>;
+}
+
+/**
+ * Legacy deployment_history（id UUID, project_ref, deploy_type, description, ...）
+ * 与当前 schema（id TEXT, app, tenant, version, ...）不兼容。
+ * 旧实现直接 DROP TABLE ... CASCADE，升级启动即永久丢失全部历史。
+ * 改为在同一事务内：归档旧表（RENAME 保留全部原始数据与依赖对象）、
+ * 建立新表、逐行回填、核对行数；行数不符则抛错回滚，阻断升级。
+ */
+export async function migrateLegacyDeploymentHistory(db: SQL): Promise<number> {
+  const legacy = await db`
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'deployment_history' AND column_name = 'project_ref'
+    LIMIT 1
+  `;
+  if (legacy.length === 0) return 0;
+
+  await db`ALTER TABLE deployment_history RENAME TO deployment_history_legacy`;
+  await db`
+    CREATE TABLE deployment_history (
+      id TEXT PRIMARY KEY,
+      app TEXT NOT NULL,
+      tenant TEXT NOT NULL,
+      version TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'success',
+      deployed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      triggered_by TEXT NOT NULL DEFAULT 'api',
+      config JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+
+  const rows = await db`
+    SELECT * FROM deployment_history_legacy
+  ` as Array<Record<string, unknown>>;
+
+  for (const row of rows) {
+    if (row.id === undefined || row.id === null) {
+      throw new Error("deployment_history migration blocked: legacy row without id cannot be mapped");
+    }
+    await db`
+      INSERT INTO deployment_history (id, app, tenant, version, status, deployed_at, triggered_by, config, created_at)
+      VALUES (
+        ${String(row.id)},
+        ${requiredLegacyText(row.deploy_type, "deploy_type")},
+        ${requiredLegacyText(row.project_ref, "project_ref")},
+        ${requiredLegacyText(row.version ?? row.description, "version/description")},
+        ${row.status === undefined || row.status === null
+          ? "success"
+          : requiredLegacyText(row.status, "status")},
+        ${requiredLegacyTimestamp(row.deployed_at ?? row.created_at, "deployed_at/created_at")},
+        ${typeof row.triggered_by === "string" && row.triggered_by.trim() !== ""
+          ? row.triggered_by
+          : "legacy-migration"},
+        ${parseLegacyDeploymentConfig(row.config)}::jsonb,
+        ${requiredLegacyTimestamp(row.created_at ?? row.deployed_at, "created_at/deployed_at")}
+      )
+    `;
+  }
+
+  const [{ count }] = await db`SELECT COUNT(*) AS count FROM deployment_history`;
+  if (Number(count) !== rows.length) {
+    throw new Error(
+      `deployment_history migration backfill mismatch: ${rows.length} legacy rows vs ${count} migrated rows`,
+    );
+  }
+
+  logger.info(
+    `[PlatformV2] Migrated ${rows.length} legacy deployment_history row(s); original data archived in deployment_history_legacy`,
+  );
+  return rows.length;
+}
+
 /** Move old config-embedded webhook definitions into durable metadata and managed secret storage. */
 export async function migrateLegacyProjectWebhooks(db: SQL): Promise<number> {
   const projects = await db`

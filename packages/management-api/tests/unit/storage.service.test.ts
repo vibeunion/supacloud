@@ -65,9 +65,33 @@ describe("StorageService (using adapter)", () => {
   });
 
   describe("JuiceFS Methods / Status", () => {
-    test("startMigration should trigger async sync and return a jobId", async () => {
-      const result = await service.startMigration("s3://bucket", { access_key: "ak", secret_key: "sk", endpoint: "ep" });
-      expect(result).toHaveProperty("jobId");
+    test("startMigration sends credentials over stdin instead of argv", async () => {
+      let writtenCredentials = "";
+      const spawnSpy = spyOn(Bun, "spawn").mockImplementation((() => ({
+        stdin: {
+          write(chunk: string) {
+            writtenCredentials += chunk;
+          },
+          end() {},
+        },
+        stdout: new ReadableStream({ start(controller) { controller.close(); } }),
+        stderr: new ReadableStream({ start(controller) { controller.close(); } }),
+        exited: Promise.resolve(0),
+      })) as typeof Bun.spawn);
+
+      const credentials = { access_key: "ak", secret_key: "sk", endpoint: "ep" };
+      try {
+        const result = await service.startMigration("s3://bucket", credentials);
+
+        expect(result).toHaveProperty("jobId");
+        const command = spawnSpy.mock.calls[0]?.[0] as string[];
+        expect(command).toHaveLength(3);
+        expect(command.join(" ")).not.toContain(credentials.access_key);
+        expect(command.join(" ")).not.toContain(credentials.secret_key);
+        expect(JSON.parse(writtenCredentials)).toEqual(credentials);
+      } finally {
+        spawnSpy.mockRestore();
+      }
     });
   });
 });

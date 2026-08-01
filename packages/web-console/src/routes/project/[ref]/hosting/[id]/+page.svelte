@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { apiClient } from "$lib/api";
+  import { apiClient, ensureMutationSucceeded } from "$lib/api";
 
   import { page } from "$app/state";
   import { Loader2, Save, Key, Globe, GitBranch, Terminal, Copy, RefreshCw, Trash2, Plus, ExternalLink, Upload } from "lucide-svelte";
@@ -212,11 +212,16 @@
 
   const removeDomainMutation = createMutation(() => ({
     mutationFn: async (domain: string) => {
-      await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/domains/${domain}`, { method: "DELETE" });
+      const response = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/domains/${domain}`, { method: "DELETE" });
+      await ensureMutationSucceeded(response, "删除域名失败");
       return true;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["deployment", projectRef, deployId] });
+    },
+    onError: (error: unknown) => {
+      actionMsg = `❌ ${error instanceof Error ? error.message : String(error)}`;
+      setTimeout(() => actionMsg = null, 4000);
     }
   }));
 
@@ -248,11 +253,16 @@
 
   const deleteTokenMutation = createMutation(() => ({
     mutationFn: async (tokenId: string) => {
-      await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/tokens/${tokenId}`, { method: "DELETE" });
+      const response = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/tokens/${tokenId}`, { method: "DELETE" });
+      await ensureMutationSucceeded(response, "删除访问令牌失败");
       return true;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["deployment_tokens", projectRef, deployId] });
+    },
+    onError: (error: unknown) => {
+      actionMsg = `❌ ${error instanceof Error ? error.message : String(error)}`;
+      setTimeout(() => actionMsg = null, 4000);
     }
   }));
 

@@ -1,15 +1,25 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { Elysia } from "elysia";
-import { frontendRoutes } from "../../src/routes/frontend";
 import { frontendService } from "../../src/services/frontend.service";
 import { rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+const requireProjectOrAdminAuth = mock(() => Promise.resolve(null));
+const authModule = await import("../../src/middleware/auth");
+const requireProjectOrAdminAuthSpy = spyOn(authModule, "requireProjectOrAdminAuth").mockImplementation(
+  requireProjectOrAdminAuth as typeof authModule.requireProjectOrAdminAuth,
+);
+const { frontendRoutes } = await import("../../src/routes/frontend");
+
 describe("Frontend deployment upload routes", () => {
   let app: Elysia;
   let testZipBytes: Uint8Array;
   let tempZipPath: string;
+
+  afterAll(() => {
+    requireProjectOrAdminAuthSpy.mockRestore();
+  });
 
   beforeAll(async () => {
     app = new Elysia().use(frontendRoutes);
@@ -30,6 +40,9 @@ describe("Frontend deployment upload routes", () => {
   });
 
   beforeEach(() => {
+    requireProjectOrAdminAuth.mockReset();
+    requireProjectOrAdminAuth.mockResolvedValue(null);
+
     // Mock getDeployment 保证存在该部署
     spyOn(frontendService, "getDeployment").mockImplementation(async (ref, id) => {
       return {
@@ -191,5 +204,27 @@ describe("Frontend deployment upload routes", () => {
     const data = await res.json() as any;
     expect(data.success).toBe(false);
     expect(data.message).toBe("Invalid zip archive");
+  });
+
+  test("denies the request when project authorization fails and skips the service", async () => {
+    requireProjectOrAdminAuth.mockResolvedValue({
+      status: 403,
+      body: { error: "Missing capability: operations.manage" },
+    });
+    const createDeployment = spyOn(frontendService, "createDeployment");
+    createDeployment.mockClear();
+
+    const res = await app.handle(new Request(
+      "http://localhost/v1/projects/proj123/frontend/deployments",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "denied-site", framework: "static" }),
+      },
+    ));
+
+    expect(res.status).toBe(403);
+    expect(requireProjectOrAdminAuth).toHaveBeenCalledWith(expect.any(Request), "proj123");
+    expect(createDeployment).not.toHaveBeenCalled();
   });
 });

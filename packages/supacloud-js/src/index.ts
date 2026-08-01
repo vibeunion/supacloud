@@ -446,6 +446,29 @@ const TERMINAL_STATUSES = new Set<string>([
   "completed",
 ]);
 
+function waitForPollingInterval(
+  intervalMs: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (settle: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      settle();
+    };
+    const onAbort = () => finish(() => {
+      reject(signal?.reason ?? new DOMException("Aborted", "AbortError"));
+    });
+    const timer = setTimeout(() => finish(resolve), intervalMs);
+
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted) onAbort();
+  });
+}
+
 function normalizeBaseUrl(url: string): string {
   return url.replace(/\/+$/, "");
 }
@@ -733,19 +756,7 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> exte
       const task = await this.get(taskId);
       if (TERMINAL_STATUSES.has(String(task.status))) return task;
 
-      await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(resolve, intervalMs);
-
-        if (options.signal) {
-          const onAbort = () => {
-            clearTimeout(timer);
-            options.signal?.removeEventListener("abort", onAbort);
-            reject(options.signal?.reason ?? new DOMException("Aborted", "AbortError"));
-          };
-
-          options.signal.addEventListener("abort", onAbort, { once: true });
-        }
-      });
+      await waitForPollingInterval(intervalMs, options.signal);
     }
   }
 

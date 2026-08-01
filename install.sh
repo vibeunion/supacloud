@@ -3662,21 +3662,11 @@ import sys
 source, target, env_file = map(Path, sys.argv[1:])
 lines = source.read_text().splitlines()
 result = []
-skipping = False
 for line in lines:
-    if line.startswith("ExecStart=/usr/bin/podman run"):
-        result.append(
-            "ExecStart=/usr/bin/podman run --replace "
-            "--name ${REALTIME_CONTAINER_NAME} --network host "
-            f"--env-file {env_file} ${{REALTIME_IMAGE}}"
-        )
-        skipping = True
-        continue
-    if skipping:
-        if line.strip() == "${REALTIME_IMAGE}":
-            skipping = False
-        continue
-    result.append(line)
+    if line.startswith("Environment=REALTIME_CONTAINER_ENV_FILE="):
+        result.append(f"Environment=REALTIME_CONTAINER_ENV_FILE={env_file}")
+    else:
+        result.append(line)
 target.write_text("\n".join(result) + "\n")
 PY
 }

@@ -36,6 +36,21 @@ interface S3Credentials {
   secret_key: string;
 }
 
+function readS3Credentials(projectConfig: unknown): S3Credentials | null {
+  const config = normalizeProjectConfig(projectConfig);
+  const credentials = config.s3_credentials as Record<string, unknown> | undefined;
+  if (
+    typeof credentials?.access_key !== "string" ||
+    typeof credentials.secret_key !== "string"
+  ) {
+    return null;
+  }
+  return {
+    access_key: credentials.access_key,
+    secret_key: credentials.secret_key,
+  };
+}
+
 function generateS3AccessKey(ref: string): string {
   return `supac_${ref}_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
 }
@@ -52,15 +67,8 @@ async function getOrCreateS3Credentials(ref: string): Promise<S3Credentials | nu
   const project = await projectRepository.findByRef(ref);
   if (!project) return null;
 
-  const cfg = normalizeProjectConfig(project.config);
-  const s3Creds = cfg.s3_credentials as Record<string, unknown> | undefined;
-  if (
-    s3Creds &&
-    typeof s3Creds.access_key === "string" &&
-    typeof s3Creds.secret_key === "string"
-  ) {
-    return { access_key: s3Creds.access_key, secret_key: s3Creds.secret_key };
-  }
+  const existingCredentials = readS3Credentials(project.config);
+  if (existingCredentials) return existingCredentials;
 
   // Auto-provision on first use.
   const credentials: S3Credentials = {
@@ -73,6 +81,11 @@ async function getOrCreateS3Credentials(ref: string): Promise<S3Credentials | nu
   );
   logger.info(`[storage-s3] provisioned S3 credentials for ${ref}`);
   return credentials;
+}
+
+async function getS3Credentials(ref: string): Promise<S3Credentials | null> {
+  const project = await projectRepository.findByRef(ref);
+  return project ? readS3Credentials(project.config) : null;
 }
 
 function xmlEscape(s: string): string {
@@ -134,7 +147,7 @@ async function authenticate(request: Request, ref: string): Promise<boolean> {
     const parsed = parseSigV4Header(authHeader);
     if (!parsed) return false;
 
-    const credentials = await getOrCreateS3Credentials(ref);
+    const credentials = await getS3Credentials(ref);
     if (!credentials) return false;
 
     // The access key in the credential scope must match the project's S3 access key.

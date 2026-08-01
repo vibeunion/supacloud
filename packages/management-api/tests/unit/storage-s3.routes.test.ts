@@ -326,6 +326,25 @@ describe("storageS3Routes", () => {
 // --- SigV4 auth tests ----------------------------------------------------
 
 describe("storageS3Routes SigV4 auth", () => {
+  test("SigV4 authentication never provisions credentials", async () => {
+    mockFindByRef.mockResolvedValue({
+      ref: "testproj",
+      service_role_key: "test-service-key",
+      config: {},
+    } as never);
+
+    const res = await app.handle(
+      new Request("http://localhost/v1/storage/testproj/s3/", {
+        headers: {
+          authorization: "AWS4-HMAC-SHA256 Credential=forged/20260801/us-east-1/s3/aws4_request, SignedHeaders=host, Signature=00",
+        },
+      }),
+    );
+
+    expect(res.status).toBe(403);
+    expect(mockUpdateConfig).not.toHaveBeenCalled();
+  });
+
   test("GET /credentials provisions and returns S3 credentials", async () => {
     // Simulate project without pre-existing s3_credentials (auto-provision)
     mockFindByRef.mockResolvedValue({ ref: "testproj", service_role_key: "test-service-key", config: {} } as never);

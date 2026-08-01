@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { apiClient } from "$lib/api";
+  import { apiClient, ensureMutationSucceeded } from "$lib/api";
 
   import { page } from "$app/state";
   import { goto } from "$app/navigation";
@@ -30,9 +30,8 @@
 
   const redeployMutation = createMutation(() => ({
     mutationFn: async (id: string) => {
-      const res = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${id}/redeploy`, { method: "POST" });
-      const data = await res.json();
-      if (data.success === false) throw new Error(data.error || '部署失败');
+      const response = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${id}/redeploy`, { method: "POST" });
+      await ensureMutationSucceeded(response, "部署失败");
       return true;
     },
     onSuccess: () => {
@@ -55,7 +54,8 @@
 
   const deleteMutation = createMutation(() => ({
     mutationFn: async (id: string) => {
-      await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${id}`, { method: "DELETE" });
+      const response = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${id}`, { method: "DELETE" });
+      await ensureMutationSucceeded(response, "删除部署失败");
       return true;
     },
     onMutate: (id) => {
@@ -64,6 +64,9 @@
     onSuccess: () => {
       actionMsg = "✅ 部署已删除";
       query.refetch();
+    },
+    onError: (error: unknown) => {
+      actionMsg = `❌ ${error instanceof Error ? error.message : String(error)}`;
     },
     onSettled: () => {
       deletingId = null;

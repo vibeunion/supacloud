@@ -1,6 +1,43 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import path from "path";
+import { syncBuiltinESMExports } from "node:module";
+import { fileURLToPath } from "node:url";
 
-let capturedServeHandler: Function | null = null;
+export type CapturedServeHandler = (
+  request: Request,
+) => Response | Promise<Response>;
+
+let capturedServeHandler: CapturedServeHandler | null = null;
+export const SUBPROCESS_DISABLED_MESSAGE =
+  "Subprocess execution is disabled in the multi-tenant Edge Runtime.";
+export const FILESYSTEM_DISABLED_MESSAGE =
+  "Direct file system module access is disabled in the multi-tenant Edge Runtime.";
+export const NATIVE_LOADER_DISABLED_MESSAGE =
+  "Native and builtin module loaders are disabled in the multi-tenant Edge Runtime.";
+
+const nodeFs = require("node:fs") as typeof import("node:fs");
+const nodeFsPromises = require("node:fs/promises") as typeof import("node:fs/promises");
+const runtimeFs = {
+  lstatSync: nodeFs.lstatSync.bind(nodeFs),
+  realpathSync: nodeFs.realpathSync.bind(nodeFs),
+  readFileSync: nodeFs.readFileSync.bind(nodeFs),
+  writeFileSync: nodeFs.writeFileSync.bind(nodeFs),
+  statSync: nodeFs.statSync.bind(nodeFs),
+  readdirSync: nodeFs.readdirSync.bind(nodeFs),
+  rmSync: nodeFs.rmSync.bind(nodeFs),
+  mkdirSync: nodeFs.mkdirSync.bind(nodeFs),
+  stat: nodeFsPromises.stat.bind(nodeFsPromises),
+  readdir: nodeFsPromises.readdir.bind(nodeFsPromises),
+  mkdir: nodeFsPromises.mkdir.bind(nodeFsPromises),
+  rm: nodeFsPromises.rm.bind(nodeFsPromises),
+};
+const runtimeBunFile = Bun.file.bind(Bun);
+const runtimeBunWrite = Bun.write.bind(Bun);
+
+export function runtimeFile(path: string | URL): ReturnType<typeof Bun.file> {
+  return runtimeBunFile(path);
+}
+
 export function getCapturedServeHandler() {
   return capturedServeHandler;
 }
@@ -8,11 +45,256 @@ export function clearCapturedServeHandler() {
   capturedServeHandler = null;
 }
 
-let currentProjectRoot: string | null = null;
+export function disableSubprocessApis(): void {
+  const subprocessDisabled = () => {
+    throw new Error(SUBPROCESS_DISABLED_MESSAGE);
+  };
+  const nativeLoaderDisabled = () => {
+    throw new Error(NATIVE_LOADER_DISABLED_MESSAGE);
+  };
+  const DisabledWorker = class {
+    constructor() {
+      subprocessDisabled();
+    }
+  };
+  if (globalThis.Bun) {
+    const bun = globalThis.Bun as unknown as Record<string, unknown>;
+    bun.$ = subprocessDisabled;
+    bun.spawn = subprocessDisabled;
+    bun.spawnSync = subprocessDisabled;
+    if (typeof bun.dlopen === "function") bun.dlopen = nativeLoaderDisabled;
+    bun.file = (...args: unknown[]) => {
+      assertPathInProject(args[0]);
+      return (runtimeBunFile as unknown as (...fileArgs: unknown[]) => unknown)(...args);
+    };
+    bun.write = (...args: unknown[]) => {
+      assertPathInProject(args[0]);
+      return (runtimeBunWrite as unknown as (...writeArgs: unknown[]) => unknown)(...args);
+    };
+
+    // bun:ffi 的命名导出在首次导入时会绑定 Bun.FFI 的底层入口。
+    // 必须在加载租户模块前禁用，否则可绕过 Bun.spawn 直接调用 libc system()。
+    const ffi = bun.FFI as Record<string, unknown> | undefined;
+    if (ffi) {
+      for (const name of ["callback", "dlopen", "linkSymbols"]) {
+        ffi[name] = subprocessDisabled;
+      }
+    }
+  }
+
+  const ffiModule = require("bun:ffi") as Record<string, unknown>;
+  for (const name of ["CFunction", "JSCallback", "cc", "dlopen", "linkSymbols"]) {
+    ffiModule[name] = subprocessDisabled;
+  }
+  const nativeFfi = ffiModule.native as Record<string, unknown> | undefined;
+  if (nativeFfi) {
+    nativeFfi.dlopen = subprocessDisabled;
+    nativeFfi.callback = subprocessDisabled;
+  }
+
+  // 新 Worker 有独立全局对象，不会继承本 worker 安装的 guard。
+  // 若允许租户创建 Worker，便可在子 worker 中重新调用未打补丁的 Bun.spawn。
+  (globalThis as Record<string, unknown>).Worker = DisabledWorker;
+  const workerThreads = require("node:worker_threads") as Record<string, unknown>;
+  workerThreads.Worker = DisabledWorker;
+
+  const childProcess = require("node:child_process") as Record<string, unknown>;
+  for (const name of ["exec", "execFile", "execFileSync", "execSync", "fork", "spawn", "spawnSync"]) {
+    childProcess[name] = subprocessDisabled;
+  }
+  const cluster = require("node:cluster") as Record<string, unknown>;
+  cluster.fork = subprocessDisabled;
+
+  guardFunctionExports(
+    nodeFs as unknown as Record<string, unknown>,
+  );
+  guardFunctionExports(
+    nodeFsPromises as unknown as Record<string, unknown>,
+  );
+
+  const processApi = process as unknown as Record<string, unknown>;
+  for (const name of ["dlopen", "binding", "_linkedBinding", "getBuiltinModule"]) {
+    if (typeof processApi[name] === "function") processApi[name] = nativeLoaderDisabled;
+  }
+
+  const moduleApi = require("node:module") as Record<string, unknown>;
+  for (const name of ["createRequire", "_load"]) {
+    if (typeof moduleApi[name] === "function") moduleApi[name] = nativeLoaderDisabled;
+  }
+  const modulePrototype = (moduleApi.Module as { prototype?: Record<string, unknown> } | undefined)?.prototype
+    || (moduleApi as { prototype?: Record<string, unknown> }).prototype;
+  if (modulePrototype && typeof modulePrototype.require === "function") {
+    modulePrototype.require = nativeLoaderDisabled;
+  }
+  syncBuiltinESMExports();
+}
+
+function guardFunctionExports(
+  target: Record<string, unknown>,
+): void {
+  for (const name of Object.getOwnPropertyNames(target)) {
+    const original = target[name];
+    if (typeof original !== "function") continue;
+    if (FILESYSTEM_VALUE_CONSTRUCTORS.has(name)) continue;
+
+    const guarded = function (this: unknown, ...args: unknown[]) {
+      assertFilesystemOperation(name, args);
+      if (new.target) return Reflect.construct(original, args, original);
+      return Reflect.apply(original, this, args);
+    };
+    target[name] = guarded;
+  }
+}
+
+function capturedHandler(candidate: unknown): CapturedServeHandler | null {
+  return typeof candidate === "function"
+    ? candidate as CapturedServeHandler
+    : null;
+}
+
+type ProjectPathContext = {
+  lexicalRoot: string;
+  realRoot: string;
+};
+
+const runtimeDependencyContext: ProjectPathContext = (() => {
+  const lexicalRoot = path.resolve(import.meta.dir, "node_modules");
+  let realRoot = lexicalRoot;
+  try {
+    realRoot = runtimeFs.realpathSync(lexicalRoot);
+  } catch (error) {
+    if (!isMissingPathError(error)) throw error;
+  }
+  return {
+    lexicalRoot,
+    realRoot,
+  };
+})();
+
+const FILESYSTEM_VALUE_CONSTRUCTORS = new Set([
+  "Dir",
+  "Dirent",
+  "Stats",
+  "_toUnixTimestamp",
+]);
+
+const READ_PATH_OPERATIONS = new Map<string, readonly number[]>([
+  ["access", [0]],
+  ["accessSync", [0]],
+  ["createReadStream", [0]],
+  ["exists", [0]],
+  ["existsSync", [0]],
+  ["glob", [0]],
+  ["globSync", [0]],
+  ["lstat", [0]],
+  ["lstatSync", [0]],
+  ["openAsBlob", [0]],
+  ["opendir", [0]],
+  ["opendirSync", [0]],
+  ["readFile", [0]],
+  ["readFileSync", [0]],
+  ["readdir", [0]],
+  ["readdirSync", [0]],
+  ["readlink", [0]],
+  ["readlinkSync", [0]],
+  ["realpath", [0]],
+  ["realpathSync", [0]],
+  ["stat", [0]],
+  ["statSync", [0]],
+  ["statfs", [0]],
+  ["statfsSync", [0]],
+  ["unwatchFile", [0]],
+  ["watch", [0]],
+  ["watchFile", [0]],
+  ["ReadStream", [0]],
+  ["FileReadStream", [0]],
+]);
+
+const WRITE_PATH_OPERATIONS = new Map<string, readonly number[]>([
+  ["appendFile", [0]],
+  ["appendFileSync", [0]],
+  ["chmod", [0]],
+  ["chmodSync", [0]],
+  ["chown", [0]],
+  ["chownSync", [0]],
+  ["copyFile", [0, 1]],
+  ["copyFileSync", [0, 1]],
+  ["cp", [0, 1]],
+  ["cpSync", [0, 1]],
+  ["createWriteStream", [0]],
+  ["lchmod", [0]],
+  ["lchmodSync", [0]],
+  ["lchown", [0]],
+  ["lchownSync", [0]],
+  ["link", [0, 1]],
+  ["linkSync", [0, 1]],
+  ["lutimes", [0]],
+  ["lutimesSync", [0]],
+  ["mkdir", [0]],
+  ["mkdirSync", [0]],
+  ["mkdtemp", [0]],
+  ["mkdtempSync", [0]],
+  ["rename", [0, 1]],
+  ["renameSync", [0, 1]],
+  ["rm", [0]],
+  ["rmSync", [0]],
+  ["rmdir", [0]],
+  ["rmdirSync", [0]],
+  ["truncate", [0]],
+  ["truncateSync", [0]],
+  ["unlink", [0]],
+  ["unlinkSync", [0]],
+  ["utimes", [0]],
+  ["utimesSync", [0]],
+  ["writeFile", [0]],
+  ["writeFileSync", [0]],
+  ["WriteStream", [0]],
+  ["FileWriteStream", [0]],
+]);
+
+const FILE_DESCRIPTOR_OPERATIONS = new Set([
+  "close",
+  "closeSync",
+  "fchmod",
+  "fchmodSync",
+  "fchown",
+  "fchownSync",
+  "fdatasync",
+  "fdatasyncSync",
+  "fstat",
+  "fstatSync",
+  "fsync",
+  "fsyncSync",
+  "ftruncate",
+  "ftruncateSync",
+  "futimes",
+  "futimesSync",
+  "read",
+  "readSync",
+  "readv",
+  "readvSync",
+  "write",
+  "writeSync",
+  "writev",
+  "writevSync",
+]);
+
+const projectPathContext = new AsyncLocalStorage<ProjectPathContext | null>();
+let activeProjectPathContext: ProjectPathContext | null = null;
 let injectedEnvRef: Record<string, string> = {};
 
 export function setProjectRoot(root: string | null) {
-  currentProjectRoot = root;
+  if (!root) {
+    activeProjectPathContext = null;
+    projectPathContext.enterWith(null);
+    return;
+  }
+  const lexicalRoot = path.resolve(root);
+  activeProjectPathContext = {
+    lexicalRoot,
+    realRoot: runtimeFs.realpathSync(lexicalRoot),
+  };
+  projectPathContext.enterWith(activeProjectPathContext);
 }
 
 export function setInjectedEnv(env: Record<string, string>) {
@@ -24,35 +306,126 @@ function isPathInside(candidate: string, base: string): boolean {
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
-function assertPathInProject(p: string): void {
-  if (!currentProjectRoot) return;
-  const resolved = path.resolve(p);
-  if (!isPathInside(resolved, currentProjectRoot)) {
-    throw new Error(`Access denied: path "${p}" is outside the project directory`);
+function filesystemPath(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value instanceof URL) {
+    if (value.protocol !== "file:") {
+      throw new Error(`Access denied: URL protocol "${value.protocol}" is not a local project file`);
+    }
+    return fileURLToPath(value);
+  }
+  if (value && typeof value === "object" && typeof (value as { name?: unknown }).name === "string") {
+    return (value as { name: string }).name;
+  }
+  throw new Error("Access denied: file descriptors and unverifiable file targets are not supported");
+}
+
+function isMissingPathError(error: unknown): boolean {
+  return error instanceof Error
+    && "code" in error
+    && (error as NodeJS.ErrnoException).code === "ENOENT";
+}
+
+function currentProjectPathContext(): ProjectPathContext | null {
+  return projectPathContext.getStore() || activeProjectPathContext;
+}
+
+function assertPathInContext(value: unknown, context: ProjectPathContext): void {
+  const requestedPath = filesystemPath(value);
+  const resolved = path.resolve(requestedPath);
+  if (!isPathInside(resolved, context.lexicalRoot)) {
+    throw new Error(`Access denied: path "${requestedPath}" is outside the allowed directory`);
+  }
+
+  const relative = path.relative(context.lexicalRoot, resolved);
+  let prefix = context.lexicalRoot;
+  for (const segment of relative.split(path.sep).filter(Boolean)) {
+    prefix = path.join(prefix, segment);
+    try {
+      runtimeFs.lstatSync(prefix);
+      const realPrefix = runtimeFs.realpathSync(prefix);
+      if (!isPathInside(realPrefix, context.realRoot)) {
+        throw new Error(`Access denied: path "${requestedPath}" escapes through a symbolic link`);
+      }
+    } catch (error) {
+      if (isMissingPathError(error)) break;
+      throw error;
+    }
   }
 }
 
-const BLOCKED_COMMANDS = new Set([
-  "mkfs", "shutdown", "reboot", "init",
-  "fdisk", "parted", "dd",
-  "cat", "head", "tail", "less", "more",
-  "curl", "wget", "nc", "ncat", "netcat",
-  "ssh", "scp", "sftp", "telnet",
-  "env", "printenv", "export",
-  "ps", "top", "htop", "lsof", "ss", "netstat",
-  "whoami", "id", "hostname", "uname",
-  "crontab", "at", "batch",
-  "passwd", "su", "sudo", "doas",
-  "chmod", "chown", "chgrp",
-  "kill", "killall", "pkill",
-  "docker", "podman", "kubectl",
-  "python", "python3", "perl", "ruby", "node", "bun", "bash", "sh", "zsh", "fish",
-  "rm", "rmdir",
-]);
+function isPathAllowed(value: unknown, context: ProjectPathContext): boolean {
+  try {
+    assertPathInContext(value, context);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
-function isCommandBlocked(cmd: string): boolean {
-  const base = cmd.split("/").pop() || cmd;
-  return BLOCKED_COMMANDS.has(base);
+function assertFilesystemReadPath(value: unknown, context: ProjectPathContext): void {
+  if (isPathAllowed(value, context) || isPathAllowed(value, runtimeDependencyContext)) return;
+  throw new Error(FILESYSTEM_DISABLED_MESSAGE);
+}
+
+export function assertRuntimeDependencyPath(value: unknown): void {
+  try {
+    assertPathInContext(value, runtimeDependencyContext);
+  } catch {
+    throw new Error("Access denied: module is outside the trusted runtime dependency directory");
+  }
+}
+
+function isReadOnlyOpen(flags: unknown): boolean {
+  return flags === undefined
+    || flags === "r"
+    || flags === "rs"
+    || flags === "sr"
+    || flags === nodeFs.constants.O_RDONLY;
+}
+
+function assertFilesystemOperation(name: string, args: unknown[]): void {
+  const context = currentProjectPathContext();
+  if (!context) return;
+
+  if (name === "symlink" || name === "symlinkSync") {
+    throw new Error(FILESYSTEM_DISABLED_MESSAGE);
+  }
+  if (name === "open" || name === "openSync") {
+    if (isReadOnlyOpen(args[1])) assertFilesystemReadPath(args[0], context);
+    else assertPathInProject(args[0]);
+    return;
+  }
+
+  const readPathIndexes = READ_PATH_OPERATIONS.get(name);
+  if (readPathIndexes) {
+    for (const index of readPathIndexes) assertFilesystemReadPath(args[index], context);
+    return;
+  }
+
+  const writePathIndexes = WRITE_PATH_OPERATIONS.get(name);
+  if (writePathIndexes) {
+    for (const index of writePathIndexes) assertPathInProject(args[index]);
+    return;
+  }
+
+  if (FILE_DESCRIPTOR_OPERATIONS.has(name)) return;
+  throw new Error(FILESYSTEM_DISABLED_MESSAGE);
+}
+
+export function assertPathInProject(value: unknown): void {
+  const context = currentProjectPathContext();
+  const requestedPath = filesystemPath(value);
+  if (!context) {
+    throw new Error(`Access denied: no active project for path "${requestedPath}"`);
+  }
+
+  try {
+    assertPathInContext(requestedPath, context);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("symbolic link")) throw error;
+    throw new Error(`Access denied: path "${requestedPath}" is outside the project directory`);
+  }
 }
 
 const envWriteLog: Set<string> = new Set();
@@ -76,26 +449,25 @@ const envWriteLog: Set<string> = new Set();
 
   readTextFile: (p: string) => {
     assertPathInProject(p);
-    return Bun.file(p).text();
+    return runtimeBunFile(p).text();
   },
   readFile: (p: string) => {
     assertPathInProject(p);
-    return Bun.file(p)
+    return runtimeBunFile(p)
       .arrayBuffer()
       .then((b: ArrayBuffer) => new Uint8Array(b));
   },
   writeTextFile: (p: string, d: string) => {
     assertPathInProject(p);
-    return Bun.write(p, d).then(() => {});
+    return runtimeBunWrite(p, d).then(() => {});
   },
   writeFile: (p: string, d: Uint8Array) => {
     assertPathInProject(p);
-    return Bun.write(p, d).then(() => {});
+    return runtimeBunWrite(p, d).then(() => {});
   },
   stat: async (p: string) => {
     assertPathInProject(p);
-    const { stat } = await import("fs/promises");
-    const s = await stat(p);
+    const s = await runtimeFs.stat(p);
     return {
       isFile: s.isFile(),
       isDirectory: s.isDirectory(),
@@ -105,8 +477,7 @@ const envWriteLog: Set<string> = new Set();
   },
   readDir: async function* (p: string) {
     assertPathInProject(p);
-    const { readdir } = await import("fs/promises");
-    const entries = await readdir(p, { withFileTypes: true });
+    const entries = await runtimeFs.readdir(p, { withFileTypes: true });
     for (const e of entries) {
       yield {
         name: e.name,
@@ -118,33 +489,28 @@ const envWriteLog: Set<string> = new Set();
   },
   mkdir: (p: string, opts?: { recursive?: boolean }) => {
     assertPathInProject(p);
-    const fs = require("fs/promises");
-    return fs.mkdir(p, opts);
+    return runtimeFs.mkdir(p, opts);
   },
   remove: (p: string, opts?: { recursive?: boolean }) => {
     assertPathInProject(p);
-    const fs = require("fs/promises");
-    return fs.rm(p, opts);
+    return runtimeFs.rm(p, opts);
   },
 
   readTextFileSync: (p: string) => {
     assertPathInProject(p);
-    const fs = require("fs");
-    return fs.readFileSync(p, "utf-8");
+    return runtimeFs.readFileSync(p, "utf-8");
   },
   writeFileSync: (p: string, d: string | Uint8Array) => {
     assertPathInProject(p);
-    const fs = require("fs");
     if (typeof d === "string") {
-      fs.writeFileSync(p, d, "utf-8");
+      runtimeFs.writeFileSync(p, d, "utf-8");
     } else {
-      fs.writeFileSync(p, d);
+      runtimeFs.writeFileSync(p, d);
     }
   },
   statSync: (p: string) => {
     assertPathInProject(p);
-    const fs = require("fs");
-    const s = fs.statSync(p);
+    const s = runtimeFs.statSync(p);
     return {
       isFile: s.isFile(),
       isDirectory: s.isDirectory(),
@@ -158,8 +524,7 @@ const envWriteLog: Set<string> = new Set();
   },
   readDirSync: function* (p: string) {
     assertPathInProject(p);
-    const fs = require("fs");
-    const entries = fs.readdirSync(p, { withFileTypes: true });
+    const entries = runtimeFs.readdirSync(p, { withFileTypes: true });
     for (const e of entries) {
       yield {
         name: e.name,
@@ -171,17 +536,15 @@ const envWriteLog: Set<string> = new Set();
   },
   removeSync: (p: string, opts?: { recursive?: boolean }) => {
     assertPathInProject(p);
-    const fs = require("fs");
     if (opts?.recursive) {
-      fs.rmSync(p, { recursive: true });
+      runtimeFs.rmSync(p, { recursive: true });
     } else {
-      fs.rmSync(p);
+      runtimeFs.rmSync(p);
     }
   },
   mkdirSync: (p: string, opts?: { recursive?: boolean }) => {
     assertPathInProject(p);
-    const fs = require("fs");
-    fs.mkdirSync(p, opts);
+    runtimeFs.mkdirSync(p, opts);
   },
 
   exit: (c?: number) => process.exit(c),
@@ -207,13 +570,9 @@ const envWriteLog: Set<string> = new Set();
     throw new Error("Deno.connect() not supported, use fetch/Bun.connect");
   },
   Command: class Command {
-    private cmd: string;
-    private args: string[];
-    private opts: any;
-
     constructor(
-      cmd: string,
-      opts?: {
+      _cmd: string,
+      _opts?: {
         args?: string[];
         cwd?: string;
         env?: Record<string, string>;
@@ -222,112 +581,19 @@ const envWriteLog: Set<string> = new Set();
         stderr?: "inherit" | "piped" | "null";
       },
     ) {
-      if (isCommandBlocked(cmd)) {
-        throw new Error(
-          `Deno.Command("${cmd}") is blocked for security reasons.`,
-        );
-      }
-      this.cmd = cmd;
-      this.args = opts?.args || [];
-      this.opts = opts || {};
-    }
-
-    async output() {
-      const proc = Bun.spawn([this.cmd, ...this.args], {
-        cwd: this.opts.cwd,
-        env: this.opts.env
-          ? { ...process.env, ...this.opts.env }
-          : process.env,
-        stdout:
-          this.opts.stdout === "piped"
-            ? "pipe"
-            : this.opts.stdout === "null"
-              ? "ignore"
-              : "inherit",
-        stderr:
-          this.opts.stderr === "piped"
-            ? "pipe"
-            : this.opts.stderr === "null"
-              ? "ignore"
-              : "inherit",
-      });
-      const exitCode = await proc.exited;
-      const stdout = proc.stdout
-        ? await new Response(proc.stdout)
-            .arrayBuffer()
-            .then((b) => new Uint8Array(b))
-        : new Uint8Array(0);
-      const stderr = proc.stderr
-        ? await new Response(proc.stderr)
-            .arrayBuffer()
-            .then((b) => new Uint8Array(b))
-        : new Uint8Array(0);
-      return { stdout, stderr, code: exitCode, success: exitCode === 0 };
-    }
-
-    outputSync() {
-      const proc = Bun.spawnSync([this.cmd, ...this.args], {
-        cwd: this.opts.cwd,
-        env: this.opts.env
-          ? { ...process.env, ...this.opts.env }
-          : process.env,
-        stdout:
-          this.opts.stdout === "piped"
-            ? "pipe"
-            : this.opts.stdout === "null"
-              ? "ignore"
-              : "inherit",
-        stderr:
-          this.opts.stderr === "piped"
-            ? "pipe"
-            : this.opts.stderr === "null"
-              ? "ignore"
-              : "inherit",
-      });
-      return {
-        stdout: new Uint8Array(proc.stdout?.buffer || new ArrayBuffer(0)),
-        stderr: new Uint8Array(proc.stderr?.buffer || new ArrayBuffer(0)),
-        code: proc.exitCode ?? 1,
-        success: proc.exitCode === 0,
-      };
-    }
-
-    spawn() {
-      return Bun.spawn([this.cmd, ...this.args], {
-        cwd: this.opts.cwd,
-        env: this.opts.env
-          ? { ...process.env, ...this.opts.env }
-          : process.env,
-        stdin:
-          this.opts.stdin === "piped"
-            ? "pipe"
-            : this.opts.stdin === "null"
-              ? "ignore"
-              : "inherit",
-        stdout:
-          this.opts.stdout === "piped"
-            ? "pipe"
-            : this.opts.stdout === "null"
-              ? "ignore"
-              : "inherit",
-        stderr:
-          this.opts.stderr === "piped"
-            ? "pipe"
-            : this.opts.stderr === "null"
-              ? "ignore"
-              : "inherit",
-      });
+      throw new Error(
+        SUBPROCESS_DISABLED_MESSAGE,
+      );
     }
   },
-  serve: (handlerOrOpts: any, maybeHandler?: any) => {
-    if (typeof handlerOrOpts === "function") {
-      capturedServeHandler = handlerOrOpts;
-    } else if (typeof maybeHandler === "function") {
-      capturedServeHandler = maybeHandler;
-    } else if (handlerOrOpts && typeof handlerOrOpts === "object") {
-      capturedServeHandler =
-        handlerOrOpts.handler || handlerOrOpts.fetch || null;
-    }
+  serve: (handlerOrOpts: unknown, maybeHandler?: unknown) => {
+    const options = handlerOrOpts && typeof handlerOrOpts === "object"
+      ? handlerOrOpts as Record<string, unknown>
+      : {};
+    capturedServeHandler = capturedHandler(handlerOrOpts)
+      || capturedHandler(maybeHandler)
+      || capturedHandler(options.handler)
+      || capturedHandler(options.fetch);
     const mockServer = {
       finished: Promise.resolve(),
       shutdown: async () => {},

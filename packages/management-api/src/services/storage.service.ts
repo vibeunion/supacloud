@@ -120,10 +120,13 @@ export class StorageService {
 
         job.logs.push(`[${new Date().toISOString()}] Starting juicefs sync to ${s3Url}...`);
         
-        const proc = Bun.spawn([scriptPath, 'migrate_to_s3', s3Url, options], {
+        const proc = Bun.spawn([scriptPath, 'migrate_to_s3', s3Url], {
+          stdin: 'pipe',
           stdout: 'pipe',
           stderr: 'pipe'
         });
+        proc.stdin.write(options);
+        proc.stdin.end();
 
         // Function to process a single pipe stream, extracting progress strings
         const processStream = async (stream: ReadableStream<Uint8Array>) => {

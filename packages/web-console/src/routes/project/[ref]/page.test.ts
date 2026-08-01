@@ -9,4 +9,17 @@ describe("project dashboard", () => {
     expect(pageSource).toContain("<!-- Quick Links -->");
     expect(pageSource).not.toContain("<!-- Quick Access Cards -->");
   });
+
+  test("rejects stale dashboard responses after project changes or refreshes", () => {
+    expect(pageSource).toContain("createProjectLoadToken");
+    expect(pageSource).toContain("isCurrentProjectLoad(loadToken, projectRef, loadRevision)");
+    expect(pageSource).toContain("loadRevision += 1;");
+    expect(pageSource).toContain("if (isCurrentLoad(loadToken)) applyDashboardSummary(summary);");
+    expect(pageSource).toContain("if (isCurrentLoad(loadToken)) servicesLoading = false;");
+    expect(pageSource).toContain("if (nextTaskStats && isCurrentLoad(loadToken)) taskStats = nextTaskStats;");
+    expect(pageSource).toContain("resetProjectDashboardState();");
+    expect(pageSource).toContain("services = [];");
+    expect(pageSource).toContain("authManagedByRef = null;");
+    expect(pageSource).toContain("onclick={() => loadProject(projectRef)}");
+  });
 });

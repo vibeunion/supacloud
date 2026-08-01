@@ -1,3 +1,5 @@
+import { runtimeFile } from "./deno-compat";
+
 type FetchLike = typeof globalThis.fetch;
 
 export type EdgeFetchTlsPolicy = {
@@ -35,7 +37,7 @@ export async function resolveEdgeFetchTlsPolicy(
 
   const caFile = pickString(hostEnv.SUPACLOUD_EDGE_TLS_CA_FILE);
   if (caFile) {
-    return { ca: await Bun.file(caFile).text(), source: "ca-file" };
+    return { ca: await runtimeFile(caFile).text(), source: "ca-file" };
   }
 
   return { source: "none" };

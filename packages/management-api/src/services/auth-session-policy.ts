@@ -1,9 +1,12 @@
+import { renderSystemdEnvLine } from "../utils/systemd-env";
+
 export const AUTH_SESSION_POLICY_DEFAULTS = Object.freeze({
     jwt_expiry: 3600,
     refresh_token_rotation_enabled: true,
     security_refresh_token_reuse_interval: 10,
     security_update_password_require_reauthentication: true,
     password_min_length: 8,
+    password_required_characters: "",
     sessions_inactivity_timeout: null as number | null,
     sessions_single_per_user: false,
     sessions_timebox: null as number | null,
@@ -15,6 +18,7 @@ export type AuthSessionPolicy = {
     security_refresh_token_reuse_interval: number;
     security_update_password_require_reauthentication: boolean;
     password_min_length: number;
+    password_required_characters: string;
     sessions_inactivity_timeout: number | null;
     sessions_single_per_user: boolean;
     sessions_timebox: number | null;
@@ -22,7 +26,7 @@ export type AuthSessionPolicy = {
 
 export type AuthSessionPolicyKey = keyof AuthSessionPolicy;
 
-type AuthSessionPolicyPatchValue = number | boolean | null;
+type AuthSessionPolicyPatchValue = number | boolean | string | null;
 
 export type AuthSessionPolicyPatch = {
     values: Partial<Record<AuthSessionPolicyKey, AuthSessionPolicyPatchValue>>;
@@ -47,6 +51,7 @@ const AUTH_SESSION_POLICY_ALIASES: Record<AuthSessionPolicyKey, readonly string[
     security_refresh_token_reuse_interval: ["security_refresh_token_rotation_reuse_interval"],
     security_update_password_require_reauthentication: [],
     password_min_length: [],
+    password_required_characters: [],
     sessions_inactivity_timeout: [],
     sessions_single_per_user: [],
     sessions_timebox: [],
@@ -158,6 +163,20 @@ function parseDurationPolicyValue(
     return normalized;
 }
 
+function parseRequiredCharactersPolicyValue(
+    field: AuthSessionPolicyKey,
+    value: unknown,
+): string | null {
+    if (value === null) return null;
+    if (typeof value !== "string") {
+        return invalidPolicyValue(field, "must be a string or null");
+    }
+    if (CONFIG_CONTROL_CHARACTERS.test(value)) {
+        return invalidPolicyValue(field, "contains a forbidden control character");
+    }
+    return value;
+}
+
 function parseAuthSessionPolicyValue(
     field: AuthSessionPolicyKey,
     value: unknown,
@@ -170,6 +189,8 @@ function parseAuthSessionPolicyValue(
             return parseIntegerPolicyValue(field, value, { min: 0, max: 2_147_483_647 });
         case "password_min_length":
             return parseIntegerPolicyValue(field, value, { min: 6, max: 32_767 });
+        case "password_required_characters":
+            return parseRequiredCharactersPolicyValue(field, value);
         case "refresh_token_rotation_enabled":
         case "security_update_password_require_reauthentication":
         case "sessions_single_per_user":
@@ -262,6 +283,9 @@ export function renderGoTrueSessionPolicyEnv(authConfig: Record<string, unknown>
         `GOTRUE_JWT_EXP=${policy.jwt_expiry}`,
         `GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION=${policy.security_update_password_require_reauthentication}`,
         `GOTRUE_PASSWORD_MIN_LENGTH=${policy.password_min_length}`,
+        policy.password_required_characters === ""
+            ? ""
+            : renderSystemdEnvLine("GOTRUE_PASSWORD_REQUIRED_CHARACTERS", policy.password_required_characters),
         `GOTRUE_SECURITY_REFRESH_TOKEN_ROTATION_ENABLED=${policy.refresh_token_rotation_enabled}`,
         `GOTRUE_SECURITY_REFRESH_TOKEN_REUSE_INTERVAL=${policy.security_refresh_token_reuse_interval}`,
         `GOTRUE_SESSIONS_SINGLE_PER_USER=${policy.sessions_single_per_user}`,
