@@ -1356,18 +1356,22 @@ describe("WorkerPool cooperative retirement", () => {
 
   test("triggers the count budget once and stops accepting requests", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-retirement-count-"));
+    const firstStartedPath = join(projectRoot, "first-started.txt");
+    const secondStartedPath = join(projectRoot, "second-started.txt");
     const functionPath = join(projectRoot, "slow.ts");
     await Bun.write(functionPath, `
       export default async function fetch(request) {
-        await new Promise((resolve) => {
+        const aborted = new Promise((resolve) => {
           const keepAlive = setInterval(() => {}, 10);
           request.signal.addEventListener("abort", () => {
             setTimeout(() => {
               clearInterval(keepAlive);
               resolve();
-            }, 150);
+            }, 500);
           }, { once: true });
         });
+        await Bun.write(process.env.STARTED_PATH, "started");
+        await aborted;
         return new Response("retired");
       }
     `);
@@ -1375,25 +1379,44 @@ describe("WorkerPool cooperative retirement", () => {
     const exceeded: string[] = [];
     const pool = new WorkerPool({
       size: 1,
-      requestTimeout: 25,
+      requestTimeout: 100,
       retirementBudget: { maxRetiredWorkers: 1, maxRetirementAgeMs: 1_000 },
       onRetirementBudgetExceeded: (event) => exceeded.push(event.limit),
     });
     pools.push(pool);
 
     try {
-      const dispatchSlow = () => pool.dispatch({
+      const preheatReplacement = () => pool.preheat(
+        "proj_retirement_count",
+        functionPath,
+        projectRoot,
+        {},
+      );
+      const dispatchSlow = async (startedPath: string) => {
+        const responsePromise = pool.dispatch({
+          functionId: "proj_retirement_count",
+          functionPath,
+          projectRoot,
+          env: { STARTED_PATH: startedPath },
+          request: new Request("http://edge.local/functions/v1/slow"),
+        });
+        await waitForFile(startedPath);
+        return responsePromise;
+      };
+
+      expect(await preheatReplacement()).toBe(true);
+      expect((await dispatchSlow(firstStartedPath)).status).toBe(504);
+      expect(await preheatReplacement()).toBe(true);
+      expect((await dispatchSlow(secondStartedPath)).status).toBe(504);
+      expect(exceeded).toEqual(["count"]);
+      expect(pool.snapshotMetrics("retirement")["retirement_retirement_budget_exceeded"]).toBe(1);
+      expect((await pool.dispatch({
         functionId: "proj_retirement_count",
         functionPath,
         projectRoot,
         env: {},
         request: new Request("http://edge.local/functions/v1/slow"),
-      });
-      expect((await dispatchSlow()).status).toBe(504);
-      expect((await dispatchSlow()).status).toBe(504);
-      expect(exceeded).toEqual(["count"]);
-      expect(pool.snapshotMetrics("retirement")["retirement_retirement_budget_exceeded"]).toBe(1);
-      expect((await dispatchSlow()).status).toBe(503);
+      })).status).toBe(503);
       await waitForMetric(pool, "total_natural_worker_exits", 2);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
@@ -1402,10 +1425,11 @@ describe("WorkerPool cooperative retirement", () => {
 
   test("triggers the age budget once for a worker that cannot drain promptly", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-retirement-age-"));
+    const startedPath = join(projectRoot, "started.txt");
     const functionPath = join(projectRoot, "slow.ts");
     await Bun.write(functionPath, `
       export default async function fetch(request) {
-        await new Promise((resolve) => {
+        const aborted = new Promise((resolve) => {
           const keepAlive = setInterval(() => {}, 10);
           request.signal.addEventListener("abort", () => {
             setTimeout(() => {
@@ -1414,6 +1438,8 @@ describe("WorkerPool cooperative retirement", () => {
             }, 150);
           }, { once: true });
         });
+        await Bun.write(process.env.STARTED_PATH, "started");
+        await aborted;
         return new Response("retired");
       }
     `);
@@ -1421,21 +1447,28 @@ describe("WorkerPool cooperative retirement", () => {
     const exceeded: string[] = [];
     const pool = new WorkerPool({
       size: 1,
-      requestTimeout: 25,
+      requestTimeout: 100,
       retirementBudget: { maxRetiredWorkers: 8, maxRetirementAgeMs: 30 },
       onRetirementBudgetExceeded: (event) => exceeded.push(event.limit),
     });
     pools.push(pool);
 
     try {
-      const response = await pool.dispatch({
+      expect(await pool.preheat(
+        "proj_retirement_age",
+        functionPath,
+        projectRoot,
+        {},
+      )).toBe(true);
+      const responsePromise = pool.dispatch({
         functionId: "proj_retirement_age",
         functionPath,
         projectRoot,
-        env: {},
+        env: { STARTED_PATH: startedPath },
         request: new Request("http://edge.local/functions/v1/slow"),
       });
-      expect(response.status).toBe(504);
+      await waitForFile(startedPath);
+      expect((await responsePromise).status).toBe(504);
       await waitForMetric(pool, "retirement_budget_exceeded", 1);
       expect(exceeded).toEqual(["age"]);
       await Bun.sleep(50);
