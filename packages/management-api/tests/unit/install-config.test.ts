@@ -1107,6 +1107,34 @@ describe("installer configuration persistence", () => {
     expect(resolveMode().status).not.toBe(0);
   });
 
+  test("management install preflight fails closed when privilege tools are unavailable", () => {
+    const dir = makeTempDir();
+    const emptyBin = join(dir, "empty-bin");
+    mkdirSync(emptyBin);
+
+    const missing = runBash(
+      'source install.sh; PATH="$EMPTY_BIN"; ensure_management_privilege_tools_available',
+      { EMPTY_BIN: emptyBin },
+    );
+    expect(missing.status).not.toBe(0);
+    expect(missing.stdout).toContain("requires setpriv");
+
+    writeFileSync(join(emptyBin, "setpriv"), "#!/usr/bin/env bash\nexit 0\n", { mode: 0o755 });
+    const missingId = runBash(
+      'source install.sh; PATH="$EMPTY_BIN"; ensure_management_privilege_tools_available',
+      { EMPTY_BIN: emptyBin },
+    );
+    expect(missingId.status).not.toBe(0);
+    expect(missingId.stdout).toContain("requires id");
+
+    writeFileSync(join(emptyBin, "id"), "#!/usr/bin/env bash\nexit 0\n", { mode: 0o755 });
+    const available = runBash(
+      'source install.sh; PATH="$EMPTY_BIN"; ensure_management_privilege_tools_available',
+      { EMPTY_BIN: emptyBin },
+    );
+    expect(available.status, available.stderr).toBe(0);
+  });
+
   test("management recovery reconciles the privilege drop-in when the committed mode changes", () => {
     const runRecovery = (runtimeMode: "embedded" | "external", priorDropIn: "present" | "absent") => {
       const dir = makeTempDir();

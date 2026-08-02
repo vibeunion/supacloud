@@ -16,6 +16,8 @@ const BACKUP_TIMEOUT_MS = 30 * 60_000;
 const PITR_TIMEOUT_MS = 30 * 60_000;
 const TIMEOUT_KILL_AFTER = "--kill-after=30s";
 const SETPRIV_PATH = ["/usr/bin/setpriv", "/bin/setpriv"].find(existsSync) ?? "/usr/bin/setpriv";
+const ID_PATH = ["/usr/bin/id", "/bin/id"].find(existsSync) ?? "/usr/bin/id";
+const PRIMARY_GID_PATTERN = /^\d+$/;
 
 interface PgBackRestCommandResult {
   exitCode: number;
@@ -68,30 +70,52 @@ export function isPitrEnabled(environment: Record<string, string | undefined> = 
   return environment.SUPACLOUD_PITR_ENABLED === "true" || environment.PITR_ENABLED === "true";
 }
 
-function privilegeDropCommand(user: string, command: string[]): string[] {
+async function primaryGid(user: string): Promise<string> {
+  const identityProcess = Bun.spawn([
+    "timeout",
+    TIMEOUT_KILL_AFTER,
+    String(Math.ceil(INFO_TIMEOUT_MS / 1000)),
+    ID_PATH,
+    "-g",
+    user,
+  ], { stdout: "pipe", stderr: "pipe" });
+  const [exitCode, stdout] = await Promise.all([
+    identityProcess.exited,
+    new Response(identityProcess.stdout).text(),
+    new Response(identityProcess.stderr).text(),
+  ]);
+  const gid = stdout.trim();
+  if (exitCode !== 0 || !PRIMARY_GID_PATTERN.test(gid)) {
+    throw new Error("Backup user primary GID lookup failed");
+  }
+  return gid;
+}
+
+function privilegeDropCommand(user: string, gid: string, command: string[]): string[] {
   return [
     SETPRIV_PATH,
     "--reuid",
     user,
     "--regid",
-    user,
-    "--clear-groups",
+    gid,
+    "--init-groups",
     "--",
     ...command,
   ];
 }
 
-function pgBackRestCommand(
+async function pgBackRestCommand(
   pgBackRestArguments: string[],
   timeoutMs = pgBackRestArguments.includes("backup") ? BACKUP_TIMEOUT_MS : INFO_TIMEOUT_MS,
-): string[] {
+): Promise<string[]> {
   const configuration = readPgBackRestConfiguration();
   const configurationArgument = configuration.config ? [`--config=${configuration.config}`] : [];
+  const gid = await primaryGid(configuration.user);
   return [
     "timeout",
     TIMEOUT_KILL_AFTER,
     String(Math.ceil(timeoutMs / 1000)),
-    ...privilegeDropCommand(configuration.user, [
+    ...privilegeDropCommand(configuration.user, gid, [
       configuration.binary,
       ...configurationArgument,
       `--stanza=${configuration.stanza}`,
@@ -102,7 +126,8 @@ function pgBackRestCommand(
 
 async function runPgBackRest(pgBackRestArguments: string[], timeoutMs: number): Promise<PgBackRestCommandResult> {
   try {
-    const pgBackRestProcess = Bun.spawn(pgBackRestCommand(pgBackRestArguments, timeoutMs), { stdout: "pipe", stderr: "pipe" });
+    const command = await pgBackRestCommand(pgBackRestArguments, timeoutMs);
+    const pgBackRestProcess = Bun.spawn(command, { stdout: "pipe", stderr: "pipe" });
     const [exitCode, stdout] = await Promise.all([
       pgBackRestProcess.exited,
       new Response(pgBackRestProcess.stdout).text(),
@@ -304,11 +329,12 @@ export async function restore(request: RestoreRequest): Promise<{ message: strin
   try {
     let exitCode: number;
     try {
+      const postgresGid = await primaryGid("postgres");
       const restoreProcess = Bun.spawn([
         "timeout",
         TIMEOUT_KILL_AFTER,
         String(Math.ceil(PITR_TIMEOUT_MS / 1000)),
-        ...privilegeDropCommand("postgres", [
+        ...privilegeDropCommand("postgres", postgresGid, [
           "pig",
           "pitr",
           "-s",

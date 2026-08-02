@@ -26,6 +26,7 @@ const WEB_CONSOLE_ROOT = "/opt/supacloud/web-console";
 const WEB_CONSOLE_RELEASES_DIR = `${WEB_CONSOLE_ROOT}/releases`;
 const WEB_CONSOLE_CURRENT_LINK = WEB_CONSOLE_CURRENT_DIR;
 const DEFAULT_EDGE_RUNTIME_CAPACITY_DROPIN = "/etc/systemd/system/supacloud-edge-runtime.service.d/50-edge-runtime-capacity.conf";
+const DEFAULT_MANAGEMENT_PRIVILEGE_DROPIN = "/etc/systemd/system/supacloud.service.d/40-management-privilege.conf";
 const DEFAULT_EMBEDDED_EDGE_PRIVILEGE_DROPIN = "/etc/systemd/system/supacloud.service.d/50-embedded-edge-privilege.conf";
 const DEFAULT_EDGE_WORKER_POOL_SIZE = 20;
 const DEFAULT_EDGE_BACKGROUND_WORKER_POOL_SIZE = 20;
@@ -360,6 +361,15 @@ export async function verifyManagementUpgradePreflight(
     const snapshot = await inspectActiveManagementBinary(options);
     assertCanonicalManagementBinary(snapshot, "Refusing to migrate");
     return snapshot;
+}
+
+export function verifyBackupPrivilegeDropPreflight(
+    pathExists: (filePath: string) => boolean = existsSync,
+): void {
+    const setprivPath = ["/usr/bin/setpriv", "/bin/setpriv"].find(pathExists);
+    const idPath = ["/usr/bin/id", "/bin/id"].find(pathExists);
+    if (!setprivPath) throw new Error("Management upgrade requires setpriv for backup privilege separation");
+    if (!idPath) throw new Error("Management upgrade requires id for backup account resolution");
 }
 
 export async function verifyActivatedManagementBinary(
@@ -698,6 +708,18 @@ CPUWeight=60
 TasksMax=${config.tasksMax}
 OOMPolicy=stop
 `;
+}
+
+export function buildManagementPrivilegeDropIn() {
+    return `[Service]
+# Backup and PITR commands use setpriv from the root Management API process.
+CapabilityBoundingSet=
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_SETGID CAP_SETUID
+`;
+}
+
+function ensureManagementPrivilegeDropIn(filePath = DEFAULT_MANAGEMENT_PRIVILEGE_DROPIN) {
+    writeFileAtomically(filePath, buildManagementPrivilegeDropIn(), 0o644);
 }
 
 export function buildEmbeddedEdgePrivilegeDropIn() {
@@ -1266,14 +1288,35 @@ async function reloadSystemdUnits() {
     }
 }
 
-async function reconcileEmbeddedEdgePrivilegeDropIn(mode: "embedded" | "external", identity: EdgeRuntimeIdentity) {
+async function reconcileEmbeddedPrivilegeDropIn(
+    mode: "embedded" | "external",
+    identity: EdgeRuntimeIdentity,
+    filePath: string,
+) {
     if (mode === "embedded") {
         await ensureEmbeddedEdgeRuntimeSourceAccess(identity);
-        writeFileAtomically(embeddedEdgePrivilegeDropIn(), buildEmbeddedEdgePrivilegeDropIn(), 0o644);
+        writeFileAtomically(filePath, buildEmbeddedEdgePrivilegeDropIn(), 0o644);
     } else {
-        rmSync(embeddedEdgePrivilegeDropIn(), { force: true });
+        rmSync(filePath, { force: true });
     }
-    await reloadSystemdUnits();
+}
+
+export async function reconcileManagementPrivilegeDropIns(
+    mode: "embedded" | "external",
+    identity: EdgeRuntimeIdentity,
+    options: {
+        managementDropInPath?: string;
+        embeddedDropInPath?: string;
+        reloadSystemd?: () => Promise<void>;
+    } = {},
+) {
+    await reconcileEmbeddedPrivilegeDropIn(
+        mode,
+        identity,
+        options.embeddedDropInPath ?? embeddedEdgePrivilegeDropIn(),
+    );
+    ensureManagementPrivilegeDropIn(options.managementDropInPath);
+    await (options.reloadSystemd ?? reloadSystemdUnits)();
 }
 
 async function edgeRuntimeServiceIsInstalled(): Promise<boolean> {
@@ -1402,6 +1445,7 @@ type UpgradeActivationState = {
     managementEnvState: FileState | null;
     edgeRuntimeEnvState: FileState | null;
     edgeRuntimeDropInState: FileState | null;
+    managementPrivilegeDropInState: FileState | null;
     embeddedEdgePrivilegeDropInState: FileState | null;
 };
 
@@ -1449,6 +1493,9 @@ async function rollbackArtifacts(state: UpgradeActivationState, stagedWeb: Stage
     }
     if (state.edgeRuntimeDropInState) {
         restoreFileState(state.edgeRuntimeDropInState);
+    }
+    if (state.managementPrivilegeDropInState) {
+        restoreFileState(state.managementPrivilegeDropInState);
     }
     if (state.embeddedEdgePrivilegeDropInState) {
         restoreFileState(state.embeddedEdgePrivilegeDropInState);
@@ -1504,6 +1551,7 @@ export async function runUpgrade(options: { forceYes?: boolean; targetVersion?: 
         await executeUpgradeTransaction({
             preflight: async () => {
                 s.start(`Verifying ${MANAGEMENT_SERVICE_UNIT} uses the canonical upgrade target`);
+                verifyBackupPrivilegeDropPreflight();
                 await verifyManagementUpgradePreflight();
             },
             stage: async () => {
@@ -1529,6 +1577,7 @@ export async function runUpgrade(options: { forceYes?: boolean; targetVersion?: 
                     managementEnvState: null,
                     edgeRuntimeEnvState: null,
                     edgeRuntimeDropInState: null,
+                    managementPrivilegeDropInState: null,
                     embeddedEdgePrivilegeDropInState: null,
                 };
                 await activateArtifacts(stagedBinary, stagedWeb, activationState);
@@ -1539,12 +1588,13 @@ export async function runUpgrade(options: { forceYes?: boolean; targetVersion?: 
                 activationState.managementEnvState = captureFileState(managementEnvFile());
                 activationState.edgeRuntimeEnvState = captureFileState(edgeRuntimeEnvFile());
                 activationState.edgeRuntimeDropInState = captureFileState(edgeRuntimeCapacityDropIn());
+                activationState.managementPrivilegeDropInState = captureFileState(DEFAULT_MANAGEMENT_PRIVILEGE_DROPIN);
                 activationState.embeddedEdgePrivilegeDropInState = captureFileState(embeddedEdgePrivilegeDropIn());
                 const edgeRuntimeIdentity = await ensurePersistedEdgeRuntimeIdentity(managementEnvFile());
                 upsertPersistedEdgeRuntimePort(managementEnvFile(), edgeRuntimeEnvFile());
                 const edgeRuntimeMode = await runtimeModeForBinaryUpgrade();
                 activatedEdgeRuntimeMode = edgeRuntimeMode;
-                await reconcileEmbeddedEdgePrivilegeDropIn(edgeRuntimeMode, edgeRuntimeIdentity);
+                await reconcileManagementPrivilegeDropIns(edgeRuntimeMode, edgeRuntimeIdentity);
                 if (edgeRuntimeMode === "external") {
                     await ensureEdgeRuntimeCapacityDropIn(env);
                 }

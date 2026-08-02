@@ -351,6 +351,7 @@ describe("runtime companion version assets", () => {
 
   test("production units use dedicated runtime env files and pinned compiled Edge Runtime commands", () => {
     const installer = readRepoFile("install.sh");
+    const upgrade = readRepoFile("packages/management-api/src/upgrade.ts");
     const managementUnit = readRepoFile("infrastructure/systemd/supacloud.service");
     const edgeUnit = readRepoFile("infrastructure/systemd/supacloud-edge-runtime.service");
     const realtimeUnit = readRepoFile("infrastructure/systemd/supacloud-realtime.service");
@@ -398,8 +399,12 @@ describe("runtime companion version assets", () => {
     expect(selfHostEdgeDockerfile).toContain("EXPOSE 9005");
     expect(managementUnit).not.toContain("ReadWritePaths=/etc/supabase /etc/systemd/system ");
     expect(managementUnit).toContain("/run/supacloud-unit-requests");
-    expect(managementUnit).toContain("CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER");
-    expect(managementUnit).not.toContain("CAP_SETUID");
+    expect(managementUnit).toContain("CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_SETGID CAP_SETUID");
+    expect(installer).toContain("CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_SETGID CAP_SETUID");
+    expect(installer).toContain("ensure_management_privilege_tools_available");
+    expect(installer).toContain("for tool in setpriv id");
+    expect(upgrade).toContain("verifyBackupPrivilegeDropPreflight();");
+    expect(upgrade).toContain("40-management-privilege.conf");
     expect(installer).toContain("configure_management_edge_privilege_dropin");
     expect(installer).toContain(
       'MANAGEMENT_EDGE_PRIVILEGE_DROPIN="${SUPACLOUD_EMBEDDED_EDGE_PRIVILEGE_DROPIN:-/etc/systemd/system/supacloud.service.d/50-embedded-edge-privilege.conf}"',
