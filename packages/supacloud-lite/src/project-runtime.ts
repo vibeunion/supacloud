@@ -42,6 +42,7 @@ export interface ProjectRuntimeOptions {
   includeFunctions?: boolean
   includeWebhooks?: boolean
   includeSeed?: boolean
+  startRuntimeServices?: boolean
   log?: (message: string) => void
 }
 
@@ -257,6 +258,7 @@ export async function createProjectBackend(options: ProjectRuntimeOptions = {}):
     ),
     functionEnv,
     webhooks,
+    startRuntimeServices: options.startRuntimeServices,
     storageDriver: options.storageDriver ?? createStorageDriver(configuredStorageBackend, paths.storageDir, options.s3),
     log: options.log,
   })
@@ -298,7 +300,7 @@ function createStorageDriver(
 
 export async function startProjectServer(options: ProjectRuntimeOptions = {}): Promise<RunningProjectServer> {
   const resolvedOptions = options.port === 0 ? { ...options, port: await findEphemeralPort(options.host) } : options
-  const project = await createProjectBackend(resolvedOptions)
+  const project = await createProjectBackend({ ...resolvedOptions, startRuntimeServices: true })
   try {
     const server = await serveBun(project.backend, { host: project.host, port: project.port })
     let closePromise: Promise<void> | null = null

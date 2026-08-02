@@ -119,6 +119,8 @@ export interface BackendConfig {
   authRateLimits?: Record<string, import('./auth/rate-limit.js').RateLimitRule>
   /** Mount the auth service. Default true; config.toml auth.enabled = false turns /auth/v1 off. */
   authEnabled?: boolean
+  /** Start Realtime and background services. Disable for short-lived maintenance commands. Default true. */
+  startRuntimeServices?: boolean
 }
 
 /** A rendered outbound email (OTP code, magic link, recovery, etc.). */

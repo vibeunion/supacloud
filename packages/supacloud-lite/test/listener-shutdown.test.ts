@@ -1,7 +1,44 @@
 import { expect, test } from 'bun:test'
 import { Database as TinbaseDatabase } from '../src/vendor/tinbase/db/database.js'
 import type { DbEngine, EngineResults, EngineTx, EngineUnsubscribe } from '../src/vendor/tinbase/db/engine.js'
+import { createBackend } from '../src/vendor/tinbase/index.js'
+import { computeDbDiff, pullSchema } from '../src/vendor/tinbase/node/db-diff.js'
 import { RealtimeEngine } from '../src/vendor/tinbase/realtime/engine.js'
+
+test('utility backends do not attach database listeners', async () => {
+  let listenCalls = 0
+  const engine = createListenerEngine(async () => {
+    listenCalls += 1
+    return () => {}
+  })
+  const backend = await createBackend({ engine, startRuntimeServices: false, log: () => {} })
+
+  expect(listenCalls).toBe(0)
+  await backend.close()
+  expect(listenCalls).toBe(0)
+})
+
+test('schema diff utilities keep shadow and live engines listener-free', async () => {
+  const listenCalls = { diffShadow: 0, diffLive: 0, pullShadow: 0, pullLive: 0 }
+  const createCountingEngine = (backendName: keyof typeof listenCalls) =>
+    createListenerEngine(async () => {
+      listenCalls[backendName] += 1
+      return () => {}
+    })
+
+  await computeDbDiff({
+    migrations: [],
+    makeShadowEngine: async () => createCountingEngine('diffShadow'),
+    liveEngine: createCountingEngine('diffLive'),
+  })
+  await pullSchema({
+    migrations: [],
+    makeShadowEngine: async () => createCountingEngine('pullShadow'),
+    liveEngine: createCountingEngine('pullLive'),
+  })
+
+  expect(listenCalls).toEqual({ diffShadow: 0, diffLive: 0, pullShadow: 0, pullLive: 0 })
+})
 
 test('shares CDC LISTEN and awaits the final asynchronous unsubscribe', async () => {
   const unsubscribeGate = Promise.withResolvers<void>()

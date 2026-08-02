@@ -36,6 +36,7 @@ export async function computeDbDiff(opts: DbDiffOptions): Promise<string[]> {
   const shadow: TinbaseBackend = await createBackend({
     engine: opts.makeShadowEngine ? await opts.makeShadowEngine() : undefined,
     migrations: opts.migrations,
+    startRuntimeServices: false,
     // no seed: seed is data, not schema
   })
   let live: TinbaseBackend | undefined
@@ -48,6 +49,7 @@ export async function computeDbDiff(opts: DbDiffOptions): Promise<string[]> {
       engine: opts.liveEngine,
       dataDir: opts.liveEngine ? undefined : opts.liveDataDir,
       migrations: opts.migrations,
+      startRuntimeServices: false,
     })
     const shadowSnap = await snapshotSchema(shadow.db, schema)
     const liveSnap = await snapshotSchema(live.db, schema)
@@ -101,6 +103,7 @@ export async function pullSchema(opts: DbPullOptions): Promise<DbPullResult> {
   const shadow: TinbaseBackend = await createBackend({
     engine: opts.makeShadowEngine ? await opts.makeShadowEngine() : undefined,
     migrations: opts.migrations,
+    startRuntimeServices: false,
   })
   let live: TinbaseBackend | undefined
   let operationFailed = false
@@ -109,6 +112,7 @@ export async function pullSchema(opts: DbPullOptions): Promise<DbPullResult> {
       engine: opts.liveEngine,
       dataDir: opts.liveEngine ? undefined : opts.liveDataDir,
       migrations: opts.migrations,
+      startRuntimeServices: false,
     })
     const ddl = diffSchemas(await snapshotSchema(shadow.db, schema), await snapshotSchema(live.db, schema), schema)
     if (ddl.length === 0) return { ddl, version: null, path: null }
