@@ -10,6 +10,7 @@
  */
 import type { CdcEvent, Database } from '../db/database.js'
 import { quoteIdent } from '../db/database.js'
+import type { EngineUnsubscribe } from '../db/engine.js'
 import { verifyJwt } from '../jwt.js'
 import type { RequestContext } from '../types.js'
 
@@ -89,8 +90,8 @@ export class RealtimeEngine {
   private phxRefCounter = 1
   /** topic → key → metas */
   private presence = new Map<string, Map<string, PresenceMetas>>()
-  private stopCdc: (() => void) | null = null
-  private stopDbBroadcast: (() => void) | null = null
+  private stopCdc: EngineUnsubscribe | null = null
+  private stopDbBroadcast: EngineUnsubscribe | null = null
 
   constructor(
     private db: Database,
@@ -184,13 +185,19 @@ export class RealtimeEngine {
   }
 
   /** Detach listeners and close every open socket (server shutdown). */
-  stop(): void {
-    this.stopCdc?.()
+  async stop(): Promise<void> {
+    const stopCdc = this.stopCdc
+    const stopDbBroadcast = this.stopDbBroadcast
     this.stopCdc = null
-    this.stopDbBroadcast?.()
     this.stopDbBroadcast = null
     for (const conn of this.connections) conn.socket.close(1001, 'server shutting down')
     this.connections.clear()
+    const [cdcStop, broadcastStop] = await Promise.allSettled([
+      Promise.resolve().then(() => stopCdc?.()),
+      Promise.resolve().then(() => stopDbBroadcast?.()),
+    ])
+    if (cdcStop.status === 'rejected') throw cdcStop.reason
+    if (broadcastStop.status === 'rejected') throw broadcastStop.reason
   }
 
   /** Attach a socket. Returns callbacks the transport must wire up. */

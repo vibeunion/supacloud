@@ -6,6 +6,7 @@
  * webhook payload exactly: { type, table, schema, record, old_record }.
  */
 import type { CdcEvent, Database } from '../db/database.js'
+import type { EngineUnsubscribe } from '../db/engine.js'
 import { guardedFetch } from '../net/service.js'
 
 /** A registered database webhook: which changes to watch and where to POST them. */
@@ -42,7 +43,7 @@ export interface WebhookDelivery {
 /** Watches the CDC stream and POSTs matching row changes to registered webhooks. */
 export class WebhooksService {
   private hooks: WebhookConfig[] = []
-  private stop: (() => void) | null = null
+  private stop: EngineUnsubscribe | null = null
   private started = false
 
   constructor(
@@ -85,10 +86,11 @@ export class WebhooksService {
   }
 
   /** Unsubscribe from the CDC stream; registered hooks are retained. */
-  stopService(): void {
-    this.stop?.()
+  async stopService(): Promise<void> {
+    const stop = this.stop
     this.stop = null
     this.started = false
+    await stop?.()
   }
 
   private dispatch(event: CdcEvent): void {

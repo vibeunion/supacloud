@@ -14,7 +14,7 @@ import { rewriteMigrationSql } from './sql-compat.js'
 // migration's own `SET search_path` can't leak across our single connection.
 const DEFAULT_SEARCH_PATH_SQL = `set search_path to "$user", public, extensions`
 import { createPgliteEngine } from './pglite-engine.js'
-import type { DbEngine, EngineResults, EngineTx } from './engine.js'
+import type { DbEngine, EngineResults, EngineTx, EngineUnsubscribe } from './engine.js'
 import type { MigrationFile, RequestContext } from '../types.js'
 
 /** One column of an introspected table. */
@@ -109,7 +109,9 @@ export class Database {
   private schemaCache = new Map<string, SchemaInfo>()
   private fnCache = new Map<string, FunctionInfo[]>()
   private cdcListeners = new Set<(e: CdcEvent) => void>()
-  private cdcStarted = false
+  private cdcStarting: Promise<void> | null = null
+  private cdcStopping: Promise<void> | null = null
+  private cdcUnsubscribe: EngineUnsubscribe | null = null
 
   private constructor(public engine: DbEngine) {}
 
@@ -490,20 +492,54 @@ export class Database {
    * Register a CDC listener; the first call starts the single LISTEN on the
    * shared `tinbase_cdc` channel. Returns an unsubscribe fn.
    */
-  async onCdcEvent(cb: (e: CdcEvent) => void): Promise<() => void> {
+  async onCdcEvent(cb: (e: CdcEvent) => void): Promise<() => Promise<void>> {
     this.cdcListeners.add(cb)
-    if (!this.cdcStarted) {
-      this.cdcStarted = true
-      await this.engine.listen('tinbase_cdc', (payload: string) => {
-        try {
-          const event = JSON.parse(payload) as CdcEvent
-          for (const listener of this.cdcListeners) listener(event)
-        } catch {
-          // malformed payload - drop
-        }
-      })
+    try {
+      await this.startCdcListener()
+    } catch (error) {
+      this.cdcListeners.delete(cb)
+      throw error
     }
-    return () => this.cdcListeners.delete(cb)
+    return async () => {
+      if (!this.cdcListeners.delete(cb) || this.cdcListeners.size > 0) return
+      await this.stopCdcListener()
+    }
+  }
+
+  private async startCdcListener(): Promise<void> {
+    if (this.cdcStopping) await this.cdcStopping
+    if (this.cdcUnsubscribe) return
+    const starting = this.cdcStarting ?? this.attachCdcListener()
+    this.cdcStarting = starting
+    try {
+      await starting
+    } finally {
+      if (this.cdcStarting === starting) this.cdcStarting = null
+    }
+  }
+
+  private async attachCdcListener(): Promise<void> {
+    this.cdcUnsubscribe = await this.engine.listen('tinbase_cdc', (payload) => {
+      try {
+        const event = JSON.parse(payload) as CdcEvent
+        for (const listener of this.cdcListeners) listener(event)
+      } catch {
+        // malformed payload - drop
+      }
+    })
+  }
+
+  private async stopCdcListener(): Promise<void> {
+    const unsubscribe = this.cdcUnsubscribe
+    if (!unsubscribe) return
+    this.cdcUnsubscribe = null
+    const stopping = Promise.resolve().then(unsubscribe)
+    this.cdcStopping = stopping
+    try {
+      await stopping
+    } finally {
+      if (this.cdcStopping === stopping) this.cdcStopping = null
+    }
   }
 
   /**

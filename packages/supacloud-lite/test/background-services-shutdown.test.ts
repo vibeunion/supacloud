@@ -145,6 +145,114 @@ test('releases retention single-flight state after an unexpected failure', async
   expect(clockCalls).toBe(2)
 })
 
+for (const { name, create, hasBootSweep } of getBackgroundServices()) {
+  test(`${name} ignores a queued interval callback after stop`, async () => {
+    const intervals = installManualIntervals()
+    const database = createCountingDatabase()
+    const service = create(database.database)
+    try {
+      service.start()
+      if (hasBootSweep) await (service as RetentionService).sweep()
+      const oldCallback = intervals.callbackAt(0)
+
+      await service.stop()
+      const callsAfterStop = database.queryCalls()
+      oldCallback()
+      await flushMicrotasks()
+
+      expect(database.queryCalls()).toBe(callsAfterStop)
+    } finally {
+      await service.stop()
+      intervals.restore()
+    }
+  })
+
+  test(`${name} ignores an old callback after restart when timer handles are reused`, async () => {
+    const intervals = installManualIntervals()
+    const database = createCountingDatabase()
+    const service = create(database.database)
+    try {
+      service.start()
+      if (hasBootSweep) await (service as RetentionService).sweep()
+      const oldCallback = intervals.callbackAt(0)
+      await service.stop()
+
+      service.start()
+      if (hasBootSweep) await (service as RetentionService).sweep()
+      const newCallback = intervals.callbackAt(1)
+      const callsBeforeCallbacks = database.queryCalls()
+
+      oldCallback()
+      await flushMicrotasks()
+      expect(database.queryCalls()).toBe(callsBeforeCallbacks)
+
+      newCallback()
+      await flushMicrotasks()
+      expect(database.queryCalls()).toBeGreaterThan(callsBeforeCallbacks)
+    } finally {
+      await service.stop()
+      intervals.restore()
+    }
+  })
+}
+
+function getBackgroundServices(): Array<{
+  name: string
+  create: (database: Database) => { start(): void; stop(): Promise<void> }
+  hasBootSweep: boolean
+}> {
+  return [
+    { name: 'net', create: (database) => new NetService(database, fetch, 1), hasBootSweep: false },
+    { name: 'cron', create: (database) => new CronService(database, 1), hasBootSweep: false },
+    {
+      name: 'retention',
+      create: (database) => new RetentionService(database, { auditLogDays: 0, refreshTokenDays: 0 }),
+      hasBootSweep: true,
+    },
+  ]
+}
+
+function createCountingDatabase() {
+  let queryCalls = 0
+  return {
+    database: {
+      async query() {
+        queryCalls += 1
+        return { rows: [], affectedRows: 0 }
+      },
+    } as unknown as Database,
+    queryCalls: () => queryCalls,
+  }
+}
+
+function installManualIntervals() {
+  const setInterval = globalThis.setInterval
+  const clearInterval = globalThis.clearInterval
+  const callbacks: Array<() => void> = []
+  const reusedHandle = {} as ReturnType<typeof setInterval>
+  globalThis.setInterval = ((callback: () => void) => {
+    callbacks.push(callback)
+    return reusedHandle
+  }) as typeof setInterval
+  globalThis.clearInterval = (() => {}) as typeof clearInterval
+  return {
+    callbackAt: (index: number) => {
+      const callback = callbacks[index]
+      if (!callback) throw new Error(`missing interval callback ${index}`)
+      return callback
+    },
+    restore: () => {
+      globalThis.setInterval = setInterval
+      globalThis.clearInterval = clearInterval
+    },
+  }
+}
+
+async function flushMicrotasks(): Promise<void> {
+  await Promise.resolve()
+  await Promise.resolve()
+}
+
 function createGatedDatabase(failuresBeforeGate = 0) {
   const queryStarted = Promise.withResolvers<void>()
   const queryGate = Promise.withResolvers<void>()

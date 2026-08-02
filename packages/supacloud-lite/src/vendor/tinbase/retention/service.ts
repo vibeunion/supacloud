@@ -24,6 +24,7 @@ const DAY_MS = 24 * 60 * 60 * 1000
 /** Periodically purges expired/stale auth rows so those tables can't grow unbounded. */
 export class RetentionService {
   private timer: ReturnType<typeof setInterval> | null = null
+  private timerGeneration = 0
   // Tracks the sweep currently in flight. The boot sweep and interval sweeps
   // run un-awaited, but stop() must be able to drain the in-flight one before
   // the caller closes the database: PGlite has a single connection, and calling
@@ -45,10 +46,15 @@ export class RetentionService {
 
   /** Sweep once at boot, then on the configured interval; no-op if already running. */
   start(): void {
-    if (this.timer) return
+    if (this.timer !== null) return
     void this.sweep()
-    this.timer = setInterval(() => void this.sweep(), this.intervalMs)
-    if (typeof this.timer === 'object' && 'unref' in this.timer) (this.timer as { unref: () => void }).unref()
+    const generation = ++this.timerGeneration
+    let timer: ReturnType<typeof setInterval>
+    timer = setInterval(() => {
+      if (this.timer === timer && this.timerGeneration === generation) void this.sweep()
+    }, this.intervalMs)
+    this.timer = timer
+    if (typeof timer === 'object' && 'unref' in timer) (timer as { unref: () => void }).unref()
   }
 
   /**
@@ -56,9 +62,12 @@ export class RetentionService {
    * can safely close the database without racing a queued sweep query.
    */
   async stop(): Promise<void> {
-    if (this.timer) clearInterval(this.timer)
+    const timer = this.timer
     this.timer = null
-    await this.inFlight?.catch(() => {})
+    this.timerGeneration += 1
+    if (timer !== null) clearInterval(timer)
+    const inFlight = this.inFlight
+    await inFlight?.catch(() => {})
   }
 
   /** Run a single retention pass (also callable directly in tests). */

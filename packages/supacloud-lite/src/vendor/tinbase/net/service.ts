@@ -112,6 +112,7 @@ export interface NetDelivery {
  */
 export class NetService {
   private timer: ReturnType<typeof setInterval> | null = null
+  private timerGeneration = 0
   /** The in-flight tick, tracked so stop() can drain it before db.close(). */
   private inFlight: Promise<void> | null = null
 
@@ -125,9 +126,14 @@ export class NetService {
 
   /** Begin draining the queue on the tick interval; no-op if already running. */
   start(): void {
-    if (this.timer) return
-    this.timer = setInterval(() => void this.tick(), this.tickMs)
-    if (typeof this.timer === 'object' && 'unref' in this.timer) (this.timer as { unref: () => void }).unref()
+    if (this.timer !== null) return
+    const generation = ++this.timerGeneration
+    let timer: ReturnType<typeof setInterval>
+    timer = setInterval(() => {
+      if (this.timer === timer && this.timerGeneration === generation) void this.tick()
+    }, this.tickMs)
+    this.timer = timer
+    if (typeof timer === 'object' && 'unref' in timer) (timer as { unref: () => void }).unref()
   }
 
   /**
@@ -136,10 +142,12 @@ export class NetService {
    * while a query is still queued.
    */
   async stop(): Promise<void> {
-    if (this.timer) clearInterval(this.timer)
+    const timer = this.timer
     this.timer = null
-    await this.inFlight?.catch(() => {})
-    this.inFlight = null
+    this.timerGeneration += 1
+    if (timer !== null) clearInterval(timer)
+    const inFlight = this.inFlight
+    await inFlight?.catch(() => {})
   }
 
   /** Drain any queued requests once (also callable directly in tests). */
