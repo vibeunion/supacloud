@@ -112,7 +112,6 @@ export interface NetDelivery {
  */
 export class NetService {
   private timer: ReturnType<typeof setInterval> | null = null
-  private draining = false
   /** The in-flight tick, tracked so stop() can drain it before db.close(). */
   private inFlight: Promise<void> | null = null
 
@@ -127,9 +126,7 @@ export class NetService {
   /** Begin draining the queue on the tick interval; no-op if already running. */
   start(): void {
     if (this.timer) return
-    this.timer = setInterval(() => {
-      this.inFlight = this.tick()
-    }, this.tickMs)
+    this.timer = setInterval(() => void this.tick(), this.tickMs)
     if (typeof this.timer === 'object' && 'unref' in this.timer) (this.timer as { unref: () => void }).unref()
   }
 
@@ -146,33 +143,38 @@ export class NetService {
   }
 
   /** Drain any queued requests once (also callable directly in tests). */
-  async tick(): Promise<void> {
-    if (this.draining) return // never overlap drains - one writer at a time
-    this.draining = true
+  tick(): Promise<void> {
+    if (this.inFlight) return this.inFlight
+    const inFlight = Promise.resolve()
+      .then(() => this.drainQueue())
+      .finally(() => {
+        if (this.inFlight === inFlight) this.inFlight = null
+      })
+    this.inFlight = inFlight
+    return inFlight
+  }
+
+  private async drainQueue(): Promise<void> {
+    let rows: RequestRow[]
     try {
-      let rows: RequestRow[]
+      rows = (
+        await this.db.query<RequestRow>(
+          `select id, method, url, headers, body, timeout_milliseconds from net.http_request_queue order by id limit 20`
+        )
+      ).rows
+    } catch {
+      return // net.* not present (e.g. the pg-mem subset engine)
+    }
+    for (const row of rows) {
       try {
-        rows = (
-          await this.db.query<RequestRow>(
-            `select id, method, url, headers, body, timeout_milliseconds from net.http_request_queue order by id limit 20`
-          )
-        ).rows
-      } catch {
-        return // net.* not present (e.g. the pg-mem subset engine)
+        await this.deliver(row)
+      } catch (e) {
+        // A malformed row must never poison the loop or reject out of the
+        // setInterval callback - dequeue it with the error recorded instead.
+        const msg = e instanceof Error ? e.message : String(e)
+        await this.record(row.id, null, null, null, null, false, msg)
+        this.onDeliver?.({ id: row.id, method: row.method, url: row.url, timedOut: false, error: msg })
       }
-      for (const row of rows) {
-        try {
-          await this.deliver(row)
-        } catch (e) {
-          // A malformed row must never poison the loop or reject out of the
-          // setInterval callback - dequeue it with the error recorded instead.
-          const msg = e instanceof Error ? e.message : String(e)
-          await this.record(row.id, null, null, null, null, false, msg)
-          this.onDeliver?.({ id: row.id, method: row.method, url: row.url, timedOut: false, error: msg })
-        }
-      }
-    } finally {
-      this.draining = false
     }
   }
 
