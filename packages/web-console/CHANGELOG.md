@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.28.5](https://github.com/zuohuadong/supacloud/compare/web-console-v0.28.4...web-console-v0.28.5) (2026-08-02)
+
+
+### Bug Fixes
+
+* address release-blocking review findings ([0154fdb](https://github.com/zuohuadong/supacloud/commit/0154fdbab758c9d9c6a80fb877b15848a5ace5df))
+* repair cache, backup, and table setup workflows ([#668](https://github.com/zuohuadong/supacloud/issues/668)) ([66df4a0](https://github.com/zuohuadong/supacloud/commit/66df4a029a4f4d553dddd3cd3b8c27af45eae387))
+
+
+### Miscellaneous Chores
+
+* **deps-dev:** bump jsdom from 29.1.1 to 30.0.0 in /packages/web-console ([7a930e0](https://github.com/zuohuadong/supacloud/commit/7a930e0a663c360d3f2099ca67ebb9138f49c77c))
+* **deps-dev:** bump postcss from 8.5.22 to 8.5.23 in /packages/web-console ([ab8c3d3](https://github.com/zuohuadong/supacloud/commit/ab8c3d3f4c1ed566b113baf0c1bfd18b37dcfcf9))
+* **deps-dev:** bump svelte from 5.56.7 to 5.56.8 in /packages/web-console ([4d9975f](https://github.com/zuohuadong/supacloud/commit/4d9975f5f14c26b540c735569fd2d420643af2a7))
+* **deps-dev:** bump svelte-check from 4.7.3 to 4.7.4 in /packages/web-console ([e87a6e9](https://github.com/zuohuadong/supacloud/commit/e87a6e9d237cc6fb9c509c0f8b13962258418082))
+
 ## [0.28.4](https://github.com/zuohuadong/supacloud/compare/web-console-v0.28.3...web-console-v0.28.4) (2026-07-30)
 
 

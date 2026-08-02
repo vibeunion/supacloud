@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.1](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.21.0...supacloud-js-v0.21.1) (2026-08-02)
+
+
+### Bug Fixes
+
+* address release-blocking review findings ([0154fdb](https://github.com/zuohuadong/supacloud/commit/0154fdbab758c9d9c6a80fb877b15848a5ace5df))
+
 ## [0.21.0](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.20.1...supacloud-js-v0.21.0) (2026-07-28)
 
 
