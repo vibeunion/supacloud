@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.50.12](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.11...management-api-v0.50.12) (2026-08-02)
+
+
+### Bug Fixes
+
+* **management-api:** use setpriv for backup commands in sandbox ([b9b7d48](https://github.com/zuohuadong/supacloud/commit/b9b7d48181974dab020dc88ec2db960dcb7a92e2))
+
 ## [0.50.11](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.10...management-api-v0.50.11) (2026-08-02)
 
 
