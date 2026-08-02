@@ -1417,7 +1417,7 @@ async function bootstrap() {
   }
 }
 
-if (import.meta.main) {
+export function startManagementApi(): void {
   void runBootstrapOrExit(bootstrap);
 
   const shutdown = async (signal: string) => {
@@ -1480,6 +1480,10 @@ if (import.meta.main) {
 
   process.on("SIGINT", () => shutdown("SIGINT"));
   process.on("SIGTERM", () => shutdown("SIGTERM"));
+}
+
+if (import.meta.main) {
+  startManagementApi();
 }
 
 export { app };
