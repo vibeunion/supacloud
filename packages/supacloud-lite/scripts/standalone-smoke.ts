@@ -52,15 +52,24 @@ Deno.serve(() => Response.json({ ok: true, runtime: 'standalone' }))
 `)
 
   const isolatedEnvironment = withoutRuntimePath(emptyPath)
-  const version = (await runCommand([binary, 'version'], projectDir, isolatedEnvironment)).trim()
+  const version = (
+    await runCommand('version', [binary, 'version'], projectDir, isolatedEnvironment)
+  ).trim()
   assert(version === packageJson.version, `unexpected standalone version: ${version}`)
 
-  await runCommand([binary, 'migrate', '--project-dir', projectDir], projectDir, isolatedEnvironment)
-  const statusV1 = await runCommand([binary, 'status', '--project-dir', projectDir], projectDir, isolatedEnvironment)
+  await runCommand('migrate v1', [binary, 'migrate', '--project-dir', projectDir], projectDir, isolatedEnvironment)
+  const statusV1 = await runCommand(
+    'status v1',
+    [binary, 'status', '--project-dir', projectDir],
+    projectDir,
+    isolatedEnvironment,
+  )
   assertMigrationStatus(statusV1, [v1], [v2], 'v1')
 
-  const anonKey = parseAnonKey(await runCommand([binary, 'keys', '--project-dir', projectDir], projectDir, isolatedEnvironment))
-  await withServer({ binary, projectDir, environment: isolatedEnvironment }, async (url) => {
+  const anonKey = parseAnonKey(
+    await runCommand('keys', [binary, 'keys', '--project-dir', projectDir], projectDir, isolatedEnvironment),
+  )
+  await withServer({ phaseLabel: 'server v1', binary, projectDir, environment: isolatedEnvironment }, async (url) => {
     const health = await fetch(`${url}/health`)
     assert(health.status === 200, `health returned HTTP ${health.status}`)
     assert((await health.json() as { status?: string }).status === 'healthy', 'health payload was not healthy')
@@ -87,7 +96,12 @@ end $$;
 alter table public.upgrade_probe
   add column upgraded boolean not null default true;
 `)
-  const upgradeOutput = await runCommand([binary, 'upgrade', '--project-dir', projectDir], projectDir, isolatedEnvironment)
+  const upgradeOutput = await runCommand(
+    'upgrade v2',
+    [binary, 'upgrade', '--project-dir', projectDir],
+    projectDir,
+    isolatedEnvironment,
+  )
   const snapshotMarker = 'Pre-upgrade snapshot: '
   const completionMarker = 'Upgrade complete on @supacloud/lite'
   assert(upgradeOutput.indexOf(snapshotMarker) >= 0, 'upgrade did not report its pre-upgrade snapshot')
@@ -98,7 +112,7 @@ alter table public.upgrade_probe
   assert(snapshotInfo.isFile() && snapshotInfo.size > 0, 'pre-upgrade snapshot is empty')
 
   const restoredStateDir = join(projectDir, '.restored-v1')
-  await runCommand([
+  await runCommand('snapshot restore pre-upgrade', [
     binary,
     'snapshot',
     'restore',
@@ -108,7 +122,7 @@ alter table public.upgrade_probe
     '--state-dir',
     restoredStateDir,
   ], projectDir, isolatedEnvironment)
-  const restoredStatus = await runCommand([
+  const restoredStatus = await runCommand('status restored v1', [
     binary,
     'status',
     '--project-dir',
@@ -126,6 +140,7 @@ alter table public.upgrade_probe
     'pre-upgrade snapshot did not preserve project secrets',
   )
   await withServer({
+    phaseLabel: 'server restored v1',
     binary,
     projectDir,
     environment: isolatedEnvironment,
@@ -139,11 +154,16 @@ alter table public.upgrade_probe
     assert(rows[0]?.body === 'preserved-v1', 'pre-upgrade snapshot did not preserve v1 data')
   })
 
-  const statusV2 = await runCommand([binary, 'status', '--project-dir', projectDir], projectDir, isolatedEnvironment)
+  const statusV2 = await runCommand(
+    'status v2',
+    [binary, 'status', '--project-dir', projectDir],
+    projectDir,
+    isolatedEnvironment,
+  )
   assertMigrationStatus(statusV2, [v1, v2], [], 'v2')
   assert(await readFile(storageSentinel, 'utf8') === 'preserved-storage-v1', 'upgrade changed local storage')
 
-  await withServer({ binary, projectDir, environment: isolatedEnvironment }, async (url) => {
+  await withServer({ phaseLabel: 'server v2', binary, projectDir, environment: isolatedEnvironment }, async (url) => {
     const response = await fetch(`${url}/rest/v1/upgrade_probe?select=id,body,upgraded&id=eq.1`, {
       headers: { apikey: anonKey },
     })
@@ -177,6 +197,7 @@ function resolveStandaloneBinary(): string {
 }
 
 interface ServerOptions {
+  phaseLabel: string
   binary: string
   projectDir: string
   environment: NodeJS.ProcessEnv
@@ -186,6 +207,7 @@ interface ServerOptions {
 async function withServer(options: ServerOptions, check: (url: string) => Promise<void>): Promise<void> {
   const port = await findEphemeralPort()
   const stateArgs = options.stateDir ? ['--state-dir', options.stateDir] : []
+  console.log(`[standalone-smoke] ${options.phaseLabel}: start`)
   const processHandle = Bun.spawn({
     cmd: [options.binary, 'start', '--project-dir', options.projectDir, '--host', '127.0.0.1', '--port', String(port), ...stateArgs],
     cwd: options.projectDir,
@@ -198,12 +220,18 @@ async function withServer(options: ServerOptions, check: (url: string) => Promis
   const url = `http://127.0.0.1:${port}`
   try {
     await waitForHealth(url, processHandle)
+    console.log(`[standalone-smoke] ${options.phaseLabel}: healthy`)
     await check(url)
   } finally {
+    console.log(`[standalone-smoke] ${options.phaseLabel}: stop`)
     processHandle.kill('SIGTERM')
     const exitCode = await processHandle.exited
+    const expectedExitCode = expectedStandaloneShutdownExitCode()
+    console.log(
+      `[standalone-smoke] ${options.phaseLabel}: ${exitCode === expectedExitCode ? 'ok' : 'failed'} (exit ${exitCode})`,
+    )
     const [stdoutText, stderrText] = await Promise.all([stdout, stderr])
-    if (exitCode !== expectedStandaloneShutdownExitCode()) {
+    if (exitCode !== expectedExitCode) {
       throw new Error(`standalone server exited with ${exitCode}\n${stdoutText}\n${stderrText}`)
     }
   }
@@ -238,14 +266,20 @@ async function findEphemeralPort(): Promise<number> {
   return port
 }
 
-async function runCommand(command: string[], cwd: string, env: NodeJS.ProcessEnv): Promise<string> {
+async function runCommand(
+  commandLabel: string,
+  command: string[],
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+): Promise<string> {
+  console.log(`[standalone-smoke] ${commandLabel}: start`)
   const processHandle = Bun.spawn({ cmd: command, cwd, env, stdout: 'pipe', stderr: 'pipe' })
-  const [exitCode, stdout, stderr] = await Promise.all([
-    processHandle.exited,
-    new Response(processHandle.stdout).text(),
-    new Response(processHandle.stderr).text(),
-  ])
-  if (exitCode !== 0) throw new Error(`${command.join(' ')} failed (${exitCode})\n${stdout}\n${stderr}`)
+  const stdoutPromise = new Response(processHandle.stdout).text()
+  const stderrPromise = new Response(processHandle.stderr).text()
+  const exitCode = await processHandle.exited
+  console.log(`[standalone-smoke] ${commandLabel}: ${exitCode === 0 ? 'ok' : 'failed'} (exit ${exitCode})`)
+  const [stdout, stderr] = await Promise.all([stdoutPromise, stderrPromise])
+  if (exitCode !== 0) throw new Error(`standalone command "${commandLabel}" failed (${exitCode})\n${stdout}\n${stderr}`)
   return stdout
 }
 
