@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.3](https://github.com/zuohuadong/supacloud/compare/supacloud-lite-v0.5.2...supacloud-lite-v0.5.3) (2026-08-02)
+
+
+### Bug Fixes
+
+* **lite:** drain active background services before shutdown ([af0546d](https://github.com/zuohuadong/supacloud/commit/af0546d8b9cd15b21d61c8d953f9deed27dc9bff))
+
 ## [0.5.2](https://github.com/zuohuadong/supacloud/compare/supacloud-lite-v0.5.1...supacloud-lite-v0.5.2) (2026-07-30)
 
 

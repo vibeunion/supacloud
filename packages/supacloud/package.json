@@ -1,6 +1,6 @@
 {
   "name": "supacloud",
-  "version": "0.8.4",
+  "version": "0.8.5",
   "description": "Unified entrypoint: `supacloudctl cli` and `supacloudctl admin` in one command",
   "type": "module",
   "main": "./dist/index.js",
