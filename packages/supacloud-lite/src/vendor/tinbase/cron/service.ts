@@ -23,6 +23,7 @@ interface JobRow {
  */
 export class CronService {
   private timer: ReturnType<typeof setInterval> | null = null
+  private timerGeneration = 0
   private lastRun = new Map<number, number>() // jobid → epoch ms of last run
   private lastMinute = new Map<number, number>() // jobid → minute bucket last run
   /** The in-flight tick, tracked so stop() can drain it before db.close(). */
@@ -37,9 +38,14 @@ export class CronService {
 
   /** Begin polling for due jobs on the tick interval; no-op if already running. */
   start(): void {
-    if (this.timer) return
-    this.timer = setInterval(() => void this.tick(), this.tickMs)
-    if (typeof this.timer === 'object' && 'unref' in this.timer) (this.timer as { unref: () => void }).unref()
+    if (this.timer !== null) return
+    const generation = ++this.timerGeneration
+    let timer: ReturnType<typeof setInterval>
+    timer = setInterval(() => {
+      if (this.timer === timer && this.timerGeneration === generation) void this.tick()
+    }, this.tickMs)
+    this.timer = timer
+    if (typeof timer === 'object' && 'unref' in timer) (timer as { unref: () => void }).unref()
   }
 
   /**
@@ -48,10 +54,12 @@ export class CronService {
    * while a job query is still queued.
    */
   async stop(): Promise<void> {
-    if (this.timer) clearInterval(this.timer)
+    const timer = this.timer
     this.timer = null
-    await this.inFlight?.catch(() => {})
-    this.inFlight = null
+    this.timerGeneration += 1
+    if (timer !== null) clearInterval(timer)
+    const inFlight = this.inFlight
+    await inFlight?.catch(() => {})
   }
 
   /** Run any due jobs once (also callable directly in tests). */
