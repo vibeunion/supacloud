@@ -226,19 +226,21 @@ export async function createBackend(config: BackendConfig = {}): Promise<Tinbase
     log(`[net] ${d.method} ${d.url} -> ${d.timedOut ? 'TIMEOUT' : d.error ? 'FAILED ' + d.error : d.status}`)
   )
 
-  try {
-    await realtime.start()
-    cleanup.push(() => realtime.stop())
-    if (config.webhooks?.length) await webhooks.start(config.webhooks)
-    cleanup.push(() => webhooks.stopService())
-    cron.start()
-    cleanup.push(() => cron.stop())
-    retention.start()
-    cleanup.push(() => retention.stop())
-    net.start()
-    cleanup.push(() => net.stop())
-  } catch (e) {
-    await failStartup(e)
+  if (config.startRuntimeServices !== false) {
+    try {
+      await realtime.start()
+      cleanup.push(() => realtime.stop())
+      if (config.webhooks?.length) await webhooks.start(config.webhooks)
+      cleanup.push(() => webhooks.stopService())
+      cron.start()
+      cleanup.push(() => cron.stop())
+      retention.start()
+      cleanup.push(() => retention.stop())
+      net.start()
+      cleanup.push(() => net.stop())
+    } catch (e) {
+      await failStartup(e)
+    }
   }
 
   const fnMap =

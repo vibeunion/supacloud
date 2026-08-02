@@ -114,7 +114,13 @@ async function main(): Promise<void> {
     if (options.positionals[0] && options.positionals[0] !== 'types' && options.positionals[0] !== 'typescript') {
       throw new Error(`unknown gen subcommand: ${options.positionals[0]}`)
     }
-    const project = await createProjectBackend({ ...options, includeFunctions: false, includeWebhooks: false, log: quietLog })
+    const project = await createProjectBackend({
+      ...options,
+      includeFunctions: false,
+      includeWebhooks: false,
+      startRuntimeServices: false,
+      log: quietLog,
+    })
     try {
       const source = await generateTypes(project.backend.db, 'public')
       if (options.output) {
@@ -129,7 +135,13 @@ async function main(): Promise<void> {
   }
 
   if (options.command === 'inspect') {
-    const project = await createProjectBackend({ ...options, includeFunctions: false, includeWebhooks: false, log: quietLog })
+    const project = await createProjectBackend({
+      ...options,
+      includeFunctions: false,
+      includeWebhooks: false,
+      startRuntimeServices: false,
+      log: quietLog,
+    })
     try {
       printInspection(await inspectDb(project.backend.db, 'public'))
     } finally {
@@ -145,6 +157,7 @@ async function main(): Promise<void> {
       includeFunctions: false,
       includeWebhooks: false,
       includeSeed: options.command === 'migrate',
+      startRuntimeServices: false,
       log: quietLog,
     })
     try {
@@ -190,7 +203,13 @@ async function runDbCommand(options: CliOptions): Promise<void> {
     await assertResetPathsSafe(paths)
     if (paths.dataDir) await rm(paths.dataDir, { recursive: true, force: true })
     await rm(paths.storageDir, { recursive: true, force: true })
-    const project = await createProjectBackend({ ...options, includeFunctions: false, includeWebhooks: false, log: quietLog })
+    const project = await createProjectBackend({
+      ...options,
+      includeFunctions: false,
+      includeWebhooks: false,
+      startRuntimeServices: false,
+      log: quietLog,
+    })
     try {
       const applied = await project.backend.db.listAppliedMigrations()
       console.log(`reset complete: ${applied.length} migration(s) applied`)
@@ -277,6 +296,7 @@ async function runUpgradeCommand(options: CliOptions): Promise<void> {
       includeFunctions: false,
       includeWebhooks: false,
       includeSeed: true,
+      startRuntimeServices: false,
       log: quietLog,
     })
     try {
