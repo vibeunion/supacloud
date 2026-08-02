@@ -28,7 +28,7 @@ export class RetentionService {
   // run un-awaited, but stop() must be able to drain the in-flight one before
   // the caller closes the database: PGlite has a single connection, and calling
   // close() while a sweep query is still queued busy-loops the shutdown.
-  private inFlight: Promise<void> = Promise.resolve()
+  private inFlight: Promise<void> | null = null
   private readonly intervalMs: number
   private readonly auditLogDays: number
   private readonly refreshTokenDays: number
@@ -46,11 +46,8 @@ export class RetentionService {
   /** Sweep once at boot, then on the configured interval; no-op if already running. */
   start(): void {
     if (this.timer) return
-    // run once at boot, then on the interval (tracking the in-flight sweep)
-    this.inFlight = this.sweep()
-    this.timer = setInterval(() => {
-      this.inFlight = this.sweep()
-    }, this.intervalMs)
+    void this.sweep()
+    this.timer = setInterval(() => void this.sweep(), this.intervalMs)
     if (typeof this.timer === 'object' && 'unref' in this.timer) (this.timer as { unref: () => void }).unref()
   }
 
@@ -61,11 +58,22 @@ export class RetentionService {
   async stop(): Promise<void> {
     if (this.timer) clearInterval(this.timer)
     this.timer = null
-    await this.inFlight.catch(() => {})
+    await this.inFlight?.catch(() => {})
   }
 
   /** Run a single retention pass (also callable directly in tests). */
-  async sweep(): Promise<void> {
+  sweep(): Promise<void> {
+    if (this.inFlight) return this.inFlight
+    const inFlight = Promise.resolve()
+      .then(() => this.runSweep())
+      .finally(() => {
+        if (this.inFlight === inFlight) this.inFlight = null
+      })
+    this.inFlight = inFlight
+    return inFlight
+  }
+
+  private async runSweep(): Promise<void> {
     const now = this.now()
     await this.run(`delete from auth.one_time_tokens where expires_at < now()`)
     await this.run(`delete from auth.mfa_challenges where expires_at < now()`)

@@ -38,9 +38,7 @@ export class CronService {
   /** Begin polling for due jobs on the tick interval; no-op if already running. */
   start(): void {
     if (this.timer) return
-    this.timer = setInterval(() => {
-      this.inFlight = this.tick()
-    }, this.tickMs)
+    this.timer = setInterval(() => void this.tick(), this.tickMs)
     if (typeof this.timer === 'object' && 'unref' in this.timer) (this.timer as { unref: () => void }).unref()
   }
 
@@ -57,7 +55,18 @@ export class CronService {
   }
 
   /** Run any due jobs once (also callable directly in tests). */
-  async tick(): Promise<void> {
+  tick(): Promise<void> {
+    if (this.inFlight) return this.inFlight
+    const inFlight = Promise.resolve()
+      .then(() => this.runTick())
+      .finally(() => {
+        if (this.inFlight === inFlight) this.inFlight = null
+      })
+    this.inFlight = inFlight
+    return inFlight
+  }
+
+  private async runTick(): Promise<void> {
     let jobs: JobRow[]
     try {
       jobs = (await this.db.query<JobRow>(`select jobid, schedule, command, jobname, active from cron.job where active`)).rows
