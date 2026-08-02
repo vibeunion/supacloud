@@ -6,6 +6,7 @@ import { join } from "node:path";
 import {
     buildEdgeRuntimeCapacityDropIn,
     buildEmbeddedEdgePrivilegeDropIn,
+    buildManagementPrivilegeDropIn,
     buildCheckpointDatabaseOptions,
     backupCurrentBinary,
     buildRuntimeServiceRestartPlan,
@@ -27,6 +28,7 @@ import {
     resolvePersistedEdgeRuntimePort,
     resolvePersistedEdgeRuntimeMode,
     resolveUpgradeEnvironment,
+    reconcileManagementPrivilegeDropIns,
     runStagedDatabaseMigration,
     restoreCurrentBinary,
     restoreFileState,
@@ -39,6 +41,7 @@ import {
     verifyActivatedManagementBinary,
     verifyArtifactChecksum,
     verifyManagementUpgradePreflight,
+    verifyBackupPrivilegeDropPreflight,
     waitForManagementHealth,
     waitForEdgeRuntimeHealth,
     waitForUpgradeHealth,
@@ -520,6 +523,15 @@ describe("upgrade release selection", () => {
     }))).rejects.toThrow("MainPID changed from 4242 to 4343");
   });
 
+  test("upgrade preflight requires setpriv and id before staging", () => {
+    const installedPaths = new Set(["/usr/bin/setpriv", "/usr/bin/id"]);
+    expect(() => verifyBackupPrivilegeDropPreflight((filePath) => installedPaths.has(filePath))).not.toThrow();
+    expect(() => verifyBackupPrivilegeDropPreflight((filePath) => filePath.endsWith("/id")))
+      .toThrow("requires setpriv");
+    expect(() => verifyBackupPrivilegeDropPreflight((filePath) => filePath.endsWith("/setpriv")))
+      .toThrow("requires id");
+  });
+
   test("rejects a deleted active executable", async () => {
     await expect(verifyManagementUpgradePreflight(managementBinaryFixture({
       executablePath: `${canonicalManagementBinary} (deleted)`,
@@ -920,10 +932,40 @@ describe("embedded Edge Runtime source access", () => {
 });
 
 describe("upgrade edge-runtime capacity defaults", () => {
-  test("grants only the capabilities needed for embedded privilege drop", () => {
+  test("keeps privilege-drop capabilities in the canonical unit and embedded drop-in", () => {
+    const managementUnit = readFileSync(
+      join(import.meta.dir, "../../../..", "infrastructure/systemd/supacloud.service"),
+      "utf8",
+    );
     const dropIn = buildEmbeddedEdgePrivilegeDropIn();
+    expect(managementUnit).toContain("CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_SETGID CAP_SETUID");
     expect(dropIn).toContain("CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_SETGID CAP_SETUID");
     expect(dropIn).not.toContain("@keyring");
+  });
+
+  test("external upgrades retain Management privilege capabilities after removing the embedded drop-in", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "supacloud-upgrade-privilege-"));
+    const managementDropIn = join(dir, "40-management-privilege.conf");
+    const embeddedDropIn = join(dir, "50-embedded-edge-privilege.conf");
+    let reloadCount = 0;
+    try {
+      writeFileSync(embeddedDropIn, "legacy embedded policy\n");
+      await reconcileManagementPrivilegeDropIns("external", {
+        user: "supacloud-edge",
+        group: "supacloud-edge",
+      }, {
+        managementDropInPath: managementDropIn,
+        embeddedDropInPath: embeddedDropIn,
+        reloadSystemd: async () => { reloadCount += 1; },
+      });
+
+      expect(readFileSync(managementDropIn, "utf8")).toBe(buildManagementPrivilegeDropIn());
+      expect(statSync(managementDropIn).mode & 0o777).toBe(0o644);
+      expect(existsSync(embeddedDropIn)).toBe(false);
+      expect(reloadCount).toBe(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test("sizes systemd limits to sixty percent of a two-core node", () => {

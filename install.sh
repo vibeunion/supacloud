@@ -2929,6 +2929,7 @@ RestartSec=10
 StartLimitBurst=5
 StartLimitIntervalSec=60
 LimitNOFILE=65536
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_SETGID CAP_SETUID
 
 [Install]
 WantedBy=multi-user.target
@@ -3064,8 +3065,21 @@ CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_SETGID CAP_SETUI
 EOF
 }
 
+ensure_management_privilege_tools_available() {
+    local tool
+    for tool in setpriv id; do
+        if ! command -v "$tool" >/dev/null 2>&1; then
+            log_error "Management API backup privilege separation requires ${tool}"
+            return 1
+        fi
+    done
+    return 0
+}
+
 install_management_api() {
     log_step "Preparing to deploy SupaCloud Control Plane binary..."
+
+    ensure_management_privilege_tools_available || return 1
 
     local BIN_NAME="supacloud"
     local BIN_TARGET="/usr/local/bin/${BIN_NAME}"

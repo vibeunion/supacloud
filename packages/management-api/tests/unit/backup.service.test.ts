@@ -9,12 +9,20 @@ interface CommandOutcome {
 }
 
 const commandOutcomes: CommandOutcome[] = [];
+const identityOutcomes: CommandOutcome[] = [];
 const spawnedCommands: string[][] = [];
+const identityCommands: string[][] = [];
 const spawnSpy = spyOn(Bun, "spawn").mockImplementation((command) => {
-  const commandOutcome = commandOutcomes.shift();
+  const commandArguments = command as string[];
+  const isIdentityLookup = commandArguments[0] === "timeout"
+    && commandArguments[3] === "/usr/bin/id"
+    && commandArguments[4] === "-g";
+  const commandOutcome = isIdentityLookup
+    ? identityOutcomes.shift() ?? { exitCode: 0, stdout: commandArguments[5] === "pgbackrest" ? "4321\n" : "26\n" }
+    : commandOutcomes.shift();
   if (!commandOutcome) throw new Error("Unexpected pgBackRest command");
+  (isIdentityLookup ? identityCommands : spawnedCommands).push(commandArguments);
   if (commandOutcome.startError) throw commandOutcome.startError;
-  spawnedCommands.push(command as string[]);
   return {
     exited: Promise.resolve(commandOutcome.exitCode ?? 0),
     stdout: new Blob([commandOutcome.stdout || ""]).stream(),
@@ -46,7 +54,9 @@ function fullBackup(label = "20260722-120000F", error = false) {
 describe("BackupService", () => {
   beforeEach(() => {
     commandOutcomes.length = 0;
+    identityOutcomes.length = 0;
     spawnedCommands.length = 0;
+    identityCommands.length = 0;
   });
 
   afterAll(() => spawnSpy.mockRestore());
@@ -56,7 +66,8 @@ describe("BackupService", () => {
     const backups = await listBackups("supa_project_a");
 
     expect(spawnedCommands).toEqual([[
-      "timeout", "--kill-after=30s", "5", "sudo", "-n", "-u", "postgres", "pgbackrest",
+      "timeout", "--kill-after=30s", "5", "/usr/bin/setpriv", "--reuid", "postgres", "--regid",
+      "26", "--init-groups", "--", "pgbackrest",
       "--stanza=db-main", "info", "--output=json",
     ]]);
     expect(backups).toEqual([{
@@ -147,8 +158,27 @@ describe("BackupService", () => {
   });
 
   test("fails closed when the pgBackRest command cannot start", async () => {
-    commandOutcomes.push({ startError: new Error("timeout is not installed") });
+    commandOutcomes.push({ startError: new Error("setpriv is not installed") });
     await expect(listBackups("supa_project_a")).rejects.toThrow("pgBackRest command is unavailable");
+    expect(spawnedCommands[0]).toContain("/usr/bin/setpriv");
+  });
+
+  test("fails closed when the backup user primary GID lookup fails, times out, or is not numeric", async () => {
+    identityOutcomes.push({ exitCode: 1, stderr: "unknown user" });
+    await expect(listBackups("supa_project_a")).rejects.toThrow("pgBackRest command is unavailable");
+    expect(spawnedCommands).toEqual([]);
+
+    identityOutcomes.push({ exitCode: 0, stdout: "postgres\n" });
+    await expect(listBackups("supa_project_a")).rejects.toThrow("pgBackRest command is unavailable");
+    expect(spawnedCommands).toEqual([]);
+
+    identityOutcomes.push({ startError: new Error("id is unavailable") });
+    await expect(listBackups("supa_project_a")).rejects.toThrow("pgBackRest command is unavailable");
+    expect(spawnedCommands).toEqual([]);
+
+    identityOutcomes.push({ exitCode: 124 });
+    await expect(listBackups("supa_project_a")).rejects.toThrow("pgBackRest command is unavailable");
+    expect(spawnedCommands).toEqual([]);
   });
 
   test("fails closed when the completed backup does not appear in inventory", async () => {
@@ -166,7 +196,8 @@ describe("BackupService", () => {
 
     await expect(restore({ target: "2026-07-22T01:30:00Z" })).rejects.toThrow("PITR restore failed");
     expect(spawnedCommands.at(-1)).toEqual([
-      "timeout", "--kill-after=30s", "1800", "sudo", "-n", "-u", "postgres", "pig", "pitr",
+      "timeout", "--kill-after=30s", "1800", "/usr/bin/setpriv", "--reuid", "postgres", "--regid",
+      "26", "--init-groups", "--", "pig", "pitr",
       "-s", "db-main", "-t", "2026-07-22T01:30:00Z", "-y",
     ]);
   });
@@ -184,6 +215,9 @@ describe("BackupService", () => {
     await expect(restore({ target: "2026-07-22T01:30:00Z" })).rejects.toThrow("PITR restore timed out");
 
     commandOutcomes.push({ startError: new Error("pig is not installed") });
+    await expect(restore({ target: "2026-07-22T01:30:00Z" })).rejects.toThrow("PITR restore command is unavailable");
+
+    identityOutcomes.push({ exitCode: 1, stderr: "unknown user" });
     await expect(restore({ target: "2026-07-22T01:30:00Z" })).rejects.toThrow("PITR restore command is unavailable");
   });
 
@@ -220,15 +254,19 @@ describe("BackupService", () => {
     try {
       commandOutcomes.push({ exitCode: 0, stdout: inventory([], 0, "cluster-main") });
       await listBackups("supa_project_a");
+      expect(identityCommands[0]).toEqual(["timeout", "--kill-after=30s", "5", "/usr/bin/id", "-g", "pgbackrest"]);
       expect(spawnedCommands).toEqual([[
-        "timeout", "--kill-after=30s", "5", "sudo", "-n", "-u", "pgbackrest", "/usr/bin/pgbackrest",
+        "timeout", "--kill-after=30s", "5", "/usr/bin/setpriv", "--reuid", "pgbackrest", "--regid",
+        "4321", "--init-groups", "--", "/usr/bin/pgbackrest",
         "--config=/etc/supabase/pgbackrest.conf", "--stanza=cluster-main", "info", "--output=json",
       ]]);
 
       commandOutcomes.push({ exitCode: 0 });
       await restore({ target: "2026-07-22T01:30:00Z" });
+      expect(identityCommands[1]).toEqual(["timeout", "--kill-after=30s", "5", "/usr/bin/id", "-g", "postgres"]);
       expect(spawnedCommands[1]).toEqual([
-        "timeout", "--kill-after=30s", "1800", "sudo", "-n", "-u", "postgres", "pig", "pitr",
+        "timeout", "--kill-after=30s", "1800", "/usr/bin/setpriv", "--reuid", "postgres", "--regid",
+        "26", "--init-groups", "--", "pig", "pitr",
         "-s", "cluster-main", "-t", "2026-07-22T01:30:00Z", "-y",
       ]);
     } finally {
