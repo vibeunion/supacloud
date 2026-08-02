@@ -634,6 +634,8 @@ async function onParentMessage(msg: unknown): Promise<void> {
   const { functionId, functionPath, projectRoot, env, tlsPolicy, url, method, headers, body, internalBindings } = msg;
 
   const projectRef = msg.projectRef || extractProjectRef(functionId);
+  const requestAbortController = new AbortController();
+  currentAbortController = requestAbortController;
   let restoreFetchTlsPolicy = () => {};
 
   try {
@@ -652,9 +654,15 @@ async function onParentMessage(msg: unknown): Promise<void> {
       moduleVersion: msg.moduleVersion,
       projectRef,
     });
+    // Retirement may arrive while module loading is suspended. Do not enter
+    // tenant code after the worker has already closed its parent port.
+    if (requestAbortController.signal.aborted) {
+      const abortReason = requestAbortController.signal.reason;
+      throw abortReason instanceof Error
+        ? abortReason
+        : new DOMException("Task cancelled", "AbortError");
+    }
     const handler = moduleLoad.handler;
-    const requestAbortController = new AbortController();
-    currentAbortController = requestAbortController;
     await runWithPgredisBinding(internalBindings
       ? { ...internalBindings, signal: requestAbortController.signal }
       : undefined, async () => {

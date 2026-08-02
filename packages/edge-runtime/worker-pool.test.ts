@@ -34,7 +34,8 @@ async function waitForMetric(
     if (pool.snapshotMetrics("test")[`test_${metric}`] === expected) return;
     await Bun.sleep(10);
   }
-  throw new Error(`Timed out waiting for ${metric}=${expected}`);
+  const currentMetricValue = pool.snapshotMetrics("test")[`test_${metric}`];
+  throw new Error(`Timed out waiting for ${metric}=${expected}; current=${currentMetricValue}`);
 }
 
 async function waitForResponse(
@@ -1036,6 +1037,45 @@ describe("WorkerPool cancellation and replacement", () => {
     }
   });
 
+  test("cancels a request while its module is initializing", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-load-cancel-"));
+    const loadingPath = join(projectRoot, "loading.txt");
+    const handlerPath = join(projectRoot, "handler.txt");
+    const functionPath = join(projectRoot, "fn.ts");
+    await Bun.write(functionPath, `
+      await Bun.write(process.env.LOADING_PATH, "loading");
+      await Bun.sleep(100);
+      export default async function fetch() {
+        await Bun.write(process.env.HANDLER_PATH, "entered");
+        return new Response("late", { status: 200 });
+      }
+    `);
+
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    const controller = new AbortController();
+    pools.push(pool);
+
+    try {
+      const responsePromise = pool.dispatch({
+        functionId: "proj_load_cancel",
+        functionPath,
+        projectRoot,
+        env: { HANDLER_PATH: handlerPath, LOADING_PATH: loadingPath },
+        request: new Request("http://edge.local/functions/v1/load-cancel", {
+          signal: controller.signal,
+        }),
+      });
+      await waitForFile(loadingPath);
+      controller.abort();
+
+      expect((await responsePromise).status).toBe(499);
+      expect(existsSync(handlerPath)).toBe(false);
+      expect(pool.snapshotMetrics("cancel")["cancel_idle_workers"]).toBe(1);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   test("isolates HTTP aborts when requests share an external cancel key", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-duplicate-cancel-key-"));
     const firstStartedPath = join(projectRoot, "first-started.txt");
@@ -1278,6 +1318,42 @@ describe("WorkerPool cancellation and replacement", () => {
 });
 
 describe("WorkerPool cooperative retirement", () => {
+  test("retires a worker that times out during module initialization", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-retirement-load-"));
+    const functionPath = join(projectRoot, "slow-load.ts");
+    await Bun.write(functionPath, `
+      await Bun.sleep(100);
+      export default async function fetch(request) {
+        await new Promise((resolve) => {
+          const keepAlive = setInterval(() => {}, 10);
+          request.signal.addEventListener("abort", () => {
+            clearInterval(keepAlive);
+            resolve();
+          }, { once: true });
+        });
+        return new Response("retired");
+      }
+    `);
+
+    const pool = new WorkerPool({ size: 1, requestTimeout: 25 });
+    pools.push(pool);
+
+    try {
+      const response = await pool.dispatch({
+        functionId: "proj_retirement_load",
+        functionPath,
+        projectRoot,
+        env: {},
+        request: new Request("http://edge.local/functions/v1/slow-load"),
+      });
+      expect(response.status).toBe(504);
+      await waitForMetric(pool, "total_natural_worker_exits", 1);
+      expect(pool.snapshotMetrics("retirement")["retirement_retired_workers"]).toBe(0);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   test("triggers the count budget once and stops accepting requests", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-retirement-count-"));
     const functionPath = join(projectRoot, "slow.ts");
@@ -1318,7 +1394,7 @@ describe("WorkerPool cooperative retirement", () => {
       expect(exceeded).toEqual(["count"]);
       expect(pool.snapshotMetrics("retirement")["retirement_retirement_budget_exceeded"]).toBe(1);
       expect((await dispatchSlow()).status).toBe(503);
-      await waitForMetric(pool, "total_natural_worker_exits", 2, 5_000);
+      await waitForMetric(pool, "total_natural_worker_exits", 2);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
@@ -1364,7 +1440,7 @@ describe("WorkerPool cooperative retirement", () => {
       expect(exceeded).toEqual(["age"]);
       await Bun.sleep(50);
       expect(exceeded).toEqual(["age"]);
-      await waitForMetric(pool, "total_natural_worker_exits", 1, 5_000);
+      await waitForMetric(pool, "total_natural_worker_exits", 1);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
