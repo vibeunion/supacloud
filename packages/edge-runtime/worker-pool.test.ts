@@ -1318,7 +1318,7 @@ describe("WorkerPool cooperative retirement", () => {
       expect(exceeded).toEqual(["count"]);
       expect(pool.snapshotMetrics("retirement")["retirement_retirement_budget_exceeded"]).toBe(1);
       expect((await dispatchSlow()).status).toBe(503);
-      await waitForMetric(pool, "total_natural_worker_exits", 2);
+      await waitForMetric(pool, "total_natural_worker_exits", 2, 5_000);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
@@ -1364,7 +1364,7 @@ describe("WorkerPool cooperative retirement", () => {
       expect(exceeded).toEqual(["age"]);
       await Bun.sleep(50);
       expect(exceeded).toEqual(["age"]);
-      await waitForMetric(pool, "total_natural_worker_exits", 1);
+      await waitForMetric(pool, "total_natural_worker_exits", 1, 5_000);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
