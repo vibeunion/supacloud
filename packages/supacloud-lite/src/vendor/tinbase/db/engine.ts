@@ -21,6 +21,9 @@ export interface EngineTx {
   exec(sql: string): Promise<void>
 }
 
+/** Detach a database listener; some engines issue an asynchronous UNLISTEN. */
+export type EngineUnsubscribe = () => void | Promise<void>
+
 /**
  * The single database interface the rest of tinbase talks to, regardless of
  * whether it's backed by PGlite, native embedded Postgres, or the pg-mem subset.
@@ -35,7 +38,7 @@ export interface DbEngine {
   /** serialized transaction; implementations must guarantee mutual exclusion */
   transaction<T>(fn: (tx: EngineTx) => Promise<T>): Promise<T>
   /** subscribe to pg_notify on a channel; returns an unsubscribe function */
-  listen(channel: string, cb: (payload: string) => void): Promise<() => void>
+  listen(channel: string, cb: (payload: string) => void): Promise<EngineUnsubscribe>
   /** close the underlying connection/instance */
   close(): Promise<void>
 }

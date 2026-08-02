@@ -2,7 +2,7 @@
 import { mkdir, open, unlink, type FileHandle } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import type { Extension } from '@electric-sql/pglite'
-import type { DbEngine, EngineResults, EngineTx } from './engine.js'
+import type { DbEngine, EngineResults, EngineTx, EngineUnsubscribe } from './engine.js'
 import { readDataDirLockOwner, recoverStaleDataDirLock } from './data-dir-lock.js'
 import {
   STANDALONE_PGLITE_ASSETS,
@@ -101,7 +101,7 @@ export async function createPgliteEngine(dataDir?: string): Promise<DbEngine> {
         })
       }) as Promise<T>
     },
-    async listen(channel: string, cb: (payload: string) => void): Promise<() => void> {
+    async listen(channel: string, cb: (payload: string) => void): Promise<EngineUnsubscribe> {
       return pg.listen(channel, cb)
     },
     close: async () => {
