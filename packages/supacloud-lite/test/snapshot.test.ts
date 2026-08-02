@@ -174,8 +174,9 @@ async function runCli(args: string[]): Promise<string> {
     cwd: join(import.meta.dir, '..'),
     stdout: 'pipe',
     stderr: 'pipe',
-    env: { ...process.env, SUPACLOUD_LITE_DEBUG_SHUTDOWN: '1' },
+    env: process.env,
   })
+  processHandle.ref()
   const [exitCode, stdout, stderr] = await Promise.all([
     processHandle.exited,
     new Response(processHandle.stdout).text(),
