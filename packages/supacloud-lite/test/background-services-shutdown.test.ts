@@ -41,8 +41,8 @@ test('retries cron after a job-list failure and drains the active tick during st
 
   service.start()
   try {
-    await queryGate.queryStarted
     await Bun.sleep(50)
+    await queryGate.queryStarted
     expect(queryGate.queryCalls()).toBe(2)
     expect(queryGate.maxConcurrentQueries()).toBe(1)
 
