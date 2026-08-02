@@ -4,6 +4,7 @@ import { access, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { waitForShutdown } from '../src/shutdown.js'
+import { withWindowsSubprocessRef } from '../scripts/subprocess.js'
 
 const cliPath = resolve(import.meta.dir, '../src/cli.ts')
 
@@ -109,11 +110,11 @@ async function runCli(projectDir: string, command: string[]) {
     stdout: 'pipe',
     stderr: 'pipe',
   })
-  const [exitCode, stdout, stderr] = await Promise.all([
+  const [exitCode, stdout, stderr] = await withWindowsSubprocessRef(() => Promise.all([
     processHandle.exited,
     new Response(processHandle.stdout).text(),
     new Response(processHandle.stderr).text(),
-  ])
+  ]))
   return { exitCode, stdout, stderr, durationMs: performance.now() - startedAt }
 }
 
@@ -123,7 +124,7 @@ async function stopCli(cliRun: ReturnType<typeof startCli>, signal: NodeJS.Signa
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
   }
-  return await cliRun.processHandle.exited
+  return await withWindowsSubprocessRef(() => cliRun.processHandle.exited)
 }
 
 async function assertShutdownHandlerClosesProject(signal: NodeJS.Signals): Promise<void> {
