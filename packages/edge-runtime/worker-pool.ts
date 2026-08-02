@@ -223,7 +223,11 @@ export class WorkerPool {
   private resolveTlsPolicy(env: Record<string, string>): Promise<EdgeFetchTlsPolicy> {
     // Bun smol workers do not reliably inherit the parent process env. Resolve
     // host-controlled TLS policy in the main process and pass it as message data.
-    return resolveEdgeFetchTlsPolicy(env, process.env);
+    return resolveEdgeFetchTlsPolicy(
+      env,
+      process.env,
+      (caFile) => Bun.file(caFile).text(),
+    );
   }
 
   async dispatch(opts: DispatchOptions): Promise<Response> {
