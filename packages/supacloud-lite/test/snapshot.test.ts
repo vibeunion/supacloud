@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ensureProjectSecrets, resolveProjectPaths } from '../src/project-runtime.js'
 import { createSnapshot, restoreSnapshot } from '../src/snapshot.js'
+import { withWindowsSubprocessRef } from '../scripts/subprocess.js'
 import { createSymlinkIfPermitted } from './support/symlink.js'
 
 const temporaryDirectories: string[] = []
@@ -155,6 +156,10 @@ describe('Lite snapshots', () => {
 
     const status = await runCli(['status', '--project-dir', projectDir])
     expect(status).toContain('20260728000000')
+
+    const lockPath = `${resolveProjectPaths({ projectDir }).dataDir!}.supacloud-lite.lock`
+    await expect(access(lockPath)).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await runCli(['status', '--project-dir', projectDir])).toContain('20260728000000')
   })
 })
 
@@ -172,11 +177,13 @@ async function runCli(args: string[]): Promise<string> {
     stderr: 'pipe',
     env: process.env,
   })
-  const [exitCode, stdout, stderr] = await Promise.all([
-    processHandle.exited,
-    new Response(processHandle.stdout).text(),
-    new Response(processHandle.stderr).text(),
-  ])
-  if (exitCode !== 0) throw new Error(`CLI failed (${exitCode}): ${stderr || stdout}`)
-  return stdout
+  return await withWindowsSubprocessRef(async () => {
+    const [exitCode, stdout, stderr] = await Promise.all([
+      processHandle.exited,
+      new Response(processHandle.stdout).text(),
+      new Response(processHandle.stderr).text(),
+    ])
+    if (exitCode !== 0) throw new Error(`CLI failed (${exitCode}): ${stderr || stdout}`)
+    return stdout
+  })
 }

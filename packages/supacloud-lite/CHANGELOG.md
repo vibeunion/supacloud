@@ -6,7 +6,6 @@
 ### Bug Fixes
 
 * **lite:** await realtime listener shutdown ([797699b](https://github.com/zuohuadong/supacloud/commit/797699bcc8b0fcaafccf076acec3c8a49a7ee447))
-* **lite:** ignore stale background timer callbacks ([2f832fc](https://github.com/zuohuadong/supacloud/commit/2f832fc0a57e8227d4bf65097d1d06f030b29ba4))
 * **lite:** ignore stale background timer callbacks ([004ba74](https://github.com/zuohuadong/supacloud/commit/004ba74bf3f7970377fc743368d45cf4b6837da4))
 * **lite:** skip runtime services for utility commands ([050576e](https://github.com/zuohuadong/supacloud/commit/050576ebcf0a25a0ddd28db020eca759c2521753))
 
