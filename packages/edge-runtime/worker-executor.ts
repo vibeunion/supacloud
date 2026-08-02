@@ -1,15 +1,22 @@
 import path from "path";
+import { fileURLToPath } from "node:url";
+import {
+  initSync as initModuleLexerSync,
+  parse as parseModuleImports,
+} from "es-module-lexer";
 import {
   assertPathInProject,
   assertRuntimeDependencyPath,
   clearCapturedServeHandler,
+  DYNAMIC_CODE_DISABLED_MESSAGE,
+  guardDynamicCodeApis,
   disableSubprocessApis,
   envWriteLog,
   FILESYSTEM_DISABLED_MESSAGE,
   getCapturedServeHandler,
+  initializeProjectRootControl,
   NATIVE_LOADER_DISABLED_MESSAGE,
   setInjectedEnv,
-  setProjectRoot,
   SUBPROCESS_DISABLED_MESSAGE,
 } from "./deno-compat";
 import { installEdgeFetchTlsPolicy, resolveEdgeFetchTlsPolicy } from "./fetch-tls-policy";
@@ -19,12 +26,20 @@ import { runWithPgredisBinding } from "./internal-bindings";
 const { parentPort } = require("node:worker_threads") as typeof import("node:worker_threads");
 import type { PgredisRuntimeBindingConfig } from "./internal-bindings";
 
+const runtimeBunFile = Bun.file.bind(Bun);
+const setProjectRoot = initializeProjectRootControl();
+
 export function getInjectedEnv(): Record<string, string> {
   return currentInjectedEnv;
 }
 
 if (!parentPort) throw new Error("This file must be run as a Worker");
+initModuleLexerSync();
 disableSubprocessApis();
+guardDynamicCodeApis((source) => {
+  const [generatedImports] = parseModuleImports(source);
+  if (generatedImports.length > 0) throw new Error(DYNAMIC_CODE_DISABLED_MESSAGE);
+});
 
 const MAX_MODULE_CACHE = 20;
 
@@ -138,9 +153,30 @@ const DISABLED_TENANT_MODULES = new Map([
   ["fs/promises", FILESYSTEM_DISABLED_MESSAGE],
   ["node:fs", FILESYSTEM_DISABLED_MESSAGE],
   ["node:fs/promises", FILESYSTEM_DISABLED_MESSAGE],
+  ["bun:jsc", NATIVE_LOADER_DISABLED_MESSAGE],
+  ["inspector", NATIVE_LOADER_DISABLED_MESSAGE],
   ["module", NATIVE_LOADER_DISABLED_MESSAGE],
+  ["node:inspector", NATIVE_LOADER_DISABLED_MESSAGE],
   ["node:module", NATIVE_LOADER_DISABLED_MESSAGE],
+  ["node:v8", NATIVE_LOADER_DISABLED_MESSAGE],
+  ["node:vm", NATIVE_LOADER_DISABLED_MESSAGE],
+  ["v8", NATIVE_LOADER_DISABLED_MESSAGE],
+  ["vm", NATIVE_LOADER_DISABLED_MESSAGE],
 ]);
+
+const COMPUTED_DYNAMIC_IMPORT_DISABLED_MESSAGE =
+  "Computed dynamic imports are disabled in the multi-tenant Edge Runtime.";
+const UNSUPPORTED_MODULE_PROTOCOL_MESSAGE =
+  "Unsupported module URL protocol in the multi-tenant Edge Runtime.";
+const RUNTIME_RESOLVED_MODULE_PREFIXES = [
+  "node:",
+  "bun:",
+  "npm:",
+  "jsr:",
+  "https://deno.land/std",
+  "https://esm.sh/",
+  "https://cdn.skypack.dev/",
+];
 
 function moduleLoader(filePath: string): "js" | "jsx" | "ts" | "tsx" | null {
   if (filePath.endsWith(".tsx")) return "tsx";
@@ -150,9 +186,31 @@ function moduleLoader(filePath: string): "js" | "jsx" | "ts" | "tsx" | null {
   return null;
 }
 
+function isDynamicImportLiteral(source: string, start: number, end: number): boolean {
+  const expression = source.slice(start, end).trim();
+  const quote = expression[0];
+  if ((quote !== "\"" && quote !== "'" && quote !== "`") || expression.length < 2) {
+    return false;
+  }
+
+  for (let index = 1; index < expression.length; index++) {
+    const character = expression[index];
+    if (character === "\\") {
+      index++;
+      continue;
+    }
+    if (quote === "`" && character === "$" && expression[index + 1] === "{") {
+      return false;
+    }
+    if (character === quote) {
+      return expression.slice(index + 1).trim() === "";
+    }
+  }
+  return false;
+}
+
 async function assertTenantModuleGraphSafe(
   entryPath: string,
-  projectRoot: string,
   visited = new Set<string>(),
 ): Promise<void> {
   const resolvedEntry = path.resolve(entryPath);
@@ -163,6 +221,12 @@ async function assertTenantModuleGraphSafe(
   const loader = moduleLoader(resolvedEntry);
   if (!loader) return;
   const source = await Bun.file(resolvedEntry).text();
+  const [moduleImports] = parseModuleImports(source);
+  if (moduleImports.some((imported) => (
+    imported.d >= 0 && !isDynamicImportLiteral(source, imported.s, imported.e)
+  ))) {
+    throw new Error(COMPUTED_DYNAMIC_IMPORT_DISABLED_MESSAGE);
+  }
   const imports = new Bun.Transpiler({ loader })
     .scanImports(source);
   for (const imported of imports) {
@@ -170,18 +234,26 @@ async function assertTenantModuleGraphSafe(
     if (disabledMessage) {
       throw new Error(disabledMessage);
     }
-    if (!imported.path.startsWith(".") && !path.isAbsolute(imported.path)) continue;
-
     let dependencyPath = imported.path;
-    if (!path.isAbsolute(dependencyPath)) {
+    if (dependencyPath.startsWith("file:")) {
+      dependencyPath = fileURLToPath(dependencyPath);
+    } else if (/^[A-Za-z][A-Za-z\d+.-]*:/.test(dependencyPath)) {
+      if (RUNTIME_RESOLVED_MODULE_PREFIXES.some((prefix) => dependencyPath.startsWith(prefix))) {
+        continue;
+      }
+      throw new Error(UNSUPPORTED_MODULE_PROTOCOL_MESSAGE);
+    } else if (!dependencyPath.startsWith(".") && !path.isAbsolute(dependencyPath)) {
+      continue;
+    } else if (!path.isAbsolute(dependencyPath)) {
       try {
         dependencyPath = Bun.resolveSync(imported.path, path.dirname(resolvedEntry));
       } catch {
         continue;
       }
     }
-    const relative = path.relative(projectRoot, dependencyPath);
-    if (relative !== "" && (relative.startsWith("..") || path.isAbsolute(relative))) {
+    try {
+      assertPathInProject(dependencyPath);
+    } catch {
       try {
         assertRuntimeDependencyPath(dependencyPath);
       } catch {
@@ -189,7 +261,7 @@ async function assertTenantModuleGraphSafe(
       }
       continue;
     }
-    await assertTenantModuleGraphSafe(dependencyPath, projectRoot, visited);
+    await assertTenantModuleGraphSafe(dependencyPath, visited);
   }
 }
 
@@ -205,7 +277,11 @@ let retiring = false;
 async function resolveMessageTlsPolicy(
   tlsPolicy: EdgeFetchTlsPolicy | undefined,
 ): Promise<EdgeFetchTlsPolicy> {
-  return tlsPolicy ?? await resolveEdgeFetchTlsPolicy(currentInjectedEnv, originalProcessEnv);
+  return tlsPolicy ?? await resolveEdgeFetchTlsPolicy(
+    currentInjectedEnv,
+    originalProcessEnv,
+    (caFile) => runtimeBunFile(caFile).text(),
+  );
 }
 
 function injectEnv(env: Record<string, string>) {
@@ -329,7 +405,7 @@ async function loadModule(input: {
 
   evictOldestModule();
 
-  await assertTenantModuleGraphSafe(input.functionPath, input.projectRoot);
+  await assertTenantModuleGraphSafe(input.functionPath);
   const handler = await importModuleHandler(
     buildModuleImportUrl(input.functionPath, moduleVersion),
   );
@@ -558,6 +634,8 @@ async function onParentMessage(msg: unknown): Promise<void> {
   const { functionId, functionPath, projectRoot, env, tlsPolicy, url, method, headers, body, internalBindings } = msg;
 
   const projectRef = msg.projectRef || extractProjectRef(functionId);
+  const requestAbortController = new AbortController();
+  currentAbortController = requestAbortController;
   let restoreFetchTlsPolicy = () => {};
 
   try {
@@ -576,9 +654,15 @@ async function onParentMessage(msg: unknown): Promise<void> {
       moduleVersion: msg.moduleVersion,
       projectRef,
     });
+    // Retirement may arrive while module loading is suspended. Do not enter
+    // tenant code after the worker has already closed its parent port.
+    if (requestAbortController.signal.aborted) {
+      const abortReason = requestAbortController.signal.reason;
+      throw abortReason instanceof Error
+        ? abortReason
+        : new DOMException("Task cancelled", "AbortError");
+    }
     const handler = moduleLoad.handler;
-    const requestAbortController = new AbortController();
-    currentAbortController = requestAbortController;
     await runWithPgredisBinding(internalBindings
       ? { ...internalBindings, signal: requestAbortController.signal }
       : undefined, async () => {

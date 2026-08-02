@@ -1,5 +1,3 @@
-import { runtimeFile } from "./deno-compat";
-
 type FetchLike = typeof globalThis.fetch;
 
 export type EdgeFetchTlsPolicy = {
@@ -22,6 +20,7 @@ function pickString(value: string | undefined): string | undefined {
 export async function resolveEdgeFetchTlsPolicy(
   env: Record<string, string | undefined>,
   hostEnv: Record<string, string | undefined> = {},
+  readCaFile?: (path: string) => Promise<string>,
 ): Promise<EdgeFetchTlsPolicy> {
   if (
     enabled(env.SUPACLOUD_EDGE_TLS_INSECURE_SKIP_VERIFY) ||
@@ -37,7 +36,8 @@ export async function resolveEdgeFetchTlsPolicy(
 
   const caFile = pickString(hostEnv.SUPACLOUD_EDGE_TLS_CA_FILE);
   if (caFile) {
-    return { ca: await runtimeFile(caFile).text(), source: "ca-file" };
+    if (!readCaFile) throw new Error("Host CA file reader is unavailable.");
+    return { ca: await readCaFile(caFile), source: "ca-file" };
   }
 
   return { source: "none" };

@@ -14,6 +14,10 @@ export const FILESYSTEM_DISABLED_MESSAGE =
   "Direct file system module access is disabled in the multi-tenant Edge Runtime.";
 export const NATIVE_LOADER_DISABLED_MESSAGE =
   "Native and builtin module loaders are disabled in the multi-tenant Edge Runtime.";
+export const DYNAMIC_CODE_DISABLED_MESSAGE =
+  "Dynamic code generation is disabled in the multi-tenant Edge Runtime.";
+export const HOST_RUNTIME_DISABLED_MESSAGE =
+  "Host runtime capabilities are disabled in the multi-tenant Edge Runtime.";
 
 const nodeFs = require("node:fs") as typeof import("node:fs");
 const nodeFsPromises = require("node:fs/promises") as typeof import("node:fs/promises");
@@ -33,9 +37,27 @@ const runtimeFs = {
 };
 const runtimeBunFile = Bun.file.bind(Bun);
 const runtimeBunWrite = Bun.write.bind(Bun);
+const DISABLED_BUN_HOST_CAPABILITIES = [
+  "Archive",
+  "FileSystemRouter",
+  "Glob",
+  "Terminal",
+  "cron",
+  "generateHeapSnapshot",
+  "listen",
+  "openInEditor",
+  "serve",
+  "udpSocket",
+];
 
-export function runtimeFile(path: string | URL): ReturnType<typeof Bun.file> {
-  return runtimeBunFile(path);
+let projectRootControlInitialized = false;
+
+export function initializeProjectRootControl(): (root: string | null) => void {
+  if (projectRootControlInitialized) {
+    throw new Error("Project root control is already initialized.");
+  }
+  projectRootControlInitialized = true;
+  return setProjectRoot;
 }
 
 export function getCapturedServeHandler() {
@@ -62,7 +84,10 @@ export function disableSubprocessApis(): void {
     bun.$ = subprocessDisabled;
     bun.spawn = subprocessDisabled;
     bun.spawnSync = subprocessDisabled;
+    bun.build = dynamicCodeDisabled;
+    if (typeof bun.mmap === "function") bun.mmap = filesystemDisabled;
     if (typeof bun.dlopen === "function") bun.dlopen = nativeLoaderDisabled;
+    disableBunHostCapabilities(bun);
     bun.file = (...args: unknown[]) => {
       assertPathInProject(args[0]);
       return (runtimeBunFile as unknown as (...fileArgs: unknown[]) => unknown)(...args);
@@ -76,8 +101,14 @@ export function disableSubprocessApis(): void {
     // 必须在加载租户模块前禁用，否则可绕过 Bun.spawn 直接调用 libc system()。
     const ffi = bun.FFI as Record<string, unknown> | undefined;
     if (ffi) {
-      for (const name of ["callback", "dlopen", "linkSymbols"]) {
-        ffi[name] = subprocessDisabled;
+      for (const name of Object.getOwnPropertyNames(ffi)) {
+        if (typeof ffi[name] === "function") ffi[name] = nativeLoaderDisabled;
+      }
+      const ffiRead = ffi.read as Record<string, unknown> | undefined;
+      if (ffiRead) {
+        for (const name of Object.getOwnPropertyNames(ffiRead)) {
+          if (typeof ffiRead[name] === "function") ffiRead[name] = nativeLoaderDisabled;
+        }
       }
     }
   }
@@ -127,6 +158,68 @@ export function disableSubprocessApis(): void {
     modulePrototype.require = nativeLoaderDisabled;
   }
   syncBuiltinESMExports();
+}
+
+function disableBunHostCapabilities(bun: Record<string, unknown>): void {
+  for (const name of DISABLED_BUN_HOST_CAPABILITIES) {
+    if (Object.getOwnPropertyDescriptor(bun, name)?.writable) {
+      bun[name] = hostRuntimeDisabled;
+    }
+  }
+}
+
+export function guardDynamicCodeApis(validateSource: (source: string) => void): void {
+  const constructors: Function[] = [
+    Function,
+    Object.getPrototypeOf(async function () {}).constructor,
+    Object.getPrototypeOf(function* () {}).constructor,
+    Object.getPrototypeOf(async function* () {}).constructor,
+  ];
+
+  Object.defineProperty(globalThis, "eval", {
+    configurable: false,
+    value: dynamicCodeDisabled,
+    writable: false,
+  });
+  for (const originalConstructor of constructors) {
+    installGuardedCodeConstructor(originalConstructor, validateSource);
+  }
+}
+
+function installGuardedCodeConstructor(
+  originalConstructor: Function,
+  validateSource: (source: string) => void,
+): void {
+  const guardedConstructor = function (this: unknown, ...args: unknown[]) {
+    for (const argument of args) validateSource(String(argument));
+    return Reflect.apply(originalConstructor, this, args);
+  };
+  Object.setPrototypeOf(guardedConstructor, Object.getPrototypeOf(originalConstructor));
+  Object.defineProperty(guardedConstructor, "prototype", { value: originalConstructor.prototype });
+  Object.defineProperty(originalConstructor.prototype, "constructor", {
+    configurable: false,
+    value: guardedConstructor,
+    writable: false,
+  });
+  if (originalConstructor === Function) {
+    Object.defineProperty(globalThis, "Function", {
+      configurable: false,
+      value: guardedConstructor,
+      writable: false,
+    });
+  }
+}
+
+function dynamicCodeDisabled(): never {
+  throw new Error(DYNAMIC_CODE_DISABLED_MESSAGE);
+}
+
+function filesystemDisabled(): never {
+  throw new Error(FILESYSTEM_DISABLED_MESSAGE);
+}
+
+function hostRuntimeDisabled(): never {
+  throw new Error(HOST_RUNTIME_DISABLED_MESSAGE);
 }
 
 function guardFunctionExports(
@@ -283,7 +376,7 @@ const projectPathContext = new AsyncLocalStorage<ProjectPathContext | null>();
 let activeProjectPathContext: ProjectPathContext | null = null;
 let injectedEnvRef: Record<string, string> = {};
 
-export function setProjectRoot(root: string | null) {
+function setProjectRoot(root: string | null) {
   if (!root) {
     activeProjectPathContext = null;
     projectPathContext.enterWith(null);
@@ -333,12 +426,17 @@ function currentProjectPathContext(): ProjectPathContext | null {
 function assertPathInContext(value: unknown, context: ProjectPathContext): void {
   const requestedPath = filesystemPath(value);
   const resolved = path.resolve(requestedPath);
-  if (!isPathInside(resolved, context.lexicalRoot)) {
+  const base = isPathInside(resolved, context.lexicalRoot)
+    ? context.lexicalRoot
+    : isPathInside(resolved, context.realRoot)
+      ? context.realRoot
+      : null;
+  if (!base) {
     throw new Error(`Access denied: path "${requestedPath}" is outside the allowed directory`);
   }
 
-  const relative = path.relative(context.lexicalRoot, resolved);
-  let prefix = context.lexicalRoot;
+  const relative = path.relative(base, resolved);
+  let prefix = base;
   for (const segment of relative.split(path.sep).filter(Boolean)) {
     prefix = path.join(prefix, segment);
     try {

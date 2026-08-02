@@ -3,9 +3,11 @@ import { syncBuiltinESMExports } from "node:module";
 import {
   disableSubprocessApis,
   FILESYSTEM_DISABLED_MESSAGE,
+  initializeProjectRootControl,
   NATIVE_LOADER_DISABLED_MESSAGE,
-  setProjectRoot,
 } from "./deno-compat";
+
+const setProjectRoot = initializeProjectRootControl();
 
 test("Deno.Command fails closed for every subprocess command", () => {
   const DenoCompat = (globalThis as any).Deno;
@@ -18,6 +20,7 @@ test("Deno.Command fails closed for every subprocess command", () => {
 
 test("the worker subprocess guard disables and restores process creation APIs", async () => {
   const bun = globalThis.Bun as unknown as Record<string, unknown>;
+  const originalBunProperties = Object.getOwnPropertyDescriptors(bun);
   const childProcess = require("node:child_process") as Record<string, unknown>;
   const fs = require("node:fs") as Record<string, unknown>;
   const fsPromises = require("node:fs/promises") as Record<string, unknown>;
@@ -32,6 +35,8 @@ test("the worker subprocess guard disables and restores process creation APIs", 
   const originalBunWrite = bun.write;
   const originalBunDlopen = bun.dlopen;
   const originalFfi = { ...(bun.FFI as Record<string, unknown>) };
+  const ffiRead = (bun.FFI as Record<string, unknown>).read as Record<string, unknown>;
+  const originalFfiRead = { ...ffiRead };
   const originalFfiModule = { ...ffiModule };
   const originalNativeFfi = { ...(ffiModule.native as Record<string, unknown>) };
   const originalWorker = (globalThis as Record<string, unknown>).Worker;
@@ -100,6 +105,7 @@ test("the worker subprocess guard disables and restores process creation APIs", 
     bun.write = originalBunWrite;
     if (originalBunDlopen !== undefined) bun.dlopen = originalBunDlopen;
     Object.assign(bun.FFI as Record<string, unknown>, originalFfi);
+    Object.assign(ffiRead, originalFfiRead);
     Object.assign(ffiModule, originalFfiModule);
     Object.assign(ffiModule.native as Record<string, unknown>, originalNativeFfi);
     (globalThis as Record<string, unknown>).Worker = originalWorker;
@@ -112,6 +118,9 @@ test("the worker subprocess guard disables and restores process creation APIs", 
     moduleApi.createRequire = originalModuleCreateRequire;
     moduleApi._load = originalModuleLoad;
     if (modulePrototype && originalModuleRequire) modulePrototype.require = originalModuleRequire;
+    for (const [name, descriptor] of Object.entries(originalBunProperties)) {
+      if ("value" in descriptor && descriptor.writable) bun[name] = descriptor.value;
+    }
     syncBuiltinESMExports();
   }
 });

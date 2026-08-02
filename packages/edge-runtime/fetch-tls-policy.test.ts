@@ -63,7 +63,7 @@ describe("Edge fetch TLS policy", () => {
         SUPACLOUD_EDGE_TLS_CA_FILE: "/tenant/ca-file-is-ignored.pem",
       }, {
         SUPACLOUD_EDGE_TLS_CA_FILE: caPath,
-      });
+      }, (path) => Bun.file(path).text());
       const init = await captureFetchInit(policy);
       expect(init.tls?.ca).toContain("file");
     } finally {
