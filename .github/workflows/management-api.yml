@@ -57,7 +57,7 @@ permissions:
 # gitleaks:allow
 env:
   NODE_VERSION: "24.x"
-  BUN_VERSION: "1.4.0-canary.1+50bb3bd8e"
+  BUN_VERSION: "canary"
   XCADDY_VERSION: "v0.4.5"
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   # noqa: hardcoded-jwt — these are the Supabase public demo keys used for local/CI testing only
