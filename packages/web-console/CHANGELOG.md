@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.28.6](https://github.com/zuohuadong/supacloud/compare/web-console-v0.28.5...web-console-v0.28.6) (2026-08-02)
+
+
+### Miscellaneous Chores
+
+* **deps-dev:** bump tailwind-variants from 3.2.2 to 3.3.0 in /packages/web-console ([d3c7263](https://github.com/zuohuadong/supacloud/commit/d3c72631a280589b3d61beebd564b56ce8c4428d))
+* **deps-dev:** bump tailwind-variants in /packages/web-console ([04af188](https://github.com/zuohuadong/supacloud/commit/04af1887aa9b51cc7ac19289f15a0ae85c8fdeb2))
+
 ## [0.28.5](https://github.com/zuohuadong/supacloud/compare/web-console-v0.28.4...web-console-v0.28.5) (2026-08-02)
 
 
