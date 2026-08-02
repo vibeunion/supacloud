@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.50.13](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.12...management-api-v0.50.13) (2026-08-02)
+
+
+### Bug Fixes
+
+* **management-api:** isolate standalone version command ([315bd4d](https://github.com/zuohuadong/supacloud/commit/315bd4d4824463ac02366b5a75f31bb6153887a2))
+
 ## [0.50.12](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.11...management-api-v0.50.12) (2026-08-02)
 
 
