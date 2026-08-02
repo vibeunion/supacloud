@@ -176,12 +176,24 @@ async function runCli(args: string[]): Promise<string> {
     stderr: 'pipe',
     env: process.env,
   })
-  processHandle.ref()
-  const [exitCode, stdout, stderr] = await Promise.all([
-    processHandle.exited,
-    new Response(processHandle.stdout).text(),
-    new Response(processHandle.stderr).text(),
-  ])
-  if (exitCode !== 0) throw new Error(`CLI failed (${exitCode}): ${stderr || stdout}`)
-  return stdout
+  return await withWindowsSubprocessRef(async () => {
+    const [exitCode, stdout, stderr] = await Promise.all([
+      processHandle.exited,
+      new Response(processHandle.stdout).text(),
+      new Response(processHandle.stderr).text(),
+    ])
+    if (exitCode !== 0) throw new Error(`CLI failed (${exitCode}): ${stderr || stdout}`)
+    return stdout
+  })
+}
+
+async function withWindowsSubprocessRef<T>(operation: () => Promise<T>): Promise<T> {
+  if (process.platform !== 'win32') return await operation()
+  // Bun 1.3.14 can stop polling Windows IOCP when only a subprocess exit is pending.
+  const eventLoopRef = setInterval(() => {}, 1000)
+  try {
+    return await operation()
+  } finally {
+    clearInterval(eventLoopRef)
+  }
 }
