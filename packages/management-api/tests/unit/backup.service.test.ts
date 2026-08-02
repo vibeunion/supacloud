@@ -56,7 +56,8 @@ describe("BackupService", () => {
     const backups = await listBackups("supa_project_a");
 
     expect(spawnedCommands).toEqual([[
-      "timeout", "--kill-after=30s", "5", "sudo", "-n", "-u", "postgres", "pgbackrest",
+      "timeout", "--kill-after=30s", "5", "/usr/bin/setpriv", "--reuid", "postgres", "--regid",
+      "postgres", "--clear-groups", "--", "pgbackrest",
       "--stanza=db-main", "info", "--output=json",
     ]]);
     expect(backups).toEqual([{
@@ -166,7 +167,8 @@ describe("BackupService", () => {
 
     await expect(restore({ target: "2026-07-22T01:30:00Z" })).rejects.toThrow("PITR restore failed");
     expect(spawnedCommands.at(-1)).toEqual([
-      "timeout", "--kill-after=30s", "1800", "sudo", "-n", "-u", "postgres", "pig", "pitr",
+      "timeout", "--kill-after=30s", "1800", "/usr/bin/setpriv", "--reuid", "postgres", "--regid",
+      "postgres", "--clear-groups", "--", "pig", "pitr",
       "-s", "db-main", "-t", "2026-07-22T01:30:00Z", "-y",
     ]);
   });
@@ -221,14 +223,16 @@ describe("BackupService", () => {
       commandOutcomes.push({ exitCode: 0, stdout: inventory([], 0, "cluster-main") });
       await listBackups("supa_project_a");
       expect(spawnedCommands).toEqual([[
-        "timeout", "--kill-after=30s", "5", "sudo", "-n", "-u", "pgbackrest", "/usr/bin/pgbackrest",
+        "timeout", "--kill-after=30s", "5", "/usr/bin/setpriv", "--reuid", "pgbackrest", "--regid",
+        "pgbackrest", "--clear-groups", "--", "/usr/bin/pgbackrest",
         "--config=/etc/supabase/pgbackrest.conf", "--stanza=cluster-main", "info", "--output=json",
       ]]);
 
       commandOutcomes.push({ exitCode: 0 });
       await restore({ target: "2026-07-22T01:30:00Z" });
       expect(spawnedCommands[1]).toEqual([
-        "timeout", "--kill-after=30s", "1800", "sudo", "-n", "-u", "postgres", "pig", "pitr",
+        "timeout", "--kill-after=30s", "1800", "/usr/bin/setpriv", "--reuid", "postgres", "--regid",
+        "postgres", "--clear-groups", "--", "pig", "pitr",
         "-s", "cluster-main", "-t", "2026-07-22T01:30:00Z", "-y",
       ]);
     } finally {

@@ -1,4 +1,5 @@
 import { $ } from 'bun';
+import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 import { logger } from "../utils/logger";
@@ -14,6 +15,7 @@ const INFO_TIMEOUT_MS = 5_000;
 const BACKUP_TIMEOUT_MS = 30 * 60_000;
 const PITR_TIMEOUT_MS = 30 * 60_000;
 const TIMEOUT_KILL_AFTER = "--kill-after=30s";
+const SETPRIV_PATH = ["/usr/bin/setpriv", "/bin/setpriv"].find(existsSync) ?? "/usr/bin/setpriv";
 
 interface PgBackRestCommandResult {
   exitCode: number;
@@ -66,6 +68,19 @@ export function isPitrEnabled(environment: Record<string, string | undefined> = 
   return environment.SUPACLOUD_PITR_ENABLED === "true" || environment.PITR_ENABLED === "true";
 }
 
+function privilegeDropCommand(user: string, command: string[]): string[] {
+  return [
+    SETPRIV_PATH,
+    "--reuid",
+    user,
+    "--regid",
+    user,
+    "--clear-groups",
+    "--",
+    ...command,
+  ];
+}
+
 function pgBackRestCommand(
   pgBackRestArguments: string[],
   timeoutMs = pgBackRestArguments.includes("backup") ? BACKUP_TIMEOUT_MS : INFO_TIMEOUT_MS,
@@ -76,14 +91,12 @@ function pgBackRestCommand(
     "timeout",
     TIMEOUT_KILL_AFTER,
     String(Math.ceil(timeoutMs / 1000)),
-    "sudo",
-    "-n",
-    "-u",
-    configuration.user,
-    configuration.binary,
-    ...configurationArgument,
-    `--stanza=${configuration.stanza}`,
-    ...pgBackRestArguments,
+    ...privilegeDropCommand(configuration.user, [
+      configuration.binary,
+      ...configurationArgument,
+      `--stanza=${configuration.stanza}`,
+      ...pgBackRestArguments,
+    ]),
   ];
 }
 
@@ -295,17 +308,15 @@ export async function restore(request: RestoreRequest): Promise<{ message: strin
         "timeout",
         TIMEOUT_KILL_AFTER,
         String(Math.ceil(PITR_TIMEOUT_MS / 1000)),
-        "sudo",
-        "-n",
-        "-u",
-        "postgres",
-        "pig",
-        "pitr",
-        "-s",
-        getPgBackRestStanza(),
-        "-t",
-        request.target,
-        "-y",
+        ...privilegeDropCommand("postgres", [
+          "pig",
+          "pitr",
+          "-s",
+          getPgBackRestStanza(),
+          "-t",
+          request.target,
+          "-y",
+        ]),
       ], { stdout: "pipe", stderr: "pipe" });
       [exitCode] = await Promise.all([
         restoreProcess.exited,
