@@ -2,6 +2,7 @@ import { access, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import packageJson from '../package.json' with { type: 'json' }
+import { withWindowsSubprocessRef } from './subprocess.js'
 
 const packageDir = resolve(import.meta.dir, '..')
 const packDir = await mkdtemp(join(tmpdir(), 'supacloud-lite-pack-'))
@@ -120,12 +121,14 @@ async function runCommandExpectingFailure(command: string[], cwd: string, env: N
 
 async function executeCommand(command: string[], cwd: string, env: NodeJS.ProcessEnv): Promise<CommandExecution> {
   const processHandle = Bun.spawn({ cmd: command, cwd, stdout: 'pipe', stderr: 'pipe', env })
-  const [exitCode, stdout, stderr] = await Promise.all([
-    processHandle.exited,
-    new Response(processHandle.stdout).text(),
-    new Response(processHandle.stderr).text(),
-  ])
-  return { exitCode, stdout, stderr }
+  return await withWindowsSubprocessRef(async () => {
+    const [exitCode, stdout, stderr] = await Promise.all([
+      processHandle.exited,
+      new Response(processHandle.stdout).text(),
+      new Response(processHandle.stderr).text(),
+    ])
+    return { exitCode, stdout, stderr }
+  })
 }
 
 interface CommandExecution {

@@ -2,6 +2,7 @@ import { access, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/p
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import packageJson from '../package.json' with { type: 'json' }
+import { withWindowsSubprocessRef } from './subprocess.js'
 
 const packageDir = resolve(import.meta.dir, '..')
 const binary = resolveStandaloneBinary()
@@ -225,7 +226,7 @@ async function withServer(options: ServerOptions, check: (url: string) => Promis
   } finally {
     console.log(`[standalone-smoke] ${options.phaseLabel}: stop`)
     processHandle.kill('SIGTERM')
-    const exitCode = await processHandle.exited
+    const exitCode = await withWindowsSubprocessRef(() => processHandle.exited)
     const expectedExitCode = expectedStandaloneShutdownExitCode()
     console.log(
       `[standalone-smoke] ${options.phaseLabel}: ${exitCode === expectedExitCode ? 'ok' : 'failed'} (exit ${exitCode})`,
@@ -276,7 +277,7 @@ async function runCommand(
   const processHandle = Bun.spawn({ cmd: command, cwd, env, stdout: 'pipe', stderr: 'pipe' })
   const stdoutPromise = new Response(processHandle.stdout).text()
   const stderrPromise = new Response(processHandle.stderr).text()
-  const exitCode = await processHandle.exited
+  const exitCode = await withWindowsSubprocessRef(() => processHandle.exited)
   console.log(`[standalone-smoke] ${commandLabel}: ${exitCode === 0 ? 'ok' : 'failed'} (exit ${exitCode})`)
   const [stdout, stderr] = await Promise.all([stdoutPromise, stderrPromise])
   if (exitCode !== 0) throw new Error(`standalone command "${commandLabel}" failed (${exitCode})\n${stdout}\n${stderr}`)
