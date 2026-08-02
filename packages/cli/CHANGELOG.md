@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.2](https://github.com/zuohuadong/supacloud/compare/cli-v0.14.1...cli-v0.14.2) (2026-08-02)
+
+
+### Bug Fixes
+
+* address release-blocking review findings ([0154fdb](https://github.com/zuohuadong/supacloud/commit/0154fdbab758c9d9c6a80fb877b15848a5ace5df))
+
 ## [0.14.1](https://github.com/zuohuadong/supacloud/compare/cli-v0.14.0...cli-v0.14.1) (2026-07-29)
 
 

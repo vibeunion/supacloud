@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.16.2](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.16.1...edge-runtime-v0.16.2) (2026-08-02)
+
+
+### Bug Fixes
+
+* address release-blocking review findings ([0154fdb](https://github.com/zuohuadong/supacloud/commit/0154fdbab758c9d9c6a80fb877b15848a5ace5df))
+* **edge-runtime:** close dynamic import sandbox escapes ([#670](https://github.com/zuohuadong/supacloud/issues/670)) ([a935126](https://github.com/zuohuadong/supacloud/commit/a935126488eb021cd7f5d4fe58163160eb5f6686))
+
+
+### Miscellaneous Chores
+
+* **deps-dev:** bump @types/node from 26.1.1 to 26.1.2 in /packages/edge-runtime ([96c8900](https://github.com/zuohuadong/supacloud/commit/96c8900908839dd3532af924f584156da2faf7a6))
+
 ## [0.16.1](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.16.0...edge-runtime-v0.16.1) (2026-07-28)
 
 

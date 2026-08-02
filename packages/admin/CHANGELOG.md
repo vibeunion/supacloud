@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/zuohuadong/supacloud/compare/admin-v0.7.0...admin-v0.7.1) (2026-08-02)
+
+
+### Bug Fixes
+
+* address release-blocking review findings ([0154fdb](https://github.com/zuohuadong/supacloud/commit/0154fdbab758c9d9c6a80fb877b15848a5ace5df))
+
 ## [0.7.0](https://github.com/zuohuadong/supacloud/compare/admin-v0.6.0...admin-v0.7.0) (2026-07-29)
 
 

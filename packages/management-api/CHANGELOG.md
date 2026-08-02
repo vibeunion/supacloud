@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.50.11](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.10...management-api-v0.50.11) (2026-08-02)
+
+
+### Bug Fixes
+
+* address release-blocking review findings ([0154fdb](https://github.com/zuohuadong/supacloud/commit/0154fdbab758c9d9c6a80fb877b15848a5ace5df))
+* repair cache, backup, and table setup workflows ([#668](https://github.com/zuohuadong/supacloud/issues/668)) ([66df4a0](https://github.com/zuohuadong/supacloud/commit/66df4a029a4f4d553dddd3cd3b8c27af45eae387))
+
 ## [0.50.10](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.9...management-api-v0.50.10) (2026-07-30)
 
 
