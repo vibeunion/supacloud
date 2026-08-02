@@ -375,7 +375,9 @@ function formatStorage(backend: ProjectRuntimeOptions['storageBackend'] | 'custo
   return storageDir
 }
 
-main().catch((error) => {
+try {
+  await main()
+} catch (error) {
   console.error(error instanceof Error ? error.message : String(error))
   process.exitCode = 1
-})
+}

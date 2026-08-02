@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ensureProjectSecrets, resolveProjectPaths } from '../src/project-runtime.js'
@@ -155,6 +155,10 @@ describe('Lite snapshots', () => {
 
     const status = await runCli(['status', '--project-dir', projectDir])
     expect(status).toContain('20260728000000')
+
+    const lockPath = `${resolveProjectPaths({ projectDir }).dataDir!}.supacloud-lite.lock`
+    await expect(access(lockPath)).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await runCli(['status', '--project-dir', projectDir])).toContain('20260728000000')
   })
 })
 
