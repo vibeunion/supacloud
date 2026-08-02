@@ -380,4 +380,8 @@ try {
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error))
   process.exitCode = 1
+} finally {
+  if (process.env.SUPACLOUD_LITE_DEBUG_SHUTDOWN === '1') {
+    console.error(`[lite-shutdown] resources=${JSON.stringify(process.getActiveResourcesInfo())}`)
+  }
 }
