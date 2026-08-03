@@ -1,5 +1,6 @@
 import { logger } from "../utils/logger";
 import { config } from "../config";
+import { ServiceUnavailableError } from "../utils/errors";
 import path from "path";
 import fs from "fs/promises";
 
@@ -142,6 +143,12 @@ type BundleFunctionResult = {
   importCount: number;
   bunArtifactHash: string | null;
   metafile: BuildMetafile | null;
+};
+
+type EdgeFunctionRuntimeControlResult = {
+  ok: boolean;
+  status?: number;
+  error?: string;
 };
 
 function resolveExternalPackages(): string[] {
@@ -438,27 +445,46 @@ function normalizePreheatPool(value: unknown): EdgeFunctionPreheatPoolResult {
   };
 }
 
-async function preheatRuntimeFunction(ref: string, slug: string): Promise<EdgeFunctionPreheatResult> {
+async function readRuntimeControlBody(response: Response): Promise<Record<string, unknown>> {
+  const bodyText = await response.text();
+  if (!bodyText) return {};
+  try {
+    const parsed = JSON.parse(bodyText);
+    return parsed && typeof parsed === "object"
+      ? parsed as Record<string, unknown>
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+async function preheatRuntimeFunction(
+  ref: string,
+  slug: string,
+  requestedVersion?: string,
+): Promise<EdgeFunctionPreheatResult> {
   const start = performance.now();
   try {
     const runtimeUrl = `http://${config.edgeRuntimeInternal}`;
+    const headers = runtimeInternalHeaders();
+    if (requestedVersion) {
+      headers["x-supacloud-function-version"] = requestedVersion;
+    }
     const preheatRes = await fetch(`${runtimeUrl}/preheat/${ref}/${slug}`, {
       method: "POST",
-      headers: runtimeInternalHeaders(),
+      headers,
       signal: AbortSignal.timeout(10_000),
     });
     const durationMs = Math.round(performance.now() - start);
-    let body: unknown = null;
-    try {
-      body = await preheatRes.json();
-    } catch {
-      body = await preheatRes.text();
-    }
-    const bodyRecord = body && typeof body === "object" ? body as Record<string, unknown> : {};
+    const bodyRecord = await readRuntimeControlBody(preheatRes);
     const foreground = normalizePreheatPool(bodyRecord.foreground);
     const background = normalizePreheatPool(bodyRecord.background);
+    const acknowledgedVersion = typeof bodyRecord.version === "string"
+      ? bodyRecord.version
+      : undefined;
+    const versionReady = requestedVersion === undefined || acknowledgedVersion === requestedVersion;
     return {
-      ok: preheatRes.ok && Boolean(bodyRecord.success ?? true),
+      ok: preheatRes.ok && Boolean(bodyRecord.success ?? true) && versionReady,
       status: preheatRes.status,
       duration_ms: durationMs,
       attempted: foreground.attempted + background.attempted,
@@ -467,6 +493,9 @@ async function preheatRuntimeFunction(ref: string, slug: string): Promise<EdgeFu
       cache_misses: foreground.cacheMisses + background.cacheMisses,
       foreground,
       background,
+      error: versionReady
+        ? undefined
+        : "Edge Runtime did not confirm the requested function version",
     };
   } catch (error) {
     return {
@@ -488,7 +517,34 @@ function runtimeInternalHeaders(): Record<string, string> {
   return { "x-supacloud-internal-auth": config.edgeRuntimeMasterKey || config.masterToken };
 }
 
-async function invalidateCache(ref: string, slug: string): Promise<void> {
+async function invalidateRuntimeFunction(
+  ref: string,
+  slug: string,
+): Promise<EdgeFunctionRuntimeControlResult> {
+  try {
+    const runtimeUrl = `http://${config.edgeRuntimeInternal}`;
+    const res = await fetch(`${runtimeUrl}/invalidate/${ref}/${slug}`, {
+      method: "POST",
+      headers: runtimeInternalHeaders(),
+      signal: AbortSignal.timeout(2000),
+    });
+    const bodyRecord = await readRuntimeControlBody(res);
+    return {
+      ok: res.ok && bodyRecord.success !== false,
+      status: res.status,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+async function invalidateCache(
+  ref: string,
+  slug: string,
+): Promise<EdgeFunctionRuntimeControlResult> {
   // 1. Clear the transform file cache
   const cacheDir = path.join(getFunctionsRoot(), ".cache", ref);
   for (const ext of [".ts", ".js"]) {
@@ -500,18 +556,49 @@ async function invalidateCache(ref: string, slug: string): Promise<void> {
   }
 
   // 2. Notify Edge Runtime to evict the module from Worker thread caches
-  try {
-    const runtimeUrl = `http://${config.edgeRuntimeInternal}`;
-    const res = await fetch(`${runtimeUrl}/invalidate/${ref}/${slug}`, {
-      method: "POST",
-      headers: runtimeInternalHeaders(),
-      signal: AbortSignal.timeout(2000),
+  const result = await invalidateRuntimeFunction(ref, slug);
+  if (!result.ok) {
+    logger.warn(`[EdgeFunction] Runtime invalidate failed`, {
+      ref,
+      slug,
+      status: result.status,
+      error: result.error,
     });
-    if (!res.ok) {
-      logger.warn(`[EdgeFunction] Runtime invalidate failed`, { ref, slug, status: res.status });
-    }
-  } catch {
-    // Edge Runtime may not be running — modules will load fresh on next start
+  }
+  return result;
+}
+
+function requireRuntimeControl(
+  control: EdgeFunctionRuntimeControlResult,
+  operation: string,
+): void {
+  if (control.ok) return;
+  const status = control.status ? ` (HTTP ${control.status})` : "";
+  throw new ServiceUnavailableError(
+    "Edge Runtime function activation",
+    `${operation}${status}: ${control.error || "control request failed"}`,
+  );
+}
+
+async function applyActiveVersionArtifacts(
+  ref: string,
+  slug: string,
+  detail: EdgeFunctionVersionDetail,
+  bundleCode: string,
+): Promise<void> {
+  const dir = getFuncDir(ref);
+  const safeSlug = validateSlug(slug);
+  await fs.mkdir(dir, { recursive: true });
+  await Bun.write(getFuncPath(ref, safeSlug), bundleCode);
+
+  const sourceCode = detail.source_code
+    ?? (detail.has_source ? await readVersionedFunctionSource(ref, slug, detail.version) : null);
+  if (sourceCode != null) await Bun.write(getSrcPath(ref, safeSlug), sourceCode);
+
+  if (detail.has_source_dir && detail.source_dir_path) {
+    const srcDir = assertInside(dir, path.join(dir, `.src-${safeSlug}`));
+    await fs.rm(srcDir, { recursive: true, force: true });
+    await fs.cp(detail.source_dir_path, srcDir, { recursive: true });
   }
 }
 
@@ -1167,52 +1254,29 @@ export const edgeFunctionService = {
   },
 
   async activateVersion(ref: string, slug: string, version: string): Promise<EdgeFunctionConfig | null> {
-    const detail = await this.getVersion(ref, slug, version);
-    if (!detail || !detail.has_bundle) return null;
-
-    const bundleCode = detail.bundle_code ?? (await readVersionedFunctionCode(ref, slug, version));
-    if (bundleCode == null) return null;
-
-    const dir = getFuncDir(ref);
-    const safeSlug = validateSlug(slug);
-    await fs.mkdir(dir, { recursive: true });
-    await Bun.write(getFuncPath(ref, safeSlug), bundleCode);
-
-    const sourceCode =
-      detail.source_code ?? (detail.has_source ? await readVersionedFunctionSource(ref, slug, version) : null);
-    if (sourceCode != null) {
-      await Bun.write(getSrcPath(ref, safeSlug), sourceCode);
-    }
-
-    if (detail.has_source_dir && detail.source_dir_path) {
-      const srcDir = assertInside(dir, path.join(dir, `.src-${safeSlug}`));
-      await fs.rm(srcDir, { recursive: true, force: true }).catch(() => {});
-      await fs.cp(detail.source_dir_path, srcDir, { recursive: true });
-    }
-
-    await invalidateCache(ref, slug);
-
+    const releaseLock = await acquireFunctionDeployLock(ref, slug);
     try {
-      const runtimeUrl = `http://${config.edgeRuntimeInternal}`;
-      const preheatRes = await fetch(`${runtimeUrl}/preheat/${ref}/${slug}`, {
-        method: "POST",
-        headers: runtimeInternalHeaders(),
-        signal: AbortSignal.timeout(10_000),
-      });
-      if (!preheatRes.ok) {
-        logger.warn("[EdgeFunction] Runtime preheat failed during version activation", { ref, slug, version, status: preheatRes.status });
-      }
-    } catch {
-      logger.debug("[EdgeFunction] Preheat skipped during version activation", {
-        ref,
-        slug,
-        version,
-      });
-    }
+      const detail = await this.getVersion(ref, slug, version);
+      if (!detail || !detail.has_bundle) return null;
 
-    const updated = await this.updateConfig(ref, slug, { version });
-    logger.info(`[EdgeFunction] Activated version ${version} for ${slug}@${ref}`);
-    return updated;
+      const bundleCode = detail.bundle_code ?? (await readVersionedFunctionCode(ref, slug, version));
+      if (bundleCode == null) return null;
+
+      // Validate the inactive artifact before changing any live file or config.
+      const readiness = await preheatRuntimeFunction(ref, slug, version);
+      requireRuntimeControl(readiness, "version readiness");
+
+      const invalidation = await invalidateCache(ref, slug);
+      requireRuntimeControl(invalidation, "cache invalidation");
+
+      await applyActiveVersionArtifacts(ref, slug, detail, bundleCode);
+
+      const updated = await this.updateConfig(ref, slug, { version });
+      logger.info(`[EdgeFunction] Activated version ${version} for ${slug}@${ref}`);
+      return updated;
+    } finally {
+      releaseLock();
+    }
   },
 
   /** List all function slugs for a project */

@@ -49,7 +49,10 @@ describe("edgeFunctionService bundle metadata", () => {
   test("allocates after retained history instead of overwriting a rolled-back version", async () => {
     const ref = "proj_rollback_history";
     const slug = "history-safe";
-    globalThis.fetch = (() => Promise.resolve(Response.json({ success: true }))) as typeof fetch;
+    globalThis.fetch = ((_input, init) => {
+      const requestedVersion = new Headers(init?.headers).get("x-supacloud-function-version");
+      return Promise.resolve(Response.json({ success: true, version: requestedVersion }));
+    }) as typeof fetch;
 
     const v1 = await edgeFunctionService.deployBundleDetailed(ref, slug, {
       "index.ts": "export default { fetch: () => new Response('v1') };",

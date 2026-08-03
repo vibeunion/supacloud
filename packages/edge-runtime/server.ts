@@ -749,8 +749,14 @@ const app = new Elysia()
     if (authError) return authError;
 
     try {
-      const { functionPath, projectRoot, moduleVersion } = await resolveFunctionPath(c.params.ref, c.params.slug);
-      const functionId = `${c.params.ref}_${c.params.slug}`;
+      const requestedVersion = c.request.headers.get("x-supacloud-function-version") || null;
+      const { functionPath, projectRoot, moduleVersion } = await resolveFunctionPath(
+        c.params.ref,
+        c.params.slug,
+        requestedVersion,
+      );
+      const versionSuffix = requestedVersion ? `_v${requestedVersion}` : "";
+      const functionId = `${c.params.ref}_${c.params.slug}${versionSuffix}`;
       const tenantEnv = await loadTenantEnv(c.params.ref);
       const [foreground, background] = await Promise.all([
         pool.preheatIdleWorkers(functionId, functionPath, projectRoot, tenantEnv, {
@@ -765,6 +771,7 @@ const app = new Elysia()
       ]);
       return {
         preheated: functionId,
+        version: requestedVersion,
         success: foreground.succeeded > 0 || background.succeeded > 0,
         foreground,
         background,
