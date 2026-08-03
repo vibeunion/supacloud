@@ -90,6 +90,81 @@ describe("WorkerPool EdgeRuntime.waitUntil", () => {
 });
 
 describe("WorkerPool subprocess guard", () => {
+  test("allows CJS dependencies to load explicitly allowed Node builtins", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-safe-builtin-module-"));
+    const dependencyPath = join(projectRoot, "dependency.cjs");
+    const functionPath = join(projectRoot, "entry.ts");
+    await Bun.write(dependencyPath, `
+      const nodeCrypto = require("node:crypto");
+      const bareCrypto = require("crypto");
+      const ttyModule = require("tty");
+      const utilModule = require("util");
+      module.exports = () => {
+        const digest = nodeCrypto.createHash("sha256").update("safe").digest("hex");
+        const formatted = utilModule.format("%s", digest);
+        const hasTtyApi = typeof ttyModule.isatty === "function";
+        return bareCrypto.timingSafeEqual(Buffer.from(digest), Buffer.from(digest))
+          && hasTtyApi
+          && formatted === digest
+          ? digest
+          : "mismatch";
+      };
+    `);
+    await Bun.write(functionPath, `
+      import hash from "./dependency.cjs";
+      export default () => new Response(hash());
+    `);
+
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    try {
+      const response = await pool.dispatch({
+        functionId: "proj_safe_builtin_module",
+        functionPath,
+        projectRoot,
+        env: {},
+        request: new Request("http://edge.local/functions/v1/safe-builtin-module"),
+      });
+      expect({ status: response.status, body: await response.text() }).toEqual({
+        status: 200,
+        body: "8b3369944dd2a3fab39e32d1aeb1f763946a458ae3e6368a46432adc8f3a0860",
+      });
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects non-allowlisted runtime builtins", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-denied-builtin-module-"));
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    try {
+      for (const [index, builtinSpecifier] of ["bun:sqlite", "node:sqlite", "wasi"].entries()) {
+        const functionPath = join(projectRoot, `denied-${index}.ts`);
+        await Bun.write(functionPath, `
+          import * as denied from ${JSON.stringify(builtinSpecifier)};
+          export default () => new Response(String(denied));
+        `);
+        const response = await pool.dispatch({
+          functionId: `proj_denied_builtin_${index}`,
+          functionPath,
+          projectRoot,
+          env: {},
+          request: new Request(`http://edge.local/functions/v1/denied-builtin-${index}`),
+        });
+        expect(response.status).toBe(500);
+        expect(await response.json()).toEqual({
+          error: "Native and builtin module loaders are disabled in the multi-tenant Edge Runtime.",
+          name: "Error",
+        });
+      }
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   test("blocks direct and computed imports for every fs module alias", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-filesystem-module-"));
     const dynamicPath = join(projectRoot, "dynamic.ts");
