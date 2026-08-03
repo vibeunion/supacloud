@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { access, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { ensureProjectSecrets, resolveProjectPaths } from '../src/project-runtime.js'
+import { createProjectBackend, ensureProjectSecrets, resolveProjectPaths } from '../src/project-runtime.js'
 import { createSnapshot, restoreSnapshot } from '../src/snapshot.js'
 import { withWindowsSubprocessRef } from '../scripts/subprocess.js'
 import { createSymlinkIfPermitted } from './support/symlink.js'
@@ -160,7 +160,38 @@ describe('Lite snapshots', () => {
     const lockPath = `${resolveProjectPaths({ projectDir }).dataDir!}.supacloud-lite.lock`
     await expect(access(lockPath)).rejects.toMatchObject({ code: 'ENOENT' })
     expect(await runCli(['status', '--project-dir', projectDir])).toContain('20260728000000')
-  })
+  }, 60_000)
+
+  test('preserves status output larger than a pipe buffer', async () => {
+    const projectDir = await temporaryProject('supacloud-lite-status-output-')
+    const project = await createProjectBackend({
+      projectDir,
+      applyMigrations: false,
+      includeFunctions: false,
+      includeWebhooks: false,
+      startRuntimeServices: false,
+      log: () => {},
+    })
+    const migrations = Array.from({ length: 400 }, (_, index) => ({
+      version: `2${String(index).padStart(13, '0')}`,
+      name: `status_${String(index).padStart(4, '0')}_${'x'.repeat(180)}`,
+    }))
+
+    try {
+      const values = migrations
+        .map(({ version, name }) => `('${version}', '${name}', ARRAY[]::text[])`)
+        .join(',\n')
+      await project.backend.db.exec(
+        `insert into supabase_migrations.schema_migrations (version, name, statements) values ${values}`
+      )
+    } finally {
+      await project.backend.close()
+    }
+
+    const status = await runCli(['status', '--project-dir', projectDir])
+    expect(new TextEncoder().encode(status).byteLength).toBeGreaterThan(64 * 1024)
+    expect(status).toContain(migrations.at(-1)!.version)
+  }, 60_000)
 })
 
 async function temporaryProject(prefix: string): Promise<string> {

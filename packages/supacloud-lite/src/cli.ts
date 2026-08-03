@@ -82,16 +82,17 @@ async function main(): Promise<void> {
   const paths = resolveProjectPaths(options)
 
   if (options.command === 'version' || options.command === '--version') {
-    console.log(packageJson.version)
+    await writeStandardOutput(`${packageJson.version}\n`)
     return
   }
 
   if (options.command === 'keys') {
     const secrets = await ensureProjectSecrets(paths)
     const keys = await mintProjectKeys(secrets.jwtSecret)
-    console.log(`anon key:\n${keys.anonKey}`)
-    if (options.serviceRole) console.log(`\nservice_role key:\n${keys.serviceRoleKey}`)
-    else console.log('\nUse --service-role to print the privileged key.')
+    const privilegedKey = options.serviceRole
+      ? `\nservice_role key:\n${keys.serviceRoleKey}`
+      : '\nUse --service-role to print the privileged key.'
+    await writeStandardOutput(`anon key:\n${keys.anonKey}\n${privilegedKey}\n`)
     return
   }
 
@@ -126,8 +127,8 @@ async function main(): Promise<void> {
       if (options.output) {
         await mkdir(dirname(options.output), { recursive: true })
         await writeFile(options.output, source)
-        console.log(`Wrote ${options.output}`)
-      } else process.stdout.write(source)
+        await writeStandardOutput(`Wrote ${options.output}\n`)
+      } else await writeStandardOutput(source)
     } finally {
       await project.backend.close()
     }
@@ -143,7 +144,7 @@ async function main(): Promise<void> {
       log: quietLog,
     })
     try {
-      printInspection(await inspectDb(project.backend.db, 'public'))
+      await printInspection(await inspectDb(project.backend.db, 'public'))
     } finally {
       await project.backend.close()
     }
@@ -162,9 +163,12 @@ async function main(): Promise<void> {
     })
     try {
       const applied = await project.backend.db.listAppliedMigrations()
-      if (options.command === 'migrate') console.log(`${applied.length} migration(s) applied.`)
-      else if (applied.length === 0) console.log('no migrations applied')
-      else for (const migration of applied) console.log(`${migration.version}  ${migration.name ?? ''}`)
+      const output = options.command === 'migrate'
+        ? `${applied.length} migration(s) applied.`
+        : applied.length === 0
+          ? 'no migrations applied'
+          : applied.map((migration) => `${migration.version}  ${migration.name ?? ''}`).join('\n')
+      await writeStandardOutput(`${output}\n`)
     } finally {
       await project.backend.close()
     }
@@ -174,7 +178,8 @@ async function main(): Promise<void> {
   if (options.command !== 'start') throw new Error(`unknown command: ${options.command}`)
 
   const project = await startProjectServer({ ...options, log: (message) => console.log(`  ${message}`) })
-  console.log(`
+  const shutdown = waitForShutdown(() => project.close())
+  await writeStandardOutput(`
   SupaCloud Lite running
 
           API URL: ${project.url}
@@ -187,9 +192,9 @@ async function main(): Promise<void> {
 
   Run "supacloud-lite keys" for the anon key.
   Run "supacloud-lite keys --service-role" only when privileged access is required.
-`)
+\n`)
 
-  await waitForShutdown(() => project.close())
+  await shutdown
   process.exitCode = 0
 }
 
@@ -212,7 +217,7 @@ async function runDbCommand(options: CliOptions): Promise<void> {
     })
     try {
       const applied = await project.backend.db.listAppliedMigrations()
-      console.log(`reset complete: ${applied.length} migration(s) applied`)
+      await writeStandardOutput(`reset complete: ${applied.length} migration(s) applied\n`)
     } finally {
       await project.backend.close()
     }
@@ -223,7 +228,7 @@ async function runDbCommand(options: CliOptions): Promise<void> {
   if (subcommand === 'diff') {
     const ddl = await computeDbDiff({ liveDataDir: paths.dataDir, migrations: project.migrations })
     if (ddl.length === 0) {
-      console.error('No schema changes found.')
+      await writeStandardError('No schema changes found.\n')
       return
     }
     const source = `${ddl.join('\n\n')}\n`
@@ -232,8 +237,8 @@ async function runDbCommand(options: CliOptions): Promise<void> {
       const output = join(paths.projectDir, 'supabase', 'migrations', `${stamp}_${options.diffFile}.sql`)
       await mkdir(join(paths.projectDir, 'supabase', 'migrations'), { recursive: true })
       await writeFile(output, source)
-      console.log(`Wrote ${output}`)
-    } else process.stdout.write(source)
+      await writeStandardOutput(`Wrote ${output}\n`)
+    } else await writeStandardOutput(source)
     return
   }
 
@@ -244,8 +249,8 @@ async function runDbCommand(options: CliOptions): Promise<void> {
       migrationsDir: join(paths.projectDir, 'supabase', 'migrations'),
       name: options.positionals[1] ?? 'remote_schema',
     })
-    if (!result.path) console.error('No schema changes to pull.')
-    else console.log(`Wrote ${result.path} and recorded version ${result.version} as applied.`)
+    if (!result.path) await writeStandardError('No schema changes to pull.\n')
+    else await writeStandardOutput(`Wrote ${result.path} and recorded version ${result.version} as applied.\n`)
     return
   }
 
@@ -262,8 +267,10 @@ async function runSnapshotCommand(options: CliOptions): Promise<void> {
     await ensureProjectSecrets(paths)
     const output = options.output ?? join(paths.stateDir, 'backups', `snapshot-${timestamp()}.tar.gz`)
     const manifest = await createSnapshot({ paths, packageVersion: packageJson.version, storageBackend, output })
-    console.log(`Snapshot created: ${output}`)
-    if (manifest.storageBackend === 's3') console.log('S3 objects were not copied; the snapshot contains database metadata and secrets only.')
+    await writeStandardOutput(`Snapshot created: ${output}\n`)
+    if (manifest.storageBackend === 's3') {
+      await writeStandardOutput('S3 objects were not copied; the snapshot contains database metadata and secrets only.\n')
+    }
     return
   }
 
@@ -271,9 +278,15 @@ async function runSnapshotCommand(options: CliOptions): Promise<void> {
     const input = options.positionals[1]
     if (!input) throw new Error('snapshot restore requires a snapshot file')
     const result = await restoreSnapshot({ paths, storageBackend, input, force: options.force })
-    console.log(`Snapshot restored from ${resolve(input)}`)
-    for (const rollbackPath of result.rollbackPaths) console.log(`Previous state retained at ${rollbackPath}`)
-    if (result.manifest.storageBackend === 's3') console.log('Reconnect the original S3 bucket/prefix before starting Lite.')
+    const rollbackLines = result.rollbackPaths.map((rollbackPath) => `Previous state retained at ${rollbackPath}`)
+    const reconnectLine = result.manifest.storageBackend === 's3'
+      ? ['Reconnect the original S3 bucket/prefix before starting Lite.']
+      : []
+    await writeStandardOutput([
+      `Snapshot restored from ${resolve(input)}`,
+      ...rollbackLines,
+      ...reconnectLine,
+    ].join('\n') + '\n')
     return
   }
 
@@ -287,7 +300,7 @@ async function runUpgradeCommand(options: CliOptions): Promise<void> {
   await ensureProjectSecrets(paths)
   const output = options.output ?? join(paths.stateDir, 'backups', `pre-upgrade-${timestamp()}.tar.gz`)
   await createSnapshot({ paths, packageVersion: packageJson.version, storageBackend, output })
-  console.log(`Pre-upgrade snapshot: ${output}`)
+  await writeStandardOutput(`Pre-upgrade snapshot: ${output}\n`)
 
   try {
     const project = await createProjectBackend({
@@ -301,7 +314,9 @@ async function runUpgradeCommand(options: CliOptions): Promise<void> {
     })
     try {
       const applied = await project.backend.db.listAppliedMigrations()
-      console.log(`Upgrade complete on @supacloud/lite ${packageJson.version}: ${applied.length} migration(s) recorded.`)
+      await writeStandardOutput(
+        `Upgrade complete on @supacloud/lite ${packageJson.version}: ${applied.length} migration(s) recorded.\n`
+      )
     } finally {
       await project.backend.close()
     }
@@ -313,14 +328,25 @@ async function runUpgradeCommand(options: CliOptions): Promise<void> {
   }
 }
 
-function printInspection(rows: Awaited<ReturnType<typeof inspectDb>>): void {
+async function printInspection(rows: Awaited<ReturnType<typeof inspectDb>>): Promise<void> {
   if (rows.length === 0) {
-    console.log('No tables in schema "public".')
+    await writeStandardOutput('No tables in schema "public".\n')
     return
   }
   const width = Math.max(5, ...rows.map((row) => row.table.length))
-  console.log(`${'table'.padEnd(width)}  ${'rows'.padStart(10)}  size`)
-  for (const row of rows) console.log(`${row.table.padEnd(width)}  ${String(row.rows).padStart(10)}  ${row.size}`)
+  const output = [
+    `${'table'.padEnd(width)}  ${'rows'.padStart(10)}  size`,
+    ...rows.map((row) => `${row.table.padEnd(width)}  ${String(row.rows).padStart(10)}  ${row.size}`),
+  ]
+  await writeStandardOutput(`${output.join('\n')}\n`)
+}
+
+async function writeStandardOutput(output: string): Promise<void> {
+  await Bun.write(Bun.stdout, output)
+}
+
+async function writeStandardError(output: string): Promise<void> {
+  await Bun.write(Bun.stderr, output)
 }
 
 function timestamp(): string {
@@ -375,7 +401,10 @@ function formatStorage(backend: ProjectRuntimeOptions['storageBackend'] | 'custo
   return storageDir
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : String(error))
-  process.exitCode = 1
-})
+try {
+  await main()
+  process.exit(0)
+} catch (error) {
+  await writeStandardError(`${error instanceof Error ? error.message : String(error)}\n`)
+  process.exit(1)
+}
