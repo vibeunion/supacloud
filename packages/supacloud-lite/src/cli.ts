@@ -401,10 +401,16 @@ function formatStorage(backend: ProjectRuntimeOptions['storageBackend'] | 'custo
   return storageDir
 }
 
+// Bun 1.3.14 can stop pumping Windows IOCP while PGlite and its data lock close.
+// Keep the CLI referenced until main's cleanup finishes; see oven-sh/bun#34478.
+const windowsLifecycleRef = process.platform === 'win32' ? setInterval(() => {}, 1000) : null
+let exitCode = 0
 try {
   await main()
-  process.exit(0)
 } catch (error) {
   await writeStandardError(`${error instanceof Error ? error.message : String(error)}\n`)
-  process.exit(1)
+  exitCode = 1
+} finally {
+  if (windowsLifecycleRef !== null) clearInterval(windowsLifecycleRef)
 }
+process.exit(exitCode)
