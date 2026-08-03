@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.50.14](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.13...management-api-v0.50.14) (2026-08-03)
+
+
+### Bug Fixes
+
+* **systemd:** preserve PostgreSQL pid ownership ([49bbeac](https://github.com/zuohuadong/supacloud/commit/49bbeac5a4b031a52b4297ee9cdbdd170e845950))
+* **systemd:** preserve PostgreSQL pid ownership ([cc7880e](https://github.com/zuohuadong/supacloud/commit/cc7880e1667d7b3c76f5136cd74256ff9fce07f0))
+
 ## [0.50.13](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.12...management-api-v0.50.13) (2026-08-02)
 
 
