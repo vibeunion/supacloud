@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.5.5](https://github.com/zuohuadong/supacloud/compare/supacloud-lite-v0.5.4...supacloud-lite-v0.5.5) (2026-08-03)
+
+
+### Bug Fixes
+
+* **lite:** exit Windows CLI after cleanup ([579a714](https://github.com/zuohuadong/supacloud/commit/579a7147a2007885ddcaaabc0123ba10866187a5))
+* **lite:** exit Windows CLI after cleanup ([17fe71e](https://github.com/zuohuadong/supacloud/commit/17fe71e23bdd2b1c79de3fbc7ec54fe3432981d1))
+* **lite:** keep Windows CLI alive through cleanup ([2032834](https://github.com/zuohuadong/supacloud/commit/20328342240321c1f9267b307d9e546849fed85a))
+
 ## [0.5.4](https://github.com/zuohuadong/supacloud/compare/supacloud-lite-v0.5.3...supacloud-lite-v0.5.4) (2026-08-02)
 
 
