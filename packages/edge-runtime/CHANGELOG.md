@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.16.3](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.16.2...edge-runtime-v0.16.3) (2026-08-03)
+
+
+### Bug Fixes
+
+* **edge-runtime:** allow guarded builtin CJS imports ([2a6c04d](https://github.com/zuohuadong/supacloud/commit/2a6c04d2a0bb0b56b04cb30dc041415ea2924f08))
+* **edge-runtime:** allow guarded builtin CJS imports ([de3197d](https://github.com/zuohuadong/supacloud/commit/de3197d48adb7b85cef96bdcc9f4829d3e9ecf98))
+* **edge-runtime:** allow guarded uv binding for net ([fc80f03](https://github.com/zuohuadong/supacloud/commit/fc80f032af1437c2926ae476650a0b82c60548bf))
+* **edge-runtime:** allow guarded uv binding for net ([1abd4c5](https://github.com/zuohuadong/supacloud/commit/1abd4c5cc65f8dddd7a20d753d5796092d69dc79))
+
 ## [0.16.2](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.16.1...edge-runtime-v0.16.2) (2026-08-02)
 
 
