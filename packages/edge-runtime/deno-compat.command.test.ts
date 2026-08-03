@@ -77,6 +77,31 @@ test("the worker subprocess guard disables and restores process creation APIs", 
       .toThrow(FILESYSTEM_DISABLED_MESSAGE);
     expect(() => (process as unknown as Record<string, () => unknown>).binding())
       .toThrow(NATIVE_LOADER_DISABLED_MESSAGE);
+    const loadBuiltin = moduleApi._load as (request: unknown, ...args: unknown[]) => unknown;
+    expect(() => loadBuiltin.call(moduleApi, "node:crypto")).not.toThrow();
+    expect(() => loadBuiltin.call(moduleApi, "crypto")).not.toThrow();
+    expect(() => loadBuiltin.call(moduleApi, "node:fs"))
+      .toThrow(NATIVE_LOADER_DISABLED_MESSAGE);
+    expect(() => loadBuiltin.call(moduleApi, "./relative"))
+      .toThrow(NATIVE_LOADER_DISABLED_MESSAGE);
+    expect(() => loadBuiltin.call(moduleApi, "/tmp/untrusted.cjs"))
+      .toThrow(NATIVE_LOADER_DISABLED_MESSAGE);
+    expect(() => loadBuiltin.call(moduleApi, "untrusted-package"))
+      .toThrow(NATIVE_LOADER_DISABLED_MESSAGE);
+    expect(() => loadBuiltin.call(moduleApi, "bun")).not.toThrow();
+    expect(() => loadBuiltin.call(moduleApi, "bun:sqlite"))
+      .toThrow(NATIVE_LOADER_DISABLED_MESSAGE);
+    expect(() => loadBuiltin.call(moduleApi, "wasi"))
+      .toThrow(NATIVE_LOADER_DISABLED_MESSAGE);
+    expect(() => loadBuiltin.call(moduleApi, { computed: "node:crypto" }))
+      .toThrow(NATIVE_LOADER_DISABLED_MESSAGE);
+    const tenantModule = new (moduleApi.Module as new (id: string) => unknown)("tenant");
+    const tenantRequire = modulePrototype?.require as (this: unknown, request: unknown) => unknown;
+    expect(tenantRequire.call(tenantModule, "node:crypto")).toBeDefined();
+    expect(tenantRequire.call(tenantModule, "crypto")).toBeDefined();
+    expect(tenantRequire.call(tenantModule, "bun")).toBeDefined();
+    expect(() => tenantRequire.call(tenantModule, "node:module"))
+      .toThrow(NATIVE_LOADER_DISABLED_MESSAGE);
     expect(() => {
       const tenantRequire = (moduleApi.createRequire as (url: string) => (id: string) => unknown)(import.meta.url);
       tenantRequire("node:fs");

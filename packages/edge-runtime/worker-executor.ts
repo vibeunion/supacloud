@@ -15,9 +15,11 @@ import {
   FILESYSTEM_DISABLED_MESSAGE,
   getCapturedServeHandler,
   initializeProjectRootControl,
+  isKnownRuntimeBuiltinSpecifier,
   NATIVE_LOADER_DISABLED_MESSAGE,
   setInjectedEnv,
   SUBPROCESS_DISABLED_MESSAGE,
+  tenantBuiltinSpecifier,
 } from "./deno-compat";
 import { installEdgeFetchTlsPolicy, resolveEdgeFetchTlsPolicy } from "./fetch-tls-policy";
 import type { EdgeFetchTlsPolicy } from "./fetch-tls-policy";
@@ -233,6 +235,16 @@ async function assertTenantModuleGraphSafe(
     const disabledMessage = DISABLED_TENANT_MODULES.get(imported.path);
     if (disabledMessage) {
       throw new Error(disabledMessage);
+    }
+    if (tenantBuiltinSpecifier(imported.path)) {
+      continue;
+    }
+    if (
+      isKnownRuntimeBuiltinSpecifier(imported.path)
+      || imported.path.startsWith("node:")
+      || imported.path.startsWith("bun:")
+    ) {
+      throw new Error(NATIVE_LOADER_DISABLED_MESSAGE);
     }
     let dependencyPath = imported.path;
     if (dependencyPath.startsWith("file:")) {

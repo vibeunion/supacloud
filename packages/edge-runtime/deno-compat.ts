@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import path from "path";
-import { syncBuiltinESMExports } from "node:module";
+import { builtinModules, syncBuiltinESMExports } from "node:module";
 import { fileURLToPath } from "node:url";
 
 export type CapturedServeHandler = (
@@ -18,6 +18,60 @@ export const DYNAMIC_CODE_DISABLED_MESSAGE =
   "Dynamic code generation is disabled in the multi-tenant Edge Runtime.";
 export const HOST_RUNTIME_DISABLED_MESSAGE =
   "Host runtime capabilities are disabled in the multi-tenant Edge Runtime.";
+
+const KNOWN_RUNTIME_BUILTINS = new Set(
+  builtinModules.map((specifier) => specifier.replace(/^node:/, "")),
+);
+// Bun exposes host-specific and future builtins through builtinModules, so tenant
+// compatibility must remain an explicit allowlist and fail closed on upgrades.
+const TENANT_NODE_BUILTINS = new Set([
+  "assert",
+  "assert/strict",
+  "async_hooks",
+  "buffer",
+  "constants",
+  "crypto",
+  "dns",
+  "dns/promises",
+  "events",
+  "http",
+  "https",
+  "net",
+  "os",
+  "path",
+  "path/posix",
+  "path/win32",
+  "perf_hooks",
+  "punycode",
+  "querystring",
+  "stream",
+  "stream/consumers",
+  "stream/promises",
+  "stream/web",
+  "string_decoder",
+  "timers",
+  "timers/promises",
+  "tls",
+  "tty",
+  "url",
+  "util",
+  "util/types",
+  "zlib",
+]);
+export function tenantBuiltinSpecifier(request: unknown): string | null {
+  if (typeof request !== "string") return null;
+  // The bare Bun namespace is patched before tenant modules load, so preserving
+  // this entry keeps guarded file/spawn APIs without exposing bun:* host modules.
+  if (request === "bun") return request;
+  const bareSpecifier = request.replace(/^node:/, "");
+  if (!TENANT_NODE_BUILTINS.has(bareSpecifier)) return null;
+  return `node:${bareSpecifier}`;
+}
+
+export function isKnownRuntimeBuiltinSpecifier(request: string): boolean {
+  return request === "bun"
+    || KNOWN_RUNTIME_BUILTINS.has(request.replace(/^node:/, ""));
+}
 
 const nodeFs = require("node:fs") as typeof import("node:fs");
 const nodeFsPromises = require("node:fs/promises") as typeof import("node:fs/promises");
@@ -149,13 +203,24 @@ export function disableSubprocessApis(): void {
   }
 
   const moduleApi = require("node:module") as Record<string, unknown>;
-  for (const name of ["createRequire", "_load"]) {
-    if (typeof moduleApi[name] === "function") moduleApi[name] = nativeLoaderDisabled;
+  moduleApi.createRequire = nativeLoaderDisabled;
+  const originalModuleLoad = moduleApi._load as ((...args: unknown[]) => unknown) | undefined;
+  if (originalModuleLoad) {
+    moduleApi._load = function (this: unknown, request: unknown, ...args: unknown[]) {
+      const builtinSpecifier = tenantBuiltinSpecifier(request);
+      if (!builtinSpecifier) return nativeLoaderDisabled();
+      return Reflect.apply(originalModuleLoad, this, [builtinSpecifier, ...args]);
+    };
   }
   const modulePrototype = (moduleApi.Module as { prototype?: Record<string, unknown> } | undefined)?.prototype
     || (moduleApi as { prototype?: Record<string, unknown> }).prototype;
-  if (modulePrototype && typeof modulePrototype.require === "function") {
-    modulePrototype.require = nativeLoaderDisabled;
+  const originalModuleRequire = modulePrototype?.require as ((...args: unknown[]) => unknown) | undefined;
+  if (modulePrototype && originalModuleRequire) {
+    modulePrototype.require = function (this: unknown, request: unknown, ...args: unknown[]) {
+      const builtinSpecifier = tenantBuiltinSpecifier(request);
+      if (!builtinSpecifier) return nativeLoaderDisabled();
+      return Reflect.apply(originalModuleRequire, this, [builtinSpecifier, ...args]);
+    };
   }
   syncBuiltinESMExports();
 }
