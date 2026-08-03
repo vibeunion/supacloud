@@ -46,7 +46,7 @@
     "@svadmin/ui": "0.38.7",
     "@tanstack/svelte-query": "^6.1.38",
     "highlight.js": "^11.11.1",
-    "isomorphic-dompurify": "^3.19.0",
+    "isomorphic-dompurify": "^3.21.0",
     "lucide-svelte": "^1.0.1",
     "marked": "^18.0.7",
     "marked-highlight": "^2.2.4",
@@ -57,8 +57,7 @@
     "cookie": "0.7.2",
     "dompurify": "3.4.11",
     "esbuild": "0.28.1",
-    "joi": "17.13.4",
-    "undici": "7.28.0"
+    "joi": "17.13.4"
   },
   "patchedDependencies": {
     "@svadmin/ui@0.38.7": "patches/@svadmin%2Fui@0.38.7.patch"
