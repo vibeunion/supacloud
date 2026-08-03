@@ -450,12 +450,28 @@ async function readRuntimeControlBody(response: Response): Promise<Record<string
   if (!bodyText) return {};
   try {
     const parsed = JSON.parse(bodyText);
-    return parsed && typeof parsed === "object"
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
       ? parsed as Record<string, unknown>
       : {};
   } catch {
     return {};
   }
+}
+
+function preheatAcknowledgementError(
+  body: Record<string, unknown>,
+  requestedVersion?: string,
+): string | undefined {
+  if (requestedVersion === undefined) {
+    return body.success === false ? "Edge Runtime reported preheat failure" : undefined;
+  }
+  if (body.success !== true) {
+    return "Edge Runtime did not report successful version readiness";
+  }
+  if (body.version !== requestedVersion) {
+    return "Edge Runtime did not confirm the requested function version";
+  }
+  return undefined;
 }
 
 async function preheatRuntimeFunction(
@@ -479,12 +495,9 @@ async function preheatRuntimeFunction(
     const bodyRecord = await readRuntimeControlBody(preheatRes);
     const foreground = normalizePreheatPool(bodyRecord.foreground);
     const background = normalizePreheatPool(bodyRecord.background);
-    const acknowledgedVersion = typeof bodyRecord.version === "string"
-      ? bodyRecord.version
-      : undefined;
-    const versionReady = requestedVersion === undefined || acknowledgedVersion === requestedVersion;
+    const acknowledgementError = preheatAcknowledgementError(bodyRecord, requestedVersion);
     return {
-      ok: preheatRes.ok && Boolean(bodyRecord.success ?? true) && versionReady,
+      ok: preheatRes.ok && acknowledgementError === undefined,
       status: preheatRes.status,
       duration_ms: durationMs,
       attempted: foreground.attempted + background.attempted,
@@ -493,9 +506,7 @@ async function preheatRuntimeFunction(
       cache_misses: foreground.cacheMisses + background.cacheMisses,
       foreground,
       background,
-      error: versionReady
-        ? undefined
-        : "Edge Runtime did not confirm the requested function version",
+      error: acknowledgementError,
     };
   } catch (error) {
     return {
@@ -517,6 +528,32 @@ function runtimeInternalHeaders(): Record<string, string> {
   return { "x-supacloud-internal-auth": config.edgeRuntimeMasterKey || config.masterToken };
 }
 
+function isRuntimeInvalidationPoolAck(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const pool = value as Record<string, unknown>;
+  if (![pool.attempted, pool.succeeded, pool.invalidated].every(
+    (metric) => Number.isSafeInteger(metric) && Number(metric) >= 0,
+  )) return false;
+  return pool.succeeded === pool.attempted;
+}
+
+function runtimeInvalidationAckError(
+  body: Record<string, unknown>,
+  expectedFunctionId: string,
+): string | undefined {
+  if (body.invalidated !== expectedFunctionId) {
+    return "Edge Runtime did not confirm the invalidation target";
+  }
+  if (body.success !== undefined && body.success !== true) {
+    return "Edge Runtime reported invalidation failure";
+  }
+  if (!isRuntimeInvalidationPoolAck(body.foreground)
+    || !isRuntimeInvalidationPoolAck(body.background)) {
+    return "Edge Runtime returned an invalid invalidation acknowledgement";
+  }
+  return undefined;
+}
+
 async function invalidateRuntimeFunction(
   ref: string,
   slug: string,
@@ -529,9 +566,14 @@ async function invalidateRuntimeFunction(
       signal: AbortSignal.timeout(2000),
     });
     const bodyRecord = await readRuntimeControlBody(res);
+    const acknowledgementError = runtimeInvalidationAckError(
+      bodyRecord,
+      `${ref}_${slug}`,
+    );
     return {
-      ok: res.ok && bodyRecord.success !== false,
+      ok: res.ok && acknowledgementError === undefined,
       status: res.status,
+      error: acknowledgementError,
     };
   } catch (error) {
     return {

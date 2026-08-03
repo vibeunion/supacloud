@@ -18,8 +18,30 @@ type FetchStep = {
   response: Response;
 };
 
+const successfulPoolAck = {
+  attempted: 1,
+  succeeded: 1,
+  invalidated: 0,
+};
+
+function successfulInvalidationAck(ref: string, slug: string) {
+  return {
+    invalidated: `${ref}_${slug}`,
+    foreground: successfulPoolAck,
+    background: successfulPoolAck,
+  };
+}
+
 function runtimeSuccessFetch(): typeof fetch {
-  return ((_input, init) => {
+  return ((input, init) => {
+    const runtimeUrl = new URL(String(input));
+    if (runtimeUrl.pathname.includes("/invalidate/")) {
+      const pathSegments = runtimeUrl.pathname.split("/");
+      return Promise.resolve(Response.json(successfulInvalidationAck(
+        pathSegments.at(-2)!,
+        pathSegments.at(-1)!,
+      )));
+    }
     const requestedVersion = new Headers(init?.headers).get("x-supacloud-function-version");
     return Promise.resolve(Response.json({ success: true, version: requestedVersion }));
   }) as typeof fetch;
@@ -118,7 +140,65 @@ describe("edgeFunctionService version activation readiness", () => {
       { path: "/preheat/", response: Response.json({ success: false, version: "2" }) },
     ]);
 
-    await expect(edgeFunctionService.activateVersion(ref, slug, "2")).rejects.toThrow("control request failed");
+    await expect(edgeFunctionService.activateVersion(ref, slug, "2")).rejects.toThrow(
+      "did not report successful version readiness",
+    );
+    await expectRollbackUnchanged(ref, slug, before);
+  });
+
+  test.each([
+    ["missing success", { version: "2" }],
+    ["non-boolean success", { success: "true", version: "2" }],
+    ["missing version", { success: true }],
+    ["wrong version", { success: true, version: "1" }],
+  ])("fails closed when preheat has %s acknowledgement", async (ackCase, responseBody) => {
+    const ref = `proj_preheat_ack_${ackCase.replaceAll(" ", "_")}`;
+    const slug = "activate-preheat-ack";
+    const before = await prepareRollback(ref, slug);
+    globalThis.fetch = sequenceFetch([
+      { path: "/preheat/", response: Response.json(responseBody) },
+    ]);
+
+    await expect(edgeFunctionService.activateVersion(ref, slug, "2")).rejects.toThrow(
+      "Edge Runtime function activation unavailable",
+    );
+    await expectRollbackUnchanged(ref, slug, before);
+  });
+
+  test.each([
+    ["empty response", {}],
+    ["missing pool acknowledgement", { invalidated: "TARGET" }],
+    [
+      "partial pool acknowledgement",
+      {
+        invalidated: "TARGET",
+        foreground: { attempted: 2, succeeded: 1, invalidated: 1 },
+        background: successfulPoolAck,
+      },
+    ],
+    [
+      "wrong target",
+      {
+        invalidated: "another_function",
+        foreground: successfulPoolAck,
+        background: successfulPoolAck,
+      },
+    ],
+  ])("fails closed when invalidation has %s", async (ackCase, responseBody) => {
+    const ref = `proj_invalidate_ack_${ackCase.replaceAll(" ", "_")}`;
+    const slug = "activate-invalidate-ack";
+    const before = await prepareRollback(ref, slug);
+    const acknowledgedBody = responseBody.invalidated === "TARGET"
+      ? { ...responseBody, invalidated: `${ref}_${slug}` }
+      : responseBody;
+    globalThis.fetch = sequenceFetch([
+      { path: "/preheat/", response: Response.json({ success: true, version: "2" }) },
+      { path: "/invalidate/", response: Response.json(acknowledgedBody) },
+    ]);
+
+    await expect(edgeFunctionService.activateVersion(ref, slug, "2")).rejects.toThrow(
+      "Edge Runtime function activation unavailable",
+    );
     await expectRollbackUnchanged(ref, slug, before);
   });
 
@@ -128,7 +208,10 @@ describe("edgeFunctionService version activation readiness", () => {
     await prepareRollback(ref, slug);
     const steps: FetchStep[] = [
       { path: "/preheat/", response: Response.json({ success: true, version: "2" }) },
-      { path: "/invalidate/", response: Response.json({ success: true }) },
+      {
+        path: "/invalidate/",
+        response: Response.json(successfulInvalidationAck(ref, slug)),
+      },
     ];
     globalThis.fetch = sequenceFetch(steps);
 
