@@ -14,24 +14,28 @@ log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
-fix_stale_postmaster_pid() {
+check_postmaster_pid_liveness() {
     local pg_data="${PGDATA:-/pg/data}"
     local pid_file="${pg_data}/postmaster.pid"
-    
-    if [[ -f "$pid_file" ]]; then
-        local pid
-        pid=$(head -1 "$pid_file" 2>/dev/null || echo "")
-        
-        if [[ -n "$pid" ]]; then
-            if ! kill -0 "$pid" 2>/dev/null; then
-                log_warn "Found stale postmaster.pid (PID: $pid), removing..."
-                rm -f "$pid_file"
-                log_info "Stale PID file removed"
-            else
-                log_info "PostgreSQL PID $pid is still running"
-            fi
-        fi
+
+    [[ -f "$pid_file" ]] || return 0
+
+    local pid
+    pid=$(head -1 "$pid_file" 2>/dev/null || echo "")
+
+    if [[ ! "$pid" =~ ^[1-9][0-9]*$ ]]; then
+        log_warn "Invalid PostgreSQL PID in $pid_file; leaving the file untouched"
+        return
     fi
+
+    if ps -p "$pid" -o pid= >/dev/null 2>&1; then
+        log_info "PostgreSQL PID $pid is still running"
+        return
+    fi
+
+    # The Management API unit intentionally has no CAP_KILL. A denied probe
+    # must not become proof that PostgreSQL is dead; its owner handles recovery.
+    log_warn "Unable to confirm PostgreSQL PID $pid; leaving $pid_file untouched for PostgreSQL/Patroni recovery"
 }
 
 fix_gotrue_search_path() {
@@ -116,7 +120,7 @@ main() {
     echo "=========================================="
     echo ""
     
-    fix_stale_postmaster_pid
+    check_postmaster_pid_liveness
     fix_gotrue_search_path
     ensure_gateway_running
     # Container recovery stays outside this sandbox. Realtime has a dedicated
