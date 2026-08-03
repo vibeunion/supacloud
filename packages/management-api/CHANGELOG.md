@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.50.16](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.15...management-api-v0.50.16) (2026-08-03)
+
+
+### Bug Fixes
+
+* **functions:** fail closed on activation readiness ([78af76b](https://github.com/zuohuadong/supacloud/commit/78af76bb07887bc54f6d3a0ac09407d7e95b3bce))
+* **functions:** fail closed on activation readiness ([72424ee](https://github.com/zuohuadong/supacloud/commit/72424ee716549fd8f12c5b3c45b6f76ad41b175e))
+* **functions:** validate runtime control acknowledgements ([4c24e95](https://github.com/zuohuadong/supacloud/commit/4c24e955fffc7247dbfebae677ab2fe8545d1e4a))
+
 ## [0.50.15](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.14...management-api-v0.50.15) (2026-08-03)
 
 
