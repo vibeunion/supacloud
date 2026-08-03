@@ -1,5 +1,6 @@
 import { afterAll, afterEach, describe, expect, mock, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -45,6 +46,116 @@ afterAll(async () => {
 });
 
 describe("edgeFunctionService bundle metadata", () => {
+  test("allocates after retained history instead of overwriting a rolled-back version", async () => {
+    const ref = "proj_rollback_history";
+    const slug = "history-safe";
+    globalThis.fetch = (() => Promise.resolve(Response.json({ success: true }))) as typeof fetch;
+
+    const v1 = await edgeFunctionService.deployBundleDetailed(ref, slug, {
+      "index.ts": "export default { fetch: () => new Response('v1') };",
+    });
+    const v2 = await edgeFunctionService.deployBundleDetailed(ref, slug, {
+      "index.ts": "export default { fetch: () => new Response('retained-v2') };",
+    });
+
+    expect(v1).toMatchObject({ success: true, version: "1" });
+    expect(v2).toMatchObject({ success: true, version: "2" });
+
+    const v2Bundle = await readFile(v2.content_path!);
+    const v2SourcePath = join(functionsRoot, ref, ".versions", slug, "2", "src", "index.ts");
+    const v2Source = await readFile(v2SourcePath);
+    const v2BundleHash = createHash("sha256").update(v2Bundle).digest("hex");
+    const v2SourceHash = createHash("sha256").update(v2Source).digest("hex");
+
+    await edgeFunctionService.activateVersion(ref, slug, "1");
+
+    const result = await edgeFunctionService.deployBundleDetailed(ref, slug, {
+      "index.ts": "export default { fetch: () => new Response('new-v3') };",
+    });
+
+    expect(result).toMatchObject({ success: true, version: "3" });
+    expect(createHash("sha256").update(await readFile(v2.content_path!)).digest("hex")).toBe(v2BundleHash);
+    expect(createHash("sha256").update(await readFile(v2SourcePath)).digest("hex")).toBe(v2SourceHash);
+    expect(existsSync(join(functionsRoot, ref, ".versions", slug, "3", "src", "index.ts"))).toBe(true);
+  });
+
+  test("starts at version 1 when neither config nor version history exists", async () => {
+    const result = await edgeFunctionService.deployBundleDetailed("proj_first_version", "first", {
+      "index.ts": "export default { fetch: () => new Response('first') };",
+    });
+
+    expect(result).toMatchObject({ success: true, version: "1" });
+  });
+
+  test("ignores malformed history directory names", async () => {
+    const ref = "proj_bad_history";
+    const slug = "bad-history";
+    const versionDir = join(functionsRoot, ref, ".versions", slug);
+    await Promise.all([
+      mkdir(join(versionDir, "not-a-version"), { recursive: true }),
+      mkdir(join(versionDir, "01"), { recursive: true }),
+    ]);
+    await edgeFunctionService.updateConfig(ref, slug, { version: "1" });
+
+    const result = await edgeFunctionService.deployBundleDetailed(ref, slug, {
+      "index.ts": "export default { fetch: () => new Response('next') };",
+    });
+
+    expect(result).toMatchObject({ success: true, version: "2" });
+    expect(existsSync(join(versionDir, "not-a-version"))).toBe(true);
+    expect(existsSync(join(versionDir, "01"))).toBe(true);
+  });
+
+  test("fails closed for unsafe numeric history and config versions", async () => {
+    const unsafeVersion = "9007199254740992";
+    const historyRef = "proj_unsafe_history";
+    const historySlug = "unsafe-history";
+    await mkdir(join(functionsRoot, historyRef, ".versions", historySlug, unsafeVersion), { recursive: true });
+
+    const historyResult = await edgeFunctionService.deployBundleDetailed(historyRef, historySlug, {
+      "index.ts": "export default { fetch: () => new Response('blocked') };",
+    });
+
+    expect(historyResult).toMatchObject({ success: false, error: "Function version exceeds the safe integer range" });
+
+    const configRef = "proj_unsafe_config";
+    const configSlug = "unsafe-config";
+    await edgeFunctionService.updateConfig(configRef, configSlug, { version: unsafeVersion });
+
+    const configResult = await edgeFunctionService.deployBundleDetailed(configRef, configSlug, {
+      "index.ts": "export default { fetch: () => new Response('blocked') };",
+    });
+
+    expect(configResult).toMatchObject({ success: false, error: "Function version exceeds the safe integer range" });
+  });
+
+  test("serializes single-file and bundle deployments for the same function", async () => {
+    const ref = "proj_concurrent";
+    const slug = "same-function";
+    const [bundleResult, singleResult] = await Promise.all([
+      edgeFunctionService.deployBundleDetailed(ref, slug, {
+        "index.ts": "export default { fetch: () => new Response('bundle-marker') };",
+      }),
+      edgeFunctionService.deployDetailed(
+        ref,
+        slug,
+        "export default { fetch: () => new Response('single-marker') };",
+      ),
+    ]);
+
+    expect(bundleResult).toMatchObject({ success: true });
+    expect(singleResult).toMatchObject({ success: true });
+    expect([bundleResult.version, singleResult.version].sort()).toEqual(["1", "2"]);
+    expect(await Bun.file(bundleResult.content_path!).text()).toContain("bundle-marker");
+    expect(await Bun.file(singleResult.content_path!).text()).toContain("single-marker");
+    expect(
+      await Bun.file(join(functionsRoot, ref, ".versions", slug, bundleResult.version!, "src", "index.ts")).text(),
+    ).toContain("bundle-marker");
+    expect(
+      await Bun.file(join(functionsRoot, ref, ".versions", slug, singleResult.version!, "index.src.ts")).text(),
+    ).toContain("single-marker");
+  });
+
   test("keeps multi-file runtime code beside its static assets", async () => {
     globalThis.fetch = (() => Promise.resolve(Response.json({ ok: true }))) as typeof fetch;
 

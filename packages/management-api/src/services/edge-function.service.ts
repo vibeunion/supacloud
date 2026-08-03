@@ -102,6 +102,8 @@ const BUNDLED_SOURCE_RUNTIME_ENTRY = ".supacloud-entry.js";
 const SAFE_REF_REGEX = /^[a-zA-Z0-9_-]{1,64}$/;
 const SAFE_SLUG_REGEX = /^[a-zA-Z0-9_-]{1,128}$/;
 const EXTERNAL_PACKAGE_REGEX = /^(?:@[a-zA-Z0-9._-]+\/)?[a-zA-Z0-9._-]+$/;
+const CANONICAL_VERSION_REGEX = /^(?:0|[1-9]\d*)$/;
+const functionDeployLocks = new Map<string, Promise<void>>();
 const deployMetrics: EdgeFunctionDeployMetrics = {
   total_deploys: 0,
   total_bundle_size_bytes: 0,
@@ -161,6 +163,32 @@ function validateSlug(slug: string): string {
     throw new Error("Invalid function slug");
   }
   return slug;
+}
+
+function parseVersionNumber(value: unknown): number | null {
+  if (typeof value !== "string" || !CANONICAL_VERSION_REGEX.test(value)) return null;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) throw new Error("Function version exceeds the safe integer range");
+  return parsed;
+}
+
+async function acquireFunctionDeployLock(
+  ref: string,
+  slug: string,
+): Promise<() => void> {
+  const key = JSON.stringify([ref, slug]);
+  const previous = functionDeployLocks.get(key) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const queueTail = previous.then(() => current);
+  functionDeployLocks.set(key, queueTail);
+  await previous;
+  return () => {
+    release();
+    if (functionDeployLocks.get(key) === queueTail) functionDeployLocks.delete(key);
+  };
 }
 
 function getFunctionsRoot(): string {
@@ -487,16 +515,45 @@ async function invalidateCache(ref: string, slug: string): Promise<void> {
   }
 }
 
-async function computeNextFunctionVersion(ref: string, slug: string): Promise<string> {
+async function readConfiguredFunctionVersion(ref: string, slug: string): Promise<number> {
   try {
     const raw = await Bun.file(getConfigPath(ref, slug)).text();
     const parsed = JSON.parse(raw) as EdgeFunctionConfig;
-    const current = Number.parseInt(parsed.version || "0", 10);
-    if (Number.isFinite(current)) return String(current + 1);
-  } catch {
-    // no existing config
+    if (parsed.version === undefined) return 0;
+    const version = parseVersionNumber(parsed.version);
+    if (version === null) throw new Error("Function config contains an invalid version");
+    return version;
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    return 0;
   }
-  return "1";
+}
+
+async function maxHistoricalFunctionVersion(ref: string, slug: string): Promise<number> {
+  const history = await listVersionDirectories(ref, slug);
+  return history.reduce((maximum, version) => Math.max(maximum, Number(version)), 0);
+}
+
+async function assertFunctionVersionAvailable(ref: string, slug: string, version: number): Promise<void> {
+  const candidate = assertInside(
+    getFuncDir(ref),
+    path.join(getFuncDir(ref), VERSIONED_DIR, validateSlug(slug), String(version)),
+  );
+  try {
+    await fs.access(candidate);
+    throw new Error(`Function version directory already exists: ${version}`);
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+}
+
+async function computeNextFunctionVersion(ref: string, slug: string): Promise<string> {
+  const configured = await readConfiguredFunctionVersion(ref, slug);
+  const historical = await maxHistoricalFunctionVersion(ref, slug);
+  const next = Math.max(configured, historical) + 1;
+  if (!Number.isSafeInteger(next)) throw new Error("Function version exceeds the safe integer range");
+  await assertFunctionVersionAvailable(ref, slug, next);
+  return String(next);
 }
 
 async function readVersionedFunctionCode(ref: string, slug: string, version: string): Promise<string | null> {
@@ -538,11 +595,12 @@ async function listVersionDirectories(ref: string, slug: string): Promise<string
   try {
     const entries = await fs.readdir(dir, { withFileTypes: true });
     return entries
-      .filter((entry) => entry.isDirectory())
+      .filter((entry) => entry.isDirectory() && parseVersionNumber(entry.name) !== null)
       .map((entry) => entry.name)
-      .sort((a, b) => Number.parseInt(a, 10) - Number.parseInt(b, 10));
-  } catch {
-    return [];
+      .sort((a, b) => Number(a) - Number(b));
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
   }
 }
 
@@ -672,6 +730,7 @@ export const edgeFunctionService = {
     code: string,
     minify: boolean = false,
   ): Promise<EdgeFunctionDeployResult> {
+    const releaseLock = await acquireFunctionDeployLock(ref, slug);
     try {
       const validation = validateFunctionCode(code);
       if (!validation.valid) {
@@ -744,6 +803,8 @@ export const edgeFunctionService = {
         success: false,
         error: err instanceof Error ? err.message : String(err),
       };
+    } finally {
+      releaseLock();
     }
   },
 
@@ -779,6 +840,7 @@ export const edgeFunctionService = {
     entrypoint: string = "index.ts",
     minify: boolean = false,
   ): Promise<EdgeFunctionDeployResult> {
+    const releaseLock = await acquireFunctionDeployLock(ref, slug);
     try {
       if (!files[entrypoint]) {
         const error = `Entrypoint '${entrypoint}' not found in file map`;
@@ -918,6 +980,8 @@ export const edgeFunctionService = {
         success: false,
         error: err instanceof Error ? err.message : String(err),
       };
+    } finally {
+      releaseLock();
     }
   },
 
