@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.50.15](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.14...management-api-v0.50.15) (2026-08-03)
+
+
+### Bug Fixes
+
+* **functions:** preserve versions after rollback ([afc3161](https://github.com/zuohuadong/supacloud/commit/afc31614e164339dd65402521fa85c36fdaeaa6e))
+
 ## [0.50.14](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.13...management-api-v0.50.14) (2026-08-03)
 
 
