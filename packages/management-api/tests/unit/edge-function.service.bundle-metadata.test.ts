@@ -49,7 +49,17 @@ describe("edgeFunctionService bundle metadata", () => {
   test("allocates after retained history instead of overwriting a rolled-back version", async () => {
     const ref = "proj_rollback_history";
     const slug = "history-safe";
-    globalThis.fetch = (() => Promise.resolve(Response.json({ success: true }))) as typeof fetch;
+    globalThis.fetch = ((input, init) => {
+      if (String(input).includes("/invalidate/")) {
+        return Promise.resolve(Response.json({
+          invalidated: `${ref}_${slug}`,
+          foreground: { attempted: 0, succeeded: 0, invalidated: 0 },
+          background: { attempted: 0, succeeded: 0, invalidated: 0 },
+        }));
+      }
+      const requestedVersion = new Headers(init?.headers).get("x-supacloud-function-version");
+      return Promise.resolve(Response.json({ success: true, version: requestedVersion }));
+    }) as typeof fetch;
 
     const v1 = await edgeFunctionService.deployBundleDetailed(ref, slug, {
       "index.ts": "export default { fetch: () => new Response('v1') };",
@@ -157,7 +167,15 @@ describe("edgeFunctionService bundle metadata", () => {
   });
 
   test("keeps multi-file runtime code beside its static assets", async () => {
-    globalThis.fetch = (() => Promise.resolve(Response.json({ ok: true }))) as typeof fetch;
+    globalThis.fetch = ((input) => Promise.resolve(Response.json(
+      String(input).includes("/invalidate/")
+        ? {
+            invalidated: "proj_assets_asset-reader",
+            foreground: { attempted: 0, succeeded: 0, invalidated: 0 },
+            background: { attempted: 0, succeeded: 0, invalidated: 0 },
+          }
+        : { success: true },
+    ))) as typeof fetch;
 
     const deployResult = await edgeFunctionService.deployBundleDetailed(
       "proj_assets",
@@ -239,7 +257,11 @@ describe("edgeFunctionService bundle metadata", () => {
           },
         }));
       }
-      return Promise.resolve(Response.json({ ok: true }));
+      return Promise.resolve(Response.json({
+        invalidated: "proj_meta_hello",
+        foreground: { attempted: 0, succeeded: 0, invalidated: 0 },
+        background: { attempted: 0, succeeded: 0, invalidated: 0 },
+      }));
     }) as typeof fetch;
     process.env.EDGE_FUNCTION_EXTERNAL_PACKAGES = "left-pad,@scope/pkg,invalid/pkg/name";
 
