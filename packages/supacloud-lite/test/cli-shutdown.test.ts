@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { EventEmitter } from 'node:events'
-import { access, mkdtemp, rm } from 'node:fs/promises'
+import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { waitForShutdown } from '../src/shutdown.js'
@@ -88,6 +88,23 @@ test('runs project cleanup once after duplicate signals', async () => {
   await assertShutdownHandlerClosesProject('SIGINT')
 })
 
+test('keeps the Windows CLI referenced through output and clears it before exit', async () => {
+  const probeDir = await mkdtemp(join(tmpdir(), 'supacloud-lite-windows-lifecycle-'))
+  const eventsPath = join(probeDir, 'events.log')
+  const preloadPath = join(probeDir, 'preload.js')
+
+  try {
+    await writeFile(preloadPath, WINDOWS_LIFECYCLE_PROBE)
+    const cliRun = await runCliWithPreload(preloadPath, eventsPath)
+    expect(cliRun.exitCode).toBe(0)
+    expect(cliRun.stderr).toBe('')
+    expect(cliRun.stdout).not.toBe('')
+    expect(await readFile(eventsPath, 'utf8')).toBe('ref\nstdout\nclear\nexit:0\n')
+  } finally {
+    await rm(probeDir, { recursive: true, force: true })
+  }
+})
+
 function startCli(projectDir: string) {
   const bunExecutable = Bun.which('bun')
   if (!bunExecutable) throw new Error('Bun is required to run the Lite CLI test')
@@ -116,6 +133,23 @@ async function runCli(projectDir: string, command: string[]) {
     new Response(processHandle.stderr).text(),
   ]))
   return { exitCode, stdout, stderr, durationMs: performance.now() - startedAt }
+}
+
+async function runCliWithPreload(preloadPath: string, eventsPath: string) {
+  const bunExecutable = Bun.which('bun')
+  if (!bunExecutable) throw new Error('Bun is required to run the Lite CLI test')
+  const processHandle = Bun.spawn({
+    cmd: [bunExecutable, '--preload', preloadPath, cliPath, 'version'],
+    stdout: 'pipe',
+    stderr: 'pipe',
+    env: { ...process.env, SUPACLOUD_LITE_LIFECYCLE_EVENTS: eventsPath },
+  })
+  const [exitCode, stdout, stderr] = await withWindowsSubprocessRef(() => Promise.all([
+    processHandle.exited,
+    new Response(processHandle.stdout).text(),
+    new Response(processHandle.stderr).text(),
+  ]))
+  return { exitCode, stdout, stderr }
 }
 
 async function stopCli(cliRun: ReturnType<typeof startCli>, signal: NodeJS.Signals): Promise<number> {
@@ -162,3 +196,39 @@ async function waitForStartup(logs: ReadableStream<Uint8Array>): Promise<void> {
     reader.releaseLock()
   }
 }
+
+const WINDOWS_LIFECYCLE_PROBE = `
+import { appendFileSync } from 'node:fs'
+
+const eventsPath = process.env.SUPACLOUD_LITE_LIFECYCLE_EVENTS
+if (!eventsPath) throw new Error('missing lifecycle events path')
+const record = (event) => appendFileSync(eventsPath, event + '\\n')
+const nativeSetInterval = globalThis.setInterval.bind(globalThis)
+const nativeClearInterval = globalThis.clearInterval.bind(globalThis)
+const nativeWrite = Bun.write.bind(Bun)
+const nativeExit = process.exit.bind(process)
+let lifecycleRef
+
+process.platform = 'win32'
+globalThis.setInterval = (callback, delay, ...args) => {
+  const timer = nativeSetInterval(callback, delay, ...args)
+  if (delay === 1000 && lifecycleRef === undefined) {
+    lifecycleRef = timer
+    record('ref')
+  }
+  return timer
+}
+globalThis.clearInterval = (timer) => {
+  if (timer === lifecycleRef) record('clear')
+  return nativeClearInterval(timer)
+}
+Bun.write = async (destination, input) => {
+  const bytesWritten = await nativeWrite(destination, input)
+  if (destination === Bun.stdout) record('stdout')
+  return bytesWritten
+}
+process.exit = (code) => {
+  record('exit:' + (code ?? 0))
+  return nativeExit(code)
+}
+`
