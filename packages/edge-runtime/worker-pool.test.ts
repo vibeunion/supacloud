@@ -90,6 +90,73 @@ describe("WorkerPool EdgeRuntime.waitUntil", () => {
 });
 
 describe("WorkerPool subprocess guard", () => {
+  test("allows import.meta.require aliases to load safe Node builtins", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-import-meta-require-"));
+    const functionPath = join(projectRoot, "entry.js");
+    await Bun.write(functionPath, `
+      var __require = import.meta.require;
+      var ttyModule = __require("tty");
+      var utilModule = __require("util");
+      export default () => {
+        const supported = typeof ttyModule.isatty === "function"
+          && utilModule.format("%s", "safe") === "safe";
+        return new Response(supported ? "safe" : "mismatch");
+      };
+    `);
+
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    try {
+      const response = await pool.dispatch({
+        functionId: "proj_import_meta_require",
+        functionPath,
+        projectRoot,
+        env: {},
+        request: new Request("http://edge.local/functions/v1/import-meta-require"),
+      });
+      expect({ status: response.status, body: await response.text() }).toEqual({
+        status: 200,
+        body: "safe",
+      });
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("allows safe Node builtins that use internal bindings during initialization", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-internal-builtin-"));
+    const functionPath = join(projectRoot, "entry.js");
+    await Bun.write(functionPath, `
+      import * as netModule from "net";
+      import * as tlsModule from "tls";
+      export default () => {
+        const supported = typeof netModule.createServer === "function"
+          && typeof tlsModule.createServer === "function";
+        return new Response(supported ? "safe" : "mismatch");
+      };
+    `);
+
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    try {
+      const response = await pool.dispatch({
+        functionId: "proj_internal_builtin",
+        functionPath,
+        projectRoot,
+        env: {},
+        request: new Request("http://edge.local/functions/v1/internal-builtin"),
+      });
+      expect({ status: response.status, body: await response.text() }).toEqual({
+        status: 200,
+        body: "safe",
+      });
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   test("allows CJS dependencies to load explicitly allowed Node builtins", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-safe-builtin-module-"));
     const dependencyPath = join(projectRoot, "dependency.cjs");

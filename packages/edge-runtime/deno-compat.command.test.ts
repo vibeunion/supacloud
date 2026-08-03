@@ -61,6 +61,11 @@ test("the worker subprocess guard disables and restores process creation APIs", 
     ["exec", "execFile", "execFileSync", "execSync", "fork", "spawn", "spawnSync"]
       .map((name) => [name, childProcess[name]]),
   );
+  const rawProcessBinding = (process as unknown as Record<string, unknown>).binding as
+    (...args: unknown[]) => unknown;
+  const rawUvBinding = rawProcessBinding("uv") as Record<string, unknown>;
+  const rawErrname = rawUvBinding.errname as (...args: unknown[]) => unknown;
+  const rawErrorMap = rawUvBinding.getErrorMap as () => Map<unknown, unknown>;
 
   try {
     disableSubprocessApis();
@@ -75,7 +80,44 @@ test("the worker subprocess guard disables and restores process creation APIs", 
       .toThrow("outside the project directory");
     expect(() => fs.readFileSync("/etc/hosts", "utf8"))
       .toThrow(FILESYSTEM_DISABLED_MESSAGE);
-    expect(() => (process as unknown as Record<string, () => unknown>).binding())
+    const guardedProcessBinding = (process as unknown as Record<string, unknown>).binding as
+      (...args: unknown[]) => unknown;
+    const uvBinding = guardedProcessBinding("uv") as Record<string, unknown>;
+    expect(typeof uvBinding.errname).toBe("function");
+    expect(typeof uvBinding.getErrorMap).toBe("function");
+    expect(uvBinding.errname).not.toBe(rawErrname);
+    expect(uvBinding.getErrorMap).not.toBe(rawErrorMap);
+    expect(Object.isFrozen(uvBinding.errname)).toBe(true);
+    expect(Object.isFrozen(uvBinding.getErrorMap)).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(uvBinding.errname, "prototype")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(uvBinding.getErrorMap, "prototype")).toBe(false);
+    const errnameProbe = "__supacloud_uv_wrapper_probe__";
+    expect(Reflect.set(uvBinding.errname as object, errnameProbe, true)).toBe(false);
+    expect((rawErrname as Record<string, unknown>)[errnameProbe]).toBeUndefined();
+    expect((uvBinding.errname as (...args: unknown[]) => unknown)(-2)).toBe("ENOENT");
+    const copiedErrorMap = (uvBinding.getErrorMap as () => Map<unknown, unknown>)();
+    expect(copiedErrorMap).toBeInstanceOf(Map);
+    expect(copiedErrorMap).not.toBe(rawErrorMap());
+    expect(copiedErrorMap.size).toBe(rawErrorMap().size);
+    const copiedErrorDetails = [...copiedErrorMap.values()];
+    expect(copiedErrorDetails.length).toBeGreaterThan(0);
+    expect(copiedErrorDetails.every((details) => Array.isArray(details) && Object.isFrozen(details)))
+      .toBe(true);
+    expect(Object.keys(uvBinding).some((name) => name.startsWith("UV_"))).toBe(true);
+    expect(Object.keys(uvBinding).every((name) => (
+      name === "errname" || name === "getErrorMap" || name.startsWith("UV_")
+    ))).toBe(true);
+    expect(Object.isFrozen(uvBinding)).toBe(true);
+    expect(Reflect.set(uvBinding, "UV_EACCES", 0)).toBe(false);
+    expect(() => guardedProcessBinding("uv", "unexpected"))
+      .toThrow(NATIVE_LOADER_DISABLED_MESSAGE);
+    expect(() => guardedProcessBinding("fs"))
+      .toThrow(NATIVE_LOADER_DISABLED_MESSAGE);
+    expect(() => guardedProcessBinding("spawn_sync"))
+      .toThrow(NATIVE_LOADER_DISABLED_MESSAGE);
+    expect(() => guardedProcessBinding({ computed: "uv" }))
+      .toThrow(NATIVE_LOADER_DISABLED_MESSAGE);
+    expect(() => guardedProcessBinding())
       .toThrow(NATIVE_LOADER_DISABLED_MESSAGE);
     const loadBuiltin = moduleApi._load as (request: unknown, ...args: unknown[]) => unknown;
     expect(() => loadBuiltin.call(moduleApi, "node:crypto")).not.toThrow();

@@ -75,6 +75,9 @@ export function isKnownRuntimeBuiltinSpecifier(request: string): boolean {
 
 const nodeFs = require("node:fs") as typeof import("node:fs");
 const nodeFsPromises = require("node:fs/promises") as typeof import("node:fs/promises");
+const runtimeProcessBinding = (process as unknown as Record<string, unknown>).binding as
+  ((...args: unknown[]) => unknown) | undefined;
+const tenantUvBinding = createTenantUvBinding(runtimeProcessBinding);
 const runtimeFs = {
   lstatSync: nodeFs.lstatSync.bind(nodeFs),
   realpathSync: nodeFs.realpathSync.bind(nodeFs),
@@ -198,9 +201,14 @@ export function disableSubprocessApis(): void {
   );
 
   const processApi = process as unknown as Record<string, unknown>;
-  for (const name of ["dlopen", "binding", "_linkedBinding", "getBuiltinModule"]) {
+  for (const name of ["dlopen", "_linkedBinding", "getBuiltinModule"]) {
     if (typeof processApi[name] === "function") processApi[name] = nativeLoaderDisabled;
   }
+  // node:net 和 node:tls 首次加载依赖 uv 的错误映射；其他原生 binding 仍保持关闭。
+  processApi.binding = function (request: unknown, ...args: unknown[]) {
+    if (request !== "uv" || args.length > 0 || !tenantUvBinding) return nativeLoaderDisabled();
+    return tenantUvBinding;
+  };
 
   const moduleApi = require("node:module") as Record<string, unknown>;
   moduleApi.createRequire = nativeLoaderDisabled;
@@ -223,6 +231,43 @@ export function disableSubprocessApis(): void {
     };
   }
   syncBuiltinESMExports();
+}
+
+function createTenantUvBinding(
+  processBinding: ((...args: unknown[]) => unknown) | undefined,
+): Readonly<Record<string, unknown>> | null {
+  if (!processBinding) return null;
+  const rawUvBinding = Reflect.apply(processBinding, process, ["uv"]) as Record<string, unknown>;
+  const safeEntries: Array<[string, unknown]> = [];
+  for (const [name, value] of Object.entries(rawUvBinding)) {
+    if (name.startsWith("UV_") && typeof value === "number") safeEntries.push([name, value]);
+  }
+  for (const name of ["errname", "getErrorMap"] as const) {
+    const wrapped = createTenantUvFunction(name, rawUvBinding);
+    if (wrapped) safeEntries.push([name, wrapped]);
+  }
+  return Object.freeze(Object.fromEntries(safeEntries));
+}
+
+function createTenantUvFunction(
+  name: "errname" | "getErrorMap",
+  rawUvBinding: Record<string, unknown>,
+): ((...args: unknown[]) => unknown) | null {
+  const rawFunction = rawUvBinding[name];
+  if (typeof rawFunction !== "function") return null;
+  const wrapped = (...args: unknown[]) => {
+    const rawResult = Reflect.apply(rawFunction, rawUvBinding, args);
+    if (name !== "getErrorMap" || !(rawResult instanceof Map)) return rawResult;
+    const copiedEntries: Array<[unknown, unknown]> = [];
+    for (const [code, details] of rawResult) {
+      copiedEntries.push([
+        code,
+        Array.isArray(details) ? Object.freeze([...details]) : details,
+      ]);
+    }
+    return new Map(copiedEntries);
+  };
+  return Object.freeze(wrapped);
 }
 
 function disableBunHostCapabilities(bun: Record<string, unknown>): void {
