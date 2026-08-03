@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.16.4](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.16.3...edge-runtime-v0.16.4) (2026-08-03)
+
+
+### Bug Fixes
+
+* **functions:** fail closed on activation readiness ([78af76b](https://github.com/zuohuadong/supacloud/commit/78af76bb07887bc54f6d3a0ac09407d7e95b3bce))
+* **functions:** fail closed on activation readiness ([72424ee](https://github.com/zuohuadong/supacloud/commit/72424ee716549fd8f12c5b3c45b6f76ad41b175e))
+
 ## [0.16.3](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.16.2...edge-runtime-v0.16.3) (2026-08-03)
 
 
