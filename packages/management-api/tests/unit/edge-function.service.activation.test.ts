@@ -1,5 +1,5 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -27,6 +27,9 @@ const successfulPoolAck = {
 function successfulInvalidationAck(ref: string, slug: string) {
   return {
     invalidated: `${ref}_${slug}`,
+    module_scope: "legacy-base-only",
+    immutable_versions_retained: true,
+    config_cache_evicted: true,
     foreground: successfulPoolAck,
     background: successfulPoolAck,
   };
@@ -73,11 +76,8 @@ async function prepareRollback(ref: string, slug: string) {
 
   return {
     config: await edgeFunctionService.getConfig(ref, slug),
-    artifact: await readFile(join(functionsRoot, ref, `${slug}.js`), "utf8"),
-    sourceAsset: await readFile(
-      join(functionsRoot, ref, `.src-${slug}`, "public", "version.txt"),
-      "utf8",
-    ),
+    artifact: await edgeFunctionService.read(ref, slug),
+    source: await edgeFunctionService.readSource(ref, slug),
   };
 }
 
@@ -87,10 +87,8 @@ async function expectRollbackUnchanged(
   before: Awaited<ReturnType<typeof prepareRollback>>,
 ) {
   expect(await edgeFunctionService.getConfig(ref, slug)).toEqual(before.config);
-  expect(await readFile(join(functionsRoot, ref, `${slug}.js`), "utf8")).toBe(before.artifact);
-  expect(
-    await readFile(join(functionsRoot, ref, `.src-${slug}`, "public", "version.txt"), "utf8"),
-  ).toBe(before.sourceAsset);
+  expect(await edgeFunctionService.read(ref, slug)).toBe(before.artifact);
+  expect(await edgeFunctionService.readSource(ref, slug)).toBe(before.source);
 }
 
 afterEach(() => {
@@ -126,6 +124,7 @@ describe("edgeFunctionService version activation readiness", () => {
     globalThis.fetch = sequenceFetch([
       { path: "/preheat/", response: Response.json({ success: true, version: "2" }) },
       { path: "/invalidate/", response: Response.json({ message: "Unauthorized" }, { status: 401 }) },
+      { path: "/invalidate/", response: Response.json(successfulInvalidationAck(ref, slug)) },
     ]);
 
     await expect(edgeFunctionService.activateVersion(ref, slug, "2")).rejects.toThrow("HTTP 401");
@@ -194,6 +193,7 @@ describe("edgeFunctionService version activation readiness", () => {
     globalThis.fetch = sequenceFetch([
       { path: "/preheat/", response: Response.json({ success: true, version: "2" }) },
       { path: "/invalidate/", response: Response.json(acknowledgedBody) },
+      { path: "/invalidate/", response: Response.json(successfulInvalidationAck(ref, slug)) },
     ]);
 
     await expect(edgeFunctionService.activateVersion(ref, slug, "2")).rejects.toThrow(
@@ -218,10 +218,49 @@ describe("edgeFunctionService version activation readiness", () => {
     const config = await edgeFunctionService.activateVersion(ref, slug, "2");
 
     expect(config?.version).toBe("2");
-    expect(await readFile(join(functionsRoot, ref, `${slug}.js`), "utf8")).toContain("version-two");
-    expect(
-      await readFile(join(functionsRoot, ref, `.src-${slug}`, "public", "version.txt"), "utf8"),
-    ).toBe("version-two");
+    expect(await edgeFunctionService.read(ref, slug)).toContain("version-two");
+    expect(await edgeFunctionService.readSource(ref, slug)).toContain("version-two");
     expect(steps).toHaveLength(0);
+  });
+
+  test("restores the target version source metadata and authorization policy", async () => {
+    const ref = "proj_activation_full_metadata";
+    const slug = "metadata-rollback";
+    globalThis.fetch = runtimeSuccessFetch();
+    const versionOne = await edgeFunctionService.deployRelease({
+      ref,
+      slug,
+      files: {
+        "version-one.ts": "export default { fetch: () => new Response('source-version-one') };",
+        "import_map.json": JSON.stringify({ imports: {} }),
+      },
+      entrypoint: "version-one.ts",
+      config: { verify_jwt: false, background_routes: ["/version-one/*"] },
+    });
+    const versionTwo = await edgeFunctionService.deployRelease({
+      ref,
+      slug,
+      files: {
+        "version-two.ts": "export default { fetch: () => new Response('source-version-two') };",
+        "deno.json": JSON.stringify({ imports: {} }),
+      },
+      entrypoint: "version-two.ts",
+      config: { verify_jwt: true, background_routes: ["/version-two/*"] },
+    });
+
+    expect(versionOne).toMatchObject({ success: true, version: "1" });
+    expect(versionTwo).toMatchObject({ success: true, version: "2" });
+
+    const restored = await edgeFunctionService.activateVersion(ref, slug, "1");
+
+    expect(restored).toMatchObject({
+      version: "1",
+      verify_jwt: false,
+      background_routes: ["/version-one/*"],
+      entrypoint: "version-one.ts",
+      import_map: "import_map.json",
+    });
+    expect(await edgeFunctionService.getConfig(ref, slug)).toEqual(restored!);
+    expect(await edgeFunctionService.readSource(ref, slug)).toContain("source-version-one");
   });
 });

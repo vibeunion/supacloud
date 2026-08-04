@@ -108,6 +108,17 @@ type EdgeFunctionConfigInput = {
     background_routes?: string[];
 };
 
+function confirmedFunctionConfig(payload: unknown, expected: EdgeFunctionConfigInput): boolean {
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) return false;
+    const response = payload as Record<string, unknown>;
+    if (expected.verify_jwt !== undefined && response.verify_jwt !== expected.verify_jwt) return false;
+    if (expected.background_routes !== undefined) {
+        if (!Array.isArray(response.background_routes)) return false;
+        if (JSON.stringify(response.background_routes) !== JSON.stringify(expected.background_routes)) return false;
+    }
+    return true;
+}
+
 export function registerAdvancedTools(server: { tool: (...args: any[]) => void }, http: HttpTransport): void {
 
     // ═══ Edge Functions (5→1) ═══
@@ -152,6 +163,23 @@ Actions: list, deploy, deploy_bundle, config, source, delete, check`,
                     : `❌ Config update failed (${cr.status}): ${JSON.stringify(cr.data)}`;
             };
 
+            const confirmedDeploymentText = async (
+                successText: string,
+                responsePayload: unknown,
+            ): Promise<string> => {
+                if (!hasFunctionConfig() || confirmedFunctionConfig(responsePayload, functionConfig())) {
+                    return successText;
+                }
+                const fallback = await http.patch(
+                    `/v1/projects/${ref}/functions/${slug}/config`,
+                    functionConfig(),
+                );
+                if (!fallback.ok || !confirmedFunctionConfig(fallback.data, functionConfig())) {
+                    return `❌ Partial deployment (unsafe): POST succeeded and the code/bundle was deployed, but the function policy was not confirmed; legacy PATCH fallback failed (${fallback.status}): ${JSON.stringify(fallback.data)}`;
+                }
+                return `${successText}\n⚠️ Legacy non-atomic compatibility path: policy applied with follow-up PATCH`;
+            };
+
             const checkSyntax = async (sourceCode: string): Promise<{ ok: boolean; err?: string }> => {
                 const tmpDir = mkdtempSync(join(tmpdir(), "supacloud-edge-check-"));
                 const tmpFile = join(tmpDir, "index.ts");
@@ -194,25 +222,33 @@ Actions: list, deploy, deploy_bundle, config, source, delete, check`,
                         text = `❌ Deployment aborted. Syntax check failed:\n${deployCheck.err}`;
                         break;
                     }
-                    const dr = await http.post(`/v1/projects/${ref}/functions/${slug}`, { code, minify });
+                    const dr = await http.post(`/v1/projects/${ref}/functions/${slug}`, {
+                        code,
+                        minify,
+                        ...functionConfig(),
+                    });
                     if (!dr.ok) {
                         text = `❌ Failed (${dr.status}): ${JSON.stringify(dr.data)}`;
                         break;
                     }
-                    text = hasFunctionConfig()
-                        ? `✅ Function ${slug} deployed\n${await updateFunctionConfig()}`
-                        : `✅ Function ${slug} deployed`;
+                    text = await confirmedDeploymentText(`✅ Function ${slug} deployed`, dr.data);
                     break;
                 case "deploy_bundle":
                     need("slug", slug); need("files", files);
-                    const br = await http.post(`/v1/projects/${ref}/functions/${slug}/bundle`, { files, entrypoint, minify });
+                    const br = await http.post(`/v1/projects/${ref}/functions/${slug}/bundle`, {
+                        files,
+                        entrypoint,
+                        minify,
+                        ...functionConfig(),
+                    });
                     if (!br.ok) {
                         text = `❌ Failed (${br.status}): ${JSON.stringify(br.data)}`;
                         break;
                     }
-                    text = hasFunctionConfig()
-                        ? `✅ Function ${slug} bundle deployed (${Object.keys(files!).length} files)\n${await updateFunctionConfig()}`
-                        : `✅ Function ${slug} bundle deployed (${Object.keys(files!).length} files)`;
+                    text = await confirmedDeploymentText(
+                        `✅ Function ${slug} bundle deployed (${Object.keys(files!).length} files)`,
+                        br.data,
+                    );
                     break;
                 case "config":
                     text = await updateFunctionConfig();

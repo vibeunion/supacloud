@@ -9,6 +9,7 @@ import type { Project, ProjectStatus } from "../db";
 import { resolveBucketName, resolveDbName, resolveRoleName, generateDbName } from "../db";
 import { edgeFunctionService } from "./edge-function.service";
 import { getVersionedArtifactPath } from "./edge-function.service";
+import type { EdgeFunctionDeploymentRequest } from "./edge-function.service";
 import { logger } from "../utils/logger";
 import { config } from "../config";
 import { $ } from "bun";
@@ -859,6 +860,12 @@ export class ProjectService {
     if (!project) return false;
 
     return await edgeFunctionService.deploy(ref, slug, code, minify);
+  }
+
+  async deployFunctionRelease(request: EdgeFunctionDeploymentRequest) {
+    const project = await projectRepository.findByRef(request.ref);
+    if (!project) return { success: false, error: "Project not found" };
+    return edgeFunctionService.deployRelease(request);
   }
 
   async deployFunctionDetailed(

@@ -2,6 +2,7 @@ import { Elysia, t, status } from "elysia";
 import { projectService } from "../services";
 import { requireProjectOrAdminAuth } from "../middleware/auth";
 import { isUserManagedFunctionSecretName } from "../utils/project-secret-visibility";
+import type { EdgeFunctionDeploymentConfig } from "../services/edge-function.service";
 
 async function requireFunctionManagementAuth(request: Request, ref: string) {
   const authError = await requireProjectOrAdminAuth(request, ref);
@@ -27,6 +28,22 @@ function normalizeLimitOffset(
     ? Math.max(0, Math.floor(rawOffset))
     : defaults.offset;
   return { limit, offset };
+}
+
+function deploymentConfig(
+  verifyJwt: boolean | undefined,
+  backgroundRoutes: string[] | undefined,
+): EdgeFunctionDeploymentConfig {
+  return {
+    ...(typeof verifyJwt === "boolean" ? { verify_jwt: verifyJwt } : {}),
+    ...(backgroundRoutes ? { background_routes: backgroundRoutes } : {}),
+  };
+}
+
+function normalizedBackgroundRoutes(routes: unknown): string[] | undefined {
+  return Array.isArray(routes)
+    ? routes.filter((route): route is string => typeof route === "string" && route.trim().length > 0)
+    : undefined;
 }
 
 export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
@@ -110,58 +127,43 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         fileMap[entrypoint] = await fileList[0].text();
       }
 
-      const result = await projectService.deployFunctionBundleDetailed(
-        params.ref,
+      const backgroundRoutes = normalizedBackgroundRoutes(metadata.background_routes);
+      const deployment = await projectService.deployFunctionRelease({
+        ref: params.ref,
         slug,
-        fileMap,
+        files: fileMap,
         entrypoint,
-        false,
-      );
-      if (!result.success) {
+        config: deploymentConfig(metadata.verify_jwt, backgroundRoutes),
+      });
+      if (!deployment.success) {
         return status(500, {
-          message: result.error || "Failed to deploy function bundle",
+          message: deployment.error || "Failed to deploy function bundle",
           code: "500",
-          details: result,
+          details: deployment,
         });
       }
 
-      // Persist JWT setting from metadata
       const { edgeFunctionService } =
         await import("../services/edge-function.service");
-      if (typeof metadata.verify_jwt === "boolean") {
-        await edgeFunctionService.updateConfig(params.ref, slug, {
-          verify_jwt: metadata.verify_jwt,
-        });
-      }
-
-      if (Array.isArray(metadata.background_routes)) {
-        await edgeFunctionService.updateConfig(params.ref, slug, {
-          background_routes: metadata.background_routes.filter(
-            (route): route is string =>
-              typeof route === "string" && route.trim().length > 0,
-          ),
-        });
-      }
-
-      const funcConfig = await edgeFunctionService.getConfig(params.ref, slug);
+      const funcConfig = deployment.config ?? await edgeFunctionService.getConfig(params.ref, slug);
       const version = Number.parseInt(funcConfig.version || "1", 10) || 1;
       const now = new Date().toISOString();
       return {
         id: slug,
         slug,
         name: metadata.name || slug,
-        version: Number.parseInt(result.version || String(version), 10) || version,
+        version: Number.parseInt(deployment.version || String(version), 10) || version,
         status: "ACTIVE",
         verify_jwt: funcConfig.verify_jwt,
         background_routes: funcConfig.background_routes || [],
         entrypoint_path: entrypoint,
-        import_map: result.import_map != null || !!metadata.import_map_path,
-        import_map_path: result.import_map ?? metadata.import_map_path ?? null,
-        bundle_hash: result.bundle_hash ?? null,
-        bundle_size_bytes: result.bundle_size_bytes ?? null,
-        import_count: result.import_count ?? null,
-        external_packages: result.external_packages ?? [],
-        preheat: result.preheat ?? null,
+        import_map: deployment.import_map != null || !!metadata.import_map_path,
+        import_map_path: deployment.import_map ?? metadata.import_map_path ?? null,
+        bundle_hash: deployment.bundle_hash ?? null,
+        bundle_size_bytes: deployment.bundle_size_bytes ?? null,
+        import_count: deployment.import_count ?? null,
+        external_packages: deployment.external_packages ?? [],
+        preheat: deployment.preheat ?? null,
         created_at: now,
         updated_at: now,
       };
@@ -190,32 +192,26 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
       const slug = body?.slug || (query as Record<string, string>).slug;
       const code = body?.body || body?.code || "";
       const name = body?.name || (query as Record<string, string>).name;
-      const verifyJwt =
-        body?.verify_jwt ??
-        ((query as Record<string, string>).verify_jwt === "false"
-          ? false
-          : true);
-      const backgroundRoutes = Array.isArray(body?.background_routes)
-        ? body.background_routes.filter(
-            (route): route is string =>
-              typeof route === "string" && route.trim().length > 0,
-          )
-        : undefined;
+      const queryVerifyJwt = (query as Record<string, string>).verify_jwt;
+      const verifyJwt = body?.verify_jwt ?? (
+        queryVerifyJwt === undefined ? undefined : queryVerifyJwt !== "false"
+      );
+      const backgroundRoutes = normalizedBackgroundRoutes(body?.background_routes);
 
       if (!slug) {
         return status(400, { message: "slug is required", code: "400" });
       }
       let deployResult:
-        | Awaited<ReturnType<typeof projectService.deployFunctionDetailed>>
+        | Awaited<ReturnType<typeof projectService.deployFunctionRelease>>
         | null = null;
       // Allow empty code for metadata-only creation
       if (code) {
-        deployResult = await projectService.deployFunctionDetailed(
-          params.ref,
+        deployResult = await projectService.deployFunctionRelease({
+          ref: params.ref,
           slug,
           code,
-          false,
-        );
+          config: deploymentConfig(verifyJwt, backgroundRoutes),
+        });
         if (!deployResult.success) {
           return status(500, {
             message: deployResult.error || "Failed to deploy function",
@@ -227,11 +223,12 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
 
       const { edgeFunctionService } =
         await import("../services/edge-function.service");
-      await edgeFunctionService.updateConfig(params.ref, slug, {
-        verify_jwt: verifyJwt,
-        ...(backgroundRoutes ? { background_routes: backgroundRoutes } : {}),
-      });
-      const funcConfig = await edgeFunctionService.getConfig(params.ref, slug);
+      const configPatch = deploymentConfig(verifyJwt, backgroundRoutes);
+      const funcConfig = deployResult?.config ?? (
+        Object.keys(configPatch).length > 0
+          ? await edgeFunctionService.updateConfig(params.ref, slug, configPatch)
+          : await edgeFunctionService.getConfig(params.ref, slug)
+      );
       const version = Number.parseInt(funcConfig.version || "1", 10) || 1;
 
       const now = new Date().toISOString();
@@ -240,7 +237,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         slug,
         name: name || slug,
         version,
-        verify_jwt: verifyJwt,
+        verify_jwt: funcConfig.verify_jwt,
         background_routes: funcConfig.background_routes || [],
         status: "ACTIVE",
         created_at: now,
@@ -296,40 +293,28 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         code?: string;
         name?: string;
         verify_jwt?: boolean;
+        background_routes?: string[];
       }>) {
         const code = fn.body || fn.code || "";
         if (!fn.slug || !code) continue;
 
-        const success = await projectService.deployFunction(
-          params.ref,
-          fn.slug,
+        const deployResult = await projectService.deployFunctionRelease({
+          ref: params.ref,
+          slug: fn.slug,
           code,
-          false,
-        );
-        if (success && typeof fn.verify_jwt === "boolean") {
-          const { edgeFunctionService } =
-            await import("../services/edge-function.service");
-          await edgeFunctionService.updateConfig(params.ref, fn.slug, {
-            verify_jwt: fn.verify_jwt,
-          });
-        }
-
-        if (success && Array.isArray((fn as { background_routes?: unknown[] }).background_routes)) {
-          const { edgeFunctionService } =
-            await import("../services/edge-function.service");
-          await edgeFunctionService.updateConfig(params.ref, fn.slug, {
-            background_routes: ((fn as { background_routes?: unknown[] }).background_routes || []).filter(
-              (route): route is string =>
-                typeof route === "string" && route.trim().length > 0,
-            ),
-          });
-        }
+          config: deploymentConfig(
+            fn.verify_jwt,
+            normalizedBackgroundRoutes(fn.background_routes),
+          ),
+        });
 
         const now = new Date().toISOString();
         results.push({
           slug: fn.slug,
           name: fn.name || fn.slug,
-          success,
+          success: deployResult.success,
+          verify_jwt: deployResult.config?.verify_jwt,
+          background_routes: deployResult.config?.background_routes || [],
           updated_at: now,
         });
       }
@@ -570,28 +555,34 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
       const code = body.code || body.body || "";
-      const result = await projectService.deployFunctionDetailed(
-        params.ref,
-        params.slug,
+      const deployment = await projectService.deployFunctionRelease({
+        ref: params.ref,
+        slug: params.slug,
         code,
-        body.minify ?? false,
-      );
-      if (!result.success) {
+        minify: body.minify ?? false,
+        config: deploymentConfig(
+          body.verify_jwt,
+          normalizedBackgroundRoutes(body.background_routes),
+        ),
+      });
+      if (!deployment.success) {
         return status(500, {
-          message: result.error || "Failed to deploy function",
+          message: deployment.error || "Failed to deploy function",
           code: "500",
-          details: result,
+          details: deployment,
         });
       }
       return {
         success: true,
-        bundled: result.bundled ?? true,
-        version: result.version ?? null,
-        bundle_hash: result.bundle_hash ?? null,
-        bundle_size_bytes: result.bundle_size_bytes ?? null,
-        import_count: result.import_count ?? null,
-        external_packages: result.external_packages ?? [],
-        preheat: result.preheat ?? null,
+        bundled: deployment.bundled ?? true,
+        version: deployment.version ?? null,
+        bundle_hash: deployment.bundle_hash ?? null,
+        bundle_size_bytes: deployment.bundle_size_bytes ?? null,
+        import_count: deployment.import_count ?? null,
+        external_packages: deployment.external_packages ?? [],
+        preheat: deployment.preheat ?? null,
+        verify_jwt: deployment.config?.verify_jwt ?? true,
+        background_routes: deployment.config?.background_routes || [],
       };
     },
     {
@@ -600,6 +591,8 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         code: t.Optional(t.String()),
         body: t.Optional(t.String()),
         minify: t.Optional(t.Boolean()),
+        verify_jwt: t.Optional(t.Boolean()),
+        background_routes: t.Optional(t.Array(t.String())),
       }),
       detail: { tags: ["frontend"], summary: "Deploy function code by slug" },
     },
@@ -616,15 +609,19 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
       // Update code if provided
       const code = body.code || body.body;
       let deployResult:
-        | Awaited<ReturnType<typeof projectService.deployFunctionDetailed>>
+        | Awaited<ReturnType<typeof projectService.deployFunctionRelease>>
         | null = null;
+      const configPatch = deploymentConfig(
+        body.verify_jwt,
+        normalizedBackgroundRoutes(body.background_routes),
+      );
       if (code) {
-        deployResult = await projectService.deployFunctionDetailed(
-          params.ref,
-          params.slug,
+        deployResult = await projectService.deployFunctionRelease({
+          ref: params.ref,
+          slug: params.slug,
           code,
-          false,
-        );
+          config: configPatch,
+        });
         if (!deployResult.success) {
           return status(500, {
             message: deployResult.error || "Failed to deploy function",
@@ -634,26 +631,10 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         }
       }
 
-      // Update config if verify_jwt provided
-      if (typeof body.verify_jwt === "boolean") {
-        await edgeFunctionService.updateConfig(params.ref, params.slug, {
-          verify_jwt: body.verify_jwt,
-        });
-      }
-
-      if (Array.isArray(body.background_routes)) {
-        await edgeFunctionService.updateConfig(params.ref, params.slug, {
-          background_routes: body.background_routes.filter(
-            (route): route is string =>
-              typeof route === "string" && route.trim().length > 0,
-          ),
-        });
-      }
-
-      // Return updated function info
-      const funcConfig = await edgeFunctionService.getConfig(
-        params.ref,
-        params.slug,
+      const funcConfig = deployResult?.config ?? (
+        Object.keys(configPatch).length > 0
+          ? await edgeFunctionService.updateConfig(params.ref, params.slug, configPatch)
+          : await edgeFunctionService.getConfig(params.ref, params.slug)
       );
       const version = Number.parseInt(funcConfig.version || "1", 10) || 1;
       const now = new Date().toISOString();
@@ -692,31 +673,37 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, body, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
-      const result = await projectService.deployFunctionBundleDetailed(
-        params.ref,
-        params.slug,
-        body.files,
-        body.entrypoint ?? "index.ts",
-        body.minify ?? false,
-      );
-      if (!result.success) {
+      const deployment = await projectService.deployFunctionRelease({
+        ref: params.ref,
+        slug: params.slug,
+        files: body.files,
+        entrypoint: body.entrypoint ?? "index.ts",
+        minify: body.minify ?? false,
+        config: deploymentConfig(
+          body.verify_jwt,
+          normalizedBackgroundRoutes(body.background_routes),
+        ),
+      });
+      if (!deployment.success) {
         return status(500, {
-          message: result.error || "Failed to deploy function bundle",
+          message: deployment.error || "Failed to deploy function bundle",
           code: "500",
-          details: result,
+          details: deployment,
         });
       }
       return {
         success: true,
         bundled: true,
-        files: result.files ?? Object.keys(body.files).length,
-        version: result.version ?? null,
-        import_map: result.import_map ?? null,
-        bundle_hash: result.bundle_hash ?? null,
-        bundle_size_bytes: result.bundle_size_bytes ?? null,
-        import_count: result.import_count ?? null,
-        external_packages: result.external_packages ?? [],
-        preheat: result.preheat ?? null,
+        files: deployment.files ?? Object.keys(body.files).length,
+        version: deployment.version ?? null,
+        import_map: deployment.import_map ?? null,
+        bundle_hash: deployment.bundle_hash ?? null,
+        bundle_size_bytes: deployment.bundle_size_bytes ?? null,
+        import_count: deployment.import_count ?? null,
+        external_packages: deployment.external_packages ?? [],
+        preheat: deployment.preheat ?? null,
+        verify_jwt: deployment.config?.verify_jwt ?? true,
+        background_routes: deployment.config?.background_routes || [],
       };
     },
     {
@@ -725,6 +712,8 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         files: t.Record(t.String(), t.String()),
         entrypoint: t.Optional(t.String()),
         minify: t.Optional(t.Boolean()),
+        verify_jwt: t.Optional(t.Boolean()),
+        background_routes: t.Optional(t.Array(t.String())),
       }),
       detail: { tags: ["frontend"], summary: "Deploy function bundle" },
     },

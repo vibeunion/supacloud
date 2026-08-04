@@ -154,7 +154,7 @@ describe("final security regressions", () => {
   });
 
   test("function deploy response exposes bundle and preheat metadata", async () => {
-    const deploySpy = spyOn(projectService, "deployFunctionDetailed").mockResolvedValue({
+    const deploySpy = spyOn(projectService, "deployFunctionRelease").mockResolvedValue({
       success: true,
       version: "3",
       bundled: true,
@@ -170,14 +170,23 @@ describe("final security regressions", () => {
         cache_hits: 1,
         cache_misses: 2,
       },
-    } as Awaited<ReturnType<typeof projectService.deployFunctionDetailed>>);
+      config: {
+        verify_jwt: false,
+        version: "3",
+        background_routes: ["/queue/*"],
+      },
+    } as Awaited<ReturnType<typeof projectService.deployFunctionRelease>>);
     const request = appWith(projectFunctionsRoutes);
 
     try {
       const response = await request("/v1/projects/proj_1/functions/hello", {
         method: "POST",
         headers: { ...masterHeaders, "Content-Type": "application/json" },
-        body: JSON.stringify({ code: "export default { fetch() { return new Response('ok') } }" }),
+        body: JSON.stringify({
+          code: "export default { fetch() { return new Response('ok') } }",
+          verify_jwt: false,
+          background_routes: ["/queue/*"],
+        }),
       });
 
       expect(response.status).toBe(200);
@@ -189,6 +198,8 @@ describe("final security regressions", () => {
         bundle_size_bytes: 4096,
         import_count: 2,
         external_packages: ["left-pad"],
+        verify_jwt: false,
+        background_routes: ["/queue/*"],
         preheat: {
           ok: true,
           attempted: 3,
@@ -197,12 +208,80 @@ describe("final security regressions", () => {
           cache_misses: 2,
         },
       });
-      expect(deploySpy).toHaveBeenCalledWith(
-        "proj_1",
-        "hello",
-        "export default { fetch() { return new Response('ok') } }",
-        false,
-      );
+      expect(deploySpy).toHaveBeenCalledWith({
+        ref: "proj_1",
+        slug: "hello",
+        code: "export default { fetch() { return new Response('ok') } }",
+        minify: false,
+        config: { verify_jwt: false, background_routes: ["/queue/*"] },
+      });
+    } finally {
+      deploySpy.mockRestore();
+    }
+  });
+
+  test("all code deploy routes pass policy through the atomic release primitive", async () => {
+    const deploySpy = spyOn(projectService, "deployFunctionRelease").mockImplementation(async (release) => ({
+      success: true,
+      version: "4",
+      bundled: "files" in release,
+      files: "files" in release ? Object.keys(release.files).length : undefined,
+      config: {
+        verify_jwt: release.config?.verify_jwt ?? true,
+        background_routes: release.config?.background_routes ?? [],
+        version: "4",
+      },
+    }));
+    const request = appWith(projectFunctionsRoutes);
+    const jsonHeaders = { ...masterHeaders, "Content-Type": "application/json" };
+
+    try {
+      const bundleResponse = await request("/v1/projects/proj_1/functions/bundle-fn/bundle", {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({
+          files: { "index.ts": "export default { fetch() { return new Response('bundle') } }" },
+          verify_jwt: false,
+        }),
+      });
+      const patchResponse = await request("/v1/projects/proj_1/functions/patch-fn", {
+        method: "PATCH",
+        headers: jsonHeaders,
+        body: JSON.stringify({
+          code: "export default { fetch() { return new Response('patch') } }",
+          verify_jwt: false,
+        }),
+      });
+      const bulkResponse = await request("/v1/projects/proj_1/functions", {
+        method: "PUT",
+        headers: jsonHeaders,
+        body: JSON.stringify([{
+          slug: "bulk-fn",
+          code: "export default { fetch() { return new Response('bulk') } }",
+          verify_jwt: false,
+        }]),
+      });
+      const multipart = new FormData();
+      multipart.set("metadata", JSON.stringify({ entrypoint_path: "index.ts", verify_jwt: false }));
+      multipart.set("file", new File([
+        "export default { fetch() { return new Response('multipart') } }",
+      ], "index.ts", { type: "application/typescript" }));
+      const multipartResponse = await request("/v1/projects/proj_1/functions/deploy?slug=multipart-fn", {
+        method: "POST",
+        headers: masterHeaders,
+        body: multipart,
+      });
+
+      expect([
+        bundleResponse.status,
+        patchResponse.status,
+        bulkResponse.status,
+        multipartResponse.status,
+      ]).toEqual([200, 200, 200, 200]);
+      expect(deploySpy).toHaveBeenCalledTimes(4);
+      for (const call of deploySpy.mock.calls) {
+        expect(call[0].config).toMatchObject({ verify_jwt: false });
+      }
     } finally {
       deploySpy.mockRestore();
     }

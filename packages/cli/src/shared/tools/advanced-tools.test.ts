@@ -110,16 +110,16 @@ describe("edge_functions CLI tool", () => {
         expect(result.content[0].text).toContain("Function render config updated");
     });
 
-    test("patches config after bundle deployment when config flags are provided", async () => {
+    test("sends bundle config inline without a follow-up PATCH", async () => {
         const calls: Array<{ method: string; path: string; body: unknown }> = [];
         const { callback } = captureEdgeFunctionsTool({
             post: async (path: string, body: unknown) => {
                 calls.push({ method: "post", path, body });
-                return { ok: true, status: 200, data: { success: true } };
-            },
-            patch: async (path: string, body: unknown) => {
-                calls.push({ method: "patch", path, body });
-                return { ok: true, status: 200, data: { verify_jwt: true, background_routes: ["/work/*"] } };
+                return {
+                    ok: true,
+                    status: 200,
+                    data: { success: true, verify_jwt: true, background_routes: ["/work/*"] },
+                };
             },
         });
 
@@ -136,16 +136,95 @@ describe("edge_functions CLI tool", () => {
             {
                 method: "post",
                 path: "/v1/projects/proj/functions/worker/bundle",
-                body: { files: { "index.ts": "export default {}" }, entrypoint: undefined, minify: undefined },
-            },
-            {
-                method: "patch",
-                path: "/v1/projects/proj/functions/worker/config",
-                body: { verify_jwt: true, background_routes: ["/work/*"] },
+                body: {
+                    files: { "index.ts": "export default {}" },
+                    entrypoint: undefined,
+                    minify: undefined,
+                    verify_jwt: true,
+                    background_routes: ["/work/*"],
+                },
             },
         ]);
         expect(result.content[0].text).toContain("Function worker bundle deployed");
-        expect(result.content[0].text).toContain("Function worker config updated");
+    });
+
+    test("sends single-file config inline without a follow-up PATCH", async () => {
+        const calls: Array<{ method: string; path: string; body: unknown }> = [];
+        const { callback } = captureEdgeFunctionsTool({
+            post: async (path: string, body: unknown) => {
+                calls.push({ method: "post", path, body });
+                return { ok: true, status: 200, data: { success: true, verify_jwt: false } };
+            },
+        });
+
+        const result = await callback({
+            action: "deploy",
+            ref: "proj",
+            slug: "public-hook",
+            code: "export default { fetch: () => new Response('ok') }",
+            verify_jwt: false,
+        });
+
+        expect(calls).toEqual([{
+            method: "post",
+            path: "/v1/projects/proj/functions/public-hook",
+            body: {
+                code: "export default { fetch: () => new Response('ok') }",
+                minify: undefined,
+                verify_jwt: false,
+            },
+        }]);
+        expect(result.content[0].text).toContain("Function public-hook deployed");
+    });
+
+    test("uses an explicitly labelled legacy PATCH when an old server omits policy confirmation", async () => {
+        const calls: Array<{ method: string; path: string; body: unknown }> = [];
+        const { callback } = captureEdgeFunctionsTool({
+            post: async (path: string, body: unknown) => {
+                calls.push({ method: "post", path, body });
+                return { ok: true, status: 200, data: { success: true } };
+            },
+            patch: async (path: string, body: unknown) => {
+                calls.push({ method: "patch", path, body });
+                return { ok: true, status: 200, data: { verify_jwt: false } };
+            },
+        });
+
+        const response = await callback({
+            action: "deploy_bundle",
+            ref: "proj",
+            slug: "legacy-hook",
+            files: { "index.ts": "export default {}" },
+            verify_jwt: false,
+        });
+
+        expect(calls.map(({ method, path }) => ({ method, path }))).toEqual([
+            { method: "post", path: "/v1/projects/proj/functions/legacy-hook/bundle" },
+            { method: "patch", path: "/v1/projects/proj/functions/legacy-hook/config" },
+        ]);
+        expect(response.content[0].text).toContain("Legacy non-atomic compatibility path");
+    });
+
+    test("reports an unsafe partial deployment when legacy policy PATCH cannot be confirmed", async () => {
+        const { callback } = captureEdgeFunctionsTool({
+            post: async () => ({ ok: true, status: 200, data: { success: true } }),
+            patch: async () => ({ ok: false, status: 503, data: { message: "unavailable" } }),
+        });
+
+        const response = await callback({
+            action: "deploy_bundle",
+            ref: "proj",
+            slug: "legacy-hook-fail",
+            files: { "index.ts": "export default {}" },
+            verify_jwt: false,
+        });
+
+        expect(response.content[0].text).toContain("Partial deployment (unsafe)");
+        expect(response.content[0].text).toContain("POST succeeded");
+        expect(response.content[0].text).toContain("code/bundle was deployed");
+        expect(response.content[0].text).toContain("function policy was not confirmed");
+        expect(response.content[0].text).toContain("legacy PATCH fallback failed");
+        expect(response.content[0].text).not.toContain("Deployment failed");
     });
 });
 
