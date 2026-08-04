@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.16.5](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.16.4...edge-runtime-v0.16.5) (2026-08-04)
+
+
+### Bug Fixes
+
+* **edge-runtime:** fail closed function activation ([672a5f8](https://github.com/zuohuadong/supacloud/commit/672a5f82d31d26fb9d7dcb61d6f5d62a7dd9c821))
+* **edge-runtime:** fail closed function activation ([699c81f](https://github.com/zuohuadong/supacloud/commit/699c81fd36503c82dd2b7dacc7fffac54cacf050))
+* **functions:** activate code and jwt policy atomically ([447bbf5](https://github.com/zuohuadong/supacloud/commit/447bbf5e1f44651bfb790e54af502a7536b4a52c))
+* **functions:** activate code and JWT policy atomically ([c6c5fa9](https://github.com/zuohuadong/supacloud/commit/c6c5fa95aeea7dd09a53de196a98a540622a6d59))
+
 ## [0.16.4](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.16.3...edge-runtime-v0.16.4) (2026-08-03)
 
 
