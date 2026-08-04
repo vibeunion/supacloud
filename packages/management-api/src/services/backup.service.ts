@@ -6,6 +6,7 @@ import { logger } from "../utils/logger";
 import type { BackupInfo, RestoreRequest } from '../types/backup';
 import { projectRepository } from '../repositories/project.repository';
 import { resolveDbName, resolveRoleName } from '../db';
+import { config } from "../config";
 
 const PGBACKREST_NAME_PATTERN = /^[A-Za-z0-9_.-]{1,128}$/;
 const BACKUP_USER_PATTERN = /^[a-z_][a-z0-9_-]{0,31}$/;
@@ -367,6 +368,24 @@ export async function restore(request: RestoreRequest): Promise<{ message: strin
 const LOGICAL_BACKUP_DIR = process.env.SUPACLOUD_LOGICAL_BACKUP_DIR || "/tmp/supacloud-backups";
 const LOGICAL_BACKUP_FILE_PATTERN = /^backup_[A-Za-z0-9_-]{1,64}_\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.sql\.gz$/;
 
+async function runLogicalDatabaseCommand(
+  command: "pg_dump" | "pg_restore",
+  commandArguments: string[],
+  password: string,
+): Promise<void> {
+  const databaseProcess = Bun.spawn({
+    cmd: [command, "-h", config.pgHost, "-p", String(config.pgPort), ...commandArguments],
+    env: { ...process.env, PGPASSWORD: password },
+    stdout: "ignore",
+    stderr: "pipe",
+  });
+  const [exitCode] = await Promise.all([
+    databaseProcess.exited,
+    new Response(databaseProcess.stderr).text(),
+  ]);
+  if (exitCode !== 0) throw new Error(`${command} exited with code ${exitCode}`);
+}
+
 async function ensureLogicalBackupDir(): Promise<string> {
         const baseDir = resolve(LOGICAL_BACKUP_DIR);
         await mkdir(baseDir, { recursive: true, mode: 0o700 });
@@ -399,12 +418,17 @@ export async function createLogicalBackup(projectRef: string): Promise<{ success
 
         try {
             // Use tenant role, export as Custom archive format with default gzip compression
-            const tenantHost = `localhost:5432`;
             const tenantDb = await resolveDbName(projectRef);
             const tenantUser = resolveRoleName(projectRef);
 
             logger.info(`[LogicalBackup] Starting dump for ${projectRef} -> ${backupPath}`);
-            await $`PGPASSWORD=${project.db_password} pg_dump -h localhost -p 5432 -U ${tenantUser} -d ${tenantDb} -F c -Z 6 -f ${backupPath}`.quiet();
+            await runLogicalDatabaseCommand("pg_dump", [
+                "-U", tenantUser,
+                "-d", tenantDb,
+                "-F", "c",
+                "-Z", "6",
+                "-f", backupPath,
+            ], project.db_password);
 
             // Try to upload to tenant's hidden backup prefix via AWS CLI (MinIO/Garage compatible)
             if (project.s3_access_key && project.s3_secret_key) {
@@ -460,7 +484,13 @@ export async function restoreLogicalBackup(projectRef: string, backupId: string)
             const tenantUser = resolveRoleName(projectRef);
             logger.info(`[LogicalBackup] Starting restore for ${projectRef} from ${backupPath}`);
 
-            await $`PGPASSWORD=${project.db_password} pg_restore -h localhost -p 5432 -U ${tenantUser} -d ${tenantDb} -c -1 ${backupPath}`.quiet();
+            await runLogicalDatabaseCommand("pg_restore", [
+                "-U", tenantUser,
+                "-d", tenantDb,
+                "-c",
+                "-1",
+                backupPath,
+            ], project.db_password);
 
             logger.info(`[LogicalBackup] Restore complete for ${projectRef}`);
             return { success: true, message: "Logical restore completed successfully" };
