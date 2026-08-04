@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.50.19](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.18...management-api-v0.50.19) (2026-08-04)
+
+
+### Bug Fixes
+
+* **backup:** use configured postgres target ([73173c1](https://github.com/zuohuadong/supacloud/commit/73173c1c85466c21d3e6393719cf56c55988c17d))
+
 ## [0.50.18](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.17...management-api-v0.50.18) (2026-08-04)
 
 

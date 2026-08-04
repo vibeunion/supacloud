@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.8.7](https://github.com/zuohuadong/supacloud/compare/supacloud-v0.8.6...supacloud-v0.8.7) (2026-08-04)
+
+
+### Bug Fixes
+
+* **ci:** stabilize SupaCloud Lite checks after release ([4da29e7](https://github.com/zuohuadong/supacloud/commit/4da29e733e18c8449f4cebb2cf628368da91f0f1))
+* **cli:** synchronize lockfile with 0.14.3 ([59b4bfb](https://github.com/zuohuadong/supacloud/commit/59b4bfb0d433242cf050605e6ea6bfdacf1f459e))
+
 ## [0.8.6](https://github.com/zuohuadong/supacloud/compare/supacloud-v0.8.5...supacloud-v0.8.6) (2026-08-04)
 
 
