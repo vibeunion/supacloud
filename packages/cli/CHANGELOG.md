@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.14.3](https://github.com/zuohuadong/supacloud/compare/cli-v0.14.2...cli-v0.14.3) (2026-08-04)
+
+
+### Bug Fixes
+
+* **functions:** activate code and jwt policy atomically ([447bbf5](https://github.com/zuohuadong/supacloud/commit/447bbf5e1f44651bfb790e54af502a7536b4a52c))
+* **functions:** activate code and JWT policy atomically ([c6c5fa9](https://github.com/zuohuadong/supacloud/commit/c6c5fa95aeea7dd09a53de196a98a540622a6d59))
+
 ## [0.14.2](https://github.com/zuohuadong/supacloud/compare/cli-v0.14.1...cli-v0.14.2) (2026-08-02)
 
 
