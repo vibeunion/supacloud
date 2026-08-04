@@ -22,13 +22,10 @@ describe("multi-file function runtime source", () => {
     ]);
   });
 
-  test("falls back from a configured version only to frozen legacy aliases", () => {
+  test("uses only immutable artifacts for a configured version", () => {
     expect(activeFunctionPathCandidates("/functions/project", "supauth", "7")).toEqual([
       path.join("/functions/project", ".versions", "supauth", "7", "src", BUNDLED_SOURCE_RUNTIME_ENTRY),
       "/functions/project/.versions/supauth/7/index.js",
-      path.join("/functions/project", ".src-supauth", BUNDLED_SOURCE_RUNTIME_ENTRY),
-      "/functions/project/supauth.js",
-      "/functions/project/supauth.ts",
     ]);
   });
 
