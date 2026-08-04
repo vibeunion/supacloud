@@ -831,26 +831,31 @@ const app = new Elysia()
       await loadTenantEnv(c.params.ref),
     );
     const requestedVersion = backgroundDispatch.forwardedRequest.headers.get("x-supacloud-function-version");
-    const activation = await resolveFunctionPath(c.params.ref, c.params.functionName, requestedVersion);
-    const response = await dispatchFunction(
-      {
-        projectRef: c.params.ref,
-        functionName: c.params.functionName,
-        request: backgroundDispatch.forwardedRequest,
-        setHeaders,
-        activation,
-      },
-      {
-        background: true,
-        backgroundInternalToken: backgroundDispatch.backgroundInternalToken,
-        tenantEnv: backgroundDispatch.tenantEnv,
-        cancelKey: c.request.headers.get("x-supacloud-task-id") || undefined,
-        onLog: (entry) => {
-          logs.push(entry);
-          if (logs.length > 200) logs.shift();
+    let response: Response;
+    try {
+      const activation = await resolveFunctionPath(c.params.ref, c.params.functionName, requestedVersion);
+      response = await dispatchFunction(
+        {
+          projectRef: c.params.ref,
+          functionName: c.params.functionName,
+          request: backgroundDispatch.forwardedRequest,
+          setHeaders,
+          activation,
         },
-      },
-    );
+        {
+          background: true,
+          backgroundInternalToken: backgroundDispatch.backgroundInternalToken,
+          tenantEnv: backgroundDispatch.tenantEnv,
+          cancelKey: c.request.headers.get("x-supacloud-task-id") || undefined,
+          onLog: (entry) => {
+            logs.push(entry);
+            if (logs.length > 200) logs.shift();
+          },
+        },
+      );
+    } catch (error) {
+      response = functionDispatchError(error, setHeaders);
+    }
     const bodyText = await response.text();
     return new Response(
       JSON.stringify({
@@ -887,26 +892,31 @@ const app = new Elysia()
       await loadTenantEnv(c.params.ref),
     );
     const requestedVersion = backgroundDispatch.forwardedRequest.headers.get("x-supacloud-function-version");
-    const activation = await resolveFunctionPath(c.params.ref, c.params.functionName, requestedVersion);
-    const response = await dispatchFunction(
-      {
-        projectRef: c.params.ref,
-        functionName: c.params.functionName,
-        request: backgroundDispatch.forwardedRequest,
-        setHeaders,
-        activation,
-      },
-      {
-        background: true,
-        backgroundInternalToken: backgroundDispatch.backgroundInternalToken,
-        tenantEnv: backgroundDispatch.tenantEnv,
-        cancelKey: c.request.headers.get("x-supacloud-task-id") || undefined,
-        onLog: (entry) => {
-          logs.push(entry);
-          if (logs.length > 200) logs.shift();
+    let response: Response;
+    try {
+      const activation = await resolveFunctionPath(c.params.ref, c.params.functionName, requestedVersion);
+      response = await dispatchFunction(
+        {
+          projectRef: c.params.ref,
+          functionName: c.params.functionName,
+          request: backgroundDispatch.forwardedRequest,
+          setHeaders,
+          activation,
         },
-      },
-    );
+        {
+          background: true,
+          backgroundInternalToken: backgroundDispatch.backgroundInternalToken,
+          tenantEnv: backgroundDispatch.tenantEnv,
+          cancelKey: c.request.headers.get("x-supacloud-task-id") || undefined,
+          onLog: (entry) => {
+            logs.push(entry);
+            if (logs.length > 200) logs.shift();
+          },
+        },
+      );
+    } catch (error) {
+      response = functionDispatchError(error, setHeaders);
+    }
     const bodyText = await response.text();
     return new Response(
       JSON.stringify({

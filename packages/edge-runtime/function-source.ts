@@ -28,9 +28,6 @@ export function activeFunctionPathCandidates(
   activeVersion: string | null,
 ): string[] {
   return activeVersion
-    ? [
-        ...functionPathCandidates(projectRoot, functionName, activeVersion),
-        ...functionPathCandidates(projectRoot, functionName),
-      ]
+    ? functionPathCandidates(projectRoot, functionName, activeVersion)
     : functionPathCandidates(projectRoot, functionName);
 }

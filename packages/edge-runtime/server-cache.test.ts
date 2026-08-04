@@ -58,4 +58,37 @@ describe("Edge Runtime auth material invalidation", () => {
     expect(requestHandler).not.toContain("x-supacloud-function-version");
     expect(dispatcher).not.toContain("x-supacloud-function-version");
   });
+
+  test("active versions resolve only immutable artifacts", () => {
+    const resolver = source.slice(
+      source.indexOf("async function resolveFunctionPath("),
+      source.indexOf("function functionDispatchError("),
+    );
+    expect(resolver).toContain(
+      "activeFunctionPathCandidates(projectRoot, functionName, resolvedConfig.version)",
+    );
+  });
+
+  test("background routes envelope function resolution failures", () => {
+    const wildcardRoute = source.slice(
+      source.indexOf('.post("/internal/background/:ref/:functionName/*"'),
+      source.indexOf('.post("/internal/background/:ref/:functionName"'),
+    );
+    const exactRoute = source.slice(
+      source.indexOf('.post("/internal/background/:ref/:functionName"'),
+      source.indexOf('.post("/internal/background/cancel/:taskId"'),
+    );
+
+    for (const route of [wildcardRoute, exactRoute]) {
+      expect(route).toContain("let response: Response;");
+      expect(route).toContain("try {");
+      expect(route).toContain(
+        "resolveFunctionPath(c.params.ref, c.params.functionName, requestedVersion)",
+      );
+      expect(route).toContain("catch (error)");
+      expect(route).toContain("functionDispatchError(error, setHeaders)");
+      expect(route).toContain('status: 200');
+      expect(route).toContain('"x-supacloud-background-envelope": "true"');
+    }
+  });
 });
