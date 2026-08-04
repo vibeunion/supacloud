@@ -20,7 +20,7 @@ import {
 import {
   buildBackgroundForwardDispatch,
 } from "./background-forward";
-import { functionPathCandidates } from "./function-source";
+import { activeFunctionPathCandidates, functionPathCandidates } from "./function-source";
 import path from "path";
 import fs from "fs/promises";
 import type { PgredisRuntimeEndpointConfig } from "./internal-bindings";
@@ -281,16 +281,19 @@ async function resolveProjectRoot(projectRef: string): Promise<string> {
   return realProjectRoot;
 }
 
+type FunctionActivationSnapshot = {
+  functionPath: string;
+  projectRoot: string;
+  activeVersion: string | null;
+  verifyJwt: boolean;
+  moduleVersion: string;
+};
+
 async function resolveFunctionPath(
   projectRef: string,
   functionName: string,
   requestedVersion?: string | null,
-): Promise<{
-  functionPath: string;
-  projectRoot: string;
-  activeVersion: string | null;
-  moduleVersion: string;
-}> {
+): Promise<FunctionActivationSnapshot> {
   if (!isSafeFunctionSlug(functionName)) {
     throw new Error("Invalid function slug");
   }
@@ -301,7 +304,9 @@ async function resolveFunctionPath(
   const projectRoot = await resolveProjectRoot(projectRef);
   const resolvedConfig = await getFunctionConfig(projectRef, functionName, projectRoot);
   const activeVersion = requestedVersion || resolvedConfig.version || null;
-  const candidates = functionPathCandidates(projectRoot, functionName, requestedVersion);
+  const candidates = requestedVersion
+    ? functionPathCandidates(projectRoot, functionName, requestedVersion)
+    : activeFunctionPathCandidates(projectRoot, functionName, resolvedConfig.version);
 
   for (const candidate of candidates) {
     if (!isPathInside(candidate, projectRoot)) {
@@ -321,7 +326,9 @@ async function resolveFunctionPath(
         functionPath: realCandidate,
         projectRoot,
         activeVersion,
+        verifyJwt: resolvedConfig.verify_jwt,
         moduleVersion: [
+          `active:${activeVersion || "legacy"}`,
           `env:${getProjectModuleEpoch(projectRef)}`,
           `mtime:${stat.mtimeMs}`,
           `ctime:${stat.ctimeMs}`,
@@ -336,29 +343,57 @@ async function resolveFunctionPath(
   throw new Error("Function not found");
 }
 
-async function dispatchFunction(
-  projectRef: string,
-  functionName: string,
-  request: Request,
-  setHeaders: Record<string, string>,
-  opts?: {
-    background?: boolean;
-    backgroundInternalToken?: string;
-    tenantEnv?: Record<string, string>;
-    cancelKey?: string;
-    onLog?: (entry: {
-      timestamp: string;
-      stream: "stdout" | "stderr";
-      level: string;
-      message: string;
-    }) => void;
-  },
-) {
-  const requestedVersion = request.headers.get("x-supacloud-function-version") || null;
+type FunctionDispatchOptions = {
+  background?: boolean;
+  backgroundInternalToken?: string;
+  tenantEnv?: Record<string, string>;
+  cancelKey?: string;
+  onLog?: (entry: {
+    timestamp: string;
+    stream: "stdout" | "stderr";
+    level: string;
+    message: string;
+  }) => void;
+};
 
+type FunctionDispatchInput = {
+  projectRef: string;
+  functionName: string;
+  request: Request;
+  setHeaders: Record<string, string>;
+  activation: FunctionActivationSnapshot;
+};
+
+function functionDispatchError(
+  error: unknown,
+  setHeaders: Record<string, string>,
+): Response {
+  const message = error instanceof Error ? error.message : "Internal Error";
+  setHeaders["x-relay-error"] = "true";
+  const statusCode = message.includes("not found") || message.includes("ENOENT")
+    ? 404
+    : message.includes("timeout") || message.includes("Timeout")
+      ? 504
+      : 500;
+  const safeMessage = statusCode === 404
+    ? "Function not found"
+    : statusCode === 504
+      ? "Function execution timed out"
+      : "Internal Server Error";
+  return new Response(JSON.stringify({ error: safeMessage }), {
+    status: statusCode,
+    headers: { "Content-Type": "application/json", "x-relay-error": "true" },
+  });
+}
+
+async function dispatchFunction(
+  input: FunctionDispatchInput,
+  opts?: FunctionDispatchOptions,
+) {
+  const { projectRef, functionName, request, setHeaders, activation } = input;
   try {
-    const { functionPath, projectRoot, activeVersion, moduleVersion } = await resolveFunctionPath(projectRef, functionName, requestedVersion);
-    const versionSuffix = requestedVersion ? `_v${requestedVersion}` : "";
+    const { functionPath, projectRoot, activeVersion, moduleVersion } = activation;
+    const versionSuffix = activeVersion ? `_v${activeVersion}` : "";
     const functionId = `${projectRef}_${functionName}${versionSuffix}`;
     const targetPool = opts?.background ? backgroundPool : pool;
     const tenantEnv = opts?.tenantEnv || await loadTenantEnv(projectRef);
@@ -396,28 +431,8 @@ async function dispatchFunction(
         opts?.onLog?.(entry);
       },
     });
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : "Internal Error";
-
-    setHeaders["x-relay-error"] = "true";
-
-    const statusCode =
-      message.includes("not found") || message.includes("ENOENT")
-        ? 404
-        : message.includes("timeout") || message.includes("Timeout")
-          ? 504
-          : 500;
-
-    const safeMessage = statusCode === 404
-      ? "Function not found"
-      : statusCode === 504
-        ? "Function execution timed out"
-        : "Internal Server Error";
-
-    return new Response(JSON.stringify({ error: safeMessage }), {
-      status: statusCode,
-      headers: { "Content-Type": "application/json", "x-relay-error": "true" },
-    });
+  } catch (error: unknown) {
+    return functionDispatchError(error, setHeaders);
   }
 }
 
@@ -651,10 +666,15 @@ async function handleFunctionRequest(
     return blockedResponse;
   }
 
-  const projectRoot = await resolveProjectRoot(projectRef);
-  const fnConfig = await getFunctionConfig(projectRef, functionName, projectRoot);
+  const setHeaders = c.set.headers as Record<string, string>;
+  let activation: FunctionActivationSnapshot;
+  try {
+    activation = await resolveFunctionPath(projectRef, functionName);
+  } catch (error) {
+    return functionDispatchError(error, setHeaders);
+  }
   let verifiedSubject: string | undefined;
-  if (c.request.method !== "OPTIONS" && fnConfig.verify_jwt) {
+  if (c.request.method !== "OPTIONS" && activation.verifyJwt) {
     const verification = await verifyJwt(
       projectRef,
       authHeader,
@@ -679,10 +699,13 @@ async function handleFunctionRequest(
   const functionRequest = withVerifiedJwtContext(c.request, verifiedSubject);
   c.set.headers["x-sb-execution-id"] = crypto.randomUUID();
   const response = await dispatchFunction(
-    projectRef,
-    functionName,
-    functionRequest,
-    c.set.headers as Record<string, string>,
+    {
+      projectRef,
+      functionName,
+      request: functionRequest,
+      setHeaders,
+      activation,
+    },
   );
 
   if (response.status === 401) {
@@ -720,12 +743,20 @@ const app = new Elysia()
     }
 
     const functionId = `${c.params.ref}_${c.params.slug}`;
+    configCache.delete(`${c.params.ref}/${c.params.slug}`);
     invalidateTenantEnvCache(c.params.ref);
     const [foreground, background] = await Promise.all([
       pool.invalidateModule(functionId),
       backgroundPool.invalidateModule(functionId),
     ]);
-    return { invalidated: functionId, foreground, background };
+    return {
+      invalidated: functionId,
+      module_scope: "legacy-base-only",
+      immutable_versions_retained: true,
+      config_cache_evicted: true,
+      foreground,
+      background,
+    };
   })
 
   .post("/invalidate-env/:ref", async (c) => {
@@ -799,11 +830,16 @@ const app = new Elysia()
       c.request,
       await loadTenantEnv(c.params.ref),
     );
+    const requestedVersion = backgroundDispatch.forwardedRequest.headers.get("x-supacloud-function-version");
+    const activation = await resolveFunctionPath(c.params.ref, c.params.functionName, requestedVersion);
     const response = await dispatchFunction(
-      c.params.ref,
-      c.params.functionName,
-      backgroundDispatch.forwardedRequest,
-      setHeaders,
+      {
+        projectRef: c.params.ref,
+        functionName: c.params.functionName,
+        request: backgroundDispatch.forwardedRequest,
+        setHeaders,
+        activation,
+      },
       {
         background: true,
         backgroundInternalToken: backgroundDispatch.backgroundInternalToken,
@@ -850,11 +886,16 @@ const app = new Elysia()
       c.request,
       await loadTenantEnv(c.params.ref),
     );
+    const requestedVersion = backgroundDispatch.forwardedRequest.headers.get("x-supacloud-function-version");
+    const activation = await resolveFunctionPath(c.params.ref, c.params.functionName, requestedVersion);
     const response = await dispatchFunction(
-      c.params.ref,
-      c.params.functionName,
-      backgroundDispatch.forwardedRequest,
-      setHeaders,
+      {
+        projectRef: c.params.ref,
+        functionName: c.params.functionName,
+        request: backgroundDispatch.forwardedRequest,
+        setHeaders,
+        activation,
+      },
       {
         background: true,
         backgroundInternalToken: backgroundDispatch.backgroundInternalToken,

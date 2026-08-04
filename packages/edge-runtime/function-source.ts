@@ -21,3 +21,16 @@ export function functionPathCandidates(
     path.join(projectRoot, `${functionName}.ts`),
   ];
 }
+
+export function activeFunctionPathCandidates(
+  projectRoot: string,
+  functionName: string,
+  activeVersion: string | null,
+): string[] {
+  return activeVersion
+    ? [
+        ...functionPathCandidates(projectRoot, functionName, activeVersion),
+        ...functionPathCandidates(projectRoot, functionName),
+      ]
+    : functionPathCandidates(projectRoot, functionName);
+}
