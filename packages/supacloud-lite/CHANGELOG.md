@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.6](https://github.com/zuohuadong/supacloud/compare/supacloud-lite-v0.5.5...supacloud-lite-v0.5.6) (2026-08-04)
+
+
+### Documentation
+
+* **lite:** add bilingual Chinese/English README ([2b31e87](https://github.com/zuohuadong/supacloud/commit/2b31e8778389200b1077d77e7b1e9999db57d848))
+
 ## [0.5.5](https://github.com/zuohuadong/supacloud/compare/supacloud-lite-v0.5.4...supacloud-lite-v0.5.5) (2026-08-03)
 
 
