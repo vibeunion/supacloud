@@ -1,10 +1,16 @@
 # SupaCloud Lite
 
+[中文](#中文) | [English](#english)
+
+---
+
+## 中文
+
 SupaCloud Lite 是一个面向单项目部署的 Bun 原生 Supabase 兼容后端。它使用 PGlite 在进程内运行 PostgreSQL，并实现 Supabase 客户端依赖的 REST、Auth、Storage、Realtime 和 Edge Functions 协议。
 
 V1 的目标不是复刻完整 Supabase 平台控制面，而是让现有应用在尽量少改代码的前提下，使用官方 `@supabase/supabase-js` 连接一个轻量、本地、无 Docker 的后端。
 
-## 状态
+### 状态
 
 - 运行时：npm 包需要 Bun 1.3+；单二进制发行版已内嵌 Bun 和 PGlite 资源
 - 数据库：PGlite 0.5.4
@@ -14,7 +20,7 @@ V1 的目标不是复刻完整 Supabase 平台控制面，而是让现有应用�
 - 对象存储：默认使用 `.supacloud-lite/storage`，也可切换为内存或远端 S3
 - 密钥文件：`.supacloud-lite/secrets.json`，权限为 `0600`
 
-## 快速开始
+### 快速开始
 
 ```bash
 bun add @supacloud/lite
@@ -52,7 +58,7 @@ const supabase = createClient('http://127.0.0.1:54321', process.env.SUPACLOUD_LI
 const { data, error } = await supabase.from('todos').select('*')
 ```
 
-## 项目约定
+### 项目约定
 
 SupaCloud Lite 直接读取现有 Supabase CLI 目录：
 
@@ -68,7 +74,7 @@ supabase/
 
 `config.toml` 当前支持 Auth、API schema/max rows、Storage bucket/size limit、seed 和 function entrypoint 等常用配置。
 
-### Auth 运行方式
+#### Auth 运行方式
 
 Lite 不下载、安装或启动独立的 GoTrue 进程。`/auth/v1/*` 由同一个 Bun 进程中的内置 Auth 实现处理，并与该 Lite 项目的 PGlite `auth` schema 共享生命周期；这避免了 sidecar 的配置、端口和会话一致性负担。
 
@@ -81,7 +87,7 @@ enabled = false
 
 关闭后 `/auth/v1/*` 返回 `404`，但不会把 Lite 变成完整 GoTrue 运行时，也不会自动移除已有的 `auth` schema 或 API key。需要完整 GoTrue 行为、多项目鉴权或独立鉴权进程时，应使用完整 SupaCloud 平台。
 
-## CLI
+### CLI
 
 ```text
 supacloud-lite start
@@ -132,7 +138,7 @@ S3 模式下 `db reset` 会被拒绝，因为 Lite 不能把数据库元数据�
 
 网络暴露时必须提供足够强的 JWT secret 和独立 vault key。默认生成的密钥适合单机项目；不要把 `.supacloud-lite/secrets.json` 提交到版本库。
 
-## Windows 内嵌终端排障
+### Windows 内嵌终端排障
 
 Lite 需要 Bun 读取已安装的 `dist/cli.js`、项目配置和 PGlite WASM 文件。若在 TRAE 等 IDE 内嵌 PowerShell 中出现 `EPERM reading`，先在同一终端运行最小文件读取测试：
 
@@ -145,7 +151,7 @@ bun .\bun-read-test.js
 
 若最小测试成功而 Lite 仍失败，请保留完整错误、`bun --version`、终端类型和项目路径，再提交 Lite 问题。不要为绕过 `EPERM` 放宽项目目录的全局 ACL。
 
-## 升级、快照与恢复
+### 升级、快照与恢复
 
 生产或持久化环境升级时，必须先停止当前 Lite 进程。npm 安装先更新项目锁定的依赖，再运行受控升级命令：
 
@@ -206,7 +212,7 @@ S3 模式的快照只包含数据库中的 Storage 元数据和密钥，不复�
 
 内存数据库没有可持久化的数据，因此 `snapshot` 和 `upgrade` 会拒绝 `--memory`。
 
-## 兼容范围
+### 兼容范围
 
 | 能力 | V1 状态 | 说明 |
 | --- | --- | --- |
@@ -226,7 +232,7 @@ S3 模式的快照只包含数据库中的 Storage 元数据和密钥，不复�
 
 RLS 表的 Realtime DELETE 无法在行删除后安全重放 SELECT policy，因此 V1 只向 `service_role` 订阅者发送这类 DELETE 事件。普通用户仍可收到通过逐行 RLS 校验的 INSERT/UPDATE 事件。
 
-## 从 Supabase 迁移
+### 从 Supabase 迁移
 
 应用代码、SQL migrations、RLS policy、Storage 调用和 Realtime 订阅可以保持原来的 Supabase 形状。迁移时仍需验证以下边界：
 
@@ -237,7 +243,7 @@ RLS 表的 Realtime DELETE 无法在行删除后安全重放 SELECT policy，因
 
 Lite 使用 Bun 原生 bcrypt，并兼容验证常见 GoTrue bcrypt 密码散列，因此经过映射的 `auth.users` 用户可保留密码。Auth 表结构、identity、refresh token 和 provider metadata 仍需通过受控迁移脚本转换；不要直接覆盖整个 `auth` schema。迁移后必须抽样验证登录，并为无法识别的散列准备密码重置流程。
 
-## 队列与 Edge 缓存
+### 队列与 Edge 缓存
 
 Lite 在同一个 PGlite 数据库中提供 Supabase Queues 的公开 RPC façade。应用可以直接使用官方客户端的
 `supabase.schema('pgmq_public').rpc(...)`，无需额外的队列进程：
@@ -275,17 +281,17 @@ const value = await cache.get<{ rendered: boolean }>('welcome:user:42')
 缓存实现使用项目自己的 PGlite 表，支持 `get`、`set`、`delete`、`ttl`、原子 `getset` 和原子 `getdel`。默认边界与标准版一致：key 最长 512 个字符、JSON 值最大 1,048,576 bytes、TTL 最大 31,536,000,000ms。有 TTL 的值在读取时会惰性清理，Lite 的 retention sweeper 还会周期性删除过期行；文件数据库会跨重启保留缓存，`--memory` 数据库则随进程退出丢失。绑定按函数请求和项目隔离，函数返回后启动的 detached Promise 不能继续访问它；Lite 不提供跨项目共享、Redis 协议、队列或限流能力。
 Lite 的缓存调用是进程内数据库操作，不具备标准版跨进程 HTTP binding 的超时和请求中止传播；不要在同一 JavaScript 进程中混合加载 Lite 与标准 Edge Runtime，两者都拥有全局 `SupaCloud` binding，Lite 检测到已有其他实现时会拒绝启动。
 
-## 多项目
+### 多项目
 
 V1 不在一个进程内复用多个 PGlite 项目。需要多个项目时，为每个项目配置独立的工作目录、端口和 `.supacloud-lite` 状态目录，并用进程管理器分别启动。这样可保持数据库、JWT、Storage 和 Realtime 的故障域隔离。
 
-## 资源边界
+### 资源边界
 
 PGlite 是 WebAssembly PostgreSQL，不是 SQLite。它换来了 PostgreSQL SQL、角色、RLS 和 Supabase 迁移兼容性，但内存占用通常高于 PocketBase/SQLite。生产部署前应按真实 schema、并发和 Realtime 负载做容量测试。
 
 npm 包继续通过依赖目录加载 PGlite。GitHub Release 的平台单二进制则内嵌 Bun、PGlite JS、核心 WASM/data 和 Lite 使用的 contrib 扩展；启动时会把扩展压缩包释放到受限的临时目录，PGlite 初始化完成后立即清理。项目配置、Functions、数据库、对象存储和密钥仍保持外置。
 
-## API
+### API
 
 ```ts
 import { createProjectBackend, startProjectServer } from '@supacloud/lite'
@@ -304,6 +310,318 @@ await running.close()
 
 也可以使用 `createLiteBackend()` 直接创建内存或自定义目录的嵌入式后端，并把它的 `fetch` 传给自定义宿主。
 
-## 来源与许可
+### 来源与许可
 
 协议实现派生并精简自 Tinbase，保留其 MIT 许可；PGlite 使用 Apache-2.0。完整说明见 `THIRD_PARTY_NOTICES.md` 和 `LICENSES/`。
+
+---
+
+## English
+
+SupaCloud Lite is a Bun-native, Supabase-compatible backend designed for single-project deployments. It runs PostgreSQL in-process using PGlite and implements the REST, Auth, Storage, Realtime, and Edge Functions protocols that the Supabase client relies on.
+
+The goal of V1 is not to replicate the full Supabase platform control plane, but to let existing applications connect to a lightweight, local, Docker-free backend using the official `@supabase/supabase-js` with minimal code changes.
+
+### Status
+
+- Runtime: the npm package requires Bun 1.3+; the single-binary release embeds Bun and PGlite assets
+- Database: PGlite 0.5.4
+- Project model: single process, single project, with an internal project ref fixed as `local`
+- Client: uses the official `@supabase/supabase-js` directly
+- Data directory: `.supacloud-lite/db`
+- Object storage: defaults to `.supacloud-lite/storage`, can also be switched to memory or remote S3
+- Secrets file: `.supacloud-lite/secrets.json`, with permissions `0600`
+
+### Quick Start
+
+```bash
+bun add @supacloud/lite
+bunx supacloud-lite start
+```
+
+You can also download the `supacloud-lite-*` single binary for your current platform from the GitHub Release. This file does not require Bun, Node, npm, or Docker to be pre-installed:
+
+```bash
+chmod +x ./supacloud-lite-linux-x64
+./supacloud-lite-linux-x64 start --project-dir /path/to/project
+```
+
+The single binary still reads the project's `supabase/` directory and writes `.supacloud-lite/` persistent state outside the project; it does not include a web console or Supabase Studio. Linux x64/arm64, macOS x64/arm64, and Windows x64 use separate artifacts and cannot be mixed across operating systems or CPU architectures.
+
+Get the anon key:
+
+```bash
+bunx supacloud-lite keys
+```
+
+Print the `service_role` key only when the server side genuinely needs to bypass RLS:
+
+```bash
+bunx supacloud-lite keys --service-role
+```
+
+Client code does not need to switch to a proprietary SDK:
+
+```ts
+import { createClient } from '@supabase/supabase-js'
+
+const supabase = createClient('http://127.0.0.1:54321', process.env.SUPACLOUD_LITE_ANON_KEY!)
+
+const { data, error } = await supabase.from('todos').select('*')
+```
+
+### Project Conventions
+
+SupaCloud Lite reads the existing Supabase CLI directory directly:
+
+```text
+supabase/
+  config.toml
+  migrations/*.sql
+  seed.sql
+  functions/<name>/index.ts
+  functions/.env
+  webhooks.json
+```
+
+`config.toml` currently supports common configuration such as Auth, API schema/max rows, Storage bucket/size limit, seed, and function entrypoint.
+
+#### How Auth Works
+
+Lite does not download, install, or start a standalone GoTrue process. `/auth/v1/*` is handled by a built-in Auth implementation in the same Bun process, sharing its lifecycle with that Lite project's PGlite `auth` schema; this avoids the configuration, port, and session-consistency burden of a sidecar.
+
+Auth is enabled by default. If your project does not need a client login interface, you can disable this route in `supabase/config.toml`:
+
+```toml
+[auth]
+enabled = false
+```
+
+When disabled, `/auth/v1/*` returns `404`, but this does not turn Lite into a full GoTrue runtime, nor does it automatically remove the existing `auth` schema or API keys. When you need full GoTrue behavior, multi-project authentication, or a standalone authentication process, use the full SupaCloud platform.
+
+### CLI
+
+```text
+supacloud-lite start
+supacloud-lite migrate
+supacloud-lite status
+supacloud-lite keys [--service-role]
+supacloud-lite gen types [-o database.types.ts]
+supacloud-lite db reset
+supacloud-lite db diff [-f migration_name]
+supacloud-lite db pull [migration_name]
+supacloud-lite snapshot create [-o backup.tar.gz]
+supacloud-lite snapshot restore <backup.tar.gz> [--force]
+supacloud-lite upgrade [-o pre-upgrade.tar.gz]
+supacloud-lite inspect
+supacloud-lite version
+```
+
+Common flags:
+
+- `--project-dir`: the project directory containing `supabase/`
+- `--host` / `--port`: listen address and port
+- `--api-url`: public API URL, used for Auth issuer, OAuth callback, email links, and Functions environment
+- `--site-url`: frontend site URL, used as the default Auth redirect target
+- `--state-dir`: Lite state root directory
+- `--data-dir`: PGlite data directory
+- `--storage-dir`: object storage directory
+- `--storage-backend`: `fs`, `memory`, or `s3`
+- `--s3-prefix`: remote S3 object key prefix
+- `--memory`: use an in-memory database
+
+Environment variables:
+
+- `SUPACLOUD_LITE_HOST`
+- `SUPACLOUD_LITE_PORT`
+- `SUPACLOUD_LITE_API_URL`
+- `SUPACLOUD_LITE_SITE_URL`
+- `SUPACLOUD_LITE_STATE_DIR`
+- `SUPACLOUD_LITE_DATA_DIR`
+- `SUPACLOUD_LITE_STORAGE_DIR`
+- `SUPACLOUD_LITE_STORAGE_BACKEND`: `fs` (default), `memory`, or `s3`
+- `SUPACLOUD_LITE_S3_PREFIX`: S3 object key prefix, can be overridden by `--s3-prefix`
+- `SUPACLOUD_LITE_JWT_SECRET`
+- `SUPACLOUD_LITE_VAULT_KEY`
+
+When using remote S3, set `SUPACLOUD_LITE_STORAGE_BACKEND=s3` before starting, and provide variables such as `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_ENDPOINT`, and `S3_REGION` according to Bun S3 conventions; the corresponding `AWS_*` variables are also supported. The CLI does not accept secret parameters to avoid credentials appearing in the process list.
+
+In S3 mode, `db reset` is rejected because Lite cannot make database metadata cleanup and remote object deletion an atomic operation; you must explicitly handle the remote bucket/prefix first, then switch back to local or memory storage to perform the reset.
+
+When exposed to the network, you must provide a sufficiently strong JWT secret and an independent vault key. The default generated keys are suitable for single-machine projects; do not commit `.supacloud-lite/secrets.json` to version control.
+
+### Windows Embedded Terminal Troubleshooting
+
+Lite requires Bun to read the installed `dist/cli.js`, project configuration, and PGlite WASM files. If you encounter `EPERM reading` in an IDE-embedded PowerShell such as TRAE, first run a minimal file read test in the same terminal:
+
+```powershell
+Set-Content .\bun-read-test.js 'console.log("ok")'
+bun .\bun-read-test.js
+```
+
+If this command, which does not involve Lite, also returns `EPERM`, the failure occurs before Bun starts the application, and Lite cannot work around the host terminal's file access restrictions within application code. Switch to the system PowerShell or Windows Terminal; then upgrade to the current stable version of Bun, and check the IDE sandbox, terminal isolation, and security software policies. The fact that `node` can read the same file does not mean the Bun process has the same host permissions. After fixing the environment, run `npx supacloud-lite --help` to verify.
+
+If the minimal test succeeds but Lite still fails, keep the full error, `bun --version`, terminal type, and project path, then submit a Lite issue. Do not loosen the global ACL of the project directory to work around `EPERM`.
+
+### Upgrade, Snapshot, and Restore
+
+When upgrading a production or persistent environment, you must stop the current Lite process first. For npm installs, update the project's locked dependency first, then run the controlled upgrade command:
+
+```bash
+# Specify the target version explicitly; do not implicitly use @latest in production startup commands
+bun add @supacloud/lite@0.2.0
+
+# Automatically create a pre-upgrade snapshot, then apply any pending supabase/migrations
+bunx supacloud-lite upgrade
+```
+
+For single-binary installs, download and verify the candidate file first, then have the candidate binary migrate the existing project:
+
+```bash
+./supacloud-lite-new version
+./supacloud-lite-new upgrade --project-dir /path/to/project
+./supacloud-lite-new start --project-dir /path/to/project
+```
+
+Replacing the program file and migrating the database are two separate actions. `upgrade` does not go online, self-replace the binary, or modify `package.json`; it first writes a pre-upgrade snapshot to `.supacloud-lite/backups/pre-upgrade-<timestamp>.tar.gz` by default, and only after the snapshot succeeds does it apply the unrecorded migrations and seed. If the upgrade fails, the snapshot is retained and a restore command is printed. To roll back, stop the candidate process, restore state from the pre-upgrade snapshot, and restart the last verified version.
+
+You can also create a portable snapshot separately:
+
+```bash
+# Use the default filename and directory
+bunx supacloud-lite snapshot create
+
+# Specify the output location
+bunx supacloud-lite snapshot create -o ./backups/project-a.tar.gz
+```
+
+A snapshot is a gzip-compressed tar file containing:
+
+- the PGlite data directory;
+- object files in `fs` mode;
+- `secrets.json`, to keep JWT, session, and Vault decryption compatible;
+- a manifest of the snapshot format, Lite version, and Storage backend.
+
+Snapshots contain sensitive secrets; the output file is set to `0600` on Unix systems. You should still encrypt, restrict access to, and set a retention period for it at the database backup level. Lite must be stopped before creating a snapshot. If a data directory lock is detected, the command refuses to proceed; a stale lock can only be deleted manually after confirming the process has exited.
+
+Restore to a new project or an empty state directory:
+
+```bash
+bunx supacloud-lite snapshot restore ./backups/project-a.tar.gz
+```
+
+When the target state directory is non-empty, overwriting is rejected by default. To explicitly replace the existing state, use:
+
+```bash
+bunx supacloud-lite snapshot restore ./backups/project-a.tar.gz --force
+```
+
+`--force` does not directly delete old data; instead, it renames the old state directory to a rollback copy in the form `.supacloud-lite.restore-<id>` and prints the full path in the output. Operators should clean up that directory only after verifying the new state.
+
+When using custom `--state-dir`, `--data-dir`, or `--storage-dir`, the same arguments must be passed for both create and restore. The database and Storage directories must not overlap, nor can they point to the filesystem root or symbolic links.
+
+Snapshots in S3 mode only contain the Storage metadata and secrets in the database; they do not copy remote objects, nor do they read or save S3 credentials. When restoring, you must pass `--storage-backend s3` and re-provide the environment variables for the original bucket/prefix; cross-bucket migration still requires the object storage's own replication tool.
+
+In-memory databases have no persistable data, so `snapshot` and `upgrade` reject `--memory`.
+
+### Compatibility Scope
+
+| Capability | V1 Status | Notes |
+| --- | --- | --- |
+| `supabase.from()` | Verified core | Automated tests cover CRUD, filtering, and RLS; nested relations, RPC, and advanced PostgREST syntax are experimentally compatible |
+| `supabase.auth` | Verified core | Provided by the built-in Auth implementation rather than a standalone GoTrue process; automated tests cover email/password, sessions, and bcrypt; OTP/Magic Link, anonymous users, OAuth, and MFA are experimentally compatible |
+| `supabase.storage` | Verified core | Covers upload/download, list, delete, TUS/RLS, remote S3 driver, and a subset of Bun.Image `contain`/`fill`, format, and quality transforms; `cover` is explicitly unsupported |
+| `supabase.channel()` | Verified core | Automated tests cover `postgres_changes`, DELETE RLS isolation, and event snapshot validation; Broadcast and Presence are experimentally compatible |
+| `supabase.functions.invoke()` | Verified core | Automated tests cover Bun.build, `Deno.serve()`, public functions, and in-process restart |
+| Supabase Queues / PGMQ | Verified core | Provides `send`, `send_batch`, `read`, `pop`, `archive`, and `delete` RPCs for `pgmq_public`; queue data is persisted in the same PGlite project |
+| Edge Functions `SupaCloud.pgredis` | Verified core | Provides single-project persistent KV, TTL, and atomic `getset`/`getdel`; the binding is only available within the current function request |
+| Supabase migrations | Supported | Sorted by filename, recorded in `supabase_migrations` |
+| PostgreSQL RLS | Supported | Executed using the `anon`, `authenticated`, and `service_role` database roles |
+| Full PostgREST wire protocol | Partial | Targets common `supabase-js` behavior; does not promise all PostgREST edge-case behavior |
+| PostgreSQL extensions | Partial | Only supports extensions built into PGlite or emulated by Lite |
+| Supabase Studio | Not supported | V1 does not provide an admin UI |
+| Multi-project control plane | Not supported | V1 runs only one project per process; multiple projects can be deployed via multiple processes |
+
+Realtime DELETE on RLS tables cannot safely replay SELECT policies after a row is deleted, so V1 only sends such DELETE events to `service_role` subscribers. Regular users can still receive INSERT/UPDATE events that pass row-by-row RLS validation.
+
+### Migrating from Supabase
+
+Application code, SQL migrations, RLS policies, Storage calls, and Realtime subscriptions can keep their original Supabase shape. When migrating, you still need to validate the following boundaries:
+
+1. Bring the existing `supabase/migrations`, `config.toml`, Functions, and seed files into the Lite project.
+2. Use `supacloud-lite db reset` to replay the schema on an empty database, then import business data.
+3. Provide alternatives for SQL/API that use extensions not offered by PGlite or advanced PostgREST syntax.
+4. Verify key queries, RLS, Storage, and Realtime through real `@supabase/supabase-js` integration tests.
+
+Lite uses Bun's native bcrypt and is compatible with validating common GoTrue bcrypt password hashes, so mapped `auth.users` users can keep their passwords. Auth table structure, identity, refresh tokens, and provider metadata still need to be converted via a controlled migration script; do not directly overwrite the entire `auth` schema. After migration, you must sample-verify logins and prepare a password reset flow for unrecognized hashes.
+
+### Queues and Edge Cache
+
+Lite provides a public RPC façade for Supabase Queues within the same PGlite database. Applications can directly use the official client's
+`supabase.schema('pgmq_public').rpc(...)` without an additional queue process:
+
+```sql
+-- Queue creation is an administrative operation and should be placed in a project migration, not in the anonymous request path.
+select pgmq.create('emails');
+```
+
+```ts
+const queues = supabase.schema('pgmq_public')
+const { data: ids } = await queues.rpc('send_batch', {
+  queue_name: 'emails',
+  messages: [{ to: 'user@example.com' }],
+  sleep_seconds: 0,
+})
+const { data: messages } = await queues.rpc('read', {
+  queue_name: 'emails',
+  sleep_seconds: 60,
+  n: 10,
+})
+```
+
+Lite's `pgmq` emulation layer also provides `set_vt`, allowing direct SQL adjustment of visibility timeouts. Messages are delivered at least once according to PGMQ semantics; `pop` deletes the message immediately, and `archive` is the acknowledgment path. Queue creation, metrics, purge, settings, and management APIs are not part of Lite's public RPC façade and must still be handled by project SQL or the full SupaCloud control plane.
+Queue names follow the standard 1-128 character lowercase letter, digit, underscore, and hyphen rule, and must start with a letter or digit; Lite safely maps names that exceed PostgreSQL's 63-byte identifier limit to avoid cross-queue collisions after truncation. The default Data API exposes `public` and `pgmq_public`; if `dbSchemas` is set explicitly, Lite uses that list strictly, and `pgmq_public` should be explicitly included when queue RPCs are needed.
+
+Within an Edge Function, you can use `globalThis.SupaCloud.pgredis`:
+
+```ts
+const cache = globalThis.SupaCloud.pgredis
+await cache.set('welcome:user:42', { rendered: true }, 60_000)
+const value = await cache.get<{ rendered: boolean }>('welcome:user:42')
+```
+
+The cache implementation uses the project's own PGlite tables and supports `get`, `set`, `delete`, `ttl`, atomic `getset`, and atomic `getdel`. The default boundaries are consistent with the standard version: keys up to 512 characters, JSON values up to 1,048,576 bytes, and TTLs up to 31,536,000,000ms. Values with a TTL are lazily cleaned up on read, and Lite's retention sweeper periodically deletes expired rows; the file database retains the cache across restarts, while the `--memory` database loses it when the process exits. The binding is isolated by function request and by project; detached Promises started after the function returns cannot continue to access it; Lite does not provide cross-project sharing, a Redis protocol, queues, or rate-limiting capabilities.
+Lite's cache calls are in-process database operations and do not have the timeout and request-abort propagation of the standard version's cross-process HTTP binding; do not mix loading Lite and the standard Edge Runtime in the same JavaScript process, as both own the global `SupaCloud` binding, and Lite will refuse to start if it detects that another implementation is already present.
+
+### Multiple Projects
+
+V1 does not multiplex multiple PGlite projects within a single process. When multiple projects are needed, configure an independent working directory, port, and `.supacloud-lite` state directory for each project, and start them separately with a process manager. This keeps the database, JWT, Storage, and Realtime failure domains isolated.
+
+### Resource Boundaries
+
+PGlite is WebAssembly PostgreSQL, not SQLite. It trades off for PostgreSQL SQL, roles, RLS, and Supabase migration compatibility, but its memory footprint is typically higher than PocketBase/SQLite. Before production deployment, you should perform capacity testing against the real schema, concurrency, and Realtime load.
+
+The npm package continues to load PGlite through the dependency directory. The platform single binary from the GitHub Release embeds Bun, PGlite JS, core WASM/data, and the contrib extensions used by Lite; on startup, it extracts the extension archives to a restricted temporary directory and cleans them up immediately after PGlite initialization. Project configuration, Functions, database, object storage, and secrets remain external.
+
+### API
+
+```ts
+import { createProjectBackend, startProjectServer } from '@supacloud/lite'
+
+const running = await startProjectServer({
+  projectDir: process.cwd(),
+  host: '127.0.0.1',
+  port: 54321,
+  storageBackend: 's3',
+})
+
+await running.close()
+```
+
+Image transforms currently provide a compatible subset of Bun.Image: `width`, `height`, `resize=fill|contain`, as well as `format=origin|jpeg|png|webp` and JPEG/WebP `quality`. `resize=cover` requires cropping capability, which the current Bun runtime does not have a corresponding API for, so it explicitly returns an unsupported error instead of incorrectly stretching the image to `cover`.
+
+You can also use `createLiteBackend()` to directly create an embedded backend with an in-memory or custom directory, and pass its `fetch` to a custom host.
+
+### Provenance and License
+
+The protocol implementation is derived and slimmed down from Tinbase, retaining its MIT license; PGlite uses Apache-2.0. See `THIRD_PARTY_NOTICES.md` and `LICENSES/` for full details.
