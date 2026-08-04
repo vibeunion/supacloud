@@ -8,6 +8,8 @@ import { withWindowsSubprocessRef } from '../scripts/subprocess.js'
 import { createSymlinkIfPermitted } from './support/symlink.js'
 
 const temporaryDirectories: string[] = []
+const WINDOWS_CLI_TIMEOUT_MS = 20_000
+const WINDOWS_CLI_MAX_BUFFER_BYTES = 8 * 1024 * 1024
 
 afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })))
@@ -201,13 +203,8 @@ async function temporaryProject(prefix: string): Promise<string> {
 }
 
 async function runCli(args: string[]): Promise<string> {
-  const processHandle = Bun.spawn({
-    cmd: [process.execPath, 'run', join(import.meta.dir, '..', 'src', 'cli.ts'), ...args],
-    cwd: join(import.meta.dir, '..'),
-    stdout: 'pipe',
-    stderr: 'pipe',
-    env: process.env,
-  })
+  if (process.platform === 'win32') return runWindowsCli(args)
+  const processHandle = Bun.spawn(cliSpawnOptions(args))
   return await withWindowsSubprocessRef(async () => {
     const [exitCode, stdout, stderr] = await Promise.all([
       processHandle.exited,
@@ -217,4 +214,30 @@ async function runCli(args: string[]): Promise<string> {
     if (exitCode !== 0) throw new Error(`CLI failed (${exitCode}): ${stderr || stdout}`)
     return stdout
   })
+}
+
+function runWindowsCli(args: string[]): string {
+  const completed = Bun.spawnSync({
+    ...cliSpawnOptions(args),
+    timeout: WINDOWS_CLI_TIMEOUT_MS,
+    maxBuffer: WINDOWS_CLI_MAX_BUFFER_BYTES,
+  })
+  const stdout = completed.stdout.toString('utf8')
+  const stderr = completed.stderr.toString('utf8')
+  if (completed.exitedDueToTimeout) {
+    throw new Error(`CLI timed out after ${WINDOWS_CLI_TIMEOUT_MS}ms: ${stderr || stdout}`)
+  }
+  if (completed.exitedDueToMaxBuffer) throw new Error(`CLI output exceeded ${WINDOWS_CLI_MAX_BUFFER_BYTES} bytes`)
+  if (!completed.success) throw new Error(`CLI failed (${completed.exitCode}): ${stderr || stdout}`)
+  return stdout
+}
+
+function cliSpawnOptions(args: string[]) {
+  return {
+    cmd: [process.execPath, 'run', join(import.meta.dir, '..', 'src', 'cli.ts'), ...args],
+    cwd: join(import.meta.dir, '..'),
+    stdout: 'pipe' as const,
+    stderr: 'pipe' as const,
+    env: process.env,
+  }
 }
