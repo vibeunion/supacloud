@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.8.6](https://github.com/zuohuadong/supacloud/compare/supacloud-v0.8.5...supacloud-v0.8.6) (2026-08-04)
+
+
+### Miscellaneous Chores
+
+* release main ([fac53ca](https://github.com/zuohuadong/supacloud/commit/fac53ca02906676502cded4620b47a05465a7c5d))
+* release main ([00bf23d](https://github.com/zuohuadong/supacloud/commit/00bf23d2c371b4ba4ddb31f20bb289c769848e06))
+
 ## [0.8.5](https://github.com/zuohuadong/supacloud/compare/supacloud-v0.8.4...supacloud-v0.8.5) (2026-08-02)
 
 
