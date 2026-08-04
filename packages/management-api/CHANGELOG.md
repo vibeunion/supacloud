@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.50.17](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.16...management-api-v0.50.17) (2026-08-03)
+
+
+### Bug Fixes
+
+* **deps:** remediate high severity audits ([23a0af2](https://github.com/zuohuadong/supacloud/commit/23a0af2dd53b225764da23d182e9c66a13437b5b))
+
 ## [0.50.16](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.15...management-api-v0.50.16) (2026-08-03)
 
 

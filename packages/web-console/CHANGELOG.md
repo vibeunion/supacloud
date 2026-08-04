@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.28.7](https://github.com/zuohuadong/supacloud/compare/web-console-v0.28.6...web-console-v0.28.7) (2026-08-03)
+
+
+### Bug Fixes
+
+* **deps:** align dompurify override ([9afe1ae](https://github.com/zuohuadong/supacloud/commit/9afe1ae41cf2eb1dd7885c452a4bd4e32bc8a96d))
+* **deps:** remediate high severity audits ([23a0af2](https://github.com/zuohuadong/supacloud/commit/23a0af2dd53b225764da23d182e9c66a13437b5b))
+
 ## [0.28.6](https://github.com/zuohuadong/supacloud/compare/web-console-v0.28.5...web-console-v0.28.6) (2026-08-02)
 
 
