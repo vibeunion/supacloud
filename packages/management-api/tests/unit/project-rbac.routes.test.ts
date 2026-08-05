@@ -535,6 +535,34 @@ describe("projectRbacRoutes", () => {
     expect("current_org_id" in revokedProject).toBe(false);
   });
 
+  test("lists only assignments for the requested project and role", async () => {
+    storedConfig = seededRbacConfig(2);
+    const otherProjectConfig = seededRbacConfig(1);
+    const otherAssignments = (otherProjectConfig.rbac as { assignments: Array<{ id: string }> }).assignments;
+    otherAssignments[0].id = "other-project-assignment";
+    findByRef.mockImplementation(async (ref) => makeProject(
+      ref === "proj_1" ? storedConfig : otherProjectConfig,
+      ref,
+    ) as never);
+
+    const selectedRole = await request("/v1/projects/proj_1/rbac/roles/role-0/assign");
+    expect(selectedRole.status).toBe(200);
+    expect(await selectedRole.json()).toEqual({
+      items: [expect.objectContaining({ id: "assignment-0", role_id: "role-0", user_id: "user-one" })],
+      total: 1,
+    });
+
+    const otherProject = await request("/v1/projects/proj_2/rbac/roles/role-0/assign");
+    expect(await otherProject.json()).toMatchObject({
+      items: [{ id: "other-project-assignment", role_id: "role-0" }],
+      total: 1,
+    });
+
+    const missingRole = await request("/v1/projects/proj_1/rbac/roles/missing/assign");
+    expect(missingRole.status).toBe(404);
+    expect(await missingRole.json()).toMatchObject({ message: "Role not found", code: "404" });
+  });
+
   test("rolls back an assignment when its transactional outbox write fails", async () => {
     const role = await (await request("/v1/projects/proj_1/rbac/roles", {
       method: "POST",

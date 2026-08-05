@@ -111,6 +111,16 @@ export const projectRbacRoutes = new Elysia({ prefix: "/v1/projects/:ref" })
   }, {
     detail: { tags: ["rbac"], summary: "Delete project RBAC permission" },
   })
+  .get("/rbac/roles/:roleId/assign", async ({ params }) => {
+    try {
+      const assignments = await projectRbacService.listRoleAssignments(params.ref, params.roleId);
+      return { items: assignments, total: assignments.length };
+    } catch (error) {
+      return toHttpError(error);
+    }
+  }, {
+    detail: { tags: ["rbac"], summary: "List project RBAC role assignments" },
+  })
   .post("/rbac/roles/:roleId/assign", async ({ params, body, request }) => {
     try {
       return await projectRbacService.assignRole(params.ref, params.roleId, body, await actorId(request));
