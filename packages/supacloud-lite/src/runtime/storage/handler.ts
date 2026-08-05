@@ -74,6 +74,36 @@ function storageError(status: number, error: string, message: string): Response 
   return json(status, { statusCode: String(status), error, message })
 }
 
+/**
+ * Raised when an object write is denied by storage.objects RLS. Callers map
+ * this to a 403 with an actionable hint, because the raw Postgres message
+ * ("new row violates row-level security policy") does not tell the developer
+ * that their project is missing a storage.objects policy.
+ */
+const RLS_POLICY_HINT =
+  'Upload denied by storage.objects RLS. Create a policy in supabase/migrations, e.g. ' +
+  '`create policy "objects insert" on storage.objects for insert to authenticated with check (bucket_id = \'<bucket>\');`. ' +
+  'Without a policy, RLS blocks every write by default.'
+
+class RlsPolicyError extends Error {
+  constructor(public cause: unknown) {
+    super('storage.objects row-level security policy denied the write')
+    this.name = 'RlsPolicyError'
+  }
+}
+
+function rlsDeniedResponse(): Response {
+  return storageError(403, 'Unauthorized', RLS_POLICY_HINT)
+}
+
+function isRlsDenied(error: unknown): boolean {
+  if (!error) return false
+  const pg = error as { code?: string; message?: string }
+  if (pg.code === '42501') return true
+  if (error instanceof Error && /row-level security|permission denied/i.test(error.message)) return true
+  return false
+}
+
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -415,6 +445,7 @@ export class StorageHandler {
       const id = await this.persistObject(ctx, bucketId, key, bytes, contentType, cacheControl, upsert)
       return json(200, { Key: `${bucketId}/${key}`, Id: id })
     } catch (e) {
+      if (e instanceof RlsPolicyError) return rlsDeniedResponse()
       const pg = e as { code?: string }
       if (pg.code === '23505') {
         return storageError(409, 'Duplicate', 'The resource already exists')
@@ -471,6 +502,12 @@ export class StorageHandler {
       )
       inserted = result.rows[0] as ObjectRow | undefined
     } catch (error) {
+      if (isRlsDenied(error)) {
+        // Clean up the staged bytes, then surface an actionable RLS hint
+        // instead of the bare Postgres "row-level security" message.
+        try { await this.driver.delete(stagedKey) } catch { /* best-effort */ }
+        throw new RlsPolicyError(error)
+      }
       await this.discardStagedBytes(stagedKey, error)
     }
     if (!inserted) return this.discardStagedBytes(stagedKey, new Error('storage metadata insert returned no row'))
@@ -545,6 +582,7 @@ export class StorageHandler {
             upsert
           )
         } catch (error) {
+          if (error instanceof RlsPolicyError) return rlsDeniedResponse()
           const pg = error as { code?: string }
           if (pg.code === '23505') return storageError(409, 'Duplicate', 'The resource already exists')
           throw error
@@ -689,6 +727,7 @@ export class StorageHandler {
       )
     } catch (e) {
       this.tusUploads.delete(id)
+      if (e instanceof RlsPolicyError) return rlsDeniedResponse()
       const pg = e as { code?: string }
       if (pg.code === '23505') return storageError(409, 'Duplicate', 'The resource already exists')
       throw e
@@ -752,7 +791,7 @@ export class StorageHandler {
         pg.code === '42501' ||
         (error instanceof Error && /row-level security|permission denied/i.test(error.message))
       ) {
-        return storageError(403, 'Unauthorized', 'new row violates row-level security policy')
+        return rlsDeniedResponse()
       }
       throw error
     }
