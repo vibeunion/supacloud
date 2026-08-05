@@ -444,6 +444,41 @@ alter table storage.objects enable row level security;
 drop policy if exists tinbase_authenticated_all on storage.objects;
 drop policy if exists tinbase_public_read on storage.objects;
 
+-- ── Default storage.objects RLS policies (Supabase-compatible) ──────────
+-- The drop-policy block above is the legacy cleanup for renamed policies, but
+-- nothing recreated the defaults, so a fresh Lite project with a bucket in
+-- config.toml and no user-authored storage.objects policy rejected every
+-- upload with 403 (RLS enabled, no policy). Recreate the Supabase defaults:
+-- public buckets are world-readable and authenticated-writable; private
+-- buckets are owner-only. Drop-first keeps bootstrap idempotent on restart.
+drop policy if exists "supacloud_lite_public_read" on storage.objects;
+create policy "supacloud_lite_public_read" on storage.objects
+  for select to anon, authenticated
+  using (
+    exists (select 1 from storage.buckets b where b.id = storage.objects.bucket_id and b.public)
+  );
+
+drop policy if exists "supacloud_lite_authenticated_all" on storage.objects;
+create policy "supacloud_lite_authenticated_all" on storage.objects
+  for all to authenticated
+  using (
+    exists (select 1 from storage.buckets b where b.id = storage.objects.bucket_id and b.public)
+  )
+  with check (
+    exists (select 1 from storage.buckets b where b.id = storage.objects.bucket_id and b.public)
+  );
+
+drop policy if exists "supacloud_lite_owner_read" on storage.objects;
+create policy "supacloud_lite_owner_read" on storage.objects
+  for select to authenticated
+  using (owner = auth.uid());
+
+drop policy if exists "supacloud_lite_owner_write" on storage.objects;
+create policy "supacloud_lite_owner_write" on storage.objects
+  for all to authenticated
+  using (owner = auth.uid())
+  with check (owner = auth.uid());
+
 -- ── Migration bookkeeping (same table the Supabase CLI uses) ─────────────
 create schema if not exists supabase_migrations;
 
