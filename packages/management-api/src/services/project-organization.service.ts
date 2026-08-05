@@ -328,12 +328,13 @@ export const projectOrganizationService = {
     const domains = [...new Set((input.jit_domains || []).map((item) => item.trim().toLowerCase()).filter(Boolean))];
     try {
       return sql.begin(async (transaction) => {
+        const jitDomains = transaction.array(domains, "TEXT");
         const [organization] = await transaction`
           INSERT INTO project_business_organizations (
             project_ref, name, slug, description, branding, jit_enabled, jit_domains, created_by
           ) VALUES (
             ${ref}, ${name}, ${slug}, ${input.description ?? null}, ${JSON.stringify(input.branding || {})}::jsonb,
-            ${input.jit_enabled ?? false}, ${domains}, ${actor}
+            ${input.jit_enabled ?? false}, ${jitDomains}, ${actor}
           ) RETURNING *
         `;
         await enqueueWebhookEventInTransaction(transaction, {
@@ -364,6 +365,7 @@ export const projectOrganizationService = {
     const domains = input.jit_domains === undefined
       ? null
       : [...new Set(input.jit_domains.map((item) => item.trim().toLowerCase()).filter(Boolean))];
+    const jitDomains = domains === null ? null : sql.array(domains, "TEXT");
     const [row] = await sql`
       UPDATE project_business_organizations SET
         name = COALESCE(${name ?? null}, name),
@@ -371,7 +373,7 @@ export const projectOrganizationService = {
         description = CASE WHEN ${input.description !== undefined} THEN ${input.description ?? null} ELSE description END,
         branding = CASE WHEN ${input.branding !== undefined} THEN ${JSON.stringify(input.branding || {})}::jsonb ELSE branding END,
         jit_enabled = CASE WHEN ${input.jit_enabled !== undefined} THEN ${input.jit_enabled ?? false} ELSE jit_enabled END,
-        jit_domains = CASE WHEN ${domains !== null} THEN ${domains || []}::text[] ELSE jit_domains END,
+        jit_domains = CASE WHEN ${jitDomains !== null} THEN ${jitDomains} ELSE jit_domains END,
         updated_at = NOW()
       WHERE project_ref = ${ref} AND id = ${organizationId}
       RETURNING *
