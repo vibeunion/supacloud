@@ -6,8 +6,14 @@ let controlQueries: Array<{ query: string; values: unknown[] }> = [];
 let storedMembers: Array<Record<string, unknown>> = [];
 let rejectOutboxInsert = false;
 let memberMutationVersion = 0;
+let projectExistsInControlDb = true;
+let organizationExistsInControlDb = true;
 const controlArray = mock((values: string[], type: string) => ({ values, type }));
 const transactionArray = mock((values: string[], type: string) => ({ values, type }));
+
+function organizationWriteQueries() {
+  return controlQueries.filter(({ query }) => /^\s*(?:INSERT|UPDATE|DELETE)\b/.test(query));
+}
 
 const authorityDb = mock((strings: TemplateStringsArray) => {
   const query = strings.join("?");
@@ -19,9 +25,13 @@ const authorityDb = mock((strings: TemplateStringsArray) => {
 const controlQuery = mock((strings: TemplateStringsArray, ...values: unknown[]) => {
   const query = strings.join("?");
   controlQueries.push({ query, values });
-  if (query.includes("FROM projects")) return Promise.resolve([{ ref: "business-project" }]);
+  if (query.includes("FROM projects")) {
+    return Promise.resolve(projectExistsInControlDb ? [{ ref: "business-project" }] : []);
+  }
   if (query.includes("FROM project_business_organizations")) {
-    return Promise.resolve([{ id: "org-one", project_ref: "business-project" }]);
+    return Promise.resolve(organizationExistsInControlDb
+      ? [{ id: "org-one", project_ref: "business-project" }]
+      : []);
   }
   if (query.includes("INSERT INTO project_business_organizations")) {
     return Promise.resolve([{ id: "org-one", project_ref: "business-project", name: values[1], slug: values[2] }]);
@@ -142,10 +152,116 @@ describe("project organization GoTrue authority", () => {
     storedMembers = [];
     rejectOutboxInsert = false;
     memberMutationVersion = 0;
+    projectExistsInControlDb = true;
+    organizationExistsInControlDb = true;
     controlArray.mockClear();
     transactionArray.mockClear();
     transactionQuery.mockClear();
     config.authRuntimeOwnerRef = "auth-owner";
+  });
+
+  test("generates omitted create slugs and preserves valid explicit slugs", async () => {
+    const generated = await projectOrganizationService.create(
+      "business-project",
+      { name: "Generated Organization" },
+      "admin",
+    );
+    const explicit = await projectOrganizationService.create(
+      "business-project",
+      { name: "Explicit Organization", slug: "explicit-organization-2" },
+      "admin",
+    );
+    await projectOrganizationService.update(
+      "business-project",
+      "org-one",
+      { slug: "updated-organization-3" },
+    );
+
+    const organizationInserts = controlQueries.filter(({ query }) => (
+      query.includes("INSERT INTO project_business_organizations")
+    ));
+    const organizationUpdate = controlQueries.find(({ query }) => (
+      query.includes("UPDATE project_business_organizations")
+    ));
+    expect(generated.slug).toBe("generated-organization");
+    expect(explicit.slug).toBe("explicit-organization-2");
+    expect(organizationInserts.map(({ values }) => values[2])).toEqual([
+      "generated-organization",
+      "explicit-organization-2",
+    ]);
+    expect(organizationUpdate?.values[1]).toBe("updated-organization-3");
+  });
+
+  test("accepts explicit organization slugs at both length boundaries", async () => {
+    const validSlugs = ["ab", "a".repeat(120)];
+
+    for (const slug of validSlugs) {
+      await projectOrganizationService.create("business-project", { name: "Boundary", slug }, "admin");
+      await projectOrganizationService.update("business-project", "org-one", { slug });
+    }
+
+    const insertedSlugs = controlQueries
+      .filter(({ query }) => query.includes("INSERT INTO project_business_organizations"))
+      .map(({ values }) => values[2]);
+    const updatedSlugs = controlQueries
+      .filter(({ query }) => query.includes("UPDATE project_business_organizations"))
+      .map(({ values }) => values[1]);
+    expect(insertedSlugs).toEqual(validSlugs);
+    expect(updatedSlugs).toEqual(validSlugs);
+  });
+
+  test("rejects invalid explicit organization slugs before create or update writes", async () => {
+    const invalidSlugError = {
+      name: "ValidationError",
+      statusCode: 400,
+      code: "VALIDATION_ERROR",
+      message: "slug must be 2 to 120 lowercase letters or numbers separated by single hyphens",
+    };
+    const invalidSlugs = [
+      "",
+      "a",
+      "a".repeat(121),
+      "Uppercase",
+      "contains space",
+      "contains.dot",
+      "contains_underscore",
+      "-leading",
+      "trailing-",
+      "double--hyphen",
+    ];
+
+    for (const slug of invalidSlugs) {
+      await expect(projectOrganizationService.create(
+        "business-project",
+        { name: "Invalid slug", slug },
+        "admin",
+      )).rejects.toMatchObject(invalidSlugError);
+      await expect(projectOrganizationService.update(
+        "business-project",
+        "org-one",
+        { slug },
+      )).rejects.toMatchObject(invalidSlugError);
+      expect(organizationWriteQueries()).toEqual([]);
+    }
+  });
+
+  test("preserves not-found precedence over explicit slug validation", async () => {
+    projectExistsInControlDb = false;
+    await expect(projectOrganizationService.create(
+      "missing-project",
+      { name: "Missing project", slug: "Invalid" },
+      "admin",
+    )).rejects.toThrow("Project not found: missing-project");
+
+    projectExistsInControlDb = true;
+    organizationExistsInControlDb = false;
+    await expect(projectOrganizationService.update(
+      "business-project",
+      "missing-organization",
+      { slug: "Invalid" },
+    )).rejects.toThrow("Business organization not found: missing-organization");
+
+    expect(organizationWriteQueries()).toEqual([]);
   });
 
   test("binds omitted, empty, and normalized create domains as typed arrays", async () => {
