@@ -16,8 +16,14 @@ type ProjectState = {
 
 function migrationDatabase(project: ProjectState) {
   const storedSecrets: Array<{ scope: string; name: string; encrypted: string }> = [];
-  const storedWebhooks: Array<{ id: string; legacyId: string; secretEncrypted?: string | null }> = [];
-  const database = mock((strings: TemplateStringsArray, ...values: unknown[]) => {
+  const storedWebhooks: Array<{
+    id: string;
+    legacyId: string;
+    eventBinding: unknown;
+    secretEncrypted?: string | null;
+  }> = [];
+  const databaseArray = mock((values: string[], type: string) => ({ values, type }));
+  const databaseQuery = mock((strings: TemplateStringsArray, ...values: unknown[]) => {
     const query = strings.join("?");
     if (query.includes("SELECT ref, config")) return Promise.resolve([{ ...project }]);
     if (query.includes("INSERT INTO project_control_secrets")) {
@@ -38,12 +44,17 @@ function migrationDatabase(project: ProjectState) {
       return Promise.resolve(Array.isArray(config.webhooks) ? [{ ...project }] : []);
     }
     if (query.includes("INSERT INTO project_webhooks")) {
-      storedWebhooks.push({ id: String(values[0]), legacyId: String(values[2]) });
+      storedWebhooks.push({
+        id: String(values[0]),
+        legacyId: String(values[2]),
+        eventBinding: values[4],
+      });
       return Promise.resolve([{ id: values[0] }]);
     }
     return Promise.resolve([]);
   });
-  return { database: database as unknown as SQL, storedSecrets, storedWebhooks };
+  const database = Object.assign(databaseQuery, { array: databaseArray });
+  return { database: database as unknown as SQL, databaseArray, storedSecrets, storedWebhooks };
 }
 
 describe("platform v2 migrations", () => {
@@ -60,7 +71,7 @@ describe("platform v2 migrations", () => {
         webhooks: [{ id: "legacy-webhook", url: "https://hooks.example.test", events: ["user.created"], secret: "webhook-secret" }],
       },
     };
-    const { database, storedSecrets, storedWebhooks } = migrationDatabase(project);
+    const { database, databaseArray, storedSecrets, storedWebhooks } = migrationDatabase(project);
 
     expect(await migrateLegacyControlSecrets(database)).toBe(3);
     expect(typeof project.config).toBe("object");
@@ -80,6 +91,8 @@ describe("platform v2 migrations", () => {
     expect(typeof project.config).toBe("object");
     expect((project.config as Record<string, unknown>).webhooks).toBeUndefined();
     expect(storedWebhooks).toHaveLength(1);
+    expect(databaseArray).toHaveBeenCalledWith(["user.created"], "TEXT");
+    expect(storedWebhooks[0]?.eventBinding).toEqual({ values: ["user.created"], type: "TEXT" });
     expect(storedWebhooks[0]?.secretEncrypted).toBeUndefined();
     expect(storedSecrets.at(-1)).toMatchObject({ scope: "webhook" });
     expect(storedSecrets.at(-1)?.encrypted).toStartWith("enc:v1:");
