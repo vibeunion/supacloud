@@ -44,6 +44,7 @@ type OrganizationMemberMutation = {
 
 const MEMBER_ROLES = new Set(["member", "admin"]);
 const MAX_JIT_MEMBERSHIPS = 50;
+const ORGANIZATION_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const SENSITIVE_BRANDING_KEYS = new Set([
   "authorization",
   "cookie",
@@ -89,6 +90,13 @@ function normalizedSlug(value: string): string {
   const slug = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   if (slug.length < 2 || slug.length > 120) throw new ValidationError("slug must contain 2 to 120 URL-safe characters");
   return slug;
+}
+
+function validatedOrganizationSlug(value: string): string {
+  if (value.length < 2 || value.length > 120 || !ORGANIZATION_SLUG_PATTERN.test(value)) {
+    throw new ValidationError("slug must be 2 to 120 lowercase letters or numbers separated by single hyphens");
+  }
+  return value;
 }
 
 function hashToken(token: string): string {
@@ -323,7 +331,8 @@ export const projectOrganizationService = {
     if (!(await projectExists(ref))) throw new NotFoundError("Project", ref);
     const name = input.name.trim();
     if (!name) throw new ValidationError("name is required");
-    const slug = normalizedSlug(input.slug || name);
+    const explicitSlug = input.slug === undefined ? null : validatedOrganizationSlug(input.slug);
+    const slug = explicitSlug ?? normalizedSlug(name);
     validateBrandingValue(input.branding || {});
     const domains = [...new Set((input.jit_domains || []).map((item) => item.trim().toLowerCase()).filter(Boolean))];
     try {
@@ -360,7 +369,7 @@ export const projectOrganizationService = {
     await organizationOrThrow(ref, organizationId);
     const name = input.name?.trim();
     if (input.name !== undefined && !name) throw new ValidationError("name must not be empty");
-    const slug = input.slug !== undefined ? normalizedSlug(input.slug) : null;
+    const slug = input.slug === undefined ? null : validatedOrganizationSlug(input.slug);
     if (input.branding !== undefined) validateBrandingValue(input.branding);
     const domains = input.jit_domains === undefined
       ? null
