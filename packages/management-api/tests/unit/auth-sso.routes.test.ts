@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import { Elysia } from "elysia";
 
-const project = { ref: "proj_1", config: { gotrue_port: 4321 } };
+const project = { ref: "proj_1", config: { postgrest_port: 3321, gotrue_port: 4321 } };
 const getProject = mock(async () => project);
 const resolveProjectServiceRoleKey = mock(async () => "service-role");
 
