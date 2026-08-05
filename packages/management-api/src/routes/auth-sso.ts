@@ -2,8 +2,6 @@ import { Elysia, t, status } from "elysia";
 import { projectService } from "../services";
 import { logger } from "../utils/logger";
 import { resolveProjectServiceRoleKey } from "../utils/service-role";
-import { requireProjectOrAdminAuth } from "../middleware/auth";
-import { sql as metaSql } from "../db";
 import { resolveTenantPorts, normalizeProjectRoutingConfig } from "../utils/project-routing";
 import { normalizeProjectConfig } from "../utils/project-config";
 import { requireAuthRuntimeManagement } from "./auth-runtime";
@@ -11,24 +9,15 @@ import { requireAuthRuntimeManagement } from "./auth-runtime";
 async function getGoTrueHeaders(ref: string) {
   const project = await projectService.getProject(ref);
   if (!project) return null;
-  const serviceRoleKey = await resolveProjectServiceRoleKey(ref);
+  const serviceRoleKey = await resolveProjectServiceRoleKey(project);
   if (!serviceRoleKey) return null;
   const { config } = await import("../config");
-
-  let apiUrl: string;
-  try {
-    const rows = await metaSql`
-      SELECT config FROM projects WHERE ref = ${ref} AND deleted_at IS NULL LIMIT 1
-    `;
-    const projectConfig = normalizeProjectConfig(rows[0]?.config);
-    const routingConfig = normalizeProjectRoutingConfig(projectConfig);
-    const ports = resolveTenantPorts(routingConfig);
-    apiUrl = ports?.gotruePort
-      ? `http://127.0.0.1:${ports.gotruePort}`
-      : `http://${config.managementApiInternal}/auth/v1`;
-  } catch {
-    apiUrl = `http://${config.managementApiInternal}/auth/v1`;
-  }
+  const projectConfig = normalizeProjectConfig(project.config);
+  const routingConfig = normalizeProjectRoutingConfig(projectConfig);
+  const ports = resolveTenantPorts(routingConfig);
+  const apiUrl = ports?.gotruePort
+    ? `http://127.0.0.1:${ports.gotruePort}`
+    : `http://${config.managementApiInternal}/auth/v1`;
 
   return { apiUrl, serviceRoleKey, ref };
 }
@@ -100,12 +89,9 @@ export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
       body: t.Object({
         type: t.Literal("saml"),
         resource_id: t.Optional(t.String()),
-        saml_provider_name: t.Optional(t.String()),
         domains: t.Optional(t.Array(t.String())),
         metadata_xml: t.Optional(t.String()),
         metadata_url: t.Optional(t.String()),
-        metadata_attribute_url: t.Optional(t.String()),
-        entity_id: t.Optional(t.String()),
         attribute_mapping: t.Optional(t.Record(t.String(), t.Unknown())),
         name_id_format: t.Optional(t.String()),
         disabled: t.Optional(t.Boolean()),
@@ -173,11 +159,9 @@ export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
       body: t.Object({
         type: t.Optional(t.Literal("saml")),
         resource_id: t.Optional(t.String()),
-        saml_provider_name: t.Optional(t.String()),
         domains: t.Optional(t.Array(t.String())),
         metadata_xml: t.Optional(t.String()),
         metadata_url: t.Optional(t.String()),
-        metadata_attribute_url: t.Optional(t.String()),
         attribute_mapping: t.Optional(t.Record(t.String(), t.Unknown())),
         name_id_format: t.Optional(t.String()),
         disabled: t.Optional(t.Boolean()),
