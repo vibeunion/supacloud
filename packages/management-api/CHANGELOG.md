@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.50.20](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.19...management-api-v0.50.20) (2026-08-05)
+
+
+### Bug Fixes
+
+* **auth:** preserve GoTrue SAML provider contract ([#714](https://github.com/zuohuadong/supacloud/issues/714)) ([f1b8336](https://github.com/zuohuadong/supacloud/commit/f1b83367b92d07f4dfc442e0a0a4ecc07574a315))
+* **management-api:** bind organization JIT domains as arrays ([#717](https://github.com/zuohuadong/supacloud/issues/717)) ([c7aa000](https://github.com/zuohuadong/supacloud/commit/c7aa000046fed2edc9a53811042d68985e7a8f83))
+* **management-api:** bind webhook events as PostgreSQL arrays ([#719](https://github.com/zuohuadong/supacloud/issues/719)) ([85581ec](https://github.com/zuohuadong/supacloud/commit/85581ecd88c2def65249356c5e8e168d08f76974))
+* **management-api:** harden logical backup recovery ([ae2362e](https://github.com/zuohuadong/supacloud/commit/ae2362ef716497c6c0f4d6f1c880ca58863fb9e3))
+* **management-api:** list role assignments ([#715](https://github.com/zuohuadong/supacloud/issues/715)) ([157a3af](https://github.com/zuohuadong/supacloud/commit/157a3afd951d250ea9dc28e321c1c43545876993))
+* **management-api:** preserve SAML provider fields ([#713](https://github.com/zuohuadong/supacloud/issues/713)) ([8ced193](https://github.com/zuohuadong/supacloud/commit/8ced19345cbaee593b0bb344b3b4b9313b6bc140))
+* **management-api:** validate organization slugs ([#718](https://github.com/zuohuadong/supacloud/issues/718)) ([91c0f87](https://github.com/zuohuadong/supacloud/commit/91c0f871479b3d0d13910f34f822663f81e5caee))
+* **management-api:** verify GoTrue hook runtime safely ([2e207c8](https://github.com/zuohuadong/supacloud/commit/2e207c8a90df453a6762acbddd7c872762d37a0a))
+
 ## [0.50.19](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.18...management-api-v0.50.19) (2026-08-04)
 
 
