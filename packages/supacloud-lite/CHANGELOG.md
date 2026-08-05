@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.8](https://github.com/zuohuadong/supacloud/compare/supacloud-lite-v0.5.7...supacloud-lite-v0.5.8) (2026-08-05)
+
+
+### Bug Fixes
+
+* **lite:** actionable hint when storage upload is denied by RLS ([2de9601](https://github.com/zuohuadong/supacloud/commit/2de96016c802f43a588e22e4dacc91d4efdaa1f3))
+
 ## [0.5.7](https://github.com/zuohuadong/supacloud/compare/supacloud-lite-v0.5.6...supacloud-lite-v0.5.7) (2026-08-05)
 
 
