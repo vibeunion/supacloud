@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.7](https://github.com/zuohuadong/supacloud/compare/supacloud-lite-v0.5.6...supacloud-lite-v0.5.7) (2026-08-05)
+
+
+### Bug Fixes
+
+* **lite:** rename internal runtime identities ([a8183d6](https://github.com/zuohuadong/supacloud/commit/a8183d6c9dd9a726e416698f5039be86ef6a3b0c))
+
 ## [0.5.6](https://github.com/zuohuadong/supacloud/compare/supacloud-lite-v0.5.5...supacloud-lite-v0.5.6) (2026-08-04)
 
 
