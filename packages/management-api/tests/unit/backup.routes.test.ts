@@ -6,6 +6,8 @@ const requireProjectOrAdminAuth = mock(() => Promise.resolve(null));
 const resolveDbName = mock((ref: string) => Promise.resolve(`supa_${ref}`));
 const listBackups = mock(() => Promise.resolve([]));
 const createBackup = mock(() => Promise.resolve({ message: "full backup completed" }));
+const createLogicalBackup = mock(() => Promise.resolve({ success: true, message: "Logical backup completed", file: "backup_project_a_2026-08-05T00-00-00-000Z.sql.gz" }));
+const restoreLogicalBackup = mock(() => Promise.resolve({ success: true, message: "Logical restore completed successfully" }));
 const restore = mock(() => Promise.resolve({ message: "PITR restore completed" }));
 
 const authModule = await import("../../src/middleware/auth");
@@ -26,6 +28,12 @@ const listBackupsSpy = spyOn(backupModule, "listBackups").mockImplementation(
 );
 const createBackupSpy = spyOn(backupModule, "createBackup").mockImplementation(
   createBackup as typeof backupModule.createBackup,
+);
+const createLogicalBackupSpy = spyOn(backupModule, "createLogicalBackup").mockImplementation(
+  createLogicalBackup as typeof backupModule.createLogicalBackup,
+);
+const restoreLogicalBackupSpy = spyOn(backupModule, "restoreLogicalBackup").mockImplementation(
+  restoreLogicalBackup as typeof backupModule.restoreLogicalBackup,
 );
 const restoreSpy = spyOn(backupModule, "restore").mockImplementation(
   restore as typeof backupModule.restore,
@@ -58,6 +66,14 @@ describe("physical backup routes", () => {
     listBackups.mockResolvedValue([]);
     createBackup.mockReset();
     createBackup.mockResolvedValue({ message: "full backup completed" });
+    createLogicalBackup.mockReset();
+    createLogicalBackup.mockResolvedValue({
+      success: true,
+      message: "Logical backup completed",
+      file: "backup_project_a_2026-08-05T00-00-00-000Z.sql.gz",
+    });
+    restoreLogicalBackup.mockReset();
+    restoreLogicalBackup.mockResolvedValue({ success: true, message: "Logical restore completed successfully" });
     restore.mockReset();
     restore.mockResolvedValue({ message: "PITR restore completed" });
     delete process.env.SUPACLOUD_PITR_ENABLED;
@@ -70,6 +86,8 @@ describe("physical backup routes", () => {
     resolveDbNameSpy.mockRestore();
     listBackupsSpy.mockRestore();
     createBackupSpy.mockRestore();
+    createLogicalBackupSpy.mockRestore();
+    restoreLogicalBackupSpy.mockRestore();
     restoreSpy.mockRestore();
   });
 
@@ -188,6 +206,42 @@ describe("physical backup routes", () => {
     expect(response.status).toBe(401);
     expect(listBackups).not.toHaveBeenCalled();
     expect(restore).not.toHaveBeenCalled();
+  });
+
+  test("returns a service error instead of HTTP 200 when logical backup fails", async () => {
+    createLogicalBackup.mockResolvedValueOnce({ success: false, message: "Logical backup failed" });
+
+    const response = await request("/v1/projects/project_a/database/backups/logical", {
+      method: "POST",
+      body: "{}",
+    });
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ message: "Logical backup failed" });
+  });
+
+  test("requires exact confirmation and a paused project outcome for logical restore", async () => {
+    const backupId = "backup_project_a_2026-08-05T00-00-00-000Z.sql.gz";
+    const unconfirmed = await request("/v1/projects/project_a/database/backups/logical/restore", {
+      method: "POST",
+      body: JSON.stringify({ backupId, confirmation: "RESTORE_PROJECT" }),
+    });
+    expect(unconfirmed.status).toBe(400);
+    expect(restoreLogicalBackup).not.toHaveBeenCalled();
+
+    restoreLogicalBackup.mockResolvedValueOnce({
+      success: false,
+      message: "Project must be paused before logical restore",
+      reason: "project_not_paused",
+    });
+    const pausedRequired = await request("/v1/projects/project_a/database/backups/logical/restore", {
+      method: "POST",
+      body: JSON.stringify({
+        backupId,
+        confirmation: `RESTORE_PROJECT:project_a:${backupId}`,
+      }),
+    });
+    expect(pausedRequired.status).toBe(409);
   });
 
   test("does not leave a second backup or restore contract in project config routes", () => {
