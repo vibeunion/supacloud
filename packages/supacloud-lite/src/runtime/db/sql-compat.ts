@@ -1,7 +1,7 @@
 /**
  * Compatibility rewrites for user migration / seed SQL.
  *
- * tinbase can't install C extensions (pg_cron, pg_net, http, supabase_vault,
+ * SupaCloud Lite can't install C extensions (pg_cron, pg_net, http, supabase_vault,
  * hypopg, …) into the PGlite or embedded-native Postgres build, and several of
  * them are emulated in pure SQL instead (cron, pg_net, pgmq - see
  * db/emulated.ts). A real Supabase project's first migration typically runs a
@@ -15,7 +15,7 @@
  * engine does bundle are still created normally, and the emulated schemas
  * created at bootstrap remain in place.
  *
- * It also strips `CONCURRENTLY` from index statements: tinbase applies each
+ * It also strips `CONCURRENTLY` from index statements: SupaCloud Lite applies each
  * migration inside a transaction (for atomicity + rollback), and
  * `CREATE/DROP INDEX CONCURRENTLY` / `REINDEX … CONCURRENTLY` are illegal in a
  * transaction block. On a single-connection local dev database CONCURRENTLY
@@ -121,7 +121,7 @@ function rewriteStatement(stmt: string): string {
     const outer = pickTag(bare, 'tb_ext')
     return (
       `${trivia}DO ${outer} BEGIN EXECUTE ${inner}${bare}${inner}; ` +
-      `EXCEPTION WHEN OTHERS THEN RAISE NOTICE 'tinbase: skipped extension statement (%)', SQLERRM; END ${outer};`
+      `EXCEPTION WHEN OTHERS THEN RAISE NOTICE 'SupaCloud Lite: skipped extension statement (%)', SQLERRM; END ${outer};`
     )
   }
 

@@ -1,5 +1,5 @@
 /**
- * Database webhooks - fire an HTTP request when rows change, the tinbase
+ * Database webhooks - fire an HTTP request when rows change, the SupaCloud Lite
  * equivalent of Supabase Database Webhooks (which use pg_net under the hood).
  * Built on the existing CDC pipeline (triggers + pg_notify), so it needs no C
  * extension and works on both engines. The POST body matches Supabase's

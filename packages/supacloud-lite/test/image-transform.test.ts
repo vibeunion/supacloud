@@ -6,8 +6,8 @@ import {
   transformImage,
   type ImageTransformOptions,
   type ImageTransformResult,
-} from '../src/vendor/tinbase/storage/image-transform.js'
-import { StorageHandler } from '../src/vendor/tinbase/storage/handler.js'
+} from '../src/runtime/storage/image-transform.js'
+import { StorageHandler } from '../src/runtime/storage/handler.js'
 
 const sourcePng = await new Bun.Image(createBmp(4, 2)).png().bytes()
 

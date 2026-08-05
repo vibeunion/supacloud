@@ -175,7 +175,7 @@ export class RealtimeEngine {
     if (this.stopCdc) return
     this.stopCdc = await this.db.onCdcEvent((e) => this.dispatchCdc(e))
     // broadcast-from-database: realtime.send() → pg_notify → fan out to topic
-    this.stopDbBroadcast = await this.db.engine.listen('tinbase_realtime_broadcast', (payload) => {
+    this.stopDbBroadcast = await this.db.engine.listen('supacloud_lite_realtime_broadcast', (payload) => {
       try {
         this.dispatchDbBroadcast(JSON.parse(payload) as { topic: string; event: string; payload: unknown })
       } catch {

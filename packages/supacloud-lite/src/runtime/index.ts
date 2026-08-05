@@ -1,5 +1,5 @@
 /**
- * tinbase - a pure-JS, Docker-free Supabase backend on PGlite that speaks
+ * SupaCloud Lite - a pure-JS, Docker-free Supabase backend on PGlite that speaks
  * the same wire protocols as hosted Supabase, so the official supabase-js
  * SDK works unchanged.
  *
@@ -48,12 +48,12 @@ export { snapshotSchema, diffSchemas, type SchemaSnapshot } from './db/schema-di
 export { inspectDb, type TableInfo } from './db/inspect.js'
 
 /**
- * A running tinbase backend. The one field a consumer always needs is
- * {@link TinbaseBackend.fetch}; the rest expose the underlying services for
+ * A running SupaCloud Lite backend. The one field a consumer always needs is
+ * {@link SupaCloudLiteBackend.fetch}; the rest expose the underlying services for
  * advanced/embedded use (in-process realtime, manual migrations, log access).
  * Returned by {@link createBackend}.
  */
-export interface TinbaseBackend {
+export interface SupaCloudLiteBackend {
   /** The whole backend as a fetch handler. Pass to supabase-js as global.fetch for in-process use. */
   fetch: typeof fetch
   /** The database engine wrapper - run raw SQL, inspect schema, apply migrations. */
@@ -96,10 +96,10 @@ const CORS_HEADERS: Record<string, string> = {
 }
 
 /**
- * Build a running tinbase backend from {@link BackendConfig}. Wires the
+ * Build a running SupaCloud Lite backend from {@link BackendConfig}. Wires the
  * database, auth, storage, realtime, edge functions, and the background
  * services (webhooks/cron/net/retention), mints the anon/service_role keys, and
- * returns a {@link TinbaseBackend} whose `fetch` handles every Supabase wire
+ * returns a {@link SupaCloudLiteBackend} whose `fetch` handles every Supabase wire
  * route.
  *
  * All config is optional: with an empty config it boots an in-memory PGlite
@@ -110,7 +110,7 @@ const CORS_HEADERS: Record<string, string> = {
  * @throws Error from {@link assertSecretsSafe} when bound to a network-exposed
  *   host with a weak/default JWT secret or a derived vault key.
  */
-export async function createBackend(config: BackendConfig = {}): Promise<TinbaseBackend> {
+export async function createBackend(config: BackendConfig = {}): Promise<SupaCloudLiteBackend> {
   const jwtSecret = config.jwtSecret ?? randomSecret()
   const apiUrl = config.apiUrl ?? 'http://localhost:54321'
   const siteUrl = config.siteUrl ?? apiUrl

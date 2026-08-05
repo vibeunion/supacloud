@@ -1,5 +1,5 @@
 /**
- * Local email inbox - the tinbase equivalent of Supabase local's Inbucket /
+ * Local email inbox - the SupaCloud Lite equivalent of Supabase local's Inbucket /
  * Mailpit. When no custom mailer is configured, outgoing auth emails (magic
  * links, OTP codes, password recovery, email-change confirmations) are captured
  * in memory and viewable at /inbox, so you can test those flows locally without

@@ -1,13 +1,12 @@
 # Third-Party Notices
 
-## Tinbase
+## Upstream protocol implementation
 
-SupaCloud Lite 的 Supabase 兼容协议实现包含从 Tinbase 0.10.0 派生并修改的源代码。
+SupaCloud Lite 的 Supabase 兼容协议实现包含从一个 MIT 许可的上游协议实现派生并修改的源代码。
 
 - Copyright: 2026 Sanket Sahu
 - License: MIT
-- Upstream: `https://github.com/sanketmysore/tinbase`
-- Local license copy: `LICENSES/TINBASE-MIT.txt`
+- Local license copy: `LICENSES/UPSTREAM-PROTOCOL-MIT.txt`
 
 主要修改包括：删除 Admin UI、Node HTTP server、native PostgreSQL 和 pg-mem 路径；固定为单项目 PGlite；改用 Bun.serve 和 Bun.build；增加 SupaCloud Lite 密钥、CLI、测试、文档和发布集成。
 

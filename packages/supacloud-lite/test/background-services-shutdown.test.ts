@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test'
-import { CronService } from '../src/vendor/tinbase/cron/service.js'
-import type { Database } from '../src/vendor/tinbase/db/database.js'
-import { NetService } from '../src/vendor/tinbase/net/service.js'
-import { RetentionService } from '../src/vendor/tinbase/retention/service.js'
+import { CronService } from '../src/runtime/cron/service.js'
+import type { Database } from '../src/runtime/db/database.js'
+import { NetService } from '../src/runtime/net/service.js'
+import { RetentionService } from '../src/runtime/retention/service.js'
 
 test('waits for a public net tick while later interval ticks are skipped', async () => {
   const queryGate = createGatedDatabase()

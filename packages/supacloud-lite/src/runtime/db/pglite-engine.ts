@@ -7,7 +7,7 @@ import { readDataDirLockOwner, recoverStaleDataDirLock } from './data-dir-lock.j
 import {
   STANDALONE_PGLITE_ASSETS,
   type StandalonePgliteAssets,
-} from '../../../standalone-assets-protocol.js'
+} from '../../standalone-assets-protocol.js'
 
 /**
  * Build a {@link DbEngine} backed by PGlite (WASM Postgres) at `dataDir`, or an

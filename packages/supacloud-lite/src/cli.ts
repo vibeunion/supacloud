@@ -2,9 +2,9 @@
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import packageJson from '../package.json' with { type: 'json' }
-import { generateTypes, inspectDb } from './vendor/tinbase/index.js'
-import { computeDbDiff, pullSchema } from './vendor/tinbase/node/db-diff.js'
-import { loadSupabaseProject } from './vendor/tinbase/node/project.js'
+import { generateTypes, inspectDb } from './runtime/index.js'
+import { computeDbDiff, pullSchema } from './runtime/node/db-diff.js'
+import { loadSupabaseProject } from './runtime/node/project.js'
 import {
   createProjectBackend,
   assertResetPathsSafe,

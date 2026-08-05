@@ -97,7 +97,7 @@ RP ID and origins before persisting, and checks the installed GoTrue version
 before restarting it. Applications must use
 a compatible Supabase SDK and explicitly opt in with
 `auth.experimental.passkey = true`. This capability applies to the GoTrue-based
-main/self-hosted runtime; SupaCloud Lite has a separate Tinbase/PGlite auth
+main/self-hosted runtime; SupaCloud Lite has a separate embedded PGlite auth
 runtime and does not inherit it automatically.
 
 SAML SP key rotation uses GoTrue's dual-key window:

@@ -39,11 +39,11 @@ export function runWithDenoEnv<T>(env: Record<string, string>, fn: () => Promise
 
 /** Install globalThis.Deno if we're not already running under a Deno-like runtime. */
 export function installDenoShim(): void {
-  const g = globalThis as Record<string, unknown> & { Deno?: unknown; __tinbaseDeno?: boolean }
-  if (g.__tinbaseDeno) return
+  const g = globalThis as Record<string, unknown> & { Deno?: unknown; __supacloudLiteDeno?: boolean }
+  if (g.__supacloudLiteDeno) return
   // a real Deno runtime already provides Deno.serve - don't clobber it
   if (g.Deno && typeof (g.Deno as { serve?: unknown }).serve === 'function') return
-  g.__tinbaseDeno = true
+  g.__supacloudLiteDeno = true
   g.Deno = {
     serve(arg1: unknown, arg2?: unknown) {
       captured.handler = (typeof arg1 === 'function' ? arg1 : arg2) as DenoHandler

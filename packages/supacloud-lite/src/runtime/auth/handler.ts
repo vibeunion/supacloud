@@ -5,7 +5,7 @@
 import type { Database, Querier } from '../db/database.js'
 import { randomToken, signJwt, verifyJwt, type JwtClaims } from '../jwt.js'
 import type { Mailer, RequestContext } from '../types.js'
-import { SUPACLOUD_LITE_VERSION } from '../../../version.js'
+import { SUPACLOUD_LITE_VERSION } from '../../version.js'
 import { OAuthService, type OAuthProviderConfig } from './oauth.js'
 import { hashPassword, verifyPassword } from './password.js'
 import { qrSvgDataUri } from './qr.js'

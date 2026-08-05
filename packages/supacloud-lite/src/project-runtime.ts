@@ -1,15 +1,15 @@
 import { chmod, link, lstat, mkdir, readFile, realpath, unlink, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, parse, relative, resolve } from 'node:path'
-import { createBackend, signJwt, type TinbaseBackend } from './vendor/tinbase/index.js'
-import type { WebhookConfig } from './vendor/tinbase/webhooks/service.js'
-import { serveBun, type RunningServer } from './vendor/tinbase/node/bun-server.js'
-import { FsStorageDriver } from './vendor/tinbase/node/fs-driver.js'
-import { loadProjectConfig, type ProjectConfig } from './vendor/tinbase/node/load-config.js'
-import { loadFunctionEnv, loadFunctions } from './vendor/tinbase/node/load-functions.js'
-import { loadSupabaseProject } from './vendor/tinbase/node/project.js'
-import { MemoryStorageDriver } from './vendor/tinbase/storage/driver.js'
-import { S3StorageDriver, type S3StorageDriverOptions } from './vendor/tinbase/storage/s3-driver.js'
-import type { StorageDriver } from './vendor/tinbase/types.js'
+import { createBackend, signJwt, type SupaCloudLiteBackend } from './runtime/index.js'
+import type { WebhookConfig } from './runtime/webhooks/service.js'
+import { serveBun, type RunningServer } from './runtime/node/bun-server.js'
+import { FsStorageDriver } from './runtime/node/fs-driver.js'
+import { loadProjectConfig, type ProjectConfig } from './runtime/node/load-config.js'
+import { loadFunctionEnv, loadFunctions } from './runtime/node/load-functions.js'
+import { loadSupabaseProject } from './runtime/node/project.js'
+import { MemoryStorageDriver } from './runtime/storage/driver.js'
+import { S3StorageDriver, type S3StorageDriverOptions } from './runtime/storage/s3-driver.js'
+import type { StorageDriver } from './runtime/types.js'
 
 export interface ProjectSecrets {
   jwtSecret: string
@@ -47,7 +47,7 @@ export interface ProjectRuntimeOptions {
 }
 
 export interface ProjectBackend {
-  backend: TinbaseBackend
+  backend: SupaCloudLiteBackend
   config: ProjectConfig
   paths: ProjectPaths
   host: string

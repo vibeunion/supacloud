@@ -2,7 +2,7 @@ import { chmod, copyFile, link, lstat, mkdir, mkdtemp, readdir, readFile, rename
 import { dirname, join, parse, relative, resolve, sep } from 'node:path'
 import { create as createTar, extract as extractTar } from 'tar'
 import type { ConfiguredStorageBackend, ProjectPaths } from './project-runtime.js'
-import { recoverStaleDataDirLock } from './vendor/tinbase/db/data-dir-lock.js'
+import { recoverStaleDataDirLock } from './runtime/db/data-dir-lock.js'
 
 const SNAPSHOT_FORMAT = 'supacloud-lite-snapshot'
 const SNAPSHOT_VERSION = 1

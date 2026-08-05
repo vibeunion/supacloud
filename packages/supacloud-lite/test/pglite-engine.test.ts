@@ -6,7 +6,7 @@ import {
   STANDALONE_PGLITE_ASSETS,
   type StandalonePgliteAssets,
 } from '../src/standalone-assets-protocol.js'
-import { createPgliteEngine } from '../src/vendor/tinbase/db/pglite-engine.js'
+import { createPgliteEngine } from '../src/runtime/db/pglite-engine.js'
 
 const emptyWasmModule = new WebAssembly.Module(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]))
 

@@ -1,5 +1,5 @@
 /**
- * `tinbase db diff` core: diff the live project database (which may contain
+ * `supacloud-lite db diff` core: diff the live project database (which may contain
  * changes made outside migrations) against a fresh "shadow" database that has
  * only the migrations applied. The emitted DDL is the delta you'd save as a
  * new migration.
@@ -8,7 +8,7 @@ import { mkdtempSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createBackend, type TinbaseBackend } from '../index.js'
+import { createBackend, type SupaCloudLiteBackend } from '../index.js'
 import { snapshotSchema, diffSchemas } from '../db/schema-diff.js'
 import type { MigrationFile } from '../types.js'
 
@@ -33,13 +33,13 @@ export async function computeDbDiff(opts: DbDiffOptions): Promise<string[]> {
   const schema = opts.schema ?? 'public'
 
   // shadow = migrations only, fresh
-  const shadow: TinbaseBackend = await createBackend({
+  const shadow: SupaCloudLiteBackend = await createBackend({
     engine: opts.makeShadowEngine ? await opts.makeShadowEngine() : undefined,
     migrations: opts.migrations,
     startRuntimeServices: false,
     // no seed: seed is data, not schema
   })
-  let live: TinbaseBackend | undefined
+  let live: SupaCloudLiteBackend | undefined
   let operationFailed = false
 
   try {
@@ -68,7 +68,7 @@ export async function computeDbDiff(opts: DbDiffOptions): Promise<string[]> {
 
 /** Fresh throwaway data dir for a native-engine shadow database, under the OS temp dir. */
 export function shadowNativeDataDir(): string {
-  return join(mkdtempSync(join(tmpdir(), 'tinbase-shadow-')), 'pg')
+  return join(mkdtempSync(join(tmpdir(), 'supacloud-lite-shadow-')), 'pg')
 }
 
 /** Inputs for {@link pullSchema}: everything {@link DbDiffOptions} needs plus where/how to write the migration. */
@@ -92,20 +92,20 @@ export interface DbPullResult {
 }
 
 /**
- * `tinbase db pull` core: like `db diff`, but writes the delta as a migration
+ * `supacloud-lite db pull` core: like `db diff`, but writes the delta as a migration
  * AND records it as already-applied on the live database - the schema is
- * already there, so a subsequent `tinbase start` must not re-run it. This is
+ * already there, so a subsequent `supacloud-lite start` must not re-run it. This is
  * how you bring an out-of-migration (or externally-created) schema under
  * version control.
  */
 export async function pullSchema(opts: DbPullOptions): Promise<DbPullResult> {
   const schema = opts.schema ?? 'public'
-  const shadow: TinbaseBackend = await createBackend({
+  const shadow: SupaCloudLiteBackend = await createBackend({
     engine: opts.makeShadowEngine ? await opts.makeShadowEngine() : undefined,
     migrations: opts.migrations,
     startRuntimeServices: false,
   })
-  let live: TinbaseBackend | undefined
+  let live: SupaCloudLiteBackend | undefined
   let operationFailed = false
   try {
     live = await createBackend({
@@ -146,9 +146,9 @@ export async function pullSchema(opts: DbPullOptions): Promise<DbPullResult> {
 }
 
 /** Close every initialized backend, surfacing cleanup errors only after both close attempts. */
-async function closeBackends(...backends: Array<TinbaseBackend | undefined>): Promise<void> {
+async function closeBackends(...backends: Array<SupaCloudLiteBackend | undefined>): Promise<void> {
   const results = await Promise.allSettled(
-    backends.filter((backend): backend is TinbaseBackend => backend !== undefined).map(async (backend) => await backend.close()),
+    backends.filter((backend): backend is SupaCloudLiteBackend => backend !== undefined).map(async (backend) => await backend.close()),
   )
   const failed = results.find((result) => result.status === 'rejected')
   if (failed?.status === 'rejected') throw failed.reason

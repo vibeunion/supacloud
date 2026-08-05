@@ -9,7 +9,7 @@ import { BOOTSTRAP_SQL, MINIMAL_BOOTSTRAP_SQL } from './bootstrap.js'
 import { PGMQ_SQL, CRON_SQL, NET_SQL, EXT_COMPAT_SQL, VAULT_SQL } from './emulated.js'
 import { rewriteMigrationSql } from './sql-compat.js'
 
-// tinbase's default session search_path (matches bootstrap + Supabase's, with
+// SupaCloud Lite's default session search_path (matches bootstrap + Supabase's, with
 // the extensions schema on the path). Reset to this before each migration so a
 // migration's own `SET search_path` can't leak across our single connection.
 const DEFAULT_SEARCH_PATH_SQL = `set search_path to "$user", public, extensions`
@@ -200,7 +200,7 @@ export class Database {
         this.engine.transaction(async (tx) => {
           // The Supabase CLI applies each migration on a fresh connection, so a
           // top-level `SET search_path TO ''` in one file never leaks to the next.
-          // tinbase runs every migration on one connection, so reset to the
+          // SupaCloud Lite runs every migration on one connection, so reset to the
           // default first - otherwise a hardened migration's search_path change
           // breaks unqualified calls (e.g. gen_random_bytes) in later files.
           await tx.exec(DEFAULT_SEARCH_PATH_SQL)
@@ -476,13 +476,13 @@ export class Database {
           select from pg_trigger tg
           join pg_class c on c.oid = tg.tgrelid
           join pg_namespace n on n.oid = c.relnamespace
-          where tg.tgname = 'tinbase_cdc'
+          where tg.tgname = 'supacloud_lite_cdc'
             and n.nspname = ${quoteLiteral(schema)}
             and c.relname = ${quoteLiteral(table)}
         ) then
-          create trigger tinbase_cdc
+          create trigger supacloud_lite_cdc
             after insert or update or delete on ${s}.${t}
-            for each row execute function tinbase.cdc_notify();
+            for each row execute function supacloud_lite.cdc_notify();
         end if;
       end $$;
     `)
@@ -490,7 +490,7 @@ export class Database {
 
   /**
    * Register a CDC listener; the first call starts the single LISTEN on the
-   * shared `tinbase_cdc` channel. Returns an unsubscribe fn.
+   * shared `supacloud_lite_cdc` channel. Returns an unsubscribe fn.
    */
   async onCdcEvent(cb: (e: CdcEvent) => void): Promise<() => Promise<void>> {
     this.cdcListeners.add(cb)
@@ -519,7 +519,7 @@ export class Database {
   }
 
   private async attachCdcListener(): Promise<void> {
-    this.cdcUnsubscribe = await this.engine.listen('tinbase_cdc', (payload) => {
+    this.cdcUnsubscribe = await this.engine.listen('supacloud_lite_cdc', (payload) => {
       try {
         const event = JSON.parse(payload) as CdcEvent
         for (const listener of this.cdcListeners) listener(event)

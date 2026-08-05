@@ -312,7 +312,7 @@ await running.close()
 
 ### 来源与许可
 
-协议实现派生并精简自 Tinbase，保留其 MIT 许可；PGlite 使用 Apache-2.0。完整说明见 `THIRD_PARTY_NOTICES.md` 和 `LICENSES/`。
+协议实现派生并精简自一个采用 MIT 许可的上游协议实现；PGlite 使用 Apache-2.0。完整说明见 `THIRD_PARTY_NOTICES.md` 和 `LICENSES/`。
 
 ---
 
@@ -624,4 +624,4 @@ You can also use `createLiteBackend()` to directly create an embedded backend wi
 
 ### Provenance and License
 
-The protocol implementation is derived and slimmed down from Tinbase, retaining its MIT license; PGlite uses Apache-2.0. See `THIRD_PARTY_NOTICES.md` and `LICENSES/` for full details.
+The protocol implementation is derived and slimmed down from an MIT-licensed upstream protocol implementation; PGlite uses Apache-2.0. See `THIRD_PARTY_NOTICES.md` and `LICENSES/` for full details.

@@ -6,7 +6,7 @@
  */
 import { quoteIdent, quoteLiteral, type Database, type FunctionInfo } from '../db/database.js'
 import { ApiError, type RequestContext } from '../types.js'
-import { SUPACLOUD_LITE_VERSION } from '../../../version.js'
+import { SUPACLOUD_LITE_VERSION } from '../../version.js'
 import { QueryBuilder, pgArrayLiteral, renderColumnExpr, sanitizeCast } from './build.js'
 import { errorToResponse, jsonResponse } from './errors.js'
 import { ParseError, parseQuery, type ParsedQuery } from './parse.js'

@@ -2,7 +2,7 @@
  * Database engine abstraction. Two implementations:
  *  - PGlite (WASM Postgres): portable, runs in the browser; heavier RAM.
  *  - Native embedded Postgres (Node only): PocketBase-class footprint.
- * The rest of tinbase only talks to this interface.
+ * The rest of SupaCloud Lite only talks to this interface.
  */
 
 /** Result of a query: returned rows plus, for writes, the affected row count. */
@@ -25,7 +25,7 @@ export interface EngineTx {
 export type EngineUnsubscribe = () => void | Promise<void>
 
 /**
- * The single database interface the rest of tinbase talks to, regardless of
+ * The single database interface the rest of SupaCloud Lite talks to, regardless of
  * whether it's backed by PGlite, native embedded Postgres, or the pg-mem subset.
  */
 export interface DbEngine {

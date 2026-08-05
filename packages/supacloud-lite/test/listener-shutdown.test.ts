@@ -1,9 +1,9 @@
 import { expect, test } from 'bun:test'
-import { Database as TinbaseDatabase } from '../src/vendor/tinbase/db/database.js'
-import type { DbEngine, EngineResults, EngineTx, EngineUnsubscribe } from '../src/vendor/tinbase/db/engine.js'
-import { createBackend } from '../src/vendor/tinbase/index.js'
-import { computeDbDiff, pullSchema } from '../src/vendor/tinbase/node/db-diff.js'
-import { RealtimeEngine } from '../src/vendor/tinbase/realtime/engine.js'
+import { Database as LiteDatabase } from '../src/runtime/db/database.js'
+import type { DbEngine, EngineResults, EngineTx, EngineUnsubscribe } from '../src/runtime/db/engine.js'
+import { createBackend } from '../src/runtime/index.js'
+import { computeDbDiff, pullSchema } from '../src/runtime/node/db-diff.js'
+import { RealtimeEngine } from '../src/runtime/realtime/engine.js'
 
 test('utility backends do not attach database listeners', async () => {
   let listenCalls = 0
@@ -47,12 +47,12 @@ test('shares CDC LISTEN and awaits the final asynchronous unsubscribe', async ()
   const engine = createListenerEngine(async (channel) => {
     listenCalls += 1
     return async () => {
-      expect(channel).toBe('tinbase_cdc')
+      expect(channel).toBe('supacloud_lite_cdc')
       unsubscribeCalls += 1
       await unsubscribeGate.promise
     }
   })
-  const database = await TinbaseDatabase.create(engine)
+  const database = await LiteDatabase.create(engine)
   const firstStop = await database.onCdcEvent(() => {})
   const secondStop = await database.onCdcEvent(() => {})
 
@@ -86,7 +86,7 @@ test('Realtime stop waits for both unsubscriptions and propagates the first erro
   const broadcastError = new Error('broadcast unsubscribe failed')
   const unsubscribeCalls: string[] = []
   const engine = createListenerEngine(async (channel) => {
-    if (channel === 'tinbase_cdc') {
+    if (channel === 'supacloud_lite_cdc') {
       return async () => {
         unsubscribeCalls.push(channel)
         await cdcGate.promise
@@ -97,7 +97,7 @@ test('Realtime stop waits for both unsubscriptions and propagates the first erro
       await broadcastGate.promise
     }
   })
-  const database = await TinbaseDatabase.create(engine)
+  const database = await LiteDatabase.create(engine)
   const realtime = new RealtimeEngine(database)
   await realtime.start()
 
@@ -106,7 +106,7 @@ test('Realtime stop waits for both unsubscriptions and propagates the first erro
     settled = true
   })
   await flushMicrotasks()
-  expect(unsubscribeCalls.toSorted()).toEqual(['tinbase_cdc', 'tinbase_realtime_broadcast'])
+  expect(unsubscribeCalls.toSorted()).toEqual(['supacloud_lite_cdc', 'supacloud_lite_realtime_broadcast'])
   expect(settled).toBeFalse()
 
   cdcGate.reject(cdcError)

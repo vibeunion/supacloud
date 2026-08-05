@@ -1,6 +1,6 @@
 /**
  * In-memory sliding-window rate limiter for auth endpoints. GoTrue throttles
- * login/signup/OTP/recovery to blunt brute-force and mail-flooding; tinbase
+ * login/signup/OTP/recovery to blunt brute-force and mail-flooding; SupaCloud Lite
  * mirrors that with per-key windows and returns the same 429 /
  * `over_request_rate_limit` shape. State is per-process (no external store),
  * which is sufficient for a single-process local backend.

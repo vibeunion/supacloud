@@ -1,5 +1,5 @@
 /**
- * Schema snapshot + diff - the engine behind `tinbase db diff`.
+ * Schema snapshot + diff - the engine behind `supacloud-lite db diff`.
  *
  * Snapshots a schema (tables, columns, constraints, indexes, enums) into a
  * structured form, then emits the DDL to turn one snapshot into another. Used

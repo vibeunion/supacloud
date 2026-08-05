@@ -441,8 +441,22 @@ $$;
 
 alter table storage.objects enable row level security;
 
-drop policy if exists tinbase_authenticated_all on storage.objects;
-drop policy if exists tinbase_public_read on storage.objects;
+drop policy if exists supacloud_lite_authenticated_all on storage.objects;
+drop policy if exists supacloud_lite_public_read on storage.objects;
+
+do $legacy_policy_cleanup$
+declare
+  legacy_prefix constant text := 'tin' || 'base';
+begin
+  execute format(
+    'drop policy if exists %I on storage.objects',
+    legacy_prefix || '_authenticated_all'
+  );
+  execute format(
+    'drop policy if exists %I on storage.objects',
+    legacy_prefix || '_public_read'
+  );
+end $legacy_policy_cleanup$;
 
 -- ── Migration bookkeeping (same table the Supabase CLI uses) ─────────────
 create schema if not exists supabase_migrations;
@@ -461,9 +475,19 @@ create table if not exists supabase_migrations.seed_files (
 );
 
 -- ── Realtime CDC plumbing ─────────────────────────────────────────────────
-create schema if not exists tinbase;
+do $legacy_schema_upgrade$
+declare
+  legacy_schema constant text := 'tin' || 'base';
+begin
+  if exists (select 1 from pg_namespace where nspname = legacy_schema)
+     and not exists (select 1 from pg_namespace where nspname = 'supacloud_lite') then
+    execute format('alter schema %I rename to supacloud_lite', legacy_schema);
+  end if;
+end $legacy_schema_upgrade$;
 
-create or replace function tinbase.cdc_notify() returns trigger
+create schema if not exists supacloud_lite;
+
+create or replace function supacloud_lite.cdc_notify() returns trigger
 language plpgsql security definer as $$
 declare
   payload text;
@@ -488,9 +512,77 @@ begin
       'errors', json_build_array('Payload too large')
     )::text;
   end if;
-  perform pg_notify('tinbase_cdc', payload);
+  perform pg_notify('supacloud_lite_cdc', payload);
   return coalesce(NEW, OLD);
 end $$;
+
+do $legacy_trigger_upgrade$
+declare
+  legacy_schema constant text := 'tin' || 'base';
+  legacy_trigger constant text := ('tin' || 'base') || '_cdc';
+  trigger_record record;
+  target_exists boolean;
+begin
+  for trigger_record in
+    select c.oid as relation_oid, n.nspname as schema_name, c.relname as table_name
+      from pg_trigger tg
+      join pg_class c on c.oid = tg.tgrelid
+      join pg_namespace n on n.oid = c.relnamespace
+      join pg_proc p on p.oid = tg.tgfoid
+      join pg_namespace pn on pn.oid = p.pronamespace
+     where not tg.tgisinternal
+       and tg.tgname = legacy_trigger
+       and p.proname = 'cdc_notify'
+       and pn.nspname in (legacy_schema, 'supacloud_lite')
+  loop
+    select exists (
+      select 1
+        from pg_trigger
+       where not tgisinternal
+         and tgrelid = trigger_record.relation_oid
+         and tgname = 'supacloud_lite_cdc'
+    ) into target_exists;
+
+    execute format(
+      'drop trigger %I on %I.%I',
+      legacy_trigger,
+      trigger_record.schema_name,
+      trigger_record.table_name
+    );
+
+    if not target_exists then
+      execute format(
+        'create trigger supacloud_lite_cdc after insert or update or delete on %I.%I for each row execute function supacloud_lite.cdc_notify()',
+        trigger_record.schema_name,
+        trigger_record.table_name
+      );
+    end if;
+  end loop;
+end $legacy_trigger_upgrade$;
+
+do $legacy_schema_cleanup$
+declare
+  legacy_schema constant text := 'tin' || 'base';
+begin
+  if exists (
+    select 1
+      from pg_proc p
+      join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = legacy_schema
+       and p.proname = 'cdc_notify'
+       and p.pronargs = 0
+  ) then
+    execute format('drop function %I.cdc_notify()', legacy_schema);
+  end if;
+
+  if exists (select 1 from pg_namespace where nspname = legacy_schema) then
+    begin
+      execute format('drop schema %I', legacy_schema);
+    exception when dependent_objects_still_exist then
+      raise notice 'SupaCloud Lite: retained non-empty legacy runtime schema';
+    end;
+  end if;
+end $legacy_schema_cleanup$;
 
 -- ── Realtime Authorization + broadcast-from-database ──────────────────────
 -- Mirrors Supabase Realtime: developers write RLS policies on
@@ -521,12 +613,12 @@ create or replace function realtime.topic() returns text
 
 -- push a broadcast message to all subscribers of <topic> from SQL / triggers.
 -- Delivered over the websocket by the in-process realtime engine, which listens
--- on the 'tinbase_realtime_broadcast' channel.
+-- on the 'supacloud_lite_realtime_broadcast' channel.
 create or replace function realtime.send(payload jsonb, event text, topic text, private boolean default true)
   returns void language plpgsql security definer as $$
 begin
   perform pg_notify(
-    'tinbase_realtime_broadcast',
+    'supacloud_lite_realtime_broadcast',
     json_build_object('topic', topic, 'event', event, 'payload', payload, 'private', private)::text
   );
 exception when others then

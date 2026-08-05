@@ -2,9 +2,9 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, parse } from 'node:path'
-import { decodeJwt } from '../src/vendor/tinbase/jwt.js'
+import { decodeJwt } from '../src/runtime/jwt.js'
 import { createSymlinkIfPermitted } from './support/symlink.js'
-import { loadSupabaseProject } from '../src/vendor/tinbase/node/project.js'
+import { loadSupabaseProject } from '../src/runtime/node/project.js'
 import {
   createProjectBackend,
   assertResetPathsSafe,
@@ -12,7 +12,7 @@ import {
   mintProjectKeys,
   resolveProjectPaths,
 } from '../src/project-runtime.js'
-import type { StorageDriver } from '../src/vendor/tinbase/types.js'
+import type { StorageDriver } from '../src/runtime/types.js'
 
 const temporaryDirectories: string[] = []
 

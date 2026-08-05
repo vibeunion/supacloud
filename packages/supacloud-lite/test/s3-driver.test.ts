@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   S3StorageDriver,
   type S3StorageClientLike,
-} from '../src/vendor/tinbase/storage/s3-driver.js'
+} from '../src/runtime/storage/s3-driver.js'
 
 type MockFile = {
   bytes: Uint8Array

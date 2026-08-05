@@ -1,10 +1,10 @@
 /**
- * Read everything tinbase can honor from an existing Supabase project's
- * supabase/config.toml, so pointing tinbase at that project needs no new config.
+ * Read everything SupaCloud Lite can honor from an existing Supabase project's
+ * supabase/config.toml, so pointing SupaCloud Lite at that project needs no new config.
  *
  * config.toml is one document, so this is one loader: parse once, then project
  * the tree into a nested `ProjectConfig` that mirrors the file's sections. The
- * CLI spreads those sections into createBackend. Sections for services tinbase
+ * CLI spreads those sections into createBackend. Sections for services SupaCloud Lite
  * doesn't run (SMS, analytics, pooler, studio/edge-runtime ports, experimental)
  * are intentionally ignored.
  */
@@ -25,7 +25,7 @@ import {
   type Environment,
 } from './config-toml.js'
 
-/** The project's config.toml, projected into the shapes tinbase consumes. */
+/** The project's config.toml, projected into the shapes SupaCloud Lite consumes. */
 export interface ProjectConfig {
   /** the [auth] slice: settings, redirects, sessions, rate limits, OAuth */
   auth: AuthConfig

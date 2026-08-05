@@ -1,13 +1,13 @@
 /**
- * Startup guards for the "not local anymore" transition. Tinbase ships with the
- * well-known Supabase local-dev defaults so `tinbase start` just works on
+ * Startup guards for the "not local anymore" transition. SupaCloud Lite ships with the
+ * well-known Supabase local-dev defaults so `supacloud-lite start` just works on
  * localhost; the moment the server is bound to a non-loopback interface those
  * same defaults become forgeable, so we escalate the relevant warnings into
  * hard errors.
  */
 import { DEFAULT_JWT_SECRET } from './types.js'
 
-/** Loopback hosts that keep tinbase in local-dev mode (defaults allowed). */
+/** Loopback hosts that keep SupaCloud Lite in local-dev mode (defaults allowed). */
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1', '', undefined])
 
 /**

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { hashPassword, verifyPassword } from '../src/vendor/tinbase/auth/password.js'
+import { hashPassword, verifyPassword } from '../src/runtime/auth/password.js'
 
 describe('Auth password compatibility', () => {
   test('creates and verifies GoTrue-compatible bcrypt hashes with Bun', async () => {

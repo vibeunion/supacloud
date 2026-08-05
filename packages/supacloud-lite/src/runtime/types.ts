@@ -1,5 +1,5 @@
 /**
- * Public configuration and shared types for the tinbase package. {@link BackendConfig}
+ * Public configuration and shared types for the SupaCloud Lite package. {@link BackendConfig}
  * is the primary input to {@link import('./index.js').createBackend}; the rest are
  * the small structural types that config and handlers exchange.
  */
@@ -27,7 +27,7 @@ export interface BackendConfig {
   dataDir?: string
   /**
    * Custom database engine (e.g. the native embedded Postgres engine from
-   * "tinbase/node"). Default: PGlite on `dataDir`.
+   * a native runtime module). Default: PGlite on `dataDir`.
    */
   engine?: import('./db/engine.js').DbEngine
   /** Secret used to sign/verify every JWT. Defaults to the Supabase local-dev secret. */

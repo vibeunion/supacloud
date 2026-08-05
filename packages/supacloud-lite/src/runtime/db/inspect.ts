@@ -1,5 +1,5 @@
 /**
- * `tinbase inspect` core: a lightweight database report - per-table row counts
+ * `supacloud-lite inspect` core: a lightweight database report - per-table row counts
  * and on-disk size for a schema. Like a tiny `supabase inspect db`, enough to
  * eyeball what's in a local project. (Uses pg_total_relation_size, so it runs
  * on the real-Postgres engines, not the pg-mem subset.)
