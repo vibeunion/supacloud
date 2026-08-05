@@ -166,11 +166,12 @@ async function assertWebhookCapacity(database: SQL, projectRef: string): Promise
 }
 
 async function insertWebhookMetadata(database: SQL, input: NewWebhook): Promise<WebhookRow> {
+  const eventArray = database.array(input.events, "TEXT");
   const [webhookMetadata] = await database`
     INSERT INTO project_webhooks (
       id, project_ref, url, events, enabled, api_version, created_by
     ) VALUES (
-      ${input.id}, ${input.projectRef}, ${input.url}, ${input.events},
+      ${input.id}, ${input.projectRef}, ${input.url}, ${eventArray},
       ${input.enabled}, ${SIGNATURE_API_VERSION}, ${input.actor}
     ) RETURNING *
   ` as WebhookRow[];
@@ -405,9 +406,10 @@ export const webhookDeliveryService = {
     }
     const events = input.events === undefined ? current.events : normalizeEvents(input.events);
     if (events.length === 0) throw new ValidationError("events must not be empty");
+    const eventArray = sql.array(events, "TEXT");
     await sql`
       UPDATE project_webhooks SET
-        url = ${url}, events = ${events}, enabled = ${input.enabled ?? current.enabled}, updated_at = NOW()
+        url = ${url}, events = ${eventArray}, enabled = ${input.enabled ?? current.enabled}, updated_at = NOW()
       WHERE project_ref = ${ref} AND id = ${webhookId}
     `;
     return activePublicWebhook(ref, webhookId);

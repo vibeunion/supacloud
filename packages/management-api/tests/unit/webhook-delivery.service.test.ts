@@ -7,6 +7,8 @@ let persistedQueries: Array<{ text: string; values: unknown[] }> = [];
 let unfinishedOutboxCount = 0;
 let matchingSubscriptionCount = 1;
 let managedSecretAvailable = true;
+const transactionArray = mock((values: string[], type: string) => ({ values, type }));
+const controlArray = mock((values: string[], type: string) => ({ values, type }));
 
 const webhookRow = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -42,7 +44,7 @@ const originalDelivery = {
   api_version: "2026-07-01",
 };
 
-const txMock = mock((strings: TemplateStringsArray, ...values: unknown[]) => {
+const transactionQuery = mock((strings: TemplateStringsArray, ...values: unknown[]) => {
   const text = strings.join("?");
   persistedQueries.push({ text, values });
   if (text.includes("FROM webhook_outbox") && text.includes("FOR UPDATE")) return Promise.resolve([claimed()]);
@@ -67,6 +69,7 @@ const txMock = mock((strings: TemplateStringsArray, ...values: unknown[]) => {
   if (text.includes("UPDATE project_webhooks")) return Promise.resolve([{ id: webhookRow.id, deleted_at: new Date() }]);
   return Promise.resolve([]);
 });
+const txMock = Object.assign(transactionQuery, { array: transactionArray });
 const sqlQueryMock = mock((strings: TemplateStringsArray, ...values: unknown[]) => {
   const text = strings.join("?");
   persistedQueries.push({ text, values });
@@ -83,6 +86,7 @@ const sqlQueryMock = mock((strings: TemplateStringsArray, ...values: unknown[]) 
   return Promise.resolve([]);
 });
 const sqlMock = Object.assign(sqlQueryMock, {
+  array: controlArray,
   begin: mock((callback: (tx: typeof txMock) => Promise<unknown>) => callback(txMock)),
 });
 
@@ -112,7 +116,9 @@ describe("durable webhook delivery processing", () => {
     matchingSubscriptionCount = 1;
     managedSecretAvailable = true;
     txMock.mockClear();
+    transactionArray.mockClear();
     sqlQueryMock.mockClear();
+    controlArray.mockClear();
     sqlMock.begin.mockClear();
   });
 
@@ -147,6 +153,8 @@ describe("durable webhook delivery processing", () => {
     expect(created).not.toHaveProperty("secret");
     const webhookInsert = persistedQueries.find(({ text }) => text.includes("INSERT INTO project_webhooks"));
     expect(webhookInsert?.text).not.toContain("secret_encrypted");
+    expect(transactionArray).toHaveBeenCalledWith(["user.created"], "TEXT");
+    expect(webhookInsert?.values).toContainEqual({ values: ["user.created"], type: "TEXT" });
     const managedInsert = persistedQueries.find(({ text }) => text.includes("INSERT INTO project_control_secrets"));
     expect(managedInsert?.values).toContain("webhook");
     expect(managedInsert?.values.some((storedValue) => String(storedValue).startsWith("encrypted:whsec_"))).toBe(true);
@@ -157,6 +165,41 @@ describe("durable webhook delivery processing", () => {
     expect(rotated).not.toHaveProperty("secret");
     expect(persistedQueries.some(({ text }) => text.includes("previous_secret_encrypted"))).toBe(false);
     expect(persistedQueries.some(({ text }) => text.includes("INSERT INTO project_control_secrets"))).toBe(true);
+  });
+
+  test("updates webhook events with a typed array binding", async () => {
+    await webhookDeliveryService.updateWebhook("proj_1", webhookRow.id, {
+      events: ["user.created", "organization.created"],
+    });
+
+    expect(controlArray).toHaveBeenCalledWith(["user.created", "organization.created"], "TEXT");
+    const webhookUpdate = persistedQueries.find(({ text }) => (
+      text.includes("UPDATE project_webhooks") && text.includes("events =")
+    ));
+    expect(webhookUpdate?.values).toContainEqual({
+      values: ["user.created", "organization.created"],
+      type: "TEXT",
+    });
+  });
+
+  test("preserves and binds stored events when events are omitted", async () => {
+    await webhookDeliveryService.updateWebhook("proj_1", webhookRow.id, { enabled: false });
+
+    expect(controlArray).toHaveBeenCalledWith(webhookRow.events, "TEXT");
+    const webhookUpdate = persistedQueries.find(({ text }) => text.includes("UPDATE project_webhooks"));
+    expect(webhookUpdate?.text).toContain("events =");
+    expect(webhookUpdate?.values).toContainEqual({ values: webhookRow.events, type: "TEXT" });
+  });
+
+  test("rejects empty webhook events before binding or updating", async () => {
+    await expect(webhookDeliveryService.updateWebhook(
+      "proj_1",
+      webhookRow.id,
+      { events: [] },
+    )).rejects.toThrow("events must not be empty");
+
+    expect(controlArray).not.toHaveBeenCalled();
+    expect(persistedQueries.some(({ text }) => text.includes("UPDATE project_webhooks"))).toBe(false);
   });
 
   test("reports managed secret status without reading or exposing the value", async () => {

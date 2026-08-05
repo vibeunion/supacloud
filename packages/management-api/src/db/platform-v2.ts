@@ -580,11 +580,12 @@ function normalizedLegacyWebhook(rawWebhook: LegacyWebhook): MigratedLegacyWebho
 
 async function persistLegacyWebhook(db: SQL, projectRef: string, webhook: MigratedLegacyWebhook): Promise<void> {
   const webhookId = crypto.randomUUID();
+  const eventArray = db.array(webhook.events, "TEXT");
   const [storedWebhook] = await db`
     INSERT INTO project_webhooks (
       id, project_ref, legacy_id, url, events, enabled, created_at, updated_at
     ) VALUES (
-      ${webhookId}, ${projectRef}, ${webhook.legacyId}, ${webhook.url}, ${webhook.events},
+      ${webhookId}, ${projectRef}, ${webhook.legacyId}, ${webhook.url}, ${eventArray},
       ${webhook.enabled}, ${webhook.createdAt}, ${webhook.updatedAt}
     )
     ON CONFLICT (project_ref, legacy_id) DO UPDATE SET legacy_id = EXCLUDED.legacy_id
