@@ -1060,6 +1060,8 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
             hook_send_email_uri: "send_email_hook",
             hook_send_sms_enabled: "send_sms_hook",
             hook_send_sms_uri: "send_sms_hook",
+            hook_before_user_created_enabled: "before_user_created_hook",
+            hook_before_user_created_uri: "before_user_created_hook",
             hook_custom_access_token_secrets: "custom_access_token_hook",
             hook_mfa_verification_attempt_secrets: "mfa_verification_hook",
             hook_password_verification_attempt_secrets: "password_verification_hook",
@@ -1071,7 +1073,11 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
           if (hookName) {
             const currentHooks =
               (currentAuth.hooks as Record<string, any>) || {};
-            const currentHook = currentHooks[hookName] || {};
+            const pendingHooks = (otherUpdates.hooks as Record<string, any>) || {};
+            const currentHook = {
+              ...(currentHooks[hookName] || {}),
+              ...(pendingHooks[hookName] || {}),
+            };
             if (key.endsWith("_enabled")) {
               otherUpdates.hooks = {
                 ...((otherUpdates.hooks as Record<string, any>) || {}),

@@ -546,6 +546,46 @@ describe("SupAuth auth config boundary", () => {
     expect(persistedHooks.before_user_created_hook.secrets).toBeUndefined();
   });
 
+  test("round-trips flat before-user-created hook registration fields", async () => {
+    config.authRuntimeOwnerRef = "";
+    let settings: Record<string, unknown> = {
+      auth: { hooks: { before_user_created_hook: { enabled: false, uri: null } } },
+    };
+    let appliedAuth: Record<string, unknown> | null = null;
+    projectService.getProjectSettings = async () => settings as never;
+    projectService.updateProjectSettings = async (_ref, next) => {
+      settings = next as Record<string, unknown>;
+      return settings as never;
+    };
+    tenantRuntimeService.applyAuthConfig = async (_ref, _previousAuth, nextAuth) => {
+      appliedAuth = nextAuth;
+      return {} as never;
+    };
+    const hookUri = "https://auth.tenant.example/v1/auth-hooks/before-user-created";
+
+    const response = await request("/v1/projects/tenant-a/config/auth", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        hook_before_user_created_enabled: true,
+        hook_before_user_created_uri: hookUri,
+      }),
+    });
+    const responseBody = await response.json();
+    const persistedHooks = (settings.auth as Record<string, unknown>).hooks as Record<string, unknown>;
+
+    expect(response.status).toBe(200);
+    expect(persistedHooks.before_user_created_hook).toEqual({ enabled: true, uri: hookUri });
+    expect((appliedAuth?.hooks as Record<string, unknown>).before_user_created_hook).toEqual({
+      enabled: true,
+      uri: hookUri,
+    });
+    expect(responseBody).toMatchObject({
+      hook_before_user_created_enabled: true,
+      hook_before_user_created_uri: hookUri,
+    });
+  });
+
   test("returns effective defaults and round-trips canonical session policy values", async () => {
     config.authRuntimeOwnerRef = "";
     let settings: Record<string, unknown> = { auth: {} };
