@@ -1,11 +1,10 @@
-import { $ } from 'bun';
 import { existsSync } from "node:fs";
-import { mkdir } from "node:fs/promises";
+import { chmod, mkdir, open, rm, stat } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 import { logger } from "../utils/logger";
 import type { BackupInfo, RestoreRequest } from '../types/backup';
 import { projectRepository } from '../repositories/project.repository';
-import { resolveDbName, resolveRoleName } from '../db';
+import { resolveDbName } from '../db';
 import { config } from "../config";
 
 const PGBACKREST_NAME_PATTERN = /^[A-Za-z0-9_.-]{1,128}$/;
@@ -365,17 +364,31 @@ export async function restore(request: RestoreRequest): Promise<{ message: strin
   }
 }
 
-const LOGICAL_BACKUP_DIR = process.env.SUPACLOUD_LOGICAL_BACKUP_DIR || "/tmp/supacloud-backups";
+const LOGICAL_BACKUP_DIR = process.env.SUPACLOUD_LOGICAL_BACKUP_DIR || "/var/lib/supacloud/backups";
 const LOGICAL_BACKUP_FILE_PATTERN = /^backup_[A-Za-z0-9_-]{1,64}_\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.sql\.gz$/;
+
+type LogicalBackupResult = {
+  success: boolean;
+  message: string;
+  file?: string;
+  reason?: "backup_failed" | "invalid_backup_id" | "project_not_paused" | "backup_not_found" | "restore_failed";
+};
 
 async function runLogicalDatabaseCommand(
   command: "pg_dump" | "pg_restore",
+  database: string,
   commandArguments: string[],
-  password: string,
 ): Promise<void> {
   const databaseProcess = Bun.spawn({
-    cmd: [command, "-h", config.pgHost, "-p", String(config.pgPort), ...commandArguments],
-    env: { ...process.env, PGPASSWORD: password },
+    cmd: [
+      command,
+      "-h", config.pgHost,
+      "-p", String(config.pgPort),
+      "-U", config.pgUser,
+      "-d", database,
+      ...commandArguments,
+    ],
+    env: { ...process.env, PGPASSWORD: config.pgPassword },
     stdout: "ignore",
     stderr: "pipe",
   });
@@ -386,119 +399,105 @@ async function runLogicalDatabaseCommand(
   if (exitCode !== 0) throw new Error(`${command} exited with code ${exitCode}`);
 }
 
+async function validateLogicalBackup(backupPath: string): Promise<void> {
+  const validationProcess = Bun.spawn({
+    cmd: ["pg_restore", "--list", backupPath],
+    stdout: "ignore",
+    stderr: "pipe",
+  });
+  const [exitCode] = await Promise.all([
+    validationProcess.exited,
+    new Response(validationProcess.stderr).text(),
+  ]);
+  const backupFile = await stat(backupPath);
+  if (exitCode !== 0 || backupFile.size === 0) {
+    throw new Error("Logical backup archive validation failed");
+  }
+}
+
 async function ensureLogicalBackupDir(): Promise<string> {
-        const baseDir = resolve(LOGICAL_BACKUP_DIR);
-        await mkdir(baseDir, { recursive: true, mode: 0o700 });
-        return baseDir;
-    }
+  const baseDir = resolve(LOGICAL_BACKUP_DIR);
+  await mkdir(baseDir, { recursive: true, mode: 0o700 });
+  await chmod(baseDir, 0o700);
+  return baseDir;
+}
 
 async function resolveLogicalBackupPath(filename: string): Promise<string> {
-        if (filename !== basename(filename) || !LOGICAL_BACKUP_FILE_PATTERN.test(filename)) {
-            throw new Error("Invalid backup id");
-        }
-        const baseDir = await ensureLogicalBackupDir();
-        const fullPath = resolve(baseDir, filename);
-        if (!fullPath.startsWith(`${baseDir}/`)) {
-            throw new Error("Invalid backup path");
-        }
-        return fullPath;
-    }
+  if (!isLogicalBackupId(filename)) throw new Error("Invalid backup id");
+  const baseDir = await ensureLogicalBackupDir();
+  const fullPath = resolve(baseDir, filename);
+  if (!fullPath.startsWith(`${baseDir}/`)) throw new Error("Invalid backup path");
+  return fullPath;
+}
 
-    /**
-     * Execute logical backup per tenant level (pg_dump)
-     * Export dedicated data and upload to corresponding S3 bucket
-     */
-export async function createLogicalBackup(projectRef: string): Promise<{ success: boolean; message: string; file?: string }> {
-        const project = await projectRepository.findByRef(projectRef);
-        if (!project) throw new Error("Project not found");
+function isLogicalBackupId(filename: string): boolean {
+  return filename === basename(filename) && LOGICAL_BACKUP_FILE_PATTERN.test(filename);
+}
 
-        const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-        const filename = `backup_${projectRef}_${timestamp}.sql.gz`;
-        const backupPath = await resolveLogicalBackupPath(filename);
+async function dumpLogicalBackup(projectRef: string, backupPath: string): Promise<void> {
+  const tenantDatabase = await resolveDbName(projectRef);
+  logger.info(`[LogicalBackup] Starting dump for ${projectRef} -> ${backupPath}`);
+  await runLogicalDatabaseCommand("pg_dump", tenantDatabase, [
+    "-F", "c", "-Z", "6", "-f", backupPath,
+  ]);
+  await validateLogicalBackup(backupPath);
+}
 
-        try {
-            // Use tenant role, export as Custom archive format with default gzip compression
-            const tenantDb = await resolveDbName(projectRef);
-            const tenantUser = resolveRoleName(projectRef);
+async function restoreLogicalBackupArchive(projectRef: string, backupPath: string): Promise<void> {
+  const tenantDatabase = await resolveDbName(projectRef);
+  logger.info(`[LogicalBackup] Starting restore for ${projectRef} from ${backupPath}`);
+  await runLogicalDatabaseCommand("pg_restore", tenantDatabase, [
+    "-c", "--if-exists", "--exit-on-error", "-1", backupPath,
+  ]);
+  logger.info(`[LogicalBackup] Restore complete for ${projectRef}`);
+}
 
-            logger.info(`[LogicalBackup] Starting dump for ${projectRef} -> ${backupPath}`);
-            await runLogicalDatabaseCommand("pg_dump", [
-                "-U", tenantUser,
-                "-d", tenantDb,
-                "-F", "c",
-                "-Z", "6",
-                "-f", backupPath,
-            ], project.db_password);
+/** Create a complete project-database archive with control-plane credentials. */
+export async function createLogicalBackup(projectRef: string): Promise<LogicalBackupResult> {
+  if (!await projectRepository.findByRef(projectRef)) throw new Error("Project not found");
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const filename = `backup_${projectRef}_${timestamp}.sql.gz`;
+  const backupPath = await resolveLogicalBackupPath(filename);
+  let reservedArchive = false;
+  try {
+    const archiveFile = await open(backupPath, "wx", 0o600);
+    await archiveFile.close();
+    reservedArchive = true;
+    await dumpLogicalBackup(projectRef, backupPath);
+    return { success: true, message: "Logical backup completed", file: filename };
+  } catch (error: unknown) {
+    if (reservedArchive) await rm(backupPath, { force: true });
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error("[LogicalBackup] failed:", { error: message });
+    return { success: false, message: `Logical backup failed: ${message}`, reason: "backup_failed" };
+  }
+}
 
-            // Try to upload to tenant's hidden backup prefix via AWS CLI (MinIO/Garage compatible)
-            if (project.s3_access_key && project.s3_secret_key) {
-                try {
-                    await $`AWS_ACCESS_KEY_ID=${project.s3_access_key} AWS_SECRET_ACCESS_KEY=${project.s3_secret_key} aws --endpoint-url http://localhost:9000 s3 cp ${backupPath} s3://${project.s3_bucket}/_backups/${filename}`.quiet();
-                    logger.info(`[LogicalBackup] Uploaded ${filename} to S3.`);
-                    await $`rm -f ${backupPath}`.quiet(); // Cleanup local after successful upload
-                } catch (uploadErr: unknown) {
-                    logger.warn('[LogicalBackup] S3 Upload failed (Ensure awscli is installed). Kept local copy at', backupPath);
-                }
-            }
-
-            return { success: true, message: "Logical backup completed", file: filename };
-        } catch (err: unknown) {
-            logger.error("[LogicalBackup] failed:", { error: err instanceof Error ? err.message : String(err) });
-            return { success: false, message: "Logical backup failed: " + (err instanceof Error ? err.message : String(err)) };
-        }
-    }
-
-    /**
-     * Execute logical restore per tenant level (pg_restore)
-     */
-export async function restoreLogicalBackup(projectRef: string, backupId: string): Promise<{ success: boolean; message: string }> {
-        let backupPath: string;
-        try {
-            backupPath = await resolveLogicalBackupPath(backupId);
-        } catch {
-            return { success: false, message: "Invalid backup id" };
-        }
-
-        const project = await projectRepository.findByRef(projectRef);
-        if (!project) throw new Error("Project not found");
-
-        try {
-            // Try downloading from S3 first
-            if (project.s3_access_key && project.s3_secret_key) {
-                try {
-                    await $`AWS_ACCESS_KEY_ID=${project.s3_access_key} AWS_SECRET_ACCESS_KEY=${project.s3_secret_key} aws --endpoint-url http://localhost:9000 s3 cp s3://${project.s3_bucket}/_backups/${backupId} ${backupPath}`.quiet();
-                    logger.info(`[LogicalBackup] Downloaded ${backupId} from S3.`);
-                } catch (dlErr: unknown) {
-                    logger.warn('[LogicalBackup] Could not download from S3, assuming local file exists.');
-                }
-            }
-
-            // Check file exists
-            const fileExists = await $`test -f ${backupPath}`.nothrow();
-            if (fileExists.exitCode !== 0) {
-                return { success: false, message: "Backup file not found: " + backupId };
-            }
-
-            // Execute pg_restore (force clean old objects and complete in single transaction)
-            const tenantDb = await resolveDbName(projectRef);
-            const tenantUser = resolveRoleName(projectRef);
-            logger.info(`[LogicalBackup] Starting restore for ${projectRef} from ${backupPath}`);
-
-            await runLogicalDatabaseCommand("pg_restore", [
-                "-U", tenantUser,
-                "-d", tenantDb,
-                "-c",
-                "-1",
-                backupPath,
-            ], project.db_password);
-
-            logger.info(`[LogicalBackup] Restore complete for ${projectRef}`);
-            return { success: true, message: "Logical restore completed successfully" };
-        } catch (err: unknown) {
-            logger.error("[LogicalBackup] Restore failed:", { error: err instanceof Error ? err.message : String(err) });
-            return { success: false, message: "Restore process error: " + (err instanceof Error ? err.message : String(err)) };
-        } finally {
-            // Cleanup local temp file
-            await $`rm -f ${backupPath}`.nothrow().quiet();
-        }
-    }
+/** Restore a project database only while its application runtime is paused. */
+export async function restoreLogicalBackup(projectRef: string, backupId: string): Promise<LogicalBackupResult> {
+  if (!isLogicalBackupId(backupId)) {
+    return { success: false, message: "Invalid backup id", reason: "invalid_backup_id" };
+  }
+  const backupPath = await resolveLogicalBackupPath(backupId);
+  const project = await projectRepository.findByRef(projectRef);
+  if (!project) throw new Error("Project not found");
+  if (project.status !== "paused") {
+    return {
+      success: false,
+      message: "Project must be paused before logical restore",
+      reason: "project_not_paused",
+    };
+  }
+  if (!existsSync(backupPath)) {
+    return { success: false, message: `Backup file not found: ${backupId}`, reason: "backup_not_found" };
+  }
+  try {
+    await validateLogicalBackup(backupPath);
+    await restoreLogicalBackupArchive(projectRef, backupPath);
+    return { success: true, message: "Logical restore completed successfully" };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error("[LogicalBackup] Restore failed:", { error: message });
+    return { success: false, message: `Restore process error: ${message}`, reason: "restore_failed" };
+  }
+}

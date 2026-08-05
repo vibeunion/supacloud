@@ -59,21 +59,37 @@ const projectBackupRoutes = new Elysia({ prefix: "/v1/projects/:ref/database/bac
         const authError = await requireAdminAuth(request);
         if (authError) return status(authError.status, authError.body);
 
-        return await createLogicalBackup(ref);
+        const backup = await createLogicalBackup(ref);
+        if (!backup.success) return status(503, { message: backup.message });
+        return backup;
     }, {
-        response: { 200: t.Any() },
+        response: { 200: t.Any(), 503: ErrorResponse },
         detail: { tags: ["backups"], summary: "Create a logical backup" },
     })
     .post('/logical/restore', async ({ params: { ref }, body, request }) => {
         const authError = await requireAdminAuth(request);
         if (authError) return status(authError.status, authError.body);
         if (!body.backupId) return status(400, { message: "backupId is required", code: "400" });
-        return await restoreLogicalBackup(ref, body.backupId);
+        if (body.confirmation !== `RESTORE_PROJECT:${ref}:${body.backupId}`) {
+            return status(400, { message: "Exact project restore confirmation is required" });
+        }
+        const restoreResult = await restoreLogicalBackup(ref, body.backupId);
+        if (restoreResult.success) return restoreResult;
+        if (restoreResult.reason === "project_not_paused") return status(409, { message: restoreResult.message });
+        if (restoreResult.reason === "backup_not_found") return status(404, { message: restoreResult.message });
+        if (restoreResult.reason === "invalid_backup_id") return status(400, { message: restoreResult.message });
+        return status(503, { message: restoreResult.message });
     }, {
-        body: t.Object({ backupId: t.Optional(t.String()) }),
+        body: t.Object({
+            backupId: t.Optional(t.String()),
+            confirmation: t.Optional(t.String()),
+        }),
         response: {
             200: t.Any(),
             400: ErrorResponse,
+            404: ErrorResponse,
+            409: ErrorResponse,
+            503: ErrorResponse,
         },
         detail: { tags: ["backups"], summary: "Restore from logical backup" },
     });
