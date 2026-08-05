@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { getAuthRuntimeDescriptor } from "./auth-runtime.service";
 import { projectRepository } from "../repositories/project.repository";
 import { normalizeProjectConfig } from "../utils/project-config";
@@ -44,6 +44,24 @@ type HookRuntimeConfiguration = {
   configuredSecrets: string;
 };
 
+type RuntimeCommandOutput = {
+  exitCode: number;
+  stdout: Buffer;
+};
+
+export type GoTrueEnvironmentRuntime = {
+  setprivPath: string | null;
+  systemctlPath: string | null;
+  sedPath: string | null;
+  run: (command: string[]) => Promise<RuntimeCommandOutput>;
+};
+
+type GoTrueProcessIdentity = {
+  pid: number;
+  uid: number;
+  gid: number;
+};
+
 const HOOK_CONFIGURATION: Record<GoTrueHttpHookName, { envPrefix: string; endpoint: string }> = {
   "before-user-created": {
     envPrefix: "BEFORE_USER_CREATED",
@@ -56,6 +74,39 @@ const HOOK_CONFIGURATION: Record<GoTrueHttpHookName, { envPrefix: string; endpoi
 };
 const PROBE_FIELD = "supaoauth_hook_probe";
 const PROBE_TIMEOUT_MS = 3_000;
+const PROJECT_REF_PATTERN = /^[a-z0-9-]{1,20}$/;
+
+class RuntimeInspectionUnavailableError extends Error {
+  constructor(cause: unknown) {
+    super("GoTrue runtime inspection command is unavailable", { cause });
+    this.name = "RuntimeInspectionUnavailableError";
+  }
+}
+
+async function runRuntimeCommand(command: string[]): Promise<RuntimeCommandOutput> {
+  try {
+    const child = Bun.spawn(command, {
+      env: { LANG: "C" },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [exitCode, stdout] = await Promise.all([
+      child.exited,
+      new Response(child.stdout).arrayBuffer(),
+      new Response(child.stderr).arrayBuffer(),
+    ]);
+    return { exitCode, stdout: Buffer.from(stdout) };
+  } catch (cause) {
+    throw new RuntimeInspectionUnavailableError(cause);
+  }
+}
+
+const HOST_ENVIRONMENT_RUNTIME: GoTrueEnvironmentRuntime = {
+  setprivPath: ["/usr/bin/setpriv", "/bin/setpriv"].find(existsSync) ?? null,
+  systemctlPath: ["/usr/bin/systemctl", "/bin/systemctl"].find(existsSync) ?? null,
+  sedPath: ["/usr/bin/sed", "/bin/sed"].find(existsSync) ?? null,
+  run: runRuntimeCommand,
+};
 
 function reasonCode(hookName: GoTrueHttpHookName, reason: string): string {
   return `gotrue_${hookName.replaceAll("-", "_")}_hook_${reason}`;
@@ -215,28 +266,78 @@ export async function goTrueAuthHookStatusFromRuntime(
     : configuration;
 }
 
-function processEnvironment(rawEnvironment: Buffer): Record<string, string> {
-  return Object.fromEntries(rawEnvironment.toString("utf8")
-    .split("\0")
-    .filter(Boolean)
-    .map((entry) => {
-      const separator = entry.indexOf("=");
-      return separator < 1 ? [entry, ""] : [entry.slice(0, separator), entry.slice(separator + 1)];
+function systemdProperties(rawProperties: Buffer): Record<string, string> {
+  return Object.fromEntries(rawProperties.toString("utf8")
+    .split(/\r?\n/)
+    .filter((property) => property.includes("="))
+    .map((property) => {
+      const separator = property.indexOf("=");
+      return [property.slice(0, separator), property.slice(separator + 1)];
     }));
 }
 
-async function activeGoTrueEnvironment(authorityProjectRef: string): Promise<Record<string, string> | null> {
-  const child = Bun.spawn(
-    ["systemctl", "show", `supacloud-gotrue@${authorityProjectRef}`, "--property=MainPID", "--value"],
-    { stdout: "pipe", stderr: "pipe" },
-  );
-  const [exitCode, output] = await Promise.all([
-    child.exited,
-    new Response(child.stdout).text(),
+function positiveSystemdInteger(rawInteger: string | undefined): number | null {
+  if (!rawInteger || !/^\d+$/.test(rawInteger)) return null;
+  const parsedInteger = Number(rawInteger);
+  return Number.isSafeInteger(parsedInteger) && parsedInteger > 1 ? parsedInteger : null;
+}
+
+function goTrueProcessIdentity(
+  authorityProjectRef: string,
+  properties: Record<string, string>,
+): GoTrueProcessIdentity | null {
+  const expectedIdentity = `supacloud-${authorityProjectRef}`;
+  if (properties.User !== expectedIdentity || properties.Group !== expectedIdentity) return null;
+  const pid = positiveSystemdInteger(properties.MainPID);
+  const uid = positiveSystemdInteger(properties.UID);
+  const gid = positiveSystemdInteger(properties.GID);
+  return pid && uid && gid ? { pid, uid, gid } : null;
+}
+
+async function activeGoTrueIdentity(
+  authorityProjectRef: string,
+  runtime: GoTrueEnvironmentRuntime,
+): Promise<GoTrueProcessIdentity | null> {
+  if (!runtime.systemctlPath) return null;
+  const unit = `supacloud-gotrue@${authorityProjectRef}`;
+  const commandOutput = await runtime.run([
+    runtime.systemctlPath, "show", unit, "--property=MainPID,User,Group,UID,GID", "--no-pager",
   ]);
-  const pid = Number(output.trim());
-  if (exitCode !== 0 || !Number.isSafeInteger(pid) || pid <= 1) return null;
-  return processEnvironment(await readFile(`/proc/${pid}/environ`));
+  return commandOutput.exitCode === 0
+    ? goTrueProcessIdentity(authorityProjectRef, systemdProperties(commandOutput.stdout))
+    : null;
+}
+
+function hookEnvironment(rawEnvironment: Buffer, hookName: GoTrueHttpHookName): Record<string, string> {
+  const envPrefix = HOOK_CONFIGURATION[hookName].envPrefix;
+  const allowedNames = new Set(["ENABLED", "URI", "SECRETS"].map(
+    (suffix) => `GOTRUE_HOOK_${envPrefix}_${suffix}`,
+  ));
+  const environment: Record<string, string> = {};
+  for (const entry of rawEnvironment.toString("utf8").split("\0")) {
+    const separator = entry.indexOf("=");
+    const name = separator > 0 ? entry.slice(0, separator) : "";
+    if (allowedNames.has(name)) environment[name] = entry.slice(separator + 1);
+  }
+  return environment;
+}
+
+export async function readActiveGoTrueHookEnvironment(
+  authorityProjectRef: string,
+  hookName: GoTrueHttpHookName,
+  runtime: GoTrueEnvironmentRuntime = HOST_ENVIRONMENT_RUNTIME,
+): Promise<Record<string, string> | null> {
+  if (!PROJECT_REF_PATTERN.test(authorityProjectRef)
+    || !runtime.setprivPath || !runtime.systemctlPath || !runtime.sedPath) return null;
+  const identity = await activeGoTrueIdentity(authorityProjectRef, runtime);
+  if (!identity) return null;
+  const envPrefix = HOOK_CONFIGURATION[hookName].envPrefix;
+  const commandOutput = await runtime.run([
+    runtime.setprivPath, "--reuid", String(identity.uid), "--regid", String(identity.gid),
+    "--clear-groups", "--", runtime.sedPath, "-z", "-n", "-E",
+    `/^GOTRUE_HOOK_${envPrefix}_(ENABLED|URI|SECRETS)=/p`, `/proc/${identity.pid}/environ`,
+  ]);
+  return commandOutput.exitCode === 0 ? hookEnvironment(commandOutput.stdout, hookName) : null;
 }
 
 async function authorityRoutingConfig(
@@ -257,10 +358,14 @@ async function authorityRoutingConfig(
   }
 }
 
-async function liveGoTrueEnvironment(authorityRef: string): Promise<Record<string, string> | null> {
+async function liveGoTrueEnvironment(
+  authorityRef: string,
+  hookName: GoTrueHttpHookName,
+): Promise<Record<string, string> | null> {
   try {
-    return await activeGoTrueEnvironment(authorityRef);
-  } catch {
+    return await readActiveGoTrueHookEnvironment(authorityRef, hookName);
+  } catch (error) {
+    if (!(error instanceof RuntimeInspectionUnavailableError)) throw error;
     return null;
   }
 }
@@ -289,7 +394,7 @@ export async function detectGoTrueAuthHookStatus(
   if (!routing.found) {
     return authorityStatus(unavailable(hookName, "authority_project_unavailable"), authority);
   }
-  const environment = await liveGoTrueEnvironment(authorityRef);
+  const environment = await liveGoTrueEnvironment(authorityRef, hookName);
   if (!environment) return authorityStatus(unavailable(hookName, "process_unavailable"), authority);
   const status = await goTrueAuthHookStatusFromRuntime({
     projectRef: authorityRef,
