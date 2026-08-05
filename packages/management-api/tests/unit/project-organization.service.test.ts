@@ -6,6 +6,8 @@ let controlQueries: Array<{ query: string; values: unknown[] }> = [];
 let storedMembers: Array<Record<string, unknown>> = [];
 let rejectOutboxInsert = false;
 let memberMutationVersion = 0;
+const controlArray = mock((values: string[], type: string) => ({ values, type }));
+const transactionArray = mock((values: string[], type: string) => ({ values, type }));
 
 const authorityDb = mock((strings: TemplateStringsArray) => {
   const query = strings.join("?");
@@ -99,11 +101,16 @@ const controlQuery = mock((strings: TemplateStringsArray, ...values: unknown[]) 
   }
   return Promise.resolve([]);
 });
+const transactionQuery = Object.assign(
+  mock((strings: TemplateStringsArray, ...values: unknown[]) => controlQuery(strings, ...values)),
+  { array: transactionArray },
+);
 const controlDb = Object.assign(controlQuery, {
-  begin: mock(async (callback: (transaction: typeof controlQuery) => Promise<unknown>) => {
+  array: controlArray,
+  begin: mock(async (callback: (transaction: typeof transactionQuery) => Promise<unknown>) => {
     const memberSnapshot = structuredClone(storedMembers);
     try {
-      return await callback(controlQuery);
+      return await callback(transactionQuery);
     } catch (error) {
       storedMembers = memberSnapshot;
       throw error;
@@ -135,7 +142,46 @@ describe("project organization GoTrue authority", () => {
     storedMembers = [];
     rejectOutboxInsert = false;
     memberMutationVersion = 0;
+    controlArray.mockClear();
+    transactionArray.mockClear();
+    transactionQuery.mockClear();
     config.authRuntimeOwnerRef = "auth-owner";
+  });
+
+  test("binds omitted, empty, and normalized create domains as typed arrays", async () => {
+    await projectOrganizationService.create("business-project", { name: "Omitted domains" }, "admin");
+    await projectOrganizationService.create("business-project", { name: "Empty domains", jit_domains: [] }, "admin");
+    await projectOrganizationService.create("business-project", {
+      name: "Normalized domains",
+      jit_domains: [" Example.COM ", "example.com", "second.test"],
+    }, "admin");
+
+    expect(transactionArray.mock.calls).toEqual([
+      [[], "TEXT"],
+      [[], "TEXT"],
+      [["example.com", "second.test"], "TEXT"],
+    ]);
+  });
+
+  test("binds explicit update domains as typed arrays", async () => {
+    await projectOrganizationService.update("business-project", "org-one", { jit_domains: [] });
+    await projectOrganizationService.update("business-project", "org-one", {
+      jit_domains: [" Example.COM ", "example.com", "second.test"],
+    });
+
+    expect(controlArray.mock.calls).toEqual([
+      [[], "TEXT"],
+      [["example.com", "second.test"], "TEXT"],
+    ]);
+  });
+
+  test("preserves stored update domains when jit_domains is omitted", async () => {
+    await projectOrganizationService.update("business-project", "org-one", { name: "Renamed" });
+
+    expect(controlArray).not.toHaveBeenCalled();
+    expect(controlQueries.some(({ query }) => (
+      query.includes("UPDATE project_business_organizations") && query.includes("ELSE jit_domains END")
+    ))).toBe(true);
   });
 
   test("validates users and OAuth applications against the shared auth authority", async () => {
