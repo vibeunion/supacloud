@@ -98,6 +98,7 @@ export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
     {
       params: t.Object({ ref: t.String() }),
       body: t.Object({
+        type: t.Literal("saml"),
         resource_id: t.Optional(t.String()),
         saml_provider_name: t.Optional(t.String()),
         domains: t.Optional(t.Array(t.String())),
@@ -106,6 +107,8 @@ export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
         metadata_attribute_url: t.Optional(t.String()),
         entity_id: t.Optional(t.String()),
         attribute_mapping: t.Optional(t.Record(t.String(), t.Unknown())),
+        name_id_format: t.Optional(t.String()),
+        disabled: t.Optional(t.Boolean()),
       }),
       detail: { tags: ["auth"], summary: "Create SSO provider" },
     }
@@ -168,6 +171,7 @@ export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
     {
       params: t.Object({ ref: t.String(), id: t.String() }),
       body: t.Object({
+        type: t.Optional(t.Literal("saml")),
         resource_id: t.Optional(t.String()),
         saml_provider_name: t.Optional(t.String()),
         domains: t.Optional(t.Array(t.String())),
@@ -175,6 +179,8 @@ export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
         metadata_url: t.Optional(t.String()),
         metadata_attribute_url: t.Optional(t.String()),
         attribute_mapping: t.Optional(t.Record(t.String(), t.Unknown())),
+        name_id_format: t.Optional(t.String()),
+        disabled: t.Optional(t.Boolean()),
       }),
       detail: { tags: ["auth"], summary: "Update SSO provider" },
     }
