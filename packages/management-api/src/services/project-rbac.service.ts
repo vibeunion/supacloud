@@ -946,6 +946,13 @@ export const projectRbacService = {
     return getRoleOrThrow(readRbacConfig(project.config), roleId).permissions;
   },
 
+  async listRoleAssignments(ref: string, roleId: string): Promise<ProjectRbacAssignment[]> {
+    const project = await getProjectOrThrow(ref);
+    const rbac = readRbacConfig(project.config);
+    getRoleOrThrow(rbac, roleId);
+    return rbac.assignments.filter((assignment) => assignment.role_id === roleId);
+  },
+
   async createPermission(ref: string, roleId: string, input: PermissionInput): Promise<ProjectRbacPermission> {
     const name = input.name?.trim();
     if (!name) throw Object.assign(new Error("name is required"), { statusCode: 400 });
