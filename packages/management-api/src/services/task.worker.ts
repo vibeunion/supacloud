@@ -402,29 +402,32 @@ export class TaskWorker {
     private async handleTaskFailure(task: ProjectTask) {
         const { project_ref, task_type, retries } = task;
 
-        // Cleanup tasks get more retries (10) to ensure resources are freed
-        const maxRetries = task_type.startsWith("cleanup_") ? 10 : 3;
-
-        if (retries < maxRetries) {
-            logger.warn(`[TaskWorker] Task ${task_type} for ${project_ref} failed but has retries left (${retries}/${maxRetries})`);
-            // Re-queue cleanup tasks with exponential backoff via a new pending task
-            if (task_type.startsWith("cleanup_") && retries >= 3) {
-                logger.info(`[TaskWorker] Re-queuing cleanup task ${task_type} for ${project_ref} (retry ${retries + 1})`);
-                await taskRepository.createTask(project_ref, task_type, task.payload);
-            }
-            return;
-        }
-
-        logger.error(`[TaskWorker] Saga compensation triggered for ${project_ref} failed permanently at ${task_type}`);
-
+        // Realtime is optional for the current tenant model. Preserve DB/runtime
+        // and continue the remaining provisioning pipeline instead of blocking on
+        // retries or destroying the tenant database after a later-stage addon failure.
         if (task_type === "provision_realtime") {
-            // Realtime is optional for the current tenant model. Preserve DB/runtime
-            // and continue the remaining provisioning pipeline instead of destroying
-            // the tenant database after a later-stage addon failure.
             logger.warn(`[TaskWorker] Realtime provisioning failed for ${project_ref}. Preserving core resources and continuing without realtime.`);
             await taskRepository.createTask(project_ref, "provision_router");
             return;
         }
+
+        // Cleanup tasks get more retries (10) to ensure resources are freed
+        const maxRetries = task_type.startsWith("cleanup_") ? 10 : 3;
+
+        if (retries < maxRetries) {
+            // Re-queue the failed task with exponential backoff so it is actually
+            // retried. Without this the task stays in FAILED forever and the saga
+            // compensation below is never reached, stalling the whole pipeline.
+            const baseDelayMs = 5_000;
+            const cappedAttempt = Math.min(Math.max(retries, 1), 6);
+            const nextRunAt = new Date(Date.now() + baseDelayMs * Math.pow(2, cappedAttempt - 1));
+            logger.warn(`[TaskWorker] Task ${task_type} for ${project_ref} failed, scheduling retry ${retries + 1}/${maxRetries} at ${nextRunAt.toISOString()}`);
+            await taskRepository.scheduleRetry(task.id, task.error || "Task execution failed", nextRunAt);
+            broadcastTaskUpdate({ taskId: task.id, projectRef: project_ref, taskType: task_type, status: TaskStatus.RETRY_SCHEDULED, error: task.error || "Task execution failed" });
+            return;
+        }
+
+        logger.error(`[TaskWorker] Saga compensation triggered for ${project_ref} failed permanently at ${task_type}`);
 
         // Mark project as paused/error (Only for critical creation tasks)
         if (task_type === "provision_db" || task_type === "provision_s3" || task_type === "provision_runtime") {

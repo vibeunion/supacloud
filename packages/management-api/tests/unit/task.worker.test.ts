@@ -51,13 +51,40 @@ describe("TaskWorker failure handling", () => {
       status: "failed",
       payload: {},
       error: "boom",
-      retries: 3,
+      retries: 1,
       created_at: new Date(),
       updated_at: new Date(),
     });
 
+    // Realtime is optional: failure continues the pipeline immediately regardless of retry budget
     expect(createTaskSpy).toHaveBeenCalledTimes(1);
     expect(createTaskSpy).toHaveBeenCalledWith("proj-ref", "provision_router");
+    expect(updateStatusSpy).not.toHaveBeenCalled();
+  });
+
+  test("provision failure with retries left schedules a retry instead of stalling", async () => {
+    const worker = new TaskWorker();
+    const scheduleRetrySpy = spyOn(taskRepository, "scheduleRetry").mockResolvedValue({} as any);
+    const createTaskSpy = spyOn(taskRepository, "createTask").mockResolvedValue({} as any);
+    const updateStatusSpy = spyOn(projectRepository, "updateStatus").mockResolvedValue(undefined as any);
+
+    await (worker as any).handleTaskFailure({
+      id: "task-retry-1",
+      project_ref: "proj-ref",
+      task_type: "provision_router",
+      status: "failed",
+      payload: {},
+      error: "boom",
+      retries: 1,
+      created_at: new Date(),
+      updated_at: new Date(),
+    });
+
+    expect(scheduleRetrySpy).toHaveBeenCalledTimes(1);
+    expect(scheduleRetrySpy.mock.calls[0][0]).toBe("task-retry-1");
+    expect(scheduleRetrySpy.mock.calls[0][2]).toBeInstanceOf(Date);
+    // Must not trigger saga compensation while retries remain
+    expect(createTaskSpy).not.toHaveBeenCalled();
     expect(updateStatusSpy).not.toHaveBeenCalled();
   });
 
