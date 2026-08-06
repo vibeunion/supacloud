@@ -164,10 +164,10 @@ export async function reconcileMigrationLedgerVersions(database: MigrationLedger
         checksum = legacy.checksum,
         inserted_at = COALESCE(legacy.inserted_at, canonical.inserted_at, now())
     FROM public.schema_migrations legacy
-    WHERE canonical.version = legacy.version::text
+    WHERE canonical.version::text = legacy.version::text
       AND canonical.checksum IS NULL
       AND COALESCE(cardinality(canonical.statements), 0) = 0
-      AND (canonical.name IS NULL OR canonical.name = canonical.version)
+      AND (canonical.name IS NULL OR canonical.name = canonical.version::text)
   `);
   await database.unsafe(`
     UPDATE public.schema_migrations legacy
@@ -176,7 +176,7 @@ export async function reconcileMigrationLedgerVersions(database: MigrationLedger
         checksum = canonical.checksum,
         inserted_at = canonical.inserted_at
     FROM supabase_migrations.schema_migrations canonical
-    WHERE legacy.version::text = canonical.version
+    WHERE legacy.version::text = canonical.version::text
       AND legacy.checksum IS NULL
       AND COALESCE(cardinality(legacy.statements), 0) = 0
       AND (legacy.name IS NULL OR legacy.name = legacy.version::text)
@@ -184,7 +184,7 @@ export async function reconcileMigrationLedgerVersions(database: MigrationLedger
   await database.unsafe(`
     INSERT INTO supabase_migrations.schema_migrations
       (version, statements, name, checksum, inserted_at)
-    SELECT version::text, statements, name, checksum, COALESCE(inserted_at, now())
+    SELECT version::bigint, statements, name, checksum, COALESCE(inserted_at, now())
     FROM public.schema_migrations
     ON CONFLICT (version) DO NOTHING
   `);

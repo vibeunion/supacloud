@@ -2431,6 +2431,40 @@ install_pigsty() {
         log_info "Skipping Pigsty legacy Supabase compose stack; SupaCloud uses multi-project runtime services."
         run_legacy_supabase_compose_migration_if_requested
     fi
+
+    configure_grafana_subpath
+}
+
+# ========== Configure Grafana Subpath ==========
+# The management API reverse-proxies Grafana under the public /grafana prefix,
+# so Grafana must serve from that same subpath (root_url + serve_from_sub_path).
+# Pigsty renders grafana.ini from a template that hardcodes root_url = /ui/;
+# patch both the live config and the template so playbook re-runs do not revert it.
+configure_grafana_subpath() {
+    log_step "Configuring Grafana subpath serving..."
+
+    local root_url="/grafana/"
+    if [[ -n "${SUPABASE_STUDIO_DOMAIN:-}" ]]; then
+        root_url="https://${SUPABASE_STUDIO_DOMAIN}/grafana/"
+    fi
+
+    local grafana_ini="/etc/grafana/grafana.ini"
+    local grafana_template="${HOME}/pigsty/roles/infra/templates/grafana/grafana.ini.j2"
+    local target
+    for target in "$grafana_template" "$grafana_ini"; do
+        [[ -f "$target" ]] || continue
+        sed -i "s|^root_url = .*|root_url = ${root_url}|" "$target"
+        if grep -q "^serve_from_sub_path" "$target"; then
+            sed -i "s|^serve_from_sub_path = .*|serve_from_sub_path = true|" "$target"
+        else
+            sed -i "/^root_url = /a serve_from_sub_path = true" "$target"
+        fi
+    done
+
+    if [[ -f "$grafana_ini" ]] && systemctl is-active --quiet grafana-server; then
+        systemctl restart grafana-server || log_warn "grafana-server restart failed after subpath configuration"
+    fi
+    log_info "Grafana root_url set to ${root_url} with serve_from_sub_path=true"
 }
 
 # ========== Update Pigsty Configuration ==========
@@ -2796,7 +2830,7 @@ save_all_credentials() {
         POSTGRES_DB postgres \
         POSTGRES_USER postgres \
         POSTGRES_PASSWORD "$POSTGRES_PASSWORD" \
-        GRAFANA_URL "http://${INTERNAL_IP}:3000" \
+        GRAFANA_URL "http://${INTERNAL_IP}:3000/grafana" \
         GRAFANA_USER admin \
         GRAFANA_PASSWORD "${GRAFANA_PASSWORD:-pigsty}" \
         JWT_SECRET "$JWT_SECRET" \
@@ -3248,6 +3282,7 @@ install_management_api() {
         PIGSTY_PATH "${HOME}/pigsty" \
         BASE_DOMAIN "$BASE_DOMAIN_VALUE" \
         INTERNAL_IP "$INTERNAL_IP" \
+        GRAFANA_URL "http://127.0.0.1:3000/grafana" \
         DOCKER_HOST_IP "${DOCKER_HOST_IP:-$INTERNAL_IP}" \
         DASHBOARD_USERNAME "${DASHBOARD_USERNAME:-supabase}" \
         DASHBOARD_PASSWORD "$DASHBOARD_PASSWORD" \
