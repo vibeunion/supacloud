@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.50.22](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.21...management-api-v0.50.22) (2026-08-06)
+
+
+### Bug Fixes
+
+* **management-api:** tolerate bigint version columns in migration ledger ([5ad73ad](https://github.com/zuohuadong/supacloud/commit/5ad73ad6a400534d400b98512d89f208b53ac96c))
+
 ## [0.50.21](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.20...management-api-v0.50.21) (2026-08-06)
 
 
