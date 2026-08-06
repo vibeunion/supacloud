@@ -64,11 +64,13 @@ export function renderProjectMigrationRoleSql(dbName: string, dbUser: string): s
       INSERT INTO supabase_migrations.schema_migrations
         (version, statements, name, checksum, inserted_at)
       VALUES
-        (migration_version, migration_statements, migration_name, migration_checksum, applied_at);
+        -- 线上台账表的 version 可能是 bigint（Supabase CLI 约定）或 text，
+        -- ::bigint 在两种列类型下均可写入（bigint→text 为赋值转换）。
+        (migration_version::bigint, migration_statements, migration_name, migration_checksum, applied_at);
       INSERT INTO public.schema_migrations
         (version, statements, name, checksum, inserted_at)
       VALUES
-        (migration_version, migration_statements, migration_name, migration_checksum, applied_at);
+        (migration_version::bigint, migration_statements, migration_name, migration_checksum, applied_at);
     END
     $record_migration$;
     REVOKE ALL ON FUNCTION supabase_migrations.record_schema_migration(TEXT, TEXT[], TEXT, TEXT, TEXT)
