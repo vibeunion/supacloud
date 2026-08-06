@@ -134,8 +134,6 @@ export class TaskWorker {
                 broadcastTaskUpdate({ taskId: task.id, projectRef: task.project_ref, taskType: task.task_type, status: TaskStatus.SUCCEEDED });
                 await this.handleTaskCompletion(task);
             } else {
-                await taskRepository.markTaskFailed(task.id, "Task execution failed");
-                broadcastTaskUpdate({ taskId: task.id, projectRef: task.project_ref, taskType: task.task_type, status: TaskStatus.FAILED, error: "Task execution failed" });
                 await this.handleTaskFailure(task);
             }
         } catch (err: unknown) {
@@ -401,11 +399,13 @@ export class TaskWorker {
 
     private async handleTaskFailure(task: ProjectTask) {
         const { project_ref, task_type, retries } = task;
+        const failureMessage = "Task execution failed";
 
         // Realtime is optional for the current tenant model. Preserve DB/runtime
         // and continue the remaining provisioning pipeline instead of blocking on
         // retries or destroying the tenant database after a later-stage addon failure.
         if (task_type === "provision_realtime") {
+            await this.recordTerminalFailure(task, failureMessage);
             logger.warn(`[TaskWorker] Realtime provisioning failed for ${project_ref}. Preserving core resources and continuing without realtime.`);
             await taskRepository.createTask(project_ref, "provision_router");
             return;
@@ -422,11 +422,12 @@ export class TaskWorker {
             const cappedAttempt = Math.min(Math.max(retries, 1), 6);
             const nextRunAt = new Date(Date.now() + baseDelayMs * Math.pow(2, cappedAttempt - 1));
             logger.warn(`[TaskWorker] Task ${task_type} for ${project_ref} failed, scheduling retry ${retries + 1}/${maxRetries} at ${nextRunAt.toISOString()}`);
-            await taskRepository.scheduleRetry(task.id, task.error || "Task execution failed", nextRunAt);
-            broadcastTaskUpdate({ taskId: task.id, projectRef: project_ref, taskType: task_type, status: TaskStatus.RETRY_SCHEDULED, error: task.error || "Task execution failed" });
+            await taskRepository.scheduleRetry(task.id, failureMessage, nextRunAt);
+            broadcastTaskUpdate({ taskId: task.id, projectRef: project_ref, taskType: task_type, status: TaskStatus.RETRY_SCHEDULED, error: failureMessage });
             return;
         }
 
+        await this.recordTerminalFailure(task, failureMessage);
         logger.error(`[TaskWorker] Saga compensation triggered for ${project_ref} failed permanently at ${task_type}`);
 
         // Mark project as paused/error (Only for critical creation tasks)
@@ -449,6 +450,17 @@ export class TaskWorker {
             // Admin can manually troubleshoot and retry, or trigger cleanup via API
             logger.warn(`[TaskWorker] ${task_type} failed for ${project_ref}. DB and S3 resources preserved for manual intervention.`);
         }
+    }
+
+    private async recordTerminalFailure(task: ProjectTask, failureMessage: string): Promise<void> {
+        await taskRepository.markTaskFailed(task.id, failureMessage);
+        broadcastTaskUpdate({
+            taskId: task.id,
+            projectRef: task.project_ref,
+            taskType: task.task_type,
+            status: TaskStatus.FAILED,
+            error: failureMessage,
+        });
     }
 }
 
