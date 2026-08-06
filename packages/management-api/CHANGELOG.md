@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.50.23](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.22...management-api-v0.50.23) (2026-08-06)
+
+
+### Bug Fixes
+
+* **management-api:** make ledger reconcile type-agnostic for bigint version columns ([#725](https://github.com/zuohuadong/supacloud/issues/725)) ([9ec7ee3](https://github.com/zuohuadong/supacloud/commit/9ec7ee39ef0beb9503019751359939a0309f466d))
+
 ## [0.50.22](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.21...management-api-v0.50.22) (2026-08-06)
 
 
