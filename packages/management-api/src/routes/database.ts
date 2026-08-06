@@ -686,13 +686,13 @@ async function findExistingMigration(
     return tx<Record<string, unknown>[]>`
       SELECT version, statements, name, checksum
       FROM supabase_migrations.schema_migrations
-      WHERE version = ${input.version} OR name = ${input.name}
+      WHERE version::text = ${input.version} OR name = ${input.name}
     `;
   }
   return tx<Record<string, unknown>[]>`
     SELECT version, statements, name, checksum
     FROM supabase_migrations.schema_migrations
-    WHERE version = ${input.version}
+    WHERE version::text = ${input.version}
   `;
 }
 
