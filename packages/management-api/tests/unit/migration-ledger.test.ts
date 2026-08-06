@@ -45,6 +45,30 @@ describe("migration ledger compatibility", () => {
     expect(legacyInsertSeen).toBe(true);
   });
 
+  test("reconcile statements tolerate BIGINT canonical version columns", async () => {
+    const calls: string[] = [];
+
+    await ensureMigrationLedgerMetadata({
+      unsafe: async (query: string) => {
+        calls.push(query);
+        return [];
+      },
+    });
+
+    const canonicalUpdate = calls.find((query) => query.includes("UPDATE supabase_migrations.schema_migrations canonical"));
+    expect(canonicalUpdate).toBeDefined();
+    expect(canonicalUpdate).toContain("canonical.version::text = legacy.version::text");
+    expect(canonicalUpdate).toContain("canonical.name = canonical.version::text");
+
+    const legacyUpdate = calls.find((query) => query.includes("UPDATE public.schema_migrations legacy"));
+    expect(legacyUpdate).toBeDefined();
+    expect(legacyUpdate).toContain("legacy.version::text = canonical.version::text");
+
+    const canonicalInsert = calls.find((query) => query.includes("INSERT INTO supabase_migrations.schema_migrations"));
+    expect(canonicalInsert).toBeDefined();
+    expect(canonicalInsert).toContain("SELECT version::bigint");
+  });
+
   test("backfills missing legacy timestamps for the canonical ledger", async () => {
     let canonicalInsertSeen = false;
     let canonicalUpdateSeen = false;
