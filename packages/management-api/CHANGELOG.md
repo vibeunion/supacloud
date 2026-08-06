@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.50.21](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.20...management-api-v0.50.21) (2026-08-06)
+
+
+### Bug Fixes
+
+* **task-worker:** avoid transient FAILED state for retryable task failures ([#722](https://github.com/zuohuadong/supacloud/issues/722)) ([90ced9b](https://github.com/zuohuadong/supacloud/commit/90ced9b60dd380bb42c05557ecd8e88f42573322))
+* **task-worker:** re-queue failed provisioning tasks and continue pipeline after realtime failure ([#720](https://github.com/zuohuadong/supacloud/issues/720)) ([d5e8145](https://github.com/zuohuadong/supacloud/commit/d5e814544c9470dcd153f2af4517d60101dc5e09))
+
 ## [0.50.20](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.19...management-api-v0.50.20) (2026-08-05)
 
 
