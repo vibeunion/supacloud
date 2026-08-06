@@ -27,12 +27,12 @@ afterEach(() => {
 });
 
 describe("grafana proxy routes", () => {
-  test("strips the /grafana mount prefix when proxying to the local Grafana root", () => {
+  test("forwards the /grafana subpath to the local Grafana subpath upstream", () => {
     const target = grafanaProxyInternals.buildGrafanaTargetUrl(
       "https://studio.example.com/grafana/d/pgsql-overview?orgId=1",
     );
 
-    expect(target.toString()).toBe("http://127.0.0.1:3000/d/pgsql-overview?orgId=1");
+    expect(target.toString()).toBe("http://127.0.0.1:3000/grafana/d/pgsql-overview?orgId=1");
   });
 
   test("proxies Grafana responses delegated from the SPA catch-all", async () => {
@@ -57,7 +57,7 @@ describe("grafana proxy routes", () => {
 
     expect(response.status).toBe(200);
     expect(await response.text()).toBe("grafana");
-    expect(seen[0].url).toBe("http://127.0.0.1:3000/api/search?query=pgsql");
+    expect(seen[0].url).toBe("http://127.0.0.1:3000/grafana/api/search?query=pgsql");
     expect(seen[0].headers.get("accept-encoding")).toBe("identity");
     expect(response.headers.get("content-encoding")).toBeNull();
     expect(response.headers.get("content-length")).toBeNull();

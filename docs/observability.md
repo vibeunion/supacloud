@@ -23,6 +23,13 @@ Edge Function .logs
 - 内置采集器在持久化前只保留日志正文、时间与 systemd unit，并脱敏 Authorization、Cookie、JWT、token 和数据库 DSN；不得绕过该采集器直接写入日志库。
 - 采集游标和函数文件偏移保存于 `/var/lib/supacloud/log-collector/state.json`。写入成功后才前移游标；管理进程重启会从该位置续传。首次启用只回填最近 15 分钟 journald 和每个函数日志文件末尾最多 1 MiB，避免意外全量回灌。
 
+## Grafana 子路径服务
+
+管理 API 通过公网 `/grafana` 前缀反向代理 Grafana（`GRAFANA_URL`，默认 `http://127.0.0.1:3000/grafana`）。Grafana 必须以相同子路径提供服务，否则其 HTML 中的 `<base href>` 与静态资源 URL 会指向错误前缀，出现 "Grafana has failed to load its application files" 与连续 404。
+
+- `grafana.ini` 必须设置 `root_url = https://<studio 域名>/grafana/` 且 `serve_from_sub_path = true`。
+- 安装器在 Pigsty 安装完成后自动写入上述配置（`configure_grafana_subpath`），并同步修补 Pigsty 的 `grafana.ini.j2` 模板，避免 infra playbook 重跑后回退到 Pigsty 默认的 `/ui/`。
+
 ## 默认配置
 
 `config.env` 中的默认值：
