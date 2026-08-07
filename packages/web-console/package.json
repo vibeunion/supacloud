@@ -48,7 +48,7 @@
     "highlight.js": "^11.11.1",
     "isomorphic-dompurify": "^3.21.0",
     "lucide-svelte": "^1.0.1",
-    "marked": "^18.0.7",
+    "marked": "^18.0.9",
     "marked-highlight": "^2.2.4",
     "monaco-editor": "^0.56.0",
     "svelte-i18n": "^4.0.1"
