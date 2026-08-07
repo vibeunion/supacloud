@@ -26,7 +26,7 @@
     "mode-watcher": "^1.1.0",
     "next-themes": "^0.4.6",
     "paneforge": "^1.0.2",
-    "postcss": "^8.5.23",
+    "postcss": "^8.5.25",
     "svelte": "^5.56.8",
     "svelte-check": "^4.7.4",
     "svelte-sonner": "^1.1.1",
