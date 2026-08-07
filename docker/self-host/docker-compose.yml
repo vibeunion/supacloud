@@ -34,7 +34,7 @@ services:
       - pgredis-database
 
   gotrue:
-    image: supabase/gotrue:v2.194.0
+    image: supabase/gotrue:v2.195.0
     restart: unless-stopped
     depends_on:
       postgres:
