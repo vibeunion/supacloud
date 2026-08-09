@@ -44,6 +44,7 @@ const FUNCTIONS_BASE_DIR = path.resolve(process.env.EDGE_FUNCTIONS_BASE_DIR || F
 const MGMT_API = process.env.MANAGEMENT_API_URL || "http://127.0.0.1:9090";
 const FUNCTION_REQUEST_TIMEOUT_MS = Number(process.env.EDGE_FUNCTION_TIMEOUT_MS) || 60_000;
 const BACKGROUND_FUNCTION_TIMEOUT_MS = Number(process.env.EDGE_BACKGROUND_FUNCTION_TIMEOUT_MS) || 300_000;
+const WORKER_RECYCLE_RESPONSE_GRACE_MS = 100;
 const INTERNAL_TOKEN = process.env.EDGE_RUNTIME_MASTER_KEY || process.env.MASTER_TOKEN || "";
 const PROJECT_REF_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
 const FUNCTION_SLUG_PATTERN = /^[a-zA-Z0-9_-]{1,128}$/;
@@ -251,16 +252,29 @@ if (!process.env.EDGE_RUNTIME_VERSION) {
   process.env.EDGE_RUNTIME_VERSION = "1.58.3";
 }
 
+let shuttingDown = false;
+let workerRecycleScheduled = false;
+
+function requestRuntimeRecycle(): void {
+  if (workerRecycleScheduled || shuttingDown) return;
+  workerRecycleScheduled = true;
+  queueMicrotask(() => {
+    void gracefulShutdown("worker replacement budget", 1);
+  });
+}
+
 const pool = new WorkerPool({
   size: POOL_SIZE,
   requestTimeout: FUNCTION_REQUEST_TIMEOUT_MS,
   smol: FOREGROUND_WORKER_SMOL,
+  onWorkerRecycleRequired: requestRuntimeRecycle,
 });
 
 const backgroundPool = new WorkerPool({
   size: BACKGROUND_POOL_SIZE,
   requestTimeout: BACKGROUND_FUNCTION_TIMEOUT_MS,
   smol: BACKGROUND_WORKER_SMOL,
+  onWorkerRecycleRequired: requestRuntimeRecycle,
 });
 
 async function resolveProjectRoot(projectRef: string): Promise<string> {
@@ -789,17 +803,37 @@ const app = new Elysia()
       const versionSuffix = requestedVersion ? `_v${requestedVersion}` : "";
       const functionId = `${c.params.ref}_${c.params.slug}${versionSuffix}`;
       const tenantEnv = await loadTenantEnv(c.params.ref);
-      const [foreground, background] = await Promise.all([
-        pool.preheatIdleWorkers(functionId, functionPath, projectRoot, tenantEnv, {
-          projectRef: c.params.ref,
-          moduleVersion,
-        }),
-        backgroundPool.preheatIdleWorkers(functionId, functionPath, projectRoot, tenantEnv, {
-          projectRef: c.params.ref,
-          moduleVersion,
-          maxWorkers: resolveBackgroundPreheatWorkers(),
-        }),
-      ]);
+      const [foreground, background] = requestedVersion
+        ? await Promise.all([
+            pool.preheatVersionedIdleWorkers({
+              functionId,
+              functionPath,
+              projectRoot,
+              env: tenantEnv,
+              projectRef: c.params.ref,
+              moduleVersion,
+            }),
+            backgroundPool.preheatVersionedIdleWorkers({
+              functionId,
+              functionPath,
+              projectRoot,
+              env: tenantEnv,
+              projectRef: c.params.ref,
+              moduleVersion,
+              maxWorkers: resolveBackgroundPreheatWorkers(),
+            }),
+          ])
+        : await Promise.all([
+            pool.preheatIdleWorkers(functionId, functionPath, projectRoot, tenantEnv, {
+              projectRef: c.params.ref,
+              moduleVersion,
+            }),
+            backgroundPool.preheatIdleWorkers(functionId, functionPath, projectRoot, tenantEnv, {
+              projectRef: c.params.ref,
+              moduleVersion,
+              maxWorkers: resolveBackgroundPreheatWorkers(),
+            }),
+          ]);
       return {
         preheated: functionId,
         version: requestedVersion,
@@ -974,8 +1008,7 @@ const app = new Elysia()
 
 console.log(`🚀 Edge Runtime on ${HOST}:${PORT} (${POOL_SIZE} workers)`);
 
-let shuttingDown = false;
-const gracefulShutdown = async (signal: string) => {
+const gracefulShutdown = async (signal: string, exitCode = 0) => {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log(`[EdgeRuntime] Received ${signal}, shutting down gracefully...`);
@@ -1003,7 +1036,10 @@ const gracefulShutdown = async (signal: string) => {
     console.error("[EdgeRuntime] Drain timed out, forcing exit");
   }
 
-  process.exit(0);
+  // Bulk preheats are drained above; leave time for their control responses to flush.
+  if (exitCode !== 0) await Bun.sleep(WORKER_RECYCLE_RESPONSE_GRACE_MS);
+
+  process.exit(exitCode);
 };
 
 process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));

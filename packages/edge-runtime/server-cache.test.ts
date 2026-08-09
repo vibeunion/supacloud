@@ -28,6 +28,26 @@ describe("Edge Runtime auth material invalidation", () => {
     expect(endpoint).toContain("requestedVersion,");
     expect(endpoint).toContain("`_v${requestedVersion}`");
     expect(endpoint).toContain("version: requestedVersion");
+    expect(endpoint).toContain("preheatVersionedIdleWorkers");
+    expect(endpoint).toContain("preheatIdleWorkers");
+    const regularBranchStart = endpoint.indexOf(": await Promise.all");
+    const versionedBranch = endpoint.slice(endpoint.indexOf("? await Promise.all"), regularBranchStart);
+    const regularBranch = endpoint.slice(regularBranchStart, endpoint.indexOf("return {"));
+    expect(versionedBranch).toContain("preheatVersionedIdleWorkers");
+    expect(versionedBranch).not.toContain("preheatIdleWorkers");
+    expect(regularBranch).toContain("preheatIdleWorkers");
+    expect(regularBranch).not.toContain("preheatVersionedIdleWorkers");
+    expect(endpoint).toContain("foreground,");
+    expect(endpoint).toContain("background,");
+  });
+
+  test("recycles the whole runtime after bounded worker churn", () => {
+    expect(source.match(/onWorkerRecycleRequired: requestRuntimeRecycle/g)).toHaveLength(2);
+    expect(source).toContain('gracefulShutdown("worker replacement budget", 1)');
+    expect(source).toContain("queueMicrotask");
+    expect(source).toContain("const gracefulShutdown = async (signal: string, exitCode = 0)");
+    expect(source).toContain("await Bun.sleep(WORKER_RECYCLE_RESPONSE_GRACE_MS)");
+    expect(source).toContain("process.exit(exitCode)");
   });
 
   test("function invalidation evicts policy config and active dispatch identities include version", () => {

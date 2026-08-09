@@ -212,24 +212,24 @@ describe("database tables column visibility", () => {
     secondTarget.remove();
   }, 30_000);
 
-  test("pins the patched SvAdmin UI dependency exactly", async () => {
+  test("pins the released SvAdmin UI dependency exactly", async () => {
     const packageJson = await Bun.file(new URL("package.json", packageRoot)).json();
     const lockSource = await Bun.file(new URL("bun.lock", packageRoot)).text();
 
-    expect(packageJson.dependencies["@svadmin/ui"]).toBe("0.38.7");
-    expect(packageJson.patchedDependencies["@svadmin/ui@0.38.7"])
-      .toBe("patches/@svadmin%2Fui@0.38.7.patch");
-    expect(lockSource).toContain('"@svadmin/ui": "0.38.7"');
-    expect(lockSource).toContain('"@svadmin/ui@0.38.7": "patches/@svadmin%2Fui@0.38.7.patch"');
+    expect(packageJson.dependencies["@svadmin/ui"]).toBe("0.40.3");
+    expect(lockSource).toContain('"@svadmin/ui": "0.40.3"');
+    expect(lockSource).toContain('"@svadmin/ui@0.40.3"');
   });
 
   test("keeps unavailable row estimates from rendering as negative counts", async () => {
     const source = await Bun.file(new URL("+page.svelte", import.meta.url)).text();
-    const autoTablePatch = await Bun.file(join(fileURLToPath(packageRoot), "patches", "@svadmin%2Fui@0.38.7.patch")).text();
+    const autoTableSource = await Bun.file(
+      fileURLToPath(import.meta.resolve("@svadmin/ui/components/AutoTable.svelte")),
+    ).text();
     expect(source).toContain("count >= 0");
     expect(source).toContain('count === null ? "—"');
-    expect(autoTablePatch).toContain("whitespace-nowrap");
-    expect(autoTablePatch).toContain("gap-3 px-1 py-2");
+    expect(autoTableSource).toContain("whitespace-nowrap");
+    expect(autoTableSource).toContain("gap-3 px-1 py-2");
   });
 
   test("keeps each create-table draft bound to its own DOM row", async () => {

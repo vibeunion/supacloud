@@ -1415,6 +1415,40 @@ describe("WorkerPool cancellation and replacement", () => {
     }
   });
 
+  test("drain waits for an in-progress bulk preheat", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-drain-preheat-"));
+    const functionPath = join(projectRoot, "fn.ts");
+    await Bun.write(functionPath, `
+      await Bun.sleep(120);
+      export default () => new Response("ready");
+    `);
+
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    try {
+      const preheatPromise = pool.preheatIdleWorkers(
+        "proj_drain_preheat",
+        functionPath,
+        projectRoot,
+        {},
+      );
+      await Bun.sleep(20);
+      let drained = false;
+      const drainPromise = pool.drain().then(() => {
+        drained = true;
+      });
+
+      await Bun.sleep(40);
+      expect(drained).toBe(false);
+      expect((await preheatPromise).succeeded).toBe(1);
+      await drainPromise;
+      expect(drained).toBe(true);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   test("drain waits for EdgeRuntime.waitUntil after the response", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-drain-waituntil-"));
     const completedPath = join(projectRoot, "waituntil-complete.txt");
@@ -2054,6 +2088,348 @@ describe("WorkerPool module cache", () => {
     }
   });
 
+  test("rotates idle workers before an explicit version preheat", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-version-rotation-idle-"));
+    const counterPath = join(projectRoot, "counter.txt");
+    const functionPath = join(projectRoot, "fn.ts");
+    await Bun.write(functionPath, moduleLoadCounterSource(counterPath));
+
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+    const dispatch = () => pool.dispatch({
+      functionId: "proj_rotation_fn_v1",
+      functionPath,
+      projectRoot,
+      projectRef: "proj_rotation",
+      moduleVersion: "v1",
+      env: {},
+      request: new Request("http://edge.local/functions/v1/fn"),
+    });
+
+    try {
+      expect(await (await dispatch()).text()).toBe("1");
+      const preheat = await pool.preheatVersionedIdleWorkers({
+        functionId: "proj_rotation_fn_v1",
+        functionPath,
+        projectRoot,
+        projectRef: "proj_rotation",
+        moduleVersion: "v1",
+        env: {},
+      });
+
+      expect(preheat.rotation).toEqual({
+        generation: 1,
+        attempted: 1,
+        idleRetired: 1,
+        busyTainted: 0,
+        alreadyTainted: 0,
+        immediateReplacements: 1,
+      });
+      expect(preheat.cacheMisses).toBe(1);
+      expect(await Bun.file(counterPath).text()).toBe("2");
+      expect(await (await dispatch()).text()).toBe("2");
+      await waitForMetric(pool, "total_natural_worker_exits", 1);
+      const metrics = pool.snapshotMetrics("rotation");
+      expect(metrics["rotation_total_worker_replacements"]).toBe(1);
+      expect(metrics["rotation_total_generation_rotations"]).toBe(1);
+      expect(metrics["rotation_worker_generation"]).toBe(1);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("lets busy work finish before retiring its old generation", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-version-rotation-busy-"));
+    const startedPath = join(projectRoot, "started.txt");
+    const functionPath = join(projectRoot, "fn.ts");
+    await Bun.write(functionPath, `
+      export default async function fetch() {
+        await Bun.write(process.env.STARTED_PATH, "started");
+        await Bun.sleep(150);
+        return new Response("completed");
+      }
+    `);
+
+    const pool = new WorkerPool({ size: 2, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    try {
+      const initialPreheat = await pool.preheatIdleWorkers(
+        "proj_rotation_busy_v1",
+        functionPath,
+        projectRoot,
+        { STARTED_PATH: startedPath },
+        { projectRef: "proj_rotation", moduleVersion: "v1" },
+      );
+      expect(initialPreheat.succeeded).toBe(2);
+
+      const responsePromise = pool.dispatch({
+        functionId: "proj_rotation_busy_v1",
+        functionPath,
+        projectRoot,
+        projectRef: "proj_rotation",
+        moduleVersion: "v1",
+        env: { STARTED_PATH: startedPath },
+        request: new Request("http://edge.local/functions/v1/busy"),
+      });
+      await waitForFile(startedPath);
+
+      const versionPreheat = await pool.preheatVersionedIdleWorkers({
+        functionId: "proj_rotation_busy_v2",
+        functionPath,
+        projectRoot,
+        projectRef: "proj_rotation",
+        moduleVersion: "v2",
+        env: { STARTED_PATH: startedPath },
+      });
+      expect(versionPreheat.rotation).toEqual({
+        generation: 1,
+        attempted: 2,
+        idleRetired: 1,
+        busyTainted: 1,
+        alreadyTainted: 0,
+        immediateReplacements: 1,
+      });
+      expect(versionPreheat.succeeded).toBe(1);
+
+      const response = await responsePromise;
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe("completed");
+      await waitForMetric(pool, "total_natural_worker_exits", 2);
+      const metrics = pool.snapshotMetrics("rotation");
+      expect(metrics["rotation_total_worker_replacements"]).toBe(2);
+      expect(metrics["rotation_total_generation_busy_taints"]).toBe(1);
+      expect(metrics["rotation_tainted_workers"]).toBe(0);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("serializes ordinary bulk preheat before explicit version rotation", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-version-rotation-queued-"));
+    const slowFunctionPath = join(projectRoot, "slow.ts");
+    const versionedFunctionPath = join(projectRoot, "versioned.ts");
+    await Bun.write(slowFunctionPath, `
+      await Bun.sleep(150);
+      export default () => new Response("ordinary");
+    `);
+    await Bun.write(versionedFunctionPath, `export default () => new Response("versioned");`);
+
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    try {
+      const ordinaryPreheat = pool.preheatIdleWorkers(
+        "proj_rotation_ordinary",
+        slowFunctionPath,
+        projectRoot,
+        {},
+        { projectRef: "proj_rotation", moduleVersion: "ordinary" },
+      );
+      const versionedPreheat = pool.preheatVersionedIdleWorkers({
+        functionId: "proj_rotation_versioned_v1",
+        functionPath: versionedFunctionPath,
+        projectRoot,
+        projectRef: "proj_rotation",
+        moduleVersion: "v1",
+        env: {},
+      });
+
+      const [ordinary, versioned] = await Promise.all([ordinaryPreheat, versionedPreheat]);
+      expect(ordinary.succeeded).toBe(1);
+      expect(versioned.succeeded).toBe(1);
+      expect(versioned.rotation).toEqual({
+        generation: 1,
+        attempted: 1,
+        idleRetired: 1,
+        busyTainted: 0,
+        alreadyTainted: 0,
+        immediateReplacements: 1,
+      });
+      await waitForMetric(pool, "total_natural_worker_exits", 1);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("serializes concurrent explicit version preheats by generation", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-version-rotation-ordered-"));
+    const counterPath = join(projectRoot, "counter.txt");
+    const functionPath = join(projectRoot, "fn.ts");
+    await Bun.write(functionPath, moduleLoadCounterSource(counterPath));
+
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+    const preheatVersion = (version: string) => pool.preheatVersionedIdleWorkers({
+      functionId: `proj_rotation_ordered_v${version}`,
+      functionPath,
+      projectRoot,
+      projectRef: "proj_rotation",
+      moduleVersion: version,
+      env: {},
+    });
+
+    try {
+      const preheats = await Promise.all([
+        preheatVersion("1"),
+        preheatVersion("2"),
+        preheatVersion("3"),
+      ]);
+      expect(preheats.map((preheat) => preheat.rotation.generation)).toEqual([1, 2, 3]);
+      expect(preheats.map((preheat) => preheat.succeeded)).toEqual([1, 1, 1]);
+      expect(await Bun.file(counterPath).text()).toBe("3");
+      await waitForMetric(pool, "total_natural_worker_exits", 3);
+      const metrics = pool.snapshotMetrics("ordered");
+      expect(metrics["ordered_total_worker_replacements"]).toBe(3);
+      expect(metrics["ordered_retired_workers"]).toBe(0);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("reloads rollback versions and drains repeated generation rotations", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-version-rotation-rollback-"));
+    const counterPath = join(projectRoot, "counter.txt");
+    const functionPath = join(projectRoot, "fn.ts");
+    await Bun.write(functionPath, moduleLoadCounterSource(counterPath));
+
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+    const preheatVersion = (version: string) => pool.preheatVersionedIdleWorkers({
+      functionId: `proj_rotation_rollback_v${version}`,
+      functionPath,
+      projectRoot,
+      projectRef: "proj_rotation",
+      moduleVersion: version,
+      env: {},
+    });
+
+    try {
+      for (const version of ["1", "2", "1", "3", "4", "5"]) {
+        const preheat = await preheatVersion(version);
+        expect(preheat.succeeded).toBe(1);
+        expect(preheat.cacheMisses).toBe(1);
+      }
+      expect(await Bun.file(counterPath).text()).toBe("6");
+      await waitForMetric(pool, "total_natural_worker_exits", 6);
+      const metrics = pool.snapshotMetrics("rollback");
+      expect(metrics["rollback_worker_generation"]).toBe(6);
+      expect(metrics["rollback_total_worker_replacements"]).toBe(6);
+      expect(metrics["rollback_retired_workers"]).toBe(0);
+      expect(metrics["rollback_tainted_workers"]).toBe(0);
+      expect(metrics["rollback_idle_workers"]).toBe(1);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("requests one process recycle after the worker replacement budget", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-worker-recycle-budget-"));
+    const functionPath = join(projectRoot, "fn.ts");
+    await Bun.write(functionPath, `export default () => new Response("ready");`);
+
+    const recycleEvents: Array<{ workerReplacements: number; maxWorkerReplacements: number }> = [];
+    const succeededAtRecycle: number[] = [];
+    let pool: WorkerPool;
+    pool = new WorkerPool({
+      size: 1,
+      requestTimeout: 2_000,
+      maxWorkerReplacementsBeforeRecycle: 2,
+      onWorkerRecycleRequired: (event) => {
+        recycleEvents.push(event);
+        const metrics = pool.snapshotMetrics("during_recycle");
+        succeededAtRecycle.push(metrics["during_recycle_total_preheat_succeeded"]);
+      },
+    });
+    pools.push(pool);
+
+    try {
+      for (const version of ["1", "2", "3"]) {
+        const preheat = await pool.preheatVersionedIdleWorkers({
+          functionId: `proj_recycle_v${version}`,
+          functionPath,
+          projectRoot,
+          projectRef: "proj_recycle",
+          moduleVersion: version,
+          env: {},
+        });
+        expect(preheat.succeeded).toBe(1);
+      }
+
+      expect(recycleEvents).toEqual([{ workerReplacements: 2, maxWorkerReplacements: 2 }]);
+      expect(succeededAtRecycle).toEqual([2]);
+      await waitForMetric(pool, "total_natural_worker_exits", 3);
+      const metrics = pool.snapshotMetrics("recycle");
+      expect(metrics["recycle_total_worker_replacements"]).toBe(3);
+      expect(metrics["recycle_max_worker_replacements_before_recycle"]).toBe(2);
+      expect(metrics["recycle_worker_recycle_required"]).toBe(1);
+      expect(metrics["recycle_retired_workers"]).toBe(0);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("shared recycle coordination waits for slow and fast pool preheats", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-recycle-two-pools-"));
+    const slowFunctionPath = join(projectRoot, "slow.ts");
+    const fastFunctionPath = join(projectRoot, "fast.ts");
+    await Bun.write(slowFunctionPath, `
+      await Bun.sleep(150);
+      export default () => new Response("slow");
+    `);
+    await Bun.write(fastFunctionPath, `export default () => new Response("fast");`);
+
+    let foreground: WorkerPool;
+    let background: WorkerPool;
+    let coordinatorStarts = 0;
+    let coordinatedDrain: Promise<void> | undefined;
+    const requestRecycle = () => {
+      if (coordinatedDrain) return;
+      coordinatorStarts++;
+      coordinatedDrain = Promise.all([foreground.drain(), background.drain()]).then(() => undefined);
+    };
+    foreground = new WorkerPool({
+      size: 1,
+      requestTimeout: 2_000,
+      maxWorkerReplacementsBeforeRecycle: 1,
+      onWorkerRecycleRequired: requestRecycle,
+    });
+    background = new WorkerPool({
+      size: 1,
+      requestTimeout: 2_000,
+      maxWorkerReplacementsBeforeRecycle: 1,
+      onWorkerRecycleRequired: requestRecycle,
+    });
+    pools.push(foreground, background);
+
+    try {
+      const preheat = (pool: WorkerPool, functionId: string, functionPath: string) =>
+        pool.preheatVersionedIdleWorkers({
+          functionId,
+          functionPath,
+          projectRoot,
+          projectRef: "proj_recycle_two_pools",
+          moduleVersion: "1",
+          env: {},
+        });
+      const [foregroundResult, backgroundResult] = await Promise.all([
+        preheat(foreground, "proj_recycle_foreground_v1", slowFunctionPath),
+        preheat(background, "proj_recycle_background_v1", fastFunctionPath),
+      ]);
+      await coordinatedDrain;
+
+      expect(foregroundResult.succeeded).toBe(1);
+      expect(backgroundResult.succeeded).toBe(1);
+      expect(coordinatorStarts).toBe(1);
+      const foregroundMetrics = foreground.snapshotMetrics("foreground");
+      const backgroundMetrics = background.snapshotMetrics("background");
+      expect(foregroundMetrics["foreground_total_preheat_succeeded"]).toBe(1);
+      expect(backgroundMetrics["background_total_preheat_succeeded"]).toBe(1);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   test("invalidates only the target function cache entry", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-module-invalidate-"));
     const functionAPath = join(projectRoot, "a.ts");
@@ -2313,6 +2689,8 @@ describe("WorkerPool module cache", () => {
       expect(metrics["preheat_total_preheat_attempts"]).toBe(3);
       expect(metrics["preheat_total_preheat_succeeded"]).toBe(3);
       expect(metrics["preheat_total_preheat_ms"]).toBeGreaterThanOrEqual(0);
+      expect(metrics["preheat_total_generation_rotations"]).toBe(0);
+      expect(metrics["preheat_total_worker_replacements"]).toBe(0);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
