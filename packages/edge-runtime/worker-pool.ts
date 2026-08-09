@@ -53,6 +53,8 @@ const WAIT_UNTIL_TIMEOUT_MS = Number(process.env.EDGE_WAIT_UNTIL_TIMEOUT_MS) || 
 const CONTROL_MESSAGE_TIMEOUT_MS = Number(process.env.EDGE_CONTROL_MESSAGE_TIMEOUT_MS) || 1_000;
 const DEFAULT_MAX_RETIREMENT_AGE_MS = 60_000;
 const DEFAULT_PREHEAT_TIMEOUT_MS = 10_000;
+// Bun/JSC retains fixed host memory after Worker exit, so bound churn before recycling the process.
+const DEFAULT_MAX_WORKER_REPLACEMENTS_BEFORE_RECYCLE = 128;
 
 function cancelledResponse(): Response {
   return new Response(JSON.stringify({ error: "Task cancelled" }), {
@@ -83,6 +85,24 @@ type PreheatOptions = {
   maxWorkers?: number;
 };
 
+type BulkPreheatRequest = {
+  functionId: string;
+  functionPath: string;
+  projectRoot: string;
+  env: Record<string, string>;
+  options: PreheatOptions;
+};
+
+export type VersionedPreheatRequest = {
+  functionId: string;
+  functionPath: string;
+  projectRoot: string;
+  env: Record<string, string>;
+  projectRef?: string;
+  moduleVersion: string;
+  maxWorkers?: number;
+};
+
 type WorkerPreheatResult = {
   success: boolean;
   cacheHit: boolean | null;
@@ -95,6 +115,24 @@ export type WorkerPoolPreheatResult = {
   cacheHits: number;
   cacheMisses: number;
   durationMs: number;
+};
+
+export type WorkerPoolGenerationRotationResult = {
+  generation: number;
+  attempted: number;
+  idleRetired: number;
+  busyTainted: number;
+  alreadyTainted: number;
+  immediateReplacements: number;
+};
+
+export type WorkerPoolVersionPreheatResult = WorkerPoolPreheatResult & {
+  rotation: WorkerPoolGenerationRotationResult;
+};
+
+type WorkerPoolRecycleRequired = {
+  workerReplacements: number;
+  maxWorkerReplacements: number;
 };
 
 type RetirementBudgetExceeded = {
@@ -113,12 +151,16 @@ type WorkerPoolConfig = {
     maxRetirementAgeMs: number;
   };
   onRetirementBudgetExceeded?: (exceeded: RetirementBudgetExceeded) => void;
+  maxWorkerReplacementsBeforeRecycle?: number;
+  onWorkerRecycleRequired?: (event: WorkerPoolRecycleRequired) => void;
 };
 
 type RetiredWorker = {
   retiredAt: number;
   ageTimer: ReturnType<typeof setTimeout>;
 };
+
+type GenerationRotationDisposition = "idle-retired" | "busy-tainted" | "already-tainted";
 
 function extractProjectRef(functionId: string): string | null {
   const idx = functionId.indexOf("_");
@@ -174,12 +216,21 @@ export class WorkerPool {
   private totalPreheatMs = 0;
   private totalWorkerRetirements = 0;
   private totalNaturalWorkerExits = 0;
+  private workerGeneration = 0;
+  private totalGenerationRotations = 0;
+  private totalGenerationIdleRetirements = 0;
+  private totalGenerationBusyTaints = 0;
+  private bulkPreheatTail: Promise<void> | null = null;
   private retirementBudgetExceeded = false;
+  private workerRecycleRequired = false;
+  private workerRecycleNotificationSent = false;
+  private workerRecycleNotificationDeferred = false;
   private activeWorkers = new Set<Worker>();
   private retiredWorkers = new Map<Worker, RetiredWorker>();
   private workerMetadata = new Map<
     Worker,
     {
+      generation: number;
       replacementTimer?: ReturnType<typeof setTimeout>;
       isCancelling?: boolean;
     }
@@ -192,6 +243,8 @@ export class WorkerPool {
     maxRetirementAgeMs: number;
   };
   private readonly onRetirementBudgetExceeded: (exceeded: RetirementBudgetExceeded) => void;
+  private readonly maxWorkerReplacementsBeforeRecycle: number;
+  private readonly onWorkerRecycleRequired: (event: WorkerPoolRecycleRequired) => void;
 
   constructor(private config: WorkerPoolConfig) {
     this.retirementBudget = config.retirementBudget ?? {
@@ -202,6 +255,9 @@ export class WorkerPool {
       console.error("[Pool] Worker retirement budget exceeded; restarting Edge Runtime", exceeded);
       process.exit(1);
     });
+    this.maxWorkerReplacementsBeforeRecycle = config.maxWorkerReplacementsBeforeRecycle
+      ?? DEFAULT_MAX_WORKER_REPLACEMENTS_BEFORE_RECYCLE;
+    this.onWorkerRecycleRequired = config.onWorkerRecycleRequired ?? (() => process.exit(1));
     for (let i = 0; i < config.size; i++) {
       const w = this.createWorker();
       this.idle.push(w);
@@ -215,7 +271,7 @@ export class WorkerPool {
       ...(this.config.smol ? { smol: true } : {}),
     } as any);
     this.workers.push(w);
-    this.workerMetadata.set(w, {});
+    this.workerMetadata.set(w, { generation: this.workerGeneration });
     w.once("exit", () => this.onWorkerExit(w));
     return w;
   }
@@ -338,7 +394,7 @@ export class WorkerPool {
     const cleanupInFlight = () => {
       this.inFlight.delete(opts.executionKey);
     };
-    const metadata = this.workerMetadata.get(worker) || {};
+    const metadata = this.workerMetadata.get(worker) || { generation: this.workerGeneration };
     metadata.isCancelling = false;
     if (metadata.replacementTimer) {
       clearTimeout(metadata.replacementTimer);
@@ -740,7 +796,7 @@ export class WorkerPool {
     worker.unref();
 
     if (!this.draining) {
-      this.totalWorkerReplacements++;
+      this.recordWorkerReplacement();
       const replacement = this.createWorker();
       this.activeWorkers.add(replacement);
       this.schedule(replacement);
@@ -770,10 +826,34 @@ export class WorkerPool {
     this.removeWorkerReferences(worker);
     if (!this.activeWorkers.delete(worker) || this.draining) return;
 
-    this.totalWorkerReplacements++;
+    this.recordWorkerReplacement();
     const replacement = this.createWorker();
     this.activeWorkers.add(replacement);
     this.schedule(replacement);
+  }
+
+  private recordWorkerReplacement(): void {
+    this.totalWorkerReplacements++;
+    if (this.totalWorkerReplacements >= this.maxWorkerReplacementsBeforeRecycle) {
+      this.workerRecycleRequired = true;
+    }
+    this.notifyWorkerRecycleRequired();
+  }
+
+  private notifyWorkerRecycleRequired(): void {
+    if (
+      !this.workerRecycleRequired ||
+      this.workerRecycleNotificationSent ||
+      this.workerRecycleNotificationDeferred
+    ) return;
+
+    this.workerRecycleNotificationSent = true;
+    const event = {
+      workerReplacements: this.totalWorkerReplacements,
+      maxWorkerReplacements: this.maxWorkerReplacementsBeforeRecycle,
+    };
+    console.warn("[Pool] Worker replacement budget reached; recycling Edge Runtime", event);
+    this.onWorkerRecycleRequired(event);
   }
 
   private removeWorkerReferences(worker: Worker) {
@@ -917,6 +997,38 @@ export class WorkerPool {
     return this.invalidateWorkers({ type: "invalidate_project", projectRef });
   }
 
+  private rotateWorkerForGeneration(worker: Worker): GenerationRotationDisposition {
+    if (this.idle.includes(worker)) {
+      this.retireWorker(worker);
+      return "idle-retired";
+    }
+    if (this.tainted.has(worker)) return "already-tainted";
+    this.tainted.add(worker);
+    return "busy-tainted";
+  }
+
+  private rotateGeneration(): WorkerPoolGenerationRotationResult {
+    this.workerGeneration++;
+    this.totalGenerationRotations++;
+    const workers = [...this.activeWorkers].filter(
+      (worker) => (this.workerMetadata.get(worker)?.generation ?? -1) < this.workerGeneration,
+    );
+    const dispositions = workers.map((worker) => this.rotateWorkerForGeneration(worker));
+    const idleRetired = dispositions.filter((value) => value === "idle-retired").length;
+    const busyTainted = dispositions.filter((value) => value === "busy-tainted").length;
+    const alreadyTainted = dispositions.filter((value) => value === "already-tainted").length;
+    this.totalGenerationIdleRetirements += idleRetired;
+    this.totalGenerationBusyTaints += busyTainted;
+    return {
+      generation: this.workerGeneration,
+      attempted: workers.length,
+      idleRetired,
+      busyTainted,
+      alreadyTainted,
+      immediateReplacements: idleRetired,
+    };
+  }
+
   private async preheatWorker(
     worker: Worker,
     functionId: string,
@@ -997,48 +1109,132 @@ export class WorkerPool {
       .then((result) => result.success)
       .finally(() => {
         if (!this.draining && this.activeWorkers.has(worker)) {
-          this.schedule(worker);
+          this.recycle(worker);
         }
       });
   }
 
-  async preheatIdleWorkers(
+  preheatVersionedIdleWorkers(
+    request: VersionedPreheatRequest,
+  ): Promise<WorkerPoolVersionPreheatResult> {
+    return this.enqueueBulkPreheat(() => this.rotateAndPreheatVersion(request));
+  }
+
+  private async rotateAndPreheatVersion(
+    request: VersionedPreheatRequest,
+  ): Promise<WorkerPoolVersionPreheatResult> {
+    const rotation = this.rotateGeneration();
+    const preheat = await this.preheatIdleWorkersNow({
+      functionId: request.functionId,
+      functionPath: request.functionPath,
+      projectRoot: request.projectRoot,
+      env: request.env,
+      options: {
+        projectRef: request.projectRef,
+        moduleVersion: request.moduleVersion,
+        maxWorkers: request.maxWorkers,
+      },
+    });
+    return { ...preheat, rotation };
+  }
+
+  preheatIdleWorkers(
     functionId: string,
     functionPath: string,
     projectRoot: string,
     env: Record<string, string>,
     options: PreheatOptions = {},
   ): Promise<WorkerPoolPreheatResult> {
+    return this.enqueueBulkPreheat(() => this.preheatIdleWorkersNow({
+      functionId,
+      functionPath,
+      projectRoot,
+      env,
+      options,
+    }));
+  }
+
+  private enqueueBulkPreheat<T>(operation: () => Promise<T>): Promise<T> {
+    const deferredOperation = () => this.runWithDeferredRecycleNotification(operation);
+    const queuedOperation = this.bulkPreheatTail
+      ? this.bulkPreheatTail.then(deferredOperation)
+      : deferredOperation();
+    const settledOperation = queuedOperation.then(() => undefined, () => undefined);
+    this.bulkPreheatTail = settledOperation;
+    void settledOperation.then(() => {
+      if (this.bulkPreheatTail === settledOperation) this.bulkPreheatTail = null;
+    });
+    return queuedOperation;
+  }
+
+  private async runWithDeferredRecycleNotification<T>(operation: () => Promise<T>): Promise<T> {
+    this.workerRecycleNotificationDeferred = true;
+    try {
+      return await operation();
+    } finally {
+      this.workerRecycleNotificationDeferred = false;
+      this.notifyWorkerRecycleRequired();
+    }
+  }
+
+  private async preheatIdleWorkersNow(request: BulkPreheatRequest): Promise<WorkerPoolPreheatResult> {
     const start = performance.now();
-    const requested = options.maxWorkers && options.maxWorkers > 0
-      ? Math.min(options.maxWorkers, this.idle.length)
-      : this.idle.length;
-    const workers = this.idle.splice(0, requested);
+    const workers = this.takeIdleWorkers(request.options.maxWorkers);
     if (workers.length === 0) {
       return { attempted: 0, succeeded: 0, cacheHits: 0, cacheMisses: 0, durationMs: 0 };
     }
 
     try {
-      const results = await Promise.all(
-        workers.map((worker) => this.preheatWorker(worker, functionId, functionPath, projectRoot, env, options)),
-      );
-      const durationMs = Math.round(performance.now() - start);
-      this.totalPreheatAttempts += workers.length;
-      this.totalPreheatSucceeded += results.filter((result) => result.success).length;
-      this.totalPreheatMs += durationMs;
-      return {
-        attempted: workers.length,
-        succeeded: results.filter((result) => result.success).length,
-        cacheHits: results.filter((result) => result.cacheHit === true).length,
-        cacheMisses: results.filter((result) => result.cacheHit === false).length,
-        durationMs,
-      };
+      const results = await this.preheatWorkers(request, workers);
+      return this.recordBulkPreheatResults(results, start);
     } finally {
-      if (!this.draining) {
-        for (const worker of workers) {
-          if (this.activeWorkers.has(worker)) this.schedule(worker);
-        }
-      }
+      this.recycleBulkPreheatWorkers(workers);
+    }
+  }
+
+  private preheatWorkers(
+    request: BulkPreheatRequest,
+    workers: Worker[],
+  ): Promise<WorkerPreheatResult[]> {
+    return Promise.all(workers.map((worker) => this.preheatWorker(
+      worker,
+      request.functionId,
+      request.functionPath,
+      request.projectRoot,
+      request.env,
+      request.options,
+    )));
+  }
+
+  private takeIdleWorkers(maxWorkers?: number): Worker[] {
+    const requested = maxWorkers && maxWorkers > 0
+      ? Math.min(maxWorkers, this.idle.length)
+      : this.idle.length;
+    return this.idle.splice(0, requested);
+  }
+
+  private recordBulkPreheatResults(
+    results: WorkerPreheatResult[],
+    start: number,
+  ): WorkerPoolPreheatResult {
+    const durationMs = Math.round(performance.now() - start);
+    const succeeded = results.filter((result) => result.success).length;
+    this.totalPreheatAttempts += results.length;
+    this.totalPreheatSucceeded += succeeded;
+    this.totalPreheatMs += durationMs;
+    return {
+      attempted: results.length,
+      succeeded,
+      cacheHits: results.filter((result) => result.cacheHit === true).length,
+      cacheMisses: results.filter((result) => result.cacheHit === false).length,
+      durationMs,
+    };
+  }
+
+  private recycleBulkPreheatWorkers(workers: Worker[]): void {
+    if (this.draining) return;
+    for (const worker of workers) {
+      if (this.activeWorkers.has(worker)) this.recycle(worker);
     }
   }
 
@@ -1059,9 +1255,15 @@ export class WorkerPool {
       [`${prefix}_total_module_cache_invalidated`]: this.totalModuleCacheInvalidated,
       [`${prefix}_module_cache_entries_last_worker`]: this.lastModuleCacheEntries,
       [`${prefix}_total_worker_replacements`]: this.totalWorkerReplacements,
+      [`${prefix}_max_worker_replacements_before_recycle`]: this.maxWorkerReplacementsBeforeRecycle,
+      [`${prefix}_worker_recycle_required`]: this.workerRecycleRequired ? 1 : 0,
       [`${prefix}_retired_workers`]: this.retiredWorkers.size,
       [`${prefix}_total_worker_retirements`]: this.totalWorkerRetirements,
       [`${prefix}_total_natural_worker_exits`]: this.totalNaturalWorkerExits,
+      [`${prefix}_worker_generation`]: this.workerGeneration,
+      [`${prefix}_total_generation_rotations`]: this.totalGenerationRotations,
+      [`${prefix}_total_generation_idle_retirements`]: this.totalGenerationIdleRetirements,
+      [`${prefix}_total_generation_busy_taints`]: this.totalGenerationBusyTaints,
       [`${prefix}_oldest_retired_worker_age_ms`]: this.oldestRetirementAgeMs(),
       [`${prefix}_retirement_budget_exceeded`]: this.retirementBudgetExceeded ? 1 : 0,
       [`${prefix}_total_preheat_attempts`]: this.totalPreheatAttempts,
@@ -1123,10 +1325,15 @@ export class WorkerPool {
     return this.inFlight.size;
   }
 
-  drain(): Promise<void> {
+  async drain(): Promise<void> {
     this.stopDispatching();
+    while (this.bulkPreheatTail) {
+      await this.bulkPreheatTail;
+    }
 
-    return new Promise((resolve) => {
+    if (this.inFlight.size === 0) return;
+
+    await new Promise<void>((resolve) => {
       const check = () => {
         if (this.inFlight.size === 0) {
           resolve();
