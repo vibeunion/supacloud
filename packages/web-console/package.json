@@ -14,7 +14,7 @@
   "devDependencies": {
     "@sveltejs/adapter-static": "^3.0.10",
     "@sveltejs/kit": "^2.70.2",
-    "@sveltejs/vite-plugin-svelte": "^7.2.0",
+    "@sveltejs/vite-plugin-svelte": "^7.3.0",
     "@tailwindcss/forms": "^0.5.11",
     "@tailwindcss/postcss": "^4.3.3",
     "@tailwindcss/typography": "^0.5.20",
@@ -22,13 +22,13 @@
     "autoprefixer": "^10.5.4",
     "bits-ui": "^2.18.1",
     "clsx": "^2.1.1",
-    "jsdom": "30.0.0",
+    "jsdom": "30.0.1",
     "mode-watcher": "^1.1.0",
     "next-themes": "^0.4.6",
     "paneforge": "^1.0.2",
-    "postcss": "^8.5.25",
+    "postcss": "^8.5.26",
     "svelte": "^5.56.8",
-    "svelte-check": "^4.7.4",
+    "svelte-check": "^4.7.5",
     "svelte-sonner": "^1.1.1",
     "sveltekit-superforms": "^2.30.2",
     "tailwind-animate": "^0.2.10",
@@ -37,29 +37,26 @@
     "tailwindcss": "^4.3.3",
     "typescript": "6.0.3",
     "vaul-svelte": "^0.3.2",
-    "vite": "8.2.0"
+    "vite": "8.2.1"
   },
   "dependencies": {
-    "@svadmin/core": "^0.32.2",
+    "@svadmin/core": "^0.34.1",
     "@svadmin/elysia": "^0.10.7",
     "@svadmin/sveltekit": "^0.9.6",
-    "@svadmin/ui": "0.38.7",
+    "@svadmin/ui": "0.40.3",
     "@tanstack/svelte-query": "^6.1.38",
     "highlight.js": "^11.11.1",
-    "isomorphic-dompurify": "^3.21.0",
+    "isomorphic-dompurify": "^3.22.0",
     "lucide-svelte": "^1.0.1",
-    "marked": "^18.0.7",
+    "marked": "^18.0.9",
     "marked-highlight": "^2.2.4",
     "monaco-editor": "^0.56.0",
     "svelte-i18n": "^4.0.1"
   },
   "overrides": {
     "cookie": "0.7.2",
-    "dompurify": "3.4.12",
+    "dompurify": "3.4.13",
     "esbuild": "0.28.1",
     "joi": "17.13.4"
-  },
-  "patchedDependencies": {
-    "@svadmin/ui@0.38.7": "patches/@svadmin%2Fui@0.38.7.patch"
   }
 }
