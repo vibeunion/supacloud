@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.50.24](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.23...management-api-v0.50.24) (2026-08-09)
+
+
+### Miscellaneous Chores
+
+* **deps:** bump nanoid from 6.0.0 to 6.0.1 in /packages/management-api ([181cfcd](https://github.com/zuohuadong/supacloud/commit/181cfcd289ad6d3f30563308b95506b0d935fcc1))
+* **deps:** upgrade dependencies and remove svadmin patch ([6215cb7](https://github.com/zuohuadong/supacloud/commit/6215cb7091a4d0f3dbca754984931fb5aa0e2181))
+
 ## [0.50.23](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.22...management-api-v0.50.23) (2026-08-06)
 
 

@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.16.6](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.16.5...edge-runtime-v0.16.6) (2026-08-09)
+
+
+### Bug Fixes
+
+* **edge-runtime:** bound memory across function activations ([#741](https://github.com/zuohuadong/supacloud/issues/741)) ([7711f66](https://github.com/zuohuadong/supacloud/commit/7711f66aa11f50997449931145819f592c118ee3))
+
+
+### Miscellaneous Chores
+
+* **deps:** bump @supabase/supabase-js from 2.110.9 to 2.112.0 in /packages/edge-runtime ([1b351e2](https://github.com/zuohuadong/supacloud/commit/1b351e26e5ae401c1e1877324d2ca4ba9d97534c))
+* **deps:** bump jose from 6.2.4 to 6.2.8 in /packages/edge-runtime ([f94b2c9](https://github.com/zuohuadong/supacloud/commit/f94b2c99a7b4430491ee0eef557936c2a485840f))
+* **deps:** upgrade dependencies and remove svadmin patch ([6215cb7](https://github.com/zuohuadong/supacloud/commit/6215cb7091a4d0f3dbca754984931fb5aa0e2181))
+
 ## [0.16.5](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.16.4...edge-runtime-v0.16.5) (2026-08-04)
 
 

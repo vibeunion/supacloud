@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.2](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.21.1...supacloud-js-v0.21.2) (2026-08-09)
+
+
+### Miscellaneous Chores
+
+* **deps:** upgrade dependencies and remove svadmin patch ([6215cb7](https://github.com/zuohuadong/supacloud/commit/6215cb7091a4d0f3dbca754984931fb5aa0e2181))
+
 ## [0.21.1](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.21.0...supacloud-js-v0.21.1) (2026-08-02)
 
 

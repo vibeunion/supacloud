@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.28.8](https://github.com/zuohuadong/supacloud/compare/web-console-v0.28.7...web-console-v0.28.8) (2026-08-09)
+
+
+### Bug Fixes
+
+* **edge-runtime:** bound memory across function activations ([#741](https://github.com/zuohuadong/supacloud/issues/741)) ([7711f66](https://github.com/zuohuadong/supacloud/commit/7711f66aa11f50997449931145819f592c118ee3))
+
+
+### Miscellaneous Chores
+
+* **deps-dev:** bump @sveltejs/kit from 2.70.1 to 2.70.2 in /packages/web-console ([bfd02bd](https://github.com/zuohuadong/supacloud/commit/bfd02bd99c1fd92ae06b42dfac68179a0817a70b))
+* **deps-dev:** bump postcss from 8.5.23 to 8.5.25 in /packages/web-console ([d6f3c8a](https://github.com/zuohuadong/supacloud/commit/d6f3c8ae5470dc5fcd797ea4a531140766b08276))
+* **deps-dev:** bump tailwind-variants from 3.3.0 to 3.3.1 in /packages/web-console ([2faff3b](https://github.com/zuohuadong/supacloud/commit/2faff3bc57cf599577591aa06e8be53b427e494c))
+* **deps-dev:** bump vite from 8.1.5 to 8.2.0 in /packages/web-console ([a774f95](https://github.com/zuohuadong/supacloud/commit/a774f95e5a27a77a7610d0247ccb9c0332c04412))
+* **deps:** upgrade dependencies and remove svadmin patch ([6215cb7](https://github.com/zuohuadong/supacloud/commit/6215cb7091a4d0f3dbca754984931fb5aa0e2181))
+
 ## [0.28.7](https://github.com/zuohuadong/supacloud/compare/web-console-v0.28.6...web-console-v0.28.7) (2026-08-03)
 
 

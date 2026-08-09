@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.9](https://github.com/zuohuadong/supacloud/compare/supacloud-lite-v0.5.8...supacloud-lite-v0.5.9) (2026-08-09)
+
+
+### Miscellaneous Chores
+
+* **deps:** upgrade dependencies and remove svadmin patch ([6215cb7](https://github.com/zuohuadong/supacloud/commit/6215cb7091a4d0f3dbca754984931fb5aa0e2181))
+
 ## [0.5.8](https://github.com/zuohuadong/supacloud/compare/supacloud-lite-v0.5.7...supacloud-lite-v0.5.8) (2026-08-05)
 
 
