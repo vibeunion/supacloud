@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.50.25](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.24...management-api-v0.50.25) (2026-08-09)
+
+
+### Bug Fixes
+
+* **runtime:** align GoTrue v2.195.0 across installers, CI, and Compose ([#742](https://github.com/zuohuadong/supacloud/issues/742)) ([de95062](https://github.com/zuohuadong/supacloud/commit/de9506219a6a308676a8cdba1e5372a2e2f3529a))
+
 ## [0.50.24](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.23...management-api-v0.50.24) (2026-08-09)
 
 
