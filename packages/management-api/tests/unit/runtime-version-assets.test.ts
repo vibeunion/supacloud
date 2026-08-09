@@ -949,7 +949,7 @@ describe("runtime companion version assets", () => {
     const installer = readRepoFile("install.sh");
     const upgrade = readRepoFile("scripts/lib/gotrue_upgrade.sh");
 
-    expect(readShellConstant(upgrade, "SUPACLOUD_GOTRUE_DEFAULT_VERSION")).toBe("v2.194.0");
+    expect(readShellConstant(upgrade, "SUPACLOUD_GOTRUE_DEFAULT_VERSION")).toBe("v2.195.0");
     expect(installer).toContain('source "${SCRIPT_DIR}/scripts/lib/gotrue_upgrade.sh"');
     expect(installer).toContain(
       'local GOTRUE_VERSION="${GOTRUE_VERSION:-$SUPACLOUD_GOTRUE_DEFAULT_VERSION}"',
@@ -960,8 +960,8 @@ describe("runtime companion version assets", () => {
     expect(upgrade).toContain(
       'SUPACLOUD_GOTRUE_RELEASE_ASSET="auth-${target_version}-${SUPACLOUD_GOTRUE_RELEASE_ARCH}.tar.xz"',
     );
-    expect(upgrade).toContain("ecb60cc55e5644c39c2319b73ebb348623ee98f968465590c4829ce853870db5");
-    expect(upgrade).toContain("d3237193f8af323f6d0a4315ae09d77d5b54acddeba1a6a0bf385e36c25451a4");
+    expect(upgrade).toContain("6f8065fcd708df7c09c83e1fb96b0c9507f6e2600e6a78a540153b92a49cd1f9");
+    expect(upgrade).toContain("49aa6a9578756d4f19e6f65aa9298021de8fbb9d952bf86b3806cf8e760932ae");
     expect(upgrade).toContain("supacloud_download_url");
     expect(upgrade).toContain("supacloud_install_pinned_tar_xz_binary");
     expect(upgrade).not.toContain(".tar.gz");
@@ -1006,17 +1006,17 @@ describe("runtime companion version assets", () => {
     expect(caddyBuilder).toContain('CADDY_VERSION="${CADDY_VERSION:-v2.11.4}"');
 
     expect(runtime).toContain('POSTGREST_DEFAULT_VERSION="v14.16"');
-    expect(runtime).toContain('GOTRUE_DEFAULT_VERSION="v2.194.0"');
+    expect(runtime).toContain('GOTRUE_DEFAULT_VERSION="v2.195.0"');
     for (const source of [installer, realtimeUnit, workflow]) {
       expect(source).toContain("public.ecr.aws/supabase/realtime:v2.121.1");
     }
     for (const compose of [devCompose, selfHostCompose]) {
       expect(compose).toContain("caddy:2.11.4");
-      expect(compose).toContain("supabase/gotrue:v2.194.0");
+      expect(compose).toContain("supabase/gotrue:v2.195.0");
       expect(compose).toContain("postgrest/postgrest:v14.16");
     }
     expect(workflow).toContain("postgrest/postgrest:v14.16");
-    expect(workflow).toContain("supabase/gotrue:v2.194.0");
+    expect(workflow).toContain("supabase/gotrue:v2.195.0");
     expect(postgresDockerfile).toContain("FROM postgres:18-bookworm");
     expect(devCompose).toContain("context: ../self-host/postgres");
     expect(selfHostCompose).toContain("context: ./postgres");

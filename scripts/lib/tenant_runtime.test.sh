@@ -10,7 +10,7 @@ grep -Fq 'PGPASSWORD="$db_password" psql' "$RUNTIME_SCRIPT"
 grep -Fq 'v14.16' "$RUNTIME_SCRIPT"
 grep -Fq '36b8ae140f188cfcd6003494805bf35a41e895f88c12be9183d60f91782145c6' "$RUNTIME_SCRIPT"
 grep -Fq '086f58dfa090ef0ed7e30ca5c0b49f937a9586d77e5ce372f6a34f249370e37d' "$RUNTIME_SCRIPT"
-grep -Fq 'v2.194.0' "$RUNTIME_SCRIPT"
+grep -Fq 'v2.195.0' "$RUNTIME_SCRIPT"
 grep -Fq 'GOTRUE_EXPERIMENTAL_PROVIDER_LINKING_DOMAINS' "$RUNTIME_SCRIPT"
 grep -Fq 'run the explicit SupaCloud installer/upgrade' "$RUNTIME_SCRIPT"
 
@@ -147,7 +147,7 @@ fi
 unset GOTRUE_EXPERIMENTAL_PROVIDERS_WITH_OWN_LINKING_DOMAIN
 
 fake_gotrue="$tmp_dir/gotrue"
-printf '#!/bin/sh\n[ "$1" = version ] && printf "v2.194.0\\n"\n' > "$fake_gotrue"
+printf '#!/bin/sh\n[ "$1" = version ] && printf "v2.195.0\\n"\n' > "$fake_gotrue"
 chmod 755 "$fake_gotrue"
 GOTRUE_BIN="$fake_gotrue"
 ensure_gotrue
