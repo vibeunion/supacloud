@@ -108,12 +108,14 @@ export async function runCli(
     if (!tool) {
         console.error(`❌ Unknown command: ${toolName}`);
         console.error(`Available commands: \n  ${formatAvailableCommands()}`);
-        process.exit(1);
+        process.exitCode = 1;
+        return;
     }
 
     if (args.length === 1 || args[1] === "--help" || args[1] === "-h") {
         console.error(formatToolHelp(toolName, tool));
-        process.exit(0);
+        process.exitCode = 0;
+        return;
     }
 
     if (
@@ -122,7 +124,8 @@ export async function runCli(
         (args[2] === "--help" || args[2] === "-h")
     ) {
         console.error(formatActionHelp(toolName, args[1], tool));
-        process.exit(0);
+        process.exitCode = 0;
+        return;
     }
     
     const parsedArgs: Record<string, any> = {};
@@ -163,13 +166,13 @@ export async function runCli(
         } else {
             console.log(JSON.stringify(result, null, 2));
         }
-        process.exit(cliToolResultIsError(result) ? 1 : 0);
+        process.exitCode = cliToolResultIsError(result) ? 1 : 0;
     } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
         console.error(`❌ Error: ${message}`);
         if (message.includes("required")) {
             console.error(`Hint: Pass arguments like --ref YOUR_REF`);
         }
-        process.exit(1);
+        process.exitCode = 1;
     }
 }

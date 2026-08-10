@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,6 +20,9 @@ const CONTEXT_KEYS = new Set([
 
 const servers: Array<{ stop(closeActiveConnections?: boolean): void }> = [];
 const temporaryDirectories: string[] = [];
+const LARGE_FUNCTION_SOURCE = "export const payload = "
+    + JSON.stringify("x".repeat(80 * 1024))
+    + ";\n";
 
 afterEach(() => {
     for (const server of servers.splice(0)) server.stop(true);
@@ -54,7 +57,86 @@ async function runProjectCli(
     return { exitCode, stdout, stderr };
 }
 
+function serveFunctionSource(sourceCode: string): string {
+    const server = Bun.serve({
+        hostname: "127.0.0.1",
+        port: 0,
+        fetch: () => Response.json({ code: sourceCode }),
+    });
+    servers.push(server);
+    return `http://127.0.0.1:${server.port}`;
+}
+
 describe("supacloud-cli process contract", () => {
+    test("flushes a Function source response larger than 64 KiB to stdout", async () => {
+        const apiUrl = serveFunctionSource(LARGE_FUNCTION_SOURCE);
+
+        const response = await runProjectCli(
+            ["edge_functions", "source", "--ref", "abc123", "--slug", "large-function"],
+            {
+                SUPACLOUD_API_URL: apiUrl,
+                SUPACLOUD_API_TOKEN: "test-token",
+                SUPACLOUD_PROJECT_REF: "abc123",
+            },
+        );
+
+        expect(response.exitCode).toBe(0);
+        expect(response.stdout.length).toBeGreaterThan(64 * 1024);
+        expect(JSON.parse(response.stdout)).toEqual({ code: LARGE_FUNCTION_SOURCE });
+    });
+
+    test("writes a Function source response larger than 64 KiB without stdout truncation", async () => {
+        const outputDirectory = mkdtempSync(join(tmpdir(), "supacloud-cli-source-"));
+        temporaryDirectories.push(outputDirectory);
+        const outputPath = join(outputDirectory, "large-function.ts");
+        const apiUrl = serveFunctionSource(LARGE_FUNCTION_SOURCE);
+
+        const response = await runProjectCli(
+            [
+                "edge_functions", "source",
+                "--ref", "abc123",
+                "--slug", "large-function",
+                "--output", outputPath,
+            ],
+            {
+                SUPACLOUD_API_URL: apiUrl,
+                SUPACLOUD_API_TOKEN: "test-token",
+                SUPACLOUD_PROJECT_REF: "abc123",
+            },
+        );
+
+        expect(response.exitCode).toBe(0);
+        expect(response.stdout).toContain("source written");
+        expect(response.stdout.length).toBeLessThan(1024);
+        expect(readFileSync(outputPath, "utf8")).toBe(LARGE_FUNCTION_SOURCE);
+    });
+
+    test("does not overwrite an existing Function source output", async () => {
+        const outputDirectory = mkdtempSync(join(tmpdir(), "supacloud-cli-source-existing-"));
+        temporaryDirectories.push(outputDirectory);
+        const outputPath = join(outputDirectory, "existing-function.ts");
+        writeFileSync(outputPath, "preserve-existing-source\n");
+        const apiUrl = serveFunctionSource(LARGE_FUNCTION_SOURCE);
+
+        const response = await runProjectCli(
+            [
+                "edge_functions", "source",
+                "--ref", "abc123",
+                "--slug", "large-function",
+                "--output", outputPath,
+            ],
+            {
+                SUPACLOUD_API_URL: apiUrl,
+                SUPACLOUD_API_TOKEN: "test-token",
+                SUPACLOUD_PROJECT_REF: "abc123",
+            },
+        );
+
+        expect(response.exitCode).toBe(1);
+        expect(response.stderr).toContain("EEXIST");
+        expect(readFileSync(outputPath, "utf8")).toBe("preserve-existing-source\n");
+    });
+
     test("treats failure text as an error even when isError is false", () => {
         expect(cliToolResultIsError({
             isError: false,

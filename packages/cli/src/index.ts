@@ -351,7 +351,8 @@ async function main() {
     const args = process.argv.slice(2);
     if (args.length === 0 || args[0] === "--help" || args[0] === "-h") {
         printHelp();
-        process.exit(0);
+        process.exitCode = 0;
+        return;
     }
 
     const cliTools = createCliTools();
@@ -374,5 +375,5 @@ async function main() {
 
 main().catch((error) => {
     console.error(`${commandName} failed:`, error);
-    process.exit(1);
+    process.exitCode = 1;
 });

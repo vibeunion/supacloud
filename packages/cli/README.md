@@ -68,7 +68,19 @@ supacloud-cli frontend list --ref abc123
 supacloud-cli branch create --name feature-orders --data_mode schema_only
 supacloud-cli branch promotion_plan --branch_ref preview123
 supacloud-cli branch promote --branch_ref preview123 --plan_checksum <sha256>
+supacloud-cli edge_functions deploy --ref abc123 --slug hello --path ./supabase/functions/hello
+supacloud-cli edge_functions deploy_bundle --ref abc123 --slug hello --files '{"index.ts":"export default { fetch: () => new Response(\"ok\") }"}'
+supacloud-cli edge_functions source --ref abc123 --slug hello --output ./hello.ts
 ```
+
+`edge_functions deploy --path` bundles local TypeScript and dependencies with
+Bun and runs a local syntax check before upload. The Management API validates and
+normalizes the final server-side artifact against the multi-tenant Edge Runtime
+module policy consistently for CLI, Web Console, and direct API deployments.
+`deploy_bundle --files` accepts a JSON object in shell usage.
+Use `source --output <file>` for large Functions so terminal or automation output
+limits cannot truncate the original TS/JS source code. The destination must not
+already exist.
 
 Branch promotion is migration-first. `branch promotion_plan` prints pending
 versions, names, statement counts, and checksums without echoing SQL into terminal

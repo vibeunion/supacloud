@@ -73,6 +73,24 @@ const backgroundRoutesSchema = Type.Optional(decodedSchema(
     parseBackgroundRoutes,
 ));
 
+const functionFilesRecordSchema = Type.Record(Type.String(), Type.String());
+
+function parseFunctionFiles(input: string | Record<string, string>): unknown {
+    if (typeof input !== "string") return input;
+    try {
+        return JSON.parse(input);
+    } catch (error) {
+        if (!(error instanceof SyntaxError)) throw error;
+        throw new Error("Invalid files JSON object");
+    }
+}
+
+const functionFilesSchema = decodedSchema(
+    Type.Union([Type.String(), functionFilesRecordSchema]),
+    functionFilesRecordSchema,
+    parseFunctionFiles,
+);
+
 const secretListSchema = Type.Array(Type.Object({ name: Type.String(), value: Type.String() }));
 
 function parseSecrets(value: string | Array<{ name: string; value: string }>): unknown {
@@ -119,6 +137,12 @@ function confirmedFunctionConfig(payload: unknown, expected: EdgeFunctionConfigI
     return true;
 }
 
+function functionSourceCode(payload: unknown): string | null {
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+    const code = (payload as Record<string, unknown>).code;
+    return typeof code === "string" ? code : null;
+}
+
 export function registerAdvancedTools(server: { tool: (...args: any[]) => void }, http: HttpTransport): void {
 
     // ═══ Edge Functions (5→1) ═══
@@ -132,14 +156,15 @@ Actions: list, deploy, deploy_bundle, config, source, delete, check`,
             slug: optional(Type.String(), "[deploy/deploy_bundle/config/source/delete/check] Function name"),
             code: optional(Type.String(), "[deploy/check] Function source code (TypeScript)"),
             path: optional(Type.String(), "[deploy/check] Local file path to read code from (alternative to code)"),
-            files: optional(Type.Record(Type.String(), Type.String()), "[deploy_bundle] File map: { 'index.ts': '...', '_shared/x.ts': '...' }"),
+            output: optional(Type.String(), "[source] Write source to this local file instead of stdout; the file must not already exist"),
+            files: optional(functionFilesSchema, "[deploy_bundle] File map as a JSON object: { 'index.ts': '...', '_shared/x.ts': '...' }"),
             entrypoint: optional(Type.String(), "[deploy_bundle] Entrypoint file (default: index.ts)"),
             minify: optional(Type.Boolean(), "[deploy/deploy_bundle] Minify bundle"),
             verify_jwt: optional(Type.Boolean(), "[deploy/deploy_bundle/config] Set JWT verification for this function"),
             background_routes: withDescription(backgroundRoutesSchema, "[deploy/deploy_bundle/config] Background route paths; pass comma-separated or JSON array in CLI"),
         },
         async (args: any) => {
-            const { action, ref, slug, path: pathArg, files, entrypoint, minify, verify_jwt, background_routes } = args;
+            const { action, ref, slug, path: pathArg, output, files, entrypoint, minify, verify_jwt, background_routes } = args;
             let code = args.code as string | undefined;
             const need = (f: string, v: any) => { if (!v) throw new Error(`'${f}' required for '${action}'`); };
 
@@ -197,8 +222,9 @@ Actions: list, deploy, deploy_bundle, config, source, delete, check`,
             if (pathArg && !code) {
                 try {
                     code = await bundleEdgeFunctionPath(pathArg);
-                } catch (e: any) {
-                    throw new Error(`Failed to bundle/read path ${pathArg}: ${e.message}`);
+                } catch (error: unknown) {
+                    const message = error instanceof Error ? error.message : String(error);
+                    throw new Error(`Failed to bundle/read path ${pathArg}: ${message}`);
                 }
             }
 
@@ -256,7 +282,22 @@ Actions: list, deploy, deploy_bundle, config, source, delete, check`,
                 case "source":
                     need("slug", slug);
                     const sr = await http.get(`/v1/projects/${ref}/functions/${slug}/source`);
-                    text = sr.ok ? JSON.stringify(sr.data, null, 2) : `❌ Not found (${sr.status})`;
+                    if (!sr.ok) {
+                        text = `❌ Not found (${sr.status})`;
+                        break;
+                    }
+                    if (!output) {
+                        text = JSON.stringify(sr.data, null, 2);
+                        break;
+                    }
+                    const sourceCode = functionSourceCode(sr.data);
+                    if (sourceCode === null) {
+                        text = "❌ Source response did not contain a string code field";
+                        break;
+                    }
+                    const outputPath = resolve(output);
+                    writeFileSync(outputPath, sourceCode, { flag: "wx" });
+                    text = `✅ Function ${slug} source written to ${outputPath} (${Buffer.byteLength(sourceCode)} bytes)`;
                     break;
                 case "delete":
                     need("slug", slug);
