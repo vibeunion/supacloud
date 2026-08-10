@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.50.31](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.30...management-api-v0.50.31) (2026-08-10)
+
+
+### Bug Fixes
+
+* **upgrade:** add verified offline release bundles ([#773](https://github.com/zuohuadong/supacloud/issues/773)) ([e87331e](https://github.com/zuohuadong/supacloud/commit/e87331eab943f341edebc972c4d8c1f2b7294073))
+
 ## [0.50.30](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.29...management-api-v0.50.30) (2026-08-10)
 
 
