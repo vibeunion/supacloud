@@ -33,6 +33,84 @@ const MINIMUM_COMPONENT_UPGRADE_VERSION = "0.50.27";
 const DIRECT_UPGRADE_SSH_TIMEOUT_MS = 720_000;
 // Proxy mode can exhaust each transfer once direct-first and once through the proxy.
 const PROXIED_UPGRADE_SSH_TIMEOUT_MS = 1_320_000;
+const PLATFORM_PROBE_TIMEOUT_MS = 10_000;
+const PLATFORM_HASH_TIMEOUT_MS = 30_000;
+const WEB_CONSOLE_CURRENT_DIR = "/opt/supacloud/web-console/current";
+const WEB_CONSOLE_MARKER = `${WEB_CONSOLE_CURRENT_DIR}/.supacloud-component.json`;
+const STABLE_SEMVER_CORE = "(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)";
+const EXACT_STABLE_SEMVER = new RegExp(`^(?:${STABLE_SEMVER_CORE})(?![\\s\\S])`);
+
+type ComponentProbeStatus = "ok" | "unknown" | "error";
+
+type BinaryComponentEvidence = {
+    status: ComponentProbeStatus;
+    version: string | null;
+    sha256: string | null;
+    path: string | null;
+    source: string;
+    error: string | null;
+};
+
+type WebConsoleEvidence = {
+    status: ComponentProbeStatus;
+    version: string | null;
+    tree_sha256: string | null;
+    path: string;
+    source: "component_marker_and_tree_sha256";
+    error: string | null;
+};
+
+type FixedBinaryCommand = {
+    version: string;
+    sha256: string;
+};
+
+type BinaryProbeDefinition = {
+    unit: string;
+    source: string;
+    commands: Readonly<Record<string, FixedBinaryCommand>>;
+};
+
+const BINARY_PROBES = {
+    management_api: {
+        unit: "supacloud.service",
+        source: "systemd:supacloud.service:ExecStart",
+        commands: {
+            "/usr/local/bin/supacloud": {
+                version: "/usr/local/bin/supacloud --version 2>&1",
+                sha256: "sha256sum -- /usr/local/bin/supacloud | awk '{print $1}'",
+            },
+            "/opt/supacloud/bin/supacloud": {
+                version: "/opt/supacloud/bin/supacloud --version 2>&1",
+                sha256: "sha256sum -- /opt/supacloud/bin/supacloud | awk '{print $1}'",
+            },
+        },
+    },
+    edge_runtime: {
+        unit: "supacloud-edge-runtime.service",
+        source: "systemd:supacloud-edge-runtime.service:ExecStart",
+        commands: {
+            "/usr/local/bin/supacloud-edge-runtime": {
+                version: "/usr/local/bin/supacloud-edge-runtime --version 2>&1",
+                sha256: "sha256sum -- /usr/local/bin/supacloud-edge-runtime | awk '{print $1}'",
+            },
+            "/opt/supacloud/bin/supacloud-edge-runtime": {
+                version: "/opt/supacloud/bin/supacloud-edge-runtime --version 2>&1",
+                sha256: "sha256sum -- /opt/supacloud/bin/supacloud-edge-runtime | awk '{print $1}'",
+            },
+        },
+    },
+    caddy: {
+        unit: "supacloud-caddy.service",
+        source: "systemd:supacloud-caddy.service:ExecStart",
+        commands: {
+            "/usr/local/bin/supacloud-caddy": {
+                version: "/usr/local/bin/supacloud-caddy version 2>&1",
+                sha256: "sha256sum -- /usr/local/bin/supacloud-caddy | awk '{print $1}'",
+            },
+        },
+    },
+} as const satisfies Record<string, BinaryProbeDefinition>;
 
 function hostnameSchema(fieldName: string) {
     return decodedSchema(Type.String(), Type.String({ minLength: 1, maxLength: 253 }), (value) => {
@@ -97,7 +175,8 @@ function assertSafeReleaseTag(value: string): string {
 }
 
 function assertExactStableVersion(value: string, fieldName: string): string {
-    if (!/^v?\d+\.\d+\.\d+$/.test(value)) {
+    const normalized = value.startsWith("v") ? value.slice(1) : value;
+    if (!EXACT_STABLE_SEMVER.test(normalized)) {
         throw new Error(`${fieldName} must be an exact stable semantic version`);
     }
     return value;
@@ -448,14 +527,240 @@ function assertSafeExecCommand(command: string): string {
     return reject();
 }
 
+type RemoteExecution = Awaited<ReturnType<SshTransport["exec"]>>;
+
+type ExecStartEvidence = {
+    status: ComponentProbeStatus;
+    path: string | null;
+    error: string | null;
+};
+
+async function runFixedRemoteCommand(
+    ssh: SshTransport,
+    command: string,
+    timeoutMs: number,
+): Promise<RemoteExecution | null> {
+    try {
+        return await ssh.exec(command, timeoutMs);
+    } catch {
+        return null;
+    }
+}
+
+function singleSystemdProperty(output: string, property: string): string | null {
+    const prefix = `${property}=`;
+    const matches = output.split(/\r?\n/).filter(line => line.startsWith(prefix));
+    return matches.length === 1 ? matches[0]!.slice(prefix.length) : null;
+}
+
+function strictExecStartPath(execStart: string): string | null {
+    if (execStart.length > 4096 || /[\r\n\0]/.test(execStart)) return null;
+    const matches = Array.from(execStart.matchAll(/(?:^|[{;]\s*)path=([^;}]+?)\s*(?=;|}|$)/g));
+    if (matches.length !== 1) return null;
+    const executablePath = matches[0]?.[1]?.trim() || "";
+    return /^\/[a-zA-Z0-9._/-]+$/.test(executablePath) ? executablePath : null;
+}
+
+function execStartEvidence(output: string): ExecStartEvidence {
+    if (output.length > 8192 || /\0/.test(output)) {
+        return { status: "error", path: null, error: "systemd_output_invalid" };
+    }
+    if (!output.trim()) return { status: "unknown", path: null, error: "unit_missing" };
+    const loadState = singleSystemdProperty(output, "LoadState");
+    const execStart = singleSystemdProperty(output, "ExecStart");
+    if (loadState === null || execStart === null) {
+        return { status: "error", path: null, error: "systemd_output_invalid" };
+    }
+    if (loadState !== "loaded") return { status: "unknown", path: null, error: "unit_not_loaded" };
+    if (execStart === "") return { status: "unknown", path: null, error: "exec_start_missing" };
+    const executablePath = strictExecStartPath(execStart);
+    return executablePath
+        ? { status: "ok", path: executablePath, error: null }
+        : { status: "error", path: null, error: "exec_start_invalid" };
+}
+
+function stableVersion(output: string): string | null {
+    if (output.length > 2048 || /\0/.test(output)) return null;
+    const matches = Array.from(output.matchAll(
+        new RegExp(`(?:^|[^0-9A-Za-z.+-])v?(${STABLE_SEMVER_CORE})(?=$|[^0-9A-Za-z.+-])`, "g"),
+    ));
+    const versions = new Set(matches.map(match => match[1]).filter(Boolean));
+    return versions.size === 1 ? [...versions][0]! : null;
+}
+
+function stableSha256(output: string): string | null {
+    const normalized = output.trim();
+    return /^[0-9a-f]{64}$/.test(normalized) ? normalized : null;
+}
+
+function unavailableBinaryEvidence(
+    definition: BinaryProbeDefinition,
+    evidence: ExecStartEvidence,
+): BinaryComponentEvidence {
+    return {
+        status: evidence.status,
+        version: null,
+        sha256: null,
+        path: evidence.path,
+        source: definition.source,
+        error: evidence.error,
+    };
+}
+
+function binaryProbeError(
+    versionExecution: RemoteExecution | null,
+    version: string | null,
+    hashExecution: RemoteExecution | null,
+    sha256: string | null,
+): string | null {
+    if (!versionExecution) return "version_probe_transport_failed";
+    if (!versionExecution.success) return "version_probe_failed";
+    if (!version) return "version_output_invalid";
+    if (!hashExecution) return "sha256_probe_transport_failed";
+    if (!hashExecution.success) return "sha256_probe_failed";
+    return sha256 ? null : "sha256_output_invalid";
+}
+
+async function binaryComponentEvidence(
+    ssh: SshTransport,
+    definition: BinaryProbeDefinition,
+): Promise<BinaryComponentEvidence> {
+    const execStart = await systemdBinaryEvidence(ssh, definition);
+    if (execStart.status !== "ok" || !execStart.path) return unavailableBinaryEvidence(definition, execStart);
+    const commands = definition.commands[execStart.path];
+    if (!commands) return unavailableBinaryEvidence(definition, {
+        status: "error", path: execStart.path, error: "exec_start_not_allowed",
+    });
+    return fixedBinaryEvidence(ssh, definition, execStart.path, commands);
+}
+
+async function systemdBinaryEvidence(
+    ssh: SshTransport,
+    definition: BinaryProbeDefinition,
+): Promise<ExecStartEvidence> {
+    const systemdCommand = `systemctl show --property=LoadState --property=ExecStart -- ${definition.unit}`;
+    const systemdExecution = await runFixedRemoteCommand(ssh, systemdCommand, PLATFORM_PROBE_TIMEOUT_MS);
+    if (!systemdExecution) return { status: "error", path: null, error: "systemd_probe_transport_failed" };
+    if (!systemdExecution.success) return { status: "error", path: null, error: "systemd_probe_failed" };
+    return execStartEvidence(systemdExecution.stdout);
+}
+
+async function fixedBinaryEvidence(
+    ssh: SshTransport,
+    definition: BinaryProbeDefinition,
+    executablePath: string,
+    commands: FixedBinaryCommand,
+): Promise<BinaryComponentEvidence> {
+    const [versionExecution, hashExecution] = await Promise.all([
+        runFixedRemoteCommand(ssh, commands.version, PLATFORM_PROBE_TIMEOUT_MS),
+        runFixedRemoteCommand(ssh, commands.sha256, PLATFORM_HASH_TIMEOUT_MS),
+    ]);
+    const version = versionExecution?.success ? stableVersion(versionExecution.stdout) : null;
+    const sha256 = hashExecution?.success ? stableSha256(hashExecution.stdout) : null;
+    const error = binaryProbeError(versionExecution, version, hashExecution, sha256);
+    return {
+        status: error ? "error" : "ok",
+        version,
+        sha256,
+        path: executablePath,
+        source: definition.source,
+        error,
+    };
+}
+
+function parseWebConsoleVersion(markerOutput: string): string | null {
+    if (markerOutput.length > 4096 || /\0/.test(markerOutput)) return null;
+    try {
+        const marker = JSON.parse(markerOutput) as unknown;
+        if (typeof marker !== "object" || marker === null || Array.isArray(marker)) return null;
+        const fields = marker as Record<string, unknown>;
+        if (fields.schema_version !== 1 || fields.component !== "web-console") return null;
+        return typeof fields.version === "string" && EXACT_STABLE_SEMVER.test(fields.version)
+            ? fields.version
+            : null;
+    } catch {
+        return null;
+    }
+}
+
+const WEB_MARKER_COMMAND = [
+    `MARKER=${quoteEnvValue(WEB_CONSOLE_MARKER)}`,
+    "test ! -L \"$MARKER\" || exit 65",
+    "test -e \"$MARKER\" || exit 44",
+    "test -f \"$MARKER\" || exit 65",
+    "test \"$(stat -c '%s' -- \"$MARKER\")\" -le 4096 || exit 65",
+    "cat -- \"$MARKER\"",
+].join("; ");
+
+const WEB_TREE_SHA256_COMMAND = [
+    "set -o pipefail",
+    `ROOT=${quoteEnvValue(WEB_CONSOLE_CURRENT_DIR)}`,
+    "test -d \"$ROOT\" || exit 44",
+    "test -f \"$ROOT/.supacloud-component.json\" && test ! -L \"$ROOT/.supacloud-component.json\" || exit 65",
+    "if find -H \"$ROOT\" -xdev ! -type d ! -type f -print -quit | grep -q .; then exit 65; fi",
+    "find -H \"$ROOT\" -xdev -type f -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum -- | sha256sum | awk '{print $1}'",
+].join("; ");
+
+function webConsoleProbeError(
+    markerExecution: RemoteExecution | null,
+    version: string | null,
+    treeHashExecution: RemoteExecution | null,
+    treeSha256: string | null,
+): { status: ComponentProbeStatus; error: string | null } {
+    if (!markerExecution) return { status: "error", error: "marker_probe_transport_failed" };
+    if (markerExecution.code === 44) return { status: "unknown", error: "marker_missing" };
+    if (!markerExecution.success) return { status: "error", error: "marker_probe_failed" };
+    if (!version) return { status: "error", error: "marker_invalid" };
+    if (!treeHashExecution) return { status: "error", error: "tree_sha256_probe_transport_failed" };
+    if (treeHashExecution.code === 44) return { status: "unknown", error: "web_console_missing" };
+    if (!treeHashExecution.success) return { status: "error", error: "tree_sha256_probe_failed" };
+    return treeSha256 ? { status: "ok", error: null } : { status: "error", error: "tree_sha256_output_invalid" };
+}
+
+async function webConsoleEvidence(ssh: SshTransport): Promise<WebConsoleEvidence> {
+    const [markerExecution, treeHashExecution] = await Promise.all([
+        runFixedRemoteCommand(ssh, WEB_MARKER_COMMAND, PLATFORM_PROBE_TIMEOUT_MS),
+        runFixedRemoteCommand(ssh, WEB_TREE_SHA256_COMMAND, PLATFORM_HASH_TIMEOUT_MS),
+    ]);
+    const version = markerExecution?.success ? parseWebConsoleVersion(markerExecution.stdout) : null;
+    const treeSha256 = treeHashExecution?.success ? stableSha256(treeHashExecution.stdout) : null;
+    const state = webConsoleProbeError(markerExecution, version, treeHashExecution, treeSha256);
+    return {
+        status: state.status,
+        version,
+        tree_sha256: treeSha256,
+        path: WEB_CONSOLE_CURRENT_DIR,
+        source: "component_marker_and_tree_sha256",
+        error: state.error,
+    };
+}
+
+async function platformVersions(ssh: SshTransport) {
+    const [managementApi, edgeRuntime, caddy, webConsole] = await Promise.all([
+        binaryComponentEvidence(ssh, BINARY_PROBES.management_api),
+        binaryComponentEvidence(ssh, BINARY_PROBES.edge_runtime),
+        binaryComponentEvidence(ssh, BINARY_PROBES.caddy),
+        webConsoleEvidence(ssh),
+    ]);
+    return {
+        schema_version: 1,
+        components: {
+            management_api: managementApi,
+            edge_runtime: edgeRuntime,
+            caddy,
+            web_console: webConsole,
+        },
+    };
+}
+
 export function registerSshTools(server: { tool: (...args: any[]) => void }, ssh: SshTransport): void {
     server.tool(
         "ssh",
         `Server management via SSH. Available before & after SupaCloud installation.
-Actions: ping, setup, install, upgrade, diagnose, exec, troubleshoot, container_logs, tenant_manage, tenant_list, tenant_inspect, tenant_diagnose, tenant_migrate`,
+Actions: ping, setup, install, upgrade, versions, diagnose, exec, troubleshoot, container_logs, tenant_manage, tenant_list, tenant_inspect, tenant_diagnose, tenant_migrate`,
         {
             action: withDescription(stringEnum([
-                "ping", "setup", "install", "upgrade", "diagnose", "exec",
+                "ping", "setup", "install", "upgrade", "versions", "diagnose", "exec",
                 "troubleshoot", "container_logs",
                 "tenant_manage", "tenant_list", "tenant_inspect", "tenant_diagnose", "tenant_migrate",
             ]), "Action to perform"),
@@ -673,17 +978,26 @@ Actions: ping, setup, install, upgrade, diagnose, exec, troubleshoot, container_
                     text = `✅ Upgrade done\n${upgradeExecution.stdout.slice(-300)}${edgeBoundary}`;
                     break;
                 }
+                case "versions": {
+                    text = JSON.stringify(await platformVersions(ssh), null, 2);
+                    break;
+                }
                 case "diagnose": {
                     const cmds = [
+                        "set -o pipefail",
                         "echo '=== OS ===' && uname -a",
                         "echo '=== Memory ===' && free -h",
                         "echo '=== Disk ===' && df -h /",
                         "echo '=== Docker ===' && (docker ps --format 'table {{.Names}}\t{{.Status}}' 2>/dev/null || echo 'Not found')",
-                        "echo '=== PostgreSQL ===' && (pg_isready 2>/dev/null && echo 'Running' || echo 'Not detected')",
-                        "echo '=== Management API ===' && (curl -sf http://localhost:9090/health > /dev/null && echo 'Running' || echo 'Not running')",
+                        "echo '=== Management API /health ==='",
+                        "(curl --fail --silent --show-error --max-time 5 --max-filesize 4096 http://127.0.0.1:9090/health 2>&1 | head -c 4096) || echo 'Probe failed'",
+                        "printf '\\n'",
+                        "echo '=== Management API /monitor/health ==='",
+                        "(curl --fail --silent --show-error --max-time 15 --max-filesize 16384 http://127.0.0.1:9090/monitor/health 2>&1 | head -c 16384) || echo 'Probe failed'",
+                        "printf '\\n'",
                     ];
-                    const r = await ssh.exec(cmds.join(" && "));
-                    text = r.stdout || r.stderr;
+                    const r = await ssh.exec(cmds.join("\n"), 30_000);
+                    text = redactTenantConfig((r.stdout || r.stderr).slice(0, 32_768));
                     break;
                 }
                 case "exec": {

@@ -262,6 +262,7 @@ describe("runtime companion version assets", () => {
       copyFileSync(elf, join(edgePackage, edgeAsset));
       copyFileSync(elf, join(dir, caddyAsset));
       writeFileSync(join(webBuild, "index.html"), "local web build");
+      writeFileSync(join(webBuild, ".supacloud-component.json"), "{}\n");
 
       const invoke = (command: string, extraEnv: Record<string, string> = {}) => spawnSync(
         "bash",
@@ -323,6 +324,11 @@ describe("runtime companion version assets", () => {
         "-czf", join(dist, "web-console-build.tar.gz"), "-C", webBuild, ".",
       ], { encoding: "utf8" });
       expect(tarResult.status, tarResult.stderr).toBe(0);
+      const archivedWebFiles = spawnSync("tar", [
+        "-tzf", join(dist, "web-console-build.tar.gz"),
+      ], { encoding: "utf8" });
+      expect(archivedWebFiles.status, archivedWebFiles.stderr).toBe(0);
+      expect(archivedWebFiles.stdout.split(/\r?\n/)).toContain("./.supacloud-component.json");
 
       const selected = [
         invoke('select_management_binary_source "$MANAGEMENT_ASSET"'),
