@@ -3,6 +3,10 @@ import { basename } from "node:path";
 
 import type { SshResult, SshTransport } from "../transports/ssh";
 import {
+    buildUpgradeLockScript,
+    SUPACLOUD_UPGRADE_LOCK_PATH,
+} from "../../../../management-api/src/upgrade-lock";
+import {
     cleanupLocalUpgradeBundle,
     githubCliArchiveIdentity,
     prepareLocalUpgradeBundle,
@@ -10,6 +14,8 @@ import {
     type PreparedLocalUpgradeBundle,
     type UpgradeArchitecture,
 } from "./local-upgrade-bundle";
+
+export { buildUpgradeLockScript, SUPACLOUD_UPGRADE_LOCK_PATH };
 
 export type LocalUpgradeTransferRequest = {
     managementVersion: string;
@@ -25,13 +31,16 @@ export type RemoteUpgradePaths = {
 };
 
 type RemoteUpgradeState = {
+    dropExists: boolean;
+    logExists: boolean;
     serviceState: string;
-    stageState: "absent" | "present" | "unsafe" | "unknown";
+    stageExists: boolean;
+    stageIsDirectory: boolean;
     status: string;
+    statusExists: boolean;
+    unitExists: boolean;
     unitLoadState: string;
 };
-
-type AdoptionOutcome = "already-started" | "ready-to-start";
 
 export type RemoteUpgradePreflight = {
     architecture: UpgradeArchitecture;
@@ -42,12 +51,11 @@ const REMOTE_STAGE_ROOT = "/var/lib/supacloud/upgrade-staging";
 const REMOTE_RUN_ROOT = "/var/lib/supacloud/upgrade-runs";
 const REMOTE_LOG_ROOT = "/var/log/supacloud";
 const POLL_INTERVAL_MS = 2_000;
-// Match the longest existing upgrade budget, then allow systemd's stop grace and one final state read.
-const REMOTE_UPGRADE_RUNTIME_SECONDS = 22 * 60;
-const REMOTE_UPGRADE_STOP_GRACE_MS = 30_000;
+const STATE_READ_ATTEMPTS = 3;
 const REMOTE_STATE_READ_TIMEOUT_MS = 15_000;
-const REMOTE_UPGRADE_OBSERVATION_GRACE_MS = REMOTE_UPGRADE_STOP_GRACE_MS + REMOTE_STATE_READ_TIMEOUT_MS;
-const REMOTE_UPGRADE_WAIT_TIMEOUT_MS = REMOTE_UPGRADE_RUNTIME_SECONDS * 1_000 + REMOTE_UPGRADE_OBSERVATION_GRACE_MS;
+const UPGRADE_OBSERVATION_TIMEOUT_MS = 30 * 60_000;
+
+class RemoteUpgradeReconciliationError extends AggregateError {}
 
 function quoteShell(shellText: string): string {
     return `'${shellText.split("'").join("'\\''")}'`;
@@ -107,8 +115,9 @@ export function buildRemotePreflightScript(): string {
         "export PATH",
         trustedInstalledGithubFunction(),
         "test -d /run/systemd/system || { echo 'systemd is not the active init system' >&2; exit 1; }",
-        "for tool in systemctl systemd-run sha256sum stat realpath tar file find sort awk grep timeout; do command -v \"$tool\" >/dev/null 2>&1 || { echo \"Required local-upgrade tool is missing: $tool\" >&2; exit 127; }; done",
+        "for tool in systemctl systemd-run sha256sum stat realpath tar file find sort awk grep timeout flock; do command -v \"$tool\" >/dev/null 2>&1 || { echo \"Required local-upgrade tool is missing: $tool\" >&2; exit 127; }; done",
         "systemd-run --help | grep -Eq -- '(^|[[:space:]])--collect([=[:space:]]|$)' || { echo 'systemd-run --collect is required' >&2; exit 1; }",
+        "test -d /run/lock || { echo '/run/lock is unavailable' >&2; exit 1; }",
         "test -d /var/lib/supacloud || { echo '/var/lib/supacloud is unavailable' >&2; exit 1; }",
         "test -f /etc/supabase/management-api.env || { echo 'EDGE_RUNTIME_MODE is unavailable' >&2; exit 1; }",
         "EDGE_MODE=$(awk -F= '$1 == \"EDGE_RUNTIME_MODE\" { value=$2 } END { gsub(/^[[:space:]\\\"'\"']+|[[:space:]\\\"'\"']+$/, \"\", value); print value }' /etc/supabase/management-api.env)",
@@ -229,6 +238,7 @@ function upgradeScriptSetup(paths: RemoteUpgradePaths, bundle: PreparedLocalUpgr
         finishUpgradeFunction(),
         "trap finish_upgrade EXIT", "trap 'exit 129' HUP", "trap 'exit 130' INT", "trap 'exit 143' TERM",
         "exec >>\"$LOG\" 2>&1", "write_status RUNNING",
+        buildUpgradeLockScript(SUPACLOUD_UPGRADE_LOCK_PATH),
         "while IFS='=' read -r variable _; do case \"$variable\" in *PROXY*|*Proxy*|*proxy*) unset \"$variable\" ;; esac; done < <(env)",
         "unset SUPACLOUD_ALLOW_UNVERIFIED_RELEASE SUPACLOUD_GITHUB_REPOSITORY SUPACLOUD_RELEASES_API SUPACLOUD_ATTESTATION_SIGNER_WORKFLOW NODE_USE_ENV_PROXY",
     ];
@@ -359,7 +369,8 @@ function failedAdoptionRollbackFunction(): string {
     return [
         "rollback_failed_adoption() {",
         "  local code=$? cleanup_failed=false",
-        "  trap - EXIT HUP INT TERM",
+        "  trap '' HUP INT TERM",
+        "  trap - EXIT",
         "  if [ \"$ADOPTION_ACTIVE\" != true ]; then exit \"$code\"; fi",
         "  set +e",
         "  rm -rf -- \"$STAGE\" || cleanup_failed=true",
@@ -399,124 +410,73 @@ export function buildAdoptDropScript(paths: RemoteUpgradePaths): string {
     ].join("\n");
 }
 
-function adoptionHasStarted(state: RemoteUpgradeState): boolean {
-    return unitIsRunning(state.serviceState) || /^(?:RUNNING|CLEANING|SUCCEEDED|FAILED:)/.test(state.status);
-}
-
-function unitNeverStarted(state: RemoteUpgradeState): boolean {
-    return state.unitLoadState === "not-found" || state.serviceState === "inactive";
-}
-
-function adoptionCanBeRolledBack(state: RemoteUpgradeState): boolean {
-    return state.stageState === "present" && state.status === "PREPARED" && unitNeverStarted(state);
-}
-
-function adoptionDidNotPersist(state: RemoteUpgradeState): boolean {
-    return state.stageState === "absent" && !state.status && unitNeverStarted(state);
-}
-
-function retainedUpgradeEvidence(paths: RemoteUpgradePaths): string {
-    return `stage=${paths.stage} status=${paths.status} log=${paths.log} unit=${paths.unit}`;
-}
-
-function retainedAdoptionEvidence(paths: RemoteUpgradePaths): string {
-    return `drop=${paths.drop} ${retainedUpgradeEvidence(paths)}`;
-}
-
-function ambiguousAdoptionError(
-    paths: RemoteUpgradePaths,
-    failures: unknown[],
-    state?: RemoteUpgradeState,
-): AggregateError {
-    const observedState = state
-        ? ` observed stage=${state.stageState} status=${state.status || "empty"} unit=${state.serviceState} load=${state.unitLoadState};`
-        : "";
-    return new AggregateError(
-        failures,
-        `Unable to determine whether remote upgrade adoption completed; do not retry blindly;${observedState} retained ${retainedAdoptionEvidence(paths)}`,
-    );
-}
-
-async function rollbackPreparedAdoption(
-    ssh: SshTransport,
-    paths: RemoteUpgradePaths,
-    adoptionFailure: unknown,
-    state: RemoteUpgradeState,
-): Promise<never> {
+export async function adoptRemoteDrop(ssh: SshTransport, paths: RemoteUpgradePaths): Promise<void> {
+    let adoptionFailure: Error;
+    let adoptionOutcomeUncertain = false;
     try {
-        await cleanupUnstartedUpgrade(ssh, paths);
-    } catch (cleanupFailure: unknown) {
-        throw ambiguousAdoptionError(paths, [adoptionFailure, cleanupFailure], state);
+        const adopted = await ssh.exec(rootCommand(buildAdoptDropScript(paths)), 60_000);
+        if (adopted.success) return;
+        adoptionFailure = remoteFailure("Unable to adopt the verified upgrade bundle", adopted);
+    } catch (error: unknown) {
+        adoptionOutcomeUncertain = true;
+        adoptionFailure = operationError(error, "Unable to adopt the verified upgrade bundle");
     }
-    throw adoptionFailure;
-}
-
-async function cleanupUnadoptedDrop(
-    ssh: SshTransport,
-    paths: RemoteUpgradePaths,
-    adoptionFailure: unknown,
-): Promise<never> {
-    try {
-        await cleanupRemoteDrop(ssh, paths);
-    } catch (cleanupFailure: unknown) {
-        throw new AggregateError(
-            [adoptionFailure, cleanupFailure],
-            `Remote upgrade adoption failed and upload-drop cleanup did not complete; retained ${retainedAdoptionEvidence(paths)}`,
+    const state = await observeRemoteState(ssh, paths, {
+        failureMessage: "Unable to reconcile the interrupted upgrade adoption",
+        precedingFailures: [adoptionFailure],
+    });
+    if (isFullyPreparedUnstartedState(state)) return;
+    if (adoptionOutcomeUncertain) {
+        throw remoteReconciliationFailure(
+            "Upgrade adoption outcome is still uncertain after SSH interruption", [adoptionFailure], paths,
         );
     }
-    throw adoptionFailure;
-}
-
-async function reconcileFailedAdoption(
-    ssh: SshTransport,
-    paths: RemoteUpgradePaths,
-    adoptionFailure: unknown,
-): Promise<AdoptionOutcome> {
-    let state: RemoteUpgradeState;
-    try {
-        state = await readRemoteState(ssh, paths);
-    } catch (stateFailure: unknown) {
-        throw ambiguousAdoptionError(paths, [adoptionFailure, stateFailure]);
-    }
-    if (adoptionHasStarted(state)) return "already-started";
-    if (adoptionDidNotPersist(state)) return await cleanupUnadoptedDrop(ssh, paths, adoptionFailure);
-    if (!adoptionCanBeRolledBack(state)) throw ambiguousAdoptionError(paths, [adoptionFailure], state);
-    return await rollbackPreparedAdoption(ssh, paths, adoptionFailure, state);
-}
-
-export async function adoptRemoteDrop(ssh: SshTransport, paths: RemoteUpgradePaths): Promise<AdoptionOutcome> {
-    let adopted: SshResult;
-    try {
-        adopted = await ssh.exec(rootCommand(buildAdoptDropScript(paths)), 60_000);
-    } catch (adoptionFailure: unknown) {
-        return await reconcileFailedAdoption(ssh, paths, adoptionFailure);
-    }
-    if (adopted.success) return "ready-to-start";
-    return await reconcileFailedAdoption(
-        ssh,
-        paths,
-        remoteFailure("Unable to adopt the verified upgrade bundle", adopted),
+    const noAdoptedStateRemains = !state.stageExists && !state.statusExists
+        && !state.logExists && !state.unitExists;
+    if (noAdoptedStateRemains) throw adoptionFailure;
+    throw remoteReconciliationFailure(
+        "Upgrade adoption stopped in an ambiguous state", [adoptionFailure], paths,
     );
 }
 
 function startUnitScript(paths: RemoteUpgradePaths): string {
     return [
         "set -euo pipefail",
-        `systemd-run --quiet --collect --unit=${quoteShell(paths.unit)} --property=Type=exec --property=KillMode=control-group --property=RuntimeMaxSec=${REMOTE_UPGRADE_RUNTIME_SECONDS}s --property=TimeoutStopSec=${REMOTE_UPGRADE_STOP_GRACE_MS / 1_000}s /bin/bash ${quoteShell(`${paths.stage}/run.sh`)}`,
+        `systemd-run --quiet --collect --unit=${quoteShell(paths.unit)} --property=Type=exec --property=KillMode=control-group --property=TimeoutStopSec=30s /bin/bash ${quoteShell(`${paths.stage}/run.sh`)}`,
         `systemctl is-active --quiet ${quoteShell(paths.unit)}`,
     ].join("\n");
 }
 
 export async function startRemoteUpgrade(ssh: SshTransport, paths: RemoteUpgradePaths): Promise<void> {
-    const started = await ssh.exec(rootCommand(startUnitScript(paths)), 30_000);
-    if (started.success) return;
-    const state = await readRemoteState(ssh, paths);
-    if (adoptionHasStarted(state)) return;
-    const startFailure = remoteFailure("Unable to start the transient upgrade unit", started);
+    let startFailure: Error;
+    let startOutcomeUncertain = false;
+    try {
+        const started = await ssh.exec(rootCommand(startUnitScript(paths)), 30_000);
+        if (started.success) return;
+        startFailure = remoteFailure("Unable to start the transient upgrade unit", started);
+    } catch (error: unknown) {
+        startOutcomeUncertain = true;
+        startFailure = operationError(error, "Unable to start the transient upgrade unit");
+    }
+    const state = await observeRemoteState(ssh, paths, {
+        failureMessage: "Unable to reconcile the interrupted upgrade start",
+        precedingFailures: [startFailure],
+    });
+    if (unitIsRunning(state.serviceState) || /^(?:RUNNING|CLEANING|SUCCEEDED|FAILED:)/.test(state.status)) return;
+    if (startOutcomeUncertain) {
+        throw remoteReconciliationFailure(
+            "Upgrade start outcome is still uncertain after SSH interruption", [startFailure], paths,
+        );
+    }
+    if (!isFullyPreparedUnstartedState(state)) {
+        throw remoteReconciliationFailure("Upgrade start stopped in an ambiguous state", [startFailure], paths);
+    }
     try {
         await cleanupUnstartedUpgrade(ssh, paths);
     } catch (cleanupError: unknown) {
-        throw new AggregateError([startFailure, cleanupError], "Remote upgrade start and cleanup both failed");
+        throw remoteReconciliationFailure(
+            "Remote upgrade start and cleanup both failed", [startFailure, cleanupError], paths,
+        );
     }
     throw startFailure;
 }
@@ -524,14 +484,37 @@ export async function startRemoteUpgrade(ssh: SshTransport, paths: RemoteUpgrade
 function readStateScript(paths: RemoteUpgradePaths): string {
     return [
         "set -euo pipefail",
+        `DROP=${quoteShell(paths.drop)}`,
+        `LOG=${quoteShell(paths.log)}`,
         `STAGE=${quoteShell(paths.stage)}`,
         `STATUS=${quoteShell(paths.status)}`,
         `UNIT=${quoteShell(paths.unit)}`,
-        "if test -d \"$STAGE\" && test ! -L \"$STAGE\"; then echo STAGE=present; elif test -e \"$STAGE\" || test -L \"$STAGE\"; then echo STAGE=unsafe; else echo STAGE=absent; fi",
         "printf 'STATUS=%s\\n' \"$(sed -n '1p' \"$STATUS\" 2>/dev/null || true)\"",
         "printf 'UNIT=%s\\n' \"$(systemctl is-active \"$UNIT\" 2>/dev/null || true)\"",
-        "printf 'UNIT_LOAD=%s\\n' \"$(systemctl show \"$UNIT\" --property=LoadState --value 2>/dev/null || true)\"",
+        "if [ -e \"$STAGE\" ]; then echo STAGE_EXISTS=yes; else echo STAGE_EXISTS=no; fi",
+        "if [ -d \"$STAGE\" ] && [ ! -L \"$STAGE\" ]; then echo STAGE_DIRECTORY=yes; else echo STAGE_DIRECTORY=no; fi",
+        "if [ -e \"$DROP\" ]; then echo DROP_EXISTS=yes; else echo DROP_EXISTS=no; fi",
+        "if [ -e \"$STATUS\" ]; then echo STATUS_EXISTS=yes; else echo STATUS_EXISTS=no; fi",
+        "if [ -e \"$LOG\" ]; then echo LOG_EXISTS=yes; else echo LOG_EXISTS=no; fi",
+        "UNIT_LOAD_STATE=$(systemctl show --property=LoadState --value \"$UNIT\" 2>/dev/null || true)",
+        "test -n \"$UNIT_LOAD_STATE\" || { echo 'Unable to read remote upgrade unit load state' >&2; exit 1; }",
+        "printf 'UNIT_LOAD=%s\\n' \"$UNIT_LOAD_STATE\"",
+        "if [ -n \"$UNIT_LOAD_STATE\" ] && [ \"$UNIT_LOAD_STATE\" != not-found ]; then echo UNIT_EXISTS=yes; else echo UNIT_EXISTS=no; fi",
     ].join("\n");
+}
+
+function remoteStateValue(output: string, field: string): string {
+    const match = output.match(new RegExp(`^${field}=(.*)$`, "m"));
+    if (!match) throw new Error(`Remote upgrade state is missing ${field}`);
+    return match[1]?.trim() || "";
+}
+
+function remoteStatePresence(output: string, field: string): boolean {
+    const presence = remoteStateValue(output, field);
+    if (presence !== "yes" && presence !== "no") {
+        throw new Error(`Remote upgrade state has invalid ${field}`);
+    }
+    return presence === "yes";
 }
 
 async function readRemoteState(
@@ -541,17 +524,73 @@ async function readRemoteState(
 ): Promise<RemoteUpgradeState> {
     const state = await ssh.exec(rootCommand(readStateScript(paths)), timeoutMs);
     if (!state.success) throw remoteFailure("Unable to read remote upgrade state", state);
-    const stageState = state.stdout.match(/^STAGE=(absent|present|unsafe)$/m)?.[1] || "unknown";
     return {
-        status: state.stdout.match(/^STATUS=(.*)$/m)?.[1]?.trim() || "",
-        serviceState: state.stdout.match(/^UNIT=(.*)$/m)?.[1]?.trim() || "unknown",
-        stageState: stageState as RemoteUpgradeState["stageState"],
-        unitLoadState: state.stdout.match(/^UNIT_LOAD=(.*)$/m)?.[1]?.trim() || "unknown",
+        dropExists: remoteStatePresence(state.stdout, "DROP_EXISTS"),
+        logExists: remoteStatePresence(state.stdout, "LOG_EXISTS"),
+        serviceState: remoteStateValue(state.stdout, "UNIT") || "unknown",
+        stageExists: remoteStatePresence(state.stdout, "STAGE_EXISTS"),
+        stageIsDirectory: remoteStatePresence(state.stdout, "STAGE_DIRECTORY"),
+        status: remoteStateValue(state.stdout, "STATUS"),
+        statusExists: remoteStatePresence(state.stdout, "STATUS_EXISTS"),
+        unitExists: remoteStatePresence(state.stdout, "UNIT_EXISTS"),
+        unitLoadState: remoteStateValue(state.stdout, "UNIT_LOAD"),
     };
 }
 
+type RemoteStateObservation = {
+    deadline?: number;
+    failureMessage: string;
+    precedingFailures?: readonly unknown[];
+};
+
+function observationDeadlineFailure(paths: RemoteUpgradePaths, failures: readonly unknown[]): Error {
+    return remoteReconciliationFailure(
+        "Remote upgrade is still nonterminal after the observation deadline",
+        failures,
+        paths,
+    );
+}
+
+async function observeRemoteState(
+    ssh: SshTransport,
+    paths: RemoteUpgradePaths,
+    observation: RemoteStateObservation,
+): Promise<RemoteUpgradeState> {
+    const readFailures: unknown[] = [];
+    for (let attempt = 1; attempt <= STATE_READ_ATTEMPTS; attempt += 1) {
+        const remainingMs = observation.deadline === undefined
+            ? REMOTE_STATE_READ_TIMEOUT_MS
+            : observation.deadline - Date.now();
+        if (remainingMs <= 0) {
+            throw observationDeadlineFailure(paths, readFailures);
+        }
+        try {
+            return await readRemoteState(ssh, paths, Math.min(REMOTE_STATE_READ_TIMEOUT_MS, remainingMs));
+        } catch (error: unknown) {
+            readFailures.push(error);
+            if (attempt < STATE_READ_ATTEMPTS) {
+                const retryDelay = observation.deadline === undefined
+                    ? POLL_INTERVAL_MS
+                    : Math.min(POLL_INTERVAL_MS, observation.deadline - Date.now());
+                if (retryDelay <= 0) throw observationDeadlineFailure(paths, readFailures);
+                await delay(retryDelay);
+            }
+        }
+    }
+    throw remoteReconciliationFailure(
+        observation.failureMessage,
+        [...(observation.precedingFailures ?? []), ...readFailures],
+        paths,
+    );
+}
+
 async function remoteLogTail(ssh: SshTransport, paths: RemoteUpgradePaths): Promise<string> {
-    const output = await ssh.exec(rootCommand(`tail -80 ${quoteShell(paths.log)} 2>/dev/null || true`), 15_000);
+    const script = [
+        `LOG=${quoteShell(paths.log)}`,
+        "test -f \"$LOG\" && test ! -L \"$LOG\" || { echo 'Remote upgrade log is not a regular file' >&2; exit 1; }",
+        "tail -80 -- \"$LOG\"",
+    ].join("\n");
+    const output = await ssh.exec(rootCommand(script), 15_000);
     if (!output.success) throw remoteFailure("Unable to read the remote upgrade log", output);
     return output.stdout.slice(-4_000);
 }
@@ -586,12 +625,41 @@ function remoteFailure(message: string, execution: SshResult): Error {
     return new Error(`${message}: ${diagnostic.slice(-500)}`);
 }
 
+function operationError(error: unknown, message: string): Error {
+    return error instanceof Error ? error : new Error(`${message}: ${String(error)}`);
+}
+
+function remoteEvidence(paths: RemoteUpgradePaths): string {
+    return `unit=${paths.unit} stage=${paths.stage} status=${paths.status} log=${paths.log} drop=${paths.drop}`;
+}
+
+function remoteReconciliationFailure(
+    message: string,
+    failures: readonly unknown[],
+    paths: RemoteUpgradePaths,
+): RemoteUpgradeReconciliationError {
+    return new RemoteUpgradeReconciliationError(
+        failures.map((failure) => operationError(failure, message)),
+        `${message}; reconcile remote evidence at ${remoteEvidence(paths)}; do not retry blindly`,
+    );
+}
+
+export function failureRequiresRemoteReconciliation(error: unknown): boolean {
+    return error instanceof RemoteUpgradeReconciliationError;
+}
+
 function delay(milliseconds: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function unitIsRunning(serviceState: string): boolean {
     return ["active", "activating", "deactivating", "reloading"].includes(serviceState);
+}
+
+function isFullyPreparedUnstartedState(state: RemoteUpgradeState): boolean {
+    return state.stageExists && state.stageIsDirectory && state.statusExists && state.logExists
+        && !state.dropExists && !state.unitExists && state.unitLoadState === "not-found"
+        && state.status === "PREPARED";
 }
 
 function unitStoppedNormally(state: RemoteUpgradeState): boolean {
@@ -601,28 +669,77 @@ function unitStoppedNormally(state: RemoteUpgradeState): boolean {
 
 function assertSuccessfulUnitStoppedNormally(state: RemoteUpgradeState, paths: RemoteUpgradePaths): void {
     if (unitStoppedNormally(state)) return;
-    throw new Error(
+    throw remoteReconciliationFailure(
         `Remote upgrade published SUCCEEDED but the unit stopped abnormally or ambiguously `
-        + `(state=${state.serviceState} load=${state.unitLoadState}); retained ${retainedUpgradeEvidence(paths)}`,
+        + `(state=${state.serviceState} load=${state.unitLoadState})`,
+        [],
+        paths,
+    );
+}
+
+function assertTerminalEvidence(state: RemoteUpgradeState, paths: RemoteUpgradePaths): void {
+    if (state.status !== "SUCCEEDED" && !state.status.startsWith("FAILED:")) return;
+    const evidenceIssues: string[] = [];
+    if (!state.statusExists) evidenceIssues.push("status record is missing");
+    if (!state.logExists) evidenceIssues.push("log is missing");
+    if (state.dropExists) evidenceIssues.push("upload drop still exists");
+    if (state.status === "SUCCEEDED" && state.stageExists) evidenceIssues.push("successful stage still exists");
+    if (state.status.startsWith("FAILED:") && !state.status.includes("CLEANUP") && state.stageExists) {
+        evidenceIssues.push("failed stage still exists without a cleanup failure status");
+    }
+    if (evidenceIssues.length === 0) return;
+    throw remoteReconciliationFailure(
+        `Remote upgrade terminal evidence is incomplete or inconsistent (${evidenceIssues.join(", ")})`,
+        [],
+        paths,
     );
 }
 
 async function completedUpgradeOutput(ssh: SshTransport, paths: RemoteUpgradePaths): Promise<string> {
-    const log = await remoteLogTail(ssh, paths);
-    await cleanupRemoteRecords(ssh, paths);
+    let log: string;
+    try {
+        log = await remoteLogTail(ssh, paths);
+    } catch (error: unknown) {
+        throw remoteReconciliationFailure(
+            "Upgrade succeeded but its retained log could not be read", [error], paths,
+        );
+    }
+    try {
+        await cleanupRemoteRecords(ssh, paths);
+    } catch (error: unknown) {
+        throw remoteReconciliationFailure(
+            "Upgrade succeeded but remote evidence cleanup could not be confirmed", [error], paths,
+        );
+    }
     return `✅ Upgrade done\n${log.slice(-1_500)}`;
 }
 
 async function throwRemoteUpgradeFailure(ssh: SshTransport, paths: RemoteUpgradePaths, status: string): Promise<never> {
-    const log = await remoteLogTail(ssh, paths);
+    let log: string;
+    try {
+        log = await remoteLogTail(ssh, paths);
+    } catch (error: unknown) {
+        throw remoteReconciliationFailure(
+            "Remote upgrade failed but its retained log could not be read", [error], paths,
+        );
+    }
     const failure = new Error(`Remote local upgrade failed (${status}): ${log.slice(-1_500)}`);
+    if (status.endsWith(":CLEANUP_AFTER_TRANSACTION")) {
+        throw remoteReconciliationFailure(
+            "Upgrade transaction completed but staging cleanup is incomplete", [failure], paths,
+        );
+    }
     if (status.includes("CLEANUP")) {
-        throw new Error(`${failure.message}; retained status=${paths.status} log=${paths.log}`);
+        throw remoteReconciliationFailure(
+            "Upgrade transaction and staging cleanup both failed", [failure], paths,
+        );
     }
     try {
         await cleanupRemoteRecords(ssh, paths);
     } catch (cleanupError: unknown) {
-        throw new AggregateError([failure, cleanupError], "Remote local upgrade failed and status cleanup did not complete");
+        throw remoteReconciliationFailure(
+            "Remote local upgrade failed and status cleanup did not complete", [failure, cleanupError], paths,
+        );
     }
     throw failure;
 }
@@ -631,59 +748,20 @@ function assertObservableUpgradeState(state: RemoteUpgradeState, unitRunning: bo
     const knownStatus = ["PREPARED", "RUNNING", "CLEANING", "SUCCEEDED"].includes(state.status)
         || state.status.startsWith("FAILED:");
     if (!unitRunning && !knownStatus) {
-        throw new Error(`Remote upgrade stopped without a terminal status; retained status=${paths.status} log=${paths.log}`);
+        throw remoteReconciliationFailure("Remote upgrade stopped without a terminal status", [], paths);
     }
-}
-
-function remoteUpgradeTimeout(paths: RemoteUpgradePaths, state?: RemoteUpgradeState): Error {
-    const observation = state
-        ? ` last status=${state.status || "empty"} unit_state=${state.serviceState};`
-        : "";
-    return new Error(
-        `Remote local upgrade exceeded the ${REMOTE_UPGRADE_RUNTIME_SECONDS}-second runtime limit and `
-        + `${REMOTE_UPGRADE_OBSERVATION_GRACE_MS / 1_000}-second observation grace;${observation} remote unit was not stopped; `
-        + `retained ${retainedUpgradeEvidence(paths)}; do not retry blindly`,
-    );
-}
-
-async function readRemoteStateBeforeDeadline(
-    ssh: SshTransport,
-    paths: RemoteUpgradePaths,
-    deadline: number,
-): Promise<RemoteUpgradeState> {
-    const remainingMs = deadline - Date.now();
-    if (remainingMs <= 0) throw remoteUpgradeTimeout(paths);
-    try {
-        return await readRemoteState(ssh, paths, Math.min(REMOTE_STATE_READ_TIMEOUT_MS, remainingMs));
-    } catch (stateFailure: unknown) {
-        if (Date.now() < deadline) throw stateFailure;
-        throw new AggregateError(
-            [remoteUpgradeTimeout(paths), stateFailure],
-            `Remote upgrade observation reached its deadline while reading state; retained ${retainedUpgradeEvidence(paths)}`,
-        );
-    }
-}
-
-function nextStoppedObservationCount(
-    state: RemoteUpgradeState,
-    unitRunning: boolean,
-    previousCount: number,
-    paths: RemoteUpgradePaths,
-): number {
-    const stoppedCount = unitRunning ? 0 : previousCount + 1;
-    if (stoppedCount >= 3 && ["PREPARED", "RUNNING", "CLEANING"].includes(state.status)) {
-        throw new Error(`Remote upgrade unit stopped before publishing a terminal status; retained ${retainedUpgradeEvidence(paths)}`);
-    }
-    return stoppedCount;
 }
 
 export async function awaitRemoteUpgrade(ssh: SshTransport, paths: RemoteUpgradePaths): Promise<string> {
-    const deadline = Date.now() + REMOTE_UPGRADE_WAIT_TIMEOUT_MS;
+    const observationDeadline = Date.now() + UPGRADE_OBSERVATION_TIMEOUT_MS;
     let stoppedObservations = 0;
     while (true) {
-        const state = await readRemoteStateBeforeDeadline(ssh, paths, deadline);
-        if (Date.now() >= deadline) throw remoteUpgradeTimeout(paths, state);
+        const state = await observeRemoteState(ssh, paths, {
+            deadline: observationDeadline,
+            failureMessage: "Unable to observe the remote upgrade lifecycle",
+        });
         const unitRunning = unitIsRunning(state.serviceState);
+        if (!unitRunning) assertTerminalEvidence(state, paths);
         if (state.status === "SUCCEEDED" && !unitRunning) {
             assertSuccessfulUnitStoppedNormally(state, paths);
             return await completedUpgradeOutput(ssh, paths);
@@ -691,11 +769,19 @@ export async function awaitRemoteUpgrade(ssh: SshTransport, paths: RemoteUpgrade
         if (state.status.startsWith("FAILED:") && !unitRunning) {
             await throwRemoteUpgradeFailure(ssh, paths, state.status);
         }
+        if (Date.now() >= observationDeadline) {
+            throw observationDeadlineFailure(paths, []);
+        }
         assertObservableUpgradeState(state, unitRunning, paths);
-        stoppedObservations = nextStoppedObservationCount(state, unitRunning, stoppedObservations, paths);
-        const remainingMs = deadline - Date.now();
-        if (remainingMs <= 0) throw remoteUpgradeTimeout(paths, state);
-        await delay(Math.min(POLL_INTERVAL_MS, remainingMs));
+        stoppedObservations = unitRunning ? 0 : stoppedObservations + 1;
+        if (stoppedObservations >= 3 && ["PREPARED", "RUNNING", "CLEANING"].includes(state.status)) {
+            throw remoteReconciliationFailure(
+                "Remote upgrade unit stopped before publishing a terminal status", [], paths,
+            );
+        }
+        const remainingObservationMs = observationDeadline - Date.now();
+        if (remainingObservationMs <= 0) throw observationDeadlineFailure(paths, []);
+        await delay(Math.min(POLL_INTERVAL_MS, remainingObservationMs));
     }
 }
 
@@ -704,20 +790,20 @@ export async function executeLocalUpgradeTransfer(ssh: SshTransport, request: Lo
     const paths = remotePaths(runId);
     const preflight = await remoteUpgradePreflight(ssh);
     const bundle = await prepareLocalUpgradeBundle({ ...preflight, ...request });
-    let adoptionCommandSent = false;
+    let adopted = false;
     let transferError: unknown;
     try {
         try {
             await prepareRemoteDrop(ssh, paths, bundle);
             await uploadBundleFiles(ssh, paths, bundle);
             await uploadRunScript(ssh, paths, bundle, request, preflight.architecture);
-            adoptionCommandSent = true;
-            const adoption = await adoptRemoteDrop(ssh, paths);
-            if (adoption === "ready-to-start") await startRemoteUpgrade(ssh, paths);
+            await adoptRemoteDrop(ssh, paths);
+            adopted = true;
+            await startRemoteUpgrade(ssh, paths);
             return await awaitRemoteUpgrade(ssh, paths);
         } catch (error: unknown) {
             transferError = error;
-            if (!adoptionCommandSent) {
+            if (!adopted && !failureRequiresRemoteReconciliation(error)) {
                 try {
                     await cleanupRemoteDrop(ssh, paths);
                 } catch (cleanupError: unknown) {

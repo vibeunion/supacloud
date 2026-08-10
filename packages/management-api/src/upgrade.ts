@@ -18,6 +18,10 @@ import {
     type OfflineReleaseBundle,
     type OfflineUpgradeBundle,
 } from "./offline-upgrade-bundle";
+import {
+    acquireSupaCloudUpgradeLock,
+    SUPACLOUD_UPGRADE_LOCK_PATH,
+} from "./upgrade-lock";
 
 const RELEASES_API = "https://api.github.com/repos/zuohuadong/supacloud/releases";
 const BIN_TARGET = "/usr/local/bin/supacloud";
@@ -2463,8 +2467,13 @@ export async function runUpgrade(options: RunUpgradeOptions = {}) {
             p.cancel("Upgrade cancelled.");
             return;
         }
-        executionContext = await createUpgradeExecutionContext(plan, options, s);
-        await executeUpgradeTransaction(upgradeTransactionOperations(executionContext));
+        const upgradeLock = acquireSupaCloudUpgradeLock(SUPACLOUD_UPGRADE_LOCK_PATH);
+        try {
+            executionContext = await createUpgradeExecutionContext(plan, options, s);
+            await executeUpgradeTransaction(upgradeTransactionOperations(executionContext));
+        } finally {
+            upgradeLock.release();
+        }
         p.outro(upgradeSuccessMessage(executionContext));
     } catch (error: unknown) {
         s.stop(formatUpgradeFailure(error, upgradeRecoveryPaths(executionContext)));

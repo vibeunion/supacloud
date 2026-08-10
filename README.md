@@ -235,6 +235,13 @@ The transaction runs in a uniquely named transient systemd unit and publishes a
 protected atomic status record. Admin polls that record through short SSH calls;
 it does not blindly stop a transaction that may have entered activation. The
 legacy server-download path remains available as `--artifact_transport remote`.
+Local, remote, and direct server upgrades share one nonblocking host-wide lock.
+
+Admin observes the remote transaction for up to 30 minutes. Reaching that
+deadline stops only local observation; it does not stop, clean up, or mark the
+remote transaction as failed. The CLI reports the unit, stage, status, log, and
+upload-drop paths for reconciliation. Inspect that evidence before retrying and
+do not retry blindly while the remote transaction may still be running.
 
 This transaction requires persisted `EDGE_RUNTIME_MODE=external`; embedded
 mode is rejected before release artifacts or services are changed. It preserves
@@ -242,8 +249,10 @@ the Edge Runtime systemd executable path, port, mode, and enabled state, and
 verifies each released component against its own SHA256 checksum and GitHub
 attestation. Caddy and GoTrue are outside this transaction and are not replaced.
 
-Omit `--edge_runtime_version` only when intentionally upgrading Management and
-Web Console without changing Edge Runtime; the Admin CLI reports that boundary.
+With `--artifact_transport remote` (the default), omit
+`--edge_runtime_version` only when intentionally upgrading Management and Web
+Console without changing Edge Runtime. Local transport requires exact
+Management and Edge Runtime versions.
 
 The installed `/usr/local/bin/supacloud` server binary still provides the
 Management/Web Console-only local upgrade path. Production servers do not need
