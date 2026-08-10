@@ -27,7 +27,11 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
         return status(404, { message: "Project not found", code: "404" });
       }
       try {
-        const servicesData = await tenantRuntimeService.getProjectServiceStatuses(params.ref, "studio");
+        const servicesData = await tenantRuntimeService.getProjectServiceStatuses(
+          params.ref,
+          project.config,
+          "studio",
+        );
         return { status: "healthy", services: servicesData || [] };
       } catch {
         return { status: "healthy", services: [] };
@@ -202,7 +206,7 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
         return status(404, { message: "Project not found" });
       }
 
-      return tenantRuntimeService.getProjectServiceStatuses(params.ref, "studio");
+      return tenantRuntimeService.getProjectServiceStatuses(params.ref, project.config, "studio");
     },
     {
       params: t.Object({ ref: t.String() }),

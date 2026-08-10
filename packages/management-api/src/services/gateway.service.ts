@@ -9,7 +9,7 @@ import {
     resolveProjectAuthHost,
     resolveProjectStudioHost,
 } from "../utils/project-routing";
-import { normalizeProjectConfig, normalizeThirdPartyAuthConfig } from "../utils/project-config";
+import { normalizeProjectConfig, resolveExternalAuthEndpointConfig } from "../utils/project-config";
 import { uniqueStrings } from "../utils/strings";
 import { GOTRUE_USER_ID_POSTGRES_PATTERN } from "../utils/project-user-lifecycle";
 import { assertUniqueCaddyIds, runCaddyStartupPreflight } from "./caddy-startup-preflight";
@@ -1114,9 +1114,9 @@ export class CaddyGatewayProvider implements GatewayProvider {
             const authConfig = projectConfig.auth && typeof projectConfig.auth === "object" && !Array.isArray(projectConfig.auth)
                 ? projectConfig.auth as Record<string, unknown>
                 : {};
-            const thirdPartyAuth = normalizeThirdPartyAuthConfig(authConfig.third_party_auth);
-            const externalAuthUpstream = thirdPartyAuth.enabled && thirdPartyAuth.auth_endpoint_mode === "external" && thirdPartyAuth.auth_upstream
-                ? normalizeCustomUpstream(thirdPartyAuth.auth_upstream)
+            const externalAuth = resolveExternalAuthEndpointConfig(authConfig.third_party_auth);
+            const externalAuthUpstream = externalAuth
+                ? normalizeCustomUpstream(externalAuth.auth_upstream)
                 : null;
             let sharedAuthPort: number | null = null;
             if (config.authRuntimeOwnerRef && config.authRuntimeOwnerRef !== projectRef) {
@@ -1140,13 +1140,13 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 : directAuthUpstream;
             const authHeaders = sharedAuthPort !== null
                     ? [`X-Project-Ref:${config.authRuntimeOwnerRef}`, `x-project-ref:${config.authRuntimeOwnerRef}`]
-                    : externalAuthUpstream && thirdPartyAuth.auth_host_header
-                        ? [`Host:${thirdPartyAuth.auth_host_header}`, `X-Forwarded-Host:${thirdPartyAuth.auth_host_header}`]
-                    : undefined;
+                    : externalAuthUpstream && externalAuth?.auth_host_header
+                        ? [`Host:${externalAuth.auth_host_header}`, `X-Forwarded-Host:${externalAuth.auth_host_header}`]
+                        : undefined;
             const authProxyHeaders = sharedAuthProxy ? undefined : authHeaders;
             const authUpstreamTls = sharedAuthPort === null ? externalAuthUpstream?.tls : false;
             const authUpstreamTlsInsecureSkipVerify = sharedAuthPort === null
-                && thirdPartyAuth.auth_upstream_tls_insecure_skip_verify;
+                && externalAuth?.auth_upstream_tls_insecure_skip_verify;
             const hosts = uniqueStrings(resolveProjectApiHosts(projectRef, routingConfig));
             const hostSet = new Set(hosts.map(normalizeCaddyHost));
             const authHosts = uniqueStrings([resolveProjectAuthHost(projectRef, routingConfig)])

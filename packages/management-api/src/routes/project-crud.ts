@@ -267,7 +267,7 @@ async function buildProjectResponse(
     connectionCount = connectionResult[0]?.count || 0;
   } catch {}
 
-  const serviceStatuses = await tenantRuntimeService.getProjectServiceStatuses(ref, "detail");
+  const serviceStatuses = await tenantRuntimeService.getProjectServiceStatuses(ref, project.config, "detail");
 
   return {
     ...base,

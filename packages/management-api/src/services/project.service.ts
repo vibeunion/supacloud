@@ -192,10 +192,10 @@ export class ProjectService {
     }
   }
 
-  private async checkProjectStorageHealth(ref: string): Promise<boolean> {
+  private async checkProjectStorageHealth(ref: string, projectConfig: unknown): Promise<boolean> {
     try {
       const { tenantRuntimeService } = await import("./tenant-runtime.service");
-      const services = await tenantRuntimeService.getProjectServiceStatuses(ref, "studio");
+      const services = await tenantRuntimeService.getProjectServiceStatuses(ref, projectConfig, "studio");
       const storage = services.find((service) => service.id === "storage" || service.name.toLowerCase() === "storage");
       if (storage?.healthy || storage?.status === "ACTIVE_HEALTHY") return true;
     } catch {
@@ -560,7 +560,7 @@ export class ProjectService {
     return {
       status: project.status,
       database: dbStatus.success ? "healthy" : "unhealthy",
-      storage: (await this.checkProjectStorageHealth(ref)) ? "healthy" : "unhealthy",
+      storage: (await this.checkProjectStorageHealth(ref, project.config)) ? "healthy" : "unhealthy",
     };
   }
 
