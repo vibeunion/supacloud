@@ -7,11 +7,19 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { logger } from "./utils/logger";
 import { WEB_CONSOLE_CURRENT_DIR } from "./utils/web-console-path";
 import { hasSecretEncryptionCheckpoint } from "./db/secret-key-migration";
+import {
+    RELEASE_REPOSITORY,
+    RELEASE_SIGNER_WORKFLOW,
+    RELEASE_SOURCE_REF,
+    manifestArtifact,
+} from "./release-manifest";
+import {
+    loadOfflineUpgradeBundle,
+    type OfflineReleaseBundle,
+    type OfflineUpgradeBundle,
+} from "./offline-upgrade-bundle";
 
 const RELEASES_API = "https://api.github.com/repos/zuohuadong/supacloud/releases";
-const RELEASE_REPOSITORY = "zuohuadong/supacloud";
-const RELEASE_SIGNER_WORKFLOW = `${RELEASE_REPOSITORY}/.github/workflows/release-please.yml`;
-const RELEASE_SOURCE_REF = "refs/heads/main";
 const BIN_TARGET = "/usr/local/bin/supacloud";
 const MANAGEMENT_SERVICE_UNIT = "supacloud.service";
 const EDGE_RUNTIME_SERVICE_UNIT = "supacloud-edge-runtime.service";
@@ -40,6 +48,10 @@ const DEFAULT_EDGE_RESOURCE_RATIO = 0.6;
 const DEFAULT_EDGE_TASKS_MAX = 256;
 const WEB_CONSOLE_DIR_ENV_KEY = "WEB_CONSOLE_DIR";
 const LINUX_ACCOUNT_NAME = /^[a-z_][a-z0-9_-]{0,30}\$?$/;
+const OFFLINE_BUNDLE_ENDPOINT: GithubEndpoint = {
+    label: "verified offline bundle",
+    proxyPrefix: "",
+};
 
 type GithubEndpoint = {
     label: string;
@@ -216,6 +228,14 @@ export function normalizeManagementReleaseTag(tag: string) {
     if (trimmed.startsWith("management-api-v")) return trimmed;
     if (trimmed.startsWith("v")) return `management-api-${trimmed}`;
     return `management-api-v${trimmed}`;
+}
+
+export function normalizeExactManagementVersion(tag: string): string {
+    const version = tag.trim().replace(/^management-api-v/, "").replace(/^v/, "");
+    if (!/^\d+\.\d+\.\d+$/.test(version)) {
+        throw new Error("An exact stable Management API version is required for an offline bundle");
+    }
+    return version;
 }
 
 export function normalizeEdgeRuntimeReleaseTag(tag: string) {
@@ -959,7 +979,7 @@ export function resolveArtifactVerificationMode(
 export function supportsGithubOfflineAttestationVerification(exitCode: number, helpText: string): boolean {
     const helpTokens = helpText.split(/\s+/);
     return exitCode === 0
-        && ["--bundle", "--signer-workflow", "--source-ref"].every(flag => (
+        && ["--bundle", "--signer-workflow", "--source-ref", "--deny-self-hosted-runners"].every(flag => (
             helpTokens.some(token => token === flag || token.startsWith(`${flag}=`))
         ));
 }
@@ -1024,6 +1044,7 @@ async function runGithubAttestationVerification(filePath: string, bundlePath: st
         "--repo", RELEASE_REPOSITORY,
         "--signer-workflow", RELEASE_SIGNER_WORKFLOW,
         "--source-ref", RELEASE_SOURCE_REF,
+        "--deny-self-hosted-runners",
     ]);
     if (verification.exitCode !== 0) {
         throw new Error(`GitHub artifact attestation verification failed: ${verification.stderr.slice(-500)}`);
@@ -1092,11 +1113,41 @@ async function validateElfBinaryArtifact(filePath: string, binaryName: string) {
     await $`chmod 0755 ${filePath}`;
 }
 
-async function validateManagementBinaryArtifact(filePath: string, binaryName: string) {
+export function parseManagementVersionOutput(stdout: string): string {
+    const lines = stdout.trim().split(/\r?\n/).filter(Boolean);
+    if (lines.length !== 1) throw new Error("Management --version output must contain exactly one line");
+    let message = lines[0] as string;
+    if (message.startsWith("{")) {
+        const payload = JSON.parse(message) as { message?: unknown };
+        if (typeof payload.message !== "string") throw new Error("Management --version JSON is invalid");
+        message = payload.message;
+    }
+    const match = message.match(/^SupaCloud Version: (\d+\.\d+\.\d+)$/);
+    if (!match) throw new Error("Management --version output is invalid");
+    return match[1] as string;
+}
+
+async function validateManagementBinaryArtifact(filePath: string, binaryName: string, expectedVersion: string) {
     await validateElfBinaryArtifact(filePath, binaryName);
     const smoke = Bun.spawn([filePath, "--version"], { stdout: "pipe", stderr: "pipe" });
-    if (await smoke.exited !== 0) {
+    const timeout = setTimeout(() => smoke.kill("SIGKILL"), 5_000);
+    let smokeOutput: [number, string, string];
+    try {
+        smokeOutput = await Promise.all([
+            smoke.exited,
+            new Response(smoke.stdout).text(),
+            new Response(smoke.stderr).text(),
+        ]);
+    } finally {
+        clearTimeout(timeout);
+    }
+    const [exitCode, stdout, stderr] = smokeOutput;
+    if (exitCode !== 0 || stderr.trim()) {
         throw new Error(`${binaryName} failed the --version smoke check`);
+    }
+    const actualVersion = parseManagementVersionOutput(stdout);
+    if (actualVersion !== expectedVersion) {
+        throw new Error(`${binaryName} reports ${actualVersion}; expected ${expectedVersion}`);
     }
 }
 
@@ -1149,37 +1200,57 @@ async function stageBinary(request: StageBinaryRequest): Promise<StagedBinary> {
     }
 }
 
+type StageBundledBinaryRequest = {
+    sourcePath: string;
+    binaryName: string;
+    expectedSha256: string;
+    targetPath: string;
+    validate: (filePath: string, binaryName: string) => Promise<void>;
+};
+
+async function stageBundledBinary(request: StageBundledBinaryRequest): Promise<StagedBinary> {
+    const stagedBinary = `${request.targetPath}.new-${process.pid}`;
+    try {
+        copyFileSync(request.sourcePath, stagedBinary);
+        chmodSync(stagedBinary, 0o755);
+        await request.validate(stagedBinary, request.binaryName);
+        const stagedSha256 = sha256File(stagedBinary);
+        if (stagedSha256 !== request.expectedSha256) {
+            throw new Error(`SHA256 mismatch for staged ${request.binaryName}`);
+        }
+        return { path: stagedBinary, endpoint: OFFLINE_BUNDLE_ENDPOINT, sha256: stagedSha256 };
+    } catch (error: unknown) {
+        rmSync(stagedBinary, { force: true });
+        throw error;
+    }
+}
+
 type StagedWebConsole = {
     releaseDir: string;
     endpoint: GithubEndpoint;
 };
 
-async function stageWebConsoleBuild(
-    downloadUrl: string,
+async function validateWebConsoleArchive(archivePath: string): Promise<void> {
+    const listed = await $`tar -tzf ${archivePath}`.nothrow().quiet();
+    if (listed.exitCode !== 0) throw new Error(`${WEB_CONSOLE_ASSET} is not a readable gzip tarball`);
+    validateWebConsoleArchiveEntries(listed.stdout.toString());
+    const verboseListing = await $`tar -tvzf ${archivePath}`.nothrow().quiet();
+    const hasUnsafeEntry = verboseListing.stdout.toString().split(/\r?\n/)
+        .filter(Boolean).some(line => !["-", "d"].includes(line[0] || ""));
+    if (verboseListing.exitCode !== 0 || hasUnsafeEntry) {
+        throw new Error(`${WEB_CONSOLE_ASSET} contains links or special files`);
+    }
+}
+
+async function extractWebConsoleArchive(
+    archivePath: string,
     version: string,
-    checksums: string,
-    preferredEndpoint: GithubEndpoint,
-    forceYes?: boolean,
+    endpoint: GithubEndpoint,
 ): Promise<StagedWebConsole> {
     const safeVersion = version.replace(/[^a-zA-Z0-9._-]/g, "_");
-    const archivePath = path.join(os.tmpdir(), `${WEB_CONSOLE_ASSET}-${Date.now()}`);
     const releaseDir = path.join(WEB_CONSOLE_RELEASES_DIR, `${safeVersion}-${process.pid}-${Date.now()}`);
-
     try {
-        const endpoint = await downloadAsset(downloadUrl, archivePath, preferredEndpoint, forceYes);
-        verifyArtifactChecksum(archivePath, WEB_CONSOLE_ASSET, checksums);
-        await verifyArtifactAttestation({ filePath: archivePath, forceYes });
-
-        const listed = await $`tar -tzf ${archivePath}`.nothrow().quiet();
-        if (listed.exitCode !== 0) {
-            throw new Error(`${WEB_CONSOLE_ASSET} is not a readable gzip tarball`);
-        }
-        validateWebConsoleArchiveEntries(listed.stdout.toString());
-        const verboseListing = await $`tar -tvzf ${archivePath}`.nothrow().quiet();
-        if (verboseListing.exitCode !== 0 || verboseListing.stdout.toString().split(/\r?\n/).filter(Boolean).some(line => !["-", "d"].includes(line[0] || ""))) {
-            throw new Error(`${WEB_CONSOLE_ASSET} contains links or special files`);
-        }
-
+        await validateWebConsoleArchive(archivePath);
         await $`rm -rf ${releaseDir}`.nothrow().quiet();
         await $`mkdir -p ${releaseDir} ${WEB_CONSOLE_RELEASES_DIR}`;
         const extract = await $`tar --no-same-owner --no-same-permissions -xzf ${archivePath} -C ${releaseDir}`.nothrow().quiet();
@@ -1189,11 +1260,31 @@ async function stageWebConsoleBuild(
         if (!existsSync(path.join(releaseDir, "index.html"))) {
             throw new Error(`${WEB_CONSOLE_ASSET} is invalid: index.html not found at archive root`);
         }
-
         return { releaseDir, endpoint };
     } catch (error: unknown) {
         await $`rm -rf ${releaseDir}`.nothrow().quiet();
         throw error;
+    }
+}
+
+type StageWebConsoleBuildRequest = {
+    downloadUrl: string;
+    version: string;
+    checksums: string;
+    preferredEndpoint: GithubEndpoint;
+    forceYes?: boolean;
+};
+
+async function stageWebConsoleBuild(request: StageWebConsoleBuildRequest): Promise<StagedWebConsole> {
+    const archivePath = path.join(os.tmpdir(), `${WEB_CONSOLE_ASSET}-${Date.now()}`);
+
+    try {
+        const endpoint = await downloadAsset(
+            request.downloadUrl, archivePath, request.preferredEndpoint, request.forceYes,
+        );
+        verifyArtifactChecksum(archivePath, WEB_CONSOLE_ASSET, request.checksums);
+        await verifyArtifactAttestation({ filePath: archivePath, forceYes: request.forceYes });
+        return await extractWebConsoleArchive(archivePath, request.version, endpoint);
     } finally {
         await $`rm -f ${archivePath}`.nothrow().quiet();
     }
@@ -1750,6 +1841,7 @@ type RunUpgradeOptions = {
     forceYes?: boolean;
     targetVersion?: string;
     edgeRuntimeVersion?: string;
+    assetBundleDir?: string;
 };
 
 type EdgeRuntimeUpgradePlan = {
@@ -1771,6 +1863,7 @@ type UpgradeReleasePlan = {
     binaryName: string;
     endpoint: GithubEndpoint;
     edgeRuntime: EdgeRuntimeUpgradePlan | null;
+    offlineBundle: OfflineUpgradeBundle | null;
     release: GithubRelease;
     remoteVersion: string;
 };
@@ -1908,12 +2001,63 @@ async function resolveEdgeRuntimeUpgradePlan(
     };
 }
 
+function offlineReleaseMetadata(bundle: OfflineReleaseBundle): GithubRelease {
+    return {
+        tag_name: bundle.manifest.release.tag,
+        draft: false,
+        prerelease: false,
+        assets: [...bundle.assetPaths.keys()].map(name => ({ name })),
+    };
+}
+
+async function resolveOfflineUpgradeReleasePlan(
+    options: RunUpgradeOptions,
+    binaryName: string,
+    edgePreflight: ActiveSystemdBinary | null,
+    requestedEdgeVersion: string,
+): Promise<UpgradeReleasePlan> {
+    const requestedManagementVersion = options.targetVersion
+        || process.env.SUPACLOUD_UPGRADE_TAG
+        || process.env.SUPACLOUD_UPGRADE_VERSION
+        || "";
+    const managementVersion = normalizeExactManagementVersion(requestedManagementVersion);
+    const edgeVersion = requestedEdgeVersion
+        ? normalizeEdgeRuntimeReleaseTag(requestedEdgeVersion).slice("edge-runtime-v".length)
+        : "";
+    const offlineBundle = await loadOfflineUpgradeBundle({
+        assetBundleDir: options.assetBundleDir as string,
+        management: { version: managementVersion, binaryName },
+        ...(edgePreflight ? {
+            edgeRuntime: { version: edgeVersion, binaryName: resolveEdgeRuntimeBinaryName(binaryName) },
+        } : {}),
+    });
+    recordIntegrityMode("github-attestation+same-release-sha256");
+    const edgeRuntime = edgePreflight && offlineBundle.edgeRuntime ? {
+        binaryName: resolveEdgeRuntimeBinaryName(binaryName),
+        enabledState: await readSystemdEnabledState(EDGE_RUNTIME_SERVICE_UNIT),
+        endpoint: OFFLINE_BUNDLE_ENDPOINT,
+        release: offlineReleaseMetadata(offlineBundle.edgeRuntime),
+        targetPath: edgePreflight.execStartPath,
+    } : null;
+    return {
+        binaryName,
+        endpoint: OFFLINE_BUNDLE_ENDPOINT,
+        edgeRuntime,
+        offlineBundle,
+        release: offlineReleaseMetadata(offlineBundle.management),
+        remoteVersion: offlineBundle.management.manifest.release.tag,
+    };
+}
+
 async function resolveUpgradeReleasePlan(options: RunUpgradeOptions): Promise<UpgradeReleasePlan> {
     const requestedEdgeVersion = options.edgeRuntimeVersion
         || process.env.SUPACLOUD_EDGE_RUNTIME_UPGRADE_TAG
         || "";
     const edgePreflight = await inspectEdgeRuntimeUpgradeTarget(requestedEdgeVersion);
     const binaryName = resolveLinuxBinaryName();
+    if (options.assetBundleDir) {
+        return resolveOfflineUpgradeReleasePlan(options, binaryName, edgePreflight, requestedEdgeVersion);
+    }
     const metadata = await fetchGithubApiJson(resolveReleaseApiUrl(options.targetVersion), options.forceYes);
     const release = selectManagementRelease(metadata.data as GithubRelease | GithubRelease[], binaryName);
     const edgeRuntime = await resolveEdgeRuntimeUpgradePlan({
@@ -1922,7 +2066,14 @@ async function resolveUpgradeReleasePlan(options: RunUpgradeOptions): Promise<Up
         preflight: edgePreflight,
         requestedVersion: requestedEdgeVersion,
     });
-    return { binaryName, endpoint: metadata.endpoint, edgeRuntime, release, remoteVersion: release.tag_name || "unknown" };
+    return {
+        binaryName,
+        endpoint: metadata.endpoint,
+        edgeRuntime,
+        offlineBundle: null,
+        release,
+        remoteVersion: release.tag_name || "unknown",
+    };
 }
 
 function upgradeConfirmationMessage(plan: UpgradeReleasePlan): string {
@@ -1959,10 +2110,12 @@ async function createUpgradeExecutionContext(
     spinner: ReturnType<typeof p.spinner>,
 ): Promise<UpgradeExecutionContext> {
     const preparedSecrets = prepareUpgradeSecrets(await resolveUpgradeEnvironment());
-    const checksums = await downloadReleaseChecksums(plan.release, plan.endpoint, options.forceYes);
-    const edgeRuntimeChecksums = plan.edgeRuntime
-        ? await downloadReleaseChecksums(plan.edgeRuntime.release, plan.edgeRuntime.endpoint, options.forceYes)
-        : null;
+    const checksums = plan.offlineBundle?.management.checksums
+        ?? await downloadReleaseChecksums(plan.release, plan.endpoint, options.forceYes);
+    const edgeRuntimeChecksums = plan.offlineBundle?.edgeRuntime?.checksums
+        ?? (plan.edgeRuntime
+            ? await downloadReleaseChecksums(plan.edgeRuntime.release, plan.edgeRuntime.endpoint, options.forceYes)
+            : null);
     return {
         checksums,
         edgeRuntimeChecksums,
@@ -1986,47 +2139,82 @@ async function verifyUpgradePreflight(context: UpgradeExecutionContext): Promise
     }
 }
 
+function offlineAssetPath(bundle: OfflineReleaseBundle, name: string): string {
+    const assetPath = bundle.assetPaths.get(name);
+    if (!assetPath) throw new Error(`Offline release bundle does not contain ${name}`);
+    return assetPath;
+}
+
 async function stageManagementUpgrade(context: UpgradeExecutionContext): Promise<void> {
     const { plan, state } = context;
-    context.spinner.start(`Downloading, verifying, and staging ${plan.binaryName}`);
-    state.stagedManagement = await stageBinary({
-        downloadUrl: releaseAssetUrl(plan.release, plan.binaryName),
-        binaryName: plan.binaryName,
-        checksums: context.checksums,
-        preferredEndpoint: plan.endpoint,
-        targetPath: BIN_TARGET,
-        validate: validateManagementBinaryArtifact,
-        forceYes: context.options.forceYes,
-    });
+    context.spinner.start(`Verifying and staging ${plan.binaryName}`);
+    const offlineRelease = plan.offlineBundle?.management;
+    const expectedVersion = normalizeExactManagementVersion(plan.remoteVersion);
+    const validateManagementReleaseBinary = (filePath: string, binaryName: string) => (
+        validateManagementBinaryArtifact(filePath, binaryName, expectedVersion)
+    );
+    state.stagedManagement = offlineRelease
+        ? await stageBundledBinary({
+            sourcePath: offlineAssetPath(offlineRelease, plan.binaryName),
+            binaryName: plan.binaryName,
+            expectedSha256: manifestArtifact(offlineRelease.manifest, plan.binaryName).sha256,
+            targetPath: BIN_TARGET,
+            validate: validateManagementReleaseBinary,
+        })
+        : await stageBinary({
+            downloadUrl: releaseAssetUrl(plan.release, plan.binaryName),
+            binaryName: plan.binaryName,
+            checksums: context.checksums,
+            preferredEndpoint: plan.endpoint,
+            targetPath: BIN_TARGET,
+            validate: validateManagementReleaseBinary,
+            forceYes: context.options.forceYes,
+        });
     state.downloadEndpointLabel = state.stagedManagement.endpoint.label;
 }
 
 async function stageEdgeRuntimeUpgrade(context: UpgradeExecutionContext): Promise<void> {
     const edgeRuntime = context.plan.edgeRuntime;
     if (!edgeRuntime || !context.edgeRuntimeChecksums) return;
-    context.spinner.start(`Downloading, verifying, and staging ${edgeRuntime.binaryName}`);
-    context.state.stagedEdgeRuntime = await stageBinary({
-        downloadUrl: releaseAssetUrl(edgeRuntime.release, edgeRuntime.binaryName),
-        binaryName: edgeRuntime.binaryName,
-        checksums: context.edgeRuntimeChecksums,
-        preferredEndpoint: edgeRuntime.endpoint,
-        targetPath: edgeRuntime.targetPath,
-        validate: validateElfBinaryArtifact,
-        forceYes: context.options.forceYes,
-    });
+    context.spinner.start(`Verifying and staging ${edgeRuntime.binaryName}`);
+    const offlineRelease = context.plan.offlineBundle?.edgeRuntime;
+    context.state.stagedEdgeRuntime = offlineRelease
+        ? await stageBundledBinary({
+            sourcePath: offlineAssetPath(offlineRelease, edgeRuntime.binaryName),
+            binaryName: edgeRuntime.binaryName,
+            expectedSha256: manifestArtifact(offlineRelease.manifest, edgeRuntime.binaryName).sha256,
+            targetPath: edgeRuntime.targetPath,
+            validate: validateElfBinaryArtifact,
+        })
+        : await stageBinary({
+            downloadUrl: releaseAssetUrl(edgeRuntime.release, edgeRuntime.binaryName),
+            binaryName: edgeRuntime.binaryName,
+            checksums: context.edgeRuntimeChecksums,
+            preferredEndpoint: edgeRuntime.endpoint,
+            targetPath: edgeRuntime.targetPath,
+            validate: validateElfBinaryArtifact,
+            forceYes: context.options.forceYes,
+        });
     context.state.edgeRuntimeEndpointLabel = context.state.stagedEdgeRuntime.endpoint.label;
 }
 
 async function stageWebConsoleUpgrade(context: UpgradeExecutionContext): Promise<void> {
     const { plan, state } = context;
-    context.spinner.start(`Downloading, verifying, and staging ${WEB_CONSOLE_ASSET}`);
-    state.stagedWebConsole = await stageWebConsoleBuild(
-        releaseAssetUrl(plan.release, WEB_CONSOLE_ASSET),
-        plan.remoteVersion,
-        context.checksums,
-        plan.endpoint,
-        context.options.forceYes,
-    );
+    context.spinner.start(`Verifying and staging ${WEB_CONSOLE_ASSET}`);
+    const offlineRelease = plan.offlineBundle?.management;
+    state.stagedWebConsole = offlineRelease
+        ? await extractWebConsoleArchive(
+            offlineAssetPath(offlineRelease, WEB_CONSOLE_ASSET),
+            plan.remoteVersion,
+            OFFLINE_BUNDLE_ENDPOINT,
+        )
+        : await stageWebConsoleBuild({
+            downloadUrl: releaseAssetUrl(plan.release, WEB_CONSOLE_ASSET),
+            version: plan.remoteVersion,
+            checksums: context.checksums,
+            preferredEndpoint: plan.endpoint,
+            forceYes: context.options.forceYes,
+        });
     state.webConsoleEndpointLabel = state.stagedWebConsole.endpoint.label;
 }
 
@@ -2259,7 +2447,9 @@ export async function runUpgrade(options: RunUpgradeOptions = {}) {
     p.intro("\x1b[46m SupaCloud Binary Upgrade \x1b[0m");
 
     const s = p.spinner();
-    s.start("Retrieving GitHub release metadata");
+    s.start(options.assetBundleDir
+        ? "Verifying the protected offline release bundle"
+        : "Retrieving GitHub release metadata");
     let executionContext: UpgradeExecutionContext | null = null;
 
     try {
