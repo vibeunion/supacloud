@@ -4,7 +4,7 @@
  */
 import type { Database, Querier } from '../db/database.js'
 import { randomToken, signJwt, verifyJwt, type JwtClaims } from '../jwt.js'
-import type { Mailer, RequestContext } from '../types.js'
+import type { Mailer, RequestContext, SmsSender } from '../types.js'
 import { SUPACLOUD_LITE_VERSION } from '../../version.js'
 import { OAuthService, type OAuthProviderConfig } from './oauth.js'
 import { hashPassword, verifyPassword } from './password.js'
@@ -30,6 +30,10 @@ export interface AuthConfig {
   sessionInactivitySeconds?: number
   /** sends outgoing auth email (magic links, OTP codes, recovery) */
   mailer: Mailer
+  /** sends phone OTP messages; null keeps phone auth disabled */
+  smsSender?: SmsSender | null
+  /** receives redacted operational diagnostics; never receives phone or OTP values */
+  log?: (message: string) => void
   /** OAuth providers to enable, keyed by provider name (google, github, …) */
   oauthProviders?: Record<string, OAuthProviderConfig>
   /** injectable fetch for the OAuth provider calls (tests use a mock provider) */
@@ -81,6 +85,23 @@ interface RefreshTokenRow {
   created_at: Date | string | null
 }
 
+interface PhoneOtpIssueRequest {
+  phone: string
+  createUser: boolean
+  metadata: Record<string, unknown>
+  fingerprint: string
+  tokenDigest: string
+  issuanceId: string
+  eligibleBefore: string
+  expiry: string
+}
+
+type PhoneOtpPreparation =
+  | { state: 'cooldown' }
+  | { state: 'unknown' }
+  | { state: 'signup_disabled' }
+  | { state: 'issued'; id: string; fingerprint: string; tokenDigest: string }
+
 function authError(status: number, errorCode: string, msg: string): Response {
   return json(status, { code: status, error_code: errorCode, msg })
 }
@@ -88,11 +109,47 @@ function authError(status: number, errorCode: string, msg: string): Response {
 /** A cryptographically-random numeric OTP of `length` digits (6-10). */
 function randomOtp(length: number): string {
   const n = Math.max(6, Math.min(10, Math.floor(length)))
-  const buf = new Uint32Array(n)
-  crypto.getRandomValues(buf)
   let code = ''
-  for (let i = 0; i < n; i++) code += String(buf[i] % 10)
+  // 250 is the largest multiple of 10 below 256. Rejecting bytes >=250 avoids
+  // modulo bias while keeping the code cryptographically random.
+  while (code.length < n) {
+    const bytes = crypto.getRandomValues(new Uint8Array(Math.max(16, n - code.length)))
+    for (const byte of bytes) {
+      if (byte >= 250) continue
+      code += String(byte % 10)
+      if (code.length === n) break
+    }
+  }
   return code
+}
+
+function normalizePhone(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const phone = value.trim()
+  return /^\+[1-9]\d{7,14}$/.test(phone) ? phone : null
+}
+
+function recordValue(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {}
+}
+
+function databaseDiagnosticCode(error: unknown): string {
+  const candidate = typeof error === 'object' && error !== null && 'code' in error ? error.code : null
+  return typeof candidate === 'string' && /^[0-9A-Z]{5}$/.test(candidate) ? candidate : 'database_error'
+}
+
+async function keyedDigest(secret: string, domain: string, value: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  )
+  const digest = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`${domain}\0${value}`))
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
 function json(status: number, body: unknown): Response {
@@ -119,6 +176,7 @@ export class AuthHandler {
   /** Shared, runtime-mutable settings - read on every request, never copied. */
   private settings: AuthSettings
   private rateLimiter: RateLimiter | null
+  private phoneDeliveries = new Set<Promise<void>>()
 
   constructor(
     private db: Database,
@@ -142,9 +200,13 @@ export class AuthHandler {
    * (GoTrue's `over_request_rate_limit`) when exceeded, else null to proceed.
    */
   private limit(action: string, req: Request): Response | null {
-    if (!this.rateLimiter) return null
     const client = req.headers.get('x-supacloud-lite-remote-addr') ?? 'local'
-    const retryAfter = this.rateLimiter.check(action, client)
+    return this.limitKey(action, `ip:${client}`)
+  }
+
+  private limitKey(action: string, key: string): Response | null {
+    if (!this.rateLimiter) return null
+    const retryAfter = this.rateLimiter.check(action, key)
     if (retryAfter === null) return null
     return new Response(
       JSON.stringify({ code: 429, error_code: 'over_request_rate_limit', msg: 'Request rate limit reached' }),
@@ -153,8 +215,9 @@ export class AuthHandler {
   }
 
   /** Stop background timers (rate-limiter sweep). Called on backend close. */
-  stop(): void {
+  async stop(): Promise<void> {
     this.rateLimiter?.stop()
+    await Promise.all(this.phoneDeliveries)
   }
 
   /** Dispatch one `/auth/v1/*` request. Any thrown error becomes a 500 `unexpected_failure`. */
@@ -169,7 +232,7 @@ export class AuthHandler {
         return json(200, {
           external: {
             email: true,
-            phone: false,
+            phone: this.settings.smsEnabled && this.config.smsSender != null,
             anonymous_users: this.settings.anonymousUsers,
             ...Object.fromEntries(providers.map((p) => [p, !this.settings.disabledProviders.includes(p)])),
           },
@@ -184,11 +247,11 @@ export class AuthHandler {
       if (path === 'user' && method === 'GET') return await this.getUser(req)
       if (path === 'user' && method === 'PUT') return await this.updateUser(req)
       if (path === 'logout' && method === 'POST') return await this.logout(req, url)
-      if (path === 'otp' && method === 'POST') return this.limit('otp', req) ?? (await this.sendOtp(req))
+      if (path === 'otp' && method === 'POST') return await this.sendOtp(req)
       if (path === 'recover' && method === 'POST') return this.limit('recover', req) ?? (await this.sendRecovery(req))
       if (['magiclink', 'resend'].includes(path) && method === 'POST')
-        return this.limit('otp', req) ?? (await this.sendOtp(req))
-      if (path === 'verify' && method === 'POST') return await this.verifyToken(req)
+        return await this.sendOtp(req)
+      if (path === 'verify' && method === 'POST') return this.limit('verify', req) ?? (await this.verifyToken(req))
       if (path === 'verify' && method === 'GET') return await this.verifyLink(url)
       if (path === 'factors' && method === 'POST') return await this.enrollFactor(req)
       if (/^factors\/[^/]+\/challenge$/.test(path) && method === 'POST')
@@ -461,9 +524,197 @@ export class AuthHandler {
   }
 
   private async sendOtp(req: Request): Promise<Response> {
-    const body = (await req.json().catch(() => ({}))) as { email?: string; create_user?: boolean }
-    if (!body.email) return authError(400, 'validation_failed', 'email is required')
-    return this.issueToken(body.email, 'otp', body.create_user !== false)
+    const body = (await req.json().catch(() => ({}))) as {
+      email?: string
+      phone?: string
+      create_user?: boolean
+      channel?: string
+      data?: Record<string, unknown>
+    }
+    if (body.email && body.phone) return authError(400, 'validation_failed', 'email and phone are mutually exclusive')
+    if (body.phone !== undefined) {
+      if (body.channel !== undefined && body.channel !== 'sms') {
+        return authError(422, 'unsupported_channel', 'Only the sms phone channel is supported')
+      }
+      const phone = normalizePhone(body.phone)
+      if (!phone) return authError(400, 'validation_failed', 'phone must be a valid E.164 number')
+      return this.limit('sms', req) ?? this.issuePhoneToken(phone, body.create_user !== false, recordValue(body.data))
+    }
+    if (!body.email) return authError(400, 'validation_failed', 'email or phone is required')
+    return this.limit('otp', req) ?? this.issueToken(body.email, 'otp', body.create_user !== false)
+  }
+
+  private async issuePhoneToken(
+    phone: string,
+    createUser: boolean,
+    metadata: Record<string, unknown>
+  ): Promise<Response> {
+    const sender = this.config.smsSender
+    if (!this.settings.smsEnabled || !sender) {
+      return authError(422, 'phone_provider_disabled', 'Phone sign-ins are disabled')
+    }
+
+    const fingerprint = await keyedDigest(this.config.jwtSecret, 'supacloud-lite:phone-fingerprint:v1', phone)
+    const limited = this.limitKey('sms', `phone:${fingerprint}`)
+    if (limited) return limited
+
+    const code = randomOtp(this.settings.otpLength)
+    const tokenDigest = `hmac-sha256:v1:${await keyedDigest(
+      this.config.jwtSecret,
+      'supacloud-lite:phone-otp:v1',
+      `${phone}\0${code}`
+    )}`
+    const issuanceId = crypto.randomUUID()
+    const prepared = await this.preparePhoneOtp({
+      phone,
+      createUser,
+      metadata,
+      fingerprint,
+      tokenDigest,
+      issuanceId,
+      eligibleBefore: new Date(Date.now() - this.settings.smsOtpCooldownSeconds * 1000).toISOString(),
+      expiry: `${this.settings.otpExpirySeconds} seconds`,
+    })
+
+    if (prepared.state === 'cooldown') {
+      return authError(429, 'over_sms_send_rate_limit', 'SMS can only be requested after the cooldown')
+    }
+    if (prepared.state === 'signup_disabled') {
+      return authError(422, 'signup_disabled', 'Signups not allowed for this instance')
+    }
+    if (prepared.state === 'unknown') return json(200, {})
+
+    const body = this.settings.smsTemplate.replace(/\{\{\s*\.Code\s*\}\}/g, code)
+    const delivery = createUser
+      ? this.deliverPhoneOtp(prepared, sender, phone, body, true)
+      : this.deferPhoneOtpDelivery(prepared, sender, phone, body)
+    if (!createUser) {
+      this.trackPhoneDelivery(delivery)
+      return json(200, {})
+    }
+    return await delivery
+      ? json(200, {})
+      : authError(502, 'sms_provider_failed', 'Unable to send the verification code')
+  }
+
+  private async preparePhoneOtp(request: PhoneOtpIssueRequest): Promise<PhoneOtpPreparation> {
+    try {
+      return await this.db.transaction(async (query) => {
+        const cooldown = await query(
+          `insert into auth.phone_otp_cooldowns (phone_fingerprint, issuance_id, last_sent_at)
+           values ($1, $2, now())
+           on conflict (phone_fingerprint) do update
+           set issuance_id = excluded.issuance_id, last_sent_at = excluded.last_sent_at
+           where auth.phone_otp_cooldowns.last_sent_at <= $3::timestamptz
+           returning phone_fingerprint`,
+          [request.fingerprint, request.issuanceId, request.eligibleBefore]
+        )
+        if (cooldown.rows.length === 0) return { state: 'cooldown' }
+
+        const resolved = await this.phoneUser(query, request)
+        if (resolved === 'unknown' || resolved === 'signup_disabled') return { state: resolved }
+        await this.createPhoneIdentity(query, resolved)
+        await query(`delete from auth.one_time_tokens where phone = $1 and token_type = 'sms'`, [request.phone])
+        await query(
+          `insert into auth.one_time_tokens (id, user_id, phone, token_type, token, expires_at)
+           values ($1, $2, $3, 'sms', $4, now() + $5::interval)`,
+          [request.issuanceId, resolved.id, request.phone, request.tokenDigest, request.expiry]
+        )
+        return {
+          state: 'issued', id: request.issuanceId,
+          fingerprint: request.fingerprint, tokenDigest: request.tokenDigest,
+        }
+      })
+    } catch (error) {
+      this.reportPhoneFailure('issue', databaseDiagnosticCode(error))
+      throw new Error('Unable to issue the verification code', { cause: error })
+    }
+  }
+
+  private async phoneUser(
+    query: Querier,
+    request: PhoneOtpIssueRequest
+  ): Promise<UserRow | 'unknown' | 'signup_disabled'> {
+    const existing = await query<UserRow>(`select * from auth.users where phone = $1`, [request.phone])
+    if (existing.rows[0]) return existing.rows[0]
+    if (!request.createUser) return 'unknown'
+    if (this.settings.disableSignup || !this.settings.smsSignupEnabled) return 'signup_disabled'
+    const inserted = await query<UserRow>(
+      `insert into auth.users (aud, role, phone, raw_app_meta_data, raw_user_meta_data)
+       values ('authenticated', 'authenticated', $1, $2::jsonb, $3::jsonb)
+       on conflict (phone) do nothing returning *`,
+      [
+        request.phone,
+        JSON.stringify({ provider: 'phone', providers: ['phone'] }),
+        JSON.stringify(request.metadata),
+      ]
+    )
+    if (inserted.rows[0]) return inserted.rows[0]
+    const concurrent = await query<UserRow>(`select * from auth.users where phone = $1`, [request.phone])
+    if (!concurrent.rows[0]) throw new Error('phone user could not be resolved')
+    return concurrent.rows[0]
+  }
+
+  private createPhoneIdentity(query: Querier, user: UserRow): Promise<unknown> {
+    return query(
+      `insert into auth.identities (user_id, provider, provider_id, identity_data)
+       values ($1, 'phone', $2, $3::jsonb)
+       on conflict (provider, provider_id) do nothing`,
+      [user.id, user.phone, JSON.stringify({ sub: user.id, phone: user.phone, phone_verified: user.phone_confirmed_at != null })]
+    )
+  }
+
+  private async deliverPhoneOtp(
+    issuance: Extract<PhoneOtpPreparation, { state: 'issued' }>,
+    sender: SmsSender,
+    phone: string,
+    body: string,
+    releaseCooldownOnFailure: boolean
+  ): Promise<boolean> {
+    try {
+      await sender.send({ to: phone, body })
+      return true
+    } catch {
+      this.reportPhoneFailure('deliver', 'provider_error')
+      try {
+        await this.db.transaction(async (query) => {
+          await query(`delete from auth.one_time_tokens where id = $1 and token = $2`, [issuance.id, issuance.tokenDigest])
+          if (releaseCooldownOnFailure) {
+            await query(
+              `delete from auth.phone_otp_cooldowns where phone_fingerprint = $1 and issuance_id = $2`,
+              [issuance.fingerprint, issuance.id]
+            )
+          }
+        })
+      } catch (cleanupError) {
+        this.reportPhoneFailure('cleanup', databaseDiagnosticCode(cleanupError))
+      }
+      return false
+    }
+  }
+
+  private async deferPhoneOtpDelivery(
+    issuance: Extract<PhoneOtpPreparation, { state: 'issued' }>,
+    sender: SmsSender,
+    phone: string,
+    body: string
+  ): Promise<boolean> {
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    return this.deliverPhoneOtp(issuance, sender, phone, body, false)
+  }
+
+  private trackPhoneDelivery(delivery: Promise<boolean>): void {
+    let tracked: Promise<void>
+    tracked = delivery.then(() => {}).finally(() => this.phoneDeliveries.delete(tracked))
+    this.phoneDeliveries.add(tracked)
+  }
+
+  private reportPhoneFailure(operation: string, code: string): void {
+    try {
+      this.config.log?.(`[auth] phone_otp_${operation} failed code=${code}`)
+    } catch {
+      // A broken diagnostic sink must not change the sanitized auth response.
+    }
   }
 
   private async sendRecovery(req: Request): Promise<Response> {
@@ -513,8 +764,26 @@ export class AuthHandler {
   }
 
   private async verifyToken(req: Request): Promise<Response> {
-    const body = (await req.json().catch(() => ({}))) as { type?: string; email?: string; token?: string }
+    const body = (await req.json().catch(() => ({}))) as { type?: string; email?: string; phone?: string; token?: string }
     if (!body.token) return authError(400, 'validation_failed', 'token is required')
+    if (body.type === 'sms' || body.phone !== undefined) {
+      const phone = normalizePhone(body.phone)
+      if (body.type !== 'sms' || !phone || !/^\d{6,10}$/.test(body.token)) {
+        return authError(400, 'validation_failed', 'phone, token, and type=sms are required')
+      }
+      const fingerprint = await keyedDigest(this.config.jwtSecret, 'supacloud-lite:phone-fingerprint:v1', phone)
+      const limited = this.limitKey('verify', `phone:${fingerprint}`)
+      if (limited) return limited
+      let session: Record<string, unknown> | null
+      try {
+        session = await this.redeemPhoneOtp(phone, body.token)
+      } catch (error) {
+        this.reportPhoneFailure('verify', databaseDiagnosticCode(error))
+        return authError(500, 'unexpected_failure', 'Unable to verify the code')
+      }
+      if (!session) return authError(403, 'otp_expired', 'Token has expired or is invalid')
+      return json(200, session)
+    }
     // A recovery (password-reset) token must be redeemed with type=recovery
     // explicitly - never fold it into the default set, or a guessed login OTP
     // could mint a recovery session.
@@ -523,6 +792,61 @@ export class AuthHandler {
     const user = await this.redeem(body.token, types, body.email)
     if (!user) return authError(403, 'otp_expired', 'Token has expired or is invalid')
     return json(200, await this.sessionFor(user))
+  }
+
+  private async redeemPhoneOtp(phone: string, code: string): Promise<Record<string, unknown> | null> {
+    const tokenDigest = `hmac-sha256:v1:${await keyedDigest(
+      this.config.jwtSecret,
+      'supacloud-lite:phone-otp:v1',
+      `${phone}\0${code}`
+    )}`
+    return this.db.transaction(async (query) => {
+      const claimed = await query<{ user_id: string }>(
+        `delete from auth.one_time_tokens
+         where phone = $1 and token_type = 'sms' and token = $2
+           and expires_at > now() and attempts < $3
+         returning user_id`,
+        [phone, tokenDigest, AuthHandler.MAX_OTP_ATTEMPTS]
+      )
+      const userId = claimed.rows[0]?.user_id
+      if (!userId) {
+        const attempt = await query<{ id: string; attempts: number }>(
+          `update auth.one_time_tokens set attempts = attempts + 1
+           where phone = $1 and token_type = 'sms' and expires_at > now()
+           returning id, attempts`,
+          [phone]
+        )
+        const row = attempt.rows[0]
+        if (row && row.attempts >= AuthHandler.MAX_OTP_ATTEMPTS) {
+          await query(`delete from auth.one_time_tokens where id = $1`, [row.id])
+        }
+        await query(`delete from auth.one_time_tokens where phone = $1 and expires_at <= now()`, [phone])
+        return null
+      }
+
+      await query(`delete from auth.one_time_tokens where phone = $1`, [phone])
+      const users = await query<UserRow>(
+        `update auth.users
+         set phone_confirmed_at = coalesce(phone_confirmed_at, now()), last_sign_in_at = now(), updated_at = now()
+         where id = $1 returning *`,
+        [userId]
+      )
+      const user = users.rows[0]
+      if (!user) throw new Error('phone OTP user no longer exists')
+      await query(
+        `insert into auth.identities (user_id, provider, provider_id, identity_data, last_sign_in_at)
+         values ($1, 'phone', $2, $3::jsonb, now())
+         on conflict (provider, provider_id) do update
+         set identity_data = excluded.identity_data, last_sign_in_at = now(), updated_at = now()`,
+        [user.id, phone, JSON.stringify({ sub: user.id, phone, phone_verified: true })]
+      )
+      return this.sessionFor(
+        user,
+        undefined,
+        { amr: [{ method: 'otp', timestamp: Math.floor(Date.now() / 1000) }] },
+        query
+      )
+    })
   }
 
   private async verifyLink(url: URL): Promise<Response> {
@@ -1003,7 +1327,8 @@ export class AuthHandler {
       email: u.email ?? '',
       email_confirmed_at: iso(u.email_confirmed_at),
       phone: u.phone ?? '',
-      confirmed_at: iso(u.email_confirmed_at),
+      phone_confirmed_at: iso(u.phone_confirmed_at),
+      confirmed_at: iso(u.email_confirmed_at ?? u.phone_confirmed_at),
       last_sign_in_at: iso(u.last_sign_in_at),
       app_metadata: u.raw_app_meta_data ?? {},
       user_metadata: u.raw_user_meta_data ?? {},

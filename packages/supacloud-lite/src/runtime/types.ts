@@ -85,6 +85,8 @@ export interface BackendConfig {
   functionEnv?: Record<string, string>
   /** Mail transport for OTP/magic-link/recovery emails. Default: console logger. */
   mailer?: Mailer
+  /** SMS transport for phone OTP. When absent, phone OTP is enabled only by the loopback dev inbox. */
+  smsSender?: SmsSender
   /** OAuth providers, e.g. { google: { clientId, clientSecret } }. Served at /auth/v1/authorize. */
   oauthProviders?: Record<string, import('./auth/oauth.js').OAuthProviderConfig>
   /** Injectable fetch for OAuth provider calls (tests point this at a mock provider). */
@@ -134,6 +136,17 @@ export interface MailMessage {
 /** Pluggable mail transport. Default implementation logs to the console. */
 export interface Mailer {
   send(msg: MailMessage): Promise<void>
+}
+
+/** A rendered outbound SMS. Its body can contain an OTP and must never be logged in production. */
+export interface SmsMessage {
+  to: string
+  body: string
+}
+
+/** Pluggable SMS transport. There is no production console fallback. */
+export interface SmsSender {
+  send(msg: SmsMessage): Promise<{ messageId?: string } | void>
 }
 
 /**

@@ -26,6 +26,14 @@ export interface AuthSettings {
   otpLength: number
   /** OTP / magic-link lifetime in seconds (auth.email.otp_expiry). */
   otpExpirySeconds: number
+  /** Enable the phone provider when an SMS transport is available. */
+  smsEnabled: boolean
+  /** Allow OTP requests to create a new phone-only user. */
+  smsSignupEnabled: boolean
+  /** Minimum seconds between sends to one keyed phone fingerprint. */
+  smsOtpCooldownSeconds: number
+  /** SMS body template. Must contain the Supabase-compatible {{ .Code }} placeholder. */
+  smsTemplate: string
   /** Max MFA factors a user may enroll (auth.mfa.max_enrolled_factors). */
   maxEnrolledFactors: number
   /** Allow TOTP enrollment (auth.mfa.totp.enroll_enabled). */
@@ -43,6 +51,10 @@ export const DEFAULT_AUTH_SETTINGS: AuthSettings = {
   disabledProviders: [],
   otpLength: 6,
   otpExpirySeconds: 3600,
+  smsEnabled: true,
+  smsSignupEnabled: true,
+  smsOtpCooldownSeconds: 60,
+  smsTemplate: 'Your one-time code is {{ .Code }}',
   maxEnrolledFactors: 10,
   totpEnrollEnabled: true,
   totpVerifyEnabled: true,
@@ -65,6 +77,19 @@ function sanitize(raw: Record<string, unknown>): AuthSettings {
   }
   if (typeof raw.otpExpirySeconds === 'number' && Number.isFinite(raw.otpExpirySeconds) && raw.otpExpirySeconds > 0) {
     s.otpExpirySeconds = Math.floor(raw.otpExpirySeconds)
+  }
+  if (typeof raw.smsEnabled === 'boolean') s.smsEnabled = raw.smsEnabled
+  if (typeof raw.smsSignupEnabled === 'boolean') s.smsSignupEnabled = raw.smsSignupEnabled
+  if (typeof raw.smsOtpCooldownSeconds === 'number' && Number.isFinite(raw.smsOtpCooldownSeconds)) {
+    s.smsOtpCooldownSeconds = Math.max(0, Math.min(86_400, Math.floor(raw.smsOtpCooldownSeconds)))
+  }
+  if (
+    typeof raw.smsTemplate === 'string'
+    && raw.smsTemplate.length > 0
+    && raw.smsTemplate.length <= 1_000
+    && /\{\{\s*\.Code\s*\}\}/.test(raw.smsTemplate)
+  ) {
+    s.smsTemplate = raw.smsTemplate
   }
   if (typeof raw.maxEnrolledFactors === 'number' && Number.isFinite(raw.maxEnrolledFactors) && raw.maxEnrolledFactors > 0) {
     s.maxEnrolledFactors = Math.floor(raw.maxEnrolledFactors)
@@ -112,9 +137,14 @@ export async function saveAuthSettings(db: Database, settings: AuthSettings): Pr
 export function applyAuthSettingsPatch(target: AuthSettings, patch: Record<string, unknown>): string | null {
   // Every AuthSettings key is patchable; unknown keys are rejected so a typo
   // fails loudly instead of being silently dropped by sanitize().
-  const BOOL_KEYS = ['disableSignup', 'anonymousUsers', 'autoconfirm', 'totpEnrollEnabled', 'totpVerifyEnabled']
-  const NUMBER_KEYS = ['minPasswordLength', 'otpLength', 'otpExpirySeconds', 'maxEnrolledFactors']
-  const KEYS = [...BOOL_KEYS, ...NUMBER_KEYS, 'disabledProviders']
+  const BOOL_KEYS = [
+    'disableSignup', 'anonymousUsers', 'autoconfirm', 'smsEnabled', 'smsSignupEnabled',
+    'totpEnrollEnabled', 'totpVerifyEnabled',
+  ]
+  const NUMBER_KEYS = [
+    'minPasswordLength', 'otpLength', 'otpExpirySeconds', 'smsOtpCooldownSeconds', 'maxEnrolledFactors',
+  ]
+  const KEYS = [...BOOL_KEYS, ...NUMBER_KEYS, 'disabledProviders', 'smsTemplate']
   for (const k of Object.keys(patch)) {
     if (!KEYS.includes(k)) return `unknown setting: ${k}`
   }
@@ -126,6 +156,7 @@ export function applyAuthSettingsPatch(target: AuthSettings, patch: Record<strin
     minPasswordLength: { min: 4, max: 72 },
     otpLength: { min: 6, max: 10 },
     otpExpirySeconds: { min: 1, max: Number.MAX_SAFE_INTEGER },
+    smsOtpCooldownSeconds: { min: 0, max: 86_400 },
     maxEnrolledFactors: { min: 1, max: Number.MAX_SAFE_INTEGER },
   }
   for (const k of NUMBER_KEYS) {
@@ -142,6 +173,17 @@ export function applyAuthSettingsPatch(target: AuthSettings, patch: Record<strin
     const arr = patch.disabledProviders
     if (!Array.isArray(arr) || arr.some((p) => typeof p !== 'string')) {
       return 'disabledProviders must be an array of provider names'
+    }
+  }
+  if ('smsTemplate' in patch) {
+    const template = patch.smsTemplate
+    if (
+      typeof template !== 'string'
+      || template.length === 0
+      || template.length > 1_000
+      || !/\{\{\s*\.Code\s*\}\}/.test(template)
+    ) {
+      return 'smsTemplate must contain {{ .Code }} and be at most 1000 characters'
     }
   }
   Object.assign(target, sanitize({ ...target, ...patch }))

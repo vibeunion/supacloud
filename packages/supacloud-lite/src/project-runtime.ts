@@ -9,7 +9,7 @@ import { loadFunctionEnv, loadFunctions } from './runtime/node/load-functions.js
 import { loadSupabaseProject } from './runtime/node/project.js'
 import { MemoryStorageDriver } from './runtime/storage/driver.js'
 import { S3StorageDriver, type S3StorageDriverOptions } from './runtime/storage/s3-driver.js'
-import type { StorageDriver } from './runtime/types.js'
+import type { SmsSender, StorageDriver } from './runtime/types.js'
 
 export interface ProjectSecrets {
   jwtSecret: string
@@ -32,6 +32,7 @@ export interface ProjectRuntimeOptions {
   storageDir?: string
   storageBackend?: ConfiguredStorageBackend
   storageDriver?: StorageDriver
+  smsSender?: SmsSender
   s3?: S3StorageDriverOptions
   host?: string
   port?: number
@@ -246,6 +247,7 @@ export async function createProjectBackend(options: ProjectRuntimeOptions = {}):
     sessionTimeboxSeconds: config.auth.sessionTimeboxSeconds,
     sessionInactivitySeconds: config.auth.sessionInactivitySeconds,
     oauthProviders: config.auth.oauthProviders,
+    smsSender: options.smsSender,
     dbSchemas: config.api.schemas,
     maxRows: config.api.maxRows,
     storageFileSizeLimit: config.storage.fileSizeLimit,
