@@ -638,13 +638,53 @@ describe("runtime companion version assets", () => {
     expect(helper).toContain("83d5c2ccad5498f58bf6368acb1ab32588cf43ab3a4b1c301bf36328b1c8bd60");
     expect(helper).toContain("06f86ec7103d41993b76cd78072f43595c34aaa56506d971d9860e67140bf909");
     expect(helper).toContain("supacloud_install_pinned_gh");
-    expect(helper).toContain("2.51.0");
+    expect(helper).toContain("2.68.0");
     const versionCheck = spawnSync("bash", ["-c", [
       "source scripts/lib/release_assets.sh",
-      "supacloud_version_at_least 2.51.0 2.51.0",
-      "! supacloud_version_at_least 2.50.9 2.51.0",
+      "supacloud_version_at_least 2.68.0 2.68.0",
+      "! supacloud_version_at_least 2.67.9 2.68.0",
     ].join(" && ")], { cwd: repoRoot, encoding: "utf8" });
     expect(versionCheck.status, versionCheck.stderr).toBe(0);
+  });
+
+  test("attestation verification requires a new enough gh with every offline flag", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supacloud-gh-capability-"));
+    const gh = join(dir, "gh");
+    try {
+      writeFileSync(gh, [
+        "#!/bin/sh",
+        'if [ "$1" = "--version" ]; then echo "gh version ${GH_FAKE_VERSION}"; exit 0; fi',
+        'if [ "$1 $2 $3" = "attestation verify --help" ]; then printf "%b" "$GH_HELP_TEXT"; exit 0; fi',
+        "exit 1",
+        "",
+      ].join("\n"));
+      chmodSync(gh, 0o755);
+      const invoke = (version: string, helpText: string) => spawnSync("bash", ["-c", [
+        "source scripts/lib/release_assets.sh",
+        "supacloud_attestation_verifier_available",
+      ].join(" && ")], {
+        cwd: repoRoot,
+        env: {
+          ...process.env,
+          PATH: `${dir}:${process.env.PATH}`,
+          GH_FAKE_VERSION: version,
+          GH_HELP_TEXT: helpText,
+        },
+        encoding: "utf8",
+      });
+      const flags = ["--bundle", "--signer-workflow", "--source-ref"];
+
+      expect(invoke("2.68.0", `${flags.join("\n")}\n`).status).toBe(0);
+      expect(invoke("2.67.9", `${flags.join("\n")}\n`).status).not.toBe(0);
+      for (const omittedFlag of flags) {
+        expect(invoke("2.96.0", `${flags.filter(flag => flag !== omittedFlag).join("\n")}\n`).status)
+          .not.toBe(0);
+      }
+      expect(invoke("2.96.0", "--bundle-from-oci\n--signer-workflow-repository\n--source-ref-pattern\n").status)
+        .not.toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test("pinned GitHub CLI archive requires the exact member, checksum, ELF shape, and version", () => {
@@ -749,7 +789,7 @@ describe("runtime companion version assets", () => {
       writeFileSync(gh, [
         "#!/bin/sh",
         'if [ "$1" = "--version" ]; then echo "gh version 2.96.0"; exit 0; fi',
-        'if [ "$1 $2 $3" = "attestation verify --help" ]; then echo "--signer-workflow"; exit 0; fi',
+        'if [ "$1 $2 $3" = "attestation verify --help" ]; then printf "%s\\n" "--bundle" "--signer-workflow" "--source-ref"; exit 0; fi',
         'while [ "$#" -gt 0 ]; do if [ "$1" = "--bundle" ]; then shift; printf "%s\\n" "$1" > "$GH_BUNDLE_ARGUMENT_RECORD"; break; fi; shift; done',
         'echo "HTTP 404: attestation not found" >&2',
         "exit 22",
@@ -784,6 +824,7 @@ describe("runtime companion version assets", () => {
     const fakeBin = join(dir, "bin");
     const artifact = join(dir, "artifact");
     const bundleArgumentRecord = join(dir, "gh-bundle-argument.txt");
+    const sourceRefArgumentRecord = join(dir, "gh-source-ref-argument.txt");
     try {
       spawnSync("mkdir", ["-p", fakeBin]);
       writeFileSync(artifact, "verified artifact fixture");
@@ -796,9 +837,9 @@ describe("runtime companion version assets", () => {
       writeFileSync(join(fakeBin, "gh"), [
         "#!/bin/sh",
         'if [ "$1" = "--version" ]; then echo "gh version 2.96.0"; exit 0; fi',
-        'if [ "$1 $2 $3" = "attestation verify --help" ]; then echo "--signer-workflow"; exit 0; fi',
+        'if [ "$1 $2 $3" = "attestation verify --help" ]; then printf "%s\\n" "--bundle" "--signer-workflow" "--source-ref"; exit 0; fi',
         'bundle=""',
-        'while [ "$#" -gt 0 ]; do if [ "$1" = "--bundle" ]; then shift; bundle="$1"; break; fi; shift; done',
+        'while [ "$#" -gt 0 ]; do case "$1" in --bundle) shift; bundle="$1" ;; --source-ref) shift; printf "%s\\n" "$1" > "$GH_SOURCE_REF_ARGUMENT_RECORD" ;; esac; shift; done',
         'printf "%s\\n" "$bundle" > "$GH_BUNDLE_ARGUMENT_RECORD"',
         'case "$bundle" in */bundle.jsonl) test -f "$bundle" && exit 0 ;; esac',
         'echo "offline bundle must be an existing bundle.jsonl file" >&2',
@@ -815,6 +856,7 @@ describe("runtime companion version assets", () => {
           PATH: `${fakeBin}:${process.env.PATH}`,
           ARTIFACT: artifact,
           GH_BUNDLE_ARGUMENT_RECORD: bundleArgumentRecord,
+          GH_SOURCE_REF_ARGUMENT_RECORD: sourceRefArgumentRecord,
           TMPDIR: dir,
           SUPACLOUD_INTEGRITY_MODE_RECORD: integrityMode,
         },
@@ -822,6 +864,7 @@ describe("runtime companion version assets", () => {
       });
       expect(result.status, result.stderr).toBe(0);
       expect(readFileSync(bundleArgumentRecord, "utf8").trim().endsWith("/bundle.jsonl")).toBe(true);
+      expect(readFileSync(sourceRefArgumentRecord, "utf8").trim()).toBe("refs/heads/main");
       expect(readdirSync(dir).filter(name => name.startsWith("supacloud-attestation."))).toEqual([]);
       expect(readFileSync(integrityMode, "utf8").trim()).toBe("github-attestation+same-release-sha256");
     } finally {

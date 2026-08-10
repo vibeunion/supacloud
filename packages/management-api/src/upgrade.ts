@@ -2,7 +2,7 @@ import { $, SQL } from "bun";
 import * as p from "@clack/prompts";
 import os from "node:os";
 import path from "node:path";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { logger } from "./utils/logger";
 import { WEB_CONSOLE_CURRENT_DIR } from "./utils/web-console-path";
@@ -11,6 +11,7 @@ import { hasSecretEncryptionCheckpoint } from "./db/secret-key-migration";
 const RELEASES_API = "https://api.github.com/repos/zuohuadong/supacloud/releases";
 const RELEASE_REPOSITORY = "zuohuadong/supacloud";
 const RELEASE_SIGNER_WORKFLOW = `${RELEASE_REPOSITORY}/.github/workflows/release-please.yml`;
+const RELEASE_SOURCE_REF = "refs/heads/main";
 const BIN_TARGET = "/usr/local/bin/supacloud";
 const MANAGEMENT_SERVICE_UNIT = "supacloud.service";
 const EDGE_RUNTIME_SERVICE_UNIT = "supacloud-edge-runtime.service";
@@ -653,7 +654,7 @@ async function promptForGithubProxy(lastError: string) {
     return String(value);
 }
 
-async function fetchReleaseMetadata(apiUrl: string, forceYes?: boolean) {
+async function fetchGithubApiJson(apiUrl: string, forceYes?: boolean) {
     let lastError = "";
     let endpoints = buildGithubEndpoints();
 
@@ -678,7 +679,7 @@ async function fetchReleaseMetadata(apiUrl: string, forceYes?: boolean) {
         }
 
         if (forceYes) {
-            throw new Error(`Unable to retrieve GitHub release metadata. Last error: ${lastError}`);
+            throw new Error(`Unable to retrieve GitHub API JSON. Last error: ${lastError}`);
         }
 
         const customProxy = await promptForGithubProxy(lastError);
@@ -955,14 +956,120 @@ export function resolveArtifactVerificationMode(
     );
 }
 
-async function verifyArtifactAttestation(filePath: string) {
-    const capability = await $`gh attestation verify --help`.nothrow().quiet();
-    const mode = resolveArtifactVerificationMode(capability.exitCode === 0, process.env);
-    if (mode === "attested") {
-        const verification = await $`gh attestation verify ${filePath} --repo ${RELEASE_REPOSITORY} --signer-workflow ${RELEASE_SIGNER_WORKFLOW}`.nothrow().quiet();
-        if (verification.exitCode !== 0) {
-            throw new Error(`GitHub artifact attestation verification failed: ${verification.stderr.toString().slice(-500)}`);
+export function supportsGithubOfflineAttestationVerification(exitCode: number, helpText: string): boolean {
+    const helpTokens = helpText.split(/\s+/);
+    return exitCode === 0
+        && ["--bundle", "--signer-workflow", "--source-ref"].every(flag => (
+            helpTokens.some(token => token === flag || token.startsWith(`${flag}=`))
+        ));
+}
+
+function isJsonObject(candidate: unknown): candidate is Record<string, unknown> {
+    return candidate !== null && typeof candidate === "object" && !Array.isArray(candidate);
+}
+
+export function serializeGithubAttestationBundles(payload: unknown): string {
+    if (!isJsonObject(payload) || !Array.isArray(payload.attestations) || payload.attestations.length === 0) {
+        throw new Error("GitHub artifact attestation response did not contain a non-empty attestations array");
+    }
+    const bundles = payload.attestations.map((attestation, index) => {
+        const bundle = isJsonObject(attestation) ? attestation.bundle : undefined;
+        if (!isJsonObject(bundle)) {
+            throw new Error(`GitHub artifact attestation ${index} did not contain a valid bundle object`);
         }
+        return bundle;
+    });
+    return `${bundles.map(bundle => JSON.stringify(bundle)).join("\n")}\n`;
+}
+
+function throwAttestationVerificationOutcome(verificationError: unknown, cleanupError: unknown): void {
+    if (verificationError && cleanupError) {
+        throw new AggregateError(
+            [verificationError, cleanupError],
+            "GitHub artifact attestation verification failed and temporary bundle cleanup did not complete",
+        );
+    }
+    if (verificationError) throw verificationError;
+    if (cleanupError) {
+        throw new AggregateError([cleanupError], "Temporary GitHub attestation bundle cleanup did not complete");
+    }
+}
+
+type GithubCliCommandResult = {
+    exitCode: number;
+    stdout: string;
+    stderr: string;
+};
+
+async function runGithubCli(githubArguments: string[]): Promise<GithubCliCommandResult> {
+    const executable = Bun.which("gh", { PATH: process.env.PATH });
+    if (!executable) return { exitCode: 127, stdout: "", stderr: "gh not found" };
+    const child = Bun.spawn([executable, ...githubArguments], {
+        env: process.env,
+        stdout: "pipe",
+        stderr: "pipe",
+    });
+    const [exitCode, stdout, stderr] = await Promise.all([
+        child.exited,
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+    ]);
+    return { exitCode, stdout, stderr };
+}
+
+async function runGithubAttestationVerification(filePath: string, bundlePath: string): Promise<void> {
+    const verification = await runGithubCli([
+        "attestation", "verify", filePath,
+        "--bundle", bundlePath,
+        "--repo", RELEASE_REPOSITORY,
+        "--signer-workflow", RELEASE_SIGNER_WORKFLOW,
+        "--source-ref", RELEASE_SOURCE_REF,
+    ]);
+    if (verification.exitCode !== 0) {
+        throw new Error(`GitHub artifact attestation verification failed: ${verification.stderr.slice(-500)}`);
+    }
+}
+
+async function verifyGithubAttestationBundle(filePath: string, bundleJsonl: string): Promise<void> {
+    const bundleDirectory = mkdtempSync(path.join(os.tmpdir(), "supacloud-attestation-"));
+    const bundlePath = path.join(bundleDirectory, "bundle.jsonl");
+    let verificationError: unknown;
+    try {
+        writeFileSync(bundlePath, bundleJsonl, { mode: 0o600 });
+        await runGithubAttestationVerification(filePath, bundlePath);
+    } catch (error: unknown) {
+        verificationError = error;
+    }
+
+    let cleanupError: unknown;
+    try {
+        rmSync(bundleDirectory, { recursive: true });
+    } catch (error: unknown) {
+        cleanupError = error;
+    }
+    throwAttestationVerificationOutcome(verificationError, cleanupError);
+}
+
+export type VerifyArtifactAttestationRequest = {
+    filePath: string;
+    forceYes?: boolean;
+};
+
+async function downloadGithubAttestationBundle(request: VerifyArtifactAttestationRequest): Promise<string> {
+    const digest = sha256File(request.filePath);
+    const apiUrl = `https://api.github.com/repos/${RELEASE_REPOSITORY}/attestations/sha256:${digest}`;
+    const metadata = await fetchGithubApiJson(apiUrl, request.forceYes);
+    return serializeGithubAttestationBundles(metadata.data);
+}
+
+export async function verifyArtifactAttestation(request: VerifyArtifactAttestationRequest) {
+    const capability = await runGithubCli(["attestation", "verify", "--help"]);
+    const helpText = `${capability.stdout}\n${capability.stderr}`;
+    const verifierAvailable = supportsGithubOfflineAttestationVerification(capability.exitCode, helpText);
+    const mode = resolveArtifactVerificationMode(verifierAvailable, process.env);
+    if (mode === "attested") {
+        const bundleJsonl = await downloadGithubAttestationBundle(request);
+        await verifyGithubAttestationBundle(request.filePath, bundleJsonl);
         recordIntegrityMode("github-attestation+same-release-sha256");
         return;
     }
@@ -1025,7 +1132,7 @@ async function stageBinary(request: StageBinaryRequest): Promise<StagedBinary> {
     try {
         const endpoint = await downloadAsset(request.downloadUrl, tmpBinary, request.preferredEndpoint, request.forceYes);
         const releaseSha256 = verifyArtifactChecksum(tmpBinary, request.binaryName, request.checksums);
-        await verifyArtifactAttestation(tmpBinary);
+        await verifyArtifactAttestation({ filePath: tmpBinary, forceYes: request.forceYes });
         await request.validate(tmpBinary, request.binaryName);
         await $`install -m 0755 ${tmpBinary} ${stagedBinary}`;
         const stagedSha256 = sha256File(stagedBinary);
@@ -1061,7 +1168,7 @@ async function stageWebConsoleBuild(
     try {
         const endpoint = await downloadAsset(downloadUrl, archivePath, preferredEndpoint, forceYes);
         verifyArtifactChecksum(archivePath, WEB_CONSOLE_ASSET, checksums);
-        await verifyArtifactAttestation(archivePath);
+        await verifyArtifactAttestation({ filePath: archivePath, forceYes });
 
         const listed = await $`tar -tzf ${archivePath}`.nothrow().quiet();
         if (listed.exitCode !== 0) {
@@ -1790,7 +1897,7 @@ async function resolveEdgeRuntimeUpgradePlan(
 ): Promise<EdgeRuntimeUpgradePlan | null> {
     const { binaryName, forceYes, preflight, requestedVersion } = request;
     if (!preflight) return null;
-    const metadata = await fetchReleaseMetadata(resolveEdgeRuntimeReleaseApiUrl(requestedVersion), forceYes);
+    const metadata = await fetchGithubApiJson(resolveEdgeRuntimeReleaseApiUrl(requestedVersion), forceYes);
     const expectedTag = normalizeEdgeRuntimeReleaseTag(requestedVersion);
     return {
         binaryName,
@@ -1807,7 +1914,7 @@ async function resolveUpgradeReleasePlan(options: RunUpgradeOptions): Promise<Up
         || "";
     const edgePreflight = await inspectEdgeRuntimeUpgradeTarget(requestedEdgeVersion);
     const binaryName = resolveLinuxBinaryName();
-    const metadata = await fetchReleaseMetadata(resolveReleaseApiUrl(options.targetVersion), options.forceYes);
+    const metadata = await fetchGithubApiJson(resolveReleaseApiUrl(options.targetVersion), options.forceYes);
     const release = selectManagementRelease(metadata.data as GithubRelease | GithubRelease[], binaryName);
     const edgeRuntime = await resolveEdgeRuntimeUpgradePlan({
         binaryName: resolveEdgeRuntimeBinaryName(binaryName),

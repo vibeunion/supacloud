@@ -4,7 +4,7 @@ SUPACLOUD_GITHUB_REPOSITORY="${SUPACLOUD_GITHUB_REPOSITORY:-zuohuadong/supacloud
 SUPACLOUD_RELEASES_API="${SUPACLOUD_RELEASES_API:-https://api.github.com/repos/${SUPACLOUD_GITHUB_REPOSITORY}/releases}"
 SUPACLOUD_ATTESTATION_SIGNER_WORKFLOW="${SUPACLOUD_ATTESTATION_SIGNER_WORKFLOW:-${SUPACLOUD_GITHUB_REPOSITORY}/.github/workflows/release-please.yml}"
 SUPACLOUD_GH_VERSION="${SUPACLOUD_GH_VERSION:-2.96.0}"
-SUPACLOUD_GH_MIN_VERSION="${SUPACLOUD_GH_MIN_VERSION:-2.51.0}"
+SUPACLOUD_GH_MIN_VERSION="${SUPACLOUD_GH_MIN_VERSION:-2.68.0}"
 SUPACLOUD_GH_AMD64_SHA256="${SUPACLOUD_GH_AMD64_SHA256:-83d5c2ccad5498f58bf6368acb1ab32588cf43ab3a4b1c301bf36328b1c8bd60}"
 SUPACLOUD_GH_ARM64_SHA256="${SUPACLOUD_GH_ARM64_SHA256:-06f86ec7103d41993b76cd78072f43595c34aaa56506d971d9860e67140bf909}"
 
@@ -374,7 +374,8 @@ supacloud_verify_attestation() (
         if ! verification_output=$(gh attestation verify "$artifact_file" \
             --bundle "$bundle_file" \
             --repo "$SUPACLOUD_GITHUB_REPOSITORY" \
-            --signer-workflow "$SUPACLOUD_ATTESTATION_SIGNER_WORKFLOW" 2>&1); then
+            --signer-workflow "$SUPACLOUD_ATTESTATION_SIGNER_WORKFLOW" \
+            --source-ref "refs/heads/main" 2>&1); then
             echo "GitHub artifact attestation verification failed: ${verification_output}" >&2
             return 1
         fi
@@ -393,12 +394,15 @@ supacloud_verify_attestation() (
 )
 
 supacloud_attestation_verifier_available() {
-    local version
+    local version help
     command -v gh >/dev/null 2>&1 || return 1
     version=$(supacloud_gh_version)
     [[ -n "$version" ]] || return 1
     supacloud_version_at_least "$version" "$SUPACLOUD_GH_MIN_VERSION" || return 1
-    gh attestation verify --help 2>&1 | grep -q -- '--signer-workflow'
+    help=$(gh attestation verify --help 2>&1) || return 1
+    grep -Eq -- '(^|[[:space:]])--bundle([=[:space:]]|$)' <<< "$help" || return 1
+    grep -Eq -- '(^|[[:space:]])--signer-workflow([=[:space:]]|$)' <<< "$help" || return 1
+    grep -Eq -- '(^|[[:space:]])--source-ref([=[:space:]]|$)' <<< "$help"
 }
 
 supacloud_download_release_asset() (
