@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/zuohuadong/supacloud/compare/admin-v0.7.12...admin-v0.8.0) (2026-08-10)
+
+
+### Features
+
+* **admin:** report deployed platform versions ([#794](https://github.com/zuohuadong/supacloud/issues/794)) ([1ed128c](https://github.com/zuohuadong/supacloud/commit/1ed128cb8100872a9fd4a93a373ac1df67d3baf4))
+
 ## [0.7.12](https://github.com/zuohuadong/supacloud/compare/admin-v0.7.11...admin-v0.7.12) (2026-08-10)
 
 
