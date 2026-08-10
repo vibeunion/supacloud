@@ -18,6 +18,7 @@ type SftpClient = {
     chmod: (remotePath: string, mode: number, cb: (err?: Error | null) => void) => void;
     rename: (sourcePath: string, destinationPath: string, cb: (err?: Error | null) => void) => void;
     unlink: (remotePath: string, cb: (err?: Error | null) => void) => void;
+    end: () => void;
 };
 
 export interface SshConfig {
@@ -368,7 +369,13 @@ export class SshTransport {
         let connectionReusable = true;
         let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
         try {
-            const operationPromise = openSftp(conn).then(operation);
+            const operationPromise = openSftp(conn).then(async (sftp) => {
+                try {
+                    await operation(sftp);
+                } finally {
+                    sftp.end();
+                }
+            });
             await Promise.race([
                 operationPromise,
                 new Promise<never>((_resolve, reject) => { timeoutHandle = setTimeout(() => {
