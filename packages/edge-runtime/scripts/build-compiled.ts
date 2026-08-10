@@ -64,7 +64,7 @@ try {
     ].join("\n"),
   );
 
-  await $`bun build server.ts --compile --target=${target} --outfile=${outfile}`.cwd(root);
+  await $`bun build cli.ts --compile --target=${target} --outfile=${outfile}`.cwd(root);
 } finally {
   await writeFile(generatedPath, originalGenerated);
   rmSync(tmpDir, { recursive: true, force: true });
