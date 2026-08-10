@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.4](https://github.com/zuohuadong/supacloud/compare/admin-v0.7.3...admin-v0.7.4) (2026-08-10)
+
+
+### Bug Fixes
+
+* **admin:** preserve SSH diagnostic failures ([#757](https://github.com/zuohuadong/supacloud/issues/757)) ([6924913](https://github.com/zuohuadong/supacloud/commit/6924913ea9ae97f6b2f497a803ba27c953b605a5))
+
 ## [0.7.3](https://github.com/zuohuadong/supacloud/compare/admin-v0.7.2...admin-v0.7.3) (2026-08-10)
 
 
