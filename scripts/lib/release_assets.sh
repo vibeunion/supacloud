@@ -333,16 +333,51 @@ supacloud_record_integrity_mode() {
     chmod 600 "$record_file" 2>/dev/null || true
 }
 
+supacloud_fetch_attestation_bundle() {
+    local artifact_file="$1"
+    local bundle_file="$2"
+    local digest response
+    digest=$(sha256sum "$artifact_file" | awk '{print $1}') || return 1
+    [[ "$digest" =~ ^[0-9a-fA-F]{64}$ ]] || {
+        echo "Unable to calculate the artifact digest for attestation lookup" >&2
+        return 1
+    }
+    digest=$(printf '%s' "$digest" | tr '[:upper:]' '[:lower:]')
+    response=$(supacloud_fetch_release_json \
+        "https://api.github.com/repos/${SUPACLOUD_GITHUB_REPOSITORY}/attestations/sha256:${digest}") || {
+        echo "Unable to download the public GitHub artifact attestation bundle" >&2
+        return 1
+    }
+    if ! jq -ce '
+        .attestations
+        | if type != "array" or length == 0 or any(.[]; (.bundle | type) != "object")
+          then error("no valid attestation bundles returned")
+          else .[].bundle
+          end
+    ' <<< "$response" > "$bundle_file"; then
+        echo "GitHub artifact attestation response did not contain a valid bundle" >&2
+        return 1
+    fi
+}
+
 supacloud_verify_attestation() {
     local artifact_file="$1"
     if supacloud_attestation_verifier_available; then
-        local verification_output
+        local verification_output bundle_file
+        bundle_file=$(mktemp "${TMPDIR:-/tmp}/supacloud-attestation.XXXXXX") || return 1
+        if ! supacloud_fetch_attestation_bundle "$artifact_file" "$bundle_file"; then
+            rm -f "$bundle_file"
+            return 1
+        fi
         if ! verification_output=$(gh attestation verify "$artifact_file" \
+            --bundle "$bundle_file" \
             --repo "$SUPACLOUD_GITHUB_REPOSITORY" \
             --signer-workflow "$SUPACLOUD_ATTESTATION_SIGNER_WORKFLOW" 2>&1); then
+            rm -f "$bundle_file"
             echo "GitHub artifact attestation verification failed: ${verification_output}" >&2
             return 1
         fi
+        rm -f "$bundle_file"
         supacloud_record_integrity_mode "github-attestation+same-release-sha256"
         return
     fi
