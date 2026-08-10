@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.3](https://github.com/zuohuadong/supacloud/compare/admin-v0.7.2...admin-v0.7.3) (2026-08-10)
+
+
+### Bug Fixes
+
+* **admin:** execute verified upgrade shell safely ([#755](https://github.com/zuohuadong/supacloud/issues/755)) ([5986750](https://github.com/zuohuadong/supacloud/commit/5986750c1245da40d5c9324f942db3180e2871ad))
+
 ## [0.7.2](https://github.com/zuohuadong/supacloud/compare/admin-v0.7.1...admin-v0.7.2) (2026-08-10)
 
 
