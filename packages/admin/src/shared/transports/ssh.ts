@@ -4,7 +4,7 @@
  * When SupaCloud is not yet installed, execute ops tasks on target server via SSH.
  * Includes command auditing, allowlist enforcement, and connection pooling.
  */
-import { timingSafeEqual } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { Client, type ClientChannel } from "ssh2";
 type SftpClient = {
@@ -16,6 +16,8 @@ type SftpClient = {
         cb: (err?: Error | null) => void,
     ) => void;
     chmod: (remotePath: string, mode: number, cb: (err?: Error | null) => void) => void;
+    rename: (sourcePath: string, destinationPath: string, cb: (err?: Error | null) => void) => void;
+    unlink: (remotePath: string, cb: (err?: Error | null) => void) => void;
 };
 
 export interface SshConfig {
@@ -41,8 +43,15 @@ export interface SshTransportOptions {
     clientFactory?: () => Client;
 }
 
+export type SshUploadOptions = {
+    mode?: number;
+    timeoutMs?: number;
+};
+
 const DEFAULT_MAX_OUTPUT_BYTES = 1024 * 1024;
 const MAX_CONFIGURABLE_OUTPUT_BYTES = 16 * 1024 * 1024;
+const DEFAULT_UPLOAD_TIMEOUT_MS = 10 * 60_000;
+const DEFAULT_TEXT_UPLOAD_TIMEOUT_MS = 60_000;
 
 export function normalizeSshHostFingerprint(value: string): string {
     const trimmed = value.trim();
@@ -283,13 +292,13 @@ export class SshTransport {
 
                 const timer = setTimeout(() => {
                     connectionReusable = false;
-                    this.pool.discard(conn);
                     reject(new Error(`SSH command timed out after ${timeoutMs}ms`));
                 }, timeoutMs);
 
                 conn.exec(command, (err: Error | undefined, stream: ClientChannel) => {
                     if (err) {
                         clearTimeout(timer);
+                        connectionReusable = false;
                         return reject(err);
                     }
                     stream
@@ -304,6 +313,11 @@ export class SshTransport {
                                 stderrTruncated: stderr.truncated,
                             });
                         })
+                        .on("error", (streamError: Error) => {
+                            clearTimeout(timer);
+                            connectionReusable = false;
+                            reject(streamError);
+                        })
                         .on("data", (data: Buffer) => {
                             stdout.append(data);
                         })
@@ -314,44 +328,61 @@ export class SshTransport {
             });
         } finally {
             if (connectionReusable) this.pool.release(conn);
+            else this.pool.discard(conn);
         }
     }
 
-    async upload(localPath: string, remotePath: string): Promise<void> {
-        const conn = await this.pool.acquire();
-        try {
-            return await new Promise<void>((resolve, reject) => {
-                conn.sftp((err: Error | undefined, sftp: SftpClient) => {
-                    if (err) return reject(err);
-                    sftp.fastPut(localPath, remotePath, (err2: Error | null | undefined) => {
-                        if (err2) return reject(err2);
-                        resolve();
-                    });
-                });
-            });
-        } finally {
-            this.pool.release(conn);
-        }
+    async upload(localPath: string, remotePath: string, options: SshUploadOptions = {}): Promise<void> {
+        const mode = normalizeUploadMode(options.mode);
+        const timeoutMs = normalizeUploadTimeout(options.timeoutMs, DEFAULT_UPLOAD_TIMEOUT_MS);
+        const partialPath = `${remotePath}.part-${randomUUID()}`;
+        auditCommand(`upload ${remotePath} (local content redacted)`, this.config.host, false);
+        await this.runSftpOperation(timeoutMs, async (sftp) => {
+            try {
+                await sftpFastPut(sftp, localPath, partialPath);
+                await sftpChmod(sftp, partialPath, mode);
+                await sftpRename(sftp, partialPath, remotePath);
+            } catch (error: unknown) {
+                await removePartialUpload(sftp, partialPath, error);
+            }
+        });
     }
 
     async uploadText(remotePath: string, content: string, mode = 0o600): Promise<void> {
         auditCommand(`upload ${remotePath} (${Buffer.byteLength(content)} bytes; content redacted)`, this.config.host, false);
+        const normalizedMode = normalizeUploadMode(mode);
+        const partialPath = `${remotePath}.part-${randomUUID()}`;
+        await this.runSftpOperation(DEFAULT_TEXT_UPLOAD_TIMEOUT_MS, async (sftp) => {
+            try {
+                await sftpWriteFile(sftp, partialPath, content, normalizedMode);
+                await sftpChmod(sftp, partialPath, normalizedMode);
+                await sftpRename(sftp, partialPath, remotePath);
+            } catch (error: unknown) {
+                await removePartialUpload(sftp, partialPath, error);
+            }
+        });
+    }
+
+    private async runSftpOperation(timeoutMs: number, operation: (sftp: SftpClient) => Promise<void>): Promise<void> {
         const conn = await this.pool.acquire();
+        let connectionReusable = true;
+        let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
         try {
-            await new Promise<void>((resolve, reject) => {
-                conn.sftp((err: Error | undefined, sftp: SftpClient) => {
-                    if (err) return reject(err);
-                    sftp.writeFile(remotePath, content, { mode }, (writeError) => {
-                        if (writeError) return reject(writeError);
-                        sftp.chmod(remotePath, mode, (chmodError) => {
-                            if (chmodError) return reject(chmodError);
-                            resolve();
-                        });
-                    });
-                });
-            });
+            const operationPromise = openSftp(conn).then(operation);
+            await Promise.race([
+                operationPromise,
+                new Promise<never>((_resolve, reject) => { timeoutHandle = setTimeout(() => {
+                    connectionReusable = false;
+                    reject(new Error(`SFTP upload timed out after ${timeoutMs}ms`));
+                }, timeoutMs); }),
+            ]);
+        } catch (error: unknown) {
+            connectionReusable = false;
+            throw error;
         } finally {
-            this.pool.release(conn);
+            if (timeoutHandle) clearTimeout(timeoutHandle);
+            if (connectionReusable) this.pool.release(conn);
+            else this.pool.discard(conn);
         }
     }
 
@@ -363,4 +394,63 @@ export class SshTransport {
     close() {
         this.pool.closeAll();
     }
+}
+
+function normalizeUploadMode(mode = 0o600): number {
+    if (!Number.isInteger(mode) || mode < 0 || mode > 0o777) throw new Error("Upload mode must be an octal permission between 000 and 777");
+    return mode;
+}
+
+function normalizeUploadTimeout(timeoutMs: number | undefined, fallback: number): number {
+    const resolved = timeoutMs ?? fallback;
+    if (!Number.isSafeInteger(resolved) || resolved < 1 || resolved > 60 * 60_000) {
+        throw new Error("Upload timeout must be between 1ms and 1 hour");
+    }
+    return resolved;
+}
+
+function openSftp(conn: Client): Promise<SftpClient> {
+    return new Promise((resolve, reject) => {
+        conn.sftp((error: Error | undefined, sftp: SftpClient) => error ? reject(error) : resolve(sftp));
+    });
+}
+
+function sftpFastPut(sftp: SftpClient, localPath: string, remotePath: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+        sftp.fastPut(localPath, remotePath, (error) => error ? reject(error) : resolve());
+    });
+}
+
+function sftpWriteFile(sftp: SftpClient, remotePath: string, content: string, mode: number): Promise<void> {
+    return new Promise((resolve, reject) => {
+        sftp.writeFile(remotePath, content, { mode }, (error) => error ? reject(error) : resolve());
+    });
+}
+
+function sftpChmod(sftp: SftpClient, remotePath: string, mode: number): Promise<void> {
+    return new Promise((resolve, reject) => {
+        sftp.chmod(remotePath, mode, (error) => error ? reject(error) : resolve());
+    });
+}
+
+function sftpRename(sftp: SftpClient, sourcePath: string, destinationPath: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+        sftp.rename(sourcePath, destinationPath, (error) => error ? reject(error) : resolve());
+    });
+}
+
+function sftpUnlink(sftp: SftpClient, remotePath: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+        sftp.unlink(remotePath, (error) => error ? reject(error) : resolve());
+    });
+}
+
+async function removePartialUpload(sftp: SftpClient, partialPath: string, uploadError: unknown): Promise<never> {
+    try {
+        await sftpUnlink(sftp, partialPath);
+    } catch (cleanupError: unknown) {
+        if ((cleanupError as { code?: number }).code === 2) throw uploadError;
+        throw new AggregateError([uploadError, cleanupError], `SFTP upload failed and partial cleanup did not complete: ${partialPath}`);
+    }
+    throw uploadError;
 }

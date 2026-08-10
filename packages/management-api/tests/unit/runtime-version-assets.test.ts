@@ -672,7 +672,7 @@ describe("runtime companion version assets", () => {
         },
         encoding: "utf8",
       });
-      const flags = ["--bundle", "--signer-workflow", "--source-ref"];
+      const flags = ["--bundle", "--signer-workflow", "--source-ref", "--deny-self-hosted-runners"];
 
       expect(invoke("2.68.0", `${flags.join("\n")}\n`).status).toBe(0);
       expect(invoke("2.67.9", `${flags.join("\n")}\n`).status).not.toBe(0);
@@ -735,6 +735,7 @@ describe("runtime companion version assets", () => {
     expect(workflow).toContain("subject-path: release-assets/*");
     expect(workflow).toContain("subject-path: packages/edge-runtime/dist/*");
     expect(readRepoFile("scripts/lib/release_assets.sh")).toContain("--signer-workflow");
+    expect(readRepoFile("scripts/lib/release_assets.sh")).toContain("--deny-self-hosted-runners");
   });
 
   test("artifact verification fails closed by default and only allows an explicit break-glass", () => {
@@ -789,7 +790,7 @@ describe("runtime companion version assets", () => {
       writeFileSync(gh, [
         "#!/bin/sh",
         'if [ "$1" = "--version" ]; then echo "gh version 2.96.0"; exit 0; fi',
-        'if [ "$1 $2 $3" = "attestation verify --help" ]; then printf "%s\\n" "--bundle" "--signer-workflow" "--source-ref"; exit 0; fi',
+        'if [ "$1 $2 $3" = "attestation verify --help" ]; then printf "%s\\n" "--bundle" "--signer-workflow" "--source-ref" "--deny-self-hosted-runners"; exit 0; fi',
         'while [ "$#" -gt 0 ]; do if [ "$1" = "--bundle" ]; then shift; printf "%s\\n" "$1" > "$GH_BUNDLE_ARGUMENT_RECORD"; break; fi; shift; done',
         'echo "HTTP 404: attestation not found" >&2',
         "exit 22",
@@ -837,11 +838,11 @@ describe("runtime companion version assets", () => {
       writeFileSync(join(fakeBin, "gh"), [
         "#!/bin/sh",
         'if [ "$1" = "--version" ]; then echo "gh version 2.96.0"; exit 0; fi',
-        'if [ "$1 $2 $3" = "attestation verify --help" ]; then printf "%s\\n" "--bundle" "--signer-workflow" "--source-ref"; exit 0; fi',
-        'bundle=""',
-        'while [ "$#" -gt 0 ]; do case "$1" in --bundle) shift; bundle="$1" ;; --source-ref) shift; printf "%s\\n" "$1" > "$GH_SOURCE_REF_ARGUMENT_RECORD" ;; esac; shift; done',
+        'if [ "$1 $2 $3" = "attestation verify --help" ]; then printf "%s\\n" "--bundle" "--signer-workflow" "--source-ref" "--deny-self-hosted-runners"; exit 0; fi',
+        'bundle=""; deny_self_hosted=false',
+        'while [ "$#" -gt 0 ]; do case "$1" in --bundle) shift; bundle="$1" ;; --source-ref) shift; printf "%s\\n" "$1" > "$GH_SOURCE_REF_ARGUMENT_RECORD" ;; --deny-self-hosted-runners) deny_self_hosted=true ;; esac; shift; done',
         'printf "%s\\n" "$bundle" > "$GH_BUNDLE_ARGUMENT_RECORD"',
-        'case "$bundle" in */bundle.jsonl) test -f "$bundle" && exit 0 ;; esac',
+        'case "$bundle" in */bundle.jsonl) test -f "$bundle" && test "$deny_self_hosted" = true && exit 0 ;; esac',
         'echo "offline bundle must be an existing bundle.jsonl file" >&2',
         "exit 1",
         "",

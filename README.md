@@ -215,10 +215,26 @@ transaction:
 
 ```bash
 npx @supacloud/admin ssh upgrade \
-  --version 0.50.27 \
-  --edge_runtime_version 0.16.7 \
+  --version 0.50.31 \
+  --edge_runtime_version 0.16.8 \
+  --artifact_transport local \
   --github_proxy direct
 ```
+
+`--artifact_transport local` downloads exact releases directly on the Admin
+host, verifies the signed manifest, SHA256 checksums, sizes, source commit, and
+architecture, then uploads an atomic SFTP staging tree. After root ownership is
+established, the server repeats offline verification and uses the uploaded
+target Management binary for the Management/Edge/Web transaction. The server
+does not need GitHub egress, a third-party proxy, or a permanent verifier. Local
+transport accepts only `direct` or `none`. A compatible installed `gh` is
+reused; only a server without the required strict attestation flags receives a
+pinned temporary verifier inside the removable staging tree.
+
+The transaction runs in a uniquely named transient systemd unit and publishes a
+protected atomic status record. Admin polls that record through short SSH calls;
+it does not blindly stop a transaction that may have entered activation. The
+legacy server-download path remains available as `--artifact_transport remote`.
 
 This transaction requires persisted `EDGE_RUNTIME_MODE=external`; embedded
 mode is rejected before release artifacts or services are changed. It preserves

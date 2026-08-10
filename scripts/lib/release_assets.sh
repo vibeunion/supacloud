@@ -406,7 +406,8 @@ supacloud_verify_attestation() (
             --bundle "$bundle_file" \
             --repo "$SUPACLOUD_GITHUB_REPOSITORY" \
             --signer-workflow "$SUPACLOUD_ATTESTATION_SIGNER_WORKFLOW" \
-            --source-ref "refs/heads/main" 2>&1); then
+            --source-ref "refs/heads/main" \
+            --deny-self-hosted-runners 2>&1); then
             echo "GitHub artifact attestation verification failed: ${verification_output}" >&2
             return 1
         fi
@@ -433,7 +434,8 @@ supacloud_attestation_verifier_available() {
     help=$(gh attestation verify --help 2>&1) || return 1
     grep -Eq -- '(^|[[:space:]])--bundle([=[:space:]]|$)' <<< "$help" || return 1
     grep -Eq -- '(^|[[:space:]])--signer-workflow([=[:space:]]|$)' <<< "$help" || return 1
-    grep -Eq -- '(^|[[:space:]])--source-ref([=[:space:]]|$)' <<< "$help"
+    grep -Eq -- '(^|[[:space:]])--source-ref([=[:space:]]|$)' <<< "$help" || return 1
+    grep -Eq -- '(^|[[:space:]])--deny-self-hosted-runners([=[:space:]]|$)' <<< "$help"
 }
 
 supacloud_download_release_asset() (

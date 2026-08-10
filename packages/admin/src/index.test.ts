@@ -1,9 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { fileURLToPath } from "node:url";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createAdminTools } from "./index";
+import packageMetadata from "../package.json" with { type: "json" };
 
 const PACKAGE_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const ADMIN_CONTEXT_KEYS = new Set([
@@ -122,6 +123,13 @@ describe("admin SSH registration gate", () => {
 });
 
 describe("supacloud-admin process contract", () => {
+    test("prints the exact package version", async () => {
+        const execution = await runAdminCli(["--version"]);
+
+        expect(execution.exitCode).toBe(0);
+        expect(execution.output.trim()).toBe(packageMetadata.version);
+    });
+
     test("runs through an npm-style bin symlink", async () => {
         const build = Bun.spawnSync([process.execPath, "run", "build"], { cwd: PACKAGE_ROOT });
         expect(build.exitCode).toBe(0);
@@ -134,6 +142,25 @@ describe("supacloud-admin process contract", () => {
             const result = await runAdminCliPath(linkedEntry, ["--help"]);
             expect(result.exitCode).toBe(0);
             expect(result.output).toContain("Platform administration CLI");
+            const version = await runAdminCliPath(linkedEntry, ["--version"]);
+            expect(version.exitCode).toBe(0);
+            expect(version.output.trim()).toBe(packageMetadata.version);
+        } finally {
+            rmSync(sandbox, { recursive: true, force: true });
+        }
+    });
+
+    test("build output bundles the shared release-manifest contract", async () => {
+        const build = Bun.spawnSync([process.execPath, "run", "build"], { cwd: PACKAGE_ROOT });
+        expect(build.exitCode).toBe(0);
+        const sandbox = mkdtempSync(join(tmpdir(), "supacloud-admin-standalone-dist-"));
+        const isolatedEntry = join(sandbox, "supacloud-admin");
+        copyFileSync(join(PACKAGE_ROOT, "dist/index.js"), isolatedEntry);
+        chmodSync(isolatedEntry, 0o755);
+        try {
+            const execution = await runAdminCliPath(isolatedEntry, ["--version"]);
+            expect(execution.exitCode).toBe(0);
+            expect(execution.output.trim()).toBe(packageMetadata.version);
         } finally {
             rmSync(sandbox, { recursive: true, force: true });
         }
