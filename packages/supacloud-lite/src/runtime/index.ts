@@ -302,6 +302,9 @@ export async function createBackend(config: BackendConfig = {}): Promise<SupaClo
     const url = new URL(req.url)
     const path = url.pathname
 
+    if (req.method === 'OPTIONS' && (path === '/functions/v1' || path.startsWith('/functions/v1/'))) {
+      return functions.handle(req, { role: 'anon', claims: null }, url)
+    }
     if (req.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: CORS_HEADERS })
     }

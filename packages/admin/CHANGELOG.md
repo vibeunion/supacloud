@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.8.1](https://github.com/zuohuadong/supacloud/compare/admin-v0.8.0...admin-v0.8.1) (2026-08-10)
+
+
+### Bug Fixes
+
+* **admin:** support project create domain flags ([#800](https://github.com/zuohuadong/supacloud/issues/800)) ([c47e19c](https://github.com/zuohuadong/supacloud/commit/c47e19c88e1efcaa9864e1902f47a24be22c92ee))
+
+## [0.8.0](https://github.com/zuohuadong/supacloud/compare/admin-v0.7.12...admin-v0.8.0) (2026-08-10)
+
+
+### Features
+
+* **admin:** report deployed platform versions ([#794](https://github.com/zuohuadong/supacloud/issues/794)) ([1ed128c](https://github.com/zuohuadong/supacloud/commit/1ed128cb8100872a9fd4a93a373ac1df67d3baf4))
+
+## [0.7.12](https://github.com/zuohuadong/supacloud/compare/admin-v0.7.11...admin-v0.7.12) (2026-08-10)
+
+
+### Bug Fixes
+
+* **upgrade:** pin Sigstore root for offline verification ([#789](https://github.com/zuohuadong/supacloud/issues/789)) ([4bb67ca](https://github.com/zuohuadong/supacloud/commit/4bb67caf318710d825ee7dd950bbd8a3be71db27))
+
 ## [0.7.11](https://github.com/zuohuadong/supacloud/compare/admin-v0.7.10...admin-v0.7.11) (2026-08-10)
 
 

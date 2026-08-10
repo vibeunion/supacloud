@@ -240,14 +240,15 @@ alter role service_role set search_path to "$user", public, extensions;
 grant usage on schema public to anon, authenticated, service_role;
 grant all on all tables in schema public to anon, authenticated, service_role;
 grant all on all sequences in schema public to anon, authenticated, service_role;
-grant execute on all functions in schema public to anon, authenticated, service_role;
 
 alter default privileges in schema public
   grant all on tables to anon, authenticated, service_role;
 alter default privileges in schema public
   grant all on sequences to anon, authenticated, service_role;
-alter default privileges in schema public
-  grant execute on functions to anon, authenticated, service_role;
+
+-- PostgreSQL already grants EXECUTE on new functions to PUBLIC. Keep that
+-- default so project migrations can revoke PUBLIC and grant only selected
+-- roles without hidden direct grants from Lite. Existing ACLs are left intact.
 
 -- ── Auth schema (GoTrue-compatible subset) ───────────────────────────────
 create schema if not exists auth;

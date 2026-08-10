@@ -70,6 +70,8 @@ const attestationEnvironmentKeys = [
   "GH_BUNDLE_RECORD",
   "GH_LOCK_TMPDIR",
   "GH_OMIT_SOURCE_REF",
+  "GH_OMIT_TRUSTED_ROOT",
+  "GH_ROOT_RECORD",
   "GH_VERIFY_EXIT_CODE",
   "PATH",
   "SUPACLOUD_ALLOW_UNVERIFIED_RELEASE",
@@ -126,13 +128,23 @@ function installFakeGithubCli(binDirectory: string): void {
     'if [ "$1 $2 $3" = "attestation verify --help" ]; then',
     '  printf "%s\\n" "--bundle" "--signer-workflow" "--deny-self-hosted-runners"',
     '  [ "${GH_OMIT_SOURCE_REF:-false}" = "true" ] || printf "%s\\n" "--source-ref"',
+    '  [ "${GH_OMIT_TRUSTED_ROOT:-false}" = "true" ] || printf "%s\\n" "--custom-trusted-root"',
     "  exit 0",
     "fi",
     'printf "%s\\n" "$*" > "$GH_ARGUMENT_RECORD"',
     'bundle=""',
-    'while [ "$#" -gt 0 ]; do [ "$1" = "--bundle" ] && { shift; bundle="$1"; break; }; shift; done',
+    'trusted_root=""',
+    'while [ "$#" -gt 0 ]; do',
+    '  case "$1" in',
+    '    --bundle) shift; bundle="$1" ;;',
+    '    --custom-trusted-root) shift; trusted_root="$1" ;;',
+    '  esac',
+    '  shift',
+    'done',
     'case "$bundle" in */bundle.jsonl) test -f "$bundle" || exit 88 ;; *) exit 89 ;; esac',
+    'case "$trusted_root" in */trusted_root.jsonl) test -f "$trusted_root" || exit 90 ;; *) exit 91 ;; esac',
     'cp "$bundle" "$GH_BUNDLE_RECORD"',
+    'cp "$trusted_root" "$GH_ROOT_RECORD"',
     '[ "${GH_LOCK_TMPDIR:-false}" = "true" ] && chmod 0555 "$TMPDIR"',
     'exit "${GH_VERIFY_EXIT_CODE:-0}"',
     "",
@@ -151,6 +163,7 @@ function createAttestationFixture() {
   process.env.TMPDIR = directory;
   process.env.GH_ARGUMENT_RECORD = join(directory, "gh-arguments.txt");
   process.env.GH_BUNDLE_RECORD = join(directory, "bundle-copy.jsonl");
+  process.env.GH_ROOT_RECORD = join(directory, "trusted-root-copy.jsonl");
   process.env.SUPACLOUD_INTEGRITY_MODE_RECORD = join(directory, "integrity-mode");
   return { artifact, directory };
 }
@@ -575,7 +588,13 @@ describe("upgrade release selection", () => {
   });
 
   test("offline attestation capability requires every gh verification flag", () => {
-    const requiredFlags = ["--bundle", "--signer-workflow", "--source-ref", "--deny-self-hosted-runners"];
+    const requiredFlags = [
+      "--bundle",
+      "--custom-trusted-root",
+      "--signer-workflow",
+      "--source-ref",
+      "--deny-self-hosted-runners",
+    ];
     expect(supportsGithubOfflineAttestationVerification(0, requiredFlags.join("\n"))).toBe(true);
     expect(supportsGithubOfflineAttestationVerification(0, requiredFlags.map(flag => `${flag}=value`).join("\n"))).toBe(true);
     expect(supportsGithubOfflineAttestationVerification(1, requiredFlags.join("\n"))).toBe(false);
@@ -634,12 +653,16 @@ describe("upgrade release selection", () => {
       const ghArguments = readFileSync(process.env.GH_ARGUMENT_RECORD!, "utf8");
       expect(ghArguments).toContain("--bundle");
       expect(ghArguments).toContain("/bundle.jsonl");
+      expect(ghArguments).toContain("--custom-trusted-root");
+      expect(ghArguments).toContain("/trusted_root.jsonl");
       expect(ghArguments).toContain("--repo zuohuadong/supacloud");
       expect(ghArguments).toContain("--signer-workflow zuohuadong/supacloud/.github/workflows/release-please.yml");
       expect(ghArguments).toContain("--source-ref refs/heads/main");
       expect(ghArguments).toContain("--deny-self-hosted-runners");
       expect(readFileSync(process.env.GH_BUNDLE_RECORD!, "utf8")).toBe('{"mediaType":"sigstore"}\n');
-      expect(readdirSync(fixture.directory).filter(name => name.startsWith("supacloud-attestation-"))).toEqual([]);
+      expect(createHash("sha256").update(readFileSync(process.env.GH_ROOT_RECORD!)).digest("hex"))
+        .toBe("3c2cc7f357dc064ec527fdcd78da6e9245c21a381e1abaa0f2b62b186bcac1a1");
+      expect(readdirSync(fixture.directory).filter(name => name.startsWith("supacloud-sigstore-"))).toEqual([]);
       expect(readFileSync(process.env.SUPACLOUD_INTEGRITY_MODE_RECORD!, "utf8").trim())
         .toBe("github-attestation+same-release-sha256");
     } finally {
@@ -657,7 +680,7 @@ describe("upgrade release selection", () => {
     try {
       await expect(verifyArtifactAttestation({ filePath: fixture.artifact, forceYes: true }))
         .rejects.toThrow("GitHub artifact attestation verification failed");
-      expect(readdirSync(fixture.directory).filter(name => name.startsWith("supacloud-attestation-"))).toEqual([]);
+      expect(readdirSync(fixture.directory).filter(name => name.startsWith("supacloud-sigstore-"))).toEqual([]);
       expect(existsSync(process.env.SUPACLOUD_INTEGRITY_MODE_RECORD!)).toBe(false);
     } finally {
       rmSync(fixture.directory, { recursive: true, force: true });

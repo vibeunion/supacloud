@@ -9,6 +9,26 @@ import {
   type StandalonePgliteAssets,
 } from '../../standalone-assets-protocol.js'
 
+const INITIALIZE_TIMEZONE_SQL = `
+do $$
+declare configured_timezone text;
+begin
+  select split_part(setting, '=', 2) into configured_timezone
+  from pg_db_role_setting
+  cross join lateral unnest(setconfig) as setting
+  where setdatabase = (select oid from pg_database where datname = current_database())
+    and setrole = 0
+    and lower(split_part(setting, '=', 1)) = 'timezone'
+  limit 1;
+
+  if configured_timezone is null then
+    configured_timezone := 'UTC';
+    execute format('alter database %I set timezone to %L', current_database(), configured_timezone);
+  end if;
+  perform set_config('TimeZone', configured_timezone, false);
+end $$;
+`
+
 /**
  * Build a {@link DbEngine} backed by PGlite (WASM Postgres) at `dataDir`, or an
  * in-memory database when `dataDir` is omitted. Loads the bundled contrib
@@ -72,6 +92,17 @@ export async function createPgliteEngine(dataDir?: string): Promise<DbEngine> {
         : {}),
     })
     await pg.waitReady
+    // PGlite inherits the host timezone at initdb, and its current session does
+    // not apply ALTER DATABASE settings.
+    try {
+      await pg.exec(INITIALIZE_TIMEZONE_SQL)
+    } catch (error) {
+      const [cleanup] = await Promise.allSettled([pg.close()])
+      if (cleanup.status === 'rejected') {
+        throw new AggregateError([error, cleanup.reason], 'PGlite timezone initialization and cleanup failed')
+      }
+      throw error
+    }
   } catch (error) {
     await releaseLock()
     throw error

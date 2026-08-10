@@ -256,7 +256,7 @@ function upgradeScriptSetup(paths: RemoteUpgradePaths): string[] {
         "exec >>\"$LOG\" 2>&1", "write_status RUNNING",
         buildUpgradeLockScript(SUPACLOUD_UPGRADE_LOCK_PATH),
         "while IFS='=' read -r variable _; do case \"$variable\" in *PROXY*|*Proxy*|*proxy*) unset \"$variable\" ;; esac; done < <(env)",
-        "unset SUPACLOUD_ALLOW_UNVERIFIED_RELEASE SUPACLOUD_GITHUB_REPOSITORY SUPACLOUD_RELEASES_API SUPACLOUD_ATTESTATION_SIGNER_WORKFLOW NODE_USE_ENV_PROXY",
+        "unset SUPACLOUD_ALLOW_UNVERIFIED_RELEASE SUPACLOUD_GITHUB_REPOSITORY SUPACLOUD_RELEASES_API SUPACLOUD_ATTESTATION_SIGNER_WORKFLOW SUPACLOUD_ATTESTATION_TRUSTED_ROOT NODE_USE_ENV_PROXY",
     ];
 }
 

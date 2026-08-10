@@ -188,21 +188,14 @@ Actions: list, deploy, deploy_bundle, config, source, delete, check`,
                     : `❌ Config update failed (${cr.status}): ${JSON.stringify(cr.data)}`;
             };
 
-            const confirmedDeploymentText = async (
+            const deploymentPolicyReceiptText = (
                 successText: string,
                 responsePayload: unknown,
-            ): Promise<string> => {
+            ): string => {
                 if (!hasFunctionConfig() || confirmedFunctionConfig(responsePayload, functionConfig())) {
                     return successText;
                 }
-                const fallback = await http.patch(
-                    `/v1/projects/${ref}/functions/${slug}/config`,
-                    functionConfig(),
-                );
-                if (!fallback.ok || !confirmedFunctionConfig(fallback.data, functionConfig())) {
-                    return `❌ Partial deployment (unsafe): POST succeeded and the code/bundle was deployed, but the function policy was not confirmed; legacy PATCH fallback failed (${fallback.status}): ${JSON.stringify(fallback.data)}`;
-                }
-                return `${successText}\n⚠️ Legacy non-atomic compatibility path: policy applied with follow-up PATCH`;
+                return "❌ Unsafe deployment receipt: POST succeeded but did not confirm the requested function policy. No follow-up PATCH was attempted because code and policy must be activated atomically.";
             };
 
             const checkSyntax = async (sourceCode: string): Promise<{ ok: boolean; err?: string }> => {
@@ -257,7 +250,7 @@ Actions: list, deploy, deploy_bundle, config, source, delete, check`,
                         text = `❌ Failed (${dr.status}): ${JSON.stringify(dr.data)}`;
                         break;
                     }
-                    text = await confirmedDeploymentText(`✅ Function ${slug} deployed`, dr.data);
+                    text = deploymentPolicyReceiptText(`✅ Function ${slug} deployed`, dr.data);
                     break;
                 case "deploy_bundle":
                     need("slug", slug); need("files", files);
@@ -271,7 +264,7 @@ Actions: list, deploy, deploy_bundle, config, source, delete, check`,
                         text = `❌ Failed (${br.status}): ${JSON.stringify(br.data)}`;
                         break;
                     }
-                    text = await confirmedDeploymentText(
+                    text = deploymentPolicyReceiptText(
                         `✅ Function ${slug} bundle deployed (${Object.keys(files!).length} files)`,
                         br.data,
                     );

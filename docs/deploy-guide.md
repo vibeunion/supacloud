@@ -24,7 +24,7 @@ SupaCloud 部署系统提供配置驱动的自动化部署能力，支持：
 - Management API 的运行时配置独立保存在 `/etc/supabase/management-api.env`，不得复制或覆盖安装输入文件。
 - root bootstrap 与安装源码只允许从官方 GitHub HTTPS 地址直连获取；直连失败时安装会关闭失败，不会通过代理克隆、拉取或执行源码。不要用第三方代理 URL 包裹并直接执行 root `setup.sh`。
 - `SUPACLOUD_GITHUB_PROXY` 只作为后续 GitHub Release/API 下载的显式 fallback，且 Release 产物仍必须通过 SHA256 与 provenance attestation；Admin 入口仅接受 HTTPS 代理。
-- 网络 Release 产物必须通过同一 Release 的 SHA256 校验和 GitHub build provenance attestation。`SUPACLOUD_ALLOW_UNVERIFIED_RELEASE=true` 仅是紧急 break-glass，仍保留 SHA256 校验。
+- 网络 Release 产物必须通过同一 Release 的 SHA256 校验和 GitHub build provenance attestation。验签显式使用仓库内经 TUF 复核并固定摘要的 Sigstore Public Good trusted root，不依赖目标机实时访问 TUF 服务。`SUPACLOUD_ALLOW_UNVERIFIED_RELEASE=true` 仅是紧急 break-glass，仍保留 SHA256 校验。
 
 ```bash
 # 官方 root bootstrap
