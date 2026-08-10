@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.4](https://github.com/zuohuadong/supacloud/compare/cli-v0.14.3...cli-v0.14.4) (2026-08-10)
+
+
+### Bug Fixes
+
+* **edge-functions:** align CLI bundles with runtime policy ([#745](https://github.com/zuohuadong/supacloud/issues/745)) ([1ee2f94](https://github.com/zuohuadong/supacloud/commit/1ee2f94752efb0855a1528bd0049c733ae4cc6e5))
+
 ## [0.14.3](https://github.com/zuohuadong/supacloud/compare/cli-v0.14.2...cli-v0.14.3) (2026-08-04)
 
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.7](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.16.6...edge-runtime-v0.16.7) (2026-08-10)
+
+
+### Bug Fixes
+
+* **edge-functions:** align CLI bundles with runtime policy ([#745](https://github.com/zuohuadong/supacloud/issues/745)) ([1ee2f94](https://github.com/zuohuadong/supacloud/commit/1ee2f94752efb0855a1528bd0049c733ae4cc6e5))
+
 ## [0.16.6](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.16.5...edge-runtime-v0.16.6) (2026-08-09)
 
 
