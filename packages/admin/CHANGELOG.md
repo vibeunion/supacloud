@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.5](https://github.com/zuohuadong/supacloud/compare/admin-v0.7.4...admin-v0.7.5) (2026-08-10)
+
+
+### Bug Fixes
+
+* **upgrade:** use a JSONL attestation bundle ([#762](https://github.com/zuohuadong/supacloud/issues/762)) ([37c05f0](https://github.com/zuohuadong/supacloud/commit/37c05f0820f31722c0d7b19f4195df957ba03d85))
+
 ## [0.7.4](https://github.com/zuohuadong/supacloud/compare/admin-v0.7.3...admin-v0.7.4) (2026-08-10)
 
 

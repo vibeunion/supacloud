@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.50.28](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.27...management-api-v0.50.28) (2026-08-10)
+
+
+### Bug Fixes
+
+* **management-api:** represent external auth runtime status ([#763](https://github.com/zuohuadong/supacloud/issues/763)) ([d247feb](https://github.com/zuohuadong/supacloud/commit/d247febc54bc201a357d4aa2005014ca4a6b850e))
+* **upgrade:** use a JSONL attestation bundle ([#762](https://github.com/zuohuadong/supacloud/issues/762)) ([37c05f0](https://github.com/zuohuadong/supacloud/commit/37c05f0820f31722c0d7b19f4195df957ba03d85))
+* **upgrade:** verify public attestations offline ([#760](https://github.com/zuohuadong/supacloud/issues/760)) ([172476c](https://github.com/zuohuadong/supacloud/commit/172476cd91d38d6c55ba31daf06cc9bf112c63b8))
+
 ## [0.50.27](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.26...management-api-v0.50.27) (2026-08-10)
 
 
