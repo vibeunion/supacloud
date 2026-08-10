@@ -360,24 +360,24 @@ supacloud_fetch_attestation_bundle() {
     fi
 }
 
-supacloud_verify_attestation() {
+supacloud_verify_attestation() (
     local artifact_file="$1"
     if supacloud_attestation_verifier_available; then
-        local verification_output bundle_file
-        bundle_file=$(mktemp "${TMPDIR:-/tmp}/supacloud-attestation.XXXXXX") || return 1
+        local verification_output bundle_dir bundle_file
+        bundle_dir=$(mktemp -d "${TMPDIR:-/tmp}/supacloud-attestation.XXXXXX") || return 1
+        trap 'rm -rf -- "$bundle_dir"' EXIT
+        trap 'trap - EXIT HUP INT TERM; rm -rf -- "$bundle_dir"; exit 1' HUP INT TERM
+        bundle_file="${bundle_dir}/bundle.jsonl"
         if ! supacloud_fetch_attestation_bundle "$artifact_file" "$bundle_file"; then
-            rm -f "$bundle_file"
             return 1
         fi
         if ! verification_output=$(gh attestation verify "$artifact_file" \
             --bundle "$bundle_file" \
             --repo "$SUPACLOUD_GITHUB_REPOSITORY" \
             --signer-workflow "$SUPACLOUD_ATTESTATION_SIGNER_WORKFLOW" 2>&1); then
-            rm -f "$bundle_file"
             echo "GitHub artifact attestation verification failed: ${verification_output}" >&2
             return 1
         fi
-        rm -f "$bundle_file"
         supacloud_record_integrity_mode "github-attestation+same-release-sha256"
         return
     fi
@@ -390,7 +390,7 @@ supacloud_verify_attestation() {
 
     echo "Artifact attestation verification is required, but gh attestation verify is unavailable. Install GitHub CLI or explicitly set SUPACLOUD_ALLOW_UNVERIFIED_RELEASE=true for emergency break-glass use." >&2
     return 1
-}
+)
 
 supacloud_attestation_verifier_available() {
     local version

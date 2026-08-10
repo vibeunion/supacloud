@@ -1,6 +1,6 @@
 // @supacloud-test-isolate — compiles and validates multiple release fixtures.
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -736,6 +736,7 @@ describe("runtime companion version assets", () => {
     const gh = join(fakeBin, "gh");
     const curl = join(fakeBin, "curl");
     const artifact = join(dir, "artifact");
+    const bundleArgumentRecord = join(dir, "gh-bundle-argument.txt");
     try {
       spawnSync("mkdir", ["-p", fakeBin]);
       writeFileSync(artifact, "verified artifact fixture");
@@ -749,6 +750,7 @@ describe("runtime companion version assets", () => {
         "#!/bin/sh",
         'if [ "$1" = "--version" ]; then echo "gh version 2.96.0"; exit 0; fi',
         'if [ "$1 $2 $3" = "attestation verify --help" ]; then echo "--signer-workflow"; exit 0; fi',
+        'while [ "$#" -gt 0 ]; do if [ "$1" = "--bundle" ]; then shift; printf "%s\\n" "$1" > "$GH_BUNDLE_ARGUMENT_RECORD"; break; fi; shift; done',
         'echo "HTTP 404: attestation not found" >&2',
         "exit 22",
         "",
@@ -760,6 +762,8 @@ describe("runtime companion version assets", () => {
           ...process.env,
           PATH: `${fakeBin}:${process.env.PATH}`,
           ARTIFACT: artifact,
+          GH_BUNDLE_ARGUMENT_RECORD: bundleArgumentRecord,
+          TMPDIR: dir,
           SUPACLOUD_INTEGRITY_MODE_RECORD: join(dir, "integrity-mode"),
         },
         encoding: "utf8",
@@ -767,16 +771,19 @@ describe("runtime companion version assets", () => {
       expect(result.status).not.toBe(0);
       expect(result.stderr).toContain("404");
       expect(() => readFileSync(join(dir, "integrity-mode"), "utf8")).toThrow();
+      const bundlePath = readFileSync(bundleArgumentRecord, "utf8").trim();
+      expect(bundlePath.endsWith("/bundle.jsonl")).toBe(true);
+      expect(readdirSync(dir).filter(name => name.startsWith("supacloud-attestation."))).toEqual([]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  test("artifact verification downloads a public bundle before invoking gh offline", () => {
+  test("artifact verification gives gh a temporary JSONL bundle and removes it after success", () => {
     const dir = mkdtempSync(join(tmpdir(), "supacloud-gh-offline-"));
     const fakeBin = join(dir, "bin");
     const artifact = join(dir, "artifact");
-    const calls = join(dir, "gh-calls.txt");
+    const bundleArgumentRecord = join(dir, "gh-bundle-argument.txt");
     try {
       spawnSync("mkdir", ["-p", fakeBin]);
       writeFileSync(artifact, "verified artifact fixture");
@@ -790,9 +797,11 @@ describe("runtime companion version assets", () => {
         "#!/bin/sh",
         'if [ "$1" = "--version" ]; then echo "gh version 2.96.0"; exit 0; fi',
         'if [ "$1 $2 $3" = "attestation verify --help" ]; then echo "--signer-workflow"; exit 0; fi',
-        'printf "%s\\n" "$*" > "$GH_CALLS"',
-        'case " $* " in *" --bundle "*) exit 0 ;; esac',
-        'echo "missing offline bundle" >&2',
+        'bundle=""',
+        'while [ "$#" -gt 0 ]; do if [ "$1" = "--bundle" ]; then shift; bundle="$1"; break; fi; shift; done',
+        'printf "%s\\n" "$bundle" > "$GH_BUNDLE_ARGUMENT_RECORD"',
+        'case "$bundle" in */bundle.jsonl) test -f "$bundle" && exit 0 ;; esac',
+        'echo "offline bundle must be an existing bundle.jsonl file" >&2',
         "exit 1",
         "",
       ].join("\n"));
@@ -805,13 +814,15 @@ describe("runtime companion version assets", () => {
           ...process.env,
           PATH: `${fakeBin}:${process.env.PATH}`,
           ARTIFACT: artifact,
-          GH_CALLS: calls,
+          GH_BUNDLE_ARGUMENT_RECORD: bundleArgumentRecord,
+          TMPDIR: dir,
           SUPACLOUD_INTEGRITY_MODE_RECORD: integrityMode,
         },
         encoding: "utf8",
       });
       expect(result.status, result.stderr).toBe(0);
-      expect(readFileSync(calls, "utf8")).toContain("--bundle");
+      expect(readFileSync(bundleArgumentRecord, "utf8").trim().endsWith("/bundle.jsonl")).toBe(true);
+      expect(readdirSync(dir).filter(name => name.startsWith("supacloud-attestation."))).toEqual([]);
       expect(readFileSync(integrityMode, "utf8").trim()).toBe("github-attestation+same-release-sha256");
     } finally {
       rmSync(dir, { recursive: true, force: true });
