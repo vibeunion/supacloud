@@ -45,22 +45,23 @@ create policy realtime_secrets_select on public.realtime_secrets
   for select to authenticated
   using (auth.uid() = owner_id);
 
+-- Exercise both the legacy UUID owner and the current Storage API owner_id.
 create policy assets_select on storage.objects
   for select to authenticated
-  using (bucket_id = 'assets' and owner = auth.uid());
+  using (bucket_id = 'assets' and owner = auth.uid() and owner_id = auth.uid()::text);
 
 create policy assets_insert on storage.objects
   for insert to authenticated
-  with check (bucket_id = 'assets' and owner = auth.uid());
+  with check (bucket_id = 'assets' and owner = auth.uid() and owner_id = auth.uid()::text);
 
 create policy assets_update on storage.objects
   for update to authenticated
-  using (bucket_id = 'assets' and owner = auth.uid())
-  with check (bucket_id = 'assets' and owner = auth.uid());
+  using (bucket_id = 'assets' and owner = auth.uid() and owner_id = auth.uid()::text)
+  with check (bucket_id = 'assets' and owner = auth.uid() and owner_id = auth.uid()::text);
 
 create policy assets_delete on storage.objects
   for delete to authenticated
-  using (bucket_id = 'assets' and owner = auth.uid());
+  using (bucket_id = 'assets' and owner = auth.uid() and owner_id = auth.uid()::text);
 
 grant usage on schema public to anon, authenticated, service_role;
 grant all on public.todos to authenticated, service_role;
@@ -174,6 +175,18 @@ describe('SupaCloud Lite supabase-js compatibility', () => {
       upsert: true,
     })
     expect(upload.error).toBeNull()
+    await expectStoredOwner('docs/hello.txt')
+
+    const upserted = await userClient.storage.from('assets').upload('docs/hello.txt', 'updated', {
+      contentType: 'text/plain',
+      upsert: true,
+    })
+    expect(upserted.error).toBeNull()
+    await expectStoredOwner('docs/hello.txt')
+
+    const copied = await userClient.storage.from('assets').copy('docs/hello.txt', 'docs/copied.txt')
+    expect(copied.error).toBeNull()
+    await expectStoredOwner('docs/copied.txt')
 
     const oversized = await userClient.storage.from('assets').upload('docs/oversized.txt', 'x'.repeat(64 * 1024), {
       contentType: 'text/plain',
@@ -192,9 +205,9 @@ describe('SupaCloud Lite supabase-js compatibility', () => {
 
     const downloaded = await userClient.storage.from('assets').download('docs/hello.txt')
     expect(downloaded.error).toBeNull()
-    expect(await downloaded.data!.text()).toBe('hello from lite')
+    expect(await downloaded.data!.text()).toBe('updated')
 
-    const removed = await userClient.storage.from('assets').remove(['docs/hello.txt'])
+    const removed = await userClient.storage.from('assets').remove(['docs/hello.txt', 'docs/copied.txt'])
     expect(removed.error).toBeNull()
   })
 
@@ -262,6 +275,7 @@ describe('SupaCloud Lite supabase-js compatibility', () => {
     const downloaded = await userClient.storage.from('assets').download('resumable.txt')
     expect(downloaded.error).toBeNull()
     expect(await downloaded.data!.text()).toBe('hello')
+    await expectStoredOwner('resumable.txt')
   })
 
   test('rejects unsafe TUS object paths and disallowed MIME types before upload allocation', async () => {
@@ -439,6 +453,14 @@ function clientOptions(storageKey: string) {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false, storageKey },
     realtime: { params: { eventsPerSecond: 20 } },
   }
+}
+
+async function expectStoredOwner(key: string): Promise<void> {
+  const stored = await project.backend.db.query<{ owner: string; owner_id: string }>(
+    `select owner, owner_id from storage.objects where bucket_id = 'assets' and name = $1`,
+    [key]
+  )
+  expect(stored.rows[0]).toEqual({ owner: userId, owner_id: userId })
 }
 
 function createTusUpload(length: number, token: string, key: string, contentType = 'text/plain'): Promise<Response> {

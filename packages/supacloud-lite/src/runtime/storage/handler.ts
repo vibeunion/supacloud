@@ -489,14 +489,15 @@ export class StorageHandler {
     const stagedKey = await this.stageObjectBytes(version, bytes)
     const conflictClause = upsert
       ? `on conflict (bucket_id, name) do update
-           set metadata = excluded.metadata, owner = excluded.owner, updated_at = now(), version = excluded.version`
+           set metadata = excluded.metadata, owner = excluded.owner, owner_id = excluded.owner_id,
+               updated_at = now(), version = excluded.version`
       : ''
     let inserted: ObjectRow | undefined
     try {
       const result = await this.db.withContext(ctx, (query) =>
         query(
-          `insert into storage.objects (id, bucket_id, name, owner, metadata, version)
-           values ($1, $2, $3, $4, $5::jsonb, $6) ${conflictClause} returning *`,
+          `insert into storage.objects (id, bucket_id, name, owner, owner_id, metadata, version)
+           values ($1, $2, $3, $4::uuid, $4::text, $5::jsonb, $6) ${conflictClause} returning *`,
           [objectId, bucketId, key, ctx.claims?.sub ?? null, JSON.stringify(metadata), version]
         )
       )
@@ -766,13 +767,14 @@ export class StorageHandler {
   ): Promise<Response | null> {
     const conflictClause = upsert
       ? `on conflict (bucket_id, name) do update
-           set metadata = excluded.metadata, owner = excluded.owner, updated_at = now(), version = excluded.version`
+           set metadata = excluded.metadata, owner = excluded.owner, owner_id = excluded.owner_id,
+               updated_at = now(), version = excluded.version`
       : ''
     try {
       await this.db.withContext(ctx, async (query) => {
         await query(
-          `insert into storage.objects (bucket_id, name, owner, metadata, version)
-           values ($1, $2, $3, $4::jsonb, $5) ${conflictClause} returning id`,
+          `insert into storage.objects (bucket_id, name, owner, owner_id, metadata, version)
+           values ($1, $2, $3::uuid, $3::text, $4::jsonb, $5) ${conflictClause} returning id`,
           [
             bucketId,
             key,
@@ -921,8 +923,8 @@ export class StorageHandler {
     try {
       const copied = await this.db.withContext(ctx, (query) =>
         query(
-          `insert into storage.objects (id, bucket_id, name, owner, metadata, version)
-           select $1, $4, $5, $6, metadata, $7
+          `insert into storage.objects (id, bucket_id, name, owner, owner_id, metadata, version)
+           select $1, $4, $5, $6::uuid, $6::text, metadata, $7
            from storage.objects where bucket_id = $2 and name = $3
            returning *`,
           [copyId, body.bucketId, body.sourceKey, dstBucket, body.destinationKey, ctx.claims?.sub ?? null, version]
