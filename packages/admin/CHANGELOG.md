@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.10](https://github.com/zuohuadong/supacloud/compare/admin-v0.7.9...admin-v0.7.10) (2026-08-10)
+
+
+### Bug Fixes
+
+* **admin:** support non-root local upgrade uploads ([#782](https://github.com/zuohuadong/supacloud/issues/782)) ([1445c87](https://github.com/zuohuadong/supacloud/commit/1445c87531d78d00b99ed4c0b70d4c44eaba9afd))
+
 ## [0.7.9](https://github.com/zuohuadong/supacloud/compare/admin-v0.7.8...admin-v0.7.9) (2026-08-10)
 
 
