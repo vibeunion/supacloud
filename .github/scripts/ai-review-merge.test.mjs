@@ -147,8 +147,17 @@ describe('trusted review workflow', () => {
     assert.match(workflow, /xcaddy\/cmd\/xcaddy@\$\{XCADDY_VERSION\}/);
     assert.doesNotMatch(workflow, /xcaddy\/cmd\/xcaddy@latest/);
     for (const contents of [workflow, releaseWorkflow]) {
-      for (const line of contents.split(/\r?\n/).filter((candidate) => candidate.includes('bun install'))) {
+      const installLines = contents.split(/\r?\n/).filter((candidate) => candidate.includes('bun install'));
+      const lockfileGenerationLines = installLines.filter((line) => line.includes('--lockfile-only'));
+      for (const line of installLines.filter((candidate) => !candidate.includes('--lockfile-only'))) {
         assert.match(line, /bun install --frozen-lockfile/);
+      }
+      if (contents === releaseWorkflow) {
+        assert.deepEqual(lockfileGenerationLines, [
+          '          bun install --lockfile-only --registry https://registry.npmjs.org',
+        ]);
+      } else {
+        assert.deepEqual(lockfileGenerationLines, []);
       }
     }
     assert.doesNotMatch(releaseWorkflow, /bunx\s+npm\s+publish/);

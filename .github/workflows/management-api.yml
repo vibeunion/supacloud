@@ -173,17 +173,8 @@ jobs:
 
       - name: Check unified supacloudctl CLI
         working-directory: packages/supacloud
-        env:
-          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
         run: |
-          install_mode="$(node ../../.github/scripts/supacloud-install-mode.mjs)"
-          if [[ "$install_mode" == "local-candidate" ]]; then
-            # Release 提升 sibling 包版本时，锁文件会暂时落后；使用同一提交中的候选包验证。
-            bun add --no-save '@supacloud/cli@file:../cli' '@supacloud/admin@file:../admin'
-            git diff --exit-code -- package.json bun.lock
-          else
-            bun install --frozen-lockfile
-          fi
+          bun install --frozen-lockfile
           bun run typecheck
           bun test src/index.test.ts
           bun run build
@@ -279,8 +270,8 @@ jobs:
         run: |
           node --check .github/scripts/ai-review-merge.mjs
           node --test .github/scripts/ai-review-merge.test.mjs
-          node --check .github/scripts/supacloud-install-mode.mjs
-          node --test .github/scripts/supacloud-install-mode.test.mjs
+          node --check .github/scripts/sync-supacloud-dependencies.mjs
+          node --test .github/scripts/sync-supacloud-dependencies.test.mjs
 
   unit-test:
     name: Unit Tests
