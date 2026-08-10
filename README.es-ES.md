@@ -206,7 +206,30 @@ source /etc/profile.d/supacloud.sh
 
 **Actualizaciones de producción**
 
-Los servidores de producción se actualizan reemplazando el binario Linux publicado en `/usr/local/bin/supacloud`; no necesitan `git pull` el código fuente de la aplicación durante las actualizaciones normales.
+Usa la CLI de administración para una actualización de producción verificada de
+varios componentes. Fija versiones exactas de Management y Edge Runtime para
+verificar y activar Management, Web Console y un Edge Runtime externo como una
+transacción con capacidad de reversión:
+
+```bash
+npx @supacloud/admin ssh upgrade \
+  --version 0.50.27 \
+  --edge_runtime_version 0.16.7 \
+  --github_proxy direct
+```
+
+La transacción requiere `EDGE_RUNTIME_MODE=external` persistido; el modo
+embedded se rechaza antes de modificar artefactos de release o servicios.
+Conserva la ruta del ejecutable systemd, el puerto, el modo y el estado enabled
+de Edge Runtime, y verifica cada componente con su propio SHA256 y attestation
+de GitHub. Caddy y GoTrue quedan fuera de esta transacción y no se reemplazan.
+
+Omite `--edge_runtime_version` solo cuando quieras actualizar Management y Web
+Console sin cambiar Edge Runtime; la CLI de administración informa ese límite.
+
+El binario de servidor `/usr/local/bin/supacloud` conserva la ruta local que
+solo actualiza Management/Web Console. Los servidores de producción no necesitan
+hacer `git pull` del código fuente durante las actualizaciones normales.
 
 ```bash
 sudo supacloud upgrade --yes
@@ -532,7 +555,8 @@ Para operadores humanos, la división de CLI ahora es:
 - `supacloudctl cli ...`: punto de entrada local unificado. El despacho normal es solo local y no contacta npm; usa `supacloudctl check-update cli` explícitamente cuando sea necesario.
 - `@supacloud/admin` / `supacloud-admin`: CLI de administración de servidor y plataforma
 - `supacloudctl admin ...`: punto de entrada local unificado con el mismo comportamiento offline-por-defecto; usa `supacloudctl check-update admin` explícitamente.
-- En servidores instalados, `/usr/local/bin/supacloud` sigue siendo el binario del servidor compilado; las actualizaciones del servidor siguen usando `sudo supacloud upgrade --yes`.
+- Usa `npx @supacloud/admin ssh upgrade --version <management-version> --edge_runtime_version <edge-version>` para la transacción verificada de Management, Web Console y Edge Runtime externo.
+- En servidores instalados, `/usr/local/bin/supacloud` sigue siendo el binario del servidor compilado; `sudo supacloud upgrade --yes` se limita a Management/Web Console salvo que el flujo Admin compatible reciba un objetivo exacto de Edge Runtime.
 
 
 ### Estructura del Proyecto

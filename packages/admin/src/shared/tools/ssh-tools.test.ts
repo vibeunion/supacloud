@@ -14,6 +14,11 @@ class FakeSsh {
     installEarlyFails = false;
     bootstrapDepsFail = false;
     bootstrapCloneFail = false;
+    upgradeExecThrows = false;
+    upgradeExecFails = false;
+    cleanupExecFails = false;
+    uploadThrows = false;
+    partialUploadThrows = false;
 
     async ping(): Promise<boolean> {
         return true;
@@ -21,6 +26,15 @@ class FakeSsh {
 
     async exec(command: string): Promise<{ success: boolean; stdout: string; stderr: string; code: number }> {
         this.commands.push(command);
+        if (this.upgradeExecThrows && command.includes("UPGRADE_RUNNER")) {
+            throw new Error("connection dropped");
+        }
+        if (this.upgradeExecFails && command.includes("UPGRADE_RUNNER")) {
+            return { success: false, stdout: "", stderr: "transaction failed", code: 42 };
+        }
+        if (this.cleanupExecFails && command.startsWith("rm -f '/tmp/.supacloud-release-assets-")) {
+            return { success: false, stdout: "", stderr: "permission denied", code: 1 };
+        }
         if (command.includes("BOOTSTRAP_DEPS_OK")) {
             if (this.bootstrapDepsFail) {
                 return { success: false, stdout: "", stderr: "package install failed", code: 1 };
@@ -51,7 +65,9 @@ class FakeSsh {
     }
 
     async uploadText(remotePath: string, content: string, mode = 0o600): Promise<void> {
+        if (this.uploadThrows) throw new Error("upload failed");
         this.uploads.push({ remotePath, content, mode });
+        if (this.partialUploadThrows) throw new Error("partial upload failed");
     }
 }
 
@@ -142,16 +158,165 @@ describe("ssh admin tool", () => {
     });
 
     test("upgrade proxy rejects URL credentials, query strings, and fragments", async () => {
-        const tool = captureSshTool(new FakeSsh());
-
         for (const github_proxy of [
             "http://proxy.example.com/",
             "https://user:password@proxy.example.com/",
             "https://proxy.example.com/?target=evil",
             "https://proxy.example.com/#fragment",
         ]) {
+            const ssh = new FakeSsh();
+            const tool = captureSshTool(ssh);
             await expect(tool.invoke({ action: "upgrade", github_proxy })).rejects.toThrow("Invalid github_proxy");
+            expect(ssh.uploads).toHaveLength(0);
+            expect(ssh.commands).toHaveLength(0);
         }
+    });
+
+    test("component upgrade validates both exact versions before upload", async () => {
+        for (const args of [
+            { action: "upgrade", version: "0.50.27;id", edge_runtime_version: "0.16.7" },
+            { action: "upgrade", version: "0.50.27", edge_runtime_version: "0.16.7;id" },
+            { action: "upgrade", edge_runtime_version: "0.16.7" },
+            { action: "upgrade", version: "latest", edge_runtime_version: "0.16.7" },
+            { action: "upgrade", version: "0.50.27", edge_runtime_version: "latest" },
+        ]) {
+            const ssh = new FakeSsh();
+            await expect(captureSshTool(ssh).invoke(args)).rejects.toThrow();
+            expect(ssh.uploads).toHaveLength(0);
+            expect(ssh.commands).toHaveLength(0);
+        }
+    });
+
+    test("direct proxy mode is represented by an unset helper proxy", async () => {
+        const ssh = new FakeSsh();
+        await captureSshTool(ssh).invoke({ action: "upgrade", github_proxy: "direct" });
+        expect(ssh.commands[0]).toContain("unset SUPACLOUD_GITHUB_PROXY");
+        expect(ssh.commands[0]).not.toContain("SUPACLOUD_GITHUB_PROXY='direct'");
+    });
+
+    test("component upgrade bootstraps pinned verification and one capable transaction", async () => {
+        const ssh = new FakeSsh();
+        const tool = captureSshTool(ssh);
+
+        await tool.invoke({ action: "upgrade", version: "0.50.27", edge_runtime_version: "0.16.7" });
+
+        expect(ssh.commands).toHaveLength(2);
+        const command = ssh.commands[0] ?? "";
+        expect(command).toContain("sudo -n true");
+        expect(ssh.uploads).toHaveLength(1);
+        expect(ssh.uploads[0]?.remotePath).toMatch(/^\/tmp\/\.supacloud-release-assets-[0-9a-f-]+\.sh$/);
+        expect(ssh.uploads[0]?.mode).toBe(0o600);
+        expect(ssh.uploads[0]?.content).toContain("supacloud_install_pinned_gh");
+        expect(ssh.uploads[0]?.content).toContain('SUPACLOUD_GH_VERSION="${SUPACLOUD_GH_VERSION:-2.96.0}"');
+        expect(ssh.uploads[0]?.content).toContain("83d5c2ccad5498f58bf6368acb1ab32588cf43ab3a4b1c301bf36328b1c8bd60");
+        expect(ssh.uploads[0]?.content).toContain("06f86ec7103d41993b76cd78072f43595c34aaa56506d971d9860e67140bf909");
+        expect(command).toContain("supacloud_install_pinned_gh");
+        expect(command).toContain("/usr/local/bin/supacloud --version");
+        expect(command).toContain("0.50.27");
+        expect(command).toContain("supacloud_fetch_component_release");
+        expect(command).toContain("supacloud_download_release_asset");
+        expect(command).toContain('chmod 0755 "$STAGED_MANAGEMENT"');
+        expect(command).toContain("SUPACLOUD_EDGE_RUNTIME_UPGRADE_TAG=");
+        expect(command).toContain("unset SUPACLOUD_ALLOW_UNVERIFIED_RELEASE");
+        expect(command).not.toContain("/opt/supacloud/scripts");
+        expect(command).toContain("trap 'rm -f /tmp/.supacloud-release-assets-");
+        expect(command).not.toMatch(/\/usr\/local\/bin\/supacloud upgrade --yes/);
+        expect(Bun.spawnSync(["bash", "-n", "-c", command]).exitCode).toBe(0);
+        expect(ssh.commands[1]).toBe(`rm -f '${ssh.uploads[0]?.remotePath}'`);
+    });
+
+    test("component upgrade cleans its exact helper path when SSH execution throws", async () => {
+        const ssh = new FakeSsh();
+        ssh.upgradeExecThrows = true;
+        const tool = captureSshTool(ssh);
+
+        await expect(tool.invoke({
+            action: "upgrade",
+            version: "0.50.27",
+            edge_runtime_version: "0.16.7",
+        })).rejects.toThrow("connection dropped");
+
+        expect(ssh.uploads).toHaveLength(1);
+        expect(ssh.commands.at(-1)).toBe(`rm -f '${ssh.uploads[0]?.remotePath}'`);
+    });
+
+    test("failed helper upload still cleans its generated remote path", async () => {
+        const ssh = new FakeSsh();
+        ssh.uploadThrows = true;
+
+        await expect(captureSshTool(ssh).invoke({ action: "upgrade", version: "0.50.27" }))
+            .rejects.toThrow("upload failed");
+        expect(ssh.uploads).toHaveLength(0);
+        expect(ssh.commands).toHaveLength(1);
+        expect(ssh.commands[0]).toMatch(/^rm -f '\/tmp\/\.supacloud-release-assets-[0-9a-f-]+\.sh'$/);
+    });
+
+    test("partial helper upload cleans the exact remote path", async () => {
+        const ssh = new FakeSsh();
+        ssh.partialUploadThrows = true;
+
+        await expect(captureSshTool(ssh).invoke({ action: "upgrade", version: "0.50.27" }))
+            .rejects.toThrow("partial upload failed");
+        expect(ssh.uploads).toHaveLength(1);
+        expect(ssh.commands).toEqual([`rm -f '${ssh.uploads[0]?.remotePath}'`]);
+    });
+
+    test("partial upload and helper cleanup failures preserve both diagnostics", async () => {
+        const ssh = new FakeSsh();
+        ssh.partialUploadThrows = true;
+        ssh.cleanupExecFails = true;
+
+        let failure: unknown;
+        try {
+            await captureSshTool(ssh).invoke({ action: "upgrade", version: "0.50.27" });
+        } catch (error: unknown) {
+            failure = error;
+        }
+
+        expect(failure).toBeInstanceOf(AggregateError);
+        const diagnostics = (failure as AggregateError).errors.map(candidate => String(candidate));
+        expect(diagnostics.some(message => message.includes("partial upload failed"))).toBe(true);
+        expect(diagnostics.some(message => message.includes("Failed to remove remote upgrade helper"))).toBe(true);
+    });
+
+    test("helper cleanup failures are reported instead of swallowed", async () => {
+        const ssh = new FakeSsh();
+        ssh.cleanupExecFails = true;
+
+        await expect(captureSshTool(ssh).invoke({ action: "upgrade", version: "0.50.27" }))
+            .rejects.toThrow("Failed to remove remote upgrade helper");
+    });
+
+    test("remote and helper cleanup failures preserve both diagnostics", async () => {
+        const ssh = new FakeSsh();
+        ssh.upgradeExecFails = true;
+        ssh.cleanupExecFails = true;
+
+        let failure: unknown;
+        try {
+            await captureSshTool(ssh).invoke({ action: "upgrade", version: "0.50.27" });
+        } catch (error: unknown) {
+            failure = error;
+        }
+
+        expect(failure).toBeInstanceOf(AggregateError);
+        const diagnostics = (failure as AggregateError).errors.map(candidate => String(candidate));
+        expect(diagnostics.some(message => message.includes("exit 42") && message.includes("transaction failed"))).toBe(true);
+        expect(diagnostics.some(message => message.includes("Failed to remove remote upgrade helper"))).toBe(true);
+    });
+
+    test("remote upgrade failures reach the CLI error boundary", async () => {
+        const ssh = new FakeSsh();
+        ssh.upgradeExecFails = true;
+
+        await expect(captureSshTool(ssh).invoke({ action: "upgrade", version: "0.50.27" }))
+            .rejects.toThrow("Remote upgrade failed (exit 42): transaction failed");
+    });
+
+    test("Management-only upgrade reports that Edge Runtime is unchanged", async () => {
+        const tool = captureSshTool(new FakeSsh());
+        const result = await tool.invoke({ action: "upgrade", version: "0.50.27" });
+        expect(result.content[0]?.text).toContain("Edge Runtime was not upgraded");
     });
 
     test("install rejects unsafe hostnames and control characters in secrets", () => {

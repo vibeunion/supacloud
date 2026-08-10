@@ -3,7 +3,8 @@
 import { Type } from "@sinclair/typebox";
 import { stringEnum } from "./shared/schema";
 import { resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
+import { realpathSync } from "node:fs";
 import { runCli } from "./shared/cli";
 import { resolveSupaCloudContext, type ResolvedContext } from "./shared/context";
 import { HttpTransport } from "./shared/transports/http";
@@ -276,7 +277,12 @@ async function main() {
 }
 
 function isDirectRun(): boolean {
-    return Boolean(process.argv[1]) && import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
+    if (!process.argv[1]) return false;
+    try {
+        return realpathSync(fileURLToPath(import.meta.url)) === realpathSync(resolve(process.argv[1]));
+    } catch {
+        return false;
+    }
 }
 
 if (isDirectRun()) {

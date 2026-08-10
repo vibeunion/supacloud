@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import { Type } from "@sinclair/typebox";
 import { decodedSchema, optional, stringEnum, withDescription } from "../schema";
 import type { SshTransport } from "../transports/ssh";
+import releaseAssetsScript from "../../../../../scripts/lib/release_assets.sh" with { type: "text" };
 
 const SAFE_CONTAINER_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/;
 const SAFE_PROJECT_REF = /^[a-z0-9-]{1,20}$/;
@@ -15,6 +16,7 @@ const SAFE_TIMEOUT_SECONDS = 300;
 const SAFE_HOSTNAME = /^(?=.{1,253}$)(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)(?:\.(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?))*$/;
 const SAFE_SYSTEMD_UNIT = /^[a-zA-Z0-9][a-zA-Z0-9_.@:-]{0,127}$/;
 const SAFE_DB_IDENTIFIER = /^[a-zA-Z_][a-zA-Z0-9_-]{0,62}$/;
+const MINIMUM_COMPONENT_UPGRADE_VERSION = "0.50.27";
 
 function hostnameSchema(fieldName: string) {
     return decodedSchema(Type.String(), Type.String({ minLength: 1, maxLength: 253 }), (value) => {
@@ -76,6 +78,144 @@ function assertSafeReleaseTag(value: string): string {
         throw new Error("Invalid release version");
     }
     return value;
+}
+
+function assertExactStableVersion(value: string, fieldName: string): string {
+    if (!/^v?\d+\.\d+\.\d+$/.test(value)) {
+        throw new Error(`${fieldName} must be an exact stable semantic version`);
+    }
+    return value;
+}
+
+type UpgradeRequest = {
+    version?: string;
+    edgeRuntimeVersion?: string;
+    githubProxy?: string;
+    helperPath: string;
+};
+
+function upgradeEnvAssignments(request: UpgradeRequest): string {
+    return [
+        request.version ? `SUPACLOUD_UPGRADE_TAG=${quoteEnvValue(request.version)}` : "",
+        request.edgeRuntimeVersion ? `SUPACLOUD_EDGE_RUNTIME_UPGRADE_TAG=${quoteEnvValue(request.edgeRuntimeVersion)}` : "",
+        request.githubProxy ? `SUPACLOUD_GITHUB_PROXY=${quoteEnvValue(request.githubProxy)}` : "",
+    ].filter(Boolean).join(" ");
+}
+
+function componentBootstrapCommands(request: UpgradeRequest): string[] {
+    if (!request.edgeRuntimeVersion) return [`UPGRADE_RUNNER=${quoteEnvValue("/usr/local/bin/supacloud")}`];
+    const managementVersion = request.version || "latest";
+    return [
+        `ACTIVE_VERSION=$(/usr/local/bin/supacloud --version 2>&1 | grep -Eo '[0-9]+\\.[0-9]+\\.[0-9]+' | head -1 || true)`,
+        `UPGRADE_RUNNER=${quoteEnvValue("/usr/local/bin/supacloud")}`,
+        `if ! supacloud_version_at_least "$ACTIVE_VERSION" ${quoteEnvValue(MINIMUM_COMPONENT_UPGRADE_VERSION)}; then`,
+        `  case "$(uname -m)" in x86_64|amd64) MANAGEMENT_ASSET=supacloud-linux-amd64 ;; aarch64|arm64) MANAGEMENT_ASSET=supacloud-linux-arm64 ;; *) echo 'Unsupported Management architecture' >&2; exit 1 ;; esac`,
+        `  STAGED_MANAGEMENT=$(mktemp /tmp/supacloud-management-upgrade.XXXXXX)`,
+        `  MANAGEMENT_RELEASE=$(supacloud_fetch_component_release management-api ${quoteEnvValue(managementVersion)} "$MANAGEMENT_ASSET" web-console-build.tar.gz)`,
+        `  supacloud_download_release_asset "$MANAGEMENT_RELEASE" "$MANAGEMENT_ASSET" "$STAGED_MANAGEMENT" binary`,
+        `  chmod 0755 "$STAGED_MANAGEMENT"`,
+        `  STAGED_VERSION=$("$STAGED_MANAGEMENT" --version 2>&1 | grep -Eo '[0-9]+\\.[0-9]+\\.[0-9]+' | head -1 || true)`,
+        `  supacloud_version_at_least "$STAGED_VERSION" ${quoteEnvValue(MINIMUM_COMPONENT_UPGRADE_VERSION)} || { echo 'Target Management release lacks Edge Runtime transaction capability' >&2; exit 1; }`,
+        `  UPGRADE_RUNNER="$STAGED_MANAGEMENT"`,
+        "fi",
+    ];
+}
+
+function componentPreflightCommands(request: UpgradeRequest): string[] {
+    return request.edgeRuntimeVersion ? [
+        "test -f /etc/supabase/management-api.env || { echo 'EDGE_RUNTIME_MODE is unavailable; component upgrade requires external mode' >&2; exit 1; }",
+        "EDGE_RUNTIME_MODE_VALUE=$(awk -F= '$1 == \"EDGE_RUNTIME_MODE\" { value=$2 } END { gsub(/^[[:space:]\\\"'\"']+|[[:space:]\\\"'\"']+$/, \"\", value); print value }' /etc/supabase/management-api.env)",
+        "test \"$EDGE_RUNTIME_MODE_VALUE\" = external || { echo 'Edge Runtime component upgrade supports persisted external mode only' >&2; exit 1; }",
+    ] : [];
+}
+
+function buildRootUpgradeScript(request: UpgradeRequest): string {
+    const envAssignments = upgradeEnvAssignments(request);
+    return [
+        "set -euo pipefail",
+        "umask 077",
+        "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        "export PATH",
+        "unset SUPACLOUD_ALLOW_UNVERIFIED_RELEASE SUPACLOUD_GITHUB_REPOSITORY SUPACLOUD_RELEASES_API SUPACLOUD_ATTESTATION_SIGNER_WORKFLOW SUPACLOUD_GH_VERSION SUPACLOUD_GH_MIN_VERSION SUPACLOUD_GH_AMD64_SHA256 SUPACLOUD_GH_ARM64_SHA256 GH_PROXY",
+        request.githubProxy ? `export SUPACLOUD_GITHUB_PROXY=${quoteEnvValue(request.githubProxy)}` : "unset SUPACLOUD_GITHUB_PROXY",
+        "for tool in curl jq file sha256sum tar; do command -v \"$tool\" >/dev/null 2>&1 || { echo \"Required upgrade tool is missing: $tool\" >&2; exit 127; }; done",
+        "test -x /usr/local/bin/supacloud || { echo 'SupaCloud binary not found at /usr/local/bin/supacloud; run ssh install first.' >&2; exit 127; }",
+        ...componentPreflightCommands(request),
+        "STAGED_MANAGEMENT=''",
+        "trap 'test -z \"$STAGED_MANAGEMENT\" || rm -f \"$STAGED_MANAGEMENT\"' EXIT HUP INT TERM",
+        `source ${quoteEnvValue(request.helperPath)}`,
+        "if ! supacloud_attestation_verifier_available; then supacloud_install_pinned_gh /usr/local/bin/gh; fi",
+        "supacloud_attestation_verifier_available || { echo 'Pinned GitHub attestation verifier is unavailable' >&2; exit 1; }",
+        ...componentBootstrapCommands(request),
+        `${envAssignments ? `env ${envAssignments} ` : ""}"$UPGRADE_RUNNER" upgrade --yes`,
+    ].join("; ");
+}
+
+export function buildOfficialUpgradeCommand(request: UpgradeRequest): string {
+    const rootScript = buildRootUpgradeScript(request);
+    return `set -e; trap 'rm -f ${request.helperPath}' EXIT HUP INT TERM; ` +
+        "if [ \"$(id -u)\" -eq 0 ]; then " +
+        `bash -c ${quoteEnvValue(rootScript)}; ` +
+        "else sudo -n true; " +
+        `sudo -n bash -c ${quoteEnvValue(rootScript)}; fi`;
+}
+
+async function removeRemoteUpgradeHelper(ssh: SshTransport, helperPath: string): Promise<void> {
+    const cleanup = await ssh.exec(`rm -f ${quoteEnvValue(helperPath)}`);
+    if (!cleanup.success) {
+        throw new Error(`Failed to remove remote upgrade helper (exit ${cleanup.code}): ${cleanup.stderr.slice(-300)}`);
+    }
+}
+
+type OfficialUpgradeExecution = Awaited<ReturnType<SshTransport["exec"]>>;
+
+function remoteUpgradeFailure(execution: OfficialUpgradeExecution): Error {
+    const diagnostic = execution.stderr.trim() || execution.stdout.trim() || "no remote diagnostic";
+    return new Error(`Remote upgrade failed (exit ${execution.code}): ${diagnostic.slice(-500)}`);
+}
+
+function officialUpgradeOutcome(
+    execution: OfficialUpgradeExecution | undefined,
+    executionError: unknown,
+    cleanupError: unknown,
+): OfficialUpgradeExecution {
+    if (executionError && cleanupError) {
+        throw new AggregateError([executionError, cleanupError], "Upgrade execution failed and helper cleanup did not complete");
+    }
+    if (executionError) throw executionError;
+    if (!execution) throw new Error("Upgrade execution did not return a result");
+    if (cleanupError && !execution.success) {
+        throw new AggregateError(
+            [remoteUpgradeFailure(execution), cleanupError],
+            "Remote upgrade failed and helper cleanup did not complete",
+        );
+    }
+    if (cleanupError) throw cleanupError;
+    if (!execution.success) throw remoteUpgradeFailure(execution);
+    return execution;
+}
+
+async function executeOfficialUpgrade(
+    ssh: SshTransport,
+    helperPath: string,
+    command: string,
+): Promise<Awaited<ReturnType<SshTransport["exec"]>>> {
+    let execution: OfficialUpgradeExecution | undefined;
+    let executionError: unknown;
+    try {
+        await ssh.uploadText(helperPath, releaseAssetsScript, 0o600);
+        execution = await ssh.exec(command, 600_000);
+    } catch (error: unknown) {
+        executionError = error;
+    }
+
+    let cleanupError: unknown;
+    try {
+        await removeRemoteUpgradeHelper(ssh, helperPath);
+    } catch (error: unknown) {
+        cleanupError = error;
+    }
+    return officialUpgradeOutcome(execution, executionError, cleanupError);
 }
 
 function assertSafeGithubProxy(value: string): string {
@@ -226,6 +366,7 @@ Actions: ping, setup, install, upgrade, diagnose, exec, troubleshoot, container_
             edge_runtime: optional(stringEnum(["bun"]), "[install] Runtime (default: bun)"),
             storage_type: optional(stringEnum(["juicefs", "minio"]), "[install] Storage backend configurable through Admin"),
             version: optional(Type.String(), "[upgrade] Specific version"),
+            edge_runtime_version: optional(Type.String(), "[upgrade] Exact independent Edge Runtime version"),
             github_proxy: optional(Type.String(), "[install/upgrade] Explicit GitHub proxy prefix, or direct/none"),
             focus: optional(stringEnum(["all", "containers", "database", "network", "disk", "logs"]), "[troubleshoot] Focus area"),
             container: optional(Type.String(), "[container_logs] Container name"),
@@ -383,16 +524,31 @@ Actions: ping, setup, install, upgrade, diagnose, exec, troubleshoot, container_
                     break;
                 }
                 case "upgrade": {
-                    const envParts = [
-                        args.version ? `SUPACLOUD_UPGRADE_TAG=${assertSafeReleaseTag(args.version)}` : "",
-                        args.github_proxy ? `SUPACLOUD_GITHUB_PROXY=${quoteEnvValue(assertSafeGithubProxy(args.github_proxy))}` : "",
-                    ].filter(Boolean);
-                    const envPrefix = envParts.length > 0 ? `${envParts.join(" ")} ` : "";
-                    const cmd = "if [ ! -x /usr/local/bin/supacloud ]; then " +
-                        "echo 'SupaCloud binary not found at /usr/local/bin/supacloud; run ssh install first.' >&2; exit 127; " +
-                        `fi; ${envPrefix}/usr/local/bin/supacloud upgrade --yes`;
-                    const r = await ssh.exec(cmd, 600_000);
-                    text = r.success ? `✅ Upgrade done\n${r.stdout.slice(-300)}` : `❌ Failed (exit ${r.code})\n${r.stderr.slice(-500)}`;
+                    const version = args.version ? assertSafeReleaseTag(args.version) : undefined;
+                    const edgeRuntimeVersion = args.edge_runtime_version
+                        ? assertSafeReleaseTag(args.edge_runtime_version)
+                        : undefined;
+                    if (edgeRuntimeVersion && !version) {
+                        throw new Error("'version' is required with 'edge_runtime_version'");
+                    }
+                    if (edgeRuntimeVersion && version) {
+                        assertExactStableVersion(version, "version");
+                        assertExactStableVersion(edgeRuntimeVersion, "edge_runtime_version");
+                    }
+                    const validatedProxy = args.github_proxy ? assertSafeGithubProxy(args.github_proxy) : undefined;
+                    const githubProxy = validatedProxy && !["direct", "none"].includes(validatedProxy.toLowerCase())
+                        ? validatedProxy
+                        : undefined;
+                    const helperPath = `/tmp/.supacloud-release-assets-${randomUUID()}.sh`;
+                    const cmd = buildOfficialUpgradeCommand({
+                        version,
+                        edgeRuntimeVersion,
+                        githubProxy,
+                        helperPath,
+                    });
+                    const upgradeExecution = await executeOfficialUpgrade(ssh, helperPath, cmd);
+                    const edgeBoundary = edgeRuntimeVersion ? "" : "\n⚠️ Edge Runtime was not upgraded; provide --edge_runtime_version for a component transaction.";
+                    text = `✅ Upgrade done\n${upgradeExecution.stdout.slice(-300)}${edgeBoundary}`;
                     break;
                 }
                 case "diagnose": {

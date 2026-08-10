@@ -13,6 +13,11 @@ const RELEASE_REPOSITORY = "zuohuadong/supacloud";
 const RELEASE_SIGNER_WORKFLOW = `${RELEASE_REPOSITORY}/.github/workflows/release-please.yml`;
 const BIN_TARGET = "/usr/local/bin/supacloud";
 const MANAGEMENT_SERVICE_UNIT = "supacloud.service";
+const EDGE_RUNTIME_SERVICE_UNIT = "supacloud-edge-runtime.service";
+const EDGE_RUNTIME_BINARY_TARGETS = new Set([
+    "/usr/local/bin/supacloud-edge-runtime",
+    "/opt/supacloud/bin/supacloud-edge-runtime",
+]);
 const DEFAULT_MANAGEMENT_ENV_FILE = "/etc/supabase/management-api.env";
 const DEFAULT_EDGE_RUNTIME_USER = "supacloud-edge";
 const DEFAULT_EDGE_RUNTIME_GROUP = "supacloud-edge";
@@ -67,7 +72,7 @@ export type BinaryBackupState = {
     activated: boolean;
 };
 
-type HostIdentityCommandResult = {
+export type HostIdentityCommandResult = {
     exitCode: number;
     stdout: string;
     stderr: string;
@@ -75,7 +80,7 @@ type HostIdentityCommandResult = {
 
 type HostIdentityCommandRunner = (command: string[]) => Promise<HostIdentityCommandResult>;
 
-export type ActiveManagementBinary = {
+export type ActiveSystemdBinary = {
     unit: string;
     execStartPath: string;
     pid: number;
@@ -83,7 +88,7 @@ export type ActiveManagementBinary = {
     sha256: string;
 };
 
-type ManagementBinaryInspectorOptions = {
+type SystemdBinaryInspectorOptions = {
     run?: HostIdentityCommandRunner;
     readlink?: (filePath: string) => string;
     sha256?: (filePath: string) => string;
@@ -124,8 +129,14 @@ export function backupCurrentBinary(
 
 export function restoreCurrentBinary(state: BinaryBackupState) {
     if (state.backupReady && existsSync(state.backupPath)) {
-        copyFileSync(state.backupPath, state.targetPath);
-        chmodSync(state.targetPath, 0o755);
+        const restorePath = `${state.targetPath}.restore-${process.pid}-${randomUUID()}`;
+        try {
+            copyFileSync(state.backupPath, restorePath);
+            chmodSync(restorePath, 0o755);
+            renameSync(restorePath, state.targetPath);
+        } finally {
+            rmSync(restorePath, { force: true });
+        }
     } else if (!state.hadTarget && state.activated) {
         rmSync(state.targetPath, { force: true });
     }
@@ -133,6 +144,13 @@ export function restoreCurrentBinary(state: BinaryBackupState) {
 
 export function cleanupBinaryBackup(state: BinaryBackupState) {
     rmSync(state.backupPath, { force: true });
+}
+
+export function activateStagedBinary(stagedPath: string, state: BinaryBackupState): void {
+    backupCurrentBinary(state);
+    renameSync(stagedPath, state.targetPath);
+    state.activated = true;
+    chmodSync(state.targetPath, 0o755);
 }
 
 export function captureFileState(filePath: string): FileState {
@@ -199,9 +217,28 @@ export function normalizeManagementReleaseTag(tag: string) {
     return `management-api-v${trimmed}`;
 }
 
+export function normalizeEdgeRuntimeReleaseTag(tag: string) {
+    const trimmed = tag.trim();
+    const version = trimmed.replace(/^edge-runtime-v/, "").replace(/^v/, "");
+    if (!/^\d+\.\d+\.\d+$/.test(version)) {
+        throw new Error("An exact stable Edge Runtime version is required");
+    }
+    return `edge-runtime-v${version}`;
+}
+
 function resolveReleaseApiUrl(targetVersion?: string) {
     const tag = normalizeManagementReleaseTag(targetVersion || process.env.SUPACLOUD_UPGRADE_TAG || process.env.SUPACLOUD_UPGRADE_VERSION || "");
     return tag ? `${RELEASES_API}/tags/${encodeURIComponent(tag)}` : `${RELEASES_API}?per_page=100`;
+}
+
+function resolveEdgeRuntimeReleaseApiUrl(version: string) {
+    return `${RELEASES_API}/tags/${encodeURIComponent(normalizeEdgeRuntimeReleaseTag(version))}`;
+}
+
+function resolveEdgeRuntimeBinaryName(managementBinaryName: string) {
+    return managementBinaryName.endsWith("arm64")
+        ? "supacloud-edge-runtime-linux-arm64"
+        : "supacloud-edge-runtime-linux-amd64";
 }
 
 function hasReleaseAsset(release: GithubRelease, assetName: string) {
@@ -222,6 +259,18 @@ export function selectManagementRelease(data: GithubRelease | GithubRelease[], b
         throw new Error(`No Management API release contains ${binaryName}, ${WEB_CONSOLE_ASSET}, and SHA256SUMS`);
     }
     return release;
+}
+
+export function selectEdgeRuntimeRelease(
+    releaseMetadata: GithubRelease,
+    expectedTag: string,
+    binaryName: string,
+): GithubRelease {
+    if (releaseMetadata.draft || releaseMetadata.prerelease || releaseMetadata.tag_name !== expectedTag
+        || !hasReleaseAsset(releaseMetadata, binaryName) || !hasReleaseAsset(releaseMetadata, "SHA256SUMS")) {
+        throw new Error(`Edge Runtime release ${expectedTag} must contain ${binaryName} and SHA256SUMS`);
+    }
+    return releaseMetadata;
 }
 
 export function verifyArtifactChecksum(filePath: string, assetName: string, checksums: string) {
@@ -272,6 +321,34 @@ export function parseSystemdMainPid(value: string): number {
     return pid;
 }
 
+export type SystemdEnabledState = "enabled" | "disabled";
+
+export function parseSystemdEnabledState(commandResult: HostIdentityCommandResult): SystemdEnabledState {
+    const state = commandResult.stdout.trim();
+    if ((commandResult.exitCode === 0 || commandResult.exitCode === 1)
+        && (state === "enabled" || state === "disabled")) {
+        return state;
+    }
+    throw new Error(`Unsupported systemd enabled state: ${state || commandResult.stderr.trim() || commandResult.exitCode}`);
+}
+
+export function assertEdgeRuntimeBinaryTarget(targetPath: string): void {
+    if (!EDGE_RUNTIME_BINARY_TARGETS.has(targetPath)) {
+        throw new Error(`Unsafe Edge Runtime upgrade target: ${targetPath}`);
+    }
+}
+
+export async function readSystemdEnabledState(
+    unit: string,
+    run: HostIdentityCommandRunner = runHostIdentityCommand,
+): Promise<SystemdEnabledState> {
+    try {
+        return parseSystemdEnabledState(await run(["systemctl", "is-enabled", unit]));
+    } catch (error: unknown) {
+        throw new Error(`Cannot verify ${unit} enabled state: ${error instanceof Error ? error.message : String(error)}`);
+    }
+}
+
 async function readSystemdProperty(
     unit: string,
     property: "ExecStart" | "MainPID",
@@ -289,64 +366,71 @@ async function readSystemdProperty(
     return result.stdout;
 }
 
-async function readManagementExecStartPath(run: HostIdentityCommandRunner): Promise<string> {
+async function readExecStartPath(unit: string, run: HostIdentityCommandRunner): Promise<string> {
     try {
-        const rawExecStart = await readSystemdProperty(MANAGEMENT_SERVICE_UNIT, "ExecStart", run);
+        const rawExecStart = await readSystemdProperty(unit, "ExecStart", run);
         return parseSystemdExecStartPath(rawExecStart);
     } catch (error: unknown) {
-        throw new Error(`Cannot verify ${MANAGEMENT_SERVICE_UNIT} ExecStart: ${error instanceof Error ? error.message : String(error)}`);
+        throw new Error(`Cannot verify ${unit} ExecStart: ${error instanceof Error ? error.message : String(error)}`);
     }
 }
 
-async function readManagementMainPid(run: HostIdentityCommandRunner): Promise<number> {
+async function readMainPid(unit: string, run: HostIdentityCommandRunner): Promise<number> {
     try {
-        const rawMainPid = await readSystemdProperty(MANAGEMENT_SERVICE_UNIT, "MainPID", run);
+        const rawMainPid = await readSystemdProperty(unit, "MainPID", run);
         return parseSystemdMainPid(rawMainPid);
     } catch (error: unknown) {
-        throw new Error(`Cannot verify ${MANAGEMENT_SERVICE_UNIT} MainPID: ${error instanceof Error ? error.message : String(error)}`);
+        throw new Error(`Cannot verify ${unit} MainPID: ${error instanceof Error ? error.message : String(error)}`);
     }
 }
 
-function resolveActiveExecutablePath(procExecutablePath: string, readlink: (filePath: string) => string): string {
+function resolveActiveExecutablePath(unit: string, procExecutablePath: string, readlink: (filePath: string) => string): string {
     try {
         return readlink(procExecutablePath).trim();
     } catch (error: unknown) {
-        throw new Error(`Cannot resolve ${MANAGEMENT_SERVICE_UNIT} active executable at ${procExecutablePath}: ${error instanceof Error ? error.message : String(error)}`);
+        throw new Error(`Cannot resolve ${unit} active executable at ${procExecutablePath}: ${error instanceof Error ? error.message : String(error)}`);
     }
 }
 
-function hashActiveExecutable(procExecutablePath: string, sha256: (filePath: string) => string): string {
+function hashActiveExecutable(unit: string, procExecutablePath: string, sha256: (filePath: string) => string): string {
     let digest: string;
     try {
         digest = sha256(procExecutablePath).trim().toLowerCase();
     } catch (error: unknown) {
-        throw new Error(`Cannot hash ${MANAGEMENT_SERVICE_UNIT} active executable at ${procExecutablePath}: ${error instanceof Error ? error.message : String(error)}`);
+        throw new Error(`Cannot hash ${unit} active executable at ${procExecutablePath}: ${error instanceof Error ? error.message : String(error)}`);
     }
     if (!/^[0-9a-f]{64}$/.test(digest)) {
-        throw new Error(`Cannot verify ${MANAGEMENT_SERVICE_UNIT} active executable: invalid SHA-256 digest`);
+        throw new Error(`Cannot verify ${unit} active executable: invalid SHA-256 digest`);
     }
     return digest;
 }
 
-export async function inspectActiveManagementBinary(
-    options: ManagementBinaryInspectorOptions = {},
-): Promise<ActiveManagementBinary> {
+export async function inspectActiveSystemdBinary(
+    unit: string,
+    options: SystemdBinaryInspectorOptions = {},
+): Promise<ActiveSystemdBinary> {
     const run = options.run ?? runHostIdentityCommand;
     const readlink = options.readlink ?? ((filePath: string) => readlinkSync(filePath, "utf8"));
     const sha256 = options.sha256 ?? sha256File;
-    const execStartPath = await readManagementExecStartPath(run);
-    const pid = await readManagementMainPid(run);
+    const execStartPath = await readExecStartPath(unit, run);
+    const pid = await readMainPid(unit, run);
     const procExecutablePath = `/proc/${pid}/exe`;
-    const executablePath = resolveActiveExecutablePath(procExecutablePath, readlink);
-    const digest = hashActiveExecutable(procExecutablePath, sha256);
-    const stablePid = await readManagementMainPid(run);
+    const executablePath = resolveActiveExecutablePath(unit, procExecutablePath, readlink);
+    const digest = hashActiveExecutable(unit, procExecutablePath, sha256);
+    const stablePid = await readMainPid(unit, run);
     if (stablePid !== pid) {
-        throw new Error(`Cannot verify ${MANAGEMENT_SERVICE_UNIT} active executable: MainPID changed from ${pid} to ${stablePid}`);
+        throw new Error(`Cannot verify ${unit} active executable: MainPID changed from ${pid} to ${stablePid}`);
     }
-    return { unit: MANAGEMENT_SERVICE_UNIT, execStartPath, pid, executablePath, sha256: digest };
+    return { unit, execStartPath, pid, executablePath, sha256: digest };
 }
 
-function assertCanonicalManagementBinary(snapshot: ActiveManagementBinary, phase: string): void {
+export async function inspectActiveManagementBinary(
+    options: SystemdBinaryInspectorOptions = {},
+): Promise<ActiveSystemdBinary> {
+    return inspectActiveSystemdBinary(MANAGEMENT_SERVICE_UNIT, options);
+}
+
+function assertCanonicalManagementBinary(snapshot: ActiveSystemdBinary, phase: string): void {
     if (snapshot.execStartPath !== BIN_TARGET) {
         throw new Error(`${phase}: ${snapshot.unit} ExecStart is ${snapshot.execStartPath}; upgrade target is ${BIN_TARGET}`);
     }
@@ -356,8 +440,8 @@ function assertCanonicalManagementBinary(snapshot: ActiveManagementBinary, phase
 }
 
 export async function verifyManagementUpgradePreflight(
-    options: ManagementBinaryInspectorOptions = {},
-): Promise<ActiveManagementBinary> {
+    options: SystemdBinaryInspectorOptions = {},
+): Promise<ActiveSystemdBinary> {
     const snapshot = await inspectActiveManagementBinary(options);
     assertCanonicalManagementBinary(snapshot, "Refusing to migrate");
     return snapshot;
@@ -374,8 +458,8 @@ export function verifyBackupPrivilegeDropPreflight(
 
 export async function verifyActivatedManagementBinary(
     expectedSha256: string,
-    options: ManagementBinaryInspectorOptions = {},
-): Promise<ActiveManagementBinary> {
+    options: SystemdBinaryInspectorOptions = {},
+): Promise<ActiveSystemdBinary> {
     const normalizedExpected = expectedSha256.trim().toLowerCase();
     if (!/^[0-9a-f]{64}$/.test(normalizedExpected)) {
         throw new Error("Post-upgrade binary verification requires a valid staged SHA-256 digest");
@@ -384,6 +468,26 @@ export async function verifyActivatedManagementBinary(
     assertCanonicalManagementBinary(snapshot, "Post-upgrade binary verification failed");
     if (snapshot.sha256 !== normalizedExpected) {
         throw new Error(`Post-upgrade binary verification failed: ${snapshot.unit} is running a binary whose SHA-256 does not match the staged release binary`);
+    }
+    return snapshot;
+}
+
+export async function verifyActivatedSystemdBinary(
+    unit: string,
+    targetPath: string,
+    expectedSha256: string,
+    options: SystemdBinaryInspectorOptions = {},
+): Promise<ActiveSystemdBinary> {
+    const normalizedExpected = expectedSha256.trim().toLowerCase();
+    if (!/^[0-9a-f]{64}$/.test(normalizedExpected)) {
+        throw new Error(`Post-upgrade ${unit} verification requires a valid staged SHA-256 digest`);
+    }
+    const snapshot = await inspectActiveSystemdBinary(unit, options);
+    if (snapshot.execStartPath !== targetPath || snapshot.executablePath !== targetPath) {
+        throw new Error(`Post-upgrade ${unit} verification failed: expected active target ${targetPath}`);
+    }
+    if (snapshot.sha256 !== normalizedExpected) {
+        throw new Error(`Post-upgrade ${unit} verification failed: active SHA-256 does not match the staged release`);
     }
     return snapshot;
 }
@@ -411,7 +515,23 @@ export type UpgradeTransactionOperations = {
     cleanup?: () => Promise<void>;
 };
 
-export async function executeUpgradeTransaction(operations: UpgradeTransactionOperations) {
+export type UpgradeFailureKind =
+    | "rollback-incomplete"
+    | "cleanup-incomplete-after-commit"
+    | "cleanup-incomplete-after-failure";
+
+export class UpgradeTransactionError extends AggregateError {
+    constructor(
+        readonly kind: UpgradeFailureKind,
+        errors: unknown[],
+        message: string,
+    ) {
+        super(errors, message);
+        this.name = "UpgradeTransactionError";
+    }
+}
+
+async function executeUpgradePhases(operations: UpgradeTransactionOperations): Promise<void> {
     let activationStarted = false;
     try {
         await operations.preflight();
@@ -424,13 +544,60 @@ export async function executeUpgradeTransaction(operations: UpgradeTransactionOp
         await operations.restart();
         await operations.healthCheck();
     } catch (error: unknown) {
-        if (activationStarted) {
-            await operations.rollback();
-        }
+        if (activationStarted) await rethrowAfterUpgradeRollback(operations, error);
         throw error;
-    } finally {
-        await operations.cleanup?.();
     }
+}
+
+async function rethrowAfterUpgradeRollback(
+    operations: UpgradeTransactionOperations,
+    upgradeError: unknown,
+): Promise<never> {
+    try {
+        await operations.rollback();
+    } catch (rollbackError: unknown) {
+        throw new UpgradeTransactionError(
+            "rollback-incomplete",
+            [upgradeError, rollbackError],
+            "Upgrade failed and rollback did not complete",
+        );
+    }
+    throw upgradeError;
+}
+
+function throwUpgradeOutcome(transactionError: unknown, cleanupError: unknown): void {
+    if (transactionError && cleanupError) {
+        throw new UpgradeTransactionError(
+            "cleanup-incomplete-after-failure",
+            [transactionError, cleanupError],
+            "Upgrade failed and cleanup did not complete",
+        );
+    }
+    if (transactionError) throw transactionError;
+    if (cleanupError) {
+        throw new UpgradeTransactionError(
+            "cleanup-incomplete-after-commit",
+            [cleanupError],
+            "Upgrade committed but cleanup did not complete",
+        );
+    }
+}
+
+export async function executeUpgradeTransaction(operations: UpgradeTransactionOperations) {
+    let transactionError: unknown;
+    try {
+        await executeUpgradePhases(operations);
+    } catch (error: unknown) {
+        transactionError = error;
+    }
+
+    let cleanupError: unknown;
+    try {
+        await operations.cleanup?.();
+    } catch (error: unknown) {
+        cleanupError = error;
+    }
+    throwUpgradeOutcome(transactionError, cleanupError);
 }
 
 function normalizeProxyPrefix(value: string) {
@@ -804,7 +971,7 @@ async function verifyArtifactAttestation(filePath: string) {
     recordIntegrityMode("break-glass:same-release-sha256-only");
 }
 
-async function validateBinaryArtifact(filePath: string, binaryName: string) {
+async function validateElfBinaryArtifact(filePath: string, binaryName: string) {
     const inspected = await $`file -b ${filePath}`.nothrow().quiet();
     const description = inspected.stdout.toString().trim();
     if (inspected.exitCode !== 0 || !description.includes("ELF")) {
@@ -816,6 +983,10 @@ async function validateBinaryArtifact(filePath: string, binaryName: string) {
     }
 
     await $`chmod 0755 ${filePath}`;
+}
+
+async function validateManagementBinaryArtifact(filePath: string, binaryName: string) {
+    await validateElfBinaryArtifact(filePath, binaryName);
     const smoke = Bun.spawn([filePath, "--version"], { stdout: "pipe", stderr: "pipe" });
     if (await smoke.exited !== 0) {
         throw new Error(`${binaryName} failed the --version smoke check`);
@@ -838,25 +1009,29 @@ type StagedBinary = {
     sha256: string;
 };
 
-async function stageBinary(
-    downloadUrl: string,
-    binaryName: string,
-    checksums: string,
-    preferredEndpoint: GithubEndpoint,
-    forceYes?: boolean,
-): Promise<StagedBinary> {
-    const tmpBinary = path.join(os.tmpdir(), `${binaryName}-${process.pid}-${Date.now()}`);
-    const stagedBinary = `${BIN_TARGET}.new-${process.pid}`;
+type StageBinaryRequest = {
+    downloadUrl: string;
+    binaryName: string;
+    checksums: string;
+    preferredEndpoint: GithubEndpoint;
+    targetPath: string;
+    validate: (filePath: string, binaryName: string) => Promise<void>;
+    forceYes?: boolean;
+};
+
+async function stageBinary(request: StageBinaryRequest): Promise<StagedBinary> {
+    const tmpBinary = path.join(os.tmpdir(), `${request.binaryName}-${process.pid}-${Date.now()}`);
+    const stagedBinary = `${request.targetPath}.new-${process.pid}`;
     try {
-        const endpoint = await downloadAsset(downloadUrl, tmpBinary, preferredEndpoint, forceYes);
-        const releaseSha256 = verifyArtifactChecksum(tmpBinary, binaryName, checksums);
+        const endpoint = await downloadAsset(request.downloadUrl, tmpBinary, request.preferredEndpoint, request.forceYes);
+        const releaseSha256 = verifyArtifactChecksum(tmpBinary, request.binaryName, request.checksums);
         await verifyArtifactAttestation(tmpBinary);
-        await validateBinaryArtifact(tmpBinary, binaryName);
+        await request.validate(tmpBinary, request.binaryName);
         await $`install -m 0755 ${tmpBinary} ${stagedBinary}`;
         const stagedSha256 = sha256File(stagedBinary);
         if (stagedSha256 !== releaseSha256) {
             await $`rm -f ${stagedBinary}`.nothrow().quiet();
-            throw new Error(`SHA256 mismatch for staged ${binaryName}`);
+            throw new Error(`SHA256 mismatch for staged ${request.binaryName}`);
         }
         return { path: stagedBinary, endpoint, sha256: stagedSha256 };
     } catch (error: unknown) {
@@ -1281,6 +1456,20 @@ export function resolvePersistedEdgeRuntimeMode(persistedMode?: string): EdgeRun
     throw new Error(`Invalid persisted EDGE_RUNTIME_MODE: ${persistedMode}`);
 }
 
+export function assertExternalEdgeRuntimeUpgradeMode(mode: EdgeRuntimeMode): void {
+    if (mode !== "external") {
+        throw new Error("Edge Runtime component upgrade supports persisted external mode only");
+    }
+}
+
+export function shouldCleanupUpgradeArtifacts(state: {
+    committed: boolean;
+    rollbackSucceeded: boolean;
+    activationStarted: boolean;
+}): boolean {
+    return state.committed || state.rollbackSucceeded || !state.activationStarted;
+}
+
 async function reloadSystemdUnits() {
     const reload = await $`systemctl daemon-reload`.nothrow().quiet();
     if (reload.exitCode !== 0) {
@@ -1440,6 +1629,7 @@ export async function waitForUpgradeHealth() {
 
 type UpgradeActivationState = {
     binary: BinaryBackupState;
+    edgeBinary: BinaryBackupState | null;
     oldWebTarget: string | null;
     oldWebBackup: string | null;
     managementEnvState: FileState | null;
@@ -1449,11 +1639,74 @@ type UpgradeActivationState = {
     embeddedEdgePrivilegeDropInState: FileState | null;
 };
 
-async function activateArtifacts(stagedBinary: StagedBinary, stagedWeb: StagedWebConsole | null, state: UpgradeActivationState) {
-    backupCurrentBinary(state.binary);
-    renameSync(stagedBinary.path, BIN_TARGET);
-    state.binary.activated = true;
-    chmodSync(BIN_TARGET, 0o755);
+type RunUpgradeOptions = {
+    forceYes?: boolean;
+    targetVersion?: string;
+    edgeRuntimeVersion?: string;
+};
+
+type EdgeRuntimeUpgradePlan = {
+    binaryName: string;
+    enabledState: SystemdEnabledState;
+    endpoint: GithubEndpoint;
+    release: GithubRelease;
+    targetPath: string;
+};
+
+type EdgeRuntimeReleasePlanRequest = {
+    binaryName: string;
+    forceYes?: boolean;
+    preflight: ActiveSystemdBinary | null;
+    requestedVersion: string;
+};
+
+type UpgradeReleasePlan = {
+    binaryName: string;
+    endpoint: GithubEndpoint;
+    edgeRuntime: EdgeRuntimeUpgradePlan | null;
+    release: GithubRelease;
+    remoteVersion: string;
+};
+
+type UpgradeExecutionState = {
+    activatedEdgeRuntimeMode: EdgeRuntimeMode | null;
+    activation: UpgradeActivationState | null;
+    committed: boolean;
+    downloadEndpointLabel: string;
+    edgeRuntimeEndpointLabel: string | null;
+    rollbackSucceeded: boolean;
+    stagedEdgeRuntime: StagedBinary | null;
+    stagedManagement: StagedBinary | null;
+    stagedWebConsole: StagedWebConsole | null;
+    webConsoleEndpointLabel: string | null;
+};
+
+type UpgradeExecutionContext = {
+    checksums: string;
+    edgeRuntimeChecksums: string | null;
+    options: RunUpgradeOptions;
+    plan: UpgradeReleasePlan;
+    preparedSecrets: PreparedUpgradeSecrets;
+    spinner: ReturnType<typeof p.spinner>;
+    state: UpgradeExecutionState;
+};
+
+type UpgradeCleanupAction = {
+    description: string;
+    run: () => void;
+};
+
+async function activateArtifacts(
+    stagedBinary: StagedBinary,
+    stagedEdgeBinary: StagedBinary | null,
+    stagedWeb: StagedWebConsole | null,
+    state: UpgradeActivationState,
+) {
+    activateStagedBinary(stagedBinary.path, state.binary);
+
+    if (stagedEdgeBinary && state.edgeBinary) {
+        activateStagedBinary(stagedEdgeBinary.path, state.edgeBinary);
+    }
 
     if (stagedWeb) {
         await $`mkdir -p ${WEB_CONSOLE_ROOT}`;
@@ -1475,9 +1728,10 @@ async function activateArtifacts(stagedBinary: StagedBinary, stagedWeb: StagedWe
 
 async function rollbackArtifacts(state: UpgradeActivationState, stagedWeb: StagedWebConsole | null) {
     restoreCurrentBinary(state.binary);
+    if (state.edgeBinary) restoreCurrentBinary(state.edgeBinary);
 
     if (stagedWeb) {
-        await $`rm -rf ${WEB_CONSOLE_CURRENT_LINK}`.nothrow().quiet();
+        rmSync(WEB_CONSOLE_CURRENT_LINK, { force: true, recursive: true });
         if (state.oldWebBackup) {
             await $`mv ${state.oldWebBackup} ${WEB_CONSOLE_CURRENT_LINK}`;
         } else if (state.oldWebTarget) {
@@ -1506,130 +1760,417 @@ async function rollbackArtifacts(state: UpgradeActivationState, stagedWeb: Stage
     await waitForUpgradeHealth();
 }
 
-export async function runUpgrade(options: { forceYes?: boolean; targetVersion?: string } = {}) {
+function createActivationState(edgeRuntimeTarget: string | null): UpgradeActivationState {
+    return {
+        binary: createBinaryBackupState(BIN_TARGET),
+        edgeBinary: edgeRuntimeTarget ? createBinaryBackupState(edgeRuntimeTarget) : null,
+        oldWebTarget: null,
+        oldWebBackup: null,
+        managementEnvState: null,
+        edgeRuntimeEnvState: null,
+        edgeRuntimeDropInState: null,
+        managementPrivilegeDropInState: null,
+        embeddedEdgePrivilegeDropInState: null,
+    };
+}
+
+async function inspectEdgeRuntimeUpgradeTarget(requestedVersion: string): Promise<ActiveSystemdBinary | null> {
+    if (!requestedVersion) return null;
+    assertExternalEdgeRuntimeUpgradeMode(await runtimeModeForBinaryUpgrade());
+    const preflight = await inspectActiveSystemdBinary(EDGE_RUNTIME_SERVICE_UNIT);
+    assertEdgeRuntimeBinaryTarget(preflight.execStartPath);
+    if (preflight.executablePath !== preflight.execStartPath) {
+        throw new Error(`${EDGE_RUNTIME_SERVICE_UNIT} runs ${preflight.executablePath}; expected ${preflight.execStartPath}`);
+    }
+    return preflight;
+}
+
+async function resolveEdgeRuntimeUpgradePlan(
+    request: EdgeRuntimeReleasePlanRequest,
+): Promise<EdgeRuntimeUpgradePlan | null> {
+    const { binaryName, forceYes, preflight, requestedVersion } = request;
+    if (!preflight) return null;
+    const metadata = await fetchReleaseMetadata(resolveEdgeRuntimeReleaseApiUrl(requestedVersion), forceYes);
+    const expectedTag = normalizeEdgeRuntimeReleaseTag(requestedVersion);
+    return {
+        binaryName,
+        enabledState: await readSystemdEnabledState(EDGE_RUNTIME_SERVICE_UNIT),
+        endpoint: metadata.endpoint,
+        release: selectEdgeRuntimeRelease(metadata.data as GithubRelease, expectedTag, binaryName),
+        targetPath: preflight.execStartPath,
+    };
+}
+
+async function resolveUpgradeReleasePlan(options: RunUpgradeOptions): Promise<UpgradeReleasePlan> {
+    const requestedEdgeVersion = options.edgeRuntimeVersion
+        || process.env.SUPACLOUD_EDGE_RUNTIME_UPGRADE_TAG
+        || "";
+    const edgePreflight = await inspectEdgeRuntimeUpgradeTarget(requestedEdgeVersion);
+    const binaryName = resolveLinuxBinaryName();
+    const metadata = await fetchReleaseMetadata(resolveReleaseApiUrl(options.targetVersion), options.forceYes);
+    const release = selectManagementRelease(metadata.data as GithubRelease | GithubRelease[], binaryName);
+    const edgeRuntime = await resolveEdgeRuntimeUpgradePlan({
+        binaryName: resolveEdgeRuntimeBinaryName(binaryName),
+        forceYes: options.forceYes,
+        preflight: edgePreflight,
+        requestedVersion: requestedEdgeVersion,
+    });
+    return { binaryName, endpoint: metadata.endpoint, edgeRuntime, release, remoteVersion: release.tag_name || "unknown" };
+}
+
+function upgradeConfirmationMessage(plan: UpgradeReleasePlan): string {
+    const edgeSummary = plan.edgeRuntime
+        ? ` and ${plan.edgeRuntime.targetPath} with ${plan.edgeRuntime.binaryName} from ${plan.edgeRuntime.release.tag_name}`
+        : "";
+    return `Replace ${BIN_TARGET} with ${plan.binaryName} from ${plan.remoteVersion}${edgeSummary}?`;
+}
+
+async function confirmUpgrade(plan: UpgradeReleasePlan, forceYes?: boolean): Promise<boolean> {
+    if (forceYes) return true;
+    const confirmation = await p.confirm({ message: upgradeConfirmationMessage(plan), initialValue: true });
+    return !p.isCancel(confirmation) && confirmation;
+}
+
+function createUpgradeExecutionState(plan: UpgradeReleasePlan): UpgradeExecutionState {
+    return {
+        activatedEdgeRuntimeMode: null,
+        activation: null,
+        committed: false,
+        downloadEndpointLabel: plan.endpoint.label,
+        edgeRuntimeEndpointLabel: null,
+        rollbackSucceeded: false,
+        stagedEdgeRuntime: null,
+        stagedManagement: null,
+        stagedWebConsole: null,
+        webConsoleEndpointLabel: null,
+    };
+}
+
+async function createUpgradeExecutionContext(
+    plan: UpgradeReleasePlan,
+    options: RunUpgradeOptions,
+    spinner: ReturnType<typeof p.spinner>,
+): Promise<UpgradeExecutionContext> {
+    const preparedSecrets = prepareUpgradeSecrets(await resolveUpgradeEnvironment());
+    const checksums = await downloadReleaseChecksums(plan.release, plan.endpoint, options.forceYes);
+    const edgeRuntimeChecksums = plan.edgeRuntime
+        ? await downloadReleaseChecksums(plan.edgeRuntime.release, plan.edgeRuntime.endpoint, options.forceYes)
+        : null;
+    return {
+        checksums,
+        edgeRuntimeChecksums,
+        options,
+        plan,
+        preparedSecrets,
+        spinner,
+        state: createUpgradeExecutionState(plan),
+    };
+}
+
+async function verifyUpgradePreflight(context: UpgradeExecutionContext): Promise<void> {
+    context.spinner.start(`Verifying ${MANAGEMENT_SERVICE_UNIT} uses the canonical upgrade target`);
+    verifyBackupPrivilegeDropPreflight();
+    await verifyManagementUpgradePreflight();
+    const edgeRuntime = context.plan.edgeRuntime;
+    if (!edgeRuntime) return;
+    const current = await inspectActiveSystemdBinary(EDGE_RUNTIME_SERVICE_UNIT);
+    if (current.execStartPath !== edgeRuntime.targetPath || current.executablePath !== edgeRuntime.targetPath) {
+        throw new Error(`${EDGE_RUNTIME_SERVICE_UNIT} target changed during upgrade preflight`);
+    }
+}
+
+async function stageManagementUpgrade(context: UpgradeExecutionContext): Promise<void> {
+    const { plan, state } = context;
+    context.spinner.start(`Downloading, verifying, and staging ${plan.binaryName}`);
+    state.stagedManagement = await stageBinary({
+        downloadUrl: releaseAssetUrl(plan.release, plan.binaryName),
+        binaryName: plan.binaryName,
+        checksums: context.checksums,
+        preferredEndpoint: plan.endpoint,
+        targetPath: BIN_TARGET,
+        validate: validateManagementBinaryArtifact,
+        forceYes: context.options.forceYes,
+    });
+    state.downloadEndpointLabel = state.stagedManagement.endpoint.label;
+}
+
+async function stageEdgeRuntimeUpgrade(context: UpgradeExecutionContext): Promise<void> {
+    const edgeRuntime = context.plan.edgeRuntime;
+    if (!edgeRuntime || !context.edgeRuntimeChecksums) return;
+    context.spinner.start(`Downloading, verifying, and staging ${edgeRuntime.binaryName}`);
+    context.state.stagedEdgeRuntime = await stageBinary({
+        downloadUrl: releaseAssetUrl(edgeRuntime.release, edgeRuntime.binaryName),
+        binaryName: edgeRuntime.binaryName,
+        checksums: context.edgeRuntimeChecksums,
+        preferredEndpoint: edgeRuntime.endpoint,
+        targetPath: edgeRuntime.targetPath,
+        validate: validateElfBinaryArtifact,
+        forceYes: context.options.forceYes,
+    });
+    context.state.edgeRuntimeEndpointLabel = context.state.stagedEdgeRuntime.endpoint.label;
+}
+
+async function stageWebConsoleUpgrade(context: UpgradeExecutionContext): Promise<void> {
+    const { plan, state } = context;
+    context.spinner.start(`Downloading, verifying, and staging ${WEB_CONSOLE_ASSET}`);
+    state.stagedWebConsole = await stageWebConsoleBuild(
+        releaseAssetUrl(plan.release, WEB_CONSOLE_ASSET),
+        plan.remoteVersion,
+        context.checksums,
+        plan.endpoint,
+        context.options.forceYes,
+    );
+    state.webConsoleEndpointLabel = state.stagedWebConsole.endpoint.label;
+}
+
+async function stageUpgradeArtifacts(context: UpgradeExecutionContext): Promise<void> {
+    await stageManagementUpgrade(context);
+    await stageEdgeRuntimeUpgrade(context);
+    await stageWebConsoleUpgrade(context);
+}
+
+async function migrateUpgradeMetadata(context: UpgradeExecutionContext): Promise<void> {
+    const stagedManagement = context.state.stagedManagement;
+    if (!stagedManagement) throw new Error("Upgrade binary was not staged");
+    context.spinner.start("Applying backward-compatible metadata database migrations with the staged binary");
+    await runStagedDatabaseMigration(stagedManagement.path, context.preparedSecrets);
+}
+
+async function activateUpgradeArtifacts(context: UpgradeExecutionContext): Promise<void> {
+    const { plan, state } = context;
+    if (!state.stagedManagement) throw new Error("Upgrade binary was not staged");
+    context.spinner.start("Atomically activating staged SupaCloud artifacts");
+    state.activation = createActivationState(plan.edgeRuntime?.targetPath || null);
+    await activateArtifacts(
+        state.stagedManagement,
+        state.stagedEdgeRuntime,
+        state.stagedWebConsole,
+        state.activation,
+    );
+}
+
+function captureUpgradeRuntimeFiles(activation: UpgradeActivationState): void {
+    activation.managementEnvState = captureFileState(managementEnvFile());
+    activation.edgeRuntimeEnvState = captureFileState(edgeRuntimeEnvFile());
+    activation.edgeRuntimeDropInState = captureFileState(edgeRuntimeCapacityDropIn());
+    activation.managementPrivilegeDropInState = captureFileState(DEFAULT_MANAGEMENT_PRIVILEGE_DROPIN);
+    activation.embeddedEdgePrivilegeDropInState = captureFileState(embeddedEdgePrivilegeDropIn());
+}
+
+async function applyUpgradeRuntimeSettings(context: UpgradeExecutionContext): Promise<void> {
+    const activation = context.state.activation;
+    if (!activation) throw new Error("Upgrade activation state is unavailable");
+    context.spinner.start("Applying runtime settings and restarting SupaCloud services");
+    captureUpgradeRuntimeFiles(activation);
+    const edgeRuntimeIdentity = await ensurePersistedEdgeRuntimeIdentity(managementEnvFile());
+    upsertPersistedEdgeRuntimePort(managementEnvFile(), edgeRuntimeEnvFile());
+    const edgeRuntimeMode = await runtimeModeForBinaryUpgrade();
+    context.state.activatedEdgeRuntimeMode = edgeRuntimeMode;
+    await reconcileManagementPrivilegeDropIns(edgeRuntimeMode, edgeRuntimeIdentity);
+    if (edgeRuntimeMode === "external") await ensureEdgeRuntimeCapacityDropIn(context.preparedSecrets.runtimeEnv);
+    upsertManagementWebConsoleDir(managementEnvFile());
+    await restartServices(edgeRuntimeMode);
+}
+
+async function verifyEdgeRuntimeUpgrade(context: UpgradeExecutionContext): Promise<void> {
+    const { edgeRuntime } = context.plan;
+    const stagedEdgeRuntime = context.state.stagedEdgeRuntime;
+    if (!edgeRuntime || !stagedEdgeRuntime) return;
+    await verifyActivatedSystemdBinary(
+        EDGE_RUNTIME_SERVICE_UNIT,
+        edgeRuntime.targetPath,
+        stagedEdgeRuntime.sha256,
+    );
+    const enabledState = await readSystemdEnabledState(EDGE_RUNTIME_SERVICE_UNIT);
+    if (enabledState !== edgeRuntime.enabledState) {
+        throw new Error(`${EDGE_RUNTIME_SERVICE_UNIT} enabled state changed from ${edgeRuntime.enabledState} to ${enabledState}`);
+    }
+}
+
+async function verifyUpgradeActivation(context: UpgradeExecutionContext): Promise<void> {
+    const stagedManagement = context.state.stagedManagement;
+    if (!context.state.activatedEdgeRuntimeMode) throw new Error("Edge Runtime mode was not resolved");
+    if (!stagedManagement) throw new Error("Upgrade binary was not staged");
+    context.spinner.start("Waiting for the SupaCloud health endpoint");
+    await waitForUpgradeHealth();
+    await verifyActivatedManagementBinary(stagedManagement.sha256);
+    await verifyEdgeRuntimeUpgrade(context);
+    context.state.committed = true;
+}
+
+async function rollbackUpgradeActivation(context: UpgradeExecutionContext): Promise<void> {
+    const activation = context.state.activation;
+    if (!activation) return;
+    p.log.warn("Upgrade activation failed; restoring the previous binary and Web Console target.");
+    await rollbackArtifacts(activation, context.state.stagedWebConsole);
+    context.state.rollbackSucceeded = true;
+}
+
+function stagedArtifactCleanupActions(state: UpgradeExecutionState): UpgradeCleanupAction[] {
+    const actions: UpgradeCleanupAction[] = [];
+    const management = state.stagedManagement;
+    if (management) actions.push({
+        description: `remove staged Management binary ${management.path}`,
+        run: () => rmSync(management.path, { force: true }),
+    });
+    const edgeRuntime = state.stagedEdgeRuntime;
+    if (edgeRuntime) actions.push({
+        description: `remove staged Edge Runtime binary ${edgeRuntime.path}`,
+        run: () => rmSync(edgeRuntime.path, { force: true }),
+    });
+    const webConsole = state.stagedWebConsole;
+    if (!state.committed && webConsole) actions.push({
+        description: `remove staged Web Console ${webConsole.releaseDir}`,
+        run: () => rmSync(webConsole.releaseDir, { force: true, recursive: true }),
+    });
+    return actions;
+}
+
+function activatedBackupCleanupActions(state: UpgradeExecutionState): UpgradeCleanupAction[] {
+    const activation = state.activation;
+    if (!activation) return [];
+    const actions: UpgradeCleanupAction[] = [];
+    const oldWebBackup = activation.oldWebBackup;
+    if (state.committed && oldWebBackup) actions.push({
+        description: `remove previous Web Console backup ${oldWebBackup}`,
+        run: () => rmSync(oldWebBackup, { force: true, recursive: true }),
+    });
+    actions.push({
+        description: `remove Management backup ${activation.binary.backupPath}`,
+        run: () => cleanupBinaryBackup(activation.binary),
+    });
+    const edgeRuntimeBackup = activation.edgeBinary;
+    if (edgeRuntimeBackup) actions.push({
+        description: `remove Edge Runtime backup ${edgeRuntimeBackup.backupPath}`,
+        run: () => cleanupBinaryBackup(edgeRuntimeBackup),
+    });
+    return actions;
+}
+
+function upgradeCleanupActions(context: UpgradeExecutionContext): UpgradeCleanupAction[] {
+    return [
+        ...stagedArtifactCleanupActions(context.state),
+        ...activatedBackupCleanupActions(context.state),
+    ];
+}
+
+function executeUpgradeCleanupActions(actions: UpgradeCleanupAction[]): void {
+    const failures: Error[] = [];
+    for (const action of actions) {
+        try {
+            action.run();
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error);
+            failures.push(new Error(`${action.description}: ${message}`));
+        }
+    }
+    if (failures.length > 0) throw new AggregateError(failures, "Upgrade artifact cleanup did not complete");
+}
+
+async function cleanupUpgradeArtifacts(context: UpgradeExecutionContext): Promise<void> {
+    const { state } = context;
+    const recoveryComplete = shouldCleanupUpgradeArtifacts({
+        committed: state.committed,
+        rollbackSucceeded: state.rollbackSucceeded,
+        activationStarted: Boolean(state.activation),
+    });
+    if (recoveryComplete) executeUpgradeCleanupActions(upgradeCleanupActions(context));
+}
+
+function upgradeTransactionOperations(context: UpgradeExecutionContext): UpgradeTransactionOperations {
+    return {
+        preflight: () => verifyUpgradePreflight(context),
+        stage: () => stageUpgradeArtifacts(context),
+        migrate: () => migrateUpgradeMetadata(context),
+        activate: () => activateUpgradeArtifacts(context),
+        restart: () => applyUpgradeRuntimeSettings(context),
+        healthCheck: () => verifyUpgradeActivation(context),
+        rollback: () => rollbackUpgradeActivation(context),
+        cleanup: () => cleanupUpgradeArtifacts(context),
+    };
+}
+
+function upgradeRecoveryPaths(context: UpgradeExecutionContext | null): string[] {
+    if (!context) return [];
+    const { state } = context;
+    const candidates = [
+        state.activation?.binary.backupReady ? state.activation.binary.backupPath : null,
+        state.activation?.edgeBinary?.backupReady ? state.activation.edgeBinary.backupPath : null,
+        state.activation?.oldWebBackup,
+        state.stagedManagement?.path,
+        state.stagedEdgeRuntime?.path,
+        state.stagedWebConsole?.releaseDir,
+    ];
+    return [...new Set(candidates.filter((candidate): candidate is string => Boolean(candidate && existsSync(candidate))))];
+}
+
+function sanitizedUpgradeDiagnostic(error: unknown): string {
+    const message = error instanceof Error ? error.message : String(error);
+    return message
+        .replace(/(\b(?:[A-Z0-9_]*(?:PASSWORD|PASS|SECRET|TOKEN|KEY|CREDENTIAL)[A-Z0-9_]*|DATABASE_URL|DB_URI|DSN)=)(?:"[^"]*"|'[^']*'|[^\s;]+)/gi, "$1[REDACTED]")
+        .replace(/(postgres(?:ql)?:\/\/[^:\s/]+:)[^@\s]+@/gi, "$1[REDACTED]@")
+        .replace(/[\r\n\t]+/g, " ")
+        .trim()
+        .slice(0, 500);
+}
+
+function nestedUpgradeDiagnostics(error: unknown): string[] {
+    if (error instanceof AggregateError) {
+        return error.errors.flatMap(candidate => nestedUpgradeDiagnostics(candidate));
+    }
+    return [sanitizedUpgradeDiagnostic(error)];
+}
+
+function upgradeFailureHeading(error: unknown): string {
+    if (!(error instanceof UpgradeTransactionError)) return "Upgrade failed";
+    if (error.kind === "rollback-incomplete") return "Upgrade failed and rollback is incomplete";
+    if (error.kind === "cleanup-incomplete-after-commit") return "Upgrade committed, but cleanup is incomplete";
+    return "Upgrade failed and cleanup is incomplete";
+}
+
+export function formatUpgradeFailure(error: unknown, recoveryPaths: string[] = []): string {
+    const summary = sanitizedUpgradeDiagnostic(error);
+    const diagnostics = [...new Set(nestedUpgradeDiagnostics(error))].filter(message => message && message !== summary);
+    const lines = [`${upgradeFailureHeading(error)}: ${summary}`];
+    if (diagnostics.length > 0) lines.push(`Causes: ${diagnostics.join(" | ")}`);
+    if (recoveryPaths.length > 0) lines.push(`Retained recovery paths: ${recoveryPaths.join(", ")}`);
+    return lines.join("\n");
+}
+
+function upgradeSuccessMessage(context: UpgradeExecutionContext): string {
+    const { plan, state } = context;
+    const webSummary = state.webConsoleEndpointLabel
+        ? ` and ${WEB_CONSOLE_ASSET} (${state.webConsoleEndpointLabel})`
+        : "";
+    const edgeSummary = plan.edgeRuntime
+        ? `; Edge Runtime upgraded to ${plan.edgeRuntime.release.tag_name} at ${plan.edgeRuntime.targetPath} (${state.edgeRuntimeEndpointLabel})`
+        : "; Edge Runtime was not upgraded";
+    return `SupaCloud upgraded to ${plan.remoteVersion} via ${plan.binaryName} (${state.downloadEndpointLabel})${webSummary}${edgeSummary}`;
+}
+
+export async function runUpgrade(options: RunUpgradeOptions = {}) {
     p.intro("\x1b[46m SupaCloud Binary Upgrade \x1b[0m");
 
     const s = p.spinner();
     s.start("Retrieving GitHub release metadata");
+    let executionContext: UpgradeExecutionContext | null = null;
 
     try {
         if (os.userInfo().uid !== 0) {
             throw new Error("Please run the upgrade with root privileges (sudo).");
         }
-
-        const binaryName = resolveLinuxBinaryName();
-        const { data, endpoint } = await fetchReleaseMetadata(resolveReleaseApiUrl(options.targetVersion), options.forceYes);
-        const release = selectManagementRelease(data as GithubRelease | GithubRelease[], binaryName);
-        const remoteVersion = release.tag_name || "unknown";
-        const releaseUrl = releaseAssetUrl(release, binaryName);
-        const webConsoleUrl = releaseAssetUrl(release, WEB_CONSOLE_ASSET);
-
-        s.stop(`Latest binary available: ${remoteVersion} (${binaryName}, via ${endpoint.label})`);
+        const plan = await resolveUpgradeReleasePlan(options);
+        s.stop(`Latest binary available: ${plan.remoteVersion} (${plan.binaryName}, via ${plan.endpoint.label})`);
         p.log.warn("Database migrations must be backward compatible. Automatic rollback restores the binary and Web Console target, not committed schema changes.");
-
-        const confirm = options.forceYes || await p.confirm({
-            message: `Replace ${BIN_TARGET} with ${binaryName} from ${remoteVersion}?`,
-            initialValue: true,
-        });
-
-        if (!confirm || p.isCancel(confirm)) {
+        if (!await confirmUpgrade(plan, options.forceYes)) {
             p.cancel("Upgrade cancelled.");
             return;
         }
-
-        const preparedSecrets = prepareUpgradeSecrets(await resolveUpgradeEnvironment());
-        const env = preparedSecrets.runtimeEnv;
-        const checksums = await downloadReleaseChecksums(release, endpoint, options.forceYes);
-        let stagedBinary: StagedBinary | null = null;
-        let stagedWeb: StagedWebConsole | null = null;
-        let activationState: UpgradeActivationState | null = null;
-        let committed = false;
-        let downloadEndpointLabel = endpoint.label;
-        let webConsoleEndpointLabel: string | null = null;
-        let activatedEdgeRuntimeMode: EdgeRuntimeMode | null = null;
-
-        await executeUpgradeTransaction({
-            preflight: async () => {
-                s.start(`Verifying ${MANAGEMENT_SERVICE_UNIT} uses the canonical upgrade target`);
-                verifyBackupPrivilegeDropPreflight();
-                await verifyManagementUpgradePreflight();
-            },
-            stage: async () => {
-                s.start(`Downloading, verifying, and staging ${binaryName}`);
-                stagedBinary = await stageBinary(releaseUrl, binaryName, checksums, endpoint, options.forceYes);
-                downloadEndpointLabel = stagedBinary.endpoint.label;
-                s.start(`Downloading, verifying, and staging ${WEB_CONSOLE_ASSET}`);
-                stagedWeb = await stageWebConsoleBuild(webConsoleUrl, remoteVersion, checksums, endpoint, options.forceYes);
-                webConsoleEndpointLabel = stagedWeb.endpoint.label;
-            },
-            migrate: async () => {
-                if (!stagedBinary) throw new Error("Upgrade binary was not staged");
-                s.start("Applying backward-compatible metadata database migrations with the staged binary");
-                await runStagedDatabaseMigration(stagedBinary.path, preparedSecrets);
-            },
-            activate: async () => {
-                if (!stagedBinary) throw new Error("Upgrade binary was not staged");
-                s.start("Atomically activating staged SupaCloud artifacts");
-                activationState = {
-                    binary: createBinaryBackupState(BIN_TARGET),
-                    oldWebTarget: null,
-                    oldWebBackup: null,
-                    managementEnvState: null,
-                    edgeRuntimeEnvState: null,
-                    edgeRuntimeDropInState: null,
-                    managementPrivilegeDropInState: null,
-                    embeddedEdgePrivilegeDropInState: null,
-                };
-                await activateArtifacts(stagedBinary, stagedWeb, activationState);
-            },
-            restart: async () => {
-                s.start("Applying runtime settings and restarting SupaCloud services");
-                if (!activationState) throw new Error("Upgrade activation state is unavailable");
-                activationState.managementEnvState = captureFileState(managementEnvFile());
-                activationState.edgeRuntimeEnvState = captureFileState(edgeRuntimeEnvFile());
-                activationState.edgeRuntimeDropInState = captureFileState(edgeRuntimeCapacityDropIn());
-                activationState.managementPrivilegeDropInState = captureFileState(DEFAULT_MANAGEMENT_PRIVILEGE_DROPIN);
-                activationState.embeddedEdgePrivilegeDropInState = captureFileState(embeddedEdgePrivilegeDropIn());
-                const edgeRuntimeIdentity = await ensurePersistedEdgeRuntimeIdentity(managementEnvFile());
-                upsertPersistedEdgeRuntimePort(managementEnvFile(), edgeRuntimeEnvFile());
-                const edgeRuntimeMode = await runtimeModeForBinaryUpgrade();
-                activatedEdgeRuntimeMode = edgeRuntimeMode;
-                await reconcileManagementPrivilegeDropIns(edgeRuntimeMode, edgeRuntimeIdentity);
-                if (edgeRuntimeMode === "external") {
-                    await ensureEdgeRuntimeCapacityDropIn(env);
-                }
-                upsertManagementWebConsoleDir(managementEnvFile());
-                await restartServices(edgeRuntimeMode);
-            },
-            healthCheck: async () => {
-                s.start("Waiting for the SupaCloud health endpoint");
-                if (!activatedEdgeRuntimeMode) throw new Error("Edge Runtime mode was not resolved");
-                await waitForUpgradeHealth();
-                if (!stagedBinary) throw new Error("Upgrade binary was not staged");
-                await verifyActivatedManagementBinary(stagedBinary.sha256);
-                committed = true;
-            },
-            rollback: async () => {
-                if (!activationState) return;
-                p.log.warn("Upgrade activation failed; restoring the previous binary and Web Console target.");
-                await rollbackArtifacts(activationState, stagedWeb);
-            },
-            cleanup: async () => {
-                if (stagedBinary) {
-                    await $`rm -f ${stagedBinary.path}`.nothrow().quiet();
-                }
-                if (!committed && stagedWeb) {
-                    await $`rm -rf ${stagedWeb.releaseDir}`.nothrow().quiet();
-                }
-                if (activationState) {
-                    cleanupBinaryBackup(activationState.binary);
-                }
-            },
-        });
-
-        p.outro(`SupaCloud upgraded to ${remoteVersion} via ${binaryName} (${downloadEndpointLabel})${webConsoleEndpointLabel ? ` and ${WEB_CONSOLE_ASSET} (${webConsoleEndpointLabel})` : ""}`);
+        executionContext = await createUpgradeExecutionContext(plan, options, s);
+        await executeUpgradeTransaction(upgradeTransactionOperations(executionContext));
+        p.outro(upgradeSuccessMessage(executionContext));
     } catch (error: unknown) {
-        s.stop(`Upgrade failed: ${error instanceof Error ? error.message : String(error)}`);
+        s.stop(formatUpgradeFailure(error, upgradeRecoveryPaths(executionContext)));
         process.exit(1);
     }
 }
