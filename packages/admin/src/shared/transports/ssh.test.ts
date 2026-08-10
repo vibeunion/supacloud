@@ -19,6 +19,7 @@ class FakeSshClient extends EventEmitter {
     endCalls = 0;
     activeChannels = 0;
     maxConcurrentChannels = Number.POSITIVE_INFINITY;
+    peakActiveChannels = 0;
     sftpClient: FakeSftpClient | undefined;
 
     connect(options: Record<string, unknown>): this {
@@ -50,6 +51,7 @@ class FakeSshClient extends EventEmitter {
             return;
         }
         this.activeChannels += 1;
+        this.peakActiveChannels = Math.max(this.peakActiveChannels, this.activeChannels);
         let channelOpen = true;
         this.sftpClient.onEnd = () => {
             if (!channelOpen) return;
@@ -287,6 +289,7 @@ describe("SshTransport audit safety", () => {
                 `chmod:${partialPath}:384`,
                 `rename:${partialPath}:/tmp/release/artifact`,
             ]);
+            expect(sftp.endCalls).toBe(1);
             expect(getAuditLog().at(-1)?.command).not.toContain(localPath);
         } finally {
             transport.close();
@@ -311,6 +314,7 @@ describe("SshTransport audit safety", () => {
                 `chmod:${partialPath}:384`,
                 `rename:${partialPath}:/tmp/private/run.sh`,
             ]);
+            expect(sftp.endCalls).toBe(1);
         } finally {
             transport.close();
         }
@@ -338,6 +342,7 @@ describe("SshTransport audit safety", () => {
             expect((await transport.exec("hostname")).success).toBe(true);
             expect(sftp.endCalls).toBe(10);
             expect(client.activeChannels).toBe(0);
+            expect(client.peakActiveChannels).toBe(1);
         } finally {
             transport.close();
             rmSync(fixtureDirectory, { recursive: true, force: true });

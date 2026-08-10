@@ -370,11 +370,8 @@ export class SshTransport {
         let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
         try {
             const operationPromise = openSftp(conn).then(async (sftp) => {
-                try {
-                    await operation(sftp);
-                } finally {
-                    sftp.end();
-                }
+                await operation(sftp);
+                sftp.end();
             });
             await Promise.race([
                 operationPromise,
