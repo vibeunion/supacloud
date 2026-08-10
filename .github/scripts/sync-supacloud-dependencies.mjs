@@ -17,6 +17,53 @@ function packageVersion(candidatePackage, packageName) {
   return version;
 }
 
+function stableVersionPrecedence(version, packageName) {
+  const precedence = version.split('+', 1)[0];
+  if (precedence.includes('-')) {
+    throw new Error(`${packageName} prerelease versions are not supported for automatic synchronization`);
+  }
+  return precedence.split('.').map((identifier) => BigInt(identifier));
+}
+
+function comparePrecedence(leftVersion, rightVersion) {
+  for (let index = 0; index < leftVersion.length; index += 1) {
+    if (leftVersion[index] < rightVersion[index]) return -1;
+    if (leftVersion[index] > rightVersion[index]) return 1;
+  }
+  return 0;
+}
+
+// Caret compatibility ends at the next major for 1.x, next minor for 0.x, and next patch for 0.0.x.
+function caretUpperBound([major, minor, patch]) {
+  if (major > 0n) return [major + 1n, 0n, 0n];
+  if (minor > 0n) return [0n, minor + 1n, 0n];
+  return [0n, 0n, patch + 1n];
+}
+
+function caretLowerBound(range, dependencyName) {
+  if (typeof range !== 'string' || !range.startsWith('^')) {
+    throw new Error(`${dependencyName} has an unsupported dependency range`);
+  }
+  const lowerVersion = range.slice(1);
+  if (!SEMVER_PATTERN.test(lowerVersion)) {
+    throw new Error(`${dependencyName} has an unsupported dependency range`);
+  }
+  return stableVersionPrecedence(lowerVersion, `${dependencyName} dependency range`);
+}
+
+function synchronizedRange(currentRange, candidatePackage, dependencyName) {
+  const candidateVersion = packageVersion(candidatePackage, dependencyName);
+  const candidatePrecedence = stableVersionPrecedence(candidateVersion, dependencyName);
+  const lowerBound = caretLowerBound(currentRange, dependencyName);
+  if (comparePrecedence(candidatePrecedence, lowerBound) < 0) {
+    throw new Error(`${dependencyName} candidate ${candidateVersion} is below current lower bound ${currentRange}`);
+  }
+  if (comparePrecedence(candidatePrecedence, caretUpperBound(lowerBound)) < 0) {
+    return currentRange;
+  }
+  return `^${candidateVersion}`;
+}
+
 export function syncSupacloudDependencies({ supacloudPackage, cliPackage, adminPackage }) {
   if (!supacloudPackage?.dependencies || typeof supacloudPackage.dependencies !== 'object') {
     throw new Error('supacloud package has no dependencies object');
@@ -27,7 +74,8 @@ export function syncSupacloudDependencies({ supacloudPackage, cliPackage, adminP
   let changed = false;
 
   for (const [dependencyName, candidateName] of MANAGED_DEPENDENCIES) {
-    const nextRange = `^${packageVersion(candidates[candidateName], dependencyName)}`;
+    const currentRange = nextPackage.dependencies[dependencyName];
+    const nextRange = synchronizedRange(currentRange, candidates[candidateName], dependencyName);
     if (nextPackage.dependencies[dependencyName] !== nextRange) {
       nextPackage.dependencies[dependencyName] = nextRange;
       changed = true;
@@ -64,7 +112,7 @@ if (isMainModule()) {
     if (synchronization.changed) {
       await writeFile(repository.supacloudPath, `${JSON.stringify(synchronization.package, null, 2)}\n`);
     }
-    console.log(synchronization.changed ? 'updated' : 'already-synchronized');
+    console.log(`changed=${synchronization.changed}`);
   } catch (error) {
     console.error(`Failed to sync SupaCloud dependencies: ${error.message}`);
     process.exitCode = 1;

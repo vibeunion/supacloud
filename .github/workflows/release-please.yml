@@ -459,7 +459,24 @@ jobs:
         with:
           bun-version: ${{ env.BUN_VERSION }}
 
+      - name: Synchronize umbrella dependencies
+        id: synchronize
+        run: |
+          if ! sync_output="$(node .github/scripts/sync-supacloud-dependencies.mjs)"; then
+            echo "Dependency synchronization failed." >&2
+            exit 1
+          fi
+          case "$sync_output" in
+            changed=true|changed=false) ;;
+            *)
+              echo "Unexpected dependency synchronization output: $sync_output" >&2
+              exit 1
+              ;;
+          esac
+          printf '%s\n' "$sync_output" >> "$GITHUB_OUTPUT"
+
       - name: Wait for published dependencies
+        if: ${{ steps.synchronize.outputs.changed == 'true' }}
         run: |
           cli_version="$(node -p "require('./packages/cli/package.json').version")"
           admin_version="$(node -p "require('./packages/admin/package.json').version")"
@@ -480,21 +497,22 @@ jobs:
             fi
           done
 
-      - name: Synchronize umbrella dependencies and lockfile
+      - name: Regenerate and verify umbrella lockfile
+        if: ${{ steps.synchronize.outputs.changed == 'true' }}
+        working-directory: packages/supacloud
         run: |
-          node .github/scripts/sync-supacloud-dependencies.mjs
-          cd packages/supacloud
           bun install --lockfile-only --registry https://registry.npmjs.org
           bun install --frozen-lockfile --registry https://registry.npmjs.org
           git diff --check -- package.json bun.lock
 
       - name: Open dependency synchronization PR
+        if: ${{ steps.synchronize.outputs.changed == 'true' }}
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
         run: |
           if git diff --quiet -- packages/supacloud/package.json packages/supacloud/bun.lock; then
-            echo "SupaCloud umbrella dependencies are already synchronized."
-            exit 0
+            echo "Dependency synchronization reported a change but produced no diff." >&2
+            exit 1
           fi
 
           branch="automation/sync-supacloud-dependencies"
