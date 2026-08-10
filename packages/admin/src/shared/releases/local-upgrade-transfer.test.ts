@@ -11,7 +11,9 @@ import {
     buildLocalUpgradeRunScript,
     buildPrepareDropCommand,
     buildRemotePreflightScript,
+    buildRemoteUpgradePaths,
     buildRemoteStateScript,
+    buildUploadDropCleanupFailure,
     buildUpgradeLockScript,
     failureRequiresRemoteReconciliation,
     parseRemotePreflight,
@@ -21,7 +23,7 @@ import {
 import { githubCliArchiveIdentity, type LocalUpgradeFile, type PreparedLocalUpgradeBundle } from "./local-upgrade-bundle";
 
 const paths = {
-    drop: "/tmp/.supacloud-upgrade-upload-11111111-1111-4111-8111-111111111111",
+    drop: "/var/tmp/.supacloud-upgrade-upload-11111111-1111-4111-8111-111111111111",
     stage: "/var/lib/supacloud/upgrade-staging/11111111-1111-4111-8111-111111111111",
     status: "/var/lib/supacloud/upgrade-runs/11111111-1111-4111-8111-111111111111.status",
     log: "/var/log/supacloud/upgrade-11111111-1111-4111-8111-111111111111.log",
@@ -141,7 +143,31 @@ function shellFunctionDefinition(script: string, functionName: string): string {
     throw new Error(`Generated shell function ${functionName} is incomplete`);
 }
 
+function prepareDropFixtureShell(command: string, overrides: string[] = []): string {
+    return [
+        "stat() {",
+        "  if [ \"$3\" = /var/tmp ]; then",
+        "    case \"$2\" in %u) printf '%s\\n' \"$UPLOAD_ROOT_UID\" ;; %a) printf '%s\\n' \"$UPLOAD_ROOT_MODE\" ;; esac",
+        "    return",
+        "  fi",
+        "  command stat \"$@\"",
+        "}",
+        "df() { printf 'Filesystem 1024-blocks Used Available Capacity Mounted-on\\n/dev/test 9999999 0 9999999 0%% %s\\n' \"$2\"; }",
+        ...overrides,
+        command,
+    ].join("\n");
+}
+
+function prepareDropFixtureEnv(overrides: Record<string, string> = {}): Record<string, string> {
+    return { ...process.env, UPLOAD_ROOT_UID: "0", UPLOAD_ROOT_MODE: "1777", ...overrides } as Record<string, string>;
+}
+
 describe("local upgrade remote runner", () => {
+    test("places SFTP upload drops under the shared sticky temporary root", () => {
+        expect(buildRemoteUpgradePaths("11111111-1111-4111-8111-111111111111").drop)
+            .toBe(paths.drop);
+    });
+
     test("preflights strict verifier capability without requiring the old jq parser", () => {
         const script = buildRemotePreflightScript();
 
@@ -432,16 +458,114 @@ describe("local upgrade remote runner", () => {
         const fixturePaths = { ...paths, drop: join(fixtureRoot, "drop") };
         symlinkSync(join(fixtureRoot, "missing-drop-target"), fixturePaths.drop);
 
-        const execution = Bun.spawnSync([
-            "bash", "-c", buildPrepareDropCommand(fixturePaths, preparedBundle("amd64", "installed")),
-        ]);
+        const prepareCommand = buildPrepareDropCommand(fixturePaths, preparedBundle("amd64", "installed"));
+        const fixtureCommand = prepareDropFixtureShell(prepareCommand);
+
+        const execution = Bun.spawnSync({ cmd: ["bash", "-c", fixtureCommand], env: prepareDropFixtureEnv() });
         try {
             expect(execution.exitCode).not.toBe(0);
-            expect(execution.stderr.toString()).toContain("Remote upload drop already exists");
+            expect(execution.stderr.toString()).toContain("Unable to create exclusive remote upload drop");
             expect(lstatSync(fixturePaths.drop).isSymbolicLink()).toBe(true);
+            expect(prepareCommand).toContain("UPLOAD_ROOT='/var/tmp'");
+            expect(prepareCommand).toContain("stat -c '%u' \"$UPLOAD_ROOT\"");
+            expect(prepareCommand).toContain("8#$UPLOAD_ROOT_MODE & 01000");
+            expect(prepareCommand).toContain("df -Pk \"$UPLOAD_ROOT\"");
+            expect(prepareCommand).toContain("mkdir -m 700 -- \"$DROP\"");
+            expect(prepareCommand).not.toContain(`install -d -m 700 '${fixturePaths.drop}'`);
         } finally {
             rmSync(fixtureRoot, { recursive: true, force: true });
         }
+    });
+
+    test("requires a root-owned sticky upload root", () => {
+        const fixtureRoot = realpathSync(mkdtempSync(join(tmpdir(), "supacloud-upload-root-gate-")));
+        const fixturePaths = { ...paths, drop: join(fixtureRoot, "drop") };
+        const command = prepareDropFixtureShell(
+            buildPrepareDropCommand(fixturePaths, preparedBundle("amd64", "installed")),
+        );
+        try {
+            const wrongOwner = Bun.spawnSync({
+                cmd: ["bash", "-c", command],
+                env: prepareDropFixtureEnv({ UPLOAD_ROOT_UID: "1001" }),
+            });
+            expect(wrongOwner.exitCode).not.toBe(0);
+            expect(wrongOwner.stderr.toString()).toContain("Remote upload root must be owned by root");
+
+            const missingStickyBit = Bun.spawnSync({
+                cmd: ["bash", "-c", command],
+                env: prepareDropFixtureEnv({ UPLOAD_ROOT_MODE: "0777" }),
+            });
+            expect(missingStickyBit.exitCode).not.toBe(0);
+            expect(missingStickyBit.stderr.toString()).toContain("Remote upload root must set the sticky bit");
+            expect(existsSync(fixturePaths.drop)).toBe(false);
+        } finally {
+            rmSync(fixtureRoot, { recursive: true, force: true });
+        }
+    });
+
+    test("creates a private drop atomically after the upload-root gate", () => {
+        const fixtureRoot = realpathSync(mkdtempSync(join(tmpdir(), "supacloud-private-drop-")));
+        const fixturePaths = { ...paths, drop: join(fixtureRoot, "drop") };
+        const command = prepareDropFixtureShell(
+            buildPrepareDropCommand(fixturePaths, preparedBundle("amd64", "bundled")),
+        );
+        const execution = Bun.spawnSync({ cmd: ["bash", "-c", command], env: prepareDropFixtureEnv() });
+        try {
+            expect(execution.exitCode).toBe(0);
+            for (const directory of [
+                fixturePaths.drop,
+                `${fixturePaths.drop}/bundle`,
+                `${fixturePaths.drop}/bundle/management-api`,
+                `${fixturePaths.drop}/bundle/edge-runtime`,
+                `${fixturePaths.drop}/verifier`,
+            ]) {
+                expect(lstatSync(directory).mode & 0o777).toBe(0o700);
+            }
+        } finally {
+            rmSync(fixtureRoot, { recursive: true, force: true });
+        }
+    });
+
+    test("does not follow a symlink injected at atomic drop creation", () => {
+        const fixtureRoot = realpathSync(mkdtempSync(join(tmpdir(), "supacloud-drop-race-")));
+        const raceTarget = join(fixtureRoot, "race-target");
+        const sentinel = join(raceTarget, "sentinel");
+        const fixturePaths = { ...paths, drop: join(fixtureRoot, "drop") };
+        mkdirSync(raceTarget, { mode: 0o700 });
+        writeFileSync(sentinel, "unchanged\n");
+        const command = prepareDropFixtureShell(
+            buildPrepareDropCommand(fixturePaths, preparedBundle("amd64", "installed")),
+            ["mkdir() { ln -s \"$RACE_TARGET\" \"$DROP\"; command mkdir \"$@\"; }"],
+        );
+        const execution = Bun.spawnSync({
+            cmd: ["bash", "-c", command],
+            env: prepareDropFixtureEnv({ RACE_TARGET: raceTarget }),
+        });
+        try {
+            expect(execution.exitCode).not.toBe(0);
+            expect(execution.stderr.toString()).toContain("Unable to create exclusive remote upload drop");
+            expect(lstatSync(fixturePaths.drop).isSymbolicLink()).toBe(true);
+            expect(readFileSync(sentinel, "utf8")).toBe("unchanged\n");
+        } finally {
+            rmSync(fixtureRoot, { recursive: true, force: true });
+        }
+    });
+
+    test("requires reconciliation when a failed upload drop cannot be cleaned", () => {
+        const failure = buildUploadDropCleanupFailure(
+            new Error("SFTP upload failed"),
+            new Error("remote drop cleanup failed"),
+            paths,
+        );
+
+        expect(failureRequiresRemoteReconciliation(failure)).toBe(true);
+        expect(String(failure)).toContain("do not retry blindly");
+        for (const evidencePath of [paths.drop, paths.stage, paths.status, paths.log, paths.unit]) {
+            expect(String(failure)).toContain(evidencePath);
+        }
+        const diagnostics = (failure as AggregateError).errors.map(String).join("\n");
+        expect(diagnostics).toContain("SFTP upload failed");
+        expect(diagnostics).toContain("remote drop cleanup failed");
     });
 
     test("rejects dangling adoption targets before moving the upload drop", () => {

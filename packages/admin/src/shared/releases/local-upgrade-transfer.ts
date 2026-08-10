@@ -50,6 +50,7 @@ export type RemoteUpgradePreflight = {
 const REMOTE_STAGE_ROOT = "/var/lib/supacloud/upgrade-staging";
 const REMOTE_RUN_ROOT = "/var/lib/supacloud/upgrade-runs";
 const REMOTE_LOG_ROOT = "/var/log/supacloud";
+const REMOTE_UPLOAD_ROOT = "/var/tmp";
 const POLL_INTERVAL_MS = 2_000;
 const STATE_READ_ATTEMPTS = 3;
 const REMOTE_STATE_READ_TIMEOUT_MS = 15_000;
@@ -85,9 +86,9 @@ function trustedInstalledGithubFunction(): string {
     ].join("\n");
 }
 
-function remotePaths(runId: string): RemoteUpgradePaths {
+export function buildRemoteUpgradePaths(runId: string): RemoteUpgradePaths {
     return {
-        drop: `/tmp/.supacloud-upgrade-upload-${runId}`,
+        drop: `${REMOTE_UPLOAD_ROOT}/.supacloud-upgrade-upload-${runId}`,
         stage: `${REMOTE_STAGE_ROOT}/${runId}`,
         status: `${REMOTE_RUN_ROOT}/${runId}.status`,
         log: `${REMOTE_LOG_ROOT}/upgrade-${runId}.log`,
@@ -148,9 +149,20 @@ function requiredRemoteBytes(bundle: PreparedLocalUpgradeBundle): number {
     return transferBytes * 3 + 512 * 1024 * 1024;
 }
 
+function remoteUploadRootGate(): string[] {
+    return [
+        `UPLOAD_ROOT=${quoteShell(REMOTE_UPLOAD_ROOT)}`,
+        "test -d \"$UPLOAD_ROOT\" && test ! -L \"$UPLOAD_ROOT\" || { echo 'Remote upload root must be a directory, not a symlink' >&2; exit 1; }",
+        "test \"$(stat -c '%u' \"$UPLOAD_ROOT\")\" = 0 || { echo 'Remote upload root must be owned by root' >&2; exit 1; }",
+        "UPLOAD_ROOT_MODE=$(stat -c '%a' \"$UPLOAD_ROOT\")",
+        "case \"$UPLOAD_ROOT_MODE\" in [0-7]|[0-7][0-7]|[0-7][0-7][0-7]|[0-7][0-7][0-7][0-7]) ;; *) echo 'Remote upload root has invalid permission bits' >&2; exit 1 ;; esac",
+        "(( (8#$UPLOAD_ROOT_MODE & 01000) != 0 )) || { echo 'Remote upload root must set the sticky bit' >&2; exit 1; }",
+        "test -w \"$UPLOAD_ROOT\" && test -x \"$UPLOAD_ROOT\" || { echo 'Remote upload root is not writable and searchable by the SSH user' >&2; exit 1; }",
+    ];
+}
+
 export function buildPrepareDropCommand(paths: RemoteUpgradePaths, bundle: PreparedLocalUpgradeBundle): string {
     const directories = [
-        paths.drop,
         `${paths.drop}/bundle`,
         `${paths.drop}/bundle/management-api`,
         `${paths.drop}/bundle/edge-runtime`,
@@ -160,10 +172,12 @@ export function buildPrepareDropCommand(paths: RemoteUpgradePaths, bundle: Prepa
     return [
         "set -euo pipefail",
         "umask 077",
-        `test ! -e ${quoteShell(paths.drop)} && test ! -L ${quoteShell(paths.drop)} || { echo 'Remote upload drop already exists' >&2; exit 1; }`,
-        "TMP_AVAILABLE_KB=$(df -Pk /tmp | awk 'NR == 2 { print $4 }')",
+        ...remoteUploadRootGate(),
+        `DROP=${quoteShell(paths.drop)}`,
+        "UPLOAD_AVAILABLE_KB=$(df -Pk \"$UPLOAD_ROOT\" | awk 'NR == 2 { print $4 }')",
         "VAR_AVAILABLE_KB=$(df -Pk /var/lib/supacloud | awk 'NR == 2 { print $4 }')",
-        `test \"${"$"}TMP_AVAILABLE_KB\" -ge ${Math.ceil(requiredBytes / 1024)} && test \"${"$"}VAR_AVAILABLE_KB\" -ge ${Math.ceil(requiredBytes / 1024)} || { echo 'Insufficient remote disk space for verified upgrade staging' >&2; exit 1; }`,
+        `test \"${"$"}UPLOAD_AVAILABLE_KB\" -ge ${Math.ceil(requiredBytes / 1024)} && test \"${"$"}VAR_AVAILABLE_KB\" -ge ${Math.ceil(requiredBytes / 1024)} || { echo 'Insufficient remote disk space for verified upgrade staging' >&2; exit 1; }`,
+        "mkdir -m 700 -- \"$DROP\" || { echo 'Unable to create exclusive remote upload drop' >&2; exit 1; }",
         `install -d -m 700 ${directories.map(quoteShell).join(" ")}`,
     ].join("\n");
 }
@@ -647,6 +661,18 @@ function remoteReconciliationFailure(
     );
 }
 
+export function buildUploadDropCleanupFailure(
+    transferFailure: unknown,
+    cleanupFailure: unknown,
+    paths: RemoteUpgradePaths,
+): Error {
+    return remoteReconciliationFailure(
+        "Local upgrade failed and upload-drop cleanup did not complete",
+        [transferFailure, cleanupFailure],
+        paths,
+    );
+}
+
 export function failureRequiresRemoteReconciliation(error: unknown): boolean {
     return error instanceof RemoteUpgradeReconciliationError;
 }
@@ -806,7 +832,7 @@ export async function awaitRemoteUpgrade(ssh: SshTransport, paths: RemoteUpgrade
 
 export async function executeLocalUpgradeTransfer(ssh: SshTransport, request: LocalUpgradeTransferRequest): Promise<string> {
     const runId = randomUUID();
-    const paths = remotePaths(runId);
+    const paths = buildRemoteUpgradePaths(runId);
     const preflight = await remoteUpgradePreflight(ssh);
     const bundle = await prepareLocalUpgradeBundle({ ...preflight, ...request });
     let adopted = false;
@@ -826,10 +852,7 @@ export async function executeLocalUpgradeTransfer(ssh: SshTransport, request: Lo
                 try {
                     await cleanupRemoteDrop(ssh, paths);
                 } catch (cleanupError: unknown) {
-                    transferError = new AggregateError(
-                        [transferError, cleanupError],
-                        "Local upgrade failed and upload-drop cleanup did not complete",
-                    );
+                    transferError = buildUploadDropCleanupFailure(transferError, cleanupError, paths);
                 }
             }
             throw transferError;
