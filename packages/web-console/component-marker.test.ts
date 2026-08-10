@@ -22,6 +22,14 @@ describe('web console component marker', () => {
 		);
 	});
 
+	test('rejects non-stable package versions before emitting a release marker', () => {
+		for (const version of ['01.2.3', '0.28.8-rc.1', '0.28.8+build.4', '0.28.8\n']) {
+			expect(() => webConsoleComponentMarkerSource({ version })).toThrow(
+				'exact stable semantic version'
+			);
+		}
+	});
+
 	test('registers a build plugin that emits the marker at the build root', () => {
 		const configuredPluginNames = viteConfig.plugins
 			?.flat()

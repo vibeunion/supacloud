@@ -2,8 +2,10 @@
  * SSH — Compound tool (13→1)
  * Install, upgrade, diagnose, exec, tenant mgmt — all via SSH
  */
+import { Buffer } from "node:buffer";
 import { randomUUID } from "node:crypto";
 import { basename, dirname, join } from "node:path";
+import { TextDecoder } from "node:util";
 import { Type } from "@sinclair/typebox";
 import { decodedSchema, optional, stringEnum, withDescription } from "../schema";
 import type { SshTransport } from "../transports/ssh";
@@ -35,10 +37,34 @@ const DIRECT_UPGRADE_SSH_TIMEOUT_MS = 720_000;
 const PROXIED_UPGRADE_SSH_TIMEOUT_MS = 1_320_000;
 const PLATFORM_PROBE_TIMEOUT_MS = 10_000;
 const PLATFORM_HASH_TIMEOUT_MS = 30_000;
+const WEB_CONSOLE_PROBE_TIMEOUT_MS = 60_000;
+const BINARY_VERSION_MAX_BYTES = 2048;
+const WEB_CONSOLE_MARKER_MAX_BYTES = 4096;
 const WEB_CONSOLE_CURRENT_DIR = "/opt/supacloud/web-console/current";
-const WEB_CONSOLE_MARKER = `${WEB_CONSOLE_CURRENT_DIR}/.supacloud-component.json`;
 const STABLE_SEMVER_CORE = "(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)";
 const EXACT_STABLE_SEMVER = new RegExp(`^(?:${STABLE_SEMVER_CORE})(?![\\s\\S])`);
+const SEMVER_CORE_TOKEN = /\d+\.\d+\.\d+/;
+const BINARY_HASH_BEFORE_FAILED = 70;
+const BINARY_VERSION_FAILED = 71;
+const BINARY_HASH_AFTER_FAILED = 72;
+const PROBE_CHANGED_DURING_READ = 75;
+const WEB_CONSOLE_ROOT_MISSING = 43;
+const WEB_CONSOLE_MARKER_MISSING = 44;
+const WEB_CONSOLE_ROOT_INVALID = 64;
+const WEB_CONSOLE_MARKER_INVALID = 65;
+const WEB_CONSOLE_TREE_INVALID = 66;
+const WEB_CONSOLE_TREE_FAILED = 67;
+const BINARY_HASH_BEFORE_LABEL = "SUPACLOUD_BINARY_HASH_BEFORE=";
+const BINARY_VERSION_LABEL = "SUPACLOUD_BINARY_VERSION_BASE64=";
+const BINARY_HASH_AFTER_LABEL = "SUPACLOUD_BINARY_HASH_AFTER=";
+const WEB_ROOT_REAL_BEFORE_LABEL = "SUPACLOUD_WEB_ROOT_REAL_BEFORE=";
+const WEB_ROOT_ID_BEFORE_LABEL = "SUPACLOUD_WEB_ROOT_ID_BEFORE=";
+const WEB_MARKER_BEFORE_LABEL = "SUPACLOUD_WEB_MARKER_BASE64_BEFORE=";
+const WEB_TREE_BEFORE_LABEL = "SUPACLOUD_WEB_TREE_SHA256_BEFORE=";
+const WEB_TREE_AFTER_LABEL = "SUPACLOUD_WEB_TREE_SHA256_AFTER=";
+const WEB_MARKER_AFTER_LABEL = "SUPACLOUD_WEB_MARKER_BASE64_AFTER=";
+const WEB_ROOT_REAL_AFTER_LABEL = "SUPACLOUD_WEB_ROOT_REAL_AFTER=";
+const WEB_ROOT_ID_AFTER_LABEL = "SUPACLOUD_WEB_ROOT_ID_AFTER=";
 
 type ComponentProbeStatus = "ok" | "unknown" | "error";
 
@@ -60,16 +86,29 @@ type WebConsoleEvidence = {
     error: string | null;
 };
 
-type FixedBinaryCommand = {
-    version: string;
-    sha256: string;
+type FixedBinaryProbe = {
+    command: string;
 };
 
 type BinaryProbeDefinition = {
     unit: string;
     source: string;
-    commands: Readonly<Record<string, FixedBinaryCommand>>;
+    commands: Readonly<Record<string, FixedBinaryProbe>>;
 };
+
+function fixedBinaryProbeCommand(executablePath: string, versionArgument: string): string {
+    const executable = quoteEnvValue(executablePath);
+    return [
+        "set -o pipefail",
+        `if HASH_BEFORE=$(sha256sum -- ${executable} | awk '{print $1}'); then :; else exit ${BINARY_HASH_BEFORE_FAILED}; fi`,
+        `printf '${BINARY_HASH_BEFORE_LABEL}%s\\n' "$HASH_BEFORE"`,
+        `if VERSION_BASE64=$(${executable} ${versionArgument} 2>&1 | head -c ${BINARY_VERSION_MAX_BYTES + 1} | base64 | tr -d '\\n'); then :; else exit ${BINARY_VERSION_FAILED}; fi`,
+        `printf '${BINARY_VERSION_LABEL}%s\\n' "$VERSION_BASE64"`,
+        `if HASH_AFTER=$(sha256sum -- ${executable} | awk '{print $1}'); then :; else exit ${BINARY_HASH_AFTER_FAILED}; fi`,
+        `printf '${BINARY_HASH_AFTER_LABEL}%s\\n' "$HASH_AFTER"`,
+        `[ "$HASH_BEFORE" = "$HASH_AFTER" ] || exit ${PROBE_CHANGED_DURING_READ}`,
+    ].join("\n");
+}
 
 const BINARY_PROBES = {
     management_api: {
@@ -77,12 +116,10 @@ const BINARY_PROBES = {
         source: "systemd:supacloud.service:ExecStart",
         commands: {
             "/usr/local/bin/supacloud": {
-                version: "/usr/local/bin/supacloud --version 2>&1",
-                sha256: "sha256sum -- /usr/local/bin/supacloud | awk '{print $1}'",
+                command: fixedBinaryProbeCommand("/usr/local/bin/supacloud", "--version"),
             },
             "/opt/supacloud/bin/supacloud": {
-                version: "/opt/supacloud/bin/supacloud --version 2>&1",
-                sha256: "sha256sum -- /opt/supacloud/bin/supacloud | awk '{print $1}'",
+                command: fixedBinaryProbeCommand("/opt/supacloud/bin/supacloud", "--version"),
             },
         },
     },
@@ -91,12 +128,10 @@ const BINARY_PROBES = {
         source: "systemd:supacloud-edge-runtime.service:ExecStart",
         commands: {
             "/usr/local/bin/supacloud-edge-runtime": {
-                version: "/usr/local/bin/supacloud-edge-runtime --version 2>&1",
-                sha256: "sha256sum -- /usr/local/bin/supacloud-edge-runtime | awk '{print $1}'",
+                command: fixedBinaryProbeCommand("/usr/local/bin/supacloud-edge-runtime", "--version"),
             },
             "/opt/supacloud/bin/supacloud-edge-runtime": {
-                version: "/opt/supacloud/bin/supacloud-edge-runtime --version 2>&1",
-                sha256: "sha256sum -- /opt/supacloud/bin/supacloud-edge-runtime | awk '{print $1}'",
+                command: fixedBinaryProbeCommand("/opt/supacloud/bin/supacloud-edge-runtime", "--version"),
             },
         },
     },
@@ -105,8 +140,7 @@ const BINARY_PROBES = {
         source: "systemd:supacloud-caddy.service:ExecStart",
         commands: {
             "/usr/local/bin/supacloud-caddy": {
-                version: "/usr/local/bin/supacloud-caddy version 2>&1",
-                sha256: "sha256sum -- /usr/local/bin/supacloud-caddy | awk '{print $1}'",
+                command: fixedBinaryProbeCommand("/usr/local/bin/supacloud-caddy", "version"),
             },
         },
     },
@@ -580,17 +614,18 @@ function execStartEvidence(output: string): ExecStartEvidence {
 }
 
 function stableVersion(output: string): string | null {
-    if (output.length > 2048 || /\0/.test(output)) return null;
-    const matches = Array.from(output.matchAll(
-        new RegExp(`(?:^|[^0-9A-Za-z.+-])v?(${STABLE_SEMVER_CORE})(?=$|[^0-9A-Za-z.+-])`, "g"),
-    ));
-    const versions = new Set(matches.map(match => match[1]).filter(Boolean));
-    return versions.size === 1 ? [...versions][0]! : null;
+    if (output.length > BINARY_VERSION_MAX_BYTES || /\0/.test(output)) return null;
+    const versionTokens = output.split(/\s+/).filter(token => SEMVER_CORE_TOKEN.test(token));
+    const versions = versionTokens.map(token => token.startsWith("v") ? token.slice(1) : token);
+    if (versions.length === 0 || versions.some(version => !EXACT_STABLE_SEMVER.test(version))) {
+        return null;
+    }
+    const uniqueVersions = new Set(versions);
+    return uniqueVersions.size === 1 ? [...uniqueVersions][0]! : null;
 }
 
 function stableSha256(output: string): string | null {
-    const normalized = output.trim();
-    return /^[0-9a-f]{64}$/.test(normalized) ? normalized : null;
+    return /^[0-9a-f]{64}$/.test(output) ? output : null;
 }
 
 function unavailableBinaryEvidence(
@@ -607,18 +642,93 @@ function unavailableBinaryEvidence(
     };
 }
 
-function binaryProbeError(
-    versionExecution: RemoteExecution | null,
-    version: string | null,
-    hashExecution: RemoteExecution | null,
-    sha256: string | null,
-): string | null {
-    if (!versionExecution) return "version_probe_transport_failed";
-    if (!versionExecution.success) return "version_probe_failed";
-    if (!version) return "version_output_invalid";
-    if (!hashExecution) return "sha256_probe_transport_failed";
-    if (!hashExecution.success) return "sha256_probe_failed";
-    return sha256 ? null : "sha256_output_invalid";
+function canonicalBase64Text(encoded: string, maximumBytes: number): string | null {
+    if (encoded.length > Math.ceil(maximumBytes / 3) * 4 || encoded.length % 4 !== 0) return null;
+    if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded)) return null;
+    const decodedBytes = Buffer.from(encoded, "base64");
+    if (decodedBytes.length > maximumBytes || decodedBytes.toString("base64") !== encoded) return null;
+    try {
+        return new TextDecoder("utf-8", { fatal: true }).decode(decodedBytes);
+    } catch {
+        return null;
+    }
+}
+
+function taggedProbeValue(line: string | undefined, label: string): string | null {
+    return line?.startsWith(label) ? line.slice(label.length) : null;
+}
+
+type BinaryProbeFields = {
+    versionOutput: string;
+    hashBefore: string;
+    hashAfter: string | null;
+};
+
+function binaryProbeFields(output: string): BinaryProbeFields | null {
+    if (output.length > 8192 || /[\r\0]/.test(output)) return null;
+    const lines = (output.endsWith("\n") ? output.slice(0, -1) : output).split("\n");
+    if (lines.length < 2 || lines.length > 3) return null;
+    const hashBefore = taggedProbeValue(lines[0], BINARY_HASH_BEFORE_LABEL);
+    const versionBase64 = taggedProbeValue(lines[1], BINARY_VERSION_LABEL);
+    const hashAfter = lines.length === 3
+        ? taggedProbeValue(lines[2], BINARY_HASH_AFTER_LABEL)
+        : null;
+    if (hashBefore === null || versionBase64 === null || (lines.length === 3 && hashAfter === null)) return null;
+    const versionOutput = canonicalBase64Text(versionBase64, BINARY_VERSION_MAX_BYTES);
+    return versionOutput === null ? null : { versionOutput, hashBefore, hashAfter };
+}
+
+type BinaryProbeValues = {
+    version: string | null;
+    sha256: string | null;
+    error: string | null;
+};
+
+function completedBinaryProbe(fields: BinaryProbeFields): BinaryProbeValues {
+    const version = stableVersion(fields.versionOutput);
+    const hashBefore = stableSha256(fields.hashBefore);
+    const hashAfter = fields.hashAfter === null ? null : stableSha256(fields.hashAfter);
+    if (hashBefore && hashAfter && hashBefore !== hashAfter) {
+        return { version: null, sha256: null, error: "binary_changed_during_probe" };
+    }
+    const sha256 = hashBefore && hashAfter ? hashBefore : null;
+    if (!version) return { version: null, sha256, error: "version_output_invalid" };
+    return sha256
+        ? { version, sha256, error: null }
+        : { version, sha256: null, error: "sha256_output_invalid" };
+}
+
+function reservedBinaryProbeFailure(
+    execution: RemoteExecution,
+    fields: BinaryProbeFields | null,
+): BinaryProbeValues | null {
+    if (execution.code === PROBE_CHANGED_DURING_READ) {
+        return { version: null, sha256: null, error: "binary_changed_during_probe" };
+    }
+    if (execution.code === BINARY_HASH_BEFORE_FAILED) {
+        return { version: null, sha256: null, error: "sha256_probe_failed" };
+    }
+    if (execution.code === BINARY_VERSION_FAILED) {
+        return { version: null, sha256: null, error: "version_probe_failed" };
+    }
+    if (execution.code === BINARY_HASH_AFTER_FAILED) {
+        const version = fields ? stableVersion(fields.versionOutput) : null;
+        return version
+            ? { version, sha256: null, error: "sha256_probe_failed" }
+            : { version: null, sha256: null, error: fields ? "version_output_invalid" : "binary_probe_output_invalid" };
+    }
+    return null;
+}
+
+function binaryProbeValues(execution: RemoteExecution | null): BinaryProbeValues {
+    if (!execution) return { version: null, sha256: null, error: "binary_probe_transport_failed" };
+    const fields = binaryProbeFields(execution.stdout);
+    const reservedFailure = reservedBinaryProbeFailure(execution, fields);
+    if (reservedFailure) return reservedFailure;
+    if (!execution.success) return { version: null, sha256: null, error: "binary_probe_failed" };
+    return fields
+        ? completedBinaryProbe(fields)
+        : { version: null, sha256: null, error: "binary_probe_output_invalid" };
 }
 
 async function binaryComponentEvidence(
@@ -627,11 +737,22 @@ async function binaryComponentEvidence(
 ): Promise<BinaryComponentEvidence> {
     const execStart = await systemdBinaryEvidence(ssh, definition);
     if (execStart.status !== "ok" || !execStart.path) return unavailableBinaryEvidence(definition, execStart);
-    const commands = definition.commands[execStart.path];
-    if (!commands) return unavailableBinaryEvidence(definition, {
+    const fixedProbe = definition.commands[execStart.path];
+    if (!fixedProbe) return unavailableBinaryEvidence(definition, {
         status: "error", path: execStart.path, error: "exec_start_not_allowed",
     });
-    return fixedBinaryEvidence(ssh, definition, execStart.path, commands);
+    const evidence = await fixedBinaryEvidence(ssh, definition, execStart.path, fixedProbe);
+    const verifiedExecStart = await systemdBinaryEvidence(ssh, definition);
+    if (verifiedExecStart.status !== "ok") {
+        return unavailableBinaryEvidence(definition, {
+            status: "error", path: execStart.path, error: "exec_start_recheck_failed",
+        });
+    }
+    return verifiedExecStart.path === execStart.path
+        ? evidence
+        : unavailableBinaryEvidence(definition, {
+            status: "error", path: execStart.path, error: "exec_start_changed_during_probe",
+        });
 }
 
 async function systemdBinaryEvidence(
@@ -649,27 +770,22 @@ async function fixedBinaryEvidence(
     ssh: SshTransport,
     definition: BinaryProbeDefinition,
     executablePath: string,
-    commands: FixedBinaryCommand,
+    fixedProbe: FixedBinaryProbe,
 ): Promise<BinaryComponentEvidence> {
-    const [versionExecution, hashExecution] = await Promise.all([
-        runFixedRemoteCommand(ssh, commands.version, PLATFORM_PROBE_TIMEOUT_MS),
-        runFixedRemoteCommand(ssh, commands.sha256, PLATFORM_HASH_TIMEOUT_MS),
-    ]);
-    const version = versionExecution?.success ? stableVersion(versionExecution.stdout) : null;
-    const sha256 = hashExecution?.success ? stableSha256(hashExecution.stdout) : null;
-    const error = binaryProbeError(versionExecution, version, hashExecution, sha256);
+    const execution = await runFixedRemoteCommand(ssh, fixedProbe.command, PLATFORM_HASH_TIMEOUT_MS);
+    const probe = binaryProbeValues(execution);
     return {
-        status: error ? "error" : "ok",
-        version,
-        sha256,
+        status: probe.error ? "error" : "ok",
+        version: probe.version,
+        sha256: probe.sha256,
         path: executablePath,
         source: definition.source,
-        error,
+        error: probe.error,
     };
 }
 
 function parseWebConsoleVersion(markerOutput: string): string | null {
-    if (markerOutput.length > 4096 || /\0/.test(markerOutput)) return null;
+    if (markerOutput.length > WEB_CONSOLE_MARKER_MAX_BYTES || /\0/.test(markerOutput)) return null;
     try {
         const marker = JSON.parse(markerOutput) as unknown;
         if (typeof marker !== "object" || marker === null || Array.isArray(marker)) return null;
@@ -683,48 +799,136 @@ function parseWebConsoleVersion(markerOutput: string): string | null {
     }
 }
 
-const WEB_MARKER_COMMAND = [
-    `MARKER=${quoteEnvValue(WEB_CONSOLE_MARKER)}`,
-    "test ! -L \"$MARKER\" || exit 65",
-    "test -e \"$MARKER\" || exit 44",
-    "test -f \"$MARKER\" || exit 65",
-    "test \"$(stat -c '%s' -- \"$MARKER\")\" -le 4096 || exit 65",
-    "cat -- \"$MARKER\"",
-].join("; ");
-
-const WEB_TREE_SHA256_COMMAND = [
+const WEB_CONSOLE_PROBE_COMMAND = [
     "set -o pipefail",
     `ROOT=${quoteEnvValue(WEB_CONSOLE_CURRENT_DIR)}`,
-    "test -d \"$ROOT\" || exit 44",
-    "test -f \"$ROOT/.supacloud-component.json\" && test ! -L \"$ROOT/.supacloud-component.json\" || exit 65",
-    "if find -H \"$ROOT\" -xdev ! -type d ! -type f -print -quit | grep -q .; then exit 65; fi",
-    "find -H \"$ROOT\" -xdev -type f -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum -- | sha256sum | awk '{print $1}'",
-].join("; ");
+    "if [ ! -e \"$ROOT\" ] && [ ! -L \"$ROOT\" ]; then exit 43; fi",
+    `test -d "$ROOT" || exit ${WEB_CONSOLE_ROOT_INVALID}`,
+    `ROOT_REAL_BEFORE=$(readlink -f -- "$ROOT") || exit ${WEB_CONSOLE_ROOT_INVALID}`,
+    `case "$ROOT_REAL_BEFORE" in "$ROOT"|/opt/supacloud/web-console/releases/*) ;; *) exit ${WEB_CONSOLE_ROOT_INVALID} ;; esac`,
+    `ROOT_ID_BEFORE=$(stat -c '%d:%i' -- "$ROOT_REAL_BEFORE") || exit ${WEB_CONSOLE_ROOT_INVALID}`,
+    "MARKER_BEFORE=$ROOT_REAL_BEFORE/.supacloud-component.json",
+    `test ! -L "$MARKER_BEFORE" || exit ${WEB_CONSOLE_MARKER_INVALID}`,
+    `test -e "$MARKER_BEFORE" || exit ${WEB_CONSOLE_MARKER_MISSING}`,
+    `test -f "$MARKER_BEFORE" || exit ${WEB_CONSOLE_MARKER_INVALID}`,
+    `test "$(stat -c '%s' -- "$MARKER_BEFORE")" -le ${WEB_CONSOLE_MARKER_MAX_BYTES} || exit ${WEB_CONSOLE_MARKER_INVALID}`,
+    `MARKER_BASE64_BEFORE=$(head -c ${WEB_CONSOLE_MARKER_MAX_BYTES + 1} -- "$MARKER_BEFORE" | base64 | tr -d '\\n') || exit ${WEB_CONSOLE_MARKER_INVALID}`,
+    "web_tree_sha256() {",
+    "  local TREE_ROOT INVALID_ENTRY TREE_DIGEST",
+    "  TREE_ROOT=$1",
+    `  INVALID_ENTRY=$(cd -- "$TREE_ROOT" && find . -xdev ! -type d ! -type f -print -quit) || return ${WEB_CONSOLE_TREE_FAILED}`,
+    `  test -z "$INVALID_ENTRY" || return ${WEB_CONSOLE_TREE_INVALID}`,
+    `  TREE_DIGEST=$(cd -- "$TREE_ROOT" && find . -xdev -type f -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum -- | sha256sum | awk '{print $1}') || return ${WEB_CONSOLE_TREE_FAILED}`,
+    "  printf '%s' \"$TREE_DIGEST\"",
+    "}",
+    "TREE_BEFORE=$(web_tree_sha256 \"$ROOT_REAL_BEFORE\")",
+    "TREE_STATUS=$?",
+    "test \"$TREE_STATUS\" -eq 0 || exit \"$TREE_STATUS\"",
+    "TREE_AFTER=$(web_tree_sha256 \"$ROOT_REAL_BEFORE\")",
+    "TREE_STATUS=$?",
+    `test "$TREE_STATUS" -eq 0 || exit ${PROBE_CHANGED_DURING_READ}`,
+    "MARKER_AFTER=$ROOT_REAL_BEFORE/.supacloud-component.json",
+    `test ! -L "$MARKER_AFTER" && test -f "$MARKER_AFTER" || exit ${PROBE_CHANGED_DURING_READ}`,
+    `test "$(stat -c '%s' -- "$MARKER_AFTER")" -le ${WEB_CONSOLE_MARKER_MAX_BYTES} || exit ${PROBE_CHANGED_DURING_READ}`,
+    `MARKER_BASE64_AFTER=$(head -c ${WEB_CONSOLE_MARKER_MAX_BYTES + 1} -- "$MARKER_AFTER" | base64 | tr -d '\\n') || exit ${PROBE_CHANGED_DURING_READ}`,
+    `test -d "$ROOT" || exit ${PROBE_CHANGED_DURING_READ}`,
+    `ROOT_REAL_AFTER=$(readlink -f -- "$ROOT") || exit ${PROBE_CHANGED_DURING_READ}`,
+    `ROOT_ID_AFTER=$(stat -c '%d:%i' -- "$ROOT_REAL_AFTER") || exit ${PROBE_CHANGED_DURING_READ}`,
+    `printf '${WEB_ROOT_REAL_BEFORE_LABEL}%s\\n' "$ROOT_REAL_BEFORE"`,
+    `printf '${WEB_ROOT_ID_BEFORE_LABEL}%s\\n' "$ROOT_ID_BEFORE"`,
+    `printf '${WEB_MARKER_BEFORE_LABEL}%s\\n' "$MARKER_BASE64_BEFORE"`,
+    `printf '${WEB_TREE_BEFORE_LABEL}%s\\n' "$TREE_BEFORE"`,
+    `printf '${WEB_TREE_AFTER_LABEL}%s\\n' "$TREE_AFTER"`,
+    `printf '${WEB_MARKER_AFTER_LABEL}%s\\n' "$MARKER_BASE64_AFTER"`,
+    `printf '${WEB_ROOT_REAL_AFTER_LABEL}%s\\n' "$ROOT_REAL_AFTER"`,
+    `printf '${WEB_ROOT_ID_AFTER_LABEL}%s\\n' "$ROOT_ID_AFTER"`,
+].join("\n");
+
+type WebConsoleProbeFields = {
+    markerOutput: string;
+    treeSha256: string | null;
+    consistencyError: string | null;
+};
+
+const WEB_CONSOLE_PROBE_LABELS = [
+    WEB_ROOT_REAL_BEFORE_LABEL,
+    WEB_ROOT_ID_BEFORE_LABEL,
+    WEB_MARKER_BEFORE_LABEL,
+    WEB_TREE_BEFORE_LABEL,
+    WEB_TREE_AFTER_LABEL,
+    WEB_MARKER_AFTER_LABEL,
+    WEB_ROOT_REAL_AFTER_LABEL,
+    WEB_ROOT_ID_AFTER_LABEL,
+] as const;
+
+type WebConsoleProbeValues = [string, string, string, string, string, string, string, string];
+
+function taggedWebConsoleProbeValues(output: string): WebConsoleProbeValues | null {
+    if (output.length > 16_384 || /[\r\0]/.test(output)) return null;
+    const lines = (output.endsWith("\n") ? output.slice(0, -1) : output).split("\n");
+    if (lines.length !== WEB_CONSOLE_PROBE_LABELS.length) return null;
+    const probeValues = WEB_CONSOLE_PROBE_LABELS.map((label, index) => taggedProbeValue(lines[index], label));
+    return probeValues.some(probeValue => probeValue === null)
+        ? null
+        : probeValues as WebConsoleProbeValues;
+}
+
+function webConsoleConsistencyError(probeValues: WebConsoleProbeValues): string | null {
+    const [rootBefore, rootIdBefore, markerBefore, treeBefore, treeAfter, markerAfter, rootAfter, rootIdAfter] = probeValues;
+    if (rootBefore !== rootAfter || rootIdBefore !== rootIdAfter) {
+        return "web_console_root_changed_during_probe";
+    }
+    if (markerBefore !== markerAfter) return "marker_changed_during_probe";
+    return treeBefore !== treeAfter ? "tree_sha256_changed_during_probe" : null;
+}
+
+function webConsoleProbeFields(output: string): WebConsoleProbeFields | null {
+    const probeValues = taggedWebConsoleProbeValues(output);
+    if (!probeValues) return null;
+    const [rootBefore, rootIdBefore, markerBefore, treeBefore, , markerAfter, rootAfter, rootIdAfter] = probeValues;
+    const supportedRoot = /^\/opt\/supacloud\/web-console\/(?:current|releases\/[A-Za-z0-9][A-Za-z0-9._-]*)$/;
+    if (![rootBefore, rootAfter].every(root => supportedRoot.test(root))) return null;
+    if (![rootIdBefore, rootIdAfter].every(rootId => /^\d+:\d+$/.test(rootId))) return null;
+    const markerOutput = canonicalBase64Text(markerBefore, WEB_CONSOLE_MARKER_MAX_BYTES);
+    if (markerOutput === null || canonicalBase64Text(markerAfter, WEB_CONSOLE_MARKER_MAX_BYTES) === null) return null;
+    const consistencyError = webConsoleConsistencyError(probeValues);
+    return {
+        markerOutput,
+        treeSha256: consistencyError ? null : stableSha256(treeBefore),
+        consistencyError,
+    };
+}
 
 function webConsoleProbeError(
-    markerExecution: RemoteExecution | null,
+    execution: RemoteExecution | null,
+    fields: WebConsoleProbeFields | null,
     version: string | null,
-    treeHashExecution: RemoteExecution | null,
     treeSha256: string | null,
 ): { status: ComponentProbeStatus; error: string | null } {
-    if (!markerExecution) return { status: "error", error: "marker_probe_transport_failed" };
-    if (markerExecution.code === 44) return { status: "unknown", error: "marker_missing" };
-    if (!markerExecution.success) return { status: "error", error: "marker_probe_failed" };
+    if (!execution) return { status: "error", error: "web_console_probe_transport_failed" };
+    if (execution.code === WEB_CONSOLE_ROOT_MISSING) return { status: "unknown", error: "web_console_missing" };
+    if (execution.code === WEB_CONSOLE_MARKER_MISSING) return { status: "unknown", error: "marker_missing" };
+    if (execution.code === PROBE_CHANGED_DURING_READ) {
+        return { status: "error", error: "web_console_changed_during_probe" };
+    }
+    if (execution.code === WEB_CONSOLE_ROOT_INVALID || execution.code === WEB_CONSOLE_TREE_INVALID) {
+        return { status: "error", error: "web_console_invalid_file" };
+    }
+    if (execution.code === WEB_CONSOLE_MARKER_INVALID) return { status: "error", error: "marker_invalid" };
+    if (execution.code === WEB_CONSOLE_TREE_FAILED) return { status: "error", error: "tree_sha256_probe_failed" };
+    if (!execution.success) return { status: "error", error: "web_console_probe_failed" };
+    if (!fields) return { status: "error", error: "web_console_probe_output_invalid" };
+    if (fields.consistencyError) return { status: "error", error: fields.consistencyError };
     if (!version) return { status: "error", error: "marker_invalid" };
-    if (!treeHashExecution) return { status: "error", error: "tree_sha256_probe_transport_failed" };
-    if (treeHashExecution.code === 44) return { status: "unknown", error: "web_console_missing" };
-    if (!treeHashExecution.success) return { status: "error", error: "tree_sha256_probe_failed" };
     return treeSha256 ? { status: "ok", error: null } : { status: "error", error: "tree_sha256_output_invalid" };
 }
 
 async function webConsoleEvidence(ssh: SshTransport): Promise<WebConsoleEvidence> {
-    const [markerExecution, treeHashExecution] = await Promise.all([
-        runFixedRemoteCommand(ssh, WEB_MARKER_COMMAND, PLATFORM_PROBE_TIMEOUT_MS),
-        runFixedRemoteCommand(ssh, WEB_TREE_SHA256_COMMAND, PLATFORM_HASH_TIMEOUT_MS),
-    ]);
-    const version = markerExecution?.success ? parseWebConsoleVersion(markerExecution.stdout) : null;
-    const treeSha256 = treeHashExecution?.success ? stableSha256(treeHashExecution.stdout) : null;
-    const state = webConsoleProbeError(markerExecution, version, treeHashExecution, treeSha256);
+    const execution = await runFixedRemoteCommand(ssh, WEB_CONSOLE_PROBE_COMMAND, WEB_CONSOLE_PROBE_TIMEOUT_MS);
+    const fields = execution?.success ? webConsoleProbeFields(execution.stdout) : null;
+    const version = fields && !fields.consistencyError ? parseWebConsoleVersion(fields.markerOutput) : null;
+    const treeSha256 = fields?.treeSha256 ?? null;
+    const state = webConsoleProbeError(execution, fields, version, treeSha256);
     return {
         status: state.status,
         version,
@@ -933,24 +1137,23 @@ Actions: ping, setup, install, upgrade, versions, diagnose, exec, troubleshoot, 
                     break;
                 }
                 case "upgrade": {
-                    const version = args.version ? assertSafeReleaseTag(args.version) : undefined;
+                    const version = args.version
+                        ? assertExactStableVersion(assertSafeReleaseTag(args.version), "version")
+                        : undefined;
                     const edgeRuntimeVersion = args.edge_runtime_version
-                        ? assertSafeReleaseTag(args.edge_runtime_version)
+                        ? assertExactStableVersion(
+                            assertSafeReleaseTag(args.edge_runtime_version),
+                            "edge_runtime_version",
+                        )
                         : undefined;
                     if (edgeRuntimeVersion && !version) {
                         throw new Error("'version' is required with 'edge_runtime_version'");
-                    }
-                    if (edgeRuntimeVersion && version) {
-                        assertExactStableVersion(version, "version");
-                        assertExactStableVersion(edgeRuntimeVersion, "edge_runtime_version");
                     }
                     const validatedProxy = args.github_proxy ? assertSafeGithubProxy(args.github_proxy) : undefined;
                     if (args.artifact_transport === "local") {
                         if (!version || !edgeRuntimeVersion) {
                             throw new Error("Local artifact transport requires exact 'version' and 'edge_runtime_version'");
                         }
-                        assertExactStableVersion(version, "version");
-                        assertExactStableVersion(edgeRuntimeVersion, "edge_runtime_version");
                         if (validatedProxy && !["direct", "none"].includes(validatedProxy.toLowerCase())) {
                             throw new Error("Local artifact transport only supports direct GitHub downloads");
                         }

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -16,6 +17,7 @@ import {
 
 type ToolHandler = (args: Record<string, unknown>) => Promise<{ content: Array<{ type: "text"; text: string }> }>;
 type FakeExecResult = { success: boolean; stdout: string; stderr: string; code: number };
+type FakeExecPlan = { fragment: string; executions: FakeExecResult[]; calls: number };
 
 class FakeSsh {
     readonly commands: string[] = [];
@@ -37,7 +39,7 @@ class FakeSsh {
     diagnosticExecFails = false;
     diagnosticFailureStdout = "";
     diagnosticFailureStderr = "diagnostic failed";
-    readonly matchingExecResults: Array<{ fragment: string; execution: FakeExecResult }> = [];
+    readonly matchingExecResults: FakeExecPlan[] = [];
 
     async ping(): Promise<boolean> {
         return this.pingResult;
@@ -46,8 +48,12 @@ class FakeSsh {
     async exec(command: string, timeoutMs?: number): Promise<{ success: boolean; stdout: string; stderr: string; code: number }> {
         this.commands.push(command);
         this.timeouts.push(timeoutMs);
-        const fixedExecution = this.matchingExecResults.find(candidate => command.includes(candidate.fragment));
-        if (fixedExecution) return fixedExecution.execution;
+        const fixedPlan = this.matchingExecResults.find(candidate => command.includes(candidate.fragment));
+        if (fixedPlan) {
+            const executionIndex = Math.min(fixedPlan.calls, fixedPlan.executions.length - 1);
+            fixedPlan.calls += 1;
+            return fixedPlan.executions[executionIndex]!;
+        }
         if (this.upgradeExecThrows && command.includes("UPGRADE_RUNNER")) {
             throw new Error("connection dropped");
         }
@@ -139,7 +145,87 @@ function fakeSuccess(stdout: string): FakeExecResult {
 }
 
 function addFakeExecution(ssh: FakeSsh, fragment: string, execution: FakeExecResult): void {
-    ssh.matchingExecResults.push({ fragment, execution });
+    ssh.matchingExecResults.push({ fragment, executions: [execution], calls: 0 });
+}
+
+function addFakeExecutionSequence(
+    ssh: FakeSsh,
+    fragment: string,
+    executions: FakeExecResult[],
+): FakeExecPlan {
+    if (executions.length === 0) throw new Error("Fake execution sequence must not be empty");
+    const plan = { fragment, executions, calls: 0 };
+    ssh.matchingExecResults.push(plan);
+    return plan;
+}
+
+function fakeSystemdExecStart(executablePath: string): FakeExecResult {
+    return fakeSuccess([
+        "LoadState=loaded",
+        `ExecStart={ path=${executablePath} ; argv[]=${executablePath} ; ignore_errors=no ; }`,
+        "",
+    ].join("\n"));
+}
+
+function fakeBinaryProbeSuccess(
+    fixture: { versionOutput: string; sha256: string },
+): FakeExecResult {
+    return fakeSuccess([
+        `SUPACLOUD_BINARY_HASH_BEFORE=${fixture.sha256}`,
+        `SUPACLOUD_BINARY_VERSION_BASE64=${Buffer.from(fixture.versionOutput).toString("base64")}`,
+        `SUPACLOUD_BINARY_HASH_AFTER=${fixture.sha256}`,
+        "",
+    ].join("\n"));
+}
+
+function fakeBinaryProbeChanged(
+    fixture: { versionOutput: string; hashBefore: string; hashAfter: string },
+): FakeExecResult {
+    return {
+        success: false,
+        stdout: [
+            `SUPACLOUD_BINARY_HASH_BEFORE=${fixture.hashBefore}`,
+            `SUPACLOUD_BINARY_VERSION_BASE64=${Buffer.from(fixture.versionOutput).toString("base64")}`,
+            `SUPACLOUD_BINARY_HASH_AFTER=${fixture.hashAfter}`,
+            "",
+        ].join("\n"),
+        stderr: "",
+        code: 75,
+    };
+}
+
+function fakeBinaryProbeAfterHashFailure(versionOutput: string, hashBefore: string): FakeExecResult {
+    return {
+        success: false,
+        stdout: [
+            `SUPACLOUD_BINARY_HASH_BEFORE=${hashBefore}`,
+            `SUPACLOUD_BINARY_VERSION_BASE64=${Buffer.from(versionOutput).toString("base64")}`,
+            "",
+        ].join("\n"),
+        stderr: "sha256sum failed",
+        code: 72,
+    };
+}
+
+function fakeWebConsoleProbe(
+    markerOutput: string,
+    treeSha256: string,
+    changes: { root?: string; rootId?: string; marker?: string; tree?: string } = {},
+): FakeExecResult {
+    const rootBefore = "/opt/supacloud/web-console/releases/0.28.8-123-456";
+    const rootIdBefore = "1:2";
+    const markerBefore = Buffer.from(markerOutput).toString("base64");
+    return fakeSuccess([
+        `SUPACLOUD_WEB_ROOT_REAL_BEFORE=${rootBefore}`,
+        `SUPACLOUD_WEB_ROOT_ID_BEFORE=${rootIdBefore}`,
+        `SUPACLOUD_WEB_MARKER_BASE64_BEFORE=${markerBefore}`,
+        `SUPACLOUD_WEB_TREE_SHA256_BEFORE=${treeSha256}`,
+        `SUPACLOUD_WEB_TREE_SHA256_AFTER=${changes.tree ?? treeSha256}`,
+        `SUPACLOUD_WEB_MARKER_BASE64_AFTER=${Buffer.from(changes.marker ?? markerOutput).toString("base64")}`,
+        `SUPACLOUD_WEB_ROOT_REAL_AFTER=${changes.root ?? rootBefore}`,
+        `SUPACLOUD_WEB_ROOT_ID_AFTER=${changes.rootId ?? rootIdBefore}`,
+        "",
+    ].join("\n"));
 }
 
 function addBinaryVersionFixture(
@@ -147,14 +233,11 @@ function addBinaryVersionFixture(
     fixture: { unit: string; executablePath: string; versionOutput: string; sha256: string },
 ): void {
     const { unit, executablePath, versionOutput, sha256 } = fixture;
-    addFakeExecution(ssh, `-- ${unit}`, fakeSuccess([
-        "LoadState=loaded",
-        `ExecStart={ path=${executablePath} ; argv[]=${executablePath} ; ignore_errors=no ; }`,
-        "",
-    ].join("\n")));
-    const versionArgument = unit === "supacloud-caddy.service" ? "version" : "--version";
-    addFakeExecution(ssh, `${executablePath} ${versionArgument} 2>&1`, fakeSuccess(`${versionOutput}\n`));
-    addFakeExecution(ssh, `sha256sum -- ${executablePath}`, fakeSuccess(`${sha256}\n`));
+    addFakeExecution(ssh, `-- ${unit}`, fakeSystemdExecStart(executablePath));
+    addFakeExecution(ssh, `sha256sum -- '${executablePath}'`, fakeBinaryProbeSuccess({
+        versionOutput: `${versionOutput}\n`,
+        sha256,
+    }));
 }
 
 function addPlatformVersionFixture(ssh: FakeSsh): void {
@@ -170,10 +253,19 @@ function addPlatformVersionFixture(ssh: FakeSsh): void {
         unit: "supacloud-caddy.service", executablePath: "/usr/local/bin/supacloud-caddy",
         versionOutput: "v2.11.4", sha256: "3".repeat(64),
     });
-    addFakeExecution(ssh, "MARKER='/opt/supacloud/web-console/current/.supacloud-component.json'", fakeSuccess(
+    addFakeExecution(ssh, "ROOT='/opt/supacloud/web-console/current'", fakeWebConsoleProbe(
         '{"schema_version":1,"component":"web-console","version":"0.28.8","future":true}\n',
+        "4".repeat(64),
     ));
-    addFakeExecution(ssh, 'find -H "$ROOT"', fakeSuccess(`${"4".repeat(64)}\n`));
+}
+
+async function generatedPlatformProbeCommand(commandFragment: string): Promise<string> {
+    const ssh = new FakeSsh();
+    addPlatformVersionFixture(ssh);
+    await captureSshTool(ssh).invoke({ action: "versions" });
+    const command = ssh.commands.find(candidate => candidate.includes(commandFragment));
+    if (!command) throw new Error(`Generated platform probe is missing: ${commandFragment}`);
+    return command;
 }
 
 const UPGRADE_SIGNALS = ["HUP", "INT", "TERM"] as const;
@@ -182,6 +274,21 @@ const RELEASE_ASSETS_SCRIPT = join(import.meta.dir, "../../../../../scripts/lib/
 function writeExecutableShell(filePath: string, shellSource: string): void {
     writeFileSync(filePath, shellSource);
     chmodSync(filePath, 0o755);
+}
+
+function writeDarwinStatCompatibility(commandDir: string): void {
+    if (process.platform !== "darwin") return;
+    writeExecutableShell(join(commandDir, "stat"), [
+        "#!/bin/sh",
+        "if [ \"$1\" = '-c' ] && [ \"$3\" = '--' ]; then",
+        "  case \"$2\" in",
+        "    '%d:%i') exec /usr/bin/stat -f '%d:%i' \"$4\" ;;",
+        "    '%s') exec /usr/bin/stat -f '%z' \"$4\" ;;",
+        "  esac",
+        "fi",
+        "exit 64",
+        "",
+    ].join("\n"));
 }
 
 function writeFakeGh(filePath: string, version: string): void {
@@ -376,6 +483,16 @@ describe("ssh admin tool", () => {
         ]) {
             const ssh = new FakeSsh();
             await expect(captureSshTool(ssh).invoke(args)).rejects.toThrow();
+            expect(ssh.uploads).toHaveLength(0);
+            expect(ssh.commands).toHaveLength(0);
+        }
+    });
+
+    test("remote Management upgrades reject explicit non-stable versions before remote access", async () => {
+        for (const version of ["latest", "01.50.30", "0.50.30-rc.1", "0.50.30+build.4", "0.50.30\n"]) {
+            const ssh = new FakeSsh();
+            await expect(captureSshTool(ssh).invoke({ action: "upgrade", version }))
+                .rejects.toThrow();
             expect(ssh.uploads).toHaveLength(0);
             expect(ssh.commands).toHaveLength(0);
         }
@@ -1063,8 +1180,417 @@ describe("ssh admin tool", () => {
             source: "component_marker_and_tree_sha256",
             error: null,
         });
+        const managementProbe = ssh.commands.find(command => (
+            command.includes("HASH_BEFORE=$(sha256sum -- '/usr/local/bin/supacloud'")
+        )) ?? "";
+        const hashBeforeIndex = managementProbe.indexOf("HASH_BEFORE=$(sha256sum");
+        const versionIndex = managementProbe.indexOf("VERSION_BASE64=$(");
+        const hashAfterIndex = managementProbe.indexOf("HASH_AFTER=$(sha256sum");
+        expect(hashBeforeIndex).toBeGreaterThanOrEqual(0);
+        expect(versionIndex).toBeGreaterThan(hashBeforeIndex);
+        expect(hashAfterIndex).toBeGreaterThan(versionIndex);
+        expect(managementProbe.match(/sha256sum -- '\/usr\/local\/bin\/supacloud'/g)).toHaveLength(2);
+        expect(managementProbe).toContain("| head -c 2049 | base64 |");
+        const webProbe = ssh.commands.find(command => command.includes("web_tree_sha256()")) ?? "";
+        expect(webProbe.indexOf("ROOT_REAL_BEFORE=")).toBeLessThan(webProbe.indexOf("TREE_BEFORE="));
+        expect(webProbe.indexOf("TREE_BEFORE=")).toBeLessThan(webProbe.indexOf("TREE_AFTER="));
+        expect(webProbe.indexOf("TREE_AFTER=")).toBeLessThan(webProbe.indexOf("ROOT_REAL_AFTER="));
+        expect(webProbe.match(/head -c 4097 --/g)).toHaveLength(2);
         for (const command of ssh.commands) {
             expect(Bun.spawnSync(["bash", "-n", "-c", command]).exitCode).toBe(0);
+        }
+    });
+
+    test("the fixed Web Console probe executes a real stable release tree", async () => {
+        const fixtureRoot = realpathSync(mkdtempSync(join(tmpdir(), "supacloud-web-probe-")));
+        const releaseRoot = join(fixtureRoot, "releases", "0.28.8-test");
+        const commandDir = join(fixtureRoot, "commands");
+        try {
+            mkdirSync(releaseRoot, { recursive: true });
+            mkdirSync(commandDir, { recursive: true });
+            writeDarwinStatCompatibility(commandDir);
+            const markerSource = '{"schema_version":1,"component":"web-console","version":"0.28.8"}\n';
+            const indexSource = "<!doctype html><title>SupaCloud</title>\n";
+            writeFileSync(join(releaseRoot, ".supacloud-component.json"), markerSource);
+            writeFileSync(join(releaseRoot, "index.html"), indexSource);
+            symlinkSync(releaseRoot, join(fixtureRoot, "current"));
+
+            const generatedProbe = await generatedPlatformProbeCommand("web_tree_sha256()");
+            const localProbe = generatedProbe.replaceAll("/opt/supacloud/web-console", fixtureRoot);
+            const execution = Bun.spawnSync(["bash", "-c", localProbe], {
+                env: { ...process.env, PATH: `${commandDir}:${process.env.PATH ?? ""}` },
+            });
+
+            expect(execution.exitCode).toBe(0);
+            expect(execution.stderr.toString()).toBe("");
+            const normalizedOutput = execution.stdout.toString().replaceAll(
+                fixtureRoot,
+                "/opt/supacloud/web-console",
+            );
+            const parserSsh = new FakeSsh();
+            addFakeExecution(
+                parserSsh,
+                "ROOT='/opt/supacloud/web-console/current'",
+                fakeSuccess(normalizedOutput),
+            );
+            addPlatformVersionFixture(parserSsh);
+
+            const response = await captureSshTool(parserSsh).invoke({ action: "versions" });
+            const webConsole = JSON.parse(response.content[0]?.text ?? "").components.web_console;
+
+            expect(webConsole).toMatchObject({
+                status: "ok",
+                version: "0.28.8",
+                error: null,
+            });
+            const markerSha256 = createHash("sha256").update(markerSource).digest("hex");
+            const indexSha256 = createHash("sha256").update(indexSource).digest("hex");
+            const treeInput = [
+                `${markerSha256}  ./.supacloud-component.json`,
+                `${indexSha256}  ./index.html`,
+                "",
+            ].join("\n");
+            expect(webConsole.tree_sha256).toBe(createHash("sha256").update(treeInput).digest("hex"));
+        } finally {
+            rmSync(fixtureRoot, { recursive: true, force: true });
+        }
+    });
+
+    test("the fixed Web Console probe rejects linked and special-file markers", async () => {
+        const fixtureRoot = realpathSync(mkdtempSync(join(tmpdir(), "supacloud-web-invalid-marker-")));
+        const commandDir = join(fixtureRoot, "commands");
+        try {
+            mkdirSync(commandDir, { recursive: true });
+            writeDarwinStatCompatibility(commandDir);
+            const generatedProbe = await generatedPlatformProbeCommand("web_tree_sha256()");
+            const spawnProbe = (webRoot: string) => Bun.spawnSync([
+                "bash",
+                "-c",
+                generatedProbe.replaceAll("/opt/supacloud/web-console", webRoot),
+            ], {
+                env: { ...process.env, PATH: `${commandDir}:${process.env.PATH ?? ""}` },
+            });
+
+            const linkedRoot = join(fixtureRoot, "linked");
+            const linkedRelease = join(linkedRoot, "releases", "0.28.8-test");
+            mkdirSync(linkedRelease, { recursive: true });
+            symlinkSync(linkedRelease, join(linkedRoot, "current"));
+            const markerTarget = join(linkedRoot, "marker-target.json");
+            writeFileSync(markerTarget, '{"schema_version":1,"component":"web-console","version":"0.28.8"}\n');
+            symlinkSync(markerTarget, join(linkedRelease, ".supacloud-component.json"));
+            expect(spawnProbe(linkedRoot).exitCode).toBe(65);
+
+            const specialRoot = join(fixtureRoot, "special");
+            const specialRelease = join(specialRoot, "releases", "0.28.8-test");
+            mkdirSync(specialRelease, { recursive: true });
+            symlinkSync(specialRelease, join(specialRoot, "current"));
+            const fifoPath = join(specialRelease, ".supacloud-component.json");
+            const mkfifoPath = Bun.which("mkfifo");
+            if (!mkfifoPath) throw new Error("Required test command is unavailable: mkfifo");
+            expect(Bun.spawnSync([mkfifoPath, fifoPath]).exitCode).toBe(0);
+            expect(spawnProbe(specialRoot).exitCode).toBe(65);
+        } finally {
+            rmSync(fixtureRoot, { recursive: true, force: true });
+        }
+    });
+
+    test("versions rejects binary evidence when the executable changes during one probe", async () => {
+        const ssh = new FakeSsh();
+        addFakeExecution(
+            ssh,
+            "sha256sum -- '/usr/local/bin/supacloud'",
+            fakeBinaryProbeChanged({
+                versionOutput: "SupaCloud Version: 0.50.34\n",
+                hashBefore: "1".repeat(64),
+                hashAfter: "9".repeat(64),
+            }),
+        );
+        addPlatformVersionFixture(ssh);
+
+        const response = await captureSshTool(ssh).invoke({ action: "versions" });
+        const components = JSON.parse(response.content[0]?.text ?? "").components;
+
+        expect(components.management_api).toMatchObject({
+            status: "error",
+            version: null,
+            sha256: null,
+            error: "binary_changed_during_probe",
+        });
+        expect(components.edge_runtime.status).toBe("ok");
+        expect(components.caddy.status).toBe("ok");
+        expect(components.web_console.status).toBe("ok");
+    });
+
+    test("the fixed binary probe exits 75 when version execution replaces its file", async () => {
+        const fixtureRoot = mkdtempSync(join(tmpdir(), "supacloud-binary-probe-race-"));
+        const executablePath = join(fixtureRoot, "supacloud");
+        try {
+            writeExecutableShell(executablePath, [
+                "#!/bin/bash",
+                "printf 'SupaCloud Version: 0.50.34\\n'",
+                "NEXT_PATH=\"${0}.next\"",
+                "printf '%s\\n' '#!/bin/sh' \"printf 'SupaCloud Version: 0.50.35\\\\n'\" > \"$NEXT_PATH\"",
+                "chmod 0755 \"$NEXT_PATH\"",
+                "mv -f \"$NEXT_PATH\" \"$0\"",
+                "",
+            ].join("\n"));
+            const ssh = new FakeSsh();
+            addPlatformVersionFixture(ssh);
+            await captureSshTool(ssh).invoke({ action: "versions" });
+            const fixedProbe = ssh.commands.find(command => (
+                command.includes("HASH_BEFORE=$(sha256sum -- '/usr/local/bin/supacloud'")
+            )) ?? "";
+            expect(executablePath).not.toContain("'");
+            const localProbe = fixedProbe.replaceAll(
+                "'/usr/local/bin/supacloud'",
+                `'${executablePath}'`,
+            );
+
+            const execution = Bun.spawnSync(["bash", "-c", localProbe]);
+            expect(execution.exitCode).toBe(75);
+        } finally {
+            rmSync(fixtureRoot, { recursive: true, force: true });
+        }
+    });
+
+    test("versions clears binary evidence when systemd ExecStart changes after the probe", async () => {
+        const ssh = new FakeSsh();
+        const systemdPlan = addFakeExecutionSequence(ssh, "-- supacloud.service", [
+            fakeSystemdExecStart("/usr/local/bin/supacloud"),
+            fakeSystemdExecStart("/opt/supacloud/bin/supacloud"),
+        ]);
+        addFakeExecution(
+            ssh,
+            "sha256sum -- '/usr/local/bin/supacloud'",
+            fakeBinaryProbeSuccess({ versionOutput: "SupaCloud Version: 0.50.34\n", sha256: "1".repeat(64) }),
+        );
+        addPlatformVersionFixture(ssh);
+
+        const response = await captureSshTool(ssh).invoke({ action: "versions" });
+        const management = JSON.parse(response.content[0]?.text ?? "").components.management_api;
+
+        expect(systemdPlan.calls).toBe(2);
+        expect(management).toMatchObject({
+            status: "error",
+            version: null,
+            sha256: null,
+            path: "/usr/local/bin/supacloud",
+            error: "exec_start_changed_during_probe",
+        });
+    });
+
+    test("versions rejects each Web Console snapshot change without cross-generation evidence", async () => {
+        const stableMarker = '{"schema_version":1,"component":"web-console","version":"0.28.8"}\n';
+        const changes = [
+            {
+                fixture: { root: "/opt/supacloud/web-console/releases/0.28.9-789-012" },
+                error: "web_console_root_changed_during_probe",
+            },
+            {
+                fixture: { marker: '{"schema_version":1,"component":"web-console","version":"0.28.9"}\n' },
+                error: "marker_changed_during_probe",
+            },
+            { fixture: { tree: "8".repeat(64) }, error: "tree_sha256_changed_during_probe" },
+        ];
+
+        for (const change of changes) {
+            const ssh = new FakeSsh();
+            addFakeExecution(
+                ssh,
+                "ROOT='/opt/supacloud/web-console/current'",
+                fakeWebConsoleProbe(stableMarker, "4".repeat(64), change.fixture),
+            );
+            addPlatformVersionFixture(ssh);
+
+            const response = await captureSshTool(ssh).invoke({ action: "versions" });
+            const webConsole = JSON.parse(response.content[0]?.text ?? "").components.web_console;
+
+            expect(webConsole).toMatchObject({
+                status: "error",
+                version: null,
+                tree_sha256: null,
+                error: change.error,
+            });
+        }
+    });
+
+    test("versions accepts 2048 binary-version bytes and rejects 2049", async () => {
+        const versionPrefix = "SupaCloud Version: 0.50.34";
+        for (const outputBytes of [2048, 2049]) {
+            const versionOutput = `${versionPrefix}${" ".repeat(outputBytes - versionPrefix.length)}`;
+            expect(Buffer.byteLength(versionOutput)).toBe(outputBytes);
+            const ssh = new FakeSsh();
+            addFakeExecution(
+                ssh,
+                "sha256sum -- '/usr/local/bin/supacloud'",
+                fakeBinaryProbeSuccess({ versionOutput, sha256: "1".repeat(64) }),
+            );
+            addPlatformVersionFixture(ssh);
+
+            const response = await captureSshTool(ssh).invoke({ action: "versions" });
+            const management = JSON.parse(response.content[0]?.text ?? "").components.management_api;
+
+            expect(management.status).toBe(outputBytes === 2048 ? "ok" : "error");
+            expect(management.version).toBe(outputBytes === 2048 ? "0.50.34" : null);
+        }
+    });
+
+    test("versions fails closed for malformed binary tagged output", async () => {
+        const hash = "1".repeat(64);
+        const versionBase64 = Buffer.from("SupaCloud Version: 0.50.34\n").toString("base64");
+        const validLines = [
+            `SUPACLOUD_BINARY_HASH_BEFORE=${hash}`,
+            `SUPACLOUD_BINARY_VERSION_BASE64=${versionBase64}`,
+            `SUPACLOUD_BINARY_HASH_AFTER=${hash}`,
+        ];
+        const hashLines = (invalidHash: string) => [
+            `SUPACLOUD_BINARY_HASH_BEFORE=${invalidHash}`,
+            validLines[1]!,
+            `SUPACLOUD_BINARY_HASH_AFTER=${invalidHash}`,
+        ];
+        const invalidUtf8 = Buffer.from([0xc3, 0x28]).toString("base64");
+        const invalidOutputs = [
+            { name: "missing label", output: `${validLines[0]}\n${validLines[2]}\n` },
+            { name: "duplicate label", output: `${[validLines[0], validLines[1], validLines[1], validLines[2]].join("\n")}\n` },
+            { name: "wrong order", output: `${[validLines[1], validLines[0], validLines[2]].join("\n")}\n` },
+            { name: "extra label", output: `${[...validLines, "SUPACLOUD_BINARY_EXTRA=1"].join("\n")}\n` },
+            { name: "empty base64", output: `${[validLines[0], "SUPACLOUD_BINARY_VERSION_BASE64=", validLines[2]].join("\n")}\n` },
+            { name: "invalid base64", output: `${[validLines[0], "SUPACLOUD_BINARY_VERSION_BASE64=%%%%", validLines[2]].join("\n")}\n` },
+            { name: "non-canonical base64", output: `${[validLines[0], "SUPACLOUD_BINARY_VERSION_BASE64=Zh==", validLines[2]].join("\n")}\n` },
+            { name: "invalid UTF-8", output: `${[validLines[0], `SUPACLOUD_BINARY_VERSION_BASE64=${invalidUtf8}`, validLines[2]].join("\n")}\n` },
+            { name: "short hash", output: `${hashLines("1".repeat(63)).join("\n")}\n` },
+            { name: "uppercase hash", output: `${hashLines("A".repeat(64)).join("\n")}\n` },
+            { name: "leading whitespace hash", output: `${hashLines(` ${hash}`).join("\n")}\n` },
+            { name: "trailing whitespace hash", output: `${hashLines(`${hash} `).join("\n")}\n` },
+            { name: "carriage return", output: `${validLines.join("\r\n")}\r\n` },
+        ];
+
+        for (const invalidOutput of invalidOutputs) {
+            const ssh = new FakeSsh();
+            addFakeExecution(
+                ssh,
+                "sha256sum -- '/usr/local/bin/supacloud'",
+                fakeSuccess(invalidOutput.output),
+            );
+            addPlatformVersionFixture(ssh);
+
+            const response = await captureSshTool(ssh).invoke({ action: "versions" });
+            const management = JSON.parse(response.content[0]?.text ?? "").components.management_api;
+
+            expect({ name: invalidOutput.name, status: management.status }).toEqual({
+                name: invalidOutput.name,
+                status: "error",
+            });
+        }
+    });
+
+    test("versions accepts 4096 Web marker bytes and rejects 4097", async () => {
+        const markerPrefix = '{"schema_version":1,"component":"web-console","version":"0.28.8"}';
+        for (const outputBytes of [4096, 4097]) {
+            const markerOutput = `${markerPrefix}${" ".repeat(outputBytes - markerPrefix.length)}`;
+            expect(Buffer.byteLength(markerOutput)).toBe(outputBytes);
+            const ssh = new FakeSsh();
+            addFakeExecution(
+                ssh,
+                "ROOT='/opt/supacloud/web-console/current'",
+                fakeWebConsoleProbe(markerOutput, "4".repeat(64)),
+            );
+            addPlatformVersionFixture(ssh);
+
+            const response = await captureSshTool(ssh).invoke({ action: "versions" });
+            const webConsole = JSON.parse(response.content[0]?.text ?? "").components.web_console;
+
+            expect(webConsole.status).toBe(outputBytes === 4096 ? "ok" : "error");
+            expect(webConsole.version).toBe(outputBytes === 4096 ? "0.28.8" : null);
+        }
+    });
+
+    test("versions fails closed for malformed Web Console tagged output", async () => {
+        const markerOutput = '{"schema_version":1,"component":"web-console","version":"0.28.8"}\n';
+        const validLines = fakeWebConsoleProbe(markerOutput, "4".repeat(64)).stdout.trimEnd().split("\n");
+        const webProbeOutputWith = (...replacements: Array<[number, string]>): string => {
+            const lines = [...validLines];
+            for (const [index, replacement] of replacements) lines[index] = replacement;
+            return `${lines.join("\n")}\n`;
+        };
+        const invalidUtf8 = Buffer.from([0xc3, 0x28]).toString("base64");
+        const invalidOutputs = [
+            { name: "missing label", output: `${validLines.slice(0, -1).join("\n")}\n` },
+            { name: "duplicate label", output: `${[validLines[0], ...validLines].join("\n")}\n` },
+            { name: "wrong order", output: webProbeOutputWith([0, validLines[1]!], [1, validLines[0]!]) },
+            { name: "extra label", output: `${[...validLines, "SUPACLOUD_WEB_EXTRA=1"].join("\n")}\n` },
+            { name: "empty base64", output: webProbeOutputWith([2, "SUPACLOUD_WEB_MARKER_BASE64_BEFORE="]) },
+            { name: "invalid base64", output: webProbeOutputWith([2, "SUPACLOUD_WEB_MARKER_BASE64_BEFORE=%%%%"]) },
+            { name: "non-canonical base64", output: webProbeOutputWith([2, "SUPACLOUD_WEB_MARKER_BASE64_BEFORE=Zh=="]) },
+            { name: "invalid UTF-8", output: webProbeOutputWith([2, `SUPACLOUD_WEB_MARKER_BASE64_BEFORE=${invalidUtf8}`]) },
+            {
+                name: "short hash",
+                output: webProbeOutputWith(
+                    [3, `SUPACLOUD_WEB_TREE_SHA256_BEFORE=${"4".repeat(63)}`],
+                    [4, `SUPACLOUD_WEB_TREE_SHA256_AFTER=${"4".repeat(63)}`],
+                ),
+            },
+            {
+                name: "uppercase hash",
+                output: webProbeOutputWith(
+                    [3, `SUPACLOUD_WEB_TREE_SHA256_BEFORE=${"A".repeat(64)}`],
+                    [4, `SUPACLOUD_WEB_TREE_SHA256_AFTER=${"A".repeat(64)}`],
+                ),
+            },
+            {
+                name: "leading whitespace hash",
+                output: webProbeOutputWith(
+                    [3, `SUPACLOUD_WEB_TREE_SHA256_BEFORE= ${"4".repeat(64)}`],
+                    [4, `SUPACLOUD_WEB_TREE_SHA256_AFTER= ${"4".repeat(64)}`],
+                ),
+            },
+            {
+                name: "trailing whitespace hash",
+                output: webProbeOutputWith(
+                    [3, `SUPACLOUD_WEB_TREE_SHA256_BEFORE=${"4".repeat(64)} `],
+                    [4, `SUPACLOUD_WEB_TREE_SHA256_AFTER=${"4".repeat(64)} `],
+                ),
+            },
+            {
+                name: "invalid root",
+                output: webProbeOutputWith(
+                    [0, "SUPACLOUD_WEB_ROOT_REAL_BEFORE=/tmp/web-console"],
+                    [6, "SUPACLOUD_WEB_ROOT_REAL_AFTER=/tmp/web-console"],
+                ),
+            },
+            {
+                name: "parent release segment",
+                output: webProbeOutputWith(
+                    [0, "SUPACLOUD_WEB_ROOT_REAL_BEFORE=/opt/supacloud/web-console/releases/.."],
+                    [6, "SUPACLOUD_WEB_ROOT_REAL_AFTER=/opt/supacloud/web-console/releases/.."],
+                ),
+            },
+            {
+                name: "invalid root ID",
+                output: webProbeOutputWith(
+                    [1, "SUPACLOUD_WEB_ROOT_ID_BEFORE=device:inode"],
+                    [7, "SUPACLOUD_WEB_ROOT_ID_AFTER=device:inode"],
+                ),
+            },
+            { name: "carriage return", output: `${validLines.join("\r\n")}\r\n` },
+        ];
+
+        for (const invalidOutput of invalidOutputs) {
+            const ssh = new FakeSsh();
+            addFakeExecution(
+                ssh,
+                "ROOT='/opt/supacloud/web-console/current'",
+                fakeSuccess(invalidOutput.output),
+            );
+            addPlatformVersionFixture(ssh);
+
+            const response = await captureSshTool(ssh).invoke({ action: "versions" });
+            const webConsole = JSON.parse(response.content[0]?.text ?? "").components.web_console;
+
+            expect({ name: invalidOutput.name, status: webConsole.status }).toEqual({
+                name: invalidOutput.name,
+                status: "error",
+            });
         }
     });
 
@@ -1082,10 +1608,10 @@ describe("ssh admin tool", () => {
             unit: "supacloud-caddy.service", executablePath: "/usr/local/bin/supacloud-caddy",
             versionOutput: "v2.11.4", sha256: "c".repeat(64),
         });
-        addFakeExecution(ssh, "MARKER='/opt/supacloud/web-console/current/.supacloud-component.json'", fakeSuccess(
+        addFakeExecution(ssh, "ROOT='/opt/supacloud/web-console/current'", fakeWebConsoleProbe(
             '{"schema_version":1,"component":"web-console","version":"0.28.8"}',
+            "d".repeat(64),
         ));
-        addFakeExecution(ssh, 'find -H "$ROOT"', fakeSuccess("d".repeat(64)));
 
         const response = await captureSshTool(ssh).invoke({ action: "versions" });
         const components = JSON.parse(response.content[0]?.text ?? "").components;
@@ -1150,12 +1676,11 @@ describe("ssh admin tool", () => {
 
     test("versions preserves successful fields when one fixed probe fails", async () => {
         const ssh = new FakeSsh();
-        addFakeExecution(ssh, "sha256sum -- /usr/local/bin/supacloud |", {
-            success: false,
-            stdout: "",
-            stderr: "sha256sum failed",
-            code: 1,
-        });
+        addFakeExecution(
+            ssh,
+            "sha256sum -- '/usr/local/bin/supacloud'",
+            fakeBinaryProbeAfterHashFailure("SupaCloud Version: 0.50.34\n", "1".repeat(64)),
+        );
         addPlatformVersionFixture(ssh);
 
         const response = await captureSshTool(ssh).invoke({ action: "versions" });
@@ -1172,13 +1697,24 @@ describe("ssh admin tool", () => {
         expect(components.web_console.status).toBe("ok");
     });
 
-    test("versions rejects prerelease and build-metadata version output", async () => {
-        for (const versionOutput of ["supacloud-edge-runtime 0.16.9-rc.1", "supacloud-edge-runtime 0.16.9+build.4"]) {
+    test("versions rejects every non-stable or mixed version output", async () => {
+        for (const versionOutput of [
+            "supacloud-edge-runtime 01.16.9",
+            "supacloud-edge-runtime 0.16.9-rc.1",
+            "supacloud-edge-runtime 0.16.9+build.4",
+            "supacloud-edge-runtime 0.16.9_rc.1",
+            "supacloud-edge-runtime 0.16.9~rc1",
+            "candidate 0.16.9-rc.1 fallback 0.16.9",
+            "candidate 0.16.9+build.4 fallback 0.16.9",
+            "candidate 0.16.9_rc.1 fallback 0.16.9",
+            "candidate 0.16.9~rc1 fallback 0.16.9",
+            "candidate 0.16.9/rc1 fallback 0.16.9",
+        ]) {
             const ssh = new FakeSsh();
             addFakeExecution(
                 ssh,
-                "/usr/local/bin/supacloud-edge-runtime --version 2>&1",
-                fakeSuccess(`${versionOutput}\n`),
+                "sha256sum -- '/usr/local/bin/supacloud-edge-runtime'",
+                fakeBinaryProbeSuccess({ versionOutput: `${versionOutput}\n`, sha256: "2".repeat(64) }),
             );
             addPlatformVersionFixture(ssh);
 
@@ -1195,7 +1731,7 @@ describe("ssh admin tool", () => {
 
     test("versions distinguishes missing and malformed Web Console markers", async () => {
         const missing = new FakeSsh();
-        addFakeExecution(missing, "MARKER='/opt/supacloud/web-console/current/.supacloud-component.json'", {
+        addFakeExecution(missing, "ROOT='/opt/supacloud/web-console/current'", {
             success: false, stdout: "", stderr: "", code: 44,
         });
         addPlatformVersionFixture(missing);
@@ -1213,8 +1749,8 @@ describe("ssh admin tool", () => {
             const invalid = new FakeSsh();
             addFakeExecution(
                 invalid,
-                "MARKER='/opt/supacloud/web-console/current/.supacloud-component.json'",
-                fakeSuccess(invalidMarker),
+                "ROOT='/opt/supacloud/web-console/current'",
+                fakeWebConsoleProbe(invalidMarker, "4".repeat(64)),
             );
             addPlatformVersionFixture(invalid);
 
