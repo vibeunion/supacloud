@@ -2,7 +2,7 @@ import { $, SQL } from "bun";
 import * as p from "@clack/prompts";
 import os from "node:os";
 import path from "node:path";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { logger } from "./utils/logger";
 import { WEB_CONSOLE_CURRENT_DIR } from "./utils/web-console-path";
@@ -22,6 +22,7 @@ import {
     acquireSupaCloudUpgradeLock,
     SUPACLOUD_UPGRADE_LOCK_PATH,
 } from "./upgrade-lock";
+import { withSigstoreVerificationDirectory } from "./sigstore-trusted-root";
 
 const RELEASES_API = "https://api.github.com/repos/zuohuadong/supacloud/releases";
 const BIN_TARGET = "/usr/local/bin/supacloud";
@@ -983,7 +984,7 @@ export function resolveArtifactVerificationMode(
 export function supportsGithubOfflineAttestationVerification(exitCode: number, helpText: string): boolean {
     const helpTokens = helpText.split(/\s+/);
     return exitCode === 0
-        && ["--bundle", "--signer-workflow", "--source-ref", "--deny-self-hosted-runners"].every(flag => (
+        && ["--bundle", "--custom-trusted-root", "--signer-workflow", "--source-ref", "--deny-self-hosted-runners"].every(flag => (
             helpTokens.some(token => token === flag || token.startsWith(`${flag}=`))
         ));
 }
@@ -1004,19 +1005,6 @@ export function serializeGithubAttestationBundles(payload: unknown): string {
         return bundle;
     });
     return `${bundles.map(bundle => JSON.stringify(bundle)).join("\n")}\n`;
-}
-
-function throwAttestationVerificationOutcome(verificationError: unknown, cleanupError: unknown): void {
-    if (verificationError && cleanupError) {
-        throw new AggregateError(
-            [verificationError, cleanupError],
-            "GitHub artifact attestation verification failed and temporary bundle cleanup did not complete",
-        );
-    }
-    if (verificationError) throw verificationError;
-    if (cleanupError) {
-        throw new AggregateError([cleanupError], "Temporary GitHub attestation bundle cleanup did not complete");
-    }
 }
 
 type GithubCliCommandResult = {
@@ -1041,10 +1029,15 @@ async function runGithubCli(githubArguments: string[]): Promise<GithubCliCommand
     return { exitCode, stdout, stderr };
 }
 
-async function runGithubAttestationVerification(filePath: string, bundlePath: string): Promise<void> {
+async function runGithubAttestationVerification(
+    filePath: string,
+    bundlePath: string,
+    trustedRootPath: string,
+): Promise<void> {
     const verification = await runGithubCli([
         "attestation", "verify", filePath,
         "--bundle", bundlePath,
+        "--custom-trusted-root", trustedRootPath,
         "--repo", RELEASE_REPOSITORY,
         "--signer-workflow", RELEASE_SIGNER_WORKFLOW,
         "--source-ref", RELEASE_SOURCE_REF,
@@ -1056,23 +1049,12 @@ async function runGithubAttestationVerification(filePath: string, bundlePath: st
 }
 
 async function verifyGithubAttestationBundle(filePath: string, bundleJsonl: string): Promise<void> {
-    const bundleDirectory = mkdtempSync(path.join(os.tmpdir(), "supacloud-attestation-"));
-    const bundlePath = path.join(bundleDirectory, "bundle.jsonl");
-    let verificationError: unknown;
-    try {
+    await withSigstoreVerificationDirectory(async ({ directory, trustedRootPath }) => {
+        const bundlePath = path.join(directory, "bundle.jsonl");
         writeFileSync(bundlePath, bundleJsonl, { mode: 0o600 });
-        await runGithubAttestationVerification(filePath, bundlePath);
-    } catch (error: unknown) {
-        verificationError = error;
-    }
-
-    let cleanupError: unknown;
-    try {
-        rmSync(bundleDirectory, { recursive: true });
-    } catch (error: unknown) {
-        cleanupError = error;
-    }
-    throwAttestationVerificationOutcome(verificationError, cleanupError);
+        chmodSync(bundlePath, 0o600);
+        await runGithubAttestationVerification(filePath, bundlePath, trustedRootPath);
+    });
 }
 
 export type VerifyArtifactAttestationRequest = {

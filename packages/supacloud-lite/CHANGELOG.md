@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.5.10](https://github.com/zuohuadong/supacloud/compare/supacloud-lite-v0.5.9...supacloud-lite-v0.5.10) (2026-08-10)
+
+
+### Bug Fixes
+
+* **lite:** default PGlite timezone to UTC ([#793](https://github.com/zuohuadong/supacloud/issues/793)) ([e79cb42](https://github.com/zuohuadong/supacloud/commit/e79cb421e970f94a06df01d4e325f75960803c6d))
+* **lite:** delegate function CORS preflights ([#792](https://github.com/zuohuadong/supacloud/issues/792)) ([5dd5f0f](https://github.com/zuohuadong/supacloud/commit/5dd5f0f290c6edf81c335bda8cdc27e857d4eabd))
+* **lite:** respect project function execution grants ([#795](https://github.com/zuohuadong/supacloud/issues/795)) ([becd0ec](https://github.com/zuohuadong/supacloud/commit/becd0ecc5cc255777a225d9378b5cd3135136fce))
+
 ## [0.5.9](https://github.com/zuohuadong/supacloud/compare/supacloud-lite-v0.5.8...supacloud-lite-v0.5.9) (2026-08-09)
 
 

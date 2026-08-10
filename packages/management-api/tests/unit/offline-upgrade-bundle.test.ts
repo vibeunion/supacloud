@@ -4,10 +4,12 @@ import {
   chmodSync,
   existsSync,
   linkSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   symlinkSync,
   truncateSync,
@@ -21,6 +23,13 @@ import {
   loadOfflineUpgradeBundle,
   runGithubCliWithTimeout,
 } from "../../src/offline-upgrade-bundle";
+import {
+  SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_JSONL,
+  SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_SHA256,
+  SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_SIZE,
+  SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_TUF_TARGET_SHA256,
+  withSigstoreVerificationDirectory,
+} from "../../src/sigstore-trusted-root";
 import {
   RELEASE_ATTESTATION_NAME,
   RELEASE_BUNDLE_SIZE_LIMITS,
@@ -54,6 +63,7 @@ type BundleFixture = {
 afterEach(() => {
   process.env.PATH = originalPath;
   delete process.env.GH_OFFLINE_RECORD;
+  delete process.env.GH_OFFLINE_OMIT_TRUSTED_ROOT;
   globalThis.fetch = originalFetch;
   for (const root of fixtureRoots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
@@ -134,6 +144,7 @@ function installFakeGithubCli(root: string): string {
     "#!/bin/sh",
     'if [ "$1 $2 $3" = "attestation verify --help" ]; then',
     '  printf "%s\\n" "--bundle --signer-workflow --source-ref --source-digest --deny-self-hosted-runners"',
+    '  [ "${GH_OFFLINE_OMIT_TRUSTED_ROOT:-false}" = "true" ] || printf "%s\\n" "--custom-trusted-root"',
     "  exit 0",
     "fi",
     'printf "%s\\n" "$*" >> "$GH_OFFLINE_RECORD"',
@@ -168,6 +179,61 @@ function loadFixture(fixture: BundleFixture) {
 }
 
 describe("offline upgrade bundle", () => {
+  test("pins a canonical TUF-derived trusted root and materializes it securely", async () => {
+    expect(SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_TUF_TARGET_SHA256)
+      .toBe("6494e21ea73fa7ee769f85f57d5a3e6a08725eae1e38c755fc3517c9e6bc0b66");
+    expect(Buffer.byteLength(SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_JSONL))
+      .toBe(SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_SIZE);
+    expect(sha256(SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_JSONL))
+      .toBe(SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_SHA256);
+    expect(`${JSON.stringify(JSON.parse(SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_JSONL))}\n`)
+      .toBe(SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_JSONL);
+
+    let temporaryDirectory = "";
+    await withSigstoreVerificationDirectory(async ({ directory, trustedRootPath }) => {
+      temporaryDirectory = directory;
+      expect(lstatSync(directory).mode & 0o7777).toBe(0o700);
+      expect(lstatSync(trustedRootPath).mode & 0o7777).toBe(0o600);
+      expect(readFileSync(trustedRootPath, "utf8")).toBe(SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_JSONL);
+    });
+    expect(existsSync(temporaryDirectory)).toBe(false);
+  });
+
+  test("preserves falsy verification failures and combines cleanup failures", async () => {
+    // JavaScript permits falsy thrown values; the wrapper must not turn them into success.
+    for (const rejection of [undefined, null, false, 0, ""]) {
+      let rejected = false;
+      try {
+        await withSigstoreVerificationDirectory(async () => {
+          throw rejection;
+        });
+      } catch (error: unknown) {
+        rejected = true;
+        expect(error).toBe(rejection);
+      }
+      expect(rejected).toBe(true);
+    }
+
+    let movedDirectory = "";
+    try {
+      let combinedFailure: unknown;
+      try {
+        await withSigstoreVerificationDirectory(async ({ directory }) => {
+          movedDirectory = `${directory}.moved`;
+          renameSync(directory, movedDirectory);
+          throw false;
+        });
+      } catch (error: unknown) {
+        combinedFailure = error;
+      }
+      expect(combinedFailure).toBeInstanceOf(AggregateError);
+      expect((combinedFailure as AggregateError).errors[0]).toBe(false);
+      expect((combinedFailure as AggregateError).errors[1]).toBeInstanceOf(Error);
+    } finally {
+      if (movedDirectory) rmSync(movedDirectory, { recursive: true, force: true });
+    }
+  });
+
   test("verifies the exact local bundle without calling fetch", async () => {
     const fixture = bundleFixture();
     let fetchCalls = 0;
@@ -181,13 +247,26 @@ describe("offline upgrade bundle", () => {
     expect(bundle.edgeRuntime?.manifest.release.version).toBe(edgeVersion);
     const calls = readFileSync(fixture.recordPath, "utf8").trim().split("\n");
     expect(calls).toHaveLength(7);
+    const trustedRootPaths = new Set<string>();
     for (const call of calls) {
       expect(call).toContain("--bundle");
       expect(call).toContain("--repo zuohuadong/supacloud");
       expect(call).toContain("--source-ref refs/heads/main");
       expect(call).toContain(`--source-digest ${"a".repeat(40)}`);
       expect(call).toContain("--deny-self-hosted-runners");
+      const trustedRootPath = call.match(/--custom-trusted-root ([^ ]+)/)?.[1];
+      expect(trustedRootPath).toBeTruthy();
+      trustedRootPaths.add(trustedRootPath!);
     }
+    expect(trustedRootPaths.size).toBe(1);
+    expect(existsSync([...trustedRootPaths][0]!)).toBe(false);
+  });
+
+  test("fails closed when gh cannot consume a custom trusted root", async () => {
+    const fixture = bundleFixture();
+    process.env.GH_OFFLINE_OMIT_TRUSTED_ROOT = "true";
+    await expect(loadFixture(fixture)).rejects.toThrow("current gh attestation verifier");
+    expect(existsSync(fixture.recordPath)).toBe(false);
   });
 
   test("allows two minutes for each bounded offline attestation verification", async () => {
