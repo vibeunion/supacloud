@@ -129,7 +129,7 @@ function componentPreflightCommands(request: UpgradeRequest): string[] {
     ] : [];
 }
 
-function buildRootUpgradeScript(request: UpgradeRequest): string {
+export function buildRootUpgradeScript(request: UpgradeRequest): string {
     const envAssignments = upgradeEnvAssignments(request);
     return [
         "set -euo pipefail",
@@ -148,7 +148,7 @@ function buildRootUpgradeScript(request: UpgradeRequest): string {
         "supacloud_attestation_verifier_available || { echo 'Pinned GitHub attestation verifier is unavailable' >&2; exit 1; }",
         ...componentBootstrapCommands(request),
         `${envAssignments ? `env ${envAssignments} ` : ""}"$UPGRADE_RUNNER" upgrade --yes`,
-    ].join("; ");
+    ].join("\n");
 }
 
 export function buildOfficialUpgradeCommand(request: UpgradeRequest): string {
@@ -321,7 +321,7 @@ function assertSafeExecCommand(command: string): string {
     if (commandName === "free" && ["free", "free -h", "free -m"].includes(trimmed)) return trimmed;
     if (commandName === "uname" && ["uname", "uname -a", "uname -r", "uname -m"].includes(trimmed)) return trimmed;
     if (trimmed === "cat /etc/os-release") return trimmed;
-    if (commandName === "hostname" && ["hostname", "hostname -f"].includes(trimmed)) return trimmed;
+    if (commandName === "hostname" && ["hostname", "hostname -f", "hostname -I"].includes(trimmed)) return trimmed;
 
     if (commandName === "pg_isready") {
         const seen = new Set<string>();
@@ -385,7 +385,8 @@ Actions: ping, setup, install, upgrade, diagnose, exec, troubleshoot, container_
             switch (action) {
                 case "ping": {
                     const ok = await ssh.ping();
-                    text = ok ? "✅ Server reachable" : "❌ Server unreachable";
+                    if (!ok) throw new Error("SSH ping failed: server returned an unexpected response");
+                    text = "✅ Server reachable";
                     break;
                 }
                 case "setup": {
@@ -568,6 +569,10 @@ Actions: ping, setup, install, upgrade, diagnose, exec, troubleshoot, container_
                     if (!args.command) throw new Error("'command' required");
                     const command = assertSafeExecCommand(args.command);
                     const r = await ssh.exec(command, getExecTimeoutMs(args.timeout_seconds));
+                    if (!r.success) {
+                        const diagnostic = (r.stderr || r.stdout).trim() || "no remote diagnostic";
+                        throw new Error(`Remote diagnostic command failed (exit ${r.code}): ${diagnostic.slice(-500)}`);
+                    }
                     text = `exit: ${r.code}\n\nstdout:\n${r.stdout.slice(-2000)}\n\nstderr:\n${r.stderr.slice(-500)}`;
                     break;
                 }

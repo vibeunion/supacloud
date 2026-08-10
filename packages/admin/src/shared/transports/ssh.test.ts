@@ -9,12 +9,13 @@ const TEST_HOST_FINGERPRINT = `SHA256:${createHash("sha256").update(TEST_HOST_KE
 
 class FakeSshClient extends EventEmitter {
     connectOptions: Record<string, unknown> | undefined;
+    connectError: Error | undefined;
     stdout = Buffer.from("ok\n");
     stderrOutput = Buffer.alloc(0);
 
     connect(options: Record<string, unknown>): this {
         this.connectOptions = options;
-        queueMicrotask(() => this.emit("ready"));
+        queueMicrotask(() => this.connectError ? this.emit("error", this.connectError) : this.emit("ready"));
         return this;
     }
 
@@ -33,6 +34,40 @@ class FakeSshClient extends EventEmitter {
 }
 
 describe("SshTransport audit safety", () => {
+    test("ping propagates connection errors", async () => {
+        const failedClient = new FakeSshClient();
+        failedClient.connectError = new Error("authentication failed");
+        const failedTransport = new SshTransport({
+            host: "server.example.com",
+            port: 22,
+            username: "root",
+            hostFingerprint: TEST_HOST_FINGERPRINT,
+        }, { clientFactory: () => failedClient as never });
+
+        try {
+            await expect(failedTransport.ping()).rejects.toThrow("authentication failed");
+        } finally {
+            failedTransport.close();
+        }
+    });
+
+    test("ping rejects unexpected output", async () => {
+        const unexpectedClient = new FakeSshClient();
+        unexpectedClient.stdout = Buffer.from("not-pong\n");
+        const unexpectedTransport = new SshTransport({
+            host: "server.example.com",
+            port: 22,
+            username: "root",
+            hostFingerprint: TEST_HOST_FINGERPRINT,
+        }, { clientFactory: () => unexpectedClient as never });
+
+        try {
+            expect(await unexpectedTransport.ping()).toBe(false);
+        } finally {
+            unexpectedTransport.close();
+        }
+    });
+
     test("redacts secrets from arbitrary command output", () => {
         const output = redactSshOutput([
             "POSTGRES_PASSWORD=database-password",
