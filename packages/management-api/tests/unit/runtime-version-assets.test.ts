@@ -36,6 +36,7 @@ function readRealtimeImageVersion(systemdUnit: string): string {
 describe("runtime companion version assets", () => {
   test("Management Docker and CI include the Edge Function bundle contract", () => {
     const workflow = readRepoFile(".github/workflows/management-api.yml");
+    const gitignore = readRepoFile(".gitignore");
     const dockerignore = readRepoFile(".dockerignore");
     const dockerfiles = [
       readRepoFile("packages/management-api/Dockerfile"),
@@ -44,8 +45,11 @@ describe("runtime companion version assets", () => {
 
     expect(workflow.match(/packages\/edge-bundle-contract\/\*\*/g)).toHaveLength(2);
     expect(workflow).toContain("working-directory: packages/edge-bundle-contract");
+    expect(workflow).toContain("git ls-files --error-unmatch dist/index.js");
+    expect(gitignore).toContain("!packages/edge-bundle-contract/dist/index.js");
     expect(dockerignore).toContain("**/node_modules");
     for (const dockerfile of dockerfiles) {
+      expect(dockerfile).toContain("COPY packages/edge-bundle-contract/dist ./packages/edge-bundle-contract/dist");
       expect(dockerfile).toContain("COPY packages/edge-bundle-contract/src ./packages/edge-bundle-contract/src");
       expect(dockerfile).toContain("cd /app/packages/management-api && bun install --frozen-lockfile");
     }

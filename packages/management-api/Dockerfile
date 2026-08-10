@@ -7,6 +7,7 @@ WORKDIR /app
 COPY package.json bun.lock* ./
 COPY packages/management-api/package.json packages/management-api/bun.lock ./packages/management-api/
 COPY packages/edge-bundle-contract/package.json packages/edge-bundle-contract/bun.lock ./packages/edge-bundle-contract/
+COPY packages/edge-bundle-contract/dist ./packages/edge-bundle-contract/dist
 COPY packages/edge-bundle-contract/src ./packages/edge-bundle-contract/src
 
 # Install dependencies

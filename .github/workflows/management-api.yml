@@ -164,6 +164,9 @@ jobs:
         working-directory: packages/edge-bundle-contract
         run: |
           bun install --frozen-lockfile
+          git ls-files --error-unmatch dist/index.js
+          bun run build
+          git diff --exit-code -- dist/index.js
           bun test src/index.test.ts
           bun audit --audit-level high
 

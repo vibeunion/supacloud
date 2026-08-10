@@ -6,8 +6,11 @@
   "exports": {
     ".": {
       "types": "./src/index.d.ts",
-      "import": "./src/index.js"
+      "import": "./dist/index.js"
     }
+  },
+  "scripts": {
+    "build": "bun build src/index.js --target bun --format esm --minify --outfile dist/index.js"
   },
   "dependencies": {
     "acorn": "^8.15.0"

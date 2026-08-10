@@ -81,6 +81,8 @@ out
 # Nuxt.js build / generate output
 .nuxt
 dist
+!packages/edge-bundle-contract/dist/
+!packages/edge-bundle-contract/dist/index.js
 
 # Gatsby files
 .cache/
