@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.11](https://github.com/zuohuadong/supacloud/compare/admin-v0.7.10...admin-v0.7.11) (2026-08-10)
+
+
+### Bug Fixes
+
+* **upgrade:** harden offline verification lifecycle ([#785](https://github.com/zuohuadong/supacloud/issues/785)) ([6d52088](https://github.com/zuohuadong/supacloud/commit/6d5208803d1668d95747f0a4fb8efd9cd8e7f813))
+
 ## [0.7.10](https://github.com/zuohuadong/supacloud/compare/admin-v0.7.9...admin-v0.7.10) (2026-08-10)
 
 
