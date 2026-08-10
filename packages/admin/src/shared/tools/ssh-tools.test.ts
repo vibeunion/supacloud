@@ -263,6 +263,10 @@ describe("ssh admin tool", () => {
         expect(ssh.uploads[0]?.content).toContain('SUPACLOUD_GH_VERSION="${SUPACLOUD_GH_VERSION:-2.96.0}"');
         expect(ssh.uploads[0]?.content).toContain("83d5c2ccad5498f58bf6368acb1ab32588cf43ab3a4b1c301bf36328b1c8bd60");
         expect(ssh.uploads[0]?.content).toContain("06f86ec7103d41993b76cd78072f43595c34aaa56506d971d9860e67140bf909");
+        expect(ssh.uploads[0]?.content).toContain('bundle_dir=$(mktemp -d "${TMPDIR:-/tmp}/supacloud-attestation.XXXXXX")');
+        expect(ssh.uploads[0]?.content).toContain('bundle_file="${bundle_dir}/bundle.jsonl"');
+        expect(ssh.uploads[0]?.content).toContain('trap \'rm -rf -- "$bundle_dir"\' EXIT');
+        expect(ssh.uploads[0]?.content).toContain('trap \'trap - EXIT HUP INT TERM; rm -rf -- "$bundle_dir"; exit 1\' HUP INT TERM');
         expect(command).toContain("supacloud_install_pinned_gh");
         expect(command).toContain("/usr/local/bin/supacloud --version");
         expect(command).toContain("0.50.27");
