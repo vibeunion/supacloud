@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { registerSshTools } from "./ssh-tools";
+import { buildRootUpgradeScript, registerSshTools } from "./ssh-tools";
 import { parseToolArguments } from "../schema";
 import type { ToolSchema } from "../schema";
 
@@ -19,9 +19,11 @@ class FakeSsh {
     cleanupExecFails = false;
     uploadThrows = false;
     partialUploadThrows = false;
+    pingResult = true;
+    diagnosticExecFails = false;
 
     async ping(): Promise<boolean> {
-        return true;
+        return this.pingResult;
     }
 
     async exec(command: string): Promise<{ success: boolean; stdout: string; stderr: string; code: number }> {
@@ -61,6 +63,9 @@ class FakeSsh {
                 ? { success: false, stdout: "", stderr: "restore failed", code: 1 }
                 : { success: true, stdout: "Migration complete\n", stderr: "", code: 0 };
         }
+        if (this.diagnosticExecFails && command === "hostname") {
+            return { success: false, stdout: "", stderr: "diagnostic failed", code: 3 };
+        }
         return { success: true, stdout: "SSH_SESSION_OK\n", stderr: "", code: 0 };
     }
 
@@ -99,6 +104,14 @@ function captureSshTool(ssh: FakeSsh): {
 }
 
 describe("ssh admin tool", () => {
+    test("ping fails instead of returning a successful process result", async () => {
+        const ssh = new FakeSsh();
+        ssh.pingResult = false;
+
+        await expect(captureSshTool(ssh).invoke({ action: "ping" }))
+            .rejects.toThrow("SSH ping failed");
+    });
+
     test("setup verifies the active SSH session without weakening sshd", async () => {
         const ssh = new FakeSsh();
         const tool = captureSshTool(ssh);
@@ -129,10 +142,19 @@ describe("ssh admin tool", () => {
             "cat /etc/os-release",
             "pg_isready -h localhost -p 5432",
             "hostname -f",
+            "hostname -I",
         ]) {
             const result = await tool.invoke({ action: "exec", command });
             expect(result.content[0]?.text).toContain("exit: 0");
         }
+    });
+
+    test("generic exec propagates a remote diagnostic failure", async () => {
+        const ssh = new FakeSsh();
+        ssh.diagnosticExecFails = true;
+
+        await expect(captureSshTool(ssh).invoke({ action: "exec", command: "hostname" }))
+            .rejects.toThrow("Remote diagnostic command failed (exit 3): diagnostic failed");
     });
 
     test("generic exec rejects filesystem, network, mutation, and secret-reading escapes", async () => {
@@ -221,6 +243,12 @@ describe("ssh admin tool", () => {
         expect(command).not.toContain("/opt/supacloud/scripts");
         expect(command).toContain("trap 'rm -f /tmp/.supacloud-release-assets-");
         expect(command).not.toMatch(/\/usr\/local\/bin\/supacloud upgrade --yes/);
+        const rootScript = buildRootUpgradeScript({
+            version: "0.50.27",
+            edgeRuntimeVersion: "0.16.7",
+            helperPath: ssh.uploads[0]?.remotePath ?? "",
+        });
+        expect(Bun.spawnSync(["bash", "-n", "-c", rootScript]).exitCode).toBe(0);
         expect(Bun.spawnSync(["bash", "-n", "-c", command]).exitCode).toBe(0);
         expect(ssh.commands[1]).toBe(`rm -f '${ssh.uploads[0]?.remotePath}'`);
     });

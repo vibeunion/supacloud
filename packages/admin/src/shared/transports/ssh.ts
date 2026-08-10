@@ -350,8 +350,8 @@ export class SshTransport {
     }
 
     async ping(): Promise<boolean> {
-        const result = await this.exec("echo pong", 10_000).catch(() => null);
-        return result?.stdout.trim() === "pong";
+        const result = await this.exec("echo pong", 10_000);
+        return result.success && result.stdout.trim() === "pong";
     }
 
     close() {
