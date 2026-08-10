@@ -177,6 +177,7 @@ describe("local upgrade remote runner", () => {
         expect(script).toContain("mode=$(stat -c '%a' \"$verifier\")");
         expect(script).toContain("trusted_installed_gh \"$GH\"");
         expect(script).toContain("timeout flock");
+        expect(script).toContain("tail -n 0 -- /dev/null");
         expect(script).not.toContain("Required local-upgrade tool is missing: jq");
         expect(parseRemotePreflight("ARCH=arm64\nVERIFIER=installed\n")).toEqual({
             architecture: "arm64",
@@ -961,7 +962,9 @@ describe("local upgrade remote runner", () => {
             expect(failureRequiresRemoteReconciliation(failure)).toBe(false);
             expect(String(failure)).toContain("FAILED:9:TRANSACTION");
             expect(ssh.commands).toHaveLength(3);
-            expect(ssh.commands[1]).toContain("tail -80");
+            expect(ssh.commands[1]).toContain("PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
+            expect(ssh.commands[1]).toContain('tail -n 80 -- "$LOG"');
+            expect(ssh.commands[1]).not.toContain("tail -80 --");
             expect(ssh.commands[2]).toContain("rm -f --");
             expect(ssh.commands[2]).toContain(paths.status);
             expect(ssh.commands[2]).toContain(paths.log);
@@ -1001,6 +1004,8 @@ describe("local upgrade remote runner", () => {
 
         await expect(awaitRemoteUpgrade(ssh as never, paths)).resolves.toContain("Upgrade done");
         expect(ssh.commands).toHaveLength(3);
+        expect(ssh.commands[1]).toContain("PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
+        expect(ssh.commands[1]).toContain('tail -n 80 -- "$LOG"');
         expect(ssh.commands[2]).toContain(paths.status);
         expect(ssh.commands[2]).toContain(paths.log);
     });
