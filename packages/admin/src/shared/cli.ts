@@ -6,6 +6,7 @@ import {
     schemaProperties,
 } from "./schema";
 import type { ToolSchema } from "./schema";
+import { redactSshOutput } from "./transports/ssh";
 
 interface CliRunOptions {
     commandName?: string;
@@ -21,6 +22,28 @@ function coerceCliValue(value: string): string | number | boolean {
     if (value === "false") return false;
     if (value.trim() !== "" && !Number.isNaN(Number(value))) return Number(value);
     return value;
+}
+
+function sanitizedCliDiagnostic(error: unknown): string {
+    const message = error instanceof Error ? error.message : String(error);
+    return redactSshOutput(message)
+        .replace(/[\r\n\t]+/g, " ")
+        .trim()
+        .slice(0, 1_000);
+}
+
+function nestedCliDiagnostics(error: unknown): string[] {
+    if (error instanceof AggregateError) {
+        return error.errors.flatMap(candidate => nestedCliDiagnostics(candidate));
+    }
+    return [sanitizedCliDiagnostic(error)];
+}
+
+export function formatCliError(error: unknown): string {
+    const summary = sanitizedCliDiagnostic(error);
+    const diagnostics = [...new Set(nestedCliDiagnostics(error))].filter(message => message && message !== summary);
+    if (diagnostics.length === 0) return summary;
+    return `${summary}\nDetails:\n${diagnostics.map(message => `  - ${message}`).join("\n")}`;
 }
 
 export async function runCli(
@@ -156,7 +179,7 @@ export async function runCli(
         }
         process.exit(result && typeof result === "object" && "isError" in result && result.isError === true ? 1 : 0);
     } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : String(error);
+        const message = formatCliError(error);
         console.error(`❌ Error: ${message}`);
         if (message.includes("required")) {
             console.error(`Hint: Pass arguments like --ref YOUR_REF`);

@@ -208,7 +208,30 @@ source /etc/profile.d/supacloud.sh
 
 **Production Upgrades**
 
-Production servers upgrade by replacing the released Linux binary at `/usr/local/bin/supacloud`; they do not need to `git pull` application source during normal upgrades.
+Use the Admin CLI for a verified multi-component production upgrade. Pin exact
+Management and Edge Runtime versions so the command can verify and activate
+Management, Web Console, and an external Edge Runtime as one rollback-capable
+transaction:
+
+```bash
+npx @supacloud/admin ssh upgrade \
+  --version 0.50.27 \
+  --edge_runtime_version 0.16.7 \
+  --github_proxy direct
+```
+
+This transaction requires persisted `EDGE_RUNTIME_MODE=external`; embedded
+mode is rejected before release artifacts or services are changed. It preserves
+the Edge Runtime systemd executable path, port, mode, and enabled state, and
+verifies each released component against its own SHA256 checksum and GitHub
+attestation. Caddy and GoTrue are outside this transaction and are not replaced.
+
+Omit `--edge_runtime_version` only when intentionally upgrading Management and
+Web Console without changing Edge Runtime; the Admin CLI reports that boundary.
+
+The installed `/usr/local/bin/supacloud` server binary still provides the
+Management/Web Console-only local upgrade path. Production servers do not need
+to `git pull` application source during normal upgrades.
 
 ```bash
 sudo supacloud upgrade --yes
@@ -534,7 +557,8 @@ For human operators, the CLI split is now:
 - `supacloudctl cli ...`: unified local entrypoint. Normal dispatch is local-only and does not contact npm; use `supacloudctl check-update cli` explicitly when needed.
 - `@supacloud/admin` / `supacloud-admin`: server and platform administration CLI
 - `supacloudctl admin ...`: unified local entrypoint with the same offline-by-default behavior; use `supacloudctl check-update admin` explicitly.
-- On installed servers, `/usr/local/bin/supacloud` remains the compiled server binary; server upgrades still use `sudo supacloud upgrade --yes`.
+- Use `npx @supacloud/admin ssh upgrade --version <management-version> --edge_runtime_version <edge-version>` for the verified Management, Web Console, and external Edge Runtime transaction.
+- On installed servers, `/usr/local/bin/supacloud` remains the compiled server binary; `sudo supacloud upgrade --yes` is limited to the Management/Web Console path unless an exact Edge Runtime target is supplied through the supported Admin flow.
 
 
 ### Project Structure

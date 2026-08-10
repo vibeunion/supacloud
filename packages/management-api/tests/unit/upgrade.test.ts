@@ -9,7 +9,10 @@ import {
     buildManagementPrivilegeDropIn,
     buildCheckpointDatabaseOptions,
     backupCurrentBinary,
+    activateStagedBinary,
     buildRuntimeServiceRestartPlan,
+    assertExternalEdgeRuntimeUpgradeMode,
+    assertEdgeRuntimeBinaryTarget,
     captureFileState,
     cleanupBinaryBackup,
     createBinaryBackupState,
@@ -17,9 +20,13 @@ import {
     ensureEdgeRuntimeIdentity,
     ensureEmbeddedEdgeRuntimeSourceAccess,
     ensurePersistedEdgeRuntimeIdentity,
+    formatUpgradeFailure,
     inspectActiveManagementBinary,
+    inspectActiveSystemdBinary,
+    normalizeEdgeRuntimeReleaseTag,
     normalizeManagementReleaseTag,
     parseSystemdExecStartPath,
+    parseSystemdEnabledState,
     parseSystemdMainPid,
     prepareUpgradeSecrets,
     resolveArtifactVerificationMode,
@@ -29,14 +36,18 @@ import {
     resolvePersistedEdgeRuntimeMode,
     resolveUpgradeEnvironment,
     reconcileManagementPrivilegeDropIns,
+    readSystemdEnabledState,
     runStagedDatabaseMigration,
     restoreCurrentBinary,
     restoreFileState,
+    selectEdgeRuntimeRelease,
     selectManagementRelease,
+    shouldCleanupUpgradeArtifacts,
     stopManagementService,
     upsertManagementWebConsoleDir,
     upsertPersistedEdgeRuntimePort,
     upsertEdgeRuntimeIdentityDefaults,
+    UpgradeTransactionError,
     validateWebConsoleArchiveEntries,
     verifyActivatedManagementBinary,
     verifyArtifactChecksum,
@@ -439,6 +450,37 @@ describe("upgrade release selection", () => {
     expect(selected.tag_name).toBe("management-api-v0.37.0");
   });
 
+  test("selects only the explicitly pinned Edge Runtime release with its own checksum", () => {
+    expect(normalizeEdgeRuntimeReleaseTag("0.16.7")).toBe("edge-runtime-v0.16.7");
+    expect(normalizeEdgeRuntimeReleaseTag("v0.16.7")).toBe("edge-runtime-v0.16.7");
+    expect(normalizeEdgeRuntimeReleaseTag("edge-runtime-v0.16.7")).toBe("edge-runtime-v0.16.7");
+    for (const invalidVersion of ["latest", "", "0.16", "0.16.7-beta.1"]) {
+      expect(() => normalizeEdgeRuntimeReleaseTag(invalidVersion)).toThrow("exact stable");
+    }
+
+    const selected = selectEdgeRuntimeRelease({
+      tag_name: "edge-runtime-v0.16.7",
+      draft: false,
+      prerelease: false,
+      assets: [
+        { name: "supacloud-edge-runtime-linux-amd64" },
+        { name: "SHA256SUMS" },
+      ],
+    }, "edge-runtime-v0.16.7", "supacloud-edge-runtime-linux-amd64");
+
+    expect(selected.tag_name).toBe("edge-runtime-v0.16.7");
+    expect(() => selectEdgeRuntimeRelease({
+      tag_name: "edge-runtime-v0.16.6",
+      draft: false,
+      prerelease: false,
+      assets: [
+        { name: "supacloud-edge-runtime-linux-amd64" },
+        { name: "SHA256SUMS" },
+      ],
+    }, "edge-runtime-v0.16.7", "supacloud-edge-runtime-linux-amd64"))
+      .toThrow("edge-runtime-v0.16.7");
+  });
+
   test("release verification is fail-closed unless break-glass is explicitly enabled", () => {
     expect(resolveArtifactVerificationMode(true, {})).toBe("attested");
     expect(() => resolveArtifactVerificationMode(false, {})).toThrow("attestation verification is required");
@@ -500,6 +542,62 @@ describe("upgrade release selection", () => {
       executablePath: canonicalManagementBinary,
       sha256: currentBinarySha256,
     });
+  });
+
+  test("inspects an external Edge Runtime through its real systemd target", async () => {
+    const edgeTarget = "/opt/supacloud/bin/supacloud-edge-runtime";
+    const fixture = managementBinaryFixture({
+      execStartPath: edgeTarget,
+      executablePath: edgeTarget,
+    });
+    await expect(inspectActiveSystemdBinary("supacloud-edge-runtime.service", fixture)).resolves.toEqual({
+      unit: "supacloud-edge-runtime.service",
+      execStartPath: edgeTarget,
+      pid: 4242,
+      executablePath: edgeTarget,
+      sha256: currentBinarySha256,
+    });
+  });
+
+  test("rejects Edge Runtime targets that could overwrite another executable", () => {
+    expect(() => assertEdgeRuntimeBinaryTarget("/usr/local/bin/supacloud-edge-runtime")).not.toThrow();
+    expect(() => assertEdgeRuntimeBinaryTarget("/opt/supacloud/bin/supacloud-edge-runtime")).not.toThrow();
+    for (const unsafeTarget of [
+      "/usr/local/bin/supacloud",
+      "/usr/local/bin/edge-runtime",
+      "/opt/supacloud/bin/supacloud-edge-runtime.backup",
+      "/tmp/supacloud-edge-runtime",
+    ]) {
+      expect(() => assertEdgeRuntimeBinaryTarget(unsafeTarget)).toThrow("Unsafe Edge Runtime upgrade target");
+    }
+  });
+
+  test("accepts only the enabled states that the component transaction preserves", () => {
+    expect(parseSystemdEnabledState({ exitCode: 0, stdout: "enabled\n", stderr: "" })).toBe("enabled");
+    expect(parseSystemdEnabledState({ exitCode: 1, stdout: "disabled\n", stderr: "" })).toBe("disabled");
+    expect(() => parseSystemdEnabledState({ exitCode: 0, stdout: "static\n", stderr: "" })).toThrow();
+    expect(() => parseSystemdEnabledState({ exitCode: 1, stdout: "", stderr: "not found" })).toThrow();
+  });
+
+  test("reads enabled and disabled Edge unit states without normalizing them", async () => {
+    for (const state of ["enabled", "disabled"] as const) {
+      const exitCode = state === "enabled" ? 0 : 1;
+      await expect(readSystemdEnabledState("supacloud-edge-runtime.service", async command => {
+        expect(command).toEqual(["systemctl", "is-enabled", "supacloud-edge-runtime.service"]);
+        return { exitCode, stdout: `${state}\n`, stderr: "" };
+      })).resolves.toBe(state);
+    }
+    await expect(readSystemdEnabledState("supacloud-edge-runtime.service", async () => ({
+      exitCode: 1,
+      stdout: "",
+      stderr: "unit missing",
+    }))).rejects.toThrow("supacloud-edge-runtime.service enabled state");
+  });
+
+  test("component upgrade rejects embedded mode before artifact work", () => {
+    expect(() => assertExternalEdgeRuntimeUpgradeMode("embedded"))
+      .toThrow("persisted external mode only");
+    expect(() => assertExternalEdgeRuntimeUpgradeMode("external")).not.toThrow();
   });
 
   test("fails closed when systemd, procfs, hashing, or PID stability cannot be verified", async () => {
@@ -660,6 +758,108 @@ describe("upgrade release selection", () => {
     ]);
   });
 
+  test("preserves recovery evidence and both errors when rollback fails", async () => {
+    const events: string[] = [];
+    let failure: unknown;
+    try {
+      await executeUpgradeTransaction({
+        preflight: async () => { events.push("preflight"); },
+        stage: async () => { events.push("stage"); },
+        migrate: async () => { events.push("migrate"); },
+        activate: async () => { events.push("activate"); },
+        restart: async () => { throw new Error("restart failed"); },
+        healthCheck: async () => { events.push("health"); },
+        rollback: async () => { throw new Error("rollback failed"); },
+        cleanup: async () => { events.push("cleanup"); },
+      });
+    } catch (error: unknown) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(UpgradeTransactionError);
+    const rollbackFailure = failure as UpgradeTransactionError;
+    expect(rollbackFailure.kind).toBe("rollback-incomplete");
+    expect(rollbackFailure.errors.some(candidate => String(candidate).includes("restart failed"))).toBe(true);
+    expect(rollbackFailure.errors.some(candidate => String(candidate).includes("rollback failed"))).toBe(true);
+    const output = formatUpgradeFailure(rollbackFailure, ["/usr/local/bin/supacloud.bak-run"]);
+    expect(output).toContain("rollback is incomplete");
+    expect(output).toContain("restart failed");
+    expect(output).toContain("rollback failed");
+    expect(output).toContain("/usr/local/bin/supacloud.bak-run");
+    expect(events).toContain("cleanup");
+    expect(shouldCleanupUpgradeArtifacts({
+      committed: false,
+      rollbackSucceeded: false,
+      activationStarted: true,
+    })).toBe(false);
+  });
+
+  test("reports a committed upgrade with incomplete cleanup distinctly", async () => {
+    let failure: unknown;
+    try {
+      await executeUpgradeTransaction({
+        preflight: async () => {},
+        stage: async () => {},
+        migrate: async () => {},
+        activate: async () => {},
+        restart: async () => {},
+        healthCheck: async () => {},
+        rollback: async () => {},
+        cleanup: async () => { throw new Error("backup removal denied"); },
+      });
+    } catch (error: unknown) {
+      failure = error;
+    }
+
+    expect(failure).toBeInstanceOf(UpgradeTransactionError);
+    expect((failure as UpgradeTransactionError).kind).toBe("cleanup-incomplete-after-commit");
+    const output = formatUpgradeFailure(failure, ["/opt/supacloud/web-console/current.bak-run"]);
+    expect(output).toContain("Upgrade committed, but cleanup is incomplete");
+    expect(output).toContain("backup removal denied");
+    expect(output).toContain("current.bak-run");
+  });
+
+  test("preserves upgrade and cleanup diagnostics after a successful rollback", async () => {
+    let failure: unknown;
+    try {
+      await executeUpgradeTransaction({
+        preflight: async () => {},
+        stage: async () => {},
+        migrate: async () => {},
+        activate: async () => {},
+        restart: async () => { throw new Error("restart failed"); },
+        healthCheck: async () => {},
+        rollback: async () => {},
+        cleanup: async () => { throw new Error("staged file removal denied"); },
+      });
+    } catch (error: unknown) {
+      failure = error;
+    }
+
+    expect(failure).toBeInstanceOf(UpgradeTransactionError);
+    expect((failure as UpgradeTransactionError).kind).toBe("cleanup-incomplete-after-failure");
+    const output = formatUpgradeFailure(failure);
+    expect(output).toContain("Upgrade failed and cleanup is incomplete");
+    expect(output).toContain("restart failed");
+    expect(output).toContain("staged file removal denied");
+  });
+
+  test("redacts secrets from nested CLI failure diagnostics", () => {
+    const failure = new UpgradeTransactionError(
+      "rollback-incomplete",
+      [
+        new Error("DATABASE_URL=postgresql://admin:database-password@localhost/supacloud"),
+        new Error("API_TOKEN=raw-token"),
+      ],
+      "Upgrade failed and rollback did not complete",
+    );
+
+    const output = formatUpgradeFailure(failure);
+    expect(output).toContain("DATABASE_URL=[REDACTED]");
+    expect(output).toContain("API_TOKEN=[REDACTED]");
+    expect(output).not.toContain("database-password");
+    expect(output).not.toContain("raw-token");
+  });
+
   test("rejects Web Console archives with path traversal entries", () => {
     expect(() => validateWebConsoleArchiveEntries("index.html\n../escape\n"))
       .toThrow("unsafe path");
@@ -738,6 +938,31 @@ describe("upgrade release selection", () => {
       expect(readFileSync(target, "utf8")).toBe("old-binary");
       cleanupBinaryBackup(state);
       expect(existsSync(state.backupPath)).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("restores both Management and Edge binaries after partial activation", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supacloud-upgrade-binaries-"));
+    const managementTarget = join(dir, "supacloud");
+    const edgeTarget = join(dir, "supacloud-edge-runtime");
+    const stagedManagement = join(dir, "staged-management");
+    const stagedEdge = join(dir, "staged-edge");
+    writeFileSync(managementTarget, "old-management");
+    writeFileSync(edgeTarget, "old-edge");
+    writeFileSync(stagedManagement, "new-management");
+    writeFileSync(stagedEdge, "new-edge");
+    const managementState = createBinaryBackupState(managementTarget, "transaction");
+    const edgeState = createBinaryBackupState(edgeTarget, "transaction");
+
+    try {
+      activateStagedBinary(stagedManagement, managementState);
+      activateStagedBinary(stagedEdge, edgeState);
+      restoreCurrentBinary(managementState);
+      restoreCurrentBinary(edgeState);
+      expect(readFileSync(managementTarget, "utf8")).toBe("old-management");
+      expect(readFileSync(edgeTarget, "utf8")).toBe("old-edge");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

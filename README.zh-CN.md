@@ -206,7 +206,28 @@ source /etc/profile.d/supacloud.sh
 
 **生产环境升级**
 
-生产服务器升级时直接替换 `/usr/local/bin/supacloud` 中的 Linux Release 二进制文件，常规升级不需要在服务器上 `git pull` 源码。
+生产环境的多组件升级应使用 Admin CLI。固定 Management 和 Edge Runtime
+的精确版本后，命令会把 Management、Web Console 和外置 Edge Runtime
+作为一个支持回滚的事务进行校验和启用：
+
+```bash
+npx @supacloud/admin ssh upgrade \
+  --version 0.50.27 \
+  --edge_runtime_version 0.16.7 \
+  --github_proxy direct
+```
+
+该事务要求持久化配置为 `EDGE_RUNTIME_MODE=external`；embedded 模式会在
+改动 Release 制品或服务前被拒绝。命令会保留 Edge Runtime 的 systemd
+可执行文件路径、端口、模式和 enabled 状态，并分别使用各组件自己的
+SHA256 与 GitHub attestation 做校验。Caddy 和 GoTrue 不属于该事务，
+不会被替换。
+
+只有明确只升级 Management 和 Web Console、不改 Edge Runtime 时，才省略
+`--edge_runtime_version`；Admin CLI 会明确报告这个边界。
+
+已安装的 `/usr/local/bin/supacloud` 服务端二进制仍提供只覆盖 Management/
+Web Console 的本机升级路径。生产服务器常规升级不需要 `git pull` 源码。
 
 ```bash
 sudo supacloud upgrade --yes
@@ -477,7 +498,8 @@ desired state 保存在项目专用元数据列里（`postgrest_desired`、`post
 - `supacloudctl cli ...`：统一本地入口，普通分发默认离线且不访问 npm；需要时显式运行 `supacloudctl check-update cli`
 - `@supacloud/admin` / `supacloud-admin`：服务器管理员 CLI，处理 SSH、安装、升级、租户运维
 - `supacloudctl admin ...`：统一本地入口，同样默认离线；需要时显式运行 `supacloudctl check-update admin`
-- 已安装服务器上的 `/usr/local/bin/supacloud` 仍是编译后的服务端二进制，服务端升级继续使用 `sudo supacloud upgrade --yes`
+- Management、Web Console 与外置 Edge Runtime 的受校验事务使用 `npx @supacloud/admin ssh upgrade --version <management-version> --edge_runtime_version <edge-version>`
+- 已安装服务器上的 `/usr/local/bin/supacloud` 仍是编译后的服务端二进制；除非通过受支持的 Admin 流程提供精确 Edge Runtime 目标，否则 `sudo supacloud upgrade --yes` 只覆盖 Management/Web Console
 
 
 ### 项目结构
