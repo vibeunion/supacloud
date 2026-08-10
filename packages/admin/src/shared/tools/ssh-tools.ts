@@ -220,8 +220,7 @@ async function prepareRemoteUpgradeHelperDirectory(ssh: SshTransport, helperPath
     const command = [
         "set -e",
         "umask 077",
-        `test ! -e ${quoteEnvValue(helperDirectory)}`,
-        `install -d -m 700 -- ${quoteEnvValue(helperDirectory)}`,
+        `mkdir -m 700 -- ${quoteEnvValue(helperDirectory)}`,
     ].join("; ");
     const preparation = await ssh.exec(command, 30_000);
     if (!preparation.success) {
@@ -247,30 +246,37 @@ async function removeRemoteUpgradeHelper(ssh: SshTransport, helperPath: string):
 
 type OfficialUpgradeExecution = Awaited<ReturnType<SshTransport["exec"]>>;
 
+type OfficialUpgradeOutcomeState = {
+    execution: OfficialUpgradeExecution | undefined;
+    executionFailed: boolean;
+    executionError: unknown;
+    cleanupFailed: boolean;
+    cleanupError: unknown;
+};
+
 function remoteUpgradeFailure(execution: OfficialUpgradeExecution): Error {
     const diagnostic = execution.stderr.trim() || execution.stdout.trim() || "no remote diagnostic";
     return new Error(`Remote upgrade failed (exit ${execution.code}): ${diagnostic.slice(-500)}`);
 }
 
-function officialUpgradeOutcome(
-    execution: OfficialUpgradeExecution | undefined,
-    executionError: unknown,
-    cleanupError: unknown,
-): OfficialUpgradeExecution {
-    if (executionError && cleanupError) {
-        throw new AggregateError([executionError, cleanupError], "Upgrade execution failed and helper cleanup did not complete");
-    }
-    if (executionError) throw executionError;
-    if (!execution) throw new Error("Upgrade execution did not return a result");
-    if (cleanupError && !execution.success) {
+function officialUpgradeOutcome(outcome: OfficialUpgradeOutcomeState): OfficialUpgradeExecution {
+    if (outcome.executionFailed && outcome.cleanupFailed) {
         throw new AggregateError(
-            [remoteUpgradeFailure(execution), cleanupError],
+            [outcome.executionError, outcome.cleanupError],
+            "Upgrade execution failed and helper cleanup did not complete",
+        );
+    }
+    if (outcome.executionFailed) throw outcome.executionError;
+    if (!outcome.execution) throw new Error("Upgrade execution did not return a result");
+    if (outcome.cleanupFailed && !outcome.execution.success) {
+        throw new AggregateError(
+            [remoteUpgradeFailure(outcome.execution), outcome.cleanupError],
             "Remote upgrade failed and helper cleanup did not complete",
         );
     }
-    if (cleanupError) throw cleanupError;
-    if (!execution.success) throw remoteUpgradeFailure(execution);
-    return execution;
+    if (outcome.cleanupFailed) throw outcome.cleanupError;
+    if (!outcome.execution.success) throw remoteUpgradeFailure(outcome.execution);
+    return outcome.execution;
 }
 
 async function executeOfficialUpgrade(
@@ -280,6 +286,7 @@ async function executeOfficialUpgrade(
     timeoutMs: number,
 ): Promise<Awaited<ReturnType<SshTransport["exec"]>>> {
     let execution: OfficialUpgradeExecution | undefined;
+    let executionFailed = false;
     let executionError: unknown;
     let helperPrepared = false;
     try {
@@ -290,18 +297,27 @@ async function executeOfficialUpgrade(
         await ssh.uploadText(trustedRootPath, SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_JSONL, 0o600);
         execution = await ssh.exec(command, timeoutMs);
     } catch (error: unknown) {
+        executionFailed = true;
         executionError = error;
     }
 
+    let cleanupFailed = false;
     let cleanupError: unknown;
     if (helperPrepared) {
         try {
             await removeRemoteUpgradeHelper(ssh, helperPath);
         } catch (error: unknown) {
+            cleanupFailed = true;
             cleanupError = error;
         }
     }
-    return officialUpgradeOutcome(execution, executionError, cleanupError);
+    return officialUpgradeOutcome({
+        execution,
+        executionFailed,
+        executionError,
+        cleanupFailed,
+        cleanupError,
+    });
 }
 
 function assertSafeGithubProxy(value: string): string {

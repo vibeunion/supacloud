@@ -26,8 +26,10 @@ class FakeSsh {
     bootstrapDepsFail = false;
     bootstrapCloneFail = false;
     upgradeExecThrows = false;
+    upgradeExecRejection: { value: unknown } | undefined;
     upgradeExecFails = false;
     cleanupExecFails = false;
+    cleanupExecRejection: { value: unknown } | undefined;
     uploadThrows = false;
     partialUploadThrows = false;
     pingResult = true;
@@ -45,11 +47,17 @@ class FakeSsh {
         if (this.upgradeExecThrows && command.includes("UPGRADE_RUNNER")) {
             throw new Error("connection dropped");
         }
+        if (this.upgradeExecRejection && command.includes("UPGRADE_RUNNER")) {
+            throw this.upgradeExecRejection.value;
+        }
         if (this.upgradeExecFails && command.includes("UPGRADE_RUNNER")) {
             return { success: false, stdout: "", stderr: "transaction failed", code: 42 };
         }
         if (this.cleanupExecFails && command.includes("sudo -n rm -rf -- '/tmp/.supacloud-release-assets-")) {
             return { success: false, stdout: "", stderr: "permission denied", code: 1 };
+        }
+        if (this.cleanupExecRejection && command.includes("sudo -n rm -rf -- '/tmp/.supacloud-release-assets-")) {
+            throw this.cleanupExecRejection.value;
         }
         if (command.includes("BOOTSTRAP_DEPS_OK")) {
             if (this.bootstrapDepsFail) {
@@ -614,7 +622,9 @@ describe("ssh admin tool", () => {
         expect(rootScript).toContain("stat -c '%u:%g:%a:%h'");
         expect(Bun.spawnSync(["bash", "-n", "-c", rootScript]).exitCode).toBe(0);
         expect(Bun.spawnSync(["bash", "-n", "-c", command]).exitCode).toBe(0);
-        expect(ssh.commands[0]).toMatch(/^set -e; umask 077; test ! -e '\/tmp\/\.supacloud-release-assets-[0-9a-f-]+'; install -d -m 700 --/);
+        expect(ssh.commands[0]).toMatch(/^set -e; umask 077; mkdir -m 700 -- '\/tmp\/\.supacloud-release-assets-[0-9a-f-]+'$/);
+        expect(ssh.commands[0]).not.toContain("test ! -e");
+        expect(ssh.commands[0]).not.toContain("install -d");
         expect(ssh.commands[2]).toContain(`rm -rf -- '${ssh.uploads[0]?.remotePath.replace(/\/release_assets\.sh$/, "")}'`);
         expect(ssh.commands[2]).toContain("sudo -n rm -rf --");
         expect(ssh.timeouts).toEqual([30_000, 720_000, 30_000]);
@@ -643,7 +653,7 @@ describe("ssh admin tool", () => {
         const helperPath = ssh.uploads[0]?.remotePath ?? "";
         const helperDirectory = dirname(helperPath);
         expect(helperPath).toBe(`${helperDirectory}/release_assets.sh`);
-        expect(ssh.commands[0]).toContain(`install -d -m 700 -- '${helperDirectory}'`);
+        expect(ssh.commands[0]).toContain(`mkdir -m 700 -- '${helperDirectory}'`);
         expect(buildRootUpgradeScript({ helperPath })).toContain(`source '${helperPath}'`);
         expect(ssh.commands[1]).toContain(helperDirectory);
         expect(ssh.commands[1]).toContain("rm -rf --");
@@ -658,7 +668,7 @@ describe("ssh admin tool", () => {
             .rejects.toThrow("upload failed");
         expect(ssh.uploads).toHaveLength(0);
         expect(ssh.commands).toHaveLength(2);
-        expect(ssh.commands[0]).toContain("install -d -m 700 -- '/tmp/.supacloud-release-assets-");
+        expect(ssh.commands[0]).toContain("mkdir -m 700 -- '/tmp/.supacloud-release-assets-");
         expect(ssh.commands[1]).toContain("sudo -n rm -rf -- '/tmp/.supacloud-release-assets-");
     });
 
@@ -715,6 +725,44 @@ describe("ssh admin tool", () => {
         const diagnostics = (failure as AggregateError).errors.map(candidate => String(candidate));
         expect(diagnostics.some(message => message.includes("exit 42") && message.includes("transaction failed"))).toBe(true);
         expect(diagnostics.some(message => message.includes("Failed to remove remote upgrade helper"))).toBe(true);
+    });
+
+    test("preserves falsy upgrade and helper cleanup rejections", async () => {
+        for (const rejection of [undefined, null, false, 0, ""]) {
+            const ssh = new FakeSsh();
+            ssh.upgradeExecRejection = { value: rejection };
+            let rejected = false;
+            try {
+                await captureSshTool(ssh).invoke({ action: "upgrade", version: "0.50.27" });
+            } catch (error: unknown) {
+                rejected = true;
+                expect(error).toBe(rejection);
+            }
+            expect(rejected).toBe(true);
+        }
+
+        const cleanupOnly = new FakeSsh();
+        cleanupOnly.cleanupExecRejection = { value: 0 };
+        let cleanupRejected = false;
+        try {
+            await captureSshTool(cleanupOnly).invoke({ action: "upgrade", version: "0.50.27" });
+        } catch (error: unknown) {
+            cleanupRejected = true;
+            expect(error).toBe(0);
+        }
+        expect(cleanupRejected).toBe(true);
+
+        const combined = new FakeSsh();
+        combined.upgradeExecRejection = { value: false };
+        combined.cleanupExecRejection = { value: 0 };
+        let combinedFailure: unknown;
+        try {
+            await captureSshTool(combined).invoke({ action: "upgrade", version: "0.50.27" });
+        } catch (error: unknown) {
+            combinedFailure = error;
+        }
+        expect(combinedFailure).toBeInstanceOf(AggregateError);
+        expect((combinedFailure as AggregateError).errors).toEqual([false, 0]);
     });
 
     test("remote upgrade failures reach the CLI error boundary", async () => {
