@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { SQL } from "bun";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -939,6 +939,38 @@ describe("upgrade release selection", () => {
       cleanupBinaryBackup(state);
       expect(existsSync(state.backupPath)).toBe(false);
     } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("atomically restores a binary while its current executable is still running", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "supacloud-upgrade-running-binary-"));
+    const target = join(dir, "supacloud");
+    copyFileSync(process.execPath, target);
+    chmodSync(target, 0o755);
+    const state = createBinaryBackupState(target, "running-binary");
+    backupCurrentBinary(state);
+    chmodSync(state.backupPath, 0o600);
+    const runningBinary = Bun.spawn([target, "-e", "setInterval(() => {}, 1000)"], {
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+
+    try {
+      await Bun.sleep(100);
+      process.kill(runningBinary.pid, 0);
+      const runningInode = statSync(target).ino;
+
+      restoreCurrentBinary(state);
+
+      expect(statSync(target).ino).not.toBe(runningInode);
+      expect(statSync(target).mode & 0o777).toBe(0o755);
+      expect(readFileSync(target)).toEqual(readFileSync(state.backupPath));
+      expect(readdirSync(dir).some(name => name.includes(".restore-"))).toBe(false);
+    } finally {
+      runningBinary.kill();
+      await runningBinary.exited;
+      cleanupBinaryBackup(state);
       rmSync(dir, { recursive: true, force: true });
     }
   });

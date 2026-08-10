@@ -18,6 +18,7 @@ class FakeSsh {
     upgradeExecFails = false;
     cleanupExecFails = false;
     uploadThrows = false;
+    partialUploadThrows = false;
 
     async ping(): Promise<boolean> {
         return true;
@@ -66,6 +67,7 @@ class FakeSsh {
     async uploadText(remotePath: string, content: string, mode = 0o600): Promise<void> {
         if (this.uploadThrows) throw new Error("upload failed");
         this.uploads.push({ remotePath, content, mode });
+        if (this.partialUploadThrows) throw new Error("partial upload failed");
     }
 }
 
@@ -238,14 +240,43 @@ describe("ssh admin tool", () => {
         expect(ssh.commands.at(-1)).toBe(`rm -f '${ssh.uploads[0]?.remotePath}'`);
     });
 
-    test("failed helper upload does not issue cleanup for a path that was never created", async () => {
+    test("failed helper upload still cleans its generated remote path", async () => {
         const ssh = new FakeSsh();
         ssh.uploadThrows = true;
 
         await expect(captureSshTool(ssh).invoke({ action: "upgrade", version: "0.50.27" }))
             .rejects.toThrow("upload failed");
         expect(ssh.uploads).toHaveLength(0);
-        expect(ssh.commands).toHaveLength(0);
+        expect(ssh.commands).toHaveLength(1);
+        expect(ssh.commands[0]).toMatch(/^rm -f '\/tmp\/\.supacloud-release-assets-[0-9a-f-]+\.sh'$/);
+    });
+
+    test("partial helper upload cleans the exact remote path", async () => {
+        const ssh = new FakeSsh();
+        ssh.partialUploadThrows = true;
+
+        await expect(captureSshTool(ssh).invoke({ action: "upgrade", version: "0.50.27" }))
+            .rejects.toThrow("partial upload failed");
+        expect(ssh.uploads).toHaveLength(1);
+        expect(ssh.commands).toEqual([`rm -f '${ssh.uploads[0]?.remotePath}'`]);
+    });
+
+    test("partial upload and helper cleanup failures preserve both diagnostics", async () => {
+        const ssh = new FakeSsh();
+        ssh.partialUploadThrows = true;
+        ssh.cleanupExecFails = true;
+
+        let failure: unknown;
+        try {
+            await captureSshTool(ssh).invoke({ action: "upgrade", version: "0.50.27" });
+        } catch (error: unknown) {
+            failure = error;
+        }
+
+        expect(failure).toBeInstanceOf(AggregateError);
+        const diagnostics = (failure as AggregateError).errors.map(candidate => String(candidate));
+        expect(diagnostics.some(message => message.includes("partial upload failed"))).toBe(true);
+        expect(diagnostics.some(message => message.includes("Failed to remove remote upgrade helper"))).toBe(true);
     });
 
     test("helper cleanup failures are reported instead of swallowed", async () => {

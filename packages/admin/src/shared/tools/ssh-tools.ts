@@ -200,10 +200,10 @@ async function executeOfficialUpgrade(
     helperPath: string,
     command: string,
 ): Promise<Awaited<ReturnType<SshTransport["exec"]>>> {
-    await ssh.uploadText(helperPath, releaseAssetsScript, 0o600);
     let execution: OfficialUpgradeExecution | undefined;
     let executionError: unknown;
     try {
+        await ssh.uploadText(helperPath, releaseAssetsScript, 0o600);
         execution = await ssh.exec(command, 600_000);
     } catch (error: unknown) {
         executionError = error;

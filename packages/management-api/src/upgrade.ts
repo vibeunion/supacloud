@@ -129,8 +129,14 @@ export function backupCurrentBinary(
 
 export function restoreCurrentBinary(state: BinaryBackupState) {
     if (state.backupReady && existsSync(state.backupPath)) {
-        copyFileSync(state.backupPath, state.targetPath);
-        chmodSync(state.targetPath, 0o755);
+        const restorePath = `${state.targetPath}.restore-${process.pid}-${randomUUID()}`;
+        try {
+            copyFileSync(state.backupPath, restorePath);
+            chmodSync(restorePath, 0o755);
+            renameSync(restorePath, state.targetPath);
+        } finally {
+            rmSync(restorePath, { force: true });
+        }
     } else if (!state.hadTarget && state.activated) {
         rmSync(state.targetPath, { force: true });
     }
