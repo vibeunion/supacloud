@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.6](https://github.com/zuohuadong/supacloud/compare/admin-v0.7.5...admin-v0.7.6) (2026-08-10)
+
+
+### Bug Fixes
+
+* **admin:** make upgrade direct and signal safe ([#767](https://github.com/zuohuadong/supacloud/issues/767)) ([c1b6d87](https://github.com/zuohuadong/supacloud/commit/c1b6d871a8fbe73bdfc511341291f4bdd6506e6c))
+
 ## [0.7.5](https://github.com/zuohuadong/supacloud/compare/admin-v0.7.4...admin-v0.7.5) (2026-08-10)
 
 
