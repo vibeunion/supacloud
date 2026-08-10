@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.9](https://github.com/zuohuadong/supacloud/compare/admin-v0.7.8...admin-v0.7.9) (2026-08-10)
+
+
+### Bug Fixes
+
+* **admin:** close SFTP channels after uploads ([#780](https://github.com/zuohuadong/supacloud/issues/780)) ([bf66e52](https://github.com/zuohuadong/supacloud/commit/bf66e52a2a2213b3225abcb5aa8f6d56e1d541cd))
+* **admin:** harden local upgrade state checks ([#779](https://github.com/zuohuadong/supacloud/issues/779)) ([f57308d](https://github.com/zuohuadong/supacloud/commit/f57308d784a9c42731dce7167564b403068225e6))
+
 ## [0.7.8](https://github.com/zuohuadong/supacloud/compare/admin-v0.7.7...admin-v0.7.8) (2026-08-10)
 
 

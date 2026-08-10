@@ -5,7 +5,7 @@
   "packages/pgredis-runtime": "0.3.1",
   "packages/supacloud-js": "0.21.2",
   "packages/cli": "0.14.4",
-  "packages/admin": "0.7.8",
+  "packages/admin": "0.7.9",
   "packages/supacloud": "0.8.12",
   "packages/supacloud-lite": "0.5.9"
 }
