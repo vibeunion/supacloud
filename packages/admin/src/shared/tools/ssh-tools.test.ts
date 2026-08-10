@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -6,6 +7,12 @@ import { dirname, join } from "node:path";
 import { buildOfficialUpgradeCommand, buildRootUpgradeScript, registerSshTools } from "./ssh-tools";
 import { parseToolArguments } from "../schema";
 import type { ToolSchema } from "../schema";
+import {
+    SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_FILENAME,
+    SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_JSONL,
+    SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_SHA256,
+    SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_SIZE,
+} from "../../../../management-api/src/sigstore-trusted-root";
 
 type ToolHandler = (args: Record<string, unknown>) => Promise<{ content: Array<{ type: "text"; text: string }> }>;
 
@@ -19,8 +26,10 @@ class FakeSsh {
     bootstrapDepsFail = false;
     bootstrapCloneFail = false;
     upgradeExecThrows = false;
+    upgradeExecRejection: { value: unknown } | undefined;
     upgradeExecFails = false;
     cleanupExecFails = false;
+    cleanupExecRejection: { value: unknown } | undefined;
     uploadThrows = false;
     partialUploadThrows = false;
     pingResult = true;
@@ -38,11 +47,17 @@ class FakeSsh {
         if (this.upgradeExecThrows && command.includes("UPGRADE_RUNNER")) {
             throw new Error("connection dropped");
         }
+        if (this.upgradeExecRejection && command.includes("UPGRADE_RUNNER")) {
+            throw this.upgradeExecRejection.value;
+        }
         if (this.upgradeExecFails && command.includes("UPGRADE_RUNNER")) {
             return { success: false, stdout: "", stderr: "transaction failed", code: 42 };
         }
         if (this.cleanupExecFails && command.includes("sudo -n rm -rf -- '/tmp/.supacloud-release-assets-")) {
             return { success: false, stdout: "", stderr: "permission denied", code: 1 };
+        }
+        if (this.cleanupExecRejection && command.includes("sudo -n rm -rf -- '/tmp/.supacloud-release-assets-")) {
+            throw this.cleanupExecRejection.value;
         }
         if (command.includes("BOOTSTRAP_DEPS_OK")) {
             if (this.bootstrapDepsFail) {
@@ -127,7 +142,7 @@ function writeFakeGh(filePath: string, version: string): void {
     writeExecutableShell(filePath, [
         "#!/bin/sh",
         `if [ \"$1\" = \"--version\" ]; then echo \"gh version ${version}\"; exit 0; fi`,
-        "if [ \"$1 $2 $3\" = \"attestation verify --help\" ]; then echo '--bundle --signer-workflow --source-ref --deny-self-hosted-runners'; exit 0; fi",
+        "if [ \"$1 $2 $3\" = \"attestation verify --help\" ]; then echo '--bundle --signer-workflow --source-ref --custom-trusted-root --deny-self-hosted-runners'; exit 0; fi",
         "exit 1",
         "",
     ].join("\n"));
@@ -180,6 +195,14 @@ function rootScriptVerifierBootstrap(rootScript: string): string {
     }
     return [scriptLines[0], ...scriptLines.slice(securityUnsetIndex, proxySetupIndex + 1),
         ...scriptLines.slice(helperSourceIndex, verifierGateIndex + 1)].join("\n");
+}
+
+function trustedRootPreflightScript(rootScript: string): string {
+    const scriptLines = rootScript.split("\n");
+    const start = scriptLines.findIndex(line => line.startsWith("HELPER_DIRECTORY="));
+    const end = scriptLines.findIndex(line => line === "export SUPACLOUD_ATTESTATION_TRUSTED_ROOT=\"$TRUSTED_ROOT\"");
+    if (start < 0 || end < start) throw new Error("Root upgrade script lacks trusted-root preflight boundaries");
+    return scriptLines.slice(start, end + 1).join("\n");
 }
 
 describe("ssh admin tool", () => {
@@ -338,6 +361,43 @@ describe("ssh admin tool", () => {
         expect(rootScript).toContain("Another SupaCloud upgrade is already running");
     });
 
+    test("remote trusted-root adoption rejects missing, altered, linked, and permissive files", () => {
+        const fixtureRoot = mkdtempSync(join(tmpdir(), "supacloud-admin-remote-root-"));
+        const helperPath = join(fixtureRoot, "release_assets.sh");
+        const trustedRootPath = join(fixtureRoot, SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_FILENAME);
+        const symlinkTarget = `${fixtureRoot}.outside.jsonl`;
+        writeFileSync(helperPath, "fixture", { mode: 0o600 });
+        chmodSync(fixtureRoot, 0o700);
+        const preflight = trustedRootPreflightScript(buildRootUpgradeScript({ helperPath }));
+        const fixtureCommands = [
+            "stat() { case \"$2\" in '%a') if [ \"$3\" = \"$HELPER_PATH\" ]; then printf '600\\n'; elif [ \"$3\" = \"$HELPER_DIRECTORY\" ]; then printf '700\\n'; else printf '%s\\n' \"$ROOT_MODE\"; fi ;; '%h') printf '1\\n' ;; '%s') wc -c < \"$3\" | tr -d '[:space:]' ;; '%u:%g:%a:%h') printf '0:0:%s:1\\n' \"$ROOT_MODE\" ;; *) return 1 ;; esac; }",
+            "find() { for entry in \"$1\"/*; do test -e \"$entry\" || test -L \"$entry\" || continue; basename \"$entry\"; done; }",
+            "chown() { return 0; }",
+        ];
+        const runPreflight = (rootMode = "600") => Bun.spawnSync({
+            cmd: ["bash", "-c", ["set -euo pipefail", ...fixtureCommands, preflight].join("\n")],
+            env: { ...process.env, HELPER_PATH: helperPath, ROOT_MODE: rootMode },
+        }).exitCode;
+        try {
+            expect(runPreflight()).not.toBe(0);
+
+            writeFileSync(trustedRootPath, SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_JSONL, { mode: 0o600 });
+            expect(runPreflight()).toBe(0);
+            expect(runPreflight("644")).not.toBe(0);
+
+            writeFileSync(trustedRootPath, `${SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_JSONL} `);
+            expect(runPreflight()).not.toBe(0);
+
+            rmSync(trustedRootPath);
+            writeFileSync(symlinkTarget, SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_JSONL, { mode: 0o600 });
+            symlinkSync(symlinkTarget, trustedRootPath);
+            expect(runPreflight()).not.toBe(0);
+        } finally {
+            rmSync(fixtureRoot, { recursive: true, force: true });
+            rmSync(symlinkTarget, { force: true });
+        }
+    });
+
     test("component upgrade validates both exact versions before upload", async () => {
         for (const args of [
             { action: "upgrade", version: "0.50.27;id", edge_runtime_version: "0.16.7" },
@@ -440,6 +500,7 @@ describe("ssh admin tool", () => {
         const continuationPath = join(fixtureDir, "continued");
         try {
             writeFileSync(helperPath, [
+                "supacloud_attestation_trusted_root_available() { return 0; }",
                 "supacloud_attestation_verifier_available() { return 0; }",
                 "supacloud_version_at_least() { return 1; }",
                 "supacloud_fetch_component_release() { printf '%s\\n' '{}'; }",
@@ -481,7 +542,7 @@ describe("ssh admin tool", () => {
             mkdirSync(legacyBinDir);
             mkdirSync(commandDir);
             try {
-                for (const commandName of ["awk", "grep", "install"]) {
+                for (const commandName of ["awk", "dirname", "grep", "head", "install", "jq", "sha256sum", "tr", "wc"]) {
                     linkHostCommand(commandDir, commandName);
                 }
                 if (initialGhVersion) writeFakeGh(join(legacyBinDir, "gh"), initialGhVersion);
@@ -519,7 +580,7 @@ describe("ssh admin tool", () => {
         expect(ssh.commands).toHaveLength(3);
         const command = ssh.commands[1] ?? "";
         expect(command).toContain("sudo -n true");
-        expect(ssh.uploads).toHaveLength(1);
+        expect(ssh.uploads).toHaveLength(2);
         expect(ssh.uploads[0]?.remotePath).toMatch(/^\/tmp\/\.supacloud-release-assets-[0-9a-f-]+\/release_assets\.sh$/);
         expect(ssh.uploads[0]?.mode).toBe(0o600);
         expect(ssh.uploads[0]?.content).toContain("supacloud_install_pinned_gh");
@@ -530,6 +591,14 @@ describe("ssh admin tool", () => {
         expect(ssh.uploads[0]?.content).toContain('bundle_file="${bundle_dir}/bundle.jsonl"');
         expect(ssh.uploads[0]?.content).toContain('trap \'rm -rf -- "$bundle_dir"\' EXIT');
         expect(ssh.uploads[0]?.content).toContain('trap \'trap - EXIT HUP INT TERM; rm -rf -- "$bundle_dir"; exit 1\' HUP INT TERM');
+        const trustedRootUpload = ssh.uploads[1];
+        expect(trustedRootUpload?.remotePath).toBe(
+            `${dirname(ssh.uploads[0]?.remotePath ?? "")}/${SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_FILENAME}`,
+        );
+        expect(trustedRootUpload?.mode).toBe(0o600);
+        expect(Buffer.byteLength(trustedRootUpload?.content ?? "")).toBe(SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_SIZE);
+        expect(createHash("sha256").update(trustedRootUpload?.content ?? "").digest("hex"))
+            .toBe(SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_SHA256);
         expect(command).toContain("supacloud_install_pinned_gh");
         expect(command).toContain("/usr/local/bin/supacloud --version");
         expect(command).toContain("0.50.27");
@@ -538,6 +607,9 @@ describe("ssh admin tool", () => {
         expect(command).toContain('chmod 0755 "$STAGED_MANAGEMENT"');
         expect(command).toContain("SUPACLOUD_EDGE_RUNTIME_UPGRADE_TAG=");
         expect(command).toContain("unset SUPACLOUD_ALLOW_UNVERIFIED_RELEASE");
+        expect(command).toContain("SUPACLOUD_ATTESTATION_TRUSTED_ROOT");
+        expect(command).toContain("Pinned trusted root must use mode 0600");
+        expect(command).toContain("supacloud_attestation_trusted_root_available");
         expect(command).not.toContain("/opt/supacloud/scripts");
         expect(command).toContain("rm -rf --");
         expect(command).toContain("/tmp/.supacloud-release-assets-");
@@ -547,9 +619,12 @@ describe("ssh admin tool", () => {
             edgeRuntimeVersion: "0.16.7",
             helperPath: ssh.uploads[0]?.remotePath ?? "",
         });
+        expect(rootScript).toContain("stat -c '%u:%g:%a:%h'");
         expect(Bun.spawnSync(["bash", "-n", "-c", rootScript]).exitCode).toBe(0);
         expect(Bun.spawnSync(["bash", "-n", "-c", command]).exitCode).toBe(0);
-        expect(ssh.commands[0]).toMatch(/^set -e; umask 077; test ! -e '\/tmp\/\.supacloud-release-assets-[0-9a-f-]+'; install -d -m 700 --/);
+        expect(ssh.commands[0]).toMatch(/^set -e; umask 077; mkdir -m 700 -- '\/tmp\/\.supacloud-release-assets-[0-9a-f-]+'$/);
+        expect(ssh.commands[0]).not.toContain("test ! -e");
+        expect(ssh.commands[0]).not.toContain("install -d");
         expect(ssh.commands[2]).toContain(`rm -rf -- '${ssh.uploads[0]?.remotePath.replace(/\/release_assets\.sh$/, "")}'`);
         expect(ssh.commands[2]).toContain("sudo -n rm -rf --");
         expect(ssh.timeouts).toEqual([30_000, 720_000, 30_000]);
@@ -566,7 +641,7 @@ describe("ssh admin tool", () => {
             edge_runtime_version: "0.16.7",
         })).rejects.toThrow("connection dropped");
 
-        expect(ssh.uploads).toHaveLength(1);
+        expect(ssh.uploads).toHaveLength(2);
         expect(ssh.commands.at(-1)).toContain(`rm -rf -- '${ssh.uploads[0]?.remotePath.replace(/\/release_assets\.sh$/, "")}'`);
     });
 
@@ -578,7 +653,7 @@ describe("ssh admin tool", () => {
         const helperPath = ssh.uploads[0]?.remotePath ?? "";
         const helperDirectory = dirname(helperPath);
         expect(helperPath).toBe(`${helperDirectory}/release_assets.sh`);
-        expect(ssh.commands[0]).toContain(`install -d -m 700 -- '${helperDirectory}'`);
+        expect(ssh.commands[0]).toContain(`mkdir -m 700 -- '${helperDirectory}'`);
         expect(buildRootUpgradeScript({ helperPath })).toContain(`source '${helperPath}'`);
         expect(ssh.commands[1]).toContain(helperDirectory);
         expect(ssh.commands[1]).toContain("rm -rf --");
@@ -593,7 +668,7 @@ describe("ssh admin tool", () => {
             .rejects.toThrow("upload failed");
         expect(ssh.uploads).toHaveLength(0);
         expect(ssh.commands).toHaveLength(2);
-        expect(ssh.commands[0]).toContain("install -d -m 700 -- '/tmp/.supacloud-release-assets-");
+        expect(ssh.commands[0]).toContain("mkdir -m 700 -- '/tmp/.supacloud-release-assets-");
         expect(ssh.commands[1]).toContain("sudo -n rm -rf -- '/tmp/.supacloud-release-assets-");
     });
 
@@ -650,6 +725,44 @@ describe("ssh admin tool", () => {
         const diagnostics = (failure as AggregateError).errors.map(candidate => String(candidate));
         expect(diagnostics.some(message => message.includes("exit 42") && message.includes("transaction failed"))).toBe(true);
         expect(diagnostics.some(message => message.includes("Failed to remove remote upgrade helper"))).toBe(true);
+    });
+
+    test("preserves falsy upgrade and helper cleanup rejections", async () => {
+        for (const rejection of [undefined, null, false, 0, ""]) {
+            const ssh = new FakeSsh();
+            ssh.upgradeExecRejection = { value: rejection };
+            let rejected = false;
+            try {
+                await captureSshTool(ssh).invoke({ action: "upgrade", version: "0.50.27" });
+            } catch (error: unknown) {
+                rejected = true;
+                expect(error).toBe(rejection);
+            }
+            expect(rejected).toBe(true);
+        }
+
+        const cleanupOnly = new FakeSsh();
+        cleanupOnly.cleanupExecRejection = { value: 0 };
+        let cleanupRejected = false;
+        try {
+            await captureSshTool(cleanupOnly).invoke({ action: "upgrade", version: "0.50.27" });
+        } catch (error: unknown) {
+            cleanupRejected = true;
+            expect(error).toBe(0);
+        }
+        expect(cleanupRejected).toBe(true);
+
+        const combined = new FakeSsh();
+        combined.upgradeExecRejection = { value: false };
+        combined.cleanupExecRejection = { value: 0 };
+        let combinedFailure: unknown;
+        try {
+            await captureSshTool(combined).invoke({ action: "upgrade", version: "0.50.27" });
+        } catch (error: unknown) {
+            combinedFailure = error;
+        }
+        expect(combinedFailure).toBeInstanceOf(AggregateError);
+        expect((combinedFailure as AggregateError).errors).toEqual([false, 0]);
     });
 
     test("remote upgrade failures reach the CLI error boundary", async () => {
@@ -763,6 +876,7 @@ describe("ssh admin tool", () => {
         expect(commands).toMatch(/chmod 600 '\/var\/log\/supacloud\/install-[0-9a-f-]+\.log' '\/var\/log\/supacloud\/install-[0-9a-f-]+\.status'/);
         expect(commands).not.toContain("/tmp/supacloud-install.log");
         expect(commands).not.toContain("supacloud_atomic_merge_env /etc/supabase/install.env");
+        expect(commands).toContain("packages/management-api/src/assets/sigstore-public-good-trusted-root.jsonl");
         expect(commands).not.toContain("source /opt/supacloud/scripts/lib/install_config.sh");
         expect(commands).toContain("rm -f");
         expect(commands).toMatch(/\/etc\/supabase\/\.install-input-[0-9a-f-]+\.env/);

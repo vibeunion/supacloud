@@ -49,11 +49,13 @@ Local artifact transport downloads exact releases directly on the Admin host,
 verifies their signed release manifests, checksums, sizes, provenance, source
 commit, and architecture, then transfers them through an atomic SFTP staging
 directory. The server takes root ownership, repeats offline verification, and
-runs the uploaded target Management binary without GitHub egress or a
-third-party proxy. The server reuses an installed `gh` only when it supports all
-required strict attestation flags. Otherwise Admin transfers a pinned temporary
-Linux `gh` verifier that is removed with the staging directory and never
-replaces `/usr/local/bin/gh`.
+runs the uploaded target Management binary without GitHub or Sigstore TUF
+egress or a third-party proxy. Admin and Management use the same reviewed,
+digest-pinned Sigstore Public Good trusted root via `--custom-trusted-root`, so
+the offline handoff does not depend on a pre-populated TUF cache. The server
+reuses an installed `gh` only when it supports all required strict attestation
+flags. Otherwise Admin transfers a pinned temporary Linux `gh` verifier that is
+removed with the staging directory and never replaces `/usr/local/bin/gh`.
 
 The command supports direct root SSH and passwordless `sudo -n`. The transaction
 runs in a uniquely named transient systemd unit with protected atomic status

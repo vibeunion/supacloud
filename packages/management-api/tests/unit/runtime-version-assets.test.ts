@@ -1,10 +1,15 @@
 // @supacloud-test-isolate — compiles and validates multiple release fixtures.
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import {
+  SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_SHA256,
+  SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_SIZE,
+  SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_TUF_TARGET_SHA256,
+} from "../../src/sigstore-trusted-root";
 
 const repoRoot = join(import.meta.dir, "../../..", "..");
 setDefaultTimeout(60_000);
@@ -576,7 +581,8 @@ describe("runtime companion version assets", () => {
     });
 
     try {
-      spawnSync("mkdir", ["-p", join(seed, "scripts/lib"), nonGit, fakeBin]);
+      const trustedRootDirectory = join(seed, "packages/management-api/src/assets");
+      spawnSync("mkdir", ["-p", join(seed, "scripts/lib"), trustedRootDirectory, nonGit, fakeBin]);
       writeFileSync(join(fakeBin, "git"), [
         "#!/usr/bin/env bash",
         "if [[ \"$*\" == *\"remote get-url origin\"* ]]; then",
@@ -593,6 +599,10 @@ describe("runtime companion version assets", () => {
       writeFileSync(join(seed, "install.sh"), "#!/bin/bash\n");
       writeFileSync(join(seed, "scripts/lib/install_config.sh"), "#!/bin/bash\n");
       writeFileSync(join(seed, "scripts/lib/release_assets.sh"), "#!/bin/bash\n");
+      copyFileSync(
+        join(repoRoot, "packages/management-api/src/assets/sigstore-public-good-trusted-root.jsonl"),
+        join(trustedRootDirectory, "sigstore-public-good-trusted-root.jsonl"),
+      );
       expect(git(seed, ["add", "."]).status).toBe(0);
       expect(git(seed, ["commit", "-m", "fixture"]).status).toBe(0);
       expect(spawnSync("git", ["init", "--bare", remote], { encoding: "utf8" }).status).toBe(0);
@@ -647,6 +657,61 @@ describe("runtime companion version assets", () => {
     expect(versionCheck.status, versionCheck.stderr).toBe(0);
   });
 
+  test("vendors the TUF-reviewed Sigstore Public Good trusted root", () => {
+    const assetPath = "packages/management-api/src/assets/sigstore-public-good-trusted-root.jsonl";
+    const trustedRoot = readRepoFile(assetPath);
+    const helper = readRepoFile("scripts/lib/release_assets.sh");
+    const setup = readRepoFile("setup.sh");
+
+    expect(Buffer.byteLength(trustedRoot)).toBe(SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_SIZE);
+    expect(createHash("sha256").update(trustedRoot).digest("hex"))
+      .toBe(SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_SHA256);
+    expect(trustedRoot.endsWith("\n")).toBe(true);
+    expect(trustedRoot.slice(0, -1)).not.toContain("\n");
+    expect(JSON.parse(trustedRoot).mediaType)
+      .toBe("application/vnd.dev.sigstore.trustedroot+json;version=0.1");
+    expect(SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_TUF_TARGET_SHA256)
+      .toBe("6494e21ea73fa7ee769f85f57d5a3e6a08725eae1e38c755fc3517c9e6bc0b66");
+    expect(helper).toContain(SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_SHA256);
+    expect(helper).toContain("--custom-trusted-root");
+    expect(setup).toContain(assetPath);
+  });
+
+  test("shell verification rejects missing, modified, or linked trusted roots", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supacloud-trusted-root-"));
+    const source = join(repoRoot, "packages/management-api/src/assets/sigstore-public-good-trusted-root.jsonl");
+    const valid = join(dir, "valid.jsonl");
+    const modified = join(dir, "modified.jsonl");
+    const linked = join(dir, "linked.jsonl");
+    const prepared = join(dir, "prepared.jsonl");
+    try {
+      copyFileSync(source, valid);
+      writeFileSync(modified, readFileSync(source, "utf8").replace('"mediaType"', '"mediaTypf"'));
+      symlinkSync(valid, linked);
+      const invoke = (trustedRoot: string, command = "supacloud_attestation_trusted_root_available") => spawnSync(
+        "bash",
+        ["-c", `source scripts/lib/release_assets.sh && ${command}`],
+        {
+          cwd: repoRoot,
+          env: { ...process.env, SUPACLOUD_ATTESTATION_TRUSTED_ROOT: trustedRoot, OUTPUT: prepared },
+          encoding: "utf8",
+        },
+      );
+
+      expect(invoke(valid).status).toBe(0);
+      expect(invoke(join(dir, "missing.jsonl")).status).not.toBe(0);
+      expect(invoke(modified).status).not.toBe(0);
+      expect(invoke(linked).status).not.toBe(0);
+      const preparation = invoke(valid, 'supacloud_prepare_attestation_trusted_root "$OUTPUT"');
+      expect(preparation.status, preparation.stderr).toBe(0);
+      expect(statSync(prepared).mode & 0o777).toBe(0o600);
+      expect(createHash("sha256").update(readFileSync(prepared)).digest("hex"))
+        .toBe(SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_SHA256);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("attestation verification requires a new enough gh with every offline flag", () => {
     const dir = mkdtempSync(join(tmpdir(), "supacloud-gh-capability-"));
     const gh = join(dir, "gh");
@@ -672,7 +737,13 @@ describe("runtime companion version assets", () => {
         },
         encoding: "utf8",
       });
-      const flags = ["--bundle", "--signer-workflow", "--source-ref", "--deny-self-hosted-runners"];
+      const flags = [
+        "--bundle",
+        "--signer-workflow",
+        "--source-ref",
+        "--custom-trusted-root",
+        "--deny-self-hosted-runners",
+      ];
 
       expect(invoke("2.68.0", `${flags.join("\n")}\n`).status).toBe(0);
       expect(invoke("2.67.9", `${flags.join("\n")}\n`).status).not.toBe(0);
@@ -790,7 +861,7 @@ describe("runtime companion version assets", () => {
       writeFileSync(gh, [
         "#!/bin/sh",
         'if [ "$1" = "--version" ]; then echo "gh version 2.96.0"; exit 0; fi',
-        'if [ "$1 $2 $3" = "attestation verify --help" ]; then printf "%s\\n" "--bundle" "--signer-workflow" "--source-ref" "--deny-self-hosted-runners"; exit 0; fi',
+        'if [ "$1 $2 $3" = "attestation verify --help" ]; then printf "%s\\n" "--bundle" "--signer-workflow" "--source-ref" "--custom-trusted-root" "--deny-self-hosted-runners"; exit 0; fi',
         'while [ "$#" -gt 0 ]; do if [ "$1" = "--bundle" ]; then shift; printf "%s\\n" "$1" > "$GH_BUNDLE_ARGUMENT_RECORD"; break; fi; shift; done',
         'echo "HTTP 404: attestation not found" >&2',
         "exit 22",
@@ -826,6 +897,7 @@ describe("runtime companion version assets", () => {
     const artifact = join(dir, "artifact");
     const bundleArgumentRecord = join(dir, "gh-bundle-argument.txt");
     const sourceRefArgumentRecord = join(dir, "gh-source-ref-argument.txt");
+    const trustedRootArgumentRecord = join(dir, "gh-trusted-root-argument.txt");
     try {
       spawnSync("mkdir", ["-p", fakeBin]);
       writeFileSync(artifact, "verified artifact fixture");
@@ -838,11 +910,12 @@ describe("runtime companion version assets", () => {
       writeFileSync(join(fakeBin, "gh"), [
         "#!/bin/sh",
         'if [ "$1" = "--version" ]; then echo "gh version 2.96.0"; exit 0; fi',
-        'if [ "$1 $2 $3" = "attestation verify --help" ]; then printf "%s\\n" "--bundle" "--signer-workflow" "--source-ref" "--deny-self-hosted-runners"; exit 0; fi',
-        'bundle=""; deny_self_hosted=false',
-        'while [ "$#" -gt 0 ]; do case "$1" in --bundle) shift; bundle="$1" ;; --source-ref) shift; printf "%s\\n" "$1" > "$GH_SOURCE_REF_ARGUMENT_RECORD" ;; --deny-self-hosted-runners) deny_self_hosted=true ;; esac; shift; done',
+        'if [ "$1 $2 $3" = "attestation verify --help" ]; then printf "%s\\n" "--bundle" "--signer-workflow" "--source-ref" "--custom-trusted-root" "--deny-self-hosted-runners"; exit 0; fi',
+        'bundle=""; trusted_root=""; deny_self_hosted=false',
+        'while [ "$#" -gt 0 ]; do case "$1" in --bundle) shift; bundle="$1" ;; --custom-trusted-root) shift; trusted_root="$1" ;; --source-ref) shift; printf "%s\\n" "$1" > "$GH_SOURCE_REF_ARGUMENT_RECORD" ;; --deny-self-hosted-runners) deny_self_hosted=true ;; esac; shift; done',
         'printf "%s\\n" "$bundle" > "$GH_BUNDLE_ARGUMENT_RECORD"',
-        'case "$bundle" in */bundle.jsonl) test -f "$bundle" && test "$deny_self_hosted" = true && exit 0 ;; esac',
+        'printf "%s\\n" "$trusted_root" > "$GH_TRUSTED_ROOT_ARGUMENT_RECORD"',
+        'case "$bundle:$trusted_root" in */bundle.jsonl:*/trusted_root.jsonl) test -f "$bundle" && test -f "$trusted_root" && test "$(sha256sum "$trusted_root" | cut -d " " -f 1)" = "3c2cc7f357dc064ec527fdcd78da6e9245c21a381e1abaa0f2b62b186bcac1a1" && test "$deny_self_hosted" = true && exit 0 ;; esac',
         'echo "offline bundle must be an existing bundle.jsonl file" >&2',
         "exit 1",
         "",
@@ -858,6 +931,7 @@ describe("runtime companion version assets", () => {
           ARTIFACT: artifact,
           GH_BUNDLE_ARGUMENT_RECORD: bundleArgumentRecord,
           GH_SOURCE_REF_ARGUMENT_RECORD: sourceRefArgumentRecord,
+          GH_TRUSTED_ROOT_ARGUMENT_RECORD: trustedRootArgumentRecord,
           TMPDIR: dir,
           SUPACLOUD_INTEGRITY_MODE_RECORD: integrityMode,
         },
@@ -865,6 +939,7 @@ describe("runtime companion version assets", () => {
       });
       expect(result.status, result.stderr).toBe(0);
       expect(readFileSync(bundleArgumentRecord, "utf8").trim().endsWith("/bundle.jsonl")).toBe(true);
+      expect(readFileSync(trustedRootArgumentRecord, "utf8").trim().endsWith("/trusted_root.jsonl")).toBe(true);
       expect(readFileSync(sourceRefArgumentRecord, "utf8").trim()).toBe("refs/heads/main");
       expect(readdirSync(dir).filter(name => name.startsWith("supacloud-attestation."))).toEqual([]);
       expect(readFileSync(integrityMode, "utf8").trim()).toBe("github-attestation+same-release-sha256");

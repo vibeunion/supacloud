@@ -173,6 +173,7 @@ describe("local upgrade remote runner", () => {
 
         expect(Bun.spawnSync(["bash", "-n", "-c", script]).exitCode).toBe(0);
         expect(script).toContain("--deny-self-hosted-runners");
+        expect(script).toContain("--custom-trusted-root");
         expect(script).toContain("timeout 15s \"$GH\" attestation verify --help");
         expect(script).toContain("mode=$(stat -c '%a' \"$verifier\")");
         expect(script).toContain("trusted_installed_gh \"$GH\"");
@@ -275,6 +276,8 @@ describe("local upgrade remote runner", () => {
         expect(script).toContain("--asset-bundle-dir \"$BUNDLE\"");
         expect(script).toContain("--target-version '0.50.31'");
         expect(script).toContain("--edge-runtime-version '0.16.8'");
+        expect(script).toContain("unset SUPACLOUD_ALLOW_UNVERIFIED_RELEASE");
+        expect(script).toContain("SUPACLOUD_ATTESTATION_TRUSTED_ROOT");
         expect(script).not.toContain("verify_manifest()");
         expect(script).not.toContain("MANAGEMENT_COMMIT");
         expect(script).not.toContain("jq ");

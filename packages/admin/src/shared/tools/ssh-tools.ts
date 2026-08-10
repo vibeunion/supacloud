@@ -3,7 +3,7 @@
  * Install, upgrade, diagnose, exec, tenant mgmt — all via SSH
  */
 import { randomUUID } from "node:crypto";
-import { dirname } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { Type } from "@sinclair/typebox";
 import { decodedSchema, optional, stringEnum, withDescription } from "../schema";
 import type { SshTransport } from "../transports/ssh";
@@ -12,6 +12,12 @@ import {
     executeLocalUpgradeTransfer,
     SUPACLOUD_UPGRADE_LOCK_PATH,
 } from "../releases/local-upgrade-transfer";
+import {
+    SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_FILENAME,
+    SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_JSONL,
+    SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_SHA256,
+    SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_SIZE,
+} from "../../../../management-api/src/sigstore-trusted-root";
 import releaseAssetsScript from "../../../../../scripts/lib/release_assets.sh" with { type: "text" };
 
 const SAFE_CONTAINER_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/;
@@ -146,6 +152,28 @@ function signalSafeCleanupTraps(cleanupCommand: string): string[] {
     ];
 }
 
+function trustedRootPreflightCommands(helperPath: string): string[] {
+    const helperDirectory = dirname(helperPath);
+    const trustedRootPath = join(helperDirectory, SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_FILENAME);
+    return [
+        `HELPER_DIRECTORY=${quoteEnvValue(helperDirectory)}`,
+        `TRUSTED_ROOT=${quoteEnvValue(trustedRootPath)}`,
+        "test -d \"$HELPER_DIRECTORY\" && test ! -L \"$HELPER_DIRECTORY\" || { echo 'Upgrade helper directory is not secure' >&2; exit 1; }",
+        "test \"$(stat -c '%a' \"$HELPER_DIRECTORY\")\" = 700 || { echo 'Upgrade helper directory must use mode 0700' >&2; exit 1; }",
+        `EXPECTED_HELPER_ENTRIES=$(printf '%s\\n' ${quoteEnvValue(basename(helperPath))} ${quoteEnvValue(SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_FILENAME)} | LC_ALL=C sort)`,
+        "ACTUAL_HELPER_ENTRIES=$(find \"$HELPER_DIRECTORY\" -mindepth 1 -maxdepth 1 -printf '%f\\n' | LC_ALL=C sort)",
+        "test \"$ACTUAL_HELPER_ENTRIES\" = \"$EXPECTED_HELPER_ENTRIES\" || { echo 'Upgrade helper directory does not match its strict file allowlist' >&2; exit 1; }",
+        "test -f \"$TRUSTED_ROOT\" && test ! -L \"$TRUSTED_ROOT\" && test \"$(stat -c '%h' \"$TRUSTED_ROOT\")\" = 1 || { echo 'Pinned trusted root must be a direct regular file without links' >&2; exit 1; }",
+        "test \"$(stat -c '%a' \"$TRUSTED_ROOT\")\" = 600 || { echo 'Pinned trusted root must use mode 0600' >&2; exit 1; }",
+        `test "$(stat -c '%s' "$TRUSTED_ROOT")" = ${SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_SIZE} || { echo 'Pinned trusted root size mismatch' >&2; exit 1; }`,
+        `test "$(sha256sum "$TRUSTED_ROOT" | awk '{print $1}')" = ${quoteEnvValue(SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_SHA256)} || { echo 'Pinned trusted root digest mismatch' >&2; exit 1; }`,
+        "chown -h root:root \"$TRUSTED_ROOT\"",
+        "test \"$(stat -c '%u:%g:%a:%h' \"$TRUSTED_ROOT\")\" = 0:0:600:1 || { echo 'Pinned trusted root ownership or mode changed during adoption' >&2; exit 1; }",
+        `test "$(stat -c '%s' "$TRUSTED_ROOT")" = ${SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_SIZE} && test "$(sha256sum "$TRUSTED_ROOT" | awk '{print $1}')" = ${quoteEnvValue(SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_SHA256)} || { echo 'Pinned trusted root changed during adoption' >&2; exit 1; }`,
+        "export SUPACLOUD_ATTESTATION_TRUSTED_ROOT=\"$TRUSTED_ROOT\"",
+    ];
+}
+
 export function buildRootUpgradeScript(request: UpgradeRequest): string {
     const envAssignments = upgradeEnvAssignments(request);
     return [
@@ -153,18 +181,20 @@ export function buildRootUpgradeScript(request: UpgradeRequest): string {
         "umask 077",
         "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
         "export PATH",
-        "unset SUPACLOUD_ALLOW_UNVERIFIED_RELEASE SUPACLOUD_GITHUB_REPOSITORY SUPACLOUD_RELEASES_API SUPACLOUD_ATTESTATION_SIGNER_WORKFLOW SUPACLOUD_GH_VERSION SUPACLOUD_GH_MIN_VERSION SUPACLOUD_GH_AMD64_SHA256 SUPACLOUD_GH_ARM64_SHA256 GH_PROXY",
+        "unset SUPACLOUD_ALLOW_UNVERIFIED_RELEASE SUPACLOUD_GITHUB_REPOSITORY SUPACLOUD_RELEASES_API SUPACLOUD_ATTESTATION_SIGNER_WORKFLOW SUPACLOUD_ATTESTATION_TRUSTED_ROOT SUPACLOUD_GH_VERSION SUPACLOUD_GH_MIN_VERSION SUPACLOUD_GH_AMD64_SHA256 SUPACLOUD_GH_ARM64_SHA256 GH_PROXY",
         request.githubProxy
             ? `export SUPACLOUD_GITHUB_PROXY=${quoteEnvValue(request.githubProxy)}`
             : "unset SUPACLOUD_GITHUB_PROXY SUPACLOUD_GITHUB_PROXIES",
-        "for tool in curl jq file sha256sum stat tar flock; do command -v \"$tool\" >/dev/null 2>&1 || { echo \"Required upgrade tool is missing: $tool\" >&2; exit 127; }; done",
+        "for tool in curl jq file sha256sum stat tar flock find sort chown; do command -v \"$tool\" >/dev/null 2>&1 || { echo \"Required upgrade tool is missing: $tool\" >&2; exit 127; }; done",
         "test -d /run/lock || { echo '/run/lock is unavailable' >&2; exit 1; }",
         "test -x /usr/local/bin/supacloud || { echo 'SupaCloud binary not found at /usr/local/bin/supacloud; run ssh install first.' >&2; exit 127; }",
+        ...trustedRootPreflightCommands(request.helperPath),
         buildUpgradeLockScript(SUPACLOUD_UPGRADE_LOCK_PATH),
         ...componentPreflightCommands(request),
         "STAGED_MANAGEMENT=''",
         ...signalSafeCleanupTraps('test -z "$STAGED_MANAGEMENT" || rm -f "$STAGED_MANAGEMENT"'),
         `source ${quoteEnvValue(request.helperPath)}`,
+        "supacloud_attestation_trusted_root_available || { echo 'Pinned Sigstore trusted root failed helper validation' >&2; exit 1; }",
         "if ! supacloud_attestation_verifier_available; then supacloud_install_pinned_gh /usr/local/bin/gh; fi",
         "supacloud_attestation_verifier_available || { echo 'Pinned GitHub attestation verifier is unavailable' >&2; exit 1; }",
         ...componentBootstrapCommands(request),
@@ -190,8 +220,7 @@ async function prepareRemoteUpgradeHelperDirectory(ssh: SshTransport, helperPath
     const command = [
         "set -e",
         "umask 077",
-        `test ! -e ${quoteEnvValue(helperDirectory)}`,
-        `install -d -m 700 -- ${quoteEnvValue(helperDirectory)}`,
+        `mkdir -m 700 -- ${quoteEnvValue(helperDirectory)}`,
     ].join("; ");
     const preparation = await ssh.exec(command, 30_000);
     if (!preparation.success) {
@@ -217,30 +246,37 @@ async function removeRemoteUpgradeHelper(ssh: SshTransport, helperPath: string):
 
 type OfficialUpgradeExecution = Awaited<ReturnType<SshTransport["exec"]>>;
 
+type OfficialUpgradeOutcomeState = {
+    execution: OfficialUpgradeExecution | undefined;
+    executionFailed: boolean;
+    executionError: unknown;
+    cleanupFailed: boolean;
+    cleanupError: unknown;
+};
+
 function remoteUpgradeFailure(execution: OfficialUpgradeExecution): Error {
     const diagnostic = execution.stderr.trim() || execution.stdout.trim() || "no remote diagnostic";
     return new Error(`Remote upgrade failed (exit ${execution.code}): ${diagnostic.slice(-500)}`);
 }
 
-function officialUpgradeOutcome(
-    execution: OfficialUpgradeExecution | undefined,
-    executionError: unknown,
-    cleanupError: unknown,
-): OfficialUpgradeExecution {
-    if (executionError && cleanupError) {
-        throw new AggregateError([executionError, cleanupError], "Upgrade execution failed and helper cleanup did not complete");
-    }
-    if (executionError) throw executionError;
-    if (!execution) throw new Error("Upgrade execution did not return a result");
-    if (cleanupError && !execution.success) {
+function officialUpgradeOutcome(outcome: OfficialUpgradeOutcomeState): OfficialUpgradeExecution {
+    if (outcome.executionFailed && outcome.cleanupFailed) {
         throw new AggregateError(
-            [remoteUpgradeFailure(execution), cleanupError],
+            [outcome.executionError, outcome.cleanupError],
+            "Upgrade execution failed and helper cleanup did not complete",
+        );
+    }
+    if (outcome.executionFailed) throw outcome.executionError;
+    if (!outcome.execution) throw new Error("Upgrade execution did not return a result");
+    if (outcome.cleanupFailed && !outcome.execution.success) {
+        throw new AggregateError(
+            [remoteUpgradeFailure(outcome.execution), outcome.cleanupError],
             "Remote upgrade failed and helper cleanup did not complete",
         );
     }
-    if (cleanupError) throw cleanupError;
-    if (!execution.success) throw remoteUpgradeFailure(execution);
-    return execution;
+    if (outcome.cleanupFailed) throw outcome.cleanupError;
+    if (!outcome.execution.success) throw remoteUpgradeFailure(outcome.execution);
+    return outcome.execution;
 }
 
 async function executeOfficialUpgrade(
@@ -250,26 +286,38 @@ async function executeOfficialUpgrade(
     timeoutMs: number,
 ): Promise<Awaited<ReturnType<SshTransport["exec"]>>> {
     let execution: OfficialUpgradeExecution | undefined;
+    let executionFailed = false;
     let executionError: unknown;
     let helperPrepared = false;
     try {
         await prepareRemoteUpgradeHelperDirectory(ssh, helperPath);
         helperPrepared = true;
         await ssh.uploadText(helperPath, releaseAssetsScript, 0o600);
+        const trustedRootPath = join(dirname(helperPath), SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_FILENAME);
+        await ssh.uploadText(trustedRootPath, SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_JSONL, 0o600);
         execution = await ssh.exec(command, timeoutMs);
     } catch (error: unknown) {
+        executionFailed = true;
         executionError = error;
     }
 
+    let cleanupFailed = false;
     let cleanupError: unknown;
     if (helperPrepared) {
         try {
             await removeRemoteUpgradeHelper(ssh, helperPath);
         } catch (error: unknown) {
+            cleanupFailed = true;
             cleanupError = error;
         }
     }
-    return officialUpgradeOutcome(execution, executionError, cleanupError);
+    return officialUpgradeOutcome({
+        execution,
+        executionFailed,
+        executionError,
+        cleanupFailed,
+        cleanupError,
+    });
 }
 
 function assertSafeGithubProxy(value: string): string {
@@ -503,7 +551,7 @@ Actions: ping, setup, install, upgrade, diagnose, exec, troubleshoot, container_
                         `test "$(git -C ${quoteEnvValue(BOOTSTRAP)} remote get-url origin)" = ${quoteEnvValue(REPO)}; ` +
                         `test "$(git -C ${quoteEnvValue(BOOTSTRAP)} symbolic-ref --short HEAD)" = main; ` +
                         `test -z "$(git -C ${quoteEnvValue(BOOTSTRAP)} status --porcelain --untracked-files=no)"; ` +
-                        `git -C ${quoteEnvValue(BOOTSTRAP)} ls-files --error-unmatch setup.sh scripts/lib/install_config.sh scripts/lib/release_assets.sh >/dev/null; ` +
+                        `git -C ${quoteEnvValue(BOOTSTRAP)} ls-files --error-unmatch setup.sh scripts/lib/install_config.sh scripts/lib/release_assets.sh packages/management-api/src/assets/sigstore-public-good-trusted-root.jsonl >/dev/null; ` +
                         `test -f ${quoteEnvValue(`${BOOTSTRAP}/setup.sh`)}; echo BOOTSTRAP_OK`,
                         120_000,
                     );

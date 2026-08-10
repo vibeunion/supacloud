@@ -1,20 +1,28 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { chmodSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
     assertLocalGithubVerifier,
+    assertLocalTrustedRootDirectory,
     assertLocalUpgradeBundleSize,
     assertSignedArtifact,
+    githubAttestationVerificationArguments,
     parseGithubReleaseMetadata,
+    prepareLocalUpgradeBundle,
     runGithubCli,
     serializeAttestationBundles,
     settleLocalBundleDownloads,
     type LocalUpgradeFile,
 } from "./local-upgrade-bundle";
 import { RELEASE_BUNDLE_SIZE_LIMITS } from "../../../../management-api/src/release-manifest";
+import {
+    SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_FILENAME,
+    SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_JSONL,
+} from "../../../../management-api/src/sigstore-trusted-root";
+import * as sigstoreTrustedRoot from "../../../../management-api/src/sigstore-trusted-root";
 
 const RELEASE_TAG = "management-api-v0.50.31";
 
@@ -153,10 +161,91 @@ describe("local upgrade download trust boundary", () => {
     test("requires every strict offline verification flag from the local gh", async () => {
         await withFakeGithubCli([
             "#!/usr/bin/env bash",
-            "printf '%s\\n' --bundle --signer-workflow --source-ref --source-digest --deny-self-hosted-runners",
+            "printf '%s\\n' --bundle --signer-workflow --source-ref --source-digest --deny-self-hosted-runners --custom-trusted-root",
         ].join("\n"), async () => {
             await expect(assertLocalGithubVerifier()).resolves.toBeUndefined();
         });
+    });
+
+    test("rejects a local verifier without custom trusted-root support", async () => {
+        await withFakeGithubCli([
+            "#!/usr/bin/env bash",
+            "printf '%s\\n' --bundle --signer-workflow --source-ref --source-digest --deny-self-hosted-runners",
+        ].join("\n"), async () => {
+            await expect(assertLocalGithubVerifier()).rejects.toThrow("current gh attestation verifier");
+        });
+    });
+
+    test("uses the same fixed trusted root for every local attestation verification", () => {
+        const trustedRootPath = "/private/trusted_root.jsonl";
+        const arguments_ = githubAttestationVerificationArguments({
+            artifactPath: "/bundle/SUPACLOUD-RELEASE.json",
+            bundlePath: "/bundle/SUPACLOUD-RELEASE.attestation.jsonl",
+            trustedRootPath,
+            manifest: { source: { commit: "a".repeat(40) } } as never,
+        });
+
+        expect(arguments_).toContain("--custom-trusted-root");
+        expect(arguments_[arguments_.indexOf("--custom-trusted-root") + 1]).toBe(trustedRootPath);
+        expect(arguments_.filter(argument => argument === "--custom-trusted-root")).toHaveLength(1);
+    });
+
+    test("fails closed when the pinned local trusted root is missing, altered, linked, or too permissive", () => {
+        const fixtureRoot = mkdtempSync(join(tmpdir(), "supacloud-admin-trusted-root-"));
+        const trustedRootDirectory = join(fixtureRoot, "verification");
+        const trustedRootPath = join(trustedRootDirectory, SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_FILENAME);
+        mkdirSync(trustedRootDirectory, { mode: 0o700 });
+        chmodSync(trustedRootDirectory, 0o700);
+        try {
+            expect(() => assertLocalTrustedRootDirectory(trustedRootDirectory)).toThrow("strict file allowlist");
+
+            writeFileSync(trustedRootPath, SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_JSONL, { mode: 0o600 });
+            chmodSync(trustedRootPath, 0o600);
+            expect(assertLocalTrustedRootDirectory(trustedRootDirectory)).toBe(trustedRootPath);
+
+            writeFileSync(trustedRootPath, `${SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_JSONL} `);
+            expect(() => assertLocalTrustedRootDirectory(trustedRootDirectory)).toThrow("pinned size and digest");
+
+            writeFileSync(trustedRootPath, SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_JSONL);
+            chmodSync(trustedRootPath, 0o644);
+            expect(() => assertLocalTrustedRootDirectory(trustedRootDirectory)).toThrow("exact mode 0600");
+
+            rmSync(trustedRootPath);
+            const linkedRoot = join(fixtureRoot, "linked-root.jsonl");
+            writeFileSync(linkedRoot, SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_JSONL, { mode: 0o600 });
+            symlinkSync(linkedRoot, trustedRootPath);
+            expect(() => assertLocalTrustedRootDirectory(trustedRootDirectory)).toThrow("without links");
+        } finally {
+            rmSync(fixtureRoot, { recursive: true, force: true });
+        }
+    });
+
+    test("removes the prepared bundle layout when trusted-root setup fails", async () => {
+        const existingLayouts = new Set(
+            readdirSync(tmpdir()).filter(name => name.startsWith("supacloud-admin-upgrade-")),
+        );
+        const setupFailure = new Error("trusted-root setup failed");
+        const trustedRootSetup = spyOn(sigstoreTrustedRoot, "withSigstoreVerificationDirectory")
+            .mockRejectedValue(setupFailure);
+        try {
+            await withFakeGithubCli([
+                "#!/usr/bin/env bash",
+                "printf '%s\\n' --bundle --signer-workflow --source-ref --source-digest --deny-self-hosted-runners --custom-trusted-root",
+            ].join("\n"), async () => {
+                await expect(prepareLocalUpgradeBundle({
+                    architecture: "amd64",
+                    managementVersion: "0.50.33",
+                    edgeRuntimeVersion: "0.16.9",
+                    verifierProvisioning: "installed",
+                })).rejects.toBe(setupFailure);
+            });
+        } finally {
+            trustedRootSetup.mockRestore();
+        }
+        const leakedLayouts = readdirSync(tmpdir()).filter(name => (
+            name.startsWith("supacloud-admin-upgrade-") && !existingLayouts.has(name)
+        ));
+        expect(leakedLayouts).toEqual([]);
     });
 
     test("rejects a local gh verifier carrying special permission bits", async () => {
