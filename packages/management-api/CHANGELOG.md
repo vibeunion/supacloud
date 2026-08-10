@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.50.32](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.31...management-api-v0.50.32) (2026-08-10)
+
+
+### Bug Fixes
+
+* **admin:** add verified local upgrade transport ([#775](https://github.com/zuohuadong/supacloud/issues/775)) ([b4bfa99](https://github.com/zuohuadong/supacloud/commit/b4bfa99fa3fca2b4cb75057148c5f867d46bef47))
+* **admin:** harden local upgrade reconciliation ([#778](https://github.com/zuohuadong/supacloud/issues/778)) ([2404912](https://github.com/zuohuadong/supacloud/commit/240491228fb63de8a9544153d6f9d1ae0d18e3f0))
+
 ## [0.50.31](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.30...management-api-v0.50.31) (2026-08-10)
 
 
