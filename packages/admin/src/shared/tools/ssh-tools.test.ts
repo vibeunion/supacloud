@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
-import { buildRootUpgradeScript, registerSshTools } from "./ssh-tools";
+import { buildOfficialUpgradeCommand, buildRootUpgradeScript, registerSshTools } from "./ssh-tools";
 import { parseToolArguments } from "../schema";
 import type { ToolSchema } from "../schema";
 
@@ -108,6 +111,55 @@ function captureSshTool(ssh: FakeSsh): {
         parse: (args) => parseToolArguments(registeredSchema, args),
         invoke: (args) => handler!(parseToolArguments(registeredSchema, args)),
     };
+}
+
+const UPGRADE_SIGNALS = ["HUP", "INT", "TERM"] as const;
+const RELEASE_ASSETS_SCRIPT = join(import.meta.dir, "../../../../../scripts/lib/release_assets.sh");
+
+function writeExecutableShell(filePath: string, shellSource: string): void {
+    writeFileSync(filePath, shellSource);
+    chmodSync(filePath, 0o755);
+}
+
+function writeFakeGh(filePath: string, version: string): void {
+    writeExecutableShell(filePath, [
+        "#!/bin/sh",
+        `if [ \"$1\" = \"--version\" ]; then echo \"gh version ${version}\"; exit 0; fi`,
+        "if [ \"$1 $2 $3\" = \"attestation verify --help\" ]; then echo '--bundle --signer-workflow --source-ref'; exit 0; fi",
+        "exit 1",
+        "",
+    ].join("\n"));
+}
+
+function rootScriptThroughProxySetup(rootScript: string): string {
+    const scriptLines = rootScript.split("\n");
+    const proxySetupIndex = scriptLines.findIndex(line => line.includes("SUPACLOUD_GITHUB_PROXY"));
+    if (proxySetupIndex < 0) throw new Error("Root upgrade script lacks GitHub proxy setup");
+    return scriptLines.slice(0, proxySetupIndex + 1).join("\n");
+}
+
+function rootScriptThroughHelperSource(rootScript: string, continuationPath: string): string {
+    const scriptLines = rootScript.split("\n");
+    const stagedSetupIndex = scriptLines.indexOf("STAGED_MANAGEMENT=''");
+    const helperSourceIndex = scriptLines.findIndex(line => line.startsWith("source "));
+    if (stagedSetupIndex < 0 || helperSourceIndex < stagedSetupIndex) {
+        throw new Error("Root upgrade script lacks staged Management setup");
+    }
+    return [scriptLines[0], ...scriptLines.slice(stagedSetupIndex, helperSourceIndex + 1),
+        `touch '${continuationPath}'`].join("\n");
+}
+
+function rootScriptVerifierBootstrap(rootScript: string): string {
+    const scriptLines = rootScript.split("\n");
+    const securityUnsetIndex = scriptLines.findIndex(line => line.startsWith("unset SUPACLOUD_ALLOW_UNVERIFIED_RELEASE"));
+    const proxySetupIndex = scriptLines.findIndex(line => line.includes("SUPACLOUD_GITHUB_PROXY"));
+    const helperSourceIndex = scriptLines.findIndex(line => line.startsWith("source "));
+    const verifierGateIndex = scriptLines.findIndex(line => line.startsWith("supacloud_attestation_verifier_available ||"));
+    if ([securityUnsetIndex, proxySetupIndex, helperSourceIndex, verifierGateIndex].some(index => index < 0)) {
+        throw new Error("Root upgrade script lacks verifier bootstrap boundaries");
+    }
+    return [scriptLines[0], ...scriptLines.slice(securityUnsetIndex, proxySetupIndex + 1),
+        ...scriptLines.slice(helperSourceIndex, verifierGateIndex + 1)].join("\n");
 }
 
 describe("ssh admin tool", () => {
@@ -240,11 +292,109 @@ describe("ssh admin tool", () => {
         }
     });
 
-    test("direct proxy mode is represented by an unset helper proxy", async () => {
+    test("direct proxy mode clears singular and plural remote proxy fallbacks", async () => {
         const ssh = new FakeSsh();
         await captureSshTool(ssh).invoke({ action: "upgrade", github_proxy: "direct" });
         expect(ssh.commands[0]).toContain("unset SUPACLOUD_GITHUB_PROXY");
+        expect(ssh.commands[0]).toContain("SUPACLOUD_GITHUB_PROXIES");
         expect(ssh.commands[0]).not.toContain("SUPACLOUD_GITHUB_PROXY='direct'");
+
+        const rootScript = buildRootUpgradeScript({ helperPath: "/tmp/release-assets.sh" });
+        const proxyProbe = [rootScriptThroughProxySetup(rootScript),
+            "test -z \"${SUPACLOUD_GITHUB_PROXIES+x}\""].join("\n");
+        const execution = Bun.spawnSync(["/bin/bash", "-c", proxyProbe], {
+            env: { ...process.env, SUPACLOUD_GITHUB_PROXIES: "https://fallback.example.test" },
+        });
+        expect(execution.exitCode).toBe(0);
+    });
+
+    test("outer upgrade signals remove the helper and stop command continuation", () => {
+        for (const upgradeSignal of UPGRADE_SIGNALS) {
+            const fixtureDir = mkdtempSync(join(tmpdir(), "supacloud-admin-outer-signal-"));
+            const commandDir = join(fixtureDir, "bin");
+            const helperPath = join(fixtureDir, "release-assets.sh");
+            const continuationPath = join(fixtureDir, "continued");
+            mkdirSync(commandDir);
+            try {
+                writeExecutableShell(join(commandDir, "id"), "#!/bin/sh\nprintf '0\\n'\n");
+                writeExecutableShell(join(commandDir, "bash"),
+                    `#!/bin/sh\nkill -${upgradeSignal} \"$PPID\"\nexit 0\n`);
+                writeFileSync(helperPath, "fixture");
+                const command = `${buildOfficialUpgradeCommand({ helperPath })}; touch '${continuationPath}'`;
+                const execution = Bun.spawnSync(["/bin/bash", "-c", command], {
+                    env: { ...process.env, PATH: `${commandDir}:${process.env.PATH ?? ""}` },
+                });
+                expect(execution.exitCode).not.toBe(0);
+                expect(existsSync(helperPath)).toBe(false);
+                expect(existsSync(continuationPath)).toBe(false);
+            } finally {
+                rmSync(fixtureDir, { recursive: true, force: true });
+            }
+        }
+    }, { timeout: 15_000 });
+
+    test("staged Management signals remove the binary and stop script continuation", () => {
+        for (const upgradeSignal of UPGRADE_SIGNALS) {
+            const fixtureDir = mkdtempSync(join(tmpdir(), "supacloud-admin-staged-signal-"));
+            const helperPath = join(fixtureDir, "release-assets.sh");
+            const stagedManagementPath = join(fixtureDir, "staged-management");
+            const continuationPath = join(fixtureDir, "continued");
+            const helperContinuationPath = join(fixtureDir, "helper-continued");
+            try {
+                writeFileSync(stagedManagementPath, "fixture");
+                writeFileSync(helperPath, [
+                    `STAGED_MANAGEMENT='${stagedManagementPath}'`,
+                    `kill -${upgradeSignal} \"$$\"`,
+                    `touch '${helperContinuationPath}'`,
+                ].join("\n"));
+                const rootScript = buildRootUpgradeScript({ helperPath });
+                const execution = Bun.spawnSync(["/bin/bash", "-c",
+                    rootScriptThroughHelperSource(rootScript, continuationPath)]);
+                expect(execution.exitCode).not.toBe(0);
+                expect(existsSync(stagedManagementPath)).toBe(false);
+                expect(existsSync(helperContinuationPath)).toBe(false);
+                expect(existsSync(continuationPath)).toBe(false);
+            } finally {
+                rmSync(fixtureDir, { recursive: true, force: true });
+            }
+        }
+    });
+
+    test("missing and outdated gh are replaced through the pinned verifier bootstrap", async () => {
+        for (const initialGhVersion of [null, "2.50.9"] as const) {
+            const fixtureDir = mkdtempSync(join(tmpdir(), "supacloud-admin-gh-bootstrap-"));
+            const currentBinDir = join(fixtureDir, "current-bin");
+            const legacyBinDir = join(fixtureDir, "legacy-bin");
+            const helperPath = join(fixtureDir, "release-assets-wrapper.sh");
+            const installTargetRecord = join(fixtureDir, "install-target");
+            const pinnedGhSource = join(fixtureDir, "pinned-gh");
+            mkdirSync(currentBinDir);
+            mkdirSync(legacyBinDir);
+            try {
+                if (initialGhVersion) writeFakeGh(join(legacyBinDir, "gh"), initialGhVersion);
+                writeFakeGh(pinnedGhSource, "2.96.0");
+                writeFileSync(helperPath, [
+                    `source '${RELEASE_ASSETS_SCRIPT}'`,
+                    "test -z \"${SUPACLOUD_ALLOW_UNVERIFIED_RELEASE+x}\" || return 91",
+                    "supacloud_install_pinned_gh() {",
+                    `  printf '%s\\n' \"$1\" > '${installTargetRecord}'`,
+                    `  install -m 0755 '${pinnedGhSource}' '${currentBinDir}/gh'`,
+                    "}",
+                ].join("\n"));
+                const rootScript = buildRootUpgradeScript({ helperPath });
+                const execution = Bun.spawnSync(["/bin/bash", "-c", rootScriptVerifierBootstrap(rootScript)], {
+                    env: {
+                        ...process.env,
+                        PATH: `${currentBinDir}:${legacyBinDir}:/usr/bin:/bin`,
+                        SUPACLOUD_ALLOW_UNVERIFIED_RELEASE: "true",
+                    },
+                });
+                expect(execution.exitCode).toBe(0);
+                await expect(Bun.file(installTargetRecord).text()).resolves.toBe("/usr/local/bin/gh\n");
+            } finally {
+                rmSync(fixtureDir, { recursive: true, force: true });
+            }
+        }
     });
 
     test("component upgrade bootstraps pinned verification and one capable transaction", async () => {

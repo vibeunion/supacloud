@@ -129,6 +129,13 @@ function componentPreflightCommands(request: UpgradeRequest): string[] {
     ] : [];
 }
 
+function signalSafeCleanupTraps(cleanupCommand: string): string[] {
+    return [
+        `trap '${cleanupCommand}' EXIT`,
+        `trap 'trap - EXIT HUP INT TERM; ${cleanupCommand}; exit 1' HUP INT TERM`,
+    ];
+}
+
 export function buildRootUpgradeScript(request: UpgradeRequest): string {
     const envAssignments = upgradeEnvAssignments(request);
     return [
@@ -137,12 +144,14 @@ export function buildRootUpgradeScript(request: UpgradeRequest): string {
         "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
         "export PATH",
         "unset SUPACLOUD_ALLOW_UNVERIFIED_RELEASE SUPACLOUD_GITHUB_REPOSITORY SUPACLOUD_RELEASES_API SUPACLOUD_ATTESTATION_SIGNER_WORKFLOW SUPACLOUD_GH_VERSION SUPACLOUD_GH_MIN_VERSION SUPACLOUD_GH_AMD64_SHA256 SUPACLOUD_GH_ARM64_SHA256 GH_PROXY",
-        request.githubProxy ? `export SUPACLOUD_GITHUB_PROXY=${quoteEnvValue(request.githubProxy)}` : "unset SUPACLOUD_GITHUB_PROXY",
+        request.githubProxy
+            ? `export SUPACLOUD_GITHUB_PROXY=${quoteEnvValue(request.githubProxy)}`
+            : "unset SUPACLOUD_GITHUB_PROXY SUPACLOUD_GITHUB_PROXIES",
         "for tool in curl jq file sha256sum tar; do command -v \"$tool\" >/dev/null 2>&1 || { echo \"Required upgrade tool is missing: $tool\" >&2; exit 127; }; done",
         "test -x /usr/local/bin/supacloud || { echo 'SupaCloud binary not found at /usr/local/bin/supacloud; run ssh install first.' >&2; exit 127; }",
         ...componentPreflightCommands(request),
         "STAGED_MANAGEMENT=''",
-        "trap 'test -z \"$STAGED_MANAGEMENT\" || rm -f \"$STAGED_MANAGEMENT\"' EXIT HUP INT TERM",
+        ...signalSafeCleanupTraps('test -z "$STAGED_MANAGEMENT" || rm -f "$STAGED_MANAGEMENT"'),
         `source ${quoteEnvValue(request.helperPath)}`,
         "if ! supacloud_attestation_verifier_available; then supacloud_install_pinned_gh /usr/local/bin/gh; fi",
         "supacloud_attestation_verifier_available || { echo 'Pinned GitHub attestation verifier is unavailable' >&2; exit 1; }",
@@ -153,11 +162,14 @@ export function buildRootUpgradeScript(request: UpgradeRequest): string {
 
 export function buildOfficialUpgradeCommand(request: UpgradeRequest): string {
     const rootScript = buildRootUpgradeScript(request);
-    return `set -e; trap 'rm -f ${request.helperPath}' EXIT HUP INT TERM; ` +
+    return [
+        "set -e",
+        ...signalSafeCleanupTraps(`rm -f ${request.helperPath}`),
         "if [ \"$(id -u)\" -eq 0 ]; then " +
-        `bash -c ${quoteEnvValue(rootScript)}; ` +
-        "else sudo -n true; " +
-        `sudo -n bash -c ${quoteEnvValue(rootScript)}; fi`;
+            `bash -c ${quoteEnvValue(rootScript)}; ` +
+            "else sudo -n true; " +
+            `sudo -n bash -c ${quoteEnvValue(rootScript)}; fi`,
+    ].join("; ");
 }
 
 async function removeRemoteUpgradeHelper(ssh: SshTransport, helperPath: string): Promise<void> {
