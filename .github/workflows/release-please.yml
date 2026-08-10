@@ -371,7 +371,7 @@ jobs:
         run: |
           bun install --frozen-lockfile
           bun run build
-          npm publish --provenance --access public
+          node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
       - name: Publish SupaCloud Lite to NPM
         if: ${{ needs.release-please.outputs.supacloud_lite_released == 'true' }}
@@ -381,7 +381,7 @@ jobs:
         run: |
           bun install --frozen-lockfile
           bun run check
-          npm publish --provenance --access public
+          node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
       - name: Publish cli to NPM
         if: ${{ needs.release-please.outputs.cli_released == 'true' }}
@@ -389,7 +389,7 @@ jobs:
         run: |
           bun install --frozen-lockfile
           bun run build
-          npm publish --provenance --access public
+          node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
       - name: Publish admin to NPM
         if: ${{ needs.release-please.outputs.admin_released == 'true' }}
@@ -397,24 +397,95 @@ jobs:
         run: |
           bun install --frozen-lockfile
           bun run build
-          npm publish --provenance --access public
+          node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
       - name: Publish supacloud (umbrella) to NPM
         if: ${{ needs.release-please.outputs.supacloud_released == 'true' }}
         working-directory: packages/supacloud
         run: |
-          # CLI/Admin 在同一 job 中先发布，但 registry 索引可能尚未完成传播；旧锁文件也不能解析新版本。
-          # 使用同一 release commit 中的 sibling 包构建，发布时 package.json 仍保留正常的 registry 依赖。
-          bun -e '
-            const pkg = await Bun.file("package.json").json();
-            const cli = await Bun.file("../cli/package.json").json();
-            const admin = await Bun.file("../admin/package.json").json();
-            if (pkg.dependencies["@supacloud/cli"] !== `^${cli.version}` ||
-                pkg.dependencies["@supacloud/admin"] !== `^${admin.version}`) {
-              throw new Error("supacloud dependency versions do not match local release candidates");
-            }
-          '
-          bun add --no-save '@supacloud/cli@file:../cli' '@supacloud/admin@file:../admin'
-          git diff --exit-code -- package.json bun.lock
+          bun install --frozen-lockfile --registry https://registry.npmjs.org
           bun run build
-          npm publish --provenance --access public
+          node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
+
+  sync-supacloud-dependencies:
+    needs: [release-please, publish-npm]
+    if: ${{ always() && needs.publish-npm.result == 'success' && (needs.release-please.outputs.cli_released == 'true' || needs.release-please.outputs.admin_released == 'true') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24.x'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Wait for published dependencies
+        run: |
+          cli_version="$(node -p "require('./packages/cli/package.json').version")"
+          admin_version="$(node -p "require('./packages/admin/package.json').version")"
+          for spec in "@supacloud/cli@$cli_version" "@supacloud/admin@$admin_version"; do
+            published=""
+            for attempt in $(seq 1 12); do
+              published="$(npm view "$spec" version 2>/dev/null || true)"
+              if [[ "$published" == "${spec##*@}" ]]; then
+                break
+              fi
+              if [[ "$attempt" -lt 12 ]]; then
+                sleep 5
+              fi
+            done
+            if [[ "$published" != "${spec##*@}" ]]; then
+              echo "Published package is not visible: $spec" >&2
+              exit 1
+            fi
+          done
+
+      - name: Synchronize umbrella dependencies and lockfile
+        run: |
+          node .github/scripts/sync-supacloud-dependencies.mjs
+          cd packages/supacloud
+          bun install --lockfile-only --registry https://registry.npmjs.org
+          bun install --frozen-lockfile --registry https://registry.npmjs.org
+          git diff --check -- package.json bun.lock
+
+      - name: Open dependency synchronization PR
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+        run: |
+          if git diff --quiet -- packages/supacloud/package.json packages/supacloud/bun.lock; then
+            echo "SupaCloud umbrella dependencies are already synchronized."
+            exit 0
+          fi
+
+          branch="automation/sync-supacloud-dependencies"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$branch"
+          git add packages/supacloud/package.json packages/supacloud/bun.lock
+          git commit -m "fix(supacloud): sync published CLI dependencies"
+          git push --force-with-lease origin "HEAD:$branch"
+
+          existing_pr="$(gh pr list --base main --head "$branch" --state open --json number --jq '.[0].number // empty')"
+          if [[ -z "$existing_pr" ]]; then
+            gh pr create \
+              --base main \
+              --head "$branch" \
+              --title "fix(supacloud): sync published CLI dependencies" \
+              --body "Synchronize the umbrella package with the CLI and Admin versions that have completed trusted npm publication, including the reproducible Bun lockfile."
+          else
+            echo "Updated dependency synchronization PR #$existing_pr."
+          fi

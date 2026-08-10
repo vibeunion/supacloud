@@ -43,26 +43,12 @@
     "packages/cli": {
       "release-type": "node",
       "component": "cli",
-      "changelog-path": "CHANGELOG.md",
-      "extra-files": [
-        {
-          "type": "json",
-          "path": "/packages/supacloud/package.json",
-          "jsonpath": "$.dependencies['@supacloud/cli']"
-        }
-      ]
+      "changelog-path": "CHANGELOG.md"
     },
     "packages/admin": {
       "release-type": "node",
       "component": "admin",
-      "changelog-path": "CHANGELOG.md",
-      "extra-files": [
-        {
-          "type": "json",
-          "path": "/packages/supacloud/package.json",
-          "jsonpath": "$.dependencies['@supacloud/admin']"
-        }
-      ]
+      "changelog-path": "CHANGELOG.md"
     },
     "packages/supacloud": {
       "release-type": "node",

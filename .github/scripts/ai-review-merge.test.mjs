@@ -147,17 +147,27 @@ describe('trusted review workflow', () => {
     assert.match(workflow, /xcaddy\/cmd\/xcaddy@\$\{XCADDY_VERSION\}/);
     assert.doesNotMatch(workflow, /xcaddy\/cmd\/xcaddy@latest/);
     for (const contents of [workflow, releaseWorkflow]) {
-      for (const line of contents.split(/\r?\n/).filter((candidate) => candidate.includes('bun install'))) {
+      const installLines = contents.split(/\r?\n/).filter((candidate) => candidate.includes('bun install'));
+      const lockfileGenerationLines = installLines.filter((line) => line.includes('--lockfile-only'));
+      for (const line of installLines.filter((candidate) => !candidate.includes('--lockfile-only'))) {
         assert.match(line, /bun install --frozen-lockfile/);
+      }
+      if (contents === releaseWorkflow) {
+        assert.deepEqual(lockfileGenerationLines, [
+          '          bun install --lockfile-only --registry https://registry.npmjs.org',
+        ]);
+      } else {
+        assert.deepEqual(lockfileGenerationLines, []);
       }
     }
     assert.doesNotMatch(releaseWorkflow, /bunx\s+npm\s+publish/);
     assert.match(releaseWorkflow, /npm --version/);
     assert.equal(
-      releaseWorkflow.match(/npm publish --provenance --access public/g)?.length,
+      releaseWorkflow.match(/node "\$GITHUB_WORKSPACE\/\.github\/scripts\/publish-npm-package\.mjs"/g)?.length,
       5,
-      'all npm packages must publish with the setup-node npm binary',
+      'all npm packages must use the retry-safe publisher',
     );
+    assert.doesNotMatch(releaseWorkflow, /^\s+npm publish/m);
     for (const packageName of ['management-api', 'web-console', 'supacloud-js', 'edge-runtime', 'admin', 'cli', 'supacloud']) {
       assert.equal(
         existsSync(new URL(`../../packages/${packageName}/bun.lock`, import.meta.url)),
