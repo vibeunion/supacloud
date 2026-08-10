@@ -124,7 +124,11 @@ verify_setup_checkout() {
         return 1
     fi
     if [[ "$require_installer_files" == "true" ]]; then
-        for helper in scripts/lib/install_config.sh scripts/lib/release_assets.sh install.sh; do
+        for helper in \
+            scripts/lib/install_config.sh \
+            scripts/lib/release_assets.sh \
+            packages/management-api/src/assets/sigstore-public-good-trusted-root.jsonl \
+            install.sh; do
             if ! git -C "$install_dir" ls-files --error-unmatch "$helper" >/dev/null 2>&1 \
                 || [[ ! -f "$install_dir/$helper" ]]; then
                 log_error "Trusted checkout is missing tracked installer file: $helper"

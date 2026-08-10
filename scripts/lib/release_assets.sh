@@ -7,6 +7,10 @@ SUPACLOUD_GH_VERSION="${SUPACLOUD_GH_VERSION:-2.96.0}"
 SUPACLOUD_GH_MIN_VERSION="${SUPACLOUD_GH_MIN_VERSION:-2.68.0}"
 SUPACLOUD_GH_AMD64_SHA256="${SUPACLOUD_GH_AMD64_SHA256:-83d5c2ccad5498f58bf6368acb1ab32588cf43ab3a4b1c301bf36328b1c8bd60}"
 SUPACLOUD_GH_ARM64_SHA256="${SUPACLOUD_GH_ARM64_SHA256:-06f86ec7103d41993b76cd78072f43595c34aaa56506d971d9860e67140bf909}"
+SUPACLOUD_RELEASE_ASSETS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SUPACLOUD_ATTESTATION_TRUSTED_ROOT_DEFAULT="${SUPACLOUD_RELEASE_ASSETS_DIR}/../../packages/management-api/src/assets/sigstore-public-good-trusted-root.jsonl"
+readonly SUPACLOUD_ATTESTATION_TRUSTED_ROOT_SHA256="3c2cc7f357dc064ec527fdcd78da6e9245c21a381e1abaa0f2b62b186bcac1a1"
+readonly SUPACLOUD_ATTESTATION_TRUSTED_ROOT_SIZE="5748"
 
 supacloud_curl_release_json() {
     local url="$1"
@@ -391,19 +395,48 @@ supacloud_fetch_attestation_bundle() {
     fi
 }
 
+supacloud_attestation_trusted_root_available() {
+    local trusted_root="${SUPACLOUD_ATTESTATION_TRUSTED_ROOT:-$SUPACLOUD_ATTESTATION_TRUSTED_ROOT_DEFAULT}"
+    local actual_size actual_sha256
+    [[ "$trusted_root" == /* && -f "$trusted_root" && ! -L "$trusted_root" ]] || return 1
+    actual_size=$(wc -c < "$trusted_root" | tr -d '[:space:]') || return 1
+    [[ "$actual_size" == "$SUPACLOUD_ATTESTATION_TRUSTED_ROOT_SIZE" ]] || return 1
+    actual_sha256=$(sha256sum "$trusted_root" | awk '{print $1}') || return 1
+    [[ "$actual_sha256" == "$SUPACLOUD_ATTESTATION_TRUSTED_ROOT_SHA256" ]] || return 1
+    [[ "$(wc -l < "$trusted_root" | tr -d '[:space:]')" == "1" ]] || return 1
+    jq -e 'type == "object" and .mediaType == "application/vnd.dev.sigstore.trustedroot+json;version=0.1"' \
+        "$trusted_root" >/dev/null 2>&1
+}
+
+supacloud_prepare_attestation_trusted_root() {
+    local destination="$1"
+    local trusted_root="${SUPACLOUD_ATTESTATION_TRUSTED_ROOT:-$SUPACLOUD_ATTESTATION_TRUSTED_ROOT_DEFAULT}"
+    supacloud_attestation_trusted_root_available || {
+        echo "Pinned Sigstore Public Good trusted root is missing or invalid" >&2
+        return 1
+    }
+    jq -ce . "$trusted_root" > "$destination" || return 1
+    chmod 600 "$destination"
+    [[ "$(wc -c < "$destination" | tr -d '[:space:]')" == "$SUPACLOUD_ATTESTATION_TRUSTED_ROOT_SIZE" ]] || return 1
+    [[ "$(sha256sum "$destination" | awk '{print $1}')" == "$SUPACLOUD_ATTESTATION_TRUSTED_ROOT_SHA256" ]]
+}
+
 supacloud_verify_attestation() (
     local artifact_file="$1"
     if supacloud_attestation_verifier_available; then
-        local verification_output bundle_dir bundle_file
+        local verification_output bundle_dir bundle_file trusted_root_file
         bundle_dir=$(mktemp -d "${TMPDIR:-/tmp}/supacloud-attestation.XXXXXX") || return 1
         trap 'rm -rf -- "$bundle_dir"' EXIT
         trap 'trap - EXIT HUP INT TERM; rm -rf -- "$bundle_dir"; exit 1' HUP INT TERM
         bundle_file="${bundle_dir}/bundle.jsonl"
+        trusted_root_file="${bundle_dir}/trusted_root.jsonl"
         if ! supacloud_fetch_attestation_bundle "$artifact_file" "$bundle_file"; then
             return 1
         fi
+        supacloud_prepare_attestation_trusted_root "$trusted_root_file" || return 1
         if ! verification_output=$(gh attestation verify "$artifact_file" \
             --bundle "$bundle_file" \
+            --custom-trusted-root "$trusted_root_file" \
             --repo "$SUPACLOUD_GITHUB_REPOSITORY" \
             --signer-workflow "$SUPACLOUD_ATTESTATION_SIGNER_WORKFLOW" \
             --source-ref "refs/heads/main" \
@@ -427,6 +460,7 @@ supacloud_verify_attestation() (
 
 supacloud_attestation_verifier_available() {
     local version help
+    supacloud_attestation_trusted_root_available || return 1
     command -v gh >/dev/null 2>&1 || return 1
     version=$(supacloud_gh_version)
     [[ -n "$version" ]] || return 1
@@ -435,6 +469,7 @@ supacloud_attestation_verifier_available() {
     grep -Eq -- '(^|[[:space:]])--bundle([=[:space:]]|$)' <<< "$help" || return 1
     grep -Eq -- '(^|[[:space:]])--signer-workflow([=[:space:]]|$)' <<< "$help" || return 1
     grep -Eq -- '(^|[[:space:]])--source-ref([=[:space:]]|$)' <<< "$help" || return 1
+    grep -Eq -- '(^|[[:space:]])--custom-trusted-root([=[:space:]]|$)' <<< "$help" || return 1
     grep -Eq -- '(^|[[:space:]])--deny-self-hosted-runners([=[:space:]]|$)' <<< "$help"
 }
 
