@@ -179,6 +179,22 @@ describe("supacloud-cli process contract", () => {
         expect(result.stdout + result.stderr).toContain("project-scoped API context");
     });
 
+    test("does not expose admin project creation through the project CLI", async () => {
+        const response = await runProjectCli(
+            ["project", "create", "--name", "unauthorized-project", "--domain", "example.com"],
+            {
+                SUPACLOUD_API_URL: "http://127.0.0.1:1",
+                SUPACLOUD_API_TOKEN: "test-token",
+                SUPACLOUD_PROJECT_REF: "abc123",
+            },
+        );
+
+        expect(response.exitCode).toBe(1);
+        expect(response.stderr).toContain("Invalid arguments");
+        expect(response.stderr).toContain("action");
+        expect(response.stdout).toBe("");
+    });
+
     test.each([
         ["separate flag value", ["--log_type", "database"]],
         ["equals flag value", ["--log_type=database"]],
