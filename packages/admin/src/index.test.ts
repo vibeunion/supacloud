@@ -181,6 +181,16 @@ describe("supacloud-admin process contract", () => {
         expect(result.output).toContain("SUPACLOUD_API_URL and SUPACLOUD_API_TOKEN");
     });
 
+    test("documents every project create domain flag without API context", async () => {
+        const execution = await runAdminCli(["project", "create", "--help"]);
+
+        expect(execution.exitCode).toBe(0);
+        expect(execution.output).toContain("--domain");
+        expect(execution.output).toContain("--api_domain");
+        expect(execution.output).toContain("--auth_domain");
+        expect(execution.output).toContain("--studio_domain");
+    });
+
     test("surfaces every sanitized cause when an operation and cleanup both fail", async () => {
         const result = await runAggregateFailureCli();
 

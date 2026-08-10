@@ -18,11 +18,6 @@ import packageMetadata from "../package.json" with { type: "json" };
 type ToolEntry = { schema: any; callback: (args: any) => Promise<any> };
 type ToolMap = Record<string, ToolEntry>;
 
-const adminProjectActionSchema = stringEnum([
-    "list", "create", "get", "delete", "pause", "restore",
-    "restart", "settings", "update_settings", "api_keys",
-    "health", "logs", "tasks",
-]);
 const platformActionSchema = stringEnum([
     "metrics", "list_backups", "create_backup",
     "network", "update_network",
@@ -81,7 +76,7 @@ EXAMPLES
   supacloud-admin ssh ping
   supacloud-admin ssh versions
   supacloud-admin ssh install --public_domain api.example.com --studio_domain studio.example.com
-  supacloud-admin project create --name my-app
+  supacloud-admin project create --name my-app --domain example.com
   supacloud-admin project list
   supacloud-admin platform metrics
   supacloud-admin gateway routes --ref abc123
@@ -119,8 +114,11 @@ export function createAdminTools(context: ResolvedContext = resolveSupaCloudCont
     };
 
     const registerAdminHelp = () => {
+        const projectHelpTool = captureTools((server) =>
+            registerAdminProjectCliTools(server as any, {} as HttpTransport)
+        ).project;
         tools.project = {
-            schema: { action: adminProjectActionSchema },
+            schema: projectHelpTool.schema,
             callback: async () => ({
                 isError: true,
                 content: [

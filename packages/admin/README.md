@@ -29,7 +29,7 @@ npx @supacloud/admin status
 npx @supacloud/admin ssh ping
 npx @supacloud/admin ssh versions
 npx @supacloud/admin ssh diagnose
-npx @supacloud/admin project create --name my-app
+npx @supacloud/admin project create --name my-app --domain example.com
 npx @supacloud/admin project list
 ```
 
