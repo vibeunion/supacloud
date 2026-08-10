@@ -17,6 +17,10 @@ const SAFE_HOSTNAME = /^(?=.{1,253}$)(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0
 const SAFE_SYSTEMD_UNIT = /^[a-zA-Z0-9][a-zA-Z0-9_.@:-]{0,127}$/;
 const SAFE_DB_IDENTIFIER = /^[a-zA-Z_][a-zA-Z0-9_-]{0,62}$/;
 const MINIMUM_COMPONENT_UPGRADE_VERSION = "0.50.27";
+// Keep helper verification and cleanup outside the bounded direct transfer budget.
+const DIRECT_UPGRADE_SSH_TIMEOUT_MS = 720_000;
+// Proxy mode can exhaust each transfer once direct-first and once through the proxy.
+const PROXIED_UPGRADE_SSH_TIMEOUT_MS = 1_320_000;
 
 function hostnameSchema(fieldName: string) {
     return decodedSchema(Type.String(), Type.String({ minLength: 1, maxLength: 253 }), (value) => {
@@ -211,12 +215,13 @@ async function executeOfficialUpgrade(
     ssh: SshTransport,
     helperPath: string,
     command: string,
+    timeoutMs: number,
 ): Promise<Awaited<ReturnType<SshTransport["exec"]>>> {
     let execution: OfficialUpgradeExecution | undefined;
     let executionError: unknown;
     try {
         await ssh.uploadText(helperPath, releaseAssetsScript, 0o600);
-        execution = await ssh.exec(command, 600_000);
+        execution = await ssh.exec(command, timeoutMs);
     } catch (error: unknown) {
         executionError = error;
     }
@@ -559,7 +564,10 @@ Actions: ping, setup, install, upgrade, diagnose, exec, troubleshoot, container_
                         githubProxy,
                         helperPath,
                     });
-                    const upgradeExecution = await executeOfficialUpgrade(ssh, helperPath, cmd);
+                    const upgradeTimeoutMs = githubProxy
+                        ? PROXIED_UPGRADE_SSH_TIMEOUT_MS
+                        : DIRECT_UPGRADE_SSH_TIMEOUT_MS;
+                    const upgradeExecution = await executeOfficialUpgrade(ssh, helperPath, cmd, upgradeTimeoutMs);
                     const edgeBoundary = edgeRuntimeVersion ? "" : "\n⚠️ Edge Runtime was not upgraded; provide --edge_runtime_version for a component transaction.";
                     text = `✅ Upgrade done\n${upgradeExecution.stdout.slice(-300)}${edgeBoundary}`;
                     break;

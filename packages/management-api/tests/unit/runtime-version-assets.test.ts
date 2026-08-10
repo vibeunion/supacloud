@@ -1,6 +1,6 @@
 // @supacloud-test-isolate — compiles and validates multiple release fixtures.
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -872,7 +872,7 @@ describe("runtime companion version assets", () => {
     }
   });
 
-  test("release downloads try GitHub directly and only use an explicitly configured proxy", () => {
+  test("release transfers are bounded and try GitHub directly before an explicit proxy", () => {
     const dir = mkdtempSync(join(tmpdir(), "supacloud-curl-order-"));
     const calls = join(dir, "calls.txt");
     try {
@@ -882,16 +882,27 @@ describe("runtime companion version assets", () => {
           "-c",
           [
             "source scripts/lib/release_assets.sh",
-            "curl() { printf '%s\\n' \"$*\" >> \"$CALLS\"; return 0; }",
+            "curl() {",
+            "  printf '%s\\n' \"$*\" >> \"$CALLS\"",
+            "  output=''",
+            "  while [ \"$#\" -gt 0 ]; do",
+            "    if [ \"$1\" = -o ]; then shift; output=\"$1\"; fi",
+            "    shift",
+            "  done",
+            "  test -z \"$output\" || printf '%s\\n' '{}' > \"$output\"",
+            "}",
             "export -f curl",
+            'supacloud_fetch_release_json "https://api.github.com/repos/acme/releases"',
+            'supacloud_download_release_metadata_url "https://github.com/acme/SHA256SUMS" "$METADATA_OUTPUT"',
             'supacloud_download_url "https://github.com/acme/release" "$OUTPUT"',
-          ].join("; "),
+          ].join("\n"),
         ],
         {
           cwd: repoRoot,
           env: {
             ...process.env,
             CALLS: calls,
+            METADATA_OUTPUT: join(dir, "SHA256SUMS"),
             OUTPUT: join(dir, "artifact"),
             GH_PROXY: "https://proxy.example.test",
           },
@@ -900,9 +911,101 @@ describe("runtime companion version assets", () => {
       );
       expect(result.status, result.stderr).toBe(0);
       const invocations = readFileSync(calls, "utf8").trim().split("\n");
-      expect(invocations).toHaveLength(1);
-      expect(invocations[0]).toContain("https://github.com/acme/release");
-      expect(invocations[0]).not.toContain("proxy.example.test");
+      expect(invocations).toHaveLength(3);
+      for (const metadataInvocation of invocations.slice(0, 2)) {
+        expect(metadataInvocation).toContain("--retry 1 --retry-delay 2 --retry-max-time 60");
+        expect(metadataInvocation).toContain("--connect-timeout 15 --max-time 30");
+        expect(metadataInvocation).toContain("--speed-limit 128 --speed-time 10");
+        expect(metadataInvocation).toContain("--proto =https --proto-redir =https");
+      }
+      expect(invocations[2]).toContain("--retry 1 --retry-delay 2 --retry-max-time 180");
+      expect(invocations[2]).toContain("--connect-timeout 15 --max-time 90");
+      expect(invocations[2]).toContain("--speed-limit 128 --speed-time 60");
+      expect(invocations[2]).toContain("--proto =https --proto-redir =https");
+      expect(invocations[2]).toContain("https://github.com/acme/release");
+      expect(invocations.join("\n")).not.toContain("proxy.example.test");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("release metadata falls back to the explicit proxy without exposing a partial direct response", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supacloud-curl-proxy-"));
+    const calls = join(dir, "calls.txt");
+    try {
+      const result = spawnSync("/bin/bash", ["-c", [
+        "source scripts/lib/release_assets.sh",
+        "curl() {",
+        "  printf '%s\\n' \"$*\" >> \"$CALLS\"",
+        "  curl_arguments=\"$*\"",
+        "  output=''",
+        "  while [ \"$#\" -gt 0 ]; do",
+        "    if [ \"$1\" = -o ]; then shift; output=\"$1\"; fi",
+        "    shift",
+        "  done",
+        "  case \"$curl_arguments\" in *proxy.example.test*) printf '%s\\n' '{}' > \"$output\"; return 0 ;; esac",
+        "  printf '%s' '{partial' > \"$output\"",
+        "  return 28",
+        "}",
+        "export -f curl",
+        'supacloud_fetch_release_json "https://api.github.com/repos/acme/releases"',
+      ].join("\n")], {
+        cwd: repoRoot,
+        env: {
+          ...process.env,
+          CALLS: calls,
+          GH_PROXY: "https://proxy.example.test",
+          SUPACLOUD_GITHUB_PROXY: "",
+        },
+        encoding: "utf8",
+      });
+
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toBe("{}\n");
+      const invocations = readFileSync(calls, "utf8").trim().split("\n");
+      expect(invocations).toHaveLength(2);
+      expect(invocations[0]).toContain("https://api.github.com/repos/acme/releases");
+      expect(invocations[1]).toContain("https://proxy.example.test/https://api.github.com/repos/acme/releases");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("release download signals remove partial files and stop continuation", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supacloud-release-signal-"));
+    const destination = join(dir, "staged-management");
+    const continuation = join(dir, "continued");
+    const release = JSON.stringify({
+      tag_name: "management-api-v0.50.29",
+      assets: [
+        { name: "supacloud-linux-amd64", browser_download_url: "https://example.test/management" },
+        { name: "SHA256SUMS", browser_download_url: "https://example.test/SHA256SUMS" },
+      ],
+    });
+    try {
+      const result = spawnSync("/bin/bash", ["-c", [
+        "set -e",
+        "source scripts/lib/release_assets.sh",
+        "supacloud_download_url() { printf '%s\\n' partial > \"$2\"; /bin/sh -c 'kill -TERM \"$PPID\"'; }",
+        'supacloud_download_release_asset "$RELEASE" supacloud-linux-amd64 "$DESTINATION" binary',
+        'touch "$CONTINUATION"',
+      ].join("\n")], {
+        cwd: repoRoot,
+        env: {
+          ...process.env,
+          RELEASE: release,
+          DESTINATION: destination,
+          CONTINUATION: continuation,
+          GH_PROXY: "",
+          SUPACLOUD_GITHUB_PROXY: "",
+        },
+        encoding: "utf8",
+      });
+
+      expect(result.status).not.toBe(0);
+      expect(existsSync(destination)).toBe(false);
+      expect(existsSync(continuation)).toBe(false);
+      expect(readdirSync(dir).filter(name => name.startsWith("staged-management."))).toEqual([]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
