@@ -17,6 +17,9 @@ class FakeSshClient extends EventEmitter {
     stderrOutput = Buffer.alloc(0);
     stallCommand = false;
     endCalls = 0;
+    activeChannels = 0;
+    maxConcurrentChannels = Number.POSITIVE_INFINITY;
+    peakActiveChannels = 0;
     sftpClient: FakeSftpClient | undefined;
 
     connect(options: Record<string, unknown>): this {
@@ -26,6 +29,10 @@ class FakeSshClient extends EventEmitter {
     }
 
     exec(_command: string, callback: (error: Error | undefined, stream: EventEmitter & { stderr: EventEmitter }) => void): void {
+        if (this.activeChannels >= this.maxConcurrentChannels) {
+            callback(new Error("open failed: administratively prohibited: open failed"), undefined as never);
+            return;
+        }
         const stream = new EventEmitter() as EventEmitter & { stderr: EventEmitter };
         stream.stderr = new EventEmitter();
         callback(undefined, stream);
@@ -39,6 +46,18 @@ class FakeSshClient extends EventEmitter {
 
     sftp(callback: (error: Error | undefined, sftp: FakeSftpClient) => void): void {
         if (!this.sftpClient) return callback(new Error("SFTP unavailable"), undefined as never);
+        if (this.activeChannels >= this.maxConcurrentChannels) {
+            callback(new Error("open failed: administratively prohibited: open failed"), undefined as never);
+            return;
+        }
+        this.activeChannels += 1;
+        this.peakActiveChannels = Math.max(this.peakActiveChannels, this.activeChannels);
+        let channelOpen = true;
+        this.sftpClient.onEnd = () => {
+            if (!channelOpen) return;
+            channelOpen = false;
+            this.activeChannels -= 1;
+        };
         callback(undefined, this.sftpClient);
     }
 
@@ -51,6 +70,8 @@ class FakeSftpClient {
     readonly operations: string[] = [];
     failChmod = false;
     hangFastPut = false;
+    endCalls = 0;
+    onEnd: (() => void) | undefined;
 
     fastPut(_localPath: string, remotePath: string, callback: (error?: Error | null) => void): void {
         this.operations.push(`put:${remotePath}`);
@@ -75,6 +96,11 @@ class FakeSftpClient {
     unlink(remotePath: string, callback: (error?: Error | null) => void): void {
         this.operations.push(`unlink:${remotePath}`);
         queueMicrotask(() => callback());
+    }
+
+    end(): void {
+        this.endCalls += 1;
+        this.onEnd?.();
     }
 }
 
@@ -263,6 +289,7 @@ describe("SshTransport audit safety", () => {
                 `chmod:${partialPath}:384`,
                 `rename:${partialPath}:/tmp/release/artifact`,
             ]);
+            expect(sftp.endCalls).toBe(1);
             expect(getAuditLog().at(-1)?.command).not.toContain(localPath);
         } finally {
             transport.close();
@@ -287,8 +314,38 @@ describe("SshTransport audit safety", () => {
                 `chmod:${partialPath}:384`,
                 `rename:${partialPath}:/tmp/private/run.sh`,
             ]);
+            expect(sftp.endCalls).toBe(1);
         } finally {
             transport.close();
+        }
+    });
+
+    test("closes every SFTP upload channel before a later exec session", async () => {
+        const fixtureDirectory = mkdtempSync(join(tmpdir(), "supacloud-sftp-channels-"));
+        const localPath = join(fixtureDirectory, "artifact");
+        writeFileSync(localPath, "release artifact");
+        const client = new FakeSshClient();
+        const sftp = new FakeSftpClient();
+        client.sftpClient = sftp;
+        client.maxConcurrentChannels = 10;
+        const transport = new SshTransport({
+            host: "server.example.com", port: 22, username: "root", hostFingerprint: TEST_HOST_FINGERPRINT,
+        }, { clientFactory: () => client as never });
+
+        try {
+            for (let uploadIndex = 0; uploadIndex < 10; uploadIndex += 1) {
+                const remotePath = `/tmp/release/artifact-${uploadIndex}`;
+                if (uploadIndex % 2 === 0) await transport.upload(localPath, remotePath);
+                else await transport.uploadText(remotePath, "release artifact");
+            }
+
+            expect((await transport.exec("hostname")).success).toBe(true);
+            expect(sftp.endCalls).toBe(10);
+            expect(client.activeChannels).toBe(0);
+            expect(client.peakActiveChannels).toBe(1);
+        } finally {
+            transport.close();
+            rmSync(fixtureDirectory, { recursive: true, force: true });
         }
     });
 
