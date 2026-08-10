@@ -47,13 +47,36 @@ describe('SupaCloud umbrella dependency sync', () => {
   });
 
   test('rejects malformed candidate versions', () => {
-    assert.throws(
-      () => syncSupacloudDependencies({
-        ...currentPackages,
-        cliPackage: { version: 'latest' },
-      }),
-      /@supacloud\/cli has an invalid version/,
-    );
+    for (const version of [
+      'latest',
+      '01.2.3',
+      '1.02.3',
+      '1.2.03',
+      '1.2.3-',
+      '1.2.3-alpha..1',
+      '1.2.3-alpha.',
+      '1.2.3-01',
+      '1.2.3+build..1',
+    ]) {
+      assert.throws(
+        () => syncSupacloudDependencies({
+          ...currentPackages,
+          cliPackage: { version },
+        }),
+        /@supacloud\/cli has an invalid version/,
+      );
+    }
+  });
+
+  test('accepts valid prerelease and build metadata', () => {
+    const synchronization = syncSupacloudDependencies({
+      ...currentPackages,
+      cliPackage: { version: '1.2.3-alpha.1+build.5' },
+      adminPackage: { version: '0.7.2+sha.5114f85' },
+    });
+
+    assert.equal(synchronization.package.dependencies['@supacloud/cli'], '^1.2.3-alpha.1+build.5');
+    assert.equal(synchronization.package.dependencies['@supacloud/admin'], '^0.7.2+sha.5114f85');
   });
 
   test('keeps Release Please and the post-publish sync workflow separated', () => {

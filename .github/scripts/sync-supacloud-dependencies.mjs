@@ -7,10 +7,11 @@ const MANAGED_DEPENDENCIES = [
   ['@supacloud/cli', 'cli'],
   ['@supacloud/admin', 'admin'],
 ];
+const SEMVER_PATTERN = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 
 function packageVersion(candidatePackage, packageName) {
   const version = candidatePackage?.version;
-  if (typeof version !== 'string' || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
+  if (typeof version !== 'string' || !SEMVER_PATTERN.test(version)) {
     throw new Error(`${packageName} has an invalid version`);
   }
   return version;

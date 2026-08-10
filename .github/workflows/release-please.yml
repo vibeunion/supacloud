@@ -371,7 +371,7 @@ jobs:
         run: |
           bun install --frozen-lockfile
           bun run build
-          npm publish --provenance --access public
+          node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
       - name: Publish SupaCloud Lite to NPM
         if: ${{ needs.release-please.outputs.supacloud_lite_released == 'true' }}
@@ -381,7 +381,7 @@ jobs:
         run: |
           bun install --frozen-lockfile
           bun run check
-          npm publish --provenance --access public
+          node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
       - name: Publish cli to NPM
         if: ${{ needs.release-please.outputs.cli_released == 'true' }}
@@ -389,7 +389,7 @@ jobs:
         run: |
           bun install --frozen-lockfile
           bun run build
-          npm publish --provenance --access public
+          node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
       - name: Publish admin to NPM
         if: ${{ needs.release-please.outputs.admin_released == 'true' }}
@@ -397,7 +397,7 @@ jobs:
         run: |
           bun install --frozen-lockfile
           bun run build
-          npm publish --provenance --access public
+          node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
       - name: Publish supacloud (umbrella) to NPM
         if: ${{ needs.release-please.outputs.supacloud_released == 'true' }}
@@ -405,7 +405,7 @@ jobs:
         run: |
           bun install --frozen-lockfile --registry https://registry.npmjs.org
           bun run build
-          npm publish --provenance --access public
+          node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
   sync-supacloud-dependencies:
     needs: [release-please, publish-npm]

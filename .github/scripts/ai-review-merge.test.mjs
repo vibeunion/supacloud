@@ -163,10 +163,11 @@ describe('trusted review workflow', () => {
     assert.doesNotMatch(releaseWorkflow, /bunx\s+npm\s+publish/);
     assert.match(releaseWorkflow, /npm --version/);
     assert.equal(
-      releaseWorkflow.match(/npm publish --provenance --access public/g)?.length,
+      releaseWorkflow.match(/node "\$GITHUB_WORKSPACE\/\.github\/scripts\/publish-npm-package\.mjs"/g)?.length,
       5,
-      'all npm packages must publish with the setup-node npm binary',
+      'all npm packages must use the retry-safe publisher',
     );
+    assert.doesNotMatch(releaseWorkflow, /^\s+npm publish/m);
     for (const packageName of ['management-api', 'web-console', 'supacloud-js', 'edge-runtime', 'admin', 'cli', 'supacloud']) {
       assert.equal(
         existsSync(new URL(`../../packages/${packageName}/bun.lock`, import.meta.url)),
