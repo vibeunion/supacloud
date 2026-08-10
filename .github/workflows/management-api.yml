@@ -24,29 +24,9 @@ on:
       - ".github/workflows/release-please.yml"
       - "release-please-config.json"
       - ".release-please-manifest.json"
+  # Branch protection requires a result for every PR, so do not add path filters here.
   pull_request:
     branches: ["main", "dev"]
-    paths:
-      - "packages/management-api/**"
-      - "packages/web-console/**"
-      - "packages/supacloud-js/**"
-      - "packages/edge-runtime/**"
-      - "packages/pgredis-runtime/**"
-      - "packages/supacloud-lite/**"
-      - "packages/admin/**"
-      - "packages/cli/**"
-      - "packages/supacloud/**"
-      - "docker/**"
-      - "scripts/**"
-      - "install.sh"
-      - "setup.sh"
-      - "switch.sh"
-      - ".github/scripts/**"
-      - ".github/workflows/ai-review-merge.yml"
-      - ".github/workflows/management-api.yml"
-      - ".github/workflows/release-please.yml"
-      - "release-please-config.json"
-      - ".release-please-manifest.json"
   workflow_dispatch:
 
 permissions:
@@ -758,6 +738,52 @@ jobs:
 
       - name: Test Caddy to Edge Runtime cancellation and proxying
         run: CADDY_BINARY=packages/management-api/dist/supacloud-caddy-linux-amd64 bash scripts/test_supacloud_caddy_edge_proxy.sh
+
+  # Keep this aggregate name stable: main branch protection requires it.
+  required-checks:
+    name: Required Checks
+    if: ${{ always() }}
+    needs:
+      - lint-and-typecheck
+      - package-checks
+      - supacloud-lite-windows
+      - docker-and-scripts-checks
+      - unit-test
+      - postgres-18-compatibility
+      - integration-test
+      - shell-scripts-lint
+      - caddy-edge-proxy-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+
+    steps:
+      - name: Verify required jobs
+        env:
+          LINT_AND_TYPECHECK: ${{ needs.lint-and-typecheck.result }}
+          PACKAGE_CHECKS: ${{ needs.package-checks.result }}
+          SUPACLOUD_LITE_WINDOWS: ${{ needs.supacloud-lite-windows.result }}
+          DOCKER_AND_SCRIPTS: ${{ needs.docker-and-scripts-checks.result }}
+          UNIT_TESTS: ${{ needs.unit-test.result }}
+          POSTGRES_18: ${{ needs.postgres-18-compatibility.result }}
+          INTEGRATION_TESTS: ${{ needs.integration-test.result }}
+          SHELL_SCRIPTS_LINT: ${{ needs.shell-scripts-lint.result }}
+          CADDY_EDGE_PROXY: ${{ needs.caddy-edge-proxy-smoke.result }}
+        run: |
+          for result in \
+            "$LINT_AND_TYPECHECK" \
+            "$PACKAGE_CHECKS" \
+            "$SUPACLOUD_LITE_WINDOWS" \
+            "$DOCKER_AND_SCRIPTS" \
+            "$UNIT_TESTS" \
+            "$POSTGRES_18" \
+            "$INTEGRATION_TESTS" \
+            "$SHELL_SCRIPTS_LINT" \
+            "$CADDY_EDGE_PROXY"; do
+            if [[ "$result" != "success" ]]; then
+              echo "Required CI job did not succeed: $result" >&2
+              exit 1
+            fi
+          done
 
   build-binaries:
     name: Build Binaries
