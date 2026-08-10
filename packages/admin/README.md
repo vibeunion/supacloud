@@ -27,10 +27,18 @@ Examples:
 ```bash
 npx @supacloud/admin status
 npx @supacloud/admin ssh ping
+npx @supacloud/admin ssh versions
 npx @supacloud/admin ssh diagnose
 npx @supacloud/admin project create --name my-app
 npx @supacloud/admin project list
 ```
+
+`ssh versions` emits JSON with `schema_version: 1` and fixed
+`management_api`, `edge_runtime`, `caddy`, and `web_console` component fields.
+Each component reports `status` as `ok`, `unknown`, or `error`; a failed probe
+never substitutes a guessed version. Binary evidence is bound to the active
+systemd `ExecStart`, and Web Console evidence comes from its component marker
+plus an explicit `tree_sha256` digest.
 
 ## Verified platform upgrades
 
