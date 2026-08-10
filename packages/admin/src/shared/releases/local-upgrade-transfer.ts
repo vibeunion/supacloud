@@ -148,7 +148,7 @@ function requiredRemoteBytes(bundle: PreparedLocalUpgradeBundle): number {
     return transferBytes * 3 + 512 * 1024 * 1024;
 }
 
-function prepareDropCommand(paths: RemoteUpgradePaths, bundle: PreparedLocalUpgradeBundle): string {
+export function buildPrepareDropCommand(paths: RemoteUpgradePaths, bundle: PreparedLocalUpgradeBundle): string {
     const directories = [
         paths.drop,
         `${paths.drop}/bundle`,
@@ -160,7 +160,7 @@ function prepareDropCommand(paths: RemoteUpgradePaths, bundle: PreparedLocalUpgr
     return [
         "set -euo pipefail",
         "umask 077",
-        `test ! -e ${quoteShell(paths.drop)} || { echo 'Remote upload drop already exists' >&2; exit 1; }`,
+        `test ! -e ${quoteShell(paths.drop)} && test ! -L ${quoteShell(paths.drop)} || { echo 'Remote upload drop already exists' >&2; exit 1; }`,
         "TMP_AVAILABLE_KB=$(df -Pk /tmp | awk 'NR == 2 { print $4 }')",
         "VAR_AVAILABLE_KB=$(df -Pk /var/lib/supacloud | awk 'NR == 2 { print $4 }')",
         `test \"${"$"}TMP_AVAILABLE_KB\" -ge ${Math.ceil(requiredBytes / 1024)} && test \"${"$"}VAR_AVAILABLE_KB\" -ge ${Math.ceil(requiredBytes / 1024)} || { echo 'Insufficient remote disk space for verified upgrade staging' >&2; exit 1; }`,
@@ -169,7 +169,7 @@ function prepareDropCommand(paths: RemoteUpgradePaths, bundle: PreparedLocalUpgr
 }
 
 async function prepareRemoteDrop(ssh: SshTransport, paths: RemoteUpgradePaths, bundle: PreparedLocalUpgradeBundle): Promise<void> {
-    const prepared = await ssh.exec(prepareDropCommand(paths, bundle), 30_000);
+    const prepared = await ssh.exec(buildPrepareDropCommand(paths, bundle), 30_000);
     if (!prepared.success) throw remoteFailure("Unable to prepare remote upload drop", prepared);
 }
 
@@ -398,7 +398,10 @@ export function buildAdoptDropScript(paths: RemoteUpgradePaths): string {
         "trap 'exit 130' INT",
         "trap 'exit 143' TERM",
         `install -d -o root -g root -m 700 ${quoteShell(REMOTE_STAGE_ROOT)} ${quoteShell(REMOTE_RUN_ROOT)} ${quoteShell(REMOTE_LOG_ROOT)}`,
-        "test ! -e \"$STAGE\" && test ! -e \"$STATUS\" && test ! -e \"$LOG\"",
+        "if [ -e \"$STAGE\" ] || [ -L \"$STAGE\" ] || [ -e \"$STATUS\" ] || [ -L \"$STATUS\" ] || [ -e \"$LOG\" ] || [ -L \"$LOG\" ]; then",
+        "  echo 'Upgrade adoption target already exists' >&2",
+        "  exit 1",
+        "fi",
         "systemctl status \"$UNIT\" >/dev/null 2>&1 && { echo 'Upgrade unit already exists' >&2; exit 1; } || true",
         "ADOPTION_ACTIVE=true",
         "mv \"$DROP\" \"$STAGE\"",
@@ -481,7 +484,7 @@ export async function startRemoteUpgrade(ssh: SshTransport, paths: RemoteUpgrade
     throw startFailure;
 }
 
-function readStateScript(paths: RemoteUpgradePaths): string {
+export function buildRemoteStateScript(paths: RemoteUpgradePaths): string {
     return [
         "set -euo pipefail",
         `DROP=${quoteShell(paths.drop)}`,
@@ -491,11 +494,11 @@ function readStateScript(paths: RemoteUpgradePaths): string {
         `UNIT=${quoteShell(paths.unit)}`,
         "printf 'STATUS=%s\\n' \"$(sed -n '1p' \"$STATUS\" 2>/dev/null || true)\"",
         "printf 'UNIT=%s\\n' \"$(systemctl is-active \"$UNIT\" 2>/dev/null || true)\"",
-        "if [ -e \"$STAGE\" ]; then echo STAGE_EXISTS=yes; else echo STAGE_EXISTS=no; fi",
+        "if [ -e \"$STAGE\" ] || [ -L \"$STAGE\" ]; then echo STAGE_EXISTS=yes; else echo STAGE_EXISTS=no; fi",
         "if [ -d \"$STAGE\" ] && [ ! -L \"$STAGE\" ]; then echo STAGE_DIRECTORY=yes; else echo STAGE_DIRECTORY=no; fi",
-        "if [ -e \"$DROP\" ]; then echo DROP_EXISTS=yes; else echo DROP_EXISTS=no; fi",
-        "if [ -e \"$STATUS\" ]; then echo STATUS_EXISTS=yes; else echo STATUS_EXISTS=no; fi",
-        "if [ -e \"$LOG\" ]; then echo LOG_EXISTS=yes; else echo LOG_EXISTS=no; fi",
+        "if [ -e \"$DROP\" ] || [ -L \"$DROP\" ]; then echo DROP_EXISTS=yes; else echo DROP_EXISTS=no; fi",
+        "if [ -e \"$STATUS\" ] || [ -L \"$STATUS\" ]; then echo STATUS_EXISTS=yes; else echo STATUS_EXISTS=no; fi",
+        "if [ -e \"$LOG\" ] || [ -L \"$LOG\" ]; then echo LOG_EXISTS=yes; else echo LOG_EXISTS=no; fi",
         "UNIT_LOAD_STATE=$(systemctl show --property=LoadState --value \"$UNIT\" 2>/dev/null || true)",
         "test -n \"$UNIT_LOAD_STATE\" || { echo 'Unable to read remote upgrade unit load state' >&2; exit 1; }",
         "printf 'UNIT_LOAD=%s\\n' \"$UNIT_LOAD_STATE\"",
@@ -522,7 +525,7 @@ async function readRemoteState(
     paths: RemoteUpgradePaths,
     timeoutMs = REMOTE_STATE_READ_TIMEOUT_MS,
 ): Promise<RemoteUpgradeState> {
-    const state = await ssh.exec(rootCommand(readStateScript(paths)), timeoutMs);
+    const state = await ssh.exec(rootCommand(buildRemoteStateScript(paths)), timeoutMs);
     if (!state.success) throw remoteFailure("Unable to read remote upgrade state", state);
     return {
         dropExists: remoteStatePresence(state.stdout, "DROP_EXISTS"),
@@ -677,6 +680,21 @@ function assertSuccessfulUnitStoppedNormally(state: RemoteUpgradeState, paths: R
     );
 }
 
+function failedUnitReachedTerminalState(state: RemoteUpgradeState): boolean {
+    return unitStoppedNormally(state)
+        || (state.serviceState === "failed" && state.unitLoadState === "loaded");
+}
+
+function assertFailedUnitReachedTerminalState(state: RemoteUpgradeState, paths: RemoteUpgradePaths): void {
+    if (failedUnitReachedTerminalState(state)) return;
+    throw remoteReconciliationFailure(
+        `Remote upgrade published FAILED but the unit state is ambiguous `
+        + `(state=${state.serviceState} load=${state.unitLoadState})`,
+        [],
+        paths,
+    );
+}
+
 function assertTerminalEvidence(state: RemoteUpgradeState, paths: RemoteUpgradePaths): void {
     if (state.status !== "SUCCEEDED" && !state.status.startsWith("FAILED:")) return;
     const evidenceIssues: string[] = [];
@@ -767,6 +785,7 @@ export async function awaitRemoteUpgrade(ssh: SshTransport, paths: RemoteUpgrade
             return await completedUpgradeOutput(ssh, paths);
         }
         if (state.status.startsWith("FAILED:") && !unitRunning) {
+            assertFailedUnitReachedTerminalState(state, paths);
             await throwRemoteUpgradeFailure(ssh, paths, state.status);
         }
         if (Date.now() >= observationDeadline) {
