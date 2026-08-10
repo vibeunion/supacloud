@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.50.26](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.25...management-api-v0.50.26) (2026-08-10)
+
+
+### Bug Fixes
+
+* **edge-functions:** align CLI bundles with runtime policy ([#745](https://github.com/zuohuadong/supacloud/issues/745)) ([1ee2f94](https://github.com/zuohuadong/supacloud/commit/1ee2f94752efb0855a1528bd0049c733ae4cc6e5))
+
 ## [0.50.25](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.24...management-api-v0.50.25) (2026-08-09)
 
 
