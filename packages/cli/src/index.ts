@@ -4,6 +4,8 @@ import { Type } from "@sinclair/typebox";
 import { stringEnum } from "./shared/schema";
 import { cliToolResultIsError, runCli } from "./shared/cli";
 import { resolveSupaCloudContext, type ResolvedContext } from "./shared/context";
+import { parseGlobalOptions } from "./shared/global-options";
+import { authorizeExecution, validateExecutionPolicyCoverage } from "./shared/execution-policy";
 import { HttpTransport } from "./shared/transports/http";
 import { registerDatabaseTools } from "./shared/tools/database-tools";
 import { registerAuthTools } from "./shared/tools/auth-tools";
@@ -111,9 +113,12 @@ async function createProjectStatusResult(context: ResolvedContext) {
     const checks = await collectProjectStatusChecks(context);
     const statusPayload = {
         mode: "project",
-        source: context.source,
+        environment: context.environment || null,
+        source: { kind: context.source, path: context.sourcePath },
         projectRef: context.projectRef || null,
         apiUrl: context.apiUrl || null,
+        readOnly: context.readOnly,
+        production: context.production,
         autoLinked: Boolean(context.inferredSupabaseUrl && context.inferredServiceRoleKey),
         hasApiToken: Boolean(context.apiToken),
         checks,
@@ -149,7 +154,7 @@ function captureTools(register: (server: { tool: (...args: any[]) => void }) => 
     return tools;
 }
 
-function printHelp(context = resolveSupaCloudContext()) {
+function printHelp(context: ResolvedContext) {
     const autoLink = context.inferredSupabaseUrl
         ? `Project context: ${context.inferredSupabaseUrl} (${context.source})`
         : "Project context: not detected";
@@ -162,17 +167,29 @@ function printHelp(context = resolveSupaCloudContext()) {
 
 USAGE
 
-  ${preferredCommand} <module> <action> [--flags]
-  ${preferredCommand} status
+  ${preferredCommand} [global flags] <module> <action> [--flags]
+  ${preferredCommand} [global flags] status
   ${preferredCommand} --help
+
+GLOBAL FLAGS
+
+  --env <name>                    Load .env.supacloud.<name> from the current directory.
+  --env-file <path>               Load an exact file that declares SUPACLOUD_ENV.
+  --confirm-production <ref>      Confirm a write to the selected production project.
+
+  Global flags may appear before or after the command. --env and --env-file are
+  mutually exclusive, and a selected source is never mixed with another source.
 
 DEFAULT CONTEXT
 
-  Unauthenticated runs default to the current project's .env.
+  Without a selector or project variables, runs use the current project's legacy .env.
   Supported auto-link variables:
     SUPABASE_URL / SUPACLOUD_API_URL
     SUPABASE_SERVICE_ROLE_KEY / SUPACLOUD_API_TOKEN
     SUPACLOUD_PROJECT_REF (when it cannot be inferred from <ref>.api.*)
+
+  SUPACLOUD_READ_ONLY=true blocks remote writes. Production writes require an
+  exact --confirm-production value, and cannot override the selected project ref.
 
   status checks configuration, Management API connectivity, and authentication.
   It exits non-zero when a required check fails.
@@ -216,8 +233,23 @@ SEPARATE ADMIN CLI
 `);
 }
 
-function createCliTools(): ToolMap {
-    const context = resolveSupaCloudContext();
+function authorizedToolMap(
+    tools: ToolMap,
+    context: ResolvedContext,
+    confirmProduction?: string,
+): ToolMap {
+    validateExecutionPolicyCoverage(tools);
+    for (const [moduleName, tool] of Object.entries(tools)) {
+        const callback = tool.callback;
+        tool.callback = async (args: Record<string, unknown>) => {
+            authorizeExecution(moduleName, args, { context, confirmProduction });
+            return callback(args);
+        };
+    }
+    return tools;
+}
+
+function createCliTools(context: ResolvedContext, confirmProduction?: string): ToolMap {
     let pushMigrations: ((args: Record<string, unknown>) => Promise<any>) | undefined;
     const tools: ToolMap = {
         status: {
@@ -245,6 +277,8 @@ function createCliTools(): ToolMap {
                             "⚠️ Project commands need a project-scoped API context.",
                             "",
                             "Provide one of these sources:",
+                            "  - --env <name> for .env.supacloud.<name>",
+                            "  - --env-file <path> for a file declaring SUPACLOUD_ENV",
                             "  - .env with SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY",
                             "  - SUPACLOUD_API_URL + SUPACLOUD_API_TOKEN",
                             "",
@@ -294,11 +328,14 @@ function createCliTools(): ToolMap {
                             `${preferredCommand} expects project-scoped credentials by default.`,
                             "Provide one of these sources:",
                             "",
-                            "  1. Current workspace .env",
+                            "  1. Named environment file",
+                            "     supacloud-cli --env test status",
+                            "",
+                            "  2. Current workspace .env",
                             "     SUPABASE_URL=https://your-project.example.com",
                             "     SUPABASE_SERVICE_ROLE_KEY=...",
                             "",
-                            "  2. Explicit environment variables",
+                            "  3. Explicit environment variables",
                             "     SUPACLOUD_API_URL=https://your-project.example.com",
                             "     SUPACLOUD_API_TOKEN=...",
                             "",
@@ -309,7 +346,7 @@ function createCliTools(): ToolMap {
                 ],
             }),
         };
-        return tools;
+        return authorizedToolMap(tools, context, confirmProduction);
     }
 
     const http = new HttpTransport({
@@ -344,18 +381,23 @@ function createCliTools(): ToolMap {
     })));
 
     delete tools.platform;
-    return tools;
+    return authorizedToolMap(tools, context, confirmProduction);
 }
 
 async function main() {
-    const args = process.argv.slice(2);
+    const globalOptions = parseGlobalOptions(process.argv.slice(2));
+    const args = globalOptions.args;
+    const context = resolveSupaCloudContext(process.env, process.cwd(), {
+        environmentName: globalOptions.environmentName,
+        envFile: globalOptions.envFile,
+    });
     if (args.length === 0 || args[0] === "--help" || args[0] === "-h") {
-        printHelp();
+        printHelp(context);
         process.exitCode = 0;
         return;
     }
 
-    const cliTools = createCliTools();
+    const cliTools = createCliTools(context, globalOptions.confirmProduction);
     if (args.length === 1 && !["ai", "supabase"].includes(args[0]) && cliTools[args[0]]) {
         const result = await cliTools[args[0]].callback({});
         if (result?.content && Array.isArray(result.content)) {

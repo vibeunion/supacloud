@@ -1,5 +1,28 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { resolveSupaCloudContext } from "./context";
+
+const temporaryDirectories: string[] = [];
+
+afterEach(() => {
+    for (const directory of temporaryDirectories.splice(0)) {
+        rmSync(directory, { recursive: true, force: true });
+    }
+});
+
+function temporaryWorkspace(): string {
+    const workspace = mkdtempSync(join(tmpdir(), "supacloud-cli-context-"));
+    temporaryDirectories.push(workspace);
+    return workspace;
+}
+
+function writeEnvironment(workspace: string, filename: string, values: Record<string, string>): string {
+    const path = join(workspace, filename);
+    writeFileSync(path, Object.entries(values).map(([key, value]) => `${key}=${value}`).join("\n") + "\n");
+    return path;
+}
 
 describe("resolveSupaCloudContext", () => {
     test("infers management URL from custom project API domain", () => {
@@ -34,6 +57,17 @@ describe("resolveSupaCloudContext", () => {
         expect(context.apiToken).toBe("token");
     });
 
+    test("prefers SUPACLOUD_API_TOKEN within one atomic source", () => {
+        const context = resolveSupaCloudContext({
+            SUPACLOUD_API_URL: "https://management.example.com",
+            SUPACLOUD_PROJECT_REF: "project-ref",
+            SUPACLOUD_API_TOKEN: "api-token",
+            SUPABASE_SERVICE_ROLE_KEY: "service-role",
+        }, "/tmp/no-such-supacloud-context");
+
+        expect(context.apiToken).toBe("api-token");
+    });
+
     test("explicit project ref wins over managed hostname inference", () => {
         const context = resolveSupaCloudContext({
             SUPABASE_URL: "https://inferred.api.example.com",
@@ -55,5 +89,152 @@ describe("resolveSupaCloudContext", () => {
         expect(context.host).toBe("");
         expect(context.inferredSupabaseUrl).toBe("");
         expect(context.apiToken).toBe("service-role");
+    });
+
+    test("strictly selects a named environment file without mixing process context", () => {
+        const workspace = temporaryWorkspace();
+        const path = writeEnvironment(workspace, ".env.supacloud.Test", {
+            SUPACLOUD_ENV: "test",
+            SUPACLOUD_API_URL: "https://test-management.example.com",
+            SUPACLOUD_API_TOKEN: "file-token",
+            SUPACLOUD_PROJECT_REF: "test-ref",
+        });
+
+        const context = resolveSupaCloudContext({
+            SUPACLOUD_API_TOKEN: "process-token",
+        }, workspace, { environmentName: "Test" });
+
+        expect(context).toMatchObject({
+            environment: "test",
+            source: "named_env_file",
+            sourcePath: path,
+            apiToken: "file-token",
+            projectRef: "test-ref",
+            production: false,
+        });
+    });
+
+    test("does not fall back when a named environment file is missing", () => {
+        const workspace = temporaryWorkspace();
+        writeEnvironment(workspace, ".env", {
+            SUPACLOUD_API_URL: "https://legacy.example.com",
+            SUPACLOUD_API_TOKEN: "legacy-token",
+            SUPACLOUD_PROJECT_REF: "legacy-ref",
+        });
+
+        expect(() => resolveSupaCloudContext({}, workspace, { environmentName: "missing" }))
+            .toThrow(".env.supacloud.missing");
+    });
+
+    test("requires explicit files to declare SUPACLOUD_ENV", () => {
+        const workspace = temporaryWorkspace();
+        writeEnvironment(workspace, "custom.env", {
+            SUPACLOUD_API_URL: "https://management.example.com",
+        });
+
+        expect(() => resolveSupaCloudContext({}, workspace, { envFile: "custom.env" }))
+            .toThrow("SUPACLOUD_ENV is required");
+    });
+
+    test("loads quoted values from an explicit environment file", () => {
+        const workspace = temporaryWorkspace();
+        const path = join(workspace, "ci.env");
+        writeFileSync(path, [
+            'SUPACLOUD_ENV="production"',
+            "SUPACLOUD_API_URL='https://management.example.com/'",
+            'SUPACLOUD_API_TOKEN="file-token"',
+            "SUPACLOUD_PROJECT_REF='prod-ref'",
+        ].join("\n") + "\n");
+
+        const context = resolveSupaCloudContext({
+            SUPACLOUD_API_TOKEN: "process-token",
+        }, workspace, { envFile: "ci.env" });
+
+        expect(context).toMatchObject({
+            environment: "production",
+            source: "explicit_env_file",
+            sourcePath: path,
+            apiUrl: "https://management.example.com",
+            apiToken: "file-token",
+            projectRef: "prod-ref",
+            production: true,
+        });
+    });
+
+    test("rejects a named file whose declared environment differs from its selector", () => {
+        const workspace = temporaryWorkspace();
+        writeEnvironment(workspace, ".env.supacloud.test", { SUPACLOUD_ENV: "prod" });
+
+        expect(() => resolveSupaCloudContext({}, workspace, { environmentName: "test" }))
+            .toThrow("does not match selector test");
+    });
+
+    test("uses complete SUPACLOUD_ENV process context as one CI source", () => {
+        const workspace = temporaryWorkspace();
+        const context = resolveSupaCloudContext({
+            SUPACLOUD_ENV: "production",
+            SUPACLOUD_API_URL: "https://management.example.com",
+            SUPACLOUD_API_TOKEN: "process-token",
+            SUPACLOUD_PROJECT_REF: "prod-ref",
+        }, workspace);
+
+        expect(context).toMatchObject({
+            environment: "production",
+            source: "process_env",
+            sourcePath: null,
+            projectRef: "prod-ref",
+            production: true,
+        });
+    });
+
+    test("uses SUPACLOUD_ENV as a strict named selector when process context is incomplete", () => {
+        const workspace = temporaryWorkspace();
+        writeEnvironment(workspace, ".env.supacloud.test", {
+            SUPACLOUD_API_URL: "https://test.example.com",
+            SUPACLOUD_API_TOKEN: "file-token",
+            SUPACLOUD_PROJECT_REF: "test-ref",
+        });
+
+        const context = resolveSupaCloudContext({
+            SUPACLOUD_ENV: "test",
+            SUPACLOUD_API_TOKEN: "partial-process-token",
+        }, workspace);
+
+        expect(context.source).toBe("named_env_file");
+        expect(context.apiToken).toBe("file-token");
+    });
+
+    test("does not mix partial process context with legacy dotenv", () => {
+        const workspace = temporaryWorkspace();
+        writeEnvironment(workspace, ".env", {
+            SUPACLOUD_API_TOKEN: "dotenv-token",
+            SUPACLOUD_PROJECT_REF: "dotenv-ref",
+        });
+
+        const context = resolveSupaCloudContext({
+            SUPACLOUD_API_URL: "https://process.example.com",
+        }, workspace);
+
+        expect(context.source).toBe("process_env");
+        expect(context.apiUrl).toBe("https://process.example.com");
+        expect(context.apiToken).toBe("");
+        expect(context.projectRef).toBe("");
+    });
+
+    test("keeps legacy dotenv compatibility when process context is absent", () => {
+        const workspace = temporaryWorkspace();
+        const path = writeEnvironment(workspace, ".env", {
+            SUPACLOUD_API_URL: "https://legacy.example.com",
+            SUPACLOUD_API_TOKEN: "legacy-token",
+            SUPACLOUD_PROJECT_REF: "legacy-ref",
+        });
+
+        const context = resolveSupaCloudContext({}, workspace);
+
+        expect(context).toMatchObject({
+            source: "legacy_dotenv",
+            sourcePath: path,
+            projectRef: "legacy-ref",
+        });
     });
 });
