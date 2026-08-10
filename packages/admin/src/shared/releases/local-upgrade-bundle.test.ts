@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -17,6 +17,21 @@ import {
 import { RELEASE_BUNDLE_SIZE_LIMITS } from "../../../../management-api/src/release-manifest";
 
 const RELEASE_TAG = "management-api-v0.50.31";
+
+function setFixtureMode(filePath: string, mode: number): void {
+    if ((mode & 0o7000) === 0) {
+        chmodSync(filePath, mode);
+        return;
+    }
+    const chmod = Bun.spawnSync(["chmod", mode.toString(8), filePath]);
+    if (chmod.exitCode !== 0) {
+        throw new Error(`Unable to set fixture mode ${mode.toString(8)}: ${chmod.stderr.toString().trim()}`);
+    }
+    const actualMode = statSync(filePath).mode & 0o7777;
+    if (actualMode !== mode) {
+        throw new Error(`Fixture mode is ${actualMode.toString(8)}, expected ${mode.toString(8)}`);
+    }
+}
 
 function releaseMetadata(downloadUrl: string): unknown {
     return {
@@ -35,7 +50,7 @@ function withFakeGithubCli(script: string, run: () => Promise<void>, mode = 0o70
     const executable = join(directory, "gh");
     const previousPath = process.env.PATH;
     writeFileSync(executable, script, { mode });
-    chmodSync(executable, mode);
+    setFixtureMode(executable, mode);
     process.env.PATH = `${directory}:${previousPath || ""}`;
     return run().finally(() => {
         if (previousPath === undefined) delete process.env.PATH;
@@ -127,7 +142,7 @@ describe("local upgrade download trust boundary", () => {
 
             if (process.platform === "linux") {
                 writeFileSync(artifactPath, contents);
-                chmodSync(artifactPath, 0o4600);
+                setFixtureMode(artifactPath, 0o4600);
                 expect(() => assertSignedArtifact(artifactPath, manifest)).toThrow("exact mode 0600");
             }
         } finally {
