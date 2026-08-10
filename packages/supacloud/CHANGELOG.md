@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.9](https://github.com/zuohuadong/supacloud/compare/supacloud-v0.8.8...supacloud-v0.8.9) (2026-08-10)
+
+
+### Bug Fixes
+
+* **ci:** enforce main required checks ([#749](https://github.com/zuohuadong/supacloud/issues/749)) ([bc63e3c](https://github.com/zuohuadong/supacloud/commit/bc63e3c155ccf02ecc7e5bc6c8053c2023977b74))
+
 ## [0.8.8](https://github.com/zuohuadong/supacloud/compare/supacloud-v0.8.7...supacloud-v0.8.8) (2026-08-10)
 
 
