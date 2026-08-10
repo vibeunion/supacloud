@@ -21,6 +21,8 @@ class FakeSsh {
     partialUploadThrows = false;
     pingResult = true;
     diagnosticExecFails = false;
+    diagnosticFailureStdout = "";
+    diagnosticFailureStderr = "diagnostic failed";
 
     async ping(): Promise<boolean> {
         return this.pingResult;
@@ -64,7 +66,12 @@ class FakeSsh {
                 : { success: true, stdout: "Migration complete\n", stderr: "", code: 0 };
         }
         if (this.diagnosticExecFails && command === "hostname") {
-            return { success: false, stdout: "", stderr: "diagnostic failed", code: 3 };
+            return {
+                success: false,
+                stdout: this.diagnosticFailureStdout,
+                stderr: this.diagnosticFailureStderr,
+                code: 3,
+            };
         }
         return { success: true, stdout: "SSH_SESSION_OK\n", stderr: "", code: 0 };
     }
@@ -155,6 +162,30 @@ describe("ssh admin tool", () => {
 
         await expect(captureSshTool(ssh).invoke({ action: "exec", command: "hostname" }))
             .rejects.toThrow("Remote diagnostic command failed (exit 3): diagnostic failed");
+    });
+
+    test("generic exec uses stdout when failure stderr contains only whitespace", async () => {
+        const ssh = new FakeSsh();
+        ssh.diagnosticExecFails = true;
+        ssh.diagnosticFailureStdout = "stdout diagnostic";
+        ssh.diagnosticFailureStderr = " \n";
+
+        await expect(captureSshTool(ssh).invoke({ action: "exec", command: "hostname" }))
+            .rejects.toThrow("Remote diagnostic command failed (exit 3): stdout diagnostic");
+    });
+
+    test("hostname address diagnostics require the exact allowlisted command", async () => {
+        const tool = captureSshTool(new FakeSsh());
+
+        for (const command of [
+            "hostname -I extra",
+            "hostname -Ifoo",
+            "hostname -I; id",
+            "hostname -I\nid",
+        ]) {
+            await expect(tool.invoke({ action: "exec", command }))
+                .rejects.toThrow("outside the allowed read-only diagnostic grammar");
+        }
     });
 
     test("generic exec rejects filesystem, network, mutation, and secret-reading escapes", async () => {

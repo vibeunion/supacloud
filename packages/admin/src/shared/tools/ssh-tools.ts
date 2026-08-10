@@ -570,7 +570,7 @@ Actions: ping, setup, install, upgrade, diagnose, exec, troubleshoot, container_
                     const command = assertSafeExecCommand(args.command);
                     const r = await ssh.exec(command, getExecTimeoutMs(args.timeout_seconds));
                     if (!r.success) {
-                        const diagnostic = (r.stderr || r.stdout).trim() || "no remote diagnostic";
+                        const diagnostic = r.stderr.trim() || r.stdout.trim() || "no remote diagnostic";
                         throw new Error(`Remote diagnostic command failed (exit ${r.code}): ${diagnostic.slice(-500)}`);
                     }
                     text = `exit: ${r.code}\n\nstdout:\n${r.stdout.slice(-2000)}\n\nstderr:\n${r.stderr.slice(-500)}`;
