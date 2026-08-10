@@ -5,10 +5,12 @@ WORKDIR /app
 
 # Copy dependency manifests
 COPY package.json bun.lock* ./
-COPY packages/management-api/package.json ./packages/management-api/
+COPY packages/management-api/package.json packages/management-api/bun.lock ./packages/management-api/
+COPY packages/edge-bundle-contract/package.json packages/edge-bundle-contract/bun.lock ./packages/edge-bundle-contract/
+COPY packages/edge-bundle-contract/src ./packages/edge-bundle-contract/src
 
 # Install dependencies
-RUN bun install
+RUN cd /app/packages/management-api && bun install --frozen-lockfile
 
 RUN mkdir -p /etc/supabase/pgredis-tenants \
     && chown bun:bun /etc/supabase/pgredis-tenants
@@ -18,9 +20,6 @@ COPY packages/management-api ./packages/management-api
 COPY --chmod=0755 scripts/lib/postgres_major_upgrade_executor.sh /opt/supacloud/scripts/lib/postgres_major_upgrade_executor.sh
 
 WORKDIR /app/packages/management-api
-
-# Build management API
-RUN bun run build
 
 EXPOSE 9090
 

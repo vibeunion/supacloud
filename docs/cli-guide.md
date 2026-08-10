@@ -241,6 +241,14 @@ Not supported:
 
 Use a direct Postgres DSN with `pg`, `postgres.js`, or equivalent drivers for application-side long transactions.
 
+### Edge Function bundle compatibility
+
+`edge_functions deploy --path` bundles the local entrypoint with Bun before
+upload. SupaCloud converts a computed dynamic import only when its target is a
+unique, unchanged top-level string binding; all other computed imports abort the
+deployment before upload. The Management API applies the same validation to its
+final runtime bundle before hashing, writing, or activating a version.
+
 ### Owned command areas
 
 - `project`: get, health, logs, api_keys, settings, tasks

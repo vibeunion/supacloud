@@ -4,10 +4,12 @@ FROM oven/bun:${BUN_VERSION}
 WORKDIR /app
 
 COPY package.json bun.lock* ./
-COPY packages/management-api/package.json ./packages/management-api/package.json
+COPY packages/management-api/package.json packages/management-api/bun.lock ./packages/management-api/
+COPY packages/edge-bundle-contract/package.json packages/edge-bundle-contract/bun.lock ./packages/edge-bundle-contract/
+COPY packages/edge-bundle-contract/src ./packages/edge-bundle-contract/src
 COPY packages/web-console/package.json ./packages/web-console/package.json
 
-RUN bun install
+RUN cd /app/packages/management-api && bun install --frozen-lockfile
 
 RUN mkdir -p /etc/supabase/pgredis-tenants \
     && chown bun:bun /etc/supabase/pgredis-tenants

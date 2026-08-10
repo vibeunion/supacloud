@@ -1,6 +1,7 @@
 import { logger } from "../utils/logger";
 import { config } from "../config";
 import { ServiceUnavailableError } from "../utils/errors";
+import { normalizeEdgeFunctionBundle } from "@supacloud/edge-bundle-contract";
 import path from "path";
 import fs from "fs/promises";
 
@@ -352,10 +353,6 @@ function validateFunctionCode(code: string): {
   return { valid: true };
 }
 
-/**
- * Bundle a TypeScript entrypoint into a single self-contained .js file using Bun.build().
- * Returns the bundled code string, or null on failure.
- */
 async function bundleFunction(
   entrypoint: string,
   outdir: string,
@@ -363,50 +360,45 @@ async function bundleFunction(
   minify: boolean = false,
   importMapPath?: string,
 ): Promise<BundleFunctionResult | null> {
-  try {
-    const buildOptions: Parameters<typeof Bun.build>[0] & {
-      importMap?: string;
-      metafile?: boolean;
-    } = {
-      entrypoints: [entrypoint],
-      outdir,
-      naming: `${outName}.[ext]`,
-      target: "bun",
-      minify,
-      external: resolveExternalPackages(),
-      metafile: true,
-    };
-    if (importMapPath) {
-      buildOptions.importMap = importMapPath;
-    }
-    const result = await Bun.build(buildOptions);
+  const buildOptions: Parameters<typeof Bun.build>[0] & {
+    importMap?: string;
+    metafile?: boolean;
+  } = {
+    entrypoints: [entrypoint],
+    outdir,
+    naming: `${outName}.[ext]`,
+    target: "bun",
+    minify,
+    external: resolveExternalPackages(),
+    metafile: true,
+  };
+  if (importMapPath) buildOptions.importMap = importMapPath;
 
-    if (!result.success) {
-      const messages = result.logs
-        .map((l: { message?: string }) => l.message || String(l))
-        .join("\n");
-      logger.error(`[EdgeFunction] Bun.build() failed:\n${messages}`);
-      return null;
-    }
+  const buildResult = await Bun.build(buildOptions);
 
-    const artifact = result.outputs.find((output) => output.kind === "entry-point") ?? result.outputs[0];
-    if (!artifact) {
-      logger.error(`[EdgeFunction] Bun.build() produced no output`, { entrypoint });
-      return null;
-    }
-
-    const code = await artifact.text();
-    const metafile = normalizeBuildMetafile((result as { metafile?: unknown }).metafile);
-    return {
-      code,
-      sizeBytes: typeof artifact.size === "number" ? artifact.size : bundleSizeBytes(code),
-      importCount: countMetafileImports(metafile) ?? countImports(code),
-      metafile,
-    };
-  } catch (err) {
-    logger.error(`[EdgeFunction] Bundle error`, { error: err });
+  if (!buildResult.success) {
+    const messages = buildResult.logs
+      .map((log: { message?: string }) => log.message || String(log))
+      .join("\n");
+    logger.error(`[EdgeFunction] Bun.build() failed:\n${messages}`);
     return null;
   }
+
+  const artifact = buildResult.outputs.find((output) => output.kind === "entry-point")
+    ?? buildResult.outputs[0];
+  if (!artifact) {
+    logger.error(`[EdgeFunction] Bun.build() produced no output`, { entrypoint });
+    return null;
+  }
+
+  const code = normalizeEdgeFunctionBundle(await artifact.text());
+  const metafile = normalizeBuildMetafile((buildResult as { metafile?: unknown }).metafile);
+  return {
+    code,
+    sizeBytes: bundleSizeBytes(code),
+    importCount: countMetafileImports(metafile, code) ?? countImports(code),
+    metafile,
+  };
 }
 
 async function sha256Hex(content: string): Promise<string> {
@@ -429,9 +421,9 @@ function normalizeBuildMetafile(value: unknown): BuildMetafile | null {
   };
 }
 
-function countMetafileImports(metafile: BuildMetafile | null): number | null {
+function countMetafileImports(metafile: BuildMetafile | null, bundledCode: string): number | null {
   if (!metafile?.inputs) return null;
-  const specs = new Set<string>();
+  const specs = importSpecifiers(bundledCode);
   for (const input of Object.values(metafile.inputs)) {
     for (const importEntry of input.imports || []) {
       const specifier = importEntry.original || importEntry.path;
@@ -460,33 +452,21 @@ function snapshotDeployMetrics(): EdgeFunctionDeployMetrics {
 }
 
 function countImports(code: string): number {
+  return importSpecifiers(code).size;
+}
+
+function importSpecifiers(code: string): Set<string> {
   const specs = new Set<string>();
   for (const match of code.matchAll(/\bimport\s+(?:[^"'()]*?\s+from\s+)?["']([^"']+)["']/g)) {
     specs.add(match[1]);
   }
-  for (const match of code.matchAll(/\bimport\s*\(\s*["']([^"']+)["']\s*\)/g)) {
+  for (const match of code.matchAll(/\bimport\s*\(\s*["']([^"']+)["']\s*(?:,|\))/g)) {
     specs.add(match[1]);
   }
   for (const match of code.matchAll(/\bexport\s+[^"'()]*?\s+from\s+["']([^"']+)["']/g)) {
     specs.add(match[1]);
   }
-  return specs.size;
-}
-
-function countFileImports(files: Record<string, string>): number {
-  const specs = new Set<string>();
-  for (const code of Object.values(files)) {
-    for (const match of code.matchAll(/\bimport\s+(?:[^"'()]*?\s+from\s+)?["']([^"']+)["']/g)) {
-      specs.add(match[1]);
-    }
-    for (const match of code.matchAll(/\bimport\s*\(\s*["']([^"']+)["']\s*\)/g)) {
-      specs.add(match[1]);
-    }
-    for (const match of code.matchAll(/\bexport\s+[^"'()]*?\s+from\s+["']([^"']+)["']/g)) {
-      specs.add(match[1]);
-    }
-  }
-  return specs.size;
+  return specs;
 }
 
 type PreparedFunctionVersion = {
@@ -559,15 +539,15 @@ async function prepareSingleFunctionVersion(
   const buildDir = path.join(stageDir, ".build");
   await Bun.write(sourcePath, request.code);
   const bundle = await bundleFunction(sourcePath, buildDir, "index", request.minify ?? false);
-  const deployedCode = bundle?.code ?? request.code;
-  const artifact = await writePreparedBundle(stageDir, finalDir, deployedCode, bundle?.sizeBytes);
+  if (!bundle) throw new Error("Bun.build() failed while bundling the function");
+  const artifact = await writePreparedBundle(stageDir, finalDir, bundle.code, bundle.sizeBytes);
   await fs.rm(buildDir, { recursive: true, force: true });
   return {
     version,
-    bundled: bundle !== null,
+    bundled: true,
     entrypoint: null,
     importMap: null,
-    importCount: bundle?.importCount ?? countImports(request.code),
+    importCount: bundle.importCount,
     ...artifact,
   };
 }
@@ -631,7 +611,7 @@ async function prepareBundleFunctionVersion(
     files: Object.keys(request.files).length,
     entrypoint,
     importMap,
-    importCount: bundle.importCount ?? countFileImports(request.files),
+    importCount: bundle.importCount,
     ...artifact,
   };
 }
@@ -1403,6 +1383,16 @@ async function immutableFunctionVersion(
     return { prepared, config: functionConfig };
   } finally {
     await fs.rm(stageDir, { recursive: true, force: true }).catch(() => {});
+    await removeEmptyDirectory(versionRoot);
+  }
+}
+
+async function removeEmptyDirectory(directory: string): Promise<void> {
+  try {
+    await fs.rmdir(directory);
+  } catch (error: unknown) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT" && code !== "ENOTEMPTY" && code !== "EEXIST") throw error;
   }
 }
 

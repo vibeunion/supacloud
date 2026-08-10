@@ -7,6 +7,7 @@ import { basename, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { execFile } from "node:child_process";
 import { Type } from "@sinclair/typebox";
+import { normalizeEdgeFunctionBundle } from "@supacloud/edge-bundle-contract";
 import { decodedSchema, optional, stringEnum, withDescription } from "../schema";
 import type { HttpTransport } from "../transports/http";
 
@@ -31,7 +32,7 @@ async function bundleEdgeFunctionPath(pathArg: string): Promise<string> {
     try {
         const { stderr } = await runBunBuild([entrypoint, "--target", "bun", "--outfile", outfile]);
         if (!existsSync(outfile)) throw new Error(`Bundle failed: ${stderr}`);
-        return readFileSync(outfile, "utf-8");
+        return normalizeEdgeFunctionBundle(readFileSync(outfile, "utf-8"));
     } finally {
         rmSync(tmpDir, { recursive: true, force: true });
     }

@@ -73,6 +73,142 @@ afterAll(async () => {
 });
 
 describe("edgeFunctionService bundle metadata", () => {
+  for (const minify of [false, true]) {
+    test(`normalizes single-file computed imports before writing (minify=${minify})`, async () => {
+      const ref = `proj_single_normalize_${minify}`;
+      const deployed = await edgeFunctionService.deployRelease({
+        ref,
+        slug: "otel-loader",
+        minify,
+        code: `
+          var OTEL_PKG = "@opentelemetry/api";
+          export default { async fetch() { await import(OTEL_PKG); return new Response("ok"); } };
+        `,
+      });
+
+      expect(deployed).toMatchObject({ success: true, bundled: true, version: "1" });
+      const bundle = await Bun.file(deployed.content_path!).text();
+      expect(bundle).toContain('import("@opentelemetry/api")');
+      expect(bundle).not.toMatch(/import\(\s*[A-Za-z_$][\w$]*\s*\)/);
+      expect(deployed.bundle_size_bytes).toBe(new TextEncoder().encode(bundle).byteLength);
+      expect(deployed.bundle_hash).toBe(createHash("sha256").update(bundle).digest("hex").slice(0, 16));
+      expect(deployed.import_count).toBe(1);
+    });
+
+    test(`normalizes multi-file computed imports before writing (minify=${minify})`, async () => {
+      const ref = `proj_bundle_normalize_${minify}`;
+      const deployed = await edgeFunctionService.deployRelease({
+        ref,
+        slug: "otel-loader",
+        minify,
+        files: {
+          "index.ts": `
+            import { OTEL_PKG } from "./shared";
+            export default { async fetch() { await import(OTEL_PKG); return new Response("ok"); } };
+          `,
+          "shared.ts": 'export const OTEL_PKG = "@opentelemetry/api";',
+        },
+        entrypoint: "index.ts",
+      });
+
+      expect(deployed).toMatchObject({ success: true, bundled: true, version: "1" });
+      const bundle = await Bun.file(deployed.content_path!).text();
+      expect(bundle).toContain('import("@opentelemetry/api")');
+      expect(bundle).not.toMatch(/import\(\s*[A-Za-z_$][\w$]*\s*\)/);
+    });
+  }
+
+  test("counts normalized dynamic imports with options", async () => {
+    const deployed = await edgeFunctionService.deployRelease({
+      ref: "proj_single_options",
+      slug: "json-loader",
+      code: `
+        const target = "./fixture.json";
+        export default { async fetch() { return import((target), { with: { type: "json" } }); } };
+      `,
+    });
+
+    expect(deployed).toMatchObject({ success: true, import_count: 1 });
+    const bundle = await Bun.file(deployed.content_path!).text();
+    expect(bundle).toMatch(/import\(["']\.\/fixture\.json["'],\s*\{/);
+  });
+
+  for (const deploymentKind of ["single-file", "multi-file"] as const) {
+    test(`does not list a failed first ${deploymentKind} deployment`, async () => {
+      const ref = `proj_first_rejected_${deploymentKind}`;
+      const slug = "unsafe-loader";
+      const code = `
+        const moduleName = process.env.MODULE_NAME;
+        export default { async fetch() { return import(moduleName); } };
+      `;
+      const rejected = await edgeFunctionService.deployRelease({
+        ref,
+        slug,
+        ...(deploymentKind === "single-file"
+          ? { code }
+          : { files: { "index.ts": code } }),
+      });
+
+      expect(rejected).toMatchObject({ success: false });
+      expect(await edgeFunctionService.list(ref)).not.toContain(slug);
+      expect(existsSync(join(functionsRoot, ref, ".versions", slug))).toBe(false);
+    });
+  }
+
+  test("rejects an unsafe single-file bundle without activating or preserving raw source", async () => {
+    const ref = "proj_single_fail_closed";
+    const slug = "unsafe-loader";
+    const initial = await edgeFunctionService.deployRelease({
+      ref,
+      slug,
+      code: 'export default { fetch: () => new Response("v1") };',
+    });
+    const rejected = await edgeFunctionService.deployRelease({
+      ref,
+      slug,
+      code: `
+        const moduleName = process.env.MODULE_NAME;
+        export default { async fetch() { await import(moduleName); return new Response("v2"); } };
+      `,
+    });
+
+    expect(initial).toMatchObject({ success: true, version: "1" });
+    expect(rejected).toMatchObject({
+      success: false,
+      error: expect.stringContaining("incompatible with the production runtime"),
+    });
+    expect(await edgeFunctionService.getConfig(ref, slug)).toMatchObject({ version: "1" });
+    expect(existsSync(join(functionsRoot, ref, ".versions", slug, "2"))).toBe(false);
+  });
+
+  test("rejects an unsafe multi-file bundle without activating it", async () => {
+    const ref = "proj_bundle_fail_closed";
+    const slug = "unsafe-loader";
+    const initial = await edgeFunctionService.deployRelease({
+      ref,
+      slug,
+      code: 'export default { fetch: () => new Response("v1") };',
+    });
+    const rejected = await edgeFunctionService.deployRelease({
+      ref,
+      slug,
+      files: {
+        "index.ts": `
+          const moduleName = process.env.MODULE_NAME;
+          export default { async fetch() { await import(moduleName); return new Response("v2"); } };
+        `,
+      },
+    });
+
+    expect(initial).toMatchObject({ success: true, version: "1" });
+    expect(rejected).toMatchObject({
+      success: false,
+      error: expect.stringContaining("incompatible with the production runtime"),
+    });
+    expect(await edgeFunctionService.getConfig(ref, slug)).toMatchObject({ version: "1" });
+    expect(existsSync(join(functionsRoot, ref, ".versions", slug, "2"))).toBe(false);
+  });
+
   test("commits verify_jwt=false with the activated version before invalidation", async () => {
     const ref = "proj_atomic_false";
     const slug = "public-hook";

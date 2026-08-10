@@ -5,6 +5,7 @@ on:
     branches: ["main", "dev"]
     paths:
       - "packages/management-api/**"
+      - "packages/edge-bundle-contract/**"
       - "packages/web-console/**"
       - "packages/supacloud-js/**"
       - "packages/edge-runtime/**"
@@ -28,6 +29,7 @@ on:
     branches: ["main", "dev"]
     paths:
       - "packages/management-api/**"
+      - "packages/edge-bundle-contract/**"
       - "packages/web-console/**"
       - "packages/supacloud-js/**"
       - "packages/edge-runtime/**"
@@ -156,6 +158,13 @@ jobs:
           bun install --frozen-lockfile
           bun run typecheck
           bun test internal-bindings.test.ts pgredis-capability.test.ts worker-pool.test.ts
+          bun audit --audit-level high
+
+      - name: Check Edge Function bundle contract
+        working-directory: packages/edge-bundle-contract
+        run: |
+          bun install --frozen-lockfile
+          bun test src/index.test.ts
           bun audit --audit-level high
 
       - name: Check pgredis runtime

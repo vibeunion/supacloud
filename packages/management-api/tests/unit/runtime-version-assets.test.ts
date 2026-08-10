@@ -34,6 +34,23 @@ function readRealtimeImageVersion(systemdUnit: string): string {
 }
 
 describe("runtime companion version assets", () => {
+  test("Management Docker and CI include the Edge Function bundle contract", () => {
+    const workflow = readRepoFile(".github/workflows/management-api.yml");
+    const dockerignore = readRepoFile(".dockerignore");
+    const dockerfiles = [
+      readRepoFile("packages/management-api/Dockerfile"),
+      readRepoFile("docker/self-host/management-api.Dockerfile"),
+    ];
+
+    expect(workflow.match(/packages\/edge-bundle-contract\/\*\*/g)).toHaveLength(2);
+    expect(workflow).toContain("working-directory: packages/edge-bundle-contract");
+    expect(dockerignore).toContain("**/node_modules");
+    for (const dockerfile of dockerfiles) {
+      expect(dockerfile).toContain("COPY packages/edge-bundle-contract/src ./packages/edge-bundle-contract/src");
+      expect(dockerfile).toContain("cd /app/packages/management-api && bun install --frozen-lockfile");
+    }
+  });
+
   test("release resolver falls back to the latest component release containing every requested asset", () => {
     const releases = JSON.stringify([
       {
