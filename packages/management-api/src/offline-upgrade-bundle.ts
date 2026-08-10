@@ -18,7 +18,8 @@ import {
 } from "./release-manifest";
 
 const GH_CAPABILITY_TIMEOUT_MS = 10_000;
-const GH_VERIFICATION_TIMEOUT_MS = 60_000;
+// Released binaries can take more than a minute to hash on production storage.
+const GH_VERIFICATION_TIMEOUT_MS = 2 * 60_000;
 
 type BundleOwner = {
   uid: number;

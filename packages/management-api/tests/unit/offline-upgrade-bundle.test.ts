@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { createHash } from "node:crypto";
 import {
   chmodSync,
@@ -187,6 +187,17 @@ describe("offline upgrade bundle", () => {
       expect(call).toContain("--source-ref refs/heads/main");
       expect(call).toContain(`--source-digest ${"a".repeat(40)}`);
       expect(call).toContain("--deny-self-hosted-runners");
+    }
+  });
+
+  test("allows two minutes for each bounded offline attestation verification", async () => {
+    const fixture = bundleFixture();
+    const timeout = spyOn(globalThis, "setTimeout");
+    try {
+      await loadFixture(fixture);
+      expect(timeout.mock.calls.filter((call) => call[1] === 2 * 60_000)).toHaveLength(7);
+    } finally {
+      timeout.mockRestore();
     }
   });
 

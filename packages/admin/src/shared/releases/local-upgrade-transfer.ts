@@ -51,6 +51,7 @@ const REMOTE_STAGE_ROOT = "/var/lib/supacloud/upgrade-staging";
 const REMOTE_RUN_ROOT = "/var/lib/supacloud/upgrade-runs";
 const REMOTE_LOG_ROOT = "/var/log/supacloud";
 const REMOTE_UPLOAD_ROOT = "/var/tmp";
+const REMOTE_COMMAND_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 const POLL_INTERVAL_MS = 2_000;
 const STATE_READ_ATTEMPTS = 3;
 const REMOTE_STATE_READ_TIMEOUT_MS = 15_000;
@@ -112,11 +113,12 @@ export function buildRemotePreflightScript(): string {
     const capabilityFlags = STRICT_GITHUB_CAPABILITY_FLAGS.join(" ");
     return [
         "set -euo pipefail",
-        "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        `PATH=${REMOTE_COMMAND_PATH}`,
         "export PATH",
         trustedInstalledGithubFunction(),
         "test -d /run/systemd/system || { echo 'systemd is not the active init system' >&2; exit 1; }",
-        "for tool in systemctl systemd-run sha256sum stat realpath tar file find sort awk grep timeout flock; do command -v \"$tool\" >/dev/null 2>&1 || { echo \"Required local-upgrade tool is missing: $tool\" >&2; exit 127; }; done",
+        "for tool in systemctl systemd-run sha256sum stat realpath tar file find sort awk grep tail timeout flock; do command -v \"$tool\" >/dev/null 2>&1 || { echo \"Required local-upgrade tool is missing: $tool\" >&2; exit 127; }; done",
+        "tail -n 0 -- /dev/null >/dev/null 2>&1 || { echo 'A tail implementation with -n and -- support is required' >&2; exit 1; }",
         "systemd-run --help | grep -Eq -- '(^|[[:space:]])--collect([=[:space:]]|$)' || { echo 'systemd-run --collect is required' >&2; exit 1; }",
         "test -d /run/lock || { echo '/run/lock is unavailable' >&2; exit 1; }",
         "test -d /var/lib/supacloud || { echo '/var/lib/supacloud is unavailable' >&2; exit 1; }",
@@ -243,7 +245,7 @@ function upgradeScriptSetup(paths: RemoteUpgradePaths): string[] {
     const bundleDirectory = `${paths.stage}/bundle`;
     return [
         "#!/usr/bin/env bash", "set -euo pipefail", "umask 077",
-        "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "export PATH",
+        `PATH=${REMOTE_COMMAND_PATH}`, "export PATH",
         `STAGE=${quoteShell(paths.stage)}`, `STATUS=${quoteShell(paths.status)}`, `LOG=${quoteShell(paths.log)}`,
         `BUNDLE=${quoteShell(bundleDirectory)}`,
         `MANAGEMENT_DIR=${quoteShell(`${bundleDirectory}/management-api`)}`,
@@ -603,9 +605,11 @@ async function observeRemoteState(
 
 async function remoteLogTail(ssh: SshTransport, paths: RemoteUpgradePaths): Promise<string> {
     const script = [
+        `PATH=${REMOTE_COMMAND_PATH}`,
+        "export PATH",
         `LOG=${quoteShell(paths.log)}`,
         "test -f \"$LOG\" && test ! -L \"$LOG\" || { echo 'Remote upgrade log is not a regular file' >&2; exit 1; }",
-        "tail -80 -- \"$LOG\"",
+        "tail -n 80 -- \"$LOG\"",
     ].join("\n");
     const output = await ssh.exec(rootCommand(script), 15_000);
     if (!output.success) throw remoteFailure("Unable to read the remote upgrade log", output);
