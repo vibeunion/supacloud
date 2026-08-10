@@ -4,6 +4,7 @@ import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } 
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createAdminTools } from "./index";
+import { formatCliError } from "./shared/cli";
 import packageMetadata from "../package.json" with { type: "json" };
 
 const PACKAGE_ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -182,5 +183,23 @@ describe("supacloud-admin process contract", () => {
         expect(result.output).toContain("DATABASE_URL=postgresql://admin:[REDACTED]@localhost/db");
         expect(result.output).toContain("Failed to remove remote upgrade helper: permission denied");
         expect(result.output).not.toContain("database-password");
+    });
+
+    test("preserves nested reconciliation summaries alongside cleanup failures", () => {
+        const reconciliation = new AggregateError(
+            [new Error("SSH stream closed")],
+            "Reconcile unit=upgrade.service stage=/stage status=/status log=/log drop=/drop; do not retry blindly",
+        );
+        const failure = new AggregateError(
+            [reconciliation, new Error("Local bundle cleanup failed")],
+            "Local upgrade and local bundle cleanup both failed",
+        );
+
+        const formatted = formatCliError(failure);
+        expect(formatted).toContain("Local upgrade and local bundle cleanup both failed");
+        expect(formatted).toContain("unit=upgrade.service stage=/stage status=/status log=/log drop=/drop");
+        expect(formatted).toContain("do not retry blindly");
+        expect(formatted).toContain("SSH stream closed");
+        expect(formatted).toContain("Local bundle cleanup failed");
     });
 });

@@ -1,14 +1,17 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
+    adoptRemoteDrop,
     awaitRemoteUpgrade,
     buildAdoptDropScript,
     buildCleanupUnstartedUpgradeScript,
     buildLocalUpgradeRunScript,
     buildRemotePreflightScript,
+    buildUpgradeLockScript,
+    failureRequiresRemoteReconciliation,
     parseRemotePreflight,
     remoteUpgradePreflight,
     startRemoteUpgrade,
@@ -24,22 +27,58 @@ const paths = {
 };
 
 type ScriptedResult = { success: boolean; stdout: string; stderr: string; code: number };
+type ScriptedResponse = ScriptedResult | Error;
 
 class ScriptedSsh {
     readonly commands: string[] = [];
+    readonly timeouts: number[] = [];
 
-    constructor(private readonly responses: ScriptedResult[]) {}
+    constructor(private readonly responses: ScriptedResponse[]) {}
 
-    async exec(command: string): Promise<ScriptedResult> {
+    async exec(command: string, timeoutMs: number): Promise<ScriptedResult> {
         this.commands.push(command);
+        this.timeouts.push(timeoutMs);
         const response = this.responses.shift();
         if (!response) throw new Error("Unexpected SSH command in lifecycle test");
+        if (response instanceof Error) throw response;
         return response;
     }
 }
 
 function remoteResult(stdout = "", success = true): ScriptedResult {
     return { success, stdout, stderr: success ? "" : "remote failure", code: success ? 0 : 1 };
+}
+
+type RemoteStateFixture = {
+    dropExists?: boolean;
+    logExists?: boolean;
+    serviceState: string;
+    stageExists?: boolean;
+    stageIsDirectory?: boolean;
+    status: string;
+    statusExists?: boolean;
+    unitExists?: boolean;
+    unitLoadState?: string;
+};
+
+function remoteState(fixture: RemoteStateFixture): ScriptedResult {
+    const statusExists = fixture.statusExists ?? fixture.status.length > 0;
+    const logExists = fixture.logExists ?? statusExists;
+    const unitExists = fixture.unitExists
+        ?? !["inactive", "unknown"].includes(fixture.serviceState);
+    const unitLoadState = fixture.unitLoadState ?? (unitExists ? "loaded" : "not-found");
+    return remoteResult([
+        `STATUS=${fixture.status}`,
+        `UNIT=${fixture.serviceState}`,
+        `STAGE_EXISTS=${fixture.stageExists ? "yes" : "no"}`,
+        `STAGE_DIRECTORY=${fixture.stageIsDirectory ?? fixture.stageExists ? "yes" : "no"}`,
+        `DROP_EXISTS=${fixture.dropExists ? "yes" : "no"}`,
+        `STATUS_EXISTS=${statusExists ? "yes" : "no"}`,
+        `LOG_EXISTS=${logExists ? "yes" : "no"}`,
+        `UNIT_EXISTS=${unitExists ? "yes" : "no"}`,
+        `UNIT_LOAD=${unitLoadState}`,
+        "",
+    ].join("\n"));
 }
 
 function fixtureFile(relativePath: string, index: number): LocalUpgradeFile {
@@ -109,11 +148,46 @@ describe("local upgrade remote runner", () => {
         expect(script).toContain("timeout 15s \"$GH\" attestation verify --help");
         expect(script).toContain("mode=$(stat -c '%a' \"$verifier\")");
         expect(script).toContain("trusted_installed_gh \"$GH\"");
+        expect(script).toContain("timeout flock");
         expect(script).not.toContain("Required local-upgrade tool is missing: jq");
         expect(parseRemotePreflight("ARCH=arm64\nVERIFIER=installed\n")).toEqual({
             architecture: "arm64",
             verifierProvisioning: "installed",
         });
+    });
+
+    test("serializes independent run IDs with one host-wide upgrade lock", () => {
+        const firstRun = runScript(preparedBundle("amd64", "installed"), "amd64");
+        const secondRun = buildLocalUpgradeRunScript({
+            ...paths,
+            stage: "/var/lib/supacloud/upgrade-staging/22222222-2222-4222-8222-222222222222",
+            status: "/var/lib/supacloud/upgrade-runs/22222222-2222-4222-8222-222222222222.status",
+            log: "/var/log/supacloud/upgrade-22222222-2222-4222-8222-222222222222.log",
+            unit: "supacloud-upgrade-22222222-2222-4222-8222-222222222222.service",
+        }, preparedBundle("amd64", "installed"), {
+            managementVersion: "0.50.31", edgeRuntimeVersion: "0.16.8",
+        }, "amd64");
+        expect(firstRun).toContain("/run/lock/supacloud-upgrade.lock");
+        expect(secondRun).toContain("/run/lock/supacloud-upgrade.lock");
+        if (!Bun.which("flock")) return;
+
+        const fixtureRoot = realpathSync(mkdtempSync(join(tmpdir(), "supacloud-upgrade-lock-")));
+        const lockPath = join(fixtureRoot, "upgrade.lock");
+        const execution = Bun.spawnSync(["bash", "-c", [
+            "umask 077",
+            `exec 8>${JSON.stringify(lockPath)}`,
+            "flock -n 8",
+            "set +e",
+            `( ${buildUpgradeLockScript(lockPath)} )`,
+            "code=$?",
+            "test \"$code\" -eq 75",
+        ].join("\n")]);
+        try {
+            expect(execution.exitCode).toBe(0);
+            expect(execution.stderr.toString()).toContain("already running");
+        } finally {
+            rmSync(fixtureRoot, { recursive: true, force: true });
+        }
     });
 
     test("trusts only root-owned installed verifiers without writable or special permission bits", () => {
@@ -261,6 +335,56 @@ describe("local upgrade remote runner", () => {
         }
     });
 
+    test("converts TERM into a failed transaction and runs stage cleanup", () => {
+        const script = runScript(preparedBundle("amd64", "bundled"), "amd64");
+        const lifecycleFunctions = [
+            shellFunctionDefinition(script, "write_status"),
+            shellFunctionDefinition(script, "finish_upgrade"),
+        ].join("\n");
+        const fixtureRoot = realpathSync(mkdtempSync(join(tmpdir(), "supacloud-runtime-term-")));
+        const stage = join(fixtureRoot, "stage");
+        const status = join(fixtureRoot, "run.status");
+        mkdirSync(stage, { mode: 0o700 });
+        const execution = Bun.spawnSync({
+            cmd: ["bash", "-c", [
+                "set -euo pipefail", lifecycleFunctions,
+                "trap finish_upgrade EXIT", "trap 'exit 143' TERM", "kill -TERM $$",
+            ].join("\n")],
+            env: { ...process.env, STAGE: stage, STATUS: status },
+        });
+        try {
+            expect(execution.exitCode).toBe(143);
+            expect(existsSync(stage)).toBe(false);
+            expect(readFileSync(status, "utf8").trim()).toBe("FAILED:143:TRANSACTION");
+        } finally {
+            rmSync(fixtureRoot, { recursive: true, force: true });
+        }
+    });
+
+    test("ignores a second TERM while the finalizer publishes success", () => {
+        const script = runScript(preparedBundle("amd64", "bundled"), "amd64");
+        const finishFunction = shellFunctionDefinition(script, "finish_upgrade");
+        const fixtureRoot = realpathSync(mkdtempSync(join(tmpdir(), "supacloud-finalizer-term-")));
+        const stage = join(fixtureRoot, "stage");
+        const status = join(fixtureRoot, "run.status");
+        mkdirSync(stage, { mode: 0o700 });
+        const execution = Bun.spawnSync({
+            cmd: ["bash", "-c", [
+                "set -euo pipefail",
+                "write_status() { printf '%s\\n' \"$1\" > \"$STATUS\"; if [ \"$1\" = SUCCEEDED ]; then kill -TERM \"$$\"; fi; }",
+                finishFunction, "trap finish_upgrade EXIT", "trap 'exit 143' TERM", "exit 0",
+            ].join("\n")],
+            env: { ...process.env, STAGE: stage, STATUS: status },
+        });
+        try {
+            expect(execution.exitCode).toBe(0);
+            expect(existsSync(stage)).toBe(false);
+            expect(readFileSync(status, "utf8").trim()).toBe("SUCCEEDED");
+        } finally {
+            rmSync(fixtureRoot, { recursive: true, force: true });
+        }
+    });
+
     test("uses a remote verifier when capable and uploads the pinned verifier only when needed", () => {
         const installed = runScript(preparedBundle("amd64", "installed"), "amd64");
         const bundled = runScript(preparedBundle("amd64", "bundled"), "amd64");
@@ -332,6 +456,100 @@ describe("local upgrade remote runner", () => {
         }
     });
 
+    test("rolls back an adopted stage and preserves signal exit codes", () => {
+        for (const [signal, expectedCode] of [["HUP", 129], ["INT", 130], ["TERM", 143]] as const) {
+            const fixtureRoot = realpathSync(mkdtempSync(join(tmpdir(), `supacloud-adopt-${signal.toLowerCase()}-`)));
+            const fixturePaths = {
+                drop: join(fixtureRoot, "drop"), stage: join(fixtureRoot, "stage"),
+                status: join(fixtureRoot, "run.status"), log: join(fixtureRoot, "run.log"),
+                unit: "supacloud-upgrade-test.service",
+            };
+            mkdirSync(fixturePaths.drop, { mode: 0o700 });
+            const execution = Bun.spawnSync(["bash", "-c", [
+                "install() { return 0; }", "systemctl() { return 1; }",
+                `chown() { kill -${signal} "$$"; }`,
+                buildAdoptDropScript(fixturePaths),
+            ].join("\n")]);
+            try {
+                expect(execution.exitCode).toBe(expectedCode);
+                expect(execution.stderr.toString()).toContain(`exit ${expectedCode}`);
+                expect(existsSync(fixturePaths.stage)).toBe(false);
+                expect(existsSync(fixturePaths.status)).toBe(false);
+                expect(existsSync(fixturePaths.log)).toBe(false);
+            } finally {
+                rmSync(fixtureRoot, { recursive: true, force: true });
+            }
+        }
+    });
+
+    test("continues from PREPARED when the adoption SSH result is ambiguous", async () => {
+        const ssh = new ScriptedSsh([
+            new Error("SSH stream closed after adoption"),
+            remoteState({ status: "PREPARED", serviceState: "inactive", stageExists: true }),
+        ]);
+
+        await expect(adoptRemoteDrop(ssh as never, paths)).resolves.toBeUndefined();
+        expect(ssh.commands).toHaveLength(2);
+        expect(ssh.commands[1]).toContain(paths.stage);
+        expect(ssh.commands[1]).toContain(paths.drop);
+    });
+
+    test("retains remote evidence when interrupted adoption cannot be reconciled", async () => {
+        const ssh = new ScriptedSsh([
+            new Error("SSH stream closed after adoption"),
+            new Error("read-back connection failed"),
+            new Error("read-back connection failed"),
+            new Error("read-back connection failed"),
+        ]);
+
+        const failure = await adoptRemoteDrop(ssh as never, paths).catch((error: unknown) => error);
+        expect(failure).toBeInstanceOf(AggregateError);
+        expect(failureRequiresRemoteReconciliation(failure)).toBe(true);
+        expect(String(failure)).toContain("do not retry blindly");
+        for (const retainedPath of [paths.stage, paths.status, paths.log, paths.drop, paths.unit]) {
+            expect(String(failure)).toContain(retainedPath);
+        }
+    });
+
+    test("does not clean a drop after an interrupted adoption reads back pre-operation state", async () => {
+        const ssh = new ScriptedSsh([
+            new Error("SSH stream closed before adoption returned"),
+            remoteState({
+                status: "",
+                serviceState: "inactive",
+                dropExists: true,
+                statusExists: false,
+                logExists: false,
+                unitExists: false,
+            }),
+        ]);
+
+        const failure = await adoptRemoteDrop(ssh as never, paths).catch((error: unknown) => error);
+        expect(failureRequiresRemoteReconciliation(failure)).toBe(true);
+        expect(String(failure)).toContain("outcome is still uncertain");
+        expect(ssh.commands).toHaveLength(2);
+        expect(ssh.commands.some((command) => command.includes(`rm -rf -- '${paths.drop}'`))).toBe(false);
+    });
+
+    test("requires reconciliation when adoption rollback leaves remote records", async () => {
+        const ssh = new ScriptedSsh([
+            remoteResult("", false),
+            remoteState({
+                status: "",
+                serviceState: "inactive",
+                dropExists: true,
+                statusExists: true,
+                logExists: false,
+                unitExists: false,
+            }),
+        ]);
+
+        const failure = await adoptRemoteDrop(ssh as never, paths).catch((error: unknown) => error);
+        expect(failureRequiresRemoteReconciliation(failure)).toBe(true);
+        expect(String(failure)).toContain(paths.status);
+        expect(String(failure)).toContain("do not retry blindly");
+    });
+
     test("pins the temporary Linux GitHub verifier by architecture", () => {
         const arm64 = runScript(preparedBundle("arm64", "bundled"), "arm64");
 
@@ -342,7 +560,9 @@ describe("local upgrade remote runner", () => {
     test("does not delete an adopted stage while systemd is still activating", async () => {
         const ssh = new ScriptedSsh([
             remoteResult("", false),
-            remoteResult("STATUS=PREPARED\nUNIT=activating\n"),
+            remoteState({
+                status: "PREPARED", serviceState: "activating", stageExists: true, unitExists: true,
+            }),
         ]);
 
         await expect(startRemoteUpgrade(ssh as never, paths)).resolves.toBeUndefined();
@@ -350,10 +570,58 @@ describe("local upgrade remote runner", () => {
         expect(ssh.commands.some((command) => command.includes("rm -rf --") && command.includes(paths.stage))).toBe(false);
     });
 
+    test("continues monitoring when start disconnects after the unit begins", async () => {
+        const ssh = new ScriptedSsh([
+            new Error("SSH stream closed after systemd-run"),
+            remoteState({ status: "RUNNING", serviceState: "active", stageExists: true }),
+        ]);
+
+        await expect(startRemoteUpgrade(ssh as never, paths)).resolves.toBeUndefined();
+        expect(ssh.commands).toHaveLength(2);
+        expect(ssh.commands.some((command) => command.includes("rm -rf --") && command.includes(paths.stage))).toBe(false);
+    });
+
+    test("does not clean PREPARED state while an inactive transient unit still exists", async () => {
+        const ssh = new ScriptedSsh([
+            new Error("SSH stream closed during systemd-run"),
+            remoteState({
+                status: "PREPARED",
+                serviceState: "inactive",
+                stageExists: true,
+                unitExists: true,
+            }),
+        ]);
+
+        const failure = await startRemoteUpgrade(ssh as never, paths).catch((error: unknown) => error);
+        expect(failureRequiresRemoteReconciliation(failure)).toBe(true);
+        expect(ssh.commands).toHaveLength(2);
+        expect(ssh.commands.some((command) => command.includes("rm -rf --") && command.includes(paths.stage))).toBe(false);
+    });
+
+    test("does not clean PREPARED state after an interrupted start remains inactive", async () => {
+        const ssh = new ScriptedSsh([
+            new Error("SSH stream closed before systemd-run returned"),
+            remoteState({
+                status: "PREPARED",
+                serviceState: "inactive",
+                stageExists: true,
+                unitExists: false,
+            }),
+        ]);
+
+        const failure = await startRemoteUpgrade(ssh as never, paths).catch((error: unknown) => error);
+        expect(failureRequiresRemoteReconciliation(failure)).toBe(true);
+        expect(String(failure)).toContain("outcome is still uncertain");
+        expect(ssh.commands).toHaveLength(2);
+        expect(ssh.commands.some((command) => command.includes("rm -rf --") && command.includes(paths.stage))).toBe(false);
+    });
+
     test("preserves start and cleanup failures when an unstarted unit cannot be removed", async () => {
         const ssh = new ScriptedSsh([
             remoteResult("", false),
-            remoteResult("STATUS=PREPARED\nUNIT=inactive\n"),
+            remoteState({
+                status: "PREPARED", serviceState: "inactive", stageExists: true, unitExists: false,
+            }),
             remoteResult("", false),
         ]);
 
@@ -362,6 +630,9 @@ describe("local upgrade remote runner", () => {
         const diagnostics = (failure as AggregateError).errors.map(String).join("\n");
         expect(diagnostics).toContain("Unable to start the transient upgrade unit");
         expect(diagnostics).toContain("Unable to clean an unstarted local upgrade");
+        for (const retainedPath of [paths.stage, paths.status, paths.log, paths.drop, paths.unit]) {
+            expect(String(failure)).toContain(retainedPath);
+        }
     });
 
     test("reports stage cleanup failure after still removing unstarted records", () => {
@@ -388,20 +659,78 @@ describe("local upgrade remote runner", () => {
         }
     });
 
+    test("reconnects after a transient lifecycle observation failure", async () => {
+        const ssh = new ScriptedSsh([
+            new Error("SSH connection reset while monitoring"),
+            remoteState({ status: "SUCCEEDED", serviceState: "inactive", unitExists: false }),
+            remoteResult("transaction complete\n"),
+            remoteResult(),
+        ]);
+
+        await expect(awaitRemoteUpgrade(ssh as never, paths)).resolves.toContain("Upgrade done");
+        expect(ssh.commands).toHaveLength(4);
+    });
+
     test("retains status and logs when a successful transaction cannot clean its stage", async () => {
         const ssh = new ScriptedSsh([
-            remoteResult("STATUS=FAILED:1:CLEANUP_AFTER_TRANSACTION\nUNIT=failed\n"),
+            remoteState({
+                status: "FAILED:1:CLEANUP_AFTER_TRANSACTION",
+                serviceState: "failed",
+                stageExists: true,
+            }),
             remoteResult("transaction completed; stage cleanup failed\n"),
         ]);
 
-        await expect(awaitRemoteUpgrade(ssh as never, paths)).rejects.toThrow(`retained status=${paths.status}`);
+        const failure = await awaitRemoteUpgrade(ssh as never, paths).catch((error: unknown) => error);
+        expect(failureRequiresRemoteReconciliation(failure)).toBe(true);
+        expect(String(failure)).toContain("transaction completed but staging cleanup is incomplete");
+        for (const retainedPath of [paths.stage, paths.status, paths.log, paths.drop, paths.unit]) {
+            expect(String(failure)).toContain(retainedPath);
+        }
         expect(ssh.commands).toHaveLength(2);
         expect(ssh.commands.some((command) => command.includes(`rm -f -- '${paths.status}'`))).toBe(false);
     });
 
+    test("retains evidence when a failed transaction log cannot be read", async () => {
+        const ssh = new ScriptedSsh([
+            remoteState({
+                status: "FAILED:9:TRANSACTION",
+                serviceState: "failed",
+                stageExists: false,
+            }),
+            new Error("SSH stream closed while reading the failed transaction log"),
+        ]);
+
+        const failure = await awaitRemoteUpgrade(ssh as never, paths).catch((error: unknown) => error);
+        expect(failureRequiresRemoteReconciliation(failure)).toBe(true);
+        expect(String(failure)).toContain("retained log could not be read");
+        expect(String(failure)).toContain(paths.status);
+        expect(String(failure)).toContain(paths.log);
+        expect(String(failure)).toContain("do not retry blindly");
+        expect(ssh.commands).toHaveLength(2);
+    });
+
+    test("waits for a failed finalizer to stop before validating its stage", async () => {
+        const ssh = new ScriptedSsh([
+            remoteState({
+                status: "FAILED:9:TRANSACTION", serviceState: "active", stageExists: true,
+            }),
+            remoteState({
+                status: "FAILED:9:TRANSACTION", serviceState: "failed", stageExists: false,
+            }),
+            remoteResult("transaction failed\n"),
+            remoteResult(),
+        ]);
+
+        const failure = await awaitRemoteUpgrade(ssh as never, paths).catch((error: unknown) => error);
+        expect(failureRequiresRemoteReconciliation(failure)).toBe(false);
+        expect(String(failure)).toContain("FAILED:9:TRANSACTION");
+        expect(ssh.commands).toHaveLength(4);
+    });
+
     test("removes terminal records only after a completed unit publishes success", async () => {
         const ssh = new ScriptedSsh([
-            remoteResult("STATUS=SUCCEEDED\nUNIT=inactive\n"),
+            remoteState({ status: "SUCCEEDED", serviceState: "inactive", unitExists: false }),
             remoteResult("upgrade committed\n"),
             remoteResult(),
         ]);
@@ -410,5 +739,129 @@ describe("local upgrade remote runner", () => {
         expect(ssh.commands).toHaveLength(3);
         expect(ssh.commands[2]).toContain(paths.status);
         expect(ssh.commands[2]).toContain(paths.log);
+    });
+
+    test("accepts success after a normal stop or collected transient unit", async () => {
+        for (const [serviceState, unitLoadState, unitExists] of [
+            ["inactive", "loaded", true],
+            ["unknown", "not-found", false],
+        ] as const) {
+            const ssh = new ScriptedSsh([
+                remoteState({ status: "SUCCEEDED", serviceState, unitLoadState, unitExists }),
+                remoteResult("upgrade committed\n"),
+                remoteResult(),
+            ]);
+
+            await expect(awaitRemoteUpgrade(ssh as never, paths)).resolves.toContain("Upgrade done");
+            expect(ssh.commands).toHaveLength(3);
+        }
+    });
+
+    test("requires reconciliation for abnormal or ambiguous SUCCEEDED unit states", async () => {
+        for (const [serviceState, unitLoadState] of [
+            ["failed", "loaded"],
+            ["maintenance", "loaded"],
+            ["unknown", "loaded"],
+            ["inactive", "unknown"],
+        ] as const) {
+            const ssh = new ScriptedSsh([
+                remoteState({ status: "SUCCEEDED", serviceState, unitLoadState }),
+            ]);
+
+            const failure = await awaitRemoteUpgrade(ssh as never, paths).catch((error: unknown) => error);
+            expect(failureRequiresRemoteReconciliation(failure)).toBe(true);
+            expect(String(failure)).toContain(`state=${serviceState} load=${unitLoadState}`);
+            expect(String(failure)).toContain("do not retry blindly");
+            expect(ssh.commands).toHaveLength(1);
+        }
+    });
+
+    test("requires reconciliation before reading or deleting incomplete terminal evidence", async () => {
+        for (const state of [
+            remoteState({ status: "SUCCEEDED", serviceState: "inactive", logExists: false }),
+            remoteState({ status: "SUCCEEDED", serviceState: "inactive", stageExists: true }),
+            remoteState({ status: "FAILED:9:TRANSACTION", serviceState: "failed", logExists: false }),
+            remoteState({ status: "FAILED:9:TRANSACTION", serviceState: "failed", stageExists: true }),
+        ]) {
+            const ssh = new ScriptedSsh([state]);
+
+            const failure = await awaitRemoteUpgrade(ssh as never, paths).catch((error: unknown) => error);
+            expect(failureRequiresRemoteReconciliation(failure)).toBe(true);
+            expect(String(failure)).toContain("terminal evidence is incomplete or inconsistent");
+            expect(String(failure)).toContain("do not retry blindly");
+            expect(ssh.commands).toHaveLength(1);
+        }
+    });
+
+    test("requires reconciliation when successful record cleanup disconnects", async () => {
+        const ssh = new ScriptedSsh([
+            remoteState({ status: "SUCCEEDED", serviceState: "inactive", unitExists: false }),
+            remoteResult("upgrade committed\n"),
+            new Error("SSH stream closed during record cleanup"),
+        ]);
+
+        const failure = await awaitRemoteUpgrade(ssh as never, paths).catch((error: unknown) => error);
+        expect(failureRequiresRemoteReconciliation(failure)).toBe(true);
+        expect(String(failure)).toContain("cleanup could not be confirmed");
+        expect(String(failure)).toContain(paths.status);
+        expect(String(failure)).toContain(paths.log);
+    });
+
+    test("requires reconciliation when a successful log disappears after state read-back", async () => {
+        const ssh = new ScriptedSsh([
+            remoteState({ status: "SUCCEEDED", serviceState: "inactive", unitExists: false }),
+            remoteResult("", false),
+        ]);
+
+        const failure = await awaitRemoteUpgrade(ssh as never, paths).catch((error: unknown) => error);
+        expect(failureRequiresRemoteReconciliation(failure)).toBe(true);
+        expect(String(failure)).toContain("retained log could not be read");
+        expect(String(failure)).toContain("do not retry blindly");
+        expect(ssh.commands).toHaveLength(2);
+    });
+
+    test("stops observing a nonterminal unit without stopping the remote transaction", async () => {
+        const now = spyOn(Date, "now")
+            .mockReturnValueOnce(0)
+            .mockReturnValueOnce(30 * 60_000 - 1_000)
+            .mockReturnValue(30 * 60_000);
+        const ssh = new ScriptedSsh([
+            remoteState({ status: "RUNNING", serviceState: "active", stageExists: true }),
+        ]);
+
+        try {
+            const failure = await awaitRemoteUpgrade(ssh as never, paths).catch((error: unknown) => error);
+            expect(failureRequiresRemoteReconciliation(failure)).toBe(true);
+            expect(String(failure)).toContain("observation deadline");
+            expect(ssh.commands).toHaveLength(1);
+            expect(ssh.timeouts).toEqual([1_000]);
+            expect(ssh.commands[0]).not.toContain("systemctl stop");
+        } finally {
+            now.mockRestore();
+        }
+    });
+
+    test("caps the final poll delay at the remaining observation window", async () => {
+        const timeout = spyOn(globalThis, "setTimeout");
+        const now = spyOn(Date, "now")
+            .mockReturnValueOnce(0)
+            .mockReturnValueOnce(0)
+            .mockReturnValueOnce(30 * 60_000 - 1)
+            .mockReturnValueOnce(30 * 60_000 - 1)
+            .mockReturnValue(30 * 60_000);
+        const ssh = new ScriptedSsh([
+            remoteState({ status: "RUNNING", serviceState: "active", stageExists: true }),
+        ]);
+
+        try {
+            const failure = await awaitRemoteUpgrade(ssh as never, paths).catch((error: unknown) => error);
+            expect(failureRequiresRemoteReconciliation(failure)).toBe(true);
+            expect(String(failure)).toContain("observation deadline");
+            expect(ssh.commands).toHaveLength(1);
+            expect(timeout.mock.calls.some((call) => call[1] === 1)).toBe(true);
+        } finally {
+            now.mockRestore();
+            timeout.mockRestore();
+        }
     });
 });
