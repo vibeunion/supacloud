@@ -202,7 +202,7 @@ describe("edge_functions CLI tool", () => {
         expect(result.content[0].text).toContain("Function public-hook deployed");
     });
 
-    test("uses an explicitly labelled legacy PATCH when an old server omits policy confirmation", async () => {
+    test("rejects an unconfirmed bundle policy without a follow-up PATCH", async () => {
         const calls: Array<{ method: string; path: string; body: unknown }> = [];
         const { callback } = captureEdgeFunctionsTool({
             post: async (path: string, body: unknown) => {
@@ -211,7 +211,7 @@ describe("edge_functions CLI tool", () => {
             },
             patch: async (path: string, body: unknown) => {
                 calls.push({ method: "patch", path, body });
-                return { ok: true, status: 200, data: { verify_jwt: false } };
+                throw new Error("deploy must not patch policy after activation");
             },
         });
 
@@ -225,31 +225,39 @@ describe("edge_functions CLI tool", () => {
 
         expect(calls.map(({ method, path }) => ({ method, path }))).toEqual([
             { method: "post", path: "/v1/projects/proj/functions/legacy-hook/bundle" },
-            { method: "patch", path: "/v1/projects/proj/functions/legacy-hook/config" },
         ]);
-        expect(response.content[0].text).toContain("Legacy non-atomic compatibility path");
+        expect(response.content[0].text).toStartWith("❌ Unsafe deployment receipt");
+        expect(response.content[0].text).toContain("did not confirm the requested function policy");
+        expect(response.content[0].text).toContain("No follow-up PATCH was attempted");
+        expect(response.content[0].text).toContain("code and policy must be activated atomically");
     });
 
-    test("reports an unsafe partial deployment when legacy policy PATCH cannot be confirmed", async () => {
+    test("rejects a mismatched single-file policy without a follow-up PATCH", async () => {
+        const calls: Array<{ method: string; path: string }> = [];
         const { callback } = captureEdgeFunctionsTool({
-            post: async () => ({ ok: true, status: 200, data: { success: true } }),
-            patch: async () => ({ ok: false, status: 503, data: { message: "unavailable" } }),
+            post: async (path: string) => {
+                calls.push({ method: "post", path });
+                return { ok: true, status: 200, data: { success: true, verify_jwt: true } };
+            },
+            patch: async (path: string) => {
+                calls.push({ method: "patch", path });
+                throw new Error("deploy must not patch policy after activation");
+            },
         });
 
         const response = await callback({
-            action: "deploy_bundle",
+            action: "deploy",
             ref: "proj",
-            slug: "legacy-hook-fail",
-            files: { "index.ts": "export default {}" },
+            slug: "public-hook-mismatch",
+            code: "export default { fetch: () => new Response('ok') }",
             verify_jwt: false,
         });
 
-        expect(response.content[0].text).toContain("Partial deployment (unsafe)");
-        expect(response.content[0].text).toContain("POST succeeded");
-        expect(response.content[0].text).toContain("code/bundle was deployed");
-        expect(response.content[0].text).toContain("function policy was not confirmed");
-        expect(response.content[0].text).toContain("legacy PATCH fallback failed");
-        expect(response.content[0].text).not.toContain("Deployment failed");
+        expect(calls).toEqual([
+            { method: "post", path: "/v1/projects/proj/functions/public-hook-mismatch" },
+        ]);
+        expect(response.content[0].text).toStartWith("❌ Unsafe deployment receipt");
+        expect(response.content[0].text).toContain("No follow-up PATCH was attempted");
     });
 });
 
