@@ -1,6 +1,6 @@
 {
   "name": "@supacloud/admin",
-  "version": "0.7.6",
+  "version": "0.7.7",
   "description": "Platform administration CLI for SupaCloud operators",
   "type": "module",
   "main": "./dist/index.js",
