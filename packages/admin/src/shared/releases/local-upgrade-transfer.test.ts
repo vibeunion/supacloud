@@ -251,6 +251,31 @@ describe("local upgrade remote runner", () => {
         expect(script).not.toContain("jq ");
     });
 
+    test("executes transfer verification with nounset enabled", () => {
+        const script = runScript(preparedBundle("amd64", "bundled"), "amd64");
+        const verifyTransfer = shellFunctionDefinition(script, "verify_transfer");
+        const execution = Bun.spawnSync({
+            cmd: ["bash", "-c", [
+                "set -euo pipefail",
+                "stat() { test \"$3\" = \"$EXPECTED_PATH\"; printf '%s\\n' \"$FILE_SIZE\"; }",
+                "sha256sum() { test \"$1\" = \"$EXPECTED_PATH\"; printf '%s  %s\\n' \"$FILE_SHA\" \"$1\"; }",
+                verifyTransfer,
+                "verify_transfer \"$RELATIVE\" \"$FILE_SIZE\" \"$FILE_SHA\"",
+            ].join("\n")],
+            env: {
+                ...process.env,
+                EXPECTED_PATH: "/stage/bundle/management-api/artifact",
+                FILE_SHA: "a".repeat(64),
+                FILE_SIZE: "1234",
+                RELATIVE: "bundle/management-api/artifact",
+                STAGE: "/stage",
+            },
+        });
+
+        expect(execution.exitCode).toBe(0);
+        expect(execution.stderr.toString()).toBe("");
+    });
+
     test("keeps the signed bundle immutable and reports cleanup failures as failures", () => {
         const script = runScript(preparedBundle("amd64", "bundled"), "amd64");
 

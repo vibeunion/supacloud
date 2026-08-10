@@ -225,7 +225,7 @@ function finishUpgradeFunction(): string {
     ].join("\n");
 }
 
-function upgradeScriptSetup(paths: RemoteUpgradePaths, bundle: PreparedLocalUpgradeBundle): string[] {
+function upgradeScriptSetup(paths: RemoteUpgradePaths): string[] {
     const bundleDirectory = `${paths.stage}/bundle`;
     return [
         "#!/usr/bin/env bash", "set -euo pipefail", "umask 077",
@@ -276,7 +276,7 @@ function upgradeScriptFilesystemChecks(bundle: PreparedLocalUpgradeBundle): stri
 function upgradeScriptTransferVerification(bundle: PreparedLocalUpgradeBundle): string[] {
     const files = [...bundle.files, ...(bundle.verifierArchive ? [bundle.verifierArchive] : [])];
     return [
-        "verify_transfer() { local relative=$1 expected_size=$2 expected_sha=$3 path=$STAGE/$relative; test \"$(stat -c '%s' \"$path\")\" = \"$expected_size\"; test \"$(sha256sum \"$path\" | awk '{print $1}')\" = \"$expected_sha\"; }",
+        "verify_transfer() { local relative=$1 expected_size=$2 expected_sha=$3; local path=$STAGE/$relative; test \"$(stat -c '%s' \"$path\")\" = \"$expected_size\"; test \"$(sha256sum \"$path\" | awk '{print $1}')\" = \"$expected_sha\"; }",
         ...files.map((file) => (
             `verify_transfer ${quoteShell(file.relativePath)} ${file.size} ${quoteShell(file.sha256)}`
         )),
@@ -347,7 +347,7 @@ export function buildLocalUpgradeRunScript(
     architecture: UpgradeArchitecture,
 ): string {
     return [
-        ...upgradeScriptSetup(paths, bundle),
+        ...upgradeScriptSetup(paths),
         ...upgradeScriptFilesystemChecks(bundle),
         ...upgradeScriptTransferVerification(bundle),
         ...upgradeScriptVerifier(paths, bundle, architecture),
