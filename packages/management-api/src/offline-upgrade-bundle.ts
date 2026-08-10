@@ -16,6 +16,7 @@ import {
   parseReleaseManifest,
   releaseAssetSizeLimit,
 } from "./release-manifest";
+import { withSigstoreVerificationDirectory } from "./sigstore-trusted-root";
 
 const GH_CAPABILITY_TIMEOUT_MS = 10_000;
 // Released binaries can take more than a minute to hash on production storage.
@@ -183,6 +184,7 @@ function supportsStrictOfflineVerification(capabilityResult: GithubCliResult): b
   const helpTokens = `${capabilityResult.stdout}\n${capabilityResult.stderr}`.split(/\s+/);
   const requiredFlags = [
     "--bundle",
+    "--custom-trusted-root",
     "--signer-workflow",
     "--source-ref",
     "--source-digest",
@@ -202,11 +204,16 @@ async function assertStrictOfflineVerifier(): Promise<void> {
   }
 }
 
-async function verifyOfflineAttestation(prepared: PreparedOfflineRelease, artifactPath: string): Promise<void> {
+async function verifyOfflineAttestation(
+  prepared: PreparedOfflineRelease,
+  artifactPath: string,
+  trustedRootPath: string,
+): Promise<void> {
   const attestationPath = requiredPath(prepared.assetPaths, RELEASE_ATTESTATION_NAME);
   const verification = await runGithubCliWithTimeout([
     "attestation", "verify", artifactPath,
     "--bundle", attestationPath,
+    "--custom-trusted-root", trustedRootPath,
     "--repo", RELEASE_REPOSITORY,
     "--signer-workflow", RELEASE_SIGNER_WORKFLOW,
     "--source-ref", RELEASE_SOURCE_REF,
@@ -305,10 +312,11 @@ function assertTotalBundleSize(preparedReleases: PreparedOfflineRelease[]): void
 async function verifiedChecksums(
   prepared: PreparedOfflineRelease,
   manifest: ReleaseManifest,
+  trustedRootPath: string,
 ): Promise<{ text: string; byName: Map<string, string> }> {
   const checksumsPath = requiredPath(prepared.assetPaths, RELEASE_CHECKSUMS_NAME);
   assertManifestArtifact(checksumsPath, manifest, RELEASE_CHECKSUMS_NAME);
-  await verifyOfflineAttestation(prepared, checksumsPath);
+  await verifyOfflineAttestation(prepared, checksumsPath, trustedRootPath);
   const text = readFileSync(checksumsPath, "utf8");
   return { text, byName: parseReleaseChecksums(text, manifest) };
 }
@@ -317,6 +325,7 @@ async function verifySelectedAssets(
   prepared: PreparedOfflineRelease,
   manifest: ReleaseManifest,
   checksums: Map<string, string>,
+  trustedRootPath: string,
 ): Promise<void> {
   for (const name of prepared.selectedAssetNames) {
     const assetPath = requiredPath(prepared.assetPaths, name);
@@ -324,19 +333,22 @@ async function verifySelectedAssets(
     if (checksums.get(name) !== manifestArtifact(manifest, name).sha256) {
       throw new Error(`${name} does not match SHA256SUMS`);
     }
-    await verifyOfflineAttestation(prepared, assetPath);
+    await verifyOfflineAttestation(prepared, assetPath, trustedRootPath);
   }
 }
 
-async function loadOfflineRelease(prepared: PreparedOfflineRelease): Promise<OfflineReleaseBundle> {
+async function loadOfflineRelease(
+  prepared: PreparedOfflineRelease,
+  trustedRootPath: string,
+): Promise<OfflineReleaseBundle> {
   const manifestPath = requiredPath(prepared.assetPaths, RELEASE_MANIFEST_NAME);
-  await verifyOfflineAttestation(prepared, manifestPath);
+  await verifyOfflineAttestation(prepared, manifestPath, trustedRootPath);
   const manifest = parseReleaseManifest(prepared.manifestText, {
     component: prepared.component,
     version: prepared.version,
   });
-  const checksums = await verifiedChecksums(prepared, manifest);
-  await verifySelectedAssets(prepared, manifest, checksums.byName);
+  const checksums = await verifiedChecksums(prepared, manifest, trustedRootPath);
+  await verifySelectedAssets(prepared, manifest, checksums.byName, trustedRootPath);
   return {
     directory: prepared.directory,
     manifest,
@@ -375,9 +387,11 @@ export async function loadOfflineUpgradeBundle(request: OfflineUpgradeBundleRequ
   const prepared = prepareUpgradeReleases(request, owner);
   assertTotalBundleSize([prepared.management, ...(prepared.edgeRuntime ? [prepared.edgeRuntime] : [])]);
   await assertStrictOfflineVerifier();
-  const management = await loadOfflineRelease(prepared.management);
-  const edgeRuntime = prepared.edgeRuntime
-    ? await loadOfflineRelease(prepared.edgeRuntime)
-    : null;
-  return { management, edgeRuntime };
+  return withSigstoreVerificationDirectory(async ({ trustedRootPath }) => {
+    const management = await loadOfflineRelease(prepared.management, trustedRootPath);
+    const edgeRuntime = prepared.edgeRuntime
+      ? await loadOfflineRelease(prepared.edgeRuntime, trustedRootPath)
+      : null;
+    return { management, edgeRuntime };
+  });
 }

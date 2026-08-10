@@ -335,11 +335,14 @@ Omit `edge-runtime/` and `--edge-runtime-version` together for a
 Management/Web Console-only transaction. When an Edge Runtime version is
 specified, both are mandatory. The offline path reads no GitHub release
 metadata and downloads no release asset. It verifies the supplied provenance
-bundles locally with `gh attestation verify`, then checks the signed manifest,
-`SHA256SUMS`, exact asset size and digest before staging anything. A missing or
-outdated verifier, an extra file, or a component/version mismatch fails before
-the upgrade transaction. Management and Edge Runtime may come from different
-valid release commits; each component proves its own source commit.
+bundles locally with `gh attestation verify` and the TUF-reviewed trusted root
+embedded in the Management binary, then checks the signed manifest,
+`SHA256SUMS`, exact asset size and digest before staging anything. This path
+does not initialize a live Sigstore TUF client and remains strict without TUF
+DNS, network access, or a pre-populated cache. A missing or outdated verifier,
+an invalid embedded root, an extra file, or a component/version mismatch fails
+before the upgrade transaction. Management and Edge Runtime may come from
+different valid release commits; each component proves its own source commit.
 
 ### Owned command areas
 

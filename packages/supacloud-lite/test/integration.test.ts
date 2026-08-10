@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createClient, type RealtimeChannel, type SupabaseClient } from '@supabase/supabase-js'
 import { startProjectServer, type RunningProjectServer } from '../src/project-runtime.js'
+import { BOOTSTRAP_SQL } from '../src/runtime/db/bootstrap.js'
 
 const migration = `
 create table public.todos (
@@ -66,6 +67,13 @@ grant usage on schema public to anon, authenticated, service_role;
 grant all on public.todos to authenticated, service_role;
 grant all on public.realtime_secrets to authenticated, service_role;
 grant usage, select on sequence public.todos_id_seq to authenticated, service_role;
+
+create function public.authenticated_only_rpc() returns boolean
+  language sql stable
+  as $$ select true $$;
+
+revoke all on function public.authenticated_only_rpc() from public;
+grant execute on function public.authenticated_only_rpc() to authenticated;
 `
 
 const functionSource = `
@@ -143,6 +151,32 @@ describe('SupaCloud Lite supabase-js compatibility', () => {
     expect(error).toBeNull()
     expect(data.user?.email).toBe('lite@example.com')
     expect(data.session?.access_token).toBeString()
+  })
+
+  test('honors project-defined RPC execution grants', async () => {
+    await expectRpcAllowed(userClient)
+    await expectRpcDenied(anonClient)
+    await expectRpcDenied(serviceClient)
+  })
+
+  test('preserves explicit RPC grants when bootstrapping persistent state', async () => {
+    await project.backend.db.exec(`
+      revoke all on function public.authenticated_only_rpc() from public, anon, authenticated, service_role;
+      grant execute on function public.authenticated_only_rpc() to anon;
+    `)
+    try {
+      await project.backend.db.exec(BOOTSTRAP_SQL)
+      project.backend.db.invalidateSchemaCache()
+
+      await expectRpcAllowed(anonClient)
+      await expectRpcDenied(userClient)
+      await expectRpcDenied(serviceClient)
+    } finally {
+      await project.backend.db.exec(`
+        revoke all on function public.authenticated_only_rpc() from public, anon, authenticated, service_role;
+        grant execute on function public.authenticated_only_rpc() to authenticated;
+      `)
+    }
   })
 
   test('supports PostgREST CRUD and PostgreSQL RLS', async () => {
@@ -439,6 +473,18 @@ function clientOptions(storageKey: string) {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false, storageKey },
     realtime: { params: { eventsPerSecond: 20 } },
   }
+}
+
+async function expectRpcAllowed(client: SupabaseClient): Promise<void> {
+  const call = await client.rpc('authenticated_only_rpc')
+  expect(call.error).toBeNull()
+  expect(call.data).toBe(true)
+}
+
+async function expectRpcDenied(client: SupabaseClient): Promise<void> {
+  const call = await client.rpc('authenticated_only_rpc')
+  expect(call.data).toBeNull()
+  expect(call.error?.code).toBe('42501')
 }
 
 function createTusUpload(length: number, token: string, key: string, contentType = 'text/plain'): Promise<Response> {

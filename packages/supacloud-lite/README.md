@@ -173,6 +173,22 @@ bunx supacloud-lite upgrade
 
 替换程序文件与数据库迁移是两个独立动作。`upgrade` 不会联网、自我替换二进制或修改 `package.json`；它默认先把升级前快照写入 `.supacloud-lite/backups/pre-upgrade-<timestamp>.tar.gz`，快照成功后才执行尚未记录的 migrations 和 seed。升级失败时快照会保留，并打印恢复命令。需要回滚时，停止候选进程，用升级前快照恢复状态，再重新启动上一个已验证版本。
 
+旧版 Lite 曾在 `public` schema 中直接给 `anon`、`authenticated` 和 `service_role` 授予函数执行权。已有持久化项目可能仍保留这些 ACL 和默认 ACL。升级不会自动批量撤销，因为 PostgreSQL 不能可靠区分旧版 Lite 注入的权限与项目显式授权。升级后应先创建快照，再审计 `pg_proc.proacl` 和 `pg_default_acl`。如果确认三个角色的默认函数权限不是项目意图，请先在新 migration 中撤销它们，再为需要收紧的每个已有函数增加带完整签名的显式 `REVOKE` / `GRANT`。不要对整个 schema 的已有函数执行无差别 `REVOKE`。可丢弃的本地项目可以使用 `supacloud-lite db reset` 在新的默认权限上重放 migrations；仅重启旧状态不会清理历史 ACL。
+
+```sql
+select n.nspname, p.proname, pg_get_function_identity_arguments(p.oid), p.proacl
+from pg_proc p
+join pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public'
+order by p.proname, pg_get_function_identity_arguments(p.oid);
+
+select defaclrole, defaclnamespace, defaclobjtype, defaclacl
+from pg_default_acl;
+
+alter default privileges in schema public
+  revoke execute on functions from anon, authenticated, service_role;
+```
+
 也可以单独创建可移植快照：
 
 ```bash
@@ -484,6 +500,22 @@ For single-binary installs, download and verify the candidate file first, then h
 ```
 
 Replacing the program file and migrating the database are two separate actions. `upgrade` does not go online, self-replace the binary, or modify `package.json`; it first writes a pre-upgrade snapshot to `.supacloud-lite/backups/pre-upgrade-<timestamp>.tar.gz` by default, and only after the snapshot succeeds does it apply the unrecorded migrations and seed. If the upgrade fails, the snapshot is retained and a restore command is printed. To roll back, stop the candidate process, restore state from the pre-upgrade snapshot, and restart the last verified version.
+
+Older Lite versions directly granted function execution in the `public` schema to `anon`, `authenticated`, and `service_role`. Existing persistent projects may retain those ACLs and default ACLs. Upgrades do not revoke them in bulk because PostgreSQL cannot reliably distinguish an old Lite-injected grant from an intentional project grant. After taking a snapshot, audit `pg_proc.proacl` and `pg_default_acl`. If the three roles' default function privileges are not project intent, revoke them in a new migration, then add an explicit `REVOKE` / `GRANT` with the complete signature for each existing function that needs tighter access. Do not issue an indiscriminate schema-wide `REVOKE` against existing functions. Disposable local projects can use `supacloud-lite db reset` to replay migrations on the corrected defaults; merely restarting an old state does not remove historical ACLs.
+
+```sql
+select n.nspname, p.proname, pg_get_function_identity_arguments(p.oid), p.proacl
+from pg_proc p
+join pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public'
+order by p.proname, pg_get_function_identity_arguments(p.oid);
+
+select defaclrole, defaclnamespace, defaclobjtype, defaclacl
+from pg_default_acl;
+
+alter default privileges in schema public
+  revoke execute on functions from anon, authenticated, service_role;
+```
 
 You can also create a portable snapshot separately:
 

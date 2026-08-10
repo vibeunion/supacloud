@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { accessSync, chmodSync, constants as fsConstants, createWriteStream, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { accessSync, chmodSync, constants as fsConstants, createWriteStream, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import type { IncomingMessage } from "node:http";
 import { get } from "node:https";
 import { tmpdir } from "node:os";
@@ -24,6 +24,12 @@ import {
     type ReleaseComponent,
     type ReleaseManifest,
 } from "../../../../management-api/src/release-manifest";
+import {
+    SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_FILENAME,
+    SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_SHA256,
+    SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_SIZE,
+    withSigstoreVerificationDirectory,
+} from "../../../../management-api/src/sigstore-trusted-root";
 
 export type UpgradeArchitecture = "amd64" | "arm64";
 
@@ -66,6 +72,7 @@ type ComponentDownloadRequest = {
     version: string;
     assetNames: string[];
     destination: string;
+    trustedRootPath: string;
 };
 
 type HttpsDownloadRequest = {
@@ -121,6 +128,7 @@ export const STRICT_GITHUB_CAPABILITY_FLAGS = [
     "--source-ref",
     "--source-digest",
     "--deny-self-hosted-runners",
+    "--custom-trusted-root",
 ] as const;
 
 class RetryableDownloadError extends Error {}
@@ -144,6 +152,59 @@ export function githubCliArchiveIdentity(architecture: UpgradeArchitecture): Git
 
 function sha256File(filePath: string): string {
     return createHash("sha256").update(readFileSync(filePath)).digest("hex");
+}
+
+function effectiveLocalOwner(): { uid: number; gid: number } | undefined {
+    if (process.platform === "win32") return undefined;
+    const uid = process.geteuid?.() ?? process.getuid?.();
+    const gid = process.getegid?.() ?? process.getgid?.();
+    if (uid === undefined || gid === undefined) {
+        throw new Error("Local artifact transport requires POSIX ownership checks");
+    }
+    return { uid, gid };
+}
+
+function assertLocalOwner(uid: number, gid: number, label: string): void {
+    const owner = effectiveLocalOwner();
+    if (!owner) return;
+    if (uid !== owner.uid || gid !== owner.gid) {
+        throw new Error(`${label} must be owned by the current effective user`);
+    }
+}
+
+export function assertLocalTrustedRootDirectory(directory: string): string {
+    const directoryStats = lstatSync(directory);
+    if (!directoryStats.isDirectory() || directoryStats.isSymbolicLink()) {
+        throw new Error("Local trusted-root directory must be a directory without links");
+    }
+    assertPrivateLocalDirectoryMode(directoryStats.mode, "Local trusted-root directory");
+    assertLocalOwner(directoryStats.uid, directoryStats.gid, "Local trusted-root directory");
+    const entries = readdirSync(directory);
+    if (entries.length !== 1 || entries[0] !== SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_FILENAME) {
+        throw new Error("Local trusted-root directory does not match its strict file allowlist");
+    }
+    const trustedRootPath = join(directory, SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_FILENAME);
+    assertLocalTrustedRootFile(trustedRootPath);
+    return trustedRootPath;
+}
+
+function assertPrivateLocalDirectoryMode(mode: number, label: string): void {
+    if (process.platform !== "win32" && (mode & 0o7777) !== 0o700) {
+        throw new Error(`${label} must use exact mode 0700 without special permission bits`);
+    }
+}
+
+function assertLocalTrustedRootFile(trustedRootPath: string): void {
+    const stats = lstatSync(trustedRootPath);
+    if (!stats.isFile() || stats.isSymbolicLink() || stats.nlink !== 1) {
+        throw new Error("Local trusted root must be a direct regular file without links");
+    }
+    assertPrivateLocalFileMode(stats.mode, "Local trusted root");
+    assertLocalOwner(stats.uid, stats.gid, "Local trusted root");
+    if (stats.size !== SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_SIZE
+        || sha256File(trustedRootPath) !== SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_SHA256) {
+        throw new Error("Local trusted root does not match its pinned size and digest");
+    }
 }
 
 function assertPrivateLocalFileMode(mode: number, label: string): void {
@@ -417,16 +478,30 @@ export async function assertLocalGithubVerifier(): Promise<void> {
     }
 }
 
-async function verifyManifestAttestation(manifestPath: string, bundlePath: string, manifest: ReleaseManifest): Promise<void> {
-    const verification = await runGithubCli([
-        "attestation", "verify", manifestPath,
-        "--bundle", bundlePath,
+export type GithubAttestationVerificationRequest = {
+    artifactPath: string;
+    bundlePath: string;
+    manifest: ReleaseManifest;
+    trustedRootPath: string;
+};
+
+export function githubAttestationVerificationArguments(request: GithubAttestationVerificationRequest): string[] {
+    return [
+        "attestation", "verify", request.artifactPath,
+        "--bundle", request.bundlePath,
         "--repo", RELEASE_REPOSITORY,
         "--signer-workflow", RELEASE_SIGNER_WORKFLOW,
         "--source-ref", RELEASE_SOURCE_REF,
-        "--source-digest", manifest.source.commit,
+        "--source-digest", request.manifest.source.commit,
         "--deny-self-hosted-runners",
-    ], GH_VERIFICATION_TIMEOUT_MS);
+        "--custom-trusted-root", request.trustedRootPath,
+    ];
+}
+
+async function verifyManifestAttestation(request: GithubAttestationVerificationRequest): Promise<void> {
+    const verification = await runGithubCli(
+        githubAttestationVerificationArguments(request), GH_VERIFICATION_TIMEOUT_MS,
+    );
     if (verification.exitCode !== 0) {
         throw new Error(`gh attestation verify failed: ${verification.stderr.trim().slice(-1_000) || verification.exitCode}`);
     }
@@ -489,7 +564,12 @@ async function downloadComponent(request: ComponentDownloadRequest): Promise<Loc
     );
     const manifest = parseReleaseManifest(readFileSync(manifestPath, "utf8"), request);
     await downloadManifestAttestation(manifestPath, attestationPath);
-    await verifyManifestAttestation(manifestPath, attestationPath, manifest);
+    await verifyManifestAttestation({
+        artifactPath: manifestPath,
+        bundlePath: attestationPath,
+        manifest,
+        trustedRootPath: request.trustedRootPath,
+    });
 
     const checksumsPath = directChildPath(request.destination, RELEASE_CHECKSUMS_NAME);
     await downloadDirect(
@@ -579,16 +659,21 @@ function createLocalBundleLayout(request: PrepareLocalUpgradeBundleRequest): Loc
     };
 }
 
-async function downloadLocalBundle(request: PrepareLocalUpgradeBundleRequest, layout: LocalBundleLayout): Promise<PreparedLocalUpgradeBundle> {
+async function downloadLocalBundle(
+    request: PrepareLocalUpgradeBundleRequest,
+    layout: LocalBundleLayout,
+    trustedRootPath: string,
+): Promise<PreparedLocalUpgradeBundle> {
     const { managementBinaryName, edgeRuntimeBinaryName } = layout;
     const [managementFiles, edgeFiles, verifierArchive] = await settleLocalBundleDownloads([
         downloadComponent({
             component: "management-api", version: request.managementVersion,
             assetNames: [managementBinaryName, "web-console-build.tar.gz"], destination: layout.managementDirectory,
+            trustedRootPath,
         }),
         downloadComponent({
             component: "edge-runtime", version: request.edgeRuntimeVersion,
-            assetNames: [edgeRuntimeBinaryName], destination: layout.edgeDirectory,
+            assetNames: [edgeRuntimeBinaryName], destination: layout.edgeDirectory, trustedRootPath,
         }),
         request.verifierProvisioning === "bundled"
             ? downloadPinnedGithubCli(layout.verifierDirectory, request.architecture)
@@ -605,9 +690,18 @@ export async function prepareLocalUpgradeBundle(request: PrepareLocalUpgradeBund
     await assertLocalGithubVerifier();
     const layout = createLocalBundleLayout(request);
     try {
-        return await downloadLocalBundle(request, layout);
+        return await withSigstoreVerificationDirectory(async (verificationDirectory) => {
+            const trustedRootPath = assertLocalTrustedRootDirectory(verificationDirectory.directory);
+            return await downloadLocalBundle(request, layout, trustedRootPath);
+        });
     } catch (error: unknown) {
-        rmSync(layout.directory, { recursive: true, force: true });
+        try {
+            rmSync(layout.directory, { recursive: true, force: true });
+        } catch (cleanupError: unknown) {
+            throw new AggregateError(
+                [error, cleanupError], "Local bundle preparation failed and cleanup did not complete",
+            );
+        }
         throw error;
     }
 }

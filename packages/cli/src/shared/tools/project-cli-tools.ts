@@ -240,6 +240,10 @@ Actions: list, create, get, delete, pause, restore, restart, settings, update_se
             name: optional(Type.String(), "[create] Project name"),
             region: optional(Type.String(), "[create] Region (default: local)"),
             organization_id: optional(Type.String(), "[create] Organization ID"),
+            domain: optional(Type.String(), "[create] Base custom domain"),
+            api_domain: optional(Type.String(), "[create] Explicit API domain"),
+            auth_domain: optional(Type.String(), "[create] Explicit Auth/OIDC domain"),
+            studio_domain: optional(Type.String(), "[create] Explicit Studio domain"),
             settings: optional(Type.Record(Type.String(), Type.Unknown()), "[update_settings] Config fields to update"),
             log_type: optional(stringEnum(["all", "auth", "database", "api"]), "[logs] Filter by service"),
             task_id: optional(Type.String(), "[task_detail/task_cancel/task_retry] Task ID"),
@@ -247,17 +251,43 @@ Actions: list, create, get, delete, pause, restore, restart, settings, update_se
             concurrency: optional(Type.Number(), "[update_background_settings] Max concurrent background tasks"),
             max_attempts: optional(Type.Number(), "[update_background_settings] Max attempts for background tasks"),
         },
-        async ({ action, ref, name, region, organization_id, settings, log_type, task_id, limit, concurrency, max_attempts }) => {
+        async ({
+            action,
+            ref,
+            name,
+            region,
+            organization_id,
+            domain,
+            api_domain,
+            auth_domain,
+            studio_domain,
+            settings,
+            log_type,
+            task_id,
+            limit,
+            concurrency,
+            max_attempts,
+        }) => {
             let text: string;
 
             switch (action) {
                 case "list":
                     text = ok(await http.get("/v1/projects"));
                     break;
-                case "create":
+                case "create": {
                     if (!name) throw new Error("'name' is required for create");
-                    text = ok(await http.post("/v1/projects", { name, region: region || "local", organization_id }));
+                    const createRequest: Record<string, string | undefined> = {
+                        name,
+                        region: region || "local",
+                        organization_id,
+                    };
+                    if (domain) createRequest.domain = domain;
+                    if (api_domain) createRequest.api_domain = api_domain;
+                    if (auth_domain) createRequest.auth_domain = auth_domain;
+                    if (studio_domain) createRequest.studio_domain = studio_domain;
+                    text = ok(await http.post("/v1/projects", createRequest));
                     break;
+                }
                 case "get":
                     text = ok(await http.get(`/v1/projects/${resolveRef(ref)}`));
                     break;

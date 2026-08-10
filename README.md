@@ -226,10 +226,14 @@ host, verifies the signed manifest, SHA256 checksums, sizes, source commit, and
 architecture, then uploads an atomic SFTP staging tree. After root ownership is
 established, the server repeats offline verification and uses the uploaded
 target Management binary for the Management/Edge/Web transaction. The server
-does not need GitHub egress, a third-party proxy, or a permanent verifier. Local
-transport accepts only `direct` or `none`. A compatible installed `gh` is
-reused; only a server without the required strict attestation flags receives a
-pinned temporary verifier inside the removable staging tree.
+does not need GitHub or Sigstore TUF egress, a third-party proxy, or a permanent
+verifier. SupaCloud pins the TUF-reviewed Sigstore Public Good trusted root in
+the reviewed release code and passes it explicitly to every offline
+verification; verification therefore remains strict when TUF DNS or network
+access is unavailable. Local transport accepts only `direct` or `none`. A
+compatible installed `gh` is reused; only a server without the required strict
+attestation flags receives a pinned temporary verifier inside the removable
+staging tree.
 
 The transaction runs in a uniquely named transient systemd unit and publishes a
 protected atomic status record. Admin polls that record through short SSH calls;

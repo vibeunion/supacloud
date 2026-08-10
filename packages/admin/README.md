@@ -27,10 +27,18 @@ Examples:
 ```bash
 npx @supacloud/admin status
 npx @supacloud/admin ssh ping
+npx @supacloud/admin ssh versions
 npx @supacloud/admin ssh diagnose
-npx @supacloud/admin project create --name my-app
+npx @supacloud/admin project create --name my-app --domain example.com
 npx @supacloud/admin project list
 ```
+
+`ssh versions` emits JSON with `schema_version: 1` and fixed
+`management_api`, `edge_runtime`, `caddy`, and `web_console` component fields.
+Each component reports `status` as `ok`, `unknown`, or `error`; a failed probe
+never substitutes a guessed version. Binary evidence is bound to the active
+systemd `ExecStart`, and Web Console evidence comes from its component marker
+plus an explicit `tree_sha256` digest.
 
 ## Verified platform upgrades
 
@@ -49,11 +57,13 @@ Local artifact transport downloads exact releases directly on the Admin host,
 verifies their signed release manifests, checksums, sizes, provenance, source
 commit, and architecture, then transfers them through an atomic SFTP staging
 directory. The server takes root ownership, repeats offline verification, and
-runs the uploaded target Management binary without GitHub egress or a
-third-party proxy. The server reuses an installed `gh` only when it supports all
-required strict attestation flags. Otherwise Admin transfers a pinned temporary
-Linux `gh` verifier that is removed with the staging directory and never
-replaces `/usr/local/bin/gh`.
+runs the uploaded target Management binary without GitHub or Sigstore TUF
+egress or a third-party proxy. Admin and Management use the same reviewed,
+digest-pinned Sigstore Public Good trusted root via `--custom-trusted-root`, so
+the offline handoff does not depend on a pre-populated TUF cache. The server
+reuses an installed `gh` only when it supports all required strict attestation
+flags. Otherwise Admin transfers a pinned temporary Linux `gh` verifier that is
+removed with the staging directory and never replaces `/usr/local/bin/gh`.
 
 The command supports direct root SSH and passwordless `sudo -n`. The transaction
 runs in a uniquely named transient systemd unit with protected atomic status

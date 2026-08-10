@@ -1,9 +1,11 @@
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
 import tailwindcss from '@tailwindcss/vite';
+import packageJson from './package.json' with { type: 'json' };
+import { webConsoleComponentMarker } from './component-marker.ts';
 
 export default defineConfig({
-	plugins: [tailwindcss(), sveltekit()],
+	plugins: [tailwindcss(), sveltekit(), webConsoleComponentMarker(packageJson)],
 	ssr: {
 		noExternal: ['lucide-svelte'],
 		external: ['bun', 'bun:sql', 'monaco-editor']
