@@ -734,8 +734,17 @@ describe("runtime companion version assets", () => {
     const dir = mkdtempSync(join(tmpdir(), "supacloud-gh-404-"));
     const fakeBin = join(dir, "bin");
     const gh = join(fakeBin, "gh");
+    const curl = join(fakeBin, "curl");
+    const artifact = join(dir, "artifact");
     try {
       spawnSync("mkdir", ["-p", fakeBin]);
+      writeFileSync(artifact, "verified artifact fixture");
+      writeFileSync(curl, [
+        "#!/bin/sh",
+        "printf '%s\\n' '{\"attestations\":[{\"bundle\":{\"mediaType\":\"application/vnd.dev.sigstore.bundle.v0.3+json\"}}]}'",
+        "",
+      ].join("\n"));
+      chmodSync(curl, 0o755);
       writeFileSync(gh, [
         "#!/bin/sh",
         'if [ "$1" = "--version" ]; then echo "gh version 2.96.0"; exit 0; fi',
@@ -745,11 +754,12 @@ describe("runtime companion version assets", () => {
         "",
       ].join("\n"));
       chmodSync(gh, 0o755);
-      const result = spawnSync("bash", ["-c", "source scripts/lib/release_assets.sh && supacloud_verify_attestation /tmp/artifact"], {
+      const result = spawnSync("bash", ["-c", "source scripts/lib/release_assets.sh && supacloud_verify_attestation \"$ARTIFACT\""], {
         cwd: repoRoot,
         env: {
           ...process.env,
           PATH: `${fakeBin}:${process.env.PATH}`,
+          ARTIFACT: artifact,
           SUPACLOUD_INTEGRITY_MODE_RECORD: join(dir, "integrity-mode"),
         },
         encoding: "utf8",
@@ -757,6 +767,52 @@ describe("runtime companion version assets", () => {
       expect(result.status).not.toBe(0);
       expect(result.stderr).toContain("404");
       expect(() => readFileSync(join(dir, "integrity-mode"), "utf8")).toThrow();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("artifact verification downloads a public bundle before invoking gh offline", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supacloud-gh-offline-"));
+    const fakeBin = join(dir, "bin");
+    const artifact = join(dir, "artifact");
+    const calls = join(dir, "gh-calls.txt");
+    try {
+      spawnSync("mkdir", ["-p", fakeBin]);
+      writeFileSync(artifact, "verified artifact fixture");
+      writeFileSync(join(fakeBin, "curl"), [
+        "#!/bin/sh",
+        "printf '%s\\n' '{\"attestations\":[{\"bundle\":{\"mediaType\":\"application/vnd.dev.sigstore.bundle.v0.3+json\"}}]}'",
+        "",
+      ].join("\n"));
+      chmodSync(join(fakeBin, "curl"), 0o755);
+      writeFileSync(join(fakeBin, "gh"), [
+        "#!/bin/sh",
+        'if [ "$1" = "--version" ]; then echo "gh version 2.96.0"; exit 0; fi',
+        'if [ "$1 $2 $3" = "attestation verify --help" ]; then echo "--signer-workflow"; exit 0; fi',
+        'printf "%s\\n" "$*" > "$GH_CALLS"',
+        'case " $* " in *" --bundle "*) exit 0 ;; esac',
+        'echo "missing offline bundle" >&2',
+        "exit 1",
+        "",
+      ].join("\n"));
+      chmodSync(join(fakeBin, "gh"), 0o755);
+
+      const integrityMode = join(dir, "integrity-mode");
+      const result = spawnSync("bash", ["-c", "source scripts/lib/release_assets.sh && supacloud_verify_attestation \"$ARTIFACT\""], {
+        cwd: repoRoot,
+        env: {
+          ...process.env,
+          PATH: `${fakeBin}:${process.env.PATH}`,
+          ARTIFACT: artifact,
+          GH_CALLS: calls,
+          SUPACLOUD_INTEGRITY_MODE_RECORD: integrityMode,
+        },
+        encoding: "utf8",
+      });
+      expect(result.status, result.stderr).toBe(0);
+      expect(readFileSync(calls, "utf8")).toContain("--bundle");
+      expect(readFileSync(integrityMode, "utf8").trim()).toBe("github-attestation+same-release-sha256");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
