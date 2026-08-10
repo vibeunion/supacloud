@@ -270,6 +270,8 @@ jobs:
         run: |
           node --check .github/scripts/ai-review-merge.mjs
           node --test .github/scripts/ai-review-merge.test.mjs
+          node --check .github/scripts/publish-npm-package.mjs
+          node --test .github/scripts/publish-npm-package.test.mjs
           node --check .github/scripts/sync-supacloud-dependencies.mjs
           node --test .github/scripts/sync-supacloud-dependencies.test.mjs
 
