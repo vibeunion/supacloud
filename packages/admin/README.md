@@ -39,17 +39,32 @@ external Edge Runtime as a single rollback-capable transaction:
 
 ```bash
 npx @supacloud/admin ssh upgrade \
-  --version 0.50.27 \
-  --edge_runtime_version 0.16.7 \
+  --version 0.50.31 \
+  --edge_runtime_version 0.16.8 \
+  --artifact_transport local \
   --github_proxy direct
 ```
 
-The command supports direct root SSH and passwordless `sudo -n`. It installs
-the pinned GitHub provenance verifier when needed, verifies each component
-against its own release checksum and attestation, and preserves the Edge
-Runtime systemd `ExecStart`, port, mode, and enabled state. Component upgrades
-require persisted `EDGE_RUNTIME_MODE=external`; embedded mode is rejected
-before release artifacts or services are changed.
+Local artifact transport downloads exact releases directly on the Admin host,
+verifies their signed release manifests, checksums, sizes, provenance, source
+commit, and architecture, then transfers them through an atomic SFTP staging
+directory. The server takes root ownership, repeats offline verification, and
+runs the uploaded target Management binary without GitHub egress or a
+third-party proxy. The server reuses an installed `gh` only when it supports all
+required strict attestation flags. Otherwise Admin transfers a pinned temporary
+Linux `gh` verifier that is removed with the staging directory and never
+replaces `/usr/local/bin/gh`.
+
+The command supports direct root SSH and passwordless `sudo -n`. The transaction
+runs in a uniquely named transient systemd unit with protected atomic status
+records; Admin polls that record without tying the transaction to a long-lived
+SSH channel. It preserves the Edge Runtime systemd `ExecStart`, port, mode, and
+enabled state. Component upgrades require persisted `EDGE_RUNTIME_MODE=external`;
+embedded mode is rejected before release artifacts or services are changed.
+
+`--artifact_transport local` accepts only `--github_proxy direct` or `none` and
+clears proxy environment variables on both hosts. The legacy server-download
+path remains available as `--artifact_transport remote`.
 
 Omitting `--edge_runtime_version` retains the Management and Web Console-only
 upgrade behavior and reports that Edge Runtime was not upgraded. Caddy and

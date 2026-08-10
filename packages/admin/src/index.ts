@@ -13,6 +13,7 @@ import { registerSshTools } from "./shared/tools/ssh-tools";
 import { registerAdvancedTools } from "./shared/tools/advanced-tools";
 import { registerAdminProjectCliTools } from "./shared/tools/project-cli-tools";
 import { registerGatewayTools } from "./shared/tools/gateway-tools";
+import packageMetadata from "../package.json" with { type: "json" };
 
 type ToolEntry = { schema: any; callback: (args: any) => Promise<any> };
 type ToolMap = Record<string, ToolEntry>;
@@ -60,6 +61,7 @@ USAGE
   supacloud-admin <module> <action> [--flags]
   supacloud-admin status
   supacloud-admin --help
+  supacloud-admin --version
 
 EXPECTED CONTEXT
 
@@ -256,6 +258,10 @@ async function main() {
     if (args.length === 0 || args[0] === "--help" || args[0] === "-h") {
         printHelp();
         process.exit(0);
+    }
+    if (args.length === 1 && args[0] === "--version") {
+        console.log(packageMetadata.version);
+        return;
     }
 
     const cliTools = createAdminTools();

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { buildOfficialUpgradeCommand, buildRootUpgradeScript, registerSshTools } from "./ssh-tools";
 import { parseToolArguments } from "../schema";
@@ -41,7 +41,7 @@ class FakeSsh {
         if (this.upgradeExecFails && command.includes("UPGRADE_RUNNER")) {
             return { success: false, stdout: "", stderr: "transaction failed", code: 42 };
         }
-        if (this.cleanupExecFails && command.startsWith("rm -f '/tmp/.supacloud-release-assets-")) {
+        if (this.cleanupExecFails && command.includes("sudo -n rm -rf -- '/tmp/.supacloud-release-assets-")) {
             return { success: false, stdout: "", stderr: "permission denied", code: 1 };
         }
         if (command.includes("BOOTSTRAP_DEPS_OK")) {
@@ -127,7 +127,7 @@ function writeFakeGh(filePath: string, version: string): void {
     writeExecutableShell(filePath, [
         "#!/bin/sh",
         `if [ \"$1\" = \"--version\" ]; then echo \"gh version ${version}\"; exit 0; fi`,
-        "if [ \"$1 $2 $3\" = \"attestation verify --help\" ]; then echo '--bundle --signer-workflow --source-ref'; exit 0; fi",
+        "if [ \"$1 $2 $3\" = \"attestation verify --help\" ]; then echo '--bundle --signer-workflow --source-ref --deny-self-hosted-runners'; exit 0; fi",
         "exit 1",
         "",
     ].join("\n"));
@@ -297,6 +297,39 @@ describe("ssh admin tool", () => {
         }
     });
 
+    test("local artifact transport requires two exact versions before remote access", async () => {
+        for (const args of [
+            { action: "upgrade", artifact_transport: "local" },
+            { action: "upgrade", artifact_transport: "local", version: "0.50.30" },
+            { action: "upgrade", artifact_transport: "local", version: "latest", edge_runtime_version: "0.16.8" },
+        ]) {
+            const ssh = new FakeSsh();
+            await expect(captureSshTool(ssh).invoke(args)).rejects.toThrow();
+            expect(ssh.uploads).toHaveLength(0);
+            expect(ssh.commands).toHaveLength(0);
+        }
+    });
+
+    test("local artifact transport refuses third-party GitHub proxies", async () => {
+        const ssh = new FakeSsh();
+        await expect(captureSshTool(ssh).invoke({
+            action: "upgrade",
+            artifact_transport: "local",
+            version: "0.50.30",
+            edge_runtime_version: "0.16.8",
+            github_proxy: "https://proxy.example.com/",
+        })).rejects.toThrow("only supports direct GitHub downloads");
+        expect(ssh.uploads).toHaveLength(0);
+        expect(ssh.commands).toHaveLength(0);
+    });
+
+    test("artifact transport schema accepts only local or remote", () => {
+        const tool = captureSshTool(new FakeSsh());
+        expect(tool.parse({ action: "upgrade", artifact_transport: "local" }).artifact_transport).toBe("local");
+        expect(tool.parse({ action: "upgrade", artifact_transport: "remote" }).artifact_transport).toBe("remote");
+        expect(() => tool.parse({ action: "upgrade", artifact_transport: "automatic" })).toThrow();
+    });
+
     test("component upgrade validates both exact versions before upload", async () => {
         for (const args of [
             { action: "upgrade", version: "0.50.27;id", edge_runtime_version: "0.16.7" },
@@ -315,9 +348,10 @@ describe("ssh admin tool", () => {
     test("direct proxy mode clears singular and plural remote proxy fallbacks", async () => {
         const ssh = new FakeSsh();
         await captureSshTool(ssh).invoke({ action: "upgrade", github_proxy: "direct" });
-        expect(ssh.commands[0]).toContain("unset SUPACLOUD_GITHUB_PROXY");
-        expect(ssh.commands[0]).toContain("SUPACLOUD_GITHUB_PROXIES");
-        expect(ssh.commands[0]).not.toContain("SUPACLOUD_GITHUB_PROXY='direct'");
+        const upgradeCommand = ssh.commands.find((command) => command.includes("UPGRADE_RUNNER")) ?? "";
+        expect(upgradeCommand).toContain("unset SUPACLOUD_GITHUB_PROXY");
+        expect(upgradeCommand).toContain("SUPACLOUD_GITHUB_PROXIES");
+        expect(upgradeCommand).not.toContain("SUPACLOUD_GITHUB_PROXY='direct'");
 
         const rootScript = buildRootUpgradeScript({ helperPath: "/tmp/release-assets.sh" });
         const proxyProbe = [rootScriptThroughProxySetup(rootScript),
@@ -336,7 +370,7 @@ describe("ssh admin tool", () => {
             github_proxy: "https://proxy.example.test/",
         });
 
-        expect(ssh.timeouts).toEqual([1_320_000, undefined]);
+        expect(ssh.timeouts).toEqual([30_000, 1_320_000, 30_000]);
     });
 
     test("outer upgrade signals remove the helper and stop command continuation", () => {
@@ -474,11 +508,11 @@ describe("ssh admin tool", () => {
 
         await tool.invoke({ action: "upgrade", version: "0.50.27", edge_runtime_version: "0.16.7" });
 
-        expect(ssh.commands).toHaveLength(2);
-        const command = ssh.commands[0] ?? "";
+        expect(ssh.commands).toHaveLength(3);
+        const command = ssh.commands[1] ?? "";
         expect(command).toContain("sudo -n true");
         expect(ssh.uploads).toHaveLength(1);
-        expect(ssh.uploads[0]?.remotePath).toMatch(/^\/tmp\/\.supacloud-release-assets-[0-9a-f-]+\.sh$/);
+        expect(ssh.uploads[0]?.remotePath).toMatch(/^\/tmp\/\.supacloud-release-assets-[0-9a-f-]+\/release_assets\.sh$/);
         expect(ssh.uploads[0]?.mode).toBe(0o600);
         expect(ssh.uploads[0]?.content).toContain("supacloud_install_pinned_gh");
         expect(ssh.uploads[0]?.content).toContain('SUPACLOUD_GH_VERSION="${SUPACLOUD_GH_VERSION:-2.96.0}"');
@@ -497,7 +531,8 @@ describe("ssh admin tool", () => {
         expect(command).toContain("SUPACLOUD_EDGE_RUNTIME_UPGRADE_TAG=");
         expect(command).toContain("unset SUPACLOUD_ALLOW_UNVERIFIED_RELEASE");
         expect(command).not.toContain("/opt/supacloud/scripts");
-        expect(command).toContain("trap 'rm -f /tmp/.supacloud-release-assets-");
+        expect(command).toContain("rm -rf --");
+        expect(command).toContain("/tmp/.supacloud-release-assets-");
         expect(command).not.toMatch(/\/usr\/local\/bin\/supacloud upgrade --yes/);
         const rootScript = buildRootUpgradeScript({
             version: "0.50.27",
@@ -506,8 +541,10 @@ describe("ssh admin tool", () => {
         });
         expect(Bun.spawnSync(["bash", "-n", "-c", rootScript]).exitCode).toBe(0);
         expect(Bun.spawnSync(["bash", "-n", "-c", command]).exitCode).toBe(0);
-        expect(ssh.commands[1]).toBe(`rm -f '${ssh.uploads[0]?.remotePath}'`);
-        expect(ssh.timeouts).toEqual([720_000, undefined]);
+        expect(ssh.commands[0]).toMatch(/^set -e; umask 077; test ! -e '\/tmp\/\.supacloud-release-assets-[0-9a-f-]+'; install -d -m 700 --/);
+        expect(ssh.commands[2]).toContain(`rm -rf -- '${ssh.uploads[0]?.remotePath.replace(/\/release_assets\.sh$/, "")}'`);
+        expect(ssh.commands[2]).toContain("sudo -n rm -rf --");
+        expect(ssh.timeouts).toEqual([30_000, 720_000, 30_000]);
     });
 
     test("component upgrade cleans its exact helper path when SSH execution throws", async () => {
@@ -522,7 +559,22 @@ describe("ssh admin tool", () => {
         })).rejects.toThrow("connection dropped");
 
         expect(ssh.uploads).toHaveLength(1);
-        expect(ssh.commands.at(-1)).toBe(`rm -f '${ssh.uploads[0]?.remotePath}'`);
+        expect(ssh.commands.at(-1)).toContain(`rm -rf -- '${ssh.uploads[0]?.remotePath.replace(/\/release_assets\.sh$/, "")}'`);
+    });
+
+    test("stages the sudo helper in a private user directory and cleans that directory with fallback privilege", async () => {
+        const ssh = new FakeSsh();
+
+        await captureSshTool(ssh).invoke({ action: "upgrade", version: "0.50.30" });
+
+        const helperPath = ssh.uploads[0]?.remotePath ?? "";
+        const helperDirectory = dirname(helperPath);
+        expect(helperPath).toBe(`${helperDirectory}/release_assets.sh`);
+        expect(ssh.commands[0]).toContain(`install -d -m 700 -- '${helperDirectory}'`);
+        expect(buildRootUpgradeScript({ helperPath })).toContain(`source '${helperPath}'`);
+        expect(ssh.commands[1]).toContain(helperDirectory);
+        expect(ssh.commands[1]).toContain("rm -rf --");
+        expect(ssh.commands[2]).toContain(`rm -rf -- '${helperDirectory}' || sudo -n rm -rf -- '${helperDirectory}'`);
     });
 
     test("failed helper upload still cleans its generated remote path", async () => {
@@ -532,8 +584,9 @@ describe("ssh admin tool", () => {
         await expect(captureSshTool(ssh).invoke({ action: "upgrade", version: "0.50.27" }))
             .rejects.toThrow("upload failed");
         expect(ssh.uploads).toHaveLength(0);
-        expect(ssh.commands).toHaveLength(1);
-        expect(ssh.commands[0]).toMatch(/^rm -f '\/tmp\/\.supacloud-release-assets-[0-9a-f-]+\.sh'$/);
+        expect(ssh.commands).toHaveLength(2);
+        expect(ssh.commands[0]).toContain("install -d -m 700 -- '/tmp/.supacloud-release-assets-");
+        expect(ssh.commands[1]).toContain("sudo -n rm -rf -- '/tmp/.supacloud-release-assets-");
     });
 
     test("partial helper upload cleans the exact remote path", async () => {
@@ -543,7 +596,8 @@ describe("ssh admin tool", () => {
         await expect(captureSshTool(ssh).invoke({ action: "upgrade", version: "0.50.27" }))
             .rejects.toThrow("partial upload failed");
         expect(ssh.uploads).toHaveLength(1);
-        expect(ssh.commands).toEqual([`rm -f '${ssh.uploads[0]?.remotePath}'`]);
+        expect(ssh.commands).toHaveLength(2);
+        expect(ssh.commands.at(-1)).toContain(`rm -rf -- '${ssh.uploads[0]?.remotePath.replace(/\/release_assets\.sh$/, "")}'`);
     });
 
     test("partial upload and helper cleanup failures preserve both diagnostics", async () => {

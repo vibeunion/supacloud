@@ -212,10 +212,24 @@ source /etc/profile.d/supacloud.sh
 
 ```bash
 npx @supacloud/admin ssh upgrade \
-  --version 0.50.27 \
-  --edge_runtime_version 0.16.7 \
+  --version 0.50.31 \
+  --edge_runtime_version 0.16.8 \
+  --artifact_transport local \
   --github_proxy direct
 ```
+
+`--artifact_transport local` 会在 Admin 所在机器直连官方 GitHub，验证精确
+Release 的签名 manifest、SHA256、文件大小、来源提交和目标架构，再通过原子
+SFTP staging 上传。服务器接管为 root 所有后会离线重复验证，并使用上传的目标
+Management 执行同一个 Management/Edge/Web 事务；服务器无需访问 GitHub，也
+不会使用第三方代理或为了升级永久安装 verifier。远端已有支持全部严格
+attestation 参数的 `gh` 时直接复用；仅缺少合格 `gh` 时，才在可清理的 staging
+中传入固定版本的临时 verifier。该模式只接受 `direct` 或 `none`。
+
+升级事务运行在唯一命名的 transient systemd unit 中，使用受保护的原子状态文件
+轮询，因此不会依赖一个长时间保持的 SSH channel，也不会在状态未知时强杀已经
+进入 activation 的事务。原服务器下载路径仍可通过 `--artifact_transport remote`
+显式使用。
 
 该事务要求持久化配置为 `EDGE_RUNTIME_MODE=external`；embedded 模式会在
 改动 Release 制品或服务前被拒绝。命令会保留 Edge Runtime 的 systemd

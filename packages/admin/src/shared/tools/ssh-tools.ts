@@ -3,9 +3,11 @@
  * Install, upgrade, diagnose, exec, tenant mgmt — all via SSH
  */
 import { randomUUID } from "node:crypto";
+import { dirname } from "node:path";
 import { Type } from "@sinclair/typebox";
 import { decodedSchema, optional, stringEnum, withDescription } from "../schema";
 import type { SshTransport } from "../transports/ssh";
+import { executeLocalUpgradeTransfer } from "../releases/local-upgrade-transfer";
 import releaseAssetsScript from "../../../../../scripts/lib/release_assets.sh" with { type: "text" };
 
 const SAFE_CONTAINER_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/;
@@ -135,8 +137,8 @@ function componentPreflightCommands(request: UpgradeRequest): string[] {
 
 function signalSafeCleanupTraps(cleanupCommand: string): string[] {
     return [
-        `trap '${cleanupCommand}' EXIT`,
-        `trap 'trap - EXIT HUP INT TERM; ${cleanupCommand}; exit 1' HUP INT TERM`,
+        `trap ${quoteEnvValue(cleanupCommand)} EXIT`,
+        `trap ${quoteEnvValue(`trap - EXIT HUP INT TERM; ${cleanupCommand}; exit 1`)} HUP INT TERM`,
     ];
 }
 
@@ -166,9 +168,10 @@ export function buildRootUpgradeScript(request: UpgradeRequest): string {
 
 export function buildOfficialUpgradeCommand(request: UpgradeRequest): string {
     const rootScript = buildRootUpgradeScript(request);
+    const cleanupCommand = `rm -rf -- ${quoteEnvValue(dirname(request.helperPath))}`;
     return [
         "set -e",
-        ...signalSafeCleanupTraps(`rm -f ${request.helperPath}`),
+        ...signalSafeCleanupTraps(cleanupCommand),
         "if [ \"$(id -u)\" -eq 0 ]; then " +
             `bash -c ${quoteEnvValue(rootScript)}; ` +
             "else sudo -n true; " +
@@ -176,8 +179,31 @@ export function buildOfficialUpgradeCommand(request: UpgradeRequest): string {
     ].join("; ");
 }
 
+async function prepareRemoteUpgradeHelperDirectory(ssh: SshTransport, helperPath: string): Promise<void> {
+    const helperDirectory = dirname(helperPath);
+    const command = [
+        "set -e",
+        "umask 077",
+        `test ! -e ${quoteEnvValue(helperDirectory)}`,
+        `install -d -m 700 -- ${quoteEnvValue(helperDirectory)}`,
+    ].join("; ");
+    const preparation = await ssh.exec(command, 30_000);
+    if (!preparation.success) {
+        throw new Error(`Failed to prepare remote upgrade helper directory (exit ${preparation.code}): ${preparation.stderr.slice(-300)}`);
+    }
+}
+
 async function removeRemoteUpgradeHelper(ssh: SshTransport, helperPath: string): Promise<void> {
-    const cleanup = await ssh.exec(`rm -f ${quoteEnvValue(helperPath)}`);
+    const helperDirectory = dirname(helperPath);
+    const removeCommand = `rm -rf -- ${quoteEnvValue(helperDirectory)}`;
+    const command = [
+        "if [ \"$(id -u)\" -eq 0 ]; then",
+        `  ${removeCommand}`,
+        "else",
+        `  ${removeCommand} || sudo -n ${removeCommand}`,
+        "fi",
+    ].join("\n");
+    const cleanup = await ssh.exec(command, 30_000);
     if (!cleanup.success) {
         throw new Error(`Failed to remove remote upgrade helper (exit ${cleanup.code}): ${cleanup.stderr.slice(-300)}`);
     }
@@ -219,7 +245,10 @@ async function executeOfficialUpgrade(
 ): Promise<Awaited<ReturnType<SshTransport["exec"]>>> {
     let execution: OfficialUpgradeExecution | undefined;
     let executionError: unknown;
+    let helperPrepared = false;
     try {
+        await prepareRemoteUpgradeHelperDirectory(ssh, helperPath);
+        helperPrepared = true;
         await ssh.uploadText(helperPath, releaseAssetsScript, 0o600);
         execution = await ssh.exec(command, timeoutMs);
     } catch (error: unknown) {
@@ -227,10 +256,12 @@ async function executeOfficialUpgrade(
     }
 
     let cleanupError: unknown;
-    try {
-        await removeRemoteUpgradeHelper(ssh, helperPath);
-    } catch (error: unknown) {
-        cleanupError = error;
+    if (helperPrepared) {
+        try {
+            await removeRemoteUpgradeHelper(ssh, helperPath);
+        } catch (error: unknown) {
+            cleanupError = error;
+        }
     }
     return officialUpgradeOutcome(execution, executionError, cleanupError);
 }
@@ -384,6 +415,7 @@ Actions: ping, setup, install, upgrade, diagnose, exec, troubleshoot, container_
             storage_type: optional(stringEnum(["juicefs", "minio"]), "[install] Storage backend configurable through Admin"),
             version: optional(Type.String(), "[upgrade] Specific version"),
             edge_runtime_version: optional(Type.String(), "[upgrade] Exact independent Edge Runtime version"),
+            artifact_transport: optional(stringEnum(["local", "remote"]), "[upgrade] Download verified release assets locally or on the server (default: remote)"),
             github_proxy: optional(Type.String(), "[install/upgrade] Explicit GitHub proxy prefix, or direct/none"),
             focus: optional(stringEnum(["all", "containers", "database", "network", "disk", "logs"]), "[troubleshoot] Focus area"),
             container: optional(Type.String(), "[container_logs] Container name"),
@@ -554,10 +586,25 @@ Actions: ping, setup, install, upgrade, diagnose, exec, troubleshoot, container_
                         assertExactStableVersion(edgeRuntimeVersion, "edge_runtime_version");
                     }
                     const validatedProxy = args.github_proxy ? assertSafeGithubProxy(args.github_proxy) : undefined;
+                    if (args.artifact_transport === "local") {
+                        if (!version || !edgeRuntimeVersion) {
+                            throw new Error("Local artifact transport requires exact 'version' and 'edge_runtime_version'");
+                        }
+                        assertExactStableVersion(version, "version");
+                        assertExactStableVersion(edgeRuntimeVersion, "edge_runtime_version");
+                        if (validatedProxy && !["direct", "none"].includes(validatedProxy.toLowerCase())) {
+                            throw new Error("Local artifact transport only supports direct GitHub downloads");
+                        }
+                        text = await executeLocalUpgradeTransfer(ssh, {
+                            managementVersion: version.replace(/^v/, ""),
+                            edgeRuntimeVersion: edgeRuntimeVersion.replace(/^v/, ""),
+                        });
+                        break;
+                    }
                     const githubProxy = validatedProxy && !["direct", "none"].includes(validatedProxy.toLowerCase())
                         ? validatedProxy
                         : undefined;
-                    const helperPath = `/tmp/.supacloud-release-assets-${randomUUID()}.sh`;
+                    const helperPath = `/tmp/.supacloud-release-assets-${randomUUID()}/release_assets.sh`;
                     const cmd = buildOfficialUpgradeCommand({
                         version,
                         edgeRuntimeVersion,

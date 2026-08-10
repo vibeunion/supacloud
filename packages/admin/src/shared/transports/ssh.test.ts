@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { getAuditLog, redactSshOutput, SshTransport } from "./ssh";
 
@@ -14,6 +17,7 @@ class FakeSshClient extends EventEmitter {
     stderrOutput = Buffer.alloc(0);
     stallCommand = false;
     endCalls = 0;
+    sftpClient: FakeSftpClient | undefined;
 
     connect(options: Record<string, unknown>): this {
         this.connectOptions = options;
@@ -33,8 +37,44 @@ class FakeSshClient extends EventEmitter {
         });
     }
 
+    sftp(callback: (error: Error | undefined, sftp: FakeSftpClient) => void): void {
+        if (!this.sftpClient) return callback(new Error("SFTP unavailable"), undefined as never);
+        callback(undefined, this.sftpClient);
+    }
+
     end(): void {
-        this.endCalls++;
+        this.endCalls += 1;
+    }
+}
+
+class FakeSftpClient {
+    readonly operations: string[] = [];
+    failChmod = false;
+    hangFastPut = false;
+
+    fastPut(_localPath: string, remotePath: string, callback: (error?: Error | null) => void): void {
+        this.operations.push(`put:${remotePath}`);
+        if (!this.hangFastPut) queueMicrotask(() => callback());
+    }
+
+    writeFile(remotePath: string, _content: string | Buffer, options: { mode: number }, callback: (error?: Error | null) => void): void {
+        this.operations.push(`write:${remotePath}:${options.mode}`);
+        queueMicrotask(() => callback());
+    }
+
+    chmod(remotePath: string, mode: number, callback: (error?: Error | null) => void): void {
+        this.operations.push(`chmod:${remotePath}:${mode}`);
+        queueMicrotask(() => callback(this.failChmod ? new Error("chmod failed") : undefined));
+    }
+
+    rename(sourcePath: string, destinationPath: string, callback: (error?: Error | null) => void): void {
+        this.operations.push(`rename:${sourcePath}:${destinationPath}`);
+        queueMicrotask(() => callback());
+    }
+
+    unlink(remotePath: string, callback: (error?: Error | null) => void): void {
+        this.operations.push(`unlink:${remotePath}`);
+        queueMicrotask(() => callback());
     }
 }
 
@@ -200,6 +240,106 @@ describe("SshTransport audit safety", () => {
             expect(result.stderr).not.toContain("discarded-error-secret");
         } finally {
             transport.close();
+        }
+    });
+
+    test("uploads through a protected partial path before chmod and atomic rename", async () => {
+        const fixtureDirectory = mkdtempSync(join(tmpdir(), "supacloud-sftp-upload-"));
+        const localPath = join(fixtureDirectory, "artifact");
+        writeFileSync(localPath, "release artifact");
+        const client = new FakeSshClient();
+        const sftp = new FakeSftpClient();
+        client.sftpClient = sftp;
+        const transport = new SshTransport({
+            host: "server.example.com", port: 22, username: "root", hostFingerprint: TEST_HOST_FINGERPRINT,
+        }, { clientFactory: () => client as never });
+
+        try {
+            await transport.upload(localPath, "/tmp/release/artifact", { mode: 0o600, timeoutMs: 1_000 });
+            expect(sftp.operations[0]).toMatch(/^put:\/tmp\/release\/artifact\.part-[0-9a-f-]+$/);
+            const partialPath = sftp.operations[0]!.slice("put:".length);
+            expect(sftp.operations).toEqual([
+                `put:${partialPath}`,
+                `chmod:${partialPath}:384`,
+                `rename:${partialPath}:/tmp/release/artifact`,
+            ]);
+            expect(getAuditLog().at(-1)?.command).not.toContain(localPath);
+        } finally {
+            transport.close();
+            rmSync(fixtureDirectory, { recursive: true, force: true });
+        }
+    });
+
+    test("uploads generated scripts through the same protected atomic path", async () => {
+        const client = new FakeSshClient();
+        const sftp = new FakeSftpClient();
+        client.sftpClient = sftp;
+        const transport = new SshTransport({
+            host: "server.example.com", port: 22, username: "ubuntu", hostFingerprint: TEST_HOST_FINGERPRINT,
+        }, { clientFactory: () => client as never });
+
+        try {
+            await transport.uploadText("/tmp/private/run.sh", "#!/bin/sh\nexit 0\n", 0o600);
+            expect(sftp.operations[0]).toMatch(/^write:\/tmp\/private\/run\.sh\.part-[0-9a-f-]+:384$/);
+            const partialPath = sftp.operations[0]!.slice("write:".length, -":384".length);
+            expect(sftp.operations).toEqual([
+                `write:${partialPath}:384`,
+                `chmod:${partialPath}:384`,
+                `rename:${partialPath}:/tmp/private/run.sh`,
+            ]);
+        } finally {
+            transport.close();
+        }
+    });
+
+    test("removes a partial upload and discards the connection after an SFTP error", async () => {
+        const fixtureDirectory = mkdtempSync(join(tmpdir(), "supacloud-sftp-failure-"));
+        const localPath = join(fixtureDirectory, "artifact");
+        writeFileSync(localPath, "release artifact");
+        const failedClient = new FakeSshClient();
+        const failedSftp = new FakeSftpClient();
+        failedSftp.failChmod = true;
+        failedClient.sftpClient = failedSftp;
+        const replacementClient = new FakeSshClient();
+        const clients = [failedClient, replacementClient];
+        const transport = new SshTransport({
+            host: "server.example.com", port: 22, username: "root", hostFingerprint: TEST_HOST_FINGERPRINT,
+        }, { clientFactory: () => clients.shift() as never });
+
+        try {
+            await expect(transport.upload(localPath, "/tmp/release/artifact")).rejects.toThrow("chmod failed");
+            expect(failedSftp.operations.at(-1)).toMatch(/^unlink:\/tmp\/release\/artifact\.part-/);
+            expect(failedClient.endCalls).toBeGreaterThan(0);
+            expect(await transport.ping()).toBe(false);
+            expect(replacementClient.connectOptions).toBeDefined();
+        } finally {
+            transport.close();
+            rmSync(fixtureDirectory, { recursive: true, force: true });
+        }
+    });
+
+    test("bounds an SFTP upload and does not return its timed-out connection to the pool", async () => {
+        const fixtureDirectory = mkdtempSync(join(tmpdir(), "supacloud-sftp-timeout-"));
+        const localPath = join(fixtureDirectory, "artifact");
+        writeFileSync(localPath, "release artifact");
+        const timedOutClient = new FakeSshClient();
+        const stalledSftp = new FakeSftpClient();
+        stalledSftp.hangFastPut = true;
+        timedOutClient.sftpClient = stalledSftp;
+        const replacementClient = new FakeSshClient();
+        const clients = [timedOutClient, replacementClient];
+        const transport = new SshTransport({
+            host: "server.example.com", port: 22, username: "root", hostFingerprint: TEST_HOST_FINGERPRINT,
+        }, { clientFactory: () => clients.shift() as never });
+
+        try {
+            await expect(transport.upload(localPath, "/tmp/release/artifact", { timeoutMs: 10 })).rejects.toThrow("SFTP upload timed out");
+            expect(timedOutClient.endCalls).toBeGreaterThan(0);
+            expect(await transport.ping()).toBe(false);
+            expect(replacementClient.connectOptions).toBeDefined();
+        } finally {
+            transport.close();
+            rmSync(fixtureDirectory, { recursive: true, force: true });
         }
     });
 });
