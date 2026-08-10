@@ -61,16 +61,25 @@ records; Admin polls that record without tying the transaction to a long-lived
 SSH channel. It preserves the Edge Runtime systemd `ExecStart`, port, mode, and
 enabled state. Component upgrades require persisted `EDGE_RUNTIME_MODE=external`;
 embedded mode is rejected before release artifacts or services are changed.
+Local, remote, and direct server upgrades share one nonblocking host-wide lock.
+
+Admin observes the remote transaction for up to 30 minutes. Reaching that
+deadline stops only local observation; it does not stop, clean up, or mark the
+remote transaction as failed. The CLI reports the unit, stage, status, log, and
+upload-drop paths for reconciliation. Inspect that evidence before retrying and
+do not retry blindly while the remote transaction may still be running.
 
 `--artifact_transport local` accepts only `--github_proxy direct` or `none` and
 clears proxy environment variables on both hosts. The legacy server-download
 path remains available as `--artifact_transport remote`.
 
-Omitting `--edge_runtime_version` retains the Management and Web Console-only
-upgrade behavior and reports that Edge Runtime was not upgraded. Caddy and
-GoTrue are outside this transaction and are not replaced. After a capable
-Management release is active, an exact rollback can use that active upgrader
-with explicit older targets, for example:
+With `--artifact_transport remote` (the default), omitting
+`--edge_runtime_version` retains the Management and Web Console-only upgrade
+behavior and reports that Edge Runtime was not upgraded. Local transport
+requires exact Management and Edge Runtime versions. Caddy and GoTrue are
+outside this transaction and are not replaced. After a capable Management
+release is active, an exact rollback can use that active upgrader with explicit
+older targets, for example:
 
 ```bash
 npx @supacloud/admin ssh upgrade \

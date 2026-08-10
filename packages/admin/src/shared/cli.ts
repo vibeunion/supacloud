@@ -34,7 +34,10 @@ function sanitizedCliDiagnostic(error: unknown): string {
 
 function nestedCliDiagnostics(error: unknown): string[] {
     if (error instanceof AggregateError) {
-        return error.errors.flatMap(candidate => nestedCliDiagnostics(candidate));
+        return [
+            sanitizedCliDiagnostic(error),
+            ...error.errors.flatMap(candidate => nestedCliDiagnostics(candidate)),
+        ];
     }
     return [sanitizedCliDiagnostic(error)];
 }

@@ -7,7 +7,11 @@ import { dirname } from "node:path";
 import { Type } from "@sinclair/typebox";
 import { decodedSchema, optional, stringEnum, withDescription } from "../schema";
 import type { SshTransport } from "../transports/ssh";
-import { executeLocalUpgradeTransfer } from "../releases/local-upgrade-transfer";
+import {
+    buildUpgradeLockScript,
+    executeLocalUpgradeTransfer,
+    SUPACLOUD_UPGRADE_LOCK_PATH,
+} from "../releases/local-upgrade-transfer";
 import releaseAssetsScript from "../../../../../scripts/lib/release_assets.sh" with { type: "text" };
 
 const SAFE_CONTAINER_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/;
@@ -153,8 +157,10 @@ export function buildRootUpgradeScript(request: UpgradeRequest): string {
         request.githubProxy
             ? `export SUPACLOUD_GITHUB_PROXY=${quoteEnvValue(request.githubProxy)}`
             : "unset SUPACLOUD_GITHUB_PROXY SUPACLOUD_GITHUB_PROXIES",
-        "for tool in curl jq file sha256sum tar; do command -v \"$tool\" >/dev/null 2>&1 || { echo \"Required upgrade tool is missing: $tool\" >&2; exit 127; }; done",
+        "for tool in curl jq file sha256sum stat tar flock; do command -v \"$tool\" >/dev/null 2>&1 || { echo \"Required upgrade tool is missing: $tool\" >&2; exit 127; }; done",
+        "test -d /run/lock || { echo '/run/lock is unavailable' >&2; exit 1; }",
         "test -x /usr/local/bin/supacloud || { echo 'SupaCloud binary not found at /usr/local/bin/supacloud; run ssh install first.' >&2; exit 127; }",
+        buildUpgradeLockScript(SUPACLOUD_UPGRADE_LOCK_PATH),
         ...componentPreflightCommands(request),
         "STAGED_MANAGEMENT=''",
         ...signalSafeCleanupTraps('test -z "$STAGED_MANAGEMENT" || rm -f "$STAGED_MANAGEMENT"'),

@@ -330,6 +330,14 @@ describe("ssh admin tool", () => {
         expect(() => tool.parse({ action: "upgrade", artifact_transport: "automatic" })).toThrow();
     });
 
+    test("remote artifact transport uses the host-wide upgrade lock", () => {
+        const rootScript = buildRootUpgradeScript({ helperPath: "/tmp/release-assets.sh" });
+
+        expect(rootScript).toContain("/run/lock/supacloud-upgrade.lock");
+        expect(rootScript).toContain("flock -E 75 -n 9");
+        expect(rootScript).toContain("Another SupaCloud upgrade is already running");
+    });
+
     test("component upgrade validates both exact versions before upload", async () => {
         for (const args of [
             { action: "upgrade", version: "0.50.27;id", edge_runtime_version: "0.16.7" },
