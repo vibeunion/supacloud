@@ -29,7 +29,7 @@ const platformActionSchema = stringEnum([
     "list_orgs", "get_org",
 ]);
 const sshActionSchema = stringEnum([
-    "ping", "setup", "install", "upgrade", "diagnose", "exec",
+    "ping", "setup", "install", "upgrade", "versions", "diagnose", "exec",
     "troubleshoot", "container_logs",
     "tenant_manage", "tenant_list", "tenant_inspect", "tenant_diagnose", "tenant_migrate",
 ]);
@@ -79,6 +79,7 @@ EXAMPLES
 
   supacloud-admin status
   supacloud-admin ssh ping
+  supacloud-admin ssh versions
   supacloud-admin ssh install --public_domain api.example.com --studio_domain studio.example.com
   supacloud-admin project create --name my-app
   supacloud-admin project list
