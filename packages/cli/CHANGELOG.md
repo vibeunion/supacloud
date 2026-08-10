@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.6](https://github.com/zuohuadong/supacloud/compare/cli-v0.14.5...cli-v0.14.6) (2026-08-10)
+
+
+### Bug Fixes
+
+* **admin:** support project create domain flags ([#800](https://github.com/zuohuadong/supacloud/issues/800)) ([c47e19c](https://github.com/zuohuadong/supacloud/commit/c47e19c88e1efcaa9864e1902f47a24be22c92ee))
+
 ## [0.14.5](https://github.com/zuohuadong/supacloud/compare/cli-v0.14.4...cli-v0.14.5) (2026-08-10)
 
 

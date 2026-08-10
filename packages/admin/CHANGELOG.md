@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1](https://github.com/zuohuadong/supacloud/compare/admin-v0.8.0...admin-v0.8.1) (2026-08-10)
+
+
+### Bug Fixes
+
+* **admin:** support project create domain flags ([#800](https://github.com/zuohuadong/supacloud/issues/800)) ([c47e19c](https://github.com/zuohuadong/supacloud/commit/c47e19c88e1efcaa9864e1902f47a24be22c92ee))
+
 ## [0.8.0](https://github.com/zuohuadong/supacloud/compare/admin-v0.7.12...admin-v0.8.0) (2026-08-10)
 
 
