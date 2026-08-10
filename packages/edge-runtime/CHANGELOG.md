@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.8](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.16.7...edge-runtime-v0.16.8) (2026-08-10)
+
+
+### Bug Fixes
+
+* **upgrade:** add verified offline release bundles ([#773](https://github.com/zuohuadong/supacloud/issues/773)) ([e87331e](https://github.com/zuohuadong/supacloud/commit/e87331eab943f341edebc972c4d8c1f2b7294073))
+
 ## [0.16.7](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.16.6...edge-runtime-v0.16.7) (2026-08-10)
 
 
