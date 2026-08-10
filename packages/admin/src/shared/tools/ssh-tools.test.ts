@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -129,6 +129,12 @@ function writeFakeGh(filePath: string, version: string): void {
         "exit 1",
         "",
     ].join("\n"));
+}
+
+function linkHostCommand(commandDir: string, commandName: string): void {
+    const commandPath = Bun.which(commandName);
+    if (!commandPath) throw new Error(`Required test command is unavailable: ${commandName}`);
+    symlinkSync(commandPath, join(commandDir, commandName));
 }
 
 function rootScriptThroughProxySetup(rootScript: string): string {
@@ -365,12 +371,17 @@ describe("ssh admin tool", () => {
             const fixtureDir = mkdtempSync(join(tmpdir(), "supacloud-admin-gh-bootstrap-"));
             const currentBinDir = join(fixtureDir, "current-bin");
             const legacyBinDir = join(fixtureDir, "legacy-bin");
+            const commandDir = join(fixtureDir, "command-bin");
             const helperPath = join(fixtureDir, "release-assets-wrapper.sh");
             const installTargetRecord = join(fixtureDir, "install-target");
             const pinnedGhSource = join(fixtureDir, "pinned-gh");
             mkdirSync(currentBinDir);
             mkdirSync(legacyBinDir);
+            mkdirSync(commandDir);
             try {
+                for (const commandName of ["awk", "grep", "install"]) {
+                    linkHostCommand(commandDir, commandName);
+                }
                 if (initialGhVersion) writeFakeGh(join(legacyBinDir, "gh"), initialGhVersion);
                 writeFakeGh(pinnedGhSource, "2.96.0");
                 writeFileSync(helperPath, [
@@ -385,7 +396,7 @@ describe("ssh admin tool", () => {
                 const execution = Bun.spawnSync(["/bin/bash", "-c", rootScriptVerifierBootstrap(rootScript)], {
                     env: {
                         ...process.env,
-                        PATH: `${currentBinDir}:${legacyBinDir}:/usr/bin:/bin`,
+                        PATH: `${currentBinDir}:${legacyBinDir}:${commandDir}`,
                         SUPACLOUD_ALLOW_UNVERIFIED_RELEASE: "true",
                     },
                 });
