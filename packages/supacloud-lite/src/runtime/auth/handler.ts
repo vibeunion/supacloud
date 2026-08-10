@@ -95,6 +95,11 @@ function randomOtp(length: number): string {
   return code
 }
 
+async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
 function json(status: number, body: unknown): Response {
   return new Response(status === 204 ? null : JSON.stringify(body), {
     status,
@@ -513,14 +518,20 @@ export class AuthHandler {
   }
 
   private async verifyToken(req: Request): Promise<Response> {
-    const body = (await req.json().catch(() => ({}))) as { type?: string; email?: string; token?: string }
-    if (!body.token) return authError(400, 'validation_failed', 'token is required')
+    const body = (await req.json().catch(() => ({}))) as {
+      type?: string
+      email?: string
+      token?: string
+      token_hash?: string
+    }
+    const token = body.token ?? body.token_hash
+    if (!token) return authError(400, 'validation_failed', 'token or token_hash is required')
     // A recovery (password-reset) token must be redeemed with type=recovery
     // explicitly - never fold it into the default set, or a guessed login OTP
     // could mint a recovery session.
     const types =
       body.type === 'recovery' ? ['recovery'] : body.type === 'magiclink' ? ['magiclink'] : ['otp', 'magiclink']
-    const user = await this.redeem(body.token, types, body.email)
+    const user = await this.redeem(token, types, body.email)
     if (!user) return authError(403, 'otp_expired', 'Token has expired or is invalid')
     return json(200, await this.sessionFor(user))
   }
@@ -554,6 +565,10 @@ export class AuthHandler {
     }
     const idMatch = path.match(/^admin\/users\/([0-9a-f-]{36})$/)
     const exportMatch = path.match(/^admin\/users\/([0-9a-f-]{36})\/export$/)
+
+    if (path === 'admin/generate_link' && method === 'POST') {
+      return await this.generateAdminMagicLink(req)
+    }
 
     if (path === 'admin/audit' && method === 'GET') {
       const res = await this.db.query(
@@ -635,6 +650,75 @@ export class AuthHandler {
       return await this.eraseUser(idMatch[1])
     }
     return authError(404, 'not_found', `unknown admin endpoint`)
+  }
+
+  private async generateAdminMagicLink(req: Request): Promise<Response> {
+    const body = (await req.json().catch(() => ({}))) as {
+      type?: string
+      email?: string
+      redirect_to?: string
+      data?: Record<string, unknown>
+    }
+    if (body.type !== 'magiclink') {
+      return authError(422, 'unsupported_link_type', 'Only magiclink generation is supported')
+    }
+    if (!body.email) return authError(400, 'validation_failed', 'email is required')
+
+    const email = body.email.toLowerCase().trim()
+    const emailOtp = randomOtp(this.settings.otpLength)
+    const hashedToken = await sha256Hex(randomToken(32))
+    const expiry = `${this.settings.otpExpirySeconds} seconds`
+    const requestUrl = new URL(req.url)
+    const redirectTo = resolveRedirect(
+      requestUrl.searchParams.get('redirect_to') ?? body.redirect_to,
+      this.config.siteUrl,
+      this.config.uriAllowList,
+      this.config.enforceRedirectAllowList
+    )
+
+    const user = await this.db.transaction(async (query) => {
+      const result = await query<UserRow>(
+        `insert into auth.users
+           (aud, role, email, raw_app_meta_data, raw_user_meta_data)
+         values ('authenticated', 'authenticated', $1, '{"provider":"email","providers":["email"]}', $2::jsonb)
+         on conflict (email) do update set email = excluded.email
+         returning *`,
+        [email, JSON.stringify(body.data ?? {})]
+      )
+      const linkedUser = result.rows[0]
+      await query(
+        `insert into auth.identities (user_id, provider, provider_id, identity_data)
+         values ($1::uuid, 'email', $1::text, $2::jsonb)
+         on conflict (provider, provider_id) do nothing`,
+        [linkedUser.id, JSON.stringify({ sub: linkedUser.id, email })]
+      )
+      await query(
+        `delete from auth.one_time_tokens
+         where email = $1 and token_type = any($2::text[])`,
+        [email, '{otp,magiclink}']
+      )
+      await query(
+        `insert into auth.one_time_tokens (user_id, email, token_type, token, expires_at)
+         values ($1, $2, 'otp', $3, now() + $5::interval),
+                ($1, $2, 'magiclink', $4, now() + $5::interval)`,
+        [linkedUser.id, email, emailOtp, hashedToken, expiry]
+      )
+      return linkedUser
+    })
+
+    const actionUrl = new URL(`${this.config.apiUrl}/auth/v1/verify`)
+    actionUrl.searchParams.set('token', hashedToken)
+    actionUrl.searchParams.set('type', 'magiclink')
+    actionUrl.searchParams.set('redirect_to', redirectTo)
+    await this.audit('user_magiclink_requested', { actorId: user.id, actorEmail: email, type: 'admin' })
+    return json(200, {
+      ...this.userJson(user, [], await this.getUserIdentities(user.id)),
+      action_link: actionUrl.toString(),
+      email_otp: emailOtp,
+      hashed_token: hashedToken,
+      redirect_to: redirectTo,
+      verification_type: 'magiclink',
+    })
   }
 
   // ── audit trail ───────────────────────────────────────────────────────
