@@ -1,6 +1,7 @@
 import { logger } from "../utils/logger";
 import { config } from "../config";
 import { ServiceUnavailableError } from "../utils/errors";
+import { normalizeEdgeRuntimeBundle } from "./edge-runtime-bundle";
 import path from "path";
 import fs from "fs/promises";
 
@@ -68,6 +69,7 @@ export interface EdgeFunctionPreheatPoolResult {
   cacheHits: number;
   cacheMisses: number;
   durationMs: number;
+  error?: string;
 }
 
 export interface EdgeFunctionPreheatResult {
@@ -137,29 +139,17 @@ const deployMetrics: EdgeFunctionDeployMetrics = {
   total_preheat_cache_misses: 0,
 };
 
-type BuildMetafileImport = {
-  path?: string;
-  original?: string;
-  kind?: string;
-  external?: boolean;
-};
-
-type BuildMetafile = {
-  inputs?: Record<string, {
-    bytes?: number;
-    imports?: BuildMetafileImport[];
-  }>;
-  outputs?: Record<string, {
-    bytes?: number;
-    imports?: BuildMetafileImport[];
-  }>;
-};
-
 type BundleFunctionResult = {
   code: string;
   sizeBytes: number;
   importCount: number;
-  metafile: BuildMetafile | null;
+};
+
+type BundleFunctionRequest = {
+  entrypoint: string;
+  outdir: string;
+  minify: boolean;
+  importMapPath?: string;
 };
 
 type EdgeFunctionRuntimeControlResult = {
@@ -352,61 +342,40 @@ function validateFunctionCode(code: string): {
   return { valid: true };
 }
 
-/**
- * Bundle a TypeScript entrypoint into a single self-contained .js file using Bun.build().
- * Returns the bundled code string, or null on failure.
- */
-async function bundleFunction(
-  entrypoint: string,
-  outdir: string,
-  outName: string,
-  minify: boolean = false,
-  importMapPath?: string,
-): Promise<BundleFunctionResult | null> {
-  try {
-    const buildOptions: Parameters<typeof Bun.build>[0] & {
-      importMap?: string;
-      metafile?: boolean;
-    } = {
-      entrypoints: [entrypoint],
-      outdir,
-      naming: `${outName}.[ext]`,
-      target: "bun",
-      minify,
-      external: resolveExternalPackages(),
-      metafile: true,
-    };
-    if (importMapPath) {
-      buildOptions.importMap = importMapPath;
-    }
-    const result = await Bun.build(buildOptions);
-
-    if (!result.success) {
-      const messages = result.logs
-        .map((l: { message?: string }) => l.message || String(l))
-        .join("\n");
-      logger.error(`[EdgeFunction] Bun.build() failed:\n${messages}`);
-      return null;
-    }
-
-    const artifact = result.outputs.find((output) => output.kind === "entry-point") ?? result.outputs[0];
-    if (!artifact) {
-      logger.error(`[EdgeFunction] Bun.build() produced no output`, { entrypoint });
-      return null;
-    }
-
-    const code = await artifact.text();
-    const metafile = normalizeBuildMetafile((result as { metafile?: unknown }).metafile);
-    return {
-      code,
-      sizeBytes: typeof artifact.size === "number" ? artifact.size : bundleSizeBytes(code),
-      importCount: countMetafileImports(metafile) ?? countImports(code),
-      metafile,
-    };
-  } catch (err) {
-    logger.error(`[EdgeFunction] Bundle error`, { error: err });
-    return null;
+// Build and final artifact policy failures must escape before a version can be written or preheated.
+async function buildFunctionCode(request: BundleFunctionRequest): Promise<string> {
+  const buildOptions: Parameters<typeof Bun.build>[0] & { importMap?: string } = {
+    entrypoints: [request.entrypoint],
+    outdir: request.outdir,
+    naming: "index.[ext]",
+    target: "bun",
+    minify: request.minify,
+    external: resolveExternalPackages(),
+  };
+  if (request.importMapPath) buildOptions.importMap = request.importMapPath;
+  const buildResult = await Bun.build(buildOptions);
+  if (!buildResult.success) {
+    const messages = buildResult.logs
+      .map((logEntry: { message?: string }) => logEntry.message || String(logEntry))
+      .join("\n");
+    logger.error(`[EdgeFunction] Bun.build() failed:\n${messages}`);
+    throw new Error("Bun.build() failed while bundling the function");
   }
+
+  const artifact = buildResult.outputs.find((output) => output.kind === "entry-point")
+    ?? buildResult.outputs[0];
+  if (!artifact) throw new Error("Bun.build() produced no function artifact");
+  return artifact.text();
+}
+
+async function bundleFunction(request: BundleFunctionRequest): Promise<BundleFunctionResult> {
+  const builtCode = await buildFunctionCode(request);
+  const normalizedBundle = normalizeEdgeRuntimeBundle(builtCode);
+  return {
+    code: normalizedBundle.code,
+    sizeBytes: bundleSizeBytes(normalizedBundle.code),
+    importCount: normalizedBundle.importCount,
+  };
 }
 
 async function sha256Hex(content: string): Promise<string> {
@@ -418,27 +387,6 @@ async function sha256Hex(content: string): Promise<string> {
 
 function bundleSizeBytes(content: string): number {
   return new TextEncoder().encode(content).byteLength;
-}
-
-function normalizeBuildMetafile(value: unknown): BuildMetafile | null {
-  if (!value || typeof value !== "object") return null;
-  const record = value as BuildMetafile;
-  return {
-    inputs: record.inputs && typeof record.inputs === "object" ? record.inputs : undefined,
-    outputs: record.outputs && typeof record.outputs === "object" ? record.outputs : undefined,
-  };
-}
-
-function countMetafileImports(metafile: BuildMetafile | null): number | null {
-  if (!metafile?.inputs) return null;
-  const specs = new Set<string>();
-  for (const input of Object.values(metafile.inputs)) {
-    for (const importEntry of input.imports || []) {
-      const specifier = importEntry.original || importEntry.path;
-      if (specifier) specs.add(specifier);
-    }
-  }
-  return specs.size;
 }
 
 function recordDeployMetrics(sizeBytes: number, importCount: number, preheat: EdgeFunctionPreheatResult): void {
@@ -457,36 +405,6 @@ function recordDeployMetrics(sizeBytes: number, importCount: number, preheat: Ed
 
 function snapshotDeployMetrics(): EdgeFunctionDeployMetrics {
   return { ...deployMetrics };
-}
-
-function countImports(code: string): number {
-  const specs = new Set<string>();
-  for (const match of code.matchAll(/\bimport\s+(?:[^"'()]*?\s+from\s+)?["']([^"']+)["']/g)) {
-    specs.add(match[1]);
-  }
-  for (const match of code.matchAll(/\bimport\s*\(\s*["']([^"']+)["']\s*\)/g)) {
-    specs.add(match[1]);
-  }
-  for (const match of code.matchAll(/\bexport\s+[^"'()]*?\s+from\s+["']([^"']+)["']/g)) {
-    specs.add(match[1]);
-  }
-  return specs.size;
-}
-
-function countFileImports(files: Record<string, string>): number {
-  const specs = new Set<string>();
-  for (const code of Object.values(files)) {
-    for (const match of code.matchAll(/\bimport\s+(?:[^"'()]*?\s+from\s+)?["']([^"']+)["']/g)) {
-      specs.add(match[1]);
-    }
-    for (const match of code.matchAll(/\bimport\s*\(\s*["']([^"']+)["']\s*\)/g)) {
-      specs.add(match[1]);
-    }
-    for (const match of code.matchAll(/\bexport\s+[^"'()]*?\s+from\s+["']([^"']+)["']/g)) {
-      specs.add(match[1]);
-    }
-  }
-  return specs.size;
 }
 
 type PreparedFunctionVersion = {
@@ -558,16 +476,19 @@ async function prepareSingleFunctionVersion(
   const sourcePath = path.join(stageDir, "index.src.ts");
   const buildDir = path.join(stageDir, ".build");
   await Bun.write(sourcePath, request.code);
-  const bundle = await bundleFunction(sourcePath, buildDir, "index", request.minify ?? false);
-  const deployedCode = bundle?.code ?? request.code;
-  const artifact = await writePreparedBundle(stageDir, finalDir, deployedCode, bundle?.sizeBytes);
+  const bundle = await bundleFunction({
+    entrypoint: sourcePath,
+    outdir: buildDir,
+    minify: request.minify ?? false,
+  });
+  const artifact = await writePreparedBundle(stageDir, finalDir, bundle.code, bundle.sizeBytes);
   await fs.rm(buildDir, { recursive: true, force: true });
   return {
     version,
-    bundled: bundle !== null,
+    bundled: true,
     entrypoint: null,
     importMap: null,
-    importCount: bundle?.importCount ?? countImports(request.code),
+    importCount: bundle.importCount,
     ...artifact,
   };
 }
@@ -614,14 +535,12 @@ async function prepareBundleFunctionVersion(
   await writeBundleSources(sourceDir, request.files);
   const importMap = await detectedImportMap(sourceDir);
   const buildDir = path.join(stageDir, ".build");
-  const bundle = await bundleFunction(
-    resolveInside(sourceDir, entrypoint),
-    buildDir,
-    "index",
-    request.minify ?? false,
-    importMap ? resolveInside(sourceDir, importMap) : undefined,
-  );
-  if (!bundle) throw new Error("Bun.build() failed while bundling the function");
+  const bundle = await bundleFunction({
+    entrypoint: resolveInside(sourceDir, entrypoint),
+    outdir: buildDir,
+    minify: request.minify ?? false,
+    importMapPath: importMap ? resolveInside(sourceDir, importMap) : undefined,
+  });
   await Bun.write(path.join(sourceDir, BUNDLED_SOURCE_RUNTIME_ENTRY), bundle.code);
   const artifact = await writePreparedBundle(stageDir, finalDir, bundle.code, bundle.sizeBytes);
   await fs.rm(buildDir, { recursive: true, force: true });
@@ -631,7 +550,7 @@ async function prepareBundleFunctionVersion(
     files: Object.keys(request.files).length,
     entrypoint,
     importMap,
-    importCount: bundle.importCount ?? countFileImports(request.files),
+    importCount: bundle.importCount,
     ...artifact,
   };
 }
@@ -983,7 +902,18 @@ function normalizePreheatPool(value: unknown): EdgeFunctionPreheatPoolResult {
     cacheHits: Number(record.cacheHits) || 0,
     cacheMisses: Number(record.cacheMisses) || 0,
     durationMs: Number(record.durationMs) || 0,
+    error: typeof record.error === "string" ? record.error : undefined,
   };
+}
+
+function runtimePreheatError(body: Record<string, unknown>): string | undefined {
+  for (const poolName of ["foreground", "background"] as const) {
+    const pool = body[poolName];
+    if (!pool || typeof pool !== "object" || Array.isArray(pool)) continue;
+    const error = (pool as Record<string, unknown>).error;
+    if (typeof error === "string" && error.trim()) return error;
+  }
+  return undefined;
 }
 
 async function readRuntimeControlBody(response: Response): Promise<Record<string, unknown>> {
@@ -1003,11 +933,14 @@ function preheatAcknowledgementError(
   body: Record<string, unknown>,
   requestedVersion?: string,
 ): string | undefined {
+  const runtimeError = runtimePreheatError(body);
   if (requestedVersion === undefined) {
-    return body.success === false ? "Edge Runtime reported preheat failure" : undefined;
+    return body.success === false
+      ? runtimeError ?? "Edge Runtime reported preheat failure"
+      : undefined;
   }
   if (body.success !== true) {
-    return "Edge Runtime did not report successful version readiness";
+    return runtimeError ?? "Edge Runtime did not report successful version readiness";
   }
   if (body.version !== requestedVersion) {
     return "Edge Runtime did not confirm the requested function version";

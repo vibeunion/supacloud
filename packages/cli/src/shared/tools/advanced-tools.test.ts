@@ -49,6 +49,31 @@ function captureTaskEventsTool(http: Record<string, unknown>) {
 }
 
 describe("edge_functions CLI tool", () => {
+    test("parses a bundle file map from a CLI JSON string", () => {
+        const { schema } = captureEdgeFunctionsTool({});
+        const parsed = parseToolArguments(schema, {
+            action: "deploy_bundle",
+            ref: "proj",
+            slug: "worker",
+            files: '{"index.ts":"export default {}","_shared/http.ts":"export const ok = true"}',
+        });
+
+        expect(parsed.files).toEqual({
+            "index.ts": "export default {}",
+            "_shared/http.ts": "export const ok = true",
+        });
+    });
+
+    test("returns a friendly error for invalid bundle file JSON", () => {
+        const { schema } = captureEdgeFunctionsTool({});
+        expect(() => parseToolArguments(schema, {
+            action: "deploy_bundle",
+            ref: "proj",
+            slug: "worker",
+            files: "{invalid",
+        })).toThrow("Invalid files JSON object");
+    });
+
     test("parses background routes from CLI-friendly comma-separated input", () => {
         const { schema } = captureEdgeFunctionsTool({});
         const parsed = parseToolArguments(schema, {

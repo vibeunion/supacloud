@@ -255,6 +255,17 @@ Use a direct Postgres DSN with `pg`, `postgres.js`, or equivalent drivers for ap
 - `diagnostics`
 - `gateway` (requires an admin-capable token)
 
+`edge_functions deploy --path <file-or-directory>` uses Bun to bundle local
+TypeScript and dependencies and runs a local syntax check before upload. The
+Management API applies the Edge Runtime module policy to the final server-side
+artifact for CLI, Web Console, and direct API deployments alike. For
+`deploy_bundle`, pass the file map as JSON, for example
+`--files '{"index.ts":"export default { fetch: () => new Response(\"ok\") }"}'`.
+Use `edge_functions source --slug <name> --output <file>` to read back large
+Function sources without depending on terminal capture limits. The CLI writes
+the complete original TS/JS source code and refuses to overwrite an existing
+destination.
+
 ### Deliberately excluded
 
 - Server installation

@@ -73,6 +73,118 @@ afterAll(async () => {
 });
 
 describe("edgeFunctionService bundle metadata", () => {
+  test("returns the Edge Runtime preheat error when version readiness fails", async () => {
+    globalThis.fetch = (async () => Response.json({
+      success: false,
+      version: "1",
+      foreground: {
+        attempted: 1,
+        succeeded: 0,
+        cacheHits: 0,
+        cacheMisses: 0,
+        durationMs: 1,
+        error: "Computed dynamic imports are disabled in the multi-tenant Edge Runtime.",
+      },
+      background: {
+        attempted: 0,
+        succeeded: 0,
+        cacheHits: 0,
+        cacheMisses: 0,
+        durationMs: 0,
+      },
+    })) as typeof fetch;
+
+    const deployed = await edgeFunctionService.deployRelease({
+      ref: "proj_preheat_diagnostic",
+      slug: "computed-import",
+      code: "export default { fetch: () => new Response('unreachable') };",
+    });
+
+    expect(deployed.success).toBe(false);
+    expect(deployed.error).toContain(
+      "Computed dynamic imports are disabled in the multi-tenant Edge Runtime.",
+    );
+  });
+
+  test("normalizes computed imports in final single-file and bundle artifacts", async () => {
+    const functionCode = `
+      var optionalPackage = "optional-runtime-package";
+      export default {
+        fetch: async () => Response.json(await import(optionalPackage).catch(() => null)),
+      };
+    `;
+    const singleFile = await edgeFunctionService.deployDetailed(
+      "proj_normalized_single",
+      "normalized-single",
+      functionCode,
+    );
+    const bundle = await edgeFunctionService.deployBundleDetailed(
+      "proj_normalized_bundle",
+      "normalized-bundle",
+      { "index.ts": functionCode },
+    );
+
+    for (const deployment of [singleFile, bundle]) {
+      expect(deployment).toMatchObject({ success: true, import_count: 2 });
+      const artifactCode = await readFile(deployment.content_path!, "utf8");
+      expect(artifactCode).toContain('import("optional-runtime-package")');
+      expect(artifactCode).toContain('import("undefined")');
+      expect(artifactCode).not.toContain("import(optionalPackage)");
+      expect(deployment.bundle_size_bytes).toBe(Buffer.byteLength(artifactCode));
+      expect(deployment.bundle_hash).toBe(
+        createHash("sha256").update(artifactCode).digest("hex").slice(0, 16),
+      );
+    }
+  });
+
+  test("rejects unresolved computed imports without activating a new version", async () => {
+    const ref = "proj_computed_import_rejected";
+    const slug = "computed-import-rejected";
+    const first = await edgeFunctionService.deployDetailed(
+      ref,
+      slug,
+      "export default { fetch: () => new Response('version-one') };",
+    );
+    const rejected = await edgeFunctionService.deployDetailed(
+      ref,
+      slug,
+      "export default { fetch: async () => Response.json(await import(process.env.RUNTIME_PACKAGE)) };",
+    );
+
+    expect(first).toMatchObject({ success: true, version: "1" });
+    expect(rejected).toMatchObject({ success: false });
+    expect(rejected.error).toContain("computed dynamic imports are disabled");
+    expect(await edgeFunctionService.getConfig(ref, slug)).toMatchObject({ version: "1" });
+    expect((await edgeFunctionService.listVersions(ref, slug)).map((version) => version.version))
+      .toEqual(["1"]);
+  });
+
+  test("does not write or preheat a single-file version when Bun.build fails", async () => {
+    const ref = "proj_single_build_failure";
+    const slug = "single-build-failure";
+    let runtimeCalls = 0;
+    globalThis.fetch = (async () => {
+      runtimeCalls += 1;
+      return Response.json({ success: true, version: "1" });
+    }) as typeof fetch;
+
+    const rejected = await edgeFunctionService.deployDetailed(
+      ref,
+      slug,
+      `
+        import "./missing-build-input.ts";
+        export default { fetch: () => new Response("unreachable") };
+      `,
+    );
+
+    expect(rejected).toMatchObject({ success: false });
+    expect(rejected.error).toMatch(/bundle/i);
+    expect(runtimeCalls).toBe(0);
+    expect(await edgeFunctionService.getConfig(ref, slug)).toEqual({ verify_jwt: true });
+    expect(await edgeFunctionService.listVersions(ref, slug)).toEqual([]);
+    expect(existsSync(join(functionsRoot, ref, ".versions", slug, "1"))).toBe(false);
+  });
+
   test("commits verify_jwt=false with the activated version before invalidation", async () => {
     const ref = "proj_atomic_false";
     const slug = "public-hook";
@@ -662,7 +774,7 @@ describe("edgeFunctionService bundle metadata", () => {
     expect(result.version).toBe("1");
     expect(result.bundle_hash).toMatch(/^[a-f0-9]{16}$/);
     expect(result.bundle_size_bytes).toBeGreaterThan(0);
-    expect(result.import_count).toBe(2);
+    expect(result.import_count).toBe(1);
     expect(result.external_packages).toEqual(["left-pad", "@scope/pkg"]);
     expect(result.preheat).toMatchObject({
       ok: true,
@@ -687,8 +799,8 @@ describe("edgeFunctionService bundle metadata", () => {
       total_deploys: metricsBefore.total_deploys + 1,
       total_bundle_size_bytes: metricsBefore.total_bundle_size_bytes + result.bundle_size_bytes!,
       last_bundle_size_bytes: result.bundle_size_bytes,
-      total_import_count: metricsBefore.total_import_count + 2,
-      last_import_count: 2,
+      total_import_count: metricsBefore.total_import_count + 1,
+      last_import_count: 1,
       total_preheat_duration_ms: metricsBefore.total_preheat_duration_ms + result.preheat!.duration_ms,
       last_preheat_duration_ms: result.preheat?.duration_ms,
       total_preheat_attempted: metricsBefore.total_preheat_attempted + 3,

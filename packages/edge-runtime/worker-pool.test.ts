@@ -414,6 +414,33 @@ describe("WorkerPool subprocess guard", () => {
     }
   });
 
+  test("reports the worker error when preheat rejects a computed dynamic import", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-preheat-import-project-"));
+    const functionPath = join(projectRoot, "computed-import.ts");
+    await Bun.write(functionPath, `
+      const moduleName = process.env.MODULE_PATH;
+      export default async function () {
+        return new Response(String(await import(moduleName)));
+      }
+    `);
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    try {
+      const preheat = await pool.preheatIdleWorkers(
+        "proj_preheat_computed",
+        functionPath,
+        projectRoot,
+        { MODULE_PATH: "./local.ts" },
+      );
+
+      expect(preheat.succeeded).toBe(0);
+      expect(preheat.error).toBe("Computed dynamic imports are disabled in the multi-tenant Edge Runtime.");
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   test("blocks computed imports from exposing runtime filesystem capabilities", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-runtime-module-project-"));
     const outsideRoot = await mkdtemp(join(tmpdir(), "supacloud-runtime-module-outside-"));

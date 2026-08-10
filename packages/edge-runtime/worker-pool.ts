@@ -107,6 +107,7 @@ type WorkerPreheatResult = {
   success: boolean;
   cacheHit: boolean | null;
   moduleCacheSize: number;
+  error?: string;
 };
 
 export type WorkerPoolPreheatResult = {
@@ -115,6 +116,7 @@ export type WorkerPoolPreheatResult = {
   cacheHits: number;
   cacheMisses: number;
   durationMs: number;
+  error?: string;
 };
 
 export type WorkerPoolGenerationRotationResult = {
@@ -1043,7 +1045,12 @@ export class WorkerPool {
       const timeout = setTimeout(() => {
         worker.removeListener("message", onMsg);
         this.retireWorker(worker);
-        resolve({ success: false, cacheHit: null, moduleCacheSize: this.lastModuleCacheEntries });
+        resolve({
+          success: false,
+          cacheHit: null,
+          moduleCacheSize: this.lastModuleCacheEntries,
+          error: "Worker preheat timed out",
+        });
       }, this.config.preheatTimeoutMs ?? DEFAULT_PREHEAT_TIMEOUT_MS);
 
       const onMsg = (msg: {
@@ -1051,6 +1058,7 @@ export class WorkerPool {
         functionId?: string;
         moduleCacheHit?: boolean;
         moduleCacheSize?: number;
+        error?: string;
       }) => {
         if (msg.type === "preheat_done" && msg.functionId === functionId) {
           clearTimeout(timeout);
@@ -1067,7 +1075,12 @@ export class WorkerPool {
         ) {
           clearTimeout(timeout);
           worker.removeListener("message", onMsg);
-          resolve({ success: false, cacheHit: null, moduleCacheSize: this.lastModuleCacheEntries });
+          resolve({
+            success: false,
+            cacheHit: null,
+            moduleCacheSize: this.lastModuleCacheEntries,
+            error: typeof msg.error === "string" ? msg.error : "Worker preheat failed",
+          });
         }
       };
 
@@ -1088,7 +1101,12 @@ export class WorkerPool {
         worker.removeListener("message", onMsg);
         console.warn("[Pool] Failed to dispatch worker preheat", error);
         this.retireWorker(worker);
-        resolve({ success: false, cacheHit: null, moduleCacheSize: this.lastModuleCacheEntries });
+        resolve({
+          success: false,
+          cacheHit: null,
+          moduleCacheSize: this.lastModuleCacheEntries,
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     });
   }
@@ -1228,6 +1246,7 @@ export class WorkerPool {
       cacheHits: results.filter((result) => result.cacheHit === true).length,
       cacheMisses: results.filter((result) => result.cacheHit === false).length,
       durationMs,
+      error: results.find((result) => !result.success && result.error)?.error,
     };
   }
 
