@@ -6,7 +6,7 @@
       "name": "supacloud",
       "dependencies": {
         "@supacloud/admin": "^0.8.1",
-        "@supacloud/cli": "^0.14.4",
+        "@supacloud/cli": "^0.14.6",
       },
       "devDependencies": {
         "@types/bun": "^1.3.14",
@@ -19,7 +19,7 @@
 
     "@supacloud/admin": ["@supacloud/admin@0.8.1", "", { "dependencies": { "@sinclair/typebox": "^0.34.52", "ssh2": "^1.17.0" }, "bin": { "supacloud-admin": "dist/index.js" } }, "sha512-7LyZKmdmJCYFU5W5l7WdHh5oMdSFY9jSxfJpgEhEsaGqCMj8ROwiAg9Qh5YvN9CoXWPxouudxHqcKf78fNqzuQ=="],
 
-    "@supacloud/cli": ["@supacloud/cli@0.14.4", "https://registry.npmmirror.com/@supacloud/cli/-/cli-0.14.4.tgz", { "dependencies": { "@sinclair/typebox": "^0.34.52" }, "bin": { "supacloud-cli": "dist/index.js" } }, "sha512-V8yL+/6CPImMMhYy1hysjhPFpec19C83oEjq8SmKRKT5roBoyr757jEpm2uKpua1DgEe/bE5M3KErgT3nVivkA=="],
+    "@supacloud/cli": ["@supacloud/cli@0.14.6", "", { "dependencies": { "@sinclair/typebox": "^0.34.52" }, "bin": { "supacloud-cli": "dist/index.js" } }, "sha512-OfkygAw4CEeBmeh3li1CxlpkbWWmbLFI7OcSRZR3I9A9U+Ajv0N78vRAtvckD4ijDB0b7Thoyg6DlCET6EkHyg=="],
 
     "@types/bun": ["@types/bun@1.3.14", "https://registry.npmmirror.com/@types/bun/-/bun-1.3.14.tgz", { "dependencies": { "bun-types": "1.3.14" } }, "sha512-h1hFqFVcvAvD9j9K7ZW7vd82aSA+rTdznZa+5bwvCwqSB1jmmfLcbIWhOLx1/+boy/xmjgCs/OMUL8hRJSmnPw=="],
 
