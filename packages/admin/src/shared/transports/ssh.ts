@@ -6,7 +6,7 @@
  */
 import { timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { Client } from "ssh2";
+import { Client, type ClientChannel } from "ssh2";
 type SftpClient = {
     fastPut: (localPath: string, remotePath: string, cb: (err?: Error | null) => void) => void;
     writeFile: (
@@ -233,6 +233,10 @@ class SshConnectionPool {
         }
     }
 
+    discard(conn: Client) {
+        try { conn.end(); } catch { /* ignore */ }
+    }
+
     closeAll() {
         for (const conn of this.pool) {
             try { conn.end(); } catch { /* ignore */ }
@@ -270,6 +274,7 @@ export class SshTransport {
         auditCommand(command, this.config.host, false);
 
         const conn = await this.pool.acquire();
+        let connectionReusable = true;
         try {
             return await new Promise<SshResult>((resolve, reject) => {
                 const outputLimit = this.config.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
@@ -277,11 +282,12 @@ export class SshTransport {
                 const stderr = new BoundedOutputCollector(outputLimit);
 
                 const timer = setTimeout(() => {
-                    conn.end();
+                    connectionReusable = false;
+                    this.pool.discard(conn);
                     reject(new Error(`SSH command timed out after ${timeoutMs}ms`));
                 }, timeoutMs);
 
-                conn.exec(command, (err: Error | undefined, stream: any) => {
+                conn.exec(command, (err: Error | undefined, stream: ClientChannel) => {
                     if (err) {
                         clearTimeout(timer);
                         return reject(err);
@@ -307,7 +313,7 @@ export class SshTransport {
                 });
             });
         } finally {
-            this.pool.release(conn);
+            if (connectionReusable) this.pool.release(conn);
         }
     }
 

@@ -11,6 +11,7 @@ type ToolHandler = (args: Record<string, unknown>) => Promise<{ content: Array<{
 
 class FakeSsh {
     readonly commands: string[] = [];
+    readonly timeouts: Array<number | undefined> = [];
     readonly uploads: Array<{ remotePath: string; content: string; mode: number }> = [];
     tenantInspectOutput = "";
     migrationFails = false;
@@ -31,8 +32,9 @@ class FakeSsh {
         return this.pingResult;
     }
 
-    async exec(command: string): Promise<{ success: boolean; stdout: string; stderr: string; code: number }> {
+    async exec(command: string, timeoutMs?: number): Promise<{ success: boolean; stdout: string; stderr: string; code: number }> {
         this.commands.push(command);
+        this.timeouts.push(timeoutMs);
         if (this.upgradeExecThrows && command.includes("UPGRADE_RUNNER")) {
             throw new Error("connection dropped");
         }
@@ -152,6 +154,18 @@ function rootScriptThroughHelperSource(rootScript: string, continuationPath: str
         throw new Error("Root upgrade script lacks staged Management setup");
     }
     return [scriptLines[0], ...scriptLines.slice(stagedSetupIndex, helperSourceIndex + 1),
+        `touch '${continuationPath}'`].join("\n");
+}
+
+function rootScriptThroughBootstrap(rootScript: string, continuationPath: string): string {
+    const scriptLines = rootScript.split("\n");
+    const stagedSetupIndex = scriptLines.indexOf("STAGED_MANAGEMENT=''");
+    const stagedRunnerIndex = scriptLines.indexOf('  UPGRADE_RUNNER="$STAGED_MANAGEMENT"');
+    const bootstrapEndIndex = scriptLines.indexOf("fi", stagedRunnerIndex);
+    if (stagedSetupIndex < 0 || stagedRunnerIndex < stagedSetupIndex || bootstrapEndIndex < stagedRunnerIndex) {
+        throw new Error("Root upgrade script lacks Management bootstrap boundaries");
+    }
+    return [scriptLines[0], ...scriptLines.slice(stagedSetupIndex, bootstrapEndIndex + 1),
         `touch '${continuationPath}'`].join("\n");
 }
 
@@ -314,6 +328,17 @@ describe("ssh admin tool", () => {
         expect(execution.exitCode).toBe(0);
     });
 
+    test("explicit upgrade proxy leaves time for direct-first and proxy transfer budgets", async () => {
+        const ssh = new FakeSsh();
+        await captureSshTool(ssh).invoke({
+            action: "upgrade",
+            version: "0.50.29",
+            github_proxy: "https://proxy.example.test/",
+        });
+
+        expect(ssh.timeouts).toEqual([1_320_000, undefined]);
+    });
+
     test("outer upgrade signals remove the helper and stop command continuation", () => {
         for (const upgradeSignal of UPGRADE_SIGNALS) {
             const fixtureDir = mkdtempSync(join(tmpdir(), "supacloud-admin-outer-signal-"));
@@ -363,6 +388,41 @@ describe("ssh admin tool", () => {
             } finally {
                 rmSync(fixtureDir, { recursive: true, force: true });
             }
+        }
+    });
+
+    test("failed Management bootstrap removes the staged binary and stops continuation", async () => {
+        const fixtureDir = mkdtempSync(join(tmpdir(), "supacloud-admin-bootstrap-failure-"));
+        const helperPath = join(fixtureDir, "release-assets.sh");
+        const stagedPathRecord = join(fixtureDir, "staged-path");
+        const continuationPath = join(fixtureDir, "continued");
+        try {
+            writeFileSync(helperPath, [
+                "supacloud_attestation_verifier_available() { return 0; }",
+                "supacloud_version_at_least() { return 1; }",
+                "supacloud_fetch_component_release() { printf '%s\\n' '{}'; }",
+                "supacloud_download_release_asset() {",
+                "  printf '%s\\n' \"$3\" > \"$STAGED_PATH_RECORD\"",
+                "  printf '%s\\n' partial > \"$3\"",
+                "  return 28",
+                "}",
+            ].join("\n"));
+            const rootScript = buildRootUpgradeScript({
+                version: "0.50.29",
+                edgeRuntimeVersion: "0.16.7",
+                helperPath,
+            });
+            const execution = Bun.spawnSync(["/bin/bash", "-c",
+                rootScriptThroughBootstrap(rootScript, continuationPath)], {
+                env: { ...process.env, STAGED_PATH_RECORD: stagedPathRecord },
+            });
+
+            expect(execution.exitCode).not.toBe(0);
+            const stagedPath = (await Bun.file(stagedPathRecord).text()).trim();
+            expect(existsSync(stagedPath)).toBe(false);
+            expect(existsSync(continuationPath)).toBe(false);
+        } finally {
+            rmSync(fixtureDir, { recursive: true, force: true });
         }
     });
 
@@ -447,6 +507,7 @@ describe("ssh admin tool", () => {
         expect(Bun.spawnSync(["bash", "-n", "-c", rootScript]).exitCode).toBe(0);
         expect(Bun.spawnSync(["bash", "-n", "-c", command]).exitCode).toBe(0);
         expect(ssh.commands[1]).toBe(`rm -f '${ssh.uploads[0]?.remotePath}'`);
+        expect(ssh.timeouts).toEqual([720_000, undefined]);
     });
 
     test("component upgrade cleans its exact helper path when SSH execution throws", async () => {

@@ -12,6 +12,8 @@ class FakeSshClient extends EventEmitter {
     connectError: Error | undefined;
     stdout = Buffer.from("ok\n");
     stderrOutput = Buffer.alloc(0);
+    stallCommand = false;
+    endCalls = 0;
 
     connect(options: Record<string, unknown>): this {
         this.connectOptions = options;
@@ -23,6 +25,7 @@ class FakeSshClient extends EventEmitter {
         const stream = new EventEmitter() as EventEmitter & { stderr: EventEmitter };
         stream.stderr = new EventEmitter();
         callback(undefined, stream);
+        if (this.stallCommand) return;
         queueMicrotask(() => {
             if (this.stdout.length > 0) stream.emit("data", this.stdout);
             if (this.stderrOutput.length > 0) stream.stderr.emit("data", this.stderrOutput);
@@ -30,7 +33,9 @@ class FakeSshClient extends EventEmitter {
         });
     }
 
-    end(): void {}
+    end(): void {
+        this.endCalls++;
+    }
 }
 
 describe("SshTransport audit safety", () => {
@@ -138,6 +143,34 @@ describe("SshTransport audit safety", () => {
             const verifier = client.connectOptions?.hostVerifier as ((hash: string) => boolean);
             expect(verifier(createHash("sha256").update(TEST_HOST_KEY).digest("hex"))).toBe(true);
             expect(verifier(createHash("sha256").update("different-key").digest("hex"))).toBe(false);
+        } finally {
+            transport.close();
+        }
+    });
+
+    test("discards a timed-out connection before the next cleanup command", async () => {
+        const stalledClient = new FakeSshClient();
+        stalledClient.stallCommand = true;
+        const cleanupClient = new FakeSshClient();
+        const clients = [stalledClient, cleanupClient];
+        let clientIndex = 0;
+        const transport = new SshTransport({
+            host: "server.example.com",
+            port: 22,
+            username: "root",
+            hostFingerprint: TEST_HOST_FINGERPRINT,
+        }, { clientFactory: () => clients[clientIndex++] as never });
+
+        try {
+            await expect(transport.exec("long-running-upgrade", 10)).rejects.toThrow(
+                "SSH command timed out after 10ms",
+            );
+            expect(stalledClient.endCalls).toBe(1);
+
+            const cleanup = await transport.exec("remove-upgrade-helper");
+            expect(cleanup.success).toBe(true);
+            expect(clientIndex).toBe(2);
+            expect(cleanupClient.connectOptions?.host).toBe("server.example.com");
         } finally {
             transport.close();
         }

@@ -8,6 +8,24 @@ SUPACLOUD_GH_MIN_VERSION="${SUPACLOUD_GH_MIN_VERSION:-2.68.0}"
 SUPACLOUD_GH_AMD64_SHA256="${SUPACLOUD_GH_AMD64_SHA256:-83d5c2ccad5498f58bf6368acb1ab32588cf43ab3a4b1c301bf36328b1c8bd60}"
 SUPACLOUD_GH_ARM64_SHA256="${SUPACLOUD_GH_ARM64_SHA256:-06f86ec7103d41993b76cd78072f43595c34aaa56506d971d9860e67140bf909}"
 
+supacloud_curl_release_json() {
+    local url="$1"
+    local output="$2"
+    curl -fsSL --proto '=https' --proto-redir '=https' \
+        --retry 1 --retry-delay 2 --retry-max-time 60 \
+        --connect-timeout 15 --max-time 30 --speed-limit 128 --speed-time 10 \
+        -o "$output" "$url"
+}
+
+supacloud_curl_release_asset() {
+    local url="$1"
+    local output="$2"
+    curl -fL --proto '=https' --proto-redir '=https' \
+        --retry 1 --retry-delay 2 --retry-max-time 180 \
+        --connect-timeout 15 --max-time 90 --speed-limit 128 --speed-time 60 \
+        -o "$output" "$url"
+}
+
 supacloud_component_tag() {
     local component="$1"
     local version="$2"
@@ -73,18 +91,15 @@ supacloud_fetch_component_release() {
     supacloud_select_release "$component" "${required_assets[@]}" <<< "$response"
 }
 
-supacloud_fetch_release_json() {
+supacloud_fetch_release_json() (
     local url="$1"
-    local proxy="${SUPACLOUD_GITHUB_PROXY:-${GH_PROXY:-}}"
-    if curl -fsSL --retry 3 --connect-timeout 15 "$url"; then
-        return 0
-    fi
-    if [[ -n "$proxy" ]]; then
-        curl -fsSL --retry 3 --connect-timeout 15 "${proxy%/}/${url}"
-        return
-    fi
-    return 1
-}
+    local response_file
+    response_file=$(mktemp) || return 1
+    trap 'rm -f "$response_file"' EXIT
+    trap 'trap - EXIT HUP INT TERM; rm -f "$response_file"; exit 1' HUP INT TERM
+    supacloud_download_release_metadata_url "$url" "$response_file" || return 1
+    cat "$response_file"
+)
 
 supacloud_release_asset_url() {
     local release_json="$1"
@@ -100,11 +115,26 @@ supacloud_download_url() {
     local output="$2"
     local proxy="${SUPACLOUD_GITHUB_PROXY:-${GH_PROXY:-}}"
 
-    if curl -fL --retry 3 --connect-timeout 15 -o "$output" "$url"; then
+    if supacloud_curl_release_asset "$url" "$output"; then
         return 0
     fi
     if [[ -n "$proxy" ]]; then
-        curl -fL --retry 3 --connect-timeout 15 -o "$output" "${proxy%/}/${url}"
+        supacloud_curl_release_asset "${proxy%/}/${url}" "$output"
+        return
+    fi
+    return 1
+}
+
+supacloud_download_release_metadata_url() {
+    local url="$1"
+    local output="$2"
+    local proxy="${SUPACLOUD_GITHUB_PROXY:-${GH_PROXY:-}}"
+
+    if supacloud_curl_release_json "$url" "$output"; then
+        return 0
+    fi
+    if [[ -n "$proxy" ]]; then
+        supacloud_curl_release_json "${proxy%/}/${url}" "$output"
         return
     fi
     return 1
@@ -185,7 +215,8 @@ supacloud_install_pinned_tar_xz_binary() (
     fi
 
     extract_dir=$(mktemp -d)
-    trap 'rm -rf "$extract_dir"; [[ -z "${staged_target:-}" ]] || rm -f "$staged_target"' EXIT HUP INT TERM
+    trap 'rm -rf "$extract_dir"; [[ -z "${staged_target:-}" ]] || rm -f "$staged_target"' EXIT
+    trap 'trap - EXIT HUP INT TERM; rm -rf "$extract_dir"; [[ -z "${staged_target:-}" ]] || rm -f "$staged_target"; exit 1' HUP INT TERM
     if ! tar --no-same-owner --no-same-permissions -xJf "$archive" -C "$extract_dir" "$member"; then
         return 1
     fi
@@ -417,10 +448,11 @@ supacloud_download_release_asset() (
     mkdir -p "$(dirname "$destination")"
     temporary_artifact=$(mktemp "${destination}.tmp.XXXXXX")
     temporary_checksums=$(mktemp "${destination}.SHA256SUMS.tmp.XXXXXX")
-    trap 'rm -f "${temporary_artifact:-}" "${temporary_checksums:-}"' EXIT HUP INT TERM
+    trap 'rm -f "${temporary_artifact:-}" "${temporary_checksums:-}"' EXIT
+    trap 'trap - EXIT HUP INT TERM; rm -f "${temporary_artifact:-}" "${temporary_checksums:-}"; exit 1' HUP INT TERM
 
     if ! supacloud_download_url "$asset_url" "$temporary_artifact" \
-        || ! supacloud_download_url "$checksum_url" "$temporary_checksums" \
+        || ! supacloud_download_release_metadata_url "$checksum_url" "$temporary_checksums" \
         || ! supacloud_verify_checksum "$temporary_artifact" "$asset_name" "$temporary_checksums"; then
         rm -f "$temporary_artifact" "$temporary_checksums"
         return 1
