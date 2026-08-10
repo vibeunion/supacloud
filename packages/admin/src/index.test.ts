@@ -24,18 +24,21 @@ const ADMIN_CONTEXT_KEYS = new Set([
     "SUPACLOUD_SSH_HOST_FINGERPRINT",
 ]);
 
-function cleanEnvironment(): Record<string, string> {
+function cleanEnvironment(overrides: Record<string, string> = {}): Record<string, string> {
     const env: Record<string, string> = {};
     for (const [key, value] of Object.entries(process.env)) {
         if (value !== undefined && !ADMIN_CONTEXT_KEYS.has(key)) env[key] = value;
     }
-    return env;
+    return { ...env, ...overrides };
 }
 
-async function runAdminCli(args: string[]): Promise<{ exitCode: number; output: string }> {
+async function runAdminCli(
+    args: string[],
+    overrides: Record<string, string> = {},
+): Promise<{ exitCode: number; output: string }> {
     const processHandle = Bun.spawn([process.execPath, "src/index.ts", ...args], {
         cwd: PACKAGE_ROOT,
-        env: cleanEnvironment(),
+        env: cleanEnvironment(overrides),
         stdout: "pipe",
         stderr: "pipe",
     });
@@ -181,6 +184,17 @@ describe("supacloud-admin process contract", () => {
         expect(result.output).toContain("SUPACLOUD_API_URL and SUPACLOUD_API_TOKEN");
     });
 
+    test("returns a non-zero exit code when a shortcut command reports failure text", async () => {
+        const execution = await runAdminCli(["project"], {
+            SUPACLOUD_API_URL: "http://127.0.0.1:1",
+            SUPACLOUD_API_TOKEN: "test-token",
+        });
+
+        expect(execution.exitCode).toBe(1);
+        expect(execution.output).toContain("❌ Unknown action: undefined");
+        expect(execution.output).not.toContain("test-token");
+    });
+
     test("documents every project create domain flag without API context", async () => {
         const execution = await runAdminCli(["project", "create", "--help"]);
 
@@ -189,6 +203,43 @@ describe("supacloud-admin process contract", () => {
         expect(execution.output).toContain("--api_domain");
         expect(execution.output).toContain("--auth_domain");
         expect(execution.output).toContain("--studio_domain");
+    });
+
+    test("returns a non-zero exit code when project creation is rejected", async () => {
+        const requests: Array<{ path: string; body: unknown }> = [];
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            async fetch(request) {
+                requests.push({
+                    path: new URL(request.url).pathname,
+                    body: await request.json(),
+                });
+                return Response.json({ message: "invalid domain" }, { status: 400 });
+            },
+        });
+
+        try {
+            const execution = await runAdminCli(
+                ["project", "create", "--name", "rejected-project", "--domain", "invalid.example"],
+                {
+                    SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+                    SUPACLOUD_API_TOKEN: "test-token",
+                },
+            );
+
+            expect(execution.exitCode).toBe(1);
+            expect(execution.output).toContain("❌ Failed (400)");
+            expect(requests).toEqual([{
+                path: "/v1/projects",
+                body: expect.objectContaining({
+                    name: "rejected-project",
+                    domain: "invalid.example",
+                }),
+            }]);
+        } finally {
+            server.stop(true);
+        }
     });
 
     test("surfaces every sanitized cause when an operation and cleanup both fail", async () => {
