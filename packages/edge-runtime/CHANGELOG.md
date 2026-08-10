@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.9](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.16.8...edge-runtime-v0.16.9) (2026-08-10)
+
+
+### Bug Fixes
+
+* **edge-runtime:** handle version CLI safely ([#784](https://github.com/zuohuadong/supacloud/issues/784)) ([9a84e8d](https://github.com/zuohuadong/supacloud/commit/9a84e8d0ec9a3496b5503fc23ea969fd4d2fb153))
+
 ## [0.16.8](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.16.7...edge-runtime-v0.16.8) (2026-08-10)
 
 
