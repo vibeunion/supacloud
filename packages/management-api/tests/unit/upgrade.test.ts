@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { SQL } from "bun";
-import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -42,13 +43,16 @@ import {
     restoreFileState,
     selectEdgeRuntimeRelease,
     selectManagementRelease,
+    serializeGithubAttestationBundles,
     shouldCleanupUpgradeArtifacts,
     stopManagementService,
+    supportsGithubOfflineAttestationVerification,
     upsertManagementWebConsoleDir,
     upsertPersistedEdgeRuntimePort,
     upsertEdgeRuntimeIdentityDefaults,
     UpgradeTransactionError,
     validateWebConsoleArchiveEntries,
+    verifyArtifactAttestation,
     verifyActivatedManagementBinary,
     verifyArtifactChecksum,
     verifyManagementUpgradePreflight,
@@ -59,6 +63,22 @@ import {
 } from "../../src/upgrade";
 
 const originalFetch = globalThis.fetch;
+const attestationEnvironmentKeys = [
+  "GH_ARGUMENT_RECORD",
+  "GH_BUNDLE_RECORD",
+  "GH_LOCK_TMPDIR",
+  "GH_OMIT_SOURCE_REF",
+  "GH_VERIFY_EXIT_CODE",
+  "PATH",
+  "SUPACLOUD_ALLOW_UNVERIFIED_RELEASE",
+  "SUPACLOUD_GITHUB_PROXIES",
+  "SUPACLOUD_GITHUB_PROXY",
+  "SUPACLOUD_INTEGRITY_MODE_RECORD",
+  "TMPDIR",
+] as const;
+const originalAttestationEnvironment = Object.fromEntries(
+  attestationEnvironmentKeys.map(key => [key, process.env[key]]),
+);
 
 const originalUpgradeHealthAttempts = process.env.SUPACLOUD_UPGRADE_HEALTH_ATTEMPTS;
 const originalEdgeUpgradeHealthAttempts = process.env.SUPACLOUD_UPGRADE_EDGE_HEALTH_ATTEMPTS;
@@ -97,6 +117,42 @@ function managementBinaryFixture(input: ManagementBinaryFixture = {}) {
   };
 }
 
+function installFakeGithubCli(binDirectory: string): void {
+  const executable = join(binDirectory, "gh");
+  writeFileSync(executable, [
+    "#!/bin/sh",
+    'if [ "$1 $2 $3" = "attestation verify --help" ]; then',
+    '  printf "%s\\n" "--bundle" "--signer-workflow"',
+    '  [ "${GH_OMIT_SOURCE_REF:-false}" = "true" ] || printf "%s\\n" "--source-ref"',
+    "  exit 0",
+    "fi",
+    'printf "%s\\n" "$*" > "$GH_ARGUMENT_RECORD"',
+    'bundle=""',
+    'while [ "$#" -gt 0 ]; do [ "$1" = "--bundle" ] && { shift; bundle="$1"; break; }; shift; done',
+    'case "$bundle" in */bundle.jsonl) test -f "$bundle" || exit 88 ;; *) exit 89 ;; esac',
+    'cp "$bundle" "$GH_BUNDLE_RECORD"',
+    '[ "${GH_LOCK_TMPDIR:-false}" = "true" ] && chmod 0555 "$TMPDIR"',
+    'exit "${GH_VERIFY_EXIT_CODE:-0}"',
+    "",
+  ].join("\n"));
+  chmodSync(executable, 0o755);
+}
+
+function createAttestationFixture() {
+  const directory = mkdtempSync(join(tmpdir(), "supacloud-upgrade-attestation-"));
+  const binDirectory = join(directory, "bin");
+  mkdirSync(binDirectory);
+  installFakeGithubCli(binDirectory);
+  const artifact = join(directory, "artifact");
+  writeFileSync(artifact, "verified artifact fixture");
+  process.env.PATH = `${binDirectory}:${originalAttestationEnvironment.PATH ?? ""}`;
+  process.env.TMPDIR = directory;
+  process.env.GH_ARGUMENT_RECORD = join(directory, "gh-arguments.txt");
+  process.env.GH_BUNDLE_RECORD = join(directory, "bundle-copy.jsonl");
+  process.env.SUPACLOUD_INTEGRITY_MODE_RECORD = join(directory, "integrity-mode");
+  return { artifact, directory };
+}
+
 const ensureHealthTimeout = () => {
   process.env.SUPACLOUD_UPGRADE_HEALTH_ATTEMPTS = "1";
   process.env.SUPACLOUD_UPGRADE_EDGE_HEALTH_ATTEMPTS = "1";
@@ -104,6 +160,11 @@ const ensureHealthTimeout = () => {
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
+  for (const key of attestationEnvironmentKeys) {
+    const originalValue = originalAttestationEnvironment[key];
+    if (originalValue === undefined) delete process.env[key];
+    else process.env[key] = originalValue;
+  }
   if (originalUpgradeHealthAttempts === undefined) {
     delete process.env.SUPACLOUD_UPGRADE_HEALTH_ATTEMPTS;
   } else {
@@ -494,6 +555,139 @@ describe("upgrade release selection", () => {
     expect(resolveGithubEndpointPrefixes({
       SUPACLOUD_GITHUB_PROXY: "https://proxy.example.test",
     })).toEqual(["", "https://proxy.example.test/"]);
+  });
+
+  test("offline attestation capability requires every gh verification flag", () => {
+    const requiredFlags = ["--bundle", "--signer-workflow", "--source-ref"];
+    expect(supportsGithubOfflineAttestationVerification(0, requiredFlags.join("\n"))).toBe(true);
+    expect(supportsGithubOfflineAttestationVerification(0, requiredFlags.map(flag => `${flag}=value`).join("\n"))).toBe(true);
+    expect(supportsGithubOfflineAttestationVerification(1, requiredFlags.join("\n"))).toBe(false);
+    for (const omittedFlag of requiredFlags) {
+      expect(supportsGithubOfflineAttestationVerification(
+        0,
+        requiredFlags.filter(flag => flag !== omittedFlag).join("\n"),
+      )).toBe(false);
+    }
+    expect(supportsGithubOfflineAttestationVerification(
+      0,
+      ["--bundle-from-oci", "--signer-workflow-repository", "--source-ref-pattern"].join("\n"),
+    )).toBe(false);
+  });
+
+  test("serializes every validated GitHub attestation bundle as JSONL", () => {
+    expect(serializeGithubAttestationBundles({
+      attestations: [
+        { bundle: { mediaType: "application/vnd.dev.sigstore.bundle.v0.3+json" } },
+        { bundle: { verificationMaterial: { tlogEntries: [] } } },
+      ],
+    })).toBe([
+      '{"mediaType":"application/vnd.dev.sigstore.bundle.v0.3+json"}',
+      '{"verificationMaterial":{"tlogEntries":[]}}',
+      "",
+    ].join("\n"));
+
+    for (const invalidPayload of [
+      null,
+      {},
+      { attestations: [] },
+      { attestations: [{ bundle: null }] },
+      { attestations: [{ bundle: [] }] },
+      { attestations: [{ bundle: "invalid" }] },
+    ]) {
+      expect(() => serializeGithubAttestationBundles(invalidPayload)).toThrow("attestation");
+    }
+  });
+
+  test("downloads a public digest bundle direct-first and verifies the pinned source ref", async () => {
+    const fixture = createAttestationFixture();
+    const requests: string[] = [];
+    process.env.SUPACLOUD_GITHUB_PROXY = "https://proxy.example.test/";
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const requestUrl = String(input);
+      requests.push(requestUrl);
+      if (requests.length === 1) return new Response("unavailable", { status: 503 });
+      return Response.json({ attestations: [{ bundle: { mediaType: "sigstore" } }] });
+    }) as typeof fetch;
+
+    try {
+      await expect(verifyArtifactAttestation({ filePath: fixture.artifact, forceYes: true })).resolves.toBeUndefined();
+      const digest = createHash("sha256").update(readFileSync(fixture.artifact)).digest("hex");
+      const apiUrl = `https://api.github.com/repos/zuohuadong/supacloud/attestations/sha256:${digest}`;
+      expect(requests).toEqual([apiUrl, `https://proxy.example.test/${apiUrl}`]);
+      const ghArguments = readFileSync(process.env.GH_ARGUMENT_RECORD!, "utf8");
+      expect(ghArguments).toContain("--bundle");
+      expect(ghArguments).toContain("/bundle.jsonl");
+      expect(ghArguments).toContain("--repo zuohuadong/supacloud");
+      expect(ghArguments).toContain("--signer-workflow zuohuadong/supacloud/.github/workflows/release-please.yml");
+      expect(ghArguments).toContain("--source-ref refs/heads/main");
+      expect(readFileSync(process.env.GH_BUNDLE_RECORD!, "utf8")).toBe('{"mediaType":"sigstore"}\n');
+      expect(readdirSync(fixture.directory).filter(name => name.startsWith("supacloud-attestation-"))).toEqual([]);
+      expect(readFileSync(process.env.SUPACLOUD_INTEGRITY_MODE_RECORD!, "utf8").trim())
+        .toBe("github-attestation+same-release-sha256");
+    } finally {
+      rmSync(fixture.directory, { recursive: true, force: true });
+    }
+  });
+
+  test("propagates gh verification failure and removes the temporary bundle", async () => {
+    const fixture = createAttestationFixture();
+    process.env.GH_VERIFY_EXIT_CODE = "9";
+    globalThis.fetch = (async () => Response.json({
+      attestations: [{ bundle: { mediaType: "sigstore" } }],
+    })) as typeof fetch;
+
+    try {
+      await expect(verifyArtifactAttestation({ filePath: fixture.artifact, forceYes: true }))
+        .rejects.toThrow("GitHub artifact attestation verification failed");
+      expect(readdirSync(fixture.directory).filter(name => name.startsWith("supacloud-attestation-"))).toEqual([]);
+      expect(existsSync(process.env.SUPACLOUD_INTEGRITY_MODE_RECORD!)).toBe(false);
+    } finally {
+      rmSync(fixture.directory, { recursive: true, force: true });
+    }
+  });
+
+  test("preserves verification and cleanup errors together", async () => {
+    const fixture = createAttestationFixture();
+    process.env.GH_VERIFY_EXIT_CODE = "9";
+    process.env.GH_LOCK_TMPDIR = "true";
+    globalThis.fetch = (async () => Response.json({
+      attestations: [{ bundle: { mediaType: "sigstore" } }],
+    })) as typeof fetch;
+    let failure: unknown;
+
+    try {
+      await verifyArtifactAttestation({ filePath: fixture.artifact, forceYes: true });
+    } catch (error: unknown) {
+      failure = error;
+    } finally {
+      chmodSync(fixture.directory, 0o700);
+      rmSync(fixture.directory, { recursive: true, force: true });
+    }
+
+    expect(failure).toBeInstanceOf(AggregateError);
+    const errors = (failure as AggregateError).errors;
+    expect(errors.some(error => String(error).includes("verification failed"))).toBe(true);
+    expect(errors.some(error => String(error).includes("EACCES") || String(error).includes("permission"))).toBe(true);
+  });
+
+  test("missing offline capability only permits the existing explicit break-glass", async () => {
+    const fixture = createAttestationFixture();
+    process.env.GH_OMIT_SOURCE_REF = "true";
+    process.env.SUPACLOUD_ALLOW_UNVERIFIED_RELEASE = "true";
+    let fetchCalled = false;
+    globalThis.fetch = (async () => {
+      fetchCalled = true;
+      throw new Error("attestation API must not be called in break-glass mode");
+    }) as typeof fetch;
+
+    try {
+      await expect(verifyArtifactAttestation({ filePath: fixture.artifact, forceYes: true })).resolves.toBeUndefined();
+      expect(fetchCalled).toBe(false);
+      expect(readFileSync(process.env.SUPACLOUD_INTEGRITY_MODE_RECORD!, "utf8").trim())
+        .toBe("break-glass:same-release-sha256-only");
+    } finally {
+      rmSync(fixture.directory, { recursive: true, force: true });
+    }
   });
 
   test("rejects an artifact whose digest differs from the same-release checksum", () => {
