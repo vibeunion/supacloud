@@ -1,5 +1,5 @@
 import { describe, expect, spyOn, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -9,7 +9,9 @@ import {
     buildAdoptDropScript,
     buildCleanupUnstartedUpgradeScript,
     buildLocalUpgradeRunScript,
+    buildPrepareDropCommand,
     buildRemotePreflightScript,
+    buildRemoteStateScript,
     buildUpgradeLockScript,
     failureRequiresRemoteReconciliation,
     parseRemotePreflight,
@@ -425,6 +427,73 @@ describe("local upgrade remote runner", () => {
         expect(bundled).not.toContain("--no-same-permissions");
     });
 
+    test("rejects a dangling upload-drop symlink before creating directories", () => {
+        const fixtureRoot = realpathSync(mkdtempSync(join(tmpdir(), "supacloud-prepare-drop-")));
+        const fixturePaths = { ...paths, drop: join(fixtureRoot, "drop") };
+        symlinkSync(join(fixtureRoot, "missing-drop-target"), fixturePaths.drop);
+
+        const execution = Bun.spawnSync([
+            "bash", "-c", buildPrepareDropCommand(fixturePaths, preparedBundle("amd64", "installed")),
+        ]);
+        try {
+            expect(execution.exitCode).not.toBe(0);
+            expect(execution.stderr.toString()).toContain("Remote upload drop already exists");
+            expect(lstatSync(fixturePaths.drop).isSymbolicLink()).toBe(true);
+        } finally {
+            rmSync(fixtureRoot, { recursive: true, force: true });
+        }
+    });
+
+    test("rejects dangling adoption targets before moving the upload drop", () => {
+        for (const blockedPath of ["stage", "status", "log"] as const) {
+            const fixtureRoot = realpathSync(mkdtempSync(join(tmpdir(), `supacloud-adopt-${blockedPath}-`)));
+            const fixturePaths = {
+                drop: join(fixtureRoot, "drop"), stage: join(fixtureRoot, "stage"),
+                status: join(fixtureRoot, "run.status"), log: join(fixtureRoot, "run.log"),
+                unit: "supacloud-upgrade-test.service",
+            };
+            mkdirSync(fixturePaths.drop, { mode: 0o700 });
+            symlinkSync(join(fixtureRoot, `missing-${blockedPath}-target`), fixturePaths[blockedPath]);
+            const execution = Bun.spawnSync(["bash", "-c", [
+                "install() { return 0; }", "systemctl() { return 1; }",
+                buildAdoptDropScript(fixturePaths),
+            ].join("\n")]);
+            try {
+                expect(execution.exitCode).not.toBe(0);
+                expect(existsSync(fixturePaths.drop)).toBe(true);
+                expect(lstatSync(fixturePaths[blockedPath]).isSymbolicLink()).toBe(true);
+            } finally {
+                rmSync(fixtureRoot, { recursive: true, force: true });
+            }
+        }
+    });
+
+    test("reports dangling remote evidence without treating a stage symlink as a directory", () => {
+        const fixtureRoot = realpathSync(mkdtempSync(join(tmpdir(), "supacloud-state-symlinks-")));
+        const fixturePaths = {
+            drop: join(fixtureRoot, "drop"), stage: join(fixtureRoot, "stage"),
+            status: join(fixtureRoot, "run.status"), log: join(fixtureRoot, "run.log"),
+            unit: "supacloud-upgrade-test.service",
+        };
+        for (const evidencePath of [fixturePaths.drop, fixturePaths.stage, fixturePaths.status, fixturePaths.log]) {
+            symlinkSync(join(fixtureRoot, `missing-${evidencePath.split("/").at(-1)}-target`), evidencePath);
+        }
+        const execution = Bun.spawnSync(["bash", "-c", [
+            "systemctl() { if [ \"$1\" = is-active ]; then echo inactive; return 3; fi; echo loaded; }",
+            buildRemoteStateScript(fixturePaths),
+        ].join("\n")]);
+        try {
+            expect(execution.exitCode).toBe(0);
+            const output = execution.stdout.toString();
+            for (const field of ["STAGE_EXISTS", "DROP_EXISTS", "STATUS_EXISTS", "LOG_EXISTS"]) {
+                expect(output).toContain(`${field}=yes`);
+            }
+            expect(output).toContain("STAGE_DIRECTORY=no");
+        } finally {
+            rmSync(fixtureRoot, { recursive: true, force: true });
+        }
+    });
+
     test("rolls back stage and records when adoption fails after the move", () => {
         const fixtureRoot = realpathSync(mkdtempSync(join(tmpdir(), "supacloud-adopt-rollback-")));
         const fixturePaths = {
@@ -751,6 +820,52 @@ describe("local upgrade remote runner", () => {
         expect(failureRequiresRemoteReconciliation(failure)).toBe(false);
         expect(String(failure)).toContain("FAILED:9:TRANSACTION");
         expect(ssh.commands).toHaveLength(4);
+    });
+
+    test("reads and cleans failed transaction evidence after an unambiguous unit stop", async () => {
+        for (const [serviceState, unitLoadState, unitExists] of [
+            ["failed", "loaded", true],
+            ["unknown", "not-found", false],
+        ] as const) {
+            const ssh = new ScriptedSsh([
+                remoteState({ status: "FAILED:9:TRANSACTION", serviceState, unitLoadState, unitExists }),
+                remoteResult("transaction failed\n"),
+                remoteResult(),
+            ]);
+
+            const failure = await awaitRemoteUpgrade(ssh as never, paths).catch((error: unknown) => error);
+            expect(failureRequiresRemoteReconciliation(failure)).toBe(false);
+            expect(String(failure)).toContain("FAILED:9:TRANSACTION");
+            expect(ssh.commands).toHaveLength(3);
+            expect(ssh.commands[1]).toContain("tail -80");
+            expect(ssh.commands[2]).toContain("rm -f --");
+            expect(ssh.commands[2]).toContain(paths.status);
+            expect(ssh.commands[2]).toContain(paths.log);
+        }
+    });
+
+    test("retains all evidence for ambiguous FAILED unit states", async () => {
+        for (const [serviceState, unitLoadState] of [
+            ["unknown", "loaded"],
+            ["maintenance", "loaded"],
+            ["inactive", "unknown"],
+        ] as const) {
+            const ssh = new ScriptedSsh([
+                remoteState({
+                    status: "FAILED:9:TRANSACTION",
+                    serviceState,
+                    unitLoadState,
+                }),
+            ]);
+
+            const failure = await awaitRemoteUpgrade(ssh as never, paths).catch((error: unknown) => error);
+            expect(failureRequiresRemoteReconciliation(failure)).toBe(true);
+            expect(String(failure)).toContain(`state=${serviceState} load=${unitLoadState}`);
+            for (const retainedPath of [paths.stage, paths.status, paths.log, paths.drop, paths.unit]) {
+                expect(String(failure)).toContain(retainedPath);
+            }
+            expect(ssh.commands).toHaveLength(1);
+        }
     });
 
     test("removes terminal records only after a completed unit publishes success", async () => {
