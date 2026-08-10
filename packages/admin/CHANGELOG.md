@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.2](https://github.com/zuohuadong/supacloud/compare/admin-v0.7.1...admin-v0.7.2) (2026-08-10)
+
+
+### Bug Fixes
+
+* **upgrade:** verify external runtime asset transactions ([#748](https://github.com/zuohuadong/supacloud/issues/748)) ([62156a9](https://github.com/zuohuadong/supacloud/commit/62156a90399094f4975d9ea5732a4d31209b9b6e))
+
 ## [0.7.1](https://github.com/zuohuadong/supacloud/compare/admin-v0.7.0...admin-v0.7.1) (2026-08-02)
 
 

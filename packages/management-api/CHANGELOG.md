@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.50.27](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.26...management-api-v0.50.27) (2026-08-10)
+
+
+### Bug Fixes
+
+* **upgrade:** verify external runtime asset transactions ([#748](https://github.com/zuohuadong/supacloud/issues/748)) ([62156a9](https://github.com/zuohuadong/supacloud/commit/62156a90399094f4975d9ea5732a4d31209b9b6e))
+
 ## [0.50.26](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.25...management-api-v0.50.26) (2026-08-10)
 
 
