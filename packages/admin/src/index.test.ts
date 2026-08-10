@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createAdminTools } from "./index";
 import { formatCliError } from "./shared/cli";
+import { schemaEnumValues } from "./shared/schema";
 import packageMetadata from "../package.json" with { type: "json" };
 
 const PACKAGE_ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -105,6 +106,12 @@ const baseContext = {
 };
 
 describe("admin SSH registration gate", () => {
+    test("keeps the versions action in the disabled SSH schema", () => {
+        const tools = createAdminTools(baseContext);
+
+        expect(schemaEnumValues(tools.ssh.schema.action)).toContain("versions");
+    });
+
     test("does not register executable SSH tools without a verified host fingerprint", () => {
         const tools = createAdminTools(baseContext);
         expect(tools.project.schema.name).toBeDefined();
