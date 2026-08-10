@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.50.29](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.28...management-api-v0.50.29) (2026-08-10)
+
+
+### Bug Fixes
+
+* **upgrade:** verify public attestations offline ([#765](https://github.com/zuohuadong/supacloud/issues/765)) ([60380af](https://github.com/zuohuadong/supacloud/commit/60380aff9ae7df1eaf3529a5b38d2c637c935fcf))
+
 ## [0.50.28](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.27...management-api-v0.50.28) (2026-08-10)
 
 
