@@ -21,6 +21,7 @@
     "test:e2e": "bun test tests/e2e",
     "test:sdk": "bun test tests/integration/sdk.automation.test.ts",
     "test:compat": "bun test tests/integration/sdk-parity.test.ts && bun run tests/scripts/run-official-sdk-compliance.ts && bun run tests/scripts/run-official-cli-compliance.ts && bun run tests/scripts/run-openapi-compliance.ts",
+    "release:manifest": "bun run ../../scripts/generate_release_manifest.ts --component management-api --package-json package.json",
     "prebuild": "bun run sql:check && bun run scripts/patch-dependencies.ts && cd ../web-console && bun install --frozen-lockfile && bun run build",
     "build:amd64": "bun build src/standalone.ts --compile --target=bun-linux-x64 --outfile=supacloud-linux-amd64",
     "build:arm64": "bun build src/standalone.ts --compile --target=bun-linux-arm64 --outfile=supacloud-linux-arm64",

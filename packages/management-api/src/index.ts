@@ -961,8 +961,16 @@ async function bootstrap() {
     const { runUpgrade } = await import("./upgrade");
     const forceYes = args.includes("--yes") || args.includes("-y");
     const targetVersion = readArgValue("--target-version", "--release", "--version");
+    const edgeRuntimeVersion = readArgValue("--edge-runtime-version");
+    const assetBundleDir = readArgValue("--asset-bundle-dir");
     try {
-      await runUpgrade({ forceYes, targetVersion });
+      if (args.includes("--edge-runtime-version") && !edgeRuntimeVersion) {
+        throw new Error("--edge-runtime-version requires an exact stable version");
+      }
+      if (args.includes("--asset-bundle-dir") && !assetBundleDir) {
+        throw new Error("--asset-bundle-dir requires an absolute protected directory");
+      }
+      await runUpgrade({ forceYes, targetVersion, edgeRuntimeVersion, assetBundleDir });
       process.exit(0);
     } catch (err: unknown) {
       logger.error("Upgrade aborted:", {

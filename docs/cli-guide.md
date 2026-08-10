@@ -299,6 +299,48 @@ Verify that fingerprint through a trusted out-of-band channel before setting
 it. Without it, `supacloud-admin` keeps HTTP administration available but leaves
 all executable SSH actions disabled.
 
+### Protected offline upgrade handoff
+
+The installed server binary provides the supported handoff for a release bundle
+that an administrator has already placed on the server. Pin both component
+versions; do not use `latest` or an inferred Edge Runtime version:
+
+```bash
+sudo /usr/local/bin/supacloud upgrade --yes \
+  --target-version 0.50.31 \
+  --edge-runtime-version 0.16.8 \
+  --asset-bundle-dir /var/lib/supacloud/upgrade-bundles/release-20260810
+```
+
+The bundle root and both component directories must be canonical, root-owned
+directories with mode `0700`. Every file must be a root-owned direct regular
+file with mode `0600`, one link, and no symlink traversal. The fixed layout is:
+
+```text
+<bundle>/
+  management-api/
+    SUPACLOUD-RELEASE.json
+    SUPACLOUD-RELEASE.attestation.jsonl
+    SHA256SUMS
+    supacloud-linux-<arch>
+    web-console-build.tar.gz
+  edge-runtime/
+    SUPACLOUD-RELEASE.json
+    SUPACLOUD-RELEASE.attestation.jsonl
+    SHA256SUMS
+    supacloud-edge-runtime-linux-<arch>
+```
+
+Omit `edge-runtime/` and `--edge-runtime-version` together for a
+Management/Web Console-only transaction. When an Edge Runtime version is
+specified, both are mandatory. The offline path reads no GitHub release
+metadata and downloads no release asset. It verifies the supplied provenance
+bundles locally with `gh attestation verify`, then checks the signed manifest,
+`SHA256SUMS`, exact asset size and digest before staging anything. A missing or
+outdated verifier, an extra file, or a component/version mismatch fails before
+the upgrade transaction. Management and Edge Runtime may come from different
+valid release commits; each component proves its own source commit.
+
 ### Owned command areas
 
 - `ssh`

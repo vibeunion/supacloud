@@ -115,10 +115,23 @@ jobs:
           cd release-assets
           sha256sum * > SHA256SUMS
 
+      - name: Generate strict Management release manifest
+        working-directory: packages/management-api
+        env:
+          RELEASE_TAG: ${{ needs.release-please.outputs.management_api_tag_name }}
+          SOURCE_COMMIT: ${{ github.sha }}
+        run: bun run release:manifest --assets-dir ../../release-assets --tag "$RELEASE_TAG" --source-commit "$SOURCE_COMMIT"
+
       - name: Attest management release artifacts
+        id: attest-management-release
         uses: actions/attest-build-provenance@v4
         with:
           subject-path: release-assets/*
+
+      - name: Stage offline Management attestation bundle
+        env:
+          ATTESTATION_BUNDLE: ${{ steps.attest-management-release.outputs.bundle-path }}
+        run: install -m 0600 "$ATTESTATION_BUNDLE" release-assets/SUPACLOUD-RELEASE.attestation.jsonl
 
       - name: Upload binaries to GitHub Release
         env:
@@ -194,10 +207,23 @@ jobs:
         working-directory: packages/edge-runtime/dist
         run: sha256sum * > SHA256SUMS
 
+      - name: Generate strict Edge Runtime release manifest
+        working-directory: packages/edge-runtime
+        env:
+          RELEASE_TAG: ${{ needs.release-please.outputs.edge_runtime_tag_name }}
+          SOURCE_COMMIT: ${{ github.sha }}
+        run: bun run release:manifest --assets-dir dist --tag "$RELEASE_TAG" --source-commit "$SOURCE_COMMIT"
+
       - name: Attest Edge Runtime release artifacts
+        id: attest-edge-runtime-release
         uses: actions/attest-build-provenance@v4
         with:
           subject-path: packages/edge-runtime/dist/*
+
+      - name: Stage offline Edge Runtime attestation bundle
+        env:
+          ATTESTATION_BUNDLE: ${{ steps.attest-edge-runtime-release.outputs.bundle-path }}
+        run: install -m 0600 "$ATTESTATION_BUNDLE" packages/edge-runtime/dist/SUPACLOUD-RELEASE.attestation.jsonl
 
       - name: Upload binaries to GitHub Release
         env:

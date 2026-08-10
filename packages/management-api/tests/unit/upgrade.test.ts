@@ -25,7 +25,9 @@ import {
     inspectActiveManagementBinary,
     inspectActiveSystemdBinary,
     normalizeEdgeRuntimeReleaseTag,
+    normalizeExactManagementVersion,
     normalizeManagementReleaseTag,
+    parseManagementVersionOutput,
     parseSystemdExecStartPath,
     parseSystemdEnabledState,
     parseSystemdMainPid,
@@ -122,7 +124,7 @@ function installFakeGithubCli(binDirectory: string): void {
   writeFileSync(executable, [
     "#!/bin/sh",
     'if [ "$1 $2 $3" = "attestation verify --help" ]; then',
-    '  printf "%s\\n" "--bundle" "--signer-workflow"',
+    '  printf "%s\\n" "--bundle" "--signer-workflow" "--deny-self-hosted-runners"',
     '  [ "${GH_OMIT_SOURCE_REF:-false}" = "true" ] || printf "%s\\n" "--source-ref"',
     "  exit 0",
     "fi",
@@ -473,6 +475,9 @@ describe("upgrade release selection", () => {
   });
 
   test("normalizes explicit versions and ignores unrelated latest component releases", () => {
+    expect(normalizeExactManagementVersion("0.50.30")).toBe("0.50.30");
+    expect(normalizeExactManagementVersion("management-api-v0.50.30")).toBe("0.50.30");
+    expect(() => normalizeExactManagementVersion("latest")).toThrow("exact stable");
     expect(normalizeManagementReleaseTag("0.38.0")).toBe("management-api-v0.38.0");
     expect(normalizeManagementReleaseTag("v0.38.0")).toBe("management-api-v0.38.0");
     expect(normalizeManagementReleaseTag("management-api-v0.38.0")).toBe("management-api-v0.38.0");
@@ -509,6 +514,18 @@ describe("upgrade release selection", () => {
     );
 
     expect(selected.tag_name).toBe("management-api-v0.37.0");
+  });
+
+  test("requires Management --version to report one exact stable version", () => {
+    expect(parseManagementVersionOutput("SupaCloud Version: 0.50.30\n")).toBe("0.50.30");
+    expect(parseManagementVersionOutput('{"message":"SupaCloud Version: 0.50.30"}\n')).toBe("0.50.30");
+    for (const invalid of [
+      "SupaCloud Version: 0.50.30-beta.1\n",
+      "SupaCloud Version: 0.50.29\nextra\n",
+      '{"message":"Edge Runtime Version: 0.16.8"}\n',
+    ]) {
+      expect(() => parseManagementVersionOutput(invalid)).toThrow();
+    }
   });
 
   test("selects only the explicitly pinned Edge Runtime release with its own checksum", () => {
@@ -558,7 +575,7 @@ describe("upgrade release selection", () => {
   });
 
   test("offline attestation capability requires every gh verification flag", () => {
-    const requiredFlags = ["--bundle", "--signer-workflow", "--source-ref"];
+    const requiredFlags = ["--bundle", "--signer-workflow", "--source-ref", "--deny-self-hosted-runners"];
     expect(supportsGithubOfflineAttestationVerification(0, requiredFlags.join("\n"))).toBe(true);
     expect(supportsGithubOfflineAttestationVerification(0, requiredFlags.map(flag => `${flag}=value`).join("\n"))).toBe(true);
     expect(supportsGithubOfflineAttestationVerification(1, requiredFlags.join("\n"))).toBe(false);
@@ -620,6 +637,7 @@ describe("upgrade release selection", () => {
       expect(ghArguments).toContain("--repo zuohuadong/supacloud");
       expect(ghArguments).toContain("--signer-workflow zuohuadong/supacloud/.github/workflows/release-please.yml");
       expect(ghArguments).toContain("--source-ref refs/heads/main");
+      expect(ghArguments).toContain("--deny-self-hosted-runners");
       expect(readFileSync(process.env.GH_BUNDLE_RECORD!, "utf8")).toBe('{"mediaType":"sigstore"}\n');
       expect(readdirSync(fixture.directory).filter(name => name.startsWith("supacloud-attestation-"))).toEqual([]);
       expect(readFileSync(process.env.SUPACLOUD_INTEGRITY_MODE_RECORD!, "utf8").trim())
