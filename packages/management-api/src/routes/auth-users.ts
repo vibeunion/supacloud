@@ -7,7 +7,7 @@ import { resolveProjectServiceRoleKey } from "../utils/service-role";
 import { requireProjectOrAdminAuth } from "../middleware/auth";
 import { getProjectDb, resolveDbName, sql as metaSql } from "../db";
 import { resolveTenantPorts, normalizeProjectRoutingConfig } from "../utils/project-routing";
-import { normalizeProjectConfig, normalizeThirdPartyAuthConfig } from "../utils/project-config";
+import { normalizeProjectConfig, resolveProjectExternalAuthEndpointConfig } from "../utils/project-config";
 import { requireAuthRuntimeManagement } from "./auth-runtime";
 import { gotrueGrantsService } from "../services/gotrue-grants.service";
 import { CapabilityUnavailableError, isAppError } from "../utils/errors";
@@ -51,15 +51,7 @@ function trustedDirectGoTrueUrl(request: Request): string | null {
 }
 
 function usesExternalAuthEndpoint(rawConfig: unknown): boolean {
-  const projectConfig = normalizeProjectConfig(rawConfig);
-  const auth = projectConfig.auth;
-  if (!auth || typeof auth !== "object" || Array.isArray(auth)) return false;
-  const thirdPartyAuth = normalizeThirdPartyAuthConfig(
-    (auth as Record<string, unknown>).third_party_auth,
-  );
-  return thirdPartyAuth.enabled
-    && thirdPartyAuth.auth_endpoint_mode === "external"
-    && Boolean(thirdPartyAuth.auth_upstream);
+  return resolveProjectExternalAuthEndpointConfig(rawConfig) !== null;
 }
 
 async function getGoTrueAdminContext(ref: string, directApiUrl?: string | null) {

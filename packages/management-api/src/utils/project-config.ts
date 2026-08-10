@@ -51,6 +51,12 @@ export interface ThirdPartyAuthConfig {
   claim_mapping: Record<string, string>;
 }
 
+export type ExternalAuthEndpointConfig = ThirdPartyAuthConfig & {
+  enabled: true;
+  auth_endpoint_mode: "external";
+  auth_upstream: string;
+};
+
 export function normalizeThirdPartyAuthConfig(value: unknown): ThirdPartyAuthConfig {
   const config = isRecord(value) ? { ...value } : {};
   const authUpstream = pickString(config.auth_upstream) || pickString(config.authUpstream);
@@ -71,6 +77,18 @@ export function normalizeThirdPartyAuthConfig(value: unknown): ThirdPartyAuthCon
     auth_upstream_tls_insecure_skip_verify: config.auth_upstream_tls_insecure_skip_verify === true || config.authUpstreamTlsInsecureSkipVerify === true,
     claim_mapping: normalizeClaimMapping(config.claim_mapping ?? config.claimMapping),
   };
+}
+
+export function resolveExternalAuthEndpointConfig(value: unknown): ExternalAuthEndpointConfig | null {
+  const config = normalizeThirdPartyAuthConfig(value);
+  if (!config.enabled || config.auth_endpoint_mode !== "external" || !config.auth_upstream) return null;
+  return { ...config, enabled: true, auth_endpoint_mode: "external", auth_upstream: config.auth_upstream };
+}
+
+export function resolveProjectExternalAuthEndpointConfig(value: unknown): ExternalAuthEndpointConfig | null {
+  const projectConfig = normalizeProjectConfig(value);
+  const authConfig = isRecord(projectConfig.auth) ? projectConfig.auth : {};
+  return resolveExternalAuthEndpointConfig(authConfig.third_party_auth);
 }
 
 function pickString(value: unknown): string | undefined {

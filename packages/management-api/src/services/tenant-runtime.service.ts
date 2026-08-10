@@ -9,7 +9,11 @@ import type { OAuthProvider, OAuthProviderConfig } from "../types/oauth";
 import { OAUTH_ENV_MAPPINGS } from "../types/oauth";
 import { tenantOAuthService } from "./tenant-oauth.service";
 import { resolveProjectApiUrl, resolveProjectAuthUrl, resolveProjectStudioUrl } from "../utils/project-routing";
-import { normalizeOAuthServerConfig, normalizeProjectConfig } from "../utils/project-config";
+import {
+    normalizeOAuthServerConfig,
+    normalizeProjectConfig,
+    resolveProjectExternalAuthEndpointConfig,
+} from "../utils/project-config";
 import {
     buildSharedProjectJwtVerificationMaterial,
     normalizeProjectJwtKeys,
@@ -36,7 +40,11 @@ import {
 } from "./tenant-runtime-config";
 import type { PostgresConnectionConfig } from "./tenant-runtime-config";
 import { decryptSecretIfNeeded } from "../utils/secret-crypto";
-import { getAuthRuntimeDescriptor, isSharedAuthRuntime } from "./auth-runtime.service";
+import {
+    getAuthRuntimeDescriptor,
+    isSharedAuthRuntime,
+    type AuthRuntimeMode,
+} from "./auth-runtime.service";
 import { authConfigChangesPostgrestVerifier } from "./auth-runtime-impact";
 import { runtimeCacheService } from "./runtime-cache.service";
 import { projectControlSecretsService } from "./project-control-secrets.service";
@@ -265,9 +273,35 @@ export interface ProjectServiceStatus {
     last_error?: string | null;
     updated_at?: string | null;
     last_reconciled_at?: string | null;
-    runtime_mode?: "local" | "owner" | "shared";
+    runtime_mode?: AuthRuntimeMode | "external";
     managed_by_ref?: string;
     local_runtime_enabled?: boolean;
+}
+
+type AuthServiceRuntimeDescriptor = Pick<
+    ReturnType<typeof getAuthRuntimeDescriptor>,
+    "project_ref" | "mode" | "authority_project_ref" | "local_gotrue_enabled"
+>;
+
+export function projectAuthServiceEntry(
+    rawAuth: ProjectServiceStatus,
+    authRuntime: AuthServiceRuntimeDescriptor,
+    projectConfig: unknown,
+): ProjectServiceStatus {
+    const externalAuth = authRuntime.mode === "local"
+        ? resolveProjectExternalAuthEndpointConfig(projectConfig)
+        : null;
+    const status = externalAuth && rawAuth.status === "UNHEALTHY" ? "INACTIVE" : rawAuth.status;
+    return {
+        ...rawAuth,
+        status,
+        healthy: status === "ACTIVE_HEALTHY",
+        service_host_ids: [`${authRuntime.authority_project_ref}-${rawAuth.id}`],
+        unit: `supacloud-gotrue@${authRuntime.authority_project_ref}`,
+        runtime_mode: externalAuth ? "external" : authRuntime.mode,
+        managed_by_ref: authRuntime.mode === "local" ? undefined : authRuntime.authority_project_ref,
+        local_runtime_enabled: externalAuth ? false : authRuntime.local_gotrue_enabled,
+    };
 }
 
 const POSTGREST_HEALTH_PATHS = ["/"] as const;
@@ -2399,6 +2433,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
 
     public async getProjectServiceStatuses(
         ref: string,
+        projectConfig: unknown,
         mode: "studio" | "detail" = "studio",
     ): Promise<ProjectServiceStatus[]> {
         const authRuntime = getAuthRuntimeDescriptor(ref);
@@ -2463,14 +2498,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
         const authId = mode === "studio" ? "auth" : "gotrue";
         const authName = mode === "studio" ? "auth" : "GoTrue";
         const rawAuth = rawAuthCandidate ?? this.unhealthyService(ref, authId, authName);
-        const authEntry: ProjectServiceStatus = {
-            ...rawAuth,
-            service_host_ids: [`${authRuntimeRef}-${authId}`],
-            unit: `supacloud-gotrue@${authRuntimeRef}`,
-            runtime_mode: authRuntime.mode,
-            managed_by_ref: authRuntime.mode === "local" ? undefined : authRuntimeRef,
-            local_runtime_enabled: authRuntime.local_gotrue_enabled,
-        };
+        const authEntry = projectAuthServiceEntry(rawAuth, authRuntime, projectConfig);
 
         if (mode === "studio") {
             const db = this.systemServiceEntry(ref, "db", "db", dbStatus);

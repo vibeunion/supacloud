@@ -3,6 +3,7 @@ import {
   mergeProjectConfig,
   normalizeOAuthServerConfig,
   normalizeProjectConfig,
+  resolveProjectExternalAuthEndpointConfig,
 } from "../../src/utils/project-config";
 
 describe("project-config utils", () => {
@@ -42,5 +43,32 @@ describe("project-config utils", () => {
       enabled: true,
       authorization_path: "/authorize.html",
     });
+  });
+
+  test("resolves only an enabled external Auth endpoint with an upstream", () => {
+    const configuredEndpoint = resolveProjectExternalAuthEndpointConfig(JSON.stringify({
+      auth: {
+        third_party_auth: {
+          enabled: true,
+          auth_endpoint_mode: "external",
+          auth_upstream: "127.0.0.1:3367",
+        },
+      },
+    }));
+
+    expect(configuredEndpoint).toMatchObject({
+      enabled: true,
+      auth_endpoint_mode: "external",
+      auth_upstream: "127.0.0.1:3367",
+    });
+    expect(resolveProjectExternalAuthEndpointConfig({
+      auth: { third_party_auth: { enabled: false, auth_upstream: "127.0.0.1:3367" } },
+    })).toBeNull();
+    expect(resolveProjectExternalAuthEndpointConfig({
+      auth: { third_party_auth: { enabled: true, auth_endpoint_mode: "local", auth_upstream: "127.0.0.1:3367" } },
+    })).toBeNull();
+    expect(resolveProjectExternalAuthEndpointConfig({
+      auth: { third_party_auth: { enabled: true, auth_endpoint_mode: "external" } },
+    })).toBeNull();
   });
 });
