@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.7](https://github.com/zuohuadong/supacloud/compare/admin-v0.7.6...admin-v0.7.7) (2026-08-10)
+
+
+### Bug Fixes
+
+* **upgrade:** bound stalled bootstrap transfers ([#770](https://github.com/zuohuadong/supacloud/issues/770)) ([e34a6e4](https://github.com/zuohuadong/supacloud/commit/e34a6e4a4f7762393de7f60a2f67da9984877a15))
+
 ## [0.7.6](https://github.com/zuohuadong/supacloud/compare/admin-v0.7.5...admin-v0.7.6) (2026-08-10)
 
 
