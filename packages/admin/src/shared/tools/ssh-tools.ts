@@ -44,6 +44,7 @@ const WEB_CONSOLE_CURRENT_DIR = "/opt/supacloud/web-console/current";
 const STABLE_SEMVER_CORE = "(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)";
 const EXACT_STABLE_SEMVER = new RegExp(`^(?:${STABLE_SEMVER_CORE})(?![\\s\\S])`);
 const SEMVER_CORE_TOKEN = /\d+\.\d+\.\d+/;
+const VERSION_TOKEN_SEPARATOR = /[\s"'()\[\]{}:,;=]+/;
 const BINARY_HASH_BEFORE_FAILED = 70;
 const BINARY_VERSION_FAILED = 71;
 const BINARY_HASH_AFTER_FAILED = 72;
@@ -100,13 +101,19 @@ function fixedBinaryProbeCommand(executablePath: string, versionArgument: string
     const executable = quoteEnvValue(executablePath);
     return [
         "set -o pipefail",
-        `if HASH_BEFORE=$(sha256sum -- ${executable} | awk '{print $1}'); then :; else exit ${BINARY_HASH_BEFORE_FAILED}; fi`,
+        `if exec {BINARY_FD}<${executable}; then :; else exit ${BINARY_HASH_BEFORE_FAILED}; fi`,
+        "PINNED_EXECUTABLE=/proc/$$/fd/$BINARY_FD",
+        `if PINNED_ID=$(stat -Lc '%d:%i' -- "$PINNED_EXECUTABLE"); then :; else exit ${BINARY_HASH_BEFORE_FAILED}; fi`,
+        `if HASH_BEFORE=$(sha256sum -- "$PINNED_EXECUTABLE" | awk '{print $1}'); then :; else exit ${BINARY_HASH_BEFORE_FAILED}; fi`,
         `printf '${BINARY_HASH_BEFORE_LABEL}%s\\n' "$HASH_BEFORE"`,
-        `if VERSION_BASE64=$(${executable} ${versionArgument} 2>&1 | head -c ${BINARY_VERSION_MAX_BYTES + 1} | base64 | tr -d '\\n'); then :; else exit ${BINARY_VERSION_FAILED}; fi`,
+        `if VERSION_BASE64=$( (exec -a ${executable} "$PINNED_EXECUTABLE" ${versionArgument} {BINARY_FD}<&-) 2>&1 | head -c ${BINARY_VERSION_MAX_BYTES + 1} | base64 | tr -d '\\n'); then :; else exit ${BINARY_VERSION_FAILED}; fi`,
         `printf '${BINARY_VERSION_LABEL}%s\\n' "$VERSION_BASE64"`,
-        `if HASH_AFTER=$(sha256sum -- ${executable} | awk '{print $1}'); then :; else exit ${BINARY_HASH_AFTER_FAILED}; fi`,
+        `if HASH_AFTER=$(sha256sum -- "$PINNED_EXECUTABLE" | awk '{print $1}'); then :; else exit ${BINARY_HASH_AFTER_FAILED}; fi`,
         `printf '${BINARY_HASH_AFTER_LABEL}%s\\n' "$HASH_AFTER"`,
         `[ "$HASH_BEFORE" = "$HASH_AFTER" ] || exit ${PROBE_CHANGED_DURING_READ}`,
+        `if CURRENT_ID=$(stat -Lc '%d:%i' -- ${executable}); then :; else exit ${PROBE_CHANGED_DURING_READ}; fi`,
+        `[ "$PINNED_ID" = "$CURRENT_ID" ] || exit ${PROBE_CHANGED_DURING_READ}`,
+        "exec {BINARY_FD}<&-",
     ].join("\n");
 }
 
@@ -615,7 +622,7 @@ function execStartEvidence(output: string): ExecStartEvidence {
 
 function stableVersion(output: string): string | null {
     if (output.length > BINARY_VERSION_MAX_BYTES || /\0/.test(output)) return null;
-    const versionTokens = output.split(/\s+/).filter(token => SEMVER_CORE_TOKEN.test(token));
+    const versionTokens = output.split(VERSION_TOKEN_SEPARATOR).filter(token => SEMVER_CORE_TOKEN.test(token));
     const versions = versionTokens.map(token => token.startsWith("v") ? token.slice(1) : token);
     if (versions.length === 0 || versions.some(version => !EXACT_STABLE_SEMVER.test(version))) {
         return null;

@@ -1,7 +1,18 @@
 import { describe, expect, test } from "bun:test";
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+    chmodSync,
+    existsSync,
+    linkSync,
+    mkdirSync,
+    mkdtempSync,
+    realpathSync,
+    rmSync,
+    statSync,
+    symlinkSync,
+    writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -207,6 +218,10 @@ function fakeBinaryProbeAfterHashFailure(versionOutput: string, hashBefore: stri
     };
 }
 
+function fixedBinaryProbeFragment(executablePath: string): string {
+    return `exec {BINARY_FD}<'${executablePath}'`;
+}
+
 function fakeWebConsoleProbe(
     markerOutput: string,
     treeSha256: string,
@@ -234,7 +249,7 @@ function addBinaryVersionFixture(
 ): void {
     const { unit, executablePath, versionOutput, sha256 } = fixture;
     addFakeExecution(ssh, `-- ${unit}`, fakeSystemdExecStart(executablePath));
-    addFakeExecution(ssh, `sha256sum -- '${executablePath}'`, fakeBinaryProbeSuccess({
+    addFakeExecution(ssh, fixedBinaryProbeFragment(executablePath), fakeBinaryProbeSuccess({
         versionOutput: `${versionOutput}\n`,
         sha256,
     }));
@@ -243,7 +258,7 @@ function addBinaryVersionFixture(
 function addPlatformVersionFixture(ssh: FakeSsh): void {
     addBinaryVersionFixture(ssh, {
         unit: "supacloud.service", executablePath: "/usr/local/bin/supacloud",
-        versionOutput: "SupaCloud Version: 0.50.34", sha256: "1".repeat(64),
+        versionOutput: '{"level":"INFO","message":"SupaCloud Version: 0.50.34"}', sha256: "1".repeat(64),
     });
     addBinaryVersionFixture(ssh, {
         unit: "supacloud-edge-runtime.service", executablePath: "/usr/local/bin/supacloud-edge-runtime",
@@ -266,6 +281,165 @@ async function generatedPlatformProbeCommand(commandFragment: string): Promise<s
     const command = ssh.commands.find(candidate => candidate.includes(commandFragment));
     if (!command) throw new Error(`Generated platform probe is missing: ${commandFragment}`);
     return command;
+}
+
+function bash32CompatibleDynamicFdSyntax(command: string): string {
+    if (process.platform !== "darwin") return command;
+    return command
+        .replaceAll("exec {BINARY_FD}<", "exec 9<")
+        .replaceAll("{BINARY_FD}<&-", "9<&-");
+}
+
+function localManagementProbeCommand(probeCommand: string, executablePath: string): string {
+    if (process.platform !== "darwin") return probeCommand;
+    if (executablePath.includes("'")) throw new Error("Local probe path must not contain a single quote");
+    return bash32CompatibleDynamicFdSyntax(probeCommand)
+        .replace("PINNED_EXECUTABLE=/proc/$$/fd/$BINARY_FD", `PINNED_EXECUTABLE='${executablePath}.pinned'`)
+        .replaceAll("stat -Lc '%d:%i' --", "stat -f '%d:%i'");
+}
+
+function prepareLocalPinnedExecutable(executablePath: string): void {
+    if (process.platform === "darwin") linkSync(executablePath, `${executablePath}.pinned`);
+}
+
+function uniqueTaggedOutputValue(output: string, label: string): string {
+    const matches = output.split(/\r?\n/).filter(line => line.startsWith(label));
+    if (matches.length !== 1) throw new Error(`Expected one tagged output line: ${label}`);
+    return matches[0]!.slice(label.length);
+}
+
+function binaryProbeOutputEvidence(output: string): {
+    hashBefore: string;
+    versionOutput: string;
+    hashAfter: string;
+} {
+    const encodedVersion = uniqueTaggedOutputValue(output, "SUPACLOUD_BINARY_VERSION_BASE64=");
+    return {
+        hashBefore: uniqueTaggedOutputValue(output, "SUPACLOUD_BINARY_HASH_BEFORE="),
+        versionOutput: Buffer.from(encodedVersion, "base64").toString(),
+        hashAfter: uniqueTaggedOutputValue(output, "SUPACLOUD_BINARY_HASH_AFTER="),
+    };
+}
+
+type BinaryProbeRaceFixture = {
+    fixtureRoot: string;
+    executablePath: string;
+    commandDir: string;
+    realSha256sum: string;
+    originalSha256: string;
+    originalIdentity: string;
+};
+
+function unsafePathBinaryProbeCommand(executablePath: string): string {
+    if (executablePath.includes("'")) throw new Error("Local probe path must not contain a single quote");
+    const executable = `'${executablePath}'`;
+    return [
+        "set -o pipefail",
+        `HASH_BEFORE=$(sha256sum -- ${executable} | awk '{print $1}') || exit 70`,
+        `printf 'SUPACLOUD_BINARY_HASH_BEFORE=%s\\n' "$HASH_BEFORE"`,
+        `VERSION_BASE64=$(${executable} --version 2>&1 | head -c 2049 | base64 | tr -d '\\n') || exit 71`,
+        `printf 'SUPACLOUD_BINARY_VERSION_BASE64=%s\\n' "$VERSION_BASE64"`,
+        `HASH_AFTER=$(sha256sum -- ${executable} | awk '{print $1}') || exit 72`,
+        `printf 'SUPACLOUD_BINARY_HASH_AFTER=%s\\n' "$HASH_AFTER"`,
+        `[ "$HASH_BEFORE" = "$HASH_AFTER" ] || exit 75`,
+    ].join("\n");
+}
+
+function writeHashSwapCommand(commandPath: string): void {
+    writeExecutableShell(commandPath, [
+        "#!/bin/bash",
+        "set -eu",
+        "CALL_COUNT=0",
+        "if [ -f \"$PROBE_SWAP_STATE\" ]; then read -r CALL_COUNT < \"$PROBE_SWAP_STATE\"; fi",
+        "if [ \"$CALL_COUNT\" = 0 ]; then",
+        "  \"$PROBE_REAL_SHA256SUM\" \"$@\"",
+        "  mv \"$PROBE_TARGET\" \"${PROBE_TARGET}.saved\"",
+        "  mv \"${PROBE_TARGET}.replacement\" \"$PROBE_TARGET\"",
+        "  printf '1\\n' > \"$PROBE_SWAP_STATE\"",
+        "  exit 0",
+        "fi",
+        "[ \"$CALL_COUNT\" = 1 ] || exit 64",
+        "if [ \"$PROBE_REPLACEMENT_OUTCOME\" = restore_original ]; then",
+        "  mv \"$PROBE_TARGET\" \"${PROBE_TARGET}.after\"",
+        "  mv \"${PROBE_TARGET}.saved\" \"$PROBE_TARGET\"",
+        "fi",
+        "printf '2\\n' > \"$PROBE_SWAP_STATE\"",
+        "exec \"$PROBE_REAL_SHA256SUM\" \"$@\"",
+        "",
+    ].join("\n"));
+}
+
+function fileIdentity(filePath: string): string {
+    const metadata = statSync(filePath);
+    return `${metadata.dev}:${metadata.ino}`;
+}
+
+function createBinaryProbeRaceFixture(): BinaryProbeRaceFixture {
+    const realSha256sum = Bun.which("sha256sum");
+    if (!realSha256sum) throw new Error("Required test command is unavailable: sha256sum");
+    const fixtureRoot = realpathSync(mkdtempSync(join(tmpdir(), "supacloud-binary-probe-aba-")));
+    const executablePath = join(fixtureRoot, "supacloud");
+    const commandDir = join(fixtureRoot, "commands");
+    const originalSource = "#!/bin/sh\nprintf 'SupaCloud Version: 0.50.34\\n'\n";
+    mkdirSync(commandDir);
+    writeExecutableShell(executablePath, originalSource);
+    writeExecutableShell(`${executablePath}.replacement`, "#!/bin/sh\nprintf 'SupaCloud Version: 0.50.35\\n'\n");
+    writeHashSwapCommand(join(commandDir, "sha256sum"));
+    return {
+        fixtureRoot,
+        executablePath,
+        commandDir,
+        realSha256sum,
+        originalSha256: createHash("sha256").update(originalSource).digest("hex"),
+        originalIdentity: fileIdentity(executablePath),
+    };
+}
+
+function executeBinaryProbeRace(
+    fixture: BinaryProbeRaceFixture,
+    probeCommand: string,
+    replacementOutcome: "restore_original" | "keep_replacement",
+): FakeExecResult {
+    const execution = Bun.spawnSync(["bash", "-c", probeCommand], {
+        env: {
+            ...process.env,
+            PATH: `${fixture.commandDir}:${process.env.PATH ?? ""}`,
+            PROBE_REAL_SHA256SUM: fixture.realSha256sum,
+            PROBE_REPLACEMENT_OUTCOME: replacementOutcome,
+            PROBE_SWAP_STATE: join(fixture.fixtureRoot, "hash-calls"),
+            PROBE_TARGET: fixture.executablePath,
+        },
+    });
+    return {
+        success: execution.exitCode === 0,
+        stdout: execution.stdout.toString(),
+        stderr: execution.stderr.toString(),
+        code: execution.exitCode,
+    };
+}
+
+async function fixedLocalManagementProbe(executablePath: string): Promise<string> {
+    const generatedProbe = await generatedPlatformProbeCommand(
+        fixedBinaryProbeFragment("/usr/local/bin/supacloud"),
+    );
+    prepareLocalPinnedExecutable(executablePath);
+    return localManagementProbeCommand(
+        generatedProbe.replaceAll("'/usr/local/bin/supacloud'", `'${executablePath}'`),
+        executablePath,
+    );
+}
+
+async function managementEvidenceForProbe(execution: FakeExecResult): Promise<{
+    status: string;
+    version: string | null;
+    sha256: string | null;
+    error: string | null;
+}> {
+    const ssh = new FakeSsh();
+    addFakeExecution(ssh, fixedBinaryProbeFragment("/usr/local/bin/supacloud"), execution);
+    addPlatformVersionFixture(ssh);
+    const response = await captureSshTool(ssh).invoke({ action: "versions" });
+    return JSON.parse(response.content[0]?.text ?? "").components.management_api;
 }
 
 const UPGRADE_SIGNALS = ["HUP", "INT", "TERM"] as const;
@@ -1181,7 +1355,7 @@ describe("ssh admin tool", () => {
             error: null,
         });
         const managementProbe = ssh.commands.find(command => (
-            command.includes("HASH_BEFORE=$(sha256sum -- '/usr/local/bin/supacloud'")
+            command.includes(fixedBinaryProbeFragment("/usr/local/bin/supacloud"))
         )) ?? "";
         const hashBeforeIndex = managementProbe.indexOf("HASH_BEFORE=$(sha256sum");
         const versionIndex = managementProbe.indexOf("VERSION_BASE64=$(");
@@ -1189,7 +1363,9 @@ describe("ssh admin tool", () => {
         expect(hashBeforeIndex).toBeGreaterThanOrEqual(0);
         expect(versionIndex).toBeGreaterThan(hashBeforeIndex);
         expect(hashAfterIndex).toBeGreaterThan(versionIndex);
-        expect(managementProbe.match(/sha256sum -- '\/usr\/local\/bin\/supacloud'/g)).toHaveLength(2);
+        expect(managementProbe.match(/sha256sum -- "\$PINNED_EXECUTABLE"/g)).toHaveLength(2);
+        expect(managementProbe).not.toContain("sha256sum -- '/usr/local/bin/supacloud'");
+        expect(managementProbe).toContain('"$PINNED_EXECUTABLE" --version');
         expect(managementProbe).toContain("| head -c 2049 | base64 |");
         const webProbe = ssh.commands.find(command => command.includes("web_tree_sha256()")) ?? "";
         expect(webProbe.indexOf("ROOT_REAL_BEFORE=")).toBeLessThan(webProbe.indexOf("TREE_BEFORE="));
@@ -1197,7 +1373,8 @@ describe("ssh admin tool", () => {
         expect(webProbe.indexOf("TREE_AFTER=")).toBeLessThan(webProbe.indexOf("ROOT_REAL_AFTER="));
         expect(webProbe.match(/head -c 4097 --/g)).toHaveLength(2);
         for (const command of ssh.commands) {
-            expect(Bun.spawnSync(["bash", "-n", "-c", command]).exitCode).toBe(0);
+            const syntaxCommand = bash32CompatibleDynamicFdSyntax(command);
+            expect(Bun.spawnSync(["bash", "-n", "-c", syntaxCommand]).exitCode).toBe(0);
         }
     });
 
@@ -1298,7 +1475,7 @@ describe("ssh admin tool", () => {
         const ssh = new FakeSsh();
         addFakeExecution(
             ssh,
-            "sha256sum -- '/usr/local/bin/supacloud'",
+            fixedBinaryProbeFragment("/usr/local/bin/supacloud"),
             fakeBinaryProbeChanged({
                 versionOutput: "SupaCloud Version: 0.50.34\n",
                 hashBefore: "1".repeat(64),
@@ -1321,29 +1498,100 @@ describe("ssh admin tool", () => {
         expect(components.web_console.status).toBe("ok");
     });
 
+    test("the legacy path probe can join a replacement version to restored original hashes", () => {
+        const fixture = createBinaryProbeRaceFixture();
+        try {
+            const legacyProbe = unsafePathBinaryProbeCommand(fixture.executablePath);
+            const execution = executeBinaryProbeRace(fixture, legacyProbe, "restore_original");
+
+            expect(execution.code).toBe(0);
+            expect(execution.stderr).toBe("");
+            expect(binaryProbeOutputEvidence(execution.stdout)).toEqual({
+                hashBefore: fixture.originalSha256,
+                versionOutput: "SupaCloud Version: 0.50.35\n",
+                hashAfter: fixture.originalSha256,
+            });
+            expect(fileIdentity(fixture.executablePath)).toBe(fixture.originalIdentity);
+        } finally {
+            rmSync(fixture.fixtureRoot, { recursive: true, force: true });
+        }
+    });
+
+    test("the fixed binary probe pins one executable across an ABA path replacement", async () => {
+        const fixture = createBinaryProbeRaceFixture();
+        try {
+            const fixedProbe = await fixedLocalManagementProbe(fixture.executablePath);
+            const execution = executeBinaryProbeRace(fixture, fixedProbe, "restore_original");
+
+            expect(execution.code).toBe(0);
+            expect(execution.stderr).toBe("");
+            expect(binaryProbeOutputEvidence(execution.stdout)).toEqual({
+                hashBefore: fixture.originalSha256,
+                versionOutput: "SupaCloud Version: 0.50.34\n",
+                hashAfter: fixture.originalSha256,
+            });
+            expect(fileIdentity(fixture.executablePath)).toBe(fixture.originalIdentity);
+            expect(await managementEvidenceForProbe(execution)).toMatchObject({
+                status: "ok",
+                version: "0.50.34",
+                sha256: fixture.originalSha256,
+                error: null,
+            });
+        } finally {
+            rmSync(fixture.fixtureRoot, { recursive: true, force: true });
+        }
+    });
+
+    test("the fixed binary probe rejects a replacement left at the allowed path", async () => {
+        const fixture = createBinaryProbeRaceFixture();
+        try {
+            const fixedProbe = await fixedLocalManagementProbe(fixture.executablePath);
+            const execution = executeBinaryProbeRace(fixture, fixedProbe, "keep_replacement");
+
+            expect(execution.code).toBe(75);
+            expect(execution.stderr).toBe("");
+            expect(binaryProbeOutputEvidence(execution.stdout)).toEqual({
+                hashBefore: fixture.originalSha256,
+                versionOutput: "SupaCloud Version: 0.50.34\n",
+                hashAfter: fixture.originalSha256,
+            });
+            expect(fileIdentity(fixture.executablePath)).not.toBe(fixture.originalIdentity);
+            expect(await managementEvidenceForProbe(execution)).toMatchObject({
+                status: "error",
+                version: null,
+                sha256: null,
+                error: "binary_changed_during_probe",
+            });
+        } finally {
+            rmSync(fixture.fixtureRoot, { recursive: true, force: true });
+        }
+    });
+
     test("the fixed binary probe exits 75 when version execution replaces its file", async () => {
         const fixtureRoot = mkdtempSync(join(tmpdir(), "supacloud-binary-probe-race-"));
         const executablePath = join(fixtureRoot, "supacloud");
         try {
+            expect(executablePath).not.toContain("'");
             writeExecutableShell(executablePath, [
                 "#!/bin/bash",
                 "printf 'SupaCloud Version: 0.50.34\\n'",
-                "NEXT_PATH=\"${0}.next\"",
+                `ORIGINAL_PATH='${executablePath}'`,
+                "NEXT_PATH=\"${ORIGINAL_PATH}.next\"",
                 "printf '%s\\n' '#!/bin/sh' \"printf 'SupaCloud Version: 0.50.35\\\\n'\" > \"$NEXT_PATH\"",
                 "chmod 0755 \"$NEXT_PATH\"",
-                "mv -f \"$NEXT_PATH\" \"$0\"",
+                "mv -f \"$NEXT_PATH\" \"$ORIGINAL_PATH\"",
                 "",
             ].join("\n"));
+            prepareLocalPinnedExecutable(executablePath);
             const ssh = new FakeSsh();
             addPlatformVersionFixture(ssh);
             await captureSshTool(ssh).invoke({ action: "versions" });
             const fixedProbe = ssh.commands.find(command => (
-                command.includes("HASH_BEFORE=$(sha256sum -- '/usr/local/bin/supacloud'")
+                command.includes(fixedBinaryProbeFragment("/usr/local/bin/supacloud"))
             )) ?? "";
-            expect(executablePath).not.toContain("'");
-            const localProbe = fixedProbe.replaceAll(
-                "'/usr/local/bin/supacloud'",
-                `'${executablePath}'`,
+            const localProbe = localManagementProbeCommand(
+                fixedProbe.replaceAll("'/usr/local/bin/supacloud'", `'${executablePath}'`),
+                executablePath,
             );
 
             const execution = Bun.spawnSync(["bash", "-c", localProbe]);
@@ -1361,7 +1609,7 @@ describe("ssh admin tool", () => {
         ]);
         addFakeExecution(
             ssh,
-            "sha256sum -- '/usr/local/bin/supacloud'",
+            fixedBinaryProbeFragment("/usr/local/bin/supacloud"),
             fakeBinaryProbeSuccess({ versionOutput: "SupaCloud Version: 0.50.34\n", sha256: "1".repeat(64) }),
         );
         addPlatformVersionFixture(ssh);
@@ -1422,7 +1670,7 @@ describe("ssh admin tool", () => {
             const ssh = new FakeSsh();
             addFakeExecution(
                 ssh,
-                "sha256sum -- '/usr/local/bin/supacloud'",
+                fixedBinaryProbeFragment("/usr/local/bin/supacloud"),
                 fakeBinaryProbeSuccess({ versionOutput, sha256: "1".repeat(64) }),
             );
             addPlatformVersionFixture(ssh);
@@ -1469,7 +1717,7 @@ describe("ssh admin tool", () => {
             const ssh = new FakeSsh();
             addFakeExecution(
                 ssh,
-                "sha256sum -- '/usr/local/bin/supacloud'",
+                fixedBinaryProbeFragment("/usr/local/bin/supacloud"),
                 fakeSuccess(invalidOutput.output),
             );
             addPlatformVersionFixture(ssh);
@@ -1678,7 +1926,7 @@ describe("ssh admin tool", () => {
         const ssh = new FakeSsh();
         addFakeExecution(
             ssh,
-            "sha256sum -- '/usr/local/bin/supacloud'",
+            fixedBinaryProbeFragment("/usr/local/bin/supacloud"),
             fakeBinaryProbeAfterHashFailure("SupaCloud Version: 0.50.34\n", "1".repeat(64)),
         );
         addPlatformVersionFixture(ssh);
@@ -1713,7 +1961,7 @@ describe("ssh admin tool", () => {
             const ssh = new FakeSsh();
             addFakeExecution(
                 ssh,
-                "sha256sum -- '/usr/local/bin/supacloud-edge-runtime'",
+                fixedBinaryProbeFragment("/usr/local/bin/supacloud-edge-runtime"),
                 fakeBinaryProbeSuccess({ versionOutput: `${versionOutput}\n`, sha256: "2".repeat(64) }),
             );
             addPlatformVersionFixture(ssh);
