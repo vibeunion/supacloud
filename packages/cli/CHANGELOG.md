@@ -13,6 +13,18 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.19.0](https://github.com/zuohuadong/supacloud/compare/cli-v0.18.0...cli-v0.19.0) (2026-08-11)
+
+
+### Features
+
+* **platform:** add durable project mutation journal ([#854](https://github.com/zuohuadong/supacloud/issues/854)) ([4dc089c](https://github.com/zuohuadong/supacloud/commit/4dc089c82ac31e7c3e33953f24552b98e2470012))
+
+
+### Bug Fixes
+
+* **cli:** probe application profiles through data API ([#855](https://github.com/zuohuadong/supacloud/issues/855)) ([c25ff09](https://github.com/zuohuadong/supacloud/commit/c25ff097344ff10b3adaf73b5b941e9642bed9bf))
+
 ## [0.18.0](https://github.com/zuohuadong/supacloud/compare/cli-v0.17.1...cli-v0.18.0) (2026-08-11)
 
 

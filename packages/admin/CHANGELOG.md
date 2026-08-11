@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.2](https://github.com/zuohuadong/supacloud/compare/admin-v0.10.1...admin-v0.10.2) (2026-08-11)
+
+
+### Bug Fixes
+
+* **admin:** reconcile remote upgrade timeout outcomes ([#857](https://github.com/zuohuadong/supacloud/issues/857)) ([fd0a203](https://github.com/zuohuadong/supacloud/commit/fd0a203bc5185ffb135e9bebfcb6d9ecd9b641f5))
+
 ## [0.10.1](https://github.com/zuohuadong/supacloud/compare/admin-v0.10.0...admin-v0.10.1) (2026-08-11)
 
 
