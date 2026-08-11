@@ -227,7 +227,7 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
         },
         async (args: any) => {
             const { action } = args;
-            const ref = projectRef || args.ref;
+            const ref = args.ref || projectRef;
             const schema = args.schema || "public";
             const schemas = args.schemas || ["public"];
 
