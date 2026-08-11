@@ -6,6 +6,7 @@ const originalFetch = globalThis.fetch;
 const originalSetTimeout = globalThis.setTimeout;
 const originalClearTimeout = globalThis.clearTimeout;
 const MAX_TEST_RESPONSE_BYTES = 1024 * 1024;
+const RELEASE_MUTATION_RESPONSE_MAX_BYTES = 64 * 1024;
 
 let clearedTimerIds: Array<ReturnType<typeof setTimeout> | undefined> = [];
 let nextTimerId = 0;
@@ -16,7 +17,7 @@ beforeEach(() => {
     nextTimerId = 0;
     globalThis.setTimeout = ((callback: (...args: unknown[]) => void, delay?: number, ...args: unknown[]) => {
         const timerId = ++nextTimerId as unknown as ReturnType<typeof setTimeout>;
-        if (delay !== 30_000) queueMicrotask(() => callback(...args));
+        if (delay === 500 || delay === 1_000) queueMicrotask(() => callback(...args));
         return timerId;
     }) as typeof setTimeout;
     globalThis.clearTimeout = ((timerId?: ReturnType<typeof setTimeout>) => {
@@ -46,18 +47,22 @@ function whitespaceJson(totalBytes: number): string {
     return `${" ".repeat(totalBytes - 2)}[]`;
 }
 
-function chunkedTextResponse(body: string): Response {
+function chunkedTextResponse(
+    body: string,
+    headers: HeadersInit = { "Content-Type": "application/json" },
+    chunkBytes = 256 * 1024,
+): Response {
     const bytes = new TextEncoder().encode(body);
     let offset = 0;
     const stream = new ReadableStream<Uint8Array>({
         pull(controller) {
             if (offset >= bytes.byteLength) return controller.close();
-            const nextOffset = Math.min(offset + 256 * 1024, bytes.byteLength);
+            const nextOffset = Math.min(offset + chunkBytes, bytes.byteLength);
             controller.enqueue(bytes.subarray(offset, nextOffset));
             offset = nextOffset;
         },
     });
-    return new Response(stream, { headers: { "Content-Type": "application/json" } });
+    return new Response(stream, { headers });
 }
 
 describe("HttpTransport retry policy", () => {
@@ -151,6 +156,26 @@ describe("HttpTransport retry policy", () => {
         expect(serialized).not.toContain(errorSentinel);
         expect(serialized).not.toContain("details");
     });
+
+    test("preserves the ordinary POST contract for request serialization failures", async () => {
+        let fetchCalls = 0;
+        globalThis.fetch = (async () => {
+            fetchCalls += 1;
+            return Response.json({ ok: true });
+        }) as unknown as typeof fetch;
+        const circularBody: Record<string, unknown> = {};
+        circularBody.self = circularBody;
+
+        const response = await createTransport().post("/resource", circularBody);
+
+        expect(response).toEqual({
+            ok: false,
+            status: 500,
+            data: { error: "Network Error", code: "NETWORK_ERROR" },
+            transportError: true,
+        });
+        expect(fetchCalls).toBe(0);
+    });
 });
 
 describe("HttpTransport bounded GET responses", () => {
@@ -209,5 +234,136 @@ describe("HttpTransport bounded GET responses", () => {
         });
 
         expect(response).toMatchObject({ ok: true, status: 200, data: null });
+    });
+});
+
+describe("HttpTransport release mutation response boundary", () => {
+    test("rejects an unserializable request before HTTP dispatch", async () => {
+        let fetchCalls = 0;
+        globalThis.fetch = (async () => {
+            fetchCalls += 1;
+            return Response.json({ ok: true });
+        }) as unknown as typeof fetch;
+        const circularBody: Record<string, unknown> = {};
+        circularBody.self = circularBody;
+
+        await expect(createTransport().postReleaseMutation("/resource", circularBody)).rejects.toThrow();
+
+        expect(fetchCalls).toBe(0);
+    });
+
+    test("accepts a chunked JSON response exactly at the byte cap", async () => {
+        const body = whitespaceJson(RELEASE_MUTATION_RESPONSE_MAX_BYTES);
+        globalThis.fetch = (async () => chunkedTextResponse(
+            body,
+            { "Content-Type": "application/json" },
+            1024,
+        )) as unknown as typeof fetch;
+
+        const response = await createTransport().postReleaseMutation("/resource", { expected: "1" });
+
+        expect(Buffer.byteLength(body)).toBe(RELEASE_MUTATION_RESPONSE_MAX_BYTES);
+        expect(response).toEqual({ ok: true, status: 200, data: [] });
+    });
+
+    test.each([
+        ["without Content-Length", {}],
+        ["with a false small Content-Length", { "Content-Length": "1" }],
+    ])("rejects a chunked response one byte over the cap %s", async (_label, headers) => {
+        const secretSentinel = "Bearer service-role-response-secret";
+        const structuredBody = JSON.stringify({ token: secretSentinel });
+        const body = `${" ".repeat(RELEASE_MUTATION_RESPONSE_MAX_BYTES + 1 - structuredBody.length)}${structuredBody}`;
+        globalThis.fetch = (async () => chunkedTextResponse(body, headers, 1024)) as unknown as typeof fetch;
+
+        const response = await createTransport().postReleaseMutation("/resource", { expected: "1" });
+        const serialized = JSON.stringify(response);
+
+        expect(Buffer.byteLength(body)).toBe(RELEASE_MUTATION_RESPONSE_MAX_BYTES + 1);
+        expect(response).toEqual({
+            ok: false,
+            status: 200,
+            data: { error: "Response body unavailable", code: "RESPONSE_READ_ERROR" },
+            responseReadError: true,
+        });
+        expect(serialized).not.toContain(secretSentinel);
+    });
+
+    test("rejects a response truncated below its declared Content-Length", async () => {
+        const secretSentinel = "service-role-truncated-response-secret";
+        const body = JSON.stringify({ token: secretSentinel });
+        globalThis.fetch = (async () => chunkedTextResponse(body, {
+            "Content-Length": String(Buffer.byteLength(body) + 10),
+            "Content-Type": "application/json",
+        }, 7)) as unknown as typeof fetch;
+
+        const response = await createTransport().postReleaseMutation("/resource", { expected: "1" });
+
+        expect(response.responseReadError).toBe(true);
+        expect(JSON.stringify(response)).not.toContain(secretSentinel);
+    });
+
+    test("rejects a chunked JSON response that ends mid-document", async () => {
+        const secretSentinel = "service-role-mid-document-secret";
+        const body = `{"token":"${secretSentinel}`;
+        globalThis.fetch = (async () => chunkedTextResponse(body, {}, 5)) as unknown as typeof fetch;
+
+        const response = await createTransport().postReleaseMutation("/resource", { expected: "1" });
+
+        expect(response.responseReadError).toBe(true);
+        expect(JSON.stringify(response)).not.toContain(secretSentinel);
+    });
+
+    test("redacts a secret-like body and reader exception", async () => {
+        const secretSentinel = "Bearer reader-failure-service-role-secret";
+        const stream = new ReadableStream<Uint8Array>({
+            start(controller) {
+                controller.enqueue(new TextEncoder().encode(`{"token":"${secretSentinel}`));
+                controller.error(new Error(secretSentinel));
+            },
+        });
+        globalThis.fetch = (async () => new Response(stream, {
+            headers: { "Content-Type": "application/json" },
+        })) as unknown as typeof fetch;
+
+        const response = await createTransport().postReleaseMutation("/resource", { expected: "1" });
+
+        expect(response.responseReadError).toBe(true);
+        expect(JSON.stringify(response)).not.toContain(secretSentinel);
+    });
+
+    test("times out a real response stream that stalls after headers", async () => {
+        globalThis.setTimeout = originalSetTimeout;
+        globalThis.clearTimeout = originalClearTimeout;
+        const secretSentinel = "Bearer delayed-service-role-secret";
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch: () => new Response(new ReadableStream<Uint8Array>({
+                start(controller) {
+                    controller.enqueue(new TextEncoder().encode(`{"token":"${secretSentinel}`));
+                },
+            }), { headers: { "Content-Type": "application/json" } }),
+        });
+        servers.push(server);
+        const transport = new HttpTransport({
+            baseUrl: `http://127.0.0.1:${server.port}`,
+            token: "test-token",
+        });
+        const startedAt = Date.now();
+
+        const response = await transport.postReleaseMutation("/resource", { expected: "1" });
+
+        expect(Date.now() - startedAt).toBeLessThan(15_000);
+        expect(response).toMatchObject({ ok: false, status: 200, responseReadError: true });
+        expect(JSON.stringify(response)).not.toContain(secretSentinel);
+    }, 20_000);
+
+    test.each([400, 409])("preserves a normal structured HTTP %d response", async status => {
+        const responseBody = { error: "ACTIVE_VERSION_CONFLICT", current_active_version: "8" };
+        globalThis.fetch = (async () => Response.json(responseBody, { status })) as unknown as typeof fetch;
+
+        const response = await createTransport().postReleaseMutation("/resource", { expected: "7" });
+
+        expect(response).toEqual({ ok: false, status, data: responseBody });
     });
 });

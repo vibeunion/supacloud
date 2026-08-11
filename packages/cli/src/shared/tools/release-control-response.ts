@@ -36,7 +36,10 @@ export function releaseControlMutationFailure(
     operation: string,
     response: HttpResult<unknown>,
 ): ReleaseControlToolResponse {
-    const outcomeUnknown = response.transportError || response.status === 408 || response.status >= 500;
+    const outcomeUnknown = response.transportError
+        || response.responseReadError
+        || response.status === 408
+        || response.status >= 500;
     return outcomeUnknown
         ? releaseControlFailure(operation, "OUTCOME_UNKNOWN", response.transportError ? null : response.status)
         : releaseControlFailure(operation, "HTTP_ERROR", response.status);

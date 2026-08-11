@@ -668,7 +668,7 @@ async function activateFunctionVersion(
         slug: functionSlug,
         expectedActiveVersion,
         targetVersion: version,
-    }, await http.post(endpoint, { expected_active_version: expectedActiveVersion }));
+    }, await http.postReleaseMutation(endpoint, { expected_active_version: expectedActiveVersion }));
 }
 
 export function registerAdvancedTools(
@@ -784,7 +784,7 @@ Actions: list, deploy, deploy_bundle, config, source, activate, delete, check`,
                             break;
                         }
                     }
-                    const deploymentResponse = await http.post(edgeFunctionResourcePath(ref, slug), {
+                    const deploymentResponse = await http.postReleaseMutation(edgeFunctionResourcePath(ref, slug), {
                         code: deployCode.code,
                         ...(deployCode.prebundled
                             ? { prebundled: true, expected_sha256: deployCode.expectedSha256 }
@@ -801,7 +801,7 @@ Actions: list, deploy, deploy_bundle, config, source, activate, delete, check`,
                     }, deploymentResponse);
                 case "deploy_bundle":
                     need("slug", slug); need("files", files);
-                    const bundleResponse = await http.post(`${edgeFunctionResourcePath(ref, slug)}/bundle`, {
+                    const bundleResponse = await http.postReleaseMutation(`${edgeFunctionResourcePath(ref, slug)}/bundle`, {
                         files,
                         entrypoint,
                         minify,
