@@ -254,6 +254,27 @@ describe("HttpTransport retry policy", () => {
 });
 
 describe("HttpTransport bounded GET responses", () => {
+    test.each([
+        0,
+        -1,
+        1.5,
+        Number.MAX_SAFE_INTEGER + 1,
+        Number.POSITIVE_INFINITY,
+        Number.NaN,
+    ])("rejects invalid response limit %s before dispatch", async maxResponseBytes => {
+        let fetchCalls = 0;
+        globalThis.fetch = (async () => {
+            fetchCalls += 1;
+            return Response.json({ ok: true });
+        }) as unknown as typeof fetch;
+
+        await expect(createTransport().get("/resource", { maxResponseBytes })).rejects.toThrow(
+            "HTTP response limit must be a positive safe integer",
+        );
+
+        expect(fetchCalls).toBe(0);
+    });
+
     test("accepts an exact 1 MiB UTF-8 JSON response", async () => {
         const body = whitespaceJson(MAX_TEST_RESPONSE_BYTES);
         globalThis.fetch = (async () => new Response(body, {

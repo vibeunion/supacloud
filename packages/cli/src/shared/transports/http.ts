@@ -28,6 +28,15 @@ const RELEASE_MUTATION_RESPONSE_MAX_BYTES = 64 * 1024;
 const MAX_RETRIES = 2;
 const RETRY_BASE_DELAY = 500;
 
+function validatedGetResponseLimit(options: HttpGetOptions): number | undefined {
+    const maxBytes = options.maxResponseBytes;
+    if (maxBytes === undefined) return undefined;
+    if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
+        throw new RangeError("HTTP response limit must be a positive safe integer");
+    }
+    return maxBytes;
+}
+
 type ResponseBytesRead =
     | { ok: true; bytes: Uint8Array }
     | { ok: false };
@@ -284,14 +293,15 @@ export class HttpTransport {
     }
 
     async get<T = unknown>(path: string, options: HttpGetOptions = {}): Promise<HttpResult<T>> {
+        const maxResponseBytes = validatedGetResponseLimit(options);
         try {
             const res = await fetchWithRetry(`${this.baseUrl}${path}`, {
                 method: "GET",
                 headers: this.headers(),
             });
-            const data = (options.maxResponseBytes === undefined
+            const data = (maxResponseBytes === undefined
                 ? await res.json().catch(() => null)
-                : await boundedResponseJson(res, options.maxResponseBytes)) as T;
+                : await boundedResponseJson(res, maxResponseBytes)) as T;
             return { ok: res.ok, status: res.status, data };
         } catch (error: unknown) {
             return transportFailure<T>(error);

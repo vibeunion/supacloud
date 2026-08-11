@@ -17,6 +17,12 @@ import {
     type ProjectEnvFileOperations,
     type PreparedProjectEnvFile,
 } from "./project-create-env";
+import {
+    PROJECT_READ_RESPONSE_MAX_BYTES,
+    projectGetRead,
+    projectListRead,
+    type ProjectReadResult,
+} from "./project-read-projection";
 
 type ToolServer = {
     tool: (
@@ -80,6 +86,11 @@ type ProjectToolResponse = {
 
 function projectToolResponse(text: string): ProjectToolResponse {
     return { content: [{ type: "text", text }] };
+}
+
+function projectReadResponse(readResult: ProjectReadResult): ProjectToolResponse {
+    const response = projectToolResponse(readResult.text);
+    return readResult.isError ? { ...response, isError: true } : response;
 }
 
 function failedProjectServiceResponse(message: string): ProjectToolResponse {
@@ -505,8 +516,12 @@ export function registerUserProjectCliTools(
 
             switch (action) {
                 case "get":
-                    text = ok(await http.get(`/v1/projects/${resolvedRef}`));
-                    break;
+                    return projectReadResponse(projectGetRead(
+                        await http.get(`/v1/projects/${resolvedRef}`, {
+                            maxResponseBytes: PROJECT_READ_RESPONSE_MAX_BYTES,
+                        }),
+                        resolvedRef,
+                    ));
                 case "health":
                     text = ok(await http.get(`/v1/projects/${resolvedRef}/health`));
                     break;
@@ -595,8 +610,9 @@ export function registerAdminProjectCliTools(
 
             switch (action) {
                 case "list":
-                    text = ok(await http.get("/v1/projects"));
-                    break;
+                    return projectReadResponse(projectListRead(await http.get("/v1/projects", {
+                        maxResponseBytes: PROJECT_READ_RESPONSE_MAX_BYTES,
+                    })));
                 case "create": {
                     if (!name) throw new Error("'name' is required for create");
                     const boundApiOrigin = expectedProjectApiOrigin(domain, api_domain);
@@ -639,9 +655,15 @@ export function registerAdminProjectCliTools(
                         fileOperations,
                     );
                 }
-                case "get":
-                    text = ok(await http.get(`/v1/projects/${resolveRef(ref)}`));
-                    break;
+                case "get": {
+                    const resolvedRef = resolveRef(ref);
+                    return projectReadResponse(projectGetRead(
+                        await http.get(`/v1/projects/${resolvedRef}`, {
+                            maxResponseBytes: PROJECT_READ_RESPONSE_MAX_BYTES,
+                        }),
+                        resolvedRef,
+                    ));
+                }
                 case "delete": {
                     const resolvedRef = resolveRef(ref);
                     text = simple(await http.delete(`/v1/projects/${resolvedRef}`), `Project ${resolvedRef} deleted`);

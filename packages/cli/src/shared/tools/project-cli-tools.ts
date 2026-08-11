@@ -2,6 +2,12 @@ import { Type } from "@sinclair/typebox";
 import { optional, stringEnum, withDescription } from "../schema";
 import type { ToolSchema } from "../schema";
 import type { HttpTransport } from "../transports/http";
+import {
+    PROJECT_READ_RESPONSE_MAX_BYTES,
+    projectGetRead,
+    projectListRead,
+    type ProjectReadResult,
+} from "./project-read-projection";
 
 type ToolServer = {
     tool: (
@@ -11,6 +17,13 @@ type ToolServer = {
         callback: (args: any) => Promise<any>,
     ) => void;
 };
+
+function projectReadResponse(readResult: ProjectReadResult) {
+    return {
+        content: [{ type: "text" as const, text: readResult.text }],
+        ...(readResult.isError ? { isError: true } : {}),
+    };
+}
 
 const formatTasks = (data: unknown): string => {
     if (!Array.isArray(data)) return JSON.stringify(data, null, 2);
@@ -139,8 +152,12 @@ Actions: get, health, logs, api_keys, settings, tasks, task_detail, task_cancel,
 
             switch (action) {
                 case "get":
-                    text = ok(await http.get(`/v1/projects/${resolvedRef}`));
-                    break;
+                    return projectReadResponse(projectGetRead(
+                        await http.get(`/v1/projects/${resolvedRef}`, {
+                            maxResponseBytes: PROJECT_READ_RESPONSE_MAX_BYTES,
+                        }),
+                        resolvedRef,
+                    ));
                 case "health":
                     text = ok(await http.get(`/v1/projects/${resolvedRef}/health`));
                     break;
@@ -272,8 +289,9 @@ Actions: list, create, get, delete, pause, restore, restart, settings, update_se
 
             switch (action) {
                 case "list":
-                    text = ok(await http.get("/v1/projects"));
-                    break;
+                    return projectReadResponse(projectListRead(await http.get("/v1/projects", {
+                        maxResponseBytes: PROJECT_READ_RESPONSE_MAX_BYTES,
+                    })));
                 case "create": {
                     if (!name) throw new Error("'name' is required for create");
                     const createRequest: Record<string, string | undefined> = {
@@ -288,9 +306,15 @@ Actions: list, create, get, delete, pause, restore, restart, settings, update_se
                     text = ok(await http.post("/v1/projects", createRequest));
                     break;
                 }
-                case "get":
-                    text = ok(await http.get(`/v1/projects/${resolveRef(ref)}`));
-                    break;
+                case "get": {
+                    const resolvedRef = resolveRef(ref);
+                    return projectReadResponse(projectGetRead(
+                        await http.get(`/v1/projects/${resolvedRef}`, {
+                            maxResponseBytes: PROJECT_READ_RESPONSE_MAX_BYTES,
+                        }),
+                        resolvedRef,
+                    ));
+                }
                 case "delete": {
                     const resolvedRef = resolveRef(ref);
                     text = simple(await http.delete(`/v1/projects/${resolvedRef}`), `Project ${resolvedRef} deleted`);

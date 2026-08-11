@@ -21,6 +21,10 @@ interface HttpPostOptions {
     timeoutMs: number;
 }
 
+export interface HttpGetOptions {
+    maxResponseBytes?: number;
+}
+
 const DEFAULT_TIMEOUT = 30_000;
 const MAX_POST_TIMEOUT_MS = 35 * 60_000;
 const MAX_RETRIES = 2;
@@ -60,6 +64,63 @@ function validatedPostTimeout(options?: HttpPostOptions): number {
     return timeoutMs;
 }
 
+function validatedGetResponseLimit(options: HttpGetOptions): number | undefined {
+    const maxBytes = options.maxResponseBytes;
+    if (maxBytes === undefined) return undefined;
+    if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
+        throw new RangeError("HTTP response limit must be a positive safe integer");
+    }
+    return maxBytes;
+}
+
+function responseExceedsDeclaredLimit(response: Response, maxBytes: number): boolean {
+    const contentLength = response.headers.get("content-length");
+    return contentLength !== null && /^\d+$/u.test(contentLength) && Number(contentLength) > maxBytes;
+}
+
+function joinedResponseBytes(chunks: Uint8Array[], totalBytes: number): Uint8Array {
+    const responseBytes = new Uint8Array(totalBytes);
+    let offset = 0;
+    for (const chunk of chunks) {
+        responseBytes.set(chunk, offset);
+        offset += chunk.byteLength;
+    }
+    return responseBytes;
+}
+
+async function boundedResponseBytes(response: Response, maxBytes: number): Promise<Uint8Array | null> {
+    if (responseExceedsDeclaredLimit(response, maxBytes)) {
+        void response.body?.cancel().catch(() => undefined);
+        return null;
+    }
+    if (!response.body) return new Uint8Array();
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let totalBytes = 0;
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) return joinedResponseBytes(chunks, totalBytes);
+        totalBytes += value.byteLength;
+        if (totalBytes > maxBytes) {
+            void reader.cancel().catch(() => undefined);
+            return null;
+        }
+        chunks.push(value);
+    }
+}
+
+async function boundedResponseJson(response: Response, maxBytes: number): Promise<unknown> {
+    const responseBytes = await boundedResponseBytes(response, maxBytes);
+    if (responseBytes === null) return null;
+    try {
+        const responseText = new TextDecoder("utf-8", { fatal: true }).decode(responseBytes);
+        return JSON.parse(responseText);
+    } catch (error: unknown) {
+        if (error instanceof SyntaxError || error instanceof TypeError) return null;
+        throw error;
+    }
+}
+
 async function fetchWithTimeout(
     url: string,
     options: RequestInit,
@@ -70,6 +131,7 @@ async function fetchWithTimeout(
     try {
         return await fetch(url, {
             ...options,
+            redirect: "error",
             signal: controller.signal,
         });
     } finally {
@@ -121,13 +183,16 @@ export class HttpTransport {
         };
     }
 
-    async get<T = unknown>(path: string): Promise<HttpResult<T>> {
+    async get<T = unknown>(path: string, options: HttpGetOptions = {}): Promise<HttpResult<T>> {
+        const maxResponseBytes = validatedGetResponseLimit(options);
         try {
             const res = await fetchWithRetry(`${this.baseUrl}${path}`, {
                 method: "GET",
                 headers: this.headers(),
             });
-            const data = (await res.json().catch(() => null)) as T;
+            const data = (maxResponseBytes === undefined
+                ? await res.json().catch(() => null)
+                : await boundedResponseJson(res, maxResponseBytes)) as T;
             return { ok: res.ok, status: res.status, data };
         } catch (error: unknown) {
             return transportFailure<T>(error);
