@@ -85,6 +85,7 @@ export class RetentionService {
   private async runSweep(): Promise<void> {
     const now = this.now()
     await this.run(`delete from auth.one_time_tokens where expires_at < now()`)
+    await this.run(`delete from auth.phone_otp_cooldowns where last_sent_at < now() - interval '1 day'`)
     await this.run(`delete from auth.mfa_challenges where expires_at < now()`)
     await this.run(`delete from auth.flow_state where expires_at < now()`)
     await this.run(`delete from public.supacloud_pgredis_kv where expires_at <= now()`)

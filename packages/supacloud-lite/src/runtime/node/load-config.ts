@@ -5,7 +5,7 @@
  * config.toml is one document, so this is one loader: parse once, then project
  * the tree into a nested `ProjectConfig` that mirrors the file's sections. The
  * CLI spreads those sections into createBackend. Sections for services SupaCloud Lite
- * doesn't run (SMS, analytics, pooler, studio/edge-runtime ports, experimental)
+ * doesn't run (analytics, pooler, studio/edge-runtime ports, experimental)
  * are intentionally ignored.
  */
 import type { AuthSettings } from '../auth/settings.js'
@@ -138,6 +138,7 @@ function readAuth(root: ConfigTable, env: Environment): AuthConfig {
 function readAuthSettings(root: ConfigTable): Partial<AuthSettings> {
   const auth = tableAt(root, 'auth')
   const email = tableAt(root, 'auth.email')
+  const sms = tableAt(root, 'auth.sms')
   const mfa = tableAt(root, 'auth.mfa')
   const mfaTotp = tableAt(root, 'auth.mfa.totp')
   const out: Partial<AuthSettings> = {}
@@ -163,6 +164,15 @@ function readAuthSettings(root: ConfigTable): Partial<AuthSettings> {
   if (otpLength !== undefined) out.otpLength = otpLength
   const otpExpiry = getInt(email, 'otp_expiry')
   if (otpExpiry !== undefined) out.otpExpirySeconds = otpExpiry
+
+  const smsEnabled = getBool(sms, 'enabled')
+  if (smsEnabled !== undefined) out.smsEnabled = smsEnabled
+  const smsSignup = getBool(sms, 'enable_signup')
+  if (smsSignup !== undefined) out.smsSignupEnabled = smsSignup
+  const smsFrequency = getDurationSeconds(sms, 'max_frequency')
+  if (smsFrequency !== undefined) out.smsOtpCooldownSeconds = smsFrequency
+  const smsTemplate = getString(sms, 'template')
+  if (smsTemplate !== undefined) out.smsTemplate = smsTemplate
 
   const maxFactors = getInt(mfa, 'max_enrolled_factors')
   if (maxFactors !== undefined) out.maxEnrolledFactors = maxFactors
@@ -194,6 +204,8 @@ function readRateLimits(root: ConfigTable): Record<string, RateLimitRule> | unde
     out.otp = { limit: email, windowMs: ONE_HOUR }
     out.recover = { limit: email, windowMs: ONE_HOUR }
   }
+  const sms = getInt(rl, 'sms_sent')
+  if (sms !== undefined) out.sms = { limit: sms, windowMs: ONE_HOUR }
   return Object.keys(out).length ? out : undefined
 }
 

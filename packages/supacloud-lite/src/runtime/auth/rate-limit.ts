@@ -22,6 +22,8 @@ export const DEFAULT_AUTH_RATE_LIMITS: Record<string, RateLimitRule> = {
   // Endpoints that send email (OTP, magic link, recovery): mail-flood surface.
   otp: { limit: 10, windowMs: 60 * 60 * 1000 },
   recover: { limit: 10, windowMs: 60 * 60 * 1000 },
+  sms: { limit: 10, windowMs: 60 * 60 * 1000 },
+  verify: { limit: 30, windowMs: 5 * 60 * 1000 },
 }
 
 /** Per-key sliding-window counter with one background sweep to drop stale buckets. */
