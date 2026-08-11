@@ -1048,6 +1048,52 @@ describe("supacloud-cli process contract", () => {
         ]);
     });
 
+    test("returns a non-zero machine-readable Auth failure without echoing config secrets", async () => {
+        const configSecret = "auth-config-must-not-be-printed";
+        let requestedBody = "";
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            async fetch(request) {
+                requestedBody = await request.text();
+                return Response.json({
+                    code: "AUTH_RUNTIME_APPLY_FAILED",
+                    message: `runtime rejected ${configSecret}`,
+                    persisted: true,
+                    runtime_applied: false,
+                    runtime_mode: "local",
+                    echoed_config: configSecret,
+                }, { status: 503 });
+            },
+        });
+        servers.push(server);
+
+        const response = await runProjectCli(
+            [
+                "auth", "update_config",
+                "--ref", "abc123",
+                "--config", JSON.stringify({ private_key: configSecret }),
+            ],
+            {
+                SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+                SUPACLOUD_API_TOKEN: "test-token",
+                SUPACLOUD_PROJECT_REF: "abc123",
+            },
+        );
+
+        expect(response.exitCode).toBe(1);
+        expect(JSON.parse(response.stdout)).toEqual({
+            ok: false,
+            http_status: 503,
+            code: "AUTH_RUNTIME_APPLY_FAILED",
+            persisted: true,
+            runtime_applied: false,
+            runtime_mode: "local",
+        });
+        expect(requestedBody).toContain(configSecret);
+        expect(response.stdout + response.stderr).not.toContain(configSecret);
+    });
+
     test("status reports missing configuration and exits non-zero", async () => {
         const result = await runProjectCli(["status"]);
         const status = JSON.parse(result.stdout);
