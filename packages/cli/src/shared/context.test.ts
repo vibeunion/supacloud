@@ -131,6 +131,33 @@ describe("resolveSupaCloudContext", () => {
         expect(context.credentialScope).toBe("management");
     });
 
+    test.each([
+        "https://management.example.com:443",
+        "https://management.example.com:443/",
+        "http://127.0.0.1:80",
+        "http://[::1]:80/",
+    ])("rejects non-canonical explicit default port %s", (managementUrl) => {
+        const context = resolveSupaCloudContext({
+            SUPACLOUD_API_URL: managementUrl,
+            SUPACLOUD_API_TOKEN: "management-token",
+            SUPACLOUD_PROJECT_REF: "project-ref",
+        }, "/tmp/no-such-supacloud-context");
+
+        expect(context.apiUrl).toBe("");
+        expect(context.credentialScope).toBe("management");
+    });
+
+    test("rejects an explicit default port on an application origin", () => {
+        const context = resolveSupaCloudContext({
+            SUPABASE_URL: "https://abc123.api.example.com:443",
+            SUPABASE_SERVICE_ROLE_KEY: "service-role",
+        }, "/tmp/no-such-supacloud-context");
+
+        expect(context.inferredSupabaseUrl).toBe("");
+        expect(context.host).toBe("");
+        expect(context.credentialScope).toBe("project_application");
+    });
+
     test("allows HTTP only for literal loopback Management origins", () => {
         const context = resolveSupaCloudContext({
             SUPACLOUD_API_URL: "http://127.0.0.1:9090/",
