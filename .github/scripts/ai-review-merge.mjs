@@ -14,8 +14,8 @@
  *             workflow, or review-context file is force-blocked and requires
  *             human approval.
  *   Layer 5 — Submitter identity gate: Only repo members (OWNER/MEMBER/COLLABORATOR)
- *             or recognized bots (Dependabot, release-please, etc.) are eligible for
- *             auto-merge. External contributors get review-only.
+ *             or recognized bots are eligible for auto-merge. Release Please PRs
+ *             always require a human merge; external contributors get review-only.
  *
  * Required env vars:
  *   AI_API_KEY        - OpenAI-compatible API key (GitHub Secret)
@@ -170,6 +170,10 @@ const KNOWN_BOTS = new Set([
   "semantic-release[bot]",
 ]);
 
+const RELEASE_PLEASE_HEAD_PREFIX = 'release-please--branches--';
+const RELEASE_PLEASE_LABEL_PREFIX = 'autorelease:';
+const NO_AI_MERGE_LABEL = 'no-ai-merge';
+
 // --- Context & Skill config --------------------------------------------
 
 const CONTEXT_FILES = [
@@ -285,6 +289,22 @@ async function getPRDetails() {
   return ghFetch(`/pulls/${PR_NUM}`);
 }
 
+function pullRequestLabelNames(prDetails) {
+  return (prDetails?.labels || [])
+    .map((label) => typeof label === 'string' ? label : label?.name)
+    .filter((label) => typeof label === 'string');
+}
+
+export function isReleasePleasePullRequest(prDetails) {
+  const headRef = prDetails?.head?.ref || '';
+  return headRef.startsWith(RELEASE_PLEASE_HEAD_PREFIX)
+    || pullRequestLabelNames(prDetails).some((label) => label.startsWith(RELEASE_PLEASE_LABEL_PREFIX));
+}
+
+export function hasNoAiMergeLabel(prDetails) {
+  return pullRequestLabelNames(prDetails).includes(NO_AI_MERGE_LABEL);
+}
+
 export function validatePullRequestForMerge(prDetails, {
   expectedHeadSha,
   expectedHeadRef,
@@ -295,6 +315,12 @@ export function validatePullRequestForMerge(prDetails, {
   }
   if (prDetails.draft) {
     throw new Error('Pull request is still a draft.');
+  }
+  if (hasNoAiMergeLabel(prDetails)) {
+    throw new Error('Pull request has the no-ai-merge label.');
+  }
+  if (isReleasePleasePullRequest(prDetails)) {
+    throw new Error('Release Please pull requests require human merge approval.');
   }
 
   const headSha = prDetails.head?.sha;
@@ -707,14 +733,16 @@ async function main() {
     console.log('PR is a draft. Skipping.');
     return;
   }
+  if (isReleasePleasePullRequest(prDetails)) {
+    console.log('Release Please PR requires human merge approval. Skipping auto-merge.');
+    return;
+  }
   // 补充 BASE_REF / HEAD_REF
   const effectiveBaseRef = BASE_REF || prDetails.base?.ref || 'unknown';
   const effectiveHeadRef = HEAD_REF || prDetails.head?.ref || 'unknown';
   const sha = HEAD_SHA || prDetails.head?.sha;
 
-  // 检查 "no-ai-merge" label
-  const labels = (prDetails.labels || []).map((l) => l.name);
-  if (labels.includes('no-ai-merge')) {
+  if (hasNoAiMergeLabel(prDetails)) {
     console.log('PR has "no-ai-merge" label. Skipping auto-merge.');
     return;
   }
