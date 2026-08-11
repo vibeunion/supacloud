@@ -14,7 +14,7 @@ import {
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { lstat, open, realpath, unlink } from "node:fs/promises";
-import { registerAdminProjectCliTools } from "./project-cli-tools";
+import { registerAdminProjectCliTools, registerUserProjectCliTools } from "./project-cli-tools";
 import { schemaEnumValues } from "../schema";
 import type { ToolSchema } from "../schema";
 import type { ProjectEnvFileOperations } from "./project-create-env";
@@ -165,6 +165,125 @@ function captureAdminProjectTool(
 ): ProjectCallback {
     return captureAdminProjectRegistration(http, options).callback;
 }
+
+function captureUserProjectTool(http: Record<string, unknown>, projectRef: string): ProjectCallback {
+    let projectCallback: ProjectCallback | undefined;
+    registerUserProjectCliTools({
+        tool(name: string, _description: string, _schema: ToolSchema, callback: ProjectCallback) {
+            if (name === "project") projectCallback = callback;
+        },
+    }, http as any, { projectRef });
+    if (!projectCallback) throw new Error("user project tool was not registered");
+    return projectCallback;
+}
+
+describe("admin project reads", () => {
+    test("wires Admin and user reads through bounded credential-safe projections", async () => {
+        const remoteSecret = "wired-project-private-sentinel";
+        const summary = {
+            id: "11111111-1111-4111-8111-111111111111",
+            ref: CREATE_PROJECT_REF,
+            organization_id: "22222222-2222-4222-8222-222222222222",
+            organization_slug: "example-organization",
+            name: "Example project",
+            region: "local",
+            created_at: "2026-08-12T00:00:00.000Z",
+            status: "ACTIVE_HEALTHY",
+        };
+        const requests: Array<{ path: string; maxResponseBytes: number | undefined }> = [];
+        const http = {
+            get: async (path: string, options?: { maxResponseBytes?: number }) => {
+                requests.push({ path, maxResponseBytes: options?.maxResponseBytes });
+                return path === "/v1/projects"
+                    ? { ok: true, status: 200, data: [summary] }
+                    : {
+                        ok: true,
+                        status: 200,
+                        data: {
+                            ...summary,
+                            database: {
+                                host: "db.example.test",
+                                version: "17.5",
+                                postgres_engine: "17",
+                                release_channel: "stable",
+                            },
+                            api: { url: "https://api.example.test" },
+                            studio: { url: "https://studio.example.test" },
+                            config: { private_runtime_value: remoteSecret },
+                            anon_key: remoteSecret,
+                            services: [{ token: remoteSecret }],
+                        },
+                    };
+            },
+        };
+        const projectCallback = captureAdminProjectTool(http);
+        const userProjectCallback = captureUserProjectTool(http, CREATE_PROJECT_REF);
+
+        const listResponse = await projectCallback({ action: "list" });
+        const getResponse = await projectCallback({ action: "get", ref: CREATE_PROJECT_REF });
+        const userGetResponse = await userProjectCallback({ action: "get" });
+
+        expect(JSON.parse(listResponse.content[0].text)).toEqual([summary]);
+        expect(JSON.parse(getResponse.content[0].text)).toEqual({
+            ...summary,
+            database: {
+                host: "db.example.test",
+                version: "17.5",
+                postgres_engine: "17",
+                release_channel: "stable",
+            },
+            api: { url: "https://api.example.test" },
+            studio: { url: "https://studio.example.test" },
+        });
+        expect(userGetResponse.content[0].text).toBe(getResponse.content[0].text);
+        expect(requests).toEqual([
+            { path: "/v1/projects", maxResponseBytes: 1_048_576 },
+            { path: `/v1/projects/${CREATE_PROJECT_REF}`, maxResponseBytes: 1_048_576 },
+            { path: `/v1/projects/${CREATE_PROJECT_REF}`, maxResponseBytes: 1_048_576 },
+        ]);
+        expect(
+            listResponse.content[0].text + getResponse.content[0].text + userGetResponse.content[0].text,
+        ).not.toContain(remoteSecret);
+    });
+
+    test("marks malformed Admin and user reads as tool errors without reflection", async () => {
+        const remoteSecret = "invalid-wired-project-sentinel";
+        const http = {
+            get: async () => ({
+                ok: true,
+                status: 200,
+                data: {
+                    id: "11111111-1111-4111-8111-111111111111",
+                    ref: CREATE_PROJECT_REF,
+                    organization_id: "22222222-2222-4222-8222-222222222222",
+                    organization_slug: "example-organization",
+                    name: "Example project",
+                    region: "local",
+                    created_at: "2026-08-12T00:00:00.000Z",
+                    status: "ACTIVE_HEALTHY",
+                    database: {
+                        host: "db.example.test",
+                        version: "17.5",
+                        postgres_engine: "17",
+                        release_channel: "stable",
+                    },
+                    credentials: { service_role_key: remoteSecret },
+                },
+            }),
+        };
+        const adminResponse = await captureAdminProjectTool(http)({
+            action: "get",
+            ref: CREATE_PROJECT_REF,
+        });
+        const userResponse = await captureUserProjectTool(http, CREATE_PROJECT_REF)({ action: "get" });
+
+        for (const response of [adminResponse, userResponse]) {
+            expect(response.isError).toBe(true);
+            expect(response.content[0].text).toBe("❌ Invalid project response");
+            expect(response.content[0].text).not.toContain(remoteSecret);
+        }
+    });
+});
 
 describe("admin project create", () => {
     test("declares only test and production for local credential profiles", () => {

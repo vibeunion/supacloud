@@ -13,6 +13,7 @@ let scheduledTimers: Array<{
     args: unknown[];
 }> = [];
 let nextTimerId = 0;
+const servers: Array<{ stop(closeActiveConnections?: boolean): void }> = [];
 
 beforeEach(() => {
     clearedTimerIds = [];
@@ -30,6 +31,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+    for (const server of servers.splice(0)) server.stop(true);
     globalThis.fetch = originalFetch;
     globalThis.setTimeout = originalSetTimeout;
     globalThis.clearTimeout = originalClearTimeout;
@@ -45,6 +47,27 @@ function retryableNetworkError(kind: "AbortError" | "ECONNREFUSED" | "ECONNRESET
     else Object.assign(error, { code: kind });
     return error;
 }
+
+const redirectedRequests = [
+    ["GET", (transport: HttpTransport) => transport.get("/resource")],
+    ["JSON POST", (transport: HttpTransport) => transport.post("/resource", { secret: "request-secret" })],
+    ["multipart POST", (transport: HttpTransport) => {
+        const form = new FormData();
+        form.set("secret", "request-secret");
+        return transport.postMultipart("/resource", form);
+    }],
+    ["PATCH", (transport: HttpTransport) => transport.patch("/resource", { secret: "request-secret" })],
+    ["PUT", (transport: HttpTransport) => transport.put("/resource", { secret: "request-secret" })],
+    ["DELETE", (transport: HttpTransport) => transport.delete("/resource")],
+] as const;
+
+const redirectCases = redirectedRequests.flatMap(([requestName, sendRequest]) =>
+    ([302, 307] as const).flatMap((redirectStatus) =>
+        (["same-origin", "cross-origin"] as const).map((redirectScope) =>
+            [`${requestName} ${redirectStatus} ${redirectScope}`, sendRequest, redirectStatus, redirectScope] as const
+        )
+    )
+);
 
 describe("HttpTransport retry policy", () => {
     test("retries GET after a 5xx response without waiting for backoff", async () => {
@@ -136,6 +159,53 @@ describe("HttpTransport retry policy", () => {
         expect(clearedTimerIds).toHaveLength(1);
     });
 
+    test.each(redirectCases)(
+        "rejects %s redirects without reaching the target",
+        async (_caseName, sendRequest, redirectStatus, redirectScope) => {
+            let sourceRequests = 0;
+            const targetRequests: string[] = [];
+            const crossOriginTarget = Bun.serve({
+                hostname: "127.0.0.1",
+                port: 0,
+                fetch(request) {
+                    targetRequests.push(new URL(request.url).pathname);
+                    return Response.json({ ok: true });
+                },
+            });
+            servers.push(crossOriginTarget);
+            const source = Bun.serve({
+                hostname: "127.0.0.1",
+                port: 0,
+                fetch(request) {
+                    sourceRequests += 1;
+                    const pathname = new URL(request.url).pathname;
+                    if (pathname === "/captured") {
+                        targetRequests.push(pathname);
+                        return Response.json({ ok: true });
+                    }
+                    const targetOrigin = redirectScope === "same-origin"
+                        ? new URL(request.url).origin
+                        : `http://127.0.0.1:${crossOriginTarget.port}`;
+                    return Response.redirect(`${targetOrigin}/captured`, redirectStatus);
+                },
+            });
+            servers.push(source);
+            const transport = new HttpTransport({
+                baseUrl: `http://127.0.0.1:${source.port}`,
+                token: "management-token",
+            });
+
+            const response = await sendRequest(transport);
+
+            expect(response.transportError).toBe(true);
+            expect(response.data).toEqual({ error: "Network Error", code: "NETWORK_ERROR" });
+            expect(sourceRequests).toBe(1);
+            expect(targetRequests).toEqual([]);
+            expect(JSON.stringify(response)).not.toContain("request-secret");
+            expect(JSON.stringify(response)).not.toContain("management-token");
+        },
+    );
+
     test("uses a bounded operation-specific timeout for one POST", async () => {
         globalThis.fetch = (async () => Response.json({ ok: true })) as unknown as typeof fetch;
 
@@ -189,6 +259,43 @@ describe("HttpTransport retry policy", () => {
 
         await expect(createTransport().post("/resource", {}, { timeoutMs })).rejects.toThrow(
             "HTTP request timeout must be between",
+        );
+        expect(fetchCalls).toBe(0);
+    });
+
+    test("bounds selected GET response bodies before JSON projection", async () => {
+        const remoteSecret = "oversized-get-response-sentinel";
+        globalThis.fetch = (async () => new Response(JSON.stringify({
+            config: { private_value: remoteSecret.repeat(100) },
+        }), { headers: { "Content-Type": "application/json" } })) as unknown as typeof fetch;
+
+        const response = await createTransport().get("/v1/projects/project-ref", {
+            maxResponseBytes: 128,
+        });
+
+        expect(response).toEqual({ ok: true, status: 200, data: null });
+        expect(JSON.stringify(response)).not.toContain(remoteSecret);
+    });
+
+    test("parses a selected GET response within its byte limit", async () => {
+        globalThis.fetch = (async () => Response.json({ ref: "project-ref" })) as unknown as typeof fetch;
+
+        const response = await createTransport().get("/v1/projects/project-ref", {
+            maxResponseBytes: 1_024,
+        });
+
+        expect(response).toEqual({ ok: true, status: 200, data: { ref: "project-ref" } });
+    });
+
+    test.each([0, -1, 1.5])("rejects invalid GET response limit %d before dispatch", async maxResponseBytes => {
+        let fetchCalls = 0;
+        globalThis.fetch = (async () => {
+            fetchCalls++;
+            return Response.json({});
+        }) as unknown as typeof fetch;
+
+        await expect(createTransport().get("/v1/projects", { maxResponseBytes })).rejects.toThrow(
+            "HTTP response limit must be a positive safe integer",
         );
         expect(fetchCalls).toBe(0);
     });
