@@ -58,6 +58,7 @@ function context(overrides: Partial<ResolvedContext> = {}): ResolvedContext {
         production: true,
         inferredSupabaseUrl: "",
         inferredServiceRoleKey: "",
+        credentialScope: "management",
         source: "process_env",
         sourcePath: null,
         ...overrides,

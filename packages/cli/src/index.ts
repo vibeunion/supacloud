@@ -3,7 +3,11 @@
 import { Type } from "@sinclair/typebox";
 import { stringEnum } from "./shared/schema";
 import { cliToolResultIsError, runCli } from "./shared/cli";
-import { resolveSupaCloudContext, type ResolvedContext } from "./shared/context";
+import {
+    resolveSupaCloudContext,
+    type ContextCredentialScope,
+    type ResolvedContext,
+} from "./shared/context";
 import { parseGlobalOptions } from "./shared/global-options";
 import { authorizeExecution, validateExecutionPolicyCoverage } from "./shared/execution-policy";
 import { HttpTransport } from "./shared/transports/http";
@@ -46,6 +50,13 @@ interface ProjectStatusChecks {
     project: { ok: boolean | null };
 }
 
+interface ProjectStatusProbePlan {
+    apiUrl: string;
+    connectivityPath: string;
+    authenticationPath: string;
+    authenticationHeaders: HeadersInit;
+}
+
 function successfulEndpointProbe(response: Response): EndpointProbe {
     return { reachable: true, ok: response.ok, httpStatus: response.status, error: null };
 }
@@ -55,13 +66,22 @@ function failedEndpointProbe(error: unknown): EndpointProbe {
     return { reachable: false, ok: false, httpStatus: null, error: timedOut ? "timeout" : "unreachable" };
 }
 
-async function probeEndpoint(url: string, token?: string): Promise<EndpointProbe> {
+function projectApplicationStatusUrl(candidate: string): string {
+    if (!candidate) return "";
+    const url = new URL(candidate);
+    if (url.origin !== candidate || url.username || url.password) return "";
+    if (url.protocol === "https:") return candidate;
+    const loopback = url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]";
+    return url.protocol === "http:" && loopback ? candidate : "";
+}
+
+async function probeEndpoint(url: string, headers?: HeadersInit): Promise<EndpointProbe> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3_000);
     try {
         const response = await fetch(url, {
             method: "GET",
-            headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+            headers,
             signal: controller.signal,
         });
         return successfulEndpointProbe(response);
@@ -73,6 +93,14 @@ async function probeEndpoint(url: string, token?: string): Promise<EndpointProbe
 }
 
 function missingProjectContextFields(context: ResolvedContext): string[] {
+    if (context.credentialScope === "project_application") {
+        const projectApiUrl = projectApplicationStatusUrl(context.inferredSupabaseUrl);
+        return [
+            !projectApiUrl ? "secureSupabaseUrl" : null,
+            !context.inferredServiceRoleKey ? "serviceRoleKey" : null,
+            !context.projectRef ? "projectRef" : null,
+        ].filter((field): field is string => Boolean(field));
+    }
     return [
         !context.apiUrl ? "apiUrl" : null,
         !context.apiToken ? "apiToken" : null,
@@ -82,19 +110,56 @@ function missingProjectContextFields(context: ResolvedContext): string[] {
 
 function authenticatedByProbe(authentication: EndpointProbe | null): boolean | null {
     if (!authentication) return null;
-    return authentication.reachable && ![401, 403].includes(authentication.httpStatus ?? 0);
+    return authentication.reachable && authentication.ok;
 }
 
-async function collectProjectStatusChecks(context: ResolvedContext): Promise<ProjectStatusChecks> {
-    const missing = missingProjectContextFields(context);
-    const connectivity = context.apiUrl ? await probeEndpoint(`${context.apiUrl}/health`) : null;
-    const authentication = missing.length === 0 && connectivity?.ok
-        ? await probeEndpoint(`${context.apiUrl}/v1/projects/${encodeURIComponent(context.projectRef)}/health`, context.apiToken)
-        : null;
+function connectivityProbeIsHealthy(
+    scope: ContextCredentialScope,
+    connectivity: EndpointProbe | null,
+): boolean | null {
+    if (!connectivity) return null;
+    if (scope !== "project_application") return connectivity.ok;
+    return connectivity.reachable
+        && (connectivity.ok || [401, 403].includes(connectivity.httpStatus ?? 0));
+}
+
+function projectApplicationHeaders(serviceRoleKey: string): HeadersInit {
+    return { Authorization: `Bearer ${serviceRoleKey}`, apikey: serviceRoleKey };
+}
+
+function projectStatusApiUrl(context: ResolvedContext): string {
+    return context.credentialScope === "project_application"
+        ? projectApplicationStatusUrl(context.inferredSupabaseUrl)
+        : context.apiUrl;
+}
+
+function projectStatusProbePlan(context: ResolvedContext): ProjectStatusProbePlan {
+    if (context.credentialScope === "project_application") {
+        return {
+            apiUrl: projectStatusApiUrl(context),
+            connectivityPath: "/rest/v1/",
+            authenticationPath: "/rest/v1/",
+            authenticationHeaders: projectApplicationHeaders(context.inferredServiceRoleKey),
+        };
+    }
+    return {
+        apiUrl: projectStatusApiUrl(context),
+        connectivityPath: "/health",
+        authenticationPath: `/v1/projects/${encodeURIComponent(context.projectRef)}/health`,
+        authenticationHeaders: { Authorization: `Bearer ${context.apiToken}` },
+    };
+}
+
+function projectStatusChecks(
+    missing: string[],
+    connectivity: EndpointProbe | null,
+    authentication: EndpointProbe | null,
+    connectivityOk: boolean | null,
+): ProjectStatusChecks {
     return {
         configuration: { ok: missing.length === 0, missing },
         connectivity: {
-            ok: connectivity?.ok ?? null,
+            ok: connectivityOk,
             reachable: connectivity?.reachable ?? null,
             httpStatus: connectivity?.httpStatus ?? null,
             error: connectivity?.error ?? null,
@@ -102,6 +167,22 @@ async function collectProjectStatusChecks(context: ResolvedContext): Promise<Pro
         authentication: { ok: authenticatedByProbe(authentication), httpStatus: authentication?.httpStatus ?? null },
         project: { ok: authentication?.ok ?? null },
     };
+}
+
+async function collectProjectStatusChecks(context: ResolvedContext): Promise<ProjectStatusChecks> {
+    const missing = missingProjectContextFields(context);
+    const probePlan = projectStatusProbePlan(context);
+    const connectivity = probePlan.apiUrl
+        ? await probeEndpoint(`${probePlan.apiUrl}${probePlan.connectivityPath}`)
+        : null;
+    const connectivityOk = connectivityProbeIsHealthy(context.credentialScope, connectivity);
+    const authentication = missing.length === 0 && connectivityOk
+        ? await probeEndpoint(
+            `${probePlan.apiUrl}${probePlan.authenticationPath}`,
+            probePlan.authenticationHeaders,
+        )
+        : null;
+    return projectStatusChecks(missing, connectivity, authentication, connectivityOk);
 }
 
 function projectStatusIsHealthy(checks: ProjectStatusChecks): boolean {
@@ -113,12 +194,14 @@ function projectStatusIsHealthy(checks: ProjectStatusChecks): boolean {
 
 async function createProjectStatusResult(context: ResolvedContext) {
     const checks = await collectProjectStatusChecks(context);
+    const statusApiUrl = projectStatusApiUrl(context);
     const statusPayload = {
         mode: "project",
+        credentialScope: context.credentialScope,
         environment: context.environment || null,
         source: { kind: context.source, path: context.sourcePath },
         projectRef: context.projectRef || null,
-        apiUrl: context.apiUrl || null,
+        apiUrl: statusApiUrl || null,
         readOnly: context.readOnly,
         production: context.production,
         autoLinked: Boolean(context.inferredSupabaseUrl && context.inferredServiceRoleKey),
@@ -194,7 +277,7 @@ DEFAULT CONTEXT
   SUPACLOUD_READ_ONLY=true blocks remote writes. Production writes require an
   exact --confirm-production value, and cannot override the selected project ref.
 
-  status checks configuration, Management API connectivity, and authentication.
+  status checks configuration, the selected API scope, connectivity, and authentication.
   It exits non-zero when a required check fails.
 
   ${autoLink}

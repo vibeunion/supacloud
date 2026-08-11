@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { normalizeEnvironmentName } from "./global-options";
 
 export type ContextSourceKind = "process_env" | "named_env_file" | "explicit_env_file" | "legacy_dotenv" | "none";
+export type ContextCredentialScope = "management" | "project_application" | "incomplete";
 
 export interface ContextSelection {
     environmentName?: string;
@@ -24,6 +25,7 @@ export interface ResolvedContext {
     production: boolean;
     inferredSupabaseUrl: string;
     inferredServiceRoleKey: string;
+    credentialScope: ContextCredentialScope;
     source: ContextSourceKind;
     sourcePath: string | null;
 }
@@ -127,6 +129,20 @@ function inferManagementApiUrlFromSupabaseUrl(value: string, projectRef = ""): s
     return normalized;
 }
 
+function sourceCredentialScope(
+    values: Record<string, string>,
+    explicitApiUrl: string,
+    supabaseUrl: string,
+): ContextCredentialScope {
+    const hasManagementContext = Boolean(
+        explicitApiUrl.trim() || values.SUPACLOUD_API_TOKEN?.trim() || values.SUPACLOUD_HOST?.trim(),
+    );
+    if (hasManagementContext) return "management";
+    return supabaseUrl || values.SUPABASE_SERVICE_ROLE_KEY?.trim()
+        ? "project_application"
+        : "incomplete";
+}
+
 function sourceProjectCore(values: Record<string, string>) {
     const supabaseUrl = normalizeUrl(values.SUPABASE_URL || "");
     const projectRef = (values.SUPACLOUD_PROJECT_REF || values.X_PROJECT_REF || "").trim()
@@ -139,7 +155,8 @@ function sourceProjectCore(values: Record<string, string>) {
         || inferManagementApiUrlFromSupabaseUrl(supabaseUrl, projectRef)
         || (values.SUPACLOUD_HOST ? `http://${values.SUPACLOUD_HOST}:9090` : "");
     const apiToken = values.SUPACLOUD_API_TOKEN || values.SUPABASE_SERVICE_ROLE_KEY || "";
-    return { apiUrl, apiToken, projectRef, supabaseUrl };
+    const credentialScope = sourceCredentialScope(values, explicitApiUrl, supabaseUrl);
+    return { apiUrl, apiToken, projectRef, supabaseUrl, credentialScope };
 }
 
 function processValues(env: NodeJS.ProcessEnv): Record<string, string> {
@@ -224,6 +241,7 @@ export function resolveSupaCloudContext(
         production: source.environment === "prod" || source.environment === "production",
         inferredSupabaseUrl: core.supabaseUrl,
         inferredServiceRoleKey: source.values.SUPABASE_SERVICE_ROLE_KEY || "",
+        credentialScope: core.credentialScope,
         source: source.kind,
         sourcePath: source.path,
     };

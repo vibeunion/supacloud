@@ -1820,4 +1820,133 @@ describe("supacloud-cli process contract", () => {
         expect(status.checks.connectivity.error).toBe("unreachable");
         expect(status.checks.authentication.ok).toBeNull();
     });
+
+    test("status probes an application profile through the project data API without exposing its key", async () => {
+        const workspace = mkdtempSync(join(tmpdir(), "supacloud-cli-application-status-"));
+        temporaryDirectories.push(workspace);
+        const requestedPaths: string[] = [];
+        const authorizationHeaders: Array<string | null> = [];
+        const apiKeyHeaders: Array<string | null> = [];
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch(request) {
+                requestedPaths.push(new URL(request.url).pathname);
+                authorizationHeaders.push(request.headers.get("authorization"));
+                apiKeyHeaders.push(request.headers.get("apikey"));
+                return request.headers.get("apikey") === "application-service-role"
+                    ? Response.json({ openapi: "3.0.0" })
+                    : Response.json({ error: "API key required" }, { status: 401 });
+            },
+        });
+        servers.push(server);
+        const environmentPath = join(workspace, "application.env");
+        writeFileSync(environmentPath, [
+            "SUPACLOUD_ENV=test",
+            "SUPACLOUD_PROJECT_REF=abc123",
+            `SUPABASE_URL=http://127.0.0.1:${server.port}`,
+            "SUPABASE_SERVICE_ROLE_KEY=application-service-role",
+        ].join("\n") + "\n");
+
+        const result = await runProjectCli(["status", "--env-file=application.env"], {}, workspace);
+        const status = JSON.parse(result.stdout);
+
+        expect(result.exitCode).toBe(0);
+        expect(status).toMatchObject({
+            credentialScope: "project_application",
+            apiUrl: `http://127.0.0.1:${server.port}`,
+            hasApiToken: true,
+            checks: {
+                configuration: { ok: true, missing: [] },
+                connectivity: { ok: true, reachable: true, httpStatus: 401 },
+                authentication: { ok: true, httpStatus: 200 },
+                project: { ok: true },
+            },
+        });
+        expect(requestedPaths).toEqual(["/rest/v1/", "/rest/v1/"]);
+        expect(authorizationHeaders).toEqual([null, "Bearer application-service-role"]);
+        expect(apiKeyHeaders).toEqual([null, "application-service-role"]);
+        expect(result.stdout + result.stderr).not.toContain("application-service-role");
+    });
+
+    test("status reports rejected application credentials without reflecting them", async () => {
+        const requestHeaders: Array<[string | null, string | null]> = [];
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch(request) {
+                requestHeaders.push([
+                    request.headers.get("authorization"),
+                    request.headers.get("apikey"),
+                ]);
+                return Response.json({ error: "Invalid API key" }, { status: 401 });
+            },
+        });
+        servers.push(server);
+
+        const result = await runProjectCli(["status"], {
+            SUPABASE_URL: `http://127.0.0.1:${server.port}`,
+            SUPABASE_SERVICE_ROLE_KEY: "rejected-service-role",
+            SUPACLOUD_PROJECT_REF: "abc123",
+        });
+        const status = JSON.parse(result.stdout);
+
+        expect(result.exitCode).toBe(1);
+        expect(status.checks.connectivity).toMatchObject({ ok: true, httpStatus: 401 });
+        expect(status.checks.authentication).toEqual({ ok: false, httpStatus: 401 });
+        expect(requestHeaders).toEqual([
+            [null, null],
+            ["Bearer rejected-service-role", "rejected-service-role"],
+        ]);
+        expect(result.stdout + result.stderr).not.toContain("rejected-service-role");
+    });
+
+    test("status rejects a missing application data endpoint before sending credentials", async () => {
+        const authorizationHeaders: Array<string | null> = [];
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch(request) {
+                authorizationHeaders.push(request.headers.get("authorization"));
+                return Response.json({ error: "Not found" }, { status: 404 });
+            },
+        });
+        servers.push(server);
+
+        const result = await runProjectCli(["status"], {
+            SUPABASE_URL: `http://127.0.0.1:${server.port}`,
+            SUPABASE_SERVICE_ROLE_KEY: "application-service-role",
+            SUPACLOUD_PROJECT_REF: "abc123",
+        });
+        const status = JSON.parse(result.stdout);
+
+        expect(result.exitCode).toBe(1);
+        expect(status.checks.connectivity).toMatchObject({ ok: false, reachable: true, httpStatus: 404 });
+        expect(status.checks.authentication.ok).toBeNull();
+        expect(authorizationHeaders).toEqual([null]);
+        expect(result.stdout + result.stderr).not.toContain("application-service-role");
+    });
+
+    test.each([
+        "http://api.example.test",
+        "https://api.example.test/untrusted-path",
+        "https://user:password@api.example.test",
+    ])("status rejects unsafe application origin %s before sending credentials", async (supabaseUrl) => {
+        const result = await runProjectCli(["status"], {
+            SUPABASE_URL: supabaseUrl,
+            SUPABASE_SERVICE_ROLE_KEY: "application-service-role",
+            SUPACLOUD_PROJECT_REF: "abc123",
+        });
+        const status = JSON.parse(result.stdout);
+
+        expect(result.exitCode).toBe(1);
+        expect(status.apiUrl).toBeNull();
+        expect(status.checks.configuration).toEqual({
+            ok: false,
+            missing: ["secureSupabaseUrl"],
+        });
+        expect(status.checks.connectivity.ok).toBeNull();
+        expect(status.checks.authentication.ok).toBeNull();
+        expect(result.stdout + result.stderr).not.toContain("application-service-role");
+    });
 });

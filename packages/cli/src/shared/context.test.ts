@@ -34,6 +34,7 @@ describe("resolveSupaCloudContext", () => {
         expect(context.apiUrl).toBe("https://studio.xg.aizhuliren.cn");
         expect(context.host).toBe("studio.xg.aizhuliren.cn");
         expect(context.apiToken).toBe("service-role");
+        expect(context.credentialScope).toBe("project_application");
     });
 
     test("infers management URL from managed project API domain", () => {
@@ -44,6 +45,7 @@ describe("resolveSupaCloudContext", () => {
 
         expect(context.apiUrl).toBe("https://studio-abc123.example.com");
         expect(context.projectRef).toBe("abc123");
+        expect(context.credentialScope).toBe("project_application");
     });
 
     test("explicit management API URL wins over Supabase URL inference", () => {
@@ -55,6 +57,7 @@ describe("resolveSupaCloudContext", () => {
 
         expect(context.apiUrl).toBe("https://management.example.com");
         expect(context.apiToken).toBe("token");
+        expect(context.credentialScope).toBe("management");
     });
 
     test("prefers SUPACLOUD_API_TOKEN within one atomic source", () => {
