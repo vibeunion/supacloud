@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/zuohuadong/supacloud/compare/supacloud-lite-v0.6.0...supacloud-lite-v0.7.0) (2026-08-11)
+
+
+### Features
+
+* **lite:** support admin magic link verification ([#788](https://github.com/zuohuadong/supacloud/issues/788)) ([97defa0](https://github.com/zuohuadong/supacloud/commit/97defa0e3ba875d1bd0363f9f64df02a089238ff))
+
 ## [0.6.0](https://github.com/zuohuadong/supacloud/compare/supacloud-lite-v0.5.10...supacloud-lite-v0.6.0) (2026-08-11)
 
 
