@@ -8,6 +8,7 @@ import { taskRepository } from "../repositories/task.repository";
 import type { Project, ProjectStatus } from "../db";
 import { resolveBucketName, resolveDbName, resolveRoleName, generateDbName } from "../db";
 import {
+  EDGE_FUNCTION_ACTIVE_ARTIFACT_MISSING_MESSAGE,
   activeFunctionVersionNumber,
   edgeFunctionService,
   getVersionedArtifactPath,
@@ -822,7 +823,7 @@ export class ProjectService {
       const activePath = cfg.version === undefined
         ? `${config.edgeFunctionsDir}/${ref}/${slug}.js`
         : await getVersionedArtifactPath(ref, slug, cfg.version);
-      if (activePath === null) throw new Error("Active function artifact is missing");
+      if (activePath === null) throw new Error(EDGE_FUNCTION_ACTIVE_ARTIFACT_MISSING_MESSAGE);
       const fileStat = await fs.stat(activePath);
       const updated_at = fileStat.mtime.toISOString();
       const created_at = fileStat.birthtime.toISOString();

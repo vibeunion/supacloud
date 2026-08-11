@@ -6,6 +6,7 @@ import { projectSecretsRoutes } from "../../src/routes/project-secrets";
 import { projectConfigRoutes } from "../../src/routes/project-config";
 import { projectService } from "../../src/services/project.service";
 import {
+  EDGE_FUNCTION_ACTIVE_ARTIFACT_MISSING_MESSAGE,
   EdgeFunctionActiveVersionConflictError,
   edgeFunctionService,
 } from "../../src/services/edge-function.service";
@@ -96,6 +97,29 @@ describe("final security regressions", () => {
       codeSpy.mockRestore();
       configSpy.mockRestore();
       activeVersionSpy.mockRestore();
+    }
+  });
+
+  test("function detail does not report active metadata after an active artifact failure", async () => {
+    const codeSpy = spyOn(projectService, "getFunctionCode").mockRejectedValue(
+      new Error(EDGE_FUNCTION_ACTIVE_ARTIFACT_MISSING_MESSAGE),
+    );
+    const configSpy = spyOn(edgeFunctionService, "getConfig");
+    const request = appWith(projectFunctionsRoutes);
+
+    try {
+      const response = await request("/v1/projects/proj_1/functions/upgraded-hook", {
+        headers: masterHeaders,
+      });
+      const body = await response.text();
+
+      expect(response.status).toBe(500);
+      expect(body).not.toContain("stale-positive-alias");
+      expect(body).not.toContain('"status":"ACTIVE"');
+      expect(configSpy).not.toHaveBeenCalled();
+    } finally {
+      codeSpy.mockRestore();
+      configSpy.mockRestore();
     }
   });
 
