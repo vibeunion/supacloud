@@ -6,11 +6,51 @@ Platform administration CLI for SupaCloud operators.
 
 Typical environment variables:
 
+- `SUPACLOUD_ENV` — environment identity such as `test` or `production`
+- `SUPACLOUD_READ_ONLY=true` — block every remote write
 - `SUPACLOUD_HOST`
 - `SUPACLOUD_SSH_KEY` or `SUPACLOUD_SSH_PASS`
 - `SUPACLOUD_SSH_HOST_FINGERPRINT` — required for SSH actions, in OpenSSH `SHA256:<base64>` form
 - `SUPACLOUD_API_URL`
 - `SUPACLOUD_API_TOKEN`
+
+## Environment selection and production confirmation
+
+Use `--env <name>` to load `.env.supacloud.<name>` from the current directory,
+or `--env-file <path>` to load one exact file. An explicit file must declare
+`SUPACLOUD_ENV`; a named file may also declare it, but the declared value must
+match the selector. Global flags may appear before or after the command.
+
+Selected files are atomic context sources: Admin does not fill missing API,
+project, SSH, credential, or safety values from the process environment or a
+different dotenv file. Without a selector, a complete process context declaring
+`SUPACLOUD_ENV` is used as one source. If that process context is incomplete,
+`SUPACLOUD_ENV` selects `.env.supacloud.<value>` instead. The legacy `.env`
+fallback remains available only when no Admin context variables are present in
+the process.
+
+Production writes require `--confirm-production` before any HTTP or SSH action:
+
+- Project-scoped writes use the exact requested project ref. If the selected
+  profile declares `SUPACLOUD_PROJECT_REF`, an explicit different ref is
+  rejected for both reads and writes.
+- Platform API writes that genuinely have no project ref use
+  `platform:<API host>`, for example `platform:management.example.com`.
+- SSH writes that genuinely have no project ref use `host:<SSH host[:port]>`,
+  for example `host:production.example.com:2201`.
+
+A generic value such as `production` is never accepted. Project-scoped actions
+that omit a required ref do not fall back to a platform or host confirmation.
+`SUPACLOUD_READ_ONLY=true` blocks every remote write in every environment.
+
+```bash
+npx @supacloud/admin --env test status
+npx @supacloud/admin --env production project delete \
+  --ref abc123 --confirm-production abc123
+npx @supacloud/admin --env production ssh upgrade \
+  --version 0.50.31 --edge_runtime_version 0.16.8 \
+  --confirm-production host:production.example.com:2201
+```
 
 SSH host keys are fail-closed: setting `SUPACLOUD_HOST` and credentials is not
 enough to enable SSH actions. Obtain the fingerprint through a trusted channel,

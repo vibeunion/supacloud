@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 
-import { Type } from "@sinclair/typebox";
-import { stringEnum } from "./shared/schema";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { realpathSync } from "node:fs";
 import { cliToolResultIsError, runCli } from "./shared/cli";
 import { resolveSupaCloudContext, type ResolvedContext } from "./shared/context";
+import { parseGlobalAdminOptions } from "./shared/global-options";
+import { authorizeExecution, validateExecutionPolicyCoverage } from "./shared/execution-policy";
 import { HttpTransport } from "./shared/transports/http";
 import { SshTransport } from "./shared/transports/ssh";
 import { registerSshTools } from "./shared/tools/ssh-tools";
@@ -17,17 +17,6 @@ import packageMetadata from "../package.json" with { type: "json" };
 
 type ToolEntry = { schema: any; callback: (args: any) => Promise<any> };
 type ToolMap = Record<string, ToolEntry>;
-
-const platformActionSchema = stringEnum([
-    "metrics", "list_backups", "create_backup",
-    "network", "update_network",
-    "list_orgs", "get_org",
-]);
-const sshActionSchema = stringEnum([
-    "ping", "setup", "install", "upgrade", "versions", "diagnose", "exec",
-    "troubleshoot", "container_logs",
-    "tenant_manage", "tenant_list", "tenant_inspect", "tenant_diagnose", "tenant_migrate",
-]);
 
 function captureTools(register: (server: { tool: (...args: any[]) => void }) => void): ToolMap {
     const tools: ToolMap = {};
@@ -44,6 +33,42 @@ function captureTools(register: (server: { tool: (...args: any[]) => void }) => 
     return tools;
 }
 
+function unavailableTool(schema: ToolEntry["schema"], message: string): ToolEntry {
+    return {
+        schema,
+        callback: async () => ({
+            isError: true,
+            content: [{ type: "text" as const, text: message }],
+        }),
+    };
+}
+
+function unavailableAdminSchemas(): Record<"project" | "platform" | "gateway" | "ssh", ToolEntry["schema"]> {
+    const schemaOnlyHttp = {} as HttpTransport;
+    return {
+        project: captureTools((server) =>
+            registerAdminProjectCliTools(server as any, schemaOnlyHttp)).project.schema,
+        platform: captureTools((server) =>
+            registerAdvancedTools(server as any, schemaOnlyHttp)).platform.schema,
+        gateway: captureTools((server) =>
+            registerGatewayTools(server as any, schemaOnlyHttp)).gateway.schema,
+        ssh: captureTools((server) =>
+            registerSshTools(server as any, {} as SshTransport)).ssh.schema,
+    };
+}
+
+function registerUnavailableAdminTools(tools: ToolMap): void {
+    const schemas = unavailableAdminSchemas();
+    tools.project = unavailableTool(schemas.project,
+        "⚠️ Project lifecycle commands require SUPACLOUD_API_URL and SUPACLOUD_API_TOKEN.");
+    tools.platform = unavailableTool(schemas.platform,
+        "⚠️ Platform commands require SUPACLOUD_API_URL and SUPACLOUD_API_TOKEN.");
+    tools.ssh = unavailableTool(schemas.ssh,
+        "⚠️ SSH commands require SUPACLOUD_HOST, SSH credentials, and SUPACLOUD_SSH_HOST_FINGERPRINT.");
+    tools.gateway = unavailableTool(schemas.gateway,
+        "⚠️ Gateway / Caddy commands require SUPACLOUD_API_URL and SUPACLOUD_API_TOKEN (admin privileges).");
+}
+
 function printHelp(context = resolveSupaCloudContext()) {
     console.error(`
 ╔═══════════════════════════════════════════════════════════╗
@@ -53,10 +78,19 @@ function printHelp(context = resolveSupaCloudContext()) {
 
 USAGE
 
-  supacloud-admin <module> <action> [--flags]
-  supacloud-admin status
+  supacloud-admin [global flags] <module> <action> [--flags]
+  supacloud-admin [global flags] status
   supacloud-admin --help
   supacloud-admin --version
+
+GLOBAL FLAGS
+
+  --env <name>                    Load .env.supacloud.<name> from the current directory.
+  --env-file <path>               Load an exact file that declares SUPACLOUD_ENV.
+  --confirm-production <target>   Confirm the exact production project or platform target.
+
+  Global flags may appear before or after the command. --env and --env-file are
+  mutually exclusive, and a selected source is never mixed with another source.
 
 EXPECTED CONTEXT
 
@@ -66,9 +100,17 @@ EXPECTED CONTEXT
     SUPACLOUD_SSH_HOST_FINGERPRINT=SHA256:...
     SUPACLOUD_API_URL
     SUPACLOUD_API_TOKEN
+    SUPACLOUD_ENV
+    SUPACLOUD_READ_ONLY
 
+  Environment: ${context.environment || "(unclassified)"}
+  Context source: ${context.source}${context.sourcePath ? ` (${context.sourcePath})` : ""}
   Detected host: ${context.host || "(none)"}
   Detected API URL: ${context.apiUrl || "(none)"}
+
+  SUPACLOUD_READ_ONLY=true blocks every remote write. Production project writes
+  require the exact project ref. Production writes without a project ref use
+  platform:<API host> or host:<SSH host[:port]> as the confirmation target.
 
 EXAMPLES
 
@@ -88,7 +130,26 @@ EXAMPLES
 `);
 }
 
-export function createAdminTools(context: ResolvedContext = resolveSupaCloudContext()): ToolMap {
+function authorizedToolMap(
+    tools: ToolMap,
+    context: ResolvedContext,
+    confirmProduction?: string,
+): ToolMap {
+    validateExecutionPolicyCoverage(tools);
+    for (const [moduleName, tool] of Object.entries(tools)) {
+        const callback = tool.callback;
+        tool.callback = async (args: Record<string, unknown>) => {
+            authorizeExecution(moduleName, args, { context, confirmProduction });
+            return callback(args);
+        };
+    }
+    return tools;
+}
+
+export function createAdminTools(
+    context: ResolvedContext = resolveSupaCloudContext(),
+    confirmProduction?: string,
+): ToolMap {
     const tools: ToolMap = {
         status: {
             schema: {},
@@ -104,7 +165,10 @@ export function createAdminTools(context: ResolvedContext = resolveSupaCloudCont
                                 hasApiToken: Boolean(context.apiToken),
                                 hasSshKey: Boolean(context.sshKey),
                                 hasSshHostFingerprint: Boolean(context.sshHostFingerprint),
-                                source: context.source,
+                                environment: context.environment || null,
+                                production: context.production,
+                                readOnly: context.readOnly,
+                                source: { kind: context.source, path: context.sourcePath },
                             },
                             null,
                             2,
@@ -115,61 +179,7 @@ export function createAdminTools(context: ResolvedContext = resolveSupaCloudCont
         },
     };
 
-    const registerAdminHelp = () => {
-        const projectHelpTool = captureTools((server) =>
-            registerAdminProjectCliTools(server as any, {} as HttpTransport)
-        ).project;
-        tools.project = {
-            schema: projectHelpTool.schema,
-            callback: async () => ({
-                isError: true,
-                content: [
-                    {
-                        type: "text" as const,
-                        text: "⚠️ Project lifecycle commands require SUPACLOUD_API_URL and SUPACLOUD_API_TOKEN.",
-                    },
-                ],
-            }),
-        };
-        tools.platform = {
-            schema: { action: platformActionSchema },
-            callback: async () => ({
-                isError: true,
-                content: [
-                    {
-                        type: "text" as const,
-                        text: "⚠️ Platform commands require SUPACLOUD_API_URL and SUPACLOUD_API_TOKEN.",
-                    },
-                ],
-            }),
-        };
-        tools.ssh = {
-            schema: { action: sshActionSchema },
-            callback: async () => ({
-                isError: true,
-                content: [
-                    {
-                        type: "text" as const,
-                        text: "⚠️ SSH commands require SUPACLOUD_HOST, SSH credentials, and SUPACLOUD_SSH_HOST_FINGERPRINT.",
-                    },
-                ],
-            }),
-        };
-        tools.gateway = {
-            schema: { action: Type.String() },
-            callback: async () => ({
-                isError: true,
-                content: [
-                    {
-                        type: "text" as const,
-                        text: "⚠️ Gateway / Caddy commands require SUPACLOUD_API_URL and SUPACLOUD_API_TOKEN (admin privileges).",
-                    },
-                ],
-            }),
-        };
-    };
-
-    registerAdminHelp();
+    registerUnavailableAdminTools(tools);
 
     if (context.host && context.sshHostFingerprint) {
         try {
@@ -185,7 +195,7 @@ export function createAdminTools(context: ResolvedContext = resolveSupaCloudCont
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             tools.ssh = {
-                schema: { action: sshActionSchema },
+                schema: tools.ssh.schema,
                 callback: async () => ({
                     isError: true,
                     content: [{
@@ -197,7 +207,7 @@ export function createAdminTools(context: ResolvedContext = resolveSupaCloudCont
         }
     } else if (context.host) {
         tools.ssh = {
-            schema: { action: sshActionSchema },
+            schema: tools.ssh.schema,
             callback: async () => ({
                 isError: true,
                 content: [{
@@ -251,33 +261,40 @@ export function createAdminTools(context: ResolvedContext = resolveSupaCloudCont
         };
     }
 
-    return tools;
+    return authorizedToolMap(tools, context, confirmProduction);
 }
 
 async function main() {
-    const args = process.argv.slice(2);
-    if (args.length === 0 || args[0] === "--help" || args[0] === "-h") {
-        printHelp();
-        process.exit(0);
-    }
-    if (args.length === 1 && args[0] === "--version") {
+    const rawArgs = process.argv.slice(2);
+    if (rawArgs.length === 1 && rawArgs[0] === "--version") {
         console.log(packageMetadata.version);
         return;
     }
+    const globalOptions = parseGlobalAdminOptions(rawArgs);
+    const args = globalOptions.args;
+    const context = resolveSupaCloudContext(process.env, process.cwd(), {
+        environmentName: globalOptions.environmentName,
+        envFile: globalOptions.envFile,
+    });
+    if (args.length === 0 || args[0] === "--help" || args[0] === "-h") {
+        printHelp(context);
+        process.exitCode = 0;
+        return;
+    }
 
-    const cliTools = createAdminTools();
+    const cliTools = createAdminTools(context, globalOptions.confirmProduction);
     if (args.length === 1 && cliTools[args[0]]) {
-        const result = await cliTools[args[0]].callback({});
-        if (result?.content && Array.isArray(result.content)) {
-            for (const chunk of result.content) {
+        const toolResponse = await cliTools[args[0]].callback({});
+        if (toolResponse?.content && Array.isArray(toolResponse.content)) {
+            for (const chunk of toolResponse.content) {
                 if (chunk.type === "text") {
                     console.log(chunk.text);
                 }
             }
         } else {
-            console.log(JSON.stringify(result, null, 2));
+            console.log(JSON.stringify(toolResponse, null, 2));
         }
-        if (cliToolResultIsError(result)) process.exitCode = 1;
+        if (cliToolResultIsError(toolResponse)) process.exitCode = 1;
         return;
     }
     await runCli(cliTools, args, { commandName: "supacloud-admin" });
