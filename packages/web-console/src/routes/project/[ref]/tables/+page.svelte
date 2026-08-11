@@ -3,6 +3,7 @@
   import { resolve } from "$app/paths";
   import { AutoTable } from "@svadmin/ui";
   import { apiClient } from "$lib/api";
+  import { tableRowsRouteParams } from "$lib/admin/resources";
   import { createMutation } from "@tanstack/svelte-query";
   import { t } from "svelte-i18n";
   import { toast } from "svelte-sonner";
@@ -87,11 +88,10 @@
         {#snippet tableNameRenderer({ value, record }: { value: any, record: any })}
           <div class="flex items-center gap-2">
             <TableProperties size={14} class="text-brand" />
-            <a href={resolve("/project/[ref]/tables/[schema]/[table_name]", {
-              ref: projectRef,
-              schema: String(record.table_schema),
-              table_name: String(value),
-            })} class="font-mono font-medium text-sm text-foreground hover:text-brand hover:underline transition-colors block py-1">
+            <a href={resolve(
+              "/project/[ref]/tables/[schema]/[table_name]",
+              tableRowsRouteParams(projectRef, String(record.table_schema), String(value)),
+            )} class="font-mono font-medium text-sm text-foreground hover:text-brand hover:underline transition-colors block py-1">
               {value}
             </a>
           </div>

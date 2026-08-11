@@ -29,4 +29,26 @@ describe("root layout source guards", () => {
     expect(layoutSource).toContain("toast.error(result.error);");
     expect(layoutSource).not.toContain("await logoutStudio();\n    } finally {");
   });
+
+  test("provides one reactive scoped admin context without module-level provider mirrors", () => {
+    expect(layoutSource).toContain("createProviderBundle");
+    expect(layoutSource).toContain("provideAdminContext");
+    expect(layoutSource).toContain("get providerBundle()");
+    expect(layoutSource).toContain("get resources()");
+    expect(layoutSource).toContain("get tenant()");
+    expect(layoutSource).toContain("resolveAdminTenant");
+    expect(layoutSource).not.toContain("setDataProvider");
+    expect(layoutSource).not.toContain("setAuthProvider");
+    expect(layoutSource).not.toContain("setRouterProvider");
+    expect(layoutSource).not.toContain("setChatProvider");
+    expect(layoutSource).not.toContain("setResources");
+    expect(layoutSource).not.toContain("setComponentRegistry");
+  });
+
+  test("keeps one SvAdmin toast host and never falls back an unknown project route", () => {
+    expect(layoutSource.match(/<SvadminToast/g)).toHaveLength(1);
+    expect(layoutSource).not.toContain("<Toaster");
+    expect(layoutSource).not.toContain("projects.find(p => p.ref === refFromUrl) || projects[0]");
+    expect(layoutSource).toContain("projects.find((project) => project.ref === refFromUrl) ?? null");
+  });
 });

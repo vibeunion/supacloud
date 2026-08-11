@@ -1,77 +1,102 @@
-import { createElysiaDataProvider } from '@svadmin/elysia';
-import type { ChatProvider, ChatMessage } from '@svadmin/core';
+import {
+  createElysiaDataProvider,
+  type ElysiaListContext,
+  type ElysiaResourceAdapter,
+} from '@svadmin/elysia';
+import type { BaseRecord, ChatMessage, ChatProvider, GetListResult } from '@svadmin/core';
 
 const getApiUrl = () => {
     if (typeof window === 'undefined') return 'http://localhost:9090'; // SSR
     return window.location.origin;
 };
 
-interface ListEnvelopeAdapter {
-    matches: (resource: string) => boolean;
-    recordKeys: readonly string[];
+function parseNamedListEnvelope<TData extends BaseRecord>(
+  payload: unknown,
+  context: ElysiaListContext,
+  recordKey: string,
+): GetListResult<TData> {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new Error(`Invalid list response for ${context.resource}. Expected an object containing ${recordKey}.`);
+  }
+
+  const response = payload as Record<string, unknown>;
+  const applicationError = typeof response.error === 'string'
+    ? response.error
+    : typeof response.message === 'string'
+      ? response.message
+      : undefined;
+  if (applicationError) throw new Error(applicationError);
+
+  const records = response[recordKey];
+  if (!Array.isArray(records)) {
+    throw new Error(`Invalid list response for ${context.resource}. Expected an object containing ${recordKey}.`);
+  }
+
+  const metadata = Object.fromEntries(
+    Object.entries(response).filter(([key]) => key !== recordKey),
+  );
+  return {
+    ...metadata,
+    data: records as TData[],
+    total: typeof response.total === 'number' ? response.total : records.length,
+  };
 }
 
-const defaultListRecordKeys = ["items", "data", "rows"] as const;
-const listEnvelopeAdapters: readonly ListEnvelopeAdapter[] = [
-    {
-        matches: (resource) => resource === "auth/users" || resource.endsWith("/auth/users"),
-        recordKeys: ["users"],
-    },
-    {
-        matches: (resource) => resource === "frontend/deployments" || resource.endsWith("/frontend/deployments"),
-        recordKeys: ["deployments"],
-    },
-    {
-        matches: (resource) => resource.includes("/functions/") && resource.endsWith("/logs"),
-        recordKeys: ["logs"],
-    },
+function namedEnvelopeAdapter(
+  match: ElysiaResourceAdapter['match'],
+  recordKey: string,
+): ElysiaResourceAdapter {
+  return {
+    match,
+    parseListResponse: <TData extends BaseRecord>(payload: unknown, context: ElysiaListContext) =>
+      parseNamedListEnvelope<TData>(payload, context, recordKey),
+  };
+}
+
+const tableRowsAdapter: ElysiaResourceAdapter = {
+  match: /^v1\/projects\/[^/]+\/database\/tables\/[^/]+\/[^/]+\/rows$/,
+  parseListResponse: <TData extends BaseRecord>(payload: unknown, context: ElysiaListContext) => {
+    const normalized = parseNamedListEnvelope<TData>(payload, context, 'data');
+    const identityKey = context.meta?.tableRowIdentityKey;
+    if (identityKey === undefined) return normalized;
+    if (typeof identityKey !== 'string' || identityKey.length === 0) {
+      throw new Error(`Invalid table row identity metadata for ${context.resource}.`);
+    }
+    if (normalized.data.some((record) => !record || typeof record !== 'object' || Array.isArray(record))) {
+      throw new Error(`Invalid table row response for ${context.resource}. Expected object records.`);
+    }
+
+    const offset = (context.pagination.current - 1) * context.pagination.pageSize;
+    return {
+      ...normalized,
+      data: normalized.data.map((record, index) => ({
+        ...record,
+        [identityKey]: `${context.resource}:${offset + index}`,
+      })),
+    };
+  },
+};
+
+const resourceAdapters: readonly ElysiaResourceAdapter[] = [
+  tableRowsAdapter,
+  namedEnvelopeAdapter(
+    (resource) => resource === 'auth/users' || resource.endsWith('/auth/users'),
+    'users',
+  ),
+  namedEnvelopeAdapter(
+    (resource) => resource === 'frontend/deployments' || resource.endsWith('/frontend/deployments'),
+    'deployments',
+  ),
+  namedEnvelopeAdapter(
+    (resource) => resource.includes('/functions/') && resource.endsWith('/logs'),
+    'logs',
+  ),
 ];
 
-function listRecordKeysFor(resource: string): readonly string[] {
-    const adapter = listEnvelopeAdapters.find((candidate) => candidate.matches(resource));
-    return adapter ? [...adapter.recordKeys, ...defaultListRecordKeys] : defaultListRecordKeys;
-}
-
-function normalizeListEnvelope(
-    response: Record<string, unknown>,
-    recordKey: string,
-): { data: unknown[]; total: number; [key: string]: unknown } {
-    const { [recordKey]: recordValue, ...metadata } = response;
-    const records = recordValue as unknown[];
-    return {
-        ...metadata,
-        data: records,
-        total: typeof response.total === "number" ? response.total : records.length,
-    };
-}
-
-export function parseListResponse(payload: unknown, resource: string) {
-    if (Array.isArray(payload)) return { data: payload, total: payload.length };
-    if (!payload || typeof payload !== "object") throw new Error(`Invalid list response for ${resource}`);
-
-    const response = payload as Record<string, unknown>;
-    if (response.error || response.message) {
-        const message = typeof response.error === "string" ? response.error : response.message;
-        throw new Error(typeof message === "string" ? message : "API Application Error");
-    }
-
-    const recordKeys = listRecordKeysFor(resource);
-    for (const key of recordKeys) {
-        const records = response[key];
-        if (Array.isArray(records)) {
-            return normalizeListEnvelope(response, key);
-        }
-    }
-
-    throw new Error(
-        `Unrecognized list response format from API for resource ${resource}. Expected an array or an object containing ${recordKeys.join(", ")}.`,
-    );
-}
-
 export const dataProvider = createElysiaDataProvider({
-    apiUrl: getApiUrl(),
-    withCredentials: true,
-    parseListResponse,
+  apiUrl: getApiUrl(),
+  withCredentials: true,
+  resourceAdapters,
 });
 
 // Implementation of ChatProvider using Fetch API + SSE for streaming
