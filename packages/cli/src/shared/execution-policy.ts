@@ -16,7 +16,7 @@ const ACTION_POLICY: Record<string, ModulePolicy> = {
         write: ["task_cancel", "task_retry", "update_background_settings"],
     },
     database: {
-        read: ["list_tables", "describe_columns", "list_indexes", "list_constraints", "list_extensions", "rls_status", "rls_policies", "list_auth_users", "get_auth_user", "connections", "stats", "slow_queries", "list_migrations", "project_url", "generate_types"],
+        read: ["list_tables", "describe_columns", "list_indexes", "list_constraints", "list_extensions", "rls_status", "rls_policies", "list_auth_users", "get_auth_user", "connections", "stats", "slow_queries", "list_migrations", "migration_inventory", "project_url", "generate_types"],
         write: ["query", "apply_migration", "push_migrations", "baseline_migrations", "create_table_rls"],
     },
     supabase: {

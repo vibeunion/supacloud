@@ -144,6 +144,7 @@ describe("CLI execution policy", () => {
     });
 
     test("allows migration previews and local authoring without production confirmation", () => {
+        expect(executionMode("database", "migration_inventory", {})).toBe("read");
         expect(executionMode("database", "push_migrations", { dry_run: true })).toBe("read");
         expect(executionMode("supabase", "push", { dry_run: true })).toBe("read");
         expect(() => authorizeExecution("supabase", { action: "db_dump" }, { context: context() }))
