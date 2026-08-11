@@ -12,6 +12,9 @@ import { MemoryStorageDriver } from './runtime/storage/driver.js'
 import { S3StorageDriver, type S3StorageDriverOptions } from './runtime/storage/s3-driver.js'
 import type { SmsSender, StorageDriver } from './runtime/types.js'
 
+const RESET_INITIALIZATION_ERROR = 'db reset requires initialized state; run "supacloud-lite migrate" first'
+const RESET_INVALID_SECRETS_ERROR = 'db reset requires a valid project secrets marker; restore the state before retrying'
+
 export interface ProjectSecrets {
   jwtSecret: string
   vaultKey: string
@@ -91,7 +94,7 @@ export function resolveProjectPaths(options: ProjectRuntimeOptions = {}): Projec
 export async function assertResetPathsSafe(paths: ProjectPaths): Promise<void> {
   const stateDir = resolve(paths.stateDir)
   if (stateDir === parse(stateDir).root) throw new Error('refusing to use the filesystem root as the state directory')
-  const stateInfo = await lstat(stateDir)
+  const stateInfo = await requiredResetEntry(stateDir)
   if (!stateInfo.isDirectory() || stateInfo.isSymbolicLink()) {
     throw new Error(`refusing to reset through an invalid state directory: ${stateDir}`)
   }
@@ -100,10 +103,11 @@ export async function assertResetPathsSafe(paths: ProjectPaths): Promise<void> {
   if (secretsFile !== join(stateDir, 'secrets.json')) {
     throw new Error(`refusing to reset a state directory with an invalid secrets marker path: ${secretsFile}`)
   }
-  const markerInfo = await lstat(secretsFile)
+  const markerInfo = await requiredResetEntry(secretsFile)
   if (!markerInfo.isFile() || markerInfo.isSymbolicLink()) {
     throw new Error(`refusing to reset a state directory without a valid secrets marker: ${stateDir}`)
   }
+  await assertResetSecretsValid(secretsFile)
   const targets = [
     ...(paths.dataDir ? [['database', paths.dataDir] as const] : []),
     ['storage', paths.storageDir] as const,
@@ -115,6 +119,31 @@ export async function assertResetPathsSafe(paths: ProjectPaths): Promise<void> {
       throw new Error(`refusing to reset ${label} path outside the state directory: ${target}`)
     }
     await assertResetTargetCanonical(stateDir, canonicalStateDir, target, label)
+  }
+}
+
+async function requiredResetEntry(path: string) {
+  try {
+    return await lstat(path)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new Error(RESET_INITIALIZATION_ERROR)
+    throw error
+  }
+}
+
+async function assertResetSecretsValid(path: string): Promise<void> {
+  let serializedSecrets: string
+  try {
+    serializedSecrets = await readFile(path, 'utf8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new Error(RESET_INITIALIZATION_ERROR)
+    throw error
+  }
+  // Persisted marker content is untrusted; collapse parse/shape failures before any destructive work.
+  try {
+    validateSecrets(JSON.parse(serializedSecrets) as Partial<ProjectSecrets>)
+  } catch {
+    throw new Error(RESET_INVALID_SECRETS_ERROR)
   }
 }
 
