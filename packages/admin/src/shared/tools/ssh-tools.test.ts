@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
+import { EventEmitter } from "node:events";
 import {
     chmodSync,
     existsSync,
@@ -17,8 +18,10 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { buildOfficialUpgradeCommand, buildRootUpgradeScript, registerSshTools } from "./ssh-tools";
+import { formatCliError } from "../cli";
 import { parseToolArguments } from "../schema";
 import type { ToolSchema } from "../schema";
+import { SshCommandOutcomeUnknownError, SshTransport } from "../transports/ssh";
 import {
     SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_FILENAME,
     SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_JSONL,
@@ -29,6 +32,41 @@ import {
 type ToolHandler = (args: Record<string, unknown>) => Promise<{ content: Array<{ type: "text"; text: string }> }>;
 type FakeExecResult = { success: boolean; stdout: string; stderr: string; code: number };
 type FakeExecPlan = { fragment: string; executions: FakeExecResult[]; calls: number };
+type UpgradeTransportOutcome = "late_success" | "stream_error";
+
+const TEST_SSH_HOST_FINGERPRINT = `SHA256:${Buffer.alloc(32, 7).toString("base64").replace(/=+$/, "")}`;
+
+class UpgradeTransportClient extends EventEmitter {
+    endCalls = 0;
+    terminalCloseEmitted = false;
+
+    constructor(private readonly outcome: UpgradeTransportOutcome) {
+        super();
+    }
+
+    connect(): this {
+        queueMicrotask(() => this.emit("ready"));
+        return this;
+    }
+
+    exec(_command: string, callback: (error: Error | undefined, stream: EventEmitter & { stderr: EventEmitter }) => void): void {
+        const stream = new EventEmitter() as EventEmitter & { stderr: EventEmitter };
+        stream.stderr = new EventEmitter();
+        callback(undefined, stream);
+        if (this.outcome === "stream_error") {
+            queueMicrotask(() => stream.emit("error", new Error("TOKEN=stream-secret")));
+            return;
+        }
+        setTimeout(() => {
+            this.terminalCloseEmitted = true;
+            stream.emit("close", 0);
+        }, 20);
+    }
+
+    end(): void {
+        this.endCalls += 1;
+    }
+}
 
 class FakeSsh {
     readonly commands: string[] = [];
@@ -39,6 +77,9 @@ class FakeSsh {
     installEarlyFails = false;
     bootstrapDepsFail = false;
     bootstrapCloneFail = false;
+    prepareExecOutcomeUnknown = false;
+    upgradeTransportOutcome: UpgradeTransportOutcome | undefined;
+    upgradeTransportClient: UpgradeTransportClient | undefined;
     upgradeExecThrows = false;
     upgradeExecRejection: { value: unknown } | undefined;
     upgradeExecFails = false;
@@ -64,6 +105,22 @@ class FakeSsh {
             const executionIndex = Math.min(fixedPlan.calls, fixedPlan.executions.length - 1);
             fixedPlan.calls += 1;
             return fixedPlan.executions[executionIndex]!;
+        }
+        if (this.prepareExecOutcomeUnknown && command.includes("mkdir -m 700 --")) {
+            throw new SshCommandOutcomeUnknownError("SSH command timed out after 30000ms; remote outcome is unknown");
+        }
+        if (this.upgradeTransportOutcome && command.includes("UPGRADE_RUNNER")) {
+            const client = new UpgradeTransportClient(this.upgradeTransportOutcome);
+            this.upgradeTransportClient = client;
+            const transport = new SshTransport({
+                host: "server.example.com", port: 22, username: "root",
+                hostFingerprint: TEST_SSH_HOST_FINGERPRINT,
+            }, { clientFactory: () => client as never });
+            try {
+                return await transport.exec(command, 5);
+            } finally {
+                transport.close();
+            }
         }
         if (this.upgradeExecThrows && command.includes("UPGRADE_RUNNER")) {
             throw new Error("connection dropped");
@@ -812,7 +869,7 @@ describe("ssh admin tool", () => {
         expect(execution.exitCode).toBe(0);
     });
 
-    test("explicit upgrade proxy leaves time for direct-first and proxy transfer budgets", async () => {
+    test("proxy upgrade budget adds 30-minute observation to bounded dual-route downloads", async () => {
         const ssh = new FakeSsh();
         await captureSshTool(ssh).invoke({
             action: "upgrade",
@@ -820,7 +877,7 @@ describe("ssh admin tool", () => {
             github_proxy: "https://proxy.example.test/",
         });
 
-        expect(ssh.timeouts).toEqual([30_000, 1_320_000, 30_000]);
+        expect(ssh.timeouts).toEqual([30_000, (30 + 22) * 60_000, 30_000]);
     });
 
     test("outer upgrade signals remove the helper and stop command continuation", () => {
@@ -1009,7 +1066,59 @@ describe("ssh admin tool", () => {
         expect(ssh.commands[0]).not.toContain("install -d");
         expect(ssh.commands[2]).toContain(`rm -rf -- '${ssh.uploads[0]?.remotePath.replace(/\/release_assets\.sh$/, "")}'`);
         expect(ssh.commands[2]).toContain("sudo -n rm -rf --");
-        expect(ssh.timeouts).toEqual([30_000, 720_000, 30_000]);
+        expect(ssh.timeouts).toEqual([30_000, (30 + 12) * 60_000, 30_000]);
+    });
+
+    test("timeout preserves reconciliation evidence while the remote upgrade completes later", async () => {
+        const ssh = new FakeSsh();
+        ssh.upgradeTransportOutcome = "late_success";
+        let failure: unknown;
+
+        try {
+            await captureSshTool(ssh).invoke({
+                action: "upgrade",
+                version: "0.54.0",
+                edge_runtime_version: "0.17.1",
+            });
+        } catch (error: unknown) {
+            failure = error;
+        }
+        await new Promise(resolve => setTimeout(resolve, 25));
+
+        expect(failure).toBeInstanceOf(AggregateError);
+        expect((failure as { code?: string }).code).toBe("OUTCOME_UNKNOWN");
+        const diagnostic = formatCliError(failure);
+        const helperPath = ssh.uploads[0]?.remotePath ?? "";
+        expect(diagnostic).toContain("OUTCOME_UNKNOWN");
+        expect(diagnostic).toContain(`helper=${helperPath}`);
+        expect(diagnostic).toContain(`trusted_root=${dirname(helperPath)}/${SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_FILENAME}`);
+        expect(diagnostic).toContain("do not retry blindly");
+        expect(diagnostic.length).toBeLessThan(1_000);
+        expect(ssh.upgradeTransportClient?.terminalCloseEmitted).toBe(true);
+        expect(ssh.upgradeTransportClient?.endCalls).toBe(1);
+        expect(ssh.commands).toHaveLength(2);
+        expect(ssh.commands.some(command => command.includes("sudo -n rm -rf --"))).toBe(false);
+    });
+
+    test("post-dispatch stream errors preserve helpers without reflecting transport secrets", async () => {
+        const ssh = new FakeSsh();
+        ssh.upgradeTransportOutcome = "stream_error";
+        let failure: unknown;
+
+        try {
+            await captureSshTool(ssh).invoke({ action: "upgrade", version: "0.54.0" });
+        } catch (error: unknown) {
+            failure = error;
+        }
+
+        expect((failure as { code?: string }).code).toBe("OUTCOME_UNKNOWN");
+        const diagnostic = formatCliError(failure);
+        expect(diagnostic).toContain("client cleanup was suppressed");
+        expect(diagnostic).not.toContain("stream-secret");
+        expect(diagnostic.length).toBeLessThan(1_000);
+        expect(ssh.upgradeTransportClient?.endCalls).toBe(1);
+        expect(ssh.commands).toHaveLength(2);
+        expect(ssh.commands.some(command => command.includes("sudo -n rm -rf --"))).toBe(false);
     });
 
     test("component upgrade cleans its exact helper path when SSH execution throws", async () => {
@@ -1040,6 +1149,61 @@ describe("ssh admin tool", () => {
         expect(ssh.commands[1]).toContain(helperDirectory);
         expect(ssh.commands[1]).toContain("rm -rf --");
         expect(ssh.commands[2]).toContain(`rm -rf -- '${helperDirectory}' || sudo -n rm -rf -- '${helperDirectory}'`);
+    });
+
+    test("known helper setup failure still cleans the owned generated path", async () => {
+        const ssh = new FakeSsh();
+        addFakeExecution(ssh, "mkdir -m 700 --", {
+            success: false, stdout: "", stderr: "mkdir returned failure", code: 23,
+        });
+
+        await expect(captureSshTool(ssh).invoke({ action: "upgrade", version: "0.54.0" }))
+            .rejects.toThrow("Failed to prepare remote upgrade helper directory");
+        expect(ssh.uploads).toHaveLength(0);
+        expect(ssh.commands).toHaveLength(2);
+        const helperDirectory = ssh.commands[0]?.match(/mkdir -m 700 -- '([^']+)'/)?.[1] ?? "";
+        expect(ssh.commands[1]).toContain(`rm -rf -- '${helperDirectory}'`);
+    });
+
+    test("unknown helper setup reconciles its path after attempting cleanup", async () => {
+        const ssh = new FakeSsh();
+        ssh.prepareExecOutcomeUnknown = true;
+        let failure: unknown;
+
+        try {
+            await captureSshTool(ssh).invoke({ action: "upgrade", version: "0.54.0" });
+        } catch (error: unknown) {
+            failure = error;
+        }
+
+        const diagnostic = formatCliError(failure);
+        const helperDirectory = ssh.commands[0]?.match(/mkdir -m 700 -- '([^']+)'/)?.[1] ?? "";
+        expect((failure as { code?: string }).code).toBe("OUTCOME_UNKNOWN");
+        expect(diagnostic).toContain("Remote helper setup ended without terminal status");
+        expect(diagnostic).toContain("upgrade command was not dispatched");
+        expect(diagnostic).toContain(`helper=${helperDirectory}/release_assets.sh`);
+        expect(ssh.commands).toHaveLength(2);
+        expect(ssh.commands[1]).toContain(`rm -rf -- '${helperDirectory}'`);
+    });
+
+    test("unknown helper setup preserves cleanup failure and reconciliation paths", async () => {
+        const ssh = new FakeSsh();
+        ssh.prepareExecOutcomeUnknown = true;
+        ssh.cleanupExecFails = true;
+        let failure: unknown;
+
+        try {
+            await captureSshTool(ssh).invoke({ action: "upgrade", version: "0.54.0" });
+        } catch (error: unknown) {
+            failure = error;
+        }
+
+        const diagnostic = formatCliError(failure);
+        expect((failure as { code?: string }).code).toBe("OUTCOME_UNKNOWN");
+        expect(diagnostic).toContain("helper cleanup did not complete");
+        expect(diagnostic).toContain("Failed to remove remote upgrade helper");
+        expect(diagnostic).toContain("helper=/tmp/.supacloud-release-assets-");
+        expect((failure as AggregateError).errors).toHaveLength(2);
     });
 
     test("failed helper upload still cleans its generated remote path", async () => {
@@ -1089,6 +1253,48 @@ describe("ssh admin tool", () => {
 
         await expect(captureSshTool(ssh).invoke({ action: "upgrade", version: "0.50.27" }))
             .rejects.toThrow("Failed to remove remote upgrade helper");
+    });
+
+    test("successful upgrade preserves its terminal result when helper cleanup is unknown", async () => {
+        const ssh = new FakeSsh();
+        ssh.cleanupExecRejection = {
+            value: new SshCommandOutcomeUnknownError("SSH command timed out after 30000ms; remote outcome is unknown"),
+        };
+        let failure: unknown;
+
+        try {
+            await captureSshTool(ssh).invoke({ action: "upgrade", version: "0.54.0" });
+        } catch (error: unknown) {
+            failure = error;
+        }
+
+        const diagnostic = formatCliError(failure);
+        const helperPath = ssh.uploads[0]?.remotePath ?? "";
+        expect((failure as { code?: string }).code).toBe("OUTCOME_UNKNOWN");
+        expect(diagnostic).toContain("Remote upgrade succeeded, but helper cleanup outcome is unknown");
+        expect(diagnostic).toContain(`helper=${helperPath}`);
+        expect(diagnostic).not.toContain("Remote upgrade transport ended after dispatch");
+    });
+
+    test("failed upgrade preserves its terminal failure when helper cleanup is unknown", async () => {
+        const ssh = new FakeSsh();
+        ssh.upgradeExecFails = true;
+        ssh.cleanupExecRejection = {
+            value: new SshCommandOutcomeUnknownError("SSH command stream failed after dispatch; remote outcome is unknown"),
+        };
+        let failure: unknown;
+
+        try {
+            await captureSshTool(ssh).invoke({ action: "upgrade", version: "0.54.0" });
+        } catch (error: unknown) {
+            failure = error;
+        }
+
+        const diagnostic = formatCliError(failure);
+        expect((failure as { code?: string }).code).toBe("OUTCOME_UNKNOWN");
+        expect(diagnostic).toContain("Remote upgrade failed with a terminal result");
+        expect(diagnostic).toContain("Remote upgrade failed (exit 42): transaction failed");
+        expect(diagnostic).toContain(`helper=${ssh.uploads[0]?.remotePath ?? ""}`);
     });
 
     test("remote and helper cleanup failures preserve both diagnostics", async () => {

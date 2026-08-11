@@ -55,7 +55,7 @@ const REMOTE_COMMAND_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/
 const POLL_INTERVAL_MS = 2_000;
 const STATE_READ_ATTEMPTS = 3;
 const REMOTE_STATE_READ_TIMEOUT_MS = 15_000;
-const UPGRADE_OBSERVATION_TIMEOUT_MS = 30 * 60_000;
+export const UPGRADE_OBSERVATION_TIMEOUT_MS = 30 * 60_000;
 
 class RemoteUpgradeReconciliationError extends AggregateError {}
 

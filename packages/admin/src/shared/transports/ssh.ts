@@ -40,6 +40,15 @@ export interface SshResult {
     stderrTruncated?: boolean;
 }
 
+export class SshCommandOutcomeUnknownError extends Error {
+    readonly code = "OUTCOME_UNKNOWN";
+
+    constructor(message: string) {
+        super(message);
+        this.name = "SshCommandOutcomeUnknownError";
+    }
+}
+
 export interface SshTransportOptions {
     clientFactory?: () => Client;
 }
@@ -293,39 +302,56 @@ export class SshTransport {
 
                 const timer = setTimeout(() => {
                     connectionReusable = false;
-                    reject(new Error(`SSH command timed out after ${timeoutMs}ms`));
+                    reject(new SshCommandOutcomeUnknownError(
+                        `SSH command timed out after ${timeoutMs}ms; remote outcome is unknown`,
+                    ));
                 }, timeoutMs);
 
-                conn.exec(command, (err: Error | undefined, stream: ClientChannel) => {
-                    if (err) {
-                        clearTimeout(timer);
-                        connectionReusable = false;
-                        return reject(err);
-                    }
-                    stream
-                        .on("close", (code: number) => {
-                            clearTimeout(timer);
-                            resolve({
-                                success: code === 0,
-                                stdout: stdout.finalize(),
-                                stderr: stderr.finalize(),
-                                code,
-                                stdoutTruncated: stdout.truncated,
-                                stderrTruncated: stderr.truncated,
-                            });
-                        })
-                        .on("error", (streamError: Error) => {
+                try {
+                    conn.exec(command, (err: Error | undefined, stream: ClientChannel) => {
+                        if (err) {
                             clearTimeout(timer);
                             connectionReusable = false;
-                            reject(streamError);
-                        })
-                        .on("data", (data: Buffer) => {
-                            stdout.append(data);
-                        })
-                        .stderr.on("data", (data: Buffer) => {
-                            stderr.append(data);
-                        });
-                });
+                            return reject(err);
+                        }
+                        stream
+                            .on("close", (code?: number | null) => {
+                                clearTimeout(timer);
+                                if (code === undefined) {
+                                    connectionReusable = false;
+                                    reject(new SshCommandOutcomeUnknownError(
+                                        "SSH command stream closed without a terminal status; remote outcome is unknown",
+                                    ));
+                                    return;
+                                }
+                                resolve({
+                                    success: code === 0,
+                                    stdout: stdout.finalize(),
+                                    stderr: stderr.finalize(),
+                                    code: code ?? 128,
+                                    stdoutTruncated: stdout.truncated,
+                                    stderrTruncated: stderr.truncated,
+                                });
+                            })
+                            .on("error", () => {
+                                clearTimeout(timer);
+                                connectionReusable = false;
+                                reject(new SshCommandOutcomeUnknownError(
+                                    "SSH command stream failed after dispatch; remote outcome is unknown",
+                                ));
+                            })
+                            .on("data", (data: Buffer) => {
+                                stdout.append(data);
+                            })
+                            .stderr.on("data", (data: Buffer) => {
+                                stderr.append(data);
+                            });
+                    });
+                } catch (error: unknown) {
+                    clearTimeout(timer);
+                    connectionReusable = false;
+                    reject(error);
+                }
             });
         } finally {
             if (connectionReusable) this.pool.release(conn);
