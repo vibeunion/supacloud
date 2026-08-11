@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.32.0](https://github.com/zuohuadong/supacloud/compare/web-console-v0.31.0...web-console-v0.32.0) (2026-08-11)
+
+
+### Features
+
+* **web-console:** normalize admin list envelopes ([#849](https://github.com/zuohuadong/supacloud/issues/849)) ([1034792](https://github.com/zuohuadong/supacloud/commit/103479292dd38f3c5adca38375f5192aaaec4a0f))
+
 ## [0.31.0](https://github.com/zuohuadong/supacloud/compare/web-console-v0.30.1...web-console-v0.31.0) (2026-08-11)
 
 
