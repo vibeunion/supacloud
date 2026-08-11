@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { cliToolResultIsError } from "./shared/cli";
+import packageMetadata from "../package.json" with { type: "json" };
 
 const PACKAGE_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const CONTEXT_KEYS = new Set([
@@ -65,6 +66,24 @@ async function runProjectCli(
     return { exitCode, stdout, stderr };
 }
 
+async function runProjectCliPath(
+    entryPath: string,
+    args: string[],
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+    const processHandle = Bun.spawn([entryPath, ...args], {
+        cwd: PACKAGE_ROOT,
+        env: cleanEnvironment(),
+        stdout: "pipe",
+        stderr: "pipe",
+    });
+    const [exitCode, stdout, stderr] = await Promise.all([
+        processHandle.exited,
+        new Response(processHandle.stdout).text(),
+        new Response(processHandle.stderr).text(),
+    ]);
+    return { exitCode, stdout, stderr };
+}
+
 function serveFunctionSource(sourceCode: string): string {
     const server = Bun.serve({
         hostname: "127.0.0.1",
@@ -90,6 +109,49 @@ function chunkedJsonResponse(body: string): Response {
 }
 
 describe("supacloud-cli process contract", () => {
+    test("prints the installed package version without project context", async () => {
+        const response = await runProjectCli(["--version"]);
+
+        expect(response.exitCode).toBe(0);
+        expect(response.stdout.trim()).toBe(packageMetadata.version);
+        expect(response.stderr).toBe("");
+    });
+
+    test("prints the installed package version with global options in either order", async () => {
+        const versionArgs = [
+            ["--env", "test", "--confirm-production", "project-ref", "--version"],
+            ["--version", "--env=test", "--confirm-production=project-ref"],
+            ["--version", "--env-file", "/definitely/not/a/project.env"],
+        ];
+
+        for (const args of versionArgs) {
+            const response = await runProjectCli(args);
+
+            expect(response.exitCode).toBe(0);
+            expect(response.stdout.trim()).toBe(packageMetadata.version);
+            expect(response.stderr).toBe("");
+        }
+    });
+
+    test("prints the installed package version through the npm-style bin", async () => {
+        const build = Bun.spawnSync([process.execPath, "run", "build"], { cwd: PACKAGE_ROOT });
+        expect(build.exitCode).toBe(0);
+        const sandbox = mkdtempSync(join(tmpdir(), "supacloud-cli-bin-"));
+        temporaryDirectories.push(sandbox);
+        const binDirectory = join(sandbox, "node_modules/.bin");
+        mkdirSync(binDirectory, { recursive: true });
+        const linkedEntry = join(binDirectory, "supacloud-cli");
+        symlinkSync(join(PACKAGE_ROOT, "dist/index.js"), linkedEntry);
+
+        const response = await runProjectCliPath(linkedEntry, [
+            "--version", "--env=test", "--confirm-production=project-ref",
+        ]);
+
+        expect(response.exitCode).toBe(0);
+        expect(response.stdout.trim()).toBe(packageMetadata.version);
+        expect(response.stderr).toBe("");
+    });
+
     test("documents global environment and production safety flags", async () => {
         const response = await runProjectCli(["--help"]);
 

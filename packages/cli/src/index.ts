@@ -19,6 +19,7 @@ import { registerBranchTools } from "./shared/tools/branch-tools";
 import { registerSupabaseCliTools } from "./shared/tools/supabase-cli-tools";
 import { registerAiTools } from "./shared/tools/ai-tools";
 import { registerScheduledFunctionTools } from "./shared/tools/scheduled-function-tools";
+import packageMetadata from "../package.json" with { type: "json" };
 
 type ToolEntry = { schema: any; callback: (args: any) => Promise<any> };
 type ToolMap = Record<string, ToolEntry>;
@@ -171,6 +172,7 @@ USAGE
   ${preferredCommand} [global flags] <module> <action> [--flags]
   ${preferredCommand} [global flags] status
   ${preferredCommand} --help
+  ${preferredCommand} --version
 
 GLOBAL FLAGS
 
@@ -396,6 +398,10 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
 async function main() {
     const globalOptions = parseGlobalOptions(process.argv.slice(2));
     const args = globalOptions.args;
+    if (args.length === 1 && args[0] === "--version") {
+        console.log(packageMetadata.version);
+        return;
+    }
     const context = resolveSupaCloudContext(process.env, process.cwd(), {
         environmentName: globalOptions.environmentName,
         envFile: globalOptions.envFile,
