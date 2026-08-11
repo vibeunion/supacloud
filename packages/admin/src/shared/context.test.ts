@@ -76,7 +76,7 @@ describe("resolveSupaCloudContext", () => {
             apiToken: "file-api-token",
             sshPass: "file-ssh-password",
             projectRef: "test-ref",
-            readOnly: false,
+            readOnly: true,
         });
     });
 
@@ -119,6 +119,7 @@ describe("resolveSupaCloudContext", () => {
     test("uses SUPACLOUD_ENV as a named selector when process context is incomplete", () => {
         const workspace = temporaryWorkspace();
         writeEnvironment(workspace, ".env.supacloud.test", {
+            SUPACLOUD_ENV: "test",
             SUPACLOUD_API_URL: "https://test.example.com",
             SUPACLOUD_API_TOKEN: "file-token",
         });
@@ -132,10 +133,16 @@ describe("resolveSupaCloudContext", () => {
         expect(context.apiToken).toBe("file-token");
     });
 
-    test("rejects selector drift and unsafe environment names", () => {
+    test("requires selected profiles to declare a matching environment", () => {
         const workspace = temporaryWorkspace();
+        writeEnvironment(workspace, ".env.supacloud.audit", {
+            SUPACLOUD_API_URL: "https://management.example.com",
+            SUPACLOUD_API_TOKEN: "file-token",
+        });
         writeEnvironment(workspace, ".env.supacloud.test", { SUPACLOUD_ENV: "production" });
 
+        expect(() => resolveSupaCloudContext({}, workspace, { environmentName: "audit" }))
+            .toThrow("SUPACLOUD_ENV is required");
         expect(() => resolveSupaCloudContext({}, workspace, { environmentName: "test" }))
             .toThrow("does not match selector test");
         expect(() => resolveSupaCloudContext({ SUPACLOUD_ENV: "../production" }, workspace))
@@ -159,7 +166,7 @@ describe("resolveSupaCloudContext", () => {
         expect(context.projectRef).toBe("");
     });
 
-    test("rejects ambiguous SSH ports and credential-bearing management URLs", () => {
+    test("rejects ambiguous SSH ports and unsafe management URL components", () => {
         expect(() => resolveSupaCloudContext({
             SUPACLOUD_HOST: "server.example.com",
             SUPACLOUD_SSH_PORT: "2201junk",
@@ -169,11 +176,19 @@ describe("resolveSupaCloudContext", () => {
             SUPACLOUD_SSH_PORT: "65536",
         }, "/nonexistent")).toThrow("SUPACLOUD_SSH_PORT must be an integer");
 
-        const credentialUrl = resolveSupaCloudContext({
-            SUPACLOUD_API_URL: "https://operator:url-secret@management.example.com",
-            SUPACLOUD_API_TOKEN: "api-token",
-        }, "/nonexistent");
-        expect(credentialUrl.apiUrl).toBe("");
-        expect(JSON.stringify(credentialUrl)).not.toContain("url-secret");
+        for (const apiUrl of [
+            "https://operator:url-secret@management.example.com",
+            "https://management.example.com/?query-secret",
+            "https://management.example.com/#fragment-secret",
+        ]) {
+            const unsafeUrl = resolveSupaCloudContext({
+                SUPACLOUD_API_URL: apiUrl,
+                SUPACLOUD_API_TOKEN: "api-token",
+            }, "/nonexistent");
+            expect(unsafeUrl.apiUrl).toBe("");
+            expect(JSON.stringify(unsafeUrl)).not.toContain("url-secret");
+            expect(JSON.stringify(unsafeUrl)).not.toContain("query-secret");
+            expect(JSON.stringify(unsafeUrl)).not.toContain("fragment-secret");
+        }
     });
 });

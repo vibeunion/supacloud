@@ -365,6 +365,107 @@ describe("supacloud-admin process contract", () => {
         }
     });
 
+    test("keeps a process read-only guard when a named profile is selected", async () => {
+        const workspace = mkdtempSync(join(tmpdir(), "supacloud-admin-process-read-only-"));
+        let requestCount = 0;
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch() {
+                requestCount += 1;
+                return Response.json({});
+            },
+        });
+        writeFileSync(join(workspace, ".env.supacloud.test"), [
+            "SUPACLOUD_ENV=test",
+            `SUPACLOUD_API_URL=http://127.0.0.1:${server.port}`,
+            "SUPACLOUD_API_TOKEN=profile-secret-token",
+            "SUPACLOUD_PROJECT_REF=test-ref",
+        ].join("\n") + "\n");
+
+        try {
+            const execution = await runAdminCli([
+                "project", "delete", "--ref", "test-ref", "--env", "test",
+            ], { SUPACLOUD_READ_ONLY: "true" }, workspace);
+
+            expect(execution.exitCode).toBe(1);
+            expect(execution.output).toContain("SUPACLOUD_READ_ONLY=true");
+            expect(execution.output).not.toContain("profile-secret-token");
+            expect(requestCount).toBe(0);
+        } finally {
+            server.stop(true);
+            rmSync(workspace, { recursive: true, force: true });
+        }
+    });
+
+    test("rejects unclassified process and legacy dotenv writes before HTTP", async () => {
+        const workspace = mkdtempSync(join(tmpdir(), "supacloud-admin-unclassified-write-"));
+        let requestCount = 0;
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch() {
+                requestCount += 1;
+                return Response.json({});
+            },
+        });
+        writeFileSync(join(workspace, ".env"), [
+            `SUPACLOUD_API_URL=http://127.0.0.1:${server.port}`,
+            "SUPACLOUD_API_TOKEN=legacy-secret-token",
+            "SUPACLOUD_PROJECT_REF=legacy-ref",
+        ].join("\n") + "\n");
+
+        try {
+            const processContext = await runAdminCli([
+                "project", "delete", "--ref", "process-ref",
+            ], {
+                SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+                SUPACLOUD_API_TOKEN: "process-secret-token",
+            }, workspace);
+            const legacyContext = await runAdminCli([
+                "project", "delete", "--ref", "legacy-ref",
+            ], {}, workspace);
+
+            for (const execution of [processContext, legacyContext]) {
+                expect(execution.exitCode).toBe(1);
+                expect(execution.output).toContain("requires an explicit SUPACLOUD_ENV");
+                expect(execution.output).not.toContain("process-secret-token");
+                expect(execution.output).not.toContain("legacy-secret-token");
+            }
+            expect(requestCount).toBe(0);
+        } finally {
+            server.stop(true);
+            rmSync(workspace, { recursive: true, force: true });
+        }
+    });
+
+    test("rejects API URL query strings and fragments without reflecting them in status or help", async () => {
+        for (const apiUrl of [
+            "https://management.example.com/?query-secret",
+            "https://management.example.com/#fragment-secret",
+        ]) {
+            const [status, help] = await Promise.all([
+                runAdminCli(["status"], {
+                    SUPACLOUD_API_URL: apiUrl,
+                    SUPACLOUD_API_TOKEN: "api-secret-token",
+                }),
+                runAdminCli(["--help"], {
+                    SUPACLOUD_API_URL: apiUrl,
+                    SUPACLOUD_API_TOKEN: "api-secret-token",
+                }),
+            ]);
+
+            expect(status.exitCode).toBe(0);
+            expect(JSON.parse(status.output)).toMatchObject({ apiUrl: null, hasApiToken: true });
+            expect(help.exitCode).toBe(0);
+            for (const execution of [status, help]) {
+                expect(execution.output).not.toContain("query-secret");
+                expect(execution.output).not.toContain("fragment-secret");
+                expect(execution.output).not.toContain("api-secret-token");
+            }
+        }
+    });
+
     test("binds ref-less production writes to the exact API host", async () => {
         const workspace = mkdtempSync(join(tmpdir(), "supacloud-admin-production-platform-"));
         let requestCount = 0;
@@ -481,6 +582,7 @@ describe("supacloud-admin process contract", () => {
                 "--service", "gotrue",
                 "--service_action", "stop",
             ], {
+                SUPACLOUD_ENV: "test",
                 SUPACLOUD_API_URL: `http://127.0.0.1:${apiServer.port}`,
                 SUPACLOUD_API_TOKEN: fixtureToken,
             });
@@ -554,6 +656,7 @@ describe("supacloud-admin process contract", () => {
                 "--service", "gotrue",
                 "--service_action", "stop",
             ], {
+                SUPACLOUD_ENV: "test",
                 SUPACLOUD_API_URL: `http://127.0.0.1:${apiServer.port}`,
                 SUPACLOUD_API_TOKEN: fixtureToken,
             });
@@ -589,6 +692,7 @@ describe("supacloud-admin process contract", () => {
             const execution = await runAdminCli(
                 ["project", "create", "--name", "rejected-project", "--domain", "invalid.example"],
                 {
+                    SUPACLOUD_ENV: "test",
                     SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
                     SUPACLOUD_API_TOKEN: "test-token",
                 },

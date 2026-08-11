@@ -93,11 +93,12 @@ function readEnvFile(path: string, required: boolean): Record<string, string> {
 }
 
 function normalizeUrl(urlCandidate: string): string {
-    const trimmed = urlCandidate.trim().replace(/\/+$/, "");
+    const trimmed = urlCandidate.trim();
     if (!trimmed) return "";
     try {
         const url = new URL(trimmed);
-        if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) return "";
+        if (!["http:", "https:"].includes(url.protocol)
+            || url.username || url.password || url.search || url.hash) return "";
         return url.toString().replace(/\/+$/, "");
     } catch {
         return "";
@@ -178,8 +179,10 @@ function namedEnvironmentSource(cwd: string, selector: string): ContextSource {
     const environment = normalizeEnvironmentName(selector);
     const path = resolve(cwd, `.env.supacloud.${selector}`);
     const selectedEnvironment = readEnvFile(path, true);
-    if (selectedEnvironment.SUPACLOUD_ENV
-        && normalizeEnvironmentName(selectedEnvironment.SUPACLOUD_ENV) !== environment) {
+    if (!selectedEnvironment.SUPACLOUD_ENV) {
+        throw new Error(`SUPACLOUD_ENV is required in ${path}`);
+    }
+    if (normalizeEnvironmentName(selectedEnvironment.SUPACLOUD_ENV) !== environment) {
         throw new Error(`SUPACLOUD_ENV in ${path} does not match selector ${selector}`);
     }
     return {
@@ -277,7 +280,8 @@ export function resolveSupaCloudContext(
         apiUrl: adminCore.apiUrl,
         apiToken: adminCore.apiToken,
         projectRef: adminCore.projectRef,
-        readOnly: source.environment.SUPACLOUD_READ_ONLY === "true",
+        readOnly: env.SUPACLOUD_READ_ONLY === "true"
+            || source.environment.SUPACLOUD_READ_ONLY === "true",
         environment: source.environmentName,
         production: source.environmentName === "production",
         inferredSupabaseUrl: adminCore.supabaseUrl,

@@ -79,6 +79,25 @@ describe("Admin execution policy", () => {
         })).toThrow("SUPACLOUD_READ_ONLY=true");
     });
 
+    test("blocks unclassified remote writes while allowing reads", () => {
+        const unclassifiedContext = productionContext({
+            environment: "",
+            production: false,
+        });
+        expect(() => authorizeExecution("project", {
+            action: "delete",
+            ref: "prod-ref",
+        }, {
+            context: unclassifiedContext,
+        })).toThrow("requires an explicit SUPACLOUD_ENV");
+        expect(() => authorizeExecution("project", {
+            action: "get",
+            ref: "prod-ref",
+        }, {
+            context: unclassifiedContext,
+        })).not.toThrow();
+    });
+
     test("requires exact production confirmation for project writes", () => {
         const args = { action: "delete", ref: "prod-ref" };
         expect(() => authorizeExecution("project", args, {

@@ -17,9 +17,9 @@ Typical environment variables:
 ## Environment selection and production confirmation
 
 Use `--env <name>` to load `.env.supacloud.<name>` from the current directory,
-or `--env-file <path>` to load one exact file. An explicit file must declare
-`SUPACLOUD_ENV`; a named file may also declare it, but the declared value must
-match the selector. Global flags may appear before or after the command.
+or `--env-file <path>` to load one exact file. Every selected file must declare
+`SUPACLOUD_ENV`; a named file's declared value must match the selector. Global
+flags may appear before or after the command.
 
 Selected files are atomic context sources: Admin does not fill missing API,
 project, SSH, credential, or safety values from the process environment or a
@@ -41,7 +41,14 @@ Production writes require `--confirm-production` before any HTTP or SSH action:
 
 A generic value such as `production` is never accepted. Project-scoped actions
 that omit a required ref do not fall back to a platform or host confirmation.
-`SUPACLOUD_READ_ONLY=true` blocks every remote write in every environment.
+`SUPACLOUD_READ_ONLY=true` blocks every remote write in every environment,
+including when it is set only in the process environment. Remote writes also
+require an explicit `SUPACLOUD_ENV`; unclassified process and legacy dotenv
+contexts remain usable for read-only actions but cannot mutate remote state.
+
+Management API URLs must be origin-and-path URLs without credentials, query
+strings, or fragments. This prevents URL-embedded secrets from being sent to a
+remote target or displayed by `status` and `--help`.
 
 ```bash
 npx @supacloud/admin --env test status

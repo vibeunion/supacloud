@@ -173,6 +173,9 @@ function authorizeWrite(request: WriteAuthorizationRequest): void {
     if (context.readOnly) {
         throw new Error(`Remote write ${moduleName}.${action} is blocked in read-only mode (SUPACLOUD_READ_ONLY=true)`);
     }
+    if (!context.environment) {
+        throw new Error(`Remote write ${moduleName}.${action} requires an explicit SUPACLOUD_ENV`);
+    }
     if (!context.production) return;
     if (requiresProjectRef(moduleName, action) && !projectRef) {
         throw new Error(
