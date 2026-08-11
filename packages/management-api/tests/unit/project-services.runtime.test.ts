@@ -1,7 +1,13 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { Elysia } from "elysia";
-import { projectServiceRoutes } from "../../src/routes/project-services";
+import {
+  projectServiceRouteInternals,
+  projectServiceRoutes,
+} from "../../src/routes/project-services";
+import { config } from "../../src/config";
+import { sql } from "../../src/db";
 import { projectService } from "../../src/services";
+import { hashSecretApiKey } from "../../src/utils/api-keys";
 import {
   projectAuthServiceEntry,
   tenantRuntimeService,
@@ -233,6 +239,80 @@ describe("project service PostgREST runtime controls", () => {
       projectService.getProject = originalGetProject;
       tenantRuntimeService.pausePostgrest = originalPausePostgrest;
       tenantRuntimeService.resumePostgrest = originalResumePostgrest;
+    }
+  });
+});
+
+describe("project shared service control authorization", () => {
+  test("rejects an authenticated project service-role key from controlling global storage", async () => {
+    const projectServiceRoleKey = "sb_secret_project_service_role_key";
+    const projectKeyLookup = spyOn(sql, "unsafe").mockResolvedValue([{
+      ref: "proj_1",
+      anon_key: "legacy-anon-key",
+      service_role_key: "legacy-service-role-key",
+      publishable_key: null,
+      secret_key_hash: hashSecretApiKey(projectServiceRoleKey),
+    }] as never);
+    const systemServiceControl = spyOn(projectServiceRouteInternals, "controlSystemUnit")
+      .mockResolvedValue({ exitCode: 0 } as never);
+
+    try {
+      const response = await request("/v1/projects/proj_1/services/storage/restart", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${projectServiceRoleKey}` },
+      });
+
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({
+        message: "Admin privileges required for shared services",
+        code: "403",
+      });
+      expect(projectKeyLookup).toHaveBeenCalled();
+      expect(systemServiceControl).not.toHaveBeenCalled();
+    } finally {
+      systemServiceControl.mockRestore();
+      projectKeyLookup.mockRestore();
+    }
+  });
+
+  test("allows a platform administrator to control global storage", async () => {
+    const systemServiceControl = spyOn(projectServiceRouteInternals, "controlSystemUnit")
+      .mockResolvedValue({ exitCode: 0 } as never);
+
+    try {
+      const response = await request("/v1/projects/proj_1/services/storage/restart", {
+        method: "POST",
+      });
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        service: "storage",
+        action: "restart",
+        success: true,
+      });
+      expect(systemServiceControl).toHaveBeenCalledWith("restart", "supacloud-storage");
+    } finally {
+      systemServiceControl.mockRestore();
+    }
+  });
+
+  test("keeps shared GoTrue control on a dependent project as an owner-managed conflict", async () => {
+    const originalOwnerRef = config.authRuntimeOwnerRef;
+    config.authRuntimeOwnerRef = "auth-owner";
+
+    try {
+      const response = await request("/v1/projects/dependent/services/gotrue/restart", {
+        method: "POST",
+      });
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({
+        code: "AUTH_RUNTIME_MANAGED_BY_OWNER",
+        project_ref: "dependent",
+        authority_project_ref: "auth-owner",
+      });
+    } finally {
+      config.authRuntimeOwnerRef = originalOwnerRef;
     }
   });
 });
