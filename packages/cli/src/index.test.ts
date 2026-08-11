@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { cliToolResultIsError } from "./shared/cli";
+import packageMetadata from "../package.json" with { type: "json" };
 
 const PACKAGE_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const CONTEXT_KEYS = new Set([
@@ -76,6 +77,14 @@ function serveFunctionSource(sourceCode: string): string {
 }
 
 describe("supacloud-cli process contract", () => {
+    test("prints the installed package version without project context", async () => {
+        const response = await runProjectCli(["--version"]);
+
+        expect(response.exitCode).toBe(0);
+        expect(response.stdout.trim()).toBe(packageMetadata.version);
+        expect(response.stderr).toBe("");
+    });
+
     test("documents global environment and production safety flags", async () => {
         const response = await runProjectCli(["--help"]);
 
