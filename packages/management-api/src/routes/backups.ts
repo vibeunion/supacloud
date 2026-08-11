@@ -9,8 +9,8 @@ import {
     PitrRestoreUnavailableError,
     isPitrEnabled,
 } from '../services/backup.service';
-import { resolveDbName } from '../db';
 import { requireAdminAuth, requireProjectOrAdminAuth } from '../middleware/auth';
+import { projectRepository } from '../repositories/project.repository';
 
 const ErrorResponse = t.Object({ message: t.String() });
 
@@ -19,9 +19,10 @@ const projectBackupRoutes = new Elysia({ prefix: "/v1/projects/:ref/database/bac
         const authError = await requireProjectOrAdminAuth(request, params.ref);
         if (authError) return status(authError.status, authError.body);
 
-        const dbName = await resolveDbName(params.ref);
+        const project = await projectRepository.findByRef(params.ref);
+        if (!project) return status(404, { message: "Project not found" });
         try {
-            return await listBackups(dbName);
+            return await listBackups(project.db_name);
         } catch (error) {
             if (error instanceof PgBackRestUnavailableError) {
                 return status(503, { message: "pgBackRest backup inventory is unavailable" });
@@ -29,13 +30,15 @@ const projectBackupRoutes = new Elysia({ prefix: "/v1/projects/:ref/database/bac
             throw error;
         }
     }, {
-        response: { 200: t.Any(), 503: ErrorResponse },
+        response: { 200: t.Any(), 404: ErrorResponse, 503: ErrorResponse },
         detail: { tags: ["backups"], summary: "List project backups" },
     })
-    .post('/', async ({ body, request }) => {
+    .post('/', async ({ params, body, request }) => {
         const authError = await requireAdminAuth(request);
         if (authError) return status(authError.status, authError.body);
 
+        const project = await projectRepository.findByRef(params.ref);
+        if (!project) return status(404, { message: "Project not found" });
         try {
             return await createBackup(body.type);
         } catch (error) {
@@ -52,7 +55,7 @@ const projectBackupRoutes = new Elysia({ prefix: "/v1/projects/:ref/database/bac
                 t.Literal('diff'),
             ])),
         }),
-        response: { 200: t.Any(), 503: ErrorResponse },
+        response: { 200: t.Any(), 404: ErrorResponse, 503: ErrorResponse },
         detail: { tags: ["backups"], summary: "Create a database backup" },
     })
     .post('/logical', async ({ params: { ref }, request }) => {
