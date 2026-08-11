@@ -163,13 +163,119 @@ describe("storage management routes", () => {
       });
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual([
-        { id: "public-assets", name: "public-assets", public: true, size: "-", file_size_limit: 1024 },
-        { id: "physical-only", name: "physical-only", public: false, size: "-" },
-        { id: "logical-only", name: "logical-only", public: false },
+        {
+          id: "public-assets",
+          name: "public-assets",
+          public: true,
+          size: "-",
+          file_size_limit: 1024,
+          allowed_mime_types: null,
+        },
+        {
+          id: "physical-only",
+          name: "physical-only",
+          public: false,
+          size: "-",
+          file_size_limit: null,
+          allowed_mime_types: null,
+        },
+        {
+          id: "logical-only",
+          name: "logical-only",
+          public: false,
+          file_size_limit: null,
+          allowed_mime_types: null,
+        },
       ]);
     } finally {
       listPhysicalSpy.mockRestore();
       listLogicalSpy.mockRestore();
+    }
+  });
+
+  test.each([
+    ["invalid project ref", "/v1/projects/bad.ref/storage/buckets", { name: "reports" }],
+    ["dot-only bucket", "/v1/projects/test-ref/storage/buckets", { name: "..." }],
+    ["negative file limit", "/v1/projects/test-ref/storage/buckets", { name: "reports", file_size_limit: -1 }],
+    ["fractional file limit", "/v1/projects/test-ref/storage/buckets", { name: "reports", file_size_limit: 1.5 }],
+    ["overflowing file limit", "/v1/projects/test-ref/storage/buckets", {
+      name: "reports",
+      file_size_limit: Number.MAX_SAFE_INTEGER + 1,
+    }],
+    ["empty MIME", "/v1/projects/test-ref/storage/buckets", { name: "reports", allowed_mime_types: [""] }],
+    ["overlong MIME", "/v1/projects/test-ref/storage/buckets", {
+      name: "reports",
+      allowed_mime_types: [`text/${"a".repeat(251)}`],
+    }],
+    ["too many MIME types", "/v1/projects/test-ref/storage/buckets", {
+      name: "reports",
+      allowed_mime_types: Array.from({ length: 101 }, (_, index) => `application/x-${index}`),
+    }],
+  ])("rejects %s before bucket creation", async (_label, path, body) => {
+    const createPhysicalSpy = spyOn(StorageService, "createBucket").mockResolvedValue({ success: true });
+    const createLogicalSpy = spyOn(StorageRLS, "createLogicalBucketAsAdmin").mockResolvedValue(true);
+
+    try {
+      const response = await request(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: "Bearer dev-master-token" },
+        body: JSON.stringify(body),
+      });
+
+      expect(response.status).toBe(422);
+      expect(createPhysicalSpy).not.toHaveBeenCalled();
+      expect(createLogicalSpy).not.toHaveBeenCalled();
+    } finally {
+      createPhysicalSpy.mockRestore();
+      createLogicalSpy.mockRestore();
+    }
+  });
+
+  test("rejects an empty bucket update before Management dispatch", async () => {
+    const updateBucketSpy = spyOn(StorageService, "updateBucket");
+    try {
+      const response = await request("/v1/projects/test-ref/storage/buckets/reports", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: "Bearer dev-master-token" },
+        body: "{}",
+      });
+
+      expect(response.status).toBe(422);
+      expect(updateBucketSpy).not.toHaveBeenCalled();
+    } finally {
+      updateBucketSpy.mockRestore();
+    }
+  });
+
+  test("accepts exact Storage contract upper boundaries", async () => {
+    const createPhysicalSpy = spyOn(StorageService, "createBucket").mockResolvedValue({ success: true });
+    const createLogicalSpy = spyOn(StorageRLS, "createLogicalBucketAsAdmin").mockResolvedValue(true);
+    const allowedMimeTypes = Array.from({ length: 100 }, (_, index) => `application/x-${index}`);
+    allowedMimeTypes[0] = `x/${"a".repeat(253)}`;
+    const ref = "r".repeat(64);
+    const bucket = "b".repeat(100);
+
+    try {
+      const response = await request(`/v1/projects/${ref}/storage/buckets`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: "Bearer dev-master-token" },
+        body: JSON.stringify({
+          name: bucket,
+          file_size_limit: Number.MAX_SAFE_INTEGER,
+          allowed_mime_types: allowedMimeTypes,
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(createPhysicalSpy).toHaveBeenCalledWith(ref, bucket);
+      expect(createLogicalSpy).toHaveBeenCalledWith(ref, expect.objectContaining({
+        id: bucket,
+        fileSizeLimit: Number.MAX_SAFE_INTEGER,
+        allowedMimeTypes,
+      }));
+    } finally {
+      createPhysicalSpy.mockRestore();
+      createLogicalSpy.mockRestore();
     }
   });
 

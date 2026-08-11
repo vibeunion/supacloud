@@ -310,6 +310,11 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
                 }),
             };
         }
+        const storageContextCallback = tools.storage.callback;
+        const storageHelpTool = captureTools((server) => registerStorageTools(server as any, {} as HttpTransport)).storage;
+        if (storageHelpTool) {
+            tools.storage = { schema: storageHelpTool.schema, callback: storageContextCallback };
+        }
         const branchContextCallback = tools.branch.callback;
         const branchHelpTool = captureTools((server) => registerBranchTools(server as any, {} as any, {
             readOnly: true,

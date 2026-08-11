@@ -8,6 +8,18 @@ type ToolResponse = {
     isError?: boolean;
 };
 
+const RELEASE_SCHEMA = "supacloud.cli.release-control.v1";
+
+function successReceipt(operation: string, payload: Record<string, unknown>) {
+    return {
+        schema: RELEASE_SCHEMA,
+        ok: true,
+        operation,
+        project_ref: "project-ref",
+        ...payload,
+    };
+}
+
 function storageBucket(overrides: Record<string, unknown> = {}) {
     return {
         id: "reports",
@@ -49,6 +61,12 @@ describe("Storage bucket CLI schema", () => {
             bucket: "artifacts",
             allowed_mime_types: '["text/csv"]',
         }).allowed_mime_types).toEqual(["text/csv"]);
+        expect(parseToolArguments(schema, {
+            action: "update_bucket",
+            ref: "project-ref",
+            bucket: "artifacts",
+            allowed_mime_types: [],
+        }).allowed_mime_types).toEqual([]);
     });
 
     test("rejects malformed JSON MIME type arrays", () => {
@@ -75,6 +93,50 @@ describe("Storage bucket CLI schema", () => {
             })).toThrow("file_size_limit");
         },
     );
+
+    test.each([
+        ["empty MIME", [""]],
+        ["whitespace MIME", ["   "]],
+        ["trailing empty CSV MIME", "application/pdf,"],
+        ["overlong MIME", [`text/${"a".repeat(251)}`]],
+        ["too many MIME types", Array.from({ length: 101 }, (_, index) => `application/x-${index}`)],
+    ])("rejects %s", (_label, allowedMimeTypes) => {
+        const { schema } = captureStorageTool({});
+
+        expect(() => parseToolArguments(schema, {
+            action: "update_bucket",
+            ref: "project-ref",
+            bucket: "artifacts",
+            allowed_mime_types: allowedMimeTypes,
+        })).toThrow("allowed_mime_types");
+    });
+
+    test("accepts exact upper boundaries", () => {
+        const { schema } = captureStorageTool({});
+        const allowedMimeTypes = Array.from({ length: 100 }, (_, index) => `application/x-${index}`);
+        allowedMimeTypes[0] = `x/${"a".repeat(253)}`;
+
+        const parsed = parseToolArguments(schema, {
+            action: "create_bucket",
+            ref: "r".repeat(64),
+            bucket: "b".repeat(100),
+            file_size_limit: Number.MAX_SAFE_INTEGER,
+            allowed_mime_types: allowedMimeTypes,
+        });
+
+        expect(parsed.file_size_limit).toBe(Number.MAX_SAFE_INTEGER);
+        expect(parsed.allowed_mime_types).toHaveLength(100);
+        expect((parsed.allowed_mime_types as string[])[0]).toHaveLength(255);
+    });
+
+    test.each([
+        ["invalid ref", { action: "list_buckets", ref: "bad.ref" }],
+        ["dot-only bucket", { action: "get_bucket", ref: "project-ref", bucket: "..." }],
+        ["overlong bucket", { action: "get_bucket", ref: "project-ref", bucket: "b".repeat(101) }],
+    ])("rejects %s in the CLI schema", (_label, args) => {
+        const { schema } = captureStorageTool({});
+        expect(() => parseToolArguments(schema, args)).toThrow("Invalid arguments");
+    });
 });
 
 describe("Storage bucket lifecycle", () => {
@@ -97,7 +159,7 @@ describe("Storage bucket lifecycle", () => {
         const response = await callback({ action: "list_buckets", ref: "project-ref" });
 
         expect(calls).toEqual(["/v1/projects/project-ref/storage/buckets"]);
-        expect(JSON.parse(response.content[0].text)).toEqual(buckets);
+        expect(JSON.parse(response.content[0].text)).toEqual(successReceipt("storage.list_buckets", { buckets }));
         expect(response.isError).not.toBe(true);
     });
 
@@ -113,7 +175,9 @@ describe("Storage bucket lifecycle", () => {
 
         const response = await callback({ action: "list_buckets", ref: "project-ref" });
 
-        expect(JSON.parse(response.content[0].text)).toEqual([storageBucket()]);
+        expect(JSON.parse(response.content[0].text)).toEqual(successReceipt("storage.list_buckets", {
+            buckets: [storageBucket()],
+        }));
         expect(response.content[0].text).not.toContain(secretMarker);
     });
 
@@ -130,13 +194,18 @@ describe("Storage bucket lifecycle", () => {
         const response = await callback({ action: "get_bucket", ref: "project_ref", bucket: "raw-data.v1" });
 
         expect(calls).toEqual(["/v1/projects/project_ref/storage/buckets/raw-data.v1"]);
-        expect(JSON.parse(response.content[0].text)).toEqual(bucket);
+        expect(JSON.parse(response.content[0].text)).toEqual({
+            ...successReceipt("storage.get_bucket", { bucket }),
+            project_ref: "project_ref",
+        });
     });
 
     test.each([
         ["project ref", { action: "list_buckets", ref: "../project" }],
         ["slash bucket", { action: "get_bucket", ref: "project-ref", bucket: "raw/data" }],
-        ["dot bucket", { action: "delete_bucket", ref: "project-ref", bucket: ".." }],
+        ["dot bucket", { action: "delete_bucket", ref: "project-ref", bucket: "..." }],
+        ["long bucket", { action: "get_bucket", ref: "project-ref", bucket: "a".repeat(101) }],
+        ["long ref", { action: "list_buckets", ref: "a".repeat(65) }],
     ])("rejects invalid %s path input before HTTP dispatch", async (_label, args) => {
         let requestCount = 0;
         const request = async () => {
@@ -146,6 +215,24 @@ describe("Storage bucket lifecycle", () => {
         const { callback } = captureStorageTool({ get: request, delete: request });
 
         await expect(callback(args)).rejects.toThrow("invalid for Storage buckets");
+        expect(requestCount).toBe(0);
+    });
+
+    test.each([
+        ["list_buckets", { action: "list_buckets", ref: "project-ref", bucket: "reports" }],
+        ["get_bucket", { action: "get_bucket", ref: "project-ref", bucket: "reports", public: true }],
+        ["create_bucket", { action: "create_bucket", ref: "project-ref", bucket: "reports", filename: "x" }],
+        ["update_bucket", { action: "update_bucket", ref: "project-ref", bucket: "reports", base64_content: "eA==" }],
+        ["delete_bucket", { action: "delete_bucket", ref: "project-ref", bucket: "reports", file_size_limit: 1 }],
+    ])("rejects cross-action flags for %s before HTTP dispatch", async (action, args) => {
+        let requestCount = 0;
+        const request = async () => {
+            requestCount += 1;
+            return { ok: true, status: 200, data: {} };
+        };
+        const { callback } = captureStorageTool({ get: request, post: request, put: request, delete: request });
+
+        await expect(callback(args)).rejects.toThrow(`not supported for '${action}'`);
         expect(requestCount).toBe(0);
     });
 
@@ -189,15 +276,21 @@ describe("Storage bucket lifecycle", () => {
             },
             { method: "GET", path: "/v1/projects/project-ref/storage/buckets/reports" },
         ]);
-        expect(JSON.parse(response.content[0].text)).toEqual(readback);
+        expect(JSON.parse(response.content[0].text)).toEqual(successReceipt("storage.create_bucket", {
+            bucket: readback,
+        }));
     });
 
     test("updates only explicitly provided fields", async () => {
-        const calls: Array<{ path: string; body: unknown }> = [];
+        const calls: Array<{ method: "GET" | "PUT"; path: string; body?: unknown }> = [];
         const bucket = storageBucket({ public: true, file_size_limit: 1048576, allowed_mime_types: [] });
         const { callback } = captureStorageTool({
             put: async (path: string, body: unknown) => {
-                calls.push({ path, body });
+                calls.push({ method: "PUT", path, body });
+                return { ok: true, status: 200, data: bucket };
+            },
+            get: async (path: string) => {
+                calls.push({ method: "GET", path });
                 return { ok: true, status: 200, data: bucket };
             },
         });
@@ -211,16 +304,25 @@ describe("Storage bucket lifecycle", () => {
             allowed_mime_types: [],
         });
 
-        expect(calls).toEqual([{
-            path: "/v1/projects/project-ref/storage/buckets/reports",
-            body: { public: true, file_size_limit: 1048576, allowed_mime_types: [] },
-        }]);
-        expect(JSON.parse(response.content[0].text)).toEqual(bucket);
+        expect(calls).toEqual([
+            {
+                method: "PUT",
+                path: "/v1/projects/project-ref/storage/buckets/reports",
+                body: { public: true, file_size_limit: 1048576, allowed_mime_types: [] },
+            },
+            { method: "GET", path: "/v1/projects/project-ref/storage/buckets/reports" },
+        ]);
+        expect(JSON.parse(response.content[0].text)).toEqual(successReceipt("storage.update_bucket", { bucket }));
     });
 
     test("accepts the platform's null normalization when clearing MIME restrictions", async () => {
         const { callback } = captureStorageTool({
             put: async () => ({
+                ok: true,
+                status: 200,
+                data: storageBucket({ allowed_mime_types: null }),
+            }),
+            get: async () => ({
                 ok: true,
                 status: 200,
                 data: storageBucket({ allowed_mime_types: null }),
@@ -235,7 +337,7 @@ describe("Storage bucket lifecycle", () => {
         });
 
         expect(response.isError).not.toBe(true);
-        expect(JSON.parse(response.content[0].text).allowed_mime_types).toBeNull();
+        expect(JSON.parse(response.content[0].text).bucket.allowed_mime_types).toBeNull();
     });
 
     test("rejects an empty update before HTTP dispatch", async () => {
@@ -255,20 +357,30 @@ describe("Storage bucket lifecycle", () => {
         expect(requestCount).toBe(0);
     });
 
-    test("deletes a bucket and returns the complete API receipt", async () => {
-        const calls: string[] = [];
+    test("deletes a bucket and returns an independently reconciled safe receipt", async () => {
+        const calls: Array<{ method: "DELETE" | "GET"; path: string }> = [];
         const receipt = { id: "reports", deleted: true };
         const { callback } = captureStorageTool({
             delete: async (path: string) => {
-                calls.push(path);
+                calls.push({ method: "DELETE", path });
                 return { ok: true, status: 200, data: receipt };
+            },
+            get: async (path: string) => {
+                calls.push({ method: "GET", path });
+                return { ok: false, status: 404, data: { message: "not found" } };
             },
         });
 
         const response = await callback({ action: "delete_bucket", ref: "project-ref", bucket: "reports" });
 
-        expect(calls).toEqual(["/v1/projects/project-ref/storage/buckets/reports"]);
-        expect(JSON.parse(response.content[0].text)).toEqual(receipt);
+        expect(calls).toEqual([
+            { method: "DELETE", path: "/v1/projects/project-ref/storage/buckets/reports" },
+            { method: "GET", path: "/v1/projects/project-ref/storage/buckets/reports" },
+        ]);
+        expect(JSON.parse(response.content[0].text)).toEqual(successReceipt("storage.delete_bucket", {
+            bucket_id: "reports",
+            deleted: true,
+        }));
     });
 
     test("returns a structured non-success result for bucket read failures", async () => {
@@ -358,13 +470,23 @@ describe("Storage bucket lifecycle", () => {
 
     test.each([
         ["invalid list file_size_limit", "list_buckets", [storageBucket({ file_size_limit: 1.5 })]],
+        ["negative list file_size_limit", "list_buckets", [storageBucket({ file_size_limit: -1 })]],
+        ["overflowing list file_size_limit", "list_buckets", [storageBucket({ file_size_limit: Number.MAX_SAFE_INTEGER + 1 })]],
         ["invalid get allowed_mime_types", "get_bucket", storageBucket({ allowed_mime_types: "image/png" })],
+        ["empty get MIME", "get_bucket", storageBucket({ allowed_mime_types: [""] })],
+        ["too many list MIME types", "list_buckets", [storageBucket({
+            allowed_mime_types: Array.from({ length: 101 }, (_, index) => `application/x-${index}`),
+        })]],
+        ["dot-only bucket id", "get_bucket", storageBucket({ id: "...", name: "..." })],
     ])("rejects %s metadata shape", async (_label, action, apiPayload) => {
         const { callback } = captureStorageTool({
             get: async () => ({ ok: true, status: 200, data: apiPayload }),
         });
 
-        const response = await callback({ action, ref: "project-ref", bucket: "reports" });
+        const args = action === "get_bucket"
+            ? { action, ref: "project-ref", bucket: "reports" }
+            : { action, ref: "project-ref" };
+        const response = await callback(args);
 
         expect(response.isError).toBe(true);
         expect(JSON.parse(response.content[0].text).error).toEqual({ code: "INVALID_RESPONSE", http_status: null });
@@ -430,5 +552,42 @@ describe("Storage bucket lifecycle", () => {
 
         expect(response.isError).toBe(true);
         expect(JSON.parse(response.content[0].text).error).toEqual({ code: "OUTCOME_UNKNOWN", http_status: 404 });
+    });
+
+    test("reports an unknown update outcome when independent readback differs", async () => {
+        const { callback } = captureStorageTool({
+            put: async () => ({
+                ok: true,
+                status: 200,
+                data: storageBucket({ public: true }),
+            }),
+            get: async () => ({ ok: true, status: 200, data: storageBucket({ public: false }) }),
+        });
+
+        const response = await callback({
+            action: "update_bucket",
+            ref: "project-ref",
+            bucket: "reports",
+            public: true,
+        });
+
+        expect(response.isError).toBe(true);
+        expect(JSON.parse(response.content[0].text).error).toEqual({ code: "OUTCOME_UNKNOWN", http_status: 200 });
+    });
+
+    test("reports an unknown delete outcome unless independent readback is a 404", async () => {
+        const { callback } = captureStorageTool({
+            delete: async () => ({
+                ok: true,
+                status: 200,
+                data: { id: "reports", deleted: true },
+            }),
+            get: async () => ({ ok: true, status: 200, data: storageBucket() }),
+        });
+
+        const response = await callback({ action: "delete_bucket", ref: "project-ref", bucket: "reports" });
+
+        expect(response.isError).toBe(true);
+        expect(JSON.parse(response.content[0].text).error).toEqual({ code: "OUTCOME_UNKNOWN", http_status: 200 });
     });
 });

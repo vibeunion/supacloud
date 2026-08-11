@@ -2,6 +2,7 @@ import { config } from "../config";
 import { shellService } from './shell.service';
 import { logger } from "../utils/logger";
 import { getStorageDriver } from "./storage.adapter";
+import { storageBucketInputError, type StorageBucketSettings } from "./storage-bucket-contract";
 import { statfs } from "node:fs/promises";
 
 export interface StorageStatus {
@@ -216,10 +217,9 @@ export class StorageService {
     return await getStorageDriver().isBucketEmpty(projectRef, bucketName);
   }
 
-  static async updateBucket(projectRef: string, bucketId: string, updates: { public?: boolean; file_size_limit?: number; allowed_mime_types?: string[] }): Promise<{ success: boolean; error?: string; bucket?: Record<string, unknown> }> {
-    if (!/^[a-zA-Z0-9._-]+$/.test(bucketId)) {
-      return { success: false, error: "Invalid bucket id" };
-    }
+  static async updateBucket(projectRef: string, bucketId: string, updates: StorageBucketSettings): Promise<{ success: boolean; error?: string; bucket?: Record<string, unknown> }> {
+    const inputError = storageBucketInputError(projectRef, bucketId, updates);
+    if (inputError) return { success: false, error: inputError };
 
     try {
       const { getProjectDb, resolveDbName } = await import("../db");
@@ -234,7 +234,7 @@ export class StorageService {
       }
       if (updates.allowed_mime_types !== undefined) {
         const allowedMimeTypes = updates.allowed_mime_types.length > 0
-          ? updates.allowed_mime_types
+          ? db.array(updates.allowed_mime_types, "TEXT")
           : null;
         await db`UPDATE storage.buckets SET allowed_mime_types = ${allowedMimeTypes} WHERE id = ${bucketId}`;
       }
