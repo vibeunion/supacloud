@@ -78,6 +78,7 @@ async function fetchWithTimeout(url: string, options: RequestInit): Promise<Resp
         return await fetch(url, {
             ...options,
             signal: controller.signal,
+            redirect: "error",
         });
     } finally {
         clearTimeout(timeout);

@@ -1869,36 +1869,81 @@ describe("supacloud-cli process contract", () => {
         expect(result.stdout + result.stderr).not.toContain("application-service-role");
     });
 
-    test("status reports rejected application credentials without reflecting them", async () => {
-        const requestHeaders: Array<[string | null, string | null]> = [];
-        const server = Bun.serve({
+    test.each([["401", 401], ["403", 403]] as const)(
+        "status reports application credential rejection %s without reflecting the key",
+        async (_statusLabel, rejectionStatus) => {
+            const requestHeaders: Array<[string | null, string | null]> = [];
+            const server = Bun.serve({
+                hostname: "127.0.0.1",
+                port: 0,
+                fetch(request) {
+                    requestHeaders.push([
+                        request.headers.get("authorization"),
+                        request.headers.get("apikey"),
+                    ]);
+                    return Response.json({ error: "Invalid API key" }, { status: rejectionStatus });
+                },
+            });
+            servers.push(server);
+
+            const result = await runProjectCli(["status"], {
+                SUPABASE_URL: `http://127.0.0.1:${server.port}`,
+                SUPABASE_SERVICE_ROLE_KEY: "rejected-service-role",
+                SUPACLOUD_PROJECT_REF: "abc123",
+            });
+            const status = JSON.parse(result.stdout);
+
+            expect(result.exitCode).toBe(1);
+            expect(status.checks.connectivity).toMatchObject({ ok: true, httpStatus: rejectionStatus });
+            expect(status.checks.authentication).toEqual({ ok: false, httpStatus: rejectionStatus });
+            expect(requestHeaders).toEqual([
+                [null, null],
+                ["Bearer rejected-service-role", "rejected-service-role"],
+            ]);
+            expect(result.stdout + result.stderr).not.toContain("rejected-service-role");
+        },
+    );
+
+    test("Management writes reject redirects without forwarding credentials or request bodies", async () => {
+        const targetRequests: Array<{ authorization: string | null; body: string }> = [];
+        const redirectTarget = Bun.serve({
             hostname: "127.0.0.1",
             port: 0,
-            fetch(request) {
-                requestHeaders.push([
-                    request.headers.get("authorization"),
-                    request.headers.get("apikey"),
-                ]);
-                return Response.json({ error: "Invalid API key" }, { status: 401 });
+            async fetch(request) {
+                targetRequests.push({
+                    authorization: request.headers.get("authorization"),
+                    body: await request.text(),
+                });
+                return Response.json({ configured: true });
             },
         });
-        servers.push(server);
+        servers.push(redirectTarget);
+        let sourceBody = "";
+        const source = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            async fetch(request) {
+                sourceBody = await request.text();
+                return Response.redirect(`http://127.0.0.1:${redirectTarget.port}/captured`, 307);
+            },
+        });
+        servers.push(source);
 
-        const result = await runProjectCli(["status"], {
-            SUPABASE_URL: `http://127.0.0.1:${server.port}`,
-            SUPABASE_SERVICE_ROLE_KEY: "rejected-service-role",
+        const response = await runProjectCli([
+            "auth", "configure_provider", "--ref", "abc123", "--provider", "github",
+            "--client_id", "redirect-client-id", "--client_secret", "redirect-client-secret",
+        ], {
+            SUPACLOUD_API_URL: `http://127.0.0.1:${source.port}`,
+            SUPACLOUD_API_TOKEN: "redirect-management-token",
             SUPACLOUD_PROJECT_REF: "abc123",
         });
-        const status = JSON.parse(result.stdout);
 
-        expect(result.exitCode).toBe(1);
-        expect(status.checks.connectivity).toMatchObject({ ok: true, httpStatus: 401 });
-        expect(status.checks.authentication).toEqual({ ok: false, httpStatus: 401 });
-        expect(requestHeaders).toEqual([
-            [null, null],
-            ["Bearer rejected-service-role", "rejected-service-role"],
-        ]);
-        expect(result.stdout + result.stderr).not.toContain("rejected-service-role");
+        expect(response.exitCode).toBe(1);
+        expect(sourceBody).toContain("redirect-client-secret");
+        expect(targetRequests).toEqual([]);
+        expect(response.stdout + response.stderr).not.toContain("redirect-client-id");
+        expect(response.stdout + response.stderr).not.toContain("redirect-client-secret");
+        expect(response.stdout + response.stderr).not.toContain("redirect-management-token");
     });
 
     test("status rejects a missing application data endpoint before sending credentials", async () => {
