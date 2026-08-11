@@ -127,6 +127,11 @@ describe("HttpTransport retry policy", () => {
         const response = await request(createTransport());
 
         expect(response.status).toBe(500);
+        expect(response.transportError).toBe(true);
+        expect(response.data).toEqual({
+            error: "Network Error",
+            code: "CONNECTION_RESET",
+        });
         expect(fetchCalls).toBe(1);
         expect(clearedTimerIds).toHaveLength(1);
     });
@@ -168,7 +173,8 @@ describe("HttpTransport retry policy", () => {
         expect(response).toEqual({
             ok: false,
             status: 500,
-            data: { error: "Network Error", details: "request timed out" },
+            data: { error: "Network Error", code: "TIMEOUT" },
+            transportError: true,
         });
         expect(fetchCalls).toBe(1);
         expect(clearedTimerIds).toHaveLength(1);
@@ -185,5 +191,22 @@ describe("HttpTransport retry policy", () => {
             "HTTP request timeout must be between",
         );
         expect(fetchCalls).toBe(0);
+    });
+
+    test("never preserves an arbitrary transport error message", async () => {
+        const privateDetail = "Bearer private-transport-token";
+        globalThis.fetch = (async () => {
+            throw Object.assign(new Error(privateDetail), { code: "EHOSTUNREACH" });
+        }) as unknown as typeof fetch;
+
+        const response = await createTransport().post("/v1/projects", { name: "test" });
+
+        expect(response).toEqual({
+            ok: false,
+            status: 500,
+            data: { error: "Network Error", code: "NETWORK_ERROR" },
+            transportError: true,
+        });
+        expect(JSON.stringify(response)).not.toContain(privateDetail);
     });
 });
