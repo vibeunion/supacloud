@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { Type } from "@sinclair/typebox";
+import { projectRefPathSegment } from "../project-ref";
 import { optional, stringEnum, withDescription } from "../schema";
 import type { HttpResult, HttpTransport } from "../transports/http";
 
@@ -104,26 +105,26 @@ function migrationInventoryEntry(rawEntry: unknown): MigrationInventoryEntry | n
 function compareMigrationInventoryEntries(left: MigrationInventoryEntry, right: MigrationInventoryEntry): number {
     const leftVersion = BigInt(left.version);
     const rightVersion = BigInt(right.version);
-    if (leftVersion !== rightVersion) return leftVersion < rightVersion ? -1 : 1;
-    if (left.name === right.name) return 0;
-    if (left.name === null) return -1;
-    if (right.name === null) return 1;
-    return left.name < right.name ? -1 : 1;
+    if (leftVersion === rightVersion) return 0;
+    return leftVersion < rightVersion ? -1 : 1;
 }
 
 function migrationInventory(payload: unknown): MigrationInventoryEntry[] | null {
     if (!Array.isArray(payload)) return null;
     const inventory: MigrationInventoryEntry[] = [];
-    const identities = new Set<string>();
+    const versions = new Set<string>();
     for (const rawEntry of payload) {
         const entry = migrationInventoryEntry(rawEntry);
         if (!entry) return null;
-        const identity = JSON.stringify([entry.version, entry.name]);
-        if (identities.has(identity)) return null;
-        identities.add(identity);
+        if (versions.has(entry.version)) return null;
+        versions.add(entry.version);
         inventory.push(entry);
     }
     return inventory.sort(compareMigrationInventoryEntries);
+}
+
+function migrationInventoryPath(ref: unknown): string {
+    return `/v1/projects/${projectRefPathSegment(ref, "migration_inventory")}/database/migrations`;
 }
 
 function migrationInventoryFailure(code: "HTTP_ERROR" | "INVALID_RESPONSE", httpStatus: number | null): DatabaseToolResponse {
@@ -464,7 +465,7 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
                 }
                 case "migration_inventory": {
                     const response = await http.get(
-                        `/v1/projects/${ref}/database/migrations`,
+                        migrationInventoryPath(ref),
                         { maxResponseBytes: MAX_MIGRATION_INVENTORY_BYTES },
                     );
                     return migrationInventoryResponse(response);

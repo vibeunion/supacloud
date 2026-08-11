@@ -96,6 +96,19 @@ describe("database migration helpers", () => {
         expect(response.content[0].text).toBe("[]");
     });
 
+    test.each([".", "..", "project.name", "project/other", "project?other", "project#other", "%2e"])("rejects migration inventory ref %s before HTTP dispatch", async (ref) => {
+        let requestCount = 0;
+        const callback = captureDatabaseTool({
+            get: async () => {
+                requestCount += 1;
+                return { ok: true, status: 200, data: [] };
+            },
+        });
+
+        await expect(callback({ action: "migration_inventory", ref })).rejects.toThrow("invalid for migration_inventory");
+        expect(requestCount).toBe(0);
+    });
+
     test.each([409, 503])("returns a secret-free error for HTTP %d", async (status) => {
         const responseSecret = `migration-inventory-response-${status}`;
         const callback = captureDatabaseTool({
@@ -133,9 +146,9 @@ describe("database migration helpers", () => {
         ["invalid checksum", [{ ...migrationInventoryFixture(), checksum: "invalid" }]],
         ["semantic checksum mismatch", [{ ...migrationInventoryFixture(), checksum: "0".repeat(64) }]],
         ["invalid applied timestamp", [{ ...migrationInventoryFixture(), applied_at: "not-a-timestamp" }]],
-        ["duplicate identity", (() => {
+        ["duplicate canonical version", (() => {
             const entry = migrationInventoryFixture();
-            return [entry, { ...entry }];
+            return [entry, migrationInventoryFixture({ version: entry.version, name: "same-version-different-name" })];
         })()],
     ])("rejects %s instead of reporting an empty ledger", async (_label, payload) => {
         const callback = captureDatabaseTool({

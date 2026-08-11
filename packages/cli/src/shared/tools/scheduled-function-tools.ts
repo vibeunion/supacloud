@@ -3,6 +3,7 @@ import { readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { Type } from "@sinclair/typebox";
+import { projectRefPathSegment } from "../project-ref";
 import { decodedSchema, optional, stringEnum, withDescription } from "../schema";
 import type { ToolSchema } from "../schema";
 import type { HttpResult, HttpTransport } from "../transports/http";
@@ -74,7 +75,6 @@ const FORBIDDEN_HEADER_NAMES = new Set([
     "via",
     "x-project-ref",
 ]);
-const PROJECT_REF_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const SCHEDULE_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const SAFE_SLUG_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const CRON_PART_PATTERN = /^(\*|([0-9]+)(?:-([0-9]+))?)(?:\/([0-9]+))?$/;
@@ -292,11 +292,11 @@ function assertActionArguments(action: ScheduledFunctionAction, args: Record<str
 }
 
 function schedulePath(ref: string, scheduleId?: string): string {
-    if (!PROJECT_REF_PATTERN.test(ref)) throw new Error("'ref' is invalid for Scheduled Functions");
+    const projectRefSegment = projectRefPathSegment(ref, "Scheduled Functions");
     if (scheduleId !== undefined && !SCHEDULE_ID_PATTERN.test(scheduleId)) {
         throw new Error("'schedule_id' is invalid");
     }
-    const root = `/v1/projects/${encodeURIComponent(ref)}/scheduled-functions`;
+    const root = `/v1/projects/${projectRefSegment}/scheduled-functions`;
     return scheduleId ? `${root}/${encodeURIComponent(scheduleId)}` : root;
 }
 

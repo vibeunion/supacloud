@@ -165,7 +165,8 @@ supacloud-cli secrets upsert --ref abc123 --from-env API_KEY,WEBHOOK_SECRET
 
 `database migration_inventory` reads the canonical migration ledger through the
 project-scoped Management API and prints only a validated JSON array. It rejects
-non-2xx responses, malformed entries, duplicate migration identities, checksum
+non-2xx responses, malformed entries, unsafe project refs, duplicate canonical
+migration versions, checksum
 drift, and statement-count mismatches instead of treating them as an empty
 ledger. `database list_migrations` remains available with its legacy SQL-backed,
 human-readable behavior.

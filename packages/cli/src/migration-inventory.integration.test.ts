@@ -146,6 +146,53 @@ describe("migration inventory CLI process contract", () => {
         expect(response.stderr).toBe("");
     });
 
+    test("keeps the migration ledger endpoint readable in read-only mode", async () => {
+        const requests: string[] = [];
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch(request) {
+                requests.push(`${request.method} ${new URL(request.url).pathname}`);
+                return Response.json([]);
+            },
+        });
+        servers.push(server);
+
+        const response = await runCli(
+            ["database", "migration_inventory"],
+            { ...projectEnvironment(server.port, "read-only-token"), SUPACLOUD_READ_ONLY: "true" },
+        );
+
+        expect(response.exitCode).toBe(0);
+        expect(JSON.parse(response.stdout)).toEqual([]);
+        expect(requests).toEqual(["GET /v1/projects/project-a/database/migrations"]);
+    });
+
+    test.each([".", "..", "project.name", "project/other", "project?other", "project#other", "%2e"])("rejects unsafe ref %s without dispatching or reflecting secrets", async (ref) => {
+        const token = "unsafe-ref-token-sentinel";
+        let requestCount = 0;
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch() {
+                requestCount += 1;
+                return Response.json([]);
+            },
+        });
+        servers.push(server);
+
+        const response = await runCli(
+            ["database", "migration_inventory", "--ref", ref],
+            projectEnvironment(server.port, token),
+        );
+
+        expect(response.exitCode).toBe(1);
+        expect(requestCount).toBe(0);
+        expect(response.stdout + response.stderr).toContain("invalid for migration_inventory");
+        expect(response.stdout + response.stderr).not.toContain(token);
+        expect(response.stdout + response.stderr).not.toContain(ref);
+    });
+
     test.each([409, 503])("exits non-zero for HTTP %d without reflecting the response", async (status) => {
         const token = `http-${status}-token-sentinel`;
         const responseSecret = `http-${status}-response-sentinel`;
@@ -175,9 +222,9 @@ describe("migration inventory CLI process contract", () => {
             statements: ["SELECT 1;"],
             appliedAt: null,
         }), statement_count: 2 }]],
-        ["duplicate identity", (() => {
+        ["duplicate canonical version", (() => {
             const row = migrationRow({ version: "1", name: "one", statements: ["SELECT 1;"], appliedAt: null });
-            return [row, { ...row }];
+            return [row, migrationRow({ version: "1", name: "one-renamed", statements: ["SELECT 2;"], appliedAt: null })];
         })()],
     ])("exits non-zero for a %s success payload", async (_label, payload) => {
         const server = Bun.serve({
