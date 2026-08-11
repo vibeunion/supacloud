@@ -36,16 +36,102 @@ grants, extensions, and reference-data changes in migrations; use read-only SQL
 for ordinary inspection; dry-run remote migrations; and reconcile existing
 remote drift before touching migration history.
 
-`supacloud-cli` defaults to the current workspace's project context. If you do not pass explicit flags, it tries to auto-link from `.env`:
+## Environment profiles and production safety
+
+Use named environment files to keep test and production configuration separate.
+`--env test` reads `.env.supacloud.test` from the current working directory;
+`--env prod` reads `.env.supacloud.prod` and treats the profile as production.
+For example:
+
+```dotenv
+# .env.supacloud.test
+SUPACLOUD_ENV=test
+SUPACLOUD_API_URL=https://management.test.example.com
+SUPACLOUD_API_TOKEN=<test-management-api-token>
+SUPACLOUD_PROJECT_REF=test-ref
+```
+
+```dotenv
+# .env.supacloud.prod
+SUPACLOUD_ENV=production
+SUPACLOUD_API_URL=https://management.example.com
+SUPACLOUD_API_TOKEN=<production-management-api-token>
+SUPACLOUD_PROJECT_REF=production-ref
+```
+
+Run commands with the selected profile:
+
+```bash
+supacloud-cli --env test status
+supacloud-cli project get --env test
+supacloud-cli status --env-file ./config/supacloud.staging.env
+```
+
+Global flags may appear before or after the command. Both `--key value` and
+`--key=value` syntax are accepted. `--env` and `--env-file` are mutually
+exclusive. An explicit `--env-file` must declare `SUPACLOUD_ENV`.
+
+Environment files contain credentials. The repository root `.gitignore`
+already ignores `.env` and `.env.*`; do not force-add or commit these files.
+Restrict locally created files to the current user:
+
+```bash
+chmod 600 .env.supacloud.test .env.supacloud.prod
+```
+
+CI can provide one complete context through process environment variables
+instead of writing a file:
+
+```bash
+SUPACLOUD_ENV=test \
+SUPACLOUD_API_URL=https://management.test.example.com \
+SUPACLOUD_API_TOKEN="$CI_SUPACLOUD_API_TOKEN" \
+SUPACLOUD_PROJECT_REF=test-ref \
+supacloud-cli status
+```
+
+Project context is resolved from one atomic source: a named profile selected by
+`--env`, an explicit `--env-file`, a complete process environment, or the
+legacy `.env` fallback. Core URL, token, and project-ref values are not filled
+by mixing sources. If `SUPACLOUD_ENV` is set without a complete process context,
+it strictly selects `.env.supacloud.<value>`. For backward compatibility, when
+no selector and no core process variables are present, `supacloud-cli` still
+tries to auto-link from `.env` using:
 
 - `SUPABASE_URL` or `SUPACLOUD_API_URL`
 - `SUPABASE_SERVICE_ROLE_KEY` or `SUPACLOUD_API_TOKEN`
 - `SUPACLOUD_PROJECT_REF` when the project ref cannot be inferred from a managed `<ref>.api.*` hostname
 
-Both `--key value` and `--key=value` flag syntax are accepted. `--ref` can
-override the auto-linked project for an individual command. `status` checks
-configuration, Management API connectivity, and authentication; it exits
-non-zero when any required check fails.
+The legacy `.env` fallback is unclassified and therefore does not enable the
+production confirmation gate. Production automation must select a `prod` or
+`production` profile, or set `SUPACLOUD_ENV=production` together with a complete
+process context. Use `SUPACLOUD_READ_ONLY=true` when legacy workflows must be
+restricted to inspection only.
+
+`SUPACLOUD_READ_ONLY=true` is a safety override that blocks remote writes.
+Production writes require an explicit confirmation equal to the selected
+profile's project ref:
+
+```bash
+supacloud-cli database push_migrations --env prod \
+  --ref production-ref --dir supabase/migrations \
+  --confirm-production production-ref
+```
+
+Dry runs remain read operations. Production `diagnostics repair` is always
+forbidden, and unclassified actions fail closed in production or read-only
+contexts.
+
+For supported command groups, `--ref` overrides the profile's default project
+for one command. A production profile cannot target a different project with
+`--ref`; the requested ref and `--confirm-production` must both exactly match
+the profile's project ref.
+
+`status` checks configuration, Management API connectivity, and authentication;
+it exits non-zero when any required check fails. Its output includes
+`environment`, `source` (`kind` and `path`), `apiUrl`, `projectRef`, `readOnly`,
+`production`, and `hasApiToken`. It never prints the API token or service-role
+key.
 
 Examples:
 
