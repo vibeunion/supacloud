@@ -1,6 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import { fileURLToPath } from "node:url";
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import {
+    chmodSync,
+    copyFileSync,
+    mkdirSync,
+    mkdtempSync,
+    realpathSync,
+    rmSync,
+    symlinkSync,
+    writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createAdminTools } from "./index";
@@ -9,6 +18,7 @@ import { schemaEnumValues } from "./shared/schema";
 import packageMetadata from "../package.json" with { type: "json" };
 
 const PACKAGE_ROOT = fileURLToPath(new URL("..", import.meta.url));
+const ADMIN_ENTRYPOINT = join(PACKAGE_ROOT, "src/index.ts");
 const ADMIN_CONTEXT_KEYS = new Set([
     "SUPABASE_URL",
     "SUPABASE_SERVICE_ROLE_KEY",
@@ -22,6 +32,10 @@ const ADMIN_CONTEXT_KEYS = new Set([
     "SUPACLOUD_SSH_KEY",
     "SUPACLOUD_SSH_PASS",
     "SUPACLOUD_SSH_HOST_FINGERPRINT",
+    "SUPACLOUD_SSH_USER",
+    "SUPACLOUD_SSH_PORT",
+    "SUPACLOUD_ENV",
+    "SUPACLOUD_READ_ONLY",
 ]);
 
 const EXISTING_PHYSICAL_BACKUP = {
@@ -51,9 +65,10 @@ function cleanEnvironment(overrides: Record<string, string> = {}): Record<string
 async function runAdminCli(
     args: string[],
     overrides: Record<string, string> = {},
+    workingDirectory: string = PACKAGE_ROOT,
 ): Promise<{ exitCode: number; output: string }> {
-    const processHandle = Bun.spawn([process.execPath, "src/index.ts", ...args], {
-        cwd: PACKAGE_ROOT,
+    const processHandle = Bun.spawn([process.execPath, ADMIN_ENTRYPOINT, ...args], {
+        cwd: workingDirectory,
         env: cleanEnvironment(overrides),
         stdout: "pipe",
         stderr: "pipe",
@@ -156,9 +171,12 @@ const baseContext = {
     apiToken: "api-token",
     projectRef: "",
     readOnly: false,
+    environment: "",
+    production: false,
     inferredSupabaseUrl: "",
     inferredServiceRoleKey: "",
-    source: "env" as const,
+    source: "process_env" as const,
+    sourcePath: null,
 };
 
 describe("admin SSH registration gate", () => {
@@ -171,7 +189,7 @@ describe("admin SSH registration gate", () => {
     test("does not register executable SSH tools without a verified host fingerprint", () => {
         const tools = createAdminTools(baseContext);
         expect(tools.project.schema.name).toBeDefined();
-        expect(tools.ssh.schema.command).toBeUndefined();
+        expect(tools.ssh.schema.command).toBeDefined();
         return tools.ssh.callback({ action: "ping" }).then((result) => {
             expect(result.content[0]?.text).toContain("SUPACLOUD_SSH_HOST_FINGERPRINT");
         });
@@ -197,6 +215,18 @@ describe("supacloud-admin process contract", () => {
 
         expect(execution.exitCode).toBe(0);
         expect(execution.output.trim()).toBe(packageMetadata.version);
+    });
+
+    test("documents environment selection and production confirmation", async () => {
+        const execution = await runAdminCli(["--help"]);
+
+        expect(execution.exitCode).toBe(0);
+        expect(execution.output).toContain("--env <name>");
+        expect(execution.output).toContain("--env-file <path>");
+        expect(execution.output).toContain("--confirm-production <target>");
+        expect(execution.output).toContain("SUPACLOUD_READ_ONLY=true");
+        expect(execution.output).toContain("platform:<API host>");
+        expect(execution.output).toContain("host:<SSH host[:port]>");
     });
 
     test("runs through an npm-style bin symlink", async () => {
@@ -236,6 +266,268 @@ describe("supacloud-admin process contract", () => {
             expect(execution.output.trim()).toBe(packageMetadata.version);
         } finally {
             rmSync(sandbox, { recursive: true, force: true });
+        }
+    });
+
+    test("loads one named environment source and keeps status secret-free", async () => {
+        const workspace = mkdtempSync(join(tmpdir(), "supacloud-admin-named-env-"));
+        const environmentPath = join(workspace, ".env.supacloud.test");
+        writeFileSync(environmentPath, [
+            "SUPACLOUD_ENV=test",
+            "SUPACLOUD_API_URL=https://management.test.example.com",
+            "SUPACLOUD_API_TOKEN=file-secret-token",
+            "SUPACLOUD_PROJECT_REF=test-ref",
+        ].join("\n") + "\n");
+
+        try {
+            const execution = await runAdminCli(["status", "--env=test"], {
+                SUPACLOUD_API_TOKEN: "process-secret-token",
+            }, workspace);
+            const status = JSON.parse(execution.output);
+
+            expect(execution.exitCode).toBe(0);
+            expect(status).toMatchObject({
+                environment: "test",
+                production: false,
+                readOnly: false,
+                source: { kind: "named_env_file", path: realpathSync(environmentPath) },
+                apiUrl: "https://management.test.example.com",
+                hasApiToken: true,
+            });
+            expect(execution.output).not.toContain("file-secret-token");
+            expect(execution.output).not.toContain("process-secret-token");
+        } finally {
+            rmSync(workspace, { recursive: true, force: true });
+        }
+    });
+
+    test("requires exact production project confirmation before HTTP and rejects cross-ref writes", async () => {
+        const workspace = mkdtempSync(join(tmpdir(), "supacloud-admin-production-project-"));
+        const requestedPaths: string[] = [];
+        const authorizationHeaders: string[] = [];
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch(request) {
+                requestedPaths.push(new URL(request.url).pathname);
+                authorizationHeaders.push(request.headers.get("authorization") || "");
+                return Response.json({ deleted: true });
+            },
+        });
+        writeFileSync(join(workspace, ".env.supacloud.production"), [
+            "SUPACLOUD_ENV=production",
+            `SUPACLOUD_API_URL=http://127.0.0.1:${server.port}`,
+            "SUPACLOUD_API_TOKEN=file-production-token",
+            "SUPACLOUD_PROJECT_REF=prod-ref",
+        ].join("\n") + "\n");
+
+        try {
+            const unconfirmed = await runAdminCli([
+                "project", "delete", "--ref", "prod-ref", "--env", "production",
+            ], { SUPACLOUD_API_TOKEN: "process-production-token" }, workspace);
+            const crossRef = await runAdminCli([
+                "project", "delete", "--ref", "other-ref", "--env=production",
+                "--confirm-production", "other-ref",
+            ], {}, workspace);
+            const confirmed = await runAdminCli([
+                "--confirm-production=prod-ref", "project", "delete", "--ref", "prod-ref",
+                "--env", "production",
+            ], {}, workspace);
+
+            expect(unconfirmed.exitCode).toBe(1);
+            expect(unconfirmed.output).toContain("--confirm-production prod-ref");
+            expect(crossRef.exitCode).toBe(1);
+            expect(crossRef.output).toContain("different project ref");
+            expect(confirmed.exitCode).toBe(0);
+            expect(requestedPaths).toEqual(["/v1/projects/prod-ref"]);
+            expect(authorizationHeaders).toEqual(["Bearer file-production-token"]);
+            for (const execution of [unconfirmed, crossRef, confirmed]) {
+                expect(execution.output).not.toContain("file-production-token");
+                expect(execution.output).not.toContain("process-production-token");
+            }
+        } finally {
+            server.stop(true);
+            rmSync(workspace, { recursive: true, force: true });
+        }
+    });
+
+    test("blocks read-only writes before HTTP without reflecting credentials", async () => {
+        const workspace = mkdtempSync(join(tmpdir(), "supacloud-admin-read-only-"));
+        let requestCount = 0;
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch() {
+                requestCount += 1;
+                return Response.json({});
+            },
+        });
+        writeFileSync(join(workspace, ".env.supacloud.audit"), [
+            "SUPACLOUD_ENV=audit",
+            "SUPACLOUD_READ_ONLY=true",
+            `SUPACLOUD_API_URL=http://127.0.0.1:${server.port}`,
+            "SUPACLOUD_API_TOKEN=read-only-secret-token",
+            "SUPACLOUD_PROJECT_REF=audit-ref",
+        ].join("\n") + "\n");
+
+        try {
+            const execution = await runAdminCli([
+                "project", "delete", "--ref", "audit-ref", "--env", "audit",
+            ], {}, workspace);
+
+            expect(execution.exitCode).toBe(1);
+            expect(execution.output).toContain("SUPACLOUD_READ_ONLY=true");
+            expect(execution.output).not.toContain("read-only-secret-token");
+            expect(requestCount).toBe(0);
+        } finally {
+            server.stop(true);
+            rmSync(workspace, { recursive: true, force: true });
+        }
+    });
+
+    test("keeps a process read-only guard when a named profile is selected", async () => {
+        const workspace = mkdtempSync(join(tmpdir(), "supacloud-admin-process-read-only-"));
+        let requestCount = 0;
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch() {
+                requestCount += 1;
+                return Response.json({});
+            },
+        });
+        writeFileSync(join(workspace, ".env.supacloud.test"), [
+            "SUPACLOUD_ENV=test",
+            `SUPACLOUD_API_URL=http://127.0.0.1:${server.port}`,
+            "SUPACLOUD_API_TOKEN=profile-secret-token",
+            "SUPACLOUD_PROJECT_REF=test-ref",
+        ].join("\n") + "\n");
+
+        try {
+            const execution = await runAdminCli([
+                "project", "delete", "--ref", "test-ref", "--env", "test",
+            ], { SUPACLOUD_READ_ONLY: "true" }, workspace);
+
+            expect(execution.exitCode).toBe(1);
+            expect(execution.output).toContain("SUPACLOUD_READ_ONLY=true");
+            expect(execution.output).not.toContain("profile-secret-token");
+            expect(requestCount).toBe(0);
+        } finally {
+            server.stop(true);
+            rmSync(workspace, { recursive: true, force: true });
+        }
+    });
+
+    test("rejects unclassified process and legacy dotenv writes before HTTP", async () => {
+        const workspace = mkdtempSync(join(tmpdir(), "supacloud-admin-unclassified-write-"));
+        let requestCount = 0;
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch() {
+                requestCount += 1;
+                return Response.json({});
+            },
+        });
+        writeFileSync(join(workspace, ".env"), [
+            `SUPACLOUD_API_URL=http://127.0.0.1:${server.port}`,
+            "SUPACLOUD_API_TOKEN=legacy-secret-token",
+            "SUPACLOUD_PROJECT_REF=legacy-ref",
+        ].join("\n") + "\n");
+
+        try {
+            const processContext = await runAdminCli([
+                "project", "delete", "--ref", "process-ref",
+            ], {
+                SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+                SUPACLOUD_API_TOKEN: "process-secret-token",
+            }, workspace);
+            const legacyContext = await runAdminCli([
+                "project", "delete", "--ref", "legacy-ref",
+            ], {}, workspace);
+
+            for (const execution of [processContext, legacyContext]) {
+                expect(execution.exitCode).toBe(1);
+                expect(execution.output).toContain("requires an explicit SUPACLOUD_ENV");
+                expect(execution.output).not.toContain("process-secret-token");
+                expect(execution.output).not.toContain("legacy-secret-token");
+            }
+            expect(requestCount).toBe(0);
+        } finally {
+            server.stop(true);
+            rmSync(workspace, { recursive: true, force: true });
+        }
+    });
+
+    test("rejects API URL query strings and fragments without reflecting them in status or help", async () => {
+        for (const apiUrl of [
+            "https://management.example.com/?query-secret",
+            "https://management.example.com/#fragment-secret",
+        ]) {
+            const [status, help] = await Promise.all([
+                runAdminCli(["status"], {
+                    SUPACLOUD_API_URL: apiUrl,
+                    SUPACLOUD_API_TOKEN: "api-secret-token",
+                }),
+                runAdminCli(["--help"], {
+                    SUPACLOUD_API_URL: apiUrl,
+                    SUPACLOUD_API_TOKEN: "api-secret-token",
+                }),
+            ]);
+
+            expect(status.exitCode).toBe(0);
+            expect(JSON.parse(status.output)).toMatchObject({ apiUrl: null, hasApiToken: true });
+            expect(help.exitCode).toBe(0);
+            for (const execution of [status, help]) {
+                expect(execution.output).not.toContain("query-secret");
+                expect(execution.output).not.toContain("fragment-secret");
+                expect(execution.output).not.toContain("api-secret-token");
+            }
+        }
+    });
+
+    test("binds ref-less production writes to the exact API host", async () => {
+        const workspace = mkdtempSync(join(tmpdir(), "supacloud-admin-production-platform-"));
+        let requestCount = 0;
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch() {
+                requestCount += 1;
+                return Response.json({ ref: "created-ref" });
+            },
+        });
+        writeFileSync(join(workspace, ".env.supacloud.production"), [
+            "SUPACLOUD_ENV=production",
+            `SUPACLOUD_API_URL=http://127.0.0.1:${server.port}`,
+            "SUPACLOUD_API_TOKEN=platform-production-token",
+        ].join("\n") + "\n");
+        const confirmationTarget = `platform:127.0.0.1:${server.port}`;
+
+        try {
+            const unconfirmed = await runAdminCli([
+                "project", "create", "--name", "staging", "--env", "production",
+            ], {}, workspace);
+            const genericConfirmation = await runAdminCli([
+                "project", "create", "--name", "staging", "--env", "production",
+                "--confirm-production", "production",
+            ], {}, workspace);
+            const confirmed = await runAdminCli([
+                "project", "create", "--name", "staging", "--env", "production",
+                "--confirm-production", confirmationTarget,
+            ], {}, workspace);
+
+            expect(unconfirmed.exitCode).toBe(1);
+            expect(unconfirmed.output).toContain(`--confirm-production ${confirmationTarget}`);
+            expect(genericConfirmation.exitCode).toBe(1);
+            expect(confirmed.exitCode).toBe(0);
+            expect(requestCount).toBe(1);
+            for (const execution of [unconfirmed, genericConfirmation, confirmed]) {
+                expect(execution.output).not.toContain("platform-production-token");
+            }
+        } finally {
+            server.stop(true);
+            rmSync(workspace, { recursive: true, force: true });
         }
     });
 
@@ -307,6 +599,7 @@ describe("supacloud-admin process contract", () => {
             const execution = await runAdminCli([
                 "platform", "create_backup", "--ref", "fa_staging", "--backup_type", "full",
             ], {
+                SUPACLOUD_ENV: "test",
                 SUPACLOUD_API_URL: `http://127.0.0.1:${apiServer.port}`,
                 SUPACLOUD_API_TOKEN: fixtureToken,
             });
@@ -359,6 +652,7 @@ describe("supacloud-admin process contract", () => {
             const execution = await runAdminCli([
                 "platform", "create_backup", "--ref", "fa_staging", "--backup_type", "full",
             ], {
+                SUPACLOUD_ENV: "test",
                 SUPACLOUD_API_URL: `http://127.0.0.1:${apiServer.port}`,
                 SUPACLOUD_API_TOKEN: fixtureToken,
             });
@@ -428,6 +722,7 @@ describe("supacloud-admin process contract", () => {
                 "--service", "gotrue",
                 "--service_action", "stop",
             ], {
+                SUPACLOUD_ENV: "test",
                 SUPACLOUD_API_URL: `http://127.0.0.1:${apiServer.port}`,
                 SUPACLOUD_API_TOKEN: fixtureToken,
             });
@@ -501,6 +796,7 @@ describe("supacloud-admin process contract", () => {
                 "--service", "gotrue",
                 "--service_action", "stop",
             ], {
+                SUPACLOUD_ENV: "test",
                 SUPACLOUD_API_URL: `http://127.0.0.1:${apiServer.port}`,
                 SUPACLOUD_API_TOKEN: fixtureToken,
             });
@@ -536,6 +832,7 @@ describe("supacloud-admin process contract", () => {
             const execution = await runAdminCli(
                 ["project", "create", "--name", "rejected-project", "--domain", "invalid.example"],
                 {
+                    SUPACLOUD_ENV: "test",
                     SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
                     SUPACLOUD_API_TOKEN: "test-token",
                 },
