@@ -367,7 +367,7 @@ Commands:
   keys                  print the anon key
   keys --service-role   also print the privileged service_role key
   gen types             emit Supabase-shaped TypeScript database types
-  db reset              wipe database and storage, then re-run migrations
+  db reset              reset initialized database/storage and re-run migrations
   db diff               print schema changes outside migrations
   db pull [name]        write live schema changes as an applied migration
   snapshot create       create a compressed database/storage/secrets snapshot
@@ -375,6 +375,8 @@ Commands:
   upgrade               snapshot first, then apply pending migrations
   inspect               show table rows and sizes
   version               print the package version
+
+Fresh projects must run "supacloud-lite migrate" before "db reset".
 
 Options:
   -p, --port <n>          port (default 54321)

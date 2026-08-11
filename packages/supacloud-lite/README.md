@@ -109,6 +109,8 @@ supacloud-lite inspect
 supacloud-lite version
 ```
 
+首次初始化或 state 目录不存在/为空时，先运行 `supacloud-lite migrate`。`db reset` 只接受已经初始化且保留有效 `secrets.json` 标记的 state；它不会为 reset 创建或覆盖项目 secrets。
+
 通用参数：
 
 - `--project-dir`：包含 `supabase/` 的项目目录
@@ -257,7 +259,7 @@ RLS 表的 Realtime DELETE 无法在行删除后安全重放 SELECT policy，因
 应用代码、SQL migrations、RLS policy、Storage 调用和 Realtime 订阅可以保持原来的 Supabase 形状。迁移时仍需验证以下边界：
 
 1. 把现有 `supabase/migrations`、`config.toml`、Functions 和 seed 文件带到 Lite 项目。
-2. 用 `supacloud-lite db reset` 在空库重放 schema，再导入业务数据。
+2. 先用 `supacloud-lite migrate` 初始化空 state 并重放 schema；只有在已初始化的可丢弃 state 上需要再次重放时才使用 `supacloud-lite db reset`，然后导入业务数据。
 3. 对使用 PGlite 未提供扩展或 PostgREST 高级语法的 SQL/API 做替代处理。
 4. 通过真实 `@supabase/supabase-js` 集成测试验证关键查询、RLS、Storage 和 Realtime。
 
@@ -441,6 +443,8 @@ supacloud-lite inspect
 supacloud-lite version
 ```
 
+Run `supacloud-lite migrate` first when initializing a project or when the state directory is missing or empty. `db reset` only accepts initialized state with a valid `secrets.json` marker; it never creates or replaces project secrets for a reset.
+
 Common flags:
 
 - `--project-dir`: the project directory containing `supabase/`
@@ -589,7 +593,7 @@ Realtime DELETE on RLS tables cannot safely replay SELECT policies after a row i
 Application code, SQL migrations, RLS policies, Storage calls, and Realtime subscriptions can keep their original Supabase shape. When migrating, you still need to validate the following boundaries:
 
 1. Bring the existing `supabase/migrations`, `config.toml`, Functions, and seed files into the Lite project.
-2. Use `supacloud-lite db reset` to replay the schema on an empty database, then import business data.
+2. Use `supacloud-lite migrate` to initialize empty state and replay the schema. Use `supacloud-lite db reset` only when replaying an already initialized disposable state, then import business data.
 3. Provide alternatives for SQL/API that use extensions not offered by PGlite or advanced PostgREST syntax.
 4. Verify key queries, RLS, Storage, and Realtime through real `@supabase/supabase-js` integration tests.
 
