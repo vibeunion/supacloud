@@ -169,17 +169,25 @@ supported only on Linux, where Admin holds the canonical parent directory open
 and performs create, verification, and cleanup through `/proc/self/fd`. macOS
 and Windows fail with `ENV_FILE_PLATFORM_UNSUPPORTED` before creating a file or
 requesting remote credentials. On Linux, the target is exclusively reserved at
-mode `0600` before the remote mutation; parent and file device/inode identities
-are checked before and after writing. The response API URL must have the exact
-canonical origin implied by `--api_domain` or `--domain`, including its port.
-Existing files, symlinks, replaced parents, non-canonical paths, and missing
-directories are rejected. The recommended name is
+mode `0600` before the remote mutation. Every path ancestor must be owned by
+root or the Admin process user and must not grant group/world write access;
+root/user-owned sticky directories such as `/tmp` retain their kernel entry
+protection. Parent and file device/inode identities are checked before and
+after writing, including through the held parent descriptor after the file is
+closed. The file and parent directory are synced before success is reported.
+The response API URL and project name must exactly match the request binding;
+the origin comparison includes the port. Existing files, symlinks, replaced
+parents, non-canonical paths, and missing or untrusted directories are rejected.
+The recommended name is
 `.env.project-credentials.<environment>`; verify that the target repository
 ignores it before running the command (SupaCloud's own `.env.*` rule does).
 This is an application credential file, not a SupaCloud Admin/Management
-profile: never select it with `supacloud-admin --env` or `--env-file`. It
-contains only `SUPACLOUD_ENV`, `SUPACLOUD_PROJECT_REF`, `SUPABASE_URL`, and
-`SUPABASE_SERVICE_ROLE_KEY`; the public project origin is deliberately not
+profile: Admin rejects it before registering HTTP tools, so never select it
+with `supacloud-admin --env` or `--env-file`. Selected Admin files that contain
+project application credentials must also contain an explicit Management API
+URL and `SUPACLOUD_API_TOKEN`; Admin never substitutes the service-role key.
+The generated file contains only `SUPACLOUD_ENV`, `SUPACLOUD_PROJECT_REF`,
+`SUPABASE_URL`, and `SUPABASE_SERVICE_ROLE_KEY`; the public project origin is deliberately not
 written as `SUPACLOUD_API_URL`, which Admin reserves for the Management API.
 The success receipt marks `env_file_scope` as `project_application`. Standard
 output otherwise contains only credential-free fields. Supply

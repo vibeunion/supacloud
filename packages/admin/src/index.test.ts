@@ -304,6 +304,42 @@ describe("supacloud-admin process contract", () => {
         }
     });
 
+    test("rejects a generated project env file before registering Admin HTTP tools", async () => {
+        const workspace = mkdtempSync(join(tmpdir(), "supacloud-admin-project-env-source-"));
+        const envFile = join(workspace, ".env.project-credentials.test");
+        const serviceRoleKey = "project-service-role-secret";
+        let requestCount = 0;
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch() {
+                requestCount += 1;
+                return Response.json([]);
+            },
+        });
+        writeFileSync(envFile, [
+            "SUPACLOUD_ENV=test",
+            "SUPACLOUD_PROJECT_REF=abcdefghijklmnopqrst",
+            `SUPABASE_URL=http://127.0.0.1:${server.port}`,
+            `SUPABASE_SERVICE_ROLE_KEY=${serviceRoleKey}`,
+            "",
+        ].join("\n"));
+
+        try {
+            const execution = await runAdminCli([
+                "project", "list", "--env-file", envFile,
+            ], {}, workspace);
+
+            expect(execution.exitCode).not.toBe(0);
+            expect(execution.output).toContain("cannot be used as a SupaCloud Admin profile");
+            expect(execution.output).not.toContain(serviceRoleKey);
+            expect(requestCount).toBe(0);
+        } finally {
+            server.stop(true);
+            rmSync(workspace, { recursive: true, force: true });
+        }
+    });
+
     test("requires exact production project confirmation before HTTP and rejects cross-ref writes", async () => {
         const workspace = mkdtempSync(join(tmpdir(), "supacloud-admin-production-project-"));
         const requestedPaths: string[] = [];
@@ -919,6 +955,7 @@ describe("supacloud-admin process contract", () => {
             fetch() {
                 return Response.json({
                     ref: "abcdefghijklmnopqrst",
+                    name: "expired-credential",
                     api: { url: "https://api.example.test" },
                     credentials: { service_role_key: expiredServiceRoleKey },
                 }, { status: 201 });
@@ -976,6 +1013,7 @@ describe("supacloud-admin process contract", () => {
                 requestBody = await request.json() as Record<string, unknown>;
                 return Response.json({
                     ref: projectRef,
+                    name: "process-project",
                     api: { url: "https://api.example.test" },
                     credentials: {
                         service_role_key: serviceRoleKey,

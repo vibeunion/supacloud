@@ -1,5 +1,5 @@
 import { constants } from "node:fs";
-import { isAbsolute, basename, dirname, normalize, resolve } from "node:path";
+import { isAbsolute, basename, dirname, join, normalize, parse, resolve } from "node:path";
 import {
     lstat,
     open,
@@ -13,6 +13,8 @@ const SERVICE_ROLE_KEY = /^[A-Za-z0-9_-]{8,2048}\.[A-Za-z0-9_-]{8,8192}\.[A-Za-z
 const SERVICE_ROLE_ALGORITHMS = new Set(["HS256", "ES256"]);
 const MAX_ENV_FILE_PATH_BYTES = 4_096;
 const ENV_FILE_MODE = 0o600;
+const GROUP_OR_WORLD_WRITE_MODE = 0o022;
+const STICKY_DIRECTORY_MODE = 0o1000;
 const PROC_SELF_FD = "/proc/self/fd";
 
 export type ProjectCreateEnvErrorCode =
@@ -41,6 +43,7 @@ interface ProjectEnvFileStat {
     dev: number;
     ino: number;
     mode: number;
+    uid: number;
     isDirectory(): boolean;
     isFile(): boolean;
     isSymbolicLink(): boolean;
@@ -58,11 +61,13 @@ interface ProjectEnvFileHandle {
 interface ProjectEnvDirectoryHandle {
     fd: number;
     stat(): Promise<ProjectEnvFileStat>;
+    sync(): Promise<void>;
     close(): Promise<void>;
 }
 
 export interface ProjectEnvFileOperations {
     platform: NodeJS.Platform;
+    effectiveUid(): number;
     lstat(path: string): Promise<ProjectEnvFileStat>;
     realpath(path: string): Promise<string>;
     openDirectory(path: string): Promise<ProjectEnvDirectoryHandle>;
@@ -81,6 +86,7 @@ function descriptorRelativePath(directory: ProjectEnvDirectoryHandle, filename: 
 
 const nodeProjectEnvFileOperations: ProjectEnvFileOperations = {
     platform: process.platform,
+    effectiveUid: () => process.geteuid?.() ?? -1,
     lstat,
     realpath,
     openDirectory: path => open(
@@ -157,6 +163,7 @@ async function assertSafeParent(
     try {
         const parentBeforeRealpath = await operations.lstat(directory);
         const canonicalParent = await operations.realpath(directory);
+        await assertTrustedDirectoryChain(directory, operations);
         const parentAfterRealpath = await operations.lstat(directory);
         if (
             !parentBeforeRealpath.isDirectory()
@@ -176,6 +183,40 @@ async function assertSafeParent(
     } catch (error: unknown) {
         if (error instanceof ProjectCreateEnvError) throw error;
         throw new ProjectCreateEnvError("ENV_FILE_PARENT_INVALID");
+    }
+}
+
+function directoryChain(directory: string): string[] {
+    const root = parse(directory).root;
+    const ancestors = [root];
+    let current = root;
+    for (const component of directory.slice(root.length).split("/").filter(Boolean)) {
+        current = join(current, component);
+        ancestors.push(current);
+    }
+    return ancestors;
+}
+
+function assertTrustedDirectory(directoryStat: ProjectEnvFileStat, effectiveUid: number): void {
+    const ownerIsTrusted = directoryStat.uid === 0 || directoryStat.uid === effectiveUid;
+    const hasUntrustedWriteAccess = Boolean(directoryStat.mode & GROUP_OR_WORLD_WRITE_MODE);
+    const stickyEntryProtection = Boolean(directoryStat.mode & STICKY_DIRECTORY_MODE);
+    if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()
+        || !ownerIsTrusted || (hasUntrustedWriteAccess && !stickyEntryProtection)) {
+        throw new ProjectCreateEnvError("ENV_FILE_PARENT_INVALID");
+    }
+}
+
+async function assertTrustedDirectoryChain(
+    directory: string,
+    operations: ProjectEnvFileOperations,
+): Promise<void> {
+    const effectiveUid = operations.effectiveUid();
+    if (!Number.isSafeInteger(effectiveUid) || effectiveUid < 0) {
+        throw new ProjectCreateEnvError("ENV_FILE_PARENT_INVALID");
+    }
+    for (const ancestor of directoryChain(directory)) {
+        assertTrustedDirectory(await operations.lstat(ancestor), effectiveUid);
     }
 }
 
@@ -276,6 +317,31 @@ async function sanitizeAndClose(openFile: ProjectEnvFileHandle): Promise<boolean
     return sanitized;
 }
 
+async function directorySyncSucceeded(directoryHandle: ProjectEnvDirectoryHandle): Promise<boolean> {
+    try {
+        await directoryHandle.sync();
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+async function cleanedCredentialState(
+    cleanup: FailedProjectEnvFileCleanup,
+    sanitized: boolean,
+): Promise<CredentialFileState> {
+    const { directoryHandle, filename, fileIdentity, operations } = cleanup;
+    try {
+        const targetStat = await operations.lstatAt(directoryHandle, filename);
+        if (!fileIdentity || !sameFileIdentity(targetStat, fileIdentity)) return "unknown";
+        await operations.unlinkAt(directoryHandle, filename);
+    } catch (error: unknown) {
+        if (fileSystemErrorCode(error) !== "ENOENT") return "unknown";
+    }
+    if (!await directorySyncSucceeded(directoryHandle)) return "unknown";
+    return sanitized ? "absent" : "unknown";
+}
+
 async function removeFailedEnvFile(
     cleanup: FailedProjectEnvFileCleanup,
 ): Promise<CredentialFileState> {
@@ -289,19 +355,7 @@ async function removeFailedEnvFile(
         return "absent";
     }
     const sanitized = await sanitizeAndClose(openFile);
-    let credentialFileState: CredentialFileState = "absent";
-    try {
-        const targetStat = await operations.lstatAt(directoryHandle, filename);
-        if (!fileIdentity || !sameFileIdentity(targetStat, fileIdentity)) {
-            credentialFileState = "unknown";
-        } else {
-            await operations.unlinkAt(directoryHandle, filename);
-        }
-    } catch (error: unknown) {
-        if (fileSystemErrorCode(error) !== "ENOENT" || !sanitized) {
-            credentialFileState = "unknown";
-        }
-    }
+    const credentialFileState = await cleanedCredentialState(cleanup, sanitized);
     try {
         await directoryHandle.close();
     } catch {
@@ -316,9 +370,9 @@ function assertSecureFileType(fileStat: ProjectEnvFileStat): void {
     }
 }
 
-function assertSecureOpenFile(fileStat: ProjectEnvFileStat): void {
+function assertSecureOpenFile(fileStat: ProjectEnvFileStat, effectiveUid: number): void {
     assertSecureFileType(fileStat);
-    if ((fileStat.mode & 0o777) !== ENV_FILE_MODE) {
+    if ((fileStat.mode & 0o777) !== ENV_FILE_MODE || fileStat.uid !== effectiveUid) {
         throw new ProjectCreateEnvError("ENV_FILE_VERIFY_FAILED");
     }
 }
@@ -370,12 +424,31 @@ async function assertPreparedFileBinding(
     );
     const openFileStat = await prepared.openFile.stat();
     const targetStat = await operations.lstatAt(prepared.directoryHandle, prepared.filename);
-    assertSecureOpenFile(openFileStat);
-    assertSecureFileType(targetStat);
+    const effectiveUid = operations.effectiveUid();
+    assertSecureOpenFile(openFileStat, effectiveUid);
+    assertSecureOpenFile(targetStat, effectiveUid);
     if (
         !sameFileIdentity(openFileStat, prepared.fileIdentity)
         || !sameFileIdentity(targetStat, prepared.fileIdentity)
     ) {
+        throw new ProjectCreateEnvError("ENV_FILE_VERIFY_FAILED");
+    }
+}
+
+async function assertCompletedFileBinding(
+    prepared: PreparedProjectEnvFile,
+    operations: ProjectEnvFileOperations,
+): Promise<void> {
+    if (!prepared.directoryHandle) throw new ProjectCreateEnvError("ENV_FILE_VERIFY_FAILED");
+    await assertDirectoryBinding(
+        dirname(prepared.path),
+        prepared.directoryHandle,
+        prepared.parentIdentity,
+        operations,
+    );
+    const targetStat = await operations.lstatAt(prepared.directoryHandle, prepared.filename);
+    assertSecureOpenFile(targetStat, operations.effectiveUid());
+    if (!sameFileIdentity(targetStat, prepared.fileIdentity)) {
         throw new ProjectCreateEnvError("ENV_FILE_VERIFY_FAILED");
     }
 }
@@ -419,6 +492,8 @@ export async function writeProjectEnvFile(
         await assertPreparedFileBinding(prepared, operations);
         await openFile.close();
         prepared.openFile = null;
+        await assertCompletedFileBinding(prepared, operations);
+        await directoryHandle.sync();
         await directoryHandle.close();
         prepared.directoryHandle = null;
     } catch (error: unknown) {
@@ -531,11 +606,13 @@ export function parseProjectCreateWithoutCredentials(
 
 export function parseProjectCreateCredentials(
     responsePayload: unknown,
-    expectedApiOrigin?: string,
+    expectedApiOrigin: string | undefined,
+    expectedProjectName: string,
 ): ProjectCreateCredentials | null {
-    if (!expectedApiOrigin) return null;
+    if (!expectedApiOrigin || !expectedProjectName || !isRecord(responsePayload)) return null;
+    if (responsePayload.name !== expectedProjectName) return null;
     const identity = parseProjectCreateIdentity(responsePayload, expectedApiOrigin);
-    if (!identity || !isRecord(responsePayload)) return null;
+    if (!identity) return null;
     if (!isRecord(responsePayload.credentials)) return null;
     const serviceRoleKey = responsePayload.credentials.service_role_key;
     return isServiceRoleKey(serviceRoleKey) ? { ...identity, serviceRoleKey } : null;

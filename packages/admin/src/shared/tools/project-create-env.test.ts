@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
+    chmodSync,
     constants,
+    existsSync,
     lstatSync,
     mkdirSync,
     mkdtempSync,
@@ -24,6 +26,7 @@ import {
 } from "./project-create-env";
 
 const PROJECT_REF = "abcdefghijklmnopqrst";
+const PROJECT_NAME = "secure-project";
 const API_URL = "https://api.example.test";
 const FUTURE_EXPIRATION = 4_102_444_800;
 const sandboxes: string[] = [];
@@ -35,6 +38,7 @@ function descriptorPath(directory: { fd: number }, filename: string): string {
 function linuxTestOperations(): ProjectEnvFileOperations {
     return {
         platform: "linux",
+        effectiveUid: () => process.geteuid?.() ?? -1,
         lstat,
         realpath,
         openDirectory: path => open(
@@ -57,6 +61,7 @@ async function fileStatWithMode(
         dev: stat.dev,
         ino: stat.ino,
         mode,
+        uid: stat.uid,
         isDirectory: () => stat.isDirectory(),
         isFile: () => stat.isFile(),
         isSymbolicLink: () => stat.isSymbolicLink(),
@@ -105,6 +110,7 @@ describe("project create response parsing", () => {
         const remoteSecret = "remote-secret-that-must-not-be-projected";
         const parsed = parseProjectCreateCredentials({
             ref: PROJECT_REF,
+            name: PROJECT_NAME,
             api: { url: API_URL, token: remoteSecret },
             credentials: {
                 service_role_key: SERVICE_ROLE_KEY,
@@ -114,7 +120,7 @@ describe("project create response parsing", () => {
             service_role_key: remoteSecret,
             secret_key: remoteSecret,
             message: remoteSecret.repeat(1_024),
-        }, "https://api.example.test");
+        }, "https://api.example.test", PROJECT_NAME);
 
         expect(parsed).toEqual(credentials());
         expect(JSON.stringify(parsed)).not.toContain(remoteSecret);
@@ -131,14 +137,16 @@ describe("project create response parsing", () => {
     test("rejects credential delivery without a complete expected API domain", () => {
         expect(parseProjectCreateCredentials({
             ref: PROJECT_REF,
+            name: PROJECT_NAME,
             api: { url: `https://${PROJECT_REF}.attacker.example` },
             credentials: { service_role_key: SERVICE_ROLE_KEY },
-        })).toBeNull();
+        }, undefined, PROJECT_NAME)).toBeNull();
     });
 
     test("binds credential delivery to the canonical API origin and port", () => {
         const response = (apiUrl: string) => ({
             ref: PROJECT_REF,
+            name: PROJECT_NAME,
             api: { url: apiUrl },
             credentials: { service_role_key: SERVICE_ROLE_KEY },
         });
@@ -146,11 +154,22 @@ describe("project create response parsing", () => {
         expect(parseProjectCreateCredentials(
             response("https://api.example.test:443"),
             "https://api.example.test",
+            PROJECT_NAME,
         )).toEqual(credentials());
         expect(parseProjectCreateCredentials(
             response("https://api.example.test:8443"),
             "https://api.example.test",
+            PROJECT_NAME,
         )).toBeNull();
+    });
+
+    test("binds one-time credentials to the exact requested project name", () => {
+        expect(parseProjectCreateCredentials({
+            ref: PROJECT_REF,
+            name: "stale-project",
+            api: { url: API_URL },
+            credentials: { service_role_key: SERVICE_ROLE_KEY },
+        }, API_URL, PROJECT_NAME)).toBeNull();
     });
 
     test.each([
@@ -172,8 +191,9 @@ describe("project create response parsing", () => {
         ["shell credential", { ref: PROJECT_REF, api: { url: API_URL }, credentials: { service_role_key: "headerpart.payloadpart.$(private-command)" } }],
     ])("rejects %s without reflecting hostile fields", (_name, payload) => {
         expect(parseProjectCreateCredentials(
-            payload,
+            { name: PROJECT_NAME, ...payload },
             "https://api.example.test",
+            PROJECT_NAME,
         )).toBeNull();
     });
 
@@ -250,6 +270,28 @@ describe.skipIf(process.platform !== "linux")("secure project env file", () => {
             .rejects.toMatchObject({ code: "ENV_FILE_PATH_INVALID" });
     });
 
+    test("rejects group or world-writable target parents and ancestors", async () => {
+        const root = sandbox();
+        const writableParent = join(root, "writable-parent");
+        const writableAncestor = join(root, "writable-ancestor");
+        const protectedParent = join(writableAncestor, "protected-parent");
+        mkdirSync(writableParent, { mode: 0o700 });
+        mkdirSync(writableAncestor, { mode: 0o700 });
+        mkdirSync(protectedParent, { mode: 0o700 });
+        chmodSync(writableParent, 0o777);
+        chmodSync(writableAncestor, 0o777);
+
+        for (const target of [
+            join(writableParent, "direct.env"),
+            join(protectedParent, "ancestor.env"),
+        ]) {
+            await expect(prepareProjectEnvFile(target, "test"))
+                .rejects.toMatchObject({ code: "ENV_FILE_PARENT_INVALID" });
+        }
+        expect(readdirSync(writableParent)).toEqual([]);
+        expect(readdirSync(protectedParent)).toEqual([]);
+    });
+
     test.each(["chmod", "write", "sync", "stat", "close"] as const)(
         "sanitizes %s failures and removes the reserved target",
         async failureStage => {
@@ -291,9 +333,12 @@ describe.skipIf(process.platform !== "linux")("secure project env file", () => {
             const target = join(directory, `${failureStage}.env`);
             const prepared = await prepareProjectEnvFile(target, "test", operations);
 
-            await expect(writeProjectEnvFile(prepared, credentials(), operations)).rejects.toMatchObject({
-                code: "ENV_FILE_WRITE_FAILED",
-            });
+            const cleanupUnknown = failureStage === "sync" || failureStage === "close";
+            await expect(writeProjectEnvFile(prepared, credentials(), operations)).rejects.toMatchObject(
+                cleanupUnknown
+                    ? { code: "ENV_FILE_CLEANUP_FAILED", credentialFileState: "unknown" }
+                    : { code: "ENV_FILE_WRITE_FAILED", credentialFileState: "absent" },
+            );
             expect(readdirSync(directory)).toEqual([]);
         },
     );
@@ -389,6 +434,107 @@ describe.skipIf(process.platform !== "linux")("secure project env file", () => {
         expect(readFileSync(target, "utf8")).toContain(SERVICE_ROLE_KEY);
     });
 
+    test("reports unknown when the created directory entry cannot be synced", async () => {
+        const baseOperations = linuxTestOperations();
+        let directorySyncCalls = 0;
+        const operations: ProjectEnvFileOperations = {
+            ...baseOperations,
+            async openDirectory(path) {
+                const directory = await baseOperations.openDirectory(path);
+                return {
+                    fd: directory.fd,
+                    stat: () => directory.stat(),
+                    sync: async () => {
+                        directorySyncCalls += 1;
+                        if (directorySyncCalls === 1) throw new Error("private-directory-sync");
+                        await directory.sync();
+                    },
+                    close: () => directory.close(),
+                };
+            },
+        };
+        const directory = sandbox();
+        const target = join(directory, "directory-sync.env");
+        const prepared = await prepareProjectEnvFile(target, "test", operations);
+
+        await expect(writeProjectEnvFile(prepared, credentials(), operations)).rejects.toMatchObject({
+            code: "ENV_FILE_CLEANUP_FAILED",
+            credentialFileState: "unknown",
+        });
+        expect(directorySyncCalls).toBe(2);
+        expect(existsSync(target)).toBe(false);
+    });
+
+    test("reports unknown when cleanup unlink cannot be synced", async () => {
+        const baseOperations = linuxTestOperations();
+        const operations: ProjectEnvFileOperations = {
+            ...baseOperations,
+            async openDirectory(path) {
+                const directory = await baseOperations.openDirectory(path);
+                return {
+                    fd: directory.fd,
+                    stat: () => directory.stat(),
+                    sync: async () => { throw new Error("private-cleanup-sync"); },
+                    close: () => directory.close(),
+                };
+            },
+            async openExclusiveAt(directory, filename, mode) {
+                const openFile = await baseOperations.openExclusiveAt(directory, filename, mode);
+                return {
+                    chmod: requestedMode => openFile.chmod(requestedMode),
+                    writeFile: async () => { throw new Error("private-write"); },
+                    sync: () => openFile.sync(),
+                    stat: () => openFile.stat(),
+                    truncate: length => openFile.truncate(length),
+                    close: () => openFile.close(),
+                };
+            },
+        };
+        const directory = sandbox();
+        const target = join(directory, "cleanup-sync.env");
+        const prepared = await prepareProjectEnvFile(target, "test", operations);
+
+        await expect(writeProjectEnvFile(prepared, credentials(), operations)).rejects.toMatchObject({
+            code: "ENV_FILE_CLEANUP_FAILED",
+            credentialFileState: "unknown",
+        });
+        expect(existsSync(target)).toBe(false);
+    });
+
+    test("does not report absent when truncation fails before a durable unlink", async () => {
+        const baseOperations = linuxTestOperations();
+        let credentialsWritten = false;
+        const operations: ProjectEnvFileOperations = {
+            ...baseOperations,
+            async openExclusiveAt(directory, filename, mode) {
+                const openFile = await baseOperations.openExclusiveAt(directory, filename, mode);
+                return {
+                    chmod: requestedMode => openFile.chmod(requestedMode),
+                    writeFile: async contents => {
+                        await openFile.writeFile(contents);
+                        credentialsWritten = true;
+                    },
+                    sync: () => openFile.sync(),
+                    stat: () => fileStatWithMode(
+                        openFile,
+                        credentialsWritten ? 0o100644 : 0o100600,
+                    ),
+                    truncate: async () => { throw new Error("private-truncate"); },
+                    close: () => openFile.close(),
+                };
+            },
+        };
+        const directory = sandbox();
+        const target = join(directory, "truncate-unlink.env");
+        const prepared = await prepareProjectEnvFile(target, "test", operations);
+
+        await expect(writeProjectEnvFile(prepared, credentials(), operations)).rejects.toMatchObject({
+            code: "ENV_FILE_CLEANUP_FAILED",
+            credentialFileState: "unknown",
+        });
+        expect(existsSync(target)).toBe(false);
+    });
+
     test("reserves the target before credential delivery and never overwrites it", async () => {
         const directory = sandbox();
         const target = join(directory, "reserved.env");
@@ -470,6 +616,40 @@ describe.skipIf(process.platform !== "linux")("secure project env file", () => {
             .rejects.toMatchObject({ code: "ENV_FILE_PARENT_INVALID" });
         expect(readdirSync(parent)).toEqual([]);
         expect(readdirSync(movedParent)).toEqual([]);
+    });
+
+    test("rejects target replacement from the final file close before success", async () => {
+        const baseOperations = linuxTestOperations();
+        const directory = sandbox();
+        const target = join(directory, "close-race.env");
+        let replacementWritten = false;
+        const operations: ProjectEnvFileOperations = {
+            ...baseOperations,
+            async openExclusiveAt(parent, filename, mode) {
+                const openFile = await baseOperations.openExclusiveAt(parent, filename, mode);
+                return {
+                    chmod: requestedMode => openFile.chmod(requestedMode),
+                    writeFile: contents => openFile.writeFile(contents),
+                    sync: () => openFile.sync(),
+                    stat: () => openFile.stat(),
+                    truncate: length => openFile.truncate(length),
+                    close: async () => {
+                        await openFile.close();
+                        if (replacementWritten) return;
+                        replacementWritten = true;
+                        rmSync(target, { force: true });
+                        writeFileSync(target, "attacker replacement", { mode: 0o600 });
+                    },
+                };
+            },
+        };
+        const prepared = await prepareProjectEnvFile(target, "test", operations);
+
+        await expect(writeProjectEnvFile(prepared, credentials(), operations)).rejects.toMatchObject({
+            code: "ENV_FILE_CLEANUP_FAILED",
+            credentialFileState: "unknown",
+        });
+        expect(readFileSync(target, "utf8")).toBe("attacker replacement");
     });
 });
 

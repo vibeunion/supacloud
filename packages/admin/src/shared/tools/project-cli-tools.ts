@@ -166,6 +166,11 @@ function projectCreateEnvironment(candidate: unknown): ProjectEnvironment | unde
     return candidate === "test" || candidate === "production" ? candidate : undefined;
 }
 
+interface ProjectCreateResponseBinding {
+    projectName: string;
+    apiOrigin?: string;
+}
+
 function projectCreateFileFailure(
     identity: ProjectCreateIdentity,
     credentialFileState: CredentialFileState,
@@ -260,19 +265,23 @@ async function discardProjectEnvReservation(
 async function projectCreateWithEnvResponse(
     response: HttpResult<unknown>,
     preparedEnvFile: PreparedProjectEnvFile,
-    expectedApiOrigin?: string,
+    binding: ProjectCreateResponseBinding,
     fileOperations?: ProjectEnvFileOperations,
 ): Promise<ProjectToolResponse> {
-    const credentials = parseProjectCreateCredentials(response.data, expectedApiOrigin);
+    const credentials = parseProjectCreateCredentials(
+        response.data,
+        binding.apiOrigin,
+        binding.projectName,
+    );
     if (!credentials) {
         const cleanupFailure = await discardProjectEnvReservation(
             preparedEnvFile,
             response,
-            expectedApiOrigin,
+            binding.apiOrigin,
             fileOperations,
         );
         return cleanupFailure
-            ?? invalidProjectCreateResponse(response.data, response.status, expectedApiOrigin);
+            ?? invalidProjectCreateResponse(response.data, response.status, binding.apiOrigin);
     }
     const writeFailure = await writeCreatedProjectEnv(
         preparedEnvFile,
@@ -286,7 +295,7 @@ async function projectCreateWithEnvResponse(
 async function projectCreateResponse(
     response: HttpResult<unknown>,
     preparedEnvFile: PreparedProjectEnvFile | undefined,
-    expectedApiOrigin: string | undefined,
+    binding: ProjectCreateResponseBinding,
     fileOperations?: ProjectEnvFileOperations,
 ): Promise<ProjectToolResponse> {
     if (!response.ok || response.status !== 201) {
@@ -294,7 +303,7 @@ async function projectCreateResponse(
             const cleanupFailure = await discardProjectEnvReservation(
                 preparedEnvFile,
                 response,
-                expectedApiOrigin,
+                binding.apiOrigin,
                 fileOperations,
             );
             if (cleanupFailure) return cleanupFailure;
@@ -304,8 +313,13 @@ async function projectCreateResponse(
             : projectCreateMutationFailure(response);
     }
     return preparedEnvFile
-        ? projectCreateWithEnvResponse(response, preparedEnvFile, expectedApiOrigin, fileOperations)
-        : projectCreateWithoutEnvResponse(response, expectedApiOrigin);
+        ? projectCreateWithEnvResponse(
+            response,
+            preparedEnvFile,
+            binding,
+            fileOperations,
+        )
+        : projectCreateWithoutEnvResponse(response, binding.apiOrigin);
 }
 
 function failedProjectServiceHttpResponse(response: HttpResult<unknown>): ProjectToolResponse {
@@ -621,7 +635,7 @@ export function registerAdminProjectCliTools(
                     return projectCreateResponse(
                         await http.post("/v1/projects", createRequest),
                         preparedEnvFile,
-                        boundApiOrigin,
+                        { projectName: name, apiOrigin: boundApiOrigin },
                         fileOperations,
                     );
                 }

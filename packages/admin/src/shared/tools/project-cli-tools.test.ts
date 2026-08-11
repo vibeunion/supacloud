@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
+    chmodSync,
     constants,
     existsSync,
+    mkdirSync,
     mkdtempSync,
     readFileSync,
     realpathSync,
@@ -34,6 +36,7 @@ function testProjectEnvFileOperations(): ProjectEnvFileOperations {
     const directoryPaths = new WeakMap<object, string>();
     return {
         platform: "linux",
+        effectiveUid: () => process.geteuid?.() ?? -1,
         lstat,
         realpath,
         async openDirectory(path) {
@@ -41,6 +44,7 @@ function testProjectEnvFileOperations(): ProjectEnvFileOperations {
             const directoryHandle = {
                 fd: openDirectory.fd,
                 stat: () => openDirectory.stat(),
+                sync: async () => {},
                 close: () => openDirectory.close(),
             };
             directoryPaths.set(directoryHandle, path);
@@ -78,6 +82,7 @@ function createSandbox(): string {
 function createResponse(overrides: Record<string, unknown> = {}): Record<string, unknown> {
     return {
         ref: CREATE_PROJECT_REF,
+        name: "secure-project",
         api: { url: "https://api.example.test" },
         credentials: { service_role_key: CREATE_SERVICE_ROLE_KEY },
         ...overrides,
@@ -293,7 +298,10 @@ describe("admin project create", () => {
             post: async () => ({
                 ok: true,
                 status: 201,
-                data: createResponse({ api: { url: "https://api.example.test:8443" } }),
+                data: createResponse({
+                    name: "wrong-origin-project",
+                    api: { url: "https://api.example.test:8443" },
+                }),
             }),
         });
 
@@ -309,6 +317,31 @@ describe("admin project create", () => {
         expect(JSON.parse(response.content[0].text).error.code).toBe("OUTCOME_UNKNOWN");
         expect(response.content[0].text).not.toContain(CREATE_SERVICE_ROLE_KEY);
         expect(() => readFileSync(envFile, "utf8")).toThrow();
+    });
+
+    test("rejects stale credentials for a different project name", async () => {
+        const directory = createSandbox();
+        const envFile = join(directory, "stale-name.env");
+        const projectCallback = captureAdminProjectTool({
+            post: async () => ({
+                ok: true,
+                status: 201,
+                data: createResponse({ name: "different-project" }),
+            }),
+        });
+
+        const response = await projectCallback({
+            action: "create",
+            name: "secure-project",
+            api_domain: "api.example.test",
+            env_file: envFile,
+            environment: "test",
+        });
+
+        expect(response.isError).toBe(true);
+        expect(JSON.parse(response.content[0].text).error.code).toBe("INVALID_RESPONSE");
+        expect(response.content[0].text).not.toContain(CREATE_SERVICE_ROLE_KEY);
+        expect(existsSync(envFile)).toBe(false);
     });
 
     test("keeps default create output credential-free without requesting delivery", async () => {
@@ -455,6 +488,42 @@ describe("admin project create", () => {
         expect(readFileSync(envFile, "utf8")).toBe("keep-me");
     });
 
+    test.each(["direct parent", "ancestor"] as const)(
+        "rejects a group or world-writable %s before the remote create",
+        async unsafeLevel => {
+            const root = createSandbox();
+            const writableDirectory = join(root, "writable");
+            const targetParent = unsafeLevel === "direct parent"
+                ? writableDirectory
+                : join(writableDirectory, "protected");
+            mkdirSync(writableDirectory, { mode: 0o700 });
+            if (targetParent !== writableDirectory) mkdirSync(targetParent, { mode: 0o700 });
+            chmodSync(writableDirectory, 0o777);
+            const envFile = join(targetParent, "credentials.env");
+            let postCalls = 0;
+            const projectCallback = captureAdminProjectTool({
+                post: async () => {
+                    postCalls += 1;
+                    return { ok: true, status: 201, data: createResponse() };
+                },
+            });
+
+            const response = await projectCallback({
+                action: "create",
+                name: "unsafe-path-project",
+                api_domain: "api.example.test",
+                env_file: envFile,
+                environment: "test",
+            });
+
+            expect(postCalls).toBe(0);
+            expect(response.isError).toBe(true);
+            expect(JSON.parse(response.content[0].text).error.code)
+                .toBe("ENV_FILE_PARENT_INVALID");
+            expect(existsSync(envFile)).toBe(false);
+        },
+    );
+
     test.each(["darwin", "win32"] as const)(
         "fails closed on %s before requesting remote credentials or creating a file",
         async platform => {
@@ -495,7 +564,7 @@ describe("admin project create", () => {
                 } catch (error: unknown) {
                     exclusiveRaceBlocked = (error as { code?: string }).code === "EEXIST";
                 }
-                return { ok: true, status: 201, data: createResponse() };
+                return { ok: true, status: 201, data: createResponse({ name: "raced-project" }) };
             },
         });
 
@@ -546,6 +615,7 @@ describe("admin project create", () => {
                             dev: stat.dev,
                             ino: stat.ino,
                             mode: stat.mode,
+                            uid: stat.uid,
                             isDirectory: () => false,
                             isFile: () => !credentialsWritten,
                             isSymbolicLink: () => false,
@@ -558,7 +628,11 @@ describe("admin project create", () => {
             unlinkAt: async () => { throw new Error("private-unlink-detail"); },
         };
         const projectCallback = captureAdminProjectTool({
-            post: async () => ({ ok: true, status: 201, data: createResponse() }),
+            post: async () => ({
+                ok: true,
+                status: 201,
+                data: createResponse({ name: "cleanup-unknown-project" }),
+            }),
         }, { projectEnvFileOperations: fileOperations });
 
         const response = await projectCallback({

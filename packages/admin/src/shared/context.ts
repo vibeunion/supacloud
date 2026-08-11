@@ -105,6 +105,32 @@ function normalizeUrl(urlCandidate: string): string {
     }
 }
 
+function managementApiUrlCandidate(environment: Record<string, string>): string {
+    return environment.SUPACLOUD_API_URL
+        || environment.SUPACLOUD_MANAGEMENT_API_URL
+        || environment.MANAGEMENT_API_URL
+        || "";
+}
+
+function assertAdminFileContext(environment: Record<string, string>, path: string): void {
+    const hasProjectApplicationCredentials = Boolean(
+        environment.SUPABASE_URL?.trim() || environment.SUPABASE_SERVICE_ROLE_KEY?.trim(),
+    );
+    const hasManagementApiUrl = Boolean(normalizeUrl(managementApiUrlCandidate(environment)));
+    const hasManagementApiToken = Boolean(environment.SUPACLOUD_API_TOKEN?.trim());
+    if (hasProjectApplicationCredentials && (!hasManagementApiUrl || !hasManagementApiToken)) {
+        throw new Error(
+            `Project application credentials in ${path} cannot be used as a SupaCloud Admin profile; `
+            + "SUPACLOUD_API_URL and SUPACLOUD_API_TOKEN are required",
+        );
+    }
+    if (hasManagementApiUrl !== hasManagementApiToken) {
+        throw new Error(
+            `SupaCloud Admin API context in ${path} requires both SUPACLOUD_API_URL and SUPACLOUD_API_TOKEN`,
+        );
+    }
+}
+
 function hostFromUrl(urlCandidate: string): string {
     try {
         return new URL(urlCandidate).hostname;
@@ -146,10 +172,7 @@ function sourceAdminCore(environment: Record<string, string>) {
     const supabaseUrl = normalizeUrl(environment.SUPABASE_URL || "");
     const projectRef = (environment.SUPACLOUD_PROJECT_REF || environment.X_PROJECT_REF || "").trim()
         || inferProjectRefFromSupabaseUrl(supabaseUrl);
-    const explicitApiUrl = environment.SUPACLOUD_API_URL
-        || environment.SUPACLOUD_MANAGEMENT_API_URL
-        || environment.MANAGEMENT_API_URL
-        || "";
+    const explicitApiUrl = managementApiUrlCandidate(environment);
     const apiUrl = normalizeUrl(explicitApiUrl)
         || inferManagementApiUrlFromSupabaseUrl(supabaseUrl, projectRef)
         || normalizeUrl(environment.SUPACLOUD_HOST ? `http://${environment.SUPACLOUD_HOST}:9090` : "");
@@ -185,6 +208,7 @@ function namedEnvironmentSource(cwd: string, selector: string): ContextSource {
     if (normalizeEnvironmentName(selectedEnvironment.SUPACLOUD_ENV) !== environment) {
         throw new Error(`SUPACLOUD_ENV in ${path} does not match selector ${selector}`);
     }
+    assertAdminFileContext(selectedEnvironment, path);
     return {
         environment: selectedEnvironment,
         kind: "named_env_file",
@@ -197,6 +221,7 @@ function explicitEnvironmentSource(cwd: string, envFile: string): ContextSource 
     const path = resolve(cwd, envFile);
     const selectedEnvironment = readEnvFile(path, true);
     if (!selectedEnvironment.SUPACLOUD_ENV) throw new Error(`SUPACLOUD_ENV is required in ${path}`);
+    assertAdminFileContext(selectedEnvironment, path);
     return {
         environment: selectedEnvironment,
         kind: "explicit_env_file",
@@ -208,6 +233,7 @@ function explicitEnvironmentSource(cwd: string, envFile: string): ContextSource 
 function legacyEnvironmentSource(cwd: string): ContextSource {
     const path = resolve(cwd, ".env");
     const environment = readEnvFile(path, false);
+    if (Object.keys(environment).length > 0) assertAdminFileContext(environment, path);
     const environmentName = environment.SUPACLOUD_ENV
         ? normalizeEnvironmentName(environment.SUPACLOUD_ENV)
         : "";
