@@ -146,6 +146,7 @@ supacloud-cli queue dlq --queue emails --limit 20
 supacloud-cli task_events inspect_webhook --ref abc123
 supacloud-cli database query --sql "select now()"
 supacloud-cli database query --ref abc123 --file ./queries/vector-search.sql
+supacloud-cli database migration_inventory --ref abc123
 supacloud-cli database push_migrations --ref abc123 --dir supabase/migrations --dry_run
 supacloud-cli supabase migration_new --name add_accounts
 supacloud-cli supabase db_diff --schema public --name add_accounts
@@ -161,6 +162,13 @@ supacloud-cli edge_functions activate --ref abc123 --slug hello --version 3
 supacloud-cli scheduled_functions list --ref abc123
 supacloud-cli secrets upsert --ref abc123 --from-env API_KEY,WEBHOOK_SECRET
 ```
+
+`database migration_inventory` reads the canonical migration ledger through the
+project-scoped Management API and prints only a validated JSON array. It rejects
+non-2xx responses, malformed entries, duplicate migration identities, checksum
+drift, and statement-count mismatches instead of treating them as an empty
+ledger. `database list_migrations` remains available with its legacy SQL-backed,
+human-readable behavior.
 
 `edge_functions deploy --path` bundles local TypeScript and dependencies with
 Bun and runs a local syntax check before upload. The Management API validates and

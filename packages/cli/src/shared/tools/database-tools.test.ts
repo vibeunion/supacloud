@@ -5,8 +5,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { migrationVersionFromFilename, registerDatabaseTools, vectorWarningsForPendingMigrations } from "./database-tools";
 
+interface CapturedDatabaseToolResponse {
+    content: Array<{ text: string }>;
+    isError?: boolean;
+}
+
 function captureDatabaseTool(http: Record<string, unknown>, projectRef?: string) {
-    let callback: ((args: Record<string, unknown>) => Promise<{ content: Array<{ text: string }> }>) | undefined;
+    let callback: ((args: Record<string, unknown>) => Promise<CapturedDatabaseToolResponse>) | undefined;
     registerDatabaseTools({
         tool(name: string, _description: string, _schema: Record<string, unknown>, toolCallback: typeof callback) {
             if (name !== "database") return;
@@ -16,6 +21,22 @@ function captureDatabaseTool(http: Record<string, unknown>, projectRef?: string)
 
     if (!callback) throw new Error("database tool was not registered");
     return callback;
+}
+
+function migrationInventoryFixture(overrides: Record<string, unknown> = {}) {
+    const version = typeof overrides.version === "string" ? overrides.version : "20260811090000";
+    const name = overrides.name === undefined ? "20260811090000_create_inventory" : overrides.name;
+    const statements = Array.isArray(overrides.statements) ? overrides.statements : ["SELECT 1;"];
+    const checksum = createHash("sha256").update(JSON.stringify({ version, name, statements })).digest("hex");
+    return {
+        version,
+        name,
+        statements,
+        statement_count: statements.length,
+        checksum,
+        applied_at: "2026-08-11 09:00:00+00",
+        ...overrides,
+    };
 }
 
 describe("database migration helpers", () => {
@@ -31,6 +52,126 @@ describe("database migration helpers", () => {
         await callback({ action: "project_url", ref: "override-ref" });
 
         expect(calls).toEqual(["/v1/projects/override-ref"]);
+    });
+
+    test("returns a validated, projected, numerically sorted migration inventory", async () => {
+        const requests: Array<{ path: string; maxResponseBytes?: number }> = [];
+        const later = migrationInventoryFixture({
+            version: "9007199254740993001",
+            name: "later",
+            applied_at: null,
+            response_secret: "must-not-be-projected",
+        });
+        const earlier = migrationInventoryFixture({ version: "10", name: null });
+        const callback = captureDatabaseTool({
+            get: async (path: string, options: { maxResponseBytes?: number }) => {
+                requests.push({ path, maxResponseBytes: options.maxResponseBytes });
+                return { ok: true, status: 200, data: [later, earlier] };
+            },
+        });
+
+        const response = await callback({ action: "migration_inventory", ref: "proj" });
+        const inventory = JSON.parse(response.content[0].text);
+
+        expect(response.isError).toBeUndefined();
+        expect(requests).toEqual([{
+            path: "/v1/projects/proj/database/migrations",
+            maxResponseBytes: 64 * 1024 * 1024,
+        }]);
+        expect(inventory.map((entry: { version: string }) => entry.version)).toEqual(["10", "9007199254740993001"]);
+        expect(inventory[1]).not.toHaveProperty("response_secret");
+        expect(Object.keys(inventory[0])).toEqual([
+            "version", "name", "statements", "statement_count", "checksum", "applied_at",
+        ]);
+    });
+
+    test("represents a valid empty migration ledger as a JSON array", async () => {
+        const callback = captureDatabaseTool({
+            get: async () => ({ ok: true, status: 200, data: [] }),
+        });
+
+        const response = await callback({ action: "migration_inventory", ref: "proj" });
+
+        expect(response.isError).toBeUndefined();
+        expect(response.content[0].text).toBe("[]");
+    });
+
+    test.each([409, 503])("returns a secret-free error for HTTP %d", async (status) => {
+        const responseSecret = `migration-inventory-response-${status}`;
+        const callback = captureDatabaseTool({
+            get: async () => ({
+                ok: false,
+                status,
+                data: { message: responseSecret },
+            }),
+        });
+
+        const response = await callback({ action: "migration_inventory", ref: "proj" });
+        const failure = JSON.parse(response.content[0].text);
+
+        expect(response.isError).toBe(true);
+        expect(failure).toEqual({
+            ok: false,
+            operation: "database.migration_inventory",
+            error: { code: "HTTP_ERROR", http_status: status },
+        });
+        expect(response.content[0].text).not.toContain(responseSecret);
+    });
+
+    test.each([
+        ["non-array top level", { rows: [] }],
+        ["non-canonical version", [migrationInventoryFixture({ version: "01" })]],
+        ["missing name", [(() => {
+            const entry = migrationInventoryFixture();
+            delete (entry as Record<string, unknown>).name;
+            return entry;
+        })()]],
+        ["empty name", [migrationInventoryFixture({ name: "" })]],
+        ["non-array statements", [{ ...migrationInventoryFixture(), statements: "SELECT 1;" }]],
+        ["non-string statement", [{ ...migrationInventoryFixture(), statements: [1], statement_count: 1 }]],
+        ["statement count mismatch", [{ ...migrationInventoryFixture(), statement_count: 2 }]],
+        ["invalid checksum", [{ ...migrationInventoryFixture(), checksum: "invalid" }]],
+        ["semantic checksum mismatch", [{ ...migrationInventoryFixture(), checksum: "0".repeat(64) }]],
+        ["invalid applied timestamp", [{ ...migrationInventoryFixture(), applied_at: "not-a-timestamp" }]],
+        ["duplicate identity", (() => {
+            const entry = migrationInventoryFixture();
+            return [entry, { ...entry }];
+        })()],
+    ])("rejects %s instead of reporting an empty ledger", async (_label, payload) => {
+        const callback = captureDatabaseTool({
+            get: async () => ({ ok: true, status: 200, data: payload }),
+        });
+
+        const response = await callback({ action: "migration_inventory", ref: "proj" });
+
+        expect(response.isError).toBe(true);
+        expect(JSON.parse(response.content[0].text)).toEqual({
+            ok: false,
+            operation: "database.migration_inventory",
+            error: { code: "INVALID_RESPONSE", http_status: 200 },
+        });
+    });
+
+    test("preserves the SQL-backed, human-readable list_migrations behavior", async () => {
+        const posts: Array<{ path: string; body: { sql: string } }> = [];
+        const callback = captureDatabaseTool({
+            get: async () => { throw new Error("list_migrations must not use the inventory endpoint"); },
+            post: async (path: string, body: { sql: string }) => {
+                posts.push({ path, body });
+                return {
+                    ok: true,
+                    status: 200,
+                    data: { rows: [{ version: "20260811090000", applied_at: "2026-08-11" }] },
+                };
+            },
+        });
+
+        const response = await callback({ action: "list_migrations", ref: "proj" });
+
+        expect(posts).toHaveLength(1);
+        expect(posts[0].path).toBe("/v1/projects/proj/database/sql");
+        expect(posts[0].body.sql).toContain("FROM schema_migrations");
+        expect(response.content[0].text).toContain("📝 Migrations:");
     });
 
     test("uses Supabase timestamp prefix as migration version", () => {

@@ -7,7 +7,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { Type } from "@sinclair/typebox";
 import { optional, stringEnum, withDescription } from "../schema";
-import type { HttpTransport } from "../transports/http";
+import type { HttpResult, HttpTransport } from "../transports/http";
 
 export interface DatabaseToolsConfig {
     readOnly?: boolean;
@@ -18,6 +18,7 @@ const MAX_MIGRATION_VERSION = 9_223_372_036_854_775_807n;
 const FALLBACK_MIGRATION_VERSION_BASE = 8_000_000_000_000_000_000n;
 const FALLBACK_MIGRATION_VERSION_RANGE = 1_000_000_000_000_000_000n;
 const FALLBACK_MIGRATION_VERSION_LIMIT = FALLBACK_MIGRATION_VERSION_BASE + FALLBACK_MIGRATION_VERSION_RANGE;
+const MAX_MIGRATION_INVENTORY_BYTES = 64 * 1024 * 1024;
 
 interface MigrationFile {
     file: string;
@@ -25,6 +26,127 @@ interface MigrationFile {
     version: string;
     sql: string;
     rawBytes: Uint8Array;
+}
+
+interface MigrationInventoryEntry {
+    version: string;
+    name: string | null;
+    statements: string[];
+    statement_count: number;
+    checksum: string;
+    applied_at: string | null;
+}
+
+interface DatabaseToolResponse {
+    content: Array<{ type: "text"; text: string }>;
+    isError?: boolean;
+}
+
+function isMigrationInventoryVersion(version: unknown): version is string {
+    if (typeof version !== "string" || !/^\d{1,19}$/.test(version)) return false;
+    const numericVersion = BigInt(version);
+    return numericVersion >= 1n
+        && numericVersion <= MAX_MIGRATION_VERSION
+        && numericVersion.toString() === version;
+}
+
+function isMigrationInventoryName(name: unknown): name is string | null {
+    return name === null
+        || (typeof name === "string" && name.length <= 255 && name.length > 0 && name.trim() === name);
+}
+
+function isMigrationInventoryStatements(statements: unknown): statements is string[] {
+    return Array.isArray(statements) && statements.every((statement) =>
+        typeof statement === "string"
+        && statement.length > 0
+        && statement.trim() === statement
+        && !statement.includes("\r")
+    );
+}
+
+function isMigrationInventoryAppliedAt(appliedAt: unknown): appliedAt is string | null {
+    return appliedAt === null
+        || (typeof appliedAt === "string"
+            && appliedAt.trim() === appliedAt
+            && appliedAt.length > 0
+            && !Number.isNaN(Date.parse(appliedAt)));
+}
+
+function migrationInventoryChecksum(entry: Pick<MigrationInventoryEntry, "version" | "name" | "statements">): string {
+    return createHash("sha256").update(JSON.stringify({
+        version: entry.version,
+        name: entry.name,
+        statements: entry.statements,
+    })).digest("hex");
+}
+
+function migrationInventoryEntry(rawEntry: unknown): MigrationInventoryEntry | null {
+    if (!rawEntry || typeof rawEntry !== "object" || Array.isArray(rawEntry)) return null;
+    const entry = rawEntry as Record<string, unknown>;
+    if (!isMigrationInventoryVersion(entry.version)) return null;
+    if (!isMigrationInventoryName(entry.name)) return null;
+    if (!isMigrationInventoryStatements(entry.statements)) return null;
+    if (typeof entry.statement_count !== "number" || !Number.isInteger(entry.statement_count)) return null;
+    if (entry.statement_count !== entry.statements.length) return null;
+    if (typeof entry.checksum !== "string" || !/^[0-9a-f]{64}$/.test(entry.checksum)) return null;
+    if (!isMigrationInventoryAppliedAt(entry.applied_at)) return null;
+    const migration: MigrationInventoryEntry = {
+        version: entry.version,
+        name: entry.name,
+        statements: entry.statements,
+        statement_count: entry.statement_count,
+        checksum: entry.checksum,
+        applied_at: entry.applied_at,
+    };
+    return migration.checksum === migrationInventoryChecksum(migration) ? migration : null;
+}
+
+function compareMigrationInventoryEntries(left: MigrationInventoryEntry, right: MigrationInventoryEntry): number {
+    const leftVersion = BigInt(left.version);
+    const rightVersion = BigInt(right.version);
+    if (leftVersion !== rightVersion) return leftVersion < rightVersion ? -1 : 1;
+    if (left.name === right.name) return 0;
+    if (left.name === null) return -1;
+    if (right.name === null) return 1;
+    return left.name < right.name ? -1 : 1;
+}
+
+function migrationInventory(payload: unknown): MigrationInventoryEntry[] | null {
+    if (!Array.isArray(payload)) return null;
+    const inventory: MigrationInventoryEntry[] = [];
+    const identities = new Set<string>();
+    for (const rawEntry of payload) {
+        const entry = migrationInventoryEntry(rawEntry);
+        if (!entry) return null;
+        const identity = JSON.stringify([entry.version, entry.name]);
+        if (identities.has(identity)) return null;
+        identities.add(identity);
+        inventory.push(entry);
+    }
+    return inventory.sort(compareMigrationInventoryEntries);
+}
+
+function migrationInventoryFailure(code: "HTTP_ERROR" | "INVALID_RESPONSE", httpStatus: number | null): DatabaseToolResponse {
+    return {
+        isError: true,
+        content: [{
+            type: "text",
+            text: JSON.stringify({
+                ok: false,
+                operation: "database.migration_inventory",
+                error: { code, http_status: httpStatus },
+            }, null, 2),
+        }],
+    };
+}
+
+function migrationInventoryResponse(response: HttpResult<unknown>): DatabaseToolResponse {
+    if (!response.ok) {
+        return migrationInventoryFailure("HTTP_ERROR", response.transportError ? null : response.status);
+    }
+    const inventory = migrationInventory(response.data);
+    if (!inventory) return migrationInventoryFailure("INVALID_RESPONSE", response.status);
+    return { content: [{ type: "text", text: JSON.stringify(inventory, null, 2) }] };
 }
 
 function readMigrationFile(dir: string, file: string): MigrationFile {
@@ -194,7 +316,7 @@ export function registerDatabaseTools(
         "list_extensions", "rls_status", "rls_policies",
         "list_auth_users", "get_auth_user",
         "connections", "stats", "slow_queries",
-        "list_migrations", "project_url", "generate_types",
+        "list_migrations", "migration_inventory", "project_url", "generate_types",
     ] as const;
     const writeActions = ["apply_migration", "push_migrations", "baseline_migrations", "create_table_rls"] as const;
     const allActions = readOnly ? actions : [...actions, ...writeActions];
@@ -339,6 +461,13 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
                     const r = await execSql(`SELECT version, applied_at FROM schema_migrations ORDER BY version DESC LIMIT 50;`);
                     text = r.ok ? formatMigrations(r.data) : `❌ Failed (${r.status})`;
                     break;
+                }
+                case "migration_inventory": {
+                    const response = await http.get(
+                        `/v1/projects/${ref}/database/migrations`,
+                        { maxResponseBytes: MAX_MIGRATION_INVENTORY_BYTES },
+                    );
+                    return migrationInventoryResponse(response);
                 }
                 case "project_url": {
                     const r = await http.get(`/v1/projects/${ref}`);
