@@ -235,6 +235,34 @@ describe("supacloud-cli process contract", () => {
         expect(response.stdout + response.stderr).not.toContain(secondarySecret);
     });
 
+    test("returns non-zero without echoing the response body when listing secrets fails", async () => {
+        const responseBodySentinel = "server-secret-shaped-error-sentinel";
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch() {
+                return Response.json(
+                    { error: responseBodySentinel },
+                    { status: 503 },
+                );
+            },
+        });
+        servers.push(server);
+
+        const response = await runProjectCli(
+            ["secrets", "list", "--ref", "abc123"],
+            {
+                SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+                SUPACLOUD_API_TOKEN: "test-token",
+                SUPACLOUD_PROJECT_REF: "abc123",
+            },
+        );
+
+        expect(response.exitCode).toBe(1);
+        expect(response.stdout).toContain("❌ Failed (503)");
+        expect(response.stdout + response.stderr).not.toContain(responseBodySentinel);
+    });
+
     test.each([
         ["missing value", "FA_CLI_FROM_ENV_MISSING", {}],
         ["empty value", "FA_CLI_FROM_ENV_EMPTY", { FA_CLI_FROM_ENV_EMPTY: "" }],

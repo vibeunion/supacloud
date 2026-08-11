@@ -265,6 +265,22 @@ describe("edge_functions CLI tool", () => {
 });
 
 describe("secrets CLI tool", () => {
+    test("fails closed without echoing the response body when listing secrets fails", async () => {
+        const responseBodySentinel = "server-secret-shaped-error-sentinel";
+        const { callback } = captureSecretsTool({
+            get: async () => ({
+                ok: false,
+                status: 503,
+                data: { error: responseBodySentinel },
+            }),
+        });
+
+        const response = await callback({ action: "list", ref: "proj" });
+
+        expect(response.content[0].text).toBe("❌ Failed (503)");
+        expect(response.content[0].text).not.toContain(responseBodySentinel);
+    });
+
     test("parses JSON array secrets passed as a CLI string", () => {
         const { schema } = captureSecretsTool({});
         const parsed = parseToolArguments(schema, {

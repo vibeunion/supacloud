@@ -379,9 +379,13 @@ Actions: list, upsert, delete`,
             const environmentNames = args["from-env"] as string[] | undefined;
             let text: string;
             switch (action) {
-                case "list":
-                    text = JSON.stringify((await http.get(`/v1/projects/${ref}/secrets`)).data, null, 2);
+                case "list": {
+                    const response = await http.get(`/v1/projects/${ref}/secrets`);
+                    text = response.ok
+                        ? JSON.stringify(response.data, null, 2)
+                        : `❌ Failed (${response.status})`;
                     break;
+                }
                 case "upsert":
                     const secretsToUpsert = secretsForUpsert(secrets, environmentNames, environment);
                     text = (await http.post(`/v1/projects/${ref}/secrets`, secretsToUpsert)).ok
