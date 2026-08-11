@@ -159,7 +159,7 @@ describe("admin project services", () => {
         const projectCallback = captureAdminProjectTool({
             get: async (path: string) => {
                 requestedPath = path;
-                const inventory = studioServiceInventory("project-ref", "owner-ref");
+                const inventory = studioServiceInventory("project-ref", "Legacy_Owner");
                 return {
                     ok: true,
                     status: 200,
@@ -181,7 +181,7 @@ describe("admin project services", () => {
         expect(requestedPath).toBe("/v1/projects/project-ref/services");
         expect(response.isError).not.toBe(true);
         expect(output.project_ref).toBe("project-ref");
-        expect(output.services).toEqual(studioServiceInventory("project-ref", "owner-ref"));
+        expect(output.services).toEqual(studioServiceInventory("project-ref", "Legacy_Owner"));
         expectNoRemoteResponseDetails(response.content[0].text);
     });
 
@@ -255,12 +255,20 @@ describe("admin project services", () => {
     test("rejects unsafe project refs and host bindings", async () => {
         const badNonAuthHost = studioServiceInventory();
         badNonAuthHost[0] = { ...badNonAuthHost[0], service_host_ids: ["other-ref-db"] };
-        const badAuthHost = studioServiceInventory();
-        badAuthHost[2] = { ...badAuthHost[2], service_host_ids: ["unsafe/owner-auth"] };
+        const unsafeAuthHosts = [
+            "unsafe/owner-auth",
+            "owner-ref-that-is-too-long-auth",
+            "owner\nref-auth",
+        ];
 
         await expectInvalidInventory(badNonAuthHost);
-        await expectInvalidInventory(badAuthHost);
+        for (const unsafeHost of unsafeAuthHosts) {
+            const badAuthHost = studioServiceInventory();
+            badAuthHost[2] = { ...badAuthHost[2], service_host_ids: [unsafeHost] };
+            await expectInvalidInventory(badAuthHost);
+        }
         await expectInvalidInventory(studioServiceInventory(), "unsafe/project");
+        await expectInvalidInventory(studioServiceInventory("Legacy_Owner"), "Legacy_Owner");
     });
 });
 
@@ -529,7 +537,7 @@ describe("admin project service control", () => {
                 status: 409,
                 data: {
                     code: "AUTH_RUNTIME_MANAGED_BY_OWNER",
-                    authority_project_ref: "supauth-owner",
+                    authority_project_ref: "Legacy_Owner",
                     message: REMOTE_RESPONSE_DETAILS[4],
                     token: REMOTE_RESPONSE_DETAILS[0],
                     secret: REMOTE_RESPONSE_DETAILS[1],
@@ -547,9 +555,9 @@ describe("admin project service control", () => {
         });
 
         expect(response.isError).toBe(true);
-        expect(response.content[0].text).toContain("AUTH_RUNTIME_MANAGED_BY_OWNER");
-        expect(response.content[0].text).toContain("supauth-owner");
-        expect(response.content[0].text).toContain('"status":409');
+        expect(response.content[0].text).toBe(
+            '❌ {"status":409,"code":"AUTH_RUNTIME_MANAGED_BY_OWNER","authority_project_ref":"Legacy_Owner"}',
+        );
         expectNoRemoteResponseDetails(response.content[0].text);
     });
 
@@ -559,6 +567,7 @@ describe("admin project service control", () => {
             { status: 409, code: "UNEXPECTED_CODE", authorityRef: "supauth-owner" },
             { status: 409, code: "AUTH_RUNTIME_MANAGED_BY_OWNER", authorityRef: "unsafe/project" },
             { status: 409, code: "AUTH_RUNTIME_MANAGED_BY_OWNER", authorityRef: "owner-ref-that-is-too-long" },
+            { status: 409, code: "AUTH_RUNTIME_MANAGED_BY_OWNER", authorityRef: "owner\nref" },
         ];
 
         for (const ownerResponse of unsafeOwnerResponses) {

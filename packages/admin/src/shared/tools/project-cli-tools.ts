@@ -25,8 +25,9 @@ const STUDIO_PROJECT_SERVICE_STATUSES = [
     "ACTIVE_HEALTHY", "COMING_UP", "UNHEALTHY",
 ] as const;
 const AUTH_RUNTIME_MANAGED_BY_OWNER = "AUTH_RUNTIME_MANAGED_BY_OWNER";
+const AUTH_SERVICE_HOST_SUFFIX = "-auth";
 const SAFE_PROJECT_REF = /^[a-z0-9-]{1,20}$/;
-const SAFE_AUTH_SERVICE_HOST_ID = /^[a-z0-9-]{1,20}-auth$/;
+const SAFE_AUTHORITY_PROJECT_REF = /^[A-Za-z0-9_-]{1,20}$/;
 const MAX_SERVICE_CONTROL_MESSAGE_LENGTH = 256;
 
 type ProjectServiceName = typeof PROJECT_SERVICE_NAMES[number];
@@ -75,7 +76,7 @@ function failedProjectServiceHttpResponse(response: HttpResult<unknown>): Projec
         && isRecordPayload(response.data)
         && response.data.code === AUTH_RUNTIME_MANAGED_BY_OWNER
         && typeof response.data.authority_project_ref === "string"
-        && SAFE_PROJECT_REF.test(response.data.authority_project_ref)
+        && SAFE_AUTHORITY_PROJECT_REF.test(response.data.authority_project_ref)
     ) {
         const ownerBoundary = {
             status: response.status,
@@ -112,7 +113,10 @@ function hasValidStudioServiceHost(
     hostIds: unknown,
 ): hostIds is [string] {
     if (!Array.isArray(hostIds) || hostIds.length !== 1 || typeof hostIds[0] !== "string") return false;
-    if (serviceId === "auth") return SAFE_AUTH_SERVICE_HOST_ID.test(hostIds[0]);
+    if (serviceId === "auth") {
+        if (!hostIds[0].endsWith(AUTH_SERVICE_HOST_SUFFIX)) return false;
+        return SAFE_AUTHORITY_PROJECT_REF.test(hostIds[0].slice(0, -AUTH_SERVICE_HOST_SUFFIX.length));
+    }
     return hostIds[0] === `${projectRef}-${serviceId}`;
 }
 
