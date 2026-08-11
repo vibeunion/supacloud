@@ -6,12 +6,14 @@ import { resolveEdgeFetchTlsPolicy } from "./fetch-tls-policy";
 import type { EdgeFetchTlsPolicy } from "./fetch-tls-policy";
 import type { PgredisRuntimeBindingConfig } from "./internal-bindings";
 import { EMBEDDED_WORKER_HASH, EMBEDDED_WORKER_SOURCE } from "./generated/embedded-worker";
+import { assertCanonicalPositiveFunctionVersion } from "./function-version";
 
 interface DispatchOptions {
   functionId: string;
   functionPath: string;
   projectRoot: string;
   projectRef?: string;
+  functionVersion?: string | null;
   moduleVersion?: string;
   env: Record<string, string>;
   internalBindings?: Omit<PgredisRuntimeBindingConfig, "signal">;
@@ -39,6 +41,8 @@ type QueuedDispatch = {
 };
 
 const DEFAULT_MAX_BODY_SIZE_MB = 30;
+const FUNCTION_VERSION_HEADER = "x-supacloud-function-version";
+
 function resolveMaxBodySizeBytes(value = process.env.EDGE_MAX_BODY_SIZE_MB): number {
   const configuredMb = Number(value);
   const maxBodySizeMb = Number.isFinite(configuredMb) && configuredMb > 0
@@ -60,6 +64,23 @@ function cancelledResponse(): Response {
   return new Response(JSON.stringify({ error: "Task cancelled" }), {
     status: 499,
     headers: { "Content-Type": "application/json" },
+  });
+}
+
+function withRuntimeFunctionVersion(
+  response: Response,
+  version: string | null | undefined,
+): Response {
+  const headers = new Headers(response.headers);
+  if (version === null || version === undefined) {
+    headers.delete(FUNCTION_VERSION_HEADER);
+  } else {
+    headers.set(FUNCTION_VERSION_HEADER, version);
+  }
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
   });
 }
 
@@ -296,6 +317,8 @@ export class WorkerPool {
       });
     }
 
+    assertCanonicalPositiveFunctionVersion(opts.functionVersion);
+
     this.totalRequests++;
     if (opts.envLoadMs) this.totalEnvLoadMs += opts.envLoadMs;
     const executionKey = crypto.randomUUID();
@@ -381,17 +404,23 @@ export class WorkerPool {
     worker: Worker,
     opts: ScheduledDispatch,
     enqueuedAt: number,
-    resolve: (r: Response) => void,
+    resolve: (response: Response) => void,
   ) {
     const queueWaitMs = Math.round(performance.now() - enqueuedAt);
     this.totalQueueWaitMs += queueWaitMs;
     const cancelGraceMs = 3_000;
 
     let resolved = false;
-    const safeResolve = (r: Response) => {
+    let executionStarted = false;
+    let cancellationRequested = false;
+    const resolveOnce = (response: Response) => {
       if (resolved) return;
       resolved = true;
-      resolve(r);
+      resolve(
+        executionStarted
+          ? withRuntimeFunctionVersion(response, opts.functionVersion)
+          : response,
+      );
     };
     const cleanupInFlight = () => {
       this.inFlight.delete(opts.executionKey);
@@ -413,15 +442,13 @@ export class WorkerPool {
       }
     };
 
-    let executionStarted = false;
-    let cancellationRequested = false;
     let detachResponseListeners = () => {};
 
     const timeout = setTimeout(() => {
       detachResponseListeners();
       cleanupInFlight();
       clearCancellationState();
-      safeResolve(new Response("Gateway Timeout", { status: 504 }));
+      resolveOnce(new Response("Gateway Timeout", { status: 504 }));
       this.retireWorker(worker);
     }, this.config.requestTimeout);
 
@@ -429,7 +456,7 @@ export class WorkerPool {
       detachResponseListeners();
       cleanupInFlight();
       clearCancellationState();
-      safeResolve(cancelledResponse());
+      resolveOnce(cancelledResponse());
       this.retireWorker(worker);
     };
 
@@ -466,17 +493,15 @@ export class WorkerPool {
       if (resolved) return true;
       if (!cancellationRequested) return false;
       releaseBeforeExecution();
-      safeResolve(cancelledResponse());
+      resolveOnce(cancelledResponse());
       return true;
     };
 
     const headers: Record<string, string | string[]> = {};
     opts.request.headers.forEach((v, k) => {
       const lower = k.toLowerCase();
-      if (lower === "set-cookie") {
-      } else {
-        headers[k] = v;
-      }
+      if (lower === "set-cookie" || lower === FUNCTION_VERSION_HEADER) return;
+      headers[k] = v;
     });
     const cookies = (opts.request.headers as any).getSetCookie?.();
     if (cookies && cookies.length > 0) {
@@ -488,7 +513,7 @@ export class WorkerPool {
       const contentLength = opts.request.headers.get("content-length");
       if (contentLength && parseInt(contentLength) > MAX_BODY_SIZE) {
         releaseBeforeExecution();
-        safeResolve(
+        resolveOnce(
           new Response(
             JSON.stringify({
               error: `Request body too large (max ${MAX_BODY_SIZE / 1024 / 1024}MB)`,
@@ -511,7 +536,7 @@ export class WorkerPool {
       if (finishCancelledBeforeExecution()) return;
       if (body.byteLength > MAX_BODY_SIZE) {
         releaseBeforeExecution();
-        safeResolve(
+        resolveOnce(
           new Response(
             JSON.stringify({
               error: `Request body too large (max ${MAX_BODY_SIZE / 1024 / 1024}MB)`,
@@ -616,7 +641,6 @@ export class WorkerPool {
           resHeaders.set(k, v);
         }
       }
-
       if (msg.type === "stream_start" && msg.streamId) {
         const streamId = msg.streamId;
         let streamFinished = false;
@@ -667,14 +691,14 @@ export class WorkerPool {
           },
         });
 
-        safeResolve(
+        resolveOnce(
           new Response(bodyStream, {
             status: msg.status,
             headers: resHeaders,
           }),
         );
       } else {
-        safeResolve(
+        resolveOnce(
           new Response(msg.body, {
             status: msg.status,
             headers: resHeaders,
@@ -718,7 +742,7 @@ export class WorkerPool {
       cleanupInFlight();
       clearCancellationState();
       detachResponseListeners();
-      safeResolve(new Response("Internal Error", { status: 500 }));
+      resolveOnce(new Response("Internal Error", { status: 500 }));
       this.retireWorker(worker);
     };
 

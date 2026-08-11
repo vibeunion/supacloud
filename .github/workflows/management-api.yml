@@ -135,7 +135,7 @@ jobs:
         run: |
           bun install --frozen-lockfile
           bun run typecheck
-          bun test internal-bindings.test.ts pgredis-capability.test.ts worker-pool.test.ts
+          bun test internal-bindings.test.ts pgredis-capability.test.ts function-version.test.ts function-source.test.ts server-cache.test.ts server-function-config.test.ts worker-pool.test.ts
           bun audit --audit-level high
 
       - name: Check pgredis runtime
