@@ -24,4 +24,11 @@ describe("edge function JWT toggle", () => {
     expect(source).toContain('$t("Functions.endpoint")');
     expect(source).toContain('$t("Functions.last_deploy")');
   });
+
+  test("binds create and version activation requests to the observed active version", () => {
+    expect(source).toContain('expected_active_version: "absent"');
+    expect(source).toContain("activeVersionForSlug(slug)");
+    expect(source).toContain("expected_active_version: expectedActiveVersion");
+    expect(source).toContain('versionRecord.version === "0"');
+  });
 });

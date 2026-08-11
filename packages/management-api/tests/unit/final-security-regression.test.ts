@@ -4,6 +4,10 @@ import { projectFunctionsRoutes } from "../../src/routes/project-functions";
 import { projectSecretsRoutes } from "../../src/routes/project-secrets";
 import { projectConfigRoutes } from "../../src/routes/project-config";
 import { projectService } from "../../src/services/project.service";
+import {
+  EdgeFunctionActiveVersionConflictError,
+  edgeFunctionService,
+} from "../../src/services/edge-function.service";
 import { runtimeEnvService } from "../../src/services/runtime-env.service";
 import { restoreLogicalBackup } from "../../src/services/backup.service";
 import { sdkProxyInternals } from "../../src/routes/sdk-proxy";
@@ -156,6 +160,8 @@ describe("final security regressions", () => {
   test("function deploy response exposes bundle and preheat metadata", async () => {
     const deploySpy = spyOn(projectService, "deployFunctionRelease").mockResolvedValue({
       success: true,
+      previous_active_version: "2",
+      active_version: "3",
       version: "3",
       bundled: true,
       bundle_hash: "0123456789abcdef",
@@ -184,6 +190,7 @@ describe("final security regressions", () => {
         headers: { ...masterHeaders, "Content-Type": "application/json" },
         body: JSON.stringify({
           code: "export default { fetch() { return new Response('ok') } }",
+          expected_active_version: "2",
           verify_jwt: false,
           background_routes: ["/queue/*"],
         }),
@@ -192,6 +199,10 @@ describe("final security regressions", () => {
       expect(response.status).toBe(200);
       expect(await response.json()).toMatchObject({
         success: true,
+        project_ref: "proj_1",
+        slug: "hello",
+        previous_active_version: "2",
+        active_version: "3",
         bundled: true,
         version: "3",
         bundle_hash: "0123456789abcdef",
@@ -211,6 +222,7 @@ describe("final security regressions", () => {
       expect(deploySpy).toHaveBeenCalledWith({
         ref: "proj_1",
         slug: "hello",
+        expectedActiveVersion: "2",
         code: "export default { fetch() { return new Response('ok') } }",
         minify: false,
         config: { verify_jwt: false, background_routes: ["/queue/*"] },
@@ -220,9 +232,209 @@ describe("final security regressions", () => {
     }
   });
 
+  test("function deploy requires an expected active version before service dispatch", async () => {
+    const deploySpy = spyOn(projectService, "deployFunctionRelease");
+    const request = appWith(projectFunctionsRoutes);
+
+    try {
+      const response = await request("/v1/projects/proj_1/functions/hello", {
+        method: "POST",
+        headers: { ...masterHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          code: "export default { fetch() { return new Response('blocked') } }",
+        }),
+      });
+
+      expect(response.status).toBe(422);
+      expect(deploySpy).not.toHaveBeenCalled();
+    } finally {
+      deploySpy.mockRestore();
+    }
+  });
+
+  test("function deploy rejects noncanonical expected active versions before service dispatch", async () => {
+    const deploySpy = spyOn(projectService, "deployFunctionRelease").mockRejectedValue(
+      new Error("invalid expected version reached the deploy service"),
+    );
+    const request = appWith(projectFunctionsRoutes);
+
+    try {
+      for (const expectedActiveVersion of [0, "0", "01", "", "9007199254740992", null]) {
+        const response = await request("/v1/projects/proj_1/functions/hello", {
+          method: "POST",
+          headers: { ...masterHeaders, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            code: "export default { fetch() { return new Response('blocked') } }",
+            expected_active_version: expectedActiveVersion,
+          }),
+        });
+
+        expect(response.status).toBeGreaterThanOrEqual(400);
+      }
+      expect(deploySpy).not.toHaveBeenCalled();
+    } finally {
+      deploySpy.mockRestore();
+    }
+  });
+
+  test("function deploy maps active version conflicts to HTTP 409", async () => {
+    const deploySpy = spyOn(projectService, "deployFunctionRelease").mockResolvedValue({
+      success: false,
+      error_code: "FUNCTION_ACTIVE_VERSION_CONFLICT",
+      expected_active_version: "2",
+      active_version: "3",
+      error: "Function active version changed before the requested mutation",
+    });
+    const request = appWith(projectFunctionsRoutes);
+
+    try {
+      const response = await request("/v1/projects/proj_1/functions/hello", {
+        method: "POST",
+        headers: { ...masterHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          code: "export default { fetch() { return new Response('blocked') } }",
+          expected_active_version: "2",
+        }),
+      });
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({
+        code: "FUNCTION_ACTIVE_VERSION_CONFLICT",
+        expected_active_version: "2",
+        active_version: "3",
+      });
+      expect(deploySpy).toHaveBeenCalledTimes(1);
+    } finally {
+      deploySpy.mockRestore();
+    }
+  });
+
+  test("bulk function deploy maps active version conflicts to HTTP 409", async () => {
+    const deploySpy = spyOn(projectService, "deployFunctionRelease").mockResolvedValue({
+      success: false,
+      error_code: "FUNCTION_ACTIVE_VERSION_CONFLICT",
+      expected_active_version: "2",
+      active_version: "3",
+      error: "Function active version changed before the requested mutation",
+    });
+    const request = appWith(projectFunctionsRoutes);
+
+    try {
+      const response = await request("/v1/projects/proj_1/functions", {
+        method: "PUT",
+        headers: { ...masterHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify([{
+          slug: "hello",
+          code: "export default { fetch() { return new Response('blocked') } }",
+          expected_active_version: "2",
+        }]),
+      });
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({
+        functions: [expect.objectContaining({
+          slug: "hello",
+          success: false,
+          error_code: "FUNCTION_ACTIVE_VERSION_CONFLICT",
+          active_version: "3",
+        })],
+      });
+      expect(deploySpy).toHaveBeenCalledTimes(1);
+    } finally {
+      deploySpy.mockRestore();
+    }
+  });
+
+  test("function activation requires and enforces expected active version", async () => {
+    const activationSpy = spyOn(edgeFunctionService, "activateVersion");
+    const request = appWith(projectFunctionsRoutes);
+
+    try {
+      const missing = await request(
+        "/v1/projects/proj_1/functions/hello/versions/2/activate",
+        { method: "POST", headers: masterHeaders },
+      );
+      expect(missing.status).toBe(422);
+      expect(activationSpy).not.toHaveBeenCalled();
+
+      activationSpy.mockRejectedValueOnce(new EdgeFunctionActiveVersionConflictError("1", "2"));
+      const stale = await request(
+        "/v1/projects/proj_1/functions/hello/versions/3/activate",
+        {
+          method: "POST",
+          headers: { ...masterHeaders, "Content-Type": "application/json" },
+          body: JSON.stringify({ expected_active_version: "1" }),
+        },
+      );
+      expect(stale.status).toBe(409);
+      expect(await stale.json()).toMatchObject({
+        code: "FUNCTION_ACTIVE_VERSION_CONFLICT",
+        expected_active_version: "1",
+        active_version: "2",
+      });
+      expect(activationSpy).toHaveBeenCalledWith("proj_1", "hello", "3", "1");
+    } finally {
+      activationSpy.mockRestore();
+    }
+  });
+
+  test("function activation rejects noncanonical target versions before service dispatch", async () => {
+    const activationSpy = spyOn(edgeFunctionService, "activateVersion").mockRejectedValue(
+      new Error("invalid target version reached the activation service"),
+    );
+    const request = appWith(projectFunctionsRoutes);
+
+    try {
+      for (const targetVersion of ["01", "9007199254740992"]) {
+        const response = await request(
+          `/v1/projects/proj_1/functions/hello/versions/${targetVersion}/activate`,
+          {
+            method: "POST",
+            headers: { ...masterHeaders, "Content-Type": "application/json" },
+            body: JSON.stringify({ expected_active_version: "1" }),
+          },
+        );
+
+        expect(response.status).toBeGreaterThanOrEqual(400);
+      }
+      expect(activationSpy).not.toHaveBeenCalled();
+    } finally {
+      activationSpy.mockRestore();
+    }
+  });
+
+  test("function activation rejects public version zero with HTTP 400 before service dispatch", async () => {
+    const activationSpy = spyOn(edgeFunctionService, "activateVersion").mockRejectedValue(
+      new Error("legacy target reached the public activation service"),
+    );
+    const request = appWith(projectFunctionsRoutes);
+
+    try {
+      const response = await request(
+        "/v1/projects/proj_1/functions/hello/versions/0/activate",
+        {
+          method: "POST",
+          headers: { ...masterHeaders, "Content-Type": "application/json" },
+          body: JSON.stringify({ expected_active_version: "1" }),
+        },
+      );
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        message: "version must be a canonical positive safe integer",
+        code: "VALIDATION_ERROR",
+      });
+      expect(activationSpy).not.toHaveBeenCalled();
+    } finally {
+      activationSpy.mockRestore();
+    }
+  });
+
   test("all code deploy routes pass policy through the atomic release primitive", async () => {
     const deploySpy = spyOn(projectService, "deployFunctionRelease").mockImplementation(async (release) => ({
       success: true,
+      previous_active_version: release.expectedActiveVersion,
+      active_version: "4",
       version: "4",
       bundled: "files" in release,
       files: "files" in release ? Object.keys(release.files).length : undefined,
@@ -241,6 +453,7 @@ describe("final security regressions", () => {
         headers: jsonHeaders,
         body: JSON.stringify({
           files: { "index.ts": "export default { fetch() { return new Response('bundle') } }" },
+          expected_active_version: "absent",
           verify_jwt: false,
         }),
       });
@@ -249,6 +462,7 @@ describe("final security regressions", () => {
         headers: jsonHeaders,
         body: JSON.stringify({
           code: "export default { fetch() { return new Response('patch') } }",
+          expected_active_version: "absent",
           verify_jwt: false,
         }),
       });
@@ -258,11 +472,16 @@ describe("final security regressions", () => {
         body: JSON.stringify([{
           slug: "bulk-fn",
           code: "export default { fetch() { return new Response('bulk') } }",
+          expected_active_version: "absent",
           verify_jwt: false,
         }]),
       });
       const multipart = new FormData();
-      multipart.set("metadata", JSON.stringify({ entrypoint_path: "index.ts", verify_jwt: false }));
+      multipart.set("metadata", JSON.stringify({
+        entrypoint_path: "index.ts",
+        expected_active_version: "absent",
+        verify_jwt: false,
+      }));
       multipart.set("file", new File([
         "export default { fetch() { return new Response('multipart') } }",
       ], "index.ts", { type: "application/typescript" }));

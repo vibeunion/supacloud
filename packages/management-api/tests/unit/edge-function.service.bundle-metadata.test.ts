@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
@@ -16,9 +16,25 @@ mock.restore();
 process.env.EDGE_FUNCTIONS_DIR = functionsRoot;
 process.env.EDGE_RUNTIME_INTERNAL = "127.0.0.1:65535";
 
-const { edgeFunctionService, getVersionedArtifactPath } = await import(
+const {
+  EDGE_FUNCTION_ACTIVE_VERSION_CONFLICT_CODE,
+  edgeFunctionService,
+  getVersionedArtifactPath,
+} = await import(
   "../../src/services/edge-function.service"
 );
+
+async function deployConditionalRelease(
+  request: Omit<Parameters<typeof edgeFunctionService.deployRelease>[0], "expectedActiveVersion">,
+) {
+  const expectedActiveVersion = (await edgeFunctionService.getConfig(request.ref, request.slug)).version ?? "absent";
+  return edgeFunctionService.deployRelease({ ...request, expectedActiveVersion });
+}
+
+async function activateConditionalVersion(ref: string, slug: string, version: string) {
+  const expectedActiveVersion = (await edgeFunctionService.getConfig(ref, slug)).version ?? "absent";
+  return (await edgeFunctionService.activateVersion(ref, slug, version, expectedActiveVersion))?.config ?? null;
+}
 
 const runtimeInvalidationProtocol = {
   module_scope: "legacy-base-only",
@@ -94,7 +110,7 @@ describe("edgeFunctionService bundle metadata", () => {
       },
     })) as typeof fetch;
 
-    const deployed = await edgeFunctionService.deployRelease({
+    const deployed = await deployConditionalRelease({
       ref: "proj_preheat_diagnostic",
       slug: "computed-import",
       code: "export default { fetch: () => new Response('unreachable') };",
@@ -206,7 +222,7 @@ describe("edgeFunctionService bundle metadata", () => {
       });
     }) as typeof fetch;
 
-    const deployed = await edgeFunctionService.deployRelease({
+    const deployed = await deployConditionalRelease({
       ref,
       slug,
       code: "export default { fetch: () => new Response('public') };",
@@ -224,14 +240,14 @@ describe("edgeFunctionService bundle metadata", () => {
   test("preserves an existing false policy when a later deploy omits policy", async () => {
     const ref = "proj_preserve_false";
     const slug = "public-hook";
-    await edgeFunctionService.deployRelease({
+    await deployConditionalRelease({
       ref,
       slug,
       code: "export default { fetch: () => new Response('v1') };",
       config: { verify_jwt: false },
     });
 
-    const deployed = await edgeFunctionService.deployRelease({
+    const deployed = await deployConditionalRelease({
       ref,
       slug,
       code: "export default { fetch: () => new Response('v2') };",
@@ -247,7 +263,7 @@ describe("edgeFunctionService bundle metadata", () => {
   test("clears bundle source metadata when a single-file version becomes active", async () => {
     const ref = "proj_single_metadata";
     const slug = "metadata-clear";
-    await edgeFunctionService.deployRelease({
+    await deployConditionalRelease({
       ref,
       slug,
       files: {
@@ -257,7 +273,7 @@ describe("edgeFunctionService bundle metadata", () => {
       entrypoint: "worker.ts",
     });
 
-    const singleFile = await edgeFunctionService.deployRelease({
+    const singleFile = await deployConditionalRelease({
       ref,
       slug,
       code: "export default { fetch: () => new Response('single-file') };",
@@ -270,7 +286,7 @@ describe("edgeFunctionService bundle metadata", () => {
   });
 
   test("defaults a new function policy to verify_jwt=true", async () => {
-    const deployed = await edgeFunctionService.deployRelease({
+    const deployed = await deployConditionalRelease({
       ref: "proj_default_true",
       slug: "secured",
       code: "export default { fetch: () => new Response('secured') };",
@@ -293,11 +309,11 @@ describe("edgeFunctionService bundle metadata", () => {
     const legacyBundleBefore = await readFile(legacyBundlePath, "utf8");
     const legacySourceBefore = await readFile(legacySourcePath, "utf8");
 
-    const deployed = await edgeFunctionService.deployRelease({
+    const deployed = await edgeFunctionService.deployDetailed(
       ref,
       slug,
-      code: "export default { fetch: () => new Response('immutable-v1') };",
-    });
+      "export default { fetch: () => new Response('immutable-v1') };",
+    );
 
     expect(deployed.config).toMatchObject({ verify_jwt: false, version: "1" });
     expect(await readFile(legacyBundlePath, "utf8")).toBe(legacyBundleBefore);
@@ -305,7 +321,7 @@ describe("edgeFunctionService bundle metadata", () => {
     expect(await edgeFunctionService.read(ref, slug)).toContain("immutable-v1");
     expect(await edgeFunctionService.list(ref)).toContain(slug);
 
-    const restored = await edgeFunctionService.activateVersion(ref, slug, "0");
+    const restored = await activateConditionalVersion(ref, slug, "0");
 
     expect(restored).toMatchObject({
       version: "0",
@@ -316,6 +332,22 @@ describe("edgeFunctionService bundle metadata", () => {
     expect(Object.hasOwn(restored!, "import_map")).toBe(false);
     expect(await edgeFunctionService.read(ref, slug)).toContain("legacy");
     expect(await edgeFunctionService.readSource(ref, slug)).toContain("legacy-source");
+
+    const continued = await edgeFunctionService.deployRelease({
+      ref,
+      slug,
+      expectedActiveVersion: "0",
+      code: "export default { fetch: () => new Response('post-legacy-release') };",
+    });
+
+    expect(continued).toMatchObject({
+      success: true,
+      previous_active_version: "0",
+      active_version: "2",
+      version: "2",
+      config: { version: "2" },
+    });
+    expect(await edgeFunctionService.readSource(ref, slug)).toContain("post-legacy-release");
   });
 
   test("repairs a configured version with missing artifacts from frozen aliases", async () => {
@@ -337,7 +369,7 @@ describe("edgeFunctionService bundle metadata", () => {
       })),
     ]);
 
-    const deployed = await edgeFunctionService.deployRelease({
+    const deployed = await deployConditionalRelease({
       ref,
       slug,
       code: "export default { fetch: () => new Response('version-eight') };",
@@ -346,7 +378,7 @@ describe("edgeFunctionService bundle metadata", () => {
 
     expect(deployed).toMatchObject({ success: true, version: "8" });
     expect(await Bun.file(legacyBundlePath).text()).toBe(legacyBundle);
-    const restored = await edgeFunctionService.activateVersion(ref, slug, "7");
+    const restored = await activateConditionalVersion(ref, slug, "7");
     expect(restored).toMatchObject({
       version: "7",
       verify_jwt: false,
@@ -378,7 +410,7 @@ describe("edgeFunctionService bundle metadata", () => {
       })),
     ]);
 
-    const deployed = await edgeFunctionService.deployRelease({
+    const deployed = await deployConditionalRelease({
       ref,
       slug,
       code: "export default { fetch: () => new Response('version-four') };",
@@ -386,7 +418,7 @@ describe("edgeFunctionService bundle metadata", () => {
     });
 
     expect(deployed).toMatchObject({ success: true, version: "4" });
-    const restored = await edgeFunctionService.activateVersion(ref, slug, "3");
+    const restored = await activateConditionalVersion(ref, slug, "3");
     expect(restored).toMatchObject({
       version: "3",
       verify_jwt: false,
@@ -399,7 +431,7 @@ describe("edgeFunctionService bundle metadata", () => {
   test("does not replace a corrupted manifest when deploy policy is omitted", async () => {
     const ref = "proj_corrupt_manifest";
     const slug = "corrupt-hook";
-    await edgeFunctionService.deployRelease({
+    await deployConditionalRelease({
       ref,
       slug,
       code: "export default { fetch: () => new Response('v1') };",
@@ -409,11 +441,11 @@ describe("edgeFunctionService bundle metadata", () => {
     const corruptedManifest = '{"verify_jwt": false';
     await Bun.write(manifestPath, corruptedManifest);
 
-    const failed = await edgeFunctionService.deployRelease({
+    const failed = await edgeFunctionService.deployDetailed(
       ref,
       slug,
-      code: "export default { fetch: () => new Response('v2') };",
-    });
+      "export default { fetch: () => new Response('v2') };",
+    );
 
     expect(failed.success).toBe(false);
     expect(await readFile(manifestPath, "utf8")).toBe(corruptedManifest);
@@ -450,7 +482,7 @@ describe("edgeFunctionService bundle metadata", () => {
   test("reports uncertain runtime state when activation and rollback invalidation both fail", async () => {
     const ref = "proj_manifest_rollback";
     const slug = "public-hook";
-    await edgeFunctionService.deployRelease({
+    await deployConditionalRelease({
       ref,
       slug,
       code: "export default { fetch: () => new Response('v1') };",
@@ -470,7 +502,7 @@ describe("edgeFunctionService bundle metadata", () => {
       return Promise.resolve(Response.json({ message: "unavailable" }, { status: 503 }));
     }) as typeof fetch;
 
-    const failed = await edgeFunctionService.deployRelease({
+    const failed = await deployConditionalRelease({
       ref,
       slug,
       code: "export default { fetch: () => new Response('v2') };",
@@ -515,7 +547,7 @@ describe("edgeFunctionService bundle metadata", () => {
     const v2BundleHash = createHash("sha256").update(v2Bundle).digest("hex");
     const v2SourceHash = createHash("sha256").update(v2Source).digest("hex");
 
-    await edgeFunctionService.activateVersion(ref, slug, "1");
+    await activateConditionalVersion(ref, slug, "1");
 
     const result = await edgeFunctionService.deployBundleDetailed(ref, slug, {
       "index.ts": "export default { fetch: () => new Response('new-v3') };",
@@ -605,6 +637,95 @@ describe("edgeFunctionService bundle metadata", () => {
       await Bun.file(join(functionsRoot, ref, ".versions", slug, singleResult.version!, "index.src.ts")).text(),
     ).toContain("single-marker");
   });
+
+  test("rejects a stale deploy before creating, preheating, or activating a version", async () => {
+    const ref = "proj_stale_deploy";
+    const slug = "stale-deploy";
+    await edgeFunctionService.deployDetailed(
+      ref,
+      slug,
+      "export default { fetch: () => new Response('version-one') };",
+    );
+    let runtimeCalls = 0;
+    globalThis.fetch = (async () => {
+      runtimeCalls += 1;
+      return Response.json({});
+    }) as typeof fetch;
+    const buildSpy = spyOn(Bun, "build");
+
+    try {
+      const rejected = await edgeFunctionService.deployRelease({
+        ref,
+        slug,
+        expectedActiveVersion: "2",
+        code: "export default { fetch: () => new Response('must-not-build') };",
+      });
+
+      expect(rejected).toMatchObject({
+        success: false,
+        error_code: EDGE_FUNCTION_ACTIVE_VERSION_CONFLICT_CODE,
+        expected_active_version: "2",
+        active_version: "1",
+      });
+      expect(buildSpy).not.toHaveBeenCalled();
+      expect(runtimeCalls).toBe(0);
+      expect((await edgeFunctionService.listVersions(ref, slug)).map(({ version }) => version))
+        .toEqual(["1"]);
+      expect(await edgeFunctionService.getConfig(ref, slug)).toMatchObject({ version: "1" });
+    } finally {
+      buildSpy.mockRestore();
+    }
+  });
+
+  test("allows only one concurrent deploy with the same expected active version", async () => {
+    const ref = "proj_cas_concurrent";
+    const slug = "cas-concurrent";
+    await edgeFunctionService.deployDetailed(
+      ref,
+      slug,
+      "export default { fetch: () => new Response('version-one') };",
+    );
+
+    const releases = await Promise.all([
+      edgeFunctionService.deployRelease({
+        ref,
+        slug,
+        expectedActiveVersion: "1",
+        code: "export default { fetch: () => new Response('candidate-a') };",
+      }),
+      edgeFunctionService.deployRelease({
+        ref,
+        slug,
+        expectedActiveVersion: "1",
+        code: "export default { fetch: () => new Response('candidate-b') };",
+      }),
+    ]);
+
+    expect(releases.filter(({ success }) => success)).toHaveLength(1);
+    expect(releases.filter(({ error_code }) =>
+      error_code === EDGE_FUNCTION_ACTIVE_VERSION_CONFLICT_CODE)).toHaveLength(1);
+    expect((await edgeFunctionService.listVersions(ref, slug)).map(({ version }) => version))
+      .toEqual(["2", "1"]);
+    expect(await edgeFunctionService.getConfig(ref, slug)).toMatchObject({ version: "2" });
+  });
+
+  test.each(["01", "", "9007199254740992"])(
+    "rejects invalid expected active version %j without mutation",
+    async (expectedActiveVersion) => {
+      const ref = `proj_invalid_expected_${expectedActiveVersion || "empty"}`;
+      const slug = "invalid-expected";
+      const rejected = await edgeFunctionService.deployRelease({
+        ref,
+        slug,
+        expectedActiveVersion,
+        code: "export default { fetch: () => new Response('must-not-deploy') };",
+      });
+
+      expect(rejected.success).toBe(false);
+      expect(await edgeFunctionService.listVersions(ref, slug)).toEqual([]);
+      expect((await edgeFunctionService.getConfig(ref, slug)).version).toBeUndefined();
+    },
+  );
 
   test("keeps multi-file runtime code beside its static assets", async () => {
     globalThis.fetch = ((input, init) => Promise.resolve(Response.json(

@@ -405,11 +405,22 @@ export async function waitForTask(
     }
   }
 
+  function activeVersionForSlug(slug: string): string {
+    const activeVersion = functions.find((fn) => fn.slug === slug)?.version;
+    if (typeof activeVersion !== "number" || !Number.isSafeInteger(activeVersion) || activeVersion < 1) {
+      throw new Error("当前函数激活版本无效，请刷新后重试");
+    }
+    return String(activeVersion);
+  }
+
   async function activateFunctionVersion(slug: string, version: string) {
     versionSwitching = version;
     try {
+      const expectedActiveVersion = activeVersionForSlug(slug);
       const res = await apiClient(`/v1/projects/${projectRef}/functions/${encodeURIComponent(slug)}/versions/${encodeURIComponent(version)}/activate`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ expected_active_version: expectedActiveVersion }),
       });
       const payload = await res.json().catch(() => null);
       if (!res.ok) {
@@ -417,6 +428,9 @@ export async function waitForTask(
       }
 
       toast.success(`${slug} 已切换到 v${version}`);
+      if (selectedFunction?.slug === slug) {
+        selectedFunction = { ...selectedFunction, version: Number(version) };
+      }
       await Promise.all([
         loadFunctionVersions(slug),
         query.refetch(),
@@ -502,7 +516,7 @@ export async function waitForTask(
       const res = await apiClient(`/v1/projects/${projectRef}/functions/${newSlug}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: newCode }),
+        body: JSON.stringify({ code: newCode, expected_active_version: "absent" }),
       });
       if (!res.ok) {
         const err = await res.json();
@@ -985,7 +999,8 @@ export async function waitForTask(
                         </button>
                         <button
                           onclick={() => activateFunctionVersion(currentDrawerSlug, versionRecord.version)}
-                          disabled={versionRecord.is_active || versionSwitching === versionRecord.version}
+                          disabled={versionRecord.version === "0" || versionRecord.is_active || versionSwitching === versionRecord.version}
+                          title={versionRecord.version === "0" ? "兼容版本 v0 仅供服务内部恢复" : "切换到此版本"}
                           class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-semibold hover:bg-muted/40 transition-colors disabled:opacity-50"
                         >
                           {#if versionSwitching === versionRecord.version}

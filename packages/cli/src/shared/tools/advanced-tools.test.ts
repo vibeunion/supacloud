@@ -144,6 +144,238 @@ describe("edge_functions CLI tool", () => {
         expect(result.content[0].text).toContain("Function render config updated");
     });
 
+    test("keeps the Function list as a JSON array with numeric active versions", async () => {
+        const functions = [{
+            slug: "fa-api",
+            version: 7,
+            verify_jwt: true,
+            status: "ACTIVE",
+        }];
+        const { callback } = captureEdgeFunctionsTool({
+            get: async () => ({ ok: true, status: 200, data: functions }),
+        });
+
+        const response = await callback({ action: "list", ref: "proj" });
+        const payload = JSON.parse(response.content[0].text);
+
+        expect(response.isError).toBeUndefined();
+        expect(payload).toEqual(functions);
+        expect(typeof payload[0].version).toBe("number");
+    });
+
+    test.each([
+        ["an object", { slug: "fa-api", version: 7 }],
+        ["a non-object entry", ["list-response-sentinel"]],
+        ["a missing slug", [{ version: 7, private: "list-response-sentinel" }]],
+        ["an invalid slug", [{ slug: "../fa-api", version: 7, private: "list-response-sentinel" }]],
+        ["a string version", [{ slug: "fa-api", version: "7", private: "list-response-sentinel" }]],
+        ["version zero", [{ slug: "fa-api", version: 0, private: "list-response-sentinel" }]],
+        ["a fractional version", [{ slug: "fa-api", version: 1.5, private: "list-response-sentinel" }]],
+        ["an unsafe version", [{ slug: "fa-api", version: Number.MAX_SAFE_INTEGER + 1, private: "list-response-sentinel" }]],
+        ["duplicate slugs", [{ slug: "fa-api", version: 7 }, { slug: "fa-api", version: 8 }]],
+    ])("rejects a Function list containing %s without reflecting it", async (_label, payload) => {
+        const { callback } = captureEdgeFunctionsTool({
+            get: async () => ({ ok: true, status: 200, data: payload }),
+        });
+
+        const response = await callback({ action: "list", ref: "proj" });
+
+        expect(response.isError).toBe(true);
+        expect(response.content[0].text).toBe("❌ Edge Function list response is invalid");
+        expect(response.content[0].text).not.toContain("sentinel");
+    });
+
+    test("projects an exact Function source object", async () => {
+        const { callback } = captureEdgeFunctionsTool({
+            get: async () => ({
+                ok: true,
+                status: 200,
+                data: { code: "export default {};", private: "source-response-sentinel" },
+            }),
+        });
+
+        const response = await callback({ action: "source", ref: "proj", slug: "fa-api" });
+
+        expect(response.isError).toBeUndefined();
+        expect(JSON.parse(response.content[0].text)).toEqual({ code: "export default {};" });
+        expect(response.content[0].text).not.toContain("sentinel");
+    });
+
+    test("binds source readback to an immutable version across an active-version ABA", async () => {
+        const requestedPaths: string[] = [];
+        const activeTransitions = [7];
+        let activeVersion = 7;
+        const { callback } = captureEdgeFunctionsTool({
+            get: async (path: string) => {
+                requestedPaths.push(path);
+                if (path.endsWith("/versions/7")) {
+                    activeVersion = 8;
+                    activeTransitions.push(activeVersion);
+                    activeVersion = 7;
+                    activeTransitions.push(activeVersion);
+                    return {
+                        ok: true,
+                        status: 200,
+                        data: { source_code: "export const immutable = 7;", private: "source-response-sentinel" },
+                    };
+                }
+                return {
+                    ok: true,
+                    status: 200,
+                    data: [{ slug: "fa-api", version: activeVersion, verify_jwt: true }],
+                };
+            },
+        });
+
+        const before = await callback({ action: "list", ref: "proj" });
+        const source = await callback({ action: "source", ref: "proj", slug: "fa-api", version: "7" });
+        const after = await callback({ action: "list", ref: "proj" });
+
+        expect(JSON.parse(before.content[0].text)[0].version).toBe(7);
+        expect(JSON.parse(source.content[0].text)).toEqual({ code: "export const immutable = 7;" });
+        expect(JSON.parse(after.content[0].text)[0].version).toBe(7);
+        expect(activeTransitions).toEqual([7, 8, 7]);
+        expect(requestedPaths).toEqual([
+            "/v1/projects/proj/functions",
+            "/v1/projects/proj/functions/fa-api/versions/7",
+            "/v1/projects/proj/functions",
+        ]);
+        expect(source.content[0].text).not.toContain("sentinel");
+    });
+
+    test.each([-1, 0, "0", "01", 1.5, "9007199254740992", true, {}])(
+        "rejects invalid immutable source version %j before HTTP dispatch",
+        async (version) => {
+            let requestCount = 0;
+            const { callback } = captureEdgeFunctionsTool({
+                get: async () => {
+                    requestCount += 1;
+                    return { ok: true, status: 200, data: {} };
+                },
+            });
+
+            await expect(callback({
+                action: "source",
+                ref: "proj",
+                slug: "fa-api",
+                version,
+            })).rejects.toThrow("canonical positive safe integer");
+            expect(requestCount).toBe(0);
+        },
+    );
+
+    test("rejects a malformed immutable source response without reflecting it", async () => {
+        const { callback } = captureEdgeFunctionsTool({
+            get: async () => ({
+                ok: true,
+                status: 200,
+                data: { code: "wrong-active-source", private: "version-source-response-sentinel" },
+            }),
+        });
+
+        const response = await callback({ action: "source", ref: "proj", slug: "fa-api", version: "7" });
+
+        expect(response.isError).toBe(true);
+        expect(response.content[0].text).toBe("❌ Edge Function source response is invalid");
+        expect(response.content[0].text).not.toContain("sentinel");
+    });
+
+    test.each([
+        ["free text", "source-response-sentinel"],
+        ["an array", [{ code: "source-response-sentinel" }]],
+        ["a missing code field", { private: "source-response-sentinel" }],
+        ["a non-string code field", { code: 7, private: "source-response-sentinel" }],
+    ])("rejects a Function source response containing %s without reflecting it", async (_label, payload) => {
+        const { callback } = captureEdgeFunctionsTool({
+            get: async () => ({ ok: true, status: 200, data: payload }),
+        });
+
+        const response = await callback({ action: "source", ref: "proj", slug: "fa-api" });
+
+        expect(response.isError).toBe(true);
+        expect(response.content[0].text).toBe("❌ Edge Function source response is invalid");
+        expect(response.content[0].text).not.toContain("sentinel");
+    });
+
+    test.each([
+        ["list", { action: "list", ref: "../proj" }],
+        ["deploy_bundle", {
+            action: "deploy_bundle",
+            ref: "proj",
+            slug: "../hook",
+            files: { "index.ts": "export default {}" },
+            "expected-active-version": "absent",
+        }],
+        ["source", { action: "source", ref: "proj", slug: "../hook" }],
+    ])("rejects %s path segments before HTTP dispatch", async (_action, args) => {
+        let requestCount = 0;
+        const request = async () => {
+            requestCount += 1;
+            return { ok: true, status: 200, data: {} };
+        };
+        const { callback } = captureEdgeFunctionsTool({ get: request, post: request });
+
+        await expect(callback(args)).rejects.toThrow("invalid");
+        expect(requestCount).toBe(0);
+    });
+
+    test.each(["deploy", "deploy_bundle", "activate"])(
+        "rejects %s without expected-active-version before HTTP dispatch",
+        async (action) => {
+            let requestCount = 0;
+            const { callback } = captureEdgeFunctionsTool({
+                post: async () => {
+                    requestCount += 1;
+                    return { ok: true, status: 200, data: {} };
+                },
+            });
+            const actionInput = action === "deploy"
+                ? { action, ref: "proj", slug: "hook", path: "/definitely/missing.ts" }
+                : action === "deploy_bundle"
+                    ? { action, ref: "proj", slug: "hook", files: { "index.ts": "export default {}" } }
+                    : { action, ref: "proj", slug: "hook", version: "2" };
+
+            await expect(callback(actionInput)).rejects.toThrow("--expected-active-version");
+            expect(requestCount).toBe(0);
+        },
+    );
+
+    test.each([0, "0", "01", "9007199254740992"])(
+        "rejects invalid expected active version %j during argument parsing",
+        (expectedActiveVersion) => {
+            const { schema } = captureEdgeFunctionsTool({});
+            expect(() => parseToolArguments(schema, {
+                action: "activate",
+                ref: "proj",
+                slug: "hook",
+                version: "2",
+                "expected-active-version": expectedActiveVersion,
+            })).toThrow("Invalid arguments");
+        },
+    );
+
+    test.each([0, "0", "01", "9007199254740992", true, {}])(
+        "rejects direct invalid expected active version %j before HTTP dispatch",
+        async (expectedActiveVersion) => {
+            let requestCount = 0;
+            const { callback } = captureEdgeFunctionsTool({
+                post: async () => {
+                    requestCount += 1;
+                    return { ok: true, status: 200, data: {} };
+                },
+            });
+
+            await expect(callback({
+                action: "deploy_bundle",
+                ref: "proj",
+                slug: "hook",
+                files: { "index.ts": "export default {}" },
+                "expected-active-version": expectedActiveVersion,
+            })).rejects.toThrow("canonical positive safe integer");
+            expect(requestCount).toBe(0);
+        },
+    );
+
     test("sends bundle config inline without a follow-up PATCH", async () => {
         const calls: Array<{ method: string; path: string; body: unknown }> = [];
         const { callback } = captureEdgeFunctionsTool({
@@ -152,7 +384,15 @@ describe("edge_functions CLI tool", () => {
                 return {
                     ok: true,
                     status: 200,
-                    data: { success: true, verify_jwt: true, background_routes: ["/work/*"] },
+                    data: {
+                        success: true,
+                        project_ref: "proj",
+                        slug: "worker",
+                        previous_active_version: "absent",
+                        active_version: "1",
+                        version: "1",
+                        config: { version: "1", verify_jwt: true, background_routes: ["/work/*"] },
+                    },
                 };
             },
         });
@@ -164,6 +404,7 @@ describe("edge_functions CLI tool", () => {
             files: { "index.ts": "export default {}" },
             verify_jwt: true,
             background_routes: ["/work/*"],
+            "expected-active-version": "absent",
         });
 
         expect(calls).toEqual([
@@ -174,12 +415,20 @@ describe("edge_functions CLI tool", () => {
                     files: { "index.ts": "export default {}" },
                     entrypoint: undefined,
                     minify: undefined,
+                    expected_active_version: "absent",
                     verify_jwt: true,
                     background_routes: ["/work/*"],
                 },
             },
         ]);
-        expect(result.content[0].text).toContain("Function worker bundle deployed");
+        expect(JSON.parse(result.content[0].text)).toMatchObject({
+            ok: true,
+            operation: "edge_functions.deploy_bundle",
+            project_ref: "proj",
+            slug: "worker",
+            previous_active_version: "absent",
+            active_version: "1",
+        });
     });
 
     test("sends single-file config inline without a follow-up PATCH", async () => {
@@ -187,7 +436,19 @@ describe("edge_functions CLI tool", () => {
         const { callback } = captureEdgeFunctionsTool({
             post: async (path: string, body: unknown) => {
                 calls.push({ method: "post", path, body });
-                return { ok: true, status: 200, data: { success: true, verify_jwt: false } };
+                return {
+                    ok: true,
+                    status: 200,
+                    data: {
+                        success: true,
+                        project_ref: "proj",
+                        slug: "public-hook",
+                        previous_active_version: "3",
+                        active_version: "4",
+                        version: "4",
+                        config: { version: "4", verify_jwt: false },
+                    },
+                };
             },
         });
 
@@ -197,6 +458,7 @@ describe("edge_functions CLI tool", () => {
             slug: "public-hook",
             code: "export default { fetch: () => new Response('ok') }",
             verify_jwt: false,
+            "expected-active-version": "3",
         });
 
         expect(calls).toEqual([{
@@ -205,10 +467,18 @@ describe("edge_functions CLI tool", () => {
             body: {
                 code: "export default { fetch: () => new Response('ok') }",
                 minify: undefined,
+                expected_active_version: "3",
                 verify_jwt: false,
             },
         }]);
-        expect(result.content[0].text).toContain("Function public-hook deployed");
+        expect(JSON.parse(result.content[0].text)).toMatchObject({
+            ok: true,
+            operation: "edge_functions.deploy",
+            project_ref: "proj",
+            slug: "public-hook",
+            previous_active_version: "3",
+            active_version: "4",
+        });
     });
 
     test("rejects an unconfirmed bundle policy without a follow-up PATCH", async () => {
@@ -230,15 +500,17 @@ describe("edge_functions CLI tool", () => {
             slug: "legacy-hook",
             files: { "index.ts": "export default {}" },
             verify_jwt: false,
+            "expected-active-version": "1",
         });
 
         expect(calls.map(({ method, path }) => ({ method, path }))).toEqual([
             { method: "post", path: "/v1/projects/proj/functions/legacy-hook/bundle" },
         ]);
-        expect(response.content[0].text).toStartWith("❌ Unsafe deployment receipt");
-        expect(response.content[0].text).toContain("did not confirm the requested function policy");
-        expect(response.content[0].text).toContain("No follow-up PATCH was attempted");
-        expect(response.content[0].text).toContain("code and policy must be activated atomically");
+        expect(response.isError).toBe(true);
+        expect(JSON.parse(response.content[0].text).error).toEqual({
+            code: "OUTCOME_UNKNOWN",
+            http_status: 200,
+        });
     });
 
     test("rejects a mismatched single-file policy without a follow-up PATCH", async () => {
@@ -260,52 +532,72 @@ describe("edge_functions CLI tool", () => {
             slug: "public-hook-mismatch",
             code: "export default { fetch: () => new Response('ok') }",
             verify_jwt: false,
+            "expected-active-version": "1",
         });
 
         expect(calls).toEqual([
             { method: "post", path: "/v1/projects/proj/functions/public-hook-mismatch" },
         ]);
-        expect(response.content[0].text).toStartWith("❌ Unsafe deployment receipt");
-        expect(response.content[0].text).toContain("No follow-up PATCH was attempted");
+        expect(response.isError).toBe(true);
+        expect(JSON.parse(response.content[0].text).error).toEqual({
+            code: "OUTCOME_UNKNOWN",
+            http_status: 200,
+        });
     });
 
-    test("activates the immutable legacy Function version zero with a structured receipt", async () => {
-        const calls: string[] = [];
-        const { schema, callback } = captureEdgeFunctionsTool({
-            post: async (path: string) => {
-                calls.push(path);
-                return {
-                    ok: true,
-                    status: 200,
-                    data: {
-                        success: true,
-                        version: "0",
-                        config: { version: "0", verify_jwt: false },
-                    },
-                };
+    test("rejects version zero in a deploy receipt", async () => {
+        const { callback } = captureEdgeFunctionsTool({
+            post: async () => ({
+                ok: true,
+                status: 200,
+                data: {
+                    success: true,
+                    project_ref: "proj",
+                    slug: "public-hook",
+                    previous_active_version: "absent",
+                    active_version: "0",
+                    version: "0",
+                    config: { version: "0", verify_jwt: true },
+                },
+            }),
+        });
+
+        const response = await callback({
+            action: "deploy_bundle",
+            ref: "proj",
+            slug: "public-hook",
+            files: { "index.ts": "export default {}" },
+            "expected-active-version": "absent",
+        });
+
+        expect(response.isError).toBe(true);
+        expect(JSON.parse(response.content[0].text).error).toEqual({
+            code: "OUTCOME_UNKNOWN",
+            http_status: 200,
+        });
+    });
+
+    test("rejects legacy Function version zero before activation dispatch", async () => {
+        let requestCount = 0;
+        const { callback } = captureEdgeFunctionsTool({
+            post: async () => {
+                requestCount += 1;
+                return { ok: true, status: 200, data: {} };
             },
         });
 
-        const args = parseToolArguments(schema, {
+        await expect(callback({
             action: "activate",
             ref: "proj",
             slug: "public-hook",
             version: 0,
-        });
-        const response = await callback(args);
-
-        expect(calls).toEqual(["/v1/projects/proj/functions/public-hook/versions/0/activate"]);
-        expect(JSON.parse(response.content[0].text)).toEqual({
-            schema: "supacloud.cli.release-control.v1",
-            ok: true,
-            operation: "edge_functions.activate",
-            slug: "public-hook",
-            version: "0",
-            verify_jwt: false,
-        });
+            "expected-active-version": 2,
+        })).rejects.toThrow("canonical positive safe integer");
+        expect(requestCount).toBe(0);
     });
 
     test.each([
+        ["zero", 0],
         ["a negative", -1],
         ["a fractional", 1.5],
         ["an unsafe integer", "9007199254740992"],
@@ -343,7 +635,13 @@ describe("edge_functions CLI tool", () => {
     ) => {
         const { callback } = captureEdgeFunctionsTool({ post: async () => activation });
 
-        const response = await callback({ action: "activate", ref: "proj", slug: "hook", version: "5" });
+        const response = await callback({
+            action: "activate",
+            ref: "proj",
+            slug: "hook",
+            version: "5",
+            "expected-active-version": "4",
+        });
         const payload = JSON.parse(response.content[0].text);
 
         expect(response.isError).toBe(true);
@@ -366,6 +664,7 @@ describe("edge_functions CLI tool", () => {
             slug: "hook",
             version: "5",
             verify_jwt: false,
+            "expected-active-version": "4",
         })).rejects.toThrow("not supported for 'activate'");
         expect(requestCount).toBe(0);
     });

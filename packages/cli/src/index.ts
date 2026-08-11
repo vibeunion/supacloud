@@ -221,8 +221,8 @@ EXAMPLES
   ${preferredCommand} branch promote --branch_ref preview123 --plan_checksum <sha256>
   ${preferredCommand} ai show_skill
   ${preferredCommand} ai install_skill --dry_run
-  ${preferredCommand} edge_functions deploy --ref abc123 --slug hello --path ./supabase/functions/hello
-  ${preferredCommand} edge_functions activate --ref abc123 --slug hello --version 3
+  ${preferredCommand} edge_functions deploy --ref abc123 --slug hello --path ./supabase/functions/hello --expected-active-version absent
+  ${preferredCommand} edge_functions activate --ref abc123 --slug hello --version 3 --expected-active-version 4
   ${preferredCommand} scheduled_functions list --ref abc123
   ${preferredCommand} edge_functions config --ref abc123 --slug hello --verify_jwt false --background_routes "/queue/*,/render/*"
   ${preferredCommand} secrets upsert --ref abc123 --from-env API_KEY,WEBHOOK_SECRET

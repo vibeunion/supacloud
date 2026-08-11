@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 import { execFile } from "node:child_process";
 import { Type } from "@sinclair/typebox";
 import { decodedSchema, optional, stringEnum, withDescription } from "../schema";
+import { projectRefPathSegment } from "../project-ref";
 import type { HttpResult, HttpTransport } from "../transports/http";
 import {
     releaseControlFailure,
@@ -97,26 +98,48 @@ const functionFilesSchema = decodedSchema(
     parseFunctionFiles,
 );
 
-function parseFunctionVersion(input: string | number): unknown {
+function positiveFunctionVersion(input: unknown, label: string): string {
+    if (typeof input !== "string" && typeof input !== "number") {
+        throw new Error(`${label} must be a canonical positive safe integer`);
+    }
     const version = String(input);
-    if (!CANONICAL_FUNCTION_VERSION_PATTERN.test(version)
+    if (!POSITIVE_FUNCTION_VERSION_PATTERN.test(version)
         || !Number.isSafeInteger(Number(version))) {
-        throw new Error("Function version must be a canonical safe integer");
+        throw new Error(`${label} must be a canonical positive safe integer`);
     }
     return version;
 }
 
-const CANONICAL_FUNCTION_VERSION_PATTERN = /^(?:0|[1-9][0-9]*)$/;
-const SAFE_FUNCTION_REF_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+const POSITIVE_FUNCTION_VERSION_PATTERN = /^[1-9][0-9]*$/;
 const SAFE_FUNCTION_SLUG_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
-const FUNCTION_ACTIVATION_ARGUMENTS = new Set(["action", "ref", "slug", "version"]);
+const FUNCTION_ACTIVATION_ARGUMENTS = new Set([
+    "action", "ref", "slug", "version", "expected-active-version",
+]);
 const functionVersionSchema = Type.Optional(decodedSchema(
     Type.Union([
-        Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
-        Type.String({ pattern: CANONICAL_FUNCTION_VERSION_PATTERN.source, maxLength: 16 }),
+        Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+        Type.String({ pattern: POSITIVE_FUNCTION_VERSION_PATTERN.source, maxLength: 16 }),
     ]),
-    Type.String({ pattern: CANONICAL_FUNCTION_VERSION_PATTERN.source, maxLength: 16 }),
-    parseFunctionVersion,
+    Type.String({ pattern: POSITIVE_FUNCTION_VERSION_PATTERN.source, maxLength: 16 }),
+    (input) => positiveFunctionVersion(input, "Function version"),
+));
+
+function parseExpectedActiveVersion(input: unknown): unknown {
+    if (input === "absent") return input;
+    return positiveFunctionVersion(input, "Expected active version");
+}
+
+const expectedActiveVersionSchema = Type.Optional(decodedSchema(
+    Type.Union([
+        Type.Literal("absent"),
+        Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+        Type.String({ pattern: POSITIVE_FUNCTION_VERSION_PATTERN.source, maxLength: 16 }),
+    ]),
+    Type.Union([
+        Type.Literal("absent"),
+        Type.String({ pattern: POSITIVE_FUNCTION_VERSION_PATTERN.source, maxLength: 16 }),
+    ]),
+    parseExpectedActiveVersion,
 ));
 
 const secretListSchema = Type.Array(Type.Object({ name: Type.String(), value: Type.String() }));
@@ -257,9 +280,39 @@ type EdgeFunctionConfigInput = {
     background_routes?: string[];
 };
 
+const INVALID_FUNCTION_LIST_RESPONSE = "❌ Edge Function list response is invalid";
+const INVALID_FUNCTION_SOURCE_RESPONSE = "❌ Edge Function source response is invalid";
+
+function invalidFunctionReadResponse(message: string): ReleaseControlToolResponse {
+    return { isError: true, content: [{ type: "text", text: message }] };
+}
+
+function safeFunctionList(payload: unknown): Array<Record<string, unknown>> | null {
+    if (!Array.isArray(payload)) return null;
+    const functionSlugs = new Set<string>();
+    for (const candidate of payload) {
+        const edgeFunction = objectRecord(candidate);
+        const slug = edgeFunction?.slug;
+        const version = edgeFunction?.version;
+        if (typeof slug !== "string" || !SAFE_FUNCTION_SLUG_PATTERN.test(slug)
+            || typeof version !== "number" || !Number.isSafeInteger(version) || version < 1
+            || functionSlugs.has(slug)) return null;
+        functionSlugs.add(slug);
+    }
+    return payload as Array<Record<string, unknown>>;
+}
+
+function functionListResponse(response: HttpResult<unknown>): ReleaseControlToolResponse {
+    if (!response.ok) return invalidFunctionReadResponse(`❌ Failed (${response.status})`);
+    const functions = safeFunctionList(response.data);
+    return functions
+        ? { content: [{ type: "text", text: JSON.stringify(functions, null, 2) }] }
+        : invalidFunctionReadResponse(INVALID_FUNCTION_LIST_RESPONSE);
+}
+
 function confirmedFunctionConfig(payload: unknown, expected: EdgeFunctionConfigInput): boolean {
-    if (!payload || typeof payload !== "object" || Array.isArray(payload)) return false;
-    const response = payload as Record<string, unknown>;
+    const response = objectRecord(payload);
+    if (!response) return false;
     if (expected.verify_jwt !== undefined && response.verify_jwt !== expected.verify_jwt) return false;
     if (expected.background_routes !== undefined) {
         if (!Array.isArray(response.background_routes)) return false;
@@ -268,10 +321,34 @@ function confirmedFunctionConfig(payload: unknown, expected: EdgeFunctionConfigI
     return true;
 }
 
-function functionSourceCode(payload: unknown): string | null {
+function functionSourceCode(payload: unknown, field: "code" | "source_code" = "code"): string | null {
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
-    const code = (payload as Record<string, unknown>).code;
+    const code = (payload as Record<string, unknown>)[field];
     return typeof code === "string" ? code : null;
+}
+
+function requestedSourceVersion(candidate: unknown): string | undefined {
+    return candidate === undefined
+        ? undefined
+        : positiveFunctionVersion(candidate, "Function source version");
+}
+
+function functionSourceOutput(
+    slug: string,
+    sourceCode: string,
+    output?: string,
+): ReleaseControlToolResponse {
+    if (!output) {
+        return { content: [{ type: "text", text: JSON.stringify({ code: sourceCode }, null, 2) }] };
+    }
+    const outputPath = resolve(output);
+    writeFileSync(outputPath, sourceCode, { flag: "wx" });
+    return {
+        content: [{
+            type: "text",
+            text: `✅ Function ${slug} source written to ${outputPath} (${Buffer.byteLength(sourceCode)} bytes)`,
+        }],
+    };
 }
 
 function objectRecord(candidate: unknown): Record<string, unknown> | null {
@@ -280,23 +357,110 @@ function objectRecord(candidate: unknown): Record<string, unknown> | null {
         : null;
 }
 
-function activationResponse(
-    slug: string,
-    version: string,
+function edgeFunctionResourcePath(ref: unknown, slug?: unknown): string {
+    const root = `/v1/projects/${projectRefPathSegment(ref, "Edge Functions")}/functions`;
+    if (slug === undefined) return root;
+    if (typeof slug !== "string" || !SAFE_FUNCTION_SLUG_PATTERN.test(slug)) {
+        throw new Error("'slug' is invalid for Edge Functions");
+    }
+    return `${root}/${encodeURIComponent(slug)}`;
+}
+
+async function readFunctionSource(
+    http: HttpTransport,
+    request: { projectRef: unknown; slug: string; version?: unknown; output?: string },
+): Promise<ReleaseControlToolResponse> {
+    const sourceVersion = requestedSourceVersion(request.version);
+    const resourcePath = edgeFunctionResourcePath(request.projectRef, request.slug);
+    const sourcePath = sourceVersion === undefined
+        ? `${resourcePath}/source`
+        : `${resourcePath}/versions/${encodeURIComponent(sourceVersion)}`;
+    const response = await http.get(sourcePath);
+    if (!response.ok) return invalidFunctionReadResponse(`❌ Failed (${response.status})`);
+    const sourceCode = functionSourceCode(
+        response.data,
+        sourceVersion === undefined ? "code" : "source_code",
+    );
+    return sourceCode === null
+        ? invalidFunctionReadResponse(INVALID_FUNCTION_SOURCE_RESPONSE)
+        : functionSourceOutput(request.slug, sourceCode, request.output);
+}
+
+interface FunctionMutationExpectation {
+    operation: "edge_functions.deploy" | "edge_functions.deploy_bundle" | "edge_functions.activate";
+    projectRef: string;
+    slug: string;
+    expectedActiveVersion: string;
+    targetVersion?: string;
+    config?: EdgeFunctionConfigInput;
+}
+
+interface ConfirmedFunctionMutation {
+    activeVersion: string;
+    verifyJwt: boolean;
+}
+
+function mutationIdentityMatches(
+    receipt: Record<string, unknown>,
+    expectation: FunctionMutationExpectation,
+): boolean {
+    return receipt.success === true
+        && receipt.project_ref === expectation.projectRef
+        && receipt.slug === expectation.slug
+        && receipt.previous_active_version === expectation.expectedActiveVersion;
+}
+
+function validReceiptVersion(activeVersion: unknown): activeVersion is string {
+    return typeof activeVersion === "string"
+        && POSITIVE_FUNCTION_VERSION_PATTERN.test(activeVersion)
+        && Number.isSafeInteger(Number(activeVersion));
+}
+
+function confirmedMutationVersion(
+    receipt: Record<string, unknown>,
+    config: Record<string, unknown>,
+    expectation: FunctionMutationExpectation,
+): string | null {
+    const activeVersion = receipt.active_version;
+    if (!validReceiptVersion(activeVersion)
+        || receipt.version !== activeVersion
+        || config.version !== activeVersion
+        || (expectation.targetVersion !== undefined && activeVersion !== expectation.targetVersion)) {
+        return null;
+    }
+    return activeVersion;
+}
+
+function confirmedFunctionMutation(
+    expectation: FunctionMutationExpectation,
+    payload: unknown,
+): ConfirmedFunctionMutation | null {
+    const receipt = objectRecord(payload);
+    const config = objectRecord(receipt?.config);
+    if (!receipt || !config || !mutationIdentityMatches(receipt, expectation)) return null;
+    const activeVersion = confirmedMutationVersion(receipt, config, expectation);
+    if (activeVersion === null
+        || typeof config.verify_jwt !== "boolean"
+        || !confirmedFunctionConfig(config, expectation.config ?? {})) return null;
+    return { activeVersion, verifyJwt: config.verify_jwt };
+}
+
+function functionMutationResponse(
+    expectation: FunctionMutationExpectation,
     response: HttpResult<unknown>,
 ): ReleaseControlToolResponse {
-    const operation = "edge_functions.activate";
-    if (!response.ok) return releaseControlMutationFailure(operation, response);
-    const receipt = objectRecord(response.data);
-    const config = objectRecord(receipt?.config);
-    if (receipt?.success !== true || receipt.version !== version
-        || config?.version !== version || typeof config.verify_jwt !== "boolean") {
-        return releaseControlFailure(operation, "OUTCOME_UNKNOWN", response.status);
+    if (!response.ok) return releaseControlMutationFailure(expectation.operation, response);
+    const confirmed = confirmedFunctionMutation(expectation, response.data);
+    if (!confirmed) {
+        return releaseControlFailure(expectation.operation, "OUTCOME_UNKNOWN", response.status);
     }
-    return releaseControlSuccess(operation, {
-        slug,
-        version,
-        verify_jwt: config.verify_jwt,
+    return releaseControlSuccess(expectation.operation, {
+        project_ref: expectation.projectRef,
+        slug: expectation.slug,
+        previous_active_version: expectation.expectedActiveVersion,
+        active_version: confirmed.activeVersion,
+        version: confirmed.activeVersion,
+        verify_jwt: confirmed.verifyJwt,
     });
 }
 
@@ -304,6 +468,7 @@ interface FunctionActivationTarget {
     projectRef: string;
     functionSlug: string;
     version: string;
+    expectedActiveVersion: string;
 }
 
 function readOnlyActivationResult(): ReleaseControlToolResponse {
@@ -316,14 +481,21 @@ function readOnlyActivationResult(): ReleaseControlToolResponse {
 function functionActivationTarget(args: Record<string, unknown>): FunctionActivationTarget {
     const projectRef = typeof args.ref === "string" ? args.ref.trim() : "";
     const functionSlug = typeof args.slug === "string" ? args.slug.trim() : "";
-    const version = args.version;
-    if (!SAFE_FUNCTION_REF_PATTERN.test(projectRef)) throw new Error("'ref' is invalid for 'activate'");
+    const version = positiveFunctionVersion(args.version, "Function activation version");
+    projectRefPathSegment(projectRef, "Edge Function activation");
     if (!SAFE_FUNCTION_SLUG_PATTERN.test(functionSlug)) throw new Error("'slug' is invalid for 'activate'");
-    if (typeof version !== "string" || !CANONICAL_FUNCTION_VERSION_PATTERN.test(version)
-        || !Number.isSafeInteger(Number(version))) {
-        throw new Error("'version' is invalid for 'activate'");
+    const expectedActiveVersion = requiredExpectedActiveVersion(args, "activate");
+    return { projectRef, functionSlug, version, expectedActiveVersion };
+}
+
+function requiredExpectedActiveVersion(args: Record<string, unknown>, action: string): string {
+    const expected = args["expected-active-version"];
+    if (expected === undefined) {
+        throw new Error(`'--expected-active-version' required for '${action}'`);
     }
-    return { projectRef, functionSlug, version };
+    const parsed = parseExpectedActiveVersion(expected);
+    if (typeof parsed !== "string") throw new Error("Expected active version is invalid");
+    return parsed;
 }
 
 async function activateFunctionVersion(
@@ -334,10 +506,16 @@ async function activateFunctionVersion(
     if (readOnly) return readOnlyActivationResult();
     const unsupported = Object.keys(args).filter((name) => !FUNCTION_ACTIVATION_ARGUMENTS.has(name));
     if (unsupported.length > 0) throw new Error(`'${unsupported[0]}' is not supported for 'activate'`);
-    const { projectRef, functionSlug, version } = functionActivationTarget(args);
-    const endpoint = `/v1/projects/${encodeURIComponent(projectRef)}/functions/${encodeURIComponent(functionSlug)}`
+    const { projectRef, functionSlug, version, expectedActiveVersion } = functionActivationTarget(args);
+    const endpoint = edgeFunctionResourcePath(projectRef, functionSlug)
         + `/versions/${encodeURIComponent(version)}/activate`;
-    return activationResponse(functionSlug, version, await http.post(endpoint));
+    return functionMutationResponse({
+        operation: "edge_functions.activate",
+        projectRef,
+        slug: functionSlug,
+        expectedActiveVersion,
+        targetVersion: version,
+    }, await http.post(endpoint, { expected_active_version: expectedActiveVersion }));
 }
 
 export function registerAdvancedTools(
@@ -356,7 +534,7 @@ Actions: list, deploy, deploy_bundle, config, source, activate, delete, check`,
             action: withDescription(stringEnum(["list", "deploy", "deploy_bundle", "config", "source", "activate", "delete", "check"]), "Action"),
             ref: withDescription(Type.String(), "Project ref"),
             slug: optional(Type.String(), "[deploy/deploy_bundle/config/source/activate/delete/check] Function name"),
-            version: withDescription(functionVersionSchema, "[activate] Existing Function version"),
+            version: withDescription(functionVersionSchema, "[source/activate] Existing immutable Function version; source requires a positive version"),
             code: optional(Type.String(), "[deploy/check] Function source code (TypeScript)"),
             path: optional(Type.String(), "[deploy/check] Local file path to read code from (alternative to code)"),
             output: optional(Type.String(), "[source] Write source to this local file instead of stdout; the file must not already exist"),
@@ -365,10 +543,17 @@ Actions: list, deploy, deploy_bundle, config, source, activate, delete, check`,
             minify: optional(Type.Boolean(), "[deploy/deploy_bundle] Minify bundle"),
             verify_jwt: optional(Type.Boolean(), "[deploy/deploy_bundle/config] Set JWT verification for this function"),
             background_routes: withDescription(backgroundRoutesSchema, "[deploy/deploy_bundle/config] Background route paths; pass comma-separated or JSON array in CLI"),
+            "expected-active-version": withDescription(
+                expectedActiveVersionSchema,
+                "[deploy/deploy_bundle/activate] Required current active version, or 'absent' when none exists",
+            ),
         },
         async (args: any) => {
             if (args.action === "activate") return activateFunctionVersion(http, args, options.readOnly);
             const { action, ref, slug, path: pathArg, output, files, entrypoint, minify, verify_jwt, background_routes } = args;
+            const expectedActiveVersion = action === "deploy" || action === "deploy_bundle"
+                ? requiredExpectedActiveVersion(args, action)
+                : undefined;
             let code = args.code as string | undefined;
             const need = (f: string, v: any) => { if (!v) throw new Error(`'${f}' required for '${action}'`); };
 
@@ -386,20 +571,10 @@ Actions: list, deploy, deploy_bundle, config, source, activate, delete, check`,
                 if (!hasFunctionConfig()) {
                     throw new Error("'verify_jwt' or 'background_routes' required for 'config'");
                 }
-                const cr = await http.patch(`/v1/projects/${ref}/functions/${slug}/config`, functionConfig());
+                const cr = await http.patch(`${edgeFunctionResourcePath(ref, slug)}/config`, functionConfig());
                 return cr.ok
                     ? `✅ Function ${slug} config updated\n${JSON.stringify(cr.data, null, 2)}`
                     : `❌ Config update failed (${cr.status}): ${JSON.stringify(cr.data)}`;
-            };
-
-            const deploymentPolicyReceiptText = (
-                successText: string,
-                responsePayload: unknown,
-            ): string => {
-                if (!hasFunctionConfig() || confirmedFunctionConfig(responsePayload, functionConfig())) {
-                    return successText;
-                }
-                return "❌ Unsafe deployment receipt: POST succeeded but did not confirm the requested function policy. No follow-up PATCH was attempted because code and policy must be activated atomically.";
             };
 
             const checkSyntax = async (sourceCode: string): Promise<{ ok: boolean; err?: string }> => {
@@ -427,8 +602,7 @@ Actions: list, deploy, deploy_bundle, config, source, activate, delete, check`,
 
             switch (action) {
                 case "list":
-                    text = JSON.stringify((await http.get(`/v1/projects/${ref}/functions`)).data, null, 2);
-                    break;
+                    return functionListResponse(await http.get(edgeFunctionResourcePath(ref)));
                 case "check":
                     need("code (or path)", code);
                     const checkRes = await checkSyntax(code!);
@@ -445,60 +619,49 @@ Actions: list, deploy, deploy_bundle, config, source, activate, delete, check`,
                         text = `❌ Deployment aborted. Syntax check failed:\n${deployCheck.err}`;
                         break;
                     }
-                    const dr = await http.post(`/v1/projects/${ref}/functions/${slug}`, {
+                    const deploymentResponse = await http.post(edgeFunctionResourcePath(ref, slug), {
                         code,
                         minify,
+                        expected_active_version: expectedActiveVersion,
                         ...functionConfig(),
                     });
-                    if (!dr.ok) {
-                        text = `❌ Failed (${dr.status}): ${JSON.stringify(dr.data)}`;
-                        break;
-                    }
-                    text = deploymentPolicyReceiptText(`✅ Function ${slug} deployed`, dr.data);
-                    break;
+                    return functionMutationResponse({
+                        operation: "edge_functions.deploy",
+                        projectRef: ref,
+                        slug,
+                        expectedActiveVersion: expectedActiveVersion!,
+                        config: functionConfig(),
+                    }, deploymentResponse);
                 case "deploy_bundle":
                     need("slug", slug); need("files", files);
-                    const br = await http.post(`/v1/projects/${ref}/functions/${slug}/bundle`, {
+                    const bundleResponse = await http.post(`${edgeFunctionResourcePath(ref, slug)}/bundle`, {
                         files,
                         entrypoint,
                         minify,
+                        expected_active_version: expectedActiveVersion,
                         ...functionConfig(),
                     });
-                    if (!br.ok) {
-                        text = `❌ Failed (${br.status}): ${JSON.stringify(br.data)}`;
-                        break;
-                    }
-                    text = deploymentPolicyReceiptText(
-                        `✅ Function ${slug} bundle deployed (${Object.keys(files!).length} files)`,
-                        br.data,
-                    );
-                    break;
+                    return functionMutationResponse({
+                        operation: "edge_functions.deploy_bundle",
+                        projectRef: ref,
+                        slug,
+                        expectedActiveVersion: expectedActiveVersion!,
+                        config: functionConfig(),
+                    }, bundleResponse);
                 case "config":
                     text = await updateFunctionConfig();
                     break;
                 case "source":
                     need("slug", slug);
-                    const sr = await http.get(`/v1/projects/${ref}/functions/${slug}/source`);
-                    if (!sr.ok) {
-                        text = `❌ Not found (${sr.status})`;
-                        break;
-                    }
-                    if (!output) {
-                        text = JSON.stringify(sr.data, null, 2);
-                        break;
-                    }
-                    const sourceCode = functionSourceCode(sr.data);
-                    if (sourceCode === null) {
-                        text = "❌ Source response did not contain a string code field";
-                        break;
-                    }
-                    const outputPath = resolve(output);
-                    writeFileSync(outputPath, sourceCode, { flag: "wx" });
-                    text = `✅ Function ${slug} source written to ${outputPath} (${Buffer.byteLength(sourceCode)} bytes)`;
-                    break;
+                    return readFunctionSource(http, {
+                        projectRef: ref,
+                        slug,
+                        version: args.version,
+                        output,
+                    });
                 case "delete":
                     need("slug", slug);
-                    text = (await http.delete(`/v1/projects/${ref}/functions/${slug}`)).ok ? `✅ Function ${slug} deleted` : `❌ Failed`;
+                    text = (await http.delete(edgeFunctionResourcePath(ref, slug))).ok ? `✅ Function ${slug} deleted` : `❌ Failed`;
                     break;
                 default: text = `❌ Unknown action`;
             }

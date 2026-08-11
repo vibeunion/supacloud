@@ -358,6 +358,101 @@ describe("supacloud-cli process contract", () => {
         expect(readFileSync(outputPath, "utf8")).toBe("preserve-existing-source\n");
     });
 
+    test("reads an immutable Function version to stdout or an exclusive output file", async () => {
+        const requestedPaths: string[] = [];
+        const immutableSource = "export const release = 40;\n";
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch(request) {
+                requestedPaths.push(new URL(request.url).pathname);
+                return Response.json({ source_code: immutableSource, private: "immutable-source-sentinel" });
+            },
+        });
+        servers.push(server);
+        const environment = {
+            SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+            SUPACLOUD_API_TOKEN: "test-token",
+            SUPACLOUD_PROJECT_REF: "abc123",
+        };
+        const outputDirectory = mkdtempSync(join(tmpdir(), "supacloud-cli-version-source-"));
+        temporaryDirectories.push(outputDirectory);
+        const outputPath = join(outputDirectory, "fa-api-v40.ts");
+
+        const stdoutResponse = await runProjectCli([
+            "edge_functions", "source", "--ref", "abc123", "--slug", "fa-api", "--version", "40",
+        ], environment);
+        const fileResponse = await runProjectCli([
+            "edge_functions", "source", "--ref", "abc123", "--slug", "fa-api", "--version", "40",
+            "--output", outputPath,
+        ], environment);
+        const overwriteResponse = await runProjectCli([
+            "edge_functions", "source", "--ref", "abc123", "--slug", "fa-api", "--version", "40",
+            "--output", outputPath,
+        ], environment);
+
+        expect(stdoutResponse.exitCode).toBe(0);
+        expect(JSON.parse(stdoutResponse.stdout)).toEqual({ code: immutableSource });
+        expect(stdoutResponse.stdout).not.toContain("sentinel");
+        expect(fileResponse.exitCode).toBe(0);
+        expect(readFileSync(outputPath, "utf8")).toBe(immutableSource);
+        expect(overwriteResponse.exitCode).toBe(1);
+        expect(overwriteResponse.stderr).toContain("EEXIST");
+        expect(readFileSync(outputPath, "utf8")).toBe(immutableSource);
+        expect(requestedPaths).toEqual(Array(3).fill("/v1/projects/abc123/functions/fa-api/versions/40"));
+    });
+
+    test("prints a Function list with numeric active versions for release readback", async () => {
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch: () => Response.json([{ slug: "fa-api", version: 40, verify_jwt: true }]),
+        });
+        servers.push(server);
+
+        const response = await runProjectCli(["edge_functions", "list", "--ref", "abc123"], {
+            SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+            SUPACLOUD_API_TOKEN: "test-token",
+            SUPACLOUD_PROJECT_REF: "abc123",
+        });
+        const functions = JSON.parse(response.stdout);
+
+        expect(response.exitCode).toBe(0);
+        expect(Array.isArray(functions)).toBe(true);
+        expect(functions[0]).toMatchObject({ slug: "fa-api", version: 40 });
+        expect(typeof functions[0].version).toBe("number");
+    });
+
+    test("rejects malformed Function readbacks without reflecting server fields", async () => {
+        const responseSentinel = "private-function-readback-sentinel";
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch(request) {
+                const path = new URL(request.url).pathname;
+                return path.endsWith("/source")
+                    ? Response.json({ code: 7, private: responseSentinel })
+                    : Response.json([{ slug: "fa-api", version: "40", private: responseSentinel }]);
+            },
+        });
+        servers.push(server);
+        const environment = {
+            SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+            SUPACLOUD_API_TOKEN: "test-token",
+            SUPACLOUD_PROJECT_REF: "abc123",
+        };
+
+        const listResponse = await runProjectCli(["edge_functions", "list", "--ref", "abc123"], environment);
+        const sourceResponse = await runProjectCli([
+            "edge_functions", "source", "--ref", "abc123", "--slug", "fa-api",
+        ], environment);
+
+        for (const response of [listResponse, sourceResponse]) {
+            expect(response.exitCode).toBe(1);
+            expect(response.stdout + response.stderr).not.toContain(responseSentinel);
+        }
+    });
+
     test("treats failure text as an error even when isError is false", () => {
         expect(cliToolResultIsError({
             isError: false,
@@ -721,20 +816,121 @@ describe("supacloud-cli process contract", () => {
         expect(response.stderr).not.toContain("--from_env");
     });
 
-    test("activates a Function version through a secret-safe process contract", async () => {
-        const apiToken = "activation-api-token-sentinel";
-        const requested: Array<{ method: string; path: string; authorization: string | null }> = [];
+    test("documents the exact expected-active-version flag for Function mutations", async () => {
+        for (const action of ["deploy", "deploy_bundle", "activate"]) {
+            const response = await runProjectCli(["edge_functions", action, "--help"], {
+                SUPACLOUD_API_URL: "http://127.0.0.1:1",
+                SUPACLOUD_API_TOKEN: "test-token",
+                SUPACLOUD_PROJECT_REF: "abc123",
+            });
+
+            expect(response.exitCode).toBe(0);
+            expect(response.stderr).toContain("--expected-active-version");
+            expect(response.stderr).not.toContain("--expected_active_version");
+        }
+    });
+
+    test("deploys a Function bundle with an identity-bound CAS receipt", async () => {
+        let requestBody: Record<string, unknown> | null = null;
         const server = Bun.serve({
             hostname: "127.0.0.1",
             port: 0,
-            fetch(request) {
+            async fetch(request) {
+                requestBody = await request.json() as Record<string, unknown>;
+                return Response.json({
+                    success: true,
+                    project_ref: "abc123",
+                    slug: "worker",
+                    previous_active_version: "7",
+                    active_version: "8",
+                    version: "8",
+                    config: { version: "8", verify_jwt: true },
+                });
+            },
+        });
+        servers.push(server);
+
+        const response = await runProjectCli([
+            "edge_functions", "deploy_bundle", "--ref", "abc123", "--slug", "worker",
+            "--files", JSON.stringify({ "index.ts": "export default {}" }),
+            "--expected-active-version", "7",
+        ], {
+            SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+            SUPACLOUD_API_TOKEN: "test-token",
+            SUPACLOUD_PROJECT_REF: "abc123",
+        });
+
+        expect(response.exitCode).toBe(0);
+        expect(JSON.parse(response.stdout)).toMatchObject({
+            ok: true,
+            operation: "edge_functions.deploy_bundle",
+            project_ref: "abc123",
+            slug: "worker",
+            previous_active_version: "7",
+            active_version: "8",
+        });
+        expect(requestBody).toMatchObject({ expected_active_version: "7" });
+    });
+
+    test("rejects Function mutations without expected-active-version before HTTP", async () => {
+        let requestCount = 0;
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch() {
+                requestCount += 1;
+                return Response.json({});
+            },
+        });
+        servers.push(server);
+        const commands = [
+            [
+                "edge_functions", "deploy", "--ref", "abc123", "--slug", "worker",
+                "--path", "/definitely/missing.ts",
+            ],
+            [
+                "edge_functions", "activate", "--ref", "abc123", "--slug", "worker",
+                "--version", "2",
+            ],
+        ];
+
+        for (const command of commands) {
+            const response = await runProjectCli(command, {
+                SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+                SUPACLOUD_API_TOKEN: "test-token",
+                SUPACLOUD_PROJECT_REF: "abc123",
+            });
+            expect(response.exitCode).toBe(1);
+            expect(response.stderr).toContain("--expected-active-version");
+            expect(response.stderr).not.toContain("ENOENT");
+        }
+        expect(requestCount).toBe(0);
+    });
+
+    test("activates a Function version through a secret-safe process contract", async () => {
+        const apiToken = "activation-api-token-sentinel";
+        const requested: Array<{
+            method: string;
+            path: string;
+            authorization: string | null;
+            body: unknown;
+        }> = [];
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            async fetch(request) {
                 requested.push({
                     method: request.method,
                     path: new URL(request.url).pathname,
                     authorization: request.headers.get("authorization"),
+                    body: await request.json(),
                 });
                 return Response.json({
                     success: true,
+                    project_ref: "abc123",
+                    slug: "public-hook",
+                    previous_active_version: "5",
+                    active_version: "6",
                     version: "6",
                     config: { version: "6", verify_jwt: false },
                 });
@@ -744,6 +940,7 @@ describe("supacloud-cli process contract", () => {
         const commandArguments = [
             "edge_functions", "activate", "--ref", "abc123",
             "--slug", "public-hook", "--version", "6",
+            "--expected-active-version", "5",
         ];
 
         const response = await runProjectCli(commandArguments, {
@@ -757,7 +954,10 @@ describe("supacloud-cli process contract", () => {
         expect(receipt).toMatchObject({
             ok: true,
             operation: "edge_functions.activate",
+            project_ref: "abc123",
             slug: "public-hook",
+            previous_active_version: "5",
+            active_version: "6",
             version: "6",
             verify_jwt: false,
         });
@@ -765,9 +965,39 @@ describe("supacloud-cli process contract", () => {
             method: "POST",
             path: "/v1/projects/abc123/functions/public-hook/versions/6/activate",
             authorization: `Bearer ${apiToken}`,
+            body: { expected_active_version: "5" },
         }]);
         expect(commandArguments.join("\0")).not.toContain(apiToken);
         expect(response.stdout + response.stderr).not.toContain(apiToken);
+    });
+
+    test("rejects public Function version zero before any HTTP request", async () => {
+        let requestCount = 0;
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch() {
+                requestCount += 1;
+                return Response.json({});
+            },
+        });
+        servers.push(server);
+
+        const response = await runProjectCli(
+            [
+                "edge_functions", "activate", "--ref", "abc123", "--slug", "legacy-hook",
+                "--version", "0", "--expected-active-version", "2",
+            ],
+            {
+                SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+                SUPACLOUD_API_TOKEN: "test-token",
+                SUPACLOUD_PROJECT_REF: "abc123",
+            },
+        );
+
+        expect(response.exitCode).toBe(1);
+        expect(requestCount).toBe(0);
+        expect(response.stderr).toContain("Invalid arguments");
     });
 
     test("returns structured non-zero Function activation failures without server text", async () => {
@@ -784,7 +1014,10 @@ describe("supacloud-cli process contract", () => {
         servers.push(server);
 
         const response = await runProjectCli(
-            ["edge_functions", "activate", "--ref", "abc123", "--slug", "hook", "--version", "2"],
+            [
+                "edge_functions", "activate", "--ref", "abc123", "--slug", "hook", "--version", "2",
+                "--expected-active-version", "1",
+            ],
             {
                 SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
                 SUPACLOUD_API_TOKEN: "test-token",
@@ -812,7 +1045,10 @@ describe("supacloud-cli process contract", () => {
         servers.push(server);
 
         const response = await runProjectCli(
-            ["edge_functions", "activate", "--ref", "abc123", "--slug", "hook", "--version", "2"],
+            [
+                "edge_functions", "activate", "--ref", "abc123", "--slug", "hook", "--version", "2",
+                "--expected-active-version", "1",
+            ],
             {
                 SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
                 SUPACLOUD_API_TOKEN: "test-token",
@@ -840,6 +1076,7 @@ describe("supacloud-cli process contract", () => {
         const response = await runProjectCli(
             [
                 "edge_functions", "activate", "--ref", "abc123", "--slug", "hook", "--version", "2",
+                "--expected-active-version", "1",
                 "--verify_jwt", "false",
             ],
             {
@@ -869,6 +1106,7 @@ describe("supacloud-cli process contract", () => {
         const response = await runProjectCli(
             [
                 "edge_functions", "activate", "--ref", "abc123", "--slug", "hook", "--version", "2",
+                "--expected-active-version", "1",
                 "--path", "/definitely/not/exist/private-source.ts",
             ],
             {

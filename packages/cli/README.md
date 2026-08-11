@@ -155,10 +155,10 @@ supacloud-cli frontend list --ref abc123
 supacloud-cli branch create --name feature-orders --data_mode schema_only
 supacloud-cli branch promotion_plan --branch_ref preview123
 supacloud-cli branch promote --branch_ref preview123 --plan_checksum <sha256>
-supacloud-cli edge_functions deploy --ref abc123 --slug hello --path ./supabase/functions/hello
-supacloud-cli edge_functions deploy_bundle --ref abc123 --slug hello --files '{"index.ts":"export default { fetch: () => new Response(\"ok\") }"}'
-supacloud-cli edge_functions source --ref abc123 --slug hello --output ./hello.ts
-supacloud-cli edge_functions activate --ref abc123 --slug hello --version 3
+supacloud-cli edge_functions deploy --ref abc123 --slug hello --path ./supabase/functions/hello --expected-active-version absent
+supacloud-cli edge_functions deploy_bundle --ref abc123 --slug hello --files '{"index.ts":"export default { fetch: () => new Response(\"ok\") }"}' --expected-active-version 7
+supacloud-cli edge_functions source --ref abc123 --slug hello --version 7 --output ./hello-v7.ts
+supacloud-cli edge_functions activate --ref abc123 --slug hello --version 3 --expected-active-version 8
 supacloud-cli scheduled_functions list --ref abc123
 supacloud-cli secrets upsert --ref abc123 --from-env API_KEY,WEBHOOK_SECRET
 supacloud-cli storage list_buckets --ref abc123
@@ -192,7 +192,18 @@ module policy consistently for CLI, Web Console, and direct API deployments.
 `deploy_bundle --files` accepts a JSON object in shell usage.
 Use `source --output <file>` for large Functions so terminal or automation output
 limits cannot truncate the original TS/JS source code. The destination must not
-already exist.
+already exist. Add the positive version observed from `list` as
+`source --version <N>` to read the immutable release instead of the moving active
+pointer; this remains correct across an active-version A→B→A transition.
+
+`deploy`, `deploy_bundle`, and `activate` require
+`--expected-active-version <N|absent>`. Read the current positive integer
+version from `edge_functions list`; use `absent` only when creating a slug that
+does not yet exist. A stale value returns HTTP 409 without building, preheating,
+or activating another version. List output remains a JSON array with string
+`slug` and numeric `version` fields, while source output is exactly
+`{ "code": "..." }`. Release automation must use `source --version <N>` for a
+version-bound backup.
 
 `edge_functions activate` restores an existing immutable Function version and
 returns a machine-readable receipt containing the activated version and JWT
@@ -203,6 +214,22 @@ Mutation receipts use schema `supacloud.cli.release-control.v1`. An
 `OUTCOME_UNKNOWN` error means the server may have committed the mutation before
 the response was lost or failed validation; read back current state before any
 retry.
+Version `0` is reserved for service-internal legacy recovery and cannot be used
+as a public CLI/API activation target or expected active version.
+
+```json
+{
+  "schema": "supacloud.cli.release-control.v1",
+  "ok": true,
+  "operation": "edge_functions.deploy_bundle",
+  "project_ref": "abc123",
+  "slug": "hello",
+  "previous_active_version": "7",
+  "active_version": "8",
+  "version": "8",
+  "verify_jwt": true
+}
+```
 
 Scheduled Function lifecycle operations are also project-scoped:
 
