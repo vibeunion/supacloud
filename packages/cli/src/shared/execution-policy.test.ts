@@ -131,11 +131,15 @@ describe("CLI execution policy", () => {
         })).toThrow("SUPACLOUD_READ_ONLY=true");
     });
 
-    test("classifies Function activation and Scheduled Function mutations as writes", () => {
+    test("classifies Function, Scheduled Function, and Storage lifecycle actions", () => {
         expect(executionMode("edge_functions", "activate", {})).toBe("write");
         expect(executionMode("scheduled_functions", "list", {})).toBe("read");
         for (const action of ["create", "update", "delete"]) {
             expect(executionMode("scheduled_functions", action, {})).toBe("write");
+        }
+        expect(executionMode("storage", "get_bucket", {})).toBe("read");
+        for (const action of ["create_bucket", "update_bucket", "delete_bucket"]) {
+            expect(executionMode("storage", action, {})).toBe("write");
         }
     });
 

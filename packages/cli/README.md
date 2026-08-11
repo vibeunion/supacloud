@@ -161,6 +161,13 @@ supacloud-cli edge_functions source --ref abc123 --slug hello --output ./hello.t
 supacloud-cli edge_functions activate --ref abc123 --slug hello --version 3
 supacloud-cli scheduled_functions list --ref abc123
 supacloud-cli secrets upsert --ref abc123 --from-env API_KEY,WEBHOOK_SECRET
+supacloud-cli storage list_buckets --ref abc123
+supacloud-cli storage get_bucket --ref abc123 --bucket reports
+supacloud-cli storage create_bucket --ref abc123 --bucket reports --public false \
+  --file_size_limit 10485760 --allowed_mime_types "application/pdf,image/png"
+supacloud-cli storage update_bucket --ref abc123 --bucket reports \
+  --allowed_mime_types '["application/pdf"]'
+supacloud-cli storage delete_bucket --ref abc123 --bucket reports
 ```
 
 `database migration_inventory` reads the canonical migration ledger through the

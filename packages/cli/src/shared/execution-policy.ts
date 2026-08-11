@@ -28,8 +28,8 @@ const ACTION_POLICY: Record<string, ModulePolicy> = {
         write: ["configure_provider", "update_provider", "disable_provider", "wechat_mini", "wechat_open", "update_settings", "update_config"],
     },
     storage: {
-        read: ["status", "list_buckets", "list_files"],
-        write: ["upload_base64", "delete_file"],
+        read: ["status", "list_buckets", "get_bucket", "list_files"],
+        write: ["create_bucket", "update_bucket", "delete_bucket", "upload_base64", "delete_file"],
     },
     edge_functions: {
         read: ["list", "source"],

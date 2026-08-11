@@ -54,7 +54,7 @@ function resolveRealPath(p: string): string {
 
 export interface StorageDriver {
   createBucket(projectRef: string, bucket: string): Promise<boolean>;
-  deleteBucket(projectRef: string, bucket: string): Promise<boolean>;
+  deleteBucket(projectRef: string, bucket: string): Promise<BucketDeletionResult>;
   emptyBucket(projectRef: string, bucket: string): Promise<boolean>;
   listBuckets(
     projectRef: string,
@@ -86,6 +86,33 @@ export interface StorageDriver {
     bucket: string,
     key: string,
   ): Promise<Response | null>;
+}
+
+export type BucketDeletionResult =
+  | { success: true }
+  | { success: false; reason: "not_empty" | "unknown" };
+
+function isDirectoryNotEmpty(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException).code;
+  return code === "ENOTEMPTY" || code === "EEXIST";
+}
+
+async function createObjectParent(bucketPath: string, objectKey: string): Promise<void> {
+  const bucket = await fs.lstat(bucketPath);
+  if (!bucket.isDirectory()) throw new Error("Storage bucket is unavailable");
+
+  let objectParent = bucketPath;
+  for (const segment of objectKey.split("/").slice(0, -1)) {
+    objectParent = path.join(objectParent, segment);
+    try {
+      await fs.mkdir(objectParent);
+    } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      if (!(await fs.lstat(objectParent)).isDirectory()) {
+        throw new Error("Storage object parent is unavailable");
+      }
+    }
+  }
 }
 
 export class JuiceFSDriver implements StorageDriver {
@@ -127,15 +154,18 @@ export class JuiceFSDriver implements StorageDriver {
     }
   }
 
-  async deleteBucket(projectRef: string, bucket: string): Promise<boolean> {
+  async deleteBucket(projectRef: string, bucket: string): Promise<BucketDeletionResult> {
     try {
-      await fs.rm(this.getBasePath(projectRef, bucket), {
-        recursive: true,
-        force: true,
+      await fs.rmdir(this.getBasePath(projectRef, bucket));
+      return { success: true };
+    } catch (error: unknown) {
+      if (isDirectoryNotEmpty(error)) return { success: false, reason: "not_empty" };
+      logger.warn("JuiceFS deleteBucket failed without deleting the bucket", {
+        projectRef,
+        bucket,
+        error: error instanceof Error ? error.message : String(error),
       });
-      return true;
-    } catch (e) {
-      return false;
+      return { success: false, reason: "unknown" };
     }
   }
 
@@ -180,8 +210,9 @@ export class JuiceFSDriver implements StorageDriver {
     contentType: string,
   ): Promise<boolean> {
     try {
-      const filePath = this.getBasePath(projectRef, bucket, key);
-      await fs.mkdir(path.dirname(filePath), { recursive: true });
+      const cleanKey = normalizeObjectKey(key);
+      await createObjectParent(this.getBasePath(projectRef, bucket), cleanKey);
+      const filePath = this.getBasePath(projectRef, bucket, cleanKey);
       await Bun.write(filePath, await toUint8Array(data));
       return true;
     } catch (e: unknown) {
@@ -201,8 +232,9 @@ export class JuiceFSDriver implements StorageDriver {
   ): Promise<boolean> {
     try {
       const srcPath = this.getBasePath(projectRef, srcBucket, srcKey);
-      const destPath = this.getBasePath(projectRef, destBucket, destKey);
-      await fs.mkdir(path.dirname(destPath), { recursive: true });
+      const cleanDestKey = normalizeObjectKey(destKey);
+      await createObjectParent(this.getBasePath(projectRef, destBucket), cleanDestKey);
+      const destPath = this.getBasePath(projectRef, destBucket, cleanDestKey);
       await fs.copyFile(srcPath, destPath);
       return true;
     } catch (e) {
@@ -488,8 +520,8 @@ export class S3Driver implements StorageDriver {
     return true; // Buckets are logical prefixes in S3 for SupaCloud
   }
 
-  async deleteBucket(projectRef: string, bucket: string): Promise<boolean> {
-    return true; // No distinct deletion for logical prefix unless we rm -rf objects
+  async deleteBucket(_projectRef: string, _bucket: string): Promise<BucketDeletionResult> {
+    return { success: false, reason: "unknown" };
   }
 
   async emptyBucket(projectRef: string, bucket: string): Promise<boolean> {
