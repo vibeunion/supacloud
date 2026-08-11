@@ -92,15 +92,18 @@ supacloud-cli status
 
 Project context is resolved from one atomic source: a named profile selected by
 `--env`, an explicit `--env-file`, a complete process environment, or the
-legacy `.env` fallback. Core URL, token, and project-ref values are not filled
-by mixing sources. If `SUPACLOUD_ENV` is set without a complete process context,
-it strictly selects `.env.supacloud.<value>`. For backward compatibility, when
-no selector and no core process variables are present, `supacloud-cli` still
-tries to auto-link from `.env` using:
+legacy `.env` fallback. Core URL, credential, and project-ref values are not
+filled by mixing sources. If `SUPACLOUD_ENV` is set without a complete process
+context, it strictly selects `.env.supacloud.<value>`.
 
-- `SUPABASE_URL` or `SUPACLOUD_API_URL`
-- `SUPABASE_SERVICE_ROLE_KEY` or `SUPACLOUD_API_TOKEN`
-- `SUPACLOUD_PROJECT_REF` when the project ref cannot be inferred from a managed `<ref>.api.*` hostname
+The two credential scopes are separate. Management-backed remote commands use
+only `SUPACLOUD_API_URL` + `SUPACLOUD_API_TOKEN`. An application profile using
+`SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` can be auto-linked for `status`,
+but its service-role key is never substituted for a Management token and cannot
+enable Management-backed tools. Both URL types must be canonical HTTPS origins;
+HTTP is accepted only for literal loopback development origins. Use
+`SUPACLOUD_PROJECT_REF` when it cannot be inferred from a managed
+`<ref>.api.*` application hostname.
 
 The legacy `.env` fallback is unclassified and therefore does not enable the
 production confirmation gate. Production automation must select a `prod` or
@@ -127,11 +130,13 @@ for one command. A production profile cannot target a different project with
 `--ref`; the requested ref and `--confirm-production` must both exactly match
 the profile's project ref.
 
-`status` checks configuration, Management API connectivity, and authentication;
-it exits non-zero when any required check fails. Its output includes
-`environment`, `source` (`kind` and `path`), `apiUrl`, `projectRef`, `readOnly`,
-`production`, and `hasApiToken`. It never prints the API token or service-role
-key.
+`status` checks configuration, connectivity, and authentication against the
+selected credential scope. Application profiles probe the project data API at
+the exact configured origin; credential-bearing probes refuse redirects. The
+command exits non-zero when any required check fails. Its output includes
+`credentialScope`, `environment`, `source` (`kind` and `path`), `apiUrl`,
+`projectRef`, `readOnly`, `production`, and `hasApiToken`. It never prints the
+API token or service-role key.
 
 Examples:
 
@@ -325,10 +330,10 @@ supacloud-cli supabase push --ref abc123 --dir supabase/migrations --dry_run
 supacloud-cli supabase push --ref abc123 --dir supabase/migrations
 ```
 
-`push` uses `SUPABASE_SERVICE_ROLE_KEY` or `SUPACLOUD_API_TOKEN` only for the
-SupaCloud Management API. Those credentials, upstream access tokens, database
-passwords, and secret/key environment variables are removed from the official
-CLI child process, and command output is redacted.
+`push` uses only `SUPACLOUD_API_TOKEN` for the SupaCloud Management API. That
+token, upstream access tokens, database passwords, and secret/key environment
+variables are removed from the official CLI child process, and command output
+is redacted.
 
 `push` requires a resolved project ref; pass `--ref` explicitly or set
 `SUPACLOUD_PROJECT_REF`. Relative migration directories are resolved against

@@ -336,10 +336,10 @@ function missingMigrationContextResult() {
         content: [{
             type: "text" as const,
             text: [
-                "⚠️ Remote migration push requires SupaCloud project context.",
-                "Provide SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY, or SUPACLOUD_API_URL + SUPACLOUD_API_TOKEN.",
+                "⚠️ Remote migration push requires SupaCloud Management API context.",
+                "Provide SUPACLOUD_API_URL + SUPACLOUD_API_TOKEN.",
                 "Also pass --ref or set SUPACLOUD_PROJECT_REF when the project ref cannot be inferred from the URL.",
-                "The service-role credential is sent only to the SupaCloud Management API and is never forwarded to the official CLI.",
+                "The Management token is sent only to the SupaCloud Management API and is never forwarded to the official CLI.",
             ].join("\n"),
         }],
     };
@@ -438,7 +438,7 @@ export function registerSupabaseCliTools(
 
     server.tool(
         "supabase",
-        "Controlled adapter for the official open-source Supabase CLI. Remote push stays on the SupaCloud service-role authenticated Management API.",
+        "Controlled adapter for the official open-source Supabase CLI. Remote push stays on the SupaCloud Management API and requires explicit Management credentials.",
         {
             action: withDescription(stringEnum([
                 "version", "migration_new", "db_diff", "db_reset", "db_pull",

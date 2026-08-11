@@ -498,7 +498,7 @@ describe("supacloud-cli process contract", () => {
         const result = await runProjectCli(["project", "get"]);
 
         expect(result.exitCode).toBe(1);
-        expect(result.stdout + result.stderr).toContain("project-scoped API context");
+        expect(result.stdout + result.stderr).toContain("Management API context");
     });
 
     test("does not expose admin project creation through the project CLI", async () => {
@@ -1819,5 +1819,305 @@ describe("supacloud-cli process contract", () => {
         expect(status.checks.connectivity.reachable).toBe(false);
         expect(status.checks.connectivity.error).toBe("unreachable");
         expect(status.checks.authentication.ok).toBeNull();
+    });
+
+    test("status probes an application profile through the project data API without exposing its key", async () => {
+        const workspace = mkdtempSync(join(tmpdir(), "supacloud-cli-application-status-"));
+        temporaryDirectories.push(workspace);
+        const requestedPaths: string[] = [];
+        const authorizationHeaders: Array<string | null> = [];
+        const apiKeyHeaders: Array<string | null> = [];
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch(request) {
+                requestedPaths.push(new URL(request.url).pathname);
+                authorizationHeaders.push(request.headers.get("authorization"));
+                apiKeyHeaders.push(request.headers.get("apikey"));
+                return request.headers.get("apikey") === "application-service-role"
+                    ? Response.json({ openapi: "3.0.0" })
+                    : Response.json({ error: "API key required" }, { status: 401 });
+            },
+        });
+        servers.push(server);
+        const environmentPath = join(workspace, "application.env");
+        writeFileSync(environmentPath, [
+            "SUPACLOUD_ENV=test",
+            "SUPACLOUD_PROJECT_REF=abc123",
+            `SUPABASE_URL=http://127.0.0.1:${server.port}`,
+            "SUPABASE_SERVICE_ROLE_KEY=application-service-role",
+        ].join("\n") + "\n");
+
+        const result = await runProjectCli(["status", "--env-file=application.env"], {}, workspace);
+        const status = JSON.parse(result.stdout);
+
+        expect(result.exitCode).toBe(0);
+        expect(status).toMatchObject({
+            credentialScope: "project_application",
+            apiUrl: `http://127.0.0.1:${server.port}`,
+            hasApiToken: true,
+            checks: {
+                configuration: { ok: true, missing: [] },
+                connectivity: { ok: true, reachable: true, httpStatus: 401 },
+                authentication: { ok: true, httpStatus: 200 },
+                project: { ok: true },
+            },
+        });
+        expect(requestedPaths).toEqual(["/rest/v1/", "/rest/v1/"]);
+        expect(authorizationHeaders).toEqual([null, "Bearer application-service-role"]);
+        expect(apiKeyHeaders).toEqual([null, "application-service-role"]);
+        expect(result.stdout + result.stderr).not.toContain("application-service-role");
+    });
+
+    test.each([["401", 401], ["403", 403]] as const)(
+        "status reports application credential rejection %s without reflecting the key",
+        async (_statusLabel, rejectionStatus) => {
+            const requestHeaders: Array<[string | null, string | null]> = [];
+            const server = Bun.serve({
+                hostname: "127.0.0.1",
+                port: 0,
+                fetch(request) {
+                    requestHeaders.push([
+                        request.headers.get("authorization"),
+                        request.headers.get("apikey"),
+                    ]);
+                    return Response.json({ error: "Invalid API key" }, { status: rejectionStatus });
+                },
+            });
+            servers.push(server);
+
+            const result = await runProjectCli(["status"], {
+                SUPABASE_URL: `http://127.0.0.1:${server.port}`,
+                SUPABASE_SERVICE_ROLE_KEY: "rejected-service-role",
+                SUPACLOUD_PROJECT_REF: "abc123",
+            });
+            const status = JSON.parse(result.stdout);
+
+            expect(result.exitCode).toBe(1);
+            expect(status.checks.connectivity).toMatchObject({ ok: true, httpStatus: rejectionStatus });
+            expect(status.checks.authentication).toEqual({ ok: false, httpStatus: rejectionStatus });
+            expect(requestHeaders).toEqual([
+                [null, null],
+                ["Bearer rejected-service-role", "rejected-service-role"],
+            ]);
+            expect(result.stdout + result.stderr).not.toContain("rejected-service-role");
+        },
+    );
+
+    test("Management writes reject redirects without forwarding credentials or request bodies", async () => {
+        const targetRequests: Array<{ authorization: string | null; body: string }> = [];
+        const redirectTarget = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            async fetch(request) {
+                targetRequests.push({
+                    authorization: request.headers.get("authorization"),
+                    body: await request.text(),
+                });
+                return Response.json({ configured: true });
+            },
+        });
+        servers.push(redirectTarget);
+        let sourceBody = "";
+        const source = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            async fetch(request) {
+                sourceBody = await request.text();
+                return Response.redirect(`http://127.0.0.1:${redirectTarget.port}/captured`, 307);
+            },
+        });
+        servers.push(source);
+
+        const response = await runProjectCli([
+            "auth", "configure_provider", "--ref", "abc123", "--provider", "github",
+            "--client_id", "redirect-client-id", "--client_secret", "redirect-client-secret",
+        ], {
+            SUPACLOUD_API_URL: `http://127.0.0.1:${source.port}`,
+            SUPACLOUD_API_TOKEN: "redirect-management-token",
+            SUPACLOUD_PROJECT_REF: "abc123",
+        });
+
+        expect(response.exitCode).toBe(1);
+        expect(sourceBody).toContain("redirect-client-secret");
+        expect(targetRequests).toEqual([]);
+        expect(response.stdout + response.stderr).not.toContain("redirect-client-id");
+        expect(response.stdout + response.stderr).not.toContain("redirect-client-secret");
+        expect(response.stdout + response.stderr).not.toContain("redirect-management-token");
+    });
+
+    test("status rejects a missing application data endpoint before sending credentials", async () => {
+        const authorizationHeaders: Array<string | null> = [];
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch(request) {
+                authorizationHeaders.push(request.headers.get("authorization"));
+                return Response.json({ error: "Not found" }, { status: 404 });
+            },
+        });
+        servers.push(server);
+
+        const result = await runProjectCli(["status"], {
+            SUPABASE_URL: `http://127.0.0.1:${server.port}`,
+            SUPABASE_SERVICE_ROLE_KEY: "application-service-role",
+            SUPACLOUD_PROJECT_REF: "abc123",
+        });
+        const status = JSON.parse(result.stdout);
+
+        expect(result.exitCode).toBe(1);
+        expect(status.checks.connectivity).toMatchObject({ ok: false, reachable: true, httpStatus: 404 });
+        expect(status.checks.authentication.ok).toBeNull();
+        expect(authorizationHeaders).toEqual([null]);
+        expect(result.stdout + result.stderr).not.toContain("application-service-role");
+    });
+
+    test("status refuses credential-bearing redirects from the application data origin", async () => {
+        const redirectedHeaders: Array<[string | null, string | null]> = [];
+        const redirectTarget = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch(request) {
+                redirectedHeaders.push([
+                    request.headers.get("authorization"),
+                    request.headers.get("apikey"),
+                ]);
+                return Response.json({ openapi: "3.0.0" });
+            },
+        });
+        servers.push(redirectTarget);
+        const sourceHeaders: Array<[string | null, string | null]> = [];
+        const source = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch(request) {
+                const headers: [string | null, string | null] = [
+                    request.headers.get("authorization"),
+                    request.headers.get("apikey"),
+                ];
+                sourceHeaders.push(headers);
+                return headers[1]
+                    ? Response.redirect(`http://127.0.0.1:${redirectTarget.port}/captured`, 302)
+                    : Response.json({ error: "API key required" }, { status: 401 });
+            },
+        });
+        servers.push(source);
+
+        const result = await runProjectCli(["status"], {
+            SUPABASE_URL: `http://127.0.0.1:${source.port}`,
+            SUPABASE_SERVICE_ROLE_KEY: "redirect-private-service-role",
+            SUPACLOUD_PROJECT_REF: "abc123",
+        });
+        const status = JSON.parse(result.stdout);
+
+        expect(result.exitCode).toBe(1);
+        expect(status.checks.authentication).toEqual({ ok: false, httpStatus: null });
+        expect(sourceHeaders).toEqual([
+            [null, null],
+            ["Bearer redirect-private-service-role", "redirect-private-service-role"],
+        ]);
+        expect(redirectedHeaders).toEqual([]);
+        expect(result.stdout + result.stderr).not.toContain("redirect-private-service-role");
+    });
+
+    test("never substitutes an application key for a missing Management token", async () => {
+        const authorizationHeaders: Array<string | null> = [];
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch(request) {
+                authorizationHeaders.push(request.headers.get("authorization"));
+                return Response.json({ healthy: true });
+            },
+        });
+        servers.push(server);
+
+        const result = await runProjectCli(["status"], {
+            SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+            SUPABASE_SERVICE_ROLE_KEY: "application-only-service-role",
+            SUPACLOUD_PROJECT_REF: "abc123",
+        });
+        const status = JSON.parse(result.stdout);
+
+        expect(result.exitCode).toBe(1);
+        expect(status.credentialScope).toBe("management");
+        expect(status.checks.configuration).toEqual({ ok: false, missing: ["apiToken"] });
+        expect(status.checks.authentication.ok).toBeNull();
+        expect(authorizationHeaders).toEqual([null]);
+        expect(result.stdout + result.stderr).not.toContain("application-only-service-role");
+    });
+
+    test("blocks Management-backed commands for pure application profiles before HTTP", async () => {
+        let requestCount = 0;
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch() {
+                requestCount += 1;
+                return Response.json({ unexpected: true });
+            },
+        });
+        servers.push(server);
+
+        const result = await runProjectCli(["project", "health"], {
+            SUPABASE_URL: `http://127.0.0.1:${server.port}`,
+            SUPABASE_SERVICE_ROLE_KEY: "application-only-service-role",
+            SUPACLOUD_PROJECT_REF: "abc123",
+        });
+
+        expect(result.exitCode).toBe(1);
+        expect(requestCount).toBe(0);
+        expect(result.stdout + result.stderr).toContain("Management API context");
+        expect(result.stdout + result.stderr).not.toContain("application-only-service-role");
+    });
+
+    test.each([
+        "http://management.example.test",
+        "https://user:private-password@management.example.test",
+        "https://management.example.test/private-path",
+        "https://management.example.test/%2e",
+        "https://management.example.test?token=private-query",
+        "https://management.example.test#private-fragment",
+    ])("status rejects unsafe Management origin %s without reflection", async (managementUrl) => {
+        const result = await runProjectCli(["status"], {
+            SUPACLOUD_API_URL: managementUrl,
+            SUPACLOUD_API_TOKEN: "management-private-token",
+            SUPACLOUD_PROJECT_REF: "abc123",
+        });
+        const status = JSON.parse(result.stdout);
+
+        expect(result.exitCode).toBe(1);
+        expect(status.credentialScope).toBe("management");
+        expect(status.apiUrl).toBeNull();
+        expect(status.checks.configuration.missing).toEqual(["apiUrl"]);
+        expect(result.stdout + result.stderr).not.toContain("management-private-token");
+        expect(result.stdout + result.stderr).not.toContain("private-password");
+        expect(result.stdout + result.stderr).not.toContain("private-path");
+        expect(result.stdout + result.stderr).not.toContain("private-query");
+        expect(result.stdout + result.stderr).not.toContain("private-fragment");
+    });
+
+    test.each([
+        "http://api.example.test",
+        "https://api.example.test/untrusted-path",
+        "https://api.example.test/%2e",
+        "https://user:password@api.example.test",
+    ])("status rejects unsafe application origin %s before sending credentials", async (supabaseUrl) => {
+        const result = await runProjectCli(["status"], {
+            SUPABASE_URL: supabaseUrl,
+            SUPABASE_SERVICE_ROLE_KEY: "application-service-role",
+            SUPACLOUD_PROJECT_REF: "abc123",
+        });
+        const status = JSON.parse(result.stdout);
+
+        expect(result.exitCode).toBe(1);
+        expect(status.apiUrl).toBeNull();
+        expect(status.checks.configuration).toEqual({
+            ok: false,
+            missing: ["secureSupabaseUrl"],
+        });
+        expect(status.checks.connectivity.ok).toBeNull();
+        expect(status.checks.authentication.ok).toBeNull();
+        expect(result.stdout + result.stderr).not.toContain("application-service-role");
     });
 });

@@ -65,6 +65,29 @@ function chunkedTextResponse(
     return new Response(stream, { headers });
 }
 
+const redirectedRequests = [
+    ["GET", (transport: HttpTransport) => transport.get("/resource")],
+    [
+        "JSON POST",
+        (transport: HttpTransport) => transport.post("/resource", { secret: "request-secret" }),
+    ],
+    ["multipart POST", (transport: HttpTransport) => {
+        const form = new FormData();
+        form.set("secret", "request-secret");
+        return transport.postMultipart("/resource", form);
+    }],
+    ["PATCH", (transport: HttpTransport) => transport.patch("/resource", { secret: "request-secret" })],
+    ["PUT", (transport: HttpTransport) => transport.put("/resource", { secret: "request-secret" })],
+] as const;
+
+const redirectCases = redirectedRequests.flatMap(([requestName, sendRequest]) =>
+    ([302, 307] as const).flatMap((redirectStatus) =>
+        (["same-origin", "cross-origin"] as const).map((redirectScope) =>
+            [`${requestName} ${redirectStatus} ${redirectScope}`, sendRequest, redirectStatus, redirectScope] as const
+        )
+    )
+);
+
 describe("HttpTransport retry policy", () => {
     test("retries GET after a 5xx response without waiting for backoff", async () => {
         let fetchCalls = 0;
@@ -156,6 +179,50 @@ describe("HttpTransport retry policy", () => {
         expect(serialized).not.toContain(errorSentinel);
         expect(serialized).not.toContain("details");
     });
+
+    test.each(redirectCases)(
+        "rejects %s redirects without reaching the target",
+        async (_caseName, sendRequest, redirectStatus, redirectScope) => {
+            const targetRequests: string[] = [];
+            const crossOriginTarget = Bun.serve({
+                hostname: "127.0.0.1",
+                port: 0,
+                fetch(request) {
+                    targetRequests.push(new URL(request.url).pathname);
+                    return Response.json({ ok: true });
+                },
+            });
+            servers.push(crossOriginTarget);
+            const source = Bun.serve({
+                hostname: "127.0.0.1",
+                port: 0,
+                fetch(request) {
+                    const pathname = new URL(request.url).pathname;
+                    if (pathname === "/captured") {
+                        targetRequests.push(pathname);
+                        return Response.json({ ok: true });
+                    }
+                    const targetOrigin = redirectScope === "same-origin"
+                        ? new URL(request.url).origin
+                        : `http://127.0.0.1:${crossOriginTarget.port}`;
+                    return Response.redirect(`${targetOrigin}/captured`, redirectStatus);
+                },
+            });
+            servers.push(source);
+            const transport = new HttpTransport({
+                baseUrl: `http://127.0.0.1:${source.port}`,
+                token: "management-token",
+            });
+
+            const response = await sendRequest(transport);
+
+            expect(response.transportError).toBe(true);
+            expect(response.data).toEqual({ error: "Network Error", code: "NETWORK_ERROR" });
+            expect(targetRequests).toEqual([]);
+            expect(JSON.stringify(response)).not.toContain("request-secret");
+            expect(JSON.stringify(response)).not.toContain("management-token");
+        },
+    );
 
     test("preserves the ordinary POST contract for request serialization failures", async () => {
         let fetchCalls = 0;
