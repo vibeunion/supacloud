@@ -8,11 +8,12 @@ import { basename, dirname, join } from "node:path";
 import { TextDecoder } from "node:util";
 import { Type } from "@sinclair/typebox";
 import { decodedSchema, optional, stringEnum, withDescription } from "../schema";
-import type { SshTransport } from "../transports/ssh";
+import { redactSshOutput, SshCommandOutcomeUnknownError, type SshTransport } from "../transports/ssh";
 import {
     buildUpgradeLockScript,
     executeLocalUpgradeTransfer,
     SUPACLOUD_UPGRADE_LOCK_PATH,
+    UPGRADE_OBSERVATION_TIMEOUT_MS,
 } from "../releases/local-upgrade-transfer";
 import {
     SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_FILENAME,
@@ -31,10 +32,12 @@ const SAFE_HOSTNAME = /^(?=.{1,253}$)(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0
 const SAFE_SYSTEMD_UNIT = /^[a-zA-Z0-9][a-zA-Z0-9_.@:-]{0,127}$/;
 const SAFE_DB_IDENTIFIER = /^[a-zA-Z_][a-zA-Z0-9_-]{0,62}$/;
 const MINIMUM_COMPONENT_UPGRADE_VERSION = "0.50.27";
-// Keep helper verification and cleanup outside the bounded direct transfer budget.
-const DIRECT_UPGRADE_SSH_TIMEOUT_MS = 720_000;
-// Proxy mode can exhaust each transfer once direct-first and once through the proxy.
-const PROXIED_UPGRADE_SSH_TIMEOUT_MS = 1_320_000;
+const DIRECT_BOOTSTRAP_TRANSFER_BUDGET_MS = 12 * 60_000;
+const PROXIED_BOOTSTRAP_TRANSFER_BUDGET_MS = 22 * 60_000;
+const DIRECT_UPGRADE_SSH_TIMEOUT_MS = UPGRADE_OBSERVATION_TIMEOUT_MS
+    + DIRECT_BOOTSTRAP_TRANSFER_BUDGET_MS;
+const PROXIED_UPGRADE_SSH_TIMEOUT_MS = UPGRADE_OBSERVATION_TIMEOUT_MS
+    + PROXIED_BOOTSTRAP_TRANSFER_BUDGET_MS;
 const PLATFORM_PROBE_TIMEOUT_MS = 10_000;
 const PLATFORM_HASH_TIMEOUT_MS = 30_000;
 const WEB_CONSOLE_PROBE_TIMEOUT_MS = 60_000;
@@ -372,14 +375,117 @@ type OfficialUpgradeOutcomeState = {
     executionError: unknown;
     cleanupFailed: boolean;
     cleanupError: unknown;
+    helperPath: string;
+    upgradeExecutionRequested: boolean;
 };
+
+class RemoteUpgradeOutcomeUnknownError extends AggregateError {
+    readonly code = "OUTCOME_UNKNOWN";
+}
+
+function boundedUpgradeError(error: unknown): Error {
+    const message = error instanceof Error ? error.message : String(error);
+    const diagnostic = redactSshOutput(message)
+        .replace(/[\r\n\t]+/g, " ")
+        .trim()
+        .slice(0, 500);
+    return new Error(diagnostic || "Remote operation ended without a diagnostic");
+}
+
+function remoteUpgradeEvidence(helperPath: string): string {
+    const trustedRootPath = join(dirname(helperPath), SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_FILENAME);
+    return `helper=${helperPath} trusted_root=${trustedRootPath}`;
+}
+
+function remoteUpgradeReconciliationFailure(
+    message: string,
+    failures: readonly unknown[],
+    helperPath: string,
+): RemoteUpgradeOutcomeUnknownError {
+    return new RemoteUpgradeOutcomeUnknownError(
+        failures.map(boundedUpgradeError),
+        `${message} Reconcile ${remoteUpgradeEvidence(helperPath)}; do not retry blindly`,
+    );
+}
+
+function remoteUpgradeOutcomeUnknown(
+    transportError: SshCommandOutcomeUnknownError,
+    helperPath: string,
+): RemoteUpgradeOutcomeUnknownError {
+    return remoteUpgradeReconciliationFailure(
+        "OUTCOME_UNKNOWN: Remote upgrade transport ended after dispatch; client cleanup was suppressed "
+            + "because the remote command may still be running. Verify deployed versions before retrying.",
+        [transportError],
+        helperPath,
+    );
+}
 
 function remoteUpgradeFailure(execution: OfficialUpgradeExecution): Error {
     const diagnostic = execution.stderr.trim() || execution.stdout.trim() || "no remote diagnostic";
     return new Error(`Remote upgrade failed (exit ${execution.code}): ${diagnostic.slice(-500)}`);
 }
 
+function remoteHelperSetupOutcomeUnknown(
+    outcome: OfficialUpgradeOutcomeState,
+): RemoteUpgradeOutcomeUnknownError {
+    const cleanupStatus = outcome.cleanupFailed
+        ? "the helper cleanup did not complete"
+        : "the cleanup command completed, but setup may finish later";
+    const failures = outcome.cleanupFailed
+        ? [outcome.executionError, outcome.cleanupError]
+        : [outcome.executionError];
+    return remoteUpgradeReconciliationFailure(
+        `OUTCOME_UNKNOWN: Remote helper setup ended without terminal status; ${cleanupStatus}. `
+            + "The upgrade command was not dispatched.",
+        failures,
+        outcome.helperPath,
+    );
+}
+
+function completedUpgradeCleanupOutcomeUnknown(
+    outcome: OfficialUpgradeOutcomeState,
+): RemoteUpgradeOutcomeUnknownError {
+    if (!outcome.execution) {
+        return remoteUpgradeReconciliationFailure(
+            "OUTCOME_UNKNOWN: Upgrade execution returned no result, and helper cleanup outcome is unknown.",
+            [outcome.cleanupError], outcome.helperPath,
+        );
+    }
+    const message = outcome.execution.success
+        ? "OUTCOME_UNKNOWN: Remote upgrade succeeded, but helper cleanup outcome is unknown."
+        : "OUTCOME_UNKNOWN: Remote upgrade failed with a terminal result, and helper cleanup outcome is unknown.";
+    const failures = outcome.execution.success
+        ? [outcome.cleanupError]
+        : [remoteUpgradeFailure(outcome.execution), outcome.cleanupError];
+    return remoteUpgradeReconciliationFailure(message, failures, outcome.helperPath);
+}
+
+function remoteHelperCleanupOutcomeUnknown(
+    outcome: OfficialUpgradeOutcomeState,
+): RemoteUpgradeOutcomeUnknownError {
+    if (!outcome.upgradeExecutionRequested) {
+        return remoteUpgradeReconciliationFailure(
+            "OUTCOME_UNKNOWN: Remote helper setup failed, and helper cleanup outcome is unknown. "
+                + "The upgrade command was not dispatched.",
+            [outcome.executionError, outcome.cleanupError], outcome.helperPath,
+        );
+    }
+    if (outcome.executionFailed) {
+        return remoteUpgradeReconciliationFailure(
+            "OUTCOME_UNKNOWN: Upgrade execution request failed, and helper cleanup outcome is unknown.",
+            [outcome.executionError, outcome.cleanupError], outcome.helperPath,
+        );
+    }
+    return completedUpgradeCleanupOutcomeUnknown(outcome);
+}
+
 function officialUpgradeOutcome(outcome: OfficialUpgradeOutcomeState): OfficialUpgradeExecution {
+    if (!outcome.upgradeExecutionRequested && outcome.executionError instanceof SshCommandOutcomeUnknownError) {
+        throw remoteHelperSetupOutcomeUnknown(outcome);
+    }
+    if (outcome.cleanupFailed && outcome.cleanupError instanceof SshCommandOutcomeUnknownError) {
+        throw remoteHelperCleanupOutcomeUnknown(outcome);
+    }
     if (outcome.executionFailed && outcome.cleanupFailed) {
         throw new AggregateError(
             [outcome.executionError, outcome.cleanupError],
@@ -408,28 +514,29 @@ async function executeOfficialUpgrade(
     let execution: OfficialUpgradeExecution | undefined;
     let executionFailed = false;
     let executionError: unknown;
-    let helperPrepared = false;
+    let upgradeExecutionRequested = false;
     try {
         await prepareRemoteUpgradeHelperDirectory(ssh, helperPath);
-        helperPrepared = true;
         await ssh.uploadText(helperPath, releaseAssetsScript, 0o600);
         const trustedRootPath = join(dirname(helperPath), SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_FILENAME);
         await ssh.uploadText(trustedRootPath, SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_JSONL, 0o600);
+        upgradeExecutionRequested = true;
         execution = await ssh.exec(command, timeoutMs);
     } catch (error: unknown) {
+        if (upgradeExecutionRequested && error instanceof SshCommandOutcomeUnknownError) {
+            throw remoteUpgradeOutcomeUnknown(error, helperPath);
+        }
         executionFailed = true;
         executionError = error;
     }
 
     let cleanupFailed = false;
     let cleanupError: unknown;
-    if (helperPrepared) {
-        try {
-            await removeRemoteUpgradeHelper(ssh, helperPath);
-        } catch (error: unknown) {
-            cleanupFailed = true;
-            cleanupError = error;
-        }
+    try {
+        await removeRemoteUpgradeHelper(ssh, helperPath);
+    } catch (error: unknown) {
+        cleanupFailed = true;
+        cleanupError = error;
     }
     return officialUpgradeOutcome({
         execution,
@@ -437,6 +544,8 @@ async function executeOfficialUpgrade(
         executionError,
         cleanupFailed,
         cleanupError,
+        helperPath,
+        upgradeExecutionRequested,
     });
 }
 
