@@ -209,21 +209,28 @@ Scheduled Function lifecycle operations are also project-scoped:
 ```bash
 supacloud-cli scheduled_functions create --ref abc123 --name nightly \
   --slug cleanup --cron "0 2 * * *" --method POST
+supacloud-cli scheduled_functions get --ref abc123 --schedule_id <id>
 supacloud-cli scheduled_functions update --ref abc123 --schedule_id <id> \
-  --cron "0 3 * * *"
-supacloud-cli scheduled_functions delete --ref abc123 --schedule_id <id>
+  --expected_updated_at <updated_at-from-list> --cron "0 3 * * *"
+supacloud-cli scheduled_functions delete --ref abc123 --schedule_id <id> \
+  --expected_updated_at <updated_at-from-list>
 ```
 
 Schedule IDs are canonical UUIDv4 values returned by create/list. Cron values
 use bounded numeric five-field syntax with wildcards, lists, ranges, and steps;
 out-of-range endpoints and steps are rejected before HTTP dispatch.
+Update and delete require the exact canonical UTC `updated_at` returned by list.
+A stale revision fails with HTTP 409 and performs no mutation; read the list
+again before deciding whether to issue a new write.
 
 Use `--body_file ./payload.json` for a JSON-object request body. Header values
 must come from environment variables: pass a JSON name mapping such as
 `--header_env '{"x-schedule-token":"SCHEDULE_TOKEN"}'`. Platform-owned
 `authorization`, `apikey`, and `x-project-ref` headers cannot be overridden. Receipts never
 include header values or body content; list and mutation receipts report only
-whether the body is empty and the configured header names.
+whether the body is empty and the configured header names. Update receipts bind
+`previous_updated_at` to the requested revision and return a newer `updated_at`;
+delete receipts return the matched revision as `deleted_updated_at`.
 
 For secret writes, `--from-env` accepts a comma-separated list of environment
 variable names. The CLI reads each non-empty value from its own process

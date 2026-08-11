@@ -36,7 +36,7 @@ const ACTION_POLICY: Record<string, ModulePolicy> = {
         local: ["check"],
         write: ["deploy", "deploy_bundle", "config", "activate", "delete"],
     },
-    scheduled_functions: { read: ["list"], write: ["create", "update", "delete"] },
+    scheduled_functions: { read: ["list", "get"], write: ["create", "update", "delete"] },
     secrets: { read: ["list"], write: ["upsert", "delete"] },
     frontend: {
         read: ["list", "get", "build_logs", "list_frameworks", "list_records"],

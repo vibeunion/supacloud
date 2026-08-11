@@ -2,6 +2,7 @@ import { sql, type Project, type CreateProjectInput, type ProjectStatus } from "
 import { withRetry } from "../utils/retry";
 import { encryptSecretIfNeeded } from "../utils/secret-crypto";
 import { hashSecretApiKey } from "../utils/api-keys";
+import { normalizeProjectConfig } from "../utils/project-config";
 
 export async function findAll(): Promise<Project[]> {
   return withRetry("ProjectRepository.findAll", async () => {
@@ -39,6 +40,7 @@ export async function findById(id: string): Promise<Project | null> {
 
   // Create project
 export async function create(input: CreateProjectInput): Promise<Project> {
+  const initialConfig = normalizeProjectConfig(input.config);
   return withRetry("ProjectRepository.create", async () => {
   const [project] = await sql`
     INSERT INTO projects (
@@ -63,7 +65,7 @@ export async function create(input: CreateProjectInput): Promise<Project> {
       ${input.s3_access_key || null},
       ${input.s3_secret_key || null},
       ${input.region || "local"},
-      ${input.config ? JSON.stringify(input.config) : "{}"}::jsonb,
+      ${initialConfig}::jsonb,
       ${encryptSecretIfNeeded(input.db_password)},
       ${encryptSecretIfNeeded(input.jwt_secret)},
       ${encryptSecretIfNeeded(input.service_role_key)},
@@ -90,10 +92,19 @@ export async function updateStatus(ref: string, status: ProjectStatus): Promise<
 
   // Update project config
 export async function updateConfig(ref: string, config: Record<string, unknown>): Promise<Project | null> {
+  const nextConfig = normalizeProjectConfig(config);
   return withRetry("ProjectRepository.updateConfig", async () => {
   const [project] = await sql`
     UPDATE projects
-    SET config = ${JSON.stringify(config)}::jsonb, updated_at = NOW()
+    SET config =
+          (${nextConfig}::jsonb - 'scheduled_functions')
+          || CASE
+            WHEN jsonb_typeof(projects.config) = 'object'
+              AND projects.config ? 'scheduled_functions'
+            THEN jsonb_build_object('scheduled_functions', projects.config -> 'scheduled_functions')
+            ELSE '{}'::jsonb
+          END,
+        updated_at = NOW()
     WHERE ref = ${ref} AND deleted_at IS NULL
     RETURNING *
   `;
