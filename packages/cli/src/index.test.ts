@@ -2078,6 +2078,10 @@ describe("supacloud-cli process contract", () => {
         "https://management.example.test/%2e",
         "https://management.example.test?token=private-query",
         "https://management.example.test#private-fragment",
+        "https://management.example.test:443",
+        "https://management.example.test:443/",
+        "http://127.0.0.1:80",
+        "http://127.0.0.1:80/",
     ])("status rejects unsafe Management origin %s without reflection", async (managementUrl) => {
         const result = await runProjectCli(["status"], {
             SUPACLOUD_API_URL: managementUrl,
@@ -2090,6 +2094,8 @@ describe("supacloud-cli process contract", () => {
         expect(status.credentialScope).toBe("management");
         expect(status.apiUrl).toBeNull();
         expect(status.checks.configuration.missing).toEqual(["apiUrl"]);
+        expect(status.checks.connectivity.ok).toBeNull();
+        expect(status.checks.authentication.ok).toBeNull();
         expect(result.stdout + result.stderr).not.toContain("management-private-token");
         expect(result.stdout + result.stderr).not.toContain("private-password");
         expect(result.stdout + result.stderr).not.toContain("private-path");
@@ -2102,6 +2108,10 @@ describe("supacloud-cli process contract", () => {
         "https://api.example.test/untrusted-path",
         "https://api.example.test/%2e",
         "https://user:password@api.example.test",
+        "https://api.example.test:443",
+        "https://api.example.test:443/",
+        "http://127.0.0.1:80",
+        "http://127.0.0.1:80/",
     ])("status rejects unsafe application origin %s before sending credentials", async (supabaseUrl) => {
         const result = await runProjectCli(["status"], {
             SUPABASE_URL: supabaseUrl,
