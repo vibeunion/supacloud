@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.51.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.51.0...management-api-v0.51.1) (2026-08-11)
+
+
+### Bug Fixes
+
+* **cli:** block release writes in read-only mode ([d49aa43](https://github.com/zuohuadong/supacloud/commit/d49aa4388011dafb0e143d54536bbc643040cfea))
+* **management-api:** restrict storage service control ([#812](https://github.com/zuohuadong/supacloud/issues/812)) ([1abc3a2](https://github.com/zuohuadong/supacloud/commit/1abc3a25eb90ba88df2f1cec923bc875d7fc5023))
+
 ## [0.51.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.50.34...management-api-v0.51.0) (2026-08-10)
 
 
