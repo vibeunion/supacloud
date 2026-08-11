@@ -36,7 +36,7 @@ async function readCliKeys(projectDir: string): Promise<ProjectKeys> {
   const cliProcess = Bun.spawn({
     cmd: [bunExecutable, cliPath, 'keys', '--service-role', '--project-dir', projectDir],
     cwd: projectDir,
-    env: withoutProjectSecretOverrides(),
+    env: withoutProjectRuntimeOverrides(),
     stdout: 'pipe',
     stderr: 'pipe',
   })
@@ -53,6 +53,7 @@ async function readCliKeys(projectDir: string): Promise<ProjectKeys> {
 async function readRuntimeKeys(projectDir: string): Promise<ProjectKeys> {
   const project = await createProjectBackend({
     projectDir,
+    ...isolatedProjectRuntimePaths(projectDir),
     includeFunctions: false,
     includeWebhooks: false,
     startRuntimeServices: false,
@@ -64,6 +65,11 @@ async function readRuntimeKeys(projectDir: string): Promise<ProjectKeys> {
   }
 }
 
+function isolatedProjectRuntimePaths(projectDir: string): { stateDir: string; dataDir: string; storageDir: string } {
+  const stateDir = join(projectDir, '.supacloud-lite')
+  return { stateDir, dataDir: join(stateDir, 'db'), storageDir: join(stateDir, 'storage') }
+}
+
 function parseProjectKeys(standardOutput: string): ProjectKeys {
   const anonKey = standardOutput.match(/anon key:\n([^\n]+)/)?.[1]
   const serviceRoleKey = standardOutput.match(/service_role key:\n([^\n]+)/)?.[1]
@@ -71,9 +77,12 @@ function parseProjectKeys(standardOutput: string): ProjectKeys {
   return { anonKey, serviceRoleKey }
 }
 
-function withoutProjectSecretOverrides(): Record<string, string | undefined> {
+function withoutProjectRuntimeOverrides(): Record<string, string | undefined> {
   const environment = { ...process.env }
   delete environment.SUPACLOUD_LITE_JWT_SECRET
   delete environment.SUPACLOUD_LITE_VAULT_KEY
+  delete environment.SUPACLOUD_LITE_STATE_DIR
+  delete environment.SUPACLOUD_LITE_DATA_DIR
+  delete environment.SUPACLOUD_LITE_STORAGE_DIR
   return environment
 }
