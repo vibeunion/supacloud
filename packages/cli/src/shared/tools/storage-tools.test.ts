@@ -9,6 +9,8 @@ type ToolResponse = {
 };
 
 const RELEASE_SCHEMA = "supacloud.cli.release-control.v1";
+const CURRENT_REVISION = "1786406400000000";
+const NEXT_REVISION = "1786406400000001";
 
 function successReceipt(operation: string, payload: Record<string, unknown>) {
     return {
@@ -27,7 +29,26 @@ function storageBucket(overrides: Record<string, unknown> = {}) {
         public: false,
         file_size_limit: null,
         allowed_mime_types: null,
+        revision: CURRENT_REVISION,
         ...overrides,
+    };
+}
+
+function updatedBucketReceipt(overrides: Record<string, unknown> = {}) {
+    return {
+        ...storageBucket({ revision: NEXT_REVISION, ...overrides }),
+        previous_revision: CURRENT_REVISION,
+        new_revision: NEXT_REVISION,
+    };
+}
+
+function deletedBucketReceipt() {
+    return {
+        id: "reports",
+        deleted: true,
+        require_empty: true,
+        previous_revision: CURRENT_REVISION,
+        new_revision: null,
     };
 }
 
@@ -148,6 +169,7 @@ describe("Storage bucket lifecycle", () => {
             public: false,
             file_size_limit: 1048576,
             allowed_mime_types: ["application/pdf"],
+            revision: CURRENT_REVISION,
         }];
         const { callback } = captureStorageTool({
             get: async (path: string) => {
@@ -277,17 +299,29 @@ describe("Storage bucket lifecycle", () => {
             { method: "GET", path: "/v1/projects/project-ref/storage/buckets/reports" },
         ]);
         expect(JSON.parse(response.content[0].text)).toEqual(successReceipt("storage.create_bucket", {
+            bucket_id: "reports",
+            previous_revision: null,
+            new_revision: CURRENT_REVISION,
             bucket: readback,
         }));
     });
 
     test("updates only explicitly provided fields", async () => {
         const calls: Array<{ method: "GET" | "PUT"; path: string; body?: unknown }> = [];
-        const bucket = storageBucket({ public: true, file_size_limit: 1048576, allowed_mime_types: [] });
+        const bucket = storageBucket({
+            public: true,
+            file_size_limit: 1048576,
+            allowed_mime_types: [],
+            revision: NEXT_REVISION,
+        });
         const { callback } = captureStorageTool({
             put: async (path: string, body: unknown) => {
                 calls.push({ method: "PUT", path, body });
-                return { ok: true, status: 200, data: bucket };
+                return {
+                    ok: true,
+                    status: 200,
+                    data: updatedBucketReceipt({ public: true, file_size_limit: 1048576, allowed_mime_types: [] }),
+                };
             },
             get: async (path: string) => {
                 calls.push({ method: "GET", path });
@@ -299,6 +333,7 @@ describe("Storage bucket lifecycle", () => {
             action: "update_bucket",
             ref: "project-ref",
             bucket: "reports",
+            expected_revision: CURRENT_REVISION,
             public: true,
             file_size_limit: 1048576,
             allowed_mime_types: [],
@@ -308,11 +343,21 @@ describe("Storage bucket lifecycle", () => {
             {
                 method: "PUT",
                 path: "/v1/projects/project-ref/storage/buckets/reports",
-                body: { public: true, file_size_limit: 1048576, allowed_mime_types: [] },
+                body: {
+                    expected_revision: CURRENT_REVISION,
+                    public: true,
+                    file_size_limit: 1048576,
+                    allowed_mime_types: [],
+                },
             },
             { method: "GET", path: "/v1/projects/project-ref/storage/buckets/reports" },
         ]);
-        expect(JSON.parse(response.content[0].text)).toEqual(successReceipt("storage.update_bucket", { bucket }));
+        expect(JSON.parse(response.content[0].text)).toEqual(successReceipt("storage.update_bucket", {
+            bucket_id: "reports",
+            previous_revision: CURRENT_REVISION,
+            new_revision: NEXT_REVISION,
+            bucket,
+        }));
     });
 
     test("accepts the platform's null normalization when clearing MIME restrictions", async () => {
@@ -320,12 +365,12 @@ describe("Storage bucket lifecycle", () => {
             put: async () => ({
                 ok: true,
                 status: 200,
-                data: storageBucket({ allowed_mime_types: null }),
+                data: updatedBucketReceipt({ allowed_mime_types: null }),
             }),
             get: async () => ({
                 ok: true,
                 status: 200,
-                data: storageBucket({ allowed_mime_types: null }),
+                data: storageBucket({ allowed_mime_types: null, revision: NEXT_REVISION }),
             }),
         });
 
@@ -333,6 +378,7 @@ describe("Storage bucket lifecycle", () => {
             action: "update_bucket",
             ref: "project-ref",
             bucket: "reports",
+            expected_revision: CURRENT_REVISION,
             allowed_mime_types: [],
         });
 
@@ -357,9 +403,30 @@ describe("Storage bucket lifecycle", () => {
         expect(requestCount).toBe(0);
     });
 
+    test.each([
+        ["update revision", { action: "update_bucket", ref: "project-ref", bucket: "reports", public: true }],
+        ["delete revision", { action: "delete_bucket", ref: "project-ref", bucket: "reports", require_empty: true }],
+        ["explicit empty check", {
+            action: "delete_bucket",
+            ref: "project-ref",
+            bucket: "reports",
+            expected_revision: CURRENT_REVISION,
+        }],
+    ])("requires %s before HTTP dispatch", async (_label, args) => {
+        let requestCount = 0;
+        const request = async () => {
+            requestCount += 1;
+            return { ok: true, status: 200, data: {} };
+        };
+        const { callback } = captureStorageTool({ put: request, delete: request });
+
+        await expect(callback(args)).rejects.toThrow("required");
+        expect(requestCount).toBe(0);
+    });
+
     test("deletes a bucket and returns an independently reconciled safe receipt", async () => {
         const calls: Array<{ method: "DELETE" | "GET"; path: string }> = [];
-        const receipt = { id: "reports", deleted: true };
+        const receipt = deletedBucketReceipt();
         const { callback } = captureStorageTool({
             delete: async (path: string) => {
                 calls.push({ method: "DELETE", path });
@@ -371,15 +438,27 @@ describe("Storage bucket lifecycle", () => {
             },
         });
 
-        const response = await callback({ action: "delete_bucket", ref: "project-ref", bucket: "reports" });
+        const response = await callback({
+            action: "delete_bucket",
+            ref: "project-ref",
+            bucket: "reports",
+            expected_revision: CURRENT_REVISION,
+            require_empty: true,
+        });
 
         expect(calls).toEqual([
-            { method: "DELETE", path: "/v1/projects/project-ref/storage/buckets/reports" },
+            {
+                method: "DELETE",
+                path: `/v1/projects/project-ref/storage/buckets/reports?expected_revision=${CURRENT_REVISION}&require_empty=true`,
+            },
             { method: "GET", path: "/v1/projects/project-ref/storage/buckets/reports" },
         ]);
         expect(JSON.parse(response.content[0].text)).toEqual(successReceipt("storage.delete_bucket", {
             bucket_id: "reports",
             deleted: true,
+            require_empty: true,
+            previous_revision: CURRENT_REVISION,
+            new_revision: null,
         }));
     });
 
@@ -397,7 +476,13 @@ describe("Storage bucket lifecycle", () => {
             },
         });
 
-        const response = await callback({ action: "delete_bucket", ref: "project-ref", bucket: "reports" });
+        const response = await callback({
+            action: "delete_bucket",
+            ref: "project-ref",
+            bucket: "reports",
+            expected_revision: CURRENT_REVISION,
+            require_empty: true,
+        });
 
         expect(response.isError).toBe(true);
         expect(JSON.parse(response.content[0].text).error).toEqual({ code: "HTTP_ERROR", http_status: 409 });
@@ -447,6 +532,7 @@ describe("Storage bucket lifecycle", () => {
             action: "update_bucket",
             ref: "project-ref",
             bucket: "reports",
+            expected_revision: CURRENT_REVISION,
             public: true,
         });
         const payload = JSON.parse(response.content[0].text);
@@ -460,7 +546,7 @@ describe("Storage bucket lifecycle", () => {
             put: async () => ({
                 ok: true,
                 status: 200,
-                data: storageBucket(),
+                data: updatedBucketReceipt(),
             }),
         });
 
@@ -468,6 +554,7 @@ describe("Storage bucket lifecycle", () => {
             action: "update_bucket",
             ref: "project-ref",
             bucket: "reports",
+            expected_revision: CURRENT_REVISION,
             public: true,
         });
 
@@ -518,7 +605,7 @@ describe("Storage bucket lifecycle", () => {
             put: async () => ({
                 ok: true,
                 status: 200,
-                data: storageBucket({ id: "other-bucket", name: "reports", public: true }),
+                data: updatedBucketReceipt({ id: "other-bucket", name: "reports", public: true }),
             }),
         });
 
@@ -526,6 +613,7 @@ describe("Storage bucket lifecycle", () => {
             action: "update_bucket",
             ref: "project-ref",
             bucket: "reports",
+            expected_revision: CURRENT_REVISION,
             public: true,
         });
 
@@ -580,15 +668,20 @@ describe("Storage bucket lifecycle", () => {
             put: async () => ({
                 ok: true,
                 status: 200,
-                data: storageBucket({ public: true }),
+                data: updatedBucketReceipt({ public: true }),
             }),
-            get: async () => ({ ok: true, status: 200, data: storageBucket({ public: false }) }),
+            get: async () => ({
+                ok: true,
+                status: 200,
+                data: storageBucket({ public: false, revision: NEXT_REVISION }),
+            }),
         });
 
         const response = await callback({
             action: "update_bucket",
             ref: "project-ref",
             bucket: "reports",
+            expected_revision: CURRENT_REVISION,
             public: true,
         });
 
@@ -601,12 +694,18 @@ describe("Storage bucket lifecycle", () => {
             delete: async () => ({
                 ok: true,
                 status: 200,
-                data: { id: "reports", deleted: true },
+                data: deletedBucketReceipt(),
             }),
             get: async () => ({ ok: true, status: 200, data: storageBucket() }),
         });
 
-        const response = await callback({ action: "delete_bucket", ref: "project-ref", bucket: "reports" });
+        const response = await callback({
+            action: "delete_bucket",
+            ref: "project-ref",
+            bucket: "reports",
+            expected_revision: CURRENT_REVISION,
+            require_empty: true,
+        });
 
         expect(response.isError).toBe(true);
         expect(JSON.parse(response.content[0].text).error).toEqual({ code: "OUTCOME_UNKNOWN", http_status: 200 });

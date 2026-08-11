@@ -13,6 +13,7 @@
     id?: string;
     name: string;
     public: boolean;
+    revision: string | null;
   }
 
   interface StorageFile extends BaseRecord {
@@ -152,15 +153,16 @@
   }
 
   const deleteBucketMutation = createMutation(() => ({
-    mutationFn: async (bucketId: string) => {
-      const response = await apiClient(`/v1/projects/${encodeURIComponent(projectRef)}/storage/buckets/${encodeURIComponent(bucketId)}`, {
+    mutationFn: async ({ bucketId, expectedRevision }: { bucketId: string; expectedRevision: string }) => {
+      const query = new URLSearchParams({ expected_revision: expectedRevision, require_empty: "true" });
+      const response = await apiClient(`/v1/projects/${encodeURIComponent(projectRef)}/storage/buckets/${encodeURIComponent(bucketId)}?${query}`, {
         method: "DELETE",
       });
       return readJsonResponse(response);
     },
-    onSuccess: (_payload, deletedBucketId) => {
-      if (selectedBucketId === deletedBucketId) {
-        const nextBucket = buckets.find((bucket) => String(bucket.id || bucket.name) !== deletedBucketId);
+    onSuccess: (_payload, deletedBucket) => {
+      if (selectedBucketId === deletedBucket.bucketId) {
+        const nextBucket = buckets.find((bucket) => String(bucket.id || bucket.name) !== deletedBucket.bucketId);
         selectedBucketId = nextBucket ? String(nextBucket.id || nextBucket.name) : null;
       }
       bucketsQuery.refetch();
@@ -174,7 +176,12 @@
   function deleteBucket(bucket: Bucket) {
     const bucketId = String(bucket.id || bucket.name);
     if (!confirm($t("Storage.delete_bucket_confirm", { values: { name: bucket.name } }))) return;
-    deleteBucketMutation.mutate(bucketId);
+    if (!bucket.revision) {
+      bucketsQuery.refetch();
+      toast.error($t("Storage.delete_bucket_failed"));
+      return;
+    }
+    deleteBucketMutation.mutate({ bucketId, expectedRevision: bucket.revision });
   }
 
   const deleteMutation = createMutation(() => ({
