@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { access, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { access, link, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { list as listTar } from 'tar'
 import { createProjectBackend, ensureProjectSecrets, resolveProjectPaths } from '../src/project-runtime.js'
 import { createSnapshot, restoreSnapshot } from '../src/snapshot.js'
 import { withWindowsSubprocessRef } from '../scripts/subprocess.js'
@@ -136,6 +137,30 @@ describe('Lite snapshots', () => {
     await restoreSnapshot({ paths: targetPaths, storageBackend: 'fs', input: archivePath })
     expect(await readdir(targetPaths.dataDir!)).toEqual([])
     expect(await readdir(targetPaths.storageDir)).toEqual([])
+  })
+
+  test('creates portable snapshots from hard-linked state files', async () => {
+    const sourceProject = await temporaryProject('supacloud-lite-snapshot-hard-links-source-')
+    const sourcePaths = resolveProjectPaths({ projectDir: sourceProject })
+    await ensureProjectSecrets(sourcePaths)
+    await mkdir(sourcePaths.dataDir!, { recursive: true })
+    await mkdir(sourcePaths.storageDir, { recursive: true })
+    const primaryFile = join(sourcePaths.storageDir, 'primary.txt')
+    const linkedFile = join(sourcePaths.storageDir, 'linked.txt')
+    await writeFile(primaryFile, 'shared-storage-content')
+    await link(primaryFile, linkedFile)
+    const archivePath = join(sourceProject, 'hard-links.tar.gz')
+    await createSnapshot({ paths: sourcePaths, packageVersion: 'test-version', storageBackend: 'fs', output: archivePath })
+    const archiveEntryTypes: string[] = []
+    await listTar({ file: archivePath, onReadEntry: (entry) => archiveEntryTypes.push(entry.type) })
+    expect(archiveEntryTypes).not.toContain('Link')
+
+    const targetProject = await temporaryProject('supacloud-lite-snapshot-hard-links-target-')
+    const targetPaths = resolveProjectPaths({ projectDir: targetProject })
+    await restoreSnapshot({ paths: targetPaths, storageBackend: 'fs', input: archivePath })
+
+    expect(await readFile(join(targetPaths.storageDir, 'primary.txt'), 'utf8')).toBe('shared-storage-content')
+    expect(await readFile(join(targetPaths.storageDir, 'linked.txt'), 'utf8')).toBe('shared-storage-content')
   })
 
   test('exposes snapshot and upgrade through the CLI', async () => {

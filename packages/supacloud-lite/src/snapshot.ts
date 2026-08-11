@@ -1,4 +1,4 @@
-import { chmod, copyFile, link, lstat, mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { chmod, copyFile, lstat, mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, parse, relative, resolve, sep } from 'node:path'
 import { create as createTar, extract as extractTar } from 'tar'
 import type { ConfiguredStorageBackend, ProjectPaths } from './project-runtime.js'
@@ -263,13 +263,7 @@ async function stageDirectory(root: string, destination: string): Promise<void> 
 
 async function stageFile(source: string, target: string): Promise<void> {
   await mkdir(dirname(target), { recursive: true })
-  try {
-    await link(source, target)
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code
-    if (code !== 'EXDEV' && code !== 'EPERM' && code !== 'EACCES') throw error
-    await copyFile(source, target)
-  }
+  await copyFile(source, target)
 }
 
 async function readManifest(payloadRoot: string): Promise<SnapshotManifest> {
