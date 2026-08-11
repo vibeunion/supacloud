@@ -4,7 +4,7 @@ import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } 
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createAdminTools } from "./index";
-import { formatCliError } from "./shared/cli";
+import { cliToolResultIsError, formatCliError } from "./shared/cli";
 import { schemaEnumValues } from "./shared/schema";
 import packageMetadata from "../package.json" with { type: "json" };
 
@@ -134,6 +134,11 @@ describe("admin SSH registration gate", () => {
 });
 
 describe("supacloud-admin process contract", () => {
+    test("classifies explicit tool errors without requiring content", () => {
+        expect(cliToolResultIsError({ isError: true })).toBe(true);
+        expect(cliToolResultIsError({})).toBe(false);
+    });
+
     test("prints the exact package version", async () => {
         const execution = await runAdminCli(["--version"]);
 

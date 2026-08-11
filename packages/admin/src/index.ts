@@ -272,10 +272,10 @@ async function main() {
                     console.log(chunk.text);
                 }
             }
-            if (cliToolResultIsError(result)) process.exitCode = 1;
-            return;
+        } else {
+            console.log(JSON.stringify(result, null, 2));
         }
-        console.log(JSON.stringify(result, null, 2));
+        if (cliToolResultIsError(result)) process.exitCode = 1;
         return;
     }
     await runCli(cliTools, args, { commandName: "supacloud-admin" });
