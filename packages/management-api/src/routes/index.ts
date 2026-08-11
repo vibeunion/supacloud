@@ -39,6 +39,7 @@ export { diagnosticsRoutes } from "./diagnostics";
 export { pgredisRoutes } from "./pgredis";
 export { logDrainRoutes } from "./log-drains";
 export { scheduledFunctionRoutes } from "./scheduled-functions";
+export { projectMutationRoutes } from "./project-mutations";
 export { branchRoutes } from "./branches";
 export { pgMetaRoutes } from "./pg-meta";
 export { storageS3Routes } from "./storage-s3";

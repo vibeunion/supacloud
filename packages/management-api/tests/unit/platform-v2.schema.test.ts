@@ -28,6 +28,7 @@ describe("platform v2 schema contract", () => {
       "project_collaborator_invitations",
       "project_control_secrets",
       "secret_encryption_checkpoints",
+      "project_mutations",
       "supaoauth_bff_proof_nonces",
       "project_user_deletion_fences",
       "project_webhooks",
@@ -36,6 +37,24 @@ describe("platform v2 schema contract", () => {
       "audit_log_checkpoints",
       "audit_exports",
     ]) expect(schema).toContain(`CREATE TABLE IF NOT EXISTS ${table}`);
+  });
+
+  test("keeps recoverable project mutations fenced, bounded, and free of credential columns", () => {
+    const mutationSchema = schema.slice(
+      schema.indexOf("CREATE TABLE IF NOT EXISTS project_mutations"),
+      schema.indexOf("CREATE TABLE IF NOT EXISTS supaoauth_bff_proof_nonces"),
+    );
+    expect(mutationSchema).toContain("PRIMARY KEY (project_ref, mutation_id)");
+    expect(mutationSchema).toContain("recovery_not_before TIMESTAMPTZ");
+    expect(mutationSchema).toContain("ADD COLUMN IF NOT EXISTS recovery_not_before TIMESTAMPTZ");
+    expect(mutationSchema).toContain("project_mutations_succeeded_response_check");
+    expect(mutationSchema).toContain("response_status IS NOT NULL AND response_status BETWEEN 200 AND 299");
+    expect(mutationSchema).toContain("project_mutations_recovery_idx");
+    expect(mutationSchema).toContain("status IN ('pending', 'running', 'failed_retryable')");
+    expect(mutationSchema).toContain("project_mutations_active_resource_idx");
+    for (const sensitiveColumn of [
+      "request_body", "request_headers", "request_payload", "credential", "service_role", "secret",
+    ]) expect(mutationSchema).not.toContain(sensitiveColumn);
   });
 
   test("does not store webhook secrets in plaintext or allow audit mutation", () => {
