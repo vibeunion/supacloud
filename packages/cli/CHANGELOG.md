@@ -12,6 +12,13 @@
 * **cli:** fail closed for production and read-only writes, and require exact production confirmation
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.17.1](https://github.com/zuohuadong/supacloud/compare/cli-v0.17.0...cli-v0.17.1) (2026-08-11)
+
+
+### Bug Fixes
+
+* **functions:** support legacy v0 CAS and readback ([5ee1b8b](https://github.com/zuohuadong/supacloud/commit/5ee1b8b5ec5f7177839cb22d497156e93bca589a))
+
 ## [0.17.0](https://github.com/zuohuadong/supacloud/compare/cli-v0.16.0...cli-v0.17.0) (2026-08-11)
 
 
