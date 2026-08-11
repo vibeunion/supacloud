@@ -123,7 +123,7 @@ export function buildRemotePreflightScript(): string {
         "test -d /run/lock || { echo '/run/lock is unavailable' >&2; exit 1; }",
         "test -d /var/lib/supacloud || { echo '/var/lib/supacloud is unavailable' >&2; exit 1; }",
         "test -f /etc/supabase/management-api.env || { echo 'EDGE_RUNTIME_MODE is unavailable' >&2; exit 1; }",
-        "EDGE_MODE=$(awk -F= '$1 == \"EDGE_RUNTIME_MODE\" { value=$2 } END { gsub(/^[[:space:]\\\"'\"']+|[[:space:]\\\"'\"']+$/, \"\", value); print value }' /etc/supabase/management-api.env)",
+        "EDGE_MODE=$(awk -F= '$1 == \"EDGE_RUNTIME_MODE\" { value=$2 } END { gsub(/^[[:space:]\\042\\047]+|[[:space:]\\042\\047]+$/, \"\", value); print value }' /etc/supabase/management-api.env)",
         "test \"$EDGE_MODE\" = external || { echo 'Local component upgrade requires persisted external Edge Runtime mode' >&2; exit 1; }",
         "case \"$(uname -m)\" in x86_64|amd64) echo ARCH=amd64 ;; aarch64|arm64) echo ARCH=arm64 ;; *) echo 'Unsupported remote architecture' >&2; exit 1 ;; esac",
         "VERIFIER=bundled",

@@ -186,6 +186,30 @@ describe("local upgrade remote runner", () => {
         });
     });
 
+    test("local-transfer preflight parses quoted Edge Runtime mode without awk escape warnings", () => {
+        const fixtureDirectory = mkdtempSync(join(tmpdir(), "supacloud-local-edge-mode-"));
+        const envFile = join(fixtureDirectory, "management-api.env");
+        const script = buildRemotePreflightScript();
+        const edgeModeAssignment = script.split("\n").find(line => line.startsWith("EDGE_MODE="));
+        if (!edgeModeAssignment) throw new Error("Generated local-transfer preflight does not read EDGE_RUNTIME_MODE");
+        const fixtureEdgeModeAssignment = edgeModeAssignment.replace("/etc/supabase/management-api.env", '"$ENV_FILE"');
+        expect(fixtureEdgeModeAssignment).toContain(String.raw`\042\047`);
+        expect(fixtureEdgeModeAssignment).not.toContain(String.raw`\"`);
+        try {
+            for (const configuredValue of ["external", '"external"', "'external'", "  external  "]) {
+                writeFileSync(envFile, `EDGE_RUNTIME_MODE=${configuredValue}\n`);
+                const execution = Bun.spawnSync(["bash", "-c", [
+                    "set -euo pipefail", fixtureEdgeModeAssignment, "printf '%s' \"$EDGE_MODE\"",
+                ].join("\n")], { env: { ...process.env, ENV_FILE: envFile } });
+                expect(execution.exitCode).toBe(0);
+                expect(execution.stdout.toString()).toBe("external");
+                expect(execution.stderr.toString()).toBe("");
+            }
+        } finally {
+            rmSync(fixtureDirectory, { recursive: true, force: true });
+        }
+    });
+
     test("serializes independent run IDs with one host-wide upgrade lock", () => {
         const firstRun = runScript(preparedBundle("amd64", "installed"), "amd64");
         const secondRun = buildLocalUpgradeRunScript({

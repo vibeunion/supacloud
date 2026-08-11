@@ -700,6 +700,33 @@ describe("ssh admin tool", () => {
         expect(rootScript).toContain("Another SupaCloud upgrade is already running");
     });
 
+    test("remote component preflight parses quoted Edge Runtime mode without awk escape warnings", () => {
+        const fixtureDir = mkdtempSync(join(tmpdir(), "supacloud-admin-edge-mode-"));
+        const envFile = join(fixtureDir, "management-api.env");
+        const rootScript = buildRootUpgradeScript({
+            edgeRuntimeVersion: "0.17.1",
+            helperPath: "/tmp/release-assets.sh",
+        });
+        const edgeModeAssignment = rootScript.split("\n").find(line => line.startsWith("EDGE_RUNTIME_MODE_VALUE="));
+        if (!edgeModeAssignment) throw new Error("Generated upgrade script does not read EDGE_RUNTIME_MODE");
+        const fixtureEdgeModeAssignment = edgeModeAssignment.replace("/etc/supabase/management-api.env", '"$ENV_FILE"');
+        expect(fixtureEdgeModeAssignment).toContain(String.raw`\042\047`);
+        expect(fixtureEdgeModeAssignment).not.toContain(String.raw`\"`);
+        try {
+            for (const configuredValue of ["external", '"external"', "'external'", "  external  "]) {
+                writeFileSync(envFile, `EDGE_RUNTIME_MODE=${configuredValue}\n`);
+                const execution = Bun.spawnSync(["bash", "-c", [
+                    "set -euo pipefail", fixtureEdgeModeAssignment, "printf '%s' \"$EDGE_RUNTIME_MODE_VALUE\"",
+                ].join("\n")], { env: { ...process.env, ENV_FILE: envFile } });
+                expect(execution.exitCode).toBe(0);
+                expect(execution.stdout.toString()).toBe("external");
+                expect(execution.stderr.toString()).toBe("");
+            }
+        } finally {
+            rmSync(fixtureDir, { recursive: true, force: true });
+        }
+    });
+
     test("remote trusted-root adoption rejects missing, altered, linked, and permissive files", () => {
         const fixtureRoot = mkdtempSync(join(tmpdir(), "supacloud-admin-remote-root-"));
         const helperPath = join(fixtureRoot, "release_assets.sh");
