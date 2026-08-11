@@ -32,10 +32,13 @@ function cleanEnvironment(): Record<string, string> {
     return env;
 }
 
-async function runAdminCli(args: string[]): Promise<{ exitCode: number; output: string }> {
+async function runAdminCli(
+    args: string[],
+    environment: Record<string, string> = {},
+): Promise<{ exitCode: number; output: string }> {
     const processHandle = Bun.spawn([process.execPath, "src/index.ts", ...args], {
         cwd: PACKAGE_ROOT,
-        env: cleanEnvironment(),
+        env: { ...cleanEnvironment(), ...environment },
         stdout: "pipe",
         stderr: "pipe",
     });
@@ -189,6 +192,60 @@ describe("supacloud-admin process contract", () => {
         expect(execution.output).toContain("--api_domain");
         expect(execution.output).toContain("--auth_domain");
         expect(execution.output).toContain("--studio_domain");
+    });
+
+    test("documents constrained project service control without credential flags", async () => {
+        const execution = await runAdminCli(["project", "service_control", "--help"]);
+
+        expect(execution.exitCode).toBe(0);
+        expect(execution.output).toContain("--ref");
+        expect(execution.output).toContain("--service");
+        expect(execution.output).toContain("--service_action");
+        expect(execution.output).not.toContain("--token");
+    });
+
+    test("returns non-zero when service control reports HTTP 200 with success false", async () => {
+        let authorizationHeader = "";
+        let requestMethod = "";
+        let requestedPath = "";
+        const apiServer = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch(request) {
+                const requestUrl = new URL(request.url);
+                authorizationHeader = request.headers.get("authorization") || "";
+                requestMethod = request.method;
+                requestedPath = requestUrl.pathname;
+                return Response.json({
+                    service: "gotrue",
+                    action: "stop",
+                    success: false,
+                    message: "Service gotrue stop failed",
+                });
+            },
+        });
+        const fixtureToken = "fixture-api-token";
+
+        try {
+            const execution = await runAdminCli([
+                "project", "service_control",
+                "--ref", "project-ref",
+                "--service", "gotrue",
+                "--service_action", "stop",
+            ], {
+                SUPACLOUD_API_URL: `http://127.0.0.1:${apiServer.port}`,
+                SUPACLOUD_API_TOKEN: fixtureToken,
+            });
+
+            expect(execution.exitCode).toBe(1);
+            expect(requestMethod).toBe("POST");
+            expect(requestedPath).toBe("/v1/projects/project-ref/services/gotrue/stop");
+            expect(authorizationHeader).toBe(`Bearer ${fixtureToken}`);
+            expect(execution.output).toContain("Project service control failed");
+            expect(execution.output).not.toContain(fixtureToken);
+        } finally {
+            apiServer.stop(true);
+        }
     });
 
     test("surfaces every sanitized cause when an operation and cleanup both fail", async () => {

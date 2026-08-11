@@ -78,6 +78,8 @@ EXAMPLES
   supacloud-admin ssh install --public_domain api.example.com --studio_domain studio.example.com
   supacloud-admin project create --name my-app --domain example.com
   supacloud-admin project list
+  supacloud-admin project services --ref abc123
+  supacloud-admin project service_control --ref abc123 --service gotrue --service_action stop
   supacloud-admin platform metrics
   supacloud-admin gateway routes --ref abc123
   supacloud-admin gateway upsert_route --ref abc123 --route_id webhook --hosts "api.example.com" --paths "/webhook/*" --upstream 10.0.0.5:8080
