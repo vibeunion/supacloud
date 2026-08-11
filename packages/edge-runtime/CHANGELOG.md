@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.1](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.17.0...edge-runtime-v0.17.1) (2026-08-11)
+
+
+### Bug Fixes
+
+* **edge-runtime:** fail closed after artifact realpath ([#846](https://github.com/zuohuadong/supacloud/issues/846)) ([09ade5c](https://github.com/zuohuadong/supacloud/commit/09ade5c86b9c41098b44461d59fff7229c73ae04))
+
 ## [0.17.0](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.16.9...edge-runtime-v0.17.0) (2026-08-11)
 
 
