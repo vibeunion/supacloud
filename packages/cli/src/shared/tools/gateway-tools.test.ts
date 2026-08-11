@@ -58,6 +58,20 @@ describe("gateway CLI tool — schema coercion", () => {
 });
 
 describe("gateway CLI tool — actions", () => {
+    test("prefers an explicit ref over the auto-linked project", async () => {
+        const calls: string[] = [];
+        const { callback } = captureGatewayTool({
+            get: async (path: string) => {
+                calls.push(path);
+                return { ok: true, status: 200, data: { routes: [] } };
+            },
+        }, "default-ref");
+
+        await callback({ action: "routes", ref: "override-ref" });
+
+        expect(calls).toEqual(["/v1/projects/override-ref/gateway/routes"]);
+    });
+
     test("lists custom gateway routes via GET", async () => {
         const calls: string[] = [];
         const { callback } = captureGatewayTool({

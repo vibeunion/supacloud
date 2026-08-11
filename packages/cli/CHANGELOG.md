@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+* **cli:** add atomic named and explicit environment profiles with secret-safe status output
+
+### Bug Fixes
+
+* **cli:** fail closed for production and read-only writes, and require exact production confirmation
+* **cli:** honor explicit project refs consistently while preventing production cross-ref writes
+
 ## [0.14.6](https://github.com/zuohuadong/supacloud/compare/cli-v0.14.5...cli-v0.14.6) (2026-08-10)
 
 

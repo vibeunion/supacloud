@@ -5,20 +5,34 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { migrationVersionFromFilename, registerDatabaseTools, vectorWarningsForPendingMigrations } from "./database-tools";
 
-function captureDatabaseTool(http: Record<string, unknown>) {
+function captureDatabaseTool(http: Record<string, unknown>, projectRef?: string) {
     let callback: ((args: Record<string, unknown>) => Promise<{ content: Array<{ text: string }> }>) | undefined;
     registerDatabaseTools({
         tool(name: string, _description: string, _schema: Record<string, unknown>, toolCallback: typeof callback) {
             if (name !== "database") return;
             callback = toolCallback;
         },
-    }, http as any);
+    }, http as any, { projectRef });
 
     if (!callback) throw new Error("database tool was not registered");
     return callback;
 }
 
 describe("database migration helpers", () => {
+    test("prefers an explicit ref over the auto-linked project", async () => {
+        const calls: string[] = [];
+        const callback = captureDatabaseTool({
+            get: async (path: string) => {
+                calls.push(path);
+                return { ok: true, status: 200, data: {} };
+            },
+        }, "default-ref");
+
+        await callback({ action: "project_url", ref: "override-ref" });
+
+        expect(calls).toEqual(["/v1/projects/override-ref"]);
+    });
+
     test("uses Supabase timestamp prefix as migration version", () => {
         expect(migrationVersionFromFilename("20260425123000_create_users.sql")).toBe("20260425123000");
     });
