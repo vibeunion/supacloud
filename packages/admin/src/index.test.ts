@@ -599,6 +599,7 @@ describe("supacloud-admin process contract", () => {
             const execution = await runAdminCli([
                 "platform", "create_backup", "--ref", "fa_staging", "--backup_type", "full",
             ], {
+                SUPACLOUD_ENV: "test",
                 SUPACLOUD_API_URL: `http://127.0.0.1:${apiServer.port}`,
                 SUPACLOUD_API_TOKEN: fixtureToken,
             });
@@ -651,6 +652,7 @@ describe("supacloud-admin process contract", () => {
             const execution = await runAdminCli([
                 "platform", "create_backup", "--ref", "fa_staging", "--backup_type", "full",
             ], {
+                SUPACLOUD_ENV: "test",
                 SUPACLOUD_API_URL: `http://127.0.0.1:${apiServer.port}`,
                 SUPACLOUD_API_TOKEN: fixtureToken,
             });
