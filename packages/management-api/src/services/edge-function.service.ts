@@ -1459,14 +1459,11 @@ export async function migrateLegacyVersionArtifacts(): Promise<{ moved: number }
       const parsedSourceDir = parseLegacyVersionedSourceDir(entry);
       if (!parsedSourceDir) continue;
 
+      const slug = validateSlug(parsedSourceDir.slug);
+      const version = canonicalFunctionVersion(parsedSourceDir.version);
       const sourceDir = resolveInside(dir, entry);
-      const targetDir = assertInside(dir, path.join(
-        dir,
-        VERSIONED_DIR,
-        validateSlug(parsedSourceDir.slug),
-        parsedSourceDir.version,
-        "src",
-      ));
+      const versionDir = getFunctionVersionDir(ref, slug, version);
+      const targetDir = assertInside(versionDir, path.join(versionDir, "src"));
 
       await fs.mkdir(path.dirname(targetDir), { recursive: true });
       await fs.rm(targetDir, { recursive: true, force: true }).catch(() => {});
@@ -1884,7 +1881,7 @@ export const edgeFunctionService = {
 
   async listVersions(ref: string, slug: string): Promise<EdgeFunctionVersionRecord[]> {
     const cfg = await this.getConfig(ref, slug);
-    const activeVersion = cfg.version || null;
+    const activeVersion = cfg.version ?? null;
     const versions = await listVersionDirectories(ref, slug);
 
     const records = await Promise.all(
@@ -1921,6 +1918,13 @@ export const edgeFunctionService = {
         } satisfies EdgeFunctionVersionRecord;
       }),
     );
+
+    if (activeVersion !== null) {
+      const activeRecord = records.find((record) => record.version === activeVersion);
+      if (!activeRecord?.has_bundle) {
+        throw new Error(EDGE_FUNCTION_ACTIVE_ARTIFACT_MISSING_MESSAGE);
+      }
+    }
 
     return records.sort(
       (a, b) => Number.parseInt(b.version, 10) - Number.parseInt(a.version, 10),
