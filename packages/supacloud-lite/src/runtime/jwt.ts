@@ -5,6 +5,13 @@
 
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
+const PROJECT_API_KEY_ISSUED_AT = 1_641_769_200
+const PROJECT_API_KEY_EXPIRES_AT = 4_102_444_800
+
+export interface ProjectApiKeys {
+  anonKey: string
+  serviceRoleKey: string
+}
 
 function bytesToBase64Url(bytes: Uint8Array): string {
   let binary = ''
@@ -58,6 +65,20 @@ export async function signJwt(claims: JwtClaims, secret: string): Promise<string
   const key = await hmacKey(secret, 'sign')
   const sig = await crypto.subtle.sign('HMAC', key, encoder.encode(data))
   return `${data}.${bytesToBase64Url(new Uint8Array(sig))}`
+}
+
+/** Keep project API keys canonical so CLI output and restarted runtimes remain byte-identical. */
+export async function mintProjectApiKeys(jwtSecret: string): Promise<ProjectApiKeys> {
+  const commonClaims = {
+    iss: 'supabase',
+    ref: 'local',
+    iat: PROJECT_API_KEY_ISSUED_AT,
+    exp: PROJECT_API_KEY_EXPIRES_AT,
+  }
+  return {
+    anonKey: await signJwt({ ...commonClaims, role: 'anon' }, jwtSecret),
+    serviceRoleKey: await signJwt({ ...commonClaims, role: 'service_role' }, jwtSecret),
+  }
 }
 
 /** Verifies signature and expiry. Returns claims, or null when invalid. */

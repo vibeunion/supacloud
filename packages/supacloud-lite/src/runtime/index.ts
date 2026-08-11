@@ -17,7 +17,7 @@ import { FunctionsHandler, type EdgeFunction } from './functions/handler.js'
 import { installDenoShim } from './functions/deno-shim.js'
 import { installPgredisShim, PgredisCache } from './functions/pgredis.js'
 import { Database } from './db/database.js'
-import { signJwt, verifyJwt } from './jwt.js'
+import { mintProjectApiKeys, verifyJwt } from './jwt.js'
 import { RealtimeEngine } from './realtime/engine.js'
 import { RestHandler } from './rest/handler.js'
 import { MemoryStorageDriver } from './storage/driver.js'
@@ -164,13 +164,7 @@ export async function createBackend(config: BackendConfig = {}): Promise<SupaClo
 
   const pgredis = await PgredisCache.create(db).catch(failStartup)
 
-  const now = Math.floor(Date.now() / 1000)
-  const tenYears = 10 * 365 * 24 * 3600
-  const anonKey = await signJwt({ iss: 'supabase', ref: 'local', role: 'anon', iat: now, exp: now + tenYears }, jwtSecret)
-  const serviceRoleKey = await signJwt(
-    { iss: 'supabase', ref: 'local', role: 'service_role', iat: now, exp: now + tenYears },
-    jwtSecret
-  )
+  const { anonKey, serviceRoleKey } = await mintProjectApiKeys(jwtSecret)
 
   const exposedSchemas = [...new Set(config.dbSchemas ?? ['public', 'pgmq_public'])]
   const rest = new RestHandler(db, { exposedSchemas, maxRows: config.maxRows })
