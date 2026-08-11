@@ -260,7 +260,7 @@ function componentBootstrapCommands(request: UpgradeRequest): string[] {
 function componentPreflightCommands(request: UpgradeRequest): string[] {
     return request.edgeRuntimeVersion ? [
         "test -f /etc/supabase/management-api.env || { echo 'EDGE_RUNTIME_MODE is unavailable; component upgrade requires external mode' >&2; exit 1; }",
-        "EDGE_RUNTIME_MODE_VALUE=$(awk -F= '$1 == \"EDGE_RUNTIME_MODE\" { value=$2 } END { gsub(/^[[:space:]\\042\\047]+|[[:space:]\\042\\047]+$/, \"\", value); print value }' /etc/supabase/management-api.env)",
+        "EDGE_RUNTIME_MODE_VALUE=$(awk -F= '$1 == \"EDGE_RUNTIME_MODE\" { value=substr($0, index($0, \"=\") + 1) } END { gsub(/^[[:space:]\\042\\047]+|[[:space:]\\042\\047]+$/, \"\", value); print value }' /etc/supabase/management-api.env)",
         "test \"$EDGE_RUNTIME_MODE_VALUE\" = external || { echo 'Edge Runtime component upgrade supports persisted external mode only' >&2; exit 1; }",
     ] : [];
 }

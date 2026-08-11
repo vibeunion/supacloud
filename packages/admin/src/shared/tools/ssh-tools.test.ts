@@ -700,7 +700,7 @@ describe("ssh admin tool", () => {
         expect(rootScript).toContain("Another SupaCloud upgrade is already running");
     });
 
-    test("remote component preflight parses quoted Edge Runtime mode without awk escape warnings", () => {
+    test("remote component preflight preserves the full Edge Runtime mode and rejects suffixes", () => {
         const fixtureDir = mkdtempSync(join(tmpdir(), "supacloud-admin-edge-mode-"));
         const envFile = join(fixtureDir, "management-api.env");
         const rootScript = buildRootUpgradeScript({
@@ -709,6 +709,8 @@ describe("ssh admin tool", () => {
         });
         const edgeModeAssignment = rootScript.split("\n").find(line => line.startsWith("EDGE_RUNTIME_MODE_VALUE="));
         if (!edgeModeAssignment) throw new Error("Generated upgrade script does not read EDGE_RUNTIME_MODE");
+        const edgeModeGate = rootScript.split("\n").find(line => line.startsWith('test "$EDGE_RUNTIME_MODE_VALUE" = external'));
+        if (!edgeModeGate) throw new Error("Generated upgrade script does not enforce exact external mode");
         const fixtureEdgeModeAssignment = edgeModeAssignment.replace("/etc/supabase/management-api.env", '"$ENV_FILE"');
         expect(fixtureEdgeModeAssignment).toContain(String.raw`\042\047`);
         expect(fixtureEdgeModeAssignment).not.toContain(String.raw`\"`);
@@ -716,12 +718,24 @@ describe("ssh admin tool", () => {
             for (const configuredValue of ["external", '"external"', "'external'", "  external  "]) {
                 writeFileSync(envFile, `EDGE_RUNTIME_MODE=${configuredValue}\n`);
                 const execution = Bun.spawnSync(["bash", "-c", [
-                    "set -euo pipefail", fixtureEdgeModeAssignment, "printf '%s' \"$EDGE_RUNTIME_MODE_VALUE\"",
+                    "set -euo pipefail", fixtureEdgeModeAssignment, edgeModeGate,
+                    "printf '%s' \"$EDGE_RUNTIME_MODE_VALUE\"",
                 ].join("\n")], { env: { ...process.env, ENV_FILE: envFile } });
                 expect(execution.exitCode).toBe(0);
                 expect(execution.stdout.toString()).toBe("external");
                 expect(execution.stderr.toString()).toBe("");
             }
+            writeFileSync(envFile, "EDGE_RUNTIME_MODE=external=embedded\n");
+            const fullRhsProbe = Bun.spawnSync(["bash", "-c", [
+                "set -euo pipefail", fixtureEdgeModeAssignment, "printf '%s' \"$EDGE_RUNTIME_MODE_VALUE\"",
+            ].join("\n")], { env: { ...process.env, ENV_FILE: envFile } });
+            expect(fullRhsProbe.exitCode).toBe(0);
+            expect(fullRhsProbe.stdout.toString()).toBe("external=embedded");
+            const suffixRejection = Bun.spawnSync(["bash", "-c", [
+                "set -euo pipefail", fixtureEdgeModeAssignment, edgeModeGate,
+            ].join("\n")], { env: { ...process.env, ENV_FILE: envFile } });
+            expect(suffixRejection.exitCode).not.toBe(0);
+            expect(suffixRejection.stderr.toString()).toContain("supports persisted external mode only");
         } finally {
             rmSync(fixtureDir, { recursive: true, force: true });
         }
