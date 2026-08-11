@@ -89,6 +89,52 @@ describe('Auth admin link compatibility', () => {
     }
   })
 
+  test('redeems only one credential from a generated link under concurrency', async () => {
+    const backend = await createLiteBackend({
+      jwtSecret: 'x'.repeat(64),
+      vaultKey: 'y'.repeat(64),
+      apiUrl: 'http://local',
+      log: () => {},
+    })
+    const serviceClient = createClient('http://local', backend.serviceRoleKey, {
+      ...clientOptions,
+      global: { fetch: backend.fetch },
+    })
+    const firstAnonClient = createClient('http://local', backend.anonKey, {
+      ...clientOptions,
+      global: { fetch: backend.fetch },
+    })
+    const secondAnonClient = createClient('http://local', backend.anonKey, {
+      ...clientOptions,
+      global: { fetch: backend.fetch },
+    })
+
+    try {
+      for (let round = 0; round < 20; round += 1) {
+        const email = `concurrent-link-${round}@example.com`
+        const generated = await serviceClient.auth.admin.generateLink({ type: 'magiclink', email })
+        const properties = generated.data.properties
+        if (!properties) throw new Error('generateLink returned no properties')
+
+        const redemptions = await Promise.all([
+          firstAnonClient.auth.verifyOtp({ type: 'magiclink', token_hash: properties.hashed_token }),
+          secondAnonClient.auth.verifyOtp({ type: 'email', email, token: properties.email_otp }),
+        ])
+        expect(redemptions.filter((redemption) => redemption.error === null)).toHaveLength(1)
+        expect(redemptions.filter((redemption) => redemption.error?.code === 'otp_expired')).toHaveLength(1)
+
+        const sessions = await backend.db.query<{ count: number }>(
+          `select count(*)::int as count from auth.refresh_tokens rt
+           join auth.users u on u.id = rt.user_id where u.email = $1`,
+          [email]
+        )
+        expect(sessions.rows).toEqual([{ count: 1 }])
+      }
+    } finally {
+      await backend.close()
+    }
+  })
+
   test('requires service role and rejects unsupported link requests', async () => {
     const backend = await createLiteBackend({
       jwtSecret: 'x'.repeat(64),

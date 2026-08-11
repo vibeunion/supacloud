@@ -81,6 +81,18 @@ interface RefreshTokenRow {
   created_at: Date | string | null
 }
 
+interface EmailTokenRedemption {
+  token: string
+  tokenTypes: string
+  email: string | null
+}
+
+interface EmailTokenCandidate {
+  id: string
+  user_id: string
+  email: string
+}
+
 function authError(status: number, errorCode: string, msg: string): Response {
   return json(status, { code: status, error_code: errorCode, msg })
 }
@@ -481,40 +493,78 @@ export class AuthHandler {
   private static readonly MAX_OTP_ATTEMPTS = 5
 
   private async redeem(token: string, types: string[], email?: string): Promise<UserRow | null> {
-    const normalizedEmail = email?.toLowerCase().trim() ?? null
-    const res = await this.db.query(
-      `delete from auth.one_time_tokens
-       where token = $1 and token_type = any($2::text[])
-         and ($3::text is null or email = $3) and expires_at > now()
-         and attempts < $4
-       returning user_id, email`,
-      [token, `{${types.join(',')}}`, normalizedEmail, AuthHandler.MAX_OTP_ATTEMPTS]
-    )
-    const row = res.rows[0] as { user_id: string; email: string } | undefined
-    if (!row) {
-      // Wrong/expired code: count the failed guess against the live tokens for
-      // this email, and burn them once the attempt cap is hit (brute-force
-      // lockout for the 6-digit OTP). Requires the email to scope the counter.
-      if (normalizedEmail) {
-        await this.db.query(
-          `update auth.one_time_tokens set attempts = attempts + 1
-           where email = $1 and token_type = any($2::text[]) and expires_at > now()`,
-          [normalizedEmail, `{${types.join(',')}}`]
-        )
-        await this.db.query(
-          `delete from auth.one_time_tokens where email = $1 and attempts >= $2`,
-          [normalizedEmail, AuthHandler.MAX_OTP_ATTEMPTS]
-        )
-      }
+    const redemption: EmailTokenRedemption = {
+      token,
+      tokenTypes: `{${types.join(',')}}`,
+      email: email?.toLowerCase().trim() ?? null,
+    }
+    return this.db.transaction((query) => this.claimEmailToken(query, redemption))
+  }
+
+  private async claimEmailToken(query: Querier, redemption: EmailTokenRedemption): Promise<UserRow | null> {
+    const candidate = await this.findEmailTokenCandidate(query, redemption)
+    if (!candidate) {
+      await this.recordFailedEmailTokenAttempt(query, redemption)
       return null
     }
-    await this.db.query(`delete from auth.one_time_tokens where email = $1`, [row.email])
-    const ures = await this.db.query(
+
+    const claimedToken = await this.lockAndDeleteEmailToken(query, candidate, redemption)
+    return claimedToken ? this.confirmEmailTokenUser(query, claimedToken) : null
+  }
+
+  private async lockAndDeleteEmailToken(
+    query: Querier,
+    candidate: EmailTokenCandidate,
+    redemption: EmailTokenRedemption
+  ): Promise<EmailTokenCandidate | null> {
+    // Both alternatives share this row, so the lock serializes OTP/hash claims
+    // before either transaction re-checks and removes its candidate token.
+    await query(`select id from auth.users where id = $1 for update`, [candidate.user_id])
+    const claimedTokens = await query<EmailTokenCandidate>(
+      `delete from auth.one_time_tokens
+       where id = $1 and token = $2 and token_type = any($3::text[])
+         and expires_at > now() and attempts < $4
+       returning id, user_id, email`,
+      [candidate.id, redemption.token, redemption.tokenTypes, AuthHandler.MAX_OTP_ATTEMPTS]
+    )
+    return claimedTokens.rows[0] ?? null
+  }
+
+  private async confirmEmailTokenUser(query: Querier, claimedToken: EmailTokenCandidate): Promise<UserRow | null> {
+    await query(`delete from auth.one_time_tokens where email = $1`, [claimedToken.email])
+    const users = await query<UserRow>(
       `update auth.users set email_confirmed_at = coalesce(email_confirmed_at, now()), last_sign_in_at = now()
        where id = $1 returning *`,
-      [row.user_id]
+      [claimedToken.user_id]
     )
-    return (ures.rows[0] as UserRow) ?? null
+    return users.rows[0] ?? null
+  }
+
+  private async findEmailTokenCandidate(
+    query: Querier,
+    redemption: EmailTokenRedemption
+  ): Promise<EmailTokenCandidate | null> {
+    const candidates = await query<EmailTokenCandidate>(
+      `select id, user_id, email from auth.one_time_tokens
+       where token = $1 and token_type = any($2::text[])
+         and ($3::text is null or email = $3) and expires_at > now()
+         and attempts < $4`,
+      [redemption.token, redemption.tokenTypes, redemption.email, AuthHandler.MAX_OTP_ATTEMPTS]
+    )
+    return candidates.rows[0] ?? null
+  }
+
+  private async recordFailedEmailTokenAttempt(query: Querier, redemption: EmailTokenRedemption): Promise<void> {
+    if (!redemption.email) return
+    await query(
+      `update auth.one_time_tokens set attempts = attempts + 1
+       where email = $1 and token_type = any($2::text[]) and expires_at > now()`,
+      [redemption.email, redemption.tokenTypes]
+    )
+    await query(
+      `delete from auth.one_time_tokens where email = $1 and attempts >= $2`,
+      [redemption.email, AuthHandler.MAX_OTP_ATTEMPTS]
+    )
   }
 
   private async verifyToken(req: Request): Promise<Response> {
