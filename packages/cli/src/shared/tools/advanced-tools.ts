@@ -121,6 +121,12 @@ const functionVersionSchema = Type.Optional(decodedSchema(
 
 const secretListSchema = Type.Array(Type.Object({ name: Type.String(), value: Type.String() }));
 const ENVIRONMENT_SECRET_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]{0,255}$/;
+const MAX_SECRET_COUNT = 1024;
+const MAX_ENVIRONMENT_SECRET_BYTES = 24 * 1024;
+const MAX_SECRET_JSON_BYTES = 1024 * 1024;
+const INVALID_ENVIRONMENT_SECRET_NAMES_MESSAGE = "Environment secret names are invalid";
+const INVALID_ENVIRONMENT_SECRET_VALUES_MESSAGE = "Environment secret values are missing or exceed safe limits";
+const INVALID_SECRET_LIST_RESPONSE = "❌ Project secret list response is invalid";
 
 type SecretEntry = { name: string; value: string };
 
@@ -152,39 +158,83 @@ const secretsSchema = Type.Optional(decodedSchema(
     parseSecrets,
 ));
 
+function validEnvironmentSecretNames(names: string[]): boolean {
+    if (names.length === 0 || names.length > MAX_SECRET_COUNT) return false;
+    const uniqueNames = new Set<string>();
+    for (const name of names) {
+        if (!ENVIRONMENT_SECRET_NAME_PATTERN.test(name) || uniqueNames.has(name)) return false;
+        uniqueNames.add(name);
+    }
+    return true;
+}
+
 function parseEnvironmentSecretNames(input: string): unknown {
-    const names = input.split(",").map((name) => name.trim());
-    if (names.some((name) => name.length === 0)) {
-        throw new Error("Environment secret names must be a non-empty comma-separated list");
-    }
-    const invalidName = names.find((name) => !ENVIRONMENT_SECRET_NAME_PATTERN.test(name));
-    if (invalidName) {
-        throw new Error(`Invalid environment secret name '${invalidName}'`);
-    }
-    const duplicateName = names.find((name, index) => names.indexOf(name) !== index);
-    if (duplicateName) {
-        throw new Error(`Duplicate environment secret name '${duplicateName}'`);
+    const names = input.split(",", MAX_SECRET_COUNT + 1).map((name) => name.trim());
+    if (!validEnvironmentSecretNames(names)) {
+        throw new Error(INVALID_ENVIRONMENT_SECRET_NAMES_MESSAGE);
     }
     return names;
 }
 
 const environmentSecretNamesSchema = Type.Optional(decodedSchema(
     Type.String(),
-    Type.Array(Type.String(), { minItems: 1, uniqueItems: true }),
+    Type.Array(Type.String({ pattern: ENVIRONMENT_SECRET_NAME_PATTERN.source }), {
+        minItems: 1,
+        maxItems: MAX_SECRET_COUNT,
+        uniqueItems: true,
+    }),
     parseEnvironmentSecretNames,
 ));
+
+function jsonWithinSecretLimit(payload: unknown): boolean {
+    try {
+        const serializedPayload = JSON.stringify(payload);
+        return serializedPayload !== undefined
+            && Buffer.byteLength(serializedPayload) <= MAX_SECRET_JSON_BYTES;
+    } catch (error) {
+        if (error instanceof TypeError) return false;
+        throw error;
+    }
+}
+
+function maskedSecretEntry(candidate: unknown): SecretEntry | null {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return null;
+    const { name, value } = candidate as Record<string, unknown>;
+    if (typeof name !== "string" || !ENVIRONMENT_SECRET_NAME_PATTERN.test(name)) return null;
+    if (value !== "********") return null;
+    return { name, value: "********" };
+}
+
+function projectedMaskedSecrets(payload: unknown): SecretEntry[] | null {
+    if (!Array.isArray(payload) || payload.length > MAX_SECRET_COUNT) return null;
+    if (!jsonWithinSecretLimit(payload)) return null;
+    const secretNames = new Set<string>();
+    const projectedSecrets: SecretEntry[] = [];
+    for (const candidate of payload) {
+        const secret = maskedSecretEntry(candidate);
+        if (!secret || secretNames.has(secret.name)) return null;
+        secretNames.add(secret.name);
+        projectedSecrets.push(secret);
+    }
+    return projectedSecrets;
+}
 
 function secretsFromEnvironment(
     names: string[],
     environment: NodeJS.ProcessEnv,
 ): SecretEntry[] {
-    return names.map((name) => {
+    const secrets = names.map((name) => {
         const secretValue = environment[name];
-        if (!secretValue) {
-            throw new Error(`Environment variable '${name}' must be set to a non-empty value`);
+        if (typeof secretValue !== "string" || secretValue.length === 0
+            || Buffer.byteLength(secretValue) > MAX_ENVIRONMENT_SECRET_BYTES) {
+            throw new Error(INVALID_ENVIRONMENT_SECRET_VALUES_MESSAGE);
         }
         return { name, value: secretValue };
     });
+    if (!jsonWithinSecretLimit(secrets)) {
+        throw new Error(INVALID_ENVIRONMENT_SECRET_VALUES_MESSAGE);
+    }
+    return secrets;
 }
 
 function secretsForUpsert(
@@ -477,10 +527,17 @@ Actions: list, upsert, delete`,
             let text: string;
             switch (action) {
                 case "list": {
-                    const response = await http.get(`/v1/projects/${ref}/secrets`);
-                    text = response.ok
-                        ? JSON.stringify(response.data, null, 2)
-                        : `❌ Failed (${response.status})`;
+                    const response = await http.get(`/v1/projects/${ref}/secrets`, {
+                        maxResponseBytes: MAX_SECRET_JSON_BYTES,
+                    });
+                    if (!response.ok) {
+                        text = `❌ Failed (${response.status})`;
+                        break;
+                    }
+                    const maskedSecrets = projectedMaskedSecrets(response.data);
+                    text = maskedSecrets === null
+                        ? INVALID_SECRET_LIST_RESPONSE
+                        : JSON.stringify(maskedSecrets, null, 2);
                     break;
                 }
                 case "upsert":
