@@ -23,7 +23,7 @@ function parsed(response: { content: Array<{ text: string }> }): Record<string, 
 
 describe("admin physical backup release control", () => {
     test("creates an explicit full backup and returns exact completed evidence", async () => {
-        const calls: Array<{ method: string; path: string; body?: unknown }> = [];
+        const calls: Array<{ method: string; path: string; body?: unknown; timeoutMs?: number }> = [];
         let inventoryRead = 0;
         const http = {
             get: async (path: string) => {
@@ -38,8 +38,8 @@ describe("admin physical backup release control", () => {
                     }],
                 };
             },
-            post: async (path: string, body: unknown) => {
-                calls.push({ method: "POST", path, body });
+            post: async (path: string, body: unknown, options: { timeoutMs: number }) => {
+                calls.push({ method: "POST", path, body, timeoutMs: options.timeoutMs });
                 return { ok: true, status: 200, data: { message: "full backup completed" } };
             },
         };
@@ -55,7 +55,12 @@ describe("admin physical backup release control", () => {
         expect(response.content[0].text).not.toContain("remote-token-must-not-escape");
         expect(calls).toEqual([
             { method: "GET", path: "/v1/projects/fa_staging/database/backups" },
-            { method: "POST", path: "/v1/projects/fa_staging/database/backups", body: { type: "full" } },
+            {
+                method: "POST",
+                path: "/v1/projects/fa_staging/database/backups",
+                body: { type: "full" },
+                timeoutMs: 35 * 60_000,
+            },
             { method: "GET", path: "/v1/projects/fa_staging/database/backups" },
         ]);
     });
@@ -152,6 +157,28 @@ describe("admin physical backup release control", () => {
 
         expect(parsed(response).error).toEqual({ code: "OUTCOME_UNKNOWN", http_status: 408 });
         expect(inventoryReads).toBe(2);
+    });
+
+    test("keeps an unacknowledged timed-out outcome unknown even when reconciliation sees a completed backup", async () => {
+        let inventoryReads = 0;
+        let postCount = 0;
+        const response = await createFullPhysicalBackup({
+            get: async () => ({
+                ok: true,
+                status: 200,
+                data: inventoryReads++ === 0
+                    ? [EXISTING_BACKUP]
+                    : [EXISTING_BACKUP, NEW_BACKUP],
+            }),
+            post: async () => {
+                postCount++;
+                return { ok: false, status: 500, data: null };
+            },
+        } as never, "fa_staging");
+
+        expect(parsed(response).error).toEqual({ code: "OUTCOME_UNKNOWN", http_status: 500 });
+        expect(inventoryReads).toBe(2);
+        expect(postCount).toBe(1);
     });
 
     test("reconciles malformed success before reporting an unknown outcome", async () => {

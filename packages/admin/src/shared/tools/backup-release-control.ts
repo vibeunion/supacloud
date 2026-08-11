@@ -1,6 +1,6 @@
 import type { HttpResult, HttpTransport } from "../transports/http";
 
-export type AdminBackupToolResponse = {
+type AdminBackupToolResponse = {
     content: Array<{ type: "text"; text: string }>;
     isError?: boolean;
 };
@@ -20,6 +20,7 @@ type BackupInventoryRead = {
 
 const SAFE_PATH_SEGMENT = /^[A-Za-z0-9_-]{1,64}$/;
 const SAFE_BACKUP_FIELD = /^[A-Za-z0-9_.-]{1,128}$/;
+const PHYSICAL_BACKUP_REQUEST_TIMEOUT_MS = 35 * 60_000;
 
 function nonnegativeSafeInteger(candidate: unknown): candidate is number {
     return typeof candidate === "number" && Number.isSafeInteger(candidate) && candidate >= 0;
@@ -164,7 +165,11 @@ export async function createFullPhysicalBackup(
     }
     if (!beforeRead.inventory) return backupFailure("platform.create_backup", "INVALID_RESPONSE", null);
 
-    const creation = await http.post(endpoint, { type: "full" });
+    const creation = await http.post(
+        endpoint,
+        { type: "full" },
+        { timeoutMs: PHYSICAL_BACKUP_REQUEST_TIMEOUT_MS },
+    );
     const afterRead = await readBackupInventory(http, endpoint);
     return reconciledCreationResponse(projectRef, beforeRead.inventory, creation, afterRead);
 }
