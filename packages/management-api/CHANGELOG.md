@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.53.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.52.0...management-api-v0.53.0) (2026-08-11)
+
+
+### Features
+
+* **cli:** add scheduled function revision CAS ([eaa84f3](https://github.com/zuohuadong/supacloud/commit/eaa84f3f66bebc707a75eecad6e66870989ec398))
+* **functions:** add active version concurrency control ([7a7e8b9](https://github.com/zuohuadong/supacloud/commit/7a7e8b95cb1e4001765f40302cb5ddbb7b6db372))
+* **functions:** deploy exact prebuilt artifacts ([bd3ccf8](https://github.com/zuohuadong/supacloud/commit/bd3ccf853397fd5768a6d54d3885ad8b97c2c403))
+* **storage:** add bucket revision CAS ([15f18b0](https://github.com/zuohuadong/supacloud/commit/15f18b08b763b319ebd09efcc7af45deee269044))
+
 ## [0.52.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.51.1...management-api-v0.52.0) (2026-08-11)
 
 

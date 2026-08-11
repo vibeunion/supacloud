@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.30.0](https://github.com/zuohuadong/supacloud/compare/web-console-v0.29.0...web-console-v0.30.0) (2026-08-11)
+
+
+### Features
+
+* **functions:** add active version concurrency control ([7a7e8b9](https://github.com/zuohuadong/supacloud/commit/7a7e8b95cb1e4001765f40302cb5ddbb7b6db372))
+* **storage:** add bucket revision CAS ([15f18b0](https://github.com/zuohuadong/supacloud/commit/15f18b08b763b319ebd09efcc7af45deee269044))
+
 ## [0.29.0](https://github.com/zuohuadong/supacloud/compare/web-console-v0.28.8...web-console-v0.29.0) (2026-08-10)
 
 
