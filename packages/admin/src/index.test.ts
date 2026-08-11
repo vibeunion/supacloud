@@ -24,6 +24,22 @@ const ADMIN_CONTEXT_KEYS = new Set([
     "SUPACLOUD_SSH_HOST_FINGERPRINT",
 ]);
 
+const EXISTING_PHYSICAL_BACKUP = {
+    id: "20260811-010000F",
+    type: "full",
+    timestamp: { start: 1_786_400_000, stop: 1_786_400_030 },
+    size: 4096,
+    database: "supa_fa_staging",
+};
+
+const COMPLETED_PHYSICAL_BACKUP = {
+    id: "20260811-020000F",
+    type: "full",
+    timestamp: { start: 1_786_403_600, stop: 1_786_403_660 },
+    size: 8192,
+    database: "supa_fa_staging",
+};
+
 function cleanEnvironment(overrides: Record<string, string> = {}): Record<string, string> {
     const env: Record<string, string> = {};
     for (const [key, value] of Object.entries(process.env)) {
@@ -195,6 +211,10 @@ describe("supacloud-admin process contract", () => {
             const result = await runAdminCliPath(linkedEntry, ["--help"]);
             expect(result.exitCode).toBe(0);
             expect(result.output).toContain("Platform administration CLI");
+            const backupHelp = await runAdminCliPath(linkedEntry, ["platform", "create_backup", "--help"]);
+            expect(backupHelp.exitCode).toBe(0);
+            expect(backupHelp.output).toContain("--ref");
+            expect(backupHelp.output).toContain("--backup_type");
             const version = await runAdminCliPath(linkedEntry, ["--version"]);
             expect(version.exitCode).toBe(0);
             expect(version.output.trim()).toBe(packageMetadata.version);
@@ -245,6 +265,124 @@ describe("supacloud-admin process contract", () => {
         expect(execution.output).toContain("--api_domain");
         expect(execution.output).toContain("--auth_domain");
         expect(execution.output).toContain("--studio_domain");
+    });
+
+    test("documents every physical backup flag without API context", async () => {
+        const execution = await runAdminCli(["platform", "create_backup", "--help"]);
+
+        expect(execution.exitCode).toBe(0);
+        expect(execution.output).toContain("--ref");
+        expect(execution.output).toContain("--backup_type");
+    });
+
+    test("creates a full backup with a sanitized machine-readable receipt", async () => {
+        const calls: Array<{ method: string; path: string; body?: unknown }> = [];
+        let inventoryRead = 0;
+        const apiServer = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            async fetch(request) {
+                const path = new URL(request.url).pathname;
+                if (request.method === "POST") {
+                    const body = await request.json();
+                    calls.push({ method: request.method, path, body });
+                    return Response.json({
+                        message: "full backup completed",
+                        token: "successful-mutation-secret",
+                    });
+                }
+                calls.push({ method: request.method, path });
+                inventoryRead += 1;
+                return Response.json(inventoryRead === 1
+                    ? [EXISTING_PHYSICAL_BACKUP]
+                    : [EXISTING_PHYSICAL_BACKUP, {
+                        ...COMPLETED_PHYSICAL_BACKUP,
+                        secret: "inventory-secret",
+                    }]);
+            },
+        });
+        const fixtureToken = "backup-api-token";
+
+        try {
+            const execution = await runAdminCli([
+                "platform", "create_backup", "--ref", "fa_staging", "--backup_type", "full",
+            ], {
+                SUPACLOUD_API_URL: `http://127.0.0.1:${apiServer.port}`,
+                SUPACLOUD_API_TOKEN: fixtureToken,
+            });
+
+            expect(execution.exitCode).toBe(0);
+            expect(JSON.parse(execution.output)).toEqual({
+                project_ref: "fa_staging",
+                requested_type: "full",
+                backup: COMPLETED_PHYSICAL_BACKUP,
+            });
+            expect(calls).toEqual([
+                { method: "GET", path: "/v1/projects/fa_staging/database/backups" },
+                {
+                    method: "POST",
+                    path: "/v1/projects/fa_staging/database/backups",
+                    body: { type: "full" },
+                },
+                { method: "GET", path: "/v1/projects/fa_staging/database/backups" },
+            ]);
+            expect(execution.output).not.toContain(fixtureToken);
+            expect(execution.output).not.toContain("successful-mutation-secret");
+            expect(execution.output).not.toContain("inventory-secret");
+        } finally {
+            apiServer.stop(true);
+        }
+    });
+
+    test("exits nonzero after reconciling an uncertain backup mutation", async () => {
+        const calls: Array<{ method: string; path: string; body?: unknown }> = [];
+        const apiServer = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            async fetch(request) {
+                const path = new URL(request.url).pathname;
+                if (request.method === "POST") {
+                    const body = await request.json();
+                    calls.push({ method: request.method, path, body });
+                    return Response.json({
+                        message: "remote failure detail",
+                        token: "failed-mutation-secret",
+                    }, { status: 503 });
+                }
+                calls.push({ method: request.method, path });
+                return Response.json([EXISTING_PHYSICAL_BACKUP]);
+            },
+        });
+        const fixtureToken = "failed-backup-api-token";
+
+        try {
+            const execution = await runAdminCli([
+                "platform", "create_backup", "--ref", "fa_staging", "--backup_type", "full",
+            ], {
+                SUPACLOUD_API_URL: `http://127.0.0.1:${apiServer.port}`,
+                SUPACLOUD_API_TOKEN: fixtureToken,
+            });
+
+            expect(execution.exitCode).toBe(1);
+            expect(JSON.parse(execution.output).error).toEqual({
+                code: "OUTCOME_UNKNOWN",
+                http_status: 503,
+            });
+            expect(calls).toEqual([
+                { method: "GET", path: "/v1/projects/fa_staging/database/backups" },
+                {
+                    method: "POST",
+                    path: "/v1/projects/fa_staging/database/backups",
+                    body: { type: "full" },
+                },
+                { method: "GET", path: "/v1/projects/fa_staging/database/backups" },
+            ]);
+            expect(execution.output).not.toContain(fixtureToken);
+            expect(execution.output).not.toContain("remote failure detail");
+            expect(execution.output).not.toContain("failed-mutation-secret");
+        } finally {
+            apiServer.stop(true);
+        }
     });
 
     test("documents constrained project service control without credential flags", async () => {
