@@ -33,13 +33,6 @@ function comparePrecedence(leftVersion, rightVersion) {
   return 0;
 }
 
-// Caret compatibility ends at the next major for 1.x, next minor for 0.x, and next patch for 0.0.x.
-function caretUpperBound([major, minor, patch]) {
-  if (major > 0n) return [major + 1n, 0n, 0n];
-  if (minor > 0n) return [0n, minor + 1n, 0n];
-  return [0n, 0n, patch + 1n];
-}
-
 function caretLowerBound(range, dependencyName) {
   if (typeof range !== 'string' || !range.startsWith('^')) {
     throw new Error(`${dependencyName} has an unsupported dependency range`);
@@ -55,10 +48,11 @@ function synchronizedRange(currentRange, candidatePackage, dependencyName) {
   const candidateVersion = packageVersion(candidatePackage, dependencyName);
   const candidatePrecedence = stableVersionPrecedence(candidateVersion, dependencyName);
   const lowerBound = caretLowerBound(currentRange, dependencyName);
-  if (comparePrecedence(candidatePrecedence, lowerBound) < 0) {
+  const precedence = comparePrecedence(candidatePrecedence, lowerBound);
+  if (precedence < 0) {
     throw new Error(`${dependencyName} candidate ${candidateVersion} is below current lower bound ${currentRange}`);
   }
-  if (comparePrecedence(candidatePrecedence, caretUpperBound(lowerBound)) < 0) {
+  if (precedence === 0) {
     return currentRange;
   }
   return `^${candidateVersion}`;
