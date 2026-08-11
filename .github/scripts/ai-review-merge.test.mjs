@@ -7,7 +7,9 @@ import {
   buildMergeRequestBody,
   detectSelfModification,
   formatAiUnavailableComment,
+  hasNoAiMergeLabel,
   isAiProviderUnavailableError,
+  isReleasePleasePullRequest,
   isTrustedSubmitter,
   summarizeCIStatus,
   summarizeAiProviderError,
@@ -240,6 +242,35 @@ describe('atomic merge preconditions', () => {
       }),
       /single line/,
     );
+    assert.throws(
+      () => validatePullRequestForMerge({
+        ...openPullRequest,
+        head: { sha: 'head-sha', ref: 'release-please--branches--main' },
+      }, {
+        expectedHeadSha: 'head-sha',
+        expectedHeadRef: 'release-please--branches--main',
+        expectedBaseRef: 'main',
+      }),
+      /human merge approval/,
+    );
+    assert.throws(
+      () => validatePullRequestForMerge({
+        ...openPullRequest,
+        labels: [{ name: 'autorelease: pending' }],
+      }, {
+        expectedHeadSha: 'head-sha', expectedHeadRef: 'feature/harden-merge', expectedBaseRef: 'main',
+      }),
+      /human merge approval/,
+    );
+    assert.throws(
+      () => validatePullRequestForMerge({
+        ...openPullRequest,
+        labels: [{ name: 'no-ai-merge' }],
+      }, {
+        expectedHeadSha: 'head-sha', expectedHeadRef: 'feature/harden-merge', expectedBaseRef: 'main',
+      }),
+      /no-ai-merge label/,
+    );
   });
 
   test('preserves the conventional PR title and expected SHA for squash commits', () => {
@@ -251,6 +282,31 @@ describe('atomic merge preconditions', () => {
       merge_method: 'squash',
       sha: 'head-sha',
     });
+  });
+});
+
+describe('Release Please merge gate', () => {
+  test('detects release branches and labels independently', () => {
+    assert.equal(isReleasePleasePullRequest({
+      head: { ref: 'release-please--branches--main' },
+      labels: [],
+    }), true);
+    assert.equal(isReleasePleasePullRequest({
+      head: { ref: 'automation/prepare-release' },
+      labels: [{ name: 'autorelease: pending' }],
+    }), true);
+  });
+
+  test('keeps ordinary automation PRs eligible for the existing identity gate', () => {
+    assert.equal(isReleasePleasePullRequest({
+      head: { ref: 'automation/sync-supacloud-dependencies' },
+      labels: [{ name: 'dependencies' }],
+    }), false);
+  });
+
+  test('recognizes the manual merge freeze label at the final write boundary', () => {
+    assert.equal(hasNoAiMergeLabel({ labels: ['no-ai-merge'] }), true);
+    assert.equal(hasNoAiMergeLabel({ labels: [{ name: 'dependencies' }] }), false);
   });
 });
 
