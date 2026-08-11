@@ -157,6 +157,7 @@ supacloud-cli branch promote --branch_ref preview123 --plan_checksum <sha256>
 supacloud-cli edge_functions deploy --ref abc123 --slug hello --path ./supabase/functions/hello
 supacloud-cli edge_functions deploy_bundle --ref abc123 --slug hello --files '{"index.ts":"export default { fetch: () => new Response(\"ok\") }"}'
 supacloud-cli edge_functions source --ref abc123 --slug hello --output ./hello.ts
+supacloud-cli secrets upsert --ref abc123 --from-env API_KEY,WEBHOOK_SECRET
 ```
 
 `edge_functions deploy --path` bundles local TypeScript and dependencies with
@@ -167,6 +168,13 @@ module policy consistently for CLI, Web Console, and direct API deployments.
 Use `source --output <file>` for large Functions so terminal or automation output
 limits cannot truncate the original TS/JS source code. The destination must not
 already exist.
+
+For secret writes, `--from-env` accepts a comma-separated list of environment
+variable names. The CLI reads each non-empty value from its own process
+environment, so command arguments contain names only and values are never
+printed. Names must be unique shell-style identifiers (`[A-Za-z_][A-Za-z0-9_]*`,
+up to 256 characters). Missing or empty values fail before any HTTP request.
+Do not combine `--from-env` with the compatibility `--secrets` input.
 
 Branch promotion is migration-first. `branch promotion_plan` prints pending
 versions, names, statement counts, and checksums without echoing SQL into terminal

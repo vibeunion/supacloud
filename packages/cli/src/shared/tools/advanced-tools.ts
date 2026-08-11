@@ -92,6 +92,9 @@ const functionFilesSchema = decodedSchema(
 );
 
 const secretListSchema = Type.Array(Type.Object({ name: Type.String(), value: Type.String() }));
+const ENVIRONMENT_SECRET_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]{0,255}$/;
+
+type SecretEntry = { name: string; value: string };
 
 function parseSecrets(value: string | Array<{ name: string; value: string }>): unknown {
     if (Array.isArray(value)) return value;
@@ -121,6 +124,56 @@ const secretsSchema = Type.Optional(decodedSchema(
     parseSecrets,
 ));
 
+function parseEnvironmentSecretNames(input: string): unknown {
+    const names = input.split(",").map((name) => name.trim());
+    if (names.some((name) => name.length === 0)) {
+        throw new Error("Environment secret names must be a non-empty comma-separated list");
+    }
+    const invalidName = names.find((name) => !ENVIRONMENT_SECRET_NAME_PATTERN.test(name));
+    if (invalidName) {
+        throw new Error(`Invalid environment secret name '${invalidName}'`);
+    }
+    const duplicateName = names.find((name, index) => names.indexOf(name) !== index);
+    if (duplicateName) {
+        throw new Error(`Duplicate environment secret name '${duplicateName}'`);
+    }
+    return names;
+}
+
+const environmentSecretNamesSchema = Type.Optional(decodedSchema(
+    Type.String(),
+    Type.Array(Type.String(), { minItems: 1, uniqueItems: true }),
+    parseEnvironmentSecretNames,
+));
+
+function secretsFromEnvironment(
+    names: string[],
+    environment: NodeJS.ProcessEnv,
+): SecretEntry[] {
+    return names.map((name) => {
+        const secretValue = environment[name];
+        if (!secretValue) {
+            throw new Error(`Environment variable '${name}' must be set to a non-empty value`);
+        }
+        return { name, value: secretValue };
+    });
+}
+
+function secretsForUpsert(
+    inlineSecrets: SecretEntry[] | undefined,
+    environmentNames: string[] | undefined,
+    environment: NodeJS.ProcessEnv,
+): SecretEntry[] {
+    if (inlineSecrets !== undefined && environmentNames !== undefined) {
+        throw new Error("'--from-env' cannot be combined with '--secrets'");
+    }
+    if (environmentNames !== undefined) {
+        return secretsFromEnvironment(environmentNames, environment);
+    }
+    if (!inlineSecrets?.length) throw new Error("'secrets' array required");
+    return inlineSecrets;
+}
+
 type EdgeFunctionConfigInput = {
     verify_jwt?: boolean;
     background_routes?: string[];
@@ -143,7 +196,11 @@ function functionSourceCode(payload: unknown): string | null {
     return typeof code === "string" ? code : null;
 }
 
-export function registerAdvancedTools(server: { tool: (...args: any[]) => void }, http: HttpTransport): void {
+export function registerAdvancedTools(
+    server: { tool: (...args: any[]) => void },
+    http: HttpTransport,
+    environment: NodeJS.ProcessEnv = process.env,
+): void {
 
     // ═══ Edge Functions (5→1) ═══
     server.tool(
@@ -311,19 +368,28 @@ Actions: list, upsert, delete`,
             action: withDescription(stringEnum(["list", "upsert", "delete"]), "Action"),
             ref: withDescription(Type.String(), "Project ref"),
             secrets: withDescription(secretsSchema, "[upsert] Secret list as JSON array or KEY=VALUE,KEY2=VALUE2"),
+            "from-env": withDescription(
+                environmentSecretNamesSchema,
+                "[upsert] Comma-separated environment variable names; values are read from this CLI process",
+            ),
             name: optional(Type.String(), "[delete] Secret name to delete"),
         },
         async (args: any) => {
             const { action, ref, secrets, name } = args;
+            const environmentNames = args["from-env"] as string[] | undefined;
             let text: string;
             switch (action) {
-                case "list":
-                    text = JSON.stringify((await http.get(`/v1/projects/${ref}/secrets`)).data, null, 2);
+                case "list": {
+                    const response = await http.get(`/v1/projects/${ref}/secrets`);
+                    text = response.ok
+                        ? JSON.stringify(response.data, null, 2)
+                        : `❌ Failed (${response.status})`;
                     break;
+                }
                 case "upsert":
-                    if (!secrets?.length) throw new Error("'secrets' array required");
-                    text = (await http.post(`/v1/projects/${ref}/secrets`, secrets)).ok
-                        ? `✅ Updated ${secrets.length} secrets` : `❌ Failed`;
+                    const secretsToUpsert = secretsForUpsert(secrets, environmentNames, environment);
+                    text = (await http.post(`/v1/projects/${ref}/secrets`, secretsToUpsert)).ok
+                        ? `✅ Updated ${secretsToUpsert.length} secrets` : `❌ Failed`;
                     break;
                 case "delete":
                     if (!name) throw new Error("'name' required");
