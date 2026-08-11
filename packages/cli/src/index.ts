@@ -18,6 +18,7 @@ import { registerGatewayTools } from "./shared/tools/gateway-tools";
 import { registerBranchTools } from "./shared/tools/branch-tools";
 import { registerSupabaseCliTools } from "./shared/tools/supabase-cli-tools";
 import { registerAiTools } from "./shared/tools/ai-tools";
+import { registerScheduledFunctionTools } from "./shared/tools/scheduled-function-tools";
 
 type ToolEntry = { schema: any; callback: (args: any) => Promise<any> };
 type ToolMap = Record<string, ToolEntry>;
@@ -218,6 +219,8 @@ EXAMPLES
   ${preferredCommand} ai show_skill
   ${preferredCommand} ai install_skill --dry_run
   ${preferredCommand} edge_functions deploy --ref abc123 --slug hello --path ./supabase/functions/hello
+  ${preferredCommand} edge_functions activate --ref abc123 --slug hello --version 3
+  ${preferredCommand} scheduled_functions list --ref abc123
   ${preferredCommand} edge_functions config --ref abc123 --slug hello --verify_jwt false --background_routes "/queue/*,/render/*"
   ${preferredCommand} secrets upsert --ref abc123 --from-env API_KEY,WEBHOOK_SECRET
   ${preferredCommand} gateway routes --ref abc123
@@ -291,7 +294,7 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
                 ],
             }),
         };
-        for (const name of ["database", "auth", "storage", "edge_functions", "secrets", "frontend", "queue", "task_events", "diagnostics", "gateway", "branch"]) {
+        for (const name of ["database", "auth", "storage", "edge_functions", "secrets", "frontend", "queue", "task_events", "scheduled_functions", "diagnostics", "gateway", "branch"]) {
             tools[name] = {
                 schema: { action: genericActionSchema },
                 callback: async () => ({
@@ -368,7 +371,12 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
     assign(databaseTools);
     assign(captureTools((server) => registerAuthTools(server as any, http)));
     assign(captureTools((server) => registerStorageTools(server as any, http)));
-    assign(captureTools((server) => registerAdvancedTools(server as any, http)));
+    assign(captureTools((server) => registerAdvancedTools(server as any, http, process.env, {
+        readOnly: context.readOnly,
+    })));
+    assign(captureTools((server) => registerScheduledFunctionTools(server as any, http, process.env, {
+        readOnly: context.readOnly,
+    })));
     assign(captureTools((server) => registerFrontendTools(server as any, http)));
     assign(captureTools((server) => registerGatewayTools(server as any, http, {
         projectRef: context.projectRef || undefined,

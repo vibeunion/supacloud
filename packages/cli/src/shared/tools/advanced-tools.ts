@@ -8,7 +8,13 @@ import { promisify } from "node:util";
 import { execFile } from "node:child_process";
 import { Type } from "@sinclair/typebox";
 import { decodedSchema, optional, stringEnum, withDescription } from "../schema";
-import type { HttpTransport } from "../transports/http";
+import type { HttpResult, HttpTransport } from "../transports/http";
+import {
+    releaseControlFailure,
+    releaseControlMutationFailure,
+    releaseControlSuccess,
+    type ReleaseControlToolResponse,
+} from "./release-control-response";
 
 const execFileAsync = promisify(execFile);
 
@@ -90,6 +96,28 @@ const functionFilesSchema = decodedSchema(
     functionFilesRecordSchema,
     parseFunctionFiles,
 );
+
+function parseFunctionVersion(input: string | number): unknown {
+    const version = String(input);
+    if (!CANONICAL_FUNCTION_VERSION_PATTERN.test(version)
+        || !Number.isSafeInteger(Number(version))) {
+        throw new Error("Function version must be a canonical safe integer");
+    }
+    return version;
+}
+
+const CANONICAL_FUNCTION_VERSION_PATTERN = /^(?:0|[1-9][0-9]*)$/;
+const SAFE_FUNCTION_REF_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+const SAFE_FUNCTION_SLUG_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
+const FUNCTION_ACTIVATION_ARGUMENTS = new Set(["action", "ref", "slug", "version"]);
+const functionVersionSchema = Type.Optional(decodedSchema(
+    Type.Union([
+        Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+        Type.String({ pattern: CANONICAL_FUNCTION_VERSION_PATTERN.source, maxLength: 16 }),
+    ]),
+    Type.String({ pattern: CANONICAL_FUNCTION_VERSION_PATTERN.source, maxLength: 16 }),
+    parseFunctionVersion,
+));
 
 const secretListSchema = Type.Array(Type.Object({ name: Type.String(), value: Type.String() }));
 const ENVIRONMENT_SECRET_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]{0,255}$/;
@@ -196,21 +224,89 @@ function functionSourceCode(payload: unknown): string | null {
     return typeof code === "string" ? code : null;
 }
 
+function objectRecord(candidate: unknown): Record<string, unknown> | null {
+    return candidate && typeof candidate === "object" && !Array.isArray(candidate)
+        ? candidate as Record<string, unknown>
+        : null;
+}
+
+function activationResponse(
+    slug: string,
+    version: string,
+    response: HttpResult<unknown>,
+): ReleaseControlToolResponse {
+    const operation = "edge_functions.activate";
+    if (!response.ok) return releaseControlMutationFailure(operation, response);
+    const receipt = objectRecord(response.data);
+    const config = objectRecord(receipt?.config);
+    if (receipt?.success !== true || receipt.version !== version
+        || config?.version !== version || typeof config.verify_jwt !== "boolean") {
+        return releaseControlFailure(operation, "OUTCOME_UNKNOWN", response.status);
+    }
+    return releaseControlSuccess(operation, {
+        slug,
+        version,
+        verify_jwt: config.verify_jwt,
+    });
+}
+
+interface FunctionActivationTarget {
+    projectRef: string;
+    functionSlug: string;
+    version: string;
+}
+
+function readOnlyActivationResult(): ReleaseControlToolResponse {
+    return {
+        isError: true,
+        content: [{ type: "text", text: "⚠️ Edge Function activation blocked in read-only mode." }],
+    };
+}
+
+function functionActivationTarget(args: Record<string, unknown>): FunctionActivationTarget {
+    const projectRef = typeof args.ref === "string" ? args.ref.trim() : "";
+    const functionSlug = typeof args.slug === "string" ? args.slug.trim() : "";
+    const version = args.version;
+    if (!SAFE_FUNCTION_REF_PATTERN.test(projectRef)) throw new Error("'ref' is invalid for 'activate'");
+    if (!SAFE_FUNCTION_SLUG_PATTERN.test(functionSlug)) throw new Error("'slug' is invalid for 'activate'");
+    if (typeof version !== "string" || !CANONICAL_FUNCTION_VERSION_PATTERN.test(version)
+        || !Number.isSafeInteger(Number(version))) {
+        throw new Error("'version' is invalid for 'activate'");
+    }
+    return { projectRef, functionSlug, version };
+}
+
+async function activateFunctionVersion(
+    http: HttpTransport,
+    args: Record<string, unknown>,
+    readOnly = false,
+): Promise<ReleaseControlToolResponse> {
+    if (readOnly) return readOnlyActivationResult();
+    const unsupported = Object.keys(args).filter((name) => !FUNCTION_ACTIVATION_ARGUMENTS.has(name));
+    if (unsupported.length > 0) throw new Error(`'${unsupported[0]}' is not supported for 'activate'`);
+    const { projectRef, functionSlug, version } = functionActivationTarget(args);
+    const endpoint = `/v1/projects/${encodeURIComponent(projectRef)}/functions/${encodeURIComponent(functionSlug)}`
+        + `/versions/${encodeURIComponent(version)}/activate`;
+    return activationResponse(functionSlug, version, await http.post(endpoint));
+}
+
 export function registerAdvancedTools(
     server: { tool: (...args: any[]) => void },
     http: HttpTransport,
     environment: NodeJS.ProcessEnv = process.env,
+    options: { readOnly?: boolean } = {},
 ): void {
 
-    // ═══ Edge Functions (5→1) ═══
+    // ═══ Edge Functions (8→1) ═══
     server.tool(
         "edge_functions",
         `Edge Function management (Deno/Bun serverless). Server auto-bundles dependencies.
-Actions: list, deploy, deploy_bundle, config, source, delete, check`,
+Actions: list, deploy, deploy_bundle, config, source, activate, delete, check`,
         {
-            action: withDescription(stringEnum(["list", "deploy", "deploy_bundle", "config", "source", "delete", "check"]), "Action"),
+            action: withDescription(stringEnum(["list", "deploy", "deploy_bundle", "config", "source", "activate", "delete", "check"]), "Action"),
             ref: withDescription(Type.String(), "Project ref"),
-            slug: optional(Type.String(), "[deploy/deploy_bundle/config/source/delete/check] Function name"),
+            slug: optional(Type.String(), "[deploy/deploy_bundle/config/source/activate/delete/check] Function name"),
+            version: withDescription(functionVersionSchema, "[activate] Existing Function version"),
             code: optional(Type.String(), "[deploy/check] Function source code (TypeScript)"),
             path: optional(Type.String(), "[deploy/check] Local file path to read code from (alternative to code)"),
             output: optional(Type.String(), "[source] Write source to this local file instead of stdout; the file must not already exist"),
@@ -221,6 +317,7 @@ Actions: list, deploy, deploy_bundle, config, source, delete, check`,
             background_routes: withDescription(backgroundRoutesSchema, "[deploy/deploy_bundle/config] Background route paths; pass comma-separated or JSON array in CLI"),
         },
         async (args: any) => {
+            if (args.action === "activate") return activateFunctionVersion(http, args, options.readOnly);
             const { action, ref, slug, path: pathArg, output, files, entrypoint, minify, verify_jwt, background_routes } = args;
             let code = args.code as string | undefined;
             const need = (f: string, v: any) => { if (!v) throw new Error(`'${f}' required for '${action}'`); };
