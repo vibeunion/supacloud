@@ -4,8 +4,10 @@ import {
     MAX_STORAGE_MIME_TYPE_COUNT,
     MAX_STORAGE_MIME_TYPE_LENGTH,
     STORAGE_BUCKET_ID_PATTERN_SOURCE,
+    STORAGE_BUCKET_REVISION_PATTERN_SOURCE,
     STORAGE_MIME_TYPE_PATTERN_SOURCE,
     STORAGE_PROJECT_REF_PATTERN_SOURCE,
+    normalizedStorageFileSizeLimit,
     storageBucketInputError,
 } from "../services/storage-bucket-contract";
 import { StorageRLS } from "../services/storage-rls";
@@ -18,6 +20,7 @@ const ErrorResponse = t.Object({ message: t.String() });
 const SuccessResponse = t.Object({ success: t.Boolean(), message: t.String() });
 const StorageProjectRef = t.String({ pattern: STORAGE_PROJECT_REF_PATTERN_SOURCE });
 const StorageBucketId = t.String({ pattern: STORAGE_BUCKET_ID_PATTERN_SOURCE });
+const StorageBucketRevision = t.String({ pattern: STORAGE_BUCKET_REVISION_PATTERN_SOURCE });
 const StorageFileSizeLimit = t.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER });
 const StorageMimeType = t.String({
     minLength: 1,
@@ -35,10 +38,15 @@ const StorageBucketCreateBody = t.Object({
     allowed_mime_types: t.Optional(StorageAllowedMimeTypes),
 });
 const StorageBucketUpdateBody = t.Object({
+    expected_revision: StorageBucketRevision,
     public: t.Optional(t.Boolean()),
     file_size_limit: t.Optional(StorageFileSizeLimit),
     allowed_mime_types: t.Optional(StorageAllowedMimeTypes),
-}, { minProperties: 1 });
+}, { minProperties: 2 });
+const StorageBucketDeleteQuery = t.Object({
+    expected_revision: StorageBucketRevision,
+    require_empty: t.Literal("true"),
+});
 
 type StorageBucketCreateInput = {
     name: string;
@@ -186,8 +194,9 @@ function mergeStorageBuckets(
     }
     return Array.from(bucketsById.values()).map((bucket) => ({
         ...bucket,
-        file_size_limit: bucket.file_size_limit ?? null,
+        file_size_limit: normalizedStorageFileSizeLimit(bucket.file_size_limit),
         allowed_mime_types: bucket.allowed_mime_types ?? null,
+        revision: typeof bucket.revision === "string" ? bucket.revision : null,
     }));
 }
 
@@ -204,31 +213,18 @@ async function listLegacyStorageBuckets(ref: string): Promise<Record<string, unk
     return await listStorageBuckets(ref);
 }
 
-async function deleteStorageBucket(ref: string, bucketName: string) {
-    const inputError = storageBucketInputError(ref, bucketName, {});
-    if (inputError) return { success: false, error: inputError };
-    const storageResult = await StorageService.deleteBucket(ref, bucketName);
-    if (!storageResult.success) return storageResult;
-
-    try {
-        await StorageRLS.deleteLogicalBucketAsAdmin(ref, bucketName);
-        return storageResult;
-    } catch (error: unknown) {
-        if (error instanceof Error && error.message === "Bucket is not empty") {
-            return { success: false, error: error.message };
-        }
-        logger.error("Failed to delete Studio storage bucket metadata", {
-            ref,
-            bucketName,
-            error: error instanceof Error ? error.message : String(error),
-        });
-        return { success: false, error: "Bucket deletion outcome is unknown" };
-    }
+async function deleteStorageBucket(ref: string, bucketName: string, expectedRevision: string) {
+    return await StorageService.deleteEmptyBucketAtRevision(ref, bucketName, expectedRevision);
 }
 
-function storageMutationStatus(error: string | undefined): 400 | 409 | 500 {
+function storageMutationStatus(error: string | undefined): 400 | 404 | 409 | 500 {
     if (error?.startsWith("Invalid ")) return 400;
-    return error === "Bucket already exists" || error === "Bucket is not empty" ? 409 : 500;
+    if (error === "Bucket not found") return 404;
+    return error === "Bucket already exists"
+        || error === "Bucket is not empty"
+        || error === "Bucket revision conflict"
+        ? 409
+        : 500;
 }
 
 // ── Storage Routes ────────────────────────────────────────────────
@@ -707,14 +703,18 @@ export const projectStorageRoutes = new Elysia({ prefix: "/v1/projects/:ref/stor
             public: body.public,
             file_size_limit: body.file_size_limit,
             allowed_mime_types: body.allowed_mime_types,
-        });
+        }, body.expected_revision);
 
         if (!result.success) {
             set.status = result.error === "Bucket not found" ? 404 : storageMutationStatus(result.error);
             return { message: result.error || "Failed to update bucket", code: String(set.status) };
         }
 
-        return result.bucket;
+        return {
+            ...result.bucket,
+            previous_revision: result.previousRevision,
+            new_revision: result.newRevision,
+        };
     }, {
         params: StorageBucketParams,
         body: StorageBucketUpdateBody,
@@ -750,16 +750,23 @@ export const projectStorageRoutes = new Elysia({ prefix: "/v1/projects/:ref/stor
             return status(500, { statusCode: "500", error: "InternalError", message: "Vector storage operation failed" });
         }
     }, { detail: { tags: ["storage", "vector"], summary: "Manage project vector storage" } })
-    .delete('/buckets/:id', async ({ params, set, request }) => {
+    .delete('/buckets/:id', async ({ params, query, set, request }) => {
         const authError = await requireProjectOrAdminAuth(request, params.ref);
         if (authError) return status(authError.status, authError.body);
-        const result = await deleteStorageBucket(params.ref, params.id);
+        const result = await deleteStorageBucket(params.ref, params.id, query.expected_revision);
         if (!result.success) {
             set.status = storageMutationStatus(result.error);
             return { message: result.error || "Failed to delete bucket", code: String(set.status) };
         }
-        return { id: params.id, deleted: true };
+        return {
+            id: params.id,
+            deleted: true,
+            require_empty: true,
+            previous_revision: result.previousRevision,
+            new_revision: null,
+        };
     }, {
         params: StorageBucketParams,
+        query: StorageBucketDeleteQuery,
         detail: { tags: ["storage"], summary: "Delete a storage bucket" },
     });

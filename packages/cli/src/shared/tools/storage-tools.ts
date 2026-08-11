@@ -35,13 +35,14 @@ const MAX_MIME_TYPE_LENGTH = 255;
 const PROJECT_REF_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const BUCKET_ID_PATTERN = new RegExp(`^(?!\\.+$)[A-Za-z0-9._-]{1,${MAX_BUCKET_ID_LENGTH}}$`);
 const MIME_TYPE_PATTERN = /^(?=\S)(?=.*\S$)[^\u0000-\u001f\u007f]+$/;
+const BUCKET_REVISION_PATTERN = /^[0-9]{1,20}$/;
 const ACTION_ARGUMENTS: Record<StorageAction, ReadonlySet<string>> = {
     status: new Set(["action"]),
     list_buckets: new Set(["action", "ref"]),
     get_bucket: new Set(["action", "ref", "bucket"]),
     create_bucket: new Set(["action", "ref", "bucket", "public", "file_size_limit", "allowed_mime_types"]),
-    update_bucket: new Set(["action", "ref", "bucket", "public", "file_size_limit", "allowed_mime_types"]),
-    delete_bucket: new Set(["action", "ref", "bucket"]),
+    update_bucket: new Set(["action", "ref", "bucket", "expected_revision", "public", "file_size_limit", "allowed_mime_types"]),
+    delete_bucket: new Set(["action", "ref", "bucket", "expected_revision", "require_empty"]),
     list_files: new Set(["action", "ref", "bucket"]),
     upload_base64: new Set(["action", "ref", "bucket", "filename", "base64_content", "mime_type"]),
     delete_file: new Set(["action", "ref", "bucket", "filename"]),
@@ -106,6 +107,16 @@ function requiredBucketId(args: Record<string, unknown>): string {
     return bucket;
 }
 
+function requiredBucketRevision(args: Record<string, unknown>): string {
+    const revision = requiredText(args, "expected_revision");
+    if (!BUCKET_REVISION_PATTERN.test(revision)) throw new Error("'expected_revision' is invalid for Storage buckets");
+    return revision;
+}
+
+function assertEmptyBucketDeletion(args: Record<string, unknown>): void {
+    if (args.require_empty !== true) throw new Error("'require_empty=true' required for 'delete_bucket'");
+}
+
 function assertActionArguments(action: StorageAction, args: Record<string, unknown>): void {
     const allowedArguments = ACTION_ARGUMENTS[action];
     if (!allowedArguments) throw new Error(`Unsupported Storage action '${action}'`);
@@ -134,6 +145,7 @@ type SafeBucket = {
     public: boolean;
     file_size_limit: number | null;
     allowed_mime_types: string[] | null;
+    revision: string | null;
 };
 
 function isFileSizeLimit(candidate: unknown): candidate is number | null {
@@ -159,12 +171,18 @@ function isAllowedMimeTypes(candidate: unknown): candidate is string[] | null {
                 && mimeType.length <= MAX_MIME_TYPE_LENGTH && MIME_TYPE_PATTERN.test(mimeType)));
 }
 
+function isBucketRevision(candidate: unknown): candidate is string | null {
+    return candidate === null
+        || (typeof candidate === "string" && BUCKET_REVISION_PATTERN.test(candidate));
+}
+
 function safeBucket(candidate: unknown, expectedBucket?: string): SafeBucket | null {
     const bucket = bucketRecord(candidate);
     if (bucket === null || typeof bucket.id !== "string" || !validBucketId(bucket.id)
         || typeof bucket.name !== "string" || !validBucketId(bucket.name)
         || typeof bucket.public !== "boolean" || !isFileSizeLimit(bucket.file_size_limit)
         || !isAllowedMimeTypes(bucket.allowed_mime_types)
+        || !isBucketRevision(bucket.revision)
         || (expectedBucket !== undefined && bucket.id !== expectedBucket && bucket.name !== expectedBucket)) {
         return null;
     }
@@ -174,6 +192,7 @@ function safeBucket(candidate: unknown, expectedBucket?: string): SafeBucket | n
         public: bucket.public,
         file_size_limit: bucket.file_size_limit,
         allowed_mime_types: bucket.allowed_mime_types === null ? null : [...bucket.allowed_mime_types],
+        revision: bucket.revision,
     };
 }
 
@@ -205,10 +224,24 @@ function safeCreatedBucketReceipt(
     return { bucket: { id: expectedBucket, name: expectedBucket, public: request.public === true } };
 }
 
-function safeDeletedBucket(candidate: unknown, expectedBucket: string): Record<string, unknown> | null {
+function safeDeletedBucket(
+    candidate: unknown,
+    expectedBucket: string,
+    expectedRevision: string,
+): Record<string, unknown> | null {
     const receipt = bucketRecord(candidate);
-    return receipt?.id === expectedBucket && receipt.deleted === true
-        ? { bucket_id: expectedBucket, deleted: true }
+    return receipt?.id === expectedBucket
+        && receipt.deleted === true
+        && receipt.require_empty === true
+        && receipt.previous_revision === expectedRevision
+        && receipt.new_revision === null
+        ? {
+            bucket_id: expectedBucket,
+            deleted: true,
+            require_empty: true,
+            previous_revision: expectedRevision,
+            new_revision: null,
+        }
         : null;
 }
 
@@ -218,17 +251,27 @@ type MutationReadbackExpectation = {
     response: HttpResult<unknown>;
     expectedBucket: string;
     request: Record<string, unknown>;
+    previousRevision: string | null;
+    expectedNewRevision?: string;
 };
 
 function mutationReadbackResponse(expectation: MutationReadbackExpectation): ReleaseControlToolResponse {
-    const { operation, ref, response, expectedBucket, request } = expectation;
+    const { operation, ref, response, expectedBucket, request, previousRevision, expectedNewRevision } = expectation;
     const readback = safeExactBucket(response.data, expectedBucket);
     const validReadback = readback?.name === expectedBucket
+        && readback.revision !== null
+        && (expectedNewRevision === undefined || readback.revision === expectedNewRevision)
         && bucketMatchesRequest(readback, request);
     if (!response.ok || !validReadback || !readback) {
         return releaseControlFailure(operation, "OUTCOME_UNKNOWN", response.transportError ? null : response.status);
     }
-    return releaseControlSuccess(operation, { project_ref: ref, bucket: readback });
+    return releaseControlSuccess(operation, {
+        project_ref: ref,
+        bucket_id: expectedBucket,
+        previous_revision: previousRevision,
+        new_revision: readback.revision,
+        bucket: readback,
+    });
 }
 
 type BucketResponseExpectation = {
@@ -266,13 +309,13 @@ function createBucketRequest(args: Record<string, unknown>): Record<string, unkn
 
 function updateBucketRequest(args: Record<string, unknown>): Record<string, unknown> {
     assertBucketSettings(args);
-    const request = Object.fromEntries(
+    const settings = Object.fromEntries(
         ["public", "file_size_limit", "allowed_mime_types"]
             .filter((field) => args[field] !== undefined)
             .map((field) => [field, args[field]]),
     );
-    if (Object.keys(request).length === 0) throw new Error("Bucket update requires at least one field");
-    return request;
+    if (Object.keys(settings).length === 0) throw new Error("Bucket update requires at least one field");
+    return { expected_revision: requiredBucketRevision(args), ...settings };
 }
 
 function equalAllowedMimeTypes(candidate: unknown, expected: unknown): boolean {
@@ -307,28 +350,23 @@ async function createBucketMutationReceipt(
     });
 }
 
-type UpdateBucketReceiptExpectation = {
-    http: HttpTransport;
-    ref: string;
-    bucket: string;
-    bucketPath: string;
-    request: Record<string, unknown>;
-};
-
-async function updateBucketMutationReceipt(
-    expectation: UpdateBucketReceiptExpectation,
-): Promise<ReleaseControlToolResponse> {
-    const { http, ref, bucket, bucketPath, request } = expectation;
-    return bucketResponse({
-        operation: "storage.update_bucket",
-        ref,
-        response: await http.put(bucketPath, request),
-        operationKind: "mutation",
-        safePayload: (apiPayload) => {
-            const updated = safeExactBucket(apiPayload, bucket);
-            return updated && bucketMatchesRequest(updated, request) ? { bucket: updated } : null;
-        },
-    });
+function safeUpdatedBucket(
+    candidate: unknown,
+    expectedBucket: string,
+    expectedRevision: string,
+    request: Record<string, unknown>,
+): SafeBucket | null {
+    const receipt = bucketRecord(candidate);
+    const bucket = safeExactBucket(candidate, expectedBucket);
+    return bucket
+        && bucket.name === expectedBucket
+        && bucket.revision !== null
+        && bucket.revision !== expectedRevision
+        && receipt?.previous_revision === expectedRevision
+        && receipt.new_revision === bucket.revision
+        && bucketMatchesRequest(bucket, request)
+        ? bucket
+        : null;
 }
 
 async function listBuckets(http: HttpTransport, args: Record<string, unknown>): Promise<ReleaseControlToolResponse> {
@@ -374,6 +412,7 @@ async function createBucket(http: HttpTransport, args: Record<string, unknown>):
         response: await http.get(bucketPath),
         expectedBucket: bucket,
         request: expectedReadback,
+        previousRevision: null,
     });
 }
 
@@ -381,28 +420,36 @@ async function updateBucket(http: HttpTransport, args: Record<string, unknown>):
     const ref = requiredProjectRef(args);
     const bucket = requiredBucketId(args);
     const request = updateBucketRequest(args);
+    const expectedRevision = request.expected_revision as string;
     const bucketPath = storageBucketPath(ref, bucket);
-    const receipt = await updateBucketMutationReceipt({ http, ref, bucket, bucketPath, request });
-    if (receipt.isError) return receipt;
+    const mutation = await http.put(bucketPath, request);
+    if (!mutation.ok) return releaseControlMutationFailure("storage.update_bucket", mutation);
+    const updated = safeUpdatedBucket(mutation.data, bucket, expectedRevision, request);
+    if (!updated) return releaseControlFailure("storage.update_bucket", "OUTCOME_UNKNOWN", mutation.status);
     return mutationReadbackResponse({
         operation: "storage.update_bucket",
         ref,
         response: await http.get(bucketPath),
         expectedBucket: bucket,
         request,
+        previousRevision: expectedRevision,
+        expectedNewRevision: updated.revision ?? undefined,
     });
 }
 
 async function deleteBucket(http: HttpTransport, args: Record<string, unknown>): Promise<ReleaseControlToolResponse> {
     const ref = requiredProjectRef(args);
     const bucket = requiredBucketId(args);
+    const expectedRevision = requiredBucketRevision(args);
+    assertEmptyBucketDeletion(args);
     const bucketPath = storageBucketPath(ref, bucket);
+    const deletePath = `${bucketPath}?expected_revision=${encodeURIComponent(expectedRevision)}&require_empty=true`;
     const receipt = bucketResponse({
         operation: "storage.delete_bucket",
         ref,
-        response: await http.delete(bucketPath),
+        response: await http.delete(deletePath),
         operationKind: "mutation",
-        safePayload: (candidate) => safeDeletedBucket(candidate, bucket),
+        safePayload: (candidate) => safeDeletedBucket(candidate, bucket, expectedRevision),
     });
     if (receipt.isError) return receipt;
     const readback = await http.get(bucketPath);
@@ -451,6 +498,8 @@ Actions: status, list_buckets, get_bucket, create_bucket, update_bucket, delete_
             public: optional(Type.Boolean(), "[create_bucket/update_bucket] Public bucket access"),
             file_size_limit: withDescription(fileSizeLimitSchema, "[create_bucket/update_bucket] Positive safe-integer per-file size limit in bytes"),
             allowed_mime_types: withDescription(allowedMimeTypesSchema, "[create_bucket/update_bucket] MIME types as a comma-separated or JSON array"),
+            expected_revision: optional(Type.String({ pattern: BUCKET_REVISION_PATTERN.source }), "[update_bucket/delete_bucket] Exact revision from list_buckets/get_bucket"),
+            require_empty: optional(Type.Boolean(), "[delete_bucket] Must be true; deletion never empties a bucket"),
             filename: optional(Type.String(), "[upload_base64/delete_file] File name/path"),
             base64_content: optional(Type.String(), "[upload_base64] Base64 encoded content"),
             mime_type: optional(Type.String(), "[upload_base64] MIME type (default: application/octet-stream)"),

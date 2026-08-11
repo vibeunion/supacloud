@@ -166,8 +166,10 @@ supacloud-cli storage get_bucket --ref abc123 --bucket reports
 supacloud-cli storage create_bucket --ref abc123 --bucket reports --public false \
   --file_size_limit 10485760 --allowed_mime_types "application/pdf,image/png"
 supacloud-cli storage update_bucket --ref abc123 --bucket reports \
+  --expected_revision <revision-from-get_bucket> \
   --allowed_mime_types '["application/pdf"]'
-supacloud-cli storage delete_bucket --ref abc123 --bucket reports
+supacloud-cli storage delete_bucket --ref abc123 --bucket reports \
+  --expected_revision <revision-from-get_bucket> --require_empty true
 ```
 
 `database migration_inventory` reads the canonical migration ledger through the
@@ -177,6 +179,11 @@ migration versions, checksum
 drift, and statement-count mismatches instead of treating them as an empty
 ledger. `database list_migrations` remains available with its legacy SQL-backed,
 human-readable behavior.
+
+Bucket list/get output includes the metadata `revision`. Update and delete reject
+stale revisions with HTTP 409. Delete additionally requires `require_empty=true`;
+it never empties a bucket. Mutation receipts bind `project_ref`, `bucket_id`,
+`previous_revision`, and `new_revision` (`null` after delete).
 
 `edge_functions deploy --path` bundles local TypeScript and dependencies with
 Bun and runs a local syntax check before upload. The Management API validates and
