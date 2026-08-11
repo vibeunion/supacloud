@@ -34,6 +34,8 @@ export interface EdgeFunctionVersionDetail extends EdgeFunctionVersionRecord {
 
 export interface EdgeFunctionDeployResult {
   success: boolean;
+  previous_active_version?: EdgeFunctionActiveVersion;
+  active_version?: string;
   version?: string;
   bundled?: boolean;
   files?: number;
@@ -45,7 +47,19 @@ export interface EdgeFunctionDeployResult {
   external_packages?: string[];
   preheat?: EdgeFunctionPreheatResult;
   config?: EdgeFunctionConfig;
+  error_code?: typeof EDGE_FUNCTION_ACTIVE_VERSION_CONFLICT_CODE;
+  expected_active_version?: EdgeFunctionActiveVersion;
   error?: string;
+}
+
+export const EDGE_FUNCTION_ABSENT_ACTIVE_VERSION = "absent" as const;
+export const EDGE_FUNCTION_ACTIVE_VERSION_CONFLICT_CODE = "FUNCTION_ACTIVE_VERSION_CONFLICT" as const;
+export type EdgeFunctionActiveVersion = string;
+
+export interface EdgeFunctionActivationResult {
+  previous_active_version: EdgeFunctionActiveVersion;
+  active_version: string;
+  config: EdgeFunctionConfig;
 }
 
 export type EdgeFunctionDeploymentConfig = Pick<
@@ -53,7 +67,7 @@ export type EdgeFunctionDeploymentConfig = Pick<
   "verify_jwt" | "background_routes"
 >;
 
-export type EdgeFunctionDeploymentRequest = {
+type EdgeFunctionReleaseRequest = {
   ref: string;
   slug: string;
   minify?: boolean;
@@ -62,6 +76,10 @@ export type EdgeFunctionDeploymentRequest = {
   | { code: string; files?: never; entrypoint?: never }
   | { files: Record<string, string>; entrypoint?: string; code?: never }
 );
+
+export type EdgeFunctionDeploymentRequest = EdgeFunctionReleaseRequest & {
+  expectedActiveVersion: EdgeFunctionActiveVersion;
+};
 
 export interface EdgeFunctionPreheatPoolResult {
   attempted: number;
@@ -186,6 +204,27 @@ function parseVersionNumber(value: unknown): number | null {
   return parsed;
 }
 
+function validatedExpectedActiveVersion(value: unknown): EdgeFunctionActiveVersion {
+  if (value === EDGE_FUNCTION_ABSENT_ACTIVE_VERSION) return value;
+  if (typeof value !== "string" || !CANONICAL_VERSION_REGEX.test(value)
+    || !Number.isSafeInteger(Number(value))) {
+    throw new Error("Expected active Function version must be a canonical safe integer or 'absent'");
+  }
+  return value;
+}
+
+export class EdgeFunctionActiveVersionConflictError extends Error {
+  readonly code = EDGE_FUNCTION_ACTIVE_VERSION_CONFLICT_CODE;
+
+  constructor(
+    readonly expectedActiveVersion: EdgeFunctionActiveVersion,
+    readonly activeVersion: EdgeFunctionActiveVersion,
+  ) {
+    super("Function active version changed before the requested mutation");
+    this.name = "EdgeFunctionActiveVersionConflictError";
+  }
+}
+
 async function acquireFunctionDeployLock(
   ref: string,
   slug: string,
@@ -302,6 +341,33 @@ async function functionConfigExists(ref: string, slug: string): Promise<boolean>
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     return false;
   }
+}
+
+async function activeFunctionVersion(
+  ref: string,
+  slug: string,
+): Promise<EdgeFunctionActiveVersion> {
+  const functionConfig = await readFunctionConfig(ref, slug);
+  if (functionConfig.version !== undefined) {
+    if (parseVersionNumber(functionConfig.version) === null) {
+      throw new Error("Function config contains an invalid active version");
+    }
+    return functionConfig.version;
+  }
+  return await frozenLegacyRuntimePath(ref, slug) === null
+    ? EDGE_FUNCTION_ABSENT_ACTIVE_VERSION
+    : "0";
+}
+
+async function assertExpectedActiveVersion(
+  ref: string,
+  slug: string,
+  expectedVersion: unknown,
+): Promise<EdgeFunctionActiveVersion> {
+  const expected = validatedExpectedActiveVersion(expectedVersion);
+  const active = await activeFunctionVersion(ref, slug);
+  if (active !== expected) throw new EdgeFunctionActiveVersionConflictError(expected, active);
+  return active;
 }
 
 async function writeFunctionConfigManifest(
@@ -465,7 +531,7 @@ async function writePreparedBundle(
 }
 
 async function prepareSingleFunctionVersion(
-  request: EdgeFunctionDeploymentRequest & { code: string },
+  request: EdgeFunctionReleaseRequest & { code: string },
   version: string,
   stageDir: string,
   finalDir: string,
@@ -501,7 +567,7 @@ async function detectedImportMap(sourceDir: string): Promise<string | null> {
 }
 
 function validatedBundleEntrypoint(
-  request: EdgeFunctionDeploymentRequest & { files: Record<string, string> },
+  request: EdgeFunctionReleaseRequest & { files: Record<string, string> },
 ): string {
   const entrypoint = request.entrypoint ?? "index.ts";
   if (!request.files[entrypoint]) throw new Error(`Entrypoint '${entrypoint}' not found in file map`);
@@ -525,7 +591,7 @@ async function writeBundleSources(
 }
 
 async function prepareBundleFunctionVersion(
-  request: EdgeFunctionDeploymentRequest & { files: Record<string, string> },
+  request: EdgeFunctionReleaseRequest & { files: Record<string, string> },
   version: string,
   stageDir: string,
   finalDir: string,
@@ -1312,7 +1378,7 @@ export async function migrateLegacyVersionArtifacts(): Promise<{ moved: number }
 }
 
 async function immutableFunctionVersion(
-  request: EdgeFunctionDeploymentRequest,
+  request: EdgeFunctionReleaseRequest,
   version: string,
   currentConfig: EdgeFunctionConfig,
 ): Promise<PreparedFunctionRelease> {
@@ -1405,9 +1471,12 @@ function releaseResult(
   prepared: PreparedFunctionVersion,
   readiness: EdgeFunctionPreheatResult,
   functionConfig: EdgeFunctionConfig,
+  previousActiveVersion: EdgeFunctionActiveVersion,
 ): EdgeFunctionDeployResult {
   return {
     success: true,
+    previous_active_version: previousActiveVersion,
+    active_version: prepared.version,
     version: prepared.version,
     bundled: prepared.bundled,
     files: prepared.files,
@@ -1423,7 +1492,8 @@ function releaseResult(
 }
 
 async function deployFunctionRelease(
-  request: EdgeFunctionDeploymentRequest,
+  request: EdgeFunctionReleaseRequest,
+  previousActiveVersion: EdgeFunctionActiveVersion,
 ): Promise<EdgeFunctionDeployResult> {
   let currentConfig = await readFunctionConfig(request.ref, request.slug);
   const hadManifest = await functionConfigExists(request.ref, request.slug);
@@ -1446,7 +1516,32 @@ async function deployFunctionRelease(
     nextConfig: release.config,
   });
   recordDeployMetrics(release.prepared.bundleSizeBytes, release.prepared.importCount, readiness);
-  return releaseResult(release.prepared, readiness, release.config);
+  return releaseResult(release.prepared, readiness, release.config, previousActiveVersion);
+}
+
+function failedDeployResult(
+  request: EdgeFunctionReleaseRequest,
+  error: unknown,
+): EdgeFunctionDeployResult {
+  logger.error("[EdgeFunction] Deploy failed", { ref: request.ref, slug: request.slug, error });
+  return {
+    success: false,
+    error: error instanceof Error ? error.message : String(error),
+  };
+}
+
+async function deployLatestFunctionRelease(
+  request: EdgeFunctionReleaseRequest,
+): Promise<EdgeFunctionDeployResult> {
+  const releaseLock = await acquireFunctionDeployLock(request.ref, request.slug);
+  try {
+    const activeVersion = await activeFunctionVersion(request.ref, request.slug);
+    return await deployFunctionRelease(request, activeVersion);
+  } catch (error) {
+    return failedDeployResult(request, error);
+  } finally {
+    releaseLock();
+  }
 }
 
 export const edgeFunctionService = {
@@ -1484,21 +1579,27 @@ export const edgeFunctionService = {
   async deployRelease(request: EdgeFunctionDeploymentRequest): Promise<EdgeFunctionDeployResult> {
     const releaseLock = await acquireFunctionDeployLock(request.ref, request.slug);
     try {
-      const deployed = await deployFunctionRelease(request);
+      const previousActiveVersion = await assertExpectedActiveVersion(
+        request.ref,
+        request.slug,
+        request.expectedActiveVersion,
+      );
+      const deployed = await deployFunctionRelease(request, previousActiveVersion);
       logger.info(
         `[EdgeFunction] Deployed ${request.slug} for ${request.ref} (version=${deployed.version}, verify_jwt=${deployed.config?.verify_jwt}, size=${deployed.bundle_size_bytes}, imports=${deployed.import_count})`,
       );
       return deployed;
     } catch (error) {
-      logger.error("[EdgeFunction] Deploy failed", {
-        ref: request.ref,
-        slug: request.slug,
-        error,
-      });
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : String(error),
-      };
+      if (error instanceof EdgeFunctionActiveVersionConflictError) {
+        return {
+          success: false,
+          error_code: error.code,
+          expected_active_version: error.expectedActiveVersion,
+          active_version: error.activeVersion,
+          error: error.message,
+        };
+      }
+      return failedDeployResult(request, error);
     } finally {
       releaseLock();
     }
@@ -1524,7 +1625,7 @@ export const edgeFunctionService = {
     code: string,
     minify: boolean = false,
   ): Promise<EdgeFunctionDeployResult> {
-    return this.deployRelease({ ref, slug, code, minify });
+    return deployLatestFunctionRelease({ ref, slug, code, minify });
   },
 
   /**
@@ -1559,7 +1660,7 @@ export const edgeFunctionService = {
     entrypoint: string = "index.ts",
     minify: boolean = false,
   ): Promise<EdgeFunctionDeployResult> {
-    return this.deployRelease({ ref, slug, files, entrypoint, minify });
+    return deployLatestFunctionRelease({ ref, slug, files, entrypoint, minify });
   },
 
   async runtimeCheck(
@@ -1743,9 +1844,19 @@ export const edgeFunctionService = {
     };
   },
 
-  async activateVersion(ref: string, slug: string, version: string): Promise<EdgeFunctionConfig | null> {
+  async activateVersion(
+    ref: string,
+    slug: string,
+    version: string,
+    expectedActiveVersion: EdgeFunctionActiveVersion,
+  ): Promise<EdgeFunctionActivationResult | null> {
     const releaseLock = await acquireFunctionDeployLock(ref, slug);
     try {
+      const previousActiveVersion = await assertExpectedActiveVersion(
+        ref,
+        slug,
+        expectedActiveVersion,
+      );
       const detail = await this.getVersion(ref, slug, version);
       if (!detail || !detail.has_bundle) return null;
 
@@ -1764,7 +1875,11 @@ export const edgeFunctionService = {
         nextConfig: updated,
       });
       logger.info(`[EdgeFunction] Activated version ${version} for ${slug}@${ref}`);
-      return updated;
+      return {
+        previous_active_version: previousActiveVersion,
+        active_version: version,
+        config: updated,
+      };
     } finally {
       releaseLock();
     }

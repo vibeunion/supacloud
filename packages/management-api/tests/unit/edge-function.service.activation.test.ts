@@ -11,7 +11,22 @@ const originalFetch = globalThis.fetch;
 process.env.EDGE_FUNCTIONS_DIR = functionsRoot;
 process.env.EDGE_RUNTIME_INTERNAL = "127.0.0.1:65535";
 
-const { edgeFunctionService } = await import("../../src/services/edge-function.service");
+const {
+  EDGE_FUNCTION_ACTIVE_VERSION_CONFLICT_CODE,
+  edgeFunctionService,
+} = await import("../../src/services/edge-function.service");
+
+async function deployConditionalRelease(
+  request: Omit<Parameters<typeof edgeFunctionService.deployRelease>[0], "expectedActiveVersion">,
+) {
+  const expectedActiveVersion = (await edgeFunctionService.getConfig(request.ref, request.slug)).version ?? "absent";
+  return edgeFunctionService.deployRelease({ ...request, expectedActiveVersion });
+}
+
+async function activateConditionalVersion(ref: string, slug: string, version: string) {
+  const expectedActiveVersion = (await edgeFunctionService.getConfig(ref, slug)).version ?? "absent";
+  return (await edgeFunctionService.activateVersion(ref, slug, version, expectedActiveVersion))?.config ?? null;
+}
 
 type FetchStep = {
   path: "/preheat/" | "/invalidate/";
@@ -72,7 +87,7 @@ async function prepareRollback(ref: string, slug: string) {
     "index.ts": "export default { fetch: () => new Response('version-two') };",
     "public/version.txt": "version-two",
   });
-  await edgeFunctionService.activateVersion(ref, slug, "1");
+  await activateConditionalVersion(ref, slug, "1");
 
   return {
     config: await edgeFunctionService.getConfig(ref, slug),
@@ -105,6 +120,27 @@ afterAll(async () => {
 });
 
 describe("edgeFunctionService version activation readiness", () => {
+  test("rejects stale activation before target preheat or manifest mutation", async () => {
+    const ref = "proj_activation_stale";
+    const slug = "activation-stale";
+    const before = await prepareRollback(ref, slug);
+    let runtimeCalls = 0;
+    globalThis.fetch = (async () => {
+      runtimeCalls += 1;
+      return Response.json({});
+    }) as typeof fetch;
+
+    await expect(
+      edgeFunctionService.activateVersion(ref, slug, "2", "2"),
+    ).rejects.toMatchObject({
+      code: EDGE_FUNCTION_ACTIVE_VERSION_CONFLICT_CODE,
+      expectedActiveVersion: "2",
+      activeVersion: "1",
+    });
+    expect(runtimeCalls).toBe(0);
+    await expectRollbackUnchanged(ref, slug, before);
+  });
+
   test("fails closed when version preheat is unauthorized", async () => {
     const ref = "proj_activation_preheat_401";
     const slug = "activate-preheat-401";
@@ -113,7 +149,7 @@ describe("edgeFunctionService version activation readiness", () => {
       { path: "/preheat/", response: Response.json({ message: "Unauthorized" }, { status: 401 }) },
     ]);
 
-    await expect(edgeFunctionService.activateVersion(ref, slug, "2")).rejects.toThrow("HTTP 401");
+    await expect(activateConditionalVersion(ref, slug, "2")).rejects.toThrow("HTTP 401");
     await expectRollbackUnchanged(ref, slug, before);
   });
 
@@ -127,7 +163,7 @@ describe("edgeFunctionService version activation readiness", () => {
       { path: "/invalidate/", response: Response.json(successfulInvalidationAck(ref, slug)) },
     ]);
 
-    await expect(edgeFunctionService.activateVersion(ref, slug, "2")).rejects.toThrow("HTTP 401");
+    await expect(activateConditionalVersion(ref, slug, "2")).rejects.toThrow("HTTP 401");
     await expectRollbackUnchanged(ref, slug, before);
   });
 
@@ -139,7 +175,7 @@ describe("edgeFunctionService version activation readiness", () => {
       { path: "/preheat/", response: Response.json({ success: false, version: "2" }) },
     ]);
 
-    await expect(edgeFunctionService.activateVersion(ref, slug, "2")).rejects.toThrow(
+    await expect(activateConditionalVersion(ref, slug, "2")).rejects.toThrow(
       "did not report successful version readiness",
     );
     await expectRollbackUnchanged(ref, slug, before);
@@ -158,7 +194,7 @@ describe("edgeFunctionService version activation readiness", () => {
       { path: "/preheat/", response: Response.json(responseBody) },
     ]);
 
-    await expect(edgeFunctionService.activateVersion(ref, slug, "2")).rejects.toThrow(
+    await expect(activateConditionalVersion(ref, slug, "2")).rejects.toThrow(
       "Edge Runtime function activation unavailable",
     );
     await expectRollbackUnchanged(ref, slug, before);
@@ -196,7 +232,7 @@ describe("edgeFunctionService version activation readiness", () => {
       { path: "/invalidate/", response: Response.json(successfulInvalidationAck(ref, slug)) },
     ]);
 
-    await expect(edgeFunctionService.activateVersion(ref, slug, "2")).rejects.toThrow(
+    await expect(activateConditionalVersion(ref, slug, "2")).rejects.toThrow(
       "Edge Runtime function activation unavailable",
     );
     await expectRollbackUnchanged(ref, slug, before);
@@ -215,9 +251,13 @@ describe("edgeFunctionService version activation readiness", () => {
     ];
     globalThis.fetch = sequenceFetch(steps);
 
-    const config = await edgeFunctionService.activateVersion(ref, slug, "2");
+    const activation = await edgeFunctionService.activateVersion(ref, slug, "2", "1");
 
-    expect(config?.version).toBe("2");
+    expect(activation).toMatchObject({
+      previous_active_version: "1",
+      active_version: "2",
+      config: { version: "2" },
+    });
     expect(await edgeFunctionService.read(ref, slug)).toContain("version-two");
     expect(await edgeFunctionService.readSource(ref, slug)).toContain("version-two");
     expect(steps).toHaveLength(0);
@@ -227,7 +267,7 @@ describe("edgeFunctionService version activation readiness", () => {
     const ref = "proj_activation_full_metadata";
     const slug = "metadata-rollback";
     globalThis.fetch = runtimeSuccessFetch();
-    const versionOne = await edgeFunctionService.deployRelease({
+    const versionOne = await deployConditionalRelease({
       ref,
       slug,
       files: {
@@ -237,7 +277,7 @@ describe("edgeFunctionService version activation readiness", () => {
       entrypoint: "version-one.ts",
       config: { verify_jwt: false, background_routes: ["/version-one/*"] },
     });
-    const versionTwo = await edgeFunctionService.deployRelease({
+    const versionTwo = await deployConditionalRelease({
       ref,
       slug,
       files: {
@@ -251,7 +291,7 @@ describe("edgeFunctionService version activation readiness", () => {
     expect(versionOne).toMatchObject({ success: true, version: "1" });
     expect(versionTwo).toMatchObject({ success: true, version: "2" });
 
-    const restored = await edgeFunctionService.activateVersion(ref, slug, "1");
+    const restored = await activateConditionalVersion(ref, slug, "1");
 
     expect(restored).toMatchObject({
       version: "1",

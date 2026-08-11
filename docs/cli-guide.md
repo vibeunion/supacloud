@@ -261,10 +261,31 @@ Management API applies the Edge Runtime module policy to the final server-side
 artifact for CLI, Web Console, and direct API deployments alike. For
 `deploy_bundle`, pass the file map as JSON, for example
 `--files '{"index.ts":"export default { fetch: () => new Response(\"ok\") }"}'`.
-Use `edge_functions source --slug <name> --output <file>` to read back large
+Use `edge_functions source --slug <name> --version <N> --output <file>` to read back large
 Function sources without depending on terminal capture limits. The CLI writes
 the complete original TS/JS source code and refuses to overwrite an existing
-destination.
+destination. Supplying the positive version observed from `list` binds the read
+to that immutable release and remains safe if the active pointer changes A→B→A.
+
+Function release mutations use optimistic concurrency control. Before
+`deploy`, `deploy_bundle`, or `activate`, run `edge_functions list` and pass the
+observed positive integer version as `--expected-active-version <N>`. Pass
+`--expected-active-version absent` only for the first deployment of a new slug.
+A stale value returns HTTP 409 before build, preheat, version creation, or
+manifest activation. Successful mutations return the
+`supacloud.cli.release-control.v1` receipt with `project_ref`, `slug`,
+`previous_active_version`, `active_version`, `version`, and `verify_jwt`.
+Transport failures, HTTP 408/5xx responses, and malformed 2xx receipts exit
+non-zero as `OUTCOME_UNKNOWN`; read back `edge_functions list` before retrying.
+Version `0` remains an internal compatibility marker for legacy recovery. The
+public CLI and Management API reject it as an activation target or expected
+active version; all public release automation uses positive versions.
+
+The readback contract stays simple for automation: `edge_functions list`
+prints a JSON array whose entries have a string `slug` and a positive safe
+integer numeric `version`; `edge_functions source` prints exactly
+`{ "code": "..." }`. Release automation uses `source --version <N>` rather than
+the moving active source endpoint.
 
 ### Deliberately excluded
 
