@@ -15,6 +15,8 @@ export type {
   BucketSeed,
   Mailer,
   MailMessage,
+  SmsMessage,
+  SmsSender,
   MigrationFile,
   RequestContext,
   StorageDriver,

@@ -503,6 +503,14 @@ jobs:
         run: |
           bun install --lockfile-only --registry https://registry.npmjs.org
           bun install --frozen-lockfile --registry https://registry.npmjs.org
+          for package_name in cli admin; do
+            expected="$(node -p "require('../$package_name/package.json').version")"
+            installed="$(node -p "require('./node_modules/@supacloud/$package_name/package.json').version")"
+            if [[ "$installed" != "$expected" ]]; then
+              echo "Installed @supacloud/$package_name version $installed does not match published sibling version $expected." >&2
+              exit 1
+            fi
+          done
           git diff --check -- package.json bun.lock
 
       - name: Open dependency synchronization PR

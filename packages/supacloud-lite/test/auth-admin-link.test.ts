@@ -94,6 +94,7 @@ describe('Auth admin link compatibility', () => {
       jwtSecret: 'x'.repeat(64),
       vaultKey: 'y'.repeat(64),
       apiUrl: 'http://local',
+      authRateLimits: { verify: { limit: 100, windowMs: 60_000 } },
       log: () => {},
     })
     const serviceClient = createClient('http://local', backend.serviceRoleKey, {
