@@ -2,7 +2,7 @@ import { access, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/p
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import packageJson from '../package.json' with { type: 'json' }
-import { withWindowsSubprocessRef } from './subprocess.js'
+import { executeBufferedCommand, withWindowsSubprocessRef } from './subprocess.js'
 
 const packageDir = resolve(import.meta.dir, '..')
 const binary = resolveStandaloneBinary()
@@ -12,6 +12,7 @@ const migrationDir = join(projectDir, 'supabase', 'migrations')
 const functionDir = join(projectDir, 'supabase', 'functions', 'ping')
 const v1 = '20260729000000'
 const v2 = '20260729000001'
+const commandTimeoutMs = 120_000
 
 try {
   await access(binary)
@@ -274,12 +275,14 @@ async function runCommand(
   env: NodeJS.ProcessEnv,
 ): Promise<string> {
   console.log(`[standalone-smoke] ${commandLabel}: start`)
-  const processHandle = Bun.spawn({ cmd: command, cwd, env, stdout: 'pipe', stderr: 'pipe' })
-  const stdoutPromise = new Response(processHandle.stdout).text()
-  const stderrPromise = new Response(processHandle.stderr).text()
-  const exitCode = await withWindowsSubprocessRef(() => processHandle.exited)
+  const { exitCode, stdout, stderr, timedOut } = await executeBufferedCommand({
+    command,
+    cwd,
+    env,
+    timeoutMs: commandTimeoutMs,
+  })
   console.log(`[standalone-smoke] ${commandLabel}: ${exitCode === 0 ? 'ok' : 'failed'} (exit ${exitCode})`)
-  const [stdout, stderr] = await Promise.all([stdoutPromise, stderrPromise])
+  if (timedOut) throw new Error(`standalone command "${commandLabel}" timed out after ${commandTimeoutMs}ms\n${stdout}\n${stderr}`)
   if (exitCode !== 0) throw new Error(`standalone command "${commandLabel}" failed (${exitCode})\n${stdout}\n${stderr}`)
   return stdout
 }
