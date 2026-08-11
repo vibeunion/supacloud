@@ -354,38 +354,40 @@ async function resolveFunctionPath(
       throw new Error("Function path escapes project root");
     }
 
+    let realCandidate: string;
     try {
-      const realCandidate = await fs.realpath(candidate);
-      const bindingRoot = functionArtifactBindingRoot(
-        projectRoot,
-        functionName,
-        activeVersion,
-        candidate,
-      );
-      if (!isBoundFunctionArtifact(candidate, realCandidate, bindingRoot)) {
-        throw new Error("Function path escapes its activation root");
-      }
-      const stat = await fs.stat(realCandidate);
-      if (!stat.isFile()) {
-        throw new Error("Function artifact is not a regular file");
-      }
-      return {
-        functionPath: realCandidate,
-        projectRoot,
-        activeVersion,
-        responseVersion,
-        verifyJwt: resolvedConfig.verify_jwt,
-        moduleVersion: [
-          `active:${activeVersion || "legacy"}`,
-          `env:${getProjectModuleEpoch(projectRef)}`,
-          `mtime:${stat.mtimeMs}`,
-          `ctime:${stat.ctimeMs}`,
-          `size:${stat.size}`,
-        ].join(":"),
-      };
+      realCandidate = await fs.realpath(candidate);
     } catch (error) {
       if (!isMissingFunctionCandidate(error)) throw error;
+      continue;
     }
+    const bindingRoot = functionArtifactBindingRoot(
+      projectRoot,
+      functionName,
+      activeVersion,
+      candidate,
+    );
+    if (!isBoundFunctionArtifact(candidate, realCandidate, bindingRoot)) {
+      throw new Error("Function path escapes its activation root");
+    }
+    const stat = await fs.stat(realCandidate);
+    if (!stat.isFile()) {
+      throw new Error("Function artifact is not a regular file");
+    }
+    return {
+      functionPath: realCandidate,
+      projectRoot,
+      activeVersion,
+      responseVersion,
+      verifyJwt: resolvedConfig.verify_jwt,
+      moduleVersion: [
+        `active:${activeVersion || "legacy"}`,
+        `env:${getProjectModuleEpoch(projectRef)}`,
+        `mtime:${stat.mtimeMs}`,
+        `ctime:${stat.ctimeMs}`,
+        `size:${stat.size}`,
+      ].join(":"),
+    };
   }
 
   throw new Error("Function not found");

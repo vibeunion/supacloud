@@ -6,7 +6,7 @@ import {
   setDefaultTimeout,
   test,
 } from "bun:test";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -15,6 +15,10 @@ setDefaultTimeout(30_000);
 const PROJECT_REF = "configcontract";
 const INTERNAL_TOKEN = "edge-runtime-config-test-token";
 const SERVICE_ROLE_KEY = "edge-runtime-config-test-service-role";
+const STAT_RACE_FAILURES = [
+  ["stat_race_enoent", "ENOENT"],
+  ["stat_race_enotdir", "ENOTDIR"],
+] as const;
 
 let fixtureRoot = "";
 let projectRoot = "";
@@ -137,6 +141,10 @@ function edgeRuntimeEnvironment(
   edgePort: number,
   managementPort: number,
 ): Record<string, string | undefined> {
+  const statFailures = Object.fromEntries(STAT_RACE_FAILURES.map(([slug, code]) => [
+    join(projectRoot, ".versions", slug, "7", "src", ".supacloud-entry.js"),
+    code,
+  ]));
   return {
     ...process.env,
     EDGE_RUNTIME_HOST: "127.0.0.1",
@@ -148,13 +156,19 @@ function edgeRuntimeEnvironment(
     TENANTS_DIR: join(fixtureRoot, "tenants"),
     WORKER_POOL_SIZE: "1",
     BACKGROUND_WORKER_POOL_SIZE: "1",
+    EDGE_TEST_REALPATH_STAT_FAILURES: JSON.stringify(statFailures),
   };
 }
 
 function startEdgeRuntime(managementPort: number): void {
   const edgePort = reserveEdgePort();
   edgeBaseUrl = `http://127.0.0.1:${edgePort}`;
-  edgeProcess = Bun.spawn([process.execPath, join(import.meta.dir, "server.ts")], {
+  edgeProcess = Bun.spawn([
+    process.execPath,
+    "--preload",
+    join(import.meta.dir, "server-function-config-race.preload.ts"),
+    join(import.meta.dir, "server.ts"),
+  ], {
     cwd: import.meta.dir,
     stdin: "ignore",
     stdout: "pipe",
@@ -169,6 +183,7 @@ async function initializeServerFixture(): Promise<void> {
   fixtureRoot = await mkdtemp(join(tmpdir(), "supacloud-edge-config-contract-"));
   projectRoot = join(fixtureRoot, "functions", PROJECT_REF);
   await mkdir(projectRoot, { recursive: true });
+  projectRoot = await realpath(projectRoot);
   managementServer = startManagementServer();
   startEdgeRuntime(managementServer.port);
   await waitForEdgeRuntime();
@@ -279,6 +294,14 @@ async function installInvalidPreferredArtifact(
   await writeFunctionConfig(slug, '{"verify_jwt":false,"version":"7"}');
 }
 
+async function installStatRaceFunction(slug: string, fallbackBody: string): Promise<void> {
+  await writeVersionedFunction(slug, "7", fallbackBody);
+  const sourceRoot = join(projectRoot, ".versions", slug, "7", "src");
+  await mkdir(sourceRoot, { recursive: true });
+  await writeFile(join(sourceRoot, ".supacloud-entry.js"), functionSource("preferred-body"));
+  await writeFunctionConfig(slug, '{"verify_jwt":false,"version":"7"}');
+}
+
 beforeAll(initializeServerFixture);
 
 afterAll(async () => {
@@ -356,6 +379,15 @@ describe("Edge Runtime function config boundary", () => {
       const fallbackBody = "fifo-fallback-must-not-run";
       await installInvalidPreferredArtifact("preferred_fifo", fallbackBody, "fifo");
       await expectActivationFailsClosed("preferred_fifo", fallbackBody);
+    },
+  );
+
+  test.each(STAT_RACE_FAILURES)(
+    "fails closed for %s when stat returns %s after realpath succeeds",
+    async (slug) => {
+      const fallbackBody = `${slug}-fallback-must-not-run`;
+      await installStatRaceFunction(slug, fallbackBody);
+      await expectActivationFailsClosed(slug, fallbackBody);
     },
   );
 });
