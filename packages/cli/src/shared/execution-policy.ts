@@ -94,6 +94,13 @@ export function authorizeExecution(
     if (!mode && (context.production || context.readOnly)) {
         throw new Error(`Execution policy has no classification for ${moduleName}.${action}`);
     }
+    if (context.production
+        && mode === "read"
+        && typeof args.ref === "string"
+        && args.ref
+        && args.ref !== context.projectRef) {
+        throw new Error("Production profiles cannot target a different project with --ref");
+    }
     if (mode !== "write") return;
     if (context.production && moduleName === "diagnostics" && action === "repair") {
         throw new Error("diagnostics repair is forbidden in production environments");

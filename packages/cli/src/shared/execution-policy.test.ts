@@ -1,7 +1,47 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { stringEnum } from "./schema";
 import { authorizeExecution, executionMode, validateExecutionPolicyCoverage } from "./execution-policy";
 import type { ResolvedContext } from "./context";
+
+const CLI_ENTRYPOINT = fileURLToPath(new URL("../index.ts", import.meta.url));
+const CONTEXT_ENVIRONMENT_KEYS = [
+    "SUPABASE_URL",
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "SUPACLOUD_API_URL",
+    "SUPACLOUD_MANAGEMENT_API_URL",
+    "MANAGEMENT_API_URL",
+    "SUPACLOUD_API_TOKEN",
+    "SUPACLOUD_PROJECT_REF",
+    "X_PROJECT_REF",
+    "SUPACLOUD_HOST",
+    "SUPACLOUD_ENV",
+    "SUPACLOUD_READ_ONLY",
+];
+
+function cliEnvironment(): Record<string, string> {
+    const environment = Object.fromEntries(
+        Object.entries(process.env).filter(([key, value]) => value !== undefined && !CONTEXT_ENVIRONMENT_KEYS.includes(key)),
+    ) as Record<string, string>;
+    return environment;
+}
+
+async function runCli(args: string[], workingDirectory: string) {
+    const processHandle = Bun.spawn([process.execPath, CLI_ENTRYPOINT, ...args], {
+        cwd: workingDirectory,
+        env: cliEnvironment(),
+        stdout: "pipe",
+        stderr: "pipe",
+    });
+    const [exitCode, stderr] = await Promise.all([
+        processHandle.exited,
+        new Response(processHandle.stderr).text(),
+    ]);
+    return { exitCode, stderr };
+}
 
 function context(overrides: Partial<ResolvedContext> = {}): ResolvedContext {
     return {
@@ -39,6 +79,50 @@ describe("CLI execution policy", () => {
             context: context(),
             confirmProduction: "other-ref",
         })).toThrow("cannot target a different project");
+    });
+
+    test("rejects cross-project production reads while preserving same-project and non-production reads", () => {
+        expect(() => authorizeExecution("project", { action: "api_keys", ref: "other-ref" }, {
+            context: context(),
+        })).toThrow("cannot target a different project");
+        expect(() => authorizeExecution("project", { action: "api_keys", ref: "prod-ref" }, {
+            context: context(),
+        })).not.toThrow();
+        expect(() => authorizeExecution("project", { action: "api_keys", ref: "other-ref" }, {
+            context: context({ production: false, environment: "test" }),
+        })).not.toThrow();
+    });
+
+    test("blocks cross-project production reads before the CLI sends HTTP", async () => {
+        const workspace = mkdtempSync(join(tmpdir(), "supacloud-cli-production-read-"));
+        let requestCount = 0;
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch() {
+                requestCount++;
+                return Response.json([]);
+            },
+        });
+        writeFileSync(join(workspace, ".env.supacloud.prod"), [
+            "SUPACLOUD_ENV=production",
+            `SUPACLOUD_API_URL=http://127.0.0.1:${server.port}`,
+            "SUPACLOUD_API_TOKEN=prod-secret-token",
+            "SUPACLOUD_PROJECT_REF=prod-ref",
+        ].join("\n") + "\n");
+
+        try {
+            const response = await runCli([
+                "--env", "prod", "project", "api_keys", "--ref", "other-ref",
+            ], workspace);
+
+            expect(response.exitCode).toBe(1);
+            expect(response.stderr).toContain("cannot target a different project");
+            expect(requestCount).toBe(0);
+        } finally {
+            server.stop(true);
+            rmSync(workspace, { recursive: true, force: true });
+        }
     });
 
     test("blocks every classified remote write in read-only mode", () => {
