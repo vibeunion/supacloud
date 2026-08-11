@@ -149,12 +149,10 @@ describe("edge_functions CLI tool", () => {
     });
 
     test("keeps the Function list as a JSON array with numeric active versions", async () => {
-        const functions = [{
-            slug: "fa-api",
-            version: 7,
-            verify_jwt: true,
-            status: "ACTIVE",
-        }];
+        const functions = [
+            { slug: "legacy-hook", version: 0, verify_jwt: true, status: "ACTIVE" },
+            { slug: "fa-api", version: 7, verify_jwt: true, status: "ACTIVE" },
+        ];
         const { callback } = captureEdgeFunctionsTool({
             get: async () => ({ ok: true, status: 200, data: functions }),
         });
@@ -164,7 +162,7 @@ describe("edge_functions CLI tool", () => {
 
         expect(response.isError).toBeUndefined();
         expect(payload).toEqual(functions);
-        expect(typeof payload[0].version).toBe("number");
+        expect(payload.map(({ version }: { version: number }) => version)).toEqual([0, 7]);
     });
 
     test.each([
@@ -173,7 +171,7 @@ describe("edge_functions CLI tool", () => {
         ["a missing slug", [{ version: 7, private: "list-response-sentinel" }]],
         ["an invalid slug", [{ slug: "../fa-api", version: 7, private: "list-response-sentinel" }]],
         ["a string version", [{ slug: "fa-api", version: "7", private: "list-response-sentinel" }]],
-        ["version zero", [{ slug: "fa-api", version: 0, private: "list-response-sentinel" }]],
+        ["a negative version", [{ slug: "fa-api", version: -1, private: "list-response-sentinel" }]],
         ["a fractional version", [{ slug: "fa-api", version: 1.5, private: "list-response-sentinel" }]],
         ["an unsafe version", [{ slug: "fa-api", version: Number.MAX_SAFE_INTEGER + 1, private: "list-response-sentinel" }]],
         ["duplicate slugs", [{ slug: "fa-api", version: 7 }, { slug: "fa-api", version: 8 }]],
@@ -344,7 +342,7 @@ describe("edge_functions CLI tool", () => {
         },
     );
 
-    test.each([0, "0", "01", "9007199254740992"])(
+    test.each([-1, "-1", "01", "9007199254740992"])(
         "rejects invalid expected active version %j during argument parsing",
         (expectedActiveVersion) => {
             const { schema } = captureEdgeFunctionsTool({});
@@ -358,7 +356,7 @@ describe("edge_functions CLI tool", () => {
         },
     );
 
-    test.each([0, "0", "01", "9007199254740992", true, {}])(
+    test.each([-1, "-1", "01", "9007199254740992", true, {}])(
         "rejects direct invalid expected active version %j before HTTP dispatch",
         async (expectedActiveVersion) => {
             let requestCount = 0;
@@ -375,7 +373,7 @@ describe("edge_functions CLI tool", () => {
                 slug: "hook",
                 files: { "index.ts": "export default {}" },
                 "expected-active-version": expectedActiveVersion,
-            })).rejects.toThrow("canonical positive safe integer");
+            })).rejects.toThrow("canonical non-negative safe integer");
             expect(requestCount).toBe(0);
         },
     );
@@ -523,6 +521,55 @@ describe("edge_functions CLI tool", () => {
         })).rejects.toThrow();
         expect(requestCount).toBe(0);
     });
+
+    test.each([0, "0"])(
+        "deploys over legacy active version %j with a confirmed CAS receipt",
+        async (expectedActiveVersion) => {
+            const calls: Array<{ path: string; body: unknown }> = [];
+            const { callback, schema } = captureEdgeFunctionsTool({
+                post: async (path: string, body: unknown) => {
+                    calls.push({ path, body });
+                    return {
+                        ok: true,
+                        status: 200,
+                        data: {
+                            success: true,
+                            project_ref: "proj",
+                            slug: "legacy-hook",
+                            previous_active_version: "0",
+                            active_version: "1",
+                            version: "1",
+                            config: { version: "1", verify_jwt: true },
+                        },
+                    };
+                },
+            });
+            const args = parseToolArguments(schema, {
+                action: "deploy_bundle",
+                ref: "proj",
+                slug: "legacy-hook",
+                files: { "index.ts": "export default {}" },
+                "expected-active-version": expectedActiveVersion,
+            });
+
+            const response = await callback(args);
+
+            expect(calls).toEqual([{
+                path: "/v1/projects/proj/functions/legacy-hook/bundle",
+                body: {
+                    files: { "index.ts": "export default {}" },
+                    entrypoint: undefined,
+                    minify: undefined,
+                    expected_active_version: "0",
+                },
+            }]);
+            expect(JSON.parse(response.content[0].text)).toMatchObject({
+                ok: true,
+                previous_active_version: "0",
+                active_version: "1",
+            });
+        },
+    );
 
     test("sends bundle config inline without a follow-up PATCH", async () => {
         const calls: Array<{ method: string; path: string; body: unknown }> = [];

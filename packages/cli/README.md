@@ -212,10 +212,10 @@ already exist. Add the positive version observed from `list` as
 pointer; this remains correct across an active-version A→B→A transition.
 
 `deploy`, `deploy_bundle`, and `activate` require
-`--expected-active-version <N|absent>`. Read the current positive integer
-version from `edge_functions list`; use `absent` only when creating a slug that
-does not yet exist. A stale value returns HTTP 409 without building, preheating,
-or activating another version. List output remains a JSON array with string
+`--expected-active-version <N|absent>`. Read the current non-negative integer
+version from `edge_functions list`; use `0` for a listed legacy Function and
+`absent` only when creating a slug that does not yet exist. A stale value returns
+HTTP 409 without building, preheating, or activating another version. List output remains a JSON array with string
 `slug` and numeric `version` fields, while source output is exactly
 `{ "code": "..." }`. Release automation must use `source --version <N>` for a
 version-bound backup.
@@ -229,8 +229,9 @@ Mutation receipts use schema `supacloud.cli.release-control.v1`. An
 `OUTCOME_UNKNOWN` error means the server may have committed the mutation before
 the response was lost or failed validation; read back current state before any
 retry.
-Version `0` is reserved for service-internal legacy recovery and cannot be used
-as a public CLI/API activation target or expected active version.
+Version `0` is reserved as the active-version CAS token for legacy Functions. It
+can be passed only as `--expected-active-version`; immutable source reads and
+activation targets still require a positive version.
 
 ```json
 {

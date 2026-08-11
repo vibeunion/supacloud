@@ -3,6 +3,7 @@ import { projectService } from "../services";
 import { requireProjectOrAdminAuth } from "../middleware/auth";
 import { isUserManagedFunctionSecretName } from "../utils/project-secret-visibility";
 import {
+  activeFunctionVersionNumber,
   EDGE_FUNCTION_ACTIVE_VERSION_CONFLICT_CODE,
   EDGE_FUNCTION_SHA256_HEX_PATTERN,
   EdgeFunctionActiveVersionConflictError,
@@ -12,13 +13,13 @@ import {
   type EdgeFunctionDeployResult,
 } from "../services/edge-function.service";
 
-const FUNCTION_VERSION_PATTERN = /^(?:0|[1-9][0-9]*)$/;
-const EXPECTED_ACTIVE_VERSION_PATTERN = /^[1-9][0-9]*$/;
+const CANONICAL_FUNCTION_VERSION_PATTERN = /^(?:0|[1-9][0-9]*)$/;
+const POSITIVE_FUNCTION_VERSION_PATTERN = /^[1-9][0-9]*$/;
 // Admit the reserved legacy zero at schema parsing so the handler returns the stable public HTTP 400 contract.
-const functionVersionSchema = t.String({ pattern: FUNCTION_VERSION_PATTERN.source, maxLength: 16 });
+const functionVersionSchema = t.String({ pattern: CANONICAL_FUNCTION_VERSION_PATTERN.source, maxLength: 16 });
 const expectedActiveVersionSchema = t.Union([
   t.Literal("absent"),
-  t.String({ pattern: EXPECTED_ACTIVE_VERSION_PATTERN.source, maxLength: 16 }),
+  t.String({ pattern: CANONICAL_FUNCTION_VERSION_PATTERN.source, maxLength: 16 }),
 ]);
 
 async function requireFunctionManagementAuth(request: Request, ref: string) {
@@ -65,20 +66,38 @@ function normalizedBackgroundRoutes(routes: unknown): string[] | undefined {
 
 function expectedActiveVersion(value: unknown): EdgeFunctionActiveVersion | null {
   if (value === "absent") return value;
-  if (typeof value !== "string" || !EXPECTED_ACTIVE_VERSION_PATTERN.test(value)) {
+  if (typeof value !== "string" || !CANONICAL_FUNCTION_VERSION_PATTERN.test(value)) {
     return null;
   }
   return Number.isSafeInteger(Number(value)) ? value : null;
 }
 
 function functionVersion(value: unknown): string | null {
-  if (typeof value !== "string" || !EXPECTED_ACTIVE_VERSION_PATTERN.test(value)) return null;
+  if (typeof value !== "string" || !POSITIVE_FUNCTION_VERSION_PATTERN.test(value)) return null;
   return Number.isSafeInteger(Number(value)) ? value : null;
+}
+
+async function functionResponseVersion(
+  ref: string,
+  slug: string,
+  reportedVersion?: string,
+): Promise<number | null> {
+  if (reportedVersion !== undefined) return activeFunctionVersionNumber(reportedVersion);
+  const { edgeFunctionService } = await import("../services/edge-function.service");
+  const activeVersion = await edgeFunctionService.getActiveVersion(ref, slug);
+  return activeFunctionVersionNumber(activeVersion);
 }
 
 function invalidExpectedActiveVersion() {
   return status(400, {
-    message: "expected_active_version must be a canonical positive safe integer or 'absent'",
+    message: "expected_active_version must be a canonical non-negative safe integer or 'absent'",
+    code: "VALIDATION_ERROR",
+  });
+}
+
+function invalidFunctionVersion() {
+  return status(400, {
+    message: "version must be a canonical positive safe integer",
     code: "VALIDATION_ERROR",
   });
 }
@@ -236,17 +255,21 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
       const { edgeFunctionService } =
         await import("../services/edge-function.service");
       const funcConfig = deployment.config ?? await edgeFunctionService.getConfig(params.ref, slug);
-      const version = Number.parseInt(funcConfig.version || "1", 10) || 1;
+      const version = await functionResponseVersion(
+        params.ref,
+        slug,
+        deployment.version ?? deployment.active_version ?? funcConfig.version,
+      );
       const now = new Date().toISOString();
       return {
         project_ref: params.ref,
         id: slug,
         slug,
         name: metadata.name || slug,
-        version: Number.parseInt(deployment.version || String(version), 10) || version,
+        version,
         previous_active_version: deployment.previous_active_version,
         active_version: deployment.active_version,
-        status: "ACTIVE",
+        status: version === null ? "INACTIVE" : "ACTIVE",
         verify_jwt: funcConfig.verify_jwt,
         background_routes: funcConfig.background_routes || [],
         entrypoint_path: entrypoint,
@@ -325,7 +348,11 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
           ? await edgeFunctionService.updateConfig(params.ref, slug, configPatch)
           : await edgeFunctionService.getConfig(params.ref, slug)
       );
-      const version = Number.parseInt(funcConfig.version || "1", 10) || 1;
+      const version = await functionResponseVersion(
+        params.ref,
+        slug,
+        deployResult?.version ?? deployResult?.active_version ?? funcConfig.version,
+      );
 
       const now = new Date().toISOString();
       return {
@@ -338,7 +365,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         active_version: deployResult?.active_version,
         verify_jwt: funcConfig.verify_jwt,
         background_routes: funcConfig.background_routes || [],
-        status: "ACTIVE",
+        status: version === null ? "INACTIVE" : "ACTIVE",
         created_at: now,
         updated_at: now,
         entrypoint_path:
@@ -468,14 +495,14 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         params.ref,
         params.slug,
       );
-      const version = Number.parseInt(funcConfig.version || "1", 10) || 1;
+      const version = await functionResponseVersion(params.ref, params.slug, funcConfig.version);
       const now = new Date().toISOString();
       return {
         id: params.slug,
         slug: params.slug,
         name: params.slug,
         version,
-        status: "ACTIVE",
+        status: version === null ? "INACTIVE" : "ACTIVE",
         verify_jwt: funcConfig.verify_jwt,
         background_routes: funcConfig.background_routes || [],
         entrypoint_path: `${params.slug}/index.ts`,
@@ -577,12 +604,14 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, request }) => {
       const authError = await requireFunctionManagementAuth(request, params.ref);
       if (authError) return authError;
+      const targetVersion = functionVersion(params.version);
+      if (targetVersion === null) return invalidFunctionVersion();
       const { edgeFunctionService } =
         await import("../services/edge-function.service");
       const version = await edgeFunctionService.getVersion(
         params.ref,
         params.slug,
-        params.version,
+        targetVersion,
       );
       if (!version) {
         return status(404, { message: "Function version not found", code: "404" });
@@ -609,12 +638,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
       const expectedVersion = expectedActiveVersion(body.expected_active_version);
       if (expectedVersion === null) return invalidExpectedActiveVersion();
       const targetVersion = functionVersion(params.version);
-      if (targetVersion === null) {
-        return status(400, {
-          message: "version must be a canonical positive safe integer",
-          code: "VALIDATION_ERROR",
-        });
-      }
+      if (targetVersion === null) return invalidFunctionVersion();
       try {
         const activation = await edgeFunctionService.activateVersion(
           params.ref,
@@ -786,7 +810,11 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
           ? await edgeFunctionService.updateConfig(params.ref, params.slug, configPatch)
           : await edgeFunctionService.getConfig(params.ref, params.slug)
       );
-      const version = Number.parseInt(funcConfig.version || "1", 10) || 1;
+      const version = await functionResponseVersion(
+        params.ref,
+        params.slug,
+        deployResult?.version ?? deployResult?.active_version ?? funcConfig.version,
+      );
       const now = new Date().toISOString();
       return {
         project_ref: params.ref,
@@ -796,7 +824,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         version,
         previous_active_version: deployResult?.previous_active_version,
         active_version: deployResult?.active_version,
-        status: "ACTIVE",
+        status: version === null ? "INACTIVE" : "ACTIVE",
         verify_jwt: funcConfig.verify_jwt,
         background_routes: funcConfig.background_routes || [],
         bundle_hash: deployResult?.bundle_hash ?? null,

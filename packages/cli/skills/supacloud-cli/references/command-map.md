@@ -31,7 +31,7 @@ until a project-scoped context is resolved.
 - `supabase`: allowlisted official CLI adapter for migration authoring, local reset/diff, explicit-DSN inspection/backup/type generation, and SupaCloud-controlled migration push.
 - `auth`: provider and authentication configuration.
 - `storage`: buckets and object-management workflows.
-- `edge_functions`: list, read immutable source, deploy, activate, and configure Edge Functions. Pass the positive version read from `list` to `source --version` and as `--expected-active-version`; use `absent` only for a new slug. Version `0` is internal-only.
+- `edge_functions`: list, read immutable source, deploy, activate, and configure Edge Functions. Pass the non-negative version read from `list` as `--expected-active-version`; use `absent` only for a new slug. Version `0` is a legacy CAS token and cannot be used as a source or activation target.
 - `frontend`: list, build/deploy, domain, and deployment workflows.
 - `secrets`: project secret management; never print values after write.
 - `queue`, `task_events`, `diagnostics`: asynchronous workload operations and bounded diagnostics.

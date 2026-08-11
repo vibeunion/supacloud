@@ -19,6 +19,7 @@
     type FunctionTaskRecord,
   } from "$lib/function-snippets";
   import { getTaskLatestLogPreview, hasTaskLogPreview } from "$lib/function-task-details";
+  import { requestImmutableFunctionVersion } from "$lib/function-version-details";
   import {
     filterFunctionRuntimeLogs,
     getFunctionRuntimeErrorLogs,
@@ -387,7 +388,17 @@ export async function waitForTask(
     versionDetailLoading = version;
     versionDetailError = null;
     try {
-      const res = await apiClient(`/v1/projects/${projectRef}/functions/${encodeURIComponent(slug)}/versions/${encodeURIComponent(version)}`);
+      const res = await requestImmutableFunctionVersion(apiClient, {
+        projectRef,
+        slug,
+        version,
+      });
+      if (res === null) {
+        selectedVersion = null;
+        selectedVersionKey = null;
+        versionDetailError = "兼容版本 v0 仅作为并发控制标记，不提供不可变版本详情";
+        return;
+      }
       const payload = await res.json().catch(() => null);
       if (!res.ok) {
         throw new Error(payload?.message || "获取函数版本详情失败");
@@ -407,7 +418,7 @@ export async function waitForTask(
 
   function activeVersionForSlug(slug: string): string {
     const activeVersion = functions.find((fn) => fn.slug === slug)?.version;
-    if (typeof activeVersion !== "number" || !Number.isSafeInteger(activeVersion) || activeVersion < 1) {
+    if (typeof activeVersion !== "number" || !Number.isSafeInteger(activeVersion) || activeVersion < 0) {
       throw new Error("当前函数激活版本无效，请刷新后重试");
     }
     return String(activeVersion);
@@ -475,11 +486,11 @@ export async function waitForTask(
     selectedVersionKey = null;
     versionDetailError = null;
     await Promise.all([
-      loadFunctionTasks(fn.slug, String(fn.version || 1)),
-      loadFunctionRuntimeLogs(fn.slug, 20, String(fn.version || 1)),
+      loadFunctionTasks(fn.slug, String(fn.version)),
+      loadFunctionRuntimeLogs(fn.slug, 20, String(fn.version)),
       loadFunctionVersions(fn.slug),
     ]);
-    await loadVersionDetail(fn.slug, String(fn.version || 1));
+    await loadVersionDetail(fn.slug, String(fn.version));
   }
 
   function closeFunctionDrawer() {
@@ -920,7 +931,7 @@ export async function waitForTask(
         </div>
         <div class="rounded-xl border border-border/60 bg-muted/20 p-4">
           <div class="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-foreground">{$t("Functions.version")}</div>
-          <div class="mt-2 text-sm font-semibold">v{selectedFunction.version || 1}</div>
+          <div class="mt-2 text-sm font-semibold">v{selectedFunction.version}</div>
         </div>
         <div class="rounded-xl border border-border/60 bg-muted/20 p-4">
           <div class="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-foreground">{$t("Functions.jwt_verification")}</div>
@@ -950,7 +961,7 @@ export async function waitForTask(
             <p class="text-xs text-muted-foreground mt-1">查看历史版本、检查源码/编译产物，并将当前激活版本切换到任意历史版本。</p>
           </div>
           <div class="text-[11px] text-muted-foreground">
-            {$t("Functions.active_version", { values: { version: selectedFunction.version || 1 } })}
+            {$t("Functions.active_version", { values: { version: selectedFunction.version } })}
           </div>
         </div>
 
@@ -992,7 +1003,9 @@ export async function waitForTask(
                       <div class="flex items-center gap-2">
                         <button
                           onclick={() => loadVersionDetail(currentDrawerSlug, versionRecord.version)}
-                          class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-semibold hover:bg-muted/40 transition-colors"
+                          disabled={versionRecord.version === "0"}
+                          title={versionRecord.version === "0" ? "兼容版本 v0 不提供不可变版本详情" : "查看版本详情"}
+                          class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-semibold hover:bg-muted/40 transition-colors disabled:opacity-50"
                         >
                           <Bug size={13} />
                           查看详情

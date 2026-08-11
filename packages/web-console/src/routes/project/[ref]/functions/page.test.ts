@@ -28,7 +28,17 @@ describe("edge function JWT toggle", () => {
   test("binds create and version activation requests to the observed active version", () => {
     expect(source).toContain('expected_active_version: "absent"');
     expect(source).toContain("activeVersionForSlug(slug)");
+    expect(source).toContain("activeVersion < 0");
     expect(source).toContain("expected_active_version: expectedActiveVersion");
     expect(source).toContain('versionRecord.version === "0"');
+    expect(source).not.toContain("fn.version || 1");
+    expect(source).not.toContain("selectedFunction.version || 1");
+  });
+
+  test("keeps legacy version zero out of immutable source detail requests", () => {
+    expect(source).toContain("requestImmutableFunctionVersion(apiClient");
+    expect(source).toContain("if (res === null)");
+    expect(source.match(/disabled=\{versionRecord\.version === "0"/g)).toHaveLength(2);
+    expect(source).toContain("兼容版本 v0 仅作为并发控制标记，不提供不可变版本详情");
   });
 });

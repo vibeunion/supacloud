@@ -7,12 +7,16 @@ import { gatewayService } from "./gateway.service";
 import { taskRepository } from "../repositories/task.repository";
 import type { Project, ProjectStatus } from "../db";
 import { resolveBucketName, resolveDbName, resolveRoleName, generateDbName } from "../db";
-import { edgeFunctionService } from "./edge-function.service";
-import { getVersionedArtifactPath } from "./edge-function.service";
-import type { EdgeFunctionDeploymentRequest } from "./edge-function.service";
+import {
+  activeFunctionVersionNumber,
+  edgeFunctionService,
+  getVersionedArtifactPath,
+  type EdgeFunctionDeploymentRequest,
+} from "./edge-function.service";
 import { logger } from "../utils/logger";
 import { config } from "../config";
 import { $ } from "bun";
+import * as fs from "node:fs/promises";
 import { projectLogService } from "./project-logs.service";
 import { projectOpsService } from "./project-ops.service";
 import {
@@ -811,27 +815,23 @@ export class ProjectService {
     const results: FunctionResponse[] = [];
     for (const slug of slugs) {
       const cfg = await edgeFunctionService.getConfig(ref, slug);
-      let created_at = new Date().toISOString();
-      let updated_at = created_at;
-      try {
-        const { stat } = await import("fs/promises");
-        const activePath = cfg.version
-          ? await getVersionedArtifactPath(ref, slug, cfg.version)
-          : null;
-        const fileStat = await stat(
-          activePath || `${config.edgeFunctionsDir}/${ref}/${slug}.js`,
-        );
-        updated_at = fileStat.mtime.toISOString();
-        created_at = fileStat.birthtime.toISOString();
-      } catch {
-        /* file may not exist yet */
-      }
+      const version = activeFunctionVersionNumber(
+        await edgeFunctionService.getActiveVersion(ref, slug),
+      );
+      if (version === null) throw new Error("Function became inactive while listing");
+      const activePath = cfg.version === undefined
+        ? `${config.edgeFunctionsDir}/${ref}/${slug}.js`
+        : await getVersionedArtifactPath(ref, slug, cfg.version);
+      if (activePath === null) throw new Error("Active function artifact is missing");
+      const fileStat = await fs.stat(activePath);
+      const updated_at = fileStat.mtime.toISOString();
+      const created_at = fileStat.birthtime.toISOString();
       results.push({
         id: slug,
         slug,
         name: slug,
         status: "ACTIVE",
-        version: Number.parseInt(cfg.version || "1", 10) || 1,
+        version,
         verify_jwt: cfg.verify_jwt,
         background_routes: cfg.background_routes || [],
         import_map: !!cfg.import_map,

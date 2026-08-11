@@ -276,20 +276,21 @@ to that immutable release and remains safe if the active pointer changes Aâ†’Bâ†
 
 Function release mutations use optimistic concurrency control. Before
 `deploy`, `deploy_bundle`, or `activate`, run `edge_functions list` and pass the
-observed positive integer version as `--expected-active-version <N>`. Pass
-`--expected-active-version absent` only for the first deployment of a new slug.
+observed non-negative integer version as `--expected-active-version <N>`. Use
+`0` only for a listed legacy Function, and pass `--expected-active-version absent`
+only for the first deployment of a new slug.
 A stale value returns HTTP 409 before build, preheat, version creation, or
 manifest activation. Successful mutations return the
 `supacloud.cli.release-control.v1` receipt with `project_ref`, `slug`,
 `previous_active_version`, `active_version`, `version`, and `verify_jwt`.
 Transport failures, HTTP 408/5xx responses, and malformed 2xx receipts exit
 non-zero as `OUTCOME_UNKNOWN`; read back `edge_functions list` before retrying.
-Version `0` remains an internal compatibility marker for legacy recovery. The
-public CLI and Management API reject it as an activation target or expected
-active version; all public release automation uses positive versions.
+Version `0` is reserved for a listed legacy Function's active-version CAS token.
+The public CLI and Management API accept it only as the expected active version;
+immutable source reads and activation targets still require positive versions.
 
 The readback contract stays simple for automation: `edge_functions list`
-prints a JSON array whose entries have a string `slug` and a positive safe
+prints a JSON array whose entries have a string `slug` and a non-negative safe
 integer numeric `version`; `edge_functions source` prints exactly
 `{ "code": "..." }`. Release automation uses `source --version <N>` rather than
 the moving active source endpoint.
