@@ -31,6 +31,8 @@ npx @supacloud/admin ssh versions
 npx @supacloud/admin ssh diagnose
 npx @supacloud/admin project create --name my-app --domain example.com
 npx @supacloud/admin project list
+npx @supacloud/admin project services --ref abc123
+npx @supacloud/admin project service_control --ref abc123 --service gotrue --service_action stop
 ```
 
 `ssh versions` emits JSON with `schema_version: 1` and fixed
@@ -106,6 +108,23 @@ Project commands owned by this CLI:
 - `project restore`
 - `project restart`
 - `project update_settings`
+- `project services` — read-only project service inventory
+- `project service_control` — constrained project service lifecycle control
+
+Service control accepts canonical service names only. `postgrest` supports
+`start`, `stop`, `restart`, `pause`, `resume`, and `status`; `gotrue`, `storage`,
+`postgresql`, `realtime`, and `gateway` support `start`, `stop`, and `restart`.
+The command calls only the Management API's existing
+`/v1/projects/{ref}/services` routes. A non-2xx response, a `success: false`
+receipt, or a response that does not match the requested service and action
+exits non-zero. Successful inventory and control responses are emitted as JSON
+with `project_ref` for strict read-back.
+
+The Management API remains authoritative for SupAuth ownership. Controlling
+GoTrue on a shared-auth project fails with `AUTH_RUNTIME_MANAGED_BY_OWNER`;
+the CLI does not redirect the operation to the owner project. Supply
+`SUPACLOUD_API_TOKEN` through the environment only; service-control commands do
+not accept credential flags.
 
 Gateway / Caddy commands (config is injected via the Caddy JSON Admin API; requires admin privileges):
 
