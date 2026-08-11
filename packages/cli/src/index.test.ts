@@ -76,6 +76,20 @@ function serveFunctionSource(sourceCode: string): string {
     return `http://127.0.0.1:${server.port}`;
 }
 
+function chunkedJsonResponse(body: string): Response {
+    const bytes = new TextEncoder().encode(body);
+    let offset = 0;
+    const stream = new ReadableStream<Uint8Array>({
+        pull(controller) {
+            if (offset >= bytes.byteLength) return controller.close();
+            const nextOffset = Math.min(offset + 256 * 1024, bytes.byteLength);
+            controller.enqueue(bytes.subarray(offset, nextOffset));
+            offset = nextOffset;
+        },
+    });
+    return new Response(stream, { headers: { "Content-Type": "application/json" } });
+}
+
 describe("supacloud-cli process contract", () => {
     test("prints the installed package version without project context", async () => {
         const response = await runProjectCli(["--version"]);
@@ -411,6 +425,99 @@ describe("supacloud-cli process contract", () => {
     });
 
     test.each([
+        ["masked projection", [
+            { name: "API_KEY", value: "********", internal: "projection-secret-sentinel" },
+        ], [{ name: "API_KEY", value: "********" }]],
+        ["empty list", [], []],
+    ])("prints only the local %s for a valid secret list", async (_label, payload, expected) => {
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch: () => Response.json(payload),
+        });
+        servers.push(server);
+
+        const response = await runProjectCli(
+            ["secrets", "list", "--ref", "abc123"],
+            {
+                SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+                SUPACLOUD_API_TOKEN: "test-token",
+                SUPACLOUD_PROJECT_REF: "abc123",
+            },
+        );
+
+        expect(response.exitCode).toBe(0);
+        expect(JSON.parse(response.stdout)).toEqual(expected);
+        expect(response.stdout + response.stderr).not.toContain("projection-secret-sentinel");
+    });
+
+    test.each([
+        ["free text", "list-free-text-secret-sentinel"],
+        ["object", { error: "list-object-secret-sentinel" }],
+        ["plaintext value", [{ name: "API_KEY", value: "plaintext-secret-sentinel" }]],
+        ["non-string name", [{ name: 7, value: "********", leak: "non-string-name-sentinel" }]],
+        ["dangerous name", [{ name: "API-KEY", value: "********", leak: "dangerous-name-sentinel" }]],
+        ["duplicate name", [
+            { name: "API_KEY", value: "********" },
+            { name: "API_KEY", value: "********", leak: "duplicate-name-sentinel" },
+        ]],
+        ["too many entries", Array.from({ length: 1025 }, (_, index) => ({
+            name: `KEY_${index}`,
+            value: "********",
+            leak: index === 0 ? "too-many-entries-sentinel" : undefined,
+        }))],
+        ["oversized response", [{
+            name: "API_KEY",
+            value: "********",
+            leak: `oversized-list-sentinel-${"x".repeat(1024 * 1024)}`,
+        }]],
+    ])("rejects a 200 %s secret list without reflection", async (_label, payload) => {
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch: () => Response.json(payload),
+        });
+        servers.push(server);
+
+        const response = await runProjectCli(
+            ["secrets", "list", "--ref", "abc123"],
+            {
+                SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+                SUPACLOUD_API_TOKEN: "test-token",
+                SUPACLOUD_PROJECT_REF: "abc123",
+            },
+        );
+
+        expect(response.exitCode).toBe(1);
+        expect(response.stdout.trim()).toBe("❌ Project secret list response is invalid");
+        expect(response.stdout + response.stderr).not.toContain("sentinel");
+    });
+
+    test("rejects a valid JSON secret list whose raw chunked body exceeds 1 MiB", async () => {
+        const oversizedBody = `${" ".repeat(1024 * 1024 + 1)}[]`;
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch: () => chunkedJsonResponse(oversizedBody),
+        });
+        servers.push(server);
+
+        const response = await runProjectCli(
+            ["secrets", "list", "--ref", "abc123"],
+            {
+                SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+                SUPACLOUD_API_TOKEN: "test-token",
+                SUPACLOUD_PROJECT_REF: "abc123",
+            },
+        );
+
+        expect(Buffer.byteLength(oversizedBody)).toBe(1_048_579);
+        expect(response.exitCode).toBe(1);
+        expect(response.stdout.trim()).toBe("❌ Project secret list response is invalid");
+        expect(response.stderr).toBe("");
+    });
+
+    test.each([
         ["missing value", "FA_CLI_FROM_ENV_MISSING", {}],
         ["empty value", "FA_CLI_FROM_ENV_EMPTY", { FA_CLI_FROM_ENV_EMPTY: "" }],
         ["invalid name", "FA-CLI-INVALID", {}],
@@ -440,6 +547,71 @@ describe("supacloud-cli process contract", () => {
         expect(response.exitCode).toBe(1);
         expect(requestCount).toBe(0);
         expect(response.stdout + response.stderr).not.toContain("never-printed-secret");
+    });
+
+    test("rejects a repeated from-env flag before HTTP without reading its value", async () => {
+        let requestCount = 0;
+        const secretSentinel = "duplicate-flag-secret-sentinel";
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch() {
+                requestCount += 1;
+                return Response.json({});
+            },
+        });
+        servers.push(server);
+
+        const response = await runProjectCli(
+            [
+                "secrets", "upsert", "--ref", "abc123",
+                "--from-env", "API_KEY", "--from-env=API_KEY",
+            ],
+            {
+                SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+                SUPACLOUD_API_TOKEN: "test-token",
+                SUPACLOUD_PROJECT_REF: "abc123",
+                API_KEY: secretSentinel,
+            },
+        );
+
+        expect(response.exitCode).toBe(1);
+        expect(requestCount).toBe(0);
+        expect(response.stderr).toContain("Duplicate CLI flag is not allowed");
+        expect(response.stdout + response.stderr).not.toContain(secretSentinel);
+    });
+
+    test("preserves string-shaped from-env names before generic CLI coercion", async () => {
+        let requestBody: unknown;
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            async fetch(request) {
+                requestBody = await request.json();
+                return Response.json({});
+            },
+        });
+        servers.push(server);
+
+        const response = await runProjectCli(
+            ["secrets", "upsert", "--ref", "abc123", "--from-env", "true,false,Infinity"],
+            {
+                SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+                SUPACLOUD_API_TOKEN: "test-token",
+                SUPACLOUD_PROJECT_REF: "abc123",
+                true: "true-secret-sentinel",
+                false: "false-secret-sentinel",
+                Infinity: "infinity-secret-sentinel",
+            },
+        );
+
+        expect(response.exitCode).toBe(0);
+        expect(requestBody).toEqual([
+            { name: "true", value: "true-secret-sentinel" },
+            { name: "false", value: "false-secret-sentinel" },
+            { name: "Infinity", value: "infinity-secret-sentinel" },
+        ]);
+        expect(response.stdout + response.stderr).not.toContain("secret-sentinel");
     });
 
     test("rejects mixed secret inputs before HTTP without echoing the inline value", async () => {

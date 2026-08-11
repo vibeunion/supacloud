@@ -17,6 +17,10 @@ export interface HttpResult<T = unknown> {
     transportError?: boolean;
 }
 
+export interface HttpGetOptions {
+    maxResponseBytes?: number;
+}
+
 const DEFAULT_TIMEOUT = 30_000;
 const MAX_RETRIES = 2;
 const RETRY_BASE_DELAY = 500;
@@ -87,6 +91,58 @@ async function fetchWithRetry(
     throw new Error("Unreachable");
 }
 
+function declaredResponseTooLarge(response: Response, maxBytes: number): boolean {
+    const contentLength = response.headers.get("content-length");
+    if (contentLength === null || !/^\d+$/.test(contentLength)) return false;
+    return Number(contentLength) > maxBytes;
+}
+
+function joinedResponseBytes(chunks: Uint8Array[], totalBytes: number): Uint8Array {
+    const responseBytes = new Uint8Array(totalBytes);
+    let offset = 0;
+    for (const chunk of chunks) {
+        responseBytes.set(chunk, offset);
+        offset += chunk.byteLength;
+    }
+    return responseBytes;
+}
+
+async function responseBytesWithinLimit(response: Response, maxBytes: number): Promise<Uint8Array | null> {
+    if (declaredResponseTooLarge(response, maxBytes)) {
+        await response.body?.cancel();
+        return null;
+    }
+    if (!response.body) return new Uint8Array();
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let totalBytes = 0;
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) return joinedResponseBytes(chunks, totalBytes);
+        totalBytes += value.byteLength;
+        if (totalBytes > maxBytes) {
+            await reader.cancel();
+            return null;
+        }
+        chunks.push(value);
+    }
+}
+
+function parsedUtf8Json(responseBytes: Uint8Array): unknown {
+    try {
+        const responseText = new TextDecoder("utf-8", { fatal: true }).decode(responseBytes);
+        return JSON.parse(responseText);
+    } catch (error) {
+        if (error instanceof SyntaxError || error instanceof TypeError) return null;
+        throw error;
+    }
+}
+
+async function boundedResponseJson(response: Response, maxBytes: number): Promise<unknown> {
+    const responseBytes = await responseBytesWithinLimit(response, maxBytes);
+    return responseBytes === null ? null : parsedUtf8Json(responseBytes);
+}
+
 export class HttpTransport {
     private baseUrl: string;
     private token: string;
@@ -103,13 +159,15 @@ export class HttpTransport {
         };
     }
 
-    async get<T = unknown>(path: string): Promise<HttpResult<T>> {
+    async get<T = unknown>(path: string, options: HttpGetOptions = {}): Promise<HttpResult<T>> {
         try {
             const res = await fetchWithRetry(`${this.baseUrl}${path}`, {
                 method: "GET",
                 headers: this.headers(),
             });
-            const data = (await res.json().catch(() => null)) as T;
+            const data = (options.maxResponseBytes === undefined
+                ? await res.json().catch(() => null)
+                : await boundedResponseJson(res, options.maxResponseBytes)) as T;
             return { ok: res.ok, status: res.status, data };
         } catch (error: unknown) {
             return transportFailure<T>(error);

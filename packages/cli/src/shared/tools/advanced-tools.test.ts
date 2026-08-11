@@ -429,6 +429,59 @@ describe("secrets CLI tool", () => {
         expect(response.content[0].text).not.toContain(responseBodySentinel);
     });
 
+    test("projects valid masked secret lists without unknown response fields", async () => {
+        const unknownFieldSentinel = "unknown-field-secret-sentinel";
+        const { callback } = captureSecretsTool({
+            get: async () => ({
+                ok: true,
+                status: 200,
+                data: [
+                    { name: "API_KEY", value: "********", internal: unknownFieldSentinel },
+                    { name: "WEBHOOK_SECRET", value: "********" },
+                ],
+            }),
+        });
+
+        const response = await callback({ action: "list", ref: "proj" });
+
+        expect(JSON.parse(response.content[0].text)).toEqual([
+            { name: "API_KEY", value: "********" },
+            { name: "WEBHOOK_SECRET", value: "********" },
+        ]);
+        expect(response.content[0].text).not.toContain(unknownFieldSentinel);
+    });
+
+    test.each([
+        ["free text", "list-free-text-secret-sentinel"],
+        ["object", { error: "list-object-secret-sentinel" }],
+        ["plaintext value", [{ name: "API_KEY", value: "plaintext-secret-sentinel" }]],
+        ["non-string name", [{ name: 7, value: "********", leak: "non-string-name-sentinel" }]],
+        ["dangerous name", [{ name: "API-KEY", value: "********", leak: "dangerous-name-sentinel" }]],
+        ["duplicate name", [
+            { name: "API_KEY", value: "********" },
+            { name: "API_KEY", value: "********", leak: "duplicate-name-sentinel" },
+        ]],
+        ["too many entries", Array.from({ length: 1025 }, (_, index) => ({
+            name: `KEY_${index}`,
+            value: "********",
+            leak: index === 0 ? "too-many-entries-sentinel" : undefined,
+        }))],
+        ["oversized response", [{
+            name: "API_KEY",
+            value: "********",
+            leak: `oversized-list-sentinel-${"x".repeat(1024 * 1024)}`,
+        }]],
+    ])("rejects a 2xx %s secret list without reflecting it", async (_label, payload) => {
+        const { callback } = captureSecretsTool({
+            get: async () => ({ ok: true, status: 200, data: payload }),
+        });
+
+        const response = await callback({ action: "list", ref: "proj" });
+
+        expect(response.content[0].text).toBe("❌ Project secret list response is invalid");
+        expect(response.content[0].text).not.toContain("sentinel");
+    });
+
     test("parses JSON array secrets passed as a CLI string", () => {
         const { schema } = captureSecretsTool({});
         const parsed = parseToolArguments(schema, {
@@ -466,18 +519,25 @@ describe("secrets CLI tool", () => {
     });
 
     test.each([
-        ["empty entries", "API_KEY,,WEBHOOK_SECRET", "non-empty comma-separated list"],
-        ["invalid names", "API-KEY", "Invalid environment secret name 'API-KEY'"],
-        ["overlong names", `A${"B".repeat(256)}`, "Invalid environment secret name"],
-        ["duplicate names", "API_KEY,API_KEY", "Duplicate environment secret name 'API_KEY'"],
-    ])("rejects %s before resolving environment values", (_label, names, expectedMessage) => {
+        ["empty entries", "API_KEY,,WEBHOOK_SECRET"],
+        ["invalid names", "API-KEY-secret-name-sentinel"],
+        ["overlong names", `A${"B".repeat(256)}-secret-name-sentinel`],
+        ["duplicate names", "API_KEY,API_KEY"],
+        ["too many names", Array.from({ length: 1025 }, (_, index) => `KEY_${index}`).join(",")],
+    ])("rejects %s without reflecting input", (_label, names) => {
         const { schema } = captureSecretsTool({});
 
         expect(() => parseToolArguments(schema, {
             action: "upsert",
             ref: "proj",
             "from-env": names,
-        })).toThrow(expectedMessage);
+        })).toThrow("Environment secret names are invalid");
+
+        try {
+            parseToolArguments(schema, { action: "upsert", ref: "proj", "from-env": names });
+        } catch (error) {
+            expect(String(error)).not.toContain("secret-name-sentinel");
+        }
     });
 
     test("reads secret values from the CLI environment without echoing them", async () => {
@@ -528,7 +588,63 @@ describe("secrets CLI tool", () => {
             action: "upsert",
             ref: "proj",
             "from-env": ["API_KEY"],
-        })).rejects.toThrow("Environment variable 'API_KEY' must be set to a non-empty value");
+        })).rejects.toThrow("Environment secret values are missing or exceed safe limits");
+        expect(requestCount).toBe(0);
+    });
+
+    test("reads each requested environment value exactly once", async () => {
+        const reads = new Map<string, number>();
+        const environment = new Proxy({ API_KEY: "primary", WEBHOOK_SECRET: "secondary" }, {
+            get(target, name: string) {
+                reads.set(name, (reads.get(name) ?? 0) + 1);
+                return target[name as keyof typeof target];
+            },
+        });
+        const { callback } = captureSecretsTool({
+            post: async () => ({ ok: true, status: 200, data: {} }),
+        }, environment);
+
+        await callback({
+            action: "upsert",
+            ref: "proj",
+            "from-env": ["API_KEY", "WEBHOOK_SECRET"],
+        });
+
+        expect(Object.fromEntries(reads)).toEqual({ API_KEY: 1, WEBHOOK_SECRET: 1 });
+    });
+
+    test("accepts an environment value at the exact UTF-8 byte limit", async () => {
+        const boundarySecret = "界".repeat(8192);
+        let requestBody: unknown;
+        const { callback } = captureSecretsTool({
+            post: async (_path: string, body: unknown) => {
+                requestBody = body;
+                return { ok: true, status: 200, data: {} };
+            },
+        }, { API_KEY: boundarySecret });
+
+        await callback({ action: "upsert", ref: "proj", "from-env": ["API_KEY"] });
+
+        expect(Buffer.byteLength(boundarySecret)).toBe(24 * 1024);
+        expect(requestBody).toEqual([{ name: "API_KEY", value: boundarySecret }]);
+    });
+
+    test.each([
+        ["oversized value", ["API_KEY"], { API_KEY: "x".repeat(24 * 1024 + 1) }],
+        ["oversized multibyte value", ["API_KEY"], { API_KEY: "界".repeat(8193) }],
+        ["oversized request", Array.from({ length: 1024 }, (_, index) => `KEY_${index}`),
+            Object.fromEntries(Array.from({ length: 1024 }, (_, index) => [`KEY_${index}`, "x".repeat(1024)]))],
+    ])("rejects an %s before HTTP", async (_label, names, environment) => {
+        let requestCount = 0;
+        const { callback } = captureSecretsTool({
+            post: async () => {
+                requestCount += 1;
+                return { ok: true, status: 200, data: {} };
+            },
+        }, environment);
+
+        await expect(callback({ action: "upsert", ref: "proj", "from-env": names }))
+            .rejects.toThrow("Environment secret values are missing or exceed safe limits");
         expect(requestCount).toBe(0);
     });
 
