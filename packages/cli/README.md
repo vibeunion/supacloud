@@ -228,7 +228,10 @@ server response body.
 Mutation receipts use schema `supacloud.cli.release-control.v1`. An
 `OUTCOME_UNKNOWN` error means the server may have committed the mutation before
 the response was lost or failed validation; read back current state before any
-retry.
+retry. For Function deploy, bundle deploy, and activation, the CLI applies a
+separate 5-second, 64 KiB response-body boundary after receiving HTTP headers.
+A stalled, oversized, truncated, unreadable, or malformed body is always
+`OUTCOME_UNKNOWN` and its content is never included in CLI output.
 Version `0` is reserved as the active-version CAS token for legacy Functions. It
 can be passed only as `--expected-active-version`; immutable source reads and
 activation targets still require a positive version.

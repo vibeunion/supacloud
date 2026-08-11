@@ -10,6 +10,7 @@
 ### Bug Fixes
 
 * **cli:** fail closed for production and read-only writes, and require exact production confirmation
+* **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
 ## [0.17.1](https://github.com/zuohuadong/supacloud/compare/cli-v0.17.0...cli-v0.17.1) (2026-08-11)

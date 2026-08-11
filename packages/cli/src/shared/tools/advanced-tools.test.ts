@@ -11,6 +11,9 @@ function captureEdgeFunctionsTool(
     http: Record<string, unknown>,
     options: { readOnly?: boolean } = {},
 ) {
+    const releaseMutationHttp = typeof http.postReleaseMutation === "function"
+        ? http
+        : { ...http, postReleaseMutation: http.post };
     let schema: ToolSchema | undefined;
     let callback: ((args: Record<string, unknown>) => Promise<{
         content: Array<{ text: string }>;
@@ -22,7 +25,7 @@ function captureEdgeFunctionsTool(
             schema = toolSchema;
             callback = toolCallback;
         },
-    }, http as any, process.env, options);
+    }, releaseMutationHttp as any, process.env, options);
 
     if (!schema || !callback) throw new Error("edge_functions tool was not registered");
     return { schema, callback };
@@ -807,10 +810,80 @@ describe("edge_functions CLI tool", () => {
         })).toThrow("Invalid arguments");
     });
 
+    test("routes every release-control Function mutation through the bounded response transport", async () => {
+        const releaseMutationPaths: string[] = [];
+        let ordinaryPostCount = 0;
+        const { callback } = captureEdgeFunctionsTool({
+            post: async () => {
+                ordinaryPostCount += 1;
+                throw new Error("release mutation used the ordinary POST reader");
+            },
+            postReleaseMutation: async (path: string, body: Record<string, unknown>) => {
+                releaseMutationPaths.push(path);
+                const slug = path.split("/functions/")[1].split("/")[0];
+                const previousActiveVersion = String(body.expected_active_version);
+                const activeVersion = { single: "2", bundle: "3", restore: "1" }[slug];
+                return {
+                    ok: true,
+                    status: 200,
+                    data: {
+                        success: true,
+                        project_ref: "proj",
+                        slug,
+                        previous_active_version: previousActiveVersion,
+                        active_version: activeVersion,
+                        version: activeVersion,
+                        config: { version: activeVersion, verify_jwt: true },
+                    },
+                };
+            },
+        });
+
+        const mutations = [
+            {
+                action: "deploy",
+                ref: "proj",
+                slug: "single",
+                code: "export default {};",
+                "expected-active-version": "1",
+            },
+            {
+                action: "deploy_bundle",
+                ref: "proj",
+                slug: "bundle",
+                files: { "index.ts": "export default {};" },
+                "expected-active-version": "2",
+            },
+            {
+                action: "activate",
+                ref: "proj",
+                slug: "restore",
+                version: "1",
+                "expected-active-version": "3",
+            },
+        ];
+        const responses = [];
+        for (const mutation of mutations) responses.push(await callback(mutation));
+
+        expect(responses.every((response) => response.isError !== true)).toBe(true);
+        expect(ordinaryPostCount).toBe(0);
+        expect(releaseMutationPaths).toEqual([
+            "/v1/projects/proj/functions/single",
+            "/v1/projects/proj/functions/bundle/bundle",
+            "/v1/projects/proj/functions/restore/versions/1/activate",
+        ]);
+    });
+
     test.each([
         ["HTTP 503 after possible commit", { ok: false, status: 503, data: { error: "private-server-detail" } }, "OUTCOME_UNKNOWN", 503],
         ["HTTP 408 after possible commit", { ok: false, status: 408, data: { error: "private-server-detail" } }, "OUTCOME_UNKNOWN", 408],
         ["explicit HTTP rejection", { ok: false, status: 409, data: { error: "private-server-detail" } }, "HTTP_ERROR", 409],
+        ["response read failure after HTTP 409", {
+            ok: false,
+            status: 409,
+            data: { error: "private-server-detail" },
+            responseReadError: true,
+        }, "OUTCOME_UNKNOWN", 409],
         ["transport failure", {
             ok: false,
             status: 500,
