@@ -3,10 +3,13 @@ import { fileURLToPath } from "node:url";
 import {
     chmodSync,
     copyFileSync,
+    existsSync,
     mkdirSync,
     mkdtempSync,
+    readFileSync,
     realpathSync,
     rmSync,
+    statSync,
     symlinkSync,
     writeFileSync,
 } from "node:fs";
@@ -494,7 +497,10 @@ describe("supacloud-admin process contract", () => {
             port: 0,
             fetch() {
                 requestCount += 1;
-                return Response.json({ ref: "created-ref" });
+                return Response.json({
+                    ref: "abcdefghijklmnopqrst",
+                    api: { url: "https://abcdefghijklmnopqrst.api.example.test" },
+                }, { status: 201 });
             },
         });
         writeFileSync(join(workspace, ".env.supacloud.production"), [
@@ -557,6 +563,8 @@ describe("supacloud-admin process contract", () => {
         expect(execution.output).toContain("--api_domain");
         expect(execution.output).toContain("--auth_domain");
         expect(execution.output).toContain("--studio_domain");
+        expect(execution.output).toContain("--env_file");
+        expect(execution.output).toContain("--environment");
     });
 
     test("documents every physical backup flag without API context", async () => {
@@ -839,7 +847,10 @@ describe("supacloud-admin process contract", () => {
             );
 
             expect(execution.exitCode).toBe(1);
-            expect(execution.output).toContain("❌ Failed (400)");
+            expect(JSON.parse(execution.output).error).toEqual({
+                code: "HTTP_ERROR",
+                http_status: 400,
+            });
             expect(requests).toEqual([{
                 path: "/v1/projects",
                 body: expect.objectContaining({
@@ -851,6 +862,207 @@ describe("supacloud-admin process contract", () => {
             server.stop(true);
         }
     });
+
+    test.each([
+        ["the API domain binding is missing", ["--environment", "test"], "API_DOMAIN_BINDING_REQUIRED"],
+        ["the environment binding is missing", ["--api_domain", "api.example.test"], "ENVIRONMENT_BINDING_REQUIRED"],
+    ] as const)("fails before remote project creation when %s", async (_label, bindingArgs, code) => {
+        let requestCount = 0;
+        const apiServer = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch() {
+                requestCount += 1;
+                return Response.json({ unexpected: "remote-secret" }, { status: 201 });
+            },
+        });
+        const sandbox = realpathSync(mkdtempSync(join(tmpdir(), "supacloud-admin-binding-")));
+        const envFile = join(sandbox, ".env.project-credentials.test");
+        const apiToken = "private-binding-api-token";
+
+        try {
+            const execution = await runAdminCli([
+                "project", "create",
+                "--name", "binding-required",
+                "--env_file", envFile,
+                ...bindingArgs,
+            ], {
+                SUPACLOUD_ENV: "test",
+                SUPACLOUD_API_URL: `http://127.0.0.1:${apiServer.port}`,
+                SUPACLOUD_API_TOKEN: apiToken,
+            });
+
+            expect(execution.exitCode).toBe(1);
+            expect(JSON.parse(execution.output).error).toEqual({ code, http_status: null });
+            expect(requestCount).toBe(0);
+            expect(existsSync(envFile)).toBe(false);
+            expect(execution.output).not.toContain(apiToken);
+        } finally {
+            apiServer.stop(true);
+            rmSync(sandbox, { recursive: true, force: true });
+        }
+    });
+
+    test.skipIf(process.platform !== "linux")(
+        "rejects an expired service-role response without writing or reflecting it",
+        async () => {
+        const jwtSegment = (claims: Record<string, unknown>) =>
+            Buffer.from(JSON.stringify(claims), "utf8").toString("base64url");
+        const expiredServiceRoleKey = [
+            jwtSegment({ alg: "HS256", typ: "JWT" }),
+            jwtSegment({ role: "service_role", iss: "supabase", exp: 1 }),
+            "s".repeat(43),
+        ].join(".");
+        const apiServer = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch() {
+                return Response.json({
+                    ref: "abcdefghijklmnopqrst",
+                    api: { url: "https://api.example.test" },
+                    credentials: { service_role_key: expiredServiceRoleKey },
+                }, { status: 201 });
+            },
+        });
+        const sandbox = realpathSync(mkdtempSync(join(tmpdir(), "supacloud-admin-expired-")));
+        const envFile = join(sandbox, ".env.project-credentials.test");
+
+        try {
+            const execution = await runAdminCli([
+                "project", "create",
+                "--name", "expired-credential",
+                "--api_domain", "api.example.test",
+                "--env_file", envFile,
+                "--environment", "test",
+            ], {
+                SUPACLOUD_ENV: "test",
+                SUPACLOUD_API_URL: `http://127.0.0.1:${apiServer.port}`,
+                SUPACLOUD_API_TOKEN: "test-token",
+            });
+
+            expect(execution.exitCode).toBe(1);
+            expect(JSON.parse(execution.output).error).toEqual({
+                code: "INVALID_RESPONSE",
+                http_status: 201,
+            });
+            expect(existsSync(envFile)).toBe(false);
+            expect(execution.output).not.toContain(expiredServiceRoleKey);
+        } finally {
+            apiServer.stop(true);
+            rmSync(sandbox, { recursive: true, force: true });
+        }
+        },
+    );
+
+    test.skipIf(process.platform !== "linux")(
+        "creates a project without printing one-time credentials and writes the env file as 0600",
+        async () => {
+        const projectRef = "abcdefghijklmnopqrst";
+        const jwtSegment = (claims: Record<string, unknown>) =>
+            Buffer.from(JSON.stringify(claims), "utf8").toString("base64url");
+        const serviceRoleKey = [
+            jwtSegment({ alg: "HS256", typ: "JWT" }),
+            jwtSegment({ role: "service_role", iss: "supabase", exp: 4_102_444_800 }),
+            "s".repeat(43),
+        ].join(".");
+        const privateSentinel = "private-process-response-secret";
+        const sandbox = realpathSync(mkdtempSync(join(tmpdir(), "supacloud-admin-create-process-")));
+        const envFile = join(sandbox, ".env.project-credentials.test");
+        let requestBody: Record<string, unknown> | undefined;
+        const apiServer = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            async fetch(request) {
+                requestBody = await request.json() as Record<string, unknown>;
+                return Response.json({
+                    ref: projectRef,
+                    api: { url: "https://api.example.test" },
+                    credentials: {
+                        service_role_key: serviceRoleKey,
+                        jwt_secret: privateSentinel,
+                    },
+                    db_password: privateSentinel,
+                    secret_key: privateSentinel,
+                }, { status: 201 });
+            },
+        });
+
+        try {
+            const execution = await runAdminCli([
+                "project", "create",
+                "--name", "process-project",
+                "--api_domain", "api.example.test",
+                "--env_file", envFile,
+                "--environment", "test",
+            ], {
+                SUPACLOUD_ENV: "test",
+                SUPACLOUD_API_URL: `http://127.0.0.1:${apiServer.port}`,
+                SUPACLOUD_API_TOKEN: "test-token",
+            });
+
+            expect(execution.exitCode).toBe(0);
+            expect(requestBody).toEqual(expect.objectContaining({
+                name: "process-project",
+                credential_delivery: "response",
+            }));
+            expect(execution.output).toContain('"credentials_written": true');
+            expect(execution.output).toContain('"env_file_scope": "project_application"');
+            expect(execution.output).toContain(envFile);
+            expect(execution.output).not.toContain(serviceRoleKey);
+            expect(execution.output).not.toContain(privateSentinel);
+            expect(readFileSync(envFile, "utf8")).toBe([
+                "SUPACLOUD_ENV=test",
+                `SUPACLOUD_PROJECT_REF=${projectRef}`,
+                "SUPABASE_URL=https://api.example.test",
+                `SUPABASE_SERVICE_ROLE_KEY=${serviceRoleKey}`,
+                "",
+            ].join("\n"));
+            if (process.platform !== "win32") expect(statSync(envFile).mode & 0o777).toBe(0o600);
+        } finally {
+            apiServer.stop(true);
+            rmSync(sandbox, { recursive: true, force: true });
+        }
+        },
+    );
+
+    test.skipIf(process.platform === "linux")(
+        "rejects env-file credential delivery before the HTTP request on unsupported platforms",
+        async () => {
+            let requestCount = 0;
+            const apiServer = Bun.serve({
+                hostname: "127.0.0.1",
+                port: 0,
+                fetch() {
+                    requestCount += 1;
+                    return Response.json({ unexpected: true }, { status: 201 });
+                },
+            });
+            const sandbox = realpathSync(mkdtempSync(join(tmpdir(), "supacloud-admin-platform-")));
+            const envFile = join(sandbox, ".env.project-credentials.test");
+
+            try {
+                const execution = await runAdminCli([
+                    "project", "create",
+                    "--name", "unsupported-platform",
+                    "--api_domain", "api.example.test",
+                    "--env_file", envFile,
+                    "--environment", "test",
+                ], {
+                    SUPACLOUD_ENV: "test",
+                    SUPACLOUD_API_URL: `http://127.0.0.1:${apiServer.port}`,
+                    SUPACLOUD_API_TOKEN: "test-token",
+                });
+
+                expect(execution.exitCode).toBe(1);
+                expect(JSON.parse(execution.output).error.code).toBe("ENV_FILE_PLATFORM_UNSUPPORTED");
+                expect(requestCount).toBe(0);
+                expect(existsSync(envFile)).toBe(false);
+            } finally {
+                apiServer.stop(true);
+                rmSync(sandbox, { recursive: true, force: true });
+            }
+        },
+    );
 
     test("surfaces every sanitized cause when an operation and cleanup both fail", async () => {
         const result = await runAggregateFailureCli();

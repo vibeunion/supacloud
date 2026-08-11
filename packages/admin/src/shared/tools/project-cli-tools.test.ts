@@ -1,7 +1,21 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
+import {
+    constants,
+    existsSync,
+    mkdtempSync,
+    readFileSync,
+    realpathSync,
+    rmSync,
+    statSync,
+    writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { lstat, open, realpath, unlink } from "node:fs/promises";
 import { registerAdminProjectCliTools } from "./project-cli-tools";
 import { schemaEnumValues } from "../schema";
 import type { ToolSchema } from "../schema";
+import type { ProjectEnvFileOperations } from "./project-create-env";
 
 type ProjectCallback = (
     args: Record<string, unknown>,
@@ -11,6 +25,68 @@ type ProjectToolRegistration = {
     callback: ProjectCallback;
     schema: ToolSchema;
 };
+
+const CREATE_PROJECT_REF = "abcdefghijklmnopqrst";
+const CREATE_FUTURE_EXPIRATION = 4_102_444_800;
+const createSandboxes: string[] = [];
+
+function testProjectEnvFileOperations(): ProjectEnvFileOperations {
+    const directoryPaths = new WeakMap<object, string>();
+    return {
+        platform: "linux",
+        lstat,
+        realpath,
+        async openDirectory(path) {
+            const openDirectory = await open(path, constants.O_RDONLY);
+            const directoryHandle = {
+                fd: openDirectory.fd,
+                stat: () => openDirectory.stat(),
+                close: () => openDirectory.close(),
+            };
+            directoryPaths.set(directoryHandle, path);
+            return directoryHandle;
+        },
+        openExclusiveAt: (directory, filename, mode) =>
+            open(join(directoryPaths.get(directory)!, filename), "wx", mode),
+        lstatAt: (directory, filename) => lstat(join(directoryPaths.get(directory)!, filename)),
+        unlinkAt: (directory, filename) => unlink(join(directoryPaths.get(directory)!, filename)),
+    };
+}
+
+const defaultProjectEnvFileOperations = testProjectEnvFileOperations();
+
+function createJwtSegment(claims: Record<string, unknown>): string {
+    return Buffer.from(JSON.stringify(claims), "utf8").toString("base64url");
+}
+
+const CREATE_SERVICE_ROLE_KEY = [
+    createJwtSegment({ alg: "HS256", typ: "JWT" }),
+    createJwtSegment({
+        role: "service_role",
+        iss: "supabase",
+        exp: CREATE_FUTURE_EXPIRATION,
+    }),
+    "s".repeat(43),
+].join(".");
+
+function createSandbox(): string {
+    const path = realpathSync(mkdtempSync(join(tmpdir(), "supacloud-admin-create-")));
+    createSandboxes.push(path);
+    return path;
+}
+
+function createResponse(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+        ref: CREATE_PROJECT_REF,
+        api: { url: "https://api.example.test" },
+        credentials: { service_role_key: CREATE_SERVICE_ROLE_KEY },
+        ...overrides,
+    };
+}
+
+afterEach(() => {
+    for (const path of createSandboxes.splice(0)) rmSync(path, { recursive: true, force: true });
+});
 
 const REMOTE_RESPONSE_DETAILS = [
     "remote-token-value",
@@ -61,23 +137,37 @@ async function expectInvalidInventory(
     expect(response.content[0].text).toBe("❌ Project service inventory response is invalid");
 }
 
-function captureAdminProjectRegistration(http: Record<string, unknown>): ProjectToolRegistration {
+function captureAdminProjectRegistration(
+    http: Record<string, unknown>,
+    options: { projectEnvFileOperations?: ProjectEnvFileOperations } = {},
+): ProjectToolRegistration {
     let registration: ProjectToolRegistration | undefined;
     registerAdminProjectCliTools({
         tool(name: string, _description: string, schema: ToolSchema, callback: ProjectCallback) {
             if (name === "project") registration = { callback, schema };
         },
-    }, http as any);
+    }, http as any, {
+        projectEnvFileOperations: options.projectEnvFileOperations ?? defaultProjectEnvFileOperations,
+    });
 
     if (!registration) throw new Error("admin project tool was not registered");
     return registration;
 }
 
-function captureAdminProjectTool(http: Record<string, unknown>): ProjectCallback {
-    return captureAdminProjectRegistration(http).callback;
+function captureAdminProjectTool(
+    http: Record<string, unknown>,
+    options: { projectEnvFileOperations?: ProjectEnvFileOperations } = {},
+): ProjectCallback {
+    return captureAdminProjectRegistration(http, options).callback;
 }
 
 describe("admin project create", () => {
+    test("declares only test and production for local credential profiles", () => {
+        const { schema } = captureAdminProjectRegistration({});
+
+        expect(schemaEnumValues(schema.environment)).toEqual(["test", "production"]);
+    });
+
     test("forwards every non-empty custom domain unchanged", async () => {
         const requests: Array<{ path: string; body: unknown }> = [];
         const projectCallback = captureAdminProjectTool({
@@ -137,6 +227,479 @@ describe("admin project create", () => {
         expect("api_domain" in createRequest).toBe(false);
         expect("auth_domain" in createRequest).toBe(false);
         expect("studio_domain" in createRequest).toBe(false);
+    });
+
+    test("writes one-time credentials to a new 0600 env file and emits only a safe receipt", async () => {
+        const remoteSecret = "remote-create-secret";
+        const directory = createSandbox();
+        const envFile = join(directory, ".env.project-credentials.test");
+        let createRequest: Record<string, unknown> | undefined;
+        const projectCallback = captureAdminProjectTool({
+            post: async (_path: string, body: Record<string, unknown>) => {
+                createRequest = body;
+                return {
+                    ok: true,
+                    status: 201,
+                    data: createResponse({
+                        jwt_secret: remoteSecret,
+                        db_password: remoteSecret,
+                        secret_key: remoteSecret,
+                        credentials: {
+                            service_role_key: CREATE_SERVICE_ROLE_KEY,
+                            jwt_secret: remoteSecret,
+                        },
+                    }),
+                };
+            },
+        });
+
+        const response = await projectCallback({
+            action: "create",
+            name: "secure-project",
+            api_domain: "api.example.test",
+            env_file: envFile,
+            environment: "test",
+        });
+        const receipt = JSON.parse(response.content[0].text);
+
+        expect(response.isError).not.toBe(true);
+        expect(createRequest).toEqual(expect.objectContaining({
+            name: "secure-project",
+            credential_delivery: "response",
+        }));
+        expect(receipt).toEqual({
+            schema: "supacloud.cli.release-control.v1",
+            ok: true,
+            operation: "project.create",
+            project_ref: CREATE_PROJECT_REF,
+            api_url: "https://api.example.test",
+            credentials_written: true,
+            env_file: envFile,
+            env_file_scope: "project_application",
+        });
+        expect(response.content[0].text).not.toContain(CREATE_SERVICE_ROLE_KEY);
+        expect(response.content[0].text).not.toContain(remoteSecret);
+        expect(readFileSync(envFile, "utf8")).toContain(
+            `SUPABASE_SERVICE_ROLE_KEY=${CREATE_SERVICE_ROLE_KEY}`,
+        );
+        expect(readFileSync(envFile, "utf8")).toContain("SUPACLOUD_ENV=test");
+        if (process.platform !== "win32") expect(statSync(envFile).mode & 0o777).toBe(0o600);
+    });
+
+    test("rejects a credential response on an unrequested non-default API port", async () => {
+        const directory = createSandbox();
+        const envFile = join(directory, "wrong-origin.env");
+        const projectCallback = captureAdminProjectTool({
+            post: async () => ({
+                ok: true,
+                status: 201,
+                data: createResponse({ api: { url: "https://api.example.test:8443" } }),
+            }),
+        });
+
+        const response = await projectCallback({
+            action: "create",
+            name: "wrong-origin-project",
+            api_domain: "api.example.test",
+            env_file: envFile,
+            environment: "test",
+        });
+
+        expect(response.isError).toBe(true);
+        expect(JSON.parse(response.content[0].text).error.code).toBe("OUTCOME_UNKNOWN");
+        expect(response.content[0].text).not.toContain(CREATE_SERVICE_ROLE_KEY);
+        expect(() => readFileSync(envFile, "utf8")).toThrow();
+    });
+
+    test("keeps default create output credential-free without requesting delivery", async () => {
+        let createRequest: Record<string, unknown> | undefined;
+        const projectCallback = captureAdminProjectTool({
+            post: async (_path: string, body: Record<string, unknown>) => {
+                createRequest = body;
+                return {
+                    ok: true,
+                    status: 201,
+                    data: {
+                        ref: CREATE_PROJECT_REF,
+                        api: { url: `https://${CREATE_PROJECT_REF}.api.example.test` },
+                        jwt_secret: "ignored-secret",
+                    },
+                };
+            },
+        });
+
+        const response = await projectCallback({ action: "create", name: "safe-default" });
+        const receipt = JSON.parse(response.content[0].text);
+
+        expect(response.isError).not.toBe(true);
+        expect(createRequest).not.toHaveProperty("credential_delivery");
+        expect(receipt).toEqual({
+            schema: "supacloud.cli.release-control.v1",
+            ok: true,
+            operation: "project.create",
+            project_ref: CREATE_PROJECT_REF,
+            api_url: `https://${CREATE_PROJECT_REF}.api.example.test`,
+            credentials_written: false,
+        });
+        expect(response.content[0].text).not.toContain("ignored-secret");
+    });
+
+    test("fails closed if an unrequested response contains one-time credentials", async () => {
+        const projectCallback = captureAdminProjectTool({
+            post: async () => ({ ok: true, status: 201, data: createResponse() }),
+        });
+
+        const response = await projectCallback({
+            action: "create",
+            name: "unexpected-credential-project",
+            api_domain: "api.example.test",
+        });
+
+        expect(response.isError).toBe(true);
+        expect(JSON.parse(response.content[0].text).error).toEqual({
+            code: "INVALID_RESPONSE",
+            http_status: 201,
+        });
+        expect(response.content[0].text).not.toContain(CREATE_SERVICE_ROLE_KEY);
+    });
+
+    test.each([
+        {},
+        { api_domain: "" },
+        { api_domain: "api.example.test/path" },
+        { api_domain: "api..example.test" },
+        { api_domain: "-api.example.test" },
+        { api_domain: "_api.example.test" },
+        { api_domain: "api.example.test." },
+        { api_domain: "." },
+        { domain: "https://example.test" },
+    ])("requires a complete API domain before remote credential delivery", async domainArgs => {
+        let postCalls = 0;
+        const projectCallback = captureAdminProjectTool({
+            post: async () => {
+                postCalls += 1;
+                return { ok: true, status: 201, data: createResponse() };
+            },
+        });
+
+        const response = await projectCallback({
+            action: "create",
+            name: "domain-binding-required",
+            env_file: join(createSandbox(), "domain-binding.env"),
+            environment: "test",
+            ...domainArgs,
+        });
+
+        expect(postCalls).toBe(0);
+        expect(response.isError).toBe(true);
+        expect(JSON.parse(response.content[0].text).error).toEqual({
+            code: "API_DOMAIN_BINDING_REQUIRED",
+            http_status: null,
+        });
+    });
+
+    test.each([undefined, "", "staging", "prod", "production "])(
+        "requires an exact test or production environment before remote credential delivery",
+        async environment => {
+            let postCalls = 0;
+            const projectCallback = captureAdminProjectTool({
+                post: async () => {
+                    postCalls += 1;
+                    return { ok: true, status: 201, data: createResponse() };
+                },
+            });
+
+            const response = await projectCallback({
+                action: "create",
+                name: "environment-binding-required",
+                api_domain: "api.example.test",
+                env_file: join(createSandbox(), "environment-binding.env"),
+                environment,
+            });
+
+            expect(postCalls).toBe(0);
+            expect(response.isError).toBe(true);
+            expect(JSON.parse(response.content[0].text).error).toEqual({
+                code: "ENVIRONMENT_BINDING_REQUIRED",
+                http_status: null,
+            });
+        },
+    );
+
+    test("preflights the env path before creating a project", async () => {
+        const directory = createSandbox();
+        const envFile = join(directory, "existing.env");
+        writeFileSync(envFile, "keep-me");
+        let postCalls = 0;
+        const projectCallback = captureAdminProjectTool({
+            post: async () => {
+                postCalls += 1;
+                return { ok: true, status: 201, data: createResponse() };
+            },
+        });
+
+        const response = await projectCallback({
+            action: "create",
+            name: "must-not-run",
+            api_domain: "api.example.test",
+            env_file: envFile,
+            environment: "test",
+        });
+
+        expect(postCalls).toBe(0);
+        expect(response.isError).toBe(true);
+        expect(JSON.parse(response.content[0].text).error).toEqual({
+            code: "ENV_FILE_EXISTS",
+            http_status: null,
+        });
+        expect(readFileSync(envFile, "utf8")).toBe("keep-me");
+    });
+
+    test.each(["darwin", "win32"] as const)(
+        "fails closed on %s before requesting remote credentials or creating a file",
+        async platform => {
+            let postCalls = 0;
+            const fileOperations = { ...testProjectEnvFileOperations(), platform };
+            const projectCallback = captureAdminProjectTool({
+                post: async () => {
+                    postCalls += 1;
+                    return { ok: true, status: 201, data: createResponse() };
+                },
+            }, { projectEnvFileOperations: fileOperations });
+            const directory = createSandbox();
+            const envFile = join(directory, `${platform}.env`);
+
+            const response = await projectCallback({
+                action: "create",
+                name: "unsupported-platform-project",
+                api_domain: "api.example.test",
+                env_file: envFile,
+                environment: "test",
+            });
+
+            expect(postCalls).toBe(0);
+            expect(JSON.parse(response.content[0].text).error.code)
+                .toBe("ENV_FILE_PLATFORM_UNSUPPORTED");
+            expect(() => readFileSync(envFile, "utf8")).toThrow();
+        },
+    );
+
+    test("reserves the env target before the remote credential request", async () => {
+        const directory = createSandbox();
+        const envFile = join(directory, "raced.env");
+        let exclusiveRaceBlocked = false;
+        const projectCallback = captureAdminProjectTool({
+            post: async () => {
+                try {
+                    writeFileSync(envFile, "created-during-request", { flag: "wx" });
+                } catch (error: unknown) {
+                    exclusiveRaceBlocked = (error as { code?: string }).code === "EEXIST";
+                }
+                return { ok: true, status: 201, data: createResponse() };
+            },
+        });
+
+        const response = await projectCallback({
+            action: "create",
+            name: "raced-project",
+            api_domain: "api.example.test",
+            env_file: envFile,
+            environment: "test",
+        });
+        const receipt = JSON.parse(response.content[0].text);
+
+        expect(response.isError).not.toBe(true);
+        expect(exclusiveRaceBlocked).toBe(true);
+        expect(receipt).toEqual({
+            schema: "supacloud.cli.release-control.v1",
+            ok: true,
+            operation: "project.create",
+            project_ref: CREATE_PROJECT_REF,
+            api_url: "https://api.example.test",
+            credentials_written: true,
+            env_file: envFile,
+            env_file_scope: "project_application",
+        });
+        expect(response.content[0].text).not.toContain(CREATE_SERVICE_ROLE_KEY);
+        expect(readFileSync(envFile, "utf8")).toContain(CREATE_SERVICE_ROLE_KEY);
+    });
+
+    test("reports unknown credential state when secure cleanup cannot be verified", async () => {
+        const directory = createSandbox();
+        const envFile = join(directory, "cleanup-unknown.env");
+        const baseOperations = testProjectEnvFileOperations();
+        let credentialsWritten = false;
+        const fileOperations: ProjectEnvFileOperations = {
+            ...baseOperations,
+            async openExclusiveAt(parent, filename, mode) {
+                const openFile = await baseOperations.openExclusiveAt(parent, filename, mode);
+                return {
+                    chmod: requestedMode => openFile.chmod(requestedMode),
+                    writeFile: async contents => {
+                        await openFile.writeFile(contents);
+                        credentialsWritten = true;
+                    },
+                    sync: () => openFile.sync(),
+                    stat: async () => {
+                        const stat = await openFile.stat();
+                        return {
+                            dev: stat.dev,
+                            ino: stat.ino,
+                            mode: stat.mode,
+                            isDirectory: () => false,
+                            isFile: () => !credentialsWritten,
+                            isSymbolicLink: () => false,
+                        };
+                    },
+                    truncate: async () => { throw new Error("private-truncate-detail"); },
+                    close: () => openFile.close(),
+                };
+            },
+            unlinkAt: async () => { throw new Error("private-unlink-detail"); },
+        };
+        const projectCallback = captureAdminProjectTool({
+            post: async () => ({ ok: true, status: 201, data: createResponse() }),
+        }, { projectEnvFileOperations: fileOperations });
+
+        const response = await projectCallback({
+            action: "create",
+            name: "cleanup-unknown-project",
+            api_domain: "api.example.test",
+            env_file: envFile,
+            environment: "production",
+        });
+        const receipt = JSON.parse(response.content[0].text);
+
+        expect(response.isError).toBe(true);
+        expect(receipt).toEqual({
+            schema: "supacloud.cli.release-control.v1",
+            ok: false,
+            operation: "project.create",
+            project_ref: CREATE_PROJECT_REF,
+            api_url: "https://api.example.test",
+            remote_created: true,
+            credential_file_state: "unknown",
+            retry_safe: false,
+            error: { code: "ENV_FILE_CLEANUP_FAILED", http_status: 201 },
+        });
+        expect(receipt).not.toHaveProperty("credentials_written");
+        expect(response.content[0].text).not.toContain(CREATE_SERVICE_ROLE_KEY);
+        expect(response.content[0].text).not.toContain("private-");
+        expect(readFileSync(envFile, "utf8")).toContain(CREATE_SERVICE_ROLE_KEY);
+        expect(readFileSync(envFile, "utf8")).toContain("SUPACLOUD_ENV=production");
+    });
+
+    test.each([
+        [400, "HTTP_ERROR"],
+        [408, "OUTCOME_UNKNOWN"],
+        [500, "OUTCOME_UNKNOWN"],
+        [503, "OUTCOME_UNKNOWN"],
+    ] as const)("classifies HTTP %s without reflecting its response", async (status, code) => {
+        const remoteSecret = `remote-http-${status}-secret`;
+        const envFile = join(createSandbox(), `${status}.env`);
+        const projectCallback = captureAdminProjectTool({
+            post: async () => ({
+                ok: false,
+                status,
+                data: { error: remoteSecret, service_role_key: CREATE_SERVICE_ROLE_KEY },
+            }),
+        });
+
+        const response = await projectCallback({
+            action: "create",
+            name: "http-failure-project",
+            api_domain: "api.example.test",
+            env_file: envFile,
+            environment: "test",
+        });
+
+        expect(response.isError).toBe(true);
+        expect(JSON.parse(response.content[0].text).error).toEqual({ code, http_status: status });
+        expect(response.content[0].text).not.toContain(remoteSecret);
+        expect(response.content[0].text).not.toContain(CREATE_SERVICE_ROLE_KEY);
+        expect(existsSync(envFile)).toBe(false);
+    });
+
+    test("classifies a transport failure as outcome unknown with no HTTP status", async () => {
+        const envFile = join(createSandbox(), "transport.env");
+        const projectCallback = captureAdminProjectTool({
+            post: async () => ({
+                ok: false,
+                status: 500,
+                transportError: true,
+                data: { error: "private-network-detail" },
+            }),
+        });
+
+        const response = await projectCallback({
+            action: "create",
+            name: "transport-failure-project",
+            api_domain: "api.example.test",
+            env_file: envFile,
+            environment: "test",
+        });
+
+        expect(response.isError).toBe(true);
+        expect(JSON.parse(response.content[0].text).error).toEqual({
+            code: "OUTCOME_UNKNOWN",
+            http_status: null,
+        });
+        expect(response.content[0].text).not.toContain("private-network-detail");
+        expect(existsSync(envFile)).toBe(false);
+    });
+
+    test("treats an unexpected successful HTTP status as outcome unknown", async () => {
+        const envFile = join(createSandbox(), "unexpected-status.env");
+        const projectCallback = captureAdminProjectTool({
+            post: async () => ({ ok: true, status: 200, data: createResponse() }),
+        });
+
+        const response = await projectCallback({
+            action: "create",
+            name: "unexpected-status-project",
+            api_domain: "api.example.test",
+            env_file: envFile,
+            environment: "test",
+        });
+
+        expect(response.isError).toBe(true);
+        expect(JSON.parse(response.content[0].text).error).toEqual({
+            code: "OUTCOME_UNKNOWN",
+            http_status: 200,
+        });
+        expect(response.content[0].text).not.toContain(CREATE_SERVICE_ROLE_KEY);
+        expect(existsSync(envFile)).toBe(false);
+    });
+
+    test("rejects hostile 2xx payloads without reflecting their fields", async () => {
+        const remoteSecret = "hostile-success-secret";
+        const hostileResponses = [
+            { ref: remoteSecret, api: { url: "https://api.example.test" }, credentials: { service_role_key: CREATE_SERVICE_ROLE_KEY } },
+            { ref: CREATE_PROJECT_REF, api: { url: `https://${remoteSecret}.example.test` }, credentials: { service_role_key: CREATE_SERVICE_ROLE_KEY } },
+            { ref: CREATE_PROJECT_REF, api: { url: "https://api.example.test" }, credentials: { service_role_key: `${CREATE_SERVICE_ROLE_KEY}\n${remoteSecret}` } },
+            { ref: CREATE_PROJECT_REF, api: { url: "https://api.example.test" }, credentials: remoteSecret },
+        ];
+        let responseIndex = 0;
+        const directory = createSandbox();
+        const projectCallback = captureAdminProjectTool({
+            post: async () => ({ ok: true, status: 201, data: hostileResponses[responseIndex++] }),
+        });
+
+        for (let index = 0; index < hostileResponses.length; index++) {
+            const response = await projectCallback({
+                action: "create",
+                name: "hostile-project",
+                api_domain: "api.example.test",
+                env_file: join(directory, `${index}.env`),
+                environment: "test",
+            });
+            expect(response.isError).toBe(true);
+            const expectedCode = index < 2 ? "OUTCOME_UNKNOWN" : "INVALID_RESPONSE";
+            expect(JSON.parse(response.content[0].text).error.code).toBe(expectedCode);
+            expect(response.content[0].text).not.toContain(remoteSecret);
+            expect(response.content[0].text).not.toContain(CREATE_SERVICE_ROLE_KEY);
+            expect(existsSync(join(directory, `${index}.env`))).toBe(false);
+        }
     });
 });
 
