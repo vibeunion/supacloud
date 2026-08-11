@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.1](https://github.com/zuohuadong/supacloud/compare/web-console-v0.30.0...web-console-v0.30.1) (2026-08-11)
+
+
+### Bug Fixes
+
+* **functions:** support legacy v0 CAS and readback ([5ee1b8b](https://github.com/zuohuadong/supacloud/commit/5ee1b8b5ec5f7177839cb22d497156e93bca589a))
+
 ## [0.30.0](https://github.com/zuohuadong/supacloud/compare/web-console-v0.29.0...web-console-v0.30.0) (2026-08-11)
 
 
