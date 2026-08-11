@@ -71,6 +71,8 @@ supacloud-cli branch promote --branch_ref preview123 --plan_checksum <sha256>
 supacloud-cli edge_functions deploy --ref abc123 --slug hello --path ./supabase/functions/hello
 supacloud-cli edge_functions deploy_bundle --ref abc123 --slug hello --files '{"index.ts":"export default { fetch: () => new Response(\"ok\") }"}'
 supacloud-cli edge_functions source --ref abc123 --slug hello --output ./hello.ts
+supacloud-cli edge_functions activate --ref abc123 --slug hello --version 3
+supacloud-cli scheduled_functions list --ref abc123
 ```
 
 `edge_functions deploy --path` bundles local TypeScript and dependencies with
@@ -81,6 +83,37 @@ module policy consistently for CLI, Web Console, and direct API deployments.
 Use `source --output <file>` for large Functions so terminal or automation output
 limits cannot truncate the original TS/JS source code. The destination must not
 already exist.
+
+`edge_functions activate` restores an existing immutable Function version and
+returns a machine-readable receipt containing the activated version and JWT
+policy. HTTP and malformed-response failures exit non-zero without echoing the
+server response body.
+
+Mutation receipts use schema `supacloud.cli.release-control.v1`. An
+`OUTCOME_UNKNOWN` error means the server may have committed the mutation before
+the response was lost or failed validation; read back current state before any
+retry.
+
+Scheduled Function lifecycle operations are also project-scoped:
+
+```bash
+supacloud-cli scheduled_functions create --ref abc123 --name nightly \
+  --slug cleanup --cron "0 2 * * *" --method POST
+supacloud-cli scheduled_functions update --ref abc123 --schedule_id <id> \
+  --cron "0 3 * * *"
+supacloud-cli scheduled_functions delete --ref abc123 --schedule_id <id>
+```
+
+Schedule IDs are canonical UUIDv4 values returned by create/list. Cron values
+use bounded numeric five-field syntax with wildcards, lists, ranges, and steps;
+out-of-range endpoints and steps are rejected before HTTP dispatch.
+
+Use `--body_file ./payload.json` for a JSON-object request body. Header values
+must come from environment variables: pass a JSON name mapping such as
+`--header_env '{"x-schedule-token":"SCHEDULE_TOKEN"}'`. Platform-owned
+`authorization`, `apikey`, and `x-project-ref` headers cannot be overridden. Receipts never
+include header values or body content; list and mutation receipts report only
+whether the body is empty and the configured header names.
 
 Branch promotion is migration-first. `branch promotion_plan` prints pending
 versions, names, statement counts, and checksums without echoing SQL into terminal

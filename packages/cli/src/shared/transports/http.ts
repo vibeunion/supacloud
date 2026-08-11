@@ -14,6 +14,7 @@ export interface HttpResult<T = unknown> {
     ok: boolean;
     status: number;
     data: T;
+    transportError?: boolean;
 }
 
 const DEFAULT_TIMEOUT = 30_000;
@@ -31,6 +32,19 @@ function isRetryableError(error: unknown): boolean {
     return networkError.name === "AbortError"
         || networkError.code === "ECONNREFUSED"
         || networkError.code === "ECONNRESET";
+}
+
+function transportFailure<T>(error: unknown): HttpResult<T> {
+    const networkError = error instanceof Error ? error as Error & { code?: string } : null;
+    const code = networkError?.name === "AbortError"
+        ? "TIMEOUT"
+        : networkError?.code === "ECONNRESET" ? "CONNECTION_RESET" : "NETWORK_ERROR";
+    return {
+        ok: false,
+        status: 500,
+        data: { error: "Network Error", code } as T,
+        transportError: true,
+    };
 }
 
 async function fetchWithTimeout(url: string, options: RequestInit): Promise<Response> {
@@ -97,8 +111,8 @@ export class HttpTransport {
             });
             const data = (await res.json().catch(() => null)) as T;
             return { ok: res.ok, status: res.status, data };
-        } catch (error: any) {
-            return { ok: false, status: 500, data: { error: "Network Error", details: error.message } as any };
+        } catch (error: unknown) {
+            return transportFailure<T>(error);
         }
     }
 
@@ -111,8 +125,8 @@ export class HttpTransport {
             });
             const data = (await res.json().catch(() => null)) as T;
             return { ok: res.ok, status: res.status, data };
-        } catch (error: any) {
-            return { ok: false, status: 500, data: { error: "Network Error", details: error.message } as any };
+        } catch (error: unknown) {
+            return transportFailure<T>(error);
         }
     }
 
@@ -126,8 +140,8 @@ export class HttpTransport {
             });
             const data = (await res.json().catch(() => null)) as T;
             return { ok: res.ok, status: res.status, data };
-        } catch (error: any) {
-            return { ok: false, status: 500, data: { error: "Network Error", details: error.message } as any };
+        } catch (error: unknown) {
+            return transportFailure<T>(error);
         }
     }
 
@@ -140,8 +154,8 @@ export class HttpTransport {
             });
             const data = (await res.json().catch(() => null)) as T;
             return { ok: res.ok, status: res.status, data };
-        } catch (error: any) {
-            return { ok: false, status: 500, data: { error: "Network Error", details: error.message } as any };
+        } catch (error: unknown) {
+            return transportFailure<T>(error);
         }
     }
 
@@ -154,8 +168,8 @@ export class HttpTransport {
             });
             const data = (await res.json().catch(() => null)) as T;
             return { ok: res.ok, status: res.status, data };
-        } catch (error: any) {
-            return { ok: false, status: 500, data: { error: "Network Error", details: error.message } as any };
+        } catch (error: unknown) {
+            return transportFailure<T>(error);
         }
     }
 
@@ -167,8 +181,8 @@ export class HttpTransport {
             });
             const data = (await res.json().catch(() => null)) as T;
             return { ok: res.ok, status: res.status, data };
-        } catch (error: any) {
-            return { ok: false, status: 500, data: { error: "Network Error", details: error.message } as any };
+        } catch (error: unknown) {
+            return transportFailure<T>(error);
         }
     }
 
