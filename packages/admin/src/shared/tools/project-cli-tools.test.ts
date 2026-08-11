@@ -11,7 +11,7 @@ import {
     statSync,
     writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { lstat, open, realpath, unlink } from "node:fs/promises";
 import { registerAdminProjectCliTools } from "./project-cli-tools";
@@ -74,7 +74,7 @@ const CREATE_SERVICE_ROLE_KEY = [
 ].join(".");
 
 function createSandbox(): string {
-    const path = realpathSync(mkdtempSync(join(tmpdir(), "supacloud-admin-create-")));
+    const path = realpathSync(mkdtempSync(join(homedir(), ".supacloud-admin-create-")));
     createSandboxes.push(path);
     return path;
 }
@@ -488,9 +488,14 @@ describe("admin project create", () => {
         expect(readFileSync(envFile, "utf8")).toBe("keep-me");
     });
 
-    test.each(["direct parent", "ancestor"] as const)(
-        "rejects a group or world-writable %s before the remote create",
-        async unsafeLevel => {
+    test.each([
+        ["mode 0777 direct parent", "direct parent", 0o777],
+        ["mode 1777 direct parent", "direct parent", 0o1777],
+        ["mode 0777 ancestor", "ancestor", 0o777],
+        ["mode 1777 ancestor", "ancestor", 0o1777],
+    ] as const)(
+        "rejects a %s before the remote create",
+        async (_scenario, unsafeLevel, unsafeMode) => {
             const root = createSandbox();
             const writableDirectory = join(root, "writable");
             const targetParent = unsafeLevel === "direct parent"
@@ -498,15 +503,24 @@ describe("admin project create", () => {
                 : join(writableDirectory, "protected");
             mkdirSync(writableDirectory, { mode: 0o700 });
             if (targetParent !== writableDirectory) mkdirSync(targetParent, { mode: 0o700 });
-            chmodSync(writableDirectory, 0o777);
+            chmodSync(writableDirectory, unsafeMode);
             const envFile = join(targetParent, "credentials.env");
             let postCalls = 0;
+            let reservationCalls = 0;
+            const baseFileOperations = testProjectEnvFileOperations();
+            const fileOperations: ProjectEnvFileOperations = {
+                ...baseFileOperations,
+                async openExclusiveAt(directory, filename, mode) {
+                    reservationCalls += 1;
+                    return baseFileOperations.openExclusiveAt(directory, filename, mode);
+                },
+            };
             const projectCallback = captureAdminProjectTool({
                 post: async () => {
                     postCalls += 1;
                     return { ok: true, status: 201, data: createResponse() };
                 },
-            });
+            }, { projectEnvFileOperations: fileOperations });
 
             const response = await projectCallback({
                 action: "create",
@@ -517,6 +531,7 @@ describe("admin project create", () => {
             });
 
             expect(postCalls).toBe(0);
+            expect(reservationCalls).toBe(0);
             expect(response.isError).toBe(true);
             expect(JSON.parse(response.content[0].text).error.code)
                 .toBe("ENV_FILE_PARENT_INVALID");

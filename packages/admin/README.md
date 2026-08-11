@@ -169,12 +169,13 @@ supported only on Linux, where Admin holds the canonical parent directory open
 and performs create, verification, and cleanup through `/proc/self/fd`. macOS
 and Windows fail with `ENV_FILE_PLATFORM_UNSUPPORTED` before creating a file or
 requesting remote credentials. On Linux, the target is exclusively reserved at
-mode `0600` before the remote mutation. Every path ancestor must be owned by
-root or the Admin process user and must not grant group/world write access;
-root/user-owned sticky directories such as `/tmp` retain their kernel entry
-protection. Parent and file device/inode identities are checked before and
-after writing, including through the held parent descriptor after the file is
-closed. The file and parent directory are synced before success is reported.
+mode `0600` before the remote mutation. The direct parent must be owned by the
+Admin process user. Every ancestor must be owned by root or that user and must
+not grant group/world write access; paths below writable sticky directories
+such as `/tmp` are rejected. Parent ownership, mode, and device/inode identity,
+plus file ownership, mode, and device/inode identity, are checked before and
+after writing through the held parent descriptor. The file and parent directory
+are synced before success is reported.
 The response API URL and project name must exactly match the request binding;
 the origin comparison includes the port. Existing files, symlinks, replaced
 parents, non-canonical paths, and missing or untrusted directories are rejected.

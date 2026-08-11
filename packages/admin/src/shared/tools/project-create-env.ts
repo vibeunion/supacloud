@@ -14,7 +14,6 @@ const SERVICE_ROLE_ALGORITHMS = new Set(["HS256", "ES256"]);
 const MAX_ENV_FILE_PATH_BYTES = 4_096;
 const ENV_FILE_MODE = 0o600;
 const GROUP_OR_WORLD_WRITE_MODE = 0o022;
-const STICKY_DIRECTORY_MODE = 0o1000;
 const PROC_SELF_FD = "/proc/self/fd";
 
 export type ProjectCreateEnvErrorCode =
@@ -109,6 +108,8 @@ interface ProjectEnvFileIdentity {
 
 interface ProjectEnvParentIdentity extends ProjectEnvFileIdentity {
     canonicalPath: string;
+    mode: number;
+    uid: number;
 }
 
 interface FailedProjectEnvFileCleanup {
@@ -156,30 +157,58 @@ async function assertTargetAbsent(
     throw new ProjectCreateEnvError("ENV_FILE_EXISTS");
 }
 
+function hasStableCanonicalParent(
+    directory: string,
+    canonicalParent: string,
+    parentBeforeRealpath: ProjectEnvFileStat,
+    parentAfterRealpath: ProjectEnvFileStat,
+): boolean {
+    return parentBeforeRealpath.isDirectory()
+        && !parentBeforeRealpath.isSymbolicLink()
+        && parentAfterRealpath.isDirectory()
+        && !parentAfterRealpath.isSymbolicLink()
+        && canonicalParent === directory
+        && sameFileIdentity(parentBeforeRealpath, parentAfterRealpath);
+}
+
+function parentIdentity(
+    canonicalPath: string,
+    parentStat: ProjectEnvFileStat,
+): ProjectEnvParentIdentity {
+    return {
+        canonicalPath,
+        dev: parentStat.dev,
+        ino: parentStat.ino,
+        mode: parentStat.mode,
+        uid: parentStat.uid,
+    };
+}
+
+async function verifiedParentIdentity(
+    directory: string,
+    operations: ProjectEnvFileOperations,
+): Promise<ProjectEnvParentIdentity> {
+    const parentBeforeRealpath = await operations.lstat(directory);
+    const canonicalParent = await operations.realpath(directory);
+    await assertTrustedDirectoryChain(directory, operations);
+    const parentAfterRealpath = await operations.lstat(directory);
+    assertOwnedTargetParent(parentAfterRealpath, operations.effectiveUid());
+    const stableParent = hasStableCanonicalParent(
+        directory,
+        canonicalParent,
+        parentBeforeRealpath,
+        parentAfterRealpath,
+    );
+    if (!stableParent) throw new ProjectCreateEnvError("ENV_FILE_PARENT_INVALID");
+    return parentIdentity(canonicalParent, parentAfterRealpath);
+}
+
 async function assertSafeParent(
     directory: string,
     operations: ProjectEnvFileOperations,
 ): Promise<ProjectEnvParentIdentity> {
     try {
-        const parentBeforeRealpath = await operations.lstat(directory);
-        const canonicalParent = await operations.realpath(directory);
-        await assertTrustedDirectoryChain(directory, operations);
-        const parentAfterRealpath = await operations.lstat(directory);
-        if (
-            !parentBeforeRealpath.isDirectory()
-            || parentBeforeRealpath.isSymbolicLink()
-            || !parentAfterRealpath.isDirectory()
-            || parentAfterRealpath.isSymbolicLink()
-            || canonicalParent !== directory
-            || !sameFileIdentity(parentBeforeRealpath, parentAfterRealpath)
-        ) {
-            throw new ProjectCreateEnvError("ENV_FILE_PARENT_INVALID");
-        }
-        return {
-            canonicalPath: canonicalParent,
-            dev: parentAfterRealpath.dev,
-            ino: parentAfterRealpath.ino,
-        };
+        return await verifiedParentIdentity(directory, operations);
     } catch (error: unknown) {
         if (error instanceof ProjectCreateEnvError) throw error;
         throw new ProjectCreateEnvError("ENV_FILE_PARENT_INVALID");
@@ -197,12 +226,18 @@ function directoryChain(directory: string): string[] {
     return ancestors;
 }
 
-function assertTrustedDirectory(directoryStat: ProjectEnvFileStat, effectiveUid: number): void {
+function assertTrustedAncestor(directoryStat: ProjectEnvFileStat, effectiveUid: number): void {
     const ownerIsTrusted = directoryStat.uid === 0 || directoryStat.uid === effectiveUid;
     const hasUntrustedWriteAccess = Boolean(directoryStat.mode & GROUP_OR_WORLD_WRITE_MODE);
-    const stickyEntryProtection = Boolean(directoryStat.mode & STICKY_DIRECTORY_MODE);
     if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()
-        || !ownerIsTrusted || (hasUntrustedWriteAccess && !stickyEntryProtection)) {
+        || !ownerIsTrusted || hasUntrustedWriteAccess) {
+        throw new ProjectCreateEnvError("ENV_FILE_PARENT_INVALID");
+    }
+}
+
+function assertOwnedTargetParent(directoryStat: ProjectEnvFileStat, effectiveUid: number): void {
+    assertTrustedAncestor(directoryStat, effectiveUid);
+    if (directoryStat.uid !== effectiveUid) {
         throw new ProjectCreateEnvError("ENV_FILE_PARENT_INVALID");
     }
 }
@@ -216,7 +251,7 @@ async function assertTrustedDirectoryChain(
         throw new ProjectCreateEnvError("ENV_FILE_PARENT_INVALID");
     }
     for (const ancestor of directoryChain(directory)) {
-        assertTrustedDirectory(await operations.lstat(ancestor), effectiveUid);
+        assertTrustedAncestor(await operations.lstat(ancestor), effectiveUid);
     }
 }
 
@@ -225,6 +260,15 @@ function sameFileIdentity(
     second: ProjectEnvFileIdentity,
 ): boolean {
     return first.dev === second.dev && first.ino === second.ino;
+}
+
+function sameParentIdentity(
+    current: ProjectEnvFileIdentity & Pick<ProjectEnvFileStat, "mode" | "uid">,
+    expected: ProjectEnvParentIdentity,
+): boolean {
+    return sameFileIdentity(current, expected)
+        && current.mode === expected.mode
+        && current.uid === expected.uid;
 }
 
 function hasSafeRequestedPath(requestedPath: string): boolean {
@@ -400,10 +444,10 @@ async function assertDirectoryBinding(
 ): Promise<void> {
     const heldDirectoryStat = await directoryHandle.stat();
     const currentPathIdentity = await assertSafeParent(path, operations);
+    assertOwnedTargetParent(heldDirectoryStat, operations.effectiveUid());
     if (
-        !heldDirectoryStat.isDirectory()
-        || !sameFileIdentity(heldDirectoryStat, expectedIdentity)
-        || !sameFileIdentity(currentPathIdentity, expectedIdentity)
+        !sameParentIdentity(heldDirectoryStat, expectedIdentity)
+        || !sameParentIdentity(currentPathIdentity, expectedIdentity)
     ) {
         throw new ProjectCreateEnvError("ENV_FILE_PARENT_INVALID");
     }

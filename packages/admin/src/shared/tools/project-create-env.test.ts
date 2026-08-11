@@ -15,7 +15,7 @@ import {
     writeFileSync,
 } from "node:fs";
 import { lstat, open, realpath, unlink } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import {
     parseProjectCreateCredentials,
@@ -88,7 +88,7 @@ function roleKey(
 const SERVICE_ROLE_KEY = roleKey("service_role");
 
 function sandbox(): string {
-    const path = realpathSync(mkdtempSync(join(tmpdir(), "supacloud-project-env-")));
+    const path = realpathSync(mkdtempSync(join(homedir(), ".supacloud-project-env-")));
     sandboxes.push(path);
     return path;
 }
@@ -270,26 +270,58 @@ describe.skipIf(process.platform !== "linux")("secure project env file", () => {
             .rejects.toMatchObject({ code: "ENV_FILE_PATH_INVALID" });
     });
 
-    test("rejects group or world-writable target parents and ancestors", async () => {
-        const root = sandbox();
-        const writableParent = join(root, "writable-parent");
-        const writableAncestor = join(root, "writable-ancestor");
-        const protectedParent = join(writableAncestor, "protected-parent");
-        mkdirSync(writableParent, { mode: 0o700 });
-        mkdirSync(writableAncestor, { mode: 0o700 });
-        mkdirSync(protectedParent, { mode: 0o700 });
-        chmodSync(writableParent, 0o777);
-        chmodSync(writableAncestor, 0o777);
+    test.each([
+        ["0777", 0o777],
+        ["1777", 0o1777],
+    ] as const)(
+        "rejects mode %s target parents and ancestors",
+        async (_modeName, unsafeMode) => {
+            const root = sandbox();
+            const writableParent = join(root, "writable-parent");
+            const writableAncestor = join(root, "writable-ancestor");
+            const protectedParent = join(writableAncestor, "protected-parent");
+            mkdirSync(writableParent, { mode: 0o700 });
+            mkdirSync(writableAncestor, { mode: 0o700 });
+            mkdirSync(protectedParent, { mode: 0o700 });
+            chmodSync(writableParent, unsafeMode);
+            chmodSync(writableAncestor, unsafeMode);
 
-        for (const target of [
-            join(writableParent, "direct.env"),
-            join(protectedParent, "ancestor.env"),
-        ]) {
-            await expect(prepareProjectEnvFile(target, "test"))
-                .rejects.toMatchObject({ code: "ENV_FILE_PARENT_INVALID" });
-        }
-        expect(readdirSync(writableParent)).toEqual([]);
-        expect(readdirSync(protectedParent)).toEqual([]);
+            for (const target of [
+                join(writableParent, "direct.env"),
+                join(protectedParent, "ancestor.env"),
+            ]) {
+                await expect(prepareProjectEnvFile(target, "test"))
+                    .rejects.toMatchObject({ code: "ENV_FILE_PARENT_INVALID" });
+            }
+            expect(readdirSync(writableParent)).toEqual([]);
+            expect(readdirSync(protectedParent)).toEqual([]);
+        },
+    );
+
+    test("rejects a target parent not owned by the effective user", async () => {
+        const baseOperations = linuxTestOperations();
+        const directory = sandbox();
+        const effectiveUid = process.geteuid?.() ?? 0;
+        const operations: ProjectEnvFileOperations = {
+            ...baseOperations,
+            async lstat(path) {
+                const pathStat = await baseOperations.lstat(path);
+                if (path !== directory) return pathStat;
+                return {
+                    dev: pathStat.dev,
+                    ino: pathStat.ino,
+                    mode: pathStat.mode,
+                    uid: effectiveUid === 0 ? 1 : effectiveUid + 1,
+                    isDirectory: () => pathStat.isDirectory(),
+                    isFile: () => pathStat.isFile(),
+                    isSymbolicLink: () => pathStat.isSymbolicLink(),
+                };
+            },
+        };
+
+        await expect(prepareProjectEnvFile(join(directory, "foreign.env"), "test", operations))
+            .rejects.toMatchObject({ code: "ENV_FILE_PARENT_INVALID" });
+        expect(readdirSync(directory)).toEqual([]);
     });
 
     test.each(["chmod", "write", "sync", "stat", "close"] as const)(

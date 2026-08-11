@@ -14,7 +14,7 @@ import {
     writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { createAdminTools } from "./index";
 import { cliToolResultIsError, formatCliError } from "./shared/cli";
 import { schemaEnumValues } from "./shared/schema";
@@ -990,7 +990,7 @@ describe("supacloud-admin process contract", () => {
                 }, { status: 201 });
             },
         });
-        const sandbox = realpathSync(mkdtempSync(join(tmpdir(), "supacloud-admin-expired-")));
+        const sandbox = realpathSync(mkdtempSync(join(homedir(), ".supacloud-admin-expired-")));
         const envFile = join(sandbox, ".env.project-credentials.test");
 
         try {
@@ -1032,7 +1032,7 @@ describe("supacloud-admin process contract", () => {
             "s".repeat(43),
         ].join(".");
         const privateSentinel = "private-process-response-secret";
-        const sandbox = realpathSync(mkdtempSync(join(tmpdir(), "supacloud-admin-create-process-")));
+        const sandbox = realpathSync(mkdtempSync(join(homedir(), ".supacloud-admin-create-process-")));
         const envFile = join(sandbox, ".env.project-credentials.test");
         let requestBody: Record<string, unknown> | undefined;
         const apiServer = Bun.serve({
