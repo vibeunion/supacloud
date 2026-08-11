@@ -1,4 +1,17 @@
 const CANONICAL_ACTIVE_VERSION_PATTERN = /^[1-9]\d{0,15}$/;
+const CANONICAL_CONFIGURED_VERSION_PATTERN = /^(?:0|[1-9]\d{0,15})$/;
+
+export function assertCanonicalConfiguredFunctionVersion(
+  version: unknown,
+): asserts version is string {
+  if (
+    typeof version !== "string" ||
+    !CANONICAL_CONFIGURED_VERSION_PATTERN.test(version) ||
+    !Number.isSafeInteger(Number(version))
+  ) {
+    throw new Error("Configured function version must be a canonical non-negative safe integer");
+  }
+}
 
 export function assertCanonicalPositiveFunctionVersion(
   version: string | null | undefined,
@@ -17,6 +30,9 @@ export function resolveFunctionVersionBinding(
   configuredVersion: string | null,
 ): { activeVersion: string | null; responseVersion: string | null } {
   assertCanonicalPositiveFunctionVersion(requestedVersion);
+  if (configuredVersion !== null) {
+    assertCanonicalConfiguredFunctionVersion(configuredVersion);
+  }
   const activeVersion = requestedVersion ?? configuredVersion;
   if (activeVersion === "0") return { activeVersion, responseVersion: null };
   assertCanonicalPositiveFunctionVersion(activeVersion);

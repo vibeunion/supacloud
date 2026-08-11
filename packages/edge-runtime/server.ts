@@ -22,6 +22,7 @@ import {
 } from "./background-forward";
 import { activeFunctionPathCandidates } from "./function-source";
 import {
+  assertCanonicalConfiguredFunctionVersion,
   resolveFunctionVersionBinding,
   resolveTrustedBackgroundFunctionVersionBinding,
 } from "./function-version";
@@ -509,48 +510,74 @@ const configCache = new Map<
 >();
 const CONFIG_CACHE_TTL = 10_000;
 
+type FunctionConfig = { verify_jwt: boolean; version: string | null };
+
+function isMissingFileError(error: unknown): boolean {
+  return error instanceof Error
+    && (error as NodeJS.ErrnoException).code === "ENOENT";
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function configuredVersion(config: Record<string, unknown>): string | null {
+  if (!Object.prototype.hasOwnProperty.call(config, "version")) return null;
+  assertCanonicalConfiguredFunctionVersion(config.version);
+  return config.version;
+}
+
+function parseFunctionConfig(raw: string): FunctionConfig {
+  const config: unknown = JSON.parse(raw);
+  if (!isPlainObject(config)) {
+    throw new Error("Function config must be a plain object");
+  }
+  return {
+    verify_jwt: config.verify_jwt !== false,
+    version: configuredVersion(config),
+  };
+}
+
+async function existingFunctionConfigPath(
+  configPath: string,
+  projectRoot: string,
+): Promise<string | null> {
+  try {
+    await fs.lstat(configPath);
+  } catch (error) {
+    if (isMissingFileError(error)) return null;
+    throw error;
+  }
+  const realConfigPath = await fs.realpath(configPath);
+  if (!isPathInside(realConfigPath, projectRoot)) {
+    throw new Error("Function config path escapes project root");
+  }
+  return realConfigPath;
+}
+
 async function getFunctionConfig(
   projectRef: string,
   functionName: string,
-  projectRoot?: string,
-): Promise<{ verify_jwt: boolean; version: string | null }> {
+  projectRoot: string,
+): Promise<FunctionConfig> {
   const key = `${projectRef}/${functionName}`;
   const cached = configCache.get(key);
   if (cached && cached.expiresAt > Date.now()) {
     return { verify_jwt: cached.verify_jwt, version: cached.version };
   }
 
-  try {
-    const root = projectRoot || await resolveProjectRoot(projectRef);
-    const configPath = path.resolve(root, `${functionName}.config.json`);
-    if (!isPathInside(configPath, root)) {
-      throw new Error("Function config path escapes project root");
-    }
-    const realConfigPath = await fs.realpath(configPath);
-    if (!isPathInside(realConfigPath, root)) {
-      throw new Error("Function config path escapes project root");
-    }
-    const raw = await Bun.file(realConfigPath).text();
-    const config = JSON.parse(raw);
-    const verify_jwt = config.verify_jwt !== false;
-    const version =
-      typeof config.version === "string" && config.version.trim().length > 0
-        ? config.version.trim()
-        : null;
-    configCache.set(key, {
-      verify_jwt,
-      version,
-      expiresAt: Date.now() + CONFIG_CACHE_TTL,
-    });
-    return { verify_jwt, version };
-  } catch {
-    configCache.set(key, {
-      verify_jwt: true,
-      version: null,
-      expiresAt: Date.now() + CONFIG_CACHE_TTL,
-    });
-    return { verify_jwt: true, version: null };
+  const configPath = path.resolve(projectRoot, `${functionName}.config.json`);
+  if (!isPathInside(configPath, projectRoot)) {
+    throw new Error("Function config path escapes project root");
   }
+  const realConfigPath = await existingFunctionConfigPath(configPath, projectRoot);
+  const config = realConfigPath === null
+    ? { verify_jwt: true, version: null }
+    : parseFunctionConfig(await fs.readFile(realConfigPath, "utf8"));
+  configCache.set(key, { ...config, expiresAt: Date.now() + CONFIG_CACHE_TTL });
+  return config;
 }
 
 interface ProjectSecrets {
