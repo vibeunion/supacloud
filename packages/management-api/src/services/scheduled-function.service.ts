@@ -73,7 +73,7 @@ async function writeScheduledFunctions(
     SET config = jsonb_set(
           COALESCE(config, '{}'::jsonb),
           '{scheduled_functions}',
-          ${JSON.stringify(schedules)}::jsonb,
+          ${schedules}::jsonb,
           true
         ),
         updated_at = NOW()

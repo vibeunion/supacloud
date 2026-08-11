@@ -24,7 +24,7 @@ const database = Object.assign(
     if (query.startsWith("UPDATE projects")) {
       updateCount += 1;
       if (!query.includes("jsonb_set")) {
-        const nextConfig = JSON.parse(String(parameters[0])) as Record<string, unknown>;
+        const nextConfig = structuredClone(parameters[0]) as Record<string, unknown>;
         if (Object.prototype.hasOwnProperty.call(projectConfig, "scheduled_functions")) {
           nextConfig.scheduled_functions = structuredClone(projectConfig.scheduled_functions);
         } else {
@@ -35,7 +35,7 @@ const database = Object.assign(
       }
       projectConfig = {
         ...projectConfig,
-        scheduled_functions: JSON.parse(String(parameters[0])),
+        scheduled_functions: structuredClone(parameters[0]),
       };
       return projectExists ? [{ ref: String(parameters[1]) }] : [];
     }
