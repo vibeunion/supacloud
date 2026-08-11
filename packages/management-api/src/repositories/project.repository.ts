@@ -93,7 +93,14 @@ export async function updateConfig(ref: string, config: Record<string, unknown>)
   return withRetry("ProjectRepository.updateConfig", async () => {
   const [project] = await sql`
     UPDATE projects
-    SET config = ${JSON.stringify(config)}::jsonb, updated_at = NOW()
+    SET config =
+          (${JSON.stringify(config)}::jsonb - 'scheduled_functions')
+          || CASE
+            WHEN config ? 'scheduled_functions'
+            THEN jsonb_build_object('scheduled_functions', config -> 'scheduled_functions')
+            ELSE '{}'::jsonb
+          END,
+        updated_at = NOW()
     WHERE ref = ${ref} AND deleted_at IS NULL
     RETURNING *
   `;

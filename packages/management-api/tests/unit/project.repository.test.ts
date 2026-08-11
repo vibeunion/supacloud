@@ -173,6 +173,21 @@ describe("ProjectRepository", () => {
       expect(project).toBeDefined();
     });
 
+    test("preserves the database-owned scheduled function config in the update SQL", async () => {
+      const staleSchedule = { id: "stale-schedule" };
+      const inputConfig = { key: "value", scheduled_functions: [staleSchedule] };
+      (mockSql as ReturnType<typeof mock>).mockResolvedValueOnce([mockProject]);
+
+      await projectRepository.updateConfig("test123", inputConfig);
+
+      const [strings, serializedConfig] = (mockSql as ReturnType<typeof mock>).mock.calls[0];
+      const query = (strings as TemplateStringsArray).join("?").replaceAll(/\s+/g, " ").trim();
+      expect(query).toContain("(?::jsonb - 'scheduled_functions')");
+      expect(query).toContain("config ? 'scheduled_functions'");
+      expect(query).toContain("jsonb_build_object('scheduled_functions', config -> 'scheduled_functions')");
+      expect(serializedConfig).toBe(JSON.stringify(inputConfig));
+    });
+
     test("should return null when project not found", async () => {
       (mockSql as ReturnType<typeof mock>).mockResolvedValueOnce([]);
       const project = await projectRepository.updateConfig("nonexistent", { key: "value" });

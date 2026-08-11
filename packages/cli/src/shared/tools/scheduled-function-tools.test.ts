@@ -8,6 +8,8 @@ import type { ToolSchema } from "../schema";
 
 const SCHEDULE_ID = "00000000-0000-4000-8000-000000000001";
 const OTHER_SCHEDULE_ID = "00000000-0000-4000-8000-000000000002";
+const UPDATED_AT = "2026-08-11T00:00:00.000Z";
+const NEXT_UPDATED_AT = "2026-08-11T00:00:00.001Z";
 
 function scheduleRecord(overrides: Record<string, unknown> = {}) {
     return {
@@ -19,8 +21,8 @@ function scheduleRecord(overrides: Record<string, unknown> = {}) {
         enabled: true,
         body_empty: true,
         header_names: [],
-        created_at: "2026-08-11T00:00:00.000Z",
-        updated_at: "2026-08-11T00:00:00.000Z",
+        created_at: UPDATED_AT,
+        updated_at: UPDATED_AT,
         ...overrides,
     };
 }
@@ -88,6 +90,7 @@ test("Scheduled Function list emits only safe machine-readable metadata", async 
         id: SCHEDULE_ID,
         body_empty: false,
         header_names: ["x-schedule-token"],
+        updated_at: UPDATED_AT,
     });
     expect(response.content[0].text).not.toContain(bodySentinel);
     expect(response.content[0].text).not.toContain(headerSentinel);
@@ -136,6 +139,31 @@ test("Scheduled Function read-only mode continues to allow list", async () => {
 
     expect(response.isError).not.toBe(true);
     expect(requestCount).toBe(1);
+});
+
+test("Scheduled Function get preserves the exact canonical revision in read-only mode", async () => {
+    const paths: string[] = [];
+    const { callback } = captureScheduledFunctionsTool({
+        get: async (path: string) => {
+            paths.push(path);
+            return {
+                ok: true,
+                status: 200,
+                data: { project_ref: "proj", schedule: scheduleRecord() },
+            };
+        },
+    }, {}, { readOnly: true });
+
+    const response = await callback({ action: "get", ref: "proj", schedule_id: SCHEDULE_ID });
+    const receipt = JSON.parse(response.content[0].text);
+
+    expect(response.isError).not.toBe(true);
+    expect(paths).toEqual([`/v1/projects/proj/scheduled-functions/${SCHEDULE_ID}`]);
+    expect(receipt).toMatchObject({
+        ok: true,
+        operation: "scheduled_functions.get",
+        schedule: { id: SCHEDULE_ID, updated_at: UPDATED_AT },
+    });
 });
 
 test("Scheduled Function create reads body and header values outside argv", async () => {
@@ -212,6 +240,51 @@ test.each([
     expect(response.content[0].text).not.toContain("private-server-detail");
 });
 
+test.each([
+    ` ${UPDATED_AT}`,
+    "2026-08-11T00:00:00Z",
+    "2026-08-11T08:00:00.000+08:00",
+    "2026-02-30T00:00:00.000Z",
+])("Scheduled Function list rejects non-canonical updated_at %j", async (updatedAt) => {
+    const { callback } = captureScheduledFunctionsTool({
+        get: async () => ({
+            ok: true,
+            status: 200,
+            data: { project_ref: "proj", schedules: [scheduleRecord({ updated_at: updatedAt })] },
+        }),
+    });
+
+    const response = await callback({ action: "list", ref: "proj" });
+
+    expect(response.isError).toBe(true);
+    expect(JSON.parse(response.content[0].text).error.code).toBe("INVALID_RESPONSE");
+});
+
+test.each([
+    ["update", undefined],
+    ["delete", undefined],
+    ["update", ` ${UPDATED_AT}`],
+    ["delete", "2026-08-11T00:00:00Z"],
+    ["update", "2026-08-11T08:00:00.000+08:00"],
+    ["delete", "2026-02-30T00:00:00.000Z"],
+] as const)("Scheduled Function %s requires canonical expected_updated_at before HTTP", async (action, expectedUpdatedAt) => {
+    let requestCount = 0;
+    const { callback } = captureScheduledFunctionsTool({
+        patch: async () => { requestCount += 1; },
+        delete: async () => { requestCount += 1; },
+    });
+    const args: Record<string, unknown> = {
+        action,
+        ref: "proj",
+        schedule_id: SCHEDULE_ID,
+        ...(action === "update" ? { enabled: false } : {}),
+        ...(expectedUpdatedAt === undefined ? {} : { expected_updated_at: expectedUpdatedAt }),
+    };
+
+    await expect(callback(args)).rejects.toThrow("canonical UTC timestamp");
+    expect(requestCount).toBe(0);
+});
+
 test("Scheduled Function update confirms the exact schedule and requested fields", async () => {
     const requests: unknown[] = [];
     const { callback } = captureScheduledFunctionsTool({
@@ -224,7 +297,8 @@ test("Scheduled Function update confirms the exact schedule and requested fields
                     updated: true,
                     project_ref: "proj",
                     request_id: request.request_id,
-                    schedule: scheduleReceipt(request, { id: SCHEDULE_ID }),
+                    previous_updated_at: request.expected_updated_at,
+                    schedule: scheduleReceipt(request, { id: SCHEDULE_ID, updated_at: NEXT_UPDATED_AT }),
                 },
             };
         },
@@ -234,15 +308,17 @@ test("Scheduled Function update confirms the exact schedule and requested fields
         action: "update",
         ref: "proj",
         schedule_id: SCHEDULE_ID,
+        expected_updated_at: UPDATED_AT,
         cron: "0 3 * * *",
         enabled: false,
     });
 
     expect(requests).toHaveLength(1);
-    expect(requests[0]).toMatchObject({ cron: "0 3 * * *", enabled: false });
+    expect(requests[0]).toMatchObject({ expected_updated_at: UPDATED_AT, cron: "0 3 * * *", enabled: false });
     expect((requests[0] as Record<string, unknown>).request_id).toBeString();
     expect(JSON.parse(response.content[0].text)).toMatchObject({
         ok: true,
+        previous_updated_at: UPDATED_AT,
         schedule: { id: SCHEDULE_ID, cron: "0 3 * * *", enabled: false },
     });
 });
@@ -257,9 +333,11 @@ test("Scheduled Function update rejects a mismatched receipt without exposing re
                 updated: true,
                 project_ref: "proj",
                 request_id: request.request_id,
+                previous_updated_at: request.expected_updated_at,
                 schedule: scheduleRecord({
                     id: OTHER_SCHEDULE_ID,
                     cron: "0 3 * * *",
+                    updated_at: NEXT_UPDATED_AT,
                     body: { private: responseSentinel },
                 }),
             },
@@ -270,6 +348,7 @@ test("Scheduled Function update rejects a mismatched receipt without exposing re
         action: "update",
         ref: "proj",
         schedule_id: SCHEDULE_ID,
+        expected_updated_at: UPDATED_AT,
         cron: "0 3 * * *",
     });
 
@@ -279,6 +358,36 @@ test("Scheduled Function update rejects a mismatched receipt without exposing re
         http_status: 200,
     });
     expect(response.content[0].text).not.toContain(responseSentinel);
+});
+
+test.each([
+    ["mismatched previous revision", "2026-08-10T23:59:59.999Z", NEXT_UPDATED_AT],
+    ["non-advancing revision", UPDATED_AT, UPDATED_AT],
+])("Scheduled Function update rejects %s receipt", async (_label, previousUpdatedAt, updatedAt) => {
+    const { callback } = captureScheduledFunctionsTool({
+        patch: async (_path: string, request: Record<string, unknown>) => ({
+            ok: true,
+            status: 200,
+            data: {
+                updated: true,
+                project_ref: "proj",
+                request_id: request.request_id,
+                previous_updated_at: previousUpdatedAt,
+                schedule: scheduleReceipt(request, { id: SCHEDULE_ID, updated_at: updatedAt }),
+            },
+        }),
+    });
+
+    const response = await callback({
+        action: "update",
+        ref: "proj",
+        schedule_id: SCHEDULE_ID,
+        expected_updated_at: UPDATED_AT,
+        enabled: false,
+    });
+
+    expect(response.isError).toBe(true);
+    expect(JSON.parse(response.content[0].text).error.code).toBe("OUTCOME_UNKNOWN");
 });
 
 test("Scheduled Function list rejects duplicate schedule IDs", async () => {
@@ -414,7 +523,12 @@ test("Scheduled Function reports an unknown outcome after a transport failure", 
         }),
     });
 
-    const response = await callback({ action: "delete", ref: "proj", schedule_id: SCHEDULE_ID });
+    const response = await callback({
+        action: "delete",
+        ref: "proj",
+        schedule_id: SCHEDULE_ID,
+        expected_updated_at: UPDATED_AT,
+    });
     const receipt = JSON.parse(response.content[0].text);
 
     expect(response.isError).toBe(true);
@@ -433,7 +547,12 @@ test.each([408, 500, 503])(
             }),
         });
 
-        const response = await callback({ action: "delete", ref: "proj", schedule_id: SCHEDULE_ID });
+        const response = await callback({
+            action: "delete",
+            ref: "proj",
+            schedule_id: SCHEDULE_ID,
+            expected_updated_at: UPDATED_AT,
+        });
         const receipt = JSON.parse(response.content[0].text);
 
         expect(response.isError).toBe(true);
@@ -451,7 +570,8 @@ test("Scheduled Function rejects a mismatched request receipt", async () => {
                 updated: true,
                 project_ref: "proj",
                 request_id: "00000000-0000-4000-8000-000000000099",
-                schedule: scheduleReceipt(request, { id: SCHEDULE_ID }),
+                previous_updated_at: request.expected_updated_at,
+                schedule: scheduleReceipt(request, { id: SCHEDULE_ID, updated_at: NEXT_UPDATED_AT }),
             },
         }),
     });
@@ -460,6 +580,7 @@ test("Scheduled Function rejects a mismatched request receipt", async () => {
         action: "update",
         ref: "proj",
         schedule_id: SCHEDULE_ID,
+        expected_updated_at: UPDATED_AT,
         enabled: false,
     });
 
@@ -501,15 +622,56 @@ test("Scheduled Function delete validates the exact receipt", async () => {
             return {
                 ok: true,
                 status: 200,
-                data: { deleted: true, project_ref: "proj", schedule_id: SCHEDULE_ID },
+                data: {
+                    deleted: true,
+                    project_ref: "proj",
+                    schedule_id: SCHEDULE_ID,
+                    deleted_updated_at: UPDATED_AT,
+                },
             };
         },
     });
 
-    const response = await callback({ action: "delete", ref: "proj", schedule_id: SCHEDULE_ID });
+    const response = await callback({
+        action: "delete",
+        ref: "proj",
+        schedule_id: SCHEDULE_ID,
+        expected_updated_at: UPDATED_AT,
+    });
 
-    expect(paths).toEqual([`/v1/projects/proj/scheduled-functions/${SCHEDULE_ID}`]);
-    expect(JSON.parse(response.content[0].text)).toMatchObject({ ok: true, deleted: true });
+    expect(paths).toEqual([
+        `/v1/projects/proj/scheduled-functions/${SCHEDULE_ID}?expected_updated_at=${encodeURIComponent(UPDATED_AT)}`,
+    ]);
+    expect(JSON.parse(response.content[0].text)).toMatchObject({
+        ok: true,
+        deleted: true,
+        deleted_updated_at: UPDATED_AT,
+    });
+});
+
+test("Scheduled Function delete rejects a receipt bound to another revision", async () => {
+    const { callback } = captureScheduledFunctionsTool({
+        delete: async () => ({
+            ok: true,
+            status: 200,
+            data: {
+                deleted: true,
+                project_ref: "proj",
+                schedule_id: SCHEDULE_ID,
+                deleted_updated_at: NEXT_UPDATED_AT,
+            },
+        }),
+    });
+
+    const response = await callback({
+        action: "delete",
+        ref: "proj",
+        schedule_id: SCHEDULE_ID,
+        expected_updated_at: UPDATED_AT,
+    });
+
+    expect(response.isError).toBe(true);
+    expect(JSON.parse(response.content[0].text).error.code).toBe("OUTCOME_UNKNOWN");
 });
 
 test("Scheduled Function rejects a body file over 1 MiB before HTTP dispatch", async () => {
