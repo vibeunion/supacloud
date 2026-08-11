@@ -5,7 +5,12 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { getAuditLog, redactSshOutput, SshTransport } from "./ssh";
+import {
+    getAuditLog,
+    redactSshOutput,
+    SshCommandOutcomeUnknownError,
+    SshTransport,
+} from "./ssh";
 
 const TEST_HOST_KEY = Buffer.from("supacloud-test-host-key");
 const TEST_HOST_FINGERPRINT = `SHA256:${createHash("sha256").update(TEST_HOST_KEY).digest("base64").replace(/=+$/, "")}`;
@@ -16,6 +21,11 @@ class FakeSshClient extends EventEmitter {
     stdout = Buffer.from("ok\n");
     stderrOutput = Buffer.alloc(0);
     stallCommand = false;
+    closeWithoutExitStatus = false;
+    completionDelayMs = 0;
+    synchronousExecError: Error | undefined;
+    streamErrorAfterDispatch: Error | undefined;
+    terminalCloseEmitted = false;
     endCalls = 0;
     activeChannels = 0;
     maxConcurrentChannels = Number.POSITIVE_INFINITY;
@@ -29,6 +39,7 @@ class FakeSshClient extends EventEmitter {
     }
 
     exec(_command: string, callback: (error: Error | undefined, stream: EventEmitter & { stderr: EventEmitter }) => void): void {
+        if (this.synchronousExecError) throw this.synchronousExecError;
         if (this.activeChannels >= this.maxConcurrentChannels) {
             callback(new Error("open failed: administratively prohibited: open failed"), undefined as never);
             return;
@@ -37,11 +48,19 @@ class FakeSshClient extends EventEmitter {
         stream.stderr = new EventEmitter();
         callback(undefined, stream);
         if (this.stallCommand) return;
-        queueMicrotask(() => {
+        const complete = () => {
+            if (this.streamErrorAfterDispatch) {
+                stream.emit("error", this.streamErrorAfterDispatch);
+                return;
+            }
             if (this.stdout.length > 0) stream.emit("data", this.stdout);
             if (this.stderrOutput.length > 0) stream.stderr.emit("data", this.stderrOutput);
-            stream.emit("close", 0);
-        });
+            this.terminalCloseEmitted = true;
+            if (this.closeWithoutExitStatus) stream.emit("close");
+            else stream.emit("close", 0);
+        };
+        if (this.completionDelayMs > 0) setTimeout(complete, this.completionDelayMs);
+        else queueMicrotask(complete);
     }
 
     sftp(callback: (error: Error | undefined, sftp: FakeSftpClient) => void): void {
@@ -228,15 +247,105 @@ describe("SshTransport audit safety", () => {
         }, { clientFactory: () => clients[clientIndex++] as never });
 
         try {
-            await expect(transport.exec("long-running-upgrade", 10)).rejects.toThrow(
-                "SSH command timed out after 10ms",
-            );
+            const timedOut = transport.exec("long-running-upgrade", 10);
+            await expect(timedOut).rejects.toBeInstanceOf(SshCommandOutcomeUnknownError);
+            await expect(timedOut).rejects.toMatchObject({
+                code: "OUTCOME_UNKNOWN",
+                message: "SSH command timed out after 10ms; remote outcome is unknown",
+            });
             expect(stalledClient.endCalls).toBe(1);
 
             const cleanup = await transport.exec("remove-upgrade-helper");
             expect(cleanup.success).toBe(true);
             expect(clientIndex).toBe(2);
             expect(cleanupClient.connectOptions?.host).toBe("server.example.com");
+        } finally {
+            transport.close();
+        }
+    });
+
+    test("discards a connection when exec throws synchronously before dispatch", async () => {
+        const disconnectedClient = new FakeSshClient();
+        disconnectedClient.synchronousExecError = new Error("Not connected");
+        const cleanupClient = new FakeSshClient();
+        const clients = [disconnectedClient, cleanupClient];
+        let clientIndex = 0;
+        const transport = new SshTransport({
+            host: "server.example.com",
+            port: 22,
+            username: "root",
+            hostFingerprint: TEST_HOST_FINGERPRINT,
+        }, { clientFactory: () => clients[clientIndex++] as never });
+
+        try {
+            await expect(transport.exec("long-running-upgrade", 10)).rejects.toThrow("Not connected");
+            expect(disconnectedClient.endCalls).toBe(1);
+            expect((await transport.exec("remove-upgrade-helper")).success).toBe(true);
+            expect(clientIndex).toBe(2);
+        } finally {
+            transport.close();
+        }
+    });
+
+    test("keeps timeout unknown when the remote stream closes successfully later", async () => {
+        const client = new FakeSshClient();
+        client.completionDelayMs = 20;
+        const transport = new SshTransport({
+            host: "server.example.com", port: 22, username: "root",
+            hostFingerprint: TEST_HOST_FINGERPRINT,
+        }, { clientFactory: () => client as never });
+
+        try {
+            await expect(transport.exec("long-running-upgrade", 5)).rejects.toMatchObject({
+                code: "OUTCOME_UNKNOWN",
+            });
+            await new Promise(resolve => setTimeout(resolve, 25));
+            expect(client.terminalCloseEmitted).toBe(true);
+            expect(client.endCalls).toBe(1);
+        } finally {
+            transport.close();
+        }
+    });
+
+    test("keeps post-dispatch stream errors unknown without reflecting their message", async () => {
+        const client = new FakeSshClient();
+        client.streamErrorAfterDispatch = new Error("TOKEN=stream-secret");
+        const transport = new SshTransport({
+            host: "server.example.com", port: 22, username: "root",
+            hostFingerprint: TEST_HOST_FINGERPRINT,
+        }, { clientFactory: () => client as never });
+
+        try {
+            let failure: unknown;
+            try {
+                await transport.exec("long-running-upgrade");
+            } catch (error: unknown) {
+                failure = error;
+            }
+            expect(failure).toBeInstanceOf(SshCommandOutcomeUnknownError);
+            expect(String(failure)).not.toContain("stream-secret");
+            expect(client.endCalls).toBe(1);
+        } finally {
+            transport.close();
+        }
+    });
+
+    test("marks a dispatched command without terminal status as outcome unknown", async () => {
+        const client = new FakeSshClient();
+        client.closeWithoutExitStatus = true;
+        const transport = new SshTransport({
+            host: "server.example.com",
+            port: 22,
+            username: "root",
+            hostFingerprint: TEST_HOST_FINGERPRINT,
+        }, { clientFactory: () => client as never });
+
+        try {
+            await expect(transport.exec("long-running-upgrade")).rejects.toMatchObject({
+                code: "OUTCOME_UNKNOWN",
+                message: "SSH command stream closed without a terminal status; remote outcome is unknown",
+            });
+            expect(client.endCalls).toBe(1);
         } finally {
             transport.close();
         }

@@ -137,9 +137,19 @@ With `--artifact_transport remote` (the default), omitting
 `--edge_runtime_version` retains the Management and Web Console-only upgrade
 behavior and reports that Edge Runtime was not upgraded. Local transport
 requires exact Management and Edge Runtime versions. Caddy and GoTrue are
-outside this transaction and are not replaced. After a capable Management
-release is active, an exact rollback can use that active upgrader with explicit
-older targets, for example:
+outside this transaction and are not replaced.
+
+The remote transport allows the same 30-minute transaction window plus bounded
+verifier/bootstrap downloads: 42 minutes for direct GitHub access, or 52
+minutes when each download may try direct GitHub before an explicit proxy. If
+the SSH command times out or its stream fails after dispatch, Admin reports
+`OUTCOME_UNKNOWN` and does not issue client-side helper cleanup. The remote
+command may finish later and then run its own cleanup. Reconcile the reported
+helper and trusted-root paths and read back deployed versions before deciding
+whether to retry.
+
+After a capable Management release is active, an exact rollback can use that
+active upgrader with explicit older targets, for example:
 
 ```bash
 npx @supacloud/admin ssh upgrade \
