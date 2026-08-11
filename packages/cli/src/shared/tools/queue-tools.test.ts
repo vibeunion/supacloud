@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { registerQueueTools } from "./queue-tools";
 
-function captureQueueTool(http: Record<string, unknown>) {
+function captureQueueTool(http: Record<string, unknown>, projectRef?: string) {
     let schema: Record<string, unknown> | undefined;
     let callback: ((args: Record<string, unknown>) => Promise<{ content: Array<{ text: string }> }>) | undefined;
     registerQueueTools({
@@ -10,13 +10,27 @@ function captureQueueTool(http: Record<string, unknown>) {
             schema = toolSchema;
             callback = toolCallback;
         },
-    }, http as any);
+    }, http as any, { projectRef });
 
     if (!schema || !callback) throw new Error("queue tool was not registered");
     return { schema, callback };
 }
 
 describe("queue CLI tool", () => {
+    test("prefers an explicit ref over the auto-linked project", async () => {
+        const calls: string[] = [];
+        const { callback } = captureQueueTool({
+            get: async (path: string) => {
+                calls.push(path);
+                return { ok: true, status: 200, data: [] };
+            },
+        }, "default-ref");
+
+        await callback({ action: "list", ref: "override-ref", queue: "emails" });
+
+        expect(calls).toEqual(["/v1/projects/override-ref/tasks/queues/emails/messages"]);
+    });
+
     test("sends queue messages with tracing metadata", async () => {
         const calls: Array<{ method: string; path: string; body: unknown }> = [];
         const { callback } = captureQueueTool({

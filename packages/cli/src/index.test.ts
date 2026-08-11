@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,6 +16,8 @@ const CONTEXT_KEYS = new Set([
     "SUPACLOUD_PROJECT_REF",
     "X_PROJECT_REF",
     "SUPACLOUD_HOST",
+    "SUPACLOUD_ENV",
+    "SUPACLOUD_READ_ONLY",
 ]);
 
 const servers: Array<{ stop(closeActiveConnections?: boolean): void }> = [];
@@ -42,9 +44,10 @@ function cleanEnvironment(overrides: Record<string, string> = {}): Record<string
 async function runProjectCli(
     args: string[],
     overrides: Record<string, string> = {},
+    workingDirectory = PACKAGE_ROOT,
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
-    const processHandle = Bun.spawn([process.execPath, "src/index.ts", ...args], {
-        cwd: PACKAGE_ROOT,
+    const processHandle = Bun.spawn([process.execPath, join(PACKAGE_ROOT, "src/index.ts"), ...args], {
+        cwd: workingDirectory,
         env: cleanEnvironment(overrides),
         stdout: "pipe",
         stderr: "pipe",
@@ -68,6 +71,89 @@ function serveFunctionSource(sourceCode: string): string {
 }
 
 describe("supacloud-cli process contract", () => {
+    test("documents global environment and production safety flags", async () => {
+        const response = await runProjectCli(["--help"]);
+
+        expect(response.exitCode).toBe(0);
+        expect(response.stderr).toContain("--env <name>");
+        expect(response.stderr).toContain("--env-file <path>");
+        expect(response.stderr).toContain("--confirm-production <ref>");
+        expect(response.stderr).toContain("SUPACLOUD_READ_ONLY=true");
+    });
+
+    test("loads named environments with global flags after the command and keeps status secret-free", async () => {
+        const workspace = mkdtempSync(join(tmpdir(), "supacloud-cli-named-env-"));
+        temporaryDirectories.push(workspace);
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch: () => Response.json({ status: "healthy" }),
+        });
+        servers.push(server);
+        const environmentPath = join(workspace, ".env.supacloud.test");
+        writeFileSync(environmentPath, [
+            "SUPACLOUD_ENV=test",
+            `SUPACLOUD_API_URL=http://127.0.0.1:${server.port}`,
+            "SUPACLOUD_API_TOKEN=named-secret-token",
+            "SUPACLOUD_PROJECT_REF=test-ref",
+        ].join("\n") + "\n");
+
+        const response = await runProjectCli(["status", "--env=test"], {}, workspace);
+        const status = JSON.parse(response.stdout);
+
+        expect(response.exitCode).toBe(0);
+        expect(status).toMatchObject({
+            environment: "test",
+            source: { kind: "named_env_file", path: realpathSync(environmentPath) },
+            apiUrl: `http://127.0.0.1:${server.port}`,
+            projectRef: "test-ref",
+            readOnly: false,
+            production: false,
+            hasApiToken: true,
+        });
+        expect(response.stdout).not.toContain("named-secret-token");
+    });
+
+    test("requires exact production confirmation and rejects cross-ref writes", async () => {
+        const workspace = mkdtempSync(join(tmpdir(), "supacloud-cli-production-env-"));
+        temporaryDirectories.push(workspace);
+        const requestedPaths: string[] = [];
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch(request) {
+                requestedPaths.push(new URL(request.url).pathname);
+                return Response.json({ status: "cancelled" });
+            },
+        });
+        servers.push(server);
+        writeFileSync(join(workspace, ".env.supacloud.prod"), [
+            "SUPACLOUD_ENV=production",
+            `SUPACLOUD_API_URL=http://127.0.0.1:${server.port}`,
+            "SUPACLOUD_API_TOKEN=prod-secret-token",
+            "SUPACLOUD_PROJECT_REF=prod-ref",
+        ].join("\n") + "\n");
+
+        const unconfirmed = await runProjectCli([
+            "--env", "prod", "project", "task_cancel", "--task_id", "task-1",
+        ], {}, workspace);
+        const confirmed = await runProjectCli([
+            "project", "task_cancel", "--task_id", "task-1",
+            "--env=prod", "--confirm-production=prod-ref",
+        ], {}, workspace);
+        const crossRef = await runProjectCli([
+            "project", "task_cancel", "--task_id", "task-1", "--ref", "other-ref",
+            "--env", "prod", "--confirm-production", "other-ref",
+        ], {}, workspace);
+
+        expect(unconfirmed.exitCode).toBe(1);
+        expect(unconfirmed.stderr).toContain("--confirm-production prod-ref");
+        expect(confirmed.exitCode).toBe(0);
+        expect(crossRef.exitCode).toBe(1);
+        expect(crossRef.stderr).toContain("cannot target a different project");
+        expect(requestedPaths).toEqual(["/v1/projects/prod-ref/tasks/task-1/cancel"]);
+    });
+
     test("flushes a Function source response larger than 64 KiB to stdout", async () => {
         const apiUrl = serveFunctionSource(LARGE_FUNCTION_SOURCE);
 

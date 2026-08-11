@@ -102,7 +102,7 @@ function buildProjectLogsPath(ref: string, logType?: string): string {
 }
 
 function resolveRef(refFromArgs: string | undefined, defaultRef?: string): string {
-    const ref = defaultRef || refFromArgs;
+    const ref = refFromArgs || defaultRef;
     if (!ref) throw new Error("'ref' is required for this action");
     return ref;
 }

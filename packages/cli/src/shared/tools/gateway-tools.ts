@@ -137,7 +137,7 @@ Actions: routes, upsert_route, update_route, delete_route, config, get_certifica
         },
         async (args: any) => {
             const resolveRef = (override?: string) => {
-                const ref = projectRef || override;
+                const ref = override || projectRef;
                 if (!ref) throw new Error("'ref' is required for this action");
                 return ref;
             };
