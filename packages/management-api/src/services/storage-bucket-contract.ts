@@ -4,10 +4,12 @@ export const MAX_STORAGE_MIME_TYPE_LENGTH = 255;
 export const STORAGE_PROJECT_REF_PATTERN_SOURCE = "^[A-Za-z0-9_-]{1,64}$";
 export const STORAGE_BUCKET_ID_PATTERN_SOURCE = `^(?!\\.+$)[A-Za-z0-9._-]{1,${MAX_STORAGE_BUCKET_ID_LENGTH}}$`;
 export const STORAGE_MIME_TYPE_PATTERN_SOURCE = "^(?=\\S)(?=.*\\S$)[^\\u0000-\\u001f\\u007f]+$";
+export const STORAGE_BUCKET_REVISION_PATTERN_SOURCE = "^[0-9]{1,20}$";
 
 const storageProjectRefPattern = new RegExp(STORAGE_PROJECT_REF_PATTERN_SOURCE);
 const storageBucketIdPattern = new RegExp(STORAGE_BUCKET_ID_PATTERN_SOURCE);
 const storageMimeTypePattern = new RegExp(STORAGE_MIME_TYPE_PATTERN_SOURCE);
+const storageBucketRevisionPattern = new RegExp(STORAGE_BUCKET_REVISION_PATTERN_SOURCE);
 
 export interface StorageBucketSettings {
   public?: boolean;
@@ -25,6 +27,19 @@ function validStorageBucketId(bucketId: string): boolean {
 
 function validStorageFileSizeLimit(fileSizeLimit: number): boolean {
   return Number.isSafeInteger(fileSizeLimit) && fileSizeLimit > 0;
+}
+
+export function normalizedStorageFileSizeLimit(fileSizeLimit: unknown): number | null {
+  if (fileSizeLimit === null || fileSizeLimit === undefined) return null;
+  const numericLimit = typeof fileSizeLimit === "bigint"
+    ? Number(fileSizeLimit)
+    : typeof fileSizeLimit === "string" && /^[0-9]+$/.test(fileSizeLimit)
+      ? Number(fileSizeLimit)
+      : fileSizeLimit;
+  if (typeof numericLimit !== "number" || !validStorageFileSizeLimit(numericLimit)) {
+    throw new Error("Stored bucket file size limit is invalid");
+  }
+  return numericLimit;
 }
 
 function validStorageMimeTypes(mimeTypes: string[]): boolean {
@@ -47,4 +62,8 @@ export function storageBucketInputError(
     return "Invalid allowed MIME types";
   }
   return null;
+}
+
+export function storageBucketRevisionError(revision: string): string | null {
+  return storageBucketRevisionPattern.test(revision) ? null : "Invalid bucket revision";
 }

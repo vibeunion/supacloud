@@ -105,7 +105,8 @@ export class StorageRLS {
     const dbName = await resolveDbName(ref);
     const db = getProjectDb(dbName);
     return await db`
-      SELECT id, name, public, created_at, updated_at, file_size_limit, allowed_mime_types
+      SELECT id, name, public, created_at, updated_at, file_size_limit, allowed_mime_types,
+        FLOOR(EXTRACT(EPOCH FROM COALESCE(updated_at, created_at, TIMESTAMPTZ 'epoch')) * 1000000)::bigint::text AS revision
       FROM storage.buckets
       ORDER BY name ASC
     `;

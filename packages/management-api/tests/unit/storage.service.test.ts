@@ -2,6 +2,9 @@ import { describe, test, expect, spyOn, mock } from "bun:test";
 import * as databaseModule from "../../src/db";
 import { storageService, StorageService } from "../../src/services/storage.service";
 
+const CURRENT_REVISION = "1786406400000000";
+const NEXT_REVISION = "1786406400000001";
+
 // We must mock the adapter module since StorageService now uses it internally
 const mockStorageDriver = {
   createBucket: mock().mockResolvedValue(true),
@@ -85,24 +88,29 @@ describe("StorageService (using adapter)", () => {
 
   describe("updateBucket", () => {
     test("binds single and multiple MIME types as PostgreSQL TEXT arrays and clears with NULL", async () => {
-      const sqlParameters: unknown[][] = [];
+      const sqlStatements: string[] = [];
       const textArrayCalls: Array<{ values: string[]; type: string }> = [];
       const projectDatabaseTag = async (strings: TemplateStringsArray, ...parameters: unknown[]) => {
-        sqlParameters.push(parameters);
-        return strings.join("?").includes("SELECT * FROM storage.buckets")
-          ? [{
-              id: "reports",
-              name: "reports",
-              public: false,
-              file_size_limit: null,
-              allowed_mime_types: ["application/pdf"],
-            }]
-          : [];
+        const statement = strings.join("?");
+        sqlStatements.push(statement);
+        if (statement.includes("FOR UPDATE")) return [{ revision: CURRENT_REVISION }];
+        if (!statement.includes("UPDATE storage.buckets")) return [];
+        return [{
+          id: "reports",
+          name: "reports",
+          public: false,
+          file_size_limit: null,
+          allowed_mime_types: ["application/pdf"],
+          revision: NEXT_REVISION,
+        }];
       };
       const projectDatabase = Object.assign(projectDatabaseTag, {
         array(values: string[], type: string) {
           textArrayCalls.push({ values, type });
           return values;
+        },
+        begin(operation: (transaction: typeof projectDatabaseTag) => Promise<unknown>) {
+          return operation(projectDatabase as never);
         },
       }) as never;
       const resolveDbName = spyOn(databaseModule, "resolveDbName").mockResolvedValue("supa_testref");
@@ -111,25 +119,25 @@ describe("StorageService (using adapter)", () => {
       try {
         const singleResponse = await StorageService.updateBucket("testref", "reports", {
           allowed_mime_types: ["application/pdf"],
-        });
+        }, CURRENT_REVISION);
         const multipleResponse = await StorageService.updateBucket("testref", "reports", {
           allowed_mime_types: ["application/pdf", "image/png"],
-        });
+        }, CURRENT_REVISION);
         const clearedResponse = await StorageService.updateBucket("testref", "reports", {
           allowed_mime_types: [],
-        });
+        }, CURRENT_REVISION);
 
         expect(singleResponse.success).toBe(true);
         expect(multipleResponse.success).toBe(true);
         expect(clearedResponse.success).toBe(true);
-        expect(sqlParameters[0]).toEqual([["application/pdf"], "reports"]);
-        expect(sqlParameters[2]).toEqual([["application/pdf", "image/png"], "reports"]);
-        expect(sqlParameters[4]).toEqual([null, "reports"]);
         expect(textArrayCalls).toEqual([
           { values: ["application/pdf"], type: "TEXT" },
           { values: ["application/pdf", "image/png"], type: "TEXT" },
         ]);
-        expect(sqlParameters.flat().join(" ")).not.toContain('["application/pdf"]');
+        expect(sqlStatements.filter((statement) => statement.includes("UPDATE storage.buckets"))).toHaveLength(3);
+        expect(sqlStatements.join("\n")).toContain("FOR UPDATE");
+        expect(sqlStatements.join("\n")).toContain("clock_timestamp()");
+        expect(sqlStatements.join("\n")).toContain("::bigint::text = ?");
       } finally {
         resolveDbName.mockRestore();
         getProjectDb.mockRestore();
@@ -150,7 +158,7 @@ describe("StorageService (using adapter)", () => {
     ])("rejects invalid %s before opening a project database", async (_label, ref, bucket, updates) => {
       const getProjectDb = spyOn(databaseModule, "getProjectDb");
       try {
-        const response = await StorageService.updateBucket(ref, bucket, updates);
+        const response = await StorageService.updateBucket(ref, bucket, updates, CURRENT_REVISION);
 
         expect(response.success).toBe(false);
         expect(response.error).toStartWith("Invalid ");

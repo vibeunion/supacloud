@@ -7,6 +7,8 @@ import { mockBuckets, StorageRLS } from "../../src/services/storage-rls";
 import { storageVectorInternals } from "../../src/services/storage-vector.service";
 
 const BASE = "http://localhost";
+const CURRENT_REVISION = "1786406400000000";
+const NEXT_REVISION = "1786406400000001";
 const app = new Elysia().use(storageRoutes).use(projectStorageRoutes);
 
 function request(path: string, init?: RequestInit) {
@@ -153,8 +155,8 @@ describe("storage management routes", () => {
       { id: "physical-only", name: "physical-only", public: false, size: "-" },
     ]);
     const listLogicalSpy = spyOn(StorageRLS, "listLogicalBucketsAsAdmin").mockResolvedValue([
-      { id: "public-assets", name: "public-assets", public: true, file_size_limit: 1024 },
-      { id: "logical-only", name: "logical-only", public: false },
+      { id: "public-assets", name: "public-assets", public: true, file_size_limit: "1024", revision: CURRENT_REVISION },
+      { id: "logical-only", name: "logical-only", public: false, revision: NEXT_REVISION },
     ]);
 
     try {
@@ -170,6 +172,7 @@ describe("storage management routes", () => {
           size: "-",
           file_size_limit: 1024,
           allowed_mime_types: null,
+          revision: CURRENT_REVISION,
         },
         {
           id: "physical-only",
@@ -178,6 +181,7 @@ describe("storage management routes", () => {
           size: "-",
           file_size_limit: null,
           allowed_mime_types: null,
+          revision: null,
         },
         {
           id: "logical-only",
@@ -185,6 +189,7 @@ describe("storage management routes", () => {
           public: false,
           file_size_limit: null,
           allowed_mime_types: null,
+          revision: NEXT_REVISION,
         },
       ]);
     } finally {
@@ -247,6 +252,65 @@ describe("storage management routes", () => {
     }
   });
 
+  test("updates a bucket only at the requested revision and binds the response revisions", async () => {
+    const bucket = {
+      id: "reports",
+      name: "reports",
+      public: true,
+      file_size_limit: null,
+      allowed_mime_types: null,
+      revision: NEXT_REVISION,
+    };
+    const updateBucketSpy = spyOn(StorageService, "updateBucket").mockResolvedValue({
+      success: true,
+      bucket,
+      previousRevision: CURRENT_REVISION,
+      newRevision: NEXT_REVISION,
+    });
+
+    try {
+      const response = await request("/v1/projects/test-ref/storage/buckets/reports", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: "Bearer dev-master-token" },
+        body: JSON.stringify({ expected_revision: CURRENT_REVISION, public: true }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(updateBucketSpy).toHaveBeenCalledWith("test-ref", "reports", {
+        public: true,
+        file_size_limit: undefined,
+        allowed_mime_types: undefined,
+      }, CURRENT_REVISION);
+      expect(await response.json()).toEqual({
+        ...bucket,
+        previous_revision: CURRENT_REVISION,
+        new_revision: NEXT_REVISION,
+      });
+    } finally {
+      updateBucketSpy.mockRestore();
+    }
+  });
+
+  test("maps a stale bucket update revision to 409", async () => {
+    const updateBucketSpy = spyOn(StorageService, "updateBucket").mockResolvedValue({
+      success: false,
+      error: "Bucket revision conflict",
+    });
+
+    try {
+      const response = await request("/v1/projects/test-ref/storage/buckets/reports", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: "Bearer dev-master-token" },
+        body: JSON.stringify({ expected_revision: CURRENT_REVISION, public: true }),
+      });
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({ message: "Bucket revision conflict", code: "409" });
+    } finally {
+      updateBucketSpy.mockRestore();
+    }
+  });
+
   test("accepts exact Storage contract upper boundaries", async () => {
     const createPhysicalSpy = spyOn(StorageService, "createBucket").mockResolvedValue({ success: true });
     const createLogicalSpy = spyOn(StorageRLS, "createLogicalBucketAsAdmin").mockResolvedValue(true);
@@ -297,94 +361,70 @@ describe("storage management routes", () => {
     }
   });
 
-  test("Studio bucket deletion removes the empty physical bucket before logical metadata", async () => {
-    const callOrder: string[] = [];
-    const deletePhysicalSpy = spyOn(StorageService, "deleteBucket").mockImplementation(async () => {
-      callOrder.push("physical");
-      return { success: true };
-    });
-    const deleteLogicalSpy = spyOn(StorageRLS, "deleteLogicalBucketAsAdmin").mockImplementation(async () => {
-      callOrder.push("logical");
-    });
-
+  test("Studio bucket deletion requires revision and an explicit empty-bucket guard", async () => {
+    const deleteSpy = spyOn(StorageService, "deleteEmptyBucketAtRevision");
     try {
       const response = await request("/v1/projects/test-ref/storage/buckets/public-assets", {
         method: "DELETE",
         headers: { Authorization: "Bearer dev-master-token" },
       });
+
+      expect(response.status).toBe(422);
+      expect(deleteSpy).not.toHaveBeenCalled();
+    } finally {
+      deleteSpy.mockRestore();
+    }
+  });
+
+  test("Studio bucket deletion binds project, bucket, revision, and empty-bucket receipt", async () => {
+    const deleteSpy = spyOn(StorageService, "deleteEmptyBucketAtRevision").mockResolvedValue({
+      success: true,
+      previousRevision: CURRENT_REVISION,
+    });
+    const query = `expected_revision=${CURRENT_REVISION}&require_empty=true`;
+
+    try {
+      const response = await request(`/v1/projects/test-ref/storage/buckets/public-assets?${query}`, {
+        method: "DELETE",
+        headers: { Authorization: "Bearer dev-master-token" },
+      });
+
       expect(response.status).toBe(200);
-      expect(callOrder).toEqual(["physical", "logical"]);
-      expect(deleteLogicalSpy).toHaveBeenCalledWith("test-ref", "public-assets");
-    } finally {
-      deletePhysicalSpy.mockRestore();
-      deleteLogicalSpy.mockRestore();
-    }
-  });
-
-  test("Studio bucket deletion reports a conflict when a logical object arrives after physical deletion", async () => {
-    const deletePhysicalSpy = spyOn(StorageService, "deleteBucket").mockResolvedValue({ success: true });
-    const deleteLogicalSpy = spyOn(StorageRLS, "deleteLogicalBucketAsAdmin").mockRejectedValue(
-      new Error("Bucket is not empty"),
-    );
-
-    try {
-      const response = await request("/v1/projects/test-ref/storage/buckets/public-assets", {
-        method: "DELETE",
-        headers: { Authorization: "Bearer dev-master-token" },
+      expect(deleteSpy).toHaveBeenCalledWith("test-ref", "public-assets", CURRENT_REVISION);
+      expect(await response.json()).toEqual({
+        id: "public-assets",
+        deleted: true,
+        require_empty: true,
+        previous_revision: CURRENT_REVISION,
+        new_revision: null,
       });
-      expect(response.status).toBe(409);
-      expect(await response.json()).toEqual({ message: "Bucket is not empty", code: "409" });
-      expect(deletePhysicalSpy).toHaveBeenCalledWith("test-ref", "public-assets");
-      expect(deleteLogicalSpy).toHaveBeenCalledWith("test-ref", "public-assets");
     } finally {
-      deletePhysicalSpy.mockRestore();
-      deleteLogicalSpy.mockRestore();
+      deleteSpy.mockRestore();
     }
   });
 
-  test("Studio bucket deletion reports a conflict when the physical bucket is not empty", async () => {
-    const deletePhysicalSpy = spyOn(StorageService, "deleteBucket").mockResolvedValue({
-      success: false,
-      error: "Bucket is not empty",
-    });
-    const deleteLogicalSpy = spyOn(StorageRLS, "deleteLogicalBucketAsAdmin").mockResolvedValue();
-
-    try {
-      const response = await request("/v1/projects/test-ref/storage/buckets/public-assets", {
-        method: "DELETE",
-        headers: { Authorization: "Bearer dev-master-token" },
+  test.each(["Bucket revision conflict", "Bucket is not empty"])(
+    "Studio bucket deletion maps %s to 409 without a success receipt",
+    async (error) => {
+      const deleteSpy = spyOn(StorageService, "deleteEmptyBucketAtRevision").mockResolvedValue({
+        success: false,
+        error,
       });
-      expect(response.status).toBe(409);
-      expect(await response.json()).toEqual({ message: "Bucket is not empty", code: "409" });
-      expect(deletePhysicalSpy).toHaveBeenCalledWith("test-ref", "public-assets");
-      expect(deleteLogicalSpy).not.toHaveBeenCalled();
-    } finally {
-      deletePhysicalSpy.mockRestore();
-      deleteLogicalSpy.mockRestore();
-    }
-  });
+      const query = `expected_revision=${CURRENT_REVISION}&require_empty=true`;
 
-  test("Studio bucket deletion fails closed when the physical outcome is unknown", async () => {
-    const deletePhysicalSpy = spyOn(StorageService, "deleteBucket").mockResolvedValue({
-      success: false,
-      error: "Bucket deletion outcome is unknown",
-    });
-    const deleteLogicalSpy = spyOn(StorageRLS, "deleteLogicalBucketAsAdmin").mockResolvedValue();
+      try {
+        const response = await request(`/v1/projects/test-ref/storage/buckets/public-assets?${query}`, {
+          method: "DELETE",
+          headers: { Authorization: "Bearer dev-master-token" },
+        });
 
-    try {
-      const response = await request("/v1/projects/test-ref/storage/buckets/public-assets", {
-        method: "DELETE",
-        headers: { Authorization: "Bearer dev-master-token" },
-      });
-      expect(response.status).toBe(500);
-      expect(await response.json()).toEqual({ message: "Bucket deletion outcome is unknown", code: "500" });
-      expect(deletePhysicalSpy).toHaveBeenCalledWith("test-ref", "public-assets");
-      expect(deleteLogicalSpy).not.toHaveBeenCalled();
-    } finally {
-      deletePhysicalSpy.mockRestore();
-      deleteLogicalSpy.mockRestore();
-    }
-  });
+        expect(response.status).toBe(409);
+        expect(await response.json()).toEqual({ message: error, code: "409" });
+      } finally {
+        deleteSpy.mockRestore();
+      }
+    },
+  );
 
   test("Studio bucket creation preserves storage failures", async () => {
     const registerBucketSpy = spyOn(StorageRLS, "createLogicalBucketAsAdmin").mockResolvedValue(true);
