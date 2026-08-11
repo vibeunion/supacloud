@@ -378,6 +378,58 @@ async function getProjectSql(ref: string) {
   return getProjectRoleDb(credentials.db_name, credentials.db_user, credentials.db_password);
 }
 
+interface ExistingTableColumnMetadata {
+  column_name: string;
+  data_type: string;
+  udt_name: string;
+  is_nullable: string;
+  column_default: unknown;
+  is_primary_key: boolean;
+  primary_key_position: number | null;
+}
+
+async function readTableColumnMetadata(
+  projectDb: NonNullable<Awaited<ReturnType<typeof getProjectSql>>>,
+  schema: string,
+  table: string,
+): Promise<ExistingTableColumnMetadata[]> {
+  const rows = await projectDb`
+    SELECT
+      c.column_name,
+      c.data_type,
+      c.udt_name,
+      c.is_nullable,
+      c.column_default,
+      pk.primary_key_position IS NOT NULL AS is_primary_key,
+      pk.primary_key_position
+    FROM information_schema.columns AS c
+    LEFT JOIN (
+      SELECT
+        kcu.table_catalog,
+        kcu.table_schema,
+        kcu.table_name,
+        kcu.column_name,
+        kcu.ordinal_position AS primary_key_position
+      FROM information_schema.table_constraints AS tc
+      JOIN information_schema.key_column_usage AS kcu
+        ON kcu.constraint_catalog = tc.constraint_catalog
+       AND kcu.constraint_schema = tc.constraint_schema
+       AND kcu.constraint_name = tc.constraint_name
+       AND kcu.table_catalog = tc.table_catalog
+       AND kcu.table_schema = tc.table_schema
+       AND kcu.table_name = tc.table_name
+      WHERE tc.constraint_type = 'PRIMARY KEY'
+    ) AS pk
+      ON pk.table_catalog = c.table_catalog
+     AND pk.table_schema = c.table_schema
+     AND pk.table_name = c.table_name
+     AND pk.column_name = c.column_name
+    WHERE c.table_schema = ${schema} AND c.table_name = ${table}
+    ORDER BY c.ordinal_position
+  `;
+  return rows as ExistingTableColumnMetadata[];
+}
+
 async function readQueryPerformanceStats(credentials: {
   db_name: string;
 }): Promise<{ installed: boolean; rows: unknown[] }> {
@@ -431,6 +483,76 @@ export function assertPgIdentifier(value: string, label: string): string {
 
 export function quotePgIdentifier(identifier: string, label = "identifier"): string {
   return `"${assertPgIdentifier(identifier, label).replace(/"/g, '""')}"`;
+}
+
+function assertExistingPgIdentifier(identifier: string, label: string): string {
+  if (!identifier || identifier.includes("\0")) {
+    throw new TableDefinitionError(`${label} is not a valid PostgreSQL identifier`);
+  }
+  if (new TextEncoder().encode(identifier).byteLength > 63) {
+    throw new TableDefinitionError(`${label} must not exceed 63 bytes`);
+  }
+  return identifier;
+}
+
+function quoteExistingPgIdentifier(identifier: string, label = "identifier"): string {
+  return `"${assertExistingPgIdentifier(identifier, label).replace(/"/g, '""')}"`;
+}
+
+function qualifiedExistingTableName(schema: string, table: string): string {
+  return `${quoteExistingPgIdentifier(schema, "schema")}.${quoteExistingPgIdentifier(table, "table")}`;
+}
+
+function orderedPrimaryKeyColumns(
+  columns: readonly ExistingTableColumnMetadata[],
+): ExistingTableColumnMetadata[] {
+  return columns
+    .filter((column) => (
+      column.is_primary_key
+      && Number.isInteger(column.primary_key_position)
+      && Number(column.primary_key_position) > 0
+    ))
+    .sort((left, right) => Number(left.primary_key_position) - Number(right.primary_key_position));
+}
+
+function tableRowsTieBreakers(
+  columns: readonly ExistingTableColumnMetadata[],
+  requestedFields: ReadonlySet<string>,
+): string[] {
+  const primaryKeyColumns = orderedPrimaryKeyColumns(columns);
+  if (primaryKeyColumns.length === 0) return ["tableoid", "ctid"];
+  return primaryKeyColumns
+    .filter((column) => !requestedFields.has(column.column_name))
+    .map((column) => quoteExistingPgIdentifier(column.column_name, "primary key column"));
+}
+
+function tableRowsOrderBy(
+  columns: readonly ExistingTableColumnMetadata[],
+  query: Record<string, unknown>,
+): string {
+  const requestedFields = typeof query._sort === "string"
+    ? query._sort.split(",").map((field) => field.trim()).filter(Boolean)
+    : [];
+  const tieBreakers = tableRowsTieBreakers(columns, new Set(requestedFields));
+  if (requestedFields.length > 0) {
+    const availableColumns = new Set(columns.map((column) => column.column_name));
+    const requestedOrders = typeof query._order === "string"
+      ? query._order.split(",").map((order) => order.trim().toUpperCase())
+      : [];
+    const requestedSorts = requestedFields.map((field, index) => {
+      if (!availableColumns.has(field)) {
+        throw new TableDefinitionError(`Unknown table sort column: ${field}`);
+      }
+      const order = requestedOrders[index] || "ASC";
+      if (order !== "ASC" && order !== "DESC") {
+        throw new TableDefinitionError(`Invalid sort order for ${field}`);
+      }
+      return `${quoteExistingPgIdentifier(field, "sort column")} ${order}`;
+    });
+    return [...requestedSorts, ...tieBreakers].join(", ");
+  }
+
+  return tieBreakers.join(", ");
 }
 
 export function normalizeMaterializedViewDefinition(definition: string): string {
@@ -1087,26 +1209,28 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
             }
 
             try {
-                const regex = /^[a-zA-Z_0-9]+$/;
-                if (!regex.test(params.schema) || !regex.test(params.table)) {
-                     set.status = 400;
-                     return { message: "Invalid schema or table name format", code: "400", status: 400 };
-                }
+                assertExistingPgIdentifier(params.schema, "schema");
+                assertExistingPgIdentifier(params.table, "table");
 
                 const projectDb = await getProjectSql(params.ref);
                 if (!projectDb) {
                     set.status = 404;
                     return { message: "Project database credentials not found", code: "404", status: 404 };
                 }
-                const rows = await projectDb`
-                    SELECT column_name, data_type, is_nullable, column_default
-                    FROM information_schema.columns
-                    WHERE table_schema = ${params.schema} AND table_name = ${params.table}
-                    ORDER BY ordinal_position
-                `;
+                const rows = await readTableColumnMetadata(projectDb, params.schema, params.table);
 
                 return { data: rows };
             } catch (error: unknown) {
+                if (error instanceof TableDefinitionError) {
+                    set.status = 400;
+                    return { message: error.message, code: "400", status: 400 };
+                }
+                const { errorCode, errorMessage } = databaseErrorDetails(error);
+                logger.error("[database] failed to list table columns", {
+                    projectRef: params.ref,
+                    errorCode,
+                    errorMessage,
+                });
                 set.status = 500;
                 return {
                     message: "Failed to list columns",
@@ -1138,26 +1262,35 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
 
             try {
                 const { limit, skip } = normalizePagination(query as Record<string, unknown>, 50, 500);
-
-                const regex = /^[a-zA-Z_0-9]+$/;
-                if (!regex.test(params.schema) || !regex.test(params.table)) {
-                     set.status = 400;
-                     return { message: "Invalid schema or table name format", code: "400", status: 400 };
-                }
+                const qualifiedTable = qualifiedExistingTableName(params.schema, params.table);
 
                 const projectDb = await getProjectSql(params.ref);
                 if (!projectDb) {
                     set.status = 404;
                     return { message: "Project database credentials not found", code: "404", status: 404 };
                 }
-                const rows = await projectDb.unsafe(`SELECT * FROM "${params.schema}"."${params.table}" LIMIT ${limit} OFFSET ${skip}`);
-                const countResult = await projectDb.unsafe(`SELECT count(*) as count FROM "${params.schema}"."${params.table}"`);
+                const columns = await readTableColumnMetadata(projectDb, params.schema, params.table);
+                const orderBy = tableRowsOrderBy(columns, query as Record<string, unknown>);
+                const rows = await projectDb.unsafe(
+                    `SELECT * FROM ${qualifiedTable} ORDER BY ${orderBy} LIMIT ${limit} OFFSET ${skip}`,
+                );
+                const countResult = await projectDb.unsafe(`SELECT count(*) as count FROM ${qualifiedTable}`);
 
                 return {
                     data: rows || [],
                     total: parseInt(countResult?.[0]?.count || "0")
                 };
             } catch (error: unknown) {
+                if (error instanceof TableDefinitionError) {
+                    set.status = 400;
+                    return { message: error.message, code: "400", status: 400 };
+                }
+                const { errorCode, errorMessage } = databaseErrorDetails(error);
+                logger.error("[database] failed to fetch table rows", {
+                    projectRef: params.ref,
+                    errorCode,
+                    errorMessage,
+                });
                 set.status = 500;
                 return {
                     message: "Failed to fetch rows",
