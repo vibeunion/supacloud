@@ -261,6 +261,24 @@ async function expectLegacySymlinkFailsClosed(): Promise<void> {
   await expectActivationFailsClosed(slug, forbiddenBody);
 }
 
+async function installInvalidPreferredArtifact(
+  slug: string,
+  fallbackBody: string,
+  artifactKind: "directory" | "fifo",
+): Promise<void> {
+  await writeVersionedFunction(slug, "7", fallbackBody);
+  const sourceRoot = join(projectRoot, ".versions", slug, "7", "src");
+  const preferredArtifact = join(sourceRoot, ".supacloud-entry.js");
+  await mkdir(sourceRoot, { recursive: true });
+  if (artifactKind === "directory") {
+    await mkdir(preferredArtifact);
+  } else {
+    const creation = Bun.spawnSync(["mkfifo", preferredArtifact], { stderr: "pipe" });
+    expect(creation.exitCode).toBe(0);
+  }
+  await writeFunctionConfig(slug, '{"verify_jwt":false,"version":"7"}');
+}
+
 beforeAll(initializeServerFixture);
 
 afterAll(async () => {
@@ -325,4 +343,19 @@ describe("Edge Runtime function config boundary", () => {
     await expectCrossSlugSymlinkFailsClosed();
     await expectLegacySymlinkFailsClosed();
   });
+
+  test("rejects a preferred artifact directory instead of executing a fallback", async () => {
+    const fallbackBody = "directory-fallback-must-not-run";
+    await installInvalidPreferredArtifact("preferred_directory", fallbackBody, "directory");
+    await expectActivationFailsClosed("preferred_directory", fallbackBody);
+  });
+
+  test.skipIf(process.platform === "win32")(
+    "rejects a preferred artifact FIFO instead of executing a fallback",
+    async () => {
+      const fallbackBody = "fifo-fallback-must-not-run";
+      await installInvalidPreferredArtifact("preferred_fifo", fallbackBody, "fifo");
+      await expectActivationFailsClosed("preferred_fifo", fallbackBody);
+    },
+  );
 });

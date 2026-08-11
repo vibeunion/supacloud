@@ -367,7 +367,7 @@ async function resolveFunctionPath(
       }
       const stat = await fs.stat(realCandidate);
       if (!stat.isFile()) {
-        continue;
+        throw new Error("Function artifact is not a regular file");
       }
       return {
         functionPath: realCandidate,
