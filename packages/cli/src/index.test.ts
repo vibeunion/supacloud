@@ -75,6 +75,20 @@ function serveFunctionSource(sourceCode: string): string {
     return `http://127.0.0.1:${server.port}`;
 }
 
+function chunkedJsonResponse(body: string): Response {
+    const bytes = new TextEncoder().encode(body);
+    let offset = 0;
+    const stream = new ReadableStream<Uint8Array>({
+        pull(controller) {
+            if (offset >= bytes.byteLength) return controller.close();
+            const nextOffset = Math.min(offset + 256 * 1024, bytes.byteLength);
+            controller.enqueue(bytes.subarray(offset, nextOffset));
+            offset = nextOffset;
+        },
+    });
+    return new Response(stream, { headers: { "Content-Type": "application/json" } });
+}
+
 describe("supacloud-cli process contract", () => {
     test("documents global environment and production safety flags", async () => {
         const response = await runProjectCli(["--help"]);
@@ -468,6 +482,30 @@ describe("supacloud-cli process contract", () => {
         expect(response.exitCode).toBe(1);
         expect(response.stdout.trim()).toBe("❌ Project secret list response is invalid");
         expect(response.stdout + response.stderr).not.toContain("sentinel");
+    });
+
+    test("rejects a valid JSON secret list whose raw chunked body exceeds 1 MiB", async () => {
+        const oversizedBody = `${" ".repeat(1024 * 1024 + 1)}[]`;
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch: () => chunkedJsonResponse(oversizedBody),
+        });
+        servers.push(server);
+
+        const response = await runProjectCli(
+            ["secrets", "list", "--ref", "abc123"],
+            {
+                SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+                SUPACLOUD_API_TOKEN: "test-token",
+                SUPACLOUD_PROJECT_REF: "abc123",
+            },
+        );
+
+        expect(Buffer.byteLength(oversizedBody)).toBe(1_048_579);
+        expect(response.exitCode).toBe(1);
+        expect(response.stdout.trim()).toBe("❌ Project secret list response is invalid");
+        expect(response.stderr).toBe("");
     });
 
     test.each([

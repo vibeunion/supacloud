@@ -527,7 +527,9 @@ Actions: list, upsert, delete`,
             let text: string;
             switch (action) {
                 case "list": {
-                    const response = await http.get(`/v1/projects/${ref}/secrets`);
+                    const response = await http.get(`/v1/projects/${ref}/secrets`, {
+                        maxResponseBytes: MAX_SECRET_JSON_BYTES,
+                    });
                     if (!response.ok) {
                         text = `❌ Failed (${response.status})`;
                         break;
