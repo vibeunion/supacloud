@@ -2,6 +2,21 @@ import { Type } from "@sinclair/typebox";
 import { optional, stringEnum, withDescription } from "../schema";
 import type { ToolSchema } from "../schema";
 import type { HttpResult, HttpTransport } from "../transports/http";
+import {
+    discardPreparedProjectEnvFile,
+    parseProjectCreateCredentials,
+    parseProjectCreateIdentity,
+    parseProjectCreateWithoutCredentials,
+    prepareProjectEnvFile,
+    ProjectCreateEnvError,
+    writeProjectEnvFile,
+    type CredentialFileState,
+    type ProjectCreateCredentials,
+    type ProjectCreateIdentity,
+    type ProjectEnvironment,
+    type ProjectEnvFileOperations,
+    type PreparedProjectEnvFile,
+} from "./project-create-env";
 
 type ToolServer = {
     tool: (
@@ -29,6 +44,10 @@ const AUTH_SERVICE_HOST_SUFFIX = "-auth";
 const SAFE_PROJECT_REF = /^[a-z0-9-]{1,20}$/;
 const SAFE_AUTHORITY_PROJECT_REF = /^[A-Za-z0-9_-]{1,20}$/;
 const MAX_SERVICE_CONTROL_MESSAGE_LENGTH = 256;
+const RELEASE_CONTROL_RESPONSE_SCHEMA = "supacloud.cli.release-control.v1";
+const PROJECT_CREATE_OPERATION = "project.create";
+const PROJECT_ENVIRONMENTS = ["test", "production"] as const satisfies readonly ProjectEnvironment[];
+const DNS_LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 
 type ProjectServiceName = typeof PROJECT_SERVICE_NAMES[number];
 type ProjectServiceControlAction = typeof PROJECT_SERVICE_CONTROL_ACTIONS[number];
@@ -68,6 +87,239 @@ function failedProjectServiceResponse(message: string): ProjectToolResponse {
         content: [{ type: "text", text: `❌ ${message}` }],
         isError: true,
     };
+}
+
+function projectCreateReceipt(payload: Record<string, unknown>): ProjectToolResponse {
+    return {
+        content: [{ type: "text", text: JSON.stringify({
+            schema: RELEASE_CONTROL_RESPONSE_SCHEMA,
+            ...payload,
+        }, null, 2) }],
+    };
+}
+
+function projectCreateErrorReceipt(payload: Record<string, unknown>): ProjectToolResponse {
+    return { ...projectCreateReceipt(payload), isError: true };
+}
+
+function projectCreateFailure(
+    code: string,
+    httpStatus: number | null,
+): ProjectToolResponse {
+    return projectCreateErrorReceipt({
+        ok: false,
+        operation: PROJECT_CREATE_OPERATION,
+        error: { code, http_status: httpStatus },
+    });
+}
+
+function projectCreateMutationFailure(response: HttpResult<unknown>): ProjectToolResponse {
+    const outcomeUnknown = response.transportError || response.status === 408 || response.status >= 500;
+    return outcomeUnknown
+        ? projectCreateFailure("OUTCOME_UNKNOWN", response.transportError ? null : response.status)
+        : projectCreateFailure("HTTP_ERROR", response.status);
+}
+
+function isCompleteApiHostname(hostname: string): boolean {
+    if (hostname === "localhost") return true;
+    if (/^(?:\d{1,3}\.){3}\d{1,3}$/.test(hostname)) {
+        return hostname.split(".").every(octet => Number(octet) <= 255);
+    }
+    if (hostname.startsWith("[") && hostname.endsWith("]")) return true;
+    const labels = hostname.split(".");
+    return labels.length >= 2 && labels.every(label => DNS_LABEL.test(label));
+}
+
+function normalizedApiDomain(candidate?: string): string | undefined {
+    const normalized = candidate?.trim().toLowerCase();
+    if (!normalized || normalized.length > 253 || /[\s/@?#]/.test(normalized)) return undefined;
+    try {
+        const parsed = new URL(`https://${normalized}`);
+        const exactHostname = parsed.hostname === normalized && !parsed.port;
+        return exactHostname && isCompleteApiHostname(normalized) ? normalized : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+function canonicalProjectApiOrigin(hostname: string): string {
+    const loopback = hostname === "localhost"
+        || hostname === "127.0.0.1"
+        || hostname === "[::1]";
+    return new URL(`${loopback ? "http" : "https"}://${hostname}`).origin;
+}
+
+function expectedProjectApiOrigin(domain?: string, apiDomain?: string): string | undefined {
+    if (apiDomain) {
+        const normalizedApi = normalizedApiDomain(apiDomain);
+        return normalizedApi ? canonicalProjectApiOrigin(normalizedApi) : undefined;
+    }
+    const normalizedDomain = normalizedApiDomain(domain);
+    if (!normalizedDomain) return undefined;
+    const hostname = normalizedDomain.startsWith("api.")
+        ? normalizedDomain
+        : `api.${normalizedDomain}`;
+    return canonicalProjectApiOrigin(hostname);
+}
+
+function projectCreateEnvironment(candidate: unknown): ProjectEnvironment | undefined {
+    return candidate === "test" || candidate === "production" ? candidate : undefined;
+}
+
+interface ProjectCreateResponseBinding {
+    projectName: string;
+    apiOrigin?: string;
+}
+
+function projectCreateFileFailure(
+    identity: ProjectCreateIdentity,
+    credentialFileState: CredentialFileState,
+    code: string,
+    httpStatus: number,
+): ProjectToolResponse {
+    return projectCreateErrorReceipt({
+        ok: false,
+        operation: PROJECT_CREATE_OPERATION,
+        project_ref: identity.projectRef,
+        api_url: identity.apiUrl,
+        remote_created: true,
+        credential_file_state: credentialFileState,
+        ...(credentialFileState === "absent" ? { credentials_written: false } : {}),
+        retry_safe: false,
+        error: { code, http_status: httpStatus },
+    });
+}
+
+async function writeCreatedProjectEnv(
+    preparedEnvFile: PreparedProjectEnvFile,
+    credentials: ProjectCreateCredentials,
+    responseStatus: number,
+    fileOperations?: ProjectEnvFileOperations,
+): Promise<ProjectToolResponse | null> {
+    try {
+        await writeProjectEnvFile(preparedEnvFile, credentials, fileOperations);
+        return null;
+    } catch (error: unknown) {
+        const code = error instanceof ProjectCreateEnvError
+            ? error.code
+            : "ENV_FILE_WRITE_FAILED";
+        if (!(error instanceof ProjectCreateEnvError) || error.credentialFileState === "unknown") {
+            return projectCreateFileFailure(credentials, "unknown", code, responseStatus);
+        }
+        return projectCreateFileFailure(credentials, "absent", code, responseStatus);
+    }
+}
+
+function successfulProjectCreate(
+    identity: ProjectCreateIdentity,
+    preparedEnvFile?: PreparedProjectEnvFile,
+): ProjectToolResponse {
+    return projectCreateReceipt({
+        ok: true,
+        operation: PROJECT_CREATE_OPERATION,
+        project_ref: identity.projectRef,
+        api_url: identity.apiUrl,
+        credentials_written: Boolean(preparedEnvFile),
+        ...(preparedEnvFile ? {
+            env_file: preparedEnvFile.path,
+            env_file_scope: "project_application",
+        } : {}),
+    });
+}
+
+function invalidProjectCreateResponse(
+    responsePayload: unknown,
+    responseStatus: number,
+    expectedApiOrigin?: string,
+): ProjectToolResponse {
+    const identity = parseProjectCreateIdentity(responsePayload, expectedApiOrigin);
+    return identity
+        ? projectCreateFileFailure(identity, "absent", "INVALID_RESPONSE", responseStatus)
+        : projectCreateFailure("OUTCOME_UNKNOWN", responseStatus);
+}
+
+function projectCreateWithoutEnvResponse(
+    response: HttpResult<unknown>,
+    expectedApiOrigin?: string,
+): ProjectToolResponse {
+    const identity = parseProjectCreateWithoutCredentials(response.data, expectedApiOrigin);
+    return identity
+        ? successfulProjectCreate(identity)
+        : invalidProjectCreateResponse(response.data, response.status, expectedApiOrigin);
+}
+
+async function discardProjectEnvReservation(
+    preparedEnvFile: PreparedProjectEnvFile,
+    response: HttpResult<unknown>,
+    expectedApiOrigin: string | undefined,
+    fileOperations?: ProjectEnvFileOperations,
+): Promise<ProjectToolResponse | null> {
+    const credentialFileState = await discardPreparedProjectEnvFile(preparedEnvFile, fileOperations);
+    if (credentialFileState === "absent") return null;
+    const identity = parseProjectCreateIdentity(response.data, expectedApiOrigin);
+    return identity
+        ? projectCreateFileFailure(identity, "unknown", "ENV_FILE_CLEANUP_FAILED", response.status)
+        : projectCreateFailure("ENV_FILE_CLEANUP_FAILED", response.status);
+}
+
+async function projectCreateWithEnvResponse(
+    response: HttpResult<unknown>,
+    preparedEnvFile: PreparedProjectEnvFile,
+    binding: ProjectCreateResponseBinding,
+    fileOperations?: ProjectEnvFileOperations,
+): Promise<ProjectToolResponse> {
+    const credentials = parseProjectCreateCredentials(
+        response.data,
+        binding.apiOrigin,
+        binding.projectName,
+    );
+    if (!credentials) {
+        const cleanupFailure = await discardProjectEnvReservation(
+            preparedEnvFile,
+            response,
+            binding.apiOrigin,
+            fileOperations,
+        );
+        return cleanupFailure
+            ?? invalidProjectCreateResponse(response.data, response.status, binding.apiOrigin);
+    }
+    const writeFailure = await writeCreatedProjectEnv(
+        preparedEnvFile,
+        credentials,
+        response.status,
+        fileOperations,
+    );
+    return writeFailure ?? successfulProjectCreate(credentials, preparedEnvFile);
+}
+
+async function projectCreateResponse(
+    response: HttpResult<unknown>,
+    preparedEnvFile: PreparedProjectEnvFile | undefined,
+    binding: ProjectCreateResponseBinding,
+    fileOperations?: ProjectEnvFileOperations,
+): Promise<ProjectToolResponse> {
+    if (!response.ok || response.status !== 201) {
+        if (preparedEnvFile) {
+            const cleanupFailure = await discardProjectEnvReservation(
+                preparedEnvFile,
+                response,
+                binding.apiOrigin,
+                fileOperations,
+            );
+            if (cleanupFailure) return cleanupFailure;
+        }
+        return response.ok
+            ? projectCreateFailure("OUTCOME_UNKNOWN", response.status)
+            : projectCreateMutationFailure(response);
+    }
+    return preparedEnvFile
+        ? projectCreateWithEnvResponse(
+            response,
+            preparedEnvFile,
+            binding,
+            fileOperations,
+        )
+        : projectCreateWithoutEnvResponse(response, binding.apiOrigin);
 }
 
 function failedProjectServiceHttpResponse(response: HttpResult<unknown>): ProjectToolResponse {
@@ -283,7 +535,12 @@ export function registerUserProjectCliTools(
     );
 }
 
-export function registerAdminProjectCliTools(server: ToolServer, http: HttpTransport): void {
+export function registerAdminProjectCliTools(
+    server: ToolServer,
+    http: HttpTransport,
+    options: { projectEnvFileOperations?: ProjectEnvFileOperations } = {},
+): void {
+    const fileOperations = options.projectEnvFileOperations;
     server.tool(
         "project",
         "Platform-level project lifecycle management. Actions: list, create, get, delete, pause, restore, restart, settings, update_settings, api_keys, health, logs, tasks, services, service_control",
@@ -301,6 +558,14 @@ export function registerAdminProjectCliTools(server: ToolServer, http: HttpTrans
             api_domain: optional(Type.String(), "[create] Explicit API domain"),
             auth_domain: optional(Type.String(), "[create] Explicit Auth/OIDC domain"),
             studio_domain: optional(Type.String(), "[create] Explicit Studio domain"),
+            env_file: optional(
+                Type.String(),
+                "[create] Linux-only absolute new application env path for parent-bound service-role delivery (0600)",
+            ),
+            environment: optional(
+                stringEnum(PROJECT_ENVIRONMENTS),
+                "[create] Required with env_file; application credential environment",
+            ),
             settings: optional(Type.Record(Type.String(), Type.Unknown()), "[update_settings] Config fields to update"),
             log_type: optional(stringEnum(["all", "auth", "database", "api"]), "[logs] Filter by service"),
             service: optional(stringEnum(PROJECT_SERVICE_NAMES), "[service_control] Canonical service name"),
@@ -319,6 +584,8 @@ export function registerAdminProjectCliTools(server: ToolServer, http: HttpTrans
             api_domain,
             auth_domain,
             studio_domain,
+            env_file,
+            environment,
             settings,
             log_type,
             service,
@@ -332,6 +599,29 @@ export function registerAdminProjectCliTools(server: ToolServer, http: HttpTrans
                     break;
                 case "create": {
                     if (!name) throw new Error("'name' is required for create");
+                    const boundApiOrigin = expectedProjectApiOrigin(domain, api_domain);
+                    if (env_file && !boundApiOrigin) {
+                        return projectCreateFailure("API_DOMAIN_BINDING_REQUIRED", null);
+                    }
+                    let preparedEnvFile: PreparedProjectEnvFile | undefined;
+                    if (env_file) {
+                        const boundEnvironment = projectCreateEnvironment(environment);
+                        if (!boundEnvironment) {
+                            return projectCreateFailure("ENVIRONMENT_BINDING_REQUIRED", null);
+                        }
+                        try {
+                            preparedEnvFile = await prepareProjectEnvFile(
+                                env_file,
+                                boundEnvironment,
+                                fileOperations,
+                            );
+                        } catch (error: unknown) {
+                            const code = error instanceof ProjectCreateEnvError
+                                ? error.code
+                                : "ENV_FILE_PATH_INVALID";
+                            return projectCreateFailure(code, null);
+                        }
+                    }
                     const createRequest: Record<string, string | undefined> = {
                         name,
                         region: region || "local",
@@ -341,8 +631,13 @@ export function registerAdminProjectCliTools(server: ToolServer, http: HttpTrans
                     if (api_domain) createRequest.api_domain = api_domain;
                     if (auth_domain) createRequest.auth_domain = auth_domain;
                     if (studio_domain) createRequest.studio_domain = studio_domain;
-                    text = ok(await http.post("/v1/projects", createRequest));
-                    break;
+                    if (preparedEnvFile) createRequest.credential_delivery = "response";
+                    return projectCreateResponse(
+                        await http.post("/v1/projects", createRequest),
+                        preparedEnvFile,
+                        { projectName: name, apiOrigin: boundApiOrigin },
+                        fileOperations,
+                    );
                 }
                 case "get":
                     text = ok(await http.get(`/v1/projects/${resolveRef(ref)}`));

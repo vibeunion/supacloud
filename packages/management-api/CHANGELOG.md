@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.52.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.51.1...management-api-v0.52.0) (2026-08-11)
+
+
+### Features
+
+* **admin:** add verified physical backup receipts ([#820](https://github.com/zuohuadong/supacloud/issues/820)) ([7c99ace](https://github.com/zuohuadong/supacloud/commit/7c99ace90446881cca1903f62c0efdbbf2fbd2d1))
+* **admin:** deliver project credentials securely ([#819](https://github.com/zuohuadong/supacloud/issues/819)) ([3307874](https://github.com/zuohuadong/supacloud/commit/33078744a42f49bf7e412ad3145f5374331d8756))
+* **cli:** add storage bucket lifecycle ([#822](https://github.com/zuohuadong/supacloud/issues/822)) ([e4c9b4c](https://github.com/zuohuadong/supacloud/commit/e4c9b4c8998a1149a527d38c277bf3d77f0f7572))
+
 ## [0.51.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.51.0...management-api-v0.51.1) (2026-08-11)
 
 

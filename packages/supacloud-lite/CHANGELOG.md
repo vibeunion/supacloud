@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.7.1](https://github.com/zuohuadong/supacloud/compare/supacloud-lite-v0.7.0...supacloud-lite-v0.7.1) (2026-08-11)
+
+
+### Bug Fixes
+
+* **lite:** bound standalone subprocess collection ([#827](https://github.com/zuohuadong/supacloud/issues/827)) ([4c37c33](https://github.com/zuohuadong/supacloud/commit/4c37c3325391de11ff6224b0297eb211a3627f5a))
+* **lite:** guard db reset on uninitialized state ([#826](https://github.com/zuohuadong/supacloud/issues/826)) ([1e45f5f](https://github.com/zuohuadong/supacloud/commit/1e45f5fdd0cda0dbe238043526eb8d5ab8ebf1e1))
+* **lite:** keep project API keys stable ([#817](https://github.com/zuohuadong/supacloud/issues/817)) ([80c5818](https://github.com/zuohuadong/supacloud/commit/80c581846a91654268af2b745f9a7d3d01ab8d5e))
+
 ## [0.7.0](https://github.com/zuohuadong/supacloud/compare/supacloud-lite-v0.6.0...supacloud-lite-v0.7.0) (2026-08-11)
 
 

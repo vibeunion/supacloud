@@ -76,7 +76,8 @@ npx @supacloud/admin status
 npx @supacloud/admin ssh ping
 npx @supacloud/admin ssh versions
 npx @supacloud/admin ssh diagnose
-npx @supacloud/admin project create --name my-app --domain example.com
+npx @supacloud/admin project create --name my-app --domain example.com \
+  --env_file /secure/path/.env.project-credentials.test --environment test
 npx @supacloud/admin project list
 npx @supacloud/admin project services --ref abc123
 npx @supacloud/admin project service_control --ref abc123 --service gotrue --service_action stop
@@ -157,6 +158,52 @@ Project commands owned by this CLI:
 - `project update_settings`
 - `project services` — read-only project service inventory
 - `project service_control` — constrained project service lifecycle control
+
+`project create` never prints project credentials. Pass an absolute
+`--env_file` path to explicitly request one-time service-role delivery. This
+mode requires both a complete bare `--api_domain` (or bare base `--domain`)
+and an exact `--environment test|production`; invalid or missing bindings fail
+before the remote project mutation. `--environment` is used only in the local
+credential file and is never sent to the Management API. Credential delivery is
+supported only on Linux, where Admin holds the canonical parent directory open
+and performs create, verification, and cleanup through `/proc/self/fd`. macOS
+and Windows fail with `ENV_FILE_PLATFORM_UNSUPPORTED` before creating a file or
+requesting remote credentials. On Linux, the target is exclusively reserved at
+mode `0600` before the remote mutation. The direct parent must be owned by the
+Admin process user. Every ancestor must be owned by root or that user and must
+not grant group/world write access; paths below writable sticky directories
+such as `/tmp` are rejected. Parent ownership, mode, and device/inode identity,
+plus file ownership, mode, and device/inode identity, are checked before and
+after writing through the held parent descriptor. The file and parent directory
+are synced before success is reported.
+The response API URL and project name must exactly match the request binding;
+the origin comparison includes the port. Existing files, symlinks, replaced
+parents, non-canonical paths, and missing or untrusted directories are rejected.
+The recommended name is
+`.env.project-credentials.<environment>`; verify that the target repository
+ignores it before running the command (SupaCloud's own `.env.*` rule does).
+This is an application credential file, not a SupaCloud Admin/Management
+profile: Admin rejects it before registering HTTP tools, so never select it
+with `supacloud-admin --env` or `--env-file`. Selected Admin files that contain
+project application credentials must also contain an explicit Management API
+URL and `SUPACLOUD_API_TOKEN`; Admin never substitutes the service-role key.
+The generated file contains only `SUPACLOUD_ENV`, `SUPACLOUD_PROJECT_REF`,
+`SUPABASE_URL`, and `SUPABASE_SERVICE_ROLE_KEY`; the public project origin is deliberately not
+written as `SUPACLOUD_API_URL`, which Admin reserves for the Management API.
+The success receipt marks `env_file_scope` as `project_application`. Standard
+output otherwise contains only credential-free fields. Supply
+`SUPACLOUD_API_TOKEN` through the process environment, never as a command
+argument.
+
+If the remote project is created but local env writing fails, the error receipt
+retains only the safe project ref and API URL, sets `remote_created: true` and
+`retry_safe: false`, and never includes the credential. A
+`credential_file_state: "absent"` receipt confirms cleanup and includes
+`credentials_written: false`. A `credential_file_state: "unknown"` receipt
+omits `credentials_written`; treat the target path as secret-bearing until an
+operator securely removes it or completes credential recovery/rotation. Repair
+the local path only after reading back the existing project and following that
+recovery flow; never blindly retry project creation.
 
 Service control accepts canonical service names only. `postgrest` supports
 `start`, `stop`, `restart`, `pause`, `resume`, and `status`; `gotrue`, `storage`,
