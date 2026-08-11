@@ -40,6 +40,7 @@ export async function findById(id: string): Promise<Project | null> {
 
   // Create project
 export async function create(input: CreateProjectInput): Promise<Project> {
+  const initialConfig = normalizeProjectConfig(input.config);
   return withRetry("ProjectRepository.create", async () => {
   const [project] = await sql`
     INSERT INTO projects (
@@ -64,7 +65,7 @@ export async function create(input: CreateProjectInput): Promise<Project> {
       ${input.s3_access_key || null},
       ${input.s3_secret_key || null},
       ${input.region || "local"},
-      ${input.config ? JSON.stringify(input.config) : "{}"}::jsonb,
+      ${initialConfig}::jsonb,
       ${encryptSecretIfNeeded(input.db_password)},
       ${encryptSecretIfNeeded(input.jwt_secret)},
       ${encryptSecretIfNeeded(input.service_role_key)},
@@ -96,7 +97,7 @@ export async function updateConfig(ref: string, config: Record<string, unknown>)
   const [project] = await sql`
     UPDATE projects
     SET config =
-          (${JSON.stringify(nextConfig)}::jsonb - 'scheduled_functions')
+          (${nextConfig}::jsonb - 'scheduled_functions')
           || CASE
             WHEN jsonb_typeof(projects.config) = 'object'
               AND projects.config ? 'scheduled_functions'
