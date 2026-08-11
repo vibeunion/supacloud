@@ -304,6 +304,34 @@ type FunctionActivationSnapshot = {
   moduleVersion: string;
 };
 
+function functionArtifactBindingRoot(
+  projectRoot: string,
+  functionName: string,
+  activeVersion: string | null,
+  candidate: string,
+): string {
+  if (activeVersion !== null) {
+    return path.join(projectRoot, ".versions", functionName, activeVersion);
+  }
+  const sourceRoot = path.join(projectRoot, `.src-${functionName}`);
+  return isPathInside(candidate, sourceRoot) ? sourceRoot : candidate;
+}
+
+function isBoundFunctionArtifact(
+  candidate: string,
+  realCandidate: string,
+  bindingRoot: string,
+): boolean {
+  return bindingRoot === candidate
+    ? realCandidate === candidate
+    : isPathInside(realCandidate, bindingRoot);
+}
+
+function isMissingFunctionCandidate(error: unknown): boolean {
+  if (!(error instanceof Error) || !("code" in error)) return false;
+  return error.code === "ENOENT" || error.code === "ENOTDIR";
+}
+
 async function resolveFunctionPath(
   projectRef: string,
   functionName: string,
@@ -328,8 +356,14 @@ async function resolveFunctionPath(
 
     try {
       const realCandidate = await fs.realpath(candidate);
-      if (!isPathInside(realCandidate, projectRoot)) {
-        throw new Error("Function path escapes project root");
+      const bindingRoot = functionArtifactBindingRoot(
+        projectRoot,
+        functionName,
+        activeVersion,
+        candidate,
+      );
+      if (!isBoundFunctionArtifact(candidate, realCandidate, bindingRoot)) {
+        throw new Error("Function path escapes its activation root");
       }
       const stat = await fs.stat(realCandidate);
       if (!stat.isFile()) {
@@ -350,7 +384,7 @@ async function resolveFunctionPath(
         ].join(":"),
       };
     } catch (error) {
-      if (error instanceof Error && error.message.includes("escapes")) throw error;
+      if (!isMissingFunctionCandidate(error)) throw error;
     }
   }
 
