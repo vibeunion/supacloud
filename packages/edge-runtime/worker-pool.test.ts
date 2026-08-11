@@ -14,6 +14,161 @@ afterEach(async () => {
   }
 });
 
+describe("WorkerPool runtime-owned response metadata", () => {
+  test("overwrites tenant version headers and removes them for legacy dispatches", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-function-version-"));
+    const functionPath = join(projectRoot, "fn.ts");
+    await Bun.write(functionPath, `
+      export default (request) => new Response(
+        request.headers.get("x-supacloud-function-version") || "absent",
+        {
+          headers: { "x-supacloud-function-version": "tenant-forged" },
+        },
+      );
+    `);
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    try {
+      const versioned = await pool.dispatch({
+        functionId: "proj_versioned_v12",
+        functionPath,
+        projectRoot,
+        functionVersion: "12",
+        env: {},
+        request: new Request("http://edge.local/functions/v1/versioned", {
+          headers: { "x-supacloud-function-version": "client-spoof" },
+        }),
+      });
+      expect(versioned.headers.get("x-supacloud-function-version")).toBe("12");
+      expect(await versioned.text()).toBe("absent");
+
+      const legacy = await pool.dispatch({
+        functionId: "proj_versioned",
+        functionPath,
+        projectRoot,
+        functionVersion: null,
+        env: {},
+        request: new Request("http://edge.local/functions/v1/versioned"),
+      });
+      expect(legacy.headers.has("x-supacloud-function-version")).toBe(false);
+
+      const omittedLegacy = await pool.dispatch({
+        functionId: "proj_versioned_omitted",
+        functionPath,
+        projectRoot,
+        env: {},
+        request: new Request("http://edge.local/functions/v1/versioned"),
+      });
+      expect(omittedLegacy.headers.has("x-supacloud-function-version")).toBe(false);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects non-canonical active versions before worker dispatch", async () => {
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+    const invalidVersions = [
+      "0",
+      "01",
+      "-1",
+      "v12",
+      "9007199254740992",
+      "1".repeat(128),
+    ];
+
+    for (const functionVersion of invalidVersions) {
+      await expect(pool.dispatch({
+        functionId: "proj_invalid_version",
+        functionPath: "/unused/fn.ts",
+        projectRoot: "/unused",
+        functionVersion,
+        env: {},
+        request: new Request("http://edge.local/functions/v1/versioned"),
+      })).rejects.toThrow("Function version must be a canonical positive safe integer");
+    }
+  });
+
+  test("marks tenant failures with the dispatched active version", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-function-version-error-"));
+    const functionPath = join(projectRoot, "fn.ts");
+    await Bun.write(functionPath, `export default () => { throw new Error("tenant failure"); };`);
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    try {
+      const response = await pool.dispatch({
+        functionId: "proj_versioned_error_v13",
+        functionPath,
+        projectRoot,
+        functionVersion: "13",
+        env: {},
+        request: new Request("http://edge.local/functions/v1/versioned-error"),
+      });
+      expect(response.status).toBe(500);
+      expect(response.headers.get("x-supacloud-function-version")).toBe("13");
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("keeps response metadata bound across active version ABA changes", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-function-version-aba-"));
+    const functionPath = join(projectRoot, "fn.ts");
+    await Bun.write(functionPath, `export default () => new Response("ok");`);
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    try {
+      for (const functionVersion of ["31", "32", "31"]) {
+        const response = await pool.dispatch({
+          functionId: `proj_versioned_v${functionVersion}`,
+          functionPath,
+          projectRoot,
+          functionVersion,
+          moduleVersion: functionVersion,
+          env: {},
+          request: new Request("http://edge.local/functions/v1/versioned"),
+        });
+        expect(response.headers.get("x-supacloud-function-version")).toBe(functionVersion);
+        expect(await response.text()).toBe("ok");
+      }
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("does not attach a version when postMessage fails synchronously", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-function-version-post-"));
+    const functionPath = join(projectRoot, "fn.ts");
+    await Bun.write(functionPath, `export default () => new Response("unused");`);
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+    const [worker] = (pool as unknown as {
+      idle: Array<{ postMessage: (message: unknown) => void }>;
+    }).idle;
+    worker.postMessage = () => {
+      throw new Error("postMessage failed");
+    };
+
+    try {
+      const response = await pool.dispatch({
+        functionId: "proj_versioned_post_v14",
+        functionPath,
+        projectRoot,
+        functionVersion: "14",
+        env: {},
+        request: new Request("http://edge.local/functions/v1/versioned-post"),
+      });
+      expect(response.status).toBe(500);
+      expect(response.headers.has("x-supacloud-function-version")).toBe(false);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+});
+
 async function waitForFile(path: string, timeoutMs = 2_000): Promise<string> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -1121,7 +1276,7 @@ describe("WorkerPool cancellation and replacement", () => {
       }
     `);
 
-    const pool = new WorkerPool({ size: 1, requestTimeout: 100 });
+    const pool = new WorkerPool({ size: 1, requestTimeout: 500 });
     pools.push(pool);
 
     try {
@@ -1129,20 +1284,26 @@ describe("WorkerPool cancellation and replacement", () => {
         functionId: "proj_timeout_fn",
         functionPath,
         projectRoot,
+        functionVersion: "41",
         env: {},
         request: new Request("http://edge.local/functions/v1/fn/slow"),
       });
-      await Bun.sleep(20);
+      await Bun.sleep(50);
       const fastResponse = pool.dispatch({
         functionId: "proj_timeout_fn",
         functionPath,
         projectRoot,
+        functionVersion: "42",
         env: {},
         request: new Request("http://edge.local/functions/v1/fn/fast"),
       });
 
-      expect((await slowResponse).status).toBe(504);
-      expect(await (await fastResponse).text()).toBe("fast");
+      const timedOutResponse = await slowResponse;
+      expect(timedOutResponse.status).toBe(504);
+      expect(timedOutResponse.headers.get("x-supacloud-function-version")).toBe("41");
+      const recoveredResponse = await fastResponse;
+      expect(recoveredResponse.headers.get("x-supacloud-function-version")).toBe("42");
+      expect(await recoveredResponse.text()).toBe("fast");
       const metrics = pool.snapshotMetrics("timeout");
       expect(metrics["timeout_total_worker_replacements"]).toBe(1);
       expect(metrics["timeout_total_worker_retirements"]).toBe(1);
@@ -1150,6 +1311,42 @@ describe("WorkerPool cancellation and replacement", () => {
       expect(metrics["timeout_idle_workers"]).toBe(1);
       await waitForMetric(pool, "total_natural_worker_exits", 1);
       expect(pool.snapshotMetrics("timeout")["timeout_retired_workers"]).toBe(0);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("keeps the dispatched version on a worker crash error", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-worker-crash-version-"));
+    const startedPath = join(projectRoot, "started.txt");
+    const functionPath = join(projectRoot, "fn.ts");
+    await Bun.write(functionPath, `
+      export default async () => {
+        await Bun.write(process.env.STARTED_PATH, "started");
+        await new Promise(() => {});
+      };
+    `);
+    const pool = new WorkerPool({ size: 1, requestTimeout: 5_000 });
+    pools.push(pool);
+
+    try {
+      const pendingResponse = pool.dispatch({
+        functionId: "proj_crash_fn_v45",
+        functionPath,
+        projectRoot,
+        functionVersion: "45",
+        env: { STARTED_PATH: startedPath },
+        request: new Request("http://edge.local/functions/v1/fn/crash"),
+      });
+      await waitForFile(startedPath, 5_000);
+      const [worker] = (pool as unknown as {
+        activeWorkers: Set<{ emit: (event: "error", error: Error) => boolean }>;
+      }).activeWorkers;
+      worker.emit("error", new Error("simulated worker crash"));
+
+      const crashedResponse = await pendingResponse;
+      expect(crashedResponse.status).toBe(500);
+      expect(crashedResponse.headers.get("x-supacloud-function-version")).toBe("45");
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
@@ -1182,6 +1379,7 @@ describe("WorkerPool cancellation and replacement", () => {
         functionId: "proj_cancel_fn",
         functionPath,
         projectRoot,
+        functionVersion: "43",
         env: { STARTED_PATH: startedPath },
         request: new Request("http://edge.local/functions/v1/fn/slow", {
           signal: controller.signal,
@@ -1198,7 +1396,9 @@ describe("WorkerPool cancellation and replacement", () => {
 
       controller.abort();
 
-      expect((await slowResponse).status).toBe(499);
+      const cancelled = await slowResponse;
+      expect(cancelled.status).toBe(499);
+      expect(cancelled.headers.get("x-supacloud-function-version")).toBe("43");
       expect(await (await fastResponse).text()).toBe("fast");
       expect(pool.snapshotMetrics("cancel")["cancel_idle_workers"]).toBe(1);
     } finally {
@@ -1379,9 +1579,11 @@ describe("WorkerPool cancellation and replacement", () => {
         functionId: "proj_stream_fn",
         functionPath,
         projectRoot,
+        functionVersion: "44",
         env: {},
         request: new Request("http://edge.local/functions/v1/fn/stream"),
       });
+      expect(streamResponse.headers.get("x-supacloud-function-version")).toBe("44");
       const reader = streamResponse.body!.getReader();
       expect((await reader.read()).done).toBe(false);
 
@@ -2751,11 +2953,13 @@ describe("WorkerPool body size limit", () => {
         functionId: "test_body_limit",
         functionPath,
         projectRoot,
+        functionVersion: "46",
         env: {},
         request: req,
       });
 
       expect(res.status).toBe(413);
+      expect(res.headers.has("x-supacloud-function-version")).toBe(false);
       const body = await res.json();
       expect(body.error).toContain("Request body too large");
       expect(body.error).toContain("30MB");

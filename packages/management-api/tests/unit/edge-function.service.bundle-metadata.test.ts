@@ -22,6 +22,7 @@ const {
   EDGE_FUNCTION_ACTIVE_VERSION_CONFLICT_CODE,
   edgeFunctionService,
   getVersionedArtifactPath,
+  migrateLegacyVersionArtifacts,
 } = await import(
   "../../src/services/edge-function.service"
 );
@@ -226,6 +227,81 @@ describe("edgeFunctionService bundle metadata", () => {
       }
     } finally {
       codeSpy.mockRestore();
+    }
+  });
+
+  test("version readbacks fail closed when the configured active bundle is missing", async () => {
+    const ref = "proj_missing_active_version_readback";
+    const slug = "missing-active-bundle";
+    const projectDir = join(functionsRoot, ref);
+    await mkdir(join(projectDir, ".versions", slug, "7"), { recursive: true });
+    await Promise.all([
+      Bun.write(join(projectDir, `${slug}.config.json`), JSON.stringify({ version: "7" })),
+      Bun.write(join(projectDir, `${slug}.js`), "stale legacy alias"),
+    ]);
+
+    await expect(edgeFunctionService.listVersions(ref, slug))
+      .rejects.toThrow("Active function artifact is missing");
+    await expect(edgeFunctionService.getVersion(ref, slug, "7"))
+      .rejects.toThrow("Active function artifact is missing");
+
+    const { projectFunctionsRoutes } = await import("../../src/routes/project-functions");
+    const app = new Elysia().use(projectFunctionsRoutes);
+    const request = (path: string) => app.handle(new Request(`http://localhost${path}`, {
+      headers: { Authorization: "Bearer dev-master-token" },
+    }));
+
+    for (const suffix of ["", "/7"]) {
+      const response = await request(`/v1/projects/${ref}/functions/${slug}/versions${suffix}`);
+      const body = await response.text();
+      expect(response.status).toBe(500);
+      expect(body).not.toContain('"is_active":true');
+      expect(body).not.toContain("stale legacy alias");
+    }
+  });
+
+  test("keeps manifest-less legacy version zero readable without a versioned bundle", async () => {
+    const ref = "proj_manifestless_legacy_zero";
+    const slug = "legacy-zero";
+    const projectDir = join(functionsRoot, ref);
+    await mkdir(projectDir, { recursive: true });
+    await Bun.write(join(projectDir, `${slug}.js`), "legacy version zero");
+
+    expect(await edgeFunctionService.getActiveVersion(ref, slug)).toBe("0");
+    expect(await edgeFunctionService.listVersions(ref, slug)).toEqual([]);
+    expect(await edgeFunctionService.read(ref, slug)).toBe("legacy version zero");
+  });
+
+  test("migrates only canonical legacy source-dir versions inside the matching slug root", async () => {
+    const validRef = "proj_legacy_source_v0";
+    const validSlug = "legacy-source";
+    const validSourceDir = join(functionsRoot, validRef, `.src-${validSlug}-v0`);
+    await mkdir(validSourceDir, { recursive: true });
+    await Bun.write(join(validSourceDir, "index.ts"), "export default {};");
+
+    await migrateLegacyVersionArtifacts();
+    expect(await readFile(join(
+      functionsRoot,
+      validRef,
+      ".versions",
+      validSlug,
+      "0",
+      "src",
+      "index.ts",
+    ), "utf8")).toBe("export default {};");
+
+    for (const version of ["01", "9007199254740992"]) {
+      const ref = `proj_legacy_source_invalid_${version}`;
+      const slug = "legacy-source";
+      const sourceDir = join(functionsRoot, ref, `.src-${slug}-v${version}`);
+      await mkdir(sourceDir, { recursive: true });
+      await Bun.write(join(sourceDir, "index.ts"), "invalid legacy source");
+
+      await expect(migrateLegacyVersionArtifacts()).rejects.toThrow();
+      expect(existsSync(sourceDir)).toBe(true);
+      expect(existsSync(join(functionsRoot, ref, ".versions", slug, version))).toBe(false);
+
+      await rm(join(functionsRoot, ref), { recursive: true, force: true });
     }
   });
 

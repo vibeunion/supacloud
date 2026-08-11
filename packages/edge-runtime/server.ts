@@ -20,7 +20,12 @@ import {
 import {
   buildBackgroundForwardDispatch,
 } from "./background-forward";
-import { activeFunctionPathCandidates, functionPathCandidates } from "./function-source";
+import { activeFunctionPathCandidates } from "./function-source";
+import {
+  assertCanonicalConfiguredFunctionVersion,
+  resolveFunctionVersionBinding,
+  resolveTrustedBackgroundFunctionVersionBinding,
+} from "./function-version";
 import path from "path";
 import fs from "fs/promises";
 import type { PgredisRuntimeEndpointConfig } from "./internal-bindings";
@@ -48,7 +53,6 @@ const WORKER_RECYCLE_RESPONSE_GRACE_MS = 100;
 const INTERNAL_TOKEN = process.env.EDGE_RUNTIME_MASTER_KEY || process.env.MASTER_TOKEN || "";
 const PROJECT_REF_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
 const FUNCTION_SLUG_PATTERN = /^[a-zA-Z0-9_-]{1,128}$/;
-const VERSION_PATTERN = /^[a-zA-Z0-9._-]{1,128}$/;
 const AUTH_FAILURE_WINDOW_MS = Number(process.env.EDGE_AUTH_FAILURE_WINDOW_MS) || 30_000;
 const AUTH_FAILURE_LIMIT = Number(process.env.EDGE_AUTH_FAILURE_LIMIT) || 8;
 const AUTH_FAILURE_COOLDOWN_MS = Number(process.env.EDGE_AUTH_FAILURE_COOLDOWN_MS) || 60_000;
@@ -122,10 +126,6 @@ function isSafeProjectRef(value: string): boolean {
 
 function isSafeFunctionSlug(value: string): boolean {
   return FUNCTION_SLUG_PATTERN.test(value);
-}
-
-function isSafeVersion(value: string): boolean {
-  return VERSION_PATTERN.test(value);
 }
 
 function getProjectModuleEpoch(projectRef: string): number {
@@ -299,6 +299,7 @@ type FunctionActivationSnapshot = {
   functionPath: string;
   projectRoot: string;
   activeVersion: string | null;
+  responseVersion: string | null;
   verifyJwt: boolean;
   moduleVersion: string;
 };
@@ -307,20 +308,18 @@ async function resolveFunctionPath(
   projectRef: string,
   functionName: string,
   requestedVersion?: string | null,
+  versionBindingResolver = resolveFunctionVersionBinding,
 ): Promise<FunctionActivationSnapshot> {
   if (!isSafeFunctionSlug(functionName)) {
     throw new Error("Invalid function slug");
   }
-  if (requestedVersion && !isSafeVersion(requestedVersion)) {
-    throw new Error("Invalid function version");
-  }
-
   const projectRoot = await resolveProjectRoot(projectRef);
   const resolvedConfig = await getFunctionConfig(projectRef, functionName, projectRoot);
-  const activeVersion = requestedVersion || resolvedConfig.version || null;
-  const candidates = requestedVersion
-    ? functionPathCandidates(projectRoot, functionName, requestedVersion)
-    : activeFunctionPathCandidates(projectRoot, functionName, resolvedConfig.version);
+  const { activeVersion, responseVersion } = versionBindingResolver(
+    requestedVersion,
+    resolvedConfig.version,
+  );
+  const candidates = activeFunctionPathCandidates(projectRoot, functionName, activeVersion);
 
   for (const candidate of candidates) {
     if (!isPathInside(candidate, projectRoot)) {
@@ -340,6 +339,7 @@ async function resolveFunctionPath(
         functionPath: realCandidate,
         projectRoot,
         activeVersion,
+        responseVersion,
         verifyJwt: resolvedConfig.verify_jwt,
         moduleVersion: [
           `active:${activeVersion || "legacy"}`,
@@ -406,7 +406,7 @@ async function dispatchFunction(
 ) {
   const { projectRef, functionName, request, setHeaders, activation } = input;
   try {
-    const { functionPath, projectRoot, activeVersion, moduleVersion } = activation;
+    const { functionPath, projectRoot, activeVersion, responseVersion, moduleVersion } = activation;
     const versionSuffix = activeVersion ? `_v${activeVersion}` : "";
     const functionId = `${projectRef}_${functionName}${versionSuffix}`;
     const targetPool = opts?.background ? backgroundPool : pool;
@@ -422,6 +422,7 @@ async function dispatchFunction(
       functionPath,
       projectRoot,
       projectRef,
+      functionVersion: responseVersion,
       internalBindings: PGREDIS_RUNTIME_ENDPOINT
         ? {
             baseUrl: PGREDIS_RUNTIME_ENDPOINT.baseUrl,
@@ -509,48 +510,74 @@ const configCache = new Map<
 >();
 const CONFIG_CACHE_TTL = 10_000;
 
+type FunctionConfig = { verify_jwt: boolean; version: string | null };
+
+function isMissingFileError(error: unknown): boolean {
+  return error instanceof Error
+    && (error as NodeJS.ErrnoException).code === "ENOENT";
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function configuredVersion(config: Record<string, unknown>): string | null {
+  if (!Object.prototype.hasOwnProperty.call(config, "version")) return null;
+  assertCanonicalConfiguredFunctionVersion(config.version);
+  return config.version;
+}
+
+function parseFunctionConfig(raw: string): FunctionConfig {
+  const config: unknown = JSON.parse(raw);
+  if (!isPlainObject(config)) {
+    throw new Error("Function config must be a plain object");
+  }
+  return {
+    verify_jwt: config.verify_jwt !== false,
+    version: configuredVersion(config),
+  };
+}
+
+async function existingFunctionConfigPath(
+  configPath: string,
+  projectRoot: string,
+): Promise<string | null> {
+  try {
+    await fs.lstat(configPath);
+  } catch (error) {
+    if (isMissingFileError(error)) return null;
+    throw error;
+  }
+  const realConfigPath = await fs.realpath(configPath);
+  if (!isPathInside(realConfigPath, projectRoot)) {
+    throw new Error("Function config path escapes project root");
+  }
+  return realConfigPath;
+}
+
 async function getFunctionConfig(
   projectRef: string,
   functionName: string,
-  projectRoot?: string,
-): Promise<{ verify_jwt: boolean; version: string | null }> {
+  projectRoot: string,
+): Promise<FunctionConfig> {
   const key = `${projectRef}/${functionName}`;
   const cached = configCache.get(key);
   if (cached && cached.expiresAt > Date.now()) {
     return { verify_jwt: cached.verify_jwt, version: cached.version };
   }
 
-  try {
-    const root = projectRoot || await resolveProjectRoot(projectRef);
-    const configPath = path.resolve(root, `${functionName}.config.json`);
-    if (!isPathInside(configPath, root)) {
-      throw new Error("Function config path escapes project root");
-    }
-    const realConfigPath = await fs.realpath(configPath);
-    if (!isPathInside(realConfigPath, root)) {
-      throw new Error("Function config path escapes project root");
-    }
-    const raw = await Bun.file(realConfigPath).text();
-    const config = JSON.parse(raw);
-    const verify_jwt = config.verify_jwt !== false;
-    const version =
-      typeof config.version === "string" && config.version.trim().length > 0
-        ? config.version.trim()
-        : null;
-    configCache.set(key, {
-      verify_jwt,
-      version,
-      expiresAt: Date.now() + CONFIG_CACHE_TTL,
-    });
-    return { verify_jwt, version };
-  } catch {
-    configCache.set(key, {
-      verify_jwt: true,
-      version: null,
-      expiresAt: Date.now() + CONFIG_CACHE_TTL,
-    });
-    return { verify_jwt: true, version: null };
+  const configPath = path.resolve(projectRoot, `${functionName}.config.json`);
+  if (!isPathInside(configPath, projectRoot)) {
+    throw new Error("Function config path escapes project root");
   }
+  const realConfigPath = await existingFunctionConfigPath(configPath, projectRoot);
+  const config = realConfigPath === null
+    ? { verify_jwt: true, version: null }
+    : parseFunctionConfig(await fs.readFile(realConfigPath, "utf8"));
+  configCache.set(key, { ...config, expiresAt: Date.now() + CONFIG_CACHE_TTL });
+  return config;
 }
 
 interface ProjectSecrets {
@@ -867,7 +894,12 @@ const app = new Elysia()
     const requestedVersion = backgroundDispatch.forwardedRequest.headers.get("x-supacloud-function-version");
     let response: Response;
     try {
-      const activation = await resolveFunctionPath(c.params.ref, c.params.functionName, requestedVersion);
+      const activation = await resolveFunctionPath(
+        c.params.ref,
+        c.params.functionName,
+        requestedVersion,
+        resolveTrustedBackgroundFunctionVersionBinding,
+      );
       response = await dispatchFunction(
         {
           projectRef: c.params.ref,
@@ -928,7 +960,12 @@ const app = new Elysia()
     const requestedVersion = backgroundDispatch.forwardedRequest.headers.get("x-supacloud-function-version");
     let response: Response;
     try {
-      const activation = await resolveFunctionPath(c.params.ref, c.params.functionName, requestedVersion);
+      const activation = await resolveFunctionPath(
+        c.params.ref,
+        c.params.functionName,
+        requestedVersion,
+        resolveTrustedBackgroundFunctionVersionBinding,
+      );
       response = await dispatchFunction(
         {
           projectRef: c.params.ref,
