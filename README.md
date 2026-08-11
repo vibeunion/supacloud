@@ -321,6 +321,7 @@ supacloud-cli frontend list --ref <ref>
 supacloud-cli edge_functions list --ref <ref>
 supacloud-cli edge_functions source --ref <ref> --slug hello --version 1 --output ./hello-v1.ts
 supacloud-cli edge_functions deploy --ref <ref> --slug hello --path ./supabase/functions/hello --expected-active-version absent
+supacloud-cli edge_functions deploy --ref <ref> --slug hello --prebundled-path ./dist/hello.js --expected-sha256 <sha256> --expected-active-version 1
 supacloud-cli edge_functions activate --ref <ref> --slug hello --version 2 --expected-active-version 3
 supacloud-cli storage list_buckets --ref <ref>
 ```
@@ -330,6 +331,11 @@ Function deploy and activation commands require the active version observed via
 return HTTP 409 and successful mutations emit a
 `supacloud.cli.release-control.v1` receipt. Pass the observed version to
 `edge_functions source --version <N>` for an immutable, ABA-safe source backup.
+Use `deploy --prebundled-path` with the required lowercase
+`--expected-sha256` when a release pipeline must upload an already-built runtime
+artifact without local or server rebundling. The mode rejects caller-hash,
+file-stability, UTF-8, runtime-policy, and normalization mismatches before
+activation.
 Version `0` is reserved for service-internal legacy recovery and is not a valid
 public CLI/API activation target or expected active version.
 

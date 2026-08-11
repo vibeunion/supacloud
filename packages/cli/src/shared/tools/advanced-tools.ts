@@ -1,7 +1,19 @@
 /**
  * Advanced — Split into 3 compound tools: edge_functions, secrets, platform
  */
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createHash, timingSafeEqual } from "node:crypto";
+import {
+    closeSync,
+    constants as fsConstants,
+    existsSync,
+    fstatSync,
+    mkdtempSync,
+    openSync,
+    readFileSync,
+    rmSync,
+    statSync,
+    writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -18,6 +30,77 @@ import {
 } from "./release-control-response";
 
 const execFileAsync = promisify(execFile);
+const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/;
+
+type OpenFileIdentity = {
+    dev: bigint;
+    ino: bigint;
+    size: bigint;
+    mtimeNs: bigint;
+    ctimeNs: bigint;
+};
+
+function openFileIdentity(descriptor: number): OpenFileIdentity {
+    const state = fstatSync(descriptor, { bigint: true });
+    if (!state.isFile()) throw new Error("Prebundled path must be a regular file");
+    return {
+        dev: state.dev,
+        ino: state.ino,
+        size: state.size,
+        mtimeNs: state.mtimeNs,
+        ctimeNs: state.ctimeNs,
+    };
+}
+
+function sameOpenFile(left: OpenFileIdentity, right: OpenFileIdentity): boolean {
+    return left.dev === right.dev
+        && left.ino === right.ino
+        && left.size === right.size
+        && left.mtimeNs === right.mtimeNs
+        && left.ctimeNs === right.ctimeNs;
+}
+
+function verifiedUtf8Code(bytes: Buffer): string {
+    let code: string;
+    try {
+        code = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch (error) {
+        if (error instanceof TypeError) throw new Error("Prebundled file is not valid UTF-8");
+        throw error;
+    }
+    if (!Buffer.from(code, "utf8").equals(bytes)) {
+        throw new Error("Prebundled file does not round-trip as UTF-8");
+    }
+    return code;
+}
+
+function assertExpectedSha256(bytes: Buffer, expectedSha256: string): void {
+    if (!SHA256_HEX_PATTERN.test(expectedSha256)) {
+        throw new Error("'--expected-sha256' must be a lowercase 64-character SHA-256");
+    }
+    const actualDigest = createHash("sha256").update(bytes).digest();
+    const expectedDigest = Buffer.from(expectedSha256, "hex");
+    if (!timingSafeEqual(actualDigest, expectedDigest)) {
+        throw new Error("Prebundled file SHA-256 does not match --expected-sha256");
+    }
+}
+
+function readVerifiedPrebundledCode(pathArg: string, expectedSha256: string): string {
+    const descriptor = openSync(resolve(pathArg), fsConstants.O_RDONLY | fsConstants.O_NONBLOCK);
+    try {
+        const identityBeforeRead = openFileIdentity(descriptor);
+        const bytes = readFileSync(descriptor);
+        const identityAfterRead = openFileIdentity(descriptor);
+        if (BigInt(bytes.byteLength) !== identityBeforeRead.size
+            || !sameOpenFile(identityBeforeRead, identityAfterRead)) {
+            throw new Error("Prebundled file changed while it was being read");
+        }
+        assertExpectedSha256(bytes, expectedSha256);
+        return verifiedUtf8Code(bytes);
+    } finally {
+        closeSync(descriptor);
+    }
+}
 
 async function runBunBuild(args: string[]): Promise<{ stdout: string; stderr: string }> {
     try {
@@ -41,6 +124,64 @@ async function bundleEdgeFunctionPath(pathArg: string): Promise<string> {
         return readFileSync(outfile, "utf-8");
     } finally {
         rmSync(tmpDir, { recursive: true, force: true });
+    }
+}
+
+type PreparedDeployCode =
+    | { code: string; prebundled: false }
+    | { code: string; prebundled: true; expectedSha256: string };
+
+function prebundledDeployCode(
+    pathArg: string,
+    expectedSha256: unknown,
+    minify: unknown,
+): PreparedDeployCode {
+    if (typeof expectedSha256 !== "string") {
+        throw new Error("'--expected-sha256' required with '--prebundled-path'");
+    }
+    if (minify !== undefined) {
+        throw new Error("'--minify' cannot be combined with '--prebundled-path'");
+    }
+    return {
+        code: readVerifiedPrebundledCode(pathArg, expectedSha256),
+        prebundled: true,
+        expectedSha256,
+    };
+}
+
+async function preparedDeployCode(args: Record<string, unknown>): Promise<PreparedDeployCode> {
+    const codeArg = args.code;
+    const pathArg = args.path;
+    const prebundledPath = args["prebundled-path"];
+    const sources = [codeArg, pathArg, prebundledPath].filter((source) => source !== undefined);
+    if (sources.length !== 1) {
+        throw new Error("Exactly one of '--code', '--path', or '--prebundled-path' is required for 'deploy'");
+    }
+    if (typeof prebundledPath === "string") {
+        return prebundledDeployCode(prebundledPath, args["expected-sha256"], args.minify);
+    }
+    if (args["expected-sha256"] !== undefined) {
+        throw new Error("'--expected-sha256' requires '--prebundled-path'");
+    }
+    if (typeof codeArg === "string") return { code: codeArg, prebundled: false };
+    if (typeof pathArg !== "string") throw new Error("Function deploy source is invalid");
+    return bundledDeployCode(pathArg);
+}
+
+async function bundledDeployCode(pathArg: string): Promise<PreparedDeployCode> {
+    try {
+        return { code: await bundleEdgeFunctionPath(pathArg), prebundled: false };
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`Failed to bundle/read path ${pathArg}: ${message}`);
+    }
+}
+
+function rejectPrebundledFlagsOutsideDeploy(action: string, args: Record<string, unknown>): void {
+    for (const flag of ["prebundled-path", "expected-sha256"]) {
+        if (action !== "deploy" && args[flag] !== undefined) {
+            throw new Error(`'--${flag}' is not supported for '${action}'`);
+        }
     }
 }
 
@@ -528,7 +669,7 @@ export function registerAdvancedTools(
     // ═══ Edge Functions (8→1) ═══
     server.tool(
         "edge_functions",
-        `Edge Function management (Deno/Bun serverless). Server auto-bundles dependencies.
+        `Edge Function management (Deno/Bun serverless). Source deploys are bundled; verified prebuilt artifacts stay byte-exact.
 Actions: list, deploy, deploy_bundle, config, source, activate, delete, check`,
         {
             action: withDescription(stringEnum(["list", "deploy", "deploy_bundle", "config", "source", "activate", "delete", "check"]), "Action"),
@@ -537,6 +678,14 @@ Actions: list, deploy, deploy_bundle, config, source, activate, delete, check`,
             version: withDescription(functionVersionSchema, "[source/activate] Existing immutable Function version; source requires a positive version"),
             code: optional(Type.String(), "[deploy/check] Function source code (TypeScript)"),
             path: optional(Type.String(), "[deploy/check] Local file path to read code from (alternative to code)"),
+            "prebundled-path": optional(
+                Type.String(),
+                "[deploy] Prebuilt runtime bundle to upload without rebuilding; requires expected-sha256",
+            ),
+            "expected-sha256": optional(
+                Type.String({ pattern: SHA256_HEX_PATTERN.source, minLength: 64, maxLength: 64 }),
+                "[deploy] Required lowercase SHA-256 of the exact prebundled-path bytes",
+            ),
             output: optional(Type.String(), "[source] Write source to this local file instead of stdout; the file must not already exist"),
             files: optional(functionFilesSchema, "[deploy_bundle] File map as a JSON object: { 'index.ts': '...', '_shared/x.ts': '...' }"),
             entrypoint: optional(Type.String(), "[deploy_bundle] Entrypoint file (default: index.ts)"),
@@ -551,6 +700,7 @@ Actions: list, deploy, deploy_bundle, config, source, activate, delete, check`,
         async (args: any) => {
             if (args.action === "activate") return activateFunctionVersion(http, args, options.readOnly);
             const { action, ref, slug, path: pathArg, output, files, entrypoint, minify, verify_jwt, background_routes } = args;
+            rejectPrebundledFlagsOutsideDeploy(action, args);
             const expectedActiveVersion = action === "deploy" || action === "deploy_bundle"
                 ? requiredExpectedActiveVersion(args, action)
                 : undefined;
@@ -591,7 +741,7 @@ Actions: list, deploy, deploy_bundle, config, source, activate, delete, check`,
                 }
             };
 
-            if (pathArg && !code) {
+            if (action === "check" && pathArg && !code) {
                 try {
                     code = await bundleEdgeFunctionPath(pathArg);
                 } catch (error: unknown) {
@@ -613,15 +763,20 @@ Actions: list, deploy, deploy_bundle, config, source, activate, delete, check`,
                     }
                     break;
                 case "deploy":
-                    need("slug", slug); need("code", code);
-                    const deployCheck = await checkSyntax(code!);
-                    if (!deployCheck.ok) {
-                        text = `❌ Deployment aborted. Syntax check failed:\n${deployCheck.err}`;
-                        break;
+                    need("slug", slug);
+                    const deployCode = await preparedDeployCode(args);
+                    if (!deployCode.prebundled) {
+                        const deployCheck = await checkSyntax(deployCode.code);
+                        if (!deployCheck.ok) {
+                            text = `❌ Deployment aborted. Syntax check failed:\n${deployCheck.err}`;
+                            break;
+                        }
                     }
                     const deploymentResponse = await http.post(edgeFunctionResourcePath(ref, slug), {
-                        code,
-                        minify,
+                        code: deployCode.code,
+                        ...(deployCode.prebundled
+                            ? { prebundled: true, expected_sha256: deployCode.expectedSha256 }
+                            : { minify }),
                         expected_active_version: expectedActiveVersion,
                         ...functionConfig(),
                     });

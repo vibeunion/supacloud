@@ -261,6 +261,13 @@ Management API applies the Edge Runtime module policy to the final server-side
 artifact for CLI, Web Console, and direct API deployments alike. For
 `deploy_bundle`, pass the file map as JSON, for example
 `--files '{"index.ts":"export default { fetch: () => new Response(\"ok\") }"}'`.
+Release automation that already has a final runtime artifact can use
+`edge_functions deploy --prebundled-path <file> --expected-sha256 <sha256>`.
+The lowercase SHA-256 binds the caller-approved bytes before any request. The
+CLI reads through a held regular-file descriptor and rejects file drift or
+non-round-trippable UTF-8; the server independently validates the digest and
+runtime policy and rejects any normalization change instead of rebundling.
+This mode cannot be combined with `--path`, `--code`, or `--minify`.
 Use `edge_functions source --slug <name> --version <N> --output <file>` to read back large
 Function sources without depending on terminal capture limits. The CLI writes
 the complete original TS/JS source code and refuses to overwrite an existing

@@ -156,6 +156,7 @@ supacloud-cli branch create --name feature-orders --data_mode schema_only
 supacloud-cli branch promotion_plan --branch_ref preview123
 supacloud-cli branch promote --branch_ref preview123 --plan_checksum <sha256>
 supacloud-cli edge_functions deploy --ref abc123 --slug hello --path ./supabase/functions/hello --expected-active-version absent
+supacloud-cli edge_functions deploy --ref abc123 --slug hello --prebundled-path ./dist/hello.js --expected-sha256 <sha256> --expected-active-version 4
 supacloud-cli edge_functions deploy_bundle --ref abc123 --slug hello --files '{"index.ts":"export default { fetch: () => new Response(\"ok\") }"}' --expected-active-version 7
 supacloud-cli edge_functions source --ref abc123 --slug hello --version 7 --output ./hello-v7.ts
 supacloud-cli edge_functions activate --ref abc123 --slug hello --version 3 --expected-active-version 8
@@ -189,6 +190,15 @@ it never empties a bucket. Mutation receipts bind `project_ref`, `bucket_id`,
 Bun and runs a local syntax check before upload. The Management API validates and
 normalizes the final server-side artifact against the multi-tenant Edge Runtime
 module policy consistently for CLI, Web Console, and direct API deployments.
+For an artifact already built and validated by release automation, use
+`deploy --prebundled-path <file> --expected-sha256 <64-lowercase-hex>`. The CLI
+holds the opened regular file while reading it, rejects metadata drift, invalid
+UTF-8, or a caller-hash mismatch before HTTP, and never passes the artifact in
+the process argument list. The Management API validates the hash and runtime
+policy again, rejects any normalization that would change the code, and stores
+the submitted bytes unchanged as both immutable source and runtime artifact.
+`--prebundled-path` is mutually exclusive with `--path`, `--code`, and
+`--minify`.
 `deploy_bundle --files` accepts a JSON object in shell usage.
 Use `source --output <file>` for large Functions so terminal or automation output
 limits cannot truncate the original TS/JS source code. The destination must not

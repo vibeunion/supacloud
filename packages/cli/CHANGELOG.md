@@ -5,6 +5,7 @@
 ### Features
 
 * **cli:** add atomic named and explicit environment profiles with secret-safe status output
+* **functions:** deploy caller-hash-bound prebuilt runtime artifacts without rebundling
 
 ### Bug Fixes
 

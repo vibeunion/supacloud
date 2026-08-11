@@ -1,4 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { registerAdvancedTools } from "./advanced-tools";
 import { parseToolArguments } from "../schema";
 import type { ToolSchema } from "../schema";
@@ -375,6 +379,150 @@ describe("edge_functions CLI tool", () => {
             expect(requestCount).toBe(0);
         },
     );
+
+    test("uploads verified prebundled bytes without minify or local bundling fields", async () => {
+        const directory = mkdtempSync(join(tmpdir(), "supacloud-prebundled-cli-"));
+        const bundlePath = join(directory, "fa-api.js");
+        const code = "export default { fetch: () => new Response('精确字节') };\r\n";
+        const expectedSha256 = createHash("sha256").update(code).digest("hex");
+        writeFileSync(bundlePath, code);
+        let requestBody: Record<string, unknown> | undefined;
+        const { callback } = captureEdgeFunctionsTool({
+            post: async (_path: string, body: Record<string, unknown>) => {
+                requestBody = body;
+                return {
+                    ok: true,
+                    status: 200,
+                    data: {
+                        success: true,
+                        project_ref: "proj",
+                        slug: "fa-api",
+                        previous_active_version: "3",
+                        active_version: "4",
+                        version: "4",
+                        config: { version: "4", verify_jwt: true },
+                    },
+                };
+            },
+        });
+
+        try {
+            const response = await callback({
+                action: "deploy",
+                ref: "proj",
+                slug: "fa-api",
+                "prebundled-path": bundlePath,
+                "expected-sha256": expectedSha256,
+                "expected-active-version": "3",
+            });
+
+            expect(requestBody).toEqual({
+                code,
+                prebundled: true,
+                expected_sha256: expectedSha256,
+                expected_active_version: "3",
+            });
+            expect(JSON.parse(response.content[0].text)).toMatchObject({
+                ok: true,
+                operation: "edge_functions.deploy",
+                active_version: "4",
+            });
+        } finally {
+            rmSync(directory, { recursive: true, force: true });
+        }
+    });
+
+    test("rejects a prebundled file replaced after caller hashing before HTTP dispatch", async () => {
+        const directory = mkdtempSync(join(tmpdir(), "supacloud-prebundled-replaced-"));
+        const bundlePath = join(directory, "fa-api.js");
+        const approvedCode = "export default { fetch: () => new Response('approved') };\n";
+        const expectedSha256 = createHash("sha256").update(approvedCode).digest("hex");
+        writeFileSync(bundlePath, "export default { fetch: () => new Response('replaced') };\n");
+        let requestCount = 0;
+        const { callback } = captureEdgeFunctionsTool({
+            post: async () => {
+                requestCount += 1;
+                return { ok: true, status: 200, data: {} };
+            },
+        });
+
+        try {
+            await expect(callback({
+                action: "deploy",
+                ref: "proj",
+                slug: "fa-api",
+                "prebundled-path": bundlePath,
+                "expected-sha256": expectedSha256,
+                "expected-active-version": "absent",
+            })).rejects.toThrow("SHA-256 does not match");
+            expect(requestCount).toBe(0);
+        } finally {
+            rmSync(directory, { recursive: true, force: true });
+        }
+    });
+
+    test("rejects invalid UTF-8 and non-regular prebundled inputs before HTTP dispatch", async () => {
+        const directory = mkdtempSync(join(tmpdir(), "supacloud-prebundled-invalid-"));
+        const invalidUtf8Path = join(directory, "invalid.js");
+        const nestedDirectory = join(directory, "directory.js");
+        const invalidUtf8 = Buffer.from([0xc3, 0x28]);
+        writeFileSync(invalidUtf8Path, invalidUtf8);
+        mkdirSync(nestedDirectory);
+        let requestCount = 0;
+        const { callback } = captureEdgeFunctionsTool({
+            post: async () => {
+                requestCount += 1;
+                return { ok: true, status: 200, data: {} };
+            },
+        });
+
+        try {
+            await expect(callback({
+                action: "deploy",
+                ref: "proj",
+                slug: "fa-api",
+                "prebundled-path": invalidUtf8Path,
+                "expected-sha256": createHash("sha256").update(invalidUtf8).digest("hex"),
+                "expected-active-version": "absent",
+            })).rejects.toThrow("valid UTF-8");
+            await expect(callback({
+                action: "deploy",
+                ref: "proj",
+                slug: "fa-api",
+                "prebundled-path": nestedDirectory,
+                "expected-sha256": "0".repeat(64),
+                "expected-active-version": "absent",
+            })).rejects.toThrow("regular file");
+            expect(requestCount).toBe(0);
+        } finally {
+            rmSync(directory, { recursive: true, force: true });
+        }
+    });
+
+    test.each([
+        ["code and path", { code: "export default {};", path: "function.ts" }],
+        ["path and prebundled path", { path: "function.ts", "prebundled-path": "bundle.js", "expected-sha256": "0".repeat(64) }],
+        ["prebundled path without hash", { "prebundled-path": "bundle.js" }],
+        ["hash without prebundled path", { code: "export default {};", "expected-sha256": "0".repeat(64) }],
+        ["prebundled path with minify", { "prebundled-path": "bundle.js", "expected-sha256": "0".repeat(64), minify: false }],
+    ])("rejects %s before HTTP dispatch", async (_label, deploymentInput) => {
+        let requestCount = 0;
+        const { callback } = captureEdgeFunctionsTool({
+            post: async () => {
+                requestCount += 1;
+                return { ok: true, status: 200, data: {} };
+            },
+        });
+
+        await expect(callback({
+            action: "deploy",
+            ref: "proj",
+            slug: "fa-api",
+            "expected-active-version": "absent",
+            ...deploymentInput,
+        })).rejects.toThrow();
+        expect(requestCount).toBe(0);
+    });
 
     test("sends bundle config inline without a follow-up PATCH", async () => {
         const calls: Array<{ method: string; path: string; body: unknown }> = [];
