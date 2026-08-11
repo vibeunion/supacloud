@@ -186,6 +186,44 @@ describe("local upgrade remote runner", () => {
         });
     });
 
+    test("local-transfer preflight preserves the full Edge Runtime mode and rejects suffixes", () => {
+        const fixtureDirectory = mkdtempSync(join(tmpdir(), "supacloud-local-edge-mode-"));
+        const envFile = join(fixtureDirectory, "management-api.env");
+        const script = buildRemotePreflightScript();
+        const edgeModeAssignment = script.split("\n").find(line => line.startsWith("EDGE_MODE="));
+        if (!edgeModeAssignment) throw new Error("Generated local-transfer preflight does not read EDGE_RUNTIME_MODE");
+        const edgeModeGate = script.split("\n").find(line => line.startsWith('test "$EDGE_MODE" = external'));
+        if (!edgeModeGate) throw new Error("Generated local-transfer preflight does not enforce exact external mode");
+        const fixtureEdgeModeAssignment = edgeModeAssignment.replace("/etc/supabase/management-api.env", '"$ENV_FILE"');
+        expect(fixtureEdgeModeAssignment).toContain(String.raw`\042\047`);
+        expect(fixtureEdgeModeAssignment).not.toContain(String.raw`\"`);
+        try {
+            for (const configuredValue of ["external", '"external"', "'external'", "  external  "]) {
+                writeFileSync(envFile, `EDGE_RUNTIME_MODE=${configuredValue}\n`);
+                const execution = Bun.spawnSync(["bash", "-c", [
+                    "set -euo pipefail", fixtureEdgeModeAssignment, edgeModeGate,
+                    "printf '%s' \"$EDGE_MODE\"",
+                ].join("\n")], { env: { ...process.env, ENV_FILE: envFile } });
+                expect(execution.exitCode).toBe(0);
+                expect(execution.stdout.toString()).toBe("external");
+                expect(execution.stderr.toString()).toBe("");
+            }
+            writeFileSync(envFile, "EDGE_RUNTIME_MODE=external=embedded\n");
+            const fullRhsProbe = Bun.spawnSync(["bash", "-c", [
+                "set -euo pipefail", fixtureEdgeModeAssignment, "printf '%s' \"$EDGE_MODE\"",
+            ].join("\n")], { env: { ...process.env, ENV_FILE: envFile } });
+            expect(fullRhsProbe.exitCode).toBe(0);
+            expect(fullRhsProbe.stdout.toString()).toBe("external=embedded");
+            const suffixRejection = Bun.spawnSync(["bash", "-c", [
+                "set -euo pipefail", fixtureEdgeModeAssignment, edgeModeGate,
+            ].join("\n")], { env: { ...process.env, ENV_FILE: envFile } });
+            expect(suffixRejection.exitCode).not.toBe(0);
+            expect(suffixRejection.stderr.toString()).toContain("requires persisted external Edge Runtime mode");
+        } finally {
+            rmSync(fixtureDirectory, { recursive: true, force: true });
+        }
+    });
+
     test("serializes independent run IDs with one host-wide upgrade lock", () => {
         const firstRun = runScript(preparedBundle("amd64", "installed"), "amd64");
         const secondRun = buildLocalUpgradeRunScript({
