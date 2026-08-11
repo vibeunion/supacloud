@@ -616,7 +616,7 @@ describe("edgeFunctionService bundle metadata", () => {
     expect(await edgeFunctionService.readSource(ref, slug)).toContain("post-legacy-release");
   });
 
-  test("keeps configured reads version-bound before repairing a rollback snapshot", async () => {
+  test("rejects deploy when a configured positive artifact is missing despite a legacy alias", async () => {
     const ref = "proj_missing_active_artifact";
     const slug = "missing-active-artifact";
     const projectDir = join(functionsRoot, ref);
@@ -634,6 +634,13 @@ describe("edgeFunctionService bundle metadata", () => {
         version: "7",
       })),
     ]);
+    const manifestPath = join(projectDir, `${slug}.config.json`);
+    const manifestBefore = await readFile(manifestPath, "utf8");
+    let runtimeRequests = 0;
+    globalThis.fetch = (async () => {
+      runtimeRequests += 1;
+      return Response.json({ success: true });
+    }) as typeof fetch;
 
     await expect(edgeFunctionService.read(ref, slug))
       .rejects.toThrow("Active function artifact is missing");
@@ -646,16 +653,14 @@ describe("edgeFunctionService bundle metadata", () => {
       config: { verify_jwt: true, background_routes: ["/eight/*"] },
     });
 
-    expect(deployed).toMatchObject({ success: true, version: "8" });
+    expect(deployed).toMatchObject({ success: false });
+    expect(deployed.error).toContain("Active function version artifact is missing");
+    expect(runtimeRequests).toBe(0);
+    expect(await readFile(manifestPath, "utf8")).toBe(manifestBefore);
+    expect(existsSync(join(versionDir, "index.js"))).toBe(false);
+    expect(existsSync(join(projectDir, ".versions", slug, "8"))).toBe(false);
     expect(await Bun.file(legacyBundlePath).text()).toBe(legacyBundle);
-    const restored = await activateConditionalVersion(ref, slug, "7");
-    expect(restored).toMatchObject({
-      version: "7",
-      verify_jwt: false,
-      background_routes: ["/seven/*"],
-    });
-    expect(await edgeFunctionService.read(ref, slug)).toContain("legacy-seven");
-    expect(await edgeFunctionService.readSource(ref, slug)).toContain("source-seven");
+    expect(await Bun.file(legacySourcePath).text()).toContain("source-seven");
   });
 
   test("backfills full metadata for an existing active version before deployment", async () => {

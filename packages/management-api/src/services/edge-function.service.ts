@@ -1000,7 +1000,6 @@ async function ensureConfiguredRollbackSnapshot(
   ref: string,
   slug: string,
   currentConfig: EdgeFunctionConfig,
-  legacyRuntimePath: string | null,
 ): Promise<EdgeFunctionConfig> {
   const version = currentConfig.version!;
   if (parseVersionNumber(version) === null) {
@@ -1010,16 +1009,7 @@ async function ensureConfiguredRollbackSnapshot(
     await backfillActiveVersionMetadata(ref, slug, version, currentConfig);
     return currentConfig;
   }
-  if (!legacyRuntimePath) {
-    throw new Error("Active function version artifact is missing and no frozen legacy alias exists");
-  }
-  return snapshotFrozenLegacyVersion({
-    ref,
-    slug,
-    version,
-    functionConfig: currentConfig,
-    runtimePath: legacyRuntimePath,
-  });
+  throw new Error("Active function version artifact is missing");
 }
 
 async function ensureLegacyVersionZeroSnapshot(
@@ -1059,15 +1049,14 @@ async function ensureLegacyVersionZeroSnapshot(
 async function ensureCurrentRollbackSnapshot(
   snapshot: CurrentRollbackSnapshotRequest,
 ): Promise<EdgeFunctionConfig> {
-  const legacyRuntimePath = await frozenLegacyRuntimePath(snapshot.ref, snapshot.slug);
   if (snapshot.currentConfig.version) {
     return ensureConfiguredRollbackSnapshot(
       snapshot.ref,
       snapshot.slug,
       snapshot.currentConfig,
-      legacyRuntimePath,
     );
   }
+  const legacyRuntimePath = await frozenLegacyRuntimePath(snapshot.ref, snapshot.slug);
   if (!legacyRuntimePath) return snapshot.currentConfig;
   return ensureLegacyVersionZeroSnapshot(snapshot, legacyRuntimePath);
 }
