@@ -7,14 +7,21 @@ const originalSetTimeout = globalThis.setTimeout;
 const originalClearTimeout = globalThis.clearTimeout;
 
 let clearedTimerIds: Array<ReturnType<typeof setTimeout> | undefined> = [];
+let scheduledTimers: Array<{
+    callback: (...args: unknown[]) => void;
+    delay: number | undefined;
+    args: unknown[];
+}> = [];
 let nextTimerId = 0;
 
 beforeEach(() => {
     clearedTimerIds = [];
+    scheduledTimers = [];
     nextTimerId = 0;
     globalThis.setTimeout = ((callback: (...args: unknown[]) => void, delay?: number, ...args: unknown[]) => {
         const timerId = ++nextTimerId as unknown as ReturnType<typeof setTimeout>;
-        if (delay !== 30_000) queueMicrotask(() => callback(...args));
+        scheduledTimers.push({ callback, delay, args });
+        if (delay === 500 || delay === 1_000) queueMicrotask(() => callback(...args));
         return timerId;
     }) as typeof setTimeout;
     globalThis.clearTimeout = ((timerId?: ReturnType<typeof setTimeout>) => {
@@ -96,6 +103,20 @@ describe("HttpTransport retry policy", () => {
         expect(clearedTimerIds).toHaveLength(1);
     });
 
+    test("does not retry POST after an HTTP 408 response", async () => {
+        let fetchCalls = 0;
+        globalThis.fetch = (async () => {
+            fetchCalls++;
+            return Response.json({ error: "request timeout" }, { status: 408 });
+        }) as unknown as typeof fetch;
+
+        const response = await createTransport().post("/resource", { name: "test" });
+
+        expect(response.status).toBe(408);
+        expect(fetchCalls).toBe(1);
+        expect(clearedTimerIds).toHaveLength(1);
+    });
+
     test.each(unsafeRequests)("does not retry %s after a retryable network error", async (_method, request) => {
         let fetchCalls = 0;
         globalThis.fetch = (async () => {
@@ -108,5 +129,61 @@ describe("HttpTransport retry policy", () => {
         expect(response.status).toBe(500);
         expect(fetchCalls).toBe(1);
         expect(clearedTimerIds).toHaveLength(1);
+    });
+
+    test("uses a bounded operation-specific timeout for one POST", async () => {
+        globalThis.fetch = (async () => Response.json({ ok: true })) as unknown as typeof fetch;
+
+        const response = await createTransport().post(
+            "/v1/projects/fa/database/backups",
+            { type: "full" },
+            { timeoutMs: 35 * 60_000 },
+        );
+
+        expect(response.ok).toBe(true);
+        expect(scheduledTimers.map(({ delay }) => delay)).toEqual([35 * 60_000]);
+        expect(clearedTimerIds).toHaveLength(1);
+    });
+
+    test("aborts a long POST at its cap without retrying", async () => {
+        let fetchCalls = 0;
+        globalThis.fetch = ((_input, init) => {
+            fetchCalls++;
+            return new Promise((_resolve, reject) => {
+                init?.signal?.addEventListener("abort", () => {
+                    const error = new Error("request timed out");
+                    error.name = "AbortError";
+                    reject(error);
+                });
+                queueMicrotask(() => scheduledTimers[0].callback(...scheduledTimers[0].args));
+            });
+        }) as typeof fetch;
+
+        const response = await createTransport().post(
+            "/v1/projects/fa/database/backups",
+            { type: "full" },
+            { timeoutMs: 35 * 60_000 },
+        );
+
+        expect(response).toEqual({
+            ok: false,
+            status: 500,
+            data: { error: "Network Error", details: "request timed out" },
+        });
+        expect(fetchCalls).toBe(1);
+        expect(clearedTimerIds).toHaveLength(1);
+    });
+
+    test.each([0, 35 * 60_000 + 1, 1.5])("rejects invalid POST timeout %d before dispatch", async timeoutMs => {
+        let fetchCalls = 0;
+        globalThis.fetch = (async () => {
+            fetchCalls++;
+            return Response.json({ ok: true });
+        }) as unknown as typeof fetch;
+
+        await expect(createTransport().post("/resource", {}, { timeoutMs })).rejects.toThrow(
+            "HTTP request timeout must be between",
+        );
+        expect(fetchCalls).toBe(0);
     });
 });

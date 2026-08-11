@@ -18,11 +18,6 @@ import packageMetadata from "../package.json" with { type: "json" };
 type ToolEntry = { schema: any; callback: (args: any) => Promise<any> };
 type ToolMap = Record<string, ToolEntry>;
 
-const platformActionSchema = stringEnum([
-    "metrics", "list_backups", "create_backup",
-    "network", "update_network",
-    "list_orgs", "get_org",
-]);
 const sshActionSchema = stringEnum([
     "ping", "setup", "install", "upgrade", "versions", "diagnose", "exec",
     "troubleshoot", "container_logs",
@@ -119,6 +114,9 @@ export function createAdminTools(context: ResolvedContext = resolveSupaCloudCont
         const projectHelpTool = captureTools((server) =>
             registerAdminProjectCliTools(server as any, {} as HttpTransport)
         ).project;
+        const platformHelpTool = captureTools((server) =>
+            registerAdvancedTools(server as any, {} as HttpTransport)
+        ).platform;
         tools.project = {
             schema: projectHelpTool.schema,
             callback: async () => ({
@@ -132,7 +130,7 @@ export function createAdminTools(context: ResolvedContext = resolveSupaCloudCont
             }),
         };
         tools.platform = {
-            schema: { action: platformActionSchema },
+            schema: platformHelpTool.schema,
             callback: async () => ({
                 isError: true,
                 content: [

@@ -1,6 +1,7 @@
 import { chmod, link, lstat, mkdir, readFile, realpath, unlink, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, parse, relative, resolve } from 'node:path'
-import { createBackend, signJwt, type SupaCloudLiteBackend } from './runtime/index.js'
+import { createBackend, type SupaCloudLiteBackend } from './runtime/index.js'
+import { mintProjectApiKeys } from './runtime/jwt.js'
 import type { WebhookConfig } from './runtime/webhooks/service.js'
 import { serveBun, type RunningServer } from './runtime/node/bun-server.js'
 import { FsStorageDriver } from './runtime/node/fs-driver.js'
@@ -199,13 +200,7 @@ export async function ensureProjectSecrets(paths: ProjectPaths): Promise<Project
 }
 
 export async function mintProjectKeys(jwtSecret: string): Promise<{ anonKey: string; serviceRoleKey: string }> {
-  const now = Math.floor(Date.now() / 1000)
-  const exp = now + 10 * 365 * 24 * 3600
-  const common = { iss: 'supabase', ref: 'local', iat: now, exp }
-  return {
-    anonKey: await signJwt({ ...common, role: 'anon' }, jwtSecret),
-    serviceRoleKey: await signJwt({ ...common, role: 'service_role' }, jwtSecret),
-  }
+  return await mintProjectApiKeys(jwtSecret)
 }
 
 export async function createProjectBackend(options: ProjectRuntimeOptions = {}): Promise<ProjectBackend> {
