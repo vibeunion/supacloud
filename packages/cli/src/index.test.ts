@@ -154,6 +154,56 @@ describe("supacloud-cli process contract", () => {
         expect(requestedPaths).toEqual(["/v1/projects/prod-ref/tasks/task-1/cancel"]);
     });
 
+    test("requires production confirmation for secrets from environment before HTTP", async () => {
+        const workspace = mkdtempSync(join(tmpdir(), "supacloud-cli-production-secrets-"));
+        temporaryDirectories.push(workspace);
+        const productionSecretName = "FA_CLI_PRODUCTION_SECRET";
+        const productionSecret = "production-secret-sentinel";
+        const requestedPaths: string[] = [];
+        const requestedBodies: unknown[] = [];
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            async fetch(request) {
+                requestedPaths.push(new URL(request.url).pathname);
+                requestedBodies.push(await request.json());
+                return Response.json({});
+            },
+        });
+        servers.push(server);
+        writeFileSync(join(workspace, ".env.supacloud.prod"), [
+            "SUPACLOUD_ENV=production",
+            `SUPACLOUD_API_URL=http://127.0.0.1:${server.port}`,
+            "SUPACLOUD_API_TOKEN=prod-secret-token",
+            "SUPACLOUD_PROJECT_REF=prod-ref",
+        ].join("\n") + "\n");
+
+        const unconfirmed = await runProjectCli([
+            "secrets", "upsert", "--ref", "prod-ref", "--from-env", productionSecretName, "--env", "prod",
+        ], { [productionSecretName]: productionSecret }, workspace);
+        const crossRef = await runProjectCli([
+            "secrets", "upsert", "--ref", "other-ref", "--from-env", productionSecretName,
+            "--env", "prod", "--confirm-production", "other-ref",
+        ], { [productionSecretName]: productionSecret }, workspace);
+        const confirmed = await runProjectCli([
+            "secrets", "upsert", "--ref", "prod-ref", "--from-env", productionSecretName,
+            "--env", "prod", "--confirm-production", "prod-ref",
+        ], { [productionSecretName]: productionSecret }, workspace);
+
+        expect(unconfirmed.exitCode).toBe(1);
+        expect(unconfirmed.stderr).toContain("--confirm-production prod-ref");
+        expect(crossRef.exitCode).toBe(1);
+        expect(crossRef.stderr).toContain("cannot target a different project");
+        expect(confirmed.exitCode).toBe(0);
+        expect(requestedPaths).toEqual(["/v1/projects/prod-ref/secrets"]);
+        expect(requestedBodies).toEqual([[
+            { name: productionSecretName, value: productionSecret },
+        ]]);
+        for (const response of [unconfirmed, crossRef, confirmed]) {
+            expect(response.stdout + response.stderr).not.toContain(productionSecret);
+        }
+    });
+
     test("flushes a Function source response larger than 64 KiB to stdout", async () => {
         const apiUrl = serveFunctionSource(LARGE_FUNCTION_SOURCE);
 
