@@ -71,6 +71,10 @@ const redirectedRequests = [
         "JSON POST",
         (transport: HttpTransport) => transport.post("/resource", { secret: "request-secret" }),
     ],
+    [
+        "release POST",
+        (transport: HttpTransport) => transport.postReleaseMutation("/resource", { secret: "request-secret" }),
+    ],
     ["multipart POST", (transport: HttpTransport) => {
         const form = new FormData();
         form.set("secret", "request-secret");
@@ -78,6 +82,7 @@ const redirectedRequests = [
     }],
     ["PATCH", (transport: HttpTransport) => transport.patch("/resource", { secret: "request-secret" })],
     ["PUT", (transport: HttpTransport) => transport.put("/resource", { secret: "request-secret" })],
+    ["DELETE", (transport: HttpTransport) => transport.delete("/resource")],
 ] as const;
 
 const redirectCases = redirectedRequests.flatMap(([requestName, sendRequest]) =>
@@ -183,6 +188,7 @@ describe("HttpTransport retry policy", () => {
     test.each(redirectCases)(
         "rejects %s redirects without reaching the target",
         async (_caseName, sendRequest, redirectStatus, redirectScope) => {
+            let sourceRequests = 0;
             const targetRequests: string[] = [];
             const crossOriginTarget = Bun.serve({
                 hostname: "127.0.0.1",
@@ -197,6 +203,7 @@ describe("HttpTransport retry policy", () => {
                 hostname: "127.0.0.1",
                 port: 0,
                 fetch(request) {
+                    sourceRequests += 1;
                     const pathname = new URL(request.url).pathname;
                     if (pathname === "/captured") {
                         targetRequests.push(pathname);
@@ -218,6 +225,7 @@ describe("HttpTransport retry policy", () => {
 
             expect(response.transportError).toBe(true);
             expect(response.data).toEqual({ error: "Network Error", code: "NETWORK_ERROR" });
+            expect(sourceRequests).toBe(1);
             expect(targetRequests).toEqual([]);
             expect(JSON.stringify(response)).not.toContain("request-secret");
             expect(JSON.stringify(response)).not.toContain("management-token");

@@ -101,7 +101,8 @@ only `SUPACLOUD_API_URL` + `SUPACLOUD_API_TOKEN`. An application profile using
 `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` can be auto-linked for `status`,
 but its service-role key is never substituted for a Management token and cannot
 enable Management-backed tools. Both URL types must be canonical HTTPS origins;
-HTTP is accepted only for literal loopback development origins. Use
+omit explicit default ports such as `:443`. HTTP is accepted only for literal
+loopback development origins, with the default `:80` likewise omitted. Use
 `SUPACLOUD_PROJECT_REF` when it cannot be inferred from a managed
 `<ref>.api.*` application hostname.
 
