@@ -12,6 +12,23 @@ type ProjectToolRegistration = {
     schema: ToolSchema;
 };
 
+const REMOTE_RESPONSE_DETAILS = [
+    "remote-token-value",
+    "remote-secret-value",
+    "Bearer remote-authorization",
+    "hidden-project-ref",
+    "remote free text",
+    '"token"',
+    '"secret"',
+    '"Authorization"',
+] as const;
+
+function expectNoRemoteResponseDetails(output: string): void {
+    for (const detail of REMOTE_RESPONSE_DETAILS) {
+        expect(output).not.toContain(detail);
+    }
+}
+
 function captureAdminProjectRegistration(http: Record<string, unknown>): ProjectToolRegistration {
     let registration: ProjectToolRegistration | undefined;
     registerAdminProjectCliTools({
@@ -119,6 +136,11 @@ describe("admin project services", () => {
                         status: "INACTIVE",
                         healthy: false,
                         service_host_ids: ["project-ref-auth"],
+                        token: REMOTE_RESPONSE_DETAILS[0],
+                        secret: REMOTE_RESPONSE_DETAILS[1],
+                        Authorization: REMOTE_RESPONSE_DETAILS[2],
+                        project_ref: REMOTE_RESPONSE_DETAILS[3],
+                        message: REMOTE_RESPONSE_DETAILS[4],
                     }],
                 };
             },
@@ -130,7 +152,14 @@ describe("admin project services", () => {
         expect(requestedPath).toBe("/v1/projects/project%2Fref/services");
         expect(response.isError).not.toBe(true);
         expect(output.project_ref).toBe("project/ref");
-        expect(output.services[0].id).toBe("auth");
+        expect(output.services).toEqual([{
+            id: "auth",
+            name: "auth",
+            status: "INACTIVE",
+            healthy: false,
+            service_host_ids: ["project-ref-auth"],
+        }]);
+        expectNoRemoteResponseDetails(response.content[0].text);
     });
 
     test("fails closed when the inventory contract is malformed", async () => {
@@ -148,9 +177,11 @@ describe("admin project services", () => {
 describe("admin project service control", () => {
     test("stops local GoTrue through the exact Management API route", async () => {
         let requestedPath = "";
+        let requestBody: unknown = "not-called";
         const projectCallback = captureAdminProjectTool({
-            post: async (path: string) => {
+            post: async (path: string, body: unknown) => {
                 requestedPath = path;
+                requestBody = body;
                 return {
                     ok: true,
                     status: 200,
@@ -159,6 +190,11 @@ describe("admin project service control", () => {
                         action: "stop",
                         success: true,
                         message: "Service gotrue stop succeeded",
+                        token: REMOTE_RESPONSE_DETAILS[0],
+                        secret: REMOTE_RESPONSE_DETAILS[1],
+                        Authorization: REMOTE_RESPONSE_DETAILS[2],
+                        project_ref: REMOTE_RESPONSE_DETAILS[3],
+                        detail: REMOTE_RESPONSE_DETAILS[4],
                     },
                 };
             },
@@ -173,14 +209,15 @@ describe("admin project service control", () => {
         const receipt = JSON.parse(response.content[0].text);
 
         expect(requestedPath).toBe("/v1/projects/project-ref/services/gotrue/stop");
+        expect(requestBody).toBeUndefined();
         expect(response.isError).not.toBe(true);
-        expect(receipt).toMatchObject({
+        expect(receipt).toEqual({
             project_ref: "project-ref",
             service: "gotrue",
             action: "stop",
             success: true,
         });
-        expect(receipt.receipt.message).toContain("succeeded");
+        expectNoRemoteResponseDetails(response.content[0].text);
     });
 
     test("routes every Management API-supported canonical service and action pair", async () => {
@@ -254,7 +291,11 @@ describe("admin project service control", () => {
                     service: "gotrue",
                     action: "stop",
                     success: false,
-                    message: "Service gotrue stop failed",
+                    message: REMOTE_RESPONSE_DETAILS[4],
+                    token: REMOTE_RESPONSE_DETAILS[0],
+                    secret: REMOTE_RESPONSE_DETAILS[1],
+                    Authorization: REMOTE_RESPONSE_DETAILS[2],
+                    project_ref: REMOTE_RESPONSE_DETAILS[3],
                 },
             }),
         });
@@ -267,7 +308,8 @@ describe("admin project service control", () => {
         });
 
         expect(response.isError).toBe(true);
-        expect(response.content[0].text).toContain("Project service control failed");
+        expect(response.content[0].text).toBe("❌ Project service control failed");
+        expectNoRemoteResponseDetails(response.content[0].text);
     });
 
     test("rejects a success receipt that does not match the request", async () => {
@@ -279,7 +321,11 @@ describe("admin project service control", () => {
                     service: "storage",
                     action: "stop",
                     success: true,
-                    message: "Service storage stop succeeded",
+                    message: REMOTE_RESPONSE_DETAILS[4],
+                    token: REMOTE_RESPONSE_DETAILS[0],
+                    secret: REMOTE_RESPONSE_DETAILS[1],
+                    Authorization: REMOTE_RESPONSE_DETAILS[2],
+                    project_ref: REMOTE_RESPONSE_DETAILS[3],
                 },
             }),
         });
@@ -292,7 +338,65 @@ describe("admin project service control", () => {
         });
 
         expect(response.isError).toBe(true);
-        expect(response.content[0].text).toContain("does not match the request");
+        expect(response.content[0].text).toBe("❌ Project service control response does not match the request");
+        expectNoRemoteResponseDetails(response.content[0].text);
+    });
+
+    test("rejects malformed success receipts without reflecting response fields", async () => {
+        const projectCallback = captureAdminProjectTool({
+            post: async () => ({
+                ok: true,
+                status: 200,
+                data: {
+                    service: "gotrue",
+                    action: "stop",
+                    success: true,
+                    message: { detail: REMOTE_RESPONSE_DETAILS[4] },
+                    token: REMOTE_RESPONSE_DETAILS[0],
+                    secret: REMOTE_RESPONSE_DETAILS[1],
+                    Authorization: REMOTE_RESPONSE_DETAILS[2],
+                    project_ref: REMOTE_RESPONSE_DETAILS[3],
+                },
+            }),
+        });
+
+        const response = await projectCallback({
+            action: "service_control",
+            ref: "project-ref",
+            service: "gotrue",
+            service_action: "stop",
+        });
+
+        expect(response.isError).toBe(true);
+        expect(response.content[0].text).toBe("❌ Project service control response is invalid");
+        expectNoRemoteResponseDetails(response.content[0].text);
+    });
+
+    test("reports generic HTTP failures using only the local status", async () => {
+        const projectCallback = captureAdminProjectTool({
+            post: async () => ({
+                ok: false,
+                status: 502,
+                data: {
+                    message: REMOTE_RESPONSE_DETAILS[4],
+                    token: REMOTE_RESPONSE_DETAILS[0],
+                    secret: REMOTE_RESPONSE_DETAILS[1],
+                    Authorization: REMOTE_RESPONSE_DETAILS[2],
+                    project_ref: REMOTE_RESPONSE_DETAILS[3],
+                },
+            }),
+        });
+
+        const response = await projectCallback({
+            action: "service_control",
+            ref: "project-ref",
+            service: "gotrue",
+            service_action: "stop",
+        });
+
+        expect(response.isError).toBe(true);
+        expect(response.content[0].text).toBe("❌ Failed (502)");
+        expectNoRemoteResponseDetails(response.content[0].text);
     });
 
     test("preserves the shared Auth owner boundary as a non-zero CLI result", async () => {
@@ -303,6 +407,11 @@ describe("admin project service control", () => {
                 data: {
                     code: "AUTH_RUNTIME_MANAGED_BY_OWNER",
                     authority_project_ref: "supauth-owner",
+                    message: REMOTE_RESPONSE_DETAILS[4],
+                    token: REMOTE_RESPONSE_DETAILS[0],
+                    secret: REMOTE_RESPONSE_DETAILS[1],
+                    Authorization: REMOTE_RESPONSE_DETAILS[2],
+                    project_ref: REMOTE_RESPONSE_DETAILS[3],
                 },
             }),
         });
@@ -317,5 +426,45 @@ describe("admin project service control", () => {
         expect(response.isError).toBe(true);
         expect(response.content[0].text).toContain("AUTH_RUNTIME_MANAGED_BY_OWNER");
         expect(response.content[0].text).toContain("supauth-owner");
+        expect(response.content[0].text).toContain('"status":409');
+        expectNoRemoteResponseDetails(response.content[0].text);
+    });
+
+    test("does not expose malformed owner-boundary response details", async () => {
+        const unsafeOwnerResponses = [
+            { status: 403, code: "AUTH_RUNTIME_MANAGED_BY_OWNER", authorityRef: "supauth-owner" },
+            { status: 409, code: "UNEXPECTED_CODE", authorityRef: "supauth-owner" },
+            { status: 409, code: "AUTH_RUNTIME_MANAGED_BY_OWNER", authorityRef: "unsafe/project" },
+            { status: 409, code: "AUTH_RUNTIME_MANAGED_BY_OWNER", authorityRef: "owner-ref-that-is-too-long" },
+        ];
+
+        for (const ownerResponse of unsafeOwnerResponses) {
+            const projectCallback = captureAdminProjectTool({
+                post: async () => ({
+                    ok: false,
+                    status: ownerResponse.status,
+                    data: {
+                        code: ownerResponse.code,
+                        authority_project_ref: ownerResponse.authorityRef,
+                        message: REMOTE_RESPONSE_DETAILS[4],
+                        token: REMOTE_RESPONSE_DETAILS[0],
+                        secret: REMOTE_RESPONSE_DETAILS[1],
+                        Authorization: REMOTE_RESPONSE_DETAILS[2],
+                        project_ref: REMOTE_RESPONSE_DETAILS[3],
+                    },
+                }),
+            });
+
+            const response = await projectCallback({
+                action: "service_control",
+                ref: "shared-project",
+                service: "gotrue",
+                service_action: "stop",
+            });
+
+            expect(response.isError).toBe(true);
+            expect(response.content[0].text).toBe(`❌ Failed (${ownerResponse.status})`);
+            expectNoRemoteResponseDetails(response.content[0].text);
+        }
     });
 });

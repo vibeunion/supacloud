@@ -18,9 +18,18 @@ const PROJECT_SERVICE_NAMES = [
 const PROJECT_SERVICE_CONTROL_ACTIONS = [
     "start", "stop", "restart", "pause", "resume", "status",
 ] as const;
+const AUTH_RUNTIME_MANAGED_BY_OWNER = "AUTH_RUNTIME_MANAGED_BY_OWNER";
+const SAFE_PROJECT_REF = /^[a-z0-9-]{1,20}$/;
 
 type ProjectServiceName = typeof PROJECT_SERVICE_NAMES[number];
 type ProjectServiceControlAction = typeof PROJECT_SERVICE_CONTROL_ACTIONS[number];
+type ProjectServiceStatus = {
+    id: string;
+    name: string;
+    status: string;
+    healthy: boolean;
+    service_host_ids: string[];
+};
 
 const SUPPORTED_PROJECT_SERVICE_ACTIONS: Record<
     ProjectServiceName,
@@ -51,16 +60,28 @@ function failedProjectServiceResponse(message: string): ProjectToolResponse {
 }
 
 function failedProjectServiceHttpResponse(response: HttpResult<unknown>): ProjectToolResponse {
-    return failedProjectServiceResponse(
-        `Failed (${response.status}): ${JSON.stringify(response.data)}`,
-    );
+    if (
+        response.status === 409
+        && isRecordPayload(response.data)
+        && response.data.code === AUTH_RUNTIME_MANAGED_BY_OWNER
+        && typeof response.data.authority_project_ref === "string"
+        && SAFE_PROJECT_REF.test(response.data.authority_project_ref)
+    ) {
+        const ownerBoundary = {
+            status: response.status,
+            code: AUTH_RUNTIME_MANAGED_BY_OWNER,
+            authority_project_ref: response.data.authority_project_ref,
+        };
+        return failedProjectServiceResponse(JSON.stringify(ownerBoundary));
+    }
+    return failedProjectServiceResponse(`Failed (${response.status})`);
 }
 
 function isRecordPayload(payload: unknown): payload is Record<string, unknown> {
     return typeof payload === "object" && payload !== null && !Array.isArray(payload);
 }
 
-function isProjectServiceStatus(payload: unknown): boolean {
+function isProjectServiceStatus(payload: unknown): payload is ProjectServiceStatus {
     if (!isRecordPayload(payload)) return false;
     return typeof payload.id === "string"
         && typeof payload.name === "string"
@@ -68,6 +89,16 @@ function isProjectServiceStatus(payload: unknown): boolean {
         && typeof payload.healthy === "boolean"
         && Array.isArray(payload.service_host_ids)
         && payload.service_host_ids.every((hostId) => typeof hostId === "string");
+}
+
+function projectServiceStatusOutput(status: ProjectServiceStatus): ProjectServiceStatus {
+    return {
+        id: status.id,
+        name: status.name,
+        status: status.status,
+        healthy: status.healthy,
+        service_host_ids: [...status.service_host_ids],
+    };
 }
 
 function projectServicesResponse(
@@ -78,7 +109,8 @@ function projectServicesResponse(
     if (!Array.isArray(response.data) || !response.data.every(isProjectServiceStatus)) {
         return failedProjectServiceResponse("Project service inventory response is invalid");
     }
-    return projectToolResponse(JSON.stringify({ project_ref: projectRef, services: response.data }, null, 2));
+    const services = response.data.map(projectServiceStatusOutput);
+    return projectToolResponse(JSON.stringify({ project_ref: projectRef, services }, null, 2));
 }
 
 function supportsProjectServiceAction(
@@ -97,8 +129,9 @@ function projectServiceReceiptError(
     if (receipt.service !== requestedService || receipt.action !== requestedAction) {
         return "Project service control response does not match the request";
     }
+    if (receipt.success === false) return "Project service control failed";
     if (receipt.success !== true || typeof receipt.message !== "string") {
-        return `Project service control failed: ${JSON.stringify(receipt)}`;
+        return "Project service control response is invalid";
     }
     return null;
 }
@@ -117,7 +150,6 @@ function projectServiceControlResponse(
         service: requestedService,
         action: requestedAction,
         success: true,
-        receipt: response.data,
     }, null, 2));
 }
 

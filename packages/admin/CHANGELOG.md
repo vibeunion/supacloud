@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.2](https://github.com/zuohuadong/supacloud/compare/admin-v0.8.1...admin-v0.8.2) (2026-08-11)
+
+
+### Bug Fixes
+
+* **admin:** propagate CLI failure exit codes ([#802](https://github.com/zuohuadong/supacloud/issues/802)) ([43aae07](https://github.com/zuohuadong/supacloud/commit/43aae07058cdb3ff05447e89240bf0c0d43ab4a0))
+
 ## [0.8.1](https://github.com/zuohuadong/supacloud/compare/admin-v0.8.0...admin-v0.8.1) (2026-08-10)
 
 

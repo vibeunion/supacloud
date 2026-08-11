@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.6.0](https://github.com/zuohuadong/supacloud/compare/supacloud-lite-v0.5.10...supacloud-lite-v0.6.0) (2026-08-11)
+
+
+### Features
+
+* **lite:** add secure phone OTP compatibility ([#790](https://github.com/zuohuadong/supacloud/issues/790)) ([b16b88d](https://github.com/zuohuadong/supacloud/commit/b16b88d36629fbb47e8afbfc25d2e75abf59b234))
+
+
+### Bug Fixes
+
+* **lite:** support storage owner_id compatibility ([#787](https://github.com/zuohuadong/supacloud/issues/787)) ([5fe92ea](https://github.com/zuohuadong/supacloud/commit/5fe92ea141a8fdc9328708ff8e2b565529fd8393))
+
 ## [0.5.10](https://github.com/zuohuadong/supacloud/compare/supacloud-lite-v0.5.9...supacloud-lite-v0.5.10) (2026-08-10)
 
 

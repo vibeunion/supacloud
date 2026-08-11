@@ -48,20 +48,20 @@ describe('SupaCloud umbrella dependency sync', () => {
     assert.deepEqual(currentPackages, originalPackages);
   });
 
-  test('skips CLI patch releases covered by ^0.14.4', () => {
-    for (const version of ['0.14.4', '0.14.5']) {
-      const packages = packagesWithRanges('^0.14.4', '^0.7.6', version, '0.7.6');
-      assert.equal(syncSupacloudDependencies(packages).changed, false);
-    }
+  test('keeps the CLI range when the candidate precedence is unchanged', () => {
+    const packages = packagesWithRanges('^0.14.4', '^0.7.6', '0.14.4', '0.7.6');
+    assert.equal(syncSupacloudDependencies(packages).changed, false);
   });
 
-  test('updates CLI only when it crosses the ^0.14.4 compatibility boundary', () => {
-    const packages = packagesWithRanges('^0.14.4', '^0.7.6', '0.15.0', '0.7.6');
-    const synchronization = syncSupacloudDependencies(packages);
+  test('advances the CLI lower bound for every newer stable version', () => {
+    for (const version of ['0.14.5', '0.15.0']) {
+      const packages = packagesWithRanges('^0.14.4', '^0.7.6', version, '0.7.6');
+      const synchronization = syncSupacloudDependencies(packages);
 
-    assert.equal(synchronization.changed, true);
-    assert.equal(synchronization.package.dependencies['@supacloud/cli'], '^0.15.0');
-    assert.equal(packages.supacloudPackage.dependencies['@supacloud/cli'], '^0.14.4');
+      assert.equal(synchronization.changed, true);
+      assert.equal(synchronization.package.dependencies['@supacloud/cli'], `^${version}`);
+      assert.equal(packages.supacloudPackage.dependencies['@supacloud/cli'], '^0.14.4');
+    }
   });
 
   test('rejects a CLI candidate below the ^0.14.4 lower bound', () => {
@@ -69,19 +69,19 @@ describe('SupaCloud umbrella dependency sync', () => {
     assert.throws(() => syncSupacloudDependencies(packages), /candidate 0\.14\.3 is below current lower bound \^0\.14\.4/);
   });
 
-  test('skips Admin patch releases covered by ^0.7.6', () => {
-    for (const version of ['0.7.7', '0.7.8']) {
-      const packages = packagesWithRanges('^0.14.4', '^0.7.6', '0.14.4', version);
-      assert.equal(syncSupacloudDependencies(packages).changed, false);
-    }
+  test('keeps the Admin range when the candidate precedence is unchanged', () => {
+    const packages = packagesWithRanges('^0.14.4', '^0.7.6', '0.14.4', '0.7.6');
+    assert.equal(syncSupacloudDependencies(packages).changed, false);
   });
 
-  test('updates Admin only when it crosses the ^0.7.6 compatibility boundary', () => {
-    const packages = packagesWithRanges('^0.14.4', '^0.7.6', '0.14.4', '0.8.0');
-    const synchronization = syncSupacloudDependencies(packages);
+  test('advances the Admin lower bound for every newer stable version', () => {
+    for (const version of ['0.7.7', '0.8.0']) {
+      const packages = packagesWithRanges('^0.14.4', '^0.7.6', '0.14.4', version);
+      const synchronization = syncSupacloudDependencies(packages);
 
-    assert.equal(synchronization.changed, true);
-    assert.equal(synchronization.package.dependencies['@supacloud/admin'], '^0.8.0');
+      assert.equal(synchronization.changed, true);
+      assert.equal(synchronization.package.dependencies['@supacloud/admin'], `^${version}`);
+    }
   });
 
   test('rejects an Admin candidate below the ^0.7.6 lower bound', () => {
@@ -89,15 +89,13 @@ describe('SupaCloud umbrella dependency sync', () => {
     assert.throws(() => syncSupacloudDependencies(packages), /candidate 0\.7\.5 is below current lower bound \^0\.7\.6/);
   });
 
-  test('applies caret boundaries for 1.x and 0.0.x versions', () => {
-    assert.equal(syncSupacloudDependencies(
-      packagesWithRanges('^1.2.3', '^0.7.6', '1.99.0', '0.7.6'),
-    ).changed, false);
-
-    const nextMajor = syncSupacloudDependencies(
-      packagesWithRanges('^1.2.3', '^0.7.6', '2.0.0', '0.7.6'),
-    );
-    assert.equal(nextMajor.package.dependencies['@supacloud/cli'], '^2.0.0');
+  test('advances lower bounds consistently for 1.x and 0.0.x versions', () => {
+    for (const version of ['1.2.4', '1.99.0', '2.0.0']) {
+      const synchronization = syncSupacloudDependencies(
+        packagesWithRanges('^1.2.3', '^0.7.6', version, '0.7.6'),
+      );
+      assert.equal(synchronization.package.dependencies['@supacloud/cli'], `^${version}`);
+    }
     assert.throws(
       () => syncSupacloudDependencies(packagesWithRanges('^1.2.3', '^0.7.6', '1.2.2', '0.7.6')),
       /candidate 1\.2\.2 is below current lower bound \^1\.2\.3/,
@@ -189,6 +187,9 @@ describe('SupaCloud umbrella dependency sync', () => {
     assert.ok(waitIndex < lockIndex);
     assert.ok(lockIndex < pullRequestIndex);
     assert.match(workflow, /bun install --lockfile-only --registry https:\/\/registry\.npmjs\.org/);
+    assert.match(workflow, /require\('\.\.\/\$package_name\/package\.json'\)\.version/);
+    assert.match(workflow, /require\('\.\/node_modules\/@supacloud\/\$package_name\/package\.json'\)\.version/);
+    assert.match(workflow, /Installed @supacloud\/\$package_name version \$installed does not match published sibling version \$expected/);
     assert.match(workflow, /git add packages\/supacloud\/package\.json packages\/supacloud\/bun\.lock/);
     assert.doesNotMatch(workflow, /sync-supacloud-dependencies\.mjs \|\| true/);
     assert.doesNotMatch(workflow, /bun add --no-save '@supacloud\/cli@file:\.\.\/cli'/);

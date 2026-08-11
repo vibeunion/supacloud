@@ -4,7 +4,7 @@ import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } 
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createAdminTools } from "./index";
-import { formatCliError } from "./shared/cli";
+import { cliToolResultIsError, formatCliError } from "./shared/cli";
 import { schemaEnumValues } from "./shared/schema";
 import packageMetadata from "../package.json" with { type: "json" };
 
@@ -24,21 +24,21 @@ const ADMIN_CONTEXT_KEYS = new Set([
     "SUPACLOUD_SSH_HOST_FINGERPRINT",
 ]);
 
-function cleanEnvironment(): Record<string, string> {
+function cleanEnvironment(overrides: Record<string, string> = {}): Record<string, string> {
     const env: Record<string, string> = {};
     for (const [key, value] of Object.entries(process.env)) {
         if (value !== undefined && !ADMIN_CONTEXT_KEYS.has(key)) env[key] = value;
     }
-    return env;
+    return { ...env, ...overrides };
 }
 
 async function runAdminCli(
     args: string[],
-    environment: Record<string, string> = {},
+    overrides: Record<string, string> = {},
 ): Promise<{ exitCode: number; output: string }> {
     const processHandle = Bun.spawn([process.execPath, "src/index.ts", ...args], {
         cwd: PACKAGE_ROOT,
-        env: { ...cleanEnvironment(), ...environment },
+        env: cleanEnvironment(overrides),
         stdout: "pipe",
         stderr: "pipe",
     });
@@ -134,6 +134,11 @@ describe("admin SSH registration gate", () => {
 });
 
 describe("supacloud-admin process contract", () => {
+    test("classifies explicit tool errors without requiring content", () => {
+        expect(cliToolResultIsError({ isError: true })).toBe(true);
+        expect(cliToolResultIsError({})).toBe(false);
+    });
+
     test("prints the exact package version", async () => {
         const execution = await runAdminCli(["--version"]);
 
@@ -184,6 +189,17 @@ describe("supacloud-admin process contract", () => {
         expect(result.output).toContain("SUPACLOUD_API_URL and SUPACLOUD_API_TOKEN");
     });
 
+    test("returns a non-zero exit code when a shortcut command reports failure text", async () => {
+        const execution = await runAdminCli(["project"], {
+            SUPACLOUD_API_URL: "http://127.0.0.1:1",
+            SUPACLOUD_API_TOKEN: "test-token",
+        });
+
+        expect(execution.exitCode).toBe(1);
+        expect(execution.output).toContain("❌ Unknown action: undefined");
+        expect(execution.output).not.toContain("test-token");
+    });
+
     test("documents every project create domain flag without API context", async () => {
         const execution = await runAdminCli(["project", "create", "--help"]);
 
@@ -220,11 +236,15 @@ describe("supacloud-admin process contract", () => {
                     service: "gotrue",
                     action: "stop",
                     success: false,
-                    message: "Service gotrue stop failed",
+                    message: "remote service failure text",
+                    token: "remote-response-token",
+                    secret: "remote-response-secret",
+                    Authorization: "Bearer remote-response-authorization",
+                    project_ref: "hidden-project-ref",
                 });
             },
         });
-        const fixtureToken = "fixture-api-token";
+        const fixtureToken = "dummy-supacloud-api-token";
 
         try {
             const execution = await runAdminCli([
@@ -243,8 +263,90 @@ describe("supacloud-admin process contract", () => {
             expect(authorizationHeader).toBe(`Bearer ${fixtureToken}`);
             expect(execution.output).toContain("Project service control failed");
             expect(execution.output).not.toContain(fixtureToken);
+            expect(execution.output).not.toContain("remote service failure text");
+            expect(execution.output).not.toContain("remote-response-token");
+            expect(execution.output).not.toContain("remote-response-secret");
+            expect(execution.output).not.toContain("remote-response-authorization");
+            expect(execution.output).not.toContain("hidden-project-ref");
         } finally {
             apiServer.stop(true);
+        }
+    });
+
+    test("returns non-zero without reflecting a service control HTTP error body", async () => {
+        const apiServer = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch() {
+                return Response.json({
+                    message: "remote HTTP failure text",
+                    token: "remote-http-token",
+                    secret: "remote-http-secret",
+                    Authorization: "Bearer remote-http-authorization",
+                    project_ref: "hidden-http-project-ref",
+                }, { status: 503 });
+            },
+        });
+        const fixtureToken = "dummy-http-api-token";
+
+        try {
+            const execution = await runAdminCli([
+                "project", "service_control",
+                "--ref", "project-ref",
+                "--service", "gotrue",
+                "--service_action", "stop",
+            ], {
+                SUPACLOUD_API_URL: `http://127.0.0.1:${apiServer.port}`,
+                SUPACLOUD_API_TOKEN: fixtureToken,
+            });
+
+            expect(execution.exitCode).toBe(1);
+            expect(execution.output.trim()).toBe("❌ Failed (503)");
+            expect(execution.output).not.toContain(fixtureToken);
+            expect(execution.output).not.toContain("remote HTTP failure text");
+            expect(execution.output).not.toContain("remote-http-token");
+            expect(execution.output).not.toContain("remote-http-secret");
+            expect(execution.output).not.toContain("remote-http-authorization");
+            expect(execution.output).not.toContain("hidden-http-project-ref");
+        } finally {
+            apiServer.stop(true);
+        }
+    });
+
+    test("returns a non-zero exit code when project creation is rejected", async () => {
+        const requests: Array<{ path: string; body: unknown }> = [];
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            async fetch(request) {
+                requests.push({
+                    path: new URL(request.url).pathname,
+                    body: await request.json(),
+                });
+                return Response.json({ message: "invalid domain" }, { status: 400 });
+            },
+        });
+
+        try {
+            const execution = await runAdminCli(
+                ["project", "create", "--name", "rejected-project", "--domain", "invalid.example"],
+                {
+                    SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+                    SUPACLOUD_API_TOKEN: "test-token",
+                },
+            );
+
+            expect(execution.exitCode).toBe(1);
+            expect(execution.output).toContain("❌ Failed (400)");
+            expect(requests).toEqual([{
+                path: "/v1/projects",
+                body: expect.objectContaining({
+                    name: "rejected-project",
+                    domain: "invalid.example",
+                }),
+            }]);
+        } finally {
+            server.stop(true);
         }
     });
 

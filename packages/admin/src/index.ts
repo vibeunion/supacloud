@@ -5,7 +5,7 @@ import { stringEnum } from "./shared/schema";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { realpathSync } from "node:fs";
-import { runCli } from "./shared/cli";
+import { cliToolResultIsError, runCli } from "./shared/cli";
 import { resolveSupaCloudContext, type ResolvedContext } from "./shared/context";
 import { HttpTransport } from "./shared/transports/http";
 import { SshTransport } from "./shared/transports/ssh";
@@ -274,10 +274,10 @@ async function main() {
                     console.log(chunk.text);
                 }
             }
-            if (result.isError === true) process.exitCode = 1;
-            return;
+        } else {
+            console.log(JSON.stringify(result, null, 2));
         }
-        console.log(JSON.stringify(result, null, 2));
+        if (cliToolResultIsError(result)) process.exitCode = 1;
         return;
     }
     await runCli(cliTools, args, { commandName: "supacloud-admin" });
