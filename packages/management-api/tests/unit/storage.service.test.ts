@@ -1,4 +1,5 @@
 import { describe, test, expect, spyOn, mock } from "bun:test";
+import * as databaseModule from "../../src/db";
 import { storageService, StorageService } from "../../src/services/storage.service";
 
 // We must mock the adapter module since StorageService now uses it internally
@@ -45,15 +46,33 @@ describe("StorageService (using adapter)", () => {
 
   describe("deleteBucket", () => {
     test("should return success when driver succeeds", async () => {
-      mockStorageDriver.deleteBucket.mockResolvedValueOnce(true);
+      mockStorageDriver.deleteBucket.mockResolvedValueOnce({ success: true });
       const result = await storageService.deleteBucket("testref");
       expect(result.success).toBe(true);
     });
 
     test("should pass correct params to driver", async () => {
-      mockStorageDriver.deleteBucket.mockResolvedValueOnce(true);
+      mockStorageDriver.deleteBucket.mockResolvedValueOnce({ success: true });
       await storageService.deleteBucket("myproj", "bucket");
       expect(mockStorageDriver.deleteBucket).toHaveBeenCalledWith("myproj", "bucket");
+    });
+
+    test("maps a non-empty directory result to a conflict without declaring deletion", async () => {
+      mockStorageDriver.deleteBucket.mockResolvedValueOnce({ success: false, reason: "not_empty" });
+
+      await expect(storageService.deleteBucket("myproj", "bucket")).resolves.toEqual({
+        success: false,
+        error: "Bucket is not empty",
+      });
+    });
+
+    test("maps an indeterminate driver result without declaring deletion", async () => {
+      mockStorageDriver.deleteBucket.mockResolvedValueOnce({ success: false, reason: "unknown" });
+
+      await expect(storageService.deleteBucket("myproj", "bucket")).resolves.toEqual({
+        success: false,
+        error: "Bucket deletion outcome is unknown",
+      });
     });
   });
 
@@ -61,6 +80,84 @@ describe("StorageService (using adapter)", () => {
     test("should preserve strict driver failures", async () => {
       mockStorageDriver.isBucketEmpty.mockRejectedValueOnce(new Error("storage unavailable"));
       await expect(StorageService.isBucketEmpty("myproj", "bucket")).rejects.toThrow("storage unavailable");
+    });
+  });
+
+  describe("updateBucket", () => {
+    test("binds single and multiple MIME types as PostgreSQL TEXT arrays and clears with NULL", async () => {
+      const sqlParameters: unknown[][] = [];
+      const textArrayCalls: Array<{ values: string[]; type: string }> = [];
+      const projectDatabaseTag = async (strings: TemplateStringsArray, ...parameters: unknown[]) => {
+        sqlParameters.push(parameters);
+        return strings.join("?").includes("SELECT * FROM storage.buckets")
+          ? [{
+              id: "reports",
+              name: "reports",
+              public: false,
+              file_size_limit: null,
+              allowed_mime_types: ["application/pdf"],
+            }]
+          : [];
+      };
+      const projectDatabase = Object.assign(projectDatabaseTag, {
+        array(values: string[], type: string) {
+          textArrayCalls.push({ values, type });
+          return values;
+        },
+      }) as never;
+      const resolveDbName = spyOn(databaseModule, "resolveDbName").mockResolvedValue("supa_testref");
+      const getProjectDb = spyOn(databaseModule, "getProjectDb").mockReturnValue(projectDatabase);
+
+      try {
+        const singleResponse = await StorageService.updateBucket("testref", "reports", {
+          allowed_mime_types: ["application/pdf"],
+        });
+        const multipleResponse = await StorageService.updateBucket("testref", "reports", {
+          allowed_mime_types: ["application/pdf", "image/png"],
+        });
+        const clearedResponse = await StorageService.updateBucket("testref", "reports", {
+          allowed_mime_types: [],
+        });
+
+        expect(singleResponse.success).toBe(true);
+        expect(multipleResponse.success).toBe(true);
+        expect(clearedResponse.success).toBe(true);
+        expect(sqlParameters[0]).toEqual([["application/pdf"], "reports"]);
+        expect(sqlParameters[2]).toEqual([["application/pdf", "image/png"], "reports"]);
+        expect(sqlParameters[4]).toEqual([null, "reports"]);
+        expect(textArrayCalls).toEqual([
+          { values: ["application/pdf"], type: "TEXT" },
+          { values: ["application/pdf", "image/png"], type: "TEXT" },
+        ]);
+        expect(sqlParameters.flat().join(" ")).not.toContain('["application/pdf"]');
+      } finally {
+        resolveDbName.mockRestore();
+        getProjectDb.mockRestore();
+      }
+    });
+
+    test.each([
+      ["project ref", "bad.ref", "reports", { public: true }],
+      ["dot-only bucket", "testref", "...", { public: true }],
+      ["negative file limit", "testref", "reports", { file_size_limit: -1 }],
+      ["fractional file limit", "testref", "reports", { file_size_limit: 1.5 }],
+      ["overflowing file limit", "testref", "reports", { file_size_limit: Number.MAX_SAFE_INTEGER + 1 }],
+      ["empty MIME", "testref", "reports", { allowed_mime_types: [""] }],
+      ["overlong MIME", "testref", "reports", { allowed_mime_types: [`text/${"a".repeat(251)}`] }],
+      ["too many MIME types", "testref", "reports", {
+        allowed_mime_types: Array.from({ length: 101 }, (_, index) => `application/x-${index}`),
+      }],
+    ])("rejects invalid %s before opening a project database", async (_label, ref, bucket, updates) => {
+      const getProjectDb = spyOn(databaseModule, "getProjectDb");
+      try {
+        const response = await StorageService.updateBucket(ref, bucket, updates);
+
+        expect(response.success).toBe(false);
+        expect(response.error).toStartWith("Invalid ");
+        expect(getProjectDb).not.toHaveBeenCalled();
+      } finally {
+        getProjectDb.mockRestore();
+      }
     });
   });
 

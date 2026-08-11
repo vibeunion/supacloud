@@ -387,6 +387,12 @@ jobs:
           DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
         run: bun test tests/integration/project-webhook-array-binding.test.ts
 
+      - name: Verify Storage bucket array binding on PostgreSQL 18
+        working-directory: packages/management-api
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+        run: bun test tests/integration/storage-bucket-array-binding.test.ts
+
       - name: Verify Realtime payload safety on PostgreSQL 18
         working-directory: packages/management-api
         env:

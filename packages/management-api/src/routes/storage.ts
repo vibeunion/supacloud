@@ -1,5 +1,13 @@
 import { Elysia, t, status } from "elysia";
 import { StorageService, migrationJobs } from '../services/storage.service';
+import {
+    MAX_STORAGE_MIME_TYPE_COUNT,
+    MAX_STORAGE_MIME_TYPE_LENGTH,
+    STORAGE_BUCKET_ID_PATTERN_SOURCE,
+    STORAGE_MIME_TYPE_PATTERN_SOURCE,
+    STORAGE_PROJECT_REF_PATTERN_SOURCE,
+    storageBucketInputError,
+} from "../services/storage-bucket-contract";
 import { StorageRLS } from "../services/storage-rls";
 import { StorageVectorError, StorageVectorService } from "../services/storage-vector.service";
 import { logger } from "../utils/logger";
@@ -8,13 +16,29 @@ import { requireAdminAuth, requireProjectOrAdminAuth } from "../middleware/auth"
 
 const ErrorResponse = t.Object({ message: t.String() });
 const SuccessResponse = t.Object({ success: t.Boolean(), message: t.String() });
-const StorageBucketCreateBody = t.Object({
-    name: t.String(),
-    id: t.Optional(t.String()),
-    public: t.Optional(t.Boolean()),
-    file_size_limit: t.Optional(t.Number()),
-    allowed_mime_types: t.Optional(t.Array(t.String())),
+const StorageProjectRef = t.String({ pattern: STORAGE_PROJECT_REF_PATTERN_SOURCE });
+const StorageBucketId = t.String({ pattern: STORAGE_BUCKET_ID_PATTERN_SOURCE });
+const StorageFileSizeLimit = t.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER });
+const StorageMimeType = t.String({
+    minLength: 1,
+    maxLength: MAX_STORAGE_MIME_TYPE_LENGTH,
+    pattern: STORAGE_MIME_TYPE_PATTERN_SOURCE,
 });
+const StorageAllowedMimeTypes = t.Array(StorageMimeType, { maxItems: MAX_STORAGE_MIME_TYPE_COUNT });
+const StorageProjectParams = t.Object({ ref: StorageProjectRef });
+const StorageBucketParams = t.Object({ ref: StorageProjectRef, id: StorageBucketId });
+const StorageBucketCreateBody = t.Object({
+    name: StorageBucketId,
+    id: t.Optional(StorageBucketId),
+    public: t.Optional(t.Boolean()),
+    file_size_limit: t.Optional(StorageFileSizeLimit),
+    allowed_mime_types: t.Optional(StorageAllowedMimeTypes),
+});
+const StorageBucketUpdateBody = t.Object({
+    public: t.Optional(t.Boolean()),
+    file_size_limit: t.Optional(StorageFileSizeLimit),
+    allowed_mime_types: t.Optional(StorageAllowedMimeTypes),
+}, { minProperties: 1 });
 
 type StorageBucketCreateInput = {
     name: string;
@@ -141,6 +165,8 @@ async function rollbackLogicalStorageBucket(ref: string, bucketName: string): Pr
 
 async function createStorageBucket(ref: string, input: StorageBucketCreateInput) {
     const bucketName = input.name || input.id || "";
+    const inputError = storageBucketInputError(ref, bucketName, input);
+    if (inputError) return { bucketName, storageResult: { success: false, error: inputError } };
     const logicalResult = await createLogicalStorageBucket(ref, bucketName, input);
     if (!logicalResult.success) return { bucketName, storageResult: logicalResult };
     const storageResult = await StorageService.createBucket(ref, bucketName);
@@ -158,7 +184,11 @@ function mergeStorageBuckets(
         const id = String(bucket.id);
         bucketsById.set(id, { ...bucketsById.get(id), ...bucket, id });
     }
-    return Array.from(bucketsById.values());
+    return Array.from(bucketsById.values()).map((bucket) => ({
+        ...bucket,
+        file_size_limit: bucket.file_size_limit ?? null,
+        allowed_mime_types: bucket.allowed_mime_types ?? null,
+    }));
 }
 
 async function listStorageBuckets(ref: string): Promise<Record<string, unknown>[]> {
@@ -174,17 +204,9 @@ async function listLegacyStorageBuckets(ref: string): Promise<Record<string, unk
     return await listStorageBuckets(ref);
 }
 
-async function assertStorageBucketDeletable(ref: string, bucketName: string): Promise<void> {
-    if (!await StorageService.isBucketEmpty(ref, bucketName)) throw new Error("Bucket is not empty");
-    await StorageRLS.assertLogicalBucketDeletableAsAdmin(ref, bucketName);
-}
-
 async function deleteStorageBucket(ref: string, bucketName: string) {
-    try {
-        await assertStorageBucketDeletable(ref, bucketName);
-    } catch (error: unknown) {
-        return { success: false, error: error instanceof Error ? error.message : "Failed to validate bucket" };
-    }
+    const inputError = storageBucketInputError(ref, bucketName, {});
+    if (inputError) return { success: false, error: inputError };
     const storageResult = await StorageService.deleteBucket(ref, bucketName);
     if (!storageResult.success) return storageResult;
 
@@ -192,13 +214,21 @@ async function deleteStorageBucket(ref: string, bucketName: string) {
         await StorageRLS.deleteLogicalBucketAsAdmin(ref, bucketName);
         return storageResult;
     } catch (error: unknown) {
+        if (error instanceof Error && error.message === "Bucket is not empty") {
+            return { success: false, error: error.message };
+        }
         logger.error("Failed to delete Studio storage bucket metadata", {
             ref,
             bucketName,
             error: error instanceof Error ? error.message : String(error),
         });
-        return { success: false, error: "Failed to delete bucket metadata" };
+        return { success: false, error: "Bucket deletion outcome is unknown" };
     }
+}
+
+function storageMutationStatus(error: string | undefined): 400 | 409 | 500 {
+    if (error?.startsWith("Invalid ")) return 400;
+    return error === "Bucket already exists" || error === "Bucket is not empty" ? 409 : 500;
 }
 
 // ── Storage Routes ────────────────────────────────────────────────
@@ -216,7 +246,7 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
         if (authError) return status(authError.status, authError.body);
         const { bucketName, storageResult } = await createStorageBucket(params.ref, body);
         if (!storageResult.success) {
-            set.status = storageResult.error === "Bucket already exists" ? 409 : 500;
+            set.status = storageMutationStatus(storageResult.error);
             return { message: storageResult.error || "Failed to create bucket", code: String(set.status) };
         }
         return { id: bucketName, name: bucketName, public: body.public || false };
@@ -638,17 +668,21 @@ export const projectStorageRoutes = new Elysia({ prefix: "/v1/projects/:ref/stor
         const authError = await requireProjectOrAdminAuth(request, params.ref);
         if (authError) return status(authError.status, authError.body);
         return await listStorageBuckets(params.ref);
-    }, { detail: { tags: ["storage"], summary: "List project storage buckets" } })
+    }, {
+        params: StorageProjectParams,
+        detail: { tags: ["storage"], summary: "List project storage buckets" },
+    })
     .post('/buckets', async ({ params, body, set, request }) => {
         const authError = await requireProjectOrAdminAuth(request, params.ref);
         if (authError) return status(authError.status, authError.body);
         const { bucketName, storageResult } = await createStorageBucket(params.ref, body);
         if (!storageResult.success) {
-            set.status = storageResult.error === "Bucket already exists" ? 409 : 500;
+            set.status = storageMutationStatus(storageResult.error);
             return { message: storageResult.error || "Failed to create bucket", code: String(set.status) };
         }
         return { id: bucketName, name: bucketName, public: body.public || false };
     }, {
+        params: StorageProjectParams,
         body: StorageBucketCreateBody,
         detail: { tags: ["storage"], summary: "Create a storage bucket" },
     })
@@ -662,7 +696,10 @@ export const projectStorageRoutes = new Elysia({ prefix: "/v1/projects/:ref/stor
             return { message: "Bucket not found", code: "404" };
         }
         return bucket;
-    }, { detail: { tags: ["storage"], summary: "Get a storage bucket by ID" } })
+    }, {
+        params: StorageBucketParams,
+        detail: { tags: ["storage"], summary: "Get a storage bucket by ID" },
+    })
     .put('/buckets/:id', async ({ params, body, set, request }) => {
         const authError = await requireProjectOrAdminAuth(request, params.ref);
         if (authError) return status(authError.status, authError.body);
@@ -673,17 +710,14 @@ export const projectStorageRoutes = new Elysia({ prefix: "/v1/projects/:ref/stor
         });
 
         if (!result.success) {
-            set.status = result.error === "Bucket not found" ? 404 : result.error === "Invalid bucket id" ? 400 : 500;
+            set.status = result.error === "Bucket not found" ? 404 : storageMutationStatus(result.error);
             return { message: result.error || "Failed to update bucket", code: String(set.status) };
         }
 
         return result.bucket;
     }, {
-        body: t.Object({
-            public: t.Optional(t.Boolean()),
-            file_size_limit: t.Optional(t.Number()),
-            allowed_mime_types: t.Optional(t.Array(t.String())),
-        }),
+        params: StorageBucketParams,
+        body: StorageBucketUpdateBody,
         detail: { tags: ["storage"], summary: "Update a storage bucket" },
     })
     .post('/vector/:operation', async ({ params, body, request, set }) => {
@@ -721,8 +755,11 @@ export const projectStorageRoutes = new Elysia({ prefix: "/v1/projects/:ref/stor
         if (authError) return status(authError.status, authError.body);
         const result = await deleteStorageBucket(params.ref, params.id);
         if (!result.success) {
-            set.status = result.error === "Bucket is not empty" ? 409 : 500;
+            set.status = storageMutationStatus(result.error);
             return { message: result.error || "Failed to delete bucket", code: String(set.status) };
         }
         return { id: params.id, deleted: true };
-    }, { detail: { tags: ["storage"], summary: "Delete a storage bucket" } });
+    }, {
+        params: StorageBucketParams,
+        detail: { tags: ["storage"], summary: "Delete a storage bucket" },
+    });

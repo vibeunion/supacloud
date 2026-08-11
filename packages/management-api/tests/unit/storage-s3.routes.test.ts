@@ -172,17 +172,16 @@ describe("storageS3Routes", () => {
   // --- DeleteBucket -------------------------------------------------------
 
   test("DELETE /:bucket deletes and returns 204 when empty", async () => {
-    mockListFiles.mockResolvedValue([]);
     mockDeleteBucket.mockResolvedValue({ success: true });
     const res = await authedRequest("/v1/storage/testproj/s3/mybucket", {
       method: "DELETE",
     });
     expect(res.status).toBe(204);
     expect(mockDeleteBucket).toHaveBeenCalledWith("testproj", "mybucket");
+    expect(mockListFiles).not.toHaveBeenCalled();
   });
 
   test("DELETE /:bucket returns InternalError when delete fails", async () => {
-    mockListFiles.mockResolvedValue([]);
     mockDeleteBucket.mockResolvedValue({ success: false, error: "driver error" });
     const res = await authedRequest("/v1/storage/testproj/s3/mybucket", {
       method: "DELETE",
@@ -193,7 +192,7 @@ describe("storageS3Routes", () => {
   });
 
   test("DELETE /:bucket returns BucketNotEmpty (409)", async () => {
-    mockListFiles.mockResolvedValue([{ name: "file1.txt", size: 100 }]);
+    mockDeleteBucket.mockResolvedValue({ success: false, error: "Bucket is not empty" });
     const res = await authedRequest("/v1/storage/testproj/s3/mybucket", {
       method: "DELETE",
     });

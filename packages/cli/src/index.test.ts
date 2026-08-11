@@ -149,6 +149,22 @@ describe("supacloud-cli process contract", () => {
         expect(response.stderr).toContain("SUPACLOUD_READ_ONLY=true");
     });
 
+    test("keeps complete Storage help without project configuration", async () => {
+        const workspace = mkdtempSync(join(tmpdir(), "supacloud-cli-storage-help-"));
+        temporaryDirectories.push(workspace);
+
+        const response = await runProjectCli(["storage", "--help"], {}, workspace);
+
+        expect(response.exitCode).toBe(0);
+        expect(response.stderr).toContain("list_buckets");
+        expect(response.stderr).toContain("get_bucket");
+        expect(response.stderr).toContain("create_bucket");
+        expect(response.stderr).toContain("update_bucket");
+        expect(response.stderr).toContain("delete_bucket");
+        expect(response.stderr).toContain("--file_size_limit");
+        expect(response.stderr).toContain("--allowed_mime_types");
+    });
+
     test("loads named environments with global flags after the command and keeps status secret-free", async () => {
         const workspace = mkdtempSync(join(tmpdir(), "supacloud-cli-named-env-"));
         temporaryDirectories.push(workspace);
