@@ -91,6 +91,18 @@ interface RefreshTokenRow {
   created_at: Date | string | null
 }
 
+interface EmailTokenRedemption {
+  token: string
+  tokenTypes: string
+  email: string | null
+}
+
+interface EmailTokenCandidate {
+  id: string
+  user_id: string
+  email: string
+}
+
 interface PhoneOtpIssueRequest {
   phone: string
   createUser: boolean
@@ -127,6 +139,11 @@ function randomOtp(length: number): string {
     }
   }
   return code
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
 function normalizePhone(value: unknown): string | null {
@@ -796,48 +813,93 @@ export class AuthHandler {
   private static readonly MAX_OTP_ATTEMPTS = 5
 
   private async redeem(token: string, types: string[], email?: string): Promise<UserRow | null> {
-    const normalizedEmail = email?.toLowerCase().trim() ?? null
-    const res = await this.db.query(
-      `delete from auth.one_time_tokens
-       where token = $1 and token_type = any($2::text[])
-         and ($3::text is null or email = $3) and expires_at > now()
-         and attempts < $4
-       returning user_id, email`,
-      [token, `{${types.join(',')}}`, normalizedEmail, AuthHandler.MAX_OTP_ATTEMPTS]
-    )
-    const row = res.rows[0] as { user_id: string; email: string } | undefined
-    if (!row) {
-      // Wrong/expired code: count the failed guess against the live tokens for
-      // this email, and burn them once the attempt cap is hit (brute-force
-      // lockout for the 6-digit OTP). Requires the email to scope the counter.
-      if (normalizedEmail) {
-        await this.db.query(
-          `update auth.one_time_tokens set attempts = attempts + 1
-           where email = $1 and token_type = any($2::text[]) and expires_at > now()`,
-          [normalizedEmail, `{${types.join(',')}}`]
-        )
-        await this.db.query(
-          `delete from auth.one_time_tokens where email = $1 and attempts >= $2`,
-          [normalizedEmail, AuthHandler.MAX_OTP_ATTEMPTS]
-        )
-      }
+    const redemption: EmailTokenRedemption = {
+      token,
+      tokenTypes: `{${types.join(',')}}`,
+      email: email?.toLowerCase().trim() ?? null,
+    }
+    return this.db.transaction((query) => this.claimEmailToken(query, redemption))
+  }
+
+  private async claimEmailToken(query: Querier, redemption: EmailTokenRedemption): Promise<UserRow | null> {
+    const candidate = await this.findEmailTokenCandidate(query, redemption)
+    if (!candidate) {
+      await this.recordFailedEmailTokenAttempt(query, redemption)
       return null
     }
-    await this.db.query(`delete from auth.one_time_tokens where email = $1`, [row.email])
-    const ures = await this.db.query(
+
+    const claimedToken = await this.lockAndDeleteEmailToken(query, candidate, redemption)
+    return claimedToken ? this.confirmEmailTokenUser(query, claimedToken) : null
+  }
+
+  private async lockAndDeleteEmailToken(
+    query: Querier,
+    candidate: EmailTokenCandidate,
+    redemption: EmailTokenRedemption
+  ): Promise<EmailTokenCandidate | null> {
+    // Both alternatives share this row, so the lock serializes OTP/hash claims
+    // before either transaction re-checks and removes its candidate token.
+    await query(`select id from auth.users where id = $1 for update`, [candidate.user_id])
+    const claimedTokens = await query<EmailTokenCandidate>(
+      `delete from auth.one_time_tokens
+       where id = $1 and token = $2 and token_type = any($3::text[])
+         and expires_at > now() and attempts < $4
+       returning id, user_id, email`,
+      [candidate.id, redemption.token, redemption.tokenTypes, AuthHandler.MAX_OTP_ATTEMPTS]
+    )
+    return claimedTokens.rows[0] ?? null
+  }
+
+  private async confirmEmailTokenUser(query: Querier, claimedToken: EmailTokenCandidate): Promise<UserRow | null> {
+    await query(`delete from auth.one_time_tokens where email = $1`, [claimedToken.email])
+    const users = await query<UserRow>(
       `update auth.users set email_confirmed_at = coalesce(email_confirmed_at, now()), last_sign_in_at = now()
        where id = $1 returning *`,
-      [row.user_id]
+      [claimedToken.user_id]
     )
-    return (ures.rows[0] as UserRow) ?? null
+    return users.rows[0] ?? null
+  }
+
+  private async findEmailTokenCandidate(
+    query: Querier,
+    redemption: EmailTokenRedemption
+  ): Promise<EmailTokenCandidate | null> {
+    const candidates = await query<EmailTokenCandidate>(
+      `select id, user_id, email from auth.one_time_tokens
+       where token = $1 and token_type = any($2::text[])
+         and ($3::text is null or email = $3) and expires_at > now()
+         and attempts < $4`,
+      [redemption.token, redemption.tokenTypes, redemption.email, AuthHandler.MAX_OTP_ATTEMPTS]
+    )
+    return candidates.rows[0] ?? null
+  }
+
+  private async recordFailedEmailTokenAttempt(query: Querier, redemption: EmailTokenRedemption): Promise<void> {
+    if (!redemption.email) return
+    await query(
+      `update auth.one_time_tokens set attempts = attempts + 1
+       where email = $1 and token_type = any($2::text[]) and expires_at > now()`,
+      [redemption.email, redemption.tokenTypes]
+    )
+    await query(
+      `delete from auth.one_time_tokens where email = $1 and attempts >= $2`,
+      [redemption.email, AuthHandler.MAX_OTP_ATTEMPTS]
+    )
   }
 
   private async verifyToken(req: Request): Promise<Response> {
-    const body = (await req.json().catch(() => ({}))) as { type?: string; email?: string; phone?: string; token?: string }
-    if (!body.token) return authError(400, 'validation_failed', 'token is required')
+    const body = (await req.json().catch(() => ({}))) as {
+      type?: string
+      email?: string
+      phone?: string
+      token?: string
+      token_hash?: string
+    }
+    const token = body.token ?? body.token_hash
+    if (!token) return authError(400, 'validation_failed', 'token or token_hash is required')
     if (body.type === 'sms' || body.phone !== undefined) {
       const phone = normalizePhone(body.phone)
-      if (body.type !== 'sms' || !phone || !/^\d{6,10}$/.test(body.token)) {
+      if (body.type !== 'sms' || !phone || !body.token || !/^\d{6,10}$/.test(body.token)) {
         return authError(400, 'validation_failed', 'phone, token, and type=sms are required')
       }
       const fingerprint = await keyedDigest(this.config.jwtSecret, 'supacloud-lite:phone-fingerprint:v1', phone)
@@ -858,7 +920,7 @@ export class AuthHandler {
     // could mint a recovery session.
     const types =
       body.type === 'recovery' ? ['recovery'] : body.type === 'magiclink' ? ['magiclink'] : ['otp', 'magiclink']
-    const user = await this.redeem(body.token, types, body.email)
+    const user = await this.redeem(token, types, body.email)
     if (!user) return authError(403, 'otp_expired', 'Token has expired or is invalid')
     return json(200, await this.sessionFor(user))
   }
@@ -950,6 +1012,10 @@ export class AuthHandler {
     const idMatch = path.match(/^admin\/users\/([0-9a-f-]{36})$/)
     const exportMatch = path.match(/^admin\/users\/([0-9a-f-]{36})\/export$/)
 
+    if (path === 'admin/generate_link' && method === 'POST') {
+      return await this.generateAdminMagicLink(req)
+    }
+
     if (path === 'admin/audit' && method === 'GET') {
       const res = await this.db.query(
         `select id, payload, created_at, ip_address from auth.audit_log_entries
@@ -1030,6 +1096,75 @@ export class AuthHandler {
       return await this.eraseUser(idMatch[1])
     }
     return authError(404, 'not_found', `unknown admin endpoint`)
+  }
+
+  private async generateAdminMagicLink(req: Request): Promise<Response> {
+    const body = (await req.json().catch(() => ({}))) as {
+      type?: string
+      email?: string
+      redirect_to?: string
+      data?: Record<string, unknown>
+    }
+    if (body.type !== 'magiclink') {
+      return authError(422, 'unsupported_link_type', 'Only magiclink generation is supported')
+    }
+    if (!body.email) return authError(400, 'validation_failed', 'email is required')
+
+    const email = body.email.toLowerCase().trim()
+    const emailOtp = randomOtp(this.settings.otpLength)
+    const hashedToken = await sha256Hex(randomToken(32))
+    const expiry = `${this.settings.otpExpirySeconds} seconds`
+    const requestUrl = new URL(req.url)
+    const redirectTo = resolveRedirect(
+      requestUrl.searchParams.get('redirect_to') ?? body.redirect_to,
+      this.config.siteUrl,
+      this.config.uriAllowList,
+      this.config.enforceRedirectAllowList
+    )
+
+    const user = await this.db.transaction(async (query) => {
+      const result = await query<UserRow>(
+        `insert into auth.users
+           (aud, role, email, raw_app_meta_data, raw_user_meta_data)
+         values ('authenticated', 'authenticated', $1, '{"provider":"email","providers":["email"]}', $2::jsonb)
+         on conflict (email) do update set email = excluded.email
+         returning *`,
+        [email, JSON.stringify(body.data ?? {})]
+      )
+      const linkedUser = result.rows[0]
+      await query(
+        `insert into auth.identities (user_id, provider, provider_id, identity_data)
+         values ($1::uuid, 'email', $1::text, $2::jsonb)
+         on conflict (provider, provider_id) do nothing`,
+        [linkedUser.id, JSON.stringify({ sub: linkedUser.id, email })]
+      )
+      await query(
+        `delete from auth.one_time_tokens
+         where email = $1 and token_type = any($2::text[])`,
+        [email, '{otp,magiclink}']
+      )
+      await query(
+        `insert into auth.one_time_tokens (user_id, email, token_type, token, expires_at)
+         values ($1, $2, 'otp', $3, now() + $5::interval),
+                ($1, $2, 'magiclink', $4, now() + $5::interval)`,
+        [linkedUser.id, email, emailOtp, hashedToken, expiry]
+      )
+      return linkedUser
+    })
+
+    const actionUrl = new URL(`${this.config.apiUrl}/auth/v1/verify`)
+    actionUrl.searchParams.set('token', hashedToken)
+    actionUrl.searchParams.set('type', 'magiclink')
+    actionUrl.searchParams.set('redirect_to', redirectTo)
+    await this.audit('user_magiclink_requested', { actorId: user.id, actorEmail: email, type: 'admin' })
+    return json(200, {
+      ...this.userJson(user, [], await this.getUserIdentities(user.id)),
+      action_link: actionUrl.toString(),
+      email_otp: emailOtp,
+      hashed_token: hashedToken,
+      redirect_to: redirectTo,
+      verification_type: 'magiclink',
+    })
   }
 
   // ── audit trail ───────────────────────────────────────────────────────
