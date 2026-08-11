@@ -396,13 +396,12 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
 }
 
 async function main() {
-    const rawArgs = process.argv.slice(2);
-    if (rawArgs.length === 1 && rawArgs[0] === "--version") {
+    const globalOptions = parseGlobalOptions(process.argv.slice(2));
+    const args = globalOptions.args;
+    if (args.length === 1 && args[0] === "--version") {
         console.log(packageMetadata.version);
         return;
     }
-    const globalOptions = parseGlobalOptions(rawArgs);
-    const args = globalOptions.args;
     const context = resolveSupaCloudContext(process.env, process.cwd(), {
         environmentName: globalOptions.environmentName,
         envFile: globalOptions.envFile,
