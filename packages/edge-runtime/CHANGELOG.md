@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.17.0](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.16.9...edge-runtime-v0.17.0) (2026-08-11)
+
+
+### Features
+
+* **edge-runtime:** return resolved function versions ([#844](https://github.com/zuohuadong/supacloud/issues/844)) ([b8b533f](https://github.com/zuohuadong/supacloud/commit/b8b533fca4ca727a7f7b51aee5168a61af3bc8fc))
+
+
+### Bug Fixes
+
+* **edge-runtime:** bind artifacts to activation roots ([#845](https://github.com/zuohuadong/supacloud/issues/845)) ([4f5835e](https://github.com/zuohuadong/supacloud/commit/4f5835ed261c998b17afbe96ed2dceb4cde3ddb5))
+
 ## [0.16.9](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.16.8...edge-runtime-v0.16.9) (2026-08-10)
 
 
