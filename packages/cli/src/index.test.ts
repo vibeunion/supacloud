@@ -455,8 +455,11 @@ describe("supacloud-cli process contract", () => {
         const server = Bun.serve({
             hostname: "127.0.0.1",
             port: 0,
-            fetch() {
+            fetch(request) {
                 requestCount += 1;
+                if (request.method === "GET") {
+                    return Response.json({ project_ref: "abc123", schedules: [] });
+                }
                 return Response.json({});
             },
         });
@@ -494,6 +497,16 @@ describe("supacloud-cli process contract", () => {
         }
 
         expect(requestCount).toBe(0);
+        const listResponse = await runProjectCli(["scheduled_functions", "list", "--ref", "abc123"], {
+            SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+            SUPACLOUD_API_TOKEN: "test-token",
+            SUPACLOUD_PROJECT_REF: "abc123",
+            SUPACLOUD_READ_ONLY: "true",
+        });
+
+        expect(listResponse.exitCode).toBe(0);
+        expect(JSON.parse(listResponse.stdout).schedules).toEqual([]);
+        expect(requestCount).toBe(1);
     });
 
     test("creates a schedule with body-file and environment-backed headers outside argv and output", async () => {
