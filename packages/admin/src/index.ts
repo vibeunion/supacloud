@@ -5,7 +5,7 @@ import { stringEnum } from "./shared/schema";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { realpathSync } from "node:fs";
-import { runCli } from "./shared/cli";
+import { cliToolResultIsError, runCli } from "./shared/cli";
 import { resolveSupaCloudContext, type ResolvedContext } from "./shared/context";
 import { HttpTransport } from "./shared/transports/http";
 import { SshTransport } from "./shared/transports/ssh";
@@ -78,6 +78,8 @@ EXAMPLES
   supacloud-admin ssh install --public_domain api.example.com --studio_domain studio.example.com
   supacloud-admin project create --name my-app --domain example.com
   supacloud-admin project list
+  supacloud-admin project services --ref abc123
+  supacloud-admin project service_control --ref abc123 --service gotrue --service_action stop
   supacloud-admin platform metrics
   supacloud-admin gateway routes --ref abc123
   supacloud-admin gateway upsert_route --ref abc123 --route_id webhook --hosts "api.example.com" --paths "/webhook/*" --upstream 10.0.0.5:8080
@@ -272,10 +274,10 @@ async function main() {
                     console.log(chunk.text);
                 }
             }
-            if (result.isError === true) process.exitCode = 1;
-            return;
+        } else {
+            console.log(JSON.stringify(result, null, 2));
         }
-        console.log(JSON.stringify(result, null, 2));
+        if (cliToolResultIsError(result)) process.exitCode = 1;
         return;
     }
     await runCli(cliTools, args, { commandName: "supacloud-admin" });

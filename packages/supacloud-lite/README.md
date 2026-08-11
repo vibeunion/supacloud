@@ -87,6 +87,10 @@ enabled = false
 
 关闭后 `/auth/v1/*` 返回 `404`，但不会把 Lite 变成完整 GoTrue 运行时，也不会自动移除已有的 `auth` schema 或 API key。需要完整 GoTrue 行为、多项目鉴权或独立鉴权进程时，应使用完整 SupaCloud 平台。
 
+在 loopback 地址启动时，Lite 会启用兼容 `signInWithOtp({ phone })` / `verifyOtp({ type: 'sms' })` 的本地短信收件箱，可在 `/sms-inbox` 查看验证码。短信收件箱与邮件收件箱独立、内存有界，绑定到非 loopback 地址时绝不会挂载。网络暴露的嵌入式用法必须显式注入 `BackendConfig.smsSender`；Lite 没有会把验证码写入控制台的生产 fallback。
+
+手机号必须是 E.164 格式。短信验证码在数据库中保存为域分离的 keyed-HMAC，单次兑换、最多五次错误、按可信连接 IP/手机号指纹限流，并默认对同一手机号执行 60 秒持久化发送冷却。自定义 sender 的异常只返回净化错误，不记录手机号、验证码、短信正文或供应商响应。
+
 ### CLI
 
 ```text
@@ -414,6 +418,10 @@ enabled = false
 ```
 
 When disabled, `/auth/v1/*` returns `404`, but this does not turn Lite into a full GoTrue runtime, nor does it automatically remove the existing `auth` schema or API keys. When you need full GoTrue behavior, multi-project authentication, or a standalone authentication process, use the full SupaCloud platform.
+
+When bound to loopback, Lite enables a local SMS inbox compatible with `signInWithOtp({ phone })` / `verifyOtp({ type: 'sms' })`; open `/sms-inbox` to inspect codes. The SMS inbox is independent from email, memory-bounded, and never mounted on a network-exposed bind. Embedded network deployments must inject `BackendConfig.smsSender`; there is no production console fallback for OTP bodies.
+
+Phone numbers must use E.164. SMS codes are stored as domain-separated keyed HMACs, are single-use, burn after five wrong attempts, and are limited by trusted connection IP plus a keyed phone fingerprint, with a persistent 60-second per-phone send cooldown by default. Provider failures are sanitized and never log the phone, code, SMS body, or raw provider response.
 
 ### CLI
 

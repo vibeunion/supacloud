@@ -10,6 +10,7 @@
 import { AuthHandler } from './auth/handler.js'
 import { RateLimiter } from './auth/rate-limit.js'
 import { InboxMailer } from './auth/inbox.js'
+import { SmsInbox } from './auth/sms-inbox.js'
 import { loadAuthSettings } from './auth/settings.js'
 import { LogBuffer } from './log-buffer.js'
 import { FunctionsHandler, type EdgeFunction } from './functions/handler.js'
@@ -25,7 +26,7 @@ import { WebhooksService, type WebhookDelivery } from './webhooks/service.js'
 import { CronService } from './cron/service.js'
 import { NetService, type NetDelivery } from './net/service.js'
 import { RetentionService } from './retention/service.js'
-import type { BackendConfig, Mailer, MigrationFile, RequestContext } from './types.js'
+import type { BackendConfig, Mailer, MigrationFile, RequestContext, SmsSender } from './types.js'
 import { assertSecretsSafe, isNetworkExposed } from './security.js'
 
 export * from './types.js'
@@ -33,6 +34,7 @@ export { Database } from './db/database.js'
 export { createPgliteEngine } from './db/pglite-engine.js'
 export { MemoryStorageDriver } from './storage/driver.js'
 export { InboxMailer, type InboxEntry } from './auth/inbox.js'
+export { SmsInbox, type SmsInboxEntry } from './auth/sms-inbox.js'
 export { LogBuffer, type LogEntry, type LogLevel } from './log-buffer.js'
 export { RealtimeEngine, type RealtimeSocketLike } from './realtime/engine.js'
 export { signJwt, verifyJwt, decodeJwt } from './jwt.js'
@@ -80,6 +82,8 @@ export interface SupaCloudLiteBackend {
   logs: LogBuffer
   /** Captured dev email inbox mounted only on loopback, or null when disabled or replaced. */
   inbox: InboxMailer | null
+  /** Independent captured dev SMS inbox mounted only on loopback, or null when a sender is configured/exposed. */
+  smsInbox: SmsInbox | null
   /** Apply additional migrations at runtime. */
   migrate: (migrations: MigrationFile[], seedSql?: string) => Promise<string[]>
   /** Tear down every background service and close the database. Idempotent-safe to await once. */
@@ -185,6 +189,10 @@ export async function createBackend(config: BackendConfig = {}): Promise<SupaClo
       log(`[mail] to=${msg.to} subject="${msg.subject}"`)
     },
   }
+  // Phone OTP has no console fallback: loopback gets a bounded dev inbox,
+  // while network-exposed instances must inject an explicit SMS provider.
+  const smsInbox = config.smsSender || exposed ? null : new SmsInbox()
+  const smsSender: SmsSender | null = config.smsSender ?? smsInbox
   // one shared runtime-settings object: config.toml [auth] provides the
   // committed defaults, the persisted auth.config row layers live studio edits
   // on top, and the auth handler reads the merged object per request
@@ -203,6 +211,8 @@ export async function createBackend(config: BackendConfig = {}): Promise<SupaClo
     sessionTimeboxSeconds: config.sessionTimeboxSeconds,
     sessionInactivitySeconds: config.sessionInactivitySeconds,
     mailer,
+    smsSender,
+    log,
     oauthProviders: config.oauthProviders,
     oauthFetch: config.oauthFetch,
     uriAllowList: config.uriAllowList,
@@ -319,6 +329,9 @@ export async function createBackend(config: BackendConfig = {}): Promise<SupaClo
 
     if (inbox && (path === '/inbox' || path.startsWith('/inbox/'))) {
       return withCors(inbox.serve(req, url))
+    }
+    if (smsInbox && (path === '/sms-inbox' || path.startsWith('/sms-inbox/'))) {
+      return withCors(smsInbox.serve(req, url))
     }
 
     // public endpoints that skip apikey checks
@@ -449,6 +462,7 @@ export async function createBackend(config: BackendConfig = {}): Promise<SupaClo
     jwtSecret,
     logs,
     inbox,
+    smsInbox,
     migrate: (migrations, seedSql) => db.runMigrations(migrations, seedSql),
     close: () => {
       closePromise ??= (async () => {
