@@ -3,7 +3,10 @@ import { Elysia } from "elysia";
 
 const requireAdminAuth = mock(() => Promise.resolve(null));
 const requireProjectOrAdminAuth = mock(() => Promise.resolve(null));
-const resolveDbName = mock((ref: string) => Promise.resolve(`supa_${ref}`));
+type BackupProject = { ref: string; db_name: string };
+const findByRef = mock((ref: string): Promise<BackupProject | null> => (
+  Promise.resolve({ ref, db_name: "canonical_project_database" })
+));
 const listBackups = mock(() => Promise.resolve([]));
 const createBackup = mock(() => Promise.resolve({ message: "full backup completed" }));
 const createLogicalBackup = mock(() => Promise.resolve({ success: true, message: "Logical backup completed", file: "backup_project_a_2026-08-05T00-00-00-000Z.sql.gz" }));
@@ -11,8 +14,8 @@ const restoreLogicalBackup = mock(() => Promise.resolve({ success: true, message
 const restore = mock(() => Promise.resolve({ message: "PITR restore completed" }));
 
 const authModule = await import("../../src/middleware/auth");
-const dbModule = await import("../../src/db");
 const backupModule = await import("../../src/services/backup.service");
+const { projectRepository } = await import("../../src/repositories/project.repository");
 
 const requireAdminAuthSpy = spyOn(authModule, "requireAdminAuth").mockImplementation(
   requireAdminAuth as typeof authModule.requireAdminAuth,
@@ -20,8 +23,8 @@ const requireAdminAuthSpy = spyOn(authModule, "requireAdminAuth").mockImplementa
 const requireProjectOrAdminAuthSpy = spyOn(authModule, "requireProjectOrAdminAuth").mockImplementation(
   requireProjectOrAdminAuth as typeof authModule.requireProjectOrAdminAuth,
 );
-const resolveDbNameSpy = spyOn(dbModule, "resolveDbName").mockImplementation(
-  resolveDbName as typeof dbModule.resolveDbName,
+const findByRefSpy = spyOn(projectRepository, "findByRef").mockImplementation(
+  findByRef as typeof projectRepository.findByRef,
 );
 const listBackupsSpy = spyOn(backupModule, "listBackups").mockImplementation(
   listBackups as typeof backupModule.listBackups,
@@ -60,8 +63,11 @@ describe("physical backup routes", () => {
     requireAdminAuth.mockResolvedValue(null);
     requireProjectOrAdminAuth.mockReset();
     requireProjectOrAdminAuth.mockResolvedValue(null);
-    resolveDbName.mockReset();
-    resolveDbName.mockImplementation((ref: string) => Promise.resolve(`supa_${ref}`));
+    findByRef.mockReset();
+    findByRef.mockImplementation((ref: string) => Promise.resolve({
+      ref,
+      db_name: "canonical_project_database",
+    }));
     listBackups.mockReset();
     listBackups.mockResolvedValue([]);
     createBackup.mockReset();
@@ -83,7 +89,7 @@ describe("physical backup routes", () => {
   afterAll(() => {
     requireAdminAuthSpy.mockRestore();
     requireProjectOrAdminAuthSpy.mockRestore();
-    resolveDbNameSpy.mockRestore();
+    findByRefSpy.mockRestore();
     listBackupsSpy.mockRestore();
     createBackupSpy.mockRestore();
     createLogicalBackupSpy.mockRestore();
@@ -91,19 +97,20 @@ describe("physical backup routes", () => {
     restoreSpy.mockRestore();
   });
 
-  test("lists cluster inventory under the requested project database", async () => {
+  test("lists cluster inventory under the persisted project database name", async () => {
     listBackups.mockResolvedValue([{
       id: "20260722-120000F",
       type: "full",
       timestamp: { start: 1_784_000_000, stop: 1_784_000_030 },
       size: 2048,
-      database: "supa_project_a",
+      database: "canonical_project_database",
     }]);
 
     const response = await request("/v1/projects/project_a/database/backups");
     expect(response.status).toBe(200);
     expect(await response.json()).toHaveLength(1);
-    expect(listBackups).toHaveBeenCalledWith("supa_project_a");
+    expect(findByRef).toHaveBeenCalledWith("project_a");
+    expect(listBackups).toHaveBeenCalledWith("canonical_project_database");
   });
 
   test("reports backup success only after the service returns a completed result", async () => {
@@ -114,7 +121,26 @@ describe("physical backup routes", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ message: "full backup completed" });
+    expect(findByRef).toHaveBeenCalledWith("project_a");
     expect(createBackup).toHaveBeenCalledWith("full");
+  });
+
+  test("rejects unknown project refs before physical backup reads or writes", async () => {
+    findByRef.mockResolvedValue(null);
+
+    const listResponse = await request("/v1/projects/missing/database/backups");
+    const createResponse = await request("/v1/projects/missing/database/backups", {
+      method: "POST",
+      body: JSON.stringify({ type: "full" }),
+    });
+
+    expect(listResponse.status).toBe(404);
+    expect(await listResponse.json()).toEqual({ message: "Project not found" });
+    expect(createResponse.status).toBe(404);
+    expect(await createResponse.json()).toEqual({ message: "Project not found" });
+    expect(findByRef).toHaveBeenCalledTimes(2);
+    expect(listBackups).not.toHaveBeenCalled();
+    expect(createBackup).not.toHaveBeenCalled();
   });
 
   test("returns 503 instead of an empty list or started response on pgBackRest failure", async () => {

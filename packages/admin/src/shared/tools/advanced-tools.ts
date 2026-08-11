@@ -4,6 +4,7 @@
 import { Type } from "@sinclair/typebox";
 import { optional, stringEnum, withDescription } from "../schema";
 import type { HttpTransport } from "../transports/http";
+import { createFullPhysicalBackup, listPhysicalBackups } from "./backup-release-control";
 
 export function registerAdvancedTools(server: { tool: (...args: any[]) => void }, http: HttpTransport): void {
 
@@ -170,12 +171,13 @@ Actions: metrics, list_backups, create_backup, network, update_network, list_org
                 "network", "update_network",
                 "list_orgs", "get_org",
             ]), "Action"),
-            ref: optional(Type.String(), "Project ref (for backup/network actions)"),
+            ref: optional(Type.String(), "[*] Project ref for project-scoped platform actions"),
+            backup_type: optional(stringEnum(["full"]), "[create_backup] Explicit physical backup type"),
             slug: optional(Type.String(), "[get_org] Organization slug"),
             allowed_cidrs: optional(Type.Array(Type.String()), "[update_network] Allowed CIDRs"),
         },
         async (args: any) => {
-            const { action, ref, slug, allowed_cidrs } = args;
+            const { action, ref, backup_type, slug, allowed_cidrs } = args;
             const need = (f: string, v: any) => { if (!v) throw new Error(`'${f}' required for '${action}'`); };
             let text: string;
             switch (action) {
@@ -184,13 +186,11 @@ Actions: metrics, list_backups, create_backup, network, update_network, list_org
                     break;
                 case "list_backups":
                     need("ref", ref);
-                    text = JSON.stringify((await http.get(`/v1/projects/${ref}/database/backups`)).data, null, 2);
-                    break;
+                    return listPhysicalBackups(http, ref);
                 case "create_backup": {
                     need("ref", ref);
-                    const r = await http.post(`/v1/projects/${ref}/database/backups`);
-                    text = r.ok ? `✅ Backup created\n${JSON.stringify(r.data, null, 2)}` : `❌ Failed (${r.status})`;
-                    break;
+                    need("backup_type", backup_type);
+                    return createFullPhysicalBackup(http, ref);
                 }
                 case "network":
                     need("ref", ref);
