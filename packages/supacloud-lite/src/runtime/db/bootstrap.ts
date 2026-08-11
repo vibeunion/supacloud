@@ -142,6 +142,7 @@ create table if not exists storage.buckets (
   id text primary key,
   name text not null unique,
   owner uuid,
+  owner_id text,
   public boolean default false,
   file_size_limit bigint,
   allowed_mime_types text[],
@@ -149,11 +150,17 @@ create table if not exists storage.buckets (
   updated_at timestamptz default now()
 );
 
+alter table storage.buckets add column if not exists owner_id text;
+update storage.buckets
+set owner_id = owner::text
+where owner_id is null and owner is not null;
+
 create table if not exists storage.objects (
   id uuid primary key default gen_random_uuid(),
   bucket_id text not null,
   name text not null,
   owner uuid,
+  owner_id text,
   version text,
   metadata jsonb default '{}'::jsonb,
   created_at timestamptz default now(),
@@ -161,6 +168,11 @@ create table if not exists storage.objects (
   last_accessed_at timestamptz default now(),
   unique (bucket_id, name)
 );
+
+alter table storage.objects add column if not exists owner_id text;
+update storage.objects
+set owner_id = owner::text
+where owner_id is null and owner is not null;
 
 create table if not exists supabase_migrations.schema_migrations (
   version text primary key,
@@ -451,6 +463,7 @@ create table if not exists storage.buckets (
   id text primary key,
   name text not null unique,
   owner uuid,
+  owner_id text,
   public boolean default false,
   file_size_limit bigint,
   allowed_mime_types text[],
@@ -458,11 +471,17 @@ create table if not exists storage.buckets (
   updated_at timestamptz default now()
 );
 
+alter table storage.buckets add column if not exists owner_id text;
+update storage.buckets
+set owner_id = owner::text
+where owner_id is null and owner is not null;
+
 create table if not exists storage.objects (
   id uuid primary key default gen_random_uuid(),
   bucket_id text not null references storage.buckets(id),
   name text not null,
   owner uuid,
+  owner_id text,
   version text,
   metadata jsonb default '{}'::jsonb,
   created_at timestamptz default now(),
@@ -470,6 +489,14 @@ create table if not exists storage.objects (
   last_accessed_at timestamptz default now(),
   unique (bucket_id, name)
 );
+
+-- storage-api keeps the legacy UUID owner and the current text owner_id in
+-- parallel. Re-running bootstrap upgrades existing Lite databases and retains
+-- object ownership for rows created before owner_id support was added.
+alter table storage.objects add column if not exists owner_id text;
+update storage.objects
+set owner_id = owner::text
+where owner_id is null and owner is not null;
 
 create index if not exists objects_bucket_name_idx on storage.objects(bucket_id, name);
 
