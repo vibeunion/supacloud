@@ -2,7 +2,17 @@ import { config } from "../config";
 import { shellService } from './shell.service';
 import { logger } from "../utils/logger";
 import { getStorageDriver } from "./storage.adapter";
-import { storageBucketInputError, type StorageBucketSettings } from "./storage-bucket-contract";
+import {
+  storageBucketInputError,
+  storageBucketRevisionError,
+  type StorageBucketSettings,
+} from "./storage-bucket-contract";
+import {
+  deleteEmptyBucketAtRevision as deleteEmptyBucketMetadataAtRevision,
+  updateBucketAtRevision,
+  type BucketDeleteResult,
+  type BucketUpdateResult,
+} from "./storage-bucket-mutation";
 import { statfs } from "node:fs/promises";
 
 export interface StorageStatus {
@@ -223,34 +233,25 @@ export class StorageService {
     return await getStorageDriver().isBucketEmpty(projectRef, bucketName);
   }
 
-  static async updateBucket(projectRef: string, bucketId: string, updates: StorageBucketSettings): Promise<{ success: boolean; error?: string; bucket?: Record<string, unknown> }> {
+  static async updateBucket(
+    projectRef: string,
+    bucketId: string,
+    updates: StorageBucketSettings,
+    expectedRevision: string,
+  ): Promise<BucketUpdateResult | { success: false; error: string }> {
     const inputError = storageBucketInputError(projectRef, bucketId, updates);
     if (inputError) return { success: false, error: inputError };
+    const revisionError = storageBucketRevisionError(expectedRevision);
+    if (revisionError) return { success: false, error: revisionError };
+    if (Object.values(updates).every((setting) => setting === undefined)) {
+      return { success: false, error: "Invalid empty bucket update" };
+    }
 
     try {
       const { getProjectDb, resolveDbName } = await import("../db");
       const dbName = await resolveDbName(projectRef);
       const db = getProjectDb(dbName);
-
-      if (updates.public !== undefined) {
-        await db`UPDATE storage.buckets SET public = ${updates.public} WHERE id = ${bucketId}`;
-      }
-      if (updates.file_size_limit !== undefined) {
-        await db`UPDATE storage.buckets SET file_size_limit = ${updates.file_size_limit} WHERE id = ${bucketId}`;
-      }
-      if (updates.allowed_mime_types !== undefined) {
-        const allowedMimeTypes = updates.allowed_mime_types.length > 0
-          ? db.array(updates.allowed_mime_types, "TEXT")
-          : null;
-        await db`UPDATE storage.buckets SET allowed_mime_types = ${allowedMimeTypes} WHERE id = ${bucketId}`;
-      }
-
-      const [bucket] = await db`SELECT * FROM storage.buckets WHERE id = ${bucketId}`;
-      if (!bucket) {
-        return { success: false, error: "Bucket not found" };
-      }
-
-      return { success: true, bucket: bucket as Record<string, unknown> };
+      return await updateBucketAtRevision(db, { bucketId, expectedRevision, updates });
     } catch (error: unknown) {
       logger.error("Failed to update bucket", {
         projectRef,
@@ -258,6 +259,34 @@ export class StorageService {
         error: error instanceof Error ? error.message : String(error),
       });
       return { success: false, error: "Failed to update bucket" };
+    }
+  }
+
+  static async deleteEmptyBucketAtRevision(
+    projectRef: string,
+    bucketId: string,
+    expectedRevision: string,
+  ): Promise<BucketDeleteResult | { success: false; error: string }> {
+    const inputError = storageBucketInputError(projectRef, bucketId, {});
+    if (inputError) return { success: false, error: inputError };
+    const revisionError = storageBucketRevisionError(expectedRevision);
+    if (revisionError) return { success: false, error: revisionError };
+
+    try {
+      const { getProjectDb, resolveDbName } = await import("../db");
+      const database = getProjectDb(await resolveDbName(projectRef));
+      return await deleteEmptyBucketMetadataAtRevision(database, {
+        bucketId,
+        expectedRevision,
+        deletePhysicalBucket: () => this.deleteBucket(projectRef, bucketId),
+      });
+    } catch (error: unknown) {
+      logger.error("Failed to delete bucket at revision", {
+        projectRef,
+        bucketId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return { success: false, error: "Bucket deletion outcome is unknown" };
     }
   }
 
