@@ -18,17 +18,27 @@ const PROJECT_SERVICE_NAMES = [
 const PROJECT_SERVICE_CONTROL_ACTIONS = [
     "start", "stop", "restart", "pause", "resume", "status",
 ] as const;
+const STUDIO_PROJECT_SERVICE_NAMES = [
+    "db", "rest", "auth", "realtime", "storage",
+] as const;
+const STUDIO_PROJECT_SERVICE_STATUSES = [
+    "ACTIVE_HEALTHY", "COMING_UP", "UNHEALTHY",
+] as const;
 const AUTH_RUNTIME_MANAGED_BY_OWNER = "AUTH_RUNTIME_MANAGED_BY_OWNER";
 const SAFE_PROJECT_REF = /^[a-z0-9-]{1,20}$/;
+const SAFE_AUTH_SERVICE_HOST_ID = /^[a-z0-9-]{1,20}-auth$/;
+const MAX_SERVICE_CONTROL_MESSAGE_LENGTH = 256;
 
 type ProjectServiceName = typeof PROJECT_SERVICE_NAMES[number];
 type ProjectServiceControlAction = typeof PROJECT_SERVICE_CONTROL_ACTIONS[number];
+type StudioProjectServiceName = typeof STUDIO_PROJECT_SERVICE_NAMES[number];
+type StudioProjectServiceStatus = typeof STUDIO_PROJECT_SERVICE_STATUSES[number] | "INACTIVE";
 type ProjectServiceStatus = {
-    id: string;
-    name: string;
-    status: string;
+    id: StudioProjectServiceName;
+    name: StudioProjectServiceName;
+    status: StudioProjectServiceStatus;
     healthy: boolean;
-    service_host_ids: string[];
+    service_host_ids: [string];
 };
 
 const SUPPORTED_PROJECT_SERVICE_ACTIONS: Record<
@@ -81,14 +91,36 @@ function isRecordPayload(payload: unknown): payload is Record<string, unknown> {
     return typeof payload === "object" && payload !== null && !Array.isArray(payload);
 }
 
-function isProjectServiceStatus(payload: unknown): payload is ProjectServiceStatus {
+function isStudioProjectServiceName(name: unknown): name is StudioProjectServiceName {
+    return typeof name === "string"
+        && STUDIO_PROJECT_SERVICE_NAMES.some((allowedName) => name === allowedName);
+}
+
+function hasValidStudioServiceHealth(
+    serviceId: StudioProjectServiceName,
+    status: unknown,
+    healthy: unknown,
+): status is StudioProjectServiceStatus {
+    if (status === "INACTIVE") return serviceId === "auth" && healthy === false;
+    const knownStatus = STUDIO_PROJECT_SERVICE_STATUSES.some((allowedStatus) => status === allowedStatus);
+    return knownStatus && healthy === (status === "ACTIVE_HEALTHY");
+}
+
+function hasValidStudioServiceHost(
+    serviceId: StudioProjectServiceName,
+    projectRef: string,
+    hostIds: unknown,
+): hostIds is [string] {
+    if (!Array.isArray(hostIds) || hostIds.length !== 1 || typeof hostIds[0] !== "string") return false;
+    if (serviceId === "auth") return SAFE_AUTH_SERVICE_HOST_ID.test(hostIds[0]);
+    return hostIds[0] === `${projectRef}-${serviceId}`;
+}
+
+function isProjectServiceStatus(payload: unknown, projectRef: string): payload is ProjectServiceStatus {
     if (!isRecordPayload(payload)) return false;
-    return typeof payload.id === "string"
-        && typeof payload.name === "string"
-        && typeof payload.status === "string"
-        && typeof payload.healthy === "boolean"
-        && Array.isArray(payload.service_host_ids)
-        && payload.service_host_ids.every((hostId) => typeof hostId === "string");
+    if (!isStudioProjectServiceName(payload.id) || payload.name !== payload.id) return false;
+    return hasValidStudioServiceHealth(payload.id, payload.status, payload.healthy)
+        && hasValidStudioServiceHost(payload.id, projectRef, payload.service_host_ids);
 }
 
 function projectServiceStatusOutput(status: ProjectServiceStatus): ProjectServiceStatus {
@@ -97,7 +129,7 @@ function projectServiceStatusOutput(status: ProjectServiceStatus): ProjectServic
         name: status.name,
         status: status.status,
         healthy: status.healthy,
-        service_host_ids: [...status.service_host_ids],
+        service_host_ids: [status.service_host_ids[0]],
     };
 }
 
@@ -106,7 +138,14 @@ function projectServicesResponse(
     response: HttpResult<unknown>,
 ): ProjectToolResponse {
     if (!response.ok) return failedProjectServiceHttpResponse(response);
-    if (!Array.isArray(response.data) || !response.data.every(isProjectServiceStatus)) {
+    if (!SAFE_PROJECT_REF.test(projectRef) || !Array.isArray(response.data) || response.data.length !== 5) {
+        return failedProjectServiceResponse("Project service inventory response is invalid");
+    }
+    if (!response.data.every((service) => isProjectServiceStatus(service, projectRef))) {
+        return failedProjectServiceResponse("Project service inventory response is invalid");
+    }
+    const serviceIds = new Set(response.data.map((service) => service.id));
+    if (serviceIds.size !== STUDIO_PROJECT_SERVICE_NAMES.length) {
         return failedProjectServiceResponse("Project service inventory response is invalid");
     }
     const services = response.data.map(projectServiceStatusOutput);
@@ -130,7 +169,11 @@ function projectServiceReceiptError(
         return "Project service control response does not match the request";
     }
     if (receipt.success === false) return "Project service control failed";
-    if (receipt.success !== true || typeof receipt.message !== "string") {
+    if (
+        receipt.success !== true
+        || typeof receipt.message !== "string"
+        || receipt.message.length > MAX_SERVICE_CONTROL_MESSAGE_LENGTH
+    ) {
         return "Project service control response is invalid";
     }
     return null;

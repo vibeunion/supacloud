@@ -29,6 +29,38 @@ function expectNoRemoteResponseDetails(output: string): void {
     }
 }
 
+function studioServiceInventory(
+    projectRef = "project-ref",
+    authRuntimeRef = projectRef,
+): Array<Record<string, unknown>> {
+    return [
+        { id: "db", name: "db", status: "ACTIVE_HEALTHY", healthy: true,
+            service_host_ids: [`${projectRef}-db`] },
+        { id: "rest", name: "rest", status: "COMING_UP", healthy: false,
+            service_host_ids: [`${projectRef}-rest`] },
+        { id: "auth", name: "auth", status: "INACTIVE", healthy: false,
+            service_host_ids: [`${authRuntimeRef}-auth`] },
+        { id: "realtime", name: "realtime", status: "UNHEALTHY", healthy: false,
+            service_host_ids: [`${projectRef}-realtime`] },
+        { id: "storage", name: "storage", status: "ACTIVE_HEALTHY", healthy: true,
+            service_host_ids: [`${projectRef}-storage`] },
+    ];
+}
+
+async function expectInvalidInventory(
+    inventory: unknown,
+    projectRef = "project-ref",
+): Promise<void> {
+    const projectCallback = captureAdminProjectTool({
+        get: async () => ({ ok: true, status: 200, data: inventory }),
+    });
+
+    const response = await projectCallback({ action: "services", ref: projectRef });
+
+    expect(response.isError).toBe(true);
+    expect(response.content[0].text).toBe("❌ Project service inventory response is invalid");
+}
+
 function captureAdminProjectRegistration(http: Record<string, unknown>): ProjectToolRegistration {
     let registration: ProjectToolRegistration | undefined;
     registerAdminProjectCliTools({
@@ -127,50 +159,108 @@ describe("admin project services", () => {
         const projectCallback = captureAdminProjectTool({
             get: async (path: string) => {
                 requestedPath = path;
+                const inventory = studioServiceInventory("project-ref", "owner-ref");
                 return {
                     ok: true,
                     status: 200,
-                    data: [{
-                        id: "auth",
-                        name: "auth",
-                        status: "INACTIVE",
-                        healthy: false,
-                        service_host_ids: ["project-ref-auth"],
+                    data: inventory.map((service) => ({
+                        ...service,
                         token: REMOTE_RESPONSE_DETAILS[0],
                         secret: REMOTE_RESPONSE_DETAILS[1],
                         Authorization: REMOTE_RESPONSE_DETAILS[2],
                         project_ref: REMOTE_RESPONSE_DETAILS[3],
                         message: REMOTE_RESPONSE_DETAILS[4],
-                    }],
+                    })),
                 };
             },
         });
 
-        const response = await projectCallback({ action: "services", ref: "project/ref" });
+        const response = await projectCallback({ action: "services", ref: "project-ref" });
         const output = JSON.parse(response.content[0].text);
 
-        expect(requestedPath).toBe("/v1/projects/project%2Fref/services");
+        expect(requestedPath).toBe("/v1/projects/project-ref/services");
         expect(response.isError).not.toBe(true);
-        expect(output.project_ref).toBe("project/ref");
-        expect(output.services).toEqual([{
-            id: "auth",
-            name: "auth",
-            status: "INACTIVE",
-            healthy: false,
-            service_host_ids: ["project-ref-auth"],
-        }]);
+        expect(output.project_ref).toBe("project-ref");
+        expect(output.services).toEqual(studioServiceInventory("project-ref", "owner-ref"));
         expectNoRemoteResponseDetails(response.content[0].text);
     });
 
-    test("fails closed when the inventory contract is malformed", async () => {
+    test("rejects secrets placed in every string-valued inventory field", async () => {
+        const secretMarker = "inventory-secret-marker";
+        const maliciousFields = [
+            { field: "id", value: secretMarker },
+            { field: "name", value: secretMarker },
+            { field: "status", value: secretMarker },
+            { field: "service_host_ids", value: [secretMarker] },
+        ] as const;
+
+        for (const maliciousField of maliciousFields) {
+            const inventory = studioServiceInventory();
+            inventory[0] = { ...inventory[0], [maliciousField.field]: maliciousField.value };
+            const projectCallback = captureAdminProjectTool({
+                get: async () => ({ ok: true, status: 200, data: inventory }),
+            });
+            const response = await projectCallback({ action: "services", ref: "project-ref" });
+
+            expect(response.isError).toBe(true);
+            expect(response.content[0].text).toBe("❌ Project service inventory response is invalid");
+            expect(response.content[0].text).not.toContain(secretMarker);
+        }
+    });
+
+    test("rejects an oversized inventory without reflecting its allowed fields", async () => {
+        const oversizedMarker = "oversized-secret-".repeat(64);
+        const oversizedInventory = Array.from({ length: 256 }, () => ({
+            id: oversizedMarker,
+            name: oversizedMarker,
+            status: oversizedMarker,
+            healthy: false,
+            service_host_ids: [oversizedMarker],
+        }));
         const projectCallback = captureAdminProjectTool({
-            get: async () => ({ ok: true, status: 200, data: [{ id: "auth" }] }),
+            get: async () => ({ ok: true, status: 200, data: oversizedInventory }),
         });
 
         const response = await projectCallback({ action: "services", ref: "project-ref" });
 
         expect(response.isError).toBe(true);
-        expect(response.content[0].text).toContain("inventory response is invalid");
+        expect(response.content[0].text).toBe("❌ Project service inventory response is invalid");
+        expect(response.content[0].text).not.toContain(oversizedMarker);
+        expect(JSON.stringify(oversizedInventory).length).toBeGreaterThan(1_000_000);
+    });
+
+    test("rejects duplicate, missing, inconsistent, and unbound service entries", async () => {
+        const duplicate = studioServiceInventory();
+        duplicate[4] = { ...duplicate[0] };
+        const badStatus = studioServiceInventory();
+        badStatus[1] = { ...badStatus[1], status: "INACTIVE" };
+        const healthyMismatch = studioServiceInventory();
+        healthyMismatch[0] = { ...healthyMismatch[0], healthy: false };
+        const multipleHostIds = studioServiceInventory();
+        multipleHostIds[2] = {
+            ...multipleHostIds[2],
+            service_host_ids: ["owner-ref-auth", "project-ref-auth"],
+        };
+        const invalidInventories = [
+            duplicate,
+            studioServiceInventory().slice(0, 4),
+            badStatus,
+            healthyMismatch,
+            multipleHostIds,
+        ];
+
+        for (const inventory of invalidInventories) await expectInvalidInventory(inventory);
+    });
+
+    test("rejects unsafe project refs and host bindings", async () => {
+        const badNonAuthHost = studioServiceInventory();
+        badNonAuthHost[0] = { ...badNonAuthHost[0], service_host_ids: ["other-ref-db"] };
+        const badAuthHost = studioServiceInventory();
+        badAuthHost[2] = { ...badAuthHost[2], service_host_ids: ["unsafe/owner-auth"] };
+
+        await expectInvalidInventory(badNonAuthHost);
+        await expectInvalidInventory(badAuthHost);
+        await expectInvalidInventory(studioServiceInventory(), "unsafe/project");
     });
 });
 
@@ -370,6 +460,39 @@ describe("admin project service control", () => {
         expect(response.isError).toBe(true);
         expect(response.content[0].text).toBe("❌ Project service control response is invalid");
         expectNoRemoteResponseDetails(response.content[0].text);
+    });
+
+    test("bounds the unused success receipt message", async () => {
+        let receiptMessage = "m".repeat(256);
+        const projectCallback = captureAdminProjectTool({
+            post: async () => ({
+                ok: true,
+                status: 200,
+                data: {
+                    service: "gotrue",
+                    action: "stop",
+                    success: true,
+                    message: receiptMessage,
+                },
+            }),
+        });
+        const request = {
+            action: "service_control",
+            ref: "project-ref",
+            service: "gotrue",
+            service_action: "stop",
+        };
+
+        const boundedResponse = await projectCallback(request);
+        expect(boundedResponse.isError).not.toBe(true);
+        expect(boundedResponse.content[0].text).not.toContain(receiptMessage);
+
+        receiptMessage = "oversized-message-secret-".repeat(11);
+        const oversizedResponse = await projectCallback(request);
+        expect(receiptMessage.length).toBeGreaterThan(256);
+        expect(oversizedResponse.isError).toBe(true);
+        expect(oversizedResponse.content[0].text).toBe("❌ Project service control response is invalid");
+        expect(oversizedResponse.content[0].text).not.toContain(receiptMessage);
     });
 
     test("reports generic HTTP failures using only the local status", async () => {
