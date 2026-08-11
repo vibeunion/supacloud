@@ -41,6 +41,8 @@ const AVAILABLE_REGIONS = [
     continent: "apac",
   },
 ];
+const SERVICE_ROLE_JWT = /^[A-Za-z0-9_-]{8,2048}\.[A-Za-z0-9_-]{8,8192}\.[A-Za-z0-9_-]{8,2048}$/;
+const SERVICE_ROLE_JWT_ALGORITHMS = new Set(["HS256", "ES256"]);
 
 export const V1ProjectResponseSchema = t.Object(
   {
@@ -98,11 +100,50 @@ export const V1ProjectWithDatabaseResponseSchema = t.Object(
   { additionalProperties: true },
 );
 
+export const V1ProjectCreateResponseSchema = t.Object(
+  {
+    ...V1ProjectWithDatabaseResponseSchema.properties,
+    credentials: t.Optional(
+      t.Object(
+        { service_role_key: t.String({ minLength: 32 }) },
+        { additionalProperties: false },
+      ),
+    ),
+  },
+  { additionalProperties: false },
+);
+
 function normalizeTimestamp(value: unknown): string {
   if (typeof value === "string") return value;
   if (value instanceof Date) return value.toISOString();
   if (typeof value === "number") return new Date(value).toISOString();
   return new Date().toISOString();
+}
+
+function decodeJwtRecord(encodedPart: string): Record<string, unknown> | null {
+  try {
+    const decodedPart = JSON.parse(Buffer.from(encodedPart, "base64url").toString("utf8"));
+    return decodedPart && typeof decodedPart === "object" && !Array.isArray(decodedPart)
+      ? decodedPart as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function isServiceRoleJwt(candidate: unknown): candidate is string {
+  if (typeof candidate !== "string" || !SERVICE_ROLE_JWT.test(candidate)) return false;
+  const [encodedHeader, encodedClaims] = candidate.split(".");
+  const jwtHeader = decodeJwtRecord(encodedHeader);
+  const jwtClaims = decodeJwtRecord(encodedClaims);
+  return jwtHeader?.typ === "JWT"
+    && typeof jwtHeader.alg === "string"
+    && SERVICE_ROLE_JWT_ALGORITHMS.has(jwtHeader.alg)
+    && jwtClaims?.role === "service_role"
+    && jwtClaims.iss === "supabase"
+    && typeof jwtClaims.exp === "number"
+    && Number.isFinite(jwtClaims.exp)
+    && jwtClaims.exp > Date.now() / 1_000;
 }
 
 export function toPublicV1ProjectResponse(p: any) {
@@ -132,6 +173,16 @@ export function toPublicV1ProjectWithDatabaseResponse(p: any) {
     config: publicScheduledFunctionProjectConfig(p.config),
     anon_key: p.anon_key,
     services: p.services,
+  };
+}
+
+export function toPublicV1ProjectCreateResponse(p: any, serviceRoleKey: unknown) {
+  if (!isServiceRoleJwt(serviceRoleKey)) {
+    throw new Error("Project creation credentials are unavailable");
+  }
+  return {
+    ...toPublicV1ProjectWithDatabaseResponse(p),
+    credentials: { service_role_key: serviceRoleKey },
   };
 }
 
@@ -371,14 +422,17 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
       const authError = await requireAdminAuth(request);
       if (authError) return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
 
-      const project = await projectService.createProject(body);
+      const { credential_delivery: credentialDelivery, ...createRequest } = body;
+      const project = await projectService.createProject(createRequest);
       set.status = 201;
       const fullProject = await projectService.getProject(project.ref);
       const raw = await buildProjectResponse(fullProject || project, true);
-      return toPublicV1ProjectWithDatabaseResponse(raw);
+      return credentialDelivery === "response"
+        ? toPublicV1ProjectCreateResponse(raw, project.service_role_key)
+        : toPublicV1ProjectWithDatabaseResponse(raw);
     },
     {
-      response: { 201: V1ProjectWithDatabaseResponseSchema },
+      response: { 201: V1ProjectCreateResponseSchema },
       body: t.Object({
         name: t.String({ minLength: 1, maxLength: 100 }),
         region: t.Optional(t.String()),
@@ -410,6 +464,7 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
               "Explicit Studio domain (e.g., 'xg-studio.example.com')",
           }),
         ),
+        credential_delivery: t.Optional(t.Literal("response")),
       }),
       detail: { tags: ["projects"], summary: "Create project" },
     },
