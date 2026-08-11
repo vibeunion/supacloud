@@ -11,6 +11,23 @@
 * **cli:** fail closed for production and read-only writes, and require exact production confirmation
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.15.0](https://github.com/zuohuadong/supacloud/compare/cli-v0.14.6...cli-v0.15.0) (2026-08-11)
+
+
+### Features
+
+* **cli:** add multi-environment env profiles ([#803](https://github.com/zuohuadong/supacloud/issues/803)) ([e2b98e4](https://github.com/zuohuadong/supacloud/commit/e2b98e4ae993e5ce234eef2184ab3638c1244919))
+* **cli:** expose installed package version ([#816](https://github.com/zuohuadong/supacloud/issues/816)) ([9081fda](https://github.com/zuohuadong/supacloud/commit/9081fdabd8cac373cb87d6d39226c42a20e424ea))
+* **cli:** load project secrets from environment ([#806](https://github.com/zuohuadong/supacloud/issues/806)) ([f3952e0](https://github.com/zuohuadong/supacloud/commit/f3952e003cd26f87419eec69a43127095ad13908))
+
+
+### Bug Fixes
+
+* **cli:** block release writes in read-only mode ([d49aa43](https://github.com/zuohuadong/supacloud/commit/d49aa4388011dafb0e143d54536bbc643040cfea))
+* **cli:** harden environment secret boundaries ([#815](https://github.com/zuohuadong/supacloud/issues/815)) ([f62b21d](https://github.com/zuohuadong/supacloud/commit/f62b21daaa2d591f5d887439bededa9977db3312))
+* **cli:** keep version command standalone ([#818](https://github.com/zuohuadong/supacloud/issues/818)) ([419d212](https://github.com/zuohuadong/supacloud/commit/419d212386be2076358ad39579f1c862fe81a311))
+* **cli:** preserve auth mutation failure contract ([#807](https://github.com/zuohuadong/supacloud/issues/807)) ([34d9e01](https://github.com/zuohuadong/supacloud/commit/34d9e01cec1314b9a76650ca1910809f464fe185))
+
 ## [0.14.6](https://github.com/zuohuadong/supacloud/compare/cli-v0.14.5...cli-v0.14.6) (2026-08-10)
 
 
