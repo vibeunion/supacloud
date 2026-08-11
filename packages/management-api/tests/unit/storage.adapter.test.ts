@@ -16,6 +16,15 @@ function textStream(value: string): ReadableStream<Uint8Array> {
 }
 
 describe("S3Driver uploadFile", () => {
+  test("refuses prefix deletion without an atomic empty-prefix primitive", async () => {
+    const driver = new S3Driver();
+
+    expect(await driver.deleteBucket("testref", "gallery")).toEqual({
+      success: false,
+      reason: "unknown",
+    });
+  });
+
   test("materializes ReadableStream bodies before S3 writes", async () => {
     const previousNodeEnv = process.env.NODE_ENV;
     const previousCi = process.env.CI;
@@ -100,6 +109,7 @@ describe("JuiceFSDriver uploadFile", () => {
       (driver as unknown as { getBasePath: (...parts: string[]) => string }).getBasePath =
         (_projectRef: string, bucket?: string, key?: string) =>
           join(root, bucket || "", key || "");
+      expect(await driver.createBucket("testref", "gallery")).toBe(true);
 
       const uploaded = await driver.uploadFile(
         "testref",
@@ -124,6 +134,7 @@ describe("JuiceFSDriver uploadFile", () => {
       (driver as unknown as { getBasePath: (...parts: string[]) => string }).getBasePath =
         (_projectRef: string, bucket?: string, key?: string) =>
           join(root, bucket || "", key || "");
+      expect(await driver.createBucket("testref", "gallery")).toBe(true);
 
       const uploaded = await driver.uploadFile(
         "testref",
@@ -134,6 +145,74 @@ describe("JuiceFSDriver uploadFile", () => {
       );
 
       expect(uploaded).toBe(false);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects deletion and preserves an object written after an empty check", async () => {
+    const root = await mkdtemp(join(tmpdir(), "supacloud-storage-"));
+    try {
+      const driver = new JuiceFSDriver();
+      (driver as unknown as { getBasePath: (...parts: string[]) => string }).getBasePath =
+        (_projectRef: string, bucket?: string, key?: string) =>
+          join(root, bucket || "", key || "");
+
+      expect(await driver.createBucket("testref", "gallery")).toBe(true);
+      expect(await driver.isBucketEmpty("testref", "gallery")).toBe(true);
+      expect(await driver.uploadFile(
+        "testref",
+        "gallery",
+        "arrived-after-check.txt",
+        new TextEncoder().encode("preserve me"),
+        "text/plain",
+      )).toBe(true);
+
+      expect(await driver.deleteBucket("testref", "gallery")).toEqual({
+        success: false,
+        reason: "not_empty",
+      });
+      expect(await readFile(join(root, "gallery", "arrived-after-check.txt"), "utf8")).toBe("preserve me");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("does not recreate a bucket after atomic deletion", async () => {
+    const root = await mkdtemp(join(tmpdir(), "supacloud-storage-"));
+    try {
+      const driver = new JuiceFSDriver();
+      (driver as unknown as { getBasePath: (...parts: string[]) => string }).getBasePath =
+        (_projectRef: string, bucket?: string, key?: string) =>
+          join(root, bucket || "", key || "");
+
+      expect(await driver.createBucket("testref", "gallery")).toBe(true);
+      expect(await driver.deleteBucket("testref", "gallery")).toEqual({ success: true });
+      expect(await driver.uploadFile(
+        "testref",
+        "gallery",
+        "late.txt",
+        new TextEncoder().encode("must not reappear"),
+        "text/plain",
+      )).toBe(false);
+      await expect(readFile(join(root, "gallery", "late.txt"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("treats a missing bucket as an unknown deletion outcome", async () => {
+    const root = await mkdtemp(join(tmpdir(), "supacloud-storage-"));
+    try {
+      const driver = new JuiceFSDriver();
+      (driver as unknown as { getBasePath: (...parts: string[]) => string }).getBasePath =
+        (_projectRef: string, bucket?: string, key?: string) =>
+          join(root, bucket || "", key || "");
+
+      expect(await driver.deleteBucket("testref", "missing")).toEqual({
+        success: false,
+        reason: "unknown",
+      });
     } finally {
       await rm(root, { recursive: true, force: true });
     }

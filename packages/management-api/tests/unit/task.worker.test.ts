@@ -6,6 +6,7 @@ import { projectRepository } from "../../src/repositories/project.repository";
 import { TaskWorker } from "../../src/services/task.worker";
 import { databaseService } from "../../src/services/database.service";
 import { jwtService } from "../../src/services/jwt.service";
+import { storageService } from "../../src/services/storage.service";
 import * as wsModule from "../../src/routes/ws";
 
 function failedTask(overrides: Partial<ProjectTask> = {}): ProjectTask {
@@ -182,6 +183,43 @@ describe("TaskWorker failure handling", () => {
       "cleanup_s3",
       "cleanup_db",
     ]);
+  });
+});
+
+describe("TaskWorker cleanup_s3", () => {
+  afterEach(() => {
+    mock.restore();
+  });
+
+  test.each([
+    ["successful", { success: true }, true],
+    ["non-empty", { success: false, error: "Bucket is not empty" }, false],
+    ["unknown", { success: false, error: "Bucket deletion outcome is unknown" }, false],
+  ])("returns %s storage cleanup results without declaring a false success", async (
+    _outcome,
+    deletion,
+    expected,
+  ) => {
+    const originalFixedJwtSecret = process.env.TEST_FIXED_JWT_SECRET;
+    delete process.env.TEST_FIXED_JWT_SECRET;
+    const worker = new TaskWorker();
+    const deleteBucketSpy = spyOn(storageService, "deleteBucket").mockResolvedValue(deletion);
+    spyOn(projectRepository, "findByRef").mockResolvedValue(null);
+
+    try {
+      const completed = await (worker as any).executeTask({
+        id: "cleanup-s3-task",
+        project_ref: "proj-ref",
+        task_type: "cleanup_s3",
+        payload: {},
+      });
+
+      expect(completed).toBe(expected);
+      expect(deleteBucketSpy).toHaveBeenCalledWith("proj-ref");
+    } finally {
+      if (originalFixedJwtSecret === undefined) delete process.env.TEST_FIXED_JWT_SECRET;
+      else process.env.TEST_FIXED_JWT_SECRET = originalFixedJwtSecret;
+    }
   });
 });
 

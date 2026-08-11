@@ -204,19 +204,9 @@ async function listLegacyStorageBuckets(ref: string): Promise<Record<string, unk
     return await listStorageBuckets(ref);
 }
 
-async function assertStorageBucketDeletable(ref: string, bucketName: string): Promise<void> {
-    if (!await StorageService.isBucketEmpty(ref, bucketName)) throw new Error("Bucket is not empty");
-    await StorageRLS.assertLogicalBucketDeletableAsAdmin(ref, bucketName);
-}
-
 async function deleteStorageBucket(ref: string, bucketName: string) {
     const inputError = storageBucketInputError(ref, bucketName, {});
     if (inputError) return { success: false, error: inputError };
-    try {
-        await assertStorageBucketDeletable(ref, bucketName);
-    } catch (error: unknown) {
-        return { success: false, error: error instanceof Error ? error.message : "Failed to validate bucket" };
-    }
     const storageResult = await StorageService.deleteBucket(ref, bucketName);
     if (!storageResult.success) return storageResult;
 
@@ -224,12 +214,15 @@ async function deleteStorageBucket(ref: string, bucketName: string) {
         await StorageRLS.deleteLogicalBucketAsAdmin(ref, bucketName);
         return storageResult;
     } catch (error: unknown) {
+        if (error instanceof Error && error.message === "Bucket is not empty") {
+            return { success: false, error: error.message };
+        }
         logger.error("Failed to delete Studio storage bucket metadata", {
             ref,
             bucketName,
             error: error instanceof Error ? error.message : String(error),
         });
-        return { success: false, error: "Failed to delete bucket metadata" };
+        return { success: false, error: "Bucket deletion outcome is unknown" };
     }
 }
 

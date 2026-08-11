@@ -46,15 +46,33 @@ describe("StorageService (using adapter)", () => {
 
   describe("deleteBucket", () => {
     test("should return success when driver succeeds", async () => {
-      mockStorageDriver.deleteBucket.mockResolvedValueOnce(true);
+      mockStorageDriver.deleteBucket.mockResolvedValueOnce({ success: true });
       const result = await storageService.deleteBucket("testref");
       expect(result.success).toBe(true);
     });
 
     test("should pass correct params to driver", async () => {
-      mockStorageDriver.deleteBucket.mockResolvedValueOnce(true);
+      mockStorageDriver.deleteBucket.mockResolvedValueOnce({ success: true });
       await storageService.deleteBucket("myproj", "bucket");
       expect(mockStorageDriver.deleteBucket).toHaveBeenCalledWith("myproj", "bucket");
+    });
+
+    test("maps a non-empty directory result to a conflict without declaring deletion", async () => {
+      mockStorageDriver.deleteBucket.mockResolvedValueOnce({ success: false, reason: "not_empty" });
+
+      await expect(storageService.deleteBucket("myproj", "bucket")).resolves.toEqual({
+        success: false,
+        error: "Bucket is not empty",
+      });
+    });
+
+    test("maps an indeterminate driver result without declaring deletion", async () => {
+      mockStorageDriver.deleteBucket.mockResolvedValueOnce({ success: false, reason: "unknown" });
+
+      await expect(storageService.deleteBucket("myproj", "bucket")).resolves.toEqual({
+        success: false,
+        error: "Bucket deletion outcome is unknown",
+      });
     });
   });
 

@@ -297,15 +297,8 @@ describe("storage management routes", () => {
     }
   });
 
-  test("Studio bucket deletion removes physical storage before logical metadata", async () => {
+  test("Studio bucket deletion removes the empty physical bucket before logical metadata", async () => {
     const callOrder: string[] = [];
-    const isBucketEmptySpy = spyOn(StorageService, "isBucketEmpty").mockImplementation(async () => {
-      callOrder.push("physical-preflight");
-      return true;
-    });
-    const assertDeletableSpy = spyOn(StorageRLS, "assertLogicalBucketDeletableAsAdmin").mockImplementation(async () => {
-      callOrder.push("logical-preflight");
-    });
     const deletePhysicalSpy = spyOn(StorageService, "deleteBucket").mockImplementation(async () => {
       callOrder.push("physical");
       return { success: true };
@@ -320,22 +313,40 @@ describe("storage management routes", () => {
         headers: { Authorization: "Bearer dev-master-token" },
       });
       expect(response.status).toBe(200);
-      expect(callOrder).toEqual(["physical-preflight", "logical-preflight", "physical", "logical"]);
+      expect(callOrder).toEqual(["physical", "logical"]);
       expect(deleteLogicalSpy).toHaveBeenCalledWith("test-ref", "public-assets");
     } finally {
-      isBucketEmptySpy.mockRestore();
       deletePhysicalSpy.mockRestore();
       deleteLogicalSpy.mockRestore();
-      assertDeletableSpy.mockRestore();
     }
   });
 
-  test("Studio bucket deletion leaves physical data untouched when logical objects exist", async () => {
-    const isBucketEmptySpy = spyOn(StorageService, "isBucketEmpty").mockResolvedValue(true);
-    const assertDeletableSpy = spyOn(StorageRLS, "assertLogicalBucketDeletableAsAdmin").mockRejectedValue(
+  test("Studio bucket deletion reports a conflict when a logical object arrives after physical deletion", async () => {
+    const deletePhysicalSpy = spyOn(StorageService, "deleteBucket").mockResolvedValue({ success: true });
+    const deleteLogicalSpy = spyOn(StorageRLS, "deleteLogicalBucketAsAdmin").mockRejectedValue(
       new Error("Bucket is not empty"),
     );
-    const deletePhysicalSpy = spyOn(StorageService, "deleteBucket").mockResolvedValue({ success: true });
+
+    try {
+      const response = await request("/v1/projects/test-ref/storage/buckets/public-assets", {
+        method: "DELETE",
+        headers: { Authorization: "Bearer dev-master-token" },
+      });
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({ message: "Bucket is not empty", code: "409" });
+      expect(deletePhysicalSpy).toHaveBeenCalledWith("test-ref", "public-assets");
+      expect(deleteLogicalSpy).toHaveBeenCalledWith("test-ref", "public-assets");
+    } finally {
+      deletePhysicalSpy.mockRestore();
+      deleteLogicalSpy.mockRestore();
+    }
+  });
+
+  test("Studio bucket deletion reports a conflict when the physical bucket is not empty", async () => {
+    const deletePhysicalSpy = spyOn(StorageService, "deleteBucket").mockResolvedValue({
+      success: false,
+      error: "Bucket is not empty",
+    });
     const deleteLogicalSpy = spyOn(StorageRLS, "deleteLogicalBucketAsAdmin").mockResolvedValue();
 
     try {
@@ -345,46 +356,19 @@ describe("storage management routes", () => {
       });
       expect(response.status).toBe(409);
       expect(await response.json()).toEqual({ message: "Bucket is not empty", code: "409" });
-      expect(deletePhysicalSpy).not.toHaveBeenCalled();
+      expect(deletePhysicalSpy).toHaveBeenCalledWith("test-ref", "public-assets");
       expect(deleteLogicalSpy).not.toHaveBeenCalled();
     } finally {
-      isBucketEmptySpy.mockRestore();
-      assertDeletableSpy.mockRestore();
       deletePhysicalSpy.mockRestore();
       deleteLogicalSpy.mockRestore();
     }
   });
 
-  test("Studio bucket deletion leaves physical data untouched when Studio files exist", async () => {
-    const isBucketEmptySpy = spyOn(StorageService, "isBucketEmpty").mockResolvedValue(false);
-    const assertDeletableSpy = spyOn(StorageRLS, "assertLogicalBucketDeletableAsAdmin").mockResolvedValue();
-    const deletePhysicalSpy = spyOn(StorageService, "deleteBucket").mockResolvedValue({ success: true });
-    const deleteLogicalSpy = spyOn(StorageRLS, "deleteLogicalBucketAsAdmin").mockResolvedValue();
-
-    try {
-      const response = await request("/v1/projects/test-ref/storage/buckets/public-assets", {
-        method: "DELETE",
-        headers: { Authorization: "Bearer dev-master-token" },
-      });
-      expect(response.status).toBe(409);
-      expect(await response.json()).toEqual({ message: "Bucket is not empty", code: "409" });
-      expect(assertDeletableSpy).not.toHaveBeenCalled();
-      expect(deletePhysicalSpy).not.toHaveBeenCalled();
-      expect(deleteLogicalSpy).not.toHaveBeenCalled();
-    } finally {
-      isBucketEmptySpy.mockRestore();
-      assertDeletableSpy.mockRestore();
-      deletePhysicalSpy.mockRestore();
-      deleteLogicalSpy.mockRestore();
-    }
-  });
-
-  test("Studio bucket deletion fails closed when physical inspection fails", async () => {
-    const isBucketEmptySpy = spyOn(StorageService, "isBucketEmpty").mockRejectedValue(
-      new Error("storage unavailable"),
-    );
-    const assertDeletableSpy = spyOn(StorageRLS, "assertLogicalBucketDeletableAsAdmin").mockResolvedValue();
-    const deletePhysicalSpy = spyOn(StorageService, "deleteBucket").mockResolvedValue({ success: true });
+  test("Studio bucket deletion fails closed when the physical outcome is unknown", async () => {
+    const deletePhysicalSpy = spyOn(StorageService, "deleteBucket").mockResolvedValue({
+      success: false,
+      error: "Bucket deletion outcome is unknown",
+    });
     const deleteLogicalSpy = spyOn(StorageRLS, "deleteLogicalBucketAsAdmin").mockResolvedValue();
 
     try {
@@ -393,12 +377,10 @@ describe("storage management routes", () => {
         headers: { Authorization: "Bearer dev-master-token" },
       });
       expect(response.status).toBe(500);
-      expect(assertDeletableSpy).not.toHaveBeenCalled();
-      expect(deletePhysicalSpy).not.toHaveBeenCalled();
+      expect(await response.json()).toEqual({ message: "Bucket deletion outcome is unknown", code: "500" });
+      expect(deletePhysicalSpy).toHaveBeenCalledWith("test-ref", "public-assets");
       expect(deleteLogicalSpy).not.toHaveBeenCalled();
     } finally {
-      isBucketEmptySpy.mockRestore();
-      assertDeletableSpy.mockRestore();
       deletePhysicalSpy.mockRestore();
       deleteLogicalSpy.mockRestore();
     }

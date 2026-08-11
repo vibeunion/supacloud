@@ -383,6 +383,27 @@ describe("Storage bucket lifecycle", () => {
         }));
     });
 
+    test("does not report deletion when the API rejects a concurrent write conflict", async () => {
+        let readbackRequested = false;
+        const { callback } = captureStorageTool({
+            delete: async () => ({
+                ok: false,
+                status: 409,
+                data: { message: "Bucket is not empty" },
+            }),
+            get: async () => {
+                readbackRequested = true;
+                return { ok: false, status: 404, data: { message: "not found" } };
+            },
+        });
+
+        const response = await callback({ action: "delete_bucket", ref: "project-ref", bucket: "reports" });
+
+        expect(response.isError).toBe(true);
+        expect(JSON.parse(response.content[0].text).error).toEqual({ code: "HTTP_ERROR", http_status: 409 });
+        expect(readbackRequested).toBe(false);
+    });
+
     test("returns a structured non-success result for bucket read failures", async () => {
         const { callback } = captureStorageTool({
             get: async () => ({ ok: false, status: 404, data: { message: "private-server-detail" } }),

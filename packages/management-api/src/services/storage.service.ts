@@ -193,8 +193,14 @@ export class StorageService {
   }
 
   static async deleteBucket(projectRef: string, bucketName: string = ""): Promise<{ success: boolean; error?: string }> {
-    const success = await getStorageDriver().deleteBucket(projectRef, bucketName);
-    return { success };
+    const deletion = await getStorageDriver().deleteBucket(projectRef, bucketName);
+    if (deletion.success) return deletion;
+    return {
+      success: false,
+      error: deletion.reason === "not_empty"
+        ? "Bucket is not empty"
+        : "Bucket deletion outcome is unknown",
+    };
   }
 
   static async emptyBucket(projectRef: string, bucketName: string): Promise<{ success: boolean; error?: string }> {
