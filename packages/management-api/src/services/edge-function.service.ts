@@ -54,6 +54,7 @@ export interface EdgeFunctionDeployResult {
 
 export const EDGE_FUNCTION_ABSENT_ACTIVE_VERSION = "absent" as const;
 export const EDGE_FUNCTION_ACTIVE_VERSION_CONFLICT_CODE = "FUNCTION_ACTIVE_VERSION_CONFLICT" as const;
+export const EDGE_FUNCTION_ACTIVE_ARTIFACT_MISSING_MESSAGE = "Active function artifact is missing";
 export const EDGE_FUNCTION_SHA256_HEX_PATTERN = "^[a-f0-9]{64}$";
 export type EdgeFunctionActiveVersion = string;
 
@@ -229,6 +230,12 @@ function parseVersionNumber(value: unknown): number | null {
   return parsed;
 }
 
+function canonicalFunctionVersion(value: unknown): string {
+  const parsedVersion = parseVersionNumber(value);
+  if (parsedVersion === null) throw new Error("Function config contains an invalid active version");
+  return String(parsedVersion);
+}
+
 export function activeFunctionVersionNumber(version: EdgeFunctionActiveVersion): number | null {
   if (version === EDGE_FUNCTION_ABSENT_ACTIVE_VERSION) return null;
   const parsedVersion = parseVersionNumber(version);
@@ -308,7 +315,8 @@ function getFuncPath(ref: string, slug: string): string {
 }
 
 function getVersionedFuncPath(ref: string, slug: string, version: string): string {
-  return assertInside(getFuncDir(ref), path.join(getFuncDir(ref), VERSIONED_DIR, validateSlug(slug), version, "index.js"));
+  const versionDir = getFunctionVersionDir(ref, slug, version);
+  return assertInside(versionDir, path.join(versionDir, "index.js"));
 }
 
 function getSrcPath(ref: string, slug: string): string {
@@ -316,7 +324,8 @@ function getSrcPath(ref: string, slug: string): string {
 }
 
 function getVersionedSrcPath(ref: string, slug: string, version: string): string {
-  return assertInside(getFuncDir(ref), path.join(getFuncDir(ref), VERSIONED_DIR, validateSlug(slug), version, "index.src.ts"));
+  const versionDir = getFunctionVersionDir(ref, slug, version);
+  return assertInside(versionDir, path.join(versionDir, "index.src.ts"));
 }
 
 function getConfigPath(ref: string, slug: string): string {
@@ -326,6 +335,11 @@ function getConfigPath(ref: string, slug: string): string {
 function getVersionRoot(ref: string, slug: string): string {
   const dir = getFuncDir(ref);
   return assertInside(dir, path.join(dir, VERSIONED_DIR, validateSlug(slug)));
+}
+
+function getFunctionVersionDir(ref: string, slug: string, version: string): string {
+  const versionRoot = getVersionRoot(ref, slug);
+  return assertInside(versionRoot, path.join(versionRoot, canonicalFunctionVersion(version)));
 }
 
 function getLegacySourceDir(ref: string, slug: string): string {
@@ -355,10 +369,32 @@ async function fileExists(filePath: string): Promise<boolean> {
   }
 }
 
+async function readOptionalFunctionFile(filePath: string): Promise<string | null> {
+  try {
+    return await Bun.file(filePath).text();
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+function parsedFunctionConfig(raw: string): EdgeFunctionConfig {
+  const parsed = JSON.parse(raw) as unknown;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)
+    || Object.getPrototypeOf(parsed) !== Object.prototype) {
+    throw new Error("Function config must be an object");
+  }
+  const functionConfig = { ...DEFAULT_FUNCTION_CONFIG, ...parsed } as EdgeFunctionConfig;
+  if (functionConfig.version !== undefined) {
+    functionConfig.version = canonicalFunctionVersion(functionConfig.version);
+  }
+  return functionConfig;
+}
+
 async function readFunctionConfig(ref: string, slug: string): Promise<EdgeFunctionConfig> {
   try {
     const raw = await Bun.file(getConfigPath(ref, slug)).text();
-    return { ...DEFAULT_FUNCTION_CONFIG, ...JSON.parse(raw) };
+    return parsedFunctionConfig(raw);
   } catch (error: unknown) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     return { ...DEFAULT_FUNCTION_CONFIG };
@@ -381,9 +417,6 @@ async function activeFunctionVersion(
 ): Promise<EdgeFunctionActiveVersion> {
   const functionConfig = await readFunctionConfig(ref, slug);
   if (functionConfig.version !== undefined) {
-    if (parseVersionNumber(functionConfig.version) === null) {
-      throw new Error("Function config contains an invalid active version");
-    }
     return functionConfig.version;
   }
   return await frozenLegacyRuntimePath(ref, slug) === null
@@ -786,7 +819,7 @@ async function readFunctionVersionMetadata(
   slug: string,
   version: string,
 ): Promise<FunctionVersionMetadata> {
-  const versionDir = assertInside(getVersionRoot(ref, slug), path.join(getVersionRoot(ref, slug), version));
+  const versionDir = getFunctionVersionDir(ref, slug, version);
   const metadataPath = path.join(versionDir, FUNCTION_VERSION_METADATA_FILE);
   const metadataRecord = JSON.parse(await Bun.file(metadataPath).text()) as Record<string, unknown>;
   if (!metadataRecord || typeof metadataRecord !== "object" || Array.isArray(metadataRecord)) {
@@ -856,7 +889,7 @@ async function backfillActiveVersionMetadata(
   version: string,
   functionConfig: EdgeFunctionConfig,
 ): Promise<void> {
-  const versionDir = assertInside(getVersionRoot(ref, slug), path.join(getVersionRoot(ref, slug), version));
+  const versionDir = getFunctionVersionDir(ref, slug, version);
   let existingMetadata: FunctionVersionMetadata | null = null;
   try {
     existingMetadata = await readFunctionVersionMetadata(ref, slug, version);
@@ -880,7 +913,7 @@ async function snapshotFrozenLegacyVersion(
   snapshot: LegacyVersionSnapshotRequest,
 ): Promise<EdgeFunctionConfig> {
   const versionRoot = getVersionRoot(snapshot.ref, snapshot.slug);
-  const finalDir = assertInside(versionRoot, path.join(versionRoot, snapshot.version));
+  const finalDir = getFunctionVersionDir(snapshot.ref, snapshot.slug, snapshot.version);
   if (await fileExists(finalDir)) {
     return completeFrozenLegacyVersionSnapshot(snapshot, finalDir);
   }
@@ -967,7 +1000,6 @@ async function ensureConfiguredRollbackSnapshot(
   ref: string,
   slug: string,
   currentConfig: EdgeFunctionConfig,
-  legacyRuntimePath: string | null,
 ): Promise<EdgeFunctionConfig> {
   const version = currentConfig.version!;
   if (parseVersionNumber(version) === null) {
@@ -977,16 +1009,7 @@ async function ensureConfiguredRollbackSnapshot(
     await backfillActiveVersionMetadata(ref, slug, version, currentConfig);
     return currentConfig;
   }
-  if (!legacyRuntimePath) {
-    throw new Error("Active function version artifact is missing and no frozen legacy alias exists");
-  }
-  return snapshotFrozenLegacyVersion({
-    ref,
-    slug,
-    version,
-    functionConfig: currentConfig,
-    runtimePath: legacyRuntimePath,
-  });
+  throw new Error("Active function version artifact is missing");
 }
 
 async function ensureLegacyVersionZeroSnapshot(
@@ -1026,15 +1049,14 @@ async function ensureLegacyVersionZeroSnapshot(
 async function ensureCurrentRollbackSnapshot(
   snapshot: CurrentRollbackSnapshotRequest,
 ): Promise<EdgeFunctionConfig> {
-  const legacyRuntimePath = await frozenLegacyRuntimePath(snapshot.ref, snapshot.slug);
   if (snapshot.currentConfig.version) {
     return ensureConfiguredRollbackSnapshot(
       snapshot.ref,
       snapshot.slug,
       snapshot.currentConfig,
-      legacyRuntimePath,
     );
   }
+  const legacyRuntimePath = await frozenLegacyRuntimePath(snapshot.ref, snapshot.slug);
   if (!legacyRuntimePath) return snapshot.currentConfig;
   return ensureLegacyVersionZeroSnapshot(snapshot, legacyRuntimePath);
 }
@@ -1270,10 +1292,7 @@ async function maxHistoricalFunctionVersion(ref: string, slug: string): Promise<
 }
 
 async function assertFunctionVersionAvailable(ref: string, slug: string, version: number): Promise<void> {
-  const candidate = assertInside(
-    getFuncDir(ref),
-    path.join(getFuncDir(ref), VERSIONED_DIR, validateSlug(slug), String(version)),
-  );
+  const candidate = getFunctionVersionDir(ref, slug, String(version));
   try {
     await fs.access(candidate);
     throw new Error(`Function version directory already exists: ${version}`);
@@ -1304,11 +1323,11 @@ async function readVersionedFunctionSource(
   version: string,
   entrypoint: string = "index.ts",
 ): Promise<string | null> {
-  const versionRoot = path.join(getVersionRoot(ref, slug), version);
+  const versionRoot = getFunctionVersionDir(ref, slug, version);
   const candidates = [
     getVersionedSrcPath(ref, slug, version),
     resolveInside(path.join(versionRoot, "src"), entrypoint),
-    path.join(versionRoot, "src", BUNDLED_SOURCE_RUNTIME_ENTRY),
+    assertInside(versionRoot, path.join(versionRoot, "src", BUNDLED_SOURCE_RUNTIME_ENTRY)),
   ];
   for (const candidate of candidates) {
     if (await fileExists(candidate)) return Bun.file(candidate).text();
@@ -1321,7 +1340,7 @@ export async function getVersionedArtifactPath(
   slug: string,
   version: string,
 ): Promise<string | null> {
-  const dir = assertInside(getFuncDir(ref), path.join(getFuncDir(ref), VERSIONED_DIR, validateSlug(slug), version));
+  const dir = getFunctionVersionDir(ref, slug, version);
   try {
     const entries = await fs.readdir(dir);
     const contentAddressed = entries
@@ -1465,7 +1484,7 @@ async function immutableFunctionVersion(
   currentConfig: EdgeFunctionConfig,
 ): Promise<PreparedFunctionRelease> {
   const versionRoot = getVersionRoot(request.ref, request.slug);
-  const finalDir = assertInside(versionRoot, path.join(versionRoot, version));
+  const finalDir = getFunctionVersionDir(request.ref, request.slug, version);
   const stageDir = assertInside(
     versionRoot,
     path.join(versionRoot, `.pending-${version}-${crypto.randomUUID()}`),
@@ -1845,36 +1864,22 @@ export const edgeFunctionService = {
 
   /** Read function bundled code (runtime version) */
   async read(ref: string, slug: string): Promise<string | null> {
-    try {
-      const cfg = await this.getConfig(ref, slug);
-      if (cfg.version) {
-        const versioned = await readVersionedFunctionCode(ref, slug, cfg.version);
-        if (versioned !== null) return versioned;
-      }
-      return await Bun.file(getFuncPath(ref, slug)).text();
-    } catch (err: unknown) {
-      if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-        logger.error(`[EdgeFunction] Failed to read ${slug}`, {
-          ref,
-          error: err,
-        });
-      }
-      return null;
+    const cfg = await this.getConfig(ref, slug);
+    if (cfg.version !== undefined) {
+      const versioned = await readVersionedFunctionCode(ref, slug, cfg.version);
+      if (versioned === null) throw new Error(EDGE_FUNCTION_ACTIVE_ARTIFACT_MISSING_MESSAGE);
+      return versioned;
     }
+    return readOptionalFunctionFile(getFuncPath(ref, slug));
   },
 
   /** Read function original source (for debugging) */
   async readSource(ref: string, slug: string): Promise<string | null> {
-    try {
-      const cfg = await this.getConfig(ref, slug);
-      if (cfg.version) {
-        const versioned = await readVersionedFunctionSource(ref, slug, cfg.version, cfg.entrypoint);
-        if (versioned !== null) return versioned;
-      }
-      return await Bun.file(getSrcPath(ref, slug)).text();
-    } catch {
-      return null;
+    const cfg = await this.getConfig(ref, slug);
+    if (cfg.version !== undefined) {
+      return readVersionedFunctionSource(ref, slug, cfg.version, cfg.entrypoint);
     }
+    return readOptionalFunctionFile(getSrcPath(ref, slug));
   },
 
   async listVersions(ref: string, slug: string): Promise<EdgeFunctionVersionRecord[]> {
@@ -1884,9 +1889,10 @@ export const edgeFunctionService = {
 
     const records = await Promise.all(
       versions.map(async (version) => {
+        const versionDir = getFunctionVersionDir(ref, slug, version);
         const bundlePath = await getVersionedArtifactPath(ref, slug, version);
         const sourcePath = getVersionedSrcPath(ref, slug, version);
-        const sourceDirPath = assertInside(getFuncDir(ref), path.join(getFuncDir(ref), VERSIONED_DIR, validateSlug(slug), version, "src"));
+        const sourceDirPath = assertInside(versionDir, path.join(versionDir, "src"));
         const [hasBundle, hasSource, hasSourceDir] = await Promise.all([
           bundlePath ? fileExists(bundlePath) : Promise.resolve(false),
           fileExists(sourcePath),

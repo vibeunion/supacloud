@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { Elysia } from "elysia";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs/promises";
 import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
@@ -35,6 +36,26 @@ async function deployConditionalRelease(
 async function activateConditionalVersion(ref: string, slug: string, version: string) {
   const expectedActiveVersion = (await edgeFunctionService.getConfig(ref, slug)).version ?? "absent";
   return (await edgeFunctionService.activateVersion(ref, slug, version, expectedActiveVersion))?.config ?? null;
+}
+
+async function writeConfiguredAliases(ref: string, slug: string, version: string): Promise<void> {
+  const projectDir = join(functionsRoot, ref);
+  await mkdir(projectDir, { recursive: true });
+  await Promise.all([
+    Bun.write(join(projectDir, `${slug}.config.json`), JSON.stringify({ version })),
+    Bun.write(join(projectDir, `${slug}.js`), "stale-alias-bundle"),
+    Bun.write(join(projectDir, `${slug}.src.ts`), "stale-alias-source"),
+  ]);
+}
+
+async function writeCrossSlugFixture(ref: string): Promise<void> {
+  const otherVersionDir = join(functionsRoot, ref, ".versions", "other", "1");
+  await mkdir(otherVersionDir, { recursive: true });
+  await Promise.all([
+    Bun.write(join(otherVersionDir, "index.js"), "cross-slug-bundle"),
+    Bun.write(join(otherVersionDir, "index.src.ts"), "cross-slug-source"),
+    writeConfiguredAliases(ref, "traversal", "../other/1"),
+  ]);
 }
 
 const runtimeInvalidationProtocol = {
@@ -144,26 +165,93 @@ describe("edgeFunctionService bundle metadata", () => {
       Bun.write(join(projectDir, "corrupt.config.json"), "{"),
     ]);
 
+    await expect(edgeFunctionService.read(ref, "corrupt")).rejects.toThrow();
+    await expect(edgeFunctionService.readSource(ref, "corrupt")).rejects.toThrow();
     await expect(edgeFunctionService.list(ref)).rejects.toThrow();
 
     await rm(join(projectDir, "corrupt.config.json"));
     expect(await edgeFunctionService.list(ref)).toEqual(["configured", "legacy"]);
   });
 
+  test("rejects non-object function config documents at the read boundary", async () => {
+    const ref = "proj_non_object_config";
+    const projectDir = join(functionsRoot, ref);
+    await mkdir(projectDir, { recursive: true });
+
+    for (const [slug, document] of [["array", "[]"], ["null", "null"], ["scalar", '"value"']]) {
+      await Bun.write(join(projectDir, `${slug}.config.json`), document);
+      await expect(edgeFunctionService.read(ref, slug)).rejects.toThrow("Function config must be an object");
+      await expect(edgeFunctionService.readSource(ref, slug)).rejects.toThrow("Function config must be an object");
+    }
+  });
+
+  test("rejects noncanonical config versions without cross-function reads", async () => {
+    const ref = "proj_version_path_binding";
+    await writeCrossSlugFixture(ref);
+
+    for (const [slug, version] of [
+      ["traversal", "../other/1"],
+      ["leading-zero", "01"],
+      ["unsafe-integer", "9007199254740992"],
+    ]) {
+      if (slug !== "traversal") await writeConfiguredAliases(ref, slug, version);
+      await expect(edgeFunctionService.read(ref, slug)).rejects.toThrow();
+      await expect(edgeFunctionService.readSource(ref, slug)).rejects.toThrow();
+    }
+  });
+
+  test("function read routes reject cross-function version paths", async () => {
+    const ref = "proj_route_version_path_binding";
+    await writeCrossSlugFixture(ref);
+
+    const { projectFunctionsRoutes } = await import("../../src/routes/project-functions");
+    const { projectService } = await import("../../src/services/project.service");
+    const codeSpy = spyOn(projectService, "getFunctionCode")
+      .mockImplementation((requestedRef, requestedSlug) => (
+        edgeFunctionService.read(requestedRef, requestedSlug)
+      ));
+    const app = new Elysia().use(projectFunctionsRoutes);
+    const request = (path: string) => app.handle(new Request(`http://localhost${path}`, {
+      headers: { Authorization: "Bearer dev-master-token" },
+    }));
+
+    try {
+      for (const suffix of ["", "/source", "/body"]) {
+        const response = await request(`/v1/projects/${ref}/functions/traversal${suffix}`);
+        const body = await response.text();
+        expect(response.status).toBe(500);
+        expect(body).not.toContain("cross-slug");
+        expect(body).not.toContain("stale-alias");
+        expect(body).not.toContain('\"status\":\"ACTIVE\"');
+      }
+    } finally {
+      codeSpy.mockRestore();
+    }
+  });
+
   test("propagates unreadable version artifact directories", async () => {
+    const ref = "proj_artifact_io";
+    const slug = "hello";
+    const projectDir = join(functionsRoot, ref);
     const versionDir = join(
-      functionsRoot,
-      "proj_artifact_io",
+      projectDir,
       ".versions",
-      "hello",
+      slug,
       "1",
     );
     await mkdir(versionDir, { recursive: true });
+    await Promise.all([
+      Bun.write(join(projectDir, `${slug}.config.json`), JSON.stringify({ version: "1" })),
+      Bun.write(join(projectDir, `${slug}.js`), "stale alias bundle"),
+      Bun.write(join(projectDir, `${slug}.src.ts`), "stale alias source"),
+    ]);
     await fs.chmod(versionDir, 0o000);
 
     try {
-      await expect(getVersionedArtifactPath("proj_artifact_io", "hello", "1"))
+      await expect(getVersionedArtifactPath(ref, slug, "1"))
         .rejects.toMatchObject({ code: "EACCES" });
+      await expect(edgeFunctionService.read(ref, slug)).rejects.toMatchObject({ code: "EACCES" });
+      await expect(edgeFunctionService.readSource(ref, slug)).rejects.toMatchObject({ code: "EACCES" });
     } finally {
       await fs.chmod(versionDir, 0o700);
     }
@@ -528,7 +616,7 @@ describe("edgeFunctionService bundle metadata", () => {
     expect(await edgeFunctionService.readSource(ref, slug)).toContain("post-legacy-release");
   });
 
-  test("repairs a configured version with missing artifacts from frozen aliases", async () => {
+  test("rejects deploy when a configured positive artifact is missing despite a legacy alias", async () => {
     const ref = "proj_missing_active_artifact";
     const slug = "missing-active-artifact";
     const projectDir = join(functionsRoot, ref);
@@ -546,6 +634,17 @@ describe("edgeFunctionService bundle metadata", () => {
         version: "7",
       })),
     ]);
+    const manifestPath = join(projectDir, `${slug}.config.json`);
+    const manifestBefore = await readFile(manifestPath, "utf8");
+    let runtimeRequests = 0;
+    globalThis.fetch = (async () => {
+      runtimeRequests += 1;
+      return Response.json({ success: true });
+    }) as typeof fetch;
+
+    await expect(edgeFunctionService.read(ref, slug))
+      .rejects.toThrow("Active function artifact is missing");
+    expect(await edgeFunctionService.readSource(ref, slug)).toBeNull();
 
     const deployed = await deployConditionalRelease({
       ref,
@@ -554,16 +653,14 @@ describe("edgeFunctionService bundle metadata", () => {
       config: { verify_jwt: true, background_routes: ["/eight/*"] },
     });
 
-    expect(deployed).toMatchObject({ success: true, version: "8" });
+    expect(deployed).toMatchObject({ success: false });
+    expect(deployed.error).toContain("Active function version artifact is missing");
+    expect(runtimeRequests).toBe(0);
+    expect(await readFile(manifestPath, "utf8")).toBe(manifestBefore);
+    expect(existsSync(join(versionDir, "index.js"))).toBe(false);
+    expect(existsSync(join(projectDir, ".versions", slug, "8"))).toBe(false);
     expect(await Bun.file(legacyBundlePath).text()).toBe(legacyBundle);
-    const restored = await activateConditionalVersion(ref, slug, "7");
-    expect(restored).toMatchObject({
-      version: "7",
-      verify_jwt: false,
-      background_routes: ["/seven/*"],
-    });
-    expect(await edgeFunctionService.read(ref, slug)).toContain("legacy-seven");
-    expect(await edgeFunctionService.readSource(ref, slug)).toContain("source-seven");
+    expect(await Bun.file(legacySourcePath).text()).toContain("source-seven");
   });
 
   test("backfills full metadata for an existing active version before deployment", async () => {
