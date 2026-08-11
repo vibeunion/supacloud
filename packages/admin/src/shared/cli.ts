@@ -17,6 +17,13 @@ interface CliToolResult {
     isError?: boolean;
 }
 
+export function cliToolResultIsError(toolResult: CliToolResult): boolean {
+    if (toolResult.isError === true) return true;
+    return toolResult.content?.some((chunk) =>
+        chunk.type === "text" && chunk.text?.trimStart().startsWith("❌") === true
+    ) ?? false;
+}
+
 function coerceCliValue(value: string): string | number | boolean {
     if (value === "true") return true;
     if (value === "false") return false;
@@ -180,7 +187,7 @@ export async function runCli(
         } else {
             console.log(JSON.stringify(result, null, 2));
         }
-        process.exit(result && typeof result === "object" && "isError" in result && result.isError === true ? 1 : 0);
+        process.exit(cliToolResultIsError(result) ? 1 : 0);
     } catch (error: unknown) {
         const message = formatCliError(error);
         console.error(`❌ Error: ${message}`);
