@@ -313,6 +313,37 @@ describe("database migration helpers", () => {
         }
     });
 
+    test("rejects migration identity conflicts before dry-run or apply", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
+        const postedNames: string[] = [];
+        try {
+            writeFileSync(join(dir, "20260425123000_create_users.sql"), "CREATE TABLE users (id uuid);\n");
+            writeFileSync(join(dir, "20260425124000_create_tasks.sql"), "CREATE TABLE tasks (id uuid);\n");
+            const callback = captureDatabaseTool({
+                get: async () => ({
+                    ok: true,
+                    status: 200,
+                    data: [
+                        { version: "1785220280", name: "20260425123000_create_users" },
+                        { version: "20260425124000", name: "20260425124000_renamed_tasks" },
+                    ],
+                }),
+                post: async (_path: string, body: { name: string }) => {
+                    postedNames.push(body.name);
+                    return { ok: true, status: 200, data: {} };
+                },
+            });
+
+            await expect(callback({ action: "push_migrations", ref: "proj", dir, dry_run: true }))
+                .rejects.toThrow("Migration identity conflicts");
+            await expect(callback({ action: "push_migrations", ref: "proj", dir }))
+                .rejects.toThrow("20260425123000_create_users.sql (20260425123000) conflicts with remote");
+            expect(postedNames).toHaveLength(0);
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
     test("skips only the exact already-applied migration response", async () => {
         const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
         try {
@@ -431,9 +462,9 @@ describe("database migration helpers", () => {
                             statements: ["direct-apply:20260425123000_create_users"],
                         },
                         {
-                            version: "20260425125000",
-                            name: "20260425125000_renamed_reports",
-                            statements: ["direct-apply:20260425125000_renamed_reports"],
+                            version: "20260425125099",
+                            name: "20260425125099_renamed_reports",
+                            statements: ["direct-apply:20260425125099_renamed_reports"],
                         },
                         {
                             version: "20260425126000",
@@ -442,8 +473,8 @@ describe("database migration helpers", () => {
                         },
                         {
                             version: "20260425127001",
-                            name: "20260425127000_create_metrics",
-                            statements: ["direct-apply:20260425127000_create_metrics"],
+                            name: "20260425127001_renamed_metrics",
+                            statements: ["direct-apply:20260425127001_renamed_metrics"],
                         },
                         {
                             version: "20260425128000",

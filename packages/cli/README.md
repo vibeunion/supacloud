@@ -186,6 +186,11 @@ stale revisions with HTTP 409. Delete additionally requires `require_empty=true`
 it never empties a bucket. Mutation receipts bind `project_ref`, `bucket_id`,
 `previous_revision`, and `new_revision` (`null` after delete).
 
+`database push_migrations` rejects a remote row that reuses a local migration
+name with another version, or a local version with another name, before either
+dry-run reporting or apply can continue. This keeps the preview consistent with
+the server conflict that would otherwise occur after deployment starts.
+
 `edge_functions deploy --path` bundles local TypeScript and dependencies with
 Bun and runs a local syntax check before upload. The Management API validates and
 normalizes the final server-side artifact against the multi-tenant Edge Runtime

@@ -220,6 +220,45 @@ function migrationIdentityKey(version: string, name: string): string {
     return `${version}\u0000${name}`;
 }
 
+type MigrationIdentity = { name: string; version: string };
+type MigrationIdentityConflict = {
+    file: string;
+    local: MigrationIdentity;
+    remote: MigrationIdentity;
+};
+
+function migrationIdentities(data: unknown): MigrationIdentity[] {
+    return migrationRows(data).flatMap((row) => (
+        row.version == null || row.name == null
+            ? []
+            : [{ version: String(row.version), name: String(row.name) }]
+    ));
+}
+
+function identityConflicts(local: MigrationIdentity, remote: MigrationIdentity): boolean {
+    const reusesVersionOrName = local.version === remote.version || local.name === remote.name;
+    const exactlyMatches = local.version === remote.version && local.name === remote.name;
+    return reusesVersionOrName && !exactlyMatches;
+}
+
+function migrationIdentityConflicts(data: unknown, migrationFiles: MigrationFile[]): MigrationIdentityConflict[] {
+    const remoteMigrations = migrationIdentities(data);
+    return migrationFiles.flatMap((localMigration) => remoteMigrations
+        .filter((remoteMigration) => identityConflicts(localMigration, remoteMigration))
+        .map((remoteMigration) => ({ file: localMigration.file, local: localMigration, remote: remoteMigration })));
+}
+
+function assertNoMigrationIdentityConflicts(data: unknown, migrationFiles: MigrationFile[]): void {
+    const conflicts = migrationIdentityConflicts(data, migrationFiles);
+    if (!conflicts.length) return;
+    throw new Error([
+        "Migration identity conflicts:",
+        ...conflicts.map(({ file, local, remote }) => (
+            `- ${file} (${local.version}) conflicts with remote ${remote.name} (${remote.version})`
+        )),
+    ].join("\n"));
+}
+
 function nameBoundMigrationMarkerKeys(data: unknown): Set<string> {
     const keys = new Set<string>();
     for (const row of migrationRows(data)) {
@@ -509,6 +548,8 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
                         text = `❌ Failed to load applied migrations (${migrationsResult.status}): ${JSON.stringify(migrationsResult.data)}`;
                         break;
                     }
+
+                    assertNoMigrationIdentityConflicts(migrationsResult.data, migrationFiles);
 
                     if (args.dry_run) {
                         const appliedKeys = appliedMigrationKeys(migrationsResult.data);
