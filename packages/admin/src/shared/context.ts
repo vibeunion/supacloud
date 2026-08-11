@@ -112,7 +112,7 @@ function managementApiUrlCandidate(environment: Record<string, string>): string 
         || "";
 }
 
-function assertAdminFileContext(environment: Record<string, string>, path: string): void {
+function assertAdminCredentialScope(environment: Record<string, string>, source: string): void {
     const hasProjectApplicationCredentials = Boolean(
         environment.SUPABASE_URL?.trim() || environment.SUPABASE_SERVICE_ROLE_KEY?.trim(),
     );
@@ -120,15 +120,29 @@ function assertAdminFileContext(environment: Record<string, string>, path: strin
     const hasManagementApiToken = Boolean(environment.SUPACLOUD_API_TOKEN?.trim());
     if (hasProjectApplicationCredentials && (!hasManagementApiUrl || !hasManagementApiToken)) {
         throw new Error(
-            `Project application credentials in ${path} cannot be used as a SupaCloud Admin profile; `
+            `Project application credentials in ${source} cannot be used as a SupaCloud Admin profile; `
             + "SUPACLOUD_API_URL and SUPACLOUD_API_TOKEN are required",
         );
     }
+}
+
+function assertAdminFileContext(environment: Record<string, string>, path: string): void {
+    assertAdminCredentialScope(environment, path);
+    const hasManagementApiUrl = Boolean(normalizeUrl(managementApiUrlCandidate(environment)));
+    const hasManagementApiToken = Boolean(environment.SUPACLOUD_API_TOKEN?.trim());
     if (hasManagementApiUrl !== hasManagementApiToken) {
         throw new Error(
             `SupaCloud Admin API context in ${path} requires both SUPACLOUD_API_URL and SUPACLOUD_API_TOKEN`,
         );
     }
+}
+
+function processContextSource(
+    environment: Record<string, string>,
+    environmentName: string,
+): ContextSource {
+    assertAdminCredentialScope(environment, "process environment");
+    return { environment, kind: "process_env", path: null, environmentName };
 }
 
 function hostFromUrl(urlCandidate: string): string {
@@ -250,12 +264,12 @@ function ambientContextSource(env: NodeJS.ProcessEnv, cwd: string): ContextSourc
     if (env.SUPACLOUD_ENV) {
         const environmentName = normalizeEnvironmentName(env.SUPACLOUD_ENV);
         if (completeAdminContext(environment)) {
-            return { environment, kind: "process_env", path: null, environmentName };
+            return processContextSource(environment, environmentName);
         }
         return namedEnvironmentSource(cwd, env.SUPACLOUD_ENV);
     }
     if (hasProcessContext(env)) {
-        return { environment, kind: "process_env", path: null, environmentName: "" };
+        return processContextSource(environment, "");
     }
     return legacyEnvironmentSource(cwd);
 }

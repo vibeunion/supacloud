@@ -138,6 +138,40 @@ describe("resolveSupaCloudContext", () => {
         expect(String(failure)).not.toContain(serviceRoleKey);
     });
 
+    test("rejects complete project application credentials from the process environment", () => {
+        const serviceRoleKey = "project-service-role-secret";
+        let failure: unknown;
+        try {
+            resolveSupaCloudContext({
+                SUPACLOUD_ENV: "test",
+                SUPACLOUD_PROJECT_REF: "abcdefghijklmnopqrst",
+                SUPABASE_URL: "https://api.example.test",
+                SUPABASE_SERVICE_ROLE_KEY: serviceRoleKey,
+            }, "/nonexistent");
+        } catch (error: unknown) {
+            failure = error;
+        }
+        expect(failure).toBeInstanceOf(Error);
+        expect(String(failure)).toContain("cannot be used as a SupaCloud Admin profile");
+        expect(String(failure)).toContain("SUPACLOUD_API_URL and SUPACLOUD_API_TOKEN are required");
+        expect(String(failure)).not.toContain(serviceRoleKey);
+    });
+
+    test("uses explicit Management credentials when process application credentials coexist", () => {
+        const context = resolveSupaCloudContext({
+            SUPACLOUD_ENV: "test",
+            SUPACLOUD_API_URL: "https://management.example.test",
+            SUPACLOUD_API_TOKEN: "management-token",
+            SUPACLOUD_PROJECT_REF: "abcdefghijklmnopqrst",
+            SUPABASE_URL: "https://api.example.test",
+            SUPABASE_SERVICE_ROLE_KEY: "project-service-role-secret",
+        }, "/nonexistent");
+
+        expect(context.apiUrl).toBe("https://management.example.test");
+        expect(context.apiToken).toBe("management-token");
+        expect(context.source).toBe("process_env");
+    });
+
     test("requires explicit Management URL and token fields as a complete file pair", () => {
         const workspace = temporaryWorkspace();
         writeEnvironment(workspace, "missing-token.env", {

@@ -622,6 +622,7 @@ describe.skipIf(process.platform !== "linux")("secure project env file", () => {
         const baseOperations = linuxTestOperations();
         const directory = sandbox();
         const target = join(directory, "close-race.env");
+        const displacedTarget = join(directory, "close-race-original.env");
         let replacementWritten = false;
         const operations: ProjectEnvFileOperations = {
             ...baseOperations,
@@ -637,7 +638,7 @@ describe.skipIf(process.platform !== "linux")("secure project env file", () => {
                         await openFile.close();
                         if (replacementWritten) return;
                         replacementWritten = true;
-                        rmSync(target, { force: true });
+                        renameSync(target, displacedTarget);
                         writeFileSync(target, "attacker replacement", { mode: 0o600 });
                     },
                 };
@@ -650,6 +651,7 @@ describe.skipIf(process.platform !== "linux")("secure project env file", () => {
             credentialFileState: "unknown",
         });
         expect(readFileSync(target, "utf8")).toBe("attacker replacement");
+        expect(readFileSync(displacedTarget, "utf8")).toContain(SERVICE_ROLE_KEY);
     });
 });
 
