@@ -202,6 +202,7 @@ EXAMPLES
   ${preferredCommand} ai install_skill --dry_run
   ${preferredCommand} edge_functions deploy --ref abc123 --slug hello --path ./supabase/functions/hello
   ${preferredCommand} edge_functions config --ref abc123 --slug hello --verify_jwt false --background_routes "/queue/*,/render/*"
+  ${preferredCommand} secrets upsert --ref abc123 --from-env API_KEY,WEBHOOK_SECRET
   ${preferredCommand} gateway routes --ref abc123
   ${preferredCommand} gateway upsert_route --ref abc123 --route_id webhook --hosts "api.example.com" --paths "/webhook/*" --upstream 10.0.0.5:8080
   ${preferredCommand} gateway config --ref abc123 --rate_limit_tier pro

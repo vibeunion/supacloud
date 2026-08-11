@@ -195,6 +195,128 @@ describe("supacloud-cli process contract", () => {
         expect(response.stdout).toBe("");
     });
 
+    test("loads secret values from its environment while argv and output contain names only", async () => {
+        const secretName = "FA_CLI_FROM_ENV_PRIMARY";
+        const secondSecretName = "FA_CLI_FROM_ENV_SECONDARY";
+        const primarySecret = "process-primary-secret-sentinel";
+        const secondarySecret = "process-secondary-secret-sentinel";
+        let requestBody: unknown;
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            async fetch(request) {
+                requestBody = await request.json();
+                return Response.json({});
+            },
+        });
+        servers.push(server);
+        const commandArguments = [
+            "secrets", "upsert", "--ref", "abc123",
+            "--from-env", `${secretName},${secondSecretName}`,
+        ];
+
+        const response = await runProjectCli(commandArguments, {
+            SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+            SUPACLOUD_API_TOKEN: "test-token",
+            SUPACLOUD_PROJECT_REF: "abc123",
+            [secretName]: primarySecret,
+            [secondSecretName]: secondarySecret,
+        });
+
+        expect(response.exitCode).toBe(0);
+        expect(commandArguments.join("\0")).not.toContain(primarySecret);
+        expect(commandArguments.join("\0")).not.toContain(secondarySecret);
+        expect(requestBody).toEqual([
+            { name: secretName, value: primarySecret },
+            { name: secondSecretName, value: secondarySecret },
+        ]);
+        expect(response.stdout).toContain("Updated 2 secrets");
+        expect(response.stdout + response.stderr).not.toContain(primarySecret);
+        expect(response.stdout + response.stderr).not.toContain(secondarySecret);
+    });
+
+    test.each([
+        ["missing value", "FA_CLI_FROM_ENV_MISSING", {}],
+        ["empty value", "FA_CLI_FROM_ENV_EMPTY", { FA_CLI_FROM_ENV_EMPTY: "" }],
+        ["invalid name", "FA-CLI-INVALID", {}],
+        ["duplicate name", "FA_CLI_DUPLICATE,FA_CLI_DUPLICATE", { FA_CLI_DUPLICATE: "never-printed-secret" }],
+    ])("rejects from-env %s before HTTP", async (_label, names, secretEnvironment) => {
+        let requestCount = 0;
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch() {
+                requestCount += 1;
+                return Response.json({});
+            },
+        });
+        servers.push(server);
+
+        const response = await runProjectCli(
+            ["secrets", "upsert", "--ref", "abc123", "--from-env", names],
+            {
+                SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+                SUPACLOUD_API_TOKEN: "test-token",
+                SUPACLOUD_PROJECT_REF: "abc123",
+                ...secretEnvironment,
+            },
+        );
+
+        expect(response.exitCode).toBe(1);
+        expect(requestCount).toBe(0);
+        expect(response.stdout + response.stderr).not.toContain("never-printed-secret");
+    });
+
+    test("rejects mixed secret inputs before HTTP without echoing the inline value", async () => {
+        let requestCount = 0;
+        const inlineSecret = "mixed-inline-secret-sentinel";
+        const environmentSecret = "mixed-environment-secret-sentinel";
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch() {
+                requestCount += 1;
+                return Response.json({});
+            },
+        });
+        servers.push(server);
+
+        const response = await runProjectCli(
+            [
+                "secrets", "upsert", "--ref", "abc123",
+                "--from-env", "FA_CLI_MIXED_ENV",
+                "--secrets", `INLINE_KEY=${inlineSecret}`,
+            ],
+            {
+                SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+                SUPACLOUD_API_TOKEN: "test-token",
+                SUPACLOUD_PROJECT_REF: "abc123",
+                FA_CLI_MIXED_ENV: environmentSecret,
+            },
+        );
+
+        expect(response.exitCode).toBe(1);
+        expect(requestCount).toBe(0);
+        expect(response.stderr).toContain("cannot be combined");
+        expect(response.stdout + response.stderr).not.toContain(inlineSecret);
+        expect(response.stdout + response.stderr).not.toContain(environmentSecret);
+    });
+
+    test("documents the exact kebab-case from-env flag in action help", async () => {
+        const response = await runProjectCli(
+            ["secrets", "upsert", "--help"],
+            {
+                SUPACLOUD_API_URL: "http://127.0.0.1:1",
+                SUPACLOUD_API_TOKEN: "test-token",
+                SUPACLOUD_PROJECT_REF: "abc123",
+            },
+        );
+
+        expect(response.exitCode).toBe(0);
+        expect(response.stderr).toContain("--from-env");
+        expect(response.stderr).not.toContain("--from_env");
+    });
+
     test.each([
         ["separate flag value", ["--log_type", "database"]],
         ["equals flag value", ["--log_type=database"]],
