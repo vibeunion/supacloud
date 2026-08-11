@@ -50,12 +50,34 @@ create table if not exists auth.refresh_tokens (
 create table if not exists auth.one_time_tokens (
   id uuid primary key default gen_random_uuid(),
   user_id uuid,
-  email text not null,
+  email text,
+  phone text,
   token_type text not null,
   token text not null,
   attempts int not null default 0,
   created_at timestamptz default now(),
-  expires_at timestamptz not null
+  expires_at timestamptz not null,
+  constraint one_time_tokens_contact_check check (
+    (email is not null and phone is null) or (email is null and phone is not null)
+  )
+);
+
+-- Minimal engines can persist a database created by an older Lite version.
+-- Standard ALTER statements keep that path compatible without requiring plpgsql.
+alter table auth.one_time_tokens add column if not exists phone text;
+alter table auth.one_time_tokens alter column email drop not null;
+alter table auth.one_time_tokens drop constraint if exists one_time_tokens_contact_check;
+alter table auth.one_time_tokens add constraint one_time_tokens_contact_check check (
+  (email is not null and phone is null) or (email is null and phone is not null)
+);
+
+create unique index if not exists one_time_tokens_phone_type_idx
+  on auth.one_time_tokens(phone, token_type) where phone is not null;
+
+create table if not exists auth.phone_otp_cooldowns (
+  phone_fingerprint text primary key,
+  issuance_id uuid not null,
+  last_sent_at timestamptz not null default now()
 );
 
 create table if not exists auth.identities (
@@ -120,6 +142,7 @@ create table if not exists storage.buckets (
   id text primary key,
   name text not null unique,
   owner uuid,
+  owner_id text,
   public boolean default false,
   file_size_limit bigint,
   allowed_mime_types text[],
@@ -127,11 +150,17 @@ create table if not exists storage.buckets (
   updated_at timestamptz default now()
 );
 
+alter table storage.buckets add column if not exists owner_id text;
+update storage.buckets
+set owner_id = owner::text
+where owner_id is null and owner is not null;
+
 create table if not exists storage.objects (
   id uuid primary key default gen_random_uuid(),
   bucket_id text not null,
   name text not null,
   owner uuid,
+  owner_id text,
   version text,
   metadata jsonb default '{}'::jsonb,
   created_at timestamptz default now(),
@@ -139,6 +168,11 @@ create table if not exists storage.objects (
   last_accessed_at timestamptz default now(),
   unique (bucket_id, name)
 );
+
+alter table storage.objects add column if not exists owner_id text;
+update storage.objects
+set owner_id = owner::text
+where owner_id is null and owner is not null;
 
 create table if not exists supabase_migrations.schema_migrations (
   version text primary key,
@@ -293,12 +327,43 @@ create index if not exists refresh_tokens_user_id_idx on auth.refresh_tokens(use
 create table if not exists auth.one_time_tokens (
   id uuid primary key default gen_random_uuid(),
   user_id uuid references auth.users(id) on delete cascade,
-  email text not null,
-  token_type text not null, -- otp | magiclink | recovery
+  email text,
+  phone text,
+  token_type text not null, -- otp | magiclink | recovery | sms
   token text not null,
   attempts int not null default 0,
   created_at timestamptz default now(),
-  expires_at timestamptz not null
+  expires_at timestamptz not null,
+  constraint one_time_tokens_contact_check check (
+    (email is not null and phone is null) or (email is null and phone is not null)
+  )
+);
+
+-- Upgrade databases created by Lite <=0.5.9 without touching existing email tokens.
+alter table auth.one_time_tokens add column if not exists phone text;
+alter table auth.one_time_tokens alter column email drop not null;
+do $phone_otp_contact_constraint$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'auth.one_time_tokens'::regclass
+      and conname = 'one_time_tokens_contact_check'
+  ) then
+    alter table auth.one_time_tokens add constraint one_time_tokens_contact_check check (
+      (email is not null and phone is null) or (email is null and phone is not null)
+    );
+  end if;
+end $phone_otp_contact_constraint$;
+
+create unique index if not exists one_time_tokens_phone_type_idx
+  on auth.one_time_tokens(phone, token_type) where phone is not null;
+
+-- Only a keyed phone fingerprint is persisted for cooldown enforcement; the
+-- normalized phone number never enters this table.
+create table if not exists auth.phone_otp_cooldowns (
+  phone_fingerprint text primary key,
+  issuance_id uuid not null,
+  last_sent_at timestamptz not null default now()
 );
 
 create table if not exists auth.identities (
@@ -398,6 +463,7 @@ create table if not exists storage.buckets (
   id text primary key,
   name text not null unique,
   owner uuid,
+  owner_id text,
   public boolean default false,
   file_size_limit bigint,
   allowed_mime_types text[],
@@ -405,11 +471,17 @@ create table if not exists storage.buckets (
   updated_at timestamptz default now()
 );
 
+alter table storage.buckets add column if not exists owner_id text;
+update storage.buckets
+set owner_id = owner::text
+where owner_id is null and owner is not null;
+
 create table if not exists storage.objects (
   id uuid primary key default gen_random_uuid(),
   bucket_id text not null references storage.buckets(id),
   name text not null,
   owner uuid,
+  owner_id text,
   version text,
   metadata jsonb default '{}'::jsonb,
   created_at timestamptz default now(),
@@ -417,6 +489,14 @@ create table if not exists storage.objects (
   last_accessed_at timestamptz default now(),
   unique (bucket_id, name)
 );
+
+-- storage-api keeps the legacy UUID owner and the current text owner_id in
+-- parallel. Re-running bootstrap upgrades existing Lite databases and retains
+-- object ownership for rows created before owner_id support was added.
+alter table storage.objects add column if not exists owner_id text;
+update storage.objects
+set owner_id = owner::text
+where owner_id is null and owner is not null;
 
 create index if not exists objects_bucket_name_idx on storage.objects(bucket_id, name);
 
