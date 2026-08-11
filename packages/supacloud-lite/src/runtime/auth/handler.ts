@@ -4,7 +4,7 @@
  */
 import type { Database, Querier } from '../db/database.js'
 import { randomToken, signJwt, verifyJwt, type JwtClaims } from '../jwt.js'
-import type { Mailer, RequestContext, SmsSender } from '../types.js'
+import type { Mailer, RequestContext, SmsMessage, SmsSender } from '../types.js'
 import { SUPACLOUD_LITE_VERSION } from '../../version.js'
 import { OAuthService, type OAuthProviderConfig } from './oauth.js'
 import { hashPassword, verifyPassword } from './password.js'
@@ -77,6 +77,12 @@ interface UserRow {
   phone: string | null
   phone_confirmed_at: Date | string | null
   is_anonymous: boolean | null
+  banned_until: Date | string | null
+  deleted_at: Date | string | null
+}
+
+interface PhoneUserEligibilityRow extends UserRow {
+  auth_eligible: boolean
 }
 
 interface RefreshTokenRow {
@@ -100,7 +106,7 @@ type PhoneOtpPreparation =
   | { state: 'cooldown' }
   | { state: 'unknown' }
   | { state: 'signup_disabled' }
-  | { state: 'issued'; id: string; fingerprint: string; tokenDigest: string }
+  | { state: 'issued'; id: string; fingerprint: string; tokenDigest: string; releaseCooldownOnFailure: boolean }
 
 function authError(status: number, errorCode: string, msg: string): Response {
   return json(status, { code: status, error_code: errorCode, msg })
@@ -152,6 +158,20 @@ async function keyedDigest(secret: string, domain: string, value: string): Promi
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
+async function sendSmsUntilAbort(sender: SmsSender, message: SmsMessage, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) throw new Error('Phone delivery aborted')
+  let rejectForAbort!: () => void
+  const aborted = new Promise<never>((_resolve, reject) => {
+    rejectForAbort = () => reject(new Error('Phone delivery aborted'))
+    signal.addEventListener('abort', rejectForAbort, { once: true })
+  })
+  try {
+    await Promise.race([sender.send(message, { signal }), aborted])
+  } finally {
+    signal.removeEventListener('abort', rejectForAbort)
+  }
+}
+
 function json(status: number, body: unknown): Response {
   return new Response(status === 204 ? null : JSON.stringify(body), {
     status,
@@ -172,11 +192,15 @@ function timestampMs(value: Date | string | null): number | null {
 
 /** Routes and services the GoTrue-compatible `/auth/v1/*` endpoints. */
 export class AuthHandler {
+  private static readonly PHONE_DELIVERY_TIMEOUT_MS = 15_000
+  private static readonly PHONE_DELIVERY_DRAIN_MS = 250
   private oauth: OAuthService
   /** Shared, runtime-mutable settings - read on every request, never copied. */
   private settings: AuthSettings
   private rateLimiter: RateLimiter | null
   private phoneDeliveries = new Set<Promise<void>>()
+  private phoneDeliveryControllers = new Set<AbortController>()
+  private stopping = false
 
   constructor(
     private db: Database,
@@ -217,7 +241,26 @@ export class AuthHandler {
   /** Stop background timers (rate-limiter sweep). Called on backend close. */
   async stop(): Promise<void> {
     this.rateLimiter?.stop()
+    this.stopping = true
+    if (await this.phoneDeliveriesSettledBeforeDeadline()) return
+    for (const controller of this.phoneDeliveryControllers) controller.abort()
     await Promise.all(this.phoneDeliveries)
+  }
+
+  private async phoneDeliveriesSettledBeforeDeadline(): Promise<boolean> {
+    if (this.phoneDeliveries.size === 0) return true
+    let deadlineTimer!: ReturnType<typeof setTimeout>
+    const deadline = new Promise<false>((resolve) => {
+      deadlineTimer = setTimeout(() => resolve(false), AuthHandler.PHONE_DELIVERY_DRAIN_MS)
+    })
+    try {
+      return await Promise.race([
+        Promise.all(this.phoneDeliveries).then(() => true as const),
+        deadline,
+      ])
+    } finally {
+      clearTimeout(deadlineTimer)
+    }
   }
 
   /** Dispatch one `/auth/v1/*` request. Any thrown error becomes a 500 `unexpected_failure`. */
@@ -586,10 +629,10 @@ export class AuthHandler {
 
     const body = this.settings.smsTemplate.replace(/\{\{\s*\.Code\s*\}\}/g, code)
     const delivery = createUser
-      ? this.deliverPhoneOtp(prepared, sender, phone, body, true)
+      ? this.deliverPhoneOtp(prepared, sender, phone, body)
       : this.deferPhoneOtpDelivery(prepared, sender, phone, body)
+    this.trackPhoneDelivery(delivery)
     if (!createUser) {
-      this.trackPhoneDelivery(delivery)
       return json(200, {})
     }
     return await delivery
@@ -623,6 +666,7 @@ export class AuthHandler {
         return {
           state: 'issued', id: request.issuanceId,
           fingerprint: request.fingerprint, tokenDigest: request.tokenDigest,
+          releaseCooldownOnFailure: request.createUser,
         }
       })
     } catch (error) {
@@ -635,8 +679,8 @@ export class AuthHandler {
     query: Querier,
     request: PhoneOtpIssueRequest
   ): Promise<UserRow | 'unknown' | 'signup_disabled'> {
-    const existing = await query<UserRow>(`select * from auth.users where phone = $1`, [request.phone])
-    if (existing.rows[0]) return existing.rows[0]
+    const existing = await this.phoneUserForUpdate(query, request.phone)
+    if (existing) return existing.auth_eligible ? existing : 'unknown'
     if (!request.createUser) return 'unknown'
     if (this.settings.disableSignup || !this.settings.smsSignupEnabled) return 'signup_disabled'
     const inserted = await query<UserRow>(
@@ -650,9 +694,18 @@ export class AuthHandler {
       ]
     )
     if (inserted.rows[0]) return inserted.rows[0]
-    const concurrent = await query<UserRow>(`select * from auth.users where phone = $1`, [request.phone])
-    if (!concurrent.rows[0]) throw new Error('phone user could not be resolved')
-    return concurrent.rows[0]
+    const concurrent = await this.phoneUserForUpdate(query, request.phone)
+    if (!concurrent) throw new Error('phone user could not be resolved')
+    return concurrent.auth_eligible ? concurrent : 'unknown'
+  }
+
+  private async phoneUserForUpdate(query: Querier, phone: string): Promise<PhoneUserEligibilityRow | undefined> {
+    const users = await query<PhoneUserEligibilityRow>(
+      `select *, deleted_at is null and (banned_until is null or banned_until <= now()) as auth_eligible
+       from auth.users where phone = $1 for update`,
+      [phone]
+    )
+    return users.rows[0]
   }
 
   private createPhoneIdentity(query: Querier, user: UserRow): Promise<unknown> {
@@ -668,28 +721,44 @@ export class AuthHandler {
     issuance: Extract<PhoneOtpPreparation, { state: 'issued' }>,
     sender: SmsSender,
     phone: string,
-    body: string,
-    releaseCooldownOnFailure: boolean
+    body: string
   ): Promise<boolean> {
     try {
-      await sender.send({ to: phone, body })
+      await this.sendPhoneOtp(sender, phone, body)
       return true
     } catch {
       this.reportPhoneFailure('deliver', 'provider_error')
-      try {
-        await this.db.transaction(async (query) => {
-          await query(`delete from auth.one_time_tokens where id = $1 and token = $2`, [issuance.id, issuance.tokenDigest])
-          if (releaseCooldownOnFailure) {
-            await query(
-              `delete from auth.phone_otp_cooldowns where phone_fingerprint = $1 and issuance_id = $2`,
-              [issuance.fingerprint, issuance.id]
-            )
-          }
-        })
-      } catch (cleanupError) {
-        this.reportPhoneFailure('cleanup', databaseDiagnosticCode(cleanupError))
-      }
+      await this.cleanupFailedPhoneOtp(issuance)
       return false
+    }
+  }
+
+  private async sendPhoneOtp(sender: SmsSender, phone: string, body: string): Promise<void> {
+    const controller = new AbortController()
+    this.phoneDeliveryControllers.add(controller)
+    const deliveryTimer = setTimeout(() => controller.abort(), AuthHandler.PHONE_DELIVERY_TIMEOUT_MS)
+    if (this.stopping) controller.abort()
+    try {
+      await sendSmsUntilAbort(sender, { to: phone, body }, controller.signal)
+    } finally {
+      clearTimeout(deliveryTimer)
+      this.phoneDeliveryControllers.delete(controller)
+    }
+  }
+
+  private async cleanupFailedPhoneOtp(issuance: Extract<PhoneOtpPreparation, { state: 'issued' }>): Promise<void> {
+    try {
+      await this.db.transaction(async (query) => {
+        await query(`delete from auth.one_time_tokens where id = $1 and token = $2`, [issuance.id, issuance.tokenDigest])
+        if (issuance.releaseCooldownOnFailure) {
+          await query(
+            `delete from auth.phone_otp_cooldowns where phone_fingerprint = $1 and issuance_id = $2`,
+            [issuance.fingerprint, issuance.id]
+          )
+        }
+      })
+    } catch (cleanupError) {
+      this.reportPhoneFailure('cleanup', databaseDiagnosticCode(cleanupError))
     }
   }
 
@@ -700,7 +769,7 @@ export class AuthHandler {
     body: string
   ): Promise<boolean> {
     await new Promise<void>((resolve) => setTimeout(resolve, 0))
-    return this.deliverPhoneOtp(issuance, sender, phone, body, false)
+    return this.deliverPhoneOtp(issuance, sender, phone, body)
   }
 
   private trackPhoneDelivery(delivery: Promise<boolean>): void {
@@ -828,11 +897,13 @@ export class AuthHandler {
       const users = await query<UserRow>(
         `update auth.users
          set phone_confirmed_at = coalesce(phone_confirmed_at, now()), last_sign_in_at = now(), updated_at = now()
-         where id = $1 returning *`,
+         where id = $1 and deleted_at is null
+           and (banned_until is null or banned_until <= now())
+         returning *`,
         [userId]
       )
       const user = users.rows[0]
-      if (!user) throw new Error('phone OTP user no longer exists')
+      if (!user) return null
       await query(
         `insert into auth.identities (user_id, provider, provider_id, identity_data, last_sign_in_at)
          values ($1, 'phone', $2, $3::jsonb, now())

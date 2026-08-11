@@ -146,7 +146,8 @@ export interface SmsMessage {
 
 /** Pluggable SMS transport. There is no production console fallback. */
 export interface SmsSender {
-  send(msg: SmsMessage): Promise<{ messageId?: string } | void>
+  /** The runtime supplies an abort signal for delivery deadlines and graceful shutdown. */
+  send(msg: SmsMessage, options?: { signal: AbortSignal }): Promise<{ messageId?: string } | void>
 }
 
 /**

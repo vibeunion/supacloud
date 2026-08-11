@@ -127,6 +127,36 @@ describe('phone OTP compatibility', () => {
     expect(second.data.user?.user_metadata).toEqual({ display_name: 'first' })
   })
 
+  test.each([
+    ['banned', '+8613700237000', `banned_until = now() + interval '1 hour'`],
+    ['soft-deleted', '+8613700337000', 'deleted_at = now()'],
+  ] as const)('does not issue or redeem challenges for a %s phone user', async (_state, phone, ineligibleUpdate) => {
+    const messages: string[] = []
+    const backend = await createLiteBackend({
+      jwtSecret: 'x'.repeat(64), vaultKey: 'y'.repeat(64), authSettings: { smsOtpCooldownSeconds: 0 },
+      smsSender: { async send(message) { messages.push(message.body) } }, log: () => {},
+    })
+    backends.push(backend)
+    const client = clientFor(backend)
+
+    expect((await client.auth.signInWithOtp({ phone })).error).toBeNull()
+    const code = messages[0]?.match(/\b\d{6,10}\b/)?.[0]
+    expect(code).toBeString()
+    await backend.db.query(`update auth.users set ${ineligibleUpdate} where phone = $1`, [phone])
+
+    const verified = await client.auth.verifyOtp({ phone, token: code!, type: 'sms' })
+    expect(verified.error?.code).toBe('otp_expired')
+    expect(verified.data.session).toBeNull()
+    expect((await backend.db.query(
+      `select 1 from auth.refresh_tokens rt join auth.users u on u.id = rt.user_id where u.phone = $1`,
+      [phone]
+    )).rows).toHaveLength(0)
+
+    expect((await client.auth.signInWithOtp({ phone })).error).toBeNull()
+    expect(messages).toHaveLength(1)
+    expect((await backend.db.query(`select 1 from auth.one_time_tokens where phone = $1`, [phone])).rows).toHaveLength(0)
+  })
+
   test('keeps unknown create_user=false requests enumeration-safe without creating or sending', async () => {
     const backend = await createLiteBackend({
       jwtSecret: 'x'.repeat(64), vaultKey: 'y'.repeat(64), authSettings: { smsOtpCooldownSeconds: 0 }, log: () => {},
@@ -194,6 +224,103 @@ describe('phone OTP compatibility', () => {
     expect(providerStarted).toBeFalse()
     for (let attempt = 0; attempt < 100 && !providerStarted; attempt += 1) await Bun.sleep(1)
     expect(providerStarted).toBeTrue()
+  })
+
+  test('drains a settling masked delivery before closing', async () => {
+    let markProviderStarted!: () => void
+    const providerStarted = new Promise<void>((resolve) => { markProviderStarted = resolve })
+    let releaseProvider!: () => void
+    const providerRelease = new Promise<void>((resolve) => { releaseProvider = resolve })
+    let deliveryFinished = false
+    const backend = await createLiteBackend({
+      jwtSecret: 'x'.repeat(64), vaultKey: 'y'.repeat(64), authSettings: { smsOtpCooldownSeconds: 0 },
+      smsSender: {
+        async send() {
+          markProviderStarted()
+          await providerRelease
+          deliveryFinished = true
+        },
+      },
+      log: () => {},
+    })
+    backends.push(backend)
+    await backend.db.query(
+      `insert into auth.users (aud, role, phone, raw_app_meta_data, raw_user_meta_data)
+       values ('authenticated', 'authenticated', '+8613600736000', '{"provider":"phone","providers":["phone"]}', '{}')`
+    )
+
+    expect((await clientFor(backend).auth.signInWithOtp({
+      phone: '+8613600736000', options: { shouldCreateUser: false },
+    })).error).toBeNull()
+    await providerStarted
+    let closeFinished = false
+    const closing = backend.close().then(() => { closeFinished = true })
+    await Bun.sleep(10)
+    expect(closeFinished).toBeFalse()
+    releaseProvider()
+    await closing
+    expect(deliveryFinished).toBeTrue()
+  })
+
+  test('bounds close when a masked provider never settles', async () => {
+    let markProviderStarted!: () => void
+    const providerStarted = new Promise<void>((resolve) => { markProviderStarted = resolve })
+    let deliverySignal: AbortSignal | undefined
+    const backend = await createLiteBackend({
+      jwtSecret: 'x'.repeat(64), vaultKey: 'y'.repeat(64), authSettings: { smsOtpCooldownSeconds: 0 },
+      smsSender: {
+        async send(_message, options) {
+          deliverySignal = options?.signal
+          markProviderStarted()
+          await new Promise<never>(() => {})
+        },
+      },
+      log: () => {},
+    })
+    backends.push(backend)
+    await backend.db.query(
+      `insert into auth.users (aud, role, phone, raw_app_meta_data, raw_user_meta_data)
+       values ('authenticated', 'authenticated', '+8613600836000', '{"provider":"phone","providers":["phone"]}', '{}')`
+    )
+
+    expect((await clientFor(backend).auth.signInWithOtp({
+      phone: '+8613600836000', options: { shouldCreateUser: false },
+    })).error).toBeNull()
+    await providerStarted
+    const closedWithinDeadline = await Promise.race([
+      backend.close().then(() => true),
+      Bun.sleep(1_000).then(() => false),
+    ])
+    expect(closedWithinDeadline).toBeTrue()
+    expect(deliverySignal?.aborted).toBeTrue()
+  })
+
+  test('aborts an awaited provider delivery while closing', async () => {
+    let markProviderStarted!: () => void
+    const providerStarted = new Promise<void>((resolve) => { markProviderStarted = resolve })
+    let deliverySignal: AbortSignal | undefined
+    const backend = await createLiteBackend({
+      jwtSecret: 'x'.repeat(64), vaultKey: 'y'.repeat(64), authSettings: { smsOtpCooldownSeconds: 0 },
+      smsSender: {
+        async send(_message, options) {
+          deliverySignal = options?.signal
+          markProviderStarted()
+          await new Promise<never>(() => {})
+        },
+      },
+      log: () => {},
+    })
+    backends.push(backend)
+
+    const sending = clientFor(backend).auth.signInWithOtp({ phone: '+8613600936000' })
+    await providerStarted
+    const closedWithinDeadline = await Promise.race([
+      backend.close().then(() => true),
+      Bun.sleep(1_000).then(() => false),
+    ])
+    expect(closedWithinDeadline).toBeTrue()
+    expect(deliverySignal?.aborted).toBeTrue()
+    expect((await sending).error?.message).toBe('Unable to send the verification code')
   })
 
   test('keeps masked provider failures indistinguishable on cooldown retry', async () => {
