@@ -1,5 +1,93 @@
 # Changelog
 
+## [0.9.0](https://github.com/zuohuadong/supacloud/compare/supacloud-v0.8.18...supacloud-v0.9.0) (2026-08-11)
+
+
+### Features
+
+* complete safe database promotion workflow ([6763d10](https://github.com/zuohuadong/supacloud/commit/6763d10eb4e6b715259a1e445c5921dc276d6dfd))
+* **console:** reorganize navigation hierarchy ([303326c](https://github.com/zuohuadong/supacloud/commit/303326cfa8ebb5df860c77f21fbad15bc799e0bb))
+
+
+### Bug Fixes
+
+* **ci:** enforce main required checks ([#749](https://github.com/zuohuadong/supacloud/issues/749)) ([bc63e3c](https://github.com/zuohuadong/supacloud/commit/bc63e3c155ccf02ecc7e5bc6c8053c2023977b74))
+* **ci:** stabilize SupaCloud Lite checks after release ([4da29e7](https://github.com/zuohuadong/supacloud/commit/4da29e733e18c8449f4cebb2cf628368da91f0f1))
+* **cli:** recognize direct-apply migration markers ([#530](https://github.com/zuohuadong/supacloud/issues/530)) ([33f433d](https://github.com/zuohuadong/supacloud/commit/33f433d5e4e1d132dd50a8b1d312f0485119bee0))
+* **cli:** recognize historical migration hash markers ([a9d55ff](https://github.com/zuohuadong/supacloud/commit/a9d55ff8cce32d475ba4e270ae1c6acaf1929737))
+* **cli:** synchronize lockfile with 0.14.3 ([59b4bfb](https://github.com/zuohuadong/supacloud/commit/59b4bfb0d433242cf050605e6ea6bfdacf1f459e))
+* **cli:** synchronize unified package lockfile ([d3ea1be](https://github.com/zuohuadong/supacloud/commit/d3ea1be192ffff61c346f6050e3733d3d0d60b3b))
+* **management-api:** order migration-owned sequences after tables ([d424bd7](https://github.com/zuohuadong/supacloud/commit/d424bd7ec90c874cb8f5f21e22af0234b52da255))
+* **migrations:** accept exact legacy ledger contents ([#532](https://github.com/zuohuadong/supacloud/issues/532)) ([0a86d3e](https://github.com/zuohuadong/supacloud/commit/0a86d3e00de8c9d8ca351650b97956ca4ab53ae5))
+* **supacloud:** sync published CLI dependencies ([a9779ec](https://github.com/zuohuadong/supacloud/commit/a9779ecacc6b7ba8e60740623dd2f553a3b18905))
+* **supacloud:** sync published CLI dependencies ([#753](https://github.com/zuohuadong/supacloud/issues/753)) ([e0c759f](https://github.com/zuohuadong/supacloud/commit/e0c759f945f328372c936b7214180c18dd0d259e))
+* **supacloud:** sync published CLI dependencies ([#758](https://github.com/zuohuadong/supacloud/issues/758)) ([501e754](https://github.com/zuohuadong/supacloud/commit/501e7541c797d1d6d9109971068d2045f4d40a97))
+* **supacloud:** sync published CLI dependencies ([#764](https://github.com/zuohuadong/supacloud/issues/764)) ([696e00d](https://github.com/zuohuadong/supacloud/commit/696e00daad6fccb123067daf029fc56436045f43))
+* **supacloud:** sync published CLI dependencies ([#798](https://github.com/zuohuadong/supacloud/issues/798)) ([68ec5f5](https://github.com/zuohuadong/supacloud/commit/68ec5f57c8f4e042aa053f2d24bf4cb954026c78))
+* **supacloud:** sync published CLI dependencies ([#808](https://github.com/zuohuadong/supacloud/issues/808)) ([1d06cff](https://github.com/zuohuadong/supacloud/commit/1d06cff46270c89dfb42c3d705c8849080ae506d))
+* **supacloud:** sync published CLI dependencies ([#811](https://github.com/zuohuadong/supacloud/issues/811)) ([94654f7](https://github.com/zuohuadong/supacloud/commit/94654f743a1aafdb2da600623b1ecdbee69fb4ad))
+* **supacloud:** sync published CLI dependencies ([#821](https://github.com/zuohuadong/supacloud/issues/821)) ([332bf1f](https://github.com/zuohuadong/supacloud/commit/332bf1f7b3c28edddcd177e06f8be3e2aaa4044d))
+* **supacloud:** sync published CLI dependencies ([#830](https://github.com/zuohuadong/supacloud/issues/830)) ([29309d4](https://github.com/zuohuadong/supacloud/commit/29309d4cced5b5f997e85f2b03a523cf91b760f4))
+
+
+### Miscellaneous Chores
+
+* **deps:** update supacloud lockfile for @supacloud/cli 0.14.1 ([#647](https://github.com/zuohuadong/supacloud/issues/647)) ([d69e934](https://github.com/zuohuadong/supacloud/commit/d69e934419ab462250589cbbcbd2ef336aaf362e))
+* **packages:** sync supacloud lockfile ([#482](https://github.com/zuohuadong/supacloud/issues/482)) ([7553428](https://github.com/zuohuadong/supacloud/commit/7553428301f2502dcc0c317fa5578b6eea1291d5))
+* release main ([48db1e2](https://github.com/zuohuadong/supacloud/commit/48db1e2df3cffe2fa70b730dff957bc2539d6617))
+* release main ([da1a54d](https://github.com/zuohuadong/supacloud/commit/da1a54d68151e6cdefb699c28fe2551f182e86ff))
+* release main ([0ab3ca1](https://github.com/zuohuadong/supacloud/commit/0ab3ca11dba0316dd31ddc123ced497ca460795f))
+* release main ([dee5718](https://github.com/zuohuadong/supacloud/commit/dee57180508689cb9c7a998e1d71051beb00305f))
+* release main ([e156d68](https://github.com/zuohuadong/supacloud/commit/e156d68482b9fbbf500aa136b6823b61690e0a48))
+* release main ([fac53ca](https://github.com/zuohuadong/supacloud/commit/fac53ca02906676502cded4620b47a05465a7c5d))
+* release main ([00bf23d](https://github.com/zuohuadong/supacloud/commit/00bf23d2c371b4ba4ddb31f20bb289c769848e06))
+* release main ([f4cdc29](https://github.com/zuohuadong/supacloud/commit/f4cdc29c50608ea17796686d605b5965baf9d4af))
+* release main ([d156b35](https://github.com/zuohuadong/supacloud/commit/d156b35789a5676ecc041fe9e693e70fa478cf16))
+* release main ([4030977](https://github.com/zuohuadong/supacloud/commit/4030977d61182b07e36755e367575859c475b862))
+* release main ([7509029](https://github.com/zuohuadong/supacloud/commit/7509029e27b3656885c1dccf55ed2f990f4b8e95))
+* release main ([94ad9bf](https://github.com/zuohuadong/supacloud/commit/94ad9bf72b4442f37215b920a97c77dcce89dd07))
+* release main ([f9f07c8](https://github.com/zuohuadong/supacloud/commit/f9f07c8d1a47a00e83f9f5ae397c7237ada26911))
+* release main ([8c91221](https://github.com/zuohuadong/supacloud/commit/8c912216ace830aa7e2821c29e4147e6f3709ba5))
+* release main ([d2c300a](https://github.com/zuohuadong/supacloud/commit/d2c300adf233e06df334b4cc1f8a1168518fc29b))
+* release main ([8652b7f](https://github.com/zuohuadong/supacloud/commit/8652b7ff2ab32167eabf04e96d2ea1e0973be2c9))
+* release main ([975702e](https://github.com/zuohuadong/supacloud/commit/975702e1a8e2c99fc242692a0027645912355c96))
+* release main ([2b9f9c6](https://github.com/zuohuadong/supacloud/commit/2b9f9c6c82f1ff31b838f56a51d78f8924d4b627))
+* release main ([84f6bc4](https://github.com/zuohuadong/supacloud/commit/84f6bc41795c4602b86a2552ca47c74a0d9337b9))
+* release main ([256ce28](https://github.com/zuohuadong/supacloud/commit/256ce289a17fc2187b4bca7080d619d6e7512eda))
+* release main ([5833a36](https://github.com/zuohuadong/supacloud/commit/5833a36b277b5fa5e26482d39c14bd7bb5d2d4f6))
+* release main ([1c87f14](https://github.com/zuohuadong/supacloud/commit/1c87f14afda9f662cbbe9cee82eb515bd1462b81))
+* release main ([0a955fa](https://github.com/zuohuadong/supacloud/commit/0a955fa32f4e1e4b122de18ff1cbb47673dd364e))
+* release main ([fb9b867](https://github.com/zuohuadong/supacloud/commit/fb9b867bafe6c3c0330c43b863dc508709bee667))
+* release main ([700ecd9](https://github.com/zuohuadong/supacloud/commit/700ecd971cb8c1a0bc4639486dfd73523cbf47fe))
+* release main ([c098d87](https://github.com/zuohuadong/supacloud/commit/c098d87e6c37370b65f0452bdc2cd5ebbe4d7ce6))
+* release main ([f0479a0](https://github.com/zuohuadong/supacloud/commit/f0479a051d51eb872b2e73e69de1fa0306b1cdc9))
+* release main ([68f9616](https://github.com/zuohuadong/supacloud/commit/68f9616b701d54590903369e7c4995be44e4a76e))
+* release main ([77e93ee](https://github.com/zuohuadong/supacloud/commit/77e93eef13a85052561c1858322d8f5eb1365091))
+* release main ([4cedd82](https://github.com/zuohuadong/supacloud/commit/4cedd827eeb6ad003875f6cfac786e727dde2003))
+* release main ([0bd41fc](https://github.com/zuohuadong/supacloud/commit/0bd41fc27495e5e61f00bd1136c8f3a4176dfac2))
+* release main ([#483](https://github.com/zuohuadong/supacloud/issues/483)) ([141bb8c](https://github.com/zuohuadong/supacloud/commit/141bb8cb610ed0bdd98a38e4e05131bd35feb600))
+* release main ([#521](https://github.com/zuohuadong/supacloud/issues/521)) ([1230bf3](https://github.com/zuohuadong/supacloud/commit/1230bf3a6d1db6885c67da140d4ef318ec8cdec3))
+* release main ([#617](https://github.com/zuohuadong/supacloud/issues/617)) ([45e6527](https://github.com/zuohuadong/supacloud/commit/45e6527d49329903237a6298bfefce27ed1466d4))
+* release main ([#629](https://github.com/zuohuadong/supacloud/issues/629)) ([c58c4a4](https://github.com/zuohuadong/supacloud/commit/c58c4a41a1c6719a5e17a0f2c8f7ce2cff9951af))
+* release main ([#630](https://github.com/zuohuadong/supacloud/issues/630)) ([73607fe](https://github.com/zuohuadong/supacloud/commit/73607fecd94d9cbe0a1f50cb70b11ddb512d10f4))
+* release main ([#641](https://github.com/zuohuadong/supacloud/issues/641)) ([80c6b6b](https://github.com/zuohuadong/supacloud/commit/80c6b6be2ac968869c52b180e6c9fdc8a8b816bf))
+* release main ([#645](https://github.com/zuohuadong/supacloud/issues/645)) ([a148c4c](https://github.com/zuohuadong/supacloud/commit/a148c4cfac2bde8ec62913616fbb7841dc909caa))
+* release main ([#648](https://github.com/zuohuadong/supacloud/issues/648)) ([ba78dbd](https://github.com/zuohuadong/supacloud/commit/ba78dbd5203c604acdb4f562e0190f7d6e26714b))
+* release main ([#746](https://github.com/zuohuadong/supacloud/issues/746)) ([216dd76](https://github.com/zuohuadong/supacloud/commit/216dd76ea36c521ebad31356ba0924be5626a924))
+* release main ([#747](https://github.com/zuohuadong/supacloud/issues/747)) ([836d002](https://github.com/zuohuadong/supacloud/commit/836d00279897ff8af4e41275457fd505d4c68779))
+* release main ([#750](https://github.com/zuohuadong/supacloud/issues/750)) ([bdbccba](https://github.com/zuohuadong/supacloud/commit/bdbccba54bd88d6b73efcb373caba1322f637d3e))
+* release main ([#754](https://github.com/zuohuadong/supacloud/issues/754)) ([6143cce](https://github.com/zuohuadong/supacloud/commit/6143cce869768f3e6911dfefa3df136740fad3f4))
+* release main ([#761](https://github.com/zuohuadong/supacloud/issues/761)) ([92b45ed](https://github.com/zuohuadong/supacloud/commit/92b45ed27a3e0af4a8dc35bf4dead9415fe1ef9f))
+* release main ([#769](https://github.com/zuohuadong/supacloud/issues/769)) ([8d0050c](https://github.com/zuohuadong/supacloud/commit/8d0050c4e12342fbf82ab1e9601711469658a21e))
+* release main ([#805](https://github.com/zuohuadong/supacloud/issues/805)) ([f644737](https://github.com/zuohuadong/supacloud/commit/f6447373bc961c55599774dbbdf20a3765ec23fa))
+* release main ([#809](https://github.com/zuohuadong/supacloud/issues/809)) ([b0e6ad1](https://github.com/zuohuadong/supacloud/commit/b0e6ad1f774a594629dd437eb8a9a5124f35cec5))
+* release main ([#814](https://github.com/zuohuadong/supacloud/issues/814)) ([5e99377](https://github.com/zuohuadong/supacloud/commit/5e99377cc1cb8fa2e48565c2fc551d03131914b0))
+* release main ([#823](https://github.com/zuohuadong/supacloud/issues/823)) ([80fd010](https://github.com/zuohuadong/supacloud/commit/80fd01015ff3008c4ccd83d4d8b8efd125cda48c))
+* release main ([#832](https://github.com/zuohuadong/supacloud/issues/832)) ([b609747](https://github.com/zuohuadong/supacloud/commit/b609747de85ed2b18427e64092c242a6f8d8117d))
+* **supacloud:** sync unified CLI lockfile ([d8d7fc1](https://github.com/zuohuadong/supacloud/commit/d8d7fc1d0605f8f654d14804eca4bf6c04a0bda9))
+* **supacloud:** sync unified package lock ([14e5637](https://github.com/zuohuadong/supacloud/commit/14e56373b088a00d1df253961ca3eacdba370db1))
+* sync supacloud release lockfile ([792e0f7](https://github.com/zuohuadong/supacloud/commit/792e0f7fb9c68a95a6f529844df82a8a8f5b90bc))
+
 ## [0.8.18](https://github.com/zuohuadong/supacloud/compare/supacloud-v0.8.17...supacloud-v0.8.18) (2026-08-11)
 
 
