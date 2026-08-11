@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { createHash } from "node:crypto";
+import * as fs from "node:fs/promises";
 import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -90,6 +91,8 @@ afterAll(async () => {
 
 describe("edgeFunctionService bundle metadata", () => {
   test("returns the Edge Runtime preheat error when version readiness fails", async () => {
+    const ref = "proj_preheat_diagnostic";
+    const slug = "computed-import";
     globalThis.fetch = (async () => Response.json({
       success: false,
       version: "1",
@@ -111,8 +114,8 @@ describe("edgeFunctionService bundle metadata", () => {
     })) as typeof fetch;
 
     const deployed = await deployConditionalRelease({
-      ref: "proj_preheat_diagnostic",
-      slug: "computed-import",
+      ref,
+      slug,
       code: "export default { fetch: () => new Response('unreachable') };",
     });
 
@@ -120,6 +123,50 @@ describe("edgeFunctionService bundle metadata", () => {
     expect(deployed.error).toContain(
       "Computed dynamic imports are disabled in the multi-tenant Edge Runtime.",
     );
+    expect((await edgeFunctionService.listVersions(ref, slug)).map(({ version }) => version))
+      .toEqual(["1"]);
+    expect((await edgeFunctionService.getConfig(ref, slug)).version).toBeUndefined();
+    expect(await edgeFunctionService.getActiveVersion(ref, slug)).toBe("absent");
+    expect(await edgeFunctionService.list(ref)).toEqual([]);
+  });
+
+  test("propagates corrupt candidate config without hiding valid active functions", async () => {
+    const ref = "proj_list_corrupt_config";
+    const projectDir = join(functionsRoot, ref);
+    await Promise.all([
+      mkdir(join(projectDir, ".versions", "configured", "1"), { recursive: true }),
+      mkdir(join(projectDir, ".versions", "orphan", "1"), { recursive: true }),
+      mkdir(join(projectDir, ".versions", "corrupt", "1"), { recursive: true }),
+    ]);
+    await Promise.all([
+      Bun.write(join(projectDir, "legacy.js"), "export default {};"),
+      Bun.write(join(projectDir, "configured.config.json"), JSON.stringify({ version: "1" })),
+      Bun.write(join(projectDir, "corrupt.config.json"), "{"),
+    ]);
+
+    await expect(edgeFunctionService.list(ref)).rejects.toThrow();
+
+    await rm(join(projectDir, "corrupt.config.json"));
+    expect(await edgeFunctionService.list(ref)).toEqual(["configured", "legacy"]);
+  });
+
+  test("propagates unreadable version artifact directories", async () => {
+    const versionDir = join(
+      functionsRoot,
+      "proj_artifact_io",
+      ".versions",
+      "hello",
+      "1",
+    );
+    await mkdir(versionDir, { recursive: true });
+    await fs.chmod(versionDir, 0o000);
+
+    try {
+      await expect(getVersionedArtifactPath("proj_artifact_io", "hello", "1"))
+        .rejects.toMatchObject({ code: "EACCES" });
+    } finally {
+      await fs.chmod(versionDir, 0o700);
+    }
   });
 
   test("normalizes computed imports in final single-file and bundle artifacts", async () => {
@@ -443,6 +490,25 @@ describe("edgeFunctionService bundle metadata", () => {
     expect(Object.hasOwn(restored!, "entrypoint")).toBe(false);
     expect(Object.hasOwn(restored!, "import_map")).toBe(false);
     expect(await edgeFunctionService.read(ref, slug)).toContain("legacy");
+    expect(await edgeFunctionService.readSource(ref, slug)).toContain("legacy-source");
+    expect(await edgeFunctionService.getActiveVersion(ref, slug)).toBe("0");
+
+    const stale = await edgeFunctionService.deployRelease({
+      ref,
+      slug,
+      expectedActiveVersion: "1",
+      code: "export default { fetch: () => new Response('stale-release') };",
+    });
+
+    expect(stale).toMatchObject({
+      success: false,
+      error_code: EDGE_FUNCTION_ACTIVE_VERSION_CONFLICT_CODE,
+      expected_active_version: "1",
+      active_version: "0",
+    });
+    expect((await edgeFunctionService.listVersions(ref, slug)).map(({ version }) => version))
+      .toEqual(["1", "0"]);
+    expect(await edgeFunctionService.getConfig(ref, slug)).toMatchObject({ version: "0" });
     expect(await edgeFunctionService.readSource(ref, slug)).toContain("legacy-source");
 
     const continued = await edgeFunctionService.deployRelease({

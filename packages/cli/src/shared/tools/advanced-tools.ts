@@ -251,6 +251,18 @@ function positiveFunctionVersion(input: unknown, label: string): string {
     return version;
 }
 
+function activeFunctionVersionToken(input: unknown): string {
+    if (typeof input !== "string" && typeof input !== "number") {
+        throw new Error("Expected active version must be a canonical non-negative safe integer");
+    }
+    const version = String(input);
+    if (!CANONICAL_FUNCTION_VERSION_PATTERN.test(version) || !Number.isSafeInteger(Number(version))) {
+        throw new Error("Expected active version must be a canonical non-negative safe integer");
+    }
+    return version;
+}
+
+const CANONICAL_FUNCTION_VERSION_PATTERN = /^(?:0|[1-9][0-9]*)$/;
 const POSITIVE_FUNCTION_VERSION_PATTERN = /^[1-9][0-9]*$/;
 const SAFE_FUNCTION_SLUG_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const FUNCTION_ACTIVATION_ARGUMENTS = new Set([
@@ -267,18 +279,18 @@ const functionVersionSchema = Type.Optional(decodedSchema(
 
 function parseExpectedActiveVersion(input: unknown): unknown {
     if (input === "absent") return input;
-    return positiveFunctionVersion(input, "Expected active version");
+    return activeFunctionVersionToken(input);
 }
 
 const expectedActiveVersionSchema = Type.Optional(decodedSchema(
     Type.Union([
         Type.Literal("absent"),
-        Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
-        Type.String({ pattern: POSITIVE_FUNCTION_VERSION_PATTERN.source, maxLength: 16 }),
+        Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+        Type.String({ pattern: CANONICAL_FUNCTION_VERSION_PATTERN.source, maxLength: 16 }),
     ]),
     Type.Union([
         Type.Literal("absent"),
-        Type.String({ pattern: POSITIVE_FUNCTION_VERSION_PATTERN.source, maxLength: 16 }),
+        Type.String({ pattern: CANONICAL_FUNCTION_VERSION_PATTERN.source, maxLength: 16 }),
     ]),
     parseExpectedActiveVersion,
 ));
@@ -436,7 +448,7 @@ function safeFunctionList(payload: unknown): Array<Record<string, unknown>> | nu
         const slug = edgeFunction?.slug;
         const version = edgeFunction?.version;
         if (typeof slug !== "string" || !SAFE_FUNCTION_SLUG_PATTERN.test(slug)
-            || typeof version !== "number" || !Number.isSafeInteger(version) || version < 1
+            || typeof version !== "number" || !Number.isSafeInteger(version) || version < 0
             || functionSlugs.has(slug)) return null;
         functionSlugs.add(slug);
     }

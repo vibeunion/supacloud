@@ -229,6 +229,13 @@ function parseVersionNumber(value: unknown): number | null {
   return parsed;
 }
 
+export function activeFunctionVersionNumber(version: EdgeFunctionActiveVersion): number | null {
+  if (version === EDGE_FUNCTION_ABSENT_ACTIVE_VERSION) return null;
+  const parsedVersion = parseVersionNumber(version);
+  if (parsedVersion === null) throw new Error("Function config contains an invalid active version");
+  return parsedVersion;
+}
+
 function validatedExpectedActiveVersion(value: unknown): EdgeFunctionActiveVersion {
   if (value === EDGE_FUNCTION_ABSENT_ACTIVE_VERSION) return value;
   if (typeof value !== "string" || !CANONICAL_VERSION_REGEX.test(value)
@@ -1322,8 +1329,8 @@ export async function getVersionedArtifactPath(
       .sort()
       .at(0);
     if (contentAddressed) return assertInside(dir, path.join(dir, contentAddressed));
-  } catch {
-    // Fall back to the compatibility index.js artifact below.
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
   const modern = getVersionedFuncPath(ref, slug, version);
   if (await fileExists(modern)) return modern;
@@ -1632,6 +1639,10 @@ async function deployLatestFunctionRelease(
 }
 
 export const edgeFunctionService = {
+  async getActiveVersion(ref: string, slug: string): Promise<EdgeFunctionActiveVersion> {
+    return activeFunctionVersion(ref, slug);
+  },
+
   /** Read function config (verify_jwt, etc.) */
   async getConfig(ref: string, slug: string): Promise<EdgeFunctionConfig> {
     return readFunctionConfig(ref, slug);
@@ -1972,36 +1983,40 @@ export const edgeFunctionService = {
     }
   },
 
-  /** List all function slugs for a project */
+  /** List active function slugs for a project */
   async list(ref: string): Promise<string[]> {
+    const dir = getFuncDir(ref);
+    const { Glob } = await import("bun");
+    const glob = new Glob("*.js");
+    let entries: string[];
     try {
-      const dir = getFuncDir(ref);
-      const { Glob } = await import("bun");
-      const glob = new Glob("*.js");
-      const entries = Array.from(glob.scanSync({ cwd: dir, onlyFiles: true }));
-      const slugs = new Set<string>();
-
-      for (const entry of entries) {
-        const parsedLegacy = parseLegacyVersionedFile(entry);
-        if (parsedLegacy) continue;
-        slugs.add(entry.replace(/\.js$/, ""));
-      }
-
-      const versionsRoot = path.join(dir, VERSIONED_DIR);
-      const versionedEntries = await fs.readdir(versionsRoot, { withFileTypes: true }).catch(() => []);
-      for (const entry of versionedEntries) {
-        if (entry.isDirectory()) slugs.add(entry.name);
-      }
-
-      return Array.from(slugs).sort();
-    } catch (err: unknown) {
-      if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-        logger.warn(`[EdgeFunction] Failed to list functions for ${ref}`, {
-          error: err,
-        });
-      }
-      return [];
+      entries = Array.from(glob.scanSync({ cwd: dir, onlyFiles: true }));
+    } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw error;
     }
+    const slugs = new Set<string>();
+    for (const entry of entries) {
+      if (parseLegacyVersionedFile(entry)) continue;
+      slugs.add(entry.replace(/\.js$/, ""));
+    }
+
+    const versionsRoot = path.join(dir, VERSIONED_DIR);
+    const versionedEntries = await fs.readdir(versionsRoot, { withFileTypes: true })
+      .catch((error: unknown) => {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+        throw error;
+      });
+    for (const entry of versionedEntries) {
+      if (entry.isDirectory()) slugs.add(entry.name);
+    }
+
+    const activeSlugs = await Promise.all(Array.from(slugs, async (slug) =>
+      await activeFunctionVersion(ref, slug) === EDGE_FUNCTION_ABSENT_ACTIVE_VERSION
+        ? null
+        : slug
+    ));
+    return activeSlugs.filter((slug): slug is string => slug !== null).sort();
   },
 
   /** Delete a function (both bundled and source) */

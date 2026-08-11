@@ -1,10 +1,18 @@
 import { afterAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
+import * as fs from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+const functionsRoot = await fs.mkdtemp(join(tmpdir(), "supacloud-project-functions-"));
+const originalFunctionsDir = process.env.EDGE_FUNCTIONS_DIR;
+process.env.EDGE_FUNCTIONS_DIR = functionsRoot;
 
 const baseMock = mock(() => Promise.resolve([]));
 (baseMock as unknown as Record<string, unknown>).unsafe = mock(() => Promise.resolve([]));
 const actualDb = await import("../../src/db");
 const { jwtService } = await import("../../src/services/jwt.service");
 const { edgeFunctionService } = await import("../../src/services/edge-function.service");
+const { config } = await import("../../src/config");
 
 const jwtServiceMock = {
   generateProjectRef: spyOn(jwtService, "generateProjectRef"),
@@ -35,6 +43,9 @@ const routerServiceMock = {
 
 const edgeFunctionServiceMock = {
   read: spyOn(edgeFunctionService, "read"),
+  list: spyOn(edgeFunctionService, "list"),
+  getActiveVersion: spyOn(edgeFunctionService, "getActiveVersion"),
+  getConfig: spyOn(edgeFunctionService, "getConfig"),
   deploy: spyOn(edgeFunctionService, "deploy"),
   deployDetailed: spyOn(edgeFunctionService, "deployDetailed"),
   deployBundle: spyOn(edgeFunctionService, "deployBundle"),
@@ -162,6 +173,9 @@ describe("ProjectService - Comprehensive", () => {
     routerServiceMock.getProjectStudioUrl.mockReset();
     routerServiceMock.reload.mockReset();
     edgeFunctionServiceMock.read.mockReset();
+    edgeFunctionServiceMock.list.mockReset();
+    edgeFunctionServiceMock.getActiveVersion.mockReset();
+    edgeFunctionServiceMock.getConfig.mockReset();
     edgeFunctionServiceMock.deploy.mockReset();
     edgeFunctionServiceMock.deployDetailed.mockReset();
     edgeFunctionServiceMock.deployBundle.mockReset();
@@ -209,6 +223,9 @@ describe("ProjectService - Comprehensive", () => {
     routerServiceMock.getProjectStudioUrl.mockImplementation((ref: string) => `https://${ref}.studio.localhost`);
     routerServiceMock.reload.mockResolvedValue({ success: true });
     edgeFunctionServiceMock.read.mockResolvedValue("function code here");
+    edgeFunctionServiceMock.list.mockResolvedValue([]);
+    edgeFunctionServiceMock.getActiveVersion.mockResolvedValue("absent");
+    edgeFunctionServiceMock.getConfig.mockResolvedValue({ verify_jwt: true });
     edgeFunctionServiceMock.deploy.mockResolvedValue(true);
     edgeFunctionServiceMock.deployDetailed.mockResolvedValue({
       success: true,
@@ -630,6 +647,64 @@ describe("ProjectService - Comprehensive", () => {
     expect(await service.getFunctionCode("test123abc", "my-func")).toBe("function code here");
   });
 
+  test("listFunctions preserves the legacy active version zero", async () => {
+    const projectFunctionsDir = join(config.edgeFunctionsDir, "test123abc");
+    await fs.mkdir(projectFunctionsDir, { recursive: true });
+    await Bun.write(
+      join(projectFunctionsDir, "legacy-hook.js"),
+      "export default {};",
+    );
+    projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);
+    edgeFunctionServiceMock.list.mockResolvedValueOnce(["legacy-hook"]);
+    edgeFunctionServiceMock.getActiveVersion.mockResolvedValueOnce("0");
+    edgeFunctionServiceMock.getConfig.mockResolvedValueOnce({ verify_jwt: true });
+
+    try {
+      const functions = await service.listFunctions("test123abc");
+
+      expect(functions).toHaveLength(1);
+      expect(functions[0]).toMatchObject({ slug: "legacy-hook", version: 0 });
+    } finally {
+      await fs.rm(projectFunctionsDir, { recursive: true, force: true });
+    }
+  });
+
+  test("listFunctions propagates missing and unreadable active artifacts", async () => {
+    projectRepositoryMock.findByRef.mockResolvedValue(mockProject);
+    edgeFunctionServiceMock.list.mockResolvedValue(["missing-active"]);
+    edgeFunctionServiceMock.getActiveVersion.mockResolvedValue("0");
+    edgeFunctionServiceMock.getConfig.mockResolvedValue({ verify_jwt: true });
+
+    await expect(service.listFunctions("test123abc")).rejects.toMatchObject({ code: "ENOENT" });
+
+    const permissionError = Object.assign(new Error("synthetic permission failure"), {
+      code: "EACCES",
+    });
+    const statSpy = spyOn(fs, "stat").mockRejectedValueOnce(permissionError);
+    try {
+      await expect(service.listFunctions("test123abc")).rejects.toBe(permissionError);
+    } finally {
+      statSpy.mockRestore();
+    }
+  });
+
+  test("listFunctions rejects a missing versioned artifact despite a stale legacy alias", async () => {
+    const projectFunctionsDir = join(config.edgeFunctionsDir, "test123abc");
+    await fs.mkdir(projectFunctionsDir, { recursive: true });
+    await Bun.write(join(projectFunctionsDir, "upgraded-hook.js"), "stale legacy artifact");
+    projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);
+    edgeFunctionServiceMock.list.mockResolvedValueOnce(["upgraded-hook"]);
+    edgeFunctionServiceMock.getActiveVersion.mockResolvedValueOnce("1");
+    edgeFunctionServiceMock.getConfig.mockResolvedValueOnce({ verify_jwt: true, version: "1" });
+
+    try {
+      await expect(service.listFunctions("test123abc"))
+        .rejects.toThrow("Active function artifact is missing");
+    } finally {
+      await fs.rm(projectFunctionsDir, { recursive: true, force: true });
+    }
+  });
+
   test("deployFunction delegates to edge function service", async () => {
     projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);
     expect(await service.deployFunction("test123abc", "my-func", "code")).toBe(true);
@@ -667,6 +742,12 @@ describe("ProjectService - Comprehensive", () => {
   });
 });
 
-afterAll(() => {
+afterAll(async () => {
   mock.restore();
+  if (originalFunctionsDir === undefined) {
+    delete process.env.EDGE_FUNCTIONS_DIR;
+  } else {
+    process.env.EDGE_FUNCTIONS_DIR = originalFunctionsDir;
+  }
+  await fs.rm(functionsRoot, { recursive: true, force: true });
 });

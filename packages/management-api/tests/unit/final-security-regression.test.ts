@@ -24,7 +24,7 @@ function appWith(routes: Elysia) {
 describe("final security regressions", () => {
   test("function management read endpoints require auth but preserve authenticated access", async () => {
     const listFunctionsSpy = spyOn(projectService, "listFunctions").mockResolvedValue([
-      { slug: "hello", name: "hello" },
+      { slug: "hello", name: "hello", version: 0 },
     ] as Awaited<ReturnType<typeof projectService.listFunctions>>);
     const request = appWith(projectFunctionsRoutes);
 
@@ -49,9 +49,158 @@ describe("final security regressions", () => {
       expect(listFunctionsSpy).not.toHaveBeenCalled();
       const authenticated = await request("/v1/projects/proj_1/functions", { headers: masterHeaders });
       expect(authenticated.status).toBe(200);
-      expect(await authenticated.json()).toEqual([{ slug: "hello", name: "hello" }]);
+      expect(await authenticated.json()).toEqual([{ slug: "hello", name: "hello", version: 0 }]);
     } finally {
       listFunctionsSpy.mockRestore();
+    }
+  });
+
+  test("function list does not turn artifact IO failures into active results", async () => {
+    const ioError = Object.assign(new Error("synthetic function artifact failure"), {
+      code: "EIO",
+    });
+    const listFunctionsSpy = spyOn(projectService, "listFunctions").mockRejectedValue(ioError);
+    const request = appWith(projectFunctionsRoutes);
+
+    try {
+      const response = await request("/v1/projects/proj_1/functions", {
+        headers: masterHeaders,
+      });
+
+      expect(response.status).toBe(500);
+      expect(await response.text()).not.toContain('"status":"ACTIVE"');
+    } finally {
+      listFunctionsSpy.mockRestore();
+    }
+  });
+
+  test("function detail resolves a manifest-less legacy alias as active version zero", async () => {
+    const codeSpy = spyOn(projectService, "getFunctionCode").mockResolvedValue("export default {};");
+    const configSpy = spyOn(edgeFunctionService, "getConfig").mockResolvedValue({ verify_jwt: true });
+    const activeVersionSpy = spyOn(edgeFunctionService, "getActiveVersion").mockResolvedValue("0");
+    const request = appWith(projectFunctionsRoutes);
+
+    try {
+      const response = await request("/v1/projects/proj_1/functions/legacy-hook", {
+        headers: masterHeaders,
+      });
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        slug: "legacy-hook",
+        version: 0,
+        status: "ACTIVE",
+      });
+      expect(activeVersionSpy).toHaveBeenCalledWith("proj_1", "legacy-hook");
+    } finally {
+      codeSpy.mockRestore();
+      configSpy.mockRestore();
+      activeVersionSpy.mockRestore();
+    }
+  });
+
+  test("function version detail rejects legacy zero before service dispatch", async () => {
+    const getVersionSpy = spyOn(edgeFunctionService, "getVersion").mockRejectedValue(
+      new Error("legacy source version reached the service"),
+    );
+    const request = appWith(projectFunctionsRoutes);
+
+    try {
+      const response = await request(
+        "/v1/projects/proj_1/functions/legacy-hook/versions/0",
+        { headers: masterHeaders },
+      );
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        message: "version must be a canonical positive safe integer",
+        code: "VALIDATION_ERROR",
+      });
+      expect(getVersionSpy).not.toHaveBeenCalled();
+    } finally {
+      getVersionSpy.mockRestore();
+    }
+  });
+
+  test("metadata-only Function PATCH preserves the authoritative legacy version zero", async () => {
+    const updateConfigSpy = spyOn(edgeFunctionService, "updateConfig").mockResolvedValue({
+      verify_jwt: false,
+    });
+    const activeVersionSpy = spyOn(edgeFunctionService, "getActiveVersion").mockResolvedValue("0");
+    const request = appWith(projectFunctionsRoutes);
+
+    try {
+      const response = await request("/v1/projects/proj_1/functions/legacy-hook", {
+        method: "PATCH",
+        headers: { ...masterHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({ verify_jwt: false }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        slug: "legacy-hook",
+        version: 0,
+        status: "ACTIVE",
+        verify_jwt: false,
+      });
+    } finally {
+      updateConfigSpy.mockRestore();
+      activeVersionSpy.mockRestore();
+    }
+  });
+
+  test("Function create readback uses release or filesystem truth without inventing version one", async () => {
+    const deploySpy = spyOn(projectService, "deployFunctionRelease").mockResolvedValue({
+      success: true,
+      previous_active_version: "0",
+      active_version: "1",
+      config: { verify_jwt: true },
+    });
+    const configSpy = spyOn(edgeFunctionService, "getConfig").mockResolvedValue({ verify_jwt: true });
+    const activeVersionSpy = spyOn(edgeFunctionService, "getActiveVersion")
+      .mockResolvedValueOnce("0")
+      .mockResolvedValueOnce("absent");
+    const request = appWith(projectFunctionsRoutes);
+
+    try {
+      const multipart = new FormData();
+      multipart.set("metadata", JSON.stringify({ expected_active_version: "0" }));
+      multipart.set("file", new File(["export default {};"], "index.ts"));
+      const deployed = await request("/v1/projects/proj_1/functions/deploy?slug=legacy-hook", {
+        method: "POST",
+        headers: masterHeaders,
+        body: multipart,
+      });
+      const legacy = await request("/v1/projects/proj_1/functions", {
+        method: "POST",
+        headers: { ...masterHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({ slug: "legacy-hook" }),
+      });
+      const absent = await request("/v1/projects/proj_1/functions", {
+        method: "POST",
+        headers: { ...masterHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({ slug: "missing-hook" }),
+      });
+
+      expect(await deployed.json()).toMatchObject({
+        version: 1,
+        previous_active_version: "0",
+        status: "ACTIVE",
+      });
+      expect(await legacy.json()).toMatchObject({
+        slug: "legacy-hook",
+        version: 0,
+        status: "ACTIVE",
+      });
+      expect(await absent.json()).toMatchObject({
+        slug: "missing-hook",
+        version: null,
+        status: "INACTIVE",
+      });
+    } finally {
+      deploySpy.mockRestore();
+      configSpy.mockRestore();
+      activeVersionSpy.mockRestore();
     }
   });
 
@@ -330,7 +479,7 @@ describe("final security regressions", () => {
     const request = appWith(projectFunctionsRoutes);
 
     try {
-      for (const expectedActiveVersion of [0, "0", "01", "", "9007199254740992", null]) {
+      for (const expectedActiveVersion of [0, "01", "", "9007199254740992", null]) {
         const response = await request("/v1/projects/proj_1/functions/hello", {
           method: "POST",
           headers: { ...masterHeaders, "Content-Type": "application/json" },
@@ -343,6 +492,43 @@ describe("final security regressions", () => {
         expect(response.status).toBeGreaterThanOrEqual(400);
       }
       expect(deploySpy).not.toHaveBeenCalled();
+    } finally {
+      deploySpy.mockRestore();
+    }
+  });
+
+  test("function deploy accepts the canonical legacy version zero CAS token", async () => {
+    const deploySpy = spyOn(projectService, "deployFunctionRelease").mockResolvedValue({
+      success: true,
+      previous_active_version: "0",
+      active_version: "1",
+      version: "1",
+      config: { version: "1", verify_jwt: true },
+    });
+    const request = appWith(projectFunctionsRoutes);
+
+    try {
+      const response = await request("/v1/projects/proj_1/functions/legacy-hook", {
+        method: "POST",
+        headers: { ...masterHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          code: "export default { fetch() { return new Response('upgraded') } }",
+          expected_active_version: "0",
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        slug: "legacy-hook",
+        previous_active_version: "0",
+        active_version: "1",
+        version: "1",
+      });
+      expect(deploySpy).toHaveBeenCalledWith(expect.objectContaining({
+        ref: "proj_1",
+        slug: "legacy-hook",
+        expectedActiveVersion: "0",
+      }));
     } finally {
       deploySpy.mockRestore();
     }
@@ -444,6 +630,36 @@ describe("final security regressions", () => {
         active_version: "2",
       });
       expect(activationSpy).toHaveBeenCalledWith("proj_1", "hello", "3", "1");
+    } finally {
+      activationSpy.mockRestore();
+    }
+  });
+
+  test("function activation accepts legacy version zero only as the CAS token", async () => {
+    const activationSpy = spyOn(edgeFunctionService, "activateVersion").mockResolvedValue({
+      previous_active_version: "0",
+      active_version: "2",
+      config: { version: "2", verify_jwt: true },
+    });
+    const request = appWith(projectFunctionsRoutes);
+
+    try {
+      const response = await request(
+        "/v1/projects/proj_1/functions/legacy-hook/versions/2/activate",
+        {
+          method: "POST",
+          headers: { ...masterHeaders, "Content-Type": "application/json" },
+          body: JSON.stringify({ expected_active_version: "0" }),
+        },
+      );
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        previous_active_version: "0",
+        active_version: "2",
+        version: "2",
+      });
+      expect(activationSpy).toHaveBeenCalledWith("proj_1", "legacy-hook", "2", "0");
     } finally {
       activationSpy.mockRestore();
     }

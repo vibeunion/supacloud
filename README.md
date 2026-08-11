@@ -329,15 +329,17 @@ supacloud-cli storage list_buckets --ref <ref>
 Function deploy and activation commands require the active version observed via
 `edge_functions list`; `absent` is valid only for a new slug. Stale mutations
 return HTTP 409 and successful mutations emit a
-`supacloud.cli.release-control.v1` receipt. Pass the observed version to
-`edge_functions source --version <N>` for an immutable, ABA-safe source backup.
+`supacloud.cli.release-control.v1` receipt. When the observed version is
+positive, pass it to `edge_functions source --version <N>` for an immutable,
+ABA-safe source backup.
 Use `deploy --prebundled-path` with the required lowercase
 `--expected-sha256` when a release pipeline must upload an already-built runtime
 artifact without local or server rebundling. The mode rejects caller-hash,
 file-stability, UTF-8, runtime-policy, and normalization mismatches before
 activation.
-Version `0` is reserved for service-internal legacy recovery and is not a valid
-public CLI/API activation target or expected active version.
+Version `0` is reserved for a listed legacy Function's active-version CAS token.
+It is valid only as `--expected-active-version 0`; immutable source reads and
+activation targets still require a positive version.
 
 For complex SQL, pgvector queries, and single-request transaction blocks, prefer `--file` instead of shell-escaped inline SQL.
 
