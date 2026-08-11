@@ -174,6 +174,22 @@ USING hnsw (embedding vector_cosine_ops);
 
 Transaction boundary: SupaCloud supports transaction blocks inside one SQL request and transactional migrations. It does not expose long-lived HTTP transaction sessions; use a direct Postgres DSN for application-side long transactions.
 
+Auth configuration commands accept a JSON object from the CLI:
+
+```bash
+supacloud-cli auth update_settings --ref abc123 \
+  --config '{"disable_signup":true,"enable_signup":false}'
+supacloud-cli auth update_config --ref abc123 \
+  --config '{"third_party_auth":{"enabled":true}}'
+```
+
+Failed Auth mutations exit non-zero and print a JSON object containing the HTTP
+status plus an allowlisted subset of runtime-apply state. If Management API
+returns `503` with `persisted: true`, the desired configuration was saved but
+runtime propagation was incomplete; automation must read the affected settings
+back exactly before deciding whether it is safe to continue. Free-form server
+messages and request configuration are not echoed.
+
 Project commands owned by this CLI:
 
 - `project get`
