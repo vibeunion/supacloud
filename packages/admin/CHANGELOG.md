@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/zuohuadong/supacloud/compare/admin-v0.8.2...admin-v0.9.0) (2026-08-11)
+
+
+### Features
+
+* **admin:** add project service controls ([#804](https://github.com/zuohuadong/supacloud/issues/804)) ([913400b](https://github.com/zuohuadong/supacloud/commit/913400bb89fa72f937cc517f17d0b1f96403b4ef))
+
 ## [0.8.2](https://github.com/zuohuadong/supacloud/compare/admin-v0.8.1...admin-v0.8.2) (2026-08-11)
 
 
