@@ -62,6 +62,10 @@ const TUS_MAX_SIZE = Number(process.env.TUS_MAX_SIZE || DEFAULT_TUS_MAX_SIZE_BYT
 const TUS_MAX_CHUNK_SIZE = Number(process.env.TUS_MAX_CHUNK_SIZE || Math.min(TUS_MAX_SIZE, 16 * 1024 * 1024));
 const STORAGE_BATCH_CONCURRENCY = Math.max(1, Number(process.env.STORAGE_BATCH_CONCURRENCY || 12));
 
+function isBucketNotEmpty(error: unknown): error is Error {
+    return error instanceof Error && error.message === "Bucket is not empty";
+}
+
 // ── Imaginary Config ──────────────────────────────────────────────
 const IMAGINARY_URL = config.imaginaryUrl;
 
@@ -619,16 +623,38 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         try {
             // 1. Dry run to ensure bucket can be deleted
             await StorageRLS.deleteLogicalBucket(ref, auth, params.id, true);
-        } catch (e: any) {
-            return status(403, { statusCode: "403", error: 'Forbidden', message: e.message || 'Access Denied' });
+        } catch (error: unknown) {
+            if (isBucketNotEmpty(error)) {
+                return status(409, { statusCode: "409", error: 'Conflict', message: error.message });
+            }
+            return status(403, { statusCode: "403", error: 'Forbidden', message: error instanceof Error ? error.message : 'Access Denied' });
         }
         
         // 2. Physical delete bucket
         const result = await StorageService.deleteBucket(ref, params.id);
-        if (!result.success) return status(500, { statusCode: "500", error: 'Internal', message: result.error || 'Failed to delete bucket' });
+        if (!result.success) {
+            const statusCode = result.error === "Bucket is not empty" ? 409 : 500;
+            return status(statusCode, {
+                statusCode: String(statusCode),
+                error: statusCode === 409 ? 'Conflict' : 'Internal',
+                message: result.error || 'Bucket deletion outcome is unknown',
+            });
+        }
         
         // 3. Logical delete bucket
-        await StorageRLS.deleteLogicalBucket(ref, auth, params.id, false);
+        try {
+            await StorageRLS.deleteLogicalBucket(ref, auth, params.id, false);
+        } catch (error: unknown) {
+            if (isBucketNotEmpty(error)) {
+                return status(409, { statusCode: "409", error: 'Conflict', message: error.message });
+            }
+            logger.error("Storage bucket metadata deletion outcome is unknown", {
+                ref,
+                bucketId: params.id,
+                error: error instanceof Error ? error.message : String(error),
+            });
+            return status(500, { statusCode: "500", error: 'Internal', message: 'Bucket deletion outcome is unknown' });
+        }
         return { message: "Successfully deleted" };
     }, {
         detail: { tags: ["storage"], summary: "Delete a bucket" },

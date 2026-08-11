@@ -318,8 +318,13 @@ export class TaskWorker {
 
                 case "cleanup_s3": {
                     if (process.env.TEST_FIXED_JWT_SECRET) return true;
-                    await storageService.deleteBucket(project_ref);
-                    return true;
+                    const result = await storageService.deleteBucket(project_ref);
+                    if (!result.success) {
+                        logger.error(`[TaskWorker] cleanup_s3 failed for ${project_ref}`, {
+                            outcome: result.error === "Bucket is not empty" ? "not_empty" : "unknown",
+                        });
+                    }
+                    return result.success;
                 }
 
                 case "cleanup_runtime": {

@@ -271,12 +271,11 @@ export const storageS3Routes = new Elysia({ prefix: "/v1/storage/:ref/s3" })
 
   // DELETE /:bucket -> DeleteBucket (only when empty)
   .delete("/:bucket", async ({ params, set }) => {
-    const objects = await StorageService.listFiles(params.ref, params.bucket).catch(() => []);
-    if (objects.length > 0) {
-      return s3Error("BucketNotEmpty", "The bucket you tried to delete is not empty", 409);
-    }
     const result = await StorageService.deleteBucket(params.ref, params.bucket);
     if (!result.success) {
+      if (result.error === "Bucket is not empty") {
+        return s3Error("BucketNotEmpty", "The bucket you tried to delete is not empty", 409);
+      }
       return s3Error("InternalError", result.error || "Failed to delete bucket", 500);
     }
     set.status = 204;

@@ -113,29 +113,26 @@ export class StorageRLS {
 
   static async deleteLogicalBucketAsAdmin(ref: string, bucketId: string): Promise<void> {
     if (ref === 'test_mock') {
+      if (Array.from(mockObjects.keys()).some((key) => key.startsWith(`${bucketId}/`))) {
+        throw new Error("Bucket is not empty");
+      }
       mockBuckets.delete(bucketId);
       return;
     }
     const dbName = await resolveDbName(ref);
     const db = getProjectDb(dbName);
-    await db`DELETE FROM storage.buckets WHERE id = ${bucketId}`;
-  }
-
-  static async assertLogicalBucketDeletableAsAdmin(ref: string, bucketId: string): Promise<void> {
-    if (ref === 'test_mock') {
-      if (Array.from(mockObjects.keys()).some((key) => key.startsWith(`${bucketId}/`))) {
-        throw new Error("Bucket is not empty");
-      }
-      return;
-    }
-    const dbName = await resolveDbName(ref);
-    const db = getProjectDb(dbName);
-    const [row] = await db`
-      SELECT EXISTS(
-        SELECT 1 FROM storage.objects WHERE bucket_id = ${bucketId}
-      ) AS has_objects
+    const deleted = await db`
+      DELETE FROM storage.buckets
+      WHERE id = ${bucketId}
+        AND NOT EXISTS (
+          SELECT 1 FROM storage.objects WHERE bucket_id = ${bucketId}
+        )
+      RETURNING id
     `;
-    if (row?.has_objects === true) throw new Error("Bucket is not empty");
+    if (deleted.length > 0) return;
+
+    const [bucket] = await db`SELECT id FROM storage.buckets WHERE id = ${bucketId}`;
+    if (bucket) throw new Error("Bucket is not empty");
   }
 
   

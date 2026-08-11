@@ -47,6 +47,34 @@ afterEach(() => {
 });
 
 describe("storageCompatRoutes supabase-js compatibility", () => {
+  test("does not report bucket deletion when an object arrives after physical deletion", async () => {
+    const deleteBucketSpy = spyOn(StorageService, "deleteBucket").mockImplementation(async () => {
+      mockObjects.set("avatars/arrived-during-delete.txt", { metadata: {}, updated: new Date().toISOString() });
+      return { success: true };
+    });
+
+    try {
+      const response = await request("/storage/v1/bucket/avatars", {
+        method: "DELETE",
+        headers: {
+          "x-project-ref": "test_mock",
+          authorization: "Bearer test-token",
+        },
+      });
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({
+        statusCode: "409",
+        error: "Conflict",
+        message: "Bucket is not empty",
+      });
+      expect(mockBuckets.has("avatars")).toBe(true);
+      expect(mockObjects.has("avatars/arrived-during-delete.txt")).toBe(true);
+    } finally {
+      deleteBucketSpy.mockRestore();
+    }
+  });
+
   test("iceberg surfaces expose an explicit unavailable capability", async () => {
     const icebergRes = await request("/storage/v1/iceberg/tables", {
       headers: { "x-project-ref": "test_mock", apikey: "test-token" },

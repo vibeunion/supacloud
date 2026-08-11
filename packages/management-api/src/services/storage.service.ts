@@ -2,6 +2,7 @@ import { config } from "../config";
 import { shellService } from './shell.service';
 import { logger } from "../utils/logger";
 import { getStorageDriver } from "./storage.adapter";
+import { storageBucketInputError, type StorageBucketSettings } from "./storage-bucket-contract";
 import { statfs } from "node:fs/promises";
 
 export interface StorageStatus {
@@ -192,8 +193,14 @@ export class StorageService {
   }
 
   static async deleteBucket(projectRef: string, bucketName: string = ""): Promise<{ success: boolean; error?: string }> {
-    const success = await getStorageDriver().deleteBucket(projectRef, bucketName);
-    return { success };
+    const deletion = await getStorageDriver().deleteBucket(projectRef, bucketName);
+    if (deletion.success) return deletion;
+    return {
+      success: false,
+      error: deletion.reason === "not_empty"
+        ? "Bucket is not empty"
+        : "Bucket deletion outcome is unknown",
+    };
   }
 
   static async emptyBucket(projectRef: string, bucketName: string): Promise<{ success: boolean; error?: string }> {
@@ -216,10 +223,9 @@ export class StorageService {
     return await getStorageDriver().isBucketEmpty(projectRef, bucketName);
   }
 
-  static async updateBucket(projectRef: string, bucketId: string, updates: { public?: boolean; file_size_limit?: number; allowed_mime_types?: string[] }): Promise<{ success: boolean; error?: string; bucket?: Record<string, unknown> }> {
-    if (!/^[a-zA-Z0-9._-]+$/.test(bucketId)) {
-      return { success: false, error: "Invalid bucket id" };
-    }
+  static async updateBucket(projectRef: string, bucketId: string, updates: StorageBucketSettings): Promise<{ success: boolean; error?: string; bucket?: Record<string, unknown> }> {
+    const inputError = storageBucketInputError(projectRef, bucketId, updates);
+    if (inputError) return { success: false, error: inputError };
 
     try {
       const { getProjectDb, resolveDbName } = await import("../db");
@@ -233,7 +239,10 @@ export class StorageService {
         await db`UPDATE storage.buckets SET file_size_limit = ${updates.file_size_limit} WHERE id = ${bucketId}`;
       }
       if (updates.allowed_mime_types !== undefined) {
-        await db`UPDATE storage.buckets SET allowed_mime_types = ${JSON.stringify(updates.allowed_mime_types)} WHERE id = ${bucketId}`;
+        const allowedMimeTypes = updates.allowed_mime_types.length > 0
+          ? db.array(updates.allowed_mime_types, "TEXT")
+          : null;
+        await db`UPDATE storage.buckets SET allowed_mime_types = ${allowedMimeTypes} WHERE id = ${bucketId}`;
       }
 
       const [bucket] = await db`SELECT * FROM storage.buckets WHERE id = ${bucketId}`;
