@@ -13,7 +13,7 @@
 
   import "../app.css";
   import "$lib/i18n";
-  import { onMount, tick, type Snippet, untrack } from "svelte";
+  import { onMount, tick, type Snippet } from "svelte";
   import { goto } from "$app/navigation";
   import { resolve } from "$app/paths";
   import { page } from "$app/stores";
@@ -21,41 +21,45 @@
   import Sidebar from "$lib/components/Sidebar.svelte";
   import PlatformSidebar from "$lib/components/PlatformSidebar.svelte";
   import { ModeWatcher } from "mode-watcher";
-  import { Toaster, toast } from "svelte-sonner";
+  import { toast } from "svelte-sonner";
   
   // SVAdmin Providers
   import {
-    setDataProvider,
-    setAuthProvider,
-    setResources,
-    setRouterProvider,
-    setTheme,
+    addTranslations,
+    createProviderBundle,
+    provideAdminContext,
     setLocale,
-    setChatProvider,
-    addTranslations
+    setTheme,
   } from "@svadmin/core";
   import { createSvelteKitRouterProvider } from "@svadmin/sveltekit";
-  import { Toast as SvadminToast, DevTools, setComponentRegistry, ChatDialog } from "@svadmin/ui";
+  import { ChatDialog, DevTools, Toast as SvadminToast } from "@svadmin/ui";
   import { QueryClient, QueryClientProvider } from "@tanstack/svelte-query";
   import { Menu, Plug, X } from "lucide-svelte";
   import { dataProvider, chatProvider } from "$lib/admin/provider";
   import { authProvider } from "$lib/admin/auth";
   import { buildResourceRegistry, type ResourceLabels } from "$lib/admin/resources";
+  import { resolveAdminTenant } from "$lib/admin/tenant";
   
   import zhLocales from "$lib/i18n/locales/zh.json";
   import enLocales from "$lib/i18n/locales/en.json";
   
-  const flattenChat = (loc: any): Record<string, string> => {
-    if (!loc?.chat) return {};
+  const flattenChat = (locales: unknown): Record<string, string> => {
+    if (!locales || typeof locales !== "object") return {};
+    const chat = (locales as Record<string, unknown>).chat;
+    if (!chat || typeof chat !== "object") return {};
+    const value = (key: string) => {
+      const candidate = (chat as Record<string, unknown>)[key];
+      return typeof candidate === "string" ? candidate : "";
+    };
     return {
-      'chat.title': loc.chat.title || '',
-      'chat.welcome': loc.chat.welcome || '',
-      'chat.welcomeDesc': loc.chat.welcomeDesc || '',
-      'chat.suggestion1': loc.chat.suggestion1 || '',
-      'chat.suggestion2': loc.chat.suggestion2 || '',
-      'chat.suggestion3': loc.chat.suggestion3 || '',
-      'chat.placeholder': loc.chat.placeholder || '',
-      'chat.shortcutHint': loc.chat.shortcutHint || '',
+      "chat.title": value("title"),
+      "chat.welcome": value("welcome"),
+      "chat.welcomeDesc": value("welcomeDesc"),
+      "chat.suggestion1": value("suggestion1"),
+      "chat.suggestion2": value("suggestion2"),
+      "chat.suggestion3": value("suggestion3"),
+      "chat.placeholder": value("placeholder"),
+      "chat.shortcutHint": value("shortcutHint"),
     };
   };
   
@@ -66,7 +70,21 @@
   let { children }: { children: Snippet } = $props();
 
   // Internal Data
-  let projects = $state<Record<string, unknown>[]>([]);
+  interface ProjectSummary extends Record<string, unknown> {
+    ref: string;
+    name?: string;
+  }
+
+  function isProjectSummary(value: unknown): value is ProjectSummary {
+    return Boolean(
+      value
+      && typeof value === "object"
+      && typeof (value as Record<string, unknown>).ref === "string"
+      && (value as Record<string, unknown>).ref,
+    );
+  }
+
+  let projects = $state<ProjectSummary[]>([]);
   let projectsLoading = $state(true);
   let isAuthenticated = $state(false);
   let i18nLoadGuardExpired = $state(false);
@@ -85,16 +103,11 @@
   );
   let isPlatformRoute = $derived($page.url.pathname.startsWith("/platform"));
 
-  let refFromUrl = $derived.by(() => {
-    const match = $page.url.pathname.match(/^\/project\/([^/]+)/);
-    return match ? match[1] : null;
-  });
+  let refFromUrl = $derived(typeof $page.params.ref === "string" ? $page.params.ref : null);
 
   let currentProject = $derived.by(() => {
-    if (refFromUrl && projects.length) {
-      return projects.find(p => p.ref === refFromUrl) || projects[0];
-    }
-    return projects[0] || null;
+    if (refFromUrl) return projects.find((project) => project.ref === refFromUrl) ?? null;
+    return projects[0] ?? null;
   });
 
   // SVAdmin Initialization
@@ -103,11 +116,6 @@
     defaultOptions: { queries: { staleTime: 30_000, retry: 1 } }
   });
 
-  setComponentRegistry({} as any);
-  setDataProvider(dataProvider);
-  setAuthProvider(authProvider);
-  setRouterProvider(routerProvider);
-  setChatProvider(chatProvider);
   setTheme("system");
   const readLocale = () => {
     if (typeof localStorage === "undefined") return "zh-CN";
@@ -138,12 +146,28 @@
     rows: $t("Tables.rows"),
   });
 
-  setLocale(mapToSvadminLocale(readLocale()));
-  
-  let lastResourcesKey = "";
+  const projectRefs = $derived(projects.map((project) => project.ref));
+  const adminResources = $derived(buildResourceRegistry(projectRefs, getResourceLabels()));
+  const adminTenant = $derived(resolveAdminTenant({
+    projectRefs,
+    projectRef: refFromUrl,
+    isRawPage,
+    isPlatformRoute,
+  }));
+  const providerBundle = createProviderBundle({
+    dataProvider,
+    authProvider,
+    routerProvider,
+    chatProvider,
+  });
 
-  const getResourceKey = (resources: { identifier?: string; name: string }[]) =>
-    resources.map((resource) => resource.identifier ?? resource.name).join("|");
+  provideAdminContext({
+    get providerBundle() { return providerBundle; },
+    get resources() { return adminResources; },
+    get tenant() { return adminTenant; },
+  });
+
+  setLocale(mapToSvadminLocale(readLocale()));
 
   async function handleLogout() {
     try {
@@ -207,23 +231,6 @@
     }
   }
 
-  $effect(() => {
-    const projectRefs = projects
-      .map((project) => String((project as Record<string, unknown>).ref ?? ""))
-      .filter(Boolean);
-    const freshResources = buildResourceRegistry(projectRefs, getResourceLabels());
-    const nextKey = `${$locale}|${getResourceKey(freshResources)}`;
-
-    if (nextKey === lastResourcesKey) {
-      return;
-    }
-
-    lastResourcesKey = nextKey;
-    untrack(() => {
-      setResources(freshResources);
-    });
-  });
-
   onMount(() => {
     let guardTimer: ReturnType<typeof setTimeout> | undefined;
     let unsubscribeLocale: (() => void) | undefined = locale.subscribe((value) => {
@@ -277,15 +284,8 @@
       try {
         const response = await apiClient('/v1/projects');
         if (response.ok) {
-          const nextProjects = await response.json();
-          const projectRefs = nextProjects
-            .map((project: Record<string, unknown>) => String(project.ref ?? ""))
-            .filter(Boolean);
-          const nextResources = buildResourceRegistry(projectRefs, getResourceLabels());
-
-          projects = nextProjects;
-          lastResourcesKey = `${$locale}|${getResourceKey(nextResources)}`;
-          setResources(nextResources);
+          const payload: unknown = await response.json();
+          projects = Array.isArray(payload) ? payload.filter(isProjectSummary) : [];
         }
       } catch (err: unknown) {
         toast.error($t("Common.network_error") || "Network error");
@@ -307,8 +307,6 @@
 </script>
 
 <ModeWatcher defaultMode="light" />
-<!-- Alias Toaster as SonnerToaster in script but use the original name in markup if not aliased -->
-<Toaster richColors position="top-right" />
 
 <QueryClientProvider client={queryClient}>
   <div class={isRawPage ? "flex min-h-screen bg-background" : "flex h-screen overflow-hidden bg-background"}>
@@ -391,7 +389,7 @@
           </div>
           {#if !isPlatformRoute && currentProject?.ref}
             <a
-              href={`/project/${currentProject.ref}/api`}
+              href={resolve("/project/[ref]/api", { ref: currentProject.ref })}
               class="inline-flex h-9 items-center gap-2 rounded-lg border bg-background px-3 text-xs font-semibold text-foreground transition-colors hover:border-brand/40 hover:bg-brand/5 hover:text-brand"
             >
               <Plug class="h-4 w-4" />
@@ -417,8 +415,8 @@
     {/if}
   </div>
 
+  <SvadminToast />
   {#if !isRawPage}
-    <SvadminToast />
     <ChatDialog />
     <DevTools />
   {/if}
