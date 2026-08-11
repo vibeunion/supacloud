@@ -3,6 +3,7 @@ import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:f
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { withWindowsSubprocessRef } from '../scripts/subprocess.js'
+import { createSymlinkIfPermitted } from './support/symlink.js'
 
 const cliPath = resolve(import.meta.dir, '../src/cli.ts')
 const initializationError = 'db reset requires initialized state; run "supacloud-lite migrate" first\n'
@@ -90,6 +91,60 @@ describe('db reset CLI', () => {
     expect(await readFile(dataSentinel, 'utf8')).toBe('database preserved')
     expect(await readFile(storageSentinel, 'utf8')).toBe('storage preserved')
     expect(await readFile(secretsPath, 'utf8')).toBe('{}\n')
+  })
+
+  test('preserves state and redacts paths when the secrets marker is a directory', async () => {
+    const projectDir = await temporaryProject()
+    const stateDir = join(projectDir, '.supacloud-lite')
+    const dataSentinel = join(stateDir, 'db', 'database.sentinel')
+    const storageSentinel = join(stateDir, 'storage', 'storage.sentinel')
+    const markerDirectory = join(stateDir, 'secrets.json')
+    const markerSentinel = join(markerDirectory, 'marker.sentinel')
+    await mkdir(join(stateDir, 'db'), { recursive: true })
+    await mkdir(join(stateDir, 'storage'))
+    await mkdir(markerDirectory)
+    await writeFile(dataSentinel, 'database preserved')
+    await writeFile(storageSentinel, 'storage preserved')
+    await writeFile(markerSentinel, 'directory marker preserved')
+
+    const reset = await runCli(projectDir, ['db', 'reset'])
+
+    expect(reset.exitCode).toBe(1)
+    expect(reset.stdout).toBe('')
+    expect(reset.stderr).toBe(invalidMarkerError)
+    expect(reset.stderr.includes(projectDir)).toBe(false)
+    expect(reset.stderr.includes('ENOENT')).toBe(false)
+    expect(await readFile(dataSentinel, 'utf8')).toBe('database preserved')
+    expect(await readFile(storageSentinel, 'utf8')).toBe('storage preserved')
+    expect(await readFile(markerSentinel, 'utf8')).toBe('directory marker preserved')
+  })
+
+  test('preserves state and redacts paths when the secrets marker is a symbolic link', async () => {
+    const projectDir = await temporaryProject()
+    const stateDir = join(projectDir, '.supacloud-lite')
+    const dataSentinel = join(stateDir, 'db', 'database.sentinel')
+    const storageSentinel = join(stateDir, 'storage', 'storage.sentinel')
+    const secretsPath = join(stateDir, 'secrets.json')
+    const externalMarker = join(projectDir, 'external-secrets.json')
+    const externalSecret = 'must-not-appear-in-reset-output'
+    await mkdir(join(stateDir, 'db'), { recursive: true })
+    await mkdir(join(stateDir, 'storage'))
+    await writeFile(dataSentinel, 'database preserved')
+    await writeFile(storageSentinel, 'storage preserved')
+    await writeFile(externalMarker, externalSecret)
+    if (!await createSymlinkIfPermitted(externalMarker, secretsPath)) return
+
+    const reset = await runCli(projectDir, ['db', 'reset'])
+
+    expect(reset.exitCode).toBe(1)
+    expect(reset.stdout).toBe('')
+    expect(reset.stderr).toBe(invalidMarkerError)
+    expect(reset.stderr.includes(projectDir)).toBe(false)
+    expect(reset.stderr.includes('ENOENT')).toBe(false)
+    expect(reset.stderr.includes(externalSecret)).toBe(false)
+    expect(await readFile(dataSentinel, 'utf8')).toBe('database preserved')
+    expect(await readFile(storageSentinel, 'utf8')).toBe('storage preserved')
+    expect(await readFile(externalMarker, 'utf8')).toBe(externalSecret)
   })
 
   test('directs fresh projects to migrate in CLI help', async () => {

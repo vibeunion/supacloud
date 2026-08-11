@@ -105,7 +105,7 @@ export async function assertResetPathsSafe(paths: ProjectPaths): Promise<void> {
   }
   const markerInfo = await requiredResetEntry(secretsFile)
   if (!markerInfo.isFile() || markerInfo.isSymbolicLink()) {
-    throw new Error(`refusing to reset a state directory without a valid secrets marker: ${stateDir}`)
+    throw new Error(RESET_INVALID_SECRETS_ERROR)
   }
   await assertResetSecretsValid(secretsFile)
   const targets = [
