@@ -1,4 +1,5 @@
 import type { TSchema } from "@sinclair/typebox";
+import { Value } from "@sinclair/typebox/value";
 import {
     parseToolArguments,
     schemaDescription,
@@ -28,6 +29,48 @@ function coerceCliValue(value: string): string | number | boolean {
     if (value === "false") return false;
     if (value.trim() !== "" && !Number.isNaN(Number(value))) return Number(value);
     return value;
+}
+
+const DUPLICATE_CLI_FLAG_MESSAGE = "Duplicate CLI flag is not allowed";
+
+interface CliFlag {
+    name: string;
+    rawValue?: string;
+    nextIndex: number;
+}
+
+function cliFlagAt(args: string[], index: number): CliFlag | null {
+    const argument = args[index];
+    if (!argument.startsWith("--") || argument.length <= 2) return null;
+    const rawFlag = argument.slice(2);
+    const equalsIndex = rawFlag.indexOf("=");
+    if (equalsIndex >= 0) {
+        return { name: rawFlag.slice(0, equalsIndex), rawValue: rawFlag.slice(equalsIndex + 1), nextIndex: index };
+    }
+    const nextArgument = args[index + 1];
+    if (nextArgument !== undefined && !nextArgument.startsWith("--")) {
+        return { name: rawFlag, rawValue: nextArgument, nextIndex: index + 1 };
+    }
+    return { name: rawFlag, nextIndex: index };
+}
+
+function schemaCompatibleCliValue(field: TSchema | undefined, rawValue: string): string | number | boolean {
+    return field && Value.Check(field, rawValue) ? rawValue : coerceCliValue(rawValue);
+}
+
+function parseCliFlags(args: string[], startIndex: number, schema: ToolSchema): Record<string, unknown> {
+    const parsedFlags: Record<string, unknown> = Object.create(null);
+    const fields = schemaProperties(schema);
+    for (let index = startIndex; index < args.length; index++) {
+        const flag = cliFlagAt(args, index);
+        if (!flag) continue;
+        index = flag.nextIndex;
+        if (Object.hasOwn(parsedFlags, flag.name)) throw new Error(DUPLICATE_CLI_FLAG_MESSAGE);
+        parsedFlags[flag.name] = flag.rawValue === undefined
+            ? true
+            : schemaCompatibleCliValue(fields[flag.name], flag.rawValue);
+    }
+    return parsedFlags;
 }
 
 export async function runCli(
@@ -128,32 +171,16 @@ export async function runCli(
         return;
     }
     
-    const parsedArgs: Record<string, any> = {};
     let startIdx = 1;
 
     // Check if there is an action argument (assuming index 1 is action if not starting with '--')
     if (args.length > 1 && !args[1].startsWith("--")) {
-        parsedArgs.action = args[1];
         startIdx = 2;
     }
-    
-    for (let i = startIdx; i < args.length; i++) {
-        const arg = args[i];
-        if (arg.startsWith("--") && arg.length > 2) {
-            const rawFlag = arg.slice(2);
-            const equalsIndex = rawFlag.indexOf("=");
-            const key = equalsIndex >= 0 ? rawFlag.slice(0, equalsIndex) : rawFlag;
-            let val: string | number | boolean = true;
-            if (equalsIndex >= 0) {
-                val = coerceCliValue(rawFlag.slice(equalsIndex + 1));
-            } else if (i + 1 < args.length && !args[i + 1].startsWith("--")) {
-                val = coerceCliValue(args[++i]);
-            }
-            parsedArgs[key] = val;
-        }
-    }
-    
+
     try {
+        const parsedArgs = parseCliFlags(args, startIdx, tool.schema);
+        if (startIdx === 2) parsedArgs.action = args[1];
         const validatedArgs = parseToolArguments(tool.schema, parsedArgs);
 
         const result = await tool.callback(validatedArgs) as CliToolResult;
