@@ -23,7 +23,7 @@ type ToolServer = {
     ) => void;
 };
 
-type ScheduledFunctionAction = "list" | "create" | "update" | "delete";
+type ScheduledFunctionAction = "list" | "get" | "create" | "update" | "delete";
 
 interface ScheduledFunctionToolsOptions {
     readOnly?: boolean;
@@ -52,6 +52,7 @@ type ScheduleMutationExpectation = {
     ref: string;
     scheduleId: string;
     requestId: string;
+    expectedUpdatedAt: string;
     expectedFields: Record<string, unknown>;
 };
 
@@ -84,12 +85,14 @@ const MAX_BODY_FILE_BYTES = 1_048_576;
 const MAX_HEADER_COUNT = 64;
 const MAX_HEADER_VALUE_LENGTH = 8_192;
 const MAX_SCHEDULE_NAME_LENGTH = 120;
+const CANONICAL_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const headerEnvironmentRecord = Type.Record(Type.String(), Type.String());
 const ACTION_ARGUMENTS: Record<ScheduledFunctionAction, ReadonlySet<string>> = {
     list: new Set(["action", "ref"]),
+    get: new Set(["action", "ref", "schedule_id"]),
     create: new Set(["action", "ref", "name", "slug", "cron", "method", "body_file", "header_env"]),
-    update: new Set(["action", "ref", "schedule_id", "name", "cron", "method", "enabled", "body_file", "header_env"]),
-    delete: new Set(["action", "ref", "schedule_id"]),
+    update: new Set(["action", "ref", "schedule_id", "expected_updated_at", "name", "cron", "method", "enabled", "body_file", "header_env"]),
+    delete: new Set(["action", "ref", "schedule_id", "expected_updated_at"]),
 };
 
 function parseHeaderEnvironment(input: string | Record<string, string>): unknown {
@@ -239,7 +242,13 @@ function validScheduleDefinition(schedule: Record<string, unknown>): boolean {
 }
 
 function validScheduleMetadata(schedule: Record<string, unknown>): boolean {
-    return typeof schedule.created_at === "string" && typeof schedule.updated_at === "string";
+    return typeof schedule.created_at === "string" && isCanonicalTimestamp(schedule.updated_at);
+}
+
+function isCanonicalTimestamp(candidate: unknown): candidate is string {
+    if (typeof candidate !== "string" || !CANONICAL_TIMESTAMP_PATTERN.test(candidate)) return false;
+    const milliseconds = Date.parse(candidate);
+    return Number.isFinite(milliseconds) && new Date(milliseconds).toISOString() === candidate;
 }
 
 function safeSchedulePayload(
@@ -318,6 +327,21 @@ function listResponse(ref: string, response: HttpResult<unknown>): ReleaseContro
     return releaseControlSuccess(operation, { project_ref: ref, schedules });
 }
 
+function getResponse(
+    ref: string,
+    scheduleId: string,
+    response: HttpResult<unknown>,
+): ReleaseControlToolResponse {
+    const operation = "scheduled_functions.get";
+    if (!response.ok) return scheduleFailure(operation, response);
+    const payload = objectRecord(response.data);
+    const schedule = safeSchedule(payload?.schedule);
+    if (payload?.project_ref !== ref || !schedule || schedule.id !== scheduleId) {
+        return releaseControlFailure(operation, "INVALID_RESPONSE", null);
+    }
+    return releaseControlSuccess(operation, { project_ref: ref, schedule });
+}
+
 function mutationResponse(
     expectation: ScheduleMutationExpectation,
     response: HttpResult<unknown>,
@@ -331,28 +355,40 @@ function mutationResponse(
     const confirmsRequest = schedule && Object.entries(expectedFields).every(
         ([field, expected]) => isDeepStrictEqual(schedule[field as keyof SafeScheduledFunction], expected),
     );
+    const confirmsRevision = action === "create"
+        || (payload?.previous_updated_at === expectation.expectedUpdatedAt
+            && schedule !== null && schedule.updated_at > expectation.expectedUpdatedAt);
     if (payload?.project_ref !== ref || payload.request_id !== requestId
         || payload?.[action === "create" ? "created" : "updated"] !== true
-        || !schedule || !confirmsRequest || (scheduleId !== undefined && schedule.id !== scheduleId)) {
+        || !schedule || !confirmsRequest || !confirmsRevision
+        || (scheduleId !== undefined && schedule.id !== scheduleId)) {
         return releaseControlFailure(operation, "OUTCOME_UNKNOWN", response.status);
     }
-    return releaseControlSuccess(operation, { project_ref: ref, request_id: requestId, schedule });
+    return releaseControlSuccess(operation, {
+        project_ref: ref,
+        request_id: requestId,
+        ...(action === "update" ? { previous_updated_at: expectation.expectedUpdatedAt } : {}),
+        schedule,
+    });
 }
 
 function deleteResponse(
     ref: string,
     scheduleId: string,
+    expectedUpdatedAt: string,
     response: HttpResult<unknown>,
 ): ReleaseControlToolResponse {
     const operation = "scheduled_functions.delete";
     if (!response.ok) return releaseControlMutationFailure(operation, response);
     const payload = objectRecord(response.data);
-    if (payload?.deleted !== true || payload.project_ref !== ref || payload.schedule_id !== scheduleId) {
+    if (payload?.deleted !== true || payload.project_ref !== ref || payload.schedule_id !== scheduleId
+        || payload.deleted_updated_at !== expectedUpdatedAt) {
         return releaseControlFailure(operation, "OUTCOME_UNKNOWN", response.status);
     }
     return releaseControlSuccess(operation, {
         project_ref: ref,
         schedule_id: scheduleId,
+        deleted_updated_at: expectedUpdatedAt,
         deleted: true,
     });
 }
@@ -412,10 +448,19 @@ function requiredCron(args: Record<string, unknown>, action: string): string {
     return cron;
 }
 
+function requiredExpectedUpdatedAt(args: Record<string, unknown>, action: "update" | "delete"): string {
+    const candidate = args.expected_updated_at;
+    if (!isCanonicalTimestamp(candidate)) {
+        throw new Error(`'expected_updated_at' must be a canonical UTC timestamp for '${action}'`);
+    }
+    return candidate;
+}
+
 function updateRequest(
     args: Record<string, unknown>,
     environment: NodeJS.ProcessEnv,
 ): Record<string, unknown> {
+    const expectedUpdatedAt = requiredExpectedUpdatedAt(args, "update");
     const body = scheduleBody(args.body_file);
     const headers = scheduleHeaders(args.header_env, environment);
     const cron = args.cron === undefined ? undefined : requiredCron(args, "update");
@@ -427,7 +472,15 @@ function updateRequest(
     if (Object.keys(mutationFields).length === 0) {
         throw new Error("Scheduled Function update requires at least one field");
     }
-    return { request_id: randomUUID(), ...mutationFields };
+    return {
+        request_id: randomUUID(),
+        expected_updated_at: expectedUpdatedAt,
+        ...mutationFields,
+    };
+}
+
+function deletePath(schedulePathname: string, expectedUpdatedAt: string): string {
+    return `${schedulePathname}?expected_updated_at=${encodeURIComponent(expectedUpdatedAt)}`;
 }
 
 async function executeScheduleAction(
@@ -437,7 +490,7 @@ async function executeScheduleAction(
     readOnly = false,
 ): Promise<ReleaseControlToolResponse> {
     const action = args.action as ScheduledFunctionAction;
-    if (readOnly && action !== "list") return readOnlyResult();
+    if (readOnly && action !== "list" && action !== "get") return readOnlyResult();
     assertActionArguments(action, args);
     const ref = requiredText(args, "ref", action);
     if (action === "list") return listResponse(ref, await http.get(schedulePath(ref)));
@@ -448,20 +501,24 @@ async function executeScheduleAction(
             await http.post(schedulePath(ref), request));
     }
     const scheduleId = requiredText(args, "schedule_id", action);
+    const targetPath = schedulePath(ref, scheduleId);
+    if (action === "get") return getResponse(ref, scheduleId, await http.get(targetPath));
     if (action === "update") {
         const request = updateRequest(args, environment);
         const requestId = request.request_id as string;
+        const expectedUpdatedAt = request.expected_updated_at as string;
         return mutationResponse({
             action,
             ref,
             scheduleId,
             requestId,
+            expectedUpdatedAt,
             expectedFields: safeMutationFields(request),
-        }, await http.patch(
-            schedulePath(ref, scheduleId), request,
-        ));
+        }, await http.patch(targetPath, request));
     }
-    return deleteResponse(ref, scheduleId, await http.delete(schedulePath(ref, scheduleId)));
+    const expectedUpdatedAt = requiredExpectedUpdatedAt(args, "delete");
+    return deleteResponse(ref, scheduleId, expectedUpdatedAt,
+        await http.delete(deletePath(targetPath, expectedUpdatedAt)));
 }
 
 export function registerScheduledFunctionTools(
@@ -474,11 +531,12 @@ export function registerScheduledFunctionTools(
         (args) => executeScheduleAction(http, environment, args, options.readOnly));
 }
 
-const SCHEDULE_TOOL_DESCRIPTION = "Scheduled Edge Function lifecycle. Actions: list, create, update, delete";
+const SCHEDULE_TOOL_DESCRIPTION = "Scheduled Edge Function lifecycle. Actions: list, get, create, update, delete";
 const SCHEDULE_TOOL_SCHEMA: ToolSchema = {
-    action: withDescription(stringEnum(["list", "create", "update", "delete"]), "Action"),
+    action: withDescription(stringEnum(["list", "get", "create", "update", "delete"]), "Action"),
     ref: withDescription(Type.String(), "Project ref"),
-    schedule_id: optional(Type.String(), "[update/delete] Schedule ID"),
+    schedule_id: optional(Type.String(), "[get/update/delete] Schedule ID"),
+    expected_updated_at: optional(Type.String(), "[update/delete] Canonical updated_at from list"),
     name: optional(Type.String(), "[create/update] Display name"),
     slug: optional(Type.String(), "[create] Edge Function slug"),
     cron: optional(Type.String(), "[create/update] Five-field cron expression"),

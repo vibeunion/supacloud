@@ -28,6 +28,7 @@ const LARGE_FUNCTION_SOURCE = "export const payload = "
     + JSON.stringify("x".repeat(80 * 1024))
     + ";\n";
 const SCHEDULE_ID = "00000000-0000-4000-8000-000000000001";
+const SCHEDULE_UPDATED_AT = "2026-08-11T00:00:00.000Z";
 const PATH_ESCAPE_INPUTS = [
     ".", "..", "%2e", "%2e%2e", ".%2e", "%2e.", "%252e%252e", "a/b", "a?b", "a#b",
 ];
@@ -1248,6 +1249,80 @@ describe("supacloud-cli process contract", () => {
         expect(response.stdout + response.stderr).not.toContain(bodySentinel);
     });
 
+    test("gets, updates, and deletes a schedule with revision-bound receipts", async () => {
+        const nextUpdatedAt = "2026-08-11T00:00:00.001Z";
+        const requestedMethods: string[] = [];
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            async fetch(request) {
+                requestedMethods.push(request.method);
+                const requestUrl = new URL(request.url);
+                const schedule = {
+                    id: SCHEDULE_ID,
+                    name: "Nightly",
+                    slug: "worker",
+                    cron: "0 2 * * *",
+                    method: "POST",
+                    enabled: request.method === "PATCH" ? false : true,
+                    body_empty: true,
+                    header_names: [],
+                    created_at: SCHEDULE_UPDATED_AT,
+                    updated_at: request.method === "PATCH" ? nextUpdatedAt : SCHEDULE_UPDATED_AT,
+                };
+                if (request.method === "GET") {
+                    return Response.json({ project_ref: "abc123", schedule });
+                }
+                if (request.method === "PATCH") {
+                    const body = await request.json() as Record<string, unknown>;
+                    return Response.json({
+                        updated: true,
+                        project_ref: "abc123",
+                        request_id: body.request_id,
+                        previous_updated_at: body.expected_updated_at,
+                        schedule,
+                    });
+                }
+                return Response.json({
+                    deleted: true,
+                    project_ref: "abc123",
+                    schedule_id: SCHEDULE_ID,
+                    deleted_updated_at: requestUrl.searchParams.get("expected_updated_at"),
+                });
+            },
+        });
+        servers.push(server);
+        const environment = {
+            SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+            SUPACLOUD_API_TOKEN: "test-token",
+            SUPACLOUD_PROJECT_REF: "abc123",
+        };
+
+        const getResponse = await runProjectCli([
+            "scheduled_functions", "get", "--ref", "abc123", "--schedule_id", SCHEDULE_ID,
+        ], environment);
+        const updateResponse = await runProjectCli([
+            "scheduled_functions", "update", "--ref", "abc123", "--schedule_id", SCHEDULE_ID,
+            "--expected_updated_at", SCHEDULE_UPDATED_AT, "--enabled", "false",
+        ], environment);
+        const deleteResponse = await runProjectCli([
+            "scheduled_functions", "delete", "--ref", "abc123", "--schedule_id", SCHEDULE_ID,
+            "--expected_updated_at", nextUpdatedAt,
+        ], environment);
+
+        expect([getResponse.exitCode, updateResponse.exitCode, deleteResponse.exitCode]).toEqual([0, 0, 0]);
+        expect(JSON.parse(getResponse.stdout).schedule.updated_at).toBe(SCHEDULE_UPDATED_AT);
+        expect(JSON.parse(updateResponse.stdout)).toMatchObject({
+            previous_updated_at: SCHEDULE_UPDATED_AT,
+            schedule: { updated_at: nextUpdatedAt, enabled: false },
+        });
+        expect(JSON.parse(deleteResponse.stdout)).toMatchObject({
+            deleted: true,
+            deleted_updated_at: nextUpdatedAt,
+        });
+        expect(requestedMethods).toEqual(["GET", "PATCH", "DELETE"]);
+    });
+
     test.each(PATH_ESCAPE_INPUTS)("rejects schedule path escape '%s' before any HTTP request", async (scheduleId) => {
         let requestCount = 0;
         let projectMutationCount = 0;
@@ -1319,7 +1394,10 @@ describe("supacloud-cli process contract", () => {
         servers.push(server);
 
         const response = await runProjectCli(
-            ["scheduled_functions", "delete", "--ref", "abc123", "--schedule_id", SCHEDULE_ID],
+            [
+                "scheduled_functions", "delete", "--ref", "abc123", "--schedule_id", SCHEDULE_ID,
+                "--expected_updated_at", SCHEDULE_UPDATED_AT,
+            ],
             {
                 SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
                 SUPACLOUD_API_TOKEN: "test-token",

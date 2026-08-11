@@ -147,6 +147,9 @@ describe("ProjectRepository", () => {
       };
       const project = await projectRepository.create(input);
       expect(project).toBeDefined();
+      const [, ...parameters] = (mockSql as ReturnType<typeof mock>).mock.calls[0];
+      expect(parameters).toContainEqual({ custom: "value" });
+      expect(parameters).not.toContain(JSON.stringify(input.config));
     });
   });
 
@@ -171,6 +174,30 @@ describe("ProjectRepository", () => {
       (mockSql as ReturnType<typeof mock>).mockResolvedValueOnce([updatedProject]);
       const project = await projectRepository.updateConfig("test123", { key: "value" });
       expect(project).toBeDefined();
+    });
+
+    test("preserves the database-owned scheduled function config in the update SQL", async () => {
+      const staleSchedule = { id: "stale-schedule" };
+      const inputConfig = { key: "value", scheduled_functions: [staleSchedule] };
+      (mockSql as ReturnType<typeof mock>).mockResolvedValueOnce([mockProject]);
+
+      await projectRepository.updateConfig("test123", inputConfig);
+
+      const [strings, nextConfig] = (mockSql as ReturnType<typeof mock>).mock.calls[0];
+      const query = (strings as TemplateStringsArray).join("?").replaceAll(/\s+/g, " ").trim();
+      expect(query).toContain("jsonb_typeof(projects.config) = 'object'");
+      expect(query).toContain("projects.config ? 'scheduled_functions'");
+      expect(query).toContain("jsonb_build_object('scheduled_functions', projects.config -> 'scheduled_functions')");
+      expect(nextConfig).toEqual(inputConfig);
+    });
+
+    test("normalizes unexpected scalar config before building the update query", async () => {
+      (mockSql as ReturnType<typeof mock>).mockResolvedValueOnce([mockProject]);
+
+      await projectRepository.updateConfig("test123", "legacy" as unknown as Record<string, unknown>);
+
+      const [, nextConfig] = (mockSql as ReturnType<typeof mock>).mock.calls[0];
+      expect(nextConfig).toEqual({});
     });
 
     test("should return null when project not found", async () => {

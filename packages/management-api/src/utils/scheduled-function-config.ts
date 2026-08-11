@@ -40,6 +40,7 @@ export const MAX_SCHEDULE_NAME_LENGTH = 120;
 
 const FUNCTION_SLUG_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const SCHEDULE_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const CANONICAL_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
 function objectRecord(candidate: unknown): Record<string, unknown> | null {
   return candidate && typeof candidate === "object" && !Array.isArray(candidate)
@@ -62,6 +63,12 @@ export function normalizedScheduledFunctionSlug(candidate: unknown): string | nu
   if (typeof candidate !== "string") return null;
   const slug = candidate.trim();
   return FUNCTION_SLUG_PATTERN.test(slug) ? slug : null;
+}
+
+export function isCanonicalScheduledFunctionTimestamp(candidate: unknown): candidate is string {
+  if (typeof candidate !== "string" || !CANONICAL_TIMESTAMP_PATTERN.test(candidate)) return false;
+  const milliseconds = Date.parse(candidate);
+  return Number.isFinite(milliseconds) && new Date(milliseconds).toISOString() === candidate;
 }
 
 export function scheduledFunctionBodyWithinLimit(candidate: unknown): boolean {
@@ -96,7 +103,14 @@ export function isScheduledFunctionConfig(candidate: unknown): candidate is Sche
   const schedule = objectRecord(candidate);
   return schedule !== null && validScheduleIdentity(schedule) && validScheduleDefinition(schedule)
     && validSchedulePayload(schedule)
-    && typeof schedule.created_at === "string" && typeof schedule.updated_at === "string";
+    && typeof schedule.created_at === "string"
+    && isCanonicalScheduledFunctionTimestamp(schedule.updated_at);
+}
+
+export function scheduledFunctionsFromProjectConfig(projectConfig: unknown): ScheduledFunctionConfig[] {
+  const normalizedConfig = normalizeProjectConfig(projectConfig);
+  const scheduleCandidates = normalizedConfig.scheduled_functions;
+  return Array.isArray(scheduleCandidates) ? scheduleCandidates.filter(isScheduledFunctionConfig) : [];
 }
 
 function publicBodyEmpty(schedule: PublicScheduleCandidate): boolean {

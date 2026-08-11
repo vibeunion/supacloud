@@ -134,6 +134,7 @@ describe("CLI execution policy", () => {
     test("classifies Function, Scheduled Function, and Storage lifecycle actions", () => {
         expect(executionMode("edge_functions", "activate", {})).toBe("write");
         expect(executionMode("scheduled_functions", "list", {})).toBe("read");
+        expect(executionMode("scheduled_functions", "get", {})).toBe("read");
         for (const action of ["create", "update", "delete"]) {
             expect(executionMode("scheduled_functions", action, {})).toBe("write");
         }
