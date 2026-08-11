@@ -16,7 +16,12 @@ export interface HttpResult<T = unknown> {
     data: T;
 }
 
+interface HttpPostOptions {
+    timeoutMs: number;
+}
+
 const DEFAULT_TIMEOUT = 30_000;
+const MAX_POST_TIMEOUT_MS = 35 * 60_000;
 const MAX_RETRIES = 2;
 const RETRY_BASE_DELAY = 500;
 
@@ -33,9 +38,21 @@ function isRetryableError(error: unknown): boolean {
         || networkError.code === "ECONNRESET";
 }
 
-async function fetchWithTimeout(url: string, options: RequestInit): Promise<Response> {
+function validatedPostTimeout(options?: HttpPostOptions): number {
+    const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT;
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > MAX_POST_TIMEOUT_MS) {
+        throw new RangeError(`HTTP request timeout must be between 1 and ${MAX_POST_TIMEOUT_MS} ms`);
+    }
+    return timeoutMs;
+}
+
+async function fetchWithTimeout(
+    url: string,
+    options: RequestInit,
+    timeoutMs = DEFAULT_TIMEOUT,
+): Promise<Response> {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT);
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
         return await fetch(url, {
             ...options,
@@ -49,11 +66,12 @@ async function fetchWithTimeout(url: string, options: RequestInit): Promise<Resp
 async function fetchWithRetry(
     url: string,
     options: RequestInit,
+    timeoutMs = DEFAULT_TIMEOUT,
 ): Promise<Response> {
     const retries = isRetryableMethod(options.method) ? MAX_RETRIES : 0;
     for (let attempt = 0; attempt <= retries; attempt++) {
         try {
-            const res = await fetchWithTimeout(url, options);
+            const res = await fetchWithTimeout(url, options, timeoutMs);
 
             if (res.status >= 500 && res.status < 600 && attempt < retries) {
                 const delay = RETRY_BASE_DELAY * Math.pow(2, attempt);
@@ -102,13 +120,18 @@ export class HttpTransport {
         }
     }
 
-    async post<T = unknown>(path: string, body?: unknown): Promise<HttpResult<T>> {
+    async post<T = unknown>(
+        path: string,
+        body?: unknown,
+        options?: HttpPostOptions,
+    ): Promise<HttpResult<T>> {
+        const timeoutMs = validatedPostTimeout(options);
         try {
             const res = await fetchWithRetry(`${this.baseUrl}${path}`, {
                 method: "POST",
                 headers: this.headers(),
                 body: body ? JSON.stringify(body) : undefined,
-            });
+            }, timeoutMs);
             const data = (await res.json().catch(() => null)) as T;
             return { ok: res.ok, status: res.status, data };
         } catch (error: any) {

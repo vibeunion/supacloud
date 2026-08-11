@@ -126,6 +126,21 @@ the CLI does not redirect the operation to the owner project. Supply
 `SUPACLOUD_API_TOKEN` through the environment only; service-control commands do
 not accept credential flags.
 
+Create a completed full physical backup before a release with:
+
+```bash
+supacloud-admin platform create_backup --ref abc123 --backup_type full
+```
+
+The command reads the physical backup inventory before the write and performs
+one bounded reconciliation read after every mutation attempt. It exits non-zero
+unless the API confirms success and the inventory contains exactly one new,
+completed full backup with a nonzero size. The Management API rejects unknown
+project refs and resolves inventory from the persisted project database name.
+The JSON receipt contains only the project ref, requested type, backup ID,
+database, timestamps, and size. `platform list_backups --ref abc123` applies the
+same strict, sanitized inventory validation without creating a backup.
+
 Gateway / Caddy commands (config is injected via the Caddy JSON Admin API; requires admin privileges):
 
 - `gateway routes` — list custom gateway routes
