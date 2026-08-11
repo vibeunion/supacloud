@@ -92,6 +92,43 @@ async function runAggregateFailureCli(): Promise<{ exitCode: number; output: str
     return { exitCode, output: stdout + stderr };
 }
 
+function studioProcessInventory(): Array<Record<string, unknown>> {
+    return [
+        { id: "db", name: "db", status: "ACTIVE_HEALTHY", healthy: true, service_host_ids: ["project-ref-db"] },
+        { id: "rest", name: "rest", status: "COMING_UP", healthy: false, service_host_ids: ["project-ref-rest"] },
+        { id: "auth", name: "auth", status: "INACTIVE", healthy: false, service_host_ids: ["owner-ref-auth"] },
+        { id: "realtime", name: "realtime", status: "UNHEALTHY", healthy: false, service_host_ids: ["project-ref-realtime"] },
+        { id: "storage", name: "storage", status: "ACTIVE_HEALTHY", healthy: true, service_host_ids: ["project-ref-storage"] },
+    ];
+}
+
+function inventoryWithField(fieldName: string, fieldValue: unknown): Array<Record<string, unknown>> {
+    const inventory = studioProcessInventory();
+    inventory[0] = { ...inventory[0], [fieldName]: fieldValue };
+    return inventory;
+}
+
+function invalidProcessInventories(secretMarker: string, oversizedMarker: string): unknown[] {
+    const duplicate = studioProcessInventory();
+    duplicate[4] = { ...duplicate[0] };
+    const badStatus = studioProcessInventory();
+    badStatus[1] = { ...badStatus[1], status: "INACTIVE" };
+    const healthyMismatch = studioProcessInventory();
+    healthyMismatch[0] = { ...healthyMismatch[0], healthy: false };
+    const multipleHostIds = studioProcessInventory();
+    multipleHostIds[2] = { ...multipleHostIds[2], service_host_ids: ["owner-ref-auth", "project-ref-auth"] };
+    const oversizedInventory = Array.from({ length: 256 }, () => ({
+        id: oversizedMarker, name: oversizedMarker, status: oversizedMarker,
+        healthy: false, service_host_ids: [oversizedMarker],
+    }));
+    return [
+        inventoryWithField("id", secretMarker), inventoryWithField("name", secretMarker),
+        inventoryWithField("status", secretMarker), inventoryWithField("service_host_ids", [secretMarker]),
+        oversizedInventory, duplicate, studioProcessInventory().slice(0, 4),
+        badStatus, healthyMismatch, multipleHostIds,
+    ];
+}
+
 const baseContext = {
     host: "server.example.com",
     sshUser: "root",
@@ -208,6 +245,139 @@ describe("supacloud-admin process contract", () => {
         expect(execution.output).toContain("--api_domain");
         expect(execution.output).toContain("--auth_domain");
         expect(execution.output).toContain("--studio_domain");
+    });
+
+    test("documents constrained project service control without credential flags", async () => {
+        const execution = await runAdminCli(["project", "service_control", "--help"]);
+
+        expect(execution.exitCode).toBe(0);
+        expect(execution.output).toContain("--ref");
+        expect(execution.output).toContain("--service");
+        expect(execution.output).toContain("--service_action");
+        expect(execution.output).not.toContain("--token");
+    });
+
+    test("returns non-zero when service control reports HTTP 200 with success false", async () => {
+        let authorizationHeader = "";
+        let requestMethod = "";
+        let requestedPath = "";
+        const apiServer = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch(request) {
+                const requestUrl = new URL(request.url);
+                authorizationHeader = request.headers.get("authorization") || "";
+                requestMethod = request.method;
+                requestedPath = requestUrl.pathname;
+                return Response.json({
+                    service: "gotrue",
+                    action: "stop",
+                    success: false,
+                    message: "remote service failure text",
+                    token: "remote-response-token",
+                    secret: "remote-response-secret",
+                    Authorization: "Bearer remote-response-authorization",
+                    project_ref: "hidden-project-ref",
+                });
+            },
+        });
+        const fixtureToken = "dummy-supacloud-api-token";
+
+        try {
+            const execution = await runAdminCli([
+                "project", "service_control",
+                "--ref", "project-ref",
+                "--service", "gotrue",
+                "--service_action", "stop",
+            ], {
+                SUPACLOUD_API_URL: `http://127.0.0.1:${apiServer.port}`,
+                SUPACLOUD_API_TOKEN: fixtureToken,
+            });
+
+            expect(execution.exitCode).toBe(1);
+            expect(requestMethod).toBe("POST");
+            expect(requestedPath).toBe("/v1/projects/project-ref/services/gotrue/stop");
+            expect(authorizationHeader).toBe(`Bearer ${fixtureToken}`);
+            expect(execution.output).toContain("Project service control failed");
+            expect(execution.output).not.toContain(fixtureToken);
+            expect(execution.output).not.toContain("remote service failure text");
+            expect(execution.output).not.toContain("remote-response-token");
+            expect(execution.output).not.toContain("remote-response-secret");
+            expect(execution.output).not.toContain("remote-response-authorization");
+            expect(execution.output).not.toContain("hidden-project-ref");
+        } finally {
+            apiServer.stop(true);
+        }
+    });
+
+    test("returns non-zero for every invalid service inventory without reflection", async () => {
+        const secretMarker = "process-inventory-secret";
+        const oversizedMarker = "oversized-process-secret-".repeat(48);
+        const invalidInventories = invalidProcessInventories(secretMarker, oversizedMarker);
+        let responseIndex = 0;
+        const apiServer = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch() {
+                return Response.json(invalidInventories[responseIndex++]);
+            },
+        });
+
+        try {
+            for (const _inventory of invalidInventories) {
+                const execution = await runAdminCli(["project", "services", "--ref", "project-ref"], {
+                    SUPACLOUD_API_URL: `http://127.0.0.1:${apiServer.port}`,
+                    SUPACLOUD_API_TOKEN: "test-token",
+                });
+                expect(execution.exitCode).toBe(1);
+                expect(execution.output.trim()).toBe("❌ Project service inventory response is invalid");
+                expect(execution.output).not.toContain(secretMarker);
+                expect(execution.output).not.toContain(oversizedMarker);
+            }
+            expect(responseIndex).toBe(invalidInventories.length);
+        } finally {
+            apiServer.stop(true);
+        }
+    });
+
+    test("returns non-zero without reflecting a service control HTTP error body", async () => {
+        const apiServer = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch() {
+                return Response.json({
+                    message: "remote HTTP failure text",
+                    token: "remote-http-token",
+                    secret: "remote-http-secret",
+                    Authorization: "Bearer remote-http-authorization",
+                    project_ref: "hidden-http-project-ref",
+                }, { status: 503 });
+            },
+        });
+        const fixtureToken = "dummy-http-api-token";
+
+        try {
+            const execution = await runAdminCli([
+                "project", "service_control",
+                "--ref", "project-ref",
+                "--service", "gotrue",
+                "--service_action", "stop",
+            ], {
+                SUPACLOUD_API_URL: `http://127.0.0.1:${apiServer.port}`,
+                SUPACLOUD_API_TOKEN: fixtureToken,
+            });
+
+            expect(execution.exitCode).toBe(1);
+            expect(execution.output.trim()).toBe("❌ Failed (503)");
+            expect(execution.output).not.toContain(fixtureToken);
+            expect(execution.output).not.toContain("remote HTTP failure text");
+            expect(execution.output).not.toContain("remote-http-token");
+            expect(execution.output).not.toContain("remote-http-secret");
+            expect(execution.output).not.toContain("remote-http-authorization");
+            expect(execution.output).not.toContain("hidden-http-project-ref");
+        } finally {
+            apiServer.stop(true);
+        }
     });
 
     test("returns a non-zero exit code when project creation is rejected", async () => {
