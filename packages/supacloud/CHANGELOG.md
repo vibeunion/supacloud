@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.2](https://github.com/zuohuadong/supacloud/compare/supacloud-v0.9.1...supacloud-v0.9.2) (2026-08-11)
+
+
+### Bug Fixes
+
+* **supacloud:** sync published CLI dependencies ([#853](https://github.com/zuohuadong/supacloud/issues/853)) ([0dabd2b](https://github.com/zuohuadong/supacloud/commit/0dabd2b7566aeaaffc861bf2a61088491e46d2fc))
+
 ## [0.9.1](https://github.com/zuohuadong/supacloud/compare/supacloud-v0.9.0...supacloud-v0.9.1) (2026-08-11)
 
 

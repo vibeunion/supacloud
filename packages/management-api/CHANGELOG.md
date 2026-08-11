@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.55.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.54.0...management-api-v0.55.0) (2026-08-11)
+
+
+### Features
+
+* **platform:** add durable project mutation journal ([#854](https://github.com/zuohuadong/supacloud/issues/854)) ([4dc089c](https://github.com/zuohuadong/supacloud/commit/4dc089c82ac31e7c3e33953f24552b98e2470012))
+
+
+### Elegance & Refactoring
+
+* **admin:** adopt scoped svadmin providers ([#856](https://github.com/zuohuadong/supacloud/issues/856)) ([6b019d3](https://github.com/zuohuadong/supacloud/commit/6b019d3ac22d74ddbe75184a4b37257d25575a96))
+
 ## [0.54.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.53.1...management-api-v0.54.0) (2026-08-11)
 
 
