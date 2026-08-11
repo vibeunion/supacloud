@@ -28,6 +28,20 @@ function captureAdminProjectTool(http: Record<string, unknown>) {
 }
 
 describe("project CLI task actions", () => {
+    test("prefers an explicit ref over the auto-linked project", async () => {
+        const calls: string[] = [];
+        const callback = captureProjectTool({
+            get: async (path: string) => {
+                calls.push(path);
+                return { ok: true, status: 200, data: {} };
+            },
+        }, "default-ref");
+
+        await callback({ action: "get", ref: "override-ref" });
+
+        expect(calls).toEqual(["/v1/projects/override-ref"]);
+    });
+
     test("retrieves task detail and formats latest logs", async () => {
         const calls: string[] = [];
         const callback = captureProjectTool({

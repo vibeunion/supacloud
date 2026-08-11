@@ -2,8 +2,70 @@
  * Auth — Compound tool (10→1)
  */
 import { Type } from "@sinclair/typebox";
-import { optional, stringEnum, withDescription } from "../schema";
-import type { HttpTransport } from "../transports/http";
+import { decodedSchema, optional, stringEnum, withDescription } from "../schema";
+import type { HttpResult, HttpTransport } from "../transports/http";
+
+const authConfigRecord = Type.Record(Type.String(), Type.Unknown());
+const safeAuthMutationCodes = new Set([
+    "AUTH_RUNTIME_APPLY_FAILED",
+    "SUPAUTH_DEPENDENT_REFRESH_FAILED",
+]);
+
+function parseAuthConfig(input: string | Record<string, unknown>): unknown {
+    if (typeof input !== "string") return input;
+    try {
+        return JSON.parse(input);
+    } catch (error) {
+        if (!(error instanceof SyntaxError)) throw error;
+        throw new Error("Invalid auth config JSON object");
+    }
+}
+
+const authConfigSchema = decodedSchema(
+    Type.Union([Type.String(), authConfigRecord]),
+    authConfigRecord,
+    parseAuthConfig,
+);
+
+function safeAuthFailureFields(payload: unknown): Record<string, unknown> {
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) return {};
+    const body = payload as Record<string, unknown>;
+    const fields: Record<string, unknown> = {};
+    if (typeof body.code === "string" && safeAuthMutationCodes.has(body.code)) {
+        fields.code = body.code;
+    }
+    for (const field of ["persisted", "runtime_applied", "dependents_applied"] as const) {
+        if (typeof body[field] === "boolean") fields[field] = body[field];
+    }
+    if (body.dependent_status === "failed" || body.dependent_status === "unknown") {
+        fields.dependent_status = body.dependent_status;
+    }
+    if (body.runtime_mode === "local" || body.runtime_mode === "owner" || body.runtime_mode === "shared") {
+        fields.runtime_mode = body.runtime_mode;
+    }
+    return fields;
+}
+
+function safeAuthMutationFailure(response: HttpResult<unknown>): Record<string, unknown> {
+    return {
+        ok: false,
+        http_status: response.status,
+        ...safeAuthFailureFields(response.data),
+    };
+}
+
+function authMutationResult(response: HttpResult<unknown>, successMessage: string) {
+    if (response.ok) {
+        return { content: [{ type: "text" as const, text: successMessage }] };
+    }
+    return {
+        isError: true,
+        content: [{
+            type: "text" as const,
+            text: JSON.stringify(safeAuthMutationFailure(response), null, 2),
+        }],
+    };
+}
 
 function formatProviders(data: unknown): string {
     if (!data || typeof data !== "object") return JSON.stringify(data, null, 2);
@@ -40,7 +102,7 @@ Actions: list_providers, get_provider, configure_provider, update_provider, disa
             url: optional(Type.String(), "[configure] Custom OAuth URL"),
             app_id: optional(Type.String(), "[wechat_*] WeChat App ID"),
             app_secret: optional(Type.String(), "[wechat_*] WeChat App Secret"),
-            config: optional(Type.Record(Type.String(), Type.Unknown()), "[update_settings/update_config] Config fields"),
+            config: optional(authConfigSchema, "[update_settings/update_config] Config fields as a JSON object"),
         },
         async (args: any) => {
             const { action, ref, provider, client_id, client_secret, redirect_uri, url, app_id, app_secret, config } = args;
@@ -100,15 +162,19 @@ Actions: list_providers, get_provider, configure_provider, update_provider, disa
                     break;
                 case "update_settings":
                     need("ref"); if (!config) throw new Error("'config' required");
-                    text = (await http.patch(`/v1/projects/${ref}/auth/config`, config)).ok ? `✅ Auth settings updated` : `❌ Failed`;
-                    break;
+                    return authMutationResult(
+                        await http.patch(`/v1/projects/${ref}/auth/config`, config),
+                        "✅ Auth settings updated",
+                    );
                 case "get_config":
                     need("ref"); text = ok(await http.get(`/v1/projects/${ref}/config/auth`));
                     break;
                 case "update_config":
                     need("ref"); if (!config) throw new Error("'config' required");
-                    text = (await http.patch(`/v1/projects/${ref}/config/auth`, config)).ok ? `✅ Auth config updated` : `❌ Failed`;
-                    break;
+                    return authMutationResult(
+                        await http.patch(`/v1/projects/${ref}/config/auth`, config),
+                        "✅ Auth config updated",
+                    );
                 default: text = `❌ Unknown action: ${action}`;
             }
             return { content: [{ type: "text" as const, text }] };
