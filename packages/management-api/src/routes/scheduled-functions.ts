@@ -15,85 +15,128 @@ import { mergeProjectConfig, normalizeProjectConfig } from "../utils/project-con
 import { config } from "../config";
 import { logger } from "../utils/logger";
 import { scheduledFunctionWorker } from "../workers/scheduled-function.worker";
+import { isValidScheduledFunctionCron } from "../utils/scheduled-function-cron";
+import {
+  normalizedScheduledFunctionHeaders,
+  SCHEDULE_HEADERS_INVALID,
+} from "../utils/scheduled-function-headers";
+import {
+  isScheduledFunctionConfig,
+  MAX_SCHEDULE_NAME_LENGTH,
+  normalizedScheduledFunctionName,
+  normalizedScheduledFunctionSlug,
+  publicScheduledFunction,
+  scheduledFunctionBodyWithinLimit,
+  type ScheduledFunctionConfig,
+  type ScheduledFunctionMethod,
+} from "../utils/scheduled-function-config";
 
-export type ScheduledFunctionMethod = "GET" | "POST";
+export type { ScheduledFunctionConfig, ScheduledFunctionMethod } from "../utils/scheduled-function-config";
 
-export interface ScheduledFunctionConfig {
-  id: string;
+const ALLOWED_METHODS: ReadonlySet<ScheduledFunctionMethod> = new Set(["GET", "POST"]);
+const MAX_SCHEDULES_PER_PROJECT = 20;
+const PROJECT_REF_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+const SCHEDULE_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const SCHEDULE_BODY_INVALID = "SCHEDULE_BODY_INVALID";
+const SCHEDULE_PATCH_FIELDS = ["name", "cron", "method", "body", "headers", "enabled"] as const;
+
+interface ScheduleCreateInput {
+  request_id: string;
   name: string;
   slug: string;
   cron: string;
   method: ScheduledFunctionMethod;
   body?: Record<string, unknown>;
   headers?: Record<string, string>;
-  enabled: boolean;
-  created_at: string;
-  updated_at: string;
 }
 
-const ALLOWED_METHODS: ReadonlySet<ScheduledFunctionMethod> = new Set(["GET", "POST"]);
-const MAX_SCHEDULES_PER_PROJECT = 20;
-
-// Basic 5-field cron validation (does not validate semantic correctness like Feb 30).
-const CRON_RE = /^(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)$/;
-
-function isScheduledFunctionConfig(value: unknown): value is ScheduledFunctionConfig {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const item = value as Record<string, unknown>;
-  return (
-    typeof item.id === "string" &&
-    typeof item.name === "string" &&
-    typeof item.slug === "string" &&
-    typeof item.cron === "string" &&
-    typeof item.method === "string" &&
-    ALLOWED_METHODS.has(item.method as ScheduledFunctionMethod) &&
-    typeof item.enabled === "boolean"
-  );
-}
+type SchedulePatchInput = Partial<Pick<
+  ScheduledFunctionConfig,
+  "name" | "cron" | "method" | "body" | "headers" | "enabled"
+>> & { request_id: string };
 
 function readSchedules(projectConfig: unknown): ScheduledFunctionConfig[] {
-  const cfg = normalizeProjectConfig(projectConfig as Record<string, unknown> | null | undefined);
-  const raw = cfg.scheduled_functions;
-  if (!Array.isArray(raw)) return [];
-  return raw.filter(isScheduledFunctionConfig);
+  const normalizedConfig = normalizeProjectConfig(projectConfig as Record<string, unknown> | null | undefined);
+  const scheduleCandidates = normalizedConfig.scheduled_functions;
+  if (!Array.isArray(scheduleCandidates)) return [];
+  return scheduleCandidates.filter(isScheduledFunctionConfig);
 }
 
-function validateScheduleInput(input: {
-  name?: string;
-  slug?: string;
-  cron?: string;
-  method?: string;
-}): string | null {
-  if (!input.name?.trim()) return "name is required";
-  if (!input.slug?.trim() || !/^[a-z0-9_-]+$/i.test(input.slug)) return "slug must be alphanumeric/dash/underscore";
-  if (!input.cron?.trim() || !CRON_RE.test(input.cron.trim())) return "cron must be a valid 5-field expression";
-  if (input.method && !ALLOWED_METHODS.has(input.method as ScheduledFunctionMethod)) {
-    return `method must be one of: ${[...ALLOWED_METHODS].join(", ")}`;
+function validatedScheduleCreateInput(
+  input: ScheduleCreateInput,
+): { error: string } | { name: string; slug: string; cron: string } {
+  if (!input.request_id || !SCHEDULE_ID_PATTERN.test(input.request_id)) {
+    return { error: "request_id must be a UUIDv4" };
   }
+  const name = normalizedScheduledFunctionName(input.name);
+  if (!name) return { error: `name must be 1-${MAX_SCHEDULE_NAME_LENGTH} characters` };
+  const slug = normalizedScheduledFunctionSlug(input.slug);
+  if (!slug) return { error: "slug must be 1-128 alphanumeric/dash/underscore characters" };
+  const cron = typeof input.cron === "string" ? input.cron.trim() : "";
+  if (!isValidScheduledFunctionCron(cron)) return { error: "cron must be a valid bounded 5-field expression" };
+  if (!ALLOWED_METHODS.has(input.method)) {
+    return { error: `method must be one of: ${[...ALLOWED_METHODS].join(", ")}` };
+  }
+  if (!scheduledFunctionBodyWithinLimit(input.body)) return { error: SCHEDULE_BODY_INVALID };
+  return { name, slug, cron };
+}
+
+function schedulePatchError(input: SchedulePatchInput): string | null {
+  if (!SCHEDULE_ID_PATTERN.test(input.request_id)) return "request_id must be a UUIDv4";
+  if (!SCHEDULE_PATCH_FIELDS.some((field) => input[field] !== undefined)) {
+    return "Scheduled function update requires at least one field";
+  }
+  if (input.name !== undefined && !normalizedScheduledFunctionName(input.name)) {
+    return `name must be 1-${MAX_SCHEDULE_NAME_LENGTH} characters`;
+  }
+  if (input.cron !== undefined && !isValidScheduledFunctionCron(input.cron.trim())) {
+    return "cron must be a valid bounded 5-field expression";
+  }
+  if (input.method !== undefined && !ALLOWED_METHODS.has(input.method)) return "method must be GET or POST";
+  if (!scheduledFunctionBodyWithinLimit(input.body)) return SCHEDULE_BODY_INVALID;
   return null;
 }
 
-function publicSafeSchedule(s: ScheduledFunctionConfig) {
-  return { ...s };
+function normalizedSchedulePatch(
+  input: SchedulePatchInput,
+  headers: Record<string, string> | undefined,
+): Partial<ScheduledFunctionConfig> {
+  return {
+    ...(input.name !== undefined ? { name: input.name.trim() } : {}),
+    ...(input.cron !== undefined ? { cron: input.cron.trim() } : {}),
+    ...(input.method !== undefined ? { method: input.method } : {}),
+    ...(input.body !== undefined ? { body: input.body } : {}),
+    ...(input.headers !== undefined && headers ? { headers } : {}),
+    ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
+  };
+}
+
+function scheduleHeaders(
+  candidate: Record<string, string> | undefined,
+): Record<string, string> | null | undefined {
+  return candidate === undefined ? undefined : normalizedScheduledFunctionHeaders(candidate);
 }
 
 export const scheduledFunctionRoutes = new Elysia({ prefix: "/v1/projects/:ref/scheduled-functions" })
   .onBeforeHandle(async ({ params, request }) => {
+    if (!PROJECT_REF_PATTERN.test(params.ref)) return status(400, { error: "Project ref is invalid" });
     const authError = await authMiddleware.requireProjectOrAdminAuth(request, params.ref);
     if (authError) return status(authError.status, authError.body);
   })
   .get("", async ({ params }) => {
     const project = await projectRepository.findByRef(params.ref);
     if (!project) return status(404, { error: "Project not found" });
-    const schedules = readSchedules(project.config).map(publicSafeSchedule);
+    const schedules = readSchedules(project.config).map(publicScheduledFunction);
     return { project_ref: params.ref, schedules };
   }, {
     detail: { tags: ["scheduled-functions"], summary: "List scheduled functions" },
   })
   .post("", async ({ params, body }) => {
-    const input = body as { name: string; slug: string; cron: string; method: ScheduledFunctionMethod; body?: Record<string, unknown>; headers?: Record<string, string> };
-    const err = validateScheduleInput(input);
-    if (err) return status(400, { error: err });
+    const input = body as ScheduleCreateInput;
+    const validation = validatedScheduleCreateInput(input);
+    if ("error" in validation) return status(400, validation);
+    const headers = scheduleHeaders(input.headers);
+    if (headers === null) return status(400, { error: SCHEDULE_HEADERS_INVALID });
 
     const project = await projectRepository.findByRef(params.ref);
     if (!project) return status(404, { error: "Project not found" });
@@ -102,19 +145,19 @@ export const scheduledFunctionRoutes = new Elysia({ prefix: "/v1/projects/:ref/s
     if (existing.length >= MAX_SCHEDULES_PER_PROJECT) {
       return status(400, { error: `A project can have at most ${MAX_SCHEDULES_PER_PROJECT} scheduled functions` });
     }
-    if (existing.some((s) => s.slug === input.slug)) {
-      return status(409, { error: `A schedule for slug '${input.slug}' already exists` });
+    if (existing.some((schedule) => schedule.slug === validation.slug)) {
+      return status(409, { error: `A schedule for slug '${validation.slug}' already exists` });
     }
 
     const now = new Date().toISOString();
     const schedule: ScheduledFunctionConfig = {
       id: crypto.randomUUID(),
-      name: input.name.trim().slice(0, 120),
-      slug: input.slug.trim(),
-      cron: input.cron.trim(),
+      name: validation.name,
+      slug: validation.slug,
+      cron: validation.cron,
       method: input.method,
       body: input.body,
-      headers: input.headers,
+      headers: headers ?? undefined,
       enabled: true,
       created_at: now,
       updated_at: now,
@@ -127,9 +170,15 @@ export const scheduledFunctionRoutes = new Elysia({ prefix: "/v1/projects/:ref/s
     if (!updated) return status(404, { error: "Project not found" });
 
     scheduledFunctionWorker.reload();
-    return { created: true, project_ref: params.ref, schedule: publicSafeSchedule(schedule) };
+    return {
+      created: true,
+      project_ref: params.ref,
+      request_id: input.request_id,
+      schedule: publicScheduledFunction(schedule),
+    };
   }, {
     body: t.Object({
+      request_id: t.String(),
       name: t.String(),
       slug: t.String(),
       cron: t.String(),
@@ -140,44 +189,43 @@ export const scheduledFunctionRoutes = new Elysia({ prefix: "/v1/projects/:ref/s
     detail: { tags: ["scheduled-functions"], summary: "Create a scheduled function" },
   })
   .patch("/:scheduleId", async ({ params, body }) => {
-    const input = body as Partial<Pick<ScheduledFunctionConfig, "name" | "cron" | "method" | "body" | "headers" | "enabled">>;
-
-    if (input.cron !== undefined && !CRON_RE.test(input.cron.trim())) {
-      return status(400, { error: "cron must be a valid 5-field expression" });
-    }
-    if (input.method !== undefined && !ALLOWED_METHODS.has(input.method as ScheduledFunctionMethod)) {
-      return status(400, { error: "method must be GET or POST" });
-    }
+    if (!SCHEDULE_ID_PATTERN.test(params.scheduleId)) return status(400, { error: "Scheduled function ID is invalid" });
+    const input = body as SchedulePatchInput;
+    const validationError = schedulePatchError(input);
+    if (validationError) return status(400, { error: validationError });
+    const headers = scheduleHeaders(input.headers);
+    if (headers === null) return status(400, { error: SCHEDULE_HEADERS_INVALID });
 
     const project = await projectRepository.findByRef(params.ref);
     if (!project) return status(404, { error: "Project not found" });
 
     const schedules = readSchedules(project.config);
-    const target = schedules.find((s) => s.id === params.scheduleId);
+    const target = schedules.find((schedule) => schedule.id === params.scheduleId);
     if (!target) return status(404, { error: "Scheduled function not found" });
 
     const updatedSchedule: ScheduledFunctionConfig = {
       ...target,
-      name: input.name !== undefined ? input.name.trim().slice(0, 120) : target.name,
-      cron: input.cron !== undefined ? input.cron.trim() : target.cron,
-      method: input.method !== undefined ? (input.method as ScheduledFunctionMethod) : target.method,
-      body: input.body !== undefined ? input.body : target.body,
-      headers: input.headers !== undefined ? input.headers : target.headers,
-      enabled: input.enabled !== undefined ? !!input.enabled : target.enabled,
+      ...normalizedSchedulePatch(input, headers),
       updated_at: new Date().toISOString(),
     };
 
-    const next = schedules.map((s) => (s.id === target.id ? updatedSchedule : s));
+    const nextSchedules = schedules.map((schedule) => schedule.id === target.id ? updatedSchedule : schedule);
     const updated = await projectRepository.updateConfig(
       params.ref,
-      mergeProjectConfig(project.config, { scheduled_functions: next }),
+      mergeProjectConfig(project.config, { scheduled_functions: nextSchedules }),
     );
     if (!updated) return status(404, { error: "Project not found" });
 
     scheduledFunctionWorker.reload();
-    return { updated: true, project_ref: params.ref, schedule: publicSafeSchedule(updatedSchedule) };
+    return {
+      updated: true,
+      project_ref: params.ref,
+      request_id: input.request_id,
+      schedule: publicScheduledFunction(updatedSchedule),
+    };
   }, {
     body: t.Object({
+      request_id: t.String(),
       name: t.Optional(t.String()),
       cron: t.Optional(t.String()),
       method: t.Optional(t.Union([t.Literal("GET"), t.Literal("POST")])),
@@ -188,16 +236,17 @@ export const scheduledFunctionRoutes = new Elysia({ prefix: "/v1/projects/:ref/s
     detail: { tags: ["scheduled-functions"], summary: "Update a scheduled function" },
   })
   .delete("/:scheduleId", async ({ params }) => {
+    if (!SCHEDULE_ID_PATTERN.test(params.scheduleId)) return status(400, { error: "Scheduled function ID is invalid" });
     const project = await projectRepository.findByRef(params.ref);
     if (!project) return status(404, { error: "Project not found" });
 
     const schedules = readSchedules(project.config);
-    const next = schedules.filter((s) => s.id !== params.scheduleId);
-    if (next.length === schedules.length) return status(404, { error: "Scheduled function not found" });
+    const nextSchedules = schedules.filter((schedule) => schedule.id !== params.scheduleId);
+    if (nextSchedules.length === schedules.length) return status(404, { error: "Scheduled function not found" });
 
     const updated = await projectRepository.updateConfig(
       params.ref,
-      mergeProjectConfig(project.config, { scheduled_functions: next }),
+      mergeProjectConfig(project.config, { scheduled_functions: nextSchedules }),
     );
     if (!updated) return status(404, { error: "Project not found" });
 
@@ -207,16 +256,17 @@ export const scheduledFunctionRoutes = new Elysia({ prefix: "/v1/projects/:ref/s
     detail: { tags: ["scheduled-functions"], summary: "Delete a scheduled function" },
   })
   .post("/:scheduleId/trigger", async ({ params }) => {
+    if (!SCHEDULE_ID_PATTERN.test(params.scheduleId)) return status(400, { error: "Scheduled function ID is invalid" });
     const project = await projectRepository.findByRef(params.ref);
     if (!project) return status(404, { error: "Project not found" });
 
     const schedules = readSchedules(project.config);
-    const target = schedules.find((s) => s.id === params.scheduleId);
+    const target = schedules.find((schedule) => schedule.id === params.scheduleId);
     if (!target) return status(404, { error: "Scheduled function not found" });
 
-    const result = await scheduledFunctionWorker.triggerOnce(params.ref, target);
-    if (!result.ok) return status(502, { error: result.error });
-    return { triggered: true, project_ref: params.ref, schedule_id: params.scheduleId, status: result.status };
+    const invocation = await scheduledFunctionWorker.triggerOnce(params.ref, target);
+    if (!invocation.ok) return status(502, { error: invocation.error });
+    return { triggered: true, project_ref: params.ref, schedule_id: params.scheduleId, status: invocation.status };
   }, {
     detail: { tags: ["scheduled-functions"], summary: "Manually trigger a scheduled function" },
   });
