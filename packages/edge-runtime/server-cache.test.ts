@@ -72,10 +72,19 @@ describe("Edge Runtime auth material invalidation", () => {
       source.indexOf("async function dispatchFunction("),
       source.indexOf("async function appendFunctionRuntimeLog("),
     );
+    const poolDispatch = dispatcher.slice(
+      dispatcher.indexOf("return await targetPool.dispatch({"),
+      dispatcher.indexOf(
+        "    });",
+        dispatcher.indexOf("return await targetPool.dispatch({"),
+      ),
+    );
     expect(requestHandler).toContain("activation = await resolveFunctionPath(projectRef, functionName)");
     expect(requestHandler).toContain("activation.verifyJwt");
     expect(requestHandler).toContain("activation,");
     expect(requestHandler).not.toContain("x-supacloud-function-version");
+    expect(poolDispatch).toContain("functionVersion: responseVersion");
+    expect(poolDispatch).not.toContain("functionVersion: activeVersion");
     expect(dispatcher).not.toContain("x-supacloud-function-version");
   });
 
@@ -85,8 +94,13 @@ describe("Edge Runtime auth material invalidation", () => {
       source.indexOf("function functionDispatchError("),
     );
     expect(resolver).toContain(
-      "activeFunctionPathCandidates(projectRoot, functionName, resolvedConfig.version)",
+      "activeFunctionPathCandidates(projectRoot, functionName, activeVersion)",
     );
+    expect(resolver).toContain("versionBindingResolver = resolveFunctionVersionBinding");
+    expect(resolver).toContain("versionBindingResolver(");
+    expect(resolver).toContain("requestedVersion,");
+    expect(resolver).toContain("resolvedConfig.version,");
+    expect(resolver).toContain("responseVersion,");
   });
 
   test("background routes envelope function resolution failures", () => {
@@ -102,13 +116,25 @@ describe("Edge Runtime auth material invalidation", () => {
     for (const route of [wildcardRoute, exactRoute]) {
       expect(route).toContain("let response: Response;");
       expect(route).toContain("try {");
-      expect(route).toContain(
-        "resolveFunctionPath(c.params.ref, c.params.functionName, requestedVersion)",
-      );
+      expect(route).toContain("resolveTrustedBackgroundFunctionVersionBinding,");
       expect(route).toContain("catch (error)");
       expect(route).toContain("functionDispatchError(error, setHeaders)");
       expect(route).toContain('status: 200');
       expect(route).toContain('"x-supacloud-background-envelope": "true"');
     }
+  });
+
+  test("only trusted background routes can resolve queued legacy-zero versions", () => {
+    const preheatSource = source.slice(
+      source.indexOf('.post("/preheat/:ref/:slug"'),
+      source.indexOf('.post("/internal/background/:ref/:functionName/*"'),
+    );
+    const backgroundSource = source.slice(
+      source.indexOf('.post("/internal/background/:ref/:functionName/*"'),
+      source.indexOf('.post("/internal/background/cancel/:taskId"'),
+    );
+
+    expect(preheatSource).not.toContain("resolveTrustedBackgroundFunctionVersionBinding,");
+    expect(backgroundSource.match(/resolveTrustedBackgroundFunctionVersionBinding,/g)).toHaveLength(2);
   });
 });

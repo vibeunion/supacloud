@@ -29,6 +29,13 @@ describe("multi-file function runtime source", () => {
     ]);
   });
 
+  test("keeps a legacy zero activation bound to its immutable artifact", () => {
+    expect(activeFunctionPathCandidates("/functions/project", "supauth", "0")).toEqual([
+      path.join("/functions/project", ".versions", "supauth", "0", "src", BUNDLED_SOURCE_RUNTIME_ENTRY),
+      "/functions/project/.versions/supauth/0/index.js",
+    ]);
+  });
+
   test("uses mutable aliases only for a legacy activation without a version", () => {
     expect(activeFunctionPathCandidates("/functions/project", "supauth", null)).toEqual([
       path.join("/functions/project", ".src-supauth", BUNDLED_SOURCE_RUNTIME_ENTRY),

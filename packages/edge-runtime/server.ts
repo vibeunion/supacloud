@@ -20,7 +20,11 @@ import {
 import {
   buildBackgroundForwardDispatch,
 } from "./background-forward";
-import { activeFunctionPathCandidates, functionPathCandidates } from "./function-source";
+import { activeFunctionPathCandidates } from "./function-source";
+import {
+  resolveFunctionVersionBinding,
+  resolveTrustedBackgroundFunctionVersionBinding,
+} from "./function-version";
 import path from "path";
 import fs from "fs/promises";
 import type { PgredisRuntimeEndpointConfig } from "./internal-bindings";
@@ -48,7 +52,6 @@ const WORKER_RECYCLE_RESPONSE_GRACE_MS = 100;
 const INTERNAL_TOKEN = process.env.EDGE_RUNTIME_MASTER_KEY || process.env.MASTER_TOKEN || "";
 const PROJECT_REF_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
 const FUNCTION_SLUG_PATTERN = /^[a-zA-Z0-9_-]{1,128}$/;
-const VERSION_PATTERN = /^[a-zA-Z0-9._-]{1,128}$/;
 const AUTH_FAILURE_WINDOW_MS = Number(process.env.EDGE_AUTH_FAILURE_WINDOW_MS) || 30_000;
 const AUTH_FAILURE_LIMIT = Number(process.env.EDGE_AUTH_FAILURE_LIMIT) || 8;
 const AUTH_FAILURE_COOLDOWN_MS = Number(process.env.EDGE_AUTH_FAILURE_COOLDOWN_MS) || 60_000;
@@ -122,10 +125,6 @@ function isSafeProjectRef(value: string): boolean {
 
 function isSafeFunctionSlug(value: string): boolean {
   return FUNCTION_SLUG_PATTERN.test(value);
-}
-
-function isSafeVersion(value: string): boolean {
-  return VERSION_PATTERN.test(value);
 }
 
 function getProjectModuleEpoch(projectRef: string): number {
@@ -299,6 +298,7 @@ type FunctionActivationSnapshot = {
   functionPath: string;
   projectRoot: string;
   activeVersion: string | null;
+  responseVersion: string | null;
   verifyJwt: boolean;
   moduleVersion: string;
 };
@@ -307,20 +307,18 @@ async function resolveFunctionPath(
   projectRef: string,
   functionName: string,
   requestedVersion?: string | null,
+  versionBindingResolver = resolveFunctionVersionBinding,
 ): Promise<FunctionActivationSnapshot> {
   if (!isSafeFunctionSlug(functionName)) {
     throw new Error("Invalid function slug");
   }
-  if (requestedVersion && !isSafeVersion(requestedVersion)) {
-    throw new Error("Invalid function version");
-  }
-
   const projectRoot = await resolveProjectRoot(projectRef);
   const resolvedConfig = await getFunctionConfig(projectRef, functionName, projectRoot);
-  const activeVersion = requestedVersion || resolvedConfig.version || null;
-  const candidates = requestedVersion
-    ? functionPathCandidates(projectRoot, functionName, requestedVersion)
-    : activeFunctionPathCandidates(projectRoot, functionName, resolvedConfig.version);
+  const { activeVersion, responseVersion } = versionBindingResolver(
+    requestedVersion,
+    resolvedConfig.version,
+  );
+  const candidates = activeFunctionPathCandidates(projectRoot, functionName, activeVersion);
 
   for (const candidate of candidates) {
     if (!isPathInside(candidate, projectRoot)) {
@@ -340,6 +338,7 @@ async function resolveFunctionPath(
         functionPath: realCandidate,
         projectRoot,
         activeVersion,
+        responseVersion,
         verifyJwt: resolvedConfig.verify_jwt,
         moduleVersion: [
           `active:${activeVersion || "legacy"}`,
@@ -406,7 +405,7 @@ async function dispatchFunction(
 ) {
   const { projectRef, functionName, request, setHeaders, activation } = input;
   try {
-    const { functionPath, projectRoot, activeVersion, moduleVersion } = activation;
+    const { functionPath, projectRoot, activeVersion, responseVersion, moduleVersion } = activation;
     const versionSuffix = activeVersion ? `_v${activeVersion}` : "";
     const functionId = `${projectRef}_${functionName}${versionSuffix}`;
     const targetPool = opts?.background ? backgroundPool : pool;
@@ -422,6 +421,7 @@ async function dispatchFunction(
       functionPath,
       projectRoot,
       projectRef,
+      functionVersion: responseVersion,
       internalBindings: PGREDIS_RUNTIME_ENDPOINT
         ? {
             baseUrl: PGREDIS_RUNTIME_ENDPOINT.baseUrl,
@@ -867,7 +867,12 @@ const app = new Elysia()
     const requestedVersion = backgroundDispatch.forwardedRequest.headers.get("x-supacloud-function-version");
     let response: Response;
     try {
-      const activation = await resolveFunctionPath(c.params.ref, c.params.functionName, requestedVersion);
+      const activation = await resolveFunctionPath(
+        c.params.ref,
+        c.params.functionName,
+        requestedVersion,
+        resolveTrustedBackgroundFunctionVersionBinding,
+      );
       response = await dispatchFunction(
         {
           projectRef: c.params.ref,
@@ -928,7 +933,12 @@ const app = new Elysia()
     const requestedVersion = backgroundDispatch.forwardedRequest.headers.get("x-supacloud-function-version");
     let response: Response;
     try {
-      const activation = await resolveFunctionPath(c.params.ref, c.params.functionName, requestedVersion);
+      const activation = await resolveFunctionPath(
+        c.params.ref,
+        c.params.functionName,
+        requestedVersion,
+        resolveTrustedBackgroundFunctionVersionBinding,
+      );
       response = await dispatchFunction(
         {
           projectRef: c.params.ref,
