@@ -17,6 +17,14 @@ import {
   getAuthRuntimeManagedError,
 } from "../services/auth-runtime.service";
 
+async function controlSystemUnit(action: string, unitName: string) {
+  return $`systemctl ${action} ${unitName}`.nothrow().quiet();
+}
+
+export const projectServiceRouteInternals = {
+  controlSystemUnit,
+};
+
 export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
   // Get project health status
   .get(
@@ -268,11 +276,11 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
         rest: `supacloud-pgrst@${ref}`,
         gotrue: `supacloud-gotrue@${ref}`,
         auth: `supacloud-gotrue@${ref}`,
-        storage: "supacloud-storage",
       };
       const sharedUnitMap: Record<string, string> = {
         postgresql: "patroni",
         realtime: "supacloud-realtime",
+        storage: "supacloud-storage",
         gateway: "supacloud-caddy",
         caddy: "supacloud-caddy",
       };
@@ -332,9 +340,7 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
       }
 
       try {
-        const result = await $`systemctl ${action} ${unitName}`
-          .nothrow()
-          .quiet();
+        const result = await projectServiceRouteInternals.controlSystemUnit(action, unitName);
         return {
           service,
           action,
