@@ -7,6 +7,7 @@ import { logger } from "../utils/logger";
 import { projectService } from "../services";
 import { getProjectDb, resolveDbName, resolveRoleName } from "../db";
 import { normalizeProjectConfig } from "../utils/project-config";
+import { publicScheduledFunctionProjectConfig } from "../utils/scheduled-function-config";
 import { getAuthContext, requireAdminAuth, requireProjectOrAdminAuth } from "../middleware/auth";
 import { tenantRuntimeService } from "../services/tenant-runtime.service";
 import {
@@ -128,7 +129,7 @@ export function toPublicV1ProjectWithDatabaseResponse(p: any) {
     },
     api: p.api,
     studio: p.studio,
-    config: p.config,
+    config: publicScheduledFunctionProjectConfig(p.config),
     anon_key: p.anon_key,
     services: p.services,
   };
@@ -289,7 +290,7 @@ async function buildProjectResponse(
     anon_key: project.anon_key,
     api: project.api,
     studio: project.studio,
-    config: normalizeProjectConfig(project.config),
+    config: publicScheduledFunctionProjectConfig(project.config),
   };
 }
 

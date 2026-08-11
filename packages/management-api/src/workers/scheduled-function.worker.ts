@@ -15,14 +15,33 @@ import { config } from "../config";
 import { logger } from "../utils/logger";
 import { normalizeProjectConfig } from "../utils/project-config";
 import { projectRepository } from "../repositories/project.repository";
-import type { ScheduledFunctionConfig } from "../routes/scheduled-functions";
+import { scheduledFunctionCronMatches } from "../utils/scheduled-function-cron";
+import {
+  normalizedScheduledFunctionHeaders,
+  SCHEDULE_HEADERS_INVALID,
+} from "../utils/scheduled-function-headers";
+import {
+  isScheduledFunctionConfig,
+  scheduledFunctionBodyWithinLimit,
+  type ScheduledFunctionConfig,
+} from "../utils/scheduled-function-config";
 
 const POLL_INTERVAL_MS = 60_000;
 const INVOKE_TIMEOUT_MS = 30_000;
+const SCHEDULE_LOAD_FAILED = "SCHEDULE_LOAD_FAILED";
+const SCHEDULE_CONFIG_INVALID = "SCHEDULE_CONFIG_INVALID";
+const SCHEDULE_PROJECT_NOT_FOUND = "SCHEDULE_PROJECT_NOT_FOUND";
+const SCHEDULE_INVOKE_FAILED = "SCHEDULE_INVOKE_FAILED";
+const PROJECT_REF_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
 interface DueSchedule {
   ref: string;
   schedule: ScheduledFunctionConfig;
+}
+
+function validInvocationSchedule(ref: string, schedule: unknown): schedule is ScheduledFunctionConfig {
+  return PROJECT_REF_PATTERN.test(ref)
+    && isScheduledFunctionConfig(schedule);
 }
 
 export function scheduledFunctionsDueAt(
@@ -34,77 +53,16 @@ export function scheduledFunctionsDueAt(
     const projectConfig = normalizeProjectConfig(row.config);
     const rawSchedules = projectConfig.scheduled_functions;
     if (!Array.isArray(rawSchedules)) continue;
-    for (const item of rawSchedules) {
-      if (!item || typeof item !== "object") continue;
-      const schedule = item as ScheduledFunctionConfig;
-      if (schedule.enabled === false || !schedule.cron || !schedule.slug) continue;
-      if (isDue(schedule.cron, now)) due.push({ ref: row.ref, schedule });
+    for (const candidate of rawSchedules) {
+      if (!validInvocationSchedule(row.ref, candidate) || !candidate.enabled) continue;
+      if (isDue(candidate.cron, now)) due.push({ ref: row.ref, schedule: candidate });
     }
   }
   return due;
 }
 
-function parseField(field: string, min: number, max: number): Set<number> {
-  const result = new Set<number>();
-  for (const part of field.split(",")) {
-    const trimmed = part.trim();
-    if (trimmed === "*") {
-      for (let i = min; i <= max; i++) result.add(i);
-      continue;
-    }
-    // step: a/b
-    const stepIdx = trimmed.indexOf("/");
-    let step = 1;
-    let rangePart = trimmed;
-    if (stepIdx > 0) {
-      step = parseInt(trimmed.slice(stepIdx + 1), 10);
-      if (!Number.isFinite(step) || step < 1) continue;
-      rangePart = trimmed.slice(0, stepIdx);
-    }
-    let start = min;
-    let end = max;
-    if (rangePart !== "*") {
-      const dashIdx = rangePart.indexOf("-");
-      if (dashIdx > 0) {
-        start = parseInt(rangePart.slice(0, dashIdx), 10);
-        end = parseInt(rangePart.slice(dashIdx + 1), 10);
-      } else {
-        start = end = parseInt(rangePart, 10);
-      }
-    }
-    if (!Number.isFinite(start) || !Number.isFinite(end)) continue;
-    for (let i = start; i <= end; i += step) {
-      if (i >= min && i <= max) result.add(i);
-    }
-  }
-  return result;
-}
-
 export function isDue(cronExpr: string, date: Date): boolean {
-  const parts = cronExpr.trim().split(/\s+/);
-  if (parts.length !== 5) return false;
-  const [minute, hour, dom, month, dow] = parts;
-  const m = parseField(minute, 0, 59);
-  const h = parseField(hour, 0, 23);
-  const dayOfMonth = parseField(dom, 1, 31);
-  const monthField = parseField(month, 1, 12);
-  // 0 and 7 both mean Sunday in cron.
-  const dowSet = parseField(dow, 0, 7);
-  if (dowSet.has(7)) dowSet.add(0);
-
-  const minOk = m.has(date.getMinutes());
-  const hourOk = h.has(date.getHours());
-  const domOk = dayOfMonth.has(date.getDate());
-  const monthOk = monthField.has(date.getMonth() + 1);
-  const dowOk = dowSet.has(date.getDay());
-
-  // Standard cron: when both dom and dow are restricted (not '*'), fire on either match.
-  const domRestricted = dom !== "*";
-  const dowRestricted = dow !== "*";
-  if (domRestricted && dowRestricted) {
-    return minOk && hourOk && monthOk && (domOk || dowOk);
-  }
-  return minOk && hourOk && monthOk && domOk && dowOk;
+  return scheduledFunctionCronMatches(cronExpr, date);
 }
 
 async function loadAllSchedules(): Promise<DueSchedule[]> {
@@ -114,8 +72,8 @@ async function loadAllSchedules(): Promise<DueSchedule[]> {
       SELECT ref, config FROM projects
       WHERE deleted_at IS NULL
     `) as { ref: string; config: unknown }[];
-  } catch (err) {
-    logger.debug("[scheduled-functions] failed to load projects", { error: err instanceof Error ? err.message : String(err) });
+  } catch {
+    logger.debug("[scheduled-functions] failed to load projects", { error: SCHEDULE_LOAD_FAILED });
     return [];
   }
 
@@ -128,37 +86,48 @@ export interface TriggerResult {
   error?: string;
 }
 
+function invocationHeaders(
+  ref: string,
+  serviceRoleKey: string,
+  userHeaders: Record<string, string>,
+): Record<string, string> {
+  // Platform headers are applied last so tenant schedules cannot redirect or
+  // re-authenticate the internal runtime request.
+  return {
+    ...userHeaders,
+    "x-project-ref": ref,
+    "apikey": serviceRoleKey,
+    "authorization": `Bearer ${serviceRoleKey}`,
+  };
+}
+
+function invocationRequest(
+  schedule: ScheduledFunctionConfig,
+  headers: Record<string, string>,
+): RequestInit {
+  const sendsJsonBody = schedule.method === "POST" && schedule.body !== undefined;
+  return {
+    method: schedule.method,
+    headers: sendsJsonBody ? { ...headers, "content-type": "application/json" } : headers,
+    signal: AbortSignal.timeout(INVOKE_TIMEOUT_MS),
+    ...(sendsJsonBody ? { body: JSON.stringify(schedule.body) } : {}),
+  };
+}
+
 async function invokeEdgeFunction(ref: string, schedule: ScheduledFunctionConfig): Promise<TriggerResult> {
+  if (!validInvocationSchedule(ref, schedule)) return { ok: false, error: SCHEDULE_CONFIG_INVALID };
+  if (!scheduledFunctionBodyWithinLimit(schedule.body)) return { ok: false, error: SCHEDULE_CONFIG_INVALID };
   const url = `${config.edgeRuntimeUrl}/functions/v1/${encodeURIComponent(schedule.slug)}`;
+  const userHeaders = normalizedScheduledFunctionHeaders(schedule.headers ?? {});
+  if (!userHeaders) return { ok: false, error: SCHEDULE_HEADERS_INVALID };
   try {
-    // Load the project service_role_key so the edge runtime accepts the call
-    // even when verify_jwt is enabled. User-configured headers override defaults.
     const project = await projectRepository.findByRef(ref);
-    if (!project) {
-      return { ok: false, error: "Project not found" };
-    }
-    const defaultHeaders: Record<string, string> = {
-      "x-project-ref": ref,
-      "apikey": project.service_role_key,
-      "authorization": `Bearer ${project.service_role_key}`,
-    };
-    const headers: Record<string, string> = {
-      ...defaultHeaders,
-      ...schedule.headers,
-    };
-    const init: RequestInit = {
-      method: schedule.method,
-      headers,
-      signal: AbortSignal.timeout(INVOKE_TIMEOUT_MS),
-    };
-    if (schedule.method === "POST" && schedule.body) {
-      headers["content-type"] = "application/json";
-      init.body = JSON.stringify(schedule.body);
-    }
-    const res = await fetch(url, init);
-    return { ok: res.ok, status: res.status };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    if (!project) return { ok: false, error: SCHEDULE_PROJECT_NOT_FOUND };
+    const headers = invocationHeaders(ref, project.service_role_key, userHeaders);
+    const response = await fetch(url, invocationRequest(schedule, headers));
+    return { ok: response.ok, status: response.status };
+  } catch {
+    return { ok: false, error: SCHEDULE_INVOKE_FAILED };
   }
 }
 
@@ -202,11 +171,11 @@ class ScheduledFunctionWorker {
 
       await Promise.allSettled(
         due.map(async ({ ref, schedule }) => {
-          const result = await invokeEdgeFunction(ref, schedule);
-          if (!result.ok) {
+          const invocation = await invokeEdgeFunction(ref, schedule);
+          if (!invocation.ok) {
             logger.warn(`[scheduled-functions] invoke failed for ${ref}/${schedule.slug}`, {
-              status: result.status,
-              error: result.error,
+              status: invocation.status,
+              error: invocation.error,
             });
           }
         }),

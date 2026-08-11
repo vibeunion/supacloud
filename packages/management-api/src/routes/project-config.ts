@@ -66,6 +66,7 @@ import {
   readLiveDatabaseSettings,
   updateDatabaseSettings,
 } from "../services/project-database-config.service";
+import { publicScheduledFunctionProjectConfig } from "../utils/scheduled-function-config";
 
 /** Map PostgreSQL column types to TypeScript types */
 function pgTypeToTs(udtName: string, dataType: string): string {
@@ -626,7 +627,7 @@ function buildSharedSettingsResponse(
   settings: Record<string, unknown>,
   authorityProjectRef: unknown,
 ) {
-  const { auth: _auth, ...safeSettings } = settings;
+  const { auth: _auth, ...safeSettings } = publicScheduledFunctionProjectConfig(settings);
   return {
     ...safeSettings,
     auth_runtime: {
@@ -641,10 +642,11 @@ async function buildProjectSettingsResponse(
   ref: string,
   settings: Record<string, unknown>,
 ) {
-  const auth = settings.auth;
-  if (!auth || typeof auth !== "object" || Array.isArray(auth)) return settings;
+  const publicSettings = publicScheduledFunctionProjectConfig(settings);
+  const auth = publicSettings.auth;
+  if (!auth || typeof auth !== "object" || Array.isArray(auth)) return publicSettings;
   return {
-    ...settings,
+    ...publicSettings,
     auth: await safeProjectSettingsAuthConfig(ref, auth as Record<string, unknown>),
   };
 }
@@ -688,6 +690,12 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   .put(
     "/:ref/settings",
     async ({ params, body }) => {
+      if (Object.prototype.hasOwnProperty.call(body, "scheduled_functions")) {
+        return status(400, {
+          code: "SCHEDULED_FUNCTION_API_REQUIRED",
+          message: "Scheduled functions must be managed through the dedicated scheduled-functions API",
+        });
+      }
       const managedError = getAuthRuntimeManagedError(params.ref, "configuration");
       if (managedError && Object.prototype.hasOwnProperty.call(body, "auth")) {
         return status(409, managedError);

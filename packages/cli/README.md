@@ -157,6 +157,8 @@ supacloud-cli branch promote --branch_ref preview123 --plan_checksum <sha256>
 supacloud-cli edge_functions deploy --ref abc123 --slug hello --path ./supabase/functions/hello
 supacloud-cli edge_functions deploy_bundle --ref abc123 --slug hello --files '{"index.ts":"export default { fetch: () => new Response(\"ok\") }"}'
 supacloud-cli edge_functions source --ref abc123 --slug hello --output ./hello.ts
+supacloud-cli edge_functions activate --ref abc123 --slug hello --version 3
+supacloud-cli scheduled_functions list --ref abc123
 supacloud-cli secrets upsert --ref abc123 --from-env API_KEY,WEBHOOK_SECRET
 ```
 
@@ -168,6 +170,37 @@ module policy consistently for CLI, Web Console, and direct API deployments.
 Use `source --output <file>` for large Functions so terminal or automation output
 limits cannot truncate the original TS/JS source code. The destination must not
 already exist.
+
+`edge_functions activate` restores an existing immutable Function version and
+returns a machine-readable receipt containing the activated version and JWT
+policy. HTTP and malformed-response failures exit non-zero without echoing the
+server response body.
+
+Mutation receipts use schema `supacloud.cli.release-control.v1`. An
+`OUTCOME_UNKNOWN` error means the server may have committed the mutation before
+the response was lost or failed validation; read back current state before any
+retry.
+
+Scheduled Function lifecycle operations are also project-scoped:
+
+```bash
+supacloud-cli scheduled_functions create --ref abc123 --name nightly \
+  --slug cleanup --cron "0 2 * * *" --method POST
+supacloud-cli scheduled_functions update --ref abc123 --schedule_id <id> \
+  --cron "0 3 * * *"
+supacloud-cli scheduled_functions delete --ref abc123 --schedule_id <id>
+```
+
+Schedule IDs are canonical UUIDv4 values returned by create/list. Cron values
+use bounded numeric five-field syntax with wildcards, lists, ranges, and steps;
+out-of-range endpoints and steps are rejected before HTTP dispatch.
+
+Use `--body_file ./payload.json` for a JSON-object request body. Header values
+must come from environment variables: pass a JSON name mapping such as
+`--header_env '{"x-schedule-token":"SCHEDULE_TOKEN"}'`. Platform-owned
+`authorization`, `apikey`, and `x-project-ref` headers cannot be overridden. Receipts never
+include header values or body content; list and mutation receipts report only
+whether the body is empty and the configured header names.
 
 For secret writes, `--from-env` accepts a comma-separated list of environment
 variable names. The CLI reads each non-empty value from its own process
@@ -267,6 +300,22 @@ USING hnsw (embedding vector_cosine_ops);
 ```
 
 Transaction boundary: SupaCloud supports transaction blocks inside one SQL request and transactional migrations. It does not expose long-lived HTTP transaction sessions; use a direct Postgres DSN for application-side long transactions.
+
+Auth configuration commands accept a JSON object from the CLI:
+
+```bash
+supacloud-cli auth update_settings --ref abc123 \
+  --config '{"disable_signup":true,"enable_signup":false}'
+supacloud-cli auth update_config --ref abc123 \
+  --config '{"third_party_auth":{"enabled":true}}'
+```
+
+Failed Auth mutations exit non-zero and print a JSON object containing the HTTP
+status plus an allowlisted subset of runtime-apply state. If Management API
+returns `503` with `persisted: true`, the desired configuration was saved but
+runtime propagation was incomplete; automation must read the affected settings
+back exactly before deciding whether it is safe to continue. Free-form server
+messages and request configuration are not echoed.
 
 Project commands owned by this CLI:
 
