@@ -94,10 +94,14 @@ export async function updateConfig(ref: string, config: Record<string, unknown>)
   const [project] = await sql`
     UPDATE projects
     SET config =
-          (${JSON.stringify(config)}::jsonb - 'scheduled_functions')
+          CASE jsonb_typeof(${JSON.stringify(config)}::jsonb)
+            WHEN 'object' THEN ${JSON.stringify(config)}::jsonb - 'scheduled_functions'
+            ELSE '{}'::jsonb
+          END
           || CASE
-            WHEN config ? 'scheduled_functions'
-            THEN jsonb_build_object('scheduled_functions', config -> 'scheduled_functions')
+            WHEN jsonb_typeof(projects.config) = 'object'
+              AND projects.config ? 'scheduled_functions'
+            THEN jsonb_build_object('scheduled_functions', projects.config -> 'scheduled_functions')
             ELSE '{}'::jsonb
           END,
         updated_at = NOW()
