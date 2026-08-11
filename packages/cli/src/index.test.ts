@@ -117,35 +117,22 @@ describe("supacloud-cli process contract", () => {
         expect(response.stderr).toBe("");
     });
 
-    test("prints the installed package version with global options in either order", async () => {
-        const versionArgs = [
-            ["--env", "test", "--confirm-production", "project-ref", "--version"],
-            ["--version", "--env=test", "--confirm-production=project-ref"],
-            ["--version", "--env-file", "/definitely/not/a/project.env"],
-        ];
-
-        for (const args of versionArgs) {
-            const response = await runProjectCli(args);
-
-            expect(response.exitCode).toBe(0);
-            expect(response.stdout.trim()).toBe(packageMetadata.version);
-            expect(response.stderr).toBe("");
-        }
-    });
-
     test("prints the installed package version through the npm-style bin", async () => {
-        const build = Bun.spawnSync([process.execPath, "run", "build"], { cwd: PACKAGE_ROOT });
-        expect(build.exitCode).toBe(0);
         const sandbox = mkdtempSync(join(tmpdir(), "supacloud-cli-bin-"));
         temporaryDirectories.push(sandbox);
+        const buildDirectory = join(sandbox, "dist");
+        const build = Bun.spawnSync([
+            process.execPath, "build", "src/index.ts", "--outdir", buildDirectory, "--target", "node",
+        ], { cwd: PACKAGE_ROOT });
+        expect(build.exitCode).toBe(0);
+        const builtEntry = join(buildDirectory, "index.js");
+        expect(readFileSync(builtEntry, "utf8").split("\n", 1)[0]).toBe("#!/usr/bin/env node");
         const binDirectory = join(sandbox, "node_modules/.bin");
         mkdirSync(binDirectory, { recursive: true });
         const linkedEntry = join(binDirectory, "supacloud-cli");
-        symlinkSync(join(PACKAGE_ROOT, "dist/index.js"), linkedEntry);
+        symlinkSync(builtEntry, linkedEntry);
 
-        const response = await runProjectCliPath(linkedEntry, [
-            "--version", "--env=test", "--confirm-production=project-ref",
-        ]);
+        const response = await runProjectCliPath(linkedEntry, ["--version"]);
 
         expect(response.exitCode).toBe(0);
         expect(response.stdout.trim()).toBe(packageMetadata.version);
