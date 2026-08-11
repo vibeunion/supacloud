@@ -6,6 +6,45 @@ const getApiUrl = () => {
     return window.location.origin;
 };
 
+interface ListEnvelopeAdapter {
+    matches: (resource: string) => boolean;
+    recordKeys: readonly string[];
+}
+
+const defaultListRecordKeys = ["items", "data", "rows"] as const;
+const listEnvelopeAdapters: readonly ListEnvelopeAdapter[] = [
+    {
+        matches: (resource) => resource === "auth/users" || resource.endsWith("/auth/users"),
+        recordKeys: ["users"],
+    },
+    {
+        matches: (resource) => resource === "frontend/deployments" || resource.endsWith("/frontend/deployments"),
+        recordKeys: ["deployments"],
+    },
+    {
+        matches: (resource) => resource.includes("/functions/") && resource.endsWith("/logs"),
+        recordKeys: ["logs"],
+    },
+];
+
+function listRecordKeysFor(resource: string): readonly string[] {
+    const adapter = listEnvelopeAdapters.find((candidate) => candidate.matches(resource));
+    return adapter ? [...adapter.recordKeys, ...defaultListRecordKeys] : defaultListRecordKeys;
+}
+
+function normalizeListEnvelope(
+    response: Record<string, unknown>,
+    recordKey: string,
+): { data: unknown[]; total: number; [key: string]: unknown } {
+    const { [recordKey]: recordValue, ...metadata } = response;
+    const records = recordValue as unknown[];
+    return {
+        ...metadata,
+        data: records,
+        total: typeof response.total === "number" ? response.total : records.length,
+    };
+}
+
 export function parseListResponse(payload: unknown, resource: string) {
     if (Array.isArray(payload)) return { data: payload, total: payload.length };
     if (!payload || typeof payload !== "object") throw new Error(`Invalid list response for ${resource}`);
@@ -16,16 +55,16 @@ export function parseListResponse(payload: unknown, resource: string) {
         throw new Error(typeof message === "string" ? message : "API Application Error");
     }
 
-    for (const key of ["items", "data", "rows", "users", "deployments"] as const) {
+    const recordKeys = listRecordKeysFor(resource);
+    for (const key of recordKeys) {
         const records = response[key];
         if (Array.isArray(records)) {
-            const total = typeof response.total === "number" ? response.total : records.length;
-            return { data: records, total };
+            return normalizeListEnvelope(response, key);
         }
     }
 
     throw new Error(
-        `Unrecognized list response format from API for resource ${resource}. Expected an array or an object containing items, data, rows, users, or deployments.`,
+        `Unrecognized list response format from API for resource ${resource}. Expected an array or an object containing ${recordKeys.join(", ")}.`,
     );
 }
 
@@ -110,9 +149,10 @@ export const chatProvider: ChatProvider = {
             }
         }
       }
-    } catch (e: any) {
-      if (e.name === 'AbortError') return;
-      yield `\n\n*(Error: ${e.message})*`;
+    } catch (error: unknown) {
+      if (error instanceof Error && error.name === 'AbortError') return;
+      const message = error instanceof Error ? error.message : String(error);
+      yield `\n\n*(Error: ${message})*`;
     }
   }
 };

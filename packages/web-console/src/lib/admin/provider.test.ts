@@ -50,4 +50,18 @@ describe("parseListResponse", () => {
       total: 1,
     });
   });
+
+  test("uses the function-log envelope and preserves cursor metadata", () => {
+    expect(parseListResponse({
+      logs: [{ id: "log-1" }],
+      total: 7,
+      nextCursor: "cursor-2",
+      backend: "vector",
+    }, "v1/projects/project-a/functions/send-email/logs")).toEqual({
+      data: [{ id: "log-1" }],
+      total: 7,
+      nextCursor: "cursor-2",
+      backend: "vector",
+    });
+  });
 });
