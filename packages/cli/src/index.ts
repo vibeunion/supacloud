@@ -210,6 +210,7 @@ EXAMPLES
   ${preferredCommand} frontend list --ref abc123
   ${preferredCommand} database query --sql "select now()"
   ${preferredCommand} database query --ref abc123 --file ./queries/vector-search.sql
+  ${preferredCommand} database migration_inventory --ref abc123
   ${preferredCommand} database push_migrations --ref abc123 --dir supabase/migrations --dry_run
   ${preferredCommand} supabase migration_new --name add_accounts
   ${preferredCommand} supabase db_diff --schema public --name add_accounts
