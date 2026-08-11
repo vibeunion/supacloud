@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.1](https://github.com/zuohuadong/supacloud/compare/admin-v0.10.0...admin-v0.10.1) (2026-08-11)
+
+
+### Bug Fixes
+
+* **admin:** make upgrade preflight awk portable ([#851](https://github.com/zuohuadong/supacloud/issues/851)) ([b7005f0](https://github.com/zuohuadong/supacloud/commit/b7005f0e0c7944ac6f98549251a305b537057c72))
+
 ## [0.10.0](https://github.com/zuohuadong/supacloud/compare/admin-v0.9.0...admin-v0.10.0) (2026-08-11)
 
 
