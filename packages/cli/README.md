@@ -159,6 +159,7 @@ supacloud-cli edge_functions deploy_bundle --ref abc123 --slug hello --files '{"
 supacloud-cli edge_functions source --ref abc123 --slug hello --output ./hello.ts
 supacloud-cli edge_functions activate --ref abc123 --slug hello --version 3
 supacloud-cli scheduled_functions list --ref abc123
+supacloud-cli secrets upsert --ref abc123 --from-env API_KEY,WEBHOOK_SECRET
 ```
 
 `edge_functions deploy --path` bundles local TypeScript and dependencies with
@@ -200,6 +201,13 @@ must come from environment variables: pass a JSON name mapping such as
 `authorization`, `apikey`, and `x-project-ref` headers cannot be overridden. Receipts never
 include header values or body content; list and mutation receipts report only
 whether the body is empty and the configured header names.
+
+For secret writes, `--from-env` accepts a comma-separated list of environment
+variable names. The CLI reads each non-empty value from its own process
+environment, so command arguments contain names only and values are never
+printed. Names must be unique shell-style identifiers (`[A-Za-z_][A-Za-z0-9_]*`,
+up to 256 characters). Missing or empty values fail before any HTTP request.
+Do not combine `--from-env` with the compatibility `--secrets` input.
 
 Branch promotion is migration-first. `branch promotion_plan` prints pending
 versions, names, statement counts, and checksums without echoing SQL into terminal

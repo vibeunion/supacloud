@@ -222,6 +222,7 @@ EXAMPLES
   ${preferredCommand} edge_functions activate --ref abc123 --slug hello --version 3
   ${preferredCommand} scheduled_functions list --ref abc123
   ${preferredCommand} edge_functions config --ref abc123 --slug hello --verify_jwt false --background_routes "/queue/*,/render/*"
+  ${preferredCommand} secrets upsert --ref abc123 --from-env API_KEY,WEBHOOK_SECRET
   ${preferredCommand} gateway routes --ref abc123
   ${preferredCommand} gateway upsert_route --ref abc123 --route_id webhook --hosts "api.example.com" --paths "/webhook/*" --upstream 10.0.0.5:8080
   ${preferredCommand} gateway config --ref abc123 --rate_limit_tier pro
@@ -370,7 +371,7 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
     assign(databaseTools);
     assign(captureTools((server) => registerAuthTools(server as any, http)));
     assign(captureTools((server) => registerStorageTools(server as any, http)));
-    assign(captureTools((server) => registerAdvancedTools(server as any, http, {
+    assign(captureTools((server) => registerAdvancedTools(server as any, http, process.env, {
         readOnly: context.readOnly,
     })));
     assign(captureTools((server) => registerScheduledFunctionTools(server as any, http, process.env, {

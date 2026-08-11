@@ -3,7 +3,10 @@ import { registerAdvancedTools } from "./advanced-tools";
 import { parseToolArguments } from "../schema";
 import type { ToolSchema } from "../schema";
 
-function captureEdgeFunctionsTool(http: Record<string, unknown>, options: { readOnly?: boolean } = {}) {
+function captureEdgeFunctionsTool(
+    http: Record<string, unknown>,
+    options: { readOnly?: boolean } = {},
+) {
     let schema: ToolSchema | undefined;
     let callback: ((args: Record<string, unknown>) => Promise<{
         content: Array<{ text: string }>;
@@ -15,13 +18,16 @@ function captureEdgeFunctionsTool(http: Record<string, unknown>, options: { read
             schema = toolSchema;
             callback = toolCallback;
         },
-    }, http as any, options);
+    }, http as any, process.env, options);
 
     if (!schema || !callback) throw new Error("edge_functions tool was not registered");
     return { schema, callback };
 }
 
-function captureSecretsTool(http: Record<string, unknown>) {
+function captureSecretsTool(
+    http: Record<string, unknown>,
+    environment: NodeJS.ProcessEnv = {},
+) {
     let schema: ToolSchema | undefined;
     let callback: ((args: Record<string, unknown>) => Promise<{ content: Array<{ text: string }> }>) | undefined;
     registerAdvancedTools({
@@ -30,7 +36,7 @@ function captureSecretsTool(http: Record<string, unknown>) {
             schema = toolSchema;
             callback = toolCallback;
         },
-    }, http as any);
+    }, http as any, environment);
 
     if (!schema || !callback) throw new Error("secrets tool was not registered");
     return { schema, callback };
@@ -407,6 +413,22 @@ describe("edge_functions CLI tool", () => {
 });
 
 describe("secrets CLI tool", () => {
+    test("fails closed without echoing the response body when listing secrets fails", async () => {
+        const responseBodySentinel = "server-secret-shaped-error-sentinel";
+        const { callback } = captureSecretsTool({
+            get: async () => ({
+                ok: false,
+                status: 503,
+                data: { error: responseBodySentinel },
+            }),
+        });
+
+        const response = await callback({ action: "list", ref: "proj" });
+
+        expect(response.content[0].text).toBe("❌ Failed (503)");
+        expect(response.content[0].text).not.toContain(responseBodySentinel);
+    });
+
     test("parses JSON array secrets passed as a CLI string", () => {
         const { schema } = captureSecretsTool({});
         const parsed = parseToolArguments(schema, {
@@ -430,6 +452,103 @@ describe("secrets CLI tool", () => {
             { name: "API_KEY", value: "secret" },
             { name: "OTHER", value: "value=with=equals" },
         ]);
+    });
+
+    test("parses explicit environment variable names from the kebab-case flag", () => {
+        const { schema } = captureSecretsTool({});
+        const parsed = parseToolArguments(schema, {
+            action: "upsert",
+            ref: "proj",
+            "from-env": " API_KEY,WEBHOOK_SECRET ",
+        });
+
+        expect(parsed["from-env"]).toEqual(["API_KEY", "WEBHOOK_SECRET"]);
+    });
+
+    test.each([
+        ["empty entries", "API_KEY,,WEBHOOK_SECRET", "non-empty comma-separated list"],
+        ["invalid names", "API-KEY", "Invalid environment secret name 'API-KEY'"],
+        ["overlong names", `A${"B".repeat(256)}`, "Invalid environment secret name"],
+        ["duplicate names", "API_KEY,API_KEY", "Duplicate environment secret name 'API_KEY'"],
+    ])("rejects %s before resolving environment values", (_label, names, expectedMessage) => {
+        const { schema } = captureSecretsTool({});
+
+        expect(() => parseToolArguments(schema, {
+            action: "upsert",
+            ref: "proj",
+            "from-env": names,
+        })).toThrow(expectedMessage);
+    });
+
+    test("reads secret values from the CLI environment without echoing them", async () => {
+        const requests: Array<{ path: string; body: unknown }> = [];
+        const primarySecret = "unit-primary-secret-sentinel";
+        const secondarySecret = "unit-secondary-secret-sentinel";
+        const { callback } = captureSecretsTool({
+            post: async (path: string, body: unknown) => {
+                requests.push({ path, body });
+                return { ok: true, status: 200, data: {} };
+            },
+        }, {
+            API_KEY: primarySecret,
+            WEBHOOK_SECRET: secondarySecret,
+        });
+
+        const response = await callback({
+            action: "upsert",
+            ref: "proj",
+            "from-env": ["API_KEY", "WEBHOOK_SECRET"],
+        });
+
+        expect(requests).toEqual([{
+            path: "/v1/projects/proj/secrets",
+            body: [
+                { name: "API_KEY", value: primarySecret },
+                { name: "WEBHOOK_SECRET", value: secondarySecret },
+            ],
+        }]);
+        expect(response.content[0].text).toBe("✅ Updated 2 secrets");
+        expect(response.content[0].text).not.toContain(primarySecret);
+        expect(response.content[0].text).not.toContain(secondarySecret);
+    });
+
+    test.each([
+        ["missing", {}],
+        ["empty", { API_KEY: "" }],
+    ])("fails closed when an environment value is %s", async (_label, environment) => {
+        let requestCount = 0;
+        const { callback } = captureSecretsTool({
+            post: async () => {
+                requestCount += 1;
+                return { ok: true, status: 200, data: {} };
+            },
+        }, environment);
+
+        await expect(callback({
+            action: "upsert",
+            ref: "proj",
+            "from-env": ["API_KEY"],
+        })).rejects.toThrow("Environment variable 'API_KEY' must be set to a non-empty value");
+        expect(requestCount).toBe(0);
+    });
+
+    test("rejects mixed from-env and inline inputs before HTTP", async () => {
+        let requestCount = 0;
+        const inlineSecret = "unit-inline-secret-sentinel";
+        const { callback } = captureSecretsTool({
+            post: async () => {
+                requestCount += 1;
+                return { ok: true, status: 200, data: {} };
+            },
+        }, { API_KEY: "unit-environment-secret-sentinel" });
+
+        await expect(callback({
+            action: "upsert",
+            ref: "proj",
+            secrets: [{ name: "INLINE_KEY", value: inlineSecret }],
+            "from-env": ["API_KEY"],
+        })).rejects.toThrow("'--from-env' cannot be combined with '--secrets'");
+        expect(requestCount).toBe(0);
     });
 });
 
