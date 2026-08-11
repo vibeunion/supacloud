@@ -6,7 +6,7 @@ import {
   setDefaultTimeout,
   test,
 } from "bun:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -179,15 +179,19 @@ async function expectInvalidConfigFailsClosed(slug: string, rawConfig: string): 
   await writeLegacyFunction(slug, staleBody);
   await writeFunctionConfig(slug, rawConfig);
 
+  await expectActivationFailsClosed(slug, staleBody);
+}
+
+async function expectActivationFailsClosed(slug: string, forbiddenBody: string): Promise<void> {
   const foreground = await invokeForeground(slug);
   expect(foreground.status).toBe(500);
   expect(foreground.headers.has("x-supacloud-function-version")).toBe(false);
-  expect(await foreground.text()).not.toContain(staleBody);
+  expect(await foreground.text()).not.toContain(forbiddenBody);
 
   const background = await invokeBackground(slug);
   expect(background.status).toBe(500);
   expect(background.headers["x-supacloud-function-version"]).toBeUndefined();
-  expect(background.bodyText).not.toContain(staleBody);
+  expect(background.bodyText).not.toContain(forbiddenBody);
 }
 
 async function installValidFunction(
@@ -217,6 +221,62 @@ async function expectValidFunctionResponse(
   expect(background.status).toBe(200);
   expect(background.headers["x-supacloud-function-version"] ?? null).toBe(responseVersion);
   expect(background.bodyText).toBe(body);
+}
+
+async function expectCrossVersionSymlinkFailsClosed(): Promise<void> {
+  const slug = "cross_version";
+  const forbiddenBody = "executed-v8";
+  await writeVersionedFunction(slug, "8", forbiddenBody);
+  const versionSevenRoot = join(projectRoot, ".versions", slug, "7");
+  await mkdir(versionSevenRoot, { recursive: true });
+  await symlink(
+    join(projectRoot, ".versions", slug, "8", "index.js"),
+    join(versionSevenRoot, "index.js"),
+  );
+  await writeFunctionConfig(slug, '{"verify_jwt":false,"version":"7"}');
+  await expectActivationFailsClosed(slug, forbiddenBody);
+}
+
+async function expectCrossSlugSymlinkFailsClosed(): Promise<void> {
+  const slug = "cross_slug";
+  const targetSlug = "cross_slug_target";
+  const forbiddenBody = "executed-other-slug";
+  await writeVersionedFunction(targetSlug, "7", forbiddenBody);
+  const versionRoot = join(projectRoot, ".versions", slug, "7");
+  await mkdir(versionRoot, { recursive: true });
+  await symlink(
+    join(projectRoot, ".versions", targetSlug, "7", "index.js"),
+    join(versionRoot, "index.js"),
+  );
+  await writeFunctionConfig(slug, '{"verify_jwt":false,"version":"7"}');
+  await expectActivationFailsClosed(slug, forbiddenBody);
+}
+
+async function expectLegacySymlinkFailsClosed(): Promise<void> {
+  const slug = "legacy_symlink";
+  const targetSlug = "legacy_symlink_target";
+  const forbiddenBody = "executed-legacy-target";
+  await writeLegacyFunction(targetSlug, forbiddenBody);
+  await symlink(join(projectRoot, `${targetSlug}.ts`), join(projectRoot, `${slug}.ts`));
+  await expectActivationFailsClosed(slug, forbiddenBody);
+}
+
+async function installInvalidPreferredArtifact(
+  slug: string,
+  fallbackBody: string,
+  artifactKind: "directory" | "fifo",
+): Promise<void> {
+  await writeVersionedFunction(slug, "7", fallbackBody);
+  const sourceRoot = join(projectRoot, ".versions", slug, "7", "src");
+  const preferredArtifact = join(sourceRoot, ".supacloud-entry.js");
+  await mkdir(sourceRoot, { recursive: true });
+  if (artifactKind === "directory") {
+    await mkdir(preferredArtifact);
+  } else {
+    const creation = Bun.spawnSync(["mkfifo", preferredArtifact], { stderr: "pipe" });
+    expect(creation.exitCode).toBe(0);
+  }
+  await writeFunctionConfig(slug, '{"verify_jwt":false,"version":"7"}');
 }
 
 beforeAll(initializeServerFixture);
@@ -277,4 +337,25 @@ describe("Edge Runtime function config boundary", () => {
     expect(invalidated.status).toBe(500);
     expect(await invalidated.text()).not.toContain("stale-cache-alias");
   });
+
+  test("rejects cross-version and cross-slug artifact symlinks", async () => {
+    await expectCrossVersionSymlinkFailsClosed();
+    await expectCrossSlugSymlinkFailsClosed();
+    await expectLegacySymlinkFailsClosed();
+  });
+
+  test("rejects a preferred artifact directory instead of executing a fallback", async () => {
+    const fallbackBody = "directory-fallback-must-not-run";
+    await installInvalidPreferredArtifact("preferred_directory", fallbackBody, "directory");
+    await expectActivationFailsClosed("preferred_directory", fallbackBody);
+  });
+
+  test.skipIf(process.platform === "win32")(
+    "rejects a preferred artifact FIFO instead of executing a fallback",
+    async () => {
+      const fallbackBody = "fifo-fallback-must-not-run";
+      await installInvalidPreferredArtifact("preferred_fifo", fallbackBody, "fifo");
+      await expectActivationFailsClosed("preferred_fifo", fallbackBody);
+    },
+  );
 });
