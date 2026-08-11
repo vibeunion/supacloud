@@ -48,6 +48,21 @@ function invalidObjectKey(key: string): string | null {
   return null
 }
 
+const LEGACY_OWNER_UUID_PATTERN = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i
+
+interface StorageObjectOwnership {
+  legacyOwner: string | null
+  ownerId: string | null
+}
+
+function storageObjectOwnership(ctx: RequestContext): StorageObjectOwnership {
+  const ownerId = typeof ctx.claims?.sub === 'string' ? ctx.claims.sub : null
+  // Current Storage accepts arbitrary text subjects; only mirror UUID subjects
+  // into the deprecated owner column used by legacy policies.
+  const legacyOwner = ownerId !== null && LEGACY_OWNER_UUID_PATTERN.test(ownerId) ? ownerId : null
+  return { legacyOwner, ownerId }
+}
+
 interface ObjectRow {
   id: string
   bucket_id: string
@@ -481,6 +496,7 @@ export class StorageHandler {
     upsert: boolean
   ): Promise<string> {
     const metadata = objectMetadata(bytes.length, contentType, cacheControl)
+    const ownership = storageObjectOwnership(ctx)
     const previous = (
       await this.db.query<ObjectRow>(`select * from storage.objects where bucket_id = $1 and name = $2`, [bucketId, key])
     ).rows[0]
@@ -489,15 +505,16 @@ export class StorageHandler {
     const stagedKey = await this.stageObjectBytes(version, bytes)
     const conflictClause = upsert
       ? `on conflict (bucket_id, name) do update
-           set metadata = excluded.metadata, owner = excluded.owner, updated_at = now(), version = excluded.version`
+           set metadata = excluded.metadata, owner = excluded.owner, owner_id = excluded.owner_id,
+               updated_at = now(), version = excluded.version`
       : ''
     let inserted: ObjectRow | undefined
     try {
       const result = await this.db.withContext(ctx, (query) =>
         query(
-          `insert into storage.objects (id, bucket_id, name, owner, metadata, version)
-           values ($1, $2, $3, $4, $5::jsonb, $6) ${conflictClause} returning *`,
-          [objectId, bucketId, key, ctx.claims?.sub ?? null, JSON.stringify(metadata), version]
+          `insert into storage.objects (id, bucket_id, name, owner, owner_id, metadata, version)
+           values ($1, $2, $3, $4::uuid, $5, $6::jsonb, $7) ${conflictClause} returning *`,
+          [objectId, bucketId, key, ownership.legacyOwner, ownership.ownerId, JSON.stringify(metadata), version]
         )
       )
       inserted = result.rows[0] as ObjectRow | undefined
@@ -764,19 +781,22 @@ export class StorageHandler {
     cacheControl: string | undefined,
     upsert: boolean
   ): Promise<Response | null> {
+    const ownership = storageObjectOwnership(ctx)
     const conflictClause = upsert
       ? `on conflict (bucket_id, name) do update
-           set metadata = excluded.metadata, owner = excluded.owner, updated_at = now(), version = excluded.version`
+           set metadata = excluded.metadata, owner = excluded.owner, owner_id = excluded.owner_id,
+               updated_at = now(), version = excluded.version`
       : ''
     try {
       await this.db.withContext(ctx, async (query) => {
         await query(
-          `insert into storage.objects (bucket_id, name, owner, metadata, version)
-           values ($1, $2, $3, $4::jsonb, $5) ${conflictClause} returning id`,
+          `insert into storage.objects (bucket_id, name, owner, owner_id, metadata, version)
+           values ($1, $2, $3::uuid, $4, $5::jsonb, $6) ${conflictClause} returning id`,
           [
             bucketId,
             key,
-            ctx.claims?.sub ?? null,
+            ownership.legacyOwner,
+            ownership.ownerId,
             JSON.stringify(objectMetadata(size, contentType ?? 'application/octet-stream', cacheControl ?? 'no-cache')),
             createObjectVersion(),
           ]
@@ -918,14 +938,24 @@ export class StorageHandler {
     }
 
     const copyId = crypto.randomUUID()
+    const ownership = storageObjectOwnership(ctx)
     try {
       const copied = await this.db.withContext(ctx, (query) =>
         query(
-          `insert into storage.objects (id, bucket_id, name, owner, metadata, version)
-           select $1, $4, $5, $6, metadata, $7
+          `insert into storage.objects (id, bucket_id, name, owner, owner_id, metadata, version)
+           select $1, $4, $5, $6::uuid, $7, metadata, $8
            from storage.objects where bucket_id = $2 and name = $3
            returning *`,
-          [copyId, body.bucketId, body.sourceKey, dstBucket, body.destinationKey, ctx.claims?.sub ?? null, version]
+          [
+            copyId,
+            body.bucketId,
+            body.sourceKey,
+            dstBucket,
+            body.destinationKey,
+            ownership.legacyOwner,
+            ownership.ownerId,
+            version,
+          ]
         )
       )
       if (copied.rows.length === 0) throw new Error('storage copy source disappeared')
