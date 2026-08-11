@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.10.0](https://github.com/zuohuadong/supacloud/compare/admin-v0.9.0...admin-v0.10.0) (2026-08-11)
+
+
+### Features
+
+* **admin:** add verified physical backup receipts ([#820](https://github.com/zuohuadong/supacloud/issues/820)) ([7c99ace](https://github.com/zuohuadong/supacloud/commit/7c99ace90446881cca1903f62c0efdbbf2fbd2d1))
+* **admin:** deliver project credentials securely ([#819](https://github.com/zuohuadong/supacloud/issues/819)) ([3307874](https://github.com/zuohuadong/supacloud/commit/33078744a42f49bf7e412ad3145f5374331d8756))
+* **admin:** gate production writes by environment ([#825](https://github.com/zuohuadong/supacloud/issues/825)) ([49018d6](https://github.com/zuohuadong/supacloud/commit/49018d6e573984cc21251271a030bb23b6eddfd0))
+
 ## [0.9.0](https://github.com/zuohuadong/supacloud/compare/admin-v0.8.2...admin-v0.9.0) (2026-08-11)
 
 

@@ -11,6 +11,14 @@
 * **cli:** fail closed for production and read-only writes, and require exact production confirmation
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.16.0](https://github.com/zuohuadong/supacloud/compare/cli-v0.15.0...cli-v0.16.0) (2026-08-11)
+
+
+### Features
+
+* **cli:** add migration inventory action ([#824](https://github.com/zuohuadong/supacloud/issues/824)) ([d5d81b1](https://github.com/zuohuadong/supacloud/commit/d5d81b1145d4d80ac65adcd2c472785887d42686))
+* **cli:** add storage bucket lifecycle ([#822](https://github.com/zuohuadong/supacloud/issues/822)) ([e4c9b4c](https://github.com/zuohuadong/supacloud/commit/e4c9b4c8998a1149a527d38c277bf3d77f0f7572))
+
 ## [0.15.0](https://github.com/zuohuadong/supacloud/compare/cli-v0.14.6...cli-v0.15.0) (2026-08-11)
 
 
