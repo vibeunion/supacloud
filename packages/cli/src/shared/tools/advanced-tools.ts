@@ -203,6 +203,13 @@ interface FunctionActivationTarget {
     version: string;
 }
 
+function readOnlyActivationResult(): ReleaseControlToolResponse {
+    return {
+        isError: true,
+        content: [{ type: "text", text: "⚠️ Edge Function activation blocked in read-only mode." }],
+    };
+}
+
 function functionActivationTarget(args: Record<string, unknown>): FunctionActivationTarget {
     const projectRef = typeof args.ref === "string" ? args.ref.trim() : "";
     const functionSlug = typeof args.slug === "string" ? args.slug.trim() : "";
@@ -219,7 +226,9 @@ function functionActivationTarget(args: Record<string, unknown>): FunctionActiva
 async function activateFunctionVersion(
     http: HttpTransport,
     args: Record<string, unknown>,
+    readOnly = false,
 ): Promise<ReleaseControlToolResponse> {
+    if (readOnly) return readOnlyActivationResult();
     const unsupported = Object.keys(args).filter((name) => !FUNCTION_ACTIVATION_ARGUMENTS.has(name));
     if (unsupported.length > 0) throw new Error(`'${unsupported[0]}' is not supported for 'activate'`);
     const { projectRef, functionSlug, version } = functionActivationTarget(args);
@@ -228,7 +237,11 @@ async function activateFunctionVersion(
     return activationResponse(functionSlug, version, await http.post(endpoint));
 }
 
-export function registerAdvancedTools(server: { tool: (...args: any[]) => void }, http: HttpTransport): void {
+export function registerAdvancedTools(
+    server: { tool: (...args: any[]) => void },
+    http: HttpTransport,
+    options: { readOnly?: boolean } = {},
+): void {
 
     // ═══ Edge Functions (8→1) ═══
     server.tool(
@@ -250,7 +263,7 @@ Actions: list, deploy, deploy_bundle, config, source, activate, delete, check`,
             background_routes: withDescription(backgroundRoutesSchema, "[deploy/deploy_bundle/config] Background route paths; pass comma-separated or JSON array in CLI"),
         },
         async (args: any) => {
-            if (args.action === "activate") return activateFunctionVersion(http, args);
+            if (args.action === "activate") return activateFunctionVersion(http, args, options.readOnly);
             const { action, ref, slug, path: pathArg, output, files, entrypoint, minify, verify_jwt, background_routes } = args;
             let code = args.code as string | undefined;
             const need = (f: string, v: any) => { if (!v) throw new Error(`'${f}' required for '${action}'`); };

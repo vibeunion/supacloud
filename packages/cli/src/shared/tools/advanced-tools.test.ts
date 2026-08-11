@@ -3,7 +3,7 @@ import { registerAdvancedTools } from "./advanced-tools";
 import { parseToolArguments } from "../schema";
 import type { ToolSchema } from "../schema";
 
-function captureEdgeFunctionsTool(http: Record<string, unknown>) {
+function captureEdgeFunctionsTool(http: Record<string, unknown>, options: { readOnly?: boolean } = {}) {
     let schema: ToolSchema | undefined;
     let callback: ((args: Record<string, unknown>) => Promise<{
         content: Array<{ text: string }>;
@@ -15,7 +15,7 @@ function captureEdgeFunctionsTool(http: Record<string, unknown>) {
             schema = toolSchema;
             callback = toolCallback;
         },
-    }, http as any);
+    }, http as any, options);
 
     if (!schema || !callback) throw new Error("edge_functions tool was not registered");
     return { schema, callback };
@@ -380,6 +380,28 @@ describe("edge_functions CLI tool", () => {
             version: "5",
             path: "/definitely/not/exist/private-source.ts",
         })).rejects.toThrow("'path' is not supported for 'activate'");
+        expect(requestCount).toBe(0);
+    });
+
+    test("blocks activate in read-only mode before validation or HTTP dispatch", async () => {
+        let requestCount = 0;
+        const { callback } = captureEdgeFunctionsTool({
+            post: async () => {
+                requestCount += 1;
+                return { ok: true, status: 200, data: {} };
+            },
+        }, { readOnly: true });
+
+        const response = await callback({
+            action: "activate",
+            ref: "../unsafe-ref",
+            slug: "../unsafe-slug",
+            version: "invalid",
+            path: "/definitely/not/exist/private-source.ts",
+        });
+
+        expect(response.isError).toBe(true);
+        expect(response.content[0].text).toContain("read-only");
         expect(requestCount).toBe(0);
     });
 });

@@ -24,6 +24,10 @@ type ToolServer = {
 
 type ScheduledFunctionAction = "list" | "create" | "update" | "delete";
 
+interface ScheduledFunctionToolsOptions {
+    readOnly?: boolean;
+}
+
 interface SafeScheduledFunction {
     id: string;
     name: string;
@@ -353,6 +357,13 @@ function deleteResponse(
     });
 }
 
+function readOnlyResult(): ReleaseControlToolResponse {
+    return {
+        isError: true,
+        content: [{ type: "text", text: "⚠️ Scheduled Function write blocked in read-only mode." }],
+    };
+}
+
 function createRequest(
     args: Record<string, unknown>,
     environment: NodeJS.ProcessEnv,
@@ -423,8 +434,10 @@ async function executeScheduleAction(
     http: HttpTransport,
     environment: NodeJS.ProcessEnv,
     args: Record<string, unknown>,
+    readOnly = false,
 ): Promise<ReleaseControlToolResponse> {
     const action = args.action as ScheduledFunctionAction;
+    if (readOnly && action !== "list") return readOnlyResult();
     assertActionArguments(action, args);
     const ref = requiredText(args, "ref", action);
     if (action === "list") return listResponse(ref, await http.get(schedulePath(ref)));
@@ -455,9 +468,10 @@ export function registerScheduledFunctionTools(
     server: ToolServer,
     http: HttpTransport,
     environment: NodeJS.ProcessEnv = process.env,
+    options: ScheduledFunctionToolsOptions = {},
 ): void {
     server.tool("scheduled_functions", SCHEDULE_TOOL_DESCRIPTION, SCHEDULE_TOOL_SCHEMA,
-        (args) => executeScheduleAction(http, environment, args));
+        (args) => executeScheduleAction(http, environment, args, options.readOnly));
 }
 
 const SCHEDULE_TOOL_DESCRIPTION = "Scheduled Edge Function lifecycle. Actions: list, create, update, delete";

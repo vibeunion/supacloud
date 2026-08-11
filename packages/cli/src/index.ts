@@ -333,8 +333,12 @@ function createCliTools(): ToolMap {
     assign(databaseTools);
     assign(captureTools((server) => registerAuthTools(server as any, http)));
     assign(captureTools((server) => registerStorageTools(server as any, http)));
-    assign(captureTools((server) => registerAdvancedTools(server as any, http)));
-    assign(captureTools((server) => registerScheduledFunctionTools(server as any, http)));
+    assign(captureTools((server) => registerAdvancedTools(server as any, http, {
+        readOnly: context.readOnly,
+    })));
+    assign(captureTools((server) => registerScheduledFunctionTools(server as any, http, process.env, {
+        readOnly: context.readOnly,
+    })));
     assign(captureTools((server) => registerFrontendTools(server as any, http)));
     assign(captureTools((server) => registerGatewayTools(server as any, http, {
         projectRef: context.projectRef || undefined,

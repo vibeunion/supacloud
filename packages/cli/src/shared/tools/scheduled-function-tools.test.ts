@@ -44,6 +44,7 @@ function scheduleReceipt(request: Record<string, unknown>, overrides: Record<str
 function captureScheduledFunctionsTool(
     http: Record<string, unknown>,
     environment: NodeJS.ProcessEnv = {},
+    options: { readOnly?: boolean } = {},
 ) {
     let schema: ToolSchema | undefined;
     let callback: ((args: Record<string, unknown>) => Promise<{
@@ -56,7 +57,7 @@ function captureScheduledFunctionsTool(
             schema = toolSchema;
             callback = toolCallback;
         },
-    }, http as never, environment);
+    }, http as never, environment, options);
     if (!schema || !callback) throw new Error("scheduled_functions tool was not registered");
     return { schema, callback };
 }
@@ -90,6 +91,51 @@ test("Scheduled Function list emits only safe machine-readable metadata", async 
     });
     expect(response.content[0].text).not.toContain(bodySentinel);
     expect(response.content[0].text).not.toContain(headerSentinel);
+});
+
+test("Scheduled Function read-only mode blocks writes before body-file reads or HTTP dispatch", async () => {
+    let requestCount = 0;
+    const { callback } = captureScheduledFunctionsTool({
+        post: async () => { requestCount += 1; },
+        patch: async () => { requestCount += 1; },
+        delete: async () => { requestCount += 1; },
+    }, {}, { readOnly: true });
+
+    for (const args of [
+        {
+            action: "create",
+            ref: "proj",
+            body_file: "/definitely/not/exist/schedule-body.json",
+        },
+        {
+            action: "update",
+            ref: "proj",
+            schedule_id: SCHEDULE_ID,
+            body_file: "/definitely/not/exist/schedule-body.json",
+        },
+        { action: "delete", ref: "proj", schedule_id: SCHEDULE_ID },
+    ]) {
+        const response = await callback(args);
+        expect(response.isError).toBe(true);
+        expect(response.content[0].text).toContain("read-only");
+    }
+
+    expect(requestCount).toBe(0);
+});
+
+test("Scheduled Function read-only mode continues to allow list", async () => {
+    let requestCount = 0;
+    const { callback } = captureScheduledFunctionsTool({
+        get: async () => {
+            requestCount += 1;
+            return { ok: true, status: 200, data: { project_ref: "proj", schedules: [] } };
+        },
+    }, {}, { readOnly: true });
+
+    const response = await callback({ action: "list", ref: "proj" });
+
+    expect(response.isError).not.toBe(true);
+    expect(requestCount).toBe(1);
 });
 
 test("Scheduled Function create reads body and header values outside argv", async () => {

@@ -14,6 +14,7 @@ const CONTEXT_KEYS = new Set([
     "MANAGEMENT_API_URL",
     "SUPACLOUD_API_TOKEN",
     "SUPACLOUD_PROJECT_REF",
+    "SUPACLOUD_READ_ONLY",
     "X_PROJECT_REF",
     "SUPACLOUD_HOST",
 ]);
@@ -361,6 +362,52 @@ describe("supacloud-cli process contract", () => {
         expect(response.stderr).toContain("'path' is not supported for 'activate'");
         expect(response.stdout + response.stderr).not.toContain("ENOENT");
         expect(response.stdout + response.stderr).not.toContain("Failed to bundle/read path");
+    });
+
+    test("blocks scheduled writes and Function activation in read-only mode before local reads or HTTP dispatch", async () => {
+        let requestCount = 0;
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch() {
+                requestCount += 1;
+                return Response.json({});
+            },
+        });
+        servers.push(server);
+        const missingBodyFile = "/definitely/not/exist/schedule-body.json";
+        const missingSourceFile = "/definitely/not/exist/function-source.ts";
+        const commands = [
+            [
+                "scheduled_functions", "create", "--ref", "abc123", "--name", "Nightly",
+                "--slug", "worker", "--cron", "0 2 * * *", "--method", "POST",
+                "--body_file", missingBodyFile,
+            ],
+            [
+                "scheduled_functions", "update", "--ref", "abc123", "--schedule_id", SCHEDULE_ID,
+                "--body_file", missingBodyFile,
+            ],
+            ["scheduled_functions", "delete", "--ref", "abc123", "--schedule_id", SCHEDULE_ID],
+            [
+                "edge_functions", "activate", "--ref", "abc123", "--slug", "worker", "--version", "1",
+                "--path", missingSourceFile,
+            ],
+        ];
+
+        for (const command of commands) {
+            const response = await runProjectCli(command, {
+                SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+                SUPACLOUD_API_TOKEN: "test-token",
+                SUPACLOUD_PROJECT_REF: "abc123",
+                SUPACLOUD_READ_ONLY: "true",
+            });
+
+            expect(response.exitCode).toBe(1);
+            expect(response.stdout + response.stderr).toContain("read-only");
+            expect(response.stdout + response.stderr).not.toContain("ENOENT");
+        }
+
+        expect(requestCount).toBe(0);
     });
 
     test("creates a schedule with body-file and environment-backed headers outside argv and output", async () => {
