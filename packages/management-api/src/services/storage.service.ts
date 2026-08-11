@@ -233,7 +233,10 @@ export class StorageService {
         await db`UPDATE storage.buckets SET file_size_limit = ${updates.file_size_limit} WHERE id = ${bucketId}`;
       }
       if (updates.allowed_mime_types !== undefined) {
-        await db`UPDATE storage.buckets SET allowed_mime_types = ${JSON.stringify(updates.allowed_mime_types)} WHERE id = ${bucketId}`;
+        const allowedMimeTypes = updates.allowed_mime_types.length > 0
+          ? updates.allowed_mime_types
+          : null;
+        await db`UPDATE storage.buckets SET allowed_mime_types = ${allowedMimeTypes} WHERE id = ${bucketId}`;
       }
 
       const [bucket] = await db`SELECT * FROM storage.buckets WHERE id = ${bucketId}`;

@@ -1,4 +1,5 @@
 import { describe, test, expect, spyOn, mock } from "bun:test";
+import * as databaseModule from "../../src/db";
 import { storageService, StorageService } from "../../src/services/storage.service";
 
 // We must mock the adapter module since StorageService now uses it internally
@@ -61,6 +62,39 @@ describe("StorageService (using adapter)", () => {
     test("should preserve strict driver failures", async () => {
       mockStorageDriver.isBucketEmpty.mockRejectedValueOnce(new Error("storage unavailable"));
       await expect(StorageService.isBucketEmpty("myproj", "bucket")).rejects.toThrow("storage unavailable");
+    });
+  });
+
+  describe("updateBucket", () => {
+    test("binds MIME types as a PostgreSQL array instead of serialized JSON", async () => {
+      const sqlParameters: unknown[][] = [];
+      const projectDatabase = (async (strings: TemplateStringsArray, ...parameters: unknown[]) => {
+        sqlParameters.push(parameters);
+        return strings.join("?").includes("SELECT * FROM storage.buckets")
+          ? [{
+              id: "reports",
+              name: "reports",
+              public: false,
+              file_size_limit: null,
+              allowed_mime_types: ["application/pdf"],
+            }]
+          : [];
+      }) as never;
+      const resolveDbName = spyOn(databaseModule, "resolveDbName").mockResolvedValue("supa_testref");
+      const getProjectDb = spyOn(databaseModule, "getProjectDb").mockReturnValue(projectDatabase);
+
+      try {
+        const response = await StorageService.updateBucket("testref", "reports", {
+          allowed_mime_types: ["application/pdf"],
+        });
+
+        expect(response.success).toBe(true);
+        expect(sqlParameters[0]).toEqual([["application/pdf"], "reports"]);
+        expect(sqlParameters.flat().join(" ")).not.toContain('["application/pdf"]');
+      } finally {
+        resolveDbName.mockRestore();
+        getProjectDb.mockRestore();
+      }
     });
   });
 
