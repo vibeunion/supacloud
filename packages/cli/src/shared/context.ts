@@ -82,51 +82,34 @@ function readEnvFile(path: string, required: boolean): Record<string, string> {
     }
 }
 
-function normalizeUrl(value: string): string {
-    const trimmed = value.trim().replace(/\/+$/, "");
-    if (!trimmed) return "";
+function canonicalApiOrigin(value: string): string {
+    const candidate = value.trim();
+    if (!candidate) return "";
     try {
-        return new URL(trimmed).toString().replace(/\/+$/, "");
-    } catch {
-        return "";
+        const url = new URL(candidate);
+        const loopback = url.hostname === "localhost"
+            || url.hostname === "127.0.0.1"
+            || url.hostname === "[::1]";
+        const allowedProtocol = url.protocol === "https:"
+            || (url.protocol === "http:" && loopback);
+        const exactOrigin = candidate === url.origin || candidate === `${url.origin}/`;
+        return allowedProtocol && !url.username && !url.password
+            && exactOrigin && url.pathname === "/" && !url.search && !url.hash
+            ? url.origin
+            : "";
+    } catch (error: unknown) {
+        if (error instanceof TypeError) return "";
+        throw error;
     }
 }
 
 function hostFromUrl(value: string): string {
-    try {
-        return new URL(value).hostname;
-    } catch {
-        return "";
-    }
+    return value ? new URL(value).hostname : "";
 }
 
 function inferProjectRefFromSupabaseUrl(value: string): string {
-    const normalized = normalizeUrl(value);
-    if (!normalized) return "";
-    return new URL(normalized).hostname.match(/^([a-z0-9-]+)\.api\./i)?.[1] ?? "";
-}
-
-function inferManagementApiUrlFromSupabaseUrl(value: string, projectRef = ""): string {
-    const normalized = normalizeUrl(value);
-    if (!normalized) return "";
-
-    const url = new URL(normalized);
-    const host = url.hostname;
-    if (host.startsWith("api.")) {
-        url.hostname = `studio.${host.slice("api.".length)}`;
-        return url.toString().replace(/\/+$/, "");
-    }
-    const ref = projectRef.trim();
-    if (ref && host.startsWith(`${ref}.api.`)) {
-        url.hostname = `studio-${ref}.${host.slice(`${ref}.api.`.length)}`;
-        return url.toString().replace(/\/+$/, "");
-    }
-    const managedHost = host.match(/^([a-z0-9-]+)\.api\.(.+)$/i);
-    if (managedHost) {
-        url.hostname = `studio-${managedHost[1]}.${managedHost[2]}`;
-        return url.toString().replace(/\/+$/, "");
-    }
-    return normalized;
+    if (!value) return "";
+    return new URL(value).hostname.match(/^([a-z0-9-]+)\.api\./i)?.[1] ?? "";
 }
 
 function sourceCredentialScope(
@@ -144,18 +127,18 @@ function sourceCredentialScope(
 }
 
 function sourceProjectCore(values: Record<string, string>) {
-    const supabaseUrl = normalizeUrl(values.SUPABASE_URL || "");
+    const supabaseUrl = canonicalApiOrigin(values.SUPABASE_URL || "");
     const projectRef = (values.SUPACLOUD_PROJECT_REF || values.X_PROJECT_REF || "").trim()
         || inferProjectRefFromSupabaseUrl(supabaseUrl);
     const explicitApiUrl = values.SUPACLOUD_API_URL
         || values.SUPACLOUD_MANAGEMENT_API_URL
         || values.MANAGEMENT_API_URL
         || "";
-    const apiUrl = normalizeUrl(explicitApiUrl)
-        || inferManagementApiUrlFromSupabaseUrl(supabaseUrl, projectRef)
-        || (values.SUPACLOUD_HOST ? `http://${values.SUPACLOUD_HOST}:9090` : "");
-    const apiToken = values.SUPACLOUD_API_TOKEN || values.SUPABASE_SERVICE_ROLE_KEY || "";
     const credentialScope = sourceCredentialScope(values, explicitApiUrl, supabaseUrl);
+    const managementUrl = explicitApiUrl
+        || (values.SUPACLOUD_HOST ? `http://${values.SUPACLOUD_HOST}:9090` : "");
+    const apiUrl = credentialScope === "management" ? canonicalApiOrigin(managementUrl) : "";
+    const apiToken = credentialScope === "management" ? values.SUPACLOUD_API_TOKEN || "" : "";
     return { apiUrl, apiToken, projectRef, supabaseUrl, credentialScope };
 }
 
@@ -169,6 +152,13 @@ function hasProcessContext(env: NodeJS.ProcessEnv): boolean {
 
 function completeProjectContext(values: Record<string, string>): boolean {
     const core = sourceProjectCore(values);
+    if (core.credentialScope === "project_application") {
+        return Boolean(
+            core.supabaseUrl
+            && values.SUPABASE_SERVICE_ROLE_KEY?.trim()
+            && core.projectRef,
+        );
+    }
     return Boolean(core.apiUrl && core.apiToken && core.projectRef);
 }
 

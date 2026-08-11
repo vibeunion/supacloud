@@ -55,7 +55,7 @@ describe("supacloud-cli official Supabase CLI surface", () => {
     test("preserves existing context guidance for other command groups", async () => {
         const result = await runCli(["database"]);
 
-        expect(result.stdout + result.stderr).toContain("project-scoped API context");
+        expect(result.stdout + result.stderr).toContain("Management API context");
         expect(result.stdout + result.stderr).not.toContain("Available actions");
     });
 
@@ -70,15 +70,16 @@ describe("supacloud-cli official Supabase CLI surface", () => {
         expect(result.stdout + result.stderr).not.toContain("must-not-reach-child");
     });
 
-    test("requires service-role project context for remote migration push", async () => {
+    test("requires Management API context for remote migration push", async () => {
         const result = await runCli(["supabase", "push", "--dry_run"]);
 
         expect(result.exitCode).toBe(1);
         expect(result.stdout + result.stderr).toContain("Management API");
-        expect(result.stdout + result.stderr).toContain("SUPABASE_SERVICE_ROLE_KEY");
+        expect(result.stdout + result.stderr).toContain("SUPACLOUD_API_TOKEN");
+        expect(result.stdout + result.stderr).not.toContain("SUPABASE_SERVICE_ROLE_KEY");
     });
 
-    test("uses the service-role token only on the SupaCloud migration API path", async () => {
+    test("uses the Management token only on the SupaCloud migration API path", async () => {
         const migrationDir = mkdtempSync(join(tmpdir(), "supacloud-cli-migrations-"));
         const migrationFile = "20260718090000_create_adapter_test.sql";
         writeFileSync(join(migrationDir, migrationFile), "create table adapter_test(id bigint primary key);\n");
@@ -100,7 +101,7 @@ describe("supacloud-cli official Supabase CLI surface", () => {
                 ["supabase", "push", "--dir", migrationDir, "--dry_run"],
                 {
                     SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
-                    SUPABASE_SERVICE_ROLE_KEY: "project-service-role",
+                    SUPACLOUD_API_TOKEN: "management-api-token",
                     SUPACLOUD_PROJECT_REF: "project-a",
                     SUPACLOUD_SUPABASE_CLI_BIN: "/must/not/run",
                 },
@@ -109,8 +110,8 @@ describe("supacloud-cli official Supabase CLI surface", () => {
             expect(result.exitCode).toBe(0);
             expect(result.stdout).toContain(migrationFile);
             expect(requestedPath).toBe("/v1/projects/project-a/database/migrations");
-            expect(authorization as string | null).toBe("Bearer project-service-role");
-            expect(result.stdout + result.stderr).not.toContain("project-service-role");
+            expect(authorization as string | null).toBe("Bearer management-api-token");
+            expect(result.stdout + result.stderr).not.toContain("management-api-token");
         } finally {
             server.stop(true);
             rmSync(migrationDir, { recursive: true, force: true });
@@ -131,7 +132,7 @@ describe("supacloud-cli official Supabase CLI surface", () => {
         try {
             const result = await runCli(["supabase", "push"], {
                 SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
-                SUPABASE_SERVICE_ROLE_KEY: "project-service-role",
+                SUPACLOUD_API_TOKEN: "management-api-token",
                 SUPACLOUD_PROJECT_REF: "project-a",
                 SUPACLOUD_READ_ONLY: "true",
             });
@@ -158,7 +159,7 @@ describe("supacloud-cli official Supabase CLI surface", () => {
         try {
             const result = await runCli(["supabase", "push"], {
                 SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
-                SUPABASE_SERVICE_ROLE_KEY: "project-service-role",
+                SUPACLOUD_API_TOKEN: "management-api-token",
             });
 
             expect(result.exitCode).toBe(1);

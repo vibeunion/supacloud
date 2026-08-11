@@ -173,7 +173,7 @@ describe("official Supabase CLI adapter", () => {
         })).toThrow("Invalid SUPABASE_CLI_VERSION");
     });
 
-    test("routes push through the existing service-role authenticated migration callback", async () => {
+    test("routes push through the configured Management migration callback", async () => {
         let registered: { callback: (args: any) => Promise<any> } | undefined;
         let pushedArgs: Record<string, unknown> | undefined;
         let officialExecutions = 0;

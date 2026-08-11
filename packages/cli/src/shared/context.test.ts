@@ -25,26 +25,29 @@ function writeEnvironment(workspace: string, filename: string, values: Record<st
 }
 
 describe("resolveSupaCloudContext", () => {
-    test("infers management URL from custom project API domain", () => {
+    test("keeps custom project application credentials out of Management context", () => {
         const context = resolveSupaCloudContext({
             SUPABASE_URL: "https://api.xg.aizhuliren.cn",
             SUPABASE_SERVICE_ROLE_KEY: "service-role",
         }, "/tmp/no-such-supacloud-context");
 
-        expect(context.apiUrl).toBe("https://studio.xg.aizhuliren.cn");
-        expect(context.host).toBe("studio.xg.aizhuliren.cn");
-        expect(context.apiToken).toBe("service-role");
+        expect(context.apiUrl).toBe("");
+        expect(context.host).toBe("api.xg.aizhuliren.cn");
+        expect(context.apiToken).toBe("");
+        expect(context.inferredSupabaseUrl).toBe("https://api.xg.aizhuliren.cn");
+        expect(context.inferredServiceRoleKey).toBe("service-role");
         expect(context.credentialScope).toBe("project_application");
     });
 
-    test("infers management URL from managed project API domain", () => {
+    test("infers only the project ref from a managed project application origin", () => {
         const context = resolveSupaCloudContext({
             SUPABASE_URL: "https://abc123.api.example.com/",
             SUPABASE_SERVICE_ROLE_KEY: "service-role",
         }, "/tmp/no-such-supacloud-context");
 
-        expect(context.apiUrl).toBe("https://studio-abc123.example.com");
+        expect(context.apiUrl).toBe("");
         expect(context.projectRef).toBe("abc123");
+        expect(context.inferredSupabaseUrl).toBe("https://abc123.api.example.com");
         expect(context.credentialScope).toBe("project_application");
     });
 
@@ -71,6 +74,21 @@ describe("resolveSupaCloudContext", () => {
         expect(context.apiToken).toBe("api-token");
     });
 
+    test("does not substitute an application key for a missing Management token", () => {
+        const context = resolveSupaCloudContext({
+            SUPACLOUD_API_URL: "https://management.example.com",
+            SUPACLOUD_PROJECT_REF: "project-ref",
+            SUPABASE_SERVICE_ROLE_KEY: "service-role",
+        }, "/tmp/no-such-supacloud-context");
+
+        expect(context).toMatchObject({
+            apiUrl: "https://management.example.com",
+            apiToken: "",
+            credentialScope: "management",
+            inferredServiceRoleKey: "service-role",
+        });
+    });
+
     test("explicit project ref wins over managed hostname inference", () => {
         const context = resolveSupaCloudContext({
             SUPABASE_URL: "https://inferred.api.example.com",
@@ -79,7 +97,7 @@ describe("resolveSupaCloudContext", () => {
         }, "/tmp/no-such-supacloud-context");
 
         expect(context.projectRef).toBe("explicit-ref");
-        expect(context.apiUrl).toBe("https://studio-inferred.example.com");
+        expect(context.apiUrl).toBe("");
     });
 
     test("invalid placeholder Supabase URL does not throw", () => {
@@ -91,7 +109,37 @@ describe("resolveSupaCloudContext", () => {
         expect(context.apiUrl).toBe("");
         expect(context.host).toBe("");
         expect(context.inferredSupabaseUrl).toBe("");
-        expect(context.apiToken).toBe("service-role");
+        expect(context.apiToken).toBe("");
+    });
+
+    test.each([
+        "http://management.example.com",
+        "https://user:password@management.example.com",
+        "https://management.example.com/private",
+        "https://management.example.com/%2e",
+        "https://management.example.com?token=private",
+        "https://management.example.com#private",
+    ])("rejects unsafe Management origin %s", (managementUrl) => {
+        const context = resolveSupaCloudContext({
+            SUPACLOUD_API_URL: managementUrl,
+            SUPACLOUD_API_TOKEN: "management-token",
+            SUPACLOUD_PROJECT_REF: "project-ref",
+        }, "/tmp/no-such-supacloud-context");
+
+        expect(context.apiUrl).toBe("");
+        expect(context.apiToken).toBe("management-token");
+        expect(context.credentialScope).toBe("management");
+    });
+
+    test("allows HTTP only for literal loopback Management origins", () => {
+        const context = resolveSupaCloudContext({
+            SUPACLOUD_API_URL: "http://127.0.0.1:9090/",
+            SUPACLOUD_API_TOKEN: "management-token",
+            SUPACLOUD_PROJECT_REF: "project-ref",
+        }, "/tmp/no-such-supacloud-context");
+
+        expect(context.apiUrl).toBe("http://127.0.0.1:9090");
+        expect(context.credentialScope).toBe("management");
     });
 
     test("strictly selects a named environment file without mixing process context", () => {
@@ -187,6 +235,26 @@ describe("resolveSupaCloudContext", () => {
             sourcePath: null,
             projectRef: "prod-ref",
             production: true,
+        });
+    });
+
+    test("uses a complete application SUPACLOUD_ENV process context as one source", () => {
+        const workspace = temporaryWorkspace();
+        const context = resolveSupaCloudContext({
+            SUPACLOUD_ENV: "test",
+            SUPABASE_URL: "https://abc123.api.example.com",
+            SUPABASE_SERVICE_ROLE_KEY: "application-service-role",
+            SUPACLOUD_PROJECT_REF: "abc123",
+        }, workspace);
+
+        expect(context).toMatchObject({
+            environment: "test",
+            source: "process_env",
+            sourcePath: null,
+            credentialScope: "project_application",
+            apiUrl: "",
+            apiToken: "",
+            projectRef: "abc123",
         });
     });
 

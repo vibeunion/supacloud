@@ -66,15 +66,6 @@ function failedEndpointProbe(error: unknown): EndpointProbe {
     return { reachable: false, ok: false, httpStatus: null, error: timedOut ? "timeout" : "unreachable" };
 }
 
-function projectApplicationStatusUrl(candidate: string): string {
-    if (!candidate) return "";
-    const url = new URL(candidate);
-    if (url.origin !== candidate || url.username || url.password) return "";
-    if (url.protocol === "https:") return candidate;
-    const loopback = url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]";
-    return url.protocol === "http:" && loopback ? candidate : "";
-}
-
 async function probeEndpoint(url: string, headers?: HeadersInit): Promise<EndpointProbe> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3_000);
@@ -82,6 +73,7 @@ async function probeEndpoint(url: string, headers?: HeadersInit): Promise<Endpoi
         const response = await fetch(url, {
             method: "GET",
             headers,
+            redirect: "error",
             signal: controller.signal,
         });
         return successfulEndpointProbe(response);
@@ -94,9 +86,8 @@ async function probeEndpoint(url: string, headers?: HeadersInit): Promise<Endpoi
 
 function missingProjectContextFields(context: ResolvedContext): string[] {
     if (context.credentialScope === "project_application") {
-        const projectApiUrl = projectApplicationStatusUrl(context.inferredSupabaseUrl);
         return [
-            !projectApiUrl ? "secureSupabaseUrl" : null,
+            !context.inferredSupabaseUrl ? "secureSupabaseUrl" : null,
             !context.inferredServiceRoleKey ? "serviceRoleKey" : null,
             !context.projectRef ? "projectRef" : null,
         ].filter((field): field is string => Boolean(field));
@@ -129,7 +120,7 @@ function projectApplicationHeaders(serviceRoleKey: string): HeadersInit {
 
 function projectStatusApiUrl(context: ResolvedContext): string {
     return context.credentialScope === "project_application"
-        ? projectApplicationStatusUrl(context.inferredSupabaseUrl)
+        ? context.inferredSupabaseUrl
         : context.apiUrl;
 }
 
@@ -205,7 +196,9 @@ async function createProjectStatusResult(context: ResolvedContext) {
         readOnly: context.readOnly,
         production: context.production,
         autoLinked: Boolean(context.inferredSupabaseUrl && context.inferredServiceRoleKey),
-        hasApiToken: Boolean(context.apiToken),
+        hasApiToken: context.credentialScope === "project_application"
+            ? Boolean(context.inferredServiceRoleKey)
+            : Boolean(context.apiToken),
         checks,
     };
     return {
@@ -269,10 +262,10 @@ GLOBAL FLAGS
 DEFAULT CONTEXT
 
   Without a selector or project variables, runs use the current project's legacy .env.
-  Supported auto-link variables:
-    SUPABASE_URL / SUPACLOUD_API_URL
-    SUPABASE_SERVICE_ROLE_KEY / SUPACLOUD_API_TOKEN
-    SUPACLOUD_PROJECT_REF (when it cannot be inferred from <ref>.api.*)
+  Application status accepts SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY.
+  Management-backed project commands require SUPACLOUD_API_URL +
+  SUPACLOUD_API_TOKEN. These credential scopes are never mixed.
+  SUPACLOUD_PROJECT_REF is required when it cannot be inferred from <ref>.api.*.
 
   SUPACLOUD_READ_ONLY=true blocks remote writes. Production writes require an
   exact --confirm-production value, and cannot override the selected project ref.
@@ -365,13 +358,16 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
                     {
                         type: "text" as const,
                         text: [
-                            "⚠️ Project commands need a project-scoped API context.",
+                            "⚠️ Project commands need a Management API context.",
                             "",
                             "Provide one of these sources:",
                             "  - --env <name> for .env.supacloud.<name>",
                             "  - --env-file <path> for a file declaring SUPACLOUD_ENV",
-                            "  - .env with SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY",
                             "  - SUPACLOUD_API_URL + SUPACLOUD_API_TOKEN",
+                            "  - SUPACLOUD_PROJECT_REF when the profile cannot infer it",
+                            "",
+                            "SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY application profiles",
+                            "are accepted only by status and local commands.",
                             "",
                             "Then retry commands such as:",
                             `  ${preferredCommand} project get`,
@@ -389,7 +385,7 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
                     content: [
                         {
                             type: "text" as const,
-                            text: `⚠️ This command requires project-scoped API context. Run \`${preferredCommand} status\` to inspect current detection.`,
+                            text: `⚠️ This command requires Management API context. Run \`${preferredCommand} status\` to inspect current detection.`,
                         },
                     ],
                 }),
@@ -409,7 +405,7 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
         }
     };
 
-    if (!context.apiUrl || !context.apiToken) {
+    if (context.credentialScope !== "management" || !context.apiUrl || !context.apiToken) {
         registerContextAwareHelp();
         tools.setup_help = {
             schema: {},
@@ -421,19 +417,18 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
                         text: [
                             `⚠️ No project context found for ${preferredCommand}.`,
                             "",
-                            `${preferredCommand} expects project-scoped credentials by default.`,
+                            `${preferredCommand} remote tools require Management API credentials.`,
                             "Provide one of these sources:",
                             "",
                             "  1. Named environment file",
                             "     supacloud-cli --env test status",
                             "",
-                            "  2. Current workspace .env",
-                            "     SUPABASE_URL=https://your-project.example.com",
-                            "     SUPABASE_SERVICE_ROLE_KEY=...",
-                            "",
-                            "  3. Explicit environment variables",
+                            "  2. Explicit environment variables",
                             "     SUPACLOUD_API_URL=https://your-project.example.com",
                             "     SUPACLOUD_API_TOKEN=...",
+                            "     SUPACLOUD_PROJECT_REF=your-project-ref",
+                            "",
+                            "Application SUPABASE_* profiles remain available to status and local commands.",
                             "",
                             "For server installation and tenant management, use:",
                             "  supacloud-admin",
