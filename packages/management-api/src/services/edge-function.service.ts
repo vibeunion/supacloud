@@ -54,6 +54,7 @@ export interface EdgeFunctionDeployResult {
 
 export const EDGE_FUNCTION_ABSENT_ACTIVE_VERSION = "absent" as const;
 export const EDGE_FUNCTION_ACTIVE_VERSION_CONFLICT_CODE = "FUNCTION_ACTIVE_VERSION_CONFLICT" as const;
+export const EDGE_FUNCTION_SHA256_HEX_PATTERN = "^[a-f0-9]{64}$";
 export type EdgeFunctionActiveVersion = string;
 
 export interface EdgeFunctionActivationResult {
@@ -67,14 +68,37 @@ export type EdgeFunctionDeploymentConfig = Pick<
   "verify_jwt" | "background_routes"
 >;
 
-type EdgeFunctionReleaseRequest = {
+type EdgeFunctionReleaseBase = {
   ref: string;
   slug: string;
-  minify?: boolean;
   config?: EdgeFunctionDeploymentConfig;
-} & (
-  | { code: string; files?: never; entrypoint?: never }
-  | { files: Record<string, string>; entrypoint?: string; code?: never }
+};
+
+type EdgeFunctionReleaseRequest = EdgeFunctionReleaseBase & (
+  | {
+    code: string;
+    minify?: boolean;
+    prebundled?: false;
+    expectedSha256?: never;
+    files?: never;
+    entrypoint?: never;
+  }
+  | {
+    code: string;
+    prebundled: true;
+    expectedSha256: string;
+    minify?: never;
+    files?: never;
+    entrypoint?: never;
+  }
+  | {
+    files: Record<string, string>;
+    entrypoint?: string;
+    minify?: boolean;
+    code?: never;
+    prebundled?: never;
+    expectedSha256?: never;
+  }
 );
 
 export type EdgeFunctionDeploymentRequest = EdgeFunctionReleaseRequest & {
@@ -142,6 +166,7 @@ const SAFE_REF_REGEX = /^[a-zA-Z0-9_-]{1,64}$/;
 const SAFE_SLUG_REGEX = /^[a-zA-Z0-9_-]{1,128}$/;
 const EXTERNAL_PACKAGE_REGEX = /^(?:@[a-zA-Z0-9._-]+\/)?[a-zA-Z0-9._-]+$/;
 const CANONICAL_VERSION_REGEX = /^(?:0|[1-9]\d*)$/;
+const SHA256_HEX_REGEX = new RegExp(EDGE_FUNCTION_SHA256_HEX_PATTERN);
 const functionDeployLocks = new Map<string, Promise<void>>();
 const deployMetrics: EdgeFunctionDeployMetrics = {
   total_deploys: 0,
@@ -404,8 +429,12 @@ function validateFunctionCode(code: string): {
   if (code.trim().length < 10) {
     return { valid: false, error: "Function code is too short to be valid" };
   }
-  // Accept any non-empty code - Bun.build() will validate syntax
+  // Keep syntax validation mode-specific so prebundled artifacts never pass through Bun.build().
   return { valid: true };
+}
+
+export function isCanonicalEdgeFunctionSha256(candidate: string): boolean {
+  return SHA256_HEX_REGEX.test(candidate);
 }
 
 // Build and final artifact policy failures must escape before a version can be written or preheated.
@@ -557,6 +586,52 @@ async function prepareSingleFunctionVersion(
     importCount: bundle.importCount,
     ...artifact,
   };
+}
+
+async function preparePrebundledFunctionVersion(
+  request: EdgeFunctionReleaseRequest & {
+    code: string;
+    prebundled: true;
+    expectedSha256: string;
+  },
+  version: string,
+  stageDir: string,
+  finalDir: string,
+): Promise<PreparedFunctionVersion> {
+  const normalization = await validatedPrebundledBundle(request);
+  await fs.mkdir(stageDir, { recursive: true });
+  await Bun.write(path.join(stageDir, "index.src.ts"), request.code);
+  const artifact = await writePreparedBundle(stageDir, finalDir, request.code);
+  return {
+    version,
+    bundled: true,
+    entrypoint: null,
+    importMap: null,
+    importCount: normalization.importCount,
+    ...artifact,
+  };
+}
+
+async function validatedPrebundledBundle(
+  request: EdgeFunctionReleaseRequest & {
+    code: string;
+    prebundled: true;
+    expectedSha256: string;
+  },
+) {
+  const validation = validateFunctionCode(request.code);
+  if (!validation.valid) throw new Error(validation.error);
+  if (!isCanonicalEdgeFunctionSha256(request.expectedSha256)) {
+    throw new Error("Prebundled function expected SHA-256 is invalid");
+  }
+  if (await sha256Hex(request.code) !== request.expectedSha256) {
+    throw new Error("Prebundled function SHA-256 does not match expected_sha256");
+  }
+  const normalization = normalizeEdgeRuntimeBundle(request.code);
+  if (normalization.code !== request.code) {
+    throw new Error("Prebundled function would be modified by Edge Runtime normalization");
+  }
+  return normalization;
 }
 
 async function detectedImportMap(sourceDir: string): Promise<string | null> {
@@ -1390,9 +1465,7 @@ async function immutableFunctionVersion(
   );
   await fs.mkdir(versionRoot, { recursive: true });
   try {
-    const prepared = request.code !== undefined
-      ? await prepareSingleFunctionVersion(request, version, stageDir, finalDir)
-      : await prepareBundleFunctionVersion(request, version, stageDir, finalDir);
+    const prepared = await prepareImmutableFunctionVersion(request, version, stageDir, finalDir);
     const functionConfig = activatedFunctionConfig(currentConfig, request.config, prepared);
     await writeFunctionVersionMetadata(
       stageDir,
@@ -1403,6 +1476,20 @@ async function immutableFunctionVersion(
   } finally {
     await fs.rm(stageDir, { recursive: true, force: true }).catch(() => {});
   }
+}
+
+async function prepareImmutableFunctionVersion(
+  request: EdgeFunctionReleaseRequest,
+  version: string,
+  stageDir: string,
+  finalDir: string,
+): Promise<PreparedFunctionVersion> {
+  if (request.code === undefined) {
+    return prepareBundleFunctionVersion(request, version, stageDir, finalDir);
+  }
+  return request.prebundled === true
+    ? preparePrebundledFunctionVersion(request, version, stageDir, finalDir)
+    : prepareSingleFunctionVersion(request, version, stageDir, finalDir);
 }
 
 function activatedFunctionConfig(

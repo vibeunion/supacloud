@@ -4,7 +4,9 @@ import { requireProjectOrAdminAuth } from "../middleware/auth";
 import { isUserManagedFunctionSecretName } from "../utils/project-secret-visibility";
 import {
   EDGE_FUNCTION_ACTIVE_VERSION_CONFLICT_CODE,
+  EDGE_FUNCTION_SHA256_HEX_PATTERN,
   EdgeFunctionActiveVersionConflictError,
+  isCanonicalEdgeFunctionSha256,
   type EdgeFunctionActiveVersion,
   type EdgeFunctionDeploymentConfig,
   type EdgeFunctionDeployResult,
@@ -77,6 +79,31 @@ function functionVersion(value: unknown): string | null {
 function invalidExpectedActiveVersion() {
   return status(400, {
     message: "expected_active_version must be a canonical positive safe integer or 'absent'",
+    code: "VALIDATION_ERROR",
+  });
+}
+
+type FunctionCodeDeploymentOptions =
+  | { minify: boolean }
+  | { prebundled: true; expectedSha256: string };
+
+function functionCodeDeploymentOptions(body: {
+  prebundled?: boolean;
+  expected_sha256?: string;
+  minify?: boolean;
+}): FunctionCodeDeploymentOptions | null {
+  if (body.prebundled === true) {
+    if (body.minify !== undefined || !body.expected_sha256
+      || !isCanonicalEdgeFunctionSha256(body.expected_sha256)) return null;
+    return { prebundled: true, expectedSha256: body.expected_sha256 };
+  }
+  if (body.expected_sha256 !== undefined) return null;
+  return { minify: body.minify ?? false };
+}
+
+function invalidPrebundledDeployment() {
+  return status(400, {
+    message: "prebundled deploy requires expected_sha256 and does not accept minify",
     code: "VALIDATION_ERROR",
   });
 }
@@ -665,12 +692,14 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
       const code = body.code || body.body || "";
       const expectedVersion = expectedActiveVersion(body.expected_active_version);
       if (expectedVersion === null) return invalidExpectedActiveVersion();
+      const codeDeploymentOptions = functionCodeDeploymentOptions(body);
+      if (codeDeploymentOptions === null) return invalidPrebundledDeployment();
       const deployment = await projectService.deployFunctionRelease({
         ref: params.ref,
         slug: params.slug,
         expectedActiveVersion: expectedVersion,
         code,
-        minify: body.minify ?? false,
+        ...codeDeploymentOptions,
         config: deploymentConfig(
           body.verify_jwt,
           normalizedBackgroundRoutes(body.background_routes),
@@ -702,6 +731,12 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         code: t.Optional(t.String()),
         body: t.Optional(t.String()),
         minify: t.Optional(t.Boolean()),
+        prebundled: t.Optional(t.Boolean()),
+        expected_sha256: t.Optional(t.String({
+          pattern: EDGE_FUNCTION_SHA256_HEX_PATTERN,
+          minLength: 64,
+          maxLength: 64,
+        })),
         verify_jwt: t.Optional(t.Boolean()),
         background_routes: t.Optional(t.Array(t.String())),
         expected_active_version: expectedActiveVersionSchema,

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -828,6 +829,104 @@ describe("supacloud-cli process contract", () => {
             expect(response.stderr).toContain("--expected-active-version");
             expect(response.stderr).not.toContain("--expected_active_version");
         }
+    });
+
+    test("documents exact prebundled Function deployment flags", async () => {
+        const response = await runProjectCli(["edge_functions", "deploy", "--help"], {
+            SUPACLOUD_API_URL: "http://127.0.0.1:1",
+            SUPACLOUD_API_TOKEN: "test-token",
+            SUPACLOUD_PROJECT_REF: "abc123",
+        });
+
+        expect(response.exitCode).toBe(0);
+        expect(response.stderr).toContain("--prebundled-path");
+        expect(response.stderr).toContain("--expected-sha256");
+        expect(response.stderr).not.toContain("--prebundled_path");
+        expect(response.stderr).not.toContain("--expected_sha256");
+    });
+
+    test("deploys exact verified prebundled Function bytes through the process CLI", async () => {
+        const directory = mkdtempSync(join(tmpdir(), "supacloud-cli-prebundled-"));
+        temporaryDirectories.push(directory);
+        const bundlePath = join(directory, "fa-api.js");
+        const code = "export default { fetch: () => new Response('exact-process-bytes') };\r\n";
+        const expectedSha256 = createHash("sha256").update(code).digest("hex");
+        writeFileSync(bundlePath, code);
+        let requestBody: Record<string, unknown> | undefined;
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            async fetch(request) {
+                requestBody = await request.json() as Record<string, unknown>;
+                return Response.json({
+                    success: true,
+                    project_ref: "abc123",
+                    slug: "fa-api",
+                    previous_active_version: "7",
+                    active_version: "8",
+                    version: "8",
+                    config: { version: "8", verify_jwt: true },
+                });
+            },
+        });
+        servers.push(server);
+
+        const response = await runProjectCli([
+            "edge_functions", "deploy", "--ref", "abc123", "--slug", "fa-api",
+            "--prebundled-path", bundlePath,
+            "--expected-sha256", expectedSha256,
+            "--expected-active-version", "7",
+        ], {
+            SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+            SUPACLOUD_API_TOKEN: "test-token",
+            SUPACLOUD_PROJECT_REF: "abc123",
+            PATH: "",
+        });
+
+        expect(response.exitCode).toBe(0);
+        expect(requestBody).toEqual({
+            code,
+            prebundled: true,
+            expected_sha256: expectedSha256,
+            expected_active_version: "7",
+        });
+        expect(JSON.parse(response.stdout)).toMatchObject({
+            ok: true,
+            operation: "edge_functions.deploy",
+            active_version: "8",
+        });
+    });
+
+    test("rejects a prebundled hash mismatch before the process CLI sends HTTP", async () => {
+        const directory = mkdtempSync(join(tmpdir(), "supacloud-cli-prebundled-mismatch-"));
+        temporaryDirectories.push(directory);
+        const bundlePath = join(directory, "fa-api.js");
+        writeFileSync(bundlePath, "export default { fetch: () => new Response('replaced') };\n");
+        let requestCount = 0;
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch() {
+                requestCount += 1;
+                return Response.json({});
+            },
+        });
+        servers.push(server);
+
+        const response = await runProjectCli([
+            "edge_functions", "deploy", "--ref", "abc123", "--slug", "fa-api",
+            "--prebundled-path", bundlePath,
+            "--expected-sha256", createHash("sha256").update("approved-bytes").digest("hex"),
+            "--expected-active-version", "absent",
+        ], {
+            SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+            SUPACLOUD_API_TOKEN: "test-token",
+            SUPACLOUD_PROJECT_REF: "abc123",
+        });
+
+        expect(response.exitCode).toBe(1);
+        expect(response.stderr).toContain("SHA-256 does not match");
+        expect(requestCount).toBe(0);
     });
 
     test("deploys a Function bundle with an identity-bound CAS receipt", async () => {

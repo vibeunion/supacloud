@@ -153,6 +153,118 @@ describe("edgeFunctionService bundle metadata", () => {
     }
   });
 
+  test("stores verified prebundled source and runtime artifacts as the exact submitted bytes", async () => {
+    const ref = "proj_prebundled_exact";
+    const slug = "fa-api";
+    const code = "export default { fetch: () => new Response('精确字节') };\r\n";
+    const expectedSha256 = createHash("sha256").update(code).digest("hex");
+    const buildSpy = spyOn(Bun, "build");
+
+    try {
+      const deployed = await edgeFunctionService.deployRelease({
+        ref,
+        slug,
+        expectedActiveVersion: "absent",
+        code,
+        prebundled: true,
+        expectedSha256,
+      });
+
+      expect(deployed).toMatchObject({
+        success: true,
+        previous_active_version: "absent",
+        active_version: "1",
+        version: "1",
+        bundle_hash: expectedSha256.slice(0, 16),
+        bundle_size_bytes: Buffer.byteLength(code),
+      });
+      expect(buildSpy).not.toHaveBeenCalled();
+      expect(await readFile(deployed.content_path!)).toEqual(Buffer.from(code));
+      expect(await readFile(join(
+        functionsRoot,
+        ref,
+        ".versions",
+        slug,
+        "1",
+        "index.src.ts",
+      ))).toEqual(Buffer.from(code));
+      expect(await edgeFunctionService.getVersion(ref, slug, "1")).toMatchObject({
+        bundle_code: code,
+        source_code: code,
+      });
+    } finally {
+      buildSpy.mockRestore();
+    }
+  });
+
+  test("rejects prebundled bytes that require runtime normalization before mutation", async () => {
+    const ref = "proj_prebundled_normalization";
+    const slug = "fa-api";
+    const code = [
+      'var runtimePackage = "optional-runtime-package";',
+      "export default { fetch: async () => Response.json(await import(runtimePackage)) };",
+      "",
+    ].join("\n");
+    let runtimeCalls = 0;
+    globalThis.fetch = (async () => {
+      runtimeCalls += 1;
+      return Response.json({ success: true });
+    }) as typeof fetch;
+    const buildSpy = spyOn(Bun, "build");
+
+    try {
+      const rejected = await edgeFunctionService.deployRelease({
+        ref,
+        slug,
+        expectedActiveVersion: "absent",
+        code,
+        prebundled: true,
+        expectedSha256: createHash("sha256").update(code).digest("hex"),
+      });
+
+      expect(rejected).toMatchObject({ success: false });
+      expect(rejected.error).toContain("would be modified");
+      expect(buildSpy).not.toHaveBeenCalled();
+      expect(runtimeCalls).toBe(0);
+      expect(await edgeFunctionService.listVersions(ref, slug)).toEqual([]);
+      expect(await edgeFunctionService.getConfig(ref, slug)).toEqual({ verify_jwt: true });
+    } finally {
+      buildSpy.mockRestore();
+    }
+  });
+
+  test("rejects a prebundled SHA-256 mismatch before mutation", async () => {
+    const ref = "proj_prebundled_hash_mismatch";
+    const slug = "fa-api";
+    const code = "export default { fetch: () => new Response('replaced') };\n";
+    let runtimeCalls = 0;
+    globalThis.fetch = (async () => {
+      runtimeCalls += 1;
+      return Response.json({ success: true });
+    }) as typeof fetch;
+    const buildSpy = spyOn(Bun, "build");
+
+    try {
+      const rejected = await edgeFunctionService.deployRelease({
+        ref,
+        slug,
+        expectedActiveVersion: "absent",
+        code,
+        prebundled: true,
+        expectedSha256: createHash("sha256").update("approved").digest("hex"),
+      });
+
+      expect(rejected).toMatchObject({ success: false });
+      expect(rejected.error).toContain("does not match expected_sha256");
+      expect(buildSpy).not.toHaveBeenCalled();
+      expect(runtimeCalls).toBe(0);
+      expect(await edgeFunctionService.listVersions(ref, slug)).toEqual([]);
+      expect(await edgeFunctionService.getConfig(ref, slug)).toEqual({ verify_jwt: true });
+    } finally {
+      buildSpy.mockRestore();
+    }
+  });
+
   test("rejects unresolved computed imports without activating a new version", async () => {
     const ref = "proj_computed_import_rejected";
     const slug = "computed-import-rejected";

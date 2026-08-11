@@ -1,4 +1,5 @@
 import { describe, expect, mock, spyOn, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { Elysia } from "elysia";
 import { projectFunctionsRoutes } from "../../src/routes/project-functions";
 import { projectSecretsRoutes } from "../../src/routes/project-secrets";
@@ -227,6 +228,76 @@ describe("final security regressions", () => {
         minify: false,
         config: { verify_jwt: false, background_routes: ["/queue/*"] },
       });
+    } finally {
+      deploySpy.mockRestore();
+    }
+  });
+
+  test("prebundled function deploy passes the exact-byte contract to the release primitive", async () => {
+    const code = "export default { fetch: () => new Response('exact-route-bytes') };\r\n";
+    const expectedSha256 = createHash("sha256").update(code).digest("hex");
+    const deploySpy = spyOn(projectService, "deployFunctionRelease").mockResolvedValue({
+      success: true,
+      previous_active_version: "2",
+      active_version: "3",
+      version: "3",
+      bundled: true,
+      config: { verify_jwt: true, version: "3" },
+    } as Awaited<ReturnType<typeof projectService.deployFunctionRelease>>);
+    const request = appWith(projectFunctionsRoutes);
+
+    try {
+      const response = await request("/v1/projects/proj_1/functions/fa-api", {
+        method: "POST",
+        headers: { ...masterHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          code,
+          prebundled: true,
+          expected_sha256: expectedSha256,
+          expected_active_version: "2",
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(deploySpy).toHaveBeenCalledWith({
+        ref: "proj_1",
+        slug: "fa-api",
+        expectedActiveVersion: "2",
+        code,
+        prebundled: true,
+        expectedSha256,
+        config: {},
+      });
+    } finally {
+      deploySpy.mockRestore();
+    }
+  });
+
+  test.each([
+    ["missing hash", { prebundled: true }],
+    ["minify requested", { prebundled: true, expected_sha256: "0".repeat(64), minify: false }],
+    ["hash without mode", { expected_sha256: "0".repeat(64) }],
+  ])("rejects prebundled deployment with %s before service dispatch", async (_label, fields) => {
+    const deploySpy = spyOn(projectService, "deployFunctionRelease");
+    const request = appWith(projectFunctionsRoutes);
+
+    try {
+      const response = await request("/v1/projects/proj_1/functions/fa-api", {
+        method: "POST",
+        headers: { ...masterHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          code: "export default { fetch: () => new Response('blocked') };",
+          expected_active_version: "absent",
+          ...fields,
+        }),
+      });
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        message: "prebundled deploy requires expected_sha256 and does not accept minify",
+        code: "VALIDATION_ERROR",
+      });
+      expect(deploySpy).not.toHaveBeenCalled();
     } finally {
       deploySpy.mockRestore();
     }
