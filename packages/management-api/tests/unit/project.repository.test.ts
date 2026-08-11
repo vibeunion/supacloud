@@ -182,11 +182,19 @@ describe("ProjectRepository", () => {
 
       const [strings, serializedConfig] = (mockSql as ReturnType<typeof mock>).mock.calls[0];
       const query = (strings as TemplateStringsArray).join("?").replaceAll(/\s+/g, " ").trim();
-      expect(query).toContain("WHEN 'object' THEN ?::jsonb - 'scheduled_functions'");
       expect(query).toContain("jsonb_typeof(projects.config) = 'object'");
       expect(query).toContain("projects.config ? 'scheduled_functions'");
       expect(query).toContain("jsonb_build_object('scheduled_functions', projects.config -> 'scheduled_functions')");
       expect(serializedConfig).toBe(JSON.stringify(inputConfig));
+    });
+
+    test("normalizes unexpected scalar config before building the update query", async () => {
+      (mockSql as ReturnType<typeof mock>).mockResolvedValueOnce([mockProject]);
+
+      await projectRepository.updateConfig("test123", "legacy" as unknown as Record<string, unknown>);
+
+      const [, serializedConfig] = (mockSql as ReturnType<typeof mock>).mock.calls[0];
+      expect(serializedConfig).toBe("{}");
     });
 
     test("should return null when project not found", async () => {

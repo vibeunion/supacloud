@@ -2,6 +2,7 @@ import { sql, type Project, type CreateProjectInput, type ProjectStatus } from "
 import { withRetry } from "../utils/retry";
 import { encryptSecretIfNeeded } from "../utils/secret-crypto";
 import { hashSecretApiKey } from "../utils/api-keys";
+import { normalizeProjectConfig } from "../utils/project-config";
 
 export async function findAll(): Promise<Project[]> {
   return withRetry("ProjectRepository.findAll", async () => {
@@ -90,14 +91,12 @@ export async function updateStatus(ref: string, status: ProjectStatus): Promise<
 
   // Update project config
 export async function updateConfig(ref: string, config: Record<string, unknown>): Promise<Project | null> {
+  const nextConfig = normalizeProjectConfig(config);
   return withRetry("ProjectRepository.updateConfig", async () => {
   const [project] = await sql`
     UPDATE projects
     SET config =
-          CASE jsonb_typeof(${JSON.stringify(config)}::jsonb)
-            WHEN 'object' THEN ${JSON.stringify(config)}::jsonb - 'scheduled_functions'
-            ELSE '{}'::jsonb
-          END
+          (${JSON.stringify(nextConfig)}::jsonb - 'scheduled_functions')
           || CASE
             WHEN jsonb_typeof(projects.config) = 'object'
               AND projects.config ? 'scheduled_functions'
