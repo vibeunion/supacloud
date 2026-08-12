@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.58.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.57.0...management-api-v0.58.0) (2026-08-12)
+
+
+### Features
+
+* **management-api:** add verified logical backups ([#879](https://github.com/zuohuadong/supacloud/issues/879)) ([de7da15](https://github.com/zuohuadong/supacloud/commit/de7da1510b71a71af7ebf2d2402394717c49ff9c))
+
 ## [0.57.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.56.0...management-api-v0.57.0) (2026-08-12)
 
 
