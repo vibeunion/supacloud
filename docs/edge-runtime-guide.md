@@ -60,6 +60,22 @@ Deploy flow:
   4. First request hits warm cache → 0ms cold-start
 ```
 
+### Activation Artifact Integrity
+
+Canonical activations identify an immutable `index.<digest-prefix>.js` artifact
+and record its full SHA-256 digest in the activation authority. The runtime
+checks that digest before evaluating the Function module; it does not fall back
+to the mutable legacy `index.js` path when attested authority is present.
+
+Attested imports currently require Linux. On Linux, the runtime holds the
+trusted directory chain and artifact file descriptors, then imports through
+`/proc/self/fd` so the evaluated module is the same inode that was verified.
+On macOS and Windows, the Edge Runtime binary can still start and run legacy,
+non-attested Functions. Loading an authoritative attested activation fails
+closed with `Attested Function imports require Linux descriptor binding`
+before the module loader evaluates user code. Production hosts that serve
+canonical activations must therefore run Linux.
+
 ## Dependency Management
 
 **Edge Runtime dependencies** (Elysia etc.) are declared in `packages/edge-runtime/package.json`.

@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, mock, spyOn, test } 
 import { Elysia } from "elysia";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs/promises";
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -50,6 +50,22 @@ async function activateConditionalVersion(ref: string, slug: string, version: st
     current.version ?? "absent",
     current.activation_id,
   ))?.config ?? null;
+}
+
+async function expectAttestedRuntimeEntry(
+  ref: string,
+  slug: string,
+  deployment: { version?: string; content_path?: string | null; bundle_hash?: string },
+) {
+  const versionDir = join(functionsRoot, ref, ".versions", slug, deployment.version!);
+  const runtimeEntry = join(versionDir, "src", ".supacloud-entry.js");
+  const content = await readFile(deployment.content_path!);
+  const artifactSha256 = createHash("sha256").update(content).digest("hex");
+  expect(await readFile(runtimeEntry)).toEqual(content);
+  expect(artifactSha256.slice(0, 16)).toBe(deployment.bundle_hash);
+  expect(JSON.parse(await readFile(join(versionDir, ".supacloud-version.json"), "utf8")))
+    .toMatchObject({ artifact_sha256: artifactSha256 });
+  expect((await stat(runtimeEntry)).mode & 0o222).toBe(0);
 }
 
 async function writeConfiguredAliases(ref: string, slug: string, version: string): Promise<void> {
@@ -617,6 +633,34 @@ describe("edgeFunctionService bundle metadata", () => {
     }
   });
 
+  test("migrates legacy metadata from the immutable artifact instead of a mutable alias", async () => {
+    const ref = "proj_legacy_immutable_authority";
+    const slug = "legacy-immutable-authority";
+    const versionDir = join(functionsRoot, ref, ".versions", slug, "1");
+    const immutableCode = "export default { fetch: () => new Response('immutable') };";
+    const artifactSha256 = createHash("sha256").update(immutableCode).digest("hex");
+    await mkdir(versionDir, { recursive: true });
+    await Promise.all([
+      Bun.write(join(versionDir, `index.${artifactSha256.slice(0, 16)}.js`), immutableCode),
+      Bun.write(join(versionDir, "index.js"), "export default { fetch: () => new Response('tampered') };"),
+      Bun.write(join(versionDir, ".supacloud-version.json"), JSON.stringify({
+        version: "1",
+        verify_jwt: false,
+        background_routes: [],
+        import_map: null,
+        entrypoint: null,
+      })),
+    ]);
+
+    expect(await migrateLegacyVersionArtifacts()).toEqual({ moved: 1 });
+    expect(JSON.parse(await readFile(
+      join(versionDir, ".supacloud-version.json"),
+      "utf8",
+    ))).toMatchObject({ artifact_sha256: artifactSha256 });
+    expect(await getVersionedArtifactPath(ref, slug, "1"))
+      .toBe(join(versionDir, `index.${artifactSha256.slice(0, 16)}.js`));
+  });
+
   test("rejects unsafe startup migration parents without touching an external version target", async () => {
     const migrationRoot = await mkdtemp(join(homedir(), ".supacloud-legacy-migration-"));
     const ref = "proj_unsafe_legacy_migration";
@@ -871,6 +915,37 @@ describe("edgeFunctionService bundle metadata", () => {
     }
   });
 
+  test("writes the attested source entry for every immutable deployment path", async () => {
+    globalThis.fetch = runtimeSuccessFetch();
+    const single = await edgeFunctionService.deployDetailed(
+      "proj_attested_single",
+      "single",
+      "export default { fetch: () => new Response('single') };",
+    );
+    const prebundledCode = "export default { fetch: () => new Response('prebundled') };";
+    const prebundled = await edgeFunctionService.deployRelease({
+      ref: "proj_attested_prebundled",
+      slug: "prebundled",
+      expectedActiveVersion: "absent",
+      expectedActivationId: "legacy",
+      code: prebundledCode,
+      prebundled: true,
+      expectedSha256: createHash("sha256").update(prebundledCode).digest("hex"),
+    });
+    const bundle = await edgeFunctionService.deployBundleDetailed(
+      "proj_attested_bundle",
+      "bundle",
+      { "index.ts": "export default { fetch: () => new Response('bundle') };" },
+    );
+
+    expect(single.success).toBe(true);
+    expect(prebundled.success).toBe(true);
+    expect(bundle.success).toBe(true);
+    await expectAttestedRuntimeEntry("proj_attested_single", "single", single);
+    await expectAttestedRuntimeEntry("proj_attested_prebundled", "prebundled", prebundled);
+    await expectAttestedRuntimeEntry("proj_attested_bundle", "bundle", bundle);
+  });
+
   test("rejects prebundled bytes that require runtime normalization before mutation", async () => {
     const ref = "proj_prebundled_normalization";
     const slug = "fa-api";
@@ -1046,6 +1121,40 @@ describe("edgeFunctionService bundle metadata", () => {
       verify_jwt: false,
       version: "2",
     });
+  });
+
+  test("never promotes a mutable version alias into immutable rollback authority", async () => {
+    const ref = "proj_immutable_rollback_authority";
+    const slug = "immutable-rollback-authority";
+    const first = await deployConditionalRelease({
+      ref,
+      slug,
+      code: "export default { fetch: () => new Response('immutable-v1') };",
+    });
+    const versionDirectory = join(functionsRoot, ref, ".versions", slug, "1");
+    const metadataPath = join(versionDirectory, ".supacloud-version.json");
+    const originalMetadata = JSON.parse(await readFile(metadataPath, "utf8")) as {
+      artifact_sha256: string;
+    };
+
+    await Bun.write(
+      join(versionDirectory, "index.js"),
+      "export default { fetch: () => new Response('tampered-alias') };",
+    );
+    const second = await deployConditionalRelease({
+      ref,
+      slug,
+      code: "export default { fetch: () => new Response('immutable-v2') };",
+    });
+
+    expect(first).toMatchObject({ success: true, version: "1" });
+    expect(second).toMatchObject({ success: true, version: "2" });
+    expect(JSON.parse(await readFile(metadataPath, "utf8"))).toMatchObject({
+      artifact_sha256: originalMetadata.artifact_sha256,
+    });
+    await activateConditionalVersion(ref, slug, "1");
+    expect(await edgeFunctionService.read(ref, slug)).toContain("immutable-v1");
+    expect(await edgeFunctionService.read(ref, slug)).not.toContain("tampered-alias");
   });
 
   test("clears bundle source metadata when a single-file version becomes active", async () => {

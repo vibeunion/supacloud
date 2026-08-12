@@ -201,6 +201,7 @@ const SAFE_SLUG_REGEX = /^[a-zA-Z0-9_-]{1,128}$/;
 const EXTERNAL_PACKAGE_REGEX = /^(?:@[a-zA-Z0-9._-]+\/)?[a-zA-Z0-9._-]+$/;
 const CANONICAL_VERSION_REGEX = /^(?:0|[1-9]\d*)$/;
 const SHA256_HEX_REGEX = new RegExp(EDGE_FUNCTION_SHA256_HEX_PATTERN);
+const CONTENT_ADDRESSED_ARTIFACT_REGEX = /^index\.([a-f0-9]{16})\.js$/;
 const functionDeployLocks = new Map<string, Promise<void>>();
 const FUNCTION_LOCK_TIMEOUT_MS = 30_000;
 const deployMetrics: EdgeFunctionDeployMetrics = {
@@ -742,6 +743,7 @@ type PreparedFunctionVersion = {
 type FunctionVersionMetadata = {
   version: string;
   verify_jwt: boolean;
+  artifact_sha256: string | null;
   background_routes: string[];
   import_map: string | null;
   entrypoint: string | null;
@@ -779,13 +781,33 @@ async function writePreparedBundle(
   const bundleHash = artifactSha256.slice(0, 16);
   const sizeBytes = artifactSizeBytes ?? bundleSizeBytes(code);
   await Bun.write(path.join(stageDir, "index.js"), code);
-  await Bun.write(path.join(stageDir, `index.${bundleHash}.js`), code);
+  const contentPath = path.join(stageDir, `index.${bundleHash}.js`);
+  await Bun.write(contentPath, code);
+  await fs.chmod(contentPath, 0o444);
   return {
     bundleHash,
     artifactSha256,
     bundleSizeBytes: sizeBytes,
     contentPath: path.join(finalDir, `index.${bundleHash}.js`),
   };
+}
+
+async function writePreparedReleaseBundle(
+  stageDir: string,
+  finalDir: string,
+  code: string,
+  artifactSizeBytes?: number,
+): Promise<Pick<
+  PreparedFunctionVersion,
+  "bundleHash" | "artifactSha256" | "bundleSizeBytes" | "contentPath"
+>> {
+  const artifact = await writePreparedBundle(stageDir, finalDir, code, artifactSizeBytes);
+  const sourceDir = path.join(stageDir, "src");
+  await fs.mkdir(sourceDir, { recursive: true, mode: 0o755 });
+  const runtimeEntry = path.join(sourceDir, BUNDLED_SOURCE_RUNTIME_ENTRY);
+  await Bun.write(runtimeEntry, code);
+  await fs.chmod(runtimeEntry, 0o444);
+  return artifact;
 }
 
 async function prepareSingleFunctionVersion(
@@ -805,7 +827,7 @@ async function prepareSingleFunctionVersion(
     outdir: buildDir,
     minify: request.minify ?? false,
   });
-  const artifact = await writePreparedBundle(stageDir, finalDir, bundle.code, bundle.sizeBytes);
+  const artifact = await writePreparedReleaseBundle(stageDir, finalDir, bundle.code, bundle.sizeBytes);
   await fs.rm(buildDir, { recursive: true, force: true });
   return {
     version,
@@ -830,7 +852,7 @@ async function preparePrebundledFunctionVersion(
   const normalization = await validatedPrebundledBundle(request);
   await fs.mkdir(stageDir, { recursive: true, mode: 0o755 });
   await Bun.write(path.join(stageDir, "index.src.ts"), request.code);
-  const artifact = await writePreparedBundle(stageDir, finalDir, request.code);
+  const artifact = await writePreparedReleaseBundle(stageDir, finalDir, request.code);
   return {
     version,
     bundled: true,
@@ -911,8 +933,7 @@ async function prepareBundleFunctionVersion(
     minify: request.minify ?? false,
     importMapPath: importMap ? resolveInside(sourceDir, importMap) : undefined,
   });
-  await Bun.write(path.join(sourceDir, BUNDLED_SOURCE_RUNTIME_ENTRY), bundle.code);
-  const artifact = await writePreparedBundle(stageDir, finalDir, bundle.code, bundle.sizeBytes);
+  const artifact = await writePreparedReleaseBundle(stageDir, finalDir, bundle.code, bundle.sizeBytes);
   await fs.rm(buildDir, { recursive: true, force: true });
   return {
     version,
@@ -928,6 +949,7 @@ async function prepareBundleFunctionVersion(
 function functionVersionMetadata(
   version: string,
   functionConfig: EdgeFunctionConfig,
+  artifactSha256: string,
 ): FunctionVersionMetadata {
   if (typeof functionConfig.verify_jwt !== "boolean") {
     throw new Error("Function version config contains an invalid verify_jwt policy");
@@ -939,20 +961,35 @@ function functionVersionMetadata(
   return {
     version,
     verify_jwt: functionConfig.verify_jwt,
+    artifact_sha256: artifactSha256,
     background_routes: backgroundRoutes,
     import_map: functionConfig.import_map ?? null,
     entrypoint: functionConfig.entrypoint ?? null,
   };
 }
 
+async function versionArtifactSha256(
+  ref: string,
+  slug: string,
+  version: string,
+): Promise<string> {
+  const artifactPath = await getVersionedArtifactPath(ref, slug, version);
+  if (!artifactPath) throw new Error(EDGE_FUNCTION_ACTIVE_ARTIFACT_MISSING_MESSAGE);
+  const artifactSha256 = await sha256Hex(await Bun.file(artifactPath).text());
+  const metadata = await readFunctionVersionMetadata(ref, slug, version);
+  if (metadata.artifact_sha256 !== artifactSha256) {
+    throw new Error("Function version artifact does not match its immutable metadata");
+  }
+  return artifactSha256;
+}
+
 async function writeFunctionVersionMetadata(
   stageDir: string,
   metadata: FunctionVersionMetadata,
 ): Promise<void> {
-  await Bun.write(
-    path.join(stageDir, FUNCTION_VERSION_METADATA_FILE),
-    JSON.stringify(metadata, null, 2),
-  );
+  const metadataPath = path.join(stageDir, FUNCTION_VERSION_METADATA_FILE);
+  await Bun.write(metadataPath, JSON.stringify(metadata, null, 2));
+  await fs.chmod(metadataPath, 0o444);
 }
 
 async function replaceFunctionVersionMetadata(
@@ -966,6 +1003,7 @@ async function replaceFunctionVersionMetadata(
   );
   try {
     await Bun.write(pendingPath, JSON.stringify(metadata, null, 2));
+    await fs.chmod(pendingPath, 0o444);
     await fs.rename(pendingPath, metadataPath);
   } finally {
     await fs.rm(pendingPath, { force: true }).catch(() => {});
@@ -1014,7 +1052,11 @@ async function readFunctionVersionMetadata(
   if (!metadataRecord || typeof metadataRecord !== "object" || Array.isArray(metadataRecord)) {
     throw new Error("Function version metadata must be an object");
   }
-  if (metadataRecord.version !== version || typeof metadataRecord.verify_jwt !== "boolean") {
+  if (metadataRecord.version !== version
+    || typeof metadataRecord.verify_jwt !== "boolean"
+    || (metadataRecord.artifact_sha256 !== undefined
+      && (typeof metadataRecord.artifact_sha256 !== "string"
+        || !SHA256_HEX_REGEX.test(metadataRecord.artifact_sha256)))) {
     throw new Error("Function version metadata does not match the requested version and policy");
   }
   if (!Array.isArray(metadataRecord.background_routes)
@@ -1026,6 +1068,9 @@ async function readFunctionVersionMetadata(
   const metadata: FunctionVersionMetadata = {
     version,
     verify_jwt: metadataRecord.verify_jwt,
+    artifact_sha256: typeof metadataRecord.artifact_sha256 === "string"
+      ? metadataRecord.artifact_sha256
+      : null,
     background_routes: metadataRecord.background_routes as string[],
     import_map: nullableMetadataPath(metadataRecord, "import_map"),
     entrypoint: nullableMetadataPath(metadataRecord, "entrypoint"),
@@ -1092,10 +1137,121 @@ async function backfillActiveVersionMetadata(
         background_routes: functionConfig.background_routes ?? [],
       })
     : await sourceMetadataConfig(functionConfig, version, versionDir);
+  if (existingMetadata?.artifact_sha256) {
+    await getVersionedArtifactPath(ref, slug, version);
+    await replaceFunctionVersionMetadata(
+      versionDir,
+      functionVersionMetadata(version, sourceConfig, existingMetadata.artifact_sha256),
+    );
+    return;
+  }
+  const immutableArtifact = await legacyImmutableArtifact(versionDir);
+  const legacyArtifact = getVersionedFuncPath(ref, slug, version);
+  if (immutableArtifact === null && !await fileExists(legacyArtifact)) {
+    throw new Error(EDGE_FUNCTION_ACTIVE_ARTIFACT_MISSING_MESSAGE);
+  }
+  const runtimeCode = immutableArtifact?.code ?? await Bun.file(legacyArtifact).text();
+  const artifactSha256 = immutableArtifact?.sha256 ?? await sha256Hex(runtimeCode);
+  const contentAddressedPath = path.join(
+    versionDir,
+    `index.${artifactSha256.slice(0, 16)}.js`,
+  );
+  if (!await fileExists(contentAddressedPath)) {
+    await preflightFunctionMutation(ref, slug);
+    await Bun.write(contentAddressedPath, runtimeCode);
+    await fs.chmod(contentAddressedPath, 0o444);
+  }
+  await preflightFunctionMutation(ref, slug);
   await replaceFunctionVersionMetadata(
     versionDir,
-    functionVersionMetadata(version, sourceConfig),
+    functionVersionMetadata(version, sourceConfig, artifactSha256),
   );
+}
+
+async function legacyImmutableArtifact(
+  versionDir: string,
+): Promise<{ code: string; sha256: string } | null> {
+  const candidates = (await fs.readdir(versionDir, { withFileTypes: true }))
+    .filter((entry) => entry.isFile() && CONTENT_ADDRESSED_ARTIFACT_REGEX.test(entry.name));
+  if (candidates.length === 0) return null;
+  if (candidates.length !== 1) {
+    throw new Error("Function version contains ambiguous content-addressed artifacts");
+  }
+  const candidate = candidates[0]!;
+  const code = await Bun.file(path.join(versionDir, candidate.name)).text();
+  const sha256 = await sha256Hex(code);
+  if (candidate.name !== `index.${sha256.slice(0, 16)}.js`) {
+    throw new Error("Function version content-addressed artifact does not match its name");
+  }
+  return { code, sha256 };
+}
+
+async function migrateImmutableVersionArtifact(
+  ref: string,
+  slug: string,
+  version: string,
+): Promise<boolean> {
+  const versionDir = getFunctionVersionDir(ref, slug, version);
+  let metadata: FunctionVersionMetadata | null = null;
+  try {
+    metadata = await readFunctionVersionMetadata(ref, slug, version);
+  } catch (error: unknown) {
+    if (!isMissingPathError(error)) throw error;
+  }
+  if (metadata?.artifact_sha256) {
+    await getVersionedArtifactPath(ref, slug, version);
+    return false;
+  }
+  await preflightFunctionMutation(ref, slug);
+  const immutableArtifact = await legacyImmutableArtifact(versionDir);
+  const legacyArtifact = getVersionedFuncPath(ref, slug, version);
+  if (immutableArtifact === null && !await fileExists(legacyArtifact)) {
+    if (metadata === null) return false;
+    throw new Error("Function version artifact is missing during startup migration");
+  }
+  const runtimeCode = immutableArtifact?.code ?? await Bun.file(legacyArtifact).text();
+  const artifactSha256 = immutableArtifact?.sha256 ?? await sha256Hex(runtimeCode);
+  const contentAddressedPath = assertInside(
+    versionDir,
+    path.join(versionDir, `index.${artifactSha256.slice(0, 16)}.js`),
+  );
+  if (await fileExists(contentAddressedPath)) {
+    const existingSha256 = await sha256Hex(await Bun.file(contentAddressedPath).text());
+    if (existingSha256 !== artifactSha256) {
+      throw new Error("Function version content-addressed artifact is ambiguous");
+    }
+  } else {
+    await preflightFunctionMutation(ref, slug);
+    await Bun.write(contentAddressedPath, runtimeCode);
+    await fs.chmod(contentAddressedPath, 0o444);
+  }
+  const sourceConfig = metadata
+    ? restoredFunctionConfig({ verify_jwt: metadata.verify_jwt }, metadata)
+    : await sourceMetadataConfig({ verify_jwt: true }, version, versionDir);
+  await preflightFunctionMutation(ref, slug);
+  await replaceFunctionVersionMetadata(
+    versionDir,
+    functionVersionMetadata(version, sourceConfig, artifactSha256),
+  );
+  return true;
+}
+
+async function migrateProjectImmutableVersions(ref: string): Promise<number> {
+  const versionsRoot = assertInside(getFuncDir(ref), path.join(getFuncDir(ref), VERSIONED_DIR));
+  let migrated = 0;
+  for (const slugEntry of await fs.readdir(versionsRoot, { withFileTypes: true }).catch((error) => {
+    if (isMissingPathError(error)) return [];
+    throw error;
+  })) {
+    if (!slugEntry.isDirectory()) {
+      throw new Error("Function version root contains an invalid entry");
+    }
+    const slug = validateSlug(slugEntry.name);
+    for (const version of await listVersionDirectories(ref, slug)) {
+      if (await migrateImmutableVersionArtifact(ref, slug, version)) migrated += 1;
+    }
+  }
+  return migrated;
 }
 
 async function snapshotFrozenLegacyVersion(
@@ -1113,7 +1269,7 @@ async function snapshotFrozenLegacyVersion(
   await fs.mkdir(stageDir, { recursive: true, mode: 0o755 });
   try {
     const runtimeCode = await Bun.file(snapshot.runtimePath).text();
-    await writePreparedBundle(stageDir, finalDir, runtimeCode);
+    const artifact = await writePreparedBundle(stageDir, finalDir, runtimeCode);
     await copyFrozenLegacySource(snapshot.ref, snapshot.slug, stageDir);
     const snapshotConfig = await sourceMetadataConfig(
       snapshot.functionConfig,
@@ -1122,7 +1278,7 @@ async function snapshotFrozenLegacyVersion(
     );
     await writeFunctionVersionMetadata(
       stageDir,
-      functionVersionMetadata(snapshot.version, snapshotConfig),
+      functionVersionMetadata(snapshot.version, snapshotConfig, artifact.artifactSha256),
     );
     await fs.rename(stageDir, finalDir);
     return snapshotConfig;
@@ -1177,7 +1333,7 @@ async function completeFrozenLegacyVersionSnapshot(
     );
     await replaceFunctionVersionMetadata(
       versionDir,
-      functionVersionMetadata(snapshot.version, snapshotConfig),
+      functionVersionMetadata(snapshot.version, snapshotConfig, artifact.artifactSha256),
     );
     return snapshotConfig;
   } finally {
@@ -1194,7 +1350,8 @@ async function ensureConfiguredRollbackSnapshot(
   if (parseVersionNumber(version) === null) {
     throw new Error("Function config contains an invalid version");
   }
-  if (await getVersionedArtifactPath(ref, slug, version)) {
+  const modernArtifact = getVersionedFuncPath(ref, slug, version);
+  if (await fileExists(modernArtifact) || await getVersionedArtifactPath(ref, slug, version)) {
     await backfillActiveVersionMetadata(ref, slug, version, currentConfig);
     return currentConfig;
   }
@@ -1223,7 +1380,11 @@ async function ensureLegacyVersionZeroSnapshot(
   if (versionZeroArtifact) {
     await replaceFunctionVersionMetadata(
       path.join(getVersionRoot(snapshot.ref, snapshot.slug), "0"),
-      functionVersionMetadata("0", versionZeroConfig),
+      functionVersionMetadata(
+        "0",
+        versionZeroConfig,
+        await versionArtifactSha256(snapshot.ref, snapshot.slug, "0"),
+      ),
     );
   }
   await commitFunctionActivation({
@@ -1629,19 +1790,24 @@ export async function getVersionedArtifactPath(
   version: string,
 ): Promise<string | null> {
   const dir = getFunctionVersionDir(ref, slug, version);
-  try {
-    const entries = await fs.readdir(dir);
-    const contentAddressed = entries
-      .filter((entry) => /^index\.[a-f0-9]{16}\.js$/.test(entry))
-      .sort()
-      .at(0);
-    if (contentAddressed) return assertInside(dir, path.join(dir, contentAddressed));
-  } catch (error: unknown) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  const metadataPath = path.join(dir, FUNCTION_VERSION_METADATA_FILE);
+  if (!await fileExists(metadataPath)) return null;
+  const metadata = await readFunctionVersionMetadata(ref, slug, version);
+  if (metadata.artifact_sha256 === null) {
+    throw new Error("Function version metadata is missing its artifact digest");
   }
-  const modern = getVersionedFuncPath(ref, slug, version);
-  if (await fileExists(modern)) return modern;
-  return null;
+  const contentAddressedPath = assertInside(
+    dir,
+    path.join(dir, `index.${metadata.artifact_sha256.slice(0, 16)}.js`),
+  );
+  if (!await fileExists(contentAddressedPath)) {
+    throw new Error("Function version artifact is missing for immutable metadata");
+  }
+  const actualSha256 = await sha256Hex(await Bun.file(contentAddressedPath).text());
+  if (actualSha256 !== metadata.artifact_sha256) {
+    throw new Error("Function version artifact does not match its immutable metadata");
+  }
+  return contentAddressedPath;
 }
 
 async function listVersionDirectories(ref: string, slug: string): Promise<string[]> {
@@ -1797,7 +1963,7 @@ async function migrateLegacyProjectArtifacts(ref: string): Promise<number> {
     await migrateLegacyVersionedSourceDirectory(ref, directory, entry, sourceDirectory);
     moved += 1;
   }
-  return moved;
+  return moved + await migrateProjectImmutableVersions(ref);
 }
 
 export async function migrateLegacyVersionArtifacts(): Promise<{ moved: number }> {
@@ -1827,7 +1993,7 @@ async function immutableFunctionVersion(
     const functionConfig = activatedFunctionConfig(currentConfig, request.config, prepared);
     await writeFunctionVersionMetadata(
       stageDir,
-      functionVersionMetadata(version, functionConfig),
+      functionVersionMetadata(version, functionConfig, prepared.artifactSha256),
     );
     await fs.rename(stageDir, finalDir);
     return { prepared, config: functionConfig };
@@ -2523,6 +2689,9 @@ export const edgeFunctionService = {
       const versionMetadata = await readFunctionVersionMetadata(ref, slug, version);
       const updated = restoredFunctionConfig(expected.state.config, versionMetadata);
       const artifactSha256 = await sha256Hex(detail.bundle_code);
+      if (artifactSha256 !== versionMetadata.artifact_sha256) {
+        throw new Error("Function version artifact does not match its immutable metadata");
+      }
       const activation = await commitFunctionActivation({
         ref,
         slug,

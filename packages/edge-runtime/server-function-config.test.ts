@@ -8,8 +8,8 @@ import {
 } from "bun:test";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 
 setDefaultTimeout(30_000);
 
@@ -72,9 +72,14 @@ async function installActivationCandidate(
 ): Promise<ActivationCandidate> {
   const activationId = request.activationId ?? randomUUID();
   const versionRoot = join(projectRoot, ".versions", request.slug, request.version);
-  await mkdir(versionRoot, { recursive: true });
-  await writeFile(join(versionRoot, "index.js"), request.source);
+  const sourceRoot = join(versionRoot, "src");
+  await mkdir(sourceRoot, { recursive: true });
   const artifactSha256 = createHash("sha256").update(request.source).digest("hex");
+  await Promise.all([
+    writeFile(join(versionRoot, "index.js"), request.source),
+    writeFile(join(versionRoot, `index.${artifactSha256.slice(0, 16)}.js`), request.source),
+    writeFile(join(sourceRoot, ".supacloud-entry.js"), request.source),
+  ]);
   const manifest = JSON.stringify({
     verify_jwt: request.verifyJwt ?? false,
     version: request.version,
@@ -122,10 +127,27 @@ async function publishActivationCandidate(slug: string, candidate: ActivationCan
   await writeFunctionConfig(slug, candidate.manifest);
 }
 
+async function resetActivationBaseline(slug: string): Promise<void> {
+  await rm(join(projectRoot, `${slug}.config.json`), { force: true });
+  await invalidateFunctionConfig(slug);
+}
+
 async function invokeAnonymous(slug: string): Promise<Response> {
   return fetch(`${edgeBaseUrl}/functions/v1/${slug}`, {
     headers: { "x-project-ref": PROJECT_REF },
   });
+}
+
+async function installActivationCandidateWithStaticAsset(
+  slug: string,
+  source: string,
+  asset: string,
+): Promise<ActivationCandidate> {
+  const candidate = await installActivationCandidate({ slug, version: "1", source, verifyJwt: false });
+  const assetPath = join(projectRoot, ".versions", slug, "1", "src", "public", "message.txt");
+  await mkdir(dirname(assetPath), { recursive: true });
+  await writeFile(assetPath, asset);
+  return candidate;
 }
 
 function reserveEdgePort(): number {
@@ -269,7 +291,7 @@ function startEdgeRuntime(managementPort: number): void {
 }
 
 async function initializeServerFixture(): Promise<void> {
-  fixtureRoot = await mkdtemp(join(tmpdir(), "supacloud-edge-config-contract-"));
+  fixtureRoot = await mkdtemp(join(homedir(), ".supacloud-edge-config-contract-"));
   projectRoot = join(fixtureRoot, "functions", PROJECT_REF);
   activationGenerationReadLog = join(fixtureRoot, "activation-generation-reads.log");
   await mkdir(projectRoot, { recursive: true });
@@ -490,18 +512,24 @@ describe("Edge Runtime function config boundary", () => {
     },
   );
 
-  test.each(STAT_RACE_FAILURES)(
-    "fails closed for %s when stat returns %s after realpath succeeds",
+  test.skipIf(process.platform !== "linux").each(STAT_RACE_FAILURES)(
+    "fails closed for %s when descriptor-bound open returns %s",
     async (slug) => {
       const fallbackBody = `${slug}-fallback-must-not-run`;
       await installStatRaceFunction(slug, fallbackBody);
-      await expectActivationFailsClosed(slug, fallbackBody);
+      const foreground = await invokeForeground(slug);
+      expect(foreground.status).toBe(500);
+      expect(foreground.headers.has("x-supacloud-function-version")).toBe(false);
+      expect(await foreground.text()).not.toContain(fallbackBody);
     },
   );
 
-  test("fences requests until the immutable candidate is preheated and committed", async () => {
+  test.skipIf(process.platform !== "linux")(
+    "fences requests until the immutable candidate is preheated and committed",
+    async () => {
     const slug = "activation_candidate";
     const candidateBody = "candidate-policy-visible-only-after-commit";
+    await resetActivationBaseline(slug);
     const candidate = await installActivationCandidate({
       slug,
       version: "1",
@@ -555,9 +583,104 @@ describe("Edge Runtime function config boundary", () => {
         });
       }
     }
-  });
+    },
+  );
 
-  test("rejects a foreign activation without replacing the global lease", async () => {
+  test.skipIf(process.platform !== "linux")(
+    "serves an attested multi-file Function static asset after activation",
+    async () => {
+      const slug = "activation_static_asset";
+      await resetActivationBaseline(slug);
+      const candidate = await installActivationCandidateWithStaticAsset(
+        slug,
+        `
+          export default async () => new Response(
+            await Bun.file(import.meta.dir + "/public/message.txt").text(),
+          );
+        `,
+        "asset-from-attested-source",
+      );
+      let committed = false;
+
+      try {
+        expect((await activationControl({
+          slug,
+          activationId: candidate.activationId,
+          action: "begin",
+        })).status).toBe(200);
+        expect((await activationControl({
+          slug,
+          activationId: candidate.activationId,
+          action: "preheat",
+          version: "1",
+        })).status).toBe(200);
+        await publishActivationCandidate(slug, candidate);
+        expect((await activationControl({
+          slug,
+          activationId: candidate.activationId,
+          action: "commit",
+        })).status).toBe(200);
+        committed = true;
+
+        const response = await invokeAnonymous(slug);
+        expect(response.status).toBe(200);
+        expect(await response.text()).toBe("asset-from-attested-source");
+      } finally {
+        if (!committed) {
+          await activationControl({ slug, activationId: candidate.activationId, action: "abort" });
+        }
+      }
+    },
+  );
+
+  test.skipIf(process.platform !== "linux").each(["replacement", "symlink"] as const)(
+    "rejects an attested source entry %s before activation",
+    async (mutation) => {
+      const slug = `activation_source_${mutation}`;
+      const authoritySource = functionSource("authority-must-not-be-replaced");
+      const candidate = await installActivationCandidate({
+        slug,
+        version: "1",
+        source: authoritySource,
+        verifyJwt: false,
+      });
+      const versionRoot = join(projectRoot, ".versions", slug, "1");
+      const sourceEntry = join(versionRoot, "src", ".supacloud-entry.js");
+
+      if (mutation === "replacement") {
+        await writeFile(sourceEntry, functionSource("replacement-must-not-run"));
+      } else {
+        await rm(sourceEntry);
+        await symlink(join(versionRoot, "index.js"), sourceEntry);
+      }
+
+      try {
+        expect((await activationControl({
+          slug,
+          activationId: candidate.activationId,
+          action: "begin",
+        })).status).toBe(200);
+        const preheat = await activationControl({
+          slug,
+          activationId: candidate.activationId,
+          action: "preheat",
+          version: "1",
+        });
+        expect(preheat.status).toBe(400);
+        expect(await preheat.text()).not.toContain("replacement-must-not-run");
+      } finally {
+        await activationControl({ slug, activationId: candidate.activationId, action: "abort" });
+      }
+    },
+  );
+
+  test.skipIf(process.platform !== "linux")(
+    "rejects a foreign activation without replacing the global lease",
+    async () => {
+    await Promise.all([
+      resetActivationBaseline("lease_first"),
+      resetActivationBaseline("lease_second"),
+    ]);
     const first = await installActivationCandidate({
       slug: "lease_first",
       version: "1",
@@ -599,9 +722,12 @@ describe("Edge Runtime function config boundary", () => {
         action: "abort",
       });
     }
-  });
+    },
+  );
 
-  test("cancels queued requests when an activation fence begins", async () => {
+  test.skipIf(process.platform !== "linux")(
+    "cancels queued requests when an activation fence begins",
+    async () => {
     const slug = "activation_queue";
     const slowSource = `
       export default async () => {
@@ -643,11 +769,15 @@ describe("Edge Runtime function config boundary", () => {
         action: "abort",
       });
     }
-  });
+    },
+  );
 
-  test("recovers committed activation identity after an Edge Runtime restart", async () => {
+  test.skipIf(process.platform !== "linux")(
+    "recovers committed activation identity after an Edge Runtime restart",
+    async () => {
     const slug = "activation_restart";
     const body = "committed-after-restart";
+    await resetActivationBaseline(slug);
     const candidate = await installActivationCandidate({
       slug,
       version: "1",
@@ -677,5 +807,6 @@ describe("Edge Runtime function config boundary", () => {
     const active = await invokeAnonymous(slug);
     expect(active.status).toBe(200);
     expect(await active.text()).toBe(body);
-  });
+    },
+  );
 });

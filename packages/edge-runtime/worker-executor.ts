@@ -32,6 +32,10 @@ import {
 
 const { parentPort } = require("node:worker_threads") as typeof import("node:worker_threads");
 import type { PgredisRuntimeBindingConfig } from "./internal-bindings";
+import {
+  assertTrustedFunctionArtifact,
+  withTrustedFunctionArtifact,
+} from "./trusted-function-files";
 
 const runtimeBunFile = Bun.file.bind(Bun);
 const setProjectRoot = initializeProjectRootControl();
@@ -170,20 +174,20 @@ async function importModuleHandler(importUrl: string): Promise<unknown> {
   }
 }
 
-async function artifactSha256(functionPath: string): Promise<string> {
-  const artifactBytes = await runtimeBunFile(functionPath).arrayBuffer();
-  const digest = await crypto.subtle.digest("SHA-256", artifactBytes);
-  return Buffer.from(digest).toString("hex");
-}
-
 async function assertAttestedArtifact(
   functionPath: string,
   identity: EdgeRuntimePreheatIdentity | undefined,
 ): Promise<void> {
   if (!identity) return;
-  if (await artifactSha256(functionPath) !== identity.artifact_sha256) {
-    throw new Error("Function artifact SHA-256 does not match preheat identity");
-  }
+  await assertTrustedFunctionArtifact(functionPath, identity.artifact_sha256);
+}
+
+async function assertExpectedArtifact(
+  functionPath: string,
+  expectedSha256: string | undefined,
+): Promise<void> {
+  if (expectedSha256 === undefined) return;
+  await assertTrustedFunctionArtifact(functionPath, expectedSha256);
 }
 
 const DISABLED_TENANT_MODULES = new Map([
@@ -257,6 +261,7 @@ function isDynamicImportLiteral(source: string, start: number, end: number): boo
 async function assertTenantModuleGraphSafe(
   entryPath: string,
   visited = new Set<string>(),
+  requireSingleFile = false,
 ): Promise<void> {
   const resolvedEntry = path.resolve(entryPath);
   if (visited.has(resolvedEntry)) return;
@@ -289,6 +294,9 @@ async function assertTenantModuleGraphSafe(
     ) {
       throw new Error(NATIVE_LOADER_DISABLED_MESSAGE);
     }
+    if (requireSingleFile) {
+      throw new Error("Attested Function artifact must be a self-contained module");
+    }
     let dependencyPath = imported.path;
     if (dependencyPath.startsWith("file:")) {
       dependencyPath = fileURLToPath(dependencyPath);
@@ -316,7 +324,7 @@ async function assertTenantModuleGraphSafe(
       }
       continue;
     }
-    await assertTenantModuleGraphSafe(dependencyPath, visited);
+    await assertTenantModuleGraphSafe(dependencyPath, visited, requireSingleFile);
   }
 }
 
@@ -462,14 +470,33 @@ async function loadModule(input: {
   const cacheKey = buildModuleCacheKey(identity);
   const cached = moduleCache.get(cacheKey);
   if (cached) {
+    try {
+      await assertExpectedArtifact(input.functionPath, input.artifactSha256);
+    } catch (error: unknown) {
+      moduleCache.delete(cacheKey);
+      throw error;
+    }
     cached.lastUsed = Date.now();
     return { handler: cached.handler, cacheHit: true, moduleCacheSize: moduleCache.size };
   }
 
   evictOldestModule();
 
-  await assertTenantModuleGraphSafe(input.functionPath);
-  const handler = await importModuleHandler(buildModuleImportUrl(identity));
+  await assertTenantModuleGraphSafe(
+    input.functionPath,
+    new Set<string>(),
+    input.artifactSha256 !== undefined,
+  );
+  const handler = input.artifactSha256 === undefined
+    ? await importModuleHandler(buildModuleImportUrl(identity))
+    : await withTrustedFunctionArtifact(
+        input.functionPath,
+        input.artifactSha256,
+        (descriptorPath) => importModuleHandler(buildModuleImportUrl({
+          ...identity,
+          functionPath: descriptorPath,
+        })),
+      );
   moduleCache.set(cacheKey, {
     handler,
     functionId: input.functionId,
@@ -734,6 +761,12 @@ async function onParentMessage(msg: unknown): Promise<void> {
       throw abortReason instanceof Error
         ? abortReason
         : new DOMException("Task cancelled", "AbortError");
+    }
+    try {
+      await assertExpectedArtifact(functionPath, msg.artifactSha256);
+    } catch (error: unknown) {
+      invalidateCachedModules((entry) => entry.functionId === functionId);
+      throw error;
     }
     postToParent({ type: "execution_started", functionId });
     const handler = moduleLoad.handler;
