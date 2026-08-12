@@ -21,8 +21,8 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { stableStringify } from "../../src/utils/stable-json";
 
 interface SpawnInvocation {
@@ -43,11 +43,19 @@ const projects = new Map<string, TestProject>();
 const findByRef = mock(async (projectRef: string) => projects.get(projectRef) ?? null);
 const loggerError = mock(() => undefined);
 const logicalBackupTestRoot = await realpath(
-  await mkdtemp(join(tmpdir(), "supacloud-logical-backup-test-root-")),
+  await mkdtemp(join(homedir(), ".supacloud-logical-backup-test-root-")),
 );
 const logicalBackupDirectory = join(logicalBackupTestRoot, "nested", "logical-full");
 const previousLogicalBackupDirectory = process.env.SUPACLOUD_LOGICAL_BACKUP_DIR;
 process.env.SUPACLOUD_LOGICAL_BACKUP_DIR = logicalBackupDirectory;
+afterAll(async () => {
+  try {
+    await rm(logicalBackupTestRoot, { recursive: true, force: true });
+  } finally {
+    if (previousLogicalBackupDirectory === undefined) delete process.env.SUPACLOUD_LOGICAL_BACKUP_DIR;
+    else process.env.SUPACLOUD_LOGICAL_BACKUP_DIR = previousLogicalBackupDirectory;
+  }
+});
 const currentSigningKey = "logical-backup-current-test-signing-key";
 const legacySigningKey = "logical-backup-legacy-test-signing-key";
 const configMock = {
@@ -192,11 +200,20 @@ describe("verified logical-full backup service", () => {
     loggerError.mockClear();
   });
 
-  afterAll(async () => {
+  afterAll(() => {
     spawnSpy.mockRestore();
-    await rm(logicalBackupTestRoot, { recursive: true, force: true });
-    if (previousLogicalBackupDirectory === undefined) delete process.env.SUPACLOUD_LOGICAL_BACKUP_DIR;
-    else process.env.SUPACLOUD_LOGICAL_BACKUP_DIR = previousLogicalBackupDirectory;
+  });
+
+  test("uses an owner-controlled private fixture root", async () => {
+    const effectiveUid = process.geteuid?.();
+    if (effectiveUid === undefined) throw new Error("Logical backup tests require a POSIX effective uid");
+    const homeMetadata = await stat(await realpath(homedir()));
+    const fixtureMetadata = await stat(logicalBackupTestRoot);
+
+    expect([0, effectiveUid]).toContain(homeMetadata.uid);
+    expect(homeMetadata.mode & 0o022).toBe(0);
+    expect(fixtureMetadata.uid).toBe(effectiveUid);
+    expect(fixtureMetadata.mode & 0o777).toBe(0o700);
   });
 
   test("creates a stable receipt only after a complete custom archive is verified", async () => {
