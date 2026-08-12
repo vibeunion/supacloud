@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 
+const STRESS_TEST_TIMEOUT_MS = 15_000;
+
 describe("WorkerPool process-level cooperative retirement", () => {
   test("survives held fetch timeout churn and serves through replacements", async () => {
     const fixturePath = join(import.meta.dir, "worker-retirement-stress-fixture.ts");
@@ -28,5 +30,5 @@ describe("WorkerPool process-level cooperative retirement", () => {
       budgetExceeded: 0,
       idleWorkers: 2,
     });
-  });
+  }, STRESS_TEST_TIMEOUT_MS);
 });

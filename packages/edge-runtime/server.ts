@@ -1,11 +1,22 @@
 import "./url-import-plugin";
 import { Elysia } from "elysia";
 import cors from "@elysiajs/cors";
-import { WorkerPool } from "./worker-pool";
+import {
+  WorkerPool,
+  type WorkerPoolPreheatResult,
+  type WorkerPoolVersionPreheatResult,
+} from "./worker-pool";
 import {
   invalidateTenantEnvCache,
+  isTenantEnvLoadCurrent,
   loadTenantEnv,
-  withBackgroundInternalToken,
+  loadTenantRuntimeEnv,
+  recordTenantEnvDispatch,
+  reserveTenantEnvDispatch,
+  runtimeEnvObservation,
+  tenantEnvModuleProof,
+  type TenantEnvLoad,
+  type TenantEnvExecutionProfile,
 } from "./tenant-env";
 import {
   normalizeEdgeRuntimeAuthRuntimeMode,
@@ -28,8 +39,26 @@ import {
 } from "./function-version";
 import path from "path";
 import fs from "fs/promises";
+import { createHash } from "node:crypto";
+import type { Stats } from "node:fs";
 import type { PgredisRuntimeEndpointConfig } from "./internal-bindings";
 import { createPgredisCapability } from "./pgredis-capability";
+import {
+  EDGE_RUNTIME_PREHEAT_ATTESTATION_SCHEMA,
+  type EdgeRuntimePreheatIdentity,
+} from "./preheat-attestation";
+import {
+  activationAuthorityId,
+  activationFenceKey,
+  activationState,
+  assertActivationSuccessor,
+  isEdgeFunctionActivationId,
+  parseEdgeFunctionActivationManifest,
+  readEdgeFunctionActivationGeneration,
+  type EdgeFunctionActivationFence,
+  type EdgeFunctionActivationManifest,
+  type EdgeFunctionActivationState,
+} from "./function-activation";
 
 const PORT = Number(process.env.EDGE_RUNTIME_PORT) || Number(process.env.PORT) || 9005;
 const HOST = process.env.EDGE_RUNTIME_HOST || process.env.HOST || "127.0.0.1";
@@ -51,6 +80,7 @@ const FUNCTION_REQUEST_TIMEOUT_MS = Number(process.env.EDGE_FUNCTION_TIMEOUT_MS)
 const BACKGROUND_FUNCTION_TIMEOUT_MS = Number(process.env.EDGE_BACKGROUND_FUNCTION_TIMEOUT_MS) || 300_000;
 const WORKER_RECYCLE_RESPONSE_GRACE_MS = 100;
 const INTERNAL_TOKEN = process.env.EDGE_RUNTIME_MASTER_KEY || process.env.MASTER_TOKEN || "";
+const RUNTIME_INSTANCE_ID = process.env.EDGE_RUNTIME_INSTANCE_ID?.trim() || crypto.randomUUID();
 const PROJECT_REF_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
 const FUNCTION_SLUG_PATTERN = /^[a-zA-Z0-9_-]{1,128}$/;
 const AUTH_FAILURE_WINDOW_MS = Number(process.env.EDGE_AUTH_FAILURE_WINDOW_MS) || 30_000;
@@ -109,6 +139,24 @@ function resolveBooleanEnv(value: string | undefined, fallback: boolean): boolea
 
 function resolveBackgroundPreheatWorkers(): number | undefined {
   return BACKGROUND_PREHEAT_MODE === "all" ? undefined : 1;
+}
+
+function hasCompletePreheatAttestation(result: WorkerPoolPreheatResult): boolean {
+  return result.attempted > 0
+    && result.succeeded === result.attempted
+    && result.attestation !== null;
+}
+
+function activationPreheatProof(
+  foreground: WorkerPoolPreheatResult | WorkerPoolVersionPreheatResult,
+  background: WorkerPoolPreheatResult | WorkerPoolVersionPreheatResult,
+): NonNullable<EdgeFunctionActivationFence["preheated"]> | null {
+  if (!("rotation" in foreground) || !("rotation" in background)) return null;
+  return {
+    runtimeInstanceId: RUNTIME_INSTANCE_ID,
+    foregroundGeneration: foreground.rotation.generation,
+    backgroundGeneration: background.rotation.generation,
+  };
 }
 
 if (!isPathInside(FUNCTIONS_DIR_REALPATH, FUNCTIONS_BASE_REALPATH)) {
@@ -302,7 +350,73 @@ type FunctionActivationSnapshot = {
   responseVersion: string | null;
   verifyJwt: boolean;
   moduleVersion: string;
+  artifactSha256: string;
+  activationId: string | null;
 };
+
+type RuntimePreheatIdentityRequest = {
+  projectRef: string;
+  functionSlug: string;
+  requestedVersion: string | null;
+  activation: FunctionActivationSnapshot;
+  tenantEnvLoad: TenantEnvLoad;
+  executionProfile: TenantEnvExecutionProfile;
+  moduleEnvProof: string | null;
+};
+
+function runtimePreheatIdentity(
+  request: RuntimePreheatIdentityRequest,
+): EdgeRuntimePreheatIdentity {
+  return {
+    schema: EDGE_RUNTIME_PREHEAT_ATTESTATION_SCHEMA,
+    project_ref: request.projectRef,
+    function_slug: request.functionSlug,
+    requested_version: request.requestedVersion,
+    target_version: request.requestedVersion ?? request.activation.activeVersion,
+    resolved_version: request.activation.activeVersion,
+    artifact_sha256: request.activation.artifactSha256,
+    verify_jwt: request.activation.verifyJwt,
+    activation_id: request.activation.activationId,
+    runtime_instance_id: RUNTIME_INSTANCE_ID,
+    execution_profile: request.executionProfile,
+    module_env_proof: request.moduleEnvProof,
+    tenant_env: {
+      loaded_revision: request.tenantEnvLoad.revision,
+      env_proof: request.tenantEnvLoad.envProof,
+      load_state: request.tenantEnvLoad.loadState,
+      load_source: request.tenantEnvLoad.loadSource,
+    },
+  };
+}
+
+function sameArtifactIdentity(left: Stats, right: Stats): boolean {
+  return left.dev === right.dev
+    && left.ino === right.ino
+    && left.size === right.size
+    && left.mtimeMs === right.mtimeMs
+    && left.ctimeMs === right.ctimeMs;
+}
+
+async function attestedArtifactSha256(
+  functionPath: string,
+  expected: Stats,
+): Promise<string> {
+  const artifact = await fs.open(functionPath, "r");
+  try {
+    const before = await artifact.stat();
+    if (!before.isFile() || !sameArtifactIdentity(before, expected)) {
+      throw new Error("Function artifact changed before hashing");
+    }
+    const digest = createHash("sha256").update(await artifact.readFile()).digest("hex");
+    const after = await artifact.stat();
+    if (!sameArtifactIdentity(before, after)) {
+      throw new Error("Function artifact changed while hashing");
+    }
+    return digest;
+  } finally {
+    await artifact.close();
+  }
+}
 
 function functionArtifactBindingRoot(
   projectRoot: string,
@@ -332,22 +446,34 @@ function isMissingFunctionCandidate(error: unknown): boolean {
   return error.code === "ENOENT" || error.code === "ENOTDIR";
 }
 
-async function resolveFunctionPath(
-  projectRef: string,
-  functionName: string,
-  requestedVersion?: string | null,
-  versionBindingResolver = resolveFunctionVersionBinding,
+type ResolveFunctionPathRequest = {
+  projectRef: string;
+  functionName: string;
+  requestedVersion?: string | null;
+  versionBindingResolver?: typeof resolveFunctionVersionBinding;
+  configOverride?: FunctionConfig;
+};
+
+async function resolvedFunctionPath(
+  request: ResolveFunctionPathRequest,
 ): Promise<FunctionActivationSnapshot> {
-  if (!isSafeFunctionSlug(functionName)) {
+  if (!isSafeFunctionSlug(request.functionName)) {
     throw new Error("Invalid function slug");
   }
-  const projectRoot = await resolveProjectRoot(projectRef);
-  const resolvedConfig = await getFunctionConfig(projectRef, functionName, projectRoot);
+  const projectRoot = await resolveProjectRoot(request.projectRef);
+  const resolvedConfig = request.configOverride
+    ?? await getFunctionConfig(request.projectRef, request.functionName, projectRoot);
+  if (resolvedConfig.targetState === "absent") throw new Error("Function not found");
+  const versionBindingResolver = request.versionBindingResolver ?? resolveFunctionVersionBinding;
   const { activeVersion, responseVersion } = versionBindingResolver(
-    requestedVersion,
+    request.requestedVersion,
     resolvedConfig.version,
   );
-  const candidates = activeFunctionPathCandidates(projectRoot, functionName, activeVersion);
+  const candidates = activeFunctionPathCandidates(
+    projectRoot,
+    request.functionName,
+    activeVersion,
+  );
 
   for (const candidate of candidates) {
     if (!isPathInside(candidate, projectRoot)) {
@@ -363,7 +489,7 @@ async function resolveFunctionPath(
     }
     const bindingRoot = functionArtifactBindingRoot(
       projectRoot,
-      functionName,
+      request.functionName,
       activeVersion,
       candidate,
     );
@@ -374,18 +500,23 @@ async function resolveFunctionPath(
     if (!stat.isFile()) {
       throw new Error("Function artifact is not a regular file");
     }
+    const artifactSha256 = await attestedArtifactSha256(realCandidate, stat);
     return {
       functionPath: realCandidate,
       projectRoot,
       activeVersion,
       responseVersion,
       verifyJwt: resolvedConfig.verify_jwt,
+      artifactSha256,
+      activationId: resolvedConfig.activationId,
       moduleVersion: [
         `active:${activeVersion || "legacy"}`,
-        `env:${getProjectModuleEpoch(projectRef)}`,
+        `activation:${resolvedConfig.activationId ?? "legacy"}`,
+        `env:${getProjectModuleEpoch(request.projectRef)}`,
         `mtime:${stat.mtimeMs}`,
         `ctime:${stat.ctimeMs}`,
         `size:${stat.size}`,
+        `sha256:${artifactSha256}`,
       ].join(":"),
     };
   }
@@ -393,10 +524,24 @@ async function resolveFunctionPath(
   throw new Error("Function not found");
 }
 
+async function resolveFunctionPath(
+  projectRef: string,
+  functionName: string,
+  requestedVersion?: string | null,
+  versionBindingResolver = resolveFunctionVersionBinding,
+): Promise<FunctionActivationSnapshot> {
+  return resolvedFunctionPath({
+    projectRef,
+    functionName,
+    requestedVersion,
+    versionBindingResolver,
+  });
+}
+
 type FunctionDispatchOptions = {
   background?: boolean;
-  backgroundInternalToken?: string;
   tenantEnv?: Record<string, string>;
+  tenantEnvLoad?: TenantEnvLoad;
   cancelKey?: string;
   onLog?: (entry: {
     timestamp: string;
@@ -424,15 +569,23 @@ function functionDispatchError(
     ? 404
     : message.includes("timeout") || message.includes("Timeout")
       ? 504
+      : message.includes("Runtime environment changed")
+        ? 503
       : 500;
   const safeMessage = statusCode === 404
-    ? "Function not found"
-    : statusCode === 504
-      ? "Function execution timed out"
-      : "Internal Server Error";
+      ? "Function not found"
+      : statusCode === 504
+        ? "Function execution timed out"
+        : statusCode === 503
+          ? "Runtime environment changed before execution"
+        : "Internal Server Error";
   return new Response(JSON.stringify({ error: safeMessage }), {
     status: statusCode,
-    headers: { "Content-Type": "application/json", "x-relay-error": "true" },
+    headers: {
+      "Content-Type": "application/json",
+      "x-relay-error": "true",
+      ...(statusCode === 503 ? { "Retry-After": "1" } : {}),
+    },
   });
 }
 
@@ -446,14 +599,28 @@ async function dispatchFunction(
     const versionSuffix = activeVersion ? `_v${activeVersion}` : "";
     const functionId = `${projectRef}_${functionName}${versionSuffix}`;
     const targetPool = opts?.background ? backgroundPool : pool;
-    const tenantEnv = opts?.tenantEnv || await loadTenantEnv(projectRef);
-    const backgroundInternalToken = opts?.backgroundInternalToken || INTERNAL_TOKEN;
+    const tenantEnvLoad = opts?.tenantEnvLoad || await loadTenantRuntimeEnv(projectRef);
+    const dispatchEnv = opts?.tenantEnv || tenantEnvLoad.env;
+    const executionProfile = opts?.background ? "background" : "foreground";
+    const moduleEnvProof = tenantEnvModuleProof(
+      projectRef,
+      tenantEnvLoad.env,
+      tenantEnvLoad,
+      executionProfile,
+    );
+    if (!isTenantEnvLoadCurrent(projectRef, tenantEnvLoad)) {
+      throw new Error("Runtime environment changed before dispatch");
+    }
+    if (activationFences.has(activationFenceKey(projectRef, functionName))) {
+      throw new Error("Runtime environment changed during Function activation");
+    }
+    const dispatchReservation = reserveTenantEnvDispatch(projectRef);
     const runtimeLogContext = {
       functionVersion: activeVersion,
       executionId: setHeaders["x-sb-execution-id"] || null,
       background: opts?.background === true,
     };
-    return await targetPool.dispatch({
+    const response = await targetPool.dispatch({
       functionId,
       functionPath,
       projectRoot,
@@ -471,17 +638,20 @@ async function dispatchFunction(
           }
         : undefined,
       moduleVersion,
-      env: opts?.background
-        ? withBackgroundInternalToken(tenantEnv, backgroundInternalToken)
-        : tenantEnv,
+      artifactSha256: activation.artifactSha256,
+      env: dispatchEnv,
+      envProof: moduleEnvProof || undefined,
       request,
       cancelKey: opts?.cancelKey,
       signal: request.signal,
+      onExecutionStarted: () =>
+        recordTenantEnvDispatch(projectRef, tenantEnvLoad, dispatchReservation),
       onLog: (entry) => {
         void appendFunctionRuntimeLog(projectRef, functionName, entry, runtimeLogContext);
         opts?.onLog?.(entry);
       },
     });
+    return response;
   } catch (error: unknown) {
     return functionDispatchError(error, setHeaders);
   }
@@ -542,37 +712,40 @@ function requireInternalAuth(request: Request): Response | undefined {
 
 const configCache = new Map<
   string,
-  { verify_jwt: boolean; version: string | null; expiresAt: number }
+  FunctionConfig & { expiresAt: number }
 >();
 const CONFIG_CACHE_TTL = 10_000;
 
-type FunctionConfig = { verify_jwt: boolean; version: string | null };
+type FunctionConfig = {
+  verify_jwt: boolean;
+  version: string | null;
+  activationId: string | null;
+  targetState: "active" | "absent" | null;
+};
+
+type ActivationPoolControl = Awaited<ReturnType<WorkerPool["invalidateProject"]>>;
+type ActivationPoolInvalidation = {
+  foreground: ActivationPoolControl;
+  background: ActivationPoolControl;
+};
+type RuntimeActivationFence = EdgeFunctionActivationFence & {
+  invalidation: Promise<ActivationPoolInvalidation>;
+};
+
+const activationFences = new Map<string, RuntimeActivationFence>();
 
 function isMissingFileError(error: unknown): boolean {
   return error instanceof Error
     && (error as NodeJS.ErrnoException).code === "ENOENT";
 }
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
-}
-
-function configuredVersion(config: Record<string, unknown>): string | null {
-  if (!Object.prototype.hasOwnProperty.call(config, "version")) return null;
-  assertCanonicalConfiguredFunctionVersion(config.version);
-  return config.version;
-}
-
 function parseFunctionConfig(raw: string): FunctionConfig {
-  const config: unknown = JSON.parse(raw);
-  if (!isPlainObject(config)) {
-    throw new Error("Function config must be a plain object");
-  }
+  const manifest = parseEdgeFunctionActivationManifest(raw);
   return {
-    verify_jwt: config.verify_jwt !== false,
-    version: configuredVersion(config),
+    verify_jwt: manifest.config.verify_jwt,
+    version: manifest.config.version,
+    activationId: activationAuthorityId(manifest),
+    targetState: manifest.authority?.target_state ?? null,
   };
 }
 
@@ -601,7 +774,12 @@ async function getFunctionConfig(
   const key = `${projectRef}/${functionName}`;
   const cached = configCache.get(key);
   if (cached && cached.expiresAt > Date.now()) {
-    return { verify_jwt: cached.verify_jwt, version: cached.version };
+    return {
+      verify_jwt: cached.verify_jwt,
+      version: cached.version,
+      activationId: cached.activationId,
+      targetState: cached.targetState,
+    };
   }
 
   const configPath = path.resolve(projectRoot, `${functionName}.config.json`);
@@ -610,10 +788,92 @@ async function getFunctionConfig(
   }
   const realConfigPath = await existingFunctionConfigPath(configPath, projectRoot);
   const config = realConfigPath === null
-    ? { verify_jwt: true, version: null }
+    ? { verify_jwt: true, version: null, activationId: null, targetState: null }
     : parseFunctionConfig(await fs.readFile(realConfigPath, "utf8"));
   configCache.set(key, { ...config, expiresAt: Date.now() + CONFIG_CACHE_TTL });
   return config;
+}
+
+async function immutableVersionConfig(
+  projectRoot: string,
+  functionName: string,
+  version: string,
+): Promise<FunctionConfig> {
+  assertCanonicalConfiguredFunctionVersion(version);
+  const versionRoot = path.resolve(projectRoot, ".versions", functionName, version);
+  const metadataPath = path.join(versionRoot, ".supacloud-version.json");
+  const resolvedMetadataPath = await fs.realpath(metadataPath);
+  if (!isPathInside(resolvedMetadataPath, versionRoot)) {
+    throw new Error("Function version metadata escapes its immutable version directory");
+  }
+  const metadata: unknown = JSON.parse(await fs.readFile(resolvedMetadataPath, "utf8"));
+  if (metadata === null || typeof metadata !== "object" || Array.isArray(metadata)) {
+    throw new Error("Function version metadata must be an object");
+  }
+  const record = metadata as Record<string, unknown>;
+  if (record.version !== version || typeof record.verify_jwt !== "boolean") {
+    throw new Error("Function version metadata does not match its immutable version");
+  }
+  return {
+    verify_jwt: record.verify_jwt,
+    version,
+    activationId: null,
+    targetState: "active",
+  };
+}
+
+async function activeActivationManifest(
+  projectRoot: string,
+  functionName: string,
+): Promise<EdgeFunctionActivationManifest> {
+  const configPath = path.resolve(projectRoot, `${functionName}.config.json`);
+  const realConfigPath = await existingFunctionConfigPath(configPath, projectRoot);
+  return realConfigPath === null
+    ? parseEdgeFunctionActivationManifest("{}")
+    : parseEdgeFunctionActivationManifest(await fs.readFile(realConfigPath, "utf8"));
+}
+
+async function preheatActivationSnapshot(
+  projectRef: string,
+  functionName: string,
+  requestedVersion: string | null,
+  activationId: string | null,
+): Promise<FunctionActivationSnapshot> {
+  const projectRoot = await resolveProjectRoot(projectRef);
+  if (activationId) {
+    const candidate = await readEdgeFunctionActivationGeneration(
+      projectRoot,
+      functionName,
+      activationId,
+    );
+    if (candidate.authority.target_state !== "active"
+      || candidate.config.version !== requestedVersion) {
+      throw new Error("Function activation candidate does not match the requested version");
+    }
+    const activation = await resolvedFunctionPath({
+      projectRef,
+      functionName,
+      requestedVersion,
+      configOverride: {
+        ...candidate.config,
+        activationId: candidate.authority.activation_id,
+        targetState: candidate.authority.target_state,
+      },
+    });
+    if (activation.artifactSha256 !== candidate.authority.artifact_sha256) {
+      throw new Error("Function activation artifact does not match its immutable generation");
+    }
+    return activation;
+  }
+  const configOverride = requestedVersion === null
+    ? undefined
+    : await immutableVersionConfig(projectRoot, functionName, requestedVersion);
+  return resolvedFunctionPath({
+    projectRef,
+    functionName,
+    requestedVersion,
+    configOverride,
+  });
 }
 
 interface ProjectSecrets {
@@ -723,6 +983,204 @@ async function verifyJwt(
   return result;
 }
 
+const EDGE_RUNTIME_FUNCTION_ACTIVATION_SCHEMA =
+  "supacloud.edge-runtime-function-activation.v1" as const;
+
+function activationFenceResponse(projectRef: string, functionSlug: string): Response | null {
+  if (!activationFences.has(activationFenceKey(projectRef, functionSlug))) return null;
+  return new Response(JSON.stringify({
+    error: "Function activation is in progress",
+    code: "FUNCTION_ACTIVATION_FENCED",
+  }), {
+    status: 503,
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": "no-store",
+      "Retry-After": "1",
+    },
+  });
+}
+
+function activationControlBody(
+  activationId: string,
+  state: EdgeFunctionActivationState,
+  foreground?: ActivationPoolControl,
+  background?: ActivationPoolControl,
+) {
+  return {
+    schema: EDGE_RUNTIME_FUNCTION_ACTIVATION_SCHEMA,
+    activation_id: activationId,
+    state,
+    runtime_instance_id: RUNTIME_INSTANCE_ID,
+    foreground_generation: foreground?.generation ?? pool.generation,
+    background_generation: background?.generation ?? backgroundPool.generation,
+    cancelled_queued: (foreground?.cancelledQueued ?? 0)
+      + (background?.cancelledQueued ?? 0),
+  };
+}
+
+function activationIdHeader(request: Request): string | null {
+  const activationId = request.headers.get("x-supacloud-activation-id");
+  return isEdgeFunctionActivationId(activationId) ? activationId : null;
+}
+
+function activationControlResponse(
+  body: ReturnType<typeof activationControlBody>,
+  status = 200,
+): Response {
+  return Response.json(body, { status });
+}
+
+function activeActivationLease(): { key: string; fence: RuntimeActivationFence } | null {
+  const entry = activationFences.entries().next().value;
+  return entry ? { key: entry[0], fence: entry[1] } : null;
+}
+
+function activationLeaseUnavailable(): Response | null {
+  if (activationFences.size === 0) return null;
+  return Response.json({
+    error: "A Function activation lease is active",
+    code: "FUNCTION_ACTIVATION_LEASE_ACTIVE",
+  }, {
+    status: 503,
+    headers: { "Cache-Control": "no-store", "Retry-After": "1" },
+  });
+}
+
+async function invalidateActivationPools(projectRef: string): Promise<ActivationPoolInvalidation> {
+  const [foreground, background] = await Promise.all([
+    pool.invalidateProject(projectRef),
+    backgroundPool.invalidateProject(projectRef),
+  ]);
+  if (foreground.succeeded !== foreground.attempted
+    || background.succeeded !== background.attempted) {
+    throw new Error("Function activation fence invalidation was incomplete");
+  }
+  return { foreground, background };
+}
+
+async function currentActivationManifest(
+  projectRef: string,
+  functionSlug: string,
+): Promise<EdgeFunctionActivationManifest> {
+  return activeActivationManifest(await resolveProjectRoot(projectRef), functionSlug);
+}
+
+async function beginFunctionActivation(
+  projectRef: string,
+  functionSlug: string,
+  activationId: string,
+) {
+  const projectRoot = await resolveProjectRoot(projectRef);
+  const candidate = await readEdgeFunctionActivationGeneration(
+    projectRoot,
+    functionSlug,
+    activationId,
+  );
+  const current = await activeActivationManifest(projectRoot, functionSlug);
+  assertActivationSuccessor(candidate, current);
+  const key = activationFenceKey(projectRef, functionSlug);
+  const existing = activeActivationLease();
+  if (existing) {
+    if (existing.key !== key
+      || existing.fence.candidate.authority.activation_id !== activationId) {
+      throw new Error("A foreign Function activation fence is already active");
+    }
+    const settled = await existing.fence.invalidation;
+    return activationControlBody(
+      activationId,
+      "fenced",
+      settled.foreground,
+      settled.background,
+    );
+  }
+  const invalidation = invalidateActivationPools(projectRef);
+  const fence = {
+    candidate,
+    preheated: null,
+    invalidation,
+  } satisfies RuntimeActivationFence;
+  activationFences.set(key, fence);
+  try {
+    const settled = await invalidation;
+    return activationControlBody(
+      activationId,
+      "fenced",
+      settled.foreground,
+      settled.background,
+    );
+  } catch (error: unknown) {
+    if (activationFences.get(key) === fence) activationFences.delete(key);
+    throw error;
+  }
+}
+
+async function functionActivationState(
+  projectRef: string,
+  functionSlug: string,
+  activationId: string,
+): Promise<EdgeFunctionActivationState> {
+  const current = await currentActivationManifest(projectRef, functionSlug);
+  return activationState(
+    activationFences.get(activationFenceKey(projectRef, functionSlug)),
+    activationAuthorityId(current),
+    activationId,
+  );
+}
+
+async function commitFunctionActivationFence(
+  projectRef: string,
+  functionSlug: string,
+  activationId: string,
+): Promise<EdgeFunctionActivationState> {
+  const key = activationFenceKey(projectRef, functionSlug);
+  const fence = activationFences.get(key);
+  const current = await currentActivationManifest(projectRef, functionSlug);
+  const state = activationState(fence, activationAuthorityId(current), activationId);
+  if (state === "committed") {
+    configCache.set(key, {
+      ...current.config,
+      activationId,
+      targetState: current.authority?.target_state ?? null,
+      expiresAt: Date.now() + CONFIG_CACHE_TTL,
+    });
+    return state;
+  }
+  if (state !== "commit_pending" || !fence) return state;
+  const preheated = fence.preheated;
+  if (fence.candidate.authority.target_state === "active"
+    && (!preheated
+      || preheated.runtimeInstanceId !== RUNTIME_INSTANCE_ID
+      || preheated.foregroundGeneration !== pool.generation
+      || preheated.backgroundGeneration !== backgroundPool.generation)) {
+    return "uncertain";
+  }
+  configCache.set(key, {
+    ...fence.candidate.config,
+    activationId,
+    targetState: fence.candidate.authority.target_state,
+    expiresAt: Date.now() + CONFIG_CACHE_TTL,
+  });
+  activationFences.delete(key);
+  return "committed";
+}
+
+async function abortFunctionActivationFence(
+  projectRef: string,
+  functionSlug: string,
+  activationId: string,
+): Promise<EdgeFunctionActivationState> {
+  const key = activationFenceKey(projectRef, functionSlug);
+  const fence = activationFences.get(key);
+  const current = await currentActivationManifest(projectRef, functionSlug);
+  const state = activationState(fence, activationAuthorityId(current), activationId);
+  if (state === "fenced" && fence) {
+    activationFences.delete(key);
+    return "aborted";
+  }
+  return state;
+}
+
 async function handleFunctionRequest(
   c: { params: Record<string, string>; headers: Record<string, string | undefined>; request: Request; set: { headers: Record<string, string | number> } },
   functionName: string,
@@ -738,6 +1196,8 @@ async function handleFunctionRequest(
     c.set.headers["x-relay-error"] = "true";
     return badRequest("Invalid project reference or function slug");
   }
+  const fencedResponse = activationFenceResponse(projectRef, functionName);
+  if (fencedResponse) return fencedResponse;
   const blockedResponse = await authFailureBlockResponse(projectRef, functionName, authHeader, apikeyHeader);
   if (blockedResponse) {
     return blockedResponse;
@@ -775,6 +1235,8 @@ async function handleFunctionRequest(
 
   const functionRequest = withVerifiedJwtContext(c.request, verifiedSubject);
   c.set.headers["x-sb-execution-id"] = crypto.randomUUID();
+  const activationChangedResponse = activationFenceResponse(projectRef, functionName);
+  if (activationChangedResponse) return activationChangedResponse;
   const response = await dispatchFunction(
     {
       projectRef,
@@ -799,7 +1261,7 @@ const app = new Elysia()
   .use(cors())
   .get("/health", () => ({
     status: "ok",
-    instanceId: process.env.EDGE_RUNTIME_INSTANCE_ID || null,
+    instanceId: RUNTIME_INSTANCE_ID,
   }))
   .get("/metrics", (c) => {
     const authError = requireInternalAuth(c.request);
@@ -812,12 +1274,97 @@ const app = new Elysia()
       .join("\n");
   })
 
+  .post("/internal/function-activation/:ref/:slug/begin", async (c) => {
+    const authError = requireInternalAuth(c.request);
+    if (authError) return authError;
+    const activationId = activationIdHeader(c.request);
+    if (!activationId
+      || !isSafeProjectRef(c.params.ref)
+      || !isSafeFunctionSlug(c.params.slug)) {
+      return badRequest("Invalid Function activation identity");
+    }
+    try {
+      return activationControlResponse(await beginFunctionActivation(
+        c.params.ref,
+        c.params.slug,
+        activationId,
+      ));
+    } catch {
+      return activationControlResponse(
+        activationControlBody(activationId, "uncertain"),
+        409,
+      );
+    }
+  })
+
+  .post("/internal/function-activation/:ref/:slug/commit", async (c) => {
+    const authError = requireInternalAuth(c.request);
+    if (authError) return authError;
+    const activationId = activationIdHeader(c.request);
+    if (!activationId
+      || !isSafeProjectRef(c.params.ref)
+      || !isSafeFunctionSlug(c.params.slug)) {
+      return badRequest("Invalid Function activation identity");
+    }
+    const state = await commitFunctionActivationFence(
+      c.params.ref,
+      c.params.slug,
+      activationId,
+    );
+    return activationControlResponse(
+      activationControlBody(activationId, state),
+      state === "committed" ? 200 : 409,
+    );
+  })
+
+  .post("/internal/function-activation/:ref/:slug/abort", async (c) => {
+    const authError = requireInternalAuth(c.request);
+    if (authError) return authError;
+    const activationId = activationIdHeader(c.request);
+    if (!activationId
+      || !isSafeProjectRef(c.params.ref)
+      || !isSafeFunctionSlug(c.params.slug)) {
+      return badRequest("Invalid Function activation identity");
+    }
+    const state = await abortFunctionActivationFence(
+      c.params.ref,
+      c.params.slug,
+      activationId,
+    );
+    return activationControlResponse(
+      activationControlBody(activationId, state),
+      state === "aborted" || state === "committed" ? 200 : 409,
+    );
+  })
+
+  .get("/internal/function-activation/:ref/:slug/status", async (c) => {
+    const authError = requireInternalAuth(c.request);
+    if (authError) return authError;
+    const activationId = activationIdHeader(c.request);
+    if (!activationId
+      || !isSafeProjectRef(c.params.ref)
+      || !isSafeFunctionSlug(c.params.slug)) {
+      return badRequest("Invalid Function activation identity");
+    }
+    const state = await functionActivationState(
+      c.params.ref,
+      c.params.slug,
+      activationId,
+    );
+    return activationControlResponse(
+      activationControlBody(activationId, state),
+      state === "uncertain" ? 409 : 200,
+    );
+  })
+
   .post("/invalidate/:ref/:slug", async (c) => {
     const authError = requireInternalAuth(c.request);
     if (authError) return authError;
     if (!isSafeProjectRef(c.params.ref) || !isSafeFunctionSlug(c.params.slug)) {
       return badRequest("Invalid project reference or function slug");
     }
+    const leaseUnavailable = activationLeaseUnavailable();
+    if (leaseUnavailable) return leaseUnavailable;
 
     const functionId = `${c.params.ref}_${c.params.slug}`;
     configCache.delete(`${c.params.ref}/${c.params.slug}`);
@@ -828,9 +1375,12 @@ const app = new Elysia()
     ]);
     return {
       invalidated: functionId,
+      runtime_instance_id: RUNTIME_INSTANCE_ID,
       module_scope: "legacy-base-only",
       immutable_versions_retained: true,
       config_cache_evicted: true,
+      success: foreground.succeeded === foreground.attempted
+        && background.succeeded === background.attempted,
       foreground,
       background,
     };
@@ -842,6 +1392,8 @@ const app = new Elysia()
     if (!isSafeProjectRef(c.params.ref)) {
       return badRequest("Invalid project reference");
     }
+    const leaseUnavailable = activationLeaseUnavailable();
+    if (leaseUnavailable) return leaseUnavailable;
 
     invalidateTenantEnvCache(c.params.ref);
     const moduleEpoch = bumpProjectModuleEpoch(c.params.ref);
@@ -852,20 +1404,95 @@ const app = new Elysia()
     return { invalidated: c.params.ref, moduleEpoch, foreground, background };
   })
 
+  .get("/internal/runtime-env-observation/:ref", (c) => {
+    const authError = requireInternalAuth(c.request);
+    if (authError) return authError;
+    if (!isSafeProjectRef(c.params.ref)) {
+      return badRequest("Invalid project reference");
+    }
+    return runtimeEnvObservation(c.params.ref);
+  })
+
+  .get("/internal/runtime-activation-epoch", (c) => {
+    const authError = requireInternalAuth(c.request);
+    if (authError) return authError;
+    return {
+      runtime_instance_id: RUNTIME_INSTANCE_ID,
+      foreground_generation: pool.generation,
+      background_generation: backgroundPool.generation,
+    };
+  })
+
   .post("/preheat/:ref/:slug", async (c) => {
     const authError = requireInternalAuth(c.request);
     if (authError) return authError;
+    if (!isSafeProjectRef(c.params.ref) || !isSafeFunctionSlug(c.params.slug)) {
+      return badRequest("Invalid project reference or function slug");
+    }
 
     try {
       const requestedVersion = c.request.headers.get("x-supacloud-function-version") || null;
-      const { functionPath, projectRoot, moduleVersion } = await resolveFunctionPath(
+      const rawActivationId = c.request.headers.get("x-supacloud-activation-id");
+      const activationId = rawActivationId === null ? null : activationIdHeader(c.request);
+      if (rawActivationId !== null && activationId === null) {
+        return badRequest("Invalid Function activation identity");
+      }
+      const fenceKey = activationFenceKey(c.params.ref, c.params.slug);
+      const activeLease = activeActivationLease();
+      if (activeLease
+        && (activeLease.key !== fenceKey
+          || activeLease.fence.candidate.authority.activation_id !== activationId)) {
+        throw new Error("A foreign Function activation lease is active");
+      }
+      const activationFence = activationId ? activeLease?.fence : undefined;
+      if (activationId
+        && activationFence?.candidate.authority.activation_id !== activationId) {
+        throw new Error("Function activation is not fenced by the requested candidate");
+      }
+      const activation = await preheatActivationSnapshot(
         c.params.ref,
         c.params.slug,
         requestedVersion,
+        activationId,
       );
-      const versionSuffix = requestedVersion ? `_v${requestedVersion}` : "";
+      const { functionPath, projectRoot, moduleVersion } = activation;
+      const versionSuffix = activation.activeVersion ? `_v${activation.activeVersion}` : "";
       const functionId = `${c.params.ref}_${c.params.slug}${versionSuffix}`;
-      const tenantEnv = await loadTenantEnv(c.params.ref);
+      const tenantEnvLoad = await loadTenantRuntimeEnv(c.params.ref);
+      if (!isTenantEnvLoadCurrent(c.params.ref, tenantEnvLoad)) {
+        throw new Error("Runtime environment changed during preheat");
+      }
+      const tenantEnv = tenantEnvLoad.env;
+      const foregroundModuleEnvProof = tenantEnvModuleProof(
+        c.params.ref,
+        tenantEnv,
+        tenantEnvLoad,
+        "foreground",
+      );
+      const backgroundModuleEnvProof = tenantEnvModuleProof(
+        c.params.ref,
+        tenantEnv,
+        tenantEnvLoad,
+        "background",
+      );
+      const foregroundAttestation = runtimePreheatIdentity({
+        projectRef: c.params.ref,
+        functionSlug: c.params.slug,
+        requestedVersion,
+        activation,
+        tenantEnvLoad,
+        executionProfile: "foreground",
+        moduleEnvProof: foregroundModuleEnvProof,
+      });
+      const backgroundAttestation = runtimePreheatIdentity({
+        projectRef: c.params.ref,
+        functionSlug: c.params.slug,
+        requestedVersion,
+        activation,
+        tenantEnvLoad,
+        executionProfile: "background",
+        moduleEnvProof: backgroundModuleEnvProof,
+      });
       const [foreground, background] = requestedVersion
         ? await Promise.all([
             pool.preheatVersionedIdleWorkers({
@@ -875,6 +1502,8 @@ const app = new Elysia()
               env: tenantEnv,
               projectRef: c.params.ref,
               moduleVersion,
+              envProof: foregroundModuleEnvProof || undefined,
+              attestation: foregroundAttestation,
             }),
             backgroundPool.preheatVersionedIdleWorkers({
               functionId,
@@ -883,6 +1512,8 @@ const app = new Elysia()
               env: tenantEnv,
               projectRef: c.params.ref,
               moduleVersion,
+              envProof: backgroundModuleEnvProof || undefined,
+              attestation: backgroundAttestation,
               maxWorkers: resolveBackgroundPreheatWorkers(),
             }),
           ])
@@ -890,17 +1521,36 @@ const app = new Elysia()
             pool.preheatIdleWorkers(functionId, functionPath, projectRoot, tenantEnv, {
               projectRef: c.params.ref,
               moduleVersion,
+              envProof: foregroundModuleEnvProof || undefined,
+              attestation: foregroundAttestation,
             }),
             backgroundPool.preheatIdleWorkers(functionId, functionPath, projectRoot, tenantEnv, {
               projectRef: c.params.ref,
               moduleVersion,
+              envProof: backgroundModuleEnvProof || undefined,
+              attestation: backgroundAttestation,
               maxWorkers: resolveBackgroundPreheatWorkers(),
             }),
           ]);
+      const complete = hasCompletePreheatAttestation(foreground)
+        && hasCompletePreheatAttestation(background)
+        && isTenantEnvLoadCurrent(c.params.ref, tenantEnvLoad)
+        && (!activationId || activationFences.get(fenceKey) === activationFence);
+      const generationProof = activationPreheatProof(foreground, background);
+      const generationsCurrent = generationProof !== null
+        && generationProof.foregroundGeneration === pool.generation
+        && generationProof.backgroundGeneration === backgroundPool.generation;
+      if (complete && activationFence && generationsCurrent) {
+        activationFence.preheated = generationProof;
+      }
+      const attestation = complete ? foreground.attestation : null;
       return {
         preheated: functionId,
         version: requestedVersion,
-        success: foreground.succeeded > 0 || background.succeeded > 0,
+        success: complete
+          && tenantEnvLoad.loadState === "loaded"
+          && (!activationFence || generationsCurrent),
+        attestation,
         foreground,
         background,
       };
@@ -912,6 +1562,8 @@ const app = new Elysia()
   .post("/internal/background/:ref/:functionName/*", async (c) => {
     const authError = requireInternalAuth(c.request);
     if (authError) return authError;
+    const fencedResponse = activationFenceResponse(c.params.ref, c.params.functionName);
+    if (fencedResponse) return fencedResponse;
 
     const setHeaders = c.set.headers as Record<string, string>;
     setHeaders["x-sb-execution-id"] = crypto.randomUUID();
@@ -923,10 +1575,8 @@ const app = new Elysia()
       message: string;
     }> = [];
 
-    const backgroundDispatch = buildBackgroundForwardDispatch(
-      c.request,
-      await loadTenantEnv(c.params.ref),
-    );
+    const tenantEnvLoad = await loadTenantRuntimeEnv(c.params.ref);
+    const backgroundDispatch = buildBackgroundForwardDispatch(c.request, tenantEnvLoad.env);
     const requestedVersion = backgroundDispatch.forwardedRequest.headers.get("x-supacloud-function-version");
     let response: Response;
     try {
@@ -936,6 +1586,11 @@ const app = new Elysia()
         requestedVersion,
         resolveTrustedBackgroundFunctionVersionBinding,
       );
+      const activationChangedResponse = activationFenceResponse(
+        c.params.ref,
+        c.params.functionName,
+      );
+      if (activationChangedResponse) return activationChangedResponse;
       response = await dispatchFunction(
         {
           projectRef: c.params.ref,
@@ -946,8 +1601,8 @@ const app = new Elysia()
         },
         {
           background: true,
-          backgroundInternalToken: backgroundDispatch.backgroundInternalToken,
           tenantEnv: backgroundDispatch.tenantEnv,
+          tenantEnvLoad,
           cancelKey: c.request.headers.get("x-supacloud-task-id") || undefined,
           onLog: (entry) => {
             logs.push(entry);
@@ -978,6 +1633,8 @@ const app = new Elysia()
   .post("/internal/background/:ref/:functionName", async (c) => {
     const authError = requireInternalAuth(c.request);
     if (authError) return authError;
+    const fencedResponse = activationFenceResponse(c.params.ref, c.params.functionName);
+    if (fencedResponse) return fencedResponse;
 
     const setHeaders = c.set.headers as Record<string, string>;
     setHeaders["x-sb-execution-id"] = crypto.randomUUID();
@@ -989,10 +1646,8 @@ const app = new Elysia()
       message: string;
     }> = [];
 
-    const backgroundDispatch = buildBackgroundForwardDispatch(
-      c.request,
-      await loadTenantEnv(c.params.ref),
-    );
+    const tenantEnvLoad = await loadTenantRuntimeEnv(c.params.ref);
+    const backgroundDispatch = buildBackgroundForwardDispatch(c.request, tenantEnvLoad.env);
     const requestedVersion = backgroundDispatch.forwardedRequest.headers.get("x-supacloud-function-version");
     let response: Response;
     try {
@@ -1002,6 +1657,11 @@ const app = new Elysia()
         requestedVersion,
         resolveTrustedBackgroundFunctionVersionBinding,
       );
+      const activationChangedResponse = activationFenceResponse(
+        c.params.ref,
+        c.params.functionName,
+      );
+      if (activationChangedResponse) return activationChangedResponse;
       response = await dispatchFunction(
         {
           projectRef: c.params.ref,
@@ -1012,8 +1672,8 @@ const app = new Elysia()
         },
         {
           background: true,
-          backgroundInternalToken: backgroundDispatch.backgroundInternalToken,
           tenantEnv: backgroundDispatch.tenantEnv,
+          tenantEnvLoad,
           cancelKey: c.request.headers.get("x-supacloud-task-id") || undefined,
           onLog: (entry) => {
             logs.push(entry);

@@ -7,6 +7,12 @@ import type { EdgeFetchTlsPolicy } from "./fetch-tls-policy";
 import type { PgredisRuntimeBindingConfig } from "./internal-bindings";
 import { EMBEDDED_WORKER_HASH, EMBEDDED_WORKER_SOURCE } from "./generated/embedded-worker";
 import { assertCanonicalPositiveFunctionVersion } from "./function-version";
+import {
+  isEdgeRuntimePreheatAttestation,
+  preheatAttestationMatches,
+  type EdgeRuntimePreheatAttestation,
+  type EdgeRuntimePreheatIdentity,
+} from "./preheat-attestation";
 
 interface DispatchOptions {
   functionId: string;
@@ -15,12 +21,15 @@ interface DispatchOptions {
   projectRef?: string;
   functionVersion?: string | null;
   moduleVersion?: string;
+  envProof?: string;
+  artifactSha256?: string;
   env: Record<string, string>;
   internalBindings?: Omit<PgredisRuntimeBindingConfig, "signal">;
   request: Request;
   cancelKey?: string;
   signal?: AbortSignal;
   envLoadMs?: number;
+  onExecutionStarted?: () => void;
   onLog?: (entry: {
     timestamp: string;
     stream: "stdout" | "stderr";
@@ -67,6 +76,16 @@ function cancelledResponse(): Response {
   });
 }
 
+function invalidatedBeforeExecutionResponse(): Response {
+  return new Response(JSON.stringify({
+    error: "Runtime environment changed before execution",
+    code: "RUNTIME_ENV_INVALIDATED",
+  }), {
+    status: 503,
+    headers: { "Content-Type": "application/json", "Retry-After": "1" },
+  });
+}
+
 function withRuntimeFunctionVersion(
   response: Response,
   version: string | null | undefined,
@@ -89,9 +108,11 @@ type WorkerControlMessage =
   | { type: "invalidate_project"; projectRef: string };
 
 type WorkerPoolControlResult = {
+  generation: number;
   attempted: number;
   succeeded: number;
   invalidated: number;
+  cancelledQueued: number;
 };
 
 type WorkerControlAck = {
@@ -103,6 +124,8 @@ type WorkerControlAck = {
 type PreheatOptions = {
   projectRef?: string;
   moduleVersion?: string;
+  envProof?: string;
+  attestation?: EdgeRuntimePreheatIdentity;
   maxWorkers?: number;
 };
 
@@ -114,6 +137,17 @@ type BulkPreheatRequest = {
   options: PreheatOptions;
 };
 
+type WorkerPreheatRequest = BulkPreheatRequest & { worker: Worker };
+
+type WorkerPreheatMessage = {
+  type?: string;
+  functionId?: string;
+  moduleCacheHit?: boolean;
+  moduleCacheSize?: number;
+  attestation?: unknown;
+  error?: string;
+};
+
 export type VersionedPreheatRequest = {
   functionId: string;
   functionPath: string;
@@ -121,6 +155,8 @@ export type VersionedPreheatRequest = {
   env: Record<string, string>;
   projectRef?: string;
   moduleVersion: string;
+  envProof?: string;
+  attestation?: EdgeRuntimePreheatIdentity;
   maxWorkers?: number;
 };
 
@@ -128,6 +164,7 @@ type WorkerPreheatResult = {
   success: boolean;
   cacheHit: boolean | null;
   moduleCacheSize: number;
+  attestation: EdgeRuntimePreheatAttestation | null;
   error?: string;
 };
 
@@ -137,6 +174,7 @@ export type WorkerPoolPreheatResult = {
   cacheHits: number;
   cacheMisses: number;
   durationMs: number;
+  attestation: EdgeRuntimePreheatAttestation | null;
   error?: string;
 };
 
@@ -184,6 +222,15 @@ type RetiredWorker = {
 };
 
 type GenerationRotationDisposition = "idle-retired" | "busy-tainted" | "already-tainted";
+
+function acceptedPreheatAttestation(
+  candidate: unknown,
+  expected: EdgeRuntimePreheatIdentity | undefined,
+): EdgeRuntimePreheatAttestation | null | false {
+  if (expected === undefined) return candidate === undefined ? null : false;
+  if (!isEdgeRuntimePreheatAttestation(candidate)) return false;
+  return preheatAttestationMatches(candidate, expected) ? candidate : false;
+}
 
 function extractProjectRef(functionId: string): string | null {
   const idx = functionId.indexOf("_");
@@ -400,6 +447,20 @@ export class WorkerPool {
     return entry;
   }
 
+  private invalidateQueuedProject(projectRef: string): number {
+    const projectQueue = this.queuedDispatches.get(projectRef);
+    if (!projectQueue) return 0;
+    this.queuedDispatches.delete(projectRef);
+    this.queuedProjects = this.queuedProjects.filter(
+      (queuedProject) => queuedProject !== projectRef,
+    );
+    this.queuedCount -= projectQueue.length;
+    for (const entry of projectQueue) {
+      entry.resolve(invalidatedBeforeExecutionResponse());
+    }
+    return projectQueue.length;
+  }
+
   private async execute(
     worker: Worker,
     opts: ScheduledDispatch,
@@ -579,6 +640,10 @@ export class WorkerPool {
       moduleCacheHit?: boolean;
       moduleCacheSize?: number;
     }) => {
+      if (msg.type === "execution_started") {
+        opts.onExecutionStarted?.();
+        return;
+      }
       if (msg.type === "log" && opts.onLog && msg.timestamp && msg.stream && msg.level && msg.message) {
         opts.onLog({
           timestamp: msg.timestamp,
@@ -759,6 +824,8 @@ export class WorkerPool {
         projectRoot: opts.projectRoot,
         projectRef: opts.projectRef,
         moduleVersion: opts.moduleVersion,
+        envProof: opts.envProof,
+        artifactSha256: opts.artifactSha256,
         env: opts.env,
         internalBindings: opts.internalBindings,
         tlsPolicy,
@@ -1007,9 +1074,11 @@ export class WorkerPool {
     }
     this.totalModuleCacheInvalidated += invalidated;
     return {
+      generation: this.workerGeneration,
       attempted: workers.length,
       succeeded: results.filter((item) => item.result.acked).length,
       invalidated,
+      cancelledQueued: 0,
     };
   }
 
@@ -1018,9 +1087,11 @@ export class WorkerPool {
     return this.invalidateWorkers({ type: "invalidate_module", functionId });
   }
 
-  invalidateProject(projectRef: string): Promise<WorkerPoolControlResult> {
+  async invalidateProject(projectRef: string): Promise<WorkerPoolControlResult> {
     console.log(`[Pool] Invalidating project modules: ${projectRef}`);
-    return this.invalidateWorkers({ type: "invalidate_project", projectRef });
+    const cancelledQueued = this.invalidateQueuedProject(projectRef);
+    const result = await this.invalidateWorkers({ type: "invalidate_project", projectRef });
+    return { ...result, cancelledQueued };
   }
 
   private rotateWorkerForGeneration(worker: Worker): GenerationRotationDisposition {
@@ -1055,84 +1126,111 @@ export class WorkerPool {
     };
   }
 
-  private async preheatWorker(
-    worker: Worker,
-    functionId: string,
-    functionPath: string,
-    projectRoot: string,
-    env: Record<string, string>,
-    options: PreheatOptions = {},
+  private failedPreheat(request: WorkerPreheatRequest, error: string): WorkerPreheatResult {
+    this.retireWorker(request.worker);
+    return {
+      success: false,
+      cacheHit: null,
+      moduleCacheSize: this.lastModuleCacheEntries,
+      attestation: null,
+      error,
+    };
+  }
+
+  private completedPreheat(
+    request: WorkerPreheatRequest,
+    message: WorkerPreheatMessage,
+  ): WorkerPreheatResult {
+    const attestation = acceptedPreheatAttestation(
+      message.attestation,
+      request.options.attestation,
+    );
+    if (attestation === false) {
+      return this.failedPreheat(request, "Worker preheat attestation mismatch");
+    }
+    this.recordModuleCacheStats(message);
+    return {
+      success: true,
+      cacheHit: typeof message.moduleCacheHit === "boolean" ? message.moduleCacheHit : null,
+      moduleCacheSize: typeof message.moduleCacheSize === "number"
+        ? message.moduleCacheSize
+        : this.lastModuleCacheEntries,
+      attestation,
+    };
+  }
+
+  private preheatMessageResult(
+    request: WorkerPreheatRequest,
+    message: WorkerPreheatMessage,
+  ): WorkerPreheatResult | null {
+    if (message.functionId !== request.functionId) return null;
+    if (message.type === "preheat_done") return this.completedPreheat(request, message);
+    if (message.type !== "preheat_error") return null;
+    return this.failedPreheat(
+      request,
+      typeof message.error === "string" ? message.error : "Worker preheat failed",
+    );
+  }
+
+  private postPreheatMessage(
+    request: WorkerPreheatRequest,
+    tlsPolicy: EdgeFetchTlsPolicy,
+  ): void {
+    request.worker.postMessage({
+      type: "preheat",
+      functionId: request.functionId,
+      functionPath: request.functionPath,
+      projectRoot: request.projectRoot,
+      projectRef: request.options.projectRef ?? extractProjectRef(request.functionId),
+      moduleVersion: request.options.moduleVersion,
+      envProof: request.options.envProof,
+      artifactSha256: request.options.attestation?.artifact_sha256,
+      attestation: request.options.attestation,
+      env: request.env,
+      tlsPolicy,
+    });
+  }
+
+  private waitForWorkerPreheat(
+    request: WorkerPreheatRequest,
+    tlsPolicy: EdgeFetchTlsPolicy,
   ): Promise<WorkerPreheatResult> {
-    const tlsPolicy = await this.resolveTlsPolicy(env);
-    const projectRef = options.projectRef ?? extractProjectRef(functionId);
     return new Promise((resolve) => {
-      const timeout = setTimeout(() => {
-        worker.removeListener("message", onMsg);
-        this.retireWorker(worker);
-        resolve({
-          success: false,
-          cacheHit: null,
-          moduleCacheSize: this.lastModuleCacheEntries,
-          error: "Worker preheat timed out",
-        });
-      }, this.config.preheatTimeoutMs ?? DEFAULT_PREHEAT_TIMEOUT_MS);
-
-      const onMsg = (msg: {
-        type?: string;
-        functionId?: string;
-        moduleCacheHit?: boolean;
-        moduleCacheSize?: number;
-        error?: string;
-      }) => {
-        if (msg.type === "preheat_done" && msg.functionId === functionId) {
-          clearTimeout(timeout);
-          worker.removeListener("message", onMsg);
-          this.recordModuleCacheStats(msg);
-          resolve({
-            success: true,
-            cacheHit: typeof msg.moduleCacheHit === "boolean" ? msg.moduleCacheHit : null,
-            moduleCacheSize: typeof msg.moduleCacheSize === "number" ? msg.moduleCacheSize : this.lastModuleCacheEntries,
-          });
-        } else if (
-          msg.type === "preheat_error" &&
-          msg.functionId === functionId
-        ) {
-          clearTimeout(timeout);
-          worker.removeListener("message", onMsg);
-          resolve({
-            success: false,
-            cacheHit: null,
-            moduleCacheSize: this.lastModuleCacheEntries,
-            error: typeof msg.error === "string" ? msg.error : "Worker preheat failed",
-          });
-        }
-      };
-
-      worker.on("message", onMsg);
-      try {
-        worker.postMessage({
-          type: "preheat",
-          functionId,
-          functionPath,
-          projectRoot,
-          projectRef,
-          moduleVersion: options.moduleVersion,
-          env,
-          tlsPolicy,
-        });
-      } catch (error) {
+      const finish = (preheat: WorkerPreheatResult) => {
         clearTimeout(timeout);
-        worker.removeListener("message", onMsg);
+        request.worker.removeListener("message", onMessage);
+        resolve(preheat);
+      };
+      const onMessage = (message: WorkerPreheatMessage) => {
+        const preheat = this.preheatMessageResult(request, message);
+        if (preheat) finish(preheat);
+      };
+      const timeout = setTimeout(() => {
+        finish(this.failedPreheat(request, "Worker preheat timed out"));
+      }, this.config.preheatTimeoutMs ?? DEFAULT_PREHEAT_TIMEOUT_MS);
+      request.worker.on("message", onMessage);
+      try {
+        this.postPreheatMessage(request, tlsPolicy);
+      } catch (error) {
         console.warn("[Pool] Failed to dispatch worker preheat", error);
-        this.retireWorker(worker);
-        resolve({
-          success: false,
-          cacheHit: null,
-          moduleCacheSize: this.lastModuleCacheEntries,
-          error: error instanceof Error ? error.message : String(error),
-        });
+        finish(this.failedPreheat(
+          request,
+          error instanceof Error ? error.message : String(error),
+        ));
       }
     });
+  }
+
+  private async preheatWorker(request: WorkerPreheatRequest): Promise<WorkerPreheatResult> {
+    try {
+      const tlsPolicy = await this.resolveTlsPolicy(request.env);
+      return this.waitForWorkerPreheat(request, tlsPolicy);
+    } catch (error) {
+      return this.failedPreheat(
+        request,
+        error instanceof Error ? error.message : String(error),
+      );
+    }
   }
 
   preheat(
@@ -1147,7 +1245,7 @@ export class WorkerPool {
       return Promise.resolve(false);
     }
 
-    return this.preheatWorker(worker, functionId, functionPath, projectRoot, env, options)
+    return this.preheatWorker({ worker, functionId, functionPath, projectRoot, env, options })
       .then((result) => result.success)
       .finally(() => {
         if (!this.draining && this.activeWorkers.has(worker)) {
@@ -1174,6 +1272,8 @@ export class WorkerPool {
       options: {
         projectRef: request.projectRef,
         moduleVersion: request.moduleVersion,
+        envProof: request.envProof,
+        attestation: request.attestation,
         maxWorkers: request.maxWorkers,
       },
     });
@@ -1223,7 +1323,14 @@ export class WorkerPool {
     const start = performance.now();
     const workers = this.takeIdleWorkers(request.options.maxWorkers);
     if (workers.length === 0) {
-      return { attempted: 0, succeeded: 0, cacheHits: 0, cacheMisses: 0, durationMs: 0 };
+      return {
+        attempted: 0,
+        succeeded: 0,
+        cacheHits: 0,
+        cacheMisses: 0,
+        durationMs: 0,
+        attestation: null,
+      };
     }
 
     try {
@@ -1238,14 +1345,7 @@ export class WorkerPool {
     request: BulkPreheatRequest,
     workers: Worker[],
   ): Promise<WorkerPreheatResult[]> {
-    return Promise.all(workers.map((worker) => this.preheatWorker(
-      worker,
-      request.functionId,
-      request.functionPath,
-      request.projectRoot,
-      request.env,
-      request.options,
-    )));
+    return Promise.all(workers.map((worker) => this.preheatWorker({ ...request, worker })));
   }
 
   private takeIdleWorkers(maxWorkers?: number): Worker[] {
@@ -1261,6 +1361,8 @@ export class WorkerPool {
   ): WorkerPoolPreheatResult {
     const durationMs = Math.round(performance.now() - start);
     const succeeded = results.filter((result) => result.success).length;
+    const allWorkersAttested = results.length > 0
+      && results.every((result) => result.success && result.attestation !== null);
     this.totalPreheatAttempts += results.length;
     this.totalPreheatSucceeded += succeeded;
     this.totalPreheatMs += durationMs;
@@ -1270,6 +1372,7 @@ export class WorkerPool {
       cacheHits: results.filter((result) => result.cacheHit === true).length,
       cacheMisses: results.filter((result) => result.cacheHit === false).length,
       durationMs,
+      attestation: allWorkersAttested ? results[0]!.attestation : null,
       error: results.find((result) => !result.success && result.error)?.error,
     };
   }
@@ -1366,6 +1469,10 @@ export class WorkerPool {
 
   get activeCount(): number {
     return this.inFlight.size;
+  }
+
+  get generation(): number {
+    return this.workerGeneration;
   }
 
   async drain(): Promise<void> {

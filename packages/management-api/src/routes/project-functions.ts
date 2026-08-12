@@ -8,10 +8,14 @@ import {
   EDGE_FUNCTION_SHA256_HEX_PATTERN,
   EdgeFunctionActiveVersionConflictError,
   isCanonicalEdgeFunctionSha256,
+  type EdgeFunctionActivationResult,
+  type EdgeFunctionActivationId,
   type EdgeFunctionActiveVersion,
+  type EdgeFunctionConfigSnapshot,
   type EdgeFunctionDeploymentConfig,
   type EdgeFunctionDeployResult,
 } from "../services/edge-function.service";
+import { EDGE_FUNCTION_ACTIVATION_ID_PATTERN } from "../services/edge-function-activation-manifest";
 
 const CANONICAL_FUNCTION_VERSION_PATTERN = /^(?:0|[1-9][0-9]*)$/;
 const POSITIVE_FUNCTION_VERSION_PATTERN = /^[1-9][0-9]*$/;
@@ -20,6 +24,14 @@ const functionVersionSchema = t.String({ pattern: CANONICAL_FUNCTION_VERSION_PAT
 const expectedActiveVersionSchema = t.Union([
   t.Literal("absent"),
   t.String({ pattern: CANONICAL_FUNCTION_VERSION_PATTERN.source, maxLength: 16 }),
+]);
+const expectedActivationIdSchema = t.Union([
+  t.Literal("legacy"),
+  t.String({
+    pattern: EDGE_FUNCTION_ACTIVATION_ID_PATTERN.source,
+    minLength: 36,
+    maxLength: 36,
+  }),
 ]);
 
 async function requireFunctionManagementAuth(request: Request, ref: string) {
@@ -58,10 +70,27 @@ function deploymentConfig(
   };
 }
 
+function functionConfigProjection(config: EdgeFunctionConfigSnapshot) {
+  return {
+    verify_jwt: config.verify_jwt,
+    background_routes: config.background_routes ?? [],
+    ...(config.version === undefined ? {} : { version: config.version }),
+    ...(config.import_map === undefined ? {} : { import_map: config.import_map }),
+    ...(config.entrypoint === undefined ? {} : { entrypoint: config.entrypoint }),
+  };
+}
+
 function normalizedBackgroundRoutes(routes: unknown): string[] | undefined {
   return Array.isArray(routes)
     ? routes.filter((route): route is string => typeof route === "string" && route.trim().length > 0)
     : undefined;
+}
+
+function functionDeploymentSource(input: { body?: string; code?: string }): string | null {
+  const sources = [input.body, input.code].filter(
+    (source): source is string => typeof source === "string" && source.length > 0,
+  );
+  return sources.length === 1 ? sources[0] : null;
 }
 
 function expectedActiveVersion(value: unknown): EdgeFunctionActiveVersion | null {
@@ -70,6 +99,13 @@ function expectedActiveVersion(value: unknown): EdgeFunctionActiveVersion | null
     return null;
   }
   return Number.isSafeInteger(Number(value)) ? value : null;
+}
+
+function expectedActivationId(value: unknown): EdgeFunctionActivationId | null {
+  if (value === "legacy") return value;
+  return typeof value === "string" && EDGE_FUNCTION_ACTIVATION_ID_PATTERN.test(value)
+    ? value
+    : null;
 }
 
 function functionVersion(value: unknown): string | null {
@@ -91,6 +127,13 @@ async function functionResponseVersion(
 function invalidExpectedActiveVersion() {
   return status(400, {
     message: "expected_active_version must be a canonical non-negative safe integer or 'absent'",
+    code: "VALIDATION_ERROR",
+  });
+}
+
+function invalidExpectedActivationId() {
+  return status(400, {
+    message: "expected_activation_id must be a canonical UUID or 'legacy'",
     code: "VALIDATION_ERROR",
   });
 }
@@ -135,6 +178,8 @@ function deploymentFailure(deployment: EdgeFunctionDeployResult) {
       code: deployment.error_code,
       expected_active_version: deployment.expected_active_version,
       active_version: deployment.active_version,
+      expected_activation_id: deployment.expected_activation_id,
+      activation_id: deployment.activation_id,
     });
   }
   return status(500, {
@@ -151,6 +196,8 @@ function activationConflict(error: unknown) {
     code: error.code,
     expected_active_version: error.expectedActiveVersion,
     active_version: error.activeVersion,
+    expected_activation_id: error.expectedActivationId,
+    activation_id: error.activationId,
   });
 }
 
@@ -160,8 +207,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, request }) => {
       const authError = await requireFunctionManagementAuth(request, params.ref);
       if (authError) return authError;
-      const functions = await projectService.listFunctions(params.ref);
-      return functions;
+      return projectService.listFunctions(params.ref);
     },
     {
       params: t.Object({ ref: t.String() }),
@@ -192,6 +238,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         background_routes?: string[];
         name?: string;
         expected_active_version?: string;
+        expected_activation_id?: string;
       } = {};
       if (body.metadata) {
         try {
@@ -210,6 +257,8 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
 
       const expectedVersion = expectedActiveVersion(metadata.expected_active_version);
       if (expectedVersion === null) return invalidExpectedActiveVersion();
+      const expectedId = expectedActivationId(metadata.expected_activation_id);
+      if (expectedId === null) return invalidExpectedActivationId();
 
       // Collect all uploaded files (the `file` field can be single or multiple)
       const rawFiles = body.file;
@@ -245,6 +294,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         ref: params.ref,
         slug,
         expectedActiveVersion: expectedVersion,
+        expectedActivationId: expectedId,
         files: fileMap,
         entrypoint,
         config: deploymentConfig(metadata.verify_jwt, backgroundRoutes),
@@ -269,6 +319,8 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         version,
         previous_active_version: deployment.previous_active_version,
         active_version: deployment.active_version,
+        expected_activation_id: expectedId,
+        activation_id: deployment.activation_id ?? funcConfig.activation_id,
         status: version === null ? "INACTIVE" : "ACTIVE",
         verify_jwt: funcConfig.verify_jwt,
         background_routes: funcConfig.background_routes || [],
@@ -313,10 +365,15 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         queryVerifyJwt === undefined ? undefined : queryVerifyJwt !== "false"
       );
       const backgroundRoutes = normalizedBackgroundRoutes(body?.background_routes);
+      const expectedId = expectedActivationId(
+        body?.expected_activation_id
+          ?? (query as Record<string, string>).expected_activation_id,
+      );
 
       if (!slug) {
         return status(400, { message: "slug is required", code: "400" });
       }
+      if (expectedId === null) return invalidExpectedActivationId();
       let deployResult:
         | Awaited<ReturnType<typeof projectService.deployFunctionRelease>>
         | null = null;
@@ -333,6 +390,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
           ref: params.ref,
           slug,
           expectedActiveVersion: expectedVersion,
+          expectedActivationId: expectedId,
           code,
           config: deploymentConfig(verifyJwt, backgroundRoutes),
         });
@@ -343,11 +401,21 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
       const { edgeFunctionService } =
         await import("../services/edge-function.service");
       const configPatch = deploymentConfig(verifyJwt, backgroundRoutes);
-      const funcConfig = deployResult?.config ?? (
-        Object.keys(configPatch).length > 0
-          ? await edgeFunctionService.updateConfig(params.ref, slug, configPatch)
-          : await edgeFunctionService.getConfig(params.ref, slug)
-      );
+      let funcConfig = deployResult?.config;
+      if (!funcConfig) {
+        try {
+          funcConfig = await edgeFunctionService.updateConfig(
+            params.ref,
+            slug,
+            configPatch,
+            expectedId,
+          );
+        } catch (error) {
+          const conflict = activationConflict(error);
+          if (conflict) return conflict;
+          throw error;
+        }
+      }
       const version = await functionResponseVersion(
         params.ref,
         slug,
@@ -363,6 +431,8 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         version,
         previous_active_version: deployResult?.previous_active_version,
         active_version: deployResult?.active_version,
+        expected_activation_id: expectedId,
+        activation_id: deployResult?.activation_id ?? funcConfig.activation_id,
         verify_jwt: funcConfig.verify_jwt,
         background_routes: funcConfig.background_routes || [],
         status: version === null ? "INACTIVE" : "ACTIVE",
@@ -389,6 +459,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
           entrypoint_path: t.Optional(t.String()),
           import_map_path: t.Optional(t.String()),
           background_routes: t.Optional(t.Array(t.String())),
+          expected_activation_id: t.Optional(expectedActivationIdSchema),
         },
         { additionalProperties: true },
       ),
@@ -401,6 +472,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
           verify_jwt: t.Optional(t.Boolean()),
           background_routes: t.Optional(t.Array(t.String())),
           expected_active_version: t.Optional(expectedActiveVersionSchema),
+          expected_activation_id: t.Optional(expectedActivationIdSchema),
         }),
       ),
       detail: { tags: ["frontend"], summary: "Create or deploy an edge function" },
@@ -421,19 +493,29 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         verify_jwt?: boolean;
         background_routes?: string[];
         expected_active_version: EdgeFunctionActiveVersion;
+        expected_activation_id: EdgeFunctionActivationId;
       }>;
       if (functions.some((fn) => expectedActiveVersion(fn.expected_active_version) === null)) {
         return invalidExpectedActiveVersion();
       }
+      if (functions.some((fn) => expectedActivationId(fn.expected_activation_id) === null)) {
+        return invalidExpectedActivationId();
+      }
+      if (functions.some((fn) => functionDeploymentSource(fn) === null)) {
+        return status(400, {
+          message: "Each function must provide exactly one non-empty body or code field",
+          code: "400",
+        });
+      }
       const results = [];
       for (const fn of functions) {
-        const code = fn.body || fn.code || "";
-        if (!fn.slug || !code) continue;
+        const code = functionDeploymentSource(fn)!;
 
         const deployResult = await projectService.deployFunctionRelease({
           ref: params.ref,
           slug: fn.slug,
           expectedActiveVersion: expectedActiveVersion(fn.expected_active_version)!,
+          expectedActivationId: expectedActivationId(fn.expected_activation_id)!,
           code,
           config: deploymentConfig(
             fn.verify_jwt,
@@ -449,15 +531,21 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
           error_code: deployResult.error_code,
           previous_active_version: deployResult.previous_active_version,
           active_version: deployResult.active_version,
+          expected_active_version: deployResult.expected_active_version,
+          expected_activation_id: fn.expected_activation_id,
+          activation_id: deployResult.activation_id ?? deployResult.config?.activation_id,
           verify_jwt: deployResult.config?.verify_jwt,
           background_routes: deployResult.config?.background_routes || [],
           updated_at: now,
         });
       }
-      return results.some((deployment) => (
+      if (results.some((deployment) => (
         deployment.error_code === EDGE_FUNCTION_ACTIVE_VERSION_CONFLICT_CODE
-      ))
-        ? status(409, { functions: results })
+      ))) {
+        return status(409, { functions: results });
+      }
+      return results.some((deployment) => !deployment.success)
+        ? status(500, { functions: results })
         : results;
     },
     {
@@ -471,6 +559,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
           verify_jwt: t.Optional(t.Boolean()),
           background_routes: t.Optional(t.Array(t.String())),
           expected_active_version: expectedActiveVersionSchema,
+          expected_activation_id: expectedActivationIdSchema,
         }),
       ),
       detail: { tags: ["frontend"], summary: "Bulk upsert edge functions" },
@@ -505,6 +594,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         status: version === null ? "INACTIVE" : "ACTIVE",
         verify_jwt: funcConfig.verify_jwt,
         background_routes: funcConfig.background_routes || [],
+        activation_id: funcConfig.activation_id,
         entrypoint_path: `${params.slug}/index.ts`,
         import_map: false,
         import_map_path: null,
@@ -637,6 +727,8 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         await import("../services/edge-function.service");
       const expectedVersion = expectedActiveVersion(body.expected_active_version);
       if (expectedVersion === null) return invalidExpectedActiveVersion();
+      const expectedId = expectedActivationId(body.expected_activation_id);
+      if (expectedId === null) return invalidExpectedActivationId();
       const targetVersion = functionVersion(params.version);
       if (targetVersion === null) return invalidFunctionVersion();
       try {
@@ -645,6 +737,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
           params.slug,
           targetVersion,
           expectedVersion,
+          expectedId,
         );
         if (!activation) {
           return status(404, { message: "Function version not found", code: "404" });
@@ -655,6 +748,8 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
           slug: params.slug,
           previous_active_version: activation.previous_active_version,
           active_version: activation.active_version,
+          expected_activation_id: expectedId,
+          activation_id: activation.activation_id,
           version: targetVersion,
           config: activation.config,
         };
@@ -670,7 +765,10 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         slug: t.String(),
         version: functionVersionSchema,
       }),
-      body: t.Object({ expected_active_version: expectedActiveVersionSchema }),
+      body: t.Object({
+        expected_active_version: expectedActiveVersionSchema,
+        expected_activation_id: expectedActivationIdSchema,
+      }),
       detail: { tags: ["frontend"], summary: "Activate a function version" },
     },
   )
@@ -716,12 +814,15 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
       const code = body.code || body.body || "";
       const expectedVersion = expectedActiveVersion(body.expected_active_version);
       if (expectedVersion === null) return invalidExpectedActiveVersion();
+      const expectedId = expectedActivationId(body.expected_activation_id);
+      if (expectedId === null) return invalidExpectedActivationId();
       const codeDeploymentOptions = functionCodeDeploymentOptions(body);
       if (codeDeploymentOptions === null) return invalidPrebundledDeployment();
       const deployment = await projectService.deployFunctionRelease({
         ref: params.ref,
         slug: params.slug,
         expectedActiveVersion: expectedVersion,
+        expectedActivationId: expectedId,
         code,
         ...codeDeploymentOptions,
         config: deploymentConfig(
@@ -739,6 +840,8 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         version: deployment.version ?? null,
         previous_active_version: deployment.previous_active_version,
         active_version: deployment.active_version,
+        expected_activation_id: expectedId,
+        activation_id: deployment.activation_id ?? deployment.config?.activation_id,
         bundle_hash: deployment.bundle_hash ?? null,
         bundle_size_bytes: deployment.bundle_size_bytes ?? null,
         import_count: deployment.import_count ?? null,
@@ -764,6 +867,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         verify_jwt: t.Optional(t.Boolean()),
         background_routes: t.Optional(t.Array(t.String())),
         expected_active_version: expectedActiveVersionSchema,
+        expected_activation_id: expectedActivationIdSchema,
       }),
       detail: { tags: ["frontend"], summary: "Deploy function code by slug" },
     },
@@ -786,6 +890,8 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         body.verify_jwt,
         normalizedBackgroundRoutes(body.background_routes),
       );
+      const expectedId = expectedActivationId(body.expected_activation_id);
+      if (expectedId === null) return invalidExpectedActivationId();
       if (code) {
         const expectedVersion = expectedActiveVersion(body.expected_active_version);
         if (expectedVersion === null) {
@@ -798,6 +904,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
           ref: params.ref,
           slug: params.slug,
           expectedActiveVersion: expectedVersion,
+          expectedActivationId: expectedId,
           code,
           config: configPatch,
         });
@@ -805,11 +912,21 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         if (failure) return failure;
       }
 
-      const funcConfig = deployResult?.config ?? (
-        Object.keys(configPatch).length > 0
-          ? await edgeFunctionService.updateConfig(params.ref, params.slug, configPatch)
-          : await edgeFunctionService.getConfig(params.ref, params.slug)
-      );
+      let funcConfig = deployResult?.config;
+      if (!funcConfig) {
+        try {
+          funcConfig = await edgeFunctionService.updateConfig(
+            params.ref,
+            params.slug,
+            configPatch,
+            expectedId,
+          );
+        } catch (error) {
+          const conflict = activationConflict(error);
+          if (conflict) return conflict;
+          throw error;
+        }
+      }
       const version = await functionResponseVersion(
         params.ref,
         params.slug,
@@ -824,6 +941,8 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         version,
         previous_active_version: deployResult?.previous_active_version,
         active_version: deployResult?.active_version,
+        expected_activation_id: expectedId,
+        activation_id: deployResult?.activation_id ?? funcConfig.activation_id,
         status: version === null ? "INACTIVE" : "ACTIVE",
         verify_jwt: funcConfig.verify_jwt,
         background_routes: funcConfig.background_routes || [],
@@ -845,6 +964,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         verify_jwt: t.Optional(t.Boolean()),
         background_routes: t.Optional(t.Array(t.String())),
         expected_active_version: t.Optional(expectedActiveVersionSchema),
+        expected_activation_id: expectedActivationIdSchema,
       }),
       detail: { tags: ["frontend"], summary: "Update function code or config" },
     },
@@ -857,10 +977,13 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
       if (authError) return status(authError.status, authError.body);
       const expectedVersion = expectedActiveVersion(body.expected_active_version);
       if (expectedVersion === null) return invalidExpectedActiveVersion();
+      const expectedId = expectedActivationId(body.expected_activation_id);
+      if (expectedId === null) return invalidExpectedActivationId();
       const deployment = await projectService.deployFunctionRelease({
         ref: params.ref,
         slug: params.slug,
         expectedActiveVersion: expectedVersion,
+        expectedActivationId: expectedId,
         files: body.files,
         entrypoint: body.entrypoint ?? "index.ts",
         minify: body.minify ?? false,
@@ -880,6 +1003,8 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         version: deployment.version ?? null,
         previous_active_version: deployment.previous_active_version,
         active_version: deployment.active_version,
+        expected_activation_id: expectedId,
+        activation_id: deployment.activation_id ?? deployment.config?.activation_id,
         import_map: deployment.import_map ?? null,
         bundle_hash: deployment.bundle_hash ?? null,
         bundle_size_bytes: deployment.bundle_size_bytes ?? null,
@@ -900,6 +1025,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         verify_jwt: t.Optional(t.Boolean()),
         background_routes: t.Optional(t.Array(t.String())),
         expected_active_version: expectedActiveVersionSchema,
+        expected_activation_id: expectedActivationIdSchema,
       }),
       detail: { tags: ["frontend"], summary: "Deploy function bundle" },
     },
@@ -917,41 +1043,76 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
           code: "400",
         });
       }
-      const success = await projectService.deleteFunction(params.ref, slug);
-      if (!success) {
-        return status(500, {
-          message: "Failed to delete function",
-          code: "500",
-        });
+      const expectedId = expectedActivationId(body.expected_activation_id);
+      if (expectedId === null) return invalidExpectedActivationId();
+      const project = await projectService.getProject(params.ref);
+      if (!project) {
+        return status(500, { message: "Failed to delete function", code: "500" });
       }
-      return { success: true };
+      const { edgeFunctionService } = await import("../services/edge-function.service");
+      let removal: EdgeFunctionActivationResult;
+      try {
+        removal = await edgeFunctionService.remove(params.ref, slug, expectedId);
+      } catch (error) {
+        const conflict = activationConflict(error);
+        if (conflict) return conflict;
+        throw error;
+      }
+      return {
+        success: true,
+        project_ref: params.ref,
+        slug,
+        expected_activation_id: expectedId,
+        activation_id: removal.activation_id,
+        previous_active_version: removal.previous_active_version,
+        active_version: removal.active_version,
+        config: removal.config,
+      };
     },
     {
       params: t.Object({ ref: t.String() }),
-      body: t.Object({ slug: t.String() }),
+      body: t.Object({
+        slug: t.String(),
+        expected_activation_id: expectedActivationIdSchema,
+      }),
       detail: { tags: ["frontend"], summary: "Delete function by slug in body" },
     },
   )
 
   .delete(
     "/:ref/functions/:slug",
-    async ({ params, request }) => {
+    async ({ params, body, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
-      const success = await projectService.deleteFunction(
-        params.ref,
-        params.slug,
-      );
-      if (!success) {
-        return status(500, {
-          message: "Failed to delete function",
-          code: "500",
-        });
+      const expectedId = expectedActivationId(body.expected_activation_id);
+      if (expectedId === null) return invalidExpectedActivationId();
+      const project = await projectService.getProject(params.ref);
+      if (!project) {
+        return status(500, { message: "Failed to delete function", code: "500" });
       }
-      return { success: true };
+      const { edgeFunctionService } = await import("../services/edge-function.service");
+      let removal: EdgeFunctionActivationResult;
+      try {
+        removal = await edgeFunctionService.remove(params.ref, params.slug, expectedId);
+      } catch (error) {
+        const conflict = activationConflict(error);
+        if (conflict) return conflict;
+        throw error;
+      }
+      return {
+        success: true,
+        project_ref: params.ref,
+        slug: params.slug,
+        expected_activation_id: expectedId,
+        activation_id: removal.activation_id,
+        previous_active_version: removal.previous_active_version,
+        active_version: removal.active_version,
+        config: removal.config,
+      };
     },
     {
       params: t.Object({ ref: t.String(), slug: t.String() }),
+      body: t.Object({ expected_activation_id: expectedActivationIdSchema }),
       detail: { tags: ["frontend"], summary: "Delete an edge function" },
     },
   )
@@ -986,11 +1147,17 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
       if (authError) return authError;
       const { edgeFunctionService } =
         await import("../services/edge-function.service");
-      const config = await edgeFunctionService.getConfig(
+      const state = await edgeFunctionService.getState(
         params.ref,
         params.slug,
       );
-      return config;
+      return {
+        project_ref: params.ref,
+        slug: params.slug,
+        active_version: state.active_version,
+        ...functionConfigProjection(state.config),
+        activation_id: state.config.activation_id,
+      };
     },
     {
       params: t.Object({ ref: t.String(), slug: t.String() }),
@@ -1005,18 +1172,35 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
       if (authError) return status(authError.status, authError.body);
       const { edgeFunctionService } =
         await import("../services/edge-function.service");
-      const updated = await edgeFunctionService.updateConfig(
-        params.ref,
-        params.slug,
-        body,
-      );
-      return updated;
+      const expectedId = expectedActivationId(body.expected_activation_id);
+      if (expectedId === null) return invalidExpectedActivationId();
+      try {
+        const updated = await edgeFunctionService.updateConfig(
+          params.ref,
+          params.slug,
+          deploymentConfig(body.verify_jwt, body.background_routes),
+          expectedId,
+        );
+        return {
+          success: true,
+          project_ref: params.ref,
+          slug: params.slug,
+          expected_activation_id: expectedId,
+          ...functionConfigProjection(updated),
+          activation_id: updated.activation_id,
+        };
+      } catch (error) {
+        const conflict = activationConflict(error);
+        if (conflict) return conflict;
+        throw error;
+      }
     },
     {
       params: t.Object({ ref: t.String(), slug: t.String() }),
       body: t.Object({
         verify_jwt: t.Optional(t.Boolean()),
         background_routes: t.Optional(t.Array(t.String())),
+        expected_activation_id: expectedActivationIdSchema,
       }),
       detail: { tags: ["frontend"], summary: "Update function configuration" },
     },

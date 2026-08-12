@@ -136,6 +136,35 @@ function studioProcessInventory(): Array<Record<string, unknown>> {
     ];
 }
 
+function processRuntimeSnapshot(projectRef = "project-ref"): Record<string, unknown> {
+    const revision = `hmac-sha256:${"a".repeat(64)}`;
+    return {
+        schema: "supacloud.runtime-snapshot.v1",
+        project_ref: projectRef,
+        captured_at: "2026-08-11T00:00:00.000Z",
+        secrets: {
+            desired_revision: revision,
+            loaded_revision: revision,
+            load_state: "current",
+            load_source: "management_api",
+            matches_desired: true,
+            loaded_at: "2026-08-11T00:00:00.000Z",
+        },
+        postgrest: {
+            desired_revision: revision,
+            loaded_revision: revision,
+            attestation_state: "loaded",
+            matches_desired: true,
+            desired: "running",
+            actual: "running",
+            health: "healthy",
+            port: 3101,
+            unit: `supacloud-pgrst@${projectRef}`,
+            loaded_at: "2026-08-11T00:00:00.000Z",
+        },
+    };
+}
+
 function inventoryWithField(fieldName: string, fieldValue: unknown): Array<Record<string, unknown>> {
     const inventory = studioProcessInventory();
     inventory[0] = { ...inventory[0], [fieldName]: fieldValue };
@@ -760,6 +789,96 @@ describe("supacloud-admin process contract", () => {
         expect(execution.output).toContain("--service");
         expect(execution.output).toContain("--service_action");
         expect(execution.output).not.toContain("--token");
+    });
+
+    test("reads a bounded project runtime snapshot through the Management API", async () => {
+        let authorizationHeader = "";
+        let requestMethod = "";
+        let requestedPath = "";
+        const snapshot = processRuntimeSnapshot();
+        const apiServer = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch(request) {
+                authorizationHeader = request.headers.get("authorization") || "";
+                requestMethod = request.method;
+                requestedPath = new URL(request.url).pathname;
+                return Response.json(snapshot);
+            },
+        });
+        const fixtureToken = "runtime-snapshot-api-token";
+
+        try {
+            const execution = await runAdminCli([
+                "project", "runtime_snapshot", "--ref", "project-ref",
+            ], {
+                SUPACLOUD_API_URL: `http://127.0.0.1:${apiServer.port}`,
+                SUPACLOUD_API_TOKEN: fixtureToken,
+            });
+
+            expect(execution.exitCode).toBe(0);
+            expect(JSON.parse(execution.output)).toEqual(snapshot);
+            expect(requestMethod).toBe("GET");
+            expect(requestedPath).toBe("/v1/projects/project-ref/runtime-snapshot");
+            expect(authorizationHeader).toBe(`Bearer ${fixtureToken}`);
+            expect(execution.output).not.toContain(fixtureToken);
+        } finally {
+            apiServer.stop(true);
+        }
+    });
+
+    test("fails closed for every malformed project runtime snapshot response", async () => {
+        const secretMarker = "runtime-snapshot-private-marker";
+        const valid = processRuntimeSnapshot();
+        const secrets = valid.secrets as Record<string, unknown>;
+        const responseFactories: Array<() => Response> = [
+            () => new Response(new ReadableStream<Uint8Array>({
+                start(controller) {
+                    controller.enqueue(new TextEncoder().encode(
+                        JSON.stringify({ token: secretMarker, padding: "x".repeat(70_000) }),
+                    ));
+                    controller.close();
+                },
+            }), { headers: { "content-type": "application/json" } }),
+            () => new Response(
+                new Uint8Array([0x7b, 0x22, 0x78, 0x22, 0x3a, 0x22, 0xc3, 0x28, 0x22, 0x7d]),
+                { headers: { "content-type": "application/json" } },
+            ),
+            () => Response.json(secretMarker),
+            () => Response.json({ ...valid, token: secretMarker }),
+            () => Response.json({ ...valid, project_ref: "other-ref" }),
+            () => Response.json({ ...valid, schema: secretMarker }),
+            () => Response.json({
+                ...valid,
+                secrets: { ...secrets, load_state: secretMarker },
+            }),
+        ];
+        let responseIndex = 0;
+        const apiServer = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch() {
+                return responseFactories[responseIndex++]();
+            },
+        });
+
+        try {
+            for (const _responseFactory of responseFactories) {
+                const execution = await runAdminCli([
+                    "project", "runtime_snapshot", "--ref", "project-ref",
+                ], {
+                    SUPACLOUD_API_URL: `http://127.0.0.1:${apiServer.port}`,
+                    SUPACLOUD_API_TOKEN: "test-token",
+                });
+
+                expect(execution.exitCode).toBe(1);
+                expect(execution.output.trim()).toBe("❌ Project runtime snapshot response is invalid");
+                expect(execution.output).not.toContain(secretMarker);
+            }
+            expect(responseIndex).toBe(responseFactories.length);
+        } finally {
+            apiServer.stop(true);
+        }
     });
 
     test("returns non-zero when service control reports HTTP 200 with success false", async () => {

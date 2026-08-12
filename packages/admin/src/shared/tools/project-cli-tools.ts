@@ -23,6 +23,7 @@ import {
     projectListRead,
     type ProjectReadResult,
 } from "./project-read-projection";
+import { parseProjectRuntimeSnapshot } from "./project-runtime-snapshot";
 
 type ToolServer = {
     tool: (
@@ -50,6 +51,7 @@ const AUTH_SERVICE_HOST_SUFFIX = "-auth";
 const SAFE_PROJECT_REF = /^[a-z0-9-]{1,20}$/;
 const SAFE_AUTHORITY_PROJECT_REF = /^[A-Za-z0-9_-]{1,20}$/;
 const MAX_SERVICE_CONTROL_MESSAGE_LENGTH = 256;
+const MAX_RUNTIME_SNAPSHOT_BYTES = 64 * 1024;
 const RELEASE_CONTROL_RESPONSE_SCHEMA = "supacloud.cli.release-control.v1";
 const PROJECT_CREATE_OPERATION = "project.create";
 const PROJECT_ENVIRONMENTS = ["test", "production"] as const satisfies readonly ProjectEnvironment[];
@@ -419,6 +421,20 @@ function projectServicesResponse(
     return projectToolResponse(JSON.stringify({ project_ref: projectRef, services }, null, 2));
 }
 
+function projectRuntimeSnapshotResponse(
+    projectRef: string,
+    response: HttpResult<unknown>,
+): ProjectToolResponse {
+    if (response.responseError) {
+        return failedProjectServiceResponse("Project runtime snapshot response is invalid");
+    }
+    if (!response.ok) return failedProjectServiceHttpResponse(response);
+    const snapshot = parseProjectRuntimeSnapshot(response.data, projectRef);
+    return snapshot
+        ? projectToolResponse(JSON.stringify(snapshot, null, 2))
+        : failedProjectServiceResponse("Project runtime snapshot response is invalid");
+}
+
 function supportsProjectServiceAction(
     service: ProjectServiceName,
     action: ProjectServiceControlAction,
@@ -558,12 +574,12 @@ export function registerAdminProjectCliTools(
     const fileOperations = options.projectEnvFileOperations;
     server.tool(
         "project",
-        "Platform-level project lifecycle management. Actions: list, create, get, delete, pause, restore, restart, settings, update_settings, api_keys, health, logs, tasks, services, service_control",
+        "Platform-level project lifecycle management. Actions: list, create, get, delete, pause, restore, restart, settings, update_settings, api_keys, health, logs, tasks, services, runtime_snapshot, service_control",
         {
             action: withDescription(stringEnum([
                 "list", "create", "get", "delete", "pause", "restore",
                 "restart", "settings", "update_settings", "api_keys",
-                "health", "logs", "tasks", "services", "service_control",
+                "health", "logs", "tasks", "services", "runtime_snapshot", "service_control",
             ]), "Action to perform"),
             ref: optional(Type.String(), "[*] Project ref (required for most actions except 'list' and 'create')"),
             name: optional(Type.String(), "[create] Project name"),
@@ -715,6 +731,16 @@ export function registerAdminProjectCliTools(
                     return projectServicesResponse(
                         resolvedRef,
                         await http.get(`/v1/projects/${encodeURIComponent(resolvedRef)}/services`),
+                    );
+                }
+                case "runtime_snapshot": {
+                    const resolvedRef = resolveRef(ref);
+                    return projectRuntimeSnapshotResponse(
+                        resolvedRef,
+                        await http.get(
+                            `/v1/projects/${encodeURIComponent(resolvedRef)}/runtime-snapshot`,
+                            { maxJsonBytes: MAX_RUNTIME_SNAPSHOT_BYTES },
+                        ),
                     );
                 }
                 case "service_control": {

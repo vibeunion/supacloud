@@ -8,7 +8,7 @@ import { tenantRuntimeService } from "./tenant-runtime.service";
 import { logger } from "../utils/logger";
 import { createPgListener, type PgListenerHandle } from "../lib/pg-listen";
 import { config } from "../config";
-import type { ProjectTask } from "../db";
+import type { Project, ProjectTask } from "../db";
 import { resolveDbName, TaskStatus, TaskType } from "../db";
 import { broadcastTaskUpdate } from "../routes/ws";
 import { realtimeService } from "./realtime.service";
@@ -19,6 +19,19 @@ import {
 } from "../utils/project-routing";
 import { mergeProjectConfig, normalizeProjectConfig } from "../utils/project-config";
 import { runtimeEnvService } from "./runtime-env.service";
+import { jwtService } from "./jwt.service";
+import { resolveStoredServiceRoleKey } from "../utils/service-role";
+
+async function repairInvalidServiceRoleKey(project: Project): Promise<void> {
+    if (resolveStoredServiceRoleKey(project)) return;
+
+    const serviceRoleKey = await jwtService.generateServiceRoleKey(project.jwt_secret);
+    await projectRepository.updateApiKeys(project.ref, {
+        jwt_secret: project.jwt_secret,
+        anon_key: project.anon_key,
+        service_role_key: serviceRoleKey,
+    });
+}
 
 export class TaskWorker {
     private isRunning = false;
@@ -296,8 +309,7 @@ export class TaskWorker {
                         logger.error(`[TaskWorker] Project ${project_ref} not found for provision_secrets`);
                         return false;
                     }
-                    // Auto-inject standard environment variables into project_secrets
-                    // so Edge Functions can verify JWTs, access Supabase APIs, etc.
+                    await repairInvalidServiceRoleKey(project);
                     const runtimeEnv = await runtimeEnvService.buildProjectRuntimeEnv(project_ref);
                     if (!runtimeEnv) return false;
                     for (const [name, value] of Object.entries(runtimeEnv)) {

@@ -161,11 +161,13 @@ supacloud-cli frontend list --ref abc123
 supacloud-cli branch create --name feature-orders --data_mode schema_only
 supacloud-cli branch promotion_plan --branch_ref preview123
 supacloud-cli branch promote --branch_ref preview123 --plan_checksum <sha256>
-supacloud-cli edge_functions deploy --ref abc123 --slug hello --path ./supabase/functions/hello --expected-active-version absent
-supacloud-cli edge_functions deploy --ref abc123 --slug hello --prebundled-path ./dist/hello.js --expected-sha256 <sha256> --expected-active-version 4
-supacloud-cli edge_functions deploy_bundle --ref abc123 --slug hello --files '{"index.ts":"export default { fetch: () => new Response(\"ok\") }"}' --expected-active-version 7
+supacloud-cli edge_functions get_config --ref abc123 --slug hello
+supacloud-cli edge_functions deploy --ref abc123 --slug hello --path ./supabase/functions/hello --expected-active-version absent --expected-activation-id legacy
+supacloud-cli edge_functions deploy --ref abc123 --slug hello --prebundled-path ./dist/hello.js --expected-sha256 <sha256> --expected-active-version 4 --expected-activation-id <uuid>
+supacloud-cli edge_functions deploy_bundle --ref abc123 --slug hello --files '{"index.ts":"export default { fetch: () => new Response(\"ok\") }"}' --expected-active-version 7 --expected-activation-id <uuid>
 supacloud-cli edge_functions source --ref abc123 --slug hello --version 7 --output ./hello-v7.ts
-supacloud-cli edge_functions activate --ref abc123 --slug hello --version 3 --expected-active-version 8
+supacloud-cli edge_functions activate --ref abc123 --slug hello --version 3 --expected-active-version 8 --expected-activation-id <uuid>
+supacloud-cli edge_functions delete --ref abc123 --slug hello --expected-activation-id <uuid>
 supacloud-cli scheduled_functions list --ref abc123
 supacloud-cli secrets upsert --ref abc123 --from-env API_KEY,WEBHOOK_SECRET
 supacloud-cli storage list_buckets --ref abc123
@@ -221,10 +223,17 @@ pointer; this remains correct across an active-version A→B→A transition.
 `--expected-active-version <N|absent>`. Read the current non-negative integer
 version from `edge_functions list`; use `0` for a listed legacy Function and
 `absent` only when creating a slug that does not yet exist. A stale value returns
-HTTP 409 without building, preheating, or activating another version. List output remains a JSON array with string
-`slug` and numeric `version` fields, while source output is exactly
-`{ "code": "..." }`. Release automation must use `source --version <N>` for a
-version-bound backup.
+HTTP 409 without building, preheating, or activating another version. Every
+Function mutation also requires `--expected-activation-id <uuid|legacy>` from
+the same `list` or `get_config` snapshot. Use `get_config` for a single atomic
+read of `active_version`, `activation_id`, and policy, including an `absent`
+tombstone after deletion. Use `legacy` only for a never-created slug or a listed
+legacy Function; recreating a deleted slug must use the tombstone UUID returned
+by `delete` or `get_config`. This second token prevents an A→B→A version cycle
+from satisfying a stale mutation. List output remains a JSON array with string
+`slug`, numeric `version`, and canonical `activation_id` fields, while source
+output is exactly `{ "code": "..." }`. Release automation must use
+`source --version <N>` for a version-bound backup.
 
 `edge_functions activate` restores an existing immutable Function version and
 returns a machine-readable receipt containing the activated version and JWT
@@ -234,10 +243,10 @@ server response body.
 Mutation receipts use schema `supacloud.cli.release-control.v1`. An
 `OUTCOME_UNKNOWN` error means the server may have committed the mutation before
 the response was lost or failed validation; read back current state before any
-retry. For Function deploy, bundle deploy, and activation, the CLI applies a
-separate 5-second, 64 KiB response-body boundary after receiving HTTP headers.
-A stalled, oversized, truncated, unreadable, or malformed body is always
-`OUTCOME_UNKNOWN` and its content is never included in CLI output.
+retry. For Function deploy, bundle deploy, activation, config, and delete, the
+CLI applies a separate 5-second, 64 KiB response-body boundary after receiving
+HTTP headers. A stalled, oversized, truncated, unreadable, or malformed body is
+always `OUTCOME_UNKNOWN` and its content is never included in CLI output.
 Version `0` is reserved as the active-version CAS token for legacy Functions. It
 can be passed only as `--expected-active-version`; immutable source reads and
 activation targets still require a positive version.
@@ -250,6 +259,8 @@ activation targets still require a positive version.
   "project_ref": "abc123",
   "slug": "hello",
   "previous_active_version": "7",
+  "expected_activation_id": "9dc0e8da-207f-4f25-ae74-b1de4e66784d",
+  "activation_id": "6417591d-c038-46e8-91ca-4c8080514144",
   "active_version": "8",
   "version": "8",
   "verify_jwt": true

@@ -5,6 +5,8 @@ import { WorkerPool } from "./worker-pool";
 
 const CHURN_BATCHES = 4;
 const REQUESTS_PER_BATCH = 6;
+const REQUEST_TIMEOUT_MS = 400;
+const HELD_FETCH_DELAY_MS = 800;
 
 async function waitForNaturalExits(pool: WorkerPool, expected: number): Promise<void> {
   const deadline = Date.now() + 3_000;
@@ -21,7 +23,7 @@ async function runStress(): Promise<void> {
   const heldFetchServer = Bun.serve({
     port: 0,
     async fetch() {
-      await Bun.sleep(120);
+      await Bun.sleep(HELD_FETCH_DELAY_MS);
       return new Response("released");
     },
   });
@@ -36,7 +38,7 @@ async function runStress(): Promise<void> {
 
   const pool = new WorkerPool({
     size: 2,
-    requestTimeout: 35,
+    requestTimeout: REQUEST_TIMEOUT_MS,
     retirementBudget: { maxRetiredWorkers: 64, maxRetirementAgeMs: 2_000 },
   });
 

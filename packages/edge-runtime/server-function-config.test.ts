@@ -6,7 +6,8 @@ import {
   setDefaultTimeout,
   test,
 } from "bun:test";
-import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -23,6 +24,7 @@ const STAT_RACE_FAILURES = [
 let fixtureRoot = "";
 let projectRoot = "";
 let edgeBaseUrl = "";
+let activationGenerationReadLog = "";
 let managementServer: Bun.Server<undefined> | undefined;
 let edgeProcess: Bun.Subprocess<"ignore", "pipe", "pipe"> | undefined;
 let edgeStdout: Promise<string> | undefined;
@@ -48,6 +50,82 @@ async function writeVersionedFunction(
 
 async function writeFunctionConfig(slug: string, raw: string): Promise<void> {
   await writeFile(join(projectRoot, `${slug}.config.json`), raw);
+}
+
+type ActivationCandidateRequest = {
+  slug: string;
+  version: string;
+  source: string;
+  activationId?: string;
+  previousActivationId?: string | null;
+  generation?: number;
+  verifyJwt?: boolean;
+};
+
+type ActivationCandidate = {
+  activationId: string;
+  manifest: string;
+};
+
+async function installActivationCandidate(
+  request: ActivationCandidateRequest,
+): Promise<ActivationCandidate> {
+  const activationId = request.activationId ?? randomUUID();
+  const versionRoot = join(projectRoot, ".versions", request.slug, request.version);
+  await mkdir(versionRoot, { recursive: true });
+  await writeFile(join(versionRoot, "index.js"), request.source);
+  const artifactSha256 = createHash("sha256").update(request.source).digest("hex");
+  const manifest = JSON.stringify({
+    verify_jwt: request.verifyJwt ?? false,
+    version: request.version,
+    _supacloud_activation: {
+      schema: "supacloud.edge-function-activation.v1",
+      activation_id: activationId,
+      activation_generation: request.generation ?? 1,
+      previous_activation_id: request.previousActivationId ?? null,
+      target_state: "active",
+      artifact_sha256: artifactSha256,
+    },
+  });
+  const generationRoot = join(projectRoot, ".activation-generations", request.slug);
+  await mkdir(generationRoot, { recursive: true });
+  await writeFile(join(generationRoot, `${activationId}.json`), manifest);
+  return { activationId, manifest };
+}
+
+type ActivationControlRequest = {
+  slug: string;
+  activationId: string;
+  action: "begin" | "preheat" | "commit" | "abort" | "status";
+  version?: string;
+};
+
+async function activationControl(request: ActivationControlRequest): Promise<Response> {
+  const headers = {
+    "x-supacloud-internal-auth": `Bearer ${INTERNAL_TOKEN}`,
+    "x-supacloud-activation-id": request.activationId,
+    ...(request.version ? { "x-supacloud-function-version": request.version } : {}),
+  };
+  if (request.action === "preheat") {
+    return fetch(`${edgeBaseUrl}/preheat/${PROJECT_REF}/${request.slug}`, {
+      method: "POST",
+      headers,
+    });
+  }
+  return fetch(
+    `${edgeBaseUrl}/internal/function-activation/${PROJECT_REF}/${request.slug}/${request.action}`,
+    { method: request.action === "status" ? "GET" : "POST", headers },
+  );
+}
+
+async function publishActivationCandidate(slug: string, candidate: ActivationCandidate): Promise<void> {
+  await writeFunctionConfig(slug, candidate.manifest);
+}
+
+async function invokeAnonymous(slug: string): Promise<Response> {
+  return fetch(`${edgeBaseUrl}/functions/v1/${slug}`, {
+    headers: { "x-project-ref": PROJECT_REF },
+  });
 }
 
 function reserveEdgePort(): number {
@@ -112,6 +190,12 @@ async function invalidateFunctionConfig(slug: string): Promise<void> {
   expect(response.status).toBe(200);
 }
 
+async function activationGenerationReadCount(): Promise<number> {
+  const logFile = Bun.file(activationGenerationReadLog);
+  if (!await logFile.exists()) return 0;
+  return (await logFile.text()).split("\n").filter(Boolean).length;
+}
+
 async function stopEdgeRuntime(): Promise<void> {
   if (!edgeProcess) return;
   if (edgeProcess.exitCode === null) edgeProcess.kill("SIGTERM");
@@ -131,9 +215,13 @@ function startManagementServer(): Bun.Server<undefined> {
     hostname: "127.0.0.1",
     port: 0,
     fetch: () => Response.json({
-      SUPACLOUD_AUTH_RUNTIME_MODE: "local",
-      SUPABASE_SERVICE_ROLE_KEY: SERVICE_ROLE_KEY,
-    }),
+        SUPACLOUD_AUTH_RUNTIME_MODE: "local",
+        SUPABASE_SERVICE_ROLE_KEY: SERVICE_ROLE_KEY,
+      }, {
+        headers: {
+          "x-supacloud-runtime-env-revision": `hmac-sha256:${"e".repeat(64)}`,
+        },
+      }),
   });
 }
 
@@ -157,6 +245,7 @@ function edgeRuntimeEnvironment(
     WORKER_POOL_SIZE: "1",
     BACKGROUND_WORKER_POOL_SIZE: "1",
     EDGE_TEST_REALPATH_STAT_FAILURES: JSON.stringify(statFailures),
+    EDGE_TEST_ACTIVATION_GENERATION_READ_LOG: activationGenerationReadLog,
   };
 }
 
@@ -182,6 +271,7 @@ function startEdgeRuntime(managementPort: number): void {
 async function initializeServerFixture(): Promise<void> {
   fixtureRoot = await mkdtemp(join(tmpdir(), "supacloud-edge-config-contract-"));
   projectRoot = join(fixtureRoot, "functions", PROJECT_REF);
+  activationGenerationReadLog = join(fixtureRoot, "activation-generation-reads.log");
   await mkdir(projectRoot, { recursive: true });
   projectRoot = await realpath(projectRoot);
   managementServer = startManagementServer();
@@ -367,6 +457,24 @@ describe("Edge Runtime function config boundary", () => {
     await expectLegacySymlinkFailsClosed();
   });
 
+  test("rejects an authenticated preheat traversal before activation generation I/O", async () => {
+    const readsBeforeRequest = await activationGenerationReadCount();
+    const response = await fetch(
+      `${edgeBaseUrl}/preheat/${PROJECT_REF}/${encodeURIComponent("../escape")}`,
+      {
+        method: "POST",
+        headers: {
+          "x-supacloud-internal-auth": `Bearer ${INTERNAL_TOKEN}`,
+          "x-supacloud-activation-id": randomUUID(),
+        },
+      },
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "Invalid project reference or function slug" });
+    expect(await activationGenerationReadCount()).toBe(readsBeforeRequest);
+  });
+
   test("rejects a preferred artifact directory instead of executing a fallback", async () => {
     const fallbackBody = "directory-fallback-must-not-run";
     await installInvalidPreferredArtifact("preferred_directory", fallbackBody, "directory");
@@ -390,4 +498,184 @@ describe("Edge Runtime function config boundary", () => {
       await expectActivationFailsClosed(slug, fallbackBody);
     },
   );
+
+  test("fences requests until the immutable candidate is preheated and committed", async () => {
+    const slug = "activation_candidate";
+    const candidateBody = "candidate-policy-visible-only-after-commit";
+    const candidate = await installActivationCandidate({
+      slug,
+      version: "1",
+      source: functionSource(candidateBody),
+      verifyJwt: false,
+    });
+    let committed = false;
+
+    try {
+      const begun = await activationControl({
+        slug,
+        activationId: candidate.activationId,
+        action: "begin",
+      });
+      expect(begun.status).toBe(200);
+      expect(await begun.json()).toMatchObject({ state: "fenced" });
+
+      const fencedBeforePreheat = await invokeAnonymous(slug);
+      expect(fencedBeforePreheat.status).toBe(503);
+      expect(await fencedBeforePreheat.text()).not.toContain(candidateBody);
+
+      const preheated = await activationControl({
+        slug,
+        activationId: candidate.activationId,
+        action: "preheat",
+        version: "1",
+      });
+      expect(preheated.status).toBe(200);
+      expect(await preheated.json()).toMatchObject({ success: true });
+      expect((await invokeAnonymous(slug)).status).toBe(503);
+
+      await publishActivationCandidate(slug, candidate);
+      const committedResponse = await activationControl({
+        slug,
+        activationId: candidate.activationId,
+        action: "commit",
+      });
+      expect(committedResponse.status).toBe(200);
+      expect(await committedResponse.json()).toMatchObject({ state: "committed" });
+      committed = true;
+
+      const active = await invokeAnonymous(slug);
+      expect(active.status).toBe(200);
+      expect(await active.text()).toBe(candidateBody);
+    } finally {
+      if (!committed) {
+        await activationControl({
+          slug,
+          activationId: candidate.activationId,
+          action: "abort",
+        });
+      }
+    }
+  });
+
+  test("rejects a foreign activation without replacing the global lease", async () => {
+    const first = await installActivationCandidate({
+      slug: "lease_first",
+      version: "1",
+      source: functionSource("first"),
+    });
+    const second = await installActivationCandidate({
+      slug: "lease_second",
+      version: "1",
+      source: functionSource("second"),
+    });
+    await activationControl({
+      slug: "lease_first",
+      activationId: first.activationId,
+      action: "begin",
+    });
+
+    try {
+      const rejected = await activationControl({
+        slug: "lease_second",
+        activationId: second.activationId,
+        action: "begin",
+      });
+      expect(rejected.status).toBe(409);
+      expect(await rejected.json()).toMatchObject({
+        activation_id: second.activationId,
+        state: "uncertain",
+      });
+      const retained = await activationControl({
+        slug: "lease_first",
+        activationId: first.activationId,
+        action: "status",
+      });
+      expect(retained.status).toBe(200);
+      expect(await retained.json()).toMatchObject({ state: "fenced" });
+    } finally {
+      await activationControl({
+        slug: "lease_first",
+        activationId: first.activationId,
+        action: "abort",
+      });
+    }
+  });
+
+  test("cancels queued requests when an activation fence begins", async () => {
+    const slug = "activation_queue";
+    const slowSource = `
+      export default async () => {
+        await Bun.sleep(350);
+        return new Response("slow-active");
+      };
+    `;
+    await writeVersionedFunction(slug, "1", "unused");
+    await writeFile(join(projectRoot, ".versions", slug, "1", "index.js"), slowSource);
+    await writeFunctionConfig(slug, JSON.stringify({ verify_jwt: false, version: "1" }));
+    const candidate = await installActivationCandidate({
+      slug,
+      version: "2",
+      source: functionSource("replacement"),
+    });
+
+    const executing = invokeForeground(slug);
+    await Bun.sleep(40);
+    const queued = invokeForeground(slug);
+    await Bun.sleep(20);
+    const begin = activationControl({
+      slug,
+      activationId: candidate.activationId,
+      action: "begin",
+    });
+
+    try {
+      const cancelled = await queued;
+      expect(cancelled.status).toBe(503);
+      expect(await cancelled.json()).toMatchObject({ code: "RUNTIME_ENV_INVALIDATED" });
+      expect((await executing).status).toBe(200);
+      const begun = await begin;
+      expect(begun.status).toBe(200);
+      expect(await begun.json()).toMatchObject({ state: "fenced", cancelled_queued: 1 });
+    } finally {
+      await activationControl({
+        slug,
+        activationId: candidate.activationId,
+        action: "abort",
+      });
+    }
+  });
+
+  test("recovers committed activation identity after an Edge Runtime restart", async () => {
+    const slug = "activation_restart";
+    const body = "committed-after-restart";
+    const candidate = await installActivationCandidate({
+      slug,
+      version: "1",
+      source: functionSource(body),
+    });
+    await activationControl({ slug, activationId: candidate.activationId, action: "begin" });
+    await activationControl({
+      slug,
+      activationId: candidate.activationId,
+      action: "preheat",
+      version: "1",
+    });
+    await publishActivationCandidate(slug, candidate);
+    await activationControl({ slug, activationId: candidate.activationId, action: "commit" });
+
+    await stopEdgeRuntime();
+    startEdgeRuntime(managementServer!.port);
+    await waitForEdgeRuntime();
+
+    const status = await activationControl({
+      slug,
+      activationId: candidate.activationId,
+      action: "status",
+    });
+    expect(status.status).toBe(200);
+    expect(await status.json()).toMatchObject({ state: "committed" });
+    const active = await invokeAnonymous(slug);
+    expect(active.status).toBe(200);
+    expect(await active.text()).toBe(body);
+  });
 });

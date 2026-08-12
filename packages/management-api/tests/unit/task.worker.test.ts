@@ -232,9 +232,9 @@ describe("TaskWorker provision_secrets", () => {
     const worker = new TaskWorker();
     const upsertSecretSpy = spyOn(databaseService, "upsertSecret").mockResolvedValue(true);
     spyOn(databaseService, "getSecrets").mockResolvedValue([]);
-    spyOn(jwtService, "generateServiceRoleKey").mockResolvedValue("generated.service.role");
-    const updateApiKeysSpy = spyOn(projectRepository, "updateApiKeys").mockResolvedValue({} as any);
-    spyOn(projectRepository, "findByRef").mockResolvedValue({
+    const generateServiceRoleKeySpy = spyOn(jwtService, "generateServiceRoleKey")
+      .mockResolvedValue("generated.service.role");
+    let storedProject = {
       ref: "proj-ref",
       name: "proj",
       db_name: "proj_ref",
@@ -252,7 +252,15 @@ describe("TaskWorker provision_secrets", () => {
       created_at: new Date(),
       updated_at: new Date(),
       deleted_at: null,
-    } as any);
+    } as any;
+    spyOn(projectRepository, "findByRef").mockImplementation(async () => storedProject);
+    const updateApiKeysSpy = spyOn(projectRepository, "updateApiKeys").mockImplementation(async (
+      _ref,
+      keys,
+    ) => {
+      storedProject = { ...storedProject, ...keys };
+      return storedProject;
+    });
 
     const ok = await (worker as any).executeTask({
       id: "task-1",
@@ -262,7 +270,12 @@ describe("TaskWorker provision_secrets", () => {
     });
 
     expect(ok).toBe(true);
-    expect(updateApiKeysSpy).toHaveBeenCalledTimes(1);
+    expect(generateServiceRoleKeySpy).toHaveBeenCalledWith("test-jwt-secret-with-enough-length");
+    expect(updateApiKeysSpy).toHaveBeenCalledWith("proj-ref", {
+      jwt_secret: "test-jwt-secret-with-enough-length",
+      anon_key: "header.payload.signature",
+      service_role_key: "generated.service.role",
+    });
 
     const secrets = new Map(upsertSecretSpy.mock.calls.map((call) => [call[1], call[2]]));
     expect(secrets.get("SUPABASE_SERVICE_ROLE_KEY")).toMatch(/^[^.]+\.[^.]+\.[^.]+$/);

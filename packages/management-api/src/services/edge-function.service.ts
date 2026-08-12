@@ -4,6 +4,24 @@ import { ServiceUnavailableError } from "../utils/errors";
 import { normalizeEdgeRuntimeBundle } from "./edge-runtime-bundle";
 import path from "path";
 import fs from "fs/promises";
+import type { Dirent } from "node:fs";
+import { acquireSupaCloudUpgradeLock, type SupaCloudUpgradeLock } from "../upgrade-lock";
+import {
+  validateEdgeRuntimePreheat,
+  type ExpectedEdgeRuntimePreheat,
+  type ValidatedEdgeRuntimePreheat,
+} from "./edge-runtime-preheat-attestation";
+import {
+  EDGE_FUNCTION_ACTIVATION_ID_PATTERN,
+  EDGE_FUNCTION_ACTIVATION_SCHEMA,
+  EdgeFunctionActivationDurabilityError,
+  confirmEdgeFunctionActivationManifestDurable,
+  parseEdgeFunctionActivationManifest,
+  preflightEdgeFunctionMutationDirectories,
+  replaceEdgeFunctionActivationManifest,
+  writeEdgeFunctionActivationGeneration,
+  type EdgeFunctionActivationAuthority,
+} from "./edge-function-activation-manifest";
 
 /** Per-function configuration (mirrors Supabase config.toml [functions.xxx]) */
 export interface EdgeFunctionConfig {
@@ -46,22 +64,36 @@ export interface EdgeFunctionDeployResult {
   content_path?: string | null;
   external_packages?: string[];
   preheat?: EdgeFunctionPreheatResult;
-  config?: EdgeFunctionConfig;
+  config?: EdgeFunctionConfigSnapshot;
   error_code?: typeof EDGE_FUNCTION_ACTIVE_VERSION_CONFLICT_CODE;
   expected_active_version?: EdgeFunctionActiveVersion;
+  expected_activation_id?: EdgeFunctionActivationId;
+  activation_id?: EdgeFunctionActivationId;
   error?: string;
 }
 
 export const EDGE_FUNCTION_ABSENT_ACTIVE_VERSION = "absent" as const;
+export const EDGE_FUNCTION_LEGACY_ACTIVATION_ID = "legacy" as const;
 export const EDGE_FUNCTION_ACTIVE_VERSION_CONFLICT_CODE = "FUNCTION_ACTIVE_VERSION_CONFLICT" as const;
 export const EDGE_FUNCTION_ACTIVE_ARTIFACT_MISSING_MESSAGE = "Active function artifact is missing";
 export const EDGE_FUNCTION_SHA256_HEX_PATTERN = "^[a-f0-9]{64}$";
 export type EdgeFunctionActiveVersion = string;
+export type EdgeFunctionActivationId = string;
+
+export type EdgeFunctionConfigSnapshot = EdgeFunctionConfig & {
+  activation_id: EdgeFunctionActivationId;
+};
+
+export type EdgeFunctionStateSnapshot = {
+  config: EdgeFunctionConfigSnapshot;
+  active_version: EdgeFunctionActiveVersion;
+};
 
 export interface EdgeFunctionActivationResult {
   previous_active_version: EdgeFunctionActiveVersion;
   active_version: string;
-  config: EdgeFunctionConfig;
+  activation_id: EdgeFunctionActivationId;
+  config: EdgeFunctionConfigSnapshot;
 }
 
 export type EdgeFunctionDeploymentConfig = Pick<
@@ -104,6 +136,7 @@ type EdgeFunctionReleaseRequest = EdgeFunctionReleaseBase & (
 
 export type EdgeFunctionDeploymentRequest = EdgeFunctionReleaseRequest & {
   expectedActiveVersion: EdgeFunctionActiveVersion;
+  expectedActivationId: EdgeFunctionActivationId;
 };
 
 export interface EdgeFunctionPreheatPoolResult {
@@ -169,6 +202,7 @@ const EXTERNAL_PACKAGE_REGEX = /^(?:@[a-zA-Z0-9._-]+\/)?[a-zA-Z0-9._-]+$/;
 const CANONICAL_VERSION_REGEX = /^(?:0|[1-9]\d*)$/;
 const SHA256_HEX_REGEX = new RegExp(EDGE_FUNCTION_SHA256_HEX_PATTERN);
 const functionDeployLocks = new Map<string, Promise<void>>();
+const FUNCTION_LOCK_TIMEOUT_MS = 30_000;
 const deployMetrics: EdgeFunctionDeployMetrics = {
   total_deploys: 0,
   total_bundle_size_bytes: 0,
@@ -196,10 +230,35 @@ type BundleFunctionRequest = {
   importMapPath?: string;
 };
 
-type EdgeFunctionRuntimeControlResult = {
+type RuntimeControlStatus = {
   ok: boolean;
   status?: number;
   error?: string;
+};
+
+type RuntimePreheatOutcome = {
+  summary: EdgeFunctionPreheatResult;
+  attestation: ValidatedEdgeRuntimePreheat | null;
+};
+
+type RuntimeFunctionActivationState =
+  | "fenced"
+  | "commit_pending"
+  | "committed"
+  | "aborted"
+  | "uncertain";
+
+type RuntimeFunctionActivationAck = {
+  activationId: string;
+  state: RuntimeFunctionActivationState;
+  runtimeInstanceId: string;
+  foregroundGeneration: number;
+  backgroundGeneration: number;
+  cancelledQueued: number;
+};
+
+type RuntimeFunctionActivationControl = RuntimeControlStatus & {
+  acknowledgement: RuntimeFunctionActivationAck | null;
 };
 
 function resolveExternalPackages(): string[] {
@@ -258,13 +317,15 @@ export class EdgeFunctionActiveVersionConflictError extends Error {
   constructor(
     readonly expectedActiveVersion: EdgeFunctionActiveVersion,
     readonly activeVersion: EdgeFunctionActiveVersion,
+    readonly expectedActivationId: EdgeFunctionActivationId,
+    readonly activationId: EdgeFunctionActivationId,
   ) {
-    super("Function active version changed before the requested mutation");
+    super("Function activation identity changed before the requested mutation");
     this.name = "EdgeFunctionActiveVersionConflictError";
   }
 }
 
-async function acquireFunctionDeployLock(
+async function acquireLocalFunctionLock(
   ref: string,
   slug: string,
 ): Promise<() => void> {
@@ -281,6 +342,59 @@ async function acquireFunctionDeployLock(
     release();
     if (functionDeployLocks.get(key) === queueTail) functionDeployLocks.delete(key);
   };
+}
+
+function isFunctionLockBusy(error: unknown): boolean {
+  return error instanceof Error
+    && error.message === "Another SupaCloud upgrade is already running";
+}
+
+async function acquireCrossProcessFunctionLock(
+  ref: string,
+  slug: string,
+): Promise<SupaCloudUpgradeLock> {
+  const functionDirectory = await prepareTrustedFunctionProjectDirectory(ref, slug);
+  const lockPath = assertInside(
+    functionDirectory,
+    path.join(functionDirectory, `.${validateSlug(slug)}.activation.lock`),
+  );
+  const deadline = Date.now() + FUNCTION_LOCK_TIMEOUT_MS;
+  while (true) {
+    try {
+      if (process.platform === "linux" || process.platform === "darwin") {
+        return acquireSupaCloudUpgradeLock(lockPath);
+      }
+      throw new Error("Function activation lock is unsupported on this platform");
+    } catch (error: unknown) {
+      if (!isFunctionLockBusy(error) || Date.now() >= deadline) throw error;
+      await Bun.sleep(20);
+    }
+  }
+}
+
+async function acquireFunctionDeployLock(
+  ref: string,
+  slug: string,
+): Promise<() => void> {
+  const releaseLocal = await acquireLocalFunctionLock(ref, slug);
+  try {
+    const crossProcessLock = await acquireCrossProcessFunctionLock(ref, slug);
+    return () => {
+      crossProcessLock.release();
+      releaseLocal();
+    };
+  } catch (error: unknown) {
+    releaseLocal();
+    throw error;
+  }
+}
+
+async function preflightAndAcquireFunctionDeployLock(
+  ref: string,
+  slug: string,
+): Promise<() => void> {
+  await preflightFunctionMutation(ref, slug);
+  return acquireFunctionDeployLock(ref, slug);
 }
 
 function getFunctionsRoot(): string {
@@ -308,6 +422,27 @@ function resolveInside(base: string, relPath: string): string {
 function getFuncDir(ref: string): string {
   const functionsRoot = getFunctionsRoot();
   return assertInside(functionsRoot, path.join(functionsRoot, validateRef(ref)));
+}
+
+async function preflightFunctionMutation(ref: string, slug: string): Promise<void> {
+  await preflightEdgeFunctionMutationDirectories({
+    projectDirectory: getFuncDir(ref),
+    functionSlug: validateSlug(slug),
+  });
+}
+
+async function prepareTrustedFunctionProjectDirectory(
+  ref: string,
+  slug: string,
+): Promise<string> {
+  const functionDirectory = getFuncDir(ref);
+  try {
+    await fs.mkdir(functionDirectory, { mode: 0o755 });
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+  }
+  await preflightFunctionMutation(ref, slug);
+  return functionDirectory;
 }
 
 function getFuncPath(ref: string, slug: string): string {
@@ -378,81 +513,130 @@ async function readOptionalFunctionFile(filePath: string): Promise<string | null
   }
 }
 
-function parsedFunctionConfig(raw: string): EdgeFunctionConfig {
-  const parsed = JSON.parse(raw) as unknown;
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)
-    || Object.getPrototypeOf(parsed) !== Object.prototype) {
-    throw new Error("Function config must be an object");
-  }
-  const functionConfig = { ...DEFAULT_FUNCTION_CONFIG, ...parsed } as EdgeFunctionConfig;
+function validatedFunctionConfig(
+  configRecord: Record<string, unknown>,
+): EdgeFunctionConfig {
+  const functionConfig = { ...DEFAULT_FUNCTION_CONFIG, ...configRecord } as EdgeFunctionConfig;
   if (functionConfig.version !== undefined) {
     functionConfig.version = canonicalFunctionVersion(functionConfig.version);
   }
   return functionConfig;
 }
 
-async function readFunctionConfig(ref: string, slug: string): Promise<EdgeFunctionConfig> {
-  try {
-    const raw = await Bun.file(getConfigPath(ref, slug)).text();
-    return parsedFunctionConfig(raw);
-  } catch (error: unknown) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    return { ...DEFAULT_FUNCTION_CONFIG };
-  }
-}
+type FunctionManifestState = {
+  config: EdgeFunctionConfig;
+  authority: EdgeFunctionActivationAuthority | null;
+  hadManifest: boolean;
+};
 
-async function functionConfigExists(ref: string, slug: string): Promise<boolean> {
-  try {
-    await fs.access(getConfigPath(ref, slug));
-    return true;
-  } catch (error: unknown) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    return false;
-  }
-}
-
-async function activeFunctionVersion(
+async function readFunctionManifestState(
   ref: string,
   slug: string,
+): Promise<FunctionManifestState> {
+  try {
+    const raw = await Bun.file(getConfigPath(ref, slug)).text();
+    const manifest = parseEdgeFunctionActivationManifest(raw);
+    return {
+      config: validatedFunctionConfig(manifest.config),
+      authority: manifest.authority,
+      hadManifest: true,
+    };
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    return {
+      config: { ...DEFAULT_FUNCTION_CONFIG },
+      authority: null,
+      hadManifest: false,
+    };
+  }
+}
+
+async function readFunctionConfig(ref: string, slug: string): Promise<EdgeFunctionConfig> {
+  return (await readFunctionManifestState(ref, slug)).config;
+}
+
+function publicActivationId(
+  authority: EdgeFunctionActivationAuthority | null,
+): EdgeFunctionActivationId {
+  return authority?.activation_id ?? EDGE_FUNCTION_LEGACY_ACTIVATION_ID;
+}
+
+function functionConfigSnapshot(state: FunctionManifestState): EdgeFunctionConfigSnapshot {
+  return {
+    ...state.config,
+    activation_id: publicActivationId(state.authority),
+  };
+}
+
+async function activeVersionFromState(
+  ref: string,
+  slug: string,
+  state: FunctionManifestState,
 ): Promise<EdgeFunctionActiveVersion> {
-  const functionConfig = await readFunctionConfig(ref, slug);
-  if (functionConfig.version !== undefined) {
-    return functionConfig.version;
+  if (state.authority?.target_state === "absent") {
+    return EDGE_FUNCTION_ABSENT_ACTIVE_VERSION;
+  }
+  if (state.config.version !== undefined) {
+    return state.config.version;
   }
   return await frozenLegacyRuntimePath(ref, slug) === null
     ? EDGE_FUNCTION_ABSENT_ACTIVE_VERSION
     : "0";
 }
 
-async function assertExpectedActiveVersion(
+async function activeFunctionVersion(
+  ref: string,
+  slug: string,
+): Promise<EdgeFunctionActiveVersion> {
+  return activeVersionFromState(ref, slug, await readFunctionManifestState(ref, slug));
+}
+
+function validatedExpectedActivationId(value: unknown): EdgeFunctionActivationId {
+  if (value === EDGE_FUNCTION_LEGACY_ACTIVATION_ID) return value;
+  if (typeof value !== "string" || !EDGE_FUNCTION_ACTIVATION_ID_PATTERN.test(value)) {
+    throw new Error("Expected Function activation identifier must be a UUID or 'legacy'");
+  }
+  return value;
+}
+
+async function assertExpectedFunctionState(
   ref: string,
   slug: string,
   expectedVersion: unknown,
-): Promise<EdgeFunctionActiveVersion> {
-  const expected = validatedExpectedActiveVersion(expectedVersion);
-  const active = await activeFunctionVersion(ref, slug);
-  if (active !== expected) throw new EdgeFunctionActiveVersionConflictError(expected, active);
-  return active;
+  expectedActivationId: unknown,
+): Promise<{ state: FunctionManifestState; activeVersion: EdgeFunctionActiveVersion }> {
+  const expectedActiveVersion = validatedExpectedActiveVersion(expectedVersion);
+  const expectedId = validatedExpectedActivationId(expectedActivationId);
+  const state = await readFunctionManifestState(ref, slug);
+  const activeVersion = await activeVersionFromState(ref, slug, state);
+  const activationId = publicActivationId(state.authority);
+  if (activeVersion !== expectedActiveVersion || activationId !== expectedId) {
+    throw new EdgeFunctionActiveVersionConflictError(
+      expectedActiveVersion,
+      activeVersion,
+      expectedId,
+      activationId,
+    );
+  }
+  return { state, activeVersion };
 }
 
-async function writeFunctionConfigManifest(
+async function assertExpectedActivationIdentity(
   ref: string,
   slug: string,
-  functionConfig: EdgeFunctionConfig,
-): Promise<void> {
-  const dir = getFuncDir(ref);
-  const configPath = getConfigPath(ref, slug);
-  const pendingPath = assertInside(
-    dir,
-    path.join(dir, `.${validateSlug(slug)}.config.${crypto.randomUUID()}.tmp`),
+  expectedActivationId: unknown,
+): Promise<FunctionManifestState> {
+  const expectedId = validatedExpectedActivationId(expectedActivationId);
+  const state = await readFunctionManifestState(ref, slug);
+  const activationId = publicActivationId(state.authority);
+  if (activationId === expectedId) return state;
+  const activeVersion = await activeVersionFromState(ref, slug, state);
+  throw new EdgeFunctionActiveVersionConflictError(
+    activeVersion,
+    activeVersion,
+    expectedId,
+    activationId,
   );
-  await fs.mkdir(dir, { recursive: true });
-  try {
-    await Bun.write(pendingPath, JSON.stringify(functionConfig, null, 2));
-    await fs.rename(pendingPath, configPath);
-  } finally {
-    await fs.rm(pendingPath, { force: true }).catch(() => {});
-  }
 }
 
 /**
@@ -549,6 +733,7 @@ type PreparedFunctionVersion = {
   entrypoint: string | null;
   importMap: string | null;
   bundleHash: string;
+  artifactSha256: string;
   bundleSizeBytes: number;
   importCount: number;
   contentPath: string;
@@ -578,8 +763,7 @@ type LegacyVersionSnapshotRequest = {
 type CurrentRollbackSnapshotRequest = {
   ref: string;
   slug: string;
-  currentConfig: EdgeFunctionConfig;
-  hadManifest: boolean;
+  currentState: FunctionManifestState;
 };
 
 async function writePreparedBundle(
@@ -587,13 +771,18 @@ async function writePreparedBundle(
   finalDir: string,
   code: string,
   artifactSizeBytes?: number,
-): Promise<Pick<PreparedFunctionVersion, "bundleHash" | "bundleSizeBytes" | "contentPath">> {
-  const bundleHash = (await sha256Hex(code)).slice(0, 16);
+): Promise<Pick<
+  PreparedFunctionVersion,
+  "bundleHash" | "artifactSha256" | "bundleSizeBytes" | "contentPath"
+>> {
+  const artifactSha256 = await sha256Hex(code);
+  const bundleHash = artifactSha256.slice(0, 16);
   const sizeBytes = artifactSizeBytes ?? bundleSizeBytes(code);
   await Bun.write(path.join(stageDir, "index.js"), code);
   await Bun.write(path.join(stageDir, `index.${bundleHash}.js`), code);
   return {
     bundleHash,
+    artifactSha256,
     bundleSizeBytes: sizeBytes,
     contentPath: path.join(finalDir, `index.${bundleHash}.js`),
   };
@@ -607,7 +796,7 @@ async function prepareSingleFunctionVersion(
 ): Promise<PreparedFunctionVersion> {
   const validation = validateFunctionCode(request.code);
   if (!validation.valid) throw new Error(validation.error);
-  await fs.mkdir(stageDir, { recursive: true });
+  await fs.mkdir(stageDir, { recursive: true, mode: 0o755 });
   const sourcePath = path.join(stageDir, "index.src.ts");
   const buildDir = path.join(stageDir, ".build");
   await Bun.write(sourcePath, request.code);
@@ -639,7 +828,7 @@ async function preparePrebundledFunctionVersion(
   finalDir: string,
 ): Promise<PreparedFunctionVersion> {
   const normalization = await validatedPrebundledBundle(request);
-  await fs.mkdir(stageDir, { recursive: true });
+  await fs.mkdir(stageDir, { recursive: true, mode: 0o755 });
   await Bun.write(path.join(stageDir, "index.src.ts"), request.code);
   const artifact = await writePreparedBundle(stageDir, finalDir, request.code);
   return {
@@ -700,7 +889,7 @@ async function writeBundleSources(
 ): Promise<void> {
   for (const [relativePath, content] of Object.entries(files)) {
     const filePath = resolveInside(sourceDir, relativePath);
-    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.mkdir(path.dirname(filePath), { recursive: true, mode: 0o755 });
     await Bun.write(filePath, content);
   }
 }
@@ -921,7 +1110,7 @@ async function snapshotFrozenLegacyVersion(
     versionRoot,
     path.join(versionRoot, `.pending-legacy-${snapshot.version}-${crypto.randomUUID()}`),
   );
-  await fs.mkdir(stageDir, { recursive: true });
+  await fs.mkdir(stageDir, { recursive: true, mode: 0o755 });
   try {
     const runtimeCode = await Bun.file(snapshot.runtimePath).text();
     await writePreparedBundle(stageDir, finalDir, runtimeCode);
@@ -971,7 +1160,7 @@ async function completeFrozenLegacyVersionSnapshot(
       `.pending-artifact-${snapshot.version}-${crypto.randomUUID()}`,
     ),
   );
-  await fs.mkdir(pendingDir, { recursive: true });
+  await fs.mkdir(pendingDir, { recursive: true, mode: 0o755 });
   try {
     const runtimeCode = await Bun.file(snapshot.runtimePath).text();
     const artifact = await writePreparedBundle(pendingDir, versionDir, runtimeCode);
@@ -1015,11 +1204,12 @@ async function ensureConfiguredRollbackSnapshot(
 async function ensureLegacyVersionZeroSnapshot(
   snapshot: CurrentRollbackSnapshotRequest,
   legacyRuntimePath: string,
-): Promise<EdgeFunctionConfig> {
+): Promise<FunctionManifestState> {
+  const currentConfig = snapshot.currentState.config;
   const versionZeroArtifact = await getVersionedArtifactPath(snapshot.ref, snapshot.slug, "0");
   const versionZeroConfig = versionZeroArtifact
     ? await sourceMetadataConfig(
-        snapshot.currentConfig,
+        currentConfig,
         "0",
         path.join(getVersionRoot(snapshot.ref, snapshot.slug), "0"),
       )
@@ -1027,7 +1217,7 @@ async function ensureLegacyVersionZeroSnapshot(
         ref: snapshot.ref,
         slug: snapshot.slug,
         version: "0",
-        functionConfig: snapshot.currentConfig,
+        functionConfig: currentConfig,
         runtimePath: legacyRuntimePath,
       });
   if (versionZeroArtifact) {
@@ -1039,128 +1229,187 @@ async function ensureLegacyVersionZeroSnapshot(
   await commitFunctionActivation({
     ref: snapshot.ref,
     slug: snapshot.slug,
-    previousConfig: snapshot.currentConfig,
-    hadManifest: snapshot.hadManifest,
+    previousState: snapshot.currentState,
     nextConfig: versionZeroConfig,
+    artifactSha256: await sha256Hex(
+      await Bun.file(
+        await getVersionedArtifactPath(snapshot.ref, snapshot.slug, "0")
+          ?? getVersionedFuncPath(snapshot.ref, snapshot.slug, "0"),
+      ).text(),
+    ),
   });
-  return versionZeroConfig;
+  return readFunctionManifestState(snapshot.ref, snapshot.slug);
 }
 
 async function ensureCurrentRollbackSnapshot(
   snapshot: CurrentRollbackSnapshotRequest,
-): Promise<EdgeFunctionConfig> {
-  if (snapshot.currentConfig.version) {
-    return ensureConfiguredRollbackSnapshot(
+): Promise<FunctionManifestState> {
+  if (snapshot.currentState.config.version) {
+    await ensureConfiguredRollbackSnapshot(
       snapshot.ref,
       snapshot.slug,
-      snapshot.currentConfig,
+      snapshot.currentState.config,
     );
+    return snapshot.currentState;
   }
   const legacyRuntimePath = await frozenLegacyRuntimePath(snapshot.ref, snapshot.slug);
-  if (!legacyRuntimePath) return snapshot.currentConfig;
+  if (!legacyRuntimePath) return snapshot.currentState;
   return ensureLegacyVersionZeroSnapshot(snapshot, legacyRuntimePath);
 }
 
-function normalizePreheatPool(value: unknown): EdgeFunctionPreheatPoolResult {
-  if (!value || typeof value !== "object") {
-    return { attempted: 0, succeeded: 0, cacheHits: 0, cacheMisses: 0, durationMs: 0 };
+async function functionActivationArtifactSha256(
+  ref: string,
+  slug: string,
+  state: FunctionManifestState,
+): Promise<string | null> {
+  if (state.authority?.target_state === "absent") return null;
+  const version = state.config.version;
+  if (!version) {
+    if (await frozenLegacyRuntimePath(ref, slug) === null) return null;
+    throw new Error("Legacy Function must be snapshotted before activation");
   }
-  const record = value as Record<string, unknown>;
-  return {
-    attempted: Number(record.attempted) || 0,
-    succeeded: Number(record.succeeded) || 0,
-    cacheHits: Number(record.cacheHits) || 0,
-    cacheMisses: Number(record.cacheMisses) || 0,
-    durationMs: Number(record.durationMs) || 0,
-    error: typeof record.error === "string" ? record.error : undefined,
-  };
+  const artifactPath = await getVersionedArtifactPath(ref, slug, version);
+  if (!artifactPath) throw new Error(EDGE_FUNCTION_ACTIVE_ARTIFACT_MISSING_MESSAGE);
+  return sha256Hex(await Bun.file(artifactPath).text());
 }
 
-function runtimePreheatError(body: Record<string, unknown>): string | undefined {
-  for (const poolName of ["foreground", "background"] as const) {
-    const pool = body[poolName];
-    if (!pool || typeof pool !== "object" || Array.isArray(pool)) continue;
-    const error = (pool as Record<string, unknown>).error;
-    if (typeof error === "string" && error.trim()) return error;
+const MAX_RUNTIME_CONTROL_BYTES = 64 * 1024;
+const RUNTIME_INSTANCE_ID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
+function hasExactRecordKeys(
+  candidate: Record<string, unknown>,
+  expected: readonly string[],
+): boolean {
+  const keys = Object.keys(candidate).sort();
+  const expectedKeys = [...expected].sort();
+  return keys.length === expectedKeys.length
+    && keys.every((key, index) => key === expectedKeys[index]);
+}
+
+async function runtimeControlChunks(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+): Promise<{ chunks: Uint8Array[]; byteLength: number }> {
+  const chunks: Uint8Array[] = [];
+  let byteLength = 0;
+  while (true) {
+    const chunk = await reader.read();
+    if (chunk.done) return { chunks, byteLength };
+    byteLength += chunk.value.byteLength;
+    if (byteLength > MAX_RUNTIME_CONTROL_BYTES) {
+      await reader.cancel();
+      throw new Error("Edge Runtime control response is too large");
+    }
+    chunks.push(chunk.value);
   }
-  return undefined;
+}
+
+function joinRuntimeControlChunks(chunks: Uint8Array[], byteLength: number): Uint8Array {
+  const body = new Uint8Array(byteLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return body;
 }
 
 async function readRuntimeControlBody(response: Response): Promise<Record<string, unknown>> {
-  const bodyText = await response.text();
-  if (!bodyText) return {};
+  const declaredLength = Number(response.headers.get("content-length") || "0");
+  if (declaredLength > MAX_RUNTIME_CONTROL_BYTES) {
+    throw new Error("Edge Runtime control response is too large");
+  }
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error("Edge Runtime control response is empty");
   try {
-    const parsed = JSON.parse(bodyText);
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : {};
-  } catch {
-    return {};
+    const { chunks, byteLength } = await runtimeControlChunks(reader);
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(
+      joinRuntimeControlChunks(chunks, byteLength),
+    );
+    const parsed = JSON.parse(text);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("Edge Runtime control response must be an object");
+    }
+    return parsed as Record<string, unknown>;
+  } finally {
+    reader.releaseLock();
   }
 }
 
-function preheatAcknowledgementError(
-  body: Record<string, unknown>,
-  requestedVersion?: string,
-): string | undefined {
-  const runtimeError = runtimePreheatError(body);
-  if (requestedVersion === undefined) {
-    return body.success === false
-      ? runtimeError ?? "Edge Runtime reported preheat failure"
-      : undefined;
-  }
-  if (body.success !== true) {
-    return runtimeError ?? "Edge Runtime did not report successful version readiness";
-  }
-  if (body.version !== requestedVersion) {
-    return "Edge Runtime did not confirm the requested function version";
-  }
-  return undefined;
+function emptyPreheatPool(): EdgeFunctionPreheatPoolResult {
+  return { attempted: 0, succeeded: 0, cacheHits: 0, cacheMisses: 0, durationMs: 0 };
+}
+
+function publicPreheatPool(
+  pool: ValidatedEdgeRuntimePreheat["foreground"] | undefined,
+): EdgeFunctionPreheatPoolResult {
+  if (!pool) return emptyPreheatPool();
+  return {
+    attempted: pool.attempted,
+    succeeded: pool.succeeded,
+    cacheHits: pool.cacheHits,
+    cacheMisses: pool.cacheMisses,
+    durationMs: pool.durationMs,
+  };
 }
 
 async function preheatRuntimeFunction(
-  ref: string,
-  slug: string,
-  requestedVersion?: string,
-): Promise<EdgeFunctionPreheatResult> {
+  expected: ExpectedEdgeRuntimePreheat,
+): Promise<RuntimePreheatOutcome> {
   const start = performance.now();
   try {
     const runtimeUrl = `http://${config.edgeRuntimeInternal}`;
     const headers = runtimeInternalHeaders();
-    if (requestedVersion) {
-      headers["x-supacloud-function-version"] = requestedVersion;
+    if (expected.requestedVersion) {
+      headers["x-supacloud-function-version"] = expected.requestedVersion;
     }
-    const preheatRes = await fetch(`${runtimeUrl}/preheat/${ref}/${slug}`, {
-      method: "POST",
-      headers,
-      signal: AbortSignal.timeout(10_000),
-    });
+    if (expected.activationId) {
+      headers["x-supacloud-activation-id"] = expected.activationId;
+    }
+    const preheatRes = await fetch(
+      `${runtimeUrl}/preheat/${expected.projectRef}/${expected.functionSlug}`,
+      {
+        method: "POST",
+        headers,
+        redirect: "error",
+        signal: AbortSignal.timeout(10_000),
+      },
+    );
     const durationMs = Math.round(performance.now() - start);
-    const bodyRecord = await readRuntimeControlBody(preheatRes);
-    const foreground = normalizePreheatPool(bodyRecord.foreground);
-    const background = normalizePreheatPool(bodyRecord.background);
-    const acknowledgementError = preheatAcknowledgementError(bodyRecord, requestedVersion);
+    const acknowledgement = validateEdgeRuntimePreheat(
+      await readRuntimeControlBody(preheatRes),
+      expected,
+    );
+    const foreground = publicPreheatPool(acknowledgement?.foreground);
+    const background = publicPreheatPool(acknowledgement?.background);
+    const acknowledgementError = acknowledgement
+      ? undefined
+      : "Edge Runtime returned an invalid preheat attestation";
     return {
-      ok: preheatRes.ok && acknowledgementError === undefined,
-      status: preheatRes.status,
-      duration_ms: durationMs,
-      attempted: foreground.attempted + background.attempted,
-      succeeded: foreground.succeeded + background.succeeded,
-      cache_hits: foreground.cacheHits + background.cacheHits,
-      cache_misses: foreground.cacheMisses + background.cacheMisses,
-      foreground,
-      background,
-      error: acknowledgementError,
+      summary: {
+        ok: preheatRes.ok && acknowledgement !== null,
+        status: preheatRes.status,
+        duration_ms: durationMs,
+        attempted: foreground.attempted + background.attempted,
+        succeeded: foreground.succeeded + background.succeeded,
+        cache_hits: foreground.cacheHits + background.cacheHits,
+        cache_misses: foreground.cacheMisses + background.cacheMisses,
+        foreground,
+        background,
+        error: acknowledgementError,
+      },
+      attestation: acknowledgement,
     };
   } catch (error) {
     return {
-      ok: false,
-      duration_ms: Math.round(performance.now() - start),
-      attempted: 0,
-      succeeded: 0,
-      cache_hits: 0,
-      cache_misses: 0,
-      error: error instanceof Error ? error.message : String(error),
+      summary: {
+        ok: false,
+        duration_ms: Math.round(performance.now() - start),
+        attempted: 0,
+        succeeded: 0,
+        cache_hits: 0,
+        cache_misses: 0,
+        error: error instanceof Error ? error.message : String(error),
+      },
+      attestation: null,
     };
   }
 }
@@ -1172,104 +1421,143 @@ function runtimeInternalHeaders(): Record<string, string> {
   return { "x-supacloud-internal-auth": config.edgeRuntimeMasterKey || config.masterToken };
 }
 
-function isRuntimeInvalidationPoolAck(value: unknown): boolean {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const pool = value as Record<string, unknown>;
-  if (![pool.attempted, pool.succeeded, pool.invalidated].every(
-    (metric) => Number.isSafeInteger(metric) && Number(metric) >= 0,
-  )) return false;
-  return pool.succeeded === pool.attempted;
+const RUNTIME_FUNCTION_ACTIVATION_SCHEMA =
+  "supacloud.edge-runtime-function-activation.v1";
+const RUNTIME_FUNCTION_ACTIVATION_KEYS = [
+  "schema",
+  "activation_id",
+  "state",
+  "runtime_instance_id",
+  "foreground_generation",
+  "background_generation",
+  "cancelled_queued",
+] as const;
+const RUNTIME_FUNCTION_ACTIVATION_STATES: readonly RuntimeFunctionActivationState[] = [
+  "fenced",
+  "commit_pending",
+  "committed",
+  "aborted",
+  "uncertain",
+];
+
+function runtimeFunctionActivationAck(
+  payload: Record<string, unknown>,
+  activationId: string,
+): RuntimeFunctionActivationAck | null {
+  if (!hasExactRecordKeys(payload, RUNTIME_FUNCTION_ACTIVATION_KEYS)
+    || payload.schema !== RUNTIME_FUNCTION_ACTIVATION_SCHEMA
+    || payload.activation_id !== activationId
+    || !RUNTIME_FUNCTION_ACTIVATION_STATES.includes(
+      payload.state as RuntimeFunctionActivationState,
+    )
+    || typeof payload.runtime_instance_id !== "string"
+    || !RUNTIME_INSTANCE_ID_PATTERN.test(payload.runtime_instance_id)
+    || !Number.isSafeInteger(payload.foreground_generation)
+    || Number(payload.foreground_generation) < 0
+    || !Number.isSafeInteger(payload.background_generation)
+    || Number(payload.background_generation) < 0
+    || !Number.isSafeInteger(payload.cancelled_queued)
+    || Number(payload.cancelled_queued) < 0) return null;
+  return {
+    activationId,
+    state: payload.state as RuntimeFunctionActivationState,
+    runtimeInstanceId: payload.runtime_instance_id,
+    foregroundGeneration: payload.foreground_generation as number,
+    backgroundGeneration: payload.background_generation as number,
+    cancelledQueued: payload.cancelled_queued as number,
+  };
 }
 
-function runtimeInvalidationAckError(
-  body: Record<string, unknown>,
-  expectedFunctionId: string,
-): string | undefined {
-  if (body.invalidated !== expectedFunctionId) {
-    return "Edge Runtime did not confirm the invalidation target";
-  }
-  if (body.success !== undefined && body.success !== true) {
-    return "Edge Runtime reported invalidation failure";
-  }
-  if (body.config_cache_evicted !== true) {
-    return "Edge Runtime did not confirm function config eviction";
-  }
-  if (body.module_scope !== "legacy-base-only" || body.immutable_versions_retained !== true) {
-    return "Edge Runtime returned an unsafe module invalidation scope";
-  }
-  if (!isRuntimeInvalidationPoolAck(body.foreground)
-    || !isRuntimeInvalidationPoolAck(body.background)) {
-    return "Edge Runtime returned an invalid invalidation acknowledgement";
-  }
-  return undefined;
-}
+type RuntimeFunctionActivationRequest = {
+  ref: string;
+  slug: string;
+  activationId: string;
+  action: "begin" | "commit" | "abort" | "status";
+};
 
-async function invalidateRuntimeFunction(
-  ref: string,
-  slug: string,
-): Promise<EdgeFunctionRuntimeControlResult> {
+async function runtimeFunctionActivationControl(
+  request: RuntimeFunctionActivationRequest,
+): Promise<RuntimeFunctionActivationControl> {
   try {
-    const runtimeUrl = `http://${config.edgeRuntimeInternal}`;
-    const res = await fetch(`${runtimeUrl}/invalidate/${ref}/${slug}`, {
-      method: "POST",
-      headers: runtimeInternalHeaders(),
-      signal: AbortSignal.timeout(2000),
-    });
-    const bodyRecord = await readRuntimeControlBody(res);
-    const acknowledgementError = runtimeInvalidationAckError(
-      bodyRecord,
-      `${ref}_${slug}`,
+    const response = await fetch(
+      `http://${config.edgeRuntimeInternal}/internal/function-activation/${request.ref}/${request.slug}/${request.action}`,
+      {
+        method: request.action === "status" ? "GET" : "POST",
+        headers: {
+          ...runtimeInternalHeaders(),
+          "x-supacloud-activation-id": request.activationId,
+        },
+        redirect: "error",
+        signal: AbortSignal.timeout(5_000),
+      },
+    );
+    const acknowledgement = runtimeFunctionActivationAck(
+      await readRuntimeControlBody(response),
+      request.activationId,
     );
     return {
-      ok: res.ok && acknowledgementError === undefined,
-      status: res.status,
-      error: acknowledgementError,
+      ok: response.ok && acknowledgement !== null,
+      status: response.status,
+      acknowledgement,
+      ...(acknowledgement === null
+        ? { error: "Edge Runtime returned an invalid Function activation acknowledgement" }
+        : {}),
     };
-  } catch (error) {
+  } catch (error: unknown) {
     return {
       ok: false,
+      acknowledgement: null,
       error: error instanceof Error ? error.message : String(error),
     };
   }
 }
 
-async function invalidateCache(
+async function settleRuntimeFunctionActivation(
   ref: string,
   slug: string,
-): Promise<EdgeFunctionRuntimeControlResult> {
-  // 1. Clear the transform file cache
-  const cacheDir = path.join(getFunctionsRoot(), ".cache", ref);
-  for (const ext of [".ts", ".js"]) {
-    try {
-      await fs.unlink(path.join(cacheDir, `${slug}${ext}`));
-    } catch {
-      /* may not exist */
-    }
-  }
-
-  // 2. Notify Edge Runtime to evict the module from Worker thread caches
-  const result = await invalidateRuntimeFunction(ref, slug);
-  if (!result.ok) {
-    logger.warn(`[EdgeFunction] Runtime invalidate failed`, {
+  state: FunctionManifestState,
+): Promise<void> {
+  const activationId = state.authority?.activation_id;
+  if (!activationId) return;
+  const status = await requiredRuntimeActivationState({
+    ref,
+    slug,
+    activationId,
+    action: "status",
+  }, ["committed", "commit_pending"]);
+  await confirmEdgeFunctionActivationManifestDurable(
+    getConfigPath(ref, slug),
+    activationId,
+  );
+  if (status.state === "commit_pending") {
+    await requiredRuntimeActivationState({
       ref,
       slug,
-      status: result.status,
-      error: result.error,
-    });
+      activationId,
+      action: "commit",
+    }, ["committed"]);
   }
-  return result;
 }
 
-function requireRuntimeControl(
-  control: EdgeFunctionRuntimeControlResult,
+function throwRuntimeControlFailure(
+  control: RuntimeControlStatus,
   operation: string,
-): void {
-  if (control.ok) return;
-  const status = control.status ? ` (HTTP ${control.status})` : "";
+): never {
+  const status = control.status === undefined ? "" : ` (HTTP ${control.status})`;
   throw new ServiceUnavailableError(
     "Edge Runtime function activation",
     `${operation}${status}: ${control.error || "control request failed"}`,
   );
+}
+
+function requiredPreheatAttestation(
+  preheat: RuntimePreheatOutcome,
+  operation: string,
+): ValidatedEdgeRuntimePreheat {
+  if (!preheat.summary.ok || !preheat.attestation) {
+    throwRuntimeControlFailure(preheat.summary, operation);
+  }
+  return preheat.attestation;
 }
 
 async function readConfiguredFunctionVersion(ref: string, slug: string): Promise<number> {
@@ -1400,11 +1688,15 @@ function parseLegacyVersionedSourceDir(entry: string): { slug: string; version: 
   return { slug: match[1], version: match[2] };
 }
 
+function isMissingPathError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error && error.code === "ENOENT";
+}
+
 async function directoryEntries(dir: string): Promise<string[]> {
   try {
     return await fs.readdir(dir);
   } catch (error: unknown) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    if (isMissingPathError(error)) return [];
     throw error;
   }
 }
@@ -1420,7 +1712,6 @@ async function removeFunctionArtifacts(ref: string, slug: string): Promise<void>
   const exactTargets = [
     getFuncPath(ref, safeSlug),
     getSrcPath(ref, safeSlug),
-    getConfigPath(ref, safeSlug),
     getLegacySourceDir(ref, safeSlug),
     getVersionRoot(ref, safeSlug),
     ...legacyArtifacts.map((entry) => resolveInside(dir, entry)),
@@ -1430,48 +1721,91 @@ async function removeFunctionArtifacts(ref: string, slug: string): Promise<void>
   ));
 }
 
+async function functionProjectDirectories(): Promise<Dirent[]> {
+  try {
+    return await fs.readdir(getFunctionsRoot(), { withFileTypes: true });
+  } catch (error: unknown) {
+    if (isMissingPathError(error)) return [];
+    throw error;
+  }
+}
+
+async function assertLegacyMigrationSource(
+  sourcePath: string,
+  expectedType: "file" | "directory",
+): Promise<void> {
+  const metadata = await fs.lstat(sourcePath);
+  const expectedTypePresent = expectedType === "file"
+    ? metadata.isFile()
+    : metadata.isDirectory();
+  if (!expectedTypePresent) {
+    throw new Error("Legacy Function migration source has an invalid type");
+  }
+}
+
+async function migrateLegacyVersionedFile(
+  ref: string,
+  directory: string,
+  entry: string,
+  parsed: { slug: string; version: string; kind: "js" | "src" },
+): Promise<void> {
+  const slug = validateSlug(parsed.slug);
+  const version = canonicalFunctionVersion(parsed.version);
+  const sourcePath = resolveInside(directory, entry);
+  await preflightFunctionMutation(ref, slug);
+  await assertLegacyMigrationSource(sourcePath, "file");
+  const targetPath = parsed.kind === "js"
+    ? getVersionedFuncPath(ref, slug, version)
+    : getVersionedSrcPath(ref, slug, version);
+  await fs.mkdir(path.dirname(targetPath), { recursive: true, mode: 0o755 });
+  await preflightFunctionMutation(ref, slug);
+  await fs.rm(targetPath, { force: true });
+  await fs.rename(sourcePath, targetPath);
+}
+
+async function migrateLegacyVersionedSourceDirectory(
+  ref: string,
+  directory: string,
+  entry: string,
+  parsed: { slug: string; version: string },
+): Promise<void> {
+  const slug = validateSlug(parsed.slug);
+  const version = canonicalFunctionVersion(parsed.version);
+  const sourceDirectory = resolveInside(directory, entry);
+  await preflightFunctionMutation(ref, slug);
+  await assertLegacyMigrationSource(sourceDirectory, "directory");
+  const versionDirectory = getFunctionVersionDir(ref, slug, version);
+  const targetDirectory = assertInside(versionDirectory, path.join(versionDirectory, "src"));
+  await fs.mkdir(path.dirname(targetDirectory), { recursive: true, mode: 0o755 });
+  await preflightFunctionMutation(ref, slug);
+  await fs.rm(targetDirectory, { recursive: true, force: true });
+  await fs.rename(sourceDirectory, targetDirectory);
+}
+
+async function migrateLegacyProjectArtifacts(ref: string): Promise<number> {
+  const directory = getFuncDir(ref);
+  let moved = 0;
+  for (const entry of await directoryEntries(directory)) {
+    const versionedFile = parseLegacyVersionedFile(entry);
+    if (versionedFile) {
+      await migrateLegacyVersionedFile(ref, directory, entry, versionedFile);
+      moved += 1;
+      continue;
+    }
+    const sourceDirectory = parseLegacyVersionedSourceDir(entry);
+    if (!sourceDirectory) continue;
+    await migrateLegacyVersionedSourceDirectory(ref, directory, entry, sourceDirectory);
+    moved += 1;
+  }
+  return moved;
+}
+
 export async function migrateLegacyVersionArtifacts(): Promise<{ moved: number }> {
   let moved = 0;
-  const projectDirs = await fs.readdir(getFunctionsRoot(), { withFileTypes: true }).catch(() => []);
-
-  for (const projectDir of projectDirs) {
-    if (!projectDir.isDirectory() || projectDir.name === ".cache") continue;
-
-    const ref = projectDir.name;
-    const dir = getFuncDir(ref);
-    const entries = await fs.readdir(dir).catch(() => []);
-
-    for (const entry of entries) {
-      const parsed = parseLegacyVersionedFile(entry);
-      if (parsed) {
-        const sourcePath = resolveInside(dir, entry);
-        const targetPath = parsed.kind === "js"
-          ? getVersionedFuncPath(ref, parsed.slug, parsed.version)
-          : getVersionedSrcPath(ref, parsed.slug, parsed.version);
-
-        await fs.mkdir(path.dirname(targetPath), { recursive: true });
-        await fs.rm(targetPath, { force: true }).catch(() => {});
-        await fs.rename(sourcePath, targetPath);
-        moved += 1;
-        continue;
-      }
-
-      const parsedSourceDir = parseLegacyVersionedSourceDir(entry);
-      if (!parsedSourceDir) continue;
-
-      const slug = validateSlug(parsedSourceDir.slug);
-      const version = canonicalFunctionVersion(parsedSourceDir.version);
-      const sourceDir = resolveInside(dir, entry);
-      const versionDir = getFunctionVersionDir(ref, slug, version);
-      const targetDir = assertInside(versionDir, path.join(versionDir, "src"));
-
-      await fs.mkdir(path.dirname(targetDir), { recursive: true });
-      await fs.rm(targetDir, { recursive: true, force: true }).catch(() => {});
-      await fs.rename(sourceDir, targetDir);
-      moved += 1;
-    }
+  for (const projectDirectory of await functionProjectDirectories()) {
+    if (!projectDirectory.isDirectory() || projectDirectory.name === ".cache") continue;
+    moved += await migrateLegacyProjectArtifacts(validateRef(projectDirectory.name));
   }
-
   return { moved };
 }
 
@@ -1486,7 +1820,8 @@ async function immutableFunctionVersion(
     versionRoot,
     path.join(versionRoot, `.pending-${version}-${crypto.randomUUID()}`),
   );
-  await fs.mkdir(versionRoot, { recursive: true });
+  await fs.mkdir(versionRoot, { recursive: true, mode: 0o755 });
+  await preflightFunctionMutation(request.ref, request.slug);
   try {
     const prepared = await prepareImmutableFunctionVersion(request, version, stageDir, finalDir);
     const functionConfig = activatedFunctionConfig(currentConfig, request.config, prepared);
@@ -1548,45 +1883,217 @@ function restoredFunctionConfig(
 type FunctionActivationCommit = {
   ref: string;
   slug: string;
-  previousConfig: EdgeFunctionConfig;
-  hadManifest: boolean;
+  previousState: FunctionManifestState;
   nextConfig: EdgeFunctionConfig;
+  artifactSha256: string | null;
 };
 
-async function restoreFunctionManifest(commit: FunctionActivationCommit): Promise<void> {
-  if (commit.hadManifest) {
-    await writeFunctionConfigManifest(commit.ref, commit.slug, commit.previousConfig);
-  } else {
-    await fs.rm(getConfigPath(commit.ref, commit.slug), { force: true });
+type PreparedFunctionActivation = FunctionActivationCommit & {
+  authority: EdgeFunctionActivationAuthority;
+};
+
+function activationConfigRecord(config: EdgeFunctionConfig): Record<string, unknown> {
+  return { ...config };
+}
+
+function nextFunctionActivationAuthority(
+  previous: FunctionManifestState,
+  artifactSha256: string | null,
+): EdgeFunctionActivationAuthority {
+  const targetState = artifactSha256 === null ? "absent" : "active";
+  return {
+    schema: EDGE_FUNCTION_ACTIVATION_SCHEMA,
+    activation_id: crypto.randomUUID(),
+    activation_generation: (previous.authority?.activation_generation ?? 0) + 1,
+    previous_activation_id: previous.authority?.activation_id ?? null,
+    target_state: targetState,
+    artifact_sha256: artifactSha256,
+  };
+}
+
+async function preparedFunctionActivation(
+  commit: FunctionActivationCommit,
+): Promise<PreparedFunctionActivation> {
+  const authority = nextFunctionActivationAuthority(
+    commit.previousState,
+    commit.artifactSha256,
+  );
+  await writeEdgeFunctionActivationGeneration({
+    projectDirectory: getFuncDir(commit.ref),
+    functionSlug: commit.slug,
+    config: activationConfigRecord(commit.nextConfig),
+    authority,
+  });
+  return { ...commit, authority };
+}
+
+function runtimeActivationFailure(message: string): ServiceUnavailableError {
+  return new ServiceUnavailableError("Edge Runtime function activation", message);
+}
+
+async function requiredRuntimeActivationState(
+  request: RuntimeFunctionActivationRequest,
+  acceptedStates: readonly RuntimeFunctionActivationState[],
+): Promise<RuntimeFunctionActivationAck> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const control = await runtimeFunctionActivationControl(request);
+    const state = control.acknowledgement?.state;
+    if (control.ok && control.acknowledgement && state && acceptedStates.includes(state)) {
+      return control.acknowledgement;
+    }
+    const readback = await runtimeFunctionActivationControl({
+      ...request,
+      action: "status",
+    });
+    const readbackState = readback.acknowledgement?.state;
+    if (readback.ok
+      && readback.acknowledgement
+      && readbackState
+      && acceptedStates.includes(readbackState)) {
+      return readback.acknowledgement;
+    }
+    if (readbackState === "uncertain") break;
+  }
+  throw runtimeActivationFailure("runtime activation state is uncertain");
+}
+
+async function beginPreparedFunctionActivation(
+  activation: PreparedFunctionActivation,
+): Promise<RuntimeFunctionActivationAck> {
+  return requiredRuntimeActivationState({
+    ref: activation.ref,
+    slug: activation.slug,
+    activationId: activation.authority.activation_id,
+    action: "begin",
+  }, ["fenced"]);
+}
+
+function assertPreheatFollowsFence(
+  fence: RuntimeFunctionActivationAck,
+  preheat: ValidatedEdgeRuntimePreheat,
+): void {
+  if (preheat.identity.runtimeInstanceId !== fence.runtimeInstanceId
+    || preheat.foreground.generation !== fence.foregroundGeneration + 1
+    || preheat.background.generation !== fence.backgroundGeneration + 1) {
+    throw runtimeActivationFailure(
+      "runtime instance or worker generation changed after activation fence",
+    );
   }
 }
 
-async function commitFunctionActivation(commit: FunctionActivationCommit): Promise<void> {
-  await writeFunctionConfigManifest(commit.ref, commit.slug, commit.nextConfig);
-  const invalidation = await invalidateCache(commit.ref, commit.slug);
-  if (invalidation.ok) return;
-  await restoreFunctionManifest(commit);
-  const rollbackInvalidation = await invalidateCache(commit.ref, commit.slug);
-  if (!rollbackInvalidation.ok) {
-    const status = rollbackInvalidation.status ? `HTTP ${rollbackInvalidation.status}: ` : "";
-    throw new ServiceUnavailableError(
-      "Edge Runtime function activation",
-      `activation manifest was restored but runtime state is uncertain; rollback invalidation failed (${status}${rollbackInvalidation.error || "control request failed"})`,
-    );
+async function preheatPreparedFunctionActivation(
+  activation: PreparedFunctionActivation,
+  fence: RuntimeFunctionActivationAck,
+): Promise<EdgeFunctionPreheatResult | null> {
+  if (activation.authority.target_state === "absent") return null;
+  const requestedVersion = activation.nextConfig.version;
+  if (!requestedVersion || !activation.artifactSha256) {
+    throw new Error("Active Function activation is missing its immutable artifact identity");
   }
-  requireRuntimeControl(invalidation, "cache invalidation");
+  const readiness = await preheatRuntimeFunction({
+    projectRef: activation.ref,
+    functionSlug: activation.slug,
+    requestedVersion,
+    resolvedVersion: requestedVersion,
+    artifactSha256: activation.artifactSha256,
+    verifyJwt: activation.nextConfig.verify_jwt,
+    activationId: activation.authority.activation_id,
+  });
+  const attestation = requiredPreheatAttestation(readiness, "candidate readiness");
+  assertPreheatFollowsFence(fence, attestation);
+  return readiness.summary;
+}
+
+async function publishPreparedFunctionActivation(
+  activation: PreparedFunctionActivation,
+): Promise<void> {
+  await replaceEdgeFunctionActivationManifest({
+    manifestPath: getConfigPath(activation.ref, activation.slug),
+    config: activationConfigRecord(activation.nextConfig),
+    authority: activation.authority,
+  });
+}
+
+async function currentManifestIsActivation(
+  activation: PreparedFunctionActivation,
+): Promise<boolean> {
+  const current = await readFunctionManifestState(activation.ref, activation.slug);
+  return current.authority?.activation_id === activation.authority.activation_id;
+}
+
+async function commitPreparedFunctionActivation(
+  activation: PreparedFunctionActivation,
+): Promise<void> {
+  await requiredRuntimeActivationState({
+    ref: activation.ref,
+    slug: activation.slug,
+    activationId: activation.authority.activation_id,
+    action: "commit",
+  }, ["committed"]);
+}
+
+async function abortPreparedFunctionActivation(
+  activation: PreparedFunctionActivation,
+): Promise<RuntimeFunctionActivationState> {
+  const acknowledgement = await requiredRuntimeActivationState({
+    ref: activation.ref,
+    slug: activation.slug,
+    activationId: activation.authority.activation_id,
+    action: "abort",
+  }, ["aborted", "committed"]);
+  return acknowledgement.state;
+}
+
+async function commitFunctionActivation(
+  commit: FunctionActivationCommit,
+): Promise<{ config: EdgeFunctionConfigSnapshot; preheat: EdgeFunctionPreheatResult | null }> {
+  const activation = await preparedFunctionActivation(commit);
+  const fence = await beginPreparedFunctionActivation(activation);
+  let preheat: EdgeFunctionPreheatResult | null = null;
+  let published = false;
+  try {
+    preheat = await preheatPreparedFunctionActivation(activation, fence);
+    try {
+      await publishPreparedFunctionActivation(activation);
+      published = true;
+    } catch (error: unknown) {
+      if (error instanceof EdgeFunctionActivationDurabilityError) throw error;
+      published = await currentManifestIsActivation(activation);
+      if (!published) throw error;
+    }
+    await commitPreparedFunctionActivation(activation);
+  } catch (error: unknown) {
+    if (error instanceof EdgeFunctionActivationDurabilityError) {
+      throw runtimeActivationFailure("manifest durability is uncertain");
+    }
+    if (published || await currentManifestIsActivation(activation)) {
+      await commitPreparedFunctionActivation(activation);
+    } else {
+      const state = await abortPreparedFunctionActivation(activation);
+      if (state === "committed") await commitPreparedFunctionActivation(activation);
+      else throw error;
+    }
+  }
+  return {
+    config: {
+      ...activation.nextConfig,
+      activation_id: activation.authority.activation_id,
+    },
+    preheat,
+  };
 }
 
 function releaseResult(
   prepared: PreparedFunctionVersion,
   readiness: EdgeFunctionPreheatResult,
-  functionConfig: EdgeFunctionConfig,
+  functionConfig: EdgeFunctionConfigSnapshot,
   previousActiveVersion: EdgeFunctionActiveVersion,
 ): EdgeFunctionDeployResult {
   return {
     success: true,
     previous_active_version: previousActiveVersion,
     active_version: prepared.version,
+    activation_id: functionConfig.activation_id,
     version: prepared.version,
     bundled: prepared.bundled,
     files: prepared.files,
@@ -1604,29 +2111,36 @@ function releaseResult(
 async function deployFunctionRelease(
   request: EdgeFunctionReleaseRequest,
   previousActiveVersion: EdgeFunctionActiveVersion,
+  initialState: FunctionManifestState,
 ): Promise<EdgeFunctionDeployResult> {
-  let currentConfig = await readFunctionConfig(request.ref, request.slug);
-  const hadManifest = await functionConfigExists(request.ref, request.slug);
-  currentConfig = await ensureCurrentRollbackSnapshot({
+  const currentState = await ensureCurrentRollbackSnapshot({
     ref: request.ref,
     slug: request.slug,
-    currentConfig,
-    hadManifest,
+    currentState: initialState,
   });
   const version = await computeNextFunctionVersion(request.ref, request.slug);
-  const release = await immutableFunctionVersion(request, version, currentConfig);
-  const readiness = await preheatRuntimeFunction(request.ref, request.slug, version);
-  requireRuntimeControl(readiness, "version readiness");
-
-  await commitFunctionActivation({
+  const release = await immutableFunctionVersion(request, version, currentState.config);
+  const activation = await commitFunctionActivation({
     ref: request.ref,
     slug: request.slug,
-    previousConfig: currentConfig,
-    hadManifest: hadManifest || currentConfig.version === "0",
+    previousState: currentState,
     nextConfig: release.config,
+    artifactSha256: release.prepared.artifactSha256,
   });
-  recordDeployMetrics(release.prepared.bundleSizeBytes, release.prepared.importCount, readiness);
-  return releaseResult(release.prepared, readiness, release.config, previousActiveVersion);
+  if (!activation.preheat) {
+    throw new Error("Active Function deployment did not produce a readiness attestation");
+  }
+  recordDeployMetrics(
+    release.prepared.bundleSizeBytes,
+    release.prepared.importCount,
+    activation.preheat,
+  );
+  return releaseResult(
+    release.prepared,
+    activation.preheat,
+    activation.config,
+    previousActiveVersion,
+  );
 }
 
 function failedDeployResult(
@@ -1643,10 +2157,12 @@ function failedDeployResult(
 async function deployLatestFunctionRelease(
   request: EdgeFunctionReleaseRequest,
 ): Promise<EdgeFunctionDeployResult> {
-  const releaseLock = await acquireFunctionDeployLock(request.ref, request.slug);
+  const releaseLock = await preflightAndAcquireFunctionDeployLock(request.ref, request.slug);
   try {
-    const activeVersion = await activeFunctionVersion(request.ref, request.slug);
-    return await deployFunctionRelease(request, activeVersion);
+    const state = await readFunctionManifestState(request.ref, request.slug);
+    await settleRuntimeFunctionActivation(request.ref, request.slug, state);
+    const activeVersion = await activeVersionFromState(request.ref, request.slug, state);
+    return await deployFunctionRelease(request, activeVersion, state);
   } catch (error) {
     return failedDeployResult(request, error);
   } finally {
@@ -1660,8 +2176,16 @@ export const edgeFunctionService = {
   },
 
   /** Read function config (verify_jwt, etc.) */
-  async getConfig(ref: string, slug: string): Promise<EdgeFunctionConfig> {
-    return readFunctionConfig(ref, slug);
+  async getConfig(ref: string, slug: string): Promise<EdgeFunctionConfigSnapshot> {
+    return functionConfigSnapshot(await readFunctionManifestState(ref, slug));
+  },
+
+  async getState(ref: string, slug: string): Promise<EdgeFunctionStateSnapshot> {
+    const state = await readFunctionManifestState(ref, slug);
+    return {
+      config: functionConfigSnapshot(state),
+      active_version: await activeVersionFromState(ref, slug, state),
+    };
   },
 
   /** Update function config */
@@ -1669,36 +2193,53 @@ export const edgeFunctionService = {
     ref: string,
     slug: string,
     configPatch: Partial<EdgeFunctionConfig>,
-  ): Promise<EdgeFunctionConfig> {
-    const releaseLock = await acquireFunctionDeployLock(ref, slug);
+    expectedActivationId: EdgeFunctionActivationId,
+  ): Promise<EdgeFunctionConfigSnapshot> {
+    const releaseLock = await preflightAndAcquireFunctionDeployLock(ref, slug);
     try {
-      const currentConfig = await readFunctionConfig(ref, slug);
-      const merged = { ...currentConfig, ...configPatch };
-      await commitFunctionActivation({
+      const expectedState = await assertExpectedActivationIdentity(
         ref,
         slug,
-        previousConfig: currentConfig,
-        hadManifest: await functionConfigExists(ref, slug),
+        expectedActivationId,
+      );
+      await settleRuntimeFunctionActivation(ref, slug, expectedState);
+      const currentState = await ensureCurrentRollbackSnapshot({
+        ref,
+        slug,
+        currentState: expectedState,
+      });
+      const merged = { ...currentState.config, ...configPatch };
+      const activation = await commitFunctionActivation({
+        ref,
+        slug,
+        previousState: currentState,
         nextConfig: merged,
+        artifactSha256: await functionActivationArtifactSha256(ref, slug, currentState),
       });
       logger.info(
         `[EdgeFunction] Config updated for ${slug}@${ref}: verify_jwt=${merged.verify_jwt}, background_routes=${(merged.background_routes || []).length}`,
       );
-      return merged;
+      return activation.config;
     } finally {
       releaseLock();
     }
   },
 
   async deployRelease(request: EdgeFunctionDeploymentRequest): Promise<EdgeFunctionDeployResult> {
-    const releaseLock = await acquireFunctionDeployLock(request.ref, request.slug);
+    const releaseLock = await preflightAndAcquireFunctionDeployLock(request.ref, request.slug);
     try {
-      const previousActiveVersion = await assertExpectedActiveVersion(
+      const expected = await assertExpectedFunctionState(
         request.ref,
         request.slug,
         request.expectedActiveVersion,
+        request.expectedActivationId,
       );
-      const deployed = await deployFunctionRelease(request, previousActiveVersion);
+      await settleRuntimeFunctionActivation(request.ref, request.slug, expected.state);
+      const deployed = await deployFunctionRelease(
+        request,
+        expected.activeVersion,
+        expected.state,
+      );
       logger.info(
         `[EdgeFunction] Deployed ${request.slug} for ${request.ref} (version=${deployed.version}, verify_jwt=${deployed.config?.verify_jwt}, size=${deployed.bundle_size_bytes}, imports=${deployed.import_count})`,
       );
@@ -1709,7 +2250,9 @@ export const edgeFunctionService = {
           success: false,
           error_code: error.code,
           expected_active_version: error.expectedActiveVersion,
+          expected_activation_id: error.expectedActivationId,
           active_version: error.activeVersion,
+          activation_id: error.activationId,
           error: error.message,
         };
       }
@@ -1788,7 +2331,6 @@ export const edgeFunctionService = {
     runtime_healthy: boolean;
     preheat_ok: boolean;
     preheat_status?: number;
-    preheat_body?: unknown;
     deploy_metrics: EdgeFunctionDeployMetrics;
     error?: string;
   }> {
@@ -1813,33 +2355,30 @@ export const edgeFunctionService = {
     }
 
     try {
-      const preheatRes = await fetch(`${runtimeUrl}/preheat/${ref}/${slug}`, {
-        method: "POST",
-        headers: runtimeInternalHeaders(),
-        signal: AbortSignal.timeout(5000),
-      });
-      let preheatBody: unknown = null;
-      try {
-        preheatBody = await preheatRes.json();
-      } catch {
-        preheatBody = await preheatRes.text();
+      if (!activeArtifactPath || !artifactExists) {
+        throw new Error("Function artifact is unavailable for readiness attestation");
       }
+      const readiness = await preheatRuntimeFunction({
+        projectRef: ref,
+        functionSlug: slug,
+        requestedVersion: null,
+        resolvedVersion: activeVersion,
+        artifactSha256: await sha256Hex(await Bun.file(activeArtifactPath).text()),
+        verifyJwt: cfg.verify_jwt,
+        activationId: cfg.activation_id === EDGE_FUNCTION_LEGACY_ACTIVATION_ID
+          ? null
+          : cfg.activation_id,
+      });
       return {
         runtime_url: runtimeUrl,
         active_version: activeVersion,
         active_artifact_path: activeArtifactPath,
         artifact_exists: artifactExists,
         runtime_healthy: runtimeHealthy,
-        preheat_ok:
-          preheatRes.ok &&
-          typeof preheatBody === "object" &&
-          preheatBody !== null &&
-          "success" in (preheatBody as Record<string, unknown>)
-            ? Boolean((preheatBody as Record<string, unknown>).success)
-            : preheatRes.ok,
-        preheat_status: preheatRes.status,
-        preheat_body: preheatBody,
+        preheat_ok: readiness.summary.ok,
+        preheat_status: readiness.summary.status,
         deploy_metrics: snapshotDeployMetrics(),
+        ...(readiness.summary.error ? { error: readiness.summary.error } : {}),
       };
     } catch (err) {
       return {
@@ -1861,9 +2400,10 @@ export const edgeFunctionService = {
 
   /** Read function bundled code (runtime version) */
   async read(ref: string, slug: string): Promise<string | null> {
-    const cfg = await this.getConfig(ref, slug);
-    if (cfg.version !== undefined) {
-      const versioned = await readVersionedFunctionCode(ref, slug, cfg.version);
+    const state = await readFunctionManifestState(ref, slug);
+    if (state.authority?.target_state === "absent") return null;
+    if (state.config.version !== undefined) {
+      const versioned = await readVersionedFunctionCode(ref, slug, state.config.version);
       if (versioned === null) throw new Error(EDGE_FUNCTION_ACTIVE_ARTIFACT_MISSING_MESSAGE);
       return versioned;
     }
@@ -1872,9 +2412,15 @@ export const edgeFunctionService = {
 
   /** Read function original source (for debugging) */
   async readSource(ref: string, slug: string): Promise<string | null> {
-    const cfg = await this.getConfig(ref, slug);
-    if (cfg.version !== undefined) {
-      return readVersionedFunctionSource(ref, slug, cfg.version, cfg.entrypoint);
+    const state = await readFunctionManifestState(ref, slug);
+    if (state.authority?.target_state === "absent") return null;
+    if (state.config.version !== undefined) {
+      return readVersionedFunctionSource(
+        ref,
+        slug,
+        state.config.version,
+        state.config.entrypoint,
+      );
     }
     return readOptionalFunctionFile(getSrcPath(ref, slug));
   },
@@ -1957,36 +2503,39 @@ export const edgeFunctionService = {
     slug: string,
     version: string,
     expectedActiveVersion: EdgeFunctionActiveVersion,
+    expectedActivationId: EdgeFunctionActivationId,
   ): Promise<EdgeFunctionActivationResult | null> {
-    const releaseLock = await acquireFunctionDeployLock(ref, slug);
+    const releaseLock = await preflightAndAcquireFunctionDeployLock(ref, slug);
     try {
-      const previousActiveVersion = await assertExpectedActiveVersion(
+      const expected = await assertExpectedFunctionState(
         ref,
         slug,
         expectedActiveVersion,
+        expectedActivationId,
       );
+      await settleRuntimeFunctionActivation(ref, slug, expected.state);
       const detail = await this.getVersion(ref, slug, version);
       if (!detail || !detail.has_bundle) return null;
+      if (detail.bundle_code === null) {
+        throw new Error("Function version artifact is unavailable for readiness attestation");
+      }
 
       const versionMetadata = await readFunctionVersionMetadata(ref, slug, version);
-      const readiness = await preheatRuntimeFunction(ref, slug, version);
-      requireRuntimeControl(readiness, "version readiness");
-
-      const currentConfig = await readFunctionConfig(ref, slug);
-      const hadManifest = await functionConfigExists(ref, slug);
-      const updated = restoredFunctionConfig(currentConfig, versionMetadata);
-      await commitFunctionActivation({
+      const updated = restoredFunctionConfig(expected.state.config, versionMetadata);
+      const artifactSha256 = await sha256Hex(detail.bundle_code);
+      const activation = await commitFunctionActivation({
         ref,
         slug,
-        previousConfig: currentConfig,
-        hadManifest,
+        previousState: expected.state,
         nextConfig: updated,
+        artifactSha256,
       });
       logger.info(`[EdgeFunction] Activated version ${version} for ${slug}@${ref}`);
       return {
-        previous_active_version: previousActiveVersion,
+        previous_active_version: expected.activeVersion,
         active_version: version,
-        config: updated,
+        activation_id: activation.config.activation_id,
+        config: activation.config,
       };
     } finally {
       releaseLock();
@@ -2030,22 +2579,41 @@ export const edgeFunctionService = {
   },
 
   /** Delete a function (both bundled and source) */
-  async remove(ref: string, slug: string): Promise<boolean> {
-    const releaseLock = await acquireFunctionDeployLock(ref, slug);
+  async remove(
+    ref: string,
+    slug: string,
+    expectedActivationId: EdgeFunctionActivationId,
+  ): Promise<EdgeFunctionActivationResult> {
+    const releaseLock = await preflightAndAcquireFunctionDeployLock(ref, slug);
     try {
-      await removeFunctionArtifacts(ref, slug);
-      const invalidation = await invalidateCache(ref, slug);
-      requireRuntimeControl(invalidation, "function deletion invalidation");
-      logger.info(`[EdgeFunction] Deleted ${slug} for ${ref}`);
-      return true;
-    } catch (err: unknown) {
-      if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-        logger.error(`[EdgeFunction] Failed to delete ${slug}`, {
+      const currentState = await assertExpectedActivationIdentity(
+        ref,
+        slug,
+        expectedActivationId,
+      );
+      await settleRuntimeFunctionActivation(ref, slug, currentState);
+      const previousActiveVersion = await activeVersionFromState(ref, slug, currentState);
+      const activation = await commitFunctionActivation({
+        ref,
+        slug,
+        previousState: currentState,
+        nextConfig: { ...DEFAULT_FUNCTION_CONFIG },
+        artifactSha256: null,
+      });
+      await removeFunctionArtifacts(ref, slug).catch((error: unknown) => {
+        logger.warn("[EdgeFunction] Deleted Function left inactive artifacts for cleanup", {
           ref,
-          error: err,
+          slug,
+          error: error instanceof Error ? error.message : String(error),
         });
-      }
-      return false;
+      });
+      logger.info(`[EdgeFunction] Deleted ${slug} for ${ref}`);
+      return {
+        previous_active_version: previousActiveVersion,
+        active_version: EDGE_FUNCTION_ABSENT_ACTIVE_VERSION,
+        activation_id: activation.config.activation_id,
+        config: activation.config,
+      };
     } finally {
       releaseLock();
     }

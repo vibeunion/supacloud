@@ -129,14 +129,20 @@ describe("HttpTransport retry policy", () => {
     );
 
     const unsafeRequests = [
-        ["POST", (transport: HttpTransport) => transport.post("/resource", { name: "test" })],
-        ["multipart POST", (transport: HttpTransport) => transport.postMultipart("/resource", new FormData())],
-        ["PATCH", (transport: HttpTransport) => transport.patch("/resource", { name: "test" })],
-        ["PUT", (transport: HttpTransport) => transport.put("/resource", { name: "test" })],
-        ["DELETE", (transport: HttpTransport) => transport.delete("/resource")],
+        ["POST", (transport: HttpTransport) => transport.post("/resource", { name: "test" }), 1],
+        ["multipart POST", (transport: HttpTransport) => transport.postMultipart("/resource", new FormData()), 1],
+        ["PATCH", (transport: HttpTransport) => transport.patch("/resource", { name: "test" }), 1],
+        ["release PATCH", (transport: HttpTransport) => transport.patchReleaseMutation("/resource", { name: "test" }), 2],
+        ["PUT", (transport: HttpTransport) => transport.put("/resource", { name: "test" }), 1],
+        ["DELETE", (transport: HttpTransport) => transport.delete("/resource"), 1],
+        ["release DELETE", (transport: HttpTransport) => transport.deleteReleaseMutation("/resource"), 2],
     ] as const;
 
-    test.each(unsafeRequests)("does not retry %s after a 5xx response", async (_method, request) => {
+    test.each(unsafeRequests)("does not retry %s after a 5xx response", async (
+        _method,
+        request,
+        expectedTimerCount,
+    ) => {
         let fetchCalls = 0;
         globalThis.fetch = (async () => {
             fetchCalls++;
@@ -147,10 +153,13 @@ describe("HttpTransport retry policy", () => {
 
         expect(response.status).toBe(503);
         expect(fetchCalls).toBe(1);
-        expect(clearedTimerIds).toHaveLength(1);
+        expect(clearedTimerIds).toHaveLength(expectedTimerCount);
     });
 
-    test.each(unsafeRequests)("does not retry %s after a retryable network error", async (_method, request) => {
+    test.each(unsafeRequests)("does not retry %s after a retryable network error", async (
+        _method,
+        request,
+    ) => {
         let fetchCalls = 0;
         globalThis.fetch = (async () => {
             fetchCalls++;
@@ -165,9 +174,24 @@ describe("HttpTransport retry policy", () => {
         expect(clearedTimerIds).toHaveLength(1);
     });
 
+    test("serializes an explicit DELETE request body", async () => {
+        let requestBody: BodyInit | null | undefined;
+        globalThis.fetch = (async (_url: RequestInfo | URL, options?: RequestInit) => {
+            requestBody = options?.body;
+            return Response.json({ success: true });
+        }) as unknown as typeof fetch;
+
+        const response = await createTransport().delete("/resource", {
+            expected_activation_id: "legacy",
+        });
+
+        expect(response.ok).toBe(true);
+        expect(requestBody).toBe(JSON.stringify({ expected_activation_id: "legacy" }));
+    });
+
     const transportFailureRequests = [
         ["GET", (transport: HttpTransport) => transport.get("/resource")],
-        ...unsafeRequests,
+        ...unsafeRequests.map(([method, request]) => [method, request] as const),
     ] as const;
 
     test.each(transportFailureRequests)("redacts %s transport error messages", async (_method, request) => {
@@ -334,6 +358,27 @@ describe("HttpTransport bounded GET responses", () => {
 });
 
 describe("HttpTransport release mutation response boundary", () => {
+    test.each([
+        ["POST", (transport: HttpTransport) => transport.postReleaseMutation("/resource", { expected: "1" })],
+        ["PATCH", (transport: HttpTransport) => transport.patchReleaseMutation("/resource", { expected: "1" })],
+        ["DELETE", (transport: HttpTransport) => transport.deleteReleaseMutation("/resource", { expected: "1" })],
+    ] as const)("bounds and redacts an oversized %s mutation response", async (method, request) => {
+        const secretSentinel = `service-role-${method.toLowerCase()}-response-secret`;
+        const structuredBody = JSON.stringify({ token: secretSentinel });
+        const body = `${" ".repeat(RELEASE_MUTATION_RESPONSE_MAX_BYTES + 1 - structuredBody.length)}${structuredBody}`;
+        let observedMethod: string | undefined;
+        globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+            observedMethod = init?.method;
+            return chunkedTextResponse(body, {}, 1024);
+        }) as unknown as typeof fetch;
+
+        const response = await request(createTransport());
+
+        expect(observedMethod).toBe(method);
+        expect(response).toMatchObject({ ok: false, status: 200, responseReadError: true });
+        expect(JSON.stringify(response)).not.toContain(secretSentinel);
+    });
+
     test("rejects an unserializable request before HTTP dispatch", async () => {
         let fetchCalls = 0;
         globalThis.fetch = (async () => {

@@ -1,5 +1,25 @@
 import { signOidcServiceRoleJwt } from "./project-jwt";
 import { normalizeProjectConfig } from "./project-config";
+import { decryptSecretIfNeeded } from "./secret-crypto";
+
+type StoredServiceRoleCredential = {
+  service_role_key?: string | null;
+  service_role_key_encrypted?: string | null;
+};
+
+function isJwtLike(value: string | null | undefined): value is string {
+  return typeof value === "string" && value.split(".").length === 3;
+}
+
+export function resolveStoredServiceRoleKey(
+  project: StoredServiceRoleCredential,
+): string | null {
+  if (isJwtLike(project.service_role_key)) return project.service_role_key;
+  if (!project.service_role_key_encrypted) return null;
+
+  const decryptedKey = decryptSecretIfNeeded(project.service_role_key_encrypted);
+  return isJwtLike(decryptedKey) ? decryptedKey : null;
+}
 
 function resolveOauthServerConfig(config: unknown): Record<string, unknown> {
   const projectConfig = normalizeProjectConfig(config);

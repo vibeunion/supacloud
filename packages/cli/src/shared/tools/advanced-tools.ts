@@ -28,6 +28,15 @@ import {
     releaseControlSuccess,
     type ReleaseControlToolResponse,
 } from "./release-control-response";
+import {
+    confirmedFunctionConfigMutation,
+    confirmedFunctionDeletion,
+    projectedFunctionIdentity,
+    projectedFunctionList,
+    validCommittedFunctionActivationId as validCommittedActivationId,
+    validObservedFunctionActivationId as validObservedActivationId,
+    type FunctionConfigInput as EdgeFunctionConfigInput,
+} from "./edge-function-response";
 
 const execFileAsync = promisify(execFile);
 const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/;
@@ -265,8 +274,13 @@ function activeFunctionVersionToken(input: unknown): string {
 const CANONICAL_FUNCTION_VERSION_PATTERN = /^(?:0|[1-9][0-9]*)$/;
 const POSITIVE_FUNCTION_VERSION_PATTERN = /^[1-9][0-9]*$/;
 const SAFE_FUNCTION_SLUG_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
+const FUNCTION_ACTIVATION_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const LEGACY_FUNCTION_ACTIVATION_ID = "legacy";
 const FUNCTION_ACTIVATION_ARGUMENTS = new Set([
-    "action", "ref", "slug", "version", "expected-active-version",
+    "action", "ref", "slug", "version", "expected-active-version", "expected-activation-id",
+]);
+const FUNCTION_IDENTITY_MUTATIONS = new Set([
+    "deploy", "deploy_bundle", "config", "activate", "delete",
 ]);
 const functionVersionSchema = Type.Optional(decodedSchema(
     Type.Union([
@@ -294,6 +308,11 @@ const expectedActiveVersionSchema = Type.Optional(decodedSchema(
     ]),
     parseExpectedActiveVersion,
 ));
+
+const expectedActivationIdSchema = Type.Optional(Type.Union([
+    Type.Literal(LEGACY_FUNCTION_ACTIVATION_ID),
+    Type.String({ pattern: FUNCTION_ACTIVATION_ID_PATTERN.source, minLength: 36, maxLength: 36 }),
+]));
 
 const secretListSchema = Type.Array(Type.Object({ name: Type.String(), value: Type.String() }));
 const ENVIRONMENT_SECRET_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]{0,255}$/;
@@ -428,11 +447,6 @@ function secretsForUpsert(
     return inlineSecrets;
 }
 
-type EdgeFunctionConfigInput = {
-    verify_jwt?: boolean;
-    background_routes?: string[];
-};
-
 const INVALID_FUNCTION_LIST_RESPONSE = "❌ Edge Function list response is invalid";
 const INVALID_FUNCTION_SOURCE_RESPONSE = "❌ Edge Function source response is invalid";
 
@@ -440,24 +454,9 @@ function invalidFunctionReadResponse(message: string): ReleaseControlToolRespons
     return { isError: true, content: [{ type: "text", text: message }] };
 }
 
-function safeFunctionList(payload: unknown): Array<Record<string, unknown>> | null {
-    if (!Array.isArray(payload)) return null;
-    const functionSlugs = new Set<string>();
-    for (const candidate of payload) {
-        const edgeFunction = objectRecord(candidate);
-        const slug = edgeFunction?.slug;
-        const version = edgeFunction?.version;
-        if (typeof slug !== "string" || !SAFE_FUNCTION_SLUG_PATTERN.test(slug)
-            || typeof version !== "number" || !Number.isSafeInteger(version) || version < 0
-            || functionSlugs.has(slug)) return null;
-        functionSlugs.add(slug);
-    }
-    return payload as Array<Record<string, unknown>>;
-}
-
 function functionListResponse(response: HttpResult<unknown>): ReleaseControlToolResponse {
     if (!response.ok) return invalidFunctionReadResponse(`❌ Failed (${response.status})`);
-    const functions = safeFunctionList(response.data);
+    const functions = projectedFunctionList(response.data);
     return functions
         ? { content: [{ type: "text", text: JSON.stringify(functions, null, 2) }] }
         : invalidFunctionReadResponse(INVALID_FUNCTION_LIST_RESPONSE);
@@ -544,12 +543,14 @@ interface FunctionMutationExpectation {
     projectRef: string;
     slug: string;
     expectedActiveVersion: string;
+    expectedActivationId: string;
     targetVersion?: string;
     config?: EdgeFunctionConfigInput;
 }
 
 interface ConfirmedFunctionMutation {
     activeVersion: string;
+    activationId: string;
     verifyJwt: boolean;
 }
 
@@ -560,7 +561,59 @@ function mutationIdentityMatches(
     return receipt.success === true
         && receipt.project_ref === expectation.projectRef
         && receipt.slug === expectation.slug
-        && receipt.previous_active_version === expectation.expectedActiveVersion;
+        && receipt.previous_active_version === expectation.expectedActiveVersion
+        && receipt.expected_activation_id === expectation.expectedActivationId;
+}
+
+async function readFunctionIdentity(
+    http: HttpTransport,
+    projectRef: string,
+    slug: string,
+): Promise<ReleaseControlToolResponse> {
+    const resourcePath = edgeFunctionResourcePath(projectRef, slug);
+    const response = await http.get(`${resourcePath}/config`);
+    if (!response.ok) {
+        return releaseControlFailure("edge_functions.get_config", "HTTP_ERROR", response.status);
+    }
+    const identity = projectedFunctionIdentity(response.data, projectRef, slug);
+    return identity
+        ? { content: [{ type: "text", text: JSON.stringify(identity, null, 2) }] }
+        : releaseControlFailure("edge_functions.get_config", "INVALID_RESPONSE", response.status);
+}
+
+async function updateFunctionConfiguration(
+    http: HttpTransport,
+    request: {
+        projectRef: string;
+        slug: string;
+        expectedActivationId: string;
+        config: EdgeFunctionConfigInput;
+    },
+): Promise<ReleaseControlToolResponse> {
+    const response = await http.patchReleaseMutation(
+        `${edgeFunctionResourcePath(request.projectRef, request.slug)}/config`,
+        { ...request.config, expected_activation_id: request.expectedActivationId },
+    );
+    if (!response.ok) return releaseControlMutationFailure("edge_functions.config", response);
+    const confirmed = confirmedFunctionConfigMutation(response.data, request);
+    return confirmed
+        ? releaseControlSuccess("edge_functions.config", confirmed)
+        : releaseControlFailure("edge_functions.config", "OUTCOME_UNKNOWN", response.status);
+}
+
+async function deleteFunction(
+    http: HttpTransport,
+    request: { projectRef: string; slug: string; expectedActivationId: string },
+): Promise<ReleaseControlToolResponse> {
+    const response = await http.deleteReleaseMutation(
+        edgeFunctionResourcePath(request.projectRef, request.slug),
+        { expected_activation_id: request.expectedActivationId },
+    );
+    if (!response.ok) return releaseControlMutationFailure("edge_functions.delete", response);
+    const confirmed = confirmedFunctionDeletion(response.data, request);
+    return confirmed
+        ? releaseControlSuccess("edge_functions.delete", confirmed)
+        : releaseControlFailure("edge_functions.delete", "OUTCOME_UNKNOWN", response.status);
 }
 
 function validReceiptVersion(activeVersion: unknown): activeVersion is string {
@@ -592,10 +645,13 @@ function confirmedFunctionMutation(
     const config = objectRecord(receipt?.config);
     if (!receipt || !config || !mutationIdentityMatches(receipt, expectation)) return null;
     const activeVersion = confirmedMutationVersion(receipt, config, expectation);
+    const activationId = receipt.activation_id;
     if (activeVersion === null
+        || !validCommittedActivationId(activationId)
+        || config.activation_id !== activationId
         || typeof config.verify_jwt !== "boolean"
         || !confirmedFunctionConfig(config, expectation.config ?? {})) return null;
-    return { activeVersion, verifyJwt: config.verify_jwt };
+    return { activeVersion, activationId, verifyJwt: config.verify_jwt };
 }
 
 function functionMutationResponse(
@@ -611,6 +667,8 @@ function functionMutationResponse(
         project_ref: expectation.projectRef,
         slug: expectation.slug,
         previous_active_version: expectation.expectedActiveVersion,
+        expected_activation_id: expectation.expectedActivationId,
+        activation_id: confirmed.activationId,
         active_version: confirmed.activeVersion,
         version: confirmed.activeVersion,
         verify_jwt: confirmed.verifyJwt,
@@ -622,6 +680,7 @@ interface FunctionActivationTarget {
     functionSlug: string;
     version: string;
     expectedActiveVersion: string;
+    expectedActivationId: string;
 }
 
 function readOnlyActivationResult(): ReleaseControlToolResponse {
@@ -638,7 +697,8 @@ function functionActivationTarget(args: Record<string, unknown>): FunctionActiva
     projectRefPathSegment(projectRef, "Edge Function activation");
     if (!SAFE_FUNCTION_SLUG_PATTERN.test(functionSlug)) throw new Error("'slug' is invalid for 'activate'");
     const expectedActiveVersion = requiredExpectedActiveVersion(args, "activate");
-    return { projectRef, functionSlug, version, expectedActiveVersion };
+    const expectedActivationId = requiredExpectedActivationId(args, "activate");
+    return { projectRef, functionSlug, version, expectedActiveVersion, expectedActivationId };
 }
 
 function requiredExpectedActiveVersion(args: Record<string, unknown>, action: string): string {
@@ -651,6 +711,17 @@ function requiredExpectedActiveVersion(args: Record<string, unknown>, action: st
     return parsed;
 }
 
+function requiredExpectedActivationId(args: Record<string, unknown>, action: string): string {
+    const expected = args["expected-activation-id"];
+    if (expected === undefined) {
+        throw new Error(`'--expected-activation-id' required for '${action}'`);
+    }
+    if (!validObservedActivationId(expected)) {
+        throw new Error("Expected activation ID must be a canonical UUID or 'legacy'");
+    }
+    return expected;
+}
+
 async function activateFunctionVersion(
     http: HttpTransport,
     args: Record<string, unknown>,
@@ -659,7 +730,7 @@ async function activateFunctionVersion(
     if (readOnly) return readOnlyActivationResult();
     const unsupported = Object.keys(args).filter((name) => !FUNCTION_ACTIVATION_ARGUMENTS.has(name));
     if (unsupported.length > 0) throw new Error(`'${unsupported[0]}' is not supported for 'activate'`);
-    const { projectRef, functionSlug, version, expectedActiveVersion } = functionActivationTarget(args);
+    const { projectRef, functionSlug, version, expectedActiveVersion, expectedActivationId } = functionActivationTarget(args);
     const endpoint = edgeFunctionResourcePath(projectRef, functionSlug)
         + `/versions/${encodeURIComponent(version)}/activate`;
     return functionMutationResponse({
@@ -667,8 +738,12 @@ async function activateFunctionVersion(
         projectRef,
         slug: functionSlug,
         expectedActiveVersion,
+        expectedActivationId,
         targetVersion: version,
-    }, await http.postReleaseMutation(endpoint, { expected_active_version: expectedActiveVersion }));
+    }, await http.postReleaseMutation(endpoint, {
+        expected_active_version: expectedActiveVersion,
+        expected_activation_id: expectedActivationId,
+    }));
 }
 
 export function registerAdvancedTools(
@@ -682,11 +757,11 @@ export function registerAdvancedTools(
     server.tool(
         "edge_functions",
         `Edge Function management (Deno/Bun serverless). Source deploys are bundled; verified prebuilt artifacts stay byte-exact.
-Actions: list, deploy, deploy_bundle, config, source, activate, delete, check`,
+Actions: list, get_config, deploy, deploy_bundle, config, source, activate, delete, check`,
         {
-            action: withDescription(stringEnum(["list", "deploy", "deploy_bundle", "config", "source", "activate", "delete", "check"]), "Action"),
+            action: withDescription(stringEnum(["list", "get_config", "deploy", "deploy_bundle", "config", "source", "activate", "delete", "check"]), "Action"),
             ref: withDescription(Type.String(), "Project ref"),
-            slug: optional(Type.String(), "[deploy/deploy_bundle/config/source/activate/delete/check] Function name"),
+            slug: optional(Type.String(), "[get_config/deploy/deploy_bundle/config/source/activate/delete/check] Function name"),
             version: withDescription(functionVersionSchema, "[source/activate] Existing immutable Function version; source requires a positive version"),
             code: optional(Type.String(), "[deploy/check] Function source code (TypeScript)"),
             path: optional(Type.String(), "[deploy/check] Local file path to read code from (alternative to code)"),
@@ -708,6 +783,10 @@ Actions: list, deploy, deploy_bundle, config, source, activate, delete, check`,
                 expectedActiveVersionSchema,
                 "[deploy/deploy_bundle/activate] Required current active version, or 'absent' when none exists",
             ),
+            "expected-activation-id": withDescription(
+                expectedActivationIdSchema,
+                "[deploy/deploy_bundle/config/activate/delete] Required activation ID from list, or 'legacy' for a new or legacy function",
+            ),
         },
         async (args: any) => {
             if (args.action === "activate") return activateFunctionVersion(http, args, options.readOnly);
@@ -715,6 +794,9 @@ Actions: list, deploy, deploy_bundle, config, source, activate, delete, check`,
             rejectPrebundledFlagsOutsideDeploy(action, args);
             const expectedActiveVersion = action === "deploy" || action === "deploy_bundle"
                 ? requiredExpectedActiveVersion(args, action)
+                : undefined;
+            const expectedActivationId = FUNCTION_IDENTITY_MUTATIONS.has(action)
+                ? requiredExpectedActivationId(args, action)
                 : undefined;
             let code = args.code as string | undefined;
             const need = (f: string, v: any) => { if (!v) throw new Error(`'${f}' required for '${action}'`); };
@@ -727,17 +809,6 @@ Actions: list, deploy, deploy_bundle, config, source, activate, delete, check`,
             });
 
             const hasFunctionConfig = () => Object.keys(functionConfig()).length > 0;
-
-            const updateFunctionConfig = async (): Promise<string> => {
-                need("slug", slug);
-                if (!hasFunctionConfig()) {
-                    throw new Error("'verify_jwt' or 'background_routes' required for 'config'");
-                }
-                const cr = await http.patch(`${edgeFunctionResourcePath(ref, slug)}/config`, functionConfig());
-                return cr.ok
-                    ? `✅ Function ${slug} config updated\n${JSON.stringify(cr.data, null, 2)}`
-                    : `❌ Config update failed (${cr.status}): ${JSON.stringify(cr.data)}`;
-            };
 
             const checkSyntax = async (sourceCode: string): Promise<{ ok: boolean; err?: string }> => {
                 const tmpDir = mkdtempSync(join(tmpdir(), "supacloud-edge-check-"));
@@ -765,6 +836,9 @@ Actions: list, deploy, deploy_bundle, config, source, activate, delete, check`,
             switch (action) {
                 case "list":
                     return functionListResponse(await http.get(edgeFunctionResourcePath(ref)));
+                case "get_config":
+                    need("slug", slug);
+                    return readFunctionIdentity(http, ref, slug);
                 case "check":
                     need("code (or path)", code);
                     const checkRes = await checkSyntax(code!);
@@ -790,6 +864,7 @@ Actions: list, deploy, deploy_bundle, config, source, activate, delete, check`,
                             ? { prebundled: true, expected_sha256: deployCode.expectedSha256 }
                             : { minify }),
                         expected_active_version: expectedActiveVersion,
+                        expected_activation_id: expectedActivationId,
                         ...functionConfig(),
                     });
                     return functionMutationResponse({
@@ -797,6 +872,7 @@ Actions: list, deploy, deploy_bundle, config, source, activate, delete, check`,
                         projectRef: ref,
                         slug,
                         expectedActiveVersion: expectedActiveVersion!,
+                        expectedActivationId: expectedActivationId!,
                         config: functionConfig(),
                     }, deploymentResponse);
                 case "deploy_bundle":
@@ -806,6 +882,7 @@ Actions: list, deploy, deploy_bundle, config, source, activate, delete, check`,
                         entrypoint,
                         minify,
                         expected_active_version: expectedActiveVersion,
+                        expected_activation_id: expectedActivationId,
                         ...functionConfig(),
                     });
                     return functionMutationResponse({
@@ -813,11 +890,20 @@ Actions: list, deploy, deploy_bundle, config, source, activate, delete, check`,
                         projectRef: ref,
                         slug,
                         expectedActiveVersion: expectedActiveVersion!,
+                        expectedActivationId: expectedActivationId!,
                         config: functionConfig(),
                     }, bundleResponse);
                 case "config":
-                    text = await updateFunctionConfig();
-                    break;
+                    need("slug", slug);
+                    if (!hasFunctionConfig()) {
+                        throw new Error("'verify_jwt' or 'background_routes' required for 'config'");
+                    }
+                    return updateFunctionConfiguration(http, {
+                        projectRef: ref,
+                        slug,
+                        expectedActivationId: expectedActivationId!,
+                        config: functionConfig(),
+                    });
                 case "source":
                     need("slug", slug);
                     return readFunctionSource(http, {
@@ -828,8 +914,11 @@ Actions: list, deploy, deploy_bundle, config, source, activate, delete, check`,
                     });
                 case "delete":
                     need("slug", slug);
-                    text = (await http.delete(edgeFunctionResourcePath(ref, slug))).ok ? `✅ Function ${slug} deleted` : `❌ Failed`;
-                    break;
+                    return deleteFunction(http, {
+                        projectRef: ref,
+                        slug,
+                        expectedActivationId: expectedActivationId!,
+                    });
                 default: text = `❌ Unknown action`;
             }
             return { content: [{ type: "text" as const, text }] };

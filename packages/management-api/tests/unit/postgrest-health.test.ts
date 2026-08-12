@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { probePostgrestHealth } from "../../src/services/tenant-runtime.service";
+import {
+  parsePostgrestActivity,
+  probePostgrestHealth,
+} from "../../src/services/tenant-runtime.service";
 
 function response(status: number): Response {
   return new Response(null, { status });
@@ -41,5 +44,30 @@ describe("PostgREST health probe", () => {
 
     expect(result.healthy).toBe(false);
     expect(result.last_error).toBe("PostgREST health checks failed: / HTTP 503");
+  });
+});
+
+describe("PostgREST systemd activity parser", () => {
+  test("accepts only systemctl's canonical active and inactive results", () => {
+    expect(parsePostgrestActivity("active\n", 0)).toBe(true);
+    expect(parsePostgrestActivity("inactive\n", 3)).toBe(false);
+    expect(parsePostgrestActivity("failed\n", 3)).toBe(false);
+  });
+
+  test("rejects empty, unknown, and contradictory exit-state pairs", () => {
+    const contradictions: Array<[string, number]> = [
+      ["", 0],
+      ["unknown\n", 4],
+      ["active\n", 3],
+      ["inactive\n", 0],
+      ["failed\n", 0],
+      ["activating\n", 0],
+      ["active\nextra\n", 0],
+    ];
+
+    for (const [output, exitCode] of contradictions) {
+      expect(() => parsePostgrestActivity(output, exitCode))
+        .toThrow("Unable to determine PostgREST systemd activity");
+    }
   });
 });

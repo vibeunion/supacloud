@@ -30,6 +30,9 @@ const LARGE_FUNCTION_SOURCE = "export const payload = "
     + ";\n";
 const SCHEDULE_ID = "00000000-0000-4000-8000-000000000001";
 const SCHEDULE_UPDATED_AT = "2026-08-11T00:00:00.000Z";
+const EXPECTED_ACTIVATION_ID = "a1111111-1111-4111-8111-111111111111";
+const COMMITTED_ACTIVATION_ID = "b2222222-2222-4222-8222-222222222222";
+const RECREATED_ACTIVATION_ID = "c3333333-3333-4333-8333-333333333333";
 const PATH_ESCAPE_INPUTS = [
     ".", "..", "%2e", "%2e%2e", ".%2e", "%2e.", "%252e%252e", "a/b", "a?b", "a#b",
 ];
@@ -408,8 +411,8 @@ describe("supacloud-cli process contract", () => {
             hostname: "127.0.0.1",
             port: 0,
             fetch: () => Response.json([
-                { slug: "legacy-hook", version: 0, verify_jwt: true },
-                { slug: "fa-api", version: 40, verify_jwt: true },
+                { slug: "legacy-hook", version: 0, activation_id: "legacy", verify_jwt: true },
+                { slug: "fa-api", version: 40, activation_id: EXPECTED_ACTIVATION_ID, verify_jwt: true },
             ]),
         });
         servers.push(server);
@@ -424,8 +427,8 @@ describe("supacloud-cli process contract", () => {
         expect(response.exitCode).toBe(0);
         expect(Array.isArray(functions)).toBe(true);
         expect(functions).toEqual([
-            { slug: "legacy-hook", version: 0, verify_jwt: true },
-            { slug: "fa-api", version: 40, verify_jwt: true },
+            { slug: "legacy-hook", version: 0, activation_id: "legacy", verify_jwt: true },
+            { slug: "fa-api", version: 40, activation_id: EXPECTED_ACTIVATION_ID, verify_jwt: true },
         ]);
     });
 
@@ -822,7 +825,7 @@ describe("supacloud-cli process contract", () => {
         expect(response.stderr).not.toContain("--from_env");
     });
 
-    test("documents the exact expected-active-version flag for Function mutations", async () => {
+    test("documents exact activation concurrency flags for Function mutations", async () => {
         for (const action of ["deploy", "deploy_bundle", "activate"]) {
             const response = await runProjectCli(["edge_functions", action, "--help"], {
                 SUPACLOUD_API_URL: "http://127.0.0.1:1",
@@ -833,7 +836,212 @@ describe("supacloud-cli process contract", () => {
             expect(response.exitCode).toBe(0);
             expect(response.stderr).toContain("--expected-active-version");
             expect(response.stderr).not.toContain("--expected_active_version");
+            expect(response.stderr).toContain("--expected-activation-id");
+            expect(response.stderr).not.toContain("--expected_activation_id");
         }
+        for (const action of ["config", "delete"]) {
+            const response = await runProjectCli(["edge_functions", action, "--help"], {
+                SUPACLOUD_API_URL: "http://127.0.0.1:1",
+                SUPACLOUD_API_TOKEN: "test-token",
+                SUPACLOUD_PROJECT_REF: "abc123",
+            });
+
+            expect(response.exitCode).toBe(0);
+            expect(response.stderr).toContain("--expected-activation-id");
+            expect(response.stderr).not.toContain("--expected-active-version");
+        }
+    });
+
+    test("documents get_config as the atomic Function identity read", async () => {
+        const response = await runProjectCli(["edge_functions", "--help"], {
+            SUPACLOUD_API_URL: "http://127.0.0.1:1",
+            SUPACLOUD_API_TOKEN: "test-token",
+            SUPACLOUD_PROJECT_REF: "abc123",
+        });
+
+        expect(response.exitCode).toBe(0);
+        expect(response.stderr).toContain("get_config");
+    });
+
+    test("reads an allowlisted tombstone identity through get_config", async () => {
+        const privateSentinel = "private-get-config-process-sentinel";
+        const requestedPaths: string[] = [];
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch(request) {
+                requestedPaths.push(new URL(request.url).pathname);
+                return Response.json({
+                    project_ref: "abc123",
+                    slug: "deleted-hook",
+                    active_version: "absent",
+                    activation_id: COMMITTED_ACTIVATION_ID,
+                    verify_jwt: true,
+                    background_routes: [],
+                    private: privateSentinel,
+                });
+            },
+        });
+        servers.push(server);
+
+        const response = await runProjectCli(
+            ["edge_functions", "get_config", "--ref", "abc123", "--slug", "deleted-hook"],
+            {
+                SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+                SUPACLOUD_API_TOKEN: "test-token",
+                SUPACLOUD_PROJECT_REF: "abc123",
+            },
+        );
+
+        expect(response.exitCode).toBe(0);
+        expect(requestedPaths).toEqual(["/v1/projects/abc123/functions/deleted-hook/config"]);
+        expect(JSON.parse(response.stdout)).toEqual({
+            project_ref: "abc123",
+            slug: "deleted-hook",
+            active_version: "absent",
+            verify_jwt: true,
+            background_routes: [],
+            activation_id: COMMITTED_ACTIVATION_ID,
+        });
+        expect(response.stdout + response.stderr).not.toContain(privateSentinel);
+    });
+
+    test("fails config and delete closed after a possible HTTP 503 commit", async () => {
+        const privateSentinel = "private-function-mutation-process-sentinel";
+        const observedMethods: string[] = [];
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch(request) {
+                observedMethods.push(request.method);
+                return Response.json({ error: privateSentinel }, { status: 503 });
+            },
+        });
+        servers.push(server);
+        const environment = {
+            SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+            SUPACLOUD_API_TOKEN: "test-token",
+            SUPACLOUD_PROJECT_REF: "abc123",
+        };
+
+        const configResponse = await runProjectCli([
+            "edge_functions", "config", "--ref", "abc123", "--slug", "hook",
+            "--verify_jwt", "false", "--expected-activation-id", EXPECTED_ACTIVATION_ID,
+        ], environment);
+        const deleteResponse = await runProjectCli([
+            "edge_functions", "delete", "--ref", "abc123", "--slug", "hook",
+            "--expected-activation-id", EXPECTED_ACTIVATION_ID,
+        ], environment);
+
+        expect(observedMethods).toEqual(["PATCH", "DELETE"]);
+        for (const response of [configResponse, deleteResponse]) {
+            expect(response.exitCode).toBe(1);
+            expect(JSON.parse(response.stdout).error).toEqual({
+                code: "OUTCOME_UNKNOWN",
+                http_status: 503,
+            });
+            expect(response.stdout + response.stderr).not.toContain(privateSentinel);
+        }
+    });
+
+    test("recreates a deleted Function with the tombstone activation identity", async () => {
+        const observedRequests: Array<{ method: string; path: string; body?: unknown }> = [];
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            async fetch(request) {
+                const path = new URL(request.url).pathname;
+                const body = request.method === "GET" ? undefined : await request.json();
+                observedRequests.push({ method: request.method, path, body });
+                if (request.method === "DELETE") {
+                    return Response.json({
+                        success: true,
+                        project_ref: "abc123",
+                        slug: "hook",
+                        expected_activation_id: EXPECTED_ACTIVATION_ID,
+                        activation_id: COMMITTED_ACTIVATION_ID,
+                        previous_active_version: "7",
+                        active_version: "absent",
+                        config: {
+                            verify_jwt: true,
+                            activation_id: COMMITTED_ACTIVATION_ID,
+                        },
+                    });
+                }
+                if (request.method === "GET") {
+                    return Response.json({
+                        project_ref: "abc123",
+                        slug: "hook",
+                        active_version: "absent",
+                        activation_id: COMMITTED_ACTIVATION_ID,
+                        verify_jwt: true,
+                        background_routes: [],
+                    });
+                }
+                return Response.json({
+                    success: true,
+                    project_ref: "abc123",
+                    slug: "hook",
+                    previous_active_version: "absent",
+                    expected_activation_id: COMMITTED_ACTIVATION_ID,
+                    activation_id: RECREATED_ACTIVATION_ID,
+                    active_version: "1",
+                    version: "1",
+                    config: {
+                        version: "1",
+                        verify_jwt: true,
+                        activation_id: RECREATED_ACTIVATION_ID,
+                    },
+                });
+            },
+        });
+        servers.push(server);
+        const environment = {
+            SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+            SUPACLOUD_API_TOKEN: "test-token",
+            SUPACLOUD_PROJECT_REF: "abc123",
+        };
+
+        const deleted = await runProjectCli([
+            "edge_functions", "delete", "--ref", "abc123", "--slug", "hook",
+            "--expected-activation-id", EXPECTED_ACTIVATION_ID,
+        ], environment);
+        const tombstone = await runProjectCli(
+            ["edge_functions", "get_config", "--ref", "abc123", "--slug", "hook"],
+            environment,
+        );
+        const recreated = await runProjectCli([
+            "edge_functions", "deploy", "--ref", "abc123", "--slug", "hook",
+            "--code", "export default { fetch: () => new Response('recreated') }",
+            "--expected-active-version", "absent",
+            "--expected-activation-id", COMMITTED_ACTIVATION_ID,
+        ], environment);
+
+        expect([deleted.exitCode, tombstone.exitCode, recreated.exitCode]).toEqual([0, 0, 0]);
+        expect(JSON.parse(deleted.stdout)).toMatchObject({
+            operation: "edge_functions.delete",
+            activation_id: COMMITTED_ACTIVATION_ID,
+            active_version: "absent",
+        });
+        expect(JSON.parse(tombstone.stdout)).toMatchObject({
+            active_version: "absent",
+            activation_id: COMMITTED_ACTIVATION_ID,
+        });
+        expect(JSON.parse(recreated.stdout)).toMatchObject({
+            operation: "edge_functions.deploy",
+            previous_active_version: "absent",
+            activation_id: RECREATED_ACTIVATION_ID,
+            active_version: "1",
+        });
+        expect(observedRequests.map(({ method, path }) => ({ method, path }))).toEqual([
+            { method: "DELETE", path: "/v1/projects/abc123/functions/hook" },
+            { method: "GET", path: "/v1/projects/abc123/functions/hook/config" },
+            { method: "POST", path: "/v1/projects/abc123/functions/hook" },
+        ]);
+        expect(observedRequests[2]?.body).toMatchObject({
+            expected_active_version: "absent",
+            expected_activation_id: COMMITTED_ACTIVATION_ID,
+        });
     });
 
     test("documents exact prebundled Function deployment flags", async () => {
@@ -868,9 +1076,15 @@ describe("supacloud-cli process contract", () => {
                     project_ref: "abc123",
                     slug: "fa-api",
                     previous_active_version: "7",
+                    expected_activation_id: EXPECTED_ACTIVATION_ID,
+                    activation_id: COMMITTED_ACTIVATION_ID,
                     active_version: "8",
                     version: "8",
-                    config: { version: "8", verify_jwt: true },
+                    config: {
+                        version: "8",
+                        verify_jwt: true,
+                        activation_id: COMMITTED_ACTIVATION_ID,
+                    },
                 });
             },
         });
@@ -881,6 +1095,7 @@ describe("supacloud-cli process contract", () => {
             "--prebundled-path", bundlePath,
             "--expected-sha256", expectedSha256,
             "--expected-active-version", "7",
+            "--expected-activation-id", EXPECTED_ACTIVATION_ID,
         ], {
             SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
             SUPACLOUD_API_TOKEN: "test-token",
@@ -894,6 +1109,7 @@ describe("supacloud-cli process contract", () => {
             prebundled: true,
             expected_sha256: expectedSha256,
             expected_active_version: "7",
+            expected_activation_id: EXPECTED_ACTIVATION_ID,
         });
         expect(JSON.parse(response.stdout)).toMatchObject({
             ok: true,
@@ -923,6 +1139,7 @@ describe("supacloud-cli process contract", () => {
             "--prebundled-path", bundlePath,
             "--expected-sha256", createHash("sha256").update("approved-bytes").digest("hex"),
             "--expected-active-version", "absent",
+            "--expected-activation-id", "legacy",
         ], {
             SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
             SUPACLOUD_API_TOKEN: "test-token",
@@ -946,9 +1163,15 @@ describe("supacloud-cli process contract", () => {
                     project_ref: "abc123",
                     slug: "worker",
                     previous_active_version: "0",
+                    expected_activation_id: "legacy",
+                    activation_id: COMMITTED_ACTIVATION_ID,
                     active_version: "1",
                     version: "1",
-                    config: { version: "1", verify_jwt: true },
+                    config: {
+                        version: "1",
+                        verify_jwt: true,
+                        activation_id: COMMITTED_ACTIVATION_ID,
+                    },
                 });
             },
         });
@@ -958,6 +1181,7 @@ describe("supacloud-cli process contract", () => {
             "edge_functions", "deploy_bundle", "--ref", "abc123", "--slug", "worker",
             "--files", JSON.stringify({ "index.ts": "export default {}" }),
             "--expected-active-version", "0",
+            "--expected-activation-id", "legacy",
         ], {
             SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
             SUPACLOUD_API_TOKEN: "test-token",
@@ -973,7 +1197,10 @@ describe("supacloud-cli process contract", () => {
             previous_active_version: "0",
             active_version: "1",
         });
-        expect(requestBody).toMatchObject({ expected_active_version: "0" });
+        expect(requestBody).toMatchObject({
+            expected_active_version: "0",
+            expected_activation_id: "legacy",
+        });
     });
 
     test("rejects Function mutations without expected-active-version before HTTP", async () => {
@@ -1011,6 +1238,73 @@ describe("supacloud-cli process contract", () => {
         expect(requestCount).toBe(0);
     });
 
+    test("rejects Function mutations without expected-activation-id before HTTP", async () => {
+        let requestCount = 0;
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch() {
+                requestCount += 1;
+                return Response.json({});
+            },
+        });
+        servers.push(server);
+        const commands = [
+            [
+                "edge_functions", "deploy", "--ref", "abc123", "--slug", "worker",
+                "--path", "/definitely/missing.ts", "--expected-active-version", "1",
+            ],
+            [
+                "edge_functions", "deploy_bundle", "--ref", "abc123", "--slug", "worker",
+                "--files", JSON.stringify({ "index.ts": "export default {}" }),
+                "--expected-active-version", "1",
+            ],
+            [
+                "edge_functions", "activate", "--ref", "abc123", "--slug", "worker",
+                "--version", "2", "--expected-active-version", "1",
+            ],
+        ];
+
+        for (const command of commands) {
+            const response = await runProjectCli(command, {
+                SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+                SUPACLOUD_API_TOKEN: "test-token",
+                SUPACLOUD_PROJECT_REF: "abc123",
+            });
+            expect(response.exitCode).toBe(1);
+            expect(response.stderr).toContain("--expected-activation-id");
+            expect(response.stderr).not.toContain("ENOENT");
+        }
+        expect(requestCount).toBe(0);
+    });
+
+    test("rejects a non-canonical expected activation ID before HTTP", async () => {
+        let requestCount = 0;
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch() {
+                requestCount += 1;
+                return Response.json({});
+            },
+        });
+        servers.push(server);
+
+        const response = await runProjectCli([
+            "edge_functions", "activate", "--ref", "abc123", "--slug", "worker",
+            "--version", "2", "--expected-active-version", "1",
+            "--expected-activation-id", EXPECTED_ACTIVATION_ID.toUpperCase(),
+        ], {
+            SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+            SUPACLOUD_API_TOKEN: "test-token",
+            SUPACLOUD_PROJECT_REF: "abc123",
+        });
+
+        expect(response.exitCode).toBe(1);
+        expect(response.stderr).toContain("Invalid arguments");
+        expect(requestCount).toBe(0);
+    });
+
     test("activates a positive Function version from legacy v0 through a secret-safe process contract", async () => {
         const apiToken = "activation-api-token-sentinel";
         const requested: Array<{
@@ -1034,9 +1328,15 @@ describe("supacloud-cli process contract", () => {
                     project_ref: "abc123",
                     slug: "public-hook",
                     previous_active_version: "0",
+                    expected_activation_id: "legacy",
+                    activation_id: COMMITTED_ACTIVATION_ID,
                     active_version: "6",
                     version: "6",
-                    config: { version: "6", verify_jwt: false },
+                    config: {
+                        version: "6",
+                        verify_jwt: false,
+                        activation_id: COMMITTED_ACTIVATION_ID,
+                    },
                 });
             },
         });
@@ -1045,6 +1345,7 @@ describe("supacloud-cli process contract", () => {
             "edge_functions", "activate", "--ref", "abc123",
             "--slug", "public-hook", "--version", "6",
             "--expected-active-version", "0",
+            "--expected-activation-id", "legacy",
         ];
 
         const response = await runProjectCli(commandArguments, {
@@ -1064,12 +1365,17 @@ describe("supacloud-cli process contract", () => {
             active_version: "6",
             version: "6",
             verify_jwt: false,
+            expected_activation_id: "legacy",
+            activation_id: COMMITTED_ACTIVATION_ID,
         });
         expect(requested).toEqual([{
             method: "POST",
             path: "/v1/projects/abc123/functions/public-hook/versions/6/activate",
             authorization: `Bearer ${apiToken}`,
-            body: { expected_active_version: "0" },
+            body: {
+                expected_active_version: "0",
+                expected_activation_id: "legacy",
+            },
         }]);
         expect(commandArguments.join("\0")).not.toContain(apiToken);
         expect(response.stdout + response.stderr).not.toContain(apiToken);
@@ -1121,6 +1427,7 @@ describe("supacloud-cli process contract", () => {
             [
                 "edge_functions", "activate", "--ref", "abc123", "--slug", "hook", "--version", "2",
                 "--expected-active-version", "1",
+                "--expected-activation-id", EXPECTED_ACTIVATION_ID,
             ],
             {
                 SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
@@ -1152,6 +1459,7 @@ describe("supacloud-cli process contract", () => {
             [
                 "edge_functions", "activate", "--ref", "abc123", "--slug", "hook", "--version", "2",
                 "--expected-active-version", "1",
+                "--expected-activation-id", EXPECTED_ACTIVATION_ID,
             ],
             {
                 SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,

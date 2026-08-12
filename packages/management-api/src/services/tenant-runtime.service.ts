@@ -50,10 +50,32 @@ import { runtimeCacheService } from "./runtime-cache.service";
 import { projectControlSecretsService } from "./project-control-secrets.service";
 import { installManagedSystemdUnit } from "./systemd-unit-broker";
 import {
+    PostgrestPoolReconcileError,
     PostgrestPoolMigrationGate,
     reconcileManagedPostgrestPool,
+    type PostgrestPoolGeneration,
+    type PostgrestPoolReconcileOperations,
     type PostgrestPoolReconcileResult,
 } from "./postgrest-pool-reconcile";
+import {
+    activatePostgrestGeneration,
+    postgrestGenerationLayout,
+    readPostgrestPointerTarget,
+    removePostgrestPointerIfCurrent,
+    replacePostgrestPointer,
+    validatePostgrestGenerationTarget,
+    type ActivatedPostgrestGeneration,
+    type PostgrestControlOwnership,
+} from "./postgrest-generation";
+import { completePostgrestActivation } from "./postgrest-activation";
+import {
+    attestPostgrestRuntime,
+    type PostgrestAttestation,
+} from "./postgrest-runtime-attestation";
+import {
+    canonicalPostgrestConfig,
+    postgrestConfigRevision,
+} from "./runtime-revision";
 
 export {
     renderGoTrueAuthEnv,
@@ -91,6 +113,24 @@ export class SupAuthDependentRefreshError extends Error {
 
 type SystemctlAction = "daemon-reload" | "disable" | "enable" | "reset-failed" | "restart" | "start" | "stop";
 type SystemctlExecutionMode = "best-effort" | "checked";
+type PostgrestActivationMode = "ensure-running" | "restart-running" | "refresh-if-running";
+type PostgrestPoolContext = {
+    ref: string;
+    runtimeUser: string;
+    ownership: PostgrestControlOwnership;
+};
+type RenderedPostgrestGenerationRequest = {
+    ref: string;
+    content: string;
+    runtimeUser: string;
+    runtimeGroupGid: number;
+    expectedPreviousPointerTarget?: string;
+};
+type AuthoritativePostgrestDesired = {
+    revision: string;
+    desired: RuntimeDesiredState;
+    port: number;
+};
 
 function recordValue(value: unknown): Record<string, unknown> {
     return value && typeof value === "object" && !Array.isArray(value)
@@ -258,6 +298,13 @@ export interface PostgrestRuntimeStatus {
     last_reconciled_at: string | null;
 }
 
+export interface PostgrestRuntimeSnapshot extends Omit<PostgrestAttestation, "desiredRevision"> {
+    desiredRevision: string;
+    desired: RuntimeDesiredState;
+    port: number;
+    unit: string;
+}
+
 export interface ProjectServiceStatus {
     id: string;
     name: string;
@@ -304,6 +351,65 @@ export function projectAuthServiceEntry(
     };
 }
 
+interface DesiredPostgrestConfigRequest {
+    projectRef: string;
+    databaseUri: string;
+    databaseSchemas: string;
+    jwtVerifierSecret: string;
+    jwtAudience: string;
+    port: number;
+    databasePool: number;
+    apiUrl: string;
+}
+
+interface PostgrestCredentialMaterial {
+    dbPassword: string;
+    jwtSecret: string;
+    jwtJwks: string | null;
+    thirdPartyJwtPolicy: ThirdPartyJwtPolicy | null;
+    dbName: string;
+    apiUrl: string;
+}
+
+export function renderDesiredPostgrestConfig(
+    request: DesiredPostgrestConfigRequest,
+): string {
+    const jwtAudience = request.jwtAudience
+        ? `jwt-aud = ${quoteTomlBasicString(request.jwtAudience)}`
+        : "";
+    return `
+# Managed by SupaCloud Management API. Legacy shell tooling must not overwrite this file.
+# PostgREST config for tenant: ${request.projectRef}
+db-uri = ${quoteTomlBasicString(request.databaseUri)}
+db-schemas = ${quoteTomlBasicString(request.databaseSchemas)}
+db-extra-search-path = "public, extensions, auth"
+db-anon-role = "anon"
+jwt-secret = ${quoteTomlBasicString(request.jwtVerifierSecret)}
+${jwtAudience}
+server-port = ${request.port}
+server-host = "0.0.0.0"
+db-pool = ${request.databasePool}
+db-pool-acquisition-timeout = 10
+log-level = "warn"
+
+# P0-10: OpenAPI spec generation (required by Studio Table Editor & API Docs)
+openapi-mode = "follow-privileges"
+openapi-server-proxy-uri = ${quoteTomlBasicString(`${request.apiUrl}/rest/v1`)}
+
+# P0-11: Pre-request function for RLS context injection
+db-pre-request = "public.set_request_context"
+
+# P1-7: Row limit protection
+db-max-rows = 1000
+
+# P2-3: Restrict CORS to the tenant's API domain
+server-cors-allowed-origins = ${quoteTomlBasicString(request.apiUrl)}
+
+# P2-4: Tenant-specific listen channel for schema cache invalidation
+db-channel = ${quoteTomlBasicString(resolvePgrstChannel(request.projectRef))}
+`.trim();
+}
+
 const POSTGREST_HEALTH_PATHS = ["/"] as const;
 
 export async function probePostgrestHealth(
@@ -330,33 +436,49 @@ export async function probePostgrestHealth(
     };
 }
 
+export function parsePostgrestActivity(output: string, exitCode: number): boolean {
+    const activity = output.trim();
+    if (exitCode === 0 && activity === "active") return true;
+    if (exitCode === 3 && (activity === "inactive" || activity === "failed")) return false;
+    throw new Error("Unable to determine PostgREST systemd activity");
+}
+
 class PostgrestRuntimeController {
     unit(ref: string): string {
         return `supacloud-pgrst@${ref}`;
     }
 
     async isActive(ref: string): Promise<boolean> {
-        return (await $`systemctl is-active ${this.unit(ref)}`.nothrow().quiet()).exitCode === 0;
+        const child = Bun.spawn({
+            cmd: ["systemctl", "is-active", this.unit(ref)],
+            stdout: "pipe",
+            stderr: "ignore",
+        });
+        const [stdout, exitCode] = await Promise.all([
+            new Response(child.stdout).text(),
+            child.exited,
+        ]);
+        return parsePostgrestActivity(stdout, exitCode);
     }
 
     async enable(ref: string): Promise<void> {
-        await $`systemctl enable ${this.unit(ref)}`.nothrow().quiet();
+        await runSystemctlOrThrow("enable", this.unit(ref));
     }
 
     async start(ref: string): Promise<void> {
-        await $`systemctl start ${this.unit(ref)}`.nothrow().quiet();
+        await runSystemctlOrThrow("start", this.unit(ref));
     }
 
     async restart(ref: string): Promise<void> {
-        await $`systemctl restart ${this.unit(ref)}`.nothrow().quiet();
+        await runSystemctlOrThrow("restart", this.unit(ref));
     }
 
     async stop(ref: string): Promise<void> {
-        await $`systemctl stop ${this.unit(ref)}`.nothrow().quiet();
+        await runSystemctlOrThrow("stop", this.unit(ref));
     }
 
     async disable(ref: string): Promise<void> {
-        await $`systemctl disable ${this.unit(ref)}`.nothrow().quiet();
+        await runSystemctlOrThrow("disable", this.unit(ref));
     }
 
     async observe(ref: string, port: number): Promise<Pick<PostgrestRuntimeStatus, "actual" | "health" | "last_error">> {
@@ -374,27 +496,6 @@ class PostgrestRuntimeController {
             health: "unhealthy",
             last_error: probe.last_error,
         };
-    }
-
-    async startOrRepair(
-        ref: string,
-        port: number,
-        mode: "restart" | "repair",
-    ): Promise<PostgrestRuntimeStatus> {
-        const active = await this.isActive(ref);
-        const shouldRestart = active && (
-            mode === "restart" ||
-            (mode === "repair" && (await this.observe(ref, port)).health !== "healthy")
-        );
-
-        await this.enable(ref);
-        if (shouldRestart) {
-            await this.restart(ref);
-        } else if (!active) {
-            await this.start(ref);
-        }
-
-        return this.waitForHealthy(ref, port);
     }
 
     async waitForHealthy(
@@ -441,7 +542,6 @@ export interface GotrueRuntimeStatus {
 
 type AppliedGotrueAuthConfig = {
     authRuntime: ReturnType<typeof getAuthRuntimeDescriptor>;
-    pgrstPort: number;
     status: GotrueRuntimeStatus;
 };
 
@@ -598,6 +698,293 @@ class TenantRuntimeService {
         }
     }
 
+    private async livePostgrestAttestation(
+        ref: string,
+        port: number,
+        desiredRevision: string,
+    ): Promise<PostgrestAttestation> {
+        return attestPostgrestRuntime({
+            projectRef: ref,
+            desiredRevision,
+            port,
+            unit: this.postgrestController.unit(ref),
+            tenantDirectory: this.TENANT_CONFIG_DIR,
+            postgrestBinary: this.POSTGREST_BIN,
+        });
+    }
+
+    private async healthyPostgrestGeneration(
+        ref: string,
+        port: number,
+        expectedRevision: string,
+    ): Promise<PostgrestRuntimeStatus> {
+        const status = await this.postgrestController.waitForHealthy(ref, port, 20, 500);
+        if (status.health !== "healthy") {
+            throw new Error(`PostgREST did not become healthy for ${ref}`);
+        }
+        const attestation = await this.livePostgrestAttestation(ref, port, expectedRevision);
+        this.assertLoadedPostgrestGeneration(ref, expectedRevision, attestation);
+        return status;
+    }
+
+    private async startOrRestartPostgrestGeneration(
+        ref: string,
+        port: number,
+        expectedRevision: string,
+    ): Promise<PostgrestRuntimeStatus> {
+        const active = await this.postgrestController.isActive(ref);
+        await this.postgrestController.enable(ref);
+        if (active) await this.postgrestController.restart(ref);
+        else await this.postgrestController.start(ref);
+        return this.healthyPostgrestGeneration(ref, port, expectedRevision);
+    }
+
+    private async restorePostgrestGeneration(
+        ref: string,
+        port: number,
+        activated: ActivatedPostgrestGeneration,
+        previousPointerTarget: string | null,
+    ): Promise<void> {
+        if (!previousPointerTarget) {
+            await this.cleanFailedFirstPostgrestGeneration(ref, activated);
+            return;
+        }
+        const previous = await validatePostgrestGenerationTarget(
+            this.TENANT_CONFIG_DIR,
+            ref,
+            previousPointerTarget,
+            activated.ownership,
+        );
+        const currentPointerTarget = await readPostgrestPointerTarget(
+            activated.layout.pointerPath,
+            ref,
+            activated.ownership,
+        );
+        if (currentPointerTarget !== activated.layout.pointerTarget) {
+            throw new Error(`PostgREST generation pointer changed concurrently for ${ref}`);
+        }
+        const runtimeUser = await this.ensureTenantRuntimeUser(ref);
+        await replacePostgrestPointer(
+            activated.layout,
+            previousPointerTarget,
+            activated.ownership,
+            (targetPath) => this.chownPath(targetPath, `root:${runtimeUser}`),
+        );
+        await this.startOrRestartPostgrestGeneration(ref, port, previous.revision);
+    }
+
+    private async cleanFailedFirstPostgrestGeneration(
+        ref: string,
+        activated: ActivatedPostgrestGeneration,
+    ): Promise<void> {
+        const shutdownErrors: unknown[] = [];
+        try {
+            await this.postgrestController.stop(ref);
+        } catch (error: unknown) {
+            shutdownErrors.push(error);
+        }
+        try {
+            await this.postgrestController.disable(ref);
+        } catch (error: unknown) {
+            shutdownErrors.push(error);
+        }
+        if (shutdownErrors.length > 0) {
+            throw new AggregateError(shutdownErrors, `Failed to stop first PostgREST generation for ${ref}`);
+        }
+        await removePostgrestPointerIfCurrent({
+            layout: activated.layout,
+            projectRef: ref,
+            expectedPointerTarget: activated.layout.pointerTarget,
+            ownership: activated.ownership,
+        });
+        if (await this.postgrestController.isActive(ref)) {
+            throw new Error(`PostgREST remained active after first-generation cleanup for ${ref}`);
+        }
+    }
+
+    private postgrestPoolGeneration(ref: string, content: string): PostgrestPoolGeneration {
+        const canonicalContent = canonicalPostgrestConfig(content);
+        const revision = postgrestConfigRevision(ref, canonicalContent);
+        return {
+            content: canonicalContent,
+            pointerTarget: postgrestGenerationLayout(
+                this.TENANT_CONFIG_DIR,
+                ref,
+                revision,
+            ).pointerTarget,
+            revision,
+        };
+    }
+
+    private async readPostgrestPoolGeneration(
+        context: PostgrestPoolContext,
+    ): Promise<PostgrestPoolGeneration> {
+        const pointerPath = path.join(this.TENANT_CONFIG_DIR, `${context.ref}_postgrest.current`);
+        const pointerTarget = await readPostgrestPointerTarget(
+            pointerPath,
+            context.ref,
+            context.ownership,
+        );
+        if (!pointerTarget) throw new Error(`PostgREST generation is unavailable for ${context.ref}`);
+        const validated = await validatePostgrestGenerationTarget(
+            this.TENANT_CONFIG_DIR,
+            context.ref,
+            pointerTarget,
+            context.ownership,
+        );
+        return {
+            content: await fs.readFile(validated.path, "utf8"),
+            pointerTarget,
+            revision: validated.revision,
+        };
+    }
+
+    private async validatePostgrestPoolGeneration(
+        context: PostgrestPoolContext,
+        generation: PostgrestPoolGeneration,
+    ): Promise<void> {
+        const validated = await validatePostgrestGenerationTarget(
+            this.TENANT_CONFIG_DIR,
+            context.ref,
+            generation.pointerTarget,
+            context.ownership,
+        );
+        const content = await fs.readFile(validated.path, "utf8");
+        if (validated.revision !== generation.revision || content !== generation.content) {
+            throw new Error(`PostgREST generation changed during pool reconciliation for ${context.ref}`);
+        }
+    }
+
+    private async activatePostgrestPoolGeneration(
+        context: PostgrestPoolContext,
+        content: string,
+        expectedPreviousPointerTarget: string,
+    ): Promise<PostgrestPoolGeneration> {
+        const activated = await this.activateRenderedPostgrestGeneration({
+            ref: context.ref,
+            content,
+            runtimeUser: context.runtimeUser,
+            runtimeGroupGid: context.ownership.runtimeGroupGid,
+            expectedPreviousPointerTarget,
+        });
+        if (activated.previousPointerTarget !== expectedPreviousPointerTarget) {
+            throw new Error(`PostgREST generation changed before pool activation for ${context.ref}`);
+        }
+        return this.postgrestPoolGeneration(context.ref, content);
+    }
+
+    private async restorePostgrestPoolPointer(
+        context: PostgrestPoolContext,
+        generation: PostgrestPoolGeneration,
+    ): Promise<void> {
+        const layout = postgrestGenerationLayout(
+            this.TENANT_CONFIG_DIR,
+            context.ref,
+            generation.revision,
+        );
+        await replacePostgrestPointer(
+            layout,
+            generation.pointerTarget,
+            context.ownership,
+            (targetPath) => this.chownPath(targetPath, `root:${context.runtimeUser}`),
+        );
+    }
+
+    private postgrestPoolOperations(
+        context: PostgrestPoolContext,
+    ): PostgrestPoolReconcileOperations {
+        return {
+            readCurrentGeneration: () => this.readPostgrestPoolGeneration(context),
+            candidateGeneration: (content) => this.postgrestPoolGeneration(context.ref, content),
+            activateCandidate: (content, previous) =>
+                this.activatePostgrestPoolGeneration(context, content, previous),
+            currentPointerTarget: () => readPostgrestPointerTarget(
+                path.join(this.TENANT_CONFIG_DIR, `${context.ref}_postgrest.current`),
+                context.ref,
+                context.ownership,
+            ),
+            validateGeneration: (generation) =>
+                this.validatePostgrestPoolGeneration(context, generation),
+            restorePointer: (generation) => this.restorePostgrestPoolPointer(context, generation),
+            restartAndAttest: async (expectedRevision) => {
+                const port = await this.getTenantPort(context.ref, "pgrst");
+                await this.startOrRestartPostgrestGeneration(
+                    context.ref,
+                    port,
+                    expectedRevision,
+                );
+            },
+        };
+    }
+
+    private assertLoadedPostgrestGeneration(
+        ref: string,
+        expectedRevision: string,
+        attestation: PostgrestAttestation,
+    ): void {
+        if (attestation.attestationState !== "loaded"
+            || attestation.loadedRevision !== expectedRevision
+            || attestation.matchesDesired !== true
+            || attestation.health !== "healthy") {
+            throw new Error(`PostgREST runtime attestation failed for ${ref}`);
+        }
+    }
+
+    private async activatePostgrestGenerationUnlocked(
+        ref: string,
+        mode: PostgrestActivationMode,
+    ): Promise<PostgrestRuntimeStatus | null> {
+        await this.ensurePostgrestBinary();
+        await this.installSystemdTemplate("checked");
+        const pgrstPort = await this.getTenantPort(ref, "pgrst");
+        const gotruePort = await this.getTenantPort(ref, "gotrue");
+        const generation = await this.generateTenantConfigUnlocked(
+            ref,
+            pgrstPort,
+            gotruePort,
+            "checked",
+        );
+        return completePostgrestActivation({
+            projectRef: ref,
+            previousPointerTarget: generation.previousPointerTarget,
+            activate: async () => {
+                const active = await this.postgrestController.isActive(ref);
+                if (!active && mode === "refresh-if-running") return null;
+                if (active && mode === "ensure-running") {
+                    const current = await this.livePostgrestAttestation(
+                        ref,
+                        pgrstPort,
+                        generation.revision,
+                    );
+                    if (current.attestationState === "loaded"
+                        && current.loadedRevision === generation.revision
+                        && current.health === "healthy") {
+                        return this.postgrestController.waitForHealthy(ref, pgrstPort, 1, 0);
+                    }
+                }
+                return this.startOrRestartPostgrestGeneration(
+                    ref,
+                    pgrstPort,
+                    generation.revision,
+                );
+            },
+            rollback: (previousPointerTarget) => this.restorePostgrestGeneration(
+                ref,
+                pgrstPort,
+                generation,
+                previousPointerTarget,
+            ),
+        });
+    }
+
+    private async activatePostgrestGeneration(
+        ref: string,
+        mode: PostgrestActivationMode,
+    ): Promise<PostgrestRuntimeStatus | null> {
+        return this.withTenantConfigLock(ref, () =>
+            this.activatePostgrestGenerationUnlocked(ref, mode));
+    }
+
     private async effectiveGoTruePort(ref: string, localPort: number): Promise<number> {
         if (!isSharedAuthRuntime(ref)) return localPort;
         const [owner] = await metaSql`
@@ -661,8 +1048,13 @@ class TenantRuntimeService {
     }
 
     private async findTenantPortConflict(ref: string, type: "pgrst" | "gotrue", port: number): Promise<string | null> {
-        await fs.mkdir(this.TENANT_CONFIG_DIR, { recursive: true });
-        const files = await fs.readdir(this.TENANT_CONFIG_DIR);
+        let files: string[];
+        try {
+            files = await fs.readdir(this.TENANT_CONFIG_DIR);
+        } catch (error: unknown) {
+            if (error instanceof Error && "code" in error && error.code === "ENOENT") return null;
+            throw error;
+        }
 
         for (const file of files) {
             let existingRef = "";
@@ -748,13 +1140,16 @@ class TenantRuntimeService {
     private async getTenantCredentials(ref: string) {
         const [project] = await metaSql`
           SELECT db_password, jwt_secret, config, db_name, anon_key, service_role_key,
-                 publishable_key, secret_key_encrypted
+                 publishable_key, secret_key_encrypted, status, postgrest_desired
           FROM projects
           WHERE ref=${ref}
         `;
 
         if (!project || !project.db_password || !project.jwt_secret) {
             throw new Error(`Cannot find valid credentials for project ${ref} in supacloud_meta`);
+        }
+        if (typeof project.db_name !== "string" || !project.db_name.trim()) {
+            throw new Error(`Cannot find authoritative database name for project ${ref}`);
         }
 
         const projectConfig = normalizeProjectConfig(project.config);
@@ -798,7 +1193,7 @@ class TenantRuntimeService {
             jwtJwks,
             thirdPartyJwtPolicy: jwtMaterial.thirdParty,
             localJwtIssuer,
-            dbName: await resolveDbName(ref),
+            dbName: project.db_name,
             apiUrl: this.deriveApiUrl(ref, projectConfig),
             authUrl: this.deriveAuthUrl(ref, projectConfig),
             anonKey: project.anonKey || project.anon_key,
@@ -807,6 +1202,9 @@ class TenantRuntimeService {
             secretKey: project.secret_key_encrypted
                 ? decryptSecretIfNeeded(String(project.secret_key_encrypted))
                 : "",
+            postgrestPort: pickPositivePort(projectConfig.postgrest_port),
+            projectStatus: String(project.status || ""),
+            postgrestDesired: project.postgrest_desired,
             siteUrl,
             uriAllowList,
             authConfig
@@ -903,6 +1301,30 @@ class TenantRuntimeService {
         return runtimeUser;
     }
 
+    private async tenantRuntimeGroupId(runtimeUser: string): Promise<number> {
+        const group = await this.runStructuredCommand(["id", "-g", runtimeUser]);
+        const rawGroupId = group.stdout.trim();
+        if (group.exitCode !== 0 || !/^\d+$/.test(rawGroupId)) {
+            throw new Error(`Tenant runtime group ${runtimeUser} is unavailable`);
+        }
+        return Number(rawGroupId);
+    }
+
+    private async activateRenderedPostgrestGeneration(
+        request: RenderedPostgrestGenerationRequest,
+    ): Promise<ActivatedPostgrestGeneration> {
+        return activatePostgrestGeneration({
+            tenantDirectory: this.TENANT_CONFIG_DIR,
+            projectRef: request.ref,
+            content: request.content,
+            expectedPreviousPointerTarget: request.expectedPreviousPointerTarget,
+            controlOwnerUid: 0,
+            runtimeGroupGid: request.runtimeGroupGid,
+            setControlOwnership: (targetPath) =>
+                this.chownPath(targetPath, `root:${request.runtimeUser}`),
+        });
+    }
+
     private async chownTenantPath(targetPath: string, runtimeUser: string): Promise<void> {
         const result = await this.runStructuredCommand(["chown", `${runtimeUser}:${runtimeUser}`, targetPath]);
         if (result.exitCode !== 0) {
@@ -989,7 +1411,7 @@ class TenantRuntimeService {
         };
     }
 
-    private async hasPgmqPublicSchema(ref: string, dbName: string, dbPassword: string): Promise<boolean> {
+    private async queryPgmqPublicSchema(ref: string, dbName: string, dbPassword: string): Promise<boolean> {
         const query = "SELECT CASE WHEN EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'pgmq_public') THEN 1 ELSE 0 END;";
         const result = await this.runTenantPsql({
             user: resolveAuthenticatorName(ref),
@@ -999,13 +1421,127 @@ class TenantRuntimeService {
             database: dbName,
         }, ["-Atqc", query]);
         if (result.exitCode !== 0) {
-            const stderr = result.stderr.trim();
+            throw new Error(`Unable to read authoritative PostgREST schemas for ${ref}`);
+        }
+        return result.stdout.trim() === "1";
+    }
+
+    private async hasPgmqPublicSchema(ref: string, dbName: string, dbPassword: string): Promise<boolean> {
+        try {
+            return await this.queryPgmqPublicSchema(ref, dbName, dbPassword);
+        } catch (error: unknown) {
             logger.warn(`[tenant-runtime] Failed to detect pgmq_public schema for ${ref}; falling back to base PostgREST schemas`, {
-                error: stderr || `psql exited with code ${result.exitCode}`,
+                error: error instanceof Error ? error.message : String(error),
             });
             return false;
         }
-        return result.stdout.trim() === "1";
+    }
+
+    private renderPostgrestCredentialConfig(
+        ref: string,
+        pgrstPort: number,
+        credentials: PostgrestCredentialMaterial,
+        databaseSchemas: string,
+    ): string {
+        const databaseUri = buildPostgresUri({
+            protocol: "postgres",
+            user: resolveAuthenticatorName(ref),
+            password: credentials.dbPassword,
+            host: this.PG_HOST,
+            port: this.PG_PORT,
+            database: credentials.dbName,
+        });
+        return renderDesiredPostgrestConfig({
+            projectRef: ref,
+            databaseUri,
+            databaseSchemas,
+            jwtVerifierSecret: credentials.jwtJwks || credentials.jwtSecret,
+            jwtAudience: isSharedAuthRuntime(ref)
+                ? ""
+                : (credentials.thirdPartyJwtPolicy?.audience[0] || ""),
+            port: pgrstPort,
+            databasePool: this.POSTGREST_DB_POOL,
+            apiUrl: credentials.apiUrl,
+        });
+    }
+
+    private async desiredPostgrestConfig(
+        ref: string,
+        pgrstPort: number,
+        credentials: PostgrestCredentialMaterial,
+    ): Promise<string> {
+        const databaseSchemas = renderPostgrestDbSchemas(
+            await this.hasPgmqPublicSchema(ref, credentials.dbName, credentials.dbPassword),
+        );
+        return this.renderPostgrestCredentialConfig(
+            ref,
+            pgrstPort,
+            credentials,
+            databaseSchemas,
+        );
+    }
+
+    private async readAuthoritativePostgrestDesired(
+        ref: string,
+    ): Promise<AuthoritativePostgrestDesired> {
+        const credentials = await this.getTenantCredentials(ref);
+        if (!credentials.postgrestPort) {
+            throw new Error(`Project ${ref} has no authoritative PostgREST port`);
+        }
+        const databaseSchemas = renderPostgrestDbSchemas(
+            await this.queryPgmqPublicSchema(ref, credentials.dbName, credentials.dbPassword),
+        );
+        const content = this.renderPostgrestCredentialConfig(
+            ref,
+            credentials.postgrestPort,
+            credentials,
+            databaseSchemas,
+        );
+        return {
+            revision: postgrestConfigRevision(ref, content),
+            desired: this.getPostgrestDesiredState({
+                status: credentials.projectStatus,
+                postgrest_desired: credentials.postgrestDesired,
+            }),
+            port: credentials.postgrestPort,
+        };
+    }
+
+    private async stableAuthoritativePostgrestDesired(
+        ref: string,
+    ): Promise<AuthoritativePostgrestDesired> {
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+            const before = await this.readAuthoritativePostgrestDesired(ref);
+            const after = await this.readAuthoritativePostgrestDesired(ref);
+            if (before.revision === after.revision
+                && before.desired === after.desired
+                && before.port === after.port) {
+                return after;
+            }
+        }
+        throw new Error(`Authoritative PostgREST configuration is unstable for ${ref}`);
+    }
+
+    public async runtimeSnapshotPostgrest(ref: string): Promise<PostgrestRuntimeSnapshot> {
+        const desired = await this.stableAuthoritativePostgrestDesired(ref);
+        const attestation = await attestPostgrestRuntime({
+            projectRef: ref,
+            desiredRevision: desired.revision,
+            port: desired.port,
+            unit: this.postgrestController.unit(ref),
+            tenantDirectory: this.TENANT_CONFIG_DIR,
+            postgrestBinary: this.POSTGREST_BIN,
+        });
+        if (attestation.desiredRevision !== desired.revision) {
+            throw new Error(`PostgREST attestation lost authoritative revision for ${ref}`);
+        }
+        return {
+            ...attestation,
+            desiredRevision: desired.revision,
+            desired: desired.desired,
+            port: desired.port,
+            unit: this.postgrestController.unit(ref),
+        };
     }
 
     private async generateTenantConfig(
@@ -1026,6 +1562,7 @@ class TenantRuntimeService {
     ) {
         const creds = await this.getTenantCredentials(ref);
         const runtimeUser = await this.ensureTenantRuntimeUser(ref);
+        const runtimeGroupGid = await this.tenantRuntimeGroupId(runtimeUser);
         await fs.mkdir(this.TENANT_CONFIG_DIR, { recursive: true, mode: 0o711 });
         await fs.chmod(this.TENANT_CONFIG_DIR, 0o711);
 
@@ -1047,16 +1584,6 @@ class TenantRuntimeService {
         })) {
             assertSafeConfigValue(`tenant ${name}`, String(value));
         }
-        const includePgmqPublic = await this.hasPgmqPublicSchema(ref, creds.dbName, creds.dbPassword);
-        const dbSchemas = renderPostgrestDbSchemas(includePgmqPublic);
-        const postgrestDbUri = buildPostgresUri({
-            protocol: "postgres",
-            user: resolveAuthenticatorName(ref),
-            password: creds.dbPassword,
-            host: this.PG_HOST,
-            port: this.PG_PORT,
-            database: creds.dbName,
-        });
         const authDbUri = buildPostgresUri({
             protocol: "postgres",
             user: "supabase_auth_admin",
@@ -1067,22 +1594,11 @@ class TenantRuntimeService {
         });
 
         const sharedAuthRuntime = isSharedAuthRuntime(ref);
-        const jwtVerifierSecret = creds.jwtJwks || creds.jwtSecret;
         const jwtJwksEnv = creds.jwtJwks ? renderSystemdEnvLine("JWT_JWKS", creds.jwtJwks) : "";
         const jwtKeysEnv = creds.jwtKeys ? renderSystemdEnvLine("JWT_KEYS", creds.jwtKeys) : "";
         const thirdPartyJwtPolicyEnv = creds.thirdPartyJwtPolicy
             ? renderSystemdEnvLine("SUPACLOUD_THIRD_PARTY_JWT_POLICY", JSON.stringify(creds.thirdPartyJwtPolicy))
             : "";
-        // Shared mode accepts both SupAuth owner tokens and an optional scoped
-        // third-party issuer. A single global jwt-aud would reject one side;
-        // the pre-request guard validates each issuer's audience instead.
-        const postgrestJwtAudience = sharedAuthRuntime
-            ? ""
-            : (creds.thirdPartyJwtPolicy?.audience[0] || "");
-        const postgrestJwtAudienceConfig = postgrestJwtAudience
-            ? `jwt-aud = ${quoteTomlBasicString(postgrestJwtAudience)}`
-            : "";
-
         // Generate PostgREST .env configuration
         // Edge runtime and other services consume these env vars
         const pgrstEnv = [
@@ -1117,44 +1633,7 @@ class TenantRuntimeService {
         );
         await this.writePgredisTenantConfig(ref, creds.dbName, creds.dbPassword);
 
-        // Generate PostgREST .conf configuration (single source of truth for all settings)
-        const pgrstConf = `
-# Managed by SupaCloud Management API. Legacy shell tooling must not overwrite this file.
-# PostgREST config for tenant: ${ref}
-db-uri = ${quoteTomlBasicString(postgrestDbUri)}
-db-schemas = ${quoteTomlBasicString(dbSchemas)}
-db-extra-search-path = "public, extensions, auth"
-db-anon-role = "anon"
-jwt-secret = ${quoteTomlBasicString(jwtVerifierSecret)}
-${postgrestJwtAudienceConfig}
-server-port = ${pgrstPort}
-server-host = "0.0.0.0"
-db-pool = ${this.POSTGREST_DB_POOL}
-db-pool-acquisition-timeout = 10
-log-level = "warn"
-
-# P0-10: OpenAPI spec generation (required by Studio Table Editor & API Docs)
-openapi-mode = "follow-privileges"
-openapi-server-proxy-uri = ${quoteTomlBasicString(`${creds.apiUrl}/rest/v1`)}
-
-# P0-11: Pre-request function for RLS context injection
-db-pre-request = "public.set_request_context"
-
-# P1-7: Row limit protection
-db-max-rows = 1000
-
-# P2-3: Restrict CORS to the tenant's API domain
-server-cors-allowed-origins = ${quoteTomlBasicString(creds.apiUrl)}
-
-# P2-4: Tenant-specific listen channel for schema cache invalidation
-db-channel = ${quoteTomlBasicString(resolvePgrstChannel(ref))}
-`.trim();
-        await this.writeTenantSecretFile(
-            path.join(this.TENANT_CONFIG_DIR, `${ref}.conf`),
-            pgrstConf,
-            runtimeUser,
-        );
-
+        const pgrstConf = await this.desiredPostgrestConfig(ref, pgrstPort, creds);
         // 共享认证模式下从项目只使用主项目 GoTrue，不再生成本地认证运行时。
         if (sharedAuthRuntime) {
             const sharedMarkerPath = path.join(this.TENANT_CONFIG_DIR, `${ref}_gotrue.shared`);
@@ -1171,8 +1650,14 @@ db-channel = ${quoteTomlBasicString(resolvePgrstChannel(ref))}
                 await this.gotrueController.stopAndDisable(ref);
             }
             await this.persistTenantPortConfig(ref, pgrstPort, gotruePort);
+            const postgrestGeneration = await this.activateRenderedPostgrestGeneration({
+                ref,
+                content: pgrstConf,
+                runtimeUser,
+                runtimeGroupGid,
+            });
             logger.info(`Config generated for ${ref} with shared GoTrue owner ${config.authRuntimeOwnerRef}`);
-            return;
+            return postgrestGeneration;
         }
 
         await fs.rm(path.join(this.TENANT_CONFIG_DIR, `${ref}_gotrue.shared`), { force: true });
@@ -1283,7 +1768,15 @@ GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE=/auth/v1/verify
         await this.writeTenantSecretFile(gotrueEnvPath, gotrueEnv, runtimeUser);
         await this.persistTenantPortConfig(ref, pgrstPort, gotruePort);
 
+        const postgrestGeneration = await this.activateRenderedPostgrestGeneration({
+            ref,
+            content: pgrstConf,
+            runtimeUser,
+            runtimeGroupGid,
+        });
+
         logger.info(`Config generated for ${ref} (pgrst_port=${pgrstPort}, gotrue_port=${gotruePort})`);
+        return postgrestGeneration;
     }
 
     private async writePgredisTenantConfig(ref: string, database: string, password: string): Promise<void> {
@@ -1327,7 +1820,9 @@ GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE=/auth/v1/verify
         const shouldWritePgrstUnit = !pgrstExists
             || await unitHasLegacyPostgrestMemoryLimit(pgrstUnitPath)
             || !currentPgrstUnit.includes("User=supacloud-%i")
-            || !currentPgrstUnit.includes("Group=supacloud-%i");
+            || !currentPgrstUnit.includes("Group=supacloud-%i")
+            || !currentPgrstUnit.includes("/usr/local/libexec/supacloud/postgrest-launcher %i")
+            || currentPgrstUnit.includes(`EnvironmentFile=${this.TENANT_CONFIG_DIR}/%i.env`);
         if (shouldWritePgrstUnit) {
             const pgrstUnit = `
 [Unit]
@@ -1340,9 +1835,13 @@ Wants=patroni.service
 Type=simple
 User=supacloud-%i
 Group=supacloud-%i
-EnvironmentFile=${this.TENANT_CONFIG_DIR}/%i.env
 Environment="GHCRTS=${this.POSTGREST_RTS}"
-ExecStart=${this.POSTGREST_BIN} ${this.TENANT_CONFIG_DIR}/%i.conf +RTS ${this.POSTGREST_RTS} -RTS
+Environment="SUPACLOUD_POSTGREST_BIN=${this.POSTGREST_BIN}"
+Environment="SUPACLOUD_POSTGREST_CONFIG_DIR=${this.TENANT_CONFIG_DIR}"
+Environment="SUPACLOUD_POSTGREST_CONFIG_TRUST_ROOT=${path.dirname(this.TENANT_CONFIG_DIR)}"
+Environment="SUPACLOUD_POSTGREST_BINARY_TRUST_ROOT=${path.dirname(path.dirname(this.POSTGREST_BIN))}"
+Environment="SUPACLOUD_POSTGREST_CONTROL_UID=0"
+ExecStart=/usr/local/libexec/supacloud/postgrest-launcher %i +RTS ${this.POSTGREST_RTS} -RTS
 Restart=on-failure
 RestartSec=5
 StartLimitBurst=3
@@ -1959,7 +2458,6 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
 
     public async startRuntime(ref: string): Promise<RuntimeStatus> {
         await this.ensureBinaries();
-        await this.installSystemdTemplate();
         await this.ensureAuthSchema(ref);
         await this.ensureOneTimeTokensAndGraphQL(ref);
         await this.ensureTenantSchemaMigrations(ref);
@@ -1972,12 +2470,8 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
 
         const pgrstPort = await this.getTenantPort(ref, "pgrst");
         const gotruePort = await this.getTenantPort(ref, "gotrue");
-
-        await this.generateTenantConfig(ref, pgrstPort, gotruePort);
-
-        // Start and enable systemd units
-        await this.postgrestController.enable(ref);
-        await this.postgrestController.start(ref);
+        const pgrstStatus = await this.activatePostgrestGeneration(ref, "ensure-running");
+        if (!pgrstStatus) throw new Error(`PostgREST activation did not run for ${ref}`);
 
         if (!isSharedAuthRuntime(ref)) {
             await this.gotrueController.enable(ref);
@@ -1986,7 +2480,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
 
         // Wait for service health checks
         logger.info(`Waiting for PostgREST(${pgrstPort}) and GoTrue(${gotruePort}) health checks...`);
-        let pgrstOk = false;
+        let pgrstOk = pgrstStatus.health === "healthy";
         let gotrueOk = false;
 
         for (let tryIdx = 0; tryIdx < 20; tryIdx++) {
@@ -2036,12 +2530,16 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
     private async removeRuntimeConfig(ref: string): Promise<void> {
         const pgrstEnvFile = Bun.file(path.join(this.TENANT_CONFIG_DIR, `${ref}.env`));
         const pgrstConfFile = Bun.file(path.join(this.TENANT_CONFIG_DIR, `${ref}.conf`));
+        const pgrstPointerFile = Bun.file(path.join(this.TENANT_CONFIG_DIR, `${ref}_postgrest.current`));
+        const pgrstGenerationDirectory = path.join(this.TENANT_CONFIG_DIR, `${ref}_postgrest.d`);
         const gotrueEnvFile = Bun.file(path.join(this.TENANT_CONFIG_DIR, `${ref}_gotrue.env`));
         const pgredisEnvFile = Bun.file(path.join(this.PGREDIS_CONFIG_DIR, `${ref}_pgredis.env`));
         const gotrueConfigDir = path.join(this.TENANT_CONFIG_DIR, `${ref}_gotrue.d`);
 
         if (await pgrstEnvFile.exists()) await fs.unlink(pgrstEnvFile.name!);
         if (await pgrstConfFile.exists()) await fs.unlink(pgrstConfFile.name!);
+        if (await pgrstPointerFile.exists()) await fs.unlink(pgrstPointerFile.name!);
+        await fs.rm(pgrstGenerationDirectory, { recursive: true, force: true });
         if (await gotrueEnvFile.exists()) await fs.unlink(gotrueEnvFile.name!);
         if (await pgredisEnvFile.exists()) await fs.unlink(pgredisEnvFile.name!);
         await fs.rm(gotrueConfigDir, { recursive: true, force: true });
@@ -2157,7 +2655,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
 
     private async preparePostgrestRuntime(ref: string): Promise<void> {
         await this.ensurePostgrestBinary();
-        await this.installSystemdTemplate();
+        await this.installSystemdTemplate("checked");
         await this.ensureTenantSchemaMigrations(ref);
         const jwtPolicy = await this.getTenantCredentials(ref);
         await this.ensurePostgrestPrerequest(
@@ -2165,10 +2663,6 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
             jwtPolicy.thirdPartyJwtPolicy,
             jwtPolicy.localJwtIssuer,
         );
-
-        const pgrstPort = await this.getTenantPort(ref, "pgrst");
-        const gotruePort = await this.getTenantPort(ref, "gotrue");
-        await this.generateTenantConfig(ref, pgrstPort, gotruePort);
     }
 
     private async persistPostgrestObservation(
@@ -2191,8 +2685,12 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
     }
 
     private async startPreparedPostgrest(ref: string, mode: "restart" | "repair"): Promise<PostgrestRuntimeStatus> {
-        const port = await this.getTenantPort(ref, "pgrst");
-        return this.postgrestController.startOrRepair(ref, port, mode);
+        const status = await this.activatePostgrestGeneration(
+            ref,
+            mode === "restart" ? "restart-running" : "ensure-running",
+        );
+        if (!status) throw new Error(`PostgREST activation did not run for ${ref}`);
+        return status;
     }
 
     private async transitionPostgrest(
@@ -2520,17 +3018,11 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
 
         if (pgrstActive || gotrueActive) {
             await this.ensureBinaries();
-            await this.installSystemdTemplate();
-
-            const pgrstPort = await this.getTenantPort(ref, "pgrst");
-            const gotruePort = await this.getTenantPort(ref, "gotrue");
-            await this.generateTenantConfig(ref, pgrstPort, gotruePort);
-
-            await this.postgrestController.restart(ref);
+            const postgrestStatus = await this.activatePostgrestGeneration(ref, "restart-running");
+            if (!postgrestStatus) throw new Error(`PostgREST activation did not run for ${ref}`);
             if (sharedAuthRuntime) await this.gotrueController.stopAndDisable(ref);
             else await this.gotrueController.restart(ref);
 
-            const postgrestStatus = await this.statusPostgrest(ref);
             await this.setPostgrestDesiredState(ref, "running");
             await this.recordPostgrestObservation(ref, {
                 actual: postgrestStatus.actual,
@@ -2563,7 +3055,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
 
         const pgrstPort = await this.getTenantPort(ref, "pgrst");
         const gotruePort = await this.getTenantPort(ref, "gotrue");
-        await this.generateTenantConfig(ref, pgrstPort, gotruePort);
+        await this.generateTenantConfig(ref, pgrstPort, gotruePort, "checked");
 
         const unit = this.gotrueController.unit(ref);
         const active = await this.gotrueController.isActive(ref);
@@ -2585,28 +3077,13 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
             );
         }
 
-        return { authRuntime, pgrstPort, status };
+        return { authRuntime, status };
     }
 
-    private async restartActivePostgrestOrThrow(ref: string, pgrstPort: number): Promise<void> {
-        if (!(await this.postgrestController.isActive(ref))) return;
-
-        await this.ensurePostgrestBinary();
-        await runSystemctlOrThrow("restart", this.postgrestController.unit(ref));
-        const status = await this.postgrestController.waitForHealthy(ref, pgrstPort, 20, 500);
+    private async restartActivePostgrestOrThrow(ref: string): Promise<void> {
+        const status = await this.activatePostgrestGeneration(ref, "refresh-if-running");
+        if (!status) return;
         await this.recordPostgrestObservation(ref, status);
-        if (status.health !== "healthy") {
-            throw new Error(status.last_error || `PostgREST did not become healthy after refreshing ${ref}`);
-        }
-    }
-
-    private async restartPostgrestForPoolUpdate(ref: string): Promise<void> {
-        const pgrstPort = await this.getTenantPort(ref, "pgrst");
-        await runSystemctlOrThrow("restart", this.postgrestController.unit(ref));
-        const status = await this.postgrestController.waitForHealthy(ref, pgrstPort, 20, 500);
-        if (status.health !== "healthy") {
-            throw new Error("PostgREST did not become healthy after the pool update");
-        }
     }
 
     private async reconcilePostgrestPool(
@@ -2614,18 +3091,27 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
         projectStatus: string,
         desired: RuntimeDesiredState,
     ): Promise<PostgrestPoolReconcileResult> {
-        return this.withTenantConfigLock(ref, () =>
-            reconcileManagedPostgrestPool({
-                configPath: path.join(this.TENANT_CONFIG_DIR, `${ref}.conf`),
+        return this.withTenantConfigLock(ref, async () => {
+            const runtimeUser = await this.ensureTenantRuntimeUser(ref);
+            const context: PostgrestPoolContext = {
+                ref,
+                runtimeUser,
+                ownership: {
+                    controlOwnerUid: 0,
+                    runtimeGroupGid: await this.tenantRuntimeGroupId(runtimeUser),
+                },
+            };
+            return reconcileManagedPostgrestPool({
                 projectRef: ref,
                 desiredPool: this.POSTGREST_DB_POOL,
                 projectStatus,
                 desiredState: desired,
-                restartAndWait: () => this.restartPostgrestForPoolUpdate(ref),
-            }));
+                operations: this.postgrestPoolOperations(context),
+            });
+        });
     }
 
-    private async refreshProjectPostgrestVerifier(ref: string, pgrstPort: number): Promise<void> {
+    private async refreshProjectPostgrestVerifier(ref: string): Promise<void> {
         const jwtPolicy = await this.getTenantCredentials(ref);
         await this.ensurePostgrestPrerequest(
             ref,
@@ -2633,7 +3119,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
             jwtPolicy.localJwtIssuer,
         );
         await runtimeCacheService.invalidateProjectRuntimeEnv(ref);
-        await this.restartActivePostgrestOrThrow(ref, pgrstPort);
+        await this.restartActivePostgrestOrThrow(ref);
     }
 
     public async applyAuthConfig(
@@ -2644,9 +3130,9 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
         const applied = await this.applyGotrueAuthConfig(ref);
         if (!authConfigChangesPostgrestVerifier(previousAuth, nextAuth)) return applied.status;
 
-        await this.refreshProjectPostgrestVerifier(ref, applied.pgrstPort);
+        await this.refreshProjectPostgrestVerifier(ref);
         if (applied.authRuntime.mode === "owner") {
-            await this.refreshSharedAuthDependents(ref, "checked");
+            await this.refreshSharedAuthDependents(ref);
         }
         return applied.status;
     }
@@ -2670,14 +3156,10 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
 
     private async refreshSharedAuthDependents(
         ownerRef: string,
-        systemctlMode: SystemctlExecutionMode = "best-effort",
     ): Promise<void> {
         const failures: string[] = [];
         for (const ref of await this.listSharedAuthDependentRefs(ownerRef)) {
             try {
-                const pgrstPort = await this.getTenantPort(ref, "pgrst");
-                const gotruePort = await this.getTenantPort(ref, "gotrue");
-                await this.generateTenantConfig(ref, pgrstPort, gotruePort, systemctlMode);
                 const jwtPolicy = await this.getTenantCredentials(ref);
                 await this.ensurePostgrestPrerequest(
                     ref,
@@ -2685,11 +3167,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
                     jwtPolicy.localJwtIssuer,
                 );
                 await runtimeCacheService.invalidateProjectRuntimeEnv(ref);
-                if (systemctlMode === "checked") {
-                    await this.restartActivePostgrestOrThrow(ref, pgrstPort);
-                } else if (await this.postgrestController.isActive(ref)) {
-                    await this.postgrestController.restart(ref);
-                }
+                await this.restartActivePostgrestOrThrow(ref);
             } catch (error: unknown) {
                 failures.push(ref);
                 logger.error(`[TenantRuntime] Failed to refresh shared auth dependent ${ref}`, {

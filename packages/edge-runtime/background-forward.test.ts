@@ -64,7 +64,7 @@ describe("background forwarded request", () => {
     expect(second).not.toBe(first);
   });
 
-  test("keeps forwarded header and tenant env token in sync", () => {
+  test("keeps the invocation token in the request-scoped header only", () => {
     const request = new Request("http://edge-runtime/internal/background/proj/fn/work", {
       method: "POST",
       headers: {
@@ -83,10 +83,9 @@ describe("background forwarded request", () => {
       "background-token",
     );
 
-    expect(dispatch.backgroundInternalToken).toBe("background-token");
     expect(dispatch.forwardedRequest.headers.get("x-supacloud-internal-auth")).toBe("Bearer background-token");
     expect(dispatch.forwardedRequest.headers.get("authorization")).toBe("Bearer user-token");
-    expect(dispatch.tenantEnv.SUPACLOUD_BACKGROUND_INTERNAL_TOKEN).toBe("background-token");
+    expect(dispatch.tenantEnv.SUPACLOUD_BACKGROUND_INTERNAL_TOKEN).toBeUndefined();
     expect(dispatch.tenantEnv.SUPABASE_URL).toBe("https://api.example.com");
   });
 });

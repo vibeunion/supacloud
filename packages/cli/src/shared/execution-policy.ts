@@ -32,7 +32,7 @@ const ACTION_POLICY: Record<string, ModulePolicy> = {
         write: ["create_bucket", "update_bucket", "delete_bucket", "upload_base64", "delete_file"],
     },
     edge_functions: {
-        read: ["list", "source"],
+        read: ["list", "get_config", "source"],
         local: ["check"],
         write: ["deploy", "deploy_bundle", "config", "activate", "delete"],
     },

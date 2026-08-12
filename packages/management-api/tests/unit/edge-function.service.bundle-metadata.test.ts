@@ -6,9 +6,9 @@ import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { tmpdir } from "node:os";
+import { homedir } from "node:os";
 
-const functionsRoot = await mkdtemp(join(tmpdir(), "supacloud-edge-functions-"));
+const functionsRoot = await mkdtemp(join(homedir(), ".supacloud-edge-functions-"));
 const originalFunctionsDir = process.env.EDGE_FUNCTIONS_DIR;
 const originalRuntimeInternal = process.env.EDGE_RUNTIME_INTERNAL;
 const originalExternalPackages = process.env.EDGE_FUNCTION_EXTERNAL_PACKAGES;
@@ -28,15 +28,28 @@ const {
 );
 
 async function deployConditionalRelease(
-  request: Omit<Parameters<typeof edgeFunctionService.deployRelease>[0], "expectedActiveVersion">,
+  request: Omit<
+    Parameters<typeof edgeFunctionService.deployRelease>[0],
+    "expectedActiveVersion" | "expectedActivationId"
+  >,
 ) {
-  const expectedActiveVersion = (await edgeFunctionService.getConfig(request.ref, request.slug)).version ?? "absent";
-  return edgeFunctionService.deployRelease({ ...request, expectedActiveVersion });
+  const current = await edgeFunctionService.getConfig(request.ref, request.slug);
+  return edgeFunctionService.deployRelease({
+    ...request,
+    expectedActiveVersion: current.version ?? "absent",
+    expectedActivationId: current.activation_id,
+  });
 }
 
 async function activateConditionalVersion(ref: string, slug: string, version: string) {
-  const expectedActiveVersion = (await edgeFunctionService.getConfig(ref, slug)).version ?? "absent";
-  return (await edgeFunctionService.activateVersion(ref, slug, version, expectedActiveVersion))?.config ?? null;
+  const current = await edgeFunctionService.getConfig(ref, slug);
+  return (await edgeFunctionService.activateVersion(
+    ref,
+    slug,
+    version,
+    current.version ?? "absent",
+    current.activation_id,
+  ))?.config ?? null;
 }
 
 async function writeConfiguredAliases(ref: string, slug: string, version: string): Promise<void> {
@@ -59,27 +72,307 @@ async function writeCrossSlugFixture(ref: string): Promise<void> {
   ]);
 }
 
-const runtimeInvalidationProtocol = {
-  module_scope: "legacy-base-only",
-  immutable_versions_retained: true,
-  config_cache_evicted: true,
+const TEST_RUNTIME_INSTANCE_ID = "00000000-0000-4000-8000-000000000001";
+const TEST_RUNTIME_REVISION = `hmac-sha256:${"a".repeat(64)}`;
+const TEST_RUNTIME_ENV_PROOF = `hmac-sha256:${"b".repeat(64)}`;
+const TEST_FOREGROUND_MODULE_ENV_PROOF = `hmac-sha256:${"c".repeat(64)}`;
+const TEST_BACKGROUND_MODULE_ENV_PROOF = `hmac-sha256:${"d".repeat(64)}`;
+const TEST_FENCE_GENERATION = 1;
+const TEST_PREHEAT_GENERATION = 2;
+
+function preheatRotation() {
+  return {
+    generation: TEST_PREHEAT_GENERATION,
+    attempted: 0,
+    idleRetired: 0,
+    busyTainted: 0,
+    alreadyTainted: 0,
+    immediateReplacements: 0,
+  };
+}
+
+type TestPreheatPoolStats = {
+  attempted: number;
+  succeeded: number;
+  cacheHits: number;
+  cacheMisses: number;
+  durationMs: number;
 };
 
-function runtimeSuccessFetch(): typeof fetch {
-  return ((input, init) => {
-    const url = String(input);
-    if (url.includes("/invalidate/")) {
-      const segments = new URL(url).pathname.split("/");
-      return Promise.resolve(Response.json({
-        invalidated: `${segments.at(-2)}_${segments.at(-1)}`,
-        ...runtimeInvalidationProtocol,
-        foreground: { attempted: 0, succeeded: 0, invalidated: 0 },
-        background: { attempted: 0, succeeded: 0, invalidated: 0 },
-      }));
+const DEFAULT_FOREGROUND_PREHEAT: TestPreheatPoolStats = {
+  attempted: 1,
+  succeeded: 1,
+  cacheHits: 0,
+  cacheMisses: 1,
+  durationMs: 1,
+};
+const DEFAULT_BACKGROUND_PREHEAT: TestPreheatPoolStats = {
+  attempted: 1,
+  succeeded: 1,
+  cacheHits: 0,
+  cacheMisses: 1,
+  durationMs: 0,
+};
+
+function testPreheatPool(
+  stats: TestPreheatPoolStats,
+  attestation: object,
+  requestedVersion: string | null,
+) {
+  return {
+    ...stats,
+    attestation: stats.succeeded > 0 ? attestation : null,
+    ...(requestedVersion === null ? {} : { rotation: preheatRotation() }),
+  };
+}
+
+type TestPreheatIdentity = {
+  ref: string;
+  slug: string;
+  requestedVersion: string | null;
+  resolvedVersion: string | null;
+  artifactSha256: string;
+  verifyJwt: boolean;
+  activationId: string | null;
+};
+
+function testPreheatAttestation(
+  identity: TestPreheatIdentity,
+  executionProfile: "foreground" | "background",
+) {
+  return {
+    schema: "supacloud.edge-runtime-preheat-attestation.v1",
+    project_ref: identity.ref,
+    function_slug: identity.slug,
+    requested_version: identity.requestedVersion,
+    target_version: identity.resolvedVersion,
+    resolved_version: identity.resolvedVersion,
+    artifact_sha256: identity.artifactSha256,
+    verify_jwt: identity.verifyJwt,
+    activation_id: identity.activationId,
+    runtime_instance_id: TEST_RUNTIME_INSTANCE_ID,
+    execution_profile: executionProfile,
+    module_env_proof: executionProfile === "foreground"
+      ? TEST_FOREGROUND_MODULE_ENV_PROOF
+      : TEST_BACKGROUND_MODULE_ENV_PROOF,
+    tenant_env: {
+      loaded_revision: TEST_RUNTIME_REVISION,
+      env_proof: TEST_RUNTIME_ENV_PROOF,
+      load_state: "loaded",
+      load_source: "management_api",
+    },
+    module_loaded: true,
+  };
+}
+
+type TestFunctionConfig = {
+  version: string | null;
+  verifyJwt: boolean;
+  activationId: string | null;
+};
+
+async function functionTestConfig(
+  ref: string,
+  slug: string,
+  activationId: string | null,
+): Promise<TestFunctionConfig> {
+  const manifestPath = activationId === null
+    ? join(functionsRoot, ref, `${slug}.config.json`)
+    : join(functionsRoot, ref, ".activation-generations", slug, `${activationId}.json`);
+  try {
+    const manifest = JSON.parse(
+      await readFile(manifestPath, "utf8"),
+    ) as {
+      version?: unknown;
+      verify_jwt?: unknown;
+      _supacloud_activation?: { activation_id?: unknown };
+    };
+    return {
+      version: typeof manifest.version === "string" ? manifest.version : null,
+      verifyJwt: manifest.verify_jwt !== false,
+      activationId: typeof manifest._supacloud_activation?.activation_id === "string"
+        ? manifest._supacloud_activation.activation_id
+        : null,
+    };
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT" || activationId !== null) throw error;
+    return { version: null, verifyJwt: true, activationId: null };
+  }
+}
+
+function runtimeActivationAck(
+  activationId: string,
+  state: "fenced" | "commit_pending" | "committed" | "aborted" | "uncertain",
+  generation: number,
+) {
+  return {
+    schema: "supacloud.edge-runtime-function-activation.v1",
+    activation_id: activationId,
+    state,
+    runtime_instance_id: TEST_RUNTIME_INSTANCE_ID,
+    foreground_generation: generation,
+    background_generation: generation,
+    cancelled_queued: 0,
+  };
+}
+
+async function runtimePreheatSuccess(
+  url: string,
+  init?: RequestInit,
+  foreground = DEFAULT_FOREGROUND_PREHEAT,
+  background = DEFAULT_BACKGROUND_PREHEAT,
+): Promise<Response> {
+  const segments = new URL(url).pathname.split("/");
+  const ref = segments.at(-2)!;
+  const slug = segments.at(-1)!;
+  const headers = new Headers(init?.headers);
+  const requestedVersion = headers.get("x-supacloud-function-version");
+  const requestedActivationId = headers.get("x-supacloud-activation-id");
+  const targetConfig = await functionTestConfig(ref, slug, requestedActivationId);
+  const resolvedVersion = requestedVersion ?? targetConfig.version;
+  const artifactPath = resolvedVersion
+    ? await getVersionedArtifactPath(ref, slug, resolvedVersion)
+    : join(functionsRoot, ref, `${slug}.js`);
+  if (!artifactPath || !existsSync(artifactPath)) {
+    throw new Error("Test preheat artifact is unavailable");
+  }
+  const artifactSha256 = createHash("sha256").update(await readFile(artifactPath)).digest("hex");
+  const identity = {
+    ref,
+    slug,
+    requestedVersion,
+    resolvedVersion,
+    artifactSha256,
+    verifyJwt: targetConfig.verifyJwt,
+    activationId: requestedActivationId,
+  };
+  const foregroundAttestation = testPreheatAttestation(identity, "foreground");
+  const backgroundAttestation = testPreheatAttestation(identity, "background");
+  const versionSuffix = resolvedVersion === null ? "" : `_v${resolvedVersion}`;
+  return Response.json({
+    preheated: `${ref}_${slug}${versionSuffix}`,
+    version: requestedVersion,
+    success: true,
+    attestation: foregroundAttestation,
+    foreground: testPreheatPool(foreground, foregroundAttestation, requestedVersion),
+    background: testPreheatPool(background, backgroundAttestation, requestedVersion),
+  });
+}
+
+type RuntimePreheatResponder = (url: string, init?: RequestInit) => Promise<Response>;
+type RuntimeActivationAction = "begin" | "status" | "commit" | "abort";
+type RuntimeActivationContext = {
+  action: RuntimeActivationAction;
+  activationId: string;
+  activeActivationId: string | null;
+  ref: string;
+  slug: string;
+};
+type RuntimeActivationResponder = (
+  context: RuntimeActivationContext,
+) => Response | null | Promise<Response | null>;
+
+class TestActivationRuntime {
+  private readonly fencedActivations = new Set<string>();
+
+  constructor(
+    private readonly preheatResponder: RuntimePreheatResponder,
+    private readonly activationResponder?: RuntimeActivationResponder,
+  ) {}
+
+  readonly fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    const url = new URL(String(input));
+    if (url.pathname.includes("/preheat/")) return this.preheatResponder(url.href, init);
+    if (!url.pathname.includes("/internal/function-activation/")) {
+      throw new Error(`Unexpected runtime request: ${url.pathname}`);
     }
-    const version = new Headers(init?.headers).get("x-supacloud-function-version");
-    return Promise.resolve(Response.json({ success: true, version }));
+    const activationId = new Headers(init?.headers).get("x-supacloud-activation-id");
+    if (activationId === null) throw new Error("Test activation identity is missing");
+    return this.activationResponse(url, activationId);
   }) as typeof fetch;
+
+  private async activationContext(url: URL, activationId: string): Promise<RuntimeActivationContext> {
+    const segments = url.pathname.split("/");
+    const action = segments.at(-1) as RuntimeActivationAction;
+    const slug = segments.at(-2)!;
+    const ref = segments.at(-3)!;
+    const active = await functionTestConfig(ref, slug, null);
+    return { action, activationId, activeActivationId: active.activationId, ref, slug };
+  }
+
+  private async activationResponse(url: URL, activationId: string): Promise<Response> {
+    const context = await this.activationContext(url, activationId);
+    const overridden = await this.activationResponder?.(context);
+    if (overridden) return overridden;
+    if (context.action === "begin") return this.begin(context.activationId);
+    if (context.action === "status") return this.status(context);
+    if (context.action === "commit") return this.commit(context);
+    if (context.action === "abort") return this.abort(context);
+    throw new Error(`Unexpected activation action: ${context.action}`);
+  }
+
+  private begin(activationId: string): Response {
+    this.fencedActivations.add(activationId);
+    return Response.json(runtimeActivationAck(
+      activationId,
+      "fenced",
+      TEST_FENCE_GENERATION,
+    ));
+  }
+
+  private status(context: RuntimeActivationContext): Response {
+    const isFenced = this.fencedActivations.has(context.activationId);
+    const state = context.activeActivationId === context.activationId
+      ? (isFenced ? "commit_pending" : "committed")
+      : (isFenced ? "fenced" : "uncertain");
+    const generation = state === "fenced" ? TEST_FENCE_GENERATION : TEST_PREHEAT_GENERATION;
+    return Response.json(runtimeActivationAck(context.activationId, state, generation));
+  }
+
+  private commit(context: RuntimeActivationContext): Response {
+    if (context.activeActivationId !== context.activationId) {
+      return this.uncertain(context.activationId);
+    }
+    this.fencedActivations.delete(context.activationId);
+    return Response.json(runtimeActivationAck(
+      context.activationId,
+      "committed",
+      TEST_PREHEAT_GENERATION,
+    ));
+  }
+
+  private abort(context: RuntimeActivationContext): Response {
+    if (context.activeActivationId === context.activationId) {
+      return Response.json(runtimeActivationAck(
+        context.activationId,
+        "committed",
+        TEST_PREHEAT_GENERATION,
+      ));
+    }
+    if (!this.fencedActivations.delete(context.activationId)) {
+      return this.uncertain(context.activationId);
+    }
+    return Response.json(runtimeActivationAck(
+      context.activationId,
+      "aborted",
+      TEST_FENCE_GENERATION,
+    ));
+  }
+
+  private uncertain(activationId: string): Response {
+    return Response.json(runtimeActivationAck(
+      activationId,
+      "uncertain",
+      TEST_FENCE_GENERATION,
+    ), { status: 409 });
+  }
+}
+
+function runtimeSuccessFetch(
+  preheatResponder: RuntimePreheatResponder = runtimePreheatSuccess,
+  activationResponder?: RuntimeActivationResponder,
+): typeof fetch {
+  return new TestActivationRuntime(preheatResponder, activationResponder).fetch;
 }
 
 beforeEach(() => {
@@ -112,10 +405,10 @@ afterAll(async () => {
 });
 
 describe("edgeFunctionService bundle metadata", () => {
-  test("returns the Edge Runtime preheat error when version readiness fails", async () => {
+  test("rejects an unattested Edge Runtime preheat failure", async () => {
     const ref = "proj_preheat_diagnostic";
     const slug = "computed-import";
-    globalThis.fetch = (async () => Response.json({
+    globalThis.fetch = runtimeSuccessFetch(async () => Response.json({
       success: false,
       version: "1",
       foreground: {
@@ -133,7 +426,7 @@ describe("edgeFunctionService bundle metadata", () => {
         cacheMisses: 0,
         durationMs: 0,
       },
-    })) as typeof fetch;
+    }));
 
     const deployed = await deployConditionalRelease({
       ref,
@@ -142,14 +435,33 @@ describe("edgeFunctionService bundle metadata", () => {
     });
 
     expect(deployed.success).toBe(false);
-    expect(deployed.error).toContain(
-      "Computed dynamic imports are disabled in the multi-tenant Edge Runtime.",
-    );
+    expect(deployed.error).toContain("invalid preheat attestation");
     expect((await edgeFunctionService.listVersions(ref, slug)).map(({ version }) => version))
       .toEqual(["1"]);
     expect((await edgeFunctionService.getConfig(ref, slug)).version).toBeUndefined();
     expect(await edgeFunctionService.getActiveVersion(ref, slug)).toBe("absent");
     expect(await edgeFunctionService.list(ref)).toEqual([]);
+  });
+
+  test.each([
+    ["oversized body", () => new Response(new Uint8Array(64 * 1024 + 1)), /too large/],
+    ["invalid UTF-8", () => new Response(new Uint8Array([0xc3, 0x28])), /Invalid byte sequence|UTF-8/i],
+    ["non-object JSON", () => Response.json([]), /must be an object/],
+  ])("rejects a preheat %s before activation", async (caseName, response, expectedError) => {
+    const ref = `proj_preheat_${caseName.replace(/\W+/g, "_")}`;
+    const slug = "bounded-control";
+    globalThis.fetch = runtimeSuccessFetch(async () => response());
+
+    const deployed = await deployConditionalRelease({
+      ref,
+      slug,
+      code: "export default { fetch: () => new Response('unreachable') };",
+    });
+
+    expect(deployed).toMatchObject({ success: false });
+    expect(deployed.error).toMatch(expectedError);
+    expect((await edgeFunctionService.getConfig(ref, slug)).version).toBeUndefined();
+    expect(await edgeFunctionService.getActiveVersion(ref, slug)).toBe("absent");
   });
 
   test("propagates corrupt candidate config without hiding valid active functions", async () => {
@@ -305,6 +617,156 @@ describe("edgeFunctionService bundle metadata", () => {
     }
   });
 
+  test("rejects unsafe startup migration parents without touching an external version target", async () => {
+    const migrationRoot = await mkdtemp(join(homedir(), ".supacloud-legacy-migration-"));
+    const ref = "proj_unsafe_legacy_migration";
+    const slug = "unsafe-legacy";
+    const projectDirectory = join(migrationRoot, ref);
+    const outsideDirectory = join(migrationRoot, `${ref}_outside`);
+    const legacyArtifact = join(projectDirectory, `${slug}.v1.js`);
+    await mkdir(projectDirectory, { mode: 0o700 });
+    await mkdir(outsideDirectory, { mode: 0o700 });
+    await Bun.write(legacyArtifact, "legacy artifact");
+    await Bun.write(join(outsideDirectory, "sentinel"), "unchanged");
+    await fs.symlink(outsideDirectory, join(projectDirectory, ".versions"), "dir");
+    await fs.chmod(projectDirectory, 0o777);
+    process.env.EDGE_FUNCTIONS_DIR = migrationRoot;
+
+    try {
+      await expect(migrateLegacyVersionArtifacts()).rejects.toThrow(
+        "Function mutation directory is not trusted",
+      );
+      expect(await Bun.file(legacyArtifact).text()).toBe("legacy artifact");
+      expect(await fs.readdir(outsideDirectory)).toEqual(["sentinel"]);
+      expect(await Bun.file(join(outsideDirectory, "sentinel")).text()).toBe("unchanged");
+    } finally {
+      process.env.EDGE_FUNCTIONS_DIR = functionsRoot;
+      await fs.chmod(projectDirectory, 0o700);
+      await rm(migrationRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects a version-directory symlink before legacy migration changes either tree", async () => {
+    const migrationRoot = await mkdtemp(join(homedir(), ".supacloud-legacy-version-link-"));
+    const ref = "proj_legacy_version_link";
+    const slug = "legacy-version-link";
+    const projectDirectory = join(migrationRoot, ref);
+    const versionSlugDirectory = join(projectDirectory, ".versions", slug);
+    const outsideDirectory = join(migrationRoot, `${ref}_outside`);
+    const legacyArtifact = join(projectDirectory, `${slug}.v1.js`);
+    await mkdir(versionSlugDirectory, { recursive: true, mode: 0o700 });
+    await mkdir(outsideDirectory, { mode: 0o700 });
+    await Bun.write(legacyArtifact, "legacy artifact");
+    await Bun.write(join(outsideDirectory, "index.js"), "outside artifact");
+    await Bun.write(join(outsideDirectory, "sentinel"), "unchanged");
+    await fs.symlink(outsideDirectory, join(versionSlugDirectory, "1"), "dir");
+    process.env.EDGE_FUNCTIONS_DIR = migrationRoot;
+
+    try {
+      await expect(migrateLegacyVersionArtifacts()).rejects.toThrow(
+        "Function mutation directory is not trusted",
+      );
+      expect(await Bun.file(legacyArtifact).text()).toBe("legacy artifact");
+      expect((await fs.readdir(outsideDirectory)).sort()).toEqual(["index.js", "sentinel"]);
+      expect(await Bun.file(join(outsideDirectory, "index.js")).text()).toBe("outside artifact");
+      expect(await Bun.file(join(outsideDirectory, "sentinel")).text()).toBe("unchanged");
+    } finally {
+      process.env.EDGE_FUNCTIONS_DIR = functionsRoot;
+      await rm(migrationRoot, { recursive: true, force: true });
+    }
+  });
+
+  test.each(["file", "directory"] as const)(
+    "rejects a legacy %s source symlink before creating a version target",
+    async (sourceType) => {
+      const migrationRoot = await mkdtemp(join(homedir(), `.supacloud-legacy-${sourceType}-link-`));
+      const ref = `proj_legacy_${sourceType}_link`;
+      const slug = `legacy-${sourceType}-link`;
+      const projectDirectory = join(migrationRoot, ref);
+      const externalPath = join(migrationRoot, `external-${sourceType}`);
+      const sourcePath = sourceType === "file"
+        ? join(projectDirectory, `${slug}.v1.js`)
+        : join(projectDirectory, `.src-${slug}-v1`);
+      await mkdir(projectDirectory, { mode: 0o700 });
+      if (sourceType === "file") await Bun.write(externalPath, "external file");
+      else {
+        await mkdir(externalPath, { mode: 0o700 });
+        await Bun.write(join(externalPath, "sentinel"), "external directory");
+      }
+      await fs.symlink(externalPath, sourcePath, sourceType === "file" ? "file" : "dir");
+      process.env.EDGE_FUNCTIONS_DIR = migrationRoot;
+
+      try {
+        await expect(migrateLegacyVersionArtifacts()).rejects.toThrow(
+          "Legacy Function migration source has an invalid type",
+        );
+        expect((await fs.lstat(sourcePath)).isSymbolicLink()).toBe(true);
+        expect(existsSync(join(projectDirectory, ".versions"))).toBe(false);
+        if (sourceType === "file") expect(await Bun.file(externalPath).text()).toBe("external file");
+        else expect(await Bun.file(join(externalPath, "sentinel")).text()).toBe("external directory");
+      } finally {
+        process.env.EDGE_FUNCTIONS_DIR = functionsRoot;
+        await rm(migrationRoot, { recursive: true, force: true });
+      }
+    },
+  );
+
+  test("propagates a non-directory functions root during startup migration", async () => {
+    const migrationRoot = await mkdtemp(join(homedir(), ".supacloud-legacy-root-error-"));
+    const functionsFile = join(migrationRoot, "functions-file");
+    await Bun.write(functionsFile, "not a directory");
+    process.env.EDGE_FUNCTIONS_DIR = functionsFile;
+
+    try {
+      await expect(migrateLegacyVersionArtifacts()).rejects.toMatchObject({ code: "ENOTDIR" });
+    } finally {
+      process.env.EDGE_FUNCTIONS_DIR = functionsRoot;
+      await rm(migrationRoot, { recursive: true, force: true });
+    }
+  });
+
+  test.skipIf(process.geteuid?.() === undefined || process.geteuid() === 0)(
+    "propagates an unreadable project directory during startup migration",
+    async () => {
+      const migrationRoot = await mkdtemp(join(homedir(), ".supacloud-legacy-project-error-"));
+      const projectDirectory = join(migrationRoot, "proj_unreadable_legacy_migration");
+      await mkdir(projectDirectory, { mode: 0o700 });
+      await fs.chmod(projectDirectory, 0o000);
+      process.env.EDGE_FUNCTIONS_DIR = migrationRoot;
+
+      try {
+        await expect(migrateLegacyVersionArtifacts()).rejects.toMatchObject({ code: "EACCES" });
+      } finally {
+        process.env.EDGE_FUNCTIONS_DIR = functionsRoot;
+        await fs.chmod(projectDirectory, 0o700);
+        await rm(migrationRoot, { recursive: true, force: true });
+      }
+    },
+  );
+
+  test("rejects invalid project and Function identities before legacy migration writes", async () => {
+    const migrationRoot = await mkdtemp(join(homedir(), ".supacloud-legacy-identity-"));
+    const invalidProject = join(migrationRoot, "invalid.project");
+    await mkdir(invalidProject);
+    await Bun.write(join(invalidProject, "valid-slug.v1.js"), "invalid project");
+    process.env.EDGE_FUNCTIONS_DIR = migrationRoot;
+
+    try {
+      await expect(migrateLegacyVersionArtifacts()).rejects.toThrow("Invalid project ref");
+      expect(await fs.readdir(invalidProject)).toEqual(["valid-slug.v1.js"]);
+      await rm(invalidProject, { recursive: true, force: true });
+
+      const validProject = join(migrationRoot, "proj_invalid_legacy_slug");
+      await mkdir(validProject);
+      await Bun.write(join(validProject, "invalid.slug.v1.js"), "invalid slug");
+      await expect(migrateLegacyVersionArtifacts()).rejects.toThrow("Invalid function slug");
+      expect(await fs.readdir(validProject)).toEqual(["invalid.slug.v1.js"]);
+    } finally {
+      process.env.EDGE_FUNCTIONS_DIR = functionsRoot;
+      await rm(migrationRoot, { recursive: true, force: true });
+    }
+  });
+
   test("propagates unreadable version artifact directories", async () => {
     const ref = "proj_artifact_io";
     const slug = "hello";
@@ -376,6 +838,7 @@ describe("edgeFunctionService bundle metadata", () => {
         ref,
         slug,
         expectedActiveVersion: "absent",
+        expectedActivationId: "legacy",
         code,
         prebundled: true,
         expectedSha256,
@@ -428,6 +891,7 @@ describe("edgeFunctionService bundle metadata", () => {
         ref,
         slug,
         expectedActiveVersion: "absent",
+        expectedActivationId: "legacy",
         code,
         prebundled: true,
         expectedSha256: createHash("sha256").update(code).digest("hex"),
@@ -438,7 +902,10 @@ describe("edgeFunctionService bundle metadata", () => {
       expect(buildSpy).not.toHaveBeenCalled();
       expect(runtimeCalls).toBe(0);
       expect(await edgeFunctionService.listVersions(ref, slug)).toEqual([]);
-      expect(await edgeFunctionService.getConfig(ref, slug)).toEqual({ verify_jwt: true });
+      expect(await edgeFunctionService.getConfig(ref, slug)).toEqual({
+        verify_jwt: true,
+        activation_id: "legacy",
+      });
     } finally {
       buildSpy.mockRestore();
     }
@@ -460,6 +927,7 @@ describe("edgeFunctionService bundle metadata", () => {
         ref,
         slug,
         expectedActiveVersion: "absent",
+        expectedActivationId: "legacy",
         code,
         prebundled: true,
         expectedSha256: createHash("sha256").update("approved").digest("hex"),
@@ -470,7 +938,10 @@ describe("edgeFunctionService bundle metadata", () => {
       expect(buildSpy).not.toHaveBeenCalled();
       expect(runtimeCalls).toBe(0);
       expect(await edgeFunctionService.listVersions(ref, slug)).toEqual([]);
-      expect(await edgeFunctionService.getConfig(ref, slug)).toEqual({ verify_jwt: true });
+      expect(await edgeFunctionService.getConfig(ref, slug)).toEqual({
+        verify_jwt: true,
+        activation_id: "legacy",
+      });
     } finally {
       buildSpy.mockRestore();
     }
@@ -519,31 +990,22 @@ describe("edgeFunctionService bundle metadata", () => {
     expect(rejected).toMatchObject({ success: false });
     expect(rejected.error).toMatch(/bundle/i);
     expect(runtimeCalls).toBe(0);
-    expect(await edgeFunctionService.getConfig(ref, slug)).toEqual({ verify_jwt: true });
+    expect(await edgeFunctionService.getConfig(ref, slug)).toEqual({
+      verify_jwt: true,
+      activation_id: "legacy",
+    });
     expect(await edgeFunctionService.listVersions(ref, slug)).toEqual([]);
     expect(existsSync(join(functionsRoot, ref, ".versions", slug, "1"))).toBe(false);
   });
 
-  test("commits verify_jwt=false with the activated version before invalidation", async () => {
+  test("keeps verify_jwt=false invisible until candidate readiness succeeds", async () => {
     const ref = "proj_atomic_false";
     const slug = "public-hook";
-    let configAtInvalidation: unknown;
-    globalThis.fetch = (async (input, init) => {
-      const url = String(input);
-      if (url.includes("/invalidate/")) {
-        configAtInvalidation = await edgeFunctionService.getConfig(ref, slug);
-        return Response.json({
-          invalidated: `${ref}_${slug}`,
-          ...runtimeInvalidationProtocol,
-          foreground: { attempted: 0, succeeded: 0, invalidated: 0 },
-          background: { attempted: 0, succeeded: 0, invalidated: 0 },
-        });
-      }
-      return Response.json({
-        success: true,
-        version: new Headers(init?.headers).get("x-supacloud-function-version"),
-      });
-    }) as typeof fetch;
+    let configDuringPreheat: unknown;
+    globalThis.fetch = runtimeSuccessFetch(async (url, init) => {
+      configDuringPreheat = await edgeFunctionService.getConfig(ref, slug);
+      return runtimePreheatSuccess(url, init);
+    });
 
     const deployed = await deployConditionalRelease({
       ref,
@@ -557,7 +1019,10 @@ describe("edgeFunctionService bundle metadata", () => {
       version: "1",
       config: { verify_jwt: false, version: "1" },
     });
-    expect(configAtInvalidation).toMatchObject({ verify_jwt: false, version: "1" });
+    expect(configDuringPreheat).toEqual({
+      verify_jwt: true,
+      activation_id: "legacy",
+    });
   });
 
   test("preserves an existing false policy when a later deploy omits policy", async () => {
@@ -621,10 +1086,11 @@ describe("edgeFunctionService bundle metadata", () => {
   test("snapshots frozen legacy aliases before first deploy and restores version zero", async () => {
     const ref = "proj_legacy_migration";
     const slug = "legacy-hook";
-    await edgeFunctionService.updateConfig(ref, slug, {
+    await mkdir(join(functionsRoot, ref), { recursive: true });
+    await Bun.write(join(functionsRoot, ref, `${slug}.config.json`), JSON.stringify({
       verify_jwt: false,
       background_routes: ["/legacy/*"],
-    });
+    }));
     const legacyBundlePath = join(functionsRoot, ref, `${slug}.js`);
     const legacySourcePath = join(functionsRoot, ref, `${slug}.src.ts`);
     await Bun.write(legacyBundlePath, "export default { fetch: () => new Response('legacy') };");
@@ -661,6 +1127,7 @@ describe("edgeFunctionService bundle metadata", () => {
       ref,
       slug,
       expectedActiveVersion: "1",
+      expectedActivationId: restored!.activation_id,
       code: "export default { fetch: () => new Response('stale-release') };",
     });
 
@@ -679,6 +1146,7 @@ describe("edgeFunctionService bundle metadata", () => {
       ref,
       slug,
       expectedActiveVersion: "0",
+      expectedActivationId: restored!.activation_id,
       code: "export default { fetch: () => new Response('post-legacy-release') };",
     });
 
@@ -790,7 +1258,9 @@ describe("edgeFunctionService bundle metadata", () => {
     });
     const manifestPath = join(functionsRoot, ref, `${slug}.config.json`);
     const corruptedManifest = '{"verify_jwt": false';
-    await Bun.write(manifestPath, corruptedManifest);
+    const corruptedReplacement = `${manifestPath}.corrupt.tmp`;
+    await Bun.write(corruptedReplacement, corruptedManifest);
+    await fs.rename(corruptedReplacement, manifestPath);
 
     const failed = await edgeFunctionService.deployDetailed(
       ref,
@@ -802,35 +1272,33 @@ describe("edgeFunctionService bundle metadata", () => {
     expect(await readFile(manifestPath, "utf8")).toBe(corruptedManifest);
   });
 
-  test("rolls back config-only updates when runtime invalidation fails", async () => {
+  test("does not publish a config-only candidate when readiness fails", async () => {
     const ref = "proj_config_rollback";
     const slug = "config-hook";
-    await edgeFunctionService.updateConfig(ref, slug, { verify_jwt: false });
+    await deployConditionalRelease({
+      ref,
+      slug,
+      code: "export default { fetch: () => new Response('active') };",
+      config: { verify_jwt: false },
+    });
+    const current = await edgeFunctionService.getConfig(ref, slug);
     const manifestPath = join(functionsRoot, ref, `${slug}.config.json`);
     const manifestBefore = await readFile(manifestPath, "utf8");
-    let invalidationCalls = 0;
-    globalThis.fetch = ((input) => {
-      invalidationCalls += 1;
-      if (invalidationCalls === 1) {
-        return Promise.resolve(Response.json({ message: "unavailable" }, { status: 503 }));
-      }
-      const segments = new URL(String(input)).pathname.split("/");
-      return Promise.resolve(Response.json({
-        invalidated: `${segments.at(-2)}_${segments.at(-1)}`,
-        ...runtimeInvalidationProtocol,
-        foreground: { attempted: 0, succeeded: 0, invalidated: 0 },
-        background: { attempted: 0, succeeded: 0, invalidated: 0 },
-      }));
-    }) as typeof fetch;
+    globalThis.fetch = runtimeSuccessFetch(async () => (
+      Response.json({ message: "unavailable" }, { status: 503 })
+    ));
 
-    await expect(edgeFunctionService.updateConfig(ref, slug, { verify_jwt: true })).rejects.toThrow(
-      "cache invalidation",
-    );
+    await expect(edgeFunctionService.updateConfig(
+      ref,
+      slug,
+      { verify_jwt: true },
+      current.activation_id,
+    )).rejects.toThrow("candidate readiness");
     expect(await readFile(manifestPath, "utf8")).toBe(manifestBefore);
-    expect(invalidationCalls).toBe(2);
+    expect(await edgeFunctionService.getConfig(ref, slug)).toEqual(current);
   });
 
-  test("reports uncertain runtime state when activation and rollback invalidation both fail", async () => {
+  test("keeps the commit-point manifest when runtime commit remains uncertain", async () => {
     const ref = "proj_manifest_rollback";
     const slug = "public-hook";
     await deployConditionalRelease({
@@ -841,17 +1309,17 @@ describe("edgeFunctionService bundle metadata", () => {
     });
     const manifestPath = join(functionsRoot, ref, `${slug}.config.json`);
     const manifestBefore = await readFile(manifestPath, "utf8");
-    let invalidationCalls = 0;
-    globalThis.fetch = ((input, init) => {
-      if (String(input).includes("/preheat/")) {
-        return Promise.resolve(Response.json({
-          success: true,
-          version: new Headers(init?.headers).get("x-supacloud-function-version"),
-        }));
-      }
-      invalidationCalls += 1;
-      return Promise.resolve(Response.json({ message: "unavailable" }, { status: 503 }));
-    }) as typeof fetch;
+    let candidateActivationId: string | null = null;
+    let uncertainCommitCalls = 0;
+    globalThis.fetch = runtimeSuccessFetch(runtimePreheatSuccess, (context) => {
+      if (context.action === "begin") candidateActivationId = context.activationId;
+      const isUncertainCommit = context.activationId === candidateActivationId
+        && context.activeActivationId === candidateActivationId
+        && (context.action === "commit" || context.action === "status");
+      if (!isUncertainCommit) return null;
+      uncertainCommitCalls += 1;
+      return Response.json({ message: "unavailable" }, { status: 503 });
+    });
 
     const failed = await deployConditionalRelease({
       ref,
@@ -861,26 +1329,21 @@ describe("edgeFunctionService bundle metadata", () => {
     });
 
     expect(failed.success).toBe(false);
-    expect(failed.error).toContain("runtime state is uncertain");
-    expect(await readFile(manifestPath, "utf8")).toBe(manifestBefore);
-    expect(invalidationCalls).toBe(2);
+    expect(failed.error).toContain("runtime activation state is uncertain");
+    const manifestAfter = await readFile(manifestPath, "utf8");
+    expect(manifestAfter).not.toBe(manifestBefore);
+    expect(JSON.parse(manifestAfter)).toMatchObject({
+      verify_jwt: true,
+      version: "2",
+      _supacloud_activation: { activation_id: candidateActivationId },
+    });
+    expect(uncertainCommitCalls).toBeGreaterThan(0);
   });
 
   test("allocates after retained history instead of overwriting a rolled-back version", async () => {
     const ref = "proj_rollback_history";
     const slug = "history-safe";
-    globalThis.fetch = ((input, init) => {
-      if (String(input).includes("/invalidate/")) {
-        return Promise.resolve(Response.json({
-          invalidated: `${ref}_${slug}`,
-          ...runtimeInvalidationProtocol,
-          foreground: { attempted: 0, succeeded: 0, invalidated: 0 },
-          background: { attempted: 0, succeeded: 0, invalidated: 0 },
-        }));
-      }
-      const requestedVersion = new Headers(init?.headers).get("x-supacloud-function-version");
-      return Promise.resolve(Response.json({ success: true, version: requestedVersion }));
-    }) as typeof fetch;
+    globalThis.fetch = runtimeSuccessFetch();
 
     const v1 = await edgeFunctionService.deployBundleDetailed(ref, slug, {
       "index.ts": "export default { fetch: () => new Response('v1') };",
@@ -953,7 +1416,11 @@ describe("edgeFunctionService bundle metadata", () => {
 
     const configRef = "proj_unsafe_config";
     const configSlug = "unsafe-config";
-    await edgeFunctionService.updateConfig(configRef, configSlug, { version: unsafeVersion });
+    await mkdir(join(functionsRoot, configRef), { recursive: true });
+    await Bun.write(
+      join(functionsRoot, configRef, `${configSlug}.config.json`),
+      JSON.stringify({ version: unsafeVersion }),
+    );
 
     const configResult = await edgeFunctionService.deployBundleDetailed(configRef, configSlug, {
       "index.ts": "export default { fetch: () => new Response('blocked') };",
@@ -997,6 +1464,7 @@ describe("edgeFunctionService bundle metadata", () => {
       slug,
       "export default { fetch: () => new Response('version-one') };",
     );
+    const current = await edgeFunctionService.getConfig(ref, slug);
     let runtimeCalls = 0;
     globalThis.fetch = (async () => {
       runtimeCalls += 1;
@@ -1009,6 +1477,7 @@ describe("edgeFunctionService bundle metadata", () => {
         ref,
         slug,
         expectedActiveVersion: "2",
+        expectedActivationId: current.activation_id,
         code: "export default { fetch: () => new Response('must-not-build') };",
       });
 
@@ -1036,18 +1505,21 @@ describe("edgeFunctionService bundle metadata", () => {
       slug,
       "export default { fetch: () => new Response('version-one') };",
     );
+    const current = await edgeFunctionService.getConfig(ref, slug);
 
     const releases = await Promise.all([
       edgeFunctionService.deployRelease({
         ref,
         slug,
         expectedActiveVersion: "1",
+        expectedActivationId: current.activation_id,
         code: "export default { fetch: () => new Response('candidate-a') };",
       }),
       edgeFunctionService.deployRelease({
         ref,
         slug,
         expectedActiveVersion: "1",
+        expectedActivationId: current.activation_id,
         code: "export default { fetch: () => new Response('candidate-b') };",
       }),
     ]);
@@ -1069,6 +1541,7 @@ describe("edgeFunctionService bundle metadata", () => {
         ref,
         slug,
         expectedActiveVersion,
+        expectedActivationId: "legacy",
         code: "export default { fetch: () => new Response('must-not-deploy') };",
       });
 
@@ -1079,19 +1552,7 @@ describe("edgeFunctionService bundle metadata", () => {
   );
 
   test("keeps multi-file runtime code beside its static assets", async () => {
-    globalThis.fetch = ((input, init) => Promise.resolve(Response.json(
-      String(input).includes("/invalidate/")
-        ? {
-            invalidated: "proj_assets_asset-reader",
-            ...runtimeInvalidationProtocol,
-            foreground: { attempted: 0, succeeded: 0, invalidated: 0 },
-            background: { attempted: 0, succeeded: 0, invalidated: 0 },
-          }
-        : {
-            success: true,
-            version: new Headers(init?.headers).get("x-supacloud-function-version"),
-          },
-    ))) as typeof fetch;
+    globalThis.fetch = runtimeSuccessFetch();
 
     const deployResult = await edgeFunctionService.deployBundleDetailed(
       "proj_assets",
@@ -1144,7 +1605,7 @@ describe("edgeFunctionService bundle metadata", () => {
     });
   });
 
-  test("deletes only the target manifest and immutable artifacts after runtime ACK", async () => {
+  test("commits a target tombstone and removes only its immutable artifacts", async () => {
     const ref = "proj_delete_exact";
     const targetSlug = "delete-target";
     const siblingSlug = "delete-sibling";
@@ -1158,16 +1619,34 @@ describe("edgeFunctionService bundle metadata", () => {
       siblingSlug,
       "export default { fetch: () => new Response('sibling') };",
     );
+    const targetBefore = await edgeFunctionService.getConfig(ref, targetSlug);
 
-    expect(await edgeFunctionService.remove(ref, targetSlug)).toBe(true);
-    expect(existsSync(join(functionsRoot, ref, `${targetSlug}.config.json`))).toBe(false);
+    const removal = await edgeFunctionService.remove(
+      ref,
+      targetSlug,
+      targetBefore.activation_id,
+    );
+    expect(removal).toMatchObject({
+      previous_active_version: "1",
+      active_version: "absent",
+    });
+    expect(existsSync(join(functionsRoot, ref, `${targetSlug}.config.json`))).toBe(true);
     expect(existsSync(join(functionsRoot, ref, ".versions", targetSlug))).toBe(false);
     expect(existsSync(join(functionsRoot, ref, `${siblingSlug}.config.json`))).toBe(true);
     expect(existsSync(join(functionsRoot, ref, ".versions", siblingSlug))).toBe(true);
-    expect(await edgeFunctionService.getConfig(ref, targetSlug)).toEqual({ verify_jwt: true });
+    expect(await edgeFunctionService.getConfig(ref, targetSlug)).toEqual({
+      verify_jwt: true,
+      activation_id: removal.activation_id,
+    });
+    await Promise.all([
+      Bun.write(join(functionsRoot, ref, `${targetSlug}.js`), "residual-bundle"),
+      Bun.write(join(functionsRoot, ref, `${targetSlug}.src.ts`), "residual-source"),
+    ]);
+    expect(await edgeFunctionService.read(ref, targetSlug)).toBeNull();
+    expect(await edgeFunctionService.readSource(ref, targetSlug)).toBeNull();
   });
 
-  test("reports deletion failure when runtime invalidation is not acknowledged", async () => {
+  test("preserves the active authority when delete fencing is not acknowledged", async () => {
     const ref = "proj_delete_unconfirmed";
     const slug = "delete-unconfirmed";
     await edgeFunctionService.deployDetailed(
@@ -1175,51 +1654,33 @@ describe("edgeFunctionService bundle metadata", () => {
       slug,
       "export default { fetch: () => new Response('delete-me') };",
     );
-    let invalidationCalls = 0;
-    globalThis.fetch = ((input) => {
-      expect(String(input)).toContain(`/invalidate/${ref}/${slug}`);
-      invalidationCalls += 1;
-      return Promise.resolve(Response.json({ message: "unavailable" }, { status: 503 }));
-    }) as typeof fetch;
+    const current = await edgeFunctionService.getConfig(ref, slug);
+    let failedControlCalls = 0;
+    globalThis.fetch = runtimeSuccessFetch(runtimePreheatSuccess, (context) => {
+      if (context.activationId === current.activation_id) return null;
+      failedControlCalls += 1;
+      return Response.json({ message: "unavailable" }, { status: 503 });
+    });
 
-    expect(await edgeFunctionService.remove(ref, slug)).toBe(false);
-    expect(invalidationCalls).toBe(1);
-    expect(existsSync(join(functionsRoot, ref, `${slug}.config.json`))).toBe(false);
-    expect(existsSync(join(functionsRoot, ref, ".versions", slug))).toBe(false);
+    await expect(edgeFunctionService.remove(ref, slug, current.activation_id))
+      .rejects.toThrow("runtime activation state is uncertain");
+    expect(failedControlCalls).toBeGreaterThan(0);
+    expect(await edgeFunctionService.getConfig(ref, slug)).toEqual(current);
+    expect(existsSync(join(functionsRoot, ref, ".versions", slug))).toBe(true);
   });
 
   test("writes content-addressed version artifacts and returns deploy preheat metadata", async () => {
     const metricsBefore = edgeFunctionService.deployMetrics();
     const fetchCalls: string[] = [];
-    globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
-      const url = String(input);
-      fetchCalls.push(url);
-      if (url.includes("/preheat/")) {
-        return Promise.resolve(Response.json({
-          success: true,
-          version: new Headers(init?.headers).get("x-supacloud-function-version"),
-          foreground: {
-            attempted: 2,
-            succeeded: 2,
-            cacheHits: 0,
-            cacheMisses: 2,
-            durationMs: 12,
-          },
-          background: {
-            attempted: 1,
-            succeeded: 1,
-            cacheHits: 1,
-            cacheMisses: 0,
-            durationMs: 4,
-          },
-        }));
-      }
-      return Promise.resolve(Response.json({
-        invalidated: "proj_meta_hello",
-        ...runtimeInvalidationProtocol,
-        foreground: { attempted: 0, succeeded: 0, invalidated: 0 },
-        background: { attempted: 0, succeeded: 0, invalidated: 0 },
-      }));
+    const runtimeFetch = runtimeSuccessFetch((url, init) => runtimePreheatSuccess(
+      url,
+      init,
+      { attempted: 2, succeeded: 2, cacheHits: 0, cacheMisses: 2, durationMs: 12 },
+      { attempted: 1, succeeded: 1, cacheHits: 1, cacheMisses: 0, durationMs: 4 },
+    ));
+    globalThis.fetch = (async (input, init) => {
+      fetchCalls.push(String(input));
+      return runtimeFetch(input, init);
     }) as typeof fetch;
     process.env.EDGE_FUNCTION_EXTERNAL_PACKAGES = "left-pad,@scope/pkg,invalid/pkg/name";
 
@@ -1281,7 +1742,10 @@ describe("edgeFunctionService bundle metadata", () => {
       total_preheat_cache_misses: metricsBefore.total_preheat_cache_misses + 2,
     });
 
-    expect(fetchCalls.some((url) => url.includes("/invalidate/proj_meta/hello"))).toBe(true);
+    expect(fetchCalls.some((url) => url.endsWith("/function-activation/proj_meta/hello/begin")))
+      .toBe(true);
     expect(fetchCalls.some((url) => url.includes("/preheat/proj_meta/hello"))).toBe(true);
+    expect(fetchCalls.some((url) => url.endsWith("/function-activation/proj_meta/hello/commit")))
+      .toBe(true);
   });
 });

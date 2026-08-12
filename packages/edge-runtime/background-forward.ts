@@ -1,9 +1,7 @@
-import { withBackgroundInternalToken } from "./tenant-env";
 import { VERIFIED_JWT_SUB_HEADER } from "./jwt-verifier";
 
 export interface BackgroundForwardDispatch {
   forwardedRequest: Request;
-  backgroundInternalToken: string;
   tenantEnv: Record<string, string>;
 }
 
@@ -57,7 +55,6 @@ export function buildBackgroundForwardDispatch(
 ): BackgroundForwardDispatch {
   return {
     forwardedRequest: buildBackgroundForwardedRequest(request, backgroundInternalToken),
-    backgroundInternalToken,
-    tenantEnv: withBackgroundInternalToken(tenantEnv, backgroundInternalToken),
+    tenantEnv: { ...tenantEnv },
   };
 }

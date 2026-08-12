@@ -1,3 +1,5 @@
+import { createHmac } from "node:crypto";
+
 const MGMT_API = process.env.MANAGEMENT_API_URL || "http://127.0.0.1:9090";
 const MASTER_TOKEN = process.env.EDGE_RUNTIME_MASTER_KEY || process.env.MASTER_TOKEN || "";
 
@@ -6,11 +8,48 @@ const TENANTS_DIRS = [
   "/opt/supacloud/tenants",
 ];
 
-const envCache = new Map<string, { env: Record<string, string>; expiresAt: number }>();
-const envInflightLoads = new Map<string, Promise<Record<string, string>>>();
+export type TenantEnvLoadSource = "management_api" | "stale_cache" | "file_fallback";
+export type TenantEnvLoadState = "loaded" | "unverified";
+export type TenantEnvExecutionProfile = "foreground" | "background";
+
+export interface TenantEnvLoad {
+  env: Record<string, string>;
+  revision: string | null;
+  envProof: string | null;
+  loadState: TenantEnvLoadState;
+  loadSource: TenantEnvLoadSource;
+  cacheEpoch: number;
+}
+
+export interface RuntimeEnvObservation {
+  schema: "supacloud.edge-runtime-env-observation.v1";
+  project_ref: string;
+  loaded_revision: string | null;
+  env_proof: string | null;
+  load_state: "loaded" | "unverified" | "not_loaded";
+  load_source: TenantEnvLoadSource | null;
+  loaded_at: string | null;
+}
+
+export interface TenantEnvDispatchReservation {
+  ordinal: number;
+  cacheEpoch: number;
+}
+
+type CachedTenantEnv = TenantEnvLoad & { expiresAt: number };
+
+const envCache = new Map<string, CachedTenantEnv>();
+const envInflightLoads = new Map<string, Promise<TenantEnvLoad>>();
+const cacheEpochs = new Map<string, number>();
+const dispatchOrdinals = new Map<string, number>();
+const loadedObservations = new Map<string, {
+  ordinal: number;
+  observation: RuntimeEnvObservation;
+}>();
 const ENV_CACHE_TTL = 5_000;
 const ENV_FALLBACK_CACHE_TTL = 30_000;
 const MASKED_SECRET_VALUE = "********";
+const ATTESTED_REVISION_PATTERN = /^hmac-sha256:[a-f0-9]{64}$/;
 const SHARED_FORBIDDEN_AUTH_ENV_KEYS = [
   "JWT_SECRET",
   "JWT_KEYS",
@@ -54,17 +93,6 @@ export function buildFallbackTenantEnv(
   return normalizeTenantEnv(ref, {
     ...prepareFallbackFileEnv(fileEnv, cachedEnv !== undefined),
     ...(cachedEnv ? stripEnvKeys(cachedEnv, LEGACY_AUTH_ENV_KEYS) : {}),
-  });
-}
-
-export function mergeTenantRuntimeEnv(
-  ref: string,
-  fileEnv: Record<string, string>,
-  apiEnv: Record<string, string>,
-): Record<string, string> {
-  return normalizeTenantEnv(ref, {
-    ...stripEnvKeys(fileEnv, LEGACY_AUTH_ENV_KEYS),
-    ...apiEnv,
   });
 }
 
@@ -176,17 +204,6 @@ export function normalizeTenantEnv(ref: string, env: Record<string, string>): Re
   return normalized;
 }
 
-export function withBackgroundInternalToken(
-  env: Record<string, string>,
-  token: string,
-): Record<string, string> {
-  if (!token) return env;
-  return {
-    ...env,
-    SUPACLOUD_BACKGROUND_INTERNAL_TOKEN: token,
-  };
-}
-
 async function loadEnvFromFile(ref: string): Promise<Record<string, string>> {
   for (const dir of TENANTS_DIRS) {
     const envPath = `${dir}/${ref}.env`;
@@ -201,7 +218,19 @@ async function loadEnvFromFile(ref: string): Promise<Record<string, string>> {
   return {};
 }
 
-async function loadEnvFromApi(ref: string): Promise<Record<string, string> | null> {
+type ApiRuntimeEnv = {
+  env: Record<string, string>;
+  revision: string | null;
+};
+
+function runtimeEnvRecord(payload: unknown): Record<string, string> | null {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  const entries = Object.entries(payload);
+  if (!entries.every(([, value]) => typeof value === "string")) return null;
+  return Object.fromEntries(entries) as Record<string, string>;
+}
+
+async function loadEnvFromApi(ref: string): Promise<ApiRuntimeEnv | null> {
   try {
     const res = await fetch(`${MGMT_API}/v1/projects/${ref}/internal/runtime-env`, {
       headers: { Authorization: `Bearer ${MASTER_TOKEN}` },
@@ -223,11 +252,15 @@ async function loadEnvFromApi(ref: string): Promise<Record<string, string> | nul
       return null;
     }
 
-    const payload = await res.json();
-    if (payload && typeof payload === "object" && !Array.isArray(payload)) {
-      return stripMaskedSecretValues(payload as Record<string, string>);
-    }
-    return null;
+    const env = runtimeEnvRecord(await res.json());
+    if (!env) return null;
+    const revisionHeader = res.headers.get("x-supacloud-runtime-env-revision");
+    return {
+      env,
+      revision: revisionHeader && ATTESTED_REVISION_PATTERN.test(revisionHeader)
+        ? revisionHeader
+        : null,
+    };
   } catch (err) {
     console.warn(
       `[tenant-env] API error for ${ref}:`,
@@ -237,31 +270,89 @@ async function loadEnvFromApi(ref: string): Promise<Record<string, string> | nul
   }
 }
 
-async function loadTenantEnvUncached(ref: string): Promise<Record<string, string>> {
+function canonicalRuntimeEnv(env: Record<string, string>): string {
+  return JSON.stringify(Object.keys(env).sort().map((name) => [name, env[name]]));
+}
+
+function keyedEnvProof(
+  domain: "env" | "module-env",
+  ref: string,
+  payload: string,
+): string {
+  const digest = createHmac("sha256", MASTER_TOKEN)
+    .update(`supacloud:edge-runtime-${domain}-proof:v1\0`, "utf8")
+    .update(ref, "utf8")
+    .update("\0", "utf8")
+    .update(payload, "utf8")
+    .digest("hex");
+  return `hmac-sha256:${digest}`;
+}
+
+function runtimeEnvProof(ref: string, env: Record<string, string>): string {
+  return keyedEnvProof("env", ref, canonicalRuntimeEnv(env));
+}
+
+function verifiedApiLoad(
+  ref: string,
+  apiEnv: ApiRuntimeEnv,
+  cacheEpoch: number,
+): TenantEnvLoad {
+  const env = { ...apiEnv.env };
+  const verified = apiEnv.revision !== null && MASTER_TOKEN.length > 0;
+  return {
+    env,
+    revision: verified ? apiEnv.revision : null,
+    envProof: verified ? runtimeEnvProof(ref, env) : null,
+    loadState: verified ? "loaded" : "unverified",
+    loadSource: "management_api",
+    cacheEpoch,
+  };
+}
+
+function fallbackLoad(
+  ref: string,
+  fileEnv: Record<string, string>,
+  cacheEpoch: number,
+  cached?: CachedTenantEnv,
+): TenantEnvLoad {
+  return {
+    env: buildFallbackTenantEnv(ref, fileEnv, cached?.env),
+    revision: null,
+    envProof: null,
+    loadState: "unverified",
+    loadSource: cached ? "stale_cache" : "file_fallback",
+    cacheEpoch,
+  };
+}
+
+async function loadTenantEnvUncached(ref: string, cacheEpoch: number): Promise<TenantEnvLoad> {
   const cached = envCache.get(ref);
   if (cached && cached.expiresAt > Date.now()) {
-    return cached.env;
+    return cached;
   }
 
   const fileEnv = stripMaskedSecretValues(await loadEnvFromFile(ref));
 
   const apiEnv = await loadEnvFromApi(ref);
   if (apiEnv === null) {
-    const fallback = buildFallbackTenantEnv(ref, fileEnv, cached?.env);
-    envCache.set(ref, { env: fallback, expiresAt: Date.now() + ENV_FALLBACK_CACHE_TTL });
+    const fallback = fallbackLoad(ref, fileEnv, cacheEpoch, cached);
+    if ((cacheEpochs.get(ref) || 0) === cacheEpoch) {
+      envCache.set(ref, { ...fallback, expiresAt: Date.now() + ENV_FALLBACK_CACHE_TTL });
+    }
     return fallback;
   }
 
-  const merged = mergeTenantRuntimeEnv(ref, fileEnv, apiEnv);
-
-  envCache.set(ref, { env: merged, expiresAt: Date.now() + ENV_CACHE_TTL });
-  return merged;
+  const loaded = verifiedApiLoad(ref, apiEnv, cacheEpoch);
+  if ((cacheEpochs.get(ref) || 0) === cacheEpoch) {
+    envCache.set(ref, { ...loaded, expiresAt: Date.now() + ENV_CACHE_TTL });
+  }
+  return loaded;
 }
 
-export async function loadTenantEnv(ref: string): Promise<Record<string, string>> {
+export async function loadTenantRuntimeEnv(ref: string): Promise<TenantEnvLoad> {
   const cached = envCache.get(ref);
   if (cached && cached.expiresAt > Date.now()) {
-    return cached.env;
+    return cached;
   }
 
   const inflight = envInflightLoads.get(ref);
@@ -269,7 +360,11 @@ export async function loadTenantEnv(ref: string): Promise<Record<string, string>
     return inflight;
   }
 
-  const load = loadTenantEnvUncached(ref).finally(() => {
+  const cacheEpoch = cacheEpochs.get(ref) || 0;
+  const load = loadTenantEnvUncached(ref, cacheEpoch).then((loaded) => {
+    if ((cacheEpochs.get(ref) || 0) === cacheEpoch) return loaded;
+    return loadTenantRuntimeEnv(ref);
+  }).finally(() => {
     if (envInflightLoads.get(ref) === load) {
       envInflightLoads.delete(ref);
     }
@@ -278,7 +373,74 @@ export async function loadTenantEnv(ref: string): Promise<Record<string, string>
   return load;
 }
 
+export async function loadTenantEnv(ref: string): Promise<Record<string, string>> {
+  return (await loadTenantRuntimeEnv(ref)).env;
+}
+
+export function tenantEnvModuleProof(
+  ref: string,
+  env: Record<string, string>,
+  load: Pick<TenantEnvLoad, "revision" | "loadState" | "loadSource">,
+  executionProfile: TenantEnvExecutionProfile,
+): string | null {
+  if (!MASTER_TOKEN) return null;
+  return keyedEnvProof("module-env", ref, JSON.stringify({
+    executionProfile,
+    revision: load.revision,
+    state: load.loadState,
+    source: load.loadSource,
+    env: canonicalRuntimeEnv(env),
+  }));
+}
+
+export function reserveTenantEnvDispatch(ref: string): TenantEnvDispatchReservation {
+  const cacheEpoch = cacheEpochs.get(ref) || 0;
+  const ordinal = (dispatchOrdinals.get(ref) || 0) + 1;
+  dispatchOrdinals.set(ref, ordinal);
+  return { ordinal, cacheEpoch };
+}
+
+export function isTenantEnvLoadCurrent(ref: string, load: TenantEnvLoad): boolean {
+  return load.cacheEpoch === (cacheEpochs.get(ref) || 0);
+}
+
+export function recordTenantEnvDispatch(
+  ref: string,
+  load: TenantEnvLoad,
+  reservation: TenantEnvDispatchReservation,
+): void {
+  if (!isTenantEnvLoadCurrent(ref, load)) return;
+  if ((cacheEpochs.get(ref) || 0) !== reservation.cacheEpoch) return;
+  if ((loadedObservations.get(ref)?.ordinal || 0) >= reservation.ordinal) return;
+  const verified = load.loadState === "loaded" && load.revision !== null && load.envProof !== null;
+  loadedObservations.set(ref, {
+    ordinal: reservation.ordinal,
+    observation: {
+      schema: "supacloud.edge-runtime-env-observation.v1",
+      project_ref: ref,
+      loaded_revision: verified ? load.revision : null,
+      env_proof: verified ? load.envProof : null,
+      load_state: verified ? "loaded" : "unverified",
+      load_source: load.loadSource,
+      loaded_at: new Date().toISOString(),
+    },
+  });
+}
+
+export function runtimeEnvObservation(ref: string): RuntimeEnvObservation {
+  return loadedObservations.get(ref)?.observation || {
+    schema: "supacloud.edge-runtime-env-observation.v1",
+    project_ref: ref,
+    loaded_revision: null,
+    env_proof: null,
+    load_state: "not_loaded",
+    load_source: null,
+    loaded_at: null,
+  };
+}
+
 export function invalidateTenantEnvCache(ref: string) {
+  cacheEpochs.set(ref, (cacheEpochs.get(ref) || 0) + 1);
   envCache.delete(ref);
   envInflightLoads.delete(ref);
 }

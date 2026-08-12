@@ -26,8 +26,10 @@ describe("Edge Runtime auth material invalidation", () => {
     );
     expect(endpoint).toContain('headers.get("x-supacloud-function-version")');
     expect(endpoint).toContain("requestedVersion,");
-    expect(endpoint).toContain("`_v${requestedVersion}`");
+    expect(endpoint).toContain("`_v${activation.activeVersion}`");
     expect(endpoint).toContain("version: requestedVersion");
+    expect(endpoint).toContain("attestation: foregroundAttestation");
+    expect(endpoint).toContain("attestation: backgroundAttestation");
     expect(endpoint).toContain("preheatVersionedIdleWorkers");
     expect(endpoint).toContain("preheatIdleWorkers");
     const regularBranchStart = endpoint.indexOf(": await Promise.all");
@@ -73,10 +75,10 @@ describe("Edge Runtime auth material invalidation", () => {
       source.indexOf("async function appendFunctionRuntimeLog("),
     );
     const poolDispatch = dispatcher.slice(
-      dispatcher.indexOf("return await targetPool.dispatch({"),
+      dispatcher.indexOf("const response = await targetPool.dispatch({"),
       dispatcher.indexOf(
         "    });",
-        dispatcher.indexOf("return await targetPool.dispatch({"),
+        dispatcher.indexOf("const response = await targetPool.dispatch({"),
       ),
     );
     expect(requestHandler).toContain("activation = await resolveFunctionPath(projectRef, functionName)");
@@ -90,15 +92,15 @@ describe("Edge Runtime auth material invalidation", () => {
 
   test("active versions resolve only immutable artifacts", () => {
     const resolver = source.slice(
-      source.indexOf("async function resolveFunctionPath("),
+      source.indexOf("async function resolvedFunctionPath("),
       source.indexOf("function functionDispatchError("),
     );
     expect(resolver).toContain(
-      "activeFunctionPathCandidates(projectRoot, functionName, activeVersion)",
+      "activeFunctionPathCandidates(\n    projectRoot,\n    request.functionName,\n    activeVersion,\n  )",
     );
     expect(resolver).toContain("versionBindingResolver = resolveFunctionVersionBinding");
     expect(resolver).toContain("versionBindingResolver(");
-    expect(resolver).toContain("requestedVersion,");
+    expect(resolver).toContain("request.requestedVersion,");
     expect(resolver).toContain("resolvedConfig.version,");
     expect(resolver).toContain("responseVersion,");
   });
