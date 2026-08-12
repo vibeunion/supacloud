@@ -269,11 +269,12 @@ function legacySchedulePayload(
 ): Pick<SafeScheduledFunction, "body_empty" | "header_names"> | null {
     const body = objectRecord(schedule.body);
     const headers = objectRecord(schedule.headers);
-    if (!body || !headers || !Object.values(headers).every(value => typeof value === "string")) {
-        return null;
-    }
+    if (!body || !headers) return null;
     const headerNames = safeHeaderNames(Object.keys(headers));
-    if (!headerNames) return null;
+    const stableHeaderValues = Object.entries(headers).every(([name, value]) =>
+        typeof value === "string" && headerValueIsStable(name.toLowerCase(), value),
+    );
+    if (!headerNames || !stableHeaderValues) return null;
     return { body_empty: Object.keys(body).length === 0, header_names: headerNames };
 }
 

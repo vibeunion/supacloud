@@ -137,6 +137,22 @@ test.each([
         body: {},
         headers: { "x-schedule-token": { nested: "private-header-sentinel" } },
     }],
+    ["empty legacy header value", {
+        body: {},
+        headers: { "x-schedule-token": "" },
+    }],
+    ["legacy header value containing a newline", {
+        body: {},
+        headers: { "x-schedule-token": "private-newline-sentinel\n" },
+    }],
+    ["legacy header value changed by Headers normalization", {
+        body: {},
+        headers: { "x-schedule-token": " private-normalization-sentinel " },
+    }],
+    ["oversized legacy header value", {
+        body: {},
+        headers: { "x-schedule-token": `private-oversized-sentinel${"x".repeat(8_192)}` },
+    }],
     ["reserved legacy header", {
         body: {},
         headers: { authorization: "private-authorization-sentinel" },
@@ -157,7 +173,82 @@ test.each([
 
     expect(response.isError).toBe(true);
     expect(JSON.parse(response.content[0].text).error.code).toBe("INVALID_RESPONSE");
-    expect(response.content[0].text).not.toContain("private-authorization-sentinel");
+    for (const sentinel of [
+        "private-header-sentinel",
+        "private-newline-sentinel",
+        "private-normalization-sentinel",
+        "private-oversized-sentinel",
+        "private-authorization-sentinel",
+    ]) {
+        expect(response.content[0].text).not.toContain(sentinel);
+    }
+});
+
+test("Scheduled Function create accepts a valid legacy receipt without exposing values", async () => {
+    const headerSentinel = "private-legacy-mutation-header-sentinel";
+    const { callback } = captureScheduledFunctionsTool({
+        post: async (_path: string, request: Record<string, unknown>) => ({
+            ok: true,
+            status: 200,
+            data: {
+                created: true,
+                project_ref: "proj",
+                request_id: request.request_id,
+                schedule: legacyScheduleRecord({
+                    body: request.body,
+                    headers: request.headers,
+                }),
+            },
+        }),
+    }, { SCHEDULE_TOKEN: headerSentinel });
+
+    const response = await callback({
+        action: "create",
+        ref: "proj",
+        name: "Nightly",
+        slug: "worker",
+        cron: "0 2 * * *",
+        method: "POST",
+        header_env: { "x-schedule-token": "SCHEDULE_TOKEN" },
+    });
+
+    expect(response.isError).not.toBe(true);
+    expect(JSON.parse(response.content[0].text).schedule).toMatchObject({
+        body_empty: true,
+        header_names: ["x-schedule-token"],
+    });
+    expect(response.content[0].text).not.toContain(headerSentinel);
+});
+
+test("Scheduled Function create fails closed on an unstable legacy receipt header", async () => {
+    const responseSentinel = "private-legacy-mutation-response-sentinel\n";
+    const { callback } = captureScheduledFunctionsTool({
+        post: async (_path: string, request: Record<string, unknown>) => ({
+            ok: true,
+            status: 200,
+            data: {
+                created: true,
+                project_ref: "proj",
+                request_id: request.request_id,
+                schedule: legacyScheduleRecord({
+                    headers: { "x-schedule-token": responseSentinel },
+                }),
+            },
+        }),
+    });
+
+    const response = await callback({
+        action: "create",
+        ref: "proj",
+        name: "Nightly",
+        slug: "worker",
+        cron: "0 2 * * *",
+        method: "POST",
+    });
+
+    expect(response.isError).toBe(true);
+    expect(JSON.parse(response.content[0].text).error.code).toBe("OUTCOME_UNKNOWN");
+    expect(response.content[0].text).not.toContain(responseSentinel.trim());
 });
 
 test("Scheduled Function read-only mode blocks writes before body-file reads or HTTP dispatch", async () => {
