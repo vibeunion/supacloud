@@ -250,7 +250,7 @@ describe("HttpTransport retry policy", () => {
         expect(clearedTimerIds).toHaveLength(1);
     });
 
-    test.each([0, 35 * 60_000 + 1, 1.5])("rejects invalid POST timeout %d before dispatch", async timeoutMs => {
+    test.each([0, 36 * 60_000 + 1, 1.5])("rejects invalid POST timeout %d before dispatch", async timeoutMs => {
         let fetchCalls = 0;
         globalThis.fetch = (async () => {
             fetchCalls++;
@@ -342,6 +342,21 @@ describe("HttpTransport bounded JSON responses", () => {
         expect(response.data.payload.length).toBeGreaterThan(64_000);
     });
 
+    test("bounds long-running POST success responses without changing the request timeout", async () => {
+        const body = jsonBodyWithByteLength(maxJsonBytes);
+        globalThis.fetch = (async () => new Response(Buffer.from(body))) as unknown as typeof fetch;
+
+        const response = await createTransport().post<{ payload: string }>(
+            "/v1/projects/project-ref/database/backups/logical",
+            {},
+            { timeoutMs: 36 * 60_000, maxJsonBytes },
+        );
+
+        expect(response.ok).toBe(true);
+        expect(response.data.payload.length).toBeGreaterThan(64_000);
+        expect(scheduledTimers.at(-1)?.delay).toBe(36 * 60_000);
+    });
+
     test("rejects a declared response larger than the byte limit", async () => {
         globalThis.fetch = (async () => new Response("{}", {
             headers: { "content-length": String(maxJsonBytes + 1) },
@@ -373,6 +388,25 @@ describe("HttpTransport bounded JSON responses", () => {
         expect(JSON.stringify(response)).not.toContain("x".repeat(128));
     });
 
+    test("marks an oversized POST response invalid without reflecting it", async () => {
+        const oversizedBody = jsonBodyWithByteLength(maxJsonBytes + 1);
+        globalThis.fetch = (async () => new Response(new ReadableStream<Uint8Array>({
+            start(controller) {
+                controller.enqueue(oversizedBody);
+                controller.close();
+            },
+        }))) as unknown as typeof fetch;
+
+        const response = await createTransport().post(
+            "/v1/projects/project-ref/database/backups/logical",
+            {},
+            { timeoutMs: 36 * 60_000, maxJsonBytes },
+        );
+
+        expect(response.responseError).toBe(true);
+        expect(JSON.stringify(response)).not.toContain("x".repeat(128));
+    });
+
     test("rejects malformed UTF-8 and malformed JSON without reflection", async () => {
         const privateMarker = "private-response-marker";
         const invalidBodies = [
@@ -397,6 +431,8 @@ describe("HttpTransport bounded JSON responses", () => {
         }) as unknown as typeof fetch;
 
         await expect(createTransport().get("/runtime-snapshot", { maxJsonBytes: maxBytes }))
+            .rejects.toThrow("positive safe integer");
+        await expect(createTransport().post("/resource", {}, { timeoutMs: 1, maxJsonBytes: maxBytes }))
             .rejects.toThrow("positive safe integer");
         expect(fetchCalls).toBe(0);
     });

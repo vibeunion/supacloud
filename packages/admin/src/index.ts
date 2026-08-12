@@ -124,6 +124,9 @@ EXAMPLES
   supacloud-admin project runtime_snapshot --ref abc123
   supacloud-admin project service_control --ref abc123 --service gotrue --service_action stop
   supacloud-admin platform metrics
+  supacloud-admin platform list_logical_backups --ref abc123
+  supacloud-admin platform create_logical_backup --ref abc123
+  supacloud-admin platform restore_logical_backup --ref abc123 --backup_id BACKUP_ID --expected_sha256 SHA256 --confirmation RESTORE_PROJECT:abc123:BACKUP_ID:SHA256
   supacloud-admin gateway routes --ref abc123
   supacloud-admin gateway upsert_route --ref abc123 --route_id webhook --hosts "api.example.com" --paths "/webhook/*" --upstream 10.0.0.5:8080
   supacloud-admin gateway config --ref abc123 --rate_limit_tier pro
