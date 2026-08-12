@@ -1,4 +1,4 @@
-import { Elysia, t } from "elysia";
+import { Elysia, status, t } from "elysia";
 import type { AnyElysia } from "elysia";
 import { logger } from "./utils/logger";
 import { runBootstrapOrExit } from "./runtime/bootstrap-fatal";
@@ -675,6 +675,13 @@ export function registerStaticAssets() {
 /**
  * Register all route modules
  */
+const DISABLED_MUTATION_RECONCILIATION_PATH = /^\/v1\/projects\/[^/]+\/mutations\/[^/]+\/reconcile\/?$/;
+
+function isDisabledMutationReconciliation(request: Request): boolean {
+  return request.method.toUpperCase() === "POST"
+    && DISABLED_MUTATION_RECONCILIATION_PATH.test(new URL(request.url).pathname);
+}
+
 export async function registerAllRoutes(): Promise<AnyElysia> {
   const {
     projectRoutes,
@@ -736,6 +743,11 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
 
   return (
     new Elysia({ name: "api-routes" })
+      .onRequest(({ request }) => {
+        if (isDisabledMutationReconciliation(request)) {
+          return status(403, { error: "Mutation reconciliation is not permitted" });
+        }
+      })
       .use(bffProofBodyCapture)
       // Auth guard runs before every route in this group
       .onBeforeHandle(async ({ request, set }) => {
