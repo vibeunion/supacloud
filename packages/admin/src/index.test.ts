@@ -57,6 +57,26 @@ const COMPLETED_PHYSICAL_BACKUP = {
     database: "supa_fa_staging",
 };
 
+const VERIFIED_LOGICAL_BACKUP_ID = "logical-full_fa_staging_0123456789abcdef0123456789abcdef";
+const VERIFIED_LOGICAL_BACKUP_SHA256 = "a".repeat(64);
+const VERIFIED_LOGICAL_BACKUP = {
+    backup_id: VERIFIED_LOGICAL_BACKUP_ID,
+    project_ref: "fa_staging",
+    database: "supa_fa_staging",
+    kind: "logical-full",
+    created_at: "2026-08-12T00:00:00.000Z",
+    completed_at: "2026-08-12T00:00:01.000Z",
+    bytes: 8192,
+    sha256: VERIFIED_LOGICAL_BACKUP_SHA256,
+};
+
+const VERIFIED_LOGICAL_BACKUP_CONFIRMATION = [
+    "RESTORE_PROJECT",
+    "fa_staging",
+    VERIFIED_LOGICAL_BACKUP_ID,
+    VERIFIED_LOGICAL_BACKUP_SHA256,
+].join(":");
+
 function cleanEnvironment(overrides: Record<string, string> = {}): Record<string, string> {
     const env: Record<string, string> = {};
     for (const [key, value] of Object.entries(process.env)) {
@@ -294,6 +314,10 @@ describe("supacloud-admin process contract", () => {
             expect(backupHelp.exitCode).toBe(0);
             expect(backupHelp.output).toContain("--ref");
             expect(backupHelp.output).toContain("--backup_type");
+            const logicalHelp = await runAdminCliPath(linkedEntry, ["platform", "restore_logical_backup", "--help"]);
+            expect(logicalHelp.exitCode).toBe(0);
+            expect(logicalHelp.output).toContain("--expected_sha256");
+            expect(logicalHelp.output).toContain("--confirmation");
             const version = await runAdminCliPath(linkedEntry, ["--version"]);
             expect(version.exitCode).toBe(0);
             expect(version.output.trim()).toBe(packageMetadata.version);
@@ -697,6 +721,226 @@ describe("supacloud-admin process contract", () => {
         expect(execution.exitCode).toBe(0);
         expect(execution.output).toContain("--ref");
         expect(execution.output).toContain("--backup_type");
+    });
+
+    test("documents every verified logical backup flag without API context", async () => {
+        const listHelp = await runAdminCli(["platform", "list_logical_backups", "--help"]);
+        const createHelp = await runAdminCli(["platform", "create_logical_backup", "--help"]);
+        const restoreHelp = await runAdminCli(["platform", "restore_logical_backup", "--help"]);
+
+        expect(listHelp.exitCode).toBe(0);
+        expect(listHelp.output).toContain("--ref");
+        expect(createHelp.exitCode).toBe(0);
+        expect(createHelp.output).toContain("--ref");
+        expect(restoreHelp.exitCode).toBe(0);
+        expect(restoreHelp.output).toContain("--ref");
+        expect(restoreHelp.output).toContain("--backup_id");
+        expect(restoreHelp.output).toContain("--expected_sha256");
+        expect(restoreHelp.output).toContain("--confirmation");
+        expect(restoreHelp.output).not.toContain("--token");
+        expect(restoreHelp.output).not.toContain("--password");
+    });
+
+    test("lists, creates, and restores verified logical backups without argv credentials", async () => {
+        const calls: Array<{ method: string; path: string; body?: unknown; authorization: string }> = [];
+        let inventoryRead = 0;
+        const apiServer = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            async fetch(request) {
+                const path = new URL(request.url).pathname;
+                const authorization = request.headers.get("authorization") || "";
+                if (request.method === "GET") {
+                    calls.push({ method: "GET", path, authorization });
+                    inventoryRead += 1;
+                    return Response.json({
+                        backups: inventoryRead === 2
+                            ? []
+                            : [{ ...VERIFIED_LOGICAL_BACKUP, receipt_hmac_sha256: "inventory-secret" }],
+                    });
+                }
+                const body = await request.json();
+                calls.push({ method: "POST", path, body, authorization });
+                return path.endsWith("/restore")
+                    ? Response.json({
+                        restored_backup: VERIFIED_LOGICAL_BACKUP,
+                        internal: "restore-response-secret",
+                    })
+                    : Response.json({
+                        backup: VERIFIED_LOGICAL_BACKUP,
+                        archive_path: "/private/logical-backup.dump",
+                    });
+            },
+        });
+        const fixtureToken = "logical-backup-api-token";
+        const environment = {
+            SUPACLOUD_ENV: "test",
+            SUPACLOUD_API_URL: `http://127.0.0.1:${apiServer.port}`,
+            SUPACLOUD_API_TOKEN: fixtureToken,
+        };
+
+        try {
+            const listed = await runAdminCli([
+                "platform", "list_logical_backups", "--ref", "fa_staging",
+            ], environment);
+            const created = await runAdminCli([
+                "platform", "create_logical_backup", "--ref", "fa_staging",
+            ], environment);
+            const restored = await runAdminCli([
+                "platform", "restore_logical_backup", "--ref", "fa_staging",
+                "--backup_id", VERIFIED_LOGICAL_BACKUP_ID,
+                "--expected_sha256", VERIFIED_LOGICAL_BACKUP_SHA256,
+                "--confirmation", VERIFIED_LOGICAL_BACKUP_CONFIRMATION,
+            ], environment);
+
+            expect(listed.exitCode).toBe(0);
+            expect(JSON.parse(listed.output)).toMatchObject({
+                operation: "platform.list_logical_backups",
+                backups: [VERIFIED_LOGICAL_BACKUP],
+            });
+            expect(created.exitCode).toBe(0);
+            expect(JSON.parse(created.output)).toMatchObject({
+                operation: "platform.create_logical_backup",
+                backup: VERIFIED_LOGICAL_BACKUP,
+            });
+            expect(restored.exitCode).toBe(0);
+            expect(JSON.parse(restored.output)).toMatchObject({
+                operation: "platform.restore_logical_backup",
+                restored_backup: VERIFIED_LOGICAL_BACKUP,
+            });
+            expect(calls).toEqual([
+                {
+                    method: "GET",
+                    path: "/v1/projects/fa_staging/database/backups/logical",
+                    authorization: `Bearer ${fixtureToken}`,
+                },
+                {
+                    method: "GET",
+                    path: "/v1/projects/fa_staging/database/backups/logical",
+                    authorization: `Bearer ${fixtureToken}`,
+                },
+                {
+                    method: "POST",
+                    path: "/v1/projects/fa_staging/database/backups/logical",
+                    body: {},
+                    authorization: `Bearer ${fixtureToken}`,
+                },
+                {
+                    method: "GET",
+                    path: "/v1/projects/fa_staging/database/backups/logical",
+                    authorization: `Bearer ${fixtureToken}`,
+                },
+                {
+                    method: "GET",
+                    path: "/v1/projects/fa_staging/database/backups/logical",
+                    authorization: `Bearer ${fixtureToken}`,
+                },
+                {
+                    method: "POST",
+                    path: "/v1/projects/fa_staging/database/backups/logical/restore",
+                    body: {
+                        backup_id: VERIFIED_LOGICAL_BACKUP_ID,
+                        expected_sha256: VERIFIED_LOGICAL_BACKUP_SHA256,
+                        confirmation: VERIFIED_LOGICAL_BACKUP_CONFIRMATION,
+                    },
+                    authorization: `Bearer ${fixtureToken}`,
+                },
+            ]);
+            const output = listed.output + created.output + restored.output;
+            expect(output).not.toContain(fixtureToken);
+            expect(output).not.toContain("inventory-secret");
+            expect(output).not.toContain("restore-response-secret");
+            expect(output).not.toContain("/private/logical-backup.dump");
+        } finally {
+            apiServer.stop(true);
+        }
+    });
+
+    test("blocks unconfirmed production logical writes before HTTP", async () => {
+        const workspace = mkdtempSync(join(tmpdir(), "supacloud-admin-production-logical-backup-"));
+        let requestCount = 0;
+        const apiServer = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch() {
+                requestCount += 1;
+                return Response.json({ backups: [] });
+            },
+        });
+        writeFileSync(join(workspace, ".env.supacloud.production"), [
+            "SUPACLOUD_ENV=production",
+            `SUPACLOUD_API_URL=http://127.0.0.1:${apiServer.port}`,
+            "SUPACLOUD_API_TOKEN=production-logical-token",
+            "SUPACLOUD_PROJECT_REF=fa_staging",
+        ].join("\n") + "\n");
+
+        try {
+            const unconfirmed = await runAdminCli([
+                "platform", "create_logical_backup", "--ref", "fa_staging",
+                "--env", "production",
+            ], {}, workspace);
+            const confirmed = await runAdminCli([
+                "platform", "create_logical_backup", "--ref", "fa_staging",
+                "--env", "production", "--confirm-production", "fa_staging",
+            ], {}, workspace);
+
+            expect(unconfirmed.exitCode).toBe(1);
+            expect(unconfirmed.output).toContain("--confirm-production fa_staging");
+            expect(requestCount).toBe(3);
+            expect(confirmed.exitCode).toBe(1);
+            expect(JSON.parse(confirmed.output).error).toEqual({
+                code: "OUTCOME_UNKNOWN",
+                http_status: 200,
+            });
+            expect(unconfirmed.output + confirmed.output).not.toContain("production-logical-token");
+        } finally {
+            apiServer.stop(true);
+            rmSync(workspace, { recursive: true, force: true });
+        }
+    });
+
+    test("returns a nonzero secret-free outcome for uncertain logical restore", async () => {
+        let requestCount = 0;
+        const apiServer = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch(request) {
+                requestCount += 1;
+                if (request.method === "GET") {
+                    return Response.json({ backups: [VERIFIED_LOGICAL_BACKUP] });
+                }
+                return Response.json({
+                    message: "remote restore failure",
+                    token: "remote-restore-secret",
+                }, { status: 503 });
+            },
+        });
+        const fixtureToken = "uncertain-restore-api-token";
+
+        try {
+            const execution = await runAdminCli([
+                "platform", "restore_logical_backup", "--ref", "fa_staging",
+                "--backup_id", VERIFIED_LOGICAL_BACKUP_ID,
+                "--expected_sha256", VERIFIED_LOGICAL_BACKUP_SHA256,
+                "--confirmation", VERIFIED_LOGICAL_BACKUP_CONFIRMATION,
+            ], {
+                SUPACLOUD_ENV: "test",
+                SUPACLOUD_API_URL: `http://127.0.0.1:${apiServer.port}`,
+                SUPACLOUD_API_TOKEN: fixtureToken,
+            });
+
+            expect(execution.exitCode).toBe(1);
+            expect(JSON.parse(execution.output).error).toEqual({
+                code: "OUTCOME_UNKNOWN",
+                http_status: 503,
+            });
+            expect(requestCount).toBe(2);
+            expect(execution.output).not.toContain(fixtureToken);
+            expect(execution.output).not.toContain("remote restore failure");
+            expect(execution.output).not.toContain("remote-restore-secret");
+        } finally {
+            apiServer.stop(true);
+        }
     });
 
     test("creates a full backup with a sanitized machine-readable receipt", async () => {

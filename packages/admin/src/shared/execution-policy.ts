@@ -18,8 +18,8 @@ const ACTION_POLICY: Record<string, ModulePolicy> = {
         write: ["create", "delete", "pause", "restore", "restart", "update_settings"],
     },
     platform: {
-        read: ["metrics", "list_backups", "network", "list_orgs", "get_org"],
-        write: ["create_backup", "update_network"],
+        read: ["metrics", "list_backups", "list_logical_backups", "network", "list_orgs", "get_org"],
+        write: ["create_backup", "create_logical_backup", "restore_logical_backup", "update_network"],
     },
     gateway: {
         read: ["routes", "get_certificate", "custom_hostname"],
@@ -51,7 +51,9 @@ const REFLESS_WRITE_ACTIONS = new Set([
 ]);
 const SSH_PROJECT_REF_ACTIONS = new Set(["tenant_manage", "tenant_inspect", "tenant_diagnose"]);
 const PLATFORM_PROJECT_REF_ACTIONS = new Set([
-    "list_backups", "create_backup", "network", "update_network",
+    "list_backups", "create_backup",
+    "list_logical_backups", "create_logical_backup", "restore_logical_backup",
+    "network", "update_network",
 ]);
 
 export interface ExecutionAuthorization {

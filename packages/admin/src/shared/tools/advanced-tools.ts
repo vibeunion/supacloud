@@ -5,6 +5,11 @@ import { Type } from "@sinclair/typebox";
 import { optional, stringEnum, withDescription } from "../schema";
 import type { HttpTransport } from "../transports/http";
 import { createFullPhysicalBackup, listPhysicalBackups } from "./backup-release-control";
+import {
+    createVerifiedLogicalBackup,
+    listVerifiedLogicalBackups,
+    restoreVerifiedLogicalBackup,
+} from "./logical-backup-control";
 
 export function registerAdvancedTools(server: { tool: (...args: any[]) => void }, http: HttpTransport): void {
 
@@ -164,20 +169,27 @@ Actions: list, upsert, delete`,
     server.tool(
         "platform",
         `Platform monitoring, backups, network, and organizations.
-Actions: metrics, list_backups, create_backup, network, update_network, list_orgs, get_org`,
+Actions: metrics, list_backups, create_backup, list_logical_backups, create_logical_backup, restore_logical_backup, network, update_network, list_orgs, get_org`,
         {
             action: withDescription(stringEnum([
                 "metrics", "list_backups", "create_backup",
+                "list_logical_backups", "create_logical_backup", "restore_logical_backup",
                 "network", "update_network",
                 "list_orgs", "get_org",
             ]), "Action"),
             ref: optional(Type.String(), "[*] Project ref for project-scoped platform actions"),
             backup_type: optional(stringEnum(["full"]), "[create_backup] Explicit physical backup type"),
+            backup_id: optional(Type.String(), "[restore_logical_backup] Verified logical backup ID"),
+            expected_sha256: optional(Type.String(), "[restore_logical_backup] Exact lowercase backup SHA-256"),
+            confirmation: optional(Type.String(), "[restore_logical_backup] Exact RESTORE_PROJECT:<ref>:<backup_id>:<sha256> confirmation"),
             slug: optional(Type.String(), "[get_org] Organization slug"),
             allowed_cidrs: optional(Type.Array(Type.String()), "[update_network] Allowed CIDRs"),
         },
         async (args: any) => {
-            const { action, ref, backup_type, slug, allowed_cidrs } = args;
+            const {
+                action, ref, backup_type, backup_id, expected_sha256,
+                confirmation, slug, allowed_cidrs,
+            } = args;
             const need = (f: string, v: any) => { if (!v) throw new Error(`'${f}' required for '${action}'`); };
             let text: string;
             switch (action) {
@@ -192,6 +204,23 @@ Actions: metrics, list_backups, create_backup, network, update_network, list_org
                     need("backup_type", backup_type);
                     return createFullPhysicalBackup(http, ref);
                 }
+                case "list_logical_backups":
+                    need("ref", ref);
+                    return listVerifiedLogicalBackups(http, ref);
+                case "create_logical_backup":
+                    need("ref", ref);
+                    return createVerifiedLogicalBackup(http, ref);
+                case "restore_logical_backup":
+                    need("ref", ref);
+                    need("backup_id", backup_id);
+                    need("expected_sha256", expected_sha256);
+                    need("confirmation", confirmation);
+                    return restoreVerifiedLogicalBackup(http, {
+                        projectRef: ref,
+                        backupId: backup_id,
+                        expectedSha256: expected_sha256,
+                        confirmation,
+                    });
                 case "network":
                     need("ref", ref);
                     text = JSON.stringify((await http.get(`/v1/projects/${ref}/network-restrictions`)).data, null, 2);
