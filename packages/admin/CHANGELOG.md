@@ -1,5 +1,66 @@
 # Changelog
 
+## [0.11.0](https://github.com/zuohuadong/supacloud/compare/admin-v0.10.3...admin-v0.11.0) (2026-08-12)
+
+
+### Features
+
+* **admin:** add project service controls ([#804](https://github.com/zuohuadong/supacloud/issues/804)) ([913400b](https://github.com/zuohuadong/supacloud/commit/913400bb89fa72f937cc517f17d0b1f96403b4ef))
+* **admin:** add verified physical backup receipts ([#820](https://github.com/zuohuadong/supacloud/issues/820)) ([7c99ace](https://github.com/zuohuadong/supacloud/commit/7c99ace90446881cca1903f62c0efdbbf2fbd2d1))
+* **admin:** deliver project credentials securely ([#819](https://github.com/zuohuadong/supacloud/issues/819)) ([3307874](https://github.com/zuohuadong/supacloud/commit/33078744a42f49bf7e412ad3145f5374331d8756))
+* **admin:** gate production writes by environment ([#825](https://github.com/zuohuadong/supacloud/issues/825)) ([49018d6](https://github.com/zuohuadong/supacloud/commit/49018d6e573984cc21251271a030bb23b6eddfd0))
+* **admin:** report deployed platform versions ([#794](https://github.com/zuohuadong/supacloud/issues/794)) ([1ed128c](https://github.com/zuohuadong/supacloud/commit/1ed128cb8100872a9fd4a93a373ac1df67d3baf4))
+* **gateway:** add managed functions upstream ([a3f8f74](https://github.com/zuohuadong/supacloud/commit/a3f8f744dc4056d50eb70826b298e0e90a861408))
+
+
+### Bug Fixes
+
+* address release-blocking review findings ([0154fdb](https://github.com/zuohuadong/supacloud/commit/0154fdbab758c9d9c6a80fb877b15848a5ace5df))
+* **admin:** add verified local upgrade transport ([#775](https://github.com/zuohuadong/supacloud/issues/775)) ([b4bfa99](https://github.com/zuohuadong/supacloud/commit/b4bfa99fa3fca2b4cb75057148c5f867d46bef47))
+* **admin:** close SFTP channels after uploads ([#780](https://github.com/zuohuadong/supacloud/issues/780)) ([bf66e52](https://github.com/zuohuadong/supacloud/commit/bf66e52a2a2213b3225abcb5aa8f6d56e1d541cd))
+* **admin:** execute verified upgrade shell safely ([#755](https://github.com/zuohuadong/supacloud/issues/755)) ([5986750](https://github.com/zuohuadong/supacloud/commit/5986750c1245da40d5c9324f942db3180e2871ad))
+* **admin:** harden local upgrade reconciliation ([#778](https://github.com/zuohuadong/supacloud/issues/778)) ([2404912](https://github.com/zuohuadong/supacloud/commit/240491228fb63de8a9544153d6f9d1ae0d18e3f0))
+* **admin:** harden local upgrade state checks ([#779](https://github.com/zuohuadong/supacloud/issues/779)) ([f57308d](https://github.com/zuohuadong/supacloud/commit/f57308d784a9c42731dce7167564b403068225e6))
+* **admin:** make upgrade direct and signal safe ([#767](https://github.com/zuohuadong/supacloud/issues/767)) ([c1b6d87](https://github.com/zuohuadong/supacloud/commit/c1b6d871a8fbe73bdfc511341291f4bdd6506e6c))
+* **admin:** make upgrade preflight awk portable ([#851](https://github.com/zuohuadong/supacloud/issues/851)) ([b7005f0](https://github.com/zuohuadong/supacloud/commit/b7005f0e0c7944ac6f98549251a305b537057c72))
+* **admin:** preserve SSH diagnostic failures ([#757](https://github.com/zuohuadong/supacloud/issues/757)) ([6924913](https://github.com/zuohuadong/supacloud/commit/6924913ea9ae97f6b2f497a803ba27c953b605a5))
+* **admin:** propagate CLI failure exit codes ([#802](https://github.com/zuohuadong/supacloud/issues/802)) ([43aae07](https://github.com/zuohuadong/supacloud/commit/43aae07058cdb3ff05447e89240bf0c0d43ab4a0))
+* **admin:** reconcile remote upgrade timeout outcomes ([#857](https://github.com/zuohuadong/supacloud/issues/857)) ([fd0a203](https://github.com/zuohuadong/supacloud/commit/fd0a203bc5185ffb135e9bebfcb6d9ecd9b641f5))
+* **admin:** support non-root local upgrade uploads ([#782](https://github.com/zuohuadong/supacloud/issues/782)) ([1445c87](https://github.com/zuohuadong/supacloud/commit/1445c87531d78d00b99ed4c0b70d4c44eaba9afd))
+* **admin:** support project create domain flags ([#800](https://github.com/zuohuadong/supacloud/issues/800)) ([c47e19c](https://github.com/zuohuadong/supacloud/commit/c47e19c88e1efcaa9864e1902f47a24be22c92ee))
+* **cli:** harden project read responses ([#861](https://github.com/zuohuadong/supacloud/issues/861)) ([923f145](https://github.com/zuohuadong/supacloud/commit/923f14587ed58b091704436abc66fc3197f5cf46))
+* **upgrade:** bound stalled bootstrap transfers ([#770](https://github.com/zuohuadong/supacloud/issues/770)) ([e34a6e4](https://github.com/zuohuadong/supacloud/commit/e34a6e4a4f7762393de7f60a2f67da9984877a15))
+* **upgrade:** harden offline verification lifecycle ([#785](https://github.com/zuohuadong/supacloud/issues/785)) ([6d52088](https://github.com/zuohuadong/supacloud/commit/6d5208803d1668d95747f0a4fb8efd9cd8e7f813))
+* **upgrade:** pin Sigstore root for offline verification ([#789](https://github.com/zuohuadong/supacloud/issues/789)) ([4bb67ca](https://github.com/zuohuadong/supacloud/commit/4bb67caf318710d825ee7dd950bbd8a3be71db27))
+* **upgrade:** use a JSONL attestation bundle ([#762](https://github.com/zuohuadong/supacloud/issues/762)) ([37c05f0](https://github.com/zuohuadong/supacloud/commit/37c05f0820f31722c0d7b19f4195df957ba03d85))
+* **upgrade:** verify external runtime asset transactions ([#748](https://github.com/zuohuadong/supacloud/issues/748)) ([62156a9](https://github.com/zuohuadong/supacloud/commit/62156a90399094f4975d9ea5732a4d31209b9b6e))
+
+
+### Miscellaneous Chores
+
+* release main ([e55dbcb](https://github.com/zuohuadong/supacloud/commit/e55dbcb5df06cc3211b6ef89d153b0d10c591c1e))
+* release main ([4030977](https://github.com/zuohuadong/supacloud/commit/4030977d61182b07e36755e367575859c475b862))
+* release main ([7509029](https://github.com/zuohuadong/supacloud/commit/7509029e27b3656885c1dccf55ed2f990f4b8e95))
+* release main ([#629](https://github.com/zuohuadong/supacloud/issues/629)) ([c58c4a4](https://github.com/zuohuadong/supacloud/commit/c58c4a41a1c6719a5e17a0f2c8f7ce2cff9951af))
+* release main ([#752](https://github.com/zuohuadong/supacloud/issues/752)) ([a08fb8b](https://github.com/zuohuadong/supacloud/commit/a08fb8bf52d2819a2e699b1c6da3fcb40f764864))
+* release main ([#756](https://github.com/zuohuadong/supacloud/issues/756)) ([4e0294b](https://github.com/zuohuadong/supacloud/commit/4e0294bf9e0f2e5195302f6c09c74c43b3a2e69a))
+* release main ([#759](https://github.com/zuohuadong/supacloud/issues/759)) ([2b25eb6](https://github.com/zuohuadong/supacloud/commit/2b25eb6193573bc5f4f79efff8cb2a735b531d01))
+* release main ([#761](https://github.com/zuohuadong/supacloud/issues/761)) ([92b45ed](https://github.com/zuohuadong/supacloud/commit/92b45ed27a3e0af4a8dc35bf4dead9415fe1ef9f))
+* release main ([#768](https://github.com/zuohuadong/supacloud/issues/768)) ([425a661](https://github.com/zuohuadong/supacloud/commit/425a661394e49f54efe5a02b0573a4f6c8d24bf9))
+* release main ([#777](https://github.com/zuohuadong/supacloud/issues/777)) ([c7f8599](https://github.com/zuohuadong/supacloud/commit/c7f859984f9982214058a1dbee3f025cd47cba49))
+* release main ([#781](https://github.com/zuohuadong/supacloud/issues/781)) ([5d22567](https://github.com/zuohuadong/supacloud/commit/5d22567ebcc2bebe7fa056238d637e0b01de0318))
+* release main ([#783](https://github.com/zuohuadong/supacloud/issues/783)) ([f3c2cd4](https://github.com/zuohuadong/supacloud/commit/f3c2cd467f8d2e0a2715f02b7cf78355959188f5))
+* release main ([#786](https://github.com/zuohuadong/supacloud/issues/786)) ([6ef3273](https://github.com/zuohuadong/supacloud/commit/6ef3273061655fa2ab1c39c6b44eac6b11bacf08))
+* release main ([#791](https://github.com/zuohuadong/supacloud/issues/791)) ([f152d93](https://github.com/zuohuadong/supacloud/commit/f152d934a6285d3c255461d9d7cd2256d333c386))
+* release main ([#796](https://github.com/zuohuadong/supacloud/issues/796)) ([f336cc1](https://github.com/zuohuadong/supacloud/commit/f336cc1443a4159b242ed754a8410e0403c2f132))
+* release main ([#801](https://github.com/zuohuadong/supacloud/issues/801)) ([d88ef58](https://github.com/zuohuadong/supacloud/commit/d88ef587c283b40e7290fbbb47e3495fdd1c16c0))
+* release main ([#805](https://github.com/zuohuadong/supacloud/issues/805)) ([f644737](https://github.com/zuohuadong/supacloud/commit/f6447373bc961c55599774dbbdf20a3765ec23fa))
+* release main ([#810](https://github.com/zuohuadong/supacloud/issues/810)) ([1141c9f](https://github.com/zuohuadong/supacloud/commit/1141c9f2f280404750309e89eb921b81529a1047))
+* release main ([#823](https://github.com/zuohuadong/supacloud/issues/823)) ([80fd010](https://github.com/zuohuadong/supacloud/commit/80fd01015ff3008c4ccd83d4d8b8efd125cda48c))
+* release main ([#852](https://github.com/zuohuadong/supacloud/issues/852)) ([4eb230c](https://github.com/zuohuadong/supacloud/commit/4eb230c079da83a936656ef068b29dfa8837eadd))
+* release main ([#858](https://github.com/zuohuadong/supacloud/issues/858)) ([7cd1d59](https://github.com/zuohuadong/supacloud/commit/7cd1d59a743a01d385020cdbec6b6af41534a276))
+* release main ([#862](https://github.com/zuohuadong/supacloud/issues/862)) ([8b745af](https://github.com/zuohuadong/supacloud/commit/8b745af77c4d36d49bec57e4b13f57cf65e6a795))
+
 ## [0.10.3](https://github.com/zuohuadong/supacloud/compare/admin-v0.10.2...admin-v0.10.3) (2026-08-12)
 
 
