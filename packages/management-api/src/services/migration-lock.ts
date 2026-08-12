@@ -1,6 +1,6 @@
 import { sql } from "../db";
-import { projectMigrationLockKey } from "./migration-promotion";
 import { logger } from "../utils/logger";
+import { projectDatabaseLockKey } from "./project-database-lock";
 
 type ReservedControlSql = Awaited<ReturnType<typeof sql.reserve>>;
 
@@ -25,7 +25,7 @@ function uniqueSortedRefs(input: MigrationLockInput): string[] {
 async function releaseLocks(connection: ReservedControlSql, refs: readonly string[]): Promise<void> {
   for (const projectRef of [...refs].reverse()) {
     try {
-      const lockKey = projectMigrationLockKey(projectRef);
+      const lockKey = projectDatabaseLockKey(projectRef);
       await connection`SELECT pg_advisory_unlock(hashtextextended(${lockKey}, 0))`;
     } catch (error: unknown) {
       logger.warn(`[migration-lock] failed to release lock for ${projectRef}`, {
@@ -46,7 +46,7 @@ export async function withProjectMigrationLocks<T>(
   const acquired: string[] = [];
   try {
     for (const projectRef of refs) {
-      const lockKey = projectMigrationLockKey(projectRef);
+      const lockKey = projectDatabaseLockKey(projectRef);
       const [row] = await connection<{ locked: boolean }[]>`
         SELECT pg_try_advisory_lock(hashtextextended(${lockKey}, 0)) AS locked
       `;

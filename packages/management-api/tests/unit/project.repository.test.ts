@@ -168,6 +168,19 @@ describe("ProjectRepository", () => {
     });
   });
 
+  describe("activateCreatingProject", () => {
+    test("activates only a project still in creating status", async () => {
+      const activeProject = { ...mockProject, status: "active" as const };
+      mockTransactionSql
+        .mockResolvedValueOnce([{ locked: true }])
+        .mockResolvedValueOnce([activeProject]);
+
+      expect(await projectRepository.activateCreatingProject("test123")).toEqual(activeProject);
+      const [strings] = mockTransactionSql.mock.calls[1];
+      expect((strings as TemplateStringsArray).join("?")).toContain("status = 'creating'");
+    });
+  });
+
   describe("updateConfig", () => {
     test("should update and return project", async () => {
       const updatedProject = { ...mockProject, config: { key: "value" } };

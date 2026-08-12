@@ -11,7 +11,7 @@ import {
   edgeFunctionService,
 } from "../../src/services/edge-function.service";
 import { runtimeEnvService } from "../../src/services/runtime-env.service";
-import { restoreLogicalBackup } from "../../src/services/backup.service";
+import { restoreLogicalBackup } from "../../src/services/logical-backup.service";
 import { sdkProxyInternals } from "../../src/routes/sdk-proxy";
 import { decryptSecretIfNeeded, isEncryptedSecret } from "../../src/utils/secret-crypto";
 
@@ -1384,9 +1384,19 @@ describe("final security regressions", () => {
   });
 
   test("logical restore rejects path traversal backup ids", async () => {
-    const result = await restoreLogicalBackup("proj_1", "../../etc/passwd");
-    expect(result.success).toBe(false);
-    expect(result.message).toBe("Invalid backup id");
+    const backupId = "../../etc/passwd";
+    const expectedSha256 = "a".repeat(64);
+
+    await expect(restoreLogicalBackup({
+      project_ref: "proj_1",
+      backup_id: backupId,
+      expected_sha256: expectedSha256,
+      confirmation: `RESTORE_PROJECT:proj_1:${backupId}:${expectedSha256}`,
+    })).rejects.toMatchObject({
+      name: "LogicalBackupContractError",
+      kind: "invalid_request",
+      message: "Invalid logical backup restore identity",
+    });
   });
 
   test("background function tasks persist encrypted credentials", async () => {

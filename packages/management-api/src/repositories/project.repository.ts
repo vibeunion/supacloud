@@ -3,6 +3,7 @@ import { withRetry } from "../utils/retry";
 import { encryptSecretIfNeeded } from "../utils/secret-crypto";
 import { hashSecretApiKey } from "../utils/api-keys";
 import { normalizeProjectConfig } from "../utils/project-config";
+import { projectDatabaseLockKey } from "../services/project-database-lock";
 
 export async function findAll(): Promise<Project[]> {
   return withRetry("ProjectRepository.findAll", async () => {
@@ -89,6 +90,23 @@ export async function updateStatus(ref: string, status: ProjectStatus): Promise<
   return project || null;
   });
   }
+
+export async function activateCreatingProject(ref: string): Promise<Project | null> {
+  const lockKey = projectDatabaseLockKey(ref);
+  return sql.begin(async (tx) => {
+    const [lock] = await tx<{ locked: boolean }[]>`
+      SELECT pg_try_advisory_xact_lock(hashtextextended(${lockKey}, 0)) AS locked
+    `;
+    if (lock?.locked !== true) return null;
+    const [project] = await tx`
+      UPDATE projects
+      SET status = 'active', updated_at = NOW()
+      WHERE ref = ${ref} AND status = 'creating' AND deleted_at IS NULL
+      RETURNING *
+    `;
+    return project || null;
+  });
+}
 
   // Update project config
 export async function updateConfig(ref: string, config: Record<string, unknown>): Promise<Project | null> {
@@ -201,6 +219,7 @@ export const projectRepository = {
   findById,
   create,
   updateStatus,
+  activateCreatingProject,
   updateConfig,
   updateApiKeys,
   updateOpaqueApiKeys,

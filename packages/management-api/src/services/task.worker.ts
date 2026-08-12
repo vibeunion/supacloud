@@ -33,6 +33,10 @@ async function repairInvalidServiceRoleKey(project: Project): Promise<void> {
     });
 }
 
+async function activateProvisionedProject(projectRef: string): Promise<boolean> {
+    return Boolean(await projectRepository.activateCreatingProject(projectRef));
+}
+
 export class TaskWorker {
     private isRunning = false;
     private isProcessing = false;
@@ -393,9 +397,10 @@ export class TaskWorker {
         } else if (task_type === "provision_gateway") {
             await taskRepository.createTask(project_ref, "provision_secrets");
         } else if (task_type === "provision_secrets") {
-            // Final step completed, activate project
-            await projectRepository.updateStatus(project_ref, "active");
-            logger.info(`[TaskWorker] Project ${project_ref} fully provisioned and activated.`);
+            const activated = await activateProvisionedProject(project_ref);
+            logger.info(activated
+                ? `[TaskWorker] Project ${project_ref} fully provisioned and activated.`
+                : `[TaskWorker] Project ${project_ref} provisioning completed without changing its current state.`);
         } else if (task_type === "cleanup_runtime") {
             // After runtime cleanup, cleanup realtime
             await taskRepository.createTask(project_ref, "cleanup_realtime");

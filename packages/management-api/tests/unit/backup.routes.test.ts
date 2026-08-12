@@ -9,12 +9,24 @@ const findByRef = mock((ref: string): Promise<BackupProject | null> => (
 ));
 const listBackups = mock(() => Promise.resolve([]));
 const createBackup = mock(() => Promise.resolve({ message: "full backup completed" }));
-const createLogicalBackup = mock(() => Promise.resolve({ success: true, message: "Logical backup completed", file: "backup_project_a_2026-08-05T00-00-00-000Z.sql.gz" }));
-const restoreLogicalBackup = mock(() => Promise.resolve({ success: true, message: "Logical restore completed successfully" }));
+const logicalBackupIdentity = {
+  backup_id: "logical-full_project_a_0123456789abcdef0123456789abcdef",
+  project_ref: "project_a",
+  database: "canonical_project_database",
+  kind: "logical-full" as const,
+  created_at: "2026-08-05T00:00:00.000Z",
+  completed_at: "2026-08-05T00:00:01.000Z",
+  bytes: 7,
+  sha256: "a".repeat(64),
+};
+const listLogicalBackups = mock(() => Promise.resolve([logicalBackupIdentity]));
+const createLogicalBackup = mock(() => Promise.resolve(logicalBackupIdentity));
+const restoreLogicalBackup = mock(() => Promise.resolve(logicalBackupIdentity));
 const restore = mock(() => Promise.resolve({ message: "PITR restore completed" }));
 
 const authModule = await import("../../src/middleware/auth");
 const backupModule = await import("../../src/services/backup.service");
+const logicalBackupModule = await import("../../src/services/logical-backup.service");
 const { projectRepository } = await import("../../src/repositories/project.repository");
 
 const requireAdminAuthSpy = spyOn(authModule, "requireAdminAuth").mockImplementation(
@@ -32,11 +44,14 @@ const listBackupsSpy = spyOn(backupModule, "listBackups").mockImplementation(
 const createBackupSpy = spyOn(backupModule, "createBackup").mockImplementation(
   createBackup as typeof backupModule.createBackup,
 );
-const createLogicalBackupSpy = spyOn(backupModule, "createLogicalBackup").mockImplementation(
-  createLogicalBackup as typeof backupModule.createLogicalBackup,
+const listLogicalBackupsSpy = spyOn(logicalBackupModule, "listLogicalBackups").mockImplementation(
+  listLogicalBackups as typeof logicalBackupModule.listLogicalBackups,
 );
-const restoreLogicalBackupSpy = spyOn(backupModule, "restoreLogicalBackup").mockImplementation(
-  restoreLogicalBackup as typeof backupModule.restoreLogicalBackup,
+const createLogicalBackupV2Spy = spyOn(logicalBackupModule, "createLogicalBackup").mockImplementation(
+  createLogicalBackup as typeof logicalBackupModule.createLogicalBackup,
+);
+const restoreLogicalBackupSpy = spyOn(logicalBackupModule, "restoreLogicalBackup").mockImplementation(
+  restoreLogicalBackup as typeof logicalBackupModule.restoreLogicalBackup,
 );
 const restoreSpy = spyOn(backupModule, "restore").mockImplementation(
   restore as typeof backupModule.restore,
@@ -73,13 +88,11 @@ describe("physical backup routes", () => {
     createBackup.mockReset();
     createBackup.mockResolvedValue({ message: "full backup completed" });
     createLogicalBackup.mockReset();
-    createLogicalBackup.mockResolvedValue({
-      success: true,
-      message: "Logical backup completed",
-      file: "backup_project_a_2026-08-05T00-00-00-000Z.sql.gz",
-    });
+    createLogicalBackup.mockResolvedValue(logicalBackupIdentity);
+    listLogicalBackups.mockReset();
+    listLogicalBackups.mockResolvedValue([logicalBackupIdentity]);
     restoreLogicalBackup.mockReset();
-    restoreLogicalBackup.mockResolvedValue({ success: true, message: "Logical restore completed successfully" });
+    restoreLogicalBackup.mockResolvedValue(logicalBackupIdentity);
     restore.mockReset();
     restore.mockResolvedValue({ message: "PITR restore completed" });
     delete process.env.SUPACLOUD_PITR_ENABLED;
@@ -92,7 +105,8 @@ describe("physical backup routes", () => {
     findByRefSpy.mockRestore();
     listBackupsSpy.mockRestore();
     createBackupSpy.mockRestore();
-    createLogicalBackupSpy.mockRestore();
+    listLogicalBackupsSpy.mockRestore();
+    createLogicalBackupV2Spy.mockRestore();
     restoreLogicalBackupSpy.mockRestore();
     restoreSpy.mockRestore();
   });
@@ -234,8 +248,12 @@ describe("physical backup routes", () => {
     expect(restore).not.toHaveBeenCalled();
   });
 
-  test("returns a service error instead of HTTP 200 when logical backup fails", async () => {
-    createLogicalBackup.mockResolvedValueOnce({ success: false, message: "Logical backup failed" });
+  test("maps logical backup contract errors without reflecting internal failures", async () => {
+    createLogicalBackup.mockRejectedValueOnce(new logicalBackupModule.LogicalBackupContractError(
+      "unavailable",
+      "Logical backup creation is unavailable",
+      { cause: new Error("password=secret /absolute/archive pg_dump stderr") },
+    ));
 
     const response = await request("/v1/projects/project_a/database/backups/logical", {
       method: "POST",
@@ -243,31 +261,60 @@ describe("physical backup routes", () => {
     });
 
     expect(response.status).toBe(503);
-    expect(await response.json()).toEqual({ message: "Logical backup failed" });
+    expect(await response.json()).toEqual({ message: "Logical backup creation is unavailable" });
   });
 
-  test("requires exact confirmation and a paused project outcome for logical restore", async () => {
-    const backupId = "backup_project_a_2026-08-05T00-00-00-000Z.sql.gz";
+  test("lists and creates only after admin authentication", async () => {
+    const inventoryResponse = await request("/v1/projects/project_a/database/backups/logical");
+    expect(inventoryResponse.status).toBe(200);
+    expect(await inventoryResponse.json()).toEqual({ backups: [logicalBackupIdentity] });
+
+    const createResponse = await request("/v1/projects/project_a/database/backups/logical", {
+      method: "POST",
+      body: "{}",
+    });
+    expect(createResponse.status).toBe(200);
+    expect(await createResponse.json()).toEqual({ backup: logicalBackupIdentity });
+
+    requireAdminAuth.mockResolvedValueOnce({ status: 403, body: { error: "Forbidden" } } as never);
+    const deniedResponse = await request("/v1/projects/project_a/database/backups/logical");
+    expect(deniedResponse.status).toBe(403);
+    expect(listLogicalBackups).toHaveBeenCalledTimes(1);
+  });
+
+  test("requires exact identity confirmation and maps paused restore to 409", async () => {
+    const backupId = logicalBackupIdentity.backup_id;
+    const expectedSha256 = logicalBackupIdentity.sha256;
     const unconfirmed = await request("/v1/projects/project_a/database/backups/logical/restore", {
       method: "POST",
-      body: JSON.stringify({ backupId, confirmation: "RESTORE_PROJECT" }),
+      body: JSON.stringify({
+        backup_id: backupId,
+        expected_sha256: expectedSha256,
+        confirmation: "RESTORE_PROJECT",
+      }),
     });
     expect(unconfirmed.status).toBe(400);
     expect(restoreLogicalBackup).not.toHaveBeenCalled();
 
-    restoreLogicalBackup.mockResolvedValueOnce({
-      success: false,
-      message: "Project must be paused before logical restore",
-      reason: "project_not_paused",
-    });
+    restoreLogicalBackup.mockRejectedValueOnce(new logicalBackupModule.LogicalBackupContractError(
+      "conflict",
+      "Project must be paused before logical restore",
+    ));
     const pausedRequired = await request("/v1/projects/project_a/database/backups/logical/restore", {
       method: "POST",
       body: JSON.stringify({
-        backupId,
-        confirmation: `RESTORE_PROJECT:project_a:${backupId}`,
+        backup_id: backupId,
+        expected_sha256: expectedSha256,
+        confirmation: `RESTORE_PROJECT:project_a:${backupId}:${expectedSha256}`,
       }),
     });
     expect(pausedRequired.status).toBe(409);
+    expect(restoreLogicalBackup).toHaveBeenCalledWith({
+      project_ref: "project_a",
+      backup_id: backupId,
+      expected_sha256: expectedSha256,
+      confirmation: `RESTORE_PROJECT:project_a:${backupId}:${expectedSha256}`,
+    });
   });
 
   test("does not leave a second backup or restore contract in project config routes", () => {
