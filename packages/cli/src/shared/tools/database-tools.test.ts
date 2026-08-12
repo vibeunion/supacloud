@@ -43,6 +43,47 @@ function migrationInventoryFixture(overrides: Record<string, unknown> = {}) {
     };
 }
 
+function migrationMutationReceipt(name: string, sql: string, version = "20260425123000") {
+    const statements = [sql.trim()];
+    const normalizedStatements = [sql.replace(/\r\n?/g, "\n").trim()];
+    return {
+        version,
+        name,
+        statements,
+        checksum: createHash("sha256").update(JSON.stringify({ version, name, statements: normalizedStatements })).digest("hex"),
+    };
+}
+
+function baselineMutationReceipt(migrations: Array<{ version: string; name: string }>) {
+    return {
+        marked: migrations.length,
+        already_applied: 0,
+        migrations: migrations.map(({ version, name }) => {
+            const statements = [`baseline:${name}`];
+            return {
+                version,
+                name,
+                checksum: createHash("sha256").update(JSON.stringify({ version, name, statements })).digest("hex"),
+            };
+        }),
+    };
+}
+
+function baselineInventory(migrations: Array<{ version: string; name: string }>) {
+    return migrations.map(({ version, name }) => migrationInventoryFixture({
+        version,
+        name,
+        statements: [`baseline:${name}`],
+    }));
+}
+
+function sqlBatchReceipt(commands: string[]) {
+    return {
+        command: "BATCH",
+        statements: commands.map((command, index) => ({ index: index + 1, command, rowCount: 0, durationMs: 1 })),
+    };
+}
+
 describe("database migration helpers", () => {
     test.each([
         ["apply_migration", { action: "apply_migration", ref: "proj", name: "safe_name", sql: "SELECT 1;" }],
@@ -109,6 +150,65 @@ describe("database migration helpers", () => {
             error: { code: "OUTCOME_UNKNOWN", http_status: 409 },
         });
         expect(response.content[0].text).not.toContain(responseSecret);
+    });
+
+    test("accepts only a migration receipt bound to the direct-apply request", async () => {
+        const callback = captureDatabaseTool({
+            postReleaseMutation: async () => ({
+                ok: true,
+                status: 200,
+                data: migrationMutationReceipt("safe_name", "SELECT 1;", "1770000000"),
+            }),
+        });
+
+        const response = await callback({ action: "apply_migration", ref: "proj", name: "safe_name", sql: "SELECT 1;" });
+
+        expect(response.isError).toBeUndefined();
+        expect(response.content[0].text).toContain("Migration 'safe_name' applied");
+    });
+
+    test("accepts a direct-apply receipt normalized from CRLF input", async () => {
+        const sql = "CREATE TABLE safe_table (\r\n  id uuid\r\n);\r\n";
+        const callback = captureDatabaseTool({
+            postReleaseMutation: async () => ({
+                ok: true,
+                status: 200,
+                data: migrationMutationReceipt("safe_name", sql, "1770000000"),
+            }),
+        });
+
+        const response = await callback({ action: "apply_migration", ref: "proj", name: "safe_name", sql });
+
+        expect(response.isError).toBeUndefined();
+        expect(response.content[0].text).toContain("Migration 'safe_name' applied");
+    });
+
+    test.each([null, {}, { version: "1770000000", name: "other", statements: ["SELECT 1;"] }])(
+        "fails a malformed direct-apply success closed",
+        async (receiptPayload) => {
+            const callback = captureDatabaseTool({
+                postReleaseMutation: async () => ({ ok: true, status: 200, data: receiptPayload }),
+            });
+
+            const response = await callback({ action: "apply_migration", ref: "proj", name: "safe_name", sql: "SELECT 1;" });
+            expect(response.isError).toBe(true);
+            expect(JSON.parse(response.content[0].text).error).toEqual({ code: "OUTCOME_UNKNOWN", http_status: 200 });
+        },
+    );
+
+    test.each([201, 202, 204])("does not treat HTTP %d as a completed direct apply", async (status) => {
+        const callback = captureDatabaseTool({
+            postReleaseMutation: async () => ({
+                ok: true,
+                status,
+                data: migrationMutationReceipt("safe_name", "SELECT 1;", "1770000000"),
+            }),
+        });
+
+        const response = await callback({ action: "apply_migration", ref: "proj", name: "safe_name", sql: "SELECT 1;" });
+
+        expect(response.isError).toBe(true);
+        expect(JSON.parse(response.content[0].text).error).toEqual({ code: "OUTCOME_UNKNOWN", http_status: status });
     });
 
     test("prefers an explicit ref over the auto-linked project", async () => {
@@ -292,9 +392,13 @@ describe("database migration helpers", () => {
             writeFileSync(join(dir, "beta.sql"), "CREATE TABLE beta (id uuid);\n");
             const callback = captureDatabaseTool({
                 get: async () => ({ ok: true, status: 200, data: [] }),
-                post: async (_path: string, body: { name: string; version: string }) => {
+                postReleaseMutation: async (_path: string, body: { name: string; version: string; sql: string }) => {
                     posts.push({ name: body.name, version: body.version });
-                    return { ok: true, status: 200, data: {} };
+                    return {
+                        ok: true,
+                        status: 200,
+                        data: migrationMutationReceipt(body.name, body.sql, body.version),
+                    };
                 },
             });
 
@@ -661,7 +765,15 @@ describe("database migration helpers", () => {
                 postReleaseMutation: async () => ({
                     ok: false,
                     status: 409,
-                    data: { code: "409", message: "Migration already applied" },
+                    data: {
+                        code: "409",
+                        message: "Migration already applied",
+                        ...migrationMutationReceipt(
+                            "20260425123000_create_users",
+                            "CREATE TABLE users (id uuid);",
+                        ),
+                        statements: undefined,
+                    },
                 }),
             });
 
@@ -669,6 +781,78 @@ describe("database migration helpers", () => {
             expect(toolResult.content[0].text).toContain("Migration push completed");
             expect(toolResult.content[0].text).toContain("Applied: 0");
             expect(toolResult.content[0].text).toContain("Skipped: 1");
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    test("does not skip an unreadable already-applied migration response", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
+        const responseSecret = "already-applied-private-response";
+        try {
+            writeFileSync(join(dir, "20260425123000_create_users.sql"), "CREATE TABLE users (id uuid);\n");
+            const callback = captureDatabaseTool({
+                get: async () => ({ ok: true, status: 200, data: [] }),
+                postReleaseMutation: async () => ({
+                    ok: false,
+                    status: 409,
+                    data: {
+                        code: "409",
+                        message: "Migration already applied",
+                        ...migrationMutationReceipt(
+                            "20260425123000_create_users",
+                            "CREATE TABLE users (id uuid);",
+                        ),
+                        private: responseSecret,
+                    },
+                    responseReadError: true,
+                }),
+            });
+
+            const response = await callback({ action: "push_migrations", ref: "proj", dir });
+
+            expect(response.isError).toBe(true);
+            expect(JSON.parse(response.content[0].text)).toMatchObject({
+                applied_before_failure: [],
+                skipped_before_failure: [],
+                failed_file: "20260425123000_create_users.sql",
+                error: { code: "OUTCOME_UNKNOWN", http_status: 409 },
+            });
+            expect(response.content[0].text).not.toContain(responseSecret);
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    test("does not skip a contradictory successful already-applied response", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
+        try {
+            writeFileSync(join(dir, "20260425123000_create_users.sql"), "CREATE TABLE users (id uuid);\n");
+            const callback = captureDatabaseTool({
+                get: async () => ({ ok: true, status: 200, data: [] }),
+                postReleaseMutation: async () => ({
+                    ok: true,
+                    status: 409,
+                    data: {
+                        code: "409",
+                        message: "Migration already applied",
+                        ...migrationMutationReceipt(
+                            "20260425123000_create_users",
+                            "CREATE TABLE users (id uuid);",
+                        ),
+                    },
+                }),
+            });
+
+            const response = await callback({ action: "push_migrations", ref: "proj", dir });
+
+            expect(response.isError).toBe(true);
+            expect(JSON.parse(response.content[0].text)).toMatchObject({
+                applied_before_failure: [],
+                skipped_before_failure: [],
+                failed_file: "20260425123000_create_users.sql",
+                error: { code: "OUTCOME_UNKNOWN", http_status: 409 },
+            });
         } finally {
             rmSync(dir, { recursive: true, force: true });
         }
@@ -697,6 +881,9 @@ describe("database migration helpers", () => {
                 schema: "supacloud.cli.release-control.v1",
                 ok: false,
                 operation: "database.push_migrations",
+                applied_before_failure: [],
+                skipped_before_failure: [],
+                failed_file: "20260425123000_create_users.sql",
                 error: { code: "HTTP_ERROR", http_status: 409 },
             });
         } finally {
@@ -730,6 +917,11 @@ describe("database migration helpers", () => {
                 schema: "supacloud.cli.release-control.v1",
                 ok: false,
                 operation: "database.push_migrations",
+                ...(failedMethod === "postReleaseMutation" ? {
+                    applied_before_failure: [],
+                    skipped_before_failure: [],
+                    failed_file: "20260425123000_create_users.sql",
+                } : {}),
                 error: { code, http_status: status },
             });
             expect(response.content[0].text).not.toContain(responseSecret);
@@ -752,7 +944,14 @@ describe("database migration helpers", () => {
                 },
                 postReleaseMutation: async () => {
                     releaseMutationCount += 1;
-                    return { ok: true, status: 200, data: {} };
+                    return {
+                        ok: true,
+                        status: 200,
+                        data: migrationMutationReceipt(
+                            "20260425123000_create_users",
+                            "CREATE TABLE users (id uuid);",
+                        ),
+                    };
                 },
             });
 
@@ -761,6 +960,132 @@ describe("database migration helpers", () => {
             expect(response.isError).not.toBe(true);
             expect(ordinaryPostCount).toBe(0);
             expect(releaseMutationCount).toBe(1);
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    test("reports files committed before a later migration rejection", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
+        try {
+            writeFileSync(join(dir, "20260425123000_create_users.sql"), "CREATE TABLE users (id uuid);\n");
+            writeFileSync(join(dir, "20260425124000_create_tasks.sql"), "CREATE TABLE tasks (id uuid);\n");
+            let postCount = 0;
+            const callback = captureDatabaseTool({
+                get: async () => ({ ok: true, status: 200, data: [] }),
+                postReleaseMutation: async () => {
+                    postCount += 1;
+                    return postCount === 1
+                        ? {
+                            ok: true,
+                            status: 200,
+                            data: migrationMutationReceipt(
+                                "20260425123000_create_users",
+                                "CREATE TABLE users (id uuid);",
+                            ),
+                        }
+                        : { ok: false, status: 409, data: { message: "private-response" } };
+                },
+            });
+
+            const response = await callback({ action: "push_migrations", ref: "proj", dir });
+            const payload = JSON.parse(response.content[0].text);
+
+            expect(response.isError).toBe(true);
+            expect(payload).toMatchObject({
+                applied_before_failure: ["20260425123000_create_users.sql"],
+                skipped_before_failure: [],
+                failed_file: "20260425124000_create_tasks.sql",
+                error: { code: "HTTP_ERROR", http_status: 409 },
+            });
+            expect(response.content[0].text).not.toContain("private-response");
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    test("reports only files encountered before the failed migration", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
+        try {
+            writeFileSync(join(dir, "20260425123000_create_users.sql"), "CREATE TABLE users (id uuid);\n");
+            writeFileSync(join(dir, "20260425124000_create_tasks.sql"), "CREATE TABLE tasks (id uuid);\n");
+            writeFileSync(join(dir, "20260425125000_create_reports.sql"), "CREATE TABLE reports (id uuid);\n");
+            const callback = captureDatabaseTool({
+                get: async () => ({
+                    ok: true,
+                    status: 200,
+                    data: [
+                        {
+                            version: "20260425123000",
+                            name: "20260425123000_create_users",
+                            statements: ["CREATE TABLE users (id uuid);"],
+                        },
+                        {
+                            version: "20260425125000",
+                            name: "20260425125000_create_reports",
+                            statements: ["CREATE TABLE reports (id uuid);"],
+                        },
+                    ],
+                }),
+                postReleaseMutation: async () => ({ ok: false, status: 409, data: {} }),
+            });
+
+            const response = await callback({ action: "push_migrations", ref: "proj", dir });
+
+            expect(JSON.parse(response.content[0].text)).toMatchObject({
+                applied_before_failure: [],
+                skipped_before_failure: ["20260425123000_create_users.sql"],
+                failed_file: "20260425124000_create_tasks.sql",
+            });
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    test("reports a malformed migration push success as outcome unknown", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
+        try {
+            writeFileSync(join(dir, "20260425123000_create_users.sql"), "CREATE TABLE users (id uuid);\n");
+            const callback = captureDatabaseTool({
+                get: async () => ({ ok: true, status: 200, data: [] }),
+                postReleaseMutation: async () => ({ ok: true, status: 200, data: {} }),
+            });
+
+            const response = await callback({ action: "push_migrations", ref: "proj", dir });
+            const payload = JSON.parse(response.content[0].text);
+
+            expect(response.isError).toBe(true);
+            expect(payload).toMatchObject({
+                applied_before_failure: [],
+                skipped_before_failure: [],
+                failed_file: "20260425123000_create_users.sql",
+                error: { code: "OUTCOME_UNKNOWN", http_status: 200 },
+            });
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    test.each([201, 202, 204])("does not treat HTTP %d as a completed migration push", async (status) => {
+        const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
+        try {
+            writeFileSync(join(dir, "20260425123000_create_users.sql"), "CREATE TABLE users (id uuid);\n");
+            const callback = captureDatabaseTool({
+                get: async () => ({ ok: true, status: 200, data: [] }),
+                postReleaseMutation: async () => ({
+                    ok: true,
+                    status,
+                    data: migrationMutationReceipt(
+                        "20260425123000_create_users",
+                        "CREATE TABLE users (id uuid);",
+                    ),
+                }),
+            });
+
+            const response = await callback({ action: "push_migrations", ref: "proj", dir });
+
+            expect(response.isError).toBe(true);
+            expect(JSON.parse(response.content[0].text).error).toEqual({ code: "OUTCOME_UNKNOWN", http_status: status });
         } finally {
             rmSync(dir, { recursive: true, force: true });
         }
@@ -924,7 +1249,11 @@ describe("database migration helpers", () => {
                     ok: true,
                     status: 200,
                     data: [
-                        { version: "20260425123000", name: "20260425123000_create_users" },
+                        {
+                            version: "20260425123000",
+                            name: "20260425123000_create_users",
+                            statements: ["baseline:20260425123000_create_users"],
+                        },
                     ],
                 }),
                 postReleaseMutation: async (path: string, body: unknown) => {
@@ -950,21 +1279,60 @@ describe("database migration helpers", () => {
         }
     });
 
-  test("baselines missing migrations through the dedicated ledger endpoint", async () => {
+    test("rejects a baseline identity without content evidence before mutation", async () => {
         const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
-        const posts: Array<{ path: string; body: any }> = [];
+        let mutationCount = 0;
+        try {
+            writeFileSync(join(dir, "20260425123000_create_users.sql"), "CREATE TABLE users (id uuid);\n");
+            const callback = captureDatabaseTool({
+                get: async () => ({
+                    ok: true,
+                    status: 200,
+                    data: [{ version: "20260425123000", name: "20260425123000_create_users" }],
+                }),
+                postReleaseMutation: async () => {
+                    mutationCount += 1;
+                    return { ok: true, status: 200, data: {} };
+                },
+            });
+
+            await expect(callback({ action: "baseline_migrations", ref: "proj", dir }))
+                .rejects.toThrow("Migration identity conflicts");
+            expect(mutationCount).toBe(0);
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    test("baselines missing migrations through the dedicated ledger endpoint", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
+        const posts: Array<{ path: string; body: unknown }> = [];
         try {
             writeFileSync(join(dir, "20260425123000_create_users.sql"), "CREATE TABLE users (id uuid);\n");
             writeFileSync(join(dir, "20260425124000_create_tasks.sql"), "CREATE TABLE tasks (id uuid);\n");
+            const baselines = [
+                { name: "20260425123000_create_users", version: "20260425123000" },
+                { name: "20260425124000_create_tasks", version: "20260425124000" },
+            ];
+            let inventoryReadCount = 0;
 
             const callback = captureDatabaseTool({
                 get: async (path: string) => {
                     expect(path).toBe("/v1/projects/proj/database/migrations");
-                    return { ok: true, status: 200, data: [] };
+                    inventoryReadCount += 1;
+                    return {
+                        ok: true,
+                        status: 200,
+                        data: inventoryReadCount === 1 ? [] : baselineInventory(baselines),
+                    };
                 },
                 postReleaseMutation: async (path: string, body: unknown) => {
                     posts.push({ path, body });
-                    return { ok: true, status: 200, data: { marked: 2, already_applied: 0 } };
+                    return {
+                        ok: true,
+                        status: 200,
+                        data: baselineMutationReceipt(baselines),
+                    };
                 },
             });
 
@@ -988,6 +1356,125 @@ describe("database migration helpers", () => {
         } finally {
             rmSync(dir, { recursive: true, force: true });
         }
+  });
+
+  test("accepts a baseline receipt completed concurrently by another caller", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
+    try {
+      writeFileSync(join(dir, "20260425123000_create_users.sql"), "CREATE TABLE users (id uuid);\n");
+      let inventoryReadCount = 0;
+      const callback = captureDatabaseTool({
+        get: async () => {
+          inventoryReadCount += 1;
+          return {
+            ok: true,
+            status: 200,
+            data: inventoryReadCount === 1
+              ? []
+              : baselineInventory([{ name: "20260425123000_create_users", version: "20260425123000" }]),
+          };
+        },
+        postReleaseMutation: async () => ({
+          ok: true,
+          status: 200,
+          data: { marked: 0, already_applied: 1, migrations: [] },
+        }),
+      });
+
+      const response = await callback({ action: "baseline_migrations", ref: "proj", dir });
+
+      expect(response.isError).toBeUndefined();
+      expect(response.content[0].text).toContain("Migration baseline completed");
+      expect(response.content[0].text).toContain("Marked applied: 0");
+      expect(response.content[0].text).toContain("Already applied: 1");
+      expect(response.content[0].text).not.toContain("Marked files:");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test.each([
+    { marked: 1 },
+    { marked: 0, already_applied: 0, migrations: [] },
+    { marked: 0, already_applied: 2, migrations: [] },
+    { marked: 1, already_applied: 0, migrations: [] },
+  ])("fails a malformed successful migration baseline closed", async (receiptPayload) => {
+    const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
+    try {
+      writeFileSync(join(dir, "20260425123000_create_users.sql"), "CREATE TABLE users (id uuid);\n");
+      const callback = captureDatabaseTool({
+        get: async () => ({ ok: true, status: 200, data: [] }),
+        postReleaseMutation: async () => ({ ok: true, status: 200, data: receiptPayload }),
+      });
+
+      const response = await callback({ action: "baseline_migrations", ref: "proj", dir });
+      expect(response.isError).toBe(true);
+      expect(JSON.parse(response.content[0].text).error).toEqual({ code: "OUTCOME_UNKNOWN", http_status: 200 });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test.each([201, 202, 204])("does not treat HTTP %d as a completed baseline", async (status) => {
+    const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
+    try {
+      writeFileSync(join(dir, "20260425123000_create_users.sql"), "CREATE TABLE users (id uuid);\n");
+      const callback = captureDatabaseTool({
+        get: async () => ({ ok: true, status: 200, data: [] }),
+        postReleaseMutation: async () => ({
+          ok: true,
+          status,
+          data: baselineMutationReceipt([
+            { name: "20260425123000_create_users", version: "20260425123000" },
+          ]),
+        }),
+      });
+
+      const response = await callback({ action: "baseline_migrations", ref: "proj", dir });
+
+      expect(response.isError).toBe(true);
+      expect(JSON.parse(response.content[0].text).error).toEqual({ code: "OUTCOME_UNKNOWN", http_status: status });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test.each([
+    ["HTTP failure", { ok: false, status: 503, data: { private: "inventory-secret" } }],
+    ["identity mismatch", {
+      ok: true,
+      status: 200,
+      data: baselineInventory([{ name: "wrong_name", version: "20260425123000" }]),
+    }],
+  ])("fails a successful baseline closed when readback has %s", async (_case, readbackResponse) => {
+    const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
+    try {
+      writeFileSync(join(dir, "20260425123000_create_users.sql"), "CREATE TABLE users (id uuid);\n");
+      let inventoryReadCount = 0;
+      const callback = captureDatabaseTool({
+        get: async () => {
+          inventoryReadCount += 1;
+          return inventoryReadCount === 1
+            ? { ok: true, status: 200, data: [] }
+            : readbackResponse;
+        },
+        postReleaseMutation: async () => ({
+          ok: true,
+          status: 200,
+          data: baselineMutationReceipt([
+            { name: "20260425123000_create_users", version: "20260425123000" },
+          ]),
+        }),
+      });
+
+      const response = await callback({ action: "baseline_migrations", ref: "proj", dir });
+
+      expect(response.isError).toBe(true);
+      expect(JSON.parse(response.content[0].text).error.code).toBe("OUTCOME_UNKNOWN");
+      expect(response.content[0].text).not.toContain("inventory-secret");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test.each([
@@ -1021,11 +1508,11 @@ describe("database migration helpers", () => {
   });
 
   test("create_table_rls defaults to deny-all and removes the legacy permissive policy", async () => {
-    const posts: Array<{ path: string; body: { sql?: string } }> = [];
+    const posts: Array<{ path: string; body: { sql?: string; mode?: string } }> = [];
     const callback = captureDatabaseTool({
-      postReleaseMutation: async (path: string, body: { sql?: string }) => {
+      postReleaseMutation: async (path: string, body: { sql?: string; mode?: string }) => {
         posts.push({ path, body });
-        return { ok: true, status: 200, data: { rows: [] } };
+        return { ok: true, status: 200, data: sqlBatchReceipt(["CREATE", "ALTER", ...Array(5).fill("DROP")]) };
       },
     });
 
@@ -1040,6 +1527,7 @@ describe("database migration helpers", () => {
     expect(result.content[0]?.text).toContain("deny-all");
     expect(posts).toHaveLength(1);
     const sql = posts[0]?.body.sql || "";
+    expect(posts[0]?.body.mode).toBe("migration");
     expect(sql).toContain("ENABLE ROW LEVEL SECURITY");
     expect(sql).toContain('DROP POLICY IF EXISTS "Enable ALL for authenticated"');
     expect(sql).not.toContain("USING (true)");
@@ -1051,7 +1539,11 @@ describe("database migration helpers", () => {
     const callback = captureDatabaseTool({
       postReleaseMutation: async (_path: string, body: { sql?: string }) => {
         posts.push({ body });
-        return { ok: true, status: 200, data: { rows: [] } };
+        return {
+          ok: true,
+          status: 200,
+          data: sqlBatchReceipt(["CREATE", "ALTER", ...Array(5).fill("DROP"), ...Array(4).fill("CREATE")]),
+        };
       },
     });
 
@@ -1072,6 +1564,41 @@ describe("database migration helpers", () => {
     expect(sql).toContain('FOR INSERT TO authenticated WITH CHECK (auth.uid() IS NOT NULL AND auth.uid() = "owner_id")');
     expect(sql).toContain('FOR UPDATE TO authenticated USING (auth.uid() IS NOT NULL AND auth.uid() = "owner_id") WITH CHECK (auth.uid() IS NOT NULL AND auth.uid() = "owner_id")');
     expect(sql).toContain('FOR DELETE TO authenticated USING (auth.uid() IS NOT NULL AND auth.uid() = "owner_id")');
+  });
+
+  test("fails a malformed successful table and RLS mutation closed", async () => {
+    const callback = captureDatabaseTool({
+      postReleaseMutation: async () => ({ ok: true, status: 200, data: { rows: [] } }),
+    });
+
+    const response = await callback({
+      action: "create_table_rls",
+      ref: "proj",
+      table: "todos",
+      columns: "id uuid primary key",
+    });
+    expect(response.isError).toBe(true);
+    expect(JSON.parse(response.content[0].text).error).toEqual({ code: "OUTCOME_UNKNOWN", http_status: 200 });
+  });
+
+  test.each([201, 202, 204])("does not treat HTTP %d as a completed table and RLS mutation", async (status) => {
+    const callback = captureDatabaseTool({
+      postReleaseMutation: async () => ({
+        ok: true,
+        status,
+        data: sqlBatchReceipt(["CREATE", "ALTER", ...Array(5).fill("DROP")]),
+      }),
+    });
+
+    const response = await callback({
+      action: "create_table_rls",
+      ref: "proj",
+      table: "todos",
+      columns: "id uuid primary key",
+    });
+
+    expect(response.isError).toBe(true);
+    expect(JSON.parse(response.content[0].text).error).toEqual({ code: "OUTCOME_UNKNOWN", http_status: status });
   });
 
   test("create_table_rls rejects unsafe identifiers and multi-statement column definitions", async () => {

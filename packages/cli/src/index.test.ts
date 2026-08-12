@@ -2078,6 +2078,9 @@ describe("supacloud-cli process contract", () => {
             schema: "supacloud.cli.release-control.v1",
             ok: false,
             operation: "database.push_migrations",
+            applied_before_failure: [],
+            skipped_before_failure: [],
+            failed_file: "20260729090000_create_orders.sql",
             error: { code: "OUTCOME_UNKNOWN", http_status: 503 },
         });
         expect(result.stdout + result.stderr).not.toContain(responseSecret);

@@ -200,6 +200,12 @@ function sortMigrationFiles(migrations: MigrationFile[]): MigrationFile[] {
 
 type RemoteMigrationIdentity = { name: string | null; statements: unknown; version: string };
 type MigrationPushPlan = { alreadyApplied: MigrationFile[]; pending: MigrationFile[] };
+type MigrationReceiptExpectation = Pick<MigrationFile, "name" | "sql"> & { version?: string };
+type BaselineReceipt = { marked: MigrationFile[]; concurrentlyAlreadyApplied: number };
+
+function normalizedMigrationStatement(statement: string): string {
+    return statement.replace(/\r\n?/g, "\n").trim();
+}
 
 function migrationRows(data: unknown): unknown[] {
     if (Array.isArray(data)) return data;
@@ -232,15 +238,6 @@ function migrationIdentities(data: unknown): RemoteMigrationIdentity[] {
         if (identity.name !== null) names.add(identity.name);
     }
     return identities;
-}
-
-function appliedMigrationKeys(data: unknown): Set<string> {
-    const keys = new Set<string>();
-    for (const migration of migrationIdentities(data)) {
-        keys.add(migration.version);
-        if (migration.name !== null) keys.add(migration.name);
-    }
-    return keys;
 }
 
 function singleRemoteStatement(remote: RemoteMigrationIdentity): string | null {
@@ -297,10 +294,109 @@ function migrationPushPlan(data: unknown, migrationFiles: MigrationFile[]): Migr
     return plan;
 }
 
-function isAlreadyAppliedMigrationResponse(response: { status: number; data: unknown }): boolean {
-    if (response.status !== 409 || !response.data || typeof response.data !== "object") return false;
+function recordPayload(payload: unknown): Record<string, unknown> | null {
+    return payload && typeof payload === "object" && !Array.isArray(payload)
+        ? payload as Record<string, unknown>
+        : null;
+}
+
+function confirmedMigrationReceipt(payload: unknown, expected: MigrationReceiptExpectation): boolean {
+    const receipt = recordPayload(payload);
+    if (!receipt || !isMigrationInventoryVersion(receipt.version)) return false;
+    const responseStatements = [expected.sql.trim()];
+    const checksumStatements = [normalizedMigrationStatement(expected.sql)];
+    const name = expected.name.trim();
+    if (receipt.name !== name || JSON.stringify(receipt.statements) !== JSON.stringify(responseStatements)) return false;
+    if (expected.version !== undefined && receipt.version !== expected.version) return false;
+    return receipt.checksum === migrationInventoryChecksum({ version: receipt.version, name, statements: checksumStatements });
+}
+
+function isAlreadyAppliedMigrationResponse(
+    response: HttpResult<unknown>,
+    migration: Required<MigrationReceiptExpectation>,
+): boolean {
+    if (response.ok || response.status !== 409 || response.transportError || response.responseReadError) return false;
+    if (!response.data || typeof response.data !== "object" || Array.isArray(response.data)) return false;
     const body = response.data as Record<string, unknown>;
-    return body.code === "409" && body.message === "Migration already applied";
+    const name = migration.name.trim();
+    const statements = [normalizedMigrationStatement(migration.sql)];
+    return body.code === "409"
+        && body.message === "Migration already applied"
+        && body.version === migration.version
+        && body.name === name
+        && body.checksum === migrationInventoryChecksum({ version: migration.version, name, statements });
+}
+
+function expectedBaselineChecksum(migration: MigrationFile): string {
+    return migrationInventoryChecksum({
+        version: migration.version,
+        name: migration.name,
+        statements: [`baseline:${migration.name}`],
+    });
+}
+
+function confirmedBaselineReceipt(payload: unknown, migrations: MigrationFile[]): BaselineReceipt | null {
+    const receipt = recordPayload(payload);
+    if (!receipt || typeof receipt.marked !== "number" || typeof receipt.already_applied !== "number") return null;
+    if (!Number.isSafeInteger(receipt.marked) || !Number.isSafeInteger(receipt.already_applied)) return null;
+    if (receipt.marked < 0 || receipt.already_applied < 0) return null;
+    if (receipt.marked + receipt.already_applied !== migrations.length) return null;
+    if (!Array.isArray(receipt.migrations) || receipt.migrations.length !== receipt.marked) return null;
+    const expected = new Map(migrations.map((migration) => [migration.version, migration]));
+    const marked: MigrationFile[] = [];
+    for (const rawMigration of receipt.migrations) {
+        const migration = recordPayload(rawMigration);
+        if (!migration || typeof migration.version !== "string") return null;
+        const local = expected.get(migration.version);
+        if (!local || migration.name !== local.name || migration.checksum !== expectedBaselineChecksum(local)) return null;
+        expected.delete(migration.version);
+        marked.push(local);
+    }
+    return expected.size === receipt.already_applied
+        ? { marked, concurrentlyAlreadyApplied: receipt.already_applied }
+        : null;
+}
+
+function baselineInventoryIsApplied(payload: unknown, migrations: MigrationFile[]): boolean {
+    const inventory = migrationInventory(payload);
+    if (!inventory) return false;
+    const byVersion = new Map(inventory.map((migration) => [migration.version, migration]));
+    return migrations.every((migration) => {
+        const remote = byVersion.get(migration.version);
+        return remote?.name === migration.name
+            && remote.statements.length === 1
+            && remote.statements[0] === `baseline:${migration.name}`
+            && remote.checksum === expectedBaselineChecksum(migration);
+    });
+}
+
+function confirmedSqlBatchReceipt(payload: unknown, expectedCommands: string[]): boolean {
+    const receipt = recordPayload(payload);
+    if (!receipt || receipt.command !== "BATCH" || !Array.isArray(receipt.statements)) return false;
+    if (receipt.statements.length !== expectedCommands.length) return false;
+    return receipt.statements.every((rawStatement, index) => {
+        const statement = recordPayload(rawStatement);
+        if (!statement || statement.index !== index + 1 || statement.command !== expectedCommands[index]) return false;
+        if (typeof statement.rowCount !== "number" || !Number.isSafeInteger(statement.rowCount) || statement.rowCount < 0) return false;
+        if (typeof statement.durationMs !== "number" || !Number.isFinite(statement.durationMs) || statement.durationMs < 0) return false;
+        return true;
+    });
+}
+
+function rlsStatementCommands(policyMode: "deny_all" | "owner"): string[] {
+    return [
+        "CREATE", "ALTER",
+        ...Array.from({ length: 5 }, () => "DROP"),
+        ...(policyMode === "owner" ? Array.from({ length: 4 }, () => "CREATE") : []),
+    ];
+}
+
+function migrationPushFailureState(applied: string[], skipped: string[], failedFile: string) {
+    return {
+        applied_before_failure: [...applied],
+        skipped_before_failure: [...skipped],
+        failed_file: failedFile,
+    };
 }
 
 function sqlReferencesVector(sql: string): boolean {
@@ -533,6 +629,12 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
                         { name: args.name, sql: args.sql },
                     );
                     if (!r.ok) return releaseControlMutationFailure("database.apply_migration", r);
+                    if (r.status !== 200) {
+                        return releaseControlFailure("database.apply_migration", "OUTCOME_UNKNOWN", r.status);
+                    }
+                    if (!confirmedMigrationReceipt(r.data, { name: args.name, sql: args.sql })) {
+                        return releaseControlFailure("database.apply_migration", "OUTCOME_UNKNOWN", r.status);
+                    }
                     text = `✅ Migration '${args.name}' applied`;
                     break;
                 }
@@ -590,19 +692,28 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
                         break;
                     }
 
+                    const pending = new Set(migrationPlan.pending.map(({ file }) => file));
                     const applied: string[] = [];
-                    const skipped = migrationPlan.alreadyApplied.map(({ file }) => file);
-                    for (const { file, name, version, sql } of migrationPlan.pending) {
+                    const skipped: string[] = [];
+                    for (const { file, name, version, sql } of migrationFiles) {
+                        if (!pending.has(file)) {
+                            skipped.push(file);
+                            continue;
+                        }
                         const r = await http.postReleaseMutation(
                             `/v1/projects/${ref}/database/migrations`,
                             { name, sql, version },
                         );
-                        if (r.ok) {
+                        if (r.ok && r.status === 200 && confirmedMigrationReceipt(r.data, { name, version, sql })) {
                             applied.push(file);
-                        } else if (isAlreadyAppliedMigrationResponse(r)) {
+                        } else if (isAlreadyAppliedMigrationResponse(r, { name, version, sql })) {
                             skipped.push(file);
                         } else {
-                            return releaseControlMutationFailure("database.push_migrations", r);
+                            const safeState = migrationPushFailureState(applied, skipped, file);
+                            if (r.ok) {
+                                return releaseControlFailure("database.push_migrations", "OUTCOME_UNKNOWN", r.status, safeState);
+                            }
+                            return releaseControlMutationFailure("database.push_migrations", r, safeState);
                         }
                     }
 
@@ -641,9 +752,9 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
                         );
                     }
 
-                    const appliedKeys = appliedMigrationKeys(r.data);
-                    const missing = migrationFiles.filter(({ name, version }) => !appliedKeys.has(name) && !appliedKeys.has(String(version)));
-                    const alreadyApplied = migrationFiles.filter(({ name, version }) => appliedKeys.has(name) || appliedKeys.has(String(version)));
+                    const migrationPlan = migrationPushPlan(r.data, migrationFiles);
+                    const missing = migrationPlan.pending;
+                    const alreadyApplied = migrationPlan.alreadyApplied;
 
                     if (args.dry_run) {
                         text = [
@@ -674,13 +785,31 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
                     if (!baselineResult.ok) {
                         return releaseControlMutationFailure("database.baseline_migrations", baselineResult);
                     }
+                    if (baselineResult.status !== 200) {
+                        return releaseControlFailure("database.baseline_migrations", "OUTCOME_UNKNOWN", baselineResult.status);
+                    }
+                    const receipt = confirmedBaselineReceipt(baselineResult.data, missing);
+                    if (!receipt) {
+                        return releaseControlFailure("database.baseline_migrations", "OUTCOME_UNKNOWN", baselineResult.status);
+                    }
+                    const inventoryResult = await http.get(
+                        `/v1/projects/${ref}/database/migrations`,
+                        { maxResponseBytes: MAX_MIGRATION_INVENTORY_BYTES },
+                    );
+                    if (!inventoryResult.ok || !baselineInventoryIsApplied(inventoryResult.data, missing)) {
+                        return releaseControlFailure(
+                            "database.baseline_migrations",
+                            "OUTCOME_UNKNOWN",
+                            inventoryResult.transportError ? null : inventoryResult.status,
+                        );
+                    }
                     text = [
                         `✅ Migration baseline completed for ${dir}`,
-                        `Marked applied: ${missing.length}`,
-                        `Already applied: ${alreadyApplied.length}`,
-                        "",
-                        "Marked files:",
-                        ...missing.map(({ file, version }) => `  - ${file} (${version})`),
+                        `Marked applied: ${receipt.marked.length}`,
+                        `Already applied: ${alreadyApplied.length + receipt.concurrentlyAlreadyApplied}`,
+                        ...(receipt.marked.length
+                            ? ["", "Marked files:", ...receipt.marked.map(({ file, version }) => `  - ${file} (${version})`)]
+                            : []),
                     ].join("\n");
                     break;
                 }
@@ -694,9 +823,15 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
                     const sql = `BEGIN; CREATE TABLE IF NOT EXISTS ${qualifiedTable} (${columns}); ALTER TABLE ${qualifiedTable} ENABLE ROW LEVEL SECURITY; ${policySql} COMMIT;`;
                     const r = await http.postReleaseMutation(
                         `/v1/projects/${ref}/database/sql`,
-                        { sql },
+                        { sql, mode: "migration" },
                     );
                     if (!r.ok) return releaseControlMutationFailure("database.create_table_rls", r);
+                    if (r.status !== 200) {
+                        return releaseControlFailure("database.create_table_rls", "OUTCOME_UNKNOWN", r.status);
+                    }
+                    if (!confirmedSqlBatchReceipt(r.data, rlsStatementCommands(policyMode))) {
+                        return releaseControlFailure("database.create_table_rls", "OUTCOME_UNKNOWN", r.status);
+                    }
                     text = `✅ Table '${schema}.${args.table}' created with RLS (${policyMode === "owner" ? "auth.uid() owner policy" : "deny-all by default"})`;
                     break;
                 }
