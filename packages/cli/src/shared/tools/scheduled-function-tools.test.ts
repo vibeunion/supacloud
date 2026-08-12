@@ -27,6 +27,11 @@ function scheduleRecord(overrides: Record<string, unknown> = {}) {
     };
 }
 
+function legacyScheduleRecord(overrides: Record<string, unknown> = {}) {
+    const { body_empty: _bodyEmpty, header_names: _headerNames, ...legacyRecord } = scheduleRecord();
+    return { ...legacyRecord, body: {}, headers: {}, ...overrides };
+}
+
 function scheduleReceipt(request: Record<string, unknown>, overrides: Record<string, unknown> = {}) {
     const body = request.body as Record<string, unknown> | undefined;
     const headers = request.headers as Record<string, string> | undefined;
@@ -94,6 +99,156 @@ test("Scheduled Function list emits only safe machine-readable metadata", async 
     });
     expect(response.content[0].text).not.toContain(bodySentinel);
     expect(response.content[0].text).not.toContain(headerSentinel);
+});
+
+test("Scheduled Function list safely projects legacy Management payload metadata", async () => {
+    const bodySentinel = "private-legacy-body-sentinel";
+    const headerSentinel = "private-legacy-header-sentinel";
+    const { callback } = captureScheduledFunctionsTool({
+        get: async () => ({
+            ok: true,
+            status: 200,
+            data: {
+                project_ref: "proj",
+                schedules: [legacyScheduleRecord({
+                    body: { private: bodySentinel },
+                    headers: { "X-Schedule-Token": headerSentinel },
+                })],
+            },
+        }),
+    });
+
+    const response = await callback({ action: "list", ref: "proj" });
+    const payload = JSON.parse(response.content[0].text);
+
+    expect(response.isError).not.toBe(true);
+    expect(payload.schedules[0]).toMatchObject({
+        body_empty: false,
+        header_names: ["x-schedule-token"],
+    });
+    expect(response.content[0].text).not.toContain(bodySentinel);
+    expect(response.content[0].text).not.toContain(headerSentinel);
+});
+
+test.each([
+    ["partial projected payload", { body_empty: true, body: {}, headers: {} }],
+    ["non-object legacy body", { body: [], headers: {} }],
+    ["non-string legacy header value", {
+        body: {},
+        headers: { "x-schedule-token": { nested: "private-header-sentinel" } },
+    }],
+    ["empty legacy header value", {
+        body: {},
+        headers: { "x-schedule-token": "" },
+    }],
+    ["legacy header value containing a newline", {
+        body: {},
+        headers: { "x-schedule-token": "private-newline-sentinel\n" },
+    }],
+    ["legacy header value changed by Headers normalization", {
+        body: {},
+        headers: { "x-schedule-token": " private-normalization-sentinel " },
+    }],
+    ["oversized legacy header value", {
+        body: {},
+        headers: { "x-schedule-token": `private-oversized-sentinel${"x".repeat(8_192)}` },
+    }],
+    ["reserved legacy header", {
+        body: {},
+        headers: { authorization: "private-authorization-sentinel" },
+    }],
+])("Scheduled Function list rejects %s", async (_label, scheduleOverrides) => {
+    const { callback } = captureScheduledFunctionsTool({
+        get: async () => ({
+            ok: true,
+            status: 200,
+            data: {
+                project_ref: "proj",
+                schedules: [legacyScheduleRecord(scheduleOverrides)],
+            },
+        }),
+    });
+
+    const response = await callback({ action: "list", ref: "proj" });
+
+    expect(response.isError).toBe(true);
+    expect(JSON.parse(response.content[0].text).error.code).toBe("INVALID_RESPONSE");
+    for (const sentinel of [
+        "private-header-sentinel",
+        "private-newline-sentinel",
+        "private-normalization-sentinel",
+        "private-oversized-sentinel",
+        "private-authorization-sentinel",
+    ]) {
+        expect(response.content[0].text).not.toContain(sentinel);
+    }
+});
+
+test("Scheduled Function create accepts a valid legacy receipt without exposing values", async () => {
+    const headerSentinel = "private-legacy-mutation-header-sentinel";
+    const { callback } = captureScheduledFunctionsTool({
+        post: async (_path: string, request: Record<string, unknown>) => ({
+            ok: true,
+            status: 200,
+            data: {
+                created: true,
+                project_ref: "proj",
+                request_id: request.request_id,
+                schedule: legacyScheduleRecord({
+                    body: request.body,
+                    headers: request.headers,
+                }),
+            },
+        }),
+    }, { SCHEDULE_TOKEN: headerSentinel });
+
+    const response = await callback({
+        action: "create",
+        ref: "proj",
+        name: "Nightly",
+        slug: "worker",
+        cron: "0 2 * * *",
+        method: "POST",
+        header_env: { "x-schedule-token": "SCHEDULE_TOKEN" },
+    });
+
+    expect(response.isError).not.toBe(true);
+    expect(JSON.parse(response.content[0].text).schedule).toMatchObject({
+        body_empty: true,
+        header_names: ["x-schedule-token"],
+    });
+    expect(response.content[0].text).not.toContain(headerSentinel);
+});
+
+test("Scheduled Function create fails closed on an unstable legacy receipt header", async () => {
+    const responseSentinel = "private-legacy-mutation-response-sentinel\n";
+    const { callback } = captureScheduledFunctionsTool({
+        post: async (_path: string, request: Record<string, unknown>) => ({
+            ok: true,
+            status: 200,
+            data: {
+                created: true,
+                project_ref: "proj",
+                request_id: request.request_id,
+                schedule: legacyScheduleRecord({
+                    headers: { "x-schedule-token": responseSentinel },
+                }),
+            },
+        }),
+    });
+
+    const response = await callback({
+        action: "create",
+        ref: "proj",
+        name: "Nightly",
+        slug: "worker",
+        cron: "0 2 * * *",
+        method: "POST",
+    });
+
+    expect(response.isError).toBe(true);
+    expect(JSON.parse(response.content[0].text).error.code).toBe("OUTCOME_UNKNOWN");
+    expect(response.content[0].text).not.toContain(responseSentinel.trim());
 });
 
 test("Scheduled Function read-only mode blocks writes before body-file reads or HTTP dispatch", async () => {
