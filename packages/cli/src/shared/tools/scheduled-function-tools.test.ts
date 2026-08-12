@@ -27,6 +27,11 @@ function scheduleRecord(overrides: Record<string, unknown> = {}) {
     };
 }
 
+function legacyScheduleRecord(overrides: Record<string, unknown> = {}) {
+    const { body_empty: _bodyEmpty, header_names: _headerNames, ...legacyRecord } = scheduleRecord();
+    return { ...legacyRecord, body: {}, headers: {}, ...overrides };
+}
+
 function scheduleReceipt(request: Record<string, unknown>, overrides: Record<string, unknown> = {}) {
     const body = request.body as Record<string, unknown> | undefined;
     const headers = request.headers as Record<string, string> | undefined;
@@ -94,6 +99,61 @@ test("Scheduled Function list emits only safe machine-readable metadata", async 
     });
     expect(response.content[0].text).not.toContain(bodySentinel);
     expect(response.content[0].text).not.toContain(headerSentinel);
+});
+
+test("Scheduled Function list safely projects legacy Management payload metadata", async () => {
+    const bodySentinel = "private-legacy-body-sentinel";
+    const headerSentinel = "private-legacy-header-sentinel";
+    const { callback } = captureScheduledFunctionsTool({
+        get: async () => ({
+            ok: true,
+            status: 200,
+            data: {
+                project_ref: "proj",
+                schedules: [legacyScheduleRecord({
+                    body: { private: bodySentinel },
+                    headers: { "X-Schedule-Token": headerSentinel },
+                })],
+            },
+        }),
+    });
+
+    const response = await callback({ action: "list", ref: "proj" });
+    const payload = JSON.parse(response.content[0].text);
+
+    expect(response.isError).not.toBe(true);
+    expect(payload.schedules[0]).toMatchObject({
+        body_empty: false,
+        header_names: ["x-schedule-token"],
+    });
+    expect(response.content[0].text).not.toContain(bodySentinel);
+    expect(response.content[0].text).not.toContain(headerSentinel);
+});
+
+test.each([
+    ["partial projected payload", { body_empty: true, body: {}, headers: {} }],
+    ["non-object legacy body", { body: [], headers: {} }],
+    ["reserved legacy header", {
+        body: {},
+        headers: { authorization: "private-authorization-sentinel" },
+    }],
+])("Scheduled Function list rejects %s", async (_label, scheduleOverrides) => {
+    const { callback } = captureScheduledFunctionsTool({
+        get: async () => ({
+            ok: true,
+            status: 200,
+            data: {
+                project_ref: "proj",
+                schedules: [legacyScheduleRecord(scheduleOverrides)],
+            },
+        }),
+    });
+
+    const response = await callback({ action: "list", ref: "proj" });
+
+    expect(response.isError).toBe(true);
+    expect(JSON.parse(response.content[0].text).error.code).toBe("INVALID_RESPONSE");
+    expect(response.content[0].text).not.toContain("private-authorization-sentinel");
 });
 
 test("Scheduled Function read-only mode blocks writes before body-file reads or HTTP dispatch", async () => {

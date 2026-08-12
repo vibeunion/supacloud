@@ -254,9 +254,25 @@ function isCanonicalTimestamp(candidate: unknown): candidate is string {
 function safeSchedulePayload(
     schedule: Record<string, unknown>,
 ): Pick<SafeScheduledFunction, "body_empty" | "header_names"> | null {
+    const hasProjectedBody = Object.hasOwn(schedule, "body_empty");
+    const hasProjectedHeaders = Object.hasOwn(schedule, "header_names");
+    if (!hasProjectedBody && !hasProjectedHeaders) return legacySchedulePayload(schedule);
+    if (!hasProjectedBody || !hasProjectedHeaders) return null;
+
     const headerNames = safeHeaderNames(schedule.header_names);
     if (typeof schedule.body_empty !== "boolean" || !headerNames) return null;
     return { body_empty: schedule.body_empty, header_names: headerNames };
+}
+
+function legacySchedulePayload(
+    schedule: Record<string, unknown>,
+): Pick<SafeScheduledFunction, "body_empty" | "header_names"> | null {
+    const body = objectRecord(schedule.body);
+    const headers = objectRecord(schedule.headers);
+    if (!body || !headers) return null;
+    const headerNames = safeHeaderNames(Object.keys(headers));
+    if (!headerNames) return null;
+    return { body_empty: Object.keys(body).length === 0, header_names: headerNames };
 }
 
 function safeHeaderNames(candidate: unknown): string[] | null {
