@@ -16,6 +16,9 @@ describe("runtime env observation ordering", () => {
     expect(dispatcher).toContain(
       "recordTenantEnvDispatch(projectRef, tenantEnvLoad, dispatchReservation)",
     );
+    const poolDispatch = dispatcher.slice(dispatcher.indexOf("targetPool.dispatch({"));
+    expect(poolDispatch.indexOf("projectRef,")).toBeGreaterThan(-1);
+    expect(poolDispatch.indexOf("projectRef,")).toBeLessThan(poolDispatch.indexOf("request,"));
   });
 
   test("advances observation only after module load and cancellation checks", () => {
