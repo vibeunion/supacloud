@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.1](https://github.com/zuohuadong/supacloud/compare/admin-v0.12.0...admin-v0.12.1) (2026-08-12)
+
+
+### Bug Fixes
+
+* **admin:** fail closed on version probe errors ([#871](https://github.com/zuohuadong/supacloud/issues/871)) ([6f47f6e](https://github.com/zuohuadong/supacloud/commit/6f47f6eae1dc693fe9449b17c7def23993a4c534))
+
 ## [0.12.0](https://github.com/zuohuadong/supacloud/compare/admin-v0.11.0...admin-v0.12.0) (2026-08-12)
 
 

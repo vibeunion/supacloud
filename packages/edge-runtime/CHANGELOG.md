@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.1](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.18.0...edge-runtime-v0.18.1) (2026-08-12)
+
+
+### Bug Fixes
+
+* **edge:** isolate Bun plugins by project ([#873](https://github.com/zuohuadong/supacloud/issues/873)) ([93fa627](https://github.com/zuohuadong/supacloud/commit/93fa62768f2fed69ea42546564b3a9218e66feda))
+
 ## [0.18.0](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.17.1...edge-runtime-v0.18.0) (2026-08-12)
 
 
