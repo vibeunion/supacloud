@@ -33,7 +33,10 @@ describe("project migration locks", () => {
       const lockKeys = fake.calls
         .filter((call) => call.sql.includes("pg_try_advisory_lock"))
         .map((call) => call.values[0]);
-      expect(lockKeys).toEqual(["supacloud:migrations:branch", "supacloud:migrations:parent"]);
+      expect(lockKeys).toEqual([
+        "supacloud:project-database:branch",
+        "supacloud:project-database:parent",
+      ]);
       expect(fake.calls.filter((call) => call.sql.includes("pg_advisory_unlock(")).length).toBe(2);
       expect(fake.release).toHaveBeenCalledTimes(1);
     } finally {
@@ -49,6 +52,30 @@ describe("project migration locks", () => {
       await expect(withProjectMigrationLocks({ projectRefs: ["parent", "branch"] }, operation))
         .rejects.toBeInstanceOf(ProjectMigrationLockError);
       expect(operation).not.toHaveBeenCalled();
+      expect(fake.calls.filter((call) => call.sql.includes("pg_advisory_unlock(")).length).toBe(1);
+      expect(fake.release).toHaveBeenCalledTimes(1);
+    } finally {
+      reserveSpy.mockRestore();
+    }
+  });
+
+  test("keeps the session lock until an asynchronous operation completes", async () => {
+    const fake = fakeLockConnection([true]);
+    const reserveSpy = spyOn(sql, "reserve").mockResolvedValue(fake.connection as never);
+    let finishOperation: (() => void) | undefined;
+    const operation = mock(() => new Promise<string>((resolve) => {
+      finishOperation = () => resolve("done");
+    }));
+    try {
+      const lockedOperation = withProjectMigrationLocks({ projectRefs: ["project"] }, operation);
+      for (let attempt = 0; attempt < 10 && operation.mock.calls.length === 0; attempt += 1) {
+        await Bun.sleep(0);
+      }
+
+      expect(operation).toHaveBeenCalledTimes(1);
+      expect(fake.calls.some((call) => call.sql.includes("pg_advisory_unlock("))).toBe(false);
+      finishOperation?.();
+      await expect(lockedOperation).resolves.toBe("done");
       expect(fake.calls.filter((call) => call.sql.includes("pg_advisory_unlock(")).length).toBe(1);
       expect(fake.release).toHaveBeenCalledTimes(1);
     } finally {

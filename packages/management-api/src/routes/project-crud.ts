@@ -29,6 +29,7 @@ import {
   parseAuthEmailTemplatePatch,
 } from "../utils/auth-email-templates";
 import { validationErrorResponse } from "../utils/http-validation";
+import { ProjectStateTransitionLockedError } from "../services/project-database-lock";
 
 // Available regions list
 const AVAILABLE_REGIONS = [
@@ -208,6 +209,20 @@ async function runPostgresUpgradeRoute<T>(operation: () => Promise<T>) {
         message: error.message,
         code: error.code,
       });
+    }
+    throw error;
+  }
+}
+
+async function runProjectStateTransition<T>(operation: () => Promise<T>) {
+  try {
+    return { completed: true, value: await operation() } as const;
+  } catch (error: unknown) {
+    if (error instanceof ProjectStateTransitionLockedError) {
+      return {
+        completed: false,
+        response: status(409, { message: error.message, code: error.code }),
+      } as const;
     }
     throw error;
   }
@@ -583,7 +598,9 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
       }
       const ownerError = getAuthRuntimeOwnerProtectionError(params.ref, "pause");
       if (ownerError) return status(409, ownerError);
-      const paused = await projectService.pauseProject(params.ref);
+      const pause = await runProjectStateTransition(() => projectService.pauseProject(params.ref));
+      if (!pause.completed) return pause.response;
+      const paused = pause.value;
       if (!paused) {
         return status(404, { message: "Project not found", code: "404" });
       }
@@ -606,7 +623,9 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
       if (authError) {
         return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
       }
-      const restored = await projectService.restoreProject(params.ref);
+      const restore = await runProjectStateTransition(() => projectService.restoreProject(params.ref));
+      if (!restore.completed) return restore.response;
+      const restored = restore.value;
       if (!restored) {
         return status(404, { message: "Project not found", code: "404" });
       }

@@ -215,10 +215,6 @@ export function detectUnsupportedMigrationOperations(statements: readonly string
   return projectMigrationSqlViolations(statements);
 }
 
-export function projectMigrationLockKey(projectRef: string): string {
-  return `supacloud:migrations:${projectRef}`;
-}
-
 function compareVersions(left: string, right: string): number {
   if (/^\d+$/.test(left) && /^\d+$/.test(right)) {
     const leftValue = BigInt(left);

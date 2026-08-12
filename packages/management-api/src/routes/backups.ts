@@ -3,16 +3,31 @@ import {
     listBackups,
     createBackup,
     restore,
-    createLogicalBackup,
-    restoreLogicalBackup,
     PgBackRestUnavailableError,
     PitrRestoreUnavailableError,
     isPitrEnabled,
 } from '../services/backup.service';
+import {
+    createLogicalBackup,
+    listLogicalBackups,
+    LogicalBackupContractError,
+    restoreLogicalBackup,
+} from "../services/logical-backup.service";
 import { requireAdminAuth, requireProjectOrAdminAuth } from '../middleware/auth';
 import { projectRepository } from '../repositories/project.repository';
 
 const ErrorResponse = t.Object({ message: t.String() });
+
+function logicalBackupErrorResponse(error: unknown) {
+    if (!(error instanceof LogicalBackupContractError)) throw error;
+    const errorStatus = {
+        invalid_request: 400,
+        not_found: 404,
+        conflict: 409,
+        unavailable: 503,
+    }[error.kind] as 400 | 404 | 409 | 503;
+    return status(errorStatus, { message: error.message });
+}
 
 const projectBackupRoutes = new Elysia({ prefix: "/v1/projects/:ref/database/backups" })
     .get('/', async ({ params, request }) => {
@@ -58,33 +73,62 @@ const projectBackupRoutes = new Elysia({ prefix: "/v1/projects/:ref/database/bac
         response: { 200: t.Any(), 404: ErrorResponse, 503: ErrorResponse },
         detail: { tags: ["backups"], summary: "Create a database backup" },
     })
+    .get('/logical', async ({ params: { ref }, request }) => {
+        const authError = await requireAdminAuth(request);
+        if (authError) return status(authError.status, authError.body);
+        try {
+            return { backups: await listLogicalBackups(ref) };
+        } catch (error: unknown) {
+            return logicalBackupErrorResponse(error);
+        }
+    }, {
+        response: { 200: t.Any(), 400: ErrorResponse, 404: ErrorResponse, 503: ErrorResponse },
+        detail: { tags: ["backups"], summary: "List verified logical-full backups" },
+    })
     .post('/logical', async ({ params: { ref }, request }) => {
         const authError = await requireAdminAuth(request);
         if (authError) return status(authError.status, authError.body);
-
-        const backup = await createLogicalBackup(ref);
-        if (!backup.success) return status(503, { message: backup.message });
-        return backup;
+        try {
+            return { backup: await createLogicalBackup(ref) };
+        } catch (error: unknown) {
+            return logicalBackupErrorResponse(error);
+        }
     }, {
-        response: { 200: t.Any(), 503: ErrorResponse },
-        detail: { tags: ["backups"], summary: "Create a logical backup" },
+        response: { 200: t.Any(), 400: ErrorResponse, 404: ErrorResponse, 503: ErrorResponse },
+        detail: { tags: ["backups"], summary: "Create a verified logical-full backup" },
     })
     .post('/logical/restore', async ({ params: { ref }, body, request }) => {
         const authError = await requireAdminAuth(request);
         if (authError) return status(authError.status, authError.body);
-        if (!body.backupId) return status(400, { message: "backupId is required", code: "400" });
-        if (body.confirmation !== `RESTORE_PROJECT:${ref}:${body.backupId}`) {
-            return status(400, { message: "Exact project restore confirmation is required" });
+        if (!body.backup_id || !body.expected_sha256 || !body.confirmation) {
+            return status(400, {
+                message: "backup_id, expected_sha256 and confirmation are required",
+            });
         }
-        const restoreResult = await restoreLogicalBackup(ref, body.backupId);
-        if (restoreResult.success) return restoreResult;
-        if (restoreResult.reason === "project_not_paused") return status(409, { message: restoreResult.message });
-        if (restoreResult.reason === "backup_not_found") return status(404, { message: restoreResult.message });
-        if (restoreResult.reason === "invalid_backup_id") return status(400, { message: restoreResult.message });
-        return status(503, { message: restoreResult.message });
+        const expectedConfirmation = [
+            "RESTORE_PROJECT",
+            ref,
+            body.backup_id,
+            body.expected_sha256,
+        ].join(":");
+        if (body.confirmation !== expectedConfirmation) {
+            return status(400, { message: "Exact logical backup restore confirmation is required" });
+        }
+        try {
+            const restoredBackup = await restoreLogicalBackup({
+                project_ref: ref,
+                backup_id: body.backup_id,
+                expected_sha256: body.expected_sha256,
+                confirmation: body.confirmation,
+            });
+            return { restored_backup: restoredBackup };
+        } catch (error: unknown) {
+            return logicalBackupErrorResponse(error);
+        }
     }, {
         body: t.Object({
-            backupId: t.Optional(t.String()),
+            backup_id: t.Optional(t.String()),
+            expected_sha256: t.Optional(t.String()),
             confirmation: t.Optional(t.String()),
         }),
         response: {
@@ -94,7 +138,7 @@ const projectBackupRoutes = new Elysia({ prefix: "/v1/projects/:ref/database/bac
             409: ErrorResponse,
             503: ErrorResponse,
         },
-        detail: { tags: ["backups"], summary: "Restore from logical backup" },
+        detail: { tags: ["backups"], summary: "Restore a verified logical-full backup" },
     });
 
 export const backupRoutes = new Elysia()

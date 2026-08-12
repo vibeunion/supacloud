@@ -34,6 +34,11 @@ import {
   DEFAULT_BACKGROUND_TASK_SETTINGS,
 } from "../config/background-task-settings";
 import { decryptSecretIfNeeded } from "../utils/secret-crypto";
+import {
+  ProjectMigrationLockError,
+  withProjectMigrationLocks,
+} from "./migration-lock";
+import { ProjectStateTransitionLockedError } from "./project-database-lock";
 
 export interface CreateProjectRequest {
   name: string;
@@ -387,24 +392,33 @@ export class ProjectService {
     return true;
   }
 
-  // Pause project
-  async pauseProject(ref: string): Promise<boolean> {
+  private async pauseProjectWhileDatabaseLocked(ref: string): Promise<boolean> {
     const project = await projectRepository.findByRef(ref);
     if (!project) return false;
 
-    await projectRepository.updateStatus(ref, "paused");
-    try {
-      await databaseService.pauseRuntime(ref);
-    } catch (err: unknown) {
-      logger.warn(`[ProjectService] Failed to pause runtime for ${ref}`, {
-        error: err instanceof Error ? err.message : String(err),
-      });
+    const runtimePause = await databaseService.pauseRuntime(ref);
+    if (!runtimePause.success) {
+      throw new Error("Project runtime could not be paused");
     }
-    return true;
+    return Boolean(await projectRepository.updateStatus(ref, "paused"));
   }
 
-  // Restore project
-  async restoreProject(ref: string): Promise<boolean> {
+  // Pause project
+  async pauseProject(ref: string): Promise<boolean> {
+    try {
+      return await withProjectMigrationLocks(
+        { projectRefs: [ref] },
+        () => this.pauseProjectWhileDatabaseLocked(ref),
+      );
+    } catch (error: unknown) {
+      if (error instanceof ProjectMigrationLockError) {
+        throw new ProjectStateTransitionLockedError(ref);
+      }
+      throw error;
+    }
+  }
+
+  private async restoreProjectWhileDatabaseLocked(ref: string): Promise<boolean> {
     const project = await projectRepository.findByRef(ref);
     if (!project) return false;
 
@@ -413,6 +427,7 @@ export class ProjectService {
     const dbExists = await databaseService.checkDatabaseExists(ref);
     if (!dbExists) {
       logger.info(`[ProjectService] Tenant DB missing for ${ref}, re-provisioning resources`);
+      await projectRepository.updateStatus(ref, "creating");
       this.provisionResources(ref, project.db_password).catch((error) => {
         logger.error(`Failed to re-provision resources for ${ref}:`, {
           error: error instanceof Error ? error.message : String(error),
@@ -429,6 +444,21 @@ export class ProjectService {
       }
     }
     return true;
+  }
+
+  // Restore project
+  async restoreProject(ref: string): Promise<boolean> {
+    try {
+      return await withProjectMigrationLocks(
+        { projectRefs: [ref] },
+        () => this.restoreProjectWhileDatabaseLocked(ref),
+      );
+    } catch (error: unknown) {
+      if (error instanceof ProjectMigrationLockError) {
+        throw new ProjectStateTransitionLockedError(ref);
+      }
+      throw error;
+    }
   }
 
   // Get project health status

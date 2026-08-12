@@ -287,3 +287,22 @@ describe("TaskWorker provision_secrets", () => {
     expect(secrets.get("X_PROJECT_REF")).toBe("proj-ref");
   });
 });
+
+describe("TaskWorker project activation", () => {
+  afterEach(() => {
+    mock.restore();
+  });
+
+  test("uses the guarded creating to active transition after provisioning", async () => {
+    const worker = new TaskWorker();
+    const activateSpy = spyOn(projectRepository, "activateCreatingProject")
+      .mockResolvedValue({ ref: "proj-ref" } as never);
+
+    await (worker as any).handleTaskCompletion({
+      project_ref: "proj-ref",
+      task_type: "provision_secrets",
+    });
+
+    expect(activateSpy).toHaveBeenCalledWith("proj-ref");
+  });
+});

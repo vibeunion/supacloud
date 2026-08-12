@@ -67,6 +67,22 @@ const realtimeServiceMock = {
   updateTenant: mock(() => Promise.resolve()),
 };
 
+class ProjectMigrationLockError extends Error {
+  constructor(readonly projectRef: string) {
+    super(`migration locked: ${projectRef}`);
+    this.name = "ProjectMigrationLockError";
+  }
+}
+
+let migrationLocked = false;
+const withProjectMigrationLocks = mock(async (
+  input: { projectRefs: readonly string[] },
+  operation: () => Promise<unknown>,
+) => {
+  if (migrationLocked) throw new ProjectMigrationLockError(input.projectRefs[0]!);
+  return operation();
+});
+
 mock.module("../../src/db", () => ({
   ...actualDb,
   sql: baseMock as unknown,
@@ -88,6 +104,11 @@ mock.module("../../src/services/realtime.service", () => ({
   realtimeService: realtimeServiceMock,
 }));
 
+mock.module("../../src/services/migration-lock", () => ({
+  ProjectMigrationLockError,
+  withProjectMigrationLocks,
+}));
+
 const { projectRepository } = await import("../../src/repositories/project.repository");
 const { taskRepository } = await import("../../src/repositories/task.repository");
 const { gatewayService } = await import("../../src/services/gateway.service");
@@ -97,6 +118,7 @@ const projectRepositoryMock = {
   findByRef: spyOn(projectRepository, "findByRef"),
   create: spyOn(projectRepository, "create"),
   updateStatus: spyOn(projectRepository, "updateStatus"),
+  activateCreatingProject: spyOn(projectRepository, "activateCreatingProject"),
   updateConfig: spyOn(projectRepository, "updateConfig"),
   updateApiKeys: spyOn(projectRepository, "updateApiKeys"),
   updateOpaqueApiKeys: spyOn(projectRepository, "updateOpaqueApiKeys"),
@@ -148,6 +170,7 @@ describe("ProjectService - Comprehensive", () => {
     projectRepositoryMock.findByRef.mockReset();
     projectRepositoryMock.create.mockReset();
     projectRepositoryMock.updateStatus.mockReset();
+    projectRepositoryMock.activateCreatingProject.mockReset();
     projectRepositoryMock.updateConfig.mockReset();
     projectRepositoryMock.updateApiKeys.mockReset();
     projectRepositoryMock.updateOpaqueApiKeys.mockReset();
@@ -187,11 +210,14 @@ describe("ProjectService - Comprehensive", () => {
     tenantRuntimeServiceMock.resumeProjectRuntime.mockReset();
     tenantRuntimeServiceMock.restartRuntime.mockReset();
     realtimeServiceMock.updateTenant.mockReset();
+    withProjectMigrationLocks.mockClear();
+    migrationLocked = false;
 
     projectRepositoryMock.findAll.mockResolvedValue([]);
     projectRepositoryMock.findByRef.mockResolvedValue(null);
     projectRepositoryMock.create.mockResolvedValue(mockProject);
     projectRepositoryMock.updateStatus.mockResolvedValue(mockProject);
+    projectRepositoryMock.activateCreatingProject.mockResolvedValue(mockProject);
     projectRepositoryMock.updateConfig.mockResolvedValue(mockProject);
     projectRepositoryMock.updateApiKeys.mockResolvedValue(mockProject);
     projectRepositoryMock.updateOpaqueApiKeys.mockResolvedValue(mockProject);
@@ -344,13 +370,43 @@ describe("ProjectService - Comprehensive", () => {
   test("pauseProject updates status", async () => {
     projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);
     expect(await service.pauseProject("test123abc")).toBe(true);
+    expect(withProjectMigrationLocks).toHaveBeenCalledWith(
+      { projectRefs: ["test123abc"] },
+      expect.any(Function),
+    );
     expect(projectRepositoryMock.updateStatus).toHaveBeenCalledWith("test123abc", "paused");
     expect(databaseServiceMock.pauseRuntime).toHaveBeenCalledWith("test123abc");
+    expect(databaseServiceMock.pauseRuntime.mock.invocationCallOrder[0])
+      .toBeLessThan(projectRepositoryMock.updateStatus.mock.invocationCallOrder[0]!);
+  });
+
+  test("pauseProject leaves status unchanged when runtime pause fails", async () => {
+    projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);
+    databaseServiceMock.pauseRuntime.mockResolvedValueOnce({ success: false, error: "runtime busy" });
+
+    await expect(service.pauseProject("test123abc")).rejects.toThrow("Project runtime could not be paused");
+    expect(projectRepositoryMock.updateStatus).not.toHaveBeenCalledWith("test123abc", "paused");
+  });
+
+  test("pauseProject reports a project-state conflict when the shared lock is busy", async () => {
+    migrationLocked = true;
+
+    await expect(service.pauseProject("test123abc")).rejects.toMatchObject({
+      name: "ProjectStateTransitionLockedError",
+      code: "project_state_locked",
+      projectRef: "test123abc",
+    });
+    expect(projectRepositoryMock.findByRef).not.toHaveBeenCalled();
+    expect(databaseServiceMock.pauseRuntime).not.toHaveBeenCalled();
   });
 
   test("restoreProject updates status", async () => {
     projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);
     expect(await service.restoreProject("test123abc")).toBe(true);
+    expect(withProjectMigrationLocks).toHaveBeenCalledWith(
+      { projectRefs: ["test123abc"] },
+      expect.any(Function),
+    );
     expect(databaseServiceMock.checkDatabaseExists).toHaveBeenCalledWith("test123abc");
     expect(projectRepositoryMock.updateStatus).toHaveBeenCalledWith("test123abc", "active");
     expect(databaseServiceMock.resumeRuntime).toHaveBeenCalledWith("test123abc");
@@ -362,11 +418,24 @@ describe("ProjectService - Comprehensive", () => {
 
     expect(await service.restoreProject("test123abc")).toBe(true);
 
+    expect(projectRepositoryMock.updateStatus).toHaveBeenCalledWith("test123abc", "creating");
     expect(projectRepositoryMock.updateStatus).not.toHaveBeenCalledWith("test123abc", "active");
     expect(taskRepositoryMock.createTask).toHaveBeenCalledWith("test123abc", "provision_db", {
       dbPassword: "password123",
       domain: undefined,
     });
+  });
+
+  test("restoreProject reports a project-state conflict when the shared lock is busy", async () => {
+    migrationLocked = true;
+
+    await expect(service.restoreProject("test123abc")).rejects.toMatchObject({
+      name: "ProjectStateTransitionLockedError",
+      code: "project_state_locked",
+      projectRef: "test123abc",
+    });
+    expect(projectRepositoryMock.findByRef).not.toHaveBeenCalled();
+    expect(databaseServiceMock.checkDatabaseExists).not.toHaveBeenCalled();
   });
 
   test("getProjectHealth returns null when project not found", async () => {
