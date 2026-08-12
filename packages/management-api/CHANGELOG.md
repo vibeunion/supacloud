@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.58.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.58.0...management-api-v0.58.1) (2026-08-12)
+
+
+### Bug Fixes
+
+* **management:** disable idle timeout for logical backups ([#886](https://github.com/zuohuadong/supacloud/issues/886)) ([82e61a1](https://github.com/zuohuadong/supacloud/commit/82e61a1a49c5caa686efadbd48efd2f87faa743d))
+
 ## [0.58.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.57.0...management-api-v0.58.0) (2026-08-12)
 
 
