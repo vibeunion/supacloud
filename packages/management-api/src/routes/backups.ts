@@ -15,6 +15,7 @@ import {
 } from "../services/logical-backup.service";
 import { requireAdminAuth, requireProjectOrAdminAuth } from '../middleware/auth';
 import { projectRepository } from '../repositories/project.repository';
+import { disableLogicalBackupMutationIdleTimeout } from "../utils/logical-backup-request-timeout";
 
 const ErrorResponse = t.Object({ message: t.String() });
 
@@ -88,6 +89,7 @@ const projectBackupRoutes = new Elysia({ prefix: "/v1/projects/:ref/database/bac
     .post('/logical', async ({ params: { ref }, request }) => {
         const authError = await requireAdminAuth(request);
         if (authError) return status(authError.status, authError.body);
+        disableLogicalBackupMutationIdleTimeout(request);
         try {
             return { backup: await createLogicalBackup(ref) };
         } catch (error: unknown) {
@@ -114,6 +116,7 @@ const projectBackupRoutes = new Elysia({ prefix: "/v1/projects/:ref/database/bac
         if (body.confirmation !== expectedConfirmation) {
             return status(400, { message: "Exact logical backup restore confirmation is required" });
         }
+        disableLogicalBackupMutationIdleTimeout(request);
         try {
             const restoredBackup = await restoreLogicalBackup({
                 project_ref: ref,

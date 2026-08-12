@@ -249,6 +249,47 @@ The JSON receipt contains only the project ref, requested type, backup ID,
 database, timestamps, and size. `platform list_backups --ref abc123` applies the
 same strict, sanitized inventory validation without creating a backup.
 
+## Verified logical backups
+
+Use the official Admin CLI to list or create project-scoped verified logical
+backups:
+
+```bash
+supacloud-admin platform list_logical_backups --ref abc123
+supacloud-admin platform create_logical_backup --ref abc123
+```
+
+The create command reads the verified inventory before and after the one-shot
+request. It reports success only when the Management response and exactly one
+new inventory identity agree on the project, database, backup ID, kind,
+timestamps, byte count, and SHA-256. The fixed JSON projection never includes
+the server's receipt HMAC, archive path, subprocess output, or response-only
+fields. Do not retry an `OUTCOME_UNKNOWN` create until the inventory has been
+reconciled.
+
+Logical restore is destructive and Management also requires the project to be
+paused. Copy an exact identity from `list_logical_backups`, then bind all of its
+recovery-critical fields:
+
+```bash
+supacloud-admin platform restore_logical_backup \
+  --ref abc123 \
+  --backup_id logical-full_abc123_0123456789abcdef0123456789abcdef \
+  --expected_sha256 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+  --confirmation RESTORE_PROJECT:abc123:logical-full_abc123_0123456789abcdef0123456789abcdef:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+```
+
+Both create and restore are classified as remote writes. They require an
+explicit `SUPACLOUD_ENV`, honor `SUPACLOUD_READ_ONLY=true`, and in production
+also require the global exact project confirmation
+`--confirm-production abc123`. A timeout, transport loss, 5xx response, or
+malformed success receipt exits non-zero without reflecting the remote body.
+Logical mutation requests have a bounded 36-minute client deadline so the
+Management request has time to return a terminal response before the client
+gives up.
+Credentials remain environment-only; logical backup commands accept no token,
+password, or service-role flags.
+
 Gateway / Caddy commands (config is injected via the Caddy JSON Admin API; requires admin privileges):
 
 - `gateway routes` — list custom gateway routes
