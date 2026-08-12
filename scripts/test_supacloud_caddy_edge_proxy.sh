@@ -17,7 +17,7 @@ if ! command -v "$BUN_BINARY" >/dev/null 2>&1; then
   exit 1
 fi
 
-work_dir="$(mktemp -d)"
+work_dir="$(mktemp -d "$HOME/.supacloud-caddy-edge.XXXXXX")"
 functions_dir="$work_dir/functions"
 tenants_dir="$work_dir/tenants"
 cancel_started_path=""
