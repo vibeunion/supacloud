@@ -1,5 +1,6 @@
 import { afterAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { Elysia } from "elysia";
+import { withLogicalBackupMutationTimeoutController } from "../../src/utils/logical-backup-request-timeout";
 
 const requireAdminAuth = mock(() => Promise.resolve(null));
 const requireProjectOrAdminAuth = mock(() => Promise.resolve(null));
@@ -61,15 +62,19 @@ const { backupRoutes } = await import("../../src/routes/backups");
 const { projectConfigRoutes } = await import("../../src/routes/project-config");
 const app = new Elysia().use(backupRoutes);
 
-function request(path: string, init: RequestInit = {}) {
-  return app.handle(new Request(`http://localhost${path}`, {
+function adminRequest(path: string, init: RequestInit = {}): Request {
+  return new Request(`http://localhost${path}`, {
     ...init,
     headers: {
       Authorization: "Bearer dev-master-token",
       "content-type": "application/json",
       ...(init.headers || {}),
     },
-  }));
+  });
+}
+
+function request(path: string, init: RequestInit = {}) {
+  return app.handle(adminRequest(path, init));
 }
 
 describe("physical backup routes", () => {
@@ -280,6 +285,74 @@ describe("physical backup routes", () => {
     const deniedResponse = await request("/v1/projects/project_a/database/backups/logical");
     expect(deniedResponse.status).toBe(403);
     expect(listLogicalBackups).toHaveBeenCalledTimes(1);
+  });
+
+  test("disables the idle timeout for authorized logical mutations", async () => {
+    const timeout = mock(() => undefined);
+    const createRequest = adminRequest("/v1/projects/project%5Fa/database/backups/logical", {
+      method: "POST",
+      body: "{}",
+    });
+    const createResponse = await withLogicalBackupMutationTimeoutController(
+      createRequest,
+      { timeout },
+      () => app.handle(createRequest),
+    );
+    const backupId = logicalBackupIdentity.backup_id;
+    const expectedSha256 = logicalBackupIdentity.sha256;
+    const restoreRequest = adminRequest("/v1/projects/project%5Fa/database/backups/logical/restore", {
+      method: "POST",
+      body: JSON.stringify({
+        backup_id: backupId,
+        expected_sha256: expectedSha256,
+        confirmation: `RESTORE_PROJECT:project_a:${backupId}:${expectedSha256}`,
+      }),
+    });
+    const restoreResponse = await withLogicalBackupMutationTimeoutController(
+      restoreRequest,
+      { timeout },
+      () => app.handle(restoreRequest),
+    );
+
+    expect(createResponse.status).toBe(200);
+    expect(restoreResponse.status).toBe(200);
+    expect(timeout.mock.calls).toEqual([
+      [createRequest, 0],
+      [restoreRequest, 0],
+    ]);
+  });
+
+  test("keeps the idle timeout for unauthorized or unconfirmed logical mutations", async () => {
+    const timeout = mock(() => undefined);
+    requireAdminAuth.mockResolvedValueOnce({ status: 401, body: { error: "Unauthorized" } } as never);
+    const createRequest = adminRequest("/v1/projects/project_a/database/backups/logical", {
+      method: "POST",
+      body: "{}",
+    });
+    const createResponse = await withLogicalBackupMutationTimeoutController(
+      createRequest,
+      { timeout },
+      () => app.handle(createRequest),
+    );
+    const restoreRequest = adminRequest("/v1/projects/project_a/database/backups/logical/restore", {
+      method: "POST",
+      body: JSON.stringify({
+        backup_id: logicalBackupIdentity.backup_id,
+        expected_sha256: logicalBackupIdentity.sha256,
+        confirmation: "RESTORE_PROJECT",
+      }),
+    });
+    const restoreResponse = await withLogicalBackupMutationTimeoutController(
+      restoreRequest,
+      { timeout },
+      () => app.handle(restoreRequest),
+    );
+
+    expect(createResponse.status).toBe(401);
+    expect(restoreResponse.status).toBe(400);
+    expect(timeout).not.toHaveBeenCalled();
+    expect(createLogicalBackup).not.toHaveBeenCalled();
+    expect(restoreLogicalBackup).not.toHaveBeenCalled();
   });
 
   test("requires exact identity confirmation and maps paused restore to 409", async () => {
