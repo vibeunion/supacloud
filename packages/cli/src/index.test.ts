@@ -1991,7 +1991,7 @@ describe("supacloud-cli process contract", () => {
                 const path = new URL(request.url).pathname;
                 requestedPaths.push(path);
                 if (request.method === "GET") return Response.json([]);
-                return Response.json({ code: "migration_baseline_rejected" }, { status: 400 });
+                return Response.json({ code: "migration_baseline_rejected", secret: "baseline-response-secret" }, { status: 400 });
             },
         });
         servers.push(server);
@@ -2006,11 +2006,81 @@ describe("supacloud-cli process contract", () => {
         );
 
         expect(result.exitCode).toBe(1);
-        expect(result.stdout).toContain("❌ Failed (400)");
+        expect(JSON.parse(result.stdout)).toEqual({
+            schema: "supacloud.cli.release-control.v1",
+            ok: false,
+            operation: "database.baseline_migrations",
+            error: { code: "HTTP_ERROR", http_status: 400 },
+        });
+        expect(result.stdout + result.stderr).not.toContain("baseline-response-secret");
         expect(requestedPaths).toEqual([
             "/v1/projects/abc123/database/migrations",
             "/v1/projects/abc123/database/migrations/baseline",
         ]);
+    });
+
+    test("returns a non-zero secret-free direct migration failure", async () => {
+        const responseSecret = "direct-migration-response-secret";
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch() {
+                return Response.json({ message: responseSecret }, { status: 503 });
+            },
+        });
+        servers.push(server);
+
+        const result = await runProjectCli(
+            ["database", "apply_migration", "--name", "safe_name", "--sql", "SELECT 1;"],
+            {
+                SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+                SUPACLOUD_API_TOKEN: "test-token",
+                SUPACLOUD_PROJECT_REF: "abc123",
+            },
+        );
+
+        expect(result.exitCode).toBe(1);
+        expect(JSON.parse(result.stdout)).toEqual({
+            schema: "supacloud.cli.release-control.v1",
+            ok: false,
+            operation: "database.apply_migration",
+            error: { code: "OUTCOME_UNKNOWN", http_status: 503 },
+        });
+        expect(result.stdout + result.stderr).not.toContain(responseSecret);
+    });
+
+    test("returns a non-zero secret-free migration push failure", async () => {
+        const migrationRoot = mkdtempSync(join(tmpdir(), "supacloud-cli-push-"));
+        temporaryDirectories.push(migrationRoot);
+        writeFileSync(join(migrationRoot, "20260729090000_create_orders.sql"), "CREATE TABLE orders (id uuid);\n");
+        const responseSecret = "migration-push-response-secret";
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch(request) {
+                if (request.method === "GET") return Response.json([]);
+                return Response.json({ message: responseSecret }, { status: 503 });
+            },
+        });
+        servers.push(server);
+
+        const result = await runProjectCli(
+            ["database", "push_migrations", "--dir", migrationRoot],
+            {
+                SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+                SUPACLOUD_API_TOKEN: "test-token",
+                SUPACLOUD_PROJECT_REF: "abc123",
+            },
+        );
+
+        expect(result.exitCode).toBe(1);
+        expect(JSON.parse(result.stdout)).toEqual({
+            schema: "supacloud.cli.release-control.v1",
+            ok: false,
+            operation: "database.push_migrations",
+            error: { code: "OUTCOME_UNKNOWN", http_status: 503 },
+        });
+        expect(result.stdout + result.stderr).not.toContain(responseSecret);
     });
 
     test("returns a non-zero machine-readable Auth failure without echoing config secrets", async () => {

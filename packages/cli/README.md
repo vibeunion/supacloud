@@ -198,6 +198,9 @@ it never empties a bucket. Mutation receipts bind `project_ref`, `bucket_id`,
 name with another version, or a local version with another name, before either
 dry-run reporting or apply can continue. This keeps the preview consistent with
 the server conflict that would otherwise occur after deployment starts.
+Mutation failures use the release-control receipt schema and never include the
+server response body. `OUTCOME_UNKNOWN` requires a fresh migration inventory
+read before deciding whether a retry is safe.
 
 `edge_functions deploy --path` bundles local TypeScript and dependencies with
 Bun and runs a local syntax check before upload. The Management API validates and

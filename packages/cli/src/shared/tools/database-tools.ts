@@ -9,6 +9,7 @@ import { Type } from "@sinclair/typebox";
 import { projectRefPathSegment } from "../project-ref";
 import { optional, stringEnum, withDescription } from "../schema";
 import type { HttpResult, HttpTransport } from "../transports/http";
+import { releaseControlFailure, releaseControlMutationFailure } from "./release-control-response";
 
 export interface DatabaseToolsConfig {
     readOnly?: boolean;
@@ -527,8 +528,12 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
                 }
                 case "apply_migration": {
                     if (!args.name || !args.sql) throw new Error("'name' and 'sql' required");
-                    const r = await http.post(`/v1/projects/${ref}/database/migrations`, { name: args.name, sql: args.sql });
-                    text = r.ok ? `✅ Migration '${args.name}' applied` : `❌ Failed (${r.status}): ${JSON.stringify(r.data)}`;
+                    const r = await http.postReleaseMutation(
+                        `/v1/projects/${ref}/database/migrations`,
+                        { name: args.name, sql: args.sql },
+                    );
+                    if (!r.ok) return releaseControlMutationFailure("database.apply_migration", r);
+                    text = `✅ Migration '${args.name}' applied`;
                     break;
                 }
                 case "push_migrations": {
@@ -550,8 +555,11 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
 
                     const migrationsResult = await http.get(`/v1/projects/${ref}/database/migrations`);
                     if (!migrationsResult.ok) {
-                        text = `❌ Failed to load applied migrations (${migrationsResult.status})`;
-                        break;
+                        return releaseControlFailure(
+                            "database.push_migrations",
+                            "HTTP_ERROR",
+                            migrationsResult.transportError ? null : migrationsResult.status,
+                        );
                     }
 
                     const migrationPlan = migrationPushPlan(migrationsResult.data, migrationFiles);
@@ -585,18 +593,16 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
                     const applied: string[] = [];
                     const skipped = migrationPlan.alreadyApplied.map(({ file }) => file);
                     for (const { file, name, version, sql } of migrationPlan.pending) {
-                        const r = await http.post(`/v1/projects/${ref}/database/migrations`, { name, sql, version });
+                        const r = await http.postReleaseMutation(
+                            `/v1/projects/${ref}/database/migrations`,
+                            { name, sql, version },
+                        );
                         if (r.ok) {
                             applied.push(file);
                         } else if (isAlreadyAppliedMigrationResponse(r)) {
                             skipped.push(file);
                         } else {
-                            text = [
-                                `❌ Failed to apply ${file} (${r.status})`,
-                                `Applied before failure: ${applied.length}`,
-                                `Skipped before failure: ${skipped.length}`,
-                            ].join("\n");
-                            return { content: [{ type: "text" as const, text }] };
+                            return releaseControlMutationFailure("database.push_migrations", r);
                         }
                     }
 
@@ -628,8 +634,11 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
 
                     const r = await http.get(`/v1/projects/${ref}/database/migrations`);
                     if (!r.ok) {
-                        text = `❌ Failed to load applied migrations (${r.status}): ${JSON.stringify(r.data)}`;
-                        break;
+                        return releaseControlFailure(
+                            "database.baseline_migrations",
+                            "HTTP_ERROR",
+                            r.transportError ? null : r.status,
+                        );
                     }
 
                     const appliedKeys = appliedMigrationKeys(r.data);
@@ -658,20 +667,21 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
                         break;
                     }
 
-                    const baselineResult = await http.post(
+                    const baselineResult = await http.postReleaseMutation(
                         `/v1/projects/${ref}/database/migrations/baseline`,
                         { migrations: missing.map(({ name, version }) => ({ name, version })) },
                     );
-                    text = baselineResult.ok
-                        ? [
-                            `✅ Migration baseline completed for ${dir}`,
-                            `Marked applied: ${missing.length}`,
-                            `Already applied: ${alreadyApplied.length}`,
-                            "",
-                            "Marked files:",
-                            ...missing.map(({ file, version }) => `  - ${file} (${version})`),
-                        ].join("\n")
-                        : `❌ Failed (${baselineResult.status}): ${JSON.stringify(baselineResult.data)}`;
+                    if (!baselineResult.ok) {
+                        return releaseControlMutationFailure("database.baseline_migrations", baselineResult);
+                    }
+                    text = [
+                        `✅ Migration baseline completed for ${dir}`,
+                        `Marked applied: ${missing.length}`,
+                        `Already applied: ${alreadyApplied.length}`,
+                        "",
+                        "Marked files:",
+                        ...missing.map(({ file, version }) => `  - ${file} (${version})`),
+                    ].join("\n");
                     break;
                 }
                 case "create_table_rls": {
@@ -682,10 +692,12 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
                     if (policyMode !== "deny_all" && policyMode !== "owner") throw new Error("Invalid RLS policy mode");
                     const policySql = buildRlsPolicySql(qualifiedTable, policyMode, args.owner_column);
                     const sql = `BEGIN; CREATE TABLE IF NOT EXISTS ${qualifiedTable} (${columns}); ALTER TABLE ${qualifiedTable} ENABLE ROW LEVEL SECURITY; ${policySql} COMMIT;`;
-                    const r = await execSql(sql);
-                    text = r.ok
-                        ? `✅ Table '${schema}.${args.table}' created with RLS (${policyMode === "owner" ? "auth.uid() owner policy" : "deny-all by default"})`
-                        : `❌ Failed (${r.status}): ${JSON.stringify(r.data)}`;
+                    const r = await http.postReleaseMutation(
+                        `/v1/projects/${ref}/database/sql`,
+                        { sql },
+                    );
+                    if (!r.ok) return releaseControlMutationFailure("database.create_table_rls", r);
+                    text = `✅ Table '${schema}.${args.table}' created with RLS (${policyMode === "owner" ? "auth.uid() owner policy" : "deny-all by default"})`;
                     break;
                 }
                 default: text = `❌ Unknown action: ${action}`;
