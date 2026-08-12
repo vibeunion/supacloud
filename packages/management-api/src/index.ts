@@ -37,6 +37,7 @@ import { isS3DataPlaneRequest } from "./utils/storage-s3-paths";
 import { studioAuthRoutes } from "./routes/studio-auth";
 import { caddyAskRoutes } from "./routes/caddy-ask";
 import { validationErrorResponse } from "./utils/http-validation";
+import { withLogicalBackupMutationTimeoutController } from "./utils/logical-backup-request-timeout";
 
 function getWebConsoleDir(): string {
   return resolveWebConsoleDir();
@@ -1347,7 +1348,11 @@ async function bootstrap() {
         }
 
         // Everything else goes through Elysia
-        return app.fetch(request);
+        return withLogicalBackupMutationTimeoutController(
+          request,
+          server,
+          () => app.fetch(request),
+        );
       },
     });
     const { taskWorker } = await import("./services/task.worker");
