@@ -18,7 +18,7 @@ interface DispatchOptions {
   functionId: string;
   functionPath: string;
   projectRoot: string;
-  projectRef?: string;
+  projectRef: string;
   functionVersion?: string | null;
   moduleVersion?: string;
   envProof?: string;
@@ -122,7 +122,7 @@ type WorkerControlAck = {
 };
 
 type PreheatOptions = {
-  projectRef?: string;
+  projectRef: string;
   moduleVersion?: string;
   envProof?: string;
   attestation?: EdgeRuntimePreheatIdentity;
@@ -153,7 +153,7 @@ export type VersionedPreheatRequest = {
   functionPath: string;
   projectRoot: string;
   env: Record<string, string>;
-  projectRef?: string;
+  projectRef: string;
   moduleVersion: string;
   envProof?: string;
   attestation?: EdgeRuntimePreheatIdentity;
@@ -232,12 +232,6 @@ function acceptedPreheatAttestation(
   return preheatAttestationMatches(candidate, expected) ? candidate : false;
 }
 
-function extractProjectRef(functionId: string): string | null {
-  const idx = functionId.indexOf("_");
-  if (idx === -1) return null;
-  return functionId.substring(0, idx);
-}
-
 function resolveWorkerEntry(): string | URL {
   if (process.env.EDGE_RUNTIME_WORKER_PATH) {
     return path.resolve(process.env.EDGE_RUNTIME_WORKER_PATH);
@@ -301,6 +295,7 @@ export class WorkerPool {
     Worker,
     {
       generation: number;
+      projectRef?: string;
       replacementTimer?: ReturnType<typeof setTimeout>;
       isCancelling?: boolean;
     }
@@ -397,19 +392,55 @@ export class WorkerPool {
         return;
       }
 
-      const worker = this.idle.pop();
+      const worker = this.takeIdleWorker(this.projectKey(opts));
       if (worker) {
         this.lastDispatchedProjectRef = this.projectKey(opts);
         this.execute(worker, opts, enqueuedAt, resolve).catch(reject);
       } else {
         this.totalQueuedRequests++;
         this.enqueueQueued({ opts, enqueuedAt, resolve, reject });
+        this.replaceIdleWorkerForQueuedProject();
       }
     });
   }
 
   private projectKey(opts: DispatchOptions): string {
-    return opts.projectRef ?? extractProjectRef(opts.functionId) ?? opts.functionId;
+    return opts.projectRef;
+  }
+
+  private workerProjectRef(worker: Worker): string | undefined {
+    return this.workerMetadata.get(worker)?.projectRef;
+  }
+
+  // Functions within one project share a trust boundary; a Worker never crosses it.
+  private workerAcceptsProject(worker: Worker, projectRef: string): boolean {
+    const assignedProjectRef = this.workerProjectRef(worker);
+    return assignedProjectRef === undefined || assignedProjectRef === projectRef;
+  }
+
+  private assignWorkerProject(worker: Worker, projectRef: string): void {
+    const metadata = this.workerMetadata.get(worker);
+    if (!metadata) throw new Error("Missing worker metadata");
+    if (metadata.projectRef !== undefined && metadata.projectRef !== projectRef) {
+      throw new Error("Worker cannot execute a different project");
+    }
+    metadata.projectRef = projectRef;
+  }
+
+  private takeIdleWorker(projectRef: string): Worker | undefined {
+    const workerIndex = this.idle.findLastIndex((worker) => (
+      this.workerProjectRef(worker) === projectRef
+    ));
+    const fallbackIndex = workerIndex >= 0
+      ? workerIndex
+      : this.idle.findLastIndex((worker) => this.workerAcceptsProject(worker, projectRef));
+    if (fallbackIndex < 0) return undefined;
+    return this.idle.splice(fallbackIndex, 1)[0];
+  }
+
+  private replaceIdleWorkerForQueuedProject(): void {
+    const mismatchedWorker = this.idle.at(-1);
+    if (mismatchedWorker) this.retireWorker(mismatchedWorker);
   }
 
   private enqueueQueued(entry: QueuedDispatch): void {
@@ -447,6 +478,23 @@ export class WorkerPool {
     return entry;
   }
 
+  private dequeueQueuedForWorker(worker: Worker): QueuedDispatch | null {
+    const projectRef = this.workerProjectRef(worker);
+    if (projectRef === undefined) return this.dequeueQueued();
+    const projectQueue = this.queuedDispatches.get(projectRef);
+    if (!projectQueue) return null;
+    const entry = projectQueue.shift();
+    if (!entry) throw new Error(`Empty dispatch queue for project ${projectRef}`);
+
+    this.queuedCount--;
+    if (projectQueue.length === 0) {
+      this.queuedDispatches.delete(projectRef);
+      this.queuedProjects = this.queuedProjects.filter((queuedProject) => queuedProject !== projectRef);
+    }
+    this.lastDispatchedProjectRef = projectRef;
+    return entry;
+  }
+
   private invalidateQueuedProject(projectRef: string): number {
     const projectQueue = this.queuedDispatches.get(projectRef);
     if (!projectQueue) return 0;
@@ -467,6 +515,7 @@ export class WorkerPool {
     enqueuedAt: number,
     resolve: (response: Response) => void,
   ) {
+    this.assignWorkerProject(worker, this.projectKey(opts));
     const queueWaitMs = Math.round(performance.now() - enqueuedAt);
     this.totalQueueWaitMs += queueWaitMs;
     const cancelGraceMs = 3_000;
@@ -862,8 +911,19 @@ export class WorkerPool {
   }
 
   private schedule(worker: Worker) {
-    const next = this.dequeueQueued();
+    const assignedProjectRef = this.workerProjectRef(worker);
+    if (assignedProjectRef !== undefined && this.queuedProjects.some(
+      (projectRef) => projectRef !== assignedProjectRef,
+    )) {
+      this.retireWorker(worker);
+      return;
+    }
+    const next = this.dequeueQueuedForWorker(worker);
     if (!next) {
+      if (this.queuedCount > 0) {
+        this.retireWorker(worker);
+        return;
+      }
       this.idle.push(worker);
       return;
     }
@@ -1082,6 +1142,23 @@ export class WorkerPool {
     };
   }
 
+  private invalidateProjectWorkers(projectRef: string): Promise<WorkerControlAck[]> {
+    const workers = [...this.activeWorkers].filter(
+      (worker) => this.workerProjectRef(worker) === projectRef,
+    );
+    for (const worker of workers) this.tainted.add(worker);
+    return Promise.all(workers.map(async (worker) => {
+      const acknowledgement = await this.sendControlMessage(worker, {
+        type: "invalidate_project",
+        projectRef,
+      });
+      if (this.idle.includes(worker)) {
+        this.retireWorker(worker);
+      }
+      return acknowledgement;
+    }));
+  }
+
   invalidateModule(functionId: string): Promise<WorkerPoolControlResult> {
     console.log(`[Pool] Invalidating module: ${functionId}`);
     return this.invalidateWorkers({ type: "invalidate_module", functionId });
@@ -1090,8 +1167,22 @@ export class WorkerPool {
   async invalidateProject(projectRef: string): Promise<WorkerPoolControlResult> {
     console.log(`[Pool] Invalidating project modules: ${projectRef}`);
     const cancelledQueued = this.invalidateQueuedProject(projectRef);
-    const result = await this.invalidateWorkers({ type: "invalidate_project", projectRef });
-    return { ...result, cancelledQueued };
+    this.totalInvalidations++;
+    const acknowledgements = await this.invalidateProjectWorkers(projectRef);
+    const invalidated = acknowledgements.reduce(
+      (sum, acknowledgement) => sum + acknowledgement.invalidated,
+      0,
+    );
+    const latestModuleCacheSize = acknowledgements.at(-1)?.moduleCacheSize;
+    if (latestModuleCacheSize !== undefined) this.lastModuleCacheEntries = latestModuleCacheSize;
+    this.totalModuleCacheInvalidated += invalidated;
+    return {
+      generation: this.workerGeneration,
+      attempted: acknowledgements.length,
+      succeeded: acknowledgements.filter((acknowledgement) => acknowledgement.acked).length,
+      invalidated,
+      cancelledQueued,
+    };
   }
 
   private rotateWorkerForGeneration(worker: Worker): GenerationRotationDisposition {
@@ -1181,7 +1272,7 @@ export class WorkerPool {
       functionId: request.functionId,
       functionPath: request.functionPath,
       projectRoot: request.projectRoot,
-      projectRef: request.options.projectRef ?? extractProjectRef(request.functionId),
+      projectRef: request.options.projectRef,
       moduleVersion: request.options.moduleVersion,
       envProof: request.options.envProof,
       artifactSha256: request.options.attestation?.artifact_sha256,
@@ -1222,6 +1313,7 @@ export class WorkerPool {
   }
 
   private async preheatWorker(request: WorkerPreheatRequest): Promise<WorkerPreheatResult> {
+    this.assignWorkerProject(request.worker, request.options.projectRef);
     try {
       const tlsPolicy = await this.resolveTlsPolicy(request.env);
       return this.waitForWorkerPreheat(request, tlsPolicy);
@@ -1238,9 +1330,10 @@ export class WorkerPool {
     functionPath: string,
     projectRoot: string,
     env: Record<string, string>,
-    options: PreheatOptions = {},
+    options: PreheatOptions,
   ): Promise<boolean> {
-    const worker = this.idle.pop();
+    const projectRef = options.projectRef;
+    const worker = this.takeIdleWorker(projectRef);
     if (!worker) {
       return Promise.resolve(false);
     }
@@ -1285,7 +1378,7 @@ export class WorkerPool {
     functionPath: string,
     projectRoot: string,
     env: Record<string, string>,
-    options: PreheatOptions = {},
+    options: PreheatOptions,
   ): Promise<WorkerPoolPreheatResult> {
     return this.enqueueBulkPreheat(() => this.preheatIdleWorkersNow({
       functionId,
@@ -1321,7 +1414,10 @@ export class WorkerPool {
 
   private async preheatIdleWorkersNow(request: BulkPreheatRequest): Promise<WorkerPoolPreheatResult> {
     const start = performance.now();
-    const workers = this.takeIdleWorkers(request.options.maxWorkers);
+    const workers = this.takeIdleWorkersForProject(
+      request.options.projectRef,
+      request.options.maxWorkers,
+    );
     if (workers.length === 0) {
       return {
         attempted: 0,
@@ -1348,11 +1444,31 @@ export class WorkerPool {
     return Promise.all(workers.map((worker) => this.preheatWorker({ ...request, worker })));
   }
 
-  private takeIdleWorkers(maxWorkers?: number): Worker[] {
-    const requested = maxWorkers && maxWorkers > 0
-      ? Math.min(maxWorkers, this.idle.length)
-      : this.idle.length;
-    return this.idle.splice(0, requested);
+  private takeIdleWorkersForProject(projectRef: string, maxWorkers?: number): Worker[] {
+    const requested = this.requestedPreheatWorkers(maxWorkers);
+    const matchingCount = this.idle.filter(
+      (worker) => this.workerAcceptsProject(worker, projectRef),
+    ).length;
+    this.replaceMismatchedIdleWorkers(projectRef, requested - matchingCount);
+
+    const available = this.idle.filter((worker) => this.workerAcceptsProject(worker, projectRef));
+    const workers = available.slice(0, requested);
+    const selected = new Set(workers);
+    this.idle = this.idle.filter((worker) => !selected.has(worker));
+    return workers;
+  }
+
+  private requestedPreheatWorkers(maxWorkers?: number): number {
+    if (!maxWorkers || maxWorkers <= 0) return this.idle.length;
+    return Math.min(maxWorkers, this.idle.length);
+  }
+
+  private replaceMismatchedIdleWorkers(projectRef: string, missingWorkers: number): void {
+    const replacementCount = Math.max(0, missingWorkers);
+    const mismatched = this.idle.filter(
+      (worker) => !this.workerAcceptsProject(worker, projectRef),
+    ).slice(0, replacementCount);
+    for (const worker of mismatched) this.retireWorker(worker);
   }
 
   private recordBulkPreheatResults(

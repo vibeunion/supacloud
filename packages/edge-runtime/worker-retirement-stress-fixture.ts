@@ -45,6 +45,7 @@ async function runStress(): Promise<void> {
   try {
     const dispatch = (path: "fast" | "slow") => pool.dispatch({
       functionId: "proj_retirement_stress",
+      projectRef: "proj_retirement_stress",
       functionPath,
       projectRoot,
       env: { HELD_FETCH_URL: `http://127.0.0.1:${heldFetchServer.port}` },

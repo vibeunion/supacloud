@@ -53,7 +53,7 @@ const MAX_MODULE_CACHE = 20;
 type ModuleCacheEntry = {
   handler: unknown;
   functionId: string;
-  projectRef: string | null;
+  projectRef: string;
   lastUsed: number;
 };
 
@@ -75,7 +75,7 @@ type PreheatMessage = {
   functionId: string;
   functionPath: string;
   projectRoot: string;
-  projectRef?: string;
+  projectRef: string;
   moduleVersion?: string;
   envProof?: string;
   artifactSha256?: string;
@@ -448,7 +448,7 @@ async function loadModule(input: {
   functionPath: string;
   projectRoot: string;
   moduleVersion?: string;
-  projectRef?: string | null;
+  projectRef: string;
   envProof?: string;
   artifactSha256?: string;
 }): Promise<LoadModuleResult> {
@@ -473,7 +473,7 @@ async function loadModule(input: {
   moduleCache.set(cacheKey, {
     handler,
     functionId: input.functionId,
-    projectRef: input.projectRef || null,
+    projectRef: input.projectRef,
     lastUsed: Date.now(),
   });
   return { handler, cacheHit: false, moduleCacheSize: moduleCache.size };
@@ -535,12 +535,6 @@ function toFunctionLocalUrl(requestUrl: string): string {
   return url.toString();
 }
 
-function extractProjectRef(functionId: string): string | null {
-  const idx = functionId.indexOf("_");
-  if (idx === -1) return null;
-  return functionId.substring(0, idx);
-}
-
 function isStringRecord(candidate: unknown): candidate is Record<string, string> {
   if (!candidate || typeof candidate !== "object") return false;
   return Object.values(candidate).every((entry) => typeof entry === "string");
@@ -575,7 +569,7 @@ function hasPreheatFields(candidate: Record<string, unknown>): boolean {
   return typeof candidate.functionId === "string"
     && typeof candidate.functionPath === "string"
     && typeof candidate.projectRoot === "string"
-    && (candidate.projectRef === undefined || typeof candidate.projectRef === "string")
+    && typeof candidate.projectRef === "string"
     && (candidate.moduleVersion === undefined || typeof candidate.moduleVersion === "string")
     && (candidate.envProof === undefined || typeof candidate.envProof === "string")
     && hasPreheatArtifactFields(candidate)
@@ -657,7 +651,6 @@ async function onParentMessage(msg: unknown): Promise<void> {
 
   if (msg.type === "preheat") {
     try {
-      const ref = msg.projectRef || extractProjectRef(msg.functionId);
       const env = msg.env || {};
       setProjectRoot(msg.projectRoot || path.dirname(msg.functionPath));
       injectEnv(env);
@@ -672,7 +665,7 @@ async function onParentMessage(msg: unknown): Promise<void> {
           functionPath: msg.functionPath,
           projectRoot: msg.projectRoot,
           moduleVersion: msg.moduleVersion,
-          projectRef: ref,
+          projectRef: msg.projectRef,
           envProof: msg.envProof,
           artifactSha256: msg.artifactSha256,
         });
@@ -711,7 +704,7 @@ async function onParentMessage(msg: unknown): Promise<void> {
 
   const { functionId, functionPath, projectRoot, env, tlsPolicy, url, method, headers, body, internalBindings } = msg;
 
-  const projectRef = msg.projectRef || extractProjectRef(functionId);
+  const projectRef = msg.projectRef;
   const requestAbortController = new AbortController();
   currentAbortController = requestAbortController;
   let restoreFetchTlsPolicy = () => {};

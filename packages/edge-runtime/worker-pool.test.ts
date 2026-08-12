@@ -71,6 +71,7 @@ describe("WorkerPool runtime-owned response metadata", () => {
     try {
       const versioned = await pool.dispatch({
         functionId: "proj_versioned_v12",
+        projectRef: "test-project",
         functionPath,
         projectRoot,
         functionVersion: "12",
@@ -84,6 +85,7 @@ describe("WorkerPool runtime-owned response metadata", () => {
 
       const legacy = await pool.dispatch({
         functionId: "proj_versioned",
+        projectRef: "test-project",
         functionPath,
         projectRoot,
         functionVersion: null,
@@ -94,6 +96,7 @@ describe("WorkerPool runtime-owned response metadata", () => {
 
       const omittedLegacy = await pool.dispatch({
         functionId: "proj_versioned_omitted",
+        projectRef: "test-project",
         functionPath,
         projectRoot,
         env: {},
@@ -120,6 +123,7 @@ describe("WorkerPool runtime-owned response metadata", () => {
     for (const functionVersion of invalidVersions) {
       await expect(pool.dispatch({
         functionId: "proj_invalid_version",
+        projectRef: "test-project",
         functionPath: "/unused/fn.ts",
         projectRoot: "/unused",
         functionVersion,
@@ -139,6 +143,7 @@ describe("WorkerPool runtime-owned response metadata", () => {
     try {
       const response = await pool.dispatch({
         functionId: "proj_versioned_error_v13",
+        projectRef: "test-project",
         functionPath,
         projectRoot,
         functionVersion: "13",
@@ -163,6 +168,7 @@ describe("WorkerPool runtime-owned response metadata", () => {
       for (const functionVersion of ["31", "32", "31"]) {
         const response = await pool.dispatch({
           functionId: `proj_versioned_v${functionVersion}`,
+          projectRef: "test-project",
           functionPath,
           projectRoot,
           functionVersion,
@@ -194,6 +200,7 @@ describe("WorkerPool runtime-owned response metadata", () => {
     try {
       const response = await pool.dispatch({
         functionId: "proj_versioned_post_v14",
+        projectRef: "test-project",
         functionPath,
         projectRoot,
         functionVersion: "14",
@@ -265,6 +272,7 @@ describe("WorkerPool EdgeRuntime.waitUntil", () => {
     try {
       const response = await pool.dispatch({
         functionId: "proj_waituntil",
+        projectRef: "test-project",
         functionPath,
         projectRoot,
         env: {
@@ -304,6 +312,7 @@ describe("WorkerPool subprocess guard", () => {
     try {
       const response = await pool.dispatch({
         functionId: "proj_import_meta_require",
+        projectRef: "test-project",
         functionPath,
         projectRoot,
         env: {},
@@ -337,6 +346,7 @@ describe("WorkerPool subprocess guard", () => {
     try {
       const response = await pool.dispatch({
         functionId: "proj_internal_builtin",
+        projectRef: "test-project",
         functionPath,
         projectRoot,
         env: {},
@@ -382,6 +392,7 @@ describe("WorkerPool subprocess guard", () => {
     try {
       const response = await pool.dispatch({
         functionId: "proj_safe_builtin_module",
+        projectRef: "test-project",
         functionPath,
         projectRoot,
         env: {},
@@ -410,6 +421,7 @@ describe("WorkerPool subprocess guard", () => {
         `);
         const response = await pool.dispatch({
           functionId: `proj_denied_builtin_${index}`,
+          projectRef: "test-project",
           functionPath,
           projectRoot,
           env: {},
@@ -445,6 +457,7 @@ describe("WorkerPool subprocess guard", () => {
     pools.push(pool);
     const dispatch = (functionId: string, functionPath: string, fsModule: string) => pool.dispatch({
       functionId,
+      projectRef: "test-project",
       functionPath,
       projectRoot,
       env: { FS_MODULE: fsModule },
@@ -510,6 +523,7 @@ describe("WorkerPool subprocess guard", () => {
     try {
       const response = await pool.dispatch({
         functionId: "proj_runtime_read_root",
+        projectRef: "test-project",
         functionPath,
         projectRoot,
         env: { DEPENDENCY_PATH: dependencyPath, RUNTIME_PATH: runtimePath },
@@ -543,6 +557,7 @@ describe("WorkerPool subprocess guard", () => {
     try {
       const response = await pool.dispatch({
         functionId: "proj_untrusted_module_root",
+        projectRef: "test-project",
         functionPath,
         projectRoot,
         env: {},
@@ -585,6 +600,7 @@ describe("WorkerPool subprocess guard", () => {
     pools.push(pool);
     const dispatch = (functionId: string, functionPath: string, modulePath: string) => pool.dispatch({
       functionId,
+      projectRef: "test-project",
       functionPath,
       projectRoot,
       env: { MODULE_PATH: modulePath },
@@ -628,6 +644,7 @@ describe("WorkerPool subprocess guard", () => {
         functionPath,
         projectRoot,
         { MODULE_PATH: "./local.ts" },
+        { projectRef: "proj_preheat" },
       );
 
       expect(preheat.succeeded).toBe(0);
@@ -636,6 +653,7 @@ describe("WorkerPool subprocess guard", () => {
 
       const response = await pool.dispatch({
         functionId: "proj_preheat_recovery",
+        projectRef: "test-project",
         functionPath: recoveryPath,
         projectRoot,
         env: {},
@@ -803,6 +821,7 @@ describe("WorkerPool subprocess guard", () => {
     try {
       const response = await pool.dispatch({
         functionId: "proj_runtime_module_escape",
+        projectRef: "test-project",
         functionPath,
         projectRoot,
         env: {
@@ -863,6 +882,7 @@ describe("WorkerPool subprocess guard", () => {
     pools.push(pool);
     const dispatch = (functionId: string, functionPath: string) => pool.dispatch({
       functionId,
+      projectRef: "test-project",
       functionPath,
       projectRoot,
       env: { MODULE_PATH: outsideModulePath },
@@ -918,6 +938,7 @@ describe("WorkerPool subprocess guard", () => {
     try {
       const response = await pool.dispatch({
         functionId: "proj_local_file_url",
+        projectRef: "test-project",
         functionPath,
         projectRoot,
         env: {},
@@ -963,6 +984,7 @@ describe("WorkerPool subprocess guard", () => {
     try {
       const response = await pool.dispatch({
         functionId: "proj_host_capabilities",
+        projectRef: "test-project",
         functionPath,
         projectRoot,
         env: { OUTSIDE_ASSET: outsideAssetPath },
@@ -1022,6 +1044,7 @@ describe("WorkerPool subprocess guard", () => {
     try {
       const response = await pool.dispatch({
         functionId: "proj_bun_file_boundary",
+        projectRef: "test-project",
         functionPath,
         projectRoot,
         env: {
@@ -1079,6 +1102,7 @@ describe("WorkerPool subprocess guard", () => {
     try {
       const response = await pool.dispatch({
         functionId: "proj_native_loader",
+        projectRef: "test-project",
         functionPath,
         projectRoot,
         env: {},
@@ -1112,6 +1136,7 @@ describe("WorkerPool subprocess guard", () => {
     try {
       const response = await pool.dispatch({
         functionId: "proj_subprocess",
+        projectRef: "test-project",
         functionPath,
         projectRoot,
         env: {},
@@ -1150,6 +1175,7 @@ describe("WorkerPool subprocess guard", () => {
     try {
       const response = await pool.dispatch({
         functionId: "proj_worker_subprocess",
+        projectRef: "test-project",
         functionPath,
         projectRoot,
         env: {},
@@ -1185,6 +1211,7 @@ describe("WorkerPool subprocess guard", () => {
     try {
       const response = await pool.dispatch({
         functionId: "proj_ffi_subprocess",
+        projectRef: "test-project",
         functionPath,
         projectRoot,
         env: {},
@@ -1217,6 +1244,7 @@ describe("WorkerPool subprocess guard", () => {
     try {
       const response = await pool.dispatch({
         functionId: "proj_text_import",
+        projectRef: "test-project",
         functionPath,
         projectRoot,
         env: {},
@@ -1466,6 +1494,7 @@ describe("WorkerPool cancellation and replacement", () => {
     try {
       const slowResponse = pool.dispatch({
         functionId: "proj_timeout_fn",
+        projectRef: "test-project",
         functionPath,
         projectRoot,
         functionVersion: "41",
@@ -1475,6 +1504,7 @@ describe("WorkerPool cancellation and replacement", () => {
       await Bun.sleep(50);
       const fastResponse = pool.dispatch({
         functionId: "proj_timeout_fn",
+        projectRef: "test-project",
         functionPath,
         projectRoot,
         functionVersion: "42",
@@ -1516,6 +1546,7 @@ describe("WorkerPool cancellation and replacement", () => {
     try {
       const pendingResponse = pool.dispatch({
         functionId: "proj_crash_fn_v45",
+        projectRef: "test-project",
         functionPath,
         projectRoot,
         functionVersion: "45",
@@ -1561,6 +1592,7 @@ describe("WorkerPool cancellation and replacement", () => {
     try {
       const slowResponse = pool.dispatch({
         functionId: "proj_cancel_fn",
+        projectRef: "test-project",
         functionPath,
         projectRoot,
         functionVersion: "43",
@@ -1572,6 +1604,7 @@ describe("WorkerPool cancellation and replacement", () => {
       await waitForFile(startedPath);
       const fastResponse = pool.dispatch({
         functionId: "proj_cancel_fn",
+        projectRef: "test-project",
         functionPath,
         projectRoot,
         env: { STARTED_PATH: startedPath },
@@ -1612,6 +1645,7 @@ describe("WorkerPool cancellation and replacement", () => {
     try {
       const responsePromise = pool.dispatch({
         functionId: "proj_load_cancel",
+        projectRef: "test-project",
         functionPath,
         projectRoot,
         env: { HANDLER_PATH: handlerPath, LOADING_PATH: loadingPath },
@@ -1658,6 +1692,7 @@ describe("WorkerPool cancellation and replacement", () => {
     try {
       const firstResponse = pool.dispatch({
         functionId: "proj_duplicate_first",
+        projectRef: "test-project",
         functionPath,
         projectRoot,
         cancelKey: "shared-task-id",
@@ -1668,6 +1703,7 @@ describe("WorkerPool cancellation and replacement", () => {
       });
       const secondResponse = pool.dispatch({
         functionId: "proj_duplicate_second",
+        projectRef: "test-project",
         functionPath,
         projectRoot,
         cancelKey: "shared-task-id",
@@ -1716,6 +1752,7 @@ describe("WorkerPool cancellation and replacement", () => {
     try {
       const slowResponse = pool.dispatch({
         functionId: "proj_queue_fn",
+        projectRef: "test-project",
         functionPath,
         projectRoot,
         env: {},
@@ -1723,6 +1760,7 @@ describe("WorkerPool cancellation and replacement", () => {
       });
       const queuedResponse = pool.dispatch({
         functionId: "proj_queue_fn",
+        projectRef: "test-project",
         functionPath,
         projectRoot,
         env: {},
@@ -1823,6 +1861,7 @@ describe("WorkerPool cancellation and replacement", () => {
     try {
       const streamResponse = await pool.dispatch({
         functionId: "proj_stream_fn",
+        projectRef: "test-project",
         functionPath,
         projectRoot,
         functionVersion: "44",
@@ -1835,6 +1874,7 @@ describe("WorkerPool cancellation and replacement", () => {
 
       const queuedResponse = pool.dispatch({
         functionId: "proj_stream_fn",
+        projectRef: "test-project",
         functionPath,
         projectRoot,
         env: {},
@@ -1869,6 +1909,7 @@ describe("WorkerPool cancellation and replacement", () => {
     try {
       const responsePromise = pool.dispatch({
         functionId: "proj_drain_fn",
+        projectRef: "test-project",
         functionPath,
         projectRoot,
         env: {},
@@ -1907,6 +1948,7 @@ describe("WorkerPool cancellation and replacement", () => {
         functionPath,
         projectRoot,
         {},
+        { projectRef: "proj_drain" },
       );
       await Bun.sleep(20);
       let drained = false;
@@ -1946,6 +1988,7 @@ describe("WorkerPool cancellation and replacement", () => {
     try {
       const response = await pool.dispatch({
         functionId: "proj_waituntil_drain_fn",
+        projectRef: "test-project",
         functionPath,
         projectRoot,
         env: { COMPLETED_PATH: completedPath },
@@ -1992,6 +2035,7 @@ describe("WorkerPool cooperative retirement", () => {
     try {
       const response = await pool.dispatch({
         functionId: "proj_retirement_load",
+        projectRef: "test-project",
         functionPath,
         projectRoot,
         env: {},
@@ -2042,10 +2086,12 @@ describe("WorkerPool cooperative retirement", () => {
         functionPath,
         projectRoot,
         {},
+        { projectRef: "test-project" },
       );
       const dispatchSlow = async (startedPath: string) => {
         const responsePromise = pool.dispatch({
           functionId: "proj_retirement_count",
+          projectRef: "test-project",
           functionPath,
           projectRoot,
           env: { STARTED_PATH: startedPath },
@@ -2063,6 +2109,7 @@ describe("WorkerPool cooperative retirement", () => {
       expect(pool.snapshotMetrics("retirement")["retirement_retirement_budget_exceeded"]).toBe(1);
       expect((await pool.dispatch({
         functionId: "proj_retirement_count",
+        projectRef: "test-project",
         functionPath,
         projectRoot,
         env: {},
@@ -2110,9 +2157,11 @@ describe("WorkerPool cooperative retirement", () => {
         functionPath,
         projectRoot,
         {},
+        { projectRef: "test-project" },
       )).toBe(true);
       const responsePromise = pool.dispatch({
         functionId: "proj_retirement_age",
+        projectRef: "test-project",
         functionPath,
         projectRoot,
         env: { STARTED_PATH: startedPath },
@@ -2149,12 +2198,13 @@ describe("WorkerPool cooperative retirement", () => {
         slowFunctionPath,
         projectRoot,
         {},
-        { moduleVersion: "v1" },
+        { projectRef: "proj_preheat", moduleVersion: "v1" },
       )).toBe(false);
       const response = await pool.dispatch({
         functionId: "proj_preheat_fast",
         functionPath: fastFunctionPath,
         projectRoot,
+        projectRef: "proj_preheat",
         env: {},
         request: new Request("http://edge.local/functions/v1/fast"),
       });
@@ -2232,6 +2282,7 @@ describe("WorkerPool TLS policy handoff", () => {
 
       const response = await pool.dispatch({
         functionId: "proj_tls",
+        projectRef: "test-project",
         functionPath,
         projectRoot,
         env: {},
@@ -2284,6 +2335,7 @@ describe("WorkerPool metrics NaN fix", () => {
     try {
       const res = await pool.dispatch({
         functionId: "test_nan",
+        projectRef: "test-project",
         functionPath,
         projectRoot,
         env: {},
@@ -2321,6 +2373,7 @@ describe("WorkerPool metrics NaN fix", () => {
       const [res1, res2] = await Promise.all([
         pool.dispatch({
           functionId: "test_nan_q1",
+          projectRef: "test-project",
           functionPath,
           projectRoot,
           env: {},
@@ -2328,6 +2381,7 @@ describe("WorkerPool metrics NaN fix", () => {
         }),
         pool.dispatch({
           functionId: "test_nan_q2",
+          projectRef: "test-project",
           functionPath,
           projectRoot,
           env: {},
@@ -2349,8 +2403,8 @@ describe("WorkerPool metrics NaN fix", () => {
   });
 });
 
-describe("WorkerPool project fairness", () => {
-  test("serves a newly queued project before the same-project backlog", async () => {
+describe("WorkerPool project scheduling", () => {
+  test("serves a different queued project before the current-project backlog", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-fair-"));
     const functionPath = join(projectRoot, "fn.ts");
     const orderPath = join(projectRoot, "order.txt");
@@ -2393,6 +2447,238 @@ describe("WorkerPool project fairness", () => {
       await rm(projectRoot, { recursive: true, force: true });
     }
   });
+
+  test("gives another project bounded progress while the first project keeps queueing", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-fair-bounded-"));
+    const functionPath = join(projectRoot, "fn.ts");
+    const orderPath = join(projectRoot, "order.txt");
+    await Bun.write(orderPath, "");
+    await Bun.write(functionPath, `
+      export default async function (request) {
+        const label = new URL(request.url).pathname.slice(1);
+        const previous = await Bun.file(process.env.ORDER_FILE).text();
+        await Bun.write(process.env.ORDER_FILE, previous + label + "\\n");
+        await Bun.sleep(20);
+        return new Response(label);
+      }
+    `);
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+    const dispatch = (projectRef: string, label: string) => pool.dispatch({
+      functionId: `${projectRef}_fn`,
+      functionPath,
+      projectRoot,
+      projectRef,
+      env: { ORDER_FILE: orderPath },
+      request: new Request(`http://edge.local/${label}`),
+    });
+
+    try {
+      const first = dispatch("project-a", "a0");
+      await waitForMetric(pool, "active_workers", 1);
+      const projectB = dispatch("project-b", "b0");
+      const projectA = Array.from({ length: 8 }, (_, index) => dispatch("project-a", `a${index + 1}`));
+      await Promise.all([first, projectB, ...projectA]);
+      const order = (await Bun.file(orderPath).text()).trim().split("\n");
+      expect(order.indexOf("b0")).toBeLessThan(3);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("WorkerPool Bun plugin project isolation", () => {
+  test.each([
+    ["global", "Bun.plugin"],
+    ["bare import", "plugin"],
+  ])("contains %s plugin registration and clearAll within one project worker", async (_label, pluginCall) => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-plugin-project-"));
+    const registerPath = join(projectRoot, "register.ts");
+    const clearGlobalPath = join(projectRoot, "clear-global.ts");
+    const clearImportPath = join(projectRoot, "clear-import.ts");
+    const probePath = join(projectRoot, "probe.ts");
+    await Bun.write(registerPath, `
+      import { plugin } from "bun";
+      const register = ${pluginCall};
+      register({
+        name: "tenant-plugin",
+        setup(build) {
+          build.module("tenant.virtual", () => ({
+            exports: { owner: "project-a" },
+            loader: "object",
+          }));
+        },
+      });
+      export default async function () {
+        const virtual = await import("tenant.virtual");
+        return new Response(virtual.owner);
+      }
+    `);
+    await Bun.write(probePath, `
+      export default async function () {
+        try {
+          const virtual = await import("tenant.virtual");
+          return new Response(virtual.owner);
+        } catch (error) {
+          return new Response(error.message, { status: 404 });
+        }
+      }
+    `);
+    await Bun.write(clearGlobalPath, `
+      export default function () {
+        Bun.plugin.clearAll();
+        return new Response("cleared-global");
+      }
+    `);
+    await Bun.write(clearImportPath, `
+      import { plugin } from "bun";
+      export default function () {
+        plugin.clearAll();
+        return new Response("cleared-import");
+      }
+    `);
+
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+    const dispatch = (projectRef: string, functionPath: string, query = "") => pool.dispatch({
+      functionId: `${projectRef}_fn`,
+      functionPath,
+      projectRoot,
+      projectRef,
+      moduleVersion: functionPath,
+      env: {},
+      request: new Request(`http://edge.local/functions/v1/fn${query}`),
+    });
+
+    try {
+      expect(await (await dispatch("project-a", registerPath)).text()).toBe("project-a");
+
+      const otherProject = await dispatch("project-b", probePath);
+      expect(otherProject.status).toBe(404);
+      expect(await otherProject.text()).toContain("Cannot find package 'tenant.virtual'");
+
+      expect(await (await dispatch("project-b", clearGlobalPath)).text()).toBe("cleared-global");
+      expect(await (await dispatch("project-b", clearImportPath)).text()).toBe("cleared-import");
+      expect(await (await dispatch("project-a", registerPath)).text()).toBe("project-a");
+      expect(pool.snapshotMetrics("plugin")["plugin_total_worker_replacements"]).toBe(2);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("keeps guarded Bun file and write APIs available in a project-bound worker", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-plugin-file-"));
+    const functionPath = join(projectRoot, "files.ts");
+    const inputPath = join(projectRoot, "input.txt");
+    const outputPath = join(projectRoot, "output.txt");
+    await Bun.write(inputPath, "project-data");
+    await Bun.write(functionPath, `
+      import { file, write } from "bun";
+      export default async function () {
+        const contents = await file(process.env.INPUT_PATH).text();
+        await write(process.env.OUTPUT_PATH, contents + ":written");
+        return new Response(contents);
+      }
+    `);
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    try {
+      const response = await pool.dispatch({
+        functionId: "project-files_fn",
+        projectRef: "test-project",
+        functionPath,
+        projectRoot,
+        env: { INPUT_PATH: inputPath, OUTPUT_PATH: outputPath },
+        request: new Request("http://edge.local/functions/v1/files"),
+      });
+      expect({ status: response.status, body: await response.text() }).toEqual({
+        status: 200,
+        body: "project-data",
+      });
+      expect(await Bun.file(outputPath).text()).toBe("project-data:written");
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("keeps foreground and background pools independently project-bound", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-plugin-profile-"));
+    const functionPath = join(projectRoot, "profile.ts");
+    await Bun.write(functionPath, `
+      import { plugin } from "bun";
+      plugin({
+        name: "profile-plugin",
+        setup(build) {
+          build.module("profile.virtual", () => ({
+            exports: { profile: process.env.EXECUTION_PROFILE },
+            loader: "object",
+          }));
+        },
+      });
+      export default async function () {
+        const virtual = await import("profile.virtual");
+        return new Response(virtual.profile);
+      }
+    `);
+    const foreground = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    const background = new WorkerPool({ size: 1, requestTimeout: 2_000, smol: true });
+    pools.push(foreground, background);
+    const dispatch = (pool: WorkerPool, profile: string) => pool.dispatch({
+      functionId: "project-profile_fn",
+      projectRef: "test-project",
+      functionPath,
+      projectRoot,
+      moduleVersion: "v1",
+      env: { EXECUTION_PROFILE: profile },
+      request: new Request("http://edge.local/functions/v1/profile"),
+    });
+
+    try {
+      const [foregroundResponse, backgroundResponse] = await Promise.all([
+        dispatch(foreground, "foreground"),
+        dispatch(background, "background"),
+      ]);
+      expect(await foregroundResponse.text()).toBe("foreground");
+      expect(await backgroundResponse.text()).toBe("background");
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("requests one runtime recycle without dropping queued cross-project work", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-plugin-recycle-"));
+    const functionPath = join(projectRoot, "fn.ts");
+    await Bun.write(functionPath, `export default () => new Response(process.env.PROJECT_LABEL);`);
+    const recycleEvents: Array<{ workerReplacements: number; maxWorkerReplacements: number }> = [];
+    const pool = new WorkerPool({
+      size: 1,
+      requestTimeout: 2_000,
+      maxWorkerReplacementsBeforeRecycle: 2,
+      onWorkerRecycleRequired: (event) => recycleEvents.push(event),
+    });
+    pools.push(pool);
+    const dispatch = (projectRef: string) => pool.dispatch({
+      functionId: `${projectRef}_fn`,
+      functionPath,
+      projectRoot,
+      projectRef,
+      env: { PROJECT_LABEL: projectRef },
+      request: new Request("http://edge.local/functions/v1/fn"),
+    });
+
+    try {
+      const responses = [];
+      for (const projectRef of ["project-a", "project-b", "project-a", "project-b"]) {
+        responses.push(await (await dispatch(projectRef)).text());
+      }
+      expect(responses).toEqual(["project-a", "project-b", "project-a", "project-b"]);
+      expect(recycleEvents).toEqual([{ workerReplacements: 2, maxWorkerReplacements: 2 }]);
+      expect(pool.snapshotMetrics("plugin_recycle")["plugin_recycle_queue_length"]).toBe(0);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("WorkerPool module cache", () => {
@@ -2430,6 +2716,7 @@ describe("WorkerPool module cache", () => {
     try {
       const serveResponse = await pool.dispatch({
         functionId: "proj_serve_first",
+        projectRef: "test-project",
         functionPath: servePath,
         projectRoot,
         moduleVersion: "v1",
@@ -2441,6 +2728,7 @@ describe("WorkerPool module cache", () => {
 
       const exportedResponse = await pool.dispatch({
         functionId: "proj_serve_exported",
+        projectRef: "test-project",
         functionPath: exportedPath,
         projectRoot,
         moduleVersion: "v1",
@@ -2467,11 +2755,12 @@ describe("WorkerPool module cache", () => {
         functionPath,
         projectRoot,
         {},
-        { moduleVersion: "v1" },
+        { projectRef: "proj_serve_preheat", moduleVersion: "v1" },
       )).toBe(true);
 
       const response = await pool.dispatch({
         functionId: "proj_serve_preheat",
+        projectRef: "proj_serve_preheat",
         functionPath,
         projectRoot,
         moduleVersion: "v1",
@@ -2499,6 +2788,7 @@ describe("WorkerPool module cache", () => {
     pools.push(pool);
     const dispatch = (functionId: string, functionPath: string) => pool.dispatch({
       functionId,
+      projectRef: "test-project",
       functionPath,
       projectRoot,
       moduleVersion: "v1",
@@ -2951,7 +3241,7 @@ describe("WorkerPool module cache", () => {
     }
   });
 
-  test("project invalidation does not evict another project's module cache", async () => {
+  test("project invalidation does not retire another project's worker", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-project-invalidate-"));
     const functionAPath = join(projectRoot, "project-a.ts");
     const functionBPath = join(projectRoot, "project-b.ts");
@@ -2984,9 +3274,9 @@ describe("WorkerPool module cache", () => {
       expect(await (await dispatch("proj_env_b_fn", functionBPath, "proj_env_b", "v1")).text()).toBe("1");
 
       const result = await pool.invalidateProject("proj_env_a");
-      expect(result.attempted).toBe(1);
-      expect(result.succeeded).toBe(1);
-      expect(result.invalidated).toBe(1);
+      expect(result.attempted).toBe(0);
+      expect(result.succeeded).toBe(0);
+      expect(result.invalidated).toBe(0);
 
       expect(await (await dispatch("proj_env_b_fn", functionBPath, "proj_env_b", "v1")).text()).toBe("1");
       expect(await Bun.file(counterBPath).text()).toBe("1");
@@ -3206,6 +3496,49 @@ describe("WorkerPool module cache", () => {
       await rm(projectRoot, { recursive: true, force: true });
     }
   });
+
+  test("replaces idle workers bound to another project before bulk preheat", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-preheat-project-replace-"));
+    const functionPath = join(projectRoot, "preheat.ts");
+    await Bun.write(functionPath, `export default () => new Response(process.env.PROJECT_LABEL);`);
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    try {
+      const initial = await pool.dispatch({
+        functionId: "project-a_fn",
+        functionPath,
+        projectRoot,
+        projectRef: "project-a",
+        env: { PROJECT_LABEL: "project-a" },
+        request: new Request("http://edge.local/functions/v1/fn"),
+      });
+      expect(await initial.text()).toBe("project-a");
+
+      const preheat = await pool.preheatIdleWorkers(
+        "project-b_fn",
+        functionPath,
+        projectRoot,
+        { PROJECT_LABEL: "project-b" },
+        { projectRef: "project-b", moduleVersion: "v1" },
+      );
+      expect(preheat).toMatchObject({ attempted: 1, succeeded: 1, cacheMisses: 1 });
+      expect(pool.snapshotMetrics("replace")["replace_total_worker_replacements"]).toBe(1);
+
+      const response = await pool.dispatch({
+        functionId: "project-b_fn",
+        functionPath,
+        projectRoot,
+        projectRef: "project-b",
+        moduleVersion: "v1",
+        env: { PROJECT_LABEL: "project-b" },
+        request: new Request("http://edge.local/functions/v1/fn"),
+      });
+      expect(await response.text()).toBe("project-b");
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("WorkerPool body size limit", () => {
@@ -3233,6 +3566,7 @@ describe("WorkerPool body size limit", () => {
 
       const res = await pool.dispatch({
         functionId: "test_body_limit",
+        projectRef: "test-project",
         functionPath,
         projectRoot,
         functionVersion: "46",
@@ -3273,6 +3607,7 @@ describe("WorkerPool body size limit", () => {
 
       const res = await pool.dispatch({
         functionId: "test_body_actual",
+        projectRef: "test-project",
         functionPath,
         projectRoot,
         env: {},
@@ -3314,6 +3649,7 @@ describe("WorkerPool body size limit", () => {
 
       const res = await pool.dispatch({
         functionId: "test_body_env",
+        projectRef: "test-project",
         functionPath,
         projectRoot,
         env: {},
@@ -3360,6 +3696,7 @@ describe("WorkerPool body size limit", () => {
 
       const res = await pool.dispatch({
         functionId: "test_body_invalid_env",
+        projectRef: "test-project",
         functionPath,
         projectRoot,
         env: {},
