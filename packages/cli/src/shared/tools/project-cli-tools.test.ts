@@ -2,8 +2,13 @@ import { describe, expect, test } from "bun:test";
 import { schemaEnumValues, type ToolSchema } from "../schema";
 import { registerAdminProjectCliTools, registerUserProjectCliTools } from "./project-cli-tools";
 
+type ProjectToolResult = {
+    content: Array<{ text: string }>;
+    isError?: boolean;
+};
+
 function captureProjectTool(http: Record<string, unknown>, projectRef = "proj") {
-    let callback: ((args: Record<string, unknown>) => Promise<{ content: Array<{ text: string }> }>) | undefined;
+    let callback: ((args: Record<string, unknown>) => Promise<ProjectToolResult>) | undefined;
     registerUserProjectCliTools({
         tool(name: string, _description: string, _schema: Record<string, unknown>, toolCallback: typeof callback) {
             if (name !== "project") return;
@@ -16,7 +21,7 @@ function captureProjectTool(http: Record<string, unknown>, projectRef = "proj") 
 }
 
 function captureAdminProjectTool(http: Record<string, unknown>) {
-    let callback: ((args: Record<string, unknown>) => Promise<{ content: Array<{ text: string }> }>) | undefined;
+    let callback: ((args: Record<string, unknown>) => Promise<ProjectToolResult>) | undefined;
     registerAdminProjectCliTools({
         tool(name: string, _description: string, _schema: Record<string, unknown>, toolCallback: typeof callback) {
             if (name === "project") callback = toolCallback;
@@ -26,6 +31,80 @@ function captureAdminProjectTool(http: Record<string, unknown>) {
     if (!callback) throw new Error("admin project tool was not registered");
     return callback;
 }
+
+const PROJECT_REF = "abcdefghijklmnopqrst";
+const PROJECT_SUMMARY = {
+    id: "11111111-1111-4111-8111-111111111111",
+    ref: PROJECT_REF,
+    organization_id: "22222222-2222-4222-8222-222222222222",
+    organization_slug: "example-organization",
+    name: "Example project",
+    region: "local",
+    created_at: "2026-08-12T00:00:00.000Z",
+    status: "ACTIVE_HEALTHY",
+};
+const PROJECT_DETAILS = {
+    ...PROJECT_SUMMARY,
+    database: {
+        host: "db.example.test",
+        version: "17.5",
+        postgres_engine: "17",
+        release_channel: "stable",
+    },
+    api: { url: "https://api.example.test" },
+    studio: { url: "https://studio.example.test" },
+};
+
+describe("project CLI reads", () => {
+    test("bounds and projects the user project get response", async () => {
+        const remoteSecret = "user-project-private-sentinel";
+        let request: { path: string; maxResponseBytes?: number } | undefined;
+        const callback = captureProjectTool({
+            get: async (path: string, options?: { maxResponseBytes?: number }) => {
+                request = { path, maxResponseBytes: options?.maxResponseBytes };
+                return {
+                    ok: true,
+                    status: 200,
+                    data: {
+                        ...PROJECT_DETAILS,
+                        config: { private_runtime_value: remoteSecret },
+                        anon_key: remoteSecret,
+                        services: [{ token: remoteSecret }],
+                    },
+                };
+            },
+        }, PROJECT_REF);
+
+        const response = await callback({ action: "get" });
+
+        expect(request).toEqual({
+            path: `/v1/projects/${PROJECT_REF}`,
+            maxResponseBytes: 1_048_576,
+        });
+        expect(response.isError).not.toBe(true);
+        expect(JSON.parse(response.content[0].text)).toEqual(PROJECT_DETAILS);
+        expect(response.content[0].text).not.toContain(remoteSecret);
+    });
+
+    test("fails malformed user and retained Admin reads without reflection", async () => {
+        const remoteSecret = "invalid-project-read-sentinel";
+        const http = {
+            get: async () => ({
+                ok: true,
+                status: 200,
+                data: { ...PROJECT_DETAILS, credentials: { service_role_key: remoteSecret } },
+            }),
+        };
+        const userResponse = await captureProjectTool(http, PROJECT_REF)({ action: "get" });
+        const adminResponse = await captureAdminProjectTool(http)({ action: "get", ref: PROJECT_REF });
+
+        for (const response of [userResponse, adminResponse]) {
+            expect(response.isError).toBe(true);
+            expect(response.content[0].text).toBe("❌ Invalid project response");
+            expect(response.content[0].text).not.toContain(remoteSecret);
+        }
+    });
+});
 
 describe("project CLI task actions", () => {
     test("prefers an explicit ref over the auto-linked project", async () => {
