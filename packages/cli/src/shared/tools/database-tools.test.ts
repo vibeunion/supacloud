@@ -279,7 +279,7 @@ describe("database migration helpers", () => {
         expect(warnings[0]).toContain("will enable pgvector");
     });
 
-    test("recognizes applied migrations when API returns a bare array", async () => {
+    test("rejects an exact remote identity without content evidence", async () => {
         const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
         try {
             writeFileSync(join(dir, "20260425123000_create_users.sql"), "CREATE TABLE users (id uuid);\n");
@@ -298,16 +298,8 @@ describe("database migration helpers", () => {
                 },
             });
 
-            const result = await callback({
-                action: "push_migrations",
-                ref: "proj",
-                dir,
-                dry_run: true,
-            });
-            const text = result.content[0].text;
-
-            expect(text).toContain("Pending:\n  - 20260425124000_create_tasks.sql (20260425124000)");
-            expect(text).toContain("Already applied:\n  - 20260425123000_create_users.sql (20260425123000)");
+            await expect(callback({ action: "push_migrations", ref: "proj", dir, dry_run: true }))
+                .rejects.toThrow("Migration identity conflicts");
         } finally {
             rmSync(dir, { recursive: true, force: true });
         }
@@ -374,6 +366,142 @@ describe("database migration helpers", () => {
             expect(apply.content[0].text).toContain("Applied: 0");
             expect(apply.content[0].text).toContain("Skipped: 1");
             expect(postedNames).toEqual([]);
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    test.each([
+        ["non-string name", { version: "1785220280", name: {}, statements: ["CREATE TABLE users (id uuid);"] }],
+        ["non-string version", { version: {}, name: "20260425123000_create_users", statements: ["CREATE TABLE users (id uuid);"] }],
+    ])("rejects a %s before dry-run or apply without writing", async (_case, remoteMigration) => {
+        const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
+        const posts: unknown[] = [];
+        try {
+            writeFileSync(join(dir, "20260425123000_create_users.sql"), "CREATE TABLE users (id uuid);\n");
+            const callback = captureDatabaseTool({
+                get: async () => ({ ok: true, status: 200, data: [remoteMigration] }),
+                post: async (_path: string, body: unknown) => {
+                    posts.push(body);
+                    return { ok: true, status: 200, data: {} };
+                },
+            });
+
+            await expect(callback({ action: "push_migrations", ref: "proj", dir, dry_run: true }))
+                .rejects.toThrow("Invalid remote migration identity");
+            await expect(callback({ action: "push_migrations", ref: "proj", dir }))
+                .rejects.toThrow("Invalid remote migration identity");
+            expect(posts).toEqual([]);
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    test("rejects same-version SQL drift before dry-run or apply without writing", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
+        const secret = "remote-secret-must-not-be-reflected";
+        const posts: unknown[] = [];
+        try {
+            writeFileSync(join(dir, "20260425123000_create_users.sql"), "CREATE TABLE users (id uuid);\n");
+            const callback = captureDatabaseTool({
+                get: async () => ({
+                    ok: true,
+                    status: 200,
+                    data: [{
+                        version: "20260425123000",
+                        name: "20260425123000_create_users",
+                        statements: [`CREATE TABLE users (id text); -- ${secret}`],
+                    }],
+                }),
+                post: async (_path: string, body: unknown) => {
+                    posts.push(body);
+                    return { ok: false, status: 409, data: { code: "migration_checksum_conflict" } };
+                },
+            });
+
+            for (const dryRun of [true, false]) {
+                let message = "";
+                try {
+                    await callback({ action: "push_migrations", ref: "proj", dir, dry_run: dryRun });
+                } catch (error) {
+                    message = error instanceof Error ? error.message : String(error);
+                }
+                expect(message).toContain("Migration identity conflicts");
+                expect(message).not.toContain(secret);
+            }
+            expect(posts).toEqual([]);
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    test("does not reflect a remote migration name in identity conflicts", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
+        const remoteName = "sentinel_remote_name_secret";
+        const posts: unknown[] = [];
+        try {
+            writeFileSync(join(dir, "20260425123000_create_users.sql"), "CREATE TABLE users (id uuid);\n");
+            const callback = captureDatabaseTool({
+                get: async () => ({
+                    ok: true,
+                    status: 200,
+                    data: [{ version: "20260425123000", name: remoteName, statements: ["SELECT 1;"] }],
+                }),
+                post: async (_path: string, body: unknown) => {
+                    posts.push(body);
+                    return { ok: true, status: 200, data: {} };
+                },
+            });
+
+            for (const dryRun of [true, false]) {
+                let message = "";
+                try {
+                    await callback({ action: "push_migrations", ref: "proj", dir, dry_run: dryRun });
+                } catch (error) {
+                    message = error instanceof Error ? error.message : String(error);
+                }
+                expect(message).toContain("Migration identity conflicts");
+                expect(message).not.toContain(remoteName);
+            }
+            expect(posts).toEqual([]);
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    test.each([
+        [
+            "version",
+            [
+                { version: "1785220280", name: "remote_alpha", statements: ["SELECT 1;"] },
+                { version: "1785220280", name: "remote_beta", statements: ["SELECT 2;"] },
+            ],
+        ],
+        [
+            "name",
+            [
+                { version: "1785220280", name: "remote_duplicate", statements: ["SELECT 1;"] },
+                { version: "1785220281", name: "remote_duplicate", statements: ["SELECT 2;"] },
+            ],
+        ],
+    ])("rejects a duplicate remote %s before dry-run or apply without writing", async (_case, remoteMigrations) => {
+        const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
+        const posts: unknown[] = [];
+        try {
+            writeFileSync(join(dir, "20260425123000_create_users.sql"), "CREATE TABLE users (id uuid);\n");
+            const callback = captureDatabaseTool({
+                get: async () => ({ ok: true, status: 200, data: remoteMigrations }),
+                post: async (_path: string, body: unknown) => {
+                    posts.push(body);
+                    return { ok: true, status: 200, data: {} };
+                },
+            });
+
+            await expect(callback({ action: "push_migrations", ref: "proj", dir, dry_run: true }))
+                .rejects.toThrow("Invalid remote migration inventory");
+            await expect(callback({ action: "push_migrations", ref: "proj", dir }))
+                .rejects.toThrow("Invalid remote migration inventory");
+            expect(posts).toEqual([]);
         } finally {
             rmSync(dir, { recursive: true, force: true });
         }
@@ -447,7 +575,7 @@ describe("database migration helpers", () => {
             });
 
             await expect(callback({ action: "push_migrations", ref: "proj", dir, dry_run: true }))
-                .rejects.toThrow("Migration identity conflicts");
+                .rejects.toThrow("Invalid remote migration inventory");
         } finally {
             rmSync(dir, { recursive: true, force: true });
         }
@@ -493,7 +621,6 @@ describe("database migration helpers", () => {
 
             const toolResult = await callback({ action: "push_migrations", ref: "proj", dir });
             expect(toolResult.content[0].text).toContain("Failed to apply 20260425123000_create_users.sql (409)");
-            expect(toolResult.content[0].text).toContain("migration_checksum_conflict");
             expect(toolResult.content[0].text).toContain("Skipped before failure: 0");
             expect(toolResult.content[0].text).not.toContain("Migration push completed");
         } finally {
@@ -501,7 +628,32 @@ describe("database migration helpers", () => {
         }
     });
 
-    test("skips baseline markers before POST but still POSTs ordinary existing migrations", async () => {
+    test("does not reflect migration inventory or apply failure bodies", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
+        const inventorySecret = "inventory-response-secret";
+        const applySecret = "apply-response-secret";
+        try {
+            writeFileSync(join(dir, "20260425123000_create_users.sql"), "CREATE TABLE users (id uuid);\n");
+            const inventoryFailure = captureDatabaseTool({
+                get: async () => ({ ok: false, status: 503, data: { token: inventorySecret } }),
+            });
+            const inventoryResult = await inventoryFailure({ action: "push_migrations", ref: "proj", dir });
+            expect(inventoryResult.content[0].text).toBe("❌ Failed to load applied migrations (503)");
+            expect(inventoryResult.content[0].text).not.toContain(inventorySecret);
+
+            const applyFailure = captureDatabaseTool({
+                get: async () => ({ ok: true, status: 200, data: [] }),
+                post: async () => ({ ok: false, status: 500, data: { token: applySecret } }),
+            });
+            const applyResult = await applyFailure({ action: "push_migrations", ref: "proj", dir });
+            expect(applyResult.content[0].text).toContain("Failed to apply 20260425123000_create_users.sql (500)");
+            expect(applyResult.content[0].text).not.toContain(applySecret);
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    test("skips exact same-identity SQL without any POST", async () => {
         const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
         const posts: Array<{ path: string; body: unknown }> = [];
         try {
@@ -530,22 +682,16 @@ describe("database migration helpers", () => {
                 },
             });
 
-            const toolResult = await callback({ action: "push_migrations", ref: "proj", dir });
-            const text = toolResult.content[0].text;
-
-            expect(text).toContain("Migration push completed");
-            expect(text).toContain("Applied: 1");
-            expect(text).toContain("Skipped: 1");
-            expect(posts).toHaveLength(1);
-            expect(posts[0].path).toBe("/v1/projects/proj/database/migrations");
-            expect((posts[0].body as { name: string }).name).toBe("20260425124000_create_tasks");
-            expect((posts[0].body as { version: string }).version).toBe("20260425124000");
+            const result = await callback({ action: "push_migrations", ref: "proj", dir });
+            expect(result.content[0].text).toContain("Applied: 0");
+            expect(result.content[0].text).toContain("Skipped: 2");
+            expect(posts).toEqual([]);
         } finally {
             rmSync(dir, { recursive: true, force: true });
         }
     });
 
-    test("skips only exact historical direct-apply markers before POST", async () => {
+    test("rejects malformed historical direct-apply markers before POST", async () => {
         const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
         const postedNames: string[] = [];
         try {
@@ -598,23 +744,15 @@ describe("database migration helpers", () => {
                 },
             });
 
-            const toolResult = await callback({ action: "push_migrations", ref: "proj", dir });
-
-            expect(toolResult.content[0].text).toContain("Applied: 5");
-            expect(toolResult.content[0].text).toContain("Skipped: 1");
-            expect(postedNames).toEqual([
-                "20260425124000_create_tasks",
-                "20260425125000_create_reports",
-                "20260425126000_create_audits",
-                "20260425127000_create_metrics",
-                "20260425128000_create_events",
-            ]);
+            await expect(callback({ action: "push_migrations", ref: "proj", dir }))
+                .rejects.toThrow("Migration identity conflicts");
+            expect(postedNames).toEqual([]);
         } finally {
             rmSync(dir, { recursive: true, force: true });
         }
     });
 
-    test("skips only matching historical sha256 markers before POST", async () => {
+    test("rejects a mismatched historical sha256 marker before POST", async () => {
         const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
         const posts: Array<{ name: string }> = [];
         try {
@@ -653,12 +791,9 @@ describe("database migration helpers", () => {
                 },
             });
 
-            const toolResult = await callback({ action: "push_migrations", ref: "proj", dir });
-            const text = toolResult.content[0].text;
-
-            expect(text).toContain("Applied: 1");
-            expect(text).toContain("Skipped: 2");
-            expect(posts).toEqual([{ name: "20260425124000_create_tasks" }]);
+            await expect(callback({ action: "push_migrations", ref: "proj", dir }))
+                .rejects.toThrow("Migration identity conflicts");
+            expect(posts).toEqual([]);
         } finally {
             rmSync(dir, { recursive: true, force: true });
         }

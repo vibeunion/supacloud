@@ -197,130 +197,103 @@ function sortMigrationFiles(migrations: MigrationFile[]): MigrationFile[] {
     return sorted;
 }
 
-function appliedMigrationKeys(data: unknown): Set<string> {
-    const rows = Array.isArray(data) ? data : (data as { rows?: unknown[] })?.rows || [];
-    const keys = new Set<string>();
-    for (const row of rows) {
-        if (!row || typeof row !== "object") continue;
-        const migration = row as { version?: unknown; name?: unknown };
-        if (migration.version != null) keys.add(String(migration.version));
-        if (migration.name != null) keys.add(String(migration.name));
+type RemoteMigrationIdentity = { name: string | null; statements: unknown; version: string };
+type MigrationPushPlan = { alreadyApplied: MigrationFile[]; pending: MigrationFile[] };
+
+function migrationRows(data: unknown): unknown[] {
+    if (Array.isArray(data)) return data;
+    if (data && typeof data === "object" && Array.isArray((data as { rows?: unknown }).rows)) {
+        return (data as { rows: unknown[] }).rows;
     }
-    return keys;
+    throw new Error("Invalid remote migration inventory");
 }
 
-function migrationRows(data: unknown): Array<Record<string, unknown>> {
-    const rows = Array.isArray(data) ? data : (data as { rows?: unknown[] })?.rows || [];
-    return Array.isArray(rows)
-        ? rows.filter((row): row is Record<string, unknown> => Boolean(row && typeof row === "object"))
-        : [];
+function migrationIdentity(row: unknown): RemoteMigrationIdentity {
+    if (!row || typeof row !== "object" || Array.isArray(row)) {
+        throw new Error("Invalid remote migration identity");
+    }
+    const migration = row as Record<string, unknown>;
+    if (!isMigrationInventoryVersion(migration.version) || !isMigrationInventoryName(migration.name)) {
+        throw new Error("Invalid remote migration identity");
+    }
+    return { version: migration.version, name: migration.name, statements: migration.statements };
 }
-
-function migrationIdentityKey(version: string, name: string): string {
-    return `${version}\u0000${name}`;
-}
-
-type MigrationIdentity = { name: string; version: string };
-type RemoteMigrationIdentity = MigrationIdentity & { statements: unknown };
-type MigrationIdentityConflict = {
-    file: string;
-    local: MigrationIdentity;
-    remote: MigrationIdentity;
-};
 
 function migrationIdentities(data: unknown): RemoteMigrationIdentity[] {
-    return migrationRows(data).flatMap((row) => (
-        row.version == null || row.name == null
-            ? []
-            : [{ version: String(row.version), name: String(row.name), statements: row.statements }]
-    ));
+    const identities = migrationRows(data).map(migrationIdentity);
+    const versions = new Set<string>();
+    const names = new Set<string>();
+    for (const identity of identities) {
+        if (versions.has(identity.version) || (identity.name !== null && names.has(identity.name))) {
+            throw new Error("Invalid remote migration inventory");
+        }
+        versions.add(identity.version);
+        if (identity.name !== null) names.add(identity.name);
+    }
+    return identities;
 }
 
-function isLegacyNameBoundMigration(
-    local: MigrationFile,
-    remote: RemoteMigrationIdentity,
-    remoteMigrations: RemoteMigrationIdentity[],
-): boolean {
-    return remoteMigrations.filter((candidate) => candidate.name === local.name).length === 1
-        && local.name === remote.name
-        && local.version !== remote.version
-        && Array.isArray(remote.statements)
+function appliedMigrationKeys(data: unknown): Set<string> {
+    const keys = new Set<string>();
+    for (const migration of migrationIdentities(data)) {
+        keys.add(migration.version);
+        if (migration.name !== null) keys.add(migration.name);
+    }
+    return keys;
+}
+
+function singleRemoteStatement(remote: RemoteMigrationIdentity): string | null {
+    return Array.isArray(remote.statements)
         && remote.statements.length === 1
         && typeof remote.statements[0] === "string"
-        && remote.statements[0].trim() === local.sql.trim();
+        ? remote.statements[0]
+        : null;
 }
 
-function identityConflicts(
+function exactIdentityIsApplied(local: MigrationFile, remote: RemoteMigrationIdentity): boolean {
+    const statement = singleRemoteStatement(remote);
+    if (statement === null) return false;
+    if (statement === `baseline:${local.name}` || statement === `direct-apply:${local.name}`) return true;
+    const rawChecksum = createHash("sha256").update(local.rawBytes).digest("hex");
+    return statement === `sha256:${rawChecksum}` || statement.trim() === local.sql.trim();
+}
+
+function legacyIdentityIsApplied(local: MigrationFile, remote: RemoteMigrationIdentity): boolean {
+    const statement = singleRemoteStatement(remote);
+    return remote.name === local.name
+        && remote.version !== local.version
+        && statement !== null
+        && statement.trim() === local.sql.trim();
+}
+
+function migrationIdentityConflict(local: MigrationFile): Error {
+    return new Error(`Migration identity conflicts:\n- ${local.file} (${local.version}) conflicts with remote inventory`);
+}
+
+function migrationDisposition(
     local: MigrationFile,
-    remote: RemoteMigrationIdentity,
     remoteMigrations: RemoteMigrationIdentity[],
-): boolean {
-    const reusesVersionOrName = local.version === remote.version || local.name === remote.name;
-    const exactlyMatches = local.version === remote.version && local.name === remote.name;
-    return reusesVersionOrName
-        && !exactlyMatches
-        && !isLegacyNameBoundMigration(local, remote, remoteMigrations);
+): "applied" | "pending" {
+    const sameVersion = remoteMigrations.filter((remote) => remote.version === local.version);
+    const sameName = remoteMigrations.filter((remote) => remote.name === local.name);
+    if (sameVersion.length > 1 || sameName.length > 1) throw migrationIdentityConflict(local);
+    if (!sameVersion.length && !sameName.length) return "pending";
+    if (sameVersion[0] && sameName[0] && sameVersion[0] !== sameName[0]) throw migrationIdentityConflict(local);
+    const remote = sameVersion[0] ?? sameName[0]!;
+    const exactIdentity = remote.version === local.version && remote.name === local.name;
+    if (exactIdentity && exactIdentityIsApplied(local, remote)) return "applied";
+    if (!sameVersion.length && legacyIdentityIsApplied(local, remote)) return "applied";
+    throw migrationIdentityConflict(local);
 }
 
-function migrationIdentityConflicts(data: unknown, migrationFiles: MigrationFile[]): MigrationIdentityConflict[] {
+function migrationPushPlan(data: unknown, migrationFiles: MigrationFile[]): MigrationPushPlan {
     const remoteMigrations = migrationIdentities(data);
-    return migrationFiles.flatMap((localMigration) => remoteMigrations
-        .filter((remoteMigration) => identityConflicts(localMigration, remoteMigration, remoteMigrations))
-        .map((remoteMigration) => ({ file: localMigration.file, local: localMigration, remote: remoteMigration })));
-}
-
-function legacyNameBoundMigrationKeys(data: unknown, migrationFiles: MigrationFile[]): Set<string> {
-    const remoteMigrations = migrationIdentities(data);
-    return new Set(migrationFiles.flatMap((localMigration) => (
-        remoteMigrations.some((remoteMigration) => (
-            isLegacyNameBoundMigration(localMigration, remoteMigration, remoteMigrations)
-        ))
-            ? [migrationIdentityKey(localMigration.version, localMigration.name)]
-            : []
-    )));
-}
-
-function assertNoMigrationIdentityConflicts(data: unknown, migrationFiles: MigrationFile[]): void {
-    const conflicts = migrationIdentityConflicts(data, migrationFiles);
-    if (!conflicts.length) return;
-    throw new Error([
-        "Migration identity conflicts:",
-        ...conflicts.map(({ file, local, remote }) => (
-            `- ${file} (${local.version}) conflicts with remote ${remote.name} (${remote.version})`
-        )),
-    ].join("\n"));
-}
-
-function nameBoundMigrationMarkerKeys(data: unknown): Set<string> {
-    const keys = new Set<string>();
-    for (const row of migrationRows(data)) {
-        if (row.version == null || row.name == null || !Array.isArray(row.statements)) continue;
-        if (row.statements.length !== 1) continue;
-        const name = String(row.name);
-        const marker = row.statements[0];
-        if (marker !== `baseline:${name}` && marker !== `direct-apply:${name}`) continue;
-        keys.add(migrationIdentityKey(String(row.version), String(row.name)));
+    const plan: MigrationPushPlan = { alreadyApplied: [], pending: [] };
+    for (const migration of migrationFiles) {
+        const disposition = migrationDisposition(migration, remoteMigrations);
+        plan[disposition === "applied" ? "alreadyApplied" : "pending"].push(migration);
     }
-    return keys;
-}
-
-function historicalChecksumMarkerKeys(
-    data: unknown,
-    migrationFiles: MigrationFile[],
-): Set<string> {
-    const filesByKey = new Map(migrationFiles.map((migration) => [migrationIdentityKey(migration.version, migration.name), migration]));
-    const keys = new Set<string>();
-    for (const row of migrationRows(data)) {
-        if (row.version == null || row.name == null || !Array.isArray(row.statements) || row.statements.length !== 1) continue;
-        const marker = row.statements[0];
-        if (typeof marker !== "string" || !/^sha256:[0-9a-f]{64}$/.test(marker)) continue;
-        const key = migrationIdentityKey(String(row.version), String(row.name));
-        const migration = filesByKey.get(key);
-        if (!migration) continue;
-        const checksum = createHash("sha256").update(migration.rawBytes).digest("hex");
-        if (marker === `sha256:${checksum}`) keys.add(key);
-    }
-    return keys;
+    return plan;
 }
 
 function isAlreadyAppliedMigrationResponse(response: { status: number; data: unknown }): boolean {
@@ -577,16 +550,15 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
 
                     const migrationsResult = await http.get(`/v1/projects/${ref}/database/migrations`);
                     if (!migrationsResult.ok) {
-                        text = `❌ Failed to load applied migrations (${migrationsResult.status}): ${JSON.stringify(migrationsResult.data)}`;
+                        text = `❌ Failed to load applied migrations (${migrationsResult.status})`;
                         break;
                     }
 
-                    assertNoMigrationIdentityConflicts(migrationsResult.data, migrationFiles);
+                    const migrationPlan = migrationPushPlan(migrationsResult.data, migrationFiles);
 
                     if (args.dry_run) {
-                        const appliedKeys = appliedMigrationKeys(migrationsResult.data);
-                        const pending = migrationFiles.filter(({ name, version }) => !appliedKeys.has(name) && !appliedKeys.has(String(version)));
-                        const alreadyApplied = migrationFiles.filter(({ name, version }) => appliedKeys.has(name) || appliedKeys.has(String(version)));
+                        const pending = migrationPlan.pending;
+                        const alreadyApplied = migrationPlan.alreadyApplied;
                         const pendingWithSql = pending;
                         let vectorEnabled: boolean | null = null;
                         if (pendingWithSql.some(({ sql }) => sqlReferencesVector(sql) || sqlCreatesVectorExtension(sql))) {
@@ -611,18 +583,8 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
                     }
 
                     const applied: string[] = [];
-                    const skipped: string[] = [];
-                    const nameBoundMarkerKeys = nameBoundMigrationMarkerKeys(migrationsResult.data);
-                    const historicalChecksumKeys = historicalChecksumMarkerKeys(migrationsResult.data, migrationFiles);
-                    const legacyNameBoundKeys = legacyNameBoundMigrationKeys(migrationsResult.data, migrationFiles);
-                    for (const { file, name, version, sql } of migrationFiles) {
-                        const migrationKey = migrationIdentityKey(version, name);
-                        if (nameBoundMarkerKeys.has(migrationKey)
-                            || historicalChecksumKeys.has(migrationKey)
-                            || legacyNameBoundKeys.has(migrationKey)) {
-                            skipped.push(file);
-                            continue;
-                        }
+                    const skipped = migrationPlan.alreadyApplied.map(({ file }) => file);
+                    for (const { file, name, version, sql } of migrationPlan.pending) {
                         const r = await http.post(`/v1/projects/${ref}/database/migrations`, { name, sql, version });
                         if (r.ok) {
                             applied.push(file);
@@ -631,8 +593,6 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
                         } else {
                             text = [
                                 `❌ Failed to apply ${file} (${r.status})`,
-                                JSON.stringify(r.data, null, 2),
-                                "",
                                 `Applied before failure: ${applied.length}`,
                                 `Skipped before failure: ${skipped.length}`,
                             ].join("\n");
