@@ -9,7 +9,7 @@ import {
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 setDefaultTimeout(30_000);
 
@@ -72,11 +72,13 @@ async function installActivationCandidate(
 ): Promise<ActivationCandidate> {
   const activationId = request.activationId ?? randomUUID();
   const versionRoot = join(projectRoot, ".versions", request.slug, request.version);
-  await mkdir(versionRoot, { recursive: true });
+  const sourceRoot = join(versionRoot, "src");
+  await mkdir(sourceRoot, { recursive: true });
   const artifactSha256 = createHash("sha256").update(request.source).digest("hex");
   await Promise.all([
     writeFile(join(versionRoot, "index.js"), request.source),
     writeFile(join(versionRoot, `index.${artifactSha256.slice(0, 16)}.js`), request.source),
+    writeFile(join(sourceRoot, ".supacloud-entry.js"), request.source),
   ]);
   const manifest = JSON.stringify({
     verify_jwt: request.verifyJwt ?? false,
@@ -134,6 +136,18 @@ async function invokeAnonymous(slug: string): Promise<Response> {
   return fetch(`${edgeBaseUrl}/functions/v1/${slug}`, {
     headers: { "x-project-ref": PROJECT_REF },
   });
+}
+
+async function installActivationCandidateWithStaticAsset(
+  slug: string,
+  source: string,
+  asset: string,
+): Promise<ActivationCandidate> {
+  const candidate = await installActivationCandidate({ slug, version: "1", source, verifyJwt: false });
+  const assetPath = join(projectRoot, ".versions", slug, "1", "src", "public", "message.txt");
+  await mkdir(dirname(assetPath), { recursive: true });
+  await writeFile(assetPath, asset);
+  return candidate;
 }
 
 function reserveEdgePort(): number {
@@ -569,6 +583,94 @@ describe("Edge Runtime function config boundary", () => {
         });
       }
     }
+    },
+  );
+
+  test.skipIf(process.platform !== "linux")(
+    "serves an attested multi-file Function static asset after activation",
+    async () => {
+      const slug = "activation_static_asset";
+      await resetActivationBaseline(slug);
+      const candidate = await installActivationCandidateWithStaticAsset(
+        slug,
+        `
+          export default async () => new Response(
+            await Bun.file(import.meta.dir + "/public/message.txt").text(),
+          );
+        `,
+        "asset-from-attested-source",
+      );
+      let committed = false;
+
+      try {
+        expect((await activationControl({
+          slug,
+          activationId: candidate.activationId,
+          action: "begin",
+        })).status).toBe(200);
+        expect((await activationControl({
+          slug,
+          activationId: candidate.activationId,
+          action: "preheat",
+          version: "1",
+        })).status).toBe(200);
+        await publishActivationCandidate(slug, candidate);
+        expect((await activationControl({
+          slug,
+          activationId: candidate.activationId,
+          action: "commit",
+        })).status).toBe(200);
+        committed = true;
+
+        const response = await invokeAnonymous(slug);
+        expect(response.status).toBe(200);
+        expect(await response.text()).toBe("asset-from-attested-source");
+      } finally {
+        if (!committed) {
+          await activationControl({ slug, activationId: candidate.activationId, action: "abort" });
+        }
+      }
+    },
+  );
+
+  test.skipIf(process.platform !== "linux").each(["replacement", "symlink"] as const)(
+    "rejects an attested source entry %s before activation",
+    async (mutation) => {
+      const slug = `activation_source_${mutation}`;
+      const authoritySource = functionSource("authority-must-not-be-replaced");
+      const candidate = await installActivationCandidate({
+        slug,
+        version: "1",
+        source: authoritySource,
+        verifyJwt: false,
+      });
+      const versionRoot = join(projectRoot, ".versions", slug, "1");
+      const sourceEntry = join(versionRoot, "src", ".supacloud-entry.js");
+
+      if (mutation === "replacement") {
+        await writeFile(sourceEntry, functionSource("replacement-must-not-run"));
+      } else {
+        await rm(sourceEntry);
+        await symlink(join(versionRoot, "index.js"), sourceEntry);
+      }
+
+      try {
+        expect((await activationControl({
+          slug,
+          activationId: candidate.activationId,
+          action: "begin",
+        })).status).toBe(200);
+        const preheat = await activationControl({
+          slug,
+          activationId: candidate.activationId,
+          action: "preheat",
+          version: "1",
+        });
+        expect(preheat.status).toBe(400);
+        expect(await preheat.text()).not.toContain("replacement-must-not-run");
+      } finally {
+        await activationControl({ slug, activationId: candidate.activationId, action: "abort" });
+      }
     },
   );
 

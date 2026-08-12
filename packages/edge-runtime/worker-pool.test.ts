@@ -729,6 +729,43 @@ describe("WorkerPool subprocess guard", () => {
     }
   });
 
+  linuxDescriptorTest("allows an attested artifact to read a project static asset", async () => {
+    const projectRoot = await mkdtemp(join(homedir(), ".supacloud-preheat-attested-assets-"));
+    const versionRoot = join(projectRoot, ".versions", "attested-assets", "1");
+    const functionPath = join(versionRoot, "src", ".supacloud-entry.js");
+    const assetPath = join(versionRoot, "src", "public", "message.txt");
+    await mkdir(join(versionRoot, "src", "public"), { recursive: true });
+    await Bun.write(assetPath, "attested-asset");
+    await Bun.write(functionPath, `
+      export default async () => new Response(await Bun.file(import.meta.dir + "/public/message.txt").text());
+    `);
+    const artifactSha256 = await functionArtifactSha256(functionPath);
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    try {
+      const response = await pool.dispatch({
+        functionId: "proj_preheat_attested_assets_v1",
+        functionPath,
+        projectRoot,
+        projectRef: "proj_preheat_attested_assets",
+        functionVersion: "1",
+        moduleVersion: "v1",
+        artifactSha256,
+        env: {},
+        request: new Request("http://edge.local/functions/v1/attested-assets"),
+      });
+
+      const responseBody = await response.text();
+      expect({ status: response.status, body: responseBody }).toEqual({
+        status: 200,
+        body: "attested-asset",
+      });
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   linuxDescriptorTest("rejects a worker preheat whose artifact hash changed", async () => {
     const projectRoot = await mkdtemp(join(homedir(), ".supacloud-preheat-hash-mismatch-"));
     const functionPath = join(projectRoot, "attested.ts");
@@ -760,7 +797,7 @@ describe("WorkerPool subprocess guard", () => {
 
   linuxDescriptorTest("does not reuse a module cache entry after artifact replacement", async () => {
     const projectRoot = await mkdtemp(join(homedir(), ".supacloud-preheat-artifact-aba-"));
-    const functionPath = join(projectRoot, "attested.ts");
+    const functionPath = join(projectRoot, ".versions", "attested", "1", "src", ".supacloud-entry.js");
     const projectRef = "proj_preheat_aba";
     const functionSlug = "attested";
     const functionId = `${projectRef}_${functionSlug}_v1`;
@@ -777,6 +814,7 @@ describe("WorkerPool subprocess guard", () => {
     };
 
     try {
+      await mkdir(join(projectRoot, ".versions", "attested", "1", "src"), { recursive: true });
       await Bun.write(functionPath, `export default () => new Response("A");`);
       expect(await preheatCurrentArtifact()).toMatchObject({ succeeded: 1, cacheMisses: 1 });
 

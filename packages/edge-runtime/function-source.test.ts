@@ -45,13 +45,13 @@ describe("multi-file function runtime source", () => {
     ]);
   });
 
-  test("derives the content-addressed runtime entry from the full authority digest", () => {
+  test("uses the immutable source runtime entry after validating the authority digest", () => {
     expect(attestedFunctionArtifactPath(
       "/functions/project",
       "supauth",
       "7",
       "a".repeat(64),
-    )).toBe("/functions/project/.versions/supauth/7/index.aaaaaaaaaaaaaaaa.js");
+    )).toBe("/functions/project/.versions/supauth/7/src/.supacloud-entry.js");
     expect(() => attestedFunctionArtifactPath(
       "/functions/project",
       "supauth",

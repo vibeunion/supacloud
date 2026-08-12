@@ -12,12 +12,15 @@ export function attestedFunctionArtifactPath(
   if (!ARTIFACT_SHA256_PATTERN.test(artifactSha256)) {
     throw new Error("Function activation artifact digest is invalid");
   }
+  // The digest attests this immutable source entry while its directory remains
+  // the base for bundled static assets resolved through import.meta.dir.
   return path.join(
     projectRoot,
     ".versions",
     functionName,
     version,
-    `index.${artifactSha256.slice(0, 16)}.js`,
+    "src",
+    BUNDLED_SOURCE_RUNTIME_ENTRY,
   );
 }
 
