@@ -13,6 +13,13 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.21.2](https://github.com/zuohuadong/supacloud/compare/cli-v0.21.1...cli-v0.21.2) (2026-08-12)
+
+
+### Bug Fixes
+
+* **cli:** bind legacy migration identities to content ([#876](https://github.com/zuohuadong/supacloud/issues/876)) ([14a7bd0](https://github.com/zuohuadong/supacloud/commit/14a7bd03fbdc88c73fa8a6d87eb563598c972f71))
+
 ## [0.21.1](https://github.com/zuohuadong/supacloud/compare/cli-v0.21.0...cli-v0.21.1) (2026-08-12)
 
 
