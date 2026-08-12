@@ -26,6 +26,27 @@ function mutationRecord(overrides: Record<string, unknown> = {}) {
     };
 }
 
+function nonSucceededMutation(status: string) {
+    if (status === "pending") {
+        return mutationRecord({
+            status, receipt: null, response_status: null, completed_at: null,
+            lease: { owner: null, expires_at: null, fencing_epoch: 0 },
+        });
+    }
+    if (status === "running") {
+        return mutationRecord({
+            status, receipt: null, response_status: null, completed_at: null,
+            lease: { owner: "worker-one", expires_at: "2099-08-11T00:00:00.000Z", fencing_epoch: 1 },
+        });
+    }
+    return mutationRecord({
+        status,
+        response_status: status === "failed_terminal" ? 400 : 503,
+        failure_code: "PROVIDER_FAILURE",
+        completed_at: ["failed_terminal", "outcome_unknown"].includes(status) ? UPDATED_AT : null,
+    });
+}
+
 function captureMutationTool(http: Record<string, unknown>) {
     let callback: ((args: Record<string, unknown>) => Promise<{
         content: Array<{ text: string }>;
@@ -76,6 +97,31 @@ test("Mutation status reads the exact bounded path and emits the fixed public pr
     });
 });
 
+test.each(["pending", "running", "failed_retryable", "failed_terminal", "outcome_unknown"])(
+    "Mutation status exits as an error for observed non-success state %s while preserving its safe projection",
+    async (status) => {
+        const callback = captureMutationTool({
+            get: async () => ({
+                ok: true,
+                status: 200,
+                data: { project_ref: "proj", mutation: nonSucceededMutation(status) },
+            }),
+        });
+
+        const response = await callback({ action: "status", ref: "proj", mutation_id: MUTATION_ID });
+        const payload = JSON.parse(response.content[0].text);
+
+        expect(response.isError).toBe(true);
+        expect(payload).toMatchObject({
+            ok: false,
+            operation: "mutations.status",
+            project_ref: "proj",
+            mutation: { mutation_id: MUTATION_ID, status },
+            error: { code: "MUTATION_NOT_SUCCEEDED", http_status: null },
+        });
+    },
+);
+
 test.each([
     ["non-empty checkpoint", { checkpoint: { phase: "private-checkpoint-sentinel" } }, "private-checkpoint-sentinel"],
     ["non-empty receipt", { receipt: { summary: "private-receipt-sentinel" } }, "private-receipt-sentinel"],
@@ -121,6 +167,27 @@ test("Mutation status rejects extra response fields without reflecting them", as
 
     expect(response.isError).toBe(true);
     expect(response.content[0].text).not.toContain(privateSentinel);
+});
+
+test.each([
+    ["non-canonical base64url", "v1/edge-function/YR"],
+    ["non-UTF-8 decoded", "v1/edge-function/_w"],
+])("Mutation status rejects a %s resource key without reflecting it", async (_case, resourceKey) => {
+    const callback = captureMutationTool({
+        get: async () => ({
+            ok: true,
+            status: 200,
+            data: { project_ref: "proj", mutation: mutationRecord({ resource_key: resourceKey }) },
+        }),
+    });
+
+    const response = await callback({ action: "status", ref: "proj", mutation_id: MUTATION_ID });
+
+    expect(response.isError).toBe(true);
+    expect(JSON.parse(response.content[0].text).error).toEqual({
+        code: "INVALID_RESPONSE", http_status: null,
+    });
+    expect(response.content[0].text).not.toContain(resourceKey);
 });
 
 test("Mutation status reports HTTP failure without reflecting the server body", async () => {

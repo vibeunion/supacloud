@@ -2130,4 +2130,54 @@ describe("supacloud-cli process contract", () => {
         expect(status.checks.authentication.ok).toBeNull();
         expect(result.stdout + result.stderr).not.toContain("application-service-role");
     });
+
+    test("mutation status exits non-zero for a durable non-success state", async () => {
+        const requestedPaths: string[] = [];
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch(request) {
+                requestedPaths.push(new URL(request.url).pathname);
+                return Response.json({
+                    project_ref: "abc123",
+                    mutation: {
+                        project_ref: "abc123",
+                        mutation_id: SCHEDULE_ID,
+                        operation: "scheduled_functions.create",
+                        resource_key: null,
+                        request_fingerprint: "a".repeat(64),
+                        principal: { type: "project", id: "project:abc123" },
+                        status: "pending",
+                        checkpoint: {},
+                        receipt: null,
+                        response_status: null,
+                        failure_code: null,
+                        lease: { owner: null, expires_at: null, fencing_epoch: 0 },
+                        completed_at: null,
+                        created_at: "2026-08-12T00:00:00.000Z",
+                        updated_at: "2026-08-12T00:00:00.000Z",
+                    },
+                });
+            },
+        });
+        servers.push(server);
+
+        const response = await runProjectCli([
+            "mutations", "status", "--ref", "abc123", "--mutation_id", SCHEDULE_ID,
+        ], {
+            SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+            SUPACLOUD_API_TOKEN: "test-token",
+            SUPACLOUD_PROJECT_REF: "abc123",
+        });
+        const payload = JSON.parse(response.stdout);
+
+        expect(response.exitCode).toBe(1);
+        expect(requestedPaths).toEqual([`/v1/projects/abc123/mutations/${SCHEDULE_ID}`]);
+        expect(payload).toMatchObject({
+            ok: false,
+            operation: "mutations.status",
+            mutation: { mutation_id: SCHEDULE_ID, status: "pending" },
+            error: { code: "MUTATION_NOT_SUCCEEDED", http_status: null },
+        });
+    });
 });

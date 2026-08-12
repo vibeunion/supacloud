@@ -36,6 +36,7 @@ import { closeTaskWebSocket, messageTaskWebSocket, openTaskWebSocket } from "./r
 import { isS3DataPlaneRequest } from "./utils/storage-s3-paths";
 import { studioAuthRoutes } from "./routes/studio-auth";
 import { caddyAskRoutes } from "./routes/caddy-ask";
+import { validationErrorResponse } from "./utils/http-validation";
 
 function getWebConsoleDir(): string {
   return resolveWebConsoleDir();
@@ -302,6 +303,31 @@ async function ensureGatewayRoutesAfterServe(initialReady: boolean): Promise<voi
 }
 
 const app = new Elysia({ strictPath: false })
+  .onError({ as: "global" }, ({ code, error, set }) => {
+    if (code === "VALIDATION") {
+      return validationErrorResponse(set);
+    }
+    const { isAppError, toAppError } = require("./utils/errors") as typeof import("./utils/errors");
+
+    if (isAppError(error)) {
+      set.status = error.statusCode;
+      return error.toJSON();
+    }
+
+    logger.error(`Error [${code}]:`, error);
+
+    if (code === "NOT_FOUND") {
+      set.status = 404;
+      return { message: "Not found", code: "NOT_FOUND" };
+    }
+
+    const appError = toAppError(error);
+    set.status = appError.statusCode;
+    if (appError.statusCode === 503) {
+      set.headers["Retry-After"] = "5";
+    }
+    return appError.toJSON();
+  })
   // Swagger docs
   .use(
     swagger({
@@ -494,39 +520,6 @@ const app = new Elysia({ strictPath: false })
   .get("/monitor/health", async () => {
     const { HealthChecker } = await import("./infra/health");
     return await HealthChecker.runFullCheck();
-  })
-
-  // Error handling (with DB graceful degradation)
-  .onError(({ code, error, set }) => {
-    const { isAppError, toAppError } = require("./utils/errors") as typeof import("./utils/errors");
-
-    if (isAppError(error)) {
-      set.status = error.statusCode;
-      return error.toJSON();
-    }
-
-    logger.error(`Error [${code}]:`, error);
-
-    if (code === "VALIDATION") {
-      set.status = 400;
-      return {
-        message: "Validation failed",
-        code: "VALIDATION_ERROR",
-        details: error.message,
-      };
-    }
-
-    if (code === "NOT_FOUND") {
-      set.status = 404;
-      return { message: "Not found", code: "NOT_FOUND" };
-    }
-
-    const appError = toAppError(error);
-    set.status = appError.statusCode;
-    if (appError.statusCode === 503) {
-      set.headers["Retry-After"] = "5";
-    }
-    return appError.toJSON();
   });
 
 /**
@@ -774,7 +767,13 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
           await logAuditEvent({ request, status: Number(set.status || 200) });
         }
       })
-      .onError(async ({ request, code, error, set }) => {
+      .onError({ as: "global" }, async ({ request, code, error, set }) => {
+        if (code === "VALIDATION") {
+          if (shouldAuditRequest(request)) {
+            await logAuditEvent({ request, status: 400, action: "error:VALIDATION" });
+          }
+          return validationErrorResponse(set);
+        }
         if (shouldAuditRequest(request)) {
           await logAuditEvent({ request, status: Number(set.status || 500), action: `error:${code}` });
         }
@@ -784,10 +783,6 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
           return error.toJSON();
         }
         logger.error(`[API] Unhandled error [${code}]:`, error);
-        if (code === "VALIDATION") {
-          set.status = 400;
-          return { message: "Validation failed", code: "VALIDATION_ERROR", details: error.message };
-        }
         if (code === "NOT_FOUND") {
           set.status = 404;
           return { message: "Not found", code: "NOT_FOUND" };

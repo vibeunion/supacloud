@@ -8,6 +8,7 @@ import {
   PROJECT_USER_LIFECYCLE_LOCK_NAMESPACE,
 } from "../utils/project-user-lifecycle";
 import { config } from "../config";
+import { migrateProjectMutationJournal } from "./project-mutation-migration";
 import { executeSqlStatements } from "./sql-statements";
 
 function configuredAuthAuthoritySql(): { backfill: string; constant: string } {
@@ -163,8 +164,7 @@ export async function ensurePlatformV2Schema(transaction: SQL): Promise<void> {
       project_ref VARCHAR(20) NOT NULL REFERENCES projects(ref) ON DELETE CASCADE,
       mutation_id UUID NOT NULL,
       operation VARCHAR(128) NOT NULL CHECK (operation ~ '^[a-z0-9][a-z0-9._:-]{0,127}$'),
-      resource_key VARCHAR(255)
-        CHECK (resource_key IS NULL OR resource_key ~ '^[A-Za-z0-9][A-Za-z0-9._:/-]{0,254}$'),
+      resource_key VARCHAR(255),
       request_fingerprint CHAR(64) NOT NULL CHECK (request_fingerprint ~ '^[0-9a-f]{64}$'),
       principal_type VARCHAR(20) NOT NULL
         CHECK (principal_type IN ('master', 'admin', 'project')),
@@ -186,7 +186,7 @@ export async function ensurePlatformV2Schema(transaction: SQL): Promise<void> {
       lease_token UUID,
       lease_expires_at TIMESTAMPTZ,
       fencing_epoch BIGINT NOT NULL DEFAULT 0 CHECK (fencing_epoch >= 0),
-      recovery_not_before TIMESTAMPTZ,
+      recovery_not_before TIMESTAMPTZ DEFAULT clock_timestamp(),
       completed_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -199,18 +199,21 @@ export async function ensurePlatformV2Schema(transaction: SQL): Promise<void> {
       CHECK (
         (status IN ('succeeded', 'failed_terminal', 'outcome_unknown')) =
         (completed_at IS NOT NULL)
+      ),
+      CONSTRAINT project_mutations_succeeded_response_check CHECK (
+        status <> 'succeeded'
+        OR (response_status IS NOT NULL AND response_status BETWEEN 200 AND 299)
+      ),
+      CONSTRAINT project_mutations_recoverable_due_check CHECK (
+        status NOT IN ('pending', 'running', 'failed_retryable')
+        OR recovery_not_before IS NOT NULL
+      ),
+      CONSTRAINT project_mutations_fencing_epoch_safe_check CHECK (
+        fencing_epoch <= 9007199254740991
       )
     );
     ALTER TABLE project_mutations
       ADD COLUMN IF NOT EXISTS recovery_not_before TIMESTAMPTZ;
-    ALTER TABLE project_mutations
-      DROP CONSTRAINT IF EXISTS project_mutations_succeeded_response_check;
-    ALTER TABLE project_mutations
-      ADD CONSTRAINT project_mutations_succeeded_response_check
-      CHECK (
-        status <> 'succeeded'
-        OR (response_status IS NOT NULL AND response_status BETWEEN 200 AND 299)
-      );
     CREATE INDEX IF NOT EXISTS project_mutations_status_idx
       ON project_mutations(project_ref, status, updated_at DESC);
     CREATE INDEX IF NOT EXISTS project_mutations_recovery_idx
@@ -524,7 +527,10 @@ export async function ensurePlatformV2Schema(transaction: SQL): Promise<void> {
 }
 
 export async function ensurePlatformV2SchemaInTransaction(controlPlaneDb: SQL): Promise<void> {
-  await controlPlaneDb.begin(async (transaction) => ensurePlatformV2Schema(transaction));
+  await controlPlaneDb.begin(async (transaction) => {
+    await ensurePlatformV2Schema(transaction);
+    await migrateProjectMutationJournal(transaction);
+  });
 }
 
 type LegacyWebhook = {

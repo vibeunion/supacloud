@@ -43,6 +43,12 @@ async function mutationStatus(
     if (readback.kind === "invalid") {
         return releaseControlFailure("mutations.status", "INVALID_RESPONSE", null);
     }
+    if (readback.mutation.status !== "succeeded") {
+        return releaseControlFailure("mutations.status", "MUTATION_NOT_SUCCEEDED", null, {
+            project_ref: ref,
+            mutation: readback.mutation,
+        });
+    }
     return releaseControlSuccess("mutations.status", { project_ref: ref, mutation: readback.mutation });
 }
 

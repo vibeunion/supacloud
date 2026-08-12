@@ -119,6 +119,8 @@ describe("delegated project authorization", () => {
       ["POST", "/frontend/deployments", "operations.manage"],
       ["GET", "/tasks", "operations.read"],
       ["POST", "/pipelines", "operations.manage"],
+      ["GET", "/mutations/00000000-0000-4000-8000-000000000001", "operations.read"],
+      ["POST", "/mutations/00000000-0000-4000-8000-000000000001/reconcile", "operations.manage"],
       ["POST", "/database/migrations", "database.migrations.manage"],
       ["POST", "/database/migrations/baseline", "database.migrations.manage"],
       ["GET", "", "project.read"],
