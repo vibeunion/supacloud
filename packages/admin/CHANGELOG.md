@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.0](https://github.com/zuohuadong/supacloud/compare/admin-v0.12.1...admin-v0.13.0) (2026-08-12)
+
+
+### Features
+
+* **admin:** add verified logical backup controls ([#885](https://github.com/zuohuadong/supacloud/issues/885)) ([14290c3](https://github.com/zuohuadong/supacloud/commit/14290c312250c4a6c58b6f7a36d5d43600beae6f))
+
 ## [0.12.1](https://github.com/zuohuadong/supacloud/compare/admin-v0.12.0...admin-v0.12.1) (2026-08-12)
 
 

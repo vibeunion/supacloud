@@ -13,6 +13,13 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.21.4](https://github.com/zuohuadong/supacloud/compare/cli-v0.21.3...cli-v0.21.4) (2026-08-12)
+
+
+### Bug Fixes
+
+* **cli:** redact database mutation failures ([#883](https://github.com/zuohuadong/supacloud/issues/883)) ([8193fe3](https://github.com/zuohuadong/supacloud/commit/8193fe3d42613d55c3df56df7360614d6fe53999))
+
 ## [0.21.3](https://github.com/zuohuadong/supacloud/compare/cli-v0.21.2...cli-v0.21.3) (2026-08-12)
 
 
