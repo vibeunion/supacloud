@@ -792,6 +792,24 @@ async function writePreparedBundle(
   };
 }
 
+async function writePreparedReleaseBundle(
+  stageDir: string,
+  finalDir: string,
+  code: string,
+  artifactSizeBytes?: number,
+): Promise<Pick<
+  PreparedFunctionVersion,
+  "bundleHash" | "artifactSha256" | "bundleSizeBytes" | "contentPath"
+>> {
+  const artifact = await writePreparedBundle(stageDir, finalDir, code, artifactSizeBytes);
+  const sourceDir = path.join(stageDir, "src");
+  await fs.mkdir(sourceDir, { recursive: true, mode: 0o755 });
+  const runtimeEntry = path.join(sourceDir, BUNDLED_SOURCE_RUNTIME_ENTRY);
+  await Bun.write(runtimeEntry, code);
+  await fs.chmod(runtimeEntry, 0o444);
+  return artifact;
+}
+
 async function prepareSingleFunctionVersion(
   request: EdgeFunctionReleaseRequest & { code: string },
   version: string,
@@ -809,7 +827,7 @@ async function prepareSingleFunctionVersion(
     outdir: buildDir,
     minify: request.minify ?? false,
   });
-  const artifact = await writePreparedBundle(stageDir, finalDir, bundle.code, bundle.sizeBytes);
+  const artifact = await writePreparedReleaseBundle(stageDir, finalDir, bundle.code, bundle.sizeBytes);
   await fs.rm(buildDir, { recursive: true, force: true });
   return {
     version,
@@ -834,7 +852,7 @@ async function preparePrebundledFunctionVersion(
   const normalization = await validatedPrebundledBundle(request);
   await fs.mkdir(stageDir, { recursive: true, mode: 0o755 });
   await Bun.write(path.join(stageDir, "index.src.ts"), request.code);
-  const artifact = await writePreparedBundle(stageDir, finalDir, request.code);
+  const artifact = await writePreparedReleaseBundle(stageDir, finalDir, request.code);
   return {
     version,
     bundled: true,
@@ -915,8 +933,7 @@ async function prepareBundleFunctionVersion(
     minify: request.minify ?? false,
     importMapPath: importMap ? resolveInside(sourceDir, importMap) : undefined,
   });
-  await Bun.write(path.join(sourceDir, BUNDLED_SOURCE_RUNTIME_ENTRY), bundle.code);
-  const artifact = await writePreparedBundle(stageDir, finalDir, bundle.code, bundle.sizeBytes);
+  const artifact = await writePreparedReleaseBundle(stageDir, finalDir, bundle.code, bundle.sizeBytes);
   await fs.rm(buildDir, { recursive: true, force: true });
   return {
     version,
