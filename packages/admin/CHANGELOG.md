@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.3](https://github.com/zuohuadong/supacloud/compare/admin-v0.10.2...admin-v0.10.3) (2026-08-12)
+
+
+### Bug Fixes
+
+* **cli:** harden project read responses ([#861](https://github.com/zuohuadong/supacloud/issues/861)) ([923f145](https://github.com/zuohuadong/supacloud/commit/923f14587ed58b091704436abc66fc3197f5cf46))
+
 ## [0.10.2](https://github.com/zuohuadong/supacloud/compare/admin-v0.10.1...admin-v0.10.2) (2026-08-11)
 
 
