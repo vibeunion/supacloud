@@ -272,14 +272,15 @@ export class HttpTransport {
         };
     }
 
-    private async postWithResponseReader<T>(
+    private async mutationWithResponseReader<T>(
+        method: "POST" | "PATCH" | "DELETE",
         path: string,
         serializedBody: string | undefined,
         responseReader: (response: Response) => Promise<ResponseJsonRead<T>>,
     ): Promise<HttpResult<T>> {
         try {
             const response = await fetchWithRetry(`${this.baseUrl}${path}`, {
-                method: "POST",
+                method,
                 headers: this.headers(),
                 body: serializedBody,
             });
@@ -310,14 +311,42 @@ export class HttpTransport {
 
     async post<T = unknown>(path: string, body?: unknown): Promise<HttpResult<T>> {
         try {
-            return await this.postWithResponseReader(path, serializedRequestBody(body), responseJsonOrNull<T>);
+            return await this.mutationWithResponseReader(
+                "POST",
+                path,
+                serializedRequestBody(body),
+                responseJsonOrNull<T>,
+            );
         } catch (error: unknown) {
             return transportFailure<T>(error);
         }
     }
 
     async postReleaseMutation<T = unknown>(path: string, body?: unknown): Promise<HttpResult<T>> {
-        return this.postWithResponseReader(path, serializedRequestBody(body), releaseMutationResponseJson<T>);
+        return this.mutationWithResponseReader(
+            "POST",
+            path,
+            serializedRequestBody(body),
+            releaseMutationResponseJson<T>,
+        );
+    }
+
+    async patchReleaseMutation<T = unknown>(path: string, body?: unknown): Promise<HttpResult<T>> {
+        return this.mutationWithResponseReader(
+            "PATCH",
+            path,
+            serializedRequestBody(body),
+            releaseMutationResponseJson<T>,
+        );
+    }
+
+    async deleteReleaseMutation<T = unknown>(path: string, body?: unknown): Promise<HttpResult<T>> {
+        return this.mutationWithResponseReader(
+            "DELETE",
+            path,
+            serializedRequestBody(body),
+            releaseMutationResponseJson<T>,
+        );
     }
 
     async postMultipart<T = unknown>(path: string, formData: FormData): Promise<HttpResult<T>> {
@@ -363,11 +392,12 @@ export class HttpTransport {
         }
     }
 
-    async delete<T = unknown>(path: string): Promise<HttpResult<T>> {
+    async delete<T = unknown>(path: string, body?: unknown): Promise<HttpResult<T>> {
         try {
             const res = await fetchWithRetry(`${this.baseUrl}${path}`, {
                 method: "DELETE",
                 headers: this.headers(),
+                body: serializedRequestBody(body),
             });
             const data = (await res.json().catch(() => null)) as T;
             return { ok: res.ok, status: res.status, data };

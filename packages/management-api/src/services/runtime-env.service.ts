@@ -1,6 +1,5 @@
 import { projectRepository } from "../repositories/project.repository";
 import { databaseService } from "./database.service";
-import { jwtService } from "./jwt.service";
 import { normalizeProjectConfig } from "../utils/project-config";
 import {
   normalizeProjectRoutingConfig,
@@ -9,7 +8,7 @@ import {
   resolveTenantPorts,
 } from "../utils/project-routing";
 import { decryptSecretIfNeeded } from "../utils/secret-crypto";
-import { logger } from "../utils/logger";
+import { resolveStoredServiceRoleKey } from "../utils/service-role";
 import {
   buildSharedProjectJwtVerificationMaterial,
   normalizeProjectJwtKeys,
@@ -17,10 +16,6 @@ import {
   resolveProjectJwtVerificationMaterial,
 } from "../utils/project-jwt";
 import { getAuthRuntimeDescriptor } from "./auth-runtime.service";
-
-function isJwtLike(value: string | null | undefined): value is string {
-  return typeof value === "string" && value.split(".").length === 3;
-}
 
 function stripTrailingSlash(value: string): string {
   return value.replace(/\/+$/, "");
@@ -83,26 +78,9 @@ export async function buildProjectRuntimeEnv(projectRef: string): Promise<Record
     (authPorts ? localServiceBaseUrl(authPorts.gotruePort) : `${internalSupabaseUrl}/auth/v1`),
   );
 
-  let serviceRoleKey = project.service_role_key;
-  const encryptedServiceRoleKey = (project as unknown as { service_role_key_encrypted?: string | null }).service_role_key_encrypted;
-
-  if (!isJwtLike(serviceRoleKey) && encryptedServiceRoleKey) {
-    try {
-      const decrypted = decryptSecretIfNeeded(encryptedServiceRoleKey);
-      if (isJwtLike(decrypted)) serviceRoleKey = decrypted;
-    } catch {
-      // Fall through to deterministic repair from jwt_secret below.
-    }
-  }
-
-  if (!isJwtLike(serviceRoleKey)) {
-    serviceRoleKey = await jwtService.generateServiceRoleKey(project.jwt_secret);
-    await projectRepository.updateApiKeys(projectRef, {
-      jwt_secret: project.jwt_secret,
-      anon_key: project.anon_key,
-      service_role_key: serviceRoleKey,
-    });
-    logger.warn(`[RuntimeEnv] Repaired invalid service_role_key for ${projectRef}`);
+  const serviceRoleKey = resolveStoredServiceRoleKey(project);
+  if (!serviceRoleKey) {
+    throw new Error(`Project ${projectRef} has no valid service-role key`);
   }
 
   const customSecrets = await databaseService.getSecrets(projectRef);

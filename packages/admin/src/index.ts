@@ -121,6 +121,7 @@ EXAMPLES
   supacloud-admin project create --name my-app --domain example.com --env_file /secure/path/.env.project-credentials.test --environment test
   supacloud-admin project list
   supacloud-admin project services --ref abc123
+  supacloud-admin project runtime_snapshot --ref abc123
   supacloud-admin project service_control --ref abc123 --service gotrue --service_action stop
   supacloud-admin platform metrics
   supacloud-admin gateway routes --ref abc123

@@ -31,6 +31,7 @@ describe("Admin execution policy", () => {
             read: [
                 "project.list", "project.get", "project.settings", "project.api_keys",
                 "project.health", "project.logs", "project.tasks", "project.services",
+                "project.runtime_snapshot",
                 "platform.metrics", "platform.list_backups", "platform.network",
                 "platform.list_orgs", "platform.get_org",
                 "gateway.routes", "gateway.get_certificate", "gateway.custom_hostname",

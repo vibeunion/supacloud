@@ -1,9 +1,9 @@
 import { afterAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import * as fs from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { join } from "node:path";
 
-const functionsRoot = await fs.mkdtemp(join(tmpdir(), "supacloud-project-functions-"));
+const functionsRoot = await fs.mkdtemp(join(homedir(), ".supacloud-project-functions-"));
 const originalFunctionsDir = process.env.EDGE_FUNCTIONS_DIR;
 process.env.EDGE_FUNCTIONS_DIR = functionsRoot;
 
@@ -46,6 +46,7 @@ const edgeFunctionServiceMock = {
   list: spyOn(edgeFunctionService, "list"),
   getActiveVersion: spyOn(edgeFunctionService, "getActiveVersion"),
   getConfig: spyOn(edgeFunctionService, "getConfig"),
+  getState: spyOn(edgeFunctionService, "getState"),
   deploy: spyOn(edgeFunctionService, "deploy"),
   deployDetailed: spyOn(edgeFunctionService, "deployDetailed"),
   deployBundle: spyOn(edgeFunctionService, "deployBundle"),
@@ -176,6 +177,7 @@ describe("ProjectService - Comprehensive", () => {
     edgeFunctionServiceMock.list.mockReset();
     edgeFunctionServiceMock.getActiveVersion.mockReset();
     edgeFunctionServiceMock.getConfig.mockReset();
+    edgeFunctionServiceMock.getState.mockReset();
     edgeFunctionServiceMock.deploy.mockReset();
     edgeFunctionServiceMock.deployDetailed.mockReset();
     edgeFunctionServiceMock.deployBundle.mockReset();
@@ -225,7 +227,11 @@ describe("ProjectService - Comprehensive", () => {
     edgeFunctionServiceMock.read.mockResolvedValue("function code here");
     edgeFunctionServiceMock.list.mockResolvedValue([]);
     edgeFunctionServiceMock.getActiveVersion.mockResolvedValue("absent");
-    edgeFunctionServiceMock.getConfig.mockResolvedValue({ verify_jwt: true });
+    edgeFunctionServiceMock.getConfig.mockResolvedValue({ verify_jwt: true, activation_id: "legacy" });
+    edgeFunctionServiceMock.getState.mockResolvedValue({
+      active_version: "absent",
+      config: { verify_jwt: true, activation_id: "legacy" },
+    });
     edgeFunctionServiceMock.deploy.mockResolvedValue(true);
     edgeFunctionServiceMock.deployDetailed.mockResolvedValue({
       success: true,
@@ -647,7 +653,7 @@ describe("ProjectService - Comprehensive", () => {
     expect(await service.getFunctionCode("test123abc", "my-func")).toBe("function code here");
   });
 
-  test("listFunctions preserves the legacy active version zero", async () => {
+  test("listFunctions reads legacy version and identity from one atomic snapshot", async () => {
     const projectFunctionsDir = join(config.edgeFunctionsDir, "test123abc");
     await fs.mkdir(projectFunctionsDir, { recursive: true });
     await Bun.write(
@@ -656,14 +662,23 @@ describe("ProjectService - Comprehensive", () => {
     );
     projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);
     edgeFunctionServiceMock.list.mockResolvedValueOnce(["legacy-hook"]);
-    edgeFunctionServiceMock.getActiveVersion.mockResolvedValueOnce("0");
-    edgeFunctionServiceMock.getConfig.mockResolvedValueOnce({ verify_jwt: true });
+    edgeFunctionServiceMock.getState.mockResolvedValueOnce({
+      active_version: "0",
+      config: { verify_jwt: true, activation_id: "legacy" },
+    });
 
     try {
       const functions = await service.listFunctions("test123abc");
 
       expect(functions).toHaveLength(1);
-      expect(functions[0]).toMatchObject({ slug: "legacy-hook", version: 0 });
+      expect(functions[0]).toMatchObject({
+        slug: "legacy-hook",
+        version: 0,
+        activation_id: "legacy",
+      });
+      expect(edgeFunctionServiceMock.getState).toHaveBeenCalledTimes(1);
+      expect(edgeFunctionServiceMock.getActiveVersion).not.toHaveBeenCalled();
+      expect(edgeFunctionServiceMock.getConfig).not.toHaveBeenCalled();
     } finally {
       await fs.rm(projectFunctionsDir, { recursive: true, force: true });
     }
@@ -672,8 +687,10 @@ describe("ProjectService - Comprehensive", () => {
   test("listFunctions propagates missing and unreadable active artifacts", async () => {
     projectRepositoryMock.findByRef.mockResolvedValue(mockProject);
     edgeFunctionServiceMock.list.mockResolvedValue(["missing-active"]);
-    edgeFunctionServiceMock.getActiveVersion.mockResolvedValue("0");
-    edgeFunctionServiceMock.getConfig.mockResolvedValue({ verify_jwt: true });
+    edgeFunctionServiceMock.getState.mockResolvedValue({
+      active_version: "0",
+      config: { verify_jwt: true, activation_id: "legacy" },
+    });
 
     await expect(service.listFunctions("test123abc")).rejects.toMatchObject({ code: "ENOENT" });
 
@@ -694,8 +711,14 @@ describe("ProjectService - Comprehensive", () => {
     await Bun.write(join(projectFunctionsDir, "upgraded-hook.js"), "stale legacy artifact");
     projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);
     edgeFunctionServiceMock.list.mockResolvedValueOnce(["upgraded-hook"]);
-    edgeFunctionServiceMock.getActiveVersion.mockResolvedValueOnce("1");
-    edgeFunctionServiceMock.getConfig.mockResolvedValueOnce({ verify_jwt: true, version: "1" });
+    edgeFunctionServiceMock.getState.mockResolvedValueOnce({
+      active_version: "1",
+      config: {
+        verify_jwt: true,
+        version: "1",
+        activation_id: "11111111-1111-4111-8111-111111111111",
+      },
+    });
 
     try {
       await expect(service.listFunctions("test123abc"))
@@ -703,6 +726,33 @@ describe("ProjectService - Comprehensive", () => {
     } finally {
       await fs.rm(projectFunctionsDir, { recursive: true, force: true });
     }
+  });
+
+  test("listFunctions fails closed when an enumerated Function becomes inactive", async () => {
+    projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);
+    edgeFunctionServiceMock.list.mockResolvedValueOnce(["concurrent-delete"]);
+    edgeFunctionServiceMock.getState.mockResolvedValueOnce({
+      active_version: "absent",
+      config: {
+        verify_jwt: true,
+        activation_id: "11111111-1111-4111-8111-111111111111",
+      },
+    });
+
+    await expect(service.listFunctions("test123abc"))
+      .rejects.toThrow("Function became inactive while listing");
+    expect(edgeFunctionServiceMock.getState).toHaveBeenCalledTimes(1);
+  });
+
+  test("listFunctions propagates atomic snapshot read failures", async () => {
+    const snapshotError = Object.assign(new Error("synthetic manifest read failure"), {
+      code: "EIO",
+    });
+    projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);
+    edgeFunctionServiceMock.list.mockResolvedValueOnce(["unreadable-manifest"]);
+    edgeFunctionServiceMock.getState.mockRejectedValueOnce(snapshotError);
+
+    await expect(service.listFunctions("test123abc")).rejects.toBe(snapshotError);
   });
 
   test("deployFunction delegates to edge function service", async () => {

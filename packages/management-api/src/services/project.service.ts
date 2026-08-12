@@ -12,6 +12,8 @@ import {
   activeFunctionVersionNumber,
   edgeFunctionService,
   getVersionedArtifactPath,
+  type EdgeFunctionActivationId,
+  type EdgeFunctionActivationResult,
   type EdgeFunctionDeploymentRequest,
 } from "./edge-function.service";
 import { logger } from "../utils/logger";
@@ -120,6 +122,7 @@ export interface FunctionResponse {
   name: string;
   status: string;
   version: number;
+  activation_id: string;
   verify_jwt: boolean;
   background_routes?: string[];
   import_map: boolean;
@@ -815,9 +818,10 @@ export class ProjectService {
     const slugs = await edgeFunctionService.list(ref);
     const results: FunctionResponse[] = [];
     for (const slug of slugs) {
-      const cfg = await edgeFunctionService.getConfig(ref, slug);
+      const snapshot = await edgeFunctionService.getState(ref, slug);
+      const cfg = snapshot.config;
       const version = activeFunctionVersionNumber(
-        await edgeFunctionService.getActiveVersion(ref, slug),
+        snapshot.active_version,
       );
       if (version === null) throw new Error("Function became inactive while listing");
       const activePath = cfg.version === undefined
@@ -833,6 +837,7 @@ export class ProjectService {
         name: slug,
         status: "ACTIVE",
         version,
+        activation_id: cfg.activation_id,
         verify_jwt: cfg.verify_jwt,
         background_routes: cfg.background_routes || [],
         import_map: !!cfg.import_map,
@@ -844,11 +849,15 @@ export class ProjectService {
     return results;
   }
 
-  async deleteFunction(ref: string, slug: string): Promise<boolean> {
+  async deleteFunction(
+    ref: string,
+    slug: string,
+    expectedActivationId: EdgeFunctionActivationId,
+  ): Promise<EdgeFunctionActivationResult | null> {
     const project = await projectRepository.findByRef(ref);
-    if (!project) return false;
+    if (!project) return null;
 
-    return await edgeFunctionService.remove(ref, slug);
+    return await edgeFunctionService.remove(ref, slug, expectedActivationId);
   }
 
   async deployFunction(

@@ -1,15 +1,18 @@
-import { afterEach, describe, expect, mock, test } from "bun:test";
-import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { describe, expect, mock, test } from "bun:test";
 import {
   PostgrestPoolMigrationGate,
   PostgrestPoolReconcileError,
   reconcileManagedPostgrestPool,
   renderManagedPostgrestDbPool,
+  type PostgrestPoolGeneration,
+  type PostgrestPoolReconcileOperations,
 } from "../../src/services/postgrest-pool-reconcile";
+import {
+  canonicalPostgrestConfig,
+  postgrestConfigRevision,
+  revisionHex,
+} from "../../src/services/runtime-revision";
 
-const temporaryDirectories: string[] = [];
 const PROJECT_REF = "afemibrarjkvzuuawjfi";
 const MANAGED_CONFIG = [
   "# Managed by SupaCloud Management API. Legacy shell tooling must not overwrite this file.",
@@ -49,26 +52,57 @@ const LEGACY_CONFIG = [
   `db-channel = \"pgrst_${PROJECT_REF}\"`,
 ].join("\n");
 
-afterEach(async () => {
-  await Promise.all(
-    temporaryDirectories.splice(0).map((directory) =>
-      rm(directory, { recursive: true, force: true })
-    ),
-  );
-});
+function generation(content: string): PostgrestPoolGeneration {
+  const canonicalContent = canonicalPostgrestConfig(content);
+  const revision = postgrestConfigRevision(PROJECT_REF, canonicalContent);
+  return {
+    content: canonicalContent,
+    pointerTarget: `${PROJECT_REF}_postgrest.d/${revisionHex(revision)}.conf`,
+    revision,
+  };
+}
 
-async function temporaryConfig(content = MANAGED_CONFIG): Promise<string> {
-  const directory = await mkdtemp(join(tmpdir(), "supacloud-postgrest-pool-"));
-  temporaryDirectories.push(directory);
-  const configPath = join(directory, "tenant.conf");
-  await writeFile(configPath, content, { mode: 0o640 });
-  await chmod(configPath, 0o640);
-  return configPath;
+function generationHarness(initialContent = MANAGED_CONFIG) {
+  let current = generation(initialContent);
+  const knownGenerations = new Map([[current.pointerTarget, current]]);
+  const restartAndAttest = mock(async (_revision: string) => {});
+  const restorePointer = mock(async (previous: PostgrestPoolGeneration) => {
+    current = previous;
+  });
+  const operations: PostgrestPoolReconcileOperations = {
+    readCurrentGeneration: async () => current,
+    candidateGeneration: (content) => generation(content),
+    activateCandidate: async (content, expectedPreviousPointerTarget) => {
+      if (current.pointerTarget !== expectedPreviousPointerTarget) {
+        throw new Error("pointer changed before activation");
+      }
+      current = generation(content);
+      knownGenerations.set(current.pointerTarget, current);
+      return current;
+    },
+    currentPointerTarget: async () => current.pointerTarget,
+    validateGeneration: async (candidate) => {
+      if (knownGenerations.get(candidate.pointerTarget)?.revision !== candidate.revision) {
+        throw new Error("generation is unavailable");
+      }
+    },
+    restorePointer,
+    restartAndAttest,
+  };
+  return {
+    current: () => current,
+    installConcurrentGeneration(content: string) {
+      current = generation(content);
+      knownGenerations.set(current.pointerTarget, current);
+    },
+    operations,
+    restartAndAttest,
+    restorePointer,
+  };
 }
 
 function request(
-  configPath: string,
-  restartAndWait: () => Promise<void>,
+  operations: PostgrestPoolReconcileOperations,
   overrides: Partial<{
     projectRef: string;
     desiredPool: number;
@@ -77,12 +111,11 @@ function request(
   }> = {},
 ) {
   return {
-    configPath,
     projectRef: overrides.projectRef ?? PROJECT_REF,
     desiredPool: overrides.desiredPool ?? 3,
     projectStatus: overrides.projectStatus ?? "active",
     desiredState: overrides.desiredState ?? "running",
-    restartAndWait,
+    operations,
   };
 }
 
@@ -171,162 +204,48 @@ describe("managed PostgREST pool rendering", () => {
 });
 
 describe("managed PostgREST pool reconciliation", () => {
-  test("reconciles canonical legacy config once and remains idempotent", async () => {
-    const configPath = await temporaryConfig(LEGACY_CONFIG);
-    const restartAndWait = mock(async () => {});
+  test("activates an immutable candidate and remains idempotent", async () => {
+    const harness = generationHarness(LEGACY_CONFIG);
 
-    expect(await reconcileManagedPostgrestPool(request(configPath, restartAndWait)))
+    expect(await reconcileManagedPostgrestPool(request(harness.operations)))
       .toEqual({ state: "updated" });
-    expect(await readFile(configPath, "utf8"))
-      .toBe(LEGACY_CONFIG.replace("db-pool = 10", "db-pool = 3"));
-    expect(await reconcileManagedPostgrestPool(request(configPath, restartAndWait)))
+    expect(harness.current().content)
+      .toBe(canonicalPostgrestConfig(LEGACY_CONFIG.replace("db-pool = 10", "db-pool = 3")));
+    expect(harness.current().pointerTarget).toMatch(
+      new RegExp(`^${PROJECT_REF}_postgrest\\.d/[a-f0-9]{64}\\.conf$`),
+    );
+    expect(await reconcileManagedPostgrestPool(request(harness.operations)))
       .toEqual({ state: "unchanged" });
-    expect(restartAndWait).toHaveBeenCalledTimes(1);
+    expect(harness.restartAndAttest).toHaveBeenCalledTimes(1);
   });
 
-  test("restores the exact canonical legacy config after health failure", async () => {
-    const configPath = await temporaryConfig(LEGACY_CONFIG);
-    const restartAndWait = mock(async () => {});
-    restartAndWait.mockRejectedValueOnce(new Error("candidate unhealthy"));
+  test("restores and attests the previous generation after candidate failure", async () => {
+    const harness = generationHarness();
+    const original = harness.current();
+    const candidateError = new Error("candidate unhealthy");
+    harness.restartAndAttest.mockRejectedValueOnce(candidateError);
 
-    expect(await reconcileManagedPostgrestPool(request(configPath, restartAndWait)))
+    expect(await reconcileManagedPostgrestPool(request(harness.operations)))
       .toEqual({
         state: "rolled_back",
         error: "POSTGREST_POOL_UPDATE_ROLLED_BACK",
-        cause: expect.any(Error),
+        cause: candidateError,
       });
-    expect(await readFile(configPath, "utf8")).toBe(LEGACY_CONFIG);
-    expect(restartAndWait).toHaveBeenCalledTimes(2);
-  });
-
-  test("updates, health-checks, preserves metadata, and becomes idempotent", async () => {
-    const configPath = await temporaryConfig();
-    const before = await stat(configPath);
-    const restartAndWait = mock(async () => {});
-
-    const first = await reconcileManagedPostgrestPool(
-      request(configPath, restartAndWait),
-    );
-    const after = await stat(configPath);
-
-    expect(first).toEqual({ state: "updated" });
-    expect(await readFile(configPath, "utf8")).toContain("db-pool = 3");
-    expect(after.mode & 0o7777).toBe(before.mode & 0o7777);
-    expect(after.uid).toBe(before.uid);
-    expect(after.gid).toBe(before.gid);
-    expect(restartAndWait).toHaveBeenCalledTimes(1);
-
-    const second = await reconcileManagedPostgrestPool(
-      request(configPath, restartAndWait),
-    );
-    expect(second).toEqual({ state: "unchanged" });
-    expect(restartAndWait).toHaveBeenCalledTimes(1);
-  });
-
-  test("honors an explicit pool override without restarting", async () => {
-    const configPath = await temporaryConfig();
-    const restartAndWait = mock(async () => {});
-
-    const result = await reconcileManagedPostgrestPool(
-      request(configPath, restartAndWait, { desiredPool: 10 }),
-    );
-
-    expect(result).toEqual({ state: "unchanged" });
-    expect(restartAndWait).not.toHaveBeenCalled();
-  });
-
-  test("does not read or start a stopped project", async () => {
-    const restartAndWait = mock(async () => {});
-    const result = await reconcileManagedPostgrestPool(
-      request("/path/does/not/exist", restartAndWait, {
-        desiredState: "stopped",
-      }),
-    );
-
-    expect(result).toEqual({ state: "skipped" });
-    expect(restartAndWait).not.toHaveBeenCalled();
-  });
-
-  test("restores the exact previous config after candidate health failure", async () => {
-    const configPath = await temporaryConfig();
-    const before = await stat(configPath);
-    const restartAndWait = mock(async () => {});
-    restartAndWait.mockRejectedValueOnce(new Error("candidate unhealthy"));
-
-    const result = await reconcileManagedPostgrestPool(
-      request(configPath, restartAndWait),
-    );
-    const after = await stat(configPath);
-
-    expect(result).toEqual({
-      state: "rolled_back",
-      error: "POSTGREST_POOL_UPDATE_ROLLED_BACK",
-      cause: expect.any(Error),
-    });
-    expect(await readFile(configPath, "utf8")).toBe(MANAGED_CONFIG);
-    expect(after.mode & 0o7777).toBe(before.mode & 0o7777);
-    expect(after.uid).toBe(before.uid);
-    expect(after.gid).toBe(before.gid);
-    expect(restartAndWait).toHaveBeenCalledTimes(2);
-
-    const retry = await reconcileManagedPostgrestPool(
-      request(configPath, restartAndWait),
-    );
-    expect(retry).toEqual({ state: "updated" });
-    expect(restartAndWait).toHaveBeenCalledTimes(3);
-  });
-
-  test("fails explicitly when the restored runtime is still unhealthy", async () => {
-    const configPath = await temporaryConfig();
-    const restartAndWait = mock(async () => {
-      throw new Error("unhealthy");
-    });
-
-    await expect(
-      reconcileManagedPostgrestPool(request(configPath, restartAndWait)),
-    ).rejects.toBeInstanceOf(PostgrestPoolReconcileError);
-    expect(await readFile(configPath, "utf8")).toBe(MANAGED_CONFIG);
-    expect(restartAndWait).toHaveBeenCalledTimes(2);
-  });
-
-  test("does not modify unmanaged or malformed managed files", async () => {
-    const unmanaged = "db-pool = 10\n";
-    const unmanagedPath = await temporaryConfig(unmanaged);
-    const unmanagedRestart = mock(async () => {});
-    expect(await reconcileManagedPostgrestPool(
-      request(unmanagedPath, unmanagedRestart),
-    )).toEqual({ state: "unchanged" });
-    expect(await readFile(unmanagedPath, "utf8")).toBe(unmanaged);
-    expect(unmanagedRestart).not.toHaveBeenCalled();
-
-    const malformed = `${MANAGED_CONFIG}db-pool = 4\n`;
-    const malformedPath = await temporaryConfig(malformed);
-    const malformedRestart = mock(async () => {});
-    await expect(
-      reconcileManagedPostgrestPool(request(malformedPath, malformedRestart)),
-    ).rejects.toThrow("exactly one db-pool setting");
-    expect(await readFile(malformedPath, "utf8")).toBe(malformed);
-    expect(malformedRestart).not.toHaveBeenCalled();
-
-    const missingPoolPath = await temporaryConfig(
-      MANAGED_CONFIG.replace("db-pool = 10\n", ""),
-    );
-    const missingPoolRestart = mock(async () => {});
-    await expect(
-      reconcileManagedPostgrestPool(request(missingPoolPath, missingPoolRestart)),
-    ).rejects.toThrow("exactly one db-pool setting");
-    expect(missingPoolRestart).not.toHaveBeenCalled();
+    expect(harness.current()).toEqual(original);
+    expect(harness.restorePointer).toHaveBeenCalledWith(original);
+    expect(harness.restartAndAttest).toHaveBeenNthCalledWith(1, expect.not.stringMatching(original.revision));
+    expect(harness.restartAndAttest).toHaveBeenNthCalledWith(2, original.revision);
   });
 
   test("preserves both candidate and rollback causes", async () => {
-    const configPath = await temporaryConfig();
+    const harness = generationHarness();
     const candidateError = new Error("candidate unhealthy");
     const rollbackError = new Error("rollback unhealthy");
-    const restartAndWait = mock(async () => {
-      throw restartAndWait.mock.calls.length === 1 ? candidateError : rollbackError;
-    });
+    harness.restartAndAttest
+      .mockRejectedValueOnce(candidateError)
+      .mockRejectedValueOnce(rollbackError);
 
-    const failure = await reconcileManagedPostgrestPool(request(configPath, restartAndWait))
+    const failure = await reconcileManagedPostgrestPool(request(harness.operations))
       .catch((error: unknown) => error);
 
     expect(failure).toBeInstanceOf(PostgrestPoolReconcileError);
@@ -336,22 +255,52 @@ describe("managed PostgREST pool reconciliation", () => {
     ]);
   });
 
-  test("does not roll back over a concurrently regenerated config", async () => {
-    const configPath = await temporaryConfig();
-    const regeneratedConfig = MANAGED_CONFIG.replace(
+  test("does not roll back over a concurrently activated generation", async () => {
+    const harness = generationHarness();
+    const concurrentContent = MANAGED_CONFIG.replace(
       "log-level = \"warn\"",
       "log-level = \"info\"",
     );
-    const restartAndWait = mock(async () => {
-      await writeFile(configPath, regeneratedConfig);
+    harness.restartAndAttest.mockImplementationOnce(async () => {
+      harness.installConcurrentGeneration(concurrentContent);
       throw new Error("restart failed");
     });
 
     await expect(
-      reconcileManagedPostgrestPool(request(configPath, restartAndWait)),
+      reconcileManagedPostgrestPool(request(harness.operations)),
     ).rejects.toBeInstanceOf(PostgrestPoolReconcileError);
-    expect(await readFile(configPath, "utf8")).toBe(regeneratedConfig);
-    expect(restartAndWait).toHaveBeenCalledTimes(1);
+    expect(harness.current().content).toBe(concurrentContent);
+    expect(harness.restorePointer).not.toHaveBeenCalled();
+    expect(harness.restartAndAttest).toHaveBeenCalledTimes(1);
+  });
+
+  test("skips stopped projects without consulting generation state", async () => {
+    const harness = generationHarness();
+    const readCurrentGeneration = mock(async () => harness.current());
+    harness.operations.readCurrentGeneration = readCurrentGeneration;
+
+    expect(await reconcileManagedPostgrestPool(request(harness.operations, {
+      desiredState: "stopped",
+    }))).toEqual({ state: "skipped" });
+    expect(readCurrentGeneration).not.toHaveBeenCalled();
+    expect(harness.restartAndAttest).not.toHaveBeenCalled();
+  });
+
+  test("leaves matching, unmanaged, and malformed generations untouched", async () => {
+    const matching = generationHarness(MANAGED_CONFIG);
+    expect(await reconcileManagedPostgrestPool(request(matching.operations, { desiredPool: 10 })))
+      .toEqual({ state: "unchanged" });
+    expect(matching.restartAndAttest).not.toHaveBeenCalled();
+
+    const unmanaged = generationHarness("db-pool = 10\n");
+    expect(await reconcileManagedPostgrestPool(request(unmanaged.operations)))
+      .toEqual({ state: "unchanged" });
+    expect(unmanaged.restartAndAttest).not.toHaveBeenCalled();
+
+    const malformed = generationHarness(`${MANAGED_CONFIG}db-pool = 4\n`);
+    await expect(reconcileManagedPostgrestPool(request(malformed.operations)))
+      .rejects.toThrow("exactly one db-pool setting");
+    expect(malformed.restartAndAttest).not.toHaveBeenCalled();
   });
 });
 

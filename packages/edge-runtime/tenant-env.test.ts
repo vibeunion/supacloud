@@ -4,10 +4,12 @@ import {
   isMaskedSecretValue,
   buildFallbackTenantEnv,
   loadTenantEnv,
-  mergeTenantRuntimeEnv,
+  loadTenantRuntimeEnv,
   normalizeTenantEnv,
+  recordTenantEnvDispatch,
+  reserveTenantEnvDispatch,
+  runtimeEnvObservation,
   stripMaskedSecretValues,
-  withBackgroundInternalToken,
 } from "./tenant-env";
 import { readEdgeRuntimeProjectSecrets } from "./jwt-verifier";
 
@@ -16,6 +18,108 @@ describe("tenant env masking guard", () => {
     expect(isMaskedSecretValue("********")).toBe(true);
     expect(isMaskedSecretValue("  ********  ")).toBe(true);
     expect(isMaskedSecretValue("real-value")).toBe(false);
+  });
+
+  test("starts without a loaded runtime observation", () => {
+    const ref = `proj_not_loaded_${Date.now()}`;
+
+    expect(runtimeEnvObservation(ref)).toEqual({
+      schema: "supacloud.edge-runtime-env-observation.v1",
+      project_ref: ref,
+      loaded_revision: null,
+      env_proof: null,
+      load_state: "not_loaded",
+      load_source: null,
+      loaded_at: null,
+    });
+  });
+
+  test("does not let a pre-invalidation dispatch refill the observation", () => {
+    const ref = `proj_observation_epoch_${Date.now()}`;
+    const reservation = reserveTenantEnvDispatch(ref);
+    invalidateTenantEnvCache(ref);
+    recordTenantEnvDispatch(ref, {
+      env: { SETTING: "old" },
+      revision: `hmac-sha256:${"a".repeat(64)}`,
+      envProof: `hmac-sha256:${"b".repeat(64)}`,
+      loadState: "loaded",
+      loadSource: "management_api",
+      cacheEpoch: reservation.cacheEpoch,
+    }, reservation);
+
+    expect(runtimeEnvObservation(ref).load_state).toBe("not_loaded");
+  });
+
+  test("keeps the newest completed dispatch observation", () => {
+    const ref = `proj_observation_order_${Date.now()}`;
+    const older = reserveTenantEnvDispatch(ref);
+    const newer = reserveTenantEnvDispatch(ref);
+    const oldRevision = `hmac-sha256:${"a".repeat(64)}`;
+    const newRevision = `hmac-sha256:${"c".repeat(64)}`;
+    recordTenantEnvDispatch(ref, {
+      env: { SETTING: "new" },
+      revision: newRevision,
+      envProof: `hmac-sha256:${"d".repeat(64)}`,
+      loadState: "loaded",
+      loadSource: "management_api",
+      cacheEpoch: newer.cacheEpoch,
+    }, newer);
+    recordTenantEnvDispatch(ref, {
+      env: { SETTING: "old" },
+      revision: oldRevision,
+      envProof: `hmac-sha256:${"b".repeat(64)}`,
+      loadState: "loaded",
+      loadSource: "management_api",
+      cacheEpoch: older.cacheEpoch,
+    }, older);
+
+    expect(runtimeEnvObservation(ref).loaded_revision).toBe(newRevision);
+  });
+
+  test("separates foreground, background, verified, and fallback module proofs", async () => {
+    const previousMasterToken = process.env.MASTER_TOKEN;
+    process.env.MASTER_TOKEN = "tenant-env-module-proof-test-key";
+    try {
+      const proofModule = await import("./tenant-env.ts?module-proof-boundaries");
+      const ref = "proj_module_proof";
+      const foregroundEnv = { RUNTIME_SECRET: "same-secret" };
+      const verifiedLoad = {
+        revision: `hmac-sha256:${"a".repeat(64)}`,
+        loadState: "loaded" as const,
+        loadSource: "management_api" as const,
+      };
+      const fallbackLoad = {
+        revision: null,
+        loadState: "unverified" as const,
+        loadSource: "file_fallback" as const,
+      };
+
+      const foregroundProof = proofModule.tenantEnvModuleProof(
+        ref,
+        foregroundEnv,
+        verifiedLoad,
+        "foreground",
+      );
+      const backgroundProof = proofModule.tenantEnvModuleProof(
+        ref,
+        foregroundEnv,
+        verifiedLoad,
+        "background",
+      );
+      const fallbackProof = proofModule.tenantEnvModuleProof(
+        ref,
+        foregroundEnv,
+        fallbackLoad,
+        "foreground",
+      );
+
+      expect(foregroundProof).toMatch(/^hmac-sha256:[a-f0-9]{64}$/);
+      expect(backgroundProof).not.toBe(foregroundProof);
+      expect(fallbackProof).not.toBe(foregroundProof);
+    } finally {
+      if (previousMasterToken === undefined) delete process.env.MASTER_TOKEN;
+      else process.env.MASTER_TOKEN = previousMasterToken;
+    }
   });
 
   test("drops masked placeholders before runtime injection", () => {
@@ -73,37 +177,6 @@ describe("tenant env masking guard", () => {
     expect(readEdgeRuntimeProjectSecrets(env)).toBeNull();
   });
 
-  test("treats a successful runtime API response as authoritative for auth mode", () => {
-    const env = mergeTenantRuntimeEnv("proj_1", {
-      SUPACLOUD_AUTH_RUNTIME_MODE: "local",
-      SUPACLOUD_AUTH_AUTHORITY_REF: "proj_1",
-      JWT_SECRET: "stale-file-secret",
-      JWT_JWKS: '{"keys":[{"kid":"stale-file-key"}]}',
-    }, {
-      SUPACLOUD_AUTH_ISSUER: "https://auth-owner.example.com/auth/v1",
-      JWT_JWKS: '{"keys":[{"kid":"owner-key"}]}',
-    });
-
-    expect(env.SUPACLOUD_AUTH_RUNTIME_MODE).toBeUndefined();
-    expect(env.SUPACLOUD_AUTH_AUTHORITY_REF).toBeUndefined();
-    expect(env.JWT_SECRET).toBeUndefined();
-    expect(env.JWT_JWKS).toBeUndefined();
-    expect(readEdgeRuntimeProjectSecrets(env)).toBeNull();
-  });
-
-  test("uses only API verifier material when the API provides an explicit mode", () => {
-    const env = mergeTenantRuntimeEnv("proj_1", {
-      SUPACLOUD_AUTH_RUNTIME_MODE: "local",
-      JWT_SECRET: "stale-file-secret",
-    }, {
-      SUPACLOUD_AUTH_RUNTIME_MODE: "owner",
-      JWT_SECRET: "current-api-secret",
-    });
-
-    expect(env.SUPACLOUD_AUTH_RUNTIME_MODE).toBe("owner");
-    expect(env.JWT_SECRET).toBe("current-api-secret");
-  });
-
   test("does not reuse cached verifier material when the runtime API is unavailable", () => {
     const env = buildFallbackTenantEnv("proj_1", {
       SUPACLOUD_AUTH_RUNTIME_MODE: "shared",
@@ -155,22 +228,6 @@ describe("tenant env masking guard", () => {
     }));
   });
 
-  test("adds background internal token only for background dispatch env", () => {
-    const base = normalizeTenantEnv("proj_1", {
-      SUPABASE_URL: "https://api.example.com",
-    });
-
-    expect(base.SUPACLOUD_BACKGROUND_INTERNAL_TOKEN).toBeUndefined();
-    expect(withBackgroundInternalToken(base, "")).toBe(base);
-    expect(withBackgroundInternalToken(base, "runtime-token")).toEqual(
-      expect.objectContaining({
-        SUPABASE_URL: "https://api.example.com",
-        SUPACLOUD_BACKGROUND_INTERNAL_TOKEN: "runtime-token",
-      }),
-    );
-    expect(base.SUPACLOUD_BACKGROUND_INTERNAL_TOKEN).toBeUndefined();
-  });
-
   test("invalidates cached runtime env for a project", async () => {
     const originalFetch = globalThis.fetch;
     const ref = `proj_cache_${Date.now()}`;
@@ -193,6 +250,25 @@ describe("tenant env masking guard", () => {
       expect(cached.RESULT_S3_ENDPOINT).toBe("http://old-s3.local");
       expect(fresh.RESULT_S3_ENDPOINT).toBe("http://new-s3.local");
       expect(calls).toBe(2);
+    } finally {
+      invalidateTenantEnvCache(ref);
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("uses the successful Management API payload without local normalization", async () => {
+    const originalFetch = globalThis.fetch;
+    const ref = `proj_authoritative_${Date.now()}`;
+    globalThis.fetch = mock(() => Promise.resolve(Response.json({
+      API_ONLY_SECRET: "current-api-value",
+    }))) as unknown as typeof fetch;
+
+    try {
+      const loaded = await loadTenantRuntimeEnv(ref);
+
+      expect(loaded.env).toEqual({ API_ONLY_SECRET: "current-api-value" });
+      expect(loaded.loadSource).toBe("management_api");
+      expect(loaded.loadState).toBe("unverified");
     } finally {
       invalidateTenantEnvCache(ref);
       globalThis.fetch = originalFetch;
@@ -281,6 +357,44 @@ describe("tenant env masking guard", () => {
       expect(firstEnv.RESULT_S3_ENDPOINT).toBe("http://coalesced-s3.local");
       expect(secondEnv.RESULT_S3_ENDPOINT).toBe("http://coalesced-s3.local");
       expect(calls).toBe(1);
+    } finally {
+      invalidateTenantEnvCache(ref);
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("discards a load that started before invalidation", async () => {
+    const originalFetch = globalThis.fetch;
+    const ref = `proj_stale_inflight_${Date.now()}`;
+    let calls = 0;
+    let resolveOldLoad!: () => void;
+    const oldLoadGate = new Promise<void>((resolve) => {
+      resolveOldLoad = resolve;
+    });
+
+    globalThis.fetch = mock(async () => {
+      calls++;
+      if (calls === 1) {
+        await oldLoadGate;
+        return Response.json({ RESULT_S3_ENDPOINT: "http://old-s3.local" });
+      }
+      return Response.json({ RESULT_S3_ENDPOINT: "http://new-s3.local" });
+    }) as unknown as typeof fetch;
+
+    try {
+      const staleLoad = loadTenantRuntimeEnv(ref);
+      await Bun.sleep(0);
+      expect(calls).toBe(1);
+
+      invalidateTenantEnvCache(ref);
+      const currentLoad = loadTenantRuntimeEnv(ref);
+      resolveOldLoad();
+
+      const [staleResult, currentResult] = await Promise.all([staleLoad, currentLoad]);
+      expect(staleResult.env.RESULT_S3_ENDPOINT).toBe("http://new-s3.local");
+      expect(currentResult.env.RESULT_S3_ENDPOINT).toBe("http://new-s3.local");
+      expect(staleResult.cacheEpoch).toBe(currentResult.cacheEpoch);
+      expect(calls).toBe(2);
     } finally {
       invalidateTenantEnvCache(ref);
       globalThis.fetch = originalFetch;

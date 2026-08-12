@@ -1,8 +1,23 @@
 import { describe, expect, test } from "bun:test";
-import { resolveProjectServiceRoleKey } from "../../src/utils/service-role";
+import {
+  resolveProjectServiceRoleKey,
+  resolveStoredServiceRoleKey,
+} from "../../src/utils/service-role";
 import { generateOidcJwtKeyMaterial } from "../../src/utils/project-jwt";
 
 describe("service-role utils", () => {
+  test("resolves only JWT-shaped stored runtime credentials", () => {
+    expect(resolveStoredServiceRoleKey({
+      service_role_key: "stored.service.role",
+      service_role_key_encrypted: "ignored.encrypted.key",
+    })).toBe("stored.service.role");
+    expect(resolveStoredServiceRoleKey({
+      service_role_key: "invalid",
+      service_role_key_encrypted: "encrypted.service.role",
+    })).toBe("encrypted.service.role");
+    expect(resolveStoredServiceRoleKey({ service_role_key: "invalid" })).toBeNull();
+  });
+
   test("signs an ES256 service_role key from migrated OAuth server material", async () => {
     const keyMaterial = await generateOidcJwtKeyMaterial("legacy-jwt-secret");
     const key = await resolveProjectServiceRoleKey({

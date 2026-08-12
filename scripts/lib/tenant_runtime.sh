@@ -95,9 +95,30 @@ is_management_api_managed_file() {
     [ -f "$1" ] && grep -Fq '# Managed by SupaCloud Management API.' "$1"
 }
 
+management_postgrest_generation() {
+    local ref="$1"
+    local pointer="${TENANT_CONFIG_DIR}/${ref}_postgrest.current"
+    local pointer_target pointer_bytes generation
+    [ -f "$pointer" ] && [ ! -L "$pointer" ] || return 1
+    pointer_bytes=$(wc -c < "$pointer") || return 1
+    IFS= read -r pointer_target < "$pointer" || return 1
+    [[ "$pointer_target" =~ ^${ref}_postgrest\.d/[a-f0-9]{64}\.conf$ \
+        && "$pointer_bytes" -eq $((${#pointer_target} + 1)) ]] || return 1
+    generation="${TENANT_CONFIG_DIR}/${pointer_target}"
+    [ -f "$generation" ] && [ ! -L "$generation" ] \
+        && is_management_api_managed_file "$generation"
+}
+
+has_management_postgrest_config() {
+    local ref="$1"
+    management_postgrest_generation "$ref" \
+        || is_management_api_managed_file "${TENANT_CONFIG_DIR}/${ref}.conf"
+}
+
 should_preserve_runtime_config_on_stop() {
     local ref="$1"
     [ -f "$(shared_auth_marker_path "$ref")" ] && return 0
+    has_management_postgrest_config "$ref" && return 0
 
     local config_path
     for config_path in \
@@ -129,9 +150,16 @@ preserve_management_api_config_if_present() {
     local shared_marker
     shared_marker=$(shared_auth_marker_path "$ref")
 
+    if { [ -e "${TENANT_CONFIG_DIR}/${ref}_postgrest.current" ] \
+        || [ -L "${TENANT_CONFIG_DIR}/${ref}_postgrest.current" ]; } \
+        && ! management_postgrest_generation "$ref"; then
+        echo "ERROR: Managed PostgREST generation for ${ref} is invalid; re-apply it through SupaCloud Management API" >&2
+        return 1
+    fi
+
     if [ -f "$shared_marker" ]; then
         if ! is_management_api_managed_file "$pgrst_env" \
-            || ! is_management_api_managed_file "$pgrst_conf"; then
+            || ! has_management_postgrest_config "$ref"; then
             echo "ERROR: Shared auth config for ${ref} is incomplete; re-apply it through SupaCloud Management API" >&2
             return 1
         fi
@@ -149,9 +177,10 @@ preserve_management_api_config_if_present() {
     for managed_file in "$pgrst_env" "$pgrst_conf" "$gotrue_env" "$gotrue_runtime_env"; do
         if is_management_api_managed_file "$managed_file"; then managed_file_present=true; fi
     done
+    if management_postgrest_generation "$ref"; then managed_file_present=true; fi
     if [ "$managed_file_present" = true ]; then
         if ! is_management_api_managed_file "$pgrst_env" \
-            || ! is_management_api_managed_file "$pgrst_conf" \
+            || ! has_management_postgrest_config "$ref" \
             || ! is_management_api_managed_file "$gotrue_env" \
             || ! is_management_api_managed_file "$gotrue_runtime_env"; then
             echo "ERROR: Management API config for ${ref} is incomplete; refusing legacy regeneration" >&2
@@ -937,7 +966,9 @@ GOTRUE_SMTP_SENDER_NAME=$(systemd_env_quote "SupaCloud")"
 # ========== Install systemd template unit ==========
 install_systemd_template() {
     local pgrst_unit="/etc/systemd/system/supacloud-pgrst@.service"
-    if [ ! -f "$pgrst_unit" ] || grep -Eq -- '-M30m|MemoryMax=45M|^User=nobody$' "$pgrst_unit"; then
+    if [ ! -f "$pgrst_unit" ] \
+        || grep -Eq -- '-M30m|MemoryMax=45M|^User=nobody$|^EnvironmentFile=/etc/supabase/tenants/%i\.env$' "$pgrst_unit" \
+        || ! grep -Fq 'ExecStart=/usr/local/libexec/supacloud/postgrest-launcher %i' "$pgrst_unit"; then
         cat > "$pgrst_unit" <<EOF
 [Unit]
 Description=SupaCloud PostgREST for tenant %i
@@ -949,10 +980,14 @@ Wants=patroni.service
 Type=simple
 User=supacloud-%i
 Group=supacloud-%i
-EnvironmentFile=/etc/supabase/tenants/%i.env
 # Keep PostgREST bounded without starving large REST reads/upserts.
 Environment="GHCRTS=${POSTGREST_RTS}"
-ExecStart=${POSTGREST_BIN} /etc/supabase/tenants/%i.conf +RTS ${POSTGREST_RTS} -RTS
+Environment="SUPACLOUD_POSTGREST_BIN=${POSTGREST_BIN}"
+Environment="SUPACLOUD_POSTGREST_CONFIG_DIR=${TENANT_CONFIG_DIR}"
+Environment="SUPACLOUD_POSTGREST_CONFIG_TRUST_ROOT=$(dirname "$TENANT_CONFIG_DIR")"
+Environment="SUPACLOUD_POSTGREST_BINARY_TRUST_ROOT=$(dirname "$(dirname "$POSTGREST_BIN")")"
+Environment="SUPACLOUD_POSTGREST_CONTROL_UID=0"
+ExecStart=/usr/local/libexec/supacloud/postgrest-launcher %i +RTS ${POSTGREST_RTS} -RTS
 Restart=on-failure
 RestartSec=5
 StartLimitBurst=3
@@ -1099,7 +1134,13 @@ stop_runtime() {
         return
     fi
 
-    rm -rf "${TENANT_CONFIG_DIR}/${ref}.env" "${TENANT_CONFIG_DIR}/${ref}.conf" "${TENANT_CONFIG_DIR}/${ref}_gotrue.env" "${TENANT_CONFIG_DIR}/${ref}_gotrue.d" "$(shared_auth_marker_path "$ref")"
+    rm -rf "${TENANT_CONFIG_DIR}/${ref}.env" \
+        "${TENANT_CONFIG_DIR}/${ref}.conf" \
+        "${TENANT_CONFIG_DIR}/${ref}_postgrest.current" \
+        "${TENANT_CONFIG_DIR}/${ref}_postgrest.d" \
+        "${TENANT_CONFIG_DIR}/${ref}_gotrue.env" \
+        "${TENANT_CONFIG_DIR}/${ref}_gotrue.d" \
+        "$(shared_auth_marker_path "$ref")"
     userdel "$runtime_user" 2>/dev/null || true
     echo "Runtime stopped for ${ref}"
 }

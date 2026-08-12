@@ -80,14 +80,35 @@ function inheritedLockStdio(descriptor: number): StdioOptions {
     return stdio;
 }
 
+function descriptorLockCommand(descriptor: number): {
+    command: string;
+    arguments: string[];
+    busyStatus: number;
+} {
+    if (process.platform === "linux") {
+        return { command: "flock", arguments: ["-E", "75", "-n", String(descriptor)], busyStatus: 75 };
+    }
+    if (process.platform === "darwin") {
+        return {
+            command: "/usr/bin/lockf",
+            arguments: ["-s", "-t", "0", String(descriptor)],
+            busyStatus: 75,
+        };
+    }
+    throw new Error("SupaCloud upgrade locking is unsupported on this platform");
+}
+
 function acquireDescriptorLock(descriptor: number): void {
+    const lockCommand = descriptorLockCommand(descriptor);
     const attempt = spawnSync(
-        "flock",
-        ["-E", "75", "-n", String(descriptor)],
+        lockCommand.command,
+        lockCommand.arguments,
         { stdio: inheritedLockStdio(descriptor) },
     );
     if (attempt.status === 0) return;
-    if (attempt.status === 75) throw new Error("Another SupaCloud upgrade is already running");
+    if (attempt.status === lockCommand.busyStatus) {
+        throw new Error("Another SupaCloud upgrade is already running");
+    }
     const diagnostic = attempt.error?.message
         || attempt.stderr?.toString("utf8").trim()
         || `exit ${attempt.status ?? "unknown"}`;

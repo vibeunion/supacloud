@@ -487,7 +487,7 @@ describe("Auth config PostgREST verifier impact", () => {
 });
 
 describe("TenantRuntimeService auth-only apply boundary", () => {
-  test("uses checked systemctl calls only in the auth apply path", () => {
+  test("uses checked GoTrue calls and attested PostgREST refreshes in the auth apply path", () => {
     const source = readFileSync(
       join(import.meta.dir, "../../src/services/tenant-runtime.service.ts"),
       "utf8",
@@ -504,23 +504,24 @@ describe("TenantRuntimeService auth-only apply boundary", () => {
     expect(restartSection).not.toContain("runSystemctlOrThrow");
     expect(authApplySection).toContain('runSystemctlOrThrow("restart", unit)');
     expect(authApplySection).toContain('runSystemctlOrThrow("start", unit)');
-    expect(authApplySection).toContain('runSystemctlOrThrow("restart", this.postgrestController.unit(ref))');
-    expect(authApplySection).toContain("waitForHealthy");
+    expect(authApplySection).toContain(
+      'activatePostgrestGeneration(ref, "refresh-if-running")',
+    );
+    expect(authApplySection).toContain('installSystemdTemplate("checked")');
   });
 
-  test("uses checked restart and serializes PostgREST pool config changes", () => {
+  test("uses attested activation and serializes PostgREST pool config changes", () => {
     const source = readFileSync(
       join(import.meta.dir, "../../src/services/tenant-runtime.service.ts"),
       "utf8",
     );
     const poolUpdateSection = source.slice(
-      source.indexOf("private async restartPostgrestForPoolUpdate"),
+      source.indexOf("private postgrestPoolOperations"),
       source.indexOf("private async refreshProjectPostgrestVerifier"),
     );
 
-    expect(poolUpdateSection).toContain(
-      'runSystemctlOrThrow("restart", this.postgrestController.unit(ref))',
-    );
+    expect(poolUpdateSection).toContain("restartAndAttest");
+    expect(poolUpdateSection).toContain("startOrRestartPostgrestGeneration");
     expect(poolUpdateSection).toContain("withTenantConfigLock");
     expect(source).toContain("generateTenantConfigUnlocked");
   });

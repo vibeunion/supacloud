@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+    chmodSync,
+    existsSync,
+    lstatSync,
+    mkdtempSync,
+    rmSync,
+    symlinkSync,
+    writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -16,6 +24,11 @@ async function waitForFile(filePath: string): Promise<void> {
     throw new Error(`Timed out waiting for ${filePath}`);
 }
 
+function supportsDescriptorLock(): boolean {
+    return (process.platform === "linux" && Bun.which("flock") !== null)
+        || (process.platform === "darwin" && existsSync("/usr/bin/lockf"));
+}
+
 describe("SupaCloud upgrade lock", () => {
     test("uses a nonblocking conflict exit for the inherited shell descriptor", () => {
         const script = buildUpgradeLockScript("/run/lock/supacloud-upgrade.lock");
@@ -28,7 +41,7 @@ describe("SupaCloud upgrade lock", () => {
     });
 
     test("serializes direct Management upgrade processes", () => {
-        if (process.platform !== "linux" || !Bun.which("flock")) return;
+        if (!supportsDescriptorLock()) return;
         const fixtureRoot = mkdtempSync(join(tmpdir(), "supacloud-management-lock-"));
         const lockPath = join(fixtureRoot, "upgrade.lock");
         const firstLock = acquireSupaCloudUpgradeLock(lockPath);
@@ -42,6 +55,23 @@ describe("SupaCloud upgrade lock", () => {
         const nextLock = acquireSupaCloudUpgradeLock(lockPath);
         nextLock.release();
         rmSync(fixtureRoot, { recursive: true, force: true });
+    });
+
+    test("never follows a replacement lock symlink", () => {
+        if (!supportsDescriptorLock()) return;
+        const fixtureRoot = mkdtempSync(join(tmpdir(), "supacloud-lock-symlink-"));
+        const targetPath = join(fixtureRoot, "target");
+        const lockPath = join(fixtureRoot, "upgrade.lock");
+        writeFileSync(targetPath, "target", { mode: 0o644 });
+        chmodSync(targetPath, 0o644);
+        symlinkSync(targetPath, lockPath);
+
+        try {
+            expect(() => acquireSupaCloudUpgradeLock(lockPath)).toThrow();
+            expect(lstatSync(targetPath).mode & 0o777).toBe(0o644);
+        } finally {
+            rmSync(fixtureRoot, { recursive: true, force: true });
+        }
     });
 
     test("reuses the Admin shell lock in a compiled Management executable", async () => {

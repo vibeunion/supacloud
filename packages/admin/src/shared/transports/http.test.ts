@@ -317,3 +317,87 @@ describe("HttpTransport retry policy", () => {
         expect(JSON.stringify(response)).not.toContain(privateDetail);
     });
 });
+
+describe("HttpTransport bounded JSON responses", () => {
+    const maxJsonBytes = 64 * 1024;
+
+    function jsonBodyWithByteLength(byteLength: number): Uint8Array {
+        const prefix = '{"payload":"';
+        const suffix = '"}';
+        return new TextEncoder().encode(
+            `${prefix}${"x".repeat(byteLength - prefix.length - suffix.length)}${suffix}`,
+        );
+    }
+
+    test("accepts a strict JSON response exactly at the byte limit", async () => {
+        const body = jsonBodyWithByteLength(maxJsonBytes);
+        globalThis.fetch = (async () => new Response(Buffer.from(body))) as unknown as typeof fetch;
+
+        const response = await createTransport().get<{ payload: string }>(
+            "/v1/projects/project-ref/runtime-snapshot",
+            { maxJsonBytes },
+        );
+
+        expect(response.ok).toBe(true);
+        expect(response.data.payload.length).toBeGreaterThan(64_000);
+    });
+
+    test("rejects a declared response larger than the byte limit", async () => {
+        globalThis.fetch = (async () => new Response("{}", {
+            headers: { "content-length": String(maxJsonBytes + 1) },
+        })) as unknown as typeof fetch;
+
+        const response = await createTransport().get("/runtime-snapshot", { maxJsonBytes });
+
+        expect(response).toEqual({
+            ok: false,
+            status: 200,
+            data: { error: "Invalid Response", code: "INVALID_RESPONSE" },
+            responseError: true,
+        });
+    });
+
+    test("rejects a chunked response after it crosses the byte limit", async () => {
+        const oversizedBody = jsonBodyWithByteLength(maxJsonBytes + 1);
+        globalThis.fetch = (async () => new Response(new ReadableStream<Uint8Array>({
+            start(controller) {
+                controller.enqueue(oversizedBody.slice(0, maxJsonBytes));
+                controller.enqueue(oversizedBody.slice(maxJsonBytes));
+                controller.close();
+            },
+        }))) as unknown as typeof fetch;
+
+        const response = await createTransport().get("/runtime-snapshot", { maxJsonBytes });
+
+        expect(response.responseError).toBe(true);
+        expect(JSON.stringify(response)).not.toContain("x".repeat(128));
+    });
+
+    test("rejects malformed UTF-8 and malformed JSON without reflection", async () => {
+        const privateMarker = "private-response-marker";
+        const invalidBodies = [
+            new Uint8Array([0x7b, 0x22, 0x78, 0x22, 0x3a, 0x22, 0xc3, 0x28, 0x22, 0x7d]),
+            new TextEncoder().encode(`{"marker":"${privateMarker}"`),
+        ];
+
+        for (const body of invalidBodies) {
+            globalThis.fetch = (async () => new Response(Buffer.from(body))) as unknown as typeof fetch;
+            const response = await createTransport().get("/runtime-snapshot", { maxJsonBytes });
+
+            expect(response.responseError).toBe(true);
+            expect(JSON.stringify(response)).not.toContain(privateMarker);
+        }
+    });
+
+    test.each([0, -1, 1.5])("rejects invalid JSON byte limit %d before dispatch", async maxBytes => {
+        let fetchCalls = 0;
+        globalThis.fetch = (async () => {
+            fetchCalls += 1;
+            return Response.json({});
+        }) as unknown as typeof fetch;
+
+        await expect(createTransport().get("/runtime-snapshot", { maxJsonBytes: maxBytes }))
+            .rejects.toThrow("positive safe integer");
+        expect(fetchCalls).toBe(0);
+    });
+});

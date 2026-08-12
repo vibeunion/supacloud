@@ -12,7 +12,9 @@ interface ModulePolicy {
 
 const ACTION_POLICY: Record<string, ModulePolicy> = {
     project: {
-        read: ["list", "get", "settings", "api_keys", "health", "logs", "tasks", "services"],
+        read: [
+            "list", "get", "settings", "api_keys", "health", "logs", "tasks", "services", "runtime_snapshot",
+        ],
         write: ["create", "delete", "pause", "restore", "restart", "update_settings"],
     },
     platform: {

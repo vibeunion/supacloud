@@ -80,6 +80,7 @@ npx @supacloud/admin project create --name my-app --domain example.com \
   --env_file /secure/path/.env.project-credentials.test --environment test
 npx @supacloud/admin project list
 npx @supacloud/admin project services --ref abc123
+npx @supacloud/admin project runtime_snapshot --ref abc123
 npx @supacloud/admin project service_control --ref abc123 --service gotrue --service_action stop
 ```
 
@@ -167,6 +168,7 @@ Project commands owned by this CLI:
 - `project restart`
 - `project update_settings`
 - `project services` — read-only project service inventory
+- `project runtime_snapshot` — strict read-only runtime revision and PostgREST attestation snapshot
 - `project service_control` — constrained project service lifecycle control
 
 `project create` never prints project credentials. Pass an absolute

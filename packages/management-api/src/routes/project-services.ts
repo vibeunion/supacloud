@@ -11,6 +11,7 @@ import {
 } from "../middleware/auth";
 import { $ } from "bun";
 import { tenantRuntimeService } from "../services/tenant-runtime.service";
+import { runtimeSnapshotService } from "../services/runtime-snapshot.service";
 import { config } from "../config";
 import {
   getAuthRuntimeDescriptor,
@@ -26,6 +27,28 @@ export const projectServiceRouteInternals = {
 };
 
 export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
+  .get(
+    "/:ref/runtime-snapshot",
+    async ({ params, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
+      const project = await projectService.getProject(params.ref);
+      if (!project) return status(404, { message: "Project not found" });
+      try {
+        return await runtimeSnapshotService.buildPublicRuntimeSnapshot(params.ref);
+      } catch {
+        return status(503, {
+          message: "Runtime snapshot unavailable",
+          code: "RUNTIME_SNAPSHOT_UNAVAILABLE",
+        });
+      }
+    },
+    {
+      params: t.Object({ ref: t.String() }),
+      detail: { tags: ["projects"], summary: "Get canonical project runtime snapshot" },
+    },
+  )
+
   // Get project health status
   .get(
     "/:ref/health",

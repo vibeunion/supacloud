@@ -4,6 +4,7 @@ import { requireProjectOrAdminAuth } from "../middleware/auth";
 import { getAuthContext } from "../middleware/auth";
 import { runtimeEnvService } from "../services/runtime-env.service";
 import { runtimeCacheService } from "../services/runtime-cache.service";
+import { runtimeEnvRevision } from "../services/runtime-revision";
 import {
   isSystemManagedProjectSecretName,
   isUserManagedProjectSecretName,
@@ -12,7 +13,7 @@ import {
 export const projectSecretsRoutes = new Elysia({ prefix: "/v1/projects" })
   .get(
     "/:ref/internal/runtime-env",
-    async ({ params, request }) => {
+    async ({ params, request, set }) => {
       const auth = await getAuthContext(request);
       if ("status" in auth) return status(auth.status, auth.body);
       if (auth.role !== "master") return status(403, { message: "Master token required", code: "403" });
@@ -21,6 +22,7 @@ export const projectSecretsRoutes = new Elysia({ prefix: "/v1/projects" })
       if (!env) {
         return status(404, { message: "Project not found", code: "404" });
       }
+      set.headers["x-supacloud-runtime-env-revision"] = runtimeEnvRevision(params.ref, env);
       return env;
     },
     {
@@ -76,7 +78,9 @@ export const projectSecretsRoutes = new Elysia({ prefix: "/v1/projects" })
       if (!success) {
         return status(500, { message: "Failed to update secrets", code: "500" });
       }
-      await runtimeCacheService.invalidateProjectRuntimeEnv(params.ref);
+      if (!await runtimeCacheService.invalidateProjectRuntimeEnv(params.ref)) {
+        return status(503, { message: "Runtime environment invalidation failed", code: "503" });
+      }
       return {};
     },
     {
@@ -119,7 +123,9 @@ export const projectSecretsRoutes = new Elysia({ prefix: "/v1/projects" })
       if (failed > 0) {
         return status(500, { message: `Failed to delete ${failed} secret(s)`, code: "500" });
       }
-      await runtimeCacheService.invalidateProjectRuntimeEnv(params.ref);
+      if (!await runtimeCacheService.invalidateProjectRuntimeEnv(params.ref)) {
+        return status(503, { message: "Runtime environment invalidation failed", code: "503" });
+      }
       return {};
     },
     {
@@ -144,7 +150,9 @@ export const projectSecretsRoutes = new Elysia({ prefix: "/v1/projects" })
       if (!success) {
         return status(500, { message: "Failed to delete secret", code: "500" });
       }
-      await runtimeCacheService.invalidateProjectRuntimeEnv(params.ref);
+      if (!await runtimeCacheService.invalidateProjectRuntimeEnv(params.ref)) {
+        return status(503, { message: "Runtime environment invalidation failed", code: "503" });
+      }
       return {};
     },
     {

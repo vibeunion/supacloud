@@ -7,13 +7,19 @@ import { registerAdvancedTools } from "./advanced-tools";
 import { parseToolArguments } from "../schema";
 import type { ToolSchema } from "../schema";
 
+const EXPECTED_ACTIVATION_ID = "a1111111-1111-4111-8111-111111111111";
+const COMMITTED_ACTIVATION_ID = "b2222222-2222-4222-8222-222222222222";
+
 function captureEdgeFunctionsTool(
     http: Record<string, unknown>,
     options: { readOnly?: boolean } = {},
 ) {
-    const releaseMutationHttp = typeof http.postReleaseMutation === "function"
-        ? http
-        : { ...http, postReleaseMutation: http.post };
+    const releaseMutationHttp = {
+        ...http,
+        postReleaseMutation: http.postReleaseMutation ?? http.post,
+        patchReleaseMutation: http.patchReleaseMutation ?? http.patch,
+        deleteReleaseMutation: http.deleteReleaseMutation ?? http.delete,
+    };
     let schema: ToolSchema | undefined;
     let callback: ((args: Record<string, unknown>) => Promise<{
         content: Array<{ text: string }>;
@@ -130,7 +136,19 @@ describe("edge_functions CLI tool", () => {
         const { callback } = captureEdgeFunctionsTool({
             patch: async (path: string, body: unknown) => {
                 calls.push({ path, body });
-                return { ok: true, status: 200, data: { verify_jwt: false, background_routes: ["/queue/*"] } };
+                return {
+                    ok: true,
+                    status: 200,
+                    data: {
+                        success: true,
+                        project_ref: "proj",
+                        slug: "render",
+                        verify_jwt: false,
+                        background_routes: ["/queue/*"],
+                        expected_activation_id: EXPECTED_ACTIVATION_ID,
+                        activation_id: COMMITTED_ACTIVATION_ID,
+                    },
+                };
             },
         });
 
@@ -140,21 +158,40 @@ describe("edge_functions CLI tool", () => {
             slug: "render",
             verify_jwt: false,
             background_routes: ["/queue/*"],
+            "expected-activation-id": EXPECTED_ACTIVATION_ID,
         });
 
         expect(calls).toEqual([
             {
                 path: "/v1/projects/proj/functions/render/config",
-                body: { verify_jwt: false, background_routes: ["/queue/*"] },
+                body: {
+                    verify_jwt: false,
+                    background_routes: ["/queue/*"],
+                    expected_activation_id: EXPECTED_ACTIVATION_ID,
+                },
             },
         ]);
-        expect(result.content[0].text).toContain("Function render config updated");
+        expect(JSON.parse(result.content[0].text)).toMatchObject({
+            ok: true,
+            operation: "edge_functions.config",
+            project_ref: "proj",
+            slug: "render",
+            activation_id: COMMITTED_ACTIVATION_ID,
+        });
     });
 
-    test("keeps the Function list as a JSON array with numeric active versions", async () => {
+    test("projects the Function list without unknown response fields", async () => {
+        const unknownFieldSentinel = "function-list-unknown-field-sentinel";
         const functions = [
-            { slug: "legacy-hook", version: 0, verify_jwt: true, status: "ACTIVE" },
-            { slug: "fa-api", version: 7, verify_jwt: true, status: "ACTIVE" },
+            {
+                slug: "legacy-hook",
+                version: 0,
+                activation_id: "legacy",
+                verify_jwt: true,
+                status: "ACTIVE",
+                private: unknownFieldSentinel,
+            },
+            { slug: "fa-api", version: 7, activation_id: EXPECTED_ACTIVATION_ID, verify_jwt: true, status: "ACTIVE" },
         ];
         const { callback } = captureEdgeFunctionsTool({
             get: async () => ({ ok: true, status: 200, data: functions }),
@@ -164,20 +201,92 @@ describe("edge_functions CLI tool", () => {
         const payload = JSON.parse(response.content[0].text);
 
         expect(response.isError).toBeUndefined();
-        expect(payload).toEqual(functions);
+        expect(payload).toEqual([
+            { slug: "legacy-hook", version: 0, activation_id: "legacy", verify_jwt: true, status: "ACTIVE" },
+            { slug: "fa-api", version: 7, activation_id: EXPECTED_ACTIVATION_ID, verify_jwt: true, status: "ACTIVE" },
+        ]);
         expect(payload.map(({ version }: { version: number }) => version)).toEqual([0, 7]);
+        expect(response.content[0].text).not.toContain(unknownFieldSentinel);
+    });
+
+    test("reads a tombstone Function identity without reflecting unknown config fields", async () => {
+        const unknownFieldSentinel = "function-config-unknown-field-sentinel";
+        const { callback } = captureEdgeFunctionsTool({
+            get: async () => ({
+                ok: true,
+                status: 200,
+                data: {
+                    project_ref: "proj",
+                    slug: "deleted-hook",
+                    active_version: "absent",
+                    activation_id: EXPECTED_ACTIVATION_ID,
+                    verify_jwt: true,
+                    background_routes: [],
+                    private: unknownFieldSentinel,
+                },
+            }),
+        });
+
+        const response = await callback({ action: "get_config", ref: "proj", slug: "deleted-hook" });
+
+        expect(JSON.parse(response.content[0].text)).toEqual({
+            project_ref: "proj",
+            slug: "deleted-hook",
+            active_version: "absent",
+            verify_jwt: true,
+            background_routes: [],
+            activation_id: EXPECTED_ACTIVATION_ID,
+        });
+        expect(response.content[0].text).not.toContain(unknownFieldSentinel);
     });
 
     test.each([
-        ["an object", { slug: "fa-api", version: 7 }],
+        ["wrong project", { project_ref: "other" }],
+        ["wrong slug", { slug: "other-hook" }],
+        ["incoherent absent version", { active_version: "absent", version: "1" }],
+        ["invalid activation ID", { activation_id: "legacy-invalid" }],
+    ])("rejects a get_config response with %s without reflecting it", async (_label, override) => {
+        const { callback } = captureEdgeFunctionsTool({
+            get: async () => ({
+                ok: true,
+                status: 200,
+                data: {
+                    project_ref: "proj",
+                    slug: "hook",
+                    active_version: "1",
+                    version: "1",
+                    activation_id: EXPECTED_ACTIVATION_ID,
+                    verify_jwt: true,
+                    background_routes: [],
+                    private: "get-config-private-sentinel",
+                    ...override,
+                },
+            }),
+        });
+
+        const response = await callback({ action: "get_config", ref: "proj", slug: "hook" });
+        const payload = JSON.parse(response.content[0].text);
+
+        expect(response.isError).toBe(true);
+        expect(payload.error).toEqual({ code: "INVALID_RESPONSE", http_status: 200 });
+        expect(response.content[0].text).not.toContain("sentinel");
+    });
+
+    test.each([
+        ["an object", { slug: "fa-api", version: 7, activation_id: EXPECTED_ACTIVATION_ID }],
         ["a non-object entry", ["list-response-sentinel"]],
-        ["a missing slug", [{ version: 7, private: "list-response-sentinel" }]],
-        ["an invalid slug", [{ slug: "../fa-api", version: 7, private: "list-response-sentinel" }]],
-        ["a string version", [{ slug: "fa-api", version: "7", private: "list-response-sentinel" }]],
-        ["a negative version", [{ slug: "fa-api", version: -1, private: "list-response-sentinel" }]],
-        ["a fractional version", [{ slug: "fa-api", version: 1.5, private: "list-response-sentinel" }]],
-        ["an unsafe version", [{ slug: "fa-api", version: Number.MAX_SAFE_INTEGER + 1, private: "list-response-sentinel" }]],
-        ["duplicate slugs", [{ slug: "fa-api", version: 7 }, { slug: "fa-api", version: 8 }]],
+        ["a missing slug", [{ version: 7, activation_id: EXPECTED_ACTIVATION_ID, private: "list-response-sentinel" }]],
+        ["an invalid slug", [{ slug: "../fa-api", version: 7, activation_id: EXPECTED_ACTIVATION_ID, private: "list-response-sentinel" }]],
+        ["a string version", [{ slug: "fa-api", version: "7", activation_id: EXPECTED_ACTIVATION_ID, private: "list-response-sentinel" }]],
+        ["a negative version", [{ slug: "fa-api", version: -1, activation_id: EXPECTED_ACTIVATION_ID, private: "list-response-sentinel" }]],
+        ["a fractional version", [{ slug: "fa-api", version: 1.5, activation_id: EXPECTED_ACTIVATION_ID, private: "list-response-sentinel" }]],
+        ["an unsafe version", [{ slug: "fa-api", version: Number.MAX_SAFE_INTEGER + 1, activation_id: EXPECTED_ACTIVATION_ID, private: "list-response-sentinel" }]],
+        ["a missing activation ID", [{ slug: "fa-api", version: 7, private: "list-response-sentinel" }]],
+        ["a non-canonical activation ID", [{ slug: "fa-api", version: 7, activation_id: EXPECTED_ACTIVATION_ID.toUpperCase(), private: "list-response-sentinel" }]],
+        ["duplicate slugs", [
+            { slug: "fa-api", version: 7, activation_id: EXPECTED_ACTIVATION_ID },
+            { slug: "fa-api", version: 8, activation_id: COMMITTED_ACTIVATION_ID },
+        ]],
     ])("rejects a Function list containing %s without reflecting it", async (_label, payload) => {
         const { callback } = captureEdgeFunctionsTool({
             get: async () => ({ ok: true, status: 200, data: payload }),
@@ -227,7 +336,12 @@ describe("edge_functions CLI tool", () => {
                 return {
                     ok: true,
                     status: 200,
-                    data: [{ slug: "fa-api", version: activeVersion, verify_jwt: true }],
+                    data: [{
+                        slug: "fa-api",
+                        version: activeVersion,
+                        activation_id: EXPECTED_ACTIVATION_ID,
+                        verify_jwt: true,
+                    }],
                 };
             },
         });
@@ -310,6 +424,7 @@ describe("edge_functions CLI tool", () => {
             slug: "../hook",
             files: { "index.ts": "export default {}" },
             "expected-active-version": "absent",
+            "expected-activation-id": "legacy",
         }],
         ["source", { action: "source", ref: "proj", slug: "../hook" }],
     ])("rejects %s path segments before HTTP dispatch", async (_action, args) => {
@@ -344,6 +459,69 @@ describe("edge_functions CLI tool", () => {
             expect(requestCount).toBe(0);
         },
     );
+
+    test.each(["deploy", "deploy_bundle", "config", "activate", "delete"])(
+        "rejects %s without expected-activation-id before HTTP dispatch",
+        async (action) => {
+            let requestCount = 0;
+            const request = async () => {
+                requestCount += 1;
+                return { ok: true, status: 200, data: {} };
+            };
+            const { callback } = captureEdgeFunctionsTool({
+                post: request,
+                patch: request,
+                delete: request,
+            });
+            const actionInput = {
+                deploy: {
+                    action,
+                    ref: "proj",
+                    slug: "hook",
+                    code: "export default {};",
+                    "expected-active-version": "1",
+                },
+                deploy_bundle: {
+                    action,
+                    ref: "proj",
+                    slug: "hook",
+                    files: { "index.ts": "export default {};" },
+                    "expected-active-version": "1",
+                },
+                config: { action, ref: "proj", slug: "hook", verify_jwt: true },
+                activate: {
+                    action,
+                    ref: "proj",
+                    slug: "hook",
+                    version: "2",
+                    "expected-active-version": "1",
+                },
+                delete: { action, ref: "proj", slug: "hook" },
+            }[action]!;
+
+            await expect(callback(actionInput)).rejects.toThrow("--expected-activation-id");
+            expect(requestCount).toBe(0);
+        },
+    );
+
+    test.each([
+        EXPECTED_ACTIVATION_ID.toUpperCase(),
+        "00000000-0000-0000-0000-000000000000",
+        "11111111-1111-6111-8111-111111111111",
+        "not-a-uuid",
+        7,
+    ])("rejects invalid expected activation ID %j during argument parsing", (expectedActivationId) => {
+        const { schema } = captureEdgeFunctionsTool({});
+
+        expect(() => parseToolArguments(schema, {
+            action: "activate",
+            ref: "proj",
+            slug: "hook",
+            version: "2",
+            "expected-active-version": "1",
+            "expected-activation-id": expectedActivationId,
+        })).toThrow("Invalid arguments");
+    });
 
     test.each([-1, "-1", "01", "9007199254740992"])(
         "rejects invalid expected active version %j during argument parsing",
@@ -399,9 +577,15 @@ describe("edge_functions CLI tool", () => {
                         project_ref: "proj",
                         slug: "fa-api",
                         previous_active_version: "3",
+                        expected_activation_id: EXPECTED_ACTIVATION_ID,
+                        activation_id: COMMITTED_ACTIVATION_ID,
                         active_version: "4",
                         version: "4",
-                        config: { version: "4", verify_jwt: true },
+                        config: {
+                            version: "4",
+                            verify_jwt: true,
+                            activation_id: COMMITTED_ACTIVATION_ID,
+                        },
                     },
                 };
             },
@@ -415,6 +599,7 @@ describe("edge_functions CLI tool", () => {
                 "prebundled-path": bundlePath,
                 "expected-sha256": expectedSha256,
                 "expected-active-version": "3",
+                "expected-activation-id": EXPECTED_ACTIVATION_ID,
             });
 
             expect(requestBody).toEqual({
@@ -422,6 +607,7 @@ describe("edge_functions CLI tool", () => {
                 prebundled: true,
                 expected_sha256: expectedSha256,
                 expected_active_version: "3",
+                expected_activation_id: EXPECTED_ACTIVATION_ID,
             });
             expect(JSON.parse(response.content[0].text)).toMatchObject({
                 ok: true,
@@ -455,6 +641,7 @@ describe("edge_functions CLI tool", () => {
                 "prebundled-path": bundlePath,
                 "expected-sha256": expectedSha256,
                 "expected-active-version": "absent",
+                "expected-activation-id": "legacy",
             })).rejects.toThrow("SHA-256 does not match");
             expect(requestCount).toBe(0);
         } finally {
@@ -485,6 +672,7 @@ describe("edge_functions CLI tool", () => {
                 "prebundled-path": invalidUtf8Path,
                 "expected-sha256": createHash("sha256").update(invalidUtf8).digest("hex"),
                 "expected-active-version": "absent",
+                "expected-activation-id": "legacy",
             })).rejects.toThrow("valid UTF-8");
             await expect(callback({
                 action: "deploy",
@@ -493,6 +681,7 @@ describe("edge_functions CLI tool", () => {
                 "prebundled-path": nestedDirectory,
                 "expected-sha256": "0".repeat(64),
                 "expected-active-version": "absent",
+                "expected-activation-id": "legacy",
             })).rejects.toThrow("regular file");
             expect(requestCount).toBe(0);
         } finally {
@@ -520,6 +709,7 @@ describe("edge_functions CLI tool", () => {
             ref: "proj",
             slug: "fa-api",
             "expected-active-version": "absent",
+            "expected-activation-id": "legacy",
             ...deploymentInput,
         })).rejects.toThrow();
         expect(requestCount).toBe(0);
@@ -540,9 +730,15 @@ describe("edge_functions CLI tool", () => {
                             project_ref: "proj",
                             slug: "legacy-hook",
                             previous_active_version: "0",
+                            expected_activation_id: "legacy",
+                            activation_id: COMMITTED_ACTIVATION_ID,
                             active_version: "1",
                             version: "1",
-                            config: { version: "1", verify_jwt: true },
+                            config: {
+                                version: "1",
+                                verify_jwt: true,
+                                activation_id: COMMITTED_ACTIVATION_ID,
+                            },
                         },
                     };
                 },
@@ -553,6 +749,7 @@ describe("edge_functions CLI tool", () => {
                 slug: "legacy-hook",
                 files: { "index.ts": "export default {}" },
                 "expected-active-version": expectedActiveVersion,
+                "expected-activation-id": "legacy",
             });
 
             const response = await callback(args);
@@ -564,6 +761,7 @@ describe("edge_functions CLI tool", () => {
                     entrypoint: undefined,
                     minify: undefined,
                     expected_active_version: "0",
+                    expected_activation_id: "legacy",
                 },
             }]);
             expect(JSON.parse(response.content[0].text)).toMatchObject({
@@ -587,9 +785,16 @@ describe("edge_functions CLI tool", () => {
                         project_ref: "proj",
                         slug: "worker",
                         previous_active_version: "absent",
+                        expected_activation_id: "legacy",
+                        activation_id: COMMITTED_ACTIVATION_ID,
                         active_version: "1",
                         version: "1",
-                        config: { version: "1", verify_jwt: true, background_routes: ["/work/*"] },
+                        config: {
+                            version: "1",
+                            verify_jwt: true,
+                            background_routes: ["/work/*"],
+                            activation_id: COMMITTED_ACTIVATION_ID,
+                        },
                     },
                 };
             },
@@ -603,6 +808,7 @@ describe("edge_functions CLI tool", () => {
             verify_jwt: true,
             background_routes: ["/work/*"],
             "expected-active-version": "absent",
+            "expected-activation-id": "legacy",
         });
 
         expect(calls).toEqual([
@@ -614,6 +820,7 @@ describe("edge_functions CLI tool", () => {
                     entrypoint: undefined,
                     minify: undefined,
                     expected_active_version: "absent",
+                    expected_activation_id: "legacy",
                     verify_jwt: true,
                     background_routes: ["/work/*"],
                 },
@@ -642,9 +849,15 @@ describe("edge_functions CLI tool", () => {
                         project_ref: "proj",
                         slug: "public-hook",
                         previous_active_version: "3",
+                        expected_activation_id: EXPECTED_ACTIVATION_ID,
+                        activation_id: COMMITTED_ACTIVATION_ID,
                         active_version: "4",
                         version: "4",
-                        config: { version: "4", verify_jwt: false },
+                        config: {
+                            version: "4",
+                            verify_jwt: false,
+                            activation_id: COMMITTED_ACTIVATION_ID,
+                        },
                     },
                 };
             },
@@ -657,6 +870,7 @@ describe("edge_functions CLI tool", () => {
             code: "export default { fetch: () => new Response('ok') }",
             verify_jwt: false,
             "expected-active-version": "3",
+            "expected-activation-id": EXPECTED_ACTIVATION_ID,
         });
 
         expect(calls).toEqual([{
@@ -666,6 +880,7 @@ describe("edge_functions CLI tool", () => {
                 code: "export default { fetch: () => new Response('ok') }",
                 minify: undefined,
                 expected_active_version: "3",
+                expected_activation_id: EXPECTED_ACTIVATION_ID,
                 verify_jwt: false,
             },
         }]);
@@ -699,6 +914,7 @@ describe("edge_functions CLI tool", () => {
             files: { "index.ts": "export default {}" },
             verify_jwt: false,
             "expected-active-version": "1",
+            "expected-activation-id": EXPECTED_ACTIVATION_ID,
         });
 
         expect(calls.map(({ method, path }) => ({ method, path }))).toEqual([
@@ -731,6 +947,7 @@ describe("edge_functions CLI tool", () => {
             code: "export default { fetch: () => new Response('ok') }",
             verify_jwt: false,
             "expected-active-version": "1",
+            "expected-activation-id": EXPECTED_ACTIVATION_ID,
         });
 
         expect(calls).toEqual([
@@ -753,9 +970,15 @@ describe("edge_functions CLI tool", () => {
                     project_ref: "proj",
                     slug: "public-hook",
                     previous_active_version: "absent",
+                    expected_activation_id: "legacy",
+                    activation_id: COMMITTED_ACTIVATION_ID,
                     active_version: "0",
                     version: "0",
-                    config: { version: "0", verify_jwt: true },
+                    config: {
+                        version: "0",
+                        verify_jwt: true,
+                        activation_id: COMMITTED_ACTIVATION_ID,
+                    },
                 },
             }),
         });
@@ -766,6 +989,7 @@ describe("edge_functions CLI tool", () => {
             slug: "public-hook",
             files: { "index.ts": "export default {}" },
             "expected-active-version": "absent",
+            "expected-activation-id": "legacy",
         });
 
         expect(response.isError).toBe(true);
@@ -774,6 +998,154 @@ describe("edge_functions CLI tool", () => {
             http_status: 200,
         });
     });
+
+    test.each([
+        ["a missing expected activation ID", {
+            success: true,
+            project_ref: "proj",
+            slug: "public-hook",
+            previous_active_version: "1",
+            activation_id: COMMITTED_ACTIVATION_ID,
+            active_version: "2",
+            version: "2",
+            config: { version: "2", verify_jwt: true, activation_id: COMMITTED_ACTIVATION_ID },
+        }],
+        ["a mismatched expected activation ID", {
+            success: true,
+            project_ref: "proj",
+            slug: "public-hook",
+            previous_active_version: "1",
+            expected_activation_id: "legacy",
+            activation_id: COMMITTED_ACTIVATION_ID,
+            active_version: "2",
+            version: "2",
+            config: { version: "2", verify_jwt: true, activation_id: COMMITTED_ACTIVATION_ID },
+        }],
+        ["a legacy committed activation ID", {
+            success: true,
+            project_ref: "proj",
+            slug: "public-hook",
+            previous_active_version: "1",
+            expected_activation_id: EXPECTED_ACTIVATION_ID,
+            activation_id: "legacy",
+            active_version: "2",
+            version: "2",
+            config: { version: "2", verify_jwt: true, activation_id: "legacy" },
+        }],
+        ["a mismatched config activation ID", {
+            success: true,
+            project_ref: "proj",
+            slug: "public-hook",
+            previous_active_version: "1",
+            expected_activation_id: EXPECTED_ACTIVATION_ID,
+            activation_id: COMMITTED_ACTIVATION_ID,
+            active_version: "2",
+            version: "2",
+            config: { version: "2", verify_jwt: true, activation_id: EXPECTED_ACTIVATION_ID },
+        }],
+    ])("rejects a successful mutation receipt containing %s", async (_label, data) => {
+        const { callback } = captureEdgeFunctionsTool({
+            post: async () => ({ ok: true, status: 200, data }),
+        });
+
+        const response = await callback({
+            action: "deploy_bundle",
+            ref: "proj",
+            slug: "public-hook",
+            files: { "index.ts": "export default {}" },
+            "expected-active-version": "1",
+            "expected-activation-id": EXPECTED_ACTIVATION_ID,
+        });
+
+        expect(response.isError).toBe(true);
+        expect(JSON.parse(response.content[0].text).error).toEqual({
+            code: "OUTCOME_UNKNOWN",
+            http_status: 200,
+        });
+    });
+
+    test("sends and binds the expected activation ID when deleting a Function", async () => {
+        const calls: Array<{ path: string; body: unknown }> = [];
+        const { callback } = captureEdgeFunctionsTool({
+            delete: async (path: string, body: unknown) => {
+                calls.push({ path, body });
+                return {
+                    ok: true,
+                    status: 200,
+                    data: {
+                        success: true,
+                        project_ref: "proj",
+                        slug: "public-hook",
+                        expected_activation_id: EXPECTED_ACTIVATION_ID,
+                        activation_id: COMMITTED_ACTIVATION_ID,
+                        previous_active_version: "4",
+                        active_version: "absent",
+                        config: {
+                            verify_jwt: true,
+                            activation_id: COMMITTED_ACTIVATION_ID,
+                        },
+                    },
+                };
+            },
+        });
+
+        const response = await callback({
+            action: "delete",
+            ref: "proj",
+            slug: "public-hook",
+            "expected-activation-id": EXPECTED_ACTIVATION_ID,
+        });
+
+        expect(calls).toEqual([{
+            path: "/v1/projects/proj/functions/public-hook",
+            body: { expected_activation_id: EXPECTED_ACTIVATION_ID },
+        }]);
+        expect(response.isError).toBeUndefined();
+        expect(JSON.parse(response.content[0].text)).toMatchObject({
+            ok: true,
+            operation: "edge_functions.delete",
+            activation_id: COMMITTED_ACTIVATION_ID,
+            active_version: "absent",
+        });
+    });
+
+    test.each(["config", "delete"])(
+        "fails %s closed when the bounded mutation response cannot prove the outcome",
+        async (action) => {
+            const responseSentinel = `${action}-private-response-sentinel`;
+            const mutationFailure = {
+                ok: false,
+                status: 200,
+                data: { error: responseSentinel },
+                responseReadError: true,
+            };
+            const { callback } = captureEdgeFunctionsTool({
+                patchReleaseMutation: async () => mutationFailure,
+                deleteReleaseMutation: async () => mutationFailure,
+            });
+            const args = action === "config"
+                ? {
+                    action,
+                    ref: "proj",
+                    slug: "hook",
+                    verify_jwt: false,
+                    "expected-activation-id": EXPECTED_ACTIVATION_ID,
+                }
+                : {
+                    action,
+                    ref: "proj",
+                    slug: "hook",
+                    "expected-activation-id": EXPECTED_ACTIVATION_ID,
+                };
+
+            const response = await callback(args);
+            const payload = JSON.parse(response.content[0].text);
+
+            expect(response.isError).toBe(true);
+            expect(payload.error).toEqual({ code: "OUTCOME_UNKNOWN", http_status: 200 });
+            expect(response.content[0].text).not.toContain(responseSentinel);
+        },
+    );
 
     test("rejects legacy Function version zero before activation dispatch", async () => {
         let requestCount = 0;
@@ -822,6 +1194,7 @@ describe("edge_functions CLI tool", () => {
                 releaseMutationPaths.push(path);
                 const slug = path.split("/functions/")[1].split("/")[0];
                 const previousActiveVersion = String(body.expected_active_version);
+                const expectedActivationId = String(body.expected_activation_id);
                 const activeVersion = { single: "2", bundle: "3", restore: "1" }[slug];
                 return {
                     ok: true,
@@ -831,9 +1204,15 @@ describe("edge_functions CLI tool", () => {
                         project_ref: "proj",
                         slug,
                         previous_active_version: previousActiveVersion,
+                        expected_activation_id: expectedActivationId,
+                        activation_id: COMMITTED_ACTIVATION_ID,
                         active_version: activeVersion,
                         version: activeVersion,
-                        config: { version: activeVersion, verify_jwt: true },
+                        config: {
+                            version: activeVersion,
+                            verify_jwt: true,
+                            activation_id: COMMITTED_ACTIVATION_ID,
+                        },
                     },
                 };
             },
@@ -846,6 +1225,7 @@ describe("edge_functions CLI tool", () => {
                 slug: "single",
                 code: "export default {};",
                 "expected-active-version": "1",
+                "expected-activation-id": EXPECTED_ACTIVATION_ID,
             },
             {
                 action: "deploy_bundle",
@@ -853,6 +1233,7 @@ describe("edge_functions CLI tool", () => {
                 slug: "bundle",
                 files: { "index.ts": "export default {};" },
                 "expected-active-version": "2",
+                "expected-activation-id": EXPECTED_ACTIVATION_ID,
             },
             {
                 action: "activate",
@@ -860,6 +1241,7 @@ describe("edge_functions CLI tool", () => {
                 slug: "restore",
                 version: "1",
                 "expected-active-version": "3",
+                "expected-activation-id": EXPECTED_ACTIVATION_ID,
             },
         ];
         const responses = [];
@@ -909,6 +1291,7 @@ describe("edge_functions CLI tool", () => {
             slug: "hook",
             version: "5",
             "expected-active-version": "4",
+            "expected-activation-id": EXPECTED_ACTIVATION_ID,
         });
         const payload = JSON.parse(response.content[0].text);
 
@@ -933,6 +1316,7 @@ describe("edge_functions CLI tool", () => {
             version: "5",
             verify_jwt: false,
             "expected-active-version": "4",
+            "expected-activation-id": EXPECTED_ACTIVATION_ID,
         })).rejects.toThrow("not supported for 'activate'");
         expect(requestCount).toBe(0);
     });

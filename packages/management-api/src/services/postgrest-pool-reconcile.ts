@@ -1,7 +1,3 @@
-import { randomUUID } from "node:crypto";
-import { chmod, chown, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
-
 const MANAGED_CONFIG_PREFIX = "# Managed by SupaCloud Management API.";
 const DB_POOL_LINE_PATTERN = /^(\s*db-pool\s*=\s*)(\d+)(\s*(?:#.*)?)$/gm;
 const CONFIG_ASSIGNMENT_PATTERN = /^([a-z][a-z0-9-]*)\s*=\s*(.+)$/;
@@ -46,19 +42,30 @@ const LEGACY_STATIC_CONFIG_VALUES = new Map([
 export const POSTGREST_POOL_RETRY_BACKOFF_MS = 60 * 60 * 1000;
 
 interface PostgrestPoolReconcileRequest {
-  configPath: string;
   projectRef: string;
   desiredPool: number;
   projectStatus: string;
   desiredState: "running" | "stopped";
-  restartAndWait: () => Promise<void>;
+  operations: PostgrestPoolReconcileOperations;
 }
 
-interface PostgrestConfigSnapshot {
+export interface PostgrestPoolGeneration {
   content: string;
-  mode: number;
-  uid: number;
-  gid: number;
+  pointerTarget: string;
+  revision: string;
+}
+
+export interface PostgrestPoolReconcileOperations {
+  readCurrentGeneration: () => Promise<PostgrestPoolGeneration>;
+  candidateGeneration: (content: string) => PostgrestPoolGeneration;
+  activateCandidate: (
+    content: string,
+    expectedPreviousPointerTarget: string,
+  ) => Promise<PostgrestPoolGeneration>;
+  currentPointerTarget: () => Promise<string | null>;
+  validateGeneration: (generation: PostgrestPoolGeneration) => Promise<void>;
+  restorePointer: (generation: PostgrestPoolGeneration) => Promise<void>;
+  restartAndAttest: (expectedRevision: string) => Promise<void>;
 }
 
 export type PostgrestPoolReconcileResult =
@@ -233,99 +240,65 @@ export function renderManagedPostgrestDbPool(
   return renderDbPoolMatch(content, matches[0], desiredPool);
 }
 
-async function readConfigSnapshot(configPath: string): Promise<PostgrestConfigSnapshot> {
-  const [content, metadata] = await Promise.all([
-    readFile(configPath, "utf8"),
-    stat(configPath),
-  ]);
-  return {
-    content,
-    mode: metadata.mode & 0o7777,
-    uid: metadata.uid,
-    gid: metadata.gid,
-  };
-}
-
-async function writeConfigSnapshot(
-  configPath: string,
-  snapshot: PostgrestConfigSnapshot,
-): Promise<void> {
-  const temporaryPath = join(
-    dirname(configPath),
-    `.${basename(configPath)}.${randomUUID()}.tmp`,
-  );
-  let writeError: unknown;
-  try {
-    await writeFile(temporaryPath, snapshot.content, {
-      encoding: "utf8",
-      flag: "wx",
-      mode: snapshot.mode,
-    });
-    await chown(temporaryPath, snapshot.uid, snapshot.gid);
-    await chmod(temporaryPath, snapshot.mode);
-    await rename(temporaryPath, configPath);
-  } catch (error: unknown) {
-    writeError = error;
-  }
-  let cleanupError: unknown;
-  try {
-    await rm(temporaryPath, { force: true });
-  } catch (error: unknown) {
-    cleanupError = error;
-  }
-  if (writeError && cleanupError) {
-    throw new AggregateError(
-      [writeError, cleanupError],
-      "PostgREST config write and temporary file cleanup both failed",
-    );
-  }
-  if (writeError) throw writeError;
-  if (cleanupError) throw cleanupError;
-}
-
-async function assertCurrentConfig(
-  configPath: string,
-  expectedContent: string,
-): Promise<void> {
-  const currentContent = await readFile(configPath, "utf8");
-  if (currentContent !== expectedContent) {
-    throw new Error("PostgREST config changed concurrently; refusing to overwrite it during rollback");
-  }
-}
-
 function isEligible(request: PostgrestPoolReconcileRequest): boolean {
   return request.projectStatus === "active" && request.desiredState === "running";
+}
+
+function sameGeneration(
+  left: PostgrestPoolGeneration,
+  right: PostgrestPoolGeneration,
+): boolean {
+  return left.pointerTarget === right.pointerTarget && left.revision === right.revision;
+}
+
+async function rollBackPoolUpdate(
+  request: PostgrestPoolReconcileRequest,
+  original: PostgrestPoolGeneration,
+  candidate: PostgrestPoolGeneration,
+  updateError: unknown,
+): Promise<PostgrestPoolReconcileResult> {
+  await request.operations.validateGeneration(original);
+  const currentPointerTarget = await request.operations.currentPointerTarget();
+  if (currentPointerTarget !== original.pointerTarget
+    && currentPointerTarget !== candidate.pointerTarget) {
+    throw new Error("PostgREST generation changed concurrently during pool rollback");
+  }
+  if (currentPointerTarget !== original.pointerTarget) {
+    await request.operations.restorePointer(original);
+  }
+  await request.operations.restartAndAttest(original.revision);
+  return {
+    state: "rolled_back",
+    error: "POSTGREST_POOL_UPDATE_ROLLED_BACK",
+    cause: updateError,
+  };
 }
 
 export async function reconcileManagedPostgrestPool(
   request: PostgrestPoolReconcileRequest,
 ): Promise<PostgrestPoolReconcileResult> {
   if (!isEligible(request)) return { state: "skipped" };
-  const original = await readConfigSnapshot(request.configPath);
+  const original = await request.operations.readCurrentGeneration();
   const candidateContent = renderManagedPostgrestDbPool(
     original.content,
     request.desiredPool,
     request.projectRef,
   );
   if (candidateContent === null) return { state: "unchanged" };
-
-  await writeConfigSnapshot(request.configPath, {
-    ...original,
-    content: candidateContent,
-  });
+  const candidate = request.operations.candidateGeneration(candidateContent);
   try {
-    await request.restartAndWait();
+    const activated = await request.operations.activateCandidate(
+      candidateContent,
+      original.pointerTarget,
+    );
+    if (!sameGeneration(activated, candidate)) {
+      throw new Error("Activated PostgREST pool generation does not match its candidate");
+    }
+    await request.operations.restartAndAttest(candidate.revision);
     return { state: "updated" };
   } catch (updateError: unknown) {
     try {
-      await assertCurrentConfig(request.configPath, candidateContent);
-      await writeConfigSnapshot(request.configPath, original);
-      await request.restartAndWait();
-      return {
-        state: "rolled_back",
-        error: "POSTGREST_POOL_UPDATE_ROLLED_BACK",
-        cause: updateError,
-      };
+      return await rollBackPoolUpdate(request, original, candidate, updateError);
     } catch (rollbackError: unknown) {
       throw new PostgrestPoolReconcileError(updateError, rollbackError);
     }

@@ -4,9 +4,48 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
+import { createHash } from "node:crypto";
 import { WorkerPool } from "./worker-pool";
+import {
+  EDGE_RUNTIME_PREHEAT_ATTESTATION_SCHEMA,
+  type EdgeRuntimePreheatIdentity,
+} from "./preheat-attestation";
 
 const pools: WorkerPool[] = [];
+
+async function functionArtifactSha256(functionPath: string): Promise<string> {
+  const artifactBytes = Buffer.from(await Bun.file(functionPath).arrayBuffer());
+  return createHash("sha256").update(artifactBytes).digest("hex");
+}
+
+function preheatIdentity(request: {
+  projectRef: string;
+  functionSlug: string;
+  version: string;
+  artifactSha256: string;
+  requestedVersion?: string | null;
+}): EdgeRuntimePreheatIdentity {
+  return {
+    schema: EDGE_RUNTIME_PREHEAT_ATTESTATION_SCHEMA,
+    project_ref: request.projectRef,
+    function_slug: request.functionSlug,
+    requested_version: request.requestedVersion ?? null,
+    target_version: request.version,
+    resolved_version: request.version,
+    artifact_sha256: request.artifactSha256,
+    verify_jwt: true,
+    activation_id: null,
+    runtime_instance_id: "00000000-0000-4000-8000-000000000001",
+    execution_profile: "foreground",
+    module_env_proof: `hmac-sha256:${"c".repeat(64)}`,
+    tenant_env: {
+      loaded_revision: `hmac-sha256:${"a".repeat(64)}`,
+      env_proof: `hmac-sha256:${"b".repeat(64)}`,
+      load_state: "loaded",
+      load_source: "management_api",
+    },
+  };
+}
 
 afterEach(async () => {
   for (const pool of pools.splice(0)) {
@@ -572,12 +611,14 @@ describe("WorkerPool subprocess guard", () => {
   test("reports the worker error when preheat rejects a computed dynamic import", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-preheat-import-project-"));
     const functionPath = join(projectRoot, "computed-import.ts");
+    const recoveryPath = join(projectRoot, "recovery.ts");
     await Bun.write(functionPath, `
       const moduleName = process.env.MODULE_PATH;
       export default async function () {
         return new Response(String(await import(moduleName)));
       }
     `);
+    await Bun.write(recoveryPath, `export default () => new Response("replacement");`);
     const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
     pools.push(pool);
 
@@ -591,6 +632,149 @@ describe("WorkerPool subprocess guard", () => {
 
       expect(preheat.succeeded).toBe(0);
       expect(preheat.error).toBe("Computed dynamic imports are disabled in the multi-tenant Edge Runtime.");
+      expect(pool.snapshotMetrics("failed_preheat")["failed_preheat_total_worker_retirements"]).toBe(1);
+
+      const response = await pool.dispatch({
+        functionId: "proj_preheat_recovery",
+        functionPath: recoveryPath,
+        projectRoot,
+        env: {},
+        request: new Request("http://edge.local/functions/v1/recovery"),
+      });
+      expect(await response.text()).toBe("replacement");
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("returns a matching worker preheat attestation", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-preheat-attested-"));
+    const functionPath = join(projectRoot, "attested.ts");
+    await Bun.write(functionPath, `export default () => new Response("attested");`);
+    const artifactSha256 = await functionArtifactSha256(functionPath);
+    const attestation = preheatIdentity({
+      projectRef: "proj_preheat_attested",
+      functionSlug: "attested",
+      version: "1",
+      artifactSha256,
+    });
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    try {
+      const preheat = await pool.preheatIdleWorkers(
+        "proj_preheat_attested_attested_v1",
+        functionPath,
+        projectRoot,
+        {},
+        { projectRef: "proj_preheat_attested", moduleVersion: "v1", attestation },
+      );
+
+      expect(preheat).toMatchObject({ succeeded: 1, cacheMisses: 1 });
+      expect(preheat.attestation).toEqual({ ...attestation, module_loaded: true });
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("preheats a legacy version-zero artifact with a matching attestation", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-preheat-legacy-zero-"));
+    const functionPath = join(projectRoot, "legacy-zero.ts");
+    await Bun.write(functionPath, `export default () => new Response("legacy-zero");`);
+    const artifactSha256 = await functionArtifactSha256(functionPath);
+    const attestation = preheatIdentity({
+      projectRef: "proj_preheat_legacy_zero",
+      functionSlug: "legacy_zero",
+      version: "0",
+      requestedVersion: "0",
+      artifactSha256,
+    });
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    try {
+      const preheat = await pool.preheatVersionedIdleWorkers({
+        functionId: "proj_preheat_legacy_zero_legacy_zero_v0",
+        functionPath,
+        projectRoot,
+        env: {},
+        projectRef: "proj_preheat_legacy_zero",
+        moduleVersion: "v0",
+        attestation,
+      });
+
+      expect(preheat).toMatchObject({ succeeded: 1, cacheMisses: 1 });
+      expect(preheat.attestation).toEqual({ ...attestation, module_loaded: true });
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects a worker preheat whose artifact hash changed", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-preheat-hash-mismatch-"));
+    const functionPath = join(projectRoot, "attested.ts");
+    await Bun.write(functionPath, `export default () => new Response("actual");`);
+    const attestation = preheatIdentity({
+      projectRef: "proj_preheat_hash",
+      functionSlug: "attested",
+      version: "1",
+      artifactSha256: "c".repeat(64),
+    });
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    try {
+      const preheat = await pool.preheatIdleWorkers(
+        "proj_preheat_hash_attested_v1",
+        functionPath,
+        projectRoot,
+        {},
+        { projectRef: "proj_preheat_hash", moduleVersion: "v1", attestation },
+      );
+
+      expect(preheat.succeeded).toBe(0);
+      expect(preheat.error).toBe("Function artifact SHA-256 does not match preheat identity");
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("does not reuse a module cache entry after artifact replacement", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-preheat-artifact-aba-"));
+    const functionPath = join(projectRoot, "attested.ts");
+    const projectRef = "proj_preheat_aba";
+    const functionSlug = "attested";
+    const functionId = `${projectRef}_${functionSlug}_v1`;
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    const preheatCurrentArtifact = async () => {
+      const artifactSha256 = await functionArtifactSha256(functionPath);
+      return pool.preheatIdleWorkers(functionId, functionPath, projectRoot, {}, {
+        projectRef,
+        moduleVersion: "stable-version-metadata",
+        attestation: preheatIdentity({ projectRef, functionSlug, version: "1", artifactSha256 }),
+      });
+    };
+
+    try {
+      await Bun.write(functionPath, `export default () => new Response("A");`);
+      expect(await preheatCurrentArtifact()).toMatchObject({ succeeded: 1, cacheMisses: 1 });
+
+      await Bun.write(functionPath, `export default () => new Response("B");`);
+      const artifactSha256 = await functionArtifactSha256(functionPath);
+      expect(await preheatCurrentArtifact()).toMatchObject({ succeeded: 1, cacheMisses: 1 });
+      const response = await pool.dispatch({
+        functionId,
+        functionPath,
+        projectRoot,
+        projectRef,
+        moduleVersion: "stable-version-metadata",
+        artifactSha256,
+        env: {},
+        request: new Request("http://edge.local/functions/v1/attested"),
+      });
+      expect(await response.text()).toBe("B");
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
@@ -1422,6 +1606,7 @@ describe("WorkerPool cancellation and replacement", () => {
 
     const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
     const controller = new AbortController();
+    let executionStarted = 0;
     pools.push(pool);
 
     try {
@@ -1430,6 +1615,9 @@ describe("WorkerPool cancellation and replacement", () => {
         functionPath,
         projectRoot,
         env: { HANDLER_PATH: handlerPath, LOADING_PATH: loadingPath },
+        onExecutionStarted: () => {
+          executionStarted += 1;
+        },
         request: new Request("http://edge.local/functions/v1/load-cancel", {
           signal: controller.signal,
         }),
@@ -1439,6 +1627,7 @@ describe("WorkerPool cancellation and replacement", () => {
 
       expect((await responsePromise).status).toBe(499);
       expect(existsSync(handlerPath)).toBe(false);
+      expect(executionStarted).toBe(0);
       expect(pool.snapshotMetrics("cancel")["cancel_idle_workers"]).toBe(1);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
@@ -1547,6 +1736,63 @@ describe("WorkerPool cancellation and replacement", () => {
       expect((await queuedResponse).status).toBe(499);
       expect((await slowResponse).status).toBe(200);
       expect(pool.snapshotMetrics("queue")["queue_total_queued_requests"]).toBe(1);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("cancels queued old-env work when a project is invalidated", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-queued-env-invalidate-"));
+    const functionPath = join(projectRoot, "fn.ts");
+    const activeStartedPath = join(projectRoot, "active-started.txt");
+    const queuedStartedPath = join(projectRoot, "queued-started.txt");
+    await Bun.write(functionPath, `
+      export default async function (request) {
+        const pathname = new URL(request.url).pathname;
+        if (pathname.endsWith("/active")) {
+          await Bun.write(process.env.ACTIVE_STARTED_PATH, "started");
+          await Bun.sleep(200);
+          return new Response("active-complete");
+        }
+        await Bun.write(process.env.QUEUED_STARTED_PATH, "started");
+        return new Response("queued-executed");
+      }
+    `);
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    try {
+      const activeResponse = pool.dispatch({
+        functionId: "proj_env_queue_fn",
+        functionPath,
+        projectRoot,
+        projectRef: "proj_env_queue",
+        env: { ACTIVE_STARTED_PATH: activeStartedPath },
+        request: new Request("http://edge.local/functions/v1/fn/active"),
+      });
+      await waitForFile(activeStartedPath);
+      const queuedResponse = pool.dispatch({
+        functionId: "proj_env_queue_fn",
+        functionPath,
+        projectRoot,
+        projectRef: "proj_env_queue",
+        env: { QUEUED_STARTED_PATH: queuedStartedPath },
+        request: new Request("http://edge.local/functions/v1/fn/queued"),
+      });
+      await waitForMetric(pool, "queue_length", 1);
+
+      const invalidation = await pool.invalidateProject("proj_env_queue");
+      const cancelled = await queuedResponse;
+
+      expect(invalidation.cancelledQueued).toBe(1);
+      expect(cancelled.status).toBe(503);
+      expect(await cancelled.json()).toEqual({
+        error: "Runtime environment changed before execution",
+        code: "RUNTIME_ENV_INVALIDATED",
+      });
+      expect(pool.snapshotMetrics("env_queue")["env_queue_queue_length"]).toBe(0);
+      expect(await activeResponse.then((response) => response.text())).toBe("active-complete");
+      expect(existsSync(queuedStartedPath)).toBe(false);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
@@ -2788,6 +3034,42 @@ describe("WorkerPool module cache", () => {
       expect(result.invalidated).toBe(1);
 
       expect(await (await dispatch("env:1:stat:same", "new")).text()).toBe("new");
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("binds native module imports to the attested env proof across A to B to A", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-env-proof-import-"));
+    const functionPath = join(projectRoot, "env-proof.ts");
+    await Bun.write(functionPath, `
+      const loadedSecret = process.env.RUNTIME_SECRET || "missing";
+      export default () => new Response(loadedSecret);
+    `);
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    const dispatch = (secret: string, envProof: string) => pool.dispatch({
+      functionId: "proj_env_proof_fn",
+      functionPath,
+      projectRoot,
+      projectRef: "proj_env_proof",
+      moduleVersion: "same-module-version",
+      envProof,
+      env: { RUNTIME_SECRET: secret },
+      request: new Request("http://edge.local/functions/v1/env-proof"),
+    });
+
+    try {
+      const proofA = `hmac-sha256:${"a".repeat(64)}`;
+      const proofB = `hmac-sha256:${"b".repeat(64)}`;
+      expect(await (await dispatch("A", proofA)).text()).toBe("A");
+      expect(await (await dispatch("B", proofB)).text()).toBe("B");
+      expect(await (await dispatch("A-not-reimported", proofA)).text()).toBe("A");
+
+      const metrics = pool.snapshotMetrics("env_proof");
+      expect(metrics["env_proof_total_module_cache_hits"]).toBe(1);
+      expect(metrics["env_proof_total_module_cache_misses"]).toBe(2);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }

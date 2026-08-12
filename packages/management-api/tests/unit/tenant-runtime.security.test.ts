@@ -61,7 +61,7 @@ describe("TenantRuntimeService secret handling", () => {
     expect(source).toContain('renderSystemdEnvLine("SUPACLOUD_AUTH_ISSUER", creds.localJwtIssuer)');
     expect(source).toContain('sharedAuthRuntime ? "" : renderSystemdEnvLine("JWT_SECRET"');
     expect(source).toContain('sharedAuthRuntime ? "" : jwtKeysEnv');
-    expect(source).toContain("const postgrestJwtAudience = sharedAuthRuntime");
+    expect(source).toContain("jwtAudience: isSharedAuthRuntime(ref)");
     expect(source).toContain("SupAuth owner tokens may only use the authenticated role");
     expect(source).toContain("Dependent legacy user sessions are disabled while SupAuth is active");
   });

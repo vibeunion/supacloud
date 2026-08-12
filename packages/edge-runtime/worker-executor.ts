@@ -24,6 +24,11 @@ import {
 import { installEdgeFetchTlsPolicy, resolveEdgeFetchTlsPolicy } from "./fetch-tls-policy";
 import type { EdgeFetchTlsPolicy } from "./fetch-tls-policy";
 import { runWithPgredisBinding } from "./internal-bindings";
+import {
+  isCanonicalArtifactSha256,
+  isEdgeRuntimePreheatIdentity,
+  type EdgeRuntimePreheatIdentity,
+} from "./preheat-attestation";
 
 const { parentPort } = require("node:worker_threads") as typeof import("node:worker_threads");
 import type { PgredisRuntimeBindingConfig } from "./internal-bindings";
@@ -72,6 +77,9 @@ type PreheatMessage = {
   projectRoot: string;
   projectRef?: string;
   moduleVersion?: string;
+  envProof?: string;
+  artifactSha256?: string;
+  attestation?: EdgeRuntimePreheatIdentity;
   env: Record<string, string>;
   tlsPolicy?: EdgeFetchTlsPolicy;
 };
@@ -110,12 +118,31 @@ function evictOldestModule() {
   }
 }
 
-function buildModuleCacheKey(functionId: string, functionPath: string, moduleVersion: string): string {
-  return `${functionId}\n${functionPath}\n${moduleVersion}`;
+type ModuleIdentity = {
+  functionId: string;
+  functionPath: string;
+  moduleVersion: string;
+  envProof: string;
+  artifactSha256: string;
+};
+
+function buildModuleCacheKey(identity: ModuleIdentity): string {
+  return [
+    identity.functionId,
+    identity.functionPath,
+    identity.moduleVersion,
+    identity.envProof,
+    identity.artifactSha256,
+  ].join("\n");
 }
 
-function buildModuleImportUrl(functionPath: string, moduleVersion: string): string {
-  return `${functionPath}?v=${encodeURIComponent(moduleVersion)}`;
+function buildModuleImportUrl(identity: ModuleIdentity): string {
+  const query = new URLSearchParams({
+    version: identity.moduleVersion,
+    env_proof: identity.envProof,
+    artifact_sha256: identity.artifactSha256,
+  });
+  return `${identity.functionPath}?${query.toString()}`;
 }
 
 function invalidateCachedModules(predicate: (entry: ModuleCacheEntry) => boolean): number {
@@ -140,6 +167,22 @@ async function importModuleHandler(importUrl: string): Promise<unknown> {
       || moduleNamespace;
   } finally {
     clearCapturedServeHandler();
+  }
+}
+
+async function artifactSha256(functionPath: string): Promise<string> {
+  const artifactBytes = await runtimeBunFile(functionPath).arrayBuffer();
+  const digest = await crypto.subtle.digest("SHA-256", artifactBytes);
+  return Buffer.from(digest).toString("hex");
+}
+
+async function assertAttestedArtifact(
+  functionPath: string,
+  identity: EdgeRuntimePreheatIdentity | undefined,
+): Promise<void> {
+  if (!identity) return;
+  if (await artifactSha256(functionPath) !== identity.artifact_sha256) {
+    throw new Error("Function artifact SHA-256 does not match preheat identity");
   }
 }
 
@@ -406,9 +449,17 @@ async function loadModule(input: {
   projectRoot: string;
   moduleVersion?: string;
   projectRef?: string | null;
+  envProof?: string;
+  artifactSha256?: string;
 }): Promise<LoadModuleResult> {
-  const moduleVersion = input.moduleVersion || "unversioned";
-  const cacheKey = buildModuleCacheKey(input.functionId, input.functionPath, moduleVersion);
+  const identity: ModuleIdentity = {
+    functionId: input.functionId,
+    functionPath: input.functionPath,
+    moduleVersion: input.moduleVersion || "unversioned",
+    envProof: input.envProof || "unverified-env",
+    artifactSha256: input.artifactSha256 || "unverified-artifact",
+  };
+  const cacheKey = buildModuleCacheKey(identity);
   const cached = moduleCache.get(cacheKey);
   if (cached) {
     cached.lastUsed = Date.now();
@@ -418,9 +469,7 @@ async function loadModule(input: {
   evictOldestModule();
 
   await assertTenantModuleGraphSafe(input.functionPath);
-  const handler = await importModuleHandler(
-    buildModuleImportUrl(input.functionPath, moduleVersion),
-  );
+  const handler = await importModuleHandler(buildModuleImportUrl(identity));
   moduleCache.set(cacheKey, {
     handler,
     functionId: input.functionId,
@@ -514,12 +563,22 @@ function isTlsPolicy(candidate: unknown): candidate is EdgeFetchTlsPolicy {
     && (policy.rejectUnauthorized === undefined || typeof policy.rejectUnauthorized === "boolean");
 }
 
+function hasPreheatArtifactFields(candidate: Record<string, unknown>): boolean {
+  if (candidate.artifactSha256 !== undefined
+    && !isCanonicalArtifactSha256(candidate.artifactSha256)) return false;
+  if (candidate.attestation === undefined) return true;
+  return isEdgeRuntimePreheatIdentity(candidate.attestation)
+    && candidate.artifactSha256 === candidate.attestation.artifact_sha256;
+}
+
 function hasPreheatFields(candidate: Record<string, unknown>): boolean {
   return typeof candidate.functionId === "string"
     && typeof candidate.functionPath === "string"
     && typeof candidate.projectRoot === "string"
     && (candidate.projectRef === undefined || typeof candidate.projectRef === "string")
     && (candidate.moduleVersion === undefined || typeof candidate.moduleVersion === "string")
+    && (candidate.envProof === undefined || typeof candidate.envProof === "string")
+    && hasPreheatArtifactFields(candidate)
     && isStringRecord(candidate.env)
     && (candidate.tlsPolicy === undefined || isTlsPolicy(candidate.tlsPolicy));
 }
@@ -607,18 +666,25 @@ async function onParentMessage(msg: unknown): Promise<void> {
         await resolveMessageTlsPolicy(msg.tlsPolicy),
       );
       try {
+        await assertAttestedArtifact(msg.functionPath, msg.attestation);
         const moduleLoad = await loadModule({
           functionId: msg.functionId,
           functionPath: msg.functionPath,
           projectRoot: msg.projectRoot,
           moduleVersion: msg.moduleVersion,
           projectRef: ref,
+          envProof: msg.envProof,
+          artifactSha256: msg.artifactSha256,
         });
+        await assertAttestedArtifact(msg.functionPath, msg.attestation);
         postToParent({
           type: "preheat_done",
           functionId: msg.functionId,
           moduleCacheHit: moduleLoad.cacheHit,
           moduleCacheSize: moduleLoad.moduleCacheSize,
+          attestation: msg.attestation
+            ? { ...msg.attestation, module_loaded: true }
+            : undefined,
         });
       } finally {
         restoreFetchTlsPolicy();
@@ -665,6 +731,8 @@ async function onParentMessage(msg: unknown): Promise<void> {
       projectRoot,
       moduleVersion: msg.moduleVersion,
       projectRef,
+      envProof: msg.envProof,
+      artifactSha256: msg.artifactSha256,
     });
     // Retirement may arrive while module loading is suspended. Do not enter
     // tenant code after the worker has already closed its parent port.
@@ -674,6 +742,7 @@ async function onParentMessage(msg: unknown): Promise<void> {
         ? abortReason
         : new DOMException("Task cancelled", "AbortError");
     }
+    postToParent({ type: "execution_started", functionId });
     const handler = moduleLoad.handler;
     await runWithPgredisBinding(internalBindings
       ? { ...internalBindings, signal: requestAbortController.signal }

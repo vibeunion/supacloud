@@ -26,14 +26,10 @@ const originalReadControlSecret = projectControlSecretsService.readValue;
 const authApplyInternals = tenantRuntimeService as unknown as {
   applyGotrueAuthConfig: (ref: string) => Promise<{
     authRuntime: { mode: "local" | "owner" };
-    pgrstPort: number;
     status: unknown;
   }>;
-  refreshProjectPostgrestVerifier: (ref: string, pgrstPort: number) => Promise<void>;
-  refreshSharedAuthDependents: (
-    ownerRef: string,
-    systemctlMode?: "best-effort" | "checked",
-  ) => Promise<void>;
+  refreshProjectPostgrestVerifier: (ref: string) => Promise<void>;
+  refreshSharedAuthDependents: (ownerRef: string) => Promise<void>;
 };
 const originalApplyGotrueAuthConfig = authApplyInternals.applyGotrueAuthConfig;
 const originalRefreshProjectPostgrestVerifier = authApplyInternals.refreshProjectPostgrestVerifier;
@@ -1187,7 +1183,7 @@ describe("TenantRuntimeService auth config runtime impact", () => {
     const events: string[] = [];
     authApplyInternals.applyGotrueAuthConfig = async () => {
       events.push("gotrue");
-      return { authRuntime: { mode: "owner" }, pgrstPort: 3101, status: {} };
+      return { authRuntime: { mode: "owner" }, status: {} };
     };
     authApplyInternals.refreshProjectPostgrestVerifier = async () => {
       events.push("postgrest");
@@ -1210,13 +1206,13 @@ describe("TenantRuntimeService auth config runtime impact", () => {
     const events: string[] = [];
     authApplyInternals.applyGotrueAuthConfig = async () => {
       events.push("gotrue");
-      return { authRuntime: { mode: "owner" }, pgrstPort: 3102, status: {} };
+      return { authRuntime: { mode: "owner" }, status: {} };
     };
-    authApplyInternals.refreshProjectPostgrestVerifier = async (ref, pgrstPort) => {
-      events.push(`postgrest:${ref}:${pgrstPort}`);
+    authApplyInternals.refreshProjectPostgrestVerifier = async (ref) => {
+      events.push(`postgrest:${ref}`);
     };
-    authApplyInternals.refreshSharedAuthDependents = async (ownerRef, systemctlMode) => {
-      events.push(`dependents:${ownerRef}:${systemctlMode}`);
+    authApplyInternals.refreshSharedAuthDependents = async (ownerRef) => {
+      events.push(`dependents:${ownerRef}`);
     };
 
     await originalApplyAuthConfig.call(
@@ -1228,8 +1224,8 @@ describe("TenantRuntimeService auth config runtime impact", () => {
 
     expect(events).toEqual([
       "gotrue",
-      "postgrest:auth-owner:3102",
-      "dependents:auth-owner:checked",
+      "postgrest:auth-owner",
+      "dependents:auth-owner",
     ]);
   });
 });

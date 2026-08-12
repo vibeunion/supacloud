@@ -3000,6 +3000,18 @@ install_systemd_unit_broker() {
     install -m 0644 "$unit_src" "$unit_target"
 }
 
+install_postgrest_launcher() {
+    local launcher_src="${SCRIPT_DIR}/scripts/lib/postgrest_launcher.sh"
+    local launcher_target="/usr/local/libexec/supacloud/postgrest-launcher"
+
+    if [[ ! -f "$launcher_src" ]]; then
+        log_error "PostgREST launcher asset is missing"
+        return 1
+    fi
+
+    install -D -m 0755 "$launcher_src" "$launcher_target"
+}
+
 capture_management_api_install() {
     local transaction_dir="$1"
     supacloud_capture_file_snapshot /usr/local/bin/supacloud "${transaction_dir}/binary" &&
@@ -3010,7 +3022,8 @@ capture_management_api_install() {
         supacloud_capture_file_snapshot /usr/local/libexec/supacloud/tenant-user "${transaction_dir}/tenant-user-helper" &&
         supacloud_capture_file_snapshot /etc/systemd/system/supacloud-tenant-user@.service "${transaction_dir}/tenant-user-unit" &&
         supacloud_capture_file_snapshot /usr/local/libexec/supacloud/systemd-unit "${transaction_dir}/systemd-unit-helper" &&
-        supacloud_capture_file_snapshot /etc/systemd/system/supacloud-systemd-unit@.service "${transaction_dir}/systemd-unit-unit"
+        supacloud_capture_file_snapshot /etc/systemd/system/supacloud-systemd-unit@.service "${transaction_dir}/systemd-unit-unit" &&
+        supacloud_capture_file_snapshot /usr/local/libexec/supacloud/postgrest-launcher "${transaction_dir}/postgrest-launcher"
 }
 
 disable_external_edge_runtime_for_embedded_mode() {
@@ -3036,6 +3049,7 @@ recover_management_api_install() {
     supacloud_restore_file_snapshot /etc/systemd/system/supacloud-tenant-user@.service "${transaction_dir}/tenant-user-unit" || return 1
     supacloud_restore_file_snapshot /usr/local/libexec/supacloud/systemd-unit "${transaction_dir}/systemd-unit-helper" || return 1
     supacloud_restore_file_snapshot /etc/systemd/system/supacloud-systemd-unit@.service "${transaction_dir}/systemd-unit-unit" || return 1
+    supacloud_restore_file_snapshot /usr/local/libexec/supacloud/postgrest-launcher "${transaction_dir}/postgrest-launcher" || return 1
     if [[ "$keep_current_env" != "true" ]]; then
         supacloud_restore_file_snapshot "$MANAGEMENT_ENV_FILE" "${transaction_dir}/env" || return 1
     fi
@@ -3408,6 +3422,9 @@ install_management_api() {
     fi
     if (( activation_status == 0 )); then
         install_systemd_unit_broker || activation_status=$?
+    fi
+    if (( activation_status == 0 )); then
+        install_postgrest_launcher || activation_status=$?
     fi
     if (( activation_status == 0 )); then
         mv -f "$staged_management_binary" "$BIN_TARGET" || activation_status=$?

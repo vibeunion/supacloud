@@ -18,6 +18,7 @@ import { registerAdminProjectCliTools, registerUserProjectCliTools } from "./pro
 import { schemaEnumValues } from "../schema";
 import type { ToolSchema } from "../schema";
 import type { ProjectEnvFileOperations } from "./project-create-env";
+import type { ProjectRuntimeSnapshot } from "./project-runtime-snapshot";
 
 type ProjectCallback = (
     args: Record<string, unknown>,
@@ -30,6 +31,7 @@ type ProjectToolRegistration = {
 
 const CREATE_PROJECT_REF = "abcdefghijklmnopqrst";
 const CREATE_FUTURE_EXPIRATION = 4_102_444_800;
+const RUNTIME_REVISION = `hmac-sha256:${"a".repeat(64)}`;
 const createSandboxes: string[] = [];
 
 function testProjectEnvFileOperations(): ProjectEnvFileOperations {
@@ -128,6 +130,34 @@ function studioServiceInventory(
     ];
 }
 
+function runtimeSnapshot(projectRef = "project-ref"): ProjectRuntimeSnapshot {
+    return {
+        schema: "supacloud.runtime-snapshot.v1",
+        project_ref: projectRef,
+        captured_at: "2026-08-11T00:00:00.000Z",
+        secrets: {
+            desired_revision: RUNTIME_REVISION,
+            loaded_revision: RUNTIME_REVISION,
+            load_state: "current",
+            load_source: "management_api",
+            matches_desired: true,
+            loaded_at: "2026-08-11T00:00:00.000Z",
+        },
+        postgrest: {
+            desired_revision: RUNTIME_REVISION,
+            loaded_revision: RUNTIME_REVISION,
+            attestation_state: "loaded",
+            matches_desired: true,
+            desired: "running",
+            actual: "running",
+            health: "healthy",
+            port: 3101,
+            unit: `supacloud-pgrst@${projectRef}`,
+            loaded_at: "2026-08-11T00:00:00.000Z",
+        },
+    };
+}
+
 async function expectInvalidInventory(
     inventory: unknown,
     projectRef = "project-ref",
@@ -140,6 +170,17 @@ async function expectInvalidInventory(
 
     expect(response.isError).toBe(true);
     expect(response.content[0].text).toBe("❌ Project service inventory response is invalid");
+}
+
+async function expectInvalidRuntimeSnapshot(payload: unknown): Promise<void> {
+    const projectCallback = captureAdminProjectTool({
+        get: async () => ({ ok: true, status: 200, data: payload }),
+    });
+
+    const response = await projectCallback({ action: "runtime_snapshot", ref: "project-ref" });
+
+    expect(response.isError).toBe(true);
+    expect(response.content[0].text).toBe("❌ Project runtime snapshot response is invalid");
 }
 
 function captureAdminProjectRegistration(
@@ -908,6 +949,215 @@ describe("admin project create", () => {
             expect(response.content[0].text).not.toContain(CREATE_SERVICE_ROLE_KEY);
             expect(existsSync(join(directory, `${index}.env`))).toBe(false);
         }
+    });
+});
+
+describe("admin project runtime snapshot", () => {
+    test("declares and requests the bounded runtime snapshot action", async () => {
+        const { schema, callback } = captureAdminProjectRegistration({
+            get: async (path: string, options: unknown) => {
+                expect(path).toBe("/v1/projects/project-ref/runtime-snapshot");
+                expect(options).toEqual({ maxJsonBytes: 64 * 1024 });
+                return { ok: true, status: 200, data: runtimeSnapshot() };
+            },
+        });
+
+        const response = await callback({ action: "runtime_snapshot", ref: "project-ref" });
+
+        expect(schemaEnumValues(schema.action)).toContain("runtime_snapshot");
+        expect(response.isError).not.toBe(true);
+        expect(JSON.parse(response.content[0].text)).toEqual(runtimeSnapshot());
+    });
+
+    test("rejects non-objects, extra keys, and wrong snapshot bindings without reflection", async () => {
+        const secretMarker = "runtime-snapshot-secret-marker";
+        const valid = runtimeSnapshot();
+        const invalidPayloads = [
+            secretMarker,
+            [valid],
+            { ...valid, token: secretMarker },
+            { ...valid, schema: secretMarker },
+            { ...valid, project_ref: secretMarker },
+            { ...valid, captured_at: secretMarker },
+            { ...valid, secrets: { ...valid.secrets, env_proof: secretMarker } },
+            { ...valid, postgrest: { ...valid.postgrest, Authorization: secretMarker } },
+        ];
+
+        for (const payload of invalidPayloads) {
+            const projectCallback = captureAdminProjectTool({
+                get: async () => ({ ok: true, status: 200, data: payload }),
+            });
+            const response = await projectCallback({ action: "runtime_snapshot", ref: "project-ref" });
+
+            expect(response.isError).toBe(true);
+            expect(response.content[0].text).toBe("❌ Project runtime snapshot response is invalid");
+            expect(response.content[0].text).not.toContain(secretMarker);
+        }
+    });
+
+    test("rejects invalid revision, timestamp, port, unit, and state combinations", async () => {
+        const valid = runtimeSnapshot();
+        const invalidPayloads = [
+            { ...valid, secrets: { ...valid.secrets, desired_revision: "sha256:not-attested" } },
+            { ...valid, secrets: { ...valid.secrets, loaded_at: "2026-08-11 00:00:00" } },
+            { ...valid, secrets: { ...valid.secrets, load_state: "not_loaded" } },
+            { ...valid, secrets: { ...valid.secrets, matches_desired: false } },
+            { ...valid, postgrest: { ...valid.postgrest, port: 0 } },
+            { ...valid, postgrest: { ...valid.postgrest, unit: "supacloud-pgrst@other-ref" } },
+            { ...valid, postgrest: { ...valid.postgrest, attestation_state: "stale" } },
+            { ...valid, postgrest: { ...valid.postgrest, loaded_at: "not-an-iso-timestamp" } },
+        ];
+
+        for (const payload of invalidPayloads) await expectInvalidRuntimeSnapshot(payload);
+    });
+
+    test("rejects hostile cross-field projections of stale secrets and loaded PostgREST", async () => {
+        const canonicalSnapshot = runtimeSnapshot();
+        const staleSecrets = {
+            ...canonicalSnapshot.secrets,
+            loaded_revision: `hmac-sha256:${"b".repeat(64)}`,
+            load_state: "stale",
+        };
+        const invalidPayloads = [
+            { ...canonicalSnapshot, secrets: { ...staleSecrets, matches_desired: true } },
+            { ...canonicalSnapshot, secrets: { ...staleSecrets, matches_desired: null } },
+            { ...canonicalSnapshot, postgrest: { ...canonicalSnapshot.postgrest, actual: "stopped" } },
+            { ...canonicalSnapshot, postgrest: { ...canonicalSnapshot.postgrest, actual: "starting" } },
+            { ...canonicalSnapshot, postgrest: { ...canonicalSnapshot.postgrest, actual: "error" } },
+            { ...canonicalSnapshot, postgrest: { ...canonicalSnapshot.postgrest, health: "unhealthy" } },
+            { ...canonicalSnapshot, postgrest: { ...canonicalSnapshot.postgrest, health: "unknown" } },
+            { ...canonicalSnapshot, postgrest: { ...canonicalSnapshot.postgrest, loaded_at: null } },
+        ];
+
+        for (const payload of invalidPayloads) await expectInvalidRuntimeSnapshot(payload);
+    });
+
+    test("rejects impossible stale PostgREST runtime projections", async () => {
+        const valid = runtimeSnapshot();
+        const stalePostgrest = {
+            ...valid.postgrest,
+            loaded_revision: `hmac-sha256:${"b".repeat(64)}`,
+            attestation_state: "stale",
+            matches_desired: false,
+        };
+        const invalidPayloads = [
+            { ...valid, postgrest: { ...stalePostgrest, actual: "stopped", health: "unknown" } },
+            { ...valid, postgrest: { ...stalePostgrest, actual: "starting", health: "unknown" } },
+            { ...valid, postgrest: { ...stalePostgrest, health: "unknown" } },
+            { ...valid, postgrest: { ...stalePostgrest, health: "unhealthy" } },
+            { ...valid, postgrest: { ...stalePostgrest, actual: "error", health: "healthy" } },
+            { ...valid, postgrest: { ...stalePostgrest, loaded_revision: null, matches_desired: null } },
+            { ...valid, postgrest: { ...stalePostgrest, loaded_at: null } },
+        ];
+
+        for (const payload of invalidPayloads) await expectInvalidRuntimeSnapshot(payload);
+    });
+
+    test("rejects load timestamps later than the snapshot capture", async () => {
+        const valid = runtimeSnapshot();
+        const futureLoadedAt = "2026-08-11T00:00:00.001Z";
+
+        await expectInvalidRuntimeSnapshot({
+            ...valid,
+            secrets: { ...valid.secrets, loaded_at: futureLoadedAt },
+        });
+        await expectInvalidRuntimeSnapshot({
+            ...valid,
+            postgrest: { ...valid.postgrest, loaded_at: futureLoadedAt },
+        });
+    });
+
+    test("accepts canonical stale, unavailable, and unverified states", async () => {
+        const valid = runtimeSnapshot();
+        const stalePostgrest = {
+            ...valid.postgrest,
+            loaded_revision: `hmac-sha256:${"b".repeat(64)}`,
+            attestation_state: "stale" as const,
+            matches_desired: false,
+        };
+        const acceptedSnapshots = [
+            {
+                ...valid,
+                secrets: {
+                    ...valid.secrets,
+                    loaded_revision: null,
+                    load_state: "unreachable",
+                    load_source: null,
+                    matches_desired: null,
+                    loaded_at: null,
+                },
+            },
+            {
+                ...valid,
+                secrets: {
+                    ...valid.secrets,
+                    loaded_revision: `hmac-sha256:${"b".repeat(64)}`,
+                    load_state: "stale",
+                    matches_desired: false,
+                },
+            },
+            {
+                ...valid,
+                secrets: {
+                    ...valid.secrets,
+                    loaded_revision: null,
+                    load_state: "unverified",
+                    load_source: "file_fallback",
+                    matches_desired: null,
+                },
+            },
+            {
+                ...valid,
+                postgrest: {
+                    ...valid.postgrest,
+                    loaded_revision: null,
+                    attestation_state: "unverified_legacy",
+                    matches_desired: null,
+                },
+            },
+            {
+                ...valid,
+                postgrest: {
+                    ...valid.postgrest,
+                    loaded_revision: null,
+                    attestation_state: "stopped",
+                    matches_desired: null,
+                    desired: "stopped",
+                    actual: "stopped",
+                    health: "unknown",
+                    loaded_at: null,
+                },
+            },
+            { ...valid, postgrest: stalePostgrest },
+            {
+                ...valid,
+                postgrest: { ...stalePostgrest, actual: "error" as const, health: "unhealthy" as const },
+            },
+        ];
+
+        for (const snapshot of acceptedSnapshots) {
+            const projectCallback = captureAdminProjectTool({
+                get: async () => ({ ok: true, status: 200, data: snapshot }),
+            });
+            const response = await projectCallback({ action: "runtime_snapshot", ref: "project-ref" });
+            expect(response.isError).not.toBe(true);
+        }
+    });
+
+    test("fails closed when the bounded HTTP reader rejects the body", async () => {
+        const projectCallback = captureAdminProjectTool({
+            get: async () => ({
+                ok: false,
+                status: 200,
+                data: { error: "Invalid Response", code: "INVALID_RESPONSE" },
+                responseError: true,
+            }),
+        });
+
+        const response = await projectCallback({ action: "runtime_snapshot", ref: "project-ref" });
+
+        expect(response.isError).toBe(true);
+        expect(response.content[0].text).toBe("❌ Project runtime snapshot response is invalid");
     });
 });
 

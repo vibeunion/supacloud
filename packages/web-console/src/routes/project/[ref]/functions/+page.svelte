@@ -31,6 +31,14 @@
     type FunctionRuntimeLogRecord,
   } from "$lib/function-runtime-logs";
   import { summarizeFunctionTasks } from "$lib/function-task-summary";
+  import {
+    isObservedFunctionActivationId,
+    parseAbsentFunctionIdentity,
+    parseFunctionActivationReceipt,
+    parseFunctionConfigReceipt,
+    parseFunctionCreateReceipt,
+    parseFunctionDeleteReceipt,
+  } from "$lib/edge-function-mutation-receipts";
 
   interface EdgeFunction extends BaseRecord {
     id: string;
@@ -38,6 +46,7 @@
     name: string;
     status: string;
     version: number;
+    activation_id: string;
     verify_jwt: boolean;
     created_at: string;
     updated_at: string;
@@ -66,11 +75,15 @@
     verifyJwt: boolean;
   }
 
-  interface VerifyJwtResponse {
-    verify_jwt: boolean;
+  const projectRef = $derived(page.params.ref);
+
+  function requiredProjectRef(): string {
+    if (typeof projectRef !== "string" || projectRef.length === 0) {
+      throw new Error("当前项目标识无效，请刷新后重试");
+    }
+    return projectRef;
   }
 
-  const projectRef = $derived(page.params.ref);
   const query = useList<EdgeFunction>({ get resource() { return `v1/projects/${projectRef}/functions`; } });
   const fetchedFunctions = $derived(Array.isArray(query.data?.data) ? query.data.data : ((query.data?.data as unknown as Record<string, unknown>)?.functions as EdgeFunction[] || []));
   let functions = $state<EdgeFunction[]>([]);
@@ -424,23 +437,47 @@ export async function waitForTask(
     return String(activeVersion);
   }
 
+  function activationIdForSlug(slug: string): string {
+    const activationId = functions.find((fn) => fn.slug === slug)?.activation_id;
+    if (!isObservedFunctionActivationId(activationId)) {
+      throw new Error("当前函数激活标识无效，请刷新后重试");
+    }
+    return activationId;
+  }
+
   async function activateFunctionVersion(slug: string, version: string) {
     versionSwitching = version;
     try {
+      const functionProjectRef = requiredProjectRef();
       const expectedActiveVersion = activeVersionForSlug(slug);
-      const res = await apiClient(`/v1/projects/${projectRef}/functions/${encodeURIComponent(slug)}/versions/${encodeURIComponent(version)}/activate`, {
+      const expectedActivationId = activationIdForSlug(slug);
+      const res = await apiClient(`/v1/projects/${functionProjectRef}/functions/${encodeURIComponent(slug)}/versions/${encodeURIComponent(version)}/activate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ expected_active_version: expectedActiveVersion }),
+        body: JSON.stringify({
+          expected_active_version: expectedActiveVersion,
+          expected_activation_id: expectedActivationId,
+        }),
       });
       const payload = await res.json().catch(() => null);
       if (!res.ok) {
         throw new Error(payload?.message || "切换函数版本失败");
       }
+      const receipt = parseFunctionActivationReceipt(payload, {
+        projectRef: functionProjectRef,
+        slug,
+        expectedActivationId,
+        previousActiveVersion: expectedActiveVersion,
+        targetVersion: version,
+      });
 
       toast.success(`${slug} 已切换到 v${version}`);
       if (selectedFunction?.slug === slug) {
-        selectedFunction = { ...selectedFunction, version: Number(version) };
+        selectedFunction = {
+          ...selectedFunction,
+          version: Number(receipt.activeVersion),
+          activation_id: receipt.activationId,
+        };
       }
       await Promise.all([
         loadFunctionVersions(slug),
@@ -524,19 +561,40 @@ export async function waitForTask(
 
   const deployMutation = createMutation(() => ({
     mutationFn: async () => {
-      const res = await apiClient(`/v1/projects/${projectRef}/functions/${newSlug}`, {
+      const functionProjectRef = requiredProjectRef();
+      const slug = newSlug.trim();
+      const resourcePath = `/v1/projects/${functionProjectRef}/functions/${encodeURIComponent(slug)}`;
+      const identityResponse = await apiClient(`${resourcePath}/config`);
+      const identityPayload = await identityResponse.json().catch(() => null);
+      if (!identityResponse.ok) {
+        throw new Error(identityPayload?.message || "读取函数激活标识失败");
+      }
+      const identity = parseAbsentFunctionIdentity(identityPayload, {
+        projectRef: functionProjectRef,
+        slug,
+      });
+      const res = await apiClient(resourcePath, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: newCode, expected_active_version: "absent" }),
+        body: JSON.stringify({
+          code: newCode,
+          expected_active_version: "absent",
+          expected_activation_id: identity.activationId,
+        }),
       });
+      const payload = await res.json().catch(() => null);
       if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || res.statusText);
+        throw new Error(payload?.error || payload?.message || res.statusText);
       }
-      return res.json();
+      const receipt = parseFunctionCreateReceipt(payload, {
+        projectRef: functionProjectRef,
+        slug,
+        expectedActivationId: identity.activationId,
+      });
+      return { slug, receipt };
     },
-    onSuccess: () => {
-      deployMsg = `✅ 函数 "${newSlug}" 部署成功`;
+    onSuccess: ({ slug }) => {
+      deployMsg = `✅ 函数 "${slug}" 部署成功`;
       showCreate = false;
       newSlug = "";
       query.refetch();
@@ -560,8 +618,21 @@ export async function waitForTask(
 
   const deleteMutation = createMutation(() => ({
     mutationFn: async (slug: string) => {
-      const res = await apiClient(`/v1/projects/${projectRef}/functions/${slug}`, { method: "DELETE" });
+      const functionProjectRef = requiredProjectRef();
+      const previousActiveVersion = activeVersionForSlug(slug);
+      const expectedActivationId = activationIdForSlug(slug);
+      const res = await apiClient(`/v1/projects/${functionProjectRef}/functions/${encodeURIComponent(slug)}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ expected_activation_id: expectedActivationId }),
+      });
       if (!res.ok) throw new Error("Delete failed");
+      parseFunctionDeleteReceipt(await res.json(), {
+        projectRef: functionProjectRef,
+        slug,
+        expectedActivationId,
+        previousActiveVersion,
+      });
       return { slug };
     },
     onSuccess: (data) => {
@@ -579,38 +650,36 @@ export async function waitForTask(
     deleteMutation.mutate(slug);
   }
 
-  function requireVerifyJwtResponse(payload: unknown): VerifyJwtResponse {
-    if (
-      typeof payload !== "object"
-      || payload === null
-      || !("verify_jwt" in payload)
-      || typeof payload.verify_jwt !== "boolean"
-    ) {
-      throw new Error("Invalid function configuration response");
-    }
-    return { verify_jwt: payload.verify_jwt };
-  }
-
   const verifyJwtMutation = createMutation(() => ({
     mutationFn: async ({ slug, verifyJwt }: VerifyJwtRequest) => {
-      const res = await apiClient(`/v1/projects/${projectRef}/functions/${slug}/config`, {
+      const functionProjectRef = requiredProjectRef();
+      const expectedActivationId = activationIdForSlug(slug);
+      const res = await apiClient(`/v1/projects/${functionProjectRef}/functions/${encodeURIComponent(slug)}/config`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ verify_jwt: verifyJwt }),
+        body: JSON.stringify({
+          verify_jwt: verifyJwt,
+          expected_activation_id: expectedActivationId,
+        }),
       });
       if (!res.ok) throw new Error("Function configuration update failed");
-      const config = requireVerifyJwtResponse(await res.json());
-      return { slug, verifyJwt: config.verify_jwt };
+      const receipt = parseFunctionConfigReceipt(await res.json(), {
+        projectRef: functionProjectRef,
+        slug,
+        expectedActivationId,
+        verifyJwt,
+      });
+      return { slug, verifyJwt: receipt.verifyJwt, activationId: receipt.activationId };
     },
     onMutate: ({ slug }) => {
       jwtUpdatingSlug = slug;
     },
-    onSuccess: ({ slug, verifyJwt }) => {
+    onSuccess: ({ slug, verifyJwt, activationId }) => {
       functions = functions.map((fn) => (
-        fn.slug === slug ? { ...fn, verify_jwt: verifyJwt } : fn
+        fn.slug === slug ? { ...fn, verify_jwt: verifyJwt, activation_id: activationId } : fn
       ));
       if (selectedFunction?.slug === slug) {
-        selectedFunction = { ...selectedFunction, verify_jwt: verifyJwt };
+        selectedFunction = { ...selectedFunction, verify_jwt: verifyJwt, activation_id: activationId };
       }
       toast.success(`${slug}: ${$t(verifyJwt ? "Functions.jwt_enabled" : "Functions.jwt_disabled")}`);
       void query.refetch();

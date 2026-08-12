@@ -298,12 +298,14 @@ EXAMPLES
   ${preferredCommand} branch promote --branch_ref preview123 --plan_checksum <sha256>
   ${preferredCommand} ai show_skill
   ${preferredCommand} ai install_skill --dry_run
-  ${preferredCommand} edge_functions deploy --ref abc123 --slug hello --path ./supabase/functions/hello --expected-active-version absent
-  ${preferredCommand} edge_functions deploy --ref abc123 --slug hello --prebundled-path ./dist/hello.js --expected-sha256 <sha256> --expected-active-version 4
-  ${preferredCommand} edge_functions activate --ref abc123 --slug hello --version 3 --expected-active-version 4
+  ${preferredCommand} edge_functions get_config --ref abc123 --slug hello
+  ${preferredCommand} edge_functions deploy --ref abc123 --slug hello --path ./supabase/functions/hello --expected-active-version absent --expected-activation-id legacy
+  ${preferredCommand} edge_functions deploy --ref abc123 --slug hello --prebundled-path ./dist/hello.js --expected-sha256 <sha256> --expected-active-version 4 --expected-activation-id <uuid>
+  ${preferredCommand} edge_functions activate --ref abc123 --slug hello --version 3 --expected-active-version 4 --expected-activation-id <uuid>
   ${preferredCommand} scheduled_functions list --ref abc123
   ${preferredCommand} mutations status --ref abc123 --mutation_id 00000000-0000-4000-8000-000000000001
-  ${preferredCommand} edge_functions config --ref abc123 --slug hello --verify_jwt false --background_routes "/queue/*,/render/*"
+  ${preferredCommand} edge_functions config --ref abc123 --slug hello --verify_jwt false --background_routes "/queue/*,/render/*" --expected-activation-id <uuid>
+  ${preferredCommand} edge_functions delete --ref abc123 --slug hello --expected-activation-id <uuid>
   ${preferredCommand} secrets upsert --ref abc123 --from-env API_KEY,WEBHOOK_SECRET
   ${preferredCommand} gateway routes --ref abc123
   ${preferredCommand} gateway upsert_route --ref abc123 --route_id webhook --hosts "api.example.com" --paths "/webhook/*" --upstream 10.0.0.5:8080

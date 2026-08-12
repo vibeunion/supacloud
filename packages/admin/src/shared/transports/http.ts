@@ -15,6 +15,7 @@ export interface HttpResult<T = unknown> {
     status: number;
     data: T;
     transportError?: boolean;
+    responseError?: boolean;
 }
 
 interface HttpPostOptions {
@@ -23,6 +24,7 @@ interface HttpPostOptions {
 
 export interface HttpGetOptions {
     maxResponseBytes?: number;
+    maxJsonBytes?: number;
 }
 
 const DEFAULT_TIMEOUT = 30_000;
@@ -56,6 +58,15 @@ function transportFailure<T>(error: unknown): HttpResult<T> {
     };
 }
 
+function responseBodyFailure<T>(status: number): HttpResult<T> {
+    return {
+        ok: false,
+        status,
+        data: { error: "Invalid Response", code: "INVALID_RESPONSE" } as T,
+        responseError: true,
+    };
+}
+
 function validatedPostTimeout(options?: HttpPostOptions): number {
     const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT;
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > MAX_POST_TIMEOUT_MS) {
@@ -69,6 +80,15 @@ function validatedGetResponseLimit(options: HttpGetOptions): number | undefined 
     if (maxBytes === undefined) return undefined;
     if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
         throw new RangeError("HTTP response limit must be a positive safe integer");
+    }
+    return maxBytes;
+}
+
+function validatedStrictJsonLimit(options: HttpGetOptions): number | undefined {
+    const maxBytes = options.maxJsonBytes;
+    if (maxBytes === undefined) return undefined;
+    if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
+        throw new RangeError("HTTP JSON response byte limit must be a positive safe integer");
     }
     return maxBytes;
 }
@@ -119,6 +139,13 @@ async function boundedResponseJson(response: Response, maxBytes: number): Promis
         if (error instanceof SyntaxError || error instanceof TypeError) return null;
         throw error;
     }
+}
+
+async function strictBoundedResponseJson(response: Response, maxBytes: number): Promise<unknown> {
+    const responseBytes = await boundedResponseBytes(response, maxBytes);
+    if (responseBytes === null) throw new Error("HTTP JSON response exceeded its byte limit");
+    const responseText = new TextDecoder("utf-8", { fatal: true }).decode(responseBytes);
+    return JSON.parse(responseText);
 }
 
 async function fetchWithTimeout(
@@ -185,18 +212,33 @@ export class HttpTransport {
 
     async get<T = unknown>(path: string, options: HttpGetOptions = {}): Promise<HttpResult<T>> {
         const maxResponseBytes = validatedGetResponseLimit(options);
+        const maxJsonBytes = validatedStrictJsonLimit(options);
+        if (maxResponseBytes !== undefined && maxJsonBytes !== undefined) {
+            throw new RangeError("HTTP response limit options are mutually exclusive");
+        }
+        let response: Response;
         try {
-            const res = await fetchWithRetry(`${this.baseUrl}${path}`, {
+            response = await fetchWithRetry(`${this.baseUrl}${path}`, {
                 method: "GET",
                 headers: this.headers(),
             });
-            const data = (maxResponseBytes === undefined
-                ? await res.json().catch(() => null)
-                : await boundedResponseJson(res, maxResponseBytes)) as T;
-            return { ok: res.ok, status: res.status, data };
         } catch (error: unknown) {
             return transportFailure<T>(error);
         }
+        if (maxJsonBytes !== undefined) {
+            try {
+                const data = await strictBoundedResponseJson(response, maxJsonBytes) as T;
+                return { ok: response.ok, status: response.status, data };
+            } catch {
+                return responseBodyFailure<T>(response.status);
+            }
+        }
+        if (maxResponseBytes !== undefined) {
+            const data = await boundedResponseJson(response, maxResponseBytes) as T;
+            return { ok: response.ok, status: response.status, data };
+        }
+        const data = (await response.json().catch(() => null)) as T;
+        return { ok: response.ok, status: response.status, data };
     }
 
     async post<T = unknown>(
