@@ -28,6 +28,7 @@ import {
   getAuthEmailTemplates,
   parseAuthEmailTemplatePatch,
 } from "../utils/auth-email-templates";
+import { validationErrorResponse } from "../utils/http-validation";
 
 // Available regions list
 const AVAILABLE_REGIONS = [
@@ -347,11 +348,8 @@ async function buildProjectResponse(
 
 export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
   .onError(({ code, error, set }) => {
+    if (code === "VALIDATION") return validationErrorResponse(set);
     logger.error(`[ProjectCRUD] Unhandled error [${code}]:`, error);
-    if (code === "VALIDATION") {
-      set.status = 400;
-      return { message: "Validation failed", code: "VALIDATION_ERROR", details: error.message };
-    }
     if (code === "NOT_FOUND") {
       set.status = 404;
       return { message: "Not found", code: "NOT_FOUND" };

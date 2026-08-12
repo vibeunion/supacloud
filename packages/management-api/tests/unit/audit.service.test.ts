@@ -14,6 +14,9 @@ describe("audit redaction", () => {
         client_secret: "client-secret",
         clientSecret: "camel-secret",
         codeVerifier: "pkce-secret",
+        jwt: "jwt-secret",
+        session: "session-secret",
+        signing_key: "signing-key-secret",
         items: [{ password: "pass" }, { safe: "visible" }],
       },
     })).toEqual({
@@ -23,6 +26,9 @@ describe("audit redaction", () => {
         client_secret: "[REDACTED]",
         clientSecret: "[REDACTED]",
         codeVerifier: "[REDACTED]",
+        jwt: "[REDACTED]",
+        session: "[REDACTED]",
+        signing_key: "[REDACTED]",
         items: [{ password: "[REDACTED]" }, { safe: "visible" }],
       },
     });
