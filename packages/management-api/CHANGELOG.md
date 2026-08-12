@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.58.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.58.1...management-api-v0.58.2) (2026-08-12)
+
+
+### Bug Fixes
+
+* **edge-runtime:** enforce activation artifact integrity ([#887](https://github.com/zuohuadong/supacloud/issues/887)) ([5a0375e](https://github.com/zuohuadong/supacloud/commit/5a0375ee348a954beb5100b05f6c5c89e43486ec))
+
 ## [0.58.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.58.0...management-api-v0.58.1) (2026-08-12)
 
 
