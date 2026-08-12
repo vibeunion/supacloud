@@ -19,6 +19,7 @@ mock.module("../src/db", () => ({
 }));
 
 import { app as baseApp } from "../src/index";
+import { buildBffProofHeaders } from "../src/services/bff-proof.service";
 import { logger } from "../src/utils/logger";
 
 describe("Management API Integration Tests", () => {
@@ -64,29 +65,69 @@ describe("Management API Integration Tests", () => {
             }), sentinel);
         });
 
-        it("does not reflect an inner API validation value into the response or logger", async () => {
-            const sentinel = "private-type-validation-sentinel";
-            await expectRedactedValidation(app, new Request(
-                `${baseUrl}/v1/projects/proj_1/mutations/00000000-0000-4000-8000-000000000001/reconcile`,
-                {
+        it.each([
+            "anonymous",
+            "project",
+            "admin",
+            "master",
+            "forged delegation",
+            "valid delegation",
+        ] as const)("short-circuits %s reconciliation before reading the request body", async (caller) => {
+            const sentinel = `private-${caller.replaceAll(" ", "-")}-body-sentinel`;
+            const bodyText = `{"${sentinel}"`;
+            const basePath = "/v1/projects/proj_1/mutations/00000000-0000-4000-8000-000000000001/reconcile";
+            const pathname = caller === "valid delegation" ? `${basePath}/` : basePath;
+            const headers = new Headers({ "content-type": "application/json" });
+            if (caller === "project") headers.set("authorization", "Bearer project.service.token");
+            if (caller === "admin") headers.set("authorization", "Bearer admin-token");
+            if (["master", "forged delegation", "valid delegation"].includes(caller)) {
+                headers.set("authorization", `Bearer ${masterToken}`);
+            }
+            if (caller === "forged delegation") {
+                headers.set("x-supaoauth-actor-signature", `v2=${"0".repeat(64)}`);
+            }
+            if (caller === "valid delegation") {
+                const proofHeaders = buildBffProofHeaders({
                     method: "POST",
-                    headers: {
-                        authorization: `Bearer ${masterToken}`,
-                        "content-type": "application/json",
-                    },
-                    body: JSON.stringify({
-                        expected_fencing_epoch: 1,
-                        status: sentinel,
-                        response_status: 200,
-                        evidence: {
-                            source: "scheduled_functions.provider_readback",
-                            observed_at: "2026-08-12T00:00:00.000Z",
-                            evidence_code: "RESOURCE_PRESENT",
-                            evidence_fingerprint: "a".repeat(64),
-                        },
-                    }),
+                    pathname,
+                    actorId: "user:integration-test",
+                    actorType: "user",
+                    requestId: "disabled-reconciliation-proof",
+                    body: bodyText,
+                });
+                for (const [name, value] of Object.entries(proofHeaders)) headers.set(name, value);
+            }
+            const bodyPull = mock(() => undefined);
+            const body = new ReadableStream({
+                type: "bytes",
+                pull(controller) {
+                    bodyPull();
+                    controller.enqueue(new TextEncoder().encode(bodyText));
+                    controller.close();
                 },
-            ), sentinel);
+            });
+            const cloneArrayBuffer = mock(() => Promise.resolve(new ArrayBuffer(0)));
+            const requestClone = mock(() => ({ arrayBuffer: cloneArrayBuffer }) as unknown as Request);
+            const requestArrayBuffer = mock(() => Promise.resolve(new ArrayBuffer(0)));
+            const request = new Request(`${baseUrl}${pathname}`, { method: "POST", headers, body });
+            Object.defineProperty(request, "clone", { value: requestClone });
+            Object.defineProperty(request, "arrayBuffer", { value: requestArrayBuffer });
+            loggerError.mockClear();
+            mockSql.mockClear();
+            const response = await app.handle(request);
+            const responseText = await response.text();
+
+            expect(response.status).toBe(403);
+            expect(JSON.parse(responseText)).toEqual({
+                error: "Mutation reconciliation is not permitted",
+            });
+            expect(responseText).not.toContain(sentinel);
+            expect(JSON.stringify(loggerError.mock.calls)).not.toContain(sentinel);
+            expect(bodyPull).not.toHaveBeenCalled();
+            expect(requestClone).not.toHaveBeenCalled();
+            expect(requestArrayBuffer).not.toHaveBeenCalled();
+            expect(cloneArrayBuffer).not.toHaveBeenCalled();
+            expect(mockSql).not.toHaveBeenCalled();
         });
 
         it("does not reflect a project-create validation value into the response or logger", async () => {

@@ -12,6 +12,8 @@ import {
 } from "../../src/services/project-mutation.service";
 import { appendAuditEventInTransaction } from "../../src/services/audit.service";
 
+const { app: mutationApi } = await import("../../src/index");
+
 const database = new SQL({
   url: process.env.DATABASE_URL ?? "postgresql://postgres:postgres@localhost:5432/postgres",
   max: 5,
@@ -156,6 +158,62 @@ describe("project mutation PostgreSQL lease fencing", () => {
 
     expect(stored).toMatchObject({ status: "running", lease_token: fixture.leaseToken });
     expect(Number(stored.fencing_epoch)).toBe(Number.MAX_SAFE_INTEGER);
+  }, 30_000);
+
+  test("external reconciliation cannot mutate an unknown outcome or release its resource", async () => {
+    const fixture = await beginAndClaim();
+    await database.begin((transaction) => completeProjectMutationFailure(transaction, {
+      projectRef, mutationId: fixture.mutationId, leaseToken: fixture.leaseToken,
+      fencingEpoch: fixture.fencingEpoch, status: "outcome_unknown",
+      failureCode: "PROVIDER_OUTCOME_UNKNOWN",
+    }));
+    const [mutationBefore] = await database`
+      SELECT status, fencing_epoch, resource_key, receipt, updated_at
+      FROM project_mutations WHERE project_ref = ${projectRef} AND mutation_id = ${fixture.mutationId}
+    `;
+    const [auditBefore] = await database`
+      SELECT COUNT(*)::int AS audit_count
+      FROM audit_logs WHERE project_ref = ${projectRef}
+    `;
+
+    const response = await mutationApi.handle(new Request(
+      `http://localhost/v1/projects/${projectRef}/mutations/${fixture.mutationId}/reconcile`,
+      {
+        method: "POST",
+        headers: { authorization: "Bearer integration-test", "content-type": "application/json" },
+        body: JSON.stringify({ status: "succeeded", expected_fencing_epoch: fixture.fencingEpoch }),
+      },
+    ));
+    const [mutationAfter] = await database`
+      SELECT status, fencing_epoch, resource_key, receipt, updated_at
+      FROM project_mutations WHERE project_ref = ${projectRef} AND mutation_id = ${fixture.mutationId}
+    `;
+    const [auditAfter] = await database`
+      SELECT COUNT(*)::int AS audit_count
+      FROM audit_logs WHERE project_ref = ${projectRef}
+    `;
+    const competingMutationId = crypto.randomUUID();
+    const competingMutation = await database.begin((transaction) => beginProjectMutation(transaction, {
+      projectRef,
+      mutationId: competingMutationId,
+      operation: "scheduled_functions.create",
+      resource: { type: "scheduled-function", id: fixture.mutationId },
+      requestFingerprint: projectMutationFingerprint({
+        project_ref: projectRef,
+        mutation_id: competingMutationId,
+      }),
+      principal: projectActor,
+    }));
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "Mutation reconciliation is not permitted" });
+    expect(mutationAfter).toEqual(mutationBefore);
+    expect(Number(auditAfter.audit_count)).toBe(Number(auditBefore.audit_count));
+    expect(competingMutation).toEqual({
+      kind: "resource_busy",
+      mutationId: fixture.mutationId,
+      status: "outcome_unknown",
+    });
   }, 30_000);
 
   test("allows exactly one reconciliation writer for an unknown outcome epoch", async () => {
