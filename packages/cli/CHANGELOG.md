@@ -13,6 +13,13 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.21.0](https://github.com/zuohuadong/supacloud/compare/cli-v0.20.0...cli-v0.21.0) (2026-08-12)
+
+
+### Features
+
+* **runtime:** attest canonical activations ([#868](https://github.com/zuohuadong/supacloud/issues/868)) ([636433e](https://github.com/zuohuadong/supacloud/commit/636433e1dbaaac04ae8d842d858b647a1667b0ce))
+
 ## [0.20.0](https://github.com/zuohuadong/supacloud/compare/cli-v0.19.1...cli-v0.20.0) (2026-08-12)
 
 

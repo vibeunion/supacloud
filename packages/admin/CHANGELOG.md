@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/zuohuadong/supacloud/compare/admin-v0.11.0...admin-v0.12.0) (2026-08-12)
+
+
+### Features
+
+* **runtime:** attest canonical activations ([#868](https://github.com/zuohuadong/supacloud/issues/868)) ([636433e](https://github.com/zuohuadong/supacloud/commit/636433e1dbaaac04ae8d842d858b647a1667b0ce))
+
 ## [0.11.0](https://github.com/zuohuadong/supacloud/compare/admin-v0.10.3...admin-v0.11.0) (2026-08-12)
 
 

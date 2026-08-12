@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.33.0](https://github.com/zuohuadong/supacloud/compare/web-console-v0.32.1...web-console-v0.33.0) (2026-08-12)
+
+
+### Features
+
+* **runtime:** attest canonical activations ([#868](https://github.com/zuohuadong/supacloud/issues/868)) ([636433e](https://github.com/zuohuadong/supacloud/commit/636433e1dbaaac04ae8d842d858b647a1667b0ce))
+
 ## [0.32.1](https://github.com/zuohuadong/supacloud/compare/web-console-v0.32.0...web-console-v0.32.1) (2026-08-11)
 
 
