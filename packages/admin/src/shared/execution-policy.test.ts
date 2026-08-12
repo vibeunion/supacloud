@@ -32,7 +32,7 @@ describe("Admin execution policy", () => {
                 "project.list", "project.get", "project.settings", "project.api_keys",
                 "project.health", "project.logs", "project.tasks", "project.services",
                 "project.runtime_snapshot",
-                "platform.metrics", "platform.list_backups", "platform.network",
+                "platform.metrics", "platform.list_backups", "platform.list_logical_backups", "platform.network",
                 "platform.list_orgs", "platform.get_org",
                 "gateway.routes", "gateway.get_certificate", "gateway.custom_hostname",
                 "ssh.ping", "ssh.versions", "ssh.diagnose", "ssh.exec",
@@ -42,7 +42,8 @@ describe("Admin execution policy", () => {
             write: [
                 "project.create", "project.delete", "project.pause", "project.restore",
                 "project.restart", "project.update_settings",
-                "platform.create_backup", "platform.update_network",
+                "platform.create_backup", "platform.create_logical_backup",
+                "platform.restore_logical_backup", "platform.update_network",
                 "gateway.upsert_route", "gateway.update_route", "gateway.delete_route",
                 "gateway.config", "gateway.update_certificate", "gateway.issue_certificate",
                 "gateway.deploy_certificate", "gateway.rebuild", "gateway.set_custom_hostname",
@@ -107,6 +108,29 @@ describe("Admin execution policy", () => {
         expect(() => authorizeExecution("project", args, {
             context: productionContext(),
             confirmProduction: "prod-ref",
+        })).not.toThrow();
+    });
+
+    test.each(["create_logical_backup", "restore_logical_backup"])(
+        "requires exact production project confirmation for platform.%s",
+        (action) => {
+            const args = { action, ref: "prod-ref" };
+            expect(() => authorizeExecution("platform", args, {
+                context: productionContext(),
+            })).toThrow("--confirm-production prod-ref");
+            expect(() => authorizeExecution("platform", args, {
+                context: productionContext(),
+                confirmProduction: "prod-ref",
+            })).not.toThrow();
+        },
+    );
+
+    test("classifies verified logical inventory as a production read", () => {
+        expect(() => authorizeExecution("platform", {
+            action: "list_logical_backups",
+            ref: "prod-ref",
+        }, {
+            context: productionContext(),
         })).not.toThrow();
     });
 

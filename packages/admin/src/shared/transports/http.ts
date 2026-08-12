@@ -20,6 +20,7 @@ export interface HttpResult<T = unknown> {
 
 interface HttpPostOptions {
     timeoutMs: number;
+    maxJsonBytes?: number;
 }
 
 export interface HttpGetOptions {
@@ -28,7 +29,7 @@ export interface HttpGetOptions {
 }
 
 const DEFAULT_TIMEOUT = 30_000;
-const MAX_POST_TIMEOUT_MS = 35 * 60_000;
+const MAX_POST_TIMEOUT_MS = 36 * 60_000;
 const MAX_RETRIES = 2;
 const RETRY_BASE_DELAY = 500;
 
@@ -247,12 +248,21 @@ export class HttpTransport {
         options?: HttpPostOptions,
     ): Promise<HttpResult<T>> {
         const timeoutMs = validatedPostTimeout(options);
+        const maxJsonBytes = validatedStrictJsonLimit(options ?? {});
         try {
             const res = await fetchWithRetry(`${this.baseUrl}${path}`, {
                 method: "POST",
                 headers: this.headers(),
                 body: body ? JSON.stringify(body) : undefined,
             }, timeoutMs);
+            if (maxJsonBytes !== undefined) {
+                try {
+                    const data = await strictBoundedResponseJson(res, maxJsonBytes) as T;
+                    return { ok: res.ok, status: res.status, data };
+                } catch {
+                    return responseBodyFailure<T>(res.status);
+                }
+            }
             const data = (await res.json().catch(() => null)) as T;
             return { ok: res.ok, status: res.status, data };
         } catch (error: unknown) {
