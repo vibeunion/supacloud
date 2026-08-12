@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.57.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.56.0...management-api-v0.57.0) (2026-08-12)
+
+
+### Features
+
+* **runtime:** attest canonical activations ([#868](https://github.com/zuohuadong/supacloud/issues/868)) ([636433e](https://github.com/zuohuadong/supacloud/commit/636433e1dbaaac04ae8d842d858b647a1667b0ce))
+
 ## [0.56.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.55.1...management-api-v0.56.0) (2026-08-12)
 
 
