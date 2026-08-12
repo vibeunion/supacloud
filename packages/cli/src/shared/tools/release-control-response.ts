@@ -12,19 +12,21 @@ export function releaseControlSuccess(
     payload: Record<string, unknown>,
 ): ReleaseControlToolResponse {
     return releaseControlResponse({
+        ...payload,
         schema: RELEASE_CONTROL_RESPONSE_SCHEMA,
         ok: true,
         operation,
-        ...payload,
     });
 }
 
 export function releaseControlFailure(
     operation: string,
-    code: "HTTP_ERROR" | "INVALID_RESPONSE" | "OUTCOME_UNKNOWN",
+    code: "HTTP_ERROR" | "INVALID_RESPONSE" | "MUTATION_NOT_SUCCEEDED" | "OUTCOME_UNKNOWN",
     httpStatus: number | null,
+    safeState: Record<string, unknown> = {},
 ): ReleaseControlToolResponse {
     return releaseControlErrorResponse({
+        ...safeState,
         schema: RELEASE_CONTROL_RESPONSE_SCHEMA,
         ok: false,
         operation,

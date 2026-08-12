@@ -5,12 +5,15 @@ import type { HttpTransport } from "./transports/http";
 const MUTATION_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const FINGERPRINT_PATTERN = /^[0-9a-f]{64}$/;
 const OPERATION_PATTERN = /^[a-z0-9][a-z0-9._:-]{0,127}$/;
-const RESOURCE_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,254}$/;
+const RESOURCE_KEY_PATTERN = /^v1\/(?:[a-z0-9][a-z0-9._-]{0,63})\/([A-Za-z0-9_-]{2,171})$/;
+const RESOURCE_ID_CONTROL_PATTERN = /[\u0000-\u001f\u007f-\u009f]/u;
 const FAILURE_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/;
 const LEASE_OWNER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,254}$/;
 const TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const MAX_STATUS_RESPONSE_BYTES = 196_608;
 const MAX_JSON_DEPTH = 32;
+const MAX_RESOURCE_ID_BYTES = 128;
+const FATAL_UTF8_DECODER = new TextDecoder("utf-8", { fatal: true });
 const MUTATION_STATUSES = new Set([
     "pending", "running", "succeeded", "failed_retryable", "failed_terminal", "outcome_unknown",
 ]);
@@ -177,11 +180,30 @@ function validMutationLifecycle(
     return true;
 }
 
+function canonicalMutationResourceKey(candidate: unknown): candidate is string {
+    if (typeof candidate !== "string") return false;
+    const match = RESOURCE_KEY_PATTERN.exec(candidate);
+    if (!match) return false;
+    const encodedResourceId = match[1]!;
+    const resourceIdBytes = Buffer.from(encodedResourceId, "base64url");
+    if (resourceIdBytes.byteLength < 1 || resourceIdBytes.byteLength > MAX_RESOURCE_ID_BYTES
+        || resourceIdBytes.toString("base64url") !== encodedResourceId) return false;
+    let resourceId: string;
+    try {
+        resourceId = FATAL_UTF8_DECODER.decode(resourceIdBytes);
+    } catch (decodeError) {
+        if (decodeError instanceof TypeError) return false;
+        throw decodeError;
+    }
+    return resourceId.trim() === resourceId
+        && !RESOURCE_ID_CONTROL_PATTERN.test(resourceId)
+        && Buffer.from(resourceId, "utf8").equals(resourceIdBytes);
+}
+
 function validMutationIdentity(mutation: Record<string, unknown>): boolean {
     if (!isMutationId(mutation.mutation_id) || typeof mutation.project_ref !== "string") return false;
     if (typeof mutation.operation !== "string" || !OPERATION_PATTERN.test(mutation.operation)) return false;
-    if (mutation.resource_key !== null
-        && (typeof mutation.resource_key !== "string" || !RESOURCE_KEY_PATTERN.test(mutation.resource_key))) return false;
+    if (mutation.resource_key !== null && !canonicalMutationResourceKey(mutation.resource_key)) return false;
     return typeof mutation.request_fingerprint === "string"
         && FINGERPRINT_PATTERN.test(mutation.request_fingerprint);
 }

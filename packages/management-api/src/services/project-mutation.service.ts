@@ -5,19 +5,25 @@ import { stableSha256 } from "../utils/stable-json";
 const MUTATION_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const FINGERPRINT_PATTERN = /^[0-9a-f]{64}$/;
 const OPERATION_PATTERN = /^[a-z0-9][a-z0-9._:-]{0,127}$/;
-const RESOURCE_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,254}$/;
+const RESOURCE_TYPE_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+const RESOURCE_KEY_PATTERN = /^v1\/[a-z0-9][a-z0-9._-]{0,63}\/[A-Za-z0-9_-]{2,171}$/;
 const FAILURE_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/;
 const LEASE_OWNER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,254}$/;
 const PRINCIPAL_ID_PATTERN = /^[^\u0000-\u001f\u007f]{1,320}$/u;
+const RESOURCE_ID_PATTERN = /^[^\u0000-\u001f\u007f-\u009f]+$/u;
+const CANONICAL_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const MAX_PUBLIC_PAYLOAD_BYTES = 65_536;
 const MAX_JSON_DEPTH = 32;
 const MAX_RECOVERY_OPERATIONS = 32;
 const MAX_RECOVERY_CLAIMS = 100;
+const MAX_RESOURCE_ID_BYTES = 128;
+const MAX_EVIDENCE_CLOCK_SKEW_MS = 5 * 60 * 1000;
+const MAX_FENCING_EPOCH = Number.MAX_SAFE_INTEGER;
 const SENSITIVE_PROJECTION_KEYS = new Set([
   "authorization", "cookie", "body", "headers", "password", "secret", "secrets",
   "token", "accesstoken", "refreshtoken", "idtoken", "apikey", "servicerolekey",
   "privatekey", "code", "sourcecode", "codebytes", "bundle", "requestbody", "requestheaders",
-  "credential", "credentials", "credentialvalue",
+  "credential", "credentials", "credentialvalue", "jwt", "session", "signingkey",
 ]);
 
 export function isProjectMutationId(candidate: unknown): candidate is string {
@@ -34,6 +40,11 @@ export type ProjectMutationStatus =
 
 export interface MutationPrincipal {
   type: "master" | "admin" | "project";
+  id: string;
+}
+
+export interface ProjectMutationResource {
+  type: string;
   id: string;
 }
 
@@ -84,11 +95,15 @@ interface StoredMutationWithLeaseState extends StoredProjectMutationRow {
   lease_active: boolean;
 }
 
+interface StoredReconciliationRow extends StoredProjectMutationRow {
+  database_now: Date | string;
+}
+
 export interface BeginProjectMutationInput {
   projectRef: string;
   mutationId: string;
   operation: string;
-  resourceKey?: string;
+  resource?: ProjectMutationResource;
   requestFingerprint: string;
   principal: MutationPrincipal;
 }
@@ -124,7 +139,7 @@ export interface MutationLeaseInput {
 export interface CheckpointProjectMutationInput extends MutationLeaseInput {
   checkpoint: Record<string, unknown>;
   leaseSeconds: number;
-  recoveryNotBefore?: Date | string | null;
+  recoveryNotBefore?: Date | string;
 }
 
 export interface CompleteProjectMutationSuccessInput extends MutationLeaseInput {
@@ -137,8 +152,33 @@ export interface CompleteProjectMutationFailureInput extends MutationLeaseInput 
   failureCode: string;
   receipt?: Record<string, unknown>;
   responseStatus?: number;
-  recoveryNotBefore?: Date | string | null;
+  recoveryNotBefore?: Date | string;
 }
+
+export interface ProjectMutationReconciliationEvidence {
+  source: string;
+  observedAt: string;
+  evidenceCode: string;
+  evidenceFingerprint: string;
+}
+
+export interface ReconcileProjectMutationInput {
+  projectRef: string;
+  mutationId: string;
+  expectedFencingEpoch: number;
+  status: "succeeded" | "failed_terminal";
+  responseStatus: number | null;
+  failureCode?: string | null;
+  evidence: ProjectMutationReconciliationEvidence;
+}
+
+export type ReconcileProjectMutationResult =
+  | { kind: "updated"; mutation: ProjectMutationState }
+  | { kind: "not_found" }
+  | { kind: "forbidden" }
+  | { kind: "invalid_evidence_time" }
+  | { kind: "not_reconcilable"; mutation: ProjectMutationState }
+  | { kind: "cas_conflict"; mutation: ProjectMutationState };
 
 export interface ClaimRecoverableProjectMutationsInput {
   operations: readonly string[];
@@ -232,13 +272,46 @@ export function projectMutationFingerprint(normalizedRequest: unknown): string {
   return stableSha256(normalizedRequest);
 }
 
+export function isCanonicalMutationTimestamp(candidate: string): boolean {
+  if (!CANONICAL_TIMESTAMP_PATTERN.test(candidate)) return false;
+  const milliseconds = Date.parse(candidate);
+  return Number.isFinite(milliseconds) && new Date(milliseconds).toISOString() === candidate;
+}
+
+function canonicalResourceId(resourceId: string): string {
+  if (!RESOURCE_ID_PATTERN.test(resourceId) || resourceId.trim() !== resourceId) {
+    throw new Error("Mutation resource id is invalid");
+  }
+  const encoded = Buffer.from(resourceId, "utf8");
+  if (encoded.toString("utf8") !== resourceId) {
+    throw new Error("Mutation resource id must contain well-formed Unicode");
+  }
+  if (encoded.byteLength > MAX_RESOURCE_ID_BYTES) {
+    throw new Error("Mutation resource id exceeds 128 bytes");
+  }
+  return encoded.toString("base64url");
+}
+
+export function projectMutationResourceKey(resource: ProjectMutationResource): string {
+  if (!RESOURCE_TYPE_PATTERN.test(resource.type)) throw new Error("Mutation resource type is invalid");
+  return `v1/${resource.type}/${canonicalResourceId(resource.id)}`;
+}
+
 function timestamp(value: Date | string | null): string | null {
   if (value === null) return null;
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 }
 
-function recoveryTimestamp(value: Date | string | null | undefined): Date | null | undefined {
-  if (value === null || value === undefined) return value;
+function storedFencingEpoch(candidate: number | string, minimum: 0 | 1): number {
+  const epoch = Number(candidate);
+  if (!Number.isSafeInteger(epoch) || epoch < minimum || epoch > MAX_FENCING_EPOCH) {
+    throw new Error("Stored mutation fencing epoch is invalid");
+  }
+  return epoch;
+}
+
+function recoveryTimestamp(value: Date | string | undefined): Date | undefined {
+  if (value === undefined) return undefined;
   const parsed = value instanceof Date ? value : new Date(value);
   if (!Number.isFinite(parsed.getTime())) throw new Error("Mutation recovery timestamp is invalid");
   return parsed;
@@ -271,7 +344,7 @@ function projectMutationState(row: StoredProjectMutationRow): ProjectMutationSta
     failureCode: row.failure_code,
     leaseOwner: row.lease_owner,
     leaseExpiresAt: timestamp(row.lease_expires_at),
-    fencingEpoch: Number(row.fencing_epoch),
+    fencingEpoch: storedFencingEpoch(row.fencing_epoch, 0),
     completedAt: timestamp(row.completed_at),
     createdAt: timestamp(row.created_at)!,
     updatedAt: timestamp(row.updated_at)!,
@@ -292,9 +365,10 @@ function assertLeaseSeconds(leaseSeconds: number): void {
 function assertBeginInput(input: BeginProjectMutationInput): void {
   assertMutationIdentity(input.projectRef, input.mutationId);
   if (!OPERATION_PATTERN.test(input.operation)) throw new Error("Mutation operation is invalid");
-  if (input.resourceKey !== undefined && !RESOURCE_KEY_PATTERN.test(input.resourceKey)) {
-    throw new Error("Mutation resource key is invalid");
+  if (Object.hasOwn(input, "resourceKey")) {
+    throw new Error("Mutation resources must use the structured resource contract");
   }
+  if (input.resource) projectMutationResourceKey(input.resource);
   if (!FINGERPRINT_PATTERN.test(input.requestFingerprint)) throw new Error("Mutation fingerprint is invalid");
   if (!PRINCIPAL_ID_PATTERN.test(input.principal.id) || input.principal.id.trim() !== input.principal.id) {
     throw new Error("Mutation principal is invalid");
@@ -331,8 +405,8 @@ async function activeResourceMutation(
 function existingMutationResult(
   row: StoredProjectMutationRow,
   input: BeginProjectMutationInput,
+  resourceKey: string | null,
 ): BeginProjectMutationResult {
-  const resourceKey = input.resourceKey ?? null;
   if (row.request_fingerprint !== input.requestFingerprint
     || row.operation !== input.operation || row.resource_key !== resourceKey) {
     return { kind: "fingerprint_conflict" };
@@ -346,14 +420,15 @@ function existingMutationResult(
 async function insertProjectMutation(
   transaction: SQL,
   input: BeginProjectMutationInput,
+  resourceKey: string | null,
 ): Promise<StoredProjectMutationRow | null> {
   const [inserted] = await transaction`
     INSERT INTO project_mutations (
       project_ref, mutation_id, operation, resource_key, request_fingerprint,
-      principal_type, principal_id
+      principal_type, principal_id, recovery_not_before
     ) VALUES (
-      ${input.projectRef}, ${input.mutationId}, ${input.operation}, ${input.resourceKey ?? null},
-      ${input.requestFingerprint}, ${input.principal.type}, ${input.principal.id}
+      ${input.projectRef}, ${input.mutationId}, ${input.operation}, ${resourceKey},
+      ${input.requestFingerprint}, ${input.principal.type}, ${input.principal.id}, clock_timestamp()
     )
     ON CONFLICT DO NOTHING
     RETURNING *
@@ -366,13 +441,14 @@ export async function beginProjectMutation(
   input: BeginProjectMutationInput,
 ): Promise<BeginProjectMutationResult> {
   assertBeginInput(input);
-  const inserted = await insertProjectMutation(transaction, input);
+  const resourceKey = input.resource ? projectMutationResourceKey(input.resource) : null;
+  const inserted = await insertProjectMutation(transaction, input, resourceKey);
   if (inserted) return { kind: "started", mutation: projectMutationState(inserted) };
 
   const existing = await lockedMutation(transaction, input.projectRef, input.mutationId);
-  if (existing) return existingMutationResult(existing, input);
-  if (input.resourceKey) {
-    const blocker = await activeResourceMutation(transaction, input.projectRef, input.resourceKey);
+  if (existing) return existingMutationResult(existing, input, resourceKey);
+  if (resourceKey) {
+    const blocker = await activeResourceMutation(transaction, input.projectRef, resourceKey);
     if (blocker) return { kind: "resource_busy", mutationId: blocker.mutation_id, status: blocker.status };
   }
   throw new Error("Mutation insert conflicted without a durable conflicting record");
@@ -390,7 +466,7 @@ async function lockedMutationLeaseState(
   input: ClaimProjectMutationInput,
 ): Promise<StoredMutationWithLeaseState | null> {
   const [row] = await transaction`
-    SELECT *, COALESCE(lease_expires_at > NOW(), false) AS lease_active
+    SELECT *, COALESCE(lease_expires_at > clock_timestamp(), false) AS lease_active
     FROM project_mutations
     WHERE project_ref = ${input.projectRef} AND mutation_id = ${input.mutationId}
     FOR UPDATE
@@ -403,13 +479,16 @@ function unclaimedMutationResult(
   input: ClaimProjectMutationInput,
 ): ClaimProjectMutationResult {
   const mutation = projectMutationState(row);
-  if (row.status === "running" && row.lease_active
-    && row.lease_owner === input.leaseOwner && row.lease_token === input.leaseToken) {
-    return { kind: "claimed", mutation };
+  if (row.status === "running" && row.lease_active) {
+    return row.lease_owner === input.leaseOwner && row.lease_token === input.leaseToken
+      ? { kind: "claimed", mutation }
+      : { kind: "busy", mutation };
   }
-  if (row.status === "running") return { kind: "busy", mutation };
   if (["succeeded", "failed_terminal", "outcome_unknown"].includes(row.status)) {
     return { kind: "terminal", mutation };
+  }
+  if (Number(row.fencing_epoch) >= MAX_FENCING_EPOCH) {
+    throw new Error("Mutation fencing epoch is exhausted");
   }
   throw new Error(`Mutation status '${row.status}' could not be claimed`);
 }
@@ -422,11 +501,12 @@ export async function claimOrResumeProjectMutation(
   const [claimed] = await transaction`
     UPDATE project_mutations
     SET status = 'running', lease_owner = ${input.leaseOwner}, lease_token = ${input.leaseToken},
-        lease_expires_at = NOW() + (${input.leaseSeconds} * INTERVAL '1 second'),
-        fencing_epoch = fencing_epoch + 1, completed_at = NULL, updated_at = NOW()
+        lease_expires_at = clock_timestamp() + (${input.leaseSeconds} * INTERVAL '1 second'),
+        fencing_epoch = fencing_epoch + 1, completed_at = NULL, updated_at = clock_timestamp()
     WHERE project_ref = ${input.projectRef} AND mutation_id = ${input.mutationId}
+      AND fencing_epoch < 9007199254740991
       AND (status IN ('pending', 'failed_retryable')
-        OR (status = 'running' AND lease_expires_at <= NOW()))
+        OR (status = 'running' AND lease_expires_at <= clock_timestamp()))
     RETURNING *
   ` as StoredProjectMutationRow[];
   if (claimed) return { kind: "claimed", mutation: projectMutationState(claimed) };
@@ -453,10 +533,7 @@ function recoverableMutationClaim(row: StoredRecoverableMutationClaimRow): Recov
     throw new Error("Stored mutation resource key is invalid");
   }
   if (!isProjectMutationId(row.lease_token)) throw new Error("Stored mutation lease token is invalid");
-  const fencingEpoch = Number(row.fencing_epoch);
-  if (!Number.isSafeInteger(fencingEpoch) || fencingEpoch < 1) {
-    throw new Error("Stored mutation fencing epoch is invalid");
-  }
+  const fencingEpoch = storedFencingEpoch(row.fencing_epoch, 1);
   const checkpoint = publicJsonRecord(row.checkpoint);
   return {
     projectRef: row.project_ref, mutationId: row.mutation_id, operation: row.operation,
@@ -475,18 +552,19 @@ async function claimRecoverableRows(
       SELECT project_ref, mutation_id
       FROM project_mutations
       WHERE operation = ANY(${operations})
+        AND fencing_epoch < 9007199254740991
         AND recovery_not_before IS NOT NULL
-        AND recovery_not_before <= NOW()
+        AND recovery_not_before <= clock_timestamp()
         AND (status IN ('pending', 'failed_retryable')
-          OR (status = 'running' AND lease_expires_at <= NOW()))
+          OR (status = 'running' AND lease_expires_at <= clock_timestamp()))
       ORDER BY recovery_not_before ASC, updated_at ASC, project_ref ASC, mutation_id ASC
       FOR UPDATE SKIP LOCKED
       LIMIT ${input.limit}
     )
     UPDATE project_mutations AS mutation
     SET status = 'running', lease_owner = ${input.leaseOwner}, lease_token = gen_random_uuid(),
-        lease_expires_at = NOW() + (${input.leaseSeconds} * INTERVAL '1 second'),
-        fencing_epoch = mutation.fencing_epoch + 1, completed_at = NULL, updated_at = NOW()
+        lease_expires_at = clock_timestamp() + (${input.leaseSeconds} * INTERVAL '1 second'),
+        fencing_epoch = mutation.fencing_epoch + 1, completed_at = NULL, updated_at = clock_timestamp()
     FROM candidates
     WHERE mutation.project_ref = candidates.project_ref
       AND mutation.mutation_id = candidates.mutation_id
@@ -529,10 +607,12 @@ export async function checkpointProjectMutation(
     SET checkpoint = ${input.checkpoint}::jsonb,
         recovery_not_before = CASE WHEN ${preserveRecoveryTime}
           THEN recovery_not_before ELSE ${recoveryNotBefore ?? null}::timestamptz END,
-        lease_expires_at = NOW() + (${input.leaseSeconds} * INTERVAL '1 second'), updated_at = NOW()
+        lease_expires_at = clock_timestamp() + (${input.leaseSeconds} * INTERVAL '1 second'),
+        updated_at = clock_timestamp()
     WHERE project_ref = ${input.projectRef} AND mutation_id = ${input.mutationId}
       AND status = 'running' AND lease_token = ${input.leaseToken}
       AND fencing_epoch = ${input.fencingEpoch}
+      AND lease_expires_at > clock_timestamp()
     RETURNING mutation_id
   ` as Array<{ mutation_id: string }>;
   return updated ? "updated" : "lease_lost";
@@ -576,11 +656,12 @@ async function finishProjectMutation(
         recovery_not_before = CASE WHEN ${preserveRecoveryTime}
           THEN recovery_not_before ELSE ${input.recoveryNotBefore ?? null}::timestamptz END,
         completed_at = CASE WHEN ${input.status} IN ('succeeded', 'failed_terminal', 'outcome_unknown')
-          THEN NOW() ELSE NULL END,
-        updated_at = NOW()
+          THEN clock_timestamp() ELSE NULL END,
+        updated_at = clock_timestamp()
     WHERE project_ref = ${input.projectRef} AND mutation_id = ${input.mutationId}
       AND status = 'running' AND lease_token = ${input.leaseToken}
       AND fencing_epoch = ${input.fencingEpoch}
+      AND lease_expires_at > clock_timestamp()
     RETURNING mutation_id
   ` as Array<{ mutation_id: string }>;
   return updated ? "updated" : "lease_lost";
@@ -611,6 +692,102 @@ export async function completeProjectMutationFailure(
     receipt: input.receipt ?? {},
     responseStatus: input.responseStatus ?? null,
   });
+}
+
+function reconciliationReceipt(input: ReconcileProjectMutationInput): Record<string, unknown> {
+  const evidence = input.evidence;
+  if (!OPERATION_PATTERN.test(evidence.source)) throw new Error("Mutation evidence source is invalid");
+  if (!isCanonicalMutationTimestamp(evidence.observedAt)) throw new Error("Mutation evidence timestamp is invalid");
+  if (!FAILURE_CODE_PATTERN.test(evidence.evidenceCode)) throw new Error("Mutation evidence code is invalid");
+  if (!FINGERPRINT_PATTERN.test(evidence.evidenceFingerprint)) {
+    throw new Error("Mutation evidence fingerprint is invalid");
+  }
+  return {
+    reconciliation: {
+      source: evidence.source,
+      observed_at: evidence.observedAt,
+      evidence_code: evidence.evidenceCode,
+      evidence_fingerprint: evidence.evidenceFingerprint,
+      target_status: input.status,
+    },
+  };
+}
+
+function assertReconciliationInput(input: ReconcileProjectMutationInput): Record<string, unknown> {
+  assertMutationIdentity(input.projectRef, input.mutationId);
+  if (!Number.isSafeInteger(input.expectedFencingEpoch) || input.expectedFencingEpoch < 1) {
+    throw new Error("Mutation reconciliation fencing epoch is invalid");
+  }
+  if (!validCompletionResponseStatus(input.status, input.responseStatus)) {
+    throw new Error("Mutation response status is invalid");
+  }
+  if (input.status === "succeeded" && input.failureCode != null) {
+    throw new Error("Successful mutation reconciliation cannot set a failure code");
+  }
+  if (input.status === "failed_terminal" && !FAILURE_CODE_PATTERN.test(input.failureCode ?? "")) {
+    throw new Error("Terminal mutation reconciliation requires a failure code");
+  }
+  const receipt = reconciliationReceipt(input);
+  assertPublicMutationPayload(receipt);
+  return receipt;
+}
+
+async function lockedReconciliationMutation(
+  transaction: SQL,
+  input: ReconcileProjectMutationInput,
+): Promise<StoredReconciliationRow | null> {
+  const [row] = await transaction`
+    SELECT mutation.*, clock_timestamp() AS database_now
+    FROM project_mutations AS mutation
+    WHERE mutation.project_ref = ${input.projectRef}
+      AND mutation.mutation_id = ${input.mutationId}
+    FOR UPDATE
+  ` as StoredReconciliationRow[];
+  return row ?? null;
+}
+
+function reconciliationPrecondition(
+  row: StoredReconciliationRow | null,
+  actor: MutationPrincipal,
+  input: ReconcileProjectMutationInput,
+): ReconcileProjectMutationResult | null {
+  if (!row) return { kind: "not_found" };
+  if (row.principal_type !== actor.type || row.principal_id !== actor.id) return { kind: "forbidden" };
+  const mutation = projectMutationState(row);
+  if (row.status !== "outcome_unknown") return { kind: "not_reconcilable", mutation };
+  if (mutation.fencingEpoch !== input.expectedFencingEpoch) return { kind: "cas_conflict", mutation };
+  const unknownAt = timestamp(row.completed_at);
+  const databaseNow = timestamp(row.database_now);
+  if (!unknownAt || !databaseNow) throw new Error("Stored mutation reconciliation timestamps are invalid");
+  const observedAt = Date.parse(input.evidence.observedAt);
+  if (observedAt < Date.parse(unknownAt)
+    || observedAt > Date.parse(databaseNow) + MAX_EVIDENCE_CLOCK_SKEW_MS) {
+    return { kind: "invalid_evidence_time" };
+  }
+  return null;
+}
+
+export async function reconcileProjectMutation(
+  transaction: SQL,
+  actor: MutationPrincipal,
+  input: ReconcileProjectMutationInput,
+): Promise<ReconcileProjectMutationResult> {
+  const receipt = assertReconciliationInput(input);
+  const current = await lockedReconciliationMutation(transaction, input);
+  const precondition = reconciliationPrecondition(current, actor, input);
+  if (precondition) return precondition;
+  const [updated] = await transaction`
+    UPDATE project_mutations
+    SET status = ${input.status}, receipt = ${receipt}::jsonb,
+        response_status = ${input.responseStatus}, failure_code = ${input.failureCode ?? null},
+        recovery_not_before = NULL, completed_at = clock_timestamp(), updated_at = clock_timestamp()
+    WHERE project_ref = ${input.projectRef} AND mutation_id = ${input.mutationId}
+      AND principal_type = ${actor.type} AND principal_id = ${actor.id}
+      AND status = 'outcome_unknown' AND fencing_epoch = ${input.expectedFencingEpoch}
+    RETURNING *
+  ` as StoredProjectMutationRow[];
+  if (!updated) throw new Error("Locked mutation reconciliation changed unexpectedly");
+  return { kind: "updated", mutation: projectMutationState(updated) };
 }
 
 export async function readProjectMutation(input: {

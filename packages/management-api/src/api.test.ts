@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, mock } from "bun:test";
+import { describe, it, expect, beforeAll, mock, spyOn } from "bun:test";
 
 const mockSql = mock((strings: string | TemplateStringsArray) => {
     const sqlStr = Array.isArray(strings) ? strings.join("") : String(strings);
@@ -18,18 +18,92 @@ mock.module("../src/db", () => ({
     sql: mockSql,
 }));
 
-import { app as baseApp, registerAllRoutes } from "../src/index";
-
-import type { Elysia } from "elysia";
+import { app as baseApp } from "../src/index";
+import { logger } from "../src/utils/logger";
 
 describe("Management API Integration Tests", () => {
     const baseUrl = "http://localhost";
     const masterToken = "dev-master-token";
     let app: typeof baseApp;
 
-    beforeAll(async () => {
-        const routes = await registerAllRoutes();
-        app = baseApp.use(routes as unknown as typeof baseApp);
+    beforeAll(() => {
+        app = baseApp;
+    });
+
+    describe("validation error redaction", () => {
+        const loggerError = spyOn(logger, "error");
+
+        async function expectRedactedValidation(
+            target: Pick<typeof baseApp, "handle">,
+            request: Request,
+            sentinel: string,
+        ): Promise<void> {
+            loggerError.mockClear();
+            const response = await target.handle(request);
+            const responseText = await response.text();
+            const logged = JSON.stringify(loggerError.mock.calls);
+
+            expect({ status: response.status, body: responseText }).toEqual({
+                status: 400,
+                body: JSON.stringify({ message: "Validation failed", code: "VALIDATION_ERROR" }),
+            });
+            expect(JSON.parse(responseText)).toEqual({
+                message: "Validation failed",
+                code: "VALIDATION_ERROR",
+            });
+            expect(responseText).not.toContain(sentinel);
+            expect(logged).not.toContain(sentinel);
+        }
+
+        it("does not reflect an outer-route validation value into the response or logger", async () => {
+            const sentinel = "private-login-validation-sentinel";
+            await expectRedactedValidation(app, new Request(`${baseUrl}/auth/login`, {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ username: [sentinel], password: "irrelevant" }),
+            }), sentinel);
+        });
+
+        it("does not reflect an inner API validation value into the response or logger", async () => {
+            const sentinel = "private-type-validation-sentinel";
+            await expectRedactedValidation(app, new Request(
+                `${baseUrl}/v1/projects/proj_1/mutations/00000000-0000-4000-8000-000000000001/reconcile`,
+                {
+                    method: "POST",
+                    headers: {
+                        authorization: `Bearer ${masterToken}`,
+                        "content-type": "application/json",
+                    },
+                    body: JSON.stringify({
+                        expected_fencing_epoch: 1,
+                        status: sentinel,
+                        response_status: 200,
+                        evidence: {
+                            source: "scheduled_functions.provider_readback",
+                            observed_at: "2026-08-12T00:00:00.000Z",
+                            evidence_code: "RESOURCE_PRESENT",
+                            evidence_fingerprint: "a".repeat(64),
+                        },
+                    }),
+                },
+            ), sentinel);
+        });
+
+        it("does not reflect a project-create validation value into the response or logger", async () => {
+            const sentinel = "private-project-create-validation-sentinel";
+            mockSql.mockClear();
+
+            await expectRedactedValidation(app, new Request(`${baseUrl}/v1/projects`, {
+                method: "POST",
+                headers: {
+                    authorization: `Bearer ${masterToken}`,
+                    "content-type": "application/json",
+                },
+                body: JSON.stringify({ name: [sentinel] }),
+            }), sentinel);
+
+            expect(mockSql).not.toHaveBeenCalled();
+        });
     });
 
     describe("GoTrue-only OpenAPI boundary", () => {

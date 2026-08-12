@@ -19,6 +19,7 @@ import {
   migrateWebhookSecretsToControlStore,
 } from "./platform-v2";
 import { migrateAuditChainSequences } from "./audit-chain-migration";
+import { migrateProjectMutationJournal } from "./project-mutation-migration";
 import { migrateLegacyEncryptedSecretsInTransaction } from "./secret-key-migration";
 import { GOTRUE_USER_ID_POSTGRES_PATTERN } from "../utils/project-user-lifecycle";
 
@@ -741,6 +742,7 @@ export async function initDatabase() {
 
     await sql.begin(async (transaction) => {
       await ensurePlatformV2Schema(transaction);
+      await migrateProjectMutationJournal(transaction);
       await migrateAuditChainSequences(transaction);
       await migrateLegacyDeploymentHistory(transaction);
       await migrateLegacyControlSecrets(transaction);

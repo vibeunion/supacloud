@@ -54,7 +54,7 @@ test("platform v2 bootstrap executes canonical DDL as individual statements in o
   const fixture = fakeControlPool();
   await ensurePlatformV2SchemaInTransaction(fixture.database);
 
-  expect(fixture.observations()).toEqual({ beginCalls: 1, taggedCalls: 1, rolledBack: false });
+  expect(fixture.observations()).toEqual({ beginCalls: 1, taggedCalls: 10, rolledBack: false });
   expect(fixture.transactionalStatements.length).toBeGreaterThan(30);
   for (const statement of fixture.transactionalStatements) {
     expect(splitSqlStatements(statement)).toHaveLength(1);

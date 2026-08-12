@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { SQL } from "bun";
 import { sql } from "../db";
 import { acquireAuditChainAppendLock } from "../db/audit-chain-lock";
 import { getVerifiedRequestPrincipal } from "../middleware/auth";
@@ -12,18 +13,20 @@ const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const SENSITIVE_KEYS = new Set([
   "authorization", "cookie", "token", "accesstoken", "refreshtoken", "idtoken",
   "password", "smtppass", "secret", "secrets", "clientsecret", "apikey",
-  "privatekey", "code", "verifier", "codeverifier",
+  "privatekey", "code", "verifier", "codeverifier", "jwt", "session", "signingkey",
 ]);
 const SENSITIVE_NAME_PATTERN = [
   "authorization", "cookie", "access[_-]?token", "refresh[_-]?token", "id[_-]?token",
   "token", "password", "smtp[_-]?pass", "secrets?", "client[_-]?secret",
   "api[_-]?key", "private[_-]?key", "code[_-]?verifier", "verifier", "code",
+  "jwt", "session", "signing[_-]?key",
 ].join("|");
 const BEARER_PATTERN = /\b(bearer\s+)(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;]+)/gi;
 const SECRET_ASSIGNMENT_PATTERN = new RegExp(
   `((?:["']?(?:${SENSITIVE_NAME_PATTERN})["']?)\\s*[:=]\\s*)("(?:\\\\.|[^"\\\\])*"|'(?:\\\\.|[^'\\\\])*'|[^\\s,;&#}\\]]+)`,
   "gi",
 );
+const transactionallyAuditedRequests = new WeakSet<Request>();
 
 function isSensitiveKey(key: string): boolean {
   const normalized = key.replaceAll("_", "").replaceAll("-", "").toLowerCase();
@@ -251,72 +254,124 @@ export function verifyAuditChain(
 
 export function shouldAuditRequest(request: Request): boolean {
   const url = new URL(request.url);
-  return url.pathname.startsWith("/v1") && WRITE_METHODS.has(request.method.toUpperCase());
+  return !transactionallyAuditedRequests.has(request)
+    && url.pathname.startsWith("/v1")
+    && WRITE_METHODS.has(request.method.toUpperCase());
+}
+
+export function markRequestAuditCommitted(request: Request): void {
+  transactionallyAuditedRequests.add(request);
+}
+
+type PreparedAuditAppend = {
+  id: string;
+  projectChainKey: string;
+  metadata: Record<string, unknown>;
+  source: string;
+};
+
+type PreparedAuditRow = {
+  previousHash: string | null;
+  chainSequence: number;
+  createdAt: Date;
+  hash: string;
+};
+
+function prepareAuditAppend(input: AppendAuditEventInput): PreparedAuditAppend {
+  return {
+    id: crypto.randomUUID(),
+    projectChainKey: input.projectRef || "__platform__",
+    metadata: redactAuditValue(input.metadata || {}) as Record<string, unknown>,
+    source: input.source || "management-api",
+  };
+}
+
+async function lockedAuditCheckpoint(transaction: SQL, projectChainKey: string) {
+  await acquireAuditChainAppendLock(transaction);
+  await transaction`SELECT pg_advisory_xact_lock(hashtext(${`audit-chain:${projectChainKey}`}))`;
+  const [checkpoint] = await transaction`
+    SELECT last_event_hash, event_count
+    FROM audit_log_checkpoints
+    WHERE project_ref = ${projectChainKey}
+    FOR UPDATE
+  `;
+  return checkpoint;
+}
+
+function prepareAuditRow(
+  input: AppendAuditEventInput,
+  append: PreparedAuditAppend,
+  checkpoint: Record<string, unknown> | undefined,
+): PreparedAuditRow {
+  const previousHash = typeof checkpoint?.last_event_hash === "string"
+    ? checkpoint.last_event_hash
+    : null;
+  const chainSequence = Number(checkpoint?.event_count || 0) + 1;
+  const createdAt = new Date();
+  const hash = auditEventHash({
+    id: append.id, project_ref: input.projectRef, actor: input.actor, actor_type: input.actorType,
+    action: input.action, method: input.method, path: input.path, status: input.status ?? null,
+    request_id: input.requestId, source: append.source, metadata: append.metadata,
+    created_at: createdAt, previous_hash: previousHash, chain_sequence: chainSequence,
+  });
+  return { previousHash, chainSequence, createdAt, hash };
+}
+
+async function insertAuditRow(
+  transaction: SQL,
+  input: AppendAuditEventInput,
+  append: PreparedAuditAppend,
+  row: PreparedAuditRow,
+) {
+  const [inserted] = await transaction`
+    INSERT INTO audit_logs (
+      id, project_ref, actor, actor_type, action, method, path, status,
+      ip_address, user_agent, request_id, metadata, source,
+      previous_hash, event_hash, chain_sequence, created_at
+    ) VALUES (
+      ${append.id}, ${input.projectRef}, ${input.actor}, ${input.actorType}, ${input.action},
+      ${input.method}, ${input.path}, ${input.status ?? null}, ${input.ipAddress ?? null},
+      ${input.userAgent || ""}, ${input.requestId}, ${JSON.stringify(append.metadata)}::jsonb,
+      ${append.source}, ${row.previousHash}, ${row.hash}, ${row.chainSequence}, ${row.createdAt}
+    )
+    RETURNING *
+  `;
+  return inserted;
+}
+
+async function advanceAuditCheckpoint(
+  transaction: SQL,
+  append: PreparedAuditAppend,
+  row: PreparedAuditRow,
+): Promise<void> {
+  await transaction`
+    INSERT INTO audit_log_checkpoints (
+      project_ref, last_event_id, last_event_hash, event_count, updated_at
+    ) VALUES (
+      ${append.projectChainKey}, ${append.id}, ${row.hash}, ${row.chainSequence}, NOW()
+    )
+    ON CONFLICT (project_ref) DO UPDATE SET
+      last_event_id = EXCLUDED.last_event_id,
+      last_event_hash = EXCLUDED.last_event_hash,
+      event_count = EXCLUDED.event_count,
+      updated_at = NOW()
+  `;
+}
+
+export async function appendAuditEventInTransaction(
+  transaction: SQL,
+  input: AppendAuditEventInput,
+) {
+  const append = prepareAuditAppend(input);
+  const checkpoint = await lockedAuditCheckpoint(transaction, append.projectChainKey);
+  const row = prepareAuditRow(input, append, checkpoint);
+  const inserted = await insertAuditRow(transaction, input, append, row);
+  await advanceAuditCheckpoint(transaction, append, row);
+  return inserted;
 }
 
 export async function appendAuditEvent(input: AppendAuditEventInput) {
-  const id = crypto.randomUUID();
-  const projectChainKey = input.projectRef || "__platform__";
-  const metadata = redactAuditValue(input.metadata || {}) as Record<string, unknown>;
-  const source = input.source || "management-api";
-
-  return sql.begin(async (tx) => {
-    await acquireAuditChainAppendLock(tx);
-    await tx`SELECT pg_advisory_xact_lock(hashtext(${`audit-chain:${projectChainKey}`}))`;
-    const [checkpoint] = await tx`
-      SELECT last_event_hash, event_count
-      FROM audit_log_checkpoints
-      WHERE project_ref = ${projectChainKey}
-      FOR UPDATE
-    `;
-    const previousHash = typeof checkpoint?.last_event_hash === "string"
-      ? checkpoint.last_event_hash
-      : null;
-    const chainSequence = Number(checkpoint?.event_count || 0) + 1;
-    const createdAt = new Date();
-    const hash = auditEventHash({
-      id,
-      project_ref: input.projectRef,
-      actor: input.actor,
-      actor_type: input.actorType,
-      action: input.action,
-      method: input.method,
-      path: input.path,
-      status: input.status ?? null,
-      request_id: input.requestId,
-      source,
-      metadata,
-      created_at: createdAt,
-      previous_hash: previousHash,
-      chain_sequence: chainSequence,
-    });
-    const [row] = await tx`
-      INSERT INTO audit_logs (
-        id, project_ref, actor, actor_type, action, method, path, status,
-        ip_address, user_agent, request_id, metadata, source,
-        previous_hash, event_hash, chain_sequence, created_at
-      ) VALUES (
-        ${id}, ${input.projectRef}, ${input.actor}, ${input.actorType}, ${input.action},
-        ${input.method}, ${input.path}, ${input.status ?? null}, ${input.ipAddress ?? null},
-        ${input.userAgent || ""}, ${input.requestId}, ${JSON.stringify(metadata)}::jsonb,
-        ${source}, ${previousHash}, ${hash}, ${chainSequence}, ${createdAt}
-      )
-      RETURNING *
-    `;
-    await tx`
-      INSERT INTO audit_log_checkpoints (
-        project_ref, last_event_id, last_event_hash, event_count, updated_at
-      ) VALUES (
-        ${projectChainKey}, ${id}, ${hash}, ${chainSequence}, NOW()
-      )
-      ON CONFLICT (project_ref) DO UPDATE SET
-        last_event_id = EXCLUDED.last_event_id,
-        last_event_hash = EXCLUDED.last_event_hash,
-        event_count = EXCLUDED.event_count,
-        updated_at = NOW()
-    `;
-    return row;
-  });
+  return sql.begin((transaction) => appendAuditEventInTransaction(transaction, input));
 }
 
 export async function verifyProjectAuditIntegrity(projectRef: string): Promise<AuditIntegrityResult> {
