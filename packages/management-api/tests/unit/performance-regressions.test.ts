@@ -55,12 +55,16 @@ describe("performance regressions", () => {
   test("one-shot CLI commands do not initialize Caddy gateway routes", async () => {
     const indexSource = await read("../../src/index.ts");
     const serverBranch = indexSource.indexOf('args.length === 0 || args.includes("--server")');
-    const gatewayInitCall = indexSource.indexOf("await initializeGatewayRoutes();");
+    const gatewayReadyCall = indexSource.indexOf("await waitForGatewayBeforeServe();");
+    const frontendRecoveryCall = indexSource.indexOf("await recoverFrontendReleasesBeforeServe();");
+    const gatewayReconcileCall = indexSource.indexOf("await reconcileGatewayBeforeServe();");
     const serveCall = indexSource.indexOf("Bun.serve({");
 
     expect(serverBranch).toBeGreaterThan(0);
-    expect(gatewayInitCall).toBeGreaterThan(serverBranch);
-    expect(gatewayInitCall).toBeLessThan(serveCall);
+    expect(gatewayReadyCall).toBeGreaterThan(serverBranch);
+    expect(frontendRecoveryCall).toBeGreaterThan(gatewayReadyCall);
+    expect(gatewayReconcileCall).toBeGreaterThan(frontendRecoveryCall);
+    expect(gatewayReconcileCall).toBeLessThan(serveCall);
   });
 
   test("gateway rebuild-all skips inactive projects", async () => {

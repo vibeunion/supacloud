@@ -533,6 +533,22 @@ jobs:
             --env MINIO_ROOT_PASSWORD=minioadmin \
             minio/minio:latest server /data
 
+      # Management refuses to serve until the Caddy Admin API is reachable and
+      # accepts its canonical JSON config, so this job needs a real Caddy. The
+      # admin endpoint is published only on the runner loopback and Management
+      # connects via CADDY_ADMIN_URL=http://0.0.0.0:2019, so the /load-posted
+      # admin.listen stays 0.0.0.0:2019 and remains reachable; the :80/:443
+      # data plane stays inside the container network, unreachable from outside.
+      - name: Start Caddy fixture
+        run: |
+          printf '%s\n' '{"admin":{"listen":"0.0.0.0:2019"}}' > "$RUNNER_TEMP/caddy-ci.json"
+          docker run --detach --rm \
+            --name supacloud-ci-caddy \
+            --publish 127.0.0.1:2019:2019 \
+            --volume "$RUNNER_TEMP/caddy-ci.json:/etc/caddy/ci.json:ro" \
+            caddy:2.11.4 \
+            caddy run --config /etc/caddy/ci.json
+
       - name: Show runtime versions
         run: |
           node --version
@@ -650,7 +666,17 @@ jobs:
           echo "Starting Management API in background..."
           bun src/index.ts > api-server.log 2>&1 &
           PID=$!
-          sleep 4
+          # Startup now includes gateway readiness, recovery, and canonical
+          # reconciliation; poll instead of a fixed sleep to avoid cold-runner flakes.
+          for attempt in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:9090/health > /dev/null; then break; fi
+            if [ "$attempt" -eq 30 ]; then
+              echo "API failed to start. Logs:"
+              cat api-server.log
+              exit 1
+            fi
+            sleep 2
+          done
           curl -sf http://127.0.0.1:9090/health || (echo "API failed to start. Logs:" && cat api-server.log && exit 1)
 
           echo "===== RUNNING E2E SNAPSHOTS ====="
@@ -683,6 +709,7 @@ jobs:
           MASTER_TOKEN: super-secret-jwt-token-with-at-least-32-characters-long
           CI: "true"
           NODE_ENV: test
+          CADDY_ADMIN_URL: http://0.0.0.0:2019
           S3_ENDPOINT: http://127.0.0.1:9001
           S3_REGION: us-east-1
           STORAGE_TYPE: s3

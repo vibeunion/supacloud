@@ -1,10 +1,13 @@
 import { logger } from "../utils/logger";
-import { gatewayService } from "../services/gateway.service";
+import {
+    gatewayService,
+    reconcileCanonicalGatewayRoutes,
+    type CanonicalGatewayReconcileState,
+} from "../services/gateway.service";
 
-// 自愈周期：默认 60s 轮询 Caddy Admin API 可达性。systemd 模式下 caddy 直接用 config.json
-// 启动，重启后会加载磁盘快照；若 management-api 内存态在此期间变化，快照即过时。docker 模式
-// 依赖 ensureGatewayReady 完成首次注入，本 worker 提供持续的自愈：检测到"从不可达恢复可达"
-// （caddy 重启信号）即触发全量重建 + JSON /load，让最新路由配置接管。
+// Caddy restarts from its durable config, which can lag behind Management state while it is
+// unavailable. Recovery edges and periodic checks therefore use the same full reconciliation;
+// only master, tenant/custom, hosted auth, frontend, and live read-back success marks recovery.
 const HEALTH_CHECK_INTERVAL_MS = Number(process.env.GATEWAY_HEALTH_CHECK_INTERVAL_MS || 60 * 1000);
 const INITIAL_DELAY_MS = Number(process.env.GATEWAY_HEALTH_CHECK_INITIAL_DELAY_MS || 30 * 1000);
 const ROUTE_RECONCILE_INTERVAL_MS = Number(process.env.GATEWAY_ROUTE_RECONCILE_INTERVAL_MS || 5 * 60 * 1000);
@@ -21,30 +24,25 @@ export function resetGatewayHealthState(): void {
 }
 
 interface HealthCheckDeps {
-    // 触发全量租户路由重建（rebuildAllTenantConfigs），默认走 gatewayService。
-    rebuildAll?: () => Promise<{ success: boolean; updated: number; errors: string[] }>;
+    reconcileAll?: () => Promise<CanonicalGatewayReconcileState>;
     // 测试可注入时钟和周期，生产环境使用环境变量配置。
     now?: () => number;
     reconcileIntervalMs?: number;
 }
 
-// 执行一次健康探测。返回本轮是否触发了全量重建。
+// 执行一次健康探测。返回本轮是否完成了 canonical reconciliation。
 export async function runGatewayHealthCheck(deps?: HealthCheckDeps): Promise<boolean> {
-    const rebuildAll = deps?.rebuildAll ?? (() => gatewayService.rebuildAllTenantConfigs());
+    const reconcileAll = deps?.reconcileAll ?? reconcileCanonicalGatewayRoutes;
     const now = deps?.now?.() ?? Date.now();
     const reconcileIntervalMs = Math.max(0, deps?.reconcileIntervalMs ?? ROUTE_RECONCILE_INTERVAL_MS);
 
-    const rebuild = async (reason: "recovered" | "periodic"): Promise<boolean> => {
+    const reconcile = async (reason: "recovered" | "periodic"): Promise<boolean> => {
+        const state = await reconcileAll();
         lastRouteReconcileAt = now;
-        const result = await rebuildAll();
-        if (!result.success) {
-            logger.warn(`[GatewayHealth] Gateway ${reason} rebuild completed with errors`, {
-                updated: result.updated,
-                errors: result.errors,
-            });
-        } else if (result.updated > 0) {
-            logger.info(`[GatewayHealth] Gateway ${reason} rebuild applied`, { updated: result.updated });
-        }
+        logger.info(`[GatewayHealth] Canonical gateway ${reason} reconciliation applied`, {
+            tenants: state.tenants.updated,
+            frontends: state.frontends.configured,
+        });
         return true;
     };
 
@@ -61,9 +59,10 @@ export async function runGatewayHealthCheck(deps?: HealthCheckDeps): Promise<boo
 
         // 从不可达恢复可达（含首次启动）：触发全量重建让最新内存态接管。
         if (!lastSeenReachable) {
-            logger.info("[GatewayHealth] Caddy reachable (recovered or first contact); rebuilding gateway config");
+            logger.info("[GatewayHealth] Caddy reachable; reconciling the canonical gateway state");
+            const reconciled = await reconcile("recovered");
             lastSeenReachable = true;
-            return rebuild("recovered");
+            return reconciled;
         }
 
         // Caddy can stay reachable while its live config is changed out-of-band
@@ -71,7 +70,7 @@ export async function runGatewayHealthCheck(deps?: HealthCheckDeps): Promise<boo
         // replay the persisted tenant routes so managed upstreams and headers
         // cannot remain stale indefinitely.
         if (reconcileIntervalMs === 0 || now - lastRouteReconcileAt >= reconcileIntervalMs) {
-            return rebuild("periodic");
+            return reconcile("periodic");
         }
 
         return false;

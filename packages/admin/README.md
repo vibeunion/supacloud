@@ -59,6 +59,30 @@ npx @supacloud/admin --env production ssh upgrade \
   --confirm-production host:production.example.com:2201
 ```
 
+Immutable prebuilt frontend releases use a content-addressed ZIP and an explicit
+compare-and-swap activation. Upload and activation are separate writes, and
+production requires the exact project ref confirmation:
+
+```bash
+supacloud-admin frontend list_releases --ref abc123 --id web
+supacloud-admin frontend get_release --ref abc123 --id web --release_id <sha256>
+supacloud-admin frontend upload_release --ref abc123 --id web \
+  --zip_path /secure/site.zip --confirm-production abc123
+supacloud-admin frontend activate_release --ref abc123 --id web \
+  --release_id <sha256> --expected_active_release_id absent \
+  --expected_activation_id absent --mutation_id <uuid-v4> \
+  --confirm-production abc123
+```
+
+The CLI reads the archive through a no-follow file descriptor, verifies its
+identity and SHA-256 before upload, validates bounded Management API receipts,
+and reads the immutable release or active inventory back before reporting
+success. Reuse the same `mutation_id` only when retrying the exact activation.
+Listing and release readback work on every Management API platform. Upload and
+activation mutations require the Linux held-directory-FD implementation; on
+other platforms, Management API returns HTTP 503 before it reads the upload
+body, creates release directories, or writes a mutation journal.
+
 SSH host keys are fail-closed: setting `SUPACLOUD_HOST` and credentials is not
 enough to enable SSH actions. Obtain the fingerprint through a trusted channel,
 compare it out of band, then set it explicitly. For example, the discovery

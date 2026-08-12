@@ -13,7 +13,9 @@ This stack is isolated from `docker/dev` and is intended for one-command self-ho
 - VictoriaLogs (persistent project logs)
 - FerretDB MongoDB wire protocol gateway, optional through the `ferretdb` Compose profile
 
-The Caddy gateway starts with a bootstrap-only Caddyfile that returns `503` until the real routing config is published. Because the `caddy` service depends on `management-api` being healthy, the Management API begins listening on `:9090` first; it then publishes the full route config as JSON via the Caddy Admin API (`POST /load` on `http://caddy:2019`), with a backoff retry loop until Caddy is reachable. Tenant routes (`/rest/v1`, `/auth/v1`, `/functions/v1`, `/platform/v1`) are owned entirely by that injected JSON, not by the Caddyfile.
+On an empty first start, Caddy validates and serves a bootstrap Caddyfile on ports `80` and `443`; both listeners return `503` until Management publishes the real routing JSON. Bootstrap HTTPS uses one fixed internal certificate for `supacloud-bootstrap.invalid` as the default and fallback SNI, so it can fail closed without issuing certificates on demand. Clients must not trust or hostname-validate that bootstrap-only certificate. Once Management has durably persisted and read back the real JSON, it creates `/etc/supacloud/caddy/INITIALIZED`. Every later Caddy start validates and serves `/etc/supacloud/caddy/config.json` directly, including a Caddy-only container recreation. If the marker remains but the JSON is missing, or if the JSON fails `caddy validate`, Caddy fails closed and leaves the mounted evidence untouched.
+
+The Compose volumes enforce the runtime ownership boundaries: Management writes `frontend-data` and `caddy-managed-config`, while Caddy mounts both read-only. `caddy-managed-state` stays writable from both containers because Management stores manual certificates there and Caddy's configured `file_system` storage writes on-demand TLS state there. Caddy's own `/data` and `/config` volumes remain separate. Caddy does not depend on Management; Management waits for Caddy health before completing its startup recovery and reconciliation. Tenant routes (`/rest/v1`, `/auth/v1`, `/functions/v1`, `/platform/v1`) remain owned by the durable JSON, never by the bootstrap Caddyfile.
 
 ## Packaged PostgreSQL extensions
 
@@ -152,6 +154,26 @@ If you enabled pgsodium on a fresh volume and need to disable it:
 4. Start the stack again: `docker compose up -d --build`.
 
 **Important**: Once pgsodium has been initialized, encrypted data (including Vault secrets) depends on the original key. Starting over with a new volume means that data is lost. If you need to keep existing data, do **not** remove the volume. Instead, keep the same `PGSODIUM_KEY` or `PGSODIUM_KEY_FILE` value and simply stop using the `pgsodium` and `vault` schemas. The extension stays loaded in `shared_preload_libraries` until you rebuild PostgreSQL with `ENABLE_PGSODIUM=false` on a fresh volume.
+
+## Frontend release activation: unresolved `outcome_unknown` recovery
+
+Management refuses to open its listener while any frontend release activation mutation is still unresolved (`pending`, `running`, `failed_retryable`, or `outcome_unknown`). Startup first drains every automatically recoverable row; only rows whose outcome cannot be proven remain. Because the Compose service uses `restart: unless-stopped`, an unresolved `outcome_unknown` row keeps the container in a restart loop. This is an intentional fail-closed gate: the platform cannot prove whether the gateway route was switched, so it refuses to serve rather than risk split-brain route authority.
+
+Symptom: the Management container never becomes healthy and logs `Frontend release activation remains unresolved after startup recovery`.
+
+Diagnosis:
+
+1. Find the blocking mutation in the platform database:
+   `SELECT project_ref, mutation_id, operation, resource_key, principal_type, principal_id, fencing_epoch, checkpoint, receipt, completed_at FROM project_mutations WHERE status = 'outcome_unknown' ORDER BY updated_at;`
+2. Establish ground truth on the gateway: compare the live Caddy configuration (`GET http://localhost:2019/config/`) and the durable JSON in the `caddy-managed-config` volume against the release recorded in the mutation's `resource_key`/`checkpoint`. Decide whether the activation actually took effect.
+
+Resolution:
+
+- There is deliberately no public reconciliation endpoint; `POST /v1/projects/:ref/mutations/:id/reconcile` returns 403. Reconciliation is an internal, audited operation (`reconcileProjectMutation` in `packages/management-api/src/services/project-mutation.service.ts`) that must be executed by a platform maintainer through a supervised one-off privileged call inside the Management environment.
+- The call must come from the mutation's original principal (`principal_type`/`principal_id`), supply the row's current `fencing_epoch` as `expectedFencingEpoch`, and include evidence whose `observedAt` falls between the row's `completed_at` and the database clock (plus skew allowance).
+- If ground truth shows the activation took effect, reconcile to `succeeded`; otherwise roll the gateway route back to the previously active release and reconcile to `failed_terminal`.
+- Never delete the row or overwrite `status` directly with SQL: that bypasses the audit event, the fencing-epoch CAS, and the evidence window, and can mask a real split-brain.
+- Once no unresolved rows remain, start Management normally; the startup gate passes and the background recovery worker resumes its normal polling.
 
 ## Notes
 

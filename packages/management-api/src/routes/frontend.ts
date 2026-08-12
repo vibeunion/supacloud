@@ -3,6 +3,14 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { frontendService } from "../services/frontend.service";
+import {
+  FRONTEND_RELEASE_ARCHIVE_MAX_BYTES,
+  FRONTEND_RELEASE_LIST_DEFAULT_LIMIT,
+  FRONTEND_RELEASE_LIST_MAX_LIMIT,
+  FrontendReleaseError,
+  frontendReleasePrincipal,
+  frontendReleaseService,
+} from "../services/frontend-release.service";
 import type { FrontendFramework } from "../types/frontend";
 import { FRAMEWORK_DEFAULTS } from "../types/frontend";
 import { requireProjectOrAdminAuth } from "../middleware/auth";
@@ -11,6 +19,7 @@ const FRONTEND_UPLOAD_MAX_BYTES = Number(process.env.FRONTEND_UPLOAD_MAX_BYTES |
 const FRONTEND_UPLOAD_MAX_FILES = Number(process.env.FRONTEND_UPLOAD_MAX_FILES || 10_000);
 const FRONTEND_UPLOAD_MAX_UNCOMPRESSED_BYTES = Number(process.env.FRONTEND_UPLOAD_MAX_UNCOMPRESSED_BYTES || 300 * 1024 * 1024);
 const SAFE_ID_PATTERN = /^[a-zA-Z0-9_-]{1,128}$/;
+const IMMUTABLE_UPLOAD_CHUNK_BYTES = 64 * 1024;
 
 function isSafeZipEntryName(name: string): boolean {
   const normalized = name.replace(/\\/g, "/");
@@ -115,6 +124,89 @@ async function readUploadedZip(request: Request, body: unknown): Promise<Uint8Ar
   return new Uint8Array(0);
 }
 
+function immutableReleaseContentLength(request: Request): number {
+  const header = request.headers.get("content-length");
+  if (header === null || !/^(?:[1-9]\d*)$/u.test(header)) {
+    throw new FrontendReleaseError(
+      "FRONTEND_RELEASE_CONTENT_LENGTH_INVALID",
+      411,
+      "Frontend release upload requires a canonical Content-Length",
+    );
+  }
+  const length = Number(header);
+  if (!Number.isSafeInteger(length) || length > FRONTEND_RELEASE_ARCHIVE_MAX_BYTES) {
+    throw new FrontendReleaseError(
+      "FRONTEND_RELEASE_ARCHIVE_TOO_LARGE",
+      413,
+      `Frontend release archive exceeds ${FRONTEND_RELEASE_ARCHIVE_MAX_BYTES} bytes`,
+    );
+  }
+  return length;
+}
+
+function assertImmutableReleaseContentType(request: Request): void {
+  if (request.headers.get("content-type")?.trim().toLowerCase() !== "application/zip") {
+    throw new FrontendReleaseError(
+      "FRONTEND_RELEASE_CONTENT_TYPE_INVALID",
+      415,
+      "Frontend release upload requires application/zip",
+    );
+  }
+}
+
+async function streamImmutableReleaseZip(
+  request: Request,
+  session: Awaited<ReturnType<typeof frontendReleaseService.prepareReleaseUpload>>,
+): Promise<void> {
+  const reader = request.body?.getReader();
+  if (!reader) {
+    throw new FrontendReleaseError("FRONTEND_RELEASE_ARCHIVE_INVALID", 400, "Frontend release archive is empty");
+  }
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      try {
+        for (let offset = 0; offset < chunk.value.byteLength; offset += IMMUTABLE_UPLOAD_CHUNK_BYTES) {
+          await session.write(chunk.value.subarray(offset, offset + IMMUTABLE_UPLOAD_CHUNK_BYTES));
+        }
+      } catch (error: unknown) {
+        await reader.cancel();
+        throw error;
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+function releasePage(query: { cursor?: string; limit?: string }): { cursor?: string; limit: number } {
+  const limitText = query.limit ?? String(FRONTEND_RELEASE_LIST_DEFAULT_LIMIT);
+  if (!/^(?:[1-9]\d*)$/u.test(limitText)) {
+    throw new FrontendReleaseError(
+      "FRONTEND_RELEASE_PAGE_INVALID",
+      400,
+      `Frontend release page limit must be 1-${FRONTEND_RELEASE_LIST_MAX_LIMIT}`,
+    );
+  }
+  const limit = Number(limitText);
+  if (limit > FRONTEND_RELEASE_LIST_MAX_LIMIT) {
+    throw new FrontendReleaseError(
+      "FRONTEND_RELEASE_PAGE_INVALID",
+      400,
+      `Frontend release page limit must be 1-${FRONTEND_RELEASE_LIST_MAX_LIMIT}`,
+    );
+  }
+  return { ...(query.cursor ? { cursor: query.cursor } : {}), limit };
+}
+
+function releaseError(error: unknown) {
+  if (error instanceof FrontendReleaseError) {
+    return status(error.statusCode, { code: error.code, error: error.message });
+  }
+  throw error;
+}
+
 export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" })
   // 组级守卫：委托 proof 必须通过 operations 能力检查，防止越权创建部署/修改环境变量
   .onBeforeHandle(async ({ params, request }) => {
@@ -150,6 +242,98 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
         id: t.String(),
       }),
       detail: { tags: ["frontend"], summary: "Get a frontend deployment" },
+    }
+  )
+
+  .get(
+    "/deployments/:id/releases",
+    async ({ params, query }) => {
+      try {
+        return await frontendReleaseService.listReleases(params.ref, params.id, releasePage(query));
+      } catch (error: unknown) {
+        return releaseError(error);
+      }
+    },
+    {
+      params: t.Object({ ref: t.String(), id: t.String() }),
+      query: t.Object({ cursor: t.Optional(t.String()), limit: t.Optional(t.String()) }),
+      detail: { tags: ["frontend"], summary: "List verified immutable frontend releases" },
+    }
+  )
+
+  .get(
+    "/deployments/:id/releases/:releaseId",
+    async ({ params }) => {
+      try {
+        return {
+          project_ref: params.ref,
+          deployment_id: params.id,
+          release: await frontendReleaseService.release(params.ref, params.id, params.releaseId),
+        };
+      } catch (error: unknown) {
+        return releaseError(error);
+      }
+    },
+    {
+      params: t.Object({ ref: t.String(), id: t.String(), releaseId: t.String() }),
+      detail: { tags: ["frontend"], summary: "Get a verified immutable frontend release" },
+    }
+  )
+
+  .post(
+    "/deployments/:id/releases",
+    async ({ params, request }) => {
+      try {
+        assertImmutableReleaseContentType(request);
+        const expectedLength = immutableReleaseContentLength(request);
+        const upload = await frontendReleaseService.prepareReleaseUpload(params.ref, params.id, expectedLength);
+        const expectedSha256 = request.headers.get("x-supacloud-content-sha256")?.trim() || "";
+        try {
+          await streamImmutableReleaseZip(request, upload);
+          const archive = await upload.finish(expectedSha256);
+          const release = await frontendReleaseService.createRelease(params.ref, params.id, archive);
+          return status(201, { project_ref: params.ref, deployment_id: params.id, release });
+        } finally {
+          await upload.abort();
+        }
+      } catch (error: unknown) {
+        return releaseError(error);
+      }
+    },
+    {
+      params: t.Object({ ref: t.String(), id: t.String() }),
+      parse: "none",
+      detail: { tags: ["frontend"], summary: "Create a verified immutable prebuilt static release" },
+    }
+  )
+
+  .post(
+    "/deployments/:id/releases/:releaseId/activate",
+    async ({ params, body, request }) => {
+      try {
+        await frontendReleaseService.assertMutationSupported(params.ref, params.id);
+        const principal = await frontendReleasePrincipal(request);
+        return await frontendReleaseService.activateRelease({
+          projectRef: params.ref,
+          deploymentId: params.id,
+          releaseId: params.releaseId,
+          expectedActiveReleaseId: body.expected_active_release_id,
+          expectedActivationId: body.expected_activation_id,
+          mutationId: body.mutation_id,
+          principal,
+        });
+      } catch (error: unknown) {
+        return releaseError(error);
+      }
+    },
+    {
+      params: t.Object({ ref: t.String(), id: t.String(), releaseId: t.String() }),
+      body: t.Object({
+        mutation_id: t.String(),
+        expected_active_release_id: t.String(),
+        expected_activation_id: t.String(),
+      }),
+      detail: { tags: ["frontend"], summary: "CAS activate an immutable static frontend release" },
     }
   )
 
@@ -236,8 +420,14 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
   .delete(
     "/deployments/:id",
     async ({ params, set }) => {
-      const success = await frontendService.deleteDeployment(params.ref, params.id);
-      if (!success) {
+      const deletion = await frontendService.deleteDeployment(params.ref, params.id);
+      if (deletion === "active") {
+        return status(409, {
+          message: "Immutable frontend release is active",
+          code: "FRONTEND_RELEASE_ACTIVE",
+        });
+      }
+      if (deletion === "not_found") {
                 return status(404, { message: "Deployment not found", code: "404" });
       }
       return { message: "Deployment deleted successfully" };

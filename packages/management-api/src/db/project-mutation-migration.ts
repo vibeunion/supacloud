@@ -1,9 +1,12 @@
 import type { SQL } from "bun";
 
 export const PROJECT_MUTATION_JOURNAL_MIGRATION_KEY = "20260812_project_mutation_journal_v3";
+export const PROJECT_MUTATION_RECOVERY_CONTRACT_MIGRATION_KEY =
+  "20260813_project_mutation_recovery_contract_v4";
 
 const CANONICAL_RESOURCE_KEY_CONSTRAINT = "project_mutations_resource_key_canonical_v1_check";
 const FENCING_EPOCH_SAFE_CONSTRAINT = "project_mutations_fencing_epoch_safe_check";
+const RECOVERY_DUE_CONSTRAINT = "project_mutations_recovery_due_v2_check";
 const CANONICAL_RESOURCE_KEY_PATTERN = "^v1/[a-z0-9][a-z0-9._-]{0,63}/[A-Za-z0-9_-]{2,171}$";
 const CANONICAL_RESOURCE_KEY_FUNCTION = "public.project_mutation_resource_key_is_canonical_v1";
 
@@ -12,13 +15,13 @@ type ConstraintState = {
   convalidated: boolean;
 };
 
-async function migrationIsCompleted(transaction: SQL): Promise<boolean> {
+async function migrationIsCompleted(transaction: SQL, migrationKey: string): Promise<boolean> {
   const [marker] = await transaction`
     SELECT migration_key
     FROM public.platform_schema_migrations
-    WHERE migration_key = ${PROJECT_MUTATION_JOURNAL_MIGRATION_KEY}
+    WHERE migration_key = ${migrationKey}
   `;
-  return marker?.migration_key === PROJECT_MUTATION_JOURNAL_MIGRATION_KEY;
+  return marker?.migration_key === migrationKey;
 }
 
 async function constraintState(transaction: SQL, name: string): Promise<ConstraintState | null> {
@@ -183,21 +186,24 @@ async function ensureRecoverableDueConstraint(transaction: SQL): Promise<void> {
   }
 }
 
-async function recordMigration(transaction: SQL, backfilledRows: number): Promise<void> {
-  const details = JSON.stringify({ backfilled_recovery_rows: backfilledRows });
+async function recordMigration(
+  transaction: SQL,
+  migrationKey: string,
+  details: Record<string, number>,
+): Promise<void> {
   await transaction`
     INSERT INTO public.platform_schema_migrations (migration_key, details)
-    VALUES (${PROJECT_MUTATION_JOURNAL_MIGRATION_KEY}, ${details}::jsonb)
+    VALUES (${migrationKey}, ${JSON.stringify(details)}::jsonb)
   `;
 }
 
-export async function migrateProjectMutationJournal(transaction: SQL): Promise<void> {
+async function migrateProjectMutationJournalV3(transaction: SQL): Promise<void> {
   await transaction`
     SELECT pg_catalog.pg_advisory_xact_lock(
       pg_catalog.hashtext(${PROJECT_MUTATION_JOURNAL_MIGRATION_KEY})
     )
   `;
-  if (await migrationIsCompleted(transaction)) return;
+  if (await migrationIsCompleted(transaction, PROJECT_MUTATION_JOURNAL_MIGRATION_KEY)) return;
 
   await ensureCanonicalResourceKeyFunction(transaction);
   await assertCanonicalResourceKeys(transaction);
@@ -210,5 +216,91 @@ export async function migrateProjectMutationJournal(transaction: SQL): Promise<v
   await ensureFencingEpochSafeConstraint(transaction);
   await ensureSucceededResponseConstraint(transaction);
   await ensureRecoverableDueConstraint(transaction);
-  await recordMigration(transaction, backfilledRows);
+  await recordMigration(transaction, PROJECT_MUTATION_JOURNAL_MIGRATION_KEY, {
+    backfilled_recovery_rows: backfilledRows,
+  });
+}
+
+async function backfillRecoverableRecoverySchedule(transaction: SQL): Promise<number> {
+  const updatedMutations = await transaction`
+    UPDATE public.project_mutations
+    SET recovery_not_before = COALESCE(updated_at, created_at, clock_timestamp())
+    WHERE recovery_not_before IS NULL
+      AND status IN ('running', 'failed_retryable')
+    RETURNING mutation_id
+  ` as Array<{ mutation_id: string }>;
+  return updatedMutations.length;
+}
+
+async function ensureRecoveryDueConstraint(transaction: SQL): Promise<void> {
+  const existing = await constraintState(transaction, RECOVERY_DUE_CONSTRAINT);
+  if (!existing) {
+    await transaction.unsafe(`
+      ALTER TABLE public.project_mutations
+      ADD CONSTRAINT ${RECOVERY_DUE_CONSTRAINT}
+      CHECK (
+        status NOT IN ('running', 'failed_retryable')
+        OR recovery_not_before IS NOT NULL
+      ) NOT VALID
+    `);
+  }
+  if (!existing?.convalidated) {
+    await transaction.unsafe(`
+      ALTER TABLE public.project_mutations
+      VALIDATE CONSTRAINT ${RECOVERY_DUE_CONSTRAINT}
+    `);
+  }
+}
+
+async function clearPendingRecoverySchedule(transaction: SQL): Promise<number> {
+  const updatedMutations = await transaction`
+    UPDATE public.project_mutations
+    SET recovery_not_before = NULL
+    WHERE status = 'pending' AND recovery_not_before IS NOT NULL
+    RETURNING mutation_id
+  ` as Array<{ mutation_id: string }>;
+  return updatedMutations.length;
+}
+
+async function replaceRecoveryIndex(transaction: SQL): Promise<void> {
+  await transaction.unsafe(`
+    CREATE INDEX IF NOT EXISTS project_mutations_recovery_v2_idx
+    ON public.project_mutations(operation, recovery_not_before, updated_at, mutation_id)
+    WHERE recovery_not_before IS NOT NULL
+      AND status IN ('running', 'failed_retryable')
+  `);
+  await transaction.unsafe(`
+    DROP INDEX IF EXISTS public.project_mutations_recovery_idx
+  `);
+}
+
+async function migrateProjectMutationRecoveryContractV4(transaction: SQL): Promise<void> {
+  await transaction`
+    SELECT pg_catalog.pg_advisory_xact_lock(
+      pg_catalog.hashtext(${PROJECT_MUTATION_RECOVERY_CONTRACT_MIGRATION_KEY})
+    )
+  `;
+  if (await migrationIsCompleted(transaction, PROJECT_MUTATION_RECOVERY_CONTRACT_MIGRATION_KEY)) return;
+
+  await transaction.unsafe(`
+    ALTER TABLE public.project_mutations
+    ALTER COLUMN recovery_not_before DROP DEFAULT
+  `);
+  const backfilledRows = await backfillRecoverableRecoverySchedule(transaction);
+  await ensureRecoveryDueConstraint(transaction);
+  await transaction.unsafe(`
+    ALTER TABLE public.project_mutations
+    DROP CONSTRAINT IF EXISTS project_mutations_recoverable_due_check
+  `);
+  const clearedPendingRows = await clearPendingRecoverySchedule(transaction);
+  await replaceRecoveryIndex(transaction);
+  await recordMigration(transaction, PROJECT_MUTATION_RECOVERY_CONTRACT_MIGRATION_KEY, {
+    backfilled_recovery_rows: backfilledRows,
+    cleared_pending_recovery_rows: clearedPendingRows,
+  });
+}
+
+export async function migrateProjectMutationJournal(transaction: SQL): Promise<void> {
+  await migrateProjectMutationJournalV3(transaction);
+  await migrateProjectMutationRecoveryContractV4(transaction);
 }

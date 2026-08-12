@@ -19,8 +19,21 @@ export interface HttpResult<T = unknown> {
 }
 
 interface HttpPostOptions {
-    timeoutMs: number;
+    timeoutMs?: number;
     maxJsonBytes?: number;
+}
+
+export interface HttpBinaryPostOptions {
+    contentType: string;
+    contentLength: number;
+    contentSha256: string;
+    maxJsonBytes: number;
+    timeoutMs?: number;
+}
+
+export interface HttpBinaryBody {
+    stream: ReadableStream<Uint8Array>;
+    byteLength: number;
 }
 
 export interface HttpGetOptions {
@@ -248,23 +261,67 @@ export class HttpTransport {
         options?: HttpPostOptions,
     ): Promise<HttpResult<T>> {
         const timeoutMs = validatedPostTimeout(options);
-        const maxJsonBytes = validatedStrictJsonLimit(options ?? {});
+        const maxJsonBytes = validatedStrictJsonLimit({ maxJsonBytes: options?.maxJsonBytes });
+        let response: Response;
         try {
-            const res = await fetchWithRetry(`${this.baseUrl}${path}`, {
+            response = await fetchWithRetry(`${this.baseUrl}${path}`, {
                 method: "POST",
                 headers: this.headers(),
                 body: body ? JSON.stringify(body) : undefined,
             }, timeoutMs);
-            if (maxJsonBytes !== undefined) {
-                try {
-                    const data = await strictBoundedResponseJson(res, maxJsonBytes) as T;
-                    return { ok: res.ok, status: res.status, data };
-                } catch {
-                    return responseBodyFailure<T>(res.status);
-                }
+        } catch (error: unknown) {
+            return transportFailure<T>(error);
+        }
+        if (maxJsonBytes !== undefined) {
+            try {
+                const data = await strictBoundedResponseJson(response, maxJsonBytes) as T;
+                return { ok: response.ok, status: response.status, data };
+            } catch {
+                return responseBodyFailure<T>(response.status);
             }
-            const data = (await res.json().catch(() => null)) as T;
-            return { ok: res.ok, status: res.status, data };
+        }
+        const data = (await response.json().catch(() => null)) as T;
+        return { ok: response.ok, status: response.status, data };
+    }
+
+    async postBinary<T = unknown>(
+        path: string,
+        body: HttpBinaryBody,
+        options: HttpBinaryPostOptions,
+    ): Promise<HttpResult<T>> {
+        if (options.contentType !== "application/zip") {
+            throw new Error("Binary HTTP content type is invalid");
+        }
+        if (!Number.isSafeInteger(options.contentLength) || options.contentLength < 1
+            || options.contentLength !== body.byteLength) {
+            throw new RangeError("Binary HTTP body length is invalid");
+        }
+        if (!/^[0-9a-f]{64}$/u.test(options.contentSha256)) {
+            throw new Error("Binary HTTP body SHA-256 is invalid");
+        }
+        const maxJsonBytes = validatedStrictJsonLimit({ maxJsonBytes: options.maxJsonBytes });
+        const timeoutMs = validatedPostTimeout(
+            options.timeoutMs === undefined ? undefined : { timeoutMs: options.timeoutMs },
+        );
+        try {
+            const request = {
+                method: "POST",
+                headers: {
+                    Authorization: `Bearer ${this.token}`,
+                    "Content-Type": options.contentType,
+                    "Content-Length": String(options.contentLength),
+                    "x-supacloud-content-sha256": options.contentSha256,
+                },
+                body: body.stream,
+                duplex: "half",
+            } as RequestInit & { duplex: "half" };
+            const response = await fetchWithRetry(`${this.baseUrl}${path}`, request, timeoutMs);
+            try {
+                const data = await strictBoundedResponseJson(response, maxJsonBytes!) as T;
+                return { ok: response.ok, status: response.status, data };
+            } catch {
+                return responseBodyFailure<T>(response.status);
+            }
         } catch (error: unknown) {
             return transportFailure<T>(error);
         }

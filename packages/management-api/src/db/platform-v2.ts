@@ -186,7 +186,7 @@ export async function ensurePlatformV2Schema(transaction: SQL): Promise<void> {
       lease_token UUID,
       lease_expires_at TIMESTAMPTZ,
       fencing_epoch BIGINT NOT NULL DEFAULT 0 CHECK (fencing_epoch >= 0),
-      recovery_not_before TIMESTAMPTZ DEFAULT clock_timestamp(),
+      recovery_not_before TIMESTAMPTZ,
       completed_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -204,8 +204,8 @@ export async function ensurePlatformV2Schema(transaction: SQL): Promise<void> {
         status <> 'succeeded'
         OR (response_status IS NOT NULL AND response_status BETWEEN 200 AND 299)
       ),
-      CONSTRAINT project_mutations_recoverable_due_check CHECK (
-        status NOT IN ('pending', 'running', 'failed_retryable')
+      CONSTRAINT project_mutations_recovery_due_v2_check CHECK (
+        status NOT IN ('running', 'failed_retryable')
         OR recovery_not_before IS NOT NULL
       ),
       CONSTRAINT project_mutations_fencing_epoch_safe_check CHECK (
@@ -216,10 +216,10 @@ export async function ensurePlatformV2Schema(transaction: SQL): Promise<void> {
       ADD COLUMN IF NOT EXISTS recovery_not_before TIMESTAMPTZ;
     CREATE INDEX IF NOT EXISTS project_mutations_status_idx
       ON project_mutations(project_ref, status, updated_at DESC);
-    CREATE INDEX IF NOT EXISTS project_mutations_recovery_idx
+    CREATE INDEX IF NOT EXISTS project_mutations_recovery_v2_idx
       ON project_mutations(operation, recovery_not_before, updated_at, mutation_id)
       WHERE recovery_not_before IS NOT NULL
-        AND status IN ('pending', 'running', 'failed_retryable');
+        AND status IN ('running', 'failed_retryable');
     CREATE UNIQUE INDEX IF NOT EXISTS project_mutations_active_resource_idx
       ON project_mutations(project_ref, resource_key)
       WHERE resource_key IS NOT NULL

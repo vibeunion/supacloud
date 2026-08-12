@@ -11,8 +11,10 @@ import {
 } from "../utils/project-routing";
 import { normalizeProjectConfig, resolveExternalAuthEndpointConfig } from "../utils/project-config";
 import { uniqueStrings } from "../utils/strings";
+import { stableStringify } from "../utils/stable-json";
 import { GOTRUE_USER_ID_POSTGRES_PATTERN } from "../utils/project-user-lifecycle";
 import { assertUniqueCaddyIds, runCaddyStartupPreflight } from "./caddy-startup-preflight";
+import { FRONTEND_GATEWAY_DURABILITY_UNKNOWN_CODE } from "./frontend-release-contract";
 import {
     type CaddyHeaderValue,
     type CaddyRoute,
@@ -43,14 +45,60 @@ export {
 } from "./gateway-route-builders";
 export type { CustomGatewayRouteConfig } from "./gateway-route-builders";
 
-import * as path from "node:path";
+import { AsyncLocalStorage } from "node:async_hooks";
 import * as fs from "node:fs/promises";
+import * as path from "node:path";
 
 export interface GatewayConfig {
     rateLimitTier?: "free" | "pro" | "enterprise";
     corsOrigins?: string;
     jwtEnabled?: boolean;
     jwtSecret?: string;
+}
+
+type CaddyLiveCandidateState = "candidate" | "different" | "unknown";
+type CaddyGatewayDurabilityStage =
+    | "candidate_sync"
+    | "candidate_rename"
+    | "config_directory_sync"
+    | "notice_open"
+    | "notice_write"
+    | "notice_sync"
+    | "notice_directory_sync";
+
+class CaddyGatewayDurabilityError extends Error {
+    readonly code = FRONTEND_GATEWAY_DURABILITY_UNKNOWN_CODE;
+    readonly preserveCandidate = true;
+
+    constructor(message: string) {
+        super(message);
+        this.name = "CaddyGatewayDurabilityError";
+    }
+}
+
+function preservesGatewayCandidate(error: unknown): boolean {
+    return error instanceof CaddyGatewayDurabilityError && error.preserveCandidate;
+}
+
+function fileErrorCode(error: unknown): string {
+    return typeof error === "object" && error !== null && "code" in error
+        ? String((error as { code?: unknown }).code)
+        : "";
+}
+
+function initializedMarkerPath(): string {
+    return path.join(path.dirname(config.caddyConfigPath), "INITIALIZED");
+}
+
+function assertDurableCaddyConfig(candidate: unknown): asserts candidate is CaddyConfig {
+    if (typeof candidate !== "object" || candidate === null || Array.isArray(candidate)) {
+        throw new Error("Durable Caddy config must be a JSON object");
+    }
+    const routes = (candidate as CaddyConfig).apps?.http?.servers?.supacloud?.routes;
+    if (!Array.isArray(routes)) {
+        throw new Error("Durable Caddy config is missing the canonical route array");
+    }
+    assertUniqueCaddyIds(candidate);
 }
 
 interface RateLimitConfig {
@@ -89,6 +137,22 @@ export interface FrontendGatewayRoute {
     mode?: "proxy" | "static";
 }
 
+interface CaddyGatewayFileOperations {
+    beforeDurabilityStage(stage: CaddyGatewayDurabilityStage): Promise<void>;
+    persistLoadedCandidate(tmpPath: string): Promise<void>;
+}
+
+export interface CanonicalGatewayReconcileState {
+    tenants: { success: boolean; updated: number; errors: string[] };
+    hostedAuth: { success: boolean; error?: string };
+    frontends: { total: number; configured: number; skipped: number; errors: string[] };
+}
+
+export interface CanonicalGatewayReconcileDependencies {
+    gateway?: GatewayProvider;
+    reconcileFrontends?: () => Promise<CanonicalGatewayReconcileState["frontends"]>;
+}
+
 export interface GatewayProvider {
     readonly name: "caddy";
     setupJwt(projectRef: string, jwtSecret: string): Promise<boolean>;
@@ -116,9 +180,11 @@ export interface GatewayProvider {
     upsertCertificateForSnis(opts: { projectRef: string; cert: string; key: string; snis: string[]; existingCertificateId?: string }): Promise<{ success: boolean; certificateId?: string; error?: string }>;
     configureFrontendRoute(route: FrontendGatewayRoute): Promise<void>;
     removeFrontendRoute(projectRef: string, deploymentId: string): Promise<void>;
+    readFrontendStaticRoot(projectRef: string, deploymentId: string): Promise<string | null>;
     setupHostedAuthRoutes(): Promise<{ success: boolean; error?: string }>;
     ensureGatewayReady(opts?: { maxAttempts?: number; intervalMs?: number }): Promise<{ ready: boolean; error?: string }>;
     checkCaddyConnectivity(): Promise<boolean>;
+    confirmCanonicalState(): Promise<void>;
 }
 
 function getRateLimitConfig(tier: string): RateLimitConfig {
@@ -151,6 +217,24 @@ type CaddyConfig = {
             servers: Record<string, CaddyServer>;
         };
     };
+};
+
+type CaddyMutableStateSnapshot = {
+    routes: Map<string, CaddyRoute>;
+    certs: Map<string, { certificate: string; key: string }>;
+    rateLimits: Map<string, { tier: string; second: number; minute: number; hour: number; enabled: boolean }>;
+    customRateLimits: Map<string, { second: number; minute: number; hour: number }>;
+    hydrated: boolean;
+};
+
+type CaddyGatewayQuarantine = {
+    candidate: CaddyConfig;
+    previousSnapshot: CaddyMutableStateSnapshot;
+};
+
+type CaddyGatewayOperationContext = {
+    token: object;
+    previousSnapshot: CaddyMutableStateSnapshot;
 };
 
 const CADDY_GENERATED_CONFIG_NOTICE_LOG =
@@ -245,7 +329,20 @@ export class CaddyGatewayProvider implements GatewayProvider {
     private deferredPersistDepth = 0;
     private deferredPersistPending = false;
     private persistAndLoadTail: Promise<void> = Promise.resolve();
+    private readonly operationContext = new AsyncLocalStorage<CaddyGatewayOperationContext>();
+    private readonly operationToken = Object.freeze({});
+    private operationTail: Promise<void> = Promise.resolve();
+    private quarantine: CaddyGatewayQuarantine | null = null;
+    private readonly fileOperations: CaddyGatewayFileOperations;
     private hydrated = false;
+
+    constructor(fileOperations?: Partial<CaddyGatewayFileOperations>) {
+        this.fileOperations = {
+            beforeDurabilityStage: async () => undefined,
+            persistLoadedCandidate: (tmpPath) => this.persistLoadedCandidate(tmpPath),
+            ...fileOperations,
+        };
+    }
 
     private async caddyRequest(pathname: string, method = "GET", body?: unknown): Promise<Response> {
         return fetch(`${config.caddyAdminUrl}${pathname}`, {
@@ -267,10 +364,14 @@ export class CaddyGatewayProvider implements GatewayProvider {
         }
     }
 
-    // 带（指数）退避的 Caddy 就绪探测：caddy 容器在 docker 模式下晚于 management-api 启动，
-    // 首次 persistAndLoad 的 POST /load 往往因 caddy 尚未监听而失败。该方法轮询 Admin API
-    // 直到可达，再补一次 persistAndLoad 让 JSON 路由真正接管 bootstrap Caddyfile。
+    // Caddy may still be starting, restarting, or temporarily unreachable when Management
+    // begins its fail-closed bootstrap. Wait for the Admin API, then publish and read back
+    // the durable JSON before Management starts serving requests.
     async ensureGatewayReady(opts?: { maxAttempts?: number; intervalMs?: number }): Promise<{ ready: boolean; error?: string }> {
+        return this.serializeOperation(() => this.ensureGatewayReadyUnlocked(opts));
+    }
+
+    private async ensureGatewayReadyUnlocked(opts?: { maxAttempts?: number; intervalMs?: number }): Promise<{ ready: boolean; error?: string }> {
         const maxAttempts = Math.max(1, Math.trunc(opts?.maxAttempts ?? 30));
         const intervalMs = Math.max(1, Math.trunc(opts?.intervalMs ?? 1000));
         for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -278,6 +379,10 @@ export class CaddyGatewayProvider implements GatewayProvider {
             if (reachable) {
                 try {
                     await this.persistAndLoad();
+                    const liveState = await this.liveCandidateState(this.baseConfig());
+                    if (liveState !== "candidate") {
+                        throw new Error(`Caddy config read-back is ${liveState}`);
+                    }
                     logger.info(`[CaddyGatewayProvider] Gateway ready after ${attempt} attempt(s); JSON config applied`);
                     return { ready: true };
                 } catch (error: unknown) {
@@ -354,30 +459,50 @@ export class CaddyGatewayProvider implements GatewayProvider {
         };
     }
 
+    private async readDurableConfig(): Promise<CaddyConfig | null> {
+        let markerPresent = false;
+        try {
+            await fs.access(initializedMarkerPath());
+            markerPresent = true;
+        } catch (error: unknown) {
+            if (fileErrorCode(error) !== "ENOENT") throw error;
+        }
+
+        let rawConfig: string;
+        try {
+            rawConfig = await fs.readFile(config.caddyConfigPath, "utf8");
+        } catch (error: unknown) {
+            if (fileErrorCode(error) !== "ENOENT") throw error;
+            if (markerPresent) {
+                throw new Error("Initialized Caddy config is missing from durable storage");
+            }
+            return null;
+        }
+
+        let parsedConfig: unknown;
+        try {
+            parsedConfig = JSON.parse(rawConfig);
+        } catch {
+            throw new Error("Durable Caddy config is malformed JSON");
+        }
+        assertDurableCaddyConfig(parsedConfig);
+        return parsedConfig;
+    }
+
     private async hydrateFromDisk(): Promise<void> {
         if (this.hydrated) return;
-        this.hydrated = true;
-
-        try {
-            const raw = await fs.readFile(config.caddyConfigPath, "utf8");
-            const parsed = JSON.parse(raw) as CaddyConfig;
-            const routes = parsed.apps?.http?.servers?.supacloud?.routes;
-            if (Array.isArray(routes)) {
-                for (const route of routes) {
-                    const id = typeof route?.["@id"] === "string" ? route["@id"] : "";
-                    if (!id || id === CADDY_UNMATCHED_HOST_ROUTE_ID) continue;
-                    if (!this.routesById.has(id)) this.routesById.set(id, this.migrateHydratedRoute(id, route));
-                    this.hydrateRateLimitFromRoute(id, route);
-                }
+        const parsed = await this.readDurableConfig();
+        if (parsed) {
+            const routes = parsed.apps.http.servers.supacloud.routes;
+            for (const route of routes) {
+                const id = typeof route?.["@id"] === "string" ? route["@id"] : "";
+                if (!id || id === CADDY_UNMATCHED_HOST_ROUTE_ID) continue;
+                if (!this.routesById.has(id)) this.routesById.set(id, this.migrateHydratedRoute(id, route));
+                this.hydrateRateLimitFromRoute(id, route);
             }
-
             this.hydrateCertificatesFromConfig(parsed);
-        } catch (error: unknown) {
-            const code = typeof error === "object" && error && "code" in error ? String((error as { code?: unknown }).code) : "";
-            if (code !== "ENOENT") {
-                logger.warn(`[CaddyGatewayProvider] Failed to hydrate existing Caddy config: ${error instanceof Error ? error.message : String(error)}`);
-            }
         }
+        this.hydrated = true;
     }
 
     private hydrateCertificatesFromConfig(parsed: CaddyConfig): void {
@@ -393,18 +518,15 @@ export class CaddyGatewayProvider implements GatewayProvider {
     }
 
     private async hydrateCertificatesFromDisk(): Promise<void> {
-        try {
-            const raw = await fs.readFile(config.caddyConfigPath, "utf8");
-            this.hydrateCertificatesFromConfig(JSON.parse(raw) as CaddyConfig);
-        } catch (error: unknown) {
-            const code = typeof error === "object" && error && "code" in error ? String((error as { code?: unknown }).code) : "";
-            if (code !== "ENOENT") {
-                logger.warn(`[CaddyGatewayProvider] Failed to hydrate existing Caddy certificates: ${error instanceof Error ? error.message : String(error)}`);
-            }
-        }
+        const parsed = await this.readDurableConfig();
+        if (parsed) this.hydrateCertificatesFromConfig(parsed);
     }
 
     async prepareCleanRebuild(): Promise<void> {
+        return this.serializeOperation(() => this.prepareCleanRebuildUnlocked());
+    }
+
+    private async prepareCleanRebuildUnlocked(): Promise<void> {
         await this.hydrateFromDiskIfUninitialized();
         await this.hydrateCertificatesFromDisk();
         const globalRoutes = Array.from(this.routesById.entries()).filter(([id]) =>
@@ -633,6 +755,103 @@ export class CaddyGatewayProvider implements GatewayProvider {
         await runCaddyStartupPreflight(config.caddyBinaryPath, candidatePath, candidateConfig);
     }
 
+    private async liveCandidateState(candidateConfig: CaddyConfig): Promise<CaddyLiveCandidateState> {
+        try {
+            const response = await this.caddyRequest("/config/");
+            if (!response.ok) return "unknown";
+            const liveConfig = await response.json();
+            return stableStringify(liveConfig) === stableStringify(candidateConfig) ? "candidate" : "different";
+        } catch {
+            return "unknown";
+        }
+    }
+
+    private async persistLoadedCandidate(tmpPath: string): Promise<void> {
+        const directoryPath = path.dirname(config.caddyConfigPath);
+        await this.syncCandidateFile(tmpPath);
+        await this.fileOperations.beforeDurabilityStage("candidate_rename");
+        await fs.rename(tmpPath, config.caddyConfigPath);
+        await this.fileOperations.beforeDurabilityStage("config_directory_sync");
+        await this.syncCaddyConfigDirectory(directoryPath);
+        await this.writeGeneratedConfigNotice(directoryPath);
+        await this.fileOperations.beforeDurabilityStage("notice_directory_sync");
+        await this.syncCaddyConfigDirectory(directoryPath);
+    }
+
+    private async syncCandidateFile(tmpPath: string): Promise<void> {
+        const candidateFile = await fs.open(tmpPath, "r");
+        try {
+            await this.fileOperations.beforeDurabilityStage("candidate_sync");
+            await candidateFile.sync();
+        } finally {
+            await candidateFile.close();
+        }
+    }
+
+    private async writeGeneratedConfigNotice(directoryPath: string): Promise<void> {
+        const noticePath = path.join(directoryPath, "DO-NOT-EDIT.txt");
+        await this.fileOperations.beforeDurabilityStage("notice_open");
+        const notice = await fs.open(noticePath, "w", 0o644);
+        try {
+            await this.fileOperations.beforeDurabilityStage("notice_write");
+            await notice.writeFile(caddyGeneratedConfigNotice(), "utf8");
+            await this.fileOperations.beforeDurabilityStage("notice_sync");
+            await notice.sync();
+        } finally {
+            await notice.close();
+        }
+    }
+
+    private async syncCaddyConfigDirectory(directoryPath: string): Promise<void> {
+        const directory = await fs.open(directoryPath, "r");
+        try {
+            await directory.sync();
+        } finally {
+            await directory.close();
+        }
+    }
+
+    private async writeInitializedMarker(): Promise<void> {
+        const directoryPath = path.dirname(config.caddyConfigPath);
+        const markerPath = initializedMarkerPath();
+        const temporaryPath = `${markerPath}.tmp-${process.pid}-${crypto.randomUUID()}`;
+        try {
+            const markerFile = await fs.open(temporaryPath, "wx", 0o644);
+            try {
+                await markerFile.writeFile("supacloud-caddy-config-v1\n", "utf8");
+                await markerFile.sync();
+            } finally {
+                await markerFile.close();
+            }
+            await fs.rename(temporaryPath, markerPath);
+            await this.syncCaddyConfigDirectory(directoryPath);
+        } catch (error: unknown) {
+            await fs.unlink(temporaryPath).catch(() => undefined);
+            throw error;
+        }
+    }
+
+    async confirmCanonicalState(): Promise<void> {
+        await this.serializeOperation(async () => {
+            const durableConfig = await this.readDurableConfig();
+            if (!durableConfig) throw new Error("Canonical Caddy config was not persisted");
+            const liveState = await this.liveCandidateState(durableConfig);
+            if (liveState !== "candidate") {
+                throw new Error(`Canonical Caddy read-back is ${liveState}`);
+            }
+            await this.writeInitializedMarker();
+        });
+    }
+
+    private throwQuarantinedCandidateError(candidate: CaddyConfig, message: string): never {
+        const context = this.operationContext.getStore();
+        if (!context || context.token !== this.operationToken) {
+            throw new CaddyGatewayDurabilityError("Caddy mutation context could not be proven");
+        }
+        this.quarantine = { candidate, previousSnapshot: context.previousSnapshot };
+        throw new CaddyGatewayDurabilityError(message);
+    }
+
     private async writeAndLoadCurrentConfig(): Promise<void> {
         const next = this.baseConfig();
         await fs.mkdir(path.dirname(config.caddyConfigPath), { recursive: true });
@@ -641,14 +860,32 @@ export class CaddyGatewayProvider implements GatewayProvider {
 
         try {
             await this.validateCandidateConfig(tmpPath, next);
-            const res = await this.caddyRequest("/load", "POST", next);
-            if (!res.ok) {
-                const text = await res.text().catch(() => "");
-                throw new Error(`Caddy /load failed with ${res.status}: ${text}`);
+            let response: Response;
+            try {
+                response = await this.caddyRequest("/load", "POST", next);
+            } catch (loadError: unknown) {
+                const state = await this.liveCandidateState(next);
+                if (state === "different") throw loadError;
+                if (state === "unknown") {
+                    this.throwQuarantinedCandidateError(next, "Caddy candidate state could not be proven after load");
+                }
+                try {
+                    await this.fileOperations.persistLoadedCandidate(tmpPath);
+                } catch {
+                    this.throwQuarantinedCandidateError(next, "Caddy candidate is live but its durable config could not be repaired");
+                }
+                return;
             }
-            await fs.rename(tmpPath, config.caddyConfigPath);
-            await fs.writeFile(path.join(path.dirname(config.caddyConfigPath), "DO-NOT-EDIT.txt"), caddyGeneratedConfigNotice());
-        } catch (error) {
+            if (!response.ok) {
+                const text = await response.text().catch(() => "");
+                throw new Error(`Caddy /load failed with ${response.status}: ${text}`);
+            }
+            try {
+                await this.fileOperations.persistLoadedCandidate(tmpPath);
+            } catch {
+                this.throwQuarantinedCandidateError(next, "Caddy candidate is live but its durable config could not be persisted");
+            }
+        } catch (error: unknown) {
             await fs.unlink(tmpPath).catch(() => undefined);
             throw error;
         }
@@ -660,6 +897,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
             return;
         }
 
+        await this.repairQuarantinedCandidate();
         const previous = this.persistAndLoadTail.catch(() => undefined);
         const current = previous.then(() => this.writeAndLoadCurrentConfig());
         this.persistAndLoadTail = current.catch(() => undefined);
@@ -667,21 +905,84 @@ export class CaddyGatewayProvider implements GatewayProvider {
     }
 
     async withDeferredPersist<T>(fn: () => Promise<T>, shouldFlush: (result: T) => boolean = () => true): Promise<T> {
+        return this.serializeOperation(() => this.withDeferredPersistUnlocked(fn, shouldFlush));
+    }
+
+    private async withDeferredPersistUnlocked<T>(fn: () => Promise<T>, shouldFlush: (result: T) => boolean): Promise<T> {
+        const snapshot = this.mutableStateSnapshot();
+        const pendingAtEntry = this.deferredPersistPending;
         this.deferredPersistDepth++;
         let completed = false;
+        let accepted = false;
         let result: T;
         try {
             result = await fn();
             completed = true;
+            accepted = shouldFlush(result);
             return result;
         } finally {
             this.deferredPersistDepth--;
-            if (this.deferredPersistDepth === 0) {
-                const flush = completed && this.deferredPersistPending && shouldFlush(result!);
+            if (!completed || !accepted) {
+                this.restoreMutableState(snapshot);
+                this.deferredPersistPending = pendingAtEntry;
+            } else if (this.deferredPersistDepth === 0) {
+                const flush = this.deferredPersistPending;
                 this.deferredPersistPending = false;
-                if (flush) await this.persistAndLoad();
+                if (flush) {
+                    try {
+                        await this.persistAndLoad();
+                    } catch (error: unknown) {
+                        if (!preservesGatewayCandidate(error)) this.restoreMutableState(snapshot);
+                        throw error;
+                    }
+                }
             }
         }
+    }
+
+    private async repairQuarantinedCandidate(): Promise<void> {
+        const quarantine = this.quarantine;
+        if (!quarantine) return;
+        const state = await this.liveCandidateState(quarantine.candidate);
+        if (state === "different") {
+            this.restoreMutableState(quarantine.previousSnapshot);
+            this.quarantine = null;
+            return;
+        }
+        if (state === "unknown") {
+            throw new CaddyGatewayDurabilityError("Caddy quarantined candidate state could not be proven");
+        }
+        const tmpPath = `${config.caddyConfigPath}.repair-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        try {
+            await fs.writeFile(tmpPath, JSON.stringify(quarantine.candidate, null, 2));
+            await this.fileOperations.persistLoadedCandidate(tmpPath);
+            this.quarantine = null;
+        } catch {
+            await fs.unlink(tmpPath).catch(() => undefined);
+            throw new CaddyGatewayDurabilityError("Caddy quarantined candidate durability could not be repaired");
+        }
+    }
+
+    private mutableStateSnapshot(): CaddyMutableStateSnapshot {
+        return {
+            routes: structuredClone(this.routesById),
+            certs: structuredClone(this.certsById),
+            rateLimits: structuredClone(this.rateLimits),
+            customRateLimits: structuredClone(this.customRateLimits),
+            hydrated: this.hydrated,
+        };
+    }
+
+    private restoreMutableState(snapshot: CaddyMutableStateSnapshot): void {
+        this.routesById.clear();
+        for (const [key, value] of snapshot.routes) this.routesById.set(key, value);
+        this.certsById.clear();
+        for (const [key, value] of snapshot.certs) this.certsById.set(key, value);
+        this.rateLimits.clear();
+        for (const [key, value] of snapshot.rateLimits) this.rateLimits.set(key, value);
+        this.customRateLimits.clear();
+        for (const [key, value] of snapshot.customRateLimits) this.customRateLimits.set(key, value);
+        this.hydrated = snapshot.hydrated;
     }
 
     private projectRouteIds(projectRef: string): string[] {
@@ -966,14 +1267,60 @@ export class CaddyGatewayProvider implements GatewayProvider {
     }
 
     private async putRoute(route: CaddyRoute): Promise<void> {
-        const id = String(route["@id"]);
-        this.routesById.set(id, route);
-        await this.persistAndLoad();
+        await this.serializeOperation(async () => {
+            const id = String(route["@id"]);
+            const previous = this.routesById.get(id);
+            this.routesById.set(id, route);
+            try {
+                await this.persistAndLoad();
+            } catch (error: unknown) {
+                if (!preservesGatewayCandidate(error)) {
+                    if (previous) this.routesById.set(id, previous);
+                    else this.routesById.delete(id);
+                }
+                throw error;
+            }
+        });
     }
 
     private async removeRoutes(ids: string[]): Promise<void> {
-        for (const id of ids) this.routesById.delete(id);
-        await this.persistAndLoad();
+        await this.serializeOperation(async () => {
+            const previous = ids.flatMap((id) => {
+                const route = this.routesById.get(id);
+                return route ? [[id, route] as const] : [];
+            });
+            for (const id of ids) this.routesById.delete(id);
+            try {
+                await this.persistAndLoad();
+            } catch (error: unknown) {
+                if (!preservesGatewayCandidate(error)) {
+                    for (const [id, route] of previous) this.routesById.set(id, route);
+                }
+                throw error;
+            }
+        });
+    }
+
+    private async serializeOperation<T>(operation: () => Promise<T>): Promise<T> {
+        if (this.operationContext.getStore()?.token === this.operationToken) return operation();
+        const previous = this.operationTail.catch(() => undefined);
+        let release!: () => void;
+        const current = new Promise<void>((resolve) => { release = resolve; });
+        const tail = previous.then(() => current);
+        this.operationTail = tail;
+        await previous;
+        try {
+            await this.repairQuarantinedCandidate();
+            await this.hydrateFromDiskIfUninitialized();
+            const context = {
+                token: this.operationToken,
+                previousSnapshot: this.mutableStateSnapshot(),
+            };
+            return await this.operationContext.run(context, operation);
+        } finally {
+            release();
+            if (this.operationTail === tail) this.operationTail = Promise.resolve();
+        }
     }
 
     async setupJwt(_projectRef: string, _jwtSecret: string): Promise<boolean> {
@@ -995,6 +1342,10 @@ export class CaddyGatewayProvider implements GatewayProvider {
     }
 
     async setRateLimit(projectRef: string, opts: string | { second?: number; minute?: number; hour?: number } = "free"): Promise<boolean> {
+        return this.serializeOperation(() => this.setRateLimitUnlocked(projectRef, opts));
+    }
+
+    private async setRateLimitUnlocked(projectRef: string, opts: string | { second?: number; minute?: number; hour?: number }): Promise<boolean> {
         await this.hydrateFromDiskIfUninitialized();
         const defaults = RATE_LIMIT_TIERS.free;
         const limits = typeof opts === "string" ? getRateLimitConfig(opts) : {
@@ -1012,6 +1363,10 @@ export class CaddyGatewayProvider implements GatewayProvider {
     }
 
     async setCustomRouteRateLimit(projectRef: string, basePath: string, limits: { second?: number; minute?: number; hour?: number }): Promise<boolean> {
+        return this.serializeOperation(() => this.setCustomRouteRateLimitUnlocked(projectRef, basePath, limits));
+    }
+
+    private async setCustomRouteRateLimitUnlocked(projectRef: string, basePath: string, limits: { second?: number; minute?: number; hour?: number }): Promise<boolean> {
         await this.hydrateFromDiskIfUninitialized();
         const routeId = `route-custom-${projectRef}-${hashStr(basePath)}`;
         const parent = this.cloneRouteForCustomLimit(projectRef, basePath, routeId);
@@ -1031,6 +1386,10 @@ export class CaddyGatewayProvider implements GatewayProvider {
     }
 
     async removeCustomRouteRateLimit(projectRef: string, basePath: string): Promise<boolean> {
+        return this.serializeOperation(() => this.removeCustomRouteRateLimitUnlocked(projectRef, basePath));
+    }
+
+    private async removeCustomRouteRateLimitUnlocked(projectRef: string, basePath: string): Promise<boolean> {
         await this.hydrateFromDiskIfUninitialized();
         const routeId = `route-custom-${projectRef}-${hashStr(basePath)}`;
         this.customRateLimits.delete(routeId);
@@ -1040,6 +1399,10 @@ export class CaddyGatewayProvider implements GatewayProvider {
     }
 
     async configureCustomGatewayRoutes(projectRef: string, routes: CustomGatewayRouteConfig[]): Promise<{ success: boolean; error?: string }> {
+        return this.serializeOperation(() => this.configureCustomGatewayRoutesUnlocked(projectRef, routes));
+    }
+
+    private async configureCustomGatewayRoutesUnlocked(projectRef: string, routes: CustomGatewayRouteConfig[]): Promise<{ success: boolean; error?: string }> {
         const previousRoutes: Array<[string, CaddyRoute]> = [];
         try {
             await this.hydrateFromDiskIfUninitialized();
@@ -1056,6 +1419,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
             await this.persistAndLoad();
             return { success: true };
         } catch (error: unknown) {
+            if (preservesGatewayCandidate(error)) throw error;
             for (const id of Array.from(this.routesById.keys())) {
                 if (isCustomGatewayRouteId(projectRef, id)) this.routesById.delete(id);
             }
@@ -1090,6 +1454,10 @@ export class CaddyGatewayProvider implements GatewayProvider {
     }
 
     async setCors(projectRef: string, origins: string[] = DEFAULT_CORS_ORIGINS): Promise<boolean> {
+        return this.serializeOperation(() => this.setCorsUnlocked(projectRef, origins));
+    }
+
+    private async setCorsUnlocked(projectRef: string, origins: string[]): Promise<boolean> {
         logger.debug(`[CaddyGatewayProvider] CORS is rendered into route JSON for ${projectRef}`);
         await this.hydrateFromDiskIfUninitialized();
         for (const id of this.projectRouteIds(projectRef)) {
@@ -1101,12 +1469,20 @@ export class CaddyGatewayProvider implements GatewayProvider {
     }
 
     async addCorsOriginsForHosts(projectRef: string, hosts: string[]): Promise<boolean> {
+        return this.serializeOperation(() => this.addCorsOriginsForHostsUnlocked(projectRef, hosts));
+    }
+
+    private async addCorsOriginsForHostsUnlocked(projectRef: string, hosts: string[]): Promise<boolean> {
         await this.hydrateFromDiskIfUninitialized();
         const allHosts = uniqueStrings([...this.hostsForProjectRoutes(projectRef), ...hosts]);
         return this.setCors(projectRef, buildTenantCorsOrigins(projectRef, undefined, allHosts));
     }
 
     async setupUpstream(projectRef: string, pgrstPort: number | string, gotruePort: number | string, projectRouting?: ProjectRoutingConfig | string, opts?: GatewaySetupOptions): Promise<{ success: boolean; error?: string }> {
+        return this.serializeOperation(() => this.setupUpstreamUnlocked(projectRef, pgrstPort, gotruePort, projectRouting, opts));
+    }
+
+    private async setupUpstreamUnlocked(projectRef: string, pgrstPort: number | string, gotruePort: number | string, projectRouting?: ProjectRoutingConfig | string, opts?: GatewaySetupOptions): Promise<{ success: boolean; error?: string }> {
         try {
             const hostIp = await this.detectHostIp();
             const projectConfig = normalizeProjectConfig(projectRouting);
@@ -1343,6 +1719,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
             logger.info(`[CaddyGatewayProvider] Routes registered for ${projectRef}`);
             return { success: true };
         } catch (error: unknown) {
+            if (preservesGatewayCandidate(error)) throw error;
             const message = error instanceof Error ? error.message : String(error);
             logger.error(`[CaddyGatewayProvider] Failed to setup upstream for ${projectRef}:`, message);
             return { success: false, error: message };
@@ -1350,6 +1727,10 @@ export class CaddyGatewayProvider implements GatewayProvider {
     }
 
     async addProjectDomains(projectRef: string, apiDomains: string[], studioDomains: string[]): Promise<boolean> {
+        return this.serializeOperation(() => this.addProjectDomainsUnlocked(projectRef, apiDomains, studioDomains));
+    }
+
+    private async addProjectDomainsUnlocked(projectRef: string, apiDomains: string[], studioDomains: string[]): Promise<boolean> {
         await this.hydrateFromDiskIfUninitialized();
         const existingKinds = ["opaque-rest", "opaque-graphql", "opaque-auth", "auth-admin-user-delete", "rest", "graphql", "auth", "gotrue-well-known", "functions", "storage", "realtime-api", "realtime", "management", "acme"];
         for (const kind of existingKinds) {
@@ -1367,6 +1748,10 @@ export class CaddyGatewayProvider implements GatewayProvider {
     }
 
     async removeProjectDomains(projectRef: string, apiDomains: string[], studioDomains: string[]): Promise<boolean> {
+        return this.serializeOperation(() => this.removeProjectDomainsUnlocked(projectRef, apiDomains, studioDomains));
+    }
+
+    private async removeProjectDomainsUnlocked(projectRef: string, apiDomains: string[], studioDomains: string[]): Promise<boolean> {
         await this.hydrateFromDiskIfUninitialized();
         const remove = new Set([...apiDomains, ...studioDomains].map(normalizeCaddyHost));
         for (const route of this.routesById.values()) {
@@ -1384,6 +1769,10 @@ export class CaddyGatewayProvider implements GatewayProvider {
     }
 
     async removeService(projectRef: string): Promise<{ success: boolean; error?: string }> {
+        return this.serializeOperation(() => this.removeServiceUnlocked(projectRef));
+    }
+
+    private async removeServiceUnlocked(projectRef: string): Promise<{ success: boolean; error?: string }> {
         await this.hydrateFromDiskIfUninitialized();
         const ids = Array.from(this.routesById.keys()).filter((id) => id.includes(`-${projectRef}-`) || id.endsWith(`-${projectRef}`));
         await this.removeRoutes(ids);
@@ -1399,6 +1788,10 @@ export class CaddyGatewayProvider implements GatewayProvider {
     }
 
     async applyConfig(projectRef: string, gatewayConfig: GatewayConfig): Promise<{ success: boolean; message: string }> {
+        return this.serializeOperation(() => this.applyConfigUnlocked(projectRef, gatewayConfig));
+    }
+
+    private async applyConfigUnlocked(projectRef: string, gatewayConfig: GatewayConfig): Promise<{ success: boolean; message: string }> {
         if (gatewayConfig.jwtSecret) await this.setupJwt(projectRef, gatewayConfig.jwtSecret);
         if (gatewayConfig.rateLimitTier) await this.setRateLimit(projectRef, gatewayConfig.rateLimitTier);
         if (gatewayConfig.corsOrigins) {
@@ -1410,6 +1803,10 @@ export class CaddyGatewayProvider implements GatewayProvider {
     }
 
     async rebuildAllTenantConfigs(): Promise<{ success: boolean; updated: number; errors: string[] }> {
+        return this.serializeOperation(() => this.rebuildAllTenantConfigsUnlocked());
+    }
+
+    private async rebuildAllTenantConfigsUnlocked(): Promise<{ success: boolean; updated: number; errors: string[] }> {
         const errors: string[] = [];
         let updated = 0;
         try {
@@ -1443,6 +1840,10 @@ export class CaddyGatewayProvider implements GatewayProvider {
     }
 
     async setupMasterRoutes(): Promise<void> {
+        return this.serializeOperation(() => this.setupMasterRoutesUnlocked());
+    }
+
+    private async setupMasterRoutesUnlocked(): Promise<void> {
         await this.hydrateFromDiskIfUninitialized();
         const hostIp = await this.detectHostIp();
         const hosts = uniqueStrings([hostIp, config.baseDomain, `api.${config.baseDomain}`]);
@@ -1468,6 +1869,10 @@ export class CaddyGatewayProvider implements GatewayProvider {
     }
 
     async configureStudioDomain(domain: string, port: number): Promise<void> {
+        return this.serializeOperation(() => this.configureStudioDomainUnlocked(domain, port));
+    }
+
+    private async configureStudioDomainUnlocked(domain: string, port: number): Promise<void> {
         await this.hydrateFromDiskIfUninitialized();
         const host = normalizeCaddyHost(domain);
         if (!host) throw new Error("Studio domain is required");
@@ -1499,6 +1904,10 @@ export class CaddyGatewayProvider implements GatewayProvider {
     }
 
     async upsertCertificateForSnis(opts: { projectRef: string; cert: string; key: string; snis: string[]; existingCertificateId?: string }): Promise<{ success: boolean; certificateId?: string; error?: string }> {
+        return this.serializeOperation(() => this.upsertCertificateForSnisUnlocked(opts));
+    }
+
+    private async upsertCertificateForSnisUnlocked(opts: { projectRef: string; cert: string; key: string; snis: string[]; existingCertificateId?: string }): Promise<{ success: boolean; certificateId?: string; error?: string }> {
         await this.hydrateFromDiskIfUninitialized();
         const snis = uniqueStrings(opts.snis.map(normalizeCaddyHost));
         if (!opts.cert.trim() || !opts.key.trim()) return { success: false, error: "Certificate and private key are required" };
@@ -1516,27 +1925,78 @@ export class CaddyGatewayProvider implements GatewayProvider {
     }
 
     async configureFrontendRoute(route: FrontendGatewayRoute): Promise<void> {
-        if (route.mode === "static" || route.root) {
-            await this.addCorsOriginsForHosts(route.projectRef, route.hosts);
-            await this.putRoute(this.makeStaticFrontendRoute(route));
-            return;
-        }
+        return this.serializeOperation(async () => {
+            await this.hydrateFromDiskIfUninitialized();
+            const routeId = `route-frontend-${route.projectRef}-${route.deploymentId}`;
+            const routeIds = this.projectRouteIds(route.projectRef);
+            const previous = new Map(routeIds.flatMap((id) => {
+                const existing = this.routesById.get(id);
+                return existing ? [[id, JSON.parse(JSON.stringify(existing)) as CaddyRoute] as const] : [];
+            }));
+            const allHosts = uniqueStrings([...this.hostsForProjectRoutes(route.projectRef), ...route.hosts]);
+            const origins = buildTenantCorsOrigins(route.projectRef, undefined, allHosts);
+            for (const id of routeIds) {
+                const projectRoute = this.routesById.get(id);
+                if (projectRoute) setRouteCors(projectRoute, origins);
+            }
+            const frontendRoute = route.mode === "static" || route.root
+                ? this.makeStaticFrontendRoute(route)
+                : this.proxyFrontendRoute(route, routeId);
+            this.routesById.set(routeId, frontendRoute);
+            try {
+                await this.persistAndLoad();
+            } catch (error: unknown) {
+                if (!preservesGatewayCandidate(error)) {
+                    this.routesById.delete(routeId);
+                    for (const [id, projectRoute] of previous) this.routesById.set(id, projectRoute);
+                }
+                throw error;
+            }
+        });
+    }
+
+    private proxyFrontendRoute(route: FrontendGatewayRoute, routeId: string): CaddyRoute {
         if (!route.port) {
             throw new Error("Caddy proxy frontend routes require an upstream port");
         }
-        await this.addCorsOriginsForHosts(route.projectRef, route.hosts);
-        await this.putRoute(this.makeRoute({
-            id: `route-frontend-${route.projectRef}-${route.deploymentId}`,
+        return this.makeRoute({
+            id: routeId,
             hosts: route.hosts,
             path: "/*",
             upstream: `127.0.0.1:${route.port}`,
             projectRef: route.projectRef,
             readTimeout: 60_000,
-        }));
+        });
     }
 
     async removeFrontendRoute(projectRef: string, deploymentId: string): Promise<void> {
         await this.removeRoutes([`route-frontend-${projectRef}-${deploymentId}`]);
+    }
+
+    async readFrontendStaticRoot(projectRef: string, deploymentId: string): Promise<string | null> {
+        const response = await this.caddyRequest("/config/apps/http/servers/supacloud/routes");
+        if (!response.ok) throw new Error(`Caddy route read-back failed with ${response.status}`);
+        const routes = await response.json();
+        if (!Array.isArray(routes)) throw new Error("Caddy route read-back is invalid");
+        const routeId = `route-frontend-${projectRef}-${deploymentId}`;
+        const matchingRoutes = routes.filter((candidate) => candidate?.["@id"] === routeId);
+        if (matchingRoutes.length > 1) throw new Error("Caddy frontend route identity is ambiguous");
+        const route = matchingRoutes[0];
+        if (!route) return null;
+        const roots = new Set<string>();
+        const visit = (candidate: unknown): void => {
+            if (Array.isArray(candidate)) {
+                for (const child of candidate) visit(child);
+                return;
+            }
+            if (!candidate || typeof candidate !== "object") return;
+            const record = candidate as Record<string, unknown>;
+            if (record.handler === "file_server" && typeof record.root === "string") roots.add(record.root);
+            for (const child of Object.values(record)) visit(child);
+        };
+        visit(route);
+        if (roots.size !== 1) throw new Error("Caddy frontend route does not have one canonical static root");
+        return [...roots][0];
     }
 
     private async detectHostIp(): Promise<string> {
@@ -1559,6 +2019,10 @@ export class CaddyGatewayProvider implements GatewayProvider {
      *   - route-supauth-authorize-page: /oauth/authorize* -> authorize.html
      */
     async setupHostedAuthRoutes(): Promise<{ success: boolean; error?: string }> {
+        return this.serializeOperation(() => this.setupHostedAuthRoutesUnlocked());
+    }
+
+    private async setupHostedAuthRoutesUnlocked(): Promise<{ success: boolean; error?: string }> {
         if (!config.hostedAuthPageEnabled) {
             // 清除已有路由
             await this.hydrateFromDiskIfUninitialized();
@@ -1649,9 +2113,47 @@ export class GatewayService implements GatewayProvider {
     upsertCertificateForSnis(opts: { projectRef: string; cert: string; key: string; snis: string[]; existingCertificateId?: string }) { return this.provider.upsertCertificateForSnis(opts); }
     configureFrontendRoute(route: FrontendGatewayRoute) { return this.provider.configureFrontendRoute(route); }
     removeFrontendRoute(projectRef: string, deploymentId: string) { return this.provider.removeFrontendRoute(projectRef, deploymentId); }
+    readFrontendStaticRoot(projectRef: string, deploymentId: string) { return this.provider.readFrontendStaticRoot(projectRef, deploymentId); }
     setupHostedAuthRoutes() { return this.provider.setupHostedAuthRoutes(); }
     ensureGatewayReady(opts?: { maxAttempts?: number; intervalMs?: number }) { return this.provider.ensureGatewayReady(opts); }
     checkCaddyConnectivity() { return this.provider.checkCaddyConnectivity(); }
+    confirmCanonicalState() { return this.provider.confirmCanonicalState(); }
 }
 
 export const gatewayService = new GatewayService();
+
+function canonicalReconcileAccepted(state: CanonicalGatewayReconcileState): boolean {
+    return state.tenants.success
+        && state.hostedAuth.success
+        && state.frontends.errors.length === 0;
+}
+
+function canonicalReconcileError(state: CanonicalGatewayReconcileState): Error {
+    const failures = [
+        ...state.tenants.errors.map((message) => `tenant: ${message}`),
+        ...(state.hostedAuth.error ? [`hosted auth: ${state.hostedAuth.error}`] : []),
+        ...state.frontends.errors.map((message) => `frontend: ${message}`),
+    ];
+    return new Error(`Canonical gateway reconciliation failed: ${failures.join("; ") || "unknown error"}`);
+}
+
+export async function reconcileCanonicalGatewayRoutes(
+    dependencies: CanonicalGatewayReconcileDependencies = {},
+): Promise<CanonicalGatewayReconcileState> {
+    const gateway = dependencies.gateway ?? gatewayService;
+    const reconcileFrontends = dependencies.reconcileFrontends ?? (async () => {
+        const { frontendService } = await import("./frontend.service");
+        return frontendService.reconcileGatewayRoutes();
+    });
+    const state = await gateway.withDeferredPersist(async () => {
+        await gateway.prepareCleanRebuild();
+        await gateway.setupMasterRoutes();
+        const tenants = await gateway.rebuildAllTenantConfigs();
+        const hostedAuth = await gateway.setupHostedAuthRoutes();
+        const frontends = await reconcileFrontends();
+        return { tenants, hostedAuth, frontends };
+    }, canonicalReconcileAccepted);
+    if (!canonicalReconcileAccepted(state)) throw canonicalReconcileError(state);
+    await gateway.confirmCanonicalState();
+    return state;
+}

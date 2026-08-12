@@ -2,18 +2,19 @@ import { describe, expect, test } from "bun:test";
 import type { SQL } from "bun";
 import {
   PROJECT_MUTATION_JOURNAL_MIGRATION_KEY,
+  PROJECT_MUTATION_RECOVERY_CONTRACT_MIGRATION_KEY,
   migrateProjectMutationJournal,
 } from "../../src/db/project-mutation-migration";
 
 type MigrationFixtureOptions = {
-  markerExists?: boolean;
+  markers?: string[];
   constraints?: Record<string, boolean>;
   backfilledRows?: number;
   invalidResourceKeys?: number;
 };
 
 function migrationFixture(options: MigrationFixtureOptions = {}) {
-  let markerExists = options.markerExists ?? false;
+  const markers = new Set(options.markers ?? []);
   const constraints = new Map(Object.entries(options.constraints ?? {}));
   const taggedQueries: string[] = [];
   const unsafeQueries: string[] = [];
@@ -22,7 +23,8 @@ function migrationFixture(options: MigrationFixtureOptions = {}) {
       const query = strings.join("?").replaceAll(/\s+/g, " ").trim();
       taggedQueries.push(query);
       if (query.includes("FROM public.platform_schema_migrations")) {
-        return markerExists ? [{ migration_key: PROJECT_MUTATION_JOURNAL_MIGRATION_KEY }] : [];
+        const migrationKey = String(parameters[0]);
+        return markers.has(migrationKey) ? [{ migration_key: migrationKey }] : [];
       }
       if (query.includes("FROM pg_catalog.pg_constraint")) {
         const name = String(parameters[0]);
@@ -34,7 +36,9 @@ function migrationFixture(options: MigrationFixtureOptions = {}) {
       if (query.startsWith("UPDATE public.project_mutations")) {
         return Array.from({ length: options.backfilledRows ?? 0 }, (_, index) => ({ mutation_id: String(index) }));
       }
-      if (query.startsWith("INSERT INTO public.platform_schema_migrations")) markerExists = true;
+      if (query.startsWith("INSERT INTO public.platform_schema_migrations")) {
+        markers.add(String(parameters[0]));
+      }
       return [];
     },
     {
@@ -48,11 +52,11 @@ function migrationFixture(options: MigrationFixtureOptions = {}) {
       },
     },
   );
-  return { transaction: transaction as unknown as SQL, taggedQueries, unsafeQueries };
+  return { transaction: transaction as unknown as SQL, taggedQueries, unsafeQueries, markers };
 }
 
 describe("project mutation journal migration", () => {
-  test("backfills active recovery schedules, validates constraints, and records one marker", async () => {
+  test("runs v3 then narrows recovery scheduling in a separately marked v4 evolution", async () => {
     const fixture = migrationFixture({ backfilledRows: 2 });
 
     await migrateProjectMutationJournal(fixture.transaction);
@@ -61,20 +65,36 @@ describe("project mutation journal migration", () => {
     expect(fixture.unsafeQueries).toContainEqual(expect.stringContaining(
       "ALTER COLUMN recovery_not_before SET DEFAULT clock_timestamp()",
     ));
-    expect(fixture.unsafeQueries.filter((query) => query.includes("ADD CONSTRAINT"))).toHaveLength(4);
-    expect(fixture.unsafeQueries.filter((query) => query.includes("VALIDATE CONSTRAINT"))).toHaveLength(4);
+    expect(fixture.unsafeQueries).toContainEqual(expect.stringContaining(
+      "ALTER COLUMN recovery_not_before DROP DEFAULT",
+    ));
+    expect(fixture.unsafeQueries.filter((query) => query.includes("ADD CONSTRAINT"))).toHaveLength(5);
+    expect(fixture.unsafeQueries.filter((query) => query.includes("VALIDATE CONSTRAINT"))).toHaveLength(5);
     expect(fixture.unsafeQueries).toContainEqual(expect.stringContaining(
       "ADD CONSTRAINT project_mutations_resource_key_canonical_v1_check",
     ));
     expect(fixture.unsafeQueries).toContainEqual(expect.stringContaining(
       "ADD CONSTRAINT project_mutations_fencing_epoch_safe_check",
     ));
-    expect(fixture.unsafeQueries.some((query) => query.includes("DROP CONSTRAINT"))).toBe(false);
-    expect(fixture.taggedQueries.filter((query) => query.startsWith("UPDATE public.project_mutations"))).toHaveLength(1);
-    expect(fixture.taggedQueries.find((query) => query.startsWith("UPDATE public.project_mutations")))
+    expect(fixture.unsafeQueries).toContainEqual(expect.stringContaining(
+      "DROP CONSTRAINT IF EXISTS project_mutations_recoverable_due_check",
+    ));
+    const recoveryUpdates = fixture.taggedQueries.filter((query) => query.startsWith(
+      "UPDATE public.project_mutations",
+    ));
+    expect(recoveryUpdates).toHaveLength(3);
+    expect(recoveryUpdates[0])
       .toContain("status IN ('pending', 'running', 'failed_retryable')");
+    expect(recoveryUpdates[1]).toContain("status IN ('running', 'failed_retryable')");
+    expect(recoveryUpdates[1]).not.toContain("'pending'");
+    expect(recoveryUpdates[2]).toContain("status = 'pending'");
+    expect(recoveryUpdates[2]).toContain("SET recovery_not_before = NULL");
     expect(fixture.taggedQueries.filter((query) => query.startsWith("INSERT INTO public.platform_schema_migrations")))
-      .toHaveLength(1);
+      .toHaveLength(2);
+    expect(fixture.markers).toEqual(new Set([
+      PROJECT_MUTATION_JOURNAL_MIGRATION_KEY,
+      PROJECT_MUTATION_RECOVERY_CONTRACT_MIGRATION_KEY,
+    ]));
     const validatorDdl = fixture.unsafeQueries.find((query) => query.startsWith(
       "CREATE OR REPLACE FUNCTION public.project_mutation_resource_key_is_canonical_v1",
     ));
@@ -83,16 +103,43 @@ describe("project mutation journal migration", () => {
     expect(validatorDdl).not.toContain("WHEN OTHERS");
   });
 
-  test("skips all mutation DDL after the durable marker exists", async () => {
-    const fixture = migrationFixture({ markerExists: true });
+  test("runs v4 when v3 is already marked without replaying v3 mutation DDL", async () => {
+    const fixture = migrationFixture({ markers: [PROJECT_MUTATION_JOURNAL_MIGRATION_KEY] });
+
+    await migrateProjectMutationJournal(fixture.transaction);
+
+    expect(fixture.unsafeQueries).toContainEqual(expect.stringContaining(
+      "ALTER COLUMN recovery_not_before DROP DEFAULT",
+    ));
+    expect(fixture.unsafeQueries.some((query) => query.includes("SET DEFAULT clock_timestamp()"))).toBe(false);
+    expect(fixture.unsafeQueries.some((query) => query.includes(
+      "CREATE OR REPLACE FUNCTION public.project_mutation_resource_key_is_canonical_v1",
+    ))).toBe(false);
+    const recoveryUpdates = fixture.taggedQueries.filter((query) => query.startsWith(
+      "UPDATE public.project_mutations",
+    ));
+    expect(recoveryUpdates).toHaveLength(2);
+    expect(recoveryUpdates[0]).toContain("status IN ('running', 'failed_retryable')");
+    expect(recoveryUpdates[1]).toContain("status = 'pending'");
+    expect(fixture.markers.has(PROJECT_MUTATION_RECOVERY_CONTRACT_MIGRATION_KEY)).toBe(true);
+  });
+
+  test("skips all mutation DDL after both durable markers exist", async () => {
+    const fixture = migrationFixture({
+      markers: [
+        PROJECT_MUTATION_JOURNAL_MIGRATION_KEY,
+        PROJECT_MUTATION_RECOVERY_CONTRACT_MIGRATION_KEY,
+      ],
+    });
 
     await migrateProjectMutationJournal(fixture.transaction);
 
     expect(fixture.unsafeQueries).toHaveLength(0);
-    expect(fixture.unsafeQueries.some((query) => query.startsWith("ALTER TABLE"))).toBe(false);
-    expect(fixture.taggedQueries).toHaveLength(2);
+    expect(fixture.taggedQueries).toHaveLength(4);
     expect(fixture.taggedQueries[0]).toContain("pg_advisory_xact_lock");
     expect(fixture.taggedQueries[1]).toContain("FROM public.platform_schema_migrations");
+    expect(fixture.taggedQueries[2]).toContain("pg_advisory_xact_lock");
+    expect(fixture.taggedQueries[3]).toContain("FROM public.platform_schema_migrations");
   });
 
   test("fails before backfill, constraints, or marker when a legacy raw resource key remains", async () => {

@@ -423,6 +423,22 @@ describe("HttpTransport bounded JSON responses", () => {
         }
     });
 
+    test("rejects oversized and malformed bounded JSON POST responses without reflection", async () => {
+        const privateMarker = "private-post-response-marker";
+        const bodies = [
+            new TextEncoder().encode(JSON.stringify({ marker: privateMarker.repeat(maxJsonBytes) })),
+            new TextEncoder().encode(`{"marker":"${privateMarker}"`),
+        ];
+
+        for (const body of bodies) {
+            globalThis.fetch = (async () => new Response(Buffer.from(body))) as unknown as typeof fetch;
+            const response = await createTransport().post("/frontend/activate", {}, { maxJsonBytes });
+
+            expect(response.responseError).toBe(true);
+            expect(JSON.stringify(response)).not.toContain(privateMarker);
+        }
+    });
+
     test.each([0, -1, 1.5])("rejects invalid JSON byte limit %d before dispatch", async maxBytes => {
         let fetchCalls = 0;
         globalThis.fetch = (async () => {
@@ -435,5 +451,85 @@ describe("HttpTransport bounded JSON responses", () => {
         await expect(createTransport().post("/resource", {}, { timeoutMs: 1, maxJsonBytes: maxBytes }))
             .rejects.toThrow("positive safe integer");
         expect(fetchCalls).toBe(0);
+    });
+});
+
+describe("HttpTransport raw binary mutations", () => {
+    function binaryBody(bytes: number[]) {
+        const body = new Uint8Array(bytes);
+        return {
+            byteLength: body.byteLength,
+            stream: new ReadableStream<Uint8Array>({
+                start(controller) {
+                    controller.enqueue(body);
+                    controller.close();
+                },
+            }),
+        };
+    }
+
+    test("sends an exact ZIP body and returns only a bounded JSON response", async () => {
+        const captured = { headers: new Headers(), body: [] as number[] };
+        globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+            const request = new Request(input, init);
+            captured.headers = request.headers;
+            captured.body = [...new Uint8Array(await request.arrayBuffer())];
+            return Response.json({ ok: true });
+        }) as unknown as typeof fetch;
+
+        const response = await createTransport().postBinary(
+            "/frontend/releases",
+            binaryBody([1, 2, 3]),
+            {
+                contentType: "application/zip",
+                contentLength: 3,
+                contentSha256: "a".repeat(64),
+                maxJsonBytes: 1024,
+            },
+        );
+
+        expect(response).toEqual({ ok: true, status: 200, data: { ok: true } });
+        expect(captured.headers.get("content-type")).toBe("application/zip");
+        expect(captured.headers.get("content-length")).toBe("3");
+        expect(captured.headers.get("x-supacloud-content-sha256")).toBe("a".repeat(64));
+        expect(captured.body).toEqual([1, 2, 3]);
+    });
+
+    test("rejects invalid binary metadata before dispatch", async () => {
+        let fetchCalls = 0;
+        globalThis.fetch = (async () => {
+            fetchCalls += 1;
+            return Response.json({});
+        }) as unknown as typeof fetch;
+        const transport = createTransport();
+        await expect(transport.postBinary("/frontend/releases", binaryBody([1]), {
+            contentType: "application/json",
+            contentLength: 1,
+            contentSha256: "a".repeat(64),
+            maxJsonBytes: 1024,
+        })).rejects.toThrow("content type");
+        await expect(transport.postBinary("/frontend/releases", binaryBody([1]), {
+            contentType: "application/zip",
+            contentLength: 2,
+            contentSha256: "a".repeat(64),
+            maxJsonBytes: 1024,
+        })).rejects.toThrow("length");
+        expect(fetchCalls).toBe(0);
+    });
+
+    test("rejects an oversized binary response without reflecting its body", async () => {
+        const privateMarker = "private-binary-response";
+        globalThis.fetch = (async () => new Response(JSON.stringify({ privateMarker }), {
+            status: 201,
+            headers: { "content-length": "2048" },
+        })) as unknown as typeof fetch;
+        const response = await createTransport().postBinary("/frontend/releases", binaryBody([1]), {
+            contentType: "application/zip",
+            contentLength: 1,
+            contentSha256: "a".repeat(64),
+            maxJsonBytes: 1024,
+        });
+        expect(response.responseError).toBe(true);
+        expect(JSON.stringify(response)).not.toContain(privateMarker);
     });
 });
