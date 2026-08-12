@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { link, lstat, mkdtemp, realpath, rm } from "node:fs/promises";
+import { chmod, link, lstat, mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -131,9 +131,13 @@ function validateActiveGeneration(fixture: Awaited<ReturnType<typeof activeFixtu
 }
 
 async function setFixtureMode(path: string, mode: number): Promise<void> {
-  const octalMode = mode.toString(8);
-  const chmod = spawnSync("/bin/chmod", [octalMode, path]);
-  if (chmod.status !== 0) throw new Error(`Cannot set fixture mode ${octalMode}`);
+  if ((mode & 0o7000) === 0) {
+    await chmod(path, mode);
+  } else {
+    const octalMode = mode.toString(8);
+    const modeChange = spawnSync("/bin/chmod", [octalMode, path]);
+    if (modeChange.status !== 0) throw new Error(`Cannot set fixture mode ${octalMode}`);
+  }
   expect((await lstat(path)).mode & 0o7777).toBe(mode);
 }
 
