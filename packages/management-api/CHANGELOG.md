@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.55.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.55.0...management-api-v0.55.1) (2026-08-12)
+
+
+### Bug Fixes
+
+* **platform:** harden durable project mutations ([#863](https://github.com/zuohuadong/supacloud/issues/863)) ([b59867c](https://github.com/zuohuadong/supacloud/commit/b59867c249fa8c25756149c7cb06c06f15217abf))
+
 ## [0.55.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.54.0...management-api-v0.55.0) (2026-08-11)
 
 
