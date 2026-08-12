@@ -133,6 +133,10 @@ test("Scheduled Function list safely projects legacy Management payload metadata
 test.each([
     ["partial projected payload", { body_empty: true, body: {}, headers: {} }],
     ["non-object legacy body", { body: [], headers: {} }],
+    ["non-string legacy header value", {
+        body: {},
+        headers: { "x-schedule-token": { nested: "private-header-sentinel" } },
+    }],
     ["reserved legacy header", {
         body: {},
         headers: { authorization: "private-authorization-sentinel" },

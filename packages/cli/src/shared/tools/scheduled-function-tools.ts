@@ -269,7 +269,9 @@ function legacySchedulePayload(
 ): Pick<SafeScheduledFunction, "body_empty" | "header_names"> | null {
     const body = objectRecord(schedule.body);
     const headers = objectRecord(schedule.headers);
-    if (!body || !headers) return null;
+    if (!body || !headers || !Object.values(headers).every(value => typeof value === "string")) {
+        return null;
+    }
     const headerNames = safeHeaderNames(Object.keys(headers));
     if (!headerNames) return null;
     return { body_empty: Object.keys(body).length === 0, header_names: headerNames };
