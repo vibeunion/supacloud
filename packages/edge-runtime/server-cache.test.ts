@@ -95,9 +95,9 @@ describe("Edge Runtime auth material invalidation", () => {
       source.indexOf("async function resolvedFunctionPath("),
       source.indexOf("function functionDispatchError("),
     );
-    expect(resolver).toContain(
-      "activeFunctionPathCandidates(\n    projectRoot,\n    request.functionName,\n    activeVersion,\n  )",
-    );
+    expect(resolver).toContain("? [attestedFunctionArtifactPath(");
+    expect(resolver).toContain("resolvedConfig.artifactSha256!");
+    expect(resolver).toContain(": activeFunctionPathCandidates(");
     expect(resolver).toContain("versionBindingResolver = resolveFunctionVersionBinding");
     expect(resolver).toContain("versionBindingResolver(");
     expect(resolver).toContain("request.requestedVersion,");

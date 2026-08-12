@@ -617,6 +617,34 @@ describe("edgeFunctionService bundle metadata", () => {
     }
   });
 
+  test("migrates legacy metadata from the immutable artifact instead of a mutable alias", async () => {
+    const ref = "proj_legacy_immutable_authority";
+    const slug = "legacy-immutable-authority";
+    const versionDir = join(functionsRoot, ref, ".versions", slug, "1");
+    const immutableCode = "export default { fetch: () => new Response('immutable') };";
+    const artifactSha256 = createHash("sha256").update(immutableCode).digest("hex");
+    await mkdir(versionDir, { recursive: true });
+    await Promise.all([
+      Bun.write(join(versionDir, `index.${artifactSha256.slice(0, 16)}.js`), immutableCode),
+      Bun.write(join(versionDir, "index.js"), "export default { fetch: () => new Response('tampered') };"),
+      Bun.write(join(versionDir, ".supacloud-version.json"), JSON.stringify({
+        version: "1",
+        verify_jwt: false,
+        background_routes: [],
+        import_map: null,
+        entrypoint: null,
+      })),
+    ]);
+
+    expect(await migrateLegacyVersionArtifacts()).toEqual({ moved: 1 });
+    expect(JSON.parse(await readFile(
+      join(versionDir, ".supacloud-version.json"),
+      "utf8",
+    ))).toMatchObject({ artifact_sha256: artifactSha256 });
+    expect(await getVersionedArtifactPath(ref, slug, "1"))
+      .toBe(join(versionDir, `index.${artifactSha256.slice(0, 16)}.js`));
+  });
+
   test("rejects unsafe startup migration parents without touching an external version target", async () => {
     const migrationRoot = await mkdtemp(join(homedir(), ".supacloud-legacy-migration-"));
     const ref = "proj_unsafe_legacy_migration";
@@ -1046,6 +1074,40 @@ describe("edgeFunctionService bundle metadata", () => {
       verify_jwt: false,
       version: "2",
     });
+  });
+
+  test("never promotes a mutable version alias into immutable rollback authority", async () => {
+    const ref = "proj_immutable_rollback_authority";
+    const slug = "immutable-rollback-authority";
+    const first = await deployConditionalRelease({
+      ref,
+      slug,
+      code: "export default { fetch: () => new Response('immutable-v1') };",
+    });
+    const versionDirectory = join(functionsRoot, ref, ".versions", slug, "1");
+    const metadataPath = join(versionDirectory, ".supacloud-version.json");
+    const originalMetadata = JSON.parse(await readFile(metadataPath, "utf8")) as {
+      artifact_sha256: string;
+    };
+
+    await Bun.write(
+      join(versionDirectory, "index.js"),
+      "export default { fetch: () => new Response('tampered-alias') };",
+    );
+    const second = await deployConditionalRelease({
+      ref,
+      slug,
+      code: "export default { fetch: () => new Response('immutable-v2') };",
+    });
+
+    expect(first).toMatchObject({ success: true, version: "1" });
+    expect(second).toMatchObject({ success: true, version: "2" });
+    expect(JSON.parse(await readFile(metadataPath, "utf8"))).toMatchObject({
+      artifact_sha256: originalMetadata.artifact_sha256,
+    });
+    await activateConditionalVersion(ref, slug, "1");
+    expect(await edgeFunctionService.read(ref, slug)).toContain("immutable-v1");
+    expect(await edgeFunctionService.read(ref, slug)).not.toContain("tampered-alias");
   });
 
   test("clears bundle source metadata when a single-file version becomes active", async () => {

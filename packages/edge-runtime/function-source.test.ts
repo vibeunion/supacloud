@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import path from "path";
 import {
   activeFunctionPathCandidates,
+  attestedFunctionArtifactPath,
   BUNDLED_SOURCE_RUNTIME_ENTRY,
   functionPathCandidates,
 } from "./function-source";
@@ -42,5 +43,20 @@ describe("multi-file function runtime source", () => {
       "/functions/project/supauth.js",
       "/functions/project/supauth.ts",
     ]);
+  });
+
+  test("derives the content-addressed runtime entry from the full authority digest", () => {
+    expect(attestedFunctionArtifactPath(
+      "/functions/project",
+      "supauth",
+      "7",
+      "a".repeat(64),
+    )).toBe("/functions/project/.versions/supauth/7/index.aaaaaaaaaaaaaaaa.js");
+    expect(() => attestedFunctionArtifactPath(
+      "/functions/project",
+      "supauth",
+      "7",
+      "a".repeat(63),
+    )).toThrow("Function activation artifact digest is invalid");
   });
 });

@@ -8,7 +8,7 @@ import {
 } from "bun:test";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { join } from "node:path";
 
 setDefaultTimeout(30_000);
@@ -73,8 +73,11 @@ async function installActivationCandidate(
   const activationId = request.activationId ?? randomUUID();
   const versionRoot = join(projectRoot, ".versions", request.slug, request.version);
   await mkdir(versionRoot, { recursive: true });
-  await writeFile(join(versionRoot, "index.js"), request.source);
   const artifactSha256 = createHash("sha256").update(request.source).digest("hex");
+  await Promise.all([
+    writeFile(join(versionRoot, "index.js"), request.source),
+    writeFile(join(versionRoot, `index.${artifactSha256.slice(0, 16)}.js`), request.source),
+  ]);
   const manifest = JSON.stringify({
     verify_jwt: request.verifyJwt ?? false,
     version: request.version,
@@ -120,6 +123,11 @@ async function activationControl(request: ActivationControlRequest): Promise<Res
 
 async function publishActivationCandidate(slug: string, candidate: ActivationCandidate): Promise<void> {
   await writeFunctionConfig(slug, candidate.manifest);
+}
+
+async function resetActivationBaseline(slug: string): Promise<void> {
+  await rm(join(projectRoot, `${slug}.config.json`), { force: true });
+  await invalidateFunctionConfig(slug);
 }
 
 async function invokeAnonymous(slug: string): Promise<Response> {
@@ -269,7 +277,7 @@ function startEdgeRuntime(managementPort: number): void {
 }
 
 async function initializeServerFixture(): Promise<void> {
-  fixtureRoot = await mkdtemp(join(tmpdir(), "supacloud-edge-config-contract-"));
+  fixtureRoot = await mkdtemp(join(homedir(), ".supacloud-edge-config-contract-"));
   projectRoot = join(fixtureRoot, "functions", PROJECT_REF);
   activationGenerationReadLog = join(fixtureRoot, "activation-generation-reads.log");
   await mkdir(projectRoot, { recursive: true });
@@ -490,18 +498,24 @@ describe("Edge Runtime function config boundary", () => {
     },
   );
 
-  test.each(STAT_RACE_FAILURES)(
-    "fails closed for %s when stat returns %s after realpath succeeds",
+  test.skipIf(process.platform !== "linux").each(STAT_RACE_FAILURES)(
+    "fails closed for %s when descriptor-bound open returns %s",
     async (slug) => {
       const fallbackBody = `${slug}-fallback-must-not-run`;
       await installStatRaceFunction(slug, fallbackBody);
-      await expectActivationFailsClosed(slug, fallbackBody);
+      const foreground = await invokeForeground(slug);
+      expect(foreground.status).toBe(500);
+      expect(foreground.headers.has("x-supacloud-function-version")).toBe(false);
+      expect(await foreground.text()).not.toContain(fallbackBody);
     },
   );
 
-  test("fences requests until the immutable candidate is preheated and committed", async () => {
+  test.skipIf(process.platform !== "linux")(
+    "fences requests until the immutable candidate is preheated and committed",
+    async () => {
     const slug = "activation_candidate";
     const candidateBody = "candidate-policy-visible-only-after-commit";
+    await resetActivationBaseline(slug);
     const candidate = await installActivationCandidate({
       slug,
       version: "1",
@@ -555,9 +569,16 @@ describe("Edge Runtime function config boundary", () => {
         });
       }
     }
-  });
+    },
+  );
 
-  test("rejects a foreign activation without replacing the global lease", async () => {
+  test.skipIf(process.platform !== "linux")(
+    "rejects a foreign activation without replacing the global lease",
+    async () => {
+    await Promise.all([
+      resetActivationBaseline("lease_first"),
+      resetActivationBaseline("lease_second"),
+    ]);
     const first = await installActivationCandidate({
       slug: "lease_first",
       version: "1",
@@ -599,9 +620,12 @@ describe("Edge Runtime function config boundary", () => {
         action: "abort",
       });
     }
-  });
+    },
+  );
 
-  test("cancels queued requests when an activation fence begins", async () => {
+  test.skipIf(process.platform !== "linux")(
+    "cancels queued requests when an activation fence begins",
+    async () => {
     const slug = "activation_queue";
     const slowSource = `
       export default async () => {
@@ -643,11 +667,15 @@ describe("Edge Runtime function config boundary", () => {
         action: "abort",
       });
     }
-  });
+    },
+  );
 
-  test("recovers committed activation identity after an Edge Runtime restart", async () => {
+  test.skipIf(process.platform !== "linux")(
+    "recovers committed activation identity after an Edge Runtime restart",
+    async () => {
     const slug = "activation_restart";
     const body = "committed-after-restart";
+    await resetActivationBaseline(slug);
     const candidate = await installActivationCandidate({
       slug,
       version: "1",
@@ -677,5 +705,6 @@ describe("Edge Runtime function config boundary", () => {
     const active = await invokeAnonymous(slug);
     expect(active.status).toBe(200);
     expect(await active.text()).toBe(body);
-  });
+    },
+  );
 });

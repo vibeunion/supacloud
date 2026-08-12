@@ -31,7 +31,11 @@ import {
 import {
   buildBackgroundForwardDispatch,
 } from "./background-forward";
-import { activeFunctionPathCandidates } from "./function-source";
+import {
+  activeFunctionPathCandidates,
+  attestedFunctionArtifactPath,
+} from "./function-source";
+import { readFunctionFile, type TrustedFunctionFile } from "./trusted-function-files";
 import {
   assertCanonicalConfiguredFunctionVersion,
   resolveFunctionVersionBinding,
@@ -39,8 +43,6 @@ import {
 } from "./function-version";
 import path from "path";
 import fs from "fs/promises";
-import { createHash } from "node:crypto";
-import type { Stats } from "node:fs";
 import type { PgredisRuntimeEndpointConfig } from "./internal-bindings";
 import { createPgredisCapability } from "./pgredis-capability";
 import {
@@ -352,6 +354,8 @@ type FunctionActivationSnapshot = {
   moduleVersion: string;
   artifactSha256: string;
   activationId: string | null;
+  authorityKind: "active" | "historical" | "legacy";
+  attested: boolean;
 };
 
 type RuntimePreheatIdentityRequest = {
@@ -366,7 +370,8 @@ type RuntimePreheatIdentityRequest = {
 
 function runtimePreheatIdentity(
   request: RuntimePreheatIdentityRequest,
-): EdgeRuntimePreheatIdentity {
+): EdgeRuntimePreheatIdentity | null {
+  if (!request.activation.attested) return null;
   return {
     schema: EDGE_RUNTIME_PREHEAT_ATTESTATION_SCHEMA,
     project_ref: request.projectRef,
@@ -389,63 +394,6 @@ function runtimePreheatIdentity(
   };
 }
 
-function sameArtifactIdentity(left: Stats, right: Stats): boolean {
-  return left.dev === right.dev
-    && left.ino === right.ino
-    && left.size === right.size
-    && left.mtimeMs === right.mtimeMs
-    && left.ctimeMs === right.ctimeMs;
-}
-
-async function attestedArtifactSha256(
-  functionPath: string,
-  expected: Stats,
-): Promise<string> {
-  const artifact = await fs.open(functionPath, "r");
-  try {
-    const before = await artifact.stat();
-    if (!before.isFile() || !sameArtifactIdentity(before, expected)) {
-      throw new Error("Function artifact changed before hashing");
-    }
-    const digest = createHash("sha256").update(await artifact.readFile()).digest("hex");
-    const after = await artifact.stat();
-    if (!sameArtifactIdentity(before, after)) {
-      throw new Error("Function artifact changed while hashing");
-    }
-    return digest;
-  } finally {
-    await artifact.close();
-  }
-}
-
-function functionArtifactBindingRoot(
-  projectRoot: string,
-  functionName: string,
-  activeVersion: string | null,
-  candidate: string,
-): string {
-  if (activeVersion !== null) {
-    return path.join(projectRoot, ".versions", functionName, activeVersion);
-  }
-  const sourceRoot = path.join(projectRoot, `.src-${functionName}`);
-  return isPathInside(candidate, sourceRoot) ? sourceRoot : candidate;
-}
-
-function isBoundFunctionArtifact(
-  candidate: string,
-  realCandidate: string,
-  bindingRoot: string,
-): boolean {
-  return bindingRoot === candidate
-    ? realCandidate === candidate
-    : isPathInside(realCandidate, bindingRoot);
-}
-
-function isMissingFunctionCandidate(error: unknown): boolean {
-  if (!(error instanceof Error) || !("code" in error)) return false;
-  return error.code === "ENOENT" || error.code === "ENOTDIR";
-}
-
 type ResolveFunctionPathRequest = {
   projectRef: string;
   functionName: string;
@@ -464,59 +412,74 @@ async function resolvedFunctionPath(
   const resolvedConfig = request.configOverride
     ?? await getFunctionConfig(request.projectRef, request.functionName, projectRoot);
   if (resolvedConfig.targetState === "absent") throw new Error("Function not found");
+  if (request.configOverride === undefined && resolvedConfig.authorityKind === "active") {
+    const currentManifest = await activeActivationManifest(projectRoot, request.functionName);
+    const currentAuthority = currentManifest.authority;
+    if (!currentAuthority
+      || currentAuthority.activation_id !== resolvedConfig.activationId
+      || currentAuthority.target_state !== resolvedConfig.targetState
+      || currentAuthority.artifact_sha256 !== resolvedConfig.artifactSha256
+      || currentManifest.config.version !== resolvedConfig.version
+      || currentManifest.config.verify_jwt !== resolvedConfig.verify_jwt) {
+      configCache.delete(`${request.projectRef}/${request.functionName}`);
+      throw new Error("Runtime environment changed before artifact resolution");
+    }
+  }
   const versionBindingResolver = request.versionBindingResolver ?? resolveFunctionVersionBinding;
   const { activeVersion, responseVersion } = versionBindingResolver(
     request.requestedVersion,
     resolvedConfig.version,
   );
-  const candidates = activeFunctionPathCandidates(
-    projectRoot,
-    request.functionName,
-    activeVersion,
-  );
+  const authoritative = resolvedConfig.authorityKind !== "legacy";
+  if (authoritative && activeVersion === null) {
+    throw new Error("Authoritative Function activation must identify a version");
+  }
+  if (authoritative && resolvedConfig.artifactSha256 === null) {
+    throw new Error("Authoritative Function activation must identify an artifact digest");
+  }
+  const candidates = authoritative
+    ? [attestedFunctionArtifactPath(
+        projectRoot,
+        request.functionName,
+        activeVersion!,
+        resolvedConfig.artifactSha256!,
+      )]
+    : activeFunctionPathCandidates(projectRoot, request.functionName, activeVersion);
 
   for (const candidate of candidates) {
     if (!isPathInside(candidate, projectRoot)) {
       throw new Error("Function path escapes project root");
     }
 
-    let realCandidate: string;
+    let artifact: TrustedFunctionFile;
     try {
-      realCandidate = await fs.realpath(candidate);
+      artifact = await readFunctionFile(candidate);
     } catch (error) {
-      if (!isMissingFunctionCandidate(error)) throw error;
-      continue;
+      const code = error instanceof Error && "code" in error ? error.code : null;
+      if (!authoritative && (code === "ENOENT" || code === "ENOTDIR")) continue;
+      throw error;
     }
-    const bindingRoot = functionArtifactBindingRoot(
-      projectRoot,
-      request.functionName,
-      activeVersion,
-      candidate,
-    );
-    if (!isBoundFunctionArtifact(candidate, realCandidate, bindingRoot)) {
-      throw new Error("Function path escapes its activation root");
+    if (authoritative && artifact.sha256 !== resolvedConfig.artifactSha256) {
+      throw new Error("Function artifact SHA-256 does not match activation authority");
     }
-    const stat = await fs.stat(realCandidate);
-    if (!stat.isFile()) {
-      throw new Error("Function artifact is not a regular file");
-    }
-    const artifactSha256 = await attestedArtifactSha256(realCandidate, stat);
     return {
-      functionPath: realCandidate,
+      functionPath: candidate,
       projectRoot,
       activeVersion,
       responseVersion,
       verifyJwt: resolvedConfig.verify_jwt,
-      artifactSha256,
+      artifactSha256: artifact.sha256,
       activationId: resolvedConfig.activationId,
+      authorityKind: resolvedConfig.authorityKind,
+      attested: authoritative,
       moduleVersion: [
         `active:${activeVersion || "legacy"}`,
         `activation:${resolvedConfig.activationId ?? "legacy"}`,
         `env:${getProjectModuleEpoch(request.projectRef)}`,
-        `mtime:${stat.mtimeMs}`,
-        `ctime:${stat.ctimeMs}`,
-        `size:${stat.size}`,
-        `sha256:${artifactSha256}`,
+        `mtime:${artifact.metadata.mtimeMs}`,
+        `ctime:${artifact.metadata.ctimeMs}`,
+        `size:${artifact.metadata.size}`,
+        `sha256:${artifact.sha256}`,
       ].join(":"),
     };
   }
@@ -614,6 +577,7 @@ async function dispatchFunction(
     if (activationFences.has(activationFenceKey(projectRef, functionName))) {
       throw new Error("Runtime environment changed during Function activation");
     }
+    await assertDispatchAuthorityCurrent(projectRef, functionName, activation);
     const dispatchReservation = reserveTenantEnvDispatch(projectRef);
     const runtimeLogContext = {
       functionVersion: activeVersion,
@@ -638,7 +602,7 @@ async function dispatchFunction(
           }
         : undefined,
       moduleVersion,
-      artifactSha256: activation.artifactSha256,
+      artifactSha256: activation.attested ? activation.artifactSha256 : undefined,
       env: dispatchEnv,
       envProof: moduleEnvProof || undefined,
       request,
@@ -721,6 +685,8 @@ type FunctionConfig = {
   version: string | null;
   activationId: string | null;
   targetState: "active" | "absent" | null;
+  artifactSha256: string | null;
+  authorityKind: "active" | "historical" | "legacy";
 };
 
 type ActivationPoolControl = Awaited<ReturnType<WorkerPool["invalidateProject"]>>;
@@ -739,31 +705,20 @@ function isMissingFileError(error: unknown): boolean {
     && (error as NodeJS.ErrnoException).code === "ENOENT";
 }
 
-function parseFunctionConfig(raw: string): FunctionConfig {
-  const manifest = parseEdgeFunctionActivationManifest(raw);
-  return {
-    verify_jwt: manifest.config.verify_jwt,
-    version: manifest.config.version,
-    activationId: activationAuthorityId(manifest),
-    targetState: manifest.authority?.target_state ?? null,
-  };
-}
-
-async function existingFunctionConfigPath(
+async function readFunctionActivationManifest(
   configPath: string,
   projectRoot: string,
-): Promise<string | null> {
+): Promise<EdgeFunctionActivationManifest | null> {
+  if (!isPathInside(configPath, projectRoot)) {
+    throw new Error("Function config path escapes project root");
+  }
   try {
-    await fs.lstat(configPath);
-  } catch (error) {
+    const configFile = await readFunctionFile(configPath);
+    return parseEdgeFunctionActivationManifest(configFile.bytes.toString("utf8"));
+  } catch (error: unknown) {
     if (isMissingFileError(error)) return null;
     throw error;
   }
-  const realConfigPath = await fs.realpath(configPath);
-  if (!isPathInside(realConfigPath, projectRoot)) {
-    throw new Error("Function config path escapes project root");
-  }
-  return realConfigPath;
 }
 
 async function getFunctionConfig(
@@ -779,6 +734,8 @@ async function getFunctionConfig(
       version: cached.version,
       activationId: cached.activationId,
       targetState: cached.targetState,
+      artifactSha256: cached.artifactSha256,
+      authorityKind: cached.authorityKind,
     };
   }
 
@@ -786,10 +743,24 @@ async function getFunctionConfig(
   if (!isPathInside(configPath, projectRoot)) {
     throw new Error("Function config path escapes project root");
   }
-  const realConfigPath = await existingFunctionConfigPath(configPath, projectRoot);
-  const config = realConfigPath === null
-    ? { verify_jwt: true, version: null, activationId: null, targetState: null }
-    : parseFunctionConfig(await fs.readFile(realConfigPath, "utf8"));
+  const manifest = await readFunctionActivationManifest(configPath, projectRoot);
+  const config = manifest === null
+    ? {
+        verify_jwt: true,
+        version: null,
+        activationId: null,
+        targetState: null,
+        artifactSha256: null,
+        authorityKind: "legacy" as const,
+      }
+    : {
+        verify_jwt: manifest.config.verify_jwt,
+        version: manifest.config.version,
+        activationId: activationAuthorityId(manifest),
+        targetState: manifest.authority?.target_state ?? null,
+        artifactSha256: manifest.authority?.artifact_sha256 ?? null,
+        authorityKind: manifest.authority === null ? "legacy" as const : "active" as const,
+      };
   configCache.set(key, { ...config, expiresAt: Date.now() + CONFIG_CACHE_TTL });
   return config;
 }
@@ -806,12 +777,15 @@ async function immutableVersionConfig(
   if (!isPathInside(resolvedMetadataPath, versionRoot)) {
     throw new Error("Function version metadata escapes its immutable version directory");
   }
-  const metadata: unknown = JSON.parse(await fs.readFile(resolvedMetadataPath, "utf8"));
+  const metadataFile = await readFunctionFile(resolvedMetadataPath);
+  const metadata: unknown = JSON.parse(metadataFile.bytes.toString("utf8"));
   if (metadata === null || typeof metadata !== "object" || Array.isArray(metadata)) {
     throw new Error("Function version metadata must be an object");
   }
   const record = metadata as Record<string, unknown>;
-  if (record.version !== version || typeof record.verify_jwt !== "boolean") {
+  if (record.version !== version
+    || typeof record.verify_jwt !== "boolean"
+    || typeof record.artifact_sha256 !== "string") {
     throw new Error("Function version metadata does not match its immutable version");
   }
   return {
@@ -819,6 +793,51 @@ async function immutableVersionConfig(
     version,
     activationId: null,
     targetState: "active",
+    artifactSha256: record.artifact_sha256,
+    authorityKind: "historical",
+  };
+}
+
+async function assertDispatchAuthorityCurrent(
+  projectRef: string,
+  functionName: string,
+  activation: FunctionActivationSnapshot,
+): Promise<void> {
+  if (!activation.attested) return;
+  const current = activation.authorityKind === "active"
+    ? await activeFunctionConfig(activation.projectRoot, functionName)
+    : await immutableVersionConfig(
+        activation.projectRoot,
+        functionName,
+        activation.activeVersion!,
+      );
+  if (current.authorityKind !== activation.authorityKind
+    || current.activationId !== activation.activationId
+    || current.version !== activation.activeVersion
+    || current.verify_jwt !== activation.verifyJwt
+    || current.targetState !== "active"
+    || current.artifactSha256 !== activation.artifactSha256) {
+    configCache.delete(`${projectRef}/${functionName}`);
+    throw new Error("Runtime environment changed before dispatch");
+  }
+  const artifact = await readFunctionFile(activation.functionPath);
+  if (artifact.sha256 !== activation.artifactSha256) {
+    throw new Error("Function artifact SHA-256 does not match dispatch authority");
+  }
+}
+
+async function activeFunctionConfig(
+  projectRoot: string,
+  functionName: string,
+): Promise<FunctionConfig> {
+  const manifest = await activeActivationManifest(projectRoot, functionName);
+  return {
+    verify_jwt: manifest.config.verify_jwt,
+    version: manifest.config.version,
+    activationId: activationAuthorityId(manifest),
+    targetState: manifest.authority?.target_state ?? null,
+    artifactSha256: manifest.authority?.artifact_sha256 ?? null,
+    authorityKind: manifest.authority === null ? "legacy" : "active",
   };
 }
 
@@ -827,10 +846,8 @@ async function activeActivationManifest(
   functionName: string,
 ): Promise<EdgeFunctionActivationManifest> {
   const configPath = path.resolve(projectRoot, `${functionName}.config.json`);
-  const realConfigPath = await existingFunctionConfigPath(configPath, projectRoot);
-  return realConfigPath === null
-    ? parseEdgeFunctionActivationManifest("{}")
-    : parseEdgeFunctionActivationManifest(await fs.readFile(realConfigPath, "utf8"));
+  return await readFunctionActivationManifest(configPath, projectRoot)
+    ?? parseEdgeFunctionActivationManifest("{}");
 }
 
 async function preheatActivationSnapshot(
@@ -858,6 +875,8 @@ async function preheatActivationSnapshot(
         ...candidate.config,
         activationId: candidate.authority.activation_id,
         targetState: candidate.authority.target_state,
+        artifactSha256: candidate.authority.artifact_sha256,
+        authorityKind: "active",
       },
     });
     if (activation.artifactSha256 !== candidate.authority.artifact_sha256) {
@@ -1142,6 +1161,8 @@ async function commitFunctionActivationFence(
       ...current.config,
       activationId,
       targetState: current.authority?.target_state ?? null,
+      artifactSha256: current.authority?.artifact_sha256 ?? null,
+      authorityKind: current.authority === null ? "legacy" : "active",
       expiresAt: Date.now() + CONFIG_CACHE_TTL,
     });
     return state;
@@ -1159,6 +1180,8 @@ async function commitFunctionActivationFence(
     ...fence.candidate.config,
     activationId,
     targetState: fence.candidate.authority.target_state,
+    artifactSha256: fence.candidate.authority.artifact_sha256,
+    authorityKind: "active",
     expiresAt: Date.now() + CONFIG_CACHE_TTL,
   });
   activationFences.delete(key);
@@ -1503,7 +1526,7 @@ const app = new Elysia()
               projectRef: c.params.ref,
               moduleVersion,
               envProof: foregroundModuleEnvProof || undefined,
-              attestation: foregroundAttestation,
+              attestation: foregroundAttestation ?? undefined,
             }),
             backgroundPool.preheatVersionedIdleWorkers({
               functionId,
@@ -1513,7 +1536,7 @@ const app = new Elysia()
               projectRef: c.params.ref,
               moduleVersion,
               envProof: backgroundModuleEnvProof || undefined,
-              attestation: backgroundAttestation,
+              attestation: backgroundAttestation ?? undefined,
               maxWorkers: resolveBackgroundPreheatWorkers(),
             }),
           ])
@@ -1522,17 +1545,18 @@ const app = new Elysia()
               projectRef: c.params.ref,
               moduleVersion,
               envProof: foregroundModuleEnvProof || undefined,
-              attestation: foregroundAttestation,
+              attestation: foregroundAttestation ?? undefined,
             }),
             backgroundPool.preheatIdleWorkers(functionId, functionPath, projectRoot, tenantEnv, {
               projectRef: c.params.ref,
               moduleVersion,
               envProof: backgroundModuleEnvProof || undefined,
-              attestation: backgroundAttestation,
+              attestation: backgroundAttestation ?? undefined,
               maxWorkers: resolveBackgroundPreheatWorkers(),
             }),
           ]);
-      const complete = hasCompletePreheatAttestation(foreground)
+      const complete = activation.attested
+        && hasCompletePreheatAttestation(foreground)
         && hasCompletePreheatAttestation(background)
         && isTenantEnvLoadCurrent(c.params.ref, tenantEnvLoad)
         && (!activationId || activationFences.get(fenceKey) === activationFence);

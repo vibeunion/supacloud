@@ -1,5 +1,5 @@
-import { readFile, realpath, stat } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
+import { readFunctionFile } from "./trusted-function-files";
 
 export const EDGE_FUNCTION_ACTIVATION_SCHEMA = "supacloud.edge-function-activation.v1" as const;
 export const EDGE_FUNCTION_ACTIVATION_FIELD = "_supacloud_activation" as const;
@@ -144,10 +144,6 @@ export function isEdgeFunctionActivationId(candidate: unknown): candidate is str
   return typeof candidate === "string" && ACTIVATION_ID_PATTERN.test(candidate);
 }
 
-function isPathWithin(candidate: string, root: string): boolean {
-  return candidate === root || candidate.startsWith(`${root}/`);
-}
-
 export async function readEdgeFunctionActivationGeneration(
   projectRoot: string,
   functionSlug: string,
@@ -158,17 +154,8 @@ export async function readEdgeFunctionActivationGeneration(
     functionSlug,
     activationId,
   );
-  const generationRoot = resolve(projectRoot, ".activation-generations", functionSlug);
-  const [resolvedPath, metadata] = await Promise.all([
-    realpath(generationPath),
-    stat(generationPath),
-  ]);
-  if (!metadata.isFile()
-    || !isPathWithin(resolvedPath, generationRoot)
-    || dirname(resolvedPath) !== generationRoot) {
-    throw new Error("Function activation generation escapes its trusted directory");
-  }
-  const manifest = parseEdgeFunctionActivationManifest(await readFile(resolvedPath, "utf8"));
+  const generationFile = await readFunctionFile(generationPath);
+  const manifest = parseEdgeFunctionActivationManifest(generationFile.bytes.toString("utf8"));
   if (!manifest.authority || manifest.authority.activation_id !== activationId) {
     throw new Error("Function activation generation identity does not match its path");
   }
