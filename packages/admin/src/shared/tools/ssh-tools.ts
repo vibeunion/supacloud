@@ -1073,6 +1073,14 @@ async function platformVersions(ssh: SshTransport) {
     };
 }
 
+function platformVersionsToolResult(report: Awaited<ReturnType<typeof platformVersions>>) {
+    const isError = Object.values(report.components).some(component => component.status === "error");
+    return {
+        content: [{ type: "text" as const, text: JSON.stringify(report, null, 2) }],
+        ...(isError ? { isError: true } : {}),
+    };
+}
+
 export function registerSshTools(server: { tool: (...args: any[]) => void }, ssh: SshTransport): void {
     server.tool(
         "ssh",
@@ -1298,8 +1306,7 @@ Actions: ping, setup, install, upgrade, versions, diagnose, exec, troubleshoot, 
                     break;
                 }
                 case "versions": {
-                    text = JSON.stringify(await platformVersions(ssh), null, 2);
-                    break;
+                    return platformVersionsToolResult(await platformVersions(ssh));
                 }
                 case "diagnose": {
                     const cmds = [

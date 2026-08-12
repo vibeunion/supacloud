@@ -89,7 +89,9 @@ npx @supacloud/admin project service_control --ref abc123 --service gotrue --ser
 Each component reports `status` as `ok`, `unknown`, or `error`; a failed probe
 never substitutes a guessed version. Binary evidence is bound to the active
 systemd `ExecStart`, and Web Console evidence comes from its component marker
-plus an explicit `tree_sha256` digest.
+plus an explicit `tree_sha256` digest. An `unknown` component remains a valid
+inventory result, while any `error` component makes the CLI exit non-zero after
+printing the structured report.
 
 ## Verified platform upgrades
 

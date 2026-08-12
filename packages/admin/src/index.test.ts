@@ -99,6 +99,21 @@ async function runAdminCliPath(entryPath: string, args: string[]): Promise<{ exi
     return { exitCode, output: stdout + stderr };
 }
 
+async function runInlineAdminCli(source: string): Promise<{ exitCode: number; output: string }> {
+    const processHandle = Bun.spawn([process.execPath, "-e", source], {
+        cwd: PACKAGE_ROOT,
+        env: cleanEnvironment(),
+        stdout: "pipe",
+        stderr: "pipe",
+    });
+    const [exitCode, stdout, stderr] = await Promise.all([
+        processHandle.exited,
+        new Response(processHandle.stdout).text(),
+        new Response(processHandle.stderr).text(),
+    ]);
+    return { exitCode, output: stdout + stderr };
+}
+
 async function runAggregateFailureCli(): Promise<{ exitCode: number; output: string }> {
     const source = [
         'import { Type } from "@sinclair/typebox";',
@@ -112,18 +127,20 @@ async function runAggregateFailureCli(): Promise<{ exitCode: number; output: str
         '} };',
         'await runCli(tools, ["fixture", "run"], { commandName: "fixture-cli" });',
     ].join("\n");
-    const processHandle = Bun.spawn([process.execPath, "-e", source], {
-        cwd: PACKAGE_ROOT,
-        env: cleanEnvironment(),
-        stdout: "pipe",
-        stderr: "pipe",
-    });
-    const [exitCode, stdout, stderr] = await Promise.all([
-        processHandle.exited,
-        new Response(processHandle.stdout).text(),
-        new Response(processHandle.stderr).text(),
-    ]);
-    return { exitCode, output: stdout + stderr };
+    return runInlineAdminCli(source);
+}
+
+async function runVersionTransportFailureCli(): Promise<{ exitCode: number; output: string }> {
+    const source = [
+        'import { runCli } from "./src/shared/cli.ts";',
+        'import { registerSshTools } from "./src/shared/tools/ssh-tools.ts";',
+        'let registered;',
+        'registerSshTools({ tool: (_name, _description, schema, callback) => { registered = { schema, callback }; } }, {',
+        '  exec: async () => { throw new Error("SUPACLOUD_API_TOKEN=admin-cli-private-sentinel"); },',
+        '});',
+        'await runCli({ ssh: registered }, ["ssh", "versions"], { commandName: "supacloud-admin" });',
+    ].join("\n");
+    return runInlineAdminCli(source);
 }
 
 function studioProcessInventory(): Array<Record<string, unknown>> {
@@ -647,6 +664,19 @@ describe("supacloud-admin process contract", () => {
         expect(execution.exitCode).toBe(1);
         expect(execution.output).toContain("❌ Unknown action: undefined");
         expect(execution.output).not.toContain("test-token");
+    });
+
+    test("returns a non-zero exit code when version probes lose SSH transport", async () => {
+        const execution = await runVersionTransportFailureCli();
+        const report = JSON.parse(execution.output) as {
+            components: Record<string, { status: string; error: string | null }>;
+        };
+
+        expect(execution.exitCode).toBe(1);
+        expect(Object.values(report.components).every(component => component.status === "error")).toBe(true);
+        expect(report.components.management_api.error).toBe("systemd_probe_transport_failed");
+        expect(report.components.web_console.error).toBe("web_console_probe_transport_failed");
+        expect(execution.output).not.toContain("admin-cli-private-sentinel");
     });
 
     test("documents every project create domain flag without API context", async () => {
