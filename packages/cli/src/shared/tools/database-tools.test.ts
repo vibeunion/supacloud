@@ -344,6 +344,115 @@ describe("database migration helpers", () => {
         }
     });
 
+    test("accepts only content-bound legacy versions and skips them without a write", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
+        const migrationName = "20260425123000_create_users";
+        const migrationSql = "CREATE TABLE users (id uuid);\n";
+        const postedNames: string[] = [];
+        try {
+            writeFileSync(join(dir, `${migrationName}.sql`), migrationSql);
+            const callback = captureDatabaseTool({
+                get: async () => ({
+                    ok: true,
+                    status: 200,
+                    data: [{
+                        version: "1785220280",
+                        name: migrationName,
+                        statements: [`\n${migrationSql.trim()}\n`],
+                    }],
+                }),
+                post: async (_path: string, body: { name: string }) => {
+                    postedNames.push(body.name);
+                    return { ok: true, status: 200, data: {} };
+                },
+            });
+
+            const dryRun = await callback({ action: "push_migrations", ref: "proj", dir, dry_run: true });
+            expect(dryRun.content[0].text).toContain(`Already applied:\n  - ${migrationName}.sql`);
+
+            const apply = await callback({ action: "push_migrations", ref: "proj", dir });
+            expect(apply.content[0].text).toContain("Applied: 0");
+            expect(apply.content[0].text).toContain("Skipped: 1");
+            expect(postedNames).toEqual([]);
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    test.each([
+        ["changed content", ["CREATE TABLE users (id text);"]],
+        ["multiple statements", ["CREATE TABLE users (id uuid);", "SELECT 1;"]],
+        ["missing statements", undefined],
+    ])("rejects a legacy migration name with %s", async (_case, statements) => {
+        const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
+        try {
+            writeFileSync(join(dir, "20260425123000_create_users.sql"), "CREATE TABLE users (id uuid);\n");
+            const callback = captureDatabaseTool({
+                get: async () => ({
+                    ok: true,
+                    status: 200,
+                    data: [{
+                        version: "1785220280",
+                        name: "20260425123000_create_users",
+                        statements,
+                    }],
+                }),
+            });
+
+            await expect(callback({ action: "push_migrations", ref: "proj", dir, dry_run: true }))
+                .rejects.toThrow("Migration identity conflicts");
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    test("keeps same-version renamed migrations conflicting even when SQL matches", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
+        try {
+            writeFileSync(join(dir, "20260425123000_create_users.sql"), "CREATE TABLE users (id uuid);\n");
+            const callback = captureDatabaseTool({
+                get: async () => ({
+                    ok: true,
+                    status: 200,
+                    data: [{
+                        version: "20260425123000",
+                        name: "20260425123000_renamed_users",
+                        statements: ["CREATE TABLE users (id uuid);"],
+                    }],
+                }),
+            });
+
+            await expect(callback({ action: "push_migrations", ref: "proj", dir, dry_run: true }))
+                .rejects.toThrow("Migration identity conflicts");
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    test("rejects ambiguous duplicate legacy names even when both contents match", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
+        const migrationName = "20260425123000_create_users";
+        const migrationSql = "CREATE TABLE users (id uuid);";
+        try {
+            writeFileSync(join(dir, `${migrationName}.sql`), `${migrationSql}\n`);
+            const callback = captureDatabaseTool({
+                get: async () => ({
+                    ok: true,
+                    status: 200,
+                    data: [
+                        { version: "1785220280", name: migrationName, statements: [migrationSql] },
+                        { version: "1785220281", name: migrationName, statements: [migrationSql] },
+                    ],
+                }),
+            });
+
+            await expect(callback({ action: "push_migrations", ref: "proj", dir, dry_run: true }))
+                .rejects.toThrow("Migration identity conflicts");
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
     test("skips only the exact already-applied migration response", async () => {
         const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
         try {

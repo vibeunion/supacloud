@@ -221,31 +221,63 @@ function migrationIdentityKey(version: string, name: string): string {
 }
 
 type MigrationIdentity = { name: string; version: string };
+type RemoteMigrationIdentity = MigrationIdentity & { statements: unknown };
 type MigrationIdentityConflict = {
     file: string;
     local: MigrationIdentity;
     remote: MigrationIdentity;
 };
 
-function migrationIdentities(data: unknown): MigrationIdentity[] {
+function migrationIdentities(data: unknown): RemoteMigrationIdentity[] {
     return migrationRows(data).flatMap((row) => (
         row.version == null || row.name == null
             ? []
-            : [{ version: String(row.version), name: String(row.name) }]
+            : [{ version: String(row.version), name: String(row.name), statements: row.statements }]
     ));
 }
 
-function identityConflicts(local: MigrationIdentity, remote: MigrationIdentity): boolean {
+function isLegacyNameBoundMigration(
+    local: MigrationFile,
+    remote: RemoteMigrationIdentity,
+    remoteMigrations: RemoteMigrationIdentity[],
+): boolean {
+    return remoteMigrations.filter((candidate) => candidate.name === local.name).length === 1
+        && local.name === remote.name
+        && local.version !== remote.version
+        && Array.isArray(remote.statements)
+        && remote.statements.length === 1
+        && typeof remote.statements[0] === "string"
+        && remote.statements[0].trim() === local.sql.trim();
+}
+
+function identityConflicts(
+    local: MigrationFile,
+    remote: RemoteMigrationIdentity,
+    remoteMigrations: RemoteMigrationIdentity[],
+): boolean {
     const reusesVersionOrName = local.version === remote.version || local.name === remote.name;
     const exactlyMatches = local.version === remote.version && local.name === remote.name;
-    return reusesVersionOrName && !exactlyMatches;
+    return reusesVersionOrName
+        && !exactlyMatches
+        && !isLegacyNameBoundMigration(local, remote, remoteMigrations);
 }
 
 function migrationIdentityConflicts(data: unknown, migrationFiles: MigrationFile[]): MigrationIdentityConflict[] {
     const remoteMigrations = migrationIdentities(data);
     return migrationFiles.flatMap((localMigration) => remoteMigrations
-        .filter((remoteMigration) => identityConflicts(localMigration, remoteMigration))
+        .filter((remoteMigration) => identityConflicts(localMigration, remoteMigration, remoteMigrations))
         .map((remoteMigration) => ({ file: localMigration.file, local: localMigration, remote: remoteMigration })));
+}
+
+function legacyNameBoundMigrationKeys(data: unknown, migrationFiles: MigrationFile[]): Set<string> {
+    const remoteMigrations = migrationIdentities(data);
+    return new Set(migrationFiles.flatMap((localMigration) => (
+        remoteMigrations.some((remoteMigration) => (
+            isLegacyNameBoundMigration(localMigration, remoteMigration, remoteMigrations)
+        ))
+            ? [migrationIdentityKey(localMigration.version, localMigration.name)]
+            : []
+    )));
 }
 
 function assertNoMigrationIdentityConflicts(data: unknown, migrationFiles: MigrationFile[]): void {
@@ -582,9 +614,12 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
                     const skipped: string[] = [];
                     const nameBoundMarkerKeys = nameBoundMigrationMarkerKeys(migrationsResult.data);
                     const historicalChecksumKeys = historicalChecksumMarkerKeys(migrationsResult.data, migrationFiles);
+                    const legacyNameBoundKeys = legacyNameBoundMigrationKeys(migrationsResult.data, migrationFiles);
                     for (const { file, name, version, sql } of migrationFiles) {
                         const migrationKey = migrationIdentityKey(version, name);
-                        if (nameBoundMarkerKeys.has(migrationKey) || historicalChecksumKeys.has(migrationKey)) {
+                        if (nameBoundMarkerKeys.has(migrationKey)
+                            || historicalChecksumKeys.has(migrationKey)
+                            || legacyNameBoundKeys.has(migrationKey)) {
                             skipped.push(file);
                             continue;
                         }
