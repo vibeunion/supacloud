@@ -13,6 +13,13 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.21.1](https://github.com/zuohuadong/supacloud/compare/cli-v0.21.0...cli-v0.21.1) (2026-08-12)
+
+
+### Bug Fixes
+
+* **cli:** read legacy scheduled function metadata ([#870](https://github.com/zuohuadong/supacloud/issues/870)) ([9e32501](https://github.com/zuohuadong/supacloud/commit/9e32501f75b59bab2d39eaaa30ea2a3f25b79aec))
+
 ## [0.21.0](https://github.com/zuohuadong/supacloud/compare/cli-v0.20.0...cli-v0.21.0) (2026-08-12)
 
 
