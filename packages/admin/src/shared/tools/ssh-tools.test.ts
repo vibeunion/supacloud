@@ -29,7 +29,10 @@ import {
     SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_SIZE,
 } from "../../../../management-api/src/sigstore-trusted-root";
 
-type ToolHandler = (args: Record<string, unknown>) => Promise<{ content: Array<{ type: "text"; text: string }> }>;
+type ToolHandler = (args: Record<string, unknown>) => Promise<{
+    content: Array<{ type: "text"; text: string }>;
+    isError?: boolean;
+}>;
 type FakeExecResult = { success: boolean; stdout: string; stderr: string; code: number };
 type FakeExecPlan = { fragment: string; executions: FakeExecResult[]; calls: number };
 type UpgradeTransportOutcome = "late_success" | "stream_error";
@@ -91,6 +94,7 @@ class FakeSsh {
     diagnosticExecFails = false;
     diagnosticFailureStdout = "";
     diagnosticFailureStderr = "diagnostic failed";
+    probeExecRejection: { value: unknown } | undefined;
     readonly matchingExecResults: FakeExecPlan[] = [];
 
     async ping(): Promise<boolean> {
@@ -106,6 +110,7 @@ class FakeSsh {
             fixedPlan.calls += 1;
             return fixedPlan.executions[executionIndex]!;
         }
+        if (this.probeExecRejection) throw this.probeExecRejection.value;
         if (this.prepareExecOutcomeUnknown && command.includes("mkdir -m 700 --")) {
             throw new SshCommandOutcomeUnknownError("SSH command timed out after 30000ms; remote outcome is unknown");
         }
@@ -1579,6 +1584,7 @@ describe("ssh admin tool", () => {
         const response = await captureSshTool(ssh).invoke({ action: "versions" });
         const report = JSON.parse(response.content[0]?.text ?? "") as any;
 
+        expect(response.isError).not.toBe(true);
         expect(report.schema_version).toBe(1);
         expect(Object.keys(report.components)).toEqual([
             "management_api", "edge_runtime", "caddy", "web_console",
@@ -2167,6 +2173,41 @@ describe("ssh admin tool", () => {
         expect(JSON.parse(malformedResponse.content[0]?.text ?? "").components.management_api).toMatchObject({
             status: "error", path: null, error: "exec_start_invalid",
         });
+        expect(malformedResponse.isError).toBe(true);
+    });
+
+    test("versions marks transport failures as tool errors without reflecting diagnostics", async () => {
+        const ssh = new FakeSsh();
+        const privateDiagnostic = "SUPACLOUD_API_TOKEN=admin-version-private-sentinel";
+        ssh.probeExecRejection = { value: new Error(privateDiagnostic) };
+
+        const response = await captureSshTool(ssh).invoke({ action: "versions" });
+        const output = response.content[0]?.text ?? "";
+        const components = JSON.parse(output).components;
+
+        expect(response.isError).toBe(true);
+        expect(components.management_api.error).toBe("systemd_probe_transport_failed");
+        expect(components.edge_runtime.error).toBe("systemd_probe_transport_failed");
+        expect(components.caddy.error).toBe("systemd_probe_transport_failed");
+        expect(components.web_console.error).toBe("web_console_probe_transport_failed");
+        expect(output).not.toContain(privateDiagnostic);
+    });
+
+    test("versions keeps unavailable components unknown without reporting a transport failure", async () => {
+        const ssh = new FakeSsh();
+        addFakeExecution(ssh, "systemctl show", fakeSuccess("LoadState=not-found\nExecStart=\n"));
+        addFakeExecution(ssh, "ROOT='/opt/supacloud/web-console/current'", {
+            success: false, stdout: "", stderr: "", code: 43,
+        });
+
+        const response = await captureSshTool(ssh).invoke({ action: "versions" });
+        const components = JSON.parse(response.content[0]?.text ?? "").components;
+
+        expect(response.isError).not.toBe(true);
+        expect(components.management_api).toMatchObject({ status: "unknown", error: "unit_not_loaded" });
+        expect(components.edge_runtime).toMatchObject({ status: "unknown", error: "unit_not_loaded" });
+        expect(components.caddy).toMatchObject({ status: "unknown", error: "unit_not_loaded" });
+        expect(components.web_console).toMatchObject({ status: "unknown", error: "web_console_missing" });
     });
 
     test("versions preserves successful fields when one fixed probe fails", async () => {
