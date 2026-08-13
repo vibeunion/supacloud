@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { access, chmod, lstat, mkdir, mkdtemp, readFile, readlink, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -11,6 +12,21 @@ import {
 import { FRAMEWORK_DEFAULTS, type FrontendDeployment } from "../../src/types/frontend";
 
 const originalFetch = globalThis.fetch;
+const withoutDeploymentLock = async <T>(
+  _projectRef: string,
+  _deploymentId: string,
+  operation: () => Promise<T>,
+): Promise<T> => operation();
+const noImmutableRelease = async () => ({
+  activeBuildDir: async () => null,
+  hasActiveRelease: async () => false,
+  hasUnresolvedActivation: async () => false,
+});
+
+function barrier(): { wait: Promise<void>; release: () => void } {
+  let release!: () => void;
+  return { wait: new Promise<void>((resolve) => { release = resolve; }), release };
+}
 
 beforeEach(() => {
   globalThis.fetch = mock(() => Promise.resolve(new Response(JSON.stringify({ data: [] })))) as unknown as typeof fetch;
@@ -29,7 +45,7 @@ describe("FrontendService DNS records", () => {
     try {
       for (const configuredBaseDomain of ["xai.xigu.team", "api.xai.xigu.team"]) {
         config.baseDomain = configuredBaseDomain;
-        const service = new FrontendService(baseDir);
+        const service = new FrontendService(baseDir, withoutDeploymentLock, noImmutableRelease);
         const deployment = await service.createDeployment("proj123", {
           name: "site",
           framework: "static",
@@ -46,7 +62,7 @@ describe("FrontendService DNS records", () => {
 
   test("returns managed temporary domain record and expected custom domain records", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "supacloud-frontend-test-"));
-    const service = new FrontendService(baseDir);
+    const service = new FrontendService(baseDir, withoutDeploymentLock, noImmutableRelease);
 
     try {
       const deployment = await service.createDeployment("proj123", {
@@ -90,7 +106,7 @@ describe("FrontendService DNS records", () => {
 
     try {
       config.baseDomain = "api.xai.xigu.team";
-      const service = new FrontendService(baseDir);
+    const service = new FrontendService(baseDir, withoutDeploymentLock, noImmutableRelease);
       const deployment = await service.createDeployment("proj123", {
         name: "site",
         framework: "static",
@@ -111,7 +127,7 @@ describe("FrontendService DNS records", () => {
 
   test("returns null when deployment does not exist", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "supacloud-frontend-test-"));
-    const service = new FrontendService(baseDir);
+    const service = new FrontendService(baseDir, withoutDeploymentLock, noImmutableRelease);
 
     try {
       await expect(service.listDnsRecords("proj123", "missing123")).resolves.toBeNull();
@@ -124,7 +140,7 @@ describe("FrontendService DNS records", () => {
 describe("FrontendService SvelteKit defaults", () => {
   test("uses an adapter-node output and a root readiness probe", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "supacloud-sveltekit-defaults-"));
-    const service = new FrontendService(baseDir);
+    const service = new FrontendService(baseDir, withoutDeploymentLock, noImmutableRelease);
 
     try {
       const deployment = await service.createDeployment("proj123", {
@@ -141,7 +157,7 @@ describe("FrontendService SvelteKit defaults", () => {
 
   test("keeps existing build settings when only readiness is updated", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "supacloud-sveltekit-update-"));
-    const service = new FrontendService(baseDir);
+      const service = new FrontendService(baseDir, withoutDeploymentLock, noImmutableRelease);
 
     try {
       const deployment = await service.createDeployment("proj123", {
@@ -168,7 +184,7 @@ describe("FrontendService SvelteKit defaults", () => {
 
   test("provides a distinct adapter-static SvelteKit profile", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "supacloud-sveltekit-static-"));
-    const service = new FrontendService(baseDir);
+    const service = new FrontendService(baseDir, withoutDeploymentLock, noImmutableRelease);
 
     try {
       const deployment = await service.createDeployment("proj123", {
@@ -269,7 +285,11 @@ describe("FrontendService gateway routing", () => {
       return Promise.resolve(new Response(JSON.stringify({ data: [] })));
     }) as unknown as typeof fetch;
 
-    const service = new FrontendService("/tmp/supacloud-frontend-test");
+    const service = new FrontendService(
+      "/tmp/supacloud-frontend-test",
+      withoutDeploymentLock,
+      noImmutableRelease,
+    );
     const deployment: FrontendDeployment = {
       id: "0000002a",
       project_ref: "proj123",
@@ -288,6 +308,11 @@ describe("FrontendService gateway routing", () => {
       deployment_url: "https://site.example.com",
     };
 
+    await mkdir(join("/tmp/supacloud-frontend-test", "proj123", deployment.id), { recursive: true });
+    await writeFile(
+      join("/tmp/supacloud-frontend-test", "proj123", deployment.id, "deployment.json"),
+      JSON.stringify(deployment),
+    );
     await service.configureGatewayRoute(deployment, "/tmp/build", false);
 
     const loadCall = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
@@ -350,7 +375,7 @@ describe("FrontendService gateway routing", () => {
         deployment_url: "https://site.example.com",
       }));
 
-      const service = new FrontendService(baseDir);
+      const service = new FrontendService(baseDir, withoutDeploymentLock, noImmutableRelease);
       const result = await service.reconcileGatewayRoutes();
 
       expect(result).toEqual({ total: 1, configured: 1, skipped: 0, errors: [] });
@@ -369,12 +394,328 @@ describe("FrontendService gateway routing", () => {
       await rm(baseDir, { recursive: true, force: true });
     }
   });
+
+  test("re-reads deployment hosts inside the route lock", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "supacloud-frontend-stale-hosts-"));
+    const gatewayCalls: Array<{ method: string; body: any }> = [];
+    globalThis.fetch = mock((_input: string | URL | Request, init?: RequestInit) => {
+      const method = init?.method || "GET";
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) : null;
+      gatewayCalls.push({ method, body });
+      return Promise.resolve(new Response(JSON.stringify({ data: [] })));
+    }) as unknown as typeof fetch;
+
+    try {
+      const service = new FrontendService(baseDir, withoutDeploymentLock, noImmutableRelease);
+      const stale = await service.createDeployment("proj123", { name: "site", framework: "static" });
+      await writeFile(
+        join(baseDir, "proj123", stale.id, "deployment.json"),
+        JSON.stringify({ ...stale, domain: "current.example.com", custom_domains: ["www.current.example.com"] }),
+      );
+
+      await service.configureGatewayRoute(stale, join(baseDir, "build"), false);
+
+      const routes = gatewayCalls.filter((call) => call.method === "POST").at(-1)
+        ?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
+      const route = routes.find((candidate: any) => candidate["@id"] === `route-frontend-proj123-${stale.id}`);
+      expect(route?.match?.[0]?.host).toEqual(["current.example.com", "www.current.example.com"]);
+    } finally {
+      await rm(baseDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("FrontendService deployment serialization", () => {
+  test("keeps the complete legacy SSR deployment inside the deployment lock", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "supacloud-frontend-ssr-lock-"));
+    const sourceDir = await mkdtemp(join(tmpdir(), "supacloud-frontend-ssr-source-"));
+    const firstEntered = barrier();
+    const releaseFirst = barrier();
+    const operationContext = new AsyncLocalStorage<boolean>();
+    let tail = Promise.resolve();
+    let secondEntered = false;
+    const serializedLock = async <T>(
+      _projectRef: string,
+      _deploymentId: string,
+      operation: () => Promise<T>,
+    ): Promise<T> => {
+      if (operationContext.getStore()) return operation();
+      const previous = tail;
+      let release!: () => void;
+      tail = new Promise<void>((resolve) => { release = resolve; });
+      await previous;
+      try {
+        return await operationContext.run(true, operation);
+      } finally {
+        release();
+      }
+    };
+
+    try {
+      const setup = new FrontendService(baseDir, withoutDeploymentLock, noImmutableRelease);
+      const deployment = await setup.createDeployment("proj123", {
+        name: "ssr-site",
+        framework: "nextjs",
+        install_command: "",
+        build_command: "",
+      });
+      // createDeployment applies framework defaults for empty commands; this
+      // test exercises the full deployment flow, so store explicit empty commands.
+      await writeFile(
+        join(baseDir, "proj123", deployment.id, "deployment.json"),
+        JSON.stringify({ ...deployment, install_command: "", build_command: "" }, null, 2),
+      );
+      await mkdir(join(sourceDir, ".next"));
+      await writeFile(join(sourceDir, ".next", "index.js"), "console.log('ready')\n");
+      const service = new FrontendService(baseDir, serializedLock, noImmutableRelease);
+      // Barrier in the build phase: only the outer deployFromSource lock keeps
+      // the second operation out here; publish-time locks are re-entrant.
+      const prepareOriginal = (service as any).prepareLegacySsrBuild.bind(service);
+      (service as any).prepareLegacySsrBuild = async (...args: any[]) => {
+        firstEntered.release();
+        await releaseFirst.wait;
+        return prepareOriginal(...args);
+      };
+      (service as any).startProcess = async () => 30001;
+      (service as any).waitForReadiness = async () => true;
+      (service as any).applyGatewayRoute = async () => undefined;
+      (service as any).stopProcess = async () => undefined;
+      (service as any).removeGatewayRoute = async () => undefined;
+      const first = service.deployFromSource("proj123", deployment.id, sourceDir);
+      await firstEntered.wait;
+      let secondStarted = false;
+      const second = Promise.resolve().then(async () => {
+        secondStarted = true;
+        return service.deleteDeployment("proj123", deployment.id);
+      }).then((outcome) => {
+        secondEntered = true;
+        return outcome;
+      });
+      while (!secondStarted) await Promise.resolve();
+      expect(secondEntered).toBe(false);
+      releaseFirst.release();
+      expect((await first).success).toBe(true);
+      expect(await second).toBe("deleted");
+      expect(secondEntered).toBe(true);
+    } finally {
+      await rm(baseDir, { recursive: true, force: true });
+      await rm(sourceDir, { recursive: true, force: true });
+    }
+  });
+
+  test("keeps the complete legacy static deployment inside the deployment lock", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "supacloud-frontend-static-lock-"));
+    const sourceDir = await mkdtemp(join(tmpdir(), "supacloud-frontend-static-source-"));
+    const firstEntered = barrier();
+    const releaseFirst = barrier();
+    const operationContext = new AsyncLocalStorage<boolean>();
+    let tail = Promise.resolve();
+    let secondEntered = false;
+    const serializedLock = async <T>(
+      _projectRef: string,
+      _deploymentId: string,
+      operation: () => Promise<T>,
+    ): Promise<T> => {
+      if (operationContext.getStore()) return operation();
+      const previous = tail;
+      let release!: () => void;
+      tail = new Promise<void>((resolve) => { release = resolve; });
+      await previous;
+      try {
+        return await operationContext.run(true, operation);
+      } finally {
+        release();
+      }
+    };
+
+    try {
+      const setup = new FrontendService(baseDir, withoutDeploymentLock, noImmutableRelease);
+      const deployment = await setup.createDeployment("proj123", {
+        name: "static-site",
+        framework: "static",
+        install_command: "",
+        build_command: "",
+      });
+      await writeFile(join(sourceDir, "index.html"), "<!doctype html>");
+      const service = new FrontendService(baseDir, serializedLock, noImmutableRelease);
+      // Barrier in the build phase: only the outer deployFromSource lock keeps
+      // the second operation out here; publish-time locks are re-entrant.
+      const prepareOriginal = (service as any).prepareLegacyBuild.bind(service);
+      (service as any).prepareLegacyBuild = async (...args: any[]) => {
+        firstEntered.release();
+        await releaseFirst.wait;
+        return prepareOriginal(...args);
+      };
+      (service as any).applyGatewayRoute = async () => undefined;
+      (service as any).stopProcess = async () => undefined;
+      (service as any).removeGatewayRoute = async () => undefined;
+      const first = service.deployFromSource("proj123", deployment.id, sourceDir);
+      await firstEntered.wait;
+      let secondStarted = false;
+      const second = Promise.resolve().then(async () => {
+        secondStarted = true;
+        return service.deleteDeployment("proj123", deployment.id);
+      }).then((outcome) => {
+        secondEntered = true;
+        return outcome;
+      });
+      while (!secondStarted) await Promise.resolve();
+      expect(secondEntered).toBe(false);
+      releaseFirst.release();
+      expect((await first).success).toBe(true);
+      expect(await second).toBe("deleted");
+      expect(secondEntered).toBe(true);
+    } finally {
+      await rm(baseDir, { recursive: true, force: true });
+      await rm(sourceDir, { recursive: true, force: true });
+    }
+  });
+
+  test("holds the deployment lock for every metadata read-modify-write", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "supacloud-frontend-rmw-lock-"));
+    const lockCalls: string[] = [];
+    const trackedLock = async <T>(projectRef: string, deploymentId: string, operation: () => Promise<T>) => {
+      lockCalls.push(`${projectRef}/${deploymentId}`);
+      return operation();
+    };
+    const service = new FrontendService(baseDir, trackedLock, noImmutableRelease);
+
+    try {
+      const deployment = await service.createDeployment("proj123", { name: "site", framework: "static" });
+      await service.updateDeployment("proj123", deployment.id, { name: "renamed" });
+      await service.setEnvVars("proj123", deployment.id, { FEATURE_FLAG: "enabled" });
+      const deployToken = await service.createDeployToken("proj123", deployment.id, "ci");
+      expect(deployToken).not.toBeNull();
+      expect(await service.verifyDeployToken("proj123", deployment.id, deployToken!.token)).toBe(true);
+      await service.setGitConfig("proj123", deployment.id, "https://git.example.com/org/repo.git", "main");
+      expect(await service.deleteDeployToken("proj123", deployment.id, deployToken!.id)).toBe(true);
+
+      expect(lockCalls).toEqual(Array(6).fill(`proj123/${deployment.id}`));
+      expect(await service.getDeployment("proj123", deployment.id)).toMatchObject({
+        name: "renamed",
+        env_vars: { FEATURE_FLAG: "enabled" },
+        git_url: "https://git.example.com/org/repo.git",
+        git_branch: "main",
+        deploy_tokens: [],
+      });
+    } finally {
+      await rm(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  test("preserves concurrent env and git metadata updates", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "supacloud-frontend-rmw-race-"));
+    let tail = Promise.resolve();
+    const serializedLock = async <T>(
+      _projectRef: string,
+      _deploymentId: string,
+      operation: () => Promise<T>,
+    ): Promise<T> => {
+      const previous = tail;
+      let release!: () => void;
+      tail = new Promise<void>((resolve) => { release = resolve; });
+      await previous;
+      try {
+        return await operation();
+      } finally {
+        release();
+      }
+    };
+    const service = new FrontendService(baseDir, serializedLock, noImmutableRelease);
+
+    try {
+      const deployment = await service.createDeployment("proj123", { name: "site", framework: "static" });
+      await Promise.all([
+        service.setEnvVars("proj123", deployment.id, { FEATURE_FLAG: "enabled" }),
+        service.setGitConfig("proj123", deployment.id, "https://git.example.com/org/repo.git", "stable"),
+      ]);
+
+      expect(await service.getDeployment("proj123", deployment.id)).toMatchObject({
+        env_vars: { FEATURE_FLAG: "enabled" },
+        git_url: "https://git.example.com/org/repo.git",
+        git_branch: "stable",
+      });
+    } finally {
+      await rm(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects immutable domain mutations before changing metadata or gateway state", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "supacloud-frontend-domain-block-"));
+    const gatewayRequest = mock(() => Promise.resolve(new Response(JSON.stringify({ data: [] }))));
+    globalThis.fetch = gatewayRequest as unknown as typeof fetch;
+    const activeRelease = async () => ({
+      activeBuildDir: async () => join(baseDir, "immutable"),
+      hasActiveRelease: async () => true,
+      hasUnresolvedActivation: async () => false,
+    });
+
+    try {
+      const setup = new FrontendService(baseDir, withoutDeploymentLock, noImmutableRelease);
+      const deployment = await setup.createDeployment("proj123", { name: "site", framework: "static" });
+      const service = new FrontendService(baseDir, withoutDeploymentLock, activeRelease);
+
+      await expect(service.addCustomDomain("proj123", deployment.id, "blocked.example.com"))
+        .rejects.toMatchObject({ code: "FRONTEND_RELEASE_ACTIVE", statusCode: 409 });
+      expect((await service.getDeployment("proj123", deployment.id))?.custom_domains).toEqual([]);
+      expect(gatewayRequest).not.toHaveBeenCalled();
+    } finally {
+      await rm(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  test("does not commit custom-domain metadata when gateway publication fails", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "supacloud-frontend-domain-gateway-failure-"));
+    globalThis.fetch = mock(() => Promise.resolve(
+      new Response("gateway rejected", { status: 500 }),
+    )) as unknown as typeof fetch;
+
+    try {
+      const service = new FrontendService(baseDir, withoutDeploymentLock, noImmutableRelease);
+      const deployment = await service.createDeployment("proj123", { name: "site", framework: "static" });
+
+      await expect(service.addCustomDomain("proj123", deployment.id, "uncommitted.example.com"))
+        .rejects.toThrow();
+      expect((await service.getDeployment("proj123", deployment.id))?.custom_domains).toEqual([]);
+    } finally {
+      await rm(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  test("checks immutable authority again before publishing a prepared static build", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "supacloud-frontend-static-cas-"));
+    const sourceDir = await mkdtemp(join(tmpdir(), "supacloud-frontend-static-source-"));
+    let activeChecks = 0;
+    const changingReleaseState = async () => ({
+      activeBuildDir: async () => null,
+      hasActiveRelease: async () => ++activeChecks > 1,
+      hasUnresolvedActivation: async () => false,
+    });
+    const gatewayRequest = mock(() => Promise.resolve(new Response(JSON.stringify({ data: [] }))));
+    globalThis.fetch = gatewayRequest as unknown as typeof fetch;
+
+    try {
+      const service = new FrontendService(baseDir, withoutDeploymentLock, changingReleaseState);
+      const deployment = await service.createDeployment("proj123", { name: "site", framework: "static" });
+      await writeFile(join(sourceDir, "index.html"), "prepared but not published");
+
+      const result = await service.deployFromSource("proj123", deployment.id, sourceDir);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("active or unresolved");
+      await expect(access(join(baseDir, "proj123", deployment.id, "build", "index.html"))).rejects.toThrow();
+      expect(gatewayRequest).not.toHaveBeenCalled();
+    } finally {
+      await rm(baseDir, { recursive: true, force: true });
+      await rm(sourceDir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("FrontendService optimizer", () => {
   test("generates br and gzip sidecars for static text assets", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "supacloud-frontend-optimizer-test-"));
-    const service = new FrontendService(baseDir);
+    const service = new FrontendService(baseDir, withoutDeploymentLock, noImmutableRelease);
     const assetPath = join(baseDir, "app.js");
 
     try {
@@ -396,7 +737,7 @@ describe("FrontendService optimizer", () => {
     const binDir = join(baseDir, "bin");
     const imagePath = join(baseDir, "hero.jpg");
     const originalPath = process.env.PATH || "";
-    const service = new FrontendService(baseDir);
+    const service = new FrontendService(baseDir, withoutDeploymentLock, noImmutableRelease);
 
     try {
       await mkdir(binDir);

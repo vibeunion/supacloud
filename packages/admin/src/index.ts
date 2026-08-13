@@ -13,6 +13,7 @@ import { registerSshTools } from "./shared/tools/ssh-tools";
 import { registerAdvancedTools } from "./shared/tools/advanced-tools";
 import { registerAdminProjectCliTools } from "./shared/tools/project-cli-tools";
 import { registerGatewayTools } from "./shared/tools/gateway-tools";
+import { registerFrontendTools } from "./shared/tools/frontend-tools";
 import packageMetadata from "../package.json" with { type: "json" };
 
 type ToolEntry = { schema: any; callback: (args: any) => Promise<any> };
@@ -43,7 +44,7 @@ function unavailableTool(schema: ToolEntry["schema"], message: string): ToolEntr
     };
 }
 
-function unavailableAdminSchemas(): Record<"project" | "platform" | "gateway" | "ssh", ToolEntry["schema"]> {
+function unavailableAdminSchemas(): Record<"project" | "platform" | "gateway" | "frontend" | "ssh", ToolEntry["schema"]> {
     const schemaOnlyHttp = {} as HttpTransport;
     return {
         project: captureTools((server) =>
@@ -52,6 +53,8 @@ function unavailableAdminSchemas(): Record<"project" | "platform" | "gateway" | 
             registerAdvancedTools(server as any, schemaOnlyHttp)).platform.schema,
         gateway: captureTools((server) =>
             registerGatewayTools(server as any, schemaOnlyHttp)).gateway.schema,
+        frontend: captureTools((server) =>
+            registerFrontendTools(server as any, schemaOnlyHttp)).frontend.schema,
         ssh: captureTools((server) =>
             registerSshTools(server as any, {} as SshTransport)).ssh.schema,
     };
@@ -67,6 +70,8 @@ function registerUnavailableAdminTools(tools: ToolMap): void {
         "⚠️ SSH commands require SUPACLOUD_HOST, SSH credentials, and SUPACLOUD_SSH_HOST_FINGERPRINT.");
     tools.gateway = unavailableTool(schemas.gateway,
         "⚠️ Gateway / Caddy commands require SUPACLOUD_API_URL and SUPACLOUD_API_TOKEN (admin privileges).");
+    tools.frontend = unavailableTool(schemas.frontend,
+        "⚠️ Frontend commands require SUPACLOUD_API_URL and SUPACLOUD_API_TOKEN.");
 }
 
 function printHelp(context = resolveSupaCloudContext()) {
@@ -131,6 +136,9 @@ EXAMPLES
   supacloud-admin gateway upsert_route --ref abc123 --route_id webhook --hosts "api.example.com" --paths "/webhook/*" --upstream 10.0.0.5:8080
   supacloud-admin gateway config --ref abc123 --rate_limit_tier pro
   supacloud-admin gateway rebuild --ref abc123 --clean
+  supacloud-admin frontend list_releases --ref abc123 --id web
+  supacloud-admin frontend upload_release --ref abc123 --id web --zip_path /secure/site.zip
+  supacloud-admin frontend activate_release --ref abc123 --id web --release_id <sha256> --expected_active_release_id absent --expected_activation_id absent --mutation_id <uuid-v4>
 `);
 }
 
@@ -234,6 +242,7 @@ export function createAdminTools(
 
         Object.assign(tools, captureTools((server) => registerAdminProjectCliTools(server as any, http)));
         Object.assign(tools, captureTools((server) => registerGatewayTools(server as any, http)));
+        Object.assign(tools, captureTools((server) => registerFrontendTools(server as any, http)));
 
         const advancedTools = captureTools((server) => registerAdvancedTools(server as any, http));
         if (advancedTools.platform) {

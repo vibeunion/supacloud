@@ -2,6 +2,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { SQL } from "bun";
 import {
   PROJECT_MUTATION_JOURNAL_MIGRATION_KEY,
+  PROJECT_MUTATION_RECOVERY_CONTRACT_MIGRATION_KEY,
   migrateProjectMutationJournal,
 } from "../../src/db/project-mutation-migration";
 
@@ -37,7 +38,7 @@ async function insertProjectFixture(transaction: SQL, projectRef: string): Promi
 async function insertLegacyMutation(
   transaction: SQL,
   projectRef: string,
-  status: "pending" | "succeeded",
+  status: "pending" | "failed_retryable" | "succeeded",
   resourceKey: string | null = null,
   recoveryNotBefore: Date | null = null,
 ): Promise<string> {
@@ -73,7 +74,7 @@ afterAll(async () => {
 }, 30_000);
 
 describe("project mutation PostgreSQL forward migration", () => {
-  test("backfills legacy active rows before enforcing the due-time invariant", async () => {
+  test("evolves a completed v3 database without scheduling pending rows for recovery", async () => {
     await withRollback(async (transaction) => {
       await transaction.unsafe(`
         ALTER TABLE project_mutations
@@ -81,37 +82,86 @@ describe("project mutation PostgreSQL forward migration", () => {
       `);
       await transaction.unsafe(`
         ALTER TABLE project_mutations
-        ALTER COLUMN recovery_not_before DROP DEFAULT
+        DROP CONSTRAINT IF EXISTS project_mutations_recovery_due_v2_check
+      `);
+      await transaction.unsafe(`
+        ALTER TABLE project_mutations
+        ALTER COLUMN recovery_not_before SET DEFAULT clock_timestamp()
+      `);
+      await transaction.unsafe("DROP INDEX IF EXISTS project_mutations_recovery_v2_idx");
+      await transaction.unsafe(`
+        CREATE INDEX IF NOT EXISTS project_mutations_recovery_idx
+        ON project_mutations(operation, recovery_not_before, updated_at, mutation_id)
+        WHERE recovery_not_before IS NOT NULL
+          AND status IN ('pending', 'running', 'failed_retryable')
       `);
       await transaction`
         DELETE FROM platform_schema_migrations
-        WHERE migration_key = ${PROJECT_MUTATION_JOURNAL_MIGRATION_KEY}
+        WHERE migration_key = ${PROJECT_MUTATION_RECOVERY_CONTRACT_MIGRATION_KEY}
+      `;
+      await transaction`
+        INSERT INTO platform_schema_migrations (migration_key)
+        VALUES (${PROJECT_MUTATION_JOURNAL_MIGRATION_KEY})
+        ON CONFLICT (migration_key) DO NOTHING
       `;
       const projectRef = `mm${process.pid.toString(36)}${Date.now().toString(36)}`.slice(0, 20);
       await insertProjectFixture(transaction, projectRef);
-      const mutationId = await insertLegacyMutation(transaction, projectRef, "pending");
+      const pendingMutationId = await insertLegacyMutation(
+        transaction,
+        projectRef,
+        "pending",
+        null,
+        new Date(),
+      );
+      const retryableMutationId = await insertLegacyMutation(
+        transaction,
+        projectRef,
+        "failed_retryable",
+      );
 
       await migrateProjectMutationJournal(transaction);
       await migrateProjectMutationJournal(transaction);
 
-      const [mutation] = await transaction`
-        SELECT recovery_not_before
-        FROM project_mutations WHERE project_ref = ${projectRef} AND mutation_id = ${mutationId}
+      const mutations = await transaction`
+        SELECT mutation_id, recovery_not_before
+        FROM project_mutations
+        WHERE project_ref = ${projectRef}
+          AND mutation_id IN (${pendingMutationId}, ${retryableMutationId})
       `;
       const [constraint] = await transaction`
         SELECT convalidated
         FROM pg_constraint
         WHERE conrelid = 'project_mutations'::regclass
-          AND conname = 'project_mutations_recoverable_due_check'
+          AND conname = 'project_mutations_recovery_due_v2_check'
+      `;
+      const [columnDefault] = await transaction`
+        SELECT column_default
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'project_mutations'
+          AND column_name = 'recovery_not_before'
+      `;
+      const indexes = await transaction`
+        SELECT indexname
+        FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND tablename = 'project_mutations'
+          AND indexname IN ('project_mutations_recovery_idx', 'project_mutations_recovery_v2_idx')
       `;
       const [marker] = await transaction`
         SELECT count(*)::integer AS count
         FROM platform_schema_migrations
-        WHERE migration_key = ${PROJECT_MUTATION_JOURNAL_MIGRATION_KEY}
+        WHERE migration_key = ${PROJECT_MUTATION_RECOVERY_CONTRACT_MIGRATION_KEY}
       `;
 
-      expect(mutation.recovery_not_before).not.toBeNull();
+      const recoveryByMutation = new Map(
+        mutations.map((mutation) => [String(mutation.mutation_id), mutation.recovery_not_before]),
+      );
+      expect(recoveryByMutation.get(pendingMutationId)).toBeNull();
+      expect(recoveryByMutation.get(retryableMutationId)).not.toBeNull();
       expect(constraint.convalidated).toBe(true);
+      expect(columnDefault.column_default).toBeNull();
+      expect(indexes).toEqual([{ indexname: "project_mutations_recovery_v2_idx" }]);
       expect(marker.count).toBe(1);
     });
   }, 30_000);

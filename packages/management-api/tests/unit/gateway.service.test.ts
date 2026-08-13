@@ -9,10 +9,12 @@ import {
     buildTenantCorsOrigins,
     caddySensitiveRequestLogEncoder,
     gatewayService,
+    reconcileCanonicalGatewayRoutes,
 } from "../../src/services/gateway.service";
 
 function captureFetch(calls: Array<{ url: string; method: string; body: any }>) {
     const originalFetch = globalThis.fetch;
+    let loadedConfig: any = null;
     globalThis.fetch = mock((input: string | URL | Request, init?: RequestInit) => {
         const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
         const method = init?.method || "GET";
@@ -21,6 +23,13 @@ function captureFetch(calls: Array<{ url: string; method: string; body: any }>) 
             try { body = JSON.parse(init.body); } catch { body = init.body; }
         }
         calls.push({ url, method, body });
+        if (method === "POST" && url.endsWith("/load")) loadedConfig = body;
+        if (method === "GET" && url.endsWith("/config/")) {
+            return Promise.resolve(Response.json(loadedConfig ?? {}));
+        }
+        if (method === "GET" && url.endsWith("/config/apps/http/servers/supacloud/routes")) {
+            return Promise.resolve(Response.json(loadedConfig?.apps?.http?.servers?.supacloud?.routes ?? []));
+        }
         return Promise.resolve(new Response(JSON.stringify({ id: "cert_123", data: [] })));
     }) as unknown as typeof fetch;
     return () => { globalThis.fetch = originalFetch; };
@@ -611,6 +620,82 @@ describe("CaddyGatewayProvider", () => {
         restore();
     });
 
+    test("reads back the one canonical static root for an immutable frontend route", async () => {
+        const calls: Array<{ url: string; method: string; body: any }> = [];
+        const restore = captureFetch(calls);
+        try {
+            const provider = new CaddyGatewayProvider();
+            await provider.configureFrontendRoute({
+                projectRef: "proj123",
+                deploymentId: "fa-web",
+                hosts: ["fa.example.com"],
+                root: "/var/supacloud/frontends/proj123/fa-web/releases/a/build",
+                mode: "static",
+            });
+
+            await expect(provider.readFrontendStaticRoot("proj123", "fa-web")).resolves.toBe(
+                "/var/supacloud/frontends/proj123/fa-web/releases/a/build",
+            );
+            await expect(provider.readFrontendStaticRoot("proj123", "missing")).resolves.toBeNull();
+        } finally {
+            restore();
+        }
+    });
+
+    test("restores the in-memory frontend and CORS candidates when Caddy rejects load", async () => {
+        const originalFetch = globalThis.fetch;
+        let loadedConfig: any = null;
+        let rejectNextLoad = false;
+        globalThis.fetch = mock((input: string | URL | Request, init?: RequestInit) => {
+            const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+            const method = init?.method || "GET";
+            if (method === "POST" && url.endsWith("/load")) {
+                if (rejectNextLoad) {
+                    rejectNextLoad = false;
+                    return Promise.resolve(new Response("rejected", { status: 400 }));
+                }
+                loadedConfig = typeof init?.body === "string" ? JSON.parse(init.body) : null;
+            }
+            if (method === "GET" && url.endsWith("/config/apps/http/servers/supacloud/routes")) {
+                return Promise.resolve(Response.json(loadedConfig?.apps?.http?.servers?.supacloud?.routes ?? []));
+            }
+            return Promise.resolve(Response.json({ ok: true }));
+        }) as unknown as typeof fetch;
+        try {
+            const provider = new CaddyGatewayProvider();
+            const oldRoot = "/var/supacloud/frontends/proj123/fa-web/releases/old/build";
+            await provider.configureFrontendRoute({
+                projectRef: "proj123",
+                deploymentId: "fa-web",
+                hosts: ["old.example.com"],
+                root: oldRoot,
+                mode: "static",
+            });
+            rejectNextLoad = true;
+            await expect(provider.configureFrontendRoute({
+                projectRef: "proj123",
+                deploymentId: "fa-web",
+                hosts: ["new.example.com"],
+                root: "/var/supacloud/frontends/proj123/fa-web/releases/new/build",
+                mode: "static",
+            })).rejects.toThrow("Caddy /load failed");
+            await expect(provider.readFrontendStaticRoot("proj123", "fa-web")).resolves.toBe(oldRoot);
+
+            await provider.configureFrontendRoute({
+                projectRef: "proj123",
+                deploymentId: "other-web",
+                hosts: ["other.example.com"],
+                root: "/var/supacloud/frontends/proj123/other-web/releases/ok/build",
+                mode: "static",
+            });
+            const routes = loadedConfig?.apps?.http?.servers?.supacloud?.routes ?? [];
+            const restored = routes.find((route: any) => route["@id"] === "route-frontend-proj123-fa-web");
+            expect(restored?.match?.[0]?.host).toEqual(["old.example.com"]);
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+    });
+
     test("serializes Caddy load publishes so concurrent frontend routes cannot finish with stale config", async () => {
         const originalFetch = globalThis.fetch;
         const appliedLoads: any[] = [];
@@ -676,6 +761,438 @@ describe("CaddyGatewayProvider", () => {
             const finalRouteIds = (appliedLoads.at(-1)?.apps?.http?.servers?.supacloud?.routes ?? []).map((route: any) => route["@id"]);
             expect(finalRouteIds).toContain("route-frontend-proj123-admin0001");
             expect(finalRouteIds).toContain("route-frontend-proj123-mobile001");
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+    });
+
+    test("does not let a failed frontend route rollback erase a concurrent successful route", async () => {
+        const originalFetch = globalThis.fetch;
+        let releaseFirstLoad: (() => void) | null = null;
+        let firstLoadStarted!: () => void;
+        const firstLoad = new Promise<void>((resolve) => { firstLoadStarted = resolve; });
+        const appliedLoads: any[] = [];
+        let loadCount = 0;
+        globalThis.fetch = mock((input: string | URL | Request, init?: RequestInit) => {
+            const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+            if ((init?.method || "GET") === "POST" && url.endsWith("/load")) {
+                const body = JSON.parse(String(init?.body));
+                loadCount += 1;
+                if (loadCount === 1) {
+                    firstLoadStarted();
+                    return new Promise<Response>((resolve) => {
+                        releaseFirstLoad = () => resolve(new Response("failure", { status: 500 }));
+                    });
+                }
+                appliedLoads.push(body);
+            }
+            return Promise.resolve(Response.json([]));
+        }) as unknown as typeof fetch;
+
+        try {
+            const provider = new CaddyGatewayProvider();
+            const failed = provider.configureFrontendRoute({
+                projectRef: "proj123", deploymentId: "failed001", hosts: ["failed.example.com"],
+                root: "/var/supacloud/frontends/proj123/failed001/build", mode: "static",
+            });
+            await firstLoad;
+            const succeeded = provider.configureFrontendRoute({
+                projectRef: "proj123", deploymentId: "good0001", hosts: ["good.example.com"],
+                root: "/var/supacloud/frontends/proj123/good0001/build", mode: "static",
+            });
+            await Promise.race([succeeded, Bun.sleep(20)]);
+            expect(appliedLoads).toHaveLength(0);
+            releaseFirstLoad?.();
+            await expect(failed).rejects.toThrow("Caddy /load failed with 500");
+            await succeeded;
+            const routeIds = appliedLoads.at(-1)?.apps?.http?.servers?.supacloud?.routes
+                ?.map((route: any) => route["@id"]);
+            expect(routeIds).toContain("route-frontend-proj123-good0001");
+            expect(routeIds).not.toContain("route-frontend-proj123-failed001");
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+    });
+
+    test("retains an unrelated writer queued behind a failed frontend publish", async () => {
+        const originalFetch = globalThis.fetch;
+        let releaseFailedLoad!: () => void;
+        let markFailedLoadStarted!: () => void;
+        const failedLoadStarted = new Promise<void>((resolve) => { markFailedLoadStarted = resolve; });
+        const appliedLoads: any[] = [];
+        let loadCount = 0;
+        globalThis.fetch = mock((input: string | URL | Request, init?: RequestInit) => {
+            const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+            if ((init?.method || "GET") === "POST" && url.endsWith("/load")) {
+                const body = JSON.parse(String(init?.body));
+                loadCount += 1;
+                if (loadCount === 1) {
+                    markFailedLoadStarted();
+                    return new Promise<Response>((resolve) => {
+                        releaseFailedLoad = () => resolve(new Response("failure", { status: 500 }));
+                    });
+                }
+                appliedLoads.push(body);
+            }
+            return Promise.resolve(Response.json([]));
+        }) as unknown as typeof fetch;
+
+        try {
+            const provider = new CaddyGatewayProvider();
+            const failed = provider.configureFrontendRoute({
+                projectRef: "proj123", deploymentId: "failed001", hosts: ["failed.example.com"],
+                root: "/var/supacloud/frontends/proj123/failed001/build", mode: "static",
+            });
+            await failedLoadStarted;
+            const unrelated = provider.configureStudioDomain("studio.example.com", 9090);
+            await Promise.race([unrelated, Bun.sleep(20)]);
+            expect(appliedLoads).toHaveLength(0);
+            releaseFailedLoad();
+            await expect(failed).rejects.toThrow("Caddy /load failed with 500");
+            await unrelated;
+
+            const routeIds = appliedLoads.at(-1)?.apps?.http?.servers?.supacloud?.routes
+                ?.map((route: any) => route["@id"]);
+            expect(routeIds).toContain("route-frontend-_global-studio");
+            expect(routeIds).not.toContain("route-frontend-proj123-failed001");
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+    });
+
+    test("removeFrontendRoute completes without nesting the operation lock", async () => {
+        const calls: Array<{ url: string; method: string; body: any }> = [];
+        const restore = captureFetch(calls);
+        try {
+            const provider = new CaddyGatewayProvider();
+            await provider.configureFrontendRoute({
+                projectRef: "proj123", deploymentId: "remove001", hosts: ["remove.example.com"],
+                root: "/var/supacloud/frontends/proj123/remove001/build", mode: "static",
+            });
+
+            const removed = provider.removeFrontendRoute("proj123", "remove001");
+            await expect(Promise.race([
+                removed.then(() => "removed"),
+                Bun.sleep(500).then(() => "timeout"),
+            ])).resolves.toBe("removed");
+
+            const routes = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load"))
+                .at(-1)?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
+            expect(routes.some((route: any) => route["@id"] === "route-frontend-proj123-remove001")).toBe(false);
+        } finally {
+            restore();
+        }
+    });
+
+    test("withDeferredPersist can call public writers reentrantly and publishes once", async () => {
+        const calls: Array<{ url: string; method: string; body: any }> = [];
+        const restore = captureFetch(calls);
+        try {
+            const provider = new CaddyGatewayProvider();
+            await expect(provider.withDeferredPersist(async () => {
+                await provider.setupMasterRoutes();
+                await provider.configureStudioDomain("studio.example.com", 9090);
+                return "ok";
+            })).resolves.toBe("ok");
+
+            const loads = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load"));
+            expect(loads).toHaveLength(1);
+            const routeIds = loads[0]?.body?.apps?.http?.servers?.supacloud?.routes
+                ?.map((route: any) => route["@id"]);
+            expect(routeIds).toContain("route-system-management-api");
+            expect(routeIds).toContain("route-frontend-_global-studio");
+        } finally {
+            restore();
+        }
+    });
+
+    test("drops rejected deferred mutations before an unrelated writer publishes", async () => {
+        for (const rejectedBatch of [
+            (provider: CaddyGatewayProvider) => provider.withDeferredPersist(async () => {
+                await provider.setupMasterRoutes();
+                throw new Error("batch rejected");
+            }),
+            (provider: CaddyGatewayProvider) => provider.withDeferredPersist(async () => {
+                await provider.setupMasterRoutes();
+                return { accepted: false };
+            }, ({ accepted }) => accepted),
+        ]) {
+            const calls: Array<{ url: string; method: string; body: any }> = [];
+            const restore = captureFetch(calls);
+            try {
+                const provider = new CaddyGatewayProvider();
+                await rejectedBatch(provider).catch(() => undefined);
+                await provider.configureStudioDomain("studio.example.com", 9090);
+                const routes = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load"))
+                    .at(-1)?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
+                expect(routes.some((route: any) => route["@id"] === "route-system-management-api")).toBe(false);
+            } finally {
+                restore();
+            }
+        }
+    });
+
+    test("restores a failed deferred flush before an unrelated writer publishes", async () => {
+        const originalFetch = globalThis.fetch;
+        const appliedLoads: any[] = [];
+        let loadCount = 0;
+        globalThis.fetch = mock((_input: string | URL | Request, init?: RequestInit) => {
+            if ((init?.method || "GET") === "POST") {
+                loadCount += 1;
+                if (loadCount === 1) return Promise.resolve(new Response("rejected", { status: 400 }));
+                appliedLoads.push(JSON.parse(String(init?.body)));
+            }
+            return Promise.resolve(Response.json({}));
+        }) as unknown as typeof fetch;
+        try {
+            const provider = new CaddyGatewayProvider();
+            await expect(provider.withDeferredPersist(async () => {
+                await provider.setupMasterRoutes();
+            })).rejects.toThrow("Caddy /load failed with 400");
+            await provider.configureStudioDomain("studio.example.com", 9090);
+            const routes = appliedLoads.at(-1)?.apps?.http?.servers?.supacloud?.routes ?? [];
+            expect(routes.some((route: any) => route["@id"] === "route-system-management-api")).toBe(false);
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+    });
+
+    test("keeps accepted outer deferred mutations while discarding a rejected inner scope", async () => {
+        const calls: Array<{ url: string; method: string; body: any }> = [];
+        const restore = captureFetch(calls);
+        try {
+            const provider = new CaddyGatewayProvider();
+            await provider.withDeferredPersist(async () => {
+                await provider.configureStudioDomain("studio.example.com", 9090);
+                await provider.withDeferredPersist(async () => {
+                    await provider.setupMasterRoutes();
+                    return false;
+                }, Boolean);
+            });
+            const routes = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load"))
+                .at(-1)?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
+            expect(routes.some((route: any) => route["@id"] === "route-frontend-_global-studio")).toBe(true);
+            expect(routes.some((route: any) => route["@id"] === "route-system-management-api")).toBe(false);
+        } finally {
+            restore();
+        }
+    });
+
+    test("repairs a live candidate after the load response is lost", async () => {
+        const originalFetch = globalThis.fetch;
+        let liveConfig: any = null;
+        globalThis.fetch = mock((input: string | URL | Request, init?: RequestInit) => {
+            const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+            if (url.endsWith("/load") && init?.method === "POST") {
+                liveConfig = JSON.parse(String(init.body));
+                return Promise.reject(new Error("response lost"));
+            }
+            if (url.endsWith("/config/")) return Promise.resolve(Response.json(liveConfig));
+            return Promise.resolve(Response.json([]));
+        }) as unknown as typeof fetch;
+        try {
+            const provider = new CaddyGatewayProvider();
+            await provider.configureFrontendRoute({
+                projectRef: "proj123", deploymentId: "fa-web", hosts: ["fa.example.com"],
+                root: "/var/supacloud/frontends/proj123/fa-web/releases/a/build", mode: "static",
+            });
+            expect(JSON.parse(await readFile(config.caddyConfigPath, "utf8")))
+                .toEqual(liveConfig);
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+    });
+
+    test("quarantines a live but non-durable candidate from unrelated writers", async () => {
+        const originalFetch = globalThis.fetch;
+        let liveConfig: any = null;
+        let loadCount = 0;
+        globalThis.fetch = mock((input: string | URL | Request, init?: RequestInit) => {
+            const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+            if (url.endsWith("/load") && init?.method === "POST") {
+                loadCount += 1;
+                liveConfig = JSON.parse(String(init.body));
+            }
+            if (url.endsWith("/config/")) return Promise.resolve(Response.json(liveConfig));
+            return Promise.resolve(Response.json([]));
+        }) as unknown as typeof fetch;
+        try {
+            const provider = new CaddyGatewayProvider({
+                persistLoadedCandidate: async () => { throw new Error("rename failed"); },
+            });
+            await expect(provider.configureFrontendRoute({
+                projectRef: "proj123", deploymentId: "fa-web", hosts: ["fa.example.com"],
+                root: "/var/supacloud/frontends/proj123/fa-web/releases/a/build", mode: "static",
+            })).rejects.toMatchObject({ code: "CADDY_GATEWAY_DURABILITY_UNKNOWN" });
+            await expect(provider.configureStudioDomain("studio.example.com", 9090))
+                .rejects.toMatchObject({ code: "CADDY_GATEWAY_DURABILITY_UNKNOWN" });
+            expect(loadCount).toBe(1);
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+    });
+
+    test("drops an unproven candidate once live readback is different before an unrelated writer", async () => {
+        const originalFetch = globalThis.fetch;
+        const submittedLoads: any[] = [];
+        let liveConfig: any = null;
+        let loseNextLoadResponse = false;
+        let loseNextReadback = false;
+        globalThis.fetch = mock((input: string | URL | Request, init?: RequestInit) => {
+            const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+            if (url.endsWith("/load") && init?.method === "POST") {
+                const candidate = JSON.parse(String(init.body));
+                submittedLoads.push(candidate);
+                if (loseNextLoadResponse) {
+                    loseNextLoadResponse = false;
+                    return Promise.reject(new Error("response lost"));
+                }
+                liveConfig = candidate;
+            }
+            if (url.endsWith("/config/")) {
+                if (loseNextReadback) {
+                    loseNextReadback = false;
+                    return Promise.reject(new Error("readback lost"));
+                }
+                return Promise.resolve(Response.json(liveConfig));
+            }
+            return Promise.resolve(Response.json([]));
+        }) as unknown as typeof fetch;
+        try {
+            const baselineProvider = new CaddyGatewayProvider();
+            await baselineProvider.configureFrontendRoute({
+                projectRef: "proj123", deploymentId: "fa-web", hosts: ["old.example.com"],
+                root: "/var/supacloud/frontends/proj123/fa-web/releases/old/build", mode: "static",
+            });
+
+            const provider = new CaddyGatewayProvider();
+            loseNextLoadResponse = true;
+            loseNextReadback = true;
+            await expect(provider.configureFrontendRoute({
+                projectRef: "proj123", deploymentId: "fa-web", hosts: ["failed.example.com"],
+                root: "/var/supacloud/frontends/proj123/fa-web/releases/failed/build", mode: "static",
+            })).rejects.toMatchObject({ code: "CADDY_GATEWAY_DURABILITY_UNKNOWN" });
+
+            await provider.configureStudioDomain("studio.example.com", 9090);
+
+            const finalRoutes = liveConfig?.apps?.http?.servers?.supacloud?.routes ?? [];
+            const restoredRoute = finalRoutes.find((route: any) => route["@id"] === "route-frontend-proj123-fa-web");
+            const restoredRouteJson = JSON.stringify(restoredRoute);
+            expect(finalRoutes.some((route: any) => route["@id"] === "route-frontend-_global-studio")).toBe(true);
+            expect(restoredRoute?.match?.[0]?.host).toEqual(["old.example.com"]);
+            expect(restoredRouteJson).toContain("/var/supacloud/frontends/proj123/fa-web/releases/old/build");
+            expect(restoredRouteJson).not.toContain("/var/supacloud/frontends/proj123/fa-web/releases/failed/build");
+            expect(submittedLoads).toHaveLength(3);
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+    });
+
+    test("repairs every durability stage without rolling back a live candidate", async () => {
+        const durabilityStages = [
+            "candidate_sync",
+            "candidate_rename",
+            "config_directory_sync",
+            "notice_open",
+            "notice_write",
+            "notice_sync",
+            "notice_directory_sync",
+        ] as const;
+
+        for (const failedStage of durabilityStages) {
+            const originalFetch = globalThis.fetch;
+            let liveConfig: any = null;
+            const appliedLoads: any[] = [];
+            let injected = false;
+            globalThis.fetch = mock((input: string | URL | Request, init?: RequestInit) => {
+                const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+                if (url.endsWith("/load") && init?.method === "POST") {
+                    liveConfig = JSON.parse(String(init.body));
+                    appliedLoads.push(liveConfig);
+                }
+                if (url.endsWith("/config/")) return Promise.resolve(Response.json(liveConfig));
+                return Promise.resolve(Response.json([]));
+            }) as unknown as typeof fetch;
+            try {
+                const provider = new CaddyGatewayProvider({
+                    beforeDurabilityStage: async (stage) => {
+                        if (stage === failedStage && !injected) {
+                            injected = true;
+                            throw new Error(`${stage} failed`);
+                        }
+                    },
+                });
+                await expect(provider.configureFrontendRoute({
+                    projectRef: "proj123", deploymentId: "applied-web", hosts: ["applied.example.com"],
+                    root: "/var/supacloud/frontends/proj123/applied-web/releases/a/build", mode: "static",
+                })).rejects.toMatchObject({ code: "CADDY_GATEWAY_DURABILITY_UNKNOWN" });
+
+                await provider.configureStudioDomain("studio.example.com", 9090);
+
+                const finalRoutes = liveConfig?.apps?.http?.servers?.supacloud?.routes ?? [];
+                expect(injected).toBe(true);
+                expect(appliedLoads).toHaveLength(2);
+                expect(finalRoutes.some((route: any) => route["@id"] === "route-frontend-proj123-applied-web")).toBe(true);
+                expect(finalRoutes.some((route: any) => route["@id"] === "route-frontend-_global-studio")).toBe(true);
+                expect(JSON.parse(await readFile(config.caddyConfigPath, "utf8"))).toEqual(liveConfig);
+            } finally {
+                globalThis.fetch = originalFetch;
+                await cleanCaddyTmp();
+            }
+        }
+    });
+
+    test("rolls back when a lost load response proves a different live config", async () => {
+        const originalFetch = globalThis.fetch;
+        let lostResponse = true;
+        let appliedConfig: any = null;
+        globalThis.fetch = mock((input: string | URL | Request, init?: RequestInit) => {
+            const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+            if (url.endsWith("/load") && init?.method === "POST") {
+                if (lostResponse) {
+                    lostResponse = false;
+                    return Promise.reject(new Error("response lost"));
+                }
+                appliedConfig = JSON.parse(String(init.body));
+            }
+            if (url.endsWith("/config/")) return Promise.resolve(Response.json({ apps: {} }));
+            return Promise.resolve(Response.json([]));
+        }) as unknown as typeof fetch;
+        try {
+            const provider = new CaddyGatewayProvider();
+            await expect(provider.configureFrontendRoute({
+                projectRef: "proj123", deploymentId: "fa-web", hosts: ["fa.example.com"],
+                root: "/var/supacloud/frontends/proj123/fa-web/releases/a/build", mode: "static",
+            })).rejects.toThrow("response lost");
+            await provider.configureStudioDomain("studio.example.com", 9090);
+            const routes = appliedConfig?.apps?.http?.servers?.supacloud?.routes ?? [];
+            expect(routes.some((route: any) => route["@id"] === "route-frontend-proj123-fa-web")).toBe(false);
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+    });
+
+    test("quarantines a lost load response when live state cannot be read", async () => {
+        const originalFetch = globalThis.fetch;
+        let loadCount = 0;
+        globalThis.fetch = mock((input: string | URL | Request, init?: RequestInit) => {
+            const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+            if (url.endsWith("/load") && init?.method === "POST") {
+                loadCount += 1;
+                return Promise.reject(new Error("response lost"));
+            }
+            if (url.endsWith("/config/")) return Promise.reject(new Error("readback lost"));
+            return Promise.resolve(Response.json([]));
+        }) as unknown as typeof fetch;
+        try {
+            const provider = new CaddyGatewayProvider();
+            await expect(provider.configureFrontendRoute({
+                projectRef: "proj123", deploymentId: "fa-web", hosts: ["fa.example.com"],
+                root: "/var/supacloud/frontends/proj123/fa-web/releases/a/build", mode: "static",
+            })).rejects.toMatchObject({ code: "CADDY_GATEWAY_DURABILITY_UNKNOWN" });
+            await expect(provider.configureStudioDomain("studio.example.com", 9090))
+                .rejects.toMatchObject({ code: "CADDY_GATEWAY_DURABILITY_UNKNOWN" });
+            expect(loadCount).toBe(1);
         } finally {
             globalThis.fetch = originalFetch;
         }
@@ -1823,10 +2340,42 @@ describe("CaddyGatewayProvider ensureGatewayReady", () => {
         await cleanCaddyTmp();
     });
 
+    test("allows only a fresh config directory to bootstrap without durable state", async () => {
+        const calls: Array<{ url: string; method: string; body: any }> = [];
+        const restore = captureFetch(calls);
+        const provider = new CaddyGatewayProvider();
+
+        try {
+            await expect(provider.ensureGatewayReady({ maxAttempts: 1, intervalMs: 1 }))
+                .resolves.toMatchObject({ ready: true });
+        } finally {
+            restore();
+        }
+    });
+
+    test("fails startup when the initialized marker outlives its durable config", async () => {
+        await mkdir("/tmp/supacloud-caddy-test", { recursive: true });
+        await writeFile("/tmp/supacloud-caddy-test/INITIALIZED", "supacloud-caddy-config-v1\n");
+
+        await expect(new CaddyGatewayProvider().ensureGatewayReady({ maxAttempts: 1, intervalMs: 1 }))
+            .rejects.toThrow("Initialized Caddy config is missing");
+    });
+
+    test("fails startup on malformed or structurally invalid durable config", async () => {
+        for (const durableConfig of ["{", JSON.stringify({ apps: {} })]) {
+            await mkdir("/tmp/supacloud-caddy-test", { recursive: true });
+            await writeFile(config.caddyConfigPath, durableConfig);
+
+            await expect(new CaddyGatewayProvider().ensureGatewayReady({ maxAttempts: 1, intervalMs: 1 })).rejects.toThrow();
+            await cleanCaddyTmp();
+        }
+    });
+
     test("retries until Caddy Admin API becomes reachable, then persists the JSON config", async () => {
         const calls: Array<{ url: string; method: string; body: any }> = [];
         // 前 2 次连接拒绝（模拟 caddy 尚未启动），第 3 次起返回 ok
         let configAttempts = 0;
+        let loadedConfig: unknown = {};
         const originalFetch = globalThis.fetch;
         globalThis.fetch = mock((input: string | URL | Request, init?: RequestInit) => {
             const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
@@ -1839,8 +2388,9 @@ describe("CaddyGatewayProvider ensureGatewayReady", () => {
             if (url.endsWith("/config/")) {
                 configAttempts += 1;
                 if (configAttempts <= 2) return Promise.resolve(new Response("connection refused", { status: 502 }));
-                return Promise.resolve(new Response(JSON.stringify({ id: "root", data: [] })));
+                return Promise.resolve(Response.json(loadedConfig));
             }
+            if (url.endsWith("/load") && method === "POST") loadedConfig = body;
             return Promise.resolve(new Response(JSON.stringify({ id: "load", data: [] })));
         }) as unknown as typeof fetch;
         const restore = () => { globalThis.fetch = originalFetch; };
@@ -1895,7 +2445,101 @@ describe("CaddyGatewayProvider ensureGatewayReady", () => {
 
         restore();
     });
+
+    test("refuses readiness when the loaded config cannot be read back canonically", async () => {
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = mock((input: string | URL | Request, init?: RequestInit) => {
+            const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+            if (url.endsWith("/config/")) return Promise.resolve(Response.json({ apps: {} }));
+            if (url.endsWith("/load") && init?.method === "POST") return Promise.resolve(Response.json({}));
+            return Promise.resolve(Response.json({}));
+        }) as unknown as typeof fetch;
+        try {
+            const result = await new CaddyGatewayProvider().ensureGatewayReady({ maxAttempts: 1, intervalMs: 1 });
+
+            expect(result).toEqual({ ready: false, error: "Caddy config read-back is different" });
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+    });
 });
+
+describe("canonical gateway reconciliation", () => {
+    afterEach(cleanCaddyTmp);
+
+    test("builds every route family once and confirms the live durable candidate", async () => {
+        const events: string[] = [];
+        const state = {
+            tenants: { success: true, updated: 2, errors: [] },
+            hostedAuth: { success: true },
+            frontends: { total: 1, configured: 1, skipped: 0, errors: [] },
+        };
+        const provider = {
+            prepareCleanRebuild: async () => { events.push("prepare"); },
+            setupMasterRoutes: async () => { events.push("master"); },
+            rebuildAllTenantConfigs: async () => { events.push("tenants"); return state.tenants; },
+            setupHostedAuthRoutes: async () => { events.push("hosted-auth"); return state.hostedAuth; },
+            withDeferredPersist: async <T>(operation: () => Promise<T>) => {
+                events.push("defer:start");
+                const reconciled = await operation();
+                events.push("defer:flush");
+                return reconciled;
+            },
+            confirmCanonicalState: async () => { events.push("confirm"); },
+        };
+
+        await expect(reconcileCanonicalGatewayRoutes({
+            gateway: provider as any,
+            reconcileFrontends: async () => { events.push("frontends"); return state.frontends; },
+        })).resolves.toEqual(state);
+        expect(events).toEqual([
+            "defer:start", "prepare", "master", "tenants", "hosted-auth", "frontends", "defer:flush", "confirm",
+        ]);
+    });
+
+    test("fails without confirming when any canonical route family reports errors", async () => {
+        let confirmed = false;
+        const provider = {
+            prepareCleanRebuild: async () => undefined,
+            setupMasterRoutes: async () => undefined,
+            rebuildAllTenantConfigs: async () => ({ success: true, updated: 1, errors: [] }),
+            setupHostedAuthRoutes: async () => ({ success: true }),
+            withDeferredPersist: async <T>(operation: () => Promise<T>) => operation(),
+            confirmCanonicalState: async () => { confirmed = true; },
+        };
+
+        await expect(reconcileCanonicalGatewayRoutes({
+            gateway: provider as any,
+            reconcileFrontends: async () => ({
+                total: 1, configured: 0, skipped: 0, errors: ["project/site: route rejected"],
+            }),
+        })).rejects.toThrow("frontend: project/site: route rejected");
+        expect(confirmed).toBe(false);
+    });
+
+    test("writes the initialized marker only after durable and live state match", async () => {
+        const calls: Array<{ url: string; method: string; body: any }> = [];
+        const restore = captureFetch(calls);
+        try {
+            const provider = new CaddyGatewayProvider();
+            await provider.setupMasterRoutes();
+            await provider.confirmCanonicalState();
+
+            expect(await readFile("/tmp/supacloud-caddy-test/INITIALIZED", "utf8"))
+                .toBe("supacloud-caddy-config-v1\n");
+        } finally {
+            restore();
+        }
+    });
+});
+
+function canonicalHealthState(updated: number) {
+    return {
+        tenants: { success: true, updated, errors: [] },
+        hostedAuth: { success: true },
+        frontends: { total: 0, configured: 0, skipped: 0, errors: [] },
+    };
+}
 
 describe("gateway-health worker", () => {
     afterEach(async () => {
@@ -1909,9 +2553,10 @@ describe("gateway-health worker", () => {
         resetGatewayHealthState();
 
         // 初始状态：未观测过可达 -> 首次探测可达会执行恢复重建。
-        await runGatewayHealthCheck({ rebuildAll: async () => ({ success: true, updated: 0, errors: [] }) });
+        const reconcileAll = async () => canonicalHealthState(0);
+        await runGatewayHealthCheck({ reconcileAll });
         // 第二次：仍然可达且未达到周期阈值，不应重复重建。
-        const rebuilt = await runGatewayHealthCheck({ rebuildAll: async () => ({ success: true, updated: 0, errors: [] }) });
+        const rebuilt = await runGatewayHealthCheck({ reconcileAll });
 
         expect(rebuilt).toBe(false);
 
@@ -1927,16 +2572,16 @@ describe("gateway-health worker", () => {
 
         let now = 1_000;
         let rebuildCount = 0;
-        const rebuildAll = async () => {
+        const reconcileAll = async () => {
             rebuildCount += 1;
-            return { success: true, updated: 1, errors: [] };
+            return canonicalHealthState(1);
         };
 
-        await runGatewayHealthCheck({ rebuildAll, now: () => now, reconcileIntervalMs: 5_000 });
+        await runGatewayHealthCheck({ reconcileAll, now: () => now, reconcileIntervalMs: 5_000 });
         now += 4_999;
-        expect(await runGatewayHealthCheck({ rebuildAll, now: () => now, reconcileIntervalMs: 5_000 })).toBe(false);
+        expect(await runGatewayHealthCheck({ reconcileAll, now: () => now, reconcileIntervalMs: 5_000 })).toBe(false);
         now += 1;
-        expect(await runGatewayHealthCheck({ rebuildAll, now: () => now, reconcileIntervalMs: 5_000 })).toBe(true);
+        expect(await runGatewayHealthCheck({ reconcileAll, now: () => now, reconcileIntervalMs: 5_000 })).toBe(true);
         expect(rebuildCount).toBe(2);
 
         restore();
@@ -1960,10 +2605,11 @@ describe("gateway-health worker", () => {
         resetGatewayHealthState();
 
         // 第一次：不可达
-        await runGatewayHealthCheck({ rebuildAll: async () => ({ success: true, updated: 3, errors: [] }) });
+        const reconcileAll = async () => canonicalHealthState(3);
+        await runGatewayHealthCheck({ reconcileAll });
         // 模拟 caddy 重启后恢复
         reachable = true;
-        const rebuilt = await runGatewayHealthCheck({ rebuildAll: async () => ({ success: true, updated: 3, errors: [] }) });
+        const rebuilt = await runGatewayHealthCheck({ reconcileAll });
 
         expect(rebuilt).toBe(true);
 
@@ -1978,12 +2624,33 @@ describe("gateway-health worker", () => {
         const { runGatewayHealthCheck, resetGatewayHealthState } = await import("../../src/workers/gateway-health.worker");
         resetGatewayHealthState();
 
-        const r1 = await runGatewayHealthCheck({ rebuildAll: async () => ({ success: true, updated: 1, errors: [] }) });
-        const r2 = await runGatewayHealthCheck({ rebuildAll: async () => ({ success: true, updated: 1, errors: [] }) });
+        const reconcileAll = async () => canonicalHealthState(1);
+        const r1 = await runGatewayHealthCheck({ reconcileAll });
+        const r2 = await runGatewayHealthCheck({ reconcileAll });
 
         expect(r1).toBe(false);
         expect(r2).toBe(false);
 
         restore();
+    });
+
+    test("does not mark Caddy recovered when canonical reconciliation fails", async () => {
+        const calls: Array<{ url: string; method: string; body: any }> = [];
+        const restore = captureFetch(calls);
+        const { runGatewayHealthCheck, resetGatewayHealthState } = await import("../../src/workers/gateway-health.worker");
+        resetGatewayHealthState();
+        let attempts = 0;
+        const reconcileAll = async () => {
+            attempts += 1;
+            if (attempts === 1) throw new Error("frontend reconcile failed");
+            return canonicalHealthState(1);
+        };
+        try {
+            expect(await runGatewayHealthCheck({ reconcileAll })).toBe(false);
+            expect(await runGatewayHealthCheck({ reconcileAll })).toBe(true);
+            expect(attempts).toBe(2);
+        } finally {
+            restore();
+        }
     });
 });

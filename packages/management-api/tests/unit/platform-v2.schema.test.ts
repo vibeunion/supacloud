@@ -49,20 +49,26 @@ describe("platform v2 schema contract", () => {
       schema.indexOf("CREATE TABLE IF NOT EXISTS supaoauth_bff_proof_nonces"),
     );
     expect(mutationSchema).toContain("PRIMARY KEY (project_ref, mutation_id)");
-    expect(mutationSchema).toContain("recovery_not_before TIMESTAMPTZ DEFAULT clock_timestamp()");
+    expect(mutationSchema).toContain("recovery_not_before TIMESTAMPTZ,");
+    expect(mutationSchema).not.toContain("recovery_not_before TIMESTAMPTZ DEFAULT");
     expect(mutationSchema).toContain("ADD COLUMN IF NOT EXISTS recovery_not_before TIMESTAMPTZ");
     expect(mutationSchema).toContain("project_mutations_succeeded_response_check");
-    expect(mutationSchema).toContain("project_mutations_recoverable_due_check");
+    expect(mutationSchema).toContain("project_mutations_recovery_due_v2_check");
     expect(mutationSchema).toContain("project_mutations_fencing_epoch_safe_check");
     expect(mutationSchema).toContain("fencing_epoch <= 9007199254740991");
     expect(mutationSchema).toContain("response_status IS NOT NULL AND response_status BETWEEN 200 AND 299");
-    expect(mutationSchema).toContain("project_mutations_recovery_idx");
-    expect(mutationSchema).toContain("status IN ('pending', 'running', 'failed_retryable')");
+    expect(mutationSchema).toContain("project_mutations_recovery_v2_idx");
+    expect(mutationSchema).toContain("status IN ('running', 'failed_retryable')");
+    expect(mutationSchema).not.toContain("status IN ('pending', 'running', 'failed_retryable')");
     expect(mutationSchema).toContain("project_mutations_active_resource_idx");
     expect(mutationSchema).not.toContain("DROP CONSTRAINT");
     expect(mutationMigration).toContain("INSERT INTO public.platform_schema_migrations");
     expect(mutationMigration).toContain("ALTER COLUMN recovery_not_before SET DEFAULT clock_timestamp()");
+    expect(mutationMigration).toContain("ALTER COLUMN recovery_not_before DROP DEFAULT");
     expect(mutationMigration).toContain("COALESCE(updated_at, created_at, clock_timestamp())");
+    expect(mutationMigration).toContain("20260813_project_mutation_recovery_contract_v4");
+    expect(mutationMigration).toContain("DROP CONSTRAINT IF EXISTS project_mutations_recoverable_due_check");
+    expect(mutationMigration).toContain("DROP INDEX IF EXISTS public.project_mutations_recovery_idx");
     expect(mutationMigration).toContain("project_mutation_resource_key_is_canonical_v1");
     expect(mutationMigration).toContain("canonical_id <> encoded_id");
     expect(mutationMigration).toContain("convert_from(decoded_id, 'UTF8')");
@@ -71,7 +77,6 @@ describe("platform v2 schema contract", () => {
     );
     expect(mutationMigration).toContain("VALIDATE CONSTRAINT ${CANONICAL_RESOURCE_KEY_CONSTRAINT}");
     expect(mutationMigration).toContain("VALIDATE CONSTRAINT ${FENCING_EPOCH_SAFE_CONSTRAINT}");
-    expect(mutationMigration).not.toContain("DROP CONSTRAINT");
     for (const sensitiveColumn of [
       "request_body", "request_headers", "request_payload", "credential", "service_role", "secret",
     ]) expect(mutationSchema).not.toContain(sensitiveColumn);

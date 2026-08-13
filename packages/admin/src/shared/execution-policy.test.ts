@@ -35,6 +35,7 @@ describe("Admin execution policy", () => {
                 "platform.metrics", "platform.list_backups", "platform.list_logical_backups", "platform.network",
                 "platform.list_orgs", "platform.get_org",
                 "gateway.routes", "gateway.get_certificate", "gateway.custom_hostname",
+                "frontend.list_releases", "frontend.get_release",
                 "ssh.ping", "ssh.versions", "ssh.diagnose", "ssh.exec",
                 "ssh.troubleshoot", "ssh.container_logs", "ssh.tenant_list",
                 "ssh.tenant_inspect", "ssh.tenant_diagnose",
@@ -48,6 +49,7 @@ describe("Admin execution policy", () => {
                 "gateway.config", "gateway.update_certificate", "gateway.issue_certificate",
                 "gateway.deploy_certificate", "gateway.rebuild", "gateway.set_custom_hostname",
                 "gateway.delete_custom_hostname", "gateway.verify_custom_hostname",
+                "frontend.upload_release", "frontend.activate_release",
                 "ssh.setup", "ssh.install", "ssh.upgrade", "ssh.tenant_migrate",
             ],
         } as const;
@@ -132,6 +134,26 @@ describe("Admin execution policy", () => {
         }, {
             context: productionContext(),
         })).not.toThrow();
+    });
+
+    test("requires the exact production project ref for frontend release writes", () => {
+        const args = {
+            action: "activate_release",
+            ref: "prod-ref",
+            id: "web",
+            release_id: "a".repeat(64),
+        };
+        expect(() => authorizeExecution("frontend", args, {
+            context: productionContext(),
+        })).toThrow("--confirm-production prod-ref");
+        expect(() => authorizeExecution("frontend", args, {
+            context: productionContext(),
+            confirmProduction: "prod-ref",
+        })).not.toThrow();
+        expect(() => authorizeExecution("frontend", { ...args, ref: "other-ref" }, {
+            context: productionContext(),
+            confirmProduction: "other-ref",
+        })).toThrow("different project ref");
     });
 
     test("rejects cross-project production reads and writes", () => {

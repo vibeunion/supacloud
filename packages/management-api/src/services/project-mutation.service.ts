@@ -136,6 +136,12 @@ export interface MutationLeaseInput {
   fencingEpoch: number;
 }
 
+export interface VerifyProjectMutationLeaseInput extends MutationLeaseInput {}
+
+export type ProjectMutationLeaseExecution<T> =
+  | { kind: "executed"; value: T }
+  | { kind: "lease_lost" };
+
 export interface CheckpointProjectMutationInput extends MutationLeaseInput {
   checkpoint: Record<string, unknown>;
   leaseSeconds: number;
@@ -192,6 +198,8 @@ export interface RecoverableProjectMutationClaim {
   mutationId: string;
   operation: string;
   resourceKey: string | null;
+  requestFingerprint: string;
+  principal: MutationPrincipal;
   checkpoint: Record<string, unknown>;
   recoveryNotBefore: string;
   leaseToken: string;
@@ -204,6 +212,9 @@ interface StoredRecoverableMutationClaimRow {
   mutation_id: string;
   operation: string;
   resource_key: string | null;
+  request_fingerprint: string;
+  principal_type: MutationPrincipal["type"];
+  principal_id: string;
   checkpoint: unknown;
   recovery_not_before: Date | string;
   lease_token: string;
@@ -362,6 +373,15 @@ function assertLeaseSeconds(leaseSeconds: number): void {
   }
 }
 
+function assertMutationPrincipal(principal: MutationPrincipal): void {
+  if (!["master", "admin", "project"].includes(principal.type)
+    || typeof principal.id !== "string"
+    || !PRINCIPAL_ID_PATTERN.test(principal.id)
+    || principal.id.trim() !== principal.id) {
+    throw new Error("Mutation principal is invalid");
+  }
+}
+
 function assertBeginInput(input: BeginProjectMutationInput): void {
   assertMutationIdentity(input.projectRef, input.mutationId);
   if (!OPERATION_PATTERN.test(input.operation)) throw new Error("Mutation operation is invalid");
@@ -370,9 +390,7 @@ function assertBeginInput(input: BeginProjectMutationInput): void {
   }
   if (input.resource) projectMutationResourceKey(input.resource);
   if (!FINGERPRINT_PATTERN.test(input.requestFingerprint)) throw new Error("Mutation fingerprint is invalid");
-  if (!PRINCIPAL_ID_PATTERN.test(input.principal.id) || input.principal.id.trim() !== input.principal.id) {
-    throw new Error("Mutation principal is invalid");
-  }
+  assertMutationPrincipal(input.principal);
 }
 
 async function lockedMutation(
@@ -402,6 +420,20 @@ async function activeResourceMutation(
   return row ?? null;
 }
 
+export async function readActiveProjectMutationForResource(
+  projectRef: string,
+  resource: ProjectMutationResource,
+): Promise<ProjectMutationState | null> {
+  if (!/^[A-Za-z0-9_-]{1,20}$/.test(projectRef)) throw new Error("Project ref is invalid");
+  const resourceKey = projectMutationResourceKey(resource);
+  const [row] = await sql`
+    SELECT * FROM project_mutations
+    WHERE project_ref = ${projectRef} AND resource_key = ${resourceKey}
+      AND status IN ('pending', 'running', 'failed_retryable', 'outcome_unknown')
+  ` as StoredProjectMutationRow[];
+  return row ? projectMutationState(row) : null;
+}
+
 function existingMutationResult(
   row: StoredProjectMutationRow,
   input: BeginProjectMutationInput,
@@ -425,10 +457,10 @@ async function insertProjectMutation(
   const [inserted] = await transaction`
     INSERT INTO project_mutations (
       project_ref, mutation_id, operation, resource_key, request_fingerprint,
-      principal_type, principal_id, recovery_not_before
+      principal_type, principal_id
     ) VALUES (
       ${input.projectRef}, ${input.mutationId}, ${input.operation}, ${resourceKey},
-      ${input.requestFingerprint}, ${input.principal.type}, ${input.principal.id}, clock_timestamp()
+      ${input.requestFingerprint}, ${input.principal.type}, ${input.principal.id}
     )
     ON CONFLICT DO NOTHING
     RETURNING *
@@ -502,6 +534,7 @@ export async function claimOrResumeProjectMutation(
     UPDATE project_mutations
     SET status = 'running', lease_owner = ${input.leaseOwner}, lease_token = ${input.leaseToken},
         lease_expires_at = clock_timestamp() + (${input.leaseSeconds} * INTERVAL '1 second'),
+        recovery_not_before = COALESCE(recovery_not_before, clock_timestamp()),
         fencing_epoch = fencing_epoch + 1, completed_at = NULL, updated_at = clock_timestamp()
     WHERE project_ref = ${input.projectRef} AND mutation_id = ${input.mutationId}
       AND fencing_epoch < 9007199254740991
@@ -528,16 +561,27 @@ function assertRecoverableClaimInput(input: ClaimRecoverableProjectMutationsInpu
 
 function recoverableMutationClaim(row: StoredRecoverableMutationClaimRow): RecoverableProjectMutationClaim {
   assertMutationIdentity(row.project_ref, row.mutation_id);
-  if (!OPERATION_PATTERN.test(row.operation)) throw new Error("Stored mutation operation is invalid");
-  if (row.resource_key !== null && !RESOURCE_KEY_PATTERN.test(row.resource_key)) {
+  if (typeof row.operation !== "string" || !OPERATION_PATTERN.test(row.operation)) {
+    throw new Error("Stored mutation operation is invalid");
+  }
+  if (row.resource_key !== null
+    && (typeof row.resource_key !== "string" || !RESOURCE_KEY_PATTERN.test(row.resource_key))) {
     throw new Error("Stored mutation resource key is invalid");
   }
+  if (typeof row.request_fingerprint !== "string"
+    || !FINGERPRINT_PATTERN.test(row.request_fingerprint)) {
+    throw new Error("Stored mutation fingerprint is invalid");
+  }
+  const principal = { type: row.principal_type, id: row.principal_id };
+  assertMutationPrincipal(principal);
   if (!isProjectMutationId(row.lease_token)) throw new Error("Stored mutation lease token is invalid");
   const fencingEpoch = storedFencingEpoch(row.fencing_epoch, 1);
   const checkpoint = publicJsonRecord(row.checkpoint);
   return {
     projectRef: row.project_ref, mutationId: row.mutation_id, operation: row.operation,
-    resourceKey: row.resource_key, checkpoint, recoveryNotBefore: timestamp(row.recovery_not_before)!,
+    resourceKey: row.resource_key, requestFingerprint: row.request_fingerprint,
+    principal,
+    checkpoint, recoveryNotBefore: timestamp(row.recovery_not_before)!,
     leaseToken: row.lease_token, leaseExpiresAt: timestamp(row.lease_expires_at)!, fencingEpoch,
   };
 }
@@ -555,7 +599,7 @@ async function claimRecoverableRows(
         AND fencing_epoch < 9007199254740991
         AND recovery_not_before IS NOT NULL
         AND recovery_not_before <= clock_timestamp()
-        AND (status IN ('pending', 'failed_retryable')
+        AND (status = 'failed_retryable'
           OR (status = 'running' AND lease_expires_at <= clock_timestamp()))
       ORDER BY recovery_not_before ASC, updated_at ASC, project_ref ASC, mutation_id ASC
       FOR UPDATE SKIP LOCKED
@@ -569,7 +613,8 @@ async function claimRecoverableRows(
     WHERE mutation.project_ref = candidates.project_ref
       AND mutation.mutation_id = candidates.mutation_id
     RETURNING mutation.project_ref, mutation.mutation_id, mutation.operation, mutation.resource_key,
-      mutation.checkpoint, mutation.recovery_not_before, mutation.lease_token,
+      mutation.request_fingerprint, mutation.principal_type, mutation.principal_id, mutation.checkpoint,
+      mutation.recovery_not_before, mutation.lease_token,
       mutation.lease_expires_at, mutation.fencing_epoch
   ` as StoredRecoverableMutationClaimRow[];
   return rows;
@@ -616,6 +661,25 @@ export async function checkpointProjectMutation(
     RETURNING mutation_id
   ` as Array<{ mutation_id: string }>;
   return updated ? "updated" : "lease_lost";
+}
+
+export async function withProjectMutationLease<T>(
+  transaction: SQL,
+  input: VerifyProjectMutationLeaseInput,
+  operation: () => Promise<T>,
+): Promise<ProjectMutationLeaseExecution<T>> {
+  assertLeaseInput(input);
+  const [row] = await transaction`
+    SELECT mutation_id
+    FROM project_mutations
+    WHERE project_ref = ${input.projectRef} AND mutation_id = ${input.mutationId}
+      AND status = 'running' AND lease_token = ${input.leaseToken}
+      AND fencing_epoch = ${input.fencingEpoch}
+      AND lease_expires_at > clock_timestamp()
+    FOR UPDATE
+  ` as Array<{ mutation_id: string }>;
+  if (!row) return { kind: "lease_lost" };
+  return { kind: "executed", value: await operation() };
 }
 
 interface FinishProjectMutationInput extends MutationLeaseInput {

@@ -249,58 +249,23 @@ async function getIndexHtml(): Promise<string | null> {
   }
 }
 
-// 在 Bun.serve 监听之前构建网关内存态路由。docker 模式下此时 caddy 容器尚未启动，
-// 首次 persistAndLoad 的 POST /load 会失败；这里只构建内存态，最终的 JSON 注入由
-// ensureGatewayReady 在 HTTP server 就绪（满足 caddy 的 healthcheck 前置）后补发。
-async function initializeGatewayRoutes(): Promise<{ caddyReady: boolean }> {
-  const { gatewayService } = await import("./services/gateway.service");
-  try {
-    await gatewayService.setupMasterRoutes();
-  } catch (e) {
-    // 首次 POST /load 在 caddy 未就绪时失败是预期路径，记录后由 ensureGatewayReady 重试。
-    logger.warn(
-      "Initial gateway config apply failed; will retry once Caddy is reachable",
-      e instanceof Error ? e.message : String(e),
-    );
-  }
-  try {
-    await gatewayService.setupHostedAuthRoutes();
-  } catch (e) {
-    logger.warn(
-      "Hosted auth route setup deferred; will retry once Caddy is reachable",
-      e instanceof Error ? e.message : String(e),
-    );
-  }
-  try {
-    const { frontendService } = await import("./services/frontend.service");
-    const result = await frontendService.reconcileGatewayRoutes();
-    if (result.configured > 0 || result.errors.length > 0) {
-      logger.info("[FrontendService] Reconciled gateway routes", result);
-    }
-  } catch (e) {
-    logger.warn(
-      "Frontend gateway reconciliation deferred; will retry once Caddy is reachable",
-      e instanceof Error ? e.message : String(e),
-    );
-  }
-  const caddyReady = await gatewayService.checkCaddyConnectivity();
-  return { caddyReady };
-}
-
-// HTTP server 监听之后异步触发：caddy 在 docker 模式下晚于 management-api 启动，
-// 这里带退避轮询 Admin API，可达后补一次 persistAndLoad 让 JSON 路由接管 bootstrap Caddyfile。
-async function ensureGatewayRoutesAfterServe(initialReady: boolean): Promise<void> {
-  if (initialReady) return;
+async function waitForGatewayBeforeServe(): Promise<void> {
   const { gatewayService } = await import("./services/gateway.service");
   const maxAttempts = Number(process.env.GATEWAY_READY_MAX_ATTEMPTS || 60);
   const intervalMs = Number(process.env.GATEWAY_READY_INTERVAL_MS || 1000);
   const result = await gatewayService.ensureGatewayReady({ maxAttempts, intervalMs });
   if (!result.ready) {
-    logger.error(
-      "Gateway never became reachable; bootstrap Caddyfile routes remain active",
-      result.error,
-    );
+    throw new Error(result.error || "Caddy Admin API did not become ready");
   }
+}
+
+async function reconcileGatewayBeforeServe(): Promise<void> {
+  const { reconcileCanonicalGatewayRoutes } = await import("./services/gateway.service");
+  const state = await reconcileCanonicalGatewayRoutes();
+  logger.info("[Bootstrap] Canonical gateway reconciliation completed", {
+    tenants: state.tenants.updated,
+    frontends: state.frontends.configured,
+  });
 }
 
 const app = new Elysia({ strictPath: false })
@@ -1141,8 +1106,6 @@ async function bootstrap() {
     await migrateWebhookSecretsToControlStore(controlPlaneSql);
     await migrateLegacyProviderLinkingConfig(controlPlaneSql);
 
-    const { caddyReady: initialGatewayReady } = await initializeGatewayRoutes();
-
     const { jitDatabaseAccessService } = await import("./services/jit-database-access.service");
     const jitGatewayState = await jitDatabaseAccessService.startGateway();
     if (jitGatewayState.errors.length > 0) {
@@ -1165,6 +1128,14 @@ async function bootstrap() {
     }
 
     await recoverDatabaseReplacementsBeforeServe();
+
+    await waitForGatewayBeforeServe();
+
+    const { recoverFrontendReleasesBeforeServe } =
+      await import("./workers/frontend-release-recovery.worker");
+    await recoverFrontendReleasesBeforeServe();
+
+    await reconcileGatewayBeforeServe();
 
     Bun.serve({
       port: config.port,
@@ -1376,6 +1347,10 @@ async function bootstrap() {
       await import("./workers/branch-replacement-recovery.worker");
     startBranchReplacementRecoveryWorker();
 
+    const { startFrontendReleaseRecoveryWorker } =
+      await import("./workers/frontend-release-recovery.worker");
+    startFrontendReleaseRecoveryWorker();
+
     const { scheduledFunctionWorker } = await import("./workers/scheduled-function.worker");
     scheduledFunctionWorker.start();
 
@@ -1416,15 +1391,6 @@ async function bootstrap() {
       ),
     );
 
-    // docker 模式下 caddy 容器晚于 management-api 启动，首次 gateway /load 会在
-    // initializeGatewayRoutes 中失败。这里在 HTTP server 就绪后带退避重试，
-    // 直到 caddy 可达再补发 JSON 配置，让租户路由接管 bootstrap Caddyfile。
-    ensureGatewayRoutesAfterServe(initialGatewayReady).catch((err: unknown) =>
-      logger.error("[Bootstrap] Gateway readiness check failed (non-fatal):", {
-        error: err instanceof Error ? err.message : String(err),
-      }),
-    );
-
     logger.info(`
     ============================================================
              SupaCloud Management API
@@ -1463,6 +1429,9 @@ export function startManagementApi(): void {
       const { stopBranchReplacementRecoveryWorker } =
         await import("./workers/branch-replacement-recovery.worker");
       stopBranchReplacementRecoveryWorker();
+      const { stopFrontendReleaseRecoveryWorker } =
+        await import("./workers/frontend-release-recovery.worker");
+      stopFrontendReleaseRecoveryWorker();
       const { scheduledFunctionWorker } =
         await import("./workers/scheduled-function.worker");
       scheduledFunctionWorker.stop();

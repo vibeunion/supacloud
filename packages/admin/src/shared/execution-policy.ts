@@ -29,6 +29,10 @@ const ACTION_POLICY: Record<string, ModulePolicy> = {
             "set_custom_hostname", "delete_custom_hostname", "verify_custom_hostname",
         ],
     },
+    frontend: {
+        read: ["list_releases", "get_release"],
+        write: ["upload_release", "activate_release"],
+    },
     ssh: {
         read: [
             "ping", "versions", "diagnose", "exec", "troubleshoot", "container_logs",
@@ -126,7 +130,7 @@ function requestedProjectRef(
     if (moduleName === "platform") {
         return PLATFORM_PROJECT_REF_ACTIONS.has(action) ? stringArgument(args, "ref") : null;
     }
-    return moduleName === "gateway" ? stringArgument(args, "ref") : null;
+    return ["gateway", "frontend"].includes(moduleName) ? stringArgument(args, "ref") : null;
 }
 
 function requiresProjectRef(moduleName: string, action: string): boolean {

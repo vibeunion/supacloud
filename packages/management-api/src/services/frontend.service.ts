@@ -12,10 +12,11 @@
  *   SSR: build -> start process -> readiness -> switch proxy route
  */
 import { $ } from "bun";
-import { readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { brotliCompressSync, constants as zlibConstants, gzipSync } from "node:zlib";
 import { logger } from "../utils/logger";
 import { config } from "../config";
+import { AppError } from "../utils/errors";
 import { normalizeBaseDomain } from "../utils/project-routing";
 import type {
   FrontendDeployment,
@@ -35,6 +36,10 @@ import {
 } from "./frontend-runtime";
 import { installManagedSystemdUnit, removeManagedSystemdUnit } from "./systemd-unit-broker";
 import { tenantRuntimeService } from "./tenant-runtime.service";
+import {
+  withFrontendDeploymentLock,
+  type FrontendDeploymentLock,
+} from "./frontend-deployment-lock";
 
 const FRONTEND_BASE_DIR = "/var/supacloud/frontends";
 const READINESS_TIMEOUT_MS = 30_000;
@@ -55,6 +60,26 @@ const STATIC_PRECOMPRESS_EXTENSIONS = new Set([
   ".xml",
 ]);
 const STATIC_IMAGE_OPTIMIZE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png"]);
+const IMMUTABLE_LEGACY_DEPLOY_ERROR = "Immutable frontend release is active or unresolved; upload and CAS activate a new release instead";
+
+export interface FrontendImmutableReleaseState {
+  activeBuildDir(projectRef: string, deploymentId: string): Promise<string | null>;
+  hasActiveRelease(projectRef: string, deploymentId: string): Promise<boolean>;
+  hasUnresolvedActivation(projectRef: string, deploymentId: string): Promise<boolean>;
+}
+
+interface PreparedLegacyBuild {
+  stagingDir: string;
+  buildLog: string;
+}
+
+type PreparedLegacySsrBuild = PreparedLegacyBuild;
+
+export type FrontendImmutableReleaseStateLoader = () => Promise<FrontendImmutableReleaseState>;
+
+const loadFrontendImmutableReleaseState: FrontendImmutableReleaseStateLoader = async () => (
+  (await import("./frontend-release.service")).frontendReleaseService
+);
 
 function normalizeHealthCheckPath(value: string | undefined): string {
   const path = value?.trim() || "/";
@@ -116,14 +141,23 @@ export class FrontendService {
   private baseDir: string;
   private domainService: FrontendDomainService;
   private recordService: FrontendRecordService;
+  private deploymentLock: FrontendDeploymentLock;
+  private releaseState: FrontendImmutableReleaseStateLoader;
 
-  constructor(baseDir: string = FRONTEND_BASE_DIR) {
+  constructor(
+    baseDir: string = FRONTEND_BASE_DIR,
+    deploymentLock: FrontendDeploymentLock = withFrontendDeploymentLock,
+    releaseState: FrontendImmutableReleaseStateLoader = loadFrontendImmutableReleaseState,
+  ) {
     this.baseDir = baseDir;
-    this.domainService = new FrontendDomainService(
-      baseDir,
-      this.getDeployment.bind(this),
-      this.configureGatewayRoute.bind(this),
-    );
+    this.deploymentLock = deploymentLock;
+    this.releaseState = releaseState;
+    this.domainService = new FrontendDomainService({
+      deploymentLock,
+      commitHostMutation: this.commitHostMutation.bind(this),
+      getDeployment: this.getDeployment.bind(this),
+      writeDeployment: this.writeDeployment.bind(this),
+    });
     this.recordService = new FrontendRecordService(baseDir);
   }
 
@@ -253,7 +287,8 @@ export class FrontendService {
           continue;
         }
 
-        const buildDir = this.joinPath(this.baseDir, ref, deployment.id, "build");
+        const activeBuildDir = await (await this.releaseState()).activeBuildDir(ref, deployment.id);
+        const buildDir = activeBuildDir || this.joinPath(this.baseDir, ref, deployment.id, "build");
         const buildStat = await stat(buildDir).catch(() => null);
         if (!buildStat?.isDirectory()) {
           skipped++;
@@ -281,6 +316,61 @@ export class FrontendService {
       logger.warn("[FrontendService] Failed to read deployment JSON", { error: err });
       return null;
     }
+  }
+
+  private async writeDeployment(deployment: FrontendDeployment): Promise<void> {
+    const deploymentPath = this.joinPath(
+      this.baseDir,
+      deployment.project_ref,
+      deployment.id,
+      "deployment.json",
+    );
+    const temporaryPath = `${deploymentPath}.tmp-${crypto.randomUUID()}`;
+    try {
+      await Bun.write(temporaryPath, JSON.stringify(deployment, null, 2));
+      await chmod(temporaryPath, 0o600);
+      await rename(temporaryPath, deploymentPath);
+    } finally {
+      try {
+        await rm(temporaryPath, { force: true });
+      } catch (error: unknown) {
+        logger.warn("[FrontendService] Failed to clean up deployment metadata temporary file", {
+          path: temporaryPath,
+          error,
+        });
+      }
+    }
+  }
+
+  private async assertLegacyMutationAllowed(
+    projectRef: string,
+    deploymentId: string,
+  ): Promise<void> {
+    const releases = await this.releaseState();
+    if (await releases.hasActiveRelease(projectRef, deploymentId)
+      || await releases.hasUnresolvedActivation(projectRef, deploymentId)) {
+      throw new AppError(
+        "Immutable frontend release is active or unresolved; use CAS release activation",
+        409,
+        "FRONTEND_RELEASE_ACTIVE",
+      );
+    }
+  }
+
+  private async legacyDeployBlocked(projectRef: string, deploymentId: string): Promise<boolean> {
+    const releases = await this.releaseState();
+    return await releases.hasActiveRelease(projectRef, deploymentId)
+      || await releases.hasUnresolvedActivation(projectRef, deploymentId);
+  }
+
+  private legacyDeployConflict(deploymentId: string): FrontendBuildResult {
+    return {
+      success: false,
+      deployment_id: deploymentId,
+      url: "",
+      build_log: "",
+      error: IMMUTABLE_LEGACY_DEPLOY_ERROR,
+    };
   }
 
   async createDeployment(projectRef: string, deploymentConfig: FrontendDeploymentConfig): Promise<FrontendDeployment> {
@@ -326,47 +416,52 @@ export class FrontendService {
     deploymentId: string,
     updates: Partial<FrontendDeploymentConfig>
   ): Promise<FrontendDeployment | null> {
-    const deployment = await this.getDeployment(projectRef, deploymentId);
-    if (!deployment) return null;
-
-    const definedUpdates = Object.fromEntries(
-      Object.entries(updates).filter(([, value]) => value !== undefined),
-    ) as Partial<FrontendDeploymentConfig>;
-    const normalizedUpdates = definedUpdates.health_check_path === undefined
-      ? definedUpdates
-      : {
-          ...definedUpdates,
-          health_check_path: normalizeHealthCheckPath(definedUpdates.health_check_path),
-        };
-    const updated = {
-      ...deployment,
-      ...normalizedUpdates,
-      updated_at: new Date().toISOString(),
-    };
-
-    await Bun.write(
-      this.joinPath(this.baseDir, projectRef, deploymentId, "deployment.json"),
-      JSON.stringify(updated, null, 2)
-    );
-
-    return updated;
+    return this.deploymentLock(projectRef, deploymentId, async () => {
+      const deployment = await this.getDeployment(projectRef, deploymentId);
+      if (!deployment) return null;
+      const definedUpdates = Object.fromEntries(
+        Object.entries(updates).filter(([, value]) => value !== undefined),
+      ) as Partial<FrontendDeploymentConfig>;
+      const normalizedUpdates = definedUpdates.health_check_path === undefined
+        ? definedUpdates
+        : {
+            ...definedUpdates,
+            health_check_path: normalizeHealthCheckPath(definedUpdates.health_check_path),
+          };
+      const updated = {
+        ...deployment,
+        ...normalizedUpdates,
+        updated_at: new Date().toISOString(),
+      };
+      const hostsChanged = deployment.domain !== updated.domain
+        || JSON.stringify(deployment.custom_domains) !== JSON.stringify(updated.custom_domains);
+      if (hostsChanged) {
+        if (deployment.status === "success") {
+          await this.commitHostMutation(deployment, updated);
+          return updated;
+        }
+        await this.assertLegacyMutationAllowed(projectRef, deploymentId);
+      }
+      await this.writeDeployment(updated);
+      return updated;
+    });
   }
 
-  async deleteDeployment(projectRef: string, deploymentId: string): Promise<boolean> {
-    const deploymentDir = this.joinPath(this.baseDir, projectRef, deploymentId);
-
-    try {
+  async deleteDeployment(
+    projectRef: string,
+    deploymentId: string,
+  ): Promise<"deleted" | "active" | "not_found"> {
+    return this.deploymentLock(projectRef, deploymentId, async () => {
+      const releases = await this.releaseState();
+      if (await releases.hasActiveRelease(projectRef, deploymentId)
+        || await releases.hasUnresolvedActivation(projectRef, deploymentId)) return "active";
       const deployment = await this.getDeployment(projectRef, deploymentId);
-      if (deployment) {
-        await this.stopProcess(projectRef, deploymentId);
-        await this.removeGatewayRoute(deployment);
-      }
-      await $`rm -rf ${deploymentDir}`.quiet();
-      return true;
-    } catch (err: unknown) {
-      logger.warn("[FrontendService] Failed to delete deployment", { error: err });
-      return false;
-    }
+      if (!deployment) return "not_found";
+      await this.stopProcess(projectRef, deploymentId);
+      await this.removeGatewayRoute(deployment);
+      await $`rm -rf ${this.joinPath(this.baseDir, projectRef, deploymentId)}`.quiet();
+      return "deleted";
+    });
   }
 
   async listDnsRecords(projectRef: string, deploymentId: string): Promise<FrontendDnsRecord[] | null> {
@@ -414,8 +509,22 @@ export class FrontendService {
     sourcePath: string
   ): Promise<FrontendBuildResult> {
     const deployment = await this.getDeployment(projectRef, deploymentId);
-    if (!deployment) {
+    if (!deployment) return this.missingDeploymentResult(deploymentId);
+    return this.deploymentLock(projectRef, deploymentId, () =>
+      this.deployFromSourceUnderLock(projectRef, deploymentId, sourcePath));
+  }
+
+  private async deployFromSourceUnderLock(
+    projectRef: string,
+    deploymentId: string,
+    sourcePath: string,
+  ): Promise<FrontendBuildResult> {
+    if (!await this.getDeployment(projectRef, deploymentId)) {
       return { success: false, deployment_id: deploymentId, url: "", build_log: "", error: "Deployment not found" };
+    }
+
+    if (await this.legacyDeployBlocked(projectRef, deploymentId)) {
+      return this.legacyDeployConflict(deploymentId);
     }
 
     const deploymentDir = this.joinPath(this.baseDir, projectRef, deploymentId);
@@ -447,8 +556,24 @@ export class FrontendService {
     branch: string = "main"
   ): Promise<FrontendBuildResult> {
     const deployment = await this.getDeployment(projectRef, deploymentId);
-    if (!deployment) {
+    if (!deployment) return this.missingDeploymentResult(deploymentId);
+    return this.deploymentLock(projectRef, deploymentId, () =>
+      this.deployFromGitUnderLock(projectRef, deploymentId, gitUrl, branch));
+  }
+
+  private async deployFromGitUnderLock(
+    projectRef: string,
+    deploymentId: string,
+    gitUrl: string,
+    branch: string,
+  ): Promise<FrontendBuildResult> {
+    if (!await this.getDeployment(projectRef, deploymentId)) {
       return { success: false, deployment_id: deploymentId, url: "", build_log: "", error: "Deployment not found" };
+    }
+
+
+    if (await this.legacyDeployBlocked(projectRef, deploymentId)) {
+      return this.legacyDeployConflict(deploymentId);
     }
 
     const deploymentDir = this.joinPath(this.baseDir, projectRef, deploymentId);
@@ -513,8 +638,6 @@ export class FrontendService {
       return { success: false, deployment_id: deploymentId, url: "", build_log: "", error: "Deployment not found" };
     }
 
-    const deploymentDir = this.joinPath(this.baseDir, projectRef, deploymentId);
-    const buildDir = this.joinPath(deploymentDir, "build");
     let buildLog = "";
 
     await this.updateDeployment(projectRef, deploymentId, { status: "building" } as Partial<FrontendDeployment>);
@@ -547,38 +670,12 @@ export class FrontendService {
       }
 
       const defaults = FRAMEWORK_DEFAULTS[deployment.framework];
-      const outputDir = this.joinPath(sourceDir, deployment.output_dir);
-      await $`rm -rf ${buildDir} && cp -r ${outputDir} ${buildDir}`.quiet();
-      if (deployment.framework === "sveltekit") {
-        await prepareSvelteKitRuntime(sourceDir, buildDir);
-      }
-      if (!defaults.is_ssr) {
-        await this.precompressStaticAssets(buildDir);
-      }
-
       if (defaults.is_ssr) {
-        // Blue-green: start process FIRST, but do NOT route traffic yet
-        const port = await this.startProcess(projectRef, deploymentId, deployment, buildDir, defaults.is_ssr);
-
-        const ready = await this.waitForReadiness(port, deployment.health_check_path || defaults.health_check_path);
-        if (!ready) {
-          // Rollback: stop the process, leave the gateway pointing at old state (or nothing)
-          logger.error(`[FrontendService] Readiness failed for ${projectRef}/${deploymentId}, stopping process`);
-          await this.stopProcess(projectRef, deploymentId);
-          throw new Error(`Frontend process failed readiness check on port ${port} within ${READINESS_TIMEOUT_MS}ms`);
-        }
+        const prepared = await this.prepareLegacySsrBuild(deployment, sourceDir, buildLog);
+        return await this.publishLegacySsrBuild(projectRef, deploymentId, prepared);
       }
-
-      // Static Caddy routes serve buildDir directly; process-backed routes proxy after readiness.
-      await this.configureGatewayRoute(deployment, buildDir, defaults.is_ssr);
-
-      await this.updateDeployment(projectRef, deploymentId, {
-        status: "success",
-        last_deployed_at: new Date().toISOString(),
-        build_log: buildLog,
-      } as Partial<FrontendDeployment>);
-
-      return { success: true, deployment_id: deploymentId, url: deployment.deployment_url, build_log: buildLog };
+      const prepared = await this.prepareLegacyBuild(deployment, sourceDir, buildLog);
+      return await this.publishLegacyBuild(projectRef, deploymentId, prepared);
     } catch (error: unknown) {
       buildLog += `\nError: ${error instanceof Error ? error.message : String(error)}\n`;
       await this.updateDeployment(projectRef, deploymentId, {
@@ -596,29 +693,283 @@ export class FrontendService {
     }
   }
 
+  private async prepareLegacyBuild(
+    deployment: FrontendDeployment,
+    sourceDir: string,
+    buildLog: string,
+  ): Promise<PreparedLegacyBuild> {
+    const deploymentDir = this.joinPath(this.baseDir, deployment.project_ref, deployment.id);
+    const stagingDir = await mkdtemp(this.joinPath(deploymentDir, ".legacy-build-"));
+    const outputDir = this.joinPath(sourceDir, deployment.output_dir);
+    try {
+      await $`cp -r ${outputDir}/. ${stagingDir}`.quiet();
+      await this.precompressStaticAssets(stagingDir);
+      await chmod(stagingDir, 0o755);
+      return { stagingDir, buildLog };
+    } catch (error: unknown) {
+      await rm(stagingDir, { recursive: true, force: true });
+      throw error;
+    }
+  }
+
+  private async publishLegacyBuild(
+    projectRef: string,
+    deploymentId: string,
+    prepared: PreparedLegacyBuild,
+  ): Promise<FrontendBuildResult> {
+    try {
+      return await this.deploymentLock(projectRef, deploymentId, async () => {
+        await this.assertLegacyMutationAllowed(projectRef, deploymentId);
+        const deployment = await this.getDeployment(projectRef, deploymentId);
+        if (!deployment) throw new Error("Deployment not found");
+        const buildDir = this.joinPath(this.baseDir, projectRef, deploymentId, "build");
+        const backupDir = await this.publishPreparedBuild(prepared.stagingDir, buildDir);
+        try {
+          await this.publishLegacyRoute(deployment, buildDir);
+          await this.writeDeployment({
+            ...deployment,
+            status: "success" as const,
+            last_deployed_at: new Date().toISOString(),
+            build_log: prepared.buildLog,
+            updated_at: new Date().toISOString(),
+          });
+        } catch (error: unknown) {
+          await this.restorePreviousBuild(buildDir, backupDir);
+          throw error;
+        }
+        if (backupDir) await this.removeLegacyBuildArtifact(backupDir);
+        return {
+          success: true,
+          deployment_id: deploymentId,
+          url: deployment.deployment_url,
+          build_log: prepared.buildLog,
+        };
+      });
+    } finally {
+      await this.removeLegacyBuildArtifact(prepared.stagingDir);
+    }
+  }
+
+  private async publishLegacySsrBuild(
+    projectRef: string,
+    deploymentId: string,
+    prepared: PreparedLegacySsrBuild,
+  ): Promise<FrontendBuildResult> {
+    try {
+      return await this.deploymentLock(projectRef, deploymentId, () =>
+        this.commitLegacySsrBuild(projectRef, deploymentId, prepared));
+    } finally {
+      await this.removeLegacyBuildArtifact(prepared.stagingDir);
+    }
+  }
+
+  private async commitLegacySsrBuild(
+    projectRef: string,
+    deploymentId: string,
+    prepared: PreparedLegacySsrBuild,
+  ): Promise<FrontendBuildResult> {
+    await this.assertLegacyMutationAllowed(projectRef, deploymentId);
+    const deployment = await this.getDeployment(projectRef, deploymentId);
+    if (!deployment) throw new Error("Deployment not found");
+    const buildDir = this.joinPath(this.baseDir, projectRef, deploymentId, "build");
+    const backupDir = await this.publishPreparedBuild(prepared.stagingDir, buildDir);
+    try {
+      await this.startReadyLegacySsrProcess(deployment, buildDir);
+      await this.applyGatewayRoute(deployment, buildDir, true, null);
+      await this.writeSuccessfulDeployment(deployment, prepared.buildLog);
+    } catch (publishError: unknown) {
+      await this.rollbackLegacySsrBuild(deployment, buildDir, backupDir, publishError);
+    }
+    if (backupDir) await this.removeLegacyBuildArtifact(backupDir);
+    return this.successfulBuildResult(deployment, prepared.buildLog);
+  }
+
+  private async startReadyLegacySsrProcess(
+    deployment: FrontendDeployment,
+    buildDir: string,
+  ): Promise<void> {
+    const port = await this.startProcess(
+      deployment.project_ref,
+      deployment.id,
+      deployment,
+      buildDir,
+      true,
+    );
+    if (await this.waitForReadiness(port, deployment.health_check_path || "/")) return;
+    throw new Error(`Frontend process failed readiness check on port ${port} within ${READINESS_TIMEOUT_MS}ms`);
+  }
+
+  private async rollbackLegacySsrBuild(
+    deployment: FrontendDeployment,
+    buildDir: string,
+    backupDir: string | null,
+    publishError: unknown,
+  ): Promise<never> {
+    try {
+      await this.stopProcess(deployment.project_ref, deployment.id);
+      await this.restorePreviousBuild(buildDir, backupDir);
+      if (backupDir) await this.startReadyLegacySsrProcess(deployment, buildDir);
+    } catch (rollbackError: unknown) {
+      throw new AggregateError(
+        [publishError, rollbackError],
+        "Frontend SSR publication and rollback both failed",
+      );
+    }
+    throw publishError;
+  }
+
+  private async writeSuccessfulDeployment(
+    deployment: FrontendDeployment,
+    buildLog: string,
+  ): Promise<void> {
+    await this.writeDeployment({
+      ...deployment,
+      status: "success" as const,
+      last_deployed_at: new Date().toISOString(),
+      build_log: buildLog,
+      updated_at: new Date().toISOString(),
+    });
+  }
+
+  private successfulBuildResult(
+    deployment: FrontendDeployment,
+    buildLog: string,
+  ): FrontendBuildResult {
+    return {
+      success: true,
+      deployment_id: deployment.id,
+      url: deployment.deployment_url,
+      build_log: buildLog,
+    };
+  }
+
+  private missingDeploymentResult(deploymentId: string): FrontendBuildResult {
+    return {
+      success: false,
+      deployment_id: deploymentId,
+      url: "",
+      build_log: "",
+      error: "Deployment not found",
+    };
+  }
+
+  private async prepareLegacySsrBuild(
+    deployment: FrontendDeployment,
+    sourceDir: string,
+    buildLog: string,
+  ): Promise<PreparedLegacySsrBuild> {
+    const deploymentDir = this.joinPath(this.baseDir, deployment.project_ref, deployment.id);
+    const stagingDir = await mkdtemp(this.joinPath(deploymentDir, ".legacy-ssr-build-"));
+    try {
+      await $`cp -r ${this.joinPath(sourceDir, deployment.output_dir)}/. ${stagingDir}`.quiet();
+      if (deployment.framework === "sveltekit") {
+        await prepareSvelteKitRuntime(sourceDir, stagingDir);
+      }
+      await chmod(stagingDir, 0o755);
+      return { stagingDir, buildLog };
+    } catch (error: unknown) {
+      await rm(stagingDir, { recursive: true, force: true });
+      throw error;
+    }
+  }
+
+  private async publishPreparedBuild(stagingDir: string, buildDir: string): Promise<string | null> {
+    const backupDir = `${buildDir}.previous-${crypto.randomUUID()}`;
+    const existing = await stat(buildDir).catch(() => null);
+    if (existing) await rename(buildDir, backupDir);
+    try {
+      await rename(stagingDir, buildDir);
+    } catch (publishError: unknown) {
+      if (!existing) throw publishError;
+      try {
+        await rename(backupDir, buildDir);
+      } catch (restoreError: unknown) {
+        throw new AggregateError(
+          [publishError, restoreError],
+          "Frontend build publication and rollback both failed",
+        );
+      }
+      throw publishError;
+    }
+    return existing ? backupDir : null;
+  }
+
+  private async restorePreviousBuild(buildDir: string, backupDir: string | null): Promise<void> {
+    await rm(buildDir, { recursive: true, force: true });
+    if (backupDir) await rename(backupDir, buildDir);
+  }
+
+  private async removeLegacyBuildArtifact(path: string): Promise<void> {
+    try {
+      await rm(path, { recursive: true, force: true });
+    } catch (error: unknown) {
+      logger.warn("[FrontendService] Failed to clean up legacy build artifact", { path, error });
+    }
+  }
+
+  private async publishLegacyRoute(
+    deployment: FrontendDeployment,
+    buildDir: string,
+  ): Promise<void> {
+    await this.applyGatewayRoute(deployment, buildDir, false, null);
+  }
+
   // ── Gateway (Web Server) Config ───────────────────────────────────
 
   async configureGatewayRoute(deployment: FrontendDeployment, buildDir: string, isSSR: boolean): Promise<void> {
-    const port = 30000 + parseInt(deployment.id, 16) % 10000;
-    const hosts = [deployment.domain, ...deployment.custom_domains];
+    await this.deploymentLock(deployment.project_ref, deployment.id, async () => {
+      const currentDeployment = await this.getDeployment(deployment.project_ref, deployment.id);
+      if (!currentDeployment) throw new Error("Deployment not found");
+      const activeBuildDir = await (await this.releaseState())
+        .activeBuildDir(deployment.project_ref, deployment.id);
+      await this.applyGatewayRoute(currentDeployment, buildDir, isSSR, activeBuildDir);
+    });
+  }
 
+  private async applyGatewayRoute(
+    deployment: FrontendDeployment,
+    buildDir: string,
+    isSSR: boolean,
+    activeBuildDir: string | null,
+  ): Promise<void> {
+    const port = 30000 + parseInt(deployment.id, 16) % 10000;
     const { gatewayService } = await import("./gateway.service");
     await gatewayService.configureFrontendRoute({
       projectRef: deployment.project_ref,
       deploymentId: deployment.id,
-      hosts,
-      port: isSSR ? port : undefined,
-      root: isSSR ? undefined : buildDir,
-      mode: isSSR ? "proxy" : "static",
+      hosts: [deployment.domain, ...deployment.custom_domains],
+      port: activeBuildDir ? undefined : isSSR ? port : undefined,
+      root: activeBuildDir || (isSSR ? undefined : buildDir),
+      mode: activeBuildDir || !isSSR ? "static" : "proxy",
     });
   }
 
   private async removeGatewayRoute(deployment: FrontendDeployment): Promise<void> {
     const { gatewayService } = await import("./gateway.service");
+    await gatewayService.removeFrontendRoute(deployment.project_ref, deployment.id);
+  }
 
+  private async commitHostMutation(
+    previous: FrontendDeployment,
+    updated: FrontendDeployment,
+  ): Promise<void> {
+    await this.assertLegacyMutationAllowed(updated.project_ref, updated.id);
+    const buildDir = this.joinPath(this.baseDir, updated.project_ref, updated.id, "build");
+    const isSSR = FRAMEWORK_DEFAULTS[previous.framework].is_ssr;
+    await this.applyGatewayRoute(updated, buildDir, isSSR, null);
     try {
-        await gatewayService.removeFrontendRoute(deployment.project_ref, deployment.id);
-    } catch (e: unknown) { logger.debug("suppressed error removing route", { error: String(e) }); }
+      await this.writeDeployment(updated);
+    } catch (commitError: unknown) {
+      try {
+        await this.applyGatewayRoute(previous, buildDir, FRAMEWORK_DEFAULTS[previous.framework].is_ssr, null);
+      } catch (rollbackError: unknown) {
+        throw new AggregateError(
+          [commitError, rollbackError],
+          "Frontend domain metadata commit and gateway rollback both failed",
+        );
+      }
+      throw commitError;
+    }
   }
 
 

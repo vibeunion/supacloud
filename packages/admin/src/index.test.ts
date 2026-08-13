@@ -489,6 +489,38 @@ describe("supacloud-admin process contract", () => {
         }
     });
 
+    test("blocks production frontend release upload before file or HTTP without exact confirmation", async () => {
+        const workspace = mkdtempSync(join(tmpdir(), "supacloud-admin-production-frontend-"));
+        let requestCount = 0;
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch() {
+                requestCount += 1;
+                return Response.json({});
+            },
+        });
+        writeFileSync(join(workspace, ".env.supacloud.production"), [
+            "SUPACLOUD_ENV=production",
+            `SUPACLOUD_API_URL=http://127.0.0.1:${server.port}`,
+            "SUPACLOUD_API_TOKEN=frontend-production-token",
+            "SUPACLOUD_PROJECT_REF=prod-ref",
+        ].join("\n") + "\n");
+        try {
+            const execution = await runAdminCli([
+                "frontend", "upload_release", "--ref", "prod-ref", "--id", "web",
+                "--zip_path", join(workspace, "missing.zip"), "--env", "production",
+            ], {}, workspace);
+            expect(execution.exitCode).toBe(1);
+            expect(execution.output).toContain("--confirm-production prod-ref");
+            expect(execution.output).not.toContain("frontend-production-token");
+            expect(requestCount).toBe(0);
+        } finally {
+            server.stop(true);
+            rmSync(workspace, { recursive: true, force: true });
+        }
+    });
+
     test("blocks read-only writes before HTTP without reflecting credentials", async () => {
         const workspace = mkdtempSync(join(tmpdir(), "supacloud-admin-read-only-"));
         let requestCount = 0;

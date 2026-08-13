@@ -45,7 +45,7 @@ function insertedMutation(parameters: unknown[]): MutationRow[] {
     principal_type: String(principalType), principal_id: String(principalId), status: "pending",
     checkpoint: {}, receipt: null, response_status: null, failure_code: null,
     lease_owner: null, lease_token: null, lease_expires_at: null, fencing_epoch: 0,
-    recovery_not_before: new Date().toISOString(),
+    recovery_not_before: null,
     completed_at: null, created_at: CREATED_AT, updated_at: CREATED_AT,
   };
   mutationRows.set(key, row);
@@ -62,6 +62,7 @@ function claimedMutation(parameters: unknown[]): MutationRow[] {
   Object.assign(row, {
     status: "running", lease_owner: leaseOwner, lease_token: leaseToken,
     lease_expires_at: new Date(Date.now() + Number(leaseSeconds) * 1000).toISOString(),
+    recovery_not_before: row.recovery_not_before ?? new Date().toISOString(),
     fencing_epoch: Number(row.fencing_epoch) + 1, completed_at: null,
   });
   return clonedRow(row);
@@ -124,7 +125,7 @@ function recoverableMutations(parameters: unknown[]): MutationRow[] {
     .filter((row) => operationNames.has(String(row.operation))
       && row.recovery_not_before !== null
       && Date.parse(String(row.recovery_not_before)) <= Date.now()
-      && (["pending", "failed_retryable"].includes(row.status)
+      && (row.status === "failed_retryable"
         || row.status === "running" && Date.parse(String(row.lease_expires_at)) <= Date.now()))
     .sort((left, right) => String(left.recovery_not_before).localeCompare(String(right.recovery_not_before))
       || String(left.updated_at).localeCompare(String(right.updated_at))
@@ -161,6 +162,14 @@ const database = mock(async (strings: TemplateStringsArray, ...parameters: unkno
   }
   if (query.includes("lease_active")) {
     return row ? [{ ...structuredClone(row), lease_active: Date.parse(String(row.lease_expires_at)) > Date.now() }] : [];
+  }
+  if (query.startsWith("SELECT mutation_id")) {
+    const [, , leaseToken, fencingEpoch] = parameters;
+    return row?.status === "running" && row.lease_token === leaseToken
+      && Number(row.fencing_epoch) === Number(fencingEpoch)
+      && Date.parse(String(row.lease_expires_at)) > Date.now()
+      ? [{ mutation_id: row.mutation_id }]
+      : [];
   }
   if (query.includes("FROM project_mutations")) return clonedRow(row);
   throw new Error(`Unexpected mutation query: ${query}`);
@@ -225,6 +234,32 @@ describe("project mutation journal", () => {
     executedQueries.length = 0;
     leaseTokenSequence = 100;
     database.mockClear();
+  });
+
+  test("does not schedule a fresh pending mutation for background recovery", async () => {
+    const begun = await mutationService.beginProjectMutation(database as never, beginInput());
+
+    expect(begun.kind).toBe("started");
+    expect(mutationRows.get(mutationKey(PROJECT_REF, MUTATION_ID))?.recovery_not_before).toBeNull();
+    const insertQuery = executedQueries.find((query) => query.startsWith("INSERT INTO project_mutations"));
+    expect(insertQuery).not.toContain("recovery_not_before");
+  });
+
+  test("schedules recovery only after a pending mutation acquires its first lease", async () => {
+    await mutationService.beginProjectMutation(database as never, beginInput());
+    const claimed = await mutationService.claimOrResumeProjectMutation(database as never, {
+      projectRef: PROJECT_REF,
+      mutationId: MUTATION_ID,
+      leaseOwner: "test-worker",
+      leaseToken: LEASE_TOKEN_A,
+      leaseSeconds: 30,
+    });
+
+    expect(claimed.kind).toBe("claimed");
+    expect(mutationRows.get(mutationKey(PROJECT_REF, MUTATION_ID))?.recovery_not_before)
+      .toEqual(expect.any(String));
+    const claimQuery = executedQueries.find((query) => query.includes("SET status = 'running'"));
+    expect(claimQuery).toContain("recovery_not_before = COALESCE(recovery_not_before, clock_timestamp())");
   });
 
   test("uses canonical full-request SHA-256 fingerprints", () => {
@@ -404,6 +439,36 @@ describe("project mutation journal", () => {
     expect(currentWrite).toBe("updated");
   });
 
+  test("holds the mutation row lock across a fenced external side effect", async () => {
+    const claim = await beginAndClaim();
+    const fencingEpoch = claim.kind === "claimed" ? claim.mutation.fencingEpoch : 0;
+    let calls = 0;
+    const executed = await mutationService.withProjectMutationLease(database as never, {
+      projectRef: PROJECT_REF,
+      mutationId: MUTATION_ID,
+      leaseToken: LEASE_TOKEN_A,
+      fencingEpoch,
+    }, async () => {
+      calls += 1;
+      return "applied";
+    });
+    const stale = await mutationService.withProjectMutationLease(database as never, {
+      projectRef: PROJECT_REF,
+      mutationId: MUTATION_ID,
+      leaseToken: LEASE_TOKEN_B,
+      fencingEpoch,
+    }, async () => {
+      calls += 1;
+      return "stale";
+    });
+
+    expect(executed).toEqual({ kind: "executed", value: "applied" });
+    expect(stale).toEqual({ kind: "lease_lost" });
+    expect(calls).toBe(1);
+    expect(executedQueries.some((query) => query.startsWith("SELECT mutation_id")
+      && query.endsWith("FOR UPDATE"))).toBe(true);
+  });
+
   test("rejects checkpoint and completion after lease expiry before any takeover", async () => {
     const firstClaim = await beginAndClaim();
     const fencingEpoch = firstClaim.kind === "claimed" ? firstClaim.mutation.fencingEpoch : 0;
@@ -443,6 +508,8 @@ describe("project mutation journal", () => {
     }
     mutationRows.get(mutationKey(PROJECT_REF, exactFirst))!.recovery_not_before = "2026-08-10T00:00:00.000Z";
     mutationRows.get(mutationKey(PROJECT_REF, exactSecond))!.recovery_not_before = "2026-08-10T00:00:01.000Z";
+    mutationRows.get(mutationKey(PROJECT_REF, exactFirst))!.status = "failed_retryable";
+    mutationRows.get(mutationKey(PROJECT_REF, exactSecond))!.status = "failed_retryable";
     mutationRows.get(mutationKey(PROJECT_REF, prefixedOperation))!.recovery_not_before = "2026-08-10T00:00:00.000Z";
     Object.assign(mutationRows.get(mutationKey(PROJECT_REF, unknownOutcome))!, {
       status: "outcome_unknown", recovery_not_before: "2026-08-10T00:00:00.000Z",
@@ -458,14 +525,14 @@ describe("project mutation journal", () => {
     expect(claimed[0]?.mutationId).toBe(exactFirst);
     expect(Object.keys(claimed[0]!).sort()).toEqual([
       "checkpoint", "fencingEpoch", "leaseExpiresAt", "leaseToken", "mutationId", "operation",
-      "projectRef", "recoveryNotBefore", "resourceKey",
+      "principal", "projectRef", "recoveryNotBefore", "requestFingerprint", "resourceKey",
     ]);
-    expect(mutationRows.get(mutationKey(PROJECT_REF, exactSecond))?.status).toBe("pending");
+    expect(mutationRows.get(mutationKey(PROJECT_REF, exactSecond))?.status).toBe("failed_retryable");
     expect(mutationRows.get(mutationKey(PROJECT_REF, prefixedOperation))?.status).toBe("pending");
     expect(mutationRows.get(mutationKey(PROJECT_REF, unknownOutcome))?.status).toBe("outcome_unknown");
     expect(mutationRows.get(mutationKey(PROJECT_REF, immediateRecovery))).toMatchObject({
       status: "pending",
-      recovery_not_before: expect.any(String),
+      recovery_not_before: null,
     });
     const claimQuery = executedQueries.find((query) => query.startsWith("WITH candidates AS"))!;
     expect(claimQuery).toContain("operation = ANY(?)");
@@ -474,12 +541,31 @@ describe("project mutation journal", () => {
     expect(claimQuery).not.toContain("LIKE");
   });
 
+  test("never exposes a fresh pending journal row to the recovery scanner", async () => {
+    await mutationService.beginProjectMutation(database as never, beginInput());
+    const fresh = mutationRows.get(mutationKey(PROJECT_REF, MUTATION_ID))!;
+    fresh.recovery_not_before = "2026-08-10T00:00:00.000Z";
+
+    const claimed = await mutationService.claimRecoverableProjectMutations({
+      operations: [fresh.operation], leaseOwner: "recovery-worker", leaseSeconds: 30, limit: 1,
+    });
+
+    expect(claimed).toEqual([]);
+    expect(fresh).toMatchObject({ status: "pending", fencing_epoch: 0, lease_token: null });
+    const claimQuery = executedQueries.findLast((query) => query.startsWith("WITH candidates AS"))!;
+    expect(claimQuery).not.toContain("status IN ('pending', 'failed_retryable')");
+    expect(claimQuery).toContain("status = 'failed_retryable'");
+  });
+
   test("concurrent recovery scanners receive disjoint fenced claims", async () => {
     const firstId = "00000000-0000-4000-8000-000000000020";
     const secondId = "00000000-0000-4000-8000-000000000021";
     for (const mutationId of [firstId, secondId]) {
       await mutationService.beginProjectMutation(database as never, beginInput({ mutationId }));
-      mutationRows.get(mutationKey(PROJECT_REF, mutationId))!.recovery_not_before = "2026-08-10T00:00:00.000Z";
+      Object.assign(mutationRows.get(mutationKey(PROJECT_REF, mutationId))!, {
+        status: "failed_retryable",
+        recovery_not_before: "2026-08-10T00:00:00.000Z",
+      });
     }
     const claimInput = {
       operations: ["scheduled_functions.create"], leaseSeconds: 30, limit: 1,
@@ -510,6 +596,7 @@ describe("project mutation journal", () => {
     const privateSentinel = "recovery-checkpoint-private-value";
     await mutationService.beginProjectMutation(database as never, beginInput());
     Object.assign(mutationRows.get(mutationKey(PROJECT_REF, MUTATION_ID))!, {
+      status: "failed_retryable",
       recovery_not_before: "2026-08-10T00:00:00.000Z",
       checkpoint: { stage: { token: privateSentinel } },
     });
@@ -527,6 +614,29 @@ describe("project mutation journal", () => {
     expect(errorMessage).toContain("token");
     expect(errorMessage).not.toContain(privateSentinel);
   });
+
+  for (const [field, invalid] of [
+    ["request_fingerprint", "not-a-fingerprint"],
+    ["principal_type", "external"],
+    ["principal_id", " project:proj_1"],
+  ] as const) {
+    test(`rolls back a recovery claim with invalid stored ${field}`, async () => {
+      await mutationService.beginProjectMutation(database as never, beginInput());
+      const row = mutationRows.get(mutationKey(PROJECT_REF, MUTATION_ID))!;
+      Object.assign(row, {
+        status: "failed_retryable",
+        recovery_not_before: "2026-08-10T00:00:00.000Z",
+        [field]: invalid,
+      });
+
+      await expect(mutationService.claimRecoverableProjectMutations({
+        operations: [row.operation as string], leaseOwner: "scanner-a", leaseSeconds: 30, limit: 1,
+      })).rejects.toThrow(/mutation/i);
+
+      expect(mutationRows.get(mutationKey(PROJECT_REF, MUTATION_ID)))
+        .toMatchObject({ status: "failed_retryable", fencing_epoch: 0, lease_token: null });
+    });
+  }
 
   test("fails closed when status readback encounters an unsafe stored projection", async () => {
     const privateSentinel = "stored-status-private-value";
@@ -803,6 +913,7 @@ describe("project mutation journal", () => {
     await mutationService.beginProjectMutation(database as never, beginInput());
     const row = mutationRows.get(mutationKey(PROJECT_REF, MUTATION_ID))!;
     row.resource_key = "legacy:scheduled-function:nightly";
+    row.status = "failed_retryable";
     row.recovery_not_before = "2026-08-10T00:00:00.000Z";
 
     await expect(mutationService.claimRecoverableProjectMutations({
@@ -811,6 +922,6 @@ describe("project mutation journal", () => {
     })).rejects.toThrow("Stored mutation resource key is invalid");
 
     expect(mutationRows.get(mutationKey(PROJECT_REF, MUTATION_ID)))
-      .toMatchObject({ status: "pending", fencing_epoch: 0, lease_token: null });
+      .toMatchObject({ status: "failed_retryable", fencing_epoch: 0, lease_token: null });
   });
 });

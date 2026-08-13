@@ -1,12 +1,21 @@
 {
 	admin 0.0.0.0:2019
-	auto_https off
+	auto_https disable_redirects
+	default_sni supacloud-bootstrap.invalid
+	fallback_sni supacloud-bootstrap.invalid
 }
 
-# Bootstrap-only configuration.
-# The Management API publishes the real routing config as JSON via the Caddy
-# Admin API (POST /load on :2019) once it starts. These routes only exist so
-# the gateway has a sane listener before the JSON config is injected.
-:8000 {
+# Bootstrap is allowed only before Management creates INITIALIZED beside its
+# first durable JSON config. Later Caddy starts use that JSON directly.
+:80 {
+	respond "SupaCloud gateway awaiting Management API JSON config" 503
+}
+
+supacloud-bootstrap.invalid:443 {
+	tls internal
+	respond "SupaCloud gateway awaiting Management API JSON config" 503
+}
+
+:443 {
 	respond "SupaCloud gateway awaiting Management API JSON config" 503
 }
