@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.0](https://github.com/zuohuadong/supacloud/compare/admin-v0.13.0...admin-v0.14.0) (2026-08-13)
+
+
+### Features
+
+* **management-api:** immutable frontend releases with deployment locks and durable Caddy bootstrap ([#890](https://github.com/zuohuadong/supacloud/issues/890)) ([b1a75f6](https://github.com/zuohuadong/supacloud/commit/b1a75f66b46db5ee9f651692aa9ce4fe00f794ef))
+
 ## [0.13.0](https://github.com/zuohuadong/supacloud/compare/admin-v0.12.1...admin-v0.13.0) (2026-08-12)
 
 
