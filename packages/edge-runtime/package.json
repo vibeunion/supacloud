@@ -18,7 +18,7 @@
   "dependencies": {
     "@elysiajs/cors": "^1.4.2",
     "@sinclair/typebox": "^0.34.52",
-    "@supabase/supabase-js": "^2.112.2",
+    "@supabase/supabase-js": "^2.112.3",
     "elysia": "^1.4.29",
     "es-module-lexer": "2.3.1",
     "jose": "^6.2.8"
