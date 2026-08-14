@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.2](https://github.com/zuohuadong/supacloud/compare/supacloud-lite-v0.7.1...supacloud-lite-v0.7.2) (2026-08-14)
+
+
+### Bug Fixes
+
+* **lite:** expose auth health probe ([#895](https://github.com/zuohuadong/supacloud/issues/895)) ([2a2930d](https://github.com/zuohuadong/supacloud/commit/2a2930d75acdcd44216bb60e89701b092e4fd352))
+
 ## [0.7.1](https://github.com/zuohuadong/supacloud/compare/supacloud-lite-v0.7.0...supacloud-lite-v0.7.1) (2026-08-11)
 
 
