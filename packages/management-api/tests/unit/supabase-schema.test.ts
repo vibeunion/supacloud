@@ -386,6 +386,27 @@ describe("supabase bootstrap schema", () => {
     }
   });
 
+  test("tenant schema installs service-role-only durable workflow RPCs", () => {
+    const workflowModule = SQL_MODULES["workflows-public"];
+    for (const source of [
+      workflowModule,
+      readRepoFile("src/db/schemas/supabase.sql"),
+    ]) {
+      expect(source).toContain("CREATE SCHEMA IF NOT EXISTS supacloud_workflows");
+      expect(source).toContain("SELECT pgmq.create('supacloud_internal_workflows')");
+      expect(source).toContain("CREATE OR REPLACE FUNCTION public.supacloud_workflow_start(request jsonb)");
+      expect(source).toContain("GRANT EXECUTE ON FUNCTION public.supacloud_workflow_claim(jsonb) TO service_role");
+      expect(source).toContain("REVOKE ALL ON ALL TABLES IN SCHEMA supacloud_workflows");
+    }
+
+    expect(SQL_MODULES["pgmq-public"]).toContain("SUPACLOUD_QUEUE_NAME_RESERVED");
+    expect(ALTER_TENANT_SQL).toContain(workflowModule);
+    expect(readRepoFile("src/scripts/migrate-tenant-schema.ts"))
+      .toContain('${SQL_MODULES["workflows-public"]}');
+    expect(readRepoFile("src/services/tenant-runtime.service.ts"))
+      .not.toContain('${SQL_MODULES["workflows-public"]}');
+  });
+
   test("tenant auth schema stops creating WebAuthn artifacts without destructive cleanup", () => {
     for (const filePath of [
       "src/db/schemas/supabase.sql",

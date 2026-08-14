@@ -257,6 +257,27 @@ describe("taskRoutes", () => {
     expect(pgmqCreateQueue).toHaveBeenCalledWith("proj_1", "emails", { unlogged: true });
   });
 
+  test("reserves SupaCloud internal queues from management API callers", async () => {
+    const createResponse = await request("/v1/projects/proj_1/tasks/queues", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ queue_name: "supacloud_internal_workflows" }),
+    });
+    const sendResponse = await request(
+      "/v1/projects/proj_1/tasks/queues/supacloud_internal_workflows/messages",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ message: { rejected: true } }),
+      },
+    );
+
+    expect(createResponse.status).toBe(400);
+    expect(sendResponse.status).toBe(400);
+    expect(pgmqCreateQueue).not.toHaveBeenCalled();
+    expect(pgmqSend).not.toHaveBeenCalled();
+  });
+
   test("POST /queues/:queueName/messages/batch sends JSON messages through PGMQ", async () => {
     pgmqSendBatch.mockResolvedValueOnce([7, 8]);
 

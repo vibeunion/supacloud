@@ -2,11 +2,13 @@ import type {
   RealtimeChannel,
   SupabaseClient,
 } from "@supabase/supabase-js";
+import { SupaCloudWorkflowsClient } from "./workflows.js";
 
 export {
   createSupaCloudOAuthFetch,
   type SupaCloudOAuthFetchOptions,
 } from "./auth-fetch.js";
+export * from "./workflows.js";
 
 export type SupaCloudTaskStatus =
   | "pending"
@@ -1335,6 +1337,7 @@ export function createSupaCloudClient<TClient extends SupabaseClient = SupabaseC
   const oauthClients = new SupaCloudOAuthClientsClient(normalized);
   const supauth = new SupaCloudSupAuthClient(normalized);
   const queues = new SupaCloudQueuesClient(normalized);
+  const workflows = new SupaCloudWorkflowsClient(options.supabase);
 
   return {
     supabase: options.supabase,
@@ -1345,6 +1348,7 @@ export function createSupaCloudClient<TClient extends SupabaseClient = SupabaseC
       oauthClients,
     },
     tasks,
+    workflows,
     supauth,
     queues,
     queue: (name: string) => new SupaCloudQueueClient(normalized, name),

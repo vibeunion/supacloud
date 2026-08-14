@@ -20,10 +20,37 @@ interface QueueClient {
   delete(messageId: string | number): Promise<QueueMutationResult>
 }
 
+interface WorkflowRun {
+  runId: string
+  status: string
+  idempotent: boolean
+  rowVersion: string
+  steps: Array<{
+    stepId: string
+    stepKey: string
+    status: string
+    queueMessageId: string
+    attempts: number
+  }>
+}
+
+interface WorkflowClient {
+  start(request: Record<string, unknown>): Promise<WorkflowRun>
+  claim(request: Record<string, unknown>): Promise<Record<string, unknown> | null>
+  advance(request: Record<string, unknown>): Promise<WorkflowRun>
+  complete(request: Record<string, unknown>): Promise<WorkflowRun>
+  retry(request: Record<string, unknown>): Promise<WorkflowRun>
+  fail(request: Record<string, unknown>): Promise<WorkflowRun>
+  cancel(runId: string, reason: string): Promise<WorkflowRun>
+  get(runId: string): Promise<WorkflowRun | null>
+  events(runId: string, options?: { afterEventId?: string; limit?: number }): Promise<Array<Record<string, unknown>>>
+}
+
 export function createSupaCloudClient(options: {
   supabase: unknown
   managementApiUrl: string
   projectRef: string
 }): {
   queue(name: string): QueueClient
+  workflows: WorkflowClient
 }

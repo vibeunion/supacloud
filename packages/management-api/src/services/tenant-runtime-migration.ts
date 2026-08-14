@@ -549,4 +549,8 @@ END $$;
 -- 18. Platform background task mirror table; GoTrue remains the auth.users writer
 ${SQL_MODULES["background-task-mirror-up"]}
 
+-- Keep existing tenant databases aligned with the durable workflow runtime.
+${SQL_MODULES["pgmq-public"]}
+${SQL_MODULES["workflows-public"]}
+
 `;
