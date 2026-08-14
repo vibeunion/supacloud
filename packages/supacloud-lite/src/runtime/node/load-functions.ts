@@ -1,6 +1,6 @@
 /** Loads edge functions from supabase/functions/<name>/index.{ts,js,mjs} (Node only). */
 import { readdir, readFile, realpath, rm, stat } from 'node:fs/promises'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { EdgeFunction } from '../functions/handler.js'
 import { installDenoShim, resetCapturedHandler, takeCapturedHandler } from '../functions/deno-shim.js'
@@ -141,7 +141,7 @@ async function loadFunctionsUnlocked(
           console.warn(`  warning: failed to load function "${name}": ${msg}`)
         }
       } finally {
-        if (bundledPath) await rm(bundledPath, { force: true }).catch(() => {})
+        if (bundledPath) await rm(dirname(bundledPath), { recursive: true, force: true }).catch(() => {})
       }
       break
     }

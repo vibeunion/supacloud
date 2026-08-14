@@ -62,7 +62,7 @@ function remotePlugin(): Bun.BunPlugin {
  * the OS temp dir).
  */
 export async function bundleFunction(entryPath: string, name: string): Promise<string> {
-  const outDir = join(tmpdir(), 'supacloud-lite-fn-bundle')
+  const outDir = join(tmpdir(), 'supacloud-lite-fn-bundle', name)
   await mkdir(outDir, { recursive: true })
   const result = await Bun.build({
     entrypoints: [entryPath],
