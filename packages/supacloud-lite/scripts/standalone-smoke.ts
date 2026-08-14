@@ -238,10 +238,12 @@ async function withServer(options: ServerOptions, check: (url: string) => Promis
   const stdout = new Response(processHandle.stdout).text()
   const stderr = new Response(processHandle.stderr).text()
   const url = `http://127.0.0.1:${port}`
+  let checkCompleted = false
   try {
     await waitForHealth(url, processHandle)
     console.log(`[standalone-smoke] ${options.phaseLabel}: healthy`)
     await check(url)
+    checkCompleted = true
   } finally {
     console.log(`[standalone-smoke] ${options.phaseLabel}: stop`)
     processHandle.kill('SIGTERM')
@@ -251,6 +253,10 @@ async function withServer(options: ServerOptions, check: (url: string) => Promis
       `[standalone-smoke] ${options.phaseLabel}: ${exitCode === expectedExitCode ? 'ok' : 'failed'} (exit ${exitCode})`,
     )
     const [stdoutText, stderrText] = await Promise.all([stdout, stderr])
+    if (!checkCompleted) {
+      if (stdoutText) console.error(`[standalone-smoke] ${options.phaseLabel} stdout:\n${stdoutText}`)
+      if (stderrText) console.error(`[standalone-smoke] ${options.phaseLabel} stderr:\n${stderrText}`)
+    }
     if (exitCode !== expectedExitCode) {
       throw new Error(`standalone server exited with ${exitCode}\n${stdoutText}\n${stderrText}`)
     }
