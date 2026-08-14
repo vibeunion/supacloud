@@ -53,6 +53,12 @@ export class FsStorageDriver implements StorageDriver {
     }
   }
 
+  /** Return Bun's lazy file handle without copying the object into a JS buffer. */
+  async getBlob(key: string): Promise<Blob | null> {
+    const file = Bun.file(this.resolve(key))
+    return (await file.exists()) ? file : null
+  }
+
   /** Delete an object; a missing key is not an error. */
   async delete(key: string): Promise<void> {
     await rm(this.resolve(key), { force: true })

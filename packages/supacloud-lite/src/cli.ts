@@ -3,7 +3,9 @@ import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import packageJson from '../package.json' with { type: 'json' }
 import { generateTypes, inspectDb } from './runtime/index.js'
-import { computeDbDiff, pullSchema } from './runtime/node/db-diff.js'
+import { computeDbDiff, createTemporaryNativeEngine, pullSchema } from './runtime/node/db-diff.js'
+import { assertDataDirUnlocked } from './runtime/db/data-dir-lock.js'
+import { createNativeEngine } from './runtime/node/native/engine.js'
 import { loadSupabaseProject } from './runtime/node/project.js'
 import {
   createProjectBackend,
@@ -59,6 +61,7 @@ function parseArgs(argv: string[]): CliOptions {
     else if (argument === '--storage-dir') options.storageDir = resolve(next())
     else if (argument === '--storage-backend') options.storageBackend = next() as ProjectRuntimeOptions['storageBackend']
     else if (argument === '--s3-prefix') options.s3 = { ...options.s3, prefix: next() }
+    else if (argument === '--engine') options.engine = next() as ProjectRuntimeOptions['engine']
     else if (argument === '--memory') options.memory = true
     else if (argument === '--output' || argument === '-o') options.output = resolve(next())
     else if (argument === '--file' || argument === '-f') options.diffFile = next()
@@ -185,7 +188,7 @@ async function main(): Promise<void> {
   SupaCloud Lite running
 
           API URL: ${project.url}
-           Engine: PGlite${paths.dataDir ? ` (${paths.dataDir})` : ' (memory)'}
+           Engine: ${formatDatabaseEngine(project.databaseEngine, paths.dataDir)}
           Storage: ${formatStorage(project.storageBackend, paths.storageDir)}
        Migrations: ${project.migrationCount} file(s)
         Functions: ${project.functionNames.length ? project.functionNames.join(', ') : 'none'}
@@ -208,6 +211,7 @@ async function runDbCommand(options: CliOptions): Promise<void> {
       throw new Error('db reset refuses the s3 storage backend because remote objects cannot be deleted atomically')
     }
     await assertResetPathsSafe(paths)
+    await assertDataDirUnlocked(paths.dataDir)
     if (paths.dataDir) await rm(paths.dataDir, { recursive: true, force: true })
     await rm(paths.storageDir, { recursive: true, force: true })
     const project = await createProjectBackend({
@@ -228,7 +232,15 @@ async function runDbCommand(options: CliOptions): Promise<void> {
 
   const project = await loadSupabaseProject(resolve(options.projectDir ?? process.cwd()))
   if (subcommand === 'diff') {
-    const ddl = await computeDbDiff({ liveDataDir: paths.dataDir, migrations: project.migrations })
+    const liveEngine = paths.databaseEngine === 'native'
+      ? await createNativeEngine({ dataDir: paths.dataDir!, log: quietLog })
+      : undefined
+    const ddl = await computeDbDiff({
+      liveDataDir: paths.databaseEngine === 'pglite' ? paths.dataDir : undefined,
+      liveEngine,
+      migrations: project.migrations,
+      makeShadowEngine: paths.databaseEngine === 'native' ? createTemporaryNativeEngine : undefined,
+    })
     if (ddl.length === 0) {
       await writeStandardError('No schema changes found.\n')
       return
@@ -245,9 +257,14 @@ async function runDbCommand(options: CliOptions): Promise<void> {
   }
 
   if (subcommand === 'pull') {
+    const liveEngine = paths.databaseEngine === 'native'
+      ? await createNativeEngine({ dataDir: paths.dataDir!, log: quietLog })
+      : undefined
     const result = await pullSchema({
-      liveDataDir: paths.dataDir,
+      liveDataDir: paths.databaseEngine === 'pglite' ? paths.dataDir : undefined,
+      liveEngine,
       migrations: project.migrations,
+      makeShadowEngine: paths.databaseEngine === 'native' ? createTemporaryNativeEngine : undefined,
       migrationsDir: join(paths.projectDir, 'supabase', 'migrations'),
       name: options.positionals[1] ?? 'remote_schema',
     })
@@ -391,6 +408,7 @@ Options:
       --storage-dir <p>   object storage directory
       --storage-backend <b> fs, memory, or s3 (default fs)
       --s3-prefix <p>      optional key prefix for the s3 backend
+      --engine <e>         pglite (default) or native (macOS/glibc Linux x64/arm64)
       --memory            use an in-memory PGlite database
   -o, --output <p>        output file for gen types
   -f, --file <name>       migration suffix for db diff
@@ -403,6 +421,11 @@ function formatStorage(backend: ProjectRuntimeOptions['storageBackend'] | 'custo
   if (backend === 'memory') return 'in-memory'
   if (backend === 'custom') return 'custom driver'
   return storageDir
+}
+
+function formatDatabaseEngine(engine: NonNullable<ProjectRuntimeOptions['engine']>, dataDir?: string): string {
+  const label = engine === 'native' ? 'Native PostgreSQL' : 'PGlite'
+  return dataDir ? `${label} (${dataDir})` : `${label} (memory)`
 }
 
 // Bun 1.3.14 can stop pumping Windows IOCP while PGlite and its data lock close.
