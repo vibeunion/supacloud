@@ -117,6 +117,7 @@ async function main(): Promise<void> {
     }
     const project = await createProjectBackend({
       ...options,
+      applyMigrations: false,
       includeFunctions: false,
       includeWebhooks: false,
       startRuntimeServices: false,
@@ -138,6 +139,7 @@ async function main(): Promise<void> {
   if (options.command === 'inspect') {
     const project = await createProjectBackend({
       ...options,
+      applyMigrations: false,
       includeFunctions: false,
       includeWebhooks: false,
       startRuntimeServices: false,
