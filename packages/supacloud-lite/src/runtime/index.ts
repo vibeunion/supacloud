@@ -424,7 +424,7 @@ export async function createBackend(config: BackendConfig = {}): Promise<SupaClo
     const res = await safeHandle(req)
     try {
       const p = new URL(req.url).pathname
-      if (p !== '/health' && p !== '/') {
+      if (p !== '/health' && p !== '/' && p !== '/auth/v1/health') {
         const level = res.status >= 500 ? 'error' : res.status >= 400 ? 'warn' : 'info'
         logs.push(`${req.method} ${p} → ${res.status}`, level)
       }
