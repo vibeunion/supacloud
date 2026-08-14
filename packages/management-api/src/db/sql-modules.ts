@@ -6,6 +6,7 @@ import postgrestRequestContextSql from "./sql-modules/postgrest-request-context.
 import realtimeAutoAttachTriggerSql from "./sql-modules/realtime-auto-attach-trigger.sql" with { type: "text" };
 import realtimeNotifyPayloadSql from "./sql-modules/realtime-notify-payload.sql" with { type: "text" };
 import storagePathHelpersSql from "./sql-modules/storage-path-helpers.sql" with { type: "text" };
+import workflowsPublicSql from "./sql-modules/workflows-public.sql" with { type: "text" };
 
 export const SQL_MODULES = {
   "auth-jwt-helpers": authJwtHelpersSql.trim(),
@@ -16,6 +17,7 @@ export const SQL_MODULES = {
   "realtime-auto-attach-trigger": realtimeAutoAttachTriggerSql.trim(),
   "realtime-notify-payload": realtimeNotifyPayloadSql.trim(),
   "storage-path-helpers": storagePathHelpersSql.trim(),
+  "workflows-public": workflowsPublicSql.trim(),
 } as const;
 
 export type SqlModuleId = keyof typeof SQL_MODULES;

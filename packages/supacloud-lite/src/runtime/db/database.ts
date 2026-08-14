@@ -6,7 +6,7 @@
  * goes through this class.
  */
 import { BOOTSTRAP_SQL, MINIMAL_BOOTSTRAP_SQL } from './bootstrap.js'
-import { PGMQ_SQL, CRON_SQL, NET_SQL, EXT_COMPAT_SQL, VAULT_SQL } from './emulated.js'
+import { PGMQ_SQL, WORKFLOWS_SQL, CRON_SQL, NET_SQL, EXT_COMPAT_SQL, VAULT_SQL } from './emulated.js'
 import { rewriteMigrationSql } from './sql-compat.js'
 
 // SupaCloud Lite's default session search_path (matches bootstrap + Supabase's, with
@@ -127,6 +127,7 @@ export class Database {
       } else {
         await engine.exec(BOOTSTRAP_SQL)
         await engine.exec(PGMQ_SQL)
+        await engine.exec(WORKFLOWS_SQL)
         await engine.exec(CRON_SQL)
         await engine.exec(NET_SQL)
         await engine.exec(EXT_COMPAT_SQL)

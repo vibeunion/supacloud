@@ -599,6 +599,9 @@ $graphql_fallback$;
 -- 17. Supabase Queues compatibility via the official PGMQ extension.
 ${SQL_MODULES["pgmq-public"]}
 
+-- 17a. Service-role-only durable workflow execution built on PGMQ.
+${SQL_MODULES["workflows-public"]}
+
 -- 18. Realtime WAL logical replication support
 DO $$
 BEGIN
