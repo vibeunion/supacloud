@@ -172,8 +172,16 @@ function applyResize(image: Bun.Image, metadata: Bun.Image.Metadata, options: Im
 }
 
 /** Decode, resize, and encode an image using the Bun.Image-compatible subset. */
-export async function transformImage(bytes: Uint8Array, options: ImageTransformOptions): Promise<ImageTransformResult> {
-  if (bytes.byteLength > MAX_TRANSFORM_BYTES) {
+export async function transformImage(
+  source: Uint8Array | Blob,
+  options: ImageTransformOptions,
+  knownSourceSize?: number
+): Promise<ImageTransformResult> {
+  const actualSourceSize = source instanceof Uint8Array
+    ? source.byteLength
+    : await Promise.resolve(source.size as number | Promise<number>)
+  const sourceSize = Math.max(knownSourceSize ?? 0, actualSourceSize)
+  if (sourceSize > MAX_TRANSFORM_BYTES) {
     return {
       ok: false,
       status: 413,
@@ -181,9 +189,10 @@ export async function transformImage(bytes: Uint8Array, options: ImageTransformO
       message: 'The source image exceeds the 25MB transformation limit',
     }
   }
+  const image = new Bun.Image(source, { maxPixels: MAX_TRANSFORM_PIXELS })
   let metadata: Bun.Image.Metadata
   try {
-    metadata = await new Bun.Image(bytes, { maxPixels: MAX_TRANSFORM_PIXELS }).metadata()
+    metadata = await image.metadata()
   } catch (error) {
     return mapImageError(error)
   }
@@ -202,7 +211,6 @@ export async function transformImage(bytes: Uint8Array, options: ImageTransformO
     }
   }
 
-  const image = new Bun.Image(bytes, { maxPixels: MAX_TRANSFORM_PIXELS })
   applyResize(image, metadata, options)
   if (options.format === 'jpeg' || (options.format === 'origin' && outputFormat === 'jpeg' && options.quality !== undefined)) {
     image.jpeg(options.quality === undefined ? undefined : { quality: options.quality })
@@ -213,7 +221,16 @@ export async function transformImage(bytes: Uint8Array, options: ImageTransformO
   }
 
   try {
-    return { ok: true, bytes: await image.bytes(), contentType }
+    const bytes = await image.bytes()
+    if (bytes.byteLength > MAX_TRANSFORM_BYTES) {
+      return {
+        ok: false,
+        status: 413,
+        error: 'ImageTooLarge',
+        message: 'The transformed image exceeds the 25MB transformation limit',
+      }
+    }
+    return { ok: true, bytes, contentType }
   } catch (error) {
     return mapImageError(error)
   }

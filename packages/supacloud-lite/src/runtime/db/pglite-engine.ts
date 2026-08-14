@@ -1,9 +1,7 @@
 /** PGlite (WASM) engine - imported dynamically so native mode never loads the WASM bundle. */
-import { mkdir, open, unlink, type FileHandle } from 'node:fs/promises'
-import { dirname, resolve } from 'node:path'
 import type { Extension } from '@electric-sql/pglite'
 import type { DbEngine, EngineResults, EngineTx, EngineUnsubscribe } from './engine.js'
-import { readDataDirLockOwner, recoverStaleDataDirLock } from './data-dir-lock.js'
+import { acquireDataDirLock } from './data-dir-lock.js'
 import {
   STANDALONE_PGLITE_ASSETS,
   type StandalonePgliteAssets,
@@ -36,7 +34,7 @@ end $$;
  * @throws if the PGlite WASM bundle isn't available in this build (use the native engine instead).
  */
 export async function createPgliteEngine(dataDir?: string): Promise<DbEngine> {
-  const releaseLock = await acquireDataDirLock(dataDir)
+  const releaseLock = await acquireDataDirLock(dataDir, 'PGlite')
   let PGlite, extensions
   const standaloneAssets = getStandaloneAssets()
   let cleanupStandaloneBundles = async () => {}
@@ -170,61 +168,4 @@ async function removePreparedBundles(cleanup: () => Promise<void>): Promise<void
     // 扩展已载入内存，清理失败不应让可用数据库变成启动失败，但必须留下诊断。
     console.error('Unable to remove temporary PGlite extension bundles:', error)
   }
-}
-
-async function acquireDataDirLock(dataDir?: string): Promise<() => Promise<void>> {
-  if (!dataDir || dataDir.includes('://')) return async () => {}
-  const absoluteDataDir = resolve(dataDir)
-  const lockPath = `${absoluteDataDir}.supacloud-lite.lock`
-  await mkdir(dirname(absoluteDataDir), { recursive: true, mode: 0o700 })
-  const nonce = crypto.randomUUID()
-  const handle = await createDataDirLock(absoluteDataDir, lockPath, nonce)
-  let released = false
-  return async () => {
-    if (released) return
-    released = true
-    await handle?.close()
-    const owner = await readDataDirLockOwner(lockPath)
-    if (owner?.nonce !== nonce) return
-    await unlink(lockPath).catch((error) => {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-    })
-  }
-}
-
-async function createDataDirLock(absoluteDataDir: string, lockPath: string, nonce: string): Promise<FileHandle> {
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      return await writeDataDirLock(lockPath, nonce)
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-      const lockState = await recoverStaleDataDirLock(lockPath)
-      if (lockState.kind === 'active') throw lockInUseError(absoluteDataDir, lockState.owner.pid)
-      if (lockState.kind === 'unreadable') throw unreadableLockError(lockPath)
-    }
-  }
-  throw unreadableLockError(lockPath)
-}
-
-async function writeDataDirLock(lockPath: string, nonce: string): Promise<FileHandle> {
-  const handle = await open(lockPath, 'wx', 0o600)
-  try {
-    await handle.writeFile(`${JSON.stringify({ pid: process.pid, nonce, createdAt: new Date().toISOString() })}\n`)
-    return handle
-  } catch (error) {
-    await handle.close().catch(() => {})
-    await unlink(lockPath).catch(() => {})
-    throw error
-  }
-}
-
-function lockInUseError(dataDir: string, pid: number): Error {
-  return new Error(`PGlite data directory is already in use: ${dataDir} (pid ${pid})`)
-}
-
-function unreadableLockError(lockPath: string): Error {
-  return new Error(
-    `PGlite data directory has an unreadable lock: ${lockPath}. ` +
-      'Confirm no SupaCloud Lite process is using it, then remove the lock manually.'
-  )
 }

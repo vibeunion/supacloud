@@ -7,7 +7,9 @@ import {
   type ImageTransformOptions,
   type ImageTransformResult,
 } from '../src/runtime/storage/image-transform.js'
+import { ImageTransformCache } from '../src/runtime/storage/image-transform-cache.js'
 import { StorageHandler } from '../src/runtime/storage/handler.js'
+import type { StorageDriver } from '../src/runtime/types.js'
 
 const sourcePng = await new Bun.Image(createBmp(4, 2)).png().bytes()
 
@@ -74,30 +76,50 @@ describe('storage image transforms', () => {
     if (!result.ok) expect(result.status).toBe(415)
   })
 
+  test('enforces the actual Blob size when metadata understates it', async () => {
+    const oversizedBlob = new Blob([new Uint8Array(25 * 1024 * 1024 + 1)])
+    const result = await transformImage(oversizedBlob, parseOptions('format=png'), 1)
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.status).toBe(413)
+  })
+
   test('preserves cache control and sets transformed response headers', async () => {
-    const handler = new StorageHandler(null as never, null as never, { jwtSecret: 'test' })
+    const driver: StorageDriver = {
+      put: async () => undefined,
+      get: async () => sourcePng,
+      delete: async () => undefined,
+      deleteMany: async () => undefined,
+    }
+    const handler = new StorageHandler(null as never, driver, { jwtSecret: 'test' })
     const transformResponse = (
       handler as unknown as {
-        transformImageResponse(source: Response, url: URL, head: boolean): Promise<Response>
+        transformImageResponse(row: unknown, url: URL, head: boolean): Promise<Response>
       }
     ).transformImageResponse.bind(handler)
-    const source = () =>
-      new Response(sourcePng as BodyInit, {
-        headers: {
-          'cache-control': 'public, max-age=3600',
-          'content-disposition': 'attachment',
-          'content-type': 'image/png',
-        },
-      })
+    const row = {
+      id: 'object-id',
+      bucket_id: 'images',
+      name: 'source.png',
+      owner: null,
+      version: null,
+      metadata: {
+        size: sourcePng.byteLength,
+        cacheControl: 'public, max-age=3600',
+        mimetype: 'image/png',
+      },
+      created_at: null,
+      updated_at: null,
+      last_accessed_at: null,
+    }
     const url = new URL('http://localhost/storage/v1/render/image/public/bucket/image.png?width=8&format=webp')
 
-    const response = await transformResponse(source(), url, false)
+    const response = await transformResponse(row, url, false)
     expect(response.headers.get('cache-control')).toBe('public, max-age=3600')
     expect(response.headers.get('content-type')).toBe('image/webp')
     expect(response.headers.get('content-length')).toBe(String((await response.clone().arrayBuffer()).byteLength))
     expect(response.headers.has('content-disposition')).toBe(false)
 
-    const head = await transformResponse(source(), url, true)
+    const head = await transformResponse(row, url, true)
     expect(head.headers.get('content-length')).toBe(response.headers.get('content-length'))
     expect((await head.arrayBuffer()).byteLength).toBe(0)
   })
@@ -149,7 +171,116 @@ describe('storage image transforms', () => {
       await backend.close()
     }
   }, 20_000)
+
+  test('caches immutable variants and invalidates them after an upsert', async () => {
+    const driver = new CountingBlobDriver()
+    const backend = await createLiteBackend({
+      jwtSecret: 'x'.repeat(64),
+      vaultKey: 'y'.repeat(64),
+      storageDriver: driver,
+      buckets: [{ id: 'images', public: true, fileSizeLimit: null, allowedMimeTypes: ['image/png'] }],
+    })
+    const client = createClient('http://local', backend.serviceRoleKey, {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+      global: { fetch: backend.fetch },
+    })
+    const transformUrl =
+      'http://local/storage/v1/render/image/public/images/source.png?width=8&height=8&resize=contain&format=webp'
+
+    try {
+      expect(
+        (await client.storage.from('images').upload('source.png', sourcePng, { contentType: 'image/png' })).error
+      ).toBeNull()
+      expect((await backend.fetch(new Request(transformUrl))).status).toBe(200)
+      expect((await backend.fetch(new Request(transformUrl))).status).toBe(200)
+      expect(driver.blobReads).toBe(1)
+
+      const replacement = await new Bun.Image(createBmp(3, 3)).png().bytes()
+      expect(
+        (
+          await client.storage.from('images').upload('source.png', replacement, {
+            contentType: 'image/png',
+            upsert: true,
+          })
+        ).error
+      ).toBeNull()
+      expect((await backend.fetch(new Request(transformUrl))).status).toBe(200)
+      expect(driver.blobReads).toBe(2)
+    } finally {
+      await backend.close()
+    }
+  }, 20_000)
+
+  test('singleflights identical work and globally serializes transforms', async () => {
+    const firstCache = new ImageTransformCache()
+    const secondCache = new ImageTransformCache()
+    let operations = 0
+    let active = 0
+    let peak = 0
+    const operation = async (): Promise<ImageTransformResult> => {
+      operations += 1
+      active += 1
+      peak = Math.max(peak, active)
+      await Bun.sleep(10)
+      active -= 1
+      return { ok: true, bytes: new Uint8Array([operations]), contentType: 'image/png' }
+    }
+
+    const [first, duplicate, second] = await Promise.all([
+      firstCache.getOrTransform('v2-a\0same', operation),
+      firstCache.getOrTransform('v2-a\0same', operation),
+      secondCache.getOrTransform('v2-b\0other', operation),
+    ])
+
+    expect(first).toBe(duplicate)
+    expect(second.ok).toBe(true)
+    expect(operations).toBe(2)
+    expect(peak).toBe(1)
+  })
+
+  test('releases the global transform permit after failure', async () => {
+    const cache = new ImageTransformCache()
+    await expect(
+      cache.getOrTransform('v2-failure', async () => {
+        throw new Error('decode failed')
+      })
+    ).rejects.toThrow('decode failed')
+
+    const result = await cache.getOrTransform('v2-success', async () => ({
+      ok: true,
+      bytes: new Uint8Array([1]),
+      contentType: 'image/png',
+    }))
+    expect(result.ok).toBe(true)
+  })
 })
+
+class CountingBlobDriver implements StorageDriver {
+  private files = new Map<string, Uint8Array>()
+  blobReads = 0
+
+  async put(key: string, data: Uint8Array): Promise<void> {
+    this.files.set(key, data)
+  }
+
+  async get(key: string): Promise<Uint8Array | null> {
+    return this.files.get(key) ?? null
+  }
+
+  async getBlob(key: string): Promise<Blob | null> {
+    this.blobReads += 1
+    const bytes = this.files.get(key)
+    return bytes ? new Blob([Uint8Array.from(bytes).buffer]) : null
+  }
+
+  async delete(key: string): Promise<void> {
+    this.files.delete(key)
+  }
+
+  async deleteMany(keys: string[]): Promise<void> {
+    for (const key of keys) this.files.delete(key)
+  }
+}
 
 function parseOptions(query: string): ImageTransformOptions {
   const parsed = parseImageTransform(new URLSearchParams(query))

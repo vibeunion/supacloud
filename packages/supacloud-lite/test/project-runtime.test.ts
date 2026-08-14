@@ -10,6 +10,7 @@ import {
   assertResetPathsSafe,
   ensureProjectSecrets,
   mintProjectKeys,
+  resolveDatabaseEngine,
   resolveProjectPaths,
 } from '../src/project-runtime.js'
 import type { StorageDriver } from '../src/runtime/types.js'
@@ -50,6 +51,18 @@ describe('project runtime', () => {
     expect(paths.stateDir).toBe(join(projectDir, '.supacloud-lite'))
     expect(paths.dataDir).toBe(join(projectDir, '.supacloud-lite', 'db'))
     expect(paths.storageDir).toBe(join(projectDir, '.supacloud-lite', 'storage'))
+    expect(paths.databaseEngine).toBe('pglite')
+    if (process.platform === 'darwin' || process.platform === 'linux') {
+      const nativePaths = resolveProjectPaths({ projectDir, engine: 'native' })
+      expect(nativePaths.dataDir).toBe(join(projectDir, '.supacloud-lite', 'pgdata'))
+      expect(nativePaths.databaseEngine).toBe('native')
+    }
+  })
+
+  test('validates database engine and memory combinations', () => {
+    expect(resolveDatabaseEngine('pglite')).toBe('pglite')
+    expect(() => resolveDatabaseEngine('invalid' as never)).toThrow('unsupported SUPACLOUD_LITE_ENGINE')
+    expect(() => resolveDatabaseEngine('native', true)).toThrow('--memory is only supported')
   })
 
   test('refuses destructive reset targets outside the state directory', async () => {

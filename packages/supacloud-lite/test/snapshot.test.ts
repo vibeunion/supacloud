@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { access, link, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { list as listTar } from 'tar'
+import { create as createTar, list as listTar } from 'tar'
 import { createProjectBackend, ensureProjectSecrets, resolveProjectPaths } from '../src/project-runtime.js'
 import { createSnapshot, restoreSnapshot } from '../src/snapshot.js'
 import { withWindowsSubprocessRef } from '../scripts/subprocess.js'
@@ -163,6 +163,54 @@ describe('Lite snapshots', () => {
     expect(await readFile(join(targetPaths.storageDir, 'linked.txt'), 'utf8')).toBe('shared-storage-content')
   })
 
+  test('rejects native snapshots for a different engine, platform, architecture, or PostgreSQL major', async () => {
+    const projectDir = await temporaryProject('supacloud-lite-snapshot-native-guards-')
+    const archivePath = join(projectDir, 'native.tar.gz')
+    const targetPaths = resolveProjectPaths({ projectDir: join(projectDir, 'target') })
+    await mkdir(targetPaths.projectDir, { recursive: true })
+    const manifest = {
+      format: 'supacloud-lite-snapshot',
+      version: 1,
+      createdAt: new Date().toISOString(),
+      packageVersion: 'test-version',
+      storageBackend: 'memory',
+      includesDatabase: true,
+      includesLocalStorage: false,
+      includesSecrets: true,
+      databaseEngine: 'native',
+      platform: process.platform,
+      architecture: process.arch,
+      postgresMajor: '17',
+    } as const
+    await writeSnapshotArchive(projectDir, archivePath, manifest)
+
+    await expect(
+      restoreSnapshot({ paths: targetPaths, storageBackend: 'memory', input: archivePath })
+    ).rejects.toThrow('database engine is native')
+
+    const nativeTarget = {
+      ...targetPaths,
+      dataDir: join(targetPaths.stateDir, 'pgdata'),
+      databaseEngine: 'native' as const,
+    }
+    const wrongPlatform = process.platform === 'linux' ? 'darwin' : 'linux'
+    await writeSnapshotArchive(projectDir, archivePath, { ...manifest, platform: wrongPlatform })
+    await expect(
+      restoreSnapshot({ paths: nativeTarget, storageBackend: 'memory', input: archivePath })
+    ).rejects.toThrow('same platform and architecture')
+
+    const wrongArchitecture = process.arch === 'arm64' ? 'x64' : 'arm64'
+    await writeSnapshotArchive(projectDir, archivePath, { ...manifest, architecture: wrongArchitecture })
+    await expect(
+      restoreSnapshot({ paths: nativeTarget, storageBackend: 'memory', input: archivePath })
+    ).rejects.toThrow('same platform and architecture')
+
+    await writeSnapshotArchive(projectDir, archivePath, { ...manifest, postgresMajor: '16' })
+    await expect(
+      restoreSnapshot({ paths: nativeTarget, storageBackend: 'memory', input: archivePath })
+    ).rejects.toThrow('snapshot major is 16')
+  })
+
   test('exposes snapshot and upgrade through the CLI', async () => {
     const projectDir = await temporaryProject('supacloud-lite-snapshot-cli-')
     await mkdir(join(projectDir, 'supabase', 'migrations'), { recursive: true })
@@ -223,6 +271,21 @@ async function temporaryProject(prefix: string): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), prefix))
   temporaryDirectories.push(directory)
   return directory
+}
+
+async function writeSnapshotArchive(
+  projectDir: string,
+  archivePath: string,
+  manifest: Record<string, unknown>
+): Promise<void> {
+  await rm(archivePath, { force: true })
+  const payload = join(projectDir, `payload-${crypto.randomUUID()}`)
+  await mkdir(join(payload, 'database'), { recursive: true })
+  await writeFile(join(payload, 'manifest.json'), JSON.stringify(manifest))
+  await writeFile(join(payload, 'secrets.json'), '{}')
+  await writeFile(join(payload, 'database', 'PG_VERSION'), '17\n')
+  await createTar({ cwd: payload, file: archivePath, gzip: true }, ['manifest.json', 'secrets.json', 'database'])
+  await rm(payload, { force: true, recursive: true })
 }
 
 async function runCli(args: string[]): Promise<string> {
