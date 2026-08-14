@@ -9,7 +9,7 @@
  * same trade Deno makes.
  */
 import { createHash } from 'node:crypto'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -64,16 +64,25 @@ function remotePlugin(): Bun.BunPlugin {
 export async function bundleFunction(entryPath: string, name: string): Promise<string> {
   const outDir = join(tmpdir(), 'supacloud-lite-fn-bundle', name)
   await mkdir(outDir, { recursive: true })
-  const result = await Bun.build({
-    entrypoints: [entryPath],
-    format: 'esm',
-    target: 'bun',
-    outdir: outDir,
-    naming: `${name}-[hash].[ext]`,
-    plugins: [remotePlugin()],
-  })
-  if (!result.success || result.outputs.length === 0) {
-    throw new Error(result.logs.map((item) => item.message).join('\n') || `failed to bundle ${entryPath}`)
+  try {
+    const buildOutput = await Bun.build({
+      entrypoints: [entryPath],
+      format: 'esm',
+      target: 'bun',
+      outdir: outDir,
+      naming: `${name}-[hash].[ext]`,
+      plugins: [remotePlugin()],
+    })
+    if (!buildOutput.success || buildOutput.outputs.length === 0) {
+      throw new Error(buildOutput.logs.map((item) => item.message).join('\n') || `failed to bundle ${entryPath}`)
+    }
+    return buildOutput.outputs[0]!.path
+  } catch (buildError) {
+    try {
+      await rm(outDir, { recursive: true, force: true })
+    } catch (cleanupError) {
+      throw new AggregateError([buildError, cleanupError], `failed to clean function bundle directory ${outDir}`)
+    }
+    throw buildError
   }
-  return result.outputs[0]!.path
 }
