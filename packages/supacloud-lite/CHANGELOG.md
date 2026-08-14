@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.3](https://github.com/zuohuadong/supacloud/compare/supacloud-lite-v0.7.2...supacloud-lite-v0.7.3) (2026-08-14)
+
+
+### Bug Fixes
+
+* **lite:** load fetch-object edge functions ([#897](https://github.com/zuohuadong/supacloud/issues/897)) ([149e430](https://github.com/zuohuadong/supacloud/commit/149e4300ab17c0627e2f89990aabed9b7605b7cf))
+* **lite:** skip request log for auth health probe ([#898](https://github.com/zuohuadong/supacloud/issues/898)) ([618d31c](https://github.com/zuohuadong/supacloud/commit/618d31c652ed1ec7b1ec6a9462e468ce1b7aa7b3))
+
 ## [0.7.2](https://github.com/zuohuadong/supacloud/compare/supacloud-lite-v0.7.1...supacloud-lite-v0.7.2) (2026-08-14)
 
 
