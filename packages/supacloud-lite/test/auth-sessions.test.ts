@@ -3,6 +3,41 @@ import { createClient } from '@supabase/supabase-js'
 import { createLiteBackend, type SupaCloudLiteBackend } from '../src/index.js'
 
 describe('Auth session limits', () => {
+  test('exposes Auth health without requiring a project API key', async () => {
+    const backend = await createLiteBackend({
+      jwtSecret: 'x'.repeat(64),
+      vaultKey: 'y'.repeat(64),
+      log: () => {},
+    })
+    try {
+      const response = await backend.fetch('http://local/auth/v1/health')
+      expect(response.status).toBe(200)
+      expect(await response.json()).toMatchObject({
+        name: 'supacloud-lite-auth',
+        description: 'GoTrue-compatible auth',
+      })
+    } finally {
+      await backend.close()
+    }
+  })
+
+  test('keeps project API key enforcement on non-public Auth endpoints', async () => {
+    const backend = await createLiteBackend({
+      jwtSecret: 'x'.repeat(64),
+      vaultKey: 'y'.repeat(64),
+      log: () => {},
+    })
+    try {
+      const response = await backend.fetch('http://local/auth/v1/token?grant_type=password', {
+        method: 'POST',
+      })
+      expect(response.status).toBe(401)
+      expect(await response.json()).toEqual({ message: 'No API key found in request' })
+    } finally {
+      await backend.close()
+    }
+  })
+
   test('keeps Auth in-process and can disable only its public routes', async () => {
     const backend = await createLiteBackend({
       authEnabled: false,
