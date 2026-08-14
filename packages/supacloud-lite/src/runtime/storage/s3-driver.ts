@@ -111,6 +111,21 @@ export class S3StorageDriver implements StorageDriver {
     }
   }
 
+  /** Return Bun's lazy S3 blob; custom clients fall back to their byte API. */
+  async getBlob(key: string): Promise<Blob | null> {
+    const file = this.client.file(this.objectKey(key))
+    if (!(await file.exists())) return null
+    if (typeof (file as Partial<Blob>).arrayBuffer === 'function') return file as unknown as Blob
+
+    try {
+      const bytes = Uint8Array.from(await file.bytes())
+      return new Blob([bytes.buffer])
+    } catch (error) {
+      if (isNotFoundError(error)) return null
+      throw error
+    }
+  }
+
   async delete(key: string): Promise<void> {
     await this.client.file(this.objectKey(key)).delete()
   }

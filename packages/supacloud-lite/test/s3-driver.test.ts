@@ -122,6 +122,25 @@ describe('S3StorageDriver', () => {
     expect(await driver.get('missing.txt')).toBeNull()
   })
 
+  test('returns a lazy blob without calling the byte fallback', async () => {
+    let byteReads = 0
+    const blob = Object.assign(new Blob([new Uint8Array([1, 2, 3])]), {
+      exists: async () => true,
+      bytes: async () => {
+        byteReads += 1
+        return new Uint8Array([1, 2, 3])
+      },
+      write: async () => undefined,
+      delete: async () => undefined,
+    })
+    const client: S3StorageClientLike = { file: () => blob }
+
+    const source = await new S3StorageDriver({}, client).getBlob('image.png')
+
+    expect(source).toBe(blob)
+    expect(byteReads).toBe(0)
+  })
+
   test('returns null when an object disappears between exists and bytes', async () => {
     const client: S3StorageClientLike = {
       file() {

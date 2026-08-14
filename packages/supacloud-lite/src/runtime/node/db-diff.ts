@@ -5,9 +5,10 @@
  * new migration.
  */
 import { mkdtempSync } from 'node:fs'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { createNativeEngine } from './native/engine.js'
 import { createBackend, type SupaCloudLiteBackend } from '../index.js'
 import { snapshotSchema, diffSchemas } from '../db/schema-diff.js'
 import type { MigrationFile } from '../types.js'
@@ -31,23 +32,26 @@ export interface DbDiffOptions {
 /** Compute the DDL delta from the migrations-only shadow db to the current live schema. */
 export async function computeDbDiff(opts: DbDiffOptions): Promise<string[]> {
   const schema = opts.schema ?? 'public'
-
-  // shadow = migrations only, fresh
-  const shadow: SupaCloudLiteBackend = await createBackend({
-    engine: opts.makeShadowEngine ? await opts.makeShadowEngine() : undefined,
-    migrations: opts.migrations,
-    startRuntimeServices: false,
-    // no seed: seed is data, not schema
-  })
+  let shadow: SupaCloudLiteBackend | undefined
   let live: SupaCloudLiteBackend | undefined
+  let unclaimedLiveEngine = opts.liveEngine
   let operationFailed = false
 
   try {
+    // shadow = migrations only, fresh
+    shadow = await createBackend({
+      engine: opts.makeShadowEngine ? await opts.makeShadowEngine() : undefined,
+      migrations: opts.migrations,
+      startRuntimeServices: false,
+      // no seed: seed is data, not schema
+    })
     // live = current project db (createBackend only applies *pending* migrations, so
     // this reflects the actual current schema including out-of-migration changes)
+    const liveEngine = unclaimedLiveEngine
+    unclaimedLiveEngine = undefined
     live = await createBackend({
-      engine: opts.liveEngine,
-      dataDir: opts.liveEngine ? undefined : opts.liveDataDir,
+      engine: liveEngine,
+      dataDir: liveEngine ? undefined : opts.liveDataDir,
       migrations: opts.migrations,
       startRuntimeServices: false,
     })
@@ -59,7 +63,7 @@ export async function computeDbDiff(opts: DbDiffOptions): Promise<string[]> {
     throw error
   } finally {
     try {
-      await closeBackends(live, shadow)
+      await closeResources(unclaimedLiveEngine, live, shadow)
     } catch (error) {
       if (!operationFailed) throw error
     }
@@ -69,6 +73,31 @@ export async function computeDbDiff(opts: DbDiffOptions): Promise<string[]> {
 /** Fresh throwaway data dir for a native-engine shadow database, under the OS temp dir. */
 export function shadowNativeDataDir(): string {
   return join(mkdtempSync(join(tmpdir(), 'supacloud-lite-shadow-')), 'pg')
+}
+
+export async function createTemporaryNativeEngine(): Promise<import('../db/engine.js').DbEngine> {
+  const dataDir = shadowNativeDataDir()
+  let engine: import('../db/engine.js').DbEngine
+  try {
+    engine = await createNativeEngine({ dataDir })
+  } catch (error) {
+    try {
+      await rm(dirname(dataDir), { recursive: true, force: true })
+    } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], 'temporary native database initialization cleanup failed')
+    }
+    throw error
+  }
+  return {
+    ...engine,
+    async close(): Promise<void> {
+      try {
+        await engine.close()
+      } finally {
+        await rm(dirname(dataDir), { recursive: true, force: true })
+      }
+    },
+  }
 }
 
 /** Inputs for {@link pullSchema}: everything {@link DbDiffOptions} needs plus where/how to write the migration. */
@@ -100,17 +129,21 @@ export interface DbPullResult {
  */
 export async function pullSchema(opts: DbPullOptions): Promise<DbPullResult> {
   const schema = opts.schema ?? 'public'
-  const shadow: SupaCloudLiteBackend = await createBackend({
-    engine: opts.makeShadowEngine ? await opts.makeShadowEngine() : undefined,
-    migrations: opts.migrations,
-    startRuntimeServices: false,
-  })
+  let shadow: SupaCloudLiteBackend | undefined
   let live: SupaCloudLiteBackend | undefined
+  let unclaimedLiveEngine = opts.liveEngine
   let operationFailed = false
   try {
+    shadow = await createBackend({
+      engine: opts.makeShadowEngine ? await opts.makeShadowEngine() : undefined,
+      migrations: opts.migrations,
+      startRuntimeServices: false,
+    })
+    const liveEngine = unclaimedLiveEngine
+    unclaimedLiveEngine = undefined
     live = await createBackend({
-      engine: opts.liveEngine,
-      dataDir: opts.liveEngine ? undefined : opts.liveDataDir,
+      engine: liveEngine,
+      dataDir: liveEngine ? undefined : opts.liveDataDir,
       migrations: opts.migrations,
       startRuntimeServices: false,
     })
@@ -138,7 +171,7 @@ export async function pullSchema(opts: DbPullOptions): Promise<DbPullResult> {
     throw error
   } finally {
     try {
-      await closeBackends(live, shadow)
+      await closeResources(unclaimedLiveEngine, live, shadow)
     } catch (error) {
       if (!operationFailed) throw error
     }
@@ -146,9 +179,11 @@ export async function pullSchema(opts: DbPullOptions): Promise<DbPullResult> {
 }
 
 /** Close every initialized backend, surfacing cleanup errors only after both close attempts. */
-async function closeBackends(...backends: Array<SupaCloudLiteBackend | undefined>): Promise<void> {
+async function closeResources(
+  ...resources: Array<Pick<SupaCloudLiteBackend, 'close'> | import('../db/engine.js').DbEngine | undefined>
+): Promise<void> {
   const results = await Promise.allSettled(
-    backends.filter((backend): backend is SupaCloudLiteBackend => backend !== undefined).map(async (backend) => await backend.close()),
+    resources.filter((resource) => resource !== undefined).map(async (resource) => await resource.close()),
   )
   const failed = results.find((result) => result.status === 'rejected')
   if (failed?.status === 'rejected') throw failed.reason

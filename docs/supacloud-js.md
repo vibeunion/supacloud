@@ -12,6 +12,7 @@ Examples:
 - Realtime status subscription with polling fallback
 - task lifecycle webhook correlation metadata
 - message queue send / receive / ack / release / fail / retry APIs
+- service-role-only durable workflow execution
 - project-aware management API routing
 - project OAuth/OIDC migration and OAuth client management
 
@@ -30,6 +31,7 @@ Examples:
 - SupaCloud task semantics
 - control-plane task APIs
 - platform-specific task observation and fallback behavior
+- durable workflow RPC types and worker operations
 
 In short:
 
@@ -77,6 +79,7 @@ Current first-class API surface:
 - `client.queue(name).getSettings(...)`
 - `client.queue(name).updateSettings(...)`
 - `client.queues.list/create/drop(...)`
+- `client.workflows.start/claim/advance/complete/retry/fail/cancel/get/events(...)`
 - `client.auth.oauthServer.getStatus()`
 - `client.auth.oauthServer.migrateToOidc()`
 - `client.auth.oauthServer.getDiscovery()`
@@ -314,6 +317,52 @@ Queue settings:
 - `rate_limit_per_minute`: enqueue rate limit for producers
 
 Terminal queue states should be treated like task states: `succeeded`, `failed`, `dead_lettered`, and `cancelled` are not in-flight.
+
+## Durable Workflows
+
+`client.workflows` coordinates code-defined, linear steps through the project's PostgreSQL and PGMQ runtime. The workflow RPCs accept only `service_role`, so construct this client in a trusted server or worker process and never expose the key to browser or mobile code.
+
+```ts
+import { createClient } from "@supabase/supabase-js";
+import { createSupaCloudClient } from "@supacloud/js";
+
+const supabase = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+);
+const supacloud = createSupaCloudClient({
+  supabase,
+  managementApiUrl: process.env.SUPACLOUD_MANAGEMENT_URL!,
+  projectRef: process.env.SUPACLOUD_PROJECT_REF!,
+});
+
+await supacloud.workflows.start({
+  runId: crypto.randomUUID(),
+  workflowName: "invoice.issue",
+  workflowVersion: "1",
+  firstStepKey: "validate",
+  input: { invoiceId: "inv-123" },
+});
+
+const claim = await supacloud.workflows.claim({
+  workerId: "invoice-worker-1",
+  visibilityTimeoutSeconds: 300,
+});
+
+if (claim?.status === "claimed") {
+  await supacloud.workflows.complete({
+    stepId: claim.stepId,
+    messageId: claim.messageId,
+    attempt: claim.attempt,
+    workerId: claim.workerId,
+    runOutput: { invoiceId: "inv-123" },
+  });
+}
+```
+
+The typed operations are `start`, `claim`, `advance`, `complete`, `retry`, `fail`, `cancel`, `get`, and `events`. Mutations can be replayed with the same request after a lost response. PostgreSQL message IDs, event cursors, and row versions remain decimal strings to preserve the full `bigint` range. Treat SQLSTATE `40001` from `claim` as transient contention and retry it.
+
+See [Durable Workflows](./durable-workflows.md) for execution semantics, security boundaries, rollback guidance, and the DBOS comparison.
 
 ## OAuth/OIDC Helpers
 

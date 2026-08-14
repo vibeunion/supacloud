@@ -1,7 +1,7 @@
 {
   "name": "@supacloud/lite",
   "version": "0.7.3",
-  "description": "Bun-native, single-project Supabase-compatible backend powered by PGlite",
+  "description": "Bun-native, single-project Supabase-compatible backend powered by PGlite or native PostgreSQL",
   "type": "module",
   "license": "Apache-2.0",
   "bin": {
@@ -37,6 +37,10 @@
     "dev": "bun run src/cli.ts start",
     "start": "bun run src/cli.ts start",
     "test": "bun test --timeout 20000",
+    "test:native": "SUPACLOUD_LITE_TEST_NATIVE=1 bun test test/native-engine.test.ts --timeout 180000",
+    "parity": "bun run parity/harness.ts",
+    "parity:native": "SUPACLOUD_LITE_TEST_NATIVE=1 bun run parity/harness.ts --engine native",
+    "check:native": "bun run test:native && bun run parity:native",
     "test:package": "bun run scripts/package-smoke.ts",
     "test:standalone": "bun run scripts/standalone-smoke.ts",
     "prepack": "bun run build",

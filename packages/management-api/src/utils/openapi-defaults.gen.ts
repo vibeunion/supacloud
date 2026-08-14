@@ -315,6 +315,7 @@ export const OPENAPI_STORAGE_CONFIG_RESPONSE_TEMPLATE = {
 export const OPENAPI_REALTIME_CONFIG_RESPONSE_TEMPLATE = {
   "private_only": null,
   "connection_pool": null,
+  "postgres_changes_pool": null,
   "max_concurrent_users": null,
   "max_events_per_second": null,
   "max_bytes_per_second": null,
