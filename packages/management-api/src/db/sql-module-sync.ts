@@ -28,7 +28,12 @@ export const SQL_MODULE_TARGETS = [
       "realtime-notify-payload",
       "postgrest-request-context",
       "pgmq-public",
+      "workflows-public",
     ],
+  },
+  {
+    relativePath: "packages/supacloud-lite/src/runtime/db/emulated.ts",
+    moduleIds: ["pgmq-public", "workflows-public"],
   },
   {
     relativePath: "scripts/004_background_task_mirror_migration.sql",

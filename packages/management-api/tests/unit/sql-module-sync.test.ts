@@ -47,6 +47,22 @@ describe("canonical SQL module synchronization", () => {
     expect(SQL_MODULES["pgmq-public"]).toContain(
       "CREATE OR REPLACE FUNCTION pgmq_public.read(queue_name text, sleep_seconds integer, n integer)",
     );
+    expect(SQL_MODULES["pgmq-public"]).toContain("SUPACLOUD_QUEUE_NAME_RESERVED");
+    expect(SQL_MODULES["pgmq-public"]).toContain(
+      "normalized_queue_name text := lower(btrim(queue_name))",
+    );
+    expect(SQL_MODULES["workflows-public"]).toContain(
+      "CREATE OR REPLACE FUNCTION public.supacloud_workflow_start(request jsonb)",
+    );
+    expect(SQL_MODULES["workflows-public"]).toContain(
+      "IF NOT pg_try_advisory_xact_lock(hashtextextended(candidate_run_id::text, 0))",
+    );
+    expect(SQL_MODULES["workflows-public"]).toContain("'messageId', queued_message.msg_id::text");
+    expect(SQL_MODULES["workflows-public"]).toContain("'eventId', page.id::text");
+    expect(SQL_MODULES["workflows-public"]).toContain("'operation', 'retry'");
+    expect(SQL_MODULES["workflows-public"]).toContain(
+      "REVOKE ALL ON FUNCTION public.supacloud_workflow_start(jsonb) FROM PUBLIC, anon, authenticated",
+    );
     expect(SQL_MODULES["background-task-mirror-up"]).toContain(
       "CREATE TABLE IF NOT EXISTS public.background_task_mirrors",
     );

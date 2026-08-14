@@ -2,7 +2,7 @@ import { Elysia, status, t } from "elysia";
 import { taskRepository } from "../repositories/task.repository";
 import { TaskStatus, type ProjectTask } from "../db";
 import { backgroundFunctionWorker, projectService } from "../services";
-import { pgmqService } from "../services/pgmq.service";
+import { isPublicPgmqQueueName, pgmqService } from "../services/pgmq.service";
 import * as authMiddleware from "../middleware/auth";
 
 const QUEUE_TASK_TYPE_PREFIX = "queue:";
@@ -10,9 +10,9 @@ const DEFAULT_QUEUE_VISIBILITY_TIMEOUT_SEC = 330;
 const MAX_QUEUE_DELAY_MS = 30 * 24 * 60 * 60 * 1000;
 
 function normalizeQueueName(name: string): string | null {
-    const value = name.trim();
-    if (!/^[a-z0-9][a-z0-9_-]{0,127}$/.test(value)) return null;
-    return value;
+    const normalizedName = name.trim();
+    if (!/^[a-z0-9][a-z0-9_-]{0,127}$/.test(normalizedName) || !isPublicPgmqQueueName(normalizedName)) return null;
+    return normalizedName;
 }
 
 function queueTaskType(name: string): string {

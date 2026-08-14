@@ -9,6 +9,7 @@ It does **not** replace [`@supabase/supabase-js`](https://www.npmjs.com/package/
 - cancel / retry helpers
 - Realtime subscription with polling fallback
 - Supabase Queues helpers backed by the official `pgmq_public` RPC API, plus SupaCloud management extensions for queue administration and diagnostics
+- Service-role-only durable workflow helpers backed by PostgreSQL and PGMQ
 - project OAuth/OIDC migration and OAuth client management
 - SupAuth provisioning and runtime verification helpers
 
@@ -283,6 +284,42 @@ Queue settings:
 - `rate_limit_per_minute`: producer enqueue limit
 
 Management extension conflicts are surfaced as `SupaCloudApiError` with `status`, `code`, and `responseBody`, so callers do not need to parse raw `fetch` responses.
+
+## Durable Workflows
+
+`supacloud.workflows` coordinates code-defined, linear steps on the project's PostgreSQL and PGMQ runtime. Every workflow RPC is restricted to `service_role`; create this client only in a trusted worker or server process.
+
+```ts
+const runId = crypto.randomUUID();
+
+await supacloud.workflows.start({
+  runId,
+  workflowName: "invoice.issue",
+  workflowVersion: "1",
+  firstStepKey: "validate",
+  input: { invoiceId: "inv-123" },
+});
+
+const claim = await supacloud.workflows.claim({
+  workerId: "invoice-worker-1",
+  visibilityTimeoutSeconds: 300,
+});
+
+if (claim?.status === "claimed") {
+  await supacloud.workflows.complete({
+    stepId: claim.stepId,
+    messageId: claim.messageId,
+    attempt: claim.attempt,
+    workerId: claim.workerId,
+    stepOutput: { validated: true },
+    runOutput: { invoiceId: "inv-123" },
+  });
+}
+```
+
+Available operations are `start`, `claim`, `advance`, `complete`, `retry`, `fail`, `cancel`, `get`, and `events`. Mutating calls are safe to replay with the same request after a lost response; a different replay payload fails with an idempotency conflict. See the repository's `docs/durable-workflows.md` for execution, security, and DBOS design boundaries.
+
+Message IDs, queue message IDs, event cursors, and run row versions are decimal strings, preserving the full PostgreSQL `bigint` range. Retry a `claim` that returns SQLSTATE `40001`; the contended queue lease is rolled back before that error is returned.
 
 ## OAuth/OIDC Helpers
 
