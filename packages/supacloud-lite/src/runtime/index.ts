@@ -348,10 +348,11 @@ export async function createBackend(config: BackendConfig = {}): Promise<SupaClo
       )
     }
     if (
-      (path === '/auth/v1/verify' || path === '/auth/v1/authorize' || path === '/auth/v1/callback') &&
-      (req.method === 'GET' || req.method === 'POST')
+      (path === '/auth/v1/health' && req.method === 'GET') ||
+      ((path === '/auth/v1/verify' || path === '/auth/v1/authorize' || path === '/auth/v1/callback') &&
+        (req.method === 'GET' || req.method === 'POST'))
     ) {
-      // email-link clicks and OAuth provider redirects arrive without an apikey
+      // Health probes, email-link clicks, and OAuth redirects arrive without an apikey.
       return withCors(await auth.handle(req, { role: 'anon', claims: null }, url))
     }
     if (path.startsWith('/auth/v1/')) {
