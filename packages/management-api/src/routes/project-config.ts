@@ -393,6 +393,10 @@ function buildRealtimeConfigResponse(raw: Record<string, unknown>) {
   response.private_only = raw.private_only ?? raw.privateOnly ?? response.private_only;
   response.connection_pool =
     raw.connection_pool ?? raw.connectionPool ?? response.connection_pool;
+  response.postgres_changes_pool =
+    raw.postgres_changes_pool ??
+    raw.postgresChangesPool ??
+    response.postgres_changes_pool;
   response.max_concurrent_users =
     raw.max_concurrent_users ??
     raw.maxConcurrentUsers ??
@@ -1614,7 +1618,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
           raw.maxJoinsPerSecond || raw.max_joins_per_second || 100,
         maxChannelsPerClient:
           raw.maxChannelsPerClient || raw.max_channels_per_client || 100,
-        ...raw,
+        ...buildRealtimeConfigResponse(raw),
       };
     },
     {
