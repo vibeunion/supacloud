@@ -16,6 +16,8 @@ describe('Auth session limits', () => {
         name: 'supacloud-lite-auth',
         description: 'GoTrue-compatible auth',
       })
+      // health probes are public and must not add noise to the Logs pane
+      expect(backend.logs.list().some((entry) => entry.msg.includes('/auth/v1/health'))).toBe(false)
     } finally {
       await backend.close()
     }
