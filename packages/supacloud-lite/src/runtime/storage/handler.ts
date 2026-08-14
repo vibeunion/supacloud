@@ -10,7 +10,9 @@ import {
   parseImageTransform,
   transformImage,
   type ImageTransformRequestOptions,
+  type ImageTransformResult,
 } from './image-transform.js'
+import { ImageTransformCache, imageTransformCacheKey } from './image-transform-cache.js'
 import type { BucketSeed, RequestContext, StorageDriver } from '../types.js'
 
 /** Construction options for {@link StorageHandler}. */
@@ -171,6 +173,7 @@ const OBJECT_VERSION_PREFIX = 'v2-'
 export class StorageHandler {
   private tusUploads = new Map<string, TusUpload>()
   private mutationTail = Promise.resolve()
+  private imageTransforms = new ImageTransformCache()
 
   constructor(
     private db: Database,
@@ -224,15 +227,18 @@ export class StorageHandler {
         const bucket = parts[3]
         const key = parts.slice(4).join('/')
         if (kind === 'public' && (method === 'GET' || method === 'HEAD')) {
-          const source = await this.downloadPublic(bucket, key, false)
+          const source = await this.loadPublicObject(bucket, key)
+          if (source instanceof Response) return source
           return await this.transformImageResponse(source, url, method === 'HEAD')
         }
         if (kind === 'authenticated' && (method === 'GET' || method === 'HEAD')) {
-          const source = await this.download(ctx, bucket, key, false)
+          const source = await this.loadAuthenticatedObject(ctx, bucket, key)
+          if (source instanceof Response) return source
           return await this.transformImageResponse(source, url, method === 'HEAD')
         }
         if (kind === 'sign' && method === 'GET') {
-          const source = await this.redeemSignedUrl(url, bucket, key)
+          const source = await this.loadSignedObject(url, bucket, key)
+          if (source instanceof Response) return source
           return await this.transformImageResponse(source, url, false)
         }
         return storageError(404, 'not_found', `unknown render endpoint: ${rest}`)
@@ -469,20 +475,30 @@ export class StorageHandler {
     }
   }
 
-  private async transformImageResponse(source: Response, url: URL, head: boolean): Promise<Response> {
-    if (!source.ok) return source
+  private async transformImageResponse(row: ObjectRow, url: URL, head: boolean): Promise<Response> {
     const parsed = parseImageTransform(url.searchParams)
     if (!parsed.ok) return storageError(parsed.status, parsed.error, parsed.message)
 
-    const result = await transformImage(new Uint8Array(await source.arrayBuffer()), parsed.value)
+    let result: ImageTransformResult
+    try {
+      result = await this.imageTransforms.getOrTransform(imageTransformCacheKey(row.version, parsed.value), async () => {
+        const source = await this.readObjectSource(row)
+        if (source === null) throw new StorageObjectMissingError()
+        return transformImage(source, parsed.value, objectSize(row))
+      })
+    } catch (error) {
+      if (error instanceof StorageObjectMissingError) {
+        return storageError(404, 'not_found', 'Object not found')
+      }
+      throw error
+    }
     if (!result.ok) return storageError(result.status, result.error, result.message)
 
-    const headers = new Headers(source.headers)
+    const headers = objectHeaders(row, result.bytes.length)
     headers.delete('content-disposition')
     headers.delete('etag')
     headers.set('content-type', result.contentType)
-    headers.set('content-length', String(result.bytes.length))
-    return new Response(head ? null : (result.bytes as BodyInit), { status: source.status, headers })
+    return new Response(head ? null : (result.bytes as BodyInit), { status: 200, headers })
   }
 
   /** Write immutable bytes first, then atomically switch the metadata pointer. */
@@ -819,15 +835,31 @@ export class StorageHandler {
   }
 
   private async download(ctx: RequestContext, bucketId: string, key: string, head: boolean): Promise<Response> {
+    const row = await this.loadAuthenticatedObject(ctx, bucketId, key)
+    if (row instanceof Response) return row
+    return this.serveObject(row, head)
+  }
+
+  private async loadAuthenticatedObject(
+    ctx: RequestContext,
+    bucketId: string,
+    key: string
+  ): Promise<ObjectRow | Response> {
     const res = await this.db.withContext(ctx, (q) =>
       q(`select * from storage.objects where bucket_id = $1 and name = $2`, [bucketId, key])
     )
     const row = res.rows[0] as ObjectRow | undefined
     if (!row) return storageError(404, 'not_found', 'Object not found')
-    return this.serveObject(row, head)
+    return row
   }
 
   private async downloadPublic(bucketId: string, key: string, head: boolean): Promise<Response> {
+    const row = await this.loadPublicObject(bucketId, key)
+    if (row instanceof Response) return row
+    return this.serveObject(row, head)
+  }
+
+  private async loadPublicObject(bucketId: string, key: string): Promise<ObjectRow | Response> {
     const bucket = await this.loadBucket(bucketId)
     if (!bucket?.public) return storageError(400, 'not_found', 'Bucket is not public')
     const res = await this.db.query(`select * from storage.objects where bucket_id = $1 and name = $2`, [
@@ -836,26 +868,17 @@ export class StorageHandler {
     ])
     const row = res.rows[0] as ObjectRow | undefined
     if (!row) return storageError(404, 'not_found', 'Object not found')
-    return this.serveObject(row, head)
+    return row
   }
 
   private async serveObject(row: ObjectRow, head: boolean): Promise<Response> {
     const bytes = await this.readObjectBytes(row)
     if (bytes === null) return storageError(404, 'not_found', 'Object not found')
-    const meta = row.metadata ?? {}
-    const contentType = String(meta.mimetype ?? 'application/octet-stream')
-    const headers: Record<string, string> = {
-      'content-type': contentType,
-      'content-length': String(bytes.length),
-      'cache-control': String(meta.cacheControl ?? 'no-cache'),
-      etag: String(meta.eTag ?? '""'),
-      'last-modified': new Date(String(meta.lastModified ?? Date.now())).toUTCString(),
-      // never let the browser sniff a different (executable) type
-      'x-content-type-options': 'nosniff',
-    }
+    const contentType = String(row.metadata?.mimetype ?? 'application/octet-stream')
+    const headers = objectHeaders(row, bytes.length)
     // The content-type is attacker-controlled at upload time; force active
     // content to download instead of rendering same-origin (stored-XSS guard).
-    if (isRenderableActiveType(contentType)) headers['content-disposition'] = 'attachment'
+    if (isRenderableActiveType(contentType)) headers.set('content-disposition', 'attachment')
     return new Response(head ? null : (bytes as BodyInit), { status: 200, headers })
   }
 
@@ -985,8 +1008,12 @@ export class StorageHandler {
   }
 
   private async readObjectBytes(row: ObjectRow): Promise<Uint8Array | null> {
-    if (isVersionedObjectVersion(row.version)) return this.driver.get(objectVersionKey(row.version))
-    return this.driver.get(legacyObjectKey(row))
+    return this.driver.get(storageKey(row))
+  }
+
+  private async readObjectSource(row: ObjectRow): Promise<Uint8Array | Blob | null> {
+    const key = storageKey(row)
+    return this.driver.getBlob ? this.driver.getBlob(key) : this.driver.get(key)
   }
 
   private async cleanupObjectRows(rows: ObjectRow[]): Promise<void> {
@@ -1119,6 +1146,12 @@ export class StorageHandler {
   }
 
   private async redeemSignedUrl(url: URL, bucketId: string, key: string): Promise<Response> {
+    const row = await this.loadSignedObject(url, bucketId, key)
+    if (row instanceof Response) return row
+    return this.serveObject(row, false)
+  }
+
+  private async loadSignedObject(url: URL, bucketId: string, key: string): Promise<ObjectRow | Response> {
     const token = url.searchParams.get('token') ?? ''
     const claims = await verifyJwt(token, this.config.jwtSecret)
     if (!claims || claims.url !== `${bucketId}/${key}` || claims.type !== 'download') {
@@ -1130,7 +1163,7 @@ export class StorageHandler {
     ])
     const row = res.rows[0] as ObjectRow | undefined
     if (!row) return storageError(404, 'not_found', 'Object not found')
-    return this.serveObject(row, false)
+    return row
   }
 
   private async signUploadUrl(ctx: RequestContext, bucketId: string, key: string): Promise<Response> {
@@ -1200,6 +1233,7 @@ function objectJson(r: ObjectRow): Record<string, unknown> {
 }
 
 class StorageValidationError extends Error {}
+class StorageObjectMissingError extends Error {}
 
 function parseSizeLimit(v: number | string | null | undefined): number | null {
   if (v === null || v === undefined || v === '') return null
@@ -1224,8 +1258,29 @@ function objectMetadata(size: number, contentType: string, cacheControl: string)
   }
 }
 
+function objectHeaders(row: ObjectRow, contentLength: number): Headers {
+  const metadata = row.metadata ?? {}
+  return new Headers({
+    'content-type': String(metadata.mimetype ?? 'application/octet-stream'),
+    'content-length': String(contentLength),
+    'cache-control': String(metadata.cacheControl ?? 'no-cache'),
+    etag: String(metadata.eTag ?? '""'),
+    'last-modified': new Date(String(metadata.lastModified ?? Date.now())).toUTCString(),
+    'x-content-type-options': 'nosniff',
+  })
+}
+
+function objectSize(row: ObjectRow): number | undefined {
+  const size = Number(row.metadata?.size)
+  return Number.isFinite(size) && size >= 0 ? size : undefined
+}
+
 function objectVersionKey(version: string): string {
   return `.supacloud-lite/objects/${version}`
+}
+
+function storageKey(row: ObjectRow): string {
+  return isVersionedObjectVersion(row.version) ? objectVersionKey(row.version) : legacyObjectKey(row)
 }
 
 function createObjectVersion(): string {

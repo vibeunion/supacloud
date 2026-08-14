@@ -1,8 +1,9 @@
 import { chmod, copyFile, lstat, mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, parse, relative, resolve, sep } from 'node:path'
 import { create as createTar, extract as extractTar } from 'tar'
-import type { ConfiguredStorageBackend, ProjectPaths } from './project-runtime.js'
+import type { ConfiguredStorageBackend, DatabaseEngine, ProjectPaths } from './project-runtime.js'
 import { recoverStaleDataDirLock } from './runtime/db/data-dir-lock.js'
+import { NATIVE_POSTGRES_MAJOR } from './runtime/node/native/engine.js'
 
 const SNAPSHOT_FORMAT = 'supacloud-lite-snapshot'
 const SNAPSHOT_VERSION = 1
@@ -16,6 +17,10 @@ export interface SnapshotManifest {
   includesDatabase: boolean
   includesLocalStorage: boolean
   includesSecrets: true
+  databaseEngine?: DatabaseEngine
+  platform?: string
+  architecture?: string
+  postgresMajor?: string
 }
 
 export interface CreateSnapshotOptions {
@@ -55,6 +60,14 @@ export async function createSnapshot(options: CreateSnapshotOptions): Promise<Sn
     includesDatabase: Boolean(paths.dataDir),
     includesLocalStorage: options.storageBackend === 'fs',
     includesSecrets: true,
+    databaseEngine: paths.databaseEngine,
+    ...(paths.databaseEngine === 'native'
+      ? {
+          platform: process.platform,
+          architecture: process.arch,
+          postgresMajor: await readPostgresMajor(paths.dataDir),
+        }
+      : {}),
   }
 
   const output = resolve(options.output)
@@ -126,6 +139,7 @@ export async function restoreSnapshot(options: RestoreSnapshotOptions): Promise<
         'restore with the matching --storage-backend value'
       )
     }
+    assertDatabaseSnapshotCompatible(manifest, paths)
     if (manifest.includesDatabase !== Boolean(paths.dataDir)) {
       throw new Error('snapshot database mode does not match the target; do not restore a persistent snapshot into --memory')
     }
@@ -283,7 +297,42 @@ function isSnapshotManifest(value: unknown): value is SnapshotManifest {
   return candidate.format === SNAPSHOT_FORMAT && candidate.version === SNAPSHOT_VERSION &&
     typeof candidate.createdAt === 'string' && typeof candidate.packageVersion === 'string' &&
     (candidate.storageBackend === 'fs' || candidate.storageBackend === 's3' || candidate.storageBackend === 'memory') &&
-    typeof candidate.includesDatabase === 'boolean' && typeof candidate.includesLocalStorage === 'boolean' && candidate.includesSecrets === true
+    typeof candidate.includesDatabase === 'boolean' && typeof candidate.includesLocalStorage === 'boolean' && candidate.includesSecrets === true &&
+    (candidate.databaseEngine === undefined || candidate.databaseEngine === 'pglite' || candidate.databaseEngine === 'native') &&
+    (candidate.platform === undefined || typeof candidate.platform === 'string') &&
+    (candidate.architecture === undefined || typeof candidate.architecture === 'string') &&
+    (candidate.postgresMajor === undefined || typeof candidate.postgresMajor === 'string')
+}
+
+function assertDatabaseSnapshotCompatible(manifest: SnapshotManifest, paths: ProjectPaths): void {
+  const sourceEngine = manifest.databaseEngine ?? 'pglite'
+  if (sourceEngine !== paths.databaseEngine) {
+    throw new Error(`snapshot database engine is ${sourceEngine}, but the target uses ${paths.databaseEngine}`)
+  }
+  if (sourceEngine !== 'native') return
+  if (manifest.platform !== process.platform || manifest.architecture !== process.arch) {
+    throw new Error(
+      `native PostgreSQL snapshots require the same platform and architecture; ` +
+        `source is ${manifest.platform ?? 'unknown'}/${manifest.architecture ?? 'unknown'}, ` +
+        `target is ${process.platform}/${process.arch}`
+    )
+  }
+  if (manifest.postgresMajor !== NATIVE_POSTGRES_MAJOR) {
+    throw new Error(
+      `native PostgreSQL snapshot major is ${manifest.postgresMajor ?? 'unknown'}, ` +
+        `but this Lite build uses ${NATIVE_POSTGRES_MAJOR}`
+    )
+  }
+}
+
+async function readPostgresMajor(dataDir?: string): Promise<string | undefined> {
+  if (!dataDir) return undefined
+  try {
+    return (await readFile(join(dataDir, 'PG_VERSION'), 'utf8')).trim()
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+    throw error
+  }
 }
 
 async function assertSnapshotPayload(payloadRoot: string, manifest: SnapshotManifest): Promise<void> {

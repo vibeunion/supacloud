@@ -8,7 +8,7 @@ SupaCloud Lite 的 Supabase 兼容协议实现包含从一个 MIT 许可的上�
 - License: MIT
 - Local license copy: `LICENSES/UPSTREAM-PROTOCOL-MIT.txt`
 
-主要修改包括：删除 Admin UI、Node HTTP server、native PostgreSQL 和 pg-mem 路径；固定为单项目 PGlite；改用 Bun.serve 和 Bun.build；增加 SupaCloud Lite 密钥、CLI、测试、文档和发布集成。
+主要修改包括：删除 Admin UI、Node HTTP server 和 pg-mem 路径；默认使用单项目 PGlite，并提供可选 native PostgreSQL 引擎；改用 Bun.serve 和 Bun.build；增加 SupaCloud Lite 密钥、CLI、测试、文档和发布集成。
 
 ## PGlite
 
@@ -17,6 +17,16 @@ SupaCloud Lite 使用 ElectricSQL PGlite 作为嵌入式 PostgreSQL 引擎。
 - License: Apache-2.0
 - Upstream: `https://github.com/electric-sql/pglite`
 - Local license copy: `LICENSES/PGLITE-APACHE-2.0.txt`
+
+## Native PostgreSQL binaries
+
+Linux/macOS 上的可选 native 引擎会按需下载 Theseus 发布的 PostgreSQL 17.7.0 预编译包；该二进制不会内嵌到 npm 包或 Lite 单文件发布物中。
+
+- PostgreSQL license: PostgreSQL License
+- Binary source: `https://github.com/theseus-rs/postgresql-binaries`
+- PostgreSQL copyright copy: `LICENSES/POSTGRESQL-17-COPYRIGHT.txt`
+- Theseus distribution license copy: `LICENSES/THESEUS-POSTGRESQL-LICENSE.txt`
+- Integrity: Lite 对默认版本的四个平台归档使用内置 SHA-256 固定校验和
 
 ## Supabase JavaScript SDK
 
