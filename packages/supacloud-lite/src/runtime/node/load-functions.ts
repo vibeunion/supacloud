@@ -49,8 +49,9 @@ let loadQueue: Promise<void> = Promise.resolve()
  * directory name. Dirs starting with `_` or `.` are skipped (shared code), as
  * are functions disabled in config.toml. Each function is bundled with esbuild
  * when available (falling back to a plain import), then its handler is taken
- * from a default export or a captured `Deno.serve()` call. Load failures warn
- * and skip rather than throwing, so one broken function can't block startup.
+ * from a default function export, a default `{ fetch() }` export, or a captured
+ * `Deno.serve()` call. Load failures warn and skip rather than throwing, so one
+ * broken function can't block startup.
  */
 export async function loadFunctions(
   projectDir: string,
@@ -115,15 +116,22 @@ async function loadFunctionsUnlocked(
           importUrl = pathToFileURL(path).href
         }
         resetCapturedHandler()
-        const mod = (await import(importUrl)) as { default?: EdgeFunction }
-        // prefer an explicit default export; otherwise use the handler a
-        // Deno.serve() call captured during import
+        const mod = (await import(importUrl)) as {
+          default?: EdgeFunction | { fetch?: EdgeFunction }
+        }
         const denoHandler = takeCapturedHandler()
-        const handler = typeof mod.default === 'function' ? mod.default : denoHandler ? (req: Request) => denoHandler(req) : undefined
+        const defaultExport = mod.default
+        const handler = typeof defaultExport === 'function'
+          ? defaultExport
+          : defaultExport && typeof defaultExport.fetch === 'function'
+            ? defaultExport.fetch.bind(defaultExport)
+            : denoHandler
+              ? (req: Request) => denoHandler(req)
+              : undefined
         if (handler) {
           functions.set(name, handler as EdgeFunction)
         } else {
-          console.warn(`  warning: function "${name}" has no default export or Deno.serve() handler, skipped`)
+          console.warn(`  warning: function "${name}" has no default function, fetch object, or Deno.serve() handler, skipped`)
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)

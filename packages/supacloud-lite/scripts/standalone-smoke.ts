@@ -10,6 +10,7 @@ const projectDir = await mkdtemp(join(tmpdir(), 'supacloud-lite-standalone-'))
 const emptyPath = await mkdtemp(join(tmpdir(), 'supacloud-lite-empty-path-'))
 const migrationDir = join(projectDir, 'supabase', 'migrations')
 const functionDir = join(projectDir, 'supabase', 'functions', 'ping')
+const fetchObjectFunctionDir = join(projectDir, 'supabase', 'functions', 'fetch-object')
 const v1 = '20260729000000'
 const v2 = '20260729000001'
 const commandTimeoutMs = 120_000
@@ -18,6 +19,7 @@ try {
   await access(binary)
   await mkdir(migrationDir, { recursive: true })
   await mkdir(functionDir, { recursive: true })
+  await mkdir(fetchObjectFunctionDir, { recursive: true })
   await writeFile(join(projectDir, 'supabase', 'config.toml'), `
 [auth]
 enabled = false
@@ -27,6 +29,9 @@ enabled = true
 sql_paths = ["./seed.sql"]
 
 [functions.ping]
+verify_jwt = false
+
+[functions.fetch-object]
 verify_jwt = false
 `)
   await writeFile(join(migrationDir, `${v1}_create_upgrade_probe.sql`), `
@@ -51,6 +56,11 @@ on conflict (id) do update set body = excluded.body;
 `)
   await writeFile(join(functionDir, 'index.ts'), `
 Deno.serve(() => Response.json({ ok: true, runtime: 'standalone' }))
+`)
+  await writeFile(join(fetchObjectFunctionDir, 'index.ts'), `
+export default {
+  fetch: () => Response.json({ ok: true, runtime: 'fetch-object' })
+}
 `)
 
   const isolatedEnvironment = withoutRuntimePath(emptyPath)
@@ -80,6 +90,14 @@ Deno.serve(() => Response.json({ ok: true, runtime: 'standalone' }))
     assert(functionResponse.status === 200, `function returned HTTP ${functionResponse.status}`)
     const functionBody = await functionResponse.json() as { ok?: boolean; runtime?: string }
     assert(functionBody.ok === true && functionBody.runtime === 'standalone', 'function response was unexpected')
+
+    const fetchObjectResponse = await fetch(`${url}/functions/v1/fetch-object`, { method: 'POST' })
+    assert(fetchObjectResponse.status === 200, `fetch-object function returned HTTP ${fetchObjectResponse.status}`)
+    const fetchObjectBody = await fetchObjectResponse.json() as { ok?: boolean; runtime?: string }
+    assert(
+      fetchObjectBody.ok === true && fetchObjectBody.runtime === 'fetch-object',
+      'fetch-object function response was unexpected',
+    )
   })
 
   const storageDir = join(projectDir, '.supacloud-lite', 'storage')
