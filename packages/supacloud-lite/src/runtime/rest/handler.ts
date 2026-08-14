@@ -37,6 +37,22 @@ function parsePrefer(header: string | null): Prefer {
   return prefer
 }
 
+function applyRequestRange(query: ParsedQuery, request: Request): void {
+  const range = request.headers.get('range')
+  if (!range || query.limits.has('') || query.offsets.has('')) return
+  const unit = request.headers.get('range-unit')
+  if (unit !== null && unit.toLowerCase() !== 'items') throw new ParseError(`unsupported range unit: ${unit}`)
+  const match = range.match(/^(\d+)-(\d*)$/)
+  if (!match) throw new ParseError(`invalid range: ${range}`)
+  const start = Number(match[1])
+  const end = match[2] ? Number(match[2]) : undefined
+  if (!Number.isSafeInteger(start) || end !== undefined && (!Number.isSafeInteger(end) || end < start)) {
+    throw new ParseError(`invalid range: ${range}`)
+  }
+  query.offsets.set('', start)
+  if (end !== undefined) query.limits.set('', end - start + 1)
+}
+
 /** Accept/Content-Type that requests (or returns) a single object instead of an array. */
 const OBJECT_MEDIA = 'application/vnd.pgrst.object+json'
 const CSV_MEDIA = 'text/csv'
@@ -142,6 +158,7 @@ export class RestHandler {
     const wantsObject = accept.includes(OBJECT_MEDIA)
     const wantsCsv = accept.includes(CSV_MEDIA)
     const q = parseQuery(url.searchParams)
+    if (method === 'GET' || method === 'HEAD') applyRequestRange(q, req)
     // db-max-rows: cap the base read limit so a client can't pull more than the
     // configured maximum (PostgREST's api.max_rows). count still reflects the total.
     if (this.maxRows !== undefined && (method === 'GET' || method === 'HEAD')) {
@@ -188,10 +205,11 @@ export class RestHandler {
           }
           return { rows: (res.rows[0] as { body: unknown[] }).body, count }
         })
+        const offset = q.offsets.get('') ?? 0
         return this.dataResponse(rows, {
-          status: 200,
+          status: count !== null && (offset > 0 || rows.length < count) ? 206 : 200,
           count,
-          offset: q.offsets.get('') ?? 0,
+          offset,
           wantsObject,
           wantsCsv,
           head: method === 'HEAD',

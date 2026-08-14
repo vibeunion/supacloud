@@ -40,6 +40,27 @@ test('schema diff utilities keep shadow and live engines listener-free', async (
   expect(listenCalls).toEqual({ diffShadow: 0, diffLive: 0, pullShadow: 0, pullLive: 0 })
 })
 
+test('schema diff utilities close a live engine when shadow creation fails', async () => {
+  for (const operation of [computeDbDiff, pullSchema]) {
+    let closeCalls = 0
+    const liveEngine = createListenerEngine(async () => () => {})
+    liveEngine.close = async () => {
+      closeCalls += 1
+    }
+
+    await expect(
+      operation({
+        migrations: [],
+        liveEngine,
+        makeShadowEngine: async () => {
+          throw new Error('shadow unavailable')
+        },
+      })
+    ).rejects.toThrow('shadow unavailable')
+    expect(closeCalls).toBe(1)
+  }
+})
+
 test('shares CDC LISTEN and awaits the final asynchronous unsubscribe', async () => {
   const unsubscribeGate = Promise.withResolvers<void>()
   let listenCalls = 0
