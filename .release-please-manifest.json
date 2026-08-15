@@ -7,5 +7,5 @@
   "packages/cli": "0.22.0",
   "packages/admin": "0.14.2",
   "packages/supacloud": "0.10.8",
-  "packages/supacloud-lite": "0.8.2"
+  "packages/supacloud-lite": "0.8.3"
 }

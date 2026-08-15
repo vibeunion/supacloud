@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.3](https://github.com/zuohuadong/supacloud/compare/supacloud-lite-v0.8.2...supacloud-lite-v0.8.3) (2026-08-15)
+
+
+### Bug Fixes
+
+* **lite:** detect glibc in standalone runtime ([#925](https://github.com/zuohuadong/supacloud/issues/925)) ([c18f0f6](https://github.com/zuohuadong/supacloud/commit/c18f0f6ee86e488a7c603e13416e794060f2012d))
+
 ## [0.8.2](https://github.com/zuohuadong/supacloud/compare/supacloud-lite-v0.8.1...supacloud-lite-v0.8.2) (2026-08-15)
 
 
