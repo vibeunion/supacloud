@@ -56,6 +56,19 @@ import {
     type PrivilegedHelperIdentity,
     type StagedPrivilegedHelper,
 } from "./embedded-systemd-unit-broker";
+import {
+    EMBEDDED_POSTGREST_LAUNCHER_SHA256,
+    POSTGREST_LAUNCHER_TARGET,
+    activatePreparedPostgrestLauncher,
+    cleanupPostgrestLauncherBackup,
+    preparePostgrestLauncherActivation,
+    readPostgrestLauncherPreflight,
+    restorePostgrestLauncher,
+    stageEmbeddedPostgrestLauncher,
+    verifyInstalledPostgrestLauncher,
+    type PostgrestLauncherActivationState,
+    type PostgrestLauncherPreflight,
+} from "./embedded-postgrest-launcher";
 
 const RELEASES_API = "https://api.github.com/repos/zuohuadong/supacloud/releases";
 const BIN_TARGET = "/usr/local/bin/supacloud";
@@ -1211,8 +1224,35 @@ export function parseSystemdUnitBrokerDigestOutput(stdout: string): string {
     return match[1] as string;
 }
 
-async function validateManagementSystemdUnitBroker(filePath: string, binaryName: string): Promise<void> {
-    const smoke = Bun.spawn([filePath, "--systemd-unit-helper-sha256"], { stdout: "pipe", stderr: "pipe" });
+export function parsePostgrestLauncherDigestOutput(stdout: string): string {
+    const lines = stdout.trim().split(/\r?\n/).filter(Boolean);
+    if (lines.length !== 1) throw new Error("Management PostgREST launcher digest output must contain exactly one line");
+    let message = lines[0] as string;
+    if (message.startsWith("{")) {
+        const payload = JSON.parse(message) as { message?: unknown };
+        if (typeof payload.message !== "string") {
+            throw new Error("Management PostgREST launcher digest JSON is invalid");
+        }
+        message = payload.message;
+    }
+    const match = message.match(/^SupaCloud PostgREST launcher SHA-256: ([0-9a-f]{64})$/);
+    if (!match) throw new Error("Management PostgREST launcher digest output is invalid");
+    return match[1] as string;
+}
+
+type ManagementEmbeddedArtifactCheck = {
+    argument: string;
+    expectedSha256: string;
+    label: string;
+    parseDigest: (stdout: string) => string;
+};
+
+async function validateManagementEmbeddedArtifact(
+    filePath: string,
+    binaryName: string,
+    check: ManagementEmbeddedArtifactCheck,
+): Promise<void> {
+    const smoke = Bun.spawn([filePath, check.argument], { stdout: "pipe", stderr: "pipe" });
     const timeout = setTimeout(() => smoke.kill("SIGKILL"), 5_000);
     try {
         const [exitCode, stdout, stderr] = await Promise.all([
@@ -1221,14 +1261,29 @@ async function validateManagementSystemdUnitBroker(filePath: string, binaryName:
             new Response(smoke.stderr).text(),
         ]);
         if (exitCode !== 0 || stderr.trim()) {
-            throw new Error(`${binaryName} failed the embedded systemd-unit helper identity check`);
+            throw new Error(`${binaryName} failed the embedded ${check.label} identity check`);
         }
-        if (parseSystemdUnitBrokerDigestOutput(stdout) !== EMBEDDED_SYSTEMD_UNIT_BROKER_SHA256) {
-            throw new Error(`${binaryName} embeds an unexpected systemd-unit helper`);
+        if (check.parseDigest(stdout) !== check.expectedSha256) {
+            throw new Error(`${binaryName} embeds an unexpected ${check.label}`);
         }
     } finally {
         clearTimeout(timeout);
     }
+}
+
+async function validateManagementEmbeddedUpgradeArtifacts(filePath: string, binaryName: string): Promise<void> {
+    await validateManagementEmbeddedArtifact(filePath, binaryName, {
+        argument: "--systemd-unit-helper-sha256",
+        expectedSha256: EMBEDDED_SYSTEMD_UNIT_BROKER_SHA256,
+        label: "systemd-unit helper",
+        parseDigest: parseSystemdUnitBrokerDigestOutput,
+    });
+    await validateManagementEmbeddedArtifact(filePath, binaryName, {
+        argument: "--postgrest-launcher-sha256",
+        expectedSha256: EMBEDDED_POSTGREST_LAUNCHER_SHA256,
+        label: "PostgREST launcher",
+        parseDigest: parsePostgrestLauncherDigestOutput,
+    });
 }
 
 async function validateManagementBinaryArtifact(filePath: string, binaryName: string, expectedVersion: string) {
@@ -1253,7 +1308,7 @@ async function validateManagementBinaryArtifact(filePath: string, binaryName: st
     if (actualVersion !== expectedVersion) {
         throw new Error(`${binaryName} reports ${actualVersion}; expected ${expectedVersion}`);
     }
-    await validateManagementSystemdUnitBroker(filePath, binaryName);
+    await validateManagementEmbeddedUpgradeArtifacts(filePath, binaryName);
 }
 
 async function downloadReleaseChecksums(release: GithubRelease, preferredEndpoint: GithubEndpoint, forceYes?: boolean) {
@@ -2305,6 +2360,7 @@ export async function waitForUpgradeHealth() {
 export type UpgradeActivationState = {
     binary: BinaryBackupState;
     edgeBinary: BinaryBackupState | null;
+    postgrestLauncher: PostgrestLauncherActivationState | null;
     systemdUnitBroker: PrivilegedHelperActivationState | null;
     webConsoleLink: WebConsoleLinkActivationState | null;
     managementEnvState: FileState | null;
@@ -2351,10 +2407,12 @@ type UpgradeExecutionState = {
     committed: boolean;
     downloadEndpointLabel: string;
     edgeRuntimeEndpointLabel: string | null;
+    preflightPostgrestLauncher: PostgrestLauncherPreflight | undefined;
     preflightSystemdUnitBroker: PrivilegedHelperIdentity | null;
     rollbackSucceeded: boolean;
     stagedEdgeRuntime: StagedBinary | null;
     stagedManagement: StagedBinary | null;
+    stagedPostgrestLauncher: StagedPrivilegedHelper | null;
     stagedSystemdUnitBroker: StagedPrivilegedHelper | null;
     stagedWebConsole: StagedWebConsole | null;
     webConsoleEndpointLabel: string | null;
@@ -2384,6 +2442,7 @@ export type UpgradeRecoveryPathState = {
     activation?: Partial<UpgradeActivationState> | null;
     stagedEdgeRuntime?: { path: string } | null;
     stagedManagement?: { path: string } | null;
+    stagedPostgrestLauncher?: { path: string } | null;
     stagedSystemdUnitBroker?: { path: string } | null;
     stagedWebConsole?: { releaseDir: string } | null;
 };
@@ -2391,6 +2450,8 @@ export type UpgradeRecoveryPathState = {
 type ActivateArtifactsRequest = {
     stagedBinary: StagedBinary;
     stagedEdgeBinary: StagedBinary | null;
+    stagedPostgrestLauncher: StagedPrivilegedHelper;
+    preflightPostgrestLauncher: PostgrestLauncherPreflight;
     stagedSystemdUnitBroker: StagedPrivilegedHelper;
     preflightSystemdUnitBroker: PrivilegedHelperIdentity;
     stagedWeb: StagedWebConsole | null;
@@ -2398,7 +2459,14 @@ type ActivateArtifactsRequest = {
 };
 
 async function activateArtifacts(request: ActivateArtifactsRequest) {
-    const { stagedBinary, stagedEdgeBinary, stagedSystemdUnitBroker, stagedWeb, state } = request;
+    const {
+        stagedBinary,
+        stagedEdgeBinary,
+        stagedPostgrestLauncher,
+        stagedSystemdUnitBroker,
+        stagedWeb,
+        state,
+    } = request;
     if (stagedWeb) verifyWebConsoleReleaseTree(stagedWeb.releaseDir, stagedWeb.treeSha256);
     const preparedSystemdUnitBroker = prepareSystemdUnitBrokerActivation({
         staged: stagedSystemdUnitBroker,
@@ -2406,7 +2474,14 @@ async function activateArtifacts(request: ActivateArtifactsRequest) {
         expectedPrevious: request.preflightSystemdUnitBroker,
     });
     state.systemdUnitBroker = preparedSystemdUnitBroker.state;
+    const preparedPostgrestLauncher = preparePostgrestLauncherActivation({
+        staged: stagedPostgrestLauncher,
+        targetPath: POSTGREST_LAUNCHER_TARGET,
+        expectedPrevious: request.preflightPostgrestLauncher,
+    });
+    state.postgrestLauncher = preparedPostgrestLauncher.state;
     activatePreparedSystemdUnitBroker(preparedSystemdUnitBroker);
+    activatePreparedPostgrestLauncher(preparedPostgrestLauncher);
     activateStagedBinary(stagedBinary.path, state.binary);
 
     if (stagedEdgeBinary && state.edgeBinary) {
@@ -2482,6 +2557,14 @@ function artifactRecoveryActions(state: UpgradeActivationState): UpgradeRecovery
             gid: systemdUnitBroker.previous.gid,
         }),
     });
+    const postgrestLauncher = state.postgrestLauncher;
+    if (postgrestLauncher) actions.push({
+        description: "restore PostgREST launcher",
+        run: () => restorePostgrestLauncher(postgrestLauncher, {
+            uid: postgrestLauncher.previous?.uid ?? postgrestLauncher.activatedIdentity.uid,
+            gid: postgrestLauncher.previous?.gid ?? postgrestLauncher.activatedIdentity.gid,
+        }),
+    });
     return actions;
 }
 
@@ -2510,6 +2593,7 @@ function createActivationState(edgeRuntimeTarget: string | null): UpgradeActivat
     return {
         binary: createBinaryBackupState(BIN_TARGET),
         edgeBinary: edgeRuntimeTarget ? createBinaryBackupState(edgeRuntimeTarget) : null,
+        postgrestLauncher: null,
         systemdUnitBroker: null,
         webConsoleLink: null,
         managementEnvState: null,
@@ -2642,10 +2726,12 @@ function createUpgradeExecutionState(plan: UpgradeReleasePlan): UpgradeExecution
         committed: false,
         downloadEndpointLabel: plan.endpoint.label,
         edgeRuntimeEndpointLabel: null,
+        preflightPostgrestLauncher: undefined,
         preflightSystemdUnitBroker: null,
         rollbackSucceeded: false,
         stagedEdgeRuntime: null,
         stagedManagement: null,
+        stagedPostgrestLauncher: null,
         stagedSystemdUnitBroker: null,
         stagedWebConsole: null,
         webConsoleEndpointLabel: null,
@@ -2680,6 +2766,7 @@ async function verifyUpgradePreflight(context: UpgradeExecutionContext): Promise
     verifyBackupPrivilegeDropPreflight();
     await verifyManagementUpgradePreflight();
     context.state.preflightSystemdUnitBroker = readPrivilegedHelperIdentity(SYSTEMD_UNIT_BROKER_TARGET);
+    context.state.preflightPostgrestLauncher = readPostgrestLauncherPreflight(POSTGREST_LAUNCHER_TARGET);
     const edgeRuntime = context.plan.edgeRuntime;
     if (!edgeRuntime) return;
     const current = await inspectActiveSystemdBinary(EDGE_RUNTIME_SERVICE_UNIT);
@@ -2773,6 +2860,8 @@ async function stageUpgradeArtifacts(context: UpgradeExecutionContext): Promise<
     await stageWebConsoleUpgrade(context);
     context.spinner.start(`Staging the Management release systemd-unit helper for ${SYSTEMD_UNIT_BROKER_TARGET}`);
     context.state.stagedSystemdUnitBroker = stageEmbeddedSystemdUnitBroker();
+    context.spinner.start(`Staging the Management release PostgREST launcher for ${POSTGREST_LAUNCHER_TARGET}`);
+    context.state.stagedPostgrestLauncher = stageEmbeddedPostgrestLauncher();
 }
 
 async function migrateUpgradeMetadata(context: UpgradeExecutionContext): Promise<void> {
@@ -2787,11 +2876,17 @@ async function activateUpgradeArtifacts(context: UpgradeExecutionContext): Promi
     if (!state.stagedManagement) throw new Error("Upgrade binary was not staged");
     if (!state.stagedSystemdUnitBroker) throw new Error("Upgrade systemd-unit helper was not staged");
     if (!state.preflightSystemdUnitBroker) throw new Error("Upgrade systemd-unit helper preflight is unavailable");
+    if (!state.stagedPostgrestLauncher) throw new Error("Upgrade PostgREST launcher was not staged");
+    if (state.preflightPostgrestLauncher === undefined) {
+        throw new Error("Upgrade PostgREST launcher preflight is unavailable");
+    }
     context.spinner.start("Atomically activating staged SupaCloud artifacts");
     state.activation = createActivationState(plan.edgeRuntime?.targetPath || null);
     await activateArtifacts({
         stagedBinary: state.stagedManagement,
         stagedEdgeBinary: state.stagedEdgeRuntime,
+        stagedPostgrestLauncher: state.stagedPostgrestLauncher,
+        preflightPostgrestLauncher: state.preflightPostgrestLauncher,
         stagedSystemdUnitBroker: state.stagedSystemdUnitBroker,
         preflightSystemdUnitBroker: state.preflightSystemdUnitBroker,
         stagedWeb: state.stagedWebConsole,
@@ -2845,6 +2940,7 @@ async function verifyUpgradeActivation(context: UpgradeExecutionContext): Promis
     await waitForUpgradeHealth();
     await verifyActivatedManagementBinary(stagedManagement.sha256);
     verifyInstalledSystemdUnitBroker();
+    verifyInstalledPostgrestLauncher();
     if (context.state.stagedWebConsole) verifyActivatedWebConsole(context.state.stagedWebConsole);
     await verifyEdgeRuntimeUpgrade(context);
     context.state.committed = true;
@@ -2874,6 +2970,11 @@ function stagedArtifactCleanupActions(state: UpgradeExecutionState): UpgradeClea
     if (systemdUnitBroker) actions.push({
         description: `remove staged systemd-unit helper ${systemdUnitBroker.path}`,
         run: () => rmSync(systemdUnitBroker.path, { force: true }),
+    });
+    const postgrestLauncher = state.stagedPostgrestLauncher;
+    if (postgrestLauncher) actions.push({
+        description: `remove staged PostgREST launcher ${postgrestLauncher.path}`,
+        run: () => rmSync(postgrestLauncher.path, { force: true }),
     });
     const webConsole = state.stagedWebConsole;
     if (!state.committed && webConsole) actions.push({
@@ -2905,6 +3006,11 @@ function activatedBackupCleanupActions(state: UpgradeExecutionState): UpgradeCle
     if (systemdUnitBrokerBackup) actions.push({
         description: `remove systemd-unit helper backup ${systemdUnitBrokerBackup.backupPath}`,
         run: () => cleanupSystemdUnitBrokerBackup(systemdUnitBrokerBackup),
+    });
+    const postgrestLauncherBackup = activation.postgrestLauncher;
+    if (postgrestLauncherBackup?.backupReady) actions.push({
+        description: `remove PostgREST launcher backup ${postgrestLauncherBackup.backupPath}`,
+        run: () => cleanupPostgrestLauncherBackup(postgrestLauncherBackup),
     });
     return actions;
 }
@@ -2952,21 +3058,41 @@ function upgradeTransactionOperations(context: UpgradeExecutionContext): Upgrade
     };
 }
 
+function recoveryPathHasDirectoryEntry(filePath: string): boolean {
+    try {
+        return lstatSync(filePath, { throwIfNoEntry: false }) !== undefined;
+    } catch {
+        // Recovery diagnostics must preserve the primary failure when a path cannot be inspected.
+        return true;
+    }
+}
+
 export function upgradeRecoveryPaths(state: UpgradeRecoveryPathState | null): string[] {
     if (!state) return [];
+    const absentLauncherTarget = state.activation?.postgrestLauncher?.activated
+        && state.activation.postgrestLauncher.previous === null
+        ? state.activation.postgrestLauncher.targetPath
+        : null;
     const candidates = [
         state.activation?.binary?.backupReady ? state.activation.binary.backupPath : null,
         state.activation?.edgeBinary?.backupReady ? state.activation.edgeBinary.backupPath : null,
         state.activation?.systemdUnitBroker?.backupReady
             ? state.activation.systemdUnitBroker.backupPath
             : null,
+        state.activation?.postgrestLauncher?.backupReady
+            ? state.activation.postgrestLauncher.backupPath
+            : null,
         state.activation?.webConsoleLink?.nextLink,
         state.stagedManagement?.path,
         state.stagedEdgeRuntime?.path,
+        state.stagedPostgrestLauncher?.path,
         state.stagedSystemdUnitBroker?.path,
         state.stagedWebConsole?.releaseDir,
     ];
-    return [...new Set(candidates.filter((candidate): candidate is string => Boolean(candidate && existsSync(candidate))))];
+    const presentPaths = candidates.filter((candidate): candidate is string =>
+        Boolean(candidate && recoveryPathHasDirectoryEntry(candidate)),
+    );
+    return [...new Set(absentLauncherTarget ? [...presentPaths, absentLauncherTarget] : presentPaths)];
 }
 
 function sanitizedUpgradeDiagnostic(error: unknown): string {

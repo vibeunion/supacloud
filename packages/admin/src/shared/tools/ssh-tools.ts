@@ -250,10 +250,13 @@ function componentBootstrapCommands(request: UpgradeRequest): string[] {
         `supacloud_download_release_asset "$MANAGEMENT_RELEASE" "$MANAGEMENT_ASSET" "$STAGED_MANAGEMENT" binary`,
         `chmod 0755 "$STAGED_MANAGEMENT"`,
         `TARGET_MANAGEMENT_VERSION=$(jq -er '.tag_name | capture("^management-api-v(?<version>(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*))$").version' <<< "$MANAGEMENT_RELEASE")`,
-        `STAGED_VERSION=$("$STAGED_MANAGEMENT" --version 2>&1 | grep -Eo '[0-9]+\\.[0-9]+\\.[0-9]+' | head -1 || true)`,
+        `STAGED_VERSION=$(timeout 5s "$STAGED_MANAGEMENT" --version 2>&1 | grep -Eo '[0-9]+\\.[0-9]+\\.[0-9]+' | head -1 || true)`,
         `test "$STAGED_VERSION" = "$TARGET_MANAGEMENT_VERSION" || { echo 'Target Management binary version does not match its verified release' >&2; exit 1; }`,
         `supacloud_version_at_least "$STAGED_VERSION" ${quoteEnvValue(MINIMUM_COMPONENT_UPGRADE_VERSION)} || { echo 'Target Management release lacks component transaction capability' >&2; exit 1; }`,
-        `"$STAGED_MANAGEMENT" --systemd-unit-helper-sha256 >/dev/null 2>&1 || { echo 'Target Management release lacks target-bound systemd-unit helper delivery' >&2; exit 1; }`,
+        `SYSTEMD_HELPER_OUTPUT=$(timeout 5s "$STAGED_MANAGEMENT" --systemd-unit-helper-sha256 2>&1)`,
+        `[[ "$SYSTEMD_HELPER_OUTPUT" =~ ^SupaCloud[[:space:]]systemd-unit[[:space:]]helper[[:space:]]SHA-256:[[:space:]][0-9a-f]{64}$ ]] || { echo 'Target Management release lacks target-bound systemd-unit helper delivery' >&2; exit 1; }`,
+        `POSTGREST_LAUNCHER_OUTPUT=$(timeout 5s "$STAGED_MANAGEMENT" --postgrest-launcher-sha256 2>&1)`,
+        `[[ "$POSTGREST_LAUNCHER_OUTPUT" =~ ^SupaCloud[[:space:]]PostgREST[[:space:]]launcher[[:space:]]SHA-256:[[:space:]][0-9a-f]{64}$ ]] || { echo 'Target Management release lacks target-bound PostgREST launcher delivery' >&2; exit 1; }`,
         `UPGRADE_RUNNER="$STAGED_MANAGEMENT"`,
     ];
 }
@@ -306,7 +309,7 @@ export function buildRootUpgradeScript(request: UpgradeRequest): string {
         request.githubProxy
             ? `export SUPACLOUD_GITHUB_PROXY=${quoteEnvValue(request.githubProxy)}`
             : "unset SUPACLOUD_GITHUB_PROXY SUPACLOUD_GITHUB_PROXIES",
-        "for tool in curl jq file sha256sum stat tar flock find sort chown; do command -v \"$tool\" >/dev/null 2>&1 || { echo \"Required upgrade tool is missing: $tool\" >&2; exit 127; }; done",
+        "for tool in curl jq file sha256sum stat tar flock find sort chown timeout; do command -v \"$tool\" >/dev/null 2>&1 || { echo \"Required upgrade tool is missing: $tool\" >&2; exit 127; }; done",
         "test -d /run/lock || { echo '/run/lock is unavailable' >&2; exit 1; }",
         "test -x /usr/local/bin/supacloud || { echo 'SupaCloud binary not found at /usr/local/bin/supacloud; run ssh install first.' >&2; exit 127; }",
         ...trustedRootPreflightCommands(request.helperPath),

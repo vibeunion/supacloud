@@ -48,6 +48,7 @@ import {
     normalizeExactManagementVersion,
     normalizeManagementReleaseTag,
     parseManagementVersionOutput,
+    parsePostgrestLauncherDigestOutput,
     parseSystemdUnitBrokerDigestOutput,
     parseSystemdExecStartPath,
     parseSystemdEnabledState,
@@ -585,6 +586,16 @@ describe("upgrade release selection", () => {
     }))).toBe(digest);
     expect(() => parseSystemdUnitBrokerDigestOutput(
       `SupaCloud systemd-unit helper SHA-256: ${digest}\nextra\n`,
+    )).toThrow("exactly one line");
+
+    expect(parsePostgrestLauncherDigestOutput(
+      `SupaCloud PostgREST launcher SHA-256: ${digest}\n`,
+    )).toBe(digest);
+    expect(parsePostgrestLauncherDigestOutput(JSON.stringify({
+      message: `SupaCloud PostgREST launcher SHA-256: ${digest}`,
+    }))).toBe(digest);
+    expect(() => parsePostgrestLauncherDigestOutput(
+      `SupaCloud PostgREST launcher SHA-256: ${digest}\nextra\n`,
     )).toThrow("exactly one line");
   });
 
@@ -1400,6 +1411,7 @@ describe("upgrade release selection", () => {
           activated: true,
         },
         edgeBinary: null,
+        postgrestLauncher: null,
         systemdUnitBroker: prepared.state,
         webConsoleLink: null,
         managementEnvState: null,

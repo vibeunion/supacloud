@@ -4,9 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pkg from "../../package.json";
 import {
+  isPostgrestLauncherDigestCommand,
   isStandaloneVersionCommand,
   isSystemdUnitBrokerDigestCommand,
 } from "../../src/standalone";
+import { EMBEDDED_POSTGREST_LAUNCHER_SHA256 } from "../../src/embedded-postgrest-launcher";
 import { EMBEDDED_SYSTEMD_UNIT_BROKER_SHA256 } from "../../src/embedded-systemd-unit-broker";
 
 const packageRoot = join(import.meta.dir, "../..");
@@ -44,6 +46,8 @@ describe("standalone version command", () => {
     expect(isStandaloneVersionCommand(["project", "--version"])).toBe(false);
     expect(isSystemdUnitBrokerDigestCommand(["--systemd-unit-helper-sha256"])).toBe(true);
     expect(isSystemdUnitBrokerDigestCommand(["upgrade", "--systemd-unit-helper-sha256"])).toBe(false);
+    expect(isPostgrestLauncherDigestCommand(["--postgrest-launcher-sha256"])).toBe(true);
+    expect(isPostgrestLauncherDigestCommand(["upgrade", "--postgrest-launcher-sha256"])).toBe(false);
   });
 
   test("compiled binary prints its version without loading runtime configuration", async () => {
@@ -60,15 +64,23 @@ describe("standalone version command", () => {
     const version = await captureProcess([binaryPath, "--version"], 5_000);
     expect(version.timedOut).toBe(false);
     expect(version.exitCode).toBe(0);
-    expect(version.stdout).toContain(`SupaCloud Version: ${pkg.version}`);
+    expect(version.stdout).toBe(`SupaCloud Version: ${pkg.version}\n`);
     expect(version.stderr).toBe("");
 
     const helperDigest = await captureProcess([binaryPath, "--systemd-unit-helper-sha256"], 5_000);
     expect(helperDigest.timedOut).toBe(false);
     expect(helperDigest.exitCode).toBe(0);
-    expect(helperDigest.stdout).toContain(
-      `SupaCloud systemd-unit helper SHA-256: ${EMBEDDED_SYSTEMD_UNIT_BROKER_SHA256}`,
+    expect(helperDigest.stdout).toBe(
+      `SupaCloud systemd-unit helper SHA-256: ${EMBEDDED_SYSTEMD_UNIT_BROKER_SHA256}\n`,
     );
     expect(helperDigest.stderr).toBe("");
+
+    const launcherDigest = await captureProcess([binaryPath, "--postgrest-launcher-sha256"], 5_000);
+    expect(launcherDigest.timedOut).toBe(false);
+    expect(launcherDigest.exitCode).toBe(0);
+    expect(launcherDigest.stdout).toBe(
+      `SupaCloud PostgREST launcher SHA-256: ${EMBEDDED_POSTGREST_LAUNCHER_SHA256}\n`,
+    );
+    expect(launcherDigest.stderr).toBe("");
   }, 40_000);
 });
