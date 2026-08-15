@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.8.0](https://github.com/zuohuadong/supacloud/compare/supacloud-lite-v0.7.3...supacloud-lite-v0.8.0) (2026-08-15)
+
+
+### Features
+
+* add project-scoped durable workflows ([#901](https://github.com/zuohuadong/supacloud/issues/901)) ([af4fbc2](https://github.com/zuohuadong/supacloud/commit/af4fbc257f18431f1ba68854ac8bdde03ec3af96))
+* **lite:** add native engine and image transform caching ([#909](https://github.com/zuohuadong/supacloud/issues/909)) ([631f575](https://github.com/zuohuadong/supacloud/commit/631f5758c7bb6649678465a62d229f0a0e0528dd))
+
+
+### Bug Fixes
+
+* **lite:** keep inspection commands read-only ([#900](https://github.com/zuohuadong/supacloud/issues/900)) ([9437b80](https://github.com/zuohuadong/supacloud/commit/9437b808cd8a376f779d2391da25661f938047f2))
+
 ## [0.7.3](https://github.com/zuohuadong/supacloud/compare/supacloud-lite-v0.7.2...supacloud-lite-v0.7.3) (2026-08-14)
 
 

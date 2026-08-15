@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.60.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.59.0...management-api-v0.60.0) (2026-08-15)
+
+
+### Features
+
+* add project-scoped durable workflows ([#901](https://github.com/zuohuadong/supacloud/issues/901)) ([af4fbc2](https://github.com/zuohuadong/supacloud/commit/af4fbc257f18431f1ba68854ac8bdde03ec3af96))
+
+
+### Bug Fixes
+
+* **management-api:** sync realtime config schema ([#908](https://github.com/zuohuadong/supacloud/issues/908)) ([1248996](https://github.com/zuohuadong/supacloud/commit/124899650f90091f128d279c3f44008814295ee1))
+
 ## [0.59.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.58.2...management-api-v0.59.0) (2026-08-13)
 
 
