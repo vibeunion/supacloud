@@ -238,7 +238,9 @@ staging tree.
 The transaction runs in a uniquely named transient systemd unit and publishes a
 protected atomic status record. Admin polls that record through short SSH calls;
 it does not blindly stop a transaction that may have entered activation. The
-legacy server-download path remains available as `--artifact_transport remote`.
+server-download path remains available as `--artifact_transport remote`; it
+also verifies and executes the exact target Management binary as the upgrade
+runner instead of delegating target-specific work to the installed prior version.
 Local, remote, and direct server upgrades share one nonblocking host-wide lock.
 
 Admin observes the remote transaction for up to 30 minutes. Reaching that
@@ -258,18 +260,25 @@ With `--artifact_transport remote` (the default), omit
 Console without changing Edge Runtime. Local transport requires exact
 Management and Edge Runtime versions.
 
-The installed `/usr/local/bin/supacloud` server binary still provides the
-Management/Web Console-only local upgrade path. Production servers do not need
-to `git pull` application source during normal upgrades.
+For a Management/Web Console-only upgrade, use Admin remote transport and omit
+`--edge_runtime_version`. Production servers do not need to `git pull`
+application source, and an installed prior Management binary is never trusted
+to implement a newer release's helper or Web activation contract.
 
 ```bash
-sudo supacloud upgrade --yes
+npx @supacloud/admin ssh upgrade \
+  --version 0.60.1 \
+  --artifact_transport remote \
+  --github_proxy direct
 ```
 
 Install and upgrade downloads are direct-first. Configure a trusted proxy only when an explicit fallback is required:
 
 ```bash
-sudo SUPACLOUD_GITHUB_PROXY=https://your-trusted-proxy.example supacloud upgrade --yes
+npx @supacloud/admin ssh upgrade \
+  --version 0.60.1 \
+  --artifact_transport remote \
+  --github_proxy https://your-trusted-proxy.example
 ```
 
 Release artifacts require same-release SHA256 verification and GitHub build provenance attestation. `SUPACLOUD_ALLOW_UNVERIFIED_RELEASE=true` is an emergency break-glass mode that retains SHA256 verification but must not be a normal installation setting.
@@ -606,7 +615,7 @@ For human operators, the CLI split is now:
 - `@supacloud/admin` / `supacloud-admin`: server and platform administration CLI
 - `supacloudctl admin ...`: unified local entrypoint with the same offline-by-default behavior; use `supacloudctl check-update admin` explicitly.
 - Use `npx @supacloud/admin ssh upgrade --version <management-version> --edge_runtime_version <edge-version>` for the verified Management, Web Console, and external Edge Runtime transaction.
-- On installed servers, `/usr/local/bin/supacloud` remains the compiled server binary; `sudo supacloud upgrade --yes` is limited to the Management/Web Console path unless an exact Edge Runtime target is supplied through the supported Admin flow.
+- `/usr/local/bin/supacloud` remains the active server binary, but all supported upgrades use Admin. Protected offline upgrades use Admin's verified local transport, which executes the authenticated target runner; do not run the bundle runner manually or let the installed prior release execute a target-specific transaction.
 
 
 ### Project Structure

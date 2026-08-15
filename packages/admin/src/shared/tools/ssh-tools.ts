@@ -233,30 +233,28 @@ type UpgradeRequest = {
     helperPath: string;
 };
 
-function upgradeEnvAssignments(request: UpgradeRequest): string {
+function upgradeTransactionEnvAssignments(request: UpgradeRequest): string {
     return [
-        request.version ? `SUPACLOUD_UPGRADE_TAG=${quoteEnvValue(request.version)}` : "",
+        'SUPACLOUD_UPGRADE_TAG="$TARGET_MANAGEMENT_VERSION"',
         request.edgeRuntimeVersion ? `SUPACLOUD_EDGE_RUNTIME_UPGRADE_TAG=${quoteEnvValue(request.edgeRuntimeVersion)}` : "",
         request.githubProxy ? `SUPACLOUD_GITHUB_PROXY=${quoteEnvValue(request.githubProxy)}` : "",
     ].filter(Boolean).join(" ");
 }
 
 function componentBootstrapCommands(request: UpgradeRequest): string[] {
-    if (!request.edgeRuntimeVersion) return [`UPGRADE_RUNNER=${quoteEnvValue("/usr/local/bin/supacloud")}`];
     const managementVersion = request.version || "latest";
     return [
-        `ACTIVE_VERSION=$(/usr/local/bin/supacloud --version 2>&1 | grep -Eo '[0-9]+\\.[0-9]+\\.[0-9]+' | head -1 || true)`,
-        `UPGRADE_RUNNER=${quoteEnvValue("/usr/local/bin/supacloud")}`,
-        `if ! supacloud_version_at_least "$ACTIVE_VERSION" ${quoteEnvValue(MINIMUM_COMPONENT_UPGRADE_VERSION)}; then`,
-        `  case "$(uname -m)" in x86_64|amd64) MANAGEMENT_ASSET=supacloud-linux-amd64 ;; aarch64|arm64) MANAGEMENT_ASSET=supacloud-linux-arm64 ;; *) echo 'Unsupported Management architecture' >&2; exit 1 ;; esac`,
-        `  STAGED_MANAGEMENT=$(mktemp /tmp/supacloud-management-upgrade.XXXXXX)`,
-        `  MANAGEMENT_RELEASE=$(supacloud_fetch_component_release management-api ${quoteEnvValue(managementVersion)} "$MANAGEMENT_ASSET" web-console-build.tar.gz)`,
-        `  supacloud_download_release_asset "$MANAGEMENT_RELEASE" "$MANAGEMENT_ASSET" "$STAGED_MANAGEMENT" binary`,
-        `  chmod 0755 "$STAGED_MANAGEMENT"`,
-        `  STAGED_VERSION=$("$STAGED_MANAGEMENT" --version 2>&1 | grep -Eo '[0-9]+\\.[0-9]+\\.[0-9]+' | head -1 || true)`,
-        `  supacloud_version_at_least "$STAGED_VERSION" ${quoteEnvValue(MINIMUM_COMPONENT_UPGRADE_VERSION)} || { echo 'Target Management release lacks Edge Runtime transaction capability' >&2; exit 1; }`,
-        `  UPGRADE_RUNNER="$STAGED_MANAGEMENT"`,
-        "fi",
+        `case "$(uname -m)" in x86_64|amd64) MANAGEMENT_ASSET=supacloud-linux-amd64 ;; aarch64|arm64) MANAGEMENT_ASSET=supacloud-linux-arm64 ;; *) echo 'Unsupported Management architecture' >&2; exit 1 ;; esac`,
+        `STAGED_MANAGEMENT=$(mktemp /tmp/supacloud-management-upgrade.XXXXXX)`,
+        `MANAGEMENT_RELEASE=$(supacloud_fetch_component_release management-api ${quoteEnvValue(managementVersion)} "$MANAGEMENT_ASSET" web-console-build.tar.gz)`,
+        `supacloud_download_release_asset "$MANAGEMENT_RELEASE" "$MANAGEMENT_ASSET" "$STAGED_MANAGEMENT" binary`,
+        `chmod 0755 "$STAGED_MANAGEMENT"`,
+        `TARGET_MANAGEMENT_VERSION=$(jq -er '.tag_name | capture("^management-api-v(?<version>(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*))$").version' <<< "$MANAGEMENT_RELEASE")`,
+        `STAGED_VERSION=$("$STAGED_MANAGEMENT" --version 2>&1 | grep -Eo '[0-9]+\\.[0-9]+\\.[0-9]+' | head -1 || true)`,
+        `test "$STAGED_VERSION" = "$TARGET_MANAGEMENT_VERSION" || { echo 'Target Management binary version does not match its verified release' >&2; exit 1; }`,
+        `supacloud_version_at_least "$STAGED_VERSION" ${quoteEnvValue(MINIMUM_COMPONENT_UPGRADE_VERSION)} || { echo 'Target Management release lacks component transaction capability' >&2; exit 1; }`,
+        `"$STAGED_MANAGEMENT" --systemd-unit-helper-sha256 >/dev/null 2>&1 || { echo 'Target Management release lacks target-bound systemd-unit helper delivery' >&2; exit 1; }`,
+        `UPGRADE_RUNNER="$STAGED_MANAGEMENT"`,
     ];
 }
 
@@ -298,7 +296,7 @@ function trustedRootPreflightCommands(helperPath: string): string[] {
 }
 
 export function buildRootUpgradeScript(request: UpgradeRequest): string {
-    const envAssignments = upgradeEnvAssignments(request);
+    const envAssignments = upgradeTransactionEnvAssignments(request);
     return [
         "set -euo pipefail",
         "umask 077",
@@ -321,7 +319,7 @@ export function buildRootUpgradeScript(request: UpgradeRequest): string {
         "if ! supacloud_attestation_verifier_available; then supacloud_install_pinned_gh /usr/local/bin/gh; fi",
         "supacloud_attestation_verifier_available || { echo 'Pinned GitHub attestation verifier is unavailable' >&2; exit 1; }",
         ...componentBootstrapCommands(request),
-        `${envAssignments ? `env ${envAssignments} ` : ""}"$UPGRADE_RUNNER" upgrade --yes`,
+        `env ${envAssignments} "$UPGRADE_RUNNER" upgrade --yes`,
     ].join("\n");
 }
 

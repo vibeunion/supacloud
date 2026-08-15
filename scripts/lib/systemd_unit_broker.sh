@@ -53,7 +53,7 @@ validate_environment_file() {
 
 validate_unit_content() {
     local section="" line key value user="" group="" seen_unit=0 seen_service=0 seen_install=0 seen_nnp=0 seen_env_file=0
-    local unit_bytes
+    local unit_bytes environment_file_ok=0
     unit_bytes=$(wc -c < "$source_file")
     (( unit_bytes > 0 && unit_bytes <= 16384 )) || return 1
     cmp -s "$source_file" <(LC_ALL=C tr -d '\000-\011\013-\037\177' < "$source_file") || return 1
@@ -101,7 +101,10 @@ validate_unit_content() {
             group="$value"
         fi
     done < "$source_file"
-    [[ "$seen_unit" == 1 && "$seen_service" == 1 && "$seen_install" == 1 && "$seen_nnp" == 1 && "$seen_env_file" == 1 \
+    if [[ "$unit_name" == "supacloud-pgrst@.service" || "$seen_env_file" == 1 ]]; then
+        environment_file_ok=1
+    fi
+    [[ "$seen_unit" == 1 && "$seen_service" == 1 && "$seen_install" == 1 && "$seen_nnp" == 1 && "$environment_file_ok" == 1 \
         && -n "$user" && "$user" == "$group" ]] || return 1
     if [[ "$unit_name" == *'@'* && "$user" != "supacloud-%i" ]]; then
         return 1

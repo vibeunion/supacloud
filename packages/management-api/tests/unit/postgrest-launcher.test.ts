@@ -170,6 +170,10 @@ describe("PostgREST launcher installation", () => {
       join(repoRoot, "packages/management-api/src/services/tenant-runtime.service.ts"),
       "utf8",
     );
+    const template = readFileSync(
+      join(repoRoot, "packages/management-api/src/services/postgrest-systemd-template.ts"),
+      "utf8",
+    );
     const canonicalPath = "/usr/local/libexec/supacloud/postgrest-launcher";
 
     expect(installer).toContain(`local launcher_target="${canonicalPath}"`);
@@ -177,7 +181,8 @@ describe("PostgREST launcher installation", () => {
     expect(installer).toContain(`supacloud_restore_file_snapshot ${canonicalPath}`);
     expect(installer).toContain("install_postgrest_launcher || activation_status=$?");
     expect(runtime).toContain(`ExecStart=${canonicalPath} %i`);
-    expect(service).toContain(`ExecStart=${canonicalPath} %i`);
-    expect(service).not.toContain("/usr/local/libexec/supacloud-postgrest-launcher");
+    expect(template).toContain(`ExecStart=${canonicalPath} %i`);
+    expect(service).toContain("renderPostgrestSystemdTemplate({");
+    expect(`${service}\n${template}`).not.toContain("/usr/local/libexec/supacloud-postgrest-launcher");
   });
 });

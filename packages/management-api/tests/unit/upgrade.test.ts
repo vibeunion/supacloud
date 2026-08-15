@@ -1,7 +1,24 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { SQL } from "bun";
 import { createHash } from "node:crypto";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  linkSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readlinkSync,
+  readdirSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -21,6 +38,9 @@ import {
     ensureEdgeRuntimeIdentity,
     ensureEmbeddedEdgeRuntimeSourceAccess,
     ensurePersistedEdgeRuntimeIdentity,
+    activatePreparedWebConsoleLink,
+    executeUpgradeRecoveryActions,
+    extractWebConsoleArchive,
     formatUpgradeFailure,
     inspectActiveManagementBinary,
     inspectActiveSystemdBinary,
@@ -28,9 +48,11 @@ import {
     normalizeExactManagementVersion,
     normalizeManagementReleaseTag,
     parseManagementVersionOutput,
+    parseSystemdUnitBrokerDigestOutput,
     parseSystemdExecStartPath,
     parseSystemdEnabledState,
     parseSystemdMainPid,
+    prepareWebConsoleLinkActivation,
     prepareUpgradeSecrets,
     resolveArtifactVerificationMode,
     resolveEdgeRuntimeCapacityConfig,
@@ -42,6 +64,7 @@ import {
     readSystemdEnabledState,
     runStagedDatabaseMigration,
     restoreCurrentBinary,
+    rollbackArtifacts,
     restoreFileState,
     selectEdgeRuntimeRelease,
     selectManagementRelease,
@@ -53,16 +76,27 @@ import {
     upsertPersistedEdgeRuntimePort,
     upsertEdgeRuntimeIdentityDefaults,
     UpgradeTransactionError,
+    type UpgradeActivationState,
+    upgradeRecoveryPaths,
     validateWebConsoleArchiveEntries,
     verifyArtifactAttestation,
     verifyActivatedManagementBinary,
     verifyArtifactChecksum,
     verifyManagementUpgradePreflight,
     verifyBackupPrivilegeDropPreflight,
+    verifyWebConsoleArchiveExpandedSize,
+    verifyWebConsoleReleaseTree,
+    restoreWebConsoleLink,
     waitForManagementHealth,
     waitForEdgeRuntimeHealth,
     waitForUpgradeHealth,
 } from "../../src/upgrade";
+import {
+    activatePreparedSystemdUnitBroker,
+    prepareSystemdUnitBrokerActivation,
+    readPrivilegedHelperIdentity,
+    stageEmbeddedSystemdUnitBroker,
+} from "../../src/embedded-systemd-unit-broker";
 
 const originalFetch = globalThis.fetch;
 const attestationEnvironmentKeys = [
@@ -539,6 +573,19 @@ describe("upgrade release selection", () => {
     ]) {
       expect(() => parseManagementVersionOutput(invalid)).toThrow();
     }
+  });
+
+  test("requires the Management helper identity command to report one exact digest", () => {
+    const digest = "b".repeat(64);
+    expect(parseSystemdUnitBrokerDigestOutput(
+      `SupaCloud systemd-unit helper SHA-256: ${digest}\n`,
+    )).toBe(digest);
+    expect(parseSystemdUnitBrokerDigestOutput(JSON.stringify({
+      message: `SupaCloud systemd-unit helper SHA-256: ${digest}`,
+    }))).toBe(digest);
+    expect(() => parseSystemdUnitBrokerDigestOutput(
+      `SupaCloud systemd-unit helper SHA-256: ${digest}\nextra\n`,
+    )).toThrow("exactly one line");
   });
 
   test("selects only the explicitly pinned Edge Runtime release with its own checksum", () => {
@@ -1098,6 +1145,300 @@ describe("upgrade release selection", () => {
   test("rejects Web Console archives with path traversal entries", () => {
     expect(() => validateWebConsoleArchiveEntries("index.html\n../escape\n"))
       .toThrow("unsafe path");
+    expect(() => validateWebConsoleArchiveEntries("./index.html\nindex.html\n"))
+      .toThrow("duplicate path");
+    expect(() => validateWebConsoleArchiveEntries("index.html\n_app\n_app/entry.js\n"))
+      .toThrow("traverses a file");
+    expect(() => validateWebConsoleArchiveEntries("index.html\n_app/\n_app\n"))
+      .toThrow();
+    expect(() => validateWebConsoleArchiveEntries(`index.html\n${"a/".repeat(33)}asset.js\n`))
+      .toThrow("unsafe path");
+    const maximumInventory = ["index.html", ...Array.from(
+      { length: 9_999 },
+      (_, index) => `asset-${index}.js`,
+    )].join("\n");
+    expect(validateWebConsoleArchiveEntries(maximumInventory).files).toHaveLength(10_000);
+    expect(() => validateWebConsoleArchiveEntries(`${maximumInventory}\noverflow.js`))
+      .toThrow("too many entries");
+    const materializedOverflow = ["index.html", ...Array.from(
+      { length: 5_000 },
+      (_, index) => `directory-${index}/asset.js`,
+    )].join("\n");
+    expect(() => validateWebConsoleArchiveEntries(materializedOverflow))
+      .toThrow("materializes too many entries");
+  });
+
+  test("rejects Web Console expanded bytes before filesystem extraction", async () => {
+    const directory = realpathSync(mkdtempSync(join(tmpdir(), "supacloud-web-console-expanded-")));
+    const source = join(directory, "source");
+    const archive = join(directory, "web-console-build.tar.gz");
+    try {
+      mkdirSync(source);
+      writeFileSync(join(source, "index.html"), "x".repeat(64));
+      expect(Bun.spawnSync(["tar", "-czf", archive, "-C", source, "."]).exitCode).toBe(0);
+      await expect(verifyWebConsoleArchiveExpandedSize(archive, 32))
+        .rejects.toThrow("exceeds the expanded size limit");
+      await expect(verifyWebConsoleArchiveExpandedSize(archive, 64)).resolves.toBeUndefined();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("extracts Web Console files with exact public modes under restrictive umask", async () => {
+    const directory = realpathSync(mkdtempSync(join(tmpdir(), "supacloud-web-console-mode-")));
+    const source = join(directory, "source");
+    const releases = join(directory, "releases");
+    const archive = join(directory, "web-console-build.tar.gz");
+    const owner = { uid: process.getuid?.() ?? 0, gid: process.getgid?.() ?? 0 };
+    mkdirSync(join(source, "_app"), { recursive: true });
+    mkdirSync(releases, { mode: 0o700 });
+    chmodSync(releases, 0o700);
+    writeFileSync(join(source, "index.html"), "<!doctype html><title>SupaCloud</title>\n", { mode: 0o600 });
+    writeFileSync(join(source, "_app", "entry.js"), "console.log('verified');\n", { mode: 0o700 });
+    const packed = Bun.spawnSync(["tar", "-czf", archive, "-C", source, "."]);
+    expect(packed.exitCode).toBe(0);
+
+    const originalUmask = process.umask(0o077);
+    try {
+      const staged = await extractWebConsoleArchive(
+        archive,
+        "management-api-v0.60.1",
+        { label: "test fixture", proxyPrefix: "" },
+        { releasesDir: releases, owner },
+      );
+      expect(statSync(staged.releaseDir).mode & 0o777).toBe(0o755);
+      expect(statSync(directory).mode & 0o777).toBe(0o755);
+      expect(statSync(releases).mode & 0o777).toBe(0o755);
+      expect(statSync(join(staged.releaseDir, "_app")).mode & 0o777).toBe(0o755);
+      expect(statSync(join(staged.releaseDir, "index.html")).mode & 0o777).toBe(0o644);
+      expect(statSync(join(staged.releaseDir, "_app", "entry.js")).mode & 0o777).toBe(0o644);
+      expect(readFileSync(join(staged.releaseDir, "index.html"), "utf8"))
+        .toBe("<!doctype html><title>SupaCloud</title>\n");
+      verifyWebConsoleReleaseTree(staged.releaseDir, staged.treeSha256, owner);
+
+      chmodSync(join(staged.releaseDir, "_app", "entry.js"), 0o600);
+      expect(() => verifyWebConsoleReleaseTree(staged.releaseDir, staged.treeSha256, owner))
+        .toThrow("mode is not 0644");
+      chmodSync(join(staged.releaseDir, "_app", "entry.js"), 0o644);
+      writeFileSync(join(staged.releaseDir, "_app", "entry.js"), "console.log('changed');\n", { mode: 0o644 });
+      expect(() => verifyWebConsoleReleaseTree(staged.releaseDir, staged.treeSha256, owner))
+        .toThrow("content tree changed");
+      expect(() => verifyWebConsoleReleaseTree(staged.releaseDir, staged.treeSha256, {
+        uid: owner.uid + 1,
+        gid: owner.gid,
+      })).toThrow("unsafe directory");
+    } finally {
+      process.umask(originalUmask);
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects Web Console link entries before creating an activatable release", async () => {
+    const directory = realpathSync(mkdtempSync(join(tmpdir(), "supacloud-web-console-links-")));
+    const source = join(directory, "source");
+    const releases = join(directory, "releases");
+    const archive = join(directory, "web-console-build.tar.gz");
+    const owner = { uid: process.getuid?.() ?? 0, gid: process.getgid?.() ?? 0 };
+    mkdirSync(source);
+    mkdirSync(releases, { mode: 0o700 });
+    chmodSync(releases, 0o700);
+    writeFileSync(join(source, "index.html"), "<!doctype html>\n");
+    symlinkSync("index.html", join(source, "linked.html"));
+    expect(Bun.spawnSync(["tar", "-czf", archive, "-C", source, "."]).exitCode).toBe(0);
+
+    try {
+      await expect(extractWebConsoleArchive(
+        archive,
+        "management-api-v0.60.1",
+        { label: "test fixture", proxyPrefix: "" },
+        { releasesDir: releases, owner },
+      )).rejects.toThrow("links or special files");
+      expect(readdirSync(releases)).toEqual([]);
+
+      rmSync(join(source, "linked.html"));
+      linkSync(join(source, "index.html"), join(source, "hard-linked.html"));
+      expect(Bun.spawnSync(["tar", "-czf", archive, "-C", source, "."]).exitCode).toBe(0);
+      await expect(extractWebConsoleArchive(
+        archive,
+        "management-api-v0.60.1",
+        { label: "test fixture", proxyPrefix: "" },
+        { releasesDir: releases, owner },
+      )).rejects.toThrow("links or special files");
+      expect(readdirSync(releases)).toEqual([]);
+
+      rmSync(join(source, "hard-linked.html"));
+      const fifoPath = join(source, "named-pipe");
+      expect(Bun.spawnSync(["mkfifo", fifoPath]).exitCode).toBe(0);
+      expect(Bun.spawnSync(["tar", "-czf", archive, "-C", source, "."]).exitCode).toBe(0);
+      await expect(extractWebConsoleArchive(
+        archive,
+        "management-api-v0.60.1",
+        { label: "test fixture", proxyPrefix: "" },
+        { releasesDir: releases, owner },
+      )).rejects.toThrow("links or special files");
+      expect(readdirSync(releases)).toEqual([]);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("atomically activates and restores the Web Console current symlink", () => {
+    const directory = realpathSync(mkdtempSync(join(tmpdir(), "supacloud-web-console-link-")));
+    const current = join(directory, "current");
+    const previous = join(directory, "previous");
+    const target = join(directory, "target");
+    const owner = { uid: process.getuid?.() ?? 0, gid: process.getgid?.() ?? 0 };
+    try {
+      chmodSync(directory, 0o755);
+      mkdirSync(previous);
+      mkdirSync(target);
+      symlinkSync(previous, current);
+      const activation = prepareWebConsoleLinkActivation(current, target, owner);
+      expect(readlinkSync(current)).toBe(previous);
+      expect(lstatSync(activation.nextLink).isSymbolicLink()).toBe(true);
+      activatePreparedWebConsoleLink(activation);
+      expect(readlinkSync(current)).toBe(target);
+      expect(existsSync(activation.nextLink)).toBe(false);
+      restoreWebConsoleLink(activation);
+      expect(readlinkSync(current)).toBe(previous);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("refuses to overwrite a drifted Web Console current target during rollback", () => {
+    const directory = realpathSync(mkdtempSync(join(tmpdir(), "supacloud-web-console-link-drift-")));
+    const current = join(directory, "current");
+    const previous = join(directory, "previous");
+    const target = join(directory, "target");
+    const unexpected = join(directory, "unexpected");
+    const owner = { uid: process.getuid?.() ?? 0, gid: process.getgid?.() ?? 0 };
+    try {
+      chmodSync(directory, 0o755);
+      for (const release of [previous, target, unexpected]) mkdirSync(release);
+      symlinkSync(previous, current);
+      const activation = prepareWebConsoleLinkActivation(current, target, owner);
+      activatePreparedWebConsoleLink(activation);
+      const replacement = join(directory, "replacement");
+      symlinkSync(unexpected, replacement);
+      renameSync(replacement, current);
+      expect(() => restoreWebConsoleLink(activation)).toThrow("changed before rollback");
+      expect(readlinkSync(current)).toBe(unexpected);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("keeps the previous Web Console target when prepared activation fails", () => {
+    const directory = realpathSync(mkdtempSync(join(tmpdir(), "supacloud-web-console-link-failure-")));
+    const current = join(directory, "current");
+    const previous = join(directory, "previous");
+    const target = join(directory, "target");
+    const owner = { uid: process.getuid?.() ?? 0, gid: process.getgid?.() ?? 0 };
+    try {
+      chmodSync(directory, 0o755);
+      mkdirSync(previous);
+      mkdirSync(target);
+      symlinkSync(previous, current);
+      const activation = prepareWebConsoleLinkActivation(current, target, owner);
+      rmSync(activation.nextLink);
+
+      expect(() => activatePreparedWebConsoleLink(activation)).toThrow();
+      expect(readlinkSync(current)).toBe(previous);
+      expect(activation.activated).toBe(false);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("retains helper evidence after internal recovery fails and outer rollback continues", async () => {
+    const directory = realpathSync(mkdtempSync(join(tmpdir(), "supacloud-helper-combined-recovery-")));
+    const helperTarget = join(directory, "systemd-unit");
+    const managementBackup = join(directory, "management.bak");
+    const owner = { uid: process.getuid?.() ?? 0, gid: process.getgid?.() ?? 0 };
+    const previousContent = "#!/bin/sh\nprintf previous-helper\\n\n";
+    try {
+      writeFileSync(helperTarget, previousContent, { mode: 0o755 });
+      chmodSync(helperTarget, 0o755);
+      const previous = readPrivilegedHelperIdentity(helperTarget, owner);
+      const staged = stageEmbeddedSystemdUnitBroker(helperTarget, "combined", owner);
+      const prepared = prepareSystemdUnitBrokerActivation({
+        staged,
+        targetPath: helperTarget,
+        runId: "combined",
+        owner,
+        expectedPrevious: previous,
+      });
+      let activationFailure: unknown;
+      try {
+        activatePreparedSystemdUnitBroker(prepared, {
+          syncDirectory: () => { throw new Error("directory fsync failed after rename"); },
+          verifyInstalled: () => { throw new Error("verification must not run after fsync failure"); },
+          restore: () => { throw new Error("internal helper restore failed"); },
+        });
+      } catch (error: unknown) {
+        activationFailure = error;
+      }
+
+      expect(activationFailure).toBeInstanceOf(AggregateError);
+      expect(prepared.state.activated).toBe(true);
+      const frozenBackup = readPrivilegedHelperIdentity(
+        prepared.state.backupPath,
+        owner,
+        previous.mode,
+      );
+      expect(frozenBackup.content).toEqual(previous.content);
+      expect(frozenBackup.mode).toBe(previous.mode);
+
+      writeFileSync(managementBackup, "previous-management", { mode: 0o755 });
+      const activationState: UpgradeActivationState = {
+        binary: {
+          targetPath: join(directory, "missing-parent", "management"),
+          backupPath: managementBackup,
+          hadTarget: true,
+          backupReady: true,
+          activated: true,
+        },
+        edgeBinary: null,
+        systemdUnitBroker: prepared.state,
+        webConsoleLink: null,
+        managementEnvState: null,
+        edgeRuntimeEnvState: null,
+        edgeRuntimeDropInState: null,
+        managementPrivilegeDropInState: null,
+        embeddedEdgePrivilegeDropInState: null,
+      };
+      let rollbackFailure: unknown;
+      try {
+        await rollbackArtifacts(activationState, []);
+      } catch (error: unknown) {
+        rollbackFailure = error;
+      }
+
+      expect(rollbackFailure).toBeInstanceOf(AggregateError);
+      expect(readFileSync(helperTarget, "utf8")).toBe(previousContent);
+      expect(prepared.state.activated).toBe(false);
+      const recoveryPaths = upgradeRecoveryPaths({ activation: activationState });
+      expect(recoveryPaths).toContain(prepared.state.backupPath);
+      const failure = new UpgradeTransactionError(
+        "rollback-incomplete",
+        [activationFailure, rollbackFailure],
+        "Upgrade failed and rollback did not complete",
+      );
+      expect(formatUpgradeFailure(failure, recoveryPaths)).toContain(prepared.state.backupPath);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("attempts every recovery action before reporting aggregate failures", async () => {
+    const attempted: string[] = [];
+    await expect(executeUpgradeRecoveryActions([
+      { description: "Management restore", run: () => { attempted.push("management"); throw new Error("failed"); } },
+      { description: "helper restore", run: () => { attempted.push("helper"); } },
+      { description: "health read-back", run: async () => { attempted.push("health"); throw new Error("unhealthy"); } },
+    ])).rejects.toBeInstanceOf(AggregateError);
+    expect(attempted).toEqual(["management", "helper", "health"]);
   });
 
   test("restores runtime env and systemd drop-in contents, permissions, and absence exactly", () => {

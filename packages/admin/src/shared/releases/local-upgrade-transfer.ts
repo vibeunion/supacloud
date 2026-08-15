@@ -352,6 +352,7 @@ function upgradeScriptExecution(
         "install -m 0755 \"$RUNNER_ASSET\" \"$RUNNER\"",
         "test \"$(sha256sum \"$RUNNER\"|awk '{print $1}')\" = \"$(sha256sum \"$RUNNER_ASSET\"|awk '{print $1}')\"",
         "\"$RUNNER\" --version | grep -Eq \"(^|[^0-9])${MANAGEMENT_VERSION//./\\.}([^0-9]|$)\"",
+        "timeout 5s \"$RUNNER\" --systemd-unit-helper-sha256 | grep -Eq 'SupaCloud systemd-unit helper SHA-256: [0-9a-f]{64}'",
         `env PATH=\"$VERIFIER_PATH:$PATH\" \"$RUNNER\" upgrade --yes --target-version ${quoteShell(request.managementVersion)} --edge-runtime-version ${quoteShell(request.edgeRuntimeVersion)} --asset-bundle-dir \"$BUNDLE\"`,
     ];
 }
