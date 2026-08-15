@@ -71,7 +71,7 @@ function stoppedOperations(
   mainPid = 0,
 ): PostgrestAttestationOperations {
   return {
-    runtimeGroupGid: async () => currentGid(),
+    runtimeIdentity: async () => ({ uid: currentUid(), gid: currentGid() }),
     systemdMainProcess: async () => ({
       ...ACTIVE_IDENTITY,
       activity,
@@ -106,7 +106,7 @@ async function activeFixture(content = "db-pool = 10\n") {
     environmentNames: [],
   });
   const operations: PostgrestAttestationOperations = {
-    runtimeGroupGid: async () => currentGid(),
+    runtimeIdentity: async () => ({ uid: currentUid(), gid: currentGid() }),
     systemdMainProcess: async () => ACTIVE_IDENTITY,
     processIdentity: async () => processIdentity(),
     health: async () => "healthy",
