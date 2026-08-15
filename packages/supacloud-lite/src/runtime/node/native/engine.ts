@@ -5,7 +5,7 @@
  * and manages the postgres child process. Trust auth over a private unix
  * socket directory (0700), never TCP.
  */
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
 import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
@@ -21,6 +21,24 @@ const DEFAULT_PG_VERSION = '17.7.0'
 const POSTGRES_MIRROR_URL_ERROR =
   'SUPACLOUD_LITE_POSTGRES_MIRROR must be an absolute HTTPS URL or a loopback HTTP URL'
 export const NATIVE_POSTGRES_MAJOR = DEFAULT_PG_VERSION.split('.')[0]!
+
+const GLIBC_DYNAMIC_LOADERS = {
+  x64: [
+    '/lib64/ld-linux-x86-64.so.2',
+    '/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2',
+  ],
+  arm64: [
+    '/lib/ld-linux-aarch64.so.1',
+    '/lib64/ld-linux-aarch64.so.1',
+    '/lib/aarch64-linux-gnu/ld-linux-aarch64.so.1',
+  ],
+} as const
+
+export interface GlibcRuntimeEvidence {
+  runtimeVersion?: string
+  dynamicLoaderPresent: boolean
+  lddVersion?: string
+}
 
 /** Options for {@link createNativeEngine}. */
 export interface NativeEngineOptions {
@@ -43,12 +61,36 @@ export function isNativeEngineSupported(): boolean {
 }
 
 function isGlibcLinux(): boolean {
-  try {
-    const version = execFileSync('ldd', ['--version'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
-    return /glibc|gnu libc/i.test(version)
-  } catch {
-    return false
+  const runtimeEvidence: GlibcRuntimeEvidence = {
+    runtimeVersion: reportedGlibcVersion(),
+    dynamicLoaderPresent: glibcDynamicLoaderPresent(),
   }
+  return isGlibcRuntime(runtimeEvidence) || isGlibcRuntime({ ...runtimeEvidence, lddVersion: lddVersion() })
+}
+
+export function isGlibcRuntime(evidence: GlibcRuntimeEvidence): boolean {
+  return Boolean(evidence.runtimeVersion?.trim()) ||
+    evidence.dynamicLoaderPresent ||
+    /glibc|gnu libc/i.test(evidence.lddVersion ?? '')
+}
+
+function reportedGlibcVersion(): string | undefined {
+  const report = process.report?.getReport() as { header?: { glibcVersionRuntime?: unknown } } | undefined
+  const runtimeVersion = report?.header?.glibcVersionRuntime
+  return typeof runtimeVersion === 'string' ? runtimeVersion : undefined
+}
+
+function glibcDynamicLoaderPresent(): boolean {
+  const loaderPaths = process.arch === 'x64'
+    ? GLIBC_DYNAMIC_LOADERS.x64
+    : process.arch === 'arm64' ? GLIBC_DYNAMIC_LOADERS.arm64 : []
+  return loaderPaths.some((loaderPath) => existsSync(loaderPath))
+}
+
+function lddVersion(): string | undefined {
+  const command = spawnSync('ldd', ['--version'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+  if (command.error || command.status !== 0) return undefined
+  return `${command.stdout}\n${command.stderr}`.trim()
 }
 
 function target(): string {
