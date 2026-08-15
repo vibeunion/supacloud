@@ -328,7 +328,8 @@ export class AuthHandler {
         return await this.oauth.authorize(url)
       }
       if (path === 'callback' && (method === 'GET' || method === 'POST')) {
-        return await this.oauth.callback(url, (userId) => this.sessionTokensFor(userId))
+        const callbackUrl = method === 'POST' ? await this.oauthCallbackUrl(req, url) : url
+        return await this.oauth.callback(callbackUrl, (userId) => this.oauthSessionTokensFor(userId))
       }
       if (path.startsWith('admin/')) return await this.admin(req, ctx, path, method)
       return authError(404, 'not_found', `unknown auth endpoint: ${path}`)
@@ -336,6 +337,16 @@ export class AuthHandler {
       const msg = e instanceof Error ? e.message : String(e)
       return authError(500, 'unexpected_failure', msg)
     }
+  }
+
+  private async oauthCallbackUrl(req: Request, url: URL): Promise<URL> {
+    const callbackUrl = new URL(url)
+    const form = await req.formData()
+    for (const field of ['code', 'state']) {
+      const value = form.get(field)
+      if (typeof value === 'string' && value) callbackUrl.searchParams.set(field, value)
+    }
+    return callbackUrl
   }
 
   // ── flows ─────────────────────────────────────────────────────────────
@@ -439,7 +450,7 @@ export class AuthHandler {
       const userId = await this.oauth.exchangePkce(authCode, verifier)
       if (!userId) return authError(403, 'flow_state_not_found', 'invalid or expired auth code')
       const ures = await this.db.query(`select * from auth.users where id = $1`, [userId])
-      return json(200, await this.sessionFor(ures.rows[0] as UserRow))
+      return json(200, await this.sessionForOAuth(ures.rows[0] as UserRow))
     }
 
     return authError(400, 'invalid_grant', `unsupported grant_type: ${grantType}`)
@@ -496,23 +507,20 @@ export class AuthHandler {
       sets.push(`is_anonymous = false`)
       sets.push(`raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb) || '{"provider":"email","providers":["email"]}'::jsonb`)
     }
-    if (sets.length === 0) return json(200, this.userJson(user))
-    params.push(user.id)
-    const res = await this.db.query(
-      `update auth.users set ${sets.join(', ')}, updated_at = now() where id = $${params.length} returning *`,
-      params
-    )
-    const updated = res.rows[0] as UserRow
-    if (upgradingAnon) {
-      // record the email identity, unless one somehow already exists
-      await this.db.query(
-        `insert into auth.identities (user_id, provider, provider_id, identity_data)
-         values ($1, 'email', $2, $3)
-         on conflict (provider, provider_id) do nothing`,
-        [updated.id, updated.id, JSON.stringify({ sub: updated.id, email: updated.email })]
-      )
+    if (sets.length === 0) {
+      return json(200, this.userJson(user, await this.getUserFactors(user.id), await this.getUserIdentities(user.id)))
     }
-    return json(200, this.userJson(updated))
+    params.push(user.id)
+    const payload = await this.db.transaction(async (query) => {
+      const res = await query<UserRow>(
+        `update auth.users set ${sets.join(', ')}, updated_at = now() where id = $${params.length} returning *`,
+        params
+      )
+      const updated = res.rows[0]
+      if (body.email) await this.ensureEmailIdentity(updated, query)
+      return this.userJsonWithRelations(updated, query)
+    })
+    return json(200, payload)
   }
 
   private async logout(req: Request, url: URL): Promise<Response> {
@@ -549,7 +557,7 @@ export class AuthHandler {
     let res = await this.db.query(`select * from auth.users where email = $1`, [normalized])
     let user = res.rows[0] as UserRow | undefined
     if (!user) {
-      if (!createUser) return authError(422, 'otp_disabled', 'Signups not allowed for otp')
+      if (!createUser) return json(200, {})
       if (this.settings.disableSignup) return authError(422, 'signup_disabled', 'Signups not allowed for this instance')
       res = await this.db.query(
         `insert into auth.users (aud, role, email, raw_app_meta_data, raw_user_meta_data)
@@ -1011,6 +1019,8 @@ export class AuthHandler {
     }
     const idMatch = path.match(/^admin\/users\/([0-9a-f-]{36})$/)
     const exportMatch = path.match(/^admin\/users\/([0-9a-f-]{36})\/export$/)
+    const factorsMatch = path.match(/^admin\/users\/([0-9a-f-]{36})\/factors$/)
+    const factorMatch = path.match(/^admin\/users\/([0-9a-f-]{36})\/factors\/([0-9a-f-]{36})$/)
 
     if (path === 'admin/generate_link' && method === 'POST') {
       return await this.generateAdminMagicLink(req)
@@ -1028,9 +1038,24 @@ export class AuthHandler {
       return await this.exportUser(exportMatch[1])
     }
 
+    if (factorsMatch && method === 'GET') {
+      const user = await this.db.query(`select 1 from auth.users where id = $1`, [factorsMatch[1]])
+      if (user.rows.length === 0) return authError(404, 'user_not_found', 'User not found')
+      return json(200, await this.getUserFactors(factorsMatch[1]))
+    }
+
+    if (factorMatch && method === 'DELETE') {
+      const deleted = await this.db.query(
+        `delete from auth.mfa_factors where user_id = $1 and id = $2 returning id`,
+        [factorMatch[1], factorMatch[2]]
+      )
+      if (deleted.rows.length === 0) return authError(404, 'mfa_factor_not_found', 'MFA factor not found')
+      return json(200, { id: factorMatch[2] })
+    }
+
     if (path === 'admin/users' && method === 'GET') {
       const res = await this.db.query(`select * from auth.users order by created_at desc limit 1000`)
-      return json(200, { users: (res.rows as UserRow[]).map((u) => this.userJson(u)), aud: 'authenticated' })
+      return json(200, { users: (res.rows as UserRow[]).map((user) => this.userJson(user)), aud: 'authenticated' })
     }
     if (path === 'admin/users' && method === 'POST') {
       const body = (await req.json().catch(() => ({}))) as {
@@ -1042,25 +1067,30 @@ export class AuthHandler {
       }
       if (!body.email) return authError(400, 'validation_failed', 'email is required')
       const hashed = body.password ? await hashPassword(body.password) : null
-      const res = await this.db.query(
-        `insert into auth.users
-           (aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data)
-         values ('authenticated', 'authenticated', $1, $2, case when $3 then now() else null end, $4, $5)
-         returning *`,
-        [
-          body.email.toLowerCase().trim(),
-          hashed,
-          body.email_confirm ?? true,
-          JSON.stringify({ provider: 'email', providers: ['email'], ...(body.app_metadata ?? {}) }),
-          JSON.stringify(body.user_metadata ?? {}),
-        ]
-      )
-      return json(200, this.userJson(res.rows[0] as UserRow))
+      const created = await this.db.transaction(async (query) => {
+        const res = await query<UserRow>(
+          `insert into auth.users
+             (aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data)
+           values ('authenticated', 'authenticated', $1, $2, case when $3 then now() else null end, $4, $5)
+           returning *`,
+          [
+            body.email!.toLowerCase().trim(),
+            hashed,
+            body.email_confirm ?? true,
+            JSON.stringify({ provider: 'email', providers: ['email'], ...(body.app_metadata ?? {}) }),
+            JSON.stringify(body.user_metadata ?? {}),
+          ]
+        )
+        const user = res.rows[0]
+        await this.ensureEmailIdentity(user, query)
+        return this.userJsonWithRelations(user, query)
+      })
+      return json(200, created)
     }
     if (idMatch && method === 'GET') {
       const res = await this.db.query(`select * from auth.users where id = $1`, [idMatch[1]])
       if (res.rows.length === 0) return authError(404, 'user_not_found', 'User not found')
-      return json(200, this.userJson(res.rows[0] as UserRow))
+      return json(200, await this.userJsonWithRelations(res.rows[0] as UserRow))
     }
     if (idMatch && method === 'PUT') {
       const body = (await req.json().catch(() => ({}))) as Record<string, unknown>
@@ -1085,12 +1115,18 @@ export class AuthHandler {
       if (body.email_confirm === true) sets.push(`email_confirmed_at = now()`)
       if (sets.length === 0) return authError(400, 'validation_failed', 'nothing to update')
       params.push(idMatch[1])
-      const res = await this.db.query(
-        `update auth.users set ${sets.join(', ')}, updated_at = now() where id = $${params.length} returning *`,
-        params
-      )
-      if (res.rows.length === 0) return authError(404, 'user_not_found', 'User not found')
-      return json(200, this.userJson(res.rows[0] as UserRow))
+      const updated = await this.db.transaction(async (query) => {
+        const res = await query<UserRow>(
+          `update auth.users set ${sets.join(', ')}, updated_at = now() where id = $${params.length} returning *`,
+          params
+        )
+        const user = res.rows[0]
+        if (!user) return null
+        if (typeof body.email === 'string') await this.ensureEmailIdentity(user, query)
+        return this.userJsonWithRelations(user, query)
+      })
+      if (!updated) return authError(404, 'user_not_found', 'User not found')
+      return json(200, updated)
     }
     if (idMatch && method === 'DELETE') {
       return await this.eraseUser(idMatch[1])
@@ -1378,18 +1414,28 @@ export class AuthHandler {
     if (!(await verifyTotp(factor.secret, body.code ?? ''))) {
       return authError(422, 'mfa_verification_failed', 'Invalid TOTP code entered')
     }
-    await this.db.query(`update auth.mfa_challenges set verified_at = now() where id = $1`, [challenge.id])
-    if (factor.status !== 'verified') {
-      await this.db.query(`update auth.mfa_factors set status = 'verified', updated_at = now() where id = $1`, [factorId])
-    }
-    // elevate the session to aal2 for the same user
-    const session = await this.sessionFor(user, undefined, {
-      aal: 'aal2',
-      amr: [
-        { method: 'password', timestamp: Math.floor(Date.now() / 1000) },
-        { method: 'totp', timestamp: Math.floor(Date.now() / 1000) },
-      ],
+    const session = await this.db.transaction(async (query) => {
+      const claimed = await query(
+        `update auth.mfa_challenges set verified_at = now()
+         where id = $1 and factor_id = $2 and verified_at is null and expires_at >= now()
+         returning id`,
+        [challenge.id, factorId]
+      )
+      if (claimed.rows.length === 0) return null
+      if (factor.status !== 'verified') {
+        await query(`update auth.mfa_factors set status = 'verified', updated_at = now() where id = $1`, [factorId])
+      }
+      return this.sessionFor(user, undefined, {
+        aal: 'aal2',
+        amr: [
+          { method: 'password', timestamp: Math.floor(Date.now() / 1000) },
+          { method: 'totp', timestamp: Math.floor(Date.now() / 1000) },
+        ],
+      }, query)
     })
+    if (!session) {
+      return authError(422, 'mfa_verification_failed', 'This challenge has already been verified')
+    }
     return json(200, session)
   }
 
@@ -1443,6 +1489,31 @@ export class AuthHandler {
       created_at: iso(r.created_at as Date | string | null),
       updated_at: iso(r.updated_at as Date | string | null),
     }))
+  }
+
+  private async ensureEmailIdentity(
+    user: UserRow,
+    query: Querier = (sql, params) => this.db.query(sql, params)
+  ): Promise<void> {
+    if (!user.email) return
+    await query(
+      `insert into auth.identities (user_id, provider, provider_id, identity_data)
+       values ($1::uuid, 'email', $1::text, $2::jsonb)
+       on conflict (provider, provider_id) do update
+       set identity_data = excluded.identity_data, updated_at = now()`,
+      [user.id, JSON.stringify({ sub: user.id, email: user.email })]
+    )
+  }
+
+  private async userJsonWithRelations(
+    user: UserRow,
+    query: Querier = (sql, params) => this.db.query(sql, params)
+  ): Promise<Record<string, unknown>> {
+    return this.userJson(
+      user,
+      await this.getUserFactors(user.id, query),
+      await this.getUserIdentities(user.id, query)
+    )
   }
 
   // ── helpers ───────────────────────────────────────────────────────────
@@ -1546,10 +1617,17 @@ export class AuthHandler {
     }
   }
 
-  /** Session tokens for a bare user id (used by the OAuth implicit callback). */
-  private async sessionTokensFor(userId: string): Promise<{ access_token: string; refresh_token: string; expires_in: number }> {
+  private sessionForOAuth(user: UserRow): Promise<Record<string, unknown>> {
+    return this.sessionFor(user, undefined, {
+      amr: [{ method: 'oauth', timestamp: Math.floor(Date.now() / 1000) }],
+    })
+  }
+
+  private async oauthSessionTokensFor(
+    userId: string
+  ): Promise<{ access_token: string; refresh_token: string; expires_in: number }> {
     const res = await this.db.query(`select * from auth.users where id = $1`, [userId])
-    const session = (await this.sessionFor(res.rows[0] as UserRow)) as {
+    const session = (await this.sessionForOAuth(res.rows[0] as UserRow)) as {
       access_token: string
       refresh_token: string
       expires_in: number
