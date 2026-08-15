@@ -1,11 +1,11 @@
 {
-  "packages/management-api": "0.60.0",
+  "packages/management-api": "0.60.1",
   "packages/web-console": "0.33.0",
   "packages/edge-runtime": "0.18.2",
   "packages/pgredis-runtime": "0.3.1",
   "packages/supacloud-js": "0.22.0",
   "packages/cli": "0.22.0",
-  "packages/admin": "0.14.0",
+  "packages/admin": "0.14.1",
   "packages/supacloud": "0.10.6",
   "packages/supacloud-lite": "0.8.1"
 }

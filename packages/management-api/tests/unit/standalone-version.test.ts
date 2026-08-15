@@ -3,7 +3,11 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pkg from "../../package.json";
-import { isStandaloneVersionCommand } from "../../src/standalone";
+import {
+  isStandaloneVersionCommand,
+  isSystemdUnitBrokerDigestCommand,
+} from "../../src/standalone";
+import { EMBEDDED_SYSTEMD_UNIT_BROKER_SHA256 } from "../../src/embedded-systemd-unit-broker";
 
 const packageRoot = join(import.meta.dir, "../..");
 const buildDirectory = mkdtempSync(join(tmpdir(), "supacloud-version-command-"));
@@ -38,6 +42,8 @@ describe("standalone version command", () => {
     expect(isStandaloneVersionCommand(["-v"])).toBe(true);
     expect(isStandaloneVersionCommand(["upgrade", "--version", "0.51.0"])).toBe(false);
     expect(isStandaloneVersionCommand(["project", "--version"])).toBe(false);
+    expect(isSystemdUnitBrokerDigestCommand(["--systemd-unit-helper-sha256"])).toBe(true);
+    expect(isSystemdUnitBrokerDigestCommand(["upgrade", "--systemd-unit-helper-sha256"])).toBe(false);
   });
 
   test("compiled binary prints its version without loading runtime configuration", async () => {
@@ -56,5 +62,13 @@ describe("standalone version command", () => {
     expect(version.exitCode).toBe(0);
     expect(version.stdout).toContain(`SupaCloud Version: ${pkg.version}`);
     expect(version.stderr).toBe("");
+
+    const helperDigest = await captureProcess([binaryPath, "--systemd-unit-helper-sha256"], 5_000);
+    expect(helperDigest.timedOut).toBe(false);
+    expect(helperDigest.exitCode).toBe(0);
+    expect(helperDigest.stdout).toContain(
+      `SupaCloud systemd-unit helper SHA-256: ${EMBEDDED_SYSTEMD_UNIT_BROKER_SHA256}`,
+    );
+    expect(helperDigest.stderr).toBe("");
   }, 40_000);
 });

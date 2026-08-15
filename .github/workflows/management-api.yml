@@ -252,6 +252,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
 
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
       - name: Validate Docker Compose files
         run: |
           docker compose -f docker/dev/docker-compose.yml config --quiet

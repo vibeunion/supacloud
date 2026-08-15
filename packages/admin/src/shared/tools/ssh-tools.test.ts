@@ -564,12 +564,11 @@ function rootScriptThroughHelperSource(rootScript: string, continuationPath: str
 function rootScriptThroughBootstrap(rootScript: string, continuationPath: string): string {
     const scriptLines = rootScript.split("\n");
     const stagedSetupIndex = scriptLines.indexOf("STAGED_MANAGEMENT=''");
-    const stagedRunnerIndex = scriptLines.indexOf('  UPGRADE_RUNNER="$STAGED_MANAGEMENT"');
-    const bootstrapEndIndex = scriptLines.indexOf("fi", stagedRunnerIndex);
-    if (stagedSetupIndex < 0 || stagedRunnerIndex < stagedSetupIndex || bootstrapEndIndex < stagedRunnerIndex) {
+    const stagedRunnerIndex = scriptLines.indexOf('UPGRADE_RUNNER="$STAGED_MANAGEMENT"');
+    if (stagedSetupIndex < 0 || stagedRunnerIndex < stagedSetupIndex) {
         throw new Error("Root upgrade script lacks Management bootstrap boundaries");
     }
-    return [scriptLines[0], ...scriptLines.slice(stagedSetupIndex, bootstrapEndIndex + 1),
+    return [scriptLines[0], ...scriptLines.slice(stagedSetupIndex, stagedRunnerIndex + 1),
         `touch '${continuationPath}'`].join("\n");
 }
 
@@ -754,12 +753,45 @@ describe("ssh admin tool", () => {
         expect(() => tool.parse({ action: "upgrade", artifact_transport: "automatic" })).toThrow();
     });
 
-    test("remote artifact transport uses the host-wide upgrade lock", () => {
-        const rootScript = buildRootUpgradeScript({ helperPath: "/tmp/release-assets.sh" });
+    test("remote artifact transport uses the host-wide lock and exact target runner", () => {
+        const rootScript = buildRootUpgradeScript({
+            helperPath: "/tmp/release-assets.sh",
+            version: "0.60.1",
+        });
 
         expect(rootScript).toContain("/run/lock/supacloud-upgrade.lock");
         expect(rootScript).toContain("flock -E 75 -n 9");
         expect(rootScript).toContain("Another SupaCloud upgrade is already running");
+        expect(rootScript).toContain("supacloud_fetch_component_release management-api '0.60.1'");
+        expect(rootScript).toContain('UPGRADE_RUNNER="$STAGED_MANAGEMENT"');
+        expect(rootScript).toContain('"$STAGED_MANAGEMENT" --systemd-unit-helper-sha256');
+        expect(rootScript).not.toContain('UPGRADE_RUNNER=\'/usr/local/bin/supacloud\'');
+    });
+
+    test("remote latest resolution pins the transaction to the bootstrap target version", () => {
+        const directory = mkdtempSync(join(tmpdir(), "supacloud-admin-target-version-"));
+        const runner = join(directory, "target-runner");
+        try {
+            writeFileSync(runner, "#!/bin/sh\nprintf '%s' \"$SUPACLOUD_UPGRADE_TAG\"\n", { mode: 0o755 });
+            chmodSync(runner, 0o755);
+            const rootScript = buildRootUpgradeScript({ helperPath: "/tmp/release-assets.sh" });
+            const transaction = rootScript.trim().split("\n").at(-1);
+            if (!transaction) throw new Error("Generated upgrade script has no transaction command");
+            const execution = Bun.spawnSync(["bash", "-c", [
+                "set -euo pipefail",
+                "TARGET_MANAGEMENT_VERSION=0.60.1",
+                `UPGRADE_RUNNER=${JSON.stringify(runner)}`,
+                "SUPACLOUD_UPGRADE_TAG=0.60.2",
+                transaction,
+            ].join("\n")]);
+
+            expect(rootScript).toContain("supacloud_fetch_component_release management-api 'latest'");
+            expect(transaction).toContain('SUPACLOUD_UPGRADE_TAG="$TARGET_MANAGEMENT_VERSION"');
+            expect(execution.exitCode).toBe(0);
+            expect(execution.stdout.toString()).toBe("0.60.1");
+        } finally {
+            rmSync(directory, { recursive: true, force: true });
+        }
     });
 
     test("remote component preflight preserves the full Edge Runtime mode and rejects suffixes", () => {
@@ -1019,7 +1051,7 @@ describe("ssh admin tool", () => {
         const ssh = new FakeSsh();
         const tool = captureSshTool(ssh);
 
-        await tool.invoke({ action: "upgrade", version: "0.50.27", edge_runtime_version: "0.16.7" });
+        await tool.invoke({ action: "upgrade", version: "0.60.1", edge_runtime_version: "0.16.7" });
 
         expect(ssh.commands).toHaveLength(3);
         const command = ssh.commands[1] ?? "";
@@ -1044,11 +1076,12 @@ describe("ssh admin tool", () => {
         expect(createHash("sha256").update(trustedRootUpload?.content ?? "").digest("hex"))
             .toBe(SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_SHA256);
         expect(command).toContain("supacloud_install_pinned_gh");
-        expect(command).toContain("/usr/local/bin/supacloud --version");
-        expect(command).toContain("0.50.27");
+        expect(command).not.toContain("/usr/local/bin/supacloud --version");
+        expect(command).toContain("0.60.1");
         expect(command).toContain("supacloud_fetch_component_release");
         expect(command).toContain("supacloud_download_release_asset");
         expect(command).toContain('chmod 0755 "$STAGED_MANAGEMENT"');
+        expect(command).toContain('"$STAGED_MANAGEMENT" --systemd-unit-helper-sha256');
         expect(command).toContain("SUPACLOUD_EDGE_RUNTIME_UPGRADE_TAG=");
         expect(command).toContain("unset SUPACLOUD_ALLOW_UNVERIFIED_RELEASE");
         expect(command).toContain("SUPACLOUD_ATTESTATION_TRUSTED_ROOT");
@@ -1059,7 +1092,7 @@ describe("ssh admin tool", () => {
         expect(command).toContain("/tmp/.supacloud-release-assets-");
         expect(command).not.toMatch(/\/usr\/local\/bin\/supacloud upgrade --yes/);
         const rootScript = buildRootUpgradeScript({
-            version: "0.50.27",
+            version: "0.60.1",
             edgeRuntimeVersion: "0.16.7",
             helperPath: ssh.uploads[0]?.remotePath ?? "",
         });

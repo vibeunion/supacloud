@@ -7,10 +7,10 @@ SupaCloud exposes three explicit local command surfaces with strict ownership bo
 - the optional `supacloud` npm package / `supacloudctl`, whose normal dispatch is local-only; `supacloudctl check-update [cli|admin]` explicitly queries npm without downloading or executing `latest`
 
 The bare `supacloud` command is not a local CLI compatibility alias. It is the
-compiled server binary installed at `/usr/local/bin/supacloud`; use it only for
-server lifecycle commands such as `sudo supacloud upgrade --yes`. Project work
-uses `supacloud-cli`, platform administration uses `supacloud-admin`, and the
-optional local umbrella command is `supacloudctl`.
+compiled active server binary installed at `/usr/local/bin/supacloud`; do not
+use an installed prior release to execute a target release's upgrade contract.
+Project work uses `supacloud-cli`, platform upgrades use `supacloud-admin`, and
+the optional local umbrella command is `supacloudctl`.
 
 ```text
 supacloud-cli        project-scoped user/developer CLI
@@ -330,20 +330,33 @@ all executable SSH actions disabled.
 
 ### Protected offline upgrade handoff
 
-The installed server binary provides the supported handoff for a release bundle
-that an administrator has already placed on the server. Pin both component
-versions; do not use `latest` or an inferred Edge Runtime version:
+Protected offline upgrades use Admin's verified local artifact transport. Admin
+authenticates the target Management binary, Web Console, and Edge Runtime on the
+operator host against the signed manifests, checksums, sizes, source commits,
+architectures, GitHub attestations, and pinned trusted root before any target
+code is transferred or executed. Pin both component versions; do not use
+`latest`:
 
 ```bash
-sudo /usr/local/bin/supacloud upgrade --yes \
-  --target-version 0.50.31 \
-  --edge-runtime-version 0.16.8 \
-  --asset-bundle-dir /var/lib/supacloud/upgrade-bundles/release-20260810
+npx @supacloud/admin@0.14.1 ssh upgrade \
+  --version 0.60.1 \
+  --edge_runtime_version 0.18.2 \
+  --artifact_transport local \
+  --github_proxy direct
 ```
 
-The bundle root and both component directories must be canonical, root-owned
-directories with mode `0700`. Every file must be a root-owned direct regular
-file with mode `0600`, one link, and no symlink traversal. The fixed layout is:
+The direct `sudo <bundle-runner> upgrade --asset-bundle-dir ...` handoff is not
+a supported trust bootstrap: bundle code must not authenticate itself after it
+already has root execution. Admin selects amd64 or arm64 from the verified SSH
+preflight, transfers a protected bundle and, only after remote byte-for-byte
+verification, executes that bundle's target Management runner. If the
+transaction is nonterminal or recovery is incomplete, retain the reported
+stage, runner, status, log, and recovery paths until read-back is complete.
+
+The Admin-created bundle root and both component directories are canonical,
+root-owned directories with mode `0700`. Every file must be a root-owned direct
+regular file with mode `0600`, one link, and no symlink traversal. The fixed
+layout is:
 
 ```text
 <bundle>/
@@ -360,18 +373,21 @@ file with mode `0600`, one link, and no symlink traversal. The fixed layout is:
     supacloud-edge-runtime-linux-<arch>
 ```
 
-Omit `edge-runtime/` and `--edge-runtime-version` together for a
-Management/Web Console-only transaction. When an Edge Runtime version is
-specified, both are mandatory. The offline path reads no GitHub release
-metadata and downloads no release asset. It verifies the supplied provenance
-bundles locally with `gh attestation verify` and the TUF-reviewed trusted root
-embedded in the Management binary, then checks the signed manifest,
-`SHA256SUMS`, exact asset size and digest before staging anything. This path
-does not initialize a live Sigstore TUF client and remains strict without TUF
-DNS, network access, or a pre-populated cache. A missing or outdated verifier,
-an invalid embedded root, an extra file, or a component/version mismatch fails
-before the upgrade transaction. Management and Edge Runtime may come from
-different valid release commits; each component proves its own source commit.
+The protected offline transport requires both exact component versions. The
+server reads no GitHub release metadata and downloads no release asset. Before
+upload or execution, Admin verifies the supplied provenance with its pinned
+`gh` and TUF-reviewed trusted root, then checks the signed manifest,
+`SHA256SUMS`, asset sizes and digests, including the target runner bytes. Before
+executing that authenticated runner, the server checks the protected filesystem
+identity and verifies every transferred byte against the size and digest frozen
+by Admin. The target runner then repeats the offline manifest, checksum, size,
+digest, and attestation verification before upgrade mutation or activation.
+This path does not initialize a live Sigstore TUF client and remains strict
+without TUF DNS, network access, or a pre-populated cache. A missing or outdated
+verifier, an invalid embedded root, an extra file, or a component/version
+mismatch fails before the upgrade transaction. Management and Edge Runtime may
+come from different valid release commits; each component proves its own source
+commit.
 
 ### Owned command areas
 

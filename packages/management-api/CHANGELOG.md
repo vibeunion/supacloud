@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.60.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.60.0...management-api-v0.60.1) (2026-08-15)
+
+
+### Bug Fixes
+
+* harden target-bound upgrade delivery ([#914](https://github.com/zuohuadong/supacloud/issues/914)) ([9d823b3](https://github.com/zuohuadong/supacloud/commit/9d823b3515f732c4a87d240fbdf05c9e9cfd0367))
+
 ## [0.60.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.59.0...management-api-v0.60.0) (2026-08-15)
 
 

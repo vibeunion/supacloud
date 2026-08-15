@@ -228,8 +228,9 @@ attestation 参数的 `gh` 时直接复用；仅缺少合格 `gh` 时，才在�
 
 升级事务运行在唯一命名的 transient systemd unit 中，使用受保护的原子状态文件
 轮询，因此不会依赖一个长时间保持的 SSH channel，也不会在状态未知时强杀已经
-进入 activation 的事务。原服务器下载路径仍可通过 `--artifact_transport remote`
-显式使用。
+进入 activation 的事务。服务器下载路径仍可通过 `--artifact_transport remote`
+显式使用；该路径也会校验并执行目标 Management binary，不把目标版本的
+helper/Web 激活逻辑交给已安装的旧版本。
 
 该事务要求持久化配置为 `EDGE_RUNTIME_MODE=external`；embedded 模式会在
 改动 Release 制品或服务前被拒绝。命令会保留 Edge Runtime 的 systemd
@@ -240,17 +241,24 @@ SHA256 与 GitHub attestation 做校验。Caddy 和 GoTrue 不属于该事务，
 只有明确只升级 Management 和 Web Console、不改 Edge Runtime 时，才省略
 `--edge_runtime_version`；Admin CLI 会明确报告这个边界。
 
-已安装的 `/usr/local/bin/supacloud` 服务端二进制仍提供只覆盖 Management/
-Web Console 的本机升级路径。生产服务器常规升级不需要 `git pull` 源码。
+只升级 Management/Web Console 时，使用 Admin remote transport 并省略
+`--edge_runtime_version`。生产服务器不需要 `git pull`，也不会让已安装的
+旧 Management binary 执行新版本的 helper/Web 事务。
 
 ```bash
-sudo supacloud upgrade --yes
+npx @supacloud/admin ssh upgrade \
+  --version 0.60.1 \
+  --artifact_transport remote \
+  --github_proxy direct
 ```
 
 安装和升级下载默认先直连 GitHub。只有需要明确回退时才配置可信代理：
 
 ```bash
-sudo SUPACLOUD_GITHUB_PROXY=https://your-trusted-proxy.example supacloud upgrade --yes
+npx @supacloud/admin ssh upgrade \
+  --version 0.60.1 \
+  --artifact_transport remote \
+  --github_proxy https://your-trusted-proxy.example
 ```
 
 Release 产物必须同时通过同一 Release 的 SHA256 和 GitHub build provenance attestation。`SUPACLOUD_ALLOW_UNVERIFIED_RELEASE=true` 仅用于紧急 break-glass，仍会校验 SHA256，不应作为常规安装配置。
@@ -513,7 +521,7 @@ desired state 保存在项目专用元数据列里（`postgrest_desired`、`post
 - `@supacloud/admin` / `supacloud-admin`：服务器管理员 CLI，处理 SSH、安装、升级、租户运维
 - `supacloudctl admin ...`：统一本地入口，同样默认离线；需要时显式运行 `supacloudctl check-update admin`
 - Management、Web Console 与外置 Edge Runtime 的受校验事务使用 `npx @supacloud/admin ssh upgrade --version <management-version> --edge_runtime_version <edge-version>`
-- 已安装服务器上的 `/usr/local/bin/supacloud` 仍是编译后的服务端二进制；除非通过受支持的 Admin 流程提供精确 Edge Runtime 目标，否则 `sudo supacloud upgrade --yes` 只覆盖 Management/Web Console
+- `/usr/local/bin/supacloud` 仍是活动服务端二进制，但所有受支持的升级都必须通过 Admin。受保护的离线升级使用 Admin 已验证的本地产物传输，并由它执行认证后的目标 runner；不能手工执行 bundle runner，也不能让已安装的旧版本执行目标版本事务
 
 
 ### 项目结构
