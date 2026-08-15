@@ -1,10 +1,19 @@
-import { readFile, readlink, realpath } from "node:fs/promises";
+import { realpath } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 import {
   readPostgrestPointerTarget,
   validatePostgrestGenerationTarget,
   type PostgrestControlOwnership,
 } from "./postgrest-generation";
+import {
+  parseLinuxRuntimeId,
+  parseSystemdMainPid,
+  probePostgrestProcessIdentity,
+  type PostgrestProcessIdentity,
+  type PostgrestRuntimeIdentity,
+} from "./postgrest-process-identity";
+
+export type { PostgrestProcessIdentity } from "./postgrest-process-identity";
 
 export type PostgrestAttestationState =
   | "loaded"
@@ -40,17 +49,10 @@ export interface SystemdProcessIdentity {
   loadedAt: string | null;
 }
 
-export interface PostgrestProcessIdentity {
-  startId: string;
-  executable: string;
-  commandLine: string[];
-  environmentNames: string[];
-}
-
 export interface PostgrestAttestationOperations {
   systemdMainProcess(unit: string): Promise<SystemdProcessIdentity>;
-  runtimeGroupGid(projectRef: string): Promise<number>;
-  processIdentity(pid: number): Promise<PostgrestProcessIdentity>;
+  runtimeIdentity(projectRef: string): Promise<PostgrestRuntimeIdentity>;
+  processIdentity(pid: number, identity: PostgrestRuntimeIdentity): Promise<PostgrestProcessIdentity>;
   health(port: number): Promise<"healthy" | "unhealthy">;
 }
 
@@ -69,6 +71,8 @@ type ControlPointerObservation =
   | { kind: "valid"; target: string; generation: ValidatedGeneration }
   | { kind: "absent" | "invalid" };
 
+const ID_PATH = "/usr/bin/id";
+
 function systemdTimestamp(rawTimestamp: string): string | null {
   if (!rawTimestamp || rawTimestamp === "n/a") return null;
   const timestamp = Date.parse(rawTimestamp);
@@ -81,7 +85,12 @@ export function parsePostgrestSystemdShow(output: string): SystemdProcessIdentit
     return separator === -1 ? [line, ""] : [line.slice(0, separator), line.slice(separator + 1)];
   }));
   const rawPid = properties.get("MainPID") || "";
-  if (!/^\d+$/.test(rawPid)) throw new Error("Invalid systemd MainPID");
+  let mainPid: number;
+  try {
+    mainPid = parseSystemdMainPid(rawPid);
+  } catch {
+    throw new Error("Invalid systemd MainPID");
+  }
   const activity = properties.get("ActiveState") || "";
   if (!["active", "activating", "reloading", "deactivating", "inactive", "failed"].includes(activity)) {
     throw new Error("Invalid systemd ActiveState");
@@ -89,18 +98,18 @@ export function parsePostgrestSystemdShow(output: string): SystemdProcessIdentit
   const invocationId = properties.get("InvocationID") || "";
   const startMonotonic = properties.get("ExecMainStartTimestampMonotonic") || "";
   if (activity === "active" && (
-    Number(rawPid) <= 0
+    mainPid <= 0
     || !/^[a-f0-9]{32}$/.test(invocationId)
     || !/^\d+$/.test(startMonotonic)
   )) {
     throw new Error("Invalid active systemd process identity");
   }
-  if (activity === "inactive" && Number(rawPid) !== 0) {
+  if (activity === "inactive" && mainPid !== 0) {
     throw new Error("Inactive systemd unit reported a main process");
   }
   return {
     activity: activity as PostgrestSystemdActivity,
-    mainPid: Number(rawPid),
+    mainPid,
     invocationId,
     startMonotonic,
     loadedAt: systemdTimestamp(properties.get("ExecMainStartTimestamp") || ""),
@@ -120,23 +129,6 @@ async function runCommand(command: string[]): Promise<string> {
   return stdout;
 }
 
-function procStartId(statContent: string): string {
-  const commandEnd = statContent.lastIndexOf(")");
-  const fieldsAfterCommand = statContent.slice(commandEnd + 2).trim().split(/\s+/);
-  const startId = fieldsAfterCommand[19];
-  if (!startId || !/^\d+$/.test(startId)) throw new Error("Invalid process start identity");
-  return startId;
-}
-
-function environmentNames(environmentBytes: Buffer): string[] {
-  return environmentBytes.toString("utf8")
-    .split("\0")
-    .filter(Boolean)
-    .map((entry) => entry.slice(0, entry.indexOf("=")))
-    .filter(Boolean)
-    .sort();
-}
-
 const defaultOperations: PostgrestAttestationOperations = {
   async systemdMainProcess(unit) {
     return parsePostgrestSystemdShow(await runCommand([
@@ -150,24 +142,22 @@ const defaultOperations: PostgrestAttestationOperations = {
       "--property=ExecMainStartTimestamp",
     ]));
   },
-  async runtimeGroupGid(projectRef) {
-    const groupId = (await runCommand(["id", "-g", `supacloud-${projectRef}`])).trim();
-    if (!/^\d+$/.test(groupId)) throw new Error("Invalid tenant runtime group");
-    return Number(groupId);
-  },
-  async processIdentity(pid) {
-    const [executable, commandLineBytes, statContent, environmentBytes] = await Promise.all([
-      readlink(`/proc/${pid}/exe`),
-      readFile(`/proc/${pid}/cmdline`),
-      readFile(`/proc/${pid}/stat`, "utf8"),
-      readFile(`/proc/${pid}/environ`),
+  async runtimeIdentity(projectRef) {
+    const runtimeUser = `supacloud-${projectRef}`;
+    const [userId, groupId] = await Promise.all([
+      runCommand([ID_PATH, "-u", runtimeUser]),
+      runCommand([ID_PATH, "-g", runtimeUser]),
     ]);
-    return {
-      startId: procStartId(statContent),
-      executable,
-      commandLine: commandLineBytes.toString("utf8").split("\0").filter(Boolean),
-      environmentNames: environmentNames(environmentBytes),
-    };
+    const uid = userId.trim();
+    const gid = groupId.trim();
+    try {
+      return { uid: parseLinuxRuntimeId(uid), gid: parseLinuxRuntimeId(gid) };
+    } catch {
+      throw new Error("Invalid tenant runtime identity");
+    }
+  },
+  processIdentity(pid, identity) {
+    return probePostgrestProcessIdentity(pid, identity);
   },
   async health(port) {
     try {
@@ -431,11 +421,12 @@ async function attestActivePostgrestRuntime(
   request: PostgrestAttestationRequest,
   operations: PostgrestAttestationOperations,
   ownership: PostgrestControlOwnership,
+  runtimeIdentity: PostgrestRuntimeIdentity,
   pointerBefore: ControlPointerObservation,
   systemdBefore: SystemdProcessIdentity,
 ): Promise<PostgrestAttestation> {
   try {
-    const beforeProcess = await operations.processIdentity(systemdBefore.mainPid);
+    const beforeProcess = await operations.processIdentity(systemdBefore.mainPid, runtimeIdentity);
     const expectedExecutable = await realpath(request.postgrestBinary);
     const health = await operations.health(request.port);
     const configArgument = managedConfigArgument(beforeProcess.commandLine);
@@ -444,7 +435,7 @@ async function attestActivePostgrestRuntime(
     const systemdAfter = await operations.systemdMainProcess(request.unit);
     const changedUnit = changedUnitAttestation(request, systemdAfter, health);
     if (changedUnit) return changedUnit;
-    const afterProcess = await operations.processIdentity(systemdAfter.mainPid);
+    const afterProcess = await operations.processIdentity(systemdAfter.mainPid, runtimeIdentity);
     if (!sameProcess(systemdBefore, systemdAfter, beforeProcess, afterProcess)) {
       return failureAttestation(request.desiredRevision, "unreachable", health);
     }
@@ -470,10 +461,12 @@ export async function attestPostgrestRuntime(
   operations: PostgrestAttestationOperations = defaultOperations,
 ): Promise<PostgrestAttestation> {
   let ownership: PostgrestControlOwnership;
+  let runtimeIdentity: PostgrestRuntimeIdentity;
   try {
+    runtimeIdentity = await operations.runtimeIdentity(request.projectRef);
     ownership = {
       controlOwnerUid: request.controlOwnerUid ?? 0,
-      runtimeGroupGid: await operations.runtimeGroupGid(request.projectRef),
+      runtimeGroupGid: runtimeIdentity.gid,
     };
   } catch {
     return failureAttestation(request.desiredRevision, "unreachable", "unknown");
@@ -491,6 +484,7 @@ export async function attestPostgrestRuntime(
     request,
     operations,
     ownership,
+    runtimeIdentity,
     pointerBefore,
     systemdBefore,
   );

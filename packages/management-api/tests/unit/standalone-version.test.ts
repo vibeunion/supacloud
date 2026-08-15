@@ -5,9 +5,15 @@ import { join } from "node:path";
 import pkg from "../../package.json";
 import {
   isPostgrestLauncherDigestCommand,
+  isPostgrestProcessIdentityProbeCommand,
+  isPostgrestProcessIdentityTerminationCommand,
   isStandaloneVersionCommand,
   isSystemdUnitBrokerDigestCommand,
 } from "../../src/standalone";
+import {
+  POSTGREST_PROCESS_IDENTITY_PROBE_FLAG,
+  POSTGREST_PROCESS_IDENTITY_TERMINATE_FLAG,
+} from "../../src/services/postgrest-process-identity";
 import { EMBEDDED_POSTGREST_LAUNCHER_SHA256 } from "../../src/embedded-postgrest-launcher";
 import { EMBEDDED_SYSTEMD_UNIT_BROKER_SHA256 } from "../../src/embedded-systemd-unit-broker";
 
@@ -48,6 +54,25 @@ describe("standalone version command", () => {
     expect(isSystemdUnitBrokerDigestCommand(["upgrade", "--systemd-unit-helper-sha256"])).toBe(false);
     expect(isPostgrestLauncherDigestCommand(["--postgrest-launcher-sha256"])).toBe(true);
     expect(isPostgrestLauncherDigestCommand(["upgrade", "--postgrest-launcher-sha256"])).toBe(false);
+    expect(isPostgrestProcessIdentityProbeCommand([
+      POSTGREST_PROCESS_IDENTITY_PROBE_FLAG,
+      "4172",
+      "981",
+      "981",
+    ])).toBe(true);
+    expect(isPostgrestProcessIdentityProbeCommand([POSTGREST_PROCESS_IDENTITY_PROBE_FLAG])).toBe(false);
+    expect(isPostgrestProcessIdentityProbeCommand(["upgrade", POSTGREST_PROCESS_IDENTITY_PROBE_FLAG])).toBe(false);
+    expect(isPostgrestProcessIdentityTerminationCommand([
+      POSTGREST_PROCESS_IDENTITY_TERMINATE_FLAG,
+      "4172",
+      "981",
+      "981",
+      "987654321",
+    ])).toBe(true);
+    expect(isPostgrestProcessIdentityTerminationCommand([
+      POSTGREST_PROCESS_IDENTITY_TERMINATE_FLAG,
+      "4172",
+    ])).toBe(false);
   });
 
   test("compiled binary prints its version without loading runtime configuration", async () => {
@@ -82,5 +107,30 @@ describe("standalone version command", () => {
       `SupaCloud PostgREST launcher SHA-256: ${EMBEDDED_POSTGREST_LAUNCHER_SHA256}\n`,
     );
     expect(launcherDigest.stderr).toBe("");
+
+    const invalidIdentityProbe = await captureProcess([
+      binaryPath,
+      POSTGREST_PROCESS_IDENTITY_PROBE_FLAG,
+      "invalid",
+      "981",
+      "981",
+    ], 5_000);
+    expect(invalidIdentityProbe.timedOut).toBe(false);
+    expect(invalidIdentityProbe.exitCode).not.toBe(0);
+    expect(invalidIdentityProbe.stdout).toBe("");
+    expect(invalidIdentityProbe.stderr).toBe("PostgREST process identity probe failed\n");
+
+    const invalidIdentityTermination = await captureProcess([
+      binaryPath,
+      POSTGREST_PROCESS_IDENTITY_TERMINATE_FLAG,
+      "invalid",
+      "981",
+      "981",
+      "987654321",
+    ], 5_000);
+    expect(invalidIdentityTermination.timedOut).toBe(false);
+    expect(invalidIdentityTermination.exitCode).not.toBe(0);
+    expect(invalidIdentityTermination.stdout).toBe("");
+    expect(invalidIdentityTermination.stderr).toBe("PostgREST process identity termination failed\n");
   }, 40_000);
 });
