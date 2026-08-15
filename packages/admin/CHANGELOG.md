@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.2](https://github.com/zuohuadong/supacloud/compare/admin-v0.14.1...admin-v0.14.2) (2026-08-15)
+
+
+### Bug Fixes
+
+* **upgrade:** deliver PostgREST launcher transactionally ([#919](https://github.com/zuohuadong/supacloud/issues/919)) ([d800655](https://github.com/zuohuadong/supacloud/commit/d800655d04fcb48f6bc19ddf827a13dc1d29adce))
+
 ## [0.14.1](https://github.com/zuohuadong/supacloud/compare/admin-v0.14.0...admin-v0.14.1) (2026-08-15)
 
 
