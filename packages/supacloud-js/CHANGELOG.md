@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.0](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.21.2...supacloud-js-v0.22.0) (2026-08-15)
+
+
+### Features
+
+* add project-scoped durable workflows ([#901](https://github.com/zuohuadong/supacloud/issues/901)) ([af4fbc2](https://github.com/zuohuadong/supacloud/commit/af4fbc257f18431f1ba68854ac8bdde03ec3af96))
+
 ## [0.21.2](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.21.1...supacloud-js-v0.21.2) (2026-08-09)
 
 
