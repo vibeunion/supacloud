@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.60.3](https://github.com/zuohuadong/supacloud/compare/management-api-v0.60.2...management-api-v0.60.3) (2026-08-15)
+
+
+### Bug Fixes
+
+* **management-api:** harden PostgREST process attestation ([#923](https://github.com/zuohuadong/supacloud/issues/923)) ([033e8d9](https://github.com/zuohuadong/supacloud/commit/033e8d91b5cb3099a4279c0c89603b6fe200b8ff))
+
 ## [0.60.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.60.1...management-api-v0.60.2) (2026-08-15)
 
 
