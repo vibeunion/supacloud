@@ -157,8 +157,9 @@ upload-drop paths for reconciliation. Inspect that evidence before retrying and
 do not retry blindly while the remote transaction may still be running.
 
 `--artifact_transport local` accepts only `--github_proxy direct` or `none` and
-clears proxy environment variables on both hosts. The legacy server-download
-path remains available as `--artifact_transport remote`.
+clears proxy environment variables on both hosts. The server-download path
+remains available as `--artifact_transport remote`; it verifies and executes
+the target Management release as the runner even for Management-only upgrades.
 
 With `--artifact_transport remote` (the default), omitting
 `--edge_runtime_version` retains the Management and Web Console-only upgrade
@@ -175,14 +176,10 @@ command may finish later and then run its own cleanup. Reconcile the reported
 helper and trusted-root paths and read back deployed versions before deciding
 whether to retry.
 
-After a capable Management release is active, an exact rollback can use that
-active upgrader with explicit older targets, for example:
-
-```bash
-npx @supacloud/admin ssh upgrade \
-  --version 0.50.26 \
-  --edge_runtime_version 0.16.6
-```
+Targets predating the target-bound systemd-unit helper identity command are
+rejected before mutation. A failed transaction still restores its exact frozen
+prior Management/helper/Web identities; an intentional downgrade to a legacy
+release requires a separately reviewed compatibility procedure.
 
 Project commands owned by this CLI:
 

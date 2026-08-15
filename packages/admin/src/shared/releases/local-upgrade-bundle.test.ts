@@ -130,14 +130,14 @@ describe("local upgrade download trust boundary", () => {
         expect(completed).toBe(true);
     });
 
-    test("rejects a downloaded artifact whose signed digest no longer matches", () => {
+    test("rejects a tampered target Management runner at the signed bundle boundary", () => {
         const directory = mkdtempSync(join(tmpdir(), "supacloud-admin-artifact-"));
-        const artifactPath = join(directory, "artifact.bin");
+        const artifactPath = join(directory, "supacloud-linux-amd64");
         const contents = "verified release artifact";
         writeFileSync(artifactPath, contents);
         const manifest = {
             artifacts: [{
-                name: "artifact.bin",
+                name: "supacloud-linux-amd64",
                 size: Buffer.byteLength(contents),
                 sha256: createHash("sha256").update(contents).digest("hex"),
             }],

@@ -97,8 +97,10 @@ function validateDirective(unitName: string, state: UnitPolicyState, line: strin
 }
 
 function validateUnitIdentity(unitName: string, state: UnitPolicyState): void {
+  const requiresEnvironmentFile = unitName !== "supacloud-pgrst@.service";
   if (!["Unit", "Service", "Install"].every((required) => state.sections.has(required))
-    || !state.user || state.user !== state.group || !state.noNewPrivileges || !state.environmentFile) {
+    || !state.user || state.user !== state.group || !state.noNewPrivileges
+    || (requiresEnvironmentFile && !state.environmentFile)) {
     throw new Error(`Systemd unit ${unitName} is missing its non-root runtime identity`);
   }
   if (unitName.includes("@") && state.user !== "supacloud-%i") {

@@ -314,6 +314,7 @@ describe("local upgrade remote runner", () => {
         expect(script).toContain("--asset-bundle-dir \"$BUNDLE\"");
         expect(script).toContain("--target-version '0.50.31'");
         expect(script).toContain("--edge-runtime-version '0.16.8'");
+        expect(script).toContain('timeout 5s "$RUNNER" --systemd-unit-helper-sha256');
         expect(script).toContain("unset SUPACLOUD_ALLOW_UNVERIFIED_RELEASE");
         expect(script).toContain("SUPACLOUD_ATTESTATION_TRUSTED_ROOT");
         expect(script).not.toContain("verify_manifest()");

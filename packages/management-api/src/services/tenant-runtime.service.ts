@@ -49,6 +49,7 @@ import { authConfigChangesPostgrestVerifier } from "./auth-runtime-impact";
 import { runtimeCacheService } from "./runtime-cache.service";
 import { projectControlSecretsService } from "./project-control-secrets.service";
 import { installManagedSystemdUnit } from "./systemd-unit-broker";
+import { renderPostgrestSystemdTemplate } from "./postgrest-systemd-template";
 import {
     PostgrestPoolReconcileError,
     PostgrestPoolMigrationGate,
@@ -1824,39 +1825,13 @@ GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE=/auth/v1/verify
             || !currentPgrstUnit.includes("/usr/local/libexec/supacloud/postgrest-launcher %i")
             || currentPgrstUnit.includes(`EnvironmentFile=${this.TENANT_CONFIG_DIR}/%i.env`);
         if (shouldWritePgrstUnit) {
-            const pgrstUnit = `
-[Unit]
-Description=SupaCloud PostgREST for tenant %i
-Documentation=https://github.com/supacloud/supacloud
-After=network.target patroni.service
-Wants=patroni.service
-
-[Service]
-Type=simple
-User=supacloud-%i
-Group=supacloud-%i
-Environment="GHCRTS=${this.POSTGREST_RTS}"
-Environment="SUPACLOUD_POSTGREST_BIN=${this.POSTGREST_BIN}"
-Environment="SUPACLOUD_POSTGREST_CONFIG_DIR=${this.TENANT_CONFIG_DIR}"
-Environment="SUPACLOUD_POSTGREST_CONFIG_TRUST_ROOT=${path.dirname(this.TENANT_CONFIG_DIR)}"
-Environment="SUPACLOUD_POSTGREST_BINARY_TRUST_ROOT=${path.dirname(path.dirname(this.POSTGREST_BIN))}"
-Environment="SUPACLOUD_POSTGREST_CONTROL_UID=0"
-ExecStart=/usr/local/libexec/supacloud/postgrest-launcher %i +RTS ${this.POSTGREST_RTS} -RTS
-Restart=on-failure
-RestartSec=5
-StartLimitBurst=3
-StartLimitIntervalSec=60
-
-NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=true
-ReadOnlyPaths=${this.TENANT_CONFIG_DIR}
-MemoryMax=${this.POSTGREST_MEMORY_MAX}
-CPUWeight=${this.POSTGREST_CPU_WEIGHT}
-
-[Install]
-WantedBy=multi-user.target
-`.trim();
+            const pgrstUnit = renderPostgrestSystemdTemplate({
+                postgrestRts: this.POSTGREST_RTS,
+                postgrestBinary: this.POSTGREST_BIN,
+                tenantConfigDir: this.TENANT_CONFIG_DIR,
+                memoryMax: this.POSTGREST_MEMORY_MAX,
+                cpuWeight: this.POSTGREST_CPU_WEIGHT,
+            });
             await installManagedSystemdUnit("supacloud-pgrst@.service", pgrstUnit);
         }
 

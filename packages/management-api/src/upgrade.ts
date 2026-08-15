@@ -2,7 +2,26 @@ import { $, SQL } from "bun";
 import * as p from "@clack/prompts";
 import os from "node:os";
 import path from "node:path";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+    chmodSync,
+    chownSync,
+    closeSync,
+    constants,
+    copyFileSync,
+    existsSync,
+    fsyncSync,
+    lstatSync,
+    mkdirSync,
+    openSync,
+    readFileSync,
+    readlinkSync,
+    readdirSync,
+    renameSync,
+    rmSync,
+    statSync,
+    symlinkSync,
+    writeFileSync,
+} from "node:fs";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { logger } from "./utils/logger";
 import { WEB_CONSOLE_CURRENT_DIR } from "./utils/web-console-path";
@@ -23,6 +42,20 @@ import {
     SUPACLOUD_UPGRADE_LOCK_PATH,
 } from "./upgrade-lock";
 import { withSigstoreVerificationDirectory } from "./sigstore-trusted-root";
+import {
+    EMBEDDED_SYSTEMD_UNIT_BROKER_SHA256,
+    SYSTEMD_UNIT_BROKER_TARGET,
+    activatePreparedSystemdUnitBroker,
+    cleanupSystemdUnitBrokerBackup,
+    prepareSystemdUnitBrokerActivation,
+    restoreSystemdUnitBroker,
+    readPrivilegedHelperIdentity,
+    stageEmbeddedSystemdUnitBroker,
+    verifyInstalledSystemdUnitBroker,
+    type PrivilegedHelperActivationState,
+    type PrivilegedHelperIdentity,
+    type StagedPrivilegedHelper,
+} from "./embedded-systemd-unit-broker";
 
 const RELEASES_API = "https://api.github.com/repos/zuohuadong/supacloud/releases";
 const BIN_TARGET = "/usr/local/bin/supacloud";
@@ -41,6 +74,8 @@ const DEFAULT_EDGE_RUNTIME_ENV_FILE = "/etc/supabase/edge-runtime.env";
 const LEGACY_CONFIG_FILE = "/opt/supacloud/config.env";
 const DEFAULT_GITHUB_PROXY = "https://ghproxy.net/";
 const WEB_CONSOLE_ASSET = "web-console-build.tar.gz";
+const WEB_CONSOLE_MAX_ENTRIES = 10_000;
+const WEB_CONSOLE_MAX_EXTRACTED_BYTES = 256 * 1024 * 1024;
 const WEB_CONSOLE_ROOT = "/opt/supacloud/web-console";
 const WEB_CONSOLE_RELEASES_DIR = `${WEB_CONSOLE_ROOT}/releases`;
 const WEB_CONSOLE_CURRENT_LINK = WEB_CONSOLE_CURRENT_DIR;
@@ -58,7 +93,7 @@ const OFFLINE_BUNDLE_ENDPOINT: GithubEndpoint = {
     proxyPrefix: "",
 };
 
-type GithubEndpoint = {
+export type GithubEndpoint = {
     label: string;
     proxyPrefix: string;
 };
@@ -518,16 +553,65 @@ export async function verifyActivatedSystemdBinary(
     return snapshot;
 }
 
-export function validateWebConsoleArchiveEntries(entriesText: string) {
-    const entries = entriesText.split(/\r?\n/).filter(Boolean);
-    for (const entry of entries) {
-        if (entry.startsWith("/") || entry.split("/").includes("..")) {
-            throw new Error(`Web Console archive contains an unsafe path: ${entry}`);
+export type WebConsoleArchiveInventory = {
+    directories: string[];
+    files: string[];
+};
+
+function normalizeWebConsoleArchiveEntry(entry: string): { path: string; directory: boolean } | null {
+    if (!entry || entry.length > 1024 || /[\u0000-\u001f\u007f]/.test(entry)
+        || entry.includes("\\") || entry.startsWith("/")) {
+        throw new Error(`Web Console archive contains an unsafe path: ${entry}`);
+    }
+    const directory = entry.endsWith("/");
+    const withoutTrailingSlash = directory ? entry.slice(0, -1) : entry;
+    const normalized = withoutTrailingSlash.replace(/^(?:\.\/)+/, "");
+    if (!normalized || normalized === ".") return null;
+    const segments = normalized.split("/");
+    if (segments.length > 32 || segments.some(segment => !segment || segment === "." || segment === "..")) {
+        throw new Error(`Web Console archive contains an unsafe path: ${entry}`);
+    }
+    return { path: segments.join("/"), directory };
+}
+
+export function validateWebConsoleArchiveEntries(entriesText: string): WebConsoleArchiveInventory {
+    const directories = new Set<string>();
+    const files = new Set<string>();
+    const explicitEntries = new Set<string>();
+    const listedEntries = entriesText.split(/\r?\n/).filter(Boolean);
+    if (listedEntries.length > WEB_CONSOLE_MAX_ENTRIES) {
+        throw new Error("Web Console archive contains too many entries");
+    }
+    for (const entry of listedEntries) {
+        const normalized = normalizeWebConsoleArchiveEntry(entry);
+        if (!normalized) continue;
+        if (explicitEntries.has(normalized.path)) {
+            throw new Error(`Web Console archive contains a duplicate path: ${normalized.path}`);
+        }
+        explicitEntries.add(normalized.path);
+        (normalized.directory ? directories : files).add(normalized.path);
+        const segments = normalized.path.split("/");
+        for (let index = 1; index < segments.length; index += 1) {
+            const parent = segments.slice(0, index).join("/");
+            if (files.has(parent)) {
+                throw new Error(`Web Console archive path traverses a file: ${normalized.path}`);
+            }
+            directories.add(parent);
         }
     }
-    if (!entries.some(entry => /(^|\/)index\.html$/.test(entry))) {
+    if (!files.has("index.html")) {
         throw new Error("Web Console archive does not contain index.html");
     }
+    if ([...files].some(file => directories.has(file))) {
+        throw new Error("Web Console archive contains conflicting file and directory paths");
+    }
+    if (directories.size + files.size > WEB_CONSOLE_MAX_ENTRIES) {
+        throw new Error("Web Console archive materializes too many entries");
+    }
+    return {
+        directories: [...directories].sort(),
+        files: [...files].sort(),
+    };
 }
 
 export type UpgradeTransactionOperations = {
@@ -1113,6 +1197,40 @@ export function parseManagementVersionOutput(stdout: string): string {
     return match[1] as string;
 }
 
+export function parseSystemdUnitBrokerDigestOutput(stdout: string): string {
+    const lines = stdout.trim().split(/\r?\n/).filter(Boolean);
+    if (lines.length !== 1) throw new Error("Management helper digest output must contain exactly one line");
+    let message = lines[0] as string;
+    if (message.startsWith("{")) {
+        const payload = JSON.parse(message) as { message?: unknown };
+        if (typeof payload.message !== "string") throw new Error("Management helper digest JSON is invalid");
+        message = payload.message;
+    }
+    const match = message.match(/^SupaCloud systemd-unit helper SHA-256: ([0-9a-f]{64})$/);
+    if (!match) throw new Error("Management helper digest output is invalid");
+    return match[1] as string;
+}
+
+async function validateManagementSystemdUnitBroker(filePath: string, binaryName: string): Promise<void> {
+    const smoke = Bun.spawn([filePath, "--systemd-unit-helper-sha256"], { stdout: "pipe", stderr: "pipe" });
+    const timeout = setTimeout(() => smoke.kill("SIGKILL"), 5_000);
+    try {
+        const [exitCode, stdout, stderr] = await Promise.all([
+            smoke.exited,
+            new Response(smoke.stdout).text(),
+            new Response(smoke.stderr).text(),
+        ]);
+        if (exitCode !== 0 || stderr.trim()) {
+            throw new Error(`${binaryName} failed the embedded systemd-unit helper identity check`);
+        }
+        if (parseSystemdUnitBrokerDigestOutput(stdout) !== EMBEDDED_SYSTEMD_UNIT_BROKER_SHA256) {
+            throw new Error(`${binaryName} embeds an unexpected systemd-unit helper`);
+        }
+    } finally {
+        clearTimeout(timeout);
+    }
+}
+
 async function validateManagementBinaryArtifact(filePath: string, binaryName: string, expectedVersion: string) {
     await validateElfBinaryArtifact(filePath, binaryName);
     const smoke = Bun.spawn([filePath, "--version"], { stdout: "pipe", stderr: "pipe" });
@@ -1135,6 +1253,7 @@ async function validateManagementBinaryArtifact(filePath: string, binaryName: st
     if (actualVersion !== expectedVersion) {
         throw new Error(`${binaryName} reports ${actualVersion}; expected ${expectedVersion}`);
     }
+    await validateManagementSystemdUnitBroker(filePath, binaryName);
 }
 
 async function downloadReleaseChecksums(release: GithubRelease, preferredEndpoint: GithubEndpoint, forceYes?: boolean) {
@@ -1214,41 +1333,413 @@ async function stageBundledBinary(request: StageBundledBinaryRequest): Promise<S
 type StagedWebConsole = {
     releaseDir: string;
     endpoint: GithubEndpoint;
+    treeSha256: string;
 };
 
-async function validateWebConsoleArchive(archivePath: string): Promise<void> {
+export type WebConsoleLinkActivationState = {
+    activated: boolean;
+    currentLink: string;
+    nextLink: string;
+    owner: WebConsoleReleaseOwner;
+    parent: string;
+    previousTarget: string | null;
+    target: string;
+};
+
+type WebConsoleReleaseOwner = {
+    uid: number;
+    gid: number;
+};
+
+export type WebConsoleExtractionOptions = {
+    releasesDir?: string;
+    owner?: WebConsoleReleaseOwner;
+};
+
+type WebConsoleTreeSnapshot = {
+    directories: string[];
+    files: string[];
+    sha256: string;
+};
+
+type WebConsoleDirectoryEntry = {
+    relative: string;
+    kind: "directory";
+};
+
+type WebConsoleFileEntry = {
+    relative: string;
+    kind: "file";
+    bytes: number;
+    contentSha256: Buffer;
+};
+
+type WebConsoleTreeEntry = WebConsoleDirectoryEntry | WebConsoleFileEntry;
+
+type WebConsoleInspectionPhase = "extracted" | "final";
+
+function assertWebConsoleDirectory(
+    directory: string,
+    owner: WebConsoleReleaseOwner,
+    label: string,
+): void {
+    const stats = lstatSync(directory);
+    if (!stats.isDirectory() || stats.isSymbolicLink() || stats.uid !== owner.uid || stats.gid !== owner.gid) {
+        throw new Error(`${label} must be a direct directory owned by the upgrade operator`);
+    }
+    if ((stats.mode & 0o022) !== 0) {
+        throw new Error(`${label} must not be group- or world-writable`);
+    }
+}
+
+function assertWebConsolePublicDirectory(
+    directory: string,
+    owner: WebConsoleReleaseOwner,
+    label: string,
+): void {
+    assertWebConsoleDirectory(directory, owner, label);
+    if ((lstatSync(directory).mode & 0o7777) !== 0o755) {
+        throw new Error(`${label} mode must be exactly 0755`);
+    }
+}
+
+function ensureWebConsoleReleasesDir(
+    releasesDir: string,
+    owner: WebConsoleReleaseOwner,
+): void {
+    const parent = path.dirname(releasesDir);
+    assertWebConsoleDirectory(parent, owner, "Web Console root");
+    chmodSync(parent, 0o755);
+    assertWebConsolePublicDirectory(parent, owner, "Web Console root");
+    if (!existsSync(releasesDir)) {
+        mkdirSync(releasesDir, { mode: 0o755 });
+        chmodSync(releasesDir, 0o755);
+        chownSync(releasesDir, owner.uid, owner.gid);
+    }
+    assertWebConsoleDirectory(releasesDir, owner, "Web Console releases root");
+    chmodSync(releasesDir, 0o755);
+    assertWebConsolePublicDirectory(releasesDir, owner, "Web Console releases root");
+}
+
+function webConsoleDirectoryEntry(
+    absolute: string,
+    relative: string,
+    owner: WebConsoleReleaseOwner,
+    phase: WebConsoleInspectionPhase,
+): WebConsoleDirectoryEntry {
+    const stats = lstatSync(absolute);
+    if (!stats.isDirectory() || stats.isSymbolicLink() || stats.uid !== owner.uid || stats.gid !== owner.gid) {
+        throw new Error(`Web Console release contains an unsafe directory: ${relative}`);
+    }
+    if (phase === "final" && (stats.mode & 0o7777) !== 0o755) {
+        throw new Error(`Web Console directory mode is not 0755: ${relative}`);
+    }
+    if ((stats.mode & 0o7000) !== 0) {
+        throw new Error(`Web Console release contains special directory mode bits: ${relative}`);
+    }
+    return { relative, kind: "directory" };
+}
+
+function webConsoleFileEntry(
+    absolute: string,
+    relative: string,
+    owner: WebConsoleReleaseOwner,
+    phase: WebConsoleInspectionPhase,
+): WebConsoleFileEntry {
+    const stats = lstatSync(absolute);
+    if (!stats.isFile() || stats.isSymbolicLink() || stats.nlink !== 1
+        || stats.uid !== owner.uid || stats.gid !== owner.gid) {
+        throw new Error(`Web Console release contains a link or special file: ${relative}`);
+    }
+    if (phase === "final" && (stats.mode & 0o7777) !== 0o644) {
+        throw new Error(`Web Console file mode is not 0644: ${relative}`);
+    }
+    if ((stats.mode & 0o7000) !== 0) {
+        throw new Error(`Web Console release contains special file mode bits: ${relative}`);
+    }
+    if (stats.size > WEB_CONSOLE_MAX_EXTRACTED_BYTES) {
+        throw new Error(`Web Console file exceeds the extracted size limit: ${relative}`);
+    }
+    const content = readFileSync(absolute);
+    return {
+        relative,
+        kind: "file",
+        bytes: content.length,
+        contentSha256: createHash("sha256").update(content).digest(),
+    };
+}
+
+function webConsoleTreeEntries(
+    absolute: string,
+    relative: string,
+    owner: WebConsoleReleaseOwner,
+    phase: WebConsoleInspectionPhase,
+): WebConsoleTreeEntry[] {
+    const directory = webConsoleDirectoryEntry(absolute, relative, owner, phase);
+    const descendants = readdirSync(absolute).sort().flatMap((name) => {
+        if (!name || /[\u0000-\u001f\u007f]/.test(name)) {
+            throw new Error("Web Console release contains an unsafe filename");
+        }
+        const childAbsolute = path.join(absolute, name);
+        const childRelative = relative === "." ? name : `${relative}/${name}`;
+        return lstatSync(childAbsolute).isDirectory()
+            ? webConsoleTreeEntries(childAbsolute, childRelative, owner, phase)
+            : [webConsoleFileEntry(childAbsolute, childRelative, owner, phase)];
+    });
+    return [directory, ...descendants];
+}
+
+function inspectWebConsoleTree(
+    releaseDir: string,
+    owner: WebConsoleReleaseOwner,
+    phase: WebConsoleInspectionPhase,
+): WebConsoleTreeSnapshot {
+    const entries = webConsoleTreeEntries(releaseDir, ".", owner, phase);
+    if (entries.length - 1 > WEB_CONSOLE_MAX_ENTRIES) {
+        throw new Error("Web Console release materializes too many entries");
+    }
+    const extractedBytes = entries.reduce(
+        (sum, entry) => sum + (entry.kind === "file" ? entry.bytes : 0),
+        0,
+    );
+    if (extractedBytes > WEB_CONSOLE_MAX_EXTRACTED_BYTES) {
+        throw new Error("Web Console release exceeds the extracted size limit");
+    }
+    const digest = createHash("sha256");
+    for (const entry of entries) {
+        digest.update(`${entry.kind === "directory" ? "d" : "f"}\0${entry.relative}\0`);
+        if (entry.kind === "file") {
+            digest.update(`${entry.bytes}\0`);
+            digest.update(entry.contentSha256);
+        }
+    }
+
+    return {
+        directories: entries.filter(entry => entry.kind === "directory" && entry.relative !== ".")
+            .map(entry => entry.relative),
+        files: entries.filter(entry => entry.kind === "file").map(entry => entry.relative),
+        sha256: digest.digest("hex"),
+    };
+}
+
+function assertWebConsoleInventory(
+    actual: WebConsoleTreeSnapshot,
+    expected: WebConsoleArchiveInventory,
+): void {
+    if (actual.directories.length !== expected.directories.length
+        || actual.directories.some((entry, index) => entry !== expected.directories[index])
+        || actual.files.length !== expected.files.length
+        || actual.files.some((entry, index) => entry !== expected.files[index])) {
+        throw new Error("Extracted Web Console inventory does not match the verified archive");
+    }
+}
+
+function normalizeWebConsoleTreeModes(
+    releaseDir: string,
+    inventory: WebConsoleArchiveInventory,
+    owner: WebConsoleReleaseOwner,
+): string {
+    const before = inspectWebConsoleTree(releaseDir, owner, "extracted");
+    assertWebConsoleInventory(before, inventory);
+    for (const file of before.files) chmodSync(path.join(releaseDir, file), 0o644);
+    for (const directory of before.directories) chmodSync(path.join(releaseDir, directory), 0o755);
+    chmodSync(releaseDir, 0o755);
+    const after = inspectWebConsoleTree(releaseDir, owner, "final");
+    assertWebConsoleInventory(after, inventory);
+    if (after.sha256 !== before.sha256) {
+        throw new Error("Web Console content tree changed while final modes were applied");
+    }
+    return after.sha256;
+}
+
+export function verifyWebConsoleReleaseTree(
+    releaseDir: string,
+    expectedSha256: string,
+    owner: WebConsoleReleaseOwner = { uid: 0, gid: 0 },
+): void {
+    const snapshot = inspectWebConsoleTree(releaseDir, owner, "final");
+    if (snapshot.sha256 !== expectedSha256) {
+        throw new Error("Staged Web Console content tree changed before activation");
+    }
+}
+
+function syncFilesystemDirectory(directory: string): void {
+    const descriptor = openSync(directory, constants.O_RDONLY);
+    try {
+        fsyncSync(descriptor);
+    } finally {
+        closeSync(descriptor);
+    }
+}
+
+function readWebConsoleLinkTarget(currentLink: string): string | null {
+    const stats = lstatSync(currentLink, { throwIfNoEntry: false });
+    if (!stats) return null;
+    if (!stats.isSymbolicLink()) {
+        throw new Error("Web Console current target must be a symbolic link");
+    }
+    const target = readlinkSync(currentLink);
+    if (!target) throw new Error("Web Console current symbolic link target is empty");
+    return target;
+}
+
+function assertWebConsoleLink(
+    linkPath: string,
+    expectedTarget: string,
+    owner: WebConsoleReleaseOwner,
+): void {
+    const stats = lstatSync(linkPath);
+    if (!stats.isSymbolicLink() || stats.uid !== owner.uid || stats.gid !== owner.gid
+        || readlinkSync(linkPath) !== expectedTarget) {
+        throw new Error("Web Console activation link identity is invalid");
+    }
+}
+
+export function prepareWebConsoleLinkActivation(
+    currentLink: string,
+    target: string,
+    owner: WebConsoleReleaseOwner = { uid: 0, gid: 0 },
+): WebConsoleLinkActivationState {
+    const parent = path.dirname(currentLink);
+    assertWebConsoleDirectory(parent, owner, "Web Console root");
+    const previousTarget = readWebConsoleLinkTarget(currentLink);
+    const nextLink = `${currentLink}.next-${randomUUID()}`;
+    try {
+        symlinkSync(target, nextLink);
+        assertWebConsoleLink(nextLink, target, owner);
+        return { activated: false, currentLink, nextLink, owner, parent, previousTarget, target };
+    } catch (error: unknown) {
+        rmSync(nextLink, { force: true });
+        throw error;
+    }
+}
+
+export function activatePreparedWebConsoleLink(state: WebConsoleLinkActivationState): void {
+    if (readWebConsoleLinkTarget(state.currentLink) !== state.previousTarget) {
+        throw new Error("Web Console current target changed before activation");
+    }
+    assertWebConsoleLink(state.nextLink, state.target, state.owner);
+    renameSync(state.nextLink, state.currentLink);
+    state.activated = true;
+    syncFilesystemDirectory(state.parent);
+    assertWebConsoleLink(state.currentLink, state.target, state.owner);
+}
+
+export function restoreWebConsoleLink(state: WebConsoleLinkActivationState): void {
+    if (!state.activated) return;
+    if (readWebConsoleLinkTarget(state.currentLink) !== state.target) {
+        throw new Error("Activated Web Console current target changed before rollback");
+    }
+    if (!state.previousTarget) {
+        rmSync(state.currentLink, { force: true });
+        state.activated = false;
+        syncFilesystemDirectory(state.parent);
+        return;
+    }
+    const restoreLink = `${state.currentLink}.restore-${randomUUID()}`;
+    try {
+        symlinkSync(state.previousTarget, restoreLink);
+        assertWebConsoleLink(restoreLink, state.previousTarget, state.owner);
+        renameSync(restoreLink, state.currentLink);
+        state.activated = false;
+        syncFilesystemDirectory(state.parent);
+        assertWebConsoleLink(state.currentLink, state.previousTarget, state.owner);
+    } finally {
+        rmSync(restoreLink, { force: true });
+    }
+}
+
+function verifyActivatedWebConsole(staged: StagedWebConsole): void {
+    if (readWebConsoleLinkTarget(WEB_CONSOLE_CURRENT_LINK) !== staged.releaseDir) {
+        throw new Error("Activated Web Console target does not match the staged verified release");
+    }
+    verifyWebConsoleReleaseTree(staged.releaseDir, staged.treeSha256);
+}
+
+export async function verifyWebConsoleArchiveExpandedSize(
+    archivePath: string,
+    maximumBytes: number,
+): Promise<void> {
+    if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1) {
+        throw new Error("Web Console expanded size limit is invalid");
+    }
+    const extraction = Bun.spawn(["tar", "-xOzf", archivePath], { stdout: "pipe", stderr: "pipe" });
+    let timedOut = false;
+    let expandedSizeExceeded = false;
+    let expandedBytes = 0;
+    const timeout = setTimeout(() => {
+        timedOut = true;
+        extraction.kill("SIGKILL");
+    }, 120_000);
+    const stderrPromise = new Response(extraction.stderr).text();
+    const reader = extraction.stdout.getReader();
+    try {
+        while (true) {
+            const chunk = await reader.read();
+            if (chunk.done) break;
+            if (chunk.value.byteLength > maximumBytes - expandedBytes) {
+                expandedSizeExceeded = true;
+                extraction.kill("SIGKILL");
+                break;
+            }
+            expandedBytes += chunk.value.byteLength;
+        }
+    } finally {
+        reader.releaseLock();
+        clearTimeout(timeout);
+    }
+    const [exitCode, stderr] = await Promise.all([extraction.exited, stderrPromise]);
+    if (timedOut) throw new Error("Web Console archive expanded-size verification timed out");
+    if (expandedSizeExceeded) {
+        throw new Error("Web Console archive exceeds the expanded size limit");
+    }
+    if (exitCode !== 0) {
+        throw new Error(`Failed to inspect Web Console expanded size: ${stderr.trim().slice(-500)}`);
+    }
+}
+
+async function validateWebConsoleArchive(archivePath: string): Promise<WebConsoleArchiveInventory> {
     const listed = await $`tar -tzf ${archivePath}`.nothrow().quiet();
     if (listed.exitCode !== 0) throw new Error(`${WEB_CONSOLE_ASSET} is not a readable gzip tarball`);
-    validateWebConsoleArchiveEntries(listed.stdout.toString());
+    const inventory = validateWebConsoleArchiveEntries(listed.stdout.toString());
     const verboseListing = await $`tar -tvzf ${archivePath}`.nothrow().quiet();
     const hasUnsafeEntry = verboseListing.stdout.toString().split(/\r?\n/)
         .filter(Boolean).some(line => !["-", "d"].includes(line[0] || ""));
     if (verboseListing.exitCode !== 0 || hasUnsafeEntry) {
         throw new Error(`${WEB_CONSOLE_ASSET} contains links or special files`);
     }
+    await verifyWebConsoleArchiveExpandedSize(archivePath, WEB_CONSOLE_MAX_EXTRACTED_BYTES);
+    return inventory;
 }
 
-async function extractWebConsoleArchive(
+export async function extractWebConsoleArchive(
     archivePath: string,
     version: string,
     endpoint: GithubEndpoint,
+    options: WebConsoleExtractionOptions = {},
 ): Promise<StagedWebConsole> {
     const safeVersion = version.replace(/[^a-zA-Z0-9._-]/g, "_");
-    const releaseDir = path.join(WEB_CONSOLE_RELEASES_DIR, `${safeVersion}-${process.pid}-${Date.now()}`);
+    const releasesDir = options.releasesDir ?? WEB_CONSOLE_RELEASES_DIR;
+    const owner = options.owner ?? { uid: 0, gid: 0 };
+    const releaseDir = path.join(releasesDir, `${safeVersion}-${process.pid}-${randomUUID()}`);
     try {
-        await validateWebConsoleArchive(archivePath);
-        await $`rm -rf ${releaseDir}`.nothrow().quiet();
-        await $`mkdir -p ${releaseDir} ${WEB_CONSOLE_RELEASES_DIR}`;
+        const inventory = await validateWebConsoleArchive(archivePath);
+        ensureWebConsoleReleasesDir(releasesDir, owner);
+        mkdirSync(releaseDir, { mode: 0o700 });
+        chmodSync(releaseDir, 0o700);
+        chownSync(releaseDir, owner.uid, owner.gid);
         const extract = await $`tar --no-same-owner --no-same-permissions -xzf ${archivePath} -C ${releaseDir}`.nothrow().quiet();
         if (extract.exitCode !== 0) {
             throw new Error(`Failed to extract ${WEB_CONSOLE_ASSET}: ${extract.stderr.toString().slice(-500)}`);
         }
-        if (!existsSync(path.join(releaseDir, "index.html"))) {
+        const indexPath = path.join(releaseDir, "index.html");
+        if (!existsSync(indexPath) || !lstatSync(indexPath).isFile() || lstatSync(indexPath).isSymbolicLink()) {
             throw new Error(`${WEB_CONSOLE_ASSET} is invalid: index.html not found at archive root`);
         }
-        return { releaseDir, endpoint };
+        const treeSha256 = normalizeWebConsoleTreeModes(releaseDir, inventory, owner);
+        return { releaseDir, endpoint, treeSha256 };
     } catch (error: unknown) {
-        await $`rm -rf ${releaseDir}`.nothrow().quiet();
+        rmSync(releaseDir, { force: true, recursive: true });
         throw error;
     }
 }
@@ -1811,11 +2302,11 @@ export async function waitForUpgradeHealth() {
     await waitForEdgeRuntimeHealth();
 }
 
-type UpgradeActivationState = {
+export type UpgradeActivationState = {
     binary: BinaryBackupState;
     edgeBinary: BinaryBackupState | null;
-    oldWebTarget: string | null;
-    oldWebBackup: string | null;
+    systemdUnitBroker: PrivilegedHelperActivationState | null;
+    webConsoleLink: WebConsoleLinkActivationState | null;
     managementEnvState: FileState | null;
     edgeRuntimeEnvState: FileState | null;
     edgeRuntimeDropInState: FileState | null;
@@ -1860,9 +2351,11 @@ type UpgradeExecutionState = {
     committed: boolean;
     downloadEndpointLabel: string;
     edgeRuntimeEndpointLabel: string | null;
+    preflightSystemdUnitBroker: PrivilegedHelperIdentity | null;
     rollbackSucceeded: boolean;
     stagedEdgeRuntime: StagedBinary | null;
     stagedManagement: StagedBinary | null;
+    stagedSystemdUnitBroker: StagedPrivilegedHelper | null;
     stagedWebConsole: StagedWebConsole | null;
     webConsoleEndpointLabel: string | null;
 };
@@ -1882,12 +2375,38 @@ type UpgradeCleanupAction = {
     run: () => void;
 };
 
-async function activateArtifacts(
-    stagedBinary: StagedBinary,
-    stagedEdgeBinary: StagedBinary | null,
-    stagedWeb: StagedWebConsole | null,
-    state: UpgradeActivationState,
-) {
+export type UpgradeRecoveryAction = {
+    description: string;
+    run: () => void | Promise<void>;
+};
+
+export type UpgradeRecoveryPathState = {
+    activation?: Partial<UpgradeActivationState> | null;
+    stagedEdgeRuntime?: { path: string } | null;
+    stagedManagement?: { path: string } | null;
+    stagedSystemdUnitBroker?: { path: string } | null;
+    stagedWebConsole?: { releaseDir: string } | null;
+};
+
+type ActivateArtifactsRequest = {
+    stagedBinary: StagedBinary;
+    stagedEdgeBinary: StagedBinary | null;
+    stagedSystemdUnitBroker: StagedPrivilegedHelper;
+    preflightSystemdUnitBroker: PrivilegedHelperIdentity;
+    stagedWeb: StagedWebConsole | null;
+    state: UpgradeActivationState;
+};
+
+async function activateArtifacts(request: ActivateArtifactsRequest) {
+    const { stagedBinary, stagedEdgeBinary, stagedSystemdUnitBroker, stagedWeb, state } = request;
+    if (stagedWeb) verifyWebConsoleReleaseTree(stagedWeb.releaseDir, stagedWeb.treeSha256);
+    const preparedSystemdUnitBroker = prepareSystemdUnitBrokerActivation({
+        staged: stagedSystemdUnitBroker,
+        targetPath: SYSTEMD_UNIT_BROKER_TARGET,
+        expectedPrevious: request.preflightSystemdUnitBroker,
+    });
+    state.systemdUnitBroker = preparedSystemdUnitBroker.state;
+    activatePreparedSystemdUnitBroker(preparedSystemdUnitBroker);
     activateStagedBinary(stagedBinary.path, state.binary);
 
     if (stagedEdgeBinary && state.edgeBinary) {
@@ -1895,63 +2414,104 @@ async function activateArtifacts(
     }
 
     if (stagedWeb) {
-        await $`mkdir -p ${WEB_CONSOLE_ROOT}`;
-        const currentIsLink = await $`test -L ${WEB_CONSOLE_CURRENT_LINK}`.nothrow().quiet();
-        if (currentIsLink.exitCode === 0) {
-            const oldTarget = await $`readlink ${WEB_CONSOLE_CURRENT_LINK}`.nothrow().quiet();
-            state.oldWebTarget = oldTarget.exitCode === 0 ? oldTarget.stdout.toString().trim() : null;
-            await $`rm -f ${WEB_CONSOLE_CURRENT_LINK}`;
-        } else {
-            const currentExists = await $`test -e ${WEB_CONSOLE_CURRENT_LINK}`.nothrow().quiet();
-            if (currentExists.exitCode === 0) {
-                state.oldWebBackup = `${WEB_CONSOLE_ROOT}/current.bak-${process.pid}-${Date.now()}`;
-                await $`mv ${WEB_CONSOLE_CURRENT_LINK} ${state.oldWebBackup}`;
-            }
-        }
-        await $`ln -s ${stagedWeb.releaseDir} ${WEB_CONSOLE_CURRENT_LINK}`;
+        state.webConsoleLink = prepareWebConsoleLinkActivation(
+            WEB_CONSOLE_CURRENT_LINK,
+            stagedWeb.releaseDir,
+        );
+        activatePreparedWebConsoleLink(state.webConsoleLink);
     }
 }
 
-async function rollbackArtifacts(state: UpgradeActivationState, stagedWeb: StagedWebConsole | null) {
-    restoreCurrentBinary(state.binary);
-    if (state.edgeBinary) restoreCurrentBinary(state.edgeBinary);
-
-    if (stagedWeb) {
-        rmSync(WEB_CONSOLE_CURRENT_LINK, { force: true, recursive: true });
-        if (state.oldWebBackup) {
-            await $`mv ${state.oldWebBackup} ${WEB_CONSOLE_CURRENT_LINK}`;
-        } else if (state.oldWebTarget) {
-            await $`ln -s ${state.oldWebTarget} ${WEB_CONSOLE_CURRENT_LINK}`;
+export async function executeUpgradeRecoveryActions(actions: UpgradeRecoveryAction[]): Promise<void> {
+    const failures: Error[] = [];
+    for (const action of actions) {
+        try {
+            await action.run();
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error);
+            failures.push(new Error(`${action.description}: ${message}`));
         }
     }
+    if (failures.length > 0) throw new AggregateError(failures, "Upgrade recovery did not complete");
+}
 
-    if (state.managementEnvState) {
-        restoreFileState(state.managementEnvState);
-    }
-    if (state.edgeRuntimeEnvState) {
-        restoreFileState(state.edgeRuntimeEnvState);
-    }
-    if (state.edgeRuntimeDropInState) {
-        restoreFileState(state.edgeRuntimeDropInState);
-    }
-    if (state.managementPrivilegeDropInState) {
-        restoreFileState(state.managementPrivilegeDropInState);
-    }
-    if (state.embeddedEdgePrivilegeDropInState) {
-        restoreFileState(state.embeddedEdgePrivilegeDropInState);
-    }
-    await reloadSystemdUnits();
+function artifactRecoveryActions(state: UpgradeActivationState): UpgradeRecoveryAction[] {
+    const actions: UpgradeRecoveryAction[] = [
+        { description: "restore Management binary", run: () => restoreCurrentBinary(state.binary) },
+    ];
+    const edgeBinary = state.edgeBinary;
+    if (edgeBinary) actions.push({
+        description: "restore Edge Runtime binary",
+        run: () => restoreCurrentBinary(edgeBinary),
+    });
+    const webConsoleLink = state.webConsoleLink;
+    if (webConsoleLink) actions.push({
+        description: "restore Web Console current target",
+        run: () => restoreWebConsoleLink(webConsoleLink),
+    });
+    const managementEnvState = state.managementEnvState;
+    if (managementEnvState) actions.push({
+        description: "restore Management environment",
+        run: () => restoreFileState(managementEnvState),
+    });
+    const edgeRuntimeEnvState = state.edgeRuntimeEnvState;
+    if (edgeRuntimeEnvState) actions.push({
+        description: "restore Edge Runtime environment",
+        run: () => restoreFileState(edgeRuntimeEnvState),
+    });
+    const edgeRuntimeDropInState = state.edgeRuntimeDropInState;
+    if (edgeRuntimeDropInState) actions.push({
+        description: "restore Edge Runtime systemd drop-in",
+        run: () => restoreFileState(edgeRuntimeDropInState),
+    });
+    const managementPrivilegeDropInState = state.managementPrivilegeDropInState;
+    if (managementPrivilegeDropInState) actions.push({
+        description: "restore Management privilege drop-in",
+        run: () => restoreFileState(managementPrivilegeDropInState),
+    });
+    const embeddedEdgePrivilegeDropInState = state.embeddedEdgePrivilegeDropInState;
+    if (embeddedEdgePrivilegeDropInState) actions.push({
+        description: "restore embedded Edge privilege drop-in",
+        run: () => restoreFileState(embeddedEdgePrivilegeDropInState),
+    });
+    const systemdUnitBroker = state.systemdUnitBroker;
+    if (systemdUnitBroker) actions.push({
+        description: "restore systemd-unit helper",
+        run: () => restoreSystemdUnitBroker(systemdUnitBroker, {
+            uid: systemdUnitBroker.previous.uid,
+            gid: systemdUnitBroker.previous.gid,
+        }),
+    });
+    return actions;
+}
 
-    await restartServices(await runtimeModeForBinaryUpgrade());
-    await waitForUpgradeHealth();
+function restoredServiceRecoveryActions(): UpgradeRecoveryAction[] {
+    return [
+        { description: "reload systemd units", run: () => reloadSystemdUnits() },
+        {
+            description: "restart restored services",
+            run: async () => restartServices(await runtimeModeForBinaryUpgrade()),
+        },
+        { description: "verify restored services", run: () => waitForUpgradeHealth() },
+    ];
+}
+
+export async function rollbackArtifacts(
+    state: UpgradeActivationState,
+    serviceActions: UpgradeRecoveryAction[] = restoredServiceRecoveryActions(),
+): Promise<void> {
+    await executeUpgradeRecoveryActions([
+        ...artifactRecoveryActions(state),
+        ...serviceActions,
+    ]);
 }
 
 function createActivationState(edgeRuntimeTarget: string | null): UpgradeActivationState {
     return {
         binary: createBinaryBackupState(BIN_TARGET),
         edgeBinary: edgeRuntimeTarget ? createBinaryBackupState(edgeRuntimeTarget) : null,
-        oldWebTarget: null,
-        oldWebBackup: null,
+        systemdUnitBroker: null,
+        webConsoleLink: null,
         managementEnvState: null,
         edgeRuntimeEnvState: null,
         edgeRuntimeDropInState: null,
@@ -2082,9 +2642,11 @@ function createUpgradeExecutionState(plan: UpgradeReleasePlan): UpgradeExecution
         committed: false,
         downloadEndpointLabel: plan.endpoint.label,
         edgeRuntimeEndpointLabel: null,
+        preflightSystemdUnitBroker: null,
         rollbackSucceeded: false,
         stagedEdgeRuntime: null,
         stagedManagement: null,
+        stagedSystemdUnitBroker: null,
         stagedWebConsole: null,
         webConsoleEndpointLabel: null,
     };
@@ -2117,6 +2679,7 @@ async function verifyUpgradePreflight(context: UpgradeExecutionContext): Promise
     context.spinner.start(`Verifying ${MANAGEMENT_SERVICE_UNIT} uses the canonical upgrade target`);
     verifyBackupPrivilegeDropPreflight();
     await verifyManagementUpgradePreflight();
+    context.state.preflightSystemdUnitBroker = readPrivilegedHelperIdentity(SYSTEMD_UNIT_BROKER_TARGET);
     const edgeRuntime = context.plan.edgeRuntime;
     if (!edgeRuntime) return;
     const current = await inspectActiveSystemdBinary(EDGE_RUNTIME_SERVICE_UNIT);
@@ -2208,6 +2771,8 @@ async function stageUpgradeArtifacts(context: UpgradeExecutionContext): Promise<
     await stageManagementUpgrade(context);
     await stageEdgeRuntimeUpgrade(context);
     await stageWebConsoleUpgrade(context);
+    context.spinner.start(`Staging the Management release systemd-unit helper for ${SYSTEMD_UNIT_BROKER_TARGET}`);
+    context.state.stagedSystemdUnitBroker = stageEmbeddedSystemdUnitBroker();
 }
 
 async function migrateUpgradeMetadata(context: UpgradeExecutionContext): Promise<void> {
@@ -2220,14 +2785,18 @@ async function migrateUpgradeMetadata(context: UpgradeExecutionContext): Promise
 async function activateUpgradeArtifacts(context: UpgradeExecutionContext): Promise<void> {
     const { plan, state } = context;
     if (!state.stagedManagement) throw new Error("Upgrade binary was not staged");
+    if (!state.stagedSystemdUnitBroker) throw new Error("Upgrade systemd-unit helper was not staged");
+    if (!state.preflightSystemdUnitBroker) throw new Error("Upgrade systemd-unit helper preflight is unavailable");
     context.spinner.start("Atomically activating staged SupaCloud artifacts");
     state.activation = createActivationState(plan.edgeRuntime?.targetPath || null);
-    await activateArtifacts(
-        state.stagedManagement,
-        state.stagedEdgeRuntime,
-        state.stagedWebConsole,
-        state.activation,
-    );
+    await activateArtifacts({
+        stagedBinary: state.stagedManagement,
+        stagedEdgeBinary: state.stagedEdgeRuntime,
+        stagedSystemdUnitBroker: state.stagedSystemdUnitBroker,
+        preflightSystemdUnitBroker: state.preflightSystemdUnitBroker,
+        stagedWeb: state.stagedWebConsole,
+        state: state.activation,
+    });
 }
 
 function captureUpgradeRuntimeFiles(activation: UpgradeActivationState): void {
@@ -2275,6 +2844,8 @@ async function verifyUpgradeActivation(context: UpgradeExecutionContext): Promis
     context.spinner.start("Waiting for the SupaCloud health endpoint");
     await waitForUpgradeHealth();
     await verifyActivatedManagementBinary(stagedManagement.sha256);
+    verifyInstalledSystemdUnitBroker();
+    if (context.state.stagedWebConsole) verifyActivatedWebConsole(context.state.stagedWebConsole);
     await verifyEdgeRuntimeUpgrade(context);
     context.state.committed = true;
 }
@@ -2283,7 +2854,7 @@ async function rollbackUpgradeActivation(context: UpgradeExecutionContext): Prom
     const activation = context.state.activation;
     if (!activation) return;
     p.log.warn("Upgrade activation failed; restoring the previous binary and Web Console target.");
-    await rollbackArtifacts(activation, context.state.stagedWebConsole);
+    await rollbackArtifacts(activation);
     context.state.rollbackSucceeded = true;
 }
 
@@ -2299,6 +2870,11 @@ function stagedArtifactCleanupActions(state: UpgradeExecutionState): UpgradeClea
         description: `remove staged Edge Runtime binary ${edgeRuntime.path}`,
         run: () => rmSync(edgeRuntime.path, { force: true }),
     });
+    const systemdUnitBroker = state.stagedSystemdUnitBroker;
+    if (systemdUnitBroker) actions.push({
+        description: `remove staged systemd-unit helper ${systemdUnitBroker.path}`,
+        run: () => rmSync(systemdUnitBroker.path, { force: true }),
+    });
     const webConsole = state.stagedWebConsole;
     if (!state.committed && webConsole) actions.push({
         description: `remove staged Web Console ${webConsole.releaseDir}`,
@@ -2311,10 +2887,10 @@ function activatedBackupCleanupActions(state: UpgradeExecutionState): UpgradeCle
     const activation = state.activation;
     if (!activation) return [];
     const actions: UpgradeCleanupAction[] = [];
-    const oldWebBackup = activation.oldWebBackup;
-    if (state.committed && oldWebBackup) actions.push({
-        description: `remove previous Web Console backup ${oldWebBackup}`,
-        run: () => rmSync(oldWebBackup, { force: true, recursive: true }),
+    const webConsoleLink = activation.webConsoleLink;
+    if (webConsoleLink) actions.push({
+        description: `remove staged Web Console activation link ${webConsoleLink.nextLink}`,
+        run: () => rmSync(webConsoleLink.nextLink, { force: true }),
     });
     actions.push({
         description: `remove Management backup ${activation.binary.backupPath}`,
@@ -2324,6 +2900,11 @@ function activatedBackupCleanupActions(state: UpgradeExecutionState): UpgradeCle
     if (edgeRuntimeBackup) actions.push({
         description: `remove Edge Runtime backup ${edgeRuntimeBackup.backupPath}`,
         run: () => cleanupBinaryBackup(edgeRuntimeBackup),
+    });
+    const systemdUnitBrokerBackup = activation.systemdUnitBroker;
+    if (systemdUnitBrokerBackup) actions.push({
+        description: `remove systemd-unit helper backup ${systemdUnitBrokerBackup.backupPath}`,
+        run: () => cleanupSystemdUnitBrokerBackup(systemdUnitBrokerBackup),
     });
     return actions;
 }
@@ -2371,15 +2952,18 @@ function upgradeTransactionOperations(context: UpgradeExecutionContext): Upgrade
     };
 }
 
-function upgradeRecoveryPaths(context: UpgradeExecutionContext | null): string[] {
-    if (!context) return [];
-    const { state } = context;
+export function upgradeRecoveryPaths(state: UpgradeRecoveryPathState | null): string[] {
+    if (!state) return [];
     const candidates = [
-        state.activation?.binary.backupReady ? state.activation.binary.backupPath : null,
+        state.activation?.binary?.backupReady ? state.activation.binary.backupPath : null,
         state.activation?.edgeBinary?.backupReady ? state.activation.edgeBinary.backupPath : null,
-        state.activation?.oldWebBackup,
+        state.activation?.systemdUnitBroker?.backupReady
+            ? state.activation.systemdUnitBroker.backupPath
+            : null,
+        state.activation?.webConsoleLink?.nextLink,
         state.stagedManagement?.path,
         state.stagedEdgeRuntime?.path,
+        state.stagedSystemdUnitBroker?.path,
         state.stagedWebConsole?.releaseDir,
     ];
     return [...new Set(candidates.filter((candidate): candidate is string => Boolean(candidate && existsSync(candidate))))];
@@ -2458,7 +3042,7 @@ export async function runUpgrade(options: RunUpgradeOptions = {}) {
         }
         p.outro(upgradeSuccessMessage(executionContext));
     } catch (error: unknown) {
-        s.stop(formatUpgradeFailure(error, upgradeRecoveryPaths(executionContext)));
+        s.stop(formatUpgradeFailure(error, upgradeRecoveryPaths(executionContext?.state ?? null)));
         process.exit(1);
     }
 }
