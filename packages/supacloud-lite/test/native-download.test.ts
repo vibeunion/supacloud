@@ -4,7 +4,11 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { create as createTar } from 'tar'
-import { ensurePostgres, resolvePostgresDownloadUrl } from '../src/runtime/node/native/engine.js'
+import {
+  ensurePostgres,
+  isNativeEngineSupported,
+  resolvePostgresDownloadUrl,
+} from '../src/runtime/node/native/engine.js'
 
 const temporaryDirectories: string[] = []
 const servers: ReturnType<typeof Bun.serve>[] = []
@@ -41,44 +45,47 @@ describe('native PostgreSQL download mirror', () => {
     )
   })
 
-  test('retries a mirrored archive and fetches its checksum through the same mirror', async () => {
-    const testRoot = await mkdtemp(join(tmpdir(), 'supacloud-lite-native-download-'))
-    temporaryDirectories.push(testRoot)
-    const archivePayload = join(testRoot, 'payload', 'postgresql')
-    await mkdir(join(archivePayload, 'bin'), { recursive: true })
-    await mkdir(join(archivePayload, 'share'), { recursive: true })
-    await writeFile(join(archivePayload, 'bin', 'postgres'), 'fixture')
-    await writeFile(join(archivePayload, 'share', 'postgres.bki'), 'fixture')
-    const archive = join(testRoot, 'postgres.tar.gz')
-    await createTar({ cwd: join(testRoot, 'payload'), file: archive, gzip: true }, ['postgresql'])
-    const archiveBytes = await readFile(archive)
-    const digest = createHash('sha256').update(archiveBytes).digest('hex')
-    let archiveAttempts = 0
-    let checksumRequests = 0
-    const mirrorServer = Bun.serve({
-      hostname: '127.0.0.1',
-      port: 0,
-      fetch(request) {
-        const requestPath = new URL(request.url).pathname
-        if (requestPath.endsWith('.tar.gz.sha256')) {
-          checksumRequests += 1
-          return new Response(`${digest}  postgres.tar.gz\n`)
-        }
-        if (requestPath.endsWith('.tar.gz')) {
-          archiveAttempts += 1
-          return archiveAttempts < 3 ? new Response('retry', { status: 503 }) : new Response(archiveBytes)
-        }
-        return new Response('not found', { status: 404 })
-      },
-    })
-    servers.push(mirrorServer)
-    process.env.SUPACLOUD_LITE_POSTGRES_MIRROR = `http://127.0.0.1:${mirrorServer.port}`
+  test.skipIf(!isNativeEngineSupported())(
+    'retries a mirrored archive and fetches its checksum through the same mirror',
+    async () => {
+      const testRoot = await mkdtemp(join(tmpdir(), 'supacloud-lite-native-download-'))
+      temporaryDirectories.push(testRoot)
+      const archivePayload = join(testRoot, 'payload', 'postgresql')
+      await mkdir(join(archivePayload, 'bin'), { recursive: true })
+      await mkdir(join(archivePayload, 'share'), { recursive: true })
+      await writeFile(join(archivePayload, 'bin', 'postgres'), 'fixture')
+      await writeFile(join(archivePayload, 'share', 'postgres.bki'), 'fixture')
+      const archive = join(testRoot, 'postgres.tar.gz')
+      await createTar({ cwd: join(testRoot, 'payload'), file: archive, gzip: true }, ['postgresql'])
+      const archiveBytes = await readFile(archive)
+      const digest = createHash('sha256').update(archiveBytes).digest('hex')
+      let archiveAttempts = 0
+      let checksumRequests = 0
+      const mirrorServer = Bun.serve({
+        hostname: '127.0.0.1',
+        port: 0,
+        fetch(request) {
+          const requestPath = new URL(request.url).pathname
+          if (requestPath.endsWith('.tar.gz.sha256')) {
+            checksumRequests += 1
+            return new Response(`${digest}  postgres.tar.gz\n`)
+          }
+          if (requestPath.endsWith('.tar.gz')) {
+            archiveAttempts += 1
+            return archiveAttempts < 3 ? new Response('retry', { status: 503 }) : new Response(archiveBytes)
+          }
+          return new Response('not found', { status: 404 })
+        },
+      })
+      servers.push(mirrorServer)
+      process.env.SUPACLOUD_LITE_POSTGRES_MIRROR = `http://127.0.0.1:${mirrorServer.port}`
 
-    const installed = await ensurePostgres('99.0.0', join(testRoot, 'cache'))
+      const installed = await ensurePostgres('99.0.0', join(testRoot, 'cache'))
 
-    expect(await readFile(join(installed, 'bin', 'postgres'), 'utf8')).toBe('fixture')
-    expect(await readFile(join(installed, 'share', 'postgres.bki'), 'utf8')).toBe('fixture')
-    expect(archiveAttempts).toBe(3)
-    expect(checksumRequests).toBe(1)
-  })
+      expect(await readFile(join(installed, 'bin', 'postgres'), 'utf8')).toBe('fixture')
+      expect(await readFile(join(installed, 'share', 'postgres.bki'), 'utf8')).toBe('fixture')
+      expect(archiveAttempts).toBe(3)
+      expect(checksumRequests).toBe(1)
+    },
+  )
 })
