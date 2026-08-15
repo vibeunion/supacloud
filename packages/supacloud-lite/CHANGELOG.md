@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1](https://github.com/zuohuadong/supacloud/compare/supacloud-lite-v0.8.0...supacloud-lite-v0.8.1) (2026-08-15)
+
+
+### Bug Fixes
+
+* **lite:** complete extended auth compatibility ([#912](https://github.com/zuohuadong/supacloud/issues/912)) ([dd657f5](https://github.com/zuohuadong/supacloud/commit/dd657f5b52f2f3d65c0178f76fd78d027c153c5a))
+
 ## [0.8.0](https://github.com/zuohuadong/supacloud/compare/supacloud-lite-v0.7.3...supacloud-lite-v0.8.0) (2026-08-15)
 
 
