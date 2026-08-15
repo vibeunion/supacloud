@@ -452,7 +452,7 @@ jobs:
           --health-timeout 5s
           --health-retries 5
       postgrest:
-        image: postgrest/postgrest:v14.16
+        image: postgrest/postgrest:v16.1
         ports:
           - 3000:3000
         env:

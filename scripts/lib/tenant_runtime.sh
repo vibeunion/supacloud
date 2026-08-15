@@ -22,9 +22,9 @@ SUPACLOUD_META_DB="${SUPACLOUD_META_DB:-supacloud_meta}"
 POSTGREST_RTS="${POSTGREST_RTS:--N1 -M256m -I0.5 -A4m}"
 POSTGREST_MEMORY_MAX="${POSTGREST_MEMORY_MAX:-384M}"
 POSTGREST_CPU_WEIGHT="${POSTGREST_CPU_WEIGHT:-40}"
-POSTGREST_DEFAULT_VERSION="v14.16"
-POSTGREST_X86_64_SHA256="36b8ae140f188cfcd6003494805bf35a41e895f88c12be9183d60f91782145c6"
-POSTGREST_ARM64_SHA256="086f58dfa090ef0ed7e30ca5c0b49f937a9586d77e5ce372f6a34f249370e37d"
+POSTGREST_DEFAULT_VERSION="v16.1"
+POSTGREST_X86_64_SHA256="b986c926cf16a1c5d97954c57d3a6edd894a5da225c3f3fc0c25dc4105009dd7"
+POSTGREST_ARM64_SHA256="90c801ef53671677d1c9bef4181579fe876c5a2b0c1ba51bb71ace4eebccc1c5"
 GOTRUE_DEFAULT_VERSION="v2.195.0"
 
 gotrue_binary_version() {
@@ -714,11 +714,11 @@ ensure_postgrest() {
     machine=$(uname -m)
     case "$machine" in
         x86_64) arch="linux-static-x86-64"; default_sha256="$POSTGREST_X86_64_SHA256" ;;
-        aarch64) arch="ubuntu-aarch64"; default_sha256="$POSTGREST_ARM64_SHA256" ;;
+        aarch64) arch="linux-static-aarch64"; default_sha256="$POSTGREST_ARM64_SHA256" ;;
         *) echo "ERROR: Unsupported architecture: $machine" >&2; exit 1 ;;
     esac
 
-    local version="${POSTGREST_VERSION:-v14.16}"
+    local version="${POSTGREST_VERSION:-v16.1}"
     local expected_sha256
     assert_safe_config_value "POSTGREST_VERSION" "$version" || exit 1
     case "$version" in *[!A-Za-z0-9._-]*|"") echo "ERROR: Invalid POSTGREST_VERSION" >&2; exit 1 ;; esac

@@ -35,9 +35,16 @@ export { FsStorageDriver } from './runtime/node/fs-driver.js'
 export { serveBun } from './runtime/node/bun-server.js'
 export type { RunningServer, ServerHandle, ServeOptions } from './runtime/node/bun-server.js'
 export {
+  createNativeEngine,
+  ensurePostgres,
+  isNativeEngineSupported,
+  type NativeEngineOptions,
+} from './runtime/node/native/engine.js'
+export {
   createProjectBackend,
   ensureProjectSecrets,
   mintProjectKeys,
+  resolveDatabaseEngine,
   resolveStorageBackend,
   resolveProjectPaths,
   startProjectServer,
@@ -52,6 +59,7 @@ export {
 } from './snapshot.js'
 export type {
   ConfiguredStorageBackend,
+  DatabaseEngine,
   ProjectBackend,
   ProjectPaths,
   ProjectRuntimeOptions,

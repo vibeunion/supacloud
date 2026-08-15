@@ -7,9 +7,9 @@ RUNTIME_SCRIPT="${SCRIPT_DIR}/tenant_runtime.sh"
 
 grep -Eq '^umask 077$' "$RUNTIME_SCRIPT"
 grep -Fq 'PGPASSWORD="$db_password" psql' "$RUNTIME_SCRIPT"
-grep -Fq 'v14.16' "$RUNTIME_SCRIPT"
-grep -Fq '36b8ae140f188cfcd6003494805bf35a41e895f88c12be9183d60f91782145c6' "$RUNTIME_SCRIPT"
-grep -Fq '086f58dfa090ef0ed7e30ca5c0b49f937a9586d77e5ce372f6a34f249370e37d' "$RUNTIME_SCRIPT"
+grep -Fq 'v16.1' "$RUNTIME_SCRIPT"
+grep -Fq 'b986c926cf16a1c5d97954c57d3a6edd894a5da225c3f3fc0c25dc4105009dd7' "$RUNTIME_SCRIPT"
+grep -Fq '90c801ef53671677d1c9bef4181579fe876c5a2b0c1ba51bb71ace4eebccc1c5' "$RUNTIME_SCRIPT"
 grep -Fq 'v2.195.0' "$RUNTIME_SCRIPT"
 grep -Fq 'GOTRUE_EXPERIMENTAL_PROVIDER_LINKING_DOMAINS' "$RUNTIME_SCRIPT"
 grep -Fq 'run the explicit SupaCloud installer/upgrade' "$RUNTIME_SCRIPT"
@@ -203,12 +203,12 @@ fi
 unset -f curl
 unset SUPACLOUD_GITHUB_PROXY
 
-if resolve_release_sha256 "PostgREST" "v99.0.0" "v14.16" "default-digest" "" >/dev/null 2>&1; then
+if resolve_release_sha256 "PostgREST" "v99.0.0" "v16.1" "default-digest" "" >/dev/null 2>&1; then
     echo "non-default PostgREST version reused the default digest" >&2
     exit 1
 fi
 explicit_digest=$(printf 'e%.0s' {1..64})
-[[ "$(resolve_release_sha256 "PostgREST" "v99.0.0" "v14.16" "$(printf 'd%.0s' {1..64})" "$explicit_digest")" == "$explicit_digest" ]]
+[[ "$(resolve_release_sha256 "PostgREST" "v99.0.0" "v16.1" "$(printf 'd%.0s' {1..64})" "$explicit_digest")" == "$explicit_digest" ]]
 
 # Archive validation rejects digest mismatches and link/special-file payloads.
 mkdir -p "$tmp_dir/archive/valid" "$tmp_dir/archive/link"

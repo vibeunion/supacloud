@@ -121,26 +121,30 @@ export class Database {
       dataDirOrEngine && typeof dataDirOrEngine === 'object'
         ? dataDirOrEngine
         : await createPgliteEngine(dataDirOrEngine)
-    if (engine.minimalBootstrap) {
-      // subset engine (pg-mem): schemas + tables only, no plpgsql/RLS/extensions
-      await engine.exec(MINIMAL_BOOTSTRAP_SQL)
-    } else {
-      await engine.exec(BOOTSTRAP_SQL)
-      // emulated extensions (pgmq queues, cron, pg_net) - pure SQL, so
-      // pgmq.*/cron.*/net.* work with no C extension on either engine
-      await engine.exec(PGMQ_SQL)
-      await engine.exec(WORKFLOWS_SQL)
-      await engine.exec(CRON_SQL)
-      await engine.exec(NET_SQL)
-      await engine.exec(EXT_COMPAT_SQL)
-      await engine.exec(VAULT_SQL)
-      // Vault encryption key, held only in this session GUC (never in a table).
-      // Set at the session level so it survives migrations' search_path resets.
-      if (opts?.vaultKey) {
-        await engine.query(`select set_config('app.settings.vault_key', $1, false)`, [opts.vaultKey])
+    try {
+      if (engine.minimalBootstrap) {
+        await engine.exec(MINIMAL_BOOTSTRAP_SQL)
+      } else {
+        await engine.exec(BOOTSTRAP_SQL)
+        await engine.exec(PGMQ_SQL)
+        await engine.exec(WORKFLOWS_SQL)
+        await engine.exec(CRON_SQL)
+        await engine.exec(NET_SQL)
+        await engine.exec(EXT_COMPAT_SQL)
+        await engine.exec(VAULT_SQL)
+        if (opts?.vaultKey) {
+          await engine.query(`select set_config('app.settings.vault_key', $1, false)`, [opts.vaultKey])
+        }
       }
+      return new Database(engine)
+    } catch (error) {
+      try {
+        await engine.close()
+      } catch (cleanupError) {
+        throw new AggregateError([error, cleanupError], 'database bootstrap and cleanup failed')
+      }
+      throw error
     }
-    return new Database(engine)
   }
 
   /** Superuser query - used by auth/storage internals and introspection. */

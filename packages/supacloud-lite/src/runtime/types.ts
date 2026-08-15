@@ -181,6 +181,8 @@ export interface BucketSeed {
 export interface StorageDriver {
   put(key: string, data: Uint8Array): Promise<void>
   get(key: string): Promise<Uint8Array | null>
+  /** Return a lazy file/blob handle when the backend supports it. */
+  getBlob?(key: string): Promise<Blob | null>
   delete(key: string): Promise<void>
   deleteMany(keys: string[]): Promise<void>
   /** Remote drivers can require cleanup failures to reach the API caller. */

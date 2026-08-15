@@ -7,6 +7,7 @@ import { serveBun, type RunningServer } from './runtime/node/bun-server.js'
 import { FsStorageDriver } from './runtime/node/fs-driver.js'
 import { loadProjectConfig, type ProjectConfig } from './runtime/node/load-config.js'
 import { loadFunctionEnv, loadFunctions } from './runtime/node/load-functions.js'
+import { createNativeEngine, isNativeEngineSupported } from './runtime/node/native/engine.js'
 import { loadSupabaseProject } from './runtime/node/project.js'
 import { MemoryStorageDriver } from './runtime/storage/driver.js'
 import { S3StorageDriver, type S3StorageDriverOptions } from './runtime/storage/s3-driver.js'
@@ -27,6 +28,7 @@ export interface ProjectPaths {
   dataDir?: string
   storageDir: string
   secretsFile: string
+  databaseEngine: DatabaseEngine
 }
 
 export interface ProjectRuntimeOptions {
@@ -43,6 +45,7 @@ export interface ProjectRuntimeOptions {
   apiUrl?: string
   siteUrl?: string
   memory?: boolean
+  engine?: DatabaseEngine
   applyMigrations?: boolean
   includeFunctions?: boolean
   includeWebhooks?: boolean
@@ -62,8 +65,10 @@ export interface ProjectBackend {
   functionNames: string[]
   webhookCount: number
   storageBackend: StorageBackend
+  databaseEngine: DatabaseEngine
 }
 
+export type DatabaseEngine = 'pglite' | 'native'
 export type StorageBackend = 'fs' | 'memory' | 's3' | 'custom'
 export type ConfiguredStorageBackend = Exclude<StorageBackend, 'custom'>
 
@@ -75,9 +80,13 @@ export interface RunningProjectServer extends ProjectBackend {
 export function resolveProjectPaths(options: ProjectRuntimeOptions = {}): ProjectPaths {
   const projectDir = resolve(options.projectDir ?? process.cwd())
   const stateDir = resolvePath(projectDir, options.stateDir ?? process.env.SUPACLOUD_LITE_STATE_DIR ?? '.supacloud-lite')
+  const databaseEngine = resolveDatabaseEngine(options.engine, options.memory)
   const dataDir = options.memory
     ? undefined
-    : resolvePath(projectDir, options.dataDir ?? process.env.SUPACLOUD_LITE_DATA_DIR ?? join(stateDir, 'db'))
+    : resolvePath(
+        projectDir,
+        options.dataDir ?? process.env.SUPACLOUD_LITE_DATA_DIR ?? join(stateDir, databaseEngine === 'native' ? 'pgdata' : 'db')
+      )
   const storageDir = resolvePath(
     projectDir,
     options.storageDir ?? process.env.SUPACLOUD_LITE_STORAGE_DIR ?? join(stateDir, 'storage')
@@ -88,6 +97,7 @@ export function resolveProjectPaths(options: ProjectRuntimeOptions = {}): Projec
     dataDir,
     storageDir,
     secretsFile: join(stateDir, 'secrets.json'),
+    databaseEngine,
   }
 }
 
@@ -248,6 +258,7 @@ export async function createProjectBackend(options: ProjectRuntimeOptions = {}):
   const webhooks = options.includeWebhooks === false ? [] : await loadWebhooks(paths.projectDir)
   const configuredStorageBackend = options.storageDriver ? 'fs' : resolveStorageBackend(options.storageBackend)
   const storageBackend: StorageBackend = options.storageDriver ? 'custom' : configuredStorageBackend
+  const databaseEngine = paths.databaseEngine
 
   if (paths.dataDir) {
     await mkdir(paths.dataDir, { recursive: true, mode: 0o700 })
@@ -256,38 +267,55 @@ export async function createProjectBackend(options: ProjectRuntimeOptions = {}):
   await mkdir(paths.storageDir, { recursive: true, mode: 0o700 })
   await chmod(paths.storageDir, 0o700)
 
-  const backend = await createBackend({
-    dataDir: paths.dataDir,
-    jwtSecret: secrets.jwtSecret,
-    vaultKey: secrets.vaultKey,
-    apiUrl: url,
-    siteUrl: options.siteUrl ?? process.env.SUPACLOUD_LITE_SITE_URL ?? config.auth.siteUrl ?? url,
-    host,
-    jwtExpiry: config.auth.jwtExpiry,
-    uriAllowList: config.auth.uriAllowList,
-    authEnabled: config.auth.enabled,
-    authSettings: config.auth.settings,
-    authRateLimits: config.auth.rateLimits,
-    sessionTimeboxSeconds: config.auth.sessionTimeboxSeconds,
-    sessionInactivitySeconds: config.auth.sessionInactivitySeconds,
-    oauthProviders: config.auth.oauthProviders,
-    smsSender: options.smsSender,
-    dbSchemas: config.api.schemas,
-    maxRows: config.api.maxRows,
-    storageFileSizeLimit: config.storage.fileSizeLimit,
-    buckets: config.storage.buckets,
-    migrations: options.applyMigrations === false ? [] : project.migrations,
-    seedSql: options.applyMigrations === false || options.includeSeed === false ? undefined : project.seedSql,
-    functions,
-    functionVerifyJwt: Object.fromEntries(
-      Object.entries(config.functions).map(([name, functionOptions]) => [name, functionOptions.verifyJwt !== false])
-    ),
-    functionEnv,
-    webhooks,
-    startRuntimeServices: options.startRuntimeServices,
-    storageDriver: options.storageDriver ?? createStorageDriver(configuredStorageBackend, paths.storageDir, options.s3),
-    log: options.log,
-  })
+  const storageDriver = options.storageDriver ?? createStorageDriver(configuredStorageBackend, paths.storageDir, options.s3)
+  const engine = databaseEngine === 'native'
+    ? await createNativeEngine({ dataDir: paths.dataDir!, log: options.log })
+    : undefined
+  let backend: SupaCloudLiteBackend
+  try {
+    backend = await createBackend({
+      engine,
+      dataDir: databaseEngine === 'pglite' ? paths.dataDir : undefined,
+      jwtSecret: secrets.jwtSecret,
+      vaultKey: secrets.vaultKey,
+      apiUrl: url,
+      siteUrl: options.siteUrl ?? process.env.SUPACLOUD_LITE_SITE_URL ?? config.auth.siteUrl ?? url,
+      host,
+      jwtExpiry: config.auth.jwtExpiry,
+      uriAllowList: config.auth.uriAllowList,
+      authEnabled: config.auth.enabled,
+      authSettings: config.auth.settings,
+      authRateLimits: config.auth.rateLimits,
+      sessionTimeboxSeconds: config.auth.sessionTimeboxSeconds,
+      sessionInactivitySeconds: config.auth.sessionInactivitySeconds,
+      oauthProviders: config.auth.oauthProviders,
+      smsSender: options.smsSender,
+      dbSchemas: config.api.schemas,
+      maxRows: config.api.maxRows,
+      storageFileSizeLimit: config.storage.fileSizeLimit,
+      buckets: config.storage.buckets,
+      migrations: options.applyMigrations === false ? [] : project.migrations,
+      seedSql: options.applyMigrations === false || options.includeSeed === false ? undefined : project.seedSql,
+      functions,
+      functionVerifyJwt: Object.fromEntries(
+        Object.entries(config.functions).map(([name, functionOptions]) => [name, functionOptions.verifyJwt !== false])
+      ),
+      functionEnv,
+      webhooks,
+      startRuntimeServices: options.startRuntimeServices,
+      storageDriver,
+      log: options.log,
+    })
+  } catch (error) {
+    if (engine) {
+      try {
+        await engine.close()
+      } catch (cleanupError) {
+        throw new AggregateError([error, cleanupError], 'project database startup cleanup failed')
+      }
+    }
+    throw error
+  }
 
   return {
     backend,
@@ -300,7 +328,23 @@ export async function createProjectBackend(options: ProjectRuntimeOptions = {}):
     functionNames: [...functions.keys()],
     webhookCount: webhooks.length,
     storageBackend,
+    databaseEngine,
   }
+}
+
+export function resolveDatabaseEngine(value?: DatabaseEngine, memory = false): DatabaseEngine {
+  const configured = value ?? process.env.SUPACLOUD_LITE_ENGINE ?? 'pglite'
+  if (configured !== 'pglite' && configured !== 'native') {
+    throw new Error(`unsupported SUPACLOUD_LITE_ENGINE: ${configured}`)
+  }
+  if (configured === 'native' && memory) throw new Error('--memory is only supported by the pglite engine')
+  if (configured === 'native' && !isNativeEngineSupported()) {
+    throw new Error(
+      `native PostgreSQL requires macOS or glibc Linux on x64/arm64; ` +
+        `${process.platform}/${process.arch} must use --engine pglite`
+    )
+  }
+  return configured
 }
 
 export function resolveStorageBackend(value?: ConfiguredStorageBackend): ConfiguredStorageBackend {
