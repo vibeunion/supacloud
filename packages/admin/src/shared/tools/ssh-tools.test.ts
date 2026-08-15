@@ -572,6 +572,37 @@ function rootScriptThroughBootstrap(rootScript: string, continuationPath: string
         `touch '${continuationPath}'`].join("\n");
 }
 
+function remoteManagementCapabilityProbe(rootScript: string): string {
+    const scriptLines = rootScript.split("\n");
+    const versionProbeIndex = scriptLines.findIndex(line => line.startsWith("STAGED_VERSION="));
+    const launcherGateIndex = scriptLines.findIndex(line => line.startsWith('[[ "$POSTGREST_LAUNCHER_OUTPUT"'));
+    if (versionProbeIndex < 0 || launcherGateIndex < versionProbeIndex) {
+        throw new Error("Root upgrade script lacks Management capability boundaries");
+    }
+    return [
+        "set -euo pipefail",
+        "supacloud_version_at_least() { return 0; }",
+        'STAGED_MANAGEMENT="$RUNNER_PATH"',
+        "TARGET_MANAGEMENT_VERSION=0.60.1",
+        ...scriptLines.slice(versionProbeIndex, launcherGateIndex + 1),
+    ].join("\n");
+}
+
+function writeTestTimeoutCommand(commandDirectory: string): void {
+    writeExecutableShell(join(commandDirectory, "timeout"), [
+        "#!/usr/bin/env bun",
+        "const [duration, executable, ...args] = process.argv.slice(2);",
+        "if (duration !== '5s' || !executable) process.exit(64);",
+        "const child = Bun.spawn([executable, ...args], { stdin: 'inherit', stdout: 'inherit', stderr: 'inherit' });",
+        "let timedOut = false;",
+        "const timer = setTimeout(() => { timedOut = true; child.kill('SIGKILL'); }, 1000);",
+        "const exitCode = await child.exited;",
+        "clearTimeout(timer);",
+        "process.exit(timedOut ? 124 : exitCode);",
+        "",
+    ].join("\n"));
+}
+
 function rootScriptVerifierBootstrap(rootScript: string): string {
     const scriptLines = rootScript.split("\n");
     const securityUnsetIndex = scriptLines.findIndex(line => line.startsWith("unset SUPACLOUD_ALLOW_UNVERIFIED_RELEASE"));
@@ -764,9 +795,57 @@ describe("ssh admin tool", () => {
         expect(rootScript).toContain("Another SupaCloud upgrade is already running");
         expect(rootScript).toContain("supacloud_fetch_component_release management-api '0.60.1'");
         expect(rootScript).toContain('UPGRADE_RUNNER="$STAGED_MANAGEMENT"');
-        expect(rootScript).toContain('"$STAGED_MANAGEMENT" --systemd-unit-helper-sha256');
+        expect(rootScript).toContain('timeout 5s "$STAGED_MANAGEMENT" --version');
+        expect(rootScript).toContain('timeout 5s "$STAGED_MANAGEMENT" --systemd-unit-helper-sha256');
+        expect(rootScript).toContain('timeout 5s "$STAGED_MANAGEMENT" --postgrest-launcher-sha256');
+        expect(rootScript).toContain("chown timeout; do command -v");
         expect(rootScript).not.toContain('UPGRADE_RUNNER=\'/usr/local/bin/supacloud\'');
     });
+
+    test("remote target-runner capability gate rejects invalid and hanging binaries", () => {
+        const fixtureDirectory = realpathSync(mkdtempSync(join(tmpdir(), "supacloud-remote-capability-")));
+        const commandDirectory = join(fixtureDirectory, "commands");
+        const runnerPath = join(fixtureDirectory, "management-runner");
+        const probe = remoteManagementCapabilityProbe(buildRootUpgradeScript({
+            helperPath: "/tmp/release-assets.sh",
+            version: "0.60.1",
+        }));
+        mkdirSync(commandDirectory);
+        writeTestTimeoutCommand(commandDirectory);
+
+        const executeProbe = (launcherCommand: string) => {
+            writeExecutableShell(runnerPath, [
+                "#!/bin/sh",
+                "case \"${1:-}\" in",
+                "  --version) printf 'SupaCloud Version: 0.60.1\\n' ;;",
+                `  --systemd-unit-helper-sha256) printf 'SupaCloud systemd-unit helper SHA-256: ${"a".repeat(64)}\\n' ;;`,
+                `  --postgrest-launcher-sha256) ${launcherCommand} ;;`,
+                "  *) exit 2 ;;",
+                "esac",
+                "",
+            ].join("\n"));
+            return Bun.spawnSync(["bash", "-c", probe], {
+                env: {
+                    ...process.env,
+                    PATH: `${commandDirectory}:${process.env.PATH ?? ""}`,
+                    RUNNER_PATH: runnerPath,
+                },
+            });
+        };
+
+        try {
+            expect(executeProbe("exit 2").exitCode).not.toBe(0);
+            const malformed = executeProbe("printf 'unexpected launcher identity\\n'");
+            expect(malformed.exitCode).not.toBe(0);
+            expect(malformed.stderr.toString()).toContain("lacks target-bound PostgREST launcher delivery");
+            expect(executeProbe("exec sleep 30").exitCode).toBe(124);
+            expect(executeProbe(
+                `printf 'SupaCloud PostgREST launcher SHA-256: ${"b".repeat(64)}\\n'`,
+            ).exitCode).toBe(0);
+        } finally {
+            rmSync(fixtureDirectory, { recursive: true, force: true });
+        }
+    }, { timeout: 20_000 });
 
     test("remote latest resolution pins the transaction to the bootstrap target version", () => {
         const directory = mkdtempSync(join(tmpdir(), "supacloud-admin-target-version-"));
@@ -1082,6 +1161,7 @@ describe("ssh admin tool", () => {
         expect(command).toContain("supacloud_download_release_asset");
         expect(command).toContain('chmod 0755 "$STAGED_MANAGEMENT"');
         expect(command).toContain('"$STAGED_MANAGEMENT" --systemd-unit-helper-sha256');
+        expect(command).toContain('"$STAGED_MANAGEMENT" --postgrest-launcher-sha256');
         expect(command).toContain("SUPACLOUD_EDGE_RUNTIME_UPGRADE_TAG=");
         expect(command).toContain("unset SUPACLOUD_ALLOW_UNVERIFIED_RELEASE");
         expect(command).toContain("SUPACLOUD_ATTESTATION_TRUSTED_ROOT");

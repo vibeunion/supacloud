@@ -1,5 +1,6 @@
 import { describe, expect, spyOn, test } from "bun:test";
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -13,6 +14,7 @@ import {
     buildRemotePreflightScript,
     buildRemoteUpgradePaths,
     buildRemoteStateScript,
+    buildTargetRunnerCapabilityScript,
     buildUploadDropCleanupFailure,
     buildUpgradeLockScript,
     failureRequiresRemoteReconciliation,
@@ -21,6 +23,7 @@ import {
     startRemoteUpgrade,
 } from "./local-upgrade-transfer";
 import { githubCliArchiveIdentity, type LocalUpgradeFile, type PreparedLocalUpgradeBundle } from "./local-upgrade-bundle";
+import managementPackage from "../../../../management-api/package.json";
 
 const paths = {
     drop: "/var/tmp/.supacloud-upgrade-upload-11111111-1111-4111-8111-111111111111",
@@ -315,12 +318,144 @@ describe("local upgrade remote runner", () => {
         expect(script).toContain("--target-version '0.50.31'");
         expect(script).toContain("--edge-runtime-version '0.16.8'");
         expect(script).toContain('timeout 5s "$RUNNER" --systemd-unit-helper-sha256');
+        expect(script).toContain('timeout 5s "$RUNNER" --postgrest-launcher-sha256');
         expect(script).toContain("unset SUPACLOUD_ALLOW_UNVERIFIED_RELEASE");
         expect(script).toContain("SUPACLOUD_ATTESTATION_TRUSTED_ROOT");
         expect(script).not.toContain("verify_manifest()");
         expect(script).not.toContain("MANAGEMENT_COMMIT");
         expect(script).not.toContain("jq ");
     });
+
+    test("rejects missing or malformed launcher capability before target-runner adoption", () => {
+        const fixtureDirectory = realpathSync(mkdtempSync(join(tmpdir(), "supacloud-runner-capability-")));
+        const drop = join(fixtureDirectory, "drop");
+        const runnerAsset = join(drop, "bundle/management-api/supacloud-linux-amd64");
+        const capabilityPaths = { ...paths, drop };
+        mkdirSync(join(drop, "bundle/management-api"), { recursive: true, mode: 0o700 });
+
+        const runCapability = (launcherCommand: string) => {
+            const source = [
+                "#!/usr/bin/env bash",
+                "set -euo pipefail",
+                "case \"${1:-}\" in",
+                "  --version) printf 'SupaCloud Version: 0.50.31\\n' ;;",
+                `  --systemd-unit-helper-sha256) printf 'SupaCloud systemd-unit helper SHA-256: ${"a".repeat(64)}\\n' ;;`,
+                `  --postgrest-launcher-sha256) ${launcherCommand} ;;`,
+                "  *) exit 2 ;;",
+                "esac",
+            ].join("\n");
+            writeFileSync(runnerAsset, source, { mode: 0o600 });
+            chmodSync(runnerAsset, 0o600);
+            const runnerFile: LocalUpgradeFile = {
+                localPath: runnerAsset,
+                relativePath: "bundle/management-api/supacloud-linux-amd64",
+                sha256: createHash("sha256").update(source).digest("hex"),
+                size: Buffer.byteLength(source),
+            };
+            const bundle: PreparedLocalUpgradeBundle = {
+                directory: fixtureDirectory,
+                files: [runnerFile],
+                verifierArchive: null,
+                managementBinaryName: "supacloud-linux-amd64",
+                edgeRuntimeBinaryName: "supacloud-edge-runtime-linux-amd64",
+            };
+            const linuxScript = buildTargetRunnerCapabilityScript(capabilityPaths, bundle, {
+                managementVersion: "0.50.31",
+                edgeRuntimeVersion: "0.16.8",
+            });
+            let script = process.platform === "darwin"
+                ? linuxScript.replaceAll("stat -c '%h'", "stat -f '%l'")
+                    .replaceAll("stat -c '%s'", "stat -f '%z'")
+                : linuxScript;
+            if (!Bun.which("timeout")) script = script.replaceAll("timeout 5s ", "");
+            expect(Bun.spawnSync(["bash", "-n", "-c", script]).exitCode).toBe(0);
+            return Bun.spawnSync(["bash", "-c", script]);
+        };
+
+        try {
+            expect(runCapability("exit 2").exitCode).not.toBe(0);
+            const malformed = runCapability("printf 'unexpected launcher identity\\n'");
+            expect(malformed.stderr.toString()).toContain("lacks PostgREST launcher delivery");
+            expect(malformed.exitCode).not.toBe(0);
+            const success = runCapability(
+                `printf 'SupaCloud PostgREST launcher SHA-256: ${"b".repeat(64)}\\n'`,
+            );
+            expect(success.stderr.toString()).toBe("");
+            expect(success.exitCode).toBe(0);
+            expect(readdirSync(drop).filter(name => name.startsWith(".runner-capability."))).toEqual([]);
+        } finally {
+            rmSync(fixtureDirectory, { recursive: true, force: true });
+        }
+    });
+
+    test("accepts the exact identities emitted by a compiled Management runner", () => {
+        const fixtureDirectory = realpathSync(mkdtempSync(join(tmpdir(), "supacloud-compiled-capability-")));
+        const drop = join(fixtureDirectory, "drop");
+        const runnerAsset = join(drop, "bundle/management-api/supacloud-linux-amd64");
+        const commandDirectory = join(fixtureDirectory, "commands");
+        mkdirSync(join(drop, "bundle/management-api"), { recursive: true, mode: 0o700 });
+        mkdirSync(commandDirectory, { mode: 0o700 });
+        writeFileSync(join(commandDirectory, "timeout"), [
+            "#!/usr/bin/env bun",
+            "const [duration, executable, ...args] = process.argv.slice(2);",
+            "if (duration !== '5s' || !executable) process.exit(64);",
+            "const child = Bun.spawn([executable, ...args], { stdin: 'inherit', stdout: 'inherit', stderr: 'inherit' });",
+            "let timedOut = false;",
+            "const timer = setTimeout(() => { timedOut = true; child.kill('SIGKILL'); }, 5000);",
+            "const exitCode = await child.exited;",
+            "clearTimeout(timer);",
+            "process.exit(timedOut ? 124 : exitCode);",
+            "",
+        ].join("\n"), { mode: 0o700 });
+        chmodSync(join(commandDirectory, "timeout"), 0o700);
+
+        try {
+            const managementPackageRoot = realpathSync(join(import.meta.dir, "../../../../management-api"));
+            if (!existsSync(join(managementPackageRoot, "node_modules"))) {
+                const installResult = Bun.spawnSync(["bun", "install", "--frozen-lockfile"], { cwd: managementPackageRoot });
+                expect(installResult.exitCode, installResult.stderr?.toString() ?? "bun install failed").toBe(0);
+            }
+            const compilation = Bun.spawnSync([
+                "bun",
+                "build",
+                "src/standalone.ts",
+                "--compile",
+                `--outfile=${runnerAsset}`,
+            ], { cwd: managementPackageRoot });
+            expect(compilation.exitCode, compilation.stderr?.toString() ?? "compilation failed").toBe(0);
+
+            const runnerBytes = readFileSync(runnerAsset);
+            const runnerFile: LocalUpgradeFile = {
+                localPath: runnerAsset,
+                relativePath: "bundle/management-api/supacloud-linux-amd64",
+                sha256: createHash("sha256").update(runnerBytes).digest("hex"),
+                size: runnerBytes.byteLength,
+            };
+            const bundle: PreparedLocalUpgradeBundle = {
+                directory: fixtureDirectory,
+                files: [runnerFile],
+                verifierArchive: null,
+                managementBinaryName: "supacloud-linux-amd64",
+                edgeRuntimeBinaryName: "supacloud-edge-runtime-linux-amd64",
+            };
+            let script = buildTargetRunnerCapabilityScript({ ...paths, drop }, bundle, {
+                managementVersion: managementPackage.version,
+                edgeRuntimeVersion: "0.16.8",
+            });
+            if (process.platform === "darwin") {
+                script = script.replaceAll("stat -c '%h'", "stat -f '%l'")
+                    .replaceAll("stat -c '%s'", "stat -f '%z'");
+            }
+            const execution = Bun.spawnSync(["bash", "-c", script], {
+                env: { ...process.env, PATH: `${commandDirectory}:${process.env.PATH ?? ""}` },
+            });
+            expect(execution.exitCode).toBe(0);
+            expect(execution.stdout.toString()).toBe("");
+            expect(execution.stderr.toString()).toBe("");
+        } finally {
+            rmSync(fixtureDirectory, { recursive: true, force: true });
+        }
+    }, { timeout: 40_000 });
 
     test("executes transfer verification with nounset enabled", () => {
         const script = runScript(preparedBundle("amd64", "bundled"), "amd64");

@@ -11,6 +11,7 @@ import {
     githubCliArchiveIdentity,
     prepareLocalUpgradeBundle,
     STRICT_GITHUB_CAPABILITY_FLAGS,
+    type LocalUpgradeFile,
     type PreparedLocalUpgradeBundle,
     type UpgradeArchitecture,
 } from "./local-upgrade-bundle";
@@ -117,7 +118,7 @@ export function buildRemotePreflightScript(): string {
         "export PATH",
         trustedInstalledGithubFunction(),
         "test -d /run/systemd/system || { echo 'systemd is not the active init system' >&2; exit 1; }",
-        "for tool in systemctl systemd-run sha256sum stat realpath tar file find sort awk grep tail timeout flock; do command -v \"$tool\" >/dev/null 2>&1 || { echo \"Required local-upgrade tool is missing: $tool\" >&2; exit 127; }; done",
+        "for tool in systemctl systemd-run sha256sum stat realpath tar file find sort awk grep tail timeout flock install mktemp; do command -v \"$tool\" >/dev/null 2>&1 || { echo \"Required local-upgrade tool is missing: $tool\" >&2; exit 127; }; done",
         "tail -n 0 -- /dev/null >/dev/null 2>&1 || { echo 'A tail implementation with -n and -- support is required' >&2; exit 1; }",
         "systemd-run --help | grep -Eq -- '(^|[[:space:]])--collect([=[:space:]]|$)' || { echo 'systemd-run --collect is required' >&2; exit 1; }",
         "test -d /run/lock || { echo '/run/lock is unavailable' >&2; exit 1; }",
@@ -193,6 +194,65 @@ async function uploadBundleFiles(ssh: SshTransport, paths: RemoteUpgradePaths, b
     const uploads = [...bundle.files, ...(bundle.verifierArchive ? [bundle.verifierArchive] : [])];
     for (const upload of uploads) {
         await ssh.upload(upload.localPath, `${paths.drop}/${upload.relativePath}`, { mode: 0o600, timeoutMs: 10 * 60_000 });
+    }
+}
+
+function managementRunnerFile(bundle: PreparedLocalUpgradeBundle): LocalUpgradeFile {
+    const relativePath = `bundle/management-api/${bundle.managementBinaryName}`;
+    const runner = bundle.files.find(file => file.relativePath === relativePath);
+    if (!runner) throw new Error(`Local upgrade bundle is missing ${relativePath}`);
+    return runner;
+}
+
+function targetRunnerCapabilityCommands(): string[] {
+    return [
+        "RUNNER=$(mktemp \"$DROP/.runner-capability.XXXXXX\")",
+        "trap 'rm -f -- \"$RUNNER\"' EXIT",
+        "trap 'trap - EXIT HUP INT TERM; rm -f -- \"$RUNNER\"; exit 1' HUP INT TERM",
+        "install -m 0700 \"$RUNNER_ASSET\" \"$RUNNER\"",
+        "test \"$(sha256sum \"$RUNNER\" | awk '{print $1}')\" = \"$EXPECTED_SHA256\"",
+        "VERSION_OUTPUT=$(timeout 5s \"$RUNNER\" --version 2>&1)",
+        "[[ \"$VERSION_OUTPUT\" =~ ^SupaCloud[[:space:]]Version:[[:space:]]${EXPECTED_VERSION//./\\.}$ ]] || { echo 'Target Management runner version mismatch' >&2; exit 1; }",
+        "SYSTEMD_HELPER_OUTPUT=$(timeout 5s \"$RUNNER\" --systemd-unit-helper-sha256 2>&1)",
+        "[[ \"$SYSTEMD_HELPER_OUTPUT\" =~ ^SupaCloud[[:space:]]systemd-unit[[:space:]]helper[[:space:]]SHA-256:[[:space:]][0-9a-f]{64}$ ]] || { echo 'Target Management runner lacks systemd-unit helper delivery' >&2; exit 1; }",
+        "POSTGREST_LAUNCHER_OUTPUT=$(timeout 5s \"$RUNNER\" --postgrest-launcher-sha256 2>&1)",
+        "[[ \"$POSTGREST_LAUNCHER_OUTPUT\" =~ ^SupaCloud[[:space:]]PostgREST[[:space:]]launcher[[:space:]]SHA-256:[[:space:]][0-9a-f]{64}$ ]] || { echo 'Target Management runner lacks PostgREST launcher delivery' >&2; exit 1; }",
+        "rm -f -- \"$RUNNER\"",
+        "trap - EXIT HUP INT TERM",
+    ];
+}
+
+export function buildTargetRunnerCapabilityScript(
+    paths: RemoteUpgradePaths,
+    bundle: PreparedLocalUpgradeBundle,
+    request: LocalUpgradeTransferRequest,
+): string {
+    const runnerFile = managementRunnerFile(bundle);
+    const runnerAsset = `${paths.drop}/${runnerFile.relativePath}`;
+    return [
+        "set -euo pipefail",
+        "umask 077",
+        `DROP=${quoteShell(paths.drop)}`,
+        `RUNNER_ASSET=${quoteShell(runnerAsset)}`,
+        `EXPECTED_SIZE=${runnerFile.size}`,
+        `EXPECTED_SHA256=${quoteShell(runnerFile.sha256)}`,
+        `EXPECTED_VERSION=${quoteShell(request.managementVersion)}`,
+        "test -f \"$RUNNER_ASSET\" && test ! -L \"$RUNNER_ASSET\" && test \"$(stat -c '%h' \"$RUNNER_ASSET\")\" = 1 || { echo 'Target Management runner is not a direct single-link file' >&2; exit 1; }",
+        "test \"$(stat -c '%s' \"$RUNNER_ASSET\")\" = \"$EXPECTED_SIZE\"",
+        "test \"$(sha256sum \"$RUNNER_ASSET\" | awk '{print $1}')\" = \"$EXPECTED_SHA256\"",
+        ...targetRunnerCapabilityCommands(),
+    ].join("\n");
+}
+
+async function verifyTargetRunnerCapability(
+    ssh: SshTransport,
+    paths: RemoteUpgradePaths,
+    bundle: PreparedLocalUpgradeBundle,
+    request: LocalUpgradeTransferRequest,
+): Promise<void> {
+    const verified = await ssh.exec(buildTargetRunnerCapabilityScript(paths, bundle, request), 30_000);
+    if (!verified.success) {
+        throw remoteFailure("Target Management runner lacks required transactional helper delivery", verified);
     }
 }
 
@@ -353,6 +413,7 @@ function upgradeScriptExecution(
         "test \"$(sha256sum \"$RUNNER\"|awk '{print $1}')\" = \"$(sha256sum \"$RUNNER_ASSET\"|awk '{print $1}')\"",
         "\"$RUNNER\" --version | grep -Eq \"(^|[^0-9])${MANAGEMENT_VERSION//./\\.}([^0-9]|$)\"",
         "timeout 5s \"$RUNNER\" --systemd-unit-helper-sha256 | grep -Eq 'SupaCloud systemd-unit helper SHA-256: [0-9a-f]{64}'",
+        "timeout 5s \"$RUNNER\" --postgrest-launcher-sha256 | grep -Eq 'SupaCloud PostgREST launcher SHA-256: [0-9a-f]{64}'",
         `env PATH=\"$VERIFIER_PATH:$PATH\" \"$RUNNER\" upgrade --yes --target-version ${quoteShell(request.managementVersion)} --edge-runtime-version ${quoteShell(request.edgeRuntimeVersion)} --asset-bundle-dir \"$BUNDLE\"`,
     ];
 }
@@ -846,6 +907,7 @@ export async function executeLocalUpgradeTransfer(ssh: SshTransport, request: Lo
         try {
             await prepareRemoteDrop(ssh, paths, bundle);
             await uploadBundleFiles(ssh, paths, bundle);
+            await verifyTargetRunnerCapability(ssh, paths, bundle, request);
             await uploadRunScript(ssh, paths, bundle, request, preflight.architecture);
             await adoptRemoteDrop(ssh, paths);
             adopted = true;
