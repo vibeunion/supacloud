@@ -2,7 +2,6 @@ import { describe, expect, test } from 'bun:test'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { createSupaCloudClient } from './helpers/supacloud-js-source.js'
 import { createLiteBackend } from '../src/index.js'
-import { WORKFLOWS_SQL } from '../src/runtime/db/emulated.js'
 import { signJwt } from '../src/runtime/jwt.js'
 
 const backendConfig = {
@@ -23,7 +22,6 @@ describe('Durable workflows', () => {
   test('enforces service-role access and durable step semantics end to end', async () => {
     const backend = await createLiteBackend(backendConfig)
     try {
-      await backend.db.exec(WORKFLOWS_SQL)
       const anon = supabaseClient(backend.anonKey, backend.fetch)
       const authenticatedToken = await signJwt(
         { role: 'authenticated', sub: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' },

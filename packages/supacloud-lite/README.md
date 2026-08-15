@@ -250,7 +250,7 @@ S3 模式的快照只包含数据库中的 Storage 元数据和密钥，不复�
 | `supabase.storage` | 已验证核心 | 覆盖上传下载、列表、删除、TUS/RLS、远端 S3 驱动，以及 Bun.Image 的 `contain`/`fill`、格式和质量变换子集；`cover` 明确不支持 |
 | `supabase.channel()` | 已验证核心 | 自动测试覆盖 `postgres_changes`、DELETE RLS 隔离和事件快照校验；Broadcast、Presence 属于实验性兼容 |
 | `supabase.functions.invoke()` | 已验证核心 | 自动测试覆盖 Bun.build、`Deno.serve()`、公开函数和同进程重启 |
-| Supabase Queues / PGMQ | 已验证核心 | 提供 `pgmq_public` 的 `send`、`send_batch`、`read`、`pop`、`archive`、`delete` RPC；队列数据持久化在同一 PGlite 项目中 |
+| Supabase Queues / PGMQ | 已验证核心 | 提供 `pgmq_public` 的 `send`、`send_batch`、`read`、`pop`、`archive`、`delete` RPC；队列数据持久化在项目数据库（PGlite 或 native PostgreSQL）中 |
 | Edge Functions `SupaCloud.pgredis` | 已验证核心 | 提供单项目持久 KV、TTL、原子 `getset`/`getdel`；绑定只在当前函数请求内可用 |
 | Supabase migrations | 支持 | 按文件名排序，记录到 `supabase_migrations` |
 | PostgreSQL RLS | 支持 | 使用 `anon`、`authenticated`、`service_role` 数据库角色执行 |
@@ -274,7 +274,7 @@ Lite 使用 Bun 原生 bcrypt，并兼容验证常见 GoTrue bcrypt 密码散列
 
 ### 队列与 Edge 缓存
 
-Lite 在同一个 PGlite 数据库中提供 Supabase Queues 的公开 RPC façade。应用可以直接使用官方客户端的
+Lite 在项目数据库（PGlite 或 native PostgreSQL）中提供 Supabase Queues 的公开 RPC façade。应用可以直接使用官方客户端的
 `supabase.schema('pgmq_public').rpc(...)`，无需额外的队列进程：
 
 ```sql
@@ -298,6 +298,7 @@ const { data: messages } = await queues.rpc('read', {
 
 Lite 的 `pgmq` 模拟层还提供 `set_vt`，支持直接 SQL 调整可见性超时。消息按 PGMQ 语义至少投递一次；`pop` 会立即删除消息，`archive` 是确认路径。队列创建、指标、purge、设置和管理 API 不属于 Lite 的公开 RPC façade，仍需由项目 SQL 或完整 SupaCloud 控制面处理。
 队列名遵循标准版的 1-128 位小写字母、数字、下划线和短横线规则，并且必须以字母或数字开头；Lite 会安全映射超出 PostgreSQL 63-byte 标识符上限的名称，避免截断后串队。默认 Data API 暴露 `public` 和 `pgmq_public`；如果显式设置 `dbSchemas`，Lite 会严格使用该列表，需要队列 RPC 时应把 `pgmq_public` 明确加入。
+Durable workflow 的 run、step、event 和内部队列也保存在同一项目数据库中，可跨进程重启恢复；内部 workflow 队列不会通过 `pgmq_public` 暴露给 Data API 角色。
 
 Edge Function 内可使用 `globalThis.SupaCloud.pgredis`：
 
@@ -591,7 +592,7 @@ In-memory databases have no persistable data, so `snapshot` and `upgrade` reject
 | `supabase.storage` | Verified core | Covers upload/download, list, delete, TUS/RLS, remote S3 driver, and a subset of Bun.Image `contain`/`fill`, format, and quality transforms; `cover` is explicitly unsupported |
 | `supabase.channel()` | Verified core | Automated tests cover `postgres_changes`, DELETE RLS isolation, and event snapshot validation; Broadcast and Presence are experimentally compatible |
 | `supabase.functions.invoke()` | Verified core | Automated tests cover Bun.build, `Deno.serve()`, public functions, and in-process restart |
-| Supabase Queues / PGMQ | Verified core | Provides `send`, `send_batch`, `read`, `pop`, `archive`, and `delete` RPCs for `pgmq_public`; queue data is persisted in the same PGlite project |
+| Supabase Queues / PGMQ | Verified core | Provides `send`, `send_batch`, `read`, `pop`, `archive`, and `delete` RPCs for `pgmq_public`; queue data is persisted in the project database (PGlite or native PostgreSQL) |
 | Edge Functions `SupaCloud.pgredis` | Verified core | Provides single-project persistent KV, TTL, and atomic `getset`/`getdel`; the binding is only available within the current function request |
 | Supabase migrations | Supported | Sorted by filename, recorded in `supabase_migrations` |
 | PostgreSQL RLS | Supported | Executed using the `anon`, `authenticated`, and `service_role` database roles |
@@ -615,7 +616,7 @@ Lite uses Bun's native bcrypt and is compatible with validating common GoTrue bc
 
 ### Queues and Edge Cache
 
-Lite provides a public RPC façade for Supabase Queues within the same PGlite database. Applications can directly use the official client's
+Lite provides a public RPC façade for Supabase Queues in the project database (PGlite or native PostgreSQL). Applications can directly use the official client's
 `supabase.schema('pgmq_public').rpc(...)` without an additional queue process:
 
 ```sql
@@ -639,6 +640,7 @@ const { data: messages } = await queues.rpc('read', {
 
 Lite's `pgmq` emulation layer also provides `set_vt`, allowing direct SQL adjustment of visibility timeouts. Messages are delivered at least once according to PGMQ semantics; `pop` deletes the message immediately, and `archive` is the acknowledgment path. Queue creation, metrics, purge, settings, and management APIs are not part of Lite's public RPC façade and must still be handled by project SQL or the full SupaCloud control plane.
 Queue names follow the standard 1-128 character lowercase letter, digit, underscore, and hyphen rule, and must start with a letter or digit; Lite safely maps names that exceed PostgreSQL's 63-byte identifier limit to avoid cross-queue collisions after truncation. The default Data API exposes `public` and `pgmq_public`; if `dbSchemas` is set explicitly, Lite uses that list strictly, and `pgmq_public` should be explicitly included when queue RPCs are needed.
+Durable workflow runs, steps, events, and the internal queue are stored in the same project database and survive process restarts. Data API roles cannot access the internal workflow queue through `pgmq_public`.
 
 Within an Edge Function, you can use `globalThis.SupaCloud.pgredis`:
 

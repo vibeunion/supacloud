@@ -106,6 +106,111 @@ export const PARITY_SCENARIOS: ParityScenario[] = [
       (observation.data as { otherCount?: number; serviceCount?: number })?.serviceCount === 1,
   },
   {
+    name: 'JWT tenant and owner claims resist spoofing',
+    module: 'rls',
+    run: async ({ anon, service, runId }) => {
+      const initialSignOut = await anon.auth.signOut()
+      const owner = await anon.auth.signUp({
+        email: `tenant-owner-${runId}@example.com`,
+        password: 'password123',
+        options: { data: { tenant_id: 'tenant-blue' } },
+      })
+      const ownerId = owner.data.user?.id
+      const ownerInsert = await anon.from('tenant_documents').insert({
+        tenant_id: 'tenant-blue',
+        content: `tenant-secret-${runId}`,
+      })
+      const ownerSignOut = await anon.auth.signOut()
+      const anonymousRead = await anon.from('tenant_documents').select('id').eq('content', `tenant-secret-${runId}`)
+      const other = await anon.auth.signUp({
+        email: `tenant-other-${runId}@example.com`,
+        password: 'password123',
+        options: { data: { tenant_id: 'tenant-red' } },
+      })
+      const forgedOwner = await anon.from('tenant_documents').insert({
+        tenant_id: 'tenant-red',
+        owner_id: ownerId,
+        content: `forged-owner-${runId}`,
+      })
+      const forgedTenant = await anon.from('tenant_documents').insert({
+        tenant_id: 'tenant-blue',
+        content: `forged-tenant-${runId}`,
+      })
+      const otherRows = await anon.from('tenant_documents').select('id').eq('content', `tenant-secret-${runId}`)
+      const serviceRows = await service.from('tenant_documents').select('id').eq('content', `tenant-secret-${runId}`)
+      return {
+        ok: Boolean(ownerId)
+          && !initialSignOut.error
+          && !owner.error
+          && !ownerInsert.error
+          && !ownerSignOut.error
+          && !other.error
+          && !otherRows.error
+          && !serviceRows.error,
+        data: {
+          anonymousCount: anonymousRead.data?.length ?? -1,
+          forgedOwnerCode: forgedOwner.error?.code,
+          forgedTenantCode: forgedTenant.error?.code,
+          otherCount: otherRows.data?.length ?? -1,
+          serviceCount: serviceRows.data?.length ?? -1,
+        },
+      }
+    },
+    expect: (observation) => observation.ok &&
+      (observation.data as { anonymousCount?: number })?.anonymousCount === 0 &&
+      (observation.data as { forgedOwnerCode?: string })?.forgedOwnerCode === '42501' &&
+      (observation.data as { forgedTenantCode?: string })?.forgedTenantCode === '42501' &&
+      (observation.data as { otherCount?: number })?.otherCount === 0 &&
+      (observation.data as { serviceCount?: number })?.serviceCount === 1,
+  },
+  {
+    name: 'private storage objects stay owner scoped',
+    module: 'storage',
+    run: async ({ anon, service, runId }) => {
+      const objectName = `private-${runId}.txt`
+      const initialSignOut = await anon.auth.signOut()
+      const owner = await anon.auth.signUp({
+        email: `storage-owner-${runId}@example.com`,
+        password: 'password123',
+      })
+      const uploaded = await anon.storage.from('parity-private').upload(objectName, 'owner-only')
+      const ownerSignOut = await anon.auth.signOut()
+      const anonymousDownload = await anon.storage.from('parity-private').download(objectName)
+      const other = await anon.auth.signUp({
+        email: `storage-other-${runId}@example.com`,
+        password: 'password123',
+      })
+      const otherDownload = await anon.storage.from('parity-private').download(objectName)
+      const otherList = await anon.storage.from('parity-private').list('', { search: objectName })
+      const otherOverwrite = await anon.storage.from('parity-private').upload(objectName, 'forged', { upsert: true })
+      const otherRemove = await anon.storage.from('parity-private').remove([objectName])
+      const serviceDownload = await service.storage.from('parity-private').download(objectName)
+      return {
+        ok: !initialSignOut.error
+          && !owner.error
+          && !uploaded.error
+          && !ownerSignOut.error
+          && !other.error
+          && !serviceDownload.error,
+        data: {
+          anonymousDenied: Boolean(anonymousDownload.error),
+          otherDenied: Boolean(otherDownload.error),
+          otherListCount: otherList.data?.length ?? -1,
+          overwriteDenied: Boolean(otherOverwrite.error),
+          otherRemoveCount: otherRemove.data?.length ?? -1,
+          serviceBody: serviceDownload.data ? await serviceDownload.data.text() : null,
+        },
+      }
+    },
+    expect: (observation) => observation.ok &&
+      (observation.data as { anonymousDenied?: boolean })?.anonymousDenied === true &&
+      (observation.data as { otherDenied?: boolean })?.otherDenied === true &&
+      (observation.data as { otherListCount?: number })?.otherListCount === 0 &&
+      (observation.data as { overwriteDenied?: boolean })?.overwriteDenied === true &&
+      (observation.data as { otherRemoveCount?: number })?.otherRemoveCount === 0 &&
+      (observation.data as { serviceBody?: string })?.serviceBody === 'owner-only',
+  },
+  {
     name: 'storage lifecycle',
     module: 'storage',
     run: async ({ service, runId }) => {
