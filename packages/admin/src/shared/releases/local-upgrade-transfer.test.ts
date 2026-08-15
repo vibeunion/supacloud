@@ -411,6 +411,10 @@ describe("local upgrade remote runner", () => {
 
         try {
             const managementPackageRoot = realpathSync(join(import.meta.dir, "../../../../management-api"));
+            if (!existsSync(join(managementPackageRoot, "node_modules"))) {
+                const installResult = Bun.spawnSync(["bun", "install", "--frozen-lockfile"], { cwd: managementPackageRoot });
+                expect(installResult.exitCode, installResult.stderr?.toString() ?? "bun install failed").toBe(0);
+            }
             const compilation = Bun.spawnSync([
                 "bun",
                 "build",
@@ -418,7 +422,7 @@ describe("local upgrade remote runner", () => {
                 "--compile",
                 `--outfile=${runnerAsset}`,
             ], { cwd: managementPackageRoot });
-            expect(compilation.exitCode).toBe(0);
+            expect(compilation.exitCode, compilation.stderr?.toString() ?? "compilation failed").toBe(0);
 
             const runnerBytes = readFileSync(runnerAsset);
             const runnerFile: LocalUpgradeFile = {
