@@ -84,7 +84,7 @@ async function createLite(): Promise<{ backend: SupaCloudLiteBackend }> {
 
 async function verifyReferenceSchema(service: SupabaseClient): Promise<void> {
   const response = await service.rpc('parity_schema_version')
-  if (response.error || response.data !== 'supacloud-lite-parity-v1') {
+  if (response.error || response.data !== 'supacloud-lite-parity-v2') {
     throw new Error('reference Supabase is missing parity/schema.sql or has a different schema version')
   }
 }

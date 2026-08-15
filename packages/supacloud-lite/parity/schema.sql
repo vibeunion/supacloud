@@ -24,11 +24,47 @@ drop policy if exists parity_note_owner on public.notes;
 create policy parity_note_owner on public.notes for all to authenticated
   using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 
+create table if not exists public.tenant_documents (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id text not null,
+  owner_id uuid not null default auth.uid(),
+  content text not null
+);
+
+alter table public.tenant_documents enable row level security;
+drop policy if exists parity_tenant_document_owner on public.tenant_documents;
+create policy parity_tenant_document_owner on public.tenant_documents for all to authenticated
+  using (
+    tenant_id = auth.jwt() -> 'user_metadata' ->> 'tenant_id'
+    and owner_id = auth.uid()
+  )
+  with check (
+    tenant_id = auth.jwt() -> 'user_metadata' ->> 'tenant_id'
+    and owner_id = auth.uid()
+  );
+
 grant usage on schema public to anon, authenticated, service_role;
 grant select on public.authors, public.posts to anon, authenticated;
 grant all on public.authors, public.posts, public.notes to service_role;
 grant select, insert, update, delete on public.notes to authenticated;
+grant all on public.tenant_documents to service_role;
+grant select, insert, update, delete on public.tenant_documents to authenticated;
 grant usage, select on all sequences in schema public to anon, authenticated, service_role;
+
+insert into storage.buckets (id, name, public)
+values ('parity-private', 'parity-private', false)
+on conflict (id) do update set public = excluded.public;
+
+drop policy if exists parity_private_object_owner on storage.objects;
+create policy parity_private_object_owner on storage.objects for all to authenticated
+  using (
+    bucket_id = 'parity-private'
+    and owner_id = auth.uid()::text
+  )
+  with check (
+    bucket_id = 'parity-private'
+    and owner_id = auth.uid()::text
+  );
 
 insert into public.authors (id, name, email) values
   (1, 'Ada', 'ada@parity.invalid'),
@@ -47,7 +83,7 @@ create or replace function public.parity_add_two(left_value integer, right_value
 returns integer language sql immutable as $$ select left_value + right_value $$;
 
 create or replace function public.parity_schema_version()
-returns text language sql immutable as $$ select 'supacloud-lite-parity-v1'::text $$;
+returns text language sql immutable as $$ select 'supacloud-lite-parity-v2'::text $$;
 
 grant execute on function public.parity_add_two(integer, integer) to anon, authenticated, service_role;
 grant execute on function public.parity_schema_version() to anon, authenticated, service_role;
