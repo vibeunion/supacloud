@@ -18,6 +18,8 @@ import { PgWireClient } from './wire.js'
 import { buildWireEngine } from './wire-engine.js'
 
 const DEFAULT_PG_VERSION = '17.7.0'
+const POSTGRES_MIRROR_URL_ERROR =
+  'SUPACLOUD_LITE_POSTGRES_MIRROR must be an absolute HTTPS URL or a loopback HTTP URL'
 export const NATIVE_POSTGRES_MAJOR = DEFAULT_PG_VERSION.split('.')[0]!
 
 /** Options for {@link createNativeEngine}. */
@@ -30,6 +32,8 @@ export interface NativeEngineOptions {
   cacheDir?: string
   /** sink for progress lines (download, install); no-op when omitted */
   log?: (msg: string) => void
+  /** Optional HTTPS or loopback HTTP prefix for proxying the PostgreSQL release download. */
+  downloadMirror?: string
 }
 
 export function isNativeEngineSupported(): boolean {
@@ -77,7 +81,7 @@ const PINNED_SHA256: Record<string, string> = {
 }
 
 /** Verify `tarball` against a pinned digest, else the release's published .sha256. */
-async function verifyTarball(tarball: string, key: string, url: string): Promise<void> {
+async function verifyTarball(tarball: string, key: string, upstreamUrl: string, downloadMirror?: string): Promise<void> {
   const actual = createHash('sha256').update(readFileSync(tarball)).digest('hex')
   const pinned = PINNED_SHA256[key]
   if (pinned) {
@@ -87,7 +91,8 @@ async function verifyTarball(tarball: string, key: string, url: string): Promise
     return
   }
   // No local pin - verify against the checksum the release publishes.
-  const res = await fetchRelease(`${url}.sha256`)
+  const checksumUrl = resolvePostgresDownloadUrl(`${upstreamUrl}.sha256`, downloadMirror)
+  const res = await fetchRelease(checksumUrl)
   if (!res.ok) throw new Error(`could not fetch checksum for ${key}: HTTP ${res.status}`)
   const expected = (await res.text()).trim().split(/\s+/)[0].toLowerCase()
   if (!/^[0-9a-f]{64}$/.test(expected)) throw new Error(`malformed published checksum for ${key}`)
@@ -97,7 +102,12 @@ async function verifyTarball(tarball: string, key: string, url: string): Promise
 }
 
 /** Download + unpack Postgres binaries if not already cached (concurrency-safe). Returns the install dir. */
-export async function ensurePostgres(version = DEFAULT_PG_VERSION, cacheDir?: string, log?: (m: string) => void): Promise<string> {
+export async function ensurePostgres(
+  version = DEFAULT_PG_VERSION,
+  cacheDir?: string,
+  log?: (m: string) => void,
+  downloadMirror?: string,
+): Promise<string> {
   const t = target()
   const root = cacheDir ?? join(homedir(), '.cache', 'supacloud-lite')
   const dir = join(root, `postgresql-${version}-${t}`)
@@ -107,7 +117,8 @@ export async function ensurePostgres(version = DEFAULT_PG_VERSION, cacheDir?: st
   // a cold cache. Each downloads + extracts to unique temp paths, then atomically
   // renames into place - so no worker ever sees a half-written tarball or a
   // partially-extracted install dir.
-  const url = `https://github.com/theseus-rs/postgresql-binaries/releases/download/${version}/postgresql-${version}-${t}.tar.gz`
+  const upstreamUrl = `https://github.com/theseus-rs/postgresql-binaries/releases/download/${version}/postgresql-${version}-${t}.tar.gz`
+  const url = resolvePostgresDownloadUrl(upstreamUrl, downloadMirror)
   mkdirSync(root, { recursive: true })
   const uniq = `${process.pid}-${randomBytes(6).toString('hex')}`
   const tarball = join(root, `pg-${version}-${uniq}.tar.gz`)
@@ -120,7 +131,7 @@ export async function ensurePostgres(version = DEFAULT_PG_VERSION, cacheDir?: st
     if (!res.ok) throw new Error(`failed to download ${url}: HTTP ${res.status}`)
     await writeFile(tarball, Buffer.from(await res.arrayBuffer()))
     // Integrity-check the tarball before executing anything it contains.
-    await verifyTarball(tarball, `postgresql-${version}-${t}`, url)
+    await verifyTarball(tarball, `postgresql-${version}-${t}`, upstreamUrl, downloadMirror)
     mkdirSync(tmpDir, { recursive: true })
     await extractTar({ cwd: tmpDir, file: tarball, gzip: true, preserveOwner: false, strict: true, strip: 1 })
     if (!isCompleteInstall(tmpDir)) throw new Error('postgres archive extracted incompletely')
@@ -140,6 +151,37 @@ export async function ensurePostgres(version = DEFAULT_PG_VERSION, cacheDir?: st
     rmSync(tarball, { force: true })
     rmSync(tmpDir, { recursive: true, force: true })
   }
+}
+
+/**
+ * Prefix a trusted GitHub release URL with an operator-selected mirror. The
+ * archive is still checked against the pinned or published SHA-256 before use.
+ */
+export function resolvePostgresDownloadUrl(upstreamUrl: string, downloadMirror?: string): string {
+  const mirror = postgresDownloadMirror(downloadMirror)
+  return mirror ? `${mirror.toString().replace(/\/+$/, '')}/${upstreamUrl}` : upstreamUrl
+}
+
+function postgresDownloadMirror(downloadMirror?: string): URL | undefined {
+  const configuredMirror = downloadMirror ?? process.env.SUPACLOUD_LITE_POSTGRES_MIRROR
+  const mirrorText = configuredMirror?.trim()
+  if (!mirrorText) return undefined
+  let mirror: URL
+  try {
+    mirror = new URL(mirrorText)
+  } catch {
+    throw new Error(POSTGRES_MIRROR_URL_ERROR)
+  }
+  const loopbackHttp = mirror.protocol === 'http:' &&
+    (mirror.hostname === '127.0.0.1' || mirror.hostname === 'localhost' || mirror.hostname === '[::1]')
+  if (mirror.protocol !== 'https:' && !loopbackHttp) throw new Error(POSTGRES_MIRROR_URL_ERROR)
+  if (mirror.username || mirror.password) {
+    throw new Error('SUPACLOUD_LITE_POSTGRES_MIRROR must not contain credentials')
+  }
+  if (mirrorText.includes('?') || mirrorText.includes('#')) {
+    throw new Error('SUPACLOUD_LITE_POSTGRES_MIRROR must not contain a query or fragment')
+  }
+  return mirror
 }
 
 async function fetchRelease(url: string): Promise<Response> {
@@ -179,7 +221,7 @@ export async function createNativeEngine(opts: NativeEngineOptions): Promise<DbE
   let postgres: ChildProcess | undefined
   let removeExitHandler: (() => void) | undefined
   try {
-    const installDir = await ensurePostgres(opts.version, opts.cacheDir, opts.log)
+    const installDir = await ensurePostgres(opts.version, opts.cacheDir, opts.log, opts.downloadMirror)
     const bin = (name: string) => join(installDir, 'bin', name)
 
     if (!existsSync(join(opts.dataDir, 'PG_VERSION'))) {
