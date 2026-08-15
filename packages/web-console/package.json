@@ -45,7 +45,7 @@
     "@svadmin/sveltekit": "^0.9.8",
     "@svadmin/ui": "0.41.1",
     "@tanstack/svelte-query": "^6.1.38",
-    "highlight.js": "^11.11.1",
+    "highlight.js": "^11.11.2",
     "isomorphic-dompurify": "^3.22.0",
     "lucide-svelte": "^1.0.1",
     "marked": "^18.0.9",
