@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.2](https://github.com/zuohuadong/supacloud/compare/supacloud-lite-v0.8.1...supacloud-lite-v0.8.2) (2026-08-15)
+
+
+### Bug Fixes
+
+* **lite:** support mirrored native postgres downloads ([#916](https://github.com/zuohuadong/supacloud/issues/916)) ([48224b7](https://github.com/zuohuadong/supacloud/commit/48224b7b067fcc56b3be8059301525cebeefb98d))
+
 ## [0.8.1](https://github.com/zuohuadong/supacloud/compare/supacloud-lite-v0.8.0...supacloud-lite-v0.8.1) (2026-08-15)
 
 
