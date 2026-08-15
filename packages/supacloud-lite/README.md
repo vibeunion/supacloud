@@ -135,8 +135,15 @@ supacloud-lite version
 - `SUPACLOUD_LITE_STORAGE_DIR`
 - `SUPACLOUD_LITE_STORAGE_BACKEND`：`fs`（默认）、`memory` 或 `s3`
 - `SUPACLOUD_LITE_S3_PREFIX`：S3 对象 key 前缀，可被 `--s3-prefix` 覆盖
+- `SUPACLOUD_LITE_POSTGRES_MIRROR`：native 引擎下载 PostgreSQL 发布包时使用的 HTTPS 镜像前缀，例如 `https://ghproxy.net/`
 - `SUPACLOUD_LITE_JWT_SECRET`
 - `SUPACLOUD_LITE_VAULT_KEY`
+
+native 引擎首次运行会下载约 12 MB 的 Theseus PostgreSQL 发布包并缓存在 `~/.cache/supacloud-lite`。网络无法直连 GitHub 时，可设置镜像前缀；Lite 会把完整上游 URL 追加到该前缀，并在解压执行前继续校验固定或上游发布的 SHA-256。镜像不能包含 URL 凭据、query 或 fragment；除 loopback 测试地址外必须使用 HTTPS。
+
+```bash
+SUPACLOUD_LITE_POSTGRES_MIRROR=https://ghproxy.net/ supacloud-lite migrate --engine native
+```
 
 使用远端 S3 时，启动前设置 `SUPACLOUD_LITE_STORAGE_BACKEND=s3`，并按 Bun S3 约定提供 `S3_BUCKET`、`S3_ACCESS_KEY_ID`、`S3_SECRET_ACCESS_KEY`、`S3_ENDPOINT`、`S3_REGION` 等变量；也支持对应的 `AWS_*` 变量。CLI 不接受密钥参数，避免凭据出现在进程列表中。
 
@@ -469,8 +476,15 @@ Environment variables:
 - `SUPACLOUD_LITE_STORAGE_DIR`
 - `SUPACLOUD_LITE_STORAGE_BACKEND`: `fs` (default), `memory`, or `s3`
 - `SUPACLOUD_LITE_S3_PREFIX`: S3 object key prefix, can be overridden by `--s3-prefix`
+- `SUPACLOUD_LITE_POSTGRES_MIRROR`: HTTPS prefix used to proxy native-engine PostgreSQL release downloads, for example `https://ghproxy.net/`
 - `SUPACLOUD_LITE_JWT_SECRET`
 - `SUPACLOUD_LITE_VAULT_KEY`
+
+On its first run, the native engine downloads an approximately 12 MB Theseus PostgreSQL release into `~/.cache/supacloud-lite`. If GitHub is not directly reachable, set a mirror prefix; Lite appends the complete upstream URL and still verifies the pinned or published SHA-256 before extracting or executing the archive. The mirror must not contain URL credentials, a query, or a fragment, and must use HTTPS except for loopback test endpoints.
+
+```bash
+SUPACLOUD_LITE_POSTGRES_MIRROR=https://ghproxy.net/ supacloud-lite migrate --engine native
+```
 
 When using remote S3, set `SUPACLOUD_LITE_STORAGE_BACKEND=s3` before starting, and provide variables such as `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_ENDPOINT`, and `S3_REGION` according to Bun S3 conventions; the corresponding `AWS_*` variables are also supported. The CLI does not accept secret parameters to avoid credentials appearing in the process list.
 
