@@ -243,6 +243,34 @@ jobs:
           bun audit --audit-level high
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+  supacloud-lite-standalone-native:
+    name: SupaCloud Lite Standalone (Native PostgreSQL)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Install dependencies
+        working-directory: packages/supacloud-lite
+        run: bun install --frozen-lockfile
+
+      - name: Build Linux x64 standalone binary
+        working-directory: packages/supacloud-lite
+        run: bun run build:standalone:linux-x64
+
+      - name: Verify standalone native contracts
+        working-directory: packages/supacloud-lite
+        env:
+          SUPACLOUD_LITE_STANDALONE_BINARY: dist/standalone/supacloud-lite-linux-x64
+        run: bun run test:standalone:native
+
   docker-and-scripts-checks:
     name: Docker & Scripts Checks
     runs-on: ubuntu-latest
