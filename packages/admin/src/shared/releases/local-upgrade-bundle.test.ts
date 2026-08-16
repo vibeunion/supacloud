@@ -69,7 +69,7 @@ function withFakeGithubCli(script: string, run: () => Promise<void>, mode = 0o70
 
 describe("local upgrade download trust boundary", () => {
     test("accepts only the exact official GitHub release asset path", () => {
-        const official = `https://github.com/zuohuadong/supacloud/releases/download/${RELEASE_TAG}/SUPACLOUD-RELEASE.json`;
+        const official = `https://github.com/vibeunion/supacloud/releases/download/${RELEASE_TAG}/SUPACLOUD-RELEASE.json`;
 
         expect(parseGithubReleaseMetadata(releaseMetadata(official), RELEASE_TAG).assets[0]?.name)
             .toBe("SUPACLOUD-RELEASE.json");

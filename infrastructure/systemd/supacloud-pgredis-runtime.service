@@ -1,6 +1,6 @@
 [Unit]
 Description=SupaCloud PostgreSQL Cache Data Plane
-Documentation=https://github.com/zuohuadong/supacloud
+Documentation=https://github.com/vibeunion/supacloud
 After=network-online.target patroni.service
 Wants=network-online.target
 Requires=patroni.service

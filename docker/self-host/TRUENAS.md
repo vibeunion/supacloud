@@ -17,7 +17,7 @@ Do **not** use the TrueNAS catalog PostgreSQL app if your goal is to reuse this 
 Use a released tag instead of `latest`.
 
 ```text
-ghcr.io/zuohuadong/supacloud/postgres:0.23.0
+ghcr.io/vibeunion/supacloud/postgres:0.23.0
 ```
 
 The package is public, so no GHCR credentials are required for normal pulls.
@@ -27,7 +27,7 @@ The package is public, so no GHCR credentials are required for normal pulls.
 Repository:
 
 ```text
-ghcr.io/zuohuadong/supacloud/postgres
+ghcr.io/vibeunion/supacloud/postgres
 ```
 
 Tag:
