@@ -164,13 +164,13 @@ npx @supacloud/admin project create --name my-app
 **一键安装（推荐）**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/zuohuadong/supacloud/main/setup.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/vibeunion/supacloud/main/setup.sh | sudo bash
 ```
 
 Root 引导脚本始终从官方仓库获取。Release/API 下载默认先直连 GitHub，仅在明确配置时回退到可信代理：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/zuohuadong/supacloud/main/setup.sh \
+curl -fsSL https://raw.githubusercontent.com/vibeunion/supacloud/main/setup.sh \
   | sudo env SUPACLOUD_GITHUB_PROXY=https://your-trusted-proxy.example bash
 ```
 
@@ -180,7 +180,7 @@ curl -fsSL https://raw.githubusercontent.com/zuohuadong/supacloud/main/setup.sh 
 
 ```bash
 # 1. 从官方仓库下载代码
-git clone https://github.com/zuohuadong/supacloud.git
+git clone https://github.com/vibeunion/supacloud.git
 cd supacloud
 
 # 2. 构建 Management API、Edge Runtime、pgredis-runtime、Caddy 与 Web Console

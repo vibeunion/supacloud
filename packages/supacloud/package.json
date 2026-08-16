@@ -27,7 +27,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/zuohuadong/supacloud.git",
+    "url": "https://github.com/vibeunion/supacloud.git",
     "directory": "packages/supacloud"
   },
   "dependencies": {

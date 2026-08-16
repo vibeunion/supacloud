@@ -164,13 +164,13 @@ Usa `supacloud-admin` para instalación, actualizaciones, operaciones de runtime
 **Instalación con un clic (Recomendado)**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/zuohuadong/supacloud/main/setup.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/vibeunion/supacloud/main/setup.sh | sudo bash
 ```
 
 El propio bootstrap raíz siempre se obtiene del repositorio oficial. Las descargas de Release/API intentan GitHub directamente primero y usan `SUPACLOUD_GITHUB_PROXY` solo como alternativa explícita:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/zuohuadong/supacloud/main/setup.sh \
+curl -fsSL https://raw.githubusercontent.com/vibeunion/supacloud/main/setup.sh \
   | sudo env SUPACLOUD_GITHUB_PROXY=https://your-trusted-proxy.example bash
 ```
 
@@ -180,7 +180,7 @@ Los hosts de producción deben usar el flujo `setup.sh` verificado de un clic mo
 
 ```bash
 # 1. Clonar repositorio
-git clone https://github.com/zuohuadong/supacloud.git
+git clone https://github.com/vibeunion/supacloud.git
 cd supacloud
 
 # 2. Construir Management API, Edge Runtime, pgredis-runtime, Caddy y Web Console

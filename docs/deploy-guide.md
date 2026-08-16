@@ -28,10 +28,10 @@ SupaCloud 部署系统提供配置驱动的自动化部署能力，支持：
 
 ```bash
 # 官方 root bootstrap
-curl -fsSL https://raw.githubusercontent.com/zuohuadong/supacloud/main/setup.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/vibeunion/supacloud/main/setup.sh | sudo bash
 
 # 仅为后续 GitHub Release/API 下载配置显式 fallback
-curl -fsSL https://raw.githubusercontent.com/zuohuadong/supacloud/main/setup.sh \
+curl -fsSL https://raw.githubusercontent.com/vibeunion/supacloud/main/setup.sh \
   | sudo env SUPACLOUD_GITHUB_PROXY=https://your-trusted-proxy.example bash
 ```
 

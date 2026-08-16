@@ -1,6 +1,6 @@
 [Unit]
 Description=SupaCloud PostgREST tenant watchdog
-Documentation=https://github.com/zuohuadong/supacloud
+Documentation=https://github.com/vibeunion/supacloud
 After=network-online.target supacloud.service
 Wants=network-online.target
 

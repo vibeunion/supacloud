@@ -1588,7 +1588,7 @@ describe("ssh admin tool", () => {
         expect(commands).toMatch(/\/etc\/supabase\/\.install-input-[0-9a-f-]+\.env/);
         expect(commands).not.toContain("supacloud_atomic_merge_env /opt/supacloud/config.env");
         const cloneCommand = ssh.commands.find(command => command.includes("BOOTSTRAP_OK")) ?? "";
-        expect(cloneCommand).toContain("https://github.com/zuohuadong/supacloud.git");
+        expect(cloneCommand).toContain("https://github.com/vibeunion/supacloud.git");
         expect(cloneCommand).not.toContain("ghproxy.net");
         expect(cloneCommand).toMatch(/\/opt\/\.supacloud-bootstrap-[0-9a-f-]+/);
         expect(cloneCommand).toContain("remote set-url origin");
@@ -1629,8 +1629,8 @@ describe("ssh admin tool", () => {
         });
 
         const cloneCommand = ssh.commands.find(command => command.includes("BOOTSTRAP_OK")) ?? "";
-        const directIndex = cloneCommand.indexOf("https://github.com/zuohuadong/supacloud.git");
-        const proxyIndex = cloneCommand.indexOf("https://proxy.example.com/https://github.com/zuohuadong/supacloud.git");
+        const directIndex = cloneCommand.indexOf("https://github.com/vibeunion/supacloud.git");
+        const proxyIndex = cloneCommand.indexOf("https://proxy.example.com/https://github.com/vibeunion/supacloud.git");
         expect(directIndex).toBeGreaterThanOrEqual(0);
         expect(proxyIndex).toBe(-1);
         expect(cloneCommand).toContain("remote set-url origin");

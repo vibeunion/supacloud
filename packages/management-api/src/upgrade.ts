@@ -70,7 +70,7 @@ import {
     type PostgrestLauncherPreflight,
 } from "./embedded-postgrest-launcher";
 
-const RELEASES_API = "https://api.github.com/repos/zuohuadong/supacloud/releases";
+const RELEASES_API = "https://api.github.com/repos/vibeunion/supacloud/releases";
 const BIN_TARGET = "/usr/local/bin/supacloud";
 const MANAGEMENT_SERVICE_UNIT = "supacloud.service";
 const EDGE_RUNTIME_SERVICE_UNIT = "supacloud-edge-runtime.service";

@@ -1,6 +1,6 @@
 [Unit]
 Description=Run SupaCloud PostgREST tenant watchdog every minute
-Documentation=https://github.com/zuohuadong/supacloud
+Documentation=https://github.com/vibeunion/supacloud
 
 [Timer]
 OnBootSec=2min
