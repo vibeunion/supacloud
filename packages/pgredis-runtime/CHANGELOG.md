@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/vibeunion/supacloud/compare/pgredis-runtime-v0.3.1...pgredis-runtime-v0.3.2) (2026-08-16)
+
+
+### Bug Fixes
+
+* **pgredis-runtime:** update PostgresX dependencies ([#935](https://github.com/vibeunion/supacloud/issues/935)) ([bb1f286](https://github.com/vibeunion/supacloud/commit/bb1f286ee1277c73741d2a8b53b61f1b24cfd193))
+
 ## [0.3.1](https://github.com/zuohuadong/supacloud/compare/pgredis-runtime-v0.3.0...pgredis-runtime-v0.3.1) (2026-07-30)
 
 
