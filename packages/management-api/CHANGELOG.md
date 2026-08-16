@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.60.4](https://github.com/zuohuadong/supacloud/compare/management-api-v0.60.3...management-api-v0.60.4) (2026-08-16)
+
+
+### Bug Fixes
+
+* **upgrade:** enforce no-new-privileges for legacy Management units ([#927](https://github.com/zuohuadong/supacloud/issues/927)) ([4aab90d](https://github.com/zuohuadong/supacloud/commit/4aab90d2463f631d40dd7c1fea2e97bcbcdbc0f8))
+
 ## [0.60.3](https://github.com/zuohuadong/supacloud/compare/management-api-v0.60.2...management-api-v0.60.3) (2026-08-15)
 
 
