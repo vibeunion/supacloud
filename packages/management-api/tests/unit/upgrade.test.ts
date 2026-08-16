@@ -1783,12 +1783,13 @@ describe("upgrade edge-runtime capacity defaults", () => {
       "utf8",
     );
     const dropIn = buildEmbeddedEdgePrivilegeDropIn();
+    expect(managementUnit).toContain("NoNewPrivileges=true");
     expect(managementUnit).toContain("CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_SETGID CAP_SETUID");
     expect(dropIn).toContain("CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_SETGID CAP_SETUID");
     expect(dropIn).not.toContain("@keyring");
   });
 
-  test("external upgrades retain Management privilege capabilities after removing the embedded drop-in", async () => {
+  test("external upgrades retain Management privilege capabilities and enforce no-new-privileges", async () => {
     const dir = mkdtempSync(join(tmpdir(), "supacloud-upgrade-privilege-"));
     const managementDropIn = join(dir, "40-management-privilege.conf");
     const embeddedDropIn = join(dir, "50-embedded-edge-privilege.conf");
@@ -1805,6 +1806,7 @@ describe("upgrade edge-runtime capacity defaults", () => {
       });
 
       expect(readFileSync(managementDropIn, "utf8")).toBe(buildManagementPrivilegeDropIn());
+      expect(readFileSync(managementDropIn, "utf8")).toContain("NoNewPrivileges=true");
       expect(statSync(managementDropIn).mode & 0o777).toBe(0o644);
       expect(existsSync(embeddedDropIn)).toBe(false);
       expect(reloadCount).toBe(1);

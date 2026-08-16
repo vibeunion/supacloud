@@ -1003,6 +1003,7 @@ OOMPolicy=stop
 export function buildManagementPrivilegeDropIn() {
     return `[Service]
 # Backup and PITR commands use setpriv from the root Management API process.
+NoNewPrivileges=true
 CapabilityBoundingSet=
 CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_SETGID CAP_SETUID
 `;
