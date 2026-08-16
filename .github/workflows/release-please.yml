@@ -345,6 +345,12 @@ jobs:
           SUPACLOUD_LITE_STANDALONE_BINARY: dist/standalone/supacloud-lite-linux-x64
         run: bun run test:standalone
 
+      - name: Verify Linux x64 standalone native contracts
+        working-directory: packages/supacloud-lite
+        env:
+          SUPACLOUD_LITE_STANDALONE_BINARY: dist/standalone/supacloud-lite-linux-x64
+        run: bun run test:standalone:native
+
       - name: Generate SHA256SUMS
         working-directory: packages/supacloud-lite/dist/standalone
         run: |

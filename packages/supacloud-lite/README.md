@@ -296,9 +296,9 @@ const { data: messages } = await queues.rpc('read', {
 })
 ```
 
-Lite 的 `pgmq` 模拟层还提供 `set_vt`，支持直接 SQL 调整可见性超时。消息按 PGMQ 语义至少投递一次；`pop` 会立即删除消息，`archive` 是确认路径。队列创建、指标、purge、设置和管理 API 不属于 Lite 的公开 RPC façade，仍需由项目 SQL 或完整 SupaCloud 控制面处理。
+Lite 的 `pgmq` 模拟层还提供 `set_vt`，支持直接 SQL 调整可见性超时。消息按 PGMQ 语义至少投递一次；`pop` 会立即删除消息，`archive` 是确认路径。`sleep_seconds` 和 visibility timeout 只控制消息何时可再次领取，不是消息 TTL；Lite/PGMQ 不提供逐消息到期删除语义。队列创建、指标、purge、设置和管理 API 不属于 Lite 的公开 RPC façade，仍需由项目 SQL 或完整 SupaCloud 控制面处理。
 队列名遵循标准版的 1-128 位小写字母、数字、下划线和短横线规则，并且必须以字母或数字开头；Lite 会安全映射超出 PostgreSQL 63-byte 标识符上限的名称，避免截断后串队。默认 Data API 暴露 `public` 和 `pgmq_public`；如果显式设置 `dbSchemas`，Lite 会严格使用该列表，需要队列 RPC 时应把 `pgmq_public` 明确加入。
-Durable workflow 的 run、step、event 和内部队列也保存在同一项目数据库中，可跨进程重启恢复；内部 workflow 队列不会通过 `pgmq_public` 暴露给 Data API 角色。
+Durable workflow 的 run、step、event 和内部队列也保存在同一项目数据库中，可跨进程重启恢复；内部 workflow 队列不会通过 `pgmq_public` 暴露给 Data API 角色。Workflow 提供重试、取消和 dead-letter 失败原语，但不会自动执行 Saga 补偿；补偿步骤及其幂等性仍由应用工作流显式定义。
 
 Edge Function 内可使用 `globalThis.SupaCloud.pgredis`：
 
@@ -308,7 +308,7 @@ await cache.set('welcome:user:42', { rendered: true }, 60_000)
 const value = await cache.get<{ rendered: boolean }>('welcome:user:42')
 ```
 
-缓存实现使用项目自己的 PGlite 表，支持 `get`、`set`、`delete`、`ttl`、原子 `getset` 和原子 `getdel`。默认边界与标准版一致：key 最长 512 个字符、JSON 值最大 1,048,576 bytes、TTL 最大 31,536,000,000ms。有 TTL 的值在读取时会惰性清理，Lite 的 retention sweeper 还会周期性删除过期行；文件数据库会跨重启保留缓存，`--memory` 数据库则随进程退出丢失。绑定按函数请求和项目隔离，函数返回后启动的 detached Promise 不能继续访问它；Lite 不提供跨项目共享、Redis 协议、队列或限流能力。
+缓存实现使用项目自己的 PGlite 表，支持 `get`、`set`、`delete`、`ttl`、原子 `getset` 和原子 `getdel`。这里的 TTL 只作用于 pgredis 缓存键，不会改变消息队列的生命周期。默认边界与标准版一致：key 最长 512 个字符、JSON 值最大 1,048,576 bytes、TTL 最大 31,536,000,000ms。有 TTL 的值在读取时会惰性清理，Lite 的 retention sweeper 还会周期性删除过期行；文件数据库会跨重启保留缓存，`--memory` 数据库则随进程退出丢失。绑定按函数请求和项目隔离，函数返回后启动的 detached Promise 不能继续访问它；Lite 不提供跨项目共享、Redis 协议、队列或限流能力。
 Lite 的缓存调用是进程内数据库操作，不具备标准版跨进程 HTTP binding 的超时和请求中止传播；不要在同一 JavaScript 进程中混合加载 Lite 与标准 Edge Runtime，两者都拥有全局 `SupaCloud` binding，Lite 检测到已有其他实现时会拒绝启动。
 
 ### 多项目
@@ -638,9 +638,9 @@ const { data: messages } = await queues.rpc('read', {
 })
 ```
 
-Lite's `pgmq` emulation layer also provides `set_vt`, allowing direct SQL adjustment of visibility timeouts. Messages are delivered at least once according to PGMQ semantics; `pop` deletes the message immediately, and `archive` is the acknowledgment path. Queue creation, metrics, purge, settings, and management APIs are not part of Lite's public RPC façade and must still be handled by project SQL or the full SupaCloud control plane.
+Lite's `pgmq` emulation layer also provides `set_vt`, allowing direct SQL adjustment of visibility timeouts. Messages are delivered at least once according to PGMQ semantics; `pop` deletes the message immediately, and `archive` is the acknowledgment path. `sleep_seconds` and visibility timeouts only control when a message can be claimed again; they are not message TTLs, and Lite/PGMQ does not provide per-message expiry deletion semantics. Queue creation, metrics, purge, settings, and management APIs are not part of Lite's public RPC façade and must still be handled by project SQL or the full SupaCloud control plane.
 Queue names follow the standard 1-128 character lowercase letter, digit, underscore, and hyphen rule, and must start with a letter or digit; Lite safely maps names that exceed PostgreSQL's 63-byte identifier limit to avoid cross-queue collisions after truncation. The default Data API exposes `public` and `pgmq_public`; if `dbSchemas` is set explicitly, Lite uses that list strictly, and `pgmq_public` should be explicitly included when queue RPCs are needed.
-Durable workflow runs, steps, events, and the internal queue are stored in the same project database and survive process restarts. Data API roles cannot access the internal workflow queue through `pgmq_public`.
+Durable workflow runs, steps, events, and the internal queue are stored in the same project database and survive process restarts. Data API roles cannot access the internal workflow queue through `pgmq_public`. Workflow retry, cancellation, and dead-letter operations are failure primitives, not automatic Saga compensation; applications must define compensation steps and their idempotency explicitly.
 
 Within an Edge Function, you can use `globalThis.SupaCloud.pgredis`:
 
@@ -650,7 +650,7 @@ await cache.set('welcome:user:42', { rendered: true }, 60_000)
 const value = await cache.get<{ rendered: boolean }>('welcome:user:42')
 ```
 
-The cache implementation uses the project's own PGlite tables and supports `get`, `set`, `delete`, `ttl`, atomic `getset`, and atomic `getdel`. The default boundaries are consistent with the standard version: keys up to 512 characters, JSON values up to 1,048,576 bytes, and TTLs up to 31,536,000,000ms. Values with a TTL are lazily cleaned up on read, and Lite's retention sweeper periodically deletes expired rows; the file database retains the cache across restarts, while the `--memory` database loses it when the process exits. The binding is isolated by function request and by project; detached Promises started after the function returns cannot continue to access it; Lite does not provide cross-project sharing, a Redis protocol, queues, or rate-limiting capabilities.
+The cache implementation uses the project's own PGlite tables and supports `get`, `set`, `delete`, `ttl`, atomic `getset`, and atomic `getdel`. This TTL applies only to pgredis cache keys and does not change queue message lifecycles. The default boundaries are consistent with the standard version: keys up to 512 characters, JSON values up to 1,048,576 bytes, and TTLs up to 31,536,000,000ms. Values with a TTL are lazily cleaned up on read, and Lite's retention sweeper periodically deletes expired rows; the file database retains the cache across restarts, while the `--memory` database loses it when the process exits. The binding is isolated by function request and by project; detached Promises started after the function returns cannot continue to access it; Lite does not provide cross-project sharing, a Redis protocol, queues, or rate-limiting capabilities.
 Lite's cache calls are in-process database operations and do not have the timeout and request-abort propagation of the standard version's cross-process HTTP binding; do not mix loading Lite and the standard Edge Runtime in the same JavaScript process, as both own the global `SupaCloud` binding, and Lite will refuse to start if it detects that another implementation is already present.
 
 ### Multiple Projects
