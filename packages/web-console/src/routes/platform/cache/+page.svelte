@@ -117,7 +117,7 @@
         <p class="mt-1 text-xs opacity-80">{$t("Cache.not_configured_desc")}</p>
         <p class="mt-2 text-xs opacity-80">{$t("Cache.not_configured_guidance")}</p>
         <a
-          href="https://github.com/zuohuadong/supacloud/blob/main/docs/pgredis-runtime.md"
+          href="https://github.com/vibeunion/supacloud/blob/main/docs/pgredis-runtime.md"
           target="_blank"
           rel="noreferrer"
           class="mt-3 inline-block font-medium underline underline-offset-2 hover:no-underline"

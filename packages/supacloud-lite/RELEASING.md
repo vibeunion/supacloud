@@ -6,7 +6,7 @@
 
 1. 在合并 Release Please 创建的 `supacloud-lite-v0.1.0` release 前，在 GitHub `npm-publish` environment 中临时配置 `NPM_BOOTSTRAP_TOKEN`；token 必须要求 2FA 并限制到该包。
 2. 合并 release，让同一次 `Release Please` workflow 运行使用该 token 完成首次发布；如果发布 job 失败，使用该次 workflow 的 **Re-run failed jobs**，不要等待下一次 release。
-3. 在 npm 包设置中配置 Trusted Publisher：user `zuohuadong`、repository `supacloud`、workflow `release-please.yml`、environment `npm-publish`，并将 allowed action 限制为 `npm publish`。
+3. 在 npm 包设置中配置 Trusted Publisher：organization `vibeunion`、repository `supacloud`、workflow `release-please.yml`、environment `npm-publish`，并将 allowed action 限制为 `npm publish`。
 4. 删除 `NPM_BOOTSTRAP_TOKEN`。后续发布由 npm OIDC Trusted Publishing 完成。
 
 ## Verification

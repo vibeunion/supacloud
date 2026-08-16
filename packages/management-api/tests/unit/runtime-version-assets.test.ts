@@ -124,7 +124,7 @@ describe("runtime companion version assets", () => {
     expect(setup).toContain('SUPACLOUD_INSTALL_DIR:-/opt/supacloud');
     expect(setup).toContain("status --porcelain --untracked-files=no");
     expect(setup).toContain("remote get-url origin");
-    expect(setup).toContain('official_origin="https://github.com/zuohuadong/supacloud.git"');
+    expect(setup).toContain('official_origin="https://github.com/vibeunion/supacloud.git"');
     expect(setup).not.toContain("SUPACLOUD_ALLOWED_ORIGIN");
     expect(setup).not.toContain("SUPACLOUD_REPOSITORY_URL");
     expect(setup).toContain("SUPACLOUD_SETUP_BRANCH");
@@ -567,7 +567,7 @@ describe("runtime companion version assets", () => {
     const fakeBin = join(dir, "bin");
     const nonGit = join(dir, "not-git");
     const missingRemote = join(dir, "missing.git");
-    const officialOrigin = "https://github.com/zuohuadong/supacloud.git";
+    const officialOrigin = "https://github.com/vibeunion/supacloud.git";
     const gitBinary = spawnSync("which", ["git"], { encoding: "utf8" }).stdout.trim();
     const git = (cwd: string, args: string[]) => spawnSync("git", args, { cwd, encoding: "utf8" });
     const invoke = (installDir: string, reportedOrigin = officialOrigin) => spawnSync("bash", ["-c", [

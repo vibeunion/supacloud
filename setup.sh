@@ -3,7 +3,7 @@
 # SupaCloud Simple Installation Entry Script
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/zuohuadong/supacloud/main/setup.sh | sudo bash
+#   curl -fsSL https://raw.githubusercontent.com/vibeunion/supacloud/main/setup.sh | sudo bash
 # ============================================================
 
 set -e
@@ -142,7 +142,7 @@ verify_setup_checkout() {
 # fall through to sourcing stale installer helpers with root privileges.
 clone_repo() {
     INSTALL_DIR="${SUPACLOUD_INSTALL_DIR:-/opt/supacloud}"
-    local official_origin="https://github.com/zuohuadong/supacloud.git"
+    local official_origin="https://github.com/vibeunion/supacloud.git"
     local expected_branch="${SUPACLOUD_SETUP_BRANCH:-main}"
 
     if [[ -e "$INSTALL_DIR" ]]; then

@@ -250,7 +250,7 @@ describe("offline upgrade bundle", () => {
     const trustedRootPaths = new Set<string>();
     for (const call of calls) {
       expect(call).toContain("--bundle");
-      expect(call).toContain("--repo zuohuadong/supacloud");
+      expect(call).toContain("--repo vibeunion/supacloud");
       expect(call).toContain("--source-ref refs/heads/main");
       expect(call).toContain(`--source-digest ${"a".repeat(40)}`);
       expect(call).toContain("--deny-self-hosted-runners");
