@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.34.0](https://github.com/zuohuadong/supacloud/compare/web-console-v0.33.0...web-console-v0.34.0) (2026-08-16)
+
+
+### Features
+
+* **web-console:** upgrade svadmin UI integration ([#930](https://github.com/zuohuadong/supacloud/issues/930)) ([a8a110b](https://github.com/zuohuadong/supacloud/commit/a8a110be08b022212132274d171234dcdea4e7b4))
+
 ## [0.33.0](https://github.com/zuohuadong/supacloud/compare/web-console-v0.32.1...web-console-v0.33.0) (2026-08-12)
 
 
