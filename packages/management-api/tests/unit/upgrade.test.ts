@@ -706,15 +706,15 @@ describe("upgrade release selection", () => {
     try {
       await expect(verifyArtifactAttestation({ filePath: fixture.artifact, forceYes: true })).resolves.toBeUndefined();
       const digest = createHash("sha256").update(readFileSync(fixture.artifact)).digest("hex");
-      const apiUrl = `https://api.github.com/repos/zuohuadong/supacloud/attestations/sha256:${digest}`;
+      const apiUrl = `https://api.github.com/repos/vibeunion/supacloud/attestations/sha256:${digest}`;
       expect(requests).toEqual([apiUrl, `https://proxy.example.test/${apiUrl}`]);
       const ghArguments = readFileSync(process.env.GH_ARGUMENT_RECORD!, "utf8");
       expect(ghArguments).toContain("--bundle");
       expect(ghArguments).toContain("/bundle.jsonl");
       expect(ghArguments).toContain("--custom-trusted-root");
       expect(ghArguments).toContain("/trusted_root.jsonl");
-      expect(ghArguments).toContain("--repo zuohuadong/supacloud");
-      expect(ghArguments).toContain("--signer-workflow zuohuadong/supacloud/.github/workflows/release-please.yml");
+      expect(ghArguments).toContain("--repo vibeunion/supacloud");
+      expect(ghArguments).toContain("--signer-workflow vibeunion/supacloud/.github/workflows/release-please.yml");
       expect(ghArguments).toContain("--source-ref refs/heads/main");
       expect(ghArguments).toContain("--deny-self-hosted-runners");
       expect(readFileSync(process.env.GH_BUNDLE_RECORD!, "utf8")).toBe('{"mediaType":"sigstore"}\n');

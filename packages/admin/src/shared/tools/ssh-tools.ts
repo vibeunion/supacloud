@@ -1153,7 +1153,7 @@ Actions: ping, setup, install, upgrade, versions, diagnose, exec, troubleshoot, 
                     const CONFIG = "/etc/supabase/install.env";
                     const INPUT = `/etc/supabase/.install-input-${installId}.env`;
                     const BOOTSTRAP = `/opt/.supacloud-bootstrap-${installId}`;
-                    const REPO = "https://github.com/zuohuadong/supacloud.git";
+                    const REPO = "https://github.com/vibeunion/supacloud.git";
                     const configuredProxy = args.github_proxy ? assertSafeGithubProxy(args.github_proxy) : "direct";
                     const proxyDisabled = ["direct", "none"].includes(configuredProxy.toLowerCase());
                     const proxyPrefix = proxyDisabled ? "" : (configuredProxy.endsWith("/") ? configuredProxy : `${configuredProxy}/`);

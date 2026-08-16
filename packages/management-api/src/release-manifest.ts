@@ -1,7 +1,7 @@
 export const RELEASE_MANIFEST_NAME = "SUPACLOUD-RELEASE.json";
 export const RELEASE_ATTESTATION_NAME = "SUPACLOUD-RELEASE.attestation.jsonl";
 export const RELEASE_CHECKSUMS_NAME = "SHA256SUMS";
-export const RELEASE_REPOSITORY = "zuohuadong/supacloud";
+export const RELEASE_REPOSITORY = "vibeunion/supacloud";
 export const RELEASE_SOURCE_REF = "refs/heads/main";
 export const RELEASE_SIGNER_WORKFLOW = `${RELEASE_REPOSITORY}/.github/workflows/release-please.yml`;
 const MEBIBYTE = 1024 * 1024;
