@@ -32,7 +32,14 @@
     setTheme,
   } from "@svadmin/core";
   import { createSvelteKitRouterProvider } from "@svadmin/sveltekit";
-  import { ChatDialog, DevTools, Toast as SvadminToast } from "@svadmin/ui";
+  import {
+    Button,
+    ChatDialog,
+    DevTools,
+    Header,
+    PageSkeleton,
+    Toast as SvadminToast,
+  } from "@svadmin/ui";
   import { QueryClient, QueryClientProvider } from "@tanstack/svelte-query";
   import { Menu, Plug, X } from "lucide-svelte";
   import { dataProvider, chatProvider } from "$lib/admin/provider";
@@ -315,10 +322,9 @@
         {@render children()}
       </div>
     {:else if isCoreLoading}
-      <div class="flex-1 flex flex-col items-center justify-center space-y-4">
-        <div class="w-12 h-12 border-4 border-brand border-t-transparent rounded-full animate-spin"></div>
-        <p class="text-muted-foreground animate-pulse text-sm">{$t("Common.loading") || "Loading..."}</p>
-      </div>
+      <main class="flex-1 overflow-y-auto bg-muted/30 p-4 sm:p-6">
+        <PageSkeleton type="list" rows={5} />
+      </main>
     {:else if !isAuthenticated}
       <div class="flex-1 flex flex-col items-center justify-center space-y-4">
         <p class="text-muted-foreground text-sm">{$t("Login.redirecting", { default: "Redirecting to login..." })}</p>
@@ -368,7 +374,8 @@
       {/if}
       
       <main class="flex-1 overflow-y-auto relative bg-muted/30">
-        <div class="sticky top-0 z-40 flex h-16 shrink-0 items-center gap-x-4 border-b bg-background px-4 shadow-sm sm:gap-x-6 sm:px-6 lg:px-8">
+        <Header showBreadcrumbs={false} showSearch={false}>
+          {#snippet children()}
           <button
             bind:this={mobileNavTrigger}
             type="button"
@@ -380,29 +387,33 @@
           >
             <Menu class="h-5 w-5" />
           </button>
-          <div class="flex flex-1 gap-x-4 self-stretch lg:gap-x-6">
-            <div class="flex items-center gap-2 text-sm text-muted-foreground">
-              <span class="hover:text-foreground cursor-pointer transition-colors">{$t("Dashboard.org_default") || "Default Organization"}</span>
-              <span>/</span>
-              <span class="text-foreground font-medium">{isPlatformRoute ? ($t("Sidebar.platform_admin") || "Platform Admin") : (currentProject?.name || ($t("Project.home") || "Home"))}</span>
-            </div>
+          <div class="flex items-center gap-2 text-sm text-muted-foreground">
+            <span class="hover:text-foreground cursor-pointer transition-colors">{$t("Dashboard.org_default") || "Default Organization"}</span>
+            <span>/</span>
+            <span class="text-foreground font-medium">{isPlatformRoute ? ($t("Sidebar.platform_admin") || "Platform Admin") : (currentProject?.name || ($t("Project.home") || "Home"))}</span>
           </div>
+          {/snippet}
+          {#snippet rightActions()}
           {#if !isPlatformRoute && currentProject?.ref}
-            <a
+            <Button
               href={resolve("/project/[ref]/api", { ref: currentProject.ref })}
-              class="inline-flex h-9 items-center gap-2 rounded-lg border bg-background px-3 text-xs font-semibold text-foreground transition-colors hover:border-brand/40 hover:bg-brand/5 hover:text-brand"
+              variant="outline"
+              size="sm"
+              class="border-brand/20 text-brand hover:border-brand/40 hover:bg-brand/5"
             >
-              <Plug class="h-4 w-4" />
+              <Plug data-icon="inline-start" />
               <span class="hidden sm:inline">{$t("Navigation.connect_api")}</span>
-            </a>
+            </Button>
           {/if}
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             onclick={handleLogout}
-            class="px-3 py-1.5 text-xs font-medium rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
           >
             {$t("Auth.signOut") || "Logout"}
-          </button>
-        </div>
+          </Button>
+          {/snippet}
+        </Header>
 
         <div class="p-4 sm:p-6">
           {#key currentProject?.ref}

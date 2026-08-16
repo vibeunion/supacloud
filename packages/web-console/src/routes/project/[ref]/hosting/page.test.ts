@@ -20,7 +20,7 @@ describe("hosting deployment entrypoints", () => {
     expect(settingsSource).toContain('uploadBody.append("file", file)');
     expect(settingsSource).toContain("timeoutMs: FRONTEND_DEPLOY_TIMEOUT_MS");
     expect(settingsSource).not.toContain('headers: { "Content-Type": "application/zip" }');
-    expect(settingsSource).toContain('.resource(`v1/projects/${projectRef}/frontend/deployments`)');
+    expect(settingsSource).toContain('keys().data.list(`v1/projects/${projectRef}/frontend/deployments`)');
   });
 
   test("localizes the Pages header and preserves the Webhook endpoint", () => {

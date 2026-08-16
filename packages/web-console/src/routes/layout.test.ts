@@ -47,6 +47,8 @@ describe("root layout source guards", () => {
 
   test("keeps one SvAdmin toast host and never falls back an unknown project route", () => {
     expect(layoutSource.match(/<SvadminToast/g)).toHaveLength(1);
+    expect(layoutSource).toContain("<PageSkeleton");
+    expect(layoutSource).toContain("<Header");
     expect(layoutSource).not.toContain("<Toaster");
     expect(layoutSource).not.toContain("projects.find(p => p.ref === refFromUrl) || projects[0]");
     expect(layoutSource).toContain("projects.find((project) => project.ref === refFromUrl) ?? null");

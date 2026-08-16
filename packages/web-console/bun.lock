@@ -5,10 +5,10 @@
     "": {
       "name": "web-console",
       "dependencies": {
-        "@svadmin/core": "^0.35.0",
+        "@svadmin/core": "^0.36.0",
         "@svadmin/elysia": "^0.11.0",
-        "@svadmin/sveltekit": "^0.9.8",
-        "@svadmin/ui": "0.41.1",
+        "@svadmin/sveltekit": "^0.9.9",
+        "@svadmin/ui": "0.42.0",
         "@tanstack/svelte-query": "^6.1.38",
         "highlight.js": "^11.11.2",
         "isomorphic-dompurify": "^3.22.0",
@@ -217,13 +217,13 @@
 
     "@standard-schema/spec": ["@standard-schema/spec@1.1.0", "", {}, "sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w=="],
 
-    "@svadmin/core": ["@svadmin/core@0.35.0", "", { "peerDependencies": { "@tanstack/svelte-query": "^6.1.38", "svelte": "^5.56.8" }, "optionalPeers": ["@tanstack/svelte-query", "svelte"] }, "sha512-k/jcUBsH5eA/bLR+Sg96ok1KMZUkku2EdjPO9APB6IqtMlBZx/shH7rjBol7nZCVwLdvLfF6qXAYr1ZELqgKkQ=="],
+    "@svadmin/core": ["@svadmin/core@0.36.0", "", { "peerDependencies": { "@tanstack/svelte-query": "^6.1.38", "svelte": "^5.56.8" }, "optionalPeers": ["@tanstack/svelte-query", "svelte"] }, "sha512-BzvF8ctKd0Ns0uePT753IgnKJXYeS32Mkp+7tIdNdw0McK5K6qFY4M9gSAo9qfQIQWeO+jeIjWFF93D1p2is8g=="],
 
     "@svadmin/elysia": ["@svadmin/elysia@0.11.0", "", { "peerDependencies": { "@elysiajs/eden": ">=1.4.9", "@svadmin/core": "^0.35.0", "elysia": ">=1.4.29" }, "optionalPeers": ["@elysiajs/eden", "@svadmin/core", "elysia"] }, "sha512-uDXfvd2K/lzqdnYGwBqXnU+gMP0uENyOm5wLsqy11djiVuCFHwjlC+RPGDd2FjKuf1Hq6g88suZ1fAbJwD1TiQ=="],
 
-    "@svadmin/sveltekit": ["@svadmin/sveltekit@0.9.8", "", { "peerDependencies": { "@svadmin/core": ">=0.32.2 <0.36.0", "@sveltejs/kit": "^2.70.2", "svelte": "^5.56.8" }, "optionalPeers": ["@svadmin/core", "@sveltejs/kit", "svelte"] }, "sha512-V222o97KlIJPu9IQK1xV+js5C5j9JNk8GRea6A/zTslS7JLPCrMP6NjFaUVN/v/dYh/IDya8M0t23AvE8JiBRw=="],
+    "@svadmin/sveltekit": ["@svadmin/sveltekit@0.9.9", "", { "peerDependencies": { "@svadmin/core": ">=0.32.2 <0.37.0", "@sveltejs/kit": "^2.70.2", "svelte": "^5.56.8" }, "optionalPeers": ["@svadmin/core", "@sveltejs/kit", "svelte"] }, "sha512-9wiezNq6hwEm1U5Tu40z21/jhrOBWSyq8Ma68UHoysPr3Ib8Eo0bhDAEh1SFQMVUxmnmEkiGVhhAAGaPPyD2pw=="],
 
-    "@svadmin/ui": ["@svadmin/ui@0.41.1", "", { "dependencies": { "@floating-ui/dom": "^1.8.0", "@lucide/svelte": "^1.30.0", "@tanstack/svelte-store": "^0.12.1", "@tanstack/svelte-table": "9.1.2", "@tanstack/table-core": "9.1.2", "bits-ui": "^2.18.1", "clsx": "^2.1.1", "svelte-sonner": "^1.1.1", "tailwind-merge": "^3.6.0", "tailwind-variants": "^3.3.1" }, "peerDependencies": { "@svadmin/core": "^0.35.0", "@svadmin/editor": "*", "@tanstack/svelte-query": "^6.1.38", "highlight.js": "^11.11.1", "isomorphic-dompurify": "^3.22.0", "marked": "^18.0.9", "marked-highlight": "^2.2.4", "svelte": "^5.56.8" }, "optionalPeers": ["@svadmin/core", "@svadmin/editor", "@tanstack/svelte-query", "highlight.js", "isomorphic-dompurify", "marked", "marked-highlight", "svelte"] }, "sha512-lDU1n8pmQoX3XkCGlrV7KybEKX4OUajikTVAPQju42yNvrC2ypVPfqUw+CVbKrErMj6JnWRJ/Lyc8aFDsbDzNA=="],
+    "@svadmin/ui": ["@svadmin/ui@0.42.0", "", { "dependencies": { "@floating-ui/dom": "^1.8.0", "@lucide/svelte": "^1.30.0", "@tanstack/svelte-store": "^0.12.1", "@tanstack/svelte-table": "9.1.2", "@tanstack/table-core": "9.1.2", "bits-ui": "^2.18.1", "clsx": "^2.1.1", "svelte-sonner": "^1.1.1", "tailwind-merge": "^3.6.0", "tailwind-variants": "^3.3.1" }, "peerDependencies": { "@svadmin/core": "^0.36.0", "@svadmin/editor": "*", "@tanstack/svelte-query": "^6.1.38", "highlight.js": "^11.11.1", "isomorphic-dompurify": "^3.22.0", "marked": "^18.0.9", "marked-highlight": "^2.2.4", "svelte": "^5.56.8" }, "optionalPeers": ["@svadmin/core", "@svadmin/editor", "@tanstack/svelte-query", "highlight.js", "isomorphic-dompurify", "marked", "marked-highlight", "svelte"] }, "sha512-22uzo0tprGLGrbg4QXteWUdmA0oyjvSBp/+RI2EJBvZWhgZiNwD2tVgf5xwV822Z54yCqHDuqUOIsn7rZsO33A=="],
 
     "@sveltejs/acorn-typescript": ["@sveltejs/acorn-typescript@1.0.12", "", { "peerDependencies": { "acorn": "^8.9.0" } }, "sha512-J1jNYG23QWd67UfrQSFHtjhV37r9mVi0gdc12A3MWPldOjRK35Xk+um+qACPVjgw3AleiqoyEAhok8Wm3q46NA=="],
 
