@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.4](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.8.3...supacloud-lite-v0.8.4) (2026-08-16)
+
+
+### Miscellaneous Chores
+
+* migrate repository references to vibeunion org ([#933](https://github.com/vibeunion/supacloud/issues/933)) ([642e14f](https://github.com/vibeunion/supacloud/commit/642e14fa6284be97ab6e964d726f9ffcf7ebf4af))
+
 ## [0.8.3](https://github.com/zuohuadong/supacloud/compare/supacloud-lite-v0.8.2...supacloud-lite-v0.8.3) (2026-08-15)
 
 

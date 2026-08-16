@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.1](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.22.0...supacloud-js-v0.22.1) (2026-08-16)
+
+
+### Miscellaneous Chores
+
+* migrate repository references to vibeunion org ([#933](https://github.com/vibeunion/supacloud/issues/933)) ([642e14f](https://github.com/vibeunion/supacloud/commit/642e14fa6284be97ab6e964d726f9ffcf7ebf4af))
+
 ## [0.22.0](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.21.2...supacloud-js-v0.22.0) (2026-08-15)
 
 
