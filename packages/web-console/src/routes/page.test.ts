@@ -44,6 +44,8 @@ describe("SupaCloud root dashboard", () => {
   test("keeps every new-project entrypoint connected to the creation form", () => {
     expect(projectsPageSource).toContain('href="/projects/create"');
     expect(projectSwitcherSource).toContain('goto("/projects/create")');
+    expect(projectSwitcherSource).toContain("TenantSwitcher");
+    expect(projectSwitcherSource).toContain("onSwitch={switchProject}");
     expect(createProjectPageSource).toContain('apiClient("/v1/projects"');
     expect(createProjectPageSource).toContain("method: \"POST\"");
     expect(createProjectPageSource).toContain("window.location.assign");
@@ -58,13 +60,13 @@ describe("SupaCloud root dashboard", () => {
   });
 
   test("locks the released svadmin adapters and Vite compatibility rule", () => {
-    expect(packageJson.dependencies["@svadmin/core"]).toBe("^0.35.0");
-    expect(packageJson.dependencies["@svadmin/ui"]).toBe("0.41.1");
-    expect(packageJson.dependencies["@svadmin/sveltekit"]).toBe("^0.9.8");
+    expect(packageJson.dependencies["@svadmin/core"]).toBe("^0.36.0");
+    expect(packageJson.dependencies["@svadmin/ui"]).toBe("0.42.0");
+    expect(packageJson.dependencies["@svadmin/sveltekit"]).toBe("^0.9.9");
     expect(packageJson.dependencies["@svadmin/elysia"]).toBe("^0.11.0");
-    expect(lockSource).toContain('"@svadmin/core@0.35.0"');
-    expect(lockSource).toContain('"@svadmin/ui@0.41.1"');
-    expect(lockSource).toContain('"@svadmin/sveltekit@0.9.8"');
+    expect(lockSource).toContain('"@svadmin/core@0.36.0"');
+    expect(lockSource).toContain('"@svadmin/ui@0.42.0"');
+    expect(lockSource).toContain('"@svadmin/sveltekit@0.9.9"');
     expect(lockSource).toContain('"@svadmin/elysia@0.11.0"');
     expect(viteSource).toContain("'@svadmin/core'");
   });

@@ -188,10 +188,7 @@
       queryClient.invalidateQueries({ queryKey: ["deployment", projectRef, deployId] });
       queryClient.invalidateQueries({ queryKey: ["deployment_logs", projectRef, deployId] });
       queryClient.invalidateQueries({
-        queryKey: keys()
-          .resource(`v1/projects/${projectRef}/frontend/deployments`)
-          .action("list")
-          .get(),
+        queryKey: keys().data.list(`v1/projects/${projectRef}/frontend/deployments`),
       });
       setTimeout(() => actionMsg = null, 4000);
     },
