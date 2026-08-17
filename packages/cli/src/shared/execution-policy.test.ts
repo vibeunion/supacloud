@@ -147,6 +147,19 @@ describe("CLI execution policy", () => {
         }
     });
 
+    test("classifies verified release controls and protects their mutations", () => {
+        expect(executionMode("release", "logical_backup_list", {})).toBe("read");
+        expect(executionMode("release", "postgrest_status", {})).toBe("read");
+        expect(executionMode("release", "logical_backup_create", {})).toBe("write");
+        expect(executionMode("release", "postgrest_restart", {})).toBe("write");
+        expect(() => authorizeExecution("release", { action: "logical_backup_create" }, {
+            context: context(),
+        })).toThrow("--confirm-production prod-ref");
+        expect(() => authorizeExecution("release", { action: "postgrest_restart" }, {
+            context: context({ production: false, environment: "test", readOnly: true }),
+        })).toThrow("SUPACLOUD_READ_ONLY=true");
+    });
+
     test("allows migration previews and local authoring without production confirmation", () => {
         expect(executionMode("database", "migration_inventory", {})).toBe("read");
         expect(executionMode("database", "push_migrations", { dry_run: true })).toBe("read");

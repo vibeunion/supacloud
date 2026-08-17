@@ -38,6 +38,10 @@ const ACTION_POLICY: Record<string, ModulePolicy> = {
     },
     scheduled_functions: { read: ["list", "get"], write: ["create", "update", "delete"] },
     mutations: { read: ["status"] },
+    release: {
+        read: ["logical_backup_list", "postgrest_status"],
+        write: ["logical_backup_create", "postgrest_restart"],
+    },
     secrets: { read: ["list"], write: ["upsert", "delete"] },
     frontend: {
         read: ["list", "get", "build_logs", "list_frameworks", "list_records"],

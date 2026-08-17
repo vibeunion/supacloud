@@ -20,9 +20,21 @@ export interface HttpResult<T = unknown> {
 
 export interface HttpGetOptions {
     maxResponseBytes?: number;
+    maxJsonBytes?: number;
+    responseTimeoutMs?: number;
+}
+
+export interface HttpPostOptions {
+    timeoutMs?: number;
+    maxJsonBytes?: number;
+}
+
+export interface HttpReleaseMutationOptions {
+    timeoutMs?: number;
 }
 
 const DEFAULT_TIMEOUT = 30_000;
+const MAX_POST_TIMEOUT_MS = 36 * 60_000;
 const RELEASE_MUTATION_RESPONSE_TIMEOUT = 5_000;
 const RELEASE_MUTATION_RESPONSE_MAX_BYTES = 64 * 1024;
 const MAX_RETRIES = 2;
@@ -35,6 +47,30 @@ function validatedGetResponseLimit(options: HttpGetOptions): number | undefined 
         throw new RangeError("HTTP response limit must be a positive safe integer");
     }
     return maxBytes;
+}
+
+function validatedJsonResponseLimit(maxBytes: number | undefined): number | undefined {
+    if (maxBytes === undefined) return undefined;
+    if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
+        throw new RangeError("HTTP JSON response limit must be a positive safe integer");
+    }
+    return maxBytes;
+}
+
+function validatedPostTimeout(options?: HttpPostOptions): number {
+    const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT;
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > MAX_POST_TIMEOUT_MS) {
+        throw new RangeError(`HTTP request timeout must be between 1 and ${MAX_POST_TIMEOUT_MS} ms`);
+    }
+    return timeoutMs;
+}
+
+function validatedResponseTimeout(timeoutMs: number | undefined): number | undefined {
+    if (timeoutMs === undefined) return undefined;
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > MAX_POST_TIMEOUT_MS) {
+        throw new RangeError(`HTTP response timeout must be between 1 and ${MAX_POST_TIMEOUT_MS} ms`);
+    }
+    return timeoutMs;
 }
 
 type ResponseBytesRead =
@@ -80,9 +116,13 @@ function responseReadFailure<T>(status: number): HttpResult<T> {
     };
 }
 
-async function fetchWithTimeout(url: string, options: RequestInit): Promise<Response> {
+async function fetchWithTimeout(
+    url: string,
+    options: RequestInit,
+    timeoutMs = DEFAULT_TIMEOUT,
+): Promise<Response> {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT);
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
         return await fetch(url, {
             ...options,
@@ -97,11 +137,12 @@ async function fetchWithTimeout(url: string, options: RequestInit): Promise<Resp
 async function fetchWithRetry(
     url: string,
     options: RequestInit,
+    timeoutMs = DEFAULT_TIMEOUT,
 ): Promise<Response> {
     const retries = isRetryableMethod(options.method) ? MAX_RETRIES : 0;
     for (let attempt = 0; attempt <= retries; attempt++) {
         try {
-            const res = await fetchWithTimeout(url, options);
+            const res = await fetchWithTimeout(url, options, timeoutMs);
 
             if (res.status >= 500 && res.status < 600 && attempt < retries) {
                 const delay = RETRY_BASE_DELAY * Math.pow(2, attempt);
@@ -167,14 +208,20 @@ async function responseBytesFromReader(
     }
 }
 
-async function responseBytesWithinLimit(response: Response, maxBytes: number): Promise<Uint8Array | null> {
+async function responseBytesWithinLimit(
+    response: Response,
+    maxBytes: number,
+    responseTimeoutMs?: number,
+): Promise<Uint8Array | null> {
     if (declaredResponseTooLarge(response, maxBytes)) {
         await response.body?.cancel();
         return null;
     }
     if (!response.body) return new Uint8Array();
     const reader = response.body.getReader();
-    const bodyRead = await responseBytesFromReader(reader, maxBytes, null);
+    const bodyRead = responseTimeoutMs === undefined
+        ? await responseBytesFromReader(reader, maxBytes, null)
+        : await responseBytesBeforeDeadline(reader, maxBytes, null, responseTimeoutMs);
     return bodyRead.ok ? bodyRead.bytes : null;
 }
 
@@ -188,8 +235,12 @@ function parsedUtf8Json(responseBytes: Uint8Array): ResponseJsonRead {
     }
 }
 
-async function boundedResponseJson(response: Response, maxBytes: number): Promise<unknown> {
-    const responseBytes = await responseBytesWithinLimit(response, maxBytes);
+async function boundedResponseJson(
+    response: Response,
+    maxBytes: number,
+    responseTimeoutMs?: number,
+): Promise<unknown> {
+    const responseBytes = await responseBytesWithinLimit(response, maxBytes, responseTimeoutMs);
     if (responseBytes === null) return null;
     const parsed = parsedUtf8Json(responseBytes);
     return parsed.ok ? parsed.parsedJson : null;
@@ -217,23 +268,30 @@ async function releaseMutationResponseBytes(response: Response): Promise<Respons
             ? { ok: true, bytes: new Uint8Array() }
             : { ok: false };
     }
-    return responseBytesBeforeDeadline(response.body.getReader(), declaredBytes);
+    return responseBytesBeforeDeadline(
+        response.body.getReader(),
+        RELEASE_MUTATION_RESPONSE_MAX_BYTES,
+        declaredBytes,
+        RELEASE_MUTATION_RESPONSE_TIMEOUT,
+    );
 }
 
 async function responseBytesBeforeDeadline(
     reader: ReadableStreamDefaultReader<Uint8Array>,
+    maxBytes: number,
     declaredBytes: number | null,
+    responseTimeoutMs: number,
 ): Promise<ResponseBytesRead> {
     let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
     const deadline = new Promise<ResponseBytesRead>((resolve) => {
         deadlineTimer = setTimeout(() => {
             cancelResponseReader(reader);
             resolve({ ok: false });
-        }, RELEASE_MUTATION_RESPONSE_TIMEOUT);
+        }, responseTimeoutMs);
     });
     try {
         return await Promise.race([
-            responseBytesFromReader(reader, RELEASE_MUTATION_RESPONSE_MAX_BYTES, declaredBytes),
+            responseBytesFromReader(reader, maxBytes, declaredBytes),
             deadline,
         ]);
     } catch {
@@ -277,13 +335,14 @@ export class HttpTransport {
         path: string,
         serializedBody: string | undefined,
         responseReader: (response: Response) => Promise<ResponseJsonRead<T>>,
+        timeoutMs = DEFAULT_TIMEOUT,
     ): Promise<HttpResult<T>> {
         try {
             const response = await fetchWithRetry(`${this.baseUrl}${path}`, {
                 method,
                 headers: this.headers(),
                 body: serializedBody,
-            });
+            }, timeoutMs);
             const responseBody = await responseReader(response);
             return responseBody.ok
                 ? { ok: response.ok, status: response.status, data: responseBody.parsedJson }
@@ -295,11 +354,22 @@ export class HttpTransport {
 
     async get<T = unknown>(path: string, options: HttpGetOptions = {}): Promise<HttpResult<T>> {
         const maxResponseBytes = validatedGetResponseLimit(options);
+        const maxJsonBytes = validatedJsonResponseLimit(options.maxJsonBytes);
+        const responseTimeoutMs = validatedResponseTimeout(options.responseTimeoutMs);
+        if (maxResponseBytes !== undefined && maxJsonBytes !== undefined) {
+            throw new RangeError("HTTP response limit options are mutually exclusive");
+        }
         try {
             const res = await fetchWithRetry(`${this.baseUrl}${path}`, {
                 method: "GET",
                 headers: this.headers(),
             });
+            if (maxJsonBytes !== undefined) {
+                const data = await boundedResponseJson(res, maxJsonBytes, responseTimeoutMs);
+                return data === null
+                    ? responseReadFailure<T>(res.status)
+                    : { ok: res.ok, status: res.status, data: data as T };
+            }
             const data = (maxResponseBytes === undefined
                 ? await res.json().catch(() => null)
                 : await boundedResponseJson(res, maxResponseBytes)) as T;
@@ -309,25 +379,45 @@ export class HttpTransport {
         }
     }
 
-    async post<T = unknown>(path: string, body?: unknown): Promise<HttpResult<T>> {
+    async post<T = unknown>(path: string, body?: unknown, options?: HttpPostOptions): Promise<HttpResult<T>> {
+        const timeoutMs = validatedPostTimeout(options);
+        const maxJsonBytes = validatedJsonResponseLimit(options?.maxJsonBytes);
         try {
-            return await this.mutationWithResponseReader(
-                "POST",
-                path,
-                serializedRequestBody(body),
-                responseJsonOrNull<T>,
-            );
+            if (maxJsonBytes === undefined) {
+                return await this.mutationWithResponseReader(
+                    "POST",
+                    path,
+                    serializedRequestBody(body),
+                    responseJsonOrNull<T>,
+                    timeoutMs,
+                );
+            }
+            const response = await fetchWithRetry(`${this.baseUrl}${path}`, {
+                method: "POST",
+                headers: this.headers(),
+                body: serializedRequestBody(body),
+            }, timeoutMs);
+            const data = await boundedResponseJson(response, maxJsonBytes);
+            return data === null
+                ? responseReadFailure<T>(response.status)
+                : { ok: response.ok, status: response.status, data: data as T };
         } catch (error: unknown) {
             return transportFailure<T>(error);
         }
     }
 
-    async postReleaseMutation<T = unknown>(path: string, body?: unknown): Promise<HttpResult<T>> {
+    async postReleaseMutation<T = unknown>(
+        path: string,
+        body?: unknown,
+        options?: HttpReleaseMutationOptions,
+    ): Promise<HttpResult<T>> {
+        const timeoutMs = validatedPostTimeout(options);
         return this.mutationWithResponseReader(
             "POST",
             path,
             serializedRequestBody(body),
             releaseMutationResponseJson<T>,
+            timeoutMs,
         );
     }
 

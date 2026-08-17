@@ -24,6 +24,7 @@ import { registerSupabaseCliTools } from "./shared/tools/supabase-cli-tools";
 import { registerAiTools } from "./shared/tools/ai-tools";
 import { registerScheduledFunctionTools } from "./shared/tools/scheduled-function-tools";
 import { registerMutationTools } from "./shared/tools/mutation-tools";
+import { registerReleaseTools } from "./shared/tools/release-tools";
 import packageMetadata from "../package.json" with { type: "json" };
 
 type ToolEntry = { schema: any; callback: (args: any) => Promise<any> };
@@ -282,6 +283,9 @@ EXAMPLES
   ${preferredCommand} project get
   ${preferredCommand} project logs --log_type database
   ${preferredCommand} project task_stats
+  ${preferredCommand} release logical_backup_create --ref abc123
+  ${preferredCommand} release postgrest_status --ref abc123
+  ${preferredCommand} release postgrest_restart --ref abc123
   ${preferredCommand} queue stats --queue emails
   ${preferredCommand} queue dlq --queue emails --limit 20
   ${preferredCommand} frontend list --ref abc123
@@ -381,7 +385,7 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
                 ],
             }),
         };
-        for (const name of ["database", "auth", "storage", "edge_functions", "secrets", "frontend", "queue", "task_events", "scheduled_functions", "mutations", "diagnostics", "gateway", "branch"]) {
+        for (const name of ["database", "auth", "storage", "edge_functions", "secrets", "frontend", "queue", "task_events", "scheduled_functions", "mutations", "diagnostics", "gateway", "branch", "release"]) {
             tools[name] = {
                 schema: { action: genericActionSchema },
                 callback: async () => ({
@@ -469,6 +473,9 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
         readOnly: context.readOnly,
     })));
     assign(captureTools((server) => registerMutationTools(server as any, http)));
+    assign(captureTools((server) => registerReleaseTools(server as any, http, {
+        projectRef: context.projectRef || undefined,
+    })));
     assign(captureTools((server) => registerFrontendTools(server as any, http)));
     assign(captureTools((server) => registerGatewayTools(server as any, http, {
         projectRef: context.projectRef || undefined,
