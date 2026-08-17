@@ -2428,7 +2428,10 @@ describe("supacloud-cli process contract", () => {
         expect(result.stdout + result.stderr).not.toContain("application-only-service-role");
     });
 
-    test("blocks Management-backed commands for pure application profiles before HTTP", async () => {
+    test.each([
+        ["project", "health"],
+        ["release", "logical_backup_create"],
+    ])("blocks %s %s for pure application profiles before HTTP", async (moduleName, action) => {
         let requestCount = 0;
         const server = Bun.serve({
             hostname: "127.0.0.1",
@@ -2440,7 +2443,7 @@ describe("supacloud-cli process contract", () => {
         });
         servers.push(server);
 
-        const result = await runProjectCli(["project", "health"], {
+        const result = await runProjectCli([moduleName, action], {
             SUPABASE_URL: `http://127.0.0.1:${server.port}`,
             SUPABASE_SERVICE_ROLE_KEY: "application-only-service-role",
             SUPACLOUD_PROJECT_REF: "abc123",

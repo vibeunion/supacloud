@@ -106,6 +106,28 @@ loopback development origins, with the default `:80` likewise omitted. Use
 `SUPACLOUD_PROJECT_REF` when it cannot be inferred from a managed
 `<ref>.api.*` application hostname.
 
+### Verified release controls
+
+`release` is an official CLI entry point for the existing Management API
+logical-backup and PostgREST lifecycle capabilities. It requires the Management
+API context above; it does not promote an application `service_role` key to
+Management authority. Restore remains an admin-only operation and is not
+exposed by this command group.
+
+```bash
+supacloud-cli release logical_backup_list --ref abc123
+supacloud-cli release logical_backup_create --ref abc123
+supacloud-cli release postgrest_status --ref abc123
+supacloud-cli release postgrest_restart --ref abc123
+```
+
+Backup creation reports success only after the CLI verifies exactly one new
+logical-backup receipt against the inventory before and after the mutation.
+PostgREST restart reports success only after it receives a matching restart
+receipt and reads back `desired=running`, `actual=running`, and
+`health=healthy`. Both mutating controls follow the normal production
+confirmation and read-only protections.
+
 The legacy `.env` fallback is unclassified and therefore does not enable the
 production confirmation gate. Production automation must select a `prod` or
 `production` profile, or set `SUPACLOUD_ENV=production` together with a complete

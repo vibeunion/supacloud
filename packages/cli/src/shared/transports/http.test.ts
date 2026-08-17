@@ -275,6 +275,33 @@ describe("HttpTransport retry policy", () => {
         });
         expect(fetchCalls).toBe(0);
     });
+
+    test.each([0, 36 * 60_000 + 1, 1.5])("rejects invalid bounded POST timeout %s before dispatch", async timeoutMs => {
+        let fetchCalls = 0;
+        globalThis.fetch = (async () => {
+            fetchCalls += 1;
+            return Response.json({ ok: true });
+        }) as unknown as typeof fetch;
+
+        await expect(createTransport().post("/resource", {}, { timeoutMs })).rejects.toThrow(
+            "HTTP request timeout must be between",
+        );
+        expect(fetchCalls).toBe(0);
+    });
+
+    test("uses an explicit ordinary POST header timeout", async () => {
+        const scheduledDelays: number[] = [];
+        globalThis.setTimeout = ((callback: (...args: unknown[]) => void, delay?: number) => {
+            scheduledDelays.push(delay ?? 0);
+            return ++nextTimerId as unknown as ReturnType<typeof setTimeout>;
+        }) as typeof setTimeout;
+        globalThis.fetch = (async () => Response.json({ ok: true })) as unknown as typeof fetch;
+
+        const response = await createTransport().post("/resource", {}, { timeoutMs: 120_000 });
+
+        expect(response).toEqual({ ok: true, status: 200, data: { ok: true } });
+        expect(scheduledDelays).toEqual([120_000]);
+    });
 });
 
 describe("HttpTransport bounded GET responses", () => {
@@ -355,9 +382,66 @@ describe("HttpTransport bounded GET responses", () => {
 
         expect(response).toMatchObject({ ok: true, status: 200, data: null });
     });
+
+    test("times out an explicitly bounded GET body after headers", async () => {
+        globalThis.setTimeout = originalSetTimeout;
+        globalThis.clearTimeout = originalClearTimeout;
+        const secretSentinel = "private-stalled-get-response";
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch: () => new Response(new ReadableStream<Uint8Array>({
+                start(controller) {
+                    controller.enqueue(new TextEncoder().encode(`{\"token\":\"${secretSentinel}`));
+                },
+            }), { headers: { "Content-Type": "application/json" } }),
+        });
+        servers.push(server);
+        const transport = new HttpTransport({
+            baseUrl: `http://127.0.0.1:${server.port}`,
+            token: "test-token",
+        });
+        const startedAt = Date.now();
+
+        const response = await transport.get("/resource", {
+            maxJsonBytes: 64 * 1024,
+            responseTimeoutMs: 10,
+        });
+
+        expect(Date.now() - startedAt).toBeLessThan(1_000);
+        expect(response).toMatchObject({ ok: false, status: 200, responseReadError: true });
+        expect(JSON.stringify(response)).not.toContain(secretSentinel);
+    });
 });
 
 describe("HttpTransport release mutation response boundary", () => {
+    test("keeps a long release header timeout separate from the body deadline", async () => {
+        const scheduledDelays: number[] = [];
+        globalThis.setTimeout = ((callback: (...args: unknown[]) => void, delay?: number) => {
+            scheduledDelays.push(delay ?? 0);
+            return ++nextTimerId as unknown as ReturnType<typeof setTimeout>;
+        }) as typeof setTimeout;
+        globalThis.fetch = (async () => Response.json({ success: true })) as unknown as typeof fetch;
+
+        const response = await createTransport().postReleaseMutation("/resource", {}, {
+            timeoutMs: 36 * 60_000,
+        });
+
+        expect(response).toEqual({ ok: true, status: 200, data: { success: true } });
+        expect(scheduledDelays).toEqual([36 * 60_000, 5_000]);
+    });
+
+    test("bounds an explicitly selected POST JSON response", async () => {
+        const secretSentinel = "private-bounded-post-response";
+        const body = JSON.stringify({ token: secretSentinel.repeat(64) });
+        globalThis.fetch = (async () => chunkedTextResponse(body, {}, 1024)) as unknown as typeof fetch;
+
+        const response = await createTransport().post("/resource", {}, { maxJsonBytes: 64 });
+
+        expect(response).toMatchObject({ ok: false, status: 200, responseReadError: true });
+        expect(JSON.stringify(response)).not.toContain(secretSentinel);
+    });
+
     test.each([
         ["POST", (transport: HttpTransport) => transport.postReleaseMutation("/resource", { expected: "1" })],
         ["PATCH", (transport: HttpTransport) => transport.patchReleaseMutation("/resource", { expected: "1" })],
