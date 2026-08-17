@@ -111,18 +111,32 @@ loopback development origins, with the default `:80` likewise omitted. Use
 `release` is an official CLI entry point for the existing Management API
 logical-backup and PostgREST lifecycle capabilities. It requires the Management
 API context above; it does not promote an application `service_role` key to
-Management authority. Restore remains an admin-only operation and is not
-exposed by this command group.
+Management authority.
 
 ```bash
 supacloud-cli release logical_backup_list --ref abc123
 supacloud-cli release logical_backup_create --ref abc123
+supacloud-cli release logical_backup_restore --ref abc123 \
+  --backup_id logical-full_abc123_<backup-id-suffix> \
+  --expected_sha256 <64-lowercase-hex> \
+  --restore_confirmation RESTORE_PROJECT:abc123:logical-full_abc123_<backup-id-suffix>:<64-lowercase-hex>
 supacloud-cli release postgrest_status --ref abc123
 supacloud-cli release postgrest_restart --ref abc123
 ```
 
 Backup creation reports success only after the CLI verifies exactly one new
 logical-backup receipt against the inventory before and after the mutation.
+Logical restore is project-scoped: pause the selected project first, obtain the
+backup ID and SHA-256 from `logical_backup_list`, and supply both the normal
+production `--confirm-production <ref>` value (for production profiles) and
+the exact `--restore_confirmation
+RESTORE_PROJECT:<ref>:<backup_id>:<sha256>`. Before POST, the CLI re-reads
+that same project's inventory and binds the request to the complete verified
+backup identity; it then verifies both the server receipt and a fresh inventory
+read. It never retries a restore. A transport, server, or unreadable-response
+failure is reported as `OUTCOME_UNKNOWN`; read the inventory and investigate
+before any new restore decision.
+
 PostgREST restart reports success only after it receives a matching restart
 receipt and reads back `desired=running`, `actual=running`, and
 `health=healthy`. Both mutating controls follow the normal production

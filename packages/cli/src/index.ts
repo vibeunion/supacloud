@@ -284,6 +284,7 @@ EXAMPLES
   ${preferredCommand} project logs --log_type database
   ${preferredCommand} project task_stats
   ${preferredCommand} release logical_backup_create --ref abc123
+  ${preferredCommand} release logical_backup_restore --ref abc123 --backup_id <backup_id> --expected_sha256 <sha256> --restore_confirmation RESTORE_PROJECT:abc123:<backup_id>:<sha256>
   ${preferredCommand} release postgrest_status --ref abc123
   ${preferredCommand} release postgrest_restart --ref abc123
   ${preferredCommand} queue stats --queue emails

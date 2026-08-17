@@ -16,6 +16,7 @@ type ToolServer = {
 type ReleaseOperation =
     | "release.logical_backup.list"
     | "release.logical_backup.create"
+    | "release.logical_backup.restore"
     | "release.postgrest.status"
     | "release.postgrest.restart";
 
@@ -138,6 +139,25 @@ function newlyCreatedBackup(
     return additions.length === 1 ? additions[0]! : null;
 }
 
+function restoreRequest(
+    projectRef: string,
+    backupId: unknown,
+    expectedSha256: unknown,
+    restoreConfirmation: unknown,
+): { backup_id: string; expected_sha256: string; confirmation: string } {
+    if (typeof backupId !== "string" || !backupBelongsToProject(backupId, projectRef)) {
+        throw new Error("'backup_id' must identify a logical-full backup for 'ref'");
+    }
+    if (typeof expectedSha256 !== "string" || !SHA256.test(expectedSha256)) {
+        throw new Error("'expected_sha256' must be a lowercase SHA-256 digest");
+    }
+    const confirmation = `RESTORE_PROJECT:${projectRef}:${backupId}:${expectedSha256}`;
+    if (restoreConfirmation !== confirmation) {
+        throw new Error("'restore_confirmation' must exactly confirm the selected logical backup restore");
+    }
+    return { backup_id: backupId, expected_sha256: expectedSha256, confirmation };
+}
+
 function endpoint(projectRef: string): string {
     if (!validProjectRef(projectRef)) throw new Error("'ref' is invalid for release controls");
     return `/v1/projects/${encodeURIComponent(projectRef)}`;
@@ -227,14 +247,17 @@ export function registerReleaseTools(
 ): void {
     server.tool(
         "release",
-        "Verified release controls using a Management API credential. Actions: logical_backup_list, logical_backup_create, postgrest_status, postgrest_restart",
+        "Verified release controls using a Management API credential. Actions: logical_backup_list, logical_backup_create, logical_backup_restore, postgrest_status, postgrest_restart",
         {
             action: withDescription(stringEnum([
-                "logical_backup_list", "logical_backup_create", "postgrest_status", "postgrest_restart",
+                "logical_backup_list", "logical_backup_create", "logical_backup_restore", "postgrest_status", "postgrest_restart",
             ]), "Release control action"),
             ref: optional(Type.String(), options.projectRef ? "Optional override when not auto-linked" : "Project ref"),
+            backup_id: optional(Type.String(), "[logical_backup_restore] Exact verified logical-full backup ID from the selected project inventory"),
+            expected_sha256: optional(Type.String(), "[logical_backup_restore] Exact lowercase SHA-256 from the selected project inventory"),
+            restore_confirmation: optional(Type.String(), "[logical_backup_restore] Exact RESTORE_PROJECT:<ref>:<backup_id>:<sha256> confirmation"),
         },
-        async ({ action, ref }) => {
+        async ({ action, ref, backup_id, expected_sha256, restore_confirmation }) => {
             const projectRef = typeof ref === "string" && ref || options.projectRef;
             if (!projectRef) throw new Error("'ref' is required for release controls");
             if (!validProjectRef(projectRef)) throw new Error("'ref' is invalid for release controls");
@@ -267,6 +290,43 @@ export function registerReleaseTools(
                 return releaseControlSuccess("release.logical_backup.create", {
                     project_ref: projectRef,
                     backup: publicBackup(addedBackup),
+                });
+            }
+            if (action === "logical_backup_restore") {
+                const request = restoreRequest(projectRef, backup_id, expected_sha256, restore_confirmation);
+                const before = await readInventory(http, projectRef);
+                const beforeFailure = readInventoryFailure("release.logical_backup.restore", before);
+                if (beforeFailure) return beforeFailure;
+                const selectedBackup = before.inventory!.find((backup) =>
+                    backup.backup_id === request.backup_id && backup.sha256 === request.expected_sha256,
+                );
+                if (!selectedBackup) {
+                    return releaseControlFailure("release.logical_backup.restore", "MUTATION_NOT_SUCCEEDED", null);
+                }
+                const mutation = await http.postReleaseMutation(
+                    `${endpoint(projectRef)}/database/backups/logical/restore`,
+                    request,
+                    { timeoutMs: BACKUP_TIMEOUT_MS },
+                );
+                if (!mutation.ok || mutation.status !== 200) {
+                    return mutationFailure("release.logical_backup.restore", mutation);
+                }
+                const responseBackup = isRecord(mutation.data)
+                    ? verifiedBackup(mutation.data.restored_backup, projectRef)
+                    : null;
+                const after = await readInventory(http, projectRef);
+                const afterFailure = readInventoryFailure("release.logical_backup.restore", after);
+                const restoredInventoryBackup = after.inventory?.find((backup) => backup.backup_id === request.backup_id);
+                if (!responseBackup
+                    || !equalBackup(responseBackup, selectedBackup)
+                    || afterFailure
+                    || !restoredInventoryBackup
+                    || !equalBackup(restoredInventoryBackup, selectedBackup)) {
+                    return releaseControlFailure("release.logical_backup.restore", "OUTCOME_UNKNOWN", mutation.status);
+                }
+                return releaseControlSuccess("release.logical_backup.restore", {
+                    project_ref: projectRef,
+                    backup: publicBackup(selectedBackup),
                 });
             }
             if (action === "postgrest_status") {
