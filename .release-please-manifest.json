@@ -4,8 +4,8 @@
   "packages/edge-runtime": "0.18.2",
   "packages/pgredis-runtime": "0.3.2",
   "packages/supacloud-js": "0.22.1",
-  "packages/cli": "0.23.0",
+  "packages/cli": "0.24.0",
   "packages/admin": "0.14.3",
-  "packages/supacloud": "0.10.9",
+  "packages/supacloud": "0.10.10",
   "packages/supacloud-lite": "0.8.4"
 }

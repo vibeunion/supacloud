@@ -13,6 +13,13 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.24.0](https://github.com/vibeunion/supacloud/compare/cli-v0.23.0...cli-v0.24.0) (2026-08-17)
+
+
+### Features
+
+* **cli:** add verified logical backup restore ([d9dd65f](https://github.com/vibeunion/supacloud/commit/d9dd65f1381b2ced1e5f508fd326c3429feadb75))
+
 ## [0.23.0](https://github.com/vibeunion/supacloud/compare/cli-v0.22.1...cli-v0.23.0) (2026-08-17)
 
 
