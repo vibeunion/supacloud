@@ -33,6 +33,8 @@ const SCHEDULE_UPDATED_AT = "2026-08-11T00:00:00.000Z";
 const EXPECTED_ACTIVATION_ID = "a1111111-1111-4111-8111-111111111111";
 const COMMITTED_ACTIVATION_ID = "b2222222-2222-4222-8222-222222222222";
 const RECREATED_ACTIVATION_ID = "c3333333-3333-4333-8333-333333333333";
+const LOGICAL_BACKUP_ID = "logical-full_abc123_0123456789abcdef0123456789abcdef";
+const LOGICAL_BACKUP_SHA256 = "a".repeat(64);
 const PATH_ESCAPE_INPUTS = [
     ".", "..", "%2e", "%2e%2e", ".%2e", "%2e.", "%252e%252e", "a/b", "a?b", "a#b",
 ];
@@ -111,6 +113,30 @@ function chunkedJsonResponse(body: string): Response {
         },
     });
     return new Response(stream, { headers: { "Content-Type": "application/json" } });
+}
+
+function logicalBackup(overrides: Record<string, unknown> = {}) {
+    return {
+        backup_id: LOGICAL_BACKUP_ID,
+        project_ref: "abc123",
+        database: "postgres",
+        kind: "logical-full",
+        created_at: "2026-08-17T12:00:00.000Z",
+        completed_at: "2026-08-17T12:01:00.000Z",
+        bytes: 128,
+        sha256: LOGICAL_BACKUP_SHA256,
+        ...overrides,
+    };
+}
+
+function logicalBackupRestoreArguments(overrides: Record<string, string> = {}): string[] {
+    const confirmation = `RESTORE_PROJECT:abc123:${LOGICAL_BACKUP_ID}:${LOGICAL_BACKUP_SHA256}`;
+    return [
+        "release", "logical_backup_restore", "--ref", "abc123",
+        "--backup_id", overrides.backup_id ?? LOGICAL_BACKUP_ID,
+        "--expected_sha256", overrides.expected_sha256 ?? LOGICAL_BACKUP_SHA256,
+        "--restore_confirmation", overrides.restore_confirmation ?? confirmation,
+    ];
 }
 
 describe("supacloud-cli process contract", () => {
@@ -2130,6 +2156,275 @@ describe("supacloud-cli process contract", () => {
         });
         expect(requestedBody).toContain(configSecret);
         expect(response.stdout + response.stderr).not.toContain(configSecret);
+    });
+
+    test("restores only the exact inventory-bound logical backup through the release CLI", async () => {
+        const requests: Array<{ method: string; path: string; body: unknown; authorization: string | null }> = [];
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            async fetch(request) {
+                const url = new URL(request.url);
+                requests.push({
+                    method: request.method,
+                    path: url.pathname,
+                    body: request.method === "POST" ? await request.json() : null,
+                    authorization: request.headers.get("authorization"),
+                });
+                if (request.method === "GET") return Response.json({ backups: [logicalBackup()] });
+                return Response.json({ restored_backup: logicalBackup(), server_only: "do-not-echo" });
+            },
+        });
+        servers.push(server);
+        const apiToken = "release-management-token";
+
+        const result = await runProjectCli(logicalBackupRestoreArguments(), {
+            SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+            SUPACLOUD_API_TOKEN: apiToken,
+            SUPACLOUD_PROJECT_REF: "abc123",
+        });
+
+        expect(result.exitCode).toBe(0);
+        expect(JSON.parse(result.stdout)).toEqual({
+            schema: "supacloud.cli.release-control.v1",
+            ok: true,
+            operation: "release.logical_backup.restore",
+            project_ref: "abc123",
+            backup: {
+                backup_id: LOGICAL_BACKUP_ID,
+                project_ref: "abc123",
+                kind: "logical-full",
+                created_at: "2026-08-17T12:00:00.000Z",
+                completed_at: "2026-08-17T12:01:00.000Z",
+                bytes: 128,
+                sha256: LOGICAL_BACKUP_SHA256,
+            },
+        });
+        expect(requests).toEqual([
+            { method: "GET", path: "/v1/projects/abc123/database/backups/logical", body: null, authorization: `Bearer ${apiToken}` },
+            {
+                method: "POST",
+                path: "/v1/projects/abc123/database/backups/logical/restore",
+                body: {
+                    backup_id: LOGICAL_BACKUP_ID,
+                    expected_sha256: LOGICAL_BACKUP_SHA256,
+                    confirmation: `RESTORE_PROJECT:abc123:${LOGICAL_BACKUP_ID}:${LOGICAL_BACKUP_SHA256}`,
+                },
+                authorization: `Bearer ${apiToken}`,
+            },
+            { method: "GET", path: "/v1/projects/abc123/database/backups/logical", body: null, authorization: `Bearer ${apiToken}` },
+        ]);
+        expect(result.stdout + result.stderr).not.toContain(apiToken);
+        expect(result.stdout + result.stderr).not.toContain("do-not-echo");
+    });
+
+    test.each([
+        ["missing backup ID", [
+            "release", "logical_backup_restore", "--ref", "abc123",
+            "--expected_sha256", LOGICAL_BACKUP_SHA256,
+            "--restore_confirmation", `RESTORE_PROJECT:abc123:${LOGICAL_BACKUP_ID}:${LOGICAL_BACKUP_SHA256}`,
+        ]],
+        ["wrong-project backup ID", logicalBackupRestoreArguments({
+            backup_id: "logical-full_other_0123456789abcdef0123456789abcdef",
+        })],
+        ["malformed SHA-256", logicalBackupRestoreArguments({ expected_sha256: "private-invalid-digest" })],
+        ["mismatched restore confirmation", logicalBackupRestoreArguments({
+            restore_confirmation: "private-invalid-confirmation",
+        })],
+    ])("rejects logical restore %s before inventory or mutation HTTP", async (_label, args) => {
+        let requestCount = 0;
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch() {
+                requestCount += 1;
+                return Response.json({ unexpected: true });
+            },
+        });
+        servers.push(server);
+
+        const result = await runProjectCli(args, {
+            SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+            SUPACLOUD_API_TOKEN: "release-management-token",
+            SUPACLOUD_PROJECT_REF: "abc123",
+        });
+
+        expect(result.exitCode).toBe(1);
+        expect(requestCount).toBe(0);
+        expect(result.stdout + result.stderr).not.toContain("release-management-token");
+        expect(result.stdout + result.stderr).not.toContain("private-invalid-digest");
+        expect(result.stdout + result.stderr).not.toContain("private-invalid-confirmation");
+    });
+
+    test("rejects a valid-looking logical backup that is absent from the selected project inventory", async () => {
+        let postCount = 0;
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch(request) {
+                if (request.method === "POST") postCount += 1;
+                return Response.json({ backups: [logicalBackup({ sha256: "b".repeat(64) })] });
+            },
+        });
+        servers.push(server);
+
+        const result = await runProjectCli(logicalBackupRestoreArguments(), {
+            SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+            SUPACLOUD_API_TOKEN: "release-management-token",
+            SUPACLOUD_PROJECT_REF: "abc123",
+        });
+
+        expect(result.exitCode).toBe(1);
+        expect(JSON.parse(result.stdout)).toEqual({
+            schema: "supacloud.cli.release-control.v1",
+            ok: false,
+            operation: "release.logical_backup.restore",
+            error: { code: "MUTATION_NOT_SUCCEEDED", http_status: null },
+        });
+        expect(postCount).toBe(0);
+    });
+
+    test("rejects malformed or cross-project logical inventory before restore HTTP", async () => {
+        let postCount = 0;
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch(request) {
+                if (request.method === "POST") postCount += 1;
+                return Response.json({
+                    backups: [logicalBackup({
+                        backup_id: "logical-full_other_0123456789abcdef0123456789abcdef",
+                    })],
+                });
+            },
+        });
+        servers.push(server);
+
+        const result = await runProjectCli(logicalBackupRestoreArguments(), {
+            SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+            SUPACLOUD_API_TOKEN: "release-management-token",
+            SUPACLOUD_PROJECT_REF: "abc123",
+        });
+
+        expect(result.exitCode).toBe(1);
+        expect(JSON.parse(result.stdout)).toEqual({
+            schema: "supacloud.cli.release-control.v1",
+            ok: false,
+            operation: "release.logical_backup.restore",
+            error: { code: "INVALID_RESPONSE", http_status: 200 },
+        });
+        expect(postCount).toBe(0);
+    });
+
+    test.each([
+        ["a response identity mismatch", logicalBackup({ sha256: "b".repeat(64) }), logicalBackup()],
+        ["a post-restore inventory identity drift", logicalBackup(), logicalBackup({ sha256: "b".repeat(64) })],
+    ])("reports OUTCOME_UNKNOWN for logical restore with %s", async (_label, restoredBackup, postRestoreBackup) => {
+        let inventoryReads = 0;
+        let postCount = 0;
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch(request) {
+                if (request.method === "POST") {
+                    postCount += 1;
+                    return Response.json({ restored_backup: restoredBackup, private_server_body: "do-not-echo" });
+                }
+                inventoryReads += 1;
+                return Response.json({ backups: [inventoryReads === 1 ? logicalBackup() : postRestoreBackup] });
+            },
+        });
+        servers.push(server);
+
+        const result = await runProjectCli(logicalBackupRestoreArguments(), {
+            SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+            SUPACLOUD_API_TOKEN: "release-management-token",
+            SUPACLOUD_PROJECT_REF: "abc123",
+        });
+
+        expect(result.exitCode).toBe(1);
+        expect(JSON.parse(result.stdout)).toEqual({
+            schema: "supacloud.cli.release-control.v1",
+            ok: false,
+            operation: "release.logical_backup.restore",
+            error: { code: "OUTCOME_UNKNOWN", http_status: 200 },
+        });
+        expect([inventoryReads, postCount]).toEqual([2, 1]);
+        expect(result.stdout + result.stderr).not.toContain("do-not-echo");
+    });
+
+    test.each([
+        [409, "HTTP_ERROR"],
+        [503, "OUTCOME_UNKNOWN"],
+    ] as const)("returns the safe logical restore result for a mutation HTTP %d", async (status, code) => {
+        let inventoryReads = 0;
+        let postCount = 0;
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch(request) {
+                if (request.method === "POST") {
+                    postCount += 1;
+                    return Response.json({ private_server_body: "do-not-echo" }, { status });
+                }
+                inventoryReads += 1;
+                return Response.json({ backups: [logicalBackup()] });
+            },
+        });
+        servers.push(server);
+
+        const result = await runProjectCli(logicalBackupRestoreArguments(), {
+            SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+            SUPACLOUD_API_TOKEN: "release-management-token",
+            SUPACLOUD_PROJECT_REF: "abc123",
+        });
+
+        expect(result.exitCode).toBe(1);
+        expect(JSON.parse(result.stdout)).toEqual({
+            schema: "supacloud.cli.release-control.v1",
+            ok: false,
+            operation: "release.logical_backup.restore",
+            error: { code, http_status: status },
+        });
+        expect([inventoryReads, postCount]).toEqual([1, 1]);
+        expect(result.stdout + result.stderr).not.toContain("do-not-echo");
+    });
+
+    test("treats an unreadable logical restore response as unknown without retrying", async () => {
+        let inventoryReads = 0;
+        let postCount = 0;
+        const responseSecret = "private-unreadable-restore-response";
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch(request) {
+                if (request.method === "POST") {
+                    postCount += 1;
+                    return new Response(`{\"private_server_body\":\"${responseSecret}`, {
+                        headers: { "Content-Type": "application/json" },
+                    });
+                }
+                inventoryReads += 1;
+                return Response.json({ backups: [logicalBackup()] });
+            },
+        });
+        servers.push(server);
+
+        const result = await runProjectCli(logicalBackupRestoreArguments(), {
+            SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+            SUPACLOUD_API_TOKEN: "release-management-token",
+            SUPACLOUD_PROJECT_REF: "abc123",
+        });
+
+        expect(result.exitCode).toBe(1);
+        expect(JSON.parse(result.stdout)).toEqual({
+            schema: "supacloud.cli.release-control.v1",
+            ok: false,
+            operation: "release.logical_backup.restore",
+            error: { code: "OUTCOME_UNKNOWN", http_status: 200 },
+        });
+        expect([inventoryReads, postCount]).toEqual([1, 1]);
+        expect(result.stdout + result.stderr).not.toContain(responseSecret);
     });
 
     test("status reports missing configuration and exits non-zero", async () => {

@@ -156,6 +156,106 @@ test("logical backup create fails closed when post-mutation inventory is ambiguo
     expect(response.content[0].text).not.toContain("private_database_name");
 });
 
+test("logical backup restore binds the exact inventory identity before and after one mutation", async () => {
+    const confirmation = `RESTORE_PROJECT:${PROJECT_REF}:${BACKUP_ID}:${SHA256}`;
+    const requests: Array<{ method: "get" | "post"; path: string; body?: unknown }> = [];
+    let inventoryReads = 0;
+    const callback = captureReleaseTool({
+        get: async (path: string) => {
+            requests.push({ method: "get", path });
+            inventoryReads += 1;
+            return { ok: true, status: 200, data: { backups: [verifiedBackup()] } };
+        },
+        postReleaseMutation: async (path: string, body: unknown) => {
+            requests.push({ method: "post", path, body });
+            return { ok: true, status: 200, data: { restored_backup: verifiedBackup() } };
+        },
+    });
+
+    const response = await callback({
+        action: "logical_backup_restore",
+        backup_id: BACKUP_ID,
+        expected_sha256: SHA256,
+        restore_confirmation: confirmation,
+    });
+
+    expect(requests).toEqual([
+        { method: "get", path: "/v1/projects/proj/database/backups/logical" },
+        {
+            method: "post",
+            path: "/v1/projects/proj/database/backups/logical/restore",
+            body: { backup_id: BACKUP_ID, expected_sha256: SHA256, confirmation },
+        },
+        { method: "get", path: "/v1/projects/proj/database/backups/logical" },
+    ]);
+    expect(inventoryReads).toBe(2);
+    expect(payload(response)).toMatchObject({
+        ok: true,
+        operation: "release.logical_backup.restore",
+        backup: { backup_id: BACKUP_ID, sha256: SHA256 },
+    });
+    expect(response.content[0].text).not.toContain("private_database_name");
+    expect(response.content[0].text).not.toContain("private-receipt-hmac");
+});
+
+test.each([
+    ["transport failure", { ok: false, status: 500, data: {}, transportError: true }, null],
+    ["unreadable response", { ok: false, status: 200, data: {}, responseReadError: true }, 200],
+    ["server failure", { ok: false, status: 503, data: {} }, 503],
+] as const)("logical backup restore has no retry after a %s", async (_label, mutation, expectedStatus) => {
+    let postCalls = 0;
+    const callback = captureReleaseTool({
+        get: async () => ({ ok: true, status: 200, data: { backups: [verifiedBackup()] } }),
+        postReleaseMutation: async () => {
+            postCalls += 1;
+            return mutation;
+        },
+    });
+
+    const response = await callback({
+        action: "logical_backup_restore",
+        backup_id: BACKUP_ID,
+        expected_sha256: SHA256,
+        restore_confirmation: `RESTORE_PROJECT:${PROJECT_REF}:${BACKUP_ID}:${SHA256}`,
+    });
+
+    expect(postCalls).toBe(1);
+    expect(payload(response)).toMatchObject({
+        ok: false,
+        operation: "release.logical_backup.restore",
+        error: { code: "OUTCOME_UNKNOWN", http_status: expectedStatus },
+    });
+});
+
+test("logical backup restore reports an unknown outcome when post-restore inventory is invalid", async () => {
+    let inventoryReads = 0;
+    const callback = captureReleaseTool({
+        get: async () => {
+            inventoryReads += 1;
+            return {
+                ok: true,
+                status: 200,
+                data: inventoryReads === 1 ? { backups: [verifiedBackup()] } : { backups: [] },
+            };
+        },
+        postReleaseMutation: async () => ({ ok: true, status: 200, data: { restored_backup: verifiedBackup() } }),
+    });
+
+    const response = await callback({
+        action: "logical_backup_restore",
+        backup_id: BACKUP_ID,
+        expected_sha256: SHA256,
+        restore_confirmation: `RESTORE_PROJECT:${PROJECT_REF}:${BACKUP_ID}:${SHA256}`,
+    });
+
+    expect(inventoryReads).toBe(2);
+    expect(payload(response)).toMatchObject({
+        ok: false,
+        operation: "release.logical_backup.restore",
+        error: { code: "OUTCOME_UNKNOWN", http_status: 200 },
+    });
+});
+
 test("PostgREST status exposes only the desired, actual, and health fields", async () => {
     const callback = captureReleaseTool({
         get: async () => ({ ok: true, status: 200, data: healthyPostgrest() }),

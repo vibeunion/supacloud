@@ -151,11 +151,19 @@ describe("CLI execution policy", () => {
         expect(executionMode("release", "logical_backup_list", {})).toBe("read");
         expect(executionMode("release", "postgrest_status", {})).toBe("read");
         expect(executionMode("release", "logical_backup_create", {})).toBe("write");
+        expect(executionMode("release", "logical_backup_restore", {})).toBe("write");
         expect(executionMode("release", "postgrest_restart", {})).toBe("write");
         expect(() => authorizeExecution("release", { action: "logical_backup_create" }, {
             context: context(),
         })).toThrow("--confirm-production prod-ref");
         expect(() => authorizeExecution("release", { action: "postgrest_restart" }, {
+            context: context({ production: false, environment: "test", readOnly: true }),
+        })).toThrow("SUPACLOUD_READ_ONLY=true");
+        expect(() => authorizeExecution("release", { action: "logical_backup_restore", ref: "other-ref" }, {
+            context: context(),
+            confirmProduction: "other-ref",
+        })).toThrow("cannot target a different project");
+        expect(() => authorizeExecution("release", { action: "logical_backup_restore" }, {
             context: context({ production: false, environment: "test", readOnly: true }),
         })).toThrow("SUPACLOUD_READ_ONLY=true");
     });
