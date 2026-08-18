@@ -1,0 +1,60 @@
+name: Capture code quality fixer result
+
+on:
+  push:
+    branches:
+      - agent/fix-code-quality-findings
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  capture:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Capture matching fixer run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -u
+          output="$(mktemp)"
+          run_id=""
+
+          for _ in $(seq 1 30); do
+            runs="$(gh run list \
+              --repo "$GITHUB_REPOSITORY" \
+              --workflow code-quality-apply-fixes.yml \
+              --commit "$GITHUB_SHA" \
+              --limit 5 \
+              --json databaseId,status,conclusion,headSha,url 2>&1)"
+            printf '%s\n' "$runs" > "$output"
+            run_id="$(printf '%s' "$runs" | jq -r 'map(select(.status == "completed"))[0].databaseId // empty' 2>/dev/null)"
+            if [[ -n "$run_id" ]]; then
+              break
+            fi
+            sleep 2
+          done
+
+          if [[ -n "$run_id" ]]; then
+            printf '\n=== failed steps ===\n' >> "$output"
+            gh run view "$run_id" --repo "$GITHUB_REPOSITORY" --log-failed >> "$output" 2>&1 || true
+          fi
+
+          encoded="$(base64 -w 0 "$output")"
+          path='.github/code-quality-fix-debug.txt'
+          current_sha="$(gh api "repos/${GITHUB_REPOSITORY}/contents/${path}?ref=agent/fix-code-quality-findings" --jq '.sha' 2>/dev/null || true)"
+          args=(
+            --method PUT
+            "repos/${GITHUB_REPOSITORY}/contents/${path}"
+            -f message='chore: capture quality fixer result [skip ci]'
+            -f content="$encoded"
+            -f branch='agent/fix-code-quality-findings'
+          )
+          if [[ -n "$current_sha" ]]; then
+            args+=(-f sha="$current_sha")
+          fi
+          gh api "${args[@]}"
