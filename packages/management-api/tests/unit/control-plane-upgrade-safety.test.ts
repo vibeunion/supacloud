@@ -64,12 +64,15 @@ describe("control-plane upgrade safety", () => {
         identity: async () => ({ uid: process.getuid?.() ?? 0, gid: process.getgid?.() ?? 0 }),
         now: () => new Date("2026-08-19T00:00:00.000Z"),
         randomId: () => "00000000-0000-4000-8000-000000000001",
-        run: async ({ args, env, stdout }) => {
+        run: async ({ args, env, stdin, stdout }) => {
           commands.push(args);
           if (args.some((argument) => argument.endsWith("/pg_dump"))) {
             expect(env?.PGPASSWORD).toBe("private-password");
             expect(Object.keys(env || {})).toEqual(["PGPASSWORD"]);
             writeFileSync(stdout!, "verified-control-plane-dump");
+          }
+          if (args.some((argument) => argument.endsWith("/pg_restore"))) {
+            expect(readFileSync(stdin!, "utf8")).toBe("verified-control-plane-dump");
           }
           return 0;
         },
