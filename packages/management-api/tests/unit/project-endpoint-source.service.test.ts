@@ -19,7 +19,7 @@ describe("project endpoint routing source service", () => {
     findAll.mockResolvedValue([] as never);
   });
 
-  test("returns only refs and private routing configs required by projection", async () => {
+  test("returns only refs and endpoint routing config fields", async () => {
     findAll.mockResolvedValue([
       {
         id: "internal-id",
@@ -27,7 +27,11 @@ describe("project endpoint routing source service", () => {
         name: "Project",
         config: {
           api_domain: "api.example.com",
-          service_role_key: "must-not-be-copied-from-config-fixture",
+          additional_api_domains: ["api-alt.example.com"],
+          api_url_scheme: "https",
+          service_role_key: "must-not-leave-private-config",
+          pgrst_port: 30123,
+          nested_private_config: { token: "private-token" },
         },
         db_password: "private-db-password",
         jwt_secret: "private-jwt-secret",
@@ -41,12 +45,26 @@ describe("project endpoint routing source service", () => {
         ref: "abc123",
         config: {
           api_domain: "api.example.com",
-          service_role_key: "must-not-be-copied-from-config-fixture",
+          additional_api_domains: ["api-alt.example.com"],
+          api_url_scheme: "https",
         },
       },
     ]);
+    expect(JSON.stringify(sources)).not.toContain("private");
     expect(sources[0]).not.toHaveProperty("db_password");
     expect(sources[0]).not.toHaveProperty("jwt_secret");
     expect(sources[0]).not.toHaveProperty("name");
+  });
+
+  test("preserves the legacy string-as-custom-domain routing contract", async () => {
+    findAll.mockResolvedValue([
+      { ref: "legacy", config: "example.com" },
+      { ref: "generated", config: { unrelated: true } },
+    ] as never);
+
+    expect(await projectEndpointSourceService.listRoutingSources()).toEqual([
+      { ref: "legacy", config: { custom_domain: "example.com" } },
+      { ref: "generated", config: undefined },
+    ]);
   });
 });
