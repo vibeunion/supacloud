@@ -267,7 +267,8 @@ DEFAULT CONTEXT
   Without a selector or project variables, runs use the current project's legacy .env.
   Application status accepts SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY.
   Management-backed project commands require SUPACLOUD_API_URL +
-  SUPACLOUD_API_TOKEN. These credential scopes are never mixed.
+  SUPACLOUD_API_TOKEN. Only release release_canary_fixture_stage_replay may additionally use
+  the selected project's SUPABASE_* pair for one application-origin RPC.
   SUPACLOUD_PROJECT_REF is required when it cannot be inferred from <ref>.api.*.
 
   SUPACLOUD_READ_ONLY=true blocks remote writes. Production writes require an
@@ -288,6 +289,7 @@ EXAMPLES
   ${preferredCommand} release logical_backup_restore --ref abc123 --backup_id <backup_id> --expected_sha256 <sha256> --restore_confirmation RESTORE_PROJECT:abc123:<backup_id>:<sha256>
   ${preferredCommand} release postgrest_status --ref abc123
   ${preferredCommand} release postgrest_restart --ref abc123
+  ${preferredCommand} release release_canary_fixture_stage_replay --ref abc123 --subject <uuid> --request_id <uuid>
   ${preferredCommand} queue stats --queue emails
   ${preferredCommand} queue dlq --queue emails --limit 20
   ${preferredCommand} frontend list --ref abc123
@@ -454,6 +456,13 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
         baseUrl: context.apiUrl,
         token: context.apiToken,
     });
+    const applicationHttp = context.inferredSupabaseUrl && context.inferredServiceRoleKey
+        ? new HttpTransport({
+            baseUrl: context.inferredSupabaseUrl,
+            token: context.inferredServiceRoleKey,
+            apiKey: context.inferredServiceRoleKey,
+        })
+        : undefined;
 
     const assign = (extra: ToolMap) => Object.assign(tools, extra);
 
@@ -478,6 +487,8 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
     assign(captureTools((server) => registerMutationTools(server as any, http)));
     assign(captureTools((server) => registerReleaseTools(server as any, http, {
         projectRef: context.projectRef || undefined,
+        applicationHttp,
+        applicationOrigin: context.inferredSupabaseUrl || undefined,
     })));
     assign(captureTools((server) => registerFrontendTools(server as any, http)));
     assign(captureTools((server) => registerGatewayTools(server as any, http, {

@@ -6,6 +6,7 @@ const CREATED_AT = "2026-08-17T00:00:00.000Z";
 const COMPLETED_AT = "2026-08-17T00:00:01.000Z";
 const SHA256 = "a".repeat(64);
 const BACKUP_ID = `logical-full_${PROJECT_REF}_${"b".repeat(32)}`;
+const APPLICATION_ORIGIN = "https://api.example.test";
 
 type ToolResult = {
     content: Array<{ type: "text"; text: string }>;
@@ -42,13 +43,33 @@ function healthyPostgrest(overrides: Record<string, unknown> = {}) {
     };
 }
 
-function captureReleaseTool(http: Record<string, unknown>): ReleaseCallback {
+function projectEndpoints(apiOrigin = APPLICATION_ORIGIN) {
+    const api = new URL(apiOrigin);
+    return {
+        schema: "supacloud.project-endpoints.v1",
+        project_ref: PROJECT_REF,
+        endpoints: {
+            api: { origin: api.origin, host: api.host, scheme: api.protocol.slice(0, -1), source: "explicit_api_domain", aliases: [] },
+            auth: { origin: "https://auth.example.test", host: "auth.example.test", scheme: "https", source: "explicit_auth_domain", aliases: [] },
+            studio: { origin: "https://studio.example.test", host: "studio.example.test", scheme: "https", source: "explicit_studio_domain", aliases: [] },
+        },
+    };
+}
+
+function captureReleaseTool(
+    http: Record<string, unknown>,
+    applicationHttp?: Record<string, unknown>,
+): ReleaseCallback {
     let callback: ReleaseCallback | undefined;
     registerReleaseTools({
         tool(name, _description, _schema, toolCallback) {
             if (name === "release") callback = toolCallback;
         },
-    }, http as never, { projectRef: PROJECT_REF });
+    }, http as never, {
+        projectRef: PROJECT_REF,
+        applicationHttp: applicationHttp as never,
+        applicationOrigin: applicationHttp ? APPLICATION_ORIGIN : undefined,
+    });
     if (!callback) throw new Error("release tool was not registered");
     return callback;
 }
@@ -320,6 +341,129 @@ test("PostgREST restart fails closed when the healthy readback is absent", async
         ok: false,
         operation: "release.postgrest.restart",
         error: { code: "OUTCOME_UNKNOWN", http_status: 200 },
+    });
+});
+
+test("release-canary fixture stage replay returns only a strict idempotent receipt", async () => {
+    const requests: Array<{ path: string; body: unknown }> = [];
+    let endpointReads = 0;
+    const callback = captureReleaseTool({
+        get: async () => {
+            endpointReads += 1;
+            return { ok: true, status: 200, data: projectEndpoints() };
+        },
+    }, {
+        postReleaseMutation: async (path: string, body: unknown) => {
+            requests.push({ path, body });
+            return {
+                ok: true,
+                status: 200,
+                data: {
+                    fixtureId: "11111111-1111-4111-8111-111111111111",
+                    tenantKey: "release-canary-22222222-2222-4222-8222-222222222222",
+                    state: "staged",
+                    idempotent: true,
+                },
+            };
+        },
+    });
+    const privateSubject = "33333333-3333-4333-8333-333333333333";
+    const requestId = "44444444-4444-4444-8444-444444444444";
+
+    const response = await callback({
+        action: "release_canary_fixture_stage_replay",
+        subject: privateSubject,
+        request_id: requestId,
+    });
+
+    expect(endpointReads).toBe(2);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.path).toBe("/rest/v1/rpc/fa_release_canary_fixture_stage");
+    expect(requests[0]?.body).toEqual({ p_subject: privateSubject, p_request_id: requestId });
+    expect(payload(response)).toMatchObject({
+        ok: true,
+        operation: "release.release_canary.fixture_stage_replay",
+        project_ref: PROJECT_REF,
+        receipt: { state: "staged", idempotent: true },
+    });
+    expect(response.content[0].text).not.toContain(privateSubject);
+});
+
+test("release-canary fixture stage replay fails closed for missing application context and unsafe receipts", async () => {
+    const callbackWithoutApplication = captureReleaseTool({});
+    await expect(callbackWithoutApplication({
+        action: "release_canary_fixture_stage_replay",
+        subject: "33333333-3333-4333-8333-333333333333",
+        request_id: "44444444-4444-4444-8444-444444444444",
+    })).rejects.toThrow("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY");
+
+    const callbackWithInvalidResponse = captureReleaseTool({
+        get: async () => ({ ok: true, status: 200, data: projectEndpoints() }),
+    }, {
+        postReleaseMutation: async () => ({
+            ok: true,
+            status: 200,
+            data: {
+                fixtureId: "11111111-1111-4111-8111-111111111111",
+                tenantKey: "release-canary-22222222-2222-4222-8222-222222222222",
+                state: "staged",
+                idempotent: true,
+                privateEcho: "must-not-be-reflected",
+            },
+        }),
+    });
+    const response = await callbackWithInvalidResponse({
+        action: "release_canary_fixture_stage_replay",
+        subject: "33333333-3333-4333-8333-333333333333",
+        request_id: "44444444-4444-4444-8444-444444444444",
+    });
+    expect(payload(response)).toMatchObject({
+        ok: false,
+        operation: "release.release_canary.fixture_stage_replay",
+        error: { code: "OUTCOME_UNKNOWN", http_status: 200 },
+    });
+    expect(response.content[0].text).not.toContain("must-not-be-reflected");
+});
+
+test.each([
+    ["invalid subject", { subject: "not-a-uuid", request_id: "44444444-4444-4444-8444-444444444444" }],
+    ["invalid request ID", { subject: "33333333-3333-4333-8333-333333333333", request_id: "not-a-uuid" }],
+])("release-canary fixture stage replay rejects %s before dispatch", async (_label, input) => {
+    let calls = 0;
+    const callback = captureReleaseTool({
+        get: async () => ({ ok: true, status: 200, data: {} }),
+    }, {
+        postReleaseMutation: async () => {
+            calls += 1;
+            return { ok: true, status: 200, data: {} };
+        },
+    });
+    await expect(callback({ action: "release_canary_fixture_stage_replay", ...input })).rejects.toThrow();
+    expect(calls).toBe(0);
+});
+
+test("release-canary fixture stage replay refuses an application origin outside the selected project projection", async () => {
+    let calls = 0;
+    const callback = captureReleaseTool({
+        get: async () => ({ ok: true, status: 200, data: projectEndpoints("https://other.example.test") }),
+    }, {
+        postReleaseMutation: async () => {
+            calls += 1;
+            return { ok: true, status: 200, data: {} };
+        },
+    });
+
+    const response = await callback({
+        action: "release_canary_fixture_stage_replay",
+        subject: "33333333-3333-4333-8333-333333333333",
+        request_id: "44444444-4444-4444-8444-444444444444",
+    });
+
+    expect(calls).toBe(0);
+    expect(payload(response)).toMatchObject({
+        ok: false,
+        operation: "release.release_canary.fixture_stage_replay",
+        error: { code: "INVALID_RESPONSE", http_status: null },
     });
 });
 

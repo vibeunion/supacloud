@@ -172,6 +172,14 @@ export function projectEndpointRead(
         : failedResult("Invalid project endpoint response");
 }
 
+export function projectApiOrigins(response: HttpResult<unknown>, expectedRef: string): string[] | null {
+    if (!successfulResponse(response)) return null;
+    const projection = projectEndpointProjection(response.data);
+    if (!projection || projection.project_ref !== expectedRef) return null;
+    const api = projection.endpoints.api;
+    return [api.origin, ...api.aliases.map((alias) => `${api.scheme}://${alias}`)];
+}
+
 export function projectEndpointListRead(response: HttpResult<unknown>): ProjectEndpointReadResult {
     if (!successfulResponse(response)) return failedHttpResult("Project endpoint list", response.status);
     if (!Array.isArray(response.data) || response.data.length > MAX_PROJECTS) {
