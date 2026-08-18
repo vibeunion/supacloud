@@ -10,6 +10,8 @@ A project credential or admin credential may read one project:
 GET /v1/projects/:ref/endpoints
 ```
 
+Delegated Studio/BFF reads map this route to the existing `project.read` capability.
+
 Only an admin credential may enumerate all projects:
 
 ```http
