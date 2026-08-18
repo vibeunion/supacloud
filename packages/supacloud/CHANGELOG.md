@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.15](https://github.com/vibeunion/supacloud/compare/supacloud-v0.10.14...supacloud-v0.10.15) (2026-08-18)
+
+
+### Bug Fixes
+
+* **supacloud:** sync published CLI dependencies ([#975](https://github.com/vibeunion/supacloud/issues/975)) ([a602001](https://github.com/vibeunion/supacloud/commit/a602001e92d64c1bc14470a91806374f5a40ee0c))
+
 ## [0.10.14](https://github.com/vibeunion/supacloud/compare/supacloud-v0.10.13...supacloud-v0.10.14) (2026-08-18)
 
 
