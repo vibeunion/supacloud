@@ -1,0 +1,1 @@
+{"format":"cms-aes256+gzip-json+base64-chunks","ciphertext_sha256":"b372d9025ff3058733a0ee451942bb94bb4c328d46844f79abf51d3169d77734","encoded_sha256":"c4b9972547178b4bd79a0ece77a5977661e93760fba373acb537983c38945efb","encoded_bytes":8712,"chunk_count":2,"chunks":["issues.cms.b64.part.000","issues.cms.b64.part.001"]}
