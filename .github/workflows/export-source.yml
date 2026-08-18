@@ -1,0 +1,28 @@
+name: Export source snapshot
+
+on:
+  push:
+    branches:
+      - agent/secure-cnb-relay-20260819
+    paths:
+      - .github/workflows/export-source.yml
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+      - name: Create source archive
+        run: tar --exclude=.git -czf /tmp/supacloud-main.tar.gz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: supacloud-main-source
+          path: /tmp/supacloud-main.tar.gz
+          retention-days: 1
+          if-no-files-found: error
