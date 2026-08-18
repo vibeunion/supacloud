@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.61.6](https://github.com/vibeunion/supacloud/compare/management-api-v0.61.5...management-api-v0.61.6) (2026-08-18)
+
+
+### Bug Fixes
+
+* **upgrade:** verify backup from a fresh descriptor ([49eeb77](https://github.com/vibeunion/supacloud/commit/49eeb770057aafce066278cbe4f6063c979b6b43))
+
 ## [0.61.5](https://github.com/vibeunion/supacloud/compare/management-api-v0.61.4...management-api-v0.61.5) (2026-08-18)
 
 
