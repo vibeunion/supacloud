@@ -580,42 +580,6 @@
       "rule_id": "js/unused-local-variable",
       "name": "js/unused-local-variable",
       "title": "Unused variable, import, function or class",
-      "message": "Unused variable key.",
-      "path": "packages/edge-runtime/worker-pool.test.ts",
-      "start_line": 2431,
-      "start_column": 19,
-      "end_line": null,
-      "severity": "recommendation",
-      "precision": "very-high",
-      "tags": [
-        "quality",
-        "maintainability",
-        "useless-code"
-      ]
-    },
-    {
-      "language": "javascript-typescript",
-      "rule_id": "js/unused-local-variable",
-      "name": "js/unused-local-variable",
-      "title": "Unused variable, import, function or class",
-      "message": "Unused variable key.",
-      "path": "packages/edge-runtime/worker-pool.test.ts",
-      "start_line": 2479,
-      "start_column": 19,
-      "end_line": null,
-      "severity": "recommendation",
-      "precision": "very-high",
-      "tags": [
-        "quality",
-        "maintainability",
-        "useless-code"
-      ]
-    },
-    {
-      "language": "javascript-typescript",
-      "rule_id": "js/unused-local-variable",
-      "name": "js/unused-local-variable",
-      "title": "Unused variable, import, function or class",
       "message": "Unused import stableStringify.",
       "path": "packages/management-api/src/diagnostics/hash.ts",
       "start_line": 2,
@@ -655,6 +619,42 @@
       "message": "Unused variable testRef.",
       "path": "packages/management-api/src/doctor.ts",
       "start_line": 60,
+      "start_column": 19,
+      "end_line": null,
+      "severity": "recommendation",
+      "precision": "very-high",
+      "tags": [
+        "quality",
+        "maintainability",
+        "useless-code"
+      ]
+    },
+    {
+      "language": "javascript-typescript",
+      "rule_id": "js/unused-local-variable",
+      "name": "js/unused-local-variable",
+      "title": "Unused variable, import, function or class",
+      "message": "Unused variable key.",
+      "path": "packages/edge-runtime/worker-pool.test.ts",
+      "start_line": 2431,
+      "start_column": 19,
+      "end_line": null,
+      "severity": "recommendation",
+      "precision": "very-high",
+      "tags": [
+        "quality",
+        "maintainability",
+        "useless-code"
+      ]
+    },
+    {
+      "language": "javascript-typescript",
+      "rule_id": "js/unused-local-variable",
+      "name": "js/unused-local-variable",
+      "title": "Unused variable, import, function or class",
+      "message": "Unused variable key.",
+      "path": "packages/edge-runtime/worker-pool.test.ts",
+      "start_line": 2479,
       "start_column": 19,
       "end_line": null,
       "severity": "recommendation",
@@ -958,24 +958,6 @@
       "rule_id": "js/unused-local-variable",
       "name": "js/unused-local-variable",
       "title": "Unused variable, import, function or class",
-      "message": "Unused function readFunctionConfig.",
-      "path": "packages/management-api/src/services/edge-function.service.ts",
-      "start_line": 555,
-      "start_column": 16,
-      "end_line": null,
-      "severity": "recommendation",
-      "precision": "very-high",
-      "tags": [
-        "quality",
-        "maintainability",
-        "useless-code"
-      ]
-    },
-    {
-      "language": "javascript-typescript",
-      "rule_id": "js/unused-local-variable",
-      "name": "js/unused-local-variable",
-      "title": "Unused variable, import, function or class",
       "message": "Unused import RELEASE_ID_PATTERN.",
       "path": "packages/management-api/src/services/frontend-release-activation.ts",
       "start_line": 2,
@@ -999,6 +981,24 @@
       "start_line": 4,
       "start_column": null,
       "end_line": 16,
+      "severity": "recommendation",
+      "precision": "very-high",
+      "tags": [
+        "quality",
+        "maintainability",
+        "useless-code"
+      ]
+    },
+    {
+      "language": "javascript-typescript",
+      "rule_id": "js/unused-local-variable",
+      "name": "js/unused-local-variable",
+      "title": "Unused variable, import, function or class",
+      "message": "Unused function readFunctionConfig.",
+      "path": "packages/management-api/src/services/edge-function.service.ts",
+      "start_line": 555,
+      "start_column": 16,
+      "end_line": null,
       "severity": "recommendation",
       "precision": "very-high",
       "tags": [
@@ -1408,8 +1408,8 @@
       "rule_id": "js/unused-local-variable",
       "name": "js/unused-local-variable",
       "title": "Unused variable, import, function or class",
-      "message": "Unused import afterEach.",
-      "path": "packages/management-api/tests/unit/project.repository.test.ts",
+      "message": "Unused import mock.",
+      "path": "packages/management-api/tests/unit/project-webhooks.routes.test.ts",
       "start_line": 1,
       "start_column": null,
       "end_line": null,
@@ -1426,8 +1426,8 @@
       "rule_id": "js/unused-local-variable",
       "name": "js/unused-local-variable",
       "title": "Unused variable, import, function or class",
-      "message": "Unused import mock.",
-      "path": "packages/management-api/tests/unit/project-webhooks.routes.test.ts",
+      "message": "Unused import afterEach.",
+      "path": "packages/management-api/tests/unit/project.repository.test.ts",
       "start_line": 1,
       "start_column": null,
       "end_line": null,
