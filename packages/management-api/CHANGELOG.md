@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.61.5](https://github.com/vibeunion/supacloud/compare/management-api-v0.61.4...management-api-v0.61.5) (2026-08-18)
+
+
+### Bug Fixes
+
+* **upgrade:** trust pinned pre-transfer edge release ([#979](https://github.com/vibeunion/supacloud/issues/979)) ([8f2e4fa](https://github.com/vibeunion/supacloud/commit/8f2e4fa597f984abecb8da51c787f1ce650b083d))
+
 ## [0.61.4](https://github.com/vibeunion/supacloud/compare/management-api-v0.61.3...management-api-v0.61.4) (2026-08-18)
 
 

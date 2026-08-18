@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.3](https://github.com/vibeunion/supacloud/compare/admin-v0.15.2...admin-v0.15.3) (2026-08-18)
+
+
+### Bug Fixes
+
+* **upgrade:** trust pinned pre-transfer edge release ([#979](https://github.com/vibeunion/supacloud/issues/979)) ([8f2e4fa](https://github.com/vibeunion/supacloud/commit/8f2e4fa597f984abecb8da51c787f1ce650b083d))
+
 ## [0.15.2](https://github.com/vibeunion/supacloud/compare/admin-v0.15.1...admin-v0.15.2) (2026-08-18)
 
 
