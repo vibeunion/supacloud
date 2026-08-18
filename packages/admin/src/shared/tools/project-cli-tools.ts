@@ -23,6 +23,12 @@ import {
     projectListRead,
     type ProjectReadResult,
 } from "./project-read-projection";
+import {
+    PROJECT_ENDPOINT_LIST_RESPONSE_MAX_BYTES,
+    PROJECT_ENDPOINT_RESPONSE_MAX_BYTES,
+    projectEndpointListRead,
+    projectEndpointRead,
+} from "./project-endpoint-read";
 import { parseProjectRuntimeSnapshot } from "./project-runtime-snapshot";
 
 type ToolServer = {
@@ -511,6 +517,10 @@ function resolveRef(refFromArgs: string | undefined, defaultRef?: string): strin
     return ref;
 }
 
+function projectEndpointProjectionPath(ref: string): string {
+    return `/v1/projects/${encodeURIComponent(ref)}/endpoint/projection`;
+}
+
 export function registerUserProjectCliTools(
     server: ToolServer,
     http: HttpTransport,
@@ -574,14 +584,14 @@ export function registerAdminProjectCliTools(
     const fileOperations = options.projectEnvFileOperations;
     server.tool(
         "project",
-        "Platform-level project lifecycle management. Actions: list, create, get, delete, pause, restore, restart, settings, update_settings, api_keys, health, logs, tasks, services, runtime_snapshot, service_control",
+        "Platform-level project lifecycle management. Actions: list, list_endpoints, create, get, endpoints, delete, pause, restore, restart, settings, update_settings, api_keys, health, logs, tasks, services, runtime_snapshot, service_control",
         {
             action: withDescription(stringEnum([
-                "list", "create", "get", "delete", "pause", "restore",
+                "list", "list_endpoints", "create", "get", "endpoints", "delete", "pause", "restore",
                 "restart", "settings", "update_settings", "api_keys",
                 "health", "logs", "tasks", "services", "runtime_snapshot", "service_control",
             ]), "Action to perform"),
-            ref: optional(Type.String(), "[*] Project ref (required for most actions except 'list' and 'create')"),
+            ref: optional(Type.String(), "[*] Project ref (required for most actions except 'list', 'list_endpoints', and 'create')"),
             name: optional(Type.String(), "[create] Project name"),
             region: optional(Type.String(), "[create] Region (default: local)"),
             organization_id: optional(Type.String(), "[create] Organization ID"),
@@ -628,6 +638,10 @@ export function registerAdminProjectCliTools(
                 case "list":
                     return projectReadResponse(projectListRead(await http.get("/v1/projects", {
                         maxResponseBytes: PROJECT_READ_RESPONSE_MAX_BYTES,
+                    })));
+                case "list_endpoints":
+                    return projectReadResponse(projectEndpointListRead(await http.get("/v1/projects/endpoints", {
+                        maxResponseBytes: PROJECT_ENDPOINT_LIST_RESPONSE_MAX_BYTES,
                     })));
                 case "create": {
                     if (!name) throw new Error("'name' is required for create");
@@ -676,6 +690,15 @@ export function registerAdminProjectCliTools(
                     return projectReadResponse(projectGetRead(
                         await http.get(`/v1/projects/${resolvedRef}`, {
                             maxResponseBytes: PROJECT_READ_RESPONSE_MAX_BYTES,
+                        }),
+                        resolvedRef,
+                    ));
+                }
+                case "endpoints": {
+                    const resolvedRef = resolveRef(ref);
+                    return projectReadResponse(projectEndpointRead(
+                        await http.get(projectEndpointProjectionPath(resolvedRef), {
+                            maxResponseBytes: PROJECT_ENDPOINT_RESPONSE_MAX_BYTES,
                         }),
                         resolvedRef,
                     ));
