@@ -1,0 +1,2 @@
+PATTERN: Missing tenant reference|tenant reference|tenant_ref|tenant-ref|x-tenant|x-project|project-ref|grant_type|auth/v1/token|tenant.*header
+
