@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.4](https://github.com/vibeunion/supacloud/compare/admin-v0.15.3...admin-v0.15.4) (2026-08-18)
+
+
+### Bug Fixes
+
+* **admin:** bound verified release downloads ([#981](https://github.com/vibeunion/supacloud/issues/981)) ([21f593a](https://github.com/vibeunion/supacloud/commit/21f593acb56b5e790f407e7a540dbbe29d16e5f2))
+
 ## [0.15.3](https://github.com/vibeunion/supacloud/compare/admin-v0.15.2...admin-v0.15.3) (2026-08-18)
 
 
