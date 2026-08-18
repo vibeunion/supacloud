@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.61.7](https://github.com/vibeunion/supacloud/compare/management-api-v0.61.6...management-api-v0.61.7) (2026-08-18)
+
+
+### Bug Fixes
+
+* **upgrade:** preflight control-plane backup ([#985](https://github.com/vibeunion/supacloud/issues/985)) ([811c908](https://github.com/vibeunion/supacloud/commit/811c908b680e3ef0549ec9ec6b578284d065cad8))
+
 ## [0.61.6](https://github.com/vibeunion/supacloud/compare/management-api-v0.61.5...management-api-v0.61.6) (2026-08-18)
 
 
