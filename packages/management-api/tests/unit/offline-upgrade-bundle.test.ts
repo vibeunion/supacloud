@@ -35,6 +35,7 @@ import {
   RELEASE_BUNDLE_SIZE_LIMITS,
   RELEASE_CHECKSUMS_NAME,
   RELEASE_MANIFEST_NAME,
+  LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY,
   RELEASE_REPOSITORY,
   RELEASE_SIGNER_WORKFLOW,
   RELEASE_SOURCE_REF,
@@ -260,6 +261,37 @@ describe("offline upgrade bundle", () => {
     }
     expect(trustedRootPaths.size).toBe(1);
     expect(existsSync([...trustedRootPaths][0]!)).toBe(false);
+  });
+
+  test("uses the exact pre-transfer attestation identity only for Edge Runtime 0.18.2", async () => {
+    const fixture = bundleFixture();
+    const legacyEdge = manifestFixture(
+      "edge-runtime",
+      LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY.version,
+      LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY.sourceCommit,
+    );
+    legacyEdge.manifest.repository = LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY.repository;
+    legacyEdge.manifest.workflow = LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY.workflow;
+    legacyEdge.manifest.release.tag = LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY.tag;
+    writeSecureFile(join(fixture.edgeDir, RELEASE_MANIFEST_NAME), `${JSON.stringify(legacyEdge.manifest)}\n`);
+    writeSecureFile(join(fixture.edgeDir, RELEASE_CHECKSUMS_NAME), legacyEdge.checksums);
+    writeSecureFile(
+      join(fixture.edgeDir, edgeBinary),
+      releaseAssetContent("edge-runtime", LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY.version, edgeBinary),
+    );
+
+    await loadOfflineUpgradeBundle({
+      assetBundleDir: fixture.root,
+      management: { version: managementVersion, binaryName: managementBinary },
+      edgeRuntime: { version: LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY.version, binaryName: edgeBinary },
+    });
+    const calls = readFileSync(fixture.recordPath, "utf8").trim().split("\n");
+    const edgeCalls = calls.filter(call => call.includes(LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY.sourceCommit));
+    expect(edgeCalls).toHaveLength(3);
+    for (const call of edgeCalls) {
+      expect(call).toContain(`--repo ${LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY.repository}`);
+      expect(call).toContain(`--signer-workflow ${LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY.workflow}`);
+    }
   });
 
   test("fails closed when gh cannot consume a custom trusted root", async () => {

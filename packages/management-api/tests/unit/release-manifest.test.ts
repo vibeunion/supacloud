@@ -4,6 +4,9 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY,
+  RELEASE_REPOSITORY,
+  RELEASE_SIGNER_WORKFLOW,
   RELEASE_CHECKSUMS_NAME,
   RELEASE_BUNDLE_SIZE_LIMITS,
   RELEASE_MANIFEST_NAME,
@@ -97,6 +100,43 @@ describe("signed release manifest", () => {
     expect(() => parseReleaseManifest(JSON.stringify(oversized), expected)).toThrow("size limit");
     expect(() => parseReleaseManifest(JSON.stringify(manifest), { ...expected, version: "1.2.4" }))
       .toThrow("does not match");
+  });
+
+  test("accepts only the exact pre-transfer Edge Runtime 0.18.2 identity", () => {
+    const current = generateManifest("edge-runtime");
+    const legacy = {
+      ...current,
+      repository: LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY.repository,
+      workflow: LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY.workflow,
+      source: {
+        ref: current.source.ref,
+        commit: LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY.sourceCommit,
+      },
+      release: {
+        component: LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY.component,
+        version: LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY.version,
+        tag: LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY.tag,
+      },
+    };
+    const expected = { component: "edge-runtime" as const, version: "0.18.2" };
+
+    expect(parseReleaseManifest(JSON.stringify(legacy), expected)).toMatchObject({
+      repository: LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY.repository,
+      workflow: LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY.workflow,
+      source: { commit: LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY.sourceCommit },
+      release: expected,
+    });
+    for (const drift of [
+      { ...legacy, repository: RELEASE_REPOSITORY },
+      { ...legacy, workflow: RELEASE_SIGNER_WORKFLOW },
+      { ...legacy, source: { ...legacy.source, commit: "f".repeat(40) } },
+    ]) {
+      expect(() => parseReleaseManifest(JSON.stringify(drift), expected)).toThrow("identity");
+    }
+    expect(() => parseReleaseManifest(JSON.stringify({
+      ...legacy,
+      release: { component: "edge-runtime", version: "0.18.3", tag: "edge-runtime-v0.18.3" },
+    }), { component: "edge-runtime", version: "0.18.3" })).toThrow("identity");
   });
 
   test("requires SHA256SUMS to agree exactly with the signed manifest", () => {
