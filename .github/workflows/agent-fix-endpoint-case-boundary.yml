@@ -1,0 +1,96 @@
+name: Fix endpoint command boundaries
+
+on:
+  pull_request:
+    types: [synchronize, reopened]
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: agent-fix-endpoint-case-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  fix:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/project-endpoints-legacy-backup' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/project-endpoints-legacy-backup
+          fetch-depth: 0
+
+      - name: Repair shared user/admin switch boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          block = '''                case "endpoints":
+                    return projectReadResponse(projectEndpointsRead(
+                        await http.get(`/v1/projects/${resolvedRef}`, {
+                            maxResponseBytes: PROJECT_ENDPOINT_RESPONSE_MAX_BYTES,
+                        }),
+                        resolvedRef,
+                    ));
+'''
+
+          for path in [
+              Path("packages/cli/src/shared/tools/project-cli-tools.ts"),
+              Path("packages/admin/src/shared/tools/project-cli-tools.ts"),
+          ]:
+              text = path.read_text()
+              marker = "export function registerAdminProjectCliTools"
+              if marker not in text:
+                  raise SystemExit(f"{path}: admin tool marker missing")
+              user_part, admin_part = text.split(marker, 1)
+              # The project-scoped user function keeps its endpoint case. Any
+              # copy in the admin function that references the user's
+              # resolvedRef variable is invalid and must be removed.
+              admin_part = admin_part.replace(block, "")
+              text = user_part + marker + admin_part
+
+              admin_block = '''                case "endpoints": {
+                    const resolvedRef = resolveRef(ref);
+                    return projectReadResponse(projectEndpointsRead(
+                        await http.get(`/v1/projects/${resolvedRef}`, {
+                            maxResponseBytes: PROJECT_ENDPOINT_RESPONSE_MAX_BYTES,
+                        }),
+                        resolvedRef,
+                    ));
+                }
+'''
+              if text.count(admin_block) != 1:
+                  raise SystemExit(f"{path}: expected exactly one admin endpoint block, found {text.count(admin_block)}")
+              if user_part.count(block) != 1:
+                  raise SystemExit(f"{path}: expected exactly one user endpoint block, found {user_part.count(block)}")
+              path.write_text(text)
+
+          Path(".github/workflows/agent-fix-endpoint-case-boundary.yml").unlink()
+          PY
+          git diff --check
+
+      - name: Commit boundary fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix(cli): keep endpoint actions within their command boundaries"
+          git push origin HEAD:feat/project-endpoints-legacy-backup
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"
+
+      - name: Typecheck and focused tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd packages/cli && bun install --frozen-lockfile && bun run typecheck && bun test src/shared/tools/project-endpoint-projection.test.ts src/shared/tools/project-cli-tools.test.ts src/shared/execution-policy.test.ts)
+          (cd packages/admin && bun install --frozen-lockfile && bun run typecheck && bun test src/shared/tools/legacy-backup-tools.test.ts src/shared/tools/project-cli-tools.test.ts src/shared/execution-policy.test.ts)
