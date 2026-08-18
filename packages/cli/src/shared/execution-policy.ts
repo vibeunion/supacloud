@@ -25,8 +25,8 @@ const ACTION_POLICY: Record<string, ModulePolicy> = {
         write: ["push"],
     },
     auth: {
-        read: ["list_providers", "get_provider", "supported_providers", "get_settings", "get_config"],
-        write: ["configure_provider", "update_provider", "disable_provider", "wechat_mini", "wechat_open", "update_settings", "update_config"],
+        read: ["list_users", "get_user", "list_providers", "get_provider", "supported_providers", "get_settings", "get_config"],
+        write: ["generate_link", "configure_provider", "update_provider", "disable_provider", "wechat_mini", "wechat_open", "update_settings", "update_config"],
     },
     oauth_clients: {
         read: ["list", "get"],

@@ -17,6 +17,7 @@ Load this reference when selecting a command surface or when a user asks an AI t
 | Inspect or back up a remote database | `supabase db_pull`, `migration_list`, `db_dump`, `gen_types` | Requires explicit PostgreSQL DSN; redact it |
 | Preview/apply migrations remotely | `supabase push` | Always dry-run first; production needs explicit approval |
 | Mark proven-equivalent historical migrations as applied | `database baseline_migrations` | Dry-run, schema-equivalence proof, backup, explicit approval |
+| Inspect auth users or generate a controlled login link | `auth list_users`, `auth get_user`, `auth generate_link` | User reads are bounded; login-link generation is a production-confirmed write and action links stay in the calling process |
 | Manage Auth/Storage/Edge Functions/frontend/secrets | Corresponding project module | Keep deployable config/code in version control |
 | Configure project gateway routes | `gateway` | Requires an admin-capable project token; inspect before write |
 | Install/upgrade/debug SupaCloud servers | `supacloud-admin` | Platform boundary; not a project CLI action |
@@ -31,7 +32,7 @@ until a project-scoped context is resolved.
 - `project`: selected-project metadata, authoritative endpoint projection, health, logs, API keys/settings, background tasks, retry/cancel, DLQ, and background settings. `project list` deliberately redirects to `supacloud-admin`; cross-project enumeration is not a project CLI capability.
 - `database`: read/query, schema inspection, extensions, indexes, RLS, stats, migration push, controlled historical baseline, and SQL-file execution.
 - `supabase`: allowlisted official CLI adapter for migration authoring, local reset/diff, explicit-DSN inspection/backup/type generation, and SupaCloud-controlled migration push.
-- `auth`: provider and authentication configuration.
+- `auth`: provider/configuration plus bounded user lookup and production-confirmed login-link generation.
 - `storage`: buckets and object-management workflows.
 - `edge_functions`: list, atomically read one active or deleted identity with `get_config`, read immutable source, deploy, activate, configure, and delete Edge Functions. For every mutation, pass the `activation_id` read from the same `list` or `get_config` snapshot as `--expected-activation-id`; use `legacy` only for a never-created or listed legacy Function, not for a deleted slug with a tombstone UUID. Deploy and activate actions also require the non-negative observed version as `--expected-active-version`; use `absent` for a never-created slug or a `get_config` tombstone. Version `0` is a legacy version token and cannot be used as a source or activation target.
 - `frontend`: list, build/deploy, domain, and deployment workflows.
