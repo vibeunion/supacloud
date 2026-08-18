@@ -33,7 +33,7 @@ type ToolMap = Record<string, ToolEntry>;
 const commandName = "supacloud-cli";
 const preferredCommand = commandName;
 const projectActionSchema = stringEnum([
-    "get", "health", "logs", "api_keys", "settings",
+    "get", "pause", "restore", "health", "logs", "api_keys", "settings",
     "tasks", "task_detail", "task_cancel", "task_retry", "task_stats", "dlq", "background_settings", "update_background_settings",
 ]);
 const genericActionSchema = Type.String();

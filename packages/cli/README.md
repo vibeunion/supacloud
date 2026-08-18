@@ -113,6 +113,22 @@ logical-backup and PostgREST lifecycle capabilities. It requires the Management
 API context above; it does not promote an application `service_role` key to
 Management authority.
 
+Project pause and restore are explicit lifecycle commands. A logical backup
+restore requires an operator to pause the selected project first and then use
+`project get` to confirm that its status is `paused`. `project restore` resumes
+the paused project lifecycle when its database exists; if the database is
+missing, the platform begins project re-provisioning instead. It does not
+restore a database backup and is never invoked automatically by the CLI.
+
+```bash
+supacloud-cli project pause --ref abc123
+supacloud-cli release logical_backup_restore --ref abc123 \
+  --backup_id logical-full_abc123_<backup-id-suffix> \
+  --expected_sha256 <64-lowercase-hex> \
+  --restore_confirmation RESTORE_PROJECT:abc123:logical-full_abc123_<backup-id-suffix>:<64-lowercase-hex>
+supacloud-cli project restore --ref abc123
+```
+
 ```bash
 supacloud-cli release logical_backup_list --ref abc123
 supacloud-cli release logical_backup_create --ref abc123

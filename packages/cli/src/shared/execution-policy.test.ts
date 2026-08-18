@@ -67,12 +67,15 @@ function context(overrides: Partial<ResolvedContext> = {}): ResolvedContext {
 
 describe("CLI execution policy", () => {
     test("requires an exact production confirmation for remote writes", () => {
-        expect(() => authorizeExecution("project", { action: "task_cancel" }, { context: context() }))
-            .toThrow("--confirm-production prod-ref");
-        expect(() => authorizeExecution("project", { action: "task_cancel" }, {
-            context: context(),
-            confirmProduction: "prod-ref",
-        })).not.toThrow();
+        for (const action of ["pause", "restore"]) {
+            expect(executionMode("project", action, {})).toBe("write");
+            expect(() => authorizeExecution("project", { action }, { context: context() }))
+                .toThrow("--confirm-production prod-ref");
+            expect(() => authorizeExecution("project", { action }, {
+                context: context(),
+                confirmProduction: "prod-ref",
+            })).not.toThrow();
+        }
     });
 
     test("rejects cross-project production overrides even when confirmed", () => {
@@ -130,6 +133,11 @@ describe("CLI execution policy", () => {
         expect(() => authorizeExecution("frontend", { action: "redeploy" }, {
             context: context({ production: false, environment: "test", readOnly: true }),
         })).toThrow("SUPACLOUD_READ_ONLY=true");
+        for (const action of ["pause", "restore"]) {
+            expect(() => authorizeExecution("project", { action }, {
+                context: context({ production: false, environment: "test", readOnly: true }),
+            })).toThrow("SUPACLOUD_READ_ONLY=true");
+        }
     });
 
     test("classifies Function, Scheduled Function, and Storage lifecycle actions", () => {
