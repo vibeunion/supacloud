@@ -108,10 +108,11 @@ function validatedOrganizationName(rawName: string): string {
   return name;
 }
 
-function isUniqueViolation(error: unknown): boolean {
-  return typeof error === "object"
-    && error !== null
-    && (error as { code?: string }).code === "23505";
+function isUniqueViolation(databaseError: unknown): boolean {
+  if (typeof databaseError !== "object" || databaseError === null) return false;
+  const postgresError = databaseError as { code?: unknown; errno?: unknown };
+  return [postgresError.code, postgresError.errno]
+    .some((sqlState) => sqlState === "23505");
 }
 
 function hashToken(token: string): string {
