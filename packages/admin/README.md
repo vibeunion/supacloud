@@ -124,8 +124,8 @@ external Edge Runtime as a single rollback-capable transaction:
 
 ```bash
 npx @supacloud/admin ssh upgrade \
-  --version 0.50.31 \
-  --edge_runtime_version 0.16.8 \
+  --version 0.61.4 \
+  --edge_runtime_version 0.18.2 \
   --artifact_transport local \
   --github_proxy direct
 ```
@@ -149,6 +149,43 @@ SSH channel. It preserves the Edge Runtime systemd `ExecStart`, port, mode, and
 enabled state. Component upgrades require persisted `EDGE_RUNTIME_MODE=external`;
 embedded mode is rejected before release artifacts or services are changed.
 Local, remote, and direct server upgrades share one nonblocking host-wide lock.
+
+Local artifact upgrades require Management 0.61.4 or newer. After stopping the
+old Management service and before writing runtime secrets or running
+`--init-db`, the target binary verifies that `DATABASE_URL` identifies the
+Management control-plane database, rejects a registered tenant database, and
+creates a verified custom-format PostgreSQL archive. Backups and their private
+receipts are stored under
+`/var/lib/supacloud/backups/control-plane-upgrades/<backup-id>/`; the five most
+recent trusted backups are retained.
+
+The inspection transaction remains open while `pg_dump` imports its exported
+snapshot, so a different PostgreSQL server cannot satisfy the dump step. The
+root process reserves the private archive first; the `postgres` identity receives
+only that inherited output descriptor and never gains path access to the
+root-only backup directory.
+
+The inspection transaction also keeps its exported snapshot alive until staged
+`--init-db` finishes. The child receives the database fingerprint and snapshot
+only in its process environment, imports that live snapshot, verifies the
+PostgreSQL cluster and database identity, and performs all initialization writes
+inside that same transaction. This keeps the writes on one PostgreSQL backend
+even when `DATABASE_URL` points through a transaction-pooling proxy. A copied
+data directory, promoted standby, restored disk snapshot, or other node cannot
+import the exporter-owned snapshot even when its static fingerprint matches.
+The guard is not persisted or printed. A guard rejection restores the previous
+runtime environment but leaves Management stopped for explicit reconciliation
+instead of reconnecting it to an unverified target.
+
+A committed transaction emits exactly one redacted
+`supacloud.control-plane-upgrade-safety.v1` receipt. It contains only the backup
+identifier and directory, byte count, SHA-256 digest, migration candidate
+counts, checkpoint state, and completion time. Admin validates the exact
+receipt schema before deleting the transient
+status and log records. A missing or malformed receipt leaves those records in
+place and requires reconciliation. Restoring a control-plane backup is a
+separate destructive operation and requires an explicit, independently reviewed
+recovery decision; the upgrade command never restores one automatically.
 
 Admin observes the remote transaction for up to 30 minutes. Reaching that
 deadline stops only local observation; it does not stop, clean up, or mark the

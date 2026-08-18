@@ -1,6 +1,6 @@
 import { config } from "../config";
 import { logger } from "../utils/logger";
-import { SQL } from "bun";
+import { SQL, type TransactionSQL } from "bun";
 import {
   generatePublishableApiKey,
   generateSecretApiKey,
@@ -22,6 +22,7 @@ import { migrateAuditChainSequences } from "./audit-chain-migration";
 import { migrateProjectMutationJournal } from "./project-mutation-migration";
 import { migrateLegacyEncryptedSecretsInTransaction } from "./secret-key-migration";
 import { GOTRUE_USER_ID_POSTGRES_PATTERN } from "../utils/project-user-lifecycle";
+import { withExpectedControlPlaneDatabaseTransaction } from "./control-plane-database-identity";
 
 function sqlStringLiteral(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
@@ -350,7 +351,7 @@ export async function initDatabase() {
   `;
 
   // Use explicit config instead of URL to ensure correct database name
-  const sql = new SQL({
+  const sqlPool = new SQL({
     hostname,
     port: parseInt(port, 10),
     database,
@@ -358,22 +359,25 @@ export async function initDatabase() {
     password,
     max: 2,
   });
+  // One explicit transaction keeps guarded upgrades on one PostgreSQL backend through pooling proxies.
+  const sqlConnection = await sqlPool.reserve();
+  let sql: SQL = sqlConnection;
 
   async function runMigrationStatement(statement: string, options?: { swallowError?: boolean; description?: string }) {
-    try {
+    if (!options?.swallowError) {
       await sql.unsafe(statement);
-    } catch (error: any) {
-      if (options?.swallowError) {
-        logger.warn(`Skipped optional migration${options.description ? ` (${options.description})` : ""}: ${error?.message || String(error)}`);
-        return;
-      }
-      throw error;
+      return;
+    }
+    try {
+      await (sql as TransactionSQL).savepoint((migration) => migration.unsafe(statement));
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn(`Skipped optional migration${options.description ? ` (${options.description})` : ""}: ${message}`);
     }
   }
 
-  try {
-    await sql`SELECT 1`;
-    logger.info("Connected to database");
+  async function initializeControlPlaneSchema(transaction: TransactionSQL): Promise<void> {
+    sql = transaction;
 
     // Check current database
     const [dbInfo] =
@@ -740,7 +744,7 @@ export async function initDatabase() {
     }
     logger.info("Schema migrations applied.");
 
-    await sql.begin(async (transaction) => {
+    await transaction.savepoint(async (transaction) => {
       await ensurePlatformV2Schema(transaction);
       await migrateProjectMutationJournal(transaction);
       await migrateAuditChainSequences(transaction);
@@ -874,13 +878,20 @@ export async function initDatabase() {
         );
       }
     });
+  }
+
+  try {
+    await sql`SELECT 1`;
+    logger.info("Connected to database");
+    await withExpectedControlPlaneDatabaseTransaction(sqlConnection, initializeControlPlaneSchema);
   } catch (error: unknown) {
     logger.error("Failed to initialize database:", {
       error: error instanceof Error ? error.message : String(error),
     });
     throw error;
   } finally {
-    await sql.close();
+    sqlConnection.release();
+    await sqlPool.close();
   }
 }
 

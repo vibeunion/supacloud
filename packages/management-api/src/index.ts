@@ -37,6 +37,10 @@ import { studioAuthRoutes } from "./routes/studio-auth";
 import { caddyAskRoutes } from "./routes/caddy-ask";
 import { validationErrorResponse } from "./utils/http-validation";
 import { withLogicalBackupMutationTimeoutController } from "./utils/logical-backup-request-timeout";
+import {
+  CONTROL_PLANE_DATABASE_GUARD_EXIT_CODE,
+  ControlPlaneDatabaseGuardError,
+} from "./db/control-plane-database-identity";
 
 function getWebConsoleDir(): string {
   return resolveWebConsoleDir();
@@ -917,7 +921,9 @@ async function bootstrap() {
       logger.error("Failed to initialize database:", {
         error: err instanceof Error ? err.message : String(err),
       });
-      process.exit(1);
+      process.exit(err instanceof ControlPlaneDatabaseGuardError
+        ? CONTROL_PLANE_DATABASE_GUARD_EXIT_CODE
+        : 1);
     }
   } else if (args.includes("install") || args.includes("--install")) {
     const { runInstall } = await import("./install");

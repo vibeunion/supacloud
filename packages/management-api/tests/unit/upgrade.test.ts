@@ -34,6 +34,7 @@ import {
     applyGrafanaUpgradeSettings,
     captureFileState,
     cleanupBinaryBackup,
+    controlPlaneSafetyReceiptLine,
     createBinaryBackupState,
     executeUpgradeTransaction,
     ensureEdgeRuntimeIdentity,
@@ -93,6 +94,7 @@ import {
     waitForManagementHealth,
     waitForEdgeRuntimeHealth,
     waitForUpgradeHealth,
+    type StagedMigrationOperations,
 } from "../../src/upgrade";
 import {
     activatePreparedSystemdUnitBroker,
@@ -100,6 +102,7 @@ import {
     readPrivilegedHelperIdentity,
     stageEmbeddedSystemdUnitBroker,
 } from "../../src/embedded-systemd-unit-broker";
+import { ControlPlaneDatabaseGuardError } from "../../src/db/control-plane-database-identity";
 
 const originalFetch = globalThis.fetch;
 const attestationEnvironmentKeys = [
@@ -125,6 +128,36 @@ const originalUpgradeHealthAttempts = process.env.SUPACLOUD_UPGRADE_HEALTH_ATTEM
 const originalEdgeUpgradeHealthAttempts = process.env.SUPACLOUD_UPGRADE_EDGE_HEALTH_ATTEMPTS;
 const canonicalManagementBinary = "/usr/local/bin/supacloud";
 const currentBinarySha256 = "a".repeat(64);
+const controlPlaneSafetyEvidence = {
+  schema: "supacloud.control-plane-upgrade-safety.v1" as const,
+  backup_id: "control-plane-20260819T000000Z-00000000-0000-4000-8000-000000000001",
+  backup_directory: "/var/lib/supacloud/backups/control-plane-upgrades/control-plane-test",
+  bytes: 1024,
+  candidate_counts: {
+    deprecated_webhook_secrets: 0,
+    legacy_deployment_history_rows: 0,
+    legacy_project_config_rows: 0,
+    opaque_key_backfill_projects: 0,
+    stored_secret_values: 3,
+  },
+  completed_at: "2026-08-19T00:00:00.000Z",
+  current_key_checkpoint_present: true,
+  sha256: "c".repeat(64),
+};
+const controlPlaneDatabaseFingerprint = "b".repeat(64);
+const controlPlaneSnapshotId = "00000003-0000001B-1";
+
+function successfulControlPlaneSafety(events: string[]): StagedMigrationOperations["withSafety"] {
+  return async (_databaseUrl, _encryptionKey, operation) => {
+    events.push("safety");
+    await operation({
+      databaseFingerprint: controlPlaneDatabaseFingerprint,
+      evidence: controlPlaneSafetyEvidence,
+      snapshotId: controlPlaneSnapshotId,
+    });
+    return controlPlaneSafetyEvidence;
+  };
+}
 
 type ManagementBinaryFixture = {
   execStartPath?: string;
@@ -413,15 +446,26 @@ describe("upgrade release selection", () => {
     await expect(runStagedDatabaseMigration("/staged/supacloud", prepared, {
       captureRuntimeEnv: () => ({ path: "/runtime.env", existed: true, content: Buffer.from("old"), mode: 0o600 }),
       stopService: async () => { events.push("stop"); },
-      persistSecrets: () => { events.push("persist"); },
-      runInit: async () => { events.push("init"); throw new Error("init failed"); },
+      withSafety: successfulControlPlaneSafety(events),
+      persistSecrets: (secrets) => {
+        events.push("persist");
+        expect(secrets.SUPACLOUD_EXPECTED_CONTROL_PLANE_DATABASE_FINGERPRINT).toBeUndefined();
+        expect(secrets.SUPACLOUD_EXPECTED_CONTROL_PLANE_DATABASE_SNAPSHOT).toBeUndefined();
+      },
+      runInit: async (_binary, env) => {
+        events.push("init");
+        expect(env.SUPACLOUD_EXPECTED_CONTROL_PLANE_DATABASE_FINGERPRINT)
+          .toBe(controlPlaneDatabaseFingerprint);
+        expect(env.SUPACLOUD_EXPECTED_CONTROL_PLANE_DATABASE_SNAPSHOT).toBe(controlPlaneSnapshotId);
+        throw new Error("init failed");
+      },
       hasCheckpoint: async () => { events.push("checkpoint:false"); return false; },
       restoreRuntimeEnv: () => { events.push("restore-env"); },
       restart: async () => { events.push("restart"); },
       healthCheck: async () => { events.push("health"); },
     })).rejects.toThrow("init failed");
 
-    expect(events).toEqual(["stop", "persist", "init", "checkpoint:false", "restore-env", "restart", "health"]);
+    expect(events).toEqual(["stop", "safety", "persist", "init", "checkpoint:false", "restore-env", "restart", "health"]);
   });
 
   test("keeps the current runtime key when init-db reports failure after a durable rotation checkpoint", async () => {
@@ -434,6 +478,7 @@ describe("upgrade release selection", () => {
     await expect(runStagedDatabaseMigration("/staged/supacloud", prepared, {
       captureRuntimeEnv: () => ({ path: "/runtime.env", existed: true, content: Buffer.from("old"), mode: 0o600 }),
       stopService: async () => { events.push("stop"); },
+      withSafety: successfulControlPlaneSafety(events),
       persistSecrets: () => { events.push("persist"); },
       runInit: async () => { events.push("init"); throw new Error("post-commit failure"); },
       hasCheckpoint: async () => { events.push("checkpoint:true"); return true; },
@@ -442,7 +487,7 @@ describe("upgrade release selection", () => {
       healthCheck: async () => { events.push("health"); },
     })).rejects.toThrow("post-commit failure");
 
-    expect(events).toEqual(["stop", "persist", "init", "checkpoint:true", "restart", "health"]);
+    expect(events).toEqual(["stop", "safety", "persist", "init", "checkpoint:true", "restart", "health"]);
   });
 
   test("leaves the service stopped when checkpoint state cannot be read safely", async () => {
@@ -455,6 +500,7 @@ describe("upgrade release selection", () => {
     await expect(runStagedDatabaseMigration("/staged/supacloud", prepared, {
       captureRuntimeEnv: () => ({ path: "/runtime.env", existed: false }),
       stopService: async () => { events.push("stop"); },
+      withSafety: successfulControlPlaneSafety(events),
       persistSecrets: () => { events.push("persist"); },
       runInit: async () => { events.push("init"); throw new Error("init failed"); },
       hasCheckpoint: async () => { events.push("checkpoint:error"); throw new Error("database unavailable"); },
@@ -463,7 +509,62 @@ describe("upgrade release selection", () => {
       healthCheck: async () => { events.push("health"); },
     })).rejects.toThrow("service remains stopped");
 
-    expect(events).toEqual(["stop", "persist", "init", "checkpoint:error"]);
+    expect(events).toEqual(["stop", "safety", "persist", "init", "checkpoint:error"]);
+  });
+
+  test("restores runtime secrets but leaves Management stopped when the live snapshot guard rejects", async () => {
+    const events: string[] = [];
+    const prepared = prepareUpgradeSecrets({
+      MASTER_TOKEN: "master-token-0123456789abcdef0123456789abcdef",
+      DATABASE_URL: "postgresql://postgres:test@localhost:5432/supacloud_meta",
+    });
+
+    await expect(runStagedDatabaseMigration("/staged/supacloud", prepared, {
+      captureRuntimeEnv: () => ({ path: "/runtime.env", existed: true, content: Buffer.from("old"), mode: 0o600 }),
+      stopService: async () => { events.push("stop"); },
+      withSafety: successfulControlPlaneSafety(events),
+      persistSecrets: () => { events.push("persist"); },
+      runInit: async () => {
+        events.push("init");
+        throw new ControlPlaneDatabaseGuardError("snapshot belongs to another server");
+      },
+      hasCheckpoint: async () => { events.push("checkpoint"); return false; },
+      restoreRuntimeEnv: () => { events.push("restore-env"); },
+      restart: async () => { events.push("restart"); },
+      healthCheck: async () => { events.push("health"); },
+    })).rejects.toThrow("service remains stopped");
+
+    expect(events).toEqual(["stop", "safety", "persist", "init", "restore-env"]);
+  });
+
+  test("restarts Management without changing runtime secrets when control-plane backup fails", async () => {
+    const events: string[] = [];
+    const prepared = prepareUpgradeSecrets({
+      MASTER_TOKEN: "master-token-0123456789abcdef0123456789abcdef",
+      DATABASE_URL: "postgresql://postgres:test@localhost:5432/supacloud_meta",
+    });
+
+    await expect(runStagedDatabaseMigration("/staged/supacloud", prepared, {
+      captureRuntimeEnv: () => ({ path: "/runtime.env", existed: true, content: Buffer.from("old"), mode: 0o600 }),
+      stopService: async () => { events.push("stop"); },
+      withSafety: async () => { events.push("safety"); throw new Error("backup failed"); },
+      persistSecrets: () => { events.push("persist"); },
+      runInit: async () => { events.push("init"); },
+      hasCheckpoint: async () => { events.push("checkpoint"); return false; },
+      restoreRuntimeEnv: () => { events.push("restore-env"); },
+      restart: async () => { events.push("restart"); },
+      healthCheck: async () => { events.push("health"); },
+    })).rejects.toThrow("backup failed");
+
+    expect(events).toEqual(["stop", "safety", "restore-env", "restart", "health"]);
+  });
+
+  test("prints one machine-readable control-plane safety receipt without secrets", () => {
+    const line = controlPlaneSafetyReceiptLine(controlPlaneSafetyEvidence);
+    expect(line).toStartWith("SUPACLOUD_CONTROL_PLANE_UPGRADE_SAFETY=");
+    expect(JSON.parse(line.split("=", 2)[1]!)).toEqual(controlPlaneSafetyEvidence);
+    expect(line).not.toContain("private-password");
+    expect(line).not.toContain(controlPlaneDatabaseFingerprint);
   });
 
   test("recovers a service that partially stopped before reporting a systemctl error", async () => {
@@ -934,12 +1035,19 @@ describe("upgrade release selection", () => {
   });
 
   test("upgrade preflight requires setpriv and id before staging", () => {
-    const installedPaths = new Set(["/usr/bin/setpriv", "/usr/bin/id"]);
+    const installedPaths = new Set([
+      "/usr/bin/setpriv", "/usr/bin/id", "/usr/bin/pg_dump", "/usr/bin/pg_restore", "/usr/bin/timeout",
+    ]);
     expect(() => verifyBackupPrivilegeDropPreflight((filePath) => installedPaths.has(filePath))).not.toThrow();
     expect(() => verifyBackupPrivilegeDropPreflight((filePath) => filePath.endsWith("/id")))
       .toThrow("requires setpriv");
     expect(() => verifyBackupPrivilegeDropPreflight((filePath) => filePath.endsWith("/setpriv")))
       .toThrow("requires id");
+    expect(() => verifyBackupPrivilegeDropPreflight((filePath) => (
+      filePath.endsWith("/setpriv") || filePath.endsWith("/id")
+    ))).toThrow("requires pg_dump and pg_restore");
+    expect(() => verifyBackupPrivilegeDropPreflight((filePath) => !filePath.endsWith("/timeout")))
+      .toThrow("requires timeout");
   });
 
   test("rejects a deleted active executable", async () => {

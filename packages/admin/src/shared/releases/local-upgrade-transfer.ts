@@ -53,12 +53,98 @@ const REMOTE_RUN_ROOT = "/var/lib/supacloud/upgrade-runs";
 const REMOTE_LOG_ROOT = "/var/log/supacloud";
 const REMOTE_UPLOAD_ROOT = "/var/tmp";
 const REMOTE_COMMAND_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+const CONTROL_PLANE_BACKUP_ROOT = "/var/lib/supacloud/backups/control-plane-upgrades";
+const CONTROL_PLANE_SAFETY_PREFIX = "SUPACLOUD_CONTROL_PLANE_UPGRADE_SAFETY=";
+const MINIMUM_CONTROL_PLANE_SAFETY_VERSION = [0, 61, 4] as const;
 const POLL_INTERVAL_MS = 2_000;
 const STATE_READ_ATTEMPTS = 3;
 const REMOTE_STATE_READ_TIMEOUT_MS = 15_000;
 export const UPGRADE_OBSERVATION_TIMEOUT_MS = 30 * 60_000;
 
 class RemoteUpgradeReconciliationError extends AggregateError {}
+
+type ControlPlaneSafetyEvidence = {
+    backup_id: string;
+    backup_directory: string;
+    bytes: number;
+    candidate_counts: Record<string, number>;
+    completed_at: string;
+    current_key_checkpoint_present: boolean;
+    schema: "supacloud.control-plane-upgrade-safety.v1";
+    sha256: string;
+};
+
+function exactObjectKeys(candidate: Record<string, unknown>, expected: readonly string[]): boolean {
+    const actual = Object.keys(candidate).sort();
+    return actual.length === expected.length && actual.every((key, index) => key === [...expected].sort()[index]);
+}
+
+function nonNegativeIntegerRecord(candidate: unknown, expectedKeys: readonly string[]): candidate is Record<string, number> {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return false;
+    const record = candidate as Record<string, unknown>;
+    return exactObjectKeys(record, expectedKeys)
+        && Object.values(record).every((value) => Number.isSafeInteger(value) && Number(value) >= 0);
+}
+
+function canonicalTimestamp(candidate: unknown): candidate is string {
+    if (typeof candidate !== "string") return false;
+    const timestamp = new Date(candidate);
+    return Number.isFinite(timestamp.valueOf()) && timestamp.toISOString() === candidate;
+}
+
+export function parseControlPlaneSafetyEvidence(log: string): ControlPlaneSafetyEvidence {
+    const receiptLines = log.split(/\r?\n/)
+        .filter((line) => line.startsWith(CONTROL_PLANE_SAFETY_PREFIX));
+    if (receiptLines.length !== 1) throw new Error("Remote upgrade did not emit one control-plane safety receipt");
+    let candidate: unknown;
+    try {
+        candidate = JSON.parse(receiptLines[0]!.slice(CONTROL_PLANE_SAFETY_PREFIX.length));
+    } catch {
+        throw new Error("Remote control-plane safety receipt is not valid JSON");
+    }
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+        throw new Error("Remote control-plane safety receipt is invalid");
+    }
+    const receipt = candidate as Record<string, unknown>;
+    const expectedKeys = [
+        "backup_id", "backup_directory", "bytes", "candidate_counts", "completed_at",
+        "current_key_checkpoint_present", "schema", "sha256",
+    ];
+    const candidateKeys = [
+        "deprecated_webhook_secrets", "legacy_deployment_history_rows", "legacy_project_config_rows",
+        "opaque_key_backfill_projects", "stored_secret_values",
+    ];
+    const validBackupId = typeof receipt.backup_id === "string"
+        && /^control-plane-\d{8}T\d{6}Z-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(receipt.backup_id);
+    const validDigest = typeof receipt.sha256 === "string" && /^[0-9a-f]{64}$/.test(receipt.sha256);
+    if (!exactObjectKeys(receipt, expectedKeys)
+        || receipt.schema !== "supacloud.control-plane-upgrade-safety.v1"
+        || !validBackupId
+        || receipt.backup_directory !== `${CONTROL_PLANE_BACKUP_ROOT}/${receipt.backup_id}`
+        || !Number.isSafeInteger(receipt.bytes) || Number(receipt.bytes) <= 0
+        || !canonicalTimestamp(receipt.completed_at)
+        || typeof receipt.current_key_checkpoint_present !== "boolean"
+        || !validDigest
+        || !nonNegativeIntegerRecord(receipt.candidate_counts, candidateKeys)) {
+        throw new Error("Remote control-plane safety receipt is invalid");
+    }
+    return receipt as ControlPlaneSafetyEvidence;
+}
+
+export function assertControlPlaneSafetyVersion(version: string): void {
+    const match = version.match(/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/);
+    if (!match) throw new Error("Management version must be an exact stable version");
+    const requested = match.slice(1).map(Number);
+    if (!requested.every(Number.isSafeInteger)) {
+        throw new Error("Management version must be an exact stable version");
+    }
+    for (let index = 0; index < requested.length; index += 1) {
+        if (requested[index]! > MINIMUM_CONTROL_PLANE_SAFETY_VERSION[index]!) return;
+        if (requested[index]! < MINIMUM_CONTROL_PLANE_SAFETY_VERSION[index]!) {
+            throw new Error("Local artifact upgrades require Management 0.61.4 or newer with control-plane backup safety");
+        }
+    }
+}
 
 function quoteShell(shellText: string): string {
     return `'${shellText.split("'").join("'\\''")}'`;
@@ -118,7 +204,7 @@ export function buildRemotePreflightScript(): string {
         "export PATH",
         trustedInstalledGithubFunction(),
         "test -d /run/systemd/system || { echo 'systemd is not the active init system' >&2; exit 1; }",
-        "for tool in systemctl systemd-run sha256sum stat realpath tar file find sort awk grep tail timeout flock install mktemp; do command -v \"$tool\" >/dev/null 2>&1 || { echo \"Required local-upgrade tool is missing: $tool\" >&2; exit 127; }; done",
+        "for tool in systemctl systemd-run sha256sum stat realpath tar file find sort awk grep tail timeout flock install mktemp setpriv id pg_dump pg_restore; do command -v \"$tool\" >/dev/null 2>&1 || { echo \"Required local-upgrade tool is missing: $tool\" >&2; exit 127; }; done",
         "tail -n 0 -- /dev/null >/dev/null 2>&1 || { echo 'A tail implementation with -n and -- support is required' >&2; exit 1; }",
         "systemd-run --help | grep -Eq -- '(^|[[:space:]])--collect([=[:space:]]|$)' || { echo 'systemd-run --collect is required' >&2; exit 1; }",
         "test -d /run/lock || { echo '/run/lock is unavailable' >&2; exit 1; }",
@@ -814,6 +900,14 @@ async function completedUpgradeOutput(ssh: SshTransport, paths: RemoteUpgradePat
             "Upgrade succeeded but its retained log could not be read", [error], paths,
         );
     }
+    let safetyEvidence: ControlPlaneSafetyEvidence;
+    try {
+        safetyEvidence = parseControlPlaneSafetyEvidence(log);
+    } catch (error: unknown) {
+        throw remoteReconciliationFailure(
+            "Upgrade succeeded but control-plane safety evidence is invalid", [error], paths,
+        );
+    }
     try {
         await cleanupRemoteRecords(ssh, paths);
     } catch (error: unknown) {
@@ -821,7 +915,7 @@ async function completedUpgradeOutput(ssh: SshTransport, paths: RemoteUpgradePat
             "Upgrade succeeded but remote evidence cleanup could not be confirmed", [error], paths,
         );
     }
-    return `✅ Upgrade done\n${log.slice(-1_500)}`;
+    return `✅ Upgrade done\n${JSON.stringify(safetyEvidence)}\n${log.slice(-1_500)}`;
 }
 
 async function throwRemoteUpgradeFailure(ssh: SshTransport, paths: RemoteUpgradePaths, status: string): Promise<never> {
@@ -897,6 +991,7 @@ export async function awaitRemoteUpgrade(ssh: SshTransport, paths: RemoteUpgrade
 }
 
 export async function executeLocalUpgradeTransfer(ssh: SshTransport, request: LocalUpgradeTransferRequest): Promise<string> {
+    assertControlPlaneSafetyVersion(request.managementVersion);
     const runId = randomUUID();
     const paths = buildRemoteUpgradePaths(runId);
     const preflight = await remoteUpgradePreflight(ssh);

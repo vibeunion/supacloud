@@ -6,6 +6,7 @@ import { join } from "node:path";
 
 import {
     adoptRemoteDrop,
+    assertControlPlaneSafetyVersion,
     awaitRemoteUpgrade,
     buildAdoptDropScript,
     buildCleanupUnstartedUpgradeScript,
@@ -17,7 +18,9 @@ import {
     buildTargetRunnerCapabilityScript,
     buildUploadDropCleanupFailure,
     buildUpgradeLockScript,
+    executeLocalUpgradeTransfer,
     failureRequiresRemoteReconciliation,
+    parseControlPlaneSafetyEvidence,
     parseRemotePreflight,
     remoteUpgradePreflight,
     startRemoteUpgrade,
@@ -55,6 +58,71 @@ class ScriptedSsh {
 function remoteResult(stdout = "", success = true): ScriptedResult {
     return { success, stdout, stderr: success ? "" : "remote failure", code: success ? 0 : 1 };
 }
+
+const controlPlaneSafetyEvidence = {
+    schema: "supacloud.control-plane-upgrade-safety.v1" as const,
+    backup_id: "control-plane-20260819T000000Z-00000000-0000-4000-8000-000000000001",
+    backup_directory: "/var/lib/supacloud/backups/control-plane-upgrades/control-plane-20260819T000000Z-00000000-0000-4000-8000-000000000001",
+    bytes: 2048,
+    candidate_counts: {
+        deprecated_webhook_secrets: 0,
+        legacy_deployment_history_rows: 0,
+        legacy_project_config_rows: 0,
+        opaque_key_backfill_projects: 0,
+        stored_secret_values: 6,
+    },
+    completed_at: "2026-08-19T00:00:00.000Z",
+    current_key_checkpoint_present: true,
+    sha256: "c".repeat(64),
+};
+
+function successfulUpgradeLog(message = "upgrade committed"): string {
+    return `${message}\nSUPACLOUD_CONTROL_PLANE_UPGRADE_SAFETY=${JSON.stringify(controlPlaneSafetyEvidence)}\n`;
+}
+
+describe("control-plane safety receipt", () => {
+    test("requires the first Management release with in-transaction control-plane backup safety", () => {
+        expect(() => assertControlPlaneSafetyVersion("0.61.3")).toThrow("0.61.4 or newer");
+        expect(() => assertControlPlaneSafetyVersion("0.61.4")).not.toThrow();
+        expect(() => assertControlPlaneSafetyVersion("0.62.0")).not.toThrow();
+        expect(() => assertControlPlaneSafetyVersion("1.0.0")).not.toThrow();
+        expect(() => assertControlPlaneSafetyVersion("latest")).toThrow("exact stable version");
+        expect(() => assertControlPlaneSafetyVersion("999999999999999999999.61.4"))
+            .toThrow("exact stable version");
+    });
+
+    test("rejects Management 0.61.3 before remote access", async () => {
+        let remoteAccesses = 0;
+        const ssh = {
+            exec: async () => {
+                remoteAccesses += 1;
+                throw new Error("remote access must not run");
+            },
+        };
+        await expect(executeLocalUpgradeTransfer(ssh as never, {
+            managementVersion: "0.61.3",
+            edgeRuntimeVersion: "0.18.2",
+        })).rejects.toThrow("0.61.4 or newer");
+        expect(remoteAccesses).toBe(0);
+    });
+
+    test("accepts one exact redacted receipt", () => {
+        expect(parseControlPlaneSafetyEvidence(successfulUpgradeLog())).toEqual(controlPlaneSafetyEvidence);
+    });
+
+    test("rejects missing, duplicate, secret-bearing, and malformed receipts", () => {
+        expect(() => parseControlPlaneSafetyEvidence("upgrade committed\n")).toThrow("one control-plane safety receipt");
+        expect(() => parseControlPlaneSafetyEvidence(`${successfulUpgradeLog()}${successfulUpgradeLog()}`))
+            .toThrow("one control-plane safety receipt");
+        expect(() => parseControlPlaneSafetyEvidence(successfulUpgradeLog().replace(
+            '"sha256"',
+            '"password":"not-allowed","sha256"',
+        ))).toThrow("receipt is invalid");
+        expect(() => parseControlPlaneSafetyEvidence(
+            "SUPACLOUD_CONTROL_PLANE_UPGRADE_SAFETY={not-json}\n",
+        )).toThrow("not valid JSON");
+    });
+});
 
 type RemoteStateFixture = {
     dropExists?: boolean;
@@ -1059,7 +1127,7 @@ describe("local upgrade remote runner", () => {
         const ssh = new ScriptedSsh([
             new Error("SSH connection reset while monitoring"),
             remoteState({ status: "SUCCEEDED", serviceState: "inactive", unitExists: false }),
-            remoteResult("transaction complete\n"),
+            remoteResult(successfulUpgradeLog("transaction complete")),
             remoteResult(),
         ]);
 
@@ -1175,7 +1243,7 @@ describe("local upgrade remote runner", () => {
     test("removes terminal records only after a completed unit publishes success", async () => {
         const ssh = new ScriptedSsh([
             remoteState({ status: "SUCCEEDED", serviceState: "inactive", unitExists: false }),
-            remoteResult("upgrade committed\n"),
+            remoteResult(successfulUpgradeLog()),
             remoteResult(),
         ]);
 
@@ -1194,7 +1262,7 @@ describe("local upgrade remote runner", () => {
         ] as const) {
             const ssh = new ScriptedSsh([
                 remoteState({ status: "SUCCEEDED", serviceState, unitLoadState, unitExists }),
-                remoteResult("upgrade committed\n"),
+                remoteResult(successfulUpgradeLog()),
                 remoteResult(),
             ]);
 
@@ -1242,7 +1310,7 @@ describe("local upgrade remote runner", () => {
     test("requires reconciliation when successful record cleanup disconnects", async () => {
         const ssh = new ScriptedSsh([
             remoteState({ status: "SUCCEEDED", serviceState: "inactive", unitExists: false }),
-            remoteResult("upgrade committed\n"),
+            remoteResult(successfulUpgradeLog()),
             new Error("SSH stream closed during record cleanup"),
         ]);
 
@@ -1251,6 +1319,21 @@ describe("local upgrade remote runner", () => {
         expect(String(failure)).toContain("cleanup could not be confirmed");
         expect(String(failure)).toContain(paths.status);
         expect(String(failure)).toContain(paths.log);
+    });
+
+    test("retains successful status and log records when the safety receipt is missing", async () => {
+        const ssh = new ScriptedSsh([
+            remoteState({ status: "SUCCEEDED", serviceState: "inactive", unitExists: false }),
+            remoteResult("upgrade committed without safety evidence\n"),
+        ]);
+
+        const failure = await awaitRemoteUpgrade(ssh as never, paths).catch((error: unknown) => error);
+        expect(failureRequiresRemoteReconciliation(failure)).toBe(true);
+        expect(String(failure)).toContain("control-plane safety evidence is invalid");
+        expect(String(failure)).toContain(paths.status);
+        expect(String(failure)).toContain(paths.log);
+        expect(ssh.commands).toHaveLength(2);
+        expect(ssh.commands.some((command) => command.includes("rm -f --"))).toBe(false);
     });
 
     test("requires reconciliation when a successful log disappears after state read-back", async () => {
