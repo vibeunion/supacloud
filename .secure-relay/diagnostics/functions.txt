@@ -1,0 +1,2 @@
+PATTERN: edge.?function|function.*deploy|deploy.*function|functions/v1|function_deploy|function-deploy|storage.*500|object.*storage
+
