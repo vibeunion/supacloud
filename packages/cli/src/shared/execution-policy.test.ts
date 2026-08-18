@@ -172,6 +172,19 @@ describe("CLI execution policy", () => {
         })).toThrow("SUPACLOUD_READ_ONLY=true");
     });
 
+    test("classifies auth user reads and generate_link as a production-confirmed write", () => {
+        expect(executionMode("auth", "list_users", {})).toBe("read");
+        expect(executionMode("auth", "get_user", {})).toBe("read");
+        expect(executionMode("auth", "generate_link", {})).toBe("write");
+        expect(() => authorizeExecution("auth", { action: "generate_link", ref: "prod-ref" }, {
+            context: context(),
+        })).toThrow("--confirm-production prod-ref");
+        expect(() => authorizeExecution("auth", { action: "generate_link", ref: "prod-ref" }, {
+            context: context(),
+            confirmProduction: "prod-ref",
+        })).not.toThrow();
+    });
+
     test("classifies verified release controls and protects their mutations", () => {
         expect(executionMode("release", "logical_backup_list", {})).toBe("read");
         expect(executionMode("release", "postgrest_status", {})).toBe("read");

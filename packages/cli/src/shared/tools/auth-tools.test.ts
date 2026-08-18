@@ -22,6 +22,117 @@ function captureAuthTool(http: Record<string, unknown>) {
 }
 
 describe("auth CLI mutation contract", () => {
+    test("lists bounded users with pagination and projects safe fields", async () => {
+        const requests: Array<{ path: string; options: unknown }> = [];
+        const { schema, callback } = captureAuthTool({
+            get: async (path: string, options: unknown) => {
+                requests.push({ path, options });
+                return {
+                    ok: true,
+                    status: 200,
+                    data: {
+                        users: [{
+                            id: "00000000-0000-4000-8000-000000000001",
+                            email: "operator@example.test",
+                            encrypted_password: "must-not-return",
+                            confirmation_token: "must-not-return",
+                        }],
+                        total: 1,
+                        page: 2,
+                        per_page: 1,
+                    },
+                };
+            },
+        });
+
+        const args = parseToolArguments(schema, {
+            action: "list_users",
+            ref: "project-a",
+            page: 2,
+            per_page: 1,
+            search: "operator@example.test",
+        });
+        const response = await callback(args);
+        const output = JSON.parse(response.content[0].text);
+
+        expect(requests[0]?.path).toBe("/v1/projects/project-a/auth/users?page=2&per_page=1&search=operator%40example.test");
+        expect(requests[0]?.options).toEqual({ maxJsonBytes: 64 * 1024, responseTimeoutMs: 5_000 });
+        expect(output.users).toEqual([{ id: "00000000-0000-4000-8000-000000000001", email: "operator@example.test" }]);
+        expect(response.content[0].text).not.toContain("must-not-return");
+    });
+
+    test("gets an exact UUID user and rejects path injection", async () => {
+        const paths: string[] = [];
+        const { callback } = captureAuthTool({
+            get: async (path: string) => {
+                paths.push(path);
+                return { ok: true, status: 200, data: { id: "00000000-0000-4000-8000-000000000002", email: "user@example.test" } };
+            },
+        });
+
+        const response = await callback({
+            action: "get_user",
+            ref: "project-a",
+            user_id: "00000000-0000-4000-8000-000000000002",
+        });
+        expect(paths).toEqual(["/v1/projects/project-a/auth/users/00000000-0000-4000-8000-000000000002"]);
+        expect(JSON.parse(response.content[0].text).user.email).toBe("user@example.test");
+        await expect(callback({ action: "get_user", ref: "project-a", user_id: "../../secrets" })).rejects.toThrow("must be a UUID");
+    });
+
+    test("returns only the action link from a successful bounded generate_link response", async () => {
+        const requests: Array<{ path: string; body: unknown }> = [];
+        const { callback } = captureAuthTool({
+            postReleaseMutation: async (path: string, body: unknown) => {
+                requests.push({ path, body });
+                return {
+                    ok: true,
+                    status: 200,
+                    data: {
+                        properties: {
+                            action_link: "https://auth.example.test/verify?token=one-time",
+                            hashed_token: "must-not-return",
+                        },
+                        user: { email: "user@example.test" },
+                    },
+                };
+            },
+        });
+
+        const response = await callback({
+            action: "generate_link",
+            ref: "project-a",
+            type: "magiclink",
+            email: "user@example.test",
+            redirect_to: "https://app.example.test/callback",
+        });
+        expect(requests).toEqual([{
+            path: "/v1/projects/project-a/auth/generate_link",
+            body: { type: "magiclink", email: "user@example.test", redirect_to: "https://app.example.test/callback" },
+        }]);
+        expect(JSON.parse(response.content[0].text)).toEqual({
+            ok: true,
+            operation: "auth.generate_link",
+            action_link: "https://auth.example.test/verify?token=one-time",
+        });
+        expect(response.content[0].text).not.toContain("must-not-return");
+    });
+
+    test("does not echo sensitive upstream bodies from generate_link failures", async () => {
+        const secret = "action-link-secret";
+        const { callback } = captureAuthTool({
+            postReleaseMutation: async () => ({
+                ok: false,
+                status: 502,
+                data: { action_link: secret, email: "user@example.test", token: secret },
+            }),
+        });
+        const response = await callback({ action: "generate_link", ref: "project-a", type: "magiclink", email: "user@example.test" });
+        expect(response.isError).toBe(true);
+        expect(response.content[0].text).not.toContain(secret);
+        expect(response.content[0].text).not.toContain("user@example.test");
+    });
+
     test("decodes a CLI JSON config before sending the PATCH request", async () => {
         const requests: Array<{ path: string; body: unknown }> = [];
         const { schema, callback } = captureAuthTool({
