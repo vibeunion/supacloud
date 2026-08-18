@@ -31,6 +31,7 @@ import {
     buildRuntimeServiceRestartPlan,
     assertExternalEdgeRuntimeUpgradeMode,
     assertEdgeRuntimeBinaryTarget,
+    applyGrafanaUpgradeSettings,
     captureFileState,
     cleanupBinaryBackup,
     createBinaryBackupState,
@@ -42,6 +43,7 @@ import {
     executeUpgradeRecoveryActions,
     extractWebConsoleArchive,
     formatUpgradeFailure,
+    grafanaSubpathConfigPaths,
     inspectActiveManagementBinary,
     inspectActiveSystemdBinary,
     normalizeEdgeRuntimeReleaseTag,
@@ -207,6 +209,23 @@ const ensureHealthTimeout = () => {
   process.env.SUPACLOUD_UPGRADE_HEALTH_ATTEMPTS = "1";
   process.env.SUPACLOUD_UPGRADE_EDGE_HEALTH_ATTEMPTS = "1";
 };
+
+function emptyUpgradeActivationState(binaryPath: string): UpgradeActivationState {
+  return {
+    binary: createBinaryBackupState(binaryPath),
+    edgeBinary: null,
+    postgrestLauncher: null,
+    systemdUnitBroker: null,
+    webConsoleLink: null,
+    managementEnvState: null,
+    edgeRuntimeEnvState: null,
+    edgeRuntimeDropInState: null,
+    managementPrivilegeDropInState: null,
+    embeddedEdgePrivilegeDropInState: null,
+    grafanaConfigStates: [],
+    grafanaWasActive: null,
+  };
+}
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
@@ -1419,6 +1438,8 @@ describe("upgrade release selection", () => {
         edgeRuntimeDropInState: null,
         managementPrivilegeDropInState: null,
         embeddedEdgePrivilegeDropInState: null,
+        grafanaConfigStates: [],
+        grafanaWasActive: null,
       };
       let rollbackFailure: unknown;
       try {
@@ -1484,6 +1505,75 @@ describe("upgrade release selection", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  test("repairs Grafana subpath settings transactionally during an existing-host upgrade", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "supacloud-grafana-upgrade-"));
+    const managementEnv = join(directory, "management-api.env");
+    const liveConfig = join(directory, "grafana.ini");
+    const templateConfig = join(directory, "grafana.ini.j2");
+    const previousEnv = "GRAFANA_URL=http://127.0.0.1:3000\nCUSTOM=keep\n";
+    const previousConfig = "[server]\nroot_url = /ui/\nserve_from_sub_path = false\n";
+    const activationState = emptyUpgradeActivationState(join(directory, "supacloud"));
+    let restartCount = 0;
+    try {
+      writeFileSync(managementEnv, previousEnv);
+      writeFileSync(liveConfig, previousConfig);
+      writeFileSync(templateConfig, previousConfig);
+      activationState.managementEnvState = captureFileState(managementEnv);
+
+      await applyGrafanaUpgradeSettings(activationState, {}, {
+        configPaths: [liveConfig, templateConfig],
+        managementEnvPath: managementEnv,
+        service: {
+          isActive: async () => true,
+          restart: async () => { restartCount += 1; },
+        },
+      });
+
+      expect(restartCount).toBe(1);
+      expect(activationState.grafanaWasActive).toBe(true);
+      expect(activationState.grafanaConfigStates).toHaveLength(2);
+      expect(readFileSync(liveConfig, "utf8")).toContain("root_url = /grafana/");
+      expect(readFileSync(templateConfig, "utf8")).toContain("serve_from_sub_path = true");
+      expect(readFileSync(managementEnv, "utf8")).toContain("GRAFANA_URL=http://127.0.0.1:3000/grafana");
+
+      await rollbackArtifacts(activationState, []);
+      expect(readFileSync(liveConfig, "utf8")).toBe(previousConfig);
+      expect(readFileSync(templateConfig, "utf8")).toBe(previousConfig);
+      expect(readFileSync(managementEnv, "utf8")).toBe(previousEnv);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("fails before runtime mutation when an active Grafana config is missing", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "supacloud-grafana-missing-"));
+    const managementEnv = join(directory, "management-api.env");
+    const activationState = emptyUpgradeActivationState(join(directory, "supacloud"));
+    try {
+      writeFileSync(managementEnv, "GRAFANA_URL=http://127.0.0.1:3000\n");
+      await expect(applyGrafanaUpgradeSettings(activationState, {}, {
+        configPaths: [join(directory, "missing-grafana.ini")],
+        managementEnvPath: managementEnv,
+        service: {
+          isActive: async () => true,
+          restart: async () => { throw new Error("restart must not run"); },
+        },
+      })).rejects.toThrow("Active grafana-server config is missing");
+      expect(readFileSync(managementEnv, "utf8")).toBe("GRAFANA_URL=http://127.0.0.1:3000\n");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("derives the Grafana template from the persisted absolute Pigsty path", () => {
+    expect(grafanaSubpathConfigPaths({ PIGSTY_PATH: "/srv/pigsty" })).toEqual([
+      "/etc/grafana/grafana.ini",
+      "/srv/pigsty/roles/infra/templates/grafana/grafana.ini.j2",
+    ]);
+    expect(() => grafanaSubpathConfigPaths({ PIGSTY_PATH: "relative/pigsty" }))
+      .toThrow("PIGSTY_PATH must be absolute");
   });
 
   test("a failed current backup never restores a stale historical .bak file", () => {
