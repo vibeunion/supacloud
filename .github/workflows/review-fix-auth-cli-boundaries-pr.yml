@@ -28,8 +28,20 @@ jobs:
           ref: fix/auth-cli-user-link-boundaries
           fetch-depth: 0
 
-      - name: Apply reviewed patch
-        run: python3 .github/scripts/fix-auth-cli-boundaries.py
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Synchronize main and apply reviewed patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git merge --no-edit origin/main
+          python3 .github/scripts/fix-auth-cli-boundaries.py
 
       - name: Validate project CLI
         shell: bash
@@ -45,9 +57,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout origin/main -- packages/cli/package.json
           git rm \
+            .github/scripts/emit-auth-cli-boundaries.py \
             .github/scripts/fix-auth-cli-boundaries.py \
             .github/workflows/review-fix-auth-cli-boundaries.yml \
             .github/workflows/review-fix-auth-cli-boundaries-pr.yml
