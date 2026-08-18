@@ -3,11 +3,12 @@ import { Elysia } from "elysia";
 
 const requireAdminAuth = mock(() => Promise.resolve(undefined));
 const requireProjectOrAdminAuth = mock(() => Promise.resolve(undefined));
-const listProjects = mock(() => Promise.resolve([]));
+const listRoutingSources = mock(() => Promise.resolve([]));
 const getProject = mock(() => Promise.resolve(null));
 
 const authModule = await import("../../src/middleware/auth");
 const servicesModule = await import("../../src/services");
+const endpointSourceModule = await import("../../src/services/project-endpoint-source.service");
 
 const requireAdminAuthSpy = spyOn(authModule, "requireAdminAuth").mockImplementation(
   requireAdminAuth as typeof authModule.requireAdminAuth,
@@ -15,8 +16,11 @@ const requireAdminAuthSpy = spyOn(authModule, "requireAdminAuth").mockImplementa
 const requireProjectOrAdminAuthSpy = spyOn(authModule, "requireProjectOrAdminAuth").mockImplementation(
   requireProjectOrAdminAuth as typeof authModule.requireProjectOrAdminAuth,
 );
-const listProjectsSpy = spyOn(servicesModule.projectService, "listProjects").mockImplementation(
-  listProjects as typeof servicesModule.projectService.listProjects,
+const listRoutingSourcesSpy = spyOn(
+  endpointSourceModule.projectEndpointSourceService,
+  "listRoutingSources",
+).mockImplementation(
+  listRoutingSources as typeof endpointSourceModule.projectEndpointSourceService.listRoutingSources,
 );
 const getProjectSpy = spyOn(servicesModule.projectService, "getProject").mockImplementation(
   getProject as typeof servicesModule.projectService.getProject,
@@ -44,7 +48,7 @@ describe("project endpoint routes", () => {
   afterAll(() => {
     requireAdminAuthSpy.mockRestore();
     requireProjectOrAdminAuthSpy.mockRestore();
-    listProjectsSpy.mockRestore();
+    listRoutingSourcesSpy.mockRestore();
     getProjectSpy.mockRestore();
   });
 
@@ -53,8 +57,8 @@ describe("project endpoint routes", () => {
     requireAdminAuth.mockResolvedValue(undefined);
     requireProjectOrAdminAuth.mockReset();
     requireProjectOrAdminAuth.mockResolvedValue(undefined);
-    listProjects.mockReset();
-    listProjects.mockResolvedValue([] as never);
+    listRoutingSources.mockReset();
+    listRoutingSources.mockResolvedValue([] as never);
     getProject.mockReset();
     getProject.mockResolvedValue(project as never);
   });
@@ -88,8 +92,8 @@ describe("project endpoint routes", () => {
     expect(getProject).toHaveBeenCalledWith("abc123");
   });
 
-  test("returns an Admin-only endpoint inventory", async () => {
-    listProjects.mockResolvedValue([project] as never);
+  test("returns an Admin-only endpoint inventory from private routing sources", async () => {
+    listRoutingSources.mockResolvedValue([project] as never);
 
     const response = await request("/v1/projects/endpoints");
 
@@ -99,12 +103,17 @@ describe("project endpoint routes", () => {
     expect(body[0]).toMatchObject({
       schema: "supacloud.project-endpoints.v1",
       project_ref: "abc123",
+      endpoints: {
+        api: { origin: "https://api.example.com", source: "explicit_api_domain" },
+        auth: { origin: "https://auth.example.com", source: "explicit_auth_domain" },
+        studio: { origin: "https://studio.example.com", source: "explicit_studio_domain" },
+      },
     });
     expect(requireAdminAuth).toHaveBeenCalledWith(expect.any(Request));
-    expect(listProjects).toHaveBeenCalledTimes(1);
+    expect(listRoutingSources).toHaveBeenCalledTimes(1);
   });
 
-  test("does not read projects when authorization fails", async () => {
+  test("does not read routing sources when authorization fails", async () => {
     requireAdminAuth.mockResolvedValue({
       status: 403,
       body: { error: "Admin privileges required" },
@@ -117,7 +126,22 @@ describe("project endpoint routes", () => {
       message: "Admin privileges required",
       code: "403",
     });
-    expect(listProjects).not.toHaveBeenCalled();
+    expect(listRoutingSources).not.toHaveBeenCalled();
+  });
+
+  test("fails closed when the endpoint inventory exceeds its limit", async () => {
+    listRoutingSources.mockResolvedValue(Array.from(
+      { length: 10_001 },
+      (_, index) => ({ ref: `p${index}`, config: null }),
+    ) as never);
+
+    const response = await request("/v1/projects/endpoints");
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({
+      message: "Project endpoint inventory exceeds the supported limit",
+      code: "PROJECT_ENDPOINT_INVENTORY_TOO_LARGE",
+    });
   });
 
   test("returns 404 for a missing project", async () => {
