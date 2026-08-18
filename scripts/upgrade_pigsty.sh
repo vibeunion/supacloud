@@ -8,7 +8,7 @@ set -e
 SUPACLOUD_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 echo "=========================================================="
-PIGSTY_VERSION="${PIGSTY_VERSION:-v4.4.0}"
+PIGSTY_VERSION="${PIGSTY_VERSION:-v4.5.0}"
 PIGSTY_CONFIG_TEMPLATE="${PIGSTY_CONFIG_TEMPLATE:-supabase}"
 SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK="${SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK:-false}"
 ANALYTICS_WAS_RUNNING=false
@@ -63,7 +63,7 @@ if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
 fi
 
 if [[ -f "${SUPACLOUD_ROOT}/scripts/upgrade_pigsty_4_4_compat.sh" ]]; then
-    echo "=> Preparing Analytics migration before Pigsty 4.4 services can initialize the destination schema..."
+    echo "=> Preparing the historical Analytics migration before Pigsty services can initialize the destination schema..."
     ANALYTICS_PREPARE_STARTED=true
     bash "${SUPACLOUD_ROOT}/scripts/upgrade_pigsty_4_4_compat.sh" --prepare-analytics
     ANALYTICS_PREPARE_COMPLETED=true
@@ -129,7 +129,7 @@ if [ -d "$HOME/pigsty" ]; then
     fi
 
     if [[ -f "${SUPACLOUD_ROOT}/scripts/upgrade_pigsty_4_4_compat.sh" ]]; then
-        echo "=> Applying Pigsty 4.4 Supabase compatibility migrations..."
+        echo "=> Applying SupaCloud/Pigsty compatibility migrations..."
         bash "${SUPACLOUD_ROOT}/scripts/upgrade_pigsty_4_4_compat.sh" --apply
     fi
     

@@ -144,7 +144,7 @@ describe("Pigsty 4.4 compatibility upgrade", () => {
     expect(workflow).toContain("docker inspect --format '{{.State.Health.Status}}'");
     expect(workflow).toContain("env -u CI -u GITHUB_ACTIONS bun src/db/init.ts");
     expect(workflow).toContain("upgrade_postgres_docker_4_4_compat.sh --apply");
-    expect(config).toContain('PIGSTY_VERSION="v4.4.0"');
+    expect(config).toContain('PIGSTY_VERSION="v4.5.0"');
   });
 
   test("Docker wrapper fails before writes on unsafe prerequisites", () => {

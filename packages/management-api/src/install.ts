@@ -563,7 +563,7 @@ async function runInteractiveConfig(
         JWT_SECRET: jwtSecret,
         SWAP_SIZE_GB: configured.SWAP_SIZE_GB || "4",
         PG_VERSION: configured.PG_VERSION || "18",
-        PIGSTY_VERSION: configured.PIGSTY_VERSION || "v4.4.0",
+        PIGSTY_VERSION: configured.PIGSTY_VERSION || "v4.5.0",
         TIMEZONE: configured.TIMEZONE || "Asia/Shanghai",
         PIGSTY_CONFIG_TEMPLATE: configured.PIGSTY_CONFIG_TEMPLATE || "supabase",
         SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK:

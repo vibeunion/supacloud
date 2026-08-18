@@ -1,5 +1,7 @@
 # Upgrade to Pigsty 4.4
 
+> Historical migration guide. SupaCloud now defaults to Pigsty v4.5.0; see [Upgrade to Pigsty 4.5](./upgrade-to-pigsty-4.5.md) for the current version pin and operational checklist.
+
 This guide upgrades an existing SupaCloud installation to Pigsty v4.4 and applies the Supabase compatibility migrations introduced with that release.
 
 ## What changes
