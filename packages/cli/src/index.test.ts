@@ -2824,7 +2824,7 @@ describe("supacloud-cli process contract", () => {
                     body: request.method === "POST" ? await request.json() : null,
                 });
                 if (request.method === "POST") return Response.json({ fixtureId, state: "disabled", idempotent: false });
-                return Response.json({ fixtureId, issuer, subject, pending: false });
+                return Response.json(false);
             },
         });
         servers.push(applicationServer);
@@ -2889,7 +2889,7 @@ describe("supacloud-cli process contract", () => {
                 body: { p_fixture_id: fixtureId, p_disable_request_id: disableRequestId, p_issuer: issuer, p_subject: subject },
             },
             {
-                path: `/rest/v1/rpc/fa_release_canary_fixture_pending?p_fixture_id=${fixtureId}&p_issuer=https%3A%2F%2Fissuer.example.test%2Fauth%2Fv1&p_subject=${subject}`,
+                path: `/rest/v1/rpc/fa_release_canary_fixture_pending?p_issuer=https%3A%2F%2Fissuer.example.test%2Fauth%2Fv1&p_subject=${subject}`,
                 method: "GET",
                 authorization: `Bearer ${serviceRoleKey}`,
                 apiKey: serviceRoleKey,
