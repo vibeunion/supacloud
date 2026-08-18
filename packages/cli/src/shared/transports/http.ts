@@ -8,6 +8,7 @@
 export interface HttpConfig {
     baseUrl: string;
     token: string;
+    apiKey?: string;
 }
 
 export interface HttpResult<T = unknown> {
@@ -317,16 +318,19 @@ async function responseJsonOrNull<T>(response: Response): Promise<ResponseJsonRe
 export class HttpTransport {
     private baseUrl: string;
     private token: string;
+    private apiKey: string;
 
     constructor(config: HttpConfig) {
         this.baseUrl = config.baseUrl.replace(/\/$/, "");
         this.token = config.token;
+        this.apiKey = config.apiKey ?? "";
     }
 
     private headers(): Record<string, string> {
         return {
             Authorization: `Bearer ${this.token}`,
             "Content-Type": "application/json",
+            ...(this.apiKey ? { apikey: this.apiKey } : {}),
         };
     }
 

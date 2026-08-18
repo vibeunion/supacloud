@@ -108,10 +108,12 @@ loopback development origins, with the default `:80` likewise omitted. Use
 
 ### Verified release controls
 
-`release` is an official CLI entry point for the existing Management API
-logical-backup and PostgREST lifecycle capabilities. It requires the Management
-API context above; it does not promote an application `service_role` key to
-Management authority.
+`release` is an official CLI entry point for verified Management API controls
+and the release-canary fixture receipt replay. Management actions require the
+Management API context above. `release_canary_fixture_stage_replay` additionally
+requires the same project's `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`; the
+key is sent only to that application origin and is never promoted to Management
+authority.
 
 Project pause and restore are explicit lifecycle commands. A logical backup
 restore requires an operator to pause the selected project first and then use
@@ -138,6 +140,11 @@ supacloud-cli release logical_backup_restore --ref abc123 \
   --restore_confirmation RESTORE_PROJECT:abc123:logical-full_abc123_<backup-id-suffix>:<64-lowercase-hex>
 supacloud-cli release postgrest_status --ref abc123
 supacloud-cli release postgrest_restart --ref abc123
+supacloud-cli release release_canary_fixture_stage_replay --ref abc123 \
+  --subject <central-subject-uuid> --request_id <stage-request-uuid>
+supacloud-cli release release_canary_fixture_disable_replay --ref abc123 \
+  --fixture_id <fixture-uuid> --disable_request_id <disable-request-uuid> \
+  --issuer <issuer-url> --subject <central-subject-uuid>
 ```
 
 Backup creation reports success only after the CLI verifies exactly one new
@@ -157,6 +164,25 @@ PostgREST restart reports success only after it receives a matching restart
 receipt and reads back `desired=running`, `actual=running`, and
 `health=healthy`. Both mutating controls follow the normal production
 confirmation and read-only protections.
+
+`release_canary_fixture_stage_replay` performs one non-retried, response-bounded
+call to the fixed `fa_release_canary_fixture_stage` PostgREST RPC with both
+bearer and `apikey` service-role headers. It accepts only canonical subject and
+request UUIDs, requires a strict `staged` and `idempotent=true` four-field
+receipt, and emits only that safe projection. Before and after the call, the CLI
+reads the selected project's authoritative endpoint projection and requires the
+configured application origin to match its API origin or alias. Production
+confirmation is mandatory.
+
+`release_canary_fixture_disable_replay` performs one non-retried call to the
+fixed `fa_release_canary_fixture_disable` PostgREST RPC using the selected
+project's application service-role origin. Its receipt must contain exactly
+`fixtureId`, `state="disabled"`, and a boolean `idempotent`; both the first
+disable (`idempotent=false`) and same-request replay (`idempotent=true`) are
+valid. The CLI then calls the existing fixed
+`fa_release_canary_fixture_pending` RPC with the exact fixture, issuer, and
+subject and requires an identity-matching `pending=false` read-back before
+reporting success. Management endpoint projection is checked before and after.
 
 The legacy `.env` fallback is unclassified and therefore does not enable the
 production confirmation gate. Production automation must select a `prod` or

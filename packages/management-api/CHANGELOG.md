@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.61.2](https://github.com/vibeunion/supacloud/compare/management-api-v0.61.1...management-api-v0.61.2) (2026-08-18)
+
+
+### Bug Fixes
+
+* **management:** map bun unique violations ([#964](https://github.com/vibeunion/supacloud/issues/964)) ([b1e7db1](https://github.com/vibeunion/supacloud/commit/b1e7db197acea1b948db23d9d06d69ab6d448b7e))
+* **management:** normalize webhook replay timestamps ([#969](https://github.com/vibeunion/supacloud/issues/969)) ([9dc0d04](https://github.com/vibeunion/supacloud/commit/9dc0d04cc957421ccdd9677c2f038136bb0a2b72))
+
 ## [0.61.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.61.0...management-api-v0.61.1) (2026-08-18)
 
 

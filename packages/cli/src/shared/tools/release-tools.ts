@@ -3,6 +3,7 @@ import { optional, stringEnum, withDescription } from "../schema";
 import type { ToolSchema } from "../schema";
 import type { HttpResult, HttpTransport } from "../transports/http";
 import { releaseControlFailure, releaseControlSuccess, type ReleaseControlToolResponse } from "./release-control-response";
+import { PROJECT_ENDPOINT_RESPONSE_MAX_BYTES, projectApiOrigins } from "./project-endpoint-read";
 
 type ToolServer = {
     tool: (
@@ -18,7 +19,22 @@ type ReleaseOperation =
     | "release.logical_backup.create"
     | "release.logical_backup.restore"
     | "release.postgrest.status"
-    | "release.postgrest.restart";
+    | "release.postgrest.restart"
+    | "release.release_canary.fixture_stage_replay"
+    | "release.release_canary.fixture_disable_replay";
+
+type ReleaseCanaryStageReceipt = {
+    fixtureId: string;
+    tenantKey: string;
+    state: "staged";
+    idempotent: true;
+};
+
+type ReleaseCanaryDisableReceipt = {
+    fixtureId: string;
+    state: "disabled";
+    idempotent: boolean;
+};
 
 type VerifiedLogicalBackup = {
     backup_id: string;
@@ -45,6 +61,14 @@ const INVENTORY_MAX_BYTES = 1024 * 1024;
 const MUTATION_MAX_BYTES = 64 * 1024;
 const BACKUP_TIMEOUT_MS = 36 * 60_000;
 const RELEASE_READ_RESPONSE_TIMEOUT_MS = 5_000;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const RELEASE_CANARY_TENANT_KEY = /^release-canary-[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const RELEASE_CANARY_STAGE_RECEIPT_KEYS = new Set(["fixtureId", "tenantKey", "state", "idempotent"]);
+const RELEASE_CANARY_DISABLE_RECEIPT_KEYS = new Set(["fixtureId", "state", "idempotent"]);
+const RELEASE_CANARY_PENDING_READBACK_KEYS = new Set(["fixtureId", "issuer", "subject", "pending"]);
+const RELEASE_CANARY_DISABLE_RPC_PATH = "/rest/v1/rpc/fa_release_canary_fixture_disable";
+const RELEASE_CANARY_PENDING_RPC_PATH = "/rest/v1/rpc/fa_release_canary_fixture_pending";
+const RELEASE_CANARY_CLAIM_MAX_LENGTH = 2_048;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -240,24 +264,145 @@ function isRestartReceipt(value: unknown): boolean {
         && value.success === true;
 }
 
+function releaseCanaryStageInput(subject: unknown, requestId: unknown): { p_subject: string; p_request_id: string } {
+    if (typeof subject !== "string" || !UUID.test(subject)) throw new Error("'subject' must be a canonical UUID");
+    if (typeof requestId !== "string" || !UUID.test(requestId)) throw new Error("'request_id' must be a canonical UUID");
+    return { p_subject: subject, p_request_id: requestId };
+}
+
+function releaseCanaryStageReceipt(value: unknown): ReleaseCanaryStageReceipt | null {
+    if (!isRecord(value)
+        || Object.keys(value).some((key) => !RELEASE_CANARY_STAGE_RECEIPT_KEYS.has(key))
+        || Object.keys(value).length !== RELEASE_CANARY_STAGE_RECEIPT_KEYS.size
+        || typeof value.fixtureId !== "string"
+        || !UUID.test(value.fixtureId)
+        || typeof value.tenantKey !== "string"
+        || !RELEASE_CANARY_TENANT_KEY.test(value.tenantKey)
+        || value.state !== "staged"
+        || value.idempotent !== true) return null;
+    return {
+        fixtureId: value.fixtureId,
+        tenantKey: value.tenantKey,
+        state: "staged",
+        idempotent: true,
+    };
+}
+
+function releaseCanaryIssuer(value: unknown): string {
+    if (typeof value !== "string" || value.length === 0 || value.length > RELEASE_CANARY_CLAIM_MAX_LENGTH
+        || value !== value.trim()
+        || /[\u0000-\u001f\u007f]/u.test(value)) {
+        throw new Error("'issuer' must be a bounded absolute HTTP(S) issuer");
+    }
+    let parsed: URL;
+    try {
+        parsed = new URL(value);
+    } catch {
+        throw new Error("'issuer' must be a bounded absolute HTTP(S) issuer");
+    }
+    const loopbackHttp = parsed.protocol === "http:"
+        && ["localhost", "127.0.0.1", "[::1]"].includes(parsed.hostname)
+        && parsed.port.length > 0;
+    if ((parsed.protocol !== "https:" && !loopbackHttp)
+        || parsed.username
+        || parsed.password
+        || parsed.search
+        || parsed.hash) {
+        throw new Error("'issuer' must be a bounded absolute HTTP(S) issuer");
+    }
+    return value;
+}
+
+function releaseCanaryDisableInput(
+    fixtureId: unknown,
+    disableRequestId: unknown,
+    issuer: unknown,
+    subject: unknown,
+): { p_fixture_id: string; p_disable_request_id: string; p_issuer: string; p_subject: string } {
+    if (typeof fixtureId !== "string" || !UUID.test(fixtureId)) {
+        throw new Error("'fixture_id' must be a canonical UUID");
+    }
+    if (typeof disableRequestId !== "string" || !UUID.test(disableRequestId)) {
+        throw new Error("'disable_request_id' must be a canonical UUID");
+    }
+    if (typeof subject !== "string" || !UUID.test(subject)) {
+        throw new Error("'subject' must be a canonical UUID");
+    }
+    return {
+        p_fixture_id: fixtureId,
+        p_disable_request_id: disableRequestId,
+        p_issuer: releaseCanaryIssuer(issuer),
+        p_subject: subject,
+    };
+}
+
+function releaseCanaryDisableReceipt(receiptCandidate: unknown, fixtureId: string): ReleaseCanaryDisableReceipt | null {
+    if (!isRecord(receiptCandidate)
+        || Object.keys(receiptCandidate).some((key) => !RELEASE_CANARY_DISABLE_RECEIPT_KEYS.has(key))
+        || Object.keys(receiptCandidate).length !== RELEASE_CANARY_DISABLE_RECEIPT_KEYS.size
+        || receiptCandidate.fixtureId !== fixtureId
+        || receiptCandidate.state !== "disabled"
+        || typeof receiptCandidate.idempotent !== "boolean") return null;
+    return { fixtureId, state: "disabled", idempotent: receiptCandidate.idempotent };
+}
+
+function releaseCanaryPendingPath(request: {
+    p_fixture_id: string;
+    p_issuer: string;
+    p_subject: string;
+}): string {
+    const params = new URLSearchParams({
+        p_fixture_id: request.p_fixture_id,
+        p_issuer: request.p_issuer,
+        p_subject: request.p_subject,
+    });
+    return `${RELEASE_CANARY_PENDING_RPC_PATH}?${params.toString()}`;
+}
+
+function releaseCanaryPendingReadback(
+    readbackCandidate: unknown,
+    request: { p_fixture_id: string; p_issuer: string; p_subject: string },
+): boolean {
+    return isRecord(readbackCandidate)
+        && Object.keys(readbackCandidate).every((key) => RELEASE_CANARY_PENDING_READBACK_KEYS.has(key))
+        && Object.keys(readbackCandidate).length === RELEASE_CANARY_PENDING_READBACK_KEYS.size
+        && readbackCandidate.fixtureId === request.p_fixture_id
+        && readbackCandidate.issuer === request.p_issuer
+        && readbackCandidate.subject === request.p_subject
+        && readbackCandidate.pending === false;
+}
+
+async function applicationOriginMatches(http: HttpTransport, projectRef: string, applicationOrigin: string): Promise<boolean> {
+    const endpointRead = await http.get(
+        `${endpoint(projectRef)}/endpoint/projection`,
+        { maxJsonBytes: PROJECT_ENDPOINT_RESPONSE_MAX_BYTES, responseTimeoutMs: RELEASE_READ_RESPONSE_TIMEOUT_MS },
+    );
+    return projectApiOrigins(endpointRead, projectRef)?.includes(applicationOrigin) === true;
+}
+
 export function registerReleaseTools(
     server: ToolServer,
     http: HttpTransport,
-    options: { projectRef?: string } = {},
+    options: { projectRef?: string; applicationHttp?: HttpTransport; applicationOrigin?: string } = {},
 ): void {
     server.tool(
         "release",
-        "Verified release controls using a Management API credential. Actions: logical_backup_list, logical_backup_create, logical_backup_restore, postgrest_status, postgrest_restart",
+        "Verified release controls. Management actions use the Management API; release canary stage/disable replay additionally require the selected project's SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.",
         {
             action: withDescription(stringEnum([
-                "logical_backup_list", "logical_backup_create", "logical_backup_restore", "postgrest_status", "postgrest_restart",
+                "logical_backup_list", "logical_backup_create", "logical_backup_restore", "postgrest_status", "postgrest_restart", "release_canary_fixture_stage_replay", "release_canary_fixture_disable_replay",
             ]), "Release control action"),
             ref: optional(Type.String(), options.projectRef ? "Optional override when not auto-linked" : "Project ref"),
             backup_id: optional(Type.String(), "[logical_backup_restore] Exact verified logical-full backup ID from the selected project inventory"),
             expected_sha256: optional(Type.String(), "[logical_backup_restore] Exact lowercase SHA-256 from the selected project inventory"),
             restore_confirmation: optional(Type.String(), "[logical_backup_restore] Exact RESTORE_PROJECT:<ref>:<backup_id>:<sha256> confirmation"),
+            subject: optional(Type.String(), "[release_canary_fixture_stage_replay/disable_replay] Exact central subject UUID"),
+            request_id: optional(Type.String(), "[release_canary_fixture_stage_replay] Exact idempotent stage request UUID"),
+            fixture_id: optional(Type.String(), "[release_canary_fixture_disable_replay] Exact staged fixture UUID"),
+            disable_request_id: optional(Type.String(), "[release_canary_fixture_disable_replay] Exact idempotent disable request UUID"),
+            issuer: optional(Type.String(), "[release_canary_fixture_disable_replay] Exact HTTP(S) issuer"),
         },
-        async ({ action, ref, backup_id, expected_sha256, restore_confirmation }) => {
+        async ({ action, ref, backup_id, expected_sha256, restore_confirmation, subject, request_id, fixture_id, disable_request_id, issuer }) => {
             const projectRef = typeof ref === "string" && ref || options.projectRef;
             if (!projectRef) throw new Error("'ref' is required for release controls");
             if (!validProjectRef(projectRef)) throw new Error("'ref' is invalid for release controls");
@@ -335,6 +480,73 @@ export function registerReleaseTools(
                 return failure ?? releaseControlSuccess("release.postgrest.status", {
                     project_ref: projectRef,
                     postgrest: read.status!,
+                });
+            }
+            if (action === "release_canary_fixture_stage_replay") {
+                if (!options.applicationHttp || !options.applicationOrigin) {
+                    throw new Error("release_canary_fixture_stage_replay requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY");
+                }
+                const request = releaseCanaryStageInput(subject, request_id);
+                if (!await applicationOriginMatches(http, projectRef, options.applicationOrigin)) {
+                    return releaseControlFailure("release.release_canary.fixture_stage_replay", "INVALID_RESPONSE", null);
+                }
+                const response = await options.applicationHttp.postReleaseMutation(
+                    "/rest/v1/rpc/fa_release_canary_fixture_stage",
+                    request,
+                );
+                if (!response.ok || response.status !== 200) {
+                    return mutationFailure("release.release_canary.fixture_stage_replay", response);
+                }
+                const receipt = releaseCanaryStageReceipt(response.data);
+                if (!receipt || !await applicationOriginMatches(http, projectRef, options.applicationOrigin)) {
+                    return releaseControlFailure("release.release_canary.fixture_stage_replay", "OUTCOME_UNKNOWN", response.status);
+                }
+                return releaseControlSuccess("release.release_canary.fixture_stage_replay", {
+                    project_ref: projectRef,
+                    receipt,
+                });
+            }
+            if (action === "release_canary_fixture_disable_replay") {
+                if (!options.applicationHttp || !options.applicationOrigin) {
+                    throw new Error("release_canary_fixture_disable_replay requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY");
+                }
+                const request = releaseCanaryDisableInput(fixture_id, disable_request_id, issuer, subject);
+                if (!await applicationOriginMatches(http, projectRef, options.applicationOrigin)) {
+                    return releaseControlFailure("release.release_canary.fixture_disable_replay", "INVALID_RESPONSE", null);
+                }
+                const response = await options.applicationHttp.postReleaseMutation(
+                    RELEASE_CANARY_DISABLE_RPC_PATH,
+                    request,
+                );
+                if (!response.ok || response.status !== 200) {
+                    return mutationFailure("release.release_canary.fixture_disable_replay", response);
+                }
+                const receipt = releaseCanaryDisableReceipt(response.data, request.p_fixture_id);
+                if (!receipt) {
+                    return releaseControlFailure("release.release_canary.fixture_disable_replay", "OUTCOME_UNKNOWN", response.status);
+                }
+                const pendingRequest = {
+                    p_fixture_id: request.p_fixture_id,
+                    p_issuer: request.p_issuer,
+                    p_subject: request.p_subject,
+                };
+                const pendingResponse = await options.applicationHttp.get(
+                    releaseCanaryPendingPath(pendingRequest),
+                    { maxJsonBytes: MUTATION_MAX_BYTES, responseTimeoutMs: RELEASE_READ_RESPONSE_TIMEOUT_MS },
+                );
+                if (!pendingResponse.ok || pendingResponse.status !== 200
+                    || !releaseCanaryPendingReadback(pendingResponse.data, pendingRequest)
+                    || !await applicationOriginMatches(http, projectRef, options.applicationOrigin)) {
+                    return releaseControlFailure(
+                        "release.release_canary.fixture_disable_replay",
+                        "OUTCOME_UNKNOWN",
+                        pendingResponse.transportError ? null : pendingResponse.status,
+                    );
+                }
+                return releaseControlSuccess("release.release_canary.fixture_disable_replay", {
+                    project_ref: projectRef,
+                    receipt,
+                    pending: false,
                 });
             }
             if (action !== "postgrest_restart") throw new Error("Unknown release control action");
