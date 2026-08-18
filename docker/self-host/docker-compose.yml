@@ -249,12 +249,13 @@ services:
       - edge-pgredis
 
   caddy:
-    image: caddy:2.11.4
+    build:
+      context: ./caddy
+    image: supacloud-caddy:2.11.4-ratelimit
     restart: unless-stopped
     entrypoint: ["/usr/local/bin/supacloud-caddy-entrypoint"]
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./caddy/entrypoint.sh:/usr/local/bin/supacloud-caddy-entrypoint:ro
       - caddy-data:/data
       - caddy-config:/config
       - frontend-data:/var/supacloud/frontends:ro

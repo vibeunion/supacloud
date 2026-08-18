@@ -557,6 +557,9 @@ jobs:
         with:
           bun-version: ${{ env.BUN_VERSION }}
 
+      - name: Build Caddy integration image
+        run: docker build --tag supacloud-caddy:2.11.4-ratelimit docker/self-host/caddy
+
       - name: Start MinIO fixture
         run: |
           docker run --detach --rm \
@@ -574,13 +577,15 @@ jobs:
       # data plane stays inside the container network, unreachable from outside.
       - name: Start Caddy fixture
         run: |
+          caddy_modules="$(docker run --rm --entrypoint caddy supacloud-caddy:2.11.4-ratelimit list-modules)"
+          grep -Fx http.handlers.rate_limit <<<"${caddy_modules}"
+          grep -Fx http.matchers.query <<<"${caddy_modules}"
           printf '%s\n' '{"admin":{"listen":"0.0.0.0:2019"}}' > "$RUNNER_TEMP/caddy-ci.json"
           docker run --detach --rm \
             --name supacloud-ci-caddy \
             --publish 127.0.0.1:2019:2019 \
-            --volume "$RUNNER_TEMP/caddy-ci.json:/etc/caddy/ci.json:ro" \
-            caddy:2.11.4 \
-            caddy run --config /etc/caddy/ci.json
+            --volume "$RUNNER_TEMP/caddy-ci.json:/etc/supacloud/caddy/config.json:ro" \
+            supacloud-caddy:2.11.4-ratelimit
 
       - name: Show runtime versions
         run: |
