@@ -49,6 +49,7 @@ import {
 } from "./upgrade-lock";
 import { withSigstoreVerificationDirectory } from "./sigstore-trusted-root";
 import {
+    prepareControlPlaneUpgradeSafety,
     withControlPlaneUpgradeSafety,
     type ControlPlaneUpgradeSafetyEvidence,
     type ControlPlaneUpgradeSafetyLease,
@@ -126,7 +127,9 @@ const OFFLINE_BUNDLE_ENDPOINT: GithubEndpoint = {
     label: "verified offline bundle",
     proxyPrefix: "",
 };
+const CONTROL_PLANE_PREFLIGHT_PREFIX = "SUPACLOUD_CONTROL_PLANE_UPGRADE_PREFLIGHT=";
 const CONTROL_PLANE_SAFETY_PREFIX = "SUPACLOUD_CONTROL_PLANE_UPGRADE_SAFETY=";
+const UPGRADE_FAILURE_PREFIX = "SUPACLOUD_UPGRADE_FAILURE=";
 
 export type GithubEndpoint = {
     label: string;
@@ -3238,12 +3241,78 @@ export function upgradeRecoveryPaths(state: UpgradeRecoveryPathState | null): st
     return [...new Set(absentLauncherTarget ? [...presentPaths, absentLauncherTarget] : presentPaths)];
 }
 
+const SENSITIVE_STRUCTURED_FIELD = /(?:password|pass|secret|token|key|credential|db_uri|database_url|dsn)/i;
+
+function decodedStructuredFieldName(encodedName: string): string | null {
+    let decodedName = encodedName.replace(/\\'/g, "'");
+    for (let decodingPass = 0; decodingPass < 3; decodingPass += 1) {
+        if (decodedName.length > 256) return null;
+        try {
+            const nextName = JSON.parse(`"${decodedName.replace(/"/g, '\\"')}"`);
+            if (typeof nextName !== "string" || nextName === decodedName) return decodedName;
+            decodedName = nextName;
+        } catch {
+            return null;
+        }
+    }
+    return decodedName;
+}
+
+function containsSensitiveStructuredField(message: string): boolean {
+    const normalizedQuotes = message.replace(/\\"/g, '"').replace(/\\'/g, "'");
+    const fieldPatterns = [
+        /"((?:\\.|[^"\\\r\n])*)"\s*:/g,
+        /'((?:\\.|[^'\\\r\n])*)'\s*:/g,
+        /(?:^|[{,]\s*)([A-Za-z_$\\][A-Za-z0-9_$\\{}]{0,255})\s*:/g,
+    ];
+    return fieldPatterns.some(pattern => [...normalizedQuotes.matchAll(pattern)].some(match => {
+        const decodedName = decodedStructuredFieldName(match[1]!);
+        return decodedName === null || SENSITIVE_STRUCTURED_FIELD.test(decodedName);
+    }));
+}
+
+function structuredSensitiveFieldsAreRedacted(message: string): boolean {
+    const normalizedQuotes = message.replace(/\\"/g, '"').replace(/\\'/g, "'");
+    try {
+        const parsedDiagnostic = JSON.parse(normalizedQuotes);
+        if (!parsedDiagnostic || typeof parsedDiagnostic !== "object") return false;
+        let foundSensitiveField = false;
+        const pending = [parsedDiagnostic];
+        while (pending.length > 0) {
+            const current = pending.pop();
+            if (!current || typeof current !== "object") continue;
+            for (const [fieldName, fieldValue] of Object.entries(current)) {
+                if (SENSITIVE_STRUCTURED_FIELD.test(fieldName)) {
+                    foundSensitiveField = true;
+                    if (fieldValue !== "[REDACTED]") return false;
+                } else if (fieldValue && typeof fieldValue === "object") {
+                    pending.push(fieldValue);
+                }
+            }
+        }
+        return foundSensitiveField;
+    } catch {
+        return false;
+    }
+}
+
 function sanitizedUpgradeDiagnostic(error: unknown): string {
     const message = error instanceof Error ? error.message : String(error);
+    if (containsSensitiveStructuredField(message) && !structuredSensitiveFieldsAreRedacted(message)) {
+        return "Upgrade failure details were redacted";
+    }
     return message
+        .replace(
+            /((?:["']?(?:password|pass|secret|token|key|credential|db_uri|database_url|dsn)["']?)\s*:\s*)("[^"]*"|'[^']*'|[^,}\]\r\n]+)/gi,
+            (_match, prefix: string, literal: string) => {
+                const quote = literal[0];
+                return `${prefix}${quote === '"' || quote === "'" ? `${quote}[REDACTED]${quote}` : "[REDACTED]"}`;
+            },
+        )
         .replace(/(\b(?:[A-Z0-9_]*(?:PASSWORD|PASS|SECRET|TOKEN|KEY|CREDENTIAL)[A-Z0-9_]*|DATABASE_URL|DB_URI|DSN)=)(?:"[^"]*"|'[^']*'|[^\s;]+)/gi, "$1[REDACTED]")
-        .replace(/(postgres(?:ql)?:\/\/[^:\s/]+:)[^@\s]+@/gi, "$1[REDACTED]@")
-        .replace(/[\r\n\t]+/g, " ")
+        .replace(/(postgres(?:ql)?:\/\/[^:\s/]*:)[^@\s]+@/gi, "$1[REDACTED]@")
+        .replace(/(\bBearer\s+)(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;]+)/gi, "$1[REDACTED]")
+        .replace(/[\u0000-\u001f\u007f]+/g, " ")
         .trim()
         .slice(0, 500);
 }
@@ -3289,6 +3358,40 @@ export function controlPlaneSafetyReceiptLine(evidence: ControlPlaneUpgradeSafet
     return `${CONTROL_PLANE_SAFETY_PREFIX}${JSON.stringify(evidence)}`;
 }
 
+export function controlPlanePreflightReceiptLine(evidence: ControlPlaneUpgradeSafetyEvidence): string {
+    return `${CONTROL_PLANE_PREFLIGHT_PREFIX}${JSON.stringify(evidence)}`;
+}
+
+type UpgradeFailureEvidence = {
+    schema: "supacloud.upgrade-failure.v1";
+    summary: string;
+    causes: string[];
+};
+
+export function upgradeFailureReceiptLine(error: unknown): string {
+    const summary = sanitizedUpgradeDiagnostic(error);
+    const causes = [...new Set(nestedUpgradeDiagnostics(error))]
+        .filter(message => message && message !== summary)
+        .slice(0, 8);
+    const evidence: UpgradeFailureEvidence = {
+        schema: "supacloud.upgrade-failure.v1",
+        summary,
+        causes,
+    };
+    return `${UPGRADE_FAILURE_PREFIX}${JSON.stringify(evidence)}`;
+}
+
+export async function runControlPlaneUpgradePreflight(): Promise<ControlPlaneUpgradeSafetyEvidence> {
+    verifyBackupPrivilegeDropPreflight();
+    const preparedSecrets = prepareUpgradeSecrets(await resolveUpgradeEnvironment());
+    const databaseUrl = preparedSecrets.runtimeEnv.DATABASE_URL;
+    if (!databaseUrl) throw new Error("DATABASE_URL is required for the control-plane upgrade preflight");
+    const encryptionKey = preparedSecrets.runtimeSecretsToPersist.SECRETS_ENCRYPTION_KEY;
+    const evidence = await prepareControlPlaneUpgradeSafety(databaseUrl, encryptionKey);
+    console.log(controlPlanePreflightReceiptLine(evidence));
+    return evidence;
+}
+
 export async function runUpgrade(options: RunUpgradeOptions = {}) {
     p.intro("\x1b[46m SupaCloud Binary Upgrade \x1b[0m");
 
@@ -3323,6 +3426,7 @@ export async function runUpgrade(options: RunUpgradeOptions = {}) {
         p.outro(upgradeSuccessMessage(executionContext));
     } catch (error: unknown) {
         s.stop(formatUpgradeFailure(error, upgradeRecoveryPaths(executionContext?.state ?? null)));
+        console.error(upgradeFailureReceiptLine(error));
         process.exit(1);
     }
 }

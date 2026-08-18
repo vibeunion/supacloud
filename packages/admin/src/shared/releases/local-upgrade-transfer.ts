@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { basename } from "node:path";
 
-import type { SshResult, SshTransport } from "../transports/ssh";
+import { redactSshOutput, type SshResult, type SshTransport } from "../transports/ssh";
 import {
     buildUpgradeLockScript,
     SUPACLOUD_UPGRADE_LOCK_PATH,
@@ -54,8 +54,10 @@ const REMOTE_LOG_ROOT = "/var/log/supacloud";
 const REMOTE_UPLOAD_ROOT = "/var/tmp";
 const REMOTE_COMMAND_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 const CONTROL_PLANE_BACKUP_ROOT = "/var/lib/supacloud/backups/control-plane-upgrades";
+const CONTROL_PLANE_PREFLIGHT_PREFIX = "SUPACLOUD_CONTROL_PLANE_UPGRADE_PREFLIGHT=";
 const CONTROL_PLANE_SAFETY_PREFIX = "SUPACLOUD_CONTROL_PLANE_UPGRADE_SAFETY=";
-const MINIMUM_CONTROL_PLANE_SAFETY_VERSION = [0, 61, 4] as const;
+const UPGRADE_FAILURE_PREFIX = "SUPACLOUD_UPGRADE_FAILURE=";
+const MINIMUM_CONTROL_PLANE_SAFETY_VERSION = [0, 61, 7] as const;
 const POLL_INTERVAL_MS = 2_000;
 const STATE_READ_ATTEMPTS = 3;
 const REMOTE_STATE_READ_TIMEOUT_MS = 15_000;
@@ -72,6 +74,12 @@ type ControlPlaneSafetyEvidence = {
     current_key_checkpoint_present: boolean;
     schema: "supacloud.control-plane-upgrade-safety.v1";
     sha256: string;
+};
+
+type UpgradeFailureEvidence = {
+    causes: string[];
+    schema: "supacloud.upgrade-failure.v1";
+    summary: string;
 };
 
 function exactObjectKeys(candidate: Record<string, unknown>, expected: readonly string[]): boolean {
@@ -92,13 +100,13 @@ function canonicalTimestamp(candidate: unknown): candidate is string {
     return Number.isFinite(timestamp.valueOf()) && timestamp.toISOString() === candidate;
 }
 
-export function parseControlPlaneSafetyEvidence(log: string): ControlPlaneSafetyEvidence {
+function parseControlPlaneSafetyReceipt(log: string, prefix: string): ControlPlaneSafetyEvidence {
     const receiptLines = log.split(/\r?\n/)
-        .filter((line) => line.startsWith(CONTROL_PLANE_SAFETY_PREFIX));
+        .filter((line) => line.startsWith(prefix));
     if (receiptLines.length !== 1) throw new Error("Remote upgrade did not emit one control-plane safety receipt");
     let candidate: unknown;
     try {
-        candidate = JSON.parse(receiptLines[0]!.slice(CONTROL_PLANE_SAFETY_PREFIX.length));
+        candidate = JSON.parse(receiptLines[0]!.slice(prefix.length));
     } catch {
         throw new Error("Remote control-plane safety receipt is not valid JSON");
     }
@@ -131,6 +139,57 @@ export function parseControlPlaneSafetyEvidence(log: string): ControlPlaneSafety
     return receipt as ControlPlaneSafetyEvidence;
 }
 
+export function parseControlPlaneSafetyEvidence(log: string): ControlPlaneSafetyEvidence {
+    return parseControlPlaneSafetyReceipt(log, CONTROL_PLANE_SAFETY_PREFIX);
+}
+
+export function parseControlPlanePreflightEvidence(log: string): ControlPlaneSafetyEvidence {
+    return parseControlPlaneSafetyReceipt(log, CONTROL_PLANE_PREFLIGHT_PREFIX);
+}
+
+function parsedUpgradeFailureReceipt(log: string): Record<string, unknown> {
+    const receiptLines = log.split(/\r?\n/).filter((line) => line.startsWith(UPGRADE_FAILURE_PREFIX));
+    if (receiptLines.length !== 1) throw new Error("Remote upgrade did not emit one structured failure receipt");
+    let candidate: unknown;
+    try {
+        candidate = JSON.parse(receiptLines[0]!.slice(UPGRADE_FAILURE_PREFIX.length));
+    } catch {
+        throw new Error("Remote upgrade failure receipt is not valid JSON");
+    }
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+        throw new Error("Remote upgrade failure receipt is invalid");
+    }
+    return candidate as Record<string, unknown>;
+}
+
+function upgradeFailureReceiptIsInvalid(receipt: Record<string, unknown>): boolean {
+    const causes = receipt.causes;
+    return !exactObjectKeys(receipt, ["causes", "schema", "summary"])
+        || receipt.schema !== "supacloud.upgrade-failure.v1"
+        || typeof receipt.summary !== "string" || !receipt.summary || receipt.summary.length > 500
+        || /[\u0000-\u001f\u007f]/.test(receipt.summary)
+        || !Array.isArray(causes) || causes.length > 8
+        || causes.some(cause => typeof cause !== "string" || !cause || cause.length > 500
+            || /[\u0000-\u001f\u007f]/.test(cause));
+}
+
+function upgradeFailureMessageContainsSensitiveData(message: string): boolean {
+    const bareBearer = /\bBearer\s+(?!\[REDACTED\](?:\s|$|[,;.)]))\S+/i;
+    return redactSshOutput(message) !== message || bareBearer.test(message);
+}
+
+export function parseUpgradeFailureEvidence(log: string): UpgradeFailureEvidence {
+    const receipt = parsedUpgradeFailureReceipt(log);
+    if (upgradeFailureReceiptIsInvalid(receipt)) {
+        throw new Error("Remote upgrade failure receipt is invalid");
+    }
+    const messages = [receipt.summary, ...(receipt.causes as string[])] as string[];
+    if (messages.some(upgradeFailureMessageContainsSensitiveData)) {
+        throw new Error("Remote upgrade failure receipt contains sensitive data");
+    }
+    return receipt as UpgradeFailureEvidence;
+}
+
 export function assertControlPlaneSafetyVersion(version: string): void {
     const match = version.match(/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/);
     if (!match) throw new Error("Management version must be an exact stable version");
@@ -141,7 +200,7 @@ export function assertControlPlaneSafetyVersion(version: string): void {
     for (let index = 0; index < requested.length; index += 1) {
         if (requested[index]! > MINIMUM_CONTROL_PLANE_SAFETY_VERSION[index]!) return;
         if (requested[index]! < MINIMUM_CONTROL_PLANE_SAFETY_VERSION[index]!) {
-            throw new Error("Local artifact upgrades require Management 0.61.4 or newer with control-plane backup safety");
+            throw new Error("Local artifact upgrades require Management 0.61.7 or newer with control-plane backup preflight safety");
         }
     }
 }
@@ -490,6 +549,7 @@ function upgradeScriptExecution(
 ): string[] {
     const runnerAsset = `${paths.stage}/bundle/management-api/${bundle.managementBinaryName}`;
     const runner = `${paths.stage}/runner`;
+    const preflight = "CONTROL_PLANE_PREFLIGHT_RECEIPT=$(env PATH=\"$VERIFIER_PATH:$PATH\" \"$RUNNER\" --control-plane-upgrade-preflight)";
     return [
         `MANAGEMENT_VERSION=${quoteShell(request.managementVersion)}`,
         `RUNNER_ASSET=${quoteShell(runnerAsset)}`,
@@ -500,7 +560,9 @@ function upgradeScriptExecution(
         "\"$RUNNER\" --version | grep -Eq \"(^|[^0-9])${MANAGEMENT_VERSION//./\\.}([^0-9]|$)\"",
         "timeout 5s \"$RUNNER\" --systemd-unit-helper-sha256 | grep -Eq 'SupaCloud systemd-unit helper SHA-256: [0-9a-f]{64}'",
         "timeout 5s \"$RUNNER\" --postgrest-launcher-sha256 | grep -Eq 'SupaCloud PostgREST launcher SHA-256: [0-9a-f]{64}'",
+        preflight,
         `env PATH=\"$VERIFIER_PATH:$PATH\" \"$RUNNER\" upgrade --yes --target-version ${quoteShell(request.managementVersion)} --edge-runtime-version ${quoteShell(request.edgeRuntimeVersion)} --asset-bundle-dir \"$BUNDLE\"`,
+        "printf '%s\\n' \"$CONTROL_PLANE_PREFLIGHT_RECEIPT\"",
     ];
 }
 
@@ -761,6 +823,10 @@ async function remoteLogTail(ssh: SshTransport, paths: RemoteUpgradePaths): Prom
     ].join("\n");
     const output = await ssh.exec(rootCommand(script), 15_000);
     if (!output.success) throw remoteFailure("Unable to read the remote upgrade log", output);
+    if (output.stdoutRedacted || output.stderrRedacted
+        || output.stdoutTruncated || output.stderrTruncated) {
+        throw new Error("Remote upgrade log required transport redaction or truncation");
+    }
     return output.stdout.slice(-4_000);
 }
 
@@ -900,12 +966,14 @@ async function completedUpgradeOutput(ssh: SshTransport, paths: RemoteUpgradePat
             "Upgrade succeeded but its retained log could not be read", [error], paths,
         );
     }
+    let preflightEvidence: ControlPlaneSafetyEvidence;
     let safetyEvidence: ControlPlaneSafetyEvidence;
     try {
+        preflightEvidence = parseControlPlanePreflightEvidence(log);
         safetyEvidence = parseControlPlaneSafetyEvidence(log);
     } catch (error: unknown) {
         throw remoteReconciliationFailure(
-            "Upgrade succeeded but control-plane safety evidence is invalid", [error], paths,
+            "Upgrade succeeded but control-plane preflight or safety evidence is invalid", [error], paths,
         );
     }
     try {
@@ -915,7 +983,7 @@ async function completedUpgradeOutput(ssh: SshTransport, paths: RemoteUpgradePat
             "Upgrade succeeded but remote evidence cleanup could not be confirmed", [error], paths,
         );
     }
-    return `✅ Upgrade done\n${JSON.stringify(safetyEvidence)}\n${log.slice(-1_500)}`;
+    return `✅ Upgrade done\n${JSON.stringify({ preflight: preflightEvidence, transaction: safetyEvidence })}\n${log.slice(-1_500)}`;
 }
 
 async function throwRemoteUpgradeFailure(ssh: SshTransport, paths: RemoteUpgradePaths, status: string): Promise<never> {
@@ -927,17 +995,32 @@ async function throwRemoteUpgradeFailure(ssh: SshTransport, paths: RemoteUpgrade
             "Remote upgrade failed but its retained log could not be read", [error], paths,
         );
     }
-    const failure = new Error(`Remote local upgrade failed (${status}): ${log.slice(-1_500)}`);
     if (status.endsWith(":CLEANUP_AFTER_TRANSACTION")) {
         throw remoteReconciliationFailure(
-            "Upgrade transaction completed but staging cleanup is incomplete", [failure], paths,
+            "Upgrade transaction completed but staging cleanup is incomplete",
+            [new Error(`Remote local upgrade ended with ${status}`)],
+            paths,
         );
     }
     if (status.includes("CLEANUP")) {
         throw remoteReconciliationFailure(
-            "Upgrade transaction and staging cleanup both failed", [failure], paths,
+            "Upgrade transaction and staging cleanup both failed",
+            [new Error(`Remote local upgrade ended with ${status}`)],
+            paths,
         );
     }
+    let failureEvidence: UpgradeFailureEvidence;
+    try {
+        failureEvidence = parseUpgradeFailureEvidence(log);
+    } catch (error: unknown) {
+        throw remoteReconciliationFailure(
+            "Remote upgrade failed without valid structured failure evidence", [error], paths,
+        );
+    }
+    const failure = new Error(
+        `Remote local upgrade failed (${status}): ${failureEvidence.summary}`
+        + (failureEvidence.causes.length > 0 ? `; causes: ${failureEvidence.causes.join(" | ")}` : ""),
+    );
     try {
         await cleanupRemoteRecords(ssh, paths);
     } catch (cleanupError: unknown) {

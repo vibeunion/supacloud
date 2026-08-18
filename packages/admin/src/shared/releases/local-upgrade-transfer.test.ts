@@ -21,6 +21,8 @@ import {
     executeLocalUpgradeTransfer,
     failureRequiresRemoteReconciliation,
     parseControlPlaneSafetyEvidence,
+    parseControlPlanePreflightEvidence,
+    parseUpgradeFailureEvidence,
     parseRemotePreflight,
     remoteUpgradePreflight,
     startRemoteUpgrade,
@@ -36,7 +38,16 @@ const paths = {
     unit: "supacloud-upgrade-11111111-1111-4111-8111-111111111111.service",
 };
 
-type ScriptedResult = { success: boolean; stdout: string; stderr: string; code: number };
+type ScriptedResult = {
+    success: boolean;
+    stdout: string;
+    stderr: string;
+    code: number;
+    stdoutRedacted?: boolean;
+    stdoutTruncated?: boolean;
+    stderrRedacted?: boolean;
+    stderrTruncated?: boolean;
+};
 type ScriptedResponse = ScriptedResult | Error;
 
 class ScriptedSsh {
@@ -77,13 +88,23 @@ const controlPlaneSafetyEvidence = {
 };
 
 function successfulUpgradeLog(message = "upgrade committed"): string {
-    return `${message}\nSUPACLOUD_CONTROL_PLANE_UPGRADE_SAFETY=${JSON.stringify(controlPlaneSafetyEvidence)}\n`;
+    return `${message}\n`
+        + `SUPACLOUD_CONTROL_PLANE_UPGRADE_PREFLIGHT=${JSON.stringify(controlPlaneSafetyEvidence)}\n`
+        + `SUPACLOUD_CONTROL_PLANE_UPGRADE_SAFETY=${JSON.stringify(controlPlaneSafetyEvidence)}\n`;
+}
+
+function failedUpgradeLog(summary = "Control-plane backup archive verification failed"): string {
+    return `SUPACLOUD_UPGRADE_FAILURE=${JSON.stringify({
+        schema: "supacloud.upgrade-failure.v1",
+        summary,
+        causes: [],
+    })}\n`;
 }
 
 describe("control-plane safety receipt", () => {
     test("requires the first Management release with in-transaction control-plane backup safety", () => {
-        expect(() => assertControlPlaneSafetyVersion("0.61.3")).toThrow("0.61.4 or newer");
-        expect(() => assertControlPlaneSafetyVersion("0.61.4")).not.toThrow();
+        expect(() => assertControlPlaneSafetyVersion("0.61.6")).toThrow("0.61.7 or newer");
+        expect(() => assertControlPlaneSafetyVersion("0.61.7")).not.toThrow();
         expect(() => assertControlPlaneSafetyVersion("0.62.0")).not.toThrow();
         expect(() => assertControlPlaneSafetyVersion("1.0.0")).not.toThrow();
         expect(() => assertControlPlaneSafetyVersion("latest")).toThrow("exact stable version");
@@ -91,7 +112,7 @@ describe("control-plane safety receipt", () => {
             .toThrow("exact stable version");
     });
 
-    test("rejects Management 0.61.3 before remote access", async () => {
+    test("rejects Management 0.61.6 before remote access", async () => {
         let remoteAccesses = 0;
         const ssh = {
             exec: async () => {
@@ -100,23 +121,81 @@ describe("control-plane safety receipt", () => {
             },
         };
         await expect(executeLocalUpgradeTransfer(ssh as never, {
-            managementVersion: "0.61.3",
+            managementVersion: "0.61.6",
             edgeRuntimeVersion: "0.18.2",
-        })).rejects.toThrow("0.61.4 or newer");
+        })).rejects.toThrow("0.61.7 or newer");
         expect(remoteAccesses).toBe(0);
     });
 
     test("accepts one exact redacted receipt", () => {
         expect(parseControlPlaneSafetyEvidence(successfulUpgradeLog())).toEqual(controlPlaneSafetyEvidence);
+        expect(parseControlPlanePreflightEvidence(successfulUpgradeLog())).toEqual(controlPlaneSafetyEvidence);
+    });
+
+    test("accepts one exact structured failure receipt", () => {
+        expect(parseUpgradeFailureEvidence(failedUpgradeLog())).toEqual({
+            schema: "supacloud.upgrade-failure.v1",
+            summary: "Control-plane backup archive verification failed",
+            causes: [],
+        });
+        expect(() => parseUpgradeFailureEvidence("transaction failed\n"))
+            .toThrow("one structured failure receipt");
+        expect(() => parseUpgradeFailureEvidence(`${failedUpgradeLog()}${failedUpgradeLog()}`))
+            .toThrow("one structured failure receipt");
+        expect(() => parseUpgradeFailureEvidence(
+            "SUPACLOUD_UPGRADE_FAILURE={not-json}\n",
+        )).toThrow("not valid JSON");
+        expect(() => parseUpgradeFailureEvidence(failedUpgradeLog("failure\nforged log line")))
+            .toThrow("receipt is invalid");
+        expect(() => parseUpgradeFailureEvidence(`SUPACLOUD_UPGRADE_FAILURE=${JSON.stringify({
+            schema: "supacloud.upgrade-failure.v1",
+            summary: "Control-plane backup failed",
+            causes: [],
+            unexpected: true,
+        })}\n`)).toThrow("receipt is invalid");
+        expect(() => parseUpgradeFailureEvidence(failedUpgradeLog(
+            "DATABASE_URL=postgresql://admin:database-password@localhost/supacloud",
+        ))).toThrow("contains sensitive data");
+        expect(() => parseUpgradeFailureEvidence(`SUPACLOUD_UPGRADE_FAILURE=${JSON.stringify({
+            schema: "supacloud.upgrade-failure.v1",
+            summary: "Control-plane backup failed",
+            causes: ["API_TOKEN=raw-token"],
+        })}\n`)).toThrow("contains sensitive data");
+        expect(() => parseUpgradeFailureEvidence(failedUpgradeLog("request failed Bearer raw-access-token")))
+            .toThrow("contains sensitive data");
+        expect(() => parseUpgradeFailureEvidence(failedUpgradeLog(
+            "postgresql://:raw-password@localhost/supacloud",
+        ))).toThrow("contains sensitive data");
+        expect(() => parseUpgradeFailureEvidence(failedUpgradeLog('{"token":"raw-token"}')))
+            .toThrow("contains sensitive data");
+        expect(parseUpgradeFailureEvidence(failedUpgradeLog('{"token":"[REDACTED]"}')).summary)
+            .toBe('{"token":"[REDACTED]"}');
+        expect(() => parseUpgradeFailureEvidence(failedUpgradeLog(String.raw`{\"token\":\"raw-token\"}suffix`)))
+            .toThrow("contains sensitive data");
+        expect(() => parseUpgradeFailureEvidence(failedUpgradeLog(
+            String.raw`{"token":"prefix-\\"synthetic-escaped-tail"}`,
+        ))).toThrow("contains sensitive data");
+        expect(() => parseUpgradeFailureEvidence(failedUpgradeLog(String.raw`{"to\\u006ben":"unicode-token"}`)))
+            .toThrow("contains sensitive data");
+        expect(() => parseUpgradeFailureEvidence(failedUpgradeLog(
+            String.raw`{\"to\\u006ben\":\"escaped-unicode-token\"}`,
+        ))).toThrow("contains sensitive data");
+        expect(() => parseUpgradeFailureEvidence(failedUpgradeLog(
+            String.raw`{to\\u006ben:"unquoted-unicode-token"}`,
+        ))).toThrow("contains sensitive data");
+        expect(() => parseUpgradeFailureEvidence(failedUpgradeLog(
+            String.raw`{to\\u{006b}en:"codepoint-unicode-token"}`,
+        ))).toThrow("contains sensitive data");
     });
 
     test("rejects missing, duplicate, secret-bearing, and malformed receipts", () => {
         expect(() => parseControlPlaneSafetyEvidence("upgrade committed\n")).toThrow("one control-plane safety receipt");
         expect(() => parseControlPlaneSafetyEvidence(`${successfulUpgradeLog()}${successfulUpgradeLog()}`))
             .toThrow("one control-plane safety receipt");
+        const safetyLine = `SUPACLOUD_CONTROL_PLANE_UPGRADE_SAFETY=${JSON.stringify(controlPlaneSafetyEvidence)}`;
         expect(() => parseControlPlaneSafetyEvidence(successfulUpgradeLog().replace(
-            '"sha256"',
-            '"password":"not-allowed","sha256"',
+            safetyLine,
+            safetyLine.replace('"sha256"', '"password":"not-allowed","sha256"'),
         ))).toThrow("receipt is invalid");
         expect(() => parseControlPlaneSafetyEvidence(
             "SUPACLOUD_CONTROL_PLANE_UPGRADE_SAFETY={not-json}\n",
@@ -387,6 +466,11 @@ describe("local upgrade remote runner", () => {
         expect(script).toContain("--edge-runtime-version '0.16.8'");
         expect(script).toContain('timeout 5s "$RUNNER" --systemd-unit-helper-sha256');
         expect(script).toContain('timeout 5s "$RUNNER" --postgrest-launcher-sha256');
+        expect(script).toContain('"$RUNNER" --control-plane-upgrade-preflight');
+        expect(script.indexOf("--control-plane-upgrade-preflight"))
+            .toBeLessThan(script.indexOf("upgrade --yes --target-version"));
+        expect(script.indexOf("printf '%s\\n' \"$CONTROL_PLANE_PREFLIGHT_RECEIPT\""))
+            .toBeGreaterThan(script.indexOf("upgrade --yes --target-version"));
         expect(script).toContain("unset SUPACLOUD_ALLOW_UNVERIFIED_RELEASE");
         expect(script).toContain("SUPACLOUD_ATTESTATION_TRUSTED_ROOT");
         expect(script).not.toContain("verify_manifest()");
@@ -1182,7 +1266,7 @@ describe("local upgrade remote runner", () => {
             remoteState({
                 status: "FAILED:9:TRANSACTION", serviceState: "failed", stageExists: false,
             }),
-            remoteResult("transaction failed\n"),
+            remoteResult(failedUpgradeLog()),
             remoteResult(),
         ]);
 
@@ -1199,7 +1283,7 @@ describe("local upgrade remote runner", () => {
         ] as const) {
             const ssh = new ScriptedSsh([
                 remoteState({ status: "FAILED:9:TRANSACTION", serviceState, unitLoadState, unitExists }),
-                remoteResult("transaction failed\n"),
+                remoteResult(failedUpgradeLog()),
                 remoteResult(),
             ]);
 
@@ -1329,11 +1413,71 @@ describe("local upgrade remote runner", () => {
 
         const failure = await awaitRemoteUpgrade(ssh as never, paths).catch((error: unknown) => error);
         expect(failureRequiresRemoteReconciliation(failure)).toBe(true);
-        expect(String(failure)).toContain("control-plane safety evidence is invalid");
+        expect(String(failure)).toContain("control-plane preflight or safety evidence is invalid");
         expect(String(failure)).toContain(paths.status);
         expect(String(failure)).toContain(paths.log);
         expect(ssh.commands).toHaveLength(2);
         expect(ssh.commands.some((command) => command.includes("rm -f --"))).toBe(false);
+    });
+
+    test("retains successful status and log records when the preflight receipt is missing", async () => {
+        const log = successfulUpgradeLog().split("\n")
+            .filter(line => !line.startsWith("SUPACLOUD_CONTROL_PLANE_UPGRADE_PREFLIGHT="))
+            .join("\n");
+        const ssh = new ScriptedSsh([
+            remoteState({ status: "SUCCEEDED", serviceState: "inactive", unitExists: false }),
+            remoteResult(log),
+        ]);
+
+        const failure = await awaitRemoteUpgrade(ssh as never, paths).catch((error: unknown) => error);
+        expect(failureRequiresRemoteReconciliation(failure)).toBe(true);
+        expect(String(failure)).toContain("control-plane preflight or safety evidence is invalid");
+        expect(String(failure)).toContain(paths.status);
+        expect(String(failure)).toContain(paths.log);
+        expect(ssh.commands).toHaveLength(2);
+        expect(ssh.commands.some((command) => command.includes("rm -f --"))).toBe(false);
+    });
+
+    test("retains failed status and log records when structured failure evidence is missing, malformed, or sensitive", async () => {
+        for (const log of [
+            "transaction failed without a structured receipt\n",
+            `${failedUpgradeLog()}${failedUpgradeLog()}`,
+            "SUPACLOUD_UPGRADE_FAILURE={not-json}\n",
+            failedUpgradeLog(String.raw`{to\\u006ben:"unquoted-unicode-token"}`),
+        ]) {
+            const ssh = new ScriptedSsh([
+                remoteState({ status: "FAILED:9:TRANSACTION", serviceState: "failed", stageExists: false }),
+                remoteResult(log),
+            ]);
+
+            const failure = await awaitRemoteUpgrade(ssh as never, paths).catch((error: unknown) => error);
+            expect(failureRequiresRemoteReconciliation(failure)).toBe(true);
+            expect(String(failure)).toContain("without valid structured failure evidence");
+            expect(String(failure)).toContain(paths.status);
+            expect(String(failure)).toContain(paths.log);
+            expect(ssh.commands).toHaveLength(2);
+            expect(ssh.commands.some((command) => command.includes("rm -f --"))).toBe(false);
+        }
+    });
+
+    test("retains failed status and log records when SSH changed the receipt stream", async () => {
+        const redactedLog = failedUpgradeLog("DATABASE_URL=[REDACTED]");
+        for (const integrityFlag of [
+            "stdoutRedacted", "stderrRedacted", "stdoutTruncated", "stderrTruncated",
+        ] as const) {
+            const ssh = new ScriptedSsh([
+                remoteState({ status: "FAILED:9:TRANSACTION", serviceState: "failed", stageExists: false }),
+                { ...remoteResult(redactedLog), [integrityFlag]: true },
+            ]);
+
+            const failure = await awaitRemoteUpgrade(ssh as never, paths).catch((error: unknown) => error);
+            expect(failureRequiresRemoteReconciliation(failure)).toBe(true);
+            expect(String(failure)).toContain("retained log could not be read");
+            expect(String(failure)).toContain(paths.status);
+            expect(String(failure)).toContain(paths.log);
+            expect(ssh.commands).toHaveLength(2);
+            expect(ssh.commands.some((command) => command.includes("rm -f --"))).toBe(false);
+        }
     });
 
     test("requires reconciliation when a successful log disappears after state read-back", async () => {

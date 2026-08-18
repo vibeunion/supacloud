@@ -34,6 +34,7 @@ import {
     applyGrafanaUpgradeSettings,
     captureFileState,
     cleanupBinaryBackup,
+    controlPlanePreflightReceiptLine,
     controlPlaneSafetyReceiptLine,
     createBinaryBackupState,
     executeUpgradeTransaction,
@@ -79,6 +80,7 @@ import {
     upsertManagementWebConsoleDir,
     upsertPersistedEdgeRuntimePort,
     upsertEdgeRuntimeIdentityDefaults,
+    upgradeFailureReceiptLine,
     UpgradeTransactionError,
     type UpgradeActivationState,
     upgradeRecoveryPaths,
@@ -565,6 +567,53 @@ describe("upgrade release selection", () => {
     expect(JSON.parse(line.split("=", 2)[1]!)).toEqual(controlPlaneSafetyEvidence);
     expect(line).not.toContain("private-password");
     expect(line).not.toContain(controlPlaneDatabaseFingerprint);
+  });
+
+  test("prints distinct preflight and redacted failure receipts", () => {
+    const preflight = controlPlanePreflightReceiptLine(controlPlaneSafetyEvidence);
+    expect(preflight).toStartWith("SUPACLOUD_CONTROL_PLANE_UPGRADE_PREFLIGHT=");
+    expect(JSON.parse(preflight.split("=", 2)[1]!)).toEqual(controlPlaneSafetyEvidence);
+
+    const failure = new AggregateError([
+      new Error("DATABASE_URL=postgresql://admin:database-password@localhost/supacloud"),
+      new Error("API_TOKEN=raw-token"),
+    ], "Control-plane backup failed");
+    const line = upgradeFailureReceiptLine(failure);
+    expect(line).toStartWith("SUPACLOUD_UPGRADE_FAILURE=");
+    expect(JSON.parse(line.slice(line.indexOf("=") + 1))).toEqual({
+      schema: "supacloud.upgrade-failure.v1",
+      summary: "Control-plane backup failed",
+      causes: ["DATABASE_URL=[REDACTED]", "API_TOKEN=[REDACTED]"],
+    });
+    expect(line).not.toContain("database-password");
+    expect(line).not.toContain("raw-token");
+    expect(upgradeFailureReceiptLine(new Error("failure\u0000with\u007fcontrols")))
+      .toContain('"summary":"failure with controls"');
+    expect(upgradeFailureReceiptLine(new Error("Authorization: Bearer raw-access-token")))
+      .toContain('"summary":"Authorization: Bearer [REDACTED]"');
+    expect(upgradeFailureReceiptLine(new Error("postgresql://:raw-password@localhost/supacloud")))
+      .toContain("postgresql://:[REDACTED]@localhost/supacloud");
+    expect(upgradeFailureReceiptLine(new Error('{"token":"raw-token"}')))
+      .toContain('"summary":"Upgrade failure details were redacted"');
+    const escapedStructuredSecret = String.raw`{\"token\":\"raw-token\"}suffix`;
+    const escapedReceipt = upgradeFailureReceiptLine(new Error(escapedStructuredSecret));
+    expect(escapedReceipt).toContain('"summary":"Upgrade failure details were redacted"');
+    expect(escapedReceipt).not.toContain("raw-token");
+    for (const structuredSecret of [
+      String.raw`{"token":"prefix-\\"synthetic-escaped-tail"}`,
+      String.raw`{"to\\u006ben":"unicode-token"}`,
+      String.raw`{\"to\\u006ben\":\"escaped-unicode-token\"}`,
+      String.raw`{to\\u006ben:"unquoted-unicode-token"}`,
+      String.raw`{to\\u{006b}en:"codepoint-unicode-token"}`,
+    ]) {
+      const structuredReceipt = upgradeFailureReceiptLine(new Error(structuredSecret));
+      expect(structuredReceipt).toContain('"summary":"Upgrade failure details were redacted"');
+      expect(structuredReceipt).not.toContain("synthetic-escaped-tail");
+      expect(structuredReceipt).not.toContain("unicode-token");
+      expect(structuredReceipt).not.toContain("escaped-unicode-token");
+      expect(structuredReceipt).not.toContain("unquoted-unicode-token");
+      expect(structuredReceipt).not.toContain("codepoint-unicode-token");
+    }
   });
 
   test("recovers a service that partially stopped before reporting a systemctl error", async () => {
