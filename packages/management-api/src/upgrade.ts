@@ -27,6 +27,12 @@ import { logger } from "./utils/logger";
 import { WEB_CONSOLE_CURRENT_DIR } from "./utils/web-console-path";
 import { hasSecretEncryptionCheckpoint } from "./db/secret-key-migration";
 import {
+    CONTROL_PLANE_DATABASE_GUARD_EXIT_CODE,
+    CONTROL_PLANE_DATABASE_FINGERPRINT_ENV,
+    CONTROL_PLANE_DATABASE_SNAPSHOT_ENV,
+    ControlPlaneDatabaseGuardError,
+} from "./db/control-plane-database-identity";
+import {
     RELEASE_REPOSITORY,
     RELEASE_SIGNER_WORKFLOW,
     RELEASE_SOURCE_REF,
@@ -42,6 +48,11 @@ import {
     SUPACLOUD_UPGRADE_LOCK_PATH,
 } from "./upgrade-lock";
 import { withSigstoreVerificationDirectory } from "./sigstore-trusted-root";
+import {
+    withControlPlaneUpgradeSafety,
+    type ControlPlaneUpgradeSafetyEvidence,
+    type ControlPlaneUpgradeSafetyLease,
+} from "./control-plane-upgrade-safety";
 import {
     EMBEDDED_SYSTEMD_UNIT_BROKER_SHA256,
     SYSTEMD_UNIT_BROKER_TARGET,
@@ -115,6 +126,7 @@ const OFFLINE_BUNDLE_ENDPOINT: GithubEndpoint = {
     label: "verified offline bundle",
     proxyPrefix: "",
 };
+const CONTROL_PLANE_SAFETY_PREFIX = "SUPACLOUD_CONTROL_PLANE_UPGRADE_SAFETY=";
 
 export type GithubEndpoint = {
     label: string;
@@ -536,8 +548,13 @@ export function verifyBackupPrivilegeDropPreflight(
 ): void {
     const setprivPath = ["/usr/bin/setpriv", "/bin/setpriv"].find(pathExists);
     const idPath = ["/usr/bin/id", "/bin/id"].find(pathExists);
+    const pgDumpPath = ["/usr/bin/pg_dump", "/usr/local/bin/pg_dump"].find(pathExists);
+    const pgRestorePath = ["/usr/bin/pg_restore", "/usr/local/bin/pg_restore"].find(pathExists);
+    const timeoutPath = ["/usr/bin/timeout", "/bin/timeout"].find(pathExists);
     if (!setprivPath) throw new Error("Management upgrade requires setpriv for backup privilege separation");
     if (!idPath) throw new Error("Management upgrade requires id for backup account resolution");
+    if (!pgDumpPath || !pgRestorePath) throw new Error("Management upgrade requires pg_dump and pg_restore");
+    if (!timeoutPath) throw new Error("Management upgrade requires timeout for bounded backup commands");
 }
 
 export async function verifyActivatedManagementBinary(
@@ -1840,6 +1857,9 @@ async function runInitDb(binaryPath: string, env: Record<string, string | undefi
         env,
     });
     const exitCode = await proc.exited;
+    if (exitCode === CONTROL_PLANE_DATABASE_GUARD_EXIT_CODE) {
+        throw new ControlPlaneDatabaseGuardError("Staged init-db rejected the control-plane database identity guard");
+    }
     if (exitCode !== 0) {
         throw new Error(`supacloud --init-db exited with code ${exitCode}`);
     }
@@ -1924,6 +1944,11 @@ async function checkpointExists(databaseUrl: string, encryptionKey: string): Pro
 
 export type StagedMigrationOperations = {
     captureRuntimeEnv: () => FileState;
+    withSafety: (
+        databaseUrl: string,
+        encryptionKey: string,
+        operation: (lease: ControlPlaneUpgradeSafetyLease) => Promise<void>,
+    ) => Promise<ControlPlaneUpgradeSafetyEvidence>;
     stopService: () => Promise<void>;
     persistSecrets: (secrets: Record<string, string>) => void;
     runInit: (binaryPath: string, env: Record<string, string | undefined>) => Promise<void>;
@@ -1936,6 +1961,7 @@ export type StagedMigrationOperations = {
 function stagedMigrationOperations(): StagedMigrationOperations {
     return {
         captureRuntimeEnv: () => captureFileState(managementEnvFile()),
+        withSafety: withControlPlaneUpgradeSafety,
         stopService: () => stopManagementService(),
         persistSecrets: persistUpgradeRuntimeSecrets,
         runInit: runInitDb,
@@ -1960,19 +1986,53 @@ export async function runStagedDatabaseMigration(
     binaryPath: string,
     preparedSecrets: PreparedUpgradeSecrets,
     operations: StagedMigrationOperations = stagedMigrationOperations(),
-): Promise<void> {
+): Promise<ControlPlaneUpgradeSafetyEvidence> {
     const databaseUrl = preparedSecrets.runtimeEnv.DATABASE_URL;
     if (!databaseUrl) throw new Error("DATABASE_URL is required for secret migration checkpoint verification");
     const encryptionKey = preparedSecrets.runtimeSecretsToPersist.SECRETS_ENCRYPTION_KEY;
     const runtimeEnvState = operations.captureRuntimeEnv();
     await operations.stopService();
+    let migrationStarted = false;
     try {
-        operations.persistSecrets(preparedSecrets.runtimeSecretsToPersist);
-        await operations.runInit(binaryPath, preparedSecrets.runtimeEnv);
-        if (!(await operations.hasCheckpoint(databaseUrl, encryptionKey))) {
-            throw new Error("Secret migration checkpoint is missing after init-db");
-        }
+        const safetyEvidence = await operations.withSafety(databaseUrl, encryptionKey, async (lease) => {
+            migrationStarted = true;
+            operations.persistSecrets(preparedSecrets.runtimeSecretsToPersist);
+            await operations.runInit(binaryPath, {
+                ...preparedSecrets.runtimeEnv,
+                [CONTROL_PLANE_DATABASE_FINGERPRINT_ENV]: lease.databaseFingerprint,
+                [CONTROL_PLANE_DATABASE_SNAPSHOT_ENV]: lease.snapshotId,
+            });
+            if (!(await operations.hasCheckpoint(databaseUrl, encryptionKey))) {
+                throw new Error("Secret migration checkpoint is missing after init-db");
+            }
+        });
+        return safetyEvidence;
     } catch (migrationError: unknown) {
+        if (!migrationStarted) {
+            try {
+                await restoreRuntimeAfterMigrationFailure(runtimeEnvState, false, operations);
+            } catch (recoveryError: unknown) {
+                throw new AggregateError(
+                    [migrationError, recoveryError],
+                    "Control-plane backup failed and the Management service could not be restored",
+                );
+            }
+            throw migrationError;
+        }
+        if (migrationError instanceof ControlPlaneDatabaseGuardError) {
+            try {
+                operations.restoreRuntimeEnv(runtimeEnvState);
+            } catch (recoveryError: unknown) {
+                throw new AggregateError(
+                    [migrationError, recoveryError],
+                    "Control-plane database guard failed and runtime secrets could not be restored; the service remains stopped",
+                );
+            }
+            throw new Error(
+                "Control-plane database guard failed; runtime secrets were restored and the service remains stopped",
+                { cause: migrationError },
+            );
+        }
         let rotationComplete: boolean;
         try {
             rotationComplete = await operations.hasCheckpoint(databaseUrl, encryptionKey);
@@ -2468,6 +2528,7 @@ type UpgradeExecutionState = {
     activatedEdgeRuntimeMode: EdgeRuntimeMode | null;
     activation: UpgradeActivationState | null;
     committed: boolean;
+    controlPlaneSafety: ControlPlaneUpgradeSafetyEvidence | null;
     downloadEndpointLabel: string;
     edgeRuntimeEndpointLabel: string | null;
     preflightPostgrestLauncher: PostgrestLauncherPreflight | undefined;
@@ -2801,6 +2862,7 @@ function createUpgradeExecutionState(plan: UpgradeReleasePlan): UpgradeExecution
         activatedEdgeRuntimeMode: null,
         activation: null,
         committed: false,
+        controlPlaneSafety: null,
         downloadEndpointLabel: plan.endpoint.label,
         edgeRuntimeEndpointLabel: null,
         preflightPostgrestLauncher: undefined,
@@ -2944,8 +3006,11 @@ async function stageUpgradeArtifacts(context: UpgradeExecutionContext): Promise<
 async function migrateUpgradeMetadata(context: UpgradeExecutionContext): Promise<void> {
     const stagedManagement = context.state.stagedManagement;
     if (!stagedManagement) throw new Error("Upgrade binary was not staged");
-    context.spinner.start("Applying backward-compatible metadata database migrations with the staged binary");
-    await runStagedDatabaseMigration(stagedManagement.path, context.preparedSecrets);
+    context.spinner.start("Creating a verified control-plane backup before applying metadata migrations");
+    context.state.controlPlaneSafety = await runStagedDatabaseMigration(
+        stagedManagement.path,
+        context.preparedSecrets,
+    );
 }
 
 async function activateUpgradeArtifacts(context: UpgradeExecutionContext): Promise<void> {
@@ -3214,7 +3279,14 @@ function upgradeSuccessMessage(context: UpgradeExecutionContext): string {
     const edgeSummary = plan.edgeRuntime
         ? `; Edge Runtime upgraded to ${plan.edgeRuntime.release.tag_name} at ${plan.edgeRuntime.targetPath} (${state.edgeRuntimeEndpointLabel})`
         : "; Edge Runtime was not upgraded";
-    return `SupaCloud upgraded to ${plan.remoteVersion} via ${plan.binaryName} (${state.downloadEndpointLabel})${webSummary}${edgeSummary}`;
+    const safetySummary = state.controlPlaneSafety
+        ? `; control-plane safety ${JSON.stringify(state.controlPlaneSafety)}`
+        : "";
+    return `SupaCloud upgraded to ${plan.remoteVersion} via ${plan.binaryName} (${state.downloadEndpointLabel})${webSummary}${edgeSummary}${safetySummary}`;
+}
+
+export function controlPlaneSafetyReceiptLine(evidence: ControlPlaneUpgradeSafetyEvidence): string {
+    return `${CONTROL_PLANE_SAFETY_PREFIX}${JSON.stringify(evidence)}`;
 }
 
 export async function runUpgrade(options: RunUpgradeOptions = {}) {
@@ -3244,6 +3316,10 @@ export async function runUpgrade(options: RunUpgradeOptions = {}) {
         } finally {
             upgradeLock.release();
         }
+        if (!executionContext.state.controlPlaneSafety) {
+            throw new Error("Control-plane upgrade safety evidence is missing after transaction commit");
+        }
+        console.log(controlPlaneSafetyReceiptLine(executionContext.state.controlPlaneSafety));
         p.outro(upgradeSuccessMessage(executionContext));
     } catch (error: unknown) {
         s.stop(formatUpgradeFailure(error, upgradeRecoveryPaths(executionContext?.state ?? null)));
