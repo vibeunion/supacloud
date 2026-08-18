@@ -127,6 +127,44 @@ describe("SupAuth auth config boundary", () => {
     });
   });
 
+  test("projects stored OAuth server state into the official auth config response", async () => {
+    config.authRuntimeOwnerRef = "";
+    projectService.getProjectSettings = async () => ({
+      auth: {
+        oauth_server: {
+          enabled: true,
+          allow_dynamic_registration: true,
+          authorizationPath: "/oauth/authorize",
+        },
+      },
+    } as never);
+
+    const response = await request("/v1/projects/tenant-a/config/auth");
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      oauth_server_enabled: true,
+      oauth_server_allow_dynamic_registration: true,
+      oauth_server_authorization_path: "/oauth/authorize",
+    });
+
+    projectService.getProjectSettings = async () => ({
+      auth: {
+        oauth_server: {
+          enabled: false,
+          allow_dynamic_registration: false,
+          authorization_path: "/consent",
+        },
+      },
+    } as never);
+    const disabledResponse = await request("/v1/projects/tenant-a/config/auth");
+    expect(disabledResponse.status).toBe(200);
+    expect(await disabledResponse.json()).toMatchObject({
+      oauth_server_enabled: false,
+      oauth_server_allow_dynamic_registration: false,
+      oauth_server_authorization_path: "/consent",
+    });
+  });
+
   test("accepts official experimental Passkey configuration on both auth config routes", async () => {
     config.authRuntimeOwnerRef = "";
     let settings: Record<string, unknown> = { auth: {} };

@@ -1,4 +1,3 @@
-import { $ } from "bun";
 import * as p from "@clack/prompts";
 import { config } from "../config";
 
@@ -222,7 +221,7 @@ export async function handleProjectPause(ref: string) {
     s.start("Pausing project...");
 
     try {
-        const result = await apiRequest("POST", `/v1/projects/${ref}/pause`);
+        await apiRequest("POST", `/v1/projects/${ref}/pause`);
         s.stop("Project paused");
 
         p.outro(`✅ Project ${ref} is now paused`);
@@ -240,7 +239,7 @@ export async function handleProjectRestore(ref: string) {
     s.start("Restoring project...");
 
     try {
-        const result = await apiRequest("POST", `/v1/projects/${ref}/restore`);
+        await apiRequest("POST", `/v1/projects/${ref}/restore`);
         s.stop("Project restored");
 
         p.outro(`✅ Project ${ref} is now active`);
@@ -258,7 +257,7 @@ export async function handleProjectRestart(ref: string) {
     s.start("Restarting project...");
 
     try {
-        const result = await apiRequest("POST", `/v1/projects/${ref}/restart`);
+        await apiRequest("POST", `/v1/projects/${ref}/restart`);
         s.stop("Project restart initiated");
 
         p.outro(`✅ Project ${ref} is restarting`);

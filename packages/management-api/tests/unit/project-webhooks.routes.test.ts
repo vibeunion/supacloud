@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { afterAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Elysia } from "elysia";
 import { ConflictError, ForbiddenError, NotFoundError } from "../../src/utils/errors";
 

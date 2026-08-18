@@ -1,5 +1,5 @@
 import type { DiagnosticContext, ResultStatus } from "../services/diagnostics.types";
-import { stableSha256, stableStringify } from "../utils/stable-json";
+import { stableSha256 } from "../utils/stable-json";
 
 export { stableStringify } from "../utils/stable-json";
 

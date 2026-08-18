@@ -1,10 +1,6 @@
-import { afterAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { afterAll, describe, expect, mock, spyOn, test } from "bun:test";
 
-// Mock the DB module
-const sqlFn = mock(() => Promise.resolve([]));
-const { sql: sqlMock } = await import("../../src/db") as { sql: unknown } as { sql: ReturnType<typeof mock> };
-// We can't easily mock the static import, so we'll test the exported functions
-// by verifying they don't throw and handle the no-projects case gracefully.
+// Exercise the exported lifecycle without replacing the worker's static DB import.
 
 const { startLogDrainForwarder, stopLogDrainForwarder } = await import("../../src/workers/log-drain-forwarder.worker");
 

@@ -1,4 +1,4 @@
-import { Elysia, status, t } from "elysia";
+import { Elysia, status } from "elysia";
 import type { AnyElysia } from "elysia";
 import { logger } from "./utils/logger";
 import { runBootstrapOrExit } from "./runtime/bootstrap-fatal";
@@ -24,9 +24,8 @@ import { bffProofBodyCapture } from "./middleware/bff-proof-body";
 import { checkRateLimit } from "./middleware/rate-limit";
 import { logAuditEvent, shouldAuditRequest } from "./services/audit.service";
 import { closeDb } from "./db";
-import { authRoutes, authRuntimeRoutes, deployRoutes, storageCompatRoutes } from "./routes";
+import { authRuntimeRoutes, storageCompatRoutes } from "./routes";
 import { migrateLegacyVersionArtifacts } from "./services/edge-function.service";
-import { resolveRealtimeTenantHost } from "./utils/sdk-parity";
 import { resolveProjectApiKey } from "./utils/project-auth";
 import { translateRealtimeProxyCredentials } from "./utils/realtime-proxy-auth";
 import { recordRequestPeerAddress } from "./utils/client-ip";

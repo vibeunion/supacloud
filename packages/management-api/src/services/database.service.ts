@@ -1,7 +1,6 @@
 import { config } from "../config";
 import { logger } from "../utils/logger";
 import { decryptSecretIfNeeded, encryptSecretIfNeeded } from "../utils/secret-crypto";
-import { shellService } from "./shell.service";
 import { SQL } from "bun";
 import {
   sql as adminSql,

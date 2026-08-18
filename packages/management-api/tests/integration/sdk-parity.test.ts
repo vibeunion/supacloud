@@ -12,7 +12,6 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
-  CI_TENANT_REF,
   CI_ANON_KEY,
   CI_SERVICE_KEY,
   CI_PROXY_URL,

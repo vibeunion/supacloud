@@ -67,6 +67,7 @@ import {
   updateDatabaseSettings,
 } from "../services/project-database-config.service";
 import { publicScheduledFunctionProjectConfig } from "../utils/scheduled-function-config";
+import { normalizeOAuthServerConfig } from "../utils/project-config";
 
 /** Map PostgreSQL column types to TypeScript types */
 function pgTypeToTs(udtName: string, dataType: string): string {
@@ -493,6 +494,7 @@ async function buildAuthConfigResponse(ref: string, settings: Record<string, unk
     (settings.auth as Record<string, unknown>) || {},
   );
   const sessionPolicy = readAuthSessionPolicy(authConfig);
+  const oauthServerConfig = normalizeOAuthServerConfig(authConfig.oauth_server);
   const externalConfig =
     (authConfig.external as Record<string, unknown>) || {};
   const hooksConfig = (authConfig.hooks as Record<string, unknown>) || {};
@@ -557,6 +559,11 @@ async function buildAuthConfigResponse(ref: string, settings: Record<string, unk
     rate_limit_verify: authConfig.rate_limit_verify ?? null,
     rate_limit_token_refresh: authConfig.rate_limit_token_refresh ?? null,
     rate_limit_otp: authConfig.rate_limit_otp ?? null,
+    oauth_server_enabled: oauthServerConfig.enabled === true,
+    oauth_server_allow_dynamic_registration:
+      oauthServerConfig.allow_dynamic_registration === true,
+    oauth_server_authorization_path:
+      oauthServerConfig.authorization_path ?? null,
     sms_provider: authConfig.sms_provider ?? "twilio",
     experimental: authConfig.experimental ?? {},
     ...readStockPasskeyConfig(authConfig),
@@ -1141,8 +1148,6 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
           };
           const samlField = samlKeyMap[key];
           if (samlField) {
-            const currentSaml =
-              (currentAuth.saml as Record<string, unknown>) || {};
             otherUpdates.saml = {
               ...((otherUpdates.saml as Record<string, unknown>) || {}),
               [samlField]: val,

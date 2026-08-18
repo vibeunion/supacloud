@@ -37,6 +37,7 @@ interface AuditLogRow {
 }
 
 const authorizedActors = new WeakMap<Request, TrustedPrincipal>();
+const HTTP_METHOD_TOKEN_PATTERN = "^[!#$%&'*+\\-.^_`|~0-9A-Za-z]+$";
 
 function isRecord(candidate: unknown): candidate is Record<string, unknown> {
   return typeof candidate === "object" && candidate !== null && !Array.isArray(candidate);
@@ -125,6 +126,8 @@ type AuditFilters = {
   resourceType: string | null;
   resourceId: string | null;
   actorId: string | null;
+  status: number | null;
+  method: string | null;
   from: string | null;
   to: string | null;
 };
@@ -137,6 +140,8 @@ async function countAuditRows(ref: string, filters: AuditFilters): Promise<numbe
       AND (${filters.resourceType}::text IS NULL OR metadata->>'resource_type' = ${filters.resourceType})
       AND (${filters.resourceId}::text IS NULL OR metadata->>'resource_id' = ${filters.resourceId})
       AND (${filters.actorId}::text IS NULL OR actor = ${filters.actorId})
+      AND (${filters.status}::int IS NULL OR status = ${filters.status})
+      AND (${filters.method}::text IS NULL OR method = ${filters.method})
       AND (${filters.from}::timestamptz IS NULL OR created_at >= ${filters.from}::timestamptz)
       AND (${filters.to}::timestamptz IS NULL OR created_at <= ${filters.to}::timestamptz)
   `;
@@ -162,6 +167,8 @@ async function selectAuditRows(database: SQL, query: AuditRowQuery) {
       AND (${query.filters.resourceType}::text IS NULL OR metadata->>'resource_type' = ${query.filters.resourceType})
       AND (${query.filters.resourceId}::text IS NULL OR metadata->>'resource_id' = ${query.filters.resourceId})
       AND (${query.filters.actorId}::text IS NULL OR actor = ${query.filters.actorId})
+      AND (${query.filters.status}::int IS NULL OR status = ${query.filters.status})
+      AND (${query.filters.method}::text IS NULL OR method = ${query.filters.method})
       AND (${query.filters.from}::timestamptz IS NULL OR created_at >= ${query.filters.from}::timestamptz)
       AND (${query.filters.to}::timestamptz IS NULL OR created_at <= ${query.filters.to}::timestamptz)
       AND (${query.cursor?.createdAt || null}::timestamptz IS NULL
@@ -188,11 +195,17 @@ function renderExport(entries: ReturnType<typeof toAuditEntry>[], format: "jsonl
 }
 
 function filtersFromQuery(query: Record<string, unknown>): AuditFilters {
+  const rawStatus = query.status;
+  const parsedStatus = rawStatus === undefined || rawStatus === null || rawStatus === ""
+    ? null
+    : Number(rawStatus);
   return {
     eventType: optionalString(query.event_type),
     resourceType: optionalString(query.resource_type),
     resourceId: optionalString(query.resource_id),
     actorId: optionalString(query.actor_id),
+    status: parsedStatus,
+    method: optionalString(query.method)?.toUpperCase() || null,
     from: optionalString(query.from),
     to: optionalString(query.to),
   };
@@ -302,6 +315,8 @@ export const projectAuditRoutes = new Elysia({ prefix: "/v1/projects/:ref/audit"
       resource_type: t.Optional(t.String()),
       resource_id: t.Optional(t.String()),
       actor_id: t.Optional(t.String()),
+      status: t.Optional(t.Numeric({ minimum: 100, maximum: 599, multipleOf: 1 })),
+      method: t.Optional(t.String({ pattern: HTTP_METHOD_TOKEN_PATTERN })),
       limit: t.Optional(t.String()),
       offset: t.Optional(t.String()),
       cursor: t.Optional(t.String()),
@@ -381,6 +396,8 @@ export const projectAuditRoutes = new Elysia({ prefix: "/v1/projects/:ref/audit"
       resource_type: t.Optional(t.String()),
       resource_id: t.Optional(t.String()),
       actor_id: t.Optional(t.String()),
+      status: t.Optional(t.Integer({ minimum: 100, maximum: 599 })),
+      method: t.Optional(t.String({ pattern: HTTP_METHOD_TOKEN_PATTERN })),
       from: t.Optional(t.String()),
       to: t.Optional(t.String()),
       limit: t.Optional(t.Number({ minimum: 1, maximum: 50000 })),

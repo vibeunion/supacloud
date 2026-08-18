@@ -552,10 +552,6 @@ async function readFunctionManifestState(
   }
 }
 
-async function readFunctionConfig(ref: string, slug: string): Promise<EdgeFunctionConfig> {
-  return (await readFunctionManifestState(ref, slug)).config;
-}
-
 function publicActivationId(
   authority: EdgeFunctionActivationAuthority | null,
 ): EdgeFunctionActivationId {

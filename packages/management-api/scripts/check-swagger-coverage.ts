@@ -69,8 +69,6 @@ for (const file of files) {
     // we've exited the method call.
     let hasDetail = false;
     let parenDepth = 0;
-    let foundOptionsObject = false;
-    let braceDepth = 0;
 
     for (let j = i; j < Math.min(i + 200, lines.length); j++) {
       const line = lines[j];

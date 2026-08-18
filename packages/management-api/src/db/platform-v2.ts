@@ -449,6 +449,8 @@ export async function ensurePlatformV2Schema(transaction: SQL): Promise<void> {
     ALTER TABLE webhook_outbox ADD COLUMN IF NOT EXISTS replay_request_body TEXT;
     ALTER TABLE webhook_outbox ADD COLUMN IF NOT EXISTS replay_signature_timestamp TEXT;
     ALTER TABLE webhook_outbox ADD COLUMN IF NOT EXISTS replay_secret_version INTEGER;
+    ALTER TABLE webhook_outbox ADD COLUMN IF NOT EXISTS replay_of_delivery_id UUID;
+    ALTER TABLE webhook_outbox ADD COLUMN IF NOT EXISTS created_by TEXT;
     ALTER TABLE webhook_deliveries ADD COLUMN IF NOT EXISTS request_body TEXT;
     ALTER TABLE webhook_deliveries ADD COLUMN IF NOT EXISTS signature_timestamp TEXT;
     ALTER TABLE webhook_deliveries ADD COLUMN IF NOT EXISTS request_api_version VARCHAR(20);

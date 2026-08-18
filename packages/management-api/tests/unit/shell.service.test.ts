@@ -1,4 +1,4 @@
-import { describe, test, expect, mock, beforeEach, spyOn } from "bun:test";
+import { describe, test, expect, beforeEach } from "bun:test";
 import { ShellService, shellService } from "../../src/services/shell.service";
 
 describe("ShellService", () => {

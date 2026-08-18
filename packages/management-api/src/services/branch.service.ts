@@ -23,7 +23,6 @@ import { databaseService } from "./database.service";
 import { projectRepository } from "../repositories/project.repository";
 import { tenantRuntimeService } from "./tenant-runtime.service";
 import { logger } from "../utils/logger";
-import { mergeProjectConfig, normalizeProjectConfig } from "../utils/project-config";
 import { createHash, createHmac, pbkdf2Sync, randomBytes } from "node:crypto";
 import {
   buildBranchMigrationPromotionPlan,

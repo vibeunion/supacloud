@@ -2428,7 +2428,7 @@ describe("WorkerPool metrics NaN fix", () => {
       expect(res.status).toBe(200);
 
       const metrics = pool.snapshotMetrics("test");
-      for (const [key, value] of Object.entries(metrics)) {
+      for (const [, value] of Object.entries(metrics)) {
         expect(Number.isNaN(value)).toBe(false);
       }
       expect(metrics["test_avg_queue_wait_ms"]).toBe(0);
@@ -2476,7 +2476,7 @@ describe("WorkerPool metrics NaN fix", () => {
       expect(res2.status).toBe(200);
 
       const metrics = pool.snapshotMetrics("testq");
-      for (const [key, value] of Object.entries(metrics)) {
+      for (const [, value] of Object.entries(metrics)) {
         expect(Number.isNaN(value)).toBe(false);
       }
       // At least one request was queued, so total_queue_wait_ms > 0

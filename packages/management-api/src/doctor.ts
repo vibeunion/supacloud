@@ -1,7 +1,6 @@
 import * as p from "@clack/prompts";
 import { HealthChecker, type HealthReport } from "./infra/health";
 import { config } from "./config";
-import os from "node:os";
 
 function getSpinner() {
     const s = p.spinner();
@@ -57,8 +56,6 @@ export async function runDoctor(options: { skipSmokeTest?: boolean, forceYes?: b
             }
 
             s.start("Running business smoke test (creating project)...");
-            const testRef = `smoke-test-${Math.random().toString(36).substring(7)}`;
-
             try {
                 const { projectService } = await import("./services");
 

@@ -9,7 +9,6 @@ import { Elysia, status, t } from "elysia";
 import * as authMiddleware from "../middleware/auth";
 import { resolveDbName, getProjectDb } from "../db";
 import { projectRepository } from "../repositories/project.repository";
-import { logger } from "../utils/logger";
 
 async function queryTenant(ref: string, sqlText: string): Promise<Record<string, unknown>[]> {
   const dbName = await resolveDbName(ref);

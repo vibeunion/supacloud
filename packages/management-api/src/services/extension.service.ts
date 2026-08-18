@@ -1,4 +1,3 @@
-import { logger } from "../utils/logger";
 import { getProjectDb, resolveDbName } from "../db";
 import { $ } from "bun";
 
