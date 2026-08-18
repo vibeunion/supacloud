@@ -2704,6 +2704,106 @@ describe("supacloud-cli process contract", () => {
         expect(result.stdout + result.stderr).not.toContain("application-service-role");
     });
 
+    test("release-canary stage replay uses the dual-bound service role and strict safe receipt", async () => {
+        const serviceRoleKey = "application-service-role-private";
+        const rpcRequests: Array<{
+            path: string;
+            authorization: string | null;
+            apiKey: string | null;
+            body: unknown;
+        }> = [];
+        const applicationServer = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            async fetch(request) {
+                rpcRequests.push({
+                    path: new URL(request.url).pathname,
+                    authorization: request.headers.get("authorization"),
+                    apiKey: request.headers.get("apikey"),
+                    body: await request.json(),
+                });
+                return Response.json({
+                    fixtureId: "11111111-1111-4111-8111-111111111111",
+                    tenantKey: "release-canary-22222222-2222-4222-8222-222222222222",
+                    state: "staged",
+                    idempotent: true,
+                });
+            },
+        });
+        servers.push(applicationServer);
+        const applicationOrigin = `http://127.0.0.1:${applicationServer.port}`;
+        const managementRequests: string[] = [];
+        const managementServer = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch(request) {
+                managementRequests.push(new URL(request.url).pathname);
+                return Response.json({
+                    schema: "supacloud.project-endpoints.v1",
+                    project_ref: "abc123",
+                    endpoints: {
+                        api: {
+                            origin: applicationOrigin,
+                            host: `127.0.0.1:${applicationServer.port}`,
+                            scheme: "http",
+                            source: "explicit_api_domain",
+                            aliases: [],
+                        },
+                        auth: { origin: "https://auth.example.test", host: "auth.example.test", scheme: "https", source: "explicit_auth_domain", aliases: [] },
+                        studio: { origin: "https://studio.example.test", host: "studio.example.test", scheme: "https", source: "explicit_studio_domain", aliases: [] },
+                    },
+                });
+            },
+        });
+        servers.push(managementServer);
+        const privateSubject = "33333333-3333-4333-8333-333333333333";
+        const requestId = "44444444-4444-4444-8444-444444444444";
+        const environment = {
+            SUPACLOUD_ENV: "production",
+            SUPACLOUD_API_URL: `http://127.0.0.1:${managementServer.port}`,
+            SUPACLOUD_API_TOKEN: "management-private-token",
+            SUPACLOUD_PROJECT_REF: "abc123",
+            SUPABASE_URL: applicationOrigin,
+            SUPABASE_SERVICE_ROLE_KEY: serviceRoleKey,
+        };
+
+        const blocked = await runProjectCli([
+            "release", "release_canary_fixture_stage_replay", "--ref", "abc123",
+            "--subject", privateSubject, "--request_id", requestId,
+        ], environment);
+        expect(blocked.exitCode).toBe(1);
+        expect(rpcRequests).toHaveLength(0);
+
+        const result = await runProjectCli([
+            "release", "release_canary_fixture_stage_replay", "--ref", "abc123",
+            "--subject", privateSubject, "--request_id", requestId,
+            "--confirm-production", "abc123",
+        ], environment);
+        const receipt = JSON.parse(result.stdout);
+
+        expect(result.exitCode).toBe(0);
+        expect(receipt).toMatchObject({
+            schema: "supacloud.cli.release-control.v1",
+            ok: true,
+            operation: "release.release_canary.fixture_stage_replay",
+            project_ref: "abc123",
+            receipt: { state: "staged", idempotent: true },
+        });
+        expect(rpcRequests).toEqual([{
+            path: "/rest/v1/rpc/fa_release_canary_fixture_stage",
+            authorization: `Bearer ${serviceRoleKey}`,
+            apiKey: serviceRoleKey,
+            body: { p_subject: privateSubject, p_request_id: requestId },
+        }]);
+        expect(managementRequests).toEqual([
+            "/v1/projects/abc123/endpoint/projection",
+            "/v1/projects/abc123/endpoint/projection",
+        ]);
+        expect(result.stdout + result.stderr).not.toContain(serviceRoleKey);
+        expect(result.stdout + result.stderr).not.toContain("management-private-token");
+        expect(result.stdout + result.stderr).not.toContain(privateSubject);
+    });
+
     test.each([["401", 401], ["403", 403]] as const)(
         "status reports application credential rejection %s without reflecting the key",
         async (_statusLabel, rejectionStatus) => {

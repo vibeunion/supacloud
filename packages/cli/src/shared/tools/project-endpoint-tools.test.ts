@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { schemaEnumValues, type ToolSchema } from "../schema";
 import { registerAdminProjectCliTools, registerUserProjectCliTools } from "./project-cli-tools";
+import { projectApiOrigins } from "./project-endpoint-read";
 
 const PROJECT_REF = "abc123";
 const PROJECT_ENDPOINTS = {
@@ -59,6 +60,14 @@ function captureAdminProjectTool(http: Record<string, unknown>): CapturedProject
 }
 
 describe("project endpoint CLI actions", () => {
+    test("projects the authoritative API origin and aliases for release binding", () => {
+        expect(projectApiOrigins({ ok: true, status: 200, data: PROJECT_ENDPOINTS }, PROJECT_REF)).toEqual([
+            "https://api.example.com",
+            "https://abc123.api.platform.example",
+        ]);
+        expect(projectApiOrigins({ ok: true, status: 200, data: PROJECT_ENDPOINTS }, "other")).toBeNull();
+    });
+
     test("reads the selected project endpoint projection through the user CLI", async () => {
         const requests: Array<{ path: string; maxResponseBytes?: number }> = [];
         const tool = captureUserProjectTool({

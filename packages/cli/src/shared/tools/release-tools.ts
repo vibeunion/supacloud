@@ -3,6 +3,7 @@ import { optional, stringEnum, withDescription } from "../schema";
 import type { ToolSchema } from "../schema";
 import type { HttpResult, HttpTransport } from "../transports/http";
 import { releaseControlFailure, releaseControlSuccess, type ReleaseControlToolResponse } from "./release-control-response";
+import { PROJECT_ENDPOINT_RESPONSE_MAX_BYTES, projectApiOrigins } from "./project-endpoint-read";
 
 type ToolServer = {
     tool: (
@@ -18,7 +19,15 @@ type ReleaseOperation =
     | "release.logical_backup.create"
     | "release.logical_backup.restore"
     | "release.postgrest.status"
-    | "release.postgrest.restart";
+    | "release.postgrest.restart"
+    | "release.release_canary.fixture_stage_replay";
+
+type ReleaseCanaryStageReceipt = {
+    fixtureId: string;
+    tenantKey: string;
+    state: "staged";
+    idempotent: true;
+};
 
 type VerifiedLogicalBackup = {
     backup_id: string;
@@ -45,6 +54,9 @@ const INVENTORY_MAX_BYTES = 1024 * 1024;
 const MUTATION_MAX_BYTES = 64 * 1024;
 const BACKUP_TIMEOUT_MS = 36 * 60_000;
 const RELEASE_READ_RESPONSE_TIMEOUT_MS = 5_000;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const RELEASE_CANARY_TENANT_KEY = /^release-canary-[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const RELEASE_CANARY_STAGE_RECEIPT_KEYS = new Set(["fixtureId", "tenantKey", "state", "idempotent"]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -240,24 +252,58 @@ function isRestartReceipt(value: unknown): boolean {
         && value.success === true;
 }
 
+function releaseCanaryStageInput(subject: unknown, requestId: unknown): { p_subject: string; p_request_id: string } {
+    if (typeof subject !== "string" || !UUID.test(subject)) throw new Error("'subject' must be a canonical UUID");
+    if (typeof requestId !== "string" || !UUID.test(requestId)) throw new Error("'request_id' must be a canonical UUID");
+    return { p_subject: subject, p_request_id: requestId };
+}
+
+function releaseCanaryStageReceipt(value: unknown): ReleaseCanaryStageReceipt | null {
+    if (!isRecord(value)
+        || Object.keys(value).some((key) => !RELEASE_CANARY_STAGE_RECEIPT_KEYS.has(key))
+        || Object.keys(value).length !== RELEASE_CANARY_STAGE_RECEIPT_KEYS.size
+        || typeof value.fixtureId !== "string"
+        || !UUID.test(value.fixtureId)
+        || typeof value.tenantKey !== "string"
+        || !RELEASE_CANARY_TENANT_KEY.test(value.tenantKey)
+        || value.state !== "staged"
+        || value.idempotent !== true) return null;
+    return {
+        fixtureId: value.fixtureId,
+        tenantKey: value.tenantKey,
+        state: "staged",
+        idempotent: true,
+    };
+}
+
+async function applicationOriginMatches(http: HttpTransport, projectRef: string, applicationOrigin: string): Promise<boolean> {
+    const endpointRead = await http.get(
+        `${endpoint(projectRef)}/endpoint/projection`,
+        { maxResponseBytes: PROJECT_ENDPOINT_RESPONSE_MAX_BYTES },
+    );
+    return projectApiOrigins(endpointRead, projectRef)?.includes(applicationOrigin) === true;
+}
+
 export function registerReleaseTools(
     server: ToolServer,
     http: HttpTransport,
-    options: { projectRef?: string } = {},
+    options: { projectRef?: string; applicationHttp?: HttpTransport; applicationOrigin?: string } = {},
 ): void {
     server.tool(
         "release",
-        "Verified release controls using a Management API credential. Actions: logical_backup_list, logical_backup_create, logical_backup_restore, postgrest_status, postgrest_restart",
+        "Verified release controls. Management actions use the Management API; release_canary_fixture_stage_replay additionally requires the selected project's SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.",
         {
             action: withDescription(stringEnum([
-                "logical_backup_list", "logical_backup_create", "logical_backup_restore", "postgrest_status", "postgrest_restart",
+                "logical_backup_list", "logical_backup_create", "logical_backup_restore", "postgrest_status", "postgrest_restart", "release_canary_fixture_stage_replay",
             ]), "Release control action"),
             ref: optional(Type.String(), options.projectRef ? "Optional override when not auto-linked" : "Project ref"),
             backup_id: optional(Type.String(), "[logical_backup_restore] Exact verified logical-full backup ID from the selected project inventory"),
             expected_sha256: optional(Type.String(), "[logical_backup_restore] Exact lowercase SHA-256 from the selected project inventory"),
             restore_confirmation: optional(Type.String(), "[logical_backup_restore] Exact RESTORE_PROJECT:<ref>:<backup_id>:<sha256> confirmation"),
+            subject: optional(Type.String(), "[release_canary_fixture_stage_replay] Exact central subject UUID"),
+            request_id: optional(Type.String(), "[release_canary_fixture_stage_replay] Exact idempotent stage request UUID"),
         },
-        async ({ action, ref, backup_id, expected_sha256, restore_confirmation }) => {
+        async ({ action, ref, backup_id, expected_sha256, restore_confirmation, subject, request_id }) => {
             const projectRef = typeof ref === "string" && ref || options.projectRef;
             if (!projectRef) throw new Error("'ref' is required for release controls");
             if (!validProjectRef(projectRef)) throw new Error("'ref' is invalid for release controls");
@@ -335,6 +381,30 @@ export function registerReleaseTools(
                 return failure ?? releaseControlSuccess("release.postgrest.status", {
                     project_ref: projectRef,
                     postgrest: read.status!,
+                });
+            }
+            if (action === "release_canary_fixture_stage_replay") {
+                if (!options.applicationHttp || !options.applicationOrigin) {
+                    throw new Error("release_canary_fixture_stage_replay requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY");
+                }
+                const request = releaseCanaryStageInput(subject, request_id);
+                if (!await applicationOriginMatches(http, projectRef, options.applicationOrigin)) {
+                    return releaseControlFailure("release.release_canary.fixture_stage_replay", "INVALID_RESPONSE", null);
+                }
+                const response = await options.applicationHttp.postReleaseMutation(
+                    "/rest/v1/rpc/fa_release_canary_fixture_stage",
+                    request,
+                );
+                if (!response.ok || response.status !== 200) {
+                    return mutationFailure("release.release_canary.fixture_stage_replay", response);
+                }
+                const receipt = releaseCanaryStageReceipt(response.data);
+                if (!receipt || !await applicationOriginMatches(http, projectRef, options.applicationOrigin)) {
+                    return releaseControlFailure("release.release_canary.fixture_stage_replay", "OUTCOME_UNKNOWN", response.status);
+                }
+                return releaseControlSuccess("release.release_canary.fixture_stage_replay", {
+                    project_ref: projectRef,
+                    receipt,
                 });
             }
             if (action !== "postgrest_restart") throw new Error("Unknown release control action");

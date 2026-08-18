@@ -36,6 +36,25 @@ function createTransport(): HttpTransport {
     return new HttpTransport({ baseUrl: "https://api.example.test", token: "test-token" });
 }
 
+test("HttpTransport sends an optional application API key only when configured", async () => {
+    const observedHeaders: Array<[string | null, string | null]> = [];
+    globalThis.fetch = (async (_input, init) => {
+        const headers = new Headers(init?.headers);
+        observedHeaders.push([headers.get("authorization"), headers.get("apikey")]);
+        return Response.json({ ok: true });
+    }) as typeof fetch;
+
+    await createTransport().postReleaseMutation("/without-api-key", {});
+    await new HttpTransport({
+        baseUrl: "https://api.example.test", token: "service-role", apiKey: "service-role",
+    }).postReleaseMutation("/with-api-key", {});
+
+    expect(observedHeaders).toEqual([
+        ["Bearer test-token", null],
+        ["Bearer service-role", "service-role"],
+    ]);
+});
+
 function retryableNetworkError(kind: "AbortError" | "ECONNREFUSED" | "ECONNRESET"): Error {
     const error = new Error(kind);
     if (kind === "AbortError") error.name = kind;
