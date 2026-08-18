@@ -22,8 +22,10 @@ const auditRow = {
   created_at: new Date("2026-07-19T00:00:00.000Z"),
 };
 
-const sqlQueryMock = mock((strings: TemplateStringsArray) => {
+let auditQueries: Array<{ text: string; values: unknown[] }> = [];
+const sqlQueryMock = mock((strings: TemplateStringsArray, ...values: unknown[]) => {
   const text = strings.join("?");
+  auditQueries.push({ text, values });
   if (text.includes("COUNT(*)::int AS count")) return Promise.resolve([{ count: 17 }]);
   if (text.includes("FROM audit_log_checkpoints")) {
     return Promise.resolve([{ project_ref: "proj_1", last_event_id: auditRow.id, last_event_hash: "hash-one", event_count: 17 }]);
@@ -95,6 +97,7 @@ describe("projectAuditRoutes v2", () => {
 
   beforeEach(() => {
     sqlMock.mockClear();
+    auditQueries = [];
     sqlMock.begin.mockClear();
     append.mockClear();
     verifyIntegrity.mockClear();
@@ -127,6 +130,35 @@ describe("projectAuditRoutes v2", () => {
       total: 17,
       items: [{ id: auditRow.id, actor_id: "admin-one", event_hash: "hash-one" }],
     });
+  });
+
+  test("filters both items and total by exact status and normalized method", async () => {
+    const response = await request("/v1/projects/proj_1/audit?status=404&method=post");
+    expect(response.status).toBe(200);
+
+    const filteredQueries = auditQueries.filter(({ text }) => (
+      text.includes("FROM audit_logs") || text.includes("COUNT(*)::int AS count")
+    ));
+    expect(filteredQueries).toHaveLength(2);
+    for (const query of filteredQueries) {
+      expect(query.text).toContain("status =");
+      expect(query.text).toContain("method =");
+      expect(query.values).toContain(404);
+      expect(query.values).toContain("POST");
+    }
+  });
+
+  test("accepts EVENT and rejects invalid audit filter boundaries before querying", async () => {
+    const eventResponse = await request("/v1/projects/proj_1/audit?method=event");
+    expect(eventResponse.status).toBe(200);
+    expect(auditQueries.some(({ values }) => values.includes("EVENT"))).toBe(true);
+
+    for (const query of ["status=99", "status=200.5", "status=600", "method=not%20a%20token"]) {
+      auditQueries = [];
+      const response = await request(`/v1/projects/proj_1/audit?${query}`);
+      expect(response.status).toBeGreaterThanOrEqual(400);
+      expect(auditQueries).toEqual([]);
+    }
   });
 
   test("ignores caller-supplied actor and preserves the verified request id", async () => {

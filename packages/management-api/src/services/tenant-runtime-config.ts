@@ -233,7 +233,7 @@ export function renderGoTrueAuthEnv(authConfig: Record<string, unknown>): string
         || readBooleanSetting(authConfig, "enable_signup", true) === false;
     const externalAnonymousUsersEnabled = readBooleanSetting(authConfig, "external_anonymous_users_enabled", true);
     const externalEmailEnabled = readBooleanSetting(authConfig, "external_email_enabled", true);
-    const externalPhoneEnabled = readBooleanSetting(authConfig, "external_phone_enabled", true);
+    const externalPhoneEnabled = readBooleanSetting(authConfig, "external_phone_enabled", false);
 
     return [
 `

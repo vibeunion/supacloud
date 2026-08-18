@@ -92,6 +92,11 @@ describe("platform v2 schema contract", () => {
     expect(schema).toContain("BEFORE UPDATE OR DELETE ON audit_logs");
   });
 
+  test("idempotently upgrades legacy webhook outbox replay columns", () => {
+    expect(schema).toContain("ALTER TABLE webhook_outbox ADD COLUMN IF NOT EXISTS replay_of_delivery_id UUID");
+    expect(schema).toContain("ALTER TABLE webhook_outbox ADD COLUMN IF NOT EXISTS created_by TEXT");
+  });
+
   test("moves audit chain backfill out of server schema bootstrap", () => {
     expect(schema).toContain("ALTER TABLE project_webhooks ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ");
     expect(schema).toContain("WHERE deleted_at IS NULL");

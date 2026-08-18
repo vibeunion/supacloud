@@ -45,6 +45,7 @@ type OrganizationMemberMutation = {
 const MEMBER_ROLES = new Set(["member", "admin"]);
 const MAX_JIT_MEMBERSHIPS = 50;
 const ORGANIZATION_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const MAX_ORGANIZATION_NAME_LENGTH = 120;
 const SENSITIVE_BRANDING_KEYS = new Set([
   "authorization",
   "cookie",
@@ -97,6 +98,20 @@ function validatedOrganizationSlug(value: string): string {
     throw new ValidationError("slug must be 2 to 120 lowercase letters or numbers separated by single hyphens");
   }
   return value;
+}
+
+function validatedOrganizationName(rawName: string): string {
+  const name = rawName.trim();
+  if (!name || name.length > MAX_ORGANIZATION_NAME_LENGTH) {
+    throw new ValidationError("name must contain 1 to 120 characters");
+  }
+  return name;
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  return typeof error === "object"
+    && error !== null
+    && (error as { code?: string }).code === "23505";
 }
 
 function hashToken(token: string): string {
@@ -329,14 +344,13 @@ export const projectOrganizationService = {
 
   async create(ref: string, input: { name: string; slug?: string; description?: string | null; branding?: Record<string, unknown>; jit_enabled?: boolean; jit_domains?: string[] }, actor: string) {
     if (!(await projectExists(ref))) throw new NotFoundError("Project", ref);
-    const name = input.name.trim();
-    if (!name) throw new ValidationError("name is required");
+    const name = validatedOrganizationName(input.name);
     const explicitSlug = input.slug === undefined ? null : validatedOrganizationSlug(input.slug);
     const slug = explicitSlug ?? normalizedSlug(name);
     validateBrandingValue(input.branding || {});
     const domains = [...new Set((input.jit_domains || []).map((item) => item.trim().toLowerCase()).filter(Boolean))];
     try {
-      return sql.begin(async (transaction) => {
+      return await sql.begin(async (transaction) => {
         const jitDomains = transaction.array(domains, "TEXT");
         const [organization] = await transaction`
           INSERT INTO project_business_organizations (
@@ -358,7 +372,7 @@ export const projectOrganizationService = {
         return organization;
       });
     } catch (error: unknown) {
-      if (typeof error === "object" && error !== null && (error as { code?: string }).code === "23505") {
+      if (isUniqueViolation(error)) {
         throw new ConflictError("An organization with this slug already exists");
       }
       throw error;
@@ -367,27 +381,35 @@ export const projectOrganizationService = {
 
   async update(ref: string, organizationId: string, input: { name?: string; slug?: string; description?: string | null; branding?: Record<string, unknown>; jit_enabled?: boolean; jit_domains?: string[] }) {
     await organizationOrThrow(ref, organizationId);
-    const name = input.name?.trim();
-    if (input.name !== undefined && !name) throw new ValidationError("name must not be empty");
+    const name = input.name === undefined
+      ? undefined
+      : validatedOrganizationName(input.name);
     const slug = input.slug === undefined ? null : validatedOrganizationSlug(input.slug);
     if (input.branding !== undefined) validateBrandingValue(input.branding);
     const domains = input.jit_domains === undefined
       ? null
       : [...new Set(input.jit_domains.map((item) => item.trim().toLowerCase()).filter(Boolean))];
     const jitDomains = domains === null ? null : sql.array(domains, "TEXT");
-    const [row] = await sql`
-      UPDATE project_business_organizations SET
-        name = COALESCE(${name ?? null}, name),
-        slug = COALESCE(${slug}, slug),
-        description = CASE WHEN ${input.description !== undefined} THEN ${input.description ?? null} ELSE description END,
-        branding = CASE WHEN ${input.branding !== undefined} THEN ${JSON.stringify(input.branding || {})}::jsonb ELSE branding END,
-        jit_enabled = CASE WHEN ${input.jit_enabled !== undefined} THEN ${input.jit_enabled ?? false} ELSE jit_enabled END,
-        jit_domains = CASE WHEN ${jitDomains !== null} THEN ${jitDomains} ELSE jit_domains END,
-        updated_at = NOW()
-      WHERE project_ref = ${ref} AND id = ${organizationId}
-      RETURNING *
-    `;
-    return row;
+    try {
+      const [row] = await sql`
+        UPDATE project_business_organizations SET
+          name = COALESCE(${name ?? null}, name),
+          slug = COALESCE(${slug}, slug),
+          description = CASE WHEN ${input.description !== undefined} THEN ${input.description ?? null} ELSE description END,
+          branding = CASE WHEN ${input.branding !== undefined} THEN ${JSON.stringify(input.branding || {})}::jsonb ELSE branding END,
+          jit_enabled = CASE WHEN ${input.jit_enabled !== undefined} THEN ${input.jit_enabled ?? false} ELSE jit_enabled END,
+          jit_domains = CASE WHEN ${jitDomains !== null} THEN ${jitDomains} ELSE jit_domains END,
+          updated_at = NOW()
+        WHERE project_ref = ${ref} AND id = ${organizationId}
+        RETURNING *
+      `;
+      return row;
+    } catch (error: unknown) {
+      if (isUniqueViolation(error)) {
+        throw new ConflictError("An organization with this slug already exists");
+      }
+      throw error;
+    }
   },
 
   async remove(ref: string, organizationId: string) {

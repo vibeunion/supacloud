@@ -8,6 +8,7 @@ let rejectOutboxInsert = false;
 let memberMutationVersion = 0;
 let projectExistsInControlDb = true;
 let organizationExistsInControlDb = true;
+let organizationUniqueViolation: "create" | "update" | null = null;
 const controlArray = mock((values: string[], type: string) => ({ values, type }));
 const transactionArray = mock((values: string[], type: string) => ({ values, type }));
 
@@ -34,7 +35,12 @@ const controlQuery = mock((strings: TemplateStringsArray, ...values: unknown[]) 
       : []);
   }
   if (query.includes("INSERT INTO project_business_organizations")) {
+    if (organizationUniqueViolation === "create") throw Object.assign(new Error("unique violation"), { code: "23505" });
     return Promise.resolve([{ id: "org-one", project_ref: "business-project", name: values[1], slug: values[2] }]);
+  }
+  if (query.includes("UPDATE project_business_organizations")) {
+    if (organizationUniqueViolation === "update") throw Object.assign(new Error("unique violation"), { code: "23505" });
+    return Promise.resolve([{ id: "org-one", project_ref: "business-project", name: values[0], slug: values[1] }]);
   }
   if (query.includes("INSERT INTO project_business_organization_members")) {
     const existing = storedMembers.find((member) => (
@@ -154,6 +160,7 @@ describe("project organization GoTrue authority", () => {
     memberMutationVersion = 0;
     projectExistsInControlDb = true;
     organizationExistsInControlDb = true;
+    organizationUniqueViolation = null;
     controlArray.mockClear();
     transactionArray.mockClear();
     transactionQuery.mockClear();
@@ -208,6 +215,54 @@ describe("project organization GoTrue authority", () => {
       .map(({ values }) => values[1]);
     expect(insertedSlugs).toEqual(validSlugs);
     expect(updatedSlugs).toEqual(validSlugs);
+  });
+
+  test("accepts organization names at 1 and 120 characters after trimming", async () => {
+    await projectOrganizationService.create(
+      "business-project",
+      { name: " a ", slug: "one-character-name" },
+      "admin",
+    );
+    await projectOrganizationService.update("business-project", "org-one", { name: "b".repeat(120) });
+
+    const insert = controlQueries.find(({ query }) => query.includes("INSERT INTO project_business_organizations"));
+    const update = controlQueries.find(({ query }) => query.includes("UPDATE project_business_organizations"));
+    expect(insert?.values[1]).toBe("a");
+    expect(update?.values[0]).toBe("b".repeat(120));
+  });
+
+  test("rejects empty and oversized organization names before create or update writes", async () => {
+    for (const name of ["", "   ", "x".repeat(121)]) {
+      await expect(projectOrganizationService.create(
+        "business-project",
+        { name, slug: "valid-slug" },
+        "admin",
+      )).rejects.toMatchObject({ statusCode: 400, code: "VALIDATION_ERROR" });
+      await expect(projectOrganizationService.update(
+        "business-project",
+        "org-one",
+        { name },
+      )).rejects.toMatchObject({ statusCode: 400, code: "VALIDATION_ERROR" });
+      expect(organizationWriteQueries()).toEqual([]);
+    }
+  });
+
+  test("maps create and update slug uniqueness races to conflict without a preflight query", async () => {
+    organizationUniqueViolation = "create";
+    await expect(projectOrganizationService.create(
+      "business-project",
+      { name: "Create conflict", slug: "duplicate-slug" },
+      "admin",
+    )).rejects.toMatchObject({ statusCode: 409, code: "CONFLICT" });
+
+    organizationUniqueViolation = "update";
+    await expect(projectOrganizationService.update(
+      "business-project",
+      "org-one",
+      { slug: "duplicate-slug" },
+    )).rejects.toMatchObject({ statusCode: 409, code: "CONFLICT" });
+
+    expect(controlQueries.filter(({ query }) => query.includes("slug =") && query.includes("SELECT"))).toEqual([]);
   });
 
   test("rejects invalid explicit organization slugs before create or update writes", async () => {
