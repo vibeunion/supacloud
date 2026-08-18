@@ -1,6 +1,6 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -9,11 +9,13 @@ import {
     assertLocalTrustedRootDirectory,
     assertLocalUpgradeBundleSize,
     assertSignedArtifact,
+    downloadPinnedGithubCli,
     githubAttestationVerificationArguments,
     manifestAttestationDownloadUrl,
     parseGithubReleaseMetadata,
     prepareLocalUpgradeBundle,
     runGithubCli,
+    runGithubCliDownload,
     serializeAttestationBundles,
     settleLocalBundleDownloads,
     type LocalUpgradeFile,
@@ -207,6 +209,74 @@ describe("local upgrade download trust boundary", () => {
         ].join("\n"), async () => {
             await expect(assertLocalGithubVerifier()).rejects.toThrow("current gh attestation verifier");
         });
+    });
+
+    test("downloads the pinned verifier through the required local GitHub CLI", async () => {
+        const downloadDirectory = mkdtempSync(join(tmpdir(), "supacloud-admin-verifier-"));
+        const argumentsPath = join(downloadDirectory, "arguments.txt");
+        const environmentPath = join(downloadDirectory, "environment.txt");
+        const previousArgumentsPath = process.env.SUPACLOUD_TEST_GH_ARGUMENTS;
+        const previousEnvironmentPath = process.env.SUPACLOUD_TEST_GH_ENVIRONMENT;
+        const previousGithubHost = process.env.GH_HOST;
+        process.env.SUPACLOUD_TEST_GH_ARGUMENTS = argumentsPath;
+        process.env.SUPACLOUD_TEST_GH_ENVIRONMENT = environmentPath;
+        process.env.GH_HOST = "github.enterprise.invalid";
+        try {
+            await withFakeGithubCli([
+                "#!/usr/bin/env bash",
+                "printf '%s\\n' \"$@\" > \"$SUPACLOUD_TEST_GH_ARGUMENTS\"",
+                "printf '%s' \"${GH_HOST-unset}\" > \"$SUPACLOUD_TEST_GH_ENVIRONMENT\"",
+                "exit 42",
+            ].join("\n"), async () => {
+                await expect(downloadPinnedGithubCli(downloadDirectory, "amd64"))
+                    .rejects.toThrow("GitHub release asset download failed");
+            });
+            expect(readFileSync(argumentsPath, "utf8").split("\n").filter(Boolean)).toEqual([
+                "release", "download", "v2.96.0", "--repo", "github.com/cli/cli",
+                "--pattern", "gh_2.96.0_linux_amd64.tar.gz", "--output", "-",
+            ]);
+            expect(readFileSync(environmentPath, "utf8")).toBe("unset");
+        } finally {
+            if (previousArgumentsPath === undefined) delete process.env.SUPACLOUD_TEST_GH_ARGUMENTS;
+            else process.env.SUPACLOUD_TEST_GH_ARGUMENTS = previousArgumentsPath;
+            if (previousEnvironmentPath === undefined) delete process.env.SUPACLOUD_TEST_GH_ENVIRONMENT;
+            else process.env.SUPACLOUD_TEST_GH_ENVIRONMENT = previousEnvironmentPath;
+            if (previousGithubHost === undefined) delete process.env.GH_HOST;
+            else process.env.GH_HOST = previousGithubHost;
+            rmSync(downloadDirectory, { recursive: true, force: true });
+        }
+    });
+
+    test("rejects a verifier archive that the GitHub CLI downloads with the wrong digest", async () => {
+        const downloadDirectory = mkdtempSync(join(tmpdir(), "supacloud-admin-verifier-"));
+        try {
+            await withFakeGithubCli([
+                "#!/usr/bin/env bash",
+                "printf 'tampered'",
+            ].join("\n"), async () => {
+                await expect(downloadPinnedGithubCli(downloadDirectory, "amd64"))
+                    .rejects.toThrow("Pinned GitHub CLI archive SHA256 mismatch");
+            });
+        } finally {
+            rmSync(downloadDirectory, { recursive: true, force: true });
+        }
+    });
+
+    test("stops a GitHub CLI asset download when the stream exceeds its byte limit", async () => {
+        const downloadDirectory = mkdtempSync(join(tmpdir(), "supacloud-admin-verifier-"));
+        const destination = join(downloadDirectory, "asset.bin");
+        try {
+            await withFakeGithubCli([
+                "#!/usr/bin/env bash",
+                "printf '123456789'",
+            ].join("\n"), async () => {
+                await expect(runGithubCliDownload(["release", "download"], destination, 8, 5_000))
+                    .rejects.toThrow("Download exceeded 8 bytes");
+            });
+            expect(() => statSync(destination)).toThrow();
+        } finally {
+            rmSync(downloadDirectory, { recursive: true, force: true });
+        }
     });
 
     test("uses the same fixed trusted root for every local attestation verification", () => {
