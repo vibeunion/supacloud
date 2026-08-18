@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.61.3](https://github.com/vibeunion/supacloud/compare/management-api-v0.61.2...management-api-v0.61.3) (2026-08-18)
+
+
+### Bug Fixes
+
+* **gateway:** add differential security rate limits ([#971](https://github.com/vibeunion/supacloud/issues/971)) ([e10988b](https://github.com/vibeunion/supacloud/commit/e10988b83c573e9945fdb77f93394bc05f3bb2f2))
+
+
+### Miscellaneous Chores
+
+* upgrade Pigsty default to v4.5.0 ([#967](https://github.com/vibeunion/supacloud/issues/967)) ([278d44e](https://github.com/vibeunion/supacloud/commit/278d44e56f2f445b51d373bdbe53662733a79d06))
+
 ## [0.61.2](https://github.com/vibeunion/supacloud/compare/management-api-v0.61.1...management-api-v0.61.2) (2026-08-18)
 
 
