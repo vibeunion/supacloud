@@ -1,0 +1,2 @@
+PATTERN: grafana|GF_SERVER|serve_from_sub_path|root_url|pgsql-overview|postgresql dashboard
+
