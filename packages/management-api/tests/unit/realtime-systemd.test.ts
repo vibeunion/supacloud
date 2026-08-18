@@ -59,7 +59,7 @@ describe("Realtime systemd deployment", () => {
     expect(unit).toContain("SupaCloud Realtime Service");
     expect(unit).toContain("podman run --replace");
     expect(unit).toContain("LogsDirectory=supacloud");
-    expect(unit).toContain("Environment=REALTIME_IMAGE=public.ecr.aws/supabase/realtime:v2.121.1");
+    expect(unit).toContain("Environment=REALTIME_IMAGE=public.ecr.aws/supabase/realtime:v2.129.0");
     expect(unit).toContain("Environment=REALTIME_CONTAINER_NAME=supacloud-realtime");
     expect(unit).toContain("Environment=REALTIME_DB_USER=supabase_admin");
     expect(unit).toContain("Environment=PG_DATABASE=supacloud_meta");
