@@ -1,0 +1,266 @@
+name: Secure CNB Issue Relay v2
+
+on:
+  push:
+    branches:
+      - agent/secure-cnb-relay-20260819
+    paths:
+      - .github/workflows/secure-cnb-relay-v2.yml
+
+permissions:
+  contents: write
+
+env:
+  RELAY_BRANCH: agent/secure-cnb-relay-20260819
+  RELAY_SLOT: v2
+  CNB_REPO: aizhuliren/xgic/supacloud
+  RECIPIENT_CERT_B64: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUZRVENDQXltZ0F3SUJBZ0lVZEkrVThwWjY5K1QzS20rMWwxVkNkdmw2a2kwd0RRWUpLb1pJaHZjTkFRRUwKQlFBd01ERXVNQ3dHQTFVRUF3d2xRMmhoZEVkUVZDQlRkWEJoUTJ4dmRXUWdRMDVDSUZKbGJHRjVJRkpsWTJsdwphV1Z1ZERBZUZ3MHlOakE0TVRneU16RXlNakphRncweU5qQTRNVGt5TXpFeU1qSmFNREF4TGpBc0JnTlZCQU1NCkpVTm9ZWFJIVUZRZ1UzVndZVU5zYjNWa0lFTk9RaUJTWld4aGVTQlNaV05wY0dsbGJuUXdnZ0lpTUEwR0NTcUcKU0liM0RRRUJBUVVBQTRJQ0R3QXdnZ0lLQW9JQ0FRRFpLTW44YVB4N2c4a1hOK0tESDJMZlljQWJoTm1BVFd3MwpPcm50Vzl4L3JSc09qU0xxeGkyaHBZZjNCaCs1U3VnTExjSTd2ekRnOG51SHZYQXRnN1gxc25QWDhIR3IweUxnCnJYWkdmMlpheElVVzRZMFozNTRPU1ora2FxNWN1TVRrWVNua2RQaW9mTXZxV1JsdmZaTVYzMkNoZlgrNGlQVlMKOEF3SWlJL2kxQ01sRkhvSndUN090TjZwaGgyVmJxNFczcThKT1kxVlY5c1ZUdEJkM1pLVlh4cXNpS24wSFBLSwpRZE1rdjFaVlpndVZUS1JZSWQ0M0tneDBJTFY3R2lJaVJQYnB6czhCNjhMY0ZqdXpWUnJVeUpwbC9UKzJ3eFFsClRpQVpZTnhxbmhQbFlkZ0laOVNnc05udDJibHJOTTc3L0FEWVFCdUpMQlhCdk16TXRxL2lORHB5Qjk1TWw3aWIKVXNNS094VGYzcGV4RXdIRkw3MDJrc25vUlB0UCtrMEs0MGpHYXRuaDlSdFZ2OXpHcFgwNU56dzFsTmxCcHBhdgo5Q1RYVGpIMjFwQXdUOW40eUlyMlZtSDV3QTFNQ1JJZTNZK0Y1T3ZwaEJNNlViNWpZV2dWSkQyMWMwSGdrUjB1CkNlbW5SVmtuRSt0YlE1OU5sTWhVb0sySEpMQ1VvdXhXbm1sU1hnVFVxdkxVMWRrTklJREtmeWh1N1o3TzlvTHYKWml3Q1l2MWoyUmJlenVadHM2N1Y3QlEyNnorVGdXYkRSN2RxSFJjSERlakE2TWExWHlRRTgwUFZtWFE2VDZSQgpGa1BETnhNTStITllaL2NUQ3QyV3JGWHNwdmtSQW1RRktaU2VkYWpaQ3N1RG9jQ29JVkh5dmlRNCswMWp0enUzCmV0R3ZIQlMyb1FJREFRQUJvMU13VVRBZEJnTlZIUTRFRmdRVWdQTnpRQWhkQTY0UDBjT2RSMXZreEFWNDlCSXcKSHdZRFZSMGpCQmd3Rm9BVWdQTnpRQWhkQTY0UDBjT2RSMXZreEFWNDlCSXdEd1lEVlIwVEFRSC9CQVV3QXdFQgovekFOQmdrcWhraUc5dzBCQVFzRkFBT0NBZ0VBbndsNG0wNUIyQTU3Uy82eTA1VVJ2QkxSSEpOUElmQzhLR1FRCkNiN2NHQ2tGcnRjSkdJdzE3UytrUCtTa0NUajZvSmwvWXlMQ2dOeVJwZHVldGwrMVlYRWtPSnI4dFZMWlJQK00KcFJQWGpRNHdqYTc1UHovRjFxNnJ2cElyamFvTHd5WEdSN1JCNVdLOGtoZFRLMUJ5eWc3bXk5RHgvRCsxd2lSKwpPMCtxcnlCOCtlaUlnUXV0czRpQ0kvSk9EekthN3k0OWgvTHJoOFoxbXJYb25QQlk1ejZkdzFkdVh5Q2VycE9qCkh5SHBPS1FzNnRjVC84M0FaV2ZuNTFnamxFSVBySUw1WHNyNCtHV0k3NGF2d3BvUDRzKzZyQXFmeHRVNDZEM1MKODJmK3IxcjNHc2c0R2RIT3c3am9SRVBQbzZPd25sNVpQbjlGNERJaTYwMjdyN2l0YmdjdTRoWUZ0czh0ZWVaOQozdWtWNDJlRHZTMzNORzAvSUk2bG1HRmtSTGlLRis5QXp5SVAvQW5xMDYzNThTNk9QT0cvVmhEMkJnUHZNNmtpCjBPWTg2eUsxd0JZcHFHb3FyZzhFYnI0cWxyRkZwalErQ2ZFMkdGSGhPUG1INHRBQmlDT1VCbHRqM0RuV0xrUHMKZ0ZsYkExbjRsbDF5Z2ptMDRQTVJSUjBwM29paWFZa3EvQXEvQ1ZEUWdKSU5EWVB1MEVKblZCY3FsdWN4UUpMSApLNVJ4QmpKNERNRGhQOE9wSlN3LzFtY1M1TWVyRlR4aXQ1UWowclZmUGdza3Z3RE4wN0FTejlvQVRNTDd2VytWCmU1Q3BoSGxJLzJYaW5LdFZFL2hZTXh0c2F6TnNCMHp4bWRRRC9XekM3L3l1enlHMVEreGlTMzJPOGhkNVpqOVMKN1JyNnJwaz0KLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo=
+
+jobs:
+  relay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELAY_BRANCH }}
+          fetch-depth: 0
+
+      - name: Create and publish one-time relay certificate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p /tmp/cnb-relay
+          cd /tmp/cnb-relay
+          openssl req -x509 -newkey rsa:4096 -sha256 -nodes \
+            -keyout runner.key.pem \
+            -out runner.crt.pem \
+            -days 1 -subj '/CN=SupaCloud CNB one-time relay v2' >/dev/null 2>&1
+
+          publish_text_file() {
+            local source=$1
+            local path=$2
+            local content payload
+            content=$(base64 -w0 "$source")
+            payload=$(jq -n \
+              --arg message "chore: publish secure relay ${RELAY_SLOT} data" \
+              --arg content "$content" \
+              --arg branch "$RELAY_BRANCH" \
+              '{message:$message, content:$content, branch:$branch}')
+            curl --fail-with-body --silent --show-error \
+              -X PUT \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/contents/${path}" \
+              --data "$payload" >/dev/null
+          }
+
+          publish_text_file runner.crt.pem ".secure-relay/${RELAY_SLOT}/runner.crt.pem"
+
+      - name: Receive encrypted token and collect CNB issues
+        run: |
+          set -euo pipefail
+          umask 077
+          cd /tmp/cnb-relay
+
+          found=0
+          for _ in $(seq 1 360); do
+            git -C "$GITHUB_WORKSPACE" fetch --quiet origin "$RELAY_BRANCH" || true
+            if git -C "$GITHUB_WORKSPACE" show "origin/${RELAY_BRANCH}:.secure-relay/${RELAY_SLOT}/token.cms.b64" > token.cms.b64 2>/dev/null; then
+              found=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$found" -ne 1 ]; then
+            echo 'Encrypted token handoff was not received.' >&2
+            exit 1
+          fi
+
+          base64 -d token.cms.b64 > token.cms
+          CNB_TOKEN=$(openssl cms -decrypt -binary -inform DER \
+            -in token.cms \
+            -recip runner.crt.pem \
+            -inkey runner.key.pem)
+          CNB_TOKEN=${CNB_TOKEN//$'\r'/}
+          CNB_TOKEN=${CNB_TOKEN//$'\n'/}
+          if [ -z "$CNB_TOKEN" ]; then
+            echo 'Encrypted token handoff decrypted to an empty value.' >&2
+            exit 1
+          fi
+          echo "::add-mask::$CNB_TOKEN"
+          export CNB_RELAY_TOKEN="$CNB_TOKEN"
+
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+
+          base = "https://api.cnb.cool"
+          repo = os.environ["CNB_REPO"]
+          token = os.environ["CNB_RELAY_TOKEN"]
+          headers = {
+              "Authorization": f"Bearer {token}",
+              "Accept": "application/vnd.cnb.api+json",
+              "User-Agent": "supacloud-secure-issue-relay-v2",
+          }
+
+          def fetch(path: str):
+              request = urllib.request.Request(base + path, headers=headers)
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  return json.loads(response.read().decode("utf-8"))
+
+          def try_fetch(path: str):
+              try:
+                  return {"ok": True, "data": fetch(path)}
+              except urllib.error.HTTPError as exc:
+                  return {"ok": False, "status": exc.code, "reason": str(exc.reason)[:200]}
+              except Exception as exc:
+                  return {"ok": False, "error": type(exc).__name__, "reason": str(exc)[:300]}
+
+          quoted_repo = "/".join(urllib.parse.quote(part, safe="") for part in repo.split("/"))
+          summaries = []
+          for page in range(1, 101):
+              page_items = fetch(
+                  f"/{quoted_repo}/-/issues?state=open&page={page}&page_size=100&order_by=created_at"
+              )
+              if not isinstance(page_items, list):
+                  raise RuntimeError("CNB issue list response was not an array")
+              summaries.extend(page_items)
+              if len(page_items) < 100:
+                  break
+
+          issues = []
+          for summary in summaries:
+              number = summary.get("number") if isinstance(summary, dict) else None
+              item = {"summary": summary}
+              if number is None:
+                  item["detail_error"] = "missing issue number"
+                  issues.append(item)
+                  continue
+
+              encoded_number = urllib.parse.quote(str(number), safe="")
+              item["detail"] = try_fetch(f"/{quoted_repo}/-/issues/{encoded_number}")
+
+              comments = []
+              comment_errors = []
+              for page in range(1, 101):
+                  result = try_fetch(
+                      f"/{quoted_repo}/-/issues/{encoded_number}/comments"
+                      f"?sort=created&page={page}&page_size=100"
+                  )
+                  if not result.get("ok"):
+                      comment_errors.append(result)
+                      break
+                  page_items = result.get("data")
+                  if not isinstance(page_items, list):
+                      comment_errors.append({"ok": False, "error": "comments response was not an array"})
+                      break
+                  comments.extend(page_items)
+                  if len(page_items) < 100:
+                      break
+              item["comments"] = comments
+              item["comment_errors"] = comment_errors
+
+              activities = []
+              activity_errors = []
+              for page in range(1, 101):
+                  result = try_fetch(
+                      f"/{quoted_repo}/-/issues/{encoded_number}/activities"
+                      f"?page={page}&page_size=100"
+                  )
+                  if not result.get("ok"):
+                      activity_errors.append(result)
+                      break
+                  page_items = result.get("data")
+                  if not isinstance(page_items, list):
+                      activity_errors.append({"ok": False, "error": "activities response was not an array"})
+                      break
+                  activities.extend(page_items)
+                  if len(page_items) < 100:
+                      break
+              item["activities"] = activities
+              item["activity_errors"] = activity_errors
+              issues.append(item)
+
+          with open("issues.json", "w", encoding="utf-8") as output:
+              json.dump(
+                  {
+                      "repository": repo,
+                      "state": "open",
+                      "count": len(summaries),
+                      "issues": issues,
+                  },
+                  output,
+                  ensure_ascii=False,
+                  separators=(",", ":"),
+              )
+          PY
+
+          unset CNB_RELAY_TOKEN CNB_TOKEN
+          gzip -9 -n issues.json
+          printf '%s' "$RECIPIENT_CERT_B64" | base64 -d > recipient.crt.pem
+          openssl cms -encrypt -aes256 -binary \
+            -in issues.json.gz \
+            -outform DER \
+            -out issues.cms \
+            recipient.crt.pem
+          base64 -w0 issues.cms > issues.cms.b64
+          split -b 6000 -d -a 3 issues.cms.b64 issues.cms.b64.part.
+          rm -f issues.json.gz token.cms token.cms.b64
+
+          python3 - <<'PY'
+          import glob
+          import hashlib
+          import json
+          from pathlib import Path
+
+          ciphertext = Path("issues.cms").read_bytes()
+          encoded = Path("issues.cms.b64").read_bytes()
+          chunks = sorted(glob.glob("issues.cms.b64.part.*"))
+          manifest = {
+              "format": "cms-aes256+gzip-json+base64-chunks",
+              "ciphertext_sha256": hashlib.sha256(ciphertext).hexdigest(),
+              "encoded_sha256": hashlib.sha256(encoded).hexdigest(),
+              "encoded_bytes": len(encoded),
+              "chunk_count": len(chunks),
+              "chunks": [Path(path).name for path in chunks],
+          }
+          Path("manifest.json").write_text(json.dumps(manifest, separators=(",", ":")) + "\n")
+          PY
+
+      - name: Publish encrypted result chunks
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd /tmp/cnb-relay
+
+          publish_text_file() {
+            local source=$1
+            local path=$2
+            local content payload
+            content=$(base64 -w0 "$source")
+            payload=$(jq -n \
+              --arg message "chore: publish secure relay ${RELAY_SLOT} result" \
+              --arg content "$content" \
+              --arg branch "$RELAY_BRANCH" \
+              '{message:$message, content:$content, branch:$branch}')
+            curl --fail-with-body --silent --show-error \
+              -X PUT \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/contents/${path}" \
+              --data "$payload" >/dev/null
+          }
+
+          for part in issues.cms.b64.part.*; do
+            publish_text_file "$part" ".secure-relay/${RELAY_SLOT}/result/${part}"
+          done
+          publish_text_file manifest.json ".secure-relay/${RELAY_SLOT}/result/manifest.json"
