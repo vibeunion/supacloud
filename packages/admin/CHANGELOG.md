@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/vibeunion/supacloud/compare/admin-v0.14.3...admin-v0.15.0) (2026-08-18)
+
+
+### Features
+
+* **cli:** add authoritative project endpoint projection ([9fb670b](https://github.com/vibeunion/supacloud/commit/9fb670b0391149fe6da91a69f4132b40c75c0ef2))
+
 ## [0.14.3](https://github.com/vibeunion/supacloud/compare/admin-v0.14.2...admin-v0.14.3) (2026-08-16)
 
 

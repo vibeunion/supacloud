@@ -7,6 +7,8 @@ Load this reference when selecting a command surface or when a user asks an AI t
 | Intent | Use | Guardrail |
 | --- | --- | --- |
 | Inspect current project binding | `supacloud-cli status` | Read-only; run first |
+| Inspect selected project API/Auth/Studio origins | `supacloud-cli project endpoints` | Uses the Management API's authoritative projection; do not reconstruct domains locally |
+| Enumerate projects or endpoint projections | `supacloud-admin project list` / `project list_endpoints` | Platform-wide read; never promote a project credential to Admin authority |
 | Inspect project health/logs/tasks | `project`, `queue`, `task_events`, `diagnostics` | Prefer bounded reads |
 | Read database rows or metadata | `database query` and database inspection actions | `SELECT`/read-only by default |
 | Create schema/function/RPC/trigger/RLS/index/grant/extension | `supabase migration_new`, then edit SQL | Never direct remote DDL |
@@ -26,7 +28,7 @@ until a project-scoped context is resolved.
 ## Command groups
 
 - `status`: resolved context, Management API connectivity, authentication, and project reachability.
-- `project`: project metadata, health, logs, API keys/settings, background tasks, retry/cancel, DLQ, and background settings.
+- `project`: selected-project metadata, authoritative endpoint projection, health, logs, API keys/settings, background tasks, retry/cancel, DLQ, and background settings. `project list` deliberately redirects to `supacloud-admin`; cross-project enumeration is not a project CLI capability.
 - `database`: read/query, schema inspection, extensions, indexes, RLS, stats, migration push, controlled historical baseline, and SQL-file execution.
 - `supabase`: allowlisted official CLI adapter for migration authoring, local reset/diff, explicit-DSN inspection/backup/type generation, and SupaCloud-controlled migration push.
 - `auth`: provider and authentication configuration.
@@ -43,8 +45,14 @@ until a project-scoped context is resolved.
 ```bash
 supacloud-cli status
 supacloud-cli project get
+supacloud-cli project endpoints
 supacloud-cli project health
 supacloud-cli supabase migration_list --db_url "$SUPACLOUD_DB_URL"
 ```
+
+The endpoint projection returns bounded, credential-free API/Auth/Studio origins,
+canonical hosts, URL schemes, configuration sources, and API aliases. It does
+not assert DNS, certificate, or runtime readiness; use the relevant health and
+gateway inspection commands for those checks.
 
 Do not paste the DSN value into chat or commit it to shell scripts. Prefer an environment variable supplied outside the repository.
