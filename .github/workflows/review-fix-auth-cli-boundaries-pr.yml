@@ -1,0 +1,57 @@
+name: Apply auth CLI boundary review fixes
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - reopened
+      - synchronize
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-auth-cli-boundary-review-fixes
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    if: github.head_ref == 'fix/auth-cli-user-link-boundaries' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repair branch
+        uses: actions/checkout@v7
+        with:
+          ref: fix/auth-cli-user-link-boundaries
+          fetch-depth: 0
+
+      - name: Apply reviewed patch
+        run: python3 .github/scripts/fix-auth-cli-boundaries.py
+
+      - name: Validate project CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd packages/cli
+          bun install --frozen-lockfile
+          bun test src/shared/tools/auth-tools.test.ts src/shared/execution-policy.test.ts
+          bun run typecheck
+          bun run build
+
+      - name: Commit reviewed implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm \
+            .github/scripts/fix-auth-cli-boundaries.py \
+            .github/workflows/review-fix-auth-cli-boundaries.yml \
+            .github/workflows/review-fix-auth-cli-boundaries-pr.yml
+          git diff --check
+          git add -A
+          git commit -m "fix(cli): harden auth user and login link boundaries"
+          git push origin HEAD:fix/auth-cli-user-link-boundaries
