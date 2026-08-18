@@ -167,7 +167,7 @@ const CAPABILITY_FAMILY_RULES: readonly CapabilityFamilyRule[] = [
     manage: "operations.manage",
   },
   {
-    prefixes: ["/studio-metrics", "/pause", "/restore", "/restart", "/read-replicas", "/endpoint", "/upgrade", "/upgrade-status", "/enforced"],
+    prefixes: ["/studio-metrics", "/pause", "/restore", "/restart", "/read-replicas", "/endpoint", "/endpoints", "/upgrade", "/upgrade-status", "/enforced"],
     read: "project.read",
     manage: "project.manage",
   },
