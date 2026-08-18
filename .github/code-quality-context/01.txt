@@ -1,0 +1,157 @@
+=== packages/management-api/src/routes/auth-oauth-server.ts:341 | js/automatic-semicolon-insertion | Avoid automated semicolon insertion (95% of all statements in [the enclosing function](1) have an explicit semicolon). ===
+   337:     signing_alg: keyMaterial.signing_alg,
+   338:     key_id: keyMaterial.key_id,
+   339:     jwt_keys: keyMaterial.jwt_keys,
+   340:     jwt_jwks: keyMaterial.jwt_jwks,
+>  341:   }
+   342: 
+   343:   const nextAuth = {
+   344:     ...currentAuth,
+   345:     oauth_server: oauthServer,
+
+=== docs/examples/supabase-js-background-task-client.ts:64 | js/unused-local-variable | Unused variable retries. ===
+    60: ) {
+    61:   const {
+    62:     body,
+    63:     headers = {},
+>   64:     retries,
+    65:     timeoutSec,
+    66:     idempotencyKey,
+    67:     method,
+    68:   } = options;
+
+=== docs/examples/supabase-js-background-task-client.ts:65 | js/unused-local-variable | Unused variable timeoutSec. ===
+    61:   const {
+    62:     body,
+    63:     headers = {},
+    64:     retries,
+>   65:     timeoutSec,
+    66:     idempotencyKey,
+    67:     method,
+    68:   } = options;
+    69: 
+
+=== docs/examples/supabase-js-background-task-client.ts:66 | js/unused-local-variable | Unused variable idempotencyKey. ===
+    62:     body,
+    63:     headers = {},
+    64:     retries,
+    65:     timeoutSec,
+>   66:     idempotencyKey,
+    67:     method,
+    68:   } = options;
+    69: 
+    70:   const { data, error } = await supabase.functions.invoke(functionName, {
+
+=== packages/admin/src/shared/tools/project-create-env.ts:392 | js/unused-local-variable | Unused variable filename. ===
+   388: 
+   389: async function removeFailedEnvFile(
+   390:     cleanup: FailedProjectEnvFileCleanup,
+   391: ): Promise<CredentialFileState> {
+>  392:     const { directoryHandle, filename, openFile, fileIdentity, operations } = cleanup;
+   393:     if (!openFile) {
+   394:         try {
+   395:             await directoryHandle.close();
+   396:         } catch {
+
+=== packages/admin/src/shared/tools/project-create-env.ts:392 | js/unused-local-variable | Unused variable fileIdentity. ===
+   388: 
+   389: async function removeFailedEnvFile(
+   390:     cleanup: FailedProjectEnvFileCleanup,
+   391: ): Promise<CredentialFileState> {
+>  392:     const { directoryHandle, filename, openFile, fileIdentity, operations } = cleanup;
+   393:     if (!openFile) {
+   394:         try {
+   395:             await directoryHandle.close();
+   396:         } catch {
+
+=== packages/admin/src/shared/tools/project-create-env.ts:392 | js/unused-local-variable | Unused variable operations. ===
+   388: 
+   389: async function removeFailedEnvFile(
+   390:     cleanup: FailedProjectEnvFileCleanup,
+   391: ): Promise<CredentialFileState> {
+>  392:     const { directoryHandle, filename, openFile, fileIdentity, operations } = cleanup;
+   393:     if (!openFile) {
+   394:         try {
+   395:             await directoryHandle.close();
+   396:         } catch {
+
+=== packages/admin/src/shared/tools/storage-tools.ts:24 | js/unused-local-variable | Unused variable fmt. ===
+    20:         },
+    21:         async (args: any) => {
+    22:             const { action, ref, bucket, filename, base64_content, mime_type } = args;
+    23:             const need = (f: string, v: any) => { if (!v) throw new Error(`'${f}' required for '${action}'`); };
+>   24:             const fmt = (data: unknown, label: string, fmtFn: (d: any) => string) => {
+    25:                 return Array.isArray(data) ? fmtFn(data) : JSON.stringify(data, null, 2);
+    26:             };
+    27: 
+    28:             let text: string;
+
+=== packages/edge-runtime/function-activation.ts:1 | js/unused-local-variable | Unused import join. ===
+>    1: import { join, resolve } from "node:path";
+     2: import { readFunctionFile } from "./trusted-function-files";
+     3: 
+     4: export const EDGE_FUNCTION_ACTIVATION_SCHEMA = "supacloud.edge-function-activation.v1" as const;
+     5: export const EDGE_FUNCTION_ACTIVATION_FIELD = "_supacloud_activation" as const;
+
+=== packages/edge-runtime/port-guard.ts:55 | js/unused-local-variable | Unused variable originalCreateSocket. ===
+    51: };
+    52: 
+    53: try {
+    54:   const dgram = require("node:dgram");
+>   55:   const originalCreateSocket = dgram.createSocket;
+    56:   dgram.createSocket = (..._args: unknown[]) => {
+    57:     console.warn("[PortGuard] dgram.createSocket() intercepted — UDP sockets blocked");
+    58:     throw new Error("UDP sockets are blocked in Edge Functions.");
+    59:   };
+
+=== packages/edge-runtime/server-function-config.test.ts:10 | js/unused-local-variable | Unused import readFile. ===
+     6:   setDefaultTimeout,
+     7:   test,
+     8: } from "bun:test";
+     9: import { createHash, randomUUID } from "node:crypto";
+>   10: import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
+    11: import { homedir } from "node:os";
+    12: import { dirname, join } from "node:path";
+    13: 
+    14: setDefaultTimeout(30_000);
+
+=== packages/edge-runtime/worker-pool.test.ts:2431 | js/unused-local-variable | Unused variable key. ===
+  2427:       });
+  2428:       expect(res.status).toBe(200);
+  2429: 
+  2430:       const metrics = pool.snapshotMetrics("test");
+> 2431:       for (const [key, value] of Object.entries(metrics)) {
+  2432:         expect(Number.isNaN(value)).toBe(false);
+  2433:       }
+  2434:       expect(metrics["test_avg_queue_wait_ms"]).toBe(0);
+  2435:     } finally {
+
+=== packages/edge-runtime/worker-pool.test.ts:2479 | js/unused-local-variable | Unused variable key. ===
+  2475:       expect(res1.status).toBe(200);
+  2476:       expect(res2.status).toBe(200);
+  2477: 
+  2478:       const metrics = pool.snapshotMetrics("testq");
+> 2479:       for (const [key, value] of Object.entries(metrics)) {
+  2480:         expect(Number.isNaN(value)).toBe(false);
+  2481:       }
+  2482:       // At least one request was queued, so total_queue_wait_ms > 0
+  2483:       expect(metrics["testq_total_queue_wait_ms"]).toBeGreaterThan(0);
+
+=== packages/edge-runtime/worker-pool.ts:1 | js/unused-local-variable | Unused import MessagePort. ===
+>    1: import { Worker, MessagePort } from "worker_threads";
+     2: import { existsSync, mkdirSync, writeFileSync } from "fs";
+     3: import { tmpdir } from "os";
+     4: import path from "path";
+     5: import { resolveEdgeFetchTlsPolicy } from "./fetch-tls-policy";
+
+=== packages/management-api/scripts/check-swagger-coverage.ts:72 | js/unused-local-variable | Unused variable foundOptionsObject. ===
+    68:     // options object (3rd argument). We track parentheses to know when
+    69:     // we've exited the method call.
+    70:     let hasDetail = false;
+    71:     let parenDepth = 0;
+>   72:     let foundOptionsObject = false;
+    73:     let braceDepth = 0;
+    74: 
+    75:     for (let j = i; j < Math.min(i + 200, lines.length); j++) {
+    76:       const line = lines[j];
+

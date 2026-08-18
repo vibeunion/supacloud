@@ -1,0 +1,138 @@
+=== packages/management-api/tests/unit/log-drain-forwarder.worker.test.ts:1 | js/unused-local-variable | Unused import beforeEach. ===
+>    1: import { afterAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
+     2: 
+     3: // Mock the DB module
+     4: const sqlFn = mock(() => Promise.resolve([]));
+     5: const { sql: sqlMock } = await import("../../src/db") as { sql: unknown } as { sql: ReturnType<typeof mock> };
+
+=== packages/management-api/tests/unit/log-drain-forwarder.worker.test.ts:4 | js/unused-local-variable | Unused variable sqlFn. ===
+     1: import { afterAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
+     2: 
+     3: // Mock the DB module
+>    4: const sqlFn = mock(() => Promise.resolve([]));
+     5: const { sql: sqlMock } = await import("../../src/db") as { sql: unknown } as { sql: ReturnType<typeof mock> };
+     6: // We can't easily mock the static import, so we'll test the exported functions
+     7: // by verifying they don't throw and handle the no-projects case gracefully.
+     8: 
+
+=== packages/management-api/tests/unit/log-drain-forwarder.worker.test.ts:5 | js/unused-local-variable | Unused variable sqlMock. ===
+     1: import { afterAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
+     2: 
+     3: // Mock the DB module
+     4: const sqlFn = mock(() => Promise.resolve([]));
+>    5: const { sql: sqlMock } = await import("../../src/db") as { sql: unknown } as { sql: ReturnType<typeof mock> };
+     6: // We can't easily mock the static import, so we'll test the exported functions
+     7: // by verifying they don't throw and handle the no-projects case gracefully.
+     8: 
+     9: const { startLogDrainForwarder, stopLogDrainForwarder } = await import("../../src/workers/log-drain-forwarder.worker");
+
+=== packages/management-api/tests/unit/logical-backup.service.test.ts:107 | js/unused-local-variable | Unused variable LogicalBackupContractError. ===
+   103: 
+   104: const {
+   105:   createLogicalBackup,
+   106:   listLogicalBackups,
+>  107:   LogicalBackupContractError,
+   108:   restoreLogicalBackup,
+   109: } = await import(
+   110:   new URL("../../src/services/logical-backup.service.ts?logical-backup-service-test", import.meta.url).href,
+   111: );
+
+=== packages/management-api/tests/unit/project-webhooks.routes.test.ts:1 | js/unused-local-variable | Unused import mock. ===
+>    1: import { afterAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
+     2: import { Elysia } from "elysia";
+     3: import { ConflictError, ForbiddenError, NotFoundError } from "../../src/utils/errors";
+     4: 
+     5: const authModule = await import("../../src/middleware/auth");
+
+=== packages/management-api/tests/unit/project.repository.test.ts:1 | js/unused-local-variable | Unused import afterEach. ===
+>    1: import { describe, test, expect, mock, beforeEach, afterEach } from "bun:test";
+     2: 
+     3: mock.restore();
+     4: 
+     5: // Mock the SQL module
+
+=== packages/management-api/tests/unit/project.service.test.ts:1 | js/unused-local-variable | Unused import beforeEach. ===
+>    1: import { describe, test, expect, mock, beforeEach } from "bun:test";
+     2: import { ProjectService } from "../../src/services/project.service";
+     3: 
+     4: // Mock 依赖
+     5: const mockRepository = {
+
+=== packages/management-api/tests/unit/project.service.test.ts:5 | js/unused-local-variable | Unused variable mockRepository. ===
+     1: import { describe, test, expect, mock, beforeEach } from "bun:test";
+     2: import { ProjectService } from "../../src/services/project.service";
+     3: 
+     4: // Mock 依赖
+>    5: const mockRepository = {
+     6:   findAll: mock(() => Promise.resolve([])),
+     7:   findByRef: mock(() => Promise.resolve(null)),
+     8:   create: mock(() =>
+     9:     Promise.resolve({
+
+=== packages/management-api/tests/unit/project.service.test.ts:37 | js/unused-local-variable | Unused variable mockDatabaseService. ===
+    33:   existsByRef: mock(() => Promise.resolve(false)),
+    34:   findById: mock(() => Promise.resolve(null)),
+    35: };
+    36: 
+>   37: const mockDatabaseService = {
+    38:   generatePassword: mock(() => "generated-password-123"),
+    39:   createDatabase: mock(() => Promise.resolve({ success: true, output: "ok" })),
+    40:   deleteDatabase: mock(() => Promise.resolve({ success: true, output: "ok" })),
+    41:   checkStatus: mock(() => Promise.resolve({ success: true, output: "STATUS=active" })),
+
+=== packages/management-api/tests/unit/project.service.test.ts:44 | js/unused-local-variable | Unused variable mockStorageService. ===
+    40:   deleteDatabase: mock(() => Promise.resolve({ success: true, output: "ok" })),
+    41:   checkStatus: mock(() => Promise.resolve({ success: true, output: "STATUS=active" })),
+    42: };
+    43: 
+>   44: const mockStorageService = {
+    45:   createBucket: mock(() =>
+    46:     Promise.resolve({ success: true, accessKey: "ak", secretKey: "sk" })
+    47:   ),
+    48:   deleteBucket: mock(() => Promise.resolve({ success: true })),
+
+=== packages/management-api/tests/unit/project.service.test.ts:54 | js/unused-local-variable | Unused variable mockRouterService. ===
+    50:     Promise.resolve({ success: true, accessKey: "ak", secretKey: "sk" })
+    51:   ),
+    52: };
+    53: 
+>   54: const mockRouterService = {
+    55:   addRoute: mock(() => Promise.resolve({ success: true })),
+    56:   removeRoute: mock(() => Promise.resolve({ success: true })),
+    57:   reload: mock(() => Promise.resolve({ success: true })),
+    58:   getProjectDomain: mock((ref: string) => `${ref}.localhost`),
+
+=== packages/management-api/tests/unit/project.service.test.ts:62 | js/unused-local-variable | Unused variable mockJwtService. ===
+    58:   getProjectDomain: mock((ref: string) => `${ref}.localhost`),
+    59:   getProjectApiUrl: mock((ref: string) => `https://${ref}.api.localhost`),
+    60: };
+    61: 
+>   62: const mockJwtService = {
+    63:   generateSecret: mock(() => "a".repeat(40)),
+    64:   generateProjectRef: mock(() => "abc123test"),
+    65:   generateAnonKey: mock(() => Promise.resolve("mock.anon.key")),
+    66:   generateServiceRoleKey: mock(() => Promise.resolve("mock.service.key")),
+
+=== packages/management-api/tests/unit/scaling.service.test.ts:1 | js/unused-local-variable | Unused import mock. ===
+>    1: import { describe, test, expect, spyOn, mock } from "bun:test";
+     2: import { ScalingService } from "../../src/services/scaling.service";
+     3: import * as MonitorService from "../../src/services/monitor.service";
+     4: import { shellService } from "../../src/services/shell.service";
+     5: import { projectRepository } from "../../src/repositories/project.repository";
+
+=== packages/management-api/tests/unit/shell.service.test.ts:1 | js/unused-local-variable | Unused imports mock, spyOn. ===
+>    1: import { describe, test, expect, mock, beforeEach, spyOn } from "bun:test";
+     2: import { ShellService, shellService } from "../../src/services/shell.service";
+     3: 
+     4: describe("ShellService", () => {
+     5:   let service: ShellService;
+
+=== packages/supacloud-lite/src/runtime/auth/password.ts:3 | js/unused-local-variable | Unused variable ITERATIONS. ===
+     1: /** Bun bcrypt hashing with PBKDF2 verification retained for pre-release Lite databases. */
+     2: 
+>    3: const ITERATIONS = 100_000
+     4: 
+     5: function toHex(bytes: Uint8Array): string {
+     6:   return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('')
+     7: }
+
