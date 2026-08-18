@@ -12,7 +12,7 @@ interface ModulePolicy {
 
 const ACTION_POLICY: Record<string, ModulePolicy> = {
     project: {
-        read: ["get", "health", "logs", "api_keys", "settings", "tasks", "task_detail", "task_stats", "dlq", "background_settings"],
+        read: ["list", "get", "endpoints", "health", "logs", "api_keys", "settings", "tasks", "task_detail", "task_stats", "dlq", "background_settings"],
         write: ["pause", "restore", "task_cancel", "task_retry", "update_background_settings"],
     },
     database: {

@@ -13,7 +13,7 @@ interface ModulePolicy {
 const ACTION_POLICY: Record<string, ModulePolicy> = {
     project: {
         read: [
-            "list", "get", "settings", "api_keys", "health", "logs", "tasks", "services", "runtime_snapshot",
+            "list", "list_endpoints", "get", "endpoints", "settings", "api_keys", "health", "logs", "tasks", "services", "runtime_snapshot",
         ],
         write: ["create", "delete", "pause", "restore", "restart", "update_settings"],
     },
@@ -125,7 +125,7 @@ function requestedProjectRef(
 ): string | null {
     if (moduleName === "ssh") return sshRequestedProjectRef(action, args);
     if (moduleName === "project") {
-        return ["list", "create"].includes(action) ? null : stringArgument(args, "ref");
+        return ["list", "list_endpoints", "create"].includes(action) ? null : stringArgument(args, "ref");
     }
     if (moduleName === "platform") {
         return PLATFORM_PROJECT_REF_ACTIONS.has(action) ? stringArgument(args, "ref") : null;

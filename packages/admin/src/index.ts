@@ -125,6 +125,8 @@ EXAMPLES
   supacloud-admin ssh install --public_domain api.example.com --studio_domain studio.example.com
   supacloud-admin project create --name my-app --domain example.com --env_file /secure/path/.env.project-credentials.test --environment test
   supacloud-admin project list
+  supacloud-admin project endpoints --ref abc123
+  supacloud-admin project list_endpoints
   supacloud-admin project services --ref abc123
   supacloud-admin project runtime_snapshot --ref abc123
   supacloud-admin project service_control --ref abc123 --service gotrue --service_action stop

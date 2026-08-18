@@ -8,6 +8,7 @@ Load this reference when selecting a command surface or when a user asks an AI t
 | --- | --- | --- |
 | Inspect current project binding | `supacloud-cli status` | Read-only; run first |
 | Inspect project health/logs/tasks | `project`, `queue`, `task_events`, `diagnostics` | Prefer bounded reads |
+| Inspect authoritative API/Auth/Studio endpoints | `project endpoints` | Project-scoped, secret-free projection |
 | Read database rows or metadata | `database query` and database inspection actions | `SELECT`/read-only by default |
 | Create schema/function/RPC/trigger/RLS/index/grant/extension | `supabase migration_new`, then edit SQL | Never direct remote DDL |
 | Generate migration from local schema changes | `supabase db_diff` | Review generated SQL before use |
@@ -26,7 +27,7 @@ until a project-scoped context is resolved.
 ## Command groups
 
 - `status`: resolved context, Management API connectivity, authentication, and project reachability.
-- `project`: project metadata, health, logs, API keys/settings, background tasks, retry/cancel, DLQ, and background settings.
+- `project`: project metadata, authoritative endpoint projection, health, logs, API keys/settings, background tasks, retry/cancel, DLQ, and background settings. Cross-project enumeration remains an admin operation.
 - `database`: read/query, schema inspection, extensions, indexes, RLS, stats, migration push, controlled historical baseline, and SQL-file execution.
 - `supabase`: allowlisted official CLI adapter for migration authoring, local reset/diff, explicit-DSN inspection/backup/type generation, and SupaCloud-controlled migration push.
 - `auth`: provider and authentication configuration.

@@ -233,6 +233,11 @@ export class ProjectService {
     return Promise.all(projects.map((p) => this.toResponse(p)));
   }
 
+  async listProjectDetails(): Promise<ProjectDetailResponse[]> {
+    const projects = await projectRepository.findAll();
+    return Promise.all(projects.map((project) => this.toDetailResponse(project)));
+  }
+
   // Get project details
   async getProject(ref: string): Promise<ProjectDetailResponse | null> {
     const project = await projectRepository.findByRef(ref);

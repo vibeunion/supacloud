@@ -3,6 +3,7 @@
 ## Quick Links
 
 - [CLI Guide](./cli-guide.md) - User CLI vs admin CLI entrypoints and command boundaries
+- [Project Endpoint Projection](./project-endpoint-projection.md) - Authoritative API/Auth/Studio origins, CLI boundaries, and legacy backup compatibility boundary
 - [Deploy Guide](./deploy-guide.md) - Complete deployment guide
 - [Deploy API](./deploy-api.md) - Deployment API reference
 - [Configuration Example](./supacloud.yml.example) - Configuration file example

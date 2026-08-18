@@ -9,11 +9,13 @@
  * This file composes them back into a single `projectRoutes` export for backward compatibility.
  */
 import { Elysia } from "elysia";
+import { projectEndpointRoutes } from "./project-endpoints";
 import { projectCrudRoutes } from "./project-crud";
 import { projectServiceRoutes } from "./project-services";
 import { projectConfigRoutes } from "./project-config";
 
 export const projectRoutes = new Elysia()
+  .use(projectEndpointRoutes)
   .use(projectCrudRoutes)
   .use(projectServiceRoutes)
   .use(projectConfigRoutes);

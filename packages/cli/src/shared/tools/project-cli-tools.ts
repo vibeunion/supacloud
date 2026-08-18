@@ -8,6 +8,7 @@ import {
     projectListRead,
     type ProjectReadResult,
 } from "./project-read-projection";
+import { projectEndpointListRead, projectEndpointsRead } from "./project-endpoint-projection";
 
 type ToolServer = {
     tool: (
@@ -132,10 +133,10 @@ export function registerUserProjectCliTools(
     server.tool(
         "project",
         `Project-scoped inspection and developer operations.
-Actions: get, pause, restore, health, logs, api_keys, settings, tasks, task_detail, task_cancel, task_retry, task_stats, dlq, background_settings, update_background_settings`,
+Actions: list, get, endpoints, pause, restore, health, logs, api_keys, settings, tasks, task_detail, task_cancel, task_retry, task_stats, dlq, background_settings, update_background_settings`,
         {
             action: withDescription(stringEnum([
-                "get", "pause", "restore", "health", "logs", "api_keys", "settings",
+                "list", "get", "endpoints", "pause", "restore", "health", "logs", "api_keys", "settings",
                 "tasks", "task_detail", "task_cancel", "task_retry", "task_stats", "dlq",
                 "background_settings", "update_background_settings",
             ]), "Action to perform"),
@@ -147,6 +148,15 @@ Actions: get, pause, restore, health, logs, api_keys, settings, tasks, task_deta
             max_attempts: optional(Type.Number(), "[update_background_settings] Max attempts for background tasks"),
         },
         async ({ action, ref, log_type, task_id, limit, concurrency, max_attempts }) => {
+            if (action === "list") {
+                return {
+                    isError: true,
+                    content: [{
+                        type: "text" as const,
+                        text: "Project enumeration is a platform operation.\nUse: supacloud-admin project list",
+                    }],
+                };
+            }
             const resolvedRef = resolveRef(ref, projectRef);
             let text: string;
 
@@ -154,6 +164,13 @@ Actions: get, pause, restore, health, logs, api_keys, settings, tasks, task_deta
                 case "get":
                     return projectReadResponse(projectGetRead(
                         await http.get(`/v1/projects/${resolvedRef}`, {
+                            maxResponseBytes: PROJECT_READ_RESPONSE_MAX_BYTES,
+                        }),
+                        resolvedRef,
+                    ));
+                case "endpoints":
+                    return projectReadResponse(projectEndpointsRead(
+                        await http.get(`/v1/projects/${resolvedRef}/endpoints`, {
                             maxResponseBytes: PROJECT_READ_RESPONSE_MAX_BYTES,
                         }),
                         resolvedRef,
@@ -250,16 +267,16 @@ export function registerAdminProjectCliTools(server: ToolServer, http: HttpTrans
     server.tool(
         "project",
         `Platform-level project lifecycle management.
-Actions: list, create, get, delete, pause, restore, restart, settings, update_settings, api_keys, health, logs, tasks, task_detail, task_cancel, task_retry, task_stats, dlq, background_settings, update_background_settings`,
+Actions: list, list_endpoints, create, get, endpoints, delete, pause, restore, restart, settings, update_settings, api_keys, health, logs, tasks, task_detail, task_cancel, task_retry, task_stats, dlq, background_settings, update_background_settings`,
         {
             action: withDescription(stringEnum([
-                "list", "create", "get", "delete", "pause", "restore",
+                "list", "list_endpoints", "create", "get", "endpoints", "delete", "pause", "restore",
                 "restart", "settings", "update_settings", "api_keys",
                 "health", "logs",
                 "tasks", "task_detail", "task_cancel", "task_retry", "task_stats", "dlq",
                 "background_settings", "update_background_settings",
             ]), "Action to perform"),
-            ref: optional(Type.String(), "Project ref (required for most actions except 'list' and 'create')"),
+            ref: optional(Type.String(), "Project ref (required for most actions except 'list', 'list_endpoints', and 'create')"),
             name: optional(Type.String(), "[create] Project name"),
             region: optional(Type.String(), "[create] Region (default: local)"),
             organization_id: optional(Type.String(), "[create] Organization ID"),
@@ -298,6 +315,10 @@ Actions: list, create, get, delete, pause, restore, restart, settings, update_se
                     return projectReadResponse(projectListRead(await http.get("/v1/projects", {
                         maxResponseBytes: PROJECT_READ_RESPONSE_MAX_BYTES,
                     })));
+                case "list_endpoints":
+                    return projectReadResponse(projectEndpointListRead(await http.get("/v1/projects/endpoints", {
+                        maxResponseBytes: PROJECT_READ_RESPONSE_MAX_BYTES,
+                    })));
                 case "create": {
                     if (!name) throw new Error("'name' is required for create");
                     const createRequest: Record<string, string | undefined> = {
@@ -316,6 +337,15 @@ Actions: list, create, get, delete, pause, restore, restart, settings, update_se
                     const resolvedRef = resolveRef(ref);
                     return projectReadResponse(projectGetRead(
                         await http.get(`/v1/projects/${resolvedRef}`, {
+                            maxResponseBytes: PROJECT_READ_RESPONSE_MAX_BYTES,
+                        }),
+                        resolvedRef,
+                    ));
+                }
+                case "endpoints": {
+                    const resolvedRef = resolveRef(ref);
+                    return projectReadResponse(projectEndpointsRead(
+                        await http.get(`/v1/projects/${resolvedRef}/endpoints`, {
                             maxResponseBytes: PROJECT_READ_RESPONSE_MAX_BYTES,
                         }),
                         resolvedRef,
