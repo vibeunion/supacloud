@@ -571,6 +571,9 @@ export const webhookDeliveryService = {
         WHERE d.project_ref = ${ref} AND d.webhook_id = ${webhookId} AND d.id = ${deliveryId}
       `;
       if (!delivery) throw new NotFoundError("Webhook delivery", deliveryId);
+      const occurredAt = delivery.occurred_at instanceof Date
+        ? delivery.occurred_at.toISOString()
+        : String(delivery.occurred_at);
       await tx`SELECT pg_advisory_xact_lock(hashtext(${`webhook-outbox:${ref}`}))`;
       await assertOutboxCapacity(tx, ref, 1);
       const [row] = await tx`
@@ -579,7 +582,7 @@ export const webhookDeliveryService = {
           idempotency_key, max_attempts, replay_of_delivery_id, created_by
         ) VALUES (
           ${ref}, ${webhookId}, ${delivery.event_id}::uuid, ${String(delivery.event_type)},
-          ${JSON.stringify(delivery.payload || {})}::jsonb, ${String(delivery.occurred_at)}::timestamptz,
+          ${JSON.stringify(delivery.payload || {})}::jsonb, ${occurredAt}::timestamptz,
           ${String(delivery.api_version || SIGNATURE_API_VERSION)},
           ${`replay:${deliveryId}:${crypto.randomUUID()}`}, ${DEFAULT_MAX_ATTEMPTS},
           ${deliveryId}::uuid, ${actor}

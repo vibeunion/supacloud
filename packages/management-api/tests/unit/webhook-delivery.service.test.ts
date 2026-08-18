@@ -363,6 +363,8 @@ describe("durable webhook delivery processing", () => {
     expect(replayInsert?.values).toContain(originalDelivery.event_id);
     expect(replayInsert?.values).toContain(originalDelivery.event_type);
     expect(replayInsert?.values).toContain(originalDelivery.api_version);
+    expect(replayInsert?.values).toContain(originalDelivery.occurred_at.toISOString());
+    expect(replayInsert?.values).not.toContain(String(originalDelivery.occurred_at));
     expect(replayInsert?.values).toContain("admin-one");
     expect(replayInsert?.text).toContain("replay_of_delivery_id, created_by");
   });
