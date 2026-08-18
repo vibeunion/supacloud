@@ -2,11 +2,17 @@ import { Elysia, status, t } from "elysia";
 import { requireAdminAuth, requireProjectOrAdminAuth } from "../middleware/auth";
 import { projectService } from "../services";
 import {
+  projectEndpointSourceService,
+  type ProjectEndpointRoutingSource,
+} from "../services/project-endpoint-source.service";
+import {
   buildProjectEndpointsProjection,
   PROJECT_ENDPOINTS_SCHEMA,
 } from "../utils/project-endpoint-projection";
 import { validationErrorResponse } from "../utils/http-validation";
 import { logger } from "../utils/logger";
+
+const MAX_PROJECT_ENDPOINT_PROJECTIONS = 10_000;
 
 const ProjectEndpointSourceSchema = t.Union([
   t.Literal("explicit_api_domain"),
@@ -52,7 +58,7 @@ const ProjectEndpointErrorSchema = t.Object(
   { additionalProperties: false },
 );
 
-function endpointProjection(project: any) {
+function endpointProjection(project: ProjectEndpointRoutingSource) {
   return buildProjectEndpointsProjection(project.ref, project.config);
 }
 
@@ -77,7 +83,13 @@ export const projectEndpointRoutes = new Elysia({ prefix: "/v1/projects" })
         });
       }
 
-      const projects = await projectService.listProjects();
+      const projects = await projectEndpointSourceService.listRoutingSources();
+      if (projects.length > MAX_PROJECT_ENDPOINT_PROJECTIONS) {
+        return status(500, {
+          message: "Project endpoint inventory exceeds the supported limit",
+          code: "PROJECT_ENDPOINT_INVENTORY_TOO_LARGE",
+        });
+      }
       return projects.map(endpointProjection);
     },
     {
