@@ -42,16 +42,10 @@ jobs:
 
           source_path = Path('packages/cli/src/shared/tools/auth-tools.ts')
           source = source_path.read_text(encoding='utf-8')
-          old = '''    if (typeof value !== "string"
-              || value.length === 0
-              || value.length > maxLength
-              || /[\\u0000-\\u001f\\u007f]/u.test(value)) return INVALID_FIELD;'''
-          new = '''    if (typeof value !== "string"
-              || value.length > maxLength
-              || /[\\u0000-\\u001f\\u007f]/u.test(value)) return INVALID_FIELD;'''
+          old = '        || value.length === 0\n'
           if source.count(old) != 1:
-              raise SystemExit('optional user field guard did not match exactly once')
-          source_path.write_text(source.replace(old, new, 1), encoding='utf-8')
+              raise SystemExit(f'optional user empty-string guard matched {source.count(old)} times')
+          source_path.write_text(source.replace(old, '', 1), encoding='utf-8')
 
           test_path = Path('packages/cli/src/shared/tools/auth-tools.test.ts')
           tests = test_path.read_text(encoding='utf-8')
