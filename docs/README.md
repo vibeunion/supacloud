@@ -3,6 +3,7 @@
 ## Quick Links
 
 - [CLI Guide](./cli-guide.md) - User CLI vs admin CLI entrypoints and command boundaries
+- [Project Endpoint Projection](./project-endpoint-projection.md) - Authoritative API/Auth/Studio origins and project/Admin read boundaries
 - [Deploy Guide](./deploy-guide.md) - Complete deployment guide
 - [Deploy API](./deploy-api.md) - Deployment API reference
 - [Configuration Example](./supacloud.yml.example) - Configuration file example
@@ -32,6 +33,7 @@
 ## Operations
 
 - [CLI Guide](./cli-guide.md) - `@supacloud/cli` and `@supacloud/admin`
+- [Project Endpoint Projection](./project-endpoint-projection.md) - Fixed endpoint schema, commands, and readiness limitations
 - [PostgREST Runtime Lifecycle](./postgrest-runtime-lifecycle.md) - Component-level PostgREST desired state, pause/resume/status, and reconciliation
 - [pgredis Runtime](./pgredis-runtime.md) - Private cache data plane, control-plane APIs, Web Console operations, and safety boundaries
 - [Platform Component Upgrade Notes](./platform-component-upgrade-notes.md) - Breaking changes, migrations, optional features, and rollback notes for current runtime components
