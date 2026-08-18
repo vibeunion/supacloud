@@ -69,6 +69,12 @@ import {
     type PostgrestLauncherActivationState,
     type PostgrestLauncherPreflight,
 } from "./embedded-postgrest-launcher";
+import {
+    applyGrafanaSubpathConfig,
+    captureGrafanaConfigSnapshots,
+    restoreGrafanaConfig,
+    type GrafanaConfigSnapshot,
+} from "./grafana-subpath";
 
 const RELEASES_API = "https://api.github.com/repos/vibeunion/supacloud/releases";
 const BIN_TARGET = "/usr/local/bin/supacloud";
@@ -79,6 +85,10 @@ const EDGE_RUNTIME_BINARY_TARGETS = new Set([
     "/opt/supacloud/bin/supacloud-edge-runtime",
 ]);
 const DEFAULT_MANAGEMENT_ENV_FILE = "/etc/supabase/management-api.env";
+const DEFAULT_GRAFANA_CONFIG_FILE = "/etc/grafana/grafana.ini";
+const DEFAULT_GRAFANA_UPSTREAM = "http://127.0.0.1:3000/grafana";
+const DEFAULT_PIGSTY_PATH = "/root/pigsty";
+const GRAFANA_TEMPLATE_RELATIVE_PATH = "roles/infra/templates/grafana/grafana.ini.j2";
 const DEFAULT_EDGE_RUNTIME_USER = "supacloud-edge";
 const DEFAULT_EDGE_RUNTIME_GROUP = "supacloud-edge";
 const DEFAULT_EDGE_RUNTIME_PORT = 9005;
@@ -2053,6 +2063,56 @@ function managementEnvFile() {
     return process.env.SUPACLOUD_MANAGEMENT_ENV_FILE || DEFAULT_MANAGEMENT_ENV_FILE;
 }
 
+type GrafanaServiceOperations = {
+    isActive: () => Promise<boolean>;
+    restart: () => Promise<void>;
+};
+
+function grafanaServiceOperations(): GrafanaServiceOperations {
+    return {
+        isActive: async () => (await $`systemctl is-active --quiet grafana-server`.nothrow().quiet()).exitCode === 0,
+        restart: async () => {
+            const restarted = await $`systemctl restart grafana-server`.nothrow().quiet();
+            if (restarted.exitCode !== 0) {
+                throw new Error(`Failed to restart grafana-server: ${restarted.stderr.toString().trim().slice(-500)}`);
+            }
+        },
+    };
+}
+
+export function grafanaSubpathConfigPaths(runtimeEnv: Record<string, string>): string[] {
+    const pigstyPath = runtimeEnv.PIGSTY_PATH?.trim() || DEFAULT_PIGSTY_PATH;
+    if (!path.isAbsolute(pigstyPath)) throw new Error("PIGSTY_PATH must be absolute during Grafana repair");
+    return [
+        DEFAULT_GRAFANA_CONFIG_FILE,
+        path.join(pigstyPath, GRAFANA_TEMPLATE_RELATIVE_PATH),
+    ];
+}
+
+type GrafanaUpgradeOptions = {
+    configPaths?: string[];
+    managementEnvPath?: string;
+    service?: GrafanaServiceOperations;
+};
+
+export async function applyGrafanaUpgradeSettings(
+    activation: UpgradeActivationState,
+    runtimeEnv: Record<string, string>,
+    options: GrafanaUpgradeOptions = {},
+): Promise<void> {
+    const configPaths = options.configPaths ?? grafanaSubpathConfigPaths(runtimeEnv);
+    const configStates = captureGrafanaConfigSnapshots(configPaths);
+    const service = options.service ?? grafanaServiceOperations();
+    activation.grafanaConfigStates = configStates;
+    activation.grafanaWasActive = await service.isActive();
+    if (activation.grafanaWasActive && !configStates.some(snapshot => snapshot.path === configPaths[0])) {
+        throw new Error(`Active grafana-server config is missing: ${configPaths[0]}`);
+    }
+    const configChanged = applyGrafanaSubpathConfig(configStates);
+    upsertEnvFileValue(options.managementEnvPath ?? managementEnvFile(), "GRAFANA_URL", DEFAULT_GRAFANA_UPSTREAM);
+    if (configChanged && activation.grafanaWasActive) await service.restart();
+}
+
 async function runHostIdentityCommand(command: string[]): Promise<HostIdentityCommandResult> {
     const child = Bun.spawn({ cmd: command, stdout: "pipe", stderr: "pipe" });
     const [stdout, stderr, exitCode] = await Promise.all([
@@ -2369,6 +2429,8 @@ export type UpgradeActivationState = {
     edgeRuntimeDropInState: FileState | null;
     managementPrivilegeDropInState: FileState | null;
     embeddedEdgePrivilegeDropInState: FileState | null;
+    grafanaConfigStates: GrafanaConfigSnapshot[];
+    grafanaWasActive: boolean | null;
 };
 
 type RunUpgradeOptions = {
@@ -2550,6 +2612,12 @@ function artifactRecoveryActions(state: UpgradeActivationState): UpgradeRecovery
         description: "restore embedded Edge privilege drop-in",
         run: () => restoreFileState(embeddedEdgePrivilegeDropInState),
     });
+    for (const grafanaConfigState of state.grafanaConfigStates) {
+        actions.push({
+            description: `restore Grafana config ${grafanaConfigState.path}`,
+            run: () => restoreGrafanaConfig(grafanaConfigState),
+        });
+    }
     const systemdUnitBroker = state.systemdUnitBroker;
     if (systemdUnitBroker) actions.push({
         description: "restore systemd-unit helper",
@@ -2569,20 +2637,26 @@ function artifactRecoveryActions(state: UpgradeActivationState): UpgradeRecovery
     return actions;
 }
 
-function restoredServiceRecoveryActions(): UpgradeRecoveryAction[] {
-    return [
+function restoredServiceRecoveryActions(state: UpgradeActivationState): UpgradeRecoveryAction[] {
+    const actions: UpgradeRecoveryAction[] = [];
+    if (state.grafanaWasActive) actions.push({
+        description: "restart restored Grafana service",
+        run: () => grafanaServiceOperations().restart(),
+    });
+    actions.push(
         { description: "reload systemd units", run: () => reloadSystemdUnits() },
         {
             description: "restart restored services",
             run: async () => restartServices(await runtimeModeForBinaryUpgrade()),
         },
         { description: "verify restored services", run: () => waitForUpgradeHealth() },
-    ];
+    );
+    return actions;
 }
 
 export async function rollbackArtifacts(
     state: UpgradeActivationState,
-    serviceActions: UpgradeRecoveryAction[] = restoredServiceRecoveryActions(),
+    serviceActions: UpgradeRecoveryAction[] = restoredServiceRecoveryActions(state),
 ): Promise<void> {
     await executeUpgradeRecoveryActions([
         ...artifactRecoveryActions(state),
@@ -2602,6 +2676,8 @@ function createActivationState(edgeRuntimeTarget: string | null): UpgradeActivat
         edgeRuntimeDropInState: null,
         managementPrivilegeDropInState: null,
         embeddedEdgePrivilegeDropInState: null,
+        grafanaConfigStates: [],
+        grafanaWasActive: null,
     };
 }
 
@@ -2908,6 +2984,7 @@ async function applyUpgradeRuntimeSettings(context: UpgradeExecutionContext): Pr
     if (!activation) throw new Error("Upgrade activation state is unavailable");
     context.spinner.start("Applying runtime settings and restarting SupaCloud services");
     captureUpgradeRuntimeFiles(activation);
+    await applyGrafanaUpgradeSettings(activation, context.preparedSecrets.runtimeEnv);
     const edgeRuntimeIdentity = await ensurePersistedEdgeRuntimeIdentity(managementEnvFile());
     upsertPersistedEdgeRuntimePort(managementEnvFile(), edgeRuntimeEnvFile());
     const edgeRuntimeMode = await runtimeModeForBinaryUpgrade();
