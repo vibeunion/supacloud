@@ -1,0 +1,303 @@
+[{"conclusion":"failure","databaseId":32118105268,"headSha":"e19daf5336cc6477169991780bdcc42382e29ff0","status":"completed","url":"https://github.com/vibeunion/supacloud/actions/runs/32118105268"}]
+
+=== failed steps ===
+apply	Apply reviewed fixes	﻿2026-08-18T08:46:42.8956545Z ##[group]Run set -euo pipefail
+apply	Apply reviewed fixes	2026-08-18T08:46:42.8958498Z ^[[36;1mset -euo pipefail^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.8959668Z ^[[36;1mpython3 - <<'PY'^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.8960767Z ^[[36;1mimport re^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.8961821Z ^[[36;1mfrom pathlib import Path^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.8963032Z ^[[36;1m^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.8963965Z ^[[36;1mchanged: set[str] = set()^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.8965173Z ^[[36;1m^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.8966383Z ^[[36;1mdef read(path: str) -> str:^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.8967864Z ^[[36;1m    return Path(path).read_text(encoding="utf-8")^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.8969352Z ^[[36;1m^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.8970397Z ^[[36;1mdef write(path: str, text: str) -> None:^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.8972068Z ^[[36;1m    Path(path).write_text(text, encoding="utf-8")^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.8973621Z ^[[36;1m    changed.add(path)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.8974780Z ^[[36;1m^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.8976341Z ^[[36;1mdef replace(path: str, old: str, new: str, expected: int = 1) -> None:^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.8978148Z ^[[36;1m    text = read(path)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.8979403Z ^[[36;1m    count = text.count(old)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.8980677Z ^[[36;1m    if count != expected:^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.8982743Z ^[[36;1m        raise RuntimeError(f"{path}: expected {expected} occurrences, found {count}: {old!r}")^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.8984946Z ^[[36;1m    write(path, text.replace(old, new))^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.8986419Z ^[[36;1m^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.8988090Z ^[[36;1mdef regex_replace(path: str, pattern: str, replacement: str, expected: int = 1) -> None:^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.8990159Z ^[[36;1m    text = read(path)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.8992055Z ^[[36;1m    updated, count = re.subn(pattern, replacement, text, flags=re.MULTILINE | re.DOTALL)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.8994130Z ^[[36;1m    if count != expected:^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.8996387Z ^[[36;1m        raise RuntimeError(f"{path}: expected {expected} regex matches, found {count}: {pattern!r}")^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.8998695Z ^[[36;1m    write(path, updated)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.8999871Z ^[[36;1m^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9000792Z ^[[36;1mimport_pattern = re.compile(^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9002365Z ^[[36;1m    r'(?ms)^import\s+(?P<type>type\s+)?\{(?P<body>[^}]*)\}\s+from\s+'^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9004318Z ^[[36;1m    r'(?P<quote>["\'])(?P<module>[^"\']+)(?P=quote)(?P<semi>;?)[ \t]*\n?'^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9006061Z ^[[36;1m)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9006895Z ^[[36;1m^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9008027Z ^[[36;1mdef import_name(specifier: str) -> tuple[str, str]:^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9009568Z ^[[36;1m    core = specifier.strip()^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9010820Z ^[[36;1m    if core.startswith("type "):^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9012102Z ^[[36;1m        core = core[5:].strip()^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9013389Z ^[[36;1m    parts = re.split(r"\s+as\s+", core)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9014856Z ^[[36;1m    return parts[0].strip(), parts[-1].strip()^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9016585Z ^[[36;1m^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9017842Z ^[[36;1mdef remove_named_imports(path: str, names: list[str]) -> None:^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9019478Z ^[[36;1m    text = read(path)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9020571Z ^[[36;1m    targets = set(names)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9021723Z ^[[36;1m    removed: set[str] = set()^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9023116Z ^[[36;1m    matches = list(import_pattern.finditer(text))^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9024602Z ^[[36;1m    for match in reversed(matches):^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9026083Z ^[[36;1m        body = match.group("body")^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9027885Z ^[[36;1m        specifiers = [item.strip() for item in body.split(",") if item.strip()]^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9029965Z ^[[36;1m        kept: list[str] = []^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9031277Z ^[[36;1m        removed_here = False^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9032764Z ^[[36;1m        for specifier in specifiers:^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9034277Z ^[[36;1m            imported, local = import_name(specifier)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9036127Z ^[[36;1m            matched = targets.intersection({imported, local})^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9037704Z ^[[36;1m            if matched:^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9039142Z ^[[36;1m                removed.update(matched)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9040499Z ^[[36;1m                removed_here = True^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9041740Z ^[[36;1m            else:^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9042878Z ^[[36;1m                kept.append(specifier)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9044214Z ^[[36;1m        if not removed_here:^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9045595Z ^[[36;1m            continue^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9046683Z ^[[36;1m^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9047529Z ^[[36;1m        if not kept:^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9048614Z ^[[36;1m            replacement = ""^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9049757Z ^[[36;1m        else:^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9050932Z ^[[36;1m            type_prefix = match.group("type") or ""^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9052426Z ^[[36;1m            quote = match.group("quote")^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9053846Z ^[[36;1m            module = match.group("module")^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9055275Z ^[[36;1m            semi = match.group("semi")^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9056764Z ^[[36;1m            had_newline = "\n" in body^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9058083Z ^[[36;1m            if had_newline:^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9059484Z ^[[36;1m                indent_match = re.search(r"\n([ \t]+)\S", body)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9061309Z ^[[36;1m                indent = indent_match.group(1) if indent_match else "  "^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9062953Z ^[[36;1m                replacement = (^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9064278Z ^[[36;1m                    f"import {type_prefix}{{\n"^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9066090Z ^[[36;1m                    + "".join(f"{indent}{specifier},\n" for specifier in kept)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9067902Z ^[[36;1m                    + f"}} from {quote}{module}{quote}{semi}\n"^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9069302Z ^[[36;1m                )^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9070314Z ^[[36;1m            else:^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9071379Z ^[[36;1m                replacement = (^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9072842Z ^[[36;1m                    f"import {type_prefix}{{ {', '.join(kept)} }} "^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9074515Z ^[[36;1m                    f"from {quote}{module}{quote}{semi}\n"^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9076016Z ^[[36;1m                )^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9077452Z ^[[36;1m        text = text[:match.start()] + replacement + text[match.end():]^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9079056Z ^[[36;1m^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9079929Z ^[[36;1m    if removed != targets:^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9081213Z ^[[36;1m        missing = sorted(targets - removed)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9083016Z ^[[36;1m        raise RuntimeError(f"{path}: import names not found: {missing}")^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9084756Z ^[[36;1m    write(path, text)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9085969Z ^[[36;1m^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9086835Z ^[[36;1mimport_removals = {^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9088297Z ^[[36;1m    "packages/edge-runtime/function-activation.ts": ["join"],^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9090490Z ^[[36;1m    "packages/edge-runtime/server-function-config.test.ts": ["readFile"],^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9092835Z ^[[36;1m    "packages/edge-runtime/worker-pool.ts": ["MessagePort"],^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9094705Z ^[[36;1m    "packages/management-api/src/cli/project.ts": ["$"],^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9096924Z ^[[36;1m    "packages/management-api/src/diagnostics/hash.ts": ["stableStringify"],^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9099789Z ^[[36;1m    "packages/management-api/src/index.ts": ["t", "authRoutes", "deployRoutes", "resolveRealtimeTenantHost"],^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9102468Z ^[[36;1m    "packages/management-api/src/routes/pg-meta.ts": ["logger"],^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9104660Z ^[[36;1m    "packages/management-api/src/routes/project-services.ts": ["config"],^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9107325Z ^[[36;1m    "packages/management-api/src/routes/scheduled-functions.ts": ["config", "logger"],^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9109936Z ^[[36;1m    "packages/management-api/src/routes/sdk-proxy.ts": ["t", "getProjectDb"],^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9112672Z ^[[36;1m    "packages/management-api/src/services/background-function-worker.ts": ["projectService"],^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9116071Z ^[[36;1m    "packages/management-api/src/services/branch.service.ts": ["mergeProjectConfig", "normalizeProjectConfig"],^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9119328Z ^[[36;1m    "packages/management-api/src/services/database.service.ts": ["shellService"],^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9121857Z ^[[36;1m    "packages/management-api/src/services/extension.service.ts": ["logger"],^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9124686Z ^[[36;1m    "packages/management-api/src/services/frontend-release-activation.ts": ["RELEASE_ID_PATTERN"],^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9128146Z ^[[36;1m    "packages/management-api/src/services/frontend-release-storage.ts": ["FRONTEND_ACTIVE_RELEASE_SCHEMA"],^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9131635Z ^[[36;1m    "packages/management-api/src/services/frontend-release.service.ts": ["FRONTEND_RELEASE_ARCHIVE_MAX_BYTES"],^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9134823Z ^[[36;1m    "packages/management-api/src/services/gateway.service.ts": ["customGatewayRouteId"],^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9137914Z ^[[36;1m    "packages/management-api/src/services/project.service.ts": ["storageService", "shellService"],^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9140898Z ^[[36;1m    "packages/management-api/src/services/realtime-bun.service.ts": ["databaseService"],^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9143583Z ^[[36;1m    "packages/management-api/src/services/storage.service.ts": ["shellService"],^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9146616Z ^[[36;1m    "packages/management-api/src/services/tenant-runtime.service.ts": ["PostgrestPoolReconcileError"],^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9149427Z ^[[36;1m    "packages/management-api/src/workers/queue.worker.ts": ["TaskStatus"],^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9151958Z ^[[36;1m    "packages/management-api/tests/integration/sdk-parity.test.ts": ["CI_TENANT_REF"],^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9154771Z ^[[36;1m    "packages/management-api/tests/scripts/run-official-sdk-compliance.ts": ["mkdtempSync"],^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9157978Z ^[[36;1m    "packages/management-api/tests/scripts/run-openapi-compliance.ts": ["getProjectDb", "resolveDbName"],^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9160913Z ^[[36;1m    "packages/management-api/tests/unit/branches.routes.test.ts": ["afterEach"],^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9163481Z ^[[36;1m    "packages/management-api/tests/unit/database.service.test.ts": ["shellService"],^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9166431Z ^[[36;1m    "packages/management-api/tests/unit/log-drain-forwarder.worker.test.ts": ["beforeEach"],^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9169218Z ^[[36;1m    "packages/management-api/tests/unit/project-webhooks.routes.test.ts": ["mock"],^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9171865Z ^[[36;1m    "packages/management-api/tests/unit/project.repository.test.ts": ["afterEach"],^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9174587Z ^[[36;1m    "packages/management-api/tests/unit/project.service.test.ts": ["mock", "beforeEach"],^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9177289Z ^[[36;1m    "packages/management-api/tests/unit/scaling.service.test.ts": ["mock"],^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9179727Z ^[[36;1m    "packages/management-api/tests/unit/shell.service.test.ts": ["mock", "spyOn"],^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9181778Z ^[[36;1m}^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9182984Z ^[[36;1mfor import_path, import_names in import_removals.items():^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9184762Z ^[[36;1m    remove_named_imports(import_path, import_names)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9186270Z ^[[36;1m^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9187100Z ^[[36;1mreplace(^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9188415Z ^[[36;1m    "packages/management-api/src/routes/auth-oauth-server.ts",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9190373Z ^[[36;1m    "    jwt_jwks: keyMaterial.jwt_jwks,\n  }\n\n  const nextAuth",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9192318Z ^[[36;1m    "    jwt_jwks: keyMaterial.jwt_jwks,\n  };\n\n  const nextAuth",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9193881Z ^[[36;1m)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9194714Z ^[[36;1mreplace(^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9196176Z ^[[36;1m    "docs/examples/supabase-js-background-task-client.ts",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9198432Z ^[[36;1m    "    body,\n    headers = {},\n    retries,\n    timeoutSec,\n    idempotencyKey,\n    method,",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9200461Z ^[[36;1m    "    body,\n    headers = {},\n    method,",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9201776Z ^[[36;1m)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9202624Z ^[[36;1mreplace(^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9204127Z ^[[36;1m    "packages/admin/src/shared/tools/project-create-env.ts",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9206570Z ^[[36;1m    "    const { directoryHandle, filename, openFile, fileIdentity, operations } = cleanup;",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9208811Z ^[[36;1m    "    const { directoryHandle, openFile } = cleanup;",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9210227Z ^[[36;1m)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9211066Z ^[[36;1mreplace(^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9212259Z ^[[36;1m    "packages/admin/src/shared/tools/storage-tools.ts",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9215623Z ^[[36;1m    "            const fmt = (data: unknown, label: string, fmtFn: (d: any) => string) => {\n                return Array.isArray(data) ? fmtFn(data) : JSON.stringify(data, null, 2);\n            };\n\n",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9218556Z ^[[36;1m    "",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9219412Z ^[[36;1m)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9220245Z ^[[36;1mreplace(^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9221306Z ^[[36;1m    "packages/edge-runtime/port-guard.ts",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9222923Z ^[[36;1m    "  const originalCreateSocket = dgram.createSocket;\n",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9225529Z ^[[36;1m    "",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9226469Z ^[[36;1m)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9227308Z ^[[36;1mreplace(^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9228431Z ^[[36;1m    "packages/edge-runtime/worker-pool.test.ts",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9230094Z ^[[36;1m    "for (const [key, value] of Object.entries(metrics))",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9231783Z ^[[36;1m    "for (const [, value] of Object.entries(metrics))",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9233185Z ^[[36;1m    expected=2,^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9234157Z ^[[36;1m)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9234986Z ^[[36;1mreplace(^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9236442Z ^[[36;1m    "packages/management-api/scripts/check-swagger-coverage.ts",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9238459Z ^[[36;1m    "    let foundOptionsObject = false;\n    let braceDepth = 0;\n",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9240025Z ^[[36;1m    "",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9240893Z ^[[36;1m)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9241724Z ^[[36;1mreplace(^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9242851Z ^[[36;1m    "packages/management-api/src/cli/project.ts",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9244316Z ^[[36;1m    "const result = await apiRequest(",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9245705Z ^[[36;1m    "await apiRequest(",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9246824Z ^[[36;1m    expected=3,^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9247777Z ^[[36;1m)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9248600Z ^[[36;1mreplace(^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9249654Z ^[[36;1m    "packages/management-api/src/doctor.ts",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9251031Z ^[[36;1m    'import os from "node:os";\n',^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9252199Z ^[[36;1m    "",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9253060Z ^[[36;1m)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9253875Z ^[[36;1mreplace(^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9254921Z ^[[36;1m    "packages/management-api/src/doctor.ts",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9256984Z ^[[36;1m    '            const testRef = `smoke-test-${Math.random().toString(36).substring(7)}`;\n\n',^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9258999Z ^[[36;1m    "",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9259854Z ^[[36;1m)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9260675Z ^[[36;1mreplace(^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9261799Z ^[[36;1m    "packages/management-api/src/routes/auth.ts",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9263960Z ^[[36;1m    "      const updatedSettings = await projectService.updateProjectSettings(params.ref, {",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9266484Z ^[[36;1m    "      await projectService.updateProjectSettings(params.ref, {",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9268090Z ^[[36;1m)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9268931Z ^[[36;1mreplace(^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9270178Z ^[[36;1m    "packages/management-api/src/routes/project-config.ts",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9272448Z ^[[36;1m    "            const currentSaml =\n              (currentAuth.saml as Record<string, unknown>) || {};\n",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9274345Z ^[[36;1m    "",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9275199Z ^[[36;1m)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9276211Z ^[[36;1mreplace(^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9277377Z ^[[36;1m    "packages/management-api/src/routes/sdk-proxy.ts",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9279078Z ^[[36;1m    "    const authHeaders: Record<string, string> = {};\n",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9280642Z ^[[36;1m    "",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9281485Z ^[[36;1m)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9282311Z ^[[36;1mreplace(^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9283674Z ^[[36;1m    "packages/management-api/src/services/edge-function.service.ts",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9287214Z ^[[36;1m    "async function readFunctionConfig(ref: string, slug: string): Promise<EdgeFunctionConfig> {\n  return (await readFunctionManifestState(ref, slug)).config;\n}\n\n",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9290148Z ^[[36;1m    "",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9290998Z ^[[36;1m)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9291824Z ^[[36;1mreplace(^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9293064Z ^[[36;1m    "packages/management-api/src/services/shell.service.ts",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9296582Z ^[[36;1m    "    // Parse database connection info from DATABASE_URL\n    const dbUrl = config.databaseUrl;\n    const dbUrlMatch = dbUrl.match(/postgresql:\\/\\/([^:]+):([^@]+)@([^:]+):(\\d+)\\//);\n\n",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9299716Z ^[[36;1m    "",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9300563Z ^[[36;1m)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9301403Z ^[[36;1mreplace(^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9302773Z ^[[36;1m    "packages/management-api/src/services/tenant-runtime.service.ts",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9304916Z ^[[36;1m    "            const res = await fetch(`${config.s3Endpoint}/minio/health/live`, {",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9307069Z ^[[36;1m    "            await fetch(`${config.s3Endpoint}/minio/health/live`, {",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9308601Z ^[[36;1m)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9309432Z ^[[36;1mreplace(^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9310869Z ^[[36;1m    "packages/management-api/tests/unit/frontend-release-archive.test.ts",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9312924Z ^[[36;1m    "    view.writeUInt32LE(entries[1].dataEnd, central + 42);",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9314840Z ^[[36;1m    "    view.writeUInt32LE(entries[1].dataEnd, secondCentral + 42);",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9316500Z ^[[36;1m)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9317320Z ^[[36;1mreplace(^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9318648Z ^[[36;1m    "packages/management-api/tests/unit/gateway.service.test.ts",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9321613Z ^[[36;1m    "        const loadsAfterCreate = calls.filter((c) => c.method === \"POST\" && c.url.endsWith(\"/load\")).length;\n\n        // Now disable - should clean up",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9326736Z ^[[36;1m    "        const loadsAfterCreate = calls.filter((c) => c.method === \"POST\" && c.url.endsWith(\"/load\")).length;\n        expect(loadsAfterCreate).toBeGreaterThan(0);\n\n        // Now disable - should clean up",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9329986Z ^[[36;1m)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9330814Z ^[[36;1mreplace(^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9332104Z ^[[36;1m    "packages/management-api/tests/unit/grafana.routes.test.ts",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9411748Z ^[[36;1m    "const app = new Elysia().use(grafanaProxyRoutes);\n",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9413465Z ^[[36;1m    "",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9414345Z ^[[36;1m)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9415180Z ^[[36;1mreplace(^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9417355Z ^[[36;1m    "packages/management-api/tests/unit/log-drain-forwarder.worker.test.ts",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9422736Z ^[[36;1m    "// Mock the DB module\nconst sqlFn = mock(() => Promise.resolve([]));\nconst { sql: sqlMock } = await import(\"../../src/db\") as { sql: unknown } as { sql: ReturnType<typeof mock> };\n// We can't easily mock the static import, so we'll test the exported functions\n// by verifying they don't throw and handle the no-projects case gracefully.\n\n",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9428480Z ^[[36;1m    "// Exercise the exported lifecycle without replacing the worker's static DB import.\n\n",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9430357Z ^[[36;1m)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9431181Z ^[[36;1mreplace(^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9432581Z ^[[36;1m    "packages/management-api/tests/unit/logical-backup.service.test.ts",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9434353Z ^[[36;1m    "  LogicalBackupContractError,\n",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9435688Z ^[[36;1m    "",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9436544Z ^[[36;1m)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9437390Z ^[[36;1mregex_replace(^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9438794Z ^[[36;1m    "packages/management-api/tests/unit/project.service.test.ts",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9440818Z ^[[36;1m    r"\n// Mock 依赖\n.*?\n(?=describe\(\"ProjectService\")",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9442204Z ^[[36;1m    "\n",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9443078Z ^[[36;1m)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9443893Z ^[[36;1mreplace(^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9445110Z ^[[36;1m    "packages/supacloud-lite/src/runtime/auth/password.ts",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9446886Z ^[[36;1m    "const ITERATIONS = 100_000\n\n",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9448055Z ^[[36;1m    "",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9448900Z ^[[36;1m)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9449712Z ^[[36;1mreplace(^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9451134Z ^[[36;1m    "packages/supacloud-lite/src/runtime/storage/image-transform-cache.ts",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9453308Z ^[[36;1m    "      if (this.inFlight.get(key) === transform) this.inFlight.delete(key)",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9455038Z ^[[36;1m    "      this.inFlight.delete(key)",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9456418Z ^[[36;1m)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9457240Z ^[[36;1mreplace(^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9458255Z ^[[36;1m    "packages/web-console/src/lib/api.ts",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9460496Z ^[[36;1m    "    if (studioSessionRefreshPromise === refreshPromise) {\n      studioSessionRefreshPromise = null;\n    }",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9462789Z ^[[36;1m    "    studioSessionRefreshPromise = null;",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9464056Z ^[[36;1m)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9464872Z ^[[36;1mreplace(^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9466313Z ^[[36;1m    "packages/management-api/src/routes/storage.ts",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9468293Z ^[[36;1m    "return status(502, { message: 'Image transform failed: ${errText}', code: '502' });",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9470663Z ^[[36;1m    "return status(502, { message: `Image transform failed: ${errText}`, code: '502' });",^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9472385Z ^[[36;1m)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9473183Z ^[[36;1m^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9474543Z ^[[36;1mschema_path = "packages/management-api/tests/unit/supabase-schema.test.ts"^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9476423Z ^[[36;1mschema_text = read(schema_path)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9477577Z ^[[36;1mhelper_anchor = (^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9478919Z ^[[36;1m    'function readRepoFile(relativePath: string): string {\n'^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9481007Z ^[[36;1m    '  return readFileSync(resolve(import.meta.dir, "../..", relativePath), "utf8");\n'^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9482757Z ^[[36;1m    '}\n'^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9483613Z ^[[36;1m)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9484440Z ^[[36;1mhelper = (^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9485358Z ^[[36;1m    helper_anchor^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9487120Z ^[[36;1m    + '\nfunction sqlModuleInterpolation(name: keyof typeof SQL_MODULES): string {\n'^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9489024Z ^[[36;1m    + '  return `\\${SQL_MODULES["${name}"]}`;\n'^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9490245Z ^[[36;1m    + '}\n'^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9491110Z ^[[36;1m)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9492059Z ^[[36;1mif schema_text.count(helper_anchor) != 1:^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9493650Z ^[[36;1m    raise RuntimeError(f"{schema_path}: helper anchor changed")^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9495844Z ^[[36;1mschema_text = schema_text.replace(helper_anchor, helper, 1)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9497823Z ^[[36;1minterpolation_pattern = re.compile(r"'\$\{SQL_MODULES\[\"([^\"]+)\"\]\}'")^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9499861Z ^[[36;1mschema_text, interpolation_count = interpolation_pattern.subn(^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9501735Z ^[[36;1m    lambda match: f'sqlModuleInterpolation("{match.group(1)}")',^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9503225Z ^[[36;1m    schema_text,^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9504165Z ^[[36;1m)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9505031Z ^[[36;1mif interpolation_count != 12:^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9506316Z ^[[36;1m    raise RuntimeError(^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9508120Z ^[[36;1m        f"{schema_path}: expected 12 literal interpolation assertions, found {interpolation_count}"^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9509985Z ^[[36;1m    )^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9510885Z ^[[36;1mwrite(schema_path, schema_text)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9511993Z ^[[36;1m^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9512935Z ^[[36;1mprint(f"Updated {len(changed)} files")^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9514179Z ^[[36;1mfor path in sorted(changed):^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9515600Z ^[[36;1m    print(path)^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9516551Z ^[[36;1mPY^[[0m
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9562034Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+apply	Apply reviewed fixes	2026-08-18T08:46:42.9563430Z ##[endgroup]
+apply	Apply reviewed fixes	2026-08-18T08:46:43.0860633Z Traceback (most recent call last):
+apply	Apply reviewed fixes	2026-08-18T08:46:43.0862001Z   File "<stdin>", line 163, in <module>
+apply	Apply reviewed fixes	2026-08-18T08:46:43.0863216Z   File "<stdin>", line 17, in replace
+apply	Apply reviewed fixes	2026-08-18T08:46:43.1024968Z RuntimeError: packages/management-api/src/cli/project.ts: expected 3 occurrences, found 9: 'const result = await apiRequest('
+apply	Apply reviewed fixes	2026-08-18T08:46:43.1040550Z ##[error]Process completed with exit code 1.
