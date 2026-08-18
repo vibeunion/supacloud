@@ -911,7 +911,19 @@ async function recoverDatabaseReplacementsBeforeServe(): Promise<void> {
  * Core logic: Based on command line arguments, decide whether to execute a single task or start the API server.
  */
 async function bootstrap() {
-  if (args.includes("--init-db")) {
+  if (args.includes("--control-plane-upgrade-preflight")) {
+    const {
+      runControlPlaneUpgradePreflight,
+      upgradeFailureReceiptLine,
+    } = await import("./upgrade");
+    try {
+      await runControlPlaneUpgradePreflight();
+      process.exit(0);
+    } catch (err: unknown) {
+      console.error(upgradeFailureReceiptLine(err));
+      process.exit(1);
+    }
+  } else if (args.includes("--init-db")) {
     const { initDatabase } = await import("./db/init");
     try {
       await initDatabase();

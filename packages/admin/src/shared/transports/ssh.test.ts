@@ -164,6 +164,7 @@ describe("SshTransport audit safety", () => {
             "export PGRST_JWT_SECRET='jwt secret with spaces'",
             '{"token":"api-token","status":"ok"}',
             "DATABASE_URL=postgres://admin:url-password@localhost/postgres",
+            "postgresql://:empty-user-password@localhost/postgres",
             "Authorization: Bearer bearer-token",
             "PUBLIC_DOMAIN=api.example.com",
         ].join("\n"));
@@ -172,9 +173,43 @@ describe("SshTransport audit safety", () => {
         expect(output).not.toContain("jwt secret with spaces");
         expect(output).not.toContain("api-token");
         expect(output).not.toContain("url-password");
+        expect(output).not.toContain("empty-user-password");
         expect(output).not.toContain("bearer-token");
         expect(output).toContain("PUBLIC_DOMAIN=api.example.com");
         expect(output.match(/\[REDACTED\]/g)?.length).toBeGreaterThanOrEqual(5);
+        expect(redactSshOutput('{"token":"[REDACTED]"}')).toBe('{"token":"[REDACTED]"}');
+        const escapedOutput = redactSshOutput(String.raw`{\"token\":\"raw-token\"}suffix`);
+        expect(escapedOutput).toBe("[REDACTED: structured secret output]");
+        expect(escapedOutput).not.toContain("raw-token");
+        for (const structuredSecret of [
+            String.raw`{"token":"prefix-\\"synthetic-escaped-tail"}`,
+            String.raw`{"to\\u006ben":"unicode-token"}`,
+            String.raw`{\"to\\u006ben\":\"escaped-unicode-token\"}`,
+            String.raw`{to\\u006ben:"unquoted-unicode-token"}`,
+            String.raw`{to\\u{006b}en:"codepoint-unicode-token"}`,
+        ]) {
+            expect(redactSshOutput(structuredSecret)).toBe("[REDACTED: structured secret output]");
+        }
+    });
+
+    test("marks command output when transport redaction changed it", async () => {
+        const client = new FakeSshClient();
+        client.stdout = Buffer.from("DATABASE_URL=postgres://admin:database-password@localhost/postgres\n");
+        const transport = new SshTransport({
+            host: "server.example.com",
+            port: 22,
+            username: "root",
+            hostFingerprint: TEST_HOST_FINGERPRINT,
+        }, { clientFactory: () => client as never });
+
+        try {
+            const result = await transport.exec("hostname");
+            expect(result.stdout).toContain("[REDACTED]");
+            expect(result.stdout).not.toContain("database-password");
+            expect(result.stdoutRedacted).toBe(true);
+        } finally {
+            transport.close();
+        }
     });
 
     test("redacts secrets from blocked results, console output, and retained audit entries", async () => {

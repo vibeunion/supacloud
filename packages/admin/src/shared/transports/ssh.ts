@@ -38,6 +38,8 @@ export interface SshResult {
     code: number;
     stdoutTruncated?: boolean;
     stderrTruncated?: boolean;
+    stdoutRedacted?: boolean;
+    stderrRedacted?: boolean;
 }
 
 export class SshCommandOutcomeUnknownError extends Error {
@@ -112,7 +114,7 @@ class BoundedOutputCollector {
         this.truncated = buffer.length > copied;
     }
 
-    finalize(): string {
+    finalize(): { output: string; redacted: boolean } {
         let output = this.storage.subarray(0, this.bytes).toString("utf8");
         if (this.truncated) {
             // Never retain an incomplete final line: it may contain a credential
@@ -121,8 +123,10 @@ class BoundedOutputCollector {
             output = lastNewline >= 0 ? output.slice(0, lastNewline + 1) : "";
         }
         const redacted = redactSshOutput(output);
-        if (!this.truncated) return redacted;
-        return `${redacted}${redacted && !redacted.endsWith("\n") ? "\n" : ""}[TRUNCATED: output exceeded ${this.limit}-byte limit]`;
+        const bounded = !this.truncated
+            ? redacted
+            : `${redacted}${redacted && !redacted.endsWith("\n") ? "\n" : ""}[TRUNCATED: output exceeded ${this.limit}-byte limit]`;
+        return { output: bounded, redacted: redacted !== output };
     }
 }
 
@@ -145,17 +149,80 @@ export function redactSshCommand(command: string): string {
             "$1$2Bearer [REDACTED]$2",
         )
         .replace(/(\b--(?:password|token|secret|api-key)\s+)(\S+)/gi, "$1[REDACTED]")
-        .replace(/(postgres(?:ql)?:\/\/[^:\s/]+:)[^@\s]+@/gi, "$1[REDACTED]@");
+        .replace(/(postgres(?:ql)?:\/\/[^:\s/]*:)[^@\s]+@/gi, "$1[REDACTED]@");
+}
+
+const SENSITIVE_STRUCTURED_FIELD = /(?:password|pass|secret|token|key|credential|db_uri|database_url|dsn)/i;
+
+function decodedStructuredFieldName(encodedName: string): string | null {
+    let decodedName = encodedName.replace(/\\'/g, "'");
+    for (let decodingPass = 0; decodingPass < 3; decodingPass += 1) {
+        if (decodedName.length > 256) return null;
+        try {
+            const nextName = JSON.parse(`"${decodedName.replace(/"/g, '\\"')}"`);
+            if (typeof nextName !== "string" || nextName === decodedName) return decodedName;
+            decodedName = nextName;
+        } catch {
+            return null;
+        }
+    }
+    return decodedName;
+}
+
+function containsSensitiveStructuredField(message: string): boolean {
+    const normalizedQuotes = message.replace(/\\"/g, '"').replace(/\\'/g, "'");
+    const fieldPatterns = [
+        /"((?:\\.|[^"\\\r\n])*)"\s*:/g,
+        /'((?:\\.|[^'\\\r\n])*)'\s*:/g,
+        /(?:^|[{,]\s*)([A-Za-z_$\\][A-Za-z0-9_$\\{}]{0,255})\s*:/g,
+    ];
+    return fieldPatterns.some(pattern => [...normalizedQuotes.matchAll(pattern)].some(match => {
+        const decodedName = decodedStructuredFieldName(match[1]!);
+        return decodedName === null || SENSITIVE_STRUCTURED_FIELD.test(decodedName);
+    }));
+}
+
+function structuredSensitiveFieldsAreRedacted(message: string): boolean {
+    const normalizedQuotes = message.replace(/\\"/g, '"').replace(/\\'/g, "'");
+    try {
+        const parsedDiagnostic = JSON.parse(normalizedQuotes);
+        if (!parsedDiagnostic || typeof parsedDiagnostic !== "object") return false;
+        let foundSensitiveField = false;
+        const pending = [parsedDiagnostic];
+        while (pending.length > 0) {
+            const current = pending.pop();
+            if (!current || typeof current !== "object") continue;
+            for (const [fieldName, fieldValue] of Object.entries(current)) {
+                if (SENSITIVE_STRUCTURED_FIELD.test(fieldName)) {
+                    foundSensitiveField = true;
+                    if (fieldValue !== "[REDACTED]") return false;
+                } else if (fieldValue && typeof fieldValue === "object") {
+                    pending.push(fieldValue);
+                }
+            }
+        }
+        return foundSensitiveField;
+    } catch {
+        return false;
+    }
 }
 
 export function redactSshOutput(output: string): string {
-    const redactedLines = output.replace(
+    const redactedEscapedFields = output.split("\n").map(line => (
+        containsSensitiveStructuredField(line) && !structuredSensitiveFieldsAreRedacted(line)
+            ? "[REDACTED: structured secret output]"
+            : line
+    )).join("\n");
+    const redactedLines = redactedEscapedFields.replace(
         /^(\s*(?:export\s+)?[A-Z0-9_]*(?:PASSWORD|PASS|SECRET|TOKEN|KEY|CREDENTIAL|DB_URI|DATABASE_URL|DSN)[A-Z0-9_]*\s*=\s*).*$/gim,
         "$1[REDACTED]",
     );
     const redactedStructuredFields = redactedLines.replace(
-        /((?:["']?(?:password|pass|secret|token|key|credential|db_uri|database_url|dsn)["']?)\s*:\s*)(?:"[^"]*"|'[^']*'|[^,}\]\r\n]+)/gi,
-        "$1[REDACTED]",
+        /((?:["']?(?:password|pass|secret|token|key|credential|db_uri|database_url|dsn)["']?)\s*:\s*)("[^"]*"|'[^']*'|[^,}\]\r\n]+)/gi,
+        (_match, prefix: string, literal: string) => {
+            const quote = literal[0];
+            return `${prefix}${quote === '"' || quote === "'" ? `${quote}[REDACTED]${quote}` : "[REDACTED]"}`;
+        },
     );
     return redactSshCommand(redactedStructuredFields);
 }
@@ -324,13 +391,17 @@ export class SshTransport {
                                     ));
                                     return;
                                 }
+                                const finalizedStdout = stdout.finalize();
+                                const finalizedStderr = stderr.finalize();
                                 resolve({
                                     success: code === 0,
-                                    stdout: stdout.finalize(),
-                                    stderr: stderr.finalize(),
+                                    stdout: finalizedStdout.output,
+                                    stderr: finalizedStderr.output,
                                     code: code ?? 128,
                                     stdoutTruncated: stdout.truncated,
                                     stderrTruncated: stderr.truncated,
+                                    stdoutRedacted: finalizedStdout.redacted,
+                                    stderrRedacted: finalizedStderr.redacted,
                                 });
                             })
                             .on("error", () => {
