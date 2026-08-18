@@ -1,6 +1,0 @@
-Traceback (most recent call last):
-  File "/home/runner/work/supacloud/supacloud/.github/scripts/apply-code-quality-fixes.py", line 296, in <module>
-    regex_replace(
-  File "/home/runner/work/supacloud/supacloud/.github/scripts/apply-code-quality-fixes.py", line 42, in regex_replace
-    raise RuntimeError(
-RuntimeError: packages/management-api/tests/unit/project.service.test.ts: expected 1 regex matches, found 0: '\\n// Mock 依赖\\n.*?\\n(?=describe\\("ProjectService"\\))'
