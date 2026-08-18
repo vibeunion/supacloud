@@ -59,7 +59,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git rm \
+          git rm -f \
             .github/scripts/emit-auth-cli-boundaries.py \
             .github/scripts/fix-auth-cli-boundaries.py \
             .github/workflows/review-fix-auth-cli-boundaries.yml \
