@@ -13,6 +13,13 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.26.0](https://github.com/vibeunion/supacloud/compare/cli-v0.25.0...cli-v0.26.0) (2026-08-18)
+
+
+### Features
+
+* **cli:** add release canary OAuth client controls ([8c928f3](https://github.com/vibeunion/supacloud/commit/8c928f39e1e4e195296f777589ada1548cbab080))
+
 ## [0.25.0](https://github.com/vibeunion/supacloud/compare/cli-v0.24.0...cli-v0.25.0) (2026-08-18)
 
 
