@@ -132,10 +132,10 @@ export function registerUserProjectCliTools(
     server.tool(
         "project",
         `Project-scoped inspection and developer operations.
-Actions: get, health, logs, api_keys, settings, tasks, task_detail, task_cancel, task_retry, task_stats, dlq, background_settings, update_background_settings`,
+Actions: get, pause, restore, health, logs, api_keys, settings, tasks, task_detail, task_cancel, task_retry, task_stats, dlq, background_settings, update_background_settings`,
         {
             action: withDescription(stringEnum([
-                "get", "health", "logs", "api_keys", "settings",
+                "get", "pause", "restore", "health", "logs", "api_keys", "settings",
                 "tasks", "task_detail", "task_cancel", "task_retry", "task_stats", "dlq",
                 "background_settings", "update_background_settings",
             ]), "Action to perform"),
@@ -158,6 +158,12 @@ Actions: get, health, logs, api_keys, settings, tasks, task_detail, task_cancel,
                         }),
                         resolvedRef,
                     ));
+                case "pause":
+                    text = simple(await http.post(`/v1/projects/${resolvedRef}/pause`), `Project ${resolvedRef} paused`);
+                    break;
+                case "restore":
+                    text = simple(await http.post(`/v1/projects/${resolvedRef}/restore`), `Project ${resolvedRef} restored`);
+                    break;
                 case "health":
                     text = ok(await http.get(`/v1/projects/${resolvedRef}/health`));
                     break;

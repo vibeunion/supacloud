@@ -250,14 +250,14 @@ describe("supacloud-cli process contract", () => {
         ].join("\n") + "\n");
 
         const unconfirmed = await runProjectCli([
-            "--env", "prod", "project", "task_cancel", "--task_id", "task-1",
+            "--env", "prod", "project", "pause",
         ], {}, workspace);
         const confirmed = await runProjectCli([
-            "project", "task_cancel", "--task_id", "task-1",
+            "project", "pause",
             "--env=prod", "--confirm-production=prod-ref",
         ], {}, workspace);
         const crossRef = await runProjectCli([
-            "project", "task_cancel", "--task_id", "task-1", "--ref", "other-ref",
+            "project", "restore", "--ref", "other-ref",
             "--env", "prod", "--confirm-production", "other-ref",
         ], {}, workspace);
 
@@ -266,7 +266,59 @@ describe("supacloud-cli process contract", () => {
         expect(confirmed.exitCode).toBe(0);
         expect(crossRef.exitCode).toBe(1);
         expect(crossRef.stderr).toContain("cannot target a different project");
-        expect(requestedPaths).toEqual(["/v1/projects/prod-ref/tasks/task-1/cancel"]);
+        expect(requestedPaths).toEqual(["/v1/projects/prod-ref/pause"]);
+    });
+
+    test("blocks project recovery actions in read-only mode before HTTP dispatch", async () => {
+        let requestCount = 0;
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch() {
+                requestCount += 1;
+                return Response.json({});
+            },
+        });
+        servers.push(server);
+
+        for (const action of ["pause", "restore"]) {
+            const response = await runProjectCli(["project", action], {
+                SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+                SUPACLOUD_API_TOKEN: "test-token",
+                SUPACLOUD_PROJECT_REF: "abc123",
+                SUPACLOUD_READ_ONLY: "true",
+            });
+
+            expect(response.exitCode).toBe(1);
+            expect(response.stdout + response.stderr).toContain("read-only");
+        }
+
+        expect(requestCount).toBe(0);
+    });
+
+    test("blocks project recovery actions for application-only profiles before HTTP dispatch", async () => {
+        let requestCount = 0;
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch() {
+                requestCount += 1;
+                return Response.json({});
+            },
+        });
+        servers.push(server);
+
+        for (const action of ["pause", "restore"]) {
+            const response = await runProjectCli(["project", action], {
+                SUPABASE_URL: `http://127.0.0.1:${server.port}`,
+                SUPABASE_SERVICE_ROLE_KEY: "application-service-role-key",
+            });
+
+            expect(response.exitCode).toBe(1);
+            expect(response.stdout + response.stderr).toContain("Management API context");
+        }
+
+        expect(requestCount).toBe(0);
     });
 
     test("requires production confirmation for secrets from environment before HTTP", async () => {

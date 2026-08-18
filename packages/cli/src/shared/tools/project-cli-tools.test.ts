@@ -106,6 +106,32 @@ describe("project CLI reads", () => {
     });
 });
 
+describe("project CLI recovery actions", () => {
+    test("targets the selected project and keeps failed response bodies private", async () => {
+        const remoteSecret = "project-recovery-private-sentinel";
+        const calls: string[] = [];
+        const callback = captureProjectTool({
+            post: async (path: string) => {
+                calls.push(path);
+                return calls.length === 1
+                    ? { ok: true, status: 200, data: {} }
+                    : { ok: false, status: 503, data: { message: remoteSecret } };
+            },
+        }, "default-ref");
+
+        const pause = await callback({ action: "pause", ref: "selected-ref" });
+        const restore = await callback({ action: "restore", ref: "selected-ref" });
+
+        expect(calls).toEqual([
+            "/v1/projects/selected-ref/pause",
+            "/v1/projects/selected-ref/restore",
+        ]);
+        expect(pause.content[0].text).toBe("✅ Project selected-ref paused");
+        expect(restore.content[0].text).toBe("❌ Failed (503)");
+        expect(restore.content[0].text).not.toContain(remoteSecret);
+    });
+});
+
 describe("project CLI task actions", () => {
     test("prefers an explicit ref over the auto-linked project", async () => {
         const calls: string[] = [];
@@ -206,6 +232,7 @@ describe("admin project create compatibility", () => {
         }, {} as any, { projectRef: "proj" });
 
         if (!userProjectSchema) throw new Error("user project tool was not registered");
+        expect(schemaEnumValues(userProjectSchema.action)).toEqual(expect.arrayContaining(["pause", "restore"]));
         expect(schemaEnumValues(userProjectSchema.action)).not.toContain("create");
         expect(userProjectSchema.domain).toBeUndefined();
         expect(userProjectSchema.api_domain).toBeUndefined();
