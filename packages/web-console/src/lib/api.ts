@@ -159,9 +159,7 @@ async function refreshExpiringStudioSession(): Promise<void> {
     if (!(error instanceof TypeError)) throw error;
     // 网络瞬断不应直接触发登出；原请求与后续 401 会话校验仍是最终依据。
   } finally {
-    if (studioSessionRefreshPromise === refreshPromise) {
-      studioSessionRefreshPromise = null;
-    }
+    studioSessionRefreshPromise = null;
   }
 }
 

@@ -1,7 +1,6 @@
 import { EventEmitter } from 'events';
 import type { JWTPayload } from 'jose';
 import { logger } from '../utils/logger';
-import { databaseService } from './database.service';
 import { resolveDbName, getProjectDb, resolveSlotName } from '../db';
 import { SQL_MODULES } from '../db/sql-modules';
 import { verifyProjectJwtPayload } from '../utils/project-jwt';

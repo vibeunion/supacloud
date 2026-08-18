@@ -104,7 +104,6 @@ mock.module("../../src/utils/logger", () => ({
 const {
   createLogicalBackup,
   listLogicalBackups,
-  LogicalBackupContractError,
   restoreLogicalBackup,
 } = await import(
   new URL("../../src/services/logical-backup.service.ts?logical-backup-service-test", import.meta.url).href,

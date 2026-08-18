@@ -21,10 +21,6 @@ Actions: status, list_buckets, list_files, upload_base64, delete_file`,
         async (args: any) => {
             const { action, ref, bucket, filename, base64_content, mime_type } = args;
             const need = (f: string, v: any) => { if (!v) throw new Error(`'${f}' required for '${action}'`); };
-            const fmt = (data: unknown, label: string, fmtFn: (d: any) => string) => {
-                return Array.isArray(data) ? fmtFn(data) : JSON.stringify(data, null, 2);
-            };
-
             let text: string;
             switch (action) {
                 case "status":

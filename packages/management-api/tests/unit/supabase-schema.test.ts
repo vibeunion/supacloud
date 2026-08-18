@@ -8,6 +8,10 @@ function readRepoFile(relativePath: string): string {
   return readFileSync(resolve(import.meta.dir, "../..", relativePath), "utf8");
 }
 
+function sqlModuleInterpolation(name: keyof typeof SQL_MODULES): string {
+  return `\${SQL_MODULES["${name}"]}`;
+}
+
 describe("supabase bootstrap schema", () => {
   test("exports the extracted tenant runtime migration used by the service", () => {
     const service = readRepoFile("src/services/tenant-runtime.service.ts");
@@ -57,7 +61,7 @@ describe("supabase bootstrap schema", () => {
       "src/services/tenant-runtime-migration.ts",
       "src/scripts/migrate-tenant-schema.ts",
     ]) {
-      expect(readRepoFile(filePath)).toContain('${SQL_MODULES["postgrest-request-context"]}');
+      expect(readRepoFile(filePath)).toContain(sqlModuleInterpolation("postgrest-request-context"));
     }
   });
 
@@ -69,7 +73,7 @@ describe("supabase bootstrap schema", () => {
       "src/scripts/migrate-tenant-schema.ts",
     ]) {
       expect(readRepoFile(filePath)).toContain(
-        '${SQL_MODULES["realtime-auto-attach-trigger"]}',
+        sqlModuleInterpolation("realtime-auto-attach-trigger"),
       );
     }
 
@@ -112,7 +116,7 @@ describe("supabase bootstrap schema", () => {
 
     for (const filePath of migrationPaths) {
       const migrationSource = readRepoFile(filePath);
-      expect(migrationSource).toContain('${SQL_MODULES["realtime-notify-payload"]}');
+      expect(migrationSource).toContain(sqlModuleInterpolation("realtime-notify-payload"));
       expect(migrationSource).toContain("PERFORM realtime.notify_change_payload(payload)");
       expect(migrationSource).not.toContain(
         "PERFORM pg_notify('realtime_changes', payload::text)",
@@ -122,7 +126,7 @@ describe("supabase bootstrap schema", () => {
     expect(ALTER_TENANT_SQL).toContain(notifyPayloadSql);
 
     const realtimeBunSource = readRepoFile("src/services/realtime-bun.service.ts");
-    expect(realtimeBunSource).toContain('${SQL_MODULES["realtime-notify-payload"]}');
+    expect(realtimeBunSource).toContain(sqlModuleInterpolation("realtime-notify-payload"));
     expect(realtimeBunSource).toContain("PERFORM realtime.notify_change_payload(payload)");
     const realtimeBunTriggerStart = realtimeBunSource.indexOf(
       "CREATE OR REPLACE FUNCTION realtime_supacloud_notify()",
@@ -164,7 +168,7 @@ describe("supabase bootstrap schema", () => {
       "src/services/tenant-runtime-migration.ts",
       "src/scripts/migrate-tenant-schema.ts",
     ]) {
-      expect(readRepoFile(filePath)).toContain('${SQL_MODULES["auth-jwt-helpers"]}');
+      expect(readRepoFile(filePath)).toContain(sqlModuleInterpolation("auth-jwt-helpers"));
     }
   });
 
@@ -246,7 +250,7 @@ describe("supabase bootstrap schema", () => {
       "src/services/tenant-runtime-migration.ts",
       "src/scripts/migrate-tenant-schema.ts",
     ]) {
-      expect(readRepoFile(filePath)).toContain('${SQL_MODULES["background-task-mirror-up"]}');
+      expect(readRepoFile(filePath)).toContain(sqlModuleInterpolation("background-task-mirror-up"));
     }
 
     const rollback = SQL_MODULES["background-task-mirror-down"];
@@ -267,7 +271,7 @@ describe("supabase bootstrap schema", () => {
 
   test("tenant auth bootstrap reuses the canonical JWT helper module", () => {
     const runtimeSource = readRepoFile("src/services/tenant-runtime.service.ts");
-    expect(runtimeSource).toContain('${SQL_MODULES["auth-jwt-helpers"]}');
+    expect(runtimeSource).toContain(sqlModuleInterpolation("auth-jwt-helpers"));
     expect(runtimeSource).not.toContain(
       "CREATE OR REPLACE FUNCTION auth.uid() returns uuid as $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid;",
     );
@@ -382,7 +386,7 @@ describe("supabase bootstrap schema", () => {
       "src/services/tenant-runtime.service.ts",
       "src/scripts/migrate-tenant-schema.ts",
     ]) {
-      expect(readRepoFile(filePath)).toContain('${SQL_MODULES["pgmq-public"]}');
+      expect(readRepoFile(filePath)).toContain(sqlModuleInterpolation("pgmq-public"));
     }
   });
 
@@ -402,9 +406,9 @@ describe("supabase bootstrap schema", () => {
     expect(SQL_MODULES["pgmq-public"]).toContain("SUPACLOUD_QUEUE_NAME_RESERVED");
     expect(ALTER_TENANT_SQL).toContain(workflowModule);
     expect(readRepoFile("src/scripts/migrate-tenant-schema.ts"))
-      .toContain('${SQL_MODULES["workflows-public"]}');
+      .toContain(sqlModuleInterpolation("workflows-public"));
     expect(readRepoFile("src/services/tenant-runtime.service.ts"))
-      .not.toContain('${SQL_MODULES["workflows-public"]}');
+      .not.toContain(sqlModuleInterpolation("workflows-public"));
   });
 
   test("tenant auth schema stops creating WebAuthn artifacts without destructive cleanup", () => {
@@ -510,8 +514,8 @@ describe("supabase bootstrap schema", () => {
     expect(bootstrap).toContain("CREATE OR REPLACE FUNCTION realtime.ensure_tasks_publication()");
     expect(bootstrap).toContain("CREATE OR REPLACE FUNCTION realtime.auto_publish_tasks_table()");
     for (const source of tenantMigrationSources) {
-      expect(source).toContain('${SQL_MODULES["realtime-notify-payload"]}');
-      expect(source).toContain('${SQL_MODULES["realtime-auto-attach-trigger"]}');
+      expect(source).toContain(sqlModuleInterpolation("realtime-notify-payload"));
+      expect(source).toContain(sqlModuleInterpolation("realtime-auto-attach-trigger"));
       expect(source).toContain("CREATE OR REPLACE FUNCTION realtime.notify_postgres_changes()");
       expect(source).toContain("CREATE OR REPLACE FUNCTION realtime.ensure_tasks_publication()");
       expect(source).toContain("CREATE OR REPLACE FUNCTION realtime.auto_publish_tasks_table()");

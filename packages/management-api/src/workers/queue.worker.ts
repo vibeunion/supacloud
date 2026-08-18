@@ -1,6 +1,6 @@
 import { logger } from "../utils/logger";
 import { config } from "../config";
-import { db, TaskStatus } from "../db/index";
+import { db } from "../db/index";
 import { createPgListener, type PgListenerHandle } from "../lib/pg-listen";
 
 /**

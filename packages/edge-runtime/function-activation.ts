@@ -1,4 +1,4 @@
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 import { readFunctionFile } from "./trusted-function-files";
 
 export const EDGE_FUNCTION_ACTIVATION_SCHEMA = "supacloud.edge-function-activation.v1" as const;

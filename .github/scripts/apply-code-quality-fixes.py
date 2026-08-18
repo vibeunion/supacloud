@@ -295,7 +295,7 @@ replace(
 )
 regex_replace(
     "packages/management-api/tests/unit/project.service.test.ts",
-    r'\n// Mock 依赖\n.*?\n(?=describe\("ProjectService"\))',
+    r'\n// Mock 依赖\n.*?\n(?=describe\("ProjectService",)',
     "\n",
 )
 replace(

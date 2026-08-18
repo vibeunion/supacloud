@@ -8,7 +8,6 @@ import {
   FRONTEND_ACTIVE_RELEASE_SCHEMA,
   FRONTEND_ACTIVATION_CHECKPOINT_SCHEMA,
   MUTATION_ID_PATTERN,
-  RELEASE_ID_PATTERN,
   frontendReleaseError,
   isFrontendGatewayDurabilityUnknown,
   parseActivationCheckpoint,

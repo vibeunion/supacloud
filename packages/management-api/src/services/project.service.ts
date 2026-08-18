@@ -1,8 +1,6 @@
 import { projectRepository } from "../repositories/project.repository";
 import { jwtService } from "./jwt.service";
 import { databaseService } from "./database.service";
-import { storageService } from "./storage.service";
-import { shellService } from "./shell.service";
 import { gatewayService } from "./gateway.service";
 import { taskRepository } from "../repositories/task.repository";
 import type { Project, ProjectStatus } from "../db";

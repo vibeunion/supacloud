@@ -1,7 +1,7 @@
 import Ajv from "ajv";
 import addFormats from "ajv-formats";
 import { ProjectService } from "../../src/services/project.service";
-import { sql, getProjectDb, resolveDbName } from "../../src/db";
+import { sql } from "../../src/db";
 
 const SUPA_OPENAPI_URL = "https://api.supabase.com/api/v1-json";
 const LOCAL_API_URL = "http://127.0.0.1:9090";

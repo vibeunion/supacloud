@@ -1,4 +1,4 @@
-import { describe, test, expect, spyOn, mock } from "bun:test";
+import { describe, test, expect, spyOn } from "bun:test";
 import { ScalingService } from "../../src/services/scaling.service";
 import * as MonitorService from "../../src/services/monitor.service";
 import { shellService } from "../../src/services/shell.service";

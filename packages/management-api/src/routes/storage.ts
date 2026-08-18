@@ -469,7 +469,7 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
             if (!res.ok) {
                 const errText = await res.text();
                 logger.error(`Imaginary ${operation} failed:`, { status: res.status, error: errText });
-                return status(502, { message: 'Image transform failed: ${errText}', code: '502' });
+                return status(502, { message: `Image transform failed: ${errText}`, code: '502' });
             }
 
             // Stream the processed image back to client with caching headers

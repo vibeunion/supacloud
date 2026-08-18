@@ -1141,8 +1141,6 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
           };
           const samlField = samlKeyMap[key];
           if (samlField) {
-            const currentSaml =
-              (currentAuth.saml as Record<string, unknown>) || {};
             otherUpdates.saml = {
               ...((otherUpdates.saml as Record<string, unknown>) || {}),
               [samlField]: val,

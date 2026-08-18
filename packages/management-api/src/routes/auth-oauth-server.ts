@@ -338,7 +338,7 @@ async function migrateProjectToOidc(
     key_id: keyMaterial.key_id,
     jwt_keys: keyMaterial.jwt_keys,
     jwt_jwks: keyMaterial.jwt_jwks,
-  }
+  };
 
   const nextAuth = {
     ...currentAuth,

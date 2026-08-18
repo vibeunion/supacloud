@@ -12,7 +12,6 @@ import {
 import { $ } from "bun";
 import { tenantRuntimeService } from "../services/tenant-runtime.service";
 import { runtimeSnapshotService } from "../services/runtime-snapshot.service";
-import { config } from "../config";
 import {
   getAuthRuntimeDescriptor,
   getAuthRuntimeManagedError,
