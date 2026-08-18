@@ -43,6 +43,7 @@ jobs:
           git merge --no-edit origin/main
           sed -i 's/re.subn(pattern, replacement, text, count=1, flags=flags)/re.subn(pattern, lambda _match: replacement, text, count=1, flags=flags)/' .github/scripts/fix-auth-cli-boundaries.py
           python3 .github/scripts/fix-auth-cli-boundaries.py
+          git checkout origin/main -- packages/cli/package.json
 
       - name: Validate project CLI
         shell: bash
@@ -58,7 +59,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git checkout origin/main -- packages/cli/package.json
           git rm \
             .github/scripts/emit-auth-cli-boundaries.py \
             .github/scripts/fix-auth-cli-boundaries.py \
