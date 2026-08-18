@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.61.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.61.0...management-api-v0.61.1) (2026-08-18)
+
+
+### Bug Fixes
+
+* remediate auth management boundaries ([#957](https://github.com/vibeunion/supacloud/issues/957)) ([5d3cb0c](https://github.com/vibeunion/supacloud/commit/5d3cb0c2196f53acf76df30a0cb8eb32f005f6aa))
+* resolve all GitHub Code Quality findings ([#952](https://github.com/vibeunion/supacloud/issues/952)) ([df0fb0c](https://github.com/vibeunion/supacloud/commit/df0fb0c53eb9a6424565bf39f1ce2f00ace429f1))
+
 ## [0.61.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.60.6...management-api-v0.61.0) (2026-08-18)
 
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.5](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.8.4...supacloud-lite-v0.8.5) (2026-08-18)
+
+
+### Bug Fixes
+
+* resolve all GitHub Code Quality findings ([#952](https://github.com/vibeunion/supacloud/issues/952)) ([df0fb0c](https://github.com/vibeunion/supacloud/commit/df0fb0c53eb9a6424565bf39f1ce2f00ace429f1))
+
 ## [0.8.4](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.8.3...supacloud-lite-v0.8.4) (2026-08-16)
 
 

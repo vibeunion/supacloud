@@ -13,6 +13,13 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.28.0](https://github.com/vibeunion/supacloud/compare/cli-v0.27.0...cli-v0.28.0) (2026-08-18)
+
+
+### Features
+
+* **cli:** expose controlled auth user and login link lifecycle ([4effe92](https://github.com/vibeunion/supacloud/commit/4effe9204638b4aa1db82263acdbfa25468f1006))
+
 ## [0.27.0](https://github.com/vibeunion/supacloud/compare/cli-v0.26.0...cli-v0.27.0) (2026-08-18)
 
 

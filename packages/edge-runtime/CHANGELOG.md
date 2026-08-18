@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.3](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.18.2...edge-runtime-v0.18.3) (2026-08-18)
+
+
+### Bug Fixes
+
+* resolve all GitHub Code Quality findings ([#952](https://github.com/vibeunion/supacloud/issues/952)) ([df0fb0c](https://github.com/vibeunion/supacloud/commit/df0fb0c53eb9a6424565bf39f1ce2f00ace429f1))
+
 ## [0.18.2](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.18.1...edge-runtime-v0.18.2) (2026-08-12)
 
 
