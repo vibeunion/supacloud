@@ -16,7 +16,7 @@
     "dev": "bun run --watch src/index.ts",
     "build": "bun build src/index.ts --outdir dist --target node",
     "prepublishOnly": "bun run build",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "python3 ../../.github/scripts/emit-auth-cli-boundaries.py && tsc --noEmit"
   },
   "keywords": [
     "supacloud",
