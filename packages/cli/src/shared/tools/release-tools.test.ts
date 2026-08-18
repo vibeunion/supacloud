@@ -486,7 +486,7 @@ test.each([false, true] as const)("release-canary fixture disable replay accepts
         },
         get: async (path: string, options: Record<string, unknown>) => {
             applicationRequests.push({ method: "GET", path, body: options });
-            return { ok: true, status: 200, data: { fixtureId, issuer, subject, pending: false } };
+            return { ok: true, status: 200, data: false };
         },
     });
 
@@ -519,7 +519,7 @@ test.each([false, true] as const)("release-canary fixture disable replay accepts
         },
         {
             method: "GET",
-            path: `/rest/v1/rpc/fa_release_canary_fixture_pending?p_fixture_id=${fixtureId}&p_issuer=https%3A%2F%2Fissuer.example.test%2Fauth%2Fv1&p_subject=${subject}`,
+            path: `/rest/v1/rpc/fa_release_canary_fixture_pending?p_issuer=https%3A%2F%2Fissuer.example.test%2Fauth%2Fv1&p_subject=${subject}`,
             body: { maxJsonBytes: 64 * 1024, responseTimeoutMs: 5_000 },
         },
     ]);
@@ -533,7 +533,7 @@ test("release-canary fixture disable replay fails closed when pending readback i
         get: async () => ({ ok: true, status: 200, data: projectEndpoints() }),
     }, {
         postReleaseMutation: async () => ({ ok: true, status: 200, data: { fixtureId, state: "disabled", idempotent: false } }),
-        get: async () => ({ ok: true, status: 200, data: { fixtureId, issuer: "https://issuer.example.test/auth/v1", subject: "33333333-3333-4333-8333-333333333333", pending: true } }),
+        get: async () => ({ ok: true, status: 200, data: true }),
     });
     const response = await callback({
         action: "release_canary_fixture_disable_replay",
