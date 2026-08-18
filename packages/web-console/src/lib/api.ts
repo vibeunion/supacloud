@@ -7,7 +7,8 @@
 const DEFAULT_REQUEST_TIMEOUT_MS = 15000;
 const SESSION_REFRESH_WINDOW_MS = 2 * 60 * 1000;
 let studioSessionExpiresAtMs = 0;
-let studioSessionRefreshPromise: Promise<StudioSessionState> | null = null;
+type StudioSessionRefresh = { promise: Promise<StudioSessionState> };
+let studioSessionRefresh: StudioSessionRefresh | null = null;
 
 export type StudioLoginResult =
   | { success: true; username?: string }
@@ -152,14 +153,16 @@ async function refreshExpiringStudioSession(): Promise<void> {
     return;
   }
 
-  const refreshPromise = studioSessionRefreshPromise ??= refreshStudioSession();
+  const refresh = studioSessionRefresh ??= { promise: refreshStudioSession() };
   try {
-    await refreshPromise;
+    await refresh.promise;
   } catch (error) {
     if (!(error instanceof TypeError)) throw error;
     // 网络瞬断不应直接触发登出；原请求与后续 401 会话校验仍是最终依据。
   } finally {
-    studioSessionRefreshPromise = null;
+    if (studioSessionRefresh === refresh) {
+      studioSessionRefresh = null;
+    }
   }
 }
 
