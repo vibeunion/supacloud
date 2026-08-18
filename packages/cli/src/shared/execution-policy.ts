@@ -12,8 +12,9 @@ interface ModulePolicy {
 
 const ACTION_POLICY: Record<string, ModulePolicy> = {
     project: {
-        read: ["get", "health", "logs", "api_keys", "settings", "tasks", "task_detail", "task_stats", "dlq", "background_settings"],
+        read: ["get", "endpoints", "health", "logs", "api_keys", "settings", "tasks", "task_detail", "task_stats", "dlq", "background_settings"],
         write: ["pause", "restore", "task_cancel", "task_retry", "update_background_settings"],
+        local: ["list"],
     },
     database: {
         read: ["list_tables", "describe_columns", "list_indexes", "list_constraints", "list_extensions", "rls_status", "rls_policies", "list_auth_users", "get_auth_user", "connections", "stats", "slow_queries", "list_migrations", "migration_inventory", "project_url", "generate_types"],
