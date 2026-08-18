@@ -13,6 +13,13 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.29.0](https://github.com/vibeunion/supacloud/compare/cli-v0.28.1...cli-v0.29.0) (2026-08-18)
+
+
+### Features
+
+* **cli:** replay release canary fixture receipts ([821c6ec](https://github.com/vibeunion/supacloud/commit/821c6ec43298698ac44a86d1c311ef0a3f9fbe6f))
+
 ## [0.28.1](https://github.com/vibeunion/supacloud/compare/cli-v0.28.0...cli-v0.28.1) (2026-08-18)
 
 
