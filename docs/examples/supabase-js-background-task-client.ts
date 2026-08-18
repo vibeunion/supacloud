@@ -61,9 +61,6 @@ export async function invokeAsync(
   const {
     body,
     headers = {},
-    retries,
-    timeoutSec,
-    idempotencyKey,
     method,
   } = options;
 

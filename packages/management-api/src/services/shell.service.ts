@@ -15,10 +15,6 @@ export class ShellService {
   async execute(script: string, args: string[], timeoutMs: number = 30_000): Promise<{ success: boolean; output: string; error?: string }> {
     const scriptPath = `${this.scriptsPath}/${script}`;
 
-    // Parse database connection info from DATABASE_URL
-    const dbUrl = config.databaseUrl;
-    const dbUrlMatch = dbUrl.match(/postgresql:\/\/([^:]+):([^@]+)@([^:]+):(\d+)\//);
-
     // Build environment variables
     const env: Record<string, string> = {
       ...process.env,

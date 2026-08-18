@@ -89,7 +89,7 @@ export class ImageTransformCache {
       if (transformResult.ok) this.store(key, transformResult)
       return transformResult
     } finally {
-      if (this.inFlight.get(key) === transform) this.inFlight.delete(key)
+      this.inFlight.delete(key)
     }
   }
 

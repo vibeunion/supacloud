@@ -1,5 +1,4 @@
 import { config } from "../config";
-import { shellService } from './shell.service';
 import { logger } from "../utils/logger";
 import { getStorageDriver } from "./storage.adapter";
 import {

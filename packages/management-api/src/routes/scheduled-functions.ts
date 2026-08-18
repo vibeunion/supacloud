@@ -11,8 +11,6 @@
 import { Elysia, status, t } from "elysia";
 import * as authMiddleware from "../middleware/auth";
 import { projectRepository } from "../repositories/project.repository";
-import { config } from "../config";
-import { logger } from "../utils/logger";
 import {
   MAX_SCHEDULES_PER_PROJECT,
   scheduledFunctionService,

@@ -187,7 +187,7 @@ describe("verified frontend release archives", () => {
     const firstCentralCommentLength = view.readUInt16LE(central + 32);
     const secondCentral = central + 46 + firstCentralNameLength
       + firstCentralExtraLength + firstCentralCommentLength;
-    view.writeUInt32LE(entries[1].dataEnd, central + 42);
+    view.writeUInt32LE(entries[1].dataEnd, secondCentral + 42);
     await expectInvalid(archive);
   });
 

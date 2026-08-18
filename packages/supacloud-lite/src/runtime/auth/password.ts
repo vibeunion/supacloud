@@ -1,7 +1,5 @@
 /** Bun bcrypt hashing with PBKDF2 verification retained for pre-release Lite databases. */
 
-const ITERATIONS = 100_000
-
 function toHex(bytes: Uint8Array): string {
   return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('')
 }

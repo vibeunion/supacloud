@@ -389,7 +389,7 @@ async function cleanedCredentialState(
 async function removeFailedEnvFile(
     cleanup: FailedProjectEnvFileCleanup,
 ): Promise<CredentialFileState> {
-    const { directoryHandle, filename, openFile, fileIdentity, operations } = cleanup;
+    const { directoryHandle, openFile } = cleanup;
     if (!openFile) {
         try {
             await directoryHandle.close();

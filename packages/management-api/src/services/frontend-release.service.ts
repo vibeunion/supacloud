@@ -2,7 +2,6 @@ import { getVerifiedRequestPrincipal } from "../middleware/auth";
 import type { MutationPrincipal } from "./project-mutation.service";
 import { FrontendReleaseActivationService } from "./frontend-release-activation";
 import {
-  FRONTEND_RELEASE_ARCHIVE_MAX_BYTES,
   FRONTEND_RELEASE_LIST_DEFAULT_LIMIT,
   FrontendReleaseError,
   type ActivateFrontendReleaseInput,

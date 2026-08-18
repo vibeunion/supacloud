@@ -21,7 +21,6 @@ import {
     type CustomGatewayRouteConfig,
     DEFAULT_CORS_ORIGINS,
     buildTenantCorsOrigins,
-    customGatewayRouteId,
     isCustomGatewayRouteId,
     makeCorsSubroute,
     makeCustomGatewayRoute,
