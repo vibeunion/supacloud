@@ -11,48 +11,115 @@ on:
 
 permissions:
   contents: read
-  security-events: read
+  security-events: write
 
 jobs:
-  findings:
+  analyze:
     if: github.head_ref == 'agent/fix-code-quality-findings'
+    name: Analyze (${{ matrix.language }})
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        language:
+          - javascript-typescript
+          - python
+
     steps:
-      - name: Fetch open Code Quality findings
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-and-quality
+
+      - name: Analyze without uploading
+        id: analyze
+        uses: github/codeql-action/analyze@v4
+        with:
+          upload: never
+          output: codeql-results
+
+      - name: Print reproducible quality findings
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+          CODEQL_LANGUAGE: ${{ matrix.language }}
         shell: bash
         run: |
           set -euo pipefail
 
-          body_file="$(mktemp)"
-          headers_file="$(mktemp)"
-          http_code="$(
-            curl --silent --show-error --location \
-              --dump-header "$headers_file" \
-              --output "$body_file" \
-              --write-out '%{http_code}' \
-              --header 'Accept: application/vnd.github+json' \
-              --header "Authorization: Bearer ${GH_TOKEN}" \
-              --header 'X-GitHub-Api-Version: 2026-03-10' \
-              "https://api.github.com/repos/${GITHUB_REPOSITORY}/code-quality/findings?state=open&per_page=100"
-          )"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
 
-          echo "CODE_QUALITY_HTTP_STATUS=${http_code}"
-          echo 'CODE_QUALITY_RESPONSE_BEGIN'
-          cat "$body_file"
-          echo
-          echo 'CODE_QUALITY_RESPONSE_END'
+          root = Path('codeql-results')
+          findings = []
+          all_results = []
 
-          if [[ "$http_code" != '200' ]]; then
-            exit 1
-          fi
+          for sarif_path in sorted(root.rglob('*.sarif')):
+              sarif = json.loads(sarif_path.read_text(encoding='utf-8'))
+              for run in sarif.get('runs', []):
+                  rules = {
+                      rule.get('id'): rule
+                      for rule in run.get('tool', {}).get('driver', {}).get('rules', [])
+                      if rule.get('id')
+                  }
+                  for result in run.get('results', []):
+                      rule_id = result.get('ruleId')
+                      rule = rules.get(rule_id, {})
+                      properties = rule.get('properties', {})
+                      tags = [str(tag).lower() for tag in properties.get('tags', [])]
+                      locations = result.get('locations') or []
+                      physical = (
+                          locations[0]
+                          .get('physicalLocation', {})
+                          if locations
+                          else {}
+                      )
+                      artifact = physical.get('artifactLocation', {})
+                      region = physical.get('region', {})
+                      item = {
+                          'language': os.environ['CODEQL_LANGUAGE'],
+                          'rule_id': rule_id,
+                          'name': rule.get('name'),
+                          'title': (rule.get('shortDescription') or {}).get('text'),
+                          'message': (result.get('message') or {}).get('text'),
+                          'path': artifact.get('uri'),
+                          'start_line': region.get('startLine'),
+                          'start_column': region.get('startColumn'),
+                          'end_line': region.get('endLine'),
+                          'severity': properties.get('problem.severity'),
+                          'precision': properties.get('precision'),
+                          'tags': tags,
+                      }
+                      all_results.append(item)
 
-          finding_count="$(jq 'length' "$body_file")"
-          echo "CODE_QUALITY_FINDING_COUNT=${finding_count}"
+                      quality_tags = {'maintainability', 'reliability', 'correctness'}
+                      is_quality = bool(quality_tags.intersection(tags))
+                      is_security = (
+                          'security' in tags
+                          or any(tag.startswith('external/cwe/') for tag in tags)
+                      )
+                      if is_quality and not is_security:
+                          findings.append(item)
 
-          if grep -qi '^link:.*rel="next"' "$headers_file"; then
-            echo 'CODE_QUALITY_PAGINATION_REQUIRED=true'
-            exit 2
-          fi
+          print('CODEQL_QUALITY_FINDINGS_BEGIN')
+          print(json.dumps(findings, ensure_ascii=False, separators=(',', ':')))
+          print('CODEQL_QUALITY_FINDINGS_END')
+          print(f'CODEQL_QUALITY_FINDING_COUNT={len(findings)}')
+
+          # Preserve unclassified results so rule-tag changes cannot hide findings.
+          unclassified = [
+              item for item in all_results
+              if item not in findings
+              and 'security' not in item['tags']
+              and not any(tag.startswith('external/cwe/') for tag in item['tags'])
+          ]
+          print('CODEQL_UNCLASSIFIED_FINDINGS_BEGIN')
+          print(json.dumps(unclassified, ensure_ascii=False, separators=(',', ':')))
+          print('CODEQL_UNCLASSIFIED_FINDINGS_END')
+          print(f'CODEQL_TOTAL_RESULT_COUNT={len(all_results)}')
+          PY
