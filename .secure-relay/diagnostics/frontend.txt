@@ -1,0 +1,2 @@
+PATTERN: onAuthStateChange|正在重定向|redirecting|href=[^ ]*projects|goto\([^)]*projects|/project/[^ ]*/settings|settings/general|subscription debugger|debugger|SIGNED_OUT|TOKEN_REFRESHED
+
