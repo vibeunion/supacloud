@@ -19,6 +19,22 @@ jobs:
         with:
           ref: agent/fix-code-quality-findings
 
+      - name: Correct the final test-block matcher
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/scripts/apply-code-quality-fixes.py')
+          text = path.read_text(encoding='utf-8')
+          old = r'(?=describe\("ProjectService"\))'
+          new = r'(?=describe\("ProjectService",)'
+          if text.count(old) != 1:
+              raise RuntimeError(f'expected one matcher to update, found {text.count(old)}')
+          path.write_text(text.replace(old, new), encoding='utf-8')
+          PY
+
       - name: Apply fixes and capture diagnostics
         id: apply
         env:
