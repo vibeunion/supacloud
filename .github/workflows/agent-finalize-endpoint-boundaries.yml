@@ -1,0 +1,122 @@
+name: Finalize endpoint command boundaries
+
+on:
+  pull_request:
+    types: [synchronize, reopened]
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: agent-finalize-endpoints-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  finalize:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/project-endpoints-legacy-backup' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/project-endpoints-legacy-backup
+          fetch-depth: 0
+
+      - name: Normalize command switch boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          user_block = '''                case "endpoints":
+                    return projectReadResponse(projectEndpointsRead(
+                        await http.get(`/v1/projects/${resolvedRef}`, {
+                            maxResponseBytes: PROJECT_ENDPOINT_RESPONSE_MAX_BYTES,
+                        }),
+                        resolvedRef,
+                    ));
+'''
+          admin_block = '''                case "endpoints": {
+                    const resolvedRef = resolveRef(ref);
+                    return projectReadResponse(projectEndpointsRead(
+                        await http.get(`/v1/projects/${resolvedRef}`, {
+                            maxResponseBytes: PROJECT_ENDPOINT_RESPONSE_MAX_BYTES,
+                        }),
+                        resolvedRef,
+                    ));
+                }
+'''
+
+          for path in [
+              Path("packages/cli/src/shared/tools/project-cli-tools.ts"),
+              Path("packages/admin/src/shared/tools/project-cli-tools.ts"),
+          ]:
+              text = path.read_text()
+              marker = "export function registerAdminProjectCliTools"
+              if marker not in text:
+                  raise SystemExit(f"{path}: admin tool marker missing")
+              before_admin, admin = text.split(marker, 1)
+              has_user_tool = "export function registerUserProjectCliTools" in before_admin
+
+              # Remove any user-style block accidentally inserted in the admin
+              # switch, while preserving exactly one in a file that actually
+              # owns the user project command.
+              admin = admin.replace(user_block, "")
+              if has_user_tool:
+                  if before_admin.count(user_block) != 1:
+                      raise SystemExit(f"{path}: expected one project-scoped endpoint block")
+              elif before_admin.count(user_block) != 0:
+                  raise SystemExit(f"{path}: unexpected project-scoped endpoint block")
+
+              text = before_admin + marker + admin
+              if text.count(admin_block) != 1:
+                  raise SystemExit(f"{path}: expected one admin endpoint block, found {text.count(admin_block)}")
+              path.write_text(text)
+
+          for workflow in [
+              Path(".github/workflows/agent-project-endpoints-legacy-backup.yml"),
+              Path(".github/workflows/agent-fix-endpoint-case-boundary.yml"),
+              Path(".github/workflows/agent-finalize-endpoint-boundaries.yml"),
+          ]:
+              if workflow.exists():
+                  workflow.unlink()
+          PY
+          git diff --check
+
+      - name: Commit normalized implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No boundary changes required."
+          else
+            git commit -m "fix(cli): normalize project and admin endpoint command boundaries"
+            git push origin HEAD:feat/project-endpoints-legacy-backup
+          fi
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"
+
+      - name: Validate project CLI
+        working-directory: packages/cli
+        shell: bash
+        run: |
+          set -euo pipefail
+          bun install --frozen-lockfile
+          bun run typecheck
+          bun test src/shared/tools/project-endpoint-projection.test.ts src/shared/tools/project-cli-tools.test.ts src/shared/execution-policy.test.ts
+
+      - name: Validate admin CLI
+        working-directory: packages/admin
+        shell: bash
+        run: |
+          set -euo pipefail
+          bun install --frozen-lockfile
+          bun run typecheck
+          bun test src/shared/tools/legacy-backup-tools.test.ts src/shared/tools/project-cli-tools.test.ts src/shared/execution-policy.test.ts
