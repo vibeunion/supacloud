@@ -1,0 +1,152 @@
+name: CNB issue diagnostics v2
+
+on:
+  push:
+    branches:
+      - agent/secure-cnb-relay-20260819
+    paths:
+      - .github/workflows/issue-diagnostics-v2.yml
+
+permissions:
+  contents: write
+
+env:
+  REPORT_BRANCH: agent/secure-cnb-relay-20260819
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Scan source tree with Python
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/supacloud-diagnostics-v2
+          python3 - <<'PY'
+          from __future__ import annotations
+
+          import re
+          import subprocess
+          from pathlib import Path
+
+          root = Path.cwd()
+          out = Path('/tmp/supacloud-diagnostics-v2')
+          out.mkdir(parents=True, exist_ok=True)
+          head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          (out / 'meta.txt').write_text(f'HEAD {head}\n', encoding='utf-8')
+
+          patterns = {
+              'frontend': r'onAuthStateChange|正在重定向|redirecting|/projects|settings/general|subscription.{0,30}debugger|debugger.{0,30}subscription|SIGNED_OUT|TOKEN_REFRESHED|INITIAL_SESSION',
+              'grafana': r'grafana|GF_SERVER|serve_from_sub_path|root_url|pgsql-overview|postgresql.{0,30}dashboard',
+              'realtime': r'provision_realtime|realtime.{0,50}(unavailable|available|health|poll|task|provision)|polling|websocket|task.{0,20}center|task_center',
+              'stats': r'table_count|index_count|relation_count|pg_class|pg_tables|pg_stat_user|information_schema\.tables|database.{0,30}stat|dashboard.{0,30}stat',
+              'auth': r'Missing tenant reference|tenant reference|tenant_ref|tenant-ref|x-tenant|x-project|project-ref|grant_type|auth/v1/token|tenant.{0,20}header',
+              'functions': r'edge.?function|function.{0,40}deploy|deploy.{0,40}function|functions/v1|function_deploy|function-deploy|storage.{0,30}500|object.{0,20}storage',
+              'tls': r'SupaCloud Generated|self.?signed|mkcert|certificate|TLS|HTTPS|trust.{0,20}cert|ca\.crt|ca\.pem',
+          }
+
+          excluded_parts = {'.git', 'node_modules', 'target', 'dist', 'build', '.svelte-kit', 'coverage', 'vendor'}
+          excluded_names = {'pnpm-lock.yaml', 'package-lock.json', 'yarn.lock', 'Cargo.lock'}
+          allowed_suffixes = {
+              '.rs', '.ts', '.tsx', '.js', '.mjs', '.cjs', '.svelte', '.go', '.py', '.sql',
+              '.toml', '.json', '.yaml', '.yml', '.md', '.sh', '.conf', '.ini', '.env', '.example',
+          }
+          search_roots = ['packages', 'docker', 'infra', 'infrastructure', 'scripts', 'docs', '.github']
+          files: list[Path] = []
+          for base_name in search_roots:
+              base = root / base_name
+              if not base.exists():
+                  continue
+              for path in base.rglob('*'):
+                  if not path.is_file():
+                      continue
+                  rel = path.relative_to(root)
+                  if any(part in excluded_parts for part in rel.parts):
+                      continue
+                  if path.name in excluded_names:
+                      continue
+                  if path.suffix.lower() not in allowed_suffixes and path.name not in {'Dockerfile', 'Caddyfile', 'Makefile'}:
+                      continue
+                  try:
+                      if path.stat().st_size > 2_000_000:
+                          continue
+                  except OSError:
+                      continue
+                  files.append(path)
+
+          for category, raw_pattern in patterns.items():
+              regex = re.compile(raw_pattern, re.IGNORECASE)
+              blocks: list[str] = [f'HEAD {head}', f'PATTERN {raw_pattern}', '']
+              match_count = 0
+              matched_files: set[str] = set()
+              for path in files:
+                  try:
+                      text = path.read_text(encoding='utf-8', errors='replace')
+                  except OSError:
+                      continue
+                  lines = text.splitlines()
+                  line_hits = [idx for idx, line in enumerate(lines) if regex.search(line)]
+                  if not line_hits:
+                      continue
+                  rel = path.relative_to(root).as_posix()
+                  matched_files.add(rel)
+                  for idx in line_hits:
+                      if match_count >= 800:
+                          break
+                      start = max(0, idx - 2)
+                      end = min(len(lines), idx + 3)
+                      blocks.append(f'--- {rel}:{idx + 1} ---')
+                      for line_idx in range(start, end):
+                          prefix = '>' if line_idx == idx else ' '
+                          rendered = lines[line_idx]
+                          if len(rendered) > 500:
+                              rendered = rendered[:500] + '…'
+                          blocks.append(f'{prefix}{line_idx + 1}: {rendered}')
+                      blocks.append('')
+                      match_count += 1
+                  if match_count >= 800:
+                      break
+              header = [
+                  f'MATCH_COUNT {match_count}',
+                  f'FILE_COUNT {len(matched_files)}',
+                  'FILES',
+                  *sorted(matched_files),
+                  '',
+                  'MATCHES',
+                  '',
+              ]
+              content = '\n'.join(blocks[:3] + header + blocks[3:])
+              if len(content.encode('utf-8')) > 240_000:
+                  content = content.encode('utf-8')[:240_000].decode('utf-8', errors='ignore') + '\n[TRUNCATED]\n'
+              (out / f'{category}.txt').write_text(content, encoding='utf-8')
+          PY
+
+      - name: Publish diagnostic reports
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          publish() {
+            local source=$1 path=$2 content payload
+            content=$(base64 -w0 "$source")
+            payload=$(jq -n \
+              --arg message 'chore: publish CNB issue diagnostics v2' \
+              --arg content "$content" \
+              --arg branch "$REPORT_BRANCH" \
+              '{message:$message, content:$content, branch:$branch}')
+            curl --fail-with-body --silent --show-error \
+              -X PUT \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/contents/${path}" \
+              --data "$payload" >/dev/null
+          }
+          for file in /tmp/supacloud-diagnostics-v2/*.txt; do
+            publish "$file" ".secure-relay/diagnostics-v2/$(basename "$file")"
+          done
