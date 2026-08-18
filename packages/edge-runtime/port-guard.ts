@@ -52,7 +52,6 @@ net.createServer = () => {
 
 try {
   const dgram = require("node:dgram");
-  const originalCreateSocket = dgram.createSocket;
   dgram.createSocket = (..._args: unknown[]) => {
     console.warn("[PortGuard] dgram.createSocket() intercepted — UDP sockets blocked");
     throw new Error("UDP sockets are blocked in Edge Functions.");

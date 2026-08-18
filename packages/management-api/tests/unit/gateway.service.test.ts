@@ -2008,6 +2008,7 @@ describe("CaddyGatewayProvider", () => {
 
         await provider.setupHostedAuthRoutes();
         const loadsAfterCreate = calls.filter((c) => c.method === "POST" && c.url.endsWith("/load")).length;
+        expect(loadsAfterCreate).toBeGreaterThan(0);
 
         // Now disable - should clean up
         (config as any).hostedAuthPageEnabled = false;

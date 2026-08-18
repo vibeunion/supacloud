@@ -4,7 +4,6 @@ import {
   renderAuthSchemaOwnershipSql,
   renderPgStatStatementsCompatibilitySql,
 } from "../../src/services/database.service";
-import { shellService } from "../../src/services/shell.service";
 
 /** Typed mock for SQL connection used in DatabaseService */
 interface MockSql {

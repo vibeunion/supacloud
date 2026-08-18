@@ -51,7 +51,6 @@ import { projectControlSecretsService } from "./project-control-secrets.service"
 import { installManagedSystemdUnit } from "./systemd-unit-broker";
 import { renderPostgrestSystemdTemplate } from "./postgrest-systemd-template";
 import {
-    PostgrestPoolReconcileError,
     PostgrestPoolMigrationGate,
     reconcileManagedPostgrestPool,
     type PostgrestPoolGeneration,
@@ -2863,7 +2862,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
         if (systemdResult === "ACTIVE_HEALTHY") return "ACTIVE_HEALTHY";
         // Fallback: probe the S3 health endpoint (accept any response, not just 2xx)
         try {
-            const res = await fetch(`${config.s3Endpoint}/minio/health/live`, {
+            await fetch(`${config.s3Endpoint}/minio/health/live`, {
                 signal: AbortSignal.timeout(3000),
             });
             // Any response (even 4xx) means the storage service is reachable

@@ -7,7 +7,6 @@ import {
   handleGrafanaRequest,
 } from "../../src/routes/grafana";
 
-const app = new Elysia().use(grafanaProxyRoutes);
 // Mirror `registerStaticAssets`: the SPA catch-all is a GET wildcard that
 // takes precedence over plugin routes in Elysia, so Grafana requests are
 // delegated from the catch-all instead of relying on `.all` route matching.

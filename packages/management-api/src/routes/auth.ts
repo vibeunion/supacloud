@@ -561,7 +561,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
         },
       };
 
-      const updatedSettings = await projectService.updateProjectSettings(params.ref, {
+      await projectService.updateProjectSettings(params.ref, {
         ...settings,
         auth: {
           ...currentAuth,

@@ -6,7 +6,6 @@ import { broadcastTaskUpdate } from "../routes/ws";
 import { logger } from "../utils/logger";
 import { config } from "../config";
 import { DEFAULT_BACKGROUND_TASK_SETTINGS } from "../config/background-task-settings";
-import { projectService } from "./project.service";
 import { decryptSecretIfNeeded } from "../utils/secret-crypto";
 import { createHmac } from "node:crypto";
 import { availableParallelism } from "node:os";

@@ -1,7 +1,6 @@
-import { Elysia, t } from "elysia";
+import { Elysia } from "elysia";
 import { randomUUID } from "node:crypto";
 import { encryptSecretIfNeeded } from "../utils/secret-crypto";
-import { getProjectDb } from "../db";
 import { config } from "../config";
 import { sql as metaSql } from "../db";
 import { logger } from "../utils/logger";
@@ -271,7 +270,6 @@ async function maybeEnqueueAsyncFunction(request: Request, ref: string): Promise
 
     const traceId = request.headers.get("x-request-id") || randomUUID();
     const idempotencyKey = request.headers.get("x-supacloud-idempotency-key")?.trim() || null;
-    const authHeaders: Record<string, string> = {};
     const authorization = request.headers.get("authorization");
     const apikey = request.headers.get("apikey");
     const projectKeys = apikey && typeof projectService.getApiKeys === "function"

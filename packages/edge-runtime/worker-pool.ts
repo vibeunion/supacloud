@@ -1,4 +1,4 @@
-import { Worker, MessagePort } from "worker_threads";
+import { Worker } from "worker_threads";
 import { existsSync, mkdirSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import path from "path";

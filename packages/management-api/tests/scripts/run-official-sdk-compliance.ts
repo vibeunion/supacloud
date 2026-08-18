@@ -8,7 +8,6 @@ import {
   rmSync,
   readFileSync,
   writeFileSync,
-  mkdtempSync,
 } from "fs";
 import { tmpdir } from "os";
 
