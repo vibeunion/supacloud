@@ -192,6 +192,7 @@ describe("CLI execution policy", () => {
         expect(executionMode("release", "logical_backup_restore", {})).toBe("write");
         expect(executionMode("release", "postgrest_restart", {})).toBe("write");
         expect(executionMode("release", "release_canary_fixture_stage_replay", {})).toBe("write");
+        expect(executionMode("release", "release_canary_fixture_disable_replay", {})).toBe("write");
         expect(() => authorizeExecution("release", { action: "logical_backup_create" }, {
             context: context(),
         })).toThrow("--confirm-production prod-ref");
@@ -201,6 +202,12 @@ describe("CLI execution policy", () => {
         expect(() => authorizeExecution("release", { action: "release_canary_fixture_stage_replay", ref: "prod-ref" }, {
             context: context(),
         })).toThrow("--confirm-production prod-ref");
+        expect(() => authorizeExecution("release", { action: "release_canary_fixture_disable_replay", ref: "prod-ref" }, {
+            context: context(),
+        })).toThrow("--confirm-production prod-ref");
+        expect(() => authorizeExecution("release", { action: "release_canary_fixture_disable_replay" }, {
+            context: context({ production: false, environment: "test", readOnly: true }),
+        })).toThrow("SUPACLOUD_READ_ONLY=true");
         expect(() => authorizeExecution("release", { action: "logical_backup_restore", ref: "other-ref" }, {
             context: context(),
             confirmProduction: "other-ref",

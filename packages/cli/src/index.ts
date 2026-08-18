@@ -267,8 +267,8 @@ DEFAULT CONTEXT
   Without a selector or project variables, runs use the current project's legacy .env.
   Application status accepts SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY.
   Management-backed project commands require SUPACLOUD_API_URL +
-  SUPACLOUD_API_TOKEN. Only release release_canary_fixture_stage_replay may additionally use
-  the selected project's SUPABASE_* pair for one application-origin RPC.
+  SUPACLOUD_API_TOKEN. Only release canary stage/disable replay actions may additionally use
+  the selected project's SUPABASE_* pair for fixed application-origin RPCs.
   SUPACLOUD_PROJECT_REF is required when it cannot be inferred from <ref>.api.*.
 
   SUPACLOUD_READ_ONLY=true blocks remote writes. Production writes require an
@@ -290,6 +290,7 @@ EXAMPLES
   ${preferredCommand} release postgrest_status --ref abc123
   ${preferredCommand} release postgrest_restart --ref abc123
   ${preferredCommand} release release_canary_fixture_stage_replay --ref abc123 --subject <uuid> --request_id <uuid>
+  ${preferredCommand} release release_canary_fixture_disable_replay --ref abc123 --fixture_id <uuid> --disable_request_id <uuid> --issuer <issuer-url> --subject <uuid>
   ${preferredCommand} queue stats --queue emails
   ${preferredCommand} queue dlq --queue emails --limit 20
   ${preferredCommand} frontend list --ref abc123
