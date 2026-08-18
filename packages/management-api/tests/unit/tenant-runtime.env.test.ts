@@ -256,12 +256,12 @@ describe("TenantRuntimeService GoTrue auth env rendering", () => {
       .toThrow(/password_required_characters.*control character/);
   });
 
-  test("defaults signup-related runtime flags to the current permissive behavior", () => {
+  test("defaults phone signup off when no managed SMS provider is configured", () => {
     expect(renderGoTrueAuthEnv({})).toBe([
       "GOTRUE_DISABLE_SIGNUP=false",
       "GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED=true",
       "GOTRUE_EXTERNAL_EMAIL_ENABLED=true",
-      "GOTRUE_EXTERNAL_PHONE_ENABLED=true",
+      "GOTRUE_EXTERNAL_PHONE_ENABLED=false",
     ].join("\n"));
   });
 
