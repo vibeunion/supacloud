@@ -1,0 +1,82 @@
+name: Code quality findings summarizer
+
+on:
+  push:
+    branches:
+      - agent/fix-code-quality-findings
+
+permissions:
+  contents: write
+
+jobs:
+  summarize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v7
+        with:
+          ref: agent/fix-code-quality-findings
+
+      - name: Split findings into compact review files
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          import json
+          from collections import Counter, defaultdict
+          from pathlib import Path
+
+          source = Path('.github/code-quality-js-findings.json')
+          payload = json.loads(source.read_text(encoding='utf-8'))
+          findings = payload['quality_findings']
+          findings.sort(key=lambda item: (
+              item.get('severity') or '',
+              item.get('rule_id') or '',
+              item.get('path') or '',
+              item.get('start_line') or 0,
+          ))
+
+          out_dir = Path('.github/code-quality-findings')
+          out_dir.mkdir(parents=True, exist_ok=True)
+          for old in out_dir.glob('*.jsonl'):
+              old.unlink()
+
+          chunk_size = 15
+          for index in range(0, len(findings), chunk_size):
+              chunk = findings[index:index + chunk_size]
+              chunk_path = out_dir / f'{index // chunk_size + 1:02d}.jsonl'
+              chunk_path.write_text(
+                  ''.join(json.dumps(item, ensure_ascii=False, separators=(',', ':')) + '\n' for item in chunk),
+                  encoding='utf-8',
+              )
+
+          by_rule = Counter(item['rule_id'] for item in findings)
+          by_path = Counter(item['path'] for item in findings)
+          summary = {
+              'total': len(findings),
+              'by_severity': dict(sorted(Counter(item.get('severity') for item in findings).items())),
+              'by_rule': dict(sorted(by_rule.items(), key=lambda item: (-item[1], item[0]))),
+              'by_path': dict(sorted(by_path.items(), key=lambda item: (-item[1], item[0]))),
+              'chunks': [path.as_posix() for path in sorted(out_dir.glob('*.jsonl'))],
+          }
+          Path('.github/code-quality-summary.json').write_text(
+              json.dumps(summary, ensure_ascii=False, indent=2) + '\n',
+              encoding='utf-8',
+          )
+          PY
+
+      - name: Commit compact review files
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/code-quality-summary.json .github/code-quality-findings
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m 'chore: split code quality findings for review [skip ci]'
+          git push origin HEAD:agent/fix-code-quality-findings
