@@ -62,11 +62,15 @@ jobs:
           for sarif_path in sorted(root.rglob('*.sarif')):
               sarif = json.loads(sarif_path.read_text(encoding='utf-8'))
               for run in sarif.get('runs', []):
+                  tool = run.get('tool', {})
+                  components = [tool.get('driver', {})] + tool.get('extensions', [])
                   rules = {
                       rule.get('id'): rule
-                      for rule in run.get('tool', {}).get('driver', {}).get('rules', [])
+                      for component in components
+                      for rule in component.get('rules', [])
                       if rule.get('id')
                   }
+
                   for result in run.get('results', []):
                       rule_id = result.get('ruleId')
                       rule = rules.get(rule_id, {})
@@ -96,7 +100,12 @@ jobs:
                       }
                       all_results.append(item)
 
-                      quality_tags = {'maintainability', 'reliability', 'correctness'}
+                      quality_tags = {
+                          'quality',
+                          'maintainability',
+                          'reliability',
+                          'correctness',
+                      }
                       is_quality = bool(quality_tags.intersection(tags))
                       is_security = (
                           'security' in tags
@@ -142,10 +151,25 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          path='.github/code-quality-js-findings.json'
           encoded="$(base64 -w 0 code-quality-js-findings.json)"
-          gh api \
-            --method PUT \
-            "repos/${GITHUB_REPOSITORY}/contents/.github/code-quality-js-findings.json" \
-            -f message='chore: persist code quality probe findings [skip ci]' \
-            -f content="$encoded" \
+          current_sha="$(
+            gh api \
+              "repos/${GITHUB_REPOSITORY}/contents/${path}?ref=${GITHUB_HEAD_REF}" \
+              --jq '.sha' \
+              2>/dev/null || true
+          )"
+
+          args=(
+            --method PUT
+            "repos/${GITHUB_REPOSITORY}/contents/${path}"
+            -f message='chore: refresh code quality probe findings [skip ci]'
+            -f content="$encoded"
             -f branch="$GITHUB_HEAD_REF"
+          )
+          if [[ -n "$current_sha" ]]; then
+            args+=(-f sha="$current_sha")
+          fi
+
+          gh api "${args[@]}"
