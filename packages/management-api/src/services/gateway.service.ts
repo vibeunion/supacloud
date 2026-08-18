@@ -17,10 +17,12 @@ import { assertUniqueCaddyIds, runCaddyStartupPreflight } from "./caddy-startup-
 import { FRONTEND_GATEWAY_DURABILITY_UNKNOWN_CODE } from "./frontend-release-contract";
 import {
     type CaddyHeaderValue,
+    type CaddyMatcher,
     type CaddyRoute,
     type CustomGatewayRouteConfig,
     DEFAULT_CORS_ORIGINS,
     buildTenantCorsOrigins,
+    isCorsSubroute,
     isCustomGatewayRouteId,
     makeCorsSubroute,
     makeCustomGatewayRoute,
@@ -124,6 +126,65 @@ const RATE_LIMIT_WINDOW_MS: Record<keyof RateLimitConfig, number> = {
     minute: 60_000,
     hour: 3_600_000,
 };
+
+const SECURITY_RATE_LIMIT_ROUTE_PREFIX = "route-security-project-";
+const SECURITY_AUTH_PATHS = ["/auth/v1/token", "/auth/v1/token/", "/auth/v1/signup", "/auth/v1/signup/"];
+const SECURITY_API_PATHS = ["/api/v1", "/api/v1/*"];
+const SECURITY_PASSWORD_MATCHERS: CaddyMatcher[] = [{
+    method: ["POST"],
+    path: ["/auth/v1/token", "/auth/v1/token/"],
+    query: { grant_type: ["password"] },
+}];
+const SECURITY_SIGNUP_MATCHERS: CaddyMatcher[] = [{
+    method: ["POST"],
+    path: ["/auth/v1/signup", "/auth/v1/signup/"],
+}];
+const SECURITY_REFRESH_MATCHERS: CaddyMatcher[] = [{
+    method: ["POST"],
+    path: ["/auth/v1/token", "/auth/v1/token/"],
+    query: { grant_type: ["refresh_token"] },
+}];
+const SECURITY_API_MATCHERS: CaddyMatcher[] = [{
+    path: SECURITY_API_PATHS,
+    not: [{ method: ["OPTIONS"] }],
+}];
+
+function routeMatcherStrings(route: CaddyRoute, field: "host" | "path"): string[] {
+    if (!Array.isArray(route.match)) return [];
+    return uniqueStrings(route.match.flatMap((matcher) => {
+        const values = (matcher as Record<string, unknown>)[field];
+        return Array.isArray(values) ? values.map(String) : [];
+    }));
+}
+
+function customRouteMayServeOrdinaryApi(route: CaddyRoute): boolean {
+    return routeMatcherStrings(route, "path").some((pattern) => {
+        const wildcard = pattern.indexOf("*");
+        if (wildcard < 0) return pattern === "/api/v1" || pattern.startsWith("/api/v1/");
+        const prefix = pattern.slice(0, wildcard);
+        return prefix.startsWith("/api/v1/") || "/api/v1/".startsWith(prefix);
+    });
+}
+
+function hostScopedCorsHandlers(route: CaddyRoute): Record<string, unknown>[] {
+    const hosts = routeMatcherStrings(route, "host");
+    if (hosts.length === 0) return [];
+    const handlers = Array.isArray(route.handle) ? route.handle as Record<string, unknown>[] : [];
+    return handlers.filter(isCorsSubroute).map((handler) => ({
+        handler: "subroute",
+        routes: [{ match: [{ host: hosts }], handle: [handler] }],
+    }));
+}
+
+function uniqueCaddyHandlers(handlers: Record<string, unknown>[]): Record<string, unknown>[] {
+    const seen = new Set<string>();
+    return handlers.filter((handler) => {
+        const encoded = stableStringify(handler);
+        if (seen.has(encoded)) return false;
+        seen.add(encoded);
+        return true;
+    });
+}
 
 type GatewaySetupOptions = { functionsPort?: number; storagePort?: number; realtimeApiPort?: number; realtimeWsPort?: number };
 
@@ -400,7 +461,8 @@ export class CaddyGatewayProvider implements GatewayProvider {
     }
 
     private baseConfig(): CaddyConfig {
-        const routes = Array.from(this.routesById.values())
+        const managedRoutes = Array.from(this.routesById.values());
+        const routes = [...managedRoutes, ...this.makeSecurityRateLimitRoutes(managedRoutes)]
             .sort((a, b) => this.compareRoutesForCaddy(a, b))
             .map((route) => this.renderRouteForCaddy(route));
         routes.push(this.makeUnmatchedHostRoute());
@@ -496,6 +558,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
             for (const route of routes) {
                 const id = typeof route?.["@id"] === "string" ? route["@id"] : "";
                 if (!id || id === CADDY_UNMATCHED_HOST_ROUTE_ID) continue;
+                if (id.startsWith(SECURITY_RATE_LIMIT_ROUTE_PREFIX)) continue;
                 if (!this.routesById.has(id)) this.routesById.set(id, this.migrateHydratedRoute(id, route));
                 this.hydrateRateLimitFromRoute(id, route);
             }
@@ -642,6 +705,9 @@ export class CaddyGatewayProvider implements GatewayProvider {
     private compareRoutesForCaddy(a: CaddyRoute, b: CaddyRoute): number {
         const aid = String(a["@id"] || "");
         const bid = String(b["@id"] || "");
+        const aSecurity = aid.startsWith(SECURITY_RATE_LIMIT_ROUTE_PREFIX);
+        const bSecurity = bid.startsWith(SECURITY_RATE_LIMIT_ROUTE_PREFIX);
+        if (aSecurity !== bSecurity) return aSecurity ? -1 : 1;
         const aCustom = aid.startsWith("route-custom-") || aid.startsWith("route-hosted-") || aid.startsWith("route-supauth-");
         const bCustom = bid.startsWith("route-custom-") || bid.startsWith("route-hosted-") || bid.startsWith("route-supauth-");
         if (aCustom !== bCustom) return aCustom ? -1 : 1;
@@ -693,6 +759,88 @@ export class CaddyGatewayProvider implements GatewayProvider {
         };
     }
 
+    private securityZoneName(projectRef: string, category: string): string {
+        return `supacloud_${sanitizeCaddyId(projectRef)}_security_${category}_minute`;
+    }
+
+    private makeSecurityRateLimitZone(projectRef: string, category: string, maxEvents: number, match: CaddyMatcher[]) {
+        return {
+            [this.securityZoneName(projectRef, category)]: {
+                key: "{http.request.remote.host}",
+                window: "1m",
+                max_events: maxEvents,
+                ipv6_prefix: 64,
+                match,
+            },
+        };
+    }
+
+    private makeSecurityRateLimitHandler(projectRef: string): Record<string, unknown> {
+        return {
+            handler: "rate_limit",
+            rate_limits: {
+                ...this.makeSecurityRateLimitZone(projectRef, "password", config.rateLimitPasswordPerMinute, SECURITY_PASSWORD_MATCHERS),
+                ...this.makeSecurityRateLimitZone(projectRef, "signup", config.rateLimitSignupPerMinute, SECURITY_SIGNUP_MATCHERS),
+                ...this.makeSecurityRateLimitZone(projectRef, "refresh", config.rateLimitRefreshPerMinute, SECURITY_REFRESH_MATCHERS),
+                ...this.makeSecurityRateLimitZone(projectRef, "api", config.rateLimitApiPerMinute, SECURITY_API_MATCHERS),
+            },
+        };
+    }
+
+    private canonicalProjectRefs(routes: CaddyRoute[]): string[] {
+        return uniqueStrings(routes.flatMap((route) => {
+            const projectRef = this.projectRefFromRouteId(String(route["@id"] || ""));
+            return projectRef ? [projectRef] : [];
+        }));
+    }
+
+    private customGatewayProjectRef(routeId: string, projectRefs: string[]): string | null {
+        const matches = projectRefs.filter((projectRef) =>
+            routeId.startsWith(`route-custom-gateway-${sanitizeCaddyId(projectRef)}-`),
+        );
+        return matches.sort((a, b) => b.length - a.length)[0] || null;
+    }
+
+    private securityRouteSources(projectRef: string, routes: CaddyRoute[], projectRefs: string[]): { authRoutes: CaddyRoute[]; apiRoutes: CaddyRoute[] } {
+        const authIds = new Set([
+            caddyRouteId(projectRef, "auth"),
+            caddyRouteId(projectRef, "auth-domain-auth"),
+        ]);
+        const authRoutes = routes.filter((route) => authIds.has(String(route["@id"] || "")));
+        const apiRoutes = routes.filter((route) => {
+            const routeId = String(route["@id"] || "");
+            return this.customGatewayProjectRef(routeId, projectRefs) === projectRef
+                && customRouteMayServeOrdinaryApi(route);
+        });
+        return { authRoutes, apiRoutes };
+    }
+
+    private makeSecurityRateLimitRoute(projectRef: string, routes: CaddyRoute[], projectRefs: string[]): CaddyRoute | null {
+        const sources = this.securityRouteSources(projectRef, routes, projectRefs);
+        const authHosts = uniqueStrings(sources.authRoutes.flatMap((route) => routeMatcherStrings(route, "host")));
+        const apiHosts = uniqueStrings(sources.apiRoutes.flatMap((route) => routeMatcherStrings(route, "host")));
+        const match: CaddyMatcher[] = [];
+        if (authHosts.length > 0) match.push({ host: authHosts, path: SECURITY_AUTH_PATHS });
+        if (apiHosts.length > 0) match.push({ host: apiHosts, path: SECURITY_API_PATHS });
+        if (match.length === 0) return null;
+        const corsHandlers = uniqueCaddyHandlers(
+            [...sources.authRoutes, ...sources.apiRoutes].flatMap(hostScopedCorsHandlers),
+        );
+        return {
+            "@id": `${SECURITY_RATE_LIMIT_ROUTE_PREFIX}${sanitizeCaddyId(projectRef)}`,
+            match,
+            handle: [...corsHandlers, this.makeSecurityRateLimitHandler(projectRef)],
+        };
+    }
+
+    private makeSecurityRateLimitRoutes(routes: CaddyRoute[]): CaddyRoute[] {
+        const projectRefs = this.canonicalProjectRefs(routes);
+        return projectRefs.flatMap((projectRef) => {
+            const route = this.makeSecurityRateLimitRoute(projectRef, routes, projectRefs);
+            return route ? [route] : [];
+        });
+    }
+
     private projectRefForRoute(routeId: string): string | null {
         for (const projectRef of this.rateLimits.keys()) {
             if (routeId.startsWith(`route-project-${projectRef}-`)) return projectRef;
@@ -704,6 +852,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
         const rendered = JSON.parse(JSON.stringify(route)) as CaddyRoute;
         delete rendered.__supacloud_priority;
         const id = String(rendered["@id"] || "");
+        if (id.startsWith(SECURITY_RATE_LIMIT_ROUTE_PREFIX)) return rendered;
         const handle = Array.isArray(rendered.handle) ? rendered.handle as Record<string, unknown>[] : [];
         const withoutRateLimit = handle.filter((handler) => handler.handler !== "rate_limit");
 
@@ -721,8 +870,10 @@ export class CaddyGatewayProvider implements GatewayProvider {
         }
 
         if (rateLimitHandler) {
-            const proxyIndex = withoutRateLimit.findIndex((handler) => handler.handler === "reverse_proxy");
-            const insertAt = proxyIndex >= 0 ? proxyIndex : withoutRateLimit.length;
+            const transformIndex = withoutRateLimit.findIndex((handler) =>
+                handler.handler === "rewrite" || handler.handler === "reverse_proxy",
+            );
+            const insertAt = transformIndex >= 0 ? transformIndex : withoutRateLimit.length;
             withoutRateLimit.splice(insertAt, 0, rateLimitHandler);
             rendered.handle = withoutRateLimit;
         }

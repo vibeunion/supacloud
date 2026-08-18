@@ -53,7 +53,7 @@ export const DEFAULT_CORS_EXPOSED = [
     "Content-Length", "Content-Range", "X-Content-Range", "X-JSON",
     "x-supabase-api-version", "X-Client-Info", "Prefer",
     "Content-Profile", "accept-profile", "Range", "Range-Unit",
-    "X-Relay-Error", "link", "x-total-count", "Content-Disposition",
+    "X-Relay-Error", "link", "x-total-count", "Content-Disposition", "Retry-After",
 ];
 
 export const DEFAULT_CORS_ORIGINS = [
@@ -392,7 +392,7 @@ function isCorsHeaderHandler(handler: Record<string, unknown>): boolean {
         && typeof (handler.response as any)?.set?.["Access-Control-Allow-Origin"] !== "undefined";
 }
 
-function isCorsSubroute(handler: Record<string, unknown>): boolean {
+export function isCorsSubroute(handler: Record<string, unknown>): boolean {
     if (handler.handler !== "subroute" || !Array.isArray(handler.routes)) return false;
     return handler.routes.some((route: any) =>
         Array.isArray(route?.handle) && route.handle.some((item: any) => isCorsHeaderHandler(item)),
