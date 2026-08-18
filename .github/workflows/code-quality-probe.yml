@@ -1,0 +1,58 @@
+name: Code quality findings probe
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+permissions:
+  contents: read
+  security-events: read
+
+jobs:
+  findings:
+    if: github.head_ref == 'agent/fix-code-quality-findings'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fetch open Code Quality findings
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          body_file="$(mktemp)"
+          headers_file="$(mktemp)"
+          http_code="$(
+            curl --silent --show-error --location \
+              --dump-header "$headers_file" \
+              --output "$body_file" \
+              --write-out '%{http_code}' \
+              --header 'Accept: application/vnd.github+json' \
+              --header "Authorization: Bearer ${GH_TOKEN}" \
+              --header 'X-GitHub-Api-Version: 2026-03-10' \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/code-quality/findings?state=open&per_page=100"
+          )"
+
+          echo "CODE_QUALITY_HTTP_STATUS=${http_code}"
+          echo 'CODE_QUALITY_RESPONSE_BEGIN'
+          cat "$body_file"
+          echo
+          echo 'CODE_QUALITY_RESPONSE_END'
+
+          if [[ "$http_code" != '200' ]]; then
+            exit 1
+          fi
+
+          finding_count="$(jq 'length' "$body_file")"
+          echo "CODE_QUALITY_FINDING_COUNT=${finding_count}"
+
+          if grep -qi '^link:.*rel="next"' "$headers_file"; then
+            echo 'CODE_QUALITY_PAGINATION_REQUIRED=true'
+            exit 2
+          fi
