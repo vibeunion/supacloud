@@ -1,0 +1,77 @@
+name: Secure CNB Relay Rechunk
+
+on:
+  push:
+    branches:
+      - agent/secure-cnb-relay-20260819
+    paths:
+      - .github/workflows/secure-cnb-relay-rechunk.yml
+
+permissions:
+  contents: write
+
+env:
+  RELAY_BRANCH: agent/secure-cnb-relay-20260819
+
+jobs:
+  rechunk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELAY_BRANCH }}
+          fetch-depth: 0
+
+      - name: Verify and split encrypted result
+        run: |
+          set -euo pipefail
+          src="$GITHUB_WORKSPACE/.secure-relay/v2/result"
+          work=/tmp/cnb-rechunk
+          mkdir -p "$work"
+          cat "$src"/issues.cms.b64.part.* > "$work/issues.cms.b64"
+          expected=$(jq -r '.encoded_sha256' "$src/manifest.json")
+          actual=$(sha256sum "$work/issues.cms.b64" | awk '{print $1}')
+          test "$actual" = "$expected"
+          split -b 1500 -d -a 3 "$work/issues.cms.b64" "$work/part."
+          python3 - <<'PY'
+          import glob
+          import hashlib
+          import json
+          from pathlib import Path
+          work = Path('/tmp/cnb-rechunk')
+          encoded = (work / 'issues.cms.b64').read_bytes()
+          chunks = sorted(glob.glob(str(work / 'part.*')))
+          manifest = {
+              'encoded_sha256': hashlib.sha256(encoded).hexdigest(),
+              'encoded_bytes': len(encoded),
+              'chunk_count': len(chunks),
+              'chunks': [Path(p).name for p in chunks],
+          }
+          (work / 'manifest.json').write_text(json.dumps(manifest, separators=(',', ':')) + '\n')
+          PY
+
+      - name: Publish small encrypted chunks
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          publish() {
+            local source=$1 path=$2 content payload
+            content=$(base64 -w0 "$source")
+            payload=$(jq -n \
+              --arg message 'chore: publish secure relay small chunks' \
+              --arg content "$content" \
+              --arg branch "$RELAY_BRANCH" \
+              '{message:$message, content:$content, branch:$branch}')
+            curl --fail-with-body --silent --show-error \
+              -X PUT \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/contents/${path}" \
+              --data "$payload" >/dev/null
+          }
+          for file in /tmp/cnb-rechunk/part.*; do
+            publish "$file" ".secure-relay/v2/rechunk/$(basename "$file")"
+          done
+          publish /tmp/cnb-rechunk/manifest.json .secure-relay/v2/rechunk/manifest.json
