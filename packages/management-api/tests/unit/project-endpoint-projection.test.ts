@@ -83,4 +83,14 @@ describe("project endpoint projection", () => {
       source: "generated",
     });
   });
+
+  test("fails closed instead of silently dropping an invalid API alias", () => {
+    config.baseDomain = "platform.example";
+    config.enableSsl = true;
+
+    expect(() => buildProjectEndpointsProjection("abc123", {
+      api_domain: "api.example.com",
+      additional_api_domains: ["operator@example.com"],
+    })).toThrow("Project endpoint alias is invalid");
+  });
 });
