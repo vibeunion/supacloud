@@ -1,0 +1,2 @@
+PATTERN: SupaCloud Generated|self.?signed|mkcert|certificate|TLS|HTTPS|trust.*cert|ca\.crt|ca\.pem
+
