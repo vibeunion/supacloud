@@ -54,21 +54,22 @@ function writeTrustedBackup(backupRoot: string, backupId: string): void {
 }
 
 describe("control-plane upgrade safety", () => {
-  test("creates a private verified dump receipt without putting the password in command arguments", async () => {
+  test("creates a private verified dump receipt with a systemd credential", async () => {
     const backupRoot = mkdtempSync(join(tmpdir(), "supacloud-control-plane-backup-"));
     chmodSync(backupRoot, 0o700);
     const commands: string[][] = [];
     try {
       const evidence = await controlPlaneUpgradeSafetyInternals.createControlPlaneBackup(target, inspection, {
         backupRoot,
-        identity: async () => ({ uid: process.getuid?.() ?? 0, gid: process.getgid?.() ?? 0 }),
         now: () => new Date("2026-08-19T00:00:00.000Z"),
         randomId: () => "00000000-0000-4000-8000-000000000001",
-        run: async ({ args, env, stdin, stdout }) => {
+        run: async ({ args, stdin, stdout }) => {
           commands.push(args);
           if (args.some((argument) => argument.endsWith("/pg_dump"))) {
-            expect(env?.PGPASSWORD).toBe("private-password");
-            expect(Object.keys(env || {})).toEqual(["PGPASSWORD"]);
+            const credential = args.find((argument) => argument.startsWith("--property=LoadCredential=pgpass:"));
+            const credentialPath = credential?.slice("--property=LoadCredential=pgpass:".length);
+            expect(statSync(credentialPath!).mode & 0o777).toBe(0o600);
+            expect(readFileSync(credentialPath!, "utf8")).toBe("127.0.0.1:5432:supacloud_meta:postgres:private-password\n");
             writeFileSync(stdout!, "verified-control-plane-dump");
           }
           if (args.some((argument) => argument.endsWith("/pg_restore"))) {
@@ -78,8 +79,13 @@ describe("control-plane upgrade safety", () => {
         },
       });
 
-      expect(commands.flat()).not.toContain("private-password");
-      expect(commands[0]).toContain("--reuid");
+      expect(commands.flat().join("\0")).not.toContain("private-password");
+      expect(commands[0]).toContain("--property=DynamicUser=yes");
+      expect(commands[0]).toContain("--property=ProtectProc=invisible");
+      expect(commands[0]).toContain("--property=ProcSubset=pid");
+      expect(commands[0]).toContain("--property=RuntimeMaxSec=1800s");
+      expect(commands[0]).toContain("--property=KillMode=control-group");
+      expect(commands[0]?.some((argument) => argument.startsWith("--property=Environment=PGPASSFILE=/run/credentials/"))).toBe(true);
       expect(commands[0]).toContain("--snapshot");
       expect(commands[0]).toContain(inspection.snapshotId);
       expect(commands[1]?.some((argument) => argument.endsWith("/pg_restore"))).toBe(true);
@@ -94,6 +100,7 @@ describe("control-plane upgrade safety", () => {
       expect(evidence.sha256).toMatch(/^[0-9a-f]{64}$/);
       expect(statSync(join(evidence.backup_directory, "control-plane.dump")).mode & 0o777).toBe(0o600);
       expect(statSync(join(evidence.backup_directory, "receipt.json")).mode & 0o777).toBe(0o600);
+      expect(readdirSync(evidence.backup_directory).sort()).toEqual(["control-plane.dump", "receipt.json"]);
       expect(JSON.parse(readFileSync(join(evidence.backup_directory, "receipt.json"), "utf8"))).toEqual(evidence);
     } finally {
       rmSync(backupRoot, { force: true, recursive: true });
@@ -106,7 +113,6 @@ describe("control-plane upgrade safety", () => {
     try {
       await expect(controlPlaneUpgradeSafetyInternals.createControlPlaneBackup(target, inspection, {
         backupRoot,
-        identity: async () => ({ uid: process.getuid?.() ?? 0, gid: process.getgid?.() ?? 0 }),
         now: () => new Date("2026-08-19T00:00:00.000Z"),
         randomId: () => "00000000-0000-4000-8000-000000000002",
         run: async ({ args, stdout }) => {
@@ -122,14 +128,78 @@ describe("control-plane upgrade safety", () => {
     }
   });
 
-  test("lets the postgres identity write only through the inherited root-owned archive descriptor", async () => {
+  test("stops and reads back the transient unit when the systemd-run client fails", async () => {
+    const backupRoot = mkdtempSync(join(tmpdir(), "supacloud-control-plane-unit-failure-"));
+    chmodSync(backupRoot, 0o700);
+    let reconciledUnit = "";
+    try {
+      await expect(controlPlaneUpgradeSafetyInternals.createControlPlaneBackup(target, inspection, {
+        backupRoot,
+        now: () => new Date("2026-08-19T00:00:00.000Z"),
+        randomId: () => "00000000-0000-4000-8000-000000000012",
+        reconcileUnit: async (unitName) => { reconciledUnit = unitName; },
+        run: async ({ args }) => args.some((argument) => argument.endsWith("/pg_dump")) ? 124 : 0,
+      })).rejects.toThrow("Control-plane pg_dump failed");
+      expect(reconciledUnit).toBe(
+        "supacloud-control-plane-20260819T000000Z-00000000-0000-4000-8000-000000000012",
+      );
+      expect(readdirSync(backupRoot)).toEqual([]);
+    } finally {
+      rmSync(backupRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("fails closed when transient unit shutdown cannot be proven", async () => {
+    const backupRoot = mkdtempSync(join(tmpdir(), "supacloud-control-plane-unit-unknown-"));
+    chmodSync(backupRoot, 0o700);
+    try {
+      await expect(controlPlaneUpgradeSafetyInternals.createControlPlaneBackup(target, inspection, {
+        backupRoot,
+        now: () => new Date("2026-08-19T00:00:00.000Z"),
+        randomId: () => "00000000-0000-4000-8000-000000000013",
+        reconcileUnit: async () => { throw new Error("unit state unavailable"); },
+        run: async ({ args }) => args.some((argument) => argument.endsWith("/pg_dump")) ? 124 : 0,
+      })).rejects.toThrow("pg_dump failure could not be reconciled");
+      const [quarantine] = readdirSync(backupRoot);
+      expect(quarantine).toEndWith(".unresolved");
+      expect(readdirSync(join(backupRoot, quarantine!))).toEqual(["control-plane.dump"]);
+      expect(statSync(join(backupRoot, quarantine!)).mode & 0o777).toBe(0o700);
+      expect(statSync(join(backupRoot, quarantine!, "control-plane.dump")).mode & 0o777).toBe(0o600);
+    } finally {
+      rmSync(backupRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("accepts only an inactive transient unit with no main process", async () => {
+    const commands: string[][] = [];
+    await controlPlaneUpgradeSafetyInternals.reconcileBackupUnit("supacloud-control-plane-test", {
+      capture: async (args) => {
+        commands.push(args);
+        return {
+          exitCode: 0,
+          stdout: "LoadState=not-found\nActiveState=inactive\nSubState=dead\nMainPID=0\n",
+        };
+      },
+      run: async ({ args }) => { commands.push(args); return 1; },
+    });
+    expect(commands[0]).toContain("stop");
+    expect(commands[1]).toContain("show");
+    await expect(controlPlaneUpgradeSafetyInternals.reconcileBackupUnit("supacloud-control-plane-test", {
+      capture: async () => ({
+        exitCode: 0,
+        stdout: "LoadState=loaded\nActiveState=active\nSubState=running\nMainPID=42\n",
+      }),
+      run: async () => 0,
+    })).rejects.toThrow("did not stop cleanly");
+  });
+
+  test("lets an isolated dynamic identity write only through the inherited root-owned archive descriptor", async () => {
     const backupRoot = mkdtempSync(join(tmpdir(), "supacloud-control-plane-descriptor-"));
     chmodSync(backupRoot, 0o700);
     let dumpArguments: string[] = [];
     try {
       const evidence = await controlPlaneUpgradeSafetyInternals.createControlPlaneBackup(target, inspection, {
         backupRoot,
-        identity: async () => ({ uid: 65_534, gid: 65_534 }),
         now: () => new Date("2026-08-19T00:00:00.000Z"),
         randomId: () => "00000000-0000-4000-8000-000000000007",
         run: async ({ args, stdout }) => {
@@ -140,13 +210,21 @@ describe("control-plane upgrade safety", () => {
           return 0;
         },
       });
-      expect(dumpArguments).toContain("65534");
-      expect(dumpArguments.some((argument) => argument.startsWith(backupRoot))).toBe(false);
+      expect(dumpArguments).toContain("--property=DynamicUser=yes");
+      expect(dumpArguments).toContain("--property=NoNewPrivileges=yes");
+      expect(dumpArguments).toContain("--property=PrivateDevices=yes");
+      expect(dumpArguments.some((argument) => argument.endsWith("/control-plane.dump"))).toBe(false);
       expect(statSync(backupRoot).mode & 0o777).toBe(0o700);
       expect(statSync(evidence.backup_directory).mode & 0o777).toBe(0o700);
     } finally {
       rmSync(backupRoot, { force: true, recursive: true });
     }
+  });
+
+  test("escapes pgpass fields and rejects line breaks", () => {
+    expect(controlPlaneUpgradeSafetyInternals.pgpassField("pa:ss\\word")).toBe("pa\\:ss\\\\word");
+    expect(() => controlPlaneUpgradeSafetyInternals.pgpassField("line\nbreak"))
+      .toThrow("cannot contain line breaks");
   });
 
   test("rejects an empty archive before catalog verification", async () => {
@@ -156,7 +234,6 @@ describe("control-plane upgrade safety", () => {
     try {
       await expect(controlPlaneUpgradeSafetyInternals.createControlPlaneBackup(target, inspection, {
         backupRoot,
-        identity: async () => ({ uid: process.getuid?.() ?? 0, gid: process.getgid?.() ?? 0 }),
         now: () => new Date("2026-08-19T00:00:00.000Z"),
         randomId: () => "00000000-0000-4000-8000-000000000003",
         run: async ({ args }) => {
@@ -180,7 +257,6 @@ describe("control-plane upgrade safety", () => {
       try {
         await expect(controlPlaneUpgradeSafetyInternals.createControlPlaneBackup(target, inspection, {
           backupRoot,
-          identity: async () => ({ uid: process.getuid?.() ?? 0, gid: process.getgid?.() ?? 0 }),
           now: () => new Date("2026-08-19T00:00:00.000Z"),
           randomId: () => "00000000-0000-4000-8000-000000000004",
           run: async ({ args, stdout }) => {
@@ -224,7 +300,6 @@ describe("control-plane upgrade safety", () => {
     try {
       const evidence = await controlPlaneUpgradeSafetyInternals.createControlPlaneBackup(target, inspection, {
         backupRoot,
-        identity: async () => ({ uid: process.getuid?.() ?? 0, gid: process.getgid?.() ?? 0 }),
         now: () => new Date("2026-08-19T00:00:00.000Z"),
         randomId: () => "00000000-0000-4000-8000-000000000005",
         run: async ({ args, stdout }) => {
@@ -260,7 +335,6 @@ describe("control-plane upgrade safety", () => {
     try {
       await expect(controlPlaneUpgradeSafetyInternals.createControlPlaneBackup(target, inspection, {
         backupRoot,
-        identity: async () => ({ uid: process.getuid?.() ?? 0, gid: process.getgid?.() ?? 0 }),
         now: () => new Date("2026-08-19T00:00:00.000Z"),
         randomId: () => "00000000-0000-4000-8000-000000000006",
         run: async ({ args, stdout }) => {
@@ -295,7 +369,6 @@ describe("control-plane upgrade safety", () => {
     try {
       await expect(controlPlaneUpgradeSafetyInternals.createControlPlaneBackup(target, inspection, {
         backupRoot,
-        identity: async () => ({ uid: process.getuid?.() ?? 0, gid: process.getgid?.() ?? 0 }),
         now: () => new Date("2026-08-19T00:00:00.000Z"),
         randomId: () => "00000000-0000-4000-8000-000000000011",
         run: async ({ args, stdout }) => {
@@ -324,7 +397,6 @@ describe("control-plane upgrade safety", () => {
     try {
       await expect(controlPlaneUpgradeSafetyInternals.createControlPlaneBackup(target, inspection, {
         backupRoot,
-        identity: async () => ({ uid: process.getuid?.() ?? 0, gid: process.getgid?.() ?? 0 }),
         now: () => new Date("2026-08-19T00:00:00.000Z"),
         randomId: () => "00000000-0000-4000-8000-000000000008",
         remove: (directory) => {

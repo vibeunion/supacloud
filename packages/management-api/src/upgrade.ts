@@ -549,13 +549,13 @@ export async function verifyManagementUpgradePreflight(
 export function verifyBackupPrivilegeDropPreflight(
     pathExists: (filePath: string) => boolean = existsSync,
 ): void {
-    const setprivPath = ["/usr/bin/setpriv", "/bin/setpriv"].find(pathExists);
-    const idPath = ["/usr/bin/id", "/bin/id"].find(pathExists);
+    const systemdRunPath = ["/usr/bin/systemd-run", "/bin/systemd-run"].find(pathExists);
     const pgDumpPath = ["/usr/bin/pg_dump", "/usr/local/bin/pg_dump"].find(pathExists);
     const pgRestorePath = ["/usr/bin/pg_restore", "/usr/local/bin/pg_restore"].find(pathExists);
+    const systemctlPath = ["/usr/bin/systemctl", "/bin/systemctl"].find(pathExists);
     const timeoutPath = ["/usr/bin/timeout", "/bin/timeout"].find(pathExists);
-    if (!setprivPath) throw new Error("Management upgrade requires setpriv for backup privilege separation");
-    if (!idPath) throw new Error("Management upgrade requires id for backup account resolution");
+    if (!systemdRunPath) throw new Error("Management upgrade requires systemd-run for isolated backups");
+    if (!systemctlPath) throw new Error("Management upgrade requires systemctl for backup reconciliation");
     if (!pgDumpPath || !pgRestorePath) throw new Error("Management upgrade requires pg_dump and pg_restore");
     if (!timeoutPath) throw new Error("Management upgrade requires timeout for bounded backup commands");
 }

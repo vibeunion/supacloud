@@ -1083,18 +1083,19 @@ describe("upgrade release selection", () => {
     }))).rejects.toThrow("MainPID changed from 4242 to 4343");
   });
 
-  test("upgrade preflight requires setpriv and id before staging", () => {
+  test("upgrade preflight requires systemd-run before staging", () => {
     const installedPaths = new Set([
-      "/usr/bin/setpriv", "/usr/bin/id", "/usr/bin/pg_dump", "/usr/bin/pg_restore", "/usr/bin/timeout",
+      "/usr/bin/systemd-run", "/usr/bin/systemctl", "/usr/bin/pg_dump", "/usr/bin/pg_restore", "/usr/bin/timeout",
     ]);
     expect(() => verifyBackupPrivilegeDropPreflight((filePath) => installedPaths.has(filePath))).not.toThrow();
-    expect(() => verifyBackupPrivilegeDropPreflight((filePath) => filePath.endsWith("/id")))
-      .toThrow("requires setpriv");
-    expect(() => verifyBackupPrivilegeDropPreflight((filePath) => filePath.endsWith("/setpriv")))
-      .toThrow("requires id");
+    expect(() => verifyBackupPrivilegeDropPreflight((filePath) => !filePath.endsWith("/systemd-run")))
+      .toThrow("requires systemd-run");
+    expect(() => verifyBackupPrivilegeDropPreflight((filePath) => !filePath.endsWith("/systemctl")))
+      .toThrow("requires systemctl");
     expect(() => verifyBackupPrivilegeDropPreflight((filePath) => (
-      filePath.endsWith("/setpriv") || filePath.endsWith("/id")
-    ))).toThrow("requires pg_dump and pg_restore");
+      filePath.endsWith("/systemd-run") || filePath.endsWith("/systemctl")
+    )))
+      .toThrow("requires pg_dump and pg_restore");
     expect(() => verifyBackupPrivilegeDropPreflight((filePath) => !filePath.endsWith("/timeout")))
       .toThrow("requires timeout");
   });
