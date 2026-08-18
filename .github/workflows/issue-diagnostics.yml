@@ -1,0 +1,88 @@
+name: CNB issue diagnostics
+
+on:
+  push:
+    branches:
+      - agent/secure-cnb-relay-20260819
+    paths:
+      - .github/workflows/issue-diagnostics.yml
+
+permissions:
+  contents: write
+
+env:
+  REPORT_BRANCH: agent/secure-cnb-relay-20260819
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Scan source tree
+        run: |
+          set -euo pipefail
+          out=/tmp/supacloud-diagnostics
+          mkdir -p "$out"
+          printf 'HEAD %s\n' "$(git rev-parse HEAD)" > "$out/meta.txt"
+
+          find packages/web-console/src/routes -type f | sort > "$out/web-routes.txt"
+          find packages -type f \( -name '*.rs' -o -name '*.ts' -o -name '*.svelte' -o -name '*.go' -o -name '*.sql' -o -name '*.toml' -o -name '*.json' \) | sort > "$out/package-files.txt"
+          find docker infra infrastructure scripts docs .github -type f 2>/dev/null | sort > "$out/ops-files.txt"
+
+          scan() {
+            local name=$1
+            local pattern=$2
+            shift 2
+            {
+              printf 'PATTERN: %s\n\n' "$pattern"
+              rg -n -i --hidden --glob '!.git/**' --glob '!**/node_modules/**' --glob '!**/target/**' --glob '!**/dist/**' --glob '!**/build/**' --glob '!**/*.lock' --glob '!**/pnpm-lock.yaml' --glob '!**/package-lock.json' --glob '!**/yarn.lock' --max-columns 300 --max-columns-preview "$pattern" "$@" || true
+            } > "$out/$name.txt"
+          }
+
+          scan frontend 'onAuthStateChange|正在重定向|redirecting|href=[^ ]*projects|goto\([^)]*projects|/project/[^ ]*/settings|settings/general|subscription debugger|debugger|SIGNED_OUT|TOKEN_REFRESHED' packages/web-console
+          scan grafana 'grafana|GF_SERVER|serve_from_sub_path|root_url|pgsql-overview|postgresql dashboard' docker infra infrastructure packages scripts docs
+          scan realtime 'provision_realtime|realtime.*(unavailable|available|health|poll|task|provision)|poll(ing)?|websocket|task.center|task_center' packages docker infra infrastructure scripts docs
+          scan stats 'table_count|index_count|relation_count|pg_class|pg_tables|pg_stat_user|information_schema\.tables|database.*stat|dashboard.*stat' packages docker infra infrastructure scripts docs
+          scan auth 'Missing tenant reference|tenant reference|tenant_ref|tenant-ref|x-tenant|x-project|project-ref|grant_type|auth/v1/token|tenant.*header' packages docker infra infrastructure scripts docs
+          scan functions 'edge.?function|function.*deploy|deploy.*function|functions/v1|function_deploy|function-deploy|storage.*500|object.*storage' packages docker infra infrastructure scripts docs
+          scan tls 'SupaCloud Generated|self.?signed|mkcert|certificate|TLS|HTTPS|trust.*cert|ca\.crt|ca\.pem' packages docker infra infrastructure scripts docs
+
+          python3 - <<'PY'
+          from pathlib import Path
+          out = Path('/tmp/supacloud-diagnostics')
+          for path in out.glob('*.txt'):
+              data = path.read_bytes()
+              limit = 180_000
+              if len(data) > limit:
+                  path.write_bytes(data[:limit] + b'\n\n[TRUNCATED]\n')
+          PY
+
+      - name: Publish diagnostic reports
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          publish() {
+            local source=$1 path=$2 content payload
+            content=$(base64 -w0 "$source")
+            payload=$(jq -n \
+              --arg message 'chore: publish CNB issue diagnostics' \
+              --arg content "$content" \
+              --arg branch "$REPORT_BRANCH" \
+              '{message:$message, content:$content, branch:$branch}')
+            curl --fail-with-body --silent --show-error \
+              -X PUT \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/contents/${path}" \
+              --data "$payload" >/dev/null
+          }
+          for file in /tmp/supacloud-diagnostics/*.txt; do
+            publish "$file" ".secure-relay/diagnostics/$(basename "$file")"
+          done
