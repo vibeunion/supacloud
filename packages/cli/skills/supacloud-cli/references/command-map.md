@@ -16,6 +16,7 @@ Load this reference when selecting a command surface or when a user asks an AI t
 | Rebuild local database | `supabase db_reset` | Local only; preserve required seed behavior |
 | Inspect or back up a remote database | `supabase db_pull`, `migration_list`, `db_dump`, `gen_types` | Requires explicit PostgreSQL DSN; redact it |
 | Replay the release-canary fixture stage receipt | `release release_canary_fixture_stage_replay` | Dual-bind Management project context and that project's service-role application origin; accepts only the exact subject/request UUID pair and a strict idempotent receipt |
+| Disable a staged release-canary fixture | `release release_canary_fixture_disable_replay` | Uses the fixed disable RPC once, accepts idempotent false/true receipts, then requires the existing pending RPC to read back pending=false for the exact fixture/issuer/subject binding |
 | Preview/apply migrations remotely | `supabase push` | Always dry-run first; production needs explicit approval |
 | Mark proven-equivalent historical migrations as applied | `database baseline_migrations` | Dry-run, schema-equivalence proof, backup, explicit approval |
 | Inspect auth users or generate a controlled login link | `auth list_users`, `auth get_user`, `auth generate_link` | User reads are bounded; generation supports only `magiclink`, `recovery`, and `invite`, requires production confirmation, and returns only a validated action URL |
@@ -40,7 +41,7 @@ until a project-scoped context is resolved.
 - `secrets`: project secret management; never print values after write.
 - `queue`, `task_events`, `diagnostics`: asynchronous workload operations and bounded diagnostics.
 - `gateway`: project route/config/rebuild operations.
-- `release`: verified backup/PostgREST lifecycle controls plus a production-confirmed, non-retried, strict release-canary fixture stage replay. The replay requires both the selected Management project binding and that project's `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY`.
+- `release`: verified backup/PostgREST lifecycle controls plus production-confirmed, non-retried, strict release-canary fixture stage and disable replay actions. These actions require both the selected Management project binding and that project's `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY`.
 - `ai`: inspect or install this packaged Skill.
 
 ## Safe inspection pattern
