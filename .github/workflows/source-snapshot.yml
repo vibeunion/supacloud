@@ -1,0 +1,27 @@
+name: Source snapshot
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/source-snapshot.yml
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 1
+      - name: Archive source
+        run: tar --exclude=.git -czf /tmp/supacloud-source.tar.gz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: supacloud-source
+          path: /tmp/supacloud-source.tar.gz
+          retention-days: 1
+          if-no-files-found: error
