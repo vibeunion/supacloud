@@ -23,46 +23,35 @@ jobs:
           ref: main
           fetch-depth: 1
 
-      - name: Scan source tree
+      - name: Collect deterministic grep reports
         run: |
           set -euo pipefail
-          out=/tmp/supacloud-diagnostics
+          out=/tmp/supacloud-diagnostics-v3
           mkdir -p "$out"
-          printf 'HEAD %s\n' "$(git rev-parse HEAD)" > "$out/meta.txt"
-
-          find packages/web-console/src/routes -type f | sort > "$out/web-routes.txt"
-          find packages -type f \( -name '*.rs' -o -name '*.ts' -o -name '*.svelte' -o -name '*.go' -o -name '*.sql' -o -name '*.toml' -o -name '*.json' \) | sort > "$out/package-files.txt"
-          find docker infra infrastructure scripts docs .github -type f 2>/dev/null | sort > "$out/ops-files.txt"
+          printf 'HEAD %s\nGREP %s\n' "$(git rev-parse HEAD)" "$(command -v grep)" > "$out/meta.txt"
 
           scan() {
-            local name=$1
-            local pattern=$2
+            local name=$1 pattern=$2
             shift 2
             {
-              printf 'PATTERN: %s\n\n' "$pattern"
-              rg -n -i --hidden --glob '!.git/**' --glob '!**/node_modules/**' --glob '!**/target/**' --glob '!**/dist/**' --glob '!**/build/**' --glob '!**/*.lock' --glob '!**/pnpm-lock.yaml' --glob '!**/package-lock.json' --glob '!**/yarn.lock' --max-columns 300 --max-columns-preview "$pattern" "$@" || true
+              printf 'PATTERN %s\n\n' "$pattern"
+              grep -RInEi \
+                --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=target \
+                --exclude-dir=dist --exclude-dir=build --exclude-dir=.svelte-kit \
+                --exclude='*.lock' --exclude='pnpm-lock.yaml' --exclude='package-lock.json' \
+                -- "$pattern" "$@" 2>/dev/null | head -n 2500 || true
             } > "$out/$name.txt"
           }
 
-          scan frontend 'onAuthStateChange|正在重定向|redirecting|href=[^ ]*projects|goto\([^)]*projects|/project/[^ ]*/settings|settings/general|subscription debugger|debugger|SIGNED_OUT|TOKEN_REFRESHED' packages/web-console
-          scan grafana 'grafana|GF_SERVER|serve_from_sub_path|root_url|pgsql-overview|postgresql dashboard' docker infra infrastructure packages scripts docs
-          scan realtime 'provision_realtime|realtime.*(unavailable|available|health|poll|task|provision)|poll(ing)?|websocket|task.center|task_center' packages docker infra infrastructure scripts docs
-          scan stats 'table_count|index_count|relation_count|pg_class|pg_tables|pg_stat_user|information_schema\.tables|database.*stat|dashboard.*stat' packages docker infra infrastructure scripts docs
-          scan auth 'Missing tenant reference|tenant reference|tenant_ref|tenant-ref|x-tenant|x-project|project-ref|grant_type|auth/v1/token|tenant.*header' packages docker infra infrastructure scripts docs
-          scan functions 'edge.?function|function.*deploy|deploy.*function|functions/v1|function_deploy|function-deploy|storage.*500|object.*storage' packages docker infra infrastructure scripts docs
-          scan tls 'SupaCloud Generated|self.?signed|mkcert|certificate|TLS|HTTPS|trust.*cert|ca\.crt|ca\.pem' packages docker infra infrastructure scripts docs
+          scan frontend 'onAuthStateChange|redirecting|正在重定向|/projects|settings/general|SIGNED_OUT|TOKEN_REFRESHED|INITIAL_SESSION|subscription.{0,40}debugger' packages/web-console
+          scan grafana 'grafana|GF_SERVER|serve_from_sub_path|root_url|pgsql-overview' packages docker infra infrastructure scripts docs config.env setup.sh install.sh
+          scan realtime 'provision_realtime|realtime.{0,60}(unavailable|available|health|poll|task|provision)|polling|websocket|task.{0,30}center|task_center' packages docker infra infrastructure scripts docs
+          scan stats 'table_count|index_count|relation_count|pg_class|pg_tables|pg_stat_user|information_schema\.tables|database.{0,40}stat|dashboard.{0,40}stat' packages docker infra infrastructure scripts docs
+          scan auth 'Missing tenant reference|tenant reference|tenant_ref|tenant-ref|x-tenant|x-project|project-ref|grant_type|auth/v1/token|tenant.{0,30}header' packages docker infra infrastructure scripts docs
+          scan functions 'edge.?function|function.{0,50}deploy|deploy.{0,50}function|functions/v1|function_deploy|function-deploy|storage.{0,40}500' packages docker infra infrastructure scripts docs
+          scan tls 'SupaCloud Generated|self.?signed|mkcert|certificate|TLS|HTTPS|trust.{0,30}cert|ca\.crt|ca\.pem' packages docker infra infrastructure scripts docs
 
-          python3 - <<'PY'
-          from pathlib import Path
-          out = Path('/tmp/supacloud-diagnostics')
-          for path in out.glob('*.txt'):
-              data = path.read_bytes()
-              limit = 180_000
-              if len(data) > limit:
-                  path.write_bytes(data[:limit] + b'\n\n[TRUNCATED]\n')
-          PY
-
-      - name: Publish diagnostic reports
+      - name: Publish reports
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -70,11 +59,7 @@ jobs:
           publish() {
             local source=$1 path=$2 content payload
             content=$(base64 -w0 "$source")
-            payload=$(jq -n \
-              --arg message 'chore: publish CNB issue diagnostics' \
-              --arg content "$content" \
-              --arg branch "$REPORT_BRANCH" \
-              '{message:$message, content:$content, branch:$branch}')
+            payload=$(jq -n --arg message 'chore: publish CNB issue diagnostics v3' --arg content "$content" --arg branch "$REPORT_BRANCH" '{message:$message,content:$content,branch:$branch}')
             curl --fail-with-body --silent --show-error \
               -X PUT \
               -H "Authorization: Bearer $GH_TOKEN" \
@@ -83,6 +68,6 @@ jobs:
               "https://api.github.com/repos/${GITHUB_REPOSITORY}/contents/${path}" \
               --data "$payload" >/dev/null
           }
-          for file in /tmp/supacloud-diagnostics/*.txt; do
-            publish "$file" ".secure-relay/diagnostics/$(basename "$file")"
+          for file in /tmp/supacloud-diagnostics-v3/*.txt; do
+            publish "$file" ".secure-relay/diagnostics-v3/$(basename "$file")"
           done
