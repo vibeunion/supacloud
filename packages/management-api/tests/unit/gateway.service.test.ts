@@ -135,6 +135,7 @@ describe("GatewayService provider selection", () => {
 
     test("default cors exposed headers allow browsers to read download filenames", () => {
         expect(DEFAULT_CORS_EXPOSED).toContain("Content-Disposition");
+        expect(DEFAULT_CORS_EXPOSED).toContain("Retry-After");
     });
 
     test("default Caddy logger redacts sensitive request headers", () => {
@@ -338,6 +339,122 @@ describe("CaddyGatewayProvider", () => {
         expect(adminUserDelete?.match?.[0]?.host).toContain("auth.example.com");
 
         restore();
+    });
+
+    test("renders isolated project security limits before rewrites and preserves configured limits across reload", async () => {
+        const calls: Array<{ url: string; method: string; body: any }> = [];
+        const restore = captureFetch(calls);
+        const provider = new CaddyGatewayProvider();
+
+        try {
+            const projectRef = "tenant-with-hyphen";
+            await provider.setupUpstream(projectRef, 3000, 9999, {
+                api_domain: "tenant-api.example.com",
+                auth_domain: "tenant-auth.example.com",
+            });
+            await provider.configureCustomGatewayRoutes(projectRef, [{
+                id: "supauth-api",
+                hosts: ["supauth-api.example.com"],
+                path: ["/api/*", "/v1/*"],
+                upstream: "127.0.0.1:9090",
+                rewrite_uri: "/functions/v1/supauth{http.request.uri.path}",
+                cors: ["https://admin.example.com"],
+                priority: 110,
+            }]);
+            await provider.setRateLimit(projectRef, "free");
+            await provider.setCustomRouteRateLimit(projectRef, "/auth/v1/token", { minute: 200 });
+
+            const load = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
+            const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
+            const security = routes.find((route: any) => route["@id"] === `route-security-project-${projectRef}`);
+            const securityHandler = security?.handle?.find((handler: any) => handler.handler === "rate_limit");
+            const zones = Object.entries(securityHandler?.rate_limits ?? {}) as Array<[string, any]>;
+            const zone = (category: string) => zones.find(([name]) => name.endsWith(`_security_${category}_minute`));
+
+            expect(security).toBeDefined();
+            expect(security?.terminal).toBeUndefined();
+            expect(security?.match).toContainEqual({
+                host: ["supauth-api.example.com"],
+                path: ["/api/v1", "/api/v1/*"],
+            });
+            expect(security?.match).toContainEqual({
+                host: expect.arrayContaining(["tenant-api.example.com", "tenant-auth.example.com"]),
+                path: ["/auth/v1/token", "/auth/v1/token/", "/auth/v1/signup", "/auth/v1/signup/"],
+            });
+            expect(zones).toHaveLength(4);
+            expect(zone("password")?.[1]).toMatchObject({
+                key: "{http.request.remote.host}",
+                window: "1m",
+                max_events: 10,
+                ipv6_prefix: 64,
+                match: [{
+                    method: ["POST"],
+                    path: ["/auth/v1/token", "/auth/v1/token/"],
+                    query: { grant_type: ["password"] },
+                }],
+            });
+            expect(zone("signup")?.[1]).toMatchObject({ max_events: 5, match: [{ method: ["POST"] }] });
+            expect(zone("refresh")?.[1]).toMatchObject({
+                max_events: 120,
+                match: [{ query: { grant_type: ["refresh_token"] } }],
+            });
+            expect(zone("api")?.[1]).toMatchObject({
+                max_events: 100,
+                match: [{ path: ["/api/v1", "/api/v1/*"], not: [{ method: ["OPTIONS"] }] }],
+            });
+            expect(JSON.stringify(securityHandler)).not.toMatch(/Forwarded|X-Real-IP/i);
+
+            const corsHandlers = security.handle.filter((handler: any) => handler.handler === "subroute");
+            const apiCors = corsHandlers.find((handler: any) =>
+                handler.routes?.[0]?.match?.[0]?.host?.includes("supauth-api.example.com"),
+            );
+            const authCors = corsHandlers.filter((handler: any) =>
+                !handler.routes?.[0]?.match?.[0]?.host?.includes("supauth-api.example.com"),
+            );
+            const corsIndex = security.handle.indexOf(corsHandlers[0]);
+            const securityLimitIndex = security.handle.indexOf(securityHandler);
+            expect(corsIndex).toBeLessThan(securityLimitIndex);
+            expect(JSON.stringify(apiCors)).toContain("https://admin.example.com");
+            expect(JSON.stringify(apiCors)).toContain("Retry-After");
+            expect(authCors.length).toBeGreaterThan(0);
+            expect(authCors.every((handler: any) =>
+                !JSON.stringify(handler).includes("https://admin.example.com"),
+            )).toBe(true);
+            expect(authCors.every((handler: any) => JSON.stringify(handler).includes("Retry-After"))).toBe(true);
+
+            const customLimitRoute = routes.find((route: any) => route["@id"]?.startsWith(`route-custom-${projectRef}-`));
+            const customLimitHandler = customLimitRoute?.handle?.find((handler: any) => handler.handler === "rate_limit");
+            const customRewriteIndex = customLimitRoute?.handle?.findIndex((handler: any) => handler.handler === "rewrite");
+            expect(routes.indexOf(security)).toBeLessThan(routes.indexOf(customLimitRoute));
+            expect(customLimitRoute?.handle?.indexOf(customLimitHandler)).toBeLessThan(customRewriteIndex);
+
+            await provider.setupUpstream("tenant", 3010, 9998, { api_domain: "short-tenant.example.com" });
+            const multiProjectLoad = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
+            const multiProjectRoutes = multiProjectLoad?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
+            const securityRoutes = multiProjectRoutes.filter((route: any) => route["@id"]?.startsWith("route-security-project-"));
+            const securityZoneNames = securityRoutes.map((route: any) => Object.keys(
+                route.handle.find((handler: any) => handler.handler === "rate_limit")?.rate_limits ?? {},
+            ));
+            const shortProjectSecurity = securityRoutes.find((route: any) => route["@id"] === "route-security-project-tenant");
+            expect(securityRoutes).toHaveLength(2);
+            expect(new Set(securityZoneNames.flat()).size).toBe(8);
+            expect(JSON.stringify(shortProjectSecurity?.match)).not.toContain("supauth-api.example.com");
+
+            const restartedProvider = new CaddyGatewayProvider();
+            await restartedProvider.setupMasterRoutes();
+            expect(await restartedProvider.getRateLimit(projectRef)).toEqual({
+                tier: "custom",
+                second: 60,
+                minute: 3000,
+                hour: 100000,
+                enabled: true,
+            });
+            const reload = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
+            const reloadedRoutes = reload?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
+            expect(reloadedRoutes.filter((route: any) => route["@id"] === security["@id"])).toHaveLength(1);
+        } finally {
+            restore();
+        }
     });
 
     test("setupUpstream splits business auth routes to an external IdP upstream", async () => {
@@ -1554,8 +1671,10 @@ describe("CaddyGatewayProvider", () => {
         const rest = routes.find((route: any) => route["@id"] === "route-project-testref123-rest");
         const rateLimit = rest?.handle?.find((handler: any) => handler.handler === "rate_limit");
         const zones = Object.values(rateLimit?.rate_limits ?? {}) as any[];
+        const rewriteIndex = rest?.handle?.findIndex((handler: any) => handler.handler === "rewrite");
 
         expect(rateLimit).toBeDefined();
+        expect(rest?.handle?.indexOf(rateLimit)).toBeLessThan(rewriteIndex);
         expect(zones.some((zone) => zone.window === "1s" && zone.max_events === 7)).toBe(true);
         expect(zones.some((zone) => zone.window === "1m" && zone.max_events === 70)).toBe(true);
         expect(zones.some((zone) => zone.window === "1h" && zone.max_events === 700)).toBe(true);
@@ -1858,7 +1977,9 @@ describe("CaddyGatewayProvider", () => {
         const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
         const custom = routes.find((route: any) => route["@id"]?.startsWith("route-custom-testref123-"));
 
-        expect(routes[0]?.["@id"]).toStartWith("route-custom-testref123-");
+        expect(routes.indexOf(custom)).toBeLessThan(
+            routes.findIndex((route: any) => route["@id"] === "route-project-testref123-rest"),
+        );
         expect(custom?.match?.[0]?.path).toEqual(["/rest/v1/audit*"]);
         expect(custom?.handle?.some((handler: any) => handler.handler === "rate_limit")).toBe(true);
 

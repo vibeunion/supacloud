@@ -1306,7 +1306,7 @@ describe("runtime companion version assets", () => {
       expect(source).toContain("public.ecr.aws/supabase/realtime:v2.129.0");
     }
     for (const compose of [devCompose, selfHostCompose]) {
-      expect(compose).toContain("caddy:2.11.4");
+      expect(compose).toContain("image: supacloud-caddy:2.11.4-ratelimit");
       expect(compose).toContain("supabase/gotrue:v2.195.0");
       expect(compose).toContain("postgrest/postgrest:v16.1");
     }
