@@ -14,13 +14,18 @@ const safeAuthMutationCodes = new Set([
 const MAX_AUTH_READ_BYTES = 64 * 1024;
 const AUTH_READ_TIMEOUT_MS = 5_000;
 const USER_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const AUTH_LINK_TYPES = [
-    "signup", "magiclink", "recovery", "invite", "email_change", "email_change_current", "email_change_new",
-] as const;
+const AUTH_LINK_TYPES = ["magiclink", "recovery", "invite"] as const;
 
 const SAFE_USER_FIELDS = [
-    "id", "email", "phone", "created_at", "last_sign_in_at",
+    "email", "phone", "created_at", "last_sign_in_at",
 ] as const;
+const MAX_AUTH_SEARCH_LENGTH = 256;
+const MAX_AUTH_EMAIL_LENGTH = 320;
+const MAX_AUTH_PHONE_LENGTH = 64;
+const MAX_AUTH_TIMESTAMP_LENGTH = 64;
+const MAX_AUTH_REDIRECT_LENGTH = 4_096;
+const MAX_AUTH_ACTION_LINK_LENGTH = 8_192;
+const INVALID_FIELD = Symbol("invalid-auth-field");
 
 function parseAuthConfig(input: string | Record<string, unknown>): unknown {
     if (typeof input !== "string") return input;
@@ -106,16 +111,36 @@ function boundedPerPage(candidate: unknown): number {
     return candidate;
 }
 
+function boundedText(candidate: unknown, field: string, maxLength: number): string {
+    if (typeof candidate !== "string") throw new Error(`'${field}' must be a string`);
+    const value = candidate.trim();
+    if (!value || value.length > maxLength || /[\u0000-\u001f\u007f]/u.test(value)) {
+        throw new Error(`'${field}' is invalid or exceeds ${maxLength} characters`);
+    }
+    return value;
+}
+
+function boundedSearch(candidate: unknown, field: "search" | "email_like"): string {
+    return boundedText(candidate, field, MAX_AUTH_SEARCH_LENGTH);
+}
+
+function requiredEmail(candidate: unknown): string {
+    return boundedText(candidate, "email", MAX_AUTH_EMAIL_LENGTH);
+}
+
 function safeRedirectTo(candidate: unknown): string | undefined {
     if (candidate === undefined) return undefined;
-    if (typeof candidate !== "string" || !candidate.trim()) throw new Error("'redirect_to' must be an absolute HTTPS or loopback HTTP URL");
+    const value = boundedText(candidate, "redirect_to", MAX_AUTH_REDIRECT_LENGTH);
     let uri: URL;
     try {
-        uri = new URL(candidate.trim());
+        uri = new URL(value);
     } catch {
         throw new Error("'redirect_to' must be an absolute HTTPS or loopback HTTP URL");
     }
-    const loopback = uri.hostname === "127.0.0.1" || uri.hostname === "[::1]";
+    const loopback = uri.hostname === "localhost"
+        || uri.hostname.endsWith(".localhost")
+        || uri.hostname === "127.0.0.1"
+        || uri.hostname === "[::1]";
     const validProtocol = uri.protocol === "https:" || (uri.protocol === "http:" && loopback && Boolean(uri.port));
     if (!validProtocol || uri.username || uri.password || uri.hash) {
         throw new Error("'redirect_to' must be an absolute HTTPS or loopback HTTP URL without credentials or fragment");
@@ -127,25 +152,66 @@ function isRecord(candidate: unknown): candidate is Record<string, unknown> {
     return candidate !== null && typeof candidate === "object" && !Array.isArray(candidate);
 }
 
+function safeOptionalUserField(
+    candidate: Record<string, unknown>,
+    field: typeof SAFE_USER_FIELDS[number],
+    maxLength: number,
+): string | null | undefined | typeof INVALID_FIELD {
+    if (!(field in candidate)) return undefined;
+    const value = candidate[field];
+    if (value === null) return null;
+    if (typeof value !== "string"
+        || value.length > maxLength
+        || /[\u0000-\u001f\u007f]/u.test(value)) return INVALID_FIELD;
+    return value;
+}
+
 function projectUser(candidate: unknown): Record<string, unknown> | null {
-    if (!isRecord(candidate) || typeof candidate.id !== "string") return null;
-    const projectedUser: Record<string, unknown> = {};
+    if (!isRecord(candidate) || typeof candidate.id !== "string" || !USER_ID_PATTERN.test(candidate.id)) return null;
+    const projectedUser: Record<string, unknown> = { id: candidate.id.toLowerCase() };
+    const fieldLimits = {
+        email: MAX_AUTH_EMAIL_LENGTH,
+        phone: MAX_AUTH_PHONE_LENGTH,
+        created_at: MAX_AUTH_TIMESTAMP_LENGTH,
+        last_sign_in_at: MAX_AUTH_TIMESTAMP_LENGTH,
+    } as const;
     for (const field of SAFE_USER_FIELDS) {
-        if (field in candidate) projectedUser[field] = candidate[field];
+        const value = safeOptionalUserField(candidate, field, fieldLimits[field]);
+        if (value === INVALID_FIELD) return null;
+        if (value !== undefined) projectedUser[field] = value;
     }
     return projectedUser;
 }
 
-function projectUserList(candidate: unknown): Record<string, unknown> | null {
-    if (!isRecord(candidate) || !Array.isArray(candidate.users)) return null;
+function safePaginationField(candidate: unknown): number | null | undefined | typeof INVALID_FIELD {
+    if (candidate === undefined) return undefined;
+    if (candidate === null) return null;
+    return typeof candidate === "number" && Number.isSafeInteger(candidate) && candidate >= 0
+        ? candidate
+        : INVALID_FIELD;
+}
+
+function projectUserList(
+    candidate: unknown,
+    expectedPage: number,
+    expectedPerPage: number,
+): Record<string, unknown> | null {
+    if (!isRecord(candidate) || !Array.isArray(candidate.users) || candidate.users.length > expectedPerPage) return null;
     const users = candidate.users.map(projectUser);
     if (users.some((user) => user === null)) return null;
-    const projectedFields: Record<string, unknown> = { users };
+    const projectedUsers = users as Record<string, unknown>[];
+    const userIds = projectedUsers.map((user) => user.id as string);
+    if (new Set(userIds).size !== userIds.length) return null;
+
+    const projectedFields: Record<string, unknown> = { users: projectedUsers };
     for (const field of ["total", "page", "per_page", "next_page", "last_page"] as const) {
-        if (field in candidate && (typeof candidate[field] === "number" || candidate[field] === null)) {
-            projectedFields[field] = candidate[field];
-        }
+        const value = safePaginationField(candidate[field]);
+        if (value === INVALID_FIELD) return null;
+        if (value !== undefined) projectedFields[field] = value;
     }
+    if (projectedFields.page !== undefined && projectedFields.page !== expectedPage) return null;
+    if (projectedFields.per_page !== undefined && projectedFields.per_page !== expectedPerPage) return null;
+    if (typeof projectedFields.total === "number" && projectedFields.total < projectedUsers.length) return null;
     return projectedFields;
 }
 
@@ -155,9 +221,19 @@ function actionLink(candidate: unknown): string | null {
         candidates.push(candidate.data, candidate.properties);
         if (isRecord(candidate.data)) candidates.push(candidate.data.properties);
     }
-    for (const candidate of candidates) {
-        if (isRecord(candidate) && typeof candidate.action_link === "string" && candidate.action_link.length > 0) {
-            return candidate.action_link;
+    for (const nested of candidates) {
+        if (!isRecord(nested) || typeof nested.action_link !== "string") continue;
+        const link = nested.action_link;
+        if (!link || link.length > MAX_AUTH_ACTION_LINK_LENGTH || /[\u0000-\u001f\u007f]/u.test(link)) continue;
+        try {
+            const uri = new URL(link);
+            if ((uri.protocol === "https:" || uri.protocol === "http:")
+                && !uri.username
+                && !uri.password
+                && !uri.hash
+                && uri.toString() === link) return link;
+        } catch {
+            // Continue looking for a valid bounded action link.
         }
     }
     return null;
@@ -184,17 +260,14 @@ async function listUsers(http: HttpTransport, args: Record<string, unknown>) {
     const perPage = boundedPerPage(args.per_page);
     const params = new URLSearchParams({ page: String(page), per_page: String(perPage) });
     for (const key of ["search", "email_like"] as const) {
-        if (args[key] !== undefined) {
-            if (typeof args[key] !== "string" || !args[key].trim()) throw new Error(`'${key}' must be a non-empty string`);
-            params.set(key, args[key].trim());
-        }
+        if (args[key] !== undefined) params.set(key, boundedSearch(args[key], key));
     }
     const response = await http.get(`/v1/projects/${ref}/auth/users?${params.toString()}`, {
         maxJsonBytes: MAX_AUTH_READ_BYTES,
         responseTimeoutMs: AUTH_READ_TIMEOUT_MS,
     });
     if (!response.ok) return safeAuthReadFailure("auth.list_users", response);
-    const users = projectUserList(response.data);
+    const users = projectUserList(response.data, page, perPage);
     if (!users) return safeAuthReadFailure("auth.list_users", { ...response, responseReadError: true });
     return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, operation: "auth.list_users", project_ref: ref, ...users }, null, 2) }] };
 }
@@ -208,23 +281,45 @@ async function getUser(http: HttpTransport, args: Record<string, unknown>) {
     });
     if (!response.ok) return safeAuthReadFailure("auth.get_user", response);
     const user = projectUser(response.data);
-    if (!user) return safeAuthReadFailure("auth.get_user", { ...response, responseReadError: true });
+    if (!user || user.id !== userId) {
+        return safeAuthReadFailure("auth.get_user", { ...response, responseReadError: true });
+    }
     return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, operation: "auth.get_user", project_ref: ref, user }, null, 2) }] };
+}
+
+function generateLinkFailure(response: HttpResult<unknown>) {
+    const outcomeUnknown = response.responseReadError
+        || response.transportError
+        || response.status === 408
+        || response.status >= 500;
+    return {
+        isError: true,
+        content: [{
+            type: "text" as const,
+            text: JSON.stringify({
+                ok: false,
+                operation: "auth.generate_link",
+                error: {
+                    code: outcomeUnknown ? "OUTCOME_UNKNOWN" : "HTTP_ERROR",
+                    http_status: response.transportError ? null : response.status,
+                },
+            }, null, 2),
+        }],
+    };
 }
 
 async function generateLink(http: HttpTransport, args: Record<string, unknown>) {
     const ref = requiredRef(args.ref);
     if (typeof args.type !== "string" || !(AUTH_LINK_TYPES as readonly string[]).includes(args.type)) {
-        throw new Error("'type' is invalid for 'generate_link'");
+        throw new Error("'type' must be one of magiclink, recovery, or invite for 'generate_link'");
     }
-    if (typeof args.email !== "string" || !args.email.trim()) throw new Error("'email' is required for 'generate_link'");
-    const body: Record<string, unknown> = { type: args.type, email: args.email.trim() };
+    const body: Record<string, unknown> = { type: args.type, email: requiredEmail(args.email) };
     const redirectTo = safeRedirectTo(args.redirect_to);
     if (redirectTo) body.redirect_to = redirectTo;
     const response = await http.postReleaseMutation(`/v1/projects/${ref}/auth/generate_link`, body);
-    if (!response.ok) return safeAuthReadFailure("auth.generate_link", response);
+    if (!response.ok) return generateLinkFailure(response);
     const link = actionLink(response.data);
-    if (!link) return safeAuthReadFailure("auth.generate_link", { ...response, responseReadError: true });
+    if (!link) return generateLinkFailure({ ...response, responseReadError: true });
     return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, operation: "auth.generate_link", action_link: link }, null, 2) }] };
 }
 
@@ -262,7 +357,7 @@ Actions: list_users, get_user, generate_link, list_providers, get_provider, conf
             per_page: optional(Type.Integer({ minimum: 1, maximum: 100 }), "[list_users] Users per page (1-100)"),
             search: optional(Type.String(), "[list_users] Search user email, phone, or UUID"),
             email_like: optional(Type.String(), "[list_users] Search user email or phone"),
-            type: optional(stringEnum(AUTH_LINK_TYPES), "[generate_link] GoTrue link type"),
+            type: optional(stringEnum(AUTH_LINK_TYPES), "[generate_link] magiclink, recovery, or invite"),
             email: optional(Type.String(), "[generate_link] User email"),
             redirect_to: optional(Type.String(), "[generate_link] Absolute HTTPS or loopback callback"),
             provider: optional(Type.String(), "[*_provider] Provider name (github, google, wechat, etc.)"),
