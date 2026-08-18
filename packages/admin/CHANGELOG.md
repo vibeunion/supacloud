@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.5](https://github.com/vibeunion/supacloud/compare/admin-v0.15.4...admin-v0.15.5) (2026-08-18)
+
+
+### Bug Fixes
+
+* **upgrade:** preflight control-plane backup ([#985](https://github.com/vibeunion/supacloud/issues/985)) ([811c908](https://github.com/vibeunion/supacloud/commit/811c908b680e3ef0549ec9ec6b578284d065cad8))
+
 ## [0.15.4](https://github.com/vibeunion/supacloud/compare/admin-v0.15.3...admin-v0.15.4) (2026-08-18)
 
 
