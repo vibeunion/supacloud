@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.60.6](https://github.com/vibeunion/supacloud/compare/management-api-v0.60.5...management-api-v0.60.6) (2026-08-18)
+
+
+### Miscellaneous Chores
+
+* **realtime:** upgrade image to v2.129.0 ([#949](https://github.com/vibeunion/supacloud/issues/949)) ([6aba050](https://github.com/vibeunion/supacloud/commit/6aba0503d19b77d2154eda831a0a60d44cc3eb05))
+
 ## [0.60.5](https://github.com/vibeunion/supacloud/compare/management-api-v0.60.4...management-api-v0.60.5) (2026-08-16)
 
 
