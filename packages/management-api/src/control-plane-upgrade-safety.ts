@@ -540,8 +540,14 @@ async function createControlPlaneBackup(
       assertStableBackupArchive(archivePath, archiveDescriptor);
       bytes = fstatSync(archiveDescriptor).size;
       if (bytes <= 0) throw new Error("Control-plane backup archive is empty");
-      if (await operations.run({ args: verifyArguments(), stdin: archiveDescriptor }) !== 0) {
-        throw new Error("Control-plane backup archive verification failed");
+      const verificationDescriptor = openBackupArchive(archivePath, process.getuid?.() ?? 0);
+      try {
+        if (await operations.run({ args: verifyArguments(), stdin: verificationDescriptor }) !== 0) {
+          throw new Error("Control-plane backup archive verification failed");
+        }
+        assertStableBackupArchive(archivePath, verificationDescriptor);
+      } finally {
+        closeSync(verificationDescriptor);
       }
       sha256 = fileSha256(archiveDescriptor, bytes);
       assertStableBackupArchive(archivePath, archiveDescriptor);
