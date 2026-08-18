@@ -180,8 +180,9 @@ project's application service-role origin. Its receipt must contain exactly
 `fixtureId`, `state="disabled"`, and a boolean `idempotent`; both the first
 disable (`idempotent=false`) and same-request replay (`idempotent=true`) are
 valid. The CLI then calls the existing fixed
-`fa_release_canary_fixture_pending` RPC with the exact fixture, issuer, and
-subject and requires an identity-matching `pending=false` read-back before
+`fa_release_canary_fixture_pending` RPC with only the exact issuer and subject
+query parameters and accepts only its authoritative JSON boolean `false`
+read-back. The fixture binding comes from the validated disable receipt before
 reporting success. Management endpoint projection is checked before and after.
 
 The legacy `.env` fallback is unclassified and therefore does not enable the
