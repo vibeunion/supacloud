@@ -27,6 +27,10 @@ const ACTION_POLICY: Record<string, ModulePolicy> = {
         read: ["list_providers", "get_provider", "supported_providers", "get_settings", "get_config"],
         write: ["configure_provider", "update_provider", "disable_provider", "wechat_mini", "wechat_open", "update_settings", "update_config"],
     },
+    oauth_clients: {
+        read: ["list", "get"],
+        write: ["create", "delete"],
+    },
     storage: {
         read: ["status", "list_buckets", "get_bucket", "list_files"],
         write: ["create_bucket", "update_bucket", "delete_bucket", "upload_base64", "delete_file"],

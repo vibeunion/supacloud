@@ -196,6 +196,16 @@ describe("supacloud-cli process contract", () => {
         expect(response.stderr).toContain("--allowed_mime_types");
     });
 
+    test("keeps the release-canary OAuth client command discoverable without project configuration", async () => {
+        const workspace = mkdtempSync(join(tmpdir(), "supacloud-cli-oauth-client-help-"));
+        temporaryDirectories.push(workspace);
+
+        const response = await runProjectCli(["oauth_clients", "--help"], {}, workspace);
+
+        expect(response.exitCode).toBe(0);
+        expect(response.stderr).toContain("oauth_clients <action>");
+    });
+
     test("loads named environments with global flags after the command and keeps status secret-free", async () => {
         const workspace = mkdtempSync(join(tmpdir(), "supacloud-cli-named-env-"));
         temporaryDirectories.push(workspace);
@@ -267,6 +277,103 @@ describe("supacloud-cli process contract", () => {
         expect(crossRef.exitCode).toBe(1);
         expect(crossRef.stderr).toContain("cannot target a different project");
         expect(requestedPaths).toEqual(["/v1/projects/prod-ref/pause"]);
+    });
+
+    test("protects a release-canary OAuth client create and keeps upstream secrets out of the process receipt", async () => {
+        const workspace = mkdtempSync(join(tmpdir(), "supacloud-cli-oauth-client-production-env-"));
+        temporaryDirectories.push(workspace);
+        const responseSecret = "oauth-client-secret-must-not-leak";
+        const requestedPaths: string[] = [];
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            async fetch(request) {
+                const path = new URL(request.url).pathname;
+                requestedPaths.push(path);
+                if (request.method === "GET" && path.endsWith("/oauth-clients")) {
+                    return Response.json({ clients: [] });
+                }
+                if (request.method === "POST" && path.endsWith("/oauth-clients")) {
+                    return Response.json({ client_id: "release-canary.client-1", client_secret: responseSecret });
+                }
+                if (request.method === "GET" && path.endsWith("/oauth-clients/release-canary.client-1")) {
+                    return Response.json({
+                        client_id: "release-canary.client-1",
+                        client_name: "supacloud-release-canary",
+                        client_type: "public",
+                        token_endpoint_auth_method: "none",
+                        redirect_uris: ["https://release-canary.example.test/callback"],
+                        grant_types: ["authorization_code"],
+                        response_types: ["code"],
+                        client_secret: responseSecret,
+                    });
+                }
+                return Response.json({}, { status: 404 });
+            },
+        });
+        servers.push(server);
+        writeFileSync(join(workspace, ".env.supacloud.prod"), [
+            "SUPACLOUD_ENV=production",
+            `SUPACLOUD_API_URL=http://127.0.0.1:${server.port}`,
+            "SUPACLOUD_API_TOKEN=prod-secret-token",
+            "SUPACLOUD_PROJECT_REF=prod-ref",
+        ].join("\n") + "\n");
+
+        const unconfirmed = await runProjectCli([
+            "--env", "prod", "oauth_clients", "create",
+            "--ref", "prod-ref",
+            "--redirect_uri", "https://release-canary.example.test/callback",
+        ], {}, workspace);
+        const confirmed = await runProjectCli([
+            "oauth_clients", "create",
+            "--ref", "prod-ref",
+            "--redirect_uri", "https://release-canary.example.test/callback",
+            "--env", "prod", "--confirm-production", "prod-ref",
+        ], {}, workspace);
+
+        expect(unconfirmed.exitCode).toBe(1);
+        expect(unconfirmed.stderr).toContain("--confirm-production prod-ref");
+        expect(confirmed.exitCode).toBe(0);
+        expect(requestedPaths).toEqual([
+            "/v1/projects/prod-ref/auth/oauth-clients",
+            "/v1/projects/prod-ref/auth/oauth-clients",
+            "/v1/projects/prod-ref/auth/oauth-clients/release-canary.client-1",
+        ]);
+        expect(confirmed.stdout).not.toContain(responseSecret);
+        expect(JSON.parse(confirmed.stdout)).toMatchObject({
+            ok: true,
+            operation: "oauth_clients.create",
+            project_ref: "prod-ref",
+            reused: false,
+        });
+    });
+
+    test("blocks a release-canary OAuth client mutation in read-only mode before HTTP dispatch", async () => {
+        let requestCount = 0;
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch() {
+                requestCount += 1;
+                return Response.json({});
+            },
+        });
+        servers.push(server);
+
+        const response = await runProjectCli([
+            "oauth_clients", "create",
+            "--ref", "abc123",
+            "--redirect_uri", "https://release-canary.example.test/callback",
+        ], {
+            SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+            SUPACLOUD_API_TOKEN: "read-only-token",
+            SUPACLOUD_PROJECT_REF: "abc123",
+            SUPACLOUD_READ_ONLY: "true",
+        });
+
+        expect(response.exitCode).toBe(1);
+        expect(response.stdout + response.stderr).toContain("read-only");
+        expect(requestCount).toBe(0);
     });
 
     test("blocks project recovery actions in read-only mode before HTTP dispatch", async () => {

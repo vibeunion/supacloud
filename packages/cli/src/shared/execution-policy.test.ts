@@ -155,6 +155,23 @@ describe("CLI execution policy", () => {
         }
     });
 
+    test("classifies dedicated release-canary OAuth client reads and mutations", () => {
+        expect(executionMode("oauth_clients", "list", {})).toBe("read");
+        expect(executionMode("oauth_clients", "get", {})).toBe("read");
+        expect(executionMode("oauth_clients", "create", {})).toBe("write");
+        expect(executionMode("oauth_clients", "delete", {})).toBe("write");
+        expect(() => authorizeExecution("oauth_clients", { action: "create", ref: "prod-ref" }, {
+            context: context(),
+        })).toThrow("--confirm-production prod-ref");
+        expect(() => authorizeExecution("oauth_clients", { action: "delete", ref: "prod-ref" }, {
+            context: context(),
+            confirmProduction: "prod-ref",
+        })).not.toThrow();
+        expect(() => authorizeExecution("oauth_clients", { action: "create", ref: "prod-ref" }, {
+            context: context({ production: false, environment: "test", readOnly: true }),
+        })).toThrow("SUPACLOUD_READ_ONLY=true");
+    });
+
     test("classifies verified release controls and protects their mutations", () => {
         expect(executionMode("release", "logical_backup_list", {})).toBe("read");
         expect(executionMode("release", "postgrest_status", {})).toBe("read");

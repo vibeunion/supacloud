@@ -13,6 +13,7 @@ import { authorizeExecution, validateExecutionPolicyCoverage } from "./shared/ex
 import { HttpTransport } from "./shared/transports/http";
 import { registerDatabaseTools } from "./shared/tools/database-tools";
 import { registerAuthTools } from "./shared/tools/auth-tools";
+import { registerOAuthClientTools } from "./shared/tools/oauth-client-tools";
 import { registerStorageTools } from "./shared/tools/storage-tools";
 import { registerAdvancedTools } from "./shared/tools/advanced-tools";
 import { registerFrontendTools } from "./shared/tools/frontend-tools";
@@ -386,7 +387,7 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
                 ],
             }),
         };
-        for (const name of ["database", "auth", "storage", "edge_functions", "secrets", "frontend", "queue", "task_events", "scheduled_functions", "mutations", "diagnostics", "gateway", "branch", "release"]) {
+        for (const name of ["database", "auth", "oauth_clients", "storage", "edge_functions", "secrets", "frontend", "queue", "task_events", "scheduled_functions", "mutations", "diagnostics", "gateway", "branch", "release"]) {
             tools[name] = {
                 schema: { action: genericActionSchema },
                 callback: async () => ({
@@ -466,6 +467,7 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
     pushMigrations = databaseTools.database?.callback;
     assign(databaseTools);
     assign(captureTools((server) => registerAuthTools(server as any, http)));
+    assign(captureTools((server) => registerOAuthClientTools(server as any, http)));
     assign(captureTools((server) => registerStorageTools(server as any, http)));
     assign(captureTools((server) => registerAdvancedTools(server as any, http, process.env, {
         readOnly: context.readOnly,
