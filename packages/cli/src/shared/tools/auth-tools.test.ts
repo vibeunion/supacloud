@@ -173,6 +173,34 @@ describe("auth CLI mutation contract", () => {
         expect(malformedResponse.content[0].text).not.toContain(secret);
     });
 
+    test("preserves empty optional email and phone fields from GoTrue", async () => {
+    const userId = "00000000-0000-4000-8000-000000000002";
+    const { callback } = captureAuthTool({
+        get: async () => ({
+            ok: true,
+            status: 200,
+            data: {
+                id: userId,
+                email: "",
+                phone: "",
+                created_at: "2026-08-18T00:00:00.000Z",
+                last_sign_in_at: null,
+            },
+        }),
+    });
+
+    const response = await callback({ action: "get_user", ref: "project-a", user_id: userId });
+
+    expect(response.isError).not.toBe(true);
+    expect(JSON.parse(response.content[0].text).user).toEqual({
+        id: userId,
+        email: "",
+        phone: "",
+        created_at: "2026-08-18T00:00:00.000Z",
+        last_sign_in_at: null,
+    });
+});
+
     test("bounds auth search and email inputs before HTTP", async () => {
         let requestCount = 0;
         const { callback } = captureAuthTool({

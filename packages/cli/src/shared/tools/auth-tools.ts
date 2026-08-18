@@ -161,7 +161,6 @@ function safeOptionalUserField(
     const value = candidate[field];
     if (value === null) return null;
     if (typeof value !== "string"
-        || value.length === 0
         || value.length > maxLength
         || /[\u0000-\u001f\u007f]/u.test(value)) return INVALID_FIELD;
     return value;
