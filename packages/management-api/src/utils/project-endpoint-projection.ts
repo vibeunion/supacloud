@@ -101,9 +101,14 @@ function endpointProjection(
     throw new Error("Project endpoint host does not match its resolved origin");
   }
 
-  const normalizedAliases = aliases
-    .map((alias) => canonicalHost(alias, scheme))
-    .filter((alias): alias is string => Boolean(alias) && alias !== host);
+  const normalizedAliases: string[] = [];
+  for (const alias of aliases) {
+    const normalizedAlias = canonicalHost(alias, scheme);
+    if (!normalizedAlias) {
+      throw new Error("Project endpoint alias is invalid");
+    }
+    if (normalizedAlias !== host) normalizedAliases.push(normalizedAlias);
+  }
 
   return {
     origin: parsed.origin,
