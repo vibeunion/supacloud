@@ -39,14 +39,14 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-          import re
 
           source_path = Path('packages/cli/src/shared/tools/auth-tools.ts')
-          source = source_path.read_text(encoding='utf-8')
-          source, count = re.subn(r'^\s*\|\| value\.length === 0\s*\n', '', source, count=1, flags=re.MULTILINE)
-          if count != 1:
-              raise SystemExit(f'optional user empty-string guard matched {count} times')
-          source_path.write_text(source, encoding='utf-8')
+          lines = source_path.read_text(encoding='utf-8').splitlines(keepends=True)
+          matches = [index for index, line in enumerate(lines) if line.strip() == '|| value.length === 0']
+          if len(matches) != 1:
+              raise SystemExit(f'optional user empty-string guard matched {len(matches)} times')
+          del lines[matches[0]]
+          source_path.write_text(''.join(lines), encoding='utf-8')
 
           test_path = Path('packages/cli/src/shared/tools/auth-tools.test.ts')
           tests = test_path.read_text(encoding='utf-8')
