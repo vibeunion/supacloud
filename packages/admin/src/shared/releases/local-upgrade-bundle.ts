@@ -1,12 +1,12 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { accessSync, chmodSync, constants as fsConstants, createWriteStream, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { accessSync, chmodSync, constants as fsConstants, createWriteStream, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import type { IncomingMessage } from "node:http";
 import { get } from "node:https";
 import { tmpdir } from "node:os";
 import { basename, delimiter, join } from "node:path";
 import { pipeline } from "node:stream/promises";
-import { Transform } from "node:stream";
+import { Transform, type Readable } from "node:stream";
 
 import {
     RELEASE_ATTESTATION_NAME,
@@ -89,6 +89,14 @@ type HttpsDownloadRequest = {
     deadline: number;
 };
 
+type GithubReleaseAssetDownloadRequest = {
+    repository: string;
+    tag: string;
+    assetName: string;
+    destination: string;
+    maxBytes: number;
+};
+
 type LocalBundleLayout = {
     directory: string;
     managementDirectory: string;
@@ -108,6 +116,7 @@ type LocalBundleDownloads = [LocalUpgradeFile[], LocalUpgradeFile[], LocalUpgrad
 
 const RELEASES_API = `https://api.github.com/repos/${RELEASE_REPOSITORY}/releases`;
 const ATTESTATIONS_API = `https://api.github.com/repos/${RELEASE_REPOSITORY}/attestations`;
+const GITHUB_CLI_REPOSITORY = "cli/cli";
 const GH_VERSION = "2.96.0";
 const GH_ARCHIVE_SHA256: Record<UpgradeArchitecture, string> = {
     amd64: "83d5c2ccad5498f58bf6368acb1ab32588cf43ab3a4b1c301bf36328b1c8bd60",
@@ -333,6 +342,33 @@ async function downloadDirect(url: string, destination: string, maxBytes: number
     throw new AggregateError(retryFailures, `Unable to download ${parsed.hostname}${parsed.pathname}`);
 }
 
+async function downloadGithubReleaseAsset(request: GithubReleaseAssetDownloadRequest): Promise<void> {
+    const download = await runGithubCliDownload([
+        "release", "download", request.tag,
+        "--repo", `github.com/${request.repository}`,
+        "--pattern", request.assetName,
+        "--output", "-",
+    ], request.destination, request.maxBytes, DOWNLOAD_TIMEOUT_MS);
+    if (download.exitCode !== 0) {
+        rmSync(request.destination, { force: true });
+        throw new Error(`GitHub release asset download failed: ${download.stderr.trim().slice(-1_000) || download.exitCode}`);
+    }
+    assertDownloadedReleaseAsset(request);
+}
+
+function assertDownloadedReleaseAsset(request: GithubReleaseAssetDownloadRequest): void {
+    const stats = lstatSync(request.destination);
+    if (!stats.isFile() || stats.isSymbolicLink() || stats.nlink !== 1) {
+        rmSync(request.destination, { force: true });
+        throw new Error("GitHub release asset must be a direct regular file");
+    }
+    if (stats.size > request.maxBytes) {
+        rmSync(request.destination, { force: true });
+        throw new Error(`GitHub release asset exceeded ${request.maxBytes} bytes`);
+    }
+    chmodSync(request.destination, 0o600);
+}
+
 function parseJsonFile(filePath: string, label: string): unknown {
     const contents = readFileSync(filePath, "utf8");
     try {
@@ -408,7 +444,7 @@ function directEnvironment(): NodeJS.ProcessEnv {
     const environment = { ...process.env };
     for (const key of Object.keys(environment)) {
         if (/(?:^|_)proxy$/i.test(key)
-            || /^(?:SUPACLOUD_GITHUB_PROXIES|NODE_USE_ENV_PROXY)$/.test(key)) {
+            || /^(?:GH_HOST|GH_REPO|SUPACLOUD_GITHUB_PROXIES|NODE_USE_ENV_PROXY)$/.test(key)) {
             delete environment[key];
         }
     }
@@ -437,16 +473,18 @@ function githubCliExecutable(environment: NodeJS.ProcessEnv): string {
 }
 
 type GithubCliResult = { exitCode: number; stdout: string; stderr: string };
+type GithubCliProcess = ChildProcessByStdio<null, Readable, Readable>;
 
-export async function runGithubCli(arguments_: string[], timeoutMs: number): Promise<GithubCliResult> {
-    return await new Promise<GithubCliResult>((resolve, reject) => {
-        const environment = directEnvironment();
-        const child = spawn(githubCliExecutable(environment), arguments_, {
-            env: environment,
-            stdio: ["ignore", "pipe", "pipe"],
-        });
-        let stdout = "";
-        let stderr = "";
+function spawnGithubCli(arguments_: string[]): GithubCliProcess {
+    const environment = directEnvironment();
+    return spawn(githubCliExecutable(environment), arguments_, {
+        env: environment,
+        stdio: ["ignore", "pipe", "pipe"],
+    });
+}
+
+function githubCliExitCode(child: GithubCliProcess, timeoutMs: number): Promise<number> {
+    return new Promise<number>((resolve, reject) => {
         let timedOut = false;
         let settled = false;
         let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
@@ -461,13 +499,50 @@ export async function runGithubCli(arguments_: string[], timeoutMs: number): Pro
             clearTimeout(timeout);
             if (forceKillTimer) clearTimeout(forceKillTimer);
             if (error) reject(error);
-            else resolve({ exitCode: timedOut ? 124 : exitCode, stdout, stderr });
+            else resolve(timedOut ? 124 : exitCode);
         };
-        child.stdout.on("data", (chunk: Buffer) => { stdout = `${stdout}${chunk.toString()}`.slice(-8_000); });
-        child.stderr.on("data", (chunk: Buffer) => { stderr = `${stderr}${chunk.toString()}`.slice(-8_000); });
         child.once("error", (error) => settleExecution(error, 127));
         child.once("close", (code) => settleExecution(undefined, code ?? 1));
     });
+}
+
+export async function runGithubCli(arguments_: string[], timeoutMs: number): Promise<GithubCliResult> {
+    const child = spawnGithubCli(arguments_);
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk: Buffer) => { stdout = `${stdout}${chunk.toString()}`.slice(-8_000); });
+    child.stderr.on("data", (chunk: Buffer) => { stderr = `${stderr}${chunk.toString()}`.slice(-8_000); });
+    const exitCode = await githubCliExitCode(child, timeoutMs);
+    return { exitCode, stdout, stderr };
+}
+
+export async function runGithubCliDownload(
+    arguments_: string[],
+    destination: string,
+    maxBytes: number,
+    timeoutMs: number,
+): Promise<GithubCliResult> {
+    const child = spawnGithubCli(arguments_);
+    let stderr = "";
+    child.stderr.on("data", (chunk: Buffer) => { stderr = `${stderr}${chunk.toString()}`.slice(-8_000); });
+    const write = pipeline(
+        child.stdout,
+        boundedWriter(maxBytes),
+        createWriteStream(destination, { flags: "wx", mode: 0o600 }),
+    ).catch((error: unknown) => {
+        child.kill("SIGKILL");
+        throw error;
+    });
+    const [writeState, exitState] = await Promise.allSettled([write, githubCliExitCode(child, timeoutMs)]);
+    if (writeState.status === "rejected") {
+        rmSync(destination, { force: true });
+        throw writeState.reason;
+    }
+    if (exitState.status === "rejected") {
+        rmSync(destination, { force: true });
+        throw exitState.reason;
+    }
+    return { exitCode: exitState.value, stdout: "", stderr };
 }
 
 function supportsStrictGithubVerification(execution: GithubCliResult): boolean {
@@ -563,6 +638,16 @@ async function downloadManifestAttestation(
     request: ManifestAttestationDownloadRequest,
 ): Promise<void> {
     const { release, manifest, manifestPath, destination } = request;
+    if (manifest.repository !== RELEASE_REPOSITORY) {
+        await downloadGithubReleaseAsset({
+            repository: RELEASE_REPOSITORY,
+            tag: release.tag_name,
+            assetName: RELEASE_ATTESTATION_NAME,
+            destination,
+            maxBytes: RELEASE_BUNDLE_SIZE_LIMITS.attestation,
+        });
+        return;
+    }
     const responsePath = `${destination}.response`;
     try {
         await downloadDirect(
@@ -570,13 +655,9 @@ async function downloadManifestAttestation(
             responsePath,
             RELEASE_BUNDLE_SIZE_LIMITS.attestation,
         );
-        if (manifest.repository === RELEASE_REPOSITORY) {
-            const bundles = serializeAttestationBundles(parseJsonFile(responsePath, "GitHub attestation response"));
-            writeFileSync(destination, bundles, { mode: 0o600, flag: "wx" });
-            chmodSync(destination, 0o600);
-        } else {
-            renameSync(responsePath, destination);
-        }
+        const bundles = serializeAttestationBundles(parseJsonFile(responsePath, "GitHub attestation response"));
+        writeFileSync(destination, bundles, { mode: 0o600, flag: "wx" });
+        chmodSync(destination, 0o600);
     } finally {
         rmSync(responsePath, { force: true });
     }
@@ -586,9 +667,11 @@ async function downloadComponent(request: ComponentDownloadRequest): Promise<Loc
     const release = await downloadReleaseMetadata(request.component, request.version, request.destination);
     const manifestPath = directChildPath(request.destination, RELEASE_MANIFEST_NAME);
     const attestationPath = directChildPath(request.destination, RELEASE_ATTESTATION_NAME);
-    await downloadDirect(
-        releaseAssetUrl(release, RELEASE_MANIFEST_NAME), manifestPath, RELEASE_BUNDLE_SIZE_LIMITS.manifest,
-    );
+    releaseAssetUrl(release, RELEASE_MANIFEST_NAME);
+    await downloadGithubReleaseAsset({
+        repository: RELEASE_REPOSITORY, tag: release.tag_name, assetName: RELEASE_MANIFEST_NAME,
+        destination: manifestPath, maxBytes: RELEASE_BUNDLE_SIZE_LIMITS.manifest,
+    });
     const manifest = parseReleaseManifest(readFileSync(manifestPath, "utf8"), request);
     await downloadManifestAttestation({ release, manifest, manifestPath, destination: attestationPath });
     await verifyManifestAttestation({
@@ -599,16 +682,20 @@ async function downloadComponent(request: ComponentDownloadRequest): Promise<Loc
     });
 
     const checksumsPath = directChildPath(request.destination, RELEASE_CHECKSUMS_NAME);
-    await downloadDirect(
-        releaseAssetUrl(release, RELEASE_CHECKSUMS_NAME), checksumsPath, RELEASE_BUNDLE_SIZE_LIMITS.checksums,
-    );
+    releaseAssetUrl(release, RELEASE_CHECKSUMS_NAME);
+    await downloadGithubReleaseAsset({
+        repository: RELEASE_REPOSITORY, tag: release.tag_name, assetName: RELEASE_CHECKSUMS_NAME,
+        destination: checksumsPath, maxBytes: RELEASE_BUNDLE_SIZE_LIMITS.checksums,
+    });
     assertSignedArtifact(checksumsPath, manifest);
     const checksums = parseReleaseChecksums(readFileSync(checksumsPath, "utf8"), manifest);
     for (const assetName of request.assetNames) {
         const assetPath = directChildPath(request.destination, assetName);
-        await downloadDirect(
-            releaseAssetUrl(release, assetName), assetPath, releaseAssetSizeLimit(request.component, assetName),
-        );
+        releaseAssetUrl(release, assetName);
+        await downloadGithubReleaseAsset({
+            repository: RELEASE_REPOSITORY, tag: release.tag_name, assetName,
+            destination: assetPath, maxBytes: releaseAssetSizeLimit(request.component, assetName),
+        });
         verifyDownloadedFile(assetPath, manifest, checksums);
     }
     return [RELEASE_MANIFEST_NAME, RELEASE_ATTESTATION_NAME, RELEASE_CHECKSUMS_NAME, ...request.assetNames]
@@ -617,11 +704,16 @@ async function downloadComponent(request: ComponentDownloadRequest): Promise<Loc
         ));
 }
 
-async function downloadPinnedGithubCli(directory: string, architecture: UpgradeArchitecture): Promise<LocalUpgradeFile> {
+export async function downloadPinnedGithubCli(
+    directory: string,
+    architecture: UpgradeArchitecture,
+): Promise<LocalUpgradeFile> {
     const identity = githubCliArchiveIdentity(architecture);
     const archivePath = directChildPath(directory, identity.archiveName);
-    const url = `https://github.com/cli/cli/releases/download/v${identity.version}/${identity.archiveName}`;
-    await downloadDirect(url, archivePath, MAX_GH_ARCHIVE_BYTES);
+    await downloadGithubReleaseAsset({
+        repository: GITHUB_CLI_REPOSITORY, tag: `v${identity.version}`, assetName: identity.archiveName,
+        destination: archivePath, maxBytes: MAX_GH_ARCHIVE_BYTES,
+    });
     if (sha256File(archivePath) !== identity.sha256) {
         throw new Error("Pinned GitHub CLI archive SHA256 mismatch");
     }
