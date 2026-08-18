@@ -10,7 +10,7 @@ on:
       - reopened
 
 permissions:
-  contents: read
+  contents: write
   security-events: write
 
 jobs:
@@ -43,7 +43,7 @@ jobs:
           upload: never
           output: codeql-results
 
-      - name: Print reproducible quality findings
+      - name: Extract reproducible quality findings
         env:
           CODEQL_LANGUAGE: ${{ matrix.language }}
         shell: bash
@@ -74,8 +74,7 @@ jobs:
                       tags = [str(tag).lower() for tag in properties.get('tags', [])]
                       locations = result.get('locations') or []
                       physical = (
-                          locations[0]
-                          .get('physicalLocation', {})
+                          locations[0].get('physicalLocation', {})
                           if locations
                           else {}
                       )
@@ -106,20 +105,47 @@ jobs:
                       if is_quality and not is_security:
                           findings.append(item)
 
-          print('CODEQL_QUALITY_FINDINGS_BEGIN')
-          print(json.dumps(findings, ensure_ascii=False, separators=(',', ':')))
-          print('CODEQL_QUALITY_FINDINGS_END')
-          print(f'CODEQL_QUALITY_FINDING_COUNT={len(findings)}')
-
-          # Preserve unclassified results so rule-tag changes cannot hide findings.
           unclassified = [
               item for item in all_results
               if item not in findings
               and 'security' not in item['tags']
               and not any(tag.startswith('external/cwe/') for tag in item['tags'])
           ]
+
+          summary = {
+              'language': os.environ['CODEQL_LANGUAGE'],
+              'quality_findings': findings,
+              'unclassified_non_security_findings': unclassified,
+              'total_result_count': len(all_results),
+          }
+
+          print('CODEQL_QUALITY_FINDINGS_BEGIN')
+          print(json.dumps(findings, ensure_ascii=False, separators=(',', ':')))
+          print('CODEQL_QUALITY_FINDINGS_END')
+          print(f'CODEQL_QUALITY_FINDING_COUNT={len(findings)}')
           print('CODEQL_UNCLASSIFIED_FINDINGS_BEGIN')
           print(json.dumps(unclassified, ensure_ascii=False, separators=(',', ':')))
           print('CODEQL_UNCLASSIFIED_FINDINGS_END')
           print(f'CODEQL_TOTAL_RESULT_COUNT={len(all_results)}')
+
+          if os.environ['CODEQL_LANGUAGE'] == 'javascript-typescript':
+              Path('code-quality-js-findings.json').write_text(
+                  json.dumps(summary, ensure_ascii=False, indent=2) + '\n',
+                  encoding='utf-8',
+              )
           PY
+
+      - name: Persist JavaScript findings summary temporarily
+        if: matrix.language == 'javascript-typescript'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          encoded="$(base64 -w 0 code-quality-js-findings.json)"
+          gh api \
+            --method PUT \
+            "repos/${GITHUB_REPOSITORY}/contents/.github/code-quality-js-findings.json" \
+            -f message='chore: persist code quality probe findings [skip ci]' \
+            -f content="$encoded" \
+            -f branch="$GITHUB_HEAD_REF"
