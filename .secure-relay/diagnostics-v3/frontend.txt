@@ -1,0 +1,286 @@
+PATTERN onAuthStateChange|redirecting|正在重定向|/projects|settings/general|SIGNED_OUT|TOKEN_REFRESHED|INITIAL_SESSION|subscription.{0,40}debugger
+
+packages/web-console/src/routes/project/[ref]/functions/+page.svelte:87:  const query = useList<EdgeFunction>({ get resource() { return `v1/projects/${projectRef}/functions`; } });
+packages/web-console/src/routes/project/[ref]/functions/+page.svelte:244:    \`\${managementApiUrl}/v1/projects/\${projectRef}/tasks/\${taskId}\`,
+packages/web-console/src/routes/project/[ref]/functions/+page.svelte:366:        `/v1/projects/${projectRef}/functions/${encodeURIComponent(slug)}/logs?${query.toString()}`,
+packages/web-console/src/routes/project/[ref]/functions/+page.svelte:386:      const res = await apiClient(`/v1/projects/${projectRef}/functions/${encodeURIComponent(slug)}/versions`);
+packages/web-console/src/routes/project/[ref]/functions/+page.svelte:454:      const res = await apiClient(`/v1/projects/${functionProjectRef}/functions/${encodeURIComponent(slug)}/versions/${encodeURIComponent(version)}/activate`, {
+packages/web-console/src/routes/project/[ref]/functions/+page.svelte:498:      const res = await apiClient(`/v1/projects/${projectRef}/tasks/${encodeURIComponent(taskId)}`);
+packages/web-console/src/routes/project/[ref]/functions/+page.svelte:566:      const resourcePath = `/v1/projects/${functionProjectRef}/functions/${encodeURIComponent(slug)}`;
+packages/web-console/src/routes/project/[ref]/functions/+page.svelte:624:      const res = await apiClient(`/v1/projects/${functionProjectRef}/functions/${encodeURIComponent(slug)}`, {
+packages/web-console/src/routes/project/[ref]/functions/+page.svelte:657:      const res = await apiClient(`/v1/projects/${functionProjectRef}/functions/${encodeURIComponent(slug)}/config`, {
+packages/web-console/src/routes/project/[ref]/functions/secrets/+page.svelte:18:  const query = useList<Secret>({ get resource() { return `v1/projects/${projectRef}/secrets`; } });
+packages/web-console/src/routes/project/[ref]/functions/secrets/+page.svelte:29:      const res = await apiClient(`/v1/projects/${projectRef}/secrets`, {
+packages/web-console/src/routes/project/[ref]/functions/secrets/+page.svelte:55:      const res = await apiClient(`/v1/projects/${projectRef}/secrets/${name}`, { method: "DELETE" });
+packages/web-console/src/routes/project/[ref]/sql/+page.svelte:240:      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+packages/web-console/src/routes/project/[ref]/sql/+page.svelte:301:        `/v1/projects/${projectRef}/database/sql/${encodeURIComponent(runningQuery.queryId)}/cancel`,
+packages/web-console/src/routes/project/[ref]/cache/+page.svelte:77:      const response = await apiClient(`/v1/projects/${encodeURIComponent(projectRef)}/cache`);
+packages/web-console/src/routes/project/[ref]/cache/+page.svelte:131:      `/v1/projects/${encodeURIComponent(projectRef)}/cache/${pathSuffix}`,
+packages/web-console/src/routes/project/[ref]/auth/oauth-server/+page.svelte:75:      const res = await apiClient(`/v1/projects/${projectRef}/auth/oauth-server`);
+packages/web-console/src/routes/project/[ref]/auth/oauth-server/+page.svelte:91:      const res = await apiClient(`/v1/projects/${projectRef}/auth/oauth-clients`);
+packages/web-console/src/routes/project/[ref]/auth/oauth-server/+page.svelte:107:          const response = await apiClient(`/v1/projects/${projectRef}/auth/oauth-server/migrate`, {
+packages/web-console/src/routes/project/[ref]/auth/oauth-server/+page.svelte:114:          const response = await apiClient(`/v1/projects/${projectRef}/auth/oauth-server`);
+packages/web-console/src/routes/project/[ref]/auth/oauth-server/+page.svelte:139:      const res = await apiClient(`/v1/projects/${projectRef}/auth/oauth-clients`, {
+packages/web-console/src/routes/project/[ref]/auth/oauth-server/+page.svelte:168:      const res = await apiClient(`/v1/projects/${projectRef}/auth/oauth-clients/${encodeURIComponent(clientId)}`, {
+packages/web-console/src/routes/project/[ref]/auth/sessions/+page.svelte:81:      const response = await apiClient(`/v1/projects/${encodeURIComponent(ref)}/config/auth`);
+packages/web-console/src/routes/project/[ref]/auth/sessions/+page.svelte:153:    const response = await apiClient(`/v1/projects/${encodeURIComponent(ref)}/config/auth`, {
+packages/web-console/src/routes/project/[ref]/auth/providers/+page.svelte:61:      const res = await apiClient(`/v1/projects/${projectRef}/auth/studio/providers`);
+packages/web-console/src/routes/project/[ref]/auth/providers/+page.svelte:107:      const res = await apiClient(`/v1/projects/${projectRef}/auth/providers/${provider.key}`, {
+packages/web-console/src/routes/project/[ref]/auth/providers/+page.svelte:147:      const res = await apiClient(`/v1/projects/${projectRef}/auth/providers/${provider.key}`, { method: "DELETE" });
+packages/web-console/src/routes/project/[ref]/auth/providers/+page.svelte:175:      const res = await apiClient(`/v1/projects/${projectRef}/auth/studio/providers/${provider.key}`, {
+packages/web-console/src/routes/project/[ref]/auth/policies/+page.svelte:71:      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+packages/web-console/src/routes/project/[ref]/auth/policies/+page.svelte:84:        apiClient(`/v1/projects/${projectRef}/database/sql`, {
+packages/web-console/src/routes/project/[ref]/auth/policies/+page.svelte:88:        apiClient(`/v1/projects/${projectRef}/database/sql`, {
+packages/web-console/src/routes/project/[ref]/auth/policies/+page.svelte:125:      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+packages/web-console/src/routes/project/[ref]/auth/policies/+page.svelte:154:      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+packages/web-console/src/routes/project/[ref]/auth/+layout.svelte:91:        const response = await apiClient(`/v1/projects/${projectRef}/auth/runtime`);
+packages/web-console/src/routes/project/[ref]/auth/templates/+page.svelte:37:      const res = await apiClient(`/v1/projects/${projectRef}/auth/template`);
+packages/web-console/src/routes/project/[ref]/auth/templates/+page.svelte:66:      const res = await apiClient(`/v1/projects/${projectRef}/auth/template`, {
+packages/web-console/src/routes/project/[ref]/auth/templates/+page.svelte:88:      const res = await apiClient(`/v1/projects/${projectRef}/auth/template`, {
+packages/web-console/src/routes/project/[ref]/auth/custom-providers/+page.svelte:55:      const response = await apiClient(`/v1/projects/${projectRef}/auth/custom-providers`);
+packages/web-console/src/routes/project/[ref]/auth/custom-providers/+page.svelte:137:        ? `/v1/projects/${projectRef}/auth/custom-providers/${encodeURIComponent(editingIdentifier)}`
+packages/web-console/src/routes/project/[ref]/auth/custom-providers/+page.svelte:138:        : `/v1/projects/${projectRef}/auth/custom-providers`;
+packages/web-console/src/routes/project/[ref]/auth/custom-providers/+page.svelte:159:      `/v1/projects/${projectRef}/auth/custom-providers/${encodeURIComponent(provider.identifier)}`,
+packages/web-console/src/routes/project/[ref]/auth/rate-limits/+page.svelte:47:      const res = await apiClient(`/v1/projects/${projectRef}/auth/config`);
+packages/web-console/src/routes/project/[ref]/auth/rate-limits/+page.svelte:76:      const res = await apiClient(`/v1/projects/${projectRef}/auth/config`, {
+packages/web-console/src/routes/project/[ref]/auth/passkeys/+page.svelte:33:      const response = await apiClient(`/v1/projects/${projectRef}/config/auth`);
+packages/web-console/src/routes/project/[ref]/auth/passkeys/+page.svelte:64:      const response = await apiClient(`/v1/projects/${projectRef}/config/auth`, {
+packages/web-console/src/routes/project/[ref]/auth/+page.svelte:46:      const response = await apiClient(`/v1/projects/${projectRef}/auth/users/invite`, {
+packages/web-console/src/routes/project/[ref]/auth/+page.svelte:65:      const response = await apiClient(`/v1/projects/${projectRef}/auth/users`, {
+packages/web-console/src/routes/project/[ref]/auth/+page.svelte:153:        resourceName={`v1/projects/${projectRef}/auth/users`} 
+packages/web-console/src/routes/project/[ref]/auth/url-configuration/+page.svelte:20:      const res = await apiClient(`/v1/projects/${projectRef}/auth/config`);
+packages/web-console/src/routes/project/[ref]/auth/url-configuration/+page.svelte:59:      const res = await apiClient(`/v1/projects/${projectRef}/auth/config`, {
+packages/web-console/src/routes/project/[ref]/auth/hooks/+page.svelte:37:      const res = await apiClient(`/v1/projects/${projectRef}/auth/config`);
+packages/web-console/src/routes/project/[ref]/auth/hooks/+page.svelte:75:      const res = await apiClient(`/v1/projects/${projectRef}/auth/config`, {
+packages/web-console/src/routes/project/[ref]/auth/protection/+page.svelte:34:      const res = await apiClient(`/v1/projects/${projectRef}/auth/config`);
+packages/web-console/src/routes/project/[ref]/auth/protection/+page.svelte:60:      const res = await apiClient(`/v1/projects/${projectRef}/auth/config`, {
+packages/web-console/src/routes/project/[ref]/auth/smtp/+page.svelte:38:      const res = await apiClient(`/v1/projects/${projectRef}/auth/config`);
+packages/web-console/src/routes/project/[ref]/auth/smtp/+page.svelte:69:      const res = await apiClient(`/v1/projects/${projectRef}/auth/config`, {
+packages/web-console/src/routes/project/[ref]/auth/mfa/+page.svelte:107:        apiClient(`/v1/projects/${encodedRef}/auth/factors?page=${currentPage}&limit=${limit}`),
+packages/web-console/src/routes/project/[ref]/auth/mfa/+page.svelte:108:        apiClient(`/v1/projects/${encodedRef}/config/auth`),
+packages/web-console/src/routes/project/[ref]/auth/mfa/+page.svelte:154:        `/v1/projects/${encodeURIComponent(projectRef)}/auth/factors/${encodeURIComponent(factor.id)}`,
+packages/web-console/src/routes/project/[ref]/+page.svelte:87:      const res = await apiClient(`/v1/projects/${ref}/database/sql`, {
+packages/web-console/src/routes/project/[ref]/+page.svelte:121:      const res = await apiClient(`/v1/projects/${ref}/functions`);
+packages/web-console/src/routes/project/[ref]/+page.svelte:132:      const response = await apiClient(`/v1/projects/${ref}/auth/runtime`);
+packages/web-console/src/routes/project/[ref]/+page.svelte:189:      const res = await apiClient(`/v1/projects/${ref}/dashboard/summary`);
+packages/web-console/src/routes/project/[ref]/+page.svelte:204:      const res = await apiClient(`/v1/projects/${ref}/services`);
+packages/web-console/src/routes/project/[ref]/+page.svelte:219:      const res = await apiClient(`/v1/projects/${ref}/tasks/stats`);
+packages/web-console/src/routes/project/[ref]/realtime/+page.svelte:37:    queryKey: ["v1/projects", "getOne", projectRef],
+packages/web-console/src/routes/project/[ref]/realtime/+page.svelte:39:      const res = await apiClient(`/v1/projects/${projectRef}`);
+packages/web-console/src/routes/project/[ref]/realtime/+page.svelte:47:    queryKey: ["v1/projects", "database-tables", projectRef],
+packages/web-console/src/routes/project/[ref]/realtime/+page.svelte:50:      const response = await apiClient(`/v1/projects/${projectRef}/database/tables?_page=1&_limit=200`);
+packages/web-console/src/routes/project/[ref]/tasks/+page.svelte:122:    return `/v1/projects/${projectRef}/tasks${suffix}`;
+packages/web-console/src/routes/project/[ref]/tasks/+page.svelte:133:        apiClient(`/v1/projects/${projectRef}/tasks/settings/background`)
+packages/web-console/src/routes/project/[ref]/tasks/+page.svelte:293:      const res = await apiClient(`/v1/projects/${projectRef}/tasks/${taskId}`);
+packages/web-console/src/routes/project/[ref]/tasks/+page.svelte:306:      const res = await apiClient(`/v1/projects/${projectRef}/tasks/${taskId}/retry`, {
+packages/web-console/src/routes/project/[ref]/tasks/+page.svelte:321:      const res = await apiClient(`/v1/projects/${projectRef}/tasks/${taskId}/cancel`, {
+packages/web-console/src/routes/project/[ref]/tasks/+page.svelte:339:      const res = await apiClient(`/v1/projects/${projectRef}/tasks/settings/background`, {
+packages/web-console/src/routes/project/[ref]/reports/auth/+page.svelte:14:      const accessRes = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+packages/web-console/src/routes/project/[ref]/reports/auth/+page.svelte:29:      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+packages/web-console/src/routes/project/[ref]/reports/auth/+page.svelte:48:      const res2 = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+packages/web-console/src/routes/project/[ref]/reports/api-overview/+page.svelte:23:      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+packages/web-console/src/routes/project/[ref]/reports/api-overview/+page.svelte:51:      const res2 = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+packages/web-console/src/routes/project/[ref]/reports/database/+page.svelte:14:      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+packages/web-console/src/routes/project/[ref]/reports/database/+page.svelte:37:      const res2 = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+packages/web-console/src/routes/project/[ref]/reports/query-performance/+page.svelte:24:      const response = await apiClient(`/v1/projects/${projectRef}/database/query-performance`);
+packages/web-console/src/routes/project/[ref]/reports/query-performance/+page.svelte:38:      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+packages/web-console/src/routes/project/[ref]/reports/storage/+page.svelte:14:      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+packages/web-console/src/routes/project/[ref]/reports/database-linter/+page.svelte:95:      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+packages/web-console/src/routes/project/[ref]/settings/custom-domains/+page.svelte:47:      const res = await apiClient(`/v1/projects/${projectRef}/custom-hostname`);
+packages/web-console/src/routes/project/[ref]/settings/custom-domains/+page.svelte:62:      const res = await apiClient(`/v1/projects/${projectRef}/gateway/certificate`);
+packages/web-console/src/routes/project/[ref]/settings/custom-domains/+page.svelte:107:      const res = await apiClient(`/v1/projects/${projectRef}/custom-hostname`, {
+packages/web-console/src/routes/project/[ref]/settings/custom-domains/+page.svelte:140:      const res = await apiClient(`/v1/projects/${projectRef}/custom-hostname`, { method: "DELETE" });
+packages/web-console/src/routes/project/[ref]/settings/custom-domains/+page.svelte:167:      const res = await apiClient(`/v1/projects/${projectRef}/gateway/certificate`, {
+packages/web-console/src/routes/project/[ref]/settings/custom-domains/+page.svelte:188:      const res = await apiClient(`/v1/projects/${projectRef}/gateway/certificate/issue`, {
+packages/web-console/src/routes/project/[ref]/settings/custom-domains/+page.svelte:213:      const res = await apiClient(`/v1/projects/${projectRef}/gateway/certificate/deploy`, {
+packages/web-console/src/routes/project/[ref]/settings/pooling/+page.svelte:12:    get resource() { return "v1/projects"; },
+packages/web-console/src/routes/project/[ref]/settings/webhooks/+page.svelte:35:      const extensionRes = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+packages/web-console/src/routes/project/[ref]/settings/webhooks/+page.svelte:53:      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+packages/web-console/src/routes/project/[ref]/settings/webhooks/+page.svelte:75:      const tblRes = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+packages/web-console/src/routes/project/[ref]/settings/webhooks/+page.svelte:119:      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+packages/web-console/src/routes/project/[ref]/settings/webhooks/+page.svelte:157:      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+packages/web-console/src/routes/project/[ref]/settings/+page.svelte:27:    get resource() { return "v1/projects"; },
+packages/web-console/src/routes/project/[ref]/settings/+page.svelte:56:    await queryClient.invalidateQueries({ queryKey: ["v1/projects", "getOne", projectRef] });
+packages/web-console/src/routes/project/[ref]/settings/+page.svelte:75:      const res = await apiClient(`/v1/projects/${projectRef}/settings`, {
+packages/web-console/src/routes/project/[ref]/settings/+page.svelte:117:      const res = await apiClient(`/v1/projects/${projectRef}/${action}`, { method: "POST" });
+packages/web-console/src/routes/project/[ref]/settings/+page.svelte:163:      const res = await apiClient(`/v1/projects/${projectRef}`, { method: "DELETE" });
+packages/web-console/src/routes/project/[ref]/settings/+page.svelte:194:      const res = await apiClient(`/v1/projects/${projectRef}/custom-hostname`);
+packages/web-console/src/routes/project/[ref]/settings/+page.svelte:213:      const res = await apiClient(`/v1/projects/${projectRef}/custom-hostname`, {
+packages/web-console/src/routes/project/[ref]/settings/+page.svelte:242:      const res = await apiClient(`/v1/projects/${projectRef}/custom-hostname`, { method: "DELETE" });
+packages/web-console/src/routes/project/[ref]/settings/+page.svelte:277:        <AutoForm resourceName="v1/projects" id={projectRef} />
+packages/web-console/src/routes/project/[ref]/settings/jwt/+page.svelte:69:      loadEndpoint("认证配置", `/v1/projects/${encodedProjectRef}/config/auth`),
+packages/web-console/src/routes/project/[ref]/settings/jwt/+page.svelte:70:      loadEndpoint("OAuth/JWKS 状态", `/v1/projects/${encodedProjectRef}/auth/oauth-server`),
+packages/web-console/src/routes/project/[ref]/settings/jwt/+page.svelte:86:    const runtimeResult = await loadEndpoint("认证运行时", `/v1/projects/${encodedRef}/auth/runtime`);
+packages/web-console/src/routes/project/[ref]/settings/services/+page.svelte:27:    get resource() { return "v1/projects"; },
+packages/web-console/src/routes/project/[ref]/settings/services/+page.svelte:78:    await queryClient.invalidateQueries({ queryKey: ["v1/projects", "getOne", projectRef] });
+packages/web-console/src/routes/project/[ref]/settings/services/+page.svelte:84:      if (type === "restart") url = `/v1/projects/${projectRef}/restart`;
+packages/web-console/src/routes/project/[ref]/settings/services/+page.svelte:85:      else if (type === "pause") url = `/v1/projects/${projectRef}/pause`;
+packages/web-console/src/routes/project/[ref]/settings/services/+page.svelte:86:      else if (type === "restore") url = `/v1/projects/${projectRef}/restore`;
+packages/web-console/src/routes/project/[ref]/settings/services/+page.svelte:89:        url = `/v1/projects/${projectRef}/services/${serviceName}/${action}`;
+packages/web-console/src/routes/project/[ref]/settings/services/+page.svelte:182:        <li><span class="font-medium">启动全部</span> 会调用 <code class="rounded bg-blue-600/10 px-1.5 py-0.5 font-mono text-[11px] text-blue-950">POST /v1/projects/{projectRef}/restore</code></li>
+packages/web-console/src/routes/project/[ref]/settings/services/+page.svelte:183:        <li><span class="font-medium">重启全部</span> 会调用 <code class="rounded bg-blue-600/10 px-1.5 py-0.5 font-mono text-[11px] text-blue-950">POST /v1/projects/{projectRef}/restart</code></li>
+packages/web-console/src/routes/project/[ref]/settings/scaling/+page.svelte:48:      const res = await apiClient(`/v1/projects/${projectRef}/scaling`);
+packages/web-console/src/routes/project/[ref]/settings/scaling/+page.svelte:57:      const res = await apiClient(`/v1/projects/${projectRef}/scaling/compute`, {
+packages/web-console/src/routes/project/[ref]/settings/scaling/+page.svelte:73:      const res = await apiClient(`/v1/projects/${projectRef}/read-replicas`, {
+packages/web-console/src/routes/project/[ref]/settings/scaling/+page.svelte:90:      const res = await apiClient(`/v1/projects/${projectRef}/read-replicas/${replica.id}`, {
+packages/web-console/src/routes/project/[ref]/settings/api/+page.svelte:26:    get resource() { return "v1/projects"; },
+packages/web-console/src/routes/project/[ref]/settings/api/+page.svelte:52:      const res = await apiClient(`/v1/projects/${projectRef}/gateway/custom-rate-limits`, {
+packages/web-console/src/routes/project/[ref]/settings/api/+page.svelte:80:      const res = await apiClient(`/v1/projects/${projectRef}/gateway/custom-rate-limits`, {
+packages/web-console/src/routes/project/[ref]/settings/network/+page.svelte:18:      const res = await apiClient(`/v1/projects/${projectRef}/network-restrictions`);
+packages/web-console/src/routes/project/[ref]/settings/network/+page.svelte:47:      const res = await apiClient(`/v1/projects/${projectRef}/network-restrictions`, {
+packages/web-console/src/routes/project/[ref]/settings/branches/+page.svelte:123:      const res = await apiClient(`/v1/projects/${projectRef}/branches`);
+packages/web-console/src/routes/project/[ref]/settings/branches/+page.svelte:137:      const res = await apiClient(`/v1/projects/${projectRef}/branches`, {
+packages/web-console/src/routes/project/[ref]/settings/branches/+page.svelte:161:      const res = await apiClient(`/v1/projects/${projectRef}/branches/${branchRef}`, {
+packages/web-console/src/routes/project/[ref]/settings/branches/+page.svelte:175:      const res = await apiClient(`/v1/projects/${projectRef}/branches/${branchRef}/promote/plan`);
+packages/web-console/src/routes/project/[ref]/settings/branches/+page.svelte:192:      const res = await apiClient(`/v1/projects/${projectRef}/branches/${input.branchRef}/promote`, {
+packages/web-console/src/routes/project/[ref]/settings/branches/+page.svelte:233:      const res = await apiClient(`/v1/projects/${projectRef}/branches/${branchRef}/promote`, {
+packages/web-console/src/routes/project/[ref]/settings/log-drains/+page.svelte:38:      const res = await apiClient(`/v1/projects/${projectRef}/log-drains`);
+packages/web-console/src/routes/project/[ref]/settings/log-drains/+page.svelte:51:      const res = await apiClient(`/v1/projects/${projectRef}/log-drains`, {
+packages/web-console/src/routes/project/[ref]/settings/log-drains/+page.svelte:76:      const res = await apiClient(`/v1/projects/${projectRef}/log-drains/${drain.id}`, {
+packages/web-console/src/routes/project/[ref]/settings/log-drains/+page.svelte:93:      const res = await apiClient(`/v1/projects/${projectRef}/log-drains/${drainId}`, { method: "DELETE" });
+packages/web-console/src/routes/project/[ref]/hosting/[id]/records/+page.svelte:26:      const res = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/records`);
+packages/web-console/src/routes/project/[ref]/hosting/[id]/+page.svelte:40:      const res = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}`);
+packages/web-console/src/routes/project/[ref]/hosting/[id]/+page.svelte:49:      const res = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/tokens`);
+packages/web-console/src/routes/project/[ref]/hosting/[id]/+page.svelte:59:      const res = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/logs`);
+packages/web-console/src/routes/project/[ref]/hosting/[id]/+page.svelte:89:      const updateResponse = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}`, {
+packages/web-console/src/routes/project/[ref]/hosting/[id]/+page.svelte:96:        const gitResponse = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/git`, {
+packages/web-console/src/routes/project/[ref]/hosting/[id]/+page.svelte:124:      const res = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/env`, {
+packages/web-console/src/routes/project/[ref]/hosting/[id]/+page.svelte:149:      const res = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/domains`, {
+packages/web-console/src/routes/project/[ref]/hosting/[id]/+page.svelte:174:      const res = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/deploy/upload`, {
+packages/web-console/src/routes/project/[ref]/hosting/[id]/+page.svelte:191:        queryKey: keys().data.list(`v1/projects/${projectRef}/frontend/deployments`),
+packages/web-console/src/routes/project/[ref]/hosting/[id]/+page.svelte:212:      const response = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/domains/${domain}`, { method: "DELETE" });
+packages/web-console/src/routes/project/[ref]/hosting/[id]/+page.svelte:231:      const res = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/tokens`, {
+packages/web-console/src/routes/project/[ref]/hosting/[id]/+page.svelte:253:      const response = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/tokens/${tokenId}`, { method: "DELETE" });
+packages/web-console/src/routes/project/[ref]/hosting/page.test.ts:23:    expect(settingsSource).toContain('keys().data.list(`v1/projects/${projectRef}/frontend/deployments`)');
+packages/web-console/src/routes/project/[ref]/hosting/+page.svelte:26:  const query = useList<Deployment>({ get resource() { return `v1/projects/${projectRef}/frontend/deployments`; } });
+packages/web-console/src/routes/project/[ref]/hosting/+page.svelte:33:      const response = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${id}/redeploy`, { method: "POST" });
+packages/web-console/src/routes/project/[ref]/hosting/+page.svelte:57:      const response = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${id}`, { method: "DELETE" });
+packages/web-console/src/routes/project/[ref]/hosting/new/+page.svelte:44:      const res = await apiClient(`/v1/projects/${projectRef}/frontend/deployments`, {
+packages/web-console/src/routes/project/[ref]/hosting/new/+page.svelte:60:        await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${dep.id}/git`, {
+packages/web-console/src/routes/project/[ref]/hosting/new/+page.svelte:66:        await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${dep.id}/deploy/git`, {
+packages/web-console/src/routes/project/[ref]/api/+page.svelte:23:    queryKey: ["v1/projects", "getOne", projectRef],
+packages/web-console/src/routes/project/[ref]/api/+page.svelte:25:      const res = await apiClient(`/v1/projects/${projectRef}`);
+packages/web-console/src/routes/project/[ref]/api/+page.svelte:34:      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+packages/web-console/src/routes/project/[ref]/database/cron/+page.svelte:53:      const extensionRes = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+packages/web-console/src/routes/project/[ref]/database/cron/+page.svelte:65:      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+packages/web-console/src/routes/project/[ref]/database/cron/+page.svelte:75:        const res2 = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+packages/web-console/src/routes/project/[ref]/database/cron/+page.svelte:100:      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+packages/web-console/src/routes/project/[ref]/database/cron/+page.svelte:126:      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+packages/web-console/src/routes/project/[ref]/database/functions/+page.svelte:49:      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+packages/web-console/src/routes/project/[ref]/database/indexes/+page.svelte:54:      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+packages/web-console/src/routes/project/[ref]/database/temporary-access/+page.svelte:44:    const response = await apiClient(`/v1/projects/${projectRef}/database${path}`, init);
+packages/web-console/src/routes/project/[ref]/database/schemas/+page.svelte:33:      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+packages/web-console/src/routes/project/[ref]/database/materialized-views/+page.svelte:29:      const res = await apiClient(`/v1/projects/${projectRef}/database/materialized-views`);
+packages/web-console/src/routes/project/[ref]/database/materialized-views/+page.svelte:38:      const res = await apiClient(`/v1/projects/${projectRef}/database/materialized-views`, {
+packages/web-console/src/routes/project/[ref]/database/materialized-views/+page.svelte:55:      const res = await apiClient(`/v1/projects/${projectRef}/database/materialized-views/${schemaname}/${matviewname}/refresh`, {
+packages/web-console/src/routes/project/[ref]/database/materialized-views/+page.svelte:71:      const res = await apiClient(`/v1/projects/${projectRef}/database/materialized-views/${schemaname}/${matviewname}?if_exists=true`, {
+packages/web-console/src/routes/project/[ref]/database/hooks/+page.svelte:42:      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+packages/web-console/src/routes/project/[ref]/database/rls-tester/+page.svelte:38:      const response = await apiClient(`/v1/projects/${projectRef}/database/rls-test`, {
+packages/web-console/src/routes/project/[ref]/database/triggers/+page.svelte:46:      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+packages/web-console/src/routes/project/[ref]/database/wrappers/+page.svelte:46:      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+packages/web-console/src/routes/project/[ref]/database/wrappers/+page.svelte:75:      const res = await apiClient(`/v1/projects/${projectRef}/database/wrappers`, {
+packages/web-console/src/routes/project/[ref]/database/settings/+page.svelte:39:      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+packages/web-console/src/routes/project/[ref]/database/roles/+page.svelte:66:      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+packages/web-console/src/routes/project/[ref]/database/roles/+page.svelte:99:      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+packages/web-console/src/routes/project/[ref]/database/roles/+page.svelte:117:      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+packages/web-console/src/routes/project/[ref]/database/types/+page.svelte:39:      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+packages/web-console/src/routes/project/[ref]/database/column-privileges/+page.svelte:72:      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+packages/web-console/src/routes/project/[ref]/database/pipelines/+page.svelte:30:    const response = await apiClient(`/v1/projects/${projectRef}/pipelines${path}`, init);
+packages/web-console/src/routes/project/[ref]/database/extensions/+page.svelte:39:      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+packages/web-console/src/routes/project/[ref]/database/extensions/+page.svelte:63:      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+packages/web-console/src/routes/project/[ref]/database/publications/+page.svelte:42:      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+packages/web-console/src/routes/project/[ref]/database/backups/+page.svelte:29:      const sizeRes = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+packages/web-console/src/routes/project/[ref]/database/backups/+page.svelte:89:      const res = await apiClient(`/v1/projects/${projectRef}/database/backups/logical`, { method: "POST" });
+packages/web-console/src/routes/project/[ref]/database/backups/+page.svelte:116:      const res = await apiClient(`/v1/projects/${projectRef}/database/backups/logical/restore`, { 
+packages/web-console/src/routes/project/[ref]/database/upgrade/+page.svelte:38:    const response = await apiClient(`/v1/projects/${projectRef}${path}`, init);
+packages/web-console/src/routes/project/[ref]/database/migrations/+page.svelte:23:      const res = await apiClient(`/v1/projects/${projectRef}/database/migrations`);
+packages/web-console/src/routes/project/[ref]/storage/policies/+page.svelte:40:      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+packages/web-console/src/routes/project/[ref]/storage/vectors/+page.svelte:35:      `/v1/projects/${encodeURIComponent(projectRef)}/storage/vector/${encodeURIComponent(operation)}`,
+packages/web-console/src/routes/project/[ref]/storage/+page.svelte:158:      const response = await apiClient(`/v1/projects/${encodeURIComponent(projectRef)}/storage/buckets/${encodeURIComponent(bucketId)}?${query}`, {
+packages/web-console/src/routes/project/[ref]/tables/+page.svelte:55:      const response = await apiClient(`/v1/projects/${projectRef}/database/tables`, {
+packages/web-console/src/routes/project/[ref]/tables/+page.svelte:118:          resourceName={`v1/projects/${projectRef}/database/tables`}
+packages/web-console/src/routes/project/[ref]/logs/+page.svelte:56:      const res = await apiClient(`/v1/projects/${projectRef}/logs?${params.toString()}`);
+packages/web-console/src/routes/platform/pooling/+page.svelte:10:      const res = await apiClient("/v1/projects");
+packages/web-console/src/routes/platform/pooling/+page.svelte:53:      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+packages/web-console/src/routes/platform/tuning/+page.svelte:10:      const res = await apiClient("/v1/projects");
+packages/web-console/src/routes/platform/tuning/+page.svelte:95:      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+packages/web-console/src/routes/platform/+page.svelte:9:  {$t("Common.loading", { default: "Redirecting to platform admin..." })}
+packages/web-console/src/routes/platform/backups/+page.svelte:16:    const response = await apiClient("/v1/projects/default/database/backups");
+packages/web-console/src/routes/platform/backups/+page.svelte:79:      const res = await apiClient("/v1/projects/default/database/backups", {
+packages/web-console/src/routes/+layout.svelte:292:        const response = await apiClient('/v1/projects');
+packages/web-console/src/routes/+layout.svelte:330:        <p class="text-muted-foreground text-sm">{$t("Login.redirecting", { default: "Redirecting to login..." })}</p>
+packages/web-console/src/routes/observability-reported-i18n.test.ts:101:    expect(servicesSource).toContain('POST /v1/projects/{projectRef}/restore');
+packages/web-console/src/routes/observability-reported-i18n.test.ts:102:    expect(servicesSource).toContain('POST /v1/projects/{projectRef}/restart');
+packages/web-console/src/routes/page.test.ts:5:const projectsPageSource = readFileSync(new URL("./projects/+page.svelte", import.meta.url), "utf8");
+packages/web-console/src/routes/page.test.ts:6:const createProjectPageSource = readFileSync(new URL("./projects/create/+page.svelte", import.meta.url), "utf8");
+packages/web-console/src/routes/page.test.ts:7:const projectSwitcherSource = readFileSync(new URL("../lib/components/ProjectSwitcher.svelte", import.meta.url), "utf8");
+packages/web-console/src/routes/page.test.ts:16:    expect(pageSource).toContain('apiClient("/v1/projects")');
+packages/web-console/src/routes/page.test.ts:39:    expect(pageSource).toContain('goto(resolve("/projects"))');
+packages/web-console/src/routes/page.test.ts:45:    expect(projectsPageSource).toContain('href="/projects/create"');
+packages/web-console/src/routes/page.test.ts:46:    expect(projectSwitcherSource).toContain('goto("/projects/create")');
+packages/web-console/src/routes/page.test.ts:49:    expect(createProjectPageSource).toContain('apiClient("/v1/projects"');
+packages/web-console/src/routes/+page.svelte:49:    { titleKey: "Dashboard.nav_projects", href: "/projects", icon: FolderKanban },
+packages/web-console/src/routes/+page.svelte:82:    const response = await apiClient("/v1/projects");
+packages/web-console/src/routes/+page.svelte:190:        <button class="primary-button" type="button" onclick={() => goto(resolve("/projects"))}>
+packages/web-console/src/routes/+page.svelte:246:              <a href={resolve("/projects")}>{$t("Dashboard.view_all")} <ArrowUpRight size={13} /></a>
+packages/web-console/src/routes/+page.svelte:300:                <button class="primary-button" type="button" onclick={() => goto(resolve("/projects"))}><Plus size={14} /> {$t("Dashboard.create_first_project")}</button>
+packages/web-console/src/routes/projects/create/+page.svelte:16:    const response = await apiClient("/v1/projects", {
+packages/web-console/src/routes/projects/create/+page.svelte:51:    <a href="/projects" class="rounded-md p-2 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="返回项目列表">
+packages/web-console/src/routes/projects/create/+page.svelte:77:      <a href="/projects" class="rounded-md px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground">取消</a>
+packages/web-console/src/routes/projects/+page.svelte:5:  const query = useList({ resource: "v1/projects" });
+packages/web-console/src/routes/projects/+page.svelte:11:    <!-- CreateButton links to /projects/create automatically because resource is inferred if we were in AdminApp, but here we can just pass the path -->
+packages/web-console/src/routes/projects/+page.svelte:12:    <a href="/projects/create" class="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-brand text-brand-foreground hover:bg-brand/90 h-10 px-4 py-2">
+packages/web-console/src/routes/layout.test.ts:19:    expect(loginPageSource).toContain('const CONSOLE_LANDING_PATH = "/projects";');
+packages/web-console/src/routes/login/+page.svelte:8:  const CONSOLE_LANDING_PATH = "/projects";
+packages/web-console/src/lib/i18n/locales/en.json:1133:    "project_deleted": "Project deleted. Redirecting…",
+packages/web-console/src/lib/i18n/locales/en.json:1959:    "redirecting": "Redirecting..."
+packages/web-console/src/lib/i18n/locales/zh.json:1959:    "redirecting": "正在重定向..."
+packages/web-console/src/lib/function-snippets.ts:110:  return `/v1/projects/${projectRef}/tasks?${query.toString()}`;
+packages/web-console/src/lib/api.ts:263:  // Recheck the cookie-backed session before redirecting on a transient 401.
+packages/web-console/src/lib/function-snippets.test.ts:34:      "/v1/projects/proj_123/tasks?function_slug=hello%2Fworld&limit=5",
+packages/web-console/src/lib/function-version-details.test.ts:61:      "/v1/projects/proj%2F1/functions/hello%20world/versions/12",
+packages/web-console/src/lib/function-version-details.ts:24:  return requester(`/v1/projects/${projectRef}/functions/${slug}/versions/${request.version}`);
+packages/web-console/src/lib/api.test.ts:42:    const response = await apiClient("/v1/projects");
+packages/web-console/src/lib/api.test.ts:62:    await apiClient("/v1/projects", {
+packages/web-console/src/lib/api.test.ts:113:    const response = await apiClient("/v1/projects", { signal });
+packages/web-console/src/lib/api.test.ts:129:    const response = await apiClient("/v1/projects/proj/database/sql", { timeoutMs: 0 });
+packages/web-console/src/lib/api.test.ts:173:      value: { location: { pathname: "/projects", href: "https://console.example.com/projects" } },
+packages/web-console/src/lib/api.test.ts:199:    const response = await apiClient("/v1/projects");
+packages/web-console/src/lib/api.test.ts:203:    expect(calls).toEqual(["/auth/session", "/auth/logout", "/auth/refresh", "/v1/projects"]);
+packages/web-console/src/lib/api.test.ts:237:    const response = await apiClient("/v1/projects");
+packages/web-console/src/lib/api.test.ts:241:    expect(calls).toEqual(["/v1/projects", "/auth/session"]);
+packages/web-console/src/lib/api.test.ts:271:    const response = await apiClient("/v1/projects");
+packages/web-console/src/lib/api.test.ts:274:    expect(calls).toEqual(["/auth/session", "/auth/refresh", "/v1/projects"]);
+packages/web-console/src/lib/api.test.ts:308:      apiClient("/v1/projects/first"),
+packages/web-console/src/lib/api.test.ts:309:      apiClient("/v1/projects/second"),
+packages/web-console/src/lib/api.test.ts:340:    const response = await apiClient("/v1/projects");
+packages/web-console/src/lib/api.test.ts:343:    expect(calls).toEqual(["/auth/session", "/auth/refresh", "/v1/projects"]);
+packages/web-console/src/lib/api.test.ts:364:    await expect(apiClient("/v1/projects")).rejects.toThrow("unexpected refresh failure");
+packages/web-console/src/lib/admin/provider.ts:57:  match: /^v1\/projects\/[^/]+\/database\/tables\/[^/]+\/[^/]+\/rows$/,
+packages/web-console/src/lib/admin/resources.ts:98:    'v1/projects',
+packages/web-console/src/lib/admin/resources.ts:109:    'v1/projects',
+packages/web-console/src/lib/admin/resources.ts:204:    name: 'v1/projects',
+packages/web-console/src/lib/admin/resources.ts:238:    name: `v1/projects/${ref}/database/tables`,
+packages/web-console/src/lib/admin/resources.ts:251:    name: `v1/projects/${ref}/auth/users`,
+packages/web-console/src/lib/admin/resources.test.ts:55:    expect(names).toContain("v1/projects/alpha123/auth/users");
+packages/web-console/src/lib/admin/resources.test.ts:56:    expect(names).toContain("v1/projects/beta456/auth/users");
+packages/web-console/src/lib/admin/resources.test.ts:57:    expect(names).toContain("v1/projects/alpha123/database/tables");
+packages/web-console/src/lib/admin/resources.test.ts:63:      (resource) => resource.name === "v1/projects/alpha123/auth/users",
+packages/web-console/src/lib/admin/resources.test.ts:71:      (resource) => resource.name === "v1/projects/alpha123/database/tables",
+packages/web-console/src/lib/admin/resources.test.ts:80:      (resource) => resource.name === "v1/projects/alpha123/auth/users",
+packages/web-console/src/lib/admin/resources.test.ts:91:      (resource) => resource.name === "v1/projects/alpha123/database/tables",
+packages/web-console/src/lib/admin/resources.test.ts:94:      (resource) => resource.name === "v1/projects/alpha123/database/tables",
+packages/web-console/src/lib/admin/resources.test.ts:107:      (resource) => resource.name === "v1/projects",
+packages/web-console/src/lib/admin/resources.test.ts:181:      "v1/projects/alpha/database/tables/odd%20schema/a%22b%2Fc/rows",
+packages/web-console/src/lib/admin/resources.test.ts:184:      "/v1/projects/alpha/database/tables/odd%20schema/a%22b%2Fc/columns",
+packages/web-console/src/lib/admin/provider.test.ts:96:      { resource: "v1/projects/project-a/functions/send-email/logs" },
+packages/web-console/src/lib/admin/provider.test.ts:114:      resource: "v1/projects/alpha/database/tables/public/events/rows",
+packages/web-console/src/lib/admin/provider.test.ts:124:        { value: "first", __svadmin_row_id: "v1/projects/alpha/database/tables/public/events/rows:2" },
+packages/web-console/src/lib/admin/provider.test.ts:125:        { value: "second", __svadmin_row_id: "v1/projects/alpha/database/tables/public/events/rows:3" },
+packages/web-console/src/lib/admin/provider.test.ts:137:        resource: "v1/projects/alpha/database/tables/public/events/rows",
+packages/web-console/src/lib/admin/provider.test.ts:145:        resource: "v1/projects/alpha/database/tables/public/events/rows",
+packages/web-console/src/lib/components/ProjectSwitcher.svelte:40:    onclick={() => goto("/projects/create")}
+packages/web-console/src/lib/components/Sidebar.svelte:26:  import ProjectSwitcher from "./ProjectSwitcher.svelte";
+packages/web-console/src/lib/components/DiagnosticsRunPanel.svelte:57:  const basePath = $derived(scope === "project" ? `/v1/projects/${projectRef}/diagnostics` : "/v1/diagnostics");
+packages/web-console/README.md:48:- **Dynamic Tenant Resources**: Resources (like `v1/projects/[ref]/database/tables` and `auth/users`) are dynamically registered via a `$effect` hook based on SvelteKit routing parameters, meaning SVAdmin adapts seamlessly to whichever tenant project you are viewing.
+packages/web-console/README.md:49:- **Dashboard Summary Hot Path**: Project dashboards first call `/v1/projects/:ref/dashboard/summary`; legacy per-card SQL calls remain as fallback if the summary endpoint is unavailable.
