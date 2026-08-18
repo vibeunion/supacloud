@@ -133,6 +133,175 @@ describe("auth CLI mutation contract", () => {
         expect(response.content[0].text).not.toContain("user@example.test");
     });
 
+    test("rejects malformed or cross-user auth projections without reflecting remote fields", async () => {
+        const secret = "nested-private-auth-field";
+        const wrongUser = captureAuthTool({
+            get: async () => ({
+                ok: true,
+                status: 200,
+                data: {
+                    id: "00000000-0000-4000-8000-000000000099",
+                    email: "other@example.test",
+                },
+            }),
+        });
+        const wrongResponse = await wrongUser.callback({
+            action: "get_user",
+            ref: "project-a",
+            user_id: "00000000-0000-4000-8000-000000000002",
+        });
+        expect(wrongResponse.isError).toBe(true);
+        expect(JSON.parse(wrongResponse.content[0].text).error).toBe("INVALID_RESPONSE");
+
+        const malformedList = captureAuthTool({
+            get: async () => ({
+                ok: true,
+                status: 200,
+                data: {
+                    users: [{
+                        id: "00000000-0000-4000-8000-000000000001",
+                        email: { token: secret },
+                    }],
+                    total: 1,
+                    page: 1,
+                    per_page: 50,
+                },
+            }),
+        });
+        const malformedResponse = await malformedList.callback({ action: "list_users", ref: "project-a" });
+        expect(malformedResponse.isError).toBe(true);
+        expect(malformedResponse.content[0].text).not.toContain(secret);
+    });
+
+    test("preserves empty optional email and phone fields from GoTrue", async () => {
+    const userId = "00000000-0000-4000-8000-000000000002";
+    const { callback } = captureAuthTool({
+        get: async () => ({
+            ok: true,
+            status: 200,
+            data: {
+                id: userId,
+                email: "",
+                phone: "",
+                created_at: "2026-08-18T00:00:00.000Z",
+                last_sign_in_at: null,
+            },
+        }),
+    });
+
+    const response = await callback({ action: "get_user", ref: "project-a", user_id: userId });
+
+    expect(response.isError).not.toBe(true);
+    expect(JSON.parse(response.content[0].text).user).toEqual({
+        id: userId,
+        email: "",
+        phone: "",
+        created_at: "2026-08-18T00:00:00.000Z",
+        last_sign_in_at: null,
+    });
+});
+
+    test("bounds auth search and email inputs before HTTP", async () => {
+        let requestCount = 0;
+        const { callback } = captureAuthTool({
+            get: async () => {
+                requestCount += 1;
+                return { ok: true, status: 200, data: { users: [] } };
+            },
+            postReleaseMutation: async () => {
+                requestCount += 1;
+                return { ok: true, status: 200, data: {} };
+            },
+        });
+
+        await expect(callback({
+            action: "list_users",
+            ref: "project-a",
+            search: "x".repeat(257),
+        })).rejects.toThrow("exceeds 256 characters");
+        await expect(callback({
+            action: "generate_link",
+            ref: "project-a",
+            type: "magiclink",
+            email: "x".repeat(321),
+        })).rejects.toThrow("exceeds 320 characters");
+        expect(requestCount).toBe(0);
+    });
+
+    test("supports explicit localhost callbacks and rejects unsafe link types", async () => {
+        const requests: Array<{ path: string; body: unknown }> = [];
+        const { callback } = captureAuthTool({
+            postReleaseMutation: async (path: string, body: unknown) => {
+                requests.push({ path, body });
+                return {
+                    ok: true,
+                    status: 200,
+                    data: { action_link: "http://project-a.api.127.0.0.1.sslip.io/auth/v1/verify?token=safe" },
+                };
+            },
+        });
+        await callback({
+            action: "generate_link",
+            ref: "project-a",
+            type: "recovery",
+            email: "user@example.test",
+            redirect_to: "http://localhost:3000/callback",
+        });
+        expect(requests[0]?.body).toEqual({
+            type: "recovery",
+            email: "user@example.test",
+            redirect_to: "http://localhost:3000/callback",
+        });
+        await expect(callback({
+            action: "generate_link",
+            ref: "project-a",
+            type: "signup",
+            email: "user@example.test",
+        })).rejects.toThrow("magiclink, recovery, or invite");
+        expect(requests).toHaveLength(1);
+    });
+
+    test("rejects malformed action links and reports an uncertain mutation without reflection", async () => {
+        const secret = "private-generated-action-link";
+        for (const result of [
+            {
+                ok: true,
+                status: 200,
+                data: { action_link: `javascript:${secret}` },
+            },
+            {
+                ok: false,
+                status: 503,
+                data: { action_link: secret, email: "user@example.test" },
+            },
+            {
+                ok: false,
+                status: 500,
+                data: { error: "Network Error" },
+                transportError: true,
+            },
+        ]) {
+            const { callback } = captureAuthTool({ postReleaseMutation: async () => result });
+            const response = await callback({
+                action: "generate_link",
+                ref: "project-a",
+                type: "magiclink",
+                email: "user@example.test",
+            });
+            expect(response.isError).toBe(true);
+            expect(JSON.parse(response.content[0].text)).toEqual({
+                ok: false,
+                operation: "auth.generate_link",
+                error: {
+                    code: "OUTCOME_UNKNOWN",
+                    http_status: result.transportError ? null : result.status,
+                },
+            });
+            expect(response.content[0].text).not.toContain(secret);
+            expect(response.content[0].text).not.toContain("user@example.test");
+        }
+    });
+
     test("decodes a CLI JSON config before sending the PATCH request", async () => {
         const requests: Array<{ path: string; body: unknown }> = [];
         const { schema, callback } = captureAuthTool({
