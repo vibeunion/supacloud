@@ -1,0 +1,2 @@
+PATTERN: table_count|index_count|relation_count|pg_class|pg_tables|pg_stat_user|information_schema\.tables|database.*stat|dashboard.*stat
+
