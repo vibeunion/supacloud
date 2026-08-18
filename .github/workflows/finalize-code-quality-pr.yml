@@ -1,0 +1,92 @@
+name: Finalize Code Quality repair branch
+
+on:
+  push:
+    branches:
+      - agent/fix-code-quality-findings
+    paths:
+      - .github/workflows/finalize-code-quality-pr.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: finalize-code-quality-repair
+  cancel-in-progress: false
+
+jobs:
+  finalize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repair branch
+        uses: actions/checkout@v7
+        with:
+          ref: agent/fix-code-quality-findings
+          fetch-depth: 0
+
+      - name: Rebase-safe merge and cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git merge --no-edit origin/main
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              file = Path(path)
+              text = file.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one occurrence, found {count}: {old!r}")
+              file.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          replace_once(
+              "packages/management-api/src/routes/storage.ts",
+              "return status(502, { message: `Image transform failed: ${errText}`, code: '502' });",
+              'return status(502, { message: "Image transform failed", code: "502" });',
+          )
+
+          replace_once(
+              "packages/web-console/src/lib/api.ts",
+              "let studioSessionRefreshPromise: Promise<StudioSessionState> | null = null;",
+              "type StudioSessionRefresh = { promise: Promise<StudioSessionState> };\nlet studioSessionRefresh: StudioSessionRefresh | null = null;",
+          )
+          replace_once(
+              "packages/web-console/src/lib/api.ts",
+              "const refreshPromise = studioSessionRefreshPromise ??= refreshStudioSession();",
+              "const refresh = studioSessionRefresh ??= { promise: refreshStudioSession() };",
+          )
+          replace_once(
+              "packages/web-console/src/lib/api.ts",
+              "await refreshPromise;",
+              "await refresh.promise;",
+          )
+          replace_once(
+              "packages/web-console/src/lib/api.ts",
+              "    studioSessionRefreshPromise = null;",
+              "    if (studioSessionRefresh === refresh) {\n      studioSessionRefresh = null;\n    }",
+          )
+          PY
+
+          git rm -r --ignore-unmatch \
+            .github/code-quality-context \
+            .github/code-quality-findings \
+            .github/code-quality-fix-debug.txt \
+            .github/code-quality-fix-result.txt \
+            .github/code-quality-js-findings.json \
+            .github/code-quality-summary.json \
+            .github/scripts/apply-code-quality-fixes.py \
+            .github/workflows/code-quality-apply-fixes-v2.yml \
+            .github/workflows/finalize-code-quality-pr.yml
+
+          git diff --check
+          git status --short
+          git add -A
+          git commit -m "fix: finalize Code Quality findings"
+          git push origin HEAD:agent/fix-code-quality-findings
