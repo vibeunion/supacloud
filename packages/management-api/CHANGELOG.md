@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.61.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.60.6...management-api-v0.61.0) (2026-08-18)
+
+
+### Features
+
+* **cli:** add authoritative project endpoint projection ([9fb670b](https://github.com/vibeunion/supacloud/commit/9fb670b0391149fe6da91a69f4132b40c75c0ef2))
+
+
+### Bug Fixes
+
+* repair Grafana subpath during upgrades ([bf45087](https://github.com/vibeunion/supacloud/commit/bf4508756256ed620fbc2cb1271e27e560c055ca))
+
 ## [0.60.6](https://github.com/vibeunion/supacloud/compare/management-api-v0.60.5...management-api-v0.60.6) (2026-08-18)
 
 
