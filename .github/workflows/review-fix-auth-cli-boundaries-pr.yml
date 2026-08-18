@@ -41,6 +41,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin main
           git merge --no-edit origin/main
+          sed -i 's/re.subn(pattern, replacement, text, count=1, flags=flags)/re.subn(pattern, lambda _match: replacement, text, count=1, flags=flags)/' .github/scripts/fix-auth-cli-boundaries.py
           python3 .github/scripts/fix-auth-cli-boundaries.py
 
       - name: Validate project CLI
