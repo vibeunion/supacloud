@@ -12,8 +12,10 @@ import {
   readFileSync,
   readSync,
   readdirSync,
+  renameSync,
   rmSync,
   type Stats,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -27,14 +29,14 @@ import { hasSecretEncryptionCheckpoint } from "./db/secret-key-migration";
 const BACKUP_ROOT = "/var/lib/supacloud/backups/control-plane-upgrades";
 const BACKUP_ID_PATTERN = /^control-plane-\d{8}T\d{6}Z-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const BACKUP_LIMIT = 5;
-const BACKUP_USER = "postgres";
 const COMMAND_TIMEOUT_SECONDS = 1800;
+const SYSTEMD_RUN_TIMEOUT_SECONDS = COMMAND_TIMEOUT_SECONDS + 60;
 const MAX_RECEIPT_BYTES = 8 * 1024;
 const POSTGRES_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_.-]{0,62}$/;
-const SETPRIV_PATH = ["/usr/bin/setpriv", "/bin/setpriv"].find(existsSync) ?? "/usr/bin/setpriv";
-const ID_PATH = ["/usr/bin/id", "/bin/id"].find(existsSync) ?? "/usr/bin/id";
 const PG_DUMP_PATH = ["/usr/bin/pg_dump", "/usr/local/bin/pg_dump"].find(existsSync) ?? "/usr/bin/pg_dump";
 const PG_RESTORE_PATH = ["/usr/bin/pg_restore", "/usr/local/bin/pg_restore"].find(existsSync) ?? "/usr/bin/pg_restore";
+const SYSTEMD_RUN_PATH = ["/usr/bin/systemd-run", "/bin/systemd-run"].find(existsSync) ?? "/usr/bin/systemd-run";
+const SYSTEMCTL_PATH = ["/usr/bin/systemctl", "/bin/systemctl"].find(existsSync) ?? "/usr/bin/systemctl";
 const TIMEOUT_PATH = ["/usr/bin/timeout", "/bin/timeout"].find(existsSync) ?? "/usr/bin/timeout";
 
 export type ControlPlaneMigrationCandidates = {
@@ -66,19 +68,34 @@ type DatabaseTarget = {
 
 type CommandRequest = {
   args: string[];
-  env?: Record<string, string | undefined>;
   stdin?: number;
   stdout?: number;
 };
 
 type ControlPlaneBackupOperations = {
   backupRoot: string;
-  identity: (user: string) => Promise<{ gid: number; uid: number }>;
   now: () => Date;
   randomId: () => string;
+  reconcileUnit?: (unitName: string) => Promise<void>;
   remove?: (directory: string) => void;
   run: (request: CommandRequest) => Promise<number>;
 };
+
+type CapturedCommand = {
+  exitCode: number;
+  stdout: string;
+};
+
+type UnitReconciliationOperations = {
+  capture: (args: string[]) => Promise<CapturedCommand>;
+  run: (request: CommandRequest) => Promise<number>;
+};
+
+class UnreconciledBackupUnitError extends AggregateError {
+  constructor(dumpError: unknown, reconciliationError: unknown) {
+    super([dumpError, reconciliationError], "Control-plane pg_dump failure could not be reconciled");
+  }
+}
 
 type ControlPlaneSafetyOperations = {
   backup: (
@@ -278,24 +295,9 @@ async function withControlPlaneInspection<T>(
   }
 }
 
-async function commandIdentity(user: string): Promise<{ gid: number; uid: number }> {
-  const values = await Promise.all(["-u", "-g"].map(async (flag) => {
-    const process = Bun.spawn([TIMEOUT_PATH, "5", ID_PATH, flag, user], {
-      env: {}, stdout: "pipe", stderr: "ignore",
-    });
-    const [exitCode, stdout] = await Promise.all([process.exited, new Response(process.stdout).text()]);
-    const numericIdentity = stdout.trim();
-    if (exitCode !== 0 || !/^\d+$/.test(numericIdentity)) {
-      throw new Error("Control-plane backup account lookup failed");
-    }
-    return Number(numericIdentity);
-  }));
-  return { uid: values[0]!, gid: values[1]! };
-}
-
 async function runCommand(request: CommandRequest): Promise<number> {
   const childProcess = Bun.spawn(request.args, {
-    env: request.env ?? {},
+    env: {},
     stdin: request.stdin ?? "ignore",
     stdout: request.stdout ?? "ignore",
     stderr: "ignore",
@@ -303,10 +305,18 @@ async function runCommand(request: CommandRequest): Promise<number> {
   return childProcess.exited;
 }
 
+async function captureCommand(args: string[]): Promise<CapturedCommand> {
+  const childProcess = Bun.spawn(args, { env: {}, stdout: "pipe", stderr: "ignore" });
+  const [exitCode, stdout] = await Promise.all([
+    childProcess.exited,
+    new Response(childProcess.stdout).text(),
+  ]);
+  return { exitCode, stdout };
+}
+
 function defaultBackupOperations(): ControlPlaneBackupOperations {
   return {
     backupRoot: BACKUP_ROOT,
-    identity: commandIdentity,
     now: () => new Date(),
     randomId: randomUUID,
     run: runCommand,
@@ -333,10 +343,100 @@ function createBackupDirectory(operations: ControlPlaneBackupOperations, backupI
   return backupDirectory;
 }
 
-function dumpArguments(target: DatabaseTarget, inspection: ControlPlaneInspection, uid: number, gid: number): string[] {
+function pgpassField(field: string): string {
+  if (/[\r\n]/.test(field)) throw new Error("Control-plane backup credentials cannot contain line breaks");
+  return field.replaceAll("\\", "\\\\").replaceAll(":", "\\:");
+}
+
+function writePgpassCredential(filePath: string, target: DatabaseTarget): void {
+  const fields = [target.hostname, target.port, target.database, target.username, target.password].map(pgpassField);
+  writeFileSync(filePath, `${fields.join(":")}\n`, { flag: "wx", mode: 0o600 });
+  assertBackupArchive(lstatSync(filePath), process.getuid?.() ?? 0);
+}
+
+function backupUnitName(backupId: string): string {
+  if (!BACKUP_ID_PATTERN.test(backupId)) throw new Error("Control-plane backup ID is invalid");
+  return `supacloud-${backupId}`;
+}
+
+function inactiveBackupUnit(output: CapturedCommand): boolean {
+  if (output.exitCode !== 0 || output.stdout.length > 512) return false;
+  const lines = output.stdout.trim().split("\n");
+  if (lines.length !== 4 || lines.some((line) => !line.includes("="))) return false;
+  const properties = new Map(lines.map((line) => line.split("=", 2) as [string, string]));
+  if (properties.size !== 4) return false;
+  const activeState = properties.get("ActiveState");
+  const loadState = properties.get("LoadState");
+  return ["inactive", "failed"].includes(activeState ?? "")
+    && ["loaded", "not-found"].includes(loadState ?? "")
+    && ["dead", "failed"].includes(properties.get("SubState") ?? "")
+    && properties.get("MainPID") === "0";
+}
+
+async function reconcileBackupUnit(
+  unitName: string,
+  operations: UnitReconciliationOperations = { capture: captureCommand, run: runCommand },
+): Promise<void> {
+  const service = `${unitName}.service`;
+  await operations.run({ args: [TIMEOUT_PATH, "45", SYSTEMCTL_PATH, "stop", "--", service] });
+  const state = await operations.capture([
+    TIMEOUT_PATH, "10", SYSTEMCTL_PATH, "show",
+    "--property=LoadState", "--property=ActiveState", "--property=SubState", "--property=MainPID",
+    "--", service,
+  ]);
+  if (!inactiveBackupUnit(state)) throw new Error("Control-plane backup transient unit did not stop cleanly");
+}
+
+async function runIsolatedDump(
+  request: CommandRequest,
+  unitName: string,
+  operations: ControlPlaneBackupOperations,
+): Promise<void> {
+  let dumpError: unknown;
+  try {
+    if (await operations.run(request) === 0) return;
+    dumpError = new Error("Control-plane pg_dump failed");
+  } catch (error: unknown) {
+    dumpError = error;
+  }
+  try {
+    await (operations.reconcileUnit ?? reconcileBackupUnit)(unitName);
+  } catch (reconciliationError: unknown) {
+    throw new UnreconciledBackupUnitError(dumpError, reconciliationError);
+  }
+  throw dumpError;
+}
+
+function quarantineUnresolvedBackup(
+  backupDirectory: string,
+  credentialPath: string,
+  backupRoot: string,
+): void {
+  rmSync(credentialPath, { force: true });
+  renameSync(backupDirectory, `${backupDirectory}.unresolved`);
+  syncPath(backupRoot, true);
+}
+
+function dumpArguments(
+  target: DatabaseTarget,
+  inspection: ControlPlaneInspection,
+  unitName: string,
+  credentialPath: string,
+): string[] {
+  const credentialDirectory = `/run/credentials/${unitName}.service`;
   return [
-    TIMEOUT_PATH, "--kill-after=30s", String(COMMAND_TIMEOUT_SECONDS),
-    SETPRIV_PATH, "--reuid", String(uid), "--regid", String(gid), "--init-groups", "--",
+    TIMEOUT_PATH, "--kill-after=30s", String(SYSTEMD_RUN_TIMEOUT_SECONDS),
+    SYSTEMD_RUN_PATH, "--quiet", "--wait", "--pipe", "--collect", `--unit=${unitName}`,
+    "--property=Type=exec", "--property=KillMode=control-group", "--property=TimeoutStopSec=30s",
+    `--property=RuntimeMaxSec=${COMMAND_TIMEOUT_SECONDS}s`,
+    "--property=DynamicUser=yes", "--property=NoNewPrivileges=yes",
+    "--property=PrivateTmp=yes", "--property=ProtectHome=yes", "--property=ProtectSystem=strict",
+    "--property=ProtectProc=invisible", "--property=ProcSubset=pid", "--property=PrivateDevices=yes",
+    "--property=ProtectKernelTunables=yes", "--property=ProtectKernelModules=yes",
+    "--property=ProtectControlGroups=yes", "--property=LockPersonality=yes",
+    "--property=RestrictSUIDSGID=yes", "--property=RestrictRealtime=yes", "--property=UMask=0077",
+    `--property=LoadCredential=pgpass:${credentialPath}`,
+    `--property=Environment=PGPASSFILE=${credentialDirectory}/pgpass`, "--",
     PG_DUMP_PATH, "--host", target.hostname, "--port", target.port, "--username", target.username,
     "--dbname", target.database, "--format=custom", "--compress=6", "--snapshot", inspection.snapshotId,
   ];
@@ -524,18 +624,20 @@ async function createControlPlaneBackup(
   const backupId = `control-plane-${completedTimestamp(operations.now())}-${operations.randomId()}`;
   const backupDirectory = createBackupDirectory(operations, backupId);
   const archivePath = join(backupDirectory, "control-plane.dump");
+  const credentialPath = join(backupDirectory, ".pgpass");
   let durableBackup = false;
   try {
-    const backupIdentity = await operations.identity(BACKUP_USER);
+    writePgpassCredential(credentialPath, target);
     const archiveDescriptor = reserveBackupArchive(archivePath);
     let bytes: number;
     let sha256: string;
     try {
-      if (await operations.run({
-        args: dumpArguments(target, inspection, backupIdentity.uid, backupIdentity.gid),
-        env: { PGPASSWORD: target.password },
+      const unitName = backupUnitName(backupId);
+      await runIsolatedDump({
+        args: dumpArguments(target, inspection, unitName, credentialPath),
         stdout: archiveDescriptor,
-      }) !== 0) throw new Error("Control-plane pg_dump failed");
+      }, unitName, operations);
+      unlinkSync(credentialPath);
       fsyncSync(archiveDescriptor);
       assertStableBackupArchive(archivePath, archiveDescriptor);
       bytes = fstatSync(archiveDescriptor).size;
@@ -574,7 +676,13 @@ async function createControlPlaneBackup(
     syncPath(operations.backupRoot, true);
     return evidence;
   } catch (error: unknown) {
-    if (!durableBackup) rmSync(backupDirectory, { force: true, recursive: true });
+    if (!durableBackup) {
+      if (error instanceof UnreconciledBackupUnitError) {
+        quarantineUnresolvedBackup(backupDirectory, credentialPath, operations.backupRoot);
+      } else {
+        rmSync(backupDirectory, { force: true, recursive: true });
+      }
+    }
     throw error;
   }
 }
@@ -620,5 +728,8 @@ export const controlPlaneUpgradeSafetyInternals = {
   databaseTargetFingerprint,
   databaseTarget,
   dumpArguments,
+  inactiveBackupUnit,
+  pgpassField,
+  reconcileBackupUnit,
   verifyArguments,
 };
