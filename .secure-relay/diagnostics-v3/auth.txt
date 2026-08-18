@@ -1,0 +1,368 @@
+PATTERN Missing tenant reference|tenant reference|tenant_ref|tenant-ref|x-tenant|x-project|project-ref|grant_type|auth/v1/token|tenant.{0,30}header
+
+packages/supacloud-lite/src/runtime/auth/handler.ts:420:    const grantType = url.searchParams.get('grant_type')
+packages/supacloud-lite/src/runtime/auth/handler.ts:428:        await this.audit('login_failed', { actorEmail: email, traits: { grant_type: 'password' } })
+packages/supacloud-lite/src/runtime/auth/handler.ts:436:      await this.audit('login', { actorId: user.id, actorEmail: user.email, traits: { grant_type: 'password' } })
+packages/supacloud-lite/src/runtime/auth/handler.ts:456:    return authError(400, 'invalid_grant', `unsupported grant_type: ${grantType}`)
+packages/supacloud-lite/src/runtime/auth/oauth.ts:10: *           exchangeCodeForSession → POST /token?grant_type=pkce)
+packages/supacloud-lite/src/runtime/auth/oauth.ts:206:  /** POST /token?grant_type=pkce - exchange an auth code + verifier for a session. */
+packages/supacloud-lite/src/runtime/auth/oauth.ts:230:      grant_type: 'authorization_code',
+packages/supacloud-lite/test/auth-sessions.test.ts:33:      const response = await backend.fetch('http://local/auth/v1/token?grant_type=password', {
+packages/supacloud-lite/test/auth-sessions.test.ts:168:  return fetchImpl('http://local/auth/v1/token?grant_type=refresh_token', {
+packages/supacloud-lite/test/auth-sessions.test.ts:181:  return fetchImpl('http://local/auth/v1/token?grant_type=pkce', {
+packages/supacloud-lite/test/auth-extended-compat.test.ts:77:      const exchange = await backend.fetch('http://local/auth/v1/token?grant_type=pkce', {
+packages/supacloud-js/src/index.ts:377:  grant_types?: string[];
+packages/supacloud-js/src/index.ts:397:  grant_types?: string[];
+packages/supacloud-js/src/auth-fetch.ts:23:    && url.pathname.endsWith("/auth/v1/token")
+packages/supacloud-js/src/auth-fetch.ts:24:    && url.searchParams.get("grant_type") === "refresh_token";
+packages/supacloud-js/src/auth-fetch.ts:102:    body.set("grant_type", "refresh_token");
+packages/supacloud-js/src/auth-fetch.test.ts:43:    await transport("https://auth.example.com/auth/v1/token?grant_type=refresh_token", {
+packages/supacloud-js/src/auth-fetch.test.ts:65:      "refresh_token=refresh_1&grant_type=refresh_token&client_id=client_1",
+packages/supacloud-js/src/auth-fetch.test.ts:78:    const request = new Request("https://auth.example.com/auth/v1/token?grant_type=refresh_token", {
+packages/supacloud-js/src/auth-fetch.test.ts:88:      "refresh_token=refresh_2&client_id=client_existing&grant_type=refresh_token",
+packages/supacloud-js/src/auth-fetch.test.ts:101:    await transport("https://auth.example.com/tenant/auth/v1/token?grant_type=refresh_token", {
+packages/supacloud-js/src/auth-fetch.test.ts:113:      })("https://auth.example.com/auth/v1/token?grant_type=refresh_token", {
+packages/supacloud-js/src/auth-fetch.test.ts:145:        await transport(`${origin}/auth/v1/token?grant_type=refresh_token`, {
+packages/supacloud-js/src/auth-fetch.test.ts:189:      "https://project.example.com/auth/v1/token?grant_type=refresh_token",
+packages/supacloud-js/src/auth-fetch.test.ts:223:      "refresh_token=refresh_1&grant_type=refresh_token&client_id=client_1",
+packages/supacloud-js/src/workflows.test.ts:16:    projectRef: "project-ref",
+packages/supacloud-js/README.md:73:transparent pass-through, so the regular `/auth/v1/token` refresh flow remains
+packages/supacloud-js/README.md:77:The adapter only transforms `POST /auth/v1/token?grant_type=refresh_token`:
+packages/supacloud-js/README.md:79:`grant_type=refresh_token` into the form body, and adds `client_id` when the
+packages/management-api/src/index.ts:1292:            request.headers.get("x-project-ref") ||
+packages/management-api/src/index.ts:1326:          requestHeaders["x-project-ref"] = projectRef;
+packages/management-api/src/services/project-rbac.service.ts:741:    "x-project-ref": ctx.authorityRef,
+packages/management-api/src/services/gateway-route-builders.ts:42:    "apikey", "x-client-info", "x-project-ref", "X-Api-Version", "x-supabase-api-version",
+packages/management-api/src/services/gateway-route-builders.ts:75:    "x-project-ref",
+packages/management-api/src/services/gateway-route-builders.ts:471:            "X-Project-Ref": projectRef,
+packages/management-api/src/services/gateway-route-builders.ts:472:            "x-project-ref": projectRef,
+packages/management-api/src/services/gateway.service.ts:131:const SECURITY_AUTH_PATHS = ["/auth/v1/token", "/auth/v1/token/", "/auth/v1/signup", "/auth/v1/signup/"];
+packages/management-api/src/services/gateway.service.ts:135:    path: ["/auth/v1/token", "/auth/v1/token/"],
+packages/management-api/src/services/gateway.service.ts:136:    query: { grant_type: ["password"] },
+packages/management-api/src/services/gateway.service.ts:144:    path: ["/auth/v1/token", "/auth/v1/token/"],
+packages/management-api/src/services/gateway.service.ts:145:    query: { grant_type: ["refresh_token"] },
+packages/management-api/src/services/gateway.service.ts:639:        proxy.headers.request.set["X-Project-Ref"] = [projectRef];
+packages/management-api/src/services/gateway.service.ts:640:        proxy.headers.request.set["x-project-ref"] = [projectRef];
+packages/management-api/src/services/gateway.service.ts:1344:            "X-Project-Ref": opts.projectRef,
+packages/management-api/src/services/gateway.service.ts:1345:            "x-project-ref": opts.projectRef,
+packages/management-api/src/services/gateway.service.ts:1668:                    ? [`X-Project-Ref:${config.authRuntimeOwnerRef}`, `x-project-ref:${config.authRuntimeOwnerRef}`]
+packages/management-api/src/services/background-function-worker.ts:299:  headers.set("x-project-ref", task.project_ref);
+packages/management-api/src/utils/scheduled-function-headers.ts:22:  "x-project-ref",
+packages/management-api/src/workers/scheduled-function.worker.ts:98:    "x-project-ref": ref,
+packages/management-api/src/routes/ws.ts:265:            const requestedRef = ws.data.request?.headers?.get("x-project-ref") || ws.data.request?.headers?.get("x-supabase-project") || query.ref || "";
+packages/management-api/src/routes/ws.ts:294:                    "x-project-ref": ref
+packages/management-api/src/routes/auth-mfa.ts:278:              "x-project-ref": params.ref,
+packages/management-api/src/routes/auth-oauth-server.ts:36:  grant_types: t.Optional(t.Array(t.String())),
+packages/management-api/src/routes/auth-oauth-server.ts:49:  grant_types: t.Optional(t.Array(t.String())),
+packages/management-api/src/routes/auth-oauth-server.ts:262:  headers.set("x-project-ref", ctx.project.ref);
+packages/management-api/src/routes/storage-compat.ts:141: * The public gateway forwards the x-project-ref header; also fall back to apikey-based lookup.
+packages/management-api/src/routes/storage-compat.ts:201:    const headerRef = headers['x-project-ref'] || headers['x-supabase-project'] || '';
+packages/management-api/src/routes/storage-compat.ts:287:    if (!ref) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing tenant reference' });
+packages/management-api/src/routes/storage-compat.ts:362:    "apikey", "x-client-info", "x-project-ref", "X-Api-Version", "x-supabase-api-version",
+packages/management-api/src/routes/storage-compat.ts:413:    // Storage compat routes rely on gateway-injected x-project-ref.
+packages/management-api/src/routes/storage-compat.ts:415:    // route already returns 400 "Missing tenant reference". This guard adds
+packages/management-api/src/routes/storage-compat.ts:441:        if (!ref) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing tenant reference' });
+packages/management-api/src/routes/storage-compat.ts:473:        if (!ref) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing tenant reference' });
+packages/management-api/src/routes/storage-compat.ts:528:        if (!ref) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing tenant reference' });
+packages/management-api/src/routes/storage-compat.ts:560:        if (!ref) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing tenant reference' });
+packages/management-api/src/routes/storage-compat.ts:597:        if (!ref) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing tenant reference' });
+packages/management-api/src/routes/storage-compat.ts:620:        if (!ref) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing tenant reference' });
+packages/management-api/src/routes/storage-compat.ts:1463:        if (!ref) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing tenant reference' });
+packages/management-api/src/routes/storage-compat.ts:1517:        if (!ref) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing tenant reference' });
+packages/management-api/src/routes/auth-wechat.ts:270:  const requestRef = req?.headers?.get("x-project-ref") || ""
+packages/management-api/src/routes/auth-wechat.ts:278:  // The shared internal auth gateway requires x-project-ref. If the runtime
+packages/management-api/src/routes/auth-wechat.ts:295:  if (projectRef) headers["x-project-ref"] = projectRef
+packages/management-api/src/routes/auth-wechat.ts:332:    if (/missing tenant reference/i.test(String(detail || "")) && index + 1 < authUrls.length) continue
+packages/management-api/src/routes/auth-wechat.ts:411:    const tokenUrl = \`https://api.weixin.qq.com/sns/jscode2session?appid=\${WECHAT_APP_ID}&secret=\${WECHAT_APP_SECRET}&js_code=\${code}&grant_type=authorization_code\`
+packages/management-api/src/routes/auth-wechat.ts:480:    const tokenUrl = \`https://api.weixin.qq.com/sns/oauth2/access_token?appid=\${WECHAT_MP_APP_ID}&secret=\${WECHAT_MP_APP_SECRET}&code=\${code}&grant_type=authorization_code\`
+packages/management-api/src/routes/auth-china.ts:165:    const tokenUrl = \`${providerInfo.oauthUrl}/token?grant_type=authorization_code&client_id=\${${providerUpper}_APP_ID}&client_secret=\${${providerUpper}_APP_SECRET}&code=\${code}&redirect_uri=\${encodeURIComponent(REDIRECT_URI)}\`
+packages/management-api/src/routes/project-functions.ts:626:          "x-project-ref": params.ref,
+packages/management-api/src/routes/auth-custom-providers.ts:37:  headers.set("x-project-ref", ctx.authorityRef);
+packages/management-api/src/routes/auth-users.ts:161:        "x-project-ref": input.projectRef,
+packages/management-api/src/routes/auth-users.ts:448:          "x-project-ref": params.ref
+packages/management-api/src/routes/auth-users.ts:525:          "x-project-ref": params.ref
+packages/management-api/src/routes/auth-users.ts:581:          "x-project-ref": params.ref
+packages/management-api/src/routes/auth-users.ts:740:          "x-project-ref": params.ref,
+packages/management-api/src/routes/auth-users.ts:770:          "x-project-ref": params.ref,
+packages/management-api/src/routes/auth-users.ts:800:            "x-project-ref": params.ref,
+packages/management-api/src/routes/auth-users.ts:832:          "x-project-ref": params.ref
+packages/management-api/src/routes/auth-users.ts:871:          "x-project-ref": params.ref
+packages/management-api/src/routes/auth-users.ts:921:          "x-project-ref": params.ref
+packages/management-api/src/routes/auth-users.ts:1098:            "x-project-ref": params.ref,
+packages/management-api/src/routes/auth-users.ts:1198:          "x-project-ref": params.ref
+packages/management-api/src/routes/auth-users.ts:1235:          "x-project-ref": params.ref
+packages/management-api/src/routes/sdk-proxy.ts:452:    const refHeader = request.headers.get("x-project-ref") || request.headers.get("x-supabase-project") || "";
+packages/management-api/src/routes/sdk-proxy.ts:613:            reqHeaders.set('x-project-ref', interceptors.upstreamRef || interceptors.ref);
+packages/management-api/src/routes/sdk-proxy.ts:694:            if (!ref) return new Response(JSON.stringify({ message: 'Missing tenant reference' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+packages/management-api/src/routes/sdk-proxy.ts:737:            if (!ref) return new Response(JSON.stringify({ message: 'Missing tenant reference' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+packages/management-api/src/routes/sdk-proxy.ts:757:    if (!ref) return new Response(JSON.stringify({ message: 'Missing tenant reference' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+packages/management-api/src/routes/sdk-proxy.ts:777:    if (!ref) return new Response(JSON.stringify({ message: 'Missing tenant reference' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+packages/management-api/src/routes/sdk-proxy.ts:786:    if (!ref) return new Response(JSON.stringify({ message: 'Missing tenant reference' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+packages/management-api/src/routes/auth-sso.ts:39:            "x-project-ref": ctx.ref
+packages/management-api/src/routes/auth-sso.ts:73:            "x-project-ref": ctx.ref
+packages/management-api/src/routes/auth-sso.ts:114:            "x-project-ref": ctx.ref
+packages/management-api/src/routes/auth-sso.ts:143:            "x-project-ref": ctx.ref
+packages/management-api/src/routes/auth-sso.ts:185:            "x-project-ref": ctx.ref
+packages/management-api/tests/unit/gateway.service.test.ts:254:        expect(rest?.handle?.at(-1)?.headers?.request?.set?.["X-Project-Ref"]).toEqual(["testref123"]);
+packages/management-api/tests/unit/gateway.service.test.ts:295:        expect(management?.handle?.at(-1)?.headers?.request?.set?.["X-Project-Ref"]).toEqual(["testref123"]);
+packages/management-api/tests/unit/gateway.service.test.ts:365:            await provider.setCustomRouteRateLimit(projectRef, "/auth/v1/token", { minute: 200 });
+packages/management-api/tests/unit/gateway.service.test.ts:382:                path: ["/auth/v1/token", "/auth/v1/token/", "/auth/v1/signup", "/auth/v1/signup/"],
+packages/management-api/tests/unit/gateway.service.test.ts:392:                    path: ["/auth/v1/token", "/auth/v1/token/"],
+packages/management-api/tests/unit/gateway.service.test.ts:393:                    query: { grant_type: ["password"] },
+packages/management-api/tests/unit/gateway.service.test.ts:399:                match: [{ query: { grant_type: ["refresh_token"] } }],
+packages/management-api/tests/unit/gateway.service.test.ts:2160:    test("all project routes inject Host, X-Project-Ref, x-project-ref, X-Forwarded-Host, X-Forwarded-Proto headers", async () => {
+packages/management-api/tests/unit/gateway.service.test.ts:2185:            expect(requestSet?.["X-Project-Ref"]).toEqual(["hdrtest"]);
+packages/management-api/tests/unit/gateway.service.test.ts:2186:            expect(requestSet?.["x-project-ref"]).toEqual(["hdrtest"]);
+packages/management-api/tests/unit/gateway.service.test.ts:2226:        expect(requestSet?.["X-Project-Ref"]).toEqual(["storagetest"]);
+packages/management-api/tests/unit/gateway.service.test.ts:2227:        expect(requestSet?.["x-project-ref"]).toEqual(["storagetest"]);
+packages/management-api/tests/unit/gateway.service.test.ts:2261:                                                        "X-Project-Ref": ["legacyref"],
+packages/management-api/tests/unit/gateway.service.test.ts:2298:        expect(requestSet?.["X-Project-Ref"]).toEqual(["legacyref"]);
+packages/management-api/tests/unit/gateway.service.test.ts:2299:        expect(requestSet?.["x-project-ref"]).toEqual(["legacyref"]);
+packages/management-api/tests/unit/gateway.service.test.ts:2353:        expect(requestSet?.["X-Project-Ref"]).toEqual(["legacyfn"]);
+packages/management-api/tests/unit/gateway.service.test.ts:2354:        expect(requestSet?.["x-project-ref"]).toEqual(["legacyfn"]);
+packages/management-api/tests/unit/gateway.service.test.ts:2388:        expect(requestSet?.["X-Project-Ref"]).toEqual(["domaintest"]);
+packages/management-api/tests/unit/gateway.service.test.ts:2389:        expect(requestSet?.["x-project-ref"]).toEqual(["domaintest"]);
+packages/management-api/tests/unit/project-crud-public-config.test.ts:128:    toPublicV1ProjectCreateResponse({ id: "project-id", ref: "project-ref", name: "Project" }, invalidCredential);
+packages/management-api/tests/unit/storage-compat.sdk.test.ts:60:          "x-project-ref": "test_mock",
+packages/management-api/tests/unit/storage-compat.sdk.test.ts:80:      headers: { "x-project-ref": "test_mock", apikey: "test-token" },
+packages/management-api/tests/unit/storage-compat.sdk.test.ts:94:      "x-project-ref": "test_mock",
+packages/management-api/tests/unit/storage-compat.sdk.test.ts:261:        "x-project-ref": "test_mock",
+packages/management-api/tests/unit/storage-compat.sdk.test.ts:282:        "x-project-ref": "test_mock",
+packages/management-api/tests/unit/storage-compat.sdk.test.ts:334:        "x-project-ref": "proj_from_header",
+packages/management-api/tests/unit/storage-compat.sdk.test.ts:389:        "x-project-ref": "proj_from_header",
+packages/management-api/tests/unit/storage-compat.sdk.test.ts:444:        "x-project-ref": "proj_from_key",
+packages/management-api/tests/unit/storage-compat.sdk.test.ts:468:        "x-project-ref": "provisioning_ref",
+packages/management-api/tests/unit/storage-compat.sdk.test.ts:497:        "x-project-ref": "provisioning_header_ref",
+packages/management-api/tests/unit/storage-compat.sdk.test.ts:540:        "x-project-ref": "proj_from_header",
+packages/management-api/tests/unit/gateway-route-builders.test.ts:49:            "X-Project-Ref",
+packages/management-api/tests/unit/gateway-route-builders.test.ts:68:            headers: { "x-project-ref": "other-project" },
+packages/management-api/tests/unit/gateway-route-builders.test.ts:69:        })).toThrow("must not override reserved header: x-project-ref");
+packages/management-api/tests/unit/gateway-route-builders.test.ts:73:        const proxy = makeCustomGatewayRoute("project-ref", {
+packages/management-api/tests/unit/gateway-route-builders.test.ts:89:        expect(proxyHeaders["X-Project-Ref"]).toEqual(["project-ref"]);
+packages/management-api/tests/unit/gateway-route-builders.test.ts:90:        expect(proxyHeaders["x-project-ref"]).toEqual(["project-ref"]);
+packages/management-api/tests/unit/gateway-route-builders.test.ts:92:        const staticRoute = makeCustomGatewayRoute("project-ref", {
+packages/management-api/tests/unit/gateway-route-builders.test.ts:97:            headers: { "X-Project-Ref": "response-value" },
+packages/management-api/tests/unit/gateway-route-builders.test.ts:99:        const redirectRoute = makeCustomGatewayRoute("project-ref", {
+packages/management-api/tests/unit/gateway-route-builders.test.ts:107:        expect(staticRoute.handle[0].response.set["X-Project-Ref"]).toEqual(["response-value"]);
+packages/management-api/tests/unit/gateway-route-builders.test.ts:135:        const caddyRoute = makeCustomGatewayRoute("project-ref", normalized) as any;
+packages/management-api/tests/unit/gateway-route-builders.test.ts:153:        const route = makeCustomGatewayRoute("project-ref", {
+packages/management-api/tests/unit/gateway-route-builders.test.ts:162:        expect(route["@id"]).toBe("route-custom-gateway-project-ref-reports");
+packages/management-api/tests/unit/gateway-route-builders.test.ts:167:        expect(route.handle[1].headers.request.set["X-Project-Ref"]).toEqual(["project-ref"]);
+packages/management-api/tests/unit/gateway-route-builders.test.ts:188:                const route = makeCustomGatewayRoute("project-ref", normalized) as any;
+packages/management-api/tests/unit/gateway-route-builders.test.ts:198:                expect(proxy.headers.request.set["X-Project-Ref"]).toEqual(["project-ref"]);
+packages/management-api/tests/unit/gateway-route-builders.test.ts:199:                expect(proxy.headers.request.set["x-project-ref"]).toEqual(["project-ref"]);
+packages/management-api/tests/unit/gateway-route-builders.test.ts:243:        const route = makeCustomGatewayRoute("project-ref", normalized) as any;
+packages/management-api/tests/unit/postgrest-pool-reconcile.test.ts:161:      LEGACY_CONFIG.replace(PROJECT_REF, "wrong-project-ref"),
+packages/management-api/tests/unit/postgrest-pool-reconcile.test.ts:165:      LEGACY_CONFIG.replace(`pgrst_${PROJECT_REF}`, "pgrst_wrong-project-ref"),
+packages/management-api/tests/unit/project-rbac.routes.test.ts:1031:    expect(authorityRequest?.headers.get("x-project-ref")).toBe("auth-owner");
+packages/management-api/tests/unit/gateway-custom-routes.api.test.ts:218:          id: "unsafe-project-ref",
+packages/management-api/tests/unit/gateway-custom-routes.api.test.ts:222:          headers: { "X-pRoJeCt-ReF": "other-project" },
+packages/management-api/tests/unit/gateway-custom-routes.api.test.ts:228:        message: "Custom proxy route headers must not override reserved header: X-pRoJeCt-ReF",
+packages/management-api/tests/unit/scheduled-functions.routes.test.ts:246:    ["reserved routing header", { "X-Project-Ref": "other-project" }],
+packages/management-api/tests/unit/sdk-proxy.functions.test.ts:100:  test("exposes tenant-bound API key header translation through the internal test seam", () => {
+packages/management-api/tests/unit/sdk-proxy.functions.test.ts:165:          "x-project-ref": "proj_1",
+packages/management-api/tests/unit/sdk-proxy.functions.test.ts:183:          "x-project-ref": "proj_1",
+packages/management-api/tests/unit/sdk-proxy.functions.test.ts:203:          "x-project-ref": "proj_1",
+packages/management-api/tests/unit/sdk-proxy.functions.test.ts:244:          "x-project-ref": "proj_1",
+packages/management-api/tests/unit/sdk-proxy.functions.test.ts:290:          "x-project-ref": "proj_1",
+packages/management-api/tests/unit/sdk-proxy.functions.test.ts:325:          "x-project-ref": "proj_1",
+packages/management-api/tests/unit/sdk-proxy.functions.test.ts:336:      expect(headers.get("x-project-ref")).toBe("proj_1");
+packages/management-api/tests/unit/sdk-proxy.functions.test.ts:355:          "x-project-ref": "proj_1",
+packages/management-api/tests/unit/sdk-proxy.functions.test.ts:535:        expect(headers.get("x-project-ref")).toBe("auth-owner");
+packages/management-api/tests/unit/sdk-proxy.functions.test.ts:1178:          "x-project-ref": "proj_1",
+packages/management-api/tests/unit/sdk-proxy.functions.test.ts:1206:          "x-project-ref": "proj_2",
+packages/management-api/tests/unit/sdk-proxy.functions.test.ts:1239:          "x-project-ref": "proj_from_header",
+packages/management-api/tests/unit/sdk-proxy.functions.test.ts:1271:          "x-project-ref": "proj_from_header",
+packages/management-api/tests/unit/sdk-proxy.functions.test.ts:1282:      expect(headers.get("x-project-ref")).toBe("proj_from_header");
+packages/management-api/tests/unit/sdk-proxy.functions.test.ts:1306:          "x-project-ref": "proj_1",
+packages/management-api/tests/unit/sdk-proxy.functions.test.ts:1330:          "x-project-ref": "proj_from_header",
+packages/management-api/tests/unit/sdk-proxy.functions.test.ts:1358:          "x-project-ref": "proj_1",
+packages/management-api/tests/unit/sdk-proxy.functions.test.ts:1408:            "x-project-ref": "proj_1",
+packages/management-api/tests/unit/supauth-gateway-routing.test.ts:26:    expect(source).toContain("X-Project-Ref:${config.authRuntimeOwnerRef}");
+packages/management-api/tests/unit/auth-oauth-server.test.ts:477:      expect(headers.get("x-project-ref")).toBe("proj_1");
+packages/management-api/tests/unit/auth-oauth-server.test.ts:638:          grant_types: ["authorization_code", "refresh_token"],
+packages/management-api/tests/unit/auth-wechat.test.ts:45:    expect(functionCode).toContain('req?.headers?.get("x-project-ref")');
+packages/management-api/tests/unit/auth-wechat.test.ts:122:        headers: { "Content-Type": "application/json", "x-project-ref": "request-project" },
+packages/management-api/tests/unit/auth-wechat.test.ts:143:        expect(request.headers.get("x-project-ref")).toBe("request-project");
+packages/management-api/tests/unit/scheduled-function.worker.test.ts:221:    "X-Project-Ref",
+packages/management-api/tests/unit/scheduled-function.worker.test.ts:309:      expect(receivedHeaders?.get("x-project-ref")).toBe("proj_a");
+packages/management-api/tests/unit/edge-function-activation-manifest.test.ts:28:  const projectDirectory = join(root, "functions", "project-ref");
+packages/management-api/tests/unit/storage-compat.helpers.test.ts:20:    const payload = signedUrlPayload("project-ref", "avatars", "folder/cat.png", expiresAt);
+packages/management-api/tests/unit/storage-compat.helpers.test.ts:23:    expect(verifyLegacySignedToken(secret, "project-ref", "avatars", "folder/cat.png", token, expiresAt)).toBe(true);
+packages/management-api/tests/unit/storage-compat.helpers.test.ts:25:    expect(verifyLegacySignedToken(secret, "project-ref", "avatars", "folder/cat.png", token, expiresAt, expiresAt + 1)).toBe(false);
+packages/management-api/tests/unit/jit-database-access.service.test.ts:29:    const role = buildJitLoginRole("very-long-project-reference-that-does-not-belong-in-an-identifier", "user-id", "reader", "credential-id");
+packages/management-api/tests/integration/sdk-parity.test.ts:241:    "SDK proxy correctly identifies tenant by anon key (no x-project-ref needed)",
+packages/management-api/tests/integration/sdk-parity.test.ts:244:      // No x-project-ref header is set — the proxy must find the tenant by apikey
+packages/management-api/tests/scripts/capture-snapshots.ts:81:    await recordEndpoint("POST", "/auth/v1/token?grant_type=password", { email: "nonexistent@test.com", password: "wrong" }, "auth_token_error");
+packages/management-api/tests/scripts/ci-tenant-bridge.ts:26:export const CI_TENANT_REF = "cisdkbridgeautotenan"; // ≤20 chars, fixed across runs
+packages/management-api/tests/scripts/ci-tenant-bridge.ts:45:    `[CIBridge] Setting up CI tenant bridge → ref=${CI_TENANT_REF}...`,
+packages/management-api/tests/scripts/ci-tenant-bridge.ts:63:      ${CI_TENANT_REF},
+packages/management-api/tests/scripts/ci-tenant-bridge.ts:99:    WHERE ref = ${CI_TENANT_REF}
+packages/management-api/tests/scripts/ci-tenant-bridge.ts:228:      const s3Result = await StorageService.createBucket(CI_TENANT_REF);
+packages/management-api/tests/scripts/ci-tenant-bridge.ts:260:          projectRef: CI_TENANT_REF,
+packages/management-api/tests/scripts/ci-tenant-bridge.ts:287:  ref:         ${CI_TENANT_REF}
+packages/management-api/tests/scripts/ci-tenant-bridge.ts:293:    ref: CI_TENANT_REF,
+packages/management-api/tests/e2e/snapshot-structural.test.ts:55:          "x-project-ref": tenantRef,
+packages/management-api/tests/e2e/snapshot-structural.test.ts:144:          "x-project-ref": tenantRef,
+packages/management-api/tests/e2e/snapshot-structural.test.ts:164:        "x-project-ref": tenantRef,
+packages/management-api/CHANGELOG.md:2717:* **realtime:** route WebSocket to self-seeded tenant realtime-dev via host header ([2bc2f77](https://github.com/zuohuadong/supacloud/commit/2bc2f77e9766c582e005284c131e123a701d14e0))
+packages/management-api/CHANGELOG.md:3070:* **realtime:** route WebSocket to self-seeded tenant realtime-dev via host header ([3b94834](https://github.com/zuohuadong/supacloud/commit/3b94834277365ec8189b9d726e270849033c3b83))
+packages/management-api/CHANGELOG.md:3421:* **realtime:** route WebSocket to self-seeded tenant realtime-dev via host header ([3b94834](https://github.com/zuohuadong/supacloud/commit/3b94834277365ec8189b9d726e270849033c3b83))
+packages/management-api/CHANGELOG.md:4214:* **realtime:** route WebSocket to self-seeded tenant realtime-dev via host header ([5c54191](https://github.com/zuohuadong/supacloud/commit/5c541914ce95821a2dda7a0e8879cbe54f09af97))
+packages/web-console/src/routes/project/[ref]/auth/navigation.test.ts:26:          "app-state": "export const page = { params: { ref: 'project-ref' }, url: { pathname: '/project/project-ref/auth' } };",
+packages/web-console/src/routes/project/[ref]/auth/navigation.test.ts:29:              project_ref: 'project-ref', mode: 'local', authority_project_ref: 'project-ref', owner_project_ref: null,
+packages/web-console/src/routes/project/[ref]/auth/navigation.test.ts:156:      const urlConfiguration = menu.querySelector<HTMLAnchorElement>('a[href="/project/project-ref/auth/url-configuration"]');
+packages/edge-runtime/worker-pool.test.ts:58:  test("overwrites tenant version headers and removes them for legacy dispatches", async () => {
+packages/edge-runtime/server-function-config.test.ts:137:    headers: { "x-project-ref": PROJECT_REF },
+packages/edge-runtime/server-function-config.test.ts:186:      "x-project-ref": PROJECT_REF,
+packages/edge-runtime/server.ts:1211:  const projectRef = c.headers["x-project-ref"];
+packages/edge-runtime/server.ts:1216:    return badRequest("Missing x-project-ref");
+packages/admin/src/shared/transports/http.test.ts:272:        const response = await createTransport().get("/v1/projects/project-ref", {
+packages/admin/src/shared/transports/http.test.ts:281:        globalThis.fetch = (async () => Response.json({ ref: "project-ref" })) as unknown as typeof fetch;
+packages/admin/src/shared/transports/http.test.ts:283:        const response = await createTransport().get("/v1/projects/project-ref", {
+packages/admin/src/shared/transports/http.test.ts:287:        expect(response).toEqual({ ok: true, status: 200, data: { ref: "project-ref" } });
+packages/admin/src/shared/transports/http.test.ts:337:            "/v1/projects/project-ref/runtime-snapshot",
+packages/admin/src/shared/transports/http.test.ts:350:            "/v1/projects/project-ref/database/backups/logical",
+packages/admin/src/shared/transports/http.test.ts:401:            "/v1/projects/project-ref/database/backups/logical",
+packages/admin/src/shared/tools/project-cli-tools.test.ts:102:    "hidden-project-ref",
+packages/admin/src/shared/tools/project-cli-tools.test.ts:116:    projectRef = "project-ref",
+packages/admin/src/shared/tools/project-cli-tools.test.ts:133:function runtimeSnapshot(projectRef = "project-ref"): ProjectRuntimeSnapshot {
+packages/admin/src/shared/tools/project-cli-tools.test.ts:163:    projectRef = "project-ref",
+packages/admin/src/shared/tools/project-cli-tools.test.ts:180:    const response = await projectCallback({ action: "runtime_snapshot", ref: "project-ref" });
+packages/admin/src/shared/tools/project-cli-tools.test.ts:341:                return { ok: true, status: 201, data: { ref: "project-ref" } };
+packages/admin/src/shared/tools/project-cli-tools.test.ts:375:                return { ok: true, status: 201, data: { ref: "project-ref" } };
+packages/admin/src/shared/tools/project-cli-tools.test.ts:959:                expect(path).toBe("/v1/projects/project-ref/runtime-snapshot");
+packages/admin/src/shared/tools/project-cli-tools.test.ts:965:        const response = await callback({ action: "runtime_snapshot", ref: "project-ref" });
+packages/admin/src/shared/tools/project-cli-tools.test.ts:990:            const response = await projectCallback({ action: "runtime_snapshot", ref: "project-ref" });
+packages/admin/src/shared/tools/project-cli-tools.test.ts:1142:            const response = await projectCallback({ action: "runtime_snapshot", ref: "project-ref" });
+packages/admin/src/shared/tools/project-cli-tools.test.ts:1157:        const response = await projectCallback({ action: "runtime_snapshot", ref: "project-ref" });
+packages/admin/src/shared/tools/project-cli-tools.test.ts:1183:                const inventory = studioServiceInventory("project-ref", "Legacy_Owner");
+packages/admin/src/shared/tools/project-cli-tools.test.ts:1199:        const response = await projectCallback({ action: "services", ref: "project-ref" });
+packages/admin/src/shared/tools/project-cli-tools.test.ts:1202:        expect(requestedPath).toBe("/v1/projects/project-ref/services");
+packages/admin/src/shared/tools/project-cli-tools.test.ts:1204:        expect(output.project_ref).toBe("project-ref");
+packages/admin/src/shared/tools/project-cli-tools.test.ts:1205:        expect(output.services).toEqual(studioServiceInventory("project-ref", "Legacy_Owner"));
+packages/admin/src/shared/tools/project-cli-tools.test.ts:1224:            const response = await projectCallback({ action: "services", ref: "project-ref" });
+packages/admin/src/shared/tools/project-cli-tools.test.ts:1245:        const response = await projectCallback({ action: "services", ref: "project-ref" });
+packages/admin/src/shared/tools/project-cli-tools.test.ts:1263:            service_host_ids: ["owner-ref-auth", "project-ref-auth"],
+packages/admin/src/shared/tools/project-cli-tools.test.ts:1324:            ref: "project-ref",
+packages/admin/src/shared/tools/project-cli-tools.test.ts:1330:        expect(requestedPath).toBe("/v1/projects/project-ref/services/gotrue/stop");
+packages/admin/src/shared/tools/project-cli-tools.test.ts:1334:            project_ref: "project-ref",
+packages/admin/src/shared/tools/project-cli-tools.test.ts:1373:                    ref: "project-ref",
+packages/admin/src/shared/tools/project-cli-tools.test.ts:1382:        expect(requestedPaths).toContain("/v1/projects/project-ref/services/postgrest/status");
+packages/admin/src/shared/tools/project-cli-tools.test.ts:1383:        expect(requestedPaths).toContain("/v1/projects/project-ref/services/gateway/restart");
+packages/admin/src/shared/tools/project-cli-tools.test.ts:1397:            ref: "project-ref",
+packages/admin/src/shared/tools/project-cli-tools.test.ts:1424:            ref: "project-ref",
+packages/admin/src/shared/tools/project-cli-tools.test.ts:1454:            ref: "project-ref",
+packages/admin/src/shared/tools/project-cli-tools.test.ts:1484:            ref: "project-ref",
+packages/admin/src/shared/tools/project-cli-tools.test.ts:1510:            ref: "project-ref",
+packages/admin/src/shared/tools/project-cli-tools.test.ts:1544:            ref: "project-ref",
+packages/admin/src/index.test.ts:168:        { id: "db", name: "db", status: "ACTIVE_HEALTHY", healthy: true, service_host_ids: ["project-ref-db"] },
+packages/admin/src/index.test.ts:169:        { id: "rest", name: "rest", status: "COMING_UP", healthy: false, service_host_ids: ["project-ref-rest"] },
+packages/admin/src/index.test.ts:171:        { id: "realtime", name: "realtime", status: "UNHEALTHY", healthy: false, service_host_ids: ["project-ref-realtime"] },
+packages/admin/src/index.test.ts:172:        { id: "storage", name: "storage", status: "ACTIVE_HEALTHY", healthy: true, service_host_ids: ["project-ref-storage"] },
+packages/admin/src/index.test.ts:176:function processRuntimeSnapshot(projectRef = "project-ref"): Record<string, unknown> {
+packages/admin/src/index.test.ts:219:    multipleHostIds[2] = { ...multipleHostIds[2], service_host_ids: ["owner-ref-auth", "project-ref-auth"] };
+packages/admin/src/index.test.ts:1119:                "project", "runtime_snapshot", "--ref", "project-ref",
+packages/admin/src/index.test.ts:1128:            expect(requestedPath).toBe("/v1/projects/project-ref/runtime-snapshot");
+packages/admin/src/index.test.ts:1174:                    "project", "runtime_snapshot", "--ref", "project-ref",
+packages/admin/src/index.test.ts:1210:                    project_ref: "hidden-project-ref",
+packages/admin/src/index.test.ts:1219:                "--ref", "project-ref",
+packages/admin/src/index.test.ts:1230:            expect(requestedPath).toBe("/v1/projects/project-ref/services/gotrue/stop");
+packages/admin/src/index.test.ts:1238:            expect(execution.output).not.toContain("hidden-project-ref");
+packages/admin/src/index.test.ts:1259:                const execution = await runAdminCli(["project", "services", "--ref", "project-ref"], {
+packages/admin/src/index.test.ts:1284:                    project_ref: "hidden-http-project-ref",
+packages/admin/src/index.test.ts:1293:                "--ref", "project-ref",
+packages/admin/src/index.test.ts:1309:            expect(execution.output).not.toContain("hidden-http-project-ref");
+packages/cli/src/index.ts:442:                            "     SUPACLOUD_PROJECT_REF=your-project-ref",
+packages/cli/src/shared/tools/oauth-client-tools.test.ts:23:        grant_types: ["authorization_code"],
+packages/cli/src/shared/tools/oauth-client-tools.test.ts:80:        { grant_types: ["authorization_code", "refresh_token"] },
+packages/cli/src/shared/tools/oauth-client-tools.test.ts:129:                    grant_types: ["authorization_code"],
+packages/cli/src/shared/tools/oauth-client-tools.test.ts:194:                    : { ok: true, status: 200, data: releaseCanaryClient({ grant_types: ["refresh_token"] }) };
+packages/cli/src/shared/tools/scheduled-function-tools.ts:6:import { projectRefPathSegment } from "../project-ref";
+packages/cli/src/shared/tools/scheduled-function-tools.ts:77:    "x-project-ref",
+packages/cli/src/shared/tools/scheduled-function-tools.test.ts:593:    "X-Project-Ref",
+packages/cli/src/shared/tools/database-tools.ts:9:import { projectRefPathSegment } from "../project-ref";
+packages/cli/src/shared/tools/advanced-tools.ts:23:import { projectRefPathSegment } from "../project-ref";
+packages/cli/src/shared/tools/auth-tools.ts:5:import { projectRefPathSegment } from "../project-ref";
+packages/cli/src/shared/tools/oauth-client-tools.ts:2:import { projectRefPathSegment } from "../project-ref";
+packages/cli/src/shared/tools/oauth-client-tools.ts:28:    grant_types: ["authorization_code"];
+packages/cli/src/shared/tools/oauth-client-tools.ts:94:        || !Array.isArray(value.grant_types)
+packages/cli/src/shared/tools/oauth-client-tools.ts:95:        || value.grant_types.length !== 1
+packages/cli/src/shared/tools/oauth-client-tools.ts:96:        || value.grant_types[0] !== "authorization_code"
+packages/cli/src/shared/tools/oauth-client-tools.ts:113:        grant_types: ["authorization_code"],
+packages/cli/src/shared/tools/oauth-client-tools.ts:223:        grant_types: ["authorization_code"],
+packages/cli/src/shared/tools/mutation-tools.ts:6:import { projectRefPathSegment } from "../project-ref";
+packages/cli/src/shared/tools/project-cli-tools.test.ts:199:                return { ok: true, status: 201, data: { ref: "project-ref" } };
+packages/cli/src/shared/tools/storage-tools.test.ts:20:        project_ref: "project-ref",
+packages/cli/src/shared/tools/storage-tools.test.ts:75:            ref: "project-ref",
+packages/cli/src/shared/tools/storage-tools.test.ts:81:            ref: "project-ref",
+packages/cli/src/shared/tools/storage-tools.test.ts:87:            ref: "project-ref",
+packages/cli/src/shared/tools/storage-tools.test.ts:98:            ref: "project-ref",
+packages/cli/src/shared/tools/storage-tools.test.ts:111:                ref: "project-ref",
+packages/cli/src/shared/tools/storage-tools.test.ts:129:            ref: "project-ref",
+packages/cli/src/shared/tools/storage-tools.test.ts:155:        ["dot-only bucket", { action: "get_bucket", ref: "project-ref", bucket: "..." }],
+packages/cli/src/shared/tools/storage-tools.test.ts:156:        ["overlong bucket", { action: "get_bucket", ref: "project-ref", bucket: "b".repeat(101) }],
+packages/cli/src/shared/tools/storage-tools.test.ts:181:        const response = await callback({ action: "list_buckets", ref: "project-ref" });
+packages/cli/src/shared/tools/storage-tools.test.ts:183:        expect(calls).toEqual(["/v1/projects/project-ref/storage/buckets"]);
+packages/cli/src/shared/tools/storage-tools.test.ts:198:        const response = await callback({ action: "list_buckets", ref: "project-ref" });
+packages/cli/src/shared/tools/storage-tools.test.ts:227:        ["slash bucket", { action: "get_bucket", ref: "project-ref", bucket: "raw/data" }],
+packages/cli/src/shared/tools/storage-tools.test.ts:228:        ["dot bucket", { action: "delete_bucket", ref: "project-ref", bucket: "..." }],
+packages/cli/src/shared/tools/storage-tools.test.ts:229:        ["long bucket", { action: "get_bucket", ref: "project-ref", bucket: "a".repeat(101) }],
+packages/cli/src/shared/tools/storage-tools.test.ts:244:        ["list_buckets", { action: "list_buckets", ref: "project-ref", bucket: "reports" }],
+packages/cli/src/shared/tools/storage-tools.test.ts:245:        ["get_bucket", { action: "get_bucket", ref: "project-ref", bucket: "reports", public: true }],
+packages/cli/src/shared/tools/storage-tools.test.ts:246:        ["create_bucket", { action: "create_bucket", ref: "project-ref", bucket: "reports", filename: "x" }],
+packages/cli/src/shared/tools/storage-tools.test.ts:247:        ["update_bucket", { action: "update_bucket", ref: "project-ref", bucket: "reports", base64_content: "eA==" }],
+packages/cli/src/shared/tools/storage-tools.test.ts:248:        ["delete_bucket", { action: "delete_bucket", ref: "project-ref", bucket: "reports", file_size_limit: 1 }],
+packages/cli/src/shared/tools/storage-tools.test.ts:281:            ref: "project-ref",
+packages/cli/src/shared/tools/storage-tools.test.ts:291:                path: "/v1/projects/project-ref/storage/buckets",
+packages/cli/src/shared/tools/storage-tools.test.ts:299:            { method: "GET", path: "/v1/projects/project-ref/storage/buckets/reports" },
+packages/cli/src/shared/tools/storage-tools.test.ts:334:            ref: "project-ref",
+packages/cli/src/shared/tools/storage-tools.test.ts:345:                path: "/v1/projects/project-ref/storage/buckets/reports",
+packages/cli/src/shared/tools/storage-tools.test.ts:353:            { method: "GET", path: "/v1/projects/project-ref/storage/buckets/reports" },
+packages/cli/src/shared/tools/storage-tools.test.ts:379:            ref: "project-ref",
+packages/cli/src/shared/tools/storage-tools.test.ts:400:            ref: "project-ref",
+packages/cli/src/shared/tools/storage-tools.test.ts:407:        ["update revision", { action: "update_bucket", ref: "project-ref", bucket: "reports", public: true }],
+packages/cli/src/shared/tools/storage-tools.test.ts:408:        ["delete revision", { action: "delete_bucket", ref: "project-ref", bucket: "reports", require_empty: true }],
+packages/cli/src/shared/tools/storage-tools.test.ts:411:            ref: "project-ref",
+packages/cli/src/shared/tools/storage-tools.test.ts:443:            ref: "project-ref",
+packages/cli/src/shared/tools/storage-tools.test.ts:452:                path: `/v1/projects/project-ref/storage/buckets/reports?expected_revision=${CURRENT_REVISION}&require_empty=true`,
+packages/cli/src/shared/tools/storage-tools.test.ts:454:            { method: "GET", path: "/v1/projects/project-ref/storage/buckets/reports" },
+packages/cli/src/shared/tools/storage-tools.test.ts:481:            ref: "project-ref",
+packages/cli/src/shared/tools/storage-tools.test.ts:497:        const response = await callback({ action: "get_bucket", ref: "project-ref", bucket: "missing" });
+packages/cli/src/shared/tools/storage-tools.test.ts:519:        const response = await callback({ action: "create_bucket", ref: "project-ref", bucket: "reports" });
+packages/cli/src/shared/tools/storage-tools.test.ts:533:            ref: "project-ref",
+packages/cli/src/shared/tools/storage-tools.test.ts:555:            ref: "project-ref",
+packages/cli/src/shared/tools/storage-tools.test.ts:573:        const response = await callback({ action: "list_buckets", ref: "project-ref" });
+packages/cli/src/shared/tools/storage-tools.test.ts:595:            ? { action, ref: "project-ref", bucket: "reports" }
+packages/cli/src/shared/tools/storage-tools.test.ts:596:            : { action, ref: "project-ref" };
+packages/cli/src/shared/tools/storage-tools.test.ts:614:            ref: "project-ref",
+packages/cli/src/shared/tools/storage-tools.test.ts:640:            ref: "project-ref",
+packages/cli/src/shared/tools/storage-tools.test.ts:660:        const response = await callback({ action: "create_bucket", ref: "project-ref", bucket: "reports" });
+packages/cli/src/shared/tools/storage-tools.test.ts:682:            ref: "project-ref",
+packages/cli/src/shared/tools/storage-tools.test.ts:704:            ref: "project-ref",
+packages/cli/src/shared/context.test.ts:69:            SUPACLOUD_PROJECT_REF: "project-ref",
+packages/cli/src/shared/context.test.ts:80:            SUPACLOUD_PROJECT_REF: "project-ref",
+packages/cli/src/shared/context.test.ts:126:            SUPACLOUD_PROJECT_REF: "project-ref",
+packages/cli/src/shared/context.test.ts:143:            SUPACLOUD_PROJECT_REF: "project-ref",
+packages/cli/src/shared/context.test.ts:165:            SUPACLOUD_PROJECT_REF: "project-ref",
+packages/cli/src/shared/mutation-protocol.ts:2:import { projectRefPathSegment } from "./project-ref";
+packages/cli/src/index.test.ts:306:                        grant_types: ["authorization_code"],
+packages/cli/src/index.test.ts:2122:                "--header_env", '{"X-Project-Ref":"SCHEDULE_TOKEN"}',
+packages/cli/README.md:95:legacy `.env` fallback. Core URL, credential, and project-ref values are not
+packages/cli/README.md:378:`authorization`, `apikey`, and `x-project-ref` headers cannot be overridden. Receipts never
+packages/cli/skills/supacloud-cli/SKILL.md:63:supacloud-cli supabase push --ref <project-ref> --dir supabase/migrations --dry_run
+packages/cli/skills/supacloud-cli/SKILL.md:65:supacloud-cli supabase push --ref <project-ref> --dir supabase/migrations
+packages/cli/skills/supacloud-cli/SKILL.md:78:  --ref <project-ref> \
+packages/cli/skills/supacloud-cli/references/database-workflow.md:30:   supacloud-cli supabase push --ref <project-ref> --dir supabase/migrations --dry_run
+packages/cli/skills/supacloud-cli/references/database-workflow.md:70:     --ref <project-ref> \
+scripts/test_supacloud_caddy_edge_proxy.sh:74:      request.headers.get("x-project-ref"),
+scripts/test_supacloud_caddy_edge_proxy.sh:109:                      "X-Project-Ref": ["$PROJECT_REF"],
+scripts/test_supacloud_caddy_edge_proxy.sh:110:                      "x-project-ref": ["$PROJECT_REF"],
+docs/pgredis-runtime.md:81:  "confirmation": "project-ref"
+docs/multi-tenant-management.md:95:| `<project>.api.example.com` | Caddy + Tenant Header |
+docs/architecture-multi-tenant.md:118:- Web Console operations go through the authenticated Management API proxy. The browser never receives the internal service token or connects to the private runtime port (Docker `9010`, systemd default `9011`); the proxy exposes bounded platform/project status, exact-key operations, and a project-ref-confirmed namespace flush.
+docs/gateway-customization.md:74:upstream 路由会被渲染成 Caddy 的 `reverse_proxy`，并自动注入这些请求头：`Host`、`X-Project-Ref` / `x-project-ref`、`X-Forwarded-Host`、`X-Forwarded-Proto`。`headers` 字段会合并进去，但不能覆盖大小写不敏感的项目绑定头或 SupaCloud 内部认证头。若有 `rewrite_uri` 则前置一个 `rewrite` handler；`strip_prefix` 则用 `strip_path_prefix`。`cors` 非空时前置一个 CORS subroute（OPTIONS 预检 + 常规响应头）。
+docs/gateway-customization.md:84:static 路由会被渲染成 Caddy `file_server`，`index_names` 为 `["index.html"]`，自动开启 `br`/`zstd`/`gzip` 预压缩协商，并隐藏 `.git`、`.env`、`deployment.json`。`headers` 字段作为响应头设置（注意：static 模式没有自动注入 `X-Project-Ref`）。
+docs/gateway-customization.md:108:效果：`billing.$BASE_DOMAIN/v1/charges` 会被剥离 `/v1` 前缀后转发到 `billing-svc.internal:8080/charges`，附带注入的 `X-Project-Ref` 与自定义 `X-Gateway-Source`，并允许来自 `https://app.$BASE_DOMAIN` 的跨域。
+docs/gateway-customization.md:194:| password | `POST /auth/v1/token?grant_type=password` | 10/min | `SUPACLOUD_RATE_LIMIT_PASSWORD_PER_MINUTE` |
+docs/gateway-customization.md:196:| refresh | `POST /auth/v1/token?grant_type=refresh_token` | 120/min | `SUPACLOUD_RATE_LIMIT_REFRESH_PER_MINUTE` |
