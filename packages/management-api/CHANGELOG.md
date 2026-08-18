@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.61.8](https://github.com/vibeunion/supacloud/compare/management-api-v0.61.7...management-api-v0.61.8) (2026-08-18)
+
+
+### Bug Fixes
+
+* **upgrade:** isolate generic control-plane backup ([#988](https://github.com/vibeunion/supacloud/issues/988)) ([fe73425](https://github.com/vibeunion/supacloud/commit/fe73425c5c1527740b287b9d083146b2c44e9cb6))
+
 ## [0.61.7](https://github.com/vibeunion/supacloud/compare/management-api-v0.61.6...management-api-v0.61.7) (2026-08-18)
 
 
