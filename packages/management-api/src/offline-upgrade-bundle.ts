@@ -6,9 +6,6 @@ import {
   RELEASE_BUNDLE_SIZE_LIMITS,
   RELEASE_CHECKSUMS_NAME,
   RELEASE_MANIFEST_NAME,
-  RELEASE_REPOSITORY,
-  RELEASE_SIGNER_WORKFLOW,
-  RELEASE_SOURCE_REF,
   type ReleaseComponent,
   type ReleaseManifest,
   manifestArtifact,
@@ -58,7 +55,6 @@ type PreparedOfflineRelease = {
   version: string;
   directory: string;
   manifestText: string;
-  sourceCommit: string;
   selectedAssetNames: string[];
   assetPaths: Map<string, string>;
 };
@@ -136,20 +132,6 @@ function assertBoundedFile(filePath: string, limit: number, label: string): void
   if (size <= 0 || size > limit) throw new Error(`${label} exceeds its size limit`);
 }
 
-function sourceCommitFromUntrustedManifest(text: string): string {
-  let candidate: unknown;
-  try {
-    candidate = JSON.parse(text);
-  } catch {
-    throw new Error("Release manifest is not valid JSON");
-  }
-  const commit = (candidate as { source?: { commit?: unknown } } | null)?.source?.commit;
-  if (typeof commit !== "string" || !/^[0-9a-f]{40}$/.test(commit)) {
-    throw new Error("Release manifest source commit is invalid");
-  }
-  return commit;
-}
-
 export async function runGithubCliWithTimeout(
   githubArguments: string[],
   timeoutMs: number,
@@ -206,6 +188,7 @@ async function assertStrictOfflineVerifier(): Promise<void> {
 
 async function verifyOfflineAttestation(
   prepared: PreparedOfflineRelease,
+  manifest: ReleaseManifest,
   artifactPath: string,
   trustedRootPath: string,
 ): Promise<void> {
@@ -214,10 +197,10 @@ async function verifyOfflineAttestation(
     "attestation", "verify", artifactPath,
     "--bundle", attestationPath,
     "--custom-trusted-root", trustedRootPath,
-    "--repo", RELEASE_REPOSITORY,
-    "--signer-workflow", RELEASE_SIGNER_WORKFLOW,
-    "--source-ref", RELEASE_SOURCE_REF,
-    "--source-digest", prepared.sourceCommit,
+    "--repo", manifest.repository,
+    "--signer-workflow", manifest.workflow,
+    "--source-ref", manifest.source.ref,
+    "--source-digest", manifest.source.commit,
     "--deny-self-hosted-runners",
   ], GH_VERIFICATION_TIMEOUT_MS);
   if (verification.exitCode !== 0) {
@@ -295,7 +278,6 @@ function prepareOfflineRelease(request: OfflineReleaseRequest): PreparedOfflineR
     version: request.version,
     directory: path.join(request.bundleRoot, request.component),
     manifestText,
-    sourceCommit: sourceCommitFromUntrustedManifest(manifestText),
     selectedAssetNames: selectedNames,
     assetPaths,
   };
@@ -316,7 +298,7 @@ async function verifiedChecksums(
 ): Promise<{ text: string; byName: Map<string, string> }> {
   const checksumsPath = requiredPath(prepared.assetPaths, RELEASE_CHECKSUMS_NAME);
   assertManifestArtifact(checksumsPath, manifest, RELEASE_CHECKSUMS_NAME);
-  await verifyOfflineAttestation(prepared, checksumsPath, trustedRootPath);
+  await verifyOfflineAttestation(prepared, manifest, checksumsPath, trustedRootPath);
   const text = readFileSync(checksumsPath, "utf8");
   return { text, byName: parseReleaseChecksums(text, manifest) };
 }
@@ -333,7 +315,7 @@ async function verifySelectedAssets(
     if (checksums.get(name) !== manifestArtifact(manifest, name).sha256) {
       throw new Error(`${name} does not match SHA256SUMS`);
     }
-    await verifyOfflineAttestation(prepared, assetPath, trustedRootPath);
+    await verifyOfflineAttestation(prepared, manifest, assetPath, trustedRootPath);
   }
 }
 
@@ -342,11 +324,11 @@ async function loadOfflineRelease(
   trustedRootPath: string,
 ): Promise<OfflineReleaseBundle> {
   const manifestPath = requiredPath(prepared.assetPaths, RELEASE_MANIFEST_NAME);
-  await verifyOfflineAttestation(prepared, manifestPath, trustedRootPath);
   const manifest = parseReleaseManifest(prepared.manifestText, {
     component: prepared.component,
     version: prepared.version,
   });
+  await verifyOfflineAttestation(prepared, manifest, manifestPath, trustedRootPath);
   const checksums = await verifiedChecksums(prepared, manifest, trustedRootPath);
   await verifySelectedAssets(prepared, manifest, checksums.byName, trustedRootPath);
   return {

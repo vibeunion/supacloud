@@ -4,6 +4,14 @@ export const RELEASE_CHECKSUMS_NAME = "SHA256SUMS";
 export const RELEASE_REPOSITORY = "vibeunion/supacloud";
 export const RELEASE_SOURCE_REF = "refs/heads/main";
 export const RELEASE_SIGNER_WORKFLOW = `${RELEASE_REPOSITORY}/.github/workflows/release-please.yml`;
+export const LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY = {
+  repository: "zuohuadong/supacloud",
+  workflow: "zuohuadong/supacloud/.github/workflows/release-please.yml",
+  component: "edge-runtime",
+  version: "0.18.2",
+  tag: "edge-runtime-v0.18.2",
+  sourceCommit: "c6a3a87cf4e41e0f3dafadb018dd0c7d5b99b7d9",
+} as const;
 const MEBIBYTE = 1024 * 1024;
 
 export const RELEASE_BUNDLE_SIZE_LIMITS = {
@@ -48,12 +56,12 @@ export type ReleaseManifestArtifact = {
 
 export type ReleaseManifest = {
   schemaVersion: 1;
-  repository: typeof RELEASE_REPOSITORY;
+  repository: typeof RELEASE_REPOSITORY | typeof LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY.repository;
   source: {
     ref: typeof RELEASE_SOURCE_REF;
     commit: string;
   };
-  workflow: typeof RELEASE_SIGNER_WORKFLOW;
+  workflow: typeof RELEASE_SIGNER_WORKFLOW | typeof LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY.workflow;
   release: {
     component: ReleaseComponent;
     version: string;
@@ -155,6 +163,26 @@ function parseArtifacts(candidate: unknown, component: ReleaseComponent): Releas
   return artifacts;
 }
 
+function parseIdentity(
+  manifest: Record<string, unknown>,
+  source: ReleaseManifest["source"],
+  release: ReleaseManifest["release"],
+): Pick<ReleaseManifest, "repository" | "workflow"> {
+  const current = manifest.repository === RELEASE_REPOSITORY
+    && manifest.workflow === RELEASE_SIGNER_WORKFLOW;
+  const legacyEdgeRuntime = manifest.repository === LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY.repository
+    && manifest.workflow === LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY.workflow
+    && release.component === LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY.component
+    && release.version === LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY.version
+    && release.tag === LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY.tag
+    && source.commit === LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY.sourceCommit;
+  if (!current && !legacyEdgeRuntime) throw new Error("Release manifest identity is invalid");
+  return {
+    repository: manifest.repository as ReleaseManifest["repository"],
+    workflow: manifest.workflow as ReleaseManifest["workflow"],
+  };
+}
+
 export function parseReleaseManifest(text: string, expected: ExpectedReleaseManifest): ReleaseManifest {
   let candidate: unknown;
   try {
@@ -164,16 +192,15 @@ export function parseReleaseManifest(text: string, expected: ExpectedReleaseMani
   }
   const manifest = manifestObject(candidate, "Release manifest");
   assertExactKeys(manifest, ["schemaVersion", "repository", "source", "workflow", "release", "artifacts"], "Release manifest");
-  if (manifest.schemaVersion !== 1 || manifest.repository !== RELEASE_REPOSITORY
-    || manifest.workflow !== RELEASE_SIGNER_WORKFLOW) {
-    throw new Error("Release manifest identity is invalid");
-  }
+  if (manifest.schemaVersion !== 1) throw new Error("Release manifest identity is invalid");
+  const source = parseSource(manifest.source);
+  const release = parseRelease(manifest.release, expected);
+  const identity = parseIdentity(manifest, source, release);
   return {
     schemaVersion: 1,
-    repository: RELEASE_REPOSITORY,
-    source: parseSource(manifest.source),
-    workflow: RELEASE_SIGNER_WORKFLOW,
-    release: parseRelease(manifest.release, expected),
+    ...identity,
+    source,
+    release,
     artifacts: parseArtifacts(manifest.artifacts, expected.component),
   };
 }

@@ -10,6 +10,7 @@ import {
     assertLocalUpgradeBundleSize,
     assertSignedArtifact,
     githubAttestationVerificationArguments,
+    manifestAttestationDownloadUrl,
     parseGithubReleaseMetadata,
     prepareLocalUpgradeBundle,
     runGithubCli,
@@ -17,7 +18,10 @@ import {
     settleLocalBundleDownloads,
     type LocalUpgradeFile,
 } from "./local-upgrade-bundle";
-import { RELEASE_BUNDLE_SIZE_LIMITS } from "../../../../management-api/src/release-manifest";
+import {
+    LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY,
+    RELEASE_BUNDLE_SIZE_LIMITS,
+} from "../../../../management-api/src/release-manifest";
 import {
     SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_FILENAME,
     SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_JSONL,
@@ -89,6 +93,35 @@ describe("local upgrade download trust boundary", () => {
 
         expect(serialized).toBe('{"mediaType":"one"}\n{"mediaType":"two"}\n');
         expect(() => serializeAttestationBundles({ attestations: [] })).toThrow("did not contain attestations");
+    });
+
+    test("downloads only the exact legacy manifest attestation from its signed release asset", () => {
+        const digest = "a".repeat(64);
+        const currentRelease = parseGithubReleaseMetadata(releaseMetadata(
+            `https://github.com/vibeunion/supacloud/releases/download/${RELEASE_TAG}/SUPACLOUD-RELEASE.json`,
+        ), RELEASE_TAG);
+        expect(manifestAttestationDownloadUrl(currentRelease, {
+            repository: "vibeunion/supacloud",
+        } as never, digest)).toBe(`https://api.github.com/repos/vibeunion/supacloud/attestations/sha256:${digest}`);
+
+        const legacyTag = LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY.tag;
+        const legacyRelease = parseGithubReleaseMetadata({
+            tag_name: legacyTag,
+            draft: false,
+            prerelease: false,
+            assets: [{
+                name: "SUPACLOUD-RELEASE.attestation.jsonl",
+                browser_download_url: `https://github.com/vibeunion/supacloud/releases/download/${legacyTag}/SUPACLOUD-RELEASE.attestation.jsonl`,
+            }],
+        }, legacyTag);
+        expect(manifestAttestationDownloadUrl(legacyRelease, {
+            repository: LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY.repository,
+        } as never, digest)).toBe(
+            `https://github.com/vibeunion/supacloud/releases/download/${legacyTag}/SUPACLOUD-RELEASE.attestation.jsonl`,
+        );
+        expect(() => manifestAttestationDownloadUrl(legacyRelease, {
+            repository: "untrusted/supacloud",
+        } as never, digest)).toThrow("not supported");
     });
 
     test("counts the optional verifier archive against the shared bundle limit", () => {
@@ -188,6 +221,26 @@ describe("local upgrade download trust boundary", () => {
         expect(arguments_).toContain("--custom-trusted-root");
         expect(arguments_[arguments_.indexOf("--custom-trusted-root") + 1]).toBe(trustedRootPath);
         expect(arguments_.filter(argument => argument === "--custom-trusted-root")).toHaveLength(1);
+    });
+
+    test("binds the exact legacy Edge Runtime release to its pre-transfer attestation identity", () => {
+        const arguments_ = githubAttestationVerificationArguments({
+            artifactPath: "/bundle/SUPACLOUD-RELEASE.json",
+            bundlePath: "/bundle/SUPACLOUD-RELEASE.attestation.jsonl",
+            trustedRootPath: "/private/trusted_root.jsonl",
+            manifest: {
+                repository: LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY.repository,
+                workflow: LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY.workflow,
+                source: {
+                    ref: "refs/heads/main",
+                    commit: LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY.sourceCommit,
+                },
+            } as never,
+        });
+
+        expect(arguments_).toContain(LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY.repository);
+        expect(arguments_).toContain(LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY.workflow);
+        expect(arguments_).toContain(LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY.sourceCommit);
     });
 
     test("fails closed when the pinned local trusted root is missing, altered, linked, or too permissive", () => {

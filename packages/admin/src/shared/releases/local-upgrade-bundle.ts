@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { accessSync, chmodSync, constants as fsConstants, createWriteStream, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { accessSync, chmodSync, constants as fsConstants, createWriteStream, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import type { IncomingMessage } from "node:http";
 import { get } from "node:https";
 import { tmpdir } from "node:os";
@@ -12,10 +12,9 @@ import {
     RELEASE_ATTESTATION_NAME,
     RELEASE_BUNDLE_SIZE_LIMITS,
     RELEASE_CHECKSUMS_NAME,
+    LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY,
     RELEASE_MANIFEST_NAME,
     RELEASE_REPOSITORY,
-    RELEASE_SIGNER_WORKFLOW,
-    RELEASE_SOURCE_REF,
     manifestArtifact,
     parseReleaseChecksums,
     parseReleaseManifest,
@@ -73,6 +72,13 @@ type ComponentDownloadRequest = {
     assetNames: string[];
     destination: string;
     trustedRootPath: string;
+};
+
+type ManifestAttestationDownloadRequest = {
+    release: GithubRelease;
+    manifest: ReleaseManifest;
+    manifestPath: string;
+    destination: string;
 };
 
 type HttpsDownloadRequest = {
@@ -489,9 +495,9 @@ export function githubAttestationVerificationArguments(request: GithubAttestatio
     return [
         "attestation", "verify", request.artifactPath,
         "--bundle", request.bundlePath,
-        "--repo", RELEASE_REPOSITORY,
-        "--signer-workflow", RELEASE_SIGNER_WORKFLOW,
-        "--source-ref", RELEASE_SOURCE_REF,
+        "--repo", request.manifest.repository,
+        "--signer-workflow", request.manifest.workflow,
+        "--source-ref", request.manifest.source.ref,
         "--source-digest", request.manifest.source.commit,
         "--deny-self-hosted-runners",
         "--custom-trusted-root", request.trustedRootPath,
@@ -539,17 +545,38 @@ async function downloadReleaseMetadata(component: ReleaseComponent, version: str
     }
 }
 
-async function downloadManifestAttestation(manifestPath: string, destination: string): Promise<void> {
+export function manifestAttestationDownloadUrl(
+    release: GithubRelease,
+    manifest: ReleaseManifest,
+    manifestDigest: string,
+): string {
+    if (manifest.repository === RELEASE_REPOSITORY) {
+        return `${ATTESTATIONS_API}/sha256:${manifestDigest}`;
+    }
+    if (manifest.repository === LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY.repository) {
+        return releaseAssetUrl(release, RELEASE_ATTESTATION_NAME);
+    }
+    throw new Error("Release manifest repository is not supported");
+}
+
+async function downloadManifestAttestation(
+    request: ManifestAttestationDownloadRequest,
+): Promise<void> {
+    const { release, manifest, manifestPath, destination } = request;
     const responsePath = `${destination}.response`;
     try {
         await downloadDirect(
-            `${ATTESTATIONS_API}/sha256:${sha256File(manifestPath)}`,
+            manifestAttestationDownloadUrl(release, manifest, sha256File(manifestPath)),
             responsePath,
             RELEASE_BUNDLE_SIZE_LIMITS.attestation,
         );
-        const bundles = serializeAttestationBundles(parseJsonFile(responsePath, "GitHub attestation response"));
-        writeFileSync(destination, bundles, { mode: 0o600, flag: "wx" });
-        chmodSync(destination, 0o600);
+        if (manifest.repository === RELEASE_REPOSITORY) {
+            const bundles = serializeAttestationBundles(parseJsonFile(responsePath, "GitHub attestation response"));
+            writeFileSync(destination, bundles, { mode: 0o600, flag: "wx" });
+            chmodSync(destination, 0o600);
+        } else {
+            renameSync(responsePath, destination);
+        }
     } finally {
         rmSync(responsePath, { force: true });
     }
@@ -563,7 +590,7 @@ async function downloadComponent(request: ComponentDownloadRequest): Promise<Loc
         releaseAssetUrl(release, RELEASE_MANIFEST_NAME), manifestPath, RELEASE_BUNDLE_SIZE_LIMITS.manifest,
     );
     const manifest = parseReleaseManifest(readFileSync(manifestPath, "utf8"), request);
-    await downloadManifestAttestation(manifestPath, attestationPath);
+    await downloadManifestAttestation({ release, manifest, manifestPath, destination: attestationPath });
     await verifyManifestAttestation({
         artifactPath: manifestPath,
         bundlePath: attestationPath,
