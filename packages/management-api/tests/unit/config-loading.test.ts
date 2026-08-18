@@ -37,6 +37,10 @@ function cleanEnv(overrides: Record<string, string>) {
     "MANAGEMENT_PROJECT_DB_POOL",
     "MANAGEMENT_PROJECT_ROLE_DB_POOL",
     "MANAGEMENT_PROJECT_POOL_CACHE_SIZE",
+    "SUPACLOUD_RATE_LIMIT_PASSWORD_PER_MINUTE",
+    "SUPACLOUD_RATE_LIMIT_SIGNUP_PER_MINUTE",
+    "SUPACLOUD_RATE_LIMIT_REFRESH_PER_MINUTE",
+    "SUPACLOUD_RATE_LIMIT_API_PER_MINUTE",
   ]) {
     delete env[key];
   }
@@ -94,6 +98,15 @@ function loadCaddyTlsIssuer(env: Record<string, string>) {
   ].join(" ")], { cwd: packageRoot, env, encoding: "utf8" });
   expect(configProcess.status, configProcess.stderr).toBe(0);
   return configProcess.stdout.match(/RESULT=([^\n]+)/)?.[1];
+}
+
+function loadSecurityRateLimits(env: Record<string, string>) {
+  const result = spawnSync("bun", ["-e", [
+    'import { config } from "./src/config.ts";',
+    'console.log(`RESULT=${config.rateLimitPasswordPerMinute}:${config.rateLimitSignupPerMinute}:${config.rateLimitRefreshPerMinute}:${config.rateLimitApiPerMinute}`);',
+  ].join(" ")], { cwd: packageRoot, env, encoding: "utf8" });
+  expect(result.status, result.stderr).toBe(0);
+  return result.stdout.match(/RESULT=([^\n]+)/)?.[1];
 }
 
 describe("production config loading boundaries", () => {
@@ -207,6 +220,33 @@ describe("production config loading boundaries", () => {
 
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("POOL");
+  });
+
+  test("uses secure differential rate-limit defaults and honors explicit overrides", () => {
+    expect(loadSecurityRateLimits(cleanEnv({ NODE_ENV: "production" }))).toBe("10:5:120:100");
+    expect(loadSecurityRateLimits(cleanEnv({
+      NODE_ENV: "production",
+      SUPACLOUD_RATE_LIMIT_PASSWORD_PER_MINUTE: "20",
+      SUPACLOUD_RATE_LIMIT_SIGNUP_PER_MINUTE: "8",
+      SUPACLOUD_RATE_LIMIT_REFRESH_PER_MINUTE: "240",
+      SUPACLOUD_RATE_LIMIT_API_PER_MINUTE: "150",
+    }))).toBe("20:8:240:150");
+  });
+
+  test.each([
+    { SUPACLOUD_RATE_LIMIT_PASSWORD_PER_MINUTE: "0" },
+    { SUPACLOUD_RATE_LIMIT_SIGNUP_PER_MINUTE: "1.5" },
+    { SUPACLOUD_RATE_LIMIT_REFRESH_PER_MINUTE: "not-a-number" },
+    { SUPACLOUD_RATE_LIMIT_API_PER_MINUTE: "-1" },
+  ])("rejects invalid differential rate-limit capacity: %p", (limitEnv) => {
+    const result = spawnSync("bun", ["-e", 'import "./src/config.ts";'], {
+      cwd: packageRoot,
+      env: cleanEnv({ NODE_ENV: "production", ...limitEnv }),
+      encoding: "utf8",
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("SUPACLOUD_RATE_LIMIT_");
   });
 
   test("rejects a BFF signing secret shared with another privileged key", () => {

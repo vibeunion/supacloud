@@ -644,7 +644,7 @@ Configuraciones de instalación clave:
 | `TUS_MAX_CHUNK_SIZE` | Tamaño máximo de fragmento de carga reanudable | `16777216` (16 MiB) |
 | `EDGE_RUNTIME` | Runtime de funciones | `bun` |
 | `PG_VERSION` | Versión de PostgreSQL | `18` |
-| `PIGSTY_VERSION` | Versión de Pigsty | `v4.4.0` |
+| `PIGSTY_VERSION` | Versión de Pigsty | `v4.5.0` |
 | `SUPACLOUD_LOGS_ENABLED` | Colector integrado + logs de proyecto VictoriaLogs (no usa Logflare) | `true` |
 | `SUPACLOUD_PIPELINES_ENABLED` | Runtime ETL fijo de Supabase para BigQuery CDC Pipelines | `true` |
 

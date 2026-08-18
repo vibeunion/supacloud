@@ -697,7 +697,7 @@ Key installation settings:
 | `TUS_MAX_CHUNK_SIZE` | Resumable upload chunk maximum size | `16777216` (16 MiB) |
 | `EDGE_RUNTIME` | Functions runtime | `bun` |
 | `PG_VERSION` | PostgreSQL version | `18` |
-| `PIGSTY_VERSION` | Pigsty version | `v4.4.0` |
+| `PIGSTY_VERSION` | Pigsty version | `v4.5.0` |
 | `SUPACLOUD_LOGS_ENABLED` | 内置采集器 + VictoriaLogs 项目日志（不使用 Logflare） | `true` |
 | `SUPACLOUD_PIPELINES_ENABLED` | Pinned Supabase ETL runtime for BigQuery CDC Pipelines | `true` |
 

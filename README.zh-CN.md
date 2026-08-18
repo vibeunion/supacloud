@@ -603,7 +603,7 @@ supacloud/
 | `TUS_MAX_CHUNK_SIZE` | 断点续传分片最大大小 | `16777216` (16 MiB) |
 | `EDGE_RUNTIME` | 云函数运行时 | `bun` |
 | `PG_VERSION` | PostgreSQL 版本 | `18` |
-| `PIGSTY_VERSION` | Pigsty 版本 | `v4.4.0` |
+| `PIGSTY_VERSION` | Pigsty 版本 | `v4.5.0` |
 | `SUPACLOUD_LOGS_ENABLED` | 内置采集器 + VictoriaLogs 项目日志（不使用 Logflare） | `true` |
 | `SUPACLOUD_PIPELINES_ENABLED` | 用于 BigQuery CDC Pipelines 的固定版本 Supabase ETL 运行时 | `true` |
 

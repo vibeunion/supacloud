@@ -149,6 +149,10 @@ export interface Config {
   poolerHost: string;
   poolerPort: number;
   rateLimitTier: string;
+  rateLimitPasswordPerMinute: number;
+  rateLimitSignupPerMinute: number;
+  rateLimitRefreshPerMinute: number;
+  rateLimitApiPerMinute: number;
   corsOrigins: string;
   dbAllowedCidrs: string;
   dbAllowedCidrsV6: string;
@@ -343,6 +347,10 @@ export const config: Config = {
   poolerHost: getEnv("POOLER_HOST", pgHost),
   poolerPort: Number(getEnv("POOLER_PORT", "6543")),
   rateLimitTier: getEnv("RATE_LIMIT_TIER", ""),
+  rateLimitPasswordPerMinute: Number(getEnv("SUPACLOUD_RATE_LIMIT_PASSWORD_PER_MINUTE", "10")),
+  rateLimitSignupPerMinute: Number(getEnv("SUPACLOUD_RATE_LIMIT_SIGNUP_PER_MINUTE", "5")),
+  rateLimitRefreshPerMinute: Number(getEnv("SUPACLOUD_RATE_LIMIT_REFRESH_PER_MINUTE", "120")),
+  rateLimitApiPerMinute: Number(getEnv("SUPACLOUD_RATE_LIMIT_API_PER_MINUTE", "100")),
   corsOrigins: getEnv("CORS_ORIGINS", ""),
   dbAllowedCidrs: getEnv("DB_ALLOWED_CIDRS", ""),
   dbAllowedCidrsV6: getEnv("DB_ALLOWED_CIDRS_V6", ""),
@@ -430,6 +438,16 @@ function validateConfig() {
   }
   if (!Number.isInteger(config.managementProjectPoolCacheSize) || config.managementProjectPoolCacheSize <= 0) {
     throw new Error("Invalid MANAGEMENT_PROJECT_POOL_CACHE_SIZE configuration. Must be a positive integer.");
+  }
+  for (const [name, limit] of [
+    ["SUPACLOUD_RATE_LIMIT_PASSWORD_PER_MINUTE", config.rateLimitPasswordPerMinute],
+    ["SUPACLOUD_RATE_LIMIT_SIGNUP_PER_MINUTE", config.rateLimitSignupPerMinute],
+    ["SUPACLOUD_RATE_LIMIT_REFRESH_PER_MINUTE", config.rateLimitRefreshPerMinute],
+    ["SUPACLOUD_RATE_LIMIT_API_PER_MINUTE", config.rateLimitApiPerMinute],
+  ] as const) {
+    if (!Number.isInteger(limit) || limit <= 0) {
+      throw new Error(`Invalid ${name} configuration. Must be a positive integer.`);
+    }
   }
 
   const isDevelopment = DEVELOPMENT_ENVS.has(config.nodeEnv) || process.env.BUN_ENV === "test" || config.isGithubActions;

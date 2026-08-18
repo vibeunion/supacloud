@@ -181,6 +181,31 @@ curl -X POST "$HOST/v1/projects/$REF/gateway/routes" \
 
 ## 网关配置（tier / CORS / JWT）
 
+### 默认安全限流
+
+Caddy 默认在路径 rewrite/strip-prefix 之前执行四个互相隔离的 1 分钟滑动窗口。每个 zone
+按项目和 `{http.request.remote.host}`（直接连接 Caddy 的 socket IP）计数，IPv6 按 `/64`
+归并；不会读取 `Forwarded`、`X-Forwarded-For` 或 `X-Real-IP`。429 由
+`caddy-ratelimit` 返回，并包含正整数 `Retry-After`；该响应头也在默认 CORS expose
+headers 中，浏览器可以读取。
+
+| 类别 | 精确匹配 | 默认上限 | 环境变量 |
+|------|----------|---------:|------------|
+| password | `POST /auth/v1/token?grant_type=password` | 10/min | `SUPACLOUD_RATE_LIMIT_PASSWORD_PER_MINUTE` |
+| signup | `POST /auth/v1/signup` | 5/min | `SUPACLOUD_RATE_LIMIT_SIGNUP_PER_MINUTE` |
+| refresh | `POST /auth/v1/token?grant_type=refresh_token` | 120/min | `SUPACLOUD_RATE_LIMIT_REFRESH_PER_MINUTE` |
+| ordinary API | 除 `OPTIONS` 外的 `/api/v1` 与 `/api/v1/*` | 100/min | `SUPACLOUD_RATE_LIMIT_API_PER_MINUTE` |
+
+四个环境变量必须是正整数。password、refresh 和普通 API 不共享计数；OAuth
+authorization code、OTP/Magic Link、其他 token grant、CORS preflight、页面和
+`/v1/public/*` 不进入上述低阈值桶。安全限流与项目 tier/单路径自定义限流同时生效，
+配置热加载使用稳定 zone 名保留当前窗口。
+
+`{http.request.remote.host}` 只有在公网客户端直连唯一权威 Caddy，或上游负载均衡器不会
+隐藏真实客户端 socket IP 时才代表最终客户端。本实现不信任可伪造的代理头，也不宣称
+多个 Caddy 实例会自动聚合计数；多实例部署必须显式配置共享 storage/distributed，并在
+上线前单独验证。
+
 `POST /v1/projects/:ref/gateway/config` 一次性更新项目的限流 tier、CORS origins、JWT 开关。对应 `GatewayService.applyConfig`。
 
 | 字段 | 类型 | 说明 |
