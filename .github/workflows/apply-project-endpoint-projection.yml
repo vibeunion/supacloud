@@ -1,0 +1,53 @@
+name: Apply project endpoint projection patch
+
+on:
+  pull_request:
+    branches: ["main"]
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-project-endpoint-projection-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.head_ref == 'agent/project-endpoint-projection'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout implementation branch
+        uses: actions/checkout@v7
+        with:
+          ref: agent/project-endpoint-projection
+          fetch-depth: 0
+
+      - name: Apply endpoint projection implementation
+        run: python3 scripts/agent/apply-project-endpoint-projection.py
+
+      - name: Validate generated patch
+        run: |
+          python3 -m py_compile scripts/agent/apply-project-endpoint-projection.py
+          git diff --check
+
+      - name: Commit implementation and remove bootstrap files
+        env:
+          BRANCH: agent/project-endpoint-projection
+        run: |
+          set -euo pipefail
+          rm -f scripts/agent/apply-project-endpoint-projection.py
+          rm -f .github/workflows/apply-project-endpoint-projection.yml
+          rmdir scripts/agent 2>/dev/null || true
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No implementation changes were generated."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "feat(cli): add authoritative project endpoint projection"
+          git push origin "HEAD:${BRANCH}"
