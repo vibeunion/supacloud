@@ -65,7 +65,6 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 const RELEASE_CANARY_TENANT_KEY = /^release-canary-[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const RELEASE_CANARY_STAGE_RECEIPT_KEYS = new Set(["fixtureId", "tenantKey", "state", "idempotent"]);
 const RELEASE_CANARY_DISABLE_RECEIPT_KEYS = new Set(["fixtureId", "state", "idempotent"]);
-const RELEASE_CANARY_PENDING_READBACK_KEYS = new Set(["fixtureId", "issuer", "subject", "pending"]);
 const RELEASE_CANARY_DISABLE_RPC_PATH = "/rest/v1/rpc/fa_release_canary_fixture_disable";
 const RELEASE_CANARY_PENDING_RPC_PATH = "/rest/v1/rpc/fa_release_canary_fixture_pending";
 const RELEASE_CANARY_CLAIM_MAX_LENGTH = 2_048;
@@ -347,29 +346,18 @@ function releaseCanaryDisableReceipt(receiptCandidate: unknown, fixtureId: strin
 }
 
 function releaseCanaryPendingPath(request: {
-    p_fixture_id: string;
     p_issuer: string;
     p_subject: string;
 }): string {
     const params = new URLSearchParams({
-        p_fixture_id: request.p_fixture_id,
         p_issuer: request.p_issuer,
         p_subject: request.p_subject,
     });
     return `${RELEASE_CANARY_PENDING_RPC_PATH}?${params.toString()}`;
 }
 
-function releaseCanaryPendingReadback(
-    readbackCandidate: unknown,
-    request: { p_fixture_id: string; p_issuer: string; p_subject: string },
-): boolean {
-    return isRecord(readbackCandidate)
-        && Object.keys(readbackCandidate).every((key) => RELEASE_CANARY_PENDING_READBACK_KEYS.has(key))
-        && Object.keys(readbackCandidate).length === RELEASE_CANARY_PENDING_READBACK_KEYS.size
-        && readbackCandidate.fixtureId === request.p_fixture_id
-        && readbackCandidate.issuer === request.p_issuer
-        && readbackCandidate.subject === request.p_subject
-        && readbackCandidate.pending === false;
+function releaseCanaryPendingReadback(readbackCandidate: unknown): boolean {
+    return readbackCandidate === false;
 }
 
 async function applicationOriginMatches(http: HttpTransport, projectRef: string, applicationOrigin: string): Promise<boolean> {
@@ -526,7 +514,6 @@ export function registerReleaseTools(
                     return releaseControlFailure("release.release_canary.fixture_disable_replay", "OUTCOME_UNKNOWN", response.status);
                 }
                 const pendingRequest = {
-                    p_fixture_id: request.p_fixture_id,
                     p_issuer: request.p_issuer,
                     p_subject: request.p_subject,
                 };
@@ -535,7 +522,7 @@ export function registerReleaseTools(
                     { maxJsonBytes: MUTATION_MAX_BYTES, responseTimeoutMs: RELEASE_READ_RESPONSE_TIMEOUT_MS },
                 );
                 if (!pendingResponse.ok || pendingResponse.status !== 200
-                    || !releaseCanaryPendingReadback(pendingResponse.data, pendingRequest)
+                    || !releaseCanaryPendingReadback(pendingResponse.data)
                     || !await applicationOriginMatches(http, projectRef, options.applicationOrigin)) {
                     return releaseControlFailure(
                         "release.release_canary.fixture_disable_replay",
