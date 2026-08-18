@@ -2804,6 +2804,108 @@ describe("supacloud-cli process contract", () => {
         expect(result.stdout + result.stderr).not.toContain(privateSubject);
     });
 
+    test("release-canary disable replay uses the dual-bound service role and pending readback", async () => {
+        const serviceRoleKey = "application-service-role-disable-private";
+        const fixtureId = "11111111-1111-4111-8111-111111111111";
+        const disableRequestId = "55555555-5555-4555-8555-555555555555";
+        const subject = "33333333-3333-4333-8333-333333333333";
+        const issuer = "https://issuer.example.test/auth/v1";
+        const applicationRequests: Array<{ path: string; method: string; authorization: string | null; apiKey: string | null; body: unknown }> = [];
+        const applicationServer = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            async fetch(request) {
+                const url = new URL(request.url);
+                applicationRequests.push({
+                    path: `${url.pathname}${url.search}`,
+                    method: request.method,
+                    authorization: request.headers.get("authorization"),
+                    apiKey: request.headers.get("apikey"),
+                    body: request.method === "POST" ? await request.json() : null,
+                });
+                if (request.method === "POST") return Response.json({ fixtureId, state: "disabled", idempotent: false });
+                return Response.json({ fixtureId, issuer, subject, pending: false });
+            },
+        });
+        servers.push(applicationServer);
+        const applicationOrigin = `http://127.0.0.1:${applicationServer.port}`;
+        const managementRequests: string[] = [];
+        const managementServer = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch(request) {
+                managementRequests.push(new URL(request.url).pathname);
+                return Response.json({
+                    schema: "supacloud.project-endpoints.v1",
+                    project_ref: "abc123",
+                    endpoints: {
+                        api: { origin: applicationOrigin, host: `127.0.0.1:${applicationServer.port}`, scheme: "http", source: "explicit_api_domain", aliases: [] },
+                        auth: { origin: "https://auth.example.test", host: "auth.example.test", scheme: "https", source: "explicit_auth_domain", aliases: [] },
+                        studio: { origin: "https://studio.example.test", host: "studio.example.test", scheme: "https", source: "explicit_studio_domain", aliases: [] },
+                    },
+                });
+            },
+        });
+        servers.push(managementServer);
+        const environment = {
+            SUPACLOUD_ENV: "production",
+            SUPACLOUD_API_URL: `http://127.0.0.1:${managementServer.port}`,
+            SUPACLOUD_API_TOKEN: "management-disable-private-token",
+            SUPACLOUD_PROJECT_REF: "abc123",
+            SUPABASE_URL: applicationOrigin,
+            SUPABASE_SERVICE_ROLE_KEY: serviceRoleKey,
+        };
+
+        const blocked = await runProjectCli([
+            "release", "release_canary_fixture_disable_replay", "--ref", "abc123",
+            "--fixture_id", fixtureId, "--disable_request_id", disableRequestId,
+            "--issuer", issuer, "--subject", subject,
+        ], environment);
+        expect(blocked.exitCode).toBe(1);
+        expect(applicationRequests).toHaveLength(0);
+
+        const result = await runProjectCli([
+            "release", "release_canary_fixture_disable_replay", "--ref", "abc123",
+            "--fixture_id", fixtureId, "--disable_request_id", disableRequestId,
+            "--issuer", issuer, "--subject", subject, "--confirm-production", "abc123",
+        ], environment);
+        const receipt = JSON.parse(result.stdout);
+
+        expect(result.exitCode).toBe(0);
+        expect(receipt).toMatchObject({
+            schema: "supacloud.cli.release-control.v1",
+            ok: true,
+            operation: "release.release_canary.fixture_disable_replay",
+            project_ref: "abc123",
+            receipt: { fixtureId, state: "disabled", idempotent: false },
+            pending: false,
+        });
+        expect(applicationRequests).toEqual([
+            {
+                path: "/rest/v1/rpc/fa_release_canary_fixture_disable",
+                method: "POST",
+                authorization: `Bearer ${serviceRoleKey}`,
+                apiKey: serviceRoleKey,
+                body: { p_fixture_id: fixtureId, p_disable_request_id: disableRequestId, p_issuer: issuer, p_subject: subject },
+            },
+            {
+                path: `/rest/v1/rpc/fa_release_canary_fixture_pending?p_fixture_id=${fixtureId}&p_issuer=https%3A%2F%2Fissuer.example.test%2Fauth%2Fv1&p_subject=${subject}`,
+                method: "GET",
+                authorization: `Bearer ${serviceRoleKey}`,
+                apiKey: serviceRoleKey,
+                body: null,
+            },
+        ]);
+        expect(managementRequests).toEqual([
+            "/v1/projects/abc123/endpoint/projection",
+            "/v1/projects/abc123/endpoint/projection",
+        ]);
+        expect(result.stdout + result.stderr).not.toContain(serviceRoleKey);
+        expect(result.stdout + result.stderr).not.toContain("management-disable-private-token");
+        expect(result.stdout + result.stderr).not.toContain(issuer);
+        expect(result.stdout + result.stderr).not.toContain(subject);
+    });
+
     test.each([["401", 401], ["403", 403]] as const)(
         "status reports application credential rejection %s without reflecting the key",
         async (_statusLabel, rejectionStatus) => {

@@ -467,6 +467,113 @@ test("release-canary fixture stage replay refuses an application origin outside 
     });
 });
 
+test.each([false, true] as const)("release-canary fixture disable replay accepts idempotent=%s and proves pending=false", async (idempotent) => {
+    const fixtureId = "11111111-1111-4111-8111-111111111111";
+    const disableRequestId = "55555555-5555-4555-8555-555555555555";
+    const subject = "33333333-3333-4333-8333-333333333333";
+    const issuer = "https://issuer.example.test/auth/v1";
+    const managementRequests: string[] = [];
+    const applicationRequests: Array<{ method: string; path: string; body?: unknown }> = [];
+    const callback = captureReleaseTool({
+        get: async (path: string, options: Record<string, unknown>) => {
+            managementRequests.push(`${path}:${JSON.stringify(options)}`);
+            return { ok: true, status: 200, data: projectEndpoints() };
+        },
+    }, {
+        postReleaseMutation: async (path: string, body: unknown) => {
+            applicationRequests.push({ method: "POST", path, body });
+            return { ok: true, status: 200, data: { fixtureId, state: "disabled", idempotent } };
+        },
+        get: async (path: string, options: Record<string, unknown>) => {
+            applicationRequests.push({ method: "GET", path, body: options });
+            return { ok: true, status: 200, data: { fixtureId, issuer, subject, pending: false } };
+        },
+    });
+
+    const response = await callback({
+        action: "release_canary_fixture_disable_replay",
+        fixture_id: fixtureId,
+        disable_request_id: disableRequestId,
+        issuer,
+        subject,
+    });
+
+    expect(payload(response)).toMatchObject({
+        ok: true,
+        operation: "release.release_canary.fixture_disable_replay",
+        project_ref: PROJECT_REF,
+        receipt: { fixtureId, state: "disabled", idempotent },
+        pending: false,
+    });
+    expect(managementRequests).toHaveLength(2);
+    expect(applicationRequests).toEqual([
+        {
+            method: "POST",
+            path: "/rest/v1/rpc/fa_release_canary_fixture_disable",
+            body: {
+                p_fixture_id: fixtureId,
+                p_disable_request_id: disableRequestId,
+                p_issuer: issuer,
+                p_subject: subject,
+            },
+        },
+        {
+            method: "GET",
+            path: `/rest/v1/rpc/fa_release_canary_fixture_pending?p_fixture_id=${fixtureId}&p_issuer=https%3A%2F%2Fissuer.example.test%2Fauth%2Fv1&p_subject=${subject}`,
+            body: { maxJsonBytes: 64 * 1024, responseTimeoutMs: 5_000 },
+        },
+    ]);
+    expect(response.content[0].text).not.toContain(issuer);
+    expect(response.content[0].text).not.toContain(subject);
+});
+
+test("release-canary fixture disable replay fails closed when pending readback is not authoritative", async () => {
+    const fixtureId = "11111111-1111-4111-8111-111111111111";
+    const callback = captureReleaseTool({
+        get: async () => ({ ok: true, status: 200, data: projectEndpoints() }),
+    }, {
+        postReleaseMutation: async () => ({ ok: true, status: 200, data: { fixtureId, state: "disabled", idempotent: false } }),
+        get: async () => ({ ok: true, status: 200, data: { fixtureId, issuer: "https://issuer.example.test/auth/v1", subject: "33333333-3333-4333-8333-333333333333", pending: true } }),
+    });
+    const response = await callback({
+        action: "release_canary_fixture_disable_replay",
+        fixture_id: fixtureId,
+        disable_request_id: "55555555-5555-4555-8555-555555555555",
+        issuer: "https://issuer.example.test/auth/v1",
+        subject: "33333333-3333-4333-8333-333333333333",
+    });
+    expect(payload(response)).toMatchObject({
+        ok: false,
+        operation: "release.release_canary.fixture_disable_replay",
+        error: { code: "OUTCOME_UNKNOWN", http_status: 200 },
+    });
+});
+
+test.each([
+    ["invalid fixture ID", { fixture_id: "not-a-uuid", disable_request_id: "55555555-5555-4555-8555-555555555555" }],
+    ["invalid disable request ID", { fixture_id: "11111111-1111-4111-8111-111111111111", disable_request_id: "not-a-uuid" }],
+    ["invalid issuer", { fixture_id: "11111111-1111-4111-8111-111111111111", disable_request_id: "55555555-5555-4555-8555-555555555555", issuer: "javascript:alert(1)" }],
+    ["external HTTP issuer", { fixture_id: "11111111-1111-4111-8111-111111111111", disable_request_id: "55555555-5555-4555-8555-555555555555", issuer: "http://issuer.example.test/auth/v1" }],
+    ["HTTP issuer without an explicit loopback port", { fixture_id: "11111111-1111-4111-8111-111111111111", disable_request_id: "55555555-5555-4555-8555-555555555555", issuer: "http://127.0.0.1/auth/v1" }],
+])("release-canary fixture disable replay rejects %s before dispatch", async (_label, input) => {
+    let calls = 0;
+    const inputRecord = input as Record<string, string>;
+    const callback = captureReleaseTool({ get: async () => ({ ok: true, status: 200, data: projectEndpoints() }) }, {
+        postReleaseMutation: async () => {
+            calls += 1;
+            return { ok: true, status: 200, data: {} };
+        },
+    });
+    await expect(callback({
+        action: "release_canary_fixture_disable_replay",
+        fixture_id: inputRecord.fixture_id,
+        disable_request_id: inputRecord.disable_request_id,
+        issuer: inputRecord.issuer ?? "https://issuer.example.test/auth/v1",
+        subject: "33333333-3333-4333-8333-333333333333",
+    })).rejects.toThrow();
+    expect(calls).toBe(0);
+});
+
 test("an unsupported release action cannot issue a mutation", async () => {
     let postCalls = 0;
     const callback = captureReleaseTool({
