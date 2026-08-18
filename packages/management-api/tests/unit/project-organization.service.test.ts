@@ -12,6 +12,13 @@ let organizationUniqueViolation: "create" | "update" | null = null;
 const controlArray = mock((values: string[], type: string) => ({ values, type }));
 const transactionArray = mock((values: string[], type: string) => ({ values, type }));
 
+function bunPostgresUniqueViolation(): Error & { code: string; errno: string } {
+  return Object.assign(new Error("localized database error"), {
+    code: "ERR_POSTGRES_SERVER_ERROR",
+    errno: "23505",
+  });
+}
+
 function organizationWriteQueries() {
   return controlQueries.filter(({ query }) => /^\s*(?:INSERT|UPDATE|DELETE)\b/.test(query));
 }
@@ -35,11 +42,11 @@ const controlQuery = mock((strings: TemplateStringsArray, ...values: unknown[]) 
       : []);
   }
   if (query.includes("INSERT INTO project_business_organizations")) {
-    if (organizationUniqueViolation === "create") throw Object.assign(new Error("unique violation"), { code: "23505" });
+    if (organizationUniqueViolation === "create") throw bunPostgresUniqueViolation();
     return Promise.resolve([{ id: "org-one", project_ref: "business-project", name: values[1], slug: values[2] }]);
   }
   if (query.includes("UPDATE project_business_organizations")) {
-    if (organizationUniqueViolation === "update") throw Object.assign(new Error("unique violation"), { code: "23505" });
+    if (organizationUniqueViolation === "update") throw bunPostgresUniqueViolation();
     return Promise.resolve([{ id: "org-one", project_ref: "business-project", name: values[0], slug: values[1] }]);
   }
   if (query.includes("INSERT INTO project_business_organization_members")) {
@@ -247,7 +254,7 @@ describe("project organization GoTrue authority", () => {
     }
   });
 
-  test("maps create and update slug uniqueness races to conflict without a preflight query", async () => {
+  test("maps Bun PostgreSQL unique-violation wrappers to conflict without localized message matching", async () => {
     organizationUniqueViolation = "create";
     await expect(projectOrganizationService.create(
       "business-project",
