@@ -1,6 +1,6 @@
 ---
 name: supacloud-cli
-description: Use when operating, implementing, diagnosing, deploying, or documenting a SupaCloud project through supacloud-cli, especially database schema, functions/RPC, triggers, RLS, indexes, grants, extensions, migrations, backups, auth, storage, Edge Functions, frontend, queues, task events, diagnostics, or gateway work. Also use when an AI might otherwise call SQL, psql, a database API, or the Management API directly.
+description: Use when operating, implementing, diagnosing, deploying, or documenting a SupaCloud project through supacloud-cli, especially project endpoint discovery, database schema, functions/RPC, triggers, RLS, indexes, grants, extensions, migrations, backups, auth, storage, Edge Functions, frontend, queues, task events, diagnostics, or gateway work. Also use when an AI might otherwise call SQL, psql, a database API, or the Management API directly.
 ---
 
 # SupaCloud CLI
@@ -24,6 +24,8 @@ Use `supacloud-cli` as the project-level control surface and keep durable change
 5. Run a remote migration dry-run before apply. Production apply requires explicit user approval in the current task.
 6. Do not edit `supabase_migrations.schema_migrations` through ordinary SQL. Migration history is an application ledger, not a schema backup or source of truth. For a proven-equivalent historical baseline, use the controlled `database baseline_migrations` action with dry-run and explicit approval.
 7. Service-role credentials authenticate the SupaCloud Management API. Never reinterpret them as PostgreSQL passwords or forward them to the official Supabase CLI.
+8. Read project domains through `supacloud-cli project endpoints`. Do not infer API, Auth, or Studio origins by concatenating project refs and base domains. The projection reports configuration, not DNS/certificate/runtime readiness.
+9. Cross-project enumeration is an Admin boundary. Use `supacloud-admin project list` or `supacloud-admin project list_endpoints`; do not attempt to widen project credentials.
 
 ## Workflow
 
@@ -35,6 +37,20 @@ Use `supacloud-cli` as the project-level control surface and keep durable change
 6. Preview remote changes with `--dry_run`.
 7. Apply only within the user-authorized environment and scope.
 8. Read back migration history and affected resources; report exact evidence and any remaining drift.
+
+## Project endpoint inspection
+
+For the selected project:
+
+```bash
+supacloud-cli status
+supacloud-cli project endpoints
+```
+
+The fixed projection contains credential-free API/Auth/Studio origins, hosts,
+schemes, source classifications, and API aliases. Follow it with the relevant
+health or gateway command before claiming that DNS, TLS, routing, or a runtime is
+ready. Project-wide or fleet-wide inventories belong to `supacloud-admin`.
 
 ## Database default
 
@@ -66,8 +82,8 @@ supacloud-cli database baseline_migrations \
 
 ## CLI boundaries
 
-- `supacloud-cli`: project status, database, migrations, auth, storage, Edge Functions, frontend, queues, task events, diagnostics, and project gateway configuration.
-- `supacloud-admin`: installation, upgrades, SSH diagnostics, platform-wide project lifecycle, tenant runtime, and server operations.
+- `supacloud-cli`: selected-project status and endpoint projection, database, migrations, auth, storage, Edge Functions, frontend, queues, task events, diagnostics, and project gateway configuration.
+- `supacloud-admin`: installation, upgrades, SSH diagnostics, platform-wide project/endpoint inventory, project lifecycle, tenant runtime, and server operations.
 - Official `supabase` CLI: invoked only through the allowlisted `supacloud-cli supabase` adapter for supported local authoring or explicit-DSN inspection commands.
 - Direct HTTP/SQL: read-only diagnosis or an explicitly approved break-glass path; never the default implementation path.
 

@@ -29,6 +29,7 @@ Edge Function .logs
 
 - `grafana.ini` 必须设置 `root_url = https://<studio 域名>/grafana/` 且 `serve_from_sub_path = true`。
 - 安装器在 Pigsty 安装完成后自动写入上述配置（`configure_grafana_subpath`），并同步修补 Pigsty 的 `grafana.ini.j2` 模板，避免 infra playbook 重跑后回退到 Pigsty 默认的 `/ui/`。
+- Management API 二进制升级会事务性修复旧实例的 live 配置、Pigsty 模板和 `GRAFANA_URL`；失败时恢复原文件，并在 Grafana 原本运行时重启服务使配置生效。
 
 ## 默认配置
 
