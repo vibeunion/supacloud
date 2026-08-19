@@ -257,7 +257,7 @@ export async function withTrustedFunctionArtifact<T>(
       throw new Error("Function artifact SHA-256 does not match activation authority");
     }
     await assertHeldDirectoryBindings(heldDirectories);
-    const imported = await readArtifact(`/proc/self/fd/${artifact.fd}`);
+    const imported = await readArtifact(absolutePath);
     const after = await artifact.stat();
     if (fileChanged(metadata, after)) throw new Error("Function runtime file changed while importing");
     await assertHeldDirectoryBindings(heldDirectories);
