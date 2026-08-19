@@ -14,6 +14,7 @@ jobs:
     timeout-minutes: 15
     env:
       RELAY_BRANCH: agent/secure-cnb-relay-20260819
+      RELAY_RUN: ${{ github.run_id }}
       CNB_ISSUES_URL: https://api.cnb.cool/aizhuliren/xgic/supacloud/-/issues?state=open&page=1&page_size=100
       RECIPIENT_CERT_B64: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUZRVENDQXltZ0F3SUJBZ0lVWStveG9Jc01iZU5sWlk0V0kvdmNNb0pEM0w4d0RRWUpLb1pJaHZjTkFRRUwKQlFBd01ERXVNQ3dHQTFVRUF3d2xRMmhoZEVkUVZDQlRkWEJoUTJ4dmRXUWdRMDVDSUZKbGJHRjVJRkpsWTJsdwphV1Z1ZERBZUZ3MHlOakE0TVRrd01EQTNNVEZhRncweU5qQTRNakF3TURBM01URmFNREF4TGpBc0JnTlZCQU1NCkpVTm9ZWFJIVUZRZ1UzVndZVU5zYjNWa0lFTk9RaUJTWld4aGVTQlNaV05wY0dsbGJuUXdnZ0lpTUEwR0NTcUcKU0liM0RRRUJBUVVBQTRJQ0R3QXdnZ0lLQW9JQ0FRQ21PcGFnRW1Ya1ozUE5jOStsN2l5djUrZ05ZUlJUTVZycQp5UUxkeDdueTBiaVE4b0lZQXUxbDRhOWRxWDEwM0pEbTFkUkJNUkNJQkZWTWN1ZG5QZ09MeG1kSVo1Rk1wTE9HCitkbTZyM1Y1aG1LM25aYzdWRFM1ZEt3QVV1c0J3Vk54cGJGRUtBRjUzMkFBR25HSVRQNG56cmtoR3orTmZ0T0sKNmpBWUNPbC9QcERMMFgwUHNDc2pNbmpOTDV4UHFQczNBWlppYW5TR1JTeTBaWW5aWjdGWFlLK3RUZjhVUGRvKwoyanEzd0JJYklESkprYk4yZ2o5YUsrSlczdGNKTFp3aTBwYSttWHlpRjduY3RsY0JIU0RobE13dm1yYWVvNzZSCnE0bFNHWVNtakJrZUpPWHU1NGFOeVlEcTlYb1FEenpGYlVkSXhNL0c5VERPMk9LWU95ZnRzOVNSc0UyNi9qTncKRVBHbWtpRkE5Q3hmaE5kNU93YW5KSTFxQ3lZTVJjT1Bqdzk3d3NWcGdxWGFXZ1d4QkNxZk1jOUl1QU41NGtHeApaYnB4b3ZvZExxM2VyUVJwM29ZSkFwYU5Ga3RNQmMxRXZZMGtEVGJ0dkt4VkZiZFJUcXd3SStGYnhFcjVTOGpVCko4dGNhQ1FWT3B6VldmZWtxZWU3Y3dEQkpqRnpXLy8rSEI4SUNBRzdiVEJoM1FaNGNFRUkzM2RvbGJwdmhtRE0KR0FzWFN4SmZjTjlOeTRKT0hteEpqUTlSemZwalVlV3RyQS81aXhUK0xRWE14RlhZdStVZ3BiOFk3R2QvV0h6OApUYjhGZE1xdDlYNXYwTkNyYU1GVHNFN2c4aTREbitGQlgvZ2g0bE55UTdnMjExT1ZDa1lHVnl3VGk2SjljbmlwClFUdUdQdmdhcndJREFRQUJvMU13VVRBZEJnTlZIUTRFRmdRVU92S3ZtMmNiN3FKa3RCY2dhSmZKNkZmZGRxVXcKSHdZRFZSMGpCQmd3Rm9BVU92S3ZtMmNiN3FKa3RCY2dhSmZKNkZmZGRxVXdEd1lEVlIwVEFRSC9CQVV3QXdFQgovekFOQmdrcWhraUc5dzBCQVFzRkFBT0NBZ0VBVnhITm00UklpNmtabTdJbXc5aGt6RThsQVhmN1M4aTJxY25PCmk4OFlKck9IOEVqd2pyOURQZTd5bnhidHZOWkR0eCtxRzhlTklicFcxZklhUFZYTDRqeFFkNXFGZDR4czRLaGEKQ3NMU3c3WjlDUHdRWUVVWEd3by8vNWdoWDhFQXRsUEl6S3pBUWMzWjA1STVqeHdJSnMzbm9CaEowbXlPbmRBcworSndKSHJrME9rUDlvOUlmQTByMWgrdHlyblhGTi9aVGhuLzFERENMV2J3U0p6UHR6SWlhdnVGWHdsKzZvS3dxCjZlaWo4b0ViWlZ4RTRqakd2OEpHSlR5MUV0cHpqMXhPZG16c0NPVGMrSk1qUElSaTJNTXBMd0JxOEhKM3ZaYjgKYnJMYjFFd0NYWC93LzMxQWhDZFZlSWFkLzhtMkwzZ1p5c0VwQTRkbWgzbjhSa1BZTXNmeDlrQm1qU2QxS21ZSwoyNVZqR2NaNWhtZWpTbm9SdWVubzZnS0VuNndYbjJZeStDOXJhNEtMbjZZL2JJWWRzeU52cFNGb0daMXZsK1Q2Ck5pMUU1Vk5GQUpRaWczRTM2d2t0aFIzSWlrYXhQSElnbzhnYmJ5ZmkzWG1TTGZwb3RFckVqUHFDYk5RdEZrUW4KcVV1K2VPT0VFRXlPdnU5N2UxZWkwYkxQTGRGVUEwWElIVHNVZTJua1lKRkhTSDcxaTl4THJQMWF6eUt3V0plZgpvTGFMMGhRWWZyamdHZkRDRS9kbFFkYXVCUXpjT2JKNG00TnEzYW1sOUFORUF1VW9JVUcwK1U2a1F5SWhpTHQwCjAvdzMxUHpQWjlINFlMNFF4OURxZ2NSQStRYW9tWGN2M1c5d08xbVZmNFVBM0p5TG9KU20wbVVwSW4yYmlYUGEKemxFaThJRT0KLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo=
       GH_TOKEN: ${{ github.token }}
@@ -33,8 +34,8 @@ jobs:
             -days 1 -subj '/CN=SupaCloud CNB relay runner' >/dev/null 2>&1
           chmod 600 /tmp/cnb-relay/runner.key
           gh api --method PUT \
-            "repos/$GITHUB_REPOSITORY/contents/.secure-relay/runner.crt" \
-            -f message='chore(relay): publish one-time runner certificate' \
+            "repos/$GITHUB_REPOSITORY/contents/.secure-relay/runner-${RELAY_RUN}.crt" \
+            -f message="chore(relay): publish runner certificate ${RELAY_RUN}" \
             -f content="$(base64 -w0 /tmp/cnb-relay/runner.crt)" \
             -f branch="$RELAY_BRANCH" >/dev/null
 
@@ -45,7 +46,7 @@ jobs:
           ref=$(jq -rn --arg value "$RELAY_BRANCH" '$value|@uri')
           for _ in $(seq 1 180); do
             if encoded=$(gh api \
-              "repos/$GITHUB_REPOSITORY/contents/.secure-relay/token.cms.b64?ref=$ref" \
+              "repos/$GITHUB_REPOSITORY/contents/.secure-relay/token-${RELAY_RUN}.cms.b64?ref=$ref" \
               --jq .content 2>/dev/null); then
               printf '%s' "$encoded" | tr -d '\n' | base64 -d \
                 > /tmp/cnb-relay/token.cms.b64
@@ -101,8 +102,8 @@ jobs:
           base64 -w0 /tmp/cnb-relay/issues.cms.der \
             > /tmp/cnb-relay/issues.cms.b64
           gh api --method PUT \
-            "repos/$GITHUB_REPOSITORY/contents/.secure-relay/issues.cms.b64" \
-            -f message='chore(relay): publish encrypted CNB issues' \
+            "repos/$GITHUB_REPOSITORY/contents/.secure-relay/issues-${RELAY_RUN}.cms.b64" \
+            -f message="chore(relay): publish encrypted CNB issues ${RELAY_RUN}" \
             -f content="$(base64 -w0 /tmp/cnb-relay/issues.cms.b64)" \
             -f branch="$RELAY_BRANCH" >/dev/null
 
