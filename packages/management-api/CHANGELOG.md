@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.62.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.61.10...management-api-v0.62.0) (2026-08-19)
+
+
+### Features
+
+* **database:** harden migration safety and schema reloads ([#1000](https://github.com/vibeunion/supacloud/issues/1000)) ([dabebf8](https://github.com/vibeunion/supacloud/commit/dabebf8fddeaebc4fa5422959f9e631df7019cc1))
+
+
+### Bug Fixes
+
+* **auth:** normalize nullable GoTrue token columns ([#1006](https://github.com/vibeunion/supacloud/issues/1006)) ([0b699bb](https://github.com/vibeunion/supacloud/commit/0b699bb35a64dba652cc3fcabfa12ebaa51b28f0))
+* **console:** fix overview navigation, dashboard table counts, and function build diagnostics ([5a689a9](https://github.com/vibeunion/supacloud/commit/5a689a9838b3ab140e58e07cd31e7af367c7f471))
+* **gateway:** use Caddy scheme vars matcher for protocol-scoped routes ([b4c858d](https://github.com/vibeunion/supacloud/commit/b4c858d3b3b62379674fe5234fc689eea88980c7))
+
 ## [0.61.10](https://github.com/vibeunion/supacloud/compare/management-api-v0.61.9...management-api-v0.61.10) (2026-08-19)
 
 

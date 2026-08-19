@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.4](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.18.3...edge-runtime-v0.18.4) (2026-08-19)
+
+
+### Bug Fixes
+
+* **edge-runtime:** pass canonical path to module loader to avoid descriptor collision ([ef636d3](https://github.com/vibeunion/supacloud/commit/ef636d39710187793b37c0dd21899c16dd979dda))
+
 ## [0.18.3](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.18.2...edge-runtime-v0.18.3) (2026-08-18)
 
 

@@ -13,6 +13,15 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.31.0](https://github.com/vibeunion/supacloud/compare/cli-v0.30.0...cli-v0.31.0) (2026-08-19)
+
+
+### Features
+
+* **cli:** deploy self-contained function bundle directories ([#1004](https://github.com/vibeunion/supacloud/issues/1004)) ([d942a37](https://github.com/vibeunion/supacloud/commit/d942a37f65914e83cda5b2634351bb9a6976619b))
+* **cli:** migrate project OAuth signing keys ([765d1de](https://github.com/vibeunion/supacloud/commit/765d1dead3ca9816a018487a7844292a37a493cb))
+* **database:** harden migration safety and schema reloads ([#1000](https://github.com/vibeunion/supacloud/issues/1000)) ([dabebf8](https://github.com/vibeunion/supacloud/commit/dabebf8fddeaebc4fa5422959f9e631df7019cc1))
+
 ## [0.30.0](https://github.com/vibeunion/supacloud/compare/cli-v0.29.0...cli-v0.30.0) (2026-08-18)
 
 

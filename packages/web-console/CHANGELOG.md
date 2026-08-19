@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.34.3](https://github.com/vibeunion/supacloud/compare/web-console-v0.34.2...web-console-v0.34.3) (2026-08-19)
+
+
+### Bug Fixes
+
+* **console:** fix overview navigation, dashboard table counts, and function build diagnostics ([5a689a9](https://github.com/vibeunion/supacloud/commit/5a689a9838b3ab140e58e07cd31e7af367c7f471))
+
 ## [0.34.2](https://github.com/vibeunion/supacloud/compare/web-console-v0.34.1...web-console-v0.34.2) (2026-08-18)
 
 
