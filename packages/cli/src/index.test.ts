@@ -1288,6 +1288,19 @@ describe("supacloud-cli process contract", () => {
         expect(response.stderr).not.toContain("--expected_sha256");
     });
 
+    test("documents the self-contained multi-file bundle directory flag", async () => {
+        const response = await runProjectCli(["edge_functions", "deploy_bundle", "--help"], {
+            SUPACLOUD_API_URL: "http://127.0.0.1:1",
+            SUPACLOUD_API_TOKEN: "test-token",
+            SUPACLOUD_PROJECT_REF: "abc123",
+        });
+
+        expect(response.exitCode).toBe(0);
+        expect(response.stderr).toContain("--bundle-dir");
+        expect(response.stderr).toContain("node_modules");
+        expect(response.stderr).not.toContain("--bundle_dir");
+    });
+
     test("deploys exact verified prebundled Function bytes through the process CLI", async () => {
         const directory = mkdtempSync(join(tmpdir(), "supacloud-cli-prebundled-"));
         temporaryDirectories.push(directory);

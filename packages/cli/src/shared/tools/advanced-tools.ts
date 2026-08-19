@@ -7,15 +7,17 @@ import {
     constants as fsConstants,
     existsSync,
     fstatSync,
+    lstatSync,
     mkdtempSync,
     openSync,
     readFileSync,
+    readdirSync,
     rmSync,
     statSync,
     writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { basename, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { execFile } from "node:child_process";
 import { Type } from "@sinclair/typebox";
@@ -40,6 +42,7 @@ import {
 
 const execFileAsync = promisify(execFile);
 const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/;
+const FORBIDDEN_BUNDLE_SEGMENTS = new Set(["node_modules", ".git"]);
 
 type OpenFileIdentity = {
     dev: bigint;
@@ -109,6 +112,57 @@ function readVerifiedPrebundledCode(pathArg: string, expectedSha256: string): st
     } finally {
         closeSync(descriptor);
     }
+}
+
+function canonicalBundlePath(root: string, filePath: string): string {
+    const bundlePath = relative(root, filePath).split(sep).join("/");
+    const segments = bundlePath.split("/");
+    if (!bundlePath || bundlePath.startsWith("/") || segments.some((segment) => (
+        !segment
+        || segment === "."
+        || segment === ".."
+        || segment.startsWith("._")
+        || FORBIDDEN_BUNDLE_SEGMENTS.has(segment)
+    ))) {
+        throw new Error(`Bundle directory contains a forbidden path: ${bundlePath || filePath}`);
+    }
+    return bundlePath;
+}
+
+function readBundleDirectory(root: string, directory: string = root): Record<string, string> {
+    const files: Record<string, string> = {};
+    const entries = readdirSync(directory, { withFileTypes: true })
+        .sort((left, right) => left.name.localeCompare(right.name));
+    for (const entry of entries) {
+        const entryPath = join(directory, entry.name);
+        const bundlePath = canonicalBundlePath(root, entryPath);
+        const entryState = lstatSync(entryPath);
+        if (entryState.isSymbolicLink()) throw new Error(`Bundle directory must not contain symlinks: ${bundlePath}`);
+        if (entryState.isDirectory()) {
+            Object.assign(files, readBundleDirectory(root, entryPath));
+            continue;
+        }
+        if (!entryState.isFile()) throw new Error(`Bundle directory must contain only regular files: ${bundlePath}`);
+        files[bundlePath] = verifiedUtf8Code(readFileSync(entryPath));
+    }
+    return files;
+}
+
+function preparedBundleFiles(args: Record<string, unknown>): Record<string, string> {
+    const files = args.files;
+    const bundleDirectory = args["bundle-dir"];
+    if ((files === undefined) === (bundleDirectory === undefined)) {
+        throw new Error("Exactly one of '--files' or '--bundle-dir' is required for 'deploy_bundle'");
+    }
+    if (typeof bundleDirectory !== "string") return files as Record<string, string>;
+    const resolvedDirectory = resolve(bundleDirectory);
+    const rootState = lstatSync(resolvedDirectory);
+    if (rootState.isSymbolicLink() || !rootState.isDirectory()) {
+        throw new Error("'--bundle-dir' must be a regular directory and must not be a symlink");
+    }
+    const bundleFiles = readBundleDirectory(resolvedDirectory);
+    if (Object.keys(bundleFiles).length === 0) throw new Error("'--bundle-dir' must not be empty");
+    return bundleFiles;
 }
 
 async function runBunBuild(args: string[]): Promise<{ stdout: string; stderr: string }> {
@@ -186,11 +240,14 @@ async function bundledDeployCode(pathArg: string): Promise<PreparedDeployCode> {
     }
 }
 
-function rejectPrebundledFlagsOutsideDeploy(action: string, args: Record<string, unknown>): void {
+function rejectActionSpecificFlags(action: string, args: Record<string, unknown>): void {
     for (const flag of ["prebundled-path", "expected-sha256"]) {
         if (action !== "deploy" && args[flag] !== undefined) {
             throw new Error(`'--${flag}' is not supported for '${action}'`);
         }
+    }
+    if (action !== "deploy_bundle" && args["bundle-dir"] !== undefined) {
+        throw new Error(`'--bundle-dir' is not supported for '${action}'`);
     }
 }
 
@@ -775,6 +832,7 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
             ),
             output: optional(Type.String(), "[source] Write source to this local file instead of stdout; the file must not already exist"),
             files: optional(functionFilesSchema, "[deploy_bundle] File map as a JSON object: { 'index.ts': '...', '_shared/x.ts': '...' }"),
+            "bundle-dir": optional(Type.String(), "[deploy_bundle] Local self-contained UTF-8 bundle directory; excludes node_modules, .git, AppleDouble, symlinks, and special files"),
             entrypoint: optional(Type.String(), "[deploy_bundle] Entrypoint file (default: index.ts)"),
             minify: optional(Type.Boolean(), "[deploy/deploy_bundle] Minify bundle"),
             verify_jwt: optional(Type.Boolean(), "[deploy/deploy_bundle/config] Set JWT verification for this function"),
@@ -790,8 +848,8 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
         },
         async (args: any) => {
             if (args.action === "activate") return activateFunctionVersion(http, args, options.readOnly);
-            const { action, ref, slug, path: pathArg, output, files, entrypoint, minify, verify_jwt, background_routes } = args;
-            rejectPrebundledFlagsOutsideDeploy(action, args);
+            const { action, ref, slug, path: pathArg, output, entrypoint, minify, verify_jwt, background_routes } = args;
+            rejectActionSpecificFlags(action, args);
             const expectedActiveVersion = action === "deploy" || action === "deploy_bundle"
                 ? requiredExpectedActiveVersion(args, action)
                 : undefined;
@@ -876,9 +934,10 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
                         config: functionConfig(),
                     }, deploymentResponse);
                 case "deploy_bundle":
-                    need("slug", slug); need("files", files);
+                    need("slug", slug);
+                    const deployBundleFiles = preparedBundleFiles(args);
                     const bundleResponse = await http.postReleaseMutation(`${edgeFunctionResourcePath(ref, slug)}/bundle`, {
-                        files,
+                        files: deployBundleFiles,
                         entrypoint,
                         minify,
                         expected_active_version: expectedActiveVersion,

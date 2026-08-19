@@ -311,6 +311,7 @@ EXAMPLES
   ${preferredCommand} edge_functions get_config --ref abc123 --slug hello
   ${preferredCommand} edge_functions deploy --ref abc123 --slug hello --path ./supabase/functions/hello --expected-active-version absent --expected-activation-id legacy
   ${preferredCommand} edge_functions deploy --ref abc123 --slug hello --prebundled-path ./dist/hello.js --expected-sha256 <sha256> --expected-active-version 4 --expected-activation-id <uuid>
+  ${preferredCommand} edge_functions deploy_bundle --ref abc123 --slug supauth --bundle-dir ./artifacts/supacloud-app/function-bundle --entrypoint index.ts --expected-active-version 4 --expected-activation-id <uuid>
   ${preferredCommand} edge_functions activate --ref abc123 --slug hello --version 3 --expected-active-version 4 --expected-activation-id <uuid>
   ${preferredCommand} scheduled_functions list --ref abc123
   ${preferredCommand} mutations status --ref abc123 --mutation_id 00000000-0000-4000-8000-000000000001
