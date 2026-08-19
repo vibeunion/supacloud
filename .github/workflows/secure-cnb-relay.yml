@@ -1,4 +1,4 @@
-name: Secure CNB issue relay
+name: Secure CNB issue detail recovery
 
 on:
   push:
@@ -14,9 +14,9 @@ jobs:
     timeout-minutes: 15
     env:
       RELAY_BRANCH: agent/secure-cnb-relay-20260819
-      RELAY_RUN: ${{ github.run_id }}
-      CNB_ISSUES_URL: https://api.cnb.cool/aizhuliren/xgic/supacloud/-/issues?state=open&page=1&page_size=100
-      RECIPIENT_CERT_B64: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUZRVENDQXltZ0F3SUJBZ0lVWStveG9Jc01iZU5sWlk0V0kvdmNNb0pEM0w4d0RRWUpLb1pJaHZjTkFRRUwKQlFBd01ERXVNQ3dHQTFVRUF3d2xRMmhoZEVkUVZDQlRkWEJoUTJ4dmRXUWdRMDVDSUZKbGJHRjVJRkpsWTJsdwphV1Z1ZERBZUZ3MHlOakE0TVRrd01EQTNNVEZhRncweU5qQTRNakF3TURBM01URmFNREF4TGpBc0JnTlZCQU1NCkpVTm9ZWFJIVUZRZ1UzVndZVU5zYjNWa0lFTk9RaUJTWld4aGVTQlNaV05wY0dsbGJuUXdnZ0lpTUEwR0NTcUcKU0liM0RRRUJBUVVBQTRJQ0R3QXdnZ0lLQW9JQ0FRQ21PcGFnRW1Ya1ozUE5jOStsN2l5djUrZ05ZUlJUTVZycQp5UUxkeDdueTBiaVE4b0lZQXUxbDRhOWRxWDEwM0pEbTFkUkJNUkNJQkZWTWN1ZG5QZ09MeG1kSVo1Rk1wTE9HCitkbTZyM1Y1aG1LM25aYzdWRFM1ZEt3QVV1c0J3Vk54cGJGRUtBRjUzMkFBR25HSVRQNG56cmtoR3orTmZ0T0sKNmpBWUNPbC9QcERMMFgwUHNDc2pNbmpOTDV4UHFQczNBWlppYW5TR1JTeTBaWW5aWjdGWFlLK3RUZjhVUGRvKwoyanEzd0JJYklESkprYk4yZ2o5YUsrSlczdGNKTFp3aTBwYSttWHlpRjduY3RsY0JIU0RobE13dm1yYWVvNzZSCnE0bFNHWVNtakJrZUpPWHU1NGFOeVlEcTlYb1FEenpGYlVkSXhNL0c5VERPMk9LWU95ZnRzOVNSc0UyNi9qTncKRVBHbWtpRkE5Q3hmaE5kNU93YW5KSTFxQ3lZTVJjT1Bqdzk3d3NWcGdxWGFXZ1d4QkNxZk1jOUl1QU41NGtHeApaYnB4b3ZvZExxM2VyUVJwM29ZSkFwYU5Ga3RNQmMxRXZZMGtEVGJ0dkt4VkZiZFJUcXd3SStGYnhFcjVTOGpVCko4dGNhQ1FWT3B6VldmZWtxZWU3Y3dEQkpqRnpXLy8rSEI4SUNBRzdiVEJoM1FaNGNFRUkzM2RvbGJwdmhtRE0KR0FzWFN4SmZjTjlOeTRKT0hteEpqUTlSemZwalVlV3RyQS81aXhUK0xRWE14RlhZdStVZ3BiOFk3R2QvV0h6OApUYjhGZE1xdDlYNXYwTkNyYU1GVHNFN2c4aTREbitGQlgvZ2g0bE55UTdnMjExT1ZDa1lHVnl3VGk2SjljbmlwClFUdUdQdmdhcndJREFRQUJvMU13VVRBZEJnTlZIUTRFRmdRVU92S3ZtMmNiN3FKa3RCY2dhSmZKNkZmZGRxVXcKSHdZRFZSMGpCQmd3Rm9BVU92S3ZtMmNiN3FKa3RCY2dhSmZKNkZmZGRxVXdEd1lEVlIwVEFRSC9CQVV3QXdFQgovekFOQmdrcWhraUc5dzBCQVFzRkFBT0NBZ0VBVnhITm00UklpNmtabTdJbXc5aGt6RThsQVhmN1M4aTJxY25PCmk4OFlKck9IOEVqd2pyOURQZTd5bnhidHZOWkR0eCtxRzhlTklicFcxZklhUFZYTDRqeFFkNXFGZDR4czRLaGEKQ3NMU3c3WjlDUHdRWUVVWEd3by8vNWdoWDhFQXRsUEl6S3pBUWMzWjA1STVqeHdJSnMzbm9CaEowbXlPbmRBcworSndKSHJrME9rUDlvOUlmQTByMWgrdHlyblhGTi9aVGhuLzFERENMV2J3U0p6UHR6SWlhdnVGWHdsKzZvS3dxCjZlaWo4b0ViWlZ4RTRqakd2OEpHSlR5MUV0cHpqMXhPZG16c0NPVGMrSk1qUElSaTJNTXBMd0JxOEhKM3ZaYjgKYnJMYjFFd0NYWC93LzMxQWhDZFZlSWFkLzhtMkwzZ1p5c0VwQTRkbWgzbjhSa1BZTXNmeDlrQm1qU2QxS21ZSwoyNVZqR2NaNWhtZWpTbm9SdWVubzZnS0VuNndYbjJZeStDOXJhNEtMbjZZL2JJWWRzeU52cFNGb0daMXZsK1Q2Ck5pMUU1Vk5GQUpRaWczRTM2d2t0aFIzSWlrYXhQSElnbzhnYmJ5ZmkzWG1TTGZwb3RFckVqUHFDYk5RdEZrUW4KcVV1K2VPT0VFRXlPdnU5N2UxZWkwYkxQTGRGVUEwWElIVHNVZTJua1lKRkhTSDcxaTl4THJQMWF6eUt3V0plZgpvTGFMMGhRWWZyamdHZkRDRS9kbFFkYXVCUXpjT2JKNG00TnEzYW1sOUFORUF1VW9JVUcwK1U2a1F5SWhpTHQwCjAvdzMxUHpQWjlINFlMNFF4OURxZ2NSQStRYW9tWGN2M1c5d08xbVZmNFVBM0p5TG9KU20wbVVwSW4yYmlYUGEKemxFaThJRT0KLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo=
+      RELAY_NONCE: recovery-1787099210-11813
+      CNB_REPO: aizhuliren/xgic/supacloud
+      RECIPIENT_CERT_B64: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUZQekNDQXllZ0F3SUJBZ0lVTnQrVHRWNysyMG0yV0NKTW5aZklKWHBtRXo0d0RRWUpLb1pJaHZjTkFRRUwKQlFBd0x6RXRNQ3NHQTFVRUF3d2tRMmhoZEVkUVZDQlRkWEJoUTJ4dmRXUWdRMDVDSUVSbGRHRnBiQ0JTWld4aAplU0F5TUI0WERUSTJNRGd4T1RBd01qWXpORm9YRFRJMk1EZ3lNREF3TWpZek5Gb3dMekV0TUNzR0ExVUVBd3drClEyaGhkRWRRVkNCVGRYQmhRMnh2ZFdRZ1EwNUNJRVJsZEdGcGJDQlNaV3hoZVNBeU1JSUNJakFOQmdrcWhraUcKOXcwQkFRRUZBQU9DQWc4QU1JSUNDZ0tDQWdFQTFaOGpYUTRrcU1HMW9ScmJLaDg0WWUrZ3hYMXJrZHFudVVrRgpJczlXYytPcm56YmFqSWk5NzRQcS9OOTh0ZExYTG9Sczk0M3J0emRtVFkzNmNCU0d1bVg0K2d6RG5QM0F5dlBqCmZETkEvK1JnRHZ5U1RUQlMwZ0xSMzBXdlg0UlBaSS9YT0piYXBFZnNSN0VJREdCamdUMW95QWc4VGt3RnNtZnMKZDFkbkUxdWxwYUV4bitBeFdyNmg4RXF3ZnQxR1JRQlFNZis0ZzVMZDVpZkx6dFBmOWQ4clpLUlRwT2RvZm15cgo5bkdYZ3RPSHRDeWZtbnpraUV6VTJHQTJlM2dEWWZVS2NuM2hrWGVTZTVyS0JqVkhwMFo4SXNJL3YwZFZRZ21YCmpIeW55dnJza3RvdHNYMzg0UzhBKzlacWp6aUM2Z3lnUTdrNG4rMzNYWEkvby8wRm9raEl4K3l5Yk4wbkN6Y1gKUnVnSElNMDJUa2VLVGxWYVcxS0diKzQzUG5oYlVlcy91OW9HZXZHNmVNN3MrZlkvSktwQmpOR2Z2S05JSUNMbAp1RXRzNE5EZkJXREZoelN0Yyt3SkVNZkVwcTlEd2pqbjNMZ0c3Y0tMYU81R0FyR3NCZTNXNEdBK3ovMXh2dU9rCnUraUtESWUzWTAxTFlXSnl1NnAxUHpzNnJMVmVOam5hSm1rYy9MVGtmS0NVa0dPUG1wa1JOeGtUWllSLzVacUMKZDJJUXJBdGxVcUVIVkRzbkVKRFUyRnd6dWFqZG5nZUk4THFUVG81MGV5V1dFb3BxR2JLZXJ1VEt1eXRBNHZTbgpjY2gzRUY2Z0NmUGlqNEJTNklkb3pOeEMzL1QzbHQ3VGtMM1dzWVZ4VU1VdmlVNTNMU254YVY3QVM5Q0JuVnMxCmViRitINThDQXdFQUFhTlRNRkV3SFFZRFZSME9CQllFRk9XRkZNcjBHNEhMOFRJTUdzUnVteG5ZblgyVE1COEcKQTFVZEl3UVlNQmFBRk9XRkZNcjBHNEhMOFRJTUdzUnVteG5ZblgyVE1BOEdBMVVkRXdFQi93UUZNQU1CQWY4dwpEUVlKS29aSWh2Y05BUUVMQlFBRGdnSUJBQ0xBOXJmMzRMR0d1bU9XY0hUVDVNb3Z4UCs5SWtvekpYQzRsMk4wCmZua0Y2UEZPZjVocXorRkozZVlGcElCQ0Vma3hreGtlOFhnK3ZKYzhxM2FIQmJuUVNqT3Z2WWQyeDcxTkRvZDAKUllaRHVEY0w4cXJPbzVNdzlZQUxnR1hmZnNoRFhNVWQ0RFhyeWEzTVpBTm9hNEZrYUNnS1NUZS9zY3lmTWFMYgp6eUNjNnhzeFFwU2NyZ1hWcjJqTHZ0R2dTbjVvamVQQWtQRWxTMnh2Sjh2ci9Kc25nU0FDWHMrWmViUGpZTzAvCmpnbERtQmtHN2svdG9ucWl3R1VYU3REVjZ5QTI1WUxOOFhkcGw3eUVQRWppY05mTi84c1ArWFRDQVdudlkydVUKRjZNSTBpb2xoakUrWGg3ZGRHYmp0VlNoRVEwcEdrQzE5a2Q4cDNVcVVOaDRRZFdpZVpQbmg2SFZ6UDRMSWhRbgowS2MwY3VrNkNtZ3J0VFZ6ZjRwZ1krVWZwaTJWZlhxaDVVYlRvMEJaN1RHSFlpZk1Wbzd0eWF4Tjk3b2ZaS3FoCk80UXFyeTRUMzUxUmVMZnVkNHRieEtXUUJUZnB6ZnhMY0d5c25JZUZSRWRnaWNEQnFzOHlwZ3VVRWk3YW0rbFQKb2lLM0E1SVpnYldHcldJeWlwWnNvTXIwK01qTW41aVEvdENyNEZ6dWNyS2RrdTdMdS9kOEozajRPRVZhUWUxbwpoTVZKeWk0RGlEbysreGRONTdWZkZQUVNDbWNyT24reWlOdUJyam5zbHpWZHhlKzFPRmRvaDU5ZWRyZVlCU3FMCktvR3FHbHI2S2ZwTnZoS0FyMUtXMGRDTDN6blM2WWNlaWdsMjR2cTAyRDBHaEVRTzdEOHNHUlF1azUyWWtUV1YKdzkzYQotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tCg==
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
@@ -31,11 +31,11 @@ jobs:
           openssl req -x509 -newkey rsa:4096 -sha256 -nodes \
             -keyout /tmp/cnb-relay/runner.key \
             -out /tmp/cnb-relay/runner.crt \
-            -days 1 -subj '/CN=SupaCloud CNB relay runner' >/dev/null 2>&1
+            -days 1 -subj '/CN=SupaCloud CNB recovery runner' >/dev/null 2>&1
           chmod 600 /tmp/cnb-relay/runner.key
           gh api --method PUT \
-            "repos/$GITHUB_REPOSITORY/contents/.secure-relay/runner-${RELAY_RUN}.crt" \
-            -f message="chore(relay): publish runner certificate ${RELAY_RUN}" \
+            "repos/$GITHUB_REPOSITORY/contents/.secure-relay/runner-${RELAY_NONCE}.crt" \
+            -f message="chore(relay): publish recovery runner ${RELAY_NONCE}" \
             -f content="$(base64 -w0 /tmp/cnb-relay/runner.crt)" \
             -f branch="$RELAY_BRANCH" >/dev/null
 
@@ -46,10 +46,9 @@ jobs:
           ref=$(jq -rn --arg value "$RELAY_BRANCH" '$value|@uri')
           for _ in $(seq 1 180); do
             if encoded=$(gh api \
-              "repos/$GITHUB_REPOSITORY/contents/.secure-relay/token-${RELAY_RUN}.cms.b64?ref=$ref" \
+              "repos/$GITHUB_REPOSITORY/contents/.secure-relay/token-${RELAY_NONCE}.cms.b64?ref=$ref" \
               --jq .content 2>/dev/null); then
-              printf '%s' "$encoded" | tr -d '\n' | base64 -d \
-                > /tmp/cnb-relay/token.cms.b64
+              printf '%s' "$encoded" | tr -d '\n' | base64 -d > /tmp/cnb-relay/token.cms.b64
               break
             fi
             sleep 2
@@ -64,47 +63,49 @@ jobs:
           chmod 600 /tmp/cnb-relay/token
           echo "::add-mask::$(cat /tmp/cnb-relay/token)"
 
-      - name: Read open CNB issues
+      - name: Read open issue details and comments
         shell: bash
         run: |
           set -euo pipefail
           token=$(cat /tmp/cnb-relay/token)
-          status=$(curl -sS -o /tmp/cnb-relay/issues.json -w '%{http_code}' \
-            -H 'Accept: application/json' \
-            -H "Authorization: Bearer $token" \
-            "$CNB_ISSUES_URL")
-          if [[ "$status" == 401 || "$status" == 403 ]]; then
-            status=$(curl -sS -o /tmp/cnb-relay/issues.json -w '%{http_code}' \
-              -H 'Accept: application/json' \
-              -H "Authorization: token $token" \
-              "$CNB_ISSUES_URL")
-          fi
-          if [[ "$status" == 401 || "$status" == 403 ]]; then
-            status=$(curl -sS -o /tmp/cnb-relay/issues.json -w '%{http_code}' \
-              -H 'Accept: application/json' \
-              -H "Private-Token: $token" \
-              "$CNB_ISSUES_URL")
-          fi
-          test "$status" = 200
-          jq empty /tmp/cnb-relay/issues.json
+          api="https://api.cnb.cool/${CNB_REPO}"
+          curl -fsS -H 'Accept: application/json' -H "Authorization: Bearer $token" \
+            "$api/-/issues?state=open&page=1&page_size=100" > /tmp/cnb-relay/list.json
+          jq empty /tmp/cnb-relay/list.json
+          : > /tmp/cnb-relay/details.ndjson
+          jq -r 'if type == "array" then .[] else (.data // .items // .issues // [])[] end | .number' \
+            /tmp/cnb-relay/list.json | while read -r number; do
+              test -n "$number"
+              curl -fsS -H 'Accept: application/json' -H "Authorization: Bearer $token" \
+                "$api/-/issues/$number" > /tmp/cnb-relay/detail.json
+              curl -fsS -H 'Accept: application/json' -H "Authorization: Bearer $token" \
+                "$api/-/issues/$number/comments?page=1&page_size=100" > /tmp/cnb-relay/comments.json
+              jq -cn --arg number "$number" \
+                --slurpfile detail /tmp/cnb-relay/detail.json \
+                --slurpfile comments /tmp/cnb-relay/comments.json \
+                '{number:$number, detail:$detail[0], comments:$comments[0]}' \
+                >> /tmp/cnb-relay/details.ndjson
+            done
+          jq -s --slurpfile list /tmp/cnb-relay/list.json \
+            '{schema:1, list:$list[0], issues:.}' /tmp/cnb-relay/details.ndjson \
+            > /tmp/cnb-relay/payload.json
+          test "$(jq '.issues | length' /tmp/cnb-relay/payload.json)" -gt 0
 
-      - name: Return encrypted issue payload
+      - name: Return encrypted detail payload
         shell: bash
         run: |
           set -euo pipefail
-          printf '%s' "$RECIPIENT_CERT_B64" | base64 -d \
-            > /tmp/cnb-relay/recipient.crt
-          gzip -9 -c /tmp/cnb-relay/issues.json > /tmp/cnb-relay/issues.json.gz
+          printf '%s' "$RECIPIENT_CERT_B64" | base64 -d > /tmp/cnb-relay/recipient.crt
+          gzip -9 -c /tmp/cnb-relay/payload.json > /tmp/cnb-relay/payload.json.gz
           openssl cms -encrypt -aes256 -binary -outform DER \
-            -in /tmp/cnb-relay/issues.json.gz \
-            -out /tmp/cnb-relay/issues.cms.der \
+            -in /tmp/cnb-relay/payload.json.gz \
+            -out /tmp/cnb-relay/details.cms.der \
             /tmp/cnb-relay/recipient.crt
-          base64 -w0 /tmp/cnb-relay/issues.cms.der \
-            > /tmp/cnb-relay/issues.cms.b64
+          base64 -w0 /tmp/cnb-relay/details.cms.der > /tmp/cnb-relay/details.cms.b64
           gh api --method PUT \
-            "repos/$GITHUB_REPOSITORY/contents/.secure-relay/issues-${RELAY_RUN}.cms.b64" \
-            -f message="chore(relay): publish encrypted CNB issues ${RELAY_RUN}" \
-            -f content="$(base64 -w0 /tmp/cnb-relay/issues.cms.b64)" \
+            "repos/$GITHUB_REPOSITORY/contents/.secure-relay/details-${RELAY_NONCE}.cms.b64" \
+            -f message="chore(relay): publish encrypted recovery details ${RELAY_NONCE}" \
+            -f content="$(base64 -w0 /tmp/cnb-relay/details.cms.b64)" \
             -f branch="$RELAY_BRANCH" >/dev/null
 
       - name: Destroy plaintext material
