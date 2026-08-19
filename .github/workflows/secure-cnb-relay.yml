@@ -1,212 +1,115 @@
-name: Secure CNB Issue Relay
+name: Secure CNB issue relay
 
 on:
   push:
-    branches:
-      - agent/secure-cnb-relay-20260819
-    paths:
-      - .github/workflows/secure-cnb-relay.yml
+    branches: [agent/secure-cnb-relay-20260819]
+    paths: [.github/workflows/secure-cnb-relay.yml]
 
 permissions:
   contents: write
-
-env:
-  RELAY_BRANCH: agent/secure-cnb-relay-20260819
-  CNB_REPO: aizhuliren/xgic/supacloud
-  RECIPIENT_CERT_B64: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUZRVENDQXltZ0F3SUJBZ0lVZEkrVThwWjY5K1QzS20rMWwxVkNkdmw2a2kwd0RRWUpLb1pJaHZjTkFRRUwKQlFBd01ERXVNQ3dHQTFVRUF3d2xRMmhoZEVkUVZDQlRkWEJoUTJ4dmRXUWdRMDVDSUZKbGJHRjVJRkpsWTJsdwphV1Z1ZERBZUZ3MHlOakE0TVRneU16RXlNakphRncweU5qQTRNVGt5TXpFeU1qSmFNREF4TGpBc0JnTlZCQU1NCkpVTm9ZWFJIVUZRZ1UzVndZVU5zYjNWa0lFTk9RaUJTWld4aGVTQlNaV05wY0dsbGJuUXdnZ0lpTUEwR0NTcUcKU0liM0RRRUJBUVVBQTRJQ0R3QXdnZ0lLQW9JQ0FRRFpLTW44YVB4N2c4a1hOK0tESDJMZlljQWJoTm1BVFd3MwpPcm50Vzl4L3JSc09qU0xxeGkyaHBZZjNCaCs1U3VnTExjSTd2ekRnOG51SHZYQXRnN1gxc25QWDhIR3IweUxnCnJYWkdmMlpheElVVzRZMFozNTRPU1ora2FxNWN1TVRrWVNua2RQaW9mTXZxV1JsdmZaTVYzMkNoZlgrNGlQVlMKOEF3SWlJL2kxQ01sRkhvSndUN090TjZwaGgyVmJxNFczcThKT1kxVlY5c1ZUdEJkM1pLVlh4cXNpS24wSFBLSwpRZE1rdjFaVlpndVZUS1JZSWQ0M0tneDBJTFY3R2lJaVJQYnB6czhCNjhMY0ZqdXpWUnJVeUpwbC9UKzJ3eFFsClRpQVpZTnhxbmhQbFlkZ0laOVNnc05udDJibHJOTTc3L0FEWVFCdUpMQlhCdk16TXRxL2lORHB5Qjk1TWw3aWIKVXNNS094VGYzcGV4RXdIRkw3MDJrc25vUlB0UCtrMEs0MGpHYXRuaDlSdFZ2OXpHcFgwNU56dzFsTmxCcHBhdgo5Q1RYVGpIMjFwQXdUOW40eUlyMlZtSDV3QTFNQ1JJZTNZK0Y1T3ZwaEJNNlViNWpZV2dWSkQyMWMwSGdrUjB1CkNlbW5SVmtuRSt0YlE1OU5sTWhVb0sySEpMQ1VvdXhXbm1sU1hnVFVxdkxVMWRrTklJREtmeWh1N1o3TzlvTHYKWml3Q1l2MWoyUmJlenVadHM2N1Y3QlEyNnorVGdXYkRSN2RxSFJjSERlakE2TWExWHlRRTgwUFZtWFE2VDZSQgpGa1BETnhNTStITllaL2NUQ3QyV3JGWHNwdmtSQW1RRktaU2VkYWpaQ3N1RG9jQ29JVkh5dmlRNCswMWp0enUzCmV0R3ZIQlMyb1FJREFRQUJvMU13VVRBZEJnTlZIUTRFRmdRVWdQTnpRQWhkQTY0UDBjT2RSMXZreEFWNDlCSXcKSHdZRFZSMGpCQmd3Rm9BVWdQTnpRQWhkQTY0UDBjT2RSMXZreEFWNDlCSXdEd1lEVlIwVEFRSC9CQVV3QXdFQgovekFOQmdrcWhraUc5dzBCQVFzRkFBT0NBZ0VBbndsNG0wNUIyQTU3Uy82eTA1VVJ2QkxSSEpOUElmQzhLR1FRCkNiN2NHQ2tGcnRjSkdJdzE3UytrUCtTa0NUajZvSmwvWXlMQ2dOeVJwZHVldGwrMVlYRWtPSnI4dFZMWlJQK00KcFJQWGpRNHdqYTc1UHovRjFxNnJ2cElyamFvTHd5WEdSN1JCNVdLOGtoZFRLMUJ5eWc3bXk5RHgvRCsxd2lSKwpPMCtxcnlCOCtlaUlnUXV0czRpQ0kvSk9EekthN3k0OWgvTHJoOFoxbXJYb25QQlk1ejZkdzFkdVh5Q2VycE9qCkh5SHBPS1FzNnRjVC84M0FaV2ZuNTFnamxFSVBySUw1WHNyNCtHV0k3NGF2d3BvUDRzKzZyQXFmeHRVNDZEM1MKODJmK3IxcjNHc2c0R2RIT3c3am9SRVBQbzZPd25sNVpQbjlGNERJaTYwMjdyN2l0YmdjdTRoWUZ0czh0ZWVaOQozdWtWNDJlRHZTMzNORzAvSUk2bG1HRmtSTGlLRis5QXp5SVAvQW5xMDYzNThTNk9QT0cvVmhEMkJnUHZNNmtpCjBPWTg2eUsxd0JZcHFHb3FyZzhFYnI0cWxyRkZwalErQ2ZFMkdGSGhPUG1INHRBQmlDT1VCbHRqM0RuV0xrUHMKZ0ZsYkExbjRsbDF5Z2ptMDRQTVJSUjBwM29paWFZa3EvQXEvQ1ZEUWdKSU5EWVB1MEVKblZCY3FsdWN4UUpMSApLNVJ4QmpKNERNRGhQOE9wSlN3LzFtY1M1TWVyRlR4aXQ1UWowclZmUGdza3Z3RE4wN0FTejlvQVRNTDd2VytWCmU1Q3BoSGxJLzJYaW5LdFZFL2hZTXh0c2F6TnNCMHp4bWRRRC9XekM3L3l1enlHMVEreGlTMzJPOGhkNVpqOVMKN1JyNnJwaz0KLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo=
 
 jobs:
   relay:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      RELAY_BRANCH: agent/secure-cnb-relay-20260819
+      CNB_ISSUES_URL: https://api.cnb.cool/aizhuliren/xgic/supacloud/-/issues?state=open&page=1&page_size=100
+      RECIPIENT_CERT_B64: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUZRVENDQXltZ0F3SUJBZ0lVWStveG9Jc01iZU5sWlk0V0kvdmNNb0pEM0w4d0RRWUpLb1pJaHZjTkFRRUwKQlFBd01ERXVNQ3dHQTFVRUF3d2xRMmhoZEVkUVZDQlRkWEJoUTJ4dmRXUWdRMDVDSUZKbGJHRjVJRkpsWTJsdwphV1Z1ZERBZUZ3MHlOakE0TVRrd01EQTNNVEZhRncweU5qQTRNakF3TURBM01URmFNREF4TGpBc0JnTlZCQU1NCkpVTm9ZWFJIVUZRZ1UzVndZVU5zYjNWa0lFTk9RaUJTWld4aGVTQlNaV05wY0dsbGJuUXdnZ0lpTUEwR0NTcUcKU0liM0RRRUJBUVVBQTRJQ0R3QXdnZ0lLQW9JQ0FRQ21PcGFnRW1Ya1ozUE5jOStsN2l5djUrZ05ZUlJUTVZycQp5UUxkeDdueTBiaVE4b0lZQXUxbDRhOWRxWDEwM0pEbTFkUkJNUkNJQkZWTWN1ZG5QZ09MeG1kSVo1Rk1wTE9HCitkbTZyM1Y1aG1LM25aYzdWRFM1ZEt3QVV1c0J3Vk54cGJGRUtBRjUzMkFBR25HSVRQNG56cmtoR3orTmZ0T0sKNmpBWUNPbC9QcERMMFgwUHNDc2pNbmpOTDV4UHFQczNBWlppYW5TR1JTeTBaWW5aWjdGWFlLK3RUZjhVUGRvKwoyanEzd0JJYklESkprYk4yZ2o5YUsrSlczdGNKTFp3aTBwYSttWHlpRjduY3RsY0JIU0RobE13dm1yYWVvNzZSCnE0bFNHWVNtakJrZUpPWHU1NGFOeVlEcTlYb1FEenpGYlVkSXhNL0c5VERPMk9LWU95ZnRzOVNSc0UyNi9qTncKRVBHbWtpRkE5Q3hmaE5kNU93YW5KSTFxQ3lZTVJjT1Bqdzk3d3NWcGdxWGFXZ1d4QkNxZk1jOUl1QU41NGtHeApaYnB4b3ZvZExxM2VyUVJwM29ZSkFwYU5Ga3RNQmMxRXZZMGtEVGJ0dkt4VkZiZFJUcXd3SStGYnhFcjVTOGpVCko4dGNhQ1FWT3B6VldmZWtxZWU3Y3dEQkpqRnpXLy8rSEI4SUNBRzdiVEJoM1FaNGNFRUkzM2RvbGJwdmhtRE0KR0FzWFN4SmZjTjlOeTRKT0hteEpqUTlSemZwalVlV3RyQS81aXhUK0xRWE14RlhZdStVZ3BiOFk3R2QvV0h6OApUYjhGZE1xdDlYNXYwTkNyYU1GVHNFN2c4aTREbitGQlgvZ2g0bE55UTdnMjExT1ZDa1lHVnl3VGk2SjljbmlwClFUdUdQdmdhcndJREFRQUJvMU13VVRBZEJnTlZIUTRFRmdRVU92S3ZtMmNiN3FKa3RCY2dhSmZKNkZmZGRxVXcKSHdZRFZSMGpCQmd3Rm9BVU92S3ZtMmNiN3FKa3RCY2dhSmZKNkZmZGRxVXdEd1lEVlIwVEFRSC9CQVV3QXdFQgovekFOQmdrcWhraUc5dzBCQVFzRkFBT0NBZ0VBVnhITm00UklpNmtabTdJbXc5aGt6RThsQVhmN1M4aTJxY25PCmk4OFlKck9IOEVqd2pyOURQZTd5bnhidHZOWkR0eCtxRzhlTklicFcxZklhUFZYTDRqeFFkNXFGZDR4czRLaGEKQ3NMU3c3WjlDUHdRWUVVWEd3by8vNWdoWDhFQXRsUEl6S3pBUWMzWjA1STVqeHdJSnMzbm9CaEowbXlPbmRBcworSndKSHJrME9rUDlvOUlmQTByMWgrdHlyblhGTi9aVGhuLzFERENMV2J3U0p6UHR6SWlhdnVGWHdsKzZvS3dxCjZlaWo4b0ViWlZ4RTRqakd2OEpHSlR5MUV0cHpqMXhPZG16c0NPVGMrSk1qUElSaTJNTXBMd0JxOEhKM3ZaYjgKYnJMYjFFd0NYWC93LzMxQWhDZFZlSWFkLzhtMkwzZ1p5c0VwQTRkbWgzbjhSa1BZTXNmeDlrQm1qU2QxS21ZSwoyNVZqR2NaNWhtZWpTbm9SdWVubzZnS0VuNndYbjJZeStDOXJhNEtMbjZZL2JJWWRzeU52cFNGb0daMXZsK1Q2Ck5pMUU1Vk5GQUpRaWczRTM2d2t0aFIzSWlrYXhQSElnbzhnYmJ5ZmkzWG1TTGZwb3RFckVqUHFDYk5RdEZrUW4KcVV1K2VPT0VFRXlPdnU5N2UxZWkwYkxQTGRGVUEwWElIVHNVZTJua1lKRkhTSDcxaTl4THJQMWF6eUt3V0plZgpvTGFMMGhRWWZyamdHZkRDRS9kbFFkYXVCUXpjT2JKNG00TnEzYW1sOUFORUF1VW9JVUcwK1U2a1F5SWhpTHQwCjAvdzMxUHpQWjlINFlMNFF4OURxZ2NSQStRYW9tWGN2M1c5d08xbVZmNFVBM0p5TG9KU20wbVVwSW4yYmlYUGEKemxFaThJRT0KLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo=
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.RELAY_BRANCH }}
-          fetch-depth: 0
 
-      - name: Publish one-time relay certificate
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Publish one-time runner certificate
+        shell: bash
         run: |
           set -euo pipefail
-          umask 077
-          mkdir -p /tmp/cnb-relay
+          install -d -m 700 /tmp/cnb-relay
           openssl req -x509 -newkey rsa:4096 -sha256 -nodes \
-            -keyout /tmp/cnb-relay/runner.key.pem \
-            -out /tmp/cnb-relay/runner.crt.pem \
-            -days 1 -subj '/CN=SupaCloud CNB one-time relay' >/dev/null 2>&1
+            -keyout /tmp/cnb-relay/runner.key \
+            -out /tmp/cnb-relay/runner.crt \
+            -days 1 -subj '/CN=SupaCloud CNB relay runner' >/dev/null 2>&1
+          chmod 600 /tmp/cnb-relay/runner.key
+          gh api --method PUT \
+            "repos/$GITHUB_REPOSITORY/contents/.secure-relay/runner.crt" \
+            -f message='chore(relay): publish one-time runner certificate' \
+            -f content="$(base64 -w0 /tmp/cnb-relay/runner.crt)" \
+            -f branch="$RELAY_BRANCH" >/dev/null
 
-          content=$(base64 -w0 /tmp/cnb-relay/runner.crt.pem)
-          payload=$(jq -n \
-            --arg message 'chore: publish one-time relay key' \
-            --arg content "$content" \
-            --arg branch "$RELAY_BRANCH" \
-            '{message:$message, content:$content, branch:$branch}')
-          curl --fail-with-body --silent --show-error \
-            -X PUT \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H 'Accept: application/vnd.github+json' \
-            -H 'X-GitHub-Api-Version: 2022-11-28' \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/contents/.secure-relay/runner.crt.pem" \
-            --data "$payload" >/tmp/cnb-relay/publish.json
-
-      - name: Receive token, collect issues, and encrypt result
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Receive encrypted token
+        shell: bash
         run: |
           set -euo pipefail
-          umask 077
-          cd /tmp/cnb-relay
-
-          found=0
-          for _ in $(seq 1 360); do
-            git -C "$GITHUB_WORKSPACE" fetch --quiet origin "$RELAY_BRANCH" || true
-            if git -C "$GITHUB_WORKSPACE" show "origin/${RELAY_BRANCH}:.secure-relay/token.cms.b64" > token.cms.b64 2>/dev/null; then
-              found=1
+          ref=$(jq -rn --arg value "$RELAY_BRANCH" '$value|@uri')
+          for _ in $(seq 1 180); do
+            if encoded=$(gh api \
+              "repos/$GITHUB_REPOSITORY/contents/.secure-relay/token.cms.b64?ref=$ref" \
+              --jq .content 2>/dev/null); then
+              printf '%s' "$encoded" | tr -d '\n' | base64 -d \
+                > /tmp/cnb-relay/token.cms.b64
               break
             fi
             sleep 2
           done
-          if [ "$found" -ne 1 ]; then
-            echo 'Encrypted token handoff was not received.' >&2
-            exit 1
+          test -s /tmp/cnb-relay/token.cms.b64
+          base64 -d /tmp/cnb-relay/token.cms.b64 > /tmp/cnb-relay/token.cms.der
+          openssl cms -decrypt -binary -inform DER \
+            -in /tmp/cnb-relay/token.cms.der \
+            -recip /tmp/cnb-relay/runner.crt \
+            -inkey /tmp/cnb-relay/runner.key \
+            -out /tmp/cnb-relay/token
+          chmod 600 /tmp/cnb-relay/token
+          echo "::add-mask::$(cat /tmp/cnb-relay/token)"
+
+      - name: Read open CNB issues
+        shell: bash
+        run: |
+          set -euo pipefail
+          token=$(cat /tmp/cnb-relay/token)
+          status=$(curl -sS -o /tmp/cnb-relay/issues.json -w '%{http_code}' \
+            -H 'Accept: application/json' \
+            -H "Authorization: Bearer $token" \
+            "$CNB_ISSUES_URL")
+          if [[ "$status" == 401 || "$status" == 403 ]]; then
+            status=$(curl -sS -o /tmp/cnb-relay/issues.json -w '%{http_code}' \
+              -H 'Accept: application/json' \
+              -H "Authorization: token $token" \
+              "$CNB_ISSUES_URL")
           fi
-
-          base64 -d token.cms.b64 > token.cms
-          CNB_TOKEN=$(openssl cms -decrypt -binary -inform DER \
-            -in token.cms \
-            -recip runner.crt.pem \
-            -inkey runner.key.pem)
-          CNB_TOKEN=${CNB_TOKEN//$'\r'/}
-          CNB_TOKEN=${CNB_TOKEN//$'\n'/}
-          if [ -z "$CNB_TOKEN" ]; then
-            echo 'Encrypted token handoff decrypted to an empty value.' >&2
-            exit 1
+          if [[ "$status" == 401 || "$status" == 403 ]]; then
+            status=$(curl -sS -o /tmp/cnb-relay/issues.json -w '%{http_code}' \
+              -H 'Accept: application/json' \
+              -H "Private-Token: $token" \
+              "$CNB_ISSUES_URL")
           fi
-          echo "::add-mask::$CNB_TOKEN"
-          export CNB_RELAY_TOKEN="$CNB_TOKEN"
+          test "$status" = 200
+          jq empty /tmp/cnb-relay/issues.json
 
-          python3 - <<'PY'
-          import json
-          import os
-          import urllib.error
-          import urllib.parse
-          import urllib.request
+      - name: Return encrypted issue payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' "$RECIPIENT_CERT_B64" | base64 -d \
+            > /tmp/cnb-relay/recipient.crt
+          gzip -9 -c /tmp/cnb-relay/issues.json > /tmp/cnb-relay/issues.json.gz
+          openssl cms -encrypt -aes256 -binary -outform DER \
+            -in /tmp/cnb-relay/issues.json.gz \
+            -out /tmp/cnb-relay/issues.cms.der \
+            /tmp/cnb-relay/recipient.crt
+          base64 -w0 /tmp/cnb-relay/issues.cms.der \
+            > /tmp/cnb-relay/issues.cms.b64
+          gh api --method PUT \
+            "repos/$GITHUB_REPOSITORY/contents/.secure-relay/issues.cms.b64" \
+            -f message='chore(relay): publish encrypted CNB issues' \
+            -f content="$(base64 -w0 /tmp/cnb-relay/issues.cms.b64)" \
+            -f branch="$RELAY_BRANCH" >/dev/null
 
-          base = "https://api.cnb.cool"
-          repo = os.environ["CNB_REPO"]
-          token = os.environ["CNB_RELAY_TOKEN"]
-          headers = {
-              "Authorization": f"Bearer {token}",
-              "Accept": "application/vnd.cnb.api+json",
-              "User-Agent": "supacloud-secure-issue-relay",
-          }
-
-          def fetch(path: str):
-              request = urllib.request.Request(base + path, headers=headers)
-              with urllib.request.urlopen(request, timeout=30) as response:
-                  return json.loads(response.read().decode("utf-8"))
-
-          def try_fetch(path: str):
-              try:
-                  return {"ok": True, "data": fetch(path)}
-              except urllib.error.HTTPError as exc:
-                  return {"ok": False, "status": exc.code, "reason": exc.reason}
-              except Exception as exc:
-                  return {"ok": False, "error": type(exc).__name__, "reason": str(exc)[:300]}
-
-          quoted_repo = "/".join(urllib.parse.quote(part, safe="") for part in repo.split("/"))
-          issue_summaries = []
-          for page in range(1, 101):
-              path = f"/{quoted_repo}/-/issues?state=open&page={page}&page_size=100&order_by=created_at"
-              page_items = fetch(path)
-              if not isinstance(page_items, list):
-                  raise RuntimeError("CNB issue list response was not an array")
-              issue_summaries.extend(page_items)
-              if len(page_items) < 100:
-                  break
-
-          issues = []
-          for summary in issue_summaries:
-              number = summary.get("number") if isinstance(summary, dict) else None
-              if number is None:
-                  issues.append({"summary": summary, "detail_error": "missing issue number"})
-                  continue
-              encoded_number = urllib.parse.quote(str(number), safe="")
-              detail = try_fetch(f"/{quoted_repo}/-/issues/{encoded_number}")
-
-              comments = []
-              comment_errors = []
-              for page in range(1, 101):
-                  result = try_fetch(
-                      f"/{quoted_repo}/-/issues/{encoded_number}/comments"
-                      f"?sort=created&page={page}&page_size=100"
-                  )
-                  if not result.get("ok"):
-                      comment_errors.append(result)
-                      break
-                  page_comments = result.get("data")
-                  if not isinstance(page_comments, list):
-                      comment_errors.append({"ok": False, "error": "comments response was not an array"})
-                      break
-                  comments.extend(page_comments)
-                  if len(page_comments) < 100:
-                      break
-
-              activities = []
-              activity_errors = []
-              for page in range(1, 101):
-                  result = try_fetch(
-                      f"/{quoted_repo}/-/issues/{encoded_number}/activities"
-                      f"?page={page}&page_size=100"
-                  )
-                  if not result.get("ok"):
-                      activity_errors.append(result)
-                      break
-                  page_activities = result.get("data")
-                  if not isinstance(page_activities, list):
-                      activity_errors.append({"ok": False, "error": "activities response was not an array"})
-                      break
-                  activities.extend(page_activities)
-                  if len(page_activities) < 100:
-                      break
-
-              issues.append({
-                  "summary": summary,
-                  "detail": detail,
-                  "comments": comments,
-                  "comment_errors": comment_errors,
-                  "activities": activities,
-                  "activity_errors": activity_errors,
-              })
-
-          payload = {
-              "repository": repo,
-              "state": "open",
-              "count": len(issue_summaries),
-              "issues": issues,
-          }
-          with open("issues.json", "w", encoding="utf-8") as output:
-              json.dump(payload, output, ensure_ascii=False, indent=2)
-          PY
-
-          unset CNB_RELAY_TOKEN CNB_TOKEN
-          printf '%s' "$RECIPIENT_CERT_B64" | base64 -d > recipient.crt.pem
-          openssl cms -encrypt -aes256 -binary \
-            -in issues.json \
-            -outform DER \
-            -out issues.cms \
-            recipient.crt.pem
-          sha256sum issues.cms > issues.cms.sha256
-          rm -f issues.json token.cms token.cms.b64
-
-      - name: Upload encrypted issue bundle
-        uses: actions/upload-artifact@v4
-        with:
-          name: cnb-issues-encrypted
-          path: |
-            /tmp/cnb-relay/issues.cms
-            /tmp/cnb-relay/issues.cms.sha256
-          if-no-files-found: error
-          retention-days: 1
+      - name: Destroy plaintext material
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          find /tmp/cnb-relay -type f -exec shred -u {} +
+          rmdir /tmp/cnb-relay 2>/dev/null || true
