@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { Elysia } from "elysia";
 import {
   clearActiveSqlQueriesForTests,
@@ -73,37 +73,28 @@ const getProjectRoleDb = mock(() => rlsDb);
 const withProjectMigrationLocks = mock(async (_scope: unknown, operation: () => Promise<unknown>) => operation());
 const assertInactive = mock(async () => undefined);
 
-const actualDb = await import("../../src/db");
-mock.module("../../src/db", () => ({
-  ...actualDb,
-  db: { ...actualDb.db, executeQuery },
-  sql: managementDb,
-  getProjectDb,
-  getProjectRoleDb,
-}));
-mock.module("../../src/services", () => ({ projectService: { getProject } }));
-const actualLock = await import("../../src/services/migration-lock");
-mock.module("../../src/services/migration-lock", () => ({
-  ...actualLock,
-  withProjectMigrationLocks,
-}));
-const actualJournal = await import("../../src/services/branch-replacement-journal");
-mock.module("../../src/services/branch-replacement-journal", () => ({
-  ...actualJournal,
-  branchReplacementJournal: { assertInactive },
-}));
-mock.module("../../src/middleware/auth", () => ({
-  requireAdminAuth,
-  requireProjectOrAdminAuth,
-}));
-mock.module("../../src/utils/logger", () => ({
-  logger: {
-    debug: mock(() => undefined),
-    error: mock(() => undefined),
-    info: mock(() => undefined),
-    warn: mock(() => undefined),
-  },
-}));
+const dbModule = await import("../../src/db");
+const servicesModule = await import("../../src/services");
+const authModule = await import("../../src/middleware/auth");
+const loggerModule = await import("../../src/utils/logger");
+
+const executeQuerySpy = spyOn(dbModule.db, "executeQuery").mockImplementation(executeQuery as never);
+const sqlSpy = spyOn(dbModule, "sql").mockImplementation(managementDb as never);
+const getProjectDbSpy = spyOn(dbModule, "getProjectDb").mockImplementation(getProjectDb as never);
+const getProjectRoleDbSpy = spyOn(dbModule, "getProjectRoleDb").mockImplementation(getProjectRoleDb as never);
+const getProjectSpy = spyOn(servicesModule.projectService, "getProject").mockImplementation(getProject as never);
+const requireAdminAuthSpy = spyOn(authModule, "requireAdminAuth").mockResolvedValue(undefined as never);
+const requireProjectOrAdminAuthSpy = spyOn(authModule, "requireProjectOrAdminAuth").mockImplementation(
+  requireProjectOrAdminAuth as typeof authModule.requireProjectOrAdminAuth,
+);
+const loggerDebugSpy = spyOn(loggerModule.logger, "debug").mockImplementation(() => undefined as never);
+const loggerErrorSpy = spyOn(loggerModule.logger, "error").mockImplementation(() => undefined as never);
+const loggerInfoSpy = spyOn(loggerModule.logger, "info").mockImplementation(() => undefined as never);
+const loggerWarnSpy = spyOn(loggerModule.logger, "warn").mockImplementation(() => undefined as never);
+const lockModule = await import("../../src/services/migration-lock");
+const journalModule = await import("../../src/services/branch-replacement-journal");
+const withProjectMigrationLocksSpy = spyOn(lockModule, "withProjectMigrationLocks").mockImplementation(withProjectMigrationLocks as never);
+const assertInactiveSpy = spyOn(journalModule.branchReplacementJournal, "assertInactive").mockImplementation(assertInactive as never);
 
 const { databaseRoutes } = await import(
   new URL("../../src/routes/database.ts?database-sql-routes-test", import.meta.url).href,
@@ -124,6 +115,21 @@ function executeSql(ref: string, scopedQueryId = queryId) {
 }
 
 describe("database SQL routes", () => {
+  afterAll(() => {
+    executeQuerySpy.mockRestore();
+    sqlSpy.mockRestore();
+    getProjectDbSpy.mockRestore();
+    getProjectRoleDbSpy.mockRestore();
+    getProjectSpy.mockRestore();
+    requireAdminAuthSpy.mockRestore();
+    requireProjectOrAdminAuthSpy.mockRestore();
+    loggerDebugSpy.mockRestore();
+    loggerErrorSpy.mockRestore();
+    loggerInfoSpy.mockRestore();
+    loggerWarnSpy.mockRestore();
+    withProjectMigrationLocksSpy.mockRestore();
+    assertInactiveSpy.mockRestore();
+  });
   beforeEach(() => {
     clearActiveSqlQueriesForTests();
     executeQuery.mockClear();
@@ -139,8 +145,8 @@ describe("database SQL routes", () => {
     getProject.mockClear();
     requireProjectOrAdminAuth.mockReset();
     requireProjectOrAdminAuth.mockResolvedValue(undefined);
-    requireAdminAuth.mockReset();
-    requireAdminAuth.mockResolvedValue(undefined);
+    requireAdminAuthSpy.mockReset();
+    requireAdminAuthSpy.mockResolvedValue(undefined as never);
     withProjectMigrationLocks.mockClear();
     assertInactive.mockClear();
   });
@@ -257,7 +263,7 @@ describe("database SQL routes", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(requireAdminAuth).toHaveBeenCalledTimes(1);
+    expect(requireAdminAuthSpy).toHaveBeenCalledTimes(1);
     expect(getProjectDb).toHaveBeenCalledWith("shared_tenant_db");
     expect(schemaReloadQueries.some(({ values }) => values.includes("pgrst_project-a"))).toBe(true);
   });

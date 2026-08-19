@@ -1,4 +1,6 @@
-import { beforeEach, describe, test, expect, mock } from "bun:test";
+import { afterAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import * as dbModule from "../../src/db";
+import { extensionService, parsePigExtensionList } from "../../src/services/extension.service";
 
 const unsafeCalls: string[] = [];
 const taggedCalls: string[] = [];
@@ -28,15 +30,17 @@ const mockDbFn = Object.assign(
     }
 );
 
-mock.module("../../src/db", () => ({
-    getProjectDb: () => mockDbFn,
-    resolveDbName: async () => "project_testref123",
-    resolvePgrstChannel: (projectRef: string) => `pgrst_${projectRef}`,
-}));
-
-import { extensionService, parsePigExtensionList } from "../../src/services/extension.service";
+const getProjectDbSpy = spyOn(dbModule, "getProjectDb").mockImplementation(() => mockDbFn as never);
+const resolveDbNameSpy = spyOn(dbModule, "resolveDbName").mockResolvedValue("project_testref123");
+const resolvePgrstChannelSpy = spyOn(dbModule, "resolvePgrstChannel").mockImplementation((ref: string) => `pgrst_${ref}`);
 
 describe("ExtensionService", () => {
+    afterAll(() => {
+        getProjectDbSpy.mockRestore();
+        resolveDbNameSpy.mockRestore();
+        resolvePgrstChannelSpy.mockRestore();
+    });
+
     beforeEach(() => {
         unsafeCalls.length = 0;
         taggedCalls.length = 0;
