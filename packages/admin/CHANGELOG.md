@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.0](https://github.com/vibeunion/supacloud/compare/admin-v0.15.5...admin-v0.16.0) (2026-08-19)
+
+
+### Features
+
+* **admin:** inspect retained upgrade status ([#995](https://github.com/vibeunion/supacloud/issues/995)) ([ed36b35](https://github.com/vibeunion/supacloud/commit/ed36b35508fbfc64e7886c21ab3a44a40b24f95d))
+
 ## [0.15.5](https://github.com/vibeunion/supacloud/compare/admin-v0.15.4...admin-v0.15.5) (2026-08-18)
 
 
