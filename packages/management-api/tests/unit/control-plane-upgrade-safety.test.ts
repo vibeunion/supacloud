@@ -85,7 +85,14 @@ describe("control-plane upgrade safety", () => {
       expect(commands[0]).toContain("--property=ProcSubset=pid");
       expect(commands[0]).toContain("--property=RuntimeMaxSec=1800s");
       expect(commands[0]).toContain("--property=KillMode=control-group");
-      expect(commands[0]?.some((argument) => argument.startsWith("--property=Environment=PGPASSFILE=/run/credentials/"))).toBe(true);
+      expect(commands[0]).toContain("--property=RuntimeDirectoryMode=0700");
+      expect(commands[0]?.some((argument) => argument.startsWith("--property=RuntimeDirectory=supacloud-control-plane-"))).toBe(true);
+      expect(commands[0]?.some((argument) => argument.startsWith("--property=Environment=PGPASSFILE="))).toBe(false);
+      const credentialBootstrap = commands[0]?.find((argument) => argument.includes("CREDENTIALS_DIRECTORY/pgpass"));
+      expect(credentialBootstrap).toContain("install --mode=0600");
+      expect(credentialBootstrap).toContain("$RUNTIME_DIRECTORY/pgpass");
+      expect(credentialBootstrap).toContain("export PGPASSFILE=");
+      expect(credentialBootstrap).toContain('exec "$@"');
       expect(commands[0]).toContain("--snapshot");
       expect(commands[0]).toContain(inspection.snapshotId);
       expect(commands[1]?.some((argument) => argument.endsWith("/pg_restore"))).toBe(true);

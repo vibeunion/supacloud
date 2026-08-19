@@ -35,6 +35,8 @@ const MAX_RECEIPT_BYTES = 8 * 1024;
 const POSTGRES_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_.-]{0,62}$/;
 const PG_DUMP_PATH = ["/usr/bin/pg_dump", "/usr/local/bin/pg_dump"].find(existsSync) ?? "/usr/bin/pg_dump";
 const PG_RESTORE_PATH = ["/usr/bin/pg_restore", "/usr/local/bin/pg_restore"].find(existsSync) ?? "/usr/bin/pg_restore";
+const INSTALL_PATH = ["/usr/bin/install", "/bin/install"].find(existsSync) ?? "/usr/bin/install";
+const SH_PATH = ["/bin/sh", "/usr/bin/sh"].find(existsSync) ?? "/bin/sh";
 const SYSTEMD_RUN_PATH = ["/usr/bin/systemd-run", "/bin/systemd-run"].find(existsSync) ?? "/usr/bin/systemd-run";
 const SYSTEMCTL_PATH = ["/usr/bin/systemctl", "/bin/systemctl"].find(existsSync) ?? "/usr/bin/systemctl";
 const TIMEOUT_PATH = ["/usr/bin/timeout", "/bin/timeout"].find(existsSync) ?? "/usr/bin/timeout";
@@ -423,7 +425,14 @@ function dumpArguments(
   unitName: string,
   credentialPath: string,
 ): string[] {
-  const credentialDirectory = `/run/credentials/${unitName}.service`;
+  const runtimeCredentialPath = `$RUNTIME_DIRECTORY/pgpass`;
+  const credentialBootstrap = [
+    "set -eu",
+    "umask 077",
+    `${INSTALL_PATH} --mode=0600 -- \"$CREDENTIALS_DIRECTORY/pgpass\" \"${runtimeCredentialPath}\"`,
+    `export PGPASSFILE=\"${runtimeCredentialPath}\"`,
+    "exec \"$@\"",
+  ].join("\n");
   return [
     TIMEOUT_PATH, "--kill-after=30s", String(SYSTEMD_RUN_TIMEOUT_SECONDS),
     SYSTEMD_RUN_PATH, "--quiet", "--wait", "--pipe", "--collect", `--unit=${unitName}`,
@@ -435,8 +444,9 @@ function dumpArguments(
     "--property=ProtectKernelTunables=yes", "--property=ProtectKernelModules=yes",
     "--property=ProtectControlGroups=yes", "--property=LockPersonality=yes",
     "--property=RestrictSUIDSGID=yes", "--property=RestrictRealtime=yes", "--property=UMask=0077",
+    `--property=RuntimeDirectory=${unitName}`, "--property=RuntimeDirectoryMode=0700",
     `--property=LoadCredential=pgpass:${credentialPath}`,
-    `--property=Environment=PGPASSFILE=${credentialDirectory}/pgpass`, "--",
+    "--", SH_PATH, "-c", credentialBootstrap, "supacloud-control-plane-pg-dump",
     PG_DUMP_PATH, "--host", target.hostname, "--port", target.port, "--username", target.username,
     "--dbname", target.database, "--format=custom", "--compress=6", "--snapshot", inspection.snapshotId,
   ];
