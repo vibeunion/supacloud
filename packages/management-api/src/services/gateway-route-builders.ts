@@ -515,7 +515,11 @@ export function makeCustomGatewayRoute(projectRef: string, input: CustomGatewayR
         host: route.hosts,
         path: Array.isArray(route.path) ? route.path : [route.path],
     };
-    if (route.protocol) match.protocol = route.protocol;
+    if (route.protocol) {
+        match.vars = {
+            "{http.request.scheme}": route.protocol,
+        };
+    }
 
     return {
         "@id": customGatewayRouteId(projectRef, route.id),

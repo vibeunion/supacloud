@@ -720,8 +720,10 @@ export class CaddyGatewayProvider implements GatewayProvider {
         const bPath = Array.isArray((b.match as any)?.[0]?.path) ? String((b.match as any)[0].path[0] || "") : "";
         if (aPath.length !== bPath.length) return bPath.length - aPath.length;
 
-        const aProtocol = typeof (a.match as any)?.[0]?.protocol === "string";
-        const bProtocol = typeof (b.match as any)?.[0]?.protocol === "string";
+        const aProtocol = typeof (a.match as any)?.[0]?.vars?.["{http.request.scheme}"] === "string"
+            || typeof (a.match as any)?.[0]?.protocol === "string";
+        const bProtocol = typeof (b.match as any)?.[0]?.vars?.["{http.request.scheme}"] === "string"
+            || typeof (b.match as any)?.[0]?.protocol === "string";
         if (aProtocol !== bProtocol) return aProtocol ? -1 : 1;
         return aid.localeCompare(bid);
     }
