@@ -233,6 +233,21 @@ describe("migration risk analysis", () => {
         ]);
     });
 
+    test("requires manual review for a DO block inside the allowed outer transaction wrapper", () => {
+        const risks = analyzeMigrationSql(`
+            BEGIN;
+            DO $migration$ BEGIN EXECUTE 'DROP TABLE users'; END $migration$;
+            COMMIT;
+        `);
+        expect(risks).toEqual([
+            expect.objectContaining({
+                level: "HIGH",
+                type: "manual_review_do_block",
+                blocksTransactionalPush: true,
+            }),
+        ]);
+    });
+
     test("requires manual review for procedural definitions and calls", () => {
         expect(analyzeMigrationSql(
             "CREATE FUNCTION public.answer() RETURNS integer LANGUAGE sql AS $$ SELECT 42 $$;",
