@@ -101,10 +101,10 @@ export const projectDashboardRoutes = new Elysia({ prefix: "/v1/projects" })
               SELECT count(*)::int AS total FROM auth.users
             `),
         safeRead<DashboardRow[]>("table count", [], () => projectDb`
-          SELECT count(*)::int AS cnt FROM pg_stat_user_tables
+          SELECT count(*)::int AS cnt FROM pg_stat_user_tables WHERE schemaname = 'public'
         `),
         safeRead<DashboardRow[]>("index count", [], () => projectDb`
-          SELECT count(*)::int AS cnt FROM pg_stat_user_indexes
+          SELECT count(*)::int AS cnt FROM pg_stat_user_indexes WHERE schemaname = 'public'
         `),
         safeRead<DashboardRow[]>("storage size", [], () => projectDb`
           SELECT pg_size_pretty(coalesce(sum(

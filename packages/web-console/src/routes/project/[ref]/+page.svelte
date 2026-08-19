@@ -156,8 +156,8 @@
               (SELECT round(100.0 * blks_hit / NULLIF(blks_hit + blks_read, 0), 1) FROM pg_stat_database WHERE datname = current_database()) as cache_ratio;`),
       runSql(ref, `SELECT count(*) as active FROM pg_stat_activity WHERE backend_type = 'client backend';`),
       canReadLocalAuth ? runSql(ref, `SELECT count(*) as total FROM auth.users;`) : Promise.resolve([]),
-      runSql(ref, `SELECT count(*) as cnt FROM pg_stat_user_tables;`),
-      runSql(ref, `SELECT count(*) as cnt FROM pg_stat_user_indexes;`),
+      runSql(ref, `SELECT count(*) as cnt FROM pg_stat_user_tables WHERE schemaname = 'public';`),
+      runSql(ref, `SELECT count(*) as cnt FROM pg_stat_user_indexes WHERE schemaname = 'public';`),
       runSql(ref, `SELECT pg_size_pretty(coalesce(sum(CASE WHEN metadata->>'size' ~ '^[0-9]+$' THEN (metadata->>'size')::bigint ELSE 0 END), 0)) as size FROM storage.objects;`),
       canReadLocalAuth
         ? runSql(ref, `SELECT email, created_at::text FROM auth.users ORDER BY created_at DESC LIMIT 5;`)
