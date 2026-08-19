@@ -1,0 +1,288 @@
+name: Apply CNB edge type-directive fix
+
+on:
+  push:
+    branches: [agent/fix-cnb-edge-type-directives-20260819]
+    paths: [.github/workflows/fix-cnb-edge-type-directives.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/fix-cnb-edge-type-directives-20260819
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Apply focused runtime normalization patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: Path, old: str, new: str, label: str) -> None:
+              text = path.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected one match, found {count}")
+              path.write_text(text.replace(old, new), encoding="utf-8")
+
+          implementation = Path("packages/management-api/src/services/edge-runtime-bundle.ts")
+          replace_once(
+              implementation,
+              '''type StaticStringBinding = {
+            moduleSpecifier: string;
+            declarations: number;
+            writes: number;
+          };
+          ''',
+              '''type StaticStringBinding = {
+            moduleSpecifier: string;
+            declarations: number;
+            writes: number;
+          };
+
+          type BundleComment = {
+            value: string;
+            start: number;
+            end: number;
+          };
+          ''',
+              "insert BundleComment",
+          )
+          replace_once(
+              implementation,
+              '''function parseBundle(code: string): SyntaxNode {
+            return parse(code, {
+              ecmaVersion: "latest",
+              sourceType: "module",
+              allowHashBang: true,
+              locations: true,
+            }) as unknown as SyntaxNode;
+          }
+          ''',
+              '''function parseBundle(code: string, comments?: BundleComment[]): SyntaxNode {
+            const options = {
+              ecmaVersion: "latest" as const,
+              sourceType: "module" as const,
+              allowHashBang: true,
+              locations: true,
+            };
+            if (comments) {
+              return parse(code, {
+                ...options,
+                onComment: (_block: boolean, value: string, start: number, end: number) => {
+                  comments.push({ value, start, end });
+                },
+              }) as unknown as SyntaxNode;
+            }
+            return parse(code, options) as unknown as SyntaxNode;
+          }
+          ''',
+              "capture parsed comments",
+          )
+          apply_replacements = '''function applyReplacements(code: string, replacements: SourceReplacement[]): string {
+            return [...replacements]
+              .sort((left, right) => right.start - left.start)
+              .reduce(
+                (normalizedCode, replacement) => normalizedCode.slice(0, replacement.start)
+                  + replacement.code
+                  + normalizedCode.slice(replacement.end),
+                code,
+              );
+          }
+          '''
+          replace_once(
+              implementation,
+              apply_replacements,
+              apply_replacements + '''
+          const TYPE_ONLY_DIRECTIVE = /^(?:\\/\\s*<reference\\b[^>]*\\/?\\s*>|@(?:deno-types|ts-types|ts-self-types)\\s*=\\s*(?:"[^"\\r\\n]+"|'[^'\\r\\n]+'|\\S+))\\s*$/i;
+
+          function typeOnlyDirective(comment: BundleComment): boolean {
+            return TYPE_ONLY_DIRECTIVE.test(comment.value.trim());
+          }
+
+          function stripTypeOnlyDirectiveComments(
+            code: string,
+            comments: BundleComment[],
+          ): string {
+            return applyReplacements(
+              code,
+              comments
+                .filter(typeOnlyDirective)
+                .map((comment) => ({
+                  start: comment.start,
+                  end: comment.end,
+                  code: code.slice(comment.start, comment.end).replace(/[^\\r\\n]/g, " "),
+                })),
+            );
+          }
+          ''',
+              "insert type-directive stripping",
+          )
+          replace_once(
+              implementation,
+              '''export function normalizeEdgeRuntimeBundle(code: string): EdgeRuntimeBundleNormalization {
+            const program = parseBundle(code);
+            const computedImports = computedDynamicImports(program);
+          ''',
+              '''export function normalizeEdgeRuntimeBundle(code: string): EdgeRuntimeBundleNormalization {
+            const comments: BundleComment[] = [];
+            const program = parseBundle(code, comments);
+            const runtimeCode = stripTypeOnlyDirectiveComments(code, comments);
+            const computedImports = computedDynamicImports(program);
+          ''',
+              "normalize comments",
+          )
+          replace_once(
+              implementation,
+              "  const normalizedCode = applyReplacements(code, replacements);\n",
+              "  const normalizedCode = applyReplacements(runtimeCode, replacements);\n",
+              "apply replacements to runtime code",
+          )
+
+          unit_test = Path("packages/management-api/tests/unit/edge-runtime-bundle.test.ts")
+          literal_test = '''  test("keeps literal dynamic imports unchanged", () => {
+            const sourceCode = 'export const modulePromise = import("optional-runtime-package");';
+
+            expect(normalizeEdgeRuntimeBundle(sourceCode)).toEqual({ code: sourceCode, importCount: 1 });
+          });
+          '''
+          replace_once(
+              unit_test,
+              literal_test,
+              literal_test + '''
+            test("removes compile-time Deno type directives without touching runtime content", () => {
+              const sourceCode = `/// <reference types="jsr:@supabase/functions-js/edge-runtime.d.ts" />
+          // @deno-types="https://example.com/runtime.d.ts"
+          import "https://example.com/runtime.js";
+          /* @ts-types="./local-types.d.ts" */
+          export const declarationText = "types.d.ts";
+          export const referenceText = \\`/// <reference types="preserve-me" />\\`;
+          `;
+
+              const normalization = normalizeEdgeRuntimeBundle(sourceCode);
+
+              expect(normalization.code).not.toContain("edge-runtime.d.ts");
+              expect(normalization.code).not.toContain("@deno-types");
+              expect(normalization.code).not.toContain("@ts-types");
+              expect(normalization.code).toContain('import "https://example.com/runtime.js"');
+              expect(normalization.code).toContain('declarationText = "types.d.ts"');
+              expect(normalization.code).toContain('reference types="preserve-me"');
+              expect(normalization.importCount).toBe(1);
+            });
+          ''',
+              "add normalization unit regression",
+          )
+
+          service_test = Path(
+              "packages/management-api/tests/unit/edge-function.service.bundle-metadata.test.ts"
+          )
+          computed_test = '''  test("normalizes computed imports in final single-file and bundle artifacts", async () => {
+            const functionCode = `
+              var optionalPackage = "optional-runtime-package";
+              export default {
+                fetch: async () => Response.json(await import(optionalPackage).catch(() => null)),
+              };
+            `;
+            const singleFile = await edgeFunctionService.deployDetailed(
+              "proj_normalized_single",
+              "normalized-single",
+              functionCode,
+            );
+            const bundle = await edgeFunctionService.deployBundleDetailed(
+              "proj_normalized_bundle",
+              "normalized-bundle",
+              { "index.ts": functionCode },
+            );
+
+            for (const deployment of [singleFile, bundle]) {
+              expect(deployment).toMatchObject({ success: true, import_count: 2 });
+              const artifactCode = await readFile(deployment.content_path!, "utf8");
+              expect(artifactCode).toContain('import("optional-runtime-package")');
+              expect(artifactCode).toContain('import("undefined")');
+              expect(artifactCode).not.toContain("import(optionalPackage)");
+              expect(deployment.bundle_size_bytes).toBe(Buffer.byteLength(artifactCode));
+              expect(deployment.bundle_hash).toBe(
+                createHash("sha256").update(artifactCode).digest("hex").slice(0, 16),
+              );
+            }
+          });
+          '''
+          replace_once(
+              service_test,
+              computed_test,
+              computed_test + '''
+            test("removes Deno type declarations from runtime artifacts while preserving source", async () => {
+              const functionCode = `/// <reference types="jsr:@supabase/functions-js/edge-runtime.d.ts" />
+          // @deno-types="https://example.com/runtime.d.ts"
+          import "optional-runtime-package";
+          export default { fetch: () => new Response("ok") };
+          `;
+              const deployments = [
+                await edgeFunctionService.deployDetailed(
+                  "proj_type_directive_single",
+                  "type-directive-single",
+                  functionCode,
+                ),
+                await edgeFunctionService.deployBundleDetailed(
+                  "proj_type_directive_bundle",
+                  "type-directive-bundle",
+                  { "index.ts": functionCode },
+                ),
+              ];
+
+              for (const deployment of deployments) {
+                expect(deployment).toMatchObject({ success: true, import_count: 1 });
+                const artifactCode = await readFile(deployment.content_path!, "utf8");
+                expect(artifactCode).not.toContain("edge-runtime.d.ts");
+                expect(artifactCode).not.toContain("@deno-types");
+                expect(await readFile(deployment.source_path!, "utf8")).toContain("edge-runtime.d.ts");
+                expect(deployment.bundle_size_bytes).toBe(Buffer.byteLength(artifactCode));
+              }
+            });
+          ''',
+              "add deployment regression",
+          )
+          PY
+
+      - name: Format and validate focused changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd packages/management-api
+          bun install --frozen-lockfile
+          bunx prettier --write \
+            src/services/edge-runtime-bundle.ts \
+            tests/unit/edge-runtime-bundle.test.ts \
+            tests/unit/edge-function.service.bundle-metadata.test.ts
+          bun run typecheck
+          bun test \
+            tests/unit/edge-runtime-bundle.test.ts \
+            tests/unit/edge-function.service.bundle-metadata.test.ts
+          cd ../..
+          git diff --check
+
+      - name: Commit focused fix and remove one-shot workflow
+        shell: bash
+        env:
+          BRANCH: agent/fix-cnb-edge-type-directives-20260819
+        run: |
+          set -euo pipefail
+          rm .github/workflows/fix-cnb-edge-type-directives.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add \
+            packages/management-api/src/services/edge-runtime-bundle.ts \
+            packages/management-api/tests/unit/edge-runtime-bundle.test.ts \
+            packages/management-api/tests/unit/edge-function.service.bundle-metadata.test.ts \
+            .github/workflows/fix-cnb-edge-type-directives.yml
+          git commit -m "fix(edge-functions): strip Deno type directives from runtime bundles"
+          git push origin "HEAD:${BRANCH}"
