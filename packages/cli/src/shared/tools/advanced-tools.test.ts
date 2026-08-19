@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { registerAdvancedTools } from "./advanced-tools";
@@ -9,6 +9,24 @@ import type { ToolSchema } from "../schema";
 
 const EXPECTED_ACTIVATION_ID = "a1111111-1111-4111-8111-111111111111";
 const COMMITTED_ACTIVATION_ID = "b2222222-2222-4222-8222-222222222222";
+
+function confirmedFunctionMutation(slug: string) {
+    return {
+        ok: true,
+        status: 200,
+        data: {
+            success: true,
+            project_ref: "proj",
+            slug,
+            previous_active_version: "3",
+            expected_activation_id: EXPECTED_ACTIVATION_ID,
+            activation_id: COMMITTED_ACTIVATION_ID,
+            active_version: "4",
+            version: "4",
+            config: { version: "4", verify_jwt: false, activation_id: COMMITTED_ACTIVATION_ID },
+        },
+    };
+}
 
 function captureEdgeFunctionsTool(
     http: Record<string, unknown>,
@@ -614,6 +632,96 @@ describe("edge_functions CLI tool", () => {
                 operation: "edge_functions.deploy",
                 active_version: "4",
             });
+        } finally {
+            rmSync(directory, { recursive: true, force: true });
+        }
+    });
+
+    test("uploads a self-contained multi-file bundle directory without node_modules", async () => {
+        const directory = mkdtempSync(join(tmpdir(), "supacloud-bundle-dir-"));
+        mkdirSync(join(directory, "admin-console", "build"), { recursive: true });
+        writeFileSync(join(directory, "index.ts"), "export default {};\n");
+        writeFileSync(join(directory, "admin-console", "build", "index.html"), "<!doctype html>\n");
+        let requestBody: Record<string, unknown> | undefined;
+        const { callback } = captureEdgeFunctionsTool({
+            post: async (_path: string, body: Record<string, unknown>) => {
+                requestBody = body;
+                return confirmedFunctionMutation("supauth");
+            },
+        });
+
+        try {
+            await callback({
+                action: "deploy_bundle",
+                ref: "proj",
+                slug: "supauth",
+                "bundle-dir": directory,
+                entrypoint: "index.ts",
+                "expected-active-version": "3",
+                "expected-activation-id": EXPECTED_ACTIVATION_ID,
+            });
+            expect(requestBody).toMatchObject({
+                files: {
+                    "index.ts": "export default {};\n",
+                    "admin-console/build/index.html": "<!doctype html>\n",
+                },
+                entrypoint: "index.ts",
+            });
+        } finally {
+            rmSync(directory, { recursive: true, force: true });
+        }
+    });
+
+    test.each(["node_modules", ".git", "._metadata"])(
+        "rejects forbidden bundle directory entry %s before HTTP dispatch",
+        async (entryName) => {
+            const directory = mkdtempSync(join(tmpdir(), "supacloud-forbidden-bundle-dir-"));
+            const entryPath = join(directory, entryName);
+            if (entryName.startsWith(".")) writeFileSync(entryPath, "forbidden");
+            else {
+                mkdirSync(entryPath);
+                writeFileSync(join(entryPath, "dependency.js"), "forbidden");
+            }
+            let requestCount = 0;
+            const { callback } = captureEdgeFunctionsTool({
+                post: async () => {
+                    requestCount += 1;
+                    return confirmedFunctionMutation("supauth");
+                },
+            });
+
+            try {
+                await expect(callback({
+                    action: "deploy_bundle",
+                    ref: "proj",
+                    slug: "supauth",
+                    "bundle-dir": directory,
+                    "expected-active-version": "3",
+                    "expected-activation-id": EXPECTED_ACTIVATION_ID,
+                })).rejects.toThrow("forbidden path");
+                expect(requestCount).toBe(0);
+            } finally {
+                rmSync(directory, { recursive: true, force: true });
+            }
+        },
+    );
+
+    test("rejects symlinks in a bundle directory before HTTP dispatch", async () => {
+        const directory = mkdtempSync(join(tmpdir(), "supacloud-symlink-bundle-dir-"));
+        const target = join(directory, "target.ts");
+        writeFileSync(target, "export default {};\n");
+        symlinkSync(target, join(directory, "index.ts"));
+        const { callback } = captureEdgeFunctionsTool({ post: async () => confirmedFunctionMutation("supauth") });
+
+        try {
+            await expect(callback({
+                action: "deploy_bundle",
+                ref: "proj",
+                slug: "supauth",
+                "bundle-dir": directory,
+                "expected-active-version": "3",
+                "expected-activation-id": EXPECTED_ACTIVATION_ID,
+            })).rejects.toThrow("must not contain symlinks");
         } finally {
             rmSync(directory, { recursive: true, force: true });
         }

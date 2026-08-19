@@ -331,6 +331,7 @@ supacloud-cli edge_functions list --ref <ref>
 supacloud-cli edge_functions source --ref <ref> --slug hello --version 1 --output ./hello-v1.ts
 supacloud-cli edge_functions deploy --ref <ref> --slug hello --path ./supabase/functions/hello --expected-active-version absent
 supacloud-cli edge_functions deploy --ref <ref> --slug hello --prebundled-path ./dist/hello.js --expected-sha256 <sha256> --expected-active-version 1
+supacloud-cli edge_functions deploy_bundle --ref <ref> --slug supauth --bundle-dir ./artifacts/supacloud-app/function-bundle --entrypoint index.ts --expected-active-version 1 --expected-activation-id <uuid>
 supacloud-cli edge_functions activate --ref <ref> --slug hello --version 2 --expected-active-version 3
 supacloud-cli storage list_buckets --ref <ref>
 ```
@@ -346,6 +347,11 @@ Use `deploy --prebundled-path` with the required lowercase
 artifact without local or server rebundling. The mode rejects caller-hash,
 file-stability, UTF-8, runtime-policy, and normalization mismatches before
 activation.
+Use `deploy_bundle --bundle-dir` for a locally built, self-contained multi-file
+Function directory. The CLI reads only regular UTF-8 files and rejects
+`node_modules`, `.git`, AppleDouble entries, symlinks, and special files before
+calling the Management API. The target host therefore needs neither a source
+checkout nor a package installation.
 Version `0` is reserved for a listed legacy Function's active-version CAS token.
 It is valid only as `--expected-active-version 0`; immutable source reads and
 activation targets still require a positive version.
