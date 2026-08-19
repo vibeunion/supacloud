@@ -77,10 +77,14 @@ function baselineInventory(migrations: Array<{ version: string; name: string }>)
     }));
 }
 
-function sqlBatchReceipt(commands: string[]) {
+function sqlBatchReceipt(
+    commands: string[],
+    schemaReloadStatus: "notified" | "notification_failed" = "notified",
+) {
     return {
         command: "BATCH",
         statements: commands.map((command, index) => ({ index: index + 1, command, rowCount: 0, durationMs: 1 })),
+        schema_reload: { status: schemaReloadStatus, ddl_committed: true },
     };
 }
 
@@ -549,6 +553,7 @@ describe("database migration helpers", () => {
     test.each([
         ["non-string name", { version: "1785220280", name: {}, statements: ["CREATE TABLE users (id uuid);"] }],
         ["non-string version", { version: {}, name: "20260425123000_create_users", statements: ["CREATE TABLE users (id uuid);"] }],
+        ["numeric version", { version: 1785220280, name: "20260425123000_create_users", statements: ["CREATE TABLE users (id uuid);"] }],
     ])("rejects a %s before dry-run or apply without writing", async (_case, remoteMigration) => {
         const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
         const posts: unknown[] = [];
@@ -1279,6 +1284,67 @@ describe("database migration helpers", () => {
         }
     });
 
+    test("accepts a safe historical numeric version while planning a baseline", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
+        try {
+            writeFileSync(join(dir, "20260425123000_create_users.sql"), "CREATE TABLE users (id uuid);\n");
+            const callback = captureDatabaseTool({
+                get: async () => ({
+                    ok: true,
+                    status: 200,
+                    data: [{
+                        version: 20260425123000,
+                        name: "20260425123000_create_users",
+                        statements: ["baseline:20260425123000_create_users"],
+                    }],
+                }),
+            });
+
+            const result = await callback({ action: "baseline_migrations", ref: "proj", dir, dry_run: true });
+
+            expect(result.content[0].text).toContain("Would mark as applied:\n  - none");
+            expect(result.content[0].text).toContain("Already applied:\n  - 20260425123000_create_users.sql");
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    test("accepts repeated generic cli_push names when versions and contents are distinct", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
+        try {
+            writeFileSync(join(dir, "20260425123000_create_users.sql"), "CREATE TABLE users (id uuid);\n");
+            writeFileSync(join(dir, "20260425124000_create_tasks.sql"), "CREATE TABLE tasks (id uuid);\n");
+            const callback = captureDatabaseTool({
+                get: async () => ({
+                    ok: true,
+                    status: 200,
+                    data: [
+                        {
+                            version: "20260425123000",
+                            name: "cli_push",
+                            statements: ["CREATE TABLE users (id uuid);"],
+                        },
+                        {
+                            version: "20260425124000",
+                            name: "cli_push",
+                            statements: ["CREATE TABLE tasks (id uuid);"],
+                        },
+                    ],
+                }),
+            });
+
+            const push = await callback({ action: "push_migrations", ref: "proj", dir, dry_run: true });
+            const baseline = await callback({ action: "baseline_migrations", ref: "proj", dir, dry_run: true });
+
+            expect(push.content[0].text).toContain("Pending:\n  - none");
+            expect(push.content[0].text).toContain("Already applied:\n  - 20260425123000_create_users.sql");
+            expect(baseline.content[0].text).toContain("Would mark as applied:\n  - none");
+            expect(baseline.content[0].text).toContain("Already applied:\n  - 20260425123000_create_users.sql");
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
     test("rejects a baseline identity without content evidence before mutation", async () => {
         const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
         let mutationCount = 0;
@@ -1581,6 +1647,33 @@ describe("database migration helpers", () => {
     expect(JSON.parse(response.content[0].text).error).toEqual({ code: "OUTCOME_UNKNOWN", http_status: 200 });
   });
 
+  test("reports committed table DDL as partial success when schema reload fails", async () => {
+    const callback = captureDatabaseTool({
+      postReleaseMutation: async () => ({
+        ok: true,
+        status: 200,
+        data: sqlBatchReceipt(["CREATE", "ALTER", ...Array(5).fill("DROP")], "notification_failed"),
+      }),
+    });
+
+    const response = await callback({
+      action: "create_table_rls",
+      ref: "proj",
+      table: "todos",
+      columns: "id uuid primary key",
+    });
+    const receipt = JSON.parse(response.content[0].text);
+
+    expect(response.isError).toBe(true);
+    expect(receipt).toMatchObject({
+      ok: false,
+      operation: "database.create_table_rls",
+      ddl_committed: true,
+      schema_reload: { status: "notification_failed" },
+      error: { code: "PARTIAL_SUCCESS", http_status: 200 },
+    });
+  });
+
   test.each([201, 202, 204])("does not treat HTTP %d as a completed table and RLS mutation", async (status) => {
     const callback = captureDatabaseTool({
       postReleaseMutation: async () => ({
@@ -1664,6 +1757,30 @@ describe("database migration helpers", () => {
       expect(text).toContain("Risk Assessment:");
       expect(text).toContain("Migration Risk Level: MEDIUM");
       expect(text).toContain("CREATE INDEX CONCURRENTLY");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  test("push_migrations dry_run fails when transactional SQL cannot be applied", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "supacloud-dryrun-blocker-test-"));
+    try {
+      writeFileSync(
+        join(dir, "20260819000001_concurrent_index.sql"),
+        "CREATE INDEX CONCURRENTLY idx_users_name ON public.users (name);",
+      );
+      const callback = captureDatabaseTool({
+        get: async () => ({ ok: true, status: 200, data: [] }),
+      });
+
+      const result = await callback({
+        action: "push_migrations",
+        ref: "proj",
+        dir,
+        dry_run: true,
+      });
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("cannot run inside the transactional migration executor");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

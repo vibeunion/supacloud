@@ -86,6 +86,31 @@ describe("migration risk analysis", () => {
         )).toHaveLength(0);
     });
 
+    test("analyzes each ALTER TABLE subcommand independently", () => {
+        const risks = analyzeMigrationSql(`
+            ALTER TABLE public.users
+              ADD COLUMN safe_count integer DEFAULT 0,
+              ADD COLUMN required_label text NOT NULL;
+        `);
+        expect(risks).toEqual([
+            expect.objectContaining({
+                type: "locking_not_null_no_default",
+                statementSnippet: expect.stringContaining("required_label"),
+            }),
+        ]);
+    });
+
+    test("flags function-based defaults conservatively but allows known stable timestamps", () => {
+        expect(analyzeMigrationSql(
+            "ALTER TABLE users ADD COLUMN request_id uuid DEFAULT gen_random_uuid() NOT NULL;",
+        )).toEqual([
+            expect.objectContaining({ type: "locking_not_null_expression_default" }),
+        ]);
+        expect(analyzeMigrationSql(
+            "ALTER TABLE users ADD COLUMN created_at timestamptz DEFAULT now() NOT NULL;",
+        )).toHaveLength(0);
+    });
+
     test("detects destructive DROP TABLE and DROP VIEW as HIGH risk", () => {
         expect(analyzeMigrationSql("DROP TABLE public.legacy_logs;")).toEqual([
             expect.objectContaining({ level: "HIGH", type: "destructive_drop_table" }),
@@ -206,6 +231,140 @@ describe("migration risk analysis", () => {
                 blocksTransactionalPush: true,
             }),
         ]);
+    });
+
+    test("requires manual review for procedural definitions and calls", () => {
+        expect(analyzeMigrationSql(
+            "CREATE FUNCTION public.answer() RETURNS integer LANGUAGE sql AS $$ SELECT 42 $$;",
+        )).toEqual([
+            expect.objectContaining({ type: "manual_review_procedural_definition", level: "HIGH" }),
+        ]);
+        expect(analyzeMigrationSql("CALL public.rebuild_reporting();")).toEqual([
+            expect.objectContaining({ type: "manual_review_procedure_call", level: "HIGH" }),
+        ]);
+    });
+
+    test("blocks project-scope and server-access operations before push", () => {
+        for (const sql of [
+            "ALTER ROLE postgres SUPERUSER;",
+            "DROP SCHEMA public CASCADE;",
+            "DROP SCHEMA application_private, public CASCADE;",
+            "ALTER SCHEMA public RENAME TO application_public;",
+            "COPY public.accounts TO PROGRAM 'cat';",
+            "COPY public.accounts TO '/var/lib/postgresql/accounts.csv';",
+            "SELECT pg_read_file('/etc/passwd');",
+            "CREATE SERVER remote_db FOREIGN DATA WRAPPER postgres_fdw;",
+            "SELECT dblink('host=remote', 'SELECT 1');",
+        ]) {
+            expect(analyzeMigrationSql(sql)).toEqual(expect.arrayContaining([
+                expect.objectContaining({ level: "HIGH", blocksTransactionalPush: true }),
+            ]));
+        }
+    });
+
+    test("allows one outer transaction wrapper but blocks nested transaction control", () => {
+        expect(analyzeMigrationSql("BEGIN; CREATE TABLE wrapped(id bigint); COMMIT;"))
+            .toHaveLength(0);
+        expect(analyzeMigrationSql("CREATE TABLE partial(id bigint); COMMIT;"))
+            .toEqual(expect.arrayContaining([
+                expect.objectContaining({
+                    type: "unsupported_transaction_control",
+                    blocksTransactionalPush: true,
+                }),
+            ]));
+        expect(analyzeMigrationSql("CREATE TABLE partial(id bigint); ABORT AND CHAIN; SELECT 1;"))
+            .toEqual(expect.arrayContaining([
+                expect.objectContaining({
+                    type: "unsupported_transaction_control",
+                    blocksTransactionalPush: true,
+                }),
+            ]));
+    });
+
+    test("blocks empty migrations after removing an outer transaction wrapper", () => {
+        expect(analyzeMigrationSql("BEGIN; COMMIT;"))
+            .toEqual([expect.objectContaining({
+                type: "unsupported_empty_migration",
+                blocksTransactionalPush: true,
+            })]);
+    });
+
+    test.each([
+        "SELECT 'unterminated",
+        'CREATE TABLE "unterminated (id bigint)',
+        "SELECT $body$unterminated",
+        "SELECT 1 /* unterminated",
+    ])("rejects malformed SQL before risk classification: %s", (sql) => {
+        expect(() => analyzeMigrationSql(sql)).toThrow("Unterminated SQL");
+    });
+
+    test("blocks session, advisory lock, and migration ledger control", () => {
+        for (const sql of [
+            "SET ROLE postgres;",
+            "SELECT pg_advisory_lock(42);",
+            "SELECT pg_catalog.\"pg_advisory_lock\"(42);",
+            "SELECT pg_catalog.\"pg_read_file\"('/etc/passwd');",
+            "SELECT extensions.\"dblink\"('host=remote', 'SELECT 1');",
+            "INSERT INTO supabase_migrations.schema_migrations(version) VALUES ('1');",
+            "DELETE FROM \"public\".\"schema_migrations\" WHERE version = '1';",
+            "DROP TABLE IF EXISTS \"supabase_migrations\".\"schema_migrations\";",
+            "DROP TABLE public.disposable, public.schema_migrations CASCADE;",
+            "TRUNCATE TABLE public.disposable, ONLY public.schema_migrations;",
+            "LOCK TABLE public.disposable, public.schema_migrations IN ACCESS EXCLUSIVE MODE;",
+            "ALTER TABLE IF EXISTS public.schema_migrations ADD COLUMN tampered boolean;",
+            "CREATE INDEX ledger_version_idx ON public.schema_migrations(version);",
+            "CREATE TRIGGER ledger_guard BEFORE INSERT ON public.schema_migrations FOR EACH ROW EXECUTE FUNCTION public.audit();",
+            "DROP TRIGGER IF EXISTS ledger_guard ON public.schema_migrations;",
+            "CREATE RULE ledger_rule AS ON INSERT TO public.schema_migrations DO INSTEAD NOTHING;",
+            "DROP RULE IF EXISTS ledger_rule ON public.schema_migrations;",
+            "CREATE POLICY ledger_policy ON public.schema_migrations USING (true);",
+            "COMMENT ON TABLE public.schema_migrations IS 'tampered';",
+            "SECURITY LABEL ON TABLE public.schema_migrations IS 'tampered';",
+            "REINDEX TABLE public.schema_migrations;",
+            "REINDEX (VERBOSE) TABLE CONCURRENTLY public.schema_migrations;",
+            "CLUSTER VERBOSE public.schema_migrations;",
+            "VACUUM (ANALYZE) public.schema_migrations;",
+            "ANALYZE public.schema_migrations;",
+            "GRANT SELECT ON public.accounts, public.schema_migrations TO authenticated;",
+            "GRANT SELECT ON ALL TABLES IN SCHEMA supabase_migrations TO authenticated;",
+            "GRANT ALL ON ALL TABLES IN SCHEMA public TO authenticated;",
+            "SELECT \"supabase_migrations\".\"record_schema_migration\"('1', ARRAY['SELECT 1'], 'fake', 'checksum');",
+        ]) {
+            expect(analyzeMigrationSql(sql)).toEqual(expect.arrayContaining([
+                expect.objectContaining({ level: "HIGH", blocksTransactionalPush: true }),
+            ]));
+        }
+        expect(analyzeMigrationSql("GRANT SELECT ON public.accounts TO schema_migrations;"))
+            .toHaveLength(0);
+        expect(analyzeMigrationSql("GRANT EXECUTE ON FUNCTION public.audit(schema_migrations) TO authenticated;"))
+            .toHaveLength(0);
+        expect(analyzeMigrationSql("GRANT USAGE ON SCHEMA schema_migrations TO authenticated;"))
+            .toHaveLength(0);
+        expect(analyzeMigrationSql("GRANT EXECUTE ON FUNCTION public.schema_migrations(text) TO authenticated;"))
+            .toHaveLength(0);
+        expect(analyzeMigrationSql("CREATE INDEX account_email_idx ON public.accounts(email);"))
+            .not.toContainEqual(expect.objectContaining({ type: "unsupported_migration_ledger_access" }));
+        expect(analyzeMigrationSql("COMMENT ON TABLE public.accounts IS 'application data';"))
+            .not.toContainEqual(expect.objectContaining({ type: "unsupported_migration_ledger_access" }));
+    });
+
+    test("blocks quoted public schema removal before push", () => {
+        expect(analyzeMigrationSql('DROP SCHEMA "public" CASCADE;')).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                type: "unsupported_public_schema_removal",
+                blocksTransactionalPush: true,
+            }),
+        ]));
+    });
+
+    test("blocks Unicode-escaped identifiers that could hide protected names", () => {
+        expect(analyzeMigrationSql(String.raw`DROP SCHEMA U&"p\0075blic" CASCADE;`))
+            .toEqual(expect.arrayContaining([
+                expect.objectContaining({
+                    type: "unsupported_unicode_escaped_identifier",
+                    blocksTransactionalPush: true,
+                }),
+            ]));
     });
 
     test("formats multi-file risk report with clear guidance", () => {

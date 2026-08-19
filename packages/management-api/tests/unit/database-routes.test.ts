@@ -305,6 +305,22 @@ describe("database route helpers", () => {
     });
   });
 
+  test("sqlRouteResponse exposes schema reload completion without obscuring committed DDL", () => {
+    const response = sqlRouteResponse({
+      rows: [],
+      rowCount: 0,
+      command: "ALTER",
+      fields: [],
+      notices: [],
+      durationMs: 12,
+    }, { schemaReloadStatus: "notification_failed", ddlCommitted: true });
+
+    expect(response.schema_reload).toEqual({
+      status: "notification_failed",
+      ddl_committed: true,
+    });
+  });
+
   test("sqlRouteErrorResponse preserves SQL error code and duration", () => {
     expect(sqlRouteErrorResponse(Object.assign(new Error("Query cancelled"), {
       code: "QUERY_CANCELLED",

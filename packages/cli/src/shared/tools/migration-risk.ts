@@ -54,12 +54,12 @@ function maskSingleQuotedString(sql: string, start: number): { masked: string; e
             end += 2;
         } else if (sql[end] === "'") {
             end += 1;
-            break;
+            return { masked: " ".repeat(end - start), end };
         } else {
             end += 1;
         }
     }
-    return { masked: " ".repeat(end - start), end };
+    throw new Error("Unterminated SQL single-quoted string");
 }
 
 function maskDoubleQuotedIdentifier(sql: string, start: number): { masked: string; end: number } {
@@ -69,12 +69,17 @@ function maskDoubleQuotedIdentifier(sql: string, start: number): { masked: strin
             end += 2;
         } else if (sql[end] === '"') {
             end += 1;
-            break;
+            return { masked: `"${"_".repeat(Math.max(0, end - start - 2))}"`, end };
         } else {
             end += 1;
         }
     }
-    return { masked: `"${"_".repeat(Math.max(0, end - start - 2))}"`, end };
+    throw new Error("Unterminated SQL double-quoted identifier");
+}
+
+function preserveDoubleQuotedIdentifier(sql: string, start: number): { masked: string; end: number } {
+    const identifier = maskDoubleQuotedIdentifier(sql, start);
+    return { masked: sql.slice(start, identifier.end), end: identifier.end };
 }
 
 function lineCommentEnd(sql: string, start: number): number {
@@ -96,6 +101,7 @@ function blockCommentEnd(sql: string, start: number): number {
             cursor++;
         }
     }
+    if (depth > 0) throw new Error("Unterminated SQL block comment");
     return cursor;
 }
 
@@ -103,12 +109,16 @@ function maskDollarQuotedString(sql: string, start: number): { masked: string; e
     const tag = dollarQuoteTagAt(sql, start);
     if (!tag) return null;
     const closingTag = sql.indexOf(tag, start + tag.length);
-    if (closingTag === -1) return null;
+    if (closingTag === -1) throw new Error("Unterminated SQL dollar-quoted body");
     const end = closingTag + tag.length;
     return { masked: " ".repeat(end - start), end };
 }
 
-function maskSqlSpan(sql: string, start: number): { masked: string; end: number } | null {
+function maskSqlSpan(
+    sql: string,
+    start: number,
+    quotedIdentifier: typeof maskDoubleQuotedIdentifier,
+): { masked: string; end: number } | null {
     if (sql.startsWith("--", start)) {
         const end = lineCommentEnd(sql, start);
         return { masked: " ".repeat(end - start), end };
@@ -118,16 +128,19 @@ function maskSqlSpan(sql: string, start: number): { masked: string; end: number 
         return { masked: " ".repeat(end - start), end };
     }
     if (sql[start] === "'") return maskSingleQuotedString(sql, start);
-    if (sql[start] === '"') return maskDoubleQuotedIdentifier(sql, start);
+    if (sql[start] === '"') return quotedIdentifier(sql, start);
     if (sql[start] === "$") return maskDollarQuotedString(sql, start);
     return null;
 }
 
-export function maskSqlNoise(sql: string): string {
+function maskSql(
+    sql: string,
+    quotedIdentifier: typeof maskDoubleQuotedIdentifier,
+): string {
     let masked = "";
     let cursor = 0;
     while (cursor < sql.length) {
-        const protectedSpan = maskSqlSpan(sql, cursor);
+        const protectedSpan = maskSqlSpan(sql, cursor, quotedIdentifier);
         if (protectedSpan) {
             masked += protectedSpan.masked;
             cursor = protectedSpan.end;
@@ -137,6 +150,14 @@ export function maskSqlNoise(sql: string): string {
         }
     }
     return masked;
+}
+
+export function maskSqlNoise(sql: string): string {
+    return maskSql(sql, maskDoubleQuotedIdentifier);
+}
+
+function maskSqlPolicyNoise(sql: string): string {
+    return maskSql(sql, preserveDoubleQuotedIdentifier);
 }
 
 export function splitSqlStatements(sql: string): string[] {
@@ -162,6 +183,42 @@ export function splitSqlStatements(sql: string): string[] {
     }
 
     return statements;
+}
+
+function normalizedTransactionStatement(statement: string): string {
+    return maskSqlNoise(statement).replace(/\s+/g, " ").trim();
+}
+
+function migrationExecutionStatements(statements: readonly string[]): string[] {
+    if (statements.length < 2) return [...statements];
+    const first = normalizedTransactionStatement(statements[0]);
+    const last = normalizedTransactionStatement(statements[statements.length - 1]);
+    const hasOuterTransaction = /^(?:BEGIN(?:\s+(?:WORK|TRANSACTION))?|START\s+TRANSACTION)$/i.test(first)
+        && /^(?:COMMIT|END)(?:\s+(?:WORK|TRANSACTION))?$/i.test(last);
+    return hasOuterTransaction ? statements.slice(1, -1) : [...statements];
+}
+
+function splitTopLevelClauses(sql: string): string[] {
+    const masked = maskSqlNoise(sql);
+    const clauses: string[] = [];
+    let parenthesisDepth = 0;
+    let bracketDepth = 0;
+    let clauseStart = 0;
+    for (let cursor = 0; cursor < masked.length; cursor += 1) {
+        const character = masked[cursor];
+        if (character === "(") parenthesisDepth += 1;
+        else if (character === ")") parenthesisDepth -= 1;
+        else if (character === "[") bracketDepth += 1;
+        else if (character === "]") bracketDepth -= 1;
+        if (parenthesisDepth < 0 || bracketDepth < 0) throw new Error("Unbalanced SQL delimiters");
+        if (character === "," && parenthesisDepth === 0 && bracketDepth === 0) {
+            clauses.push(sql.slice(clauseStart, cursor).trim());
+            clauseStart = cursor + 1;
+        }
+    }
+    if (parenthesisDepth !== 0 || bracketDepth !== 0) throw new Error("Unbalanced SQL delimiters");
+    clauses.push(sql.slice(clauseStart).trim());
+    return clauses.filter(Boolean);
 }
 
 interface RiskRule {
@@ -249,6 +306,20 @@ const RISK_RULES: readonly RiskRule[] = [
         blocksTransactionalPush: true,
     },
     {
+        type: "manual_review_procedural_definition",
+        level: "HIGH",
+        pattern: /^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:FUNCTION|PROCEDURE)\b/i,
+        description: "Defines procedural SQL whose body can hide data, privilege, or schema side effects from static rules.",
+        recommendation: "Review the complete function or procedure body and require strict migration approval.",
+    },
+    {
+        type: "manual_review_procedure_call",
+        level: "HIGH",
+        pattern: /^\s*CALL\b/i,
+        description: "Calls a stored procedure whose side effects cannot be determined statically.",
+        recommendation: "Replace the call with explicit migration SQL or require strict manual approval.",
+    },
+    {
         type: "locking_vacuum_full",
         level: "HIGH",
         pattern: /^\s*VACUUM\b/i,
@@ -294,14 +365,6 @@ const RISK_RULES: readonly RiskRule[] = [
         recommendation: "For a live table, use the approved non-transactional maintenance path for DROP INDEX CONCURRENTLY; push_migrations cannot execute it.",
     },
     {
-        type: "locking_not_null_no_default",
-        level: "MEDIUM",
-        pattern: /\bALTER\s+TABLE\b[\s\S]*?\bADD\s+(?!CONSTRAINT\b)(?:COLUMN\s+)?[a-z0-9_"]+\s+[^;]+?\bNOT\s+NULL\b(?!\s+DEFAULT\b)/i,
-        excludePattern: /\bADD\s+(?:COLUMN\s+)?[a-z0-9_"]+\s+[\s\S]*?\bDEFAULT\b[\s\S]*?\bNOT\s+NULL\b/i,
-        description: "Adding a NOT NULL column without a DEFAULT value requires full table verification and will fail if the table contains existing rows.",
-        recommendation: "Follow Expand-Contract: Add column as nullable or with a DEFAULT value first, backfill data if necessary, then add NOT NULL constraint.",
-    },
-    {
         type: "locking_alter_column_set_not_null",
         level: "MEDIUM",
         pattern: /\bALTER\s+TABLE\b[\s\S]*?\bALTER\s+(?:COLUMN\s+)?[a-z0-9_"]+\s+SET\s+NOT\s+NULL\b/i,
@@ -339,25 +402,249 @@ const RISK_RULES: readonly RiskRule[] = [
     },
 ];
 
+const MIGRATION_LEDGER_RELATION = String.raw`(?:(?:"?(?:supabase_migrations|public)"?)\s*\.\s*)?"?schema_migrations"?`;
+const MIGRATION_LEDGER_RELATION_END = String.raw`(?=$|[\s,;(*])`;
+const MIGRATION_LEDGER_DDL_OR_MAINTENANCE_PREFIX = String.raw`(?:CREATE\s+(?:UNIQUE\s+)?INDEX\b[^;]*\bON\s+(?:ONLY\s+)?|CREATE\s+(?:CONSTRAINT\s+)?TRIGGER\b[^;]*\bON\s+|DROP\s+TRIGGER\s+(?:IF\s+EXISTS\s+)?[^;]*\bON\s+|CREATE\s+RULE\b[^;]*\bTO\s+|DROP\s+RULE\s+(?:IF\s+EXISTS\s+)?[^;]*\bON\s+|CREATE\s+POLICY\b[^;]*\bON\s+|ALTER\s+POLICY\b[^;]*\bON\s+|DROP\s+POLICY\s+(?:IF\s+EXISTS\s+)?[^;]*\bON\s+|COMMENT\s+ON\s+TABLE\s+|SECURITY\s+LABEL(?:\s+FOR\s+[^;\s]+)?\s+ON\s+TABLE\s+|REINDEX(?:\s*\([^;)]*\))?\s+TABLE\s+(?:CONCURRENTLY\s+)?|CLUSTER(?:\s+VERBOSE)?\s+|VACUUM(?:\s*\([^;)]*\))?(?:\s+(?:FULL|FREEZE|VERBOSE|ANALYZE))*\s+|ANALYZE(?:\s*\([^;)]*\))?(?:\s+VERBOSE)?\s+)`;
+const MIGRATION_LEDGER_MODIFICATION_PATTERN = new RegExp(
+    String.raw`\b(?:(?:CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?|INSERT\s+INTO\s+(?:ONLY\s+)?|UPDATE\s+(?:ONLY\s+)?|DELETE\s+FROM\s+(?:ONLY\s+)?|MERGE\s+INTO\s+(?:ONLY\s+)?|ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?|COPY\s+)`
+    + MIGRATION_LEDGER_RELATION
+    + MIGRATION_LEDGER_RELATION_END
+    + String.raw`|(?:DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?|TRUNCATE(?:\s+TABLE)?\s+|LOCK\s+(?:TABLE\s+)?)[^;]*`
+    + MIGRATION_LEDGER_RELATION
+    + MIGRATION_LEDGER_RELATION_END
+    + String.raw`|`
+    + MIGRATION_LEDGER_DDL_OR_MAINTENANCE_PREFIX
+    + MIGRATION_LEDGER_RELATION
+    + MIGRATION_LEDGER_RELATION_END
+    + String.raw`)`,
+    "i",
+);
+const NON_TABLE_PRIVILEGE_TARGET = String.raw`(?:ALL\s+(?:FUNCTIONS|PROCEDURES|ROUTINES|SEQUENCES)\s+IN\s+SCHEMA|DATABASE|DOMAIN|FOREIGN\s+DATA\s+WRAPPER|FOREIGN\s+SERVER|FUNCTION|LANGUAGE|LARGE\s+OBJECT|PARAMETER|PROCEDURE|ROUTINE|SCHEMA|SEQUENCE|TABLESPACE|TYPE)\b`;
+const MIGRATION_LEDGER_PRIVILEGE_PATTERN = new RegExp(
+    String.raw`\b(?:GRANT|REVOKE)\b[^;]*\bON\s+(?:(?:TABLE\s+)?(?!`
+    + NON_TABLE_PRIVILEGE_TARGET
+    + String.raw`)(?:(?!\b(?:TO|FROM)\b)[^;])*?`
+    + MIGRATION_LEDGER_RELATION
+    + MIGRATION_LEDGER_RELATION_END
+    + String.raw`(?=[^;]*\b(?:TO|FROM)\b)|ALL\s+TABLES\s+IN\s+SCHEMA\s+"?(?:supabase_migrations|public)"?(?=$|[\s,;]))`,
+    "i",
+);
+
+const PUSH_BLOCKER_RULES: readonly RiskRule[] = [
+    {
+        type: "unsupported_project_scope_management",
+        level: "HIGH",
+        pattern: /\b(?:ALTER\s+DATABASE|DROP\s+SCHEMA\s+(?:IF\s+EXISTS\s+)?(?:[^;]*,\s*)?public(?=\s*(?:,|CASCADE\b|RESTRICT\b|$))|(?:DROP|REASSIGN)\s+OWNED\b|(?:CREATE|ALTER|DROP)\s+(?:ROLE|USER)\b|ALTER\s+SUBSCRIPTION\b)\b/i,
+        description: "Attempts cluster-wide or platform-owned database management outside the project migration boundary.",
+        recommendation: "Use an approved platform administration path instead of push_migrations.",
+        blocksTransactionalPush: true,
+    },
+    {
+        type: "unsupported_platform_schema_management",
+        level: "HIGH",
+        pattern: /\b(?:ALTER\s+SCHEMA\s+"?public"?|(?:CREATE\s+SCHEMA\s+(?:IF\s+NOT\s+EXISTS\s+)?|ALTER\s+SCHEMA\s+)"?supabase_migrations"?|DROP\s+SCHEMA\s+(?:IF\s+EXISTS\s+)?(?:[^;]*,\s*)?"?supabase_migrations"?(?=\s*(?:,|CASCADE\b|RESTRICT\b|$)))\b/i,
+        description: "Attempts to rename or re-own the public API schema, or to manage the platform migration schema.",
+        recommendation: "Keep public and supabase_migrations under platform ownership; change project-owned schemas instead.",
+        blocksTransactionalPush: true,
+    },
+    {
+        type: "unsupported_unicode_escaped_identifier",
+        level: "HIGH",
+        pattern: /\bU&"/i,
+        description: "Uses a Unicode-escaped identifier that cannot be safely canonicalized by the migration policy.",
+        recommendation: "Use a plain or directly quoted PostgreSQL identifier in controlled migrations.",
+        blocksTransactionalPush: true,
+    },
+    {
+        type: "unsupported_server_access",
+        level: "HIGH",
+        pattern: /^\s*COPY\b|\b(?:(?:lo_import|lo_export|pg_read_file|pg_write_file|pg_ls_dir|pg_stat_file|pg_execute_server_program)\s*\(|pg_(?:terminate|cancel)_backend\s*\(|LOAD\b)/i,
+        description: "Attempts server file, process, backend, or dynamic-library access from a project migration.",
+        recommendation: "Run host-level maintenance through an approved platform administration path.",
+        blocksTransactionalPush: true,
+    },
+    {
+        type: "unsupported_external_database_access",
+        level: "HIGH",
+        pattern: /\bdblink(?:_[a-z_]+)?\s*\(|\b(?:CREATE|ALTER|DROP)\s+(?:SERVER|USER\s+MAPPING|FOREIGN\s+DATA\s+WRAPPER)\b|\bIMPORT\s+FOREIGN\s+SCHEMA\b|\bCREATE\s+FOREIGN\s+TABLE\b/i,
+        description: "Attempts external database or foreign-data-wrapper access outside the project migration boundary.",
+        recommendation: "Provision external connectivity through an approved platform administration path.",
+        blocksTransactionalPush: true,
+    },
+    {
+        type: "unsupported_transaction_control",
+        level: "HIGH",
+        pattern: /^\s*(?:BEGIN|START\s+TRANSACTION|COMMIT|END|ROLLBACK|ABORT|SAVEPOINT|RELEASE\s+SAVEPOINT|PREPARE\s+TRANSACTION)\b/i,
+        description: "Contains transaction control inside a migration whose atomic transaction is owned by the platform.",
+        recommendation: "Remove internal transaction control; one matching outer BEGIN/COMMIT wrapper is stripped automatically.",
+        blocksTransactionalPush: true,
+    },
+    {
+        type: "unsupported_session_control",
+        level: "HIGH",
+        pattern: /\b(?:SET\s+(?:(?:LOCAL|SESSION)\s+)?(?:ROLE|SESSION\s+AUTHORIZATION)|RESET\s+(?:ROLE|SESSION\s+AUTHORIZATION)|DISCARD\s+ALL)\b/i,
+        description: "Attempts to change the database session identity or discard platform-managed session state.",
+        recommendation: "Keep migrations within the delegated project role and remove session identity control.",
+        blocksTransactionalPush: true,
+    },
+    {
+        type: "unsupported_advisory_lock_control",
+        level: "HIGH",
+        pattern: /\bpg_(?:try_)?advisory_(?:xact_)?(?:lock|unlock)(?:_shared|_all)?\s*\(/i,
+        description: "Attempts advisory lock control that can conflict with the platform migration lock.",
+        recommendation: "Remove custom advisory lock operations; push_migrations already serializes project migrations.",
+        blocksTransactionalPush: true,
+    },
+];
+
+const QUOTED_FUNCTION_BLOCKER_RULES: readonly RiskRule[] = [
+    {
+        type: "unsupported_server_access",
+        level: "HIGH",
+        pattern: /"(?:lo_import|lo_export|pg_read_file|pg_write_file|pg_ls_dir|pg_stat_file|pg_execute_server_program|pg_terminate_backend|pg_cancel_backend)"\s*\(/,
+        description: "Attempts server file, process, backend, or dynamic-library access from a project migration.",
+        recommendation: "Run host-level maintenance through an approved platform administration path.",
+        blocksTransactionalPush: true,
+    },
+    {
+        type: "unsupported_external_database_access",
+        level: "HIGH",
+        pattern: /"dblink(?:_[a-z_]+)?"\s*\(/,
+        description: "Attempts external database or foreign-data-wrapper access outside the project migration boundary.",
+        recommendation: "Provision external connectivity through an approved platform administration path.",
+        blocksTransactionalPush: true,
+    },
+    {
+        type: "unsupported_advisory_lock_control",
+        level: "HIGH",
+        pattern: /"pg_(?:try_)?advisory_(?:xact_)?(?:lock|unlock)(?:_shared|_all)?"\s*\(/,
+        description: "Attempts advisory lock control that can conflict with the platform migration lock.",
+        recommendation: "Remove custom advisory lock operations; push_migrations already serializes project migrations.",
+        blocksTransactionalPush: true,
+    },
+];
+
+const MIGRATION_LEDGER_BLOCKER_RULES: readonly RiskRule[] = [
+    {
+        type: "unsupported_public_schema_removal",
+        level: "HIGH",
+        pattern: /\bDROP\s+SCHEMA\s+(?:IF\s+EXISTS\s+)?(?:[^;]*,\s*)?"?public"?(?=\s*(?:,|CASCADE\b|RESTRICT\b|$))/i,
+        description: "Attempts to remove the platform-required public schema.",
+        recommendation: "Drop project objects individually through an approved contract migration; do not remove public.",
+        blocksTransactionalPush: true,
+    },
+    {
+        type: "unsupported_migration_ledger_access",
+        level: "HIGH",
+        pattern: MIGRATION_LEDGER_MODIFICATION_PATTERN,
+        description: "Attempts to modify or bypass the platform-owned migration ledger.",
+        recommendation: "Let push_migrations record the ledger entry after the migration transaction commits.",
+        blocksTransactionalPush: true,
+    },
+    {
+        type: "unsupported_migration_ledger_privileges",
+        level: "HIGH",
+        pattern: MIGRATION_LEDGER_PRIVILEGE_PATTERN,
+        description: "Attempts to change privileges on the platform-owned migration ledger.",
+        recommendation: "Keep migration ledger privileges under platform control.",
+        blocksTransactionalPush: true,
+    },
+    {
+        type: "unsupported_migration_ledger_recorder_access",
+        level: "HIGH",
+        pattern: /"?supabase_migrations"?\s*\.\s*"?record_schema_migration"?\s*\(/i,
+        description: "Attempts to call or redefine the platform migration ledger recorder.",
+        recommendation: "Let push_migrations invoke the recorder with a platform-issued lease.",
+        blocksTransactionalPush: true,
+    },
+];
+
+function matchingRisks(
+    rawStatement: string,
+    maskedStatement: string,
+    rules: readonly RiskRule[],
+): MigrationRiskItem[] {
+    return rules
+        .filter((rule) => rule.pattern.test(maskedStatement) && !rule.excludePattern?.test(maskedStatement))
+        .map((rule) => ({
+            level: rule.level,
+            type: rule.type,
+            description: rule.description,
+            recommendation: rule.recommendation,
+            statementSnippet: rawStatement.replace(/\s+/g, " ").slice(0, 100),
+            ...(rule.blocksTransactionalPush ? { blocksTransactionalPush: true as const } : {}),
+        }));
+}
+
+function defaultExpression(maskedClause: string): string {
+    const defaultIndex = maskedClause.search(/\bDEFAULT\b/i);
+    if (defaultIndex === -1) return "";
+    const expression = maskedClause.slice(defaultIndex + "DEFAULT".length);
+    const constraintIndex = expression.search(/\b(?:COLLATE|CONSTRAINT|GENERATED|NOT\s+NULL|NULL|PRIMARY\s+KEY|REFERENCES|UNIQUE|CHECK)\b/i);
+    return (constraintIndex === -1 ? expression : expression.slice(0, constraintIndex)).trim();
+}
+
+function defaultMayRequireTableRewrite(maskedClause: string): boolean {
+    const expression = defaultExpression(maskedClause);
+    if (!expression) return false;
+    const withoutKnownStableCalls = expression.replace(
+        /\b(?:now|transaction_timestamp|statement_timestamp)\s*\(\s*\)/gi,
+        "",
+    );
+    return /\b[A-Za-z_][A-Za-z0-9_$]*(?:\s*\.\s*[A-Za-z_][A-Za-z0-9_$]*)?\s*\(/.test(withoutKnownStableCalls);
+}
+
+function addedNotNullColumnRisks(rawStatement: string): MigrationRiskItem[] {
+    const maskedStatement = maskSqlNoise(rawStatement);
+    if (!/^\s*ALTER\s+TABLE\b/i.test(maskedStatement)) return [];
+    const risks: MigrationRiskItem[] = [];
+    for (const clause of splitTopLevelClauses(rawStatement)) {
+        const maskedClause = maskSqlNoise(clause);
+        if (!/\bADD\s+(?!CONSTRAINT\b)(?:COLUMN\s+)?[a-z0-9_"]+\s+[\s\S]*\bNOT\s+NULL\b/i.test(maskedClause)) continue;
+        const snippet = clause.replace(/\s+/g, " ").slice(0, 100);
+        if (!/\bDEFAULT\b/i.test(maskedClause)) {
+            risks.push({
+                level: "MEDIUM",
+                type: "locking_not_null_no_default",
+                description: "Adding a NOT NULL column without a DEFAULT value requires full table verification and fails when existing rows cannot satisfy it.",
+                recommendation: "Follow Expand-Contract: add the column as nullable, backfill it, then add NOT NULL separately.",
+                statementSnippet: snippet,
+            });
+        } else if (defaultMayRequireTableRewrite(maskedClause)) {
+            risks.push({
+                level: "MEDIUM",
+                type: "locking_not_null_expression_default",
+                description: "Adding a NOT NULL column with a function-based DEFAULT may rewrite the table while holding a strong lock.",
+                recommendation: "Use a literal or known stable default, or add the column nullable and backfill in a separate step.",
+                statementSnippet: snippet,
+            });
+        }
+    }
+    return risks;
+}
+
 export function analyzeMigrationSql(sql: string): MigrationRiskItem[] {
-    const statements = splitSqlStatements(sql);
+    const statements = migrationExecutionStatements(splitSqlStatements(sql));
+    if (statements.length === 0) {
+        return [{
+            level: "HIGH",
+            type: "unsupported_empty_migration",
+            description: "Contains no executable SQL after removing the platform-managed outer transaction wrapper.",
+            recommendation: "Remove the empty migration file or add the intended project-scoped SQL statement.",
+            statementSnippet: sql.replace(/\s+/g, " ").slice(0, 100),
+            blocksTransactionalPush: true,
+        }];
+    }
     const risks: MigrationRiskItem[] = [];
 
     for (const rawStatement of statements) {
         const masked = maskSqlNoise(rawStatement);
-        for (const rule of RISK_RULES) {
-            if (rule.pattern.test(masked) && !rule.excludePattern?.test(masked)) {
-                const snippet = rawStatement.replace(/\s+/g, " ").slice(0, 100);
-                risks.push({
-                    level: rule.level,
-                    type: rule.type,
-                    description: rule.description,
-                    recommendation: rule.recommendation,
-                    statementSnippet: snippet,
-                    ...(rule.blocksTransactionalPush ? { blocksTransactionalPush: true as const } : {}),
-                });
-            }
-        }
+        const policyMasked = maskSqlPolicyNoise(rawStatement);
+        risks.push(...matchingRisks(rawStatement, masked, RISK_RULES));
+        risks.push(...addedNotNullColumnRisks(rawStatement));
+        risks.push(...matchingRisks(rawStatement, masked, PUSH_BLOCKER_RULES));
+        risks.push(...matchingRisks(rawStatement, policyMasked, QUOTED_FUNCTION_BLOCKER_RULES));
+        risks.push(...matchingRisks(rawStatement, policyMasked, MIGRATION_LEDGER_BLOCKER_RULES));
     }
 
     return risks;

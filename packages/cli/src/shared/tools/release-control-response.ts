@@ -21,7 +21,7 @@ export function releaseControlSuccess(
 
 export function releaseControlFailure(
     operation: string,
-    code: "HTTP_ERROR" | "INVALID_RESPONSE" | "MUTATION_NOT_SUCCEEDED" | "OUTCOME_UNKNOWN",
+    code: "HTTP_ERROR" | "INVALID_RESPONSE" | "MUTATION_NOT_SUCCEEDED" | "OUTCOME_UNKNOWN" | "PARTIAL_SUCCESS",
     httpStatus: number | null,
     safeState: Record<string, unknown> = {},
 ): ReleaseControlToolResponse {

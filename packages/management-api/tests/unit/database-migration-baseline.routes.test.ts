@@ -179,6 +179,21 @@ describe("database migration baseline route", () => {
     expect(transaction.mock.invocationCallOrder.at(-1)).toBeGreaterThan(transaction.mock.invocationCallOrder[0]!);
   });
 
+  test("rejects ABORT transaction control before executing or recording a migration", async () => {
+    const response = await migrationRequest({
+      version: "20260819090001",
+      name: "20260819090001_abort_transaction",
+      sql: "CREATE TABLE public.abort_probe(id bigint); ABORT AND CHAIN; SELECT 1",
+    });
+    const body = await response.json() as Record<string, unknown>;
+
+    expect(response.status).toBe(400);
+    expect(body.code).toBe("unsupported_migration_sql");
+    expect(transaction.unsafe).not.toHaveBeenCalled();
+    expect(issueMigrationLedgerLease).not.toHaveBeenCalled();
+    expect(transactionCalls.some(({ text }) => text.includes("record_schema_migration"))).toBe(false);
+  });
+
   test("retries schema reload for an already-applied migration", async () => {
     existingMigrationRows = [{
       version: "20260819090000",

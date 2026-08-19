@@ -39,6 +39,7 @@ const rlsUnsafe = mock(async (query: string) => {
   return Array.from({ length: 501 }, (_, index) => ({ id: index + 1 }));
 });
 const schemaReloadQueries: Array<{ text: string; values: unknown[] }> = [];
+let schemaReloadShouldFail = false;
 const rlsConnection = Object.assign(
   ((..._args: unknown[]) => Promise.resolve([])) as unknown as Record<string, unknown>,
   { unsafe: rlsUnsafe, release: mock(() => undefined) },
@@ -46,7 +47,10 @@ const rlsConnection = Object.assign(
 const rlsDb = Object.assign(
   ((strings: TemplateStringsArray, ...values: unknown[]) => {
     const sql = strings.join(" ");
-    if (sql.includes("pg_notify")) schemaReloadQueries.push({ text: sql, values });
+    if (sql.includes("pg_notify")) {
+      schemaReloadQueries.push({ text: sql, values });
+      if (schemaReloadShouldFail) return Promise.reject(new Error("schema reload unavailable"));
+    }
     if (sql.includes("FROM pg_extension")) {
       return Promise.resolve([{ schema_name: "extensions", has_view: true }]);
     }
@@ -127,6 +131,7 @@ describe("database SQL routes", () => {
     rlsUnsafe.mockClear();
     rlsConnection.release.mockClear();
     schemaReloadQueries.length = 0;
+    schemaReloadShouldFail = false;
     rlsDb.begin.mockClear();
     rlsDb.reserve.mockClear();
     getProjectDb.mockClear();
@@ -230,6 +235,9 @@ describe("database SQL routes", () => {
     });
     expect(getProjectDb).toHaveBeenCalledWith("shared_tenant_db");
     expect(schemaReloadQueries.some(({ values }) => values.includes("pgrst_project-a"))).toBe(true);
+    expect(await response.json()).toMatchObject({
+      schema_reload: { status: "notified", ddl_committed: true },
+    });
   });
 
   test("sends a schema reload after admin-mode DDL", async () => {
@@ -267,6 +275,65 @@ describe("database SQL routes", () => {
 
     expect(response.status).toBe(200);
     expect(schemaReloadQueries.some(({ values }) => values.includes("pgrst_project-a"))).toBe(true);
+  });
+
+  test("does not claim committed DDL for admin SQL with caller-controlled transactions", async () => {
+    const response = await request("project-a", "/sql", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        sql: "BEGIN; CREATE TABLE public.items(id bigint); ROLLBACK;",
+        mode: "admin",
+        admin: true,
+      }),
+    });
+    const payload = await response.json() as { schema_reload?: Record<string, unknown> };
+
+    expect(response.status).toBe(200);
+    expect(payload.schema_reload).toMatchObject({ status: "notified" });
+    expect(payload.schema_reload).not.toHaveProperty("ddl_committed");
+  });
+
+  test.each([
+    "CALL public.rollback_schema_change()",
+    "DO $$ BEGIN EXECUTE 'CREATE TABLE public.items(id bigint)'; ROLLBACK; END $$",
+  ])("does not claim committed DDL for indirect admin SQL: %s", async (sql) => {
+    executeQuery.mockResolvedValueOnce({
+      rows: [],
+      rowCount: 0,
+      command: sql.startsWith("CALL") ? "CALL" : "DO",
+      fields: [],
+      notices: [],
+      durationMs: 1,
+    });
+
+    const response = await request("project-a", "/sql", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sql, mode: "admin", admin: true }),
+    });
+    const payload = await response.json() as { schema_reload?: Record<string, unknown> };
+
+    expect(response.status).toBe(200);
+    expect(payload.schema_reload).toMatchObject({ status: "notified" });
+    expect(payload.schema_reload).not.toHaveProperty("ddl_committed");
+  });
+
+  test("returns an explicit partial-success receipt when schema reload notification fails", async () => {
+    schemaReloadShouldFail = true;
+
+    const response = await request("project-a", "/sql", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sql: "ALTER TABLE public.items ADD COLUMN note text", mode: "migration" }),
+    });
+    const payload = await response.json() as Record<string, unknown>;
+
+    expect(response.status).toBe(200);
+    expect(payload).toMatchObject({
+      schema_reload: { status: "notification_failed", ddl_committed: true },
+    });
+    expect(executeQuery).toHaveBeenCalledTimes(1);
   });
 
   test("creates and drops materialized views with transactional schema reloads", async () => {

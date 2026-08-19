@@ -23,6 +23,7 @@ const FALLBACK_MIGRATION_VERSION_BASE = 8_000_000_000_000_000_000n;
 const FALLBACK_MIGRATION_VERSION_RANGE = 1_000_000_000_000_000_000n;
 const FALLBACK_MIGRATION_VERSION_LIMIT = FALLBACK_MIGRATION_VERSION_BASE + FALLBACK_MIGRATION_VERSION_RANGE;
 const MAX_MIGRATION_INVENTORY_BYTES = 64 * 1024 * 1024;
+const GENERIC_MIGRATION_NAMES = new Set(["cli_push"]);
 
 interface MigrationFile {
     file: string;
@@ -225,11 +226,41 @@ function migrationIdentity(row: unknown): RemoteMigrationIdentity {
     if (!isMigrationInventoryVersion(migration.version) || !isMigrationInventoryName(migration.name)) {
         throw new Error("Invalid remote migration identity");
     }
-    return { version: migration.version, name: migration.name, statements: migration.statements };
+    return {
+        version: migration.version,
+        name: migration.name !== null && GENERIC_MIGRATION_NAMES.has(migration.name) ? null : migration.name,
+        statements: migration.statements,
+    };
 }
 
-function migrationIdentities(data: unknown): RemoteMigrationIdentity[] {
-    const identities = migrationRows(data).map(migrationIdentity);
+function historicalMigrationVersion(version: unknown): string | null {
+    if (isMigrationInventoryVersion(version)) return version;
+    if (typeof version !== "number" || !Number.isSafeInteger(version)) return null;
+    const normalized = String(version);
+    return isMigrationInventoryVersion(normalized) ? normalized : null;
+}
+
+function baselineMigrationIdentity(row: unknown): RemoteMigrationIdentity {
+    if (!row || typeof row !== "object" || Array.isArray(row)) {
+        throw new Error("Invalid remote migration identity");
+    }
+    const migration = row as Record<string, unknown>;
+    const version = historicalMigrationVersion(migration.version);
+    if (!version || !isMigrationInventoryName(migration.name)) {
+        throw new Error("Invalid remote migration identity");
+    }
+    return {
+        version,
+        name: migration.name !== null && GENERIC_MIGRATION_NAMES.has(migration.name) ? null : migration.name,
+        statements: migration.statements,
+    };
+}
+
+function migrationIdentities(
+    data: unknown,
+    parseIdentity: (row: unknown) => RemoteMigrationIdentity,
+): RemoteMigrationIdentity[] {
+    const identities = migrationRows(data).map(parseIdentity);
     const versions = new Set<string>();
     const names = new Set<string>();
     for (const identity of identities) {
@@ -280,14 +311,27 @@ function migrationDisposition(
     if (!sameVersion.length && !sameName.length) return "pending";
     if (sameVersion[0] && sameName[0] && sameVersion[0] !== sameName[0]) throw migrationIdentityConflict(local);
     const remote = sameVersion[0] ?? sameName[0]!;
-    const exactIdentity = remote.version === local.version && remote.name === local.name;
-    if (exactIdentity && exactIdentityIsApplied(local, remote)) return "applied";
+    const versionIdentity = remote.version === local.version
+        && (remote.name === local.name || remote.name === null);
+    if (versionIdentity && exactIdentityIsApplied(local, remote)) return "applied";
     if (!sameVersion.length && legacyIdentityIsApplied(local, remote)) return "applied";
     throw migrationIdentityConflict(local);
 }
 
 function migrationPushPlan(data: unknown, migrationFiles: MigrationFile[]): MigrationPushPlan {
-    const remoteMigrations = migrationIdentities(data);
+    return migrationPlan(data, migrationFiles, migrationIdentity);
+}
+
+function migrationBaselinePlan(data: unknown, migrationFiles: MigrationFile[]): MigrationPushPlan {
+    return migrationPlan(data, migrationFiles, baselineMigrationIdentity);
+}
+
+function migrationPlan(
+    data: unknown,
+    migrationFiles: MigrationFile[],
+    parseIdentity: (row: unknown) => RemoteMigrationIdentity,
+): MigrationPushPlan {
+    const remoteMigrations = migrationIdentities(data, parseIdentity);
     const plan: MigrationPushPlan = { alreadyApplied: [], pending: [] };
     for (const migration of migrationFiles) {
         const disposition = migrationDisposition(migration, remoteMigrations);
@@ -383,6 +427,15 @@ function confirmedSqlBatchReceipt(payload: unknown, expectedCommands: string[]):
         if (typeof statement.durationMs !== "number" || !Number.isFinite(statement.durationMs) || statement.durationMs < 0) return false;
         return true;
     });
+}
+
+function schemaReloadStatus(payload: unknown): "notified" | "notification_failed" | null {
+    const receipt = recordPayload(payload);
+    const schemaReload = recordPayload(receipt?.schema_reload);
+    if (schemaReload?.ddl_committed !== true) return null;
+    return schemaReload.status === "notified" || schemaReload.status === "notification_failed"
+        ? schemaReload.status
+        : null;
 }
 
 function rlsStatementCommands(policyMode: "deny_all" | "owner"): string[] {
@@ -766,7 +819,9 @@ Actions: ${allActions.join(", ")}${localOnly ? " (local-only mode)" : readOnly ?
                         ].join("\n");
                         return {
                             content: [{ type: "text" as const, text }],
-                            ...(riskPolicyFailed ? { isError: true } : {}),
+                            ...(riskPolicyFailed || riskAnalysis.transactionalPushBlockerCount > 0
+                                ? { isError: true }
+                                : {}),
                         };
                     }
 
@@ -852,7 +907,7 @@ Actions: ${allActions.join(", ")}${localOnly ? " (local-only mode)" : readOnly ?
                         );
                     }
 
-                    const migrationPlan = migrationPushPlan(r.data, migrationFiles);
+                    const migrationPlan = migrationBaselinePlan(r.data, migrationFiles);
                     const missing = migrationPlan.pending;
                     const alreadyApplied = migrationPlan.alreadyApplied;
 
@@ -930,6 +985,18 @@ Actions: ${allActions.join(", ")}${localOnly ? " (local-only mode)" : readOnly ?
                         return releaseControlFailure("database.create_table_rls", "OUTCOME_UNKNOWN", r.status);
                     }
                     if (!confirmedSqlBatchReceipt(r.data, rlsStatementCommands(policyMode))) {
+                        return releaseControlFailure("database.create_table_rls", "OUTCOME_UNKNOWN", r.status);
+                    }
+                    const reloadStatus = schemaReloadStatus(r.data);
+                    if (reloadStatus === "notification_failed") {
+                        return releaseControlFailure(
+                            "database.create_table_rls",
+                            "PARTIAL_SUCCESS",
+                            r.status,
+                            { ddl_committed: true, schema_reload: { status: reloadStatus } },
+                        );
+                    }
+                    if (reloadStatus !== "notified") {
                         return releaseControlFailure("database.create_table_rls", "OUTCOME_UNKNOWN", r.status);
                     }
                     text = `✅ Table '${schema}.${args.table}' created with RLS (${policyMode === "owner" ? "auth.uid() owner policy" : "deny-all by default"})`;

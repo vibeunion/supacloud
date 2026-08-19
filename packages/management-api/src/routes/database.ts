@@ -2,7 +2,7 @@ import { Elysia, t } from "elysia";
 import type { SQL, TransactionSQL } from "bun";
 import { projectService } from "../services";
 import { db, getProjectDb, getProjectRoleDb, removeProjectDbCache, resolveAuthenticatorName, resolveDbName, sql as metaSql, type SqlExecutionMode } from "../db";
-import { isDangerousSQL, normalizeSqlForPolicy } from "../db/sql-policy";
+import { isDangerousSQL, normalizeSqlForPolicy, sqlContainsTransactionControl } from "../db/sql-policy";
 import { cancelActiveSqlQuery } from "../db/sql-query-registry";
 import { splitSqlStatements, stripOuterTransactionStatements } from "../db/sql-statements";
 import { requireAdminAuth, requireProjectOrAdminAuth } from "../middleware/auth";
@@ -129,7 +129,16 @@ function normalizeMigrationName(rawName: unknown, fallback: string): string {
   return name;
 }
 
-export function sqlRouteResponse(result: Awaited<ReturnType<typeof db.executeQuery>>) {
+type SchemaReloadStatus = "notified" | "notification_failed";
+type SchemaReloadMetadata = {
+  schemaReloadStatus?: SchemaReloadStatus;
+  ddlCommitted?: true;
+};
+
+export function sqlRouteResponse(
+  result: Awaited<ReturnType<typeof db.executeQuery>>,
+  metadata: SchemaReloadMetadata = {},
+) {
   return {
     rows: result.rows,
     rowCount: result.rowCount,
@@ -138,6 +147,12 @@ export function sqlRouteResponse(result: Awaited<ReturnType<typeof db.executeQue
     notices: result.notices || [],
     ...(result.statements ? { statements: result.statements } : {}),
     durationMs: result.durationMs,
+    ...(metadata.schemaReloadStatus ? {
+      schema_reload: {
+        status: metadata.schemaReloadStatus,
+        ...(metadata.ddlCommitted ? { ddl_committed: true as const } : {}),
+      },
+    } : {}),
   };
 }
 
@@ -153,6 +168,12 @@ const POSTGREST_SCHEMA_COMMANDS = new Set([
   "REVOKE",
   "SECURITY",
 ]);
+const INDIRECT_SCHEMA_EXECUTION_PATTERN = /(?:^|;)\s*(?:CALL|DO)\b/i;
+
+function adminSqlCanConfirmDdlCommitted(sqlQuery: string): boolean {
+  return !sqlContainsTransactionControl(sqlQuery)
+    && !INDIRECT_SCHEMA_EXECUTION_PATTERN.test(normalizeSqlForPolicy(sqlQuery));
+}
 
 export function sqlExecutionMayChangeSchema(
   executionResult: Awaited<ReturnType<typeof db.executeQuery>>,
@@ -1707,16 +1728,26 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                     ...(useRoleConnection ? { username: credentials.db_user, password: credentials.db_password } : {}),
                   });
                   const adminMayChangeSchema = mode === "admin" && sqlExecutionMayChangeSchema(result, sqlQuery);
+                  let schemaReloadStatus: SchemaReloadStatus | undefined;
+                  let ddlCommitted: true | undefined;
                   if (mode === "migration" || adminMayChangeSchema) {
                     const adminDb = getProjectDb(credentials.db_name);
-                    await tryNotifyPostgrestSchemaReload(adminDb, params.ref);
+                    schemaReloadStatus = await tryNotifyPostgrestSchemaReload(adminDb, params.ref)
+                      ? "notified"
+                      : "notification_failed";
+                    if (mode === "migration" || adminSqlCanConfirmDdlCommitted(sqlQuery)) {
+                      ddlCommitted = true;
+                    }
                   }
-                  return result;
+                  return { result, schemaReloadStatus, ddlCommitted };
                 };
-                const result = mode === "migration"
+                const execution = mode === "migration"
                   ? await withProjectMigrationLocks({ projectRefs: [params.ref] }, execute)
                   : await execute();
-                return sqlRouteResponse(result);
+                return sqlRouteResponse(execution.result, {
+                  schemaReloadStatus: execution.schemaReloadStatus,
+                  ddlCommitted: execution.ddlCommitted,
+                });
             } catch (error: unknown) {
                 if (error instanceof ProjectMigrationLockError) {
                     set.status = error.httpStatus;
