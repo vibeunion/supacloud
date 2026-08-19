@@ -141,6 +141,8 @@ describe("CLI execution policy", () => {
     });
 
     test("classifies Function, Scheduled Function, and Storage lifecycle actions", () => {
+        expect(executionMode("database", "lint_migrations", {})).toBe("local");
+        expect(executionMode("database", "lint", {})).toBe("local");
         expect(executionMode("edge_functions", "get_config", {})).toBe("read");
         expect(executionMode("edge_functions", "config", {})).toBe("write");
         expect(executionMode("edge_functions", "activate", {})).toBe("write");

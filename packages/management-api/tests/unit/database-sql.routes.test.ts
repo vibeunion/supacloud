@@ -24,6 +24,7 @@ const managementDb = mock((strings: TemplateStringsArray) => {
   return Promise.resolve([]);
 });
 const getProject = mock(async (ref: string) => ({ ref }));
+const requireAdminAuth = mock(async () => undefined);
 const requireProjectOrAdminAuth = mock(async () => undefined as undefined | {
   status: number;
   body: { error: string };
@@ -37,13 +38,15 @@ const rlsUnsafe = mock(async (query: string) => {
   }
   return Array.from({ length: 501 }, (_, index) => ({ id: index + 1 }));
 });
+const schemaReloadQueries: Array<{ text: string; values: unknown[] }> = [];
 const rlsConnection = Object.assign(
   ((..._args: unknown[]) => Promise.resolve([])) as unknown as Record<string, unknown>,
   { unsafe: rlsUnsafe, release: mock(() => undefined) },
 );
 const rlsDb = Object.assign(
-  ((strings: TemplateStringsArray) => {
+  ((strings: TemplateStringsArray, ...values: unknown[]) => {
     const sql = strings.join(" ");
+    if (sql.includes("pg_notify")) schemaReloadQueries.push({ text: sql, values });
     if (sql.includes("FROM pg_extension")) {
       return Promise.resolve([{ schema_name: "extensions", has_view: true }]);
     }
@@ -55,10 +58,16 @@ const rlsDb = Object.assign(
     }
     return Promise.resolve([]);
   }) as unknown as Record<string, unknown>,
-  { reserve: mock(async () => rlsConnection), unsafe: rlsUnsafe },
+  {
+    reserve: mock(async () => rlsConnection),
+    unsafe: rlsUnsafe,
+    begin: mock(async (operation: (transaction: typeof rlsDb) => Promise<unknown>) => operation(rlsDb)),
+  },
 );
 const getProjectDb = mock(() => rlsDb);
 const getProjectRoleDb = mock(() => rlsDb);
+const withProjectMigrationLocks = mock(async (_scope: unknown, operation: () => Promise<unknown>) => operation());
+const assertInactive = mock(async () => undefined);
 
 const actualDb = await import("../../src/db");
 mock.module("../../src/db", () => ({
@@ -69,8 +78,18 @@ mock.module("../../src/db", () => ({
   getProjectRoleDb,
 }));
 mock.module("../../src/services", () => ({ projectService: { getProject } }));
+const actualLock = await import("../../src/services/migration-lock");
+mock.module("../../src/services/migration-lock", () => ({
+  ...actualLock,
+  withProjectMigrationLocks,
+}));
+const actualJournal = await import("../../src/services/branch-replacement-journal");
+mock.module("../../src/services/branch-replacement-journal", () => ({
+  ...actualJournal,
+  branchReplacementJournal: { assertInactive },
+}));
 mock.module("../../src/middleware/auth", () => ({
-  requireAdminAuth: mock(async () => undefined),
+  requireAdminAuth,
   requireProjectOrAdminAuth,
 }));
 mock.module("../../src/utils/logger", () => ({
@@ -107,12 +126,18 @@ describe("database SQL routes", () => {
     managementDb.mockClear();
     rlsUnsafe.mockClear();
     rlsConnection.release.mockClear();
+    schemaReloadQueries.length = 0;
+    rlsDb.begin.mockClear();
     rlsDb.reserve.mockClear();
     getProjectDb.mockClear();
     getProjectRoleDb.mockClear();
     getProject.mockClear();
     requireProjectOrAdminAuth.mockReset();
     requireProjectOrAdminAuth.mockResolvedValue(undefined);
+    requireAdminAuth.mockReset();
+    requireAdminAuth.mockResolvedValue(undefined);
+    withProjectMigrationLocks.mockClear();
+    assertInactive.mockClear();
   });
 
   test("authenticates SQL execution before project lookup", async () => {
@@ -188,6 +213,85 @@ describe("database SQL routes", () => {
         password: "test-password",
       }],
     ]);
+  });
+
+  test("sends a schema reload after migration-mode SQL", async () => {
+    const response = await request("project-a", "/sql", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sql: "CREATE TABLE public.items(id bigint)", mode: "migration" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(executeQuery).toHaveBeenCalledWith("shared_tenant_db", "CREATE TABLE public.items(id bigint)", {
+      mode: "migration",
+      username: "tenant_user",
+      password: "test-password",
+    });
+    expect(getProjectDb).toHaveBeenCalledWith("shared_tenant_db");
+    expect(schemaReloadQueries.some(({ values }) => values.includes("pgrst_project-a"))).toBe(true);
+  });
+
+  test("sends a schema reload after admin-mode DDL", async () => {
+    executeQuery.mockResolvedValueOnce({
+      rows: [],
+      rowCount: 0,
+      command: "ALTER",
+      fields: [],
+      notices: [],
+      durationMs: 1,
+    });
+
+    const response = await request("project-a", "/sql", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sql: "ALTER TABLE public.items ADD COLUMN name text", mode: "admin", admin: true }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(requireAdminAuth).toHaveBeenCalledTimes(1);
+    expect(getProjectDb).toHaveBeenCalledWith("shared_tenant_db");
+    expect(schemaReloadQueries.some(({ values }) => values.includes("pgrst_project-a"))).toBe(true);
+  });
+
+  test("detects admin DDL from the submitted SQL when the driver reports the final command", async () => {
+    const response = await request("project-a", "/sql", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        sql: "CREATE TABLE public.items(id bigint); SELECT 1",
+        mode: "admin",
+        admin: true,
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(schemaReloadQueries.some(({ values }) => values.includes("pgrst_project-a"))).toBe(true);
+  });
+
+  test("creates and drops materialized views with transactional schema reloads", async () => {
+    const createResponse = await request("project-a", "/materialized-views", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        schema: "public",
+        name: "orders_daily",
+        definition: "SELECT current_date AS day",
+        withData: false,
+      }),
+    });
+    const dropResponse = await request(
+      "project-a",
+      "/materialized-views/public/orders_daily?if_exists=true",
+      { method: "DELETE" },
+    );
+
+    expect(createResponse.status).toBe(201);
+    expect(dropResponse.status).toBe(200);
+    expect(rlsDb.begin).toHaveBeenCalledTimes(2);
+    expect(rlsUnsafe.mock.calls.some((call) => String(call[0]).startsWith("CREATE MATERIALIZED VIEW"))).toBe(true);
+    expect(rlsUnsafe.mock.calls.some((call) => String(call[0]).startsWith("DROP MATERIALIZED VIEW"))).toBe(true);
+    expect(schemaReloadQueries.filter(({ values }) => values.includes("pgrst_project-a"))).toHaveLength(2);
   });
 
   test("reads query performance through a fixed admin-only statistics query", async () => {

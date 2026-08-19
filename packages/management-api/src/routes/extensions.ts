@@ -1,11 +1,15 @@
 import { Elysia, t, status } from "elysia";
 import { extensionService } from '../services/extension.service';
-import { requireAdminAuth } from '../middleware/auth';
+import { requireAdminAuth, requireProjectOrAdminAuth } from '../middleware/auth';
 import { logger } from "../utils/logger";
 
 const ErrorResponse = t.Object({ message: t.String() });
 
 export const extensionRoutes = new Elysia({ prefix: "/v1/projects/:ref/extensions" })
+    .onBeforeHandle(async ({ params, request }) => {
+        const authError = await requireProjectOrAdminAuth(request, params.ref);
+        if (authError) return status(authError.status, authError.body);
+    })
     .onError(({ code, error, set }) => {
         logger.error(`[Extensions] Unhandled error [${code}]:`, error);
         set.status = 500;
@@ -76,6 +80,10 @@ export const extensionRoutes = new Elysia({ prefix: "/v1/projects/:ref/extension
     });
 
 export const databaseExtensionRoutes = new Elysia({ prefix: "/v1/projects/:ref/database/extensions" })
+    .onBeforeHandle(async ({ params, request }) => {
+        const authError = await requireProjectOrAdminAuth(request, params.ref);
+        if (authError) return status(authError.status, authError.body);
+    })
     .onError(({ code, error, set }) => {
         logger.error(`[DatabaseExtensions] Unhandled error [${code}]:`, error);
         set.status = 500;

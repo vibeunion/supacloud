@@ -10,8 +10,10 @@ import { projectRefPathSegment } from "../project-ref";
 import { optional, stringEnum, withDescription } from "../schema";
 import type { HttpResult, HttpTransport } from "../transports/http";
 import { releaseControlFailure, releaseControlMutationFailure } from "./release-control-response";
+import { analyzeMigrationFiles, formatMigrationRiskReport } from "./migration-risk";
 
 export interface DatabaseToolsConfig {
+    localOnly?: boolean;
     readOnly?: boolean;
     projectRef?: string;
 }
@@ -447,13 +449,13 @@ export function vectorWarningsForPendingMigrations(
 
 export function registerDatabaseTools(
     server: { tool: (...args: any[]) => void },
-    http: HttpTransport,
+    http: HttpTransport | undefined,
     config: DatabaseToolsConfig = {}
 ): void {
-    const { readOnly = false, projectRef } = config;
+    const { localOnly = false, readOnly = false, projectRef } = config;
 
-    // Build action list dynamically
-    const actions = [
+    const localActions = ["lint_migrations", "lint"] as const;
+    const readActions = [
         "query", "list_tables", "describe_columns", "list_indexes", "list_constraints",
         "list_extensions", "rls_status", "rls_policies",
         "list_auth_users", "get_auth_user",
@@ -461,22 +463,31 @@ export function registerDatabaseTools(
         "list_migrations", "migration_inventory", "project_url", "generate_types",
     ] as const;
     const writeActions = ["apply_migration", "push_migrations", "baseline_migrations", "create_table_rls"] as const;
-    const allActions = readOnly ? actions : [...actions, ...writeActions];
+    const remoteActions = [...readActions, ...localActions] as const;
+    const allActions = localOnly
+        ? localActions
+        : readOnly
+            ? remoteActions
+            : [...remoteActions, ...writeActions] as const;
 
     server.tool(
         "database",
         `Database operations: query, schema, RLS, migrations, stats.
-Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
+Actions: ${allActions.join(", ")}${localOnly ? " (local-only mode)" : readOnly ? " (read-only mode)" : ""}`,
         {
             action: withDescription(stringEnum(allActions as unknown as [string, ...string[]]), "Action"),
             ref: projectRef ? Type.Optional(Type.String()) : optional(Type.String(), "Project ref"),
             // query
-            sql: optional(Type.String(), "[query/apply_migration] SQL statement"),
-            file: optional(Type.String(), "[query/apply_migration] Read SQL from local file path (avoids shell escaping issues with $$ and multi-statement DDL)"),
-            dir: optional(Type.String(), "[push_migrations/baseline_migrations] Directory containing .sql migration files (default: supabase/migrations)"),
+            sql: optional(Type.String(), "[query/apply_migration/lint_migrations/lint] SQL statement"),
+            file: optional(Type.String(), "[query/apply_migration/lint_migrations/lint] Read SQL from local file path (avoids shell escaping issues with $$ and multi-statement DDL)"),
+            dir: optional(Type.String(), "[push_migrations/baseline_migrations/lint_migrations/lint] Directory containing .sql migration files (default: supabase/migrations)"),
             dry_run: optional(Type.Boolean(), "[push_migrations/baseline_migrations] Preview changes without applying them"),
+            strict: optional(Type.Boolean(), "[push_migrations/lint_migrations/lint] Exit with error if high-risk destructive migrations are detected"),
+            fail_on_high: optional(Type.Boolean(), "[push_migrations/lint_migrations/lint] Alias for --strict"),
+            fail_on_medium: optional(Type.Boolean(), "[push_migrations/lint_migrations/lint] Exit with error if medium-risk or high-risk migrations are detected"),
+            json: optional(Type.Boolean(), "[lint_migrations/lint] Output structured JSON analysis"),
             // schema
-            schema: optional(Type.String(), "[*] Schema name (default: public)"),
+            schema: optional(Type.String(), "[describe_columns/list_indexes/list_constraints/rls_status/rls_policies/create_table_rls] Schema name (default: public)"),
             table: optional(Type.String(), "[describe_columns/indexes/constraints/rls_*] Table name"),
             schemas: optional(Type.Array(Type.String()), "[list_tables/generate_types] Schemas array"),
             // auth users
@@ -491,12 +502,19 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
         },
         async (args: any) => {
             const { action } = args;
+            if (localOnly && action !== "lint_migrations" && action !== "lint") {
+                throw new Error(`Database action '${String(action)}' requires Management API context`);
+            }
+            const managementHttp = (): HttpTransport => {
+                if (!http) throw new Error(`Database action '${String(action)}' requires Management API context`);
+                return http;
+            };
             const ref = args.ref || projectRef;
             const schema = args.schema || "public";
             const schemas = args.schemas || ["public"];
 
             // Resolve SQL from --file if provided (avoids shell $$ and ; escaping)
-            if (args.file && !args.sql) {
+            if (args.file && !args.sql && action !== "lint_migrations" && action !== "lint") {
                 try {
                     args.sql = readFileSync(args.file, "utf-8");
                 } catch (e: any) {
@@ -505,7 +523,7 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
             }
 
             const execSql = async (sql: string, mode?: "read" | "migration" | "admin") =>
-                http.post(`/v1/projects/${ref}/database/sql`, mode ? { sql, mode } : { sql });
+                managementHttp().post(`/v1/projects/${ref}/database/sql`, mode ? { sql, mode } : { sql });
 
             let text: string;
             switch (action) {
@@ -605,14 +623,14 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
                     break;
                 }
                 case "migration_inventory": {
-                    const response = await http.get(
+                    const response = await managementHttp().get(
                         migrationInventoryPath(ref),
                         { maxResponseBytes: MAX_MIGRATION_INVENTORY_BYTES },
                     );
                     return migrationInventoryResponse(response);
                 }
                 case "project_url": {
-                    const r = await http.get(`/v1/projects/${ref}`);
+                    const r = await managementHttp().get(`/v1/projects/${ref}`);
                     text = r.ok ? JSON.stringify({ url: (r.data as any).api?.url || `https://${ref}.supabase.co` }, null, 2) : `❌ Failed (${r.status})`;
                     break;
                 }
@@ -622,9 +640,57 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
                     text = r.ok ? generateTypeScriptTypes(r.data, schemas) : `❌ Failed (${r.status})`;
                     break;
                 }
+                case "lint_migrations":
+                case "lint": {
+                    let migrationFiles: Array<{ file: string; sql: string }> = [];
+                    const explicitInputs = [args.sql, args.file, args.dir]
+                        .filter((input) => typeof input === "string" && input.length > 0);
+                    if (explicitInputs.length > 1) {
+                        throw new Error("Use only one of --sql, --file, or --dir for migration lint");
+                    }
+
+                    if (args.sql) {
+                        migrationFiles = [{ file: "inline.sql", sql: args.sql }];
+                    } else if (args.file) {
+                        if (!existsSync(args.file) || !statSync(args.file).isFile()) {
+                            throw new Error(`Migration file not found: ${args.file}`);
+                        }
+                        migrationFiles = [{ file: args.file, sql: readFileSync(args.file, "utf8") }];
+                    } else {
+                        const dir = args.dir || "supabase/migrations";
+                        if (!existsSync(dir) || !statSync(dir).isDirectory()) {
+                            throw new Error(`Migration directory not found: ${dir}`);
+                        }
+
+                        const files = readdirSync(dir)
+                            .filter((file) => file.endsWith(".sql"))
+                            .sort();
+
+                        if (!files.length) {
+                            text = `No .sql migration files found in ${dir}`;
+                            break;
+                        }
+
+                        migrationFiles = sortMigrationFiles(files.map((file) => readMigrationFile(dir, file)));
+                    }
+
+                    const analysis = analyzeMigrationFiles(migrationFiles);
+                    if (args.json) {
+                        text = JSON.stringify(analysis, null, 2);
+                    } else {
+                        text = formatMigrationRiskReport(analysis);
+                    }
+
+                    const strict = args.strict === true || args.fail_on_high === true;
+                    const failOnMedium = args.fail_on_medium === true;
+                    if ((strict && analysis.highRiskCount > 0) || (failOnMedium && (analysis.highRiskCount > 0 || analysis.mediumRiskCount > 0))) {
+                        return { content: [{ type: "text" as const, text }], isError: true };
+                    }
+                    break;
+                }
                 case "apply_migration": {
                     if (!args.name || !args.sql) throw new Error("'name' and 'sql' required");
-                    const r = await http.postReleaseMutation(
+                    const r = await managementHttp().postReleaseMutation(
                         `/v1/projects/${ref}/database/migrations`,
                         { name: args.name, sql: args.sql },
                     );
@@ -655,7 +721,7 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
 
                     const migrationFiles = sortMigrationFiles(files.map((file) => readMigrationFile(dir, file)));
 
-                    const migrationsResult = await http.get(`/v1/projects/${ref}/database/migrations`);
+                    const migrationsResult = await managementHttp().get(`/v1/projects/${ref}/database/migrations`);
                     if (!migrationsResult.ok) {
                         return releaseControlFailure(
                             "database.push_migrations",
@@ -665,6 +731,11 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
                     }
 
                     const migrationPlan = migrationPushPlan(migrationsResult.data, migrationFiles);
+                    const riskAnalysis = analyzeMigrationFiles(migrationPlan.pending);
+                    const strict = args.strict === true || args.fail_on_high === true;
+                    const failOnMedium = args.fail_on_medium === true;
+                    const riskPolicyFailed = (strict && riskAnalysis.highRiskCount > 0)
+                        || (failOnMedium && (riskAnalysis.highRiskCount > 0 || riskAnalysis.mediumRiskCount > 0));
 
                     if (args.dry_run) {
                         const pending = migrationPlan.pending;
@@ -678,6 +749,7 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
                                 : null;
                         }
                         const warnings = vectorWarningsForPendingMigrations(pendingWithSql, vectorEnabled);
+                        const riskReport = formatMigrationRiskReport(riskAnalysis);
                         text = [
                             `Migration dry run for ${dir}`,
                             `Total: ${migrationFiles.length}`,
@@ -688,8 +760,36 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
                             "Already applied:",
                             ...(alreadyApplied.length ? alreadyApplied.map(({ file, version }) => `  - ${file} (${version})`) : ["  - none"]),
                             ...(warnings.length ? ["", "Warnings:", ...warnings.map((warning) => `  - ${warning}`)] : []),
+                            "",
+                            "Risk Assessment:",
+                            ...riskReport.split("\n").map((line) => `  ${line}`),
                         ].join("\n");
-                        break;
+                        return {
+                            content: [{ type: "text" as const, text }],
+                            ...(riskPolicyFailed ? { isError: true } : {}),
+                        };
+                    }
+
+                    if (riskAnalysis.transactionalPushBlockerCount > 0) {
+                        const riskReport = formatMigrationRiskReport(riskAnalysis);
+                        return {
+                            content: [{
+                                type: "text" as const,
+                                text: `❌ Migration push aborted because the transactional executor cannot run one or more statements:\n\n${riskReport}`,
+                            }],
+                            isError: true,
+                        };
+                    }
+
+                    if (riskPolicyFailed) {
+                        const riskReport = formatMigrationRiskReport(riskAnalysis);
+                        return {
+                            content: [{
+                                type: "text" as const,
+                                text: `❌ Migration push aborted due to strict risk policy:\n\n${riskReport}`,
+                            }],
+                            isError: true,
+                        };
                     }
 
                     const pending = new Set(migrationPlan.pending.map(({ file }) => file));
@@ -700,7 +800,7 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
                             skipped.push(file);
                             continue;
                         }
-                        const r = await http.postReleaseMutation(
+                        const r = await managementHttp().postReleaseMutation(
                             `/v1/projects/${ref}/database/migrations`,
                             { name, sql, version },
                         );
@@ -743,7 +843,7 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
 
                     const migrationFiles = sortMigrationFiles(files.map((file) => readMigrationFile(dir, file)));
 
-                    const r = await http.get(`/v1/projects/${ref}/database/migrations`);
+                    const r = await managementHttp().get(`/v1/projects/${ref}/database/migrations`);
                     if (!r.ok) {
                         return releaseControlFailure(
                             "database.baseline_migrations",
@@ -778,7 +878,7 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
                         break;
                     }
 
-                    const baselineResult = await http.postReleaseMutation(
+                    const baselineResult = await managementHttp().postReleaseMutation(
                         `/v1/projects/${ref}/database/migrations/baseline`,
                         { migrations: missing.map(({ name, version }) => ({ name, version })) },
                     );
@@ -792,7 +892,7 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
                     if (!receipt) {
                         return releaseControlFailure("database.baseline_migrations", "OUTCOME_UNKNOWN", baselineResult.status);
                     }
-                    const inventoryResult = await http.get(
+                    const inventoryResult = await managementHttp().get(
                         `/v1/projects/${ref}/database/migrations`,
                         { maxResponseBytes: MAX_MIGRATION_INVENTORY_BYTES },
                     );
@@ -821,7 +921,7 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
                     if (policyMode !== "deny_all" && policyMode !== "owner") throw new Error("Invalid RLS policy mode");
                     const policySql = buildRlsPolicySql(qualifiedTable, policyMode, args.owner_column);
                     const sql = `BEGIN; CREATE TABLE IF NOT EXISTS ${qualifiedTable} (${columns}); ALTER TABLE ${qualifiedTable} ENABLE ROW LEVEL SECURITY; ${policySql} COMMIT;`;
-                    const r = await http.postReleaseMutation(
+                    const r = await managementHttp().postReleaseMutation(
                         `/v1/projects/${ref}/database/sql`,
                         { sql, mode: "migration" },
                     );

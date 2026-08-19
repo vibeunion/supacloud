@@ -232,6 +232,7 @@ supacloud-cli task_events inspect_webhook --ref abc123
 supacloud-cli database query --sql "select now()"
 supacloud-cli database query --ref abc123 --file ./queries/vector-search.sql
 supacloud-cli database migration_inventory --ref abc123
+supacloud-cli database lint_migrations --dir supabase/migrations
 supacloud-cli database push_migrations --ref abc123 --dir supabase/migrations --dry_run
 supacloud-cli supabase migration_new --name add_accounts
 supacloud-cli supabase db_diff --schema public --name add_accounts
@@ -284,6 +285,20 @@ reports the local files applied or skipped before the failed file, so operators
 can reconcile a partially completed sequence without exposing SQL. Baseline
 success requires a bounded migration-inventory readback that confirms every
 requested version, name, baseline marker, and checksum.
+
+`database lint_migrations` is local-only and works without Management API
+credentials. Inspect one source with `--sql`, `--file`, or `--dir`; these inputs
+are mutually exclusive. `--strict` (or `--fail_on_high`) exits non-zero for HIGH
+findings, `--fail_on_medium` also fails on MEDIUM findings, and `--json` emits a
+structured report. The analyzer detects destructive DDL (`DROP TABLE`,
+`DROP COLUMN`, `TRUNCATE`, `RENAME`), table-locking risks, opaque `DO` blocks,
+and statements that cannot run in the transactional migration executor.
+`CREATE/DROP INDEX CONCURRENTLY`, `VACUUM`, and other non-transactional work must
+run through an approved maintenance path outside `push_migrations`.
+
+Migration applications and DDL executions send PostgREST schema reload
+notifications (`NOTIFY pgrst_<ref>, 'reload schema'`) so schema changes become
+visible without a manual PostgREST restart.
 
 `edge_functions deploy --path` bundles local TypeScript and dependencies with
 Bun and runs a local syntax check before upload. The Management API validates and

@@ -29,6 +29,10 @@ import {
   BranchReplacementJournalActiveError,
   branchReplacementJournal,
 } from "../services/branch-replacement-journal";
+import {
+  notifyPostgrestSchemaReload,
+  tryNotifyPostgrestSchemaReload,
+} from "../services/database-schema-notify";
 import { logger } from "../utils/logger";
 
 export type MigrationBody =
@@ -135,6 +139,37 @@ export function sqlRouteResponse(result: Awaited<ReturnType<typeof db.executeQue
     ...(result.statements ? { statements: result.statements } : {}),
     durationMs: result.durationMs,
   };
+}
+
+const POSTGREST_SCHEMA_COMMANDS = new Set([
+  "ALTER",
+  "CALL",
+  "COMMENT",
+  "CREATE",
+  "DO",
+  "DROP",
+  "GRANT",
+  "IMPORT",
+  "REVOKE",
+  "SECURITY",
+]);
+
+export function sqlExecutionMayChangeSchema(
+  executionResult: Awaited<ReturnType<typeof db.executeQuery>>,
+  sqlQuery?: string,
+): boolean {
+  const resultCommands = [
+    executionResult.command,
+    ...(executionResult.statements || []).map((statement) => statement.command),
+  ];
+  if (resultCommands.some((command) => POSTGREST_SCHEMA_COMMANDS.has(command.toUpperCase()))) {
+    return true;
+  }
+  if (!sqlQuery) return false;
+  return splitSqlStatements(sqlQuery).some((statement) => {
+    const command = normalizeSqlForPolicy(statement).match(/^([A-Z]+)/i)?.[1]?.toUpperCase();
+    return command ? POSTGREST_SCHEMA_COMMANDS.has(command) : false;
+  });
 }
 
 export function sqlRouteErrorResponse(error: unknown) {
@@ -869,6 +904,7 @@ async function executeMigrationTransaction(
             `Migration ${input.name} conflicts with an existing version, name, or checksum`,
           );
         }
+        await notifyPostgrestSchemaReload(tx, input.projectRef);
         return true;
       }
       const unsupported = detectUnsupportedMigrationOperations(execution.statements);
@@ -883,6 +919,7 @@ async function executeMigrationTransaction(
       const issuedLease = await issueMigrationLedgerLease(adminDb, input.version, execution.checksum);
       leaseHolder.current = issuedLease;
       await insertMigrationLedger(tx, input, execution.checksum, issuedLease.token);
+      await notifyPostgrestSchemaReload(tx, input.projectRef);
       return false;
     });
   } finally {
@@ -1376,7 +1413,10 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
 
             try {
                 const sql = buildCreateMaterializedViewSql(body);
-                await projectDb.unsafe(sql);
+                await projectDb.begin(async (transaction) => {
+                    await transaction.unsafe(sql);
+                    await notifyPostgrestSchemaReload(transaction, params.ref);
+                });
                 set.status = 201;
                 return {
                     schema: body.schema || "public",
@@ -1468,11 +1508,14 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
             }
 
             try {
-                await projectDb.unsafe(buildDropMaterializedViewSql({
-                    schema: params.schema,
-                    name: params.name,
-                    ifExists: query.if_exists === "true" || query.if_exists === "1",
-                }));
+                await projectDb.begin(async (transaction) => {
+                    await transaction.unsafe(buildDropMaterializedViewSql({
+                        schema: params.schema,
+                        name: params.name,
+                        ifExists: query.if_exists === "true" || query.if_exists === "1",
+                    }));
+                    await notifyPostgrestSchemaReload(transaction, params.ref);
+                });
                 return { schema: params.schema, name: params.name, deleted: true };
             } catch (error: unknown) {
                 set.status = 400;
@@ -1656,13 +1699,19 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                   if (mode === "migration") {
                     await branchReplacementJournal.assertInactive([params.ref]);
                   }
-                  return db.executeQuery(credentials.db_name, sqlQuery, {
+                  const result = await db.executeQuery(credentials.db_name, sqlQuery, {
                     mode,
                     ...(typeof body.query_id === "string"
                       ? { projectRef: params.ref, queryId: body.query_id }
                       : {}),
                     ...(useRoleConnection ? { username: credentials.db_user, password: credentials.db_password } : {}),
                   });
+                  const adminMayChangeSchema = mode === "admin" && sqlExecutionMayChangeSchema(result, sqlQuery);
+                  if (mode === "migration" || adminMayChangeSchema) {
+                    const adminDb = getProjectDb(credentials.db_name);
+                    await tryNotifyPostgrestSchemaReload(adminDb, params.ref);
+                  }
+                  return result;
                 };
                 const result = mode === "migration"
                   ? await withProjectMigrationLocks({ projectRefs: [params.ref] }, execute)

@@ -196,6 +196,51 @@ describe("supacloud-cli process contract", () => {
         expect(response.stderr).toContain("--allowed_mime_types");
     });
 
+    test("runs migration lint locally without project credentials", async () => {
+        const workspace = mkdtempSync(join(tmpdir(), "supacloud-cli-local-lint-"));
+        temporaryDirectories.push(workspace);
+        const migrationPath = join(workspace, "safe.sql");
+        writeFileSync(migrationPath, "CREATE TABLE public.items (id bigint PRIMARY KEY);");
+
+        const response = await runProjectCli([
+            "database", "lint_migrations", "--file", migrationPath,
+        ], {}, workspace);
+
+        expect(response.exitCode).toBe(0);
+        expect(response.stdout).toContain("Migration Risk Level: LOW");
+        expect(response.stdout).not.toContain("requires Management API context");
+    });
+
+    test("returns a non-zero process exit for strict local migration lint", async () => {
+        const workspace = mkdtempSync(join(tmpdir(), "supacloud-cli-local-lint-strict-"));
+        temporaryDirectories.push(workspace);
+        const migrationPath = join(workspace, "destructive.sql");
+        writeFileSync(migrationPath, "DROP TABLE public.legacy_items;");
+
+        const response = await runProjectCli([
+            "database", "lint_migrations", "--file", migrationPath, "--strict",
+        ], {}, workspace);
+
+        expect(response.exitCode).toBe(1);
+        expect(response.stdout).toContain("Migration Risk Level: HIGH");
+    });
+
+    test("documents all local lint inputs without unrelated schema flags", async () => {
+        const workspace = mkdtempSync(join(tmpdir(), "supacloud-cli-local-lint-help-"));
+        temporaryDirectories.push(workspace);
+
+        const response = await runProjectCli(["database", "lint", "--help"], {}, workspace);
+
+        expect(response.exitCode).toBe(0);
+        expect(response.stderr).toContain("--sql");
+        expect(response.stderr).toContain("--file");
+        expect(response.stderr).toContain("--dir");
+        expect(response.stderr).toContain("--strict");
+        expect(response.stderr).toContain("--fail_on_medium");
+        expect(response.stderr).toContain("--json");
+        expect(response.stderr).not.toContain("--schema");
+    });
+
     test("keeps the release-canary OAuth client command discoverable without project configuration", async () => {
         const workspace = mkdtempSync(join(tmpdir(), "supacloud-cli-oauth-client-help-"));
         temporaryDirectories.push(workspace);

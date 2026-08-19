@@ -1,10 +1,14 @@
 import { beforeEach, describe, test, expect, mock } from "bun:test";
 
 const unsafeCalls: string[] = [];
+const taggedCalls: string[] = [];
+let beginCalls = 0;
+let createExtensionFailure: Error | null = null;
 
 const mockDbFn = Object.assign(
     async (strings: TemplateStringsArray, extension?: string) => {
         const sql = strings.join("?");
+        taggedCalls.push(sql);
         if (extension === "pg_graphql" || sql.includes("pg_graphql")) {
             return [{ name: "pg_graphql", default_version: "1.5", installed_version: null, comment: "GraphQL support", is_installed: false }];
         }
@@ -14,14 +18,20 @@ const mockDbFn = Object.assign(
         close: async () => { },
         unsafe: async (sql: string) => {
             unsafeCalls.push(sql);
+            if (createExtensionFailure && sql.startsWith("CREATE EXTENSION")) throw createExtensionFailure;
             return [{ name: "pg_stat_statements", default_version: "1.10", installed_version: "1.10", comment: "track stats", is_installed: true }];
+        },
+        begin: async (operation: (transaction: typeof mockDbFn) => Promise<unknown>) => {
+            beginCalls += 1;
+            return operation(mockDbFn);
         },
     }
 );
 
 mock.module("../../src/db", () => ({
     getProjectDb: () => mockDbFn,
-    resolveDbName: async () => "project_testref123"
+    resolveDbName: async () => "project_testref123",
+    resolvePgrstChannel: (projectRef: string) => `pgrst_${projectRef}`,
 }));
 
 import { extensionService, parsePigExtensionList } from "../../src/services/extension.service";
@@ -29,6 +39,9 @@ import { extensionService, parsePigExtensionList } from "../../src/services/exte
 describe("ExtensionService", () => {
     beforeEach(() => {
         unsafeCalls.length = 0;
+        taggedCalls.length = 0;
+        beginCalls = 0;
+        createExtensionFailure = null;
     });
 
     test("listExtensions should parse DB output", async () => {
@@ -41,6 +54,8 @@ describe("ExtensionService", () => {
         const result = await extensionService.enableExtension("testref123", "postgis");
         expect(result.name).toBe("pg_stat_statements");
         expect(result.is_installed).toBe(true);
+        expect(beginCalls).toBe(1);
+        expect(taggedCalls.some((sql) => sql.includes("pg_notify"))).toBe(true);
     });
 
     test("enableExtension should drop GraphQL fallback before installing pg_graphql", async () => {
@@ -53,6 +68,26 @@ describe("ExtensionService", () => {
             "DROP FUNCTION IF EXISTS graphql_public.graphql(text, text, jsonb)",
         );
         expect(unsafeCalls[1]).toBe('CREATE EXTENSION IF NOT EXISTS "pg_graphql" CASCADE');
+        expect(beginCalls).toBe(1);
+    });
+
+    test("enableExtension rolls GraphQL fallback cleanup and extension creation into one transaction", async () => {
+        createExtensionFailure = new Error("extension install failed");
+
+        await expect(extensionService.enableExtension("testref123", "pg_graphql"))
+            .rejects.toThrow("extension install failed");
+
+        expect(beginCalls).toBe(1);
+        expect(unsafeCalls).toHaveLength(2);
+    });
+
+    test("disableExtension drops and reloads schema in one transaction", async () => {
+        const result = await extensionService.disableExtension("testref123", "postgis");
+
+        expect(result.is_installed).toBe(true);
+        expect(beginCalls).toBe(1);
+        expect(unsafeCalls).toEqual(['DROP EXTENSION IF EXISTS "postgis" CASCADE']);
+        expect(taggedCalls.some((sql) => sql.includes("pg_notify"))).toBe(true);
     });
 
     test("parsePigExtensionList should ignore psql table footers", () => {
