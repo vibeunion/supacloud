@@ -15,6 +15,7 @@ const MAX_AUTH_READ_BYTES = 64 * 1024;
 const AUTH_READ_TIMEOUT_MS = 5_000;
 const USER_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const AUTH_LINK_TYPES = ["magiclink", "recovery", "invite"] as const;
+const OAUTH_AUTHORIZATION_PATH_MAX_LENGTH = 2_048;
 
 const SAFE_USER_FIELDS = [
     "email", "phone", "created_at", "last_sign_in_at",
@@ -86,6 +87,83 @@ function authMutationResult(response: HttpResult<unknown>, successMessage: strin
 function requiredRef(candidate: unknown): string {
     if (typeof candidate !== "string" || !candidate.trim()) throw new Error("'ref' is required");
     return projectRefPathSegment(candidate.trim(), "Auth");
+}
+
+function optionalAuthorizationPath(candidate: unknown): string | undefined {
+    if (candidate === undefined) return undefined;
+    return boundedText(candidate, "authorization_path", OAUTH_AUTHORIZATION_PATH_MAX_LENGTH);
+}
+
+function oauthServerStatus(value: unknown, expectedRef: string): Record<string, unknown> | null {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    const status = value as Record<string, unknown>;
+    if (status.project_ref !== expectedRef
+        || typeof status.enabled !== "boolean"
+        || typeof status.allow_dynamic_registration !== "boolean"
+        || typeof status.issuer !== "string"
+        || typeof status.signing_alg !== "string"
+        || typeof status.oidc_id_token_ready !== "boolean"
+        || typeof status.migration_status !== "string") return null;
+    return {
+        project_ref: status.project_ref,
+        enabled: status.enabled,
+        allow_dynamic_registration: status.allow_dynamic_registration,
+        issuer: status.issuer,
+        authorization_path: typeof status.authorization_path === "string" ? status.authorization_path : null,
+        signing_alg: status.signing_alg,
+        key_id: typeof status.key_id === "string" ? status.key_id : null,
+        oidc_id_token_ready: status.oidc_id_token_ready,
+        migration_status: status.migration_status,
+    };
+}
+
+function oauthServerFailure(operation: string, response: HttpResult<unknown>) {
+    return {
+        isError: true,
+        content: [{
+            type: "text" as const,
+            text: JSON.stringify({
+                ok: false,
+                operation,
+                http_status: response.transportError || response.responseReadError ? null : response.status,
+                error: response.responseReadError ? "INVALID_RESPONSE" : response.transportError ? "NETWORK_ERROR" : "HTTP_ERROR",
+            }, null, 2),
+        }],
+    };
+}
+
+async function getOAuthServer(http: HttpTransport, ref: string) {
+    const response = await http.get(`/v1/projects/${ref}/auth/oauth-server`, {
+        maxJsonBytes: MAX_AUTH_READ_BYTES,
+        responseTimeoutMs: AUTH_READ_TIMEOUT_MS,
+    });
+    if (!response.ok) return oauthServerFailure("auth.get_oauth_server", response);
+    const status = oauthServerStatus(response.data, ref);
+    if (!status) return oauthServerFailure("auth.get_oauth_server", { ...response, responseReadError: true });
+    return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, operation: "auth.get_oauth_server", ...status }, null, 2) }] };
+}
+
+async function migrateOAuthServer(http: HttpTransport, args: Record<string, unknown>) {
+    const ref = requiredRef(args.ref);
+    const body: Record<string, unknown> = {
+        allow_dynamic_registration: args.allow_dynamic_registration === true,
+    };
+    const authorizationPath = optionalAuthorizationPath(args.authorization_path);
+    if (authorizationPath !== undefined) body.authorization_path = authorizationPath;
+    const mutation = await http.postReleaseMutation(`/v1/projects/${ref}/auth/oauth-server/migrate`, body);
+    if (!mutation.ok) return oauthServerFailure("auth.migrate_oauth_server", mutation);
+    const mutationStatus = oauthServerStatus(mutation.data, ref);
+    if (!mutationStatus) return oauthServerFailure("auth.migrate_oauth_server", { ...mutation, responseReadError: true });
+    const read = await http.get(`/v1/projects/${ref}/auth/oauth-server`, {
+        maxJsonBytes: MAX_AUTH_READ_BYTES,
+        responseTimeoutMs: AUTH_READ_TIMEOUT_MS,
+    });
+    if (!read.ok) return oauthServerFailure("auth.migrate_oauth_server", read);
+    const status = oauthServerStatus(read.data, ref);
+    if (!status || status.signing_alg !== "ES256" || status.oidc_id_token_ready !== true) {
+        return oauthServerFailure("auth.migrate_oauth_server", { ...read, responseReadError: true });
+    }
+    return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, operation: "auth.migrate_oauth_server", ...status }, null, 2) }] };
 }
 
 function requiredUserId(candidate: unknown): string {
@@ -341,7 +419,7 @@ export function registerAuthTools(server: { tool: (...args: any[]) => void }, ht
     server.tool(
         "auth",
         `Auth & OAuth provider management, controlled user lookup, and login-link generation.
-Actions: list_users, get_user, generate_link, list_providers, get_provider, configure_provider, update_provider, disable_provider, supported_providers, wechat_mini, wechat_open, get_settings, update_settings, get_config, update_config`,
+Actions: list_users, get_user, generate_link, list_providers, get_provider, configure_provider, update_provider, disable_provider, supported_providers, wechat_mini, wechat_open, get_settings, update_settings, get_config, update_config, get_oauth_server, migrate_oauth_server`,
         {
             action: withDescription(stringEnum([
                 "list_users", "get_user", "generate_link",
@@ -350,6 +428,7 @@ Actions: list_users, get_user, generate_link, list_providers, get_provider, conf
                 "wechat_mini", "wechat_open",
                 "get_settings", "update_settings",
                 "get_config", "update_config",
+                "get_oauth_server", "migrate_oauth_server",
             ]), "Action to perform"),
             ref: optional(Type.String(), "Project ref (required for most actions)"),
             user_id: optional(Type.String(), "[get_user] Exact auth user UUID"),
@@ -368,6 +447,8 @@ Actions: list_users, get_user, generate_link, list_providers, get_provider, conf
             app_id: optional(Type.String(), "[wechat_*] WeChat App ID"),
             app_secret: optional(Type.String(), "[wechat_*] WeChat App Secret"),
             config: optional(authConfigSchema, "[update_settings/update_config] Config fields as a JSON object"),
+            allow_dynamic_registration: optional(Type.Boolean(), "[migrate_oauth_server] Enable dynamic client registration"),
+            authorization_path: optional(Type.String(), "[migrate_oauth_server] Hosted OAuth authorization path"),
         },
         async (args: any) => {
             const { action, ref, provider, client_id, client_secret, redirect_uri, url, app_id, app_secret, config } = args;
@@ -382,6 +463,10 @@ Actions: list_users, get_user, generate_link, list_providers, get_provider, conf
                     return getUser(http, args);
                 case "generate_link":
                     return generateLink(http, args);
+                case "get_oauth_server":
+                    return getOAuthServer(http, requiredRef(ref));
+                case "migrate_oauth_server":
+                    return migrateOAuthServer(http, args);
                 case "list_providers":
                     need("ref");
                     const lp = await http.get(`/v1/projects/${ref}/auth/providers`);
