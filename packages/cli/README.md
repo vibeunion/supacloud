@@ -232,6 +232,7 @@ supacloud-cli task_events inspect_webhook --ref abc123
 supacloud-cli database query --sql "select now()"
 supacloud-cli database query --ref abc123 --file ./queries/vector-search.sql
 supacloud-cli database migration_inventory --ref abc123
+supacloud-cli database lint_migrations --dir supabase/migrations
 supacloud-cli database push_migrations --ref abc123 --dir supabase/migrations --dry_run
 supacloud-cli supabase migration_new --name add_accounts
 supacloud-cli supabase db_diff --schema public --name add_accounts
@@ -277,6 +278,11 @@ it never empties a bucket. Mutation receipts bind `project_ref`, `bucket_id`,
 name with another version, or a local version with another name, before either
 dry-run reporting or apply can continue. This keeps the preview consistent with
 the server conflict that would otherwise occur after deployment starts.
+`push_migrations` requires canonical string migration identities; the narrower
+`baseline_migrations` compatibility path also accepts historical safe-integer
+versions and normalizes them before comparison. Repeated historical `cli_push`
+names are treated as generic labels; version and exact content remain the
+authority.
 Mutation failures use the release-control receipt schema and never include the
 server response body. `OUTCOME_UNKNOWN` requires a fresh migration inventory
 read before deciding whether a retry is safe. A migration push failure also
@@ -284,6 +290,43 @@ reports the local files applied or skipped before the failed file, so operators
 can reconcile a partially completed sequence without exposing SQL. Baseline
 success requires a bounded migration-inventory readback that confirms every
 requested version, name, baseline marker, and checksum.
+
+`database lint_migrations` is local-only and works without Management API
+credentials. Inspect one source with `--sql`, `--file`, or `--dir`; these inputs
+are mutually exclusive. `--strict` (or `--fail_on_high`) exits non-zero for HIGH
+findings, `--fail_on_medium` also fails on MEDIUM findings, and `--json` emits a
+structured report. The analyzer detects destructive DDL (`DROP TABLE`,
+`DROP COLUMN`, `TRUNCATE`, `RENAME`), table-locking risks, opaque `DO` blocks,
+procedural definitions/calls that require manual review, and statements that
+cannot run in the transactional migration executor. Empty migrations,
+unterminated strings/comments/dollar quotes, role or cluster management,
+external database access, server file/process access, transaction-boundary or
+session-identity control, advisory locks, public-schema rename/removal, and
+direct migration-ledger schema, table, recorder, or privilege mutation fail
+before the first remote migration write. Ledger indexes, triggers, rules,
+policies, comments, security labels, and table maintenance commands are covered
+by the same fail-closed rule. Top-level `COPY` is also rejected
+because the HTTP migration executor cannot provide a safe client stream and
+server-file targets cross the project boundary. Unicode-escaped identifiers
+(`U&"..."`) are rejected because the policy cannot safely canonicalize protected
+schema and ledger names. One matching outer `BEGIN`/`COMMIT` wrapper is removed
+because the platform owns the transaction.
+Adding a `NOT NULL` column is assessed per top-level `ALTER TABLE` subcommand;
+function-based defaults remain MEDIUM risk because they may rewrite the table.
+Dry-run exits non-zero for statements the transactional executor cannot apply,
+even when strict destructive-risk mode is not enabled.
+`CREATE/DROP INDEX CONCURRENTLY`, `VACUUM`, and other non-transactional work must
+run through an approved maintenance path outside `push_migrations`.
+
+Migration applications and DDL executions send PostgREST schema reload
+notifications (`NOTIFY pgrst_<ref>, 'reload schema'`) so schema changes become
+visible without a manual PostgREST restart. Responses distinguish `notified`
+from `notification_failed` and include `ddl_committed=true` when the platform
+can prove the DDL committed. Admin SQL with explicit transaction control or
+indirect `CALL`/`DO` execution omits `ddl_committed`; for
+`database create_table_rls`, a committed DDL batch followed by a failed reload
+returns `PARTIAL_SUCCESS` instead of claiming complete success or an unknown DDL
+outcome.
 
 `edge_functions deploy --path` bundles local TypeScript and dependencies with
 Bun and runs a local syntax check before upload. The Management API validates and

@@ -77,10 +77,14 @@ function baselineInventory(migrations: Array<{ version: string; name: string }>)
     }));
 }
 
-function sqlBatchReceipt(commands: string[]) {
+function sqlBatchReceipt(
+    commands: string[],
+    schemaReloadStatus: "notified" | "notification_failed" = "notified",
+) {
     return {
         command: "BATCH",
         statements: commands.map((command, index) => ({ index: index + 1, command, rowCount: 0, durationMs: 1 })),
+        schema_reload: { status: schemaReloadStatus, ddl_committed: true },
     };
 }
 
@@ -549,6 +553,7 @@ describe("database migration helpers", () => {
     test.each([
         ["non-string name", { version: "1785220280", name: {}, statements: ["CREATE TABLE users (id uuid);"] }],
         ["non-string version", { version: {}, name: "20260425123000_create_users", statements: ["CREATE TABLE users (id uuid);"] }],
+        ["numeric version", { version: 1785220280, name: "20260425123000_create_users", statements: ["CREATE TABLE users (id uuid);"] }],
     ])("rejects a %s before dry-run or apply without writing", async (_case, remoteMigration) => {
         const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
         const posts: unknown[] = [];
@@ -1279,6 +1284,67 @@ describe("database migration helpers", () => {
         }
     });
 
+    test("accepts a safe historical numeric version while planning a baseline", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
+        try {
+            writeFileSync(join(dir, "20260425123000_create_users.sql"), "CREATE TABLE users (id uuid);\n");
+            const callback = captureDatabaseTool({
+                get: async () => ({
+                    ok: true,
+                    status: 200,
+                    data: [{
+                        version: 20260425123000,
+                        name: "20260425123000_create_users",
+                        statements: ["baseline:20260425123000_create_users"],
+                    }],
+                }),
+            });
+
+            const result = await callback({ action: "baseline_migrations", ref: "proj", dir, dry_run: true });
+
+            expect(result.content[0].text).toContain("Would mark as applied:\n  - none");
+            expect(result.content[0].text).toContain("Already applied:\n  - 20260425123000_create_users.sql");
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    test("accepts repeated generic cli_push names when versions and contents are distinct", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
+        try {
+            writeFileSync(join(dir, "20260425123000_create_users.sql"), "CREATE TABLE users (id uuid);\n");
+            writeFileSync(join(dir, "20260425124000_create_tasks.sql"), "CREATE TABLE tasks (id uuid);\n");
+            const callback = captureDatabaseTool({
+                get: async () => ({
+                    ok: true,
+                    status: 200,
+                    data: [
+                        {
+                            version: "20260425123000",
+                            name: "cli_push",
+                            statements: ["CREATE TABLE users (id uuid);"],
+                        },
+                        {
+                            version: "20260425124000",
+                            name: "cli_push",
+                            statements: ["CREATE TABLE tasks (id uuid);"],
+                        },
+                    ],
+                }),
+            });
+
+            const push = await callback({ action: "push_migrations", ref: "proj", dir, dry_run: true });
+            const baseline = await callback({ action: "baseline_migrations", ref: "proj", dir, dry_run: true });
+
+            expect(push.content[0].text).toContain("Pending:\n  - none");
+            expect(push.content[0].text).toContain("Already applied:\n  - 20260425123000_create_users.sql");
+            expect(baseline.content[0].text).toContain("Would mark as applied:\n  - none");
+            expect(baseline.content[0].text).toContain("Already applied:\n  - 20260425123000_create_users.sql");
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
     test("rejects a baseline identity without content evidence before mutation", async () => {
         const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
         let mutationCount = 0;
@@ -1581,6 +1647,33 @@ describe("database migration helpers", () => {
     expect(JSON.parse(response.content[0].text).error).toEqual({ code: "OUTCOME_UNKNOWN", http_status: 200 });
   });
 
+  test("reports committed table DDL as partial success when schema reload fails", async () => {
+    const callback = captureDatabaseTool({
+      postReleaseMutation: async () => ({
+        ok: true,
+        status: 200,
+        data: sqlBatchReceipt(["CREATE", "ALTER", ...Array(5).fill("DROP")], "notification_failed"),
+      }),
+    });
+
+    const response = await callback({
+      action: "create_table_rls",
+      ref: "proj",
+      table: "todos",
+      columns: "id uuid primary key",
+    });
+    const receipt = JSON.parse(response.content[0].text);
+
+    expect(response.isError).toBe(true);
+    expect(receipt).toMatchObject({
+      ok: false,
+      operation: "database.create_table_rls",
+      ddl_committed: true,
+      schema_reload: { status: "notification_failed" },
+      error: { code: "PARTIAL_SUCCESS", http_status: 200 },
+    });
+  });
+
   test.each([201, 202, 204])("does not treat HTTP %d as a completed table and RLS mutation", async (status) => {
     const callback = captureDatabaseTool({
       postReleaseMutation: async () => ({
@@ -1619,5 +1712,229 @@ describe("database migration helpers", () => {
       table: "todos",
       columns: "id uuid); DROP TABLE secrets; --",
     })).rejects.toThrow("Unsafe column definitions");
+  });
+  test("lint_migrations action inspects SQL files and reports risks", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "supacloud-lint-test-"));
+    try {
+      writeFileSync(join(dir, "20260819000001_safe.sql"), "CREATE TABLE public.items (id bigint PRIMARY KEY);");
+      writeFileSync(join(dir, "20260819000002_lock.sql"), "CREATE INDEX idx_items_id ON public.items (id);");
+      writeFileSync(join(dir, "20260819000003_drop.sql"), "DROP TABLE public.legacy_items;");
+
+      const callback = captureDatabaseTool({});
+      const result = await callback({
+        action: "lint_migrations",
+        dir,
+      });
+
+      const text = result.content[0].text;
+      expect(text).toContain("🔴 Migration Risk Level: HIGH");
+      expect(text).toContain("20260819000002_lock.sql");
+      expect(text).toContain("20260819000003_drop.sql");
+      expect(text).toContain("CREATE INDEX CONCURRENTLY");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("push_migrations dry_run includes Risk Assessment section", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "supacloud-dryrun-risk-test-"));
+    try {
+      writeFileSync(join(dir, "20260819000001_add_index.sql"), "CREATE INDEX idx_users_name ON public.users (name);");
+
+      const callback = captureDatabaseTool({
+        get: async () => ({ ok: true, status: 200, data: [] }),
+      });
+
+      const result = await callback({
+        action: "push_migrations",
+        ref: "proj",
+        dir,
+        dry_run: true,
+      });
+
+      const text = result.content[0].text;
+      expect(text).toContain("Migration dry run for");
+      expect(text).toContain("Risk Assessment:");
+      expect(text).toContain("Migration Risk Level: MEDIUM");
+      expect(text).toContain("CREATE INDEX CONCURRENTLY");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  test("push_migrations dry_run fails when transactional SQL cannot be applied", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "supacloud-dryrun-blocker-test-"));
+    try {
+      writeFileSync(
+        join(dir, "20260819000001_concurrent_index.sql"),
+        "CREATE INDEX CONCURRENTLY idx_users_name ON public.users (name);",
+      );
+      const callback = captureDatabaseTool({
+        get: async () => ({ ok: true, status: 200, data: [] }),
+      });
+
+      const result = await callback({
+        action: "push_migrations",
+        ref: "proj",
+        dir,
+        dry_run: true,
+      });
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("cannot run inside the transactional migration executor");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  test("lint_migrations returns isError in strict mode when high risk detected", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "supacloud-lint-strict-test-"));
+    try {
+      writeFileSync(join(dir, "20260819000001_drop.sql"), "DROP TABLE public.legacy_users;");
+
+      const callback = captureDatabaseTool({});
+      const normalResult = await callback({
+        action: "lint_migrations",
+        dir,
+      });
+      expect(normalResult.isError).toBeFalsy();
+
+      const strictResult = await callback({
+        action: "lint_migrations",
+        dir,
+        strict: true,
+      });
+      expect(strictResult.isError).toBe(true);
+      expect(strictResult.content[0].text).toContain("🔴 Migration Risk Level: HIGH");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  test("lint_migrations action supports inline sql and json output", async () => {
+    const callback = captureDatabaseTool({});
+    const result = await callback({
+      action: "lint_migrations",
+      sql: "DROP TABLE public.temp_users;",
+      json: true,
+    });
+
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.overallRisk).toBe("HIGH");
+    expect(parsed.highRiskCount).toBe(1);
+    expect(parsed.files[0].file).toBe("inline.sql");
+  });
+
+  test("lint_migrations action supports single file and fail_on_medium", async () => {
+    const filePath = join(tmpdir(), `supacloud-single-lint-${Date.now()}.sql`);
+    try {
+      writeFileSync(filePath, "CREATE INDEX idx_items ON public.items (id);");
+      const callback = captureDatabaseTool({});
+
+      const normalResult = await callback({
+        action: "lint_migrations",
+        file: filePath,
+      });
+      expect(normalResult.isError).toBeFalsy();
+      expect(normalResult.content[0].text).toContain("Migration Risk Level: MEDIUM");
+      expect(normalResult.content[0].text).toContain(filePath);
+
+      const failResult = await callback({
+        action: "lint_migrations",
+        file: filePath,
+        fail_on_medium: true,
+      });
+      expect(failResult.isError).toBe(true);
+    } finally {
+      rmSync(filePath, { force: true });
+    }
+  });
+
+  test("push_migrations with strict flag aborts when high-risk migrations exist", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "supacloud-push-strict-"));
+    try {
+      writeFileSync(join(dir, "20260819000001_drop.sql"), "DROP TABLE public.critical_data;");
+      let postCalled = false;
+
+      const callback = captureDatabaseTool({
+        get: async () => ({ ok: true, status: 200, data: [] }),
+        postReleaseMutation: async () => {
+          postCalled = true;
+          return { ok: true, status: 200, data: { name: "drop", version: "1", checksum: "abc" } };
+        },
+      });
+
+      const result = await callback({
+        action: "push_migrations",
+        ref: "proj",
+        dir,
+        strict: true,
+      });
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("Migration push aborted due to strict risk policy");
+      expect(result.content[0].text).toContain("DROP TABLE public.critical_data");
+      expect(postCalled).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("push_migrations dry_run returns an error under strict risk policy", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "supacloud-push-dryrun-strict-"));
+    try {
+      writeFileSync(join(dir, "20260819000001_drop.sql"), "DROP TABLE public.critical_data;");
+      const callback = captureDatabaseTool({
+        get: async () => ({ ok: true, status: 200, data: [] }),
+      });
+
+      const result = await callback({
+        action: "push_migrations",
+        ref: "proj",
+        dir,
+        dry_run: true,
+        strict: true,
+      });
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("Migration dry run for");
+      expect(result.content[0].text).toContain("Migration Risk Level: HIGH");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("push_migrations blocks non-transactional SQL before the first mutation", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "supacloud-push-non-transactional-"));
+    let postCalls = 0;
+    try {
+      writeFileSync(
+        join(dir, "20260819000001_concurrent_index.sql"),
+        "CREATE INDEX CONCURRENTLY idx_users_email ON public.users(email);",
+      );
+      const callback = captureDatabaseTool({
+        get: async () => ({ ok: true, status: 200, data: [] }),
+        postReleaseMutation: async () => {
+          postCalls += 1;
+          return { ok: true, status: 200, data: {} };
+        },
+      });
+
+      const result = await callback({ action: "push_migrations", ref: "proj", dir });
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("transactional executor cannot run");
+      expect(result.content[0].text).toContain("CREATE INDEX CONCURRENTLY");
+      expect(postCalls).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("lint_migrations rejects ambiguous input sources", async () => {
+    const callback = captureDatabaseTool({});
+
+    await expect(callback({
+      action: "lint_migrations",
+      sql: "SELECT 1;",
+      file: "migration.sql",
+    })).rejects.toThrow("Use only one of --sql, --file, or --dir");
   });
 });

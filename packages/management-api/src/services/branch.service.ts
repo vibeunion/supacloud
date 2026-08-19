@@ -50,6 +50,7 @@ import {
   issueMigrationLedgerLease,
   releaseMigrationLedgerLease,
 } from "./migration-ledger-lease";
+import { notifyPostgrestSchemaReload } from "./database-schema-notify";
 
 type ProjectSql = ReturnType<typeof getProjectDb>;
 type ReservedProjectSql = Awaited<ReturnType<ProjectSql["reserve"]>>;
@@ -652,7 +653,7 @@ class BranchService {
       for (const entry of entries) {
         this.assertPromotionSqlSupported(entry, applied);
         try {
-          await this.applyMigrationEntry(connection, adminDb, entry);
+          await this.applyMigrationEntry(connection, adminDb, parentRef, entry);
           applied.push(summarizeMigrationLedgerEntry(entry));
         } catch (error: unknown) {
           this.throwPromotionApplyError(error, entry, applied);
@@ -683,6 +684,7 @@ class BranchService {
   private async applyMigrationEntry(
     connection: ReservedProjectSql,
     adminDb: ProjectSql,
+    parentRef: string,
     entry: MigrationLedgerEntry,
   ): Promise<void> {
     const leaseHolder: { current?: Awaited<ReturnType<typeof issueMigrationLedgerLease>> } = {};
@@ -713,6 +715,7 @@ class BranchService {
             ${issuedLease.token}
           )
         `;
+        await notifyPostgrestSchemaReload(tx, parentRef);
       });
     } finally {
       const lease = leaseHolder.current;

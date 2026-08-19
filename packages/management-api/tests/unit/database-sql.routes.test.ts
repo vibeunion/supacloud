@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { Elysia } from "elysia";
 import {
   clearActiveSqlQueriesForTests,
@@ -24,6 +24,7 @@ const managementDb = mock((strings: TemplateStringsArray) => {
   return Promise.resolve([]);
 });
 const getProject = mock(async (ref: string) => ({ ref }));
+const requireAdminAuth = mock(async () => undefined);
 const requireProjectOrAdminAuth = mock(async () => undefined as undefined | {
   status: number;
   body: { error: string };
@@ -37,13 +38,19 @@ const rlsUnsafe = mock(async (query: string) => {
   }
   return Array.from({ length: 501 }, (_, index) => ({ id: index + 1 }));
 });
+const schemaReloadQueries: Array<{ text: string; values: unknown[] }> = [];
+let schemaReloadShouldFail = false;
 const rlsConnection = Object.assign(
   ((..._args: unknown[]) => Promise.resolve([])) as unknown as Record<string, unknown>,
   { unsafe: rlsUnsafe, release: mock(() => undefined) },
 );
 const rlsDb = Object.assign(
-  ((strings: TemplateStringsArray) => {
+  ((strings: TemplateStringsArray, ...values: unknown[]) => {
     const sql = strings.join(" ");
+    if (sql.includes("pg_notify")) {
+      schemaReloadQueries.push({ text: sql, values });
+      if (schemaReloadShouldFail) return Promise.reject(new Error("schema reload unavailable"));
+    }
     if (sql.includes("FROM pg_extension")) {
       return Promise.resolve([{ schema_name: "extensions", has_view: true }]);
     }
@@ -55,32 +62,39 @@ const rlsDb = Object.assign(
     }
     return Promise.resolve([]);
   }) as unknown as Record<string, unknown>,
-  { reserve: mock(async () => rlsConnection), unsafe: rlsUnsafe },
+  {
+    reserve: mock(async () => rlsConnection),
+    unsafe: rlsUnsafe,
+    begin: mock(async (operation: (transaction: typeof rlsDb) => Promise<unknown>) => operation(rlsDb)),
+  },
 );
 const getProjectDb = mock(() => rlsDb);
 const getProjectRoleDb = mock(() => rlsDb);
+const withProjectMigrationLocks = mock(async (_scope: unknown, operation: () => Promise<unknown>) => operation());
+const assertInactive = mock(async () => undefined);
 
-const actualDb = await import("../../src/db");
-mock.module("../../src/db", () => ({
-  ...actualDb,
-  db: { ...actualDb.db, executeQuery },
-  sql: managementDb,
-  getProjectDb,
-  getProjectRoleDb,
-}));
-mock.module("../../src/services", () => ({ projectService: { getProject } }));
-mock.module("../../src/middleware/auth", () => ({
-  requireAdminAuth: mock(async () => undefined),
-  requireProjectOrAdminAuth,
-}));
-mock.module("../../src/utils/logger", () => ({
-  logger: {
-    debug: mock(() => undefined),
-    error: mock(() => undefined),
-    info: mock(() => undefined),
-    warn: mock(() => undefined),
-  },
-}));
+const dbModule = await import("../../src/db");
+const servicesModule = await import("../../src/services");
+const authModule = await import("../../src/middleware/auth");
+const loggerModule = await import("../../src/utils/logger");
+
+const executeQuerySpy = spyOn(dbModule.db, "executeQuery").mockImplementation(executeQuery as never);
+const sqlSpy = spyOn(dbModule, "sql").mockImplementation(managementDb as never);
+const getProjectDbSpy = spyOn(dbModule, "getProjectDb").mockImplementation(getProjectDb as never);
+const getProjectRoleDbSpy = spyOn(dbModule, "getProjectRoleDb").mockImplementation(getProjectRoleDb as never);
+const getProjectSpy = spyOn(servicesModule.projectService, "getProject").mockImplementation(getProject as never);
+const requireAdminAuthSpy = spyOn(authModule, "requireAdminAuth").mockResolvedValue(undefined as never);
+const requireProjectOrAdminAuthSpy = spyOn(authModule, "requireProjectOrAdminAuth").mockImplementation(
+  requireProjectOrAdminAuth as typeof authModule.requireProjectOrAdminAuth,
+);
+const loggerDebugSpy = spyOn(loggerModule.logger, "debug").mockImplementation(() => undefined as never);
+const loggerErrorSpy = spyOn(loggerModule.logger, "error").mockImplementation(() => undefined as never);
+const loggerInfoSpy = spyOn(loggerModule.logger, "info").mockImplementation(() => undefined as never);
+const loggerWarnSpy = spyOn(loggerModule.logger, "warn").mockImplementation(() => undefined as never);
+const lockModule = await import("../../src/services/migration-lock");
+const journalModule = await import("../../src/services/branch-replacement-journal");
+const withProjectMigrationLocksSpy = spyOn(lockModule, "withProjectMigrationLocks").mockImplementation(withProjectMigrationLocks as never);
+const assertInactiveSpy = spyOn(journalModule.branchReplacementJournal, "assertInactive").mockImplementation(assertInactive as never);
 
 const { databaseRoutes } = await import(
   new URL("../../src/routes/database.ts?database-sql-routes-test", import.meta.url).href,
@@ -101,18 +115,40 @@ function executeSql(ref: string, scopedQueryId = queryId) {
 }
 
 describe("database SQL routes", () => {
+  afterAll(() => {
+    executeQuerySpy.mockRestore();
+    sqlSpy.mockRestore();
+    getProjectDbSpy.mockRestore();
+    getProjectRoleDbSpy.mockRestore();
+    getProjectSpy.mockRestore();
+    requireAdminAuthSpy.mockRestore();
+    requireProjectOrAdminAuthSpy.mockRestore();
+    loggerDebugSpy.mockRestore();
+    loggerErrorSpy.mockRestore();
+    loggerInfoSpy.mockRestore();
+    loggerWarnSpy.mockRestore();
+    withProjectMigrationLocksSpy.mockRestore();
+    assertInactiveSpy.mockRestore();
+  });
   beforeEach(() => {
     clearActiveSqlQueriesForTests();
     executeQuery.mockClear();
     managementDb.mockClear();
     rlsUnsafe.mockClear();
     rlsConnection.release.mockClear();
+    schemaReloadQueries.length = 0;
+    schemaReloadShouldFail = false;
+    rlsDb.begin.mockClear();
     rlsDb.reserve.mockClear();
     getProjectDb.mockClear();
     getProjectRoleDb.mockClear();
     getProject.mockClear();
     requireProjectOrAdminAuth.mockReset();
     requireProjectOrAdminAuth.mockResolvedValue(undefined);
+    requireAdminAuthSpy.mockReset();
+    requireAdminAuthSpy.mockResolvedValue(undefined as never);
+    withProjectMigrationLocks.mockClear();
+    assertInactive.mockClear();
   });
 
   test("authenticates SQL execution before project lookup", async () => {
@@ -188,6 +224,147 @@ describe("database SQL routes", () => {
         password: "test-password",
       }],
     ]);
+  });
+
+  test("sends a schema reload after migration-mode SQL", async () => {
+    const response = await request("project-a", "/sql", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sql: "CREATE TABLE public.items(id bigint)", mode: "migration" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(executeQuery).toHaveBeenCalledWith("shared_tenant_db", "CREATE TABLE public.items(id bigint)", {
+      mode: "migration",
+      username: "tenant_user",
+      password: "test-password",
+    });
+    expect(getProjectDb).toHaveBeenCalledWith("shared_tenant_db");
+    expect(schemaReloadQueries.some(({ values }) => values.includes("pgrst_project-a"))).toBe(true);
+    expect(await response.json()).toMatchObject({
+      schema_reload: { status: "notified", ddl_committed: true },
+    });
+  });
+
+  test("sends a schema reload after admin-mode DDL", async () => {
+    executeQuery.mockResolvedValueOnce({
+      rows: [],
+      rowCount: 0,
+      command: "ALTER",
+      fields: [],
+      notices: [],
+      durationMs: 1,
+    });
+
+    const response = await request("project-a", "/sql", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sql: "ALTER TABLE public.items ADD COLUMN name text", mode: "admin", admin: true }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(requireAdminAuthSpy).toHaveBeenCalledTimes(1);
+    expect(getProjectDb).toHaveBeenCalledWith("shared_tenant_db");
+    expect(schemaReloadQueries.some(({ values }) => values.includes("pgrst_project-a"))).toBe(true);
+  });
+
+  test("detects admin DDL from the submitted SQL when the driver reports the final command", async () => {
+    const response = await request("project-a", "/sql", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        sql: "CREATE TABLE public.items(id bigint); SELECT 1",
+        mode: "admin",
+        admin: true,
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(schemaReloadQueries.some(({ values }) => values.includes("pgrst_project-a"))).toBe(true);
+  });
+
+  test("does not claim committed DDL for admin SQL with caller-controlled transactions", async () => {
+    const response = await request("project-a", "/sql", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        sql: "BEGIN; CREATE TABLE public.items(id bigint); ROLLBACK;",
+        mode: "admin",
+        admin: true,
+      }),
+    });
+    const payload = await response.json() as { schema_reload?: Record<string, unknown> };
+
+    expect(response.status).toBe(200);
+    expect(payload.schema_reload).toMatchObject({ status: "notified" });
+    expect(payload.schema_reload).not.toHaveProperty("ddl_committed");
+  });
+
+  test.each([
+    "CALL public.rollback_schema_change()",
+    "DO $$ BEGIN EXECUTE 'CREATE TABLE public.items(id bigint)'; ROLLBACK; END $$",
+  ])("does not claim committed DDL for indirect admin SQL: %s", async (sql) => {
+    executeQuery.mockResolvedValueOnce({
+      rows: [],
+      rowCount: 0,
+      command: sql.startsWith("CALL") ? "CALL" : "DO",
+      fields: [],
+      notices: [],
+      durationMs: 1,
+    });
+
+    const response = await request("project-a", "/sql", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sql, mode: "admin", admin: true }),
+    });
+    const payload = await response.json() as { schema_reload?: Record<string, unknown> };
+
+    expect(response.status).toBe(200);
+    expect(payload.schema_reload).toMatchObject({ status: "notified" });
+    expect(payload.schema_reload).not.toHaveProperty("ddl_committed");
+  });
+
+  test("returns an explicit partial-success receipt when schema reload notification fails", async () => {
+    schemaReloadShouldFail = true;
+
+    const response = await request("project-a", "/sql", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sql: "ALTER TABLE public.items ADD COLUMN note text", mode: "migration" }),
+    });
+    const payload = await response.json() as Record<string, unknown>;
+
+    expect(response.status).toBe(200);
+    expect(payload).toMatchObject({
+      schema_reload: { status: "notification_failed", ddl_committed: true },
+    });
+    expect(executeQuery).toHaveBeenCalledTimes(1);
+  });
+
+  test("creates and drops materialized views with transactional schema reloads", async () => {
+    const createResponse = await request("project-a", "/materialized-views", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        schema: "public",
+        name: "orders_daily",
+        definition: "SELECT current_date AS day",
+        withData: false,
+      }),
+    });
+    const dropResponse = await request(
+      "project-a",
+      "/materialized-views/public/orders_daily?if_exists=true",
+      { method: "DELETE" },
+    );
+
+    expect(createResponse.status).toBe(201);
+    expect(dropResponse.status).toBe(200);
+    expect(rlsDb.begin).toHaveBeenCalledTimes(2);
+    expect(rlsUnsafe.mock.calls.some((call) => String(call[0]).startsWith("CREATE MATERIALIZED VIEW"))).toBe(true);
+    expect(rlsUnsafe.mock.calls.some((call) => String(call[0]).startsWith("DROP MATERIALIZED VIEW"))).toBe(true);
+    expect(schemaReloadQueries.filter(({ values }) => values.includes("pgrst_project-a"))).toHaveLength(2);
   });
 
   test("reads query performance through a fixed admin-only statistics query", async () => {

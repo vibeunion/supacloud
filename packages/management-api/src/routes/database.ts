@@ -2,7 +2,7 @@ import { Elysia, t } from "elysia";
 import type { SQL, TransactionSQL } from "bun";
 import { projectService } from "../services";
 import { db, getProjectDb, getProjectRoleDb, removeProjectDbCache, resolveAuthenticatorName, resolveDbName, sql as metaSql, type SqlExecutionMode } from "../db";
-import { isDangerousSQL, normalizeSqlForPolicy } from "../db/sql-policy";
+import { isDangerousSQL, normalizeSqlForPolicy, sqlContainsTransactionControl } from "../db/sql-policy";
 import { cancelActiveSqlQuery } from "../db/sql-query-registry";
 import { splitSqlStatements, stripOuterTransactionStatements } from "../db/sql-statements";
 import { requireAdminAuth, requireProjectOrAdminAuth } from "../middleware/auth";
@@ -29,6 +29,10 @@ import {
   BranchReplacementJournalActiveError,
   branchReplacementJournal,
 } from "../services/branch-replacement-journal";
+import {
+  notifyPostgrestSchemaReload,
+  tryNotifyPostgrestSchemaReload,
+} from "../services/database-schema-notify";
 import { logger } from "../utils/logger";
 
 export type MigrationBody =
@@ -125,7 +129,16 @@ function normalizeMigrationName(rawName: unknown, fallback: string): string {
   return name;
 }
 
-export function sqlRouteResponse(result: Awaited<ReturnType<typeof db.executeQuery>>) {
+type SchemaReloadStatus = "notified" | "notification_failed";
+type SchemaReloadMetadata = {
+  schemaReloadStatus?: SchemaReloadStatus;
+  ddlCommitted?: true;
+};
+
+export function sqlRouteResponse(
+  result: Awaited<ReturnType<typeof db.executeQuery>>,
+  metadata: SchemaReloadMetadata = {},
+) {
   return {
     rows: result.rows,
     rowCount: result.rowCount,
@@ -134,7 +147,50 @@ export function sqlRouteResponse(result: Awaited<ReturnType<typeof db.executeQue
     notices: result.notices || [],
     ...(result.statements ? { statements: result.statements } : {}),
     durationMs: result.durationMs,
+    ...(metadata.schemaReloadStatus ? {
+      schema_reload: {
+        status: metadata.schemaReloadStatus,
+        ...(metadata.ddlCommitted ? { ddl_committed: true as const } : {}),
+      },
+    } : {}),
   };
+}
+
+const POSTGREST_SCHEMA_COMMANDS = new Set([
+  "ALTER",
+  "CALL",
+  "COMMENT",
+  "CREATE",
+  "DO",
+  "DROP",
+  "GRANT",
+  "IMPORT",
+  "REVOKE",
+  "SECURITY",
+]);
+const INDIRECT_SCHEMA_EXECUTION_PATTERN = /(?:^|;)\s*(?:CALL|DO)\b/i;
+
+function adminSqlCanConfirmDdlCommitted(sqlQuery: string): boolean {
+  return !sqlContainsTransactionControl(sqlQuery)
+    && !INDIRECT_SCHEMA_EXECUTION_PATTERN.test(normalizeSqlForPolicy(sqlQuery));
+}
+
+export function sqlExecutionMayChangeSchema(
+  executionResult: Awaited<ReturnType<typeof db.executeQuery>>,
+  sqlQuery?: string,
+): boolean {
+  const resultCommands = [
+    executionResult.command,
+    ...(executionResult.statements || []).map((statement) => statement.command),
+  ];
+  if (resultCommands.some((command) => POSTGREST_SCHEMA_COMMANDS.has(command.toUpperCase()))) {
+    return true;
+  }
+  if (!sqlQuery) return false;
+  return splitSqlStatements(sqlQuery).some((statement) => {
+    const command = normalizeSqlForPolicy(statement).match(/^([A-Z]+)/i)?.[1]?.toUpperCase();
+    return command ? POSTGREST_SCHEMA_COMMANDS.has(command) : false;
+  });
 }
 
 export function sqlRouteErrorResponse(error: unknown) {
@@ -869,6 +925,7 @@ async function executeMigrationTransaction(
             `Migration ${input.name} conflicts with an existing version, name, or checksum`,
           );
         }
+        await notifyPostgrestSchemaReload(tx, input.projectRef);
         return true;
       }
       const unsupported = detectUnsupportedMigrationOperations(execution.statements);
@@ -883,6 +940,7 @@ async function executeMigrationTransaction(
       const issuedLease = await issueMigrationLedgerLease(adminDb, input.version, execution.checksum);
       leaseHolder.current = issuedLease;
       await insertMigrationLedger(tx, input, execution.checksum, issuedLease.token);
+      await notifyPostgrestSchemaReload(tx, input.projectRef);
       return false;
     });
   } finally {
@@ -1376,7 +1434,10 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
 
             try {
                 const sql = buildCreateMaterializedViewSql(body);
-                await projectDb.unsafe(sql);
+                await projectDb.begin(async (transaction) => {
+                    await transaction.unsafe(sql);
+                    await notifyPostgrestSchemaReload(transaction, params.ref);
+                });
                 set.status = 201;
                 return {
                     schema: body.schema || "public",
@@ -1468,11 +1529,14 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
             }
 
             try {
-                await projectDb.unsafe(buildDropMaterializedViewSql({
-                    schema: params.schema,
-                    name: params.name,
-                    ifExists: query.if_exists === "true" || query.if_exists === "1",
-                }));
+                await projectDb.begin(async (transaction) => {
+                    await transaction.unsafe(buildDropMaterializedViewSql({
+                        schema: params.schema,
+                        name: params.name,
+                        ifExists: query.if_exists === "true" || query.if_exists === "1",
+                    }));
+                    await notifyPostgrestSchemaReload(transaction, params.ref);
+                });
                 return { schema: params.schema, name: params.name, deleted: true };
             } catch (error: unknown) {
                 set.status = 400;
@@ -1656,18 +1720,34 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                   if (mode === "migration") {
                     await branchReplacementJournal.assertInactive([params.ref]);
                   }
-                  return db.executeQuery(credentials.db_name, sqlQuery, {
+                  const result = await db.executeQuery(credentials.db_name, sqlQuery, {
                     mode,
                     ...(typeof body.query_id === "string"
                       ? { projectRef: params.ref, queryId: body.query_id }
                       : {}),
                     ...(useRoleConnection ? { username: credentials.db_user, password: credentials.db_password } : {}),
                   });
+                  const adminMayChangeSchema = mode === "admin" && sqlExecutionMayChangeSchema(result, sqlQuery);
+                  let schemaReloadStatus: SchemaReloadStatus | undefined;
+                  let ddlCommitted: true | undefined;
+                  if (mode === "migration" || adminMayChangeSchema) {
+                    const adminDb = getProjectDb(credentials.db_name);
+                    schemaReloadStatus = await tryNotifyPostgrestSchemaReload(adminDb, params.ref)
+                      ? "notified"
+                      : "notification_failed";
+                    if (mode === "migration" || adminSqlCanConfirmDdlCommitted(sqlQuery)) {
+                      ddlCommitted = true;
+                    }
+                  }
+                  return { result, schemaReloadStatus, ddlCommitted };
                 };
-                const result = mode === "migration"
+                const execution = mode === "migration"
                   ? await withProjectMigrationLocks({ projectRefs: [params.ref] }, execute)
                   : await execute();
-                return sqlRouteResponse(result);
+                return sqlRouteResponse(execution.result, {
+                  schemaReloadStatus: execution.schemaReloadStatus,
+                  ddlCommitted: execution.ddlCommitted,
+                });
             } catch (error: unknown) {
                 if (error instanceof ProjectMigrationLockError) {
                     set.status = error.httpStatus;

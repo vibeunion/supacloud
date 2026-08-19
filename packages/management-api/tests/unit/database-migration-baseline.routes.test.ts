@@ -23,7 +23,10 @@ const transaction = Object.assign(
     }
     return Promise.resolve([]);
   }),
-  { array: (values: unknown[]) => values },
+  {
+    array: (values: unknown[]) => values,
+    unsafe: mock(async () => []),
+  },
 );
 const connection = {
   begin: mock(async (operation: (sql: typeof transaction) => Promise<unknown>) => operation(transaction)),
@@ -111,6 +114,14 @@ function baselineRequest(migrations: Array<{ version: string; name: string }>) {
   }));
 }
 
+function migrationRequest(migration: { version: string; name: string; sql: string }) {
+  return app.handle(new Request("http://localhost/v1/projects/proj_1/database/migrations", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(migration),
+  }));
+}
+
 describe("database migration baseline route", () => {
   beforeEach(() => {
     resetEnsuredMigrationTablesForTests();
@@ -118,6 +129,7 @@ describe("database migration baseline route", () => {
     existingMigrationRows = [];
     transactionFailure = null;
     transaction.mockClear();
+    transaction.unsafe.mockClear();
     connection.begin.mockClear();
     connection.unsafe.mockClear();
     connection.release.mockClear();
@@ -150,6 +162,58 @@ describe("database migration baseline route", () => {
     expect(recordCalls[0]?.values[1]).toEqual(["baseline:20260729090000_create_orders"]);
     expect(issueMigrationLedgerLease).toHaveBeenCalledTimes(2);
     expect(releaseMigrationLedgerLease).toHaveBeenCalledTimes(2);
+  });
+
+  test("records schema reload notification in the migration transaction", async () => {
+    const response = await migrationRequest({
+      version: "20260819090000",
+      name: "20260819090000_create_items",
+      sql: "CREATE TABLE public.items(id bigint)",
+    });
+
+    expect(response.status).toBe(200);
+    expect(transactionCalls.some(({ text }) => text.includes("record_schema_migration"))).toBe(true);
+    expect(transactionCalls.some(({ text, values }) =>
+      text.includes("pg_notify") && values.includes("pgrst_proj_1")
+    )).toBe(true);
+    expect(transaction.mock.invocationCallOrder.at(-1)).toBeGreaterThan(transaction.mock.invocationCallOrder[0]!);
+  });
+
+  test("rejects ABORT transaction control before executing or recording a migration", async () => {
+    const response = await migrationRequest({
+      version: "20260819090001",
+      name: "20260819090001_abort_transaction",
+      sql: "CREATE TABLE public.abort_probe(id bigint); ABORT AND CHAIN; SELECT 1",
+    });
+    const body = await response.json() as Record<string, unknown>;
+
+    expect(response.status).toBe(400);
+    expect(body.code).toBe("unsupported_migration_sql");
+    expect(transaction.unsafe).not.toHaveBeenCalled();
+    expect(issueMigrationLedgerLease).not.toHaveBeenCalled();
+    expect(transactionCalls.some(({ text }) => text.includes("record_schema_migration"))).toBe(false);
+  });
+
+  test("retries schema reload for an already-applied migration", async () => {
+    existingMigrationRows = [{
+      version: "20260819090000",
+      name: "20260819090000_create_items",
+      statements: ["CREATE TABLE public.items(id bigint)"],
+    }];
+
+    const response = await migrationRequest({
+      version: "20260819090000",
+      name: "20260819090000_create_items",
+      sql: "CREATE TABLE public.items(id bigint)",
+    });
+    const body = await response.json() as Record<string, unknown>;
+
+    expect({ status: response.status, body }).toMatchObject({
+      status: 409,
+      body: { message: "Migration already applied", code: "409" },
+    });
+    expect(issueMigrationLedgerLease).not.toHaveBeenCalled();
+    expect(transactionCalls.some(({ text }) => text.includes("pg_notify"))).toBe(true);
   });
 
   test("is idempotent for an identical baseline marker", async () => {

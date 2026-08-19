@@ -204,6 +204,46 @@ describe("branchService", () => {
     }
   });
 
+  test("queues schema reload inside each promoted migration transaction", async () => {
+    const entry = createMigrationLedgerEntry({
+      version: "20260819091000",
+      name: "create_reload_probe",
+      statements: ["CREATE TABLE reload_probe(id bigint primary key)"],
+    });
+    const transactionCalls: Array<{ text: string; values: unknown[] }> = [];
+    const transaction = Object.assign(
+      (strings: TemplateStringsArray, ...values: unknown[]) => {
+        transactionCalls.push({ text: strings.join("?"), values });
+        return Promise.resolve([]);
+      },
+      {
+        array: (values: readonly string[]) => values,
+        unsafe: async () => [],
+      },
+    );
+    const connection = {
+      begin: async (operation: (tx: typeof transaction) => Promise<void>) => operation(transaction),
+    };
+    const adminDb = ((strings: TemplateStringsArray) => Promise.resolve([])) as any;
+    const service = branchService as unknown as {
+      applyMigrationEntry(
+        connection: typeof connection,
+        adminDb: typeof adminDb,
+        parentRef: string,
+        entry: typeof entry,
+      ): Promise<void>;
+    };
+
+    await service.applyMigrationEntry(connection, adminDb, "parent", entry);
+
+    const recordIndex = transactionCalls.findIndex(({ text }) => text.includes("record_schema_migration"));
+    const notifyIndex = transactionCalls.findIndex(({ text, values }) =>
+      text.includes("pg_notify") && values.includes("pgrst_parent")
+    );
+    expect(recordIndex).toBeGreaterThan(-1);
+    expect(notifyIndex).toBeGreaterThan(recordIndex);
+  });
+
   test("promoteBranch rejects a stale reviewed plan before applying SQL", async () => {
     const entry = createMigrationLedgerEntry({
       version: "202607180001",
