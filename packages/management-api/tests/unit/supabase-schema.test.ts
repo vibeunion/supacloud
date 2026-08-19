@@ -191,6 +191,42 @@ describe("supabase bootstrap schema", () => {
     }
   });
 
+  test("keeps GoTrue string token columns non-null for new and existing tenants", () => {
+    const migrationSources = [
+      readRepoFile("src/services/tenant-runtime-migration.ts"),
+      readRepoFile("src/scripts/migrate-tenant-schema.ts"),
+    ];
+    const tokenColumns = new Map([
+      ["confirmation_token", 255],
+      ["recovery_token", 255],
+      ["email_change_token_new", 255],
+      ["email_change", 255],
+      ["email_change_token_current", 255],
+      ["phone_change", 15],
+      ["phone_change_token", 255],
+      ["reauthentication_token", 255],
+    ]);
+
+    for (const source of migrationSources) {
+      for (const [column, length] of tokenColumns) {
+        expect(source).toContain(
+          `ALTER COLUMN ${column} TYPE varchar(${length}) USING coalesce(${column}, '')`,
+        );
+        expect(source).toContain(`ALTER COLUMN ${column} SET DEFAULT ''`);
+        expect(source).toContain(`ALTER COLUMN ${column} SET NOT NULL`);
+      }
+    }
+
+    for (const source of [
+      readRepoFile("src/services/tenant-runtime.service.ts"),
+      readRepoFile("src/db/schemas/supabase.sql"),
+    ]) {
+      for (const column of tokenColumns.keys()) {
+        expect(source).toMatch(new RegExp(`${column}\\s+(?:varchar\\(\\d+\\)|VARCHAR\\(\\d+\\))\\s+NOT NULL DEFAULT ''`, "i"));
+      }
+    }
+  });
+
   test("tenant migration preserves complete legacy migration ledger metadata", () => {
     const runtimeMigration = readFileSync(
       new URL("../../src/services/tenant-runtime-migration.ts", import.meta.url),

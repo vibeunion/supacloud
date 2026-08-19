@@ -5,6 +5,24 @@ export const ALTER_TENANT_SQL = `
 -- 1. auth.users adds
 DO $$ BEGIN ALTER TABLE auth.users ADD COLUMN is_anonymous BOOLEAN NOT NULL DEFAULT false; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
 
+ALTER TABLE auth.users
+  ALTER COLUMN confirmation_token TYPE varchar(255) USING coalesce(confirmation_token, ''),
+  ALTER COLUMN recovery_token TYPE varchar(255) USING coalesce(recovery_token, ''),
+  ALTER COLUMN email_change_token_new TYPE varchar(255) USING coalesce(email_change_token_new, ''),
+  ALTER COLUMN email_change TYPE varchar(255) USING coalesce(email_change, ''),
+  ALTER COLUMN email_change_token_current TYPE varchar(255) USING coalesce(email_change_token_current, ''),
+  ALTER COLUMN phone_change TYPE varchar(15) USING coalesce(phone_change, ''),
+  ALTER COLUMN phone_change_token TYPE varchar(255) USING coalesce(phone_change_token, ''),
+  ALTER COLUMN reauthentication_token TYPE varchar(255) USING coalesce(reauthentication_token, ''),
+  ALTER COLUMN confirmation_token SET DEFAULT '', ALTER COLUMN confirmation_token SET NOT NULL,
+  ALTER COLUMN recovery_token SET DEFAULT '', ALTER COLUMN recovery_token SET NOT NULL,
+  ALTER COLUMN email_change_token_new SET DEFAULT '', ALTER COLUMN email_change_token_new SET NOT NULL,
+  ALTER COLUMN email_change SET DEFAULT '', ALTER COLUMN email_change SET NOT NULL,
+  ALTER COLUMN email_change_token_current SET DEFAULT '', ALTER COLUMN email_change_token_current SET NOT NULL,
+  ALTER COLUMN phone_change SET DEFAULT '', ALTER COLUMN phone_change SET NOT NULL,
+  ALTER COLUMN phone_change_token SET DEFAULT '', ALTER COLUMN phone_change_token SET NOT NULL,
+  ALTER COLUMN reauthentication_token SET DEFAULT '', ALTER COLUMN reauthentication_token SET NOT NULL;
+
 -- 2. auth.sessions adds
 DO $$ BEGIN ALTER TABLE auth.sessions ADD COLUMN tag VARCHAR(255); EXCEPTION WHEN duplicate_column THEN NULL; END $$;
 DO $$ BEGIN ALTER TABLE auth.sessions ADD COLUMN refreshed_at TIMESTAMPTZ; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
