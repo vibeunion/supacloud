@@ -526,6 +526,16 @@ function shellArray(name: string, entries: string[]): string {
 
 function finishUpgradeFunction(): string {
     return [
+        "emit_wrapper_failure_receipt() {",
+        "  local code=$1 target_phase=${2:-${UPGRADE_PHASE:-}} phase",
+        "  if [ -n \"${LOG:-}\" ] && ! grep -q '^SUPACLOUD_UPGRADE_FAILURE=' \"$LOG\" 2>/dev/null; then",
+        "    case \"$target_phase\" in",
+        "      bootstrap|filesystem_checks|transfer_verification|verifier_setup|runner_preflight|runner_upgrade|cleanup|status_publish) phase=\"$target_phase\" ;;",
+        "      *) phase=\"unknown\" ;;",
+        "    esac",
+        "    printf 'SUPACLOUD_UPGRADE_FAILURE={\"causes\":[\"exit_code=%s\",\"phase=%s\"],\"schema\":\"supacloud.upgrade-failure.v1\",\"summary\":\"Remote upgrade execution failed during %s (exit code %s)\"}\\n' \"$code\" \"$phase\" \"$phase\" \"$code\" >> \"$LOG\" || true",
+        "  fi",
+        "}",
         "finish_upgrade() {",
         "  local code=$?",
         "  trap '' HUP INT TERM",
@@ -533,15 +543,27 @@ function finishUpgradeFunction(): string {
         "  set +e",
         "  if [ \"$code\" -ne 0 ]; then",
         "    write_status \"FAILED:${code}:TRANSACTION\" || true",
+        "    emit_wrapper_failure_receipt \"$code\"",
         "    if ! rm -rf -- \"$STAGE\"; then write_status \"FAILED:${code}:TRANSACTION_AND_CLEANUP\" || true; fi",
         "    exit \"$code\"",
         "  fi",
-        "  write_status CLEANING || { echo 'Unable to publish cleanup state' >&2; exit 1; }",
-        "  if ! rm -rf -- \"$STAGE\"; then",
-        "    write_status 'FAILED:1:CLEANUP_AFTER_TRANSACTION' || true",
+        "  if ! write_status CLEANING; then",
+        "    echo 'Unable to publish cleanup state' >&2",
+        "    write_status 'FAILED:1:TRANSACTION' || true",
+        "    emit_wrapper_failure_receipt 1 status_publish",
+        "    if ! rm -rf -- \"$STAGE\"; then write_status 'FAILED:1:TRANSACTION_AND_CLEANUP' || true; fi",
         "    exit 1",
         "  fi",
-        "  write_status SUCCEEDED || exit 1",
+        "  if ! rm -rf -- \"$STAGE\"; then",
+        "    write_status 'FAILED:1:CLEANUP_AFTER_TRANSACTION' || true",
+        "    emit_wrapper_failure_receipt 1 cleanup",
+        "    exit 1",
+        "  fi",
+        "  if ! write_status SUCCEEDED; then",
+        "    write_status 'FAILED:1:TRANSACTION' || true",
+        "    emit_wrapper_failure_receipt 1 status_publish",
+        "    exit 1",
+        "  fi",
         "  exit 0",
         "}",
     ].join("\n");
@@ -556,6 +578,7 @@ function upgradeScriptSetup(paths: RemoteUpgradePaths): string[] {
         `BUNDLE=${quoteShell(bundleDirectory)}`,
         `MANAGEMENT_DIR=${quoteShell(`${bundleDirectory}/management-api`)}`,
         `EDGE_DIR=${quoteShell(`${bundleDirectory}/edge-runtime`)}`,
+        "UPGRADE_PHASE=bootstrap",
         "write_status() { local next=\"${STATUS}.next\"; printf '%s\\n' \"$1\" > \"$next\"; chmod 600 \"$next\"; mv -f \"$next\" \"$STATUS\"; }",
         finishUpgradeFunction(),
         "trap finish_upgrade EXIT", "trap 'exit 129' HUP", "trap 'exit 130' INT", "trap 'exit 143' TERM",
@@ -570,6 +593,7 @@ function upgradeScriptFilesystemChecks(bundle: PreparedLocalUpgradeBundle): stri
     const componentFiles = expectedComponentFiles(bundle);
     const stageEntries = ["bundle", "run.sh", ...(bundle.verifierArchive ? ["verifier"] : [])];
     const checks = [
+        "UPGRADE_PHASE=filesystem_checks",
         shellArray("MANAGEMENT_FILES", componentFiles.management), shellArray("EDGE_FILES", componentFiles.edge),
         "assert_directory() { local path=$1; test -d \"$path\" && test ! -L \"$path\"; test \"$(stat -c '%u:%g' \"$path\")\" = '0:0'; test \"$(stat -c '%a' \"$path\")\" = '700'; }",
         "assert_file() { local path=$1 parent=$2; test -f \"$path\" && test ! -L \"$path\"; test \"$(stat -c '%u:%g:%h' \"$path\")\" = '0:0:1'; test \"$(stat -c '%a' \"$path\")\" = '600'; test \"$(dirname \"$(realpath \"$path\")\")\" = \"$parent\"; }",
@@ -598,6 +622,7 @@ function upgradeScriptFilesystemChecks(bundle: PreparedLocalUpgradeBundle): stri
 function upgradeScriptTransferVerification(bundle: PreparedLocalUpgradeBundle): string[] {
     const files = [...bundle.files, ...(bundle.verifierArchive ? [bundle.verifierArchive] : [])];
     return [
+        "UPGRADE_PHASE=transfer_verification",
         "verify_transfer() { local relative=$1 expected_size=$2 expected_sha=$3; local path=$STAGE/$relative; test \"$(stat -c '%s' \"$path\")\" = \"$expected_size\"; test \"$(sha256sum \"$path\" | awk '{print $1}')\" = \"$expected_sha\"; }",
         ...files.map((file) => (
             `verify_transfer ${quoteShell(file.relativePath)} ${file.size} ${quoteShell(file.sha256)}`
@@ -619,6 +644,7 @@ function upgradeScriptVerifier(
         ];
     const capabilityFlags = STRICT_GITHUB_CAPABILITY_FLAGS.join(" ");
     return [
+        "UPGRADE_PHASE=verifier_setup",
         ...setup,
         "GH_HELP=$(timeout 15s \"$GH\" attestation verify --help 2>&1) || { echo 'GitHub verifier capability check failed' >&2; exit 1; }",
         `for flag in ${capabilityFlags}; do printf '%s\\n' \"$GH_HELP\" | grep -Eq -- \"(^|[[:space:]])${"$"}{flag}([=[:space:]]|$)\" || { echo \"GitHub verifier lacks $flag\" >&2; exit 1; }; done`,
@@ -652,6 +678,7 @@ function upgradeScriptExecution(
     const runner = `${paths.stage}/runner`;
     const preflight = "CONTROL_PLANE_PREFLIGHT_RECEIPT=$(env PATH=\"$VERIFIER_PATH:$PATH\" \"$RUNNER\" --control-plane-upgrade-preflight)";
     return [
+        "UPGRADE_PHASE=runner_preflight",
         `MANAGEMENT_VERSION=${quoteShell(request.managementVersion)}`,
         `RUNNER_ASSET=${quoteShell(runnerAsset)}`,
         `RUNNER=${quoteShell(runner)}`,
@@ -662,6 +689,7 @@ function upgradeScriptExecution(
         "timeout 5s \"$RUNNER\" --systemd-unit-helper-sha256 | grep -Eq 'SupaCloud systemd-unit helper SHA-256: [0-9a-f]{64}'",
         "timeout 5s \"$RUNNER\" --postgrest-launcher-sha256 | grep -Eq 'SupaCloud PostgREST launcher SHA-256: [0-9a-f]{64}'",
         preflight,
+        "UPGRADE_PHASE=runner_upgrade",
         `env PATH=\"$VERIFIER_PATH:$PATH\" \"$RUNNER\" upgrade --yes --target-version ${quoteShell(request.managementVersion)} --edge-runtime-version ${quoteShell(request.edgeRuntimeVersion)} --asset-bundle-dir \"$BUNDLE\"`,
         "printf '%s\\n' \"$CONTROL_PLANE_PREFLIGHT_RECEIPT\"",
     ];
