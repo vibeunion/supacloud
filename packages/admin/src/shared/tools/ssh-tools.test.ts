@@ -2534,4 +2534,30 @@ describe("ssh admin tool", () => {
         const command = ssh.commands.find(candidate => candidate.includes("pg_dump")) ?? "";
         expect(command).toContain("-n 'public' -n 'auth' -n 'tenant_data'");
     });
+
+    test("upgrade_status rejects missing or invalid transaction_id before SSH", async () => {
+        const ssh = new FakeSsh();
+        const tool = captureSshTool(ssh);
+
+        await expect(tool.invoke({ action: "upgrade_status" }))
+            .rejects.toThrow("'transaction_id' required");
+        expect(ssh.commands).toHaveLength(0);
+
+        for (const invalid of ["not-a-uuid", "11111111-1111-1111-8111-111111111111", "550e8400-e29b-41d4-a716-44665544000g"]) {
+            await expect(tool.invoke({ action: "upgrade_status", transaction_id: invalid }))
+                .rejects.toThrow("Invalid 'transaction_id': must be a valid UUID v4");
+            expect(ssh.commands).toHaveLength(0);
+        }
+    });
+
+    test("upgrade_status schema includes transaction_id and action help", () => {
+        const tool = captureSshTool(new FakeSsh());
+        const parsed = tool.parse({
+            action: "upgrade_status",
+            transaction_id: "550E8400-E29B-41D4-A716-446655440000",
+        });
+        expect(parsed.action).toBe("upgrade_status");
+        expect(parsed.transaction_id).toBe("550E8400-E29B-41D4-A716-446655440000");
+    });
+
 });

@@ -10,8 +10,10 @@ import { Type } from "@sinclair/typebox";
 import { decodedSchema, optional, stringEnum, withDescription } from "../schema";
 import { redactSshOutput, SshCommandOutcomeUnknownError, type SshTransport } from "../transports/ssh";
 import {
+    assertValidTransactionId,
     buildUpgradeLockScript,
     executeLocalUpgradeTransfer,
+    inspectRemoteUpgradeStatus,
     SUPACLOUD_UPGRADE_LOCK_PATH,
     UPGRADE_OBSERVATION_TIMEOUT_MS,
 } from "../releases/local-upgrade-transfer";
@@ -1086,10 +1088,10 @@ export function registerSshTools(server: { tool: (...args: any[]) => void }, ssh
     server.tool(
         "ssh",
         `Server management via SSH. Available before & after SupaCloud installation.
-Actions: ping, setup, install, upgrade, versions, diagnose, exec, troubleshoot, container_logs, tenant_manage, tenant_list, tenant_inspect, tenant_diagnose, tenant_migrate`,
+Actions: ping, setup, install, upgrade, upgrade_status, versions, diagnose, exec, troubleshoot, container_logs, tenant_manage, tenant_list, tenant_inspect, tenant_diagnose, tenant_migrate`,
         {
             action: withDescription(stringEnum([
-                "ping", "setup", "install", "upgrade", "versions", "diagnose", "exec",
+                "ping", "setup", "install", "upgrade", "upgrade_status", "versions", "diagnose", "exec",
                 "troubleshoot", "container_logs",
                 "tenant_manage", "tenant_list", "tenant_inspect", "tenant_diagnose", "tenant_migrate",
             ]), "Action to perform"),
@@ -1101,6 +1103,7 @@ Actions: ping, setup, install, upgrade, versions, diagnose, exec, troubleshoot, 
             dashboard_password: optional(secretSchema("dashboard_password"), "[install] Console password"),
             edge_runtime: optional(stringEnum(["bun"]), "[install] Runtime (default: bun)"),
             storage_type: optional(stringEnum(["juicefs", "minio"]), "[install] Storage backend configurable through Admin"),
+            transaction_id: optional(Type.String(), "[upgrade_status] UUID v4 transaction ID of a retained local-artifact upgrade"),
             version: optional(Type.String(), "[upgrade] Specific version"),
             edge_runtime_version: optional(Type.String(), "[upgrade] Exact independent Edge Runtime version"),
             artifact_transport: optional(stringEnum(["local", "remote"]), "[upgrade] Download verified release assets locally or on the server (default: remote)"),
@@ -1304,6 +1307,13 @@ Actions: ping, setup, install, upgrade, versions, diagnose, exec, troubleshoot, 
                     const upgradeExecution = await executeOfficialUpgrade(ssh, helperPath, cmd, upgradeTimeoutMs);
                     const edgeBoundary = edgeRuntimeVersion ? "" : "\n⚠️ Edge Runtime was not upgraded; provide --edge_runtime_version for a component transaction.";
                     text = `✅ Upgrade done\n${upgradeExecution.stdout.slice(-300)}${edgeBoundary}`;
+                    break;
+                }
+                case "upgrade_status": {
+                    if (!args.transaction_id) throw new Error("'transaction_id' required");
+                    const transactionId = assertValidTransactionId(args.transaction_id);
+                    const projection = await inspectRemoteUpgradeStatus(ssh, transactionId);
+                    text = JSON.stringify(projection, null, 2);
                     break;
                 }
                 case "versions": {

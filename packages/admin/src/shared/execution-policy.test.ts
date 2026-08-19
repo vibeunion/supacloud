@@ -38,7 +38,7 @@ describe("Admin execution policy", () => {
                 "frontend.list_releases", "frontend.get_release",
                 "ssh.ping", "ssh.versions", "ssh.diagnose", "ssh.exec",
                 "ssh.troubleshoot", "ssh.container_logs", "ssh.tenant_list",
-                "ssh.tenant_inspect", "ssh.tenant_diagnose",
+                "ssh.tenant_inspect", "ssh.tenant_diagnose", "ssh.upgrade_status",
             ],
             write: [
                 "project.create", "project.delete", "project.pause", "project.restore",
