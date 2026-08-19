@@ -6,26 +6,68 @@ interface SqlPattern {
   pattern: RegExp;
 }
 
+const TRANSACTION_CONTROL_PATTERN = /(?:^|;)\s*(?:BEGIN|START\s+TRANSACTION|COMMIT|END|ROLLBACK|ABORT|SAVEPOINT|RELEASE\s+SAVEPOINT|PREPARE\s+TRANSACTION)\b/i;
+
+const MIGRATION_LEDGER_RELATION = String.raw`(?:(?:"?(?:supabase_migrations|public)"?)\s*\.\s*)?"?schema_migrations"?`;
+const MIGRATION_LEDGER_RELATION_END = String.raw`(?=$|[\s,;(*])`;
+const MIGRATION_LEDGER_DDL_OR_MAINTENANCE_PREFIX = String.raw`(?:CREATE\s+(?:UNIQUE\s+)?INDEX\b[^;]*\bON\s+(?:ONLY\s+)?|CREATE\s+(?:CONSTRAINT\s+)?TRIGGER\b[^;]*\bON\s+|DROP\s+TRIGGER\s+(?:IF\s+EXISTS\s+)?[^;]*\bON\s+|CREATE\s+RULE\b[^;]*\bTO\s+|DROP\s+RULE\s+(?:IF\s+EXISTS\s+)?[^;]*\bON\s+|CREATE\s+POLICY\b[^;]*\bON\s+|ALTER\s+POLICY\b[^;]*\bON\s+|DROP\s+POLICY\s+(?:IF\s+EXISTS\s+)?[^;]*\bON\s+|COMMENT\s+ON\s+TABLE\s+|SECURITY\s+LABEL(?:\s+FOR\s+[^;\s]+)?\s+ON\s+TABLE\s+|REINDEX(?:\s*\([^;)]*\))?\s+TABLE\s+(?:CONCURRENTLY\s+)?|CLUSTER(?:\s+VERBOSE)?\s+|VACUUM(?:\s*\([^;)]*\))?(?:\s+(?:FULL|FREEZE|VERBOSE|ANALYZE))*\s+|ANALYZE(?:\s*\([^;)]*\))?(?:\s+VERBOSE)?\s+)`;
+const MIGRATION_LEDGER_MODIFICATION_PATTERN = new RegExp(
+  String.raw`\b(?:(?:CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?|INSERT\s+INTO\s+(?:ONLY\s+)?|UPDATE\s+(?:ONLY\s+)?|DELETE\s+FROM\s+(?:ONLY\s+)?|MERGE\s+INTO\s+(?:ONLY\s+)?|ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?|COPY\s+)`
+  + MIGRATION_LEDGER_RELATION
+  + MIGRATION_LEDGER_RELATION_END
+  + String.raw`|(?:DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?|TRUNCATE(?:\s+TABLE)?\s+|LOCK\s+(?:TABLE\s+)?)[^;]*`
+  + MIGRATION_LEDGER_RELATION
+  + MIGRATION_LEDGER_RELATION_END
+  + String.raw`|`
+  + MIGRATION_LEDGER_DDL_OR_MAINTENANCE_PREFIX
+  + MIGRATION_LEDGER_RELATION
+  + MIGRATION_LEDGER_RELATION_END
+  + String.raw`)`,
+  "i",
+);
+const NON_TABLE_PRIVILEGE_TARGET = String.raw`(?:ALL\s+(?:FUNCTIONS|PROCEDURES|ROUTINES|SEQUENCES)\s+IN\s+SCHEMA|DATABASE|DOMAIN|FOREIGN\s+DATA\s+WRAPPER|FOREIGN\s+SERVER|FUNCTION|LANGUAGE|LARGE\s+OBJECT|PARAMETER|PROCEDURE|ROUTINE|SCHEMA|SEQUENCE|TABLESPACE|TYPE)\b`;
+const MIGRATION_LEDGER_PRIVILEGE_PATTERN = new RegExp(
+  String.raw`\b(?:GRANT|REVOKE)\b[^;]*\bON\s+(?:(?:TABLE\s+)?(?!`
+  + NON_TABLE_PRIVILEGE_TARGET
+  + String.raw`)(?:(?!\b(?:TO|FROM)\b)[^;])*?`
+  + MIGRATION_LEDGER_RELATION
+  + MIGRATION_LEDGER_RELATION_END
+  + String.raw`(?=[^;]*\b(?:TO|FROM)\b)|ALL\s+TABLES\s+IN\s+SCHEMA\s+"?(?:supabase_migrations|public)"?(?=$|[\s,;]))`,
+  "i",
+);
+
 const PRIVILEGED_MIGRATION_PATTERNS: readonly SqlPattern[] = [
   { label: "database management", pattern: /\b(?:CREATE|ALTER|DROP)\s+DATABASE\b/i },
-  { label: "public schema removal", pattern: /\bDROP\s+SCHEMA\s+(?:IF\s+EXISTS\s+)?public\b/i },
+  { label: "public schema removal", pattern: /\bDROP\s+SCHEMA\s+(?:IF\s+EXISTS\s+)?(?:[^;]*,\s*)?"?public"?(?=\s*(?:,|CASCADE\b|RESTRICT\b|$))/i },
+  { label: "public schema alteration", pattern: /\bALTER\s+SCHEMA\s+"?public"?\b/i },
+  { label: "migration ledger schema management", pattern: /\b(?:(?:CREATE\s+SCHEMA\s+(?:IF\s+NOT\s+EXISTS\s+)?|ALTER\s+SCHEMA\s+)"?supabase_migrations"?|DROP\s+SCHEMA\s+(?:IF\s+EXISTS\s+)?(?:[^;]*,\s*)?"?supabase_migrations"?(?=\s*(?:,|CASCADE\b|RESTRICT\b|$)))/i },
+  { label: "unicode escaped identifier", pattern: /\bU&"/i },
   { label: "cluster ownership management", pattern: /\b(?:DROP|REASSIGN)\s+OWNED\b/i },
   { label: "cluster role management", pattern: /\b(?:CREATE|ALTER|DROP)\s+(?:ROLE|USER)\b/i },
   { label: "server configuration", pattern: /\bALTER\s+SYSTEM\b/i },
+  { label: "server copy access", pattern: /(?:^|;)\s*COPY\b/i },
   { label: "server-side program execution", pattern: /\bCOPY\b[\s\S]*?\b(?:TO|FROM)\s+PROGRAM\b/i },
   { label: "server file access", pattern: /\b(?:lo_import|lo_export|pg_read_file|pg_write_file|pg_ls_dir|pg_stat_file|pg_execute_server_program)\s*\(/i },
+  { label: "server file access", pattern: /"(?:lo_import|lo_export|pg_read_file|pg_write_file|pg_ls_dir|pg_stat_file|pg_execute_server_program)"\s*\(/ },
   { label: "backend control", pattern: /\bpg_(?:terminate|cancel)_backend\s*\(/i },
+  { label: "backend control", pattern: /"pg_(?:terminate|cancel)_backend"\s*\(/ },
   { label: "external database access", pattern: /\bdblink(?:_[a-z_]+)?\s*\(|\b(?:CREATE|ALTER|DROP)\s+(?:SERVER|USER\s+MAPPING|FOREIGN\s+DATA\s+WRAPPER)\b|\bIMPORT\s+FOREIGN\s+SCHEMA\b|\bCREATE\s+FOREIGN\s+TABLE\b/i },
+  { label: "external database access", pattern: /"dblink(?:_[a-z_]+)?"\s*\(/ },
   { label: "tablespace management", pattern: /\b(?:CREATE|DROP)\s+TABLESPACE\b/i },
   { label: "subscription management", pattern: /\b(?:CREATE|ALTER|DROP)\s+SUBSCRIPTION\b/i },
   { label: "dynamic library loading", pattern: /\bLOAD\b/i },
   { label: "opaque procedural SQL", pattern: /(?:^|;)\s*DO\b/i },
-  { label: "transaction control", pattern: /(?:^|;)\s*(?:BEGIN|START\s+TRANSACTION|COMMIT|END|ROLLBACK|SAVEPOINT|RELEASE\s+SAVEPOINT|PREPARE\s+TRANSACTION)\b/i },
+  { label: "transaction control", pattern: TRANSACTION_CONTROL_PATTERN },
   { label: "session role control", pattern: /\b(?:SET\s+(?:(?:LOCAL|SESSION)\s+)?(?:ROLE|SESSION\s+AUTHORIZATION)|RESET\s+(?:ROLE|SESSION\s+AUTHORIZATION)|DISCARD\s+ALL)\b/i },
   { label: "advisory lock control", pattern: /\bpg_(?:try_)?advisory_(?:xact_)?(?:lock|unlock)(?:_shared|_all)?\s*\(/i },
+  { label: "advisory lock control", pattern: /"pg_(?:try_)?advisory_(?:xact_)?(?:lock|unlock)(?:_shared|_all)?"\s*\(/ },
   {
     label: "migration ledger modification",
-    pattern: /\b(?:CREATE\s+TABLE|INSERT\s+INTO|UPDATE|DELETE\s+FROM|MERGE\s+INTO|TRUNCATE(?:\s+TABLE)?|ALTER\s+TABLE|DROP\s+TABLE|COPY|GRANT[\s\S]*?\bON\s+(?:TABLE\s+)?|REVOKE[\s\S]*?\bON\s+(?:TABLE\s+)?)\s+(?:(?:"?(?:supabase_migrations|public)"?)\s*\.\s*)?"?schema_migrations"?\b/i,
+    pattern: MIGRATION_LEDGER_MODIFICATION_PATTERN,
+  },
+  {
+    label: "migration ledger privilege modification",
+    pattern: MIGRATION_LEDGER_PRIVILEGE_PATTERN,
   },
   {
     label: "migration ledger recorder access",
@@ -161,9 +203,13 @@ export function isDangerousSQL(sqlQuery: string): boolean {
     || PRIVILEGED_MIGRATION_PATTERNS.some(({ pattern }) => pattern.test(normalized));
 }
 
+export function sqlContainsTransactionControl(sqlQuery: string): boolean {
+  return TRANSACTION_CONTROL_PATTERN.test(normalizeSqlForPolicy(sqlQuery));
+}
+
 export function projectMigrationSqlViolations(statements: readonly string[]): string[] {
   const normalized = statements.map(normalizeSqlForPolicy).join("; ");
-  return PRIVILEGED_MIGRATION_PATTERNS
+  return [...new Set(PRIVILEGED_MIGRATION_PATTERNS
     .filter(({ pattern }) => pattern.test(normalized))
-    .map(({ label }) => label);
+    .map(({ label }) => label))];
 }

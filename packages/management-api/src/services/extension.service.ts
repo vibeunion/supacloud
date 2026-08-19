@@ -1,5 +1,6 @@
-import { getProjectDb, resolveDbName } from "../db";
 import { $ } from "bun";
+import { getProjectDb, resolveDbName } from "../db";
+import { notifyPostgrestSchemaReload } from "./database-schema-notify";
 
 const IDENTIFIER_REGEX = /^[a-zA-Z_][a-zA-Z0-9_]{0,62}$/;
 type SystemExtensionInfo = { name: string; version: string; status: string; description: string };
@@ -96,25 +97,28 @@ export class ExtensionService {
         const safeSchema = schema ? validatePgIdentifier(schema, 'schema') : null;
         const dbName = await resolveDbName(projectRef);
         const db = getProjectDb(dbName);
-        if (safeExt === "pg_graphql") {
-            const rows = await db`
-                SELECT installed_version
-                FROM pg_available_extensions
-                WHERE name = 'pg_graphql'
-            `;
-            const isInstalled = rows.some((row: { installed_version?: string | null }) => row.installed_version);
-            if (!isInstalled) {
-                await db.unsafe(`
-                    DROP FUNCTION IF EXISTS graphql_public.graphql(text, text, jsonb, jsonb);
-                    DROP FUNCTION IF EXISTS graphql_public.graphql(text, text, jsonb);
-                `);
+        await db.begin(async (transaction) => {
+            if (safeExt === "pg_graphql") {
+                const installedRows = await transaction`
+                    SELECT installed_version
+                    FROM pg_available_extensions
+                    WHERE name = 'pg_graphql'
+                `;
+                const isInstalled = installedRows.some((row: { installed_version?: string | null }) => row.installed_version);
+                if (!isInstalled) {
+                    await transaction.unsafe(`
+                        DROP FUNCTION IF EXISTS graphql_public.graphql(text, text, jsonb, jsonb);
+                        DROP FUNCTION IF EXISTS graphql_public.graphql(text, text, jsonb);
+                    `);
+                }
             }
-        }
-        let sql = `CREATE EXTENSION IF NOT EXISTS "${safeExt}"`;
-        if (safeSchema) sql += ` SCHEMA "${safeSchema}"`;
-        if (version) sql += ` VERSION '${version.replace(/'/g, "''")}'`;
-        sql += ` CASCADE`;
-        await db.unsafe(sql);
+            let sql = `CREATE EXTENSION IF NOT EXISTS "${safeExt}"`;
+            if (safeSchema) sql += ` SCHEMA "${safeSchema}"`;
+            if (version) sql += ` VERSION '${version.replace(/'/g, "''")}'`;
+            sql += ` CASCADE`;
+            await transaction.unsafe(sql);
+            await notifyPostgrestSchemaReload(transaction, projectRef);
+        });
 
         const rows = await db`
             SELECT name, default_version, installed_version, comment,
@@ -128,7 +132,10 @@ export class ExtensionService {
         const safeExt = validatePgIdentifier(extension, 'extension');
         const dbName = await resolveDbName(projectRef);
         const db = getProjectDb(dbName);
-        await db.unsafe(`DROP EXTENSION IF EXISTS "${safeExt}" CASCADE`);
+        await db.begin(async (transaction) => {
+            await transaction.unsafe(`DROP EXTENSION IF EXISTS "${safeExt}" CASCADE`);
+            await notifyPostgrestSchemaReload(transaction, projectRef);
+        });
 
         const rows = await db`
             SELECT name, default_version, installed_version, comment,

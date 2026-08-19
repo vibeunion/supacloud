@@ -18,10 +18,15 @@ import {
   normalizeMigrationVersion,
   resetEnsuredMigrationTablesForTests,
   resolveMigrationStatements,
+  sqlExecutionMayChangeSchema,
   sqlRouteErrorResponse,
   sqlRouteResponse,
 } from "../../src/routes/database";
 import { projectMigrationSqlViolations } from "../../src/db/sql-policy";
+import {
+  notifyPostgrestSchemaReload,
+  tryNotifyPostgrestSchemaReload,
+} from "../../src/services/database-schema-notify";
 import { calculateMigrationChecksum } from "../../src/services/migration-promotion";
 
 describe("database route helpers", () => {
@@ -300,6 +305,22 @@ describe("database route helpers", () => {
     });
   });
 
+  test("sqlRouteResponse exposes schema reload completion without obscuring committed DDL", () => {
+    const response = sqlRouteResponse({
+      rows: [],
+      rowCount: 0,
+      command: "ALTER",
+      fields: [],
+      notices: [],
+      durationMs: 12,
+    }, { schemaReloadStatus: "notification_failed", ddlCommitted: true });
+
+    expect(response.schema_reload).toEqual({
+      status: "notification_failed",
+      ddl_committed: true,
+    });
+  });
+
   test("sqlRouteErrorResponse preserves SQL error code and duration", () => {
     expect(sqlRouteErrorResponse(Object.assign(new Error("Query cancelled"), {
       code: "QUERY_CANCELLED",
@@ -312,6 +333,29 @@ describe("database route helpers", () => {
       durationMs: 34,
       status: 400,
     });
+  });
+
+  test("detects SQL execution results that may change the PostgREST schema", () => {
+    const result = {
+      rows: [],
+      rowCount: 0,
+      command: "SELECT",
+      fields: [],
+      notices: [],
+      durationMs: 1,
+    };
+    expect(sqlExecutionMayChangeSchema(result)).toBe(false);
+    expect(sqlExecutionMayChangeSchema({ ...result, command: "CREATE" })).toBe(true);
+    expect(sqlExecutionMayChangeSchema({
+      ...result,
+      command: "BATCH",
+      statements: [{ index: 1, command: "ALTER", rowCount: 0, durationMs: 1 }],
+    })).toBe(true);
+    expect(sqlExecutionMayChangeSchema(
+      result,
+      "CREATE TABLE public.items(id bigint); SELECT 1",
+    )).toBe(true);
+    expect(sqlExecutionMayChangeSchema(result, "CALL admin.refresh_api_schema()")).toBe(true);
   });
 
   test("builds safe materialized view SQL", () => {
@@ -438,5 +482,31 @@ describe("database route helpers", () => {
       expect(contents).toContain("ALTER TABLE public.tasks REPLICA IDENTITY FULL");
       expect(contents).toContain("ALTER PUBLICATION supabase_realtime ADD TABLE public.tasks");
     }
+  });
+  test("notifyPostgrestSchemaReload sends NOTIFY to project and pgrst channels", async () => {
+    const executed: Array<{ query: string; values: unknown[] }> = [];
+    const projectDb = ((strings: TemplateStringsArray, ...values: unknown[]) => {
+      executed.push({ query: strings.join("?"), values });
+      return Promise.resolve([]);
+    }) as any;
+
+    await notifyPostgrestSchemaReload(projectDb, "test_proj");
+
+    expect(executed).toHaveLength(1);
+    expect(executed[0].query).toContain("SELECT pg_notify(?");
+    expect(executed[0].values).toContain("pgrst_test_proj");
+    expect(executed[0].query).toContain("pg_notify('pgrst', 'reload schema')");
+  });
+
+  test("notifyPostgrestSchemaReload propagates failures for transactional callers", async () => {
+    const projectDb = (() => Promise.reject(new Error("connection lost"))) as any;
+
+    await expect(notifyPostgrestSchemaReload(projectDb, "test_proj")).rejects.toThrow("connection lost");
+  });
+
+  test("tryNotifyPostgrestSchemaReload keeps post-commit reload attempts non-fatal", async () => {
+    const projectDb = (() => Promise.reject(new Error("connection lost"))) as any;
+
+    await expect(tryNotifyPostgrestSchemaReload(projectDb, "test_proj")).resolves.toBe(false);
   });
 });
