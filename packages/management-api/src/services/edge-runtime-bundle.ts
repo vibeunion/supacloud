@@ -8,6 +8,13 @@ type SyntaxNode = {
   [property: string]: unknown;
 };
 
+type CommentToken = {
+  type: "Line" | "Block";
+  value: string;
+  start: number;
+  end: number;
+};
+
 type StaticStringBinding = {
   moduleSpecifier: string;
   declarations: number;
@@ -26,14 +33,15 @@ export type EdgeRuntimeBundleNormalization = {
 };
 
 function isSyntaxNode(candidate: unknown): candidate is SyntaxNode {
-  return !!candidate
-    && typeof candidate === "object"
-    && "type" in candidate
-    && typeof candidate.type === "string"
-    && "start" in candidate
-    && typeof candidate.start === "number"
-    && "end" in candidate
-    && typeof candidate.end === "number";
+  return !candidate
+    ? false
+    : typeof candidate === "object"
+      && "type" in candidate
+      && typeof candidate.type === "string"
+      && "start" in candidate
+      && typeof candidate.start === "number"
+      && "end" in candidate
+      && typeof candidate.end === "number";
 }
 
 function syntaxChildren(node: SyntaxNode): SyntaxNode[] {
@@ -92,13 +100,29 @@ function assignedIdentifiers(node: SyntaxNode): string[] {
   return [];
 }
 
-function parseBundle(code: string): SyntaxNode {
+function parseBundle(code: string, comments?: CommentToken[]): SyntaxNode {
   return parse(code, {
     ecmaVersion: "latest",
     sourceType: "module",
     allowHashBang: true,
     locations: true,
+    ...(comments ? { onComment: comments } : {}),
   }) as unknown as SyntaxNode;
+}
+
+function isTypeDirectiveComment(comment: CommentToken): boolean {
+  if (comment.type === "Line" && /^\/+\s*<reference\b/i.test(comment.value)) {
+    return true;
+  }
+  return /^\s*(?:\*\s*)?@(deno-types|ts-types|ts-self-types)\b/i.test(comment.value);
+}
+
+function blankDirectiveComment(code: string, comment: CommentToken): SourceReplacement {
+  return {
+    start: comment.start,
+    end: comment.end,
+    code: code.slice(comment.start, comment.end).replace(/[^\r\n]/g, " "),
+  };
 }
 
 function staticStringBinding(declaration: SyntaxNode): [string, StaticStringBinding] | null {
@@ -265,7 +289,11 @@ function validatedFinalProgram(code: string): SyntaxNode {
 }
 
 export function normalizeEdgeRuntimeBundle(code: string): EdgeRuntimeBundleNormalization {
-  const program = parseBundle(code);
+  const comments: CommentToken[] = [];
+  const program = parseBundle(code, comments);
+  const directiveReplacements = comments
+    .filter(isTypeDirectiveComment)
+    .map((comment) => blankDirectiveComment(code, comment));
   const computedImports = computedDynamicImports(program);
   const evalCall = computedImports.length > 0 ? directEval(program) : undefined;
   if (evalCall) {
@@ -276,10 +304,10 @@ export function normalizeEdgeRuntimeBundle(code: string): EdgeRuntimeBundleNorma
   }
   const bindings = topLevelStringBindings(program);
   recordBindingUsage(program, bindings);
-  const replacements = computedImports.map((dynamicImport) => (
+  const importReplacements = computedImports.map((dynamicImport) => (
     computedImportReplacement(dynamicImport, bindings, code)
   ));
-  const normalizedCode = applyReplacements(code, replacements);
+  const normalizedCode = applyReplacements(code, [...directiveReplacements, ...importReplacements]);
   const finalProgram = validatedFinalProgram(normalizedCode);
   return {
     code: normalizedCode,
