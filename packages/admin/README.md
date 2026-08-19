@@ -100,6 +100,7 @@ npx @supacloud/admin status
 npx @supacloud/admin ssh ping
 npx @supacloud/admin ssh versions
 npx @supacloud/admin ssh diagnose
+npx @supacloud/admin ssh upgrade_status --transaction_id 11111111-1111-4111-8111-111111111111
 npx @supacloud/admin project create --name my-app --domain example.com \
   --env_file /secure/path/.env.project-credentials.test --environment test
 npx @supacloud/admin project list
@@ -192,6 +193,33 @@ deadline stops only local observation; it does not stop, clean up, or mark the
 remote transaction as failed. The CLI reports the unit, stage, status, log, and
 upload-drop paths for reconciliation. Inspect that evidence before retrying and
 do not retry blindly while the remote transaction may still be running.
+
+When observation ends after 30 minutes, or to safely reconcile a retained
+local-artifact upgrade transaction, use the read-only `ssh upgrade_status`
+command:
+
+```bash
+npx @supacloud/admin ssh upgrade_status \
+  --transaction_id 11111111-1111-4111-8111-111111111111
+```
+
+`ssh upgrade_status` is classified as a read-only command and is permitted in
+read-only mode (`SUPACLOUD_READ_ONLY=true`). It requires a strict UUID v4
+transaction ID before performing any SSH access. It never deletes status, log,
+stage, or upload-drop records, and never mutates service state. The command emits
+a strict JSON projection (`supacloud.admin.upgrade-status.v1`) containing the
+normalized transaction ID, lifecycle state (`running`, `succeeded`, or
+`failed`), raw bounded status, systemd active/load states, boolean
+evidence-presence flags, and validated structured receipts:
+- Nonterminal (`running`): no receipts or failure evidence are included.
+- Succeeded: path-free projections of the validated control-plane preflight and
+  transaction safety receipts.
+- Failed: validated failure evidence with credentials and remote paths redacted.
+
+The command fails closed for missing or inconsistent terminal evidence, stopped
+nonterminal units, malformed or missing structured receipts, redacted or
+truncated SSH output, or unknown status, without emitting raw logs, remote
+filesystem paths, secrets, bearer material, env values, or customer data.
 
 `--artifact_transport local` accepts only `--github_proxy direct` or `none` and
 clears proxy environment variables on both hosts. The server-download path

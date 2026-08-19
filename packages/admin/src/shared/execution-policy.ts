@@ -36,7 +36,7 @@ const ACTION_POLICY: Record<string, ModulePolicy> = {
     ssh: {
         read: [
             "ping", "versions", "diagnose", "exec", "troubleshoot", "container_logs",
-            "tenant_list", "tenant_inspect", "tenant_diagnose",
+            "tenant_list", "tenant_inspect", "tenant_diagnose", "upgrade_status",
         ],
         write: ["setup", "install", "upgrade", "tenant_migrate"],
     },

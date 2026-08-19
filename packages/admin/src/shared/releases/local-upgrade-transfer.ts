@@ -82,6 +82,107 @@ type UpgradeFailureEvidence = {
     summary: string;
 };
 
+type UpgradeStatusEvidencePresence = {
+    drop_exists: boolean;
+    log_exists: boolean;
+    stage_exists: boolean;
+    stage_is_directory: boolean;
+    status_exists: boolean;
+    unit_exists: boolean;
+};
+
+type UpgradeStatusNonterminalProjection = {
+    schema: "supacloud.admin.upgrade-status.v1";
+    transaction_id: string;
+    lifecycle: "running";
+    status: string;
+    service_state: string;
+    unit_load_state: string;
+    evidence: UpgradeStatusEvidencePresence;
+};
+
+type UpgradeStatusControlPlaneEvidence = {
+    backup_id: string;
+    bytes: number;
+    candidate_counts: Record<string, number>;
+    completed_at: string;
+    current_key_checkpoint_present: boolean;
+    receipt_schema: ControlPlaneSafetyEvidence["schema"];
+    sha256: string;
+};
+
+type UpgradeStatusFailureEvidence = {
+    causes: string[];
+    receipt_schema: UpgradeFailureEvidence["schema"];
+    summary: string;
+};
+
+type UpgradeStatusSucceededProjection = {
+    schema: "supacloud.admin.upgrade-status.v1";
+    transaction_id: string;
+    lifecycle: "succeeded";
+    status: string;
+    service_state: string;
+    unit_load_state: string;
+    evidence: UpgradeStatusEvidencePresence;
+    preflight: UpgradeStatusControlPlaneEvidence;
+    transaction: UpgradeStatusControlPlaneEvidence;
+};
+
+type UpgradeStatusFailedProjection = {
+    schema: "supacloud.admin.upgrade-status.v1";
+    transaction_id: string;
+    lifecycle: "failed";
+    status: string;
+    service_state: string;
+    unit_load_state: string;
+    evidence: UpgradeStatusEvidencePresence;
+    failure: UpgradeStatusFailureEvidence;
+};
+
+export type UpgradeStatusProjection =
+    | UpgradeStatusNonterminalProjection
+    | UpgradeStatusSucceededProjection
+    | UpgradeStatusFailedProjection;
+
+const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export function assertValidTransactionId(transactionId: unknown): string {
+    if (typeof transactionId !== "string" || !UUID_V4_PATTERN.test(transactionId)) {
+        throw new Error("Invalid 'transaction_id': must be a valid UUID v4");
+    }
+    return transactionId.toLowerCase();
+}
+
+function upgradeStatusControlPlaneEvidence(
+    receipt: ControlPlaneSafetyEvidence,
+): UpgradeStatusControlPlaneEvidence {
+    return {
+        backup_id: receipt.backup_id,
+        bytes: receipt.bytes,
+        candidate_counts: { ...receipt.candidate_counts },
+        completed_at: receipt.completed_at,
+        current_key_checkpoint_present: receipt.current_key_checkpoint_present,
+        receipt_schema: receipt.schema,
+        sha256: receipt.sha256,
+    };
+}
+
+function redactRemotePaths(message: string): string {
+    return message
+        .replace(/\bhttps?:\/\/[^\s"'`,;)\]}]+/gi, "[REDACTED_URL]")
+        .replace(/\bfile:\/\/\/[^\s"'`,;)\]}]+/gi, "[REDACTED_PATH]")
+        .replace(/(^|[^A-Za-z0-9:/])\/(?!\/)[^\s"'`,;)\]}]+/g, "$1[REDACTED_PATH]");
+}
+
+function upgradeStatusFailureEvidence(receipt: UpgradeFailureEvidence): UpgradeStatusFailureEvidence {
+    return {
+        causes: receipt.causes.map(redactRemotePaths),
+        receipt_schema: receipt.schema,
+        summary: redactRemotePaths(receipt.summary),
+    };
+}
+
 function exactObjectKeys(candidate: Record<string, unknown>, expected: readonly string[]): boolean {
     const actual = Object.keys(candidate).sort();
     return actual.length === expected.length && actual.every((key, index) => key === [...expected].sort()[index]);
@@ -1112,4 +1213,145 @@ export async function executeLocalUpgradeTransfer(ssh: SshTransport, request: Lo
             throw new AggregateError([cleanupError], "Remote local upgrade completed but local bundle cleanup did not complete");
         }
     }
+}
+
+type UpgradeStatusLifecycle = UpgradeStatusProjection["lifecycle"];
+
+function upgradeStatusLifecycle(status: string): UpgradeStatusLifecycle {
+    if (["PREPARED", "RUNNING", "CLEANING"].includes(status)) return "running";
+    if (status === "SUCCEEDED") return "succeeded";
+    const failedStatus = status.match(
+        /^FAILED:([1-9]\d{0,2}):(TRANSACTION|TRANSACTION_AND_CLEANUP|CLEANUP_AFTER_TRANSACTION)$/,
+    );
+    if (failedStatus && Number(failedStatus[1]) <= 255) return "failed";
+    throw new Error("Remote upgrade status is unknown or invalid");
+}
+
+function upgradeStatusEvidence(state: RemoteUpgradeState): UpgradeStatusEvidencePresence {
+    return {
+        drop_exists: state.dropExists,
+        log_exists: state.logExists,
+        stage_exists: state.stageExists,
+        stage_is_directory: state.stageIsDirectory,
+        status_exists: state.statusExists,
+        unit_exists: state.unitExists,
+    };
+}
+
+// CLI error formatting traverses nested causes, so these read-only inspection
+// wrappers deliberately replace path-bearing SSH and reconciliation diagnostics.
+async function readUpgradeStatusState(
+    ssh: SshTransport,
+    paths: RemoteUpgradePaths,
+): Promise<RemoteUpgradeState> {
+    try {
+        return await readRemoteState(ssh, paths);
+    } catch {
+        throw new Error("Unable to read remote upgrade state safely");
+    }
+}
+
+async function readUpgradeStatusLog(ssh: SshTransport, paths: RemoteUpgradePaths): Promise<string> {
+    try {
+        return await remoteLogTail(ssh, paths);
+    } catch {
+        throw new Error("Remote upgrade retained log could not be read safely");
+    }
+}
+
+function assertUpgradeStatusTerminalEvidence(
+    state: RemoteUpgradeState,
+    paths: RemoteUpgradePaths,
+    lifecycle: Exclude<UpgradeStatusLifecycle, "running">,
+): void {
+    try {
+        if (lifecycle === "succeeded") assertSuccessfulUnitStoppedNormally(state, paths);
+        else assertFailedUnitReachedTerminalState(state, paths);
+        assertTerminalEvidence(state, paths);
+    } catch {
+        throw new Error("Remote upgrade terminal evidence is incomplete or inconsistent");
+    }
+}
+
+function succeededUpgradeStatus(
+    transactionId: string,
+    state: RemoteUpgradeState,
+    log: string,
+): UpgradeStatusSucceededProjection {
+    let preflight: ControlPlaneSafetyEvidence;
+    let transaction: ControlPlaneSafetyEvidence;
+    try {
+        preflight = parseControlPlanePreflightEvidence(log);
+        transaction = parseControlPlaneSafetyEvidence(log);
+    } catch {
+        throw new Error("Remote upgrade safety receipts are missing or invalid");
+    }
+    return {
+        schema: "supacloud.admin.upgrade-status.v1",
+        transaction_id: transactionId,
+        lifecycle: "succeeded",
+        status: state.status,
+        service_state: state.serviceState,
+        unit_load_state: state.unitLoadState,
+        evidence: upgradeStatusEvidence(state),
+        preflight: upgradeStatusControlPlaneEvidence(preflight),
+        transaction: upgradeStatusControlPlaneEvidence(transaction),
+    };
+}
+
+function failedUpgradeStatus(
+    transactionId: string,
+    state: RemoteUpgradeState,
+    log: string,
+): UpgradeStatusFailedProjection {
+    let failure: UpgradeFailureEvidence;
+    try {
+        failure = parseUpgradeFailureEvidence(log);
+    } catch {
+        throw new Error("Remote upgrade failure receipt is missing or invalid");
+    }
+    return {
+        schema: "supacloud.admin.upgrade-status.v1",
+        transaction_id: transactionId,
+        lifecycle: "failed",
+        status: state.status,
+        service_state: state.serviceState,
+        unit_load_state: state.unitLoadState,
+        evidence: upgradeStatusEvidence(state),
+        failure: upgradeStatusFailureEvidence(failure),
+    };
+}
+
+function runningUpgradeStatus(
+    transactionId: string,
+    state: RemoteUpgradeState,
+): UpgradeStatusNonterminalProjection {
+    if (!unitIsRunning(state.serviceState) || state.unitLoadState !== "loaded" || !state.statusExists) {
+        throw new Error("Remote upgrade nonterminal state is inconsistent");
+    }
+    return {
+        schema: "supacloud.admin.upgrade-status.v1",
+        transaction_id: transactionId,
+        lifecycle: "running",
+        status: state.status,
+        service_state: state.serviceState,
+        unit_load_state: state.unitLoadState,
+        evidence: upgradeStatusEvidence(state),
+    };
+}
+
+export async function inspectRemoteUpgradeStatus(
+    ssh: SshTransport,
+    transactionIdInput: unknown,
+): Promise<UpgradeStatusProjection> {
+    const transactionId = assertValidTransactionId(transactionIdInput);
+    const paths = buildRemoteUpgradePaths(transactionId);
+    const state = await readUpgradeStatusState(ssh, paths);
+    const lifecycle = upgradeStatusLifecycle(state.status);
+    if (lifecycle === "running") return runningUpgradeStatus(transactionId, state);
+    assertUpgradeStatusTerminalEvidence(state, paths, lifecycle);
+    const log = await readUpgradeStatusLog(ssh, paths);
+    return lifecycle === "succeeded"
+        ? succeededUpgradeStatus(transactionId, state, log)
+        : failedUpgradeStatus(transactionId, state, log);
 }
