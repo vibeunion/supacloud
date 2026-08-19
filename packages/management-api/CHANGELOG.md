@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.61.9](https://github.com/vibeunion/supacloud/compare/management-api-v0.61.8...management-api-v0.61.9) (2026-08-19)
+
+
+### Bug Fixes
+
+* **upgrade:** materialize private pgpass credential ([#991](https://github.com/vibeunion/supacloud/issues/991)) ([f0765b7](https://github.com/vibeunion/supacloud/commit/f0765b72c55611bca86ae26f503a96e47362bcb9))
+
 ## [0.61.8](https://github.com/vibeunion/supacloud/compare/management-api-v0.61.7...management-api-v0.61.8) (2026-08-18)
 
 
