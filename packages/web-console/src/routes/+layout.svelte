@@ -103,11 +103,12 @@
   let isCoreLoading = $derived(projectsLoading || ($isLoading && !i18nLoadGuardExpired));
 
   // Route Detection
-  let isRawPage = $derived(
-    ($page.url.pathname as string) === "/" ||
-    ($page.url.pathname as string) === "/login" ||
-    ($page.url.pathname as string) === "/register"
+  const isAuthRoute = (path: string) => path === "/login" || path === "/register";
+  let isAuthPage = $derived(isAuthRoute($page.url.pathname as string));
+  let isStandaloneLayout = $derived(
+    ($page.url.pathname as string) === "/" || isAuthRoute($page.url.pathname as string)
   );
+  let isRawPage = $derived(isStandaloneLayout);
   let isPlatformRoute = $derived($page.url.pathname.startsWith("/platform"));
 
   let refFromUrl = $derived(typeof $page.params.ref === "string" ? $page.params.ref : null);
@@ -261,8 +262,8 @@
         i18nLoadGuardExpired = true;
       }, 4000);
 
-      // Skip auth check on raw pages (login/register)
-      if (isRawPage) {
+      // Skip auth check on unauthenticated pages (login/register)
+      if (isAuthRoute(window.location.pathname)) {
         projectsLoading = false;
         clearGuardTimer();
         cleanupLocale();

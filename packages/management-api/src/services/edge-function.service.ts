@@ -675,7 +675,7 @@ async function buildFunctionCode(request: BundleFunctionRequest): Promise<string
       .map((logEntry: { message?: string }) => logEntry.message || String(logEntry))
       .join("\n");
     logger.error(`[EdgeFunction] Bun.build() failed:\n${messages}`);
-    throw new Error("Bun.build() failed while bundling the function");
+    throw new Error(messages ? `Bun.build() failed while bundling the function: ${messages}` : "Bun.build() failed while bundling the function");
   }
 
   const artifact = buildResult.outputs.find((output) => output.kind === "entry-point")

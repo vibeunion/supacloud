@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 const layoutSource = readFileSync(new URL("./+layout.svelte", import.meta.url), "utf8");
 const loginPageSource = readFileSync(new URL("./login/+page.svelte", import.meta.url), "utf8");
@@ -21,6 +21,21 @@ describe("root layout source guards", () => {
     expect(loginPageSource).toContain("window.location.href = CONSOLE_LANDING_PATH");
     expect(loginPageSource).not.toContain('window.location.replace("/")');
     expect(loginPageSource).not.toContain('window.location.href = "/"');
+  });
+
+  test("does not skip authentication check on the overview root route", () => {
+    expect(layoutSource).toContain('const isAuthRoute = (path: string) => path === "/login" || path === "/register";');
+    expect(layoutSource).toContain("if (isAuthRoute(window.location.pathname))");
+    expect(layoutSource).not.toContain("if (isRawPage) {\n        projectsLoading = false;\n        clearGuardTimer();\n        cleanupLocale();\n        return;\n      }");
+  });
+
+  test("general settings route alias exists and forwards to project settings", () => {
+    const generalPageTs = new URL("./project/[ref]/settings/general/+page.ts", import.meta.url);
+    const generalPageSvelte = new URL("./project/[ref]/settings/general/+page.svelte", import.meta.url);
+    expect(existsSync(generalPageTs)).toBe(true);
+    expect(existsSync(generalPageSvelte)).toBe(true);
+    const tsSource = readFileSync(generalPageTs, "utf8");
+    expect(tsSource).toContain('redirect(307, resolve("/project/[ref]/settings"');
   });
 
   test("logout redirects only after the backend confirms success", () => {
