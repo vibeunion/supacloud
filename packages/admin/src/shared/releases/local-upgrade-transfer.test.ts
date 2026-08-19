@@ -659,12 +659,24 @@ describe("local upgrade remote runner", () => {
         expect(script).toContain("write_status CLEANING");
         expect(script).toContain("FAILED:1:CLEANUP_AFTER_TRANSACTION");
         expect(script).toContain([
-            "write_status CLEANING || { echo 'Unable to publish cleanup state' >&2; exit 1; }",
-            "  if ! rm -rf -- \"$STAGE\"; then",
-            "    write_status 'FAILED:1:CLEANUP_AFTER_TRANSACTION' || true",
+            "  if ! write_status CLEANING; then",
+            "    echo 'Unable to publish cleanup state' >&2",
+            "    write_status 'FAILED:1:TRANSACTION' || true",
+            "    emit_wrapper_failure_receipt 1 status_publish",
+            "    if ! rm -rf -- \"$STAGE\"; then write_status 'FAILED:1:TRANSACTION_AND_CLEANUP' || true; fi",
             "    exit 1",
             "  fi",
-            "  write_status SUCCEEDED || exit 1",
+            "  if ! rm -rf -- \"$STAGE\"; then",
+            "    write_status 'FAILED:1:CLEANUP_AFTER_TRANSACTION' || true",
+            "    emit_wrapper_failure_receipt 1 cleanup",
+            "    exit 1",
+            "  fi",
+            "  if ! write_status SUCCEEDED; then",
+            "    write_status 'FAILED:1:TRANSACTION' || true",
+            "    emit_wrapper_failure_receipt 1 status_publish",
+            "    exit 1",
+            "  fi",
+            "  exit 0",
         ].join("\n"));
         expect(script).not.toContain("RuntimeMaxSec");
         expect(script).not.toContain("curl ");
@@ -703,6 +715,7 @@ describe("local upgrade remote runner", () => {
     test("publishes terminal status directly from the generated cleanup lifecycle", () => {
         const script = runScript(preparedBundle("amd64", "bundled"), "amd64");
         const lifecycleFunctions = [
+            shellFunctionDefinition(script, "emit_wrapper_failure_receipt"),
             shellFunctionDefinition(script, "write_status"),
             shellFunctionDefinition(script, "finish_upgrade"),
         ].join("\n");
@@ -733,6 +746,7 @@ describe("local upgrade remote runner", () => {
     test("converts TERM into a failed transaction and runs stage cleanup", () => {
         const script = runScript(preparedBundle("amd64", "bundled"), "amd64");
         const lifecycleFunctions = [
+            shellFunctionDefinition(script, "emit_wrapper_failure_receipt"),
             shellFunctionDefinition(script, "write_status"),
             shellFunctionDefinition(script, "finish_upgrade"),
         ].join("\n");
@@ -758,6 +772,7 @@ describe("local upgrade remote runner", () => {
 
     test("ignores a second TERM while the finalizer publishes success", () => {
         const script = runScript(preparedBundle("amd64", "bundled"), "amd64");
+        const emitFunction = shellFunctionDefinition(script, "emit_wrapper_failure_receipt");
         const finishFunction = shellFunctionDefinition(script, "finish_upgrade");
         const fixtureRoot = realpathSync(mkdtempSync(join(tmpdir(), "supacloud-finalizer-term-")));
         const stage = join(fixtureRoot, "stage");
@@ -767,7 +782,7 @@ describe("local upgrade remote runner", () => {
             cmd: ["bash", "-c", [
                 "set -euo pipefail",
                 "write_status() { printf '%s\\n' \"$1\" > \"$STATUS\"; if [ \"$1\" = SUCCEEDED ]; then kill -TERM \"$$\"; fi; }",
-                finishFunction, "trap finish_upgrade EXIT", "trap 'exit 143' TERM", "exit 0",
+                emitFunction, finishFunction, "trap finish_upgrade EXIT", "trap 'exit 143' TERM", "exit 0",
             ].join("\n")],
             env: { ...process.env, STAGE: stage, STATUS: status },
         });
@@ -775,6 +790,273 @@ describe("local upgrade remote runner", () => {
             expect(execution.exitCode).toBe(0);
             expect(existsSync(stage)).toBe(false);
             expect(readFileSync(status, "utf8").trim()).toBe("SUCCEEDED");
+        } finally {
+            rmSync(fixtureRoot, { recursive: true, force: true });
+        }
+    });
+
+    test("tracks fixed phase labels across wrapper checks and execution in the generated script", () => {
+        const script = runScript(preparedBundle("amd64", "bundled"), "amd64");
+
+        expect(script).toContain("UPGRADE_PHASE=bootstrap");
+        expect(script).toContain("UPGRADE_PHASE=filesystem_checks");
+        expect(script).toContain("UPGRADE_PHASE=transfer_verification");
+        expect(script).toContain("UPGRADE_PHASE=verifier_setup");
+        expect(script).toContain("UPGRADE_PHASE=runner_preflight");
+        expect(script).toContain("UPGRADE_PHASE=runner_upgrade");
+    });
+
+    test("emits exactly one fallback failure receipt across wrapper transaction and cleanup failure paths", async () => {
+        const validUuid = "11111111-1111-4111-8111-111111111111";
+        const script = runScript(preparedBundle("amd64", "bundled"), "amd64");
+        const lifecycleFunctions = [
+            shellFunctionDefinition(script, "emit_wrapper_failure_receipt"),
+            shellFunctionDefinition(script, "write_status"),
+            shellFunctionDefinition(script, "finish_upgrade"),
+        ].join("\n");
+        const fixtureRoot = realpathSync(mkdtempSync(join(tmpdir(), "supacloud-wrapper-failure-")));
+
+        const runExecution = (options: {
+            phase?: string;
+            exitCode: number;
+            initialLog?: string;
+            rmOverride?: string;
+            statusOverride?: string;
+        }) => {
+            const dir = mkdtempSync(join(fixtureRoot, "run-"));
+            const stage = join(dir, "stage");
+            const status = join(dir, "status");
+            const log = join(dir, "log");
+            mkdirSync(stage, { mode: 0o700 });
+            if (options.initialLog) writeFileSync(log, options.initialLog);
+
+            const execution = Bun.spawnSync({
+                cmd: ["bash", "-c", [
+                    "set -euo pipefail",
+                    lifecycleFunctions,
+                    options.statusOverride || "",
+                    options.rmOverride || "",
+                    options.phase ? `UPGRADE_PHASE=${options.phase}` : "",
+                    "trap finish_upgrade EXIT",
+                    `exit ${options.exitCode}`,
+                ].filter(Boolean).join("\n")],
+                env: { ...process.env, STAGE: stage, STATUS: status, LOG: log },
+            });
+
+            return {
+                exitCode: execution.exitCode,
+                stageExists: existsSync(stage),
+                status: existsSync(status) ? readFileSync(status, "utf8").trim() : "",
+                logContent: existsSync(log) ? readFileSync(log, "utf8") : "",
+            };
+        };
+
+        try {
+            const successResult = runExecution({ exitCode: 0 });
+            expect(successResult.exitCode).toBe(0);
+            expect(successResult.stageExists).toBe(false);
+            expect(successResult.status).toBe("SUCCEEDED");
+            expect(successResult.logContent).toBe("");
+
+            const transactionCases = [
+                { phase: "bootstrap", exitCode: 1, expectedPhase: "bootstrap" },
+                { phase: "filesystem_checks", exitCode: 2, expectedPhase: "filesystem_checks" },
+                { phase: "transfer_verification", exitCode: 3, expectedPhase: "transfer_verification" },
+                { phase: "verifier_setup", exitCode: 4, expectedPhase: "verifier_setup" },
+                { phase: "runner_preflight", exitCode: 5, expectedPhase: "runner_preflight" },
+                { phase: "runner_upgrade", exitCode: 6, expectedPhase: "runner_upgrade" },
+                { phase: "unrecognized_phase", exitCode: 7, expectedPhase: "unknown" },
+            ];
+
+            for (const c of transactionCases) {
+                const res = runExecution({ phase: c.phase, exitCode: c.exitCode });
+                expect(res.exitCode).toBe(c.exitCode);
+                expect(res.stageExists).toBe(false);
+                expect(res.status).toBe(`FAILED:${c.exitCode}:TRANSACTION`);
+
+                const receipts = res.logContent.split(/\r?\n/).filter(l => l.startsWith("SUPACLOUD_UPGRADE_FAILURE="));
+                expect(receipts).toHaveLength(1);
+
+                const expectedEvidence = {
+                    schema: "supacloud.upgrade-failure.v1" as const,
+                    summary: `Remote upgrade execution failed during ${c.expectedPhase} (exit code ${c.exitCode})`,
+                    causes: [`exit_code=${c.exitCode}`, `phase=${c.expectedPhase}`],
+                };
+                expect(parseUpgradeFailureEvidence(res.logContent)).toEqual(expectedEvidence);
+
+                const ssh = new ScriptedSsh([
+                    remoteState({
+                        status: res.status,
+                        serviceState: "inactive",
+                        unitLoadState: "not-found",
+                        stageExists: false,
+                        logExists: true,
+                        statusExists: true,
+                    }),
+                    remoteResult(res.logContent),
+                ]);
+                const projection = await inspectRemoteUpgradeStatus(ssh as never, validUuid);
+                expect(projection.lifecycle).toBe("failed");
+                if (projection.lifecycle !== "failed") throw new Error("Expected failed projection");
+                expect(projection.status).toBe(res.status);
+                expect(projection.failure).toEqual({
+                    receipt_schema: expectedEvidence.schema,
+                    summary: expectedEvidence.summary,
+                    causes: expectedEvidence.causes,
+                });
+            }
+
+            const cleanupFail = runExecution({
+                exitCode: 0,
+                rmOverride: "rm() { if [ \"$1 $2 $3\" = \"-rf -- $STAGE\" ]; then return 1; fi; command rm \"$@\"; }",
+            });
+            expect(cleanupFail.exitCode).toBe(1);
+            expect(cleanupFail.stageExists).toBe(true);
+            expect(cleanupFail.status).toBe("FAILED:1:CLEANUP_AFTER_TRANSACTION");
+            const cleanupEvidence = {
+                schema: "supacloud.upgrade-failure.v1" as const,
+                summary: "Remote upgrade execution failed during cleanup (exit code 1)",
+                causes: ["exit_code=1", "phase=cleanup"],
+            };
+            expect(parseUpgradeFailureEvidence(cleanupFail.logContent)).toEqual(cleanupEvidence);
+
+            const cleanupSsh = new ScriptedSsh([
+                remoteState({
+                    status: cleanupFail.status,
+                    serviceState: "inactive",
+                    unitLoadState: "not-found",
+                    stageExists: true,
+                    logExists: true,
+                    statusExists: true,
+                }),
+                remoteResult(cleanupFail.logContent),
+            ]);
+            const cleanupProjection = await inspectRemoteUpgradeStatus(cleanupSsh as never, validUuid);
+            expect(cleanupProjection.lifecycle).toBe("failed");
+            if (cleanupProjection.lifecycle !== "failed") throw new Error("Expected failed projection");
+            expect(cleanupProjection.status).toBe(cleanupFail.status);
+            expect(cleanupProjection.failure).toEqual({
+                receipt_schema: cleanupEvidence.schema,
+                summary: cleanupEvidence.summary,
+                causes: cleanupEvidence.causes,
+            });
+
+            const statusPublishFail = runExecution({
+                exitCode: 0,
+                statusOverride: [
+                    "eval \"$(declare -f write_status | sed '1s/write_status/original_write_status/' )\"",
+                    "write_status() {",
+                    "  if [ \"$1\" = CLEANING ] && [ -z \"${STATUS_FAILED:-}\" ]; then",
+                    "    STATUS_FAILED=1",
+                    "    return 1",
+                    "  fi",
+                    "  original_write_status \"$@\"",
+                    "}",
+                ].join("\n"),
+            });
+            expect(statusPublishFail.exitCode).toBe(1);
+            expect(statusPublishFail.stageExists).toBe(false);
+            expect(statusPublishFail.status).toBe("FAILED:1:TRANSACTION");
+            const statusPublishEvidence = {
+                schema: "supacloud.upgrade-failure.v1" as const,
+                summary: "Remote upgrade execution failed during status_publish (exit code 1)",
+                causes: ["exit_code=1", "phase=status_publish"],
+            };
+            expect(parseUpgradeFailureEvidence(statusPublishFail.logContent)).toEqual(statusPublishEvidence);
+
+            const statusPublishSsh = new ScriptedSsh([
+                remoteState({
+                    status: statusPublishFail.status,
+                    serviceState: "inactive",
+                    unitLoadState: "not-found",
+                    stageExists: false,
+                    logExists: true,
+                    statusExists: true,
+                }),
+                remoteResult(statusPublishFail.logContent),
+            ]);
+            const statusPublishProjection = await inspectRemoteUpgradeStatus(statusPublishSsh as never, validUuid);
+            expect(statusPublishProjection.lifecycle).toBe("failed");
+            if (statusPublishProjection.lifecycle !== "failed") throw new Error("Expected failed projection");
+            expect(statusPublishProjection.status).toBe("FAILED:1:TRANSACTION");
+            expect(statusPublishProjection.failure).toEqual({
+                receipt_schema: statusPublishEvidence.schema,
+                summary: statusPublishEvidence.summary,
+                causes: statusPublishEvidence.causes,
+            });
+
+            const runnerReceipt = {
+                schema: "supacloud.upgrade-failure.v1" as const,
+                summary: "Control-plane backup preflight failed",
+                causes: ["database connection refused"],
+            };
+            const existingRes = runExecution({
+                phase: "runner_upgrade",
+                exitCode: 1,
+                initialLog: `runner logs\nSUPACLOUD_UPGRADE_FAILURE=${JSON.stringify(runnerReceipt)}\n`,
+            });
+            expect(existingRes.exitCode).toBe(1);
+            const existingLines = existingRes.logContent.split(/\r?\n/).filter(l => l.startsWith("SUPACLOUD_UPGRADE_FAILURE="));
+            expect(existingLines).toHaveLength(1);
+            expect(parseUpgradeFailureEvidence(existingRes.logContent)).toEqual(runnerReceipt);
+
+            const existingSsh = new ScriptedSsh([
+                remoteState({
+                    status: existingRes.status,
+                    serviceState: "inactive",
+                    unitLoadState: "not-found",
+                    stageExists: false,
+                    logExists: true,
+                    statusExists: true,
+                }),
+                remoteResult(existingRes.logContent),
+            ]);
+            const existingProjection = await inspectRemoteUpgradeStatus(existingSsh as never, validUuid);
+            expect(existingProjection.lifecycle).toBe("failed");
+            if (existingProjection.lifecycle !== "failed") throw new Error("Expected failed projection");
+            expect(existingProjection.failure).toEqual({
+                receipt_schema: runnerReceipt.schema,
+                summary: runnerReceipt.summary,
+                causes: runnerReceipt.causes,
+            });
+
+            const malformedLog = "SUPACLOUD_UPGRADE_FAILURE={bad-json\n";
+            const malformedRes = runExecution({ phase: "runner_upgrade", exitCode: 1, initialLog: malformedLog });
+            expect(malformedRes.logContent).toBe(malformedLog);
+            expect(() => parseUpgradeFailureEvidence(malformedRes.logContent)).toThrow("Remote upgrade failure receipt is not valid JSON");
+
+            const malformedSsh = new ScriptedSsh([
+                remoteState({
+                    status: malformedRes.status,
+                    serviceState: "inactive",
+                    unitLoadState: "not-found",
+                    stageExists: false,
+                    logExists: true,
+                    statusExists: true,
+                }),
+                remoteResult(malformedRes.logContent),
+            ]);
+            await expect(inspectRemoteUpgradeStatus(malformedSsh as never, validUuid))
+                .rejects.toThrow("Remote upgrade failure receipt is missing or invalid");
+
+            const multipleLog = "SUPACLOUD_UPGRADE_FAILURE={\"schema\":\"supacloud.upgrade-failure.v1\",\"summary\":\"a\",\"causes\":[]}\nSUPACLOUD_UPGRADE_FAILURE={\"schema\":\"supacloud.upgrade-failure.v1\",\"summary\":\"b\",\"causes\":[]}\n";
+            const multipleRes = runExecution({ phase: "runner_upgrade", exitCode: 1, initialLog: multipleLog });
+            expect(multipleRes.logContent).toBe(multipleLog);
+            expect(() => parseUpgradeFailureEvidence(multipleRes.logContent)).toThrow("Remote upgrade did not emit one structured failure receipt");
+
+            const multipleSsh = new ScriptedSsh([
+                remoteState({
+                    status: multipleRes.status,
+                    serviceState: "inactive",
+                    unitLoadState: "not-found",
+                    stageExists: false,
+                    logExists: true,
+                    statusExists: true,
+                }),
+                remoteResult(multipleRes.logContent),
+            ]);
+            await expect(inspectRemoteUpgradeStatus(multipleSsh as never, validUuid))
+                .rejects.toThrow("Remote upgrade failure receipt is missing or invalid");
         } finally {
             rmSync(fixtureRoot, { recursive: true, force: true });
         }
