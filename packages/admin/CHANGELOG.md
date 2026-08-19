@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.1](https://github.com/vibeunion/supacloud/compare/admin-v0.16.0...admin-v0.16.1) (2026-08-19)
+
+
+### Bug Fixes
+
+* **admin:** emit wrapper upgrade failure receipts ([#998](https://github.com/vibeunion/supacloud/issues/998)) ([266dbd3](https://github.com/vibeunion/supacloud/commit/266dbd327f810b4e934ee11c6b21a748d0f91e20))
+
 ## [0.16.0](https://github.com/vibeunion/supacloud/compare/admin-v0.15.5...admin-v0.16.0) (2026-08-19)
 
 
