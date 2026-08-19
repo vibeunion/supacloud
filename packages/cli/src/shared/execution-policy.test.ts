@@ -162,6 +162,8 @@ describe("CLI execution policy", () => {
         expect(executionMode("oauth_clients", "get", {})).toBe("read");
         expect(executionMode("oauth_clients", "create", {})).toBe("write");
         expect(executionMode("oauth_clients", "delete", {})).toBe("write");
+        expect(executionMode("auth", "get_oauth_server", {})).toBe("read");
+        expect(executionMode("auth", "migrate_oauth_server", {})).toBe("write");
         expect(() => authorizeExecution("oauth_clients", { action: "create", ref: "prod-ref" }, {
             context: context(),
         })).toThrow("--confirm-production prod-ref");

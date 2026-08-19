@@ -22,6 +22,76 @@ function captureAuthTool(http: Record<string, unknown>) {
 }
 
 describe("auth CLI mutation contract", () => {
+    test("migrates OAuth signing keys and requires an exact ES256 read-back", async () => {
+        const requests: Array<{ method: string; path: string; body?: unknown }> = [];
+        const status = {
+            project_ref: "project-a",
+            enabled: true,
+            allow_dynamic_registration: false,
+            issuer: "https://auth.example.test/auth/v1",
+            authorization_path: "/oauth/authorize",
+            signing_alg: "ES256",
+            key_id: "key-one",
+            oidc_id_token_ready: true,
+            migration_status: "oidc_es256_migrated",
+            jwt_keys: [{ private_key: "must-not-return" }],
+        };
+        const { schema, callback } = captureAuthTool({
+            postReleaseMutation: async (path: string, body: unknown) => {
+                requests.push({ method: "POST", path, body });
+                return { ok: true, status: 200, data: status };
+            },
+            get: async (path: string) => {
+                requests.push({ method: "GET", path });
+                return { ok: true, status: 200, data: status };
+            },
+        });
+        const args = parseToolArguments(schema, {
+            action: "migrate_oauth_server",
+            ref: "project-a",
+            allow_dynamic_registration: false,
+            authorization_path: "/oauth/authorize",
+        });
+
+        const response = await callback(args);
+        const output = JSON.parse(response.content[0].text);
+
+        expect(requests).toEqual([
+            { method: "POST", path: "/v1/projects/project-a/auth/oauth-server/migrate", body: { allow_dynamic_registration: false, authorization_path: "/oauth/authorize" } },
+            { method: "GET", path: "/v1/projects/project-a/auth/oauth-server" },
+        ]);
+        expect(output).toMatchObject({ ok: true, operation: "auth.migrate_oauth_server", signing_alg: "ES256", oidc_id_token_ready: true });
+        expect(response.content[0].text).not.toContain("must-not-return");
+    });
+
+    test("fails closed when OAuth migration read-back is not ES256-ready", async () => {
+        const { callback } = captureAuthTool({
+            postReleaseMutation: async () => ({
+                ok: true,
+                status: 200,
+                data: {
+                    project_ref: "project-a", enabled: true, allow_dynamic_registration: false,
+                    issuer: "https://auth.example.test/auth/v1", signing_alg: "ES256",
+                    oidc_id_token_ready: true, migration_status: "oidc_es256_migrated",
+                },
+            }),
+            get: async () => ({
+                ok: true,
+                status: 200,
+                data: {
+                    project_ref: "project-a", enabled: false, allow_dynamic_registration: false,
+                    issuer: "https://auth.example.test/auth/v1", signing_alg: "not_migrated",
+                    oidc_id_token_ready: false, migration_status: "not_migrated",
+                },
+            }),
+        });
+
+        const response = await callback({ action: "migrate_oauth_server", ref: "project-a" });
+
+        expect(response.isError).toBe(true);
+        expect(JSON.parse(response.content[0].text)).toMatchObject({ operation: "auth.migrate_oauth_server", error: "INVALID_RESPONSE" });
+    });
+
     test("lists bounded users with pagination and projects safe fields", async () => {
         const requests: Array<{ path: string; options: unknown }> = [];
         const { schema, callback } = captureAuthTool({
