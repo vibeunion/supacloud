@@ -7,6 +7,7 @@ import { join } from "node:path";
 import {
     adoptRemoteDrop,
     assertControlPlaneSafetyVersion,
+    assertValidTransactionId,
     awaitRemoteUpgrade,
     buildAdoptDropScript,
     buildCleanupUnstartedUpgradeScript,
@@ -20,6 +21,7 @@ import {
     buildUpgradeLockScript,
     executeLocalUpgradeTransfer,
     failureRequiresRemoteReconciliation,
+    inspectRemoteUpgradeStatus,
     parseControlPlaneSafetyEvidence,
     parseControlPlanePreflightEvidence,
     parseUpgradeFailureEvidence,
@@ -85,6 +87,16 @@ const controlPlaneSafetyEvidence = {
     completed_at: "2026-08-19T00:00:00.000Z",
     current_key_checkpoint_present: true,
     sha256: "c".repeat(64),
+};
+
+const upgradeStatusControlPlaneEvidence = {
+    backup_id: controlPlaneSafetyEvidence.backup_id,
+    bytes: controlPlaneSafetyEvidence.bytes,
+    candidate_counts: controlPlaneSafetyEvidence.candidate_counts,
+    completed_at: controlPlaneSafetyEvidence.completed_at,
+    current_key_checkpoint_present: controlPlaneSafetyEvidence.current_key_checkpoint_present,
+    receipt_schema: controlPlaneSafetyEvidence.schema,
+    sha256: controlPlaneSafetyEvidence.sha256,
 };
 
 function successfulUpgradeLog(message = "upgrade committed"): string {
@@ -1536,5 +1548,279 @@ describe("local upgrade remote runner", () => {
             now.mockRestore();
             timeout.mockRestore();
         }
+    });
+});
+describe("upgrade_status inspection", () => {
+    const validUuid = "11111111-1111-4111-8111-111111111111";
+
+    test("validates UUID v4 transaction ID before any SSH interaction", () => {
+        expect(() => assertValidTransactionId(undefined)).toThrow("Invalid 'transaction_id': must be a valid UUID v4");
+        expect(() => assertValidTransactionId(null)).toThrow("Invalid 'transaction_id': must be a valid UUID v4");
+        expect(() => assertValidTransactionId("")).toThrow("Invalid 'transaction_id': must be a valid UUID v4");
+        expect(() => assertValidTransactionId("not-a-uuid")).toThrow("Invalid 'transaction_id': must be a valid UUID v4");
+        expect(() => assertValidTransactionId("11111111-1111-1111-8111-111111111111")).toThrow("Invalid 'transaction_id': must be a valid UUID v4");
+        expect(() => assertValidTransactionId("11111111-1111-4111-7111-111111111111")).toThrow("Invalid 'transaction_id': must be a valid UUID v4");
+        expect(() => assertValidTransactionId("11111111-1111-4111-8111-11111111111g")).toThrow("Invalid 'transaction_id': must be a valid UUID v4");
+        expect(() => assertValidTransactionId(" 11111111-1111-4111-8111-111111111111 ")).toThrow("Invalid 'transaction_id': must be a valid UUID v4");
+
+        expect(assertValidTransactionId(validUuid)).toBe(validUuid);
+        expect(assertValidTransactionId("550E8400-E29B-41D4-A716-446655440000")).toBe("550e8400-e29b-41d4-a716-446655440000");
+    });
+
+    test("emits a running nonterminal projection without receipts or mutation", async () => {
+        const ssh = new ScriptedSsh([
+            remoteState({ status: "RUNNING", serviceState: "active", stageExists: true, stageIsDirectory: true }),
+        ]);
+
+        const projection = await inspectRemoteUpgradeStatus(ssh as never, validUuid);
+        expect(projection).toEqual({
+            schema: "supacloud.admin.upgrade-status.v1",
+            transaction_id: validUuid,
+            lifecycle: "running",
+            status: "RUNNING",
+            service_state: "active",
+            unit_load_state: "loaded",
+            evidence: {
+                drop_exists: false,
+                log_exists: true,
+                stage_exists: true,
+                stage_is_directory: true,
+                status_exists: true,
+                unit_exists: true,
+            },
+        });
+        expect((projection as any).preflight).toBeUndefined();
+        expect((projection as any).transaction).toBeUndefined();
+        expect((projection as any).failure).toBeUndefined();
+        expect(ssh.commands).toHaveLength(1);
+        expect(ssh.commands[0]).toContain("systemctl is-active");
+        expect(ssh.commands[0]).not.toContain("rm ");
+        expect(ssh.commands[0]).not.toContain("systemctl stop");
+    });
+
+    test("emits a succeeded projection with validated safety receipts and no mutation", async () => {
+        const ssh = new ScriptedSsh([
+            remoteState({
+                status: "SUCCEEDED",
+                serviceState: "inactive",
+                unitLoadState: "not-found",
+                stageExists: false,
+                stageIsDirectory: false,
+                dropExists: false,
+                logExists: true,
+                statusExists: true,
+            }),
+            remoteResult(successfulUpgradeLog()),
+        ]);
+
+        const projection = await inspectRemoteUpgradeStatus(ssh as never, validUuid);
+        expect(projection).toEqual({
+            schema: "supacloud.admin.upgrade-status.v1",
+            transaction_id: validUuid,
+            lifecycle: "succeeded",
+            status: "SUCCEEDED",
+            service_state: "inactive",
+            unit_load_state: "not-found",
+            evidence: {
+                drop_exists: false,
+                log_exists: true,
+                stage_exists: false,
+                stage_is_directory: false,
+                status_exists: true,
+                unit_exists: false,
+            },
+            preflight: upgradeStatusControlPlaneEvidence,
+            transaction: upgradeStatusControlPlaneEvidence,
+        });
+        expect(JSON.stringify(projection)).not.toContain("/var/");
+        expect(ssh.commands).toHaveLength(2);
+        expect(ssh.commands[0]).toContain("systemctl is-active");
+        expect(ssh.commands[1]).toContain("tail -n 80");
+        for (const cmd of ssh.commands) {
+            expect(cmd).not.toContain("rm ");
+            expect(cmd).not.toContain("systemctl stop");
+            expect(cmd).not.toContain("systemctl restart");
+        }
+    });
+
+    test("emits a failed projection with validated failure receipt and no mutation", async () => {
+        const ssh = new ScriptedSsh([
+            remoteState({
+                status: "FAILED:9:TRANSACTION",
+                serviceState: "failed",
+                unitLoadState: "loaded",
+                stageExists: false,
+                stageIsDirectory: false,
+                dropExists: false,
+                logExists: true,
+                statusExists: true,
+            }),
+            remoteResult(failedUpgradeLog("Preflight schema verification failed")),
+        ]);
+
+        const projection = await inspectRemoteUpgradeStatus(ssh as never, validUuid);
+        expect(projection).toEqual({
+            schema: "supacloud.admin.upgrade-status.v1",
+            transaction_id: validUuid,
+            lifecycle: "failed",
+            status: "FAILED:9:TRANSACTION",
+            service_state: "failed",
+            unit_load_state: "loaded",
+            evidence: {
+                drop_exists: false,
+                log_exists: true,
+                stage_exists: false,
+                stage_is_directory: false,
+                status_exists: true,
+                unit_exists: true,
+            },
+            failure: {
+                causes: [],
+                receipt_schema: "supacloud.upgrade-failure.v1",
+                summary: "Preflight schema verification failed",
+            },
+        });
+        expect(ssh.commands).toHaveLength(2);
+        for (const cmd of ssh.commands) {
+            expect(cmd).not.toContain("rm ");
+            expect(cmd).not.toContain("systemctl stop");
+            expect(cmd).not.toContain("systemctl restart");
+        }
+    });
+
+    test("redacts remote paths from validated failure evidence", async () => {
+        const ssh = new ScriptedSsh([
+            remoteState({
+                status: "FAILED:9:TRANSACTION",
+                serviceState: "failed",
+                unitLoadState: "loaded",
+                stageExists: false,
+                dropExists: false,
+            }),
+            remoteResult(`SUPACLOUD_UPGRADE_FAILURE=${JSON.stringify({
+                schema: "supacloud.upgrade-failure.v1",
+                summary: "Backup verification failed at [/var/lib/supacloud/backups/control-plane.dump], file:///etc/private, and https://storage.example.com/archive?download=private",
+                causes: ["status=`/var/lib/supacloud/upgrade-runs/private.status`"],
+            })}\n`),
+        ]);
+
+        const projection = await inspectRemoteUpgradeStatus(ssh as never, validUuid);
+        expect(projection.lifecycle).toBe("failed");
+        if (projection.lifecycle !== "failed") throw new Error("Expected failed projection");
+        expect(projection.failure).toEqual({
+            receipt_schema: "supacloud.upgrade-failure.v1",
+            summary: "Backup verification failed at [[REDACTED_PATH]], [REDACTED_PATH], and [REDACTED_URL]",
+            causes: ["status=`[REDACTED_PATH]`"],
+        });
+        expect(JSON.stringify(projection)).not.toContain("/var/");
+    });
+
+    test("fails closed when a succeeded state has malformed receipts", async () => {
+        const ssh = new ScriptedSsh([
+            remoteState({
+                status: "SUCCEEDED",
+                serviceState: "inactive",
+                unitLoadState: "not-found",
+                stageExists: false,
+                stageIsDirectory: false,
+                dropExists: false,
+                logExists: true,
+                statusExists: true,
+            }),
+            remoteResult("SUPACLOUD_CONTROL_PLANE_UPGRADE_PREFLIGHT={invalid json\n"),
+        ]);
+
+        await expect(inspectRemoteUpgradeStatus(ssh as never, validUuid))
+            .rejects.toThrow("safety receipts are missing or invalid");
+        expect(ssh.commands).toHaveLength(2);
+        for (const cmd of ssh.commands) {
+            expect(cmd).not.toContain("rm ");
+        }
+    });
+
+    test("fails closed when a failed state has malformed failure receipt", async () => {
+        const ssh = new ScriptedSsh([
+            remoteState({
+                status: "FAILED:9:TRANSACTION",
+                serviceState: "inactive",
+                unitLoadState: "not-found",
+                stageExists: false,
+                stageIsDirectory: false,
+                dropExists: false,
+                logExists: true,
+                statusExists: true,
+            }),
+            remoteResult("SUPACLOUD_UPGRADE_FAILURE={invalid json\n"),
+        ]);
+
+        await expect(inspectRemoteUpgradeStatus(ssh as never, validUuid))
+            .rejects.toThrow("failure receipt is missing or invalid");
+        expect(ssh.commands).toHaveLength(2);
+        for (const cmd of ssh.commands) {
+            expect(cmd).not.toContain("rm ");
+        }
+    });
+
+    test("fails closed when nonterminal unit stopped unexpectedly", async () => {
+        const ssh = new ScriptedSsh([
+            remoteState({ status: "RUNNING", serviceState: "inactive", unitLoadState: "not-found" }),
+        ]);
+
+        await expect(inspectRemoteUpgradeStatus(ssh as never, validUuid))
+            .rejects.toThrow("Remote upgrade nonterminal state is inconsistent");
+        expect(ssh.commands).toHaveLength(1);
+    });
+
+    test("fails closed when terminal evidence is inconsistent", async () => {
+        const ssh = new ScriptedSsh([
+            remoteState({
+                status: "SUCCEEDED",
+                serviceState: "inactive",
+                unitLoadState: "not-found",
+                stageExists: true,
+            }),
+        ]);
+
+        await expect(inspectRemoteUpgradeStatus(ssh as never, validUuid))
+            .rejects.toThrow("terminal evidence is incomplete or inconsistent");
+        expect(ssh.commands).toHaveLength(1);
+    });
+
+    test("fails closed when status is unknown", async () => {
+        const ssh = new ScriptedSsh([
+            remoteState({ status: "UNKNOWN_/var/lib/private.status", serviceState: "active" }),
+        ]);
+
+        const failure = await inspectRemoteUpgradeStatus(ssh as never, validUuid).catch((error: unknown) => error);
+        expect(String(failure)).toContain("Remote upgrade status is unknown or invalid");
+        expect(String(failure)).not.toContain("/var/");
+        expect(ssh.commands).toHaveLength(1);
+    });
+
+    test("fails closed when log tail was redacted by transport", async () => {
+        const ssh = new ScriptedSsh([
+            remoteState({
+                status: "SUCCEEDED",
+                serviceState: "inactive",
+                unitLoadState: "not-found",
+                stageExists: false,
+                stageIsDirectory: false,
+                dropExists: false,
+                logExists: true,
+                statusExists: true,
+            }),
+            {
+                success: true,
+                stdout: successfulUpgradeLog(),
+                stderr: "",
+                code: 0,
+                stdoutRedacted: true,
+            },
+        ]);
+
+        const err = await inspectRemoteUpgradeStatus(ssh as never, validUuid).catch((e: unknown) => e);
+        expect(String(err)).toContain("retained log could not be read safely");
+        expect(String(err)).not.toContain(paths.status);
+        expect(String(err)).not.toContain(paths.log);
     });
 });
