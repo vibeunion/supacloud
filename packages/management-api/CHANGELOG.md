@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.61.10](https://github.com/vibeunion/supacloud/compare/management-api-v0.61.9...management-api-v0.61.10) (2026-08-19)
+
+
+### Bug Fixes
+
+* **edge-functions:** strip Deno type directives from runtime bundles ([25da878](https://github.com/vibeunion/supacloud/commit/25da878f4b54880515797e578eaafbd5276102fb))
+
 ## [0.61.9](https://github.com/vibeunion/supacloud/compare/management-api-v0.61.8...management-api-v0.61.9) (2026-08-19)
 
 
