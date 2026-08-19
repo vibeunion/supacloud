@@ -246,7 +246,9 @@ describe("gateway route builders", () => {
         expect(route.match).toEqual([{
             host: ["www.example.com"],
             path: ["/*"],
-            protocol: "http",
+            vars: {
+                "{http.request.scheme}": "http",
+            },
         }]);
         expect(route.handle).toEqual([{
             handler: "static_response",
