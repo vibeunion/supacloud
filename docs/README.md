@@ -21,6 +21,7 @@
 - [Deploy API](./deploy-api.md) - Deployment API documentation
 - [CI/CD Integration](./ci-cd-integration.md) - CI/CD integration with GitHub webhooks
 - [Frontend Hosting](./frontend-hosting.md) - SupaCloud Pages static site hosting
+- [Release Control Automation & Canary Spec](./release-control-automation-spec.md) - Automated headless PKCE canary, batch function releases, and CAS rollback primitives
 
 ## Authentication
 
