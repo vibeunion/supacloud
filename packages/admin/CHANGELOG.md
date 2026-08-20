@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.0](https://github.com/vibeunion/supacloud/compare/admin-v0.16.1...admin-v0.17.0) (2026-08-20)
+
+
+### Features
+
+* **gateway:** support SPA fallback mode for custom static routes ([#1011](https://github.com/vibeunion/supacloud/issues/1011)) ([455bf23](https://github.com/vibeunion/supacloud/commit/455bf2348442b8c7fa3d2b3c76653ed5cd1fbc83))
+
 ## [0.16.1](https://github.com/vibeunion/supacloud/compare/admin-v0.16.0...admin-v0.16.1) (2026-08-19)
 
 
