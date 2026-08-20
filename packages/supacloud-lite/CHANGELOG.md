@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.8.5...supacloud-lite-v0.9.0) (2026-08-20)
+
+
+### Features
+
+* complete Lite application primitives and PowerSync profile ([#1017](https://github.com/vibeunion/supacloud/issues/1017)) ([134444f](https://github.com/vibeunion/supacloud/commit/134444f98d310f65bf376be1ef7bb92445701b6b))
+
 ## [0.8.5](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.8.4...supacloud-lite-v0.8.5) (2026-08-18)
 
 
