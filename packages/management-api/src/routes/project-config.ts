@@ -68,6 +68,10 @@ import {
 } from "../services/project-database-config.service";
 import { publicScheduledFunctionProjectConfig } from "../utils/scheduled-function-config";
 import { normalizeOAuthServerConfig } from "../utils/project-config";
+import {
+  type ReplicationSettingRow,
+  summarizePowerSyncReadiness,
+} from "../services/replication-readiness";
 
 /** Map PostgreSQL column types to TypeScript types */
 function pgTypeToTs(udtName: string, dataType: string): string {
@@ -1352,15 +1356,110 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       const { getProjectDb, resolveDbName } = await import("../db");
       const dbName = await resolveDbName(params.ref);
       const db = getProjectDb(dbName);
-      const slots = await db`
-        SELECT slot_name, slot_type, active, restart_lsn
-        FROM pg_replication_slots
-      `;
-      const publications = await db`
-        SELECT pubname, pubinsert, pubupdate, pubdelete, pubtruncate
-        FROM pg_publication
-      `;
-      return { replication_slots: slots, publications };
+      const [slots, publications, replicationSettings, walSenderUsage] =
+        await Promise.all([
+          db`
+            SELECT slot_name, plugin, slot_type, database, active,
+                   restart_lsn, confirmed_flush_lsn,
+                   CASE
+                     WHEN restart_lsn IS NULL THEN NULL
+                     ELSE pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn)::text
+                   END AS retained_wal_bytes,
+                   CASE
+                     WHEN confirmed_flush_lsn IS NULL THEN NULL
+                     ELSE pg_wal_lsn_diff(
+                       pg_current_wal_lsn(), confirmed_flush_lsn
+                     )::text
+                   END AS unconfirmed_wal_bytes,
+                   to_jsonb(replication_slot) ->> 'wal_status' AS wal_status,
+                   to_jsonb(replication_slot) ->> 'safe_wal_size' AS safe_wal_size,
+                   to_jsonb(replication_slot) ->> 'inactive_since' AS inactive_since,
+                   to_jsonb(replication_slot) ->> 'conflicting' AS conflicting,
+                   to_jsonb(replication_slot) ->> 'invalidation_reason' AS invalidation_reason,
+                   to_jsonb(replication_slot) ->> 'failover' AS failover,
+                   to_jsonb(replication_slot) ->> 'synced' AS synced
+            FROM pg_replication_slots replication_slot
+            ORDER BY slot_name
+          `,
+          db`
+            SELECT publication.pubname,
+                   publication.puballtables,
+                   publication.pubinsert,
+                   publication.pubupdate,
+                   publication.pubdelete,
+                   publication.pubtruncate,
+                   (
+                     SELECT count(*)::integer
+                     FROM pg_publication_tables published_table
+                     WHERE published_table.pubname = publication.pubname
+                   ) AS table_count,
+                   (
+                     SELECT count(*)::integer
+                     FROM pg_publication_tables published_table
+                     JOIN pg_namespace namespace
+                       ON namespace.nspname = published_table.schemaname
+                     JOIN pg_class relation
+                       ON relation.relnamespace = namespace.oid
+                      AND relation.relname = published_table.tablename
+                     WHERE published_table.pubname = publication.pubname
+                       AND (
+                         relation.relreplident = 'n'
+                         OR (
+                           relation.relreplident = 'i'
+                           AND NOT EXISTS (
+                             SELECT 1
+                             FROM pg_index relation_index
+                             WHERE relation_index.indrelid = relation.oid
+                               AND relation_index.indisreplident
+                           )
+                         )
+                         OR (
+                           relation.relreplident = 'd'
+                           AND NOT EXISTS (
+                             SELECT 1
+                             FROM pg_index relation_index
+                             WHERE relation_index.indrelid = relation.oid
+                               AND relation_index.indisprimary
+                           )
+                         )
+                       )
+                   ) AS replica_identity_missing_table_count
+            FROM pg_publication publication
+            ORDER BY publication.pubname
+          `,
+          db`
+            SELECT name, setting, unit, source, pending_restart
+            FROM pg_settings
+            WHERE name IN (
+              'wal_level', 'max_wal_senders', 'max_replication_slots',
+              'max_slot_wal_keep_size', 'wal_keep_size', 'max_wal_size',
+              'checkpoint_timeout', 'idle_replication_slot_timeout'
+            )
+            ORDER BY name
+          `,
+          db`
+            SELECT count(*)::integer AS active_wal_senders
+            FROM pg_stat_replication
+          `,
+        ]);
+      const activeWalSenders = Number(walSenderUsage[0]?.active_wal_senders ?? 0);
+      return {
+        replication_slots: slots,
+        publications,
+        replication_settings: Object.fromEntries(
+          replicationSettings.map((row: ReplicationSettingRow) => [
+            String(row.name),
+            String(row.setting),
+          ]),
+        ),
+        replication_setting_details: replicationSettings,
+        powersync_readiness: summarizePowerSyncReadiness({
+          settings: replicationSettings,
+          slots,
+          publications,
+          activeWalSenders,
+        }),
+      };
     },
     {
 

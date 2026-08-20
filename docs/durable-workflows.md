@@ -90,6 +90,25 @@ Use `retry` for a transient error, `fail` for a terminal error, `complete` for t
 
 `claim` can return `null`, `claimed`, `dead_lettered`, or `discarded`. A discarded result means the internal queue contained an invalid, orphaned, or no-longer-claimable message; it has already been archived and the worker can continue polling. A `40001` claim error indicates concurrent work on the same run; retry the claim because its queue lease was rolled back.
 
+## Application transition handoff
+
+Applications should append workflow intent to a private domain outbox in the
+same transaction as the accepted business transition. A trusted service-role
+dispatcher leases the outbox item, calls `supacloud_workflow_start()` with a
+stored fixed run ID, and records completion. A lost acknowledgement retries the
+same run ID, so workflow start remains idempotent.
+
+Pass identifiers and the accepted entity version to workflow input, then let
+the worker read authoritative application data. Do not duplicate mutable
+business payloads or use workflow status as approval, signing, delivery, or
+ticket state. See [Application Business State Machines](./business-state-machines.md)
+for the Maker-Checker reference and optional workflow bridge.
+
+This preserves the workflow RPC's service-role-only boundary and lets a
+temporary worker or workflow outage accumulate visible pending intent without
+rolling back approval. Direct best-effort HTTP calls from a database trigger or
+browser provide neither atomicity nor durable recovery.
+
 ## Security and operations
 
 - Only `service_role` can execute the public workflow RPCs.
