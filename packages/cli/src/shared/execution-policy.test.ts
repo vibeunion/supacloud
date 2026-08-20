@@ -140,6 +140,23 @@ describe("CLI execution policy", () => {
         }
     });
 
+    test("classifies immutable frontend release reads and protects their mutations", () => {
+        expect(executionMode("frontend", "list_releases", {})).toBe("read");
+        expect(executionMode("frontend", "get_release", {})).toBe("read");
+        expect(executionMode("frontend", "upload_release", {})).toBe("write");
+        expect(executionMode("frontend", "activate_release", {})).toBe("write");
+        expect(() => authorizeExecution("frontend", { action: "upload_release", ref: "prod-ref" }, {
+            context: context(),
+        })).toThrow("--confirm-production prod-ref");
+        expect(() => authorizeExecution("frontend", { action: "activate_release", ref: "prod-ref" }, {
+            context: context(),
+            confirmProduction: "prod-ref",
+        })).not.toThrow();
+        expect(() => authorizeExecution("frontend", { action: "upload_release", ref: "prod-ref" }, {
+            context: context({ production: false, environment: "test", readOnly: true }),
+        })).toThrow("SUPACLOUD_READ_ONLY=true");
+    });
+
     test("classifies Function, Scheduled Function, and Storage lifecycle actions", () => {
         expect(executionMode("database", "lint_migrations", {})).toBe("local");
         expect(executionMode("database", "lint", {})).toBe("local");

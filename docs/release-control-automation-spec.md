@@ -169,16 +169,20 @@ Provides immutable artifact retention and instant zero-reupload rollbacks for Su
 ### Commands
 
 ```bash
-# Upload and activate a new build
-supacloud-cli frontend deploy_upload \
+# Upload a prebuilt immutable release
+supacloud-cli frontend upload_release \
   --ref "$PROJECT_REF" \
-  --dist-dir ./app/build \
-  --manifest ./app/build/build-manifest.json
+  --id "$DEPLOYMENT_ID" \
+  --zip_path ./app/build.zip
 
-# Instantly activate a previous deployment artifact
-supacloud-cli frontend activate \
+# Activate a previously uploaded release with compare-and-swap protection
+supacloud-cli frontend activate_release \
   --ref "$PROJECT_REF" \
-  --deployment-id "dep-20260819-093012-abc123"
+  --id "$DEPLOYMENT_ID" \
+  --release_id "$RELEASE_SHA256" \
+  --expected_active_release_id "$CURRENT_RELEASE_SHA256_OR_ABSENT" \
+  --expected_activation_id "$CURRENT_ACTIVATION_UUID_OR_ABSENT" \
+  --mutation_id "$RETRY_STABLE_UUID_V4"
 ```
 
 ---
@@ -192,4 +196,4 @@ supacloud-cli frontend activate \
 | **Function Cleanup** | Manual dashboard deletion (no CLI CAS delete) | `edge_functions delete --expected-version ...` |
 | **Secrets Update** | Blind upsert without mutation receipt | CAS-checked `secrets upsert` with revision receipt |
 | **Schema Reload** | Manual `postgrest_restart` + client table polling | Native reload notification & status confirmation |
-| **Frontend Rollback** | Client re-compilation and re-upload of old zip | Instant artifact activation by `deployment-id` |
+| **Frontend Rollback** | Client re-compilation and re-upload of old zip | Instant immutable release activation by SHA-256 with CAS |

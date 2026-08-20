@@ -106,6 +106,32 @@ loopback development origins, with the default `:80` likewise omitted. Use
 `SUPACLOUD_PROJECT_REF` when it cannot be inferred from a managed
 `<ref>.api.*` application hostname.
 
+### Immutable frontend releases
+
+The `frontend` command keeps the existing deployment, Git, and legacy ZIP
+actions and also exposes the immutable prebuilt release workflow:
+
+```bash
+supacloud-cli frontend list_releases --ref abc123 --id web
+supacloud-cli frontend get_release --ref abc123 --id web --release_id <sha256>
+supacloud-cli frontend upload_release --ref abc123 --id web --zip_path ./dist.zip
+supacloud-cli frontend activate_release --ref abc123 --id web \
+  --release_id <sha256> \
+  --expected_active_release_id absent \
+  --expected_activation_id absent \
+  --mutation_id <retry-stable-uuid-v4>
+```
+
+`upload_release` hashes and streams an existing regular ZIP file without
+buffering the full archive. The Management API binds the upload to that SHA-256,
+and the CLI reads the immutable release back before reporting success.
+`activate_release` uses both the observed active release and activation IDs as
+optimistic concurrency tokens, then verifies the authoritative active release.
+Use the values returned by `list_releases`; `absent` is valid only when no
+release has been activated. Production uploads and activations require the
+normal exact `--confirm-production <ref>` value, and
+`SUPACLOUD_READ_ONLY=true` blocks both mutations.
+
 ### Verified release controls
 
 `release` is an official CLI entry point for verified Management API controls

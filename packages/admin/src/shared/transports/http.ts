@@ -21,6 +21,7 @@ export interface HttpResult<T = unknown> {
 interface HttpPostOptions {
     timeoutMs?: number;
     maxJsonBytes?: number;
+    responseTimeoutMs?: number;
 }
 
 export interface HttpBinaryPostOptions {
@@ -29,6 +30,7 @@ export interface HttpBinaryPostOptions {
     contentSha256: string;
     maxJsonBytes: number;
     timeoutMs?: number;
+    responseTimeoutMs?: number;
 }
 
 export interface HttpBinaryBody {
@@ -89,6 +91,14 @@ function validatedPostTimeout(options?: HttpPostOptions): number {
     return timeoutMs;
 }
 
+function validatedResponseTimeout(timeoutMs: number | undefined): number | undefined {
+    if (timeoutMs === undefined) return undefined;
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > MAX_POST_TIMEOUT_MS) {
+        throw new RangeError(`HTTP response timeout must be between 1 and ${MAX_POST_TIMEOUT_MS} ms`);
+    }
+    return timeoutMs;
+}
+
 function validatedGetResponseLimit(options: HttpGetOptions): number | undefined {
     const maxBytes = options.maxResponseBytes;
     if (maxBytes === undefined) return undefined;
@@ -122,13 +132,14 @@ function joinedResponseBytes(chunks: Uint8Array[], totalBytes: number): Uint8Arr
     return responseBytes;
 }
 
-async function boundedResponseBytes(response: Response, maxBytes: number): Promise<Uint8Array | null> {
-    if (responseExceedsDeclaredLimit(response, maxBytes)) {
-        void response.body?.cancel().catch(() => undefined);
-        return null;
-    }
-    if (!response.body) return new Uint8Array();
-    const reader = response.body.getReader();
+function cancelResponseReader(reader: ReadableStreamDefaultReader<Uint8Array>): void {
+    void reader.cancel().catch(() => undefined);
+}
+
+async function responseBytesFromReader(
+    reader: ReadableStreamDefaultReader<Uint8Array>,
+    maxBytes: number,
+): Promise<Uint8Array | null> {
     const chunks: Uint8Array[] = [];
     let totalBytes = 0;
     while (true) {
@@ -136,11 +147,49 @@ async function boundedResponseBytes(response: Response, maxBytes: number): Promi
         if (done) return joinedResponseBytes(chunks, totalBytes);
         totalBytes += value.byteLength;
         if (totalBytes > maxBytes) {
-            void reader.cancel().catch(() => undefined);
+            cancelResponseReader(reader);
             return null;
         }
         chunks.push(value);
     }
+}
+
+async function responseBytesBeforeDeadline(
+    reader: ReadableStreamDefaultReader<Uint8Array>,
+    maxBytes: number,
+    responseTimeoutMs: number,
+): Promise<Uint8Array | null> {
+    let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<null>((resolve) => {
+        deadlineTimer = setTimeout(() => {
+            cancelResponseReader(reader);
+            resolve(null);
+        }, responseTimeoutMs);
+    });
+    try {
+        return await Promise.race([responseBytesFromReader(reader, maxBytes), deadline]);
+    } catch {
+        cancelResponseReader(reader);
+        return null;
+    } finally {
+        clearTimeout(deadlineTimer);
+    }
+}
+
+async function boundedResponseBytes(
+    response: Response,
+    maxBytes: number,
+    responseTimeoutMs?: number,
+): Promise<Uint8Array | null> {
+    if (responseExceedsDeclaredLimit(response, maxBytes)) {
+        void response.body?.cancel().catch(() => undefined);
+        return null;
+    }
+    if (!response.body) return new Uint8Array();
+    const reader = response.body.getReader();
+    return responseTimeoutMs === undefined
+        ? responseBytesFromReader(reader, maxBytes)
+        : responseBytesBeforeDeadline(reader, maxBytes, responseTimeoutMs);
 }
 
 async function boundedResponseJson(response: Response, maxBytes: number): Promise<unknown> {
@@ -155,8 +204,12 @@ async function boundedResponseJson(response: Response, maxBytes: number): Promis
     }
 }
 
-async function strictBoundedResponseJson(response: Response, maxBytes: number): Promise<unknown> {
-    const responseBytes = await boundedResponseBytes(response, maxBytes);
+async function strictBoundedResponseJson(
+    response: Response,
+    maxBytes: number,
+    responseTimeoutMs?: number,
+): Promise<unknown> {
+    const responseBytes = await boundedResponseBytes(response, maxBytes, responseTimeoutMs);
     if (responseBytes === null) throw new Error("HTTP JSON response exceeded its byte limit");
     const responseText = new TextDecoder("utf-8", { fatal: true }).decode(responseBytes);
     return JSON.parse(responseText);
@@ -262,6 +315,7 @@ export class HttpTransport {
     ): Promise<HttpResult<T>> {
         const timeoutMs = validatedPostTimeout(options);
         const maxJsonBytes = validatedStrictJsonLimit({ maxJsonBytes: options?.maxJsonBytes });
+        const responseTimeoutMs = validatedResponseTimeout(options?.responseTimeoutMs);
         let response: Response;
         try {
             response = await fetchWithRetry(`${this.baseUrl}${path}`, {
@@ -274,7 +328,7 @@ export class HttpTransport {
         }
         if (maxJsonBytes !== undefined) {
             try {
-                const data = await strictBoundedResponseJson(response, maxJsonBytes) as T;
+                const data = await strictBoundedResponseJson(response, maxJsonBytes, responseTimeoutMs) as T;
                 return { ok: response.ok, status: response.status, data };
             } catch {
                 return responseBodyFailure<T>(response.status);
@@ -303,6 +357,7 @@ export class HttpTransport {
         const timeoutMs = validatedPostTimeout(
             options.timeoutMs === undefined ? undefined : { timeoutMs: options.timeoutMs },
         );
+        const responseTimeoutMs = validatedResponseTimeout(options.responseTimeoutMs);
         try {
             const request = {
                 method: "POST",
@@ -317,7 +372,7 @@ export class HttpTransport {
             } as RequestInit & { duplex: "half" };
             const response = await fetchWithRetry(`${this.baseUrl}${path}`, request, timeoutMs);
             try {
-                const data = await strictBoundedResponseJson(response, maxJsonBytes!) as T;
+                const data = await strictBoundedResponseJson(response, maxJsonBytes!, responseTimeoutMs) as T;
                 return { ok: response.ok, status: response.status, data };
             } catch {
                 return responseBodyFailure<T>(response.status);

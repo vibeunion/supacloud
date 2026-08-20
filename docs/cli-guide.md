@@ -55,6 +55,8 @@ supacloud-cli supabase migration_new --name add_accounts
 supacloud-cli supabase db_diff --schema public --name add_accounts
 supacloud-cli supabase push --ref abc123 --dir supabase/migrations --dry_run
 supacloud-cli frontend list --ref abc123
+supacloud-cli frontend list_releases --ref abc123 --id web
+supacloud-cli frontend upload_release --ref abc123 --id web --zip_path ./dist.zip
 ```
 
 Both `--key value` and `--key=value` syntax are supported. `supacloud-cli status`
@@ -277,6 +279,24 @@ Use a direct Postgres DSN with `pg`, `postgres.js`, or equivalent drivers for ap
 - `task_events`
 - `diagnostics`
 - `gateway` (requires an admin-capable token)
+
+The `frontend` group supports both the existing deployment/Git/legacy ZIP
+actions and immutable prebuilt release control. Use `list_releases` to read the
+active release and activation IDs, `upload_release` to stream a local ZIP bound
+to its SHA-256, and `activate_release` with the observed IDs plus a retry-stable
+UUIDv4 mutation ID. The CLI verifies upload and activation readback before
+reporting success. Production mutations require exact project confirmation;
+read-only mode blocks them before opening the archive or sending HTTP.
+
+```bash
+supacloud-cli frontend list_releases --ref abc123 --id web
+supacloud-cli frontend get_release --ref abc123 --id web --release_id <sha256>
+supacloud-cli frontend activate_release --ref abc123 --id web \
+  --release_id <sha256> \
+  --expected_active_release_id <current-sha256-or-absent> \
+  --expected_activation_id <current-uuid-v4-or-absent> \
+  --mutation_id <retry-stable-uuid-v4>
+```
 
 `edge_functions deploy --path <file-or-directory>` uses Bun to bundle local
 TypeScript and dependencies and runs a local syntax check before upload. The

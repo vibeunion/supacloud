@@ -36,6 +36,28 @@ function createTransport(): HttpTransport {
     return new HttpTransport({ baseUrl: "https://api.example.test", token: "test-token" });
 }
 
+function binaryBody(bytes: number[]) {
+    const body = new Uint8Array(bytes);
+    return {
+        byteLength: body.byteLength,
+        stream: new ReadableStream<Uint8Array>({
+            start(controller) {
+                controller.enqueue(body);
+                controller.close();
+            },
+        }),
+    };
+}
+
+function postBinary(transport: HttpTransport) {
+    return transport.postBinary("/resource", binaryBody([1]), {
+        contentType: "application/zip",
+        contentLength: 1,
+        contentSha256: "a".repeat(64),
+        maxJsonBytes: 1024,
+    });
+}
+
 test("HttpTransport sends an optional application API key only when configured", async () => {
     const observedHeaders: Array<[string | null, string | null]> = [];
     globalThis.fetch = (async (_input, init) => {
@@ -94,6 +116,7 @@ const redirectedRequests = [
         "release POST",
         (transport: HttpTransport) => transport.postReleaseMutation("/resource", { secret: "request-secret" }),
     ],
+    ["binary POST", postBinary],
     ["multipart POST", (transport: HttpTransport) => {
         const form = new FormData();
         form.set("secret", "request-secret");
@@ -149,6 +172,7 @@ describe("HttpTransport retry policy", () => {
 
     const unsafeRequests = [
         ["POST", (transport: HttpTransport) => transport.post("/resource", { name: "test" }), 1],
+        ["binary POST", postBinary, 1],
         ["multipart POST", (transport: HttpTransport) => transport.postMultipart("/resource", new FormData()), 1],
         ["PATCH", (transport: HttpTransport) => transport.patch("/resource", { name: "test" }), 1],
         ["release PATCH", (transport: HttpTransport) => transport.patchReleaseMutation("/resource", { name: "test" }), 2],
@@ -307,6 +331,23 @@ describe("HttpTransport retry policy", () => {
         );
         expect(fetchCalls).toBe(0);
     });
+
+    test.each([0, 36 * 60_000 + 1, 1.5])(
+        "rejects invalid POST response timeout %s before dispatch",
+        async responseTimeoutMs => {
+            let fetchCalls = 0;
+            globalThis.fetch = (async () => {
+                fetchCalls += 1;
+                return Response.json({ ok: true });
+            }) as unknown as typeof fetch;
+
+            await expect(createTransport().post("/resource", {}, {
+                maxJsonBytes: 1024,
+                responseTimeoutMs,
+            })).rejects.toThrow("HTTP response timeout must be between");
+            expect(fetchCalls).toBe(0);
+        },
+    );
 
     test("uses an explicit ordinary POST header timeout", async () => {
         const scheduledDelays: number[] = [];
@@ -609,5 +650,104 @@ describe("HttpTransport release mutation response boundary", () => {
         const response = await createTransport().postReleaseMutation("/resource", { expected: "7" });
 
         expect(response).toEqual({ ok: false, status, data: responseBody });
+    });
+});
+
+describe("HttpTransport raw binary mutations", () => {
+    test("sends an exact ZIP body and returns only a bounded JSON response", async () => {
+        const captured = { headers: new Headers(), body: [] as number[] };
+        globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+            const request = new Request(input, init);
+            captured.headers = request.headers;
+            captured.body = [...new Uint8Array(await request.arrayBuffer())];
+            return Response.json({ ok: true });
+        }) as unknown as typeof fetch;
+
+        const response = await createTransport().postBinary(
+            "/frontend/releases",
+            binaryBody([1, 2, 3]),
+            {
+                contentType: "application/zip",
+                contentLength: 3,
+                contentSha256: "a".repeat(64),
+                maxJsonBytes: 1024,
+            },
+        );
+
+        expect(response).toEqual({ ok: true, status: 200, data: { ok: true } });
+        expect(captured.headers.get("content-type")).toBe("application/zip");
+        expect(captured.headers.get("content-length")).toBe("3");
+        expect(captured.headers.get("x-supacloud-content-sha256")).toBe("a".repeat(64));
+        expect(captured.body).toEqual([1, 2, 3]);
+    });
+
+    test("rejects invalid binary metadata before dispatch", async () => {
+        let fetchCalls = 0;
+        globalThis.fetch = (async () => {
+            fetchCalls += 1;
+            return Response.json({});
+        }) as unknown as typeof fetch;
+        const transport = createTransport();
+        await expect(transport.postBinary("/frontend/releases", binaryBody([1]), {
+            contentType: "application/json",
+            contentLength: 1,
+            contentSha256: "a".repeat(64),
+            maxJsonBytes: 1024,
+        })).rejects.toThrow("content type");
+        await expect(transport.postBinary("/frontend/releases", binaryBody([1]), {
+            contentType: "application/zip",
+            contentLength: 2,
+            contentSha256: "a".repeat(64),
+            maxJsonBytes: 1024,
+        })).rejects.toThrow("length");
+        expect(fetchCalls).toBe(0);
+    });
+
+    test("rejects an oversized binary response without reflecting its body", async () => {
+        const privateMarker = "private-binary-response";
+        globalThis.fetch = (async () => new Response(JSON.stringify({ privateMarker }), {
+            status: 201,
+            headers: { "content-length": "2048" },
+        })) as unknown as typeof fetch;
+        const response = await createTransport().postBinary("/frontend/releases", binaryBody([1]), {
+            contentType: "application/zip",
+            contentLength: 1,
+            contentSha256: "a".repeat(64),
+            maxJsonBytes: 1024,
+        });
+        expect(response.responseReadError).toBe(true);
+        expect(JSON.stringify(response)).not.toContain(privateMarker);
+    });
+
+    test.each([
+        ["JSON activation", (transport: HttpTransport) => transport.post("/frontend/activate", {}, {
+            maxJsonBytes: 1024,
+            responseTimeoutMs: 10,
+        })],
+        ["ZIP upload", (transport: HttpTransport) => transport.postBinary(
+            "/frontend/releases",
+            binaryBody([1]),
+            {
+                contentType: "application/zip",
+                contentLength: 1,
+                contentSha256: "a".repeat(64),
+                maxJsonBytes: 1024,
+                responseTimeoutMs: 10,
+            },
+        )],
+    ] as const)("ends a stalled %s response body as unreadable", async (_label, request) => {
+        globalThis.setTimeout = originalSetTimeout;
+        globalThis.clearTimeout = originalClearTimeout;
+        globalThis.fetch = (async () => new Response(new ReadableStream<Uint8Array>({
+            start(controller) {
+                controller.enqueue(new TextEncoder().encode('{"committed":true'));
+            },
+        }), { status: 200 })) as unknown as typeof fetch;
+
+        const startedAt = Date.now();
+        const response = await request(createTransport());
+
+        expect(Date.now() - startedAt).toBeLessThan(1_000);
+        expect(response.responseReadError).toBe(true);
     });
 });
