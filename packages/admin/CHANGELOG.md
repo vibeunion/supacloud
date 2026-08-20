@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.0](https://github.com/vibeunion/supacloud/compare/admin-v0.17.0...admin-v0.18.0) (2026-08-20)
+
+
+### Features
+
+* **cli:** add immutable frontend release control ([#1022](https://github.com/vibeunion/supacloud/issues/1022)) ([435ff43](https://github.com/vibeunion/supacloud/commit/435ff4316e5cd2e70f7851448c2863fad4527e66))
+
 ## [0.17.0](https://github.com/vibeunion/supacloud/compare/admin-v0.16.1...admin-v0.17.0) (2026-08-20)
 
 
