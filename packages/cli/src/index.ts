@@ -423,6 +423,13 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
         if (branchHelpTool) {
             tools.branch = { schema: branchHelpTool.schema, callback: branchContextCallback };
         }
+        const frontendContextCallback = tools.frontend.callback;
+        const frontendHelpTool = captureTools((server) => (
+            registerFrontendTools(server as any, {} as HttpTransport)
+        )).frontend;
+        if (frontendHelpTool) {
+            tools.frontend = { schema: frontendHelpTool.schema, callback: frontendContextCallback };
+        }
     };
 
     if (context.credentialScope !== "management" || !context.apiUrl || !context.apiToken) {

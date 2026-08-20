@@ -139,6 +139,10 @@ function logicalBackupRestoreArguments(overrides: Record<string, string> = {}): 
     ];
 }
 
+function releaseBasePath(projectRef: string, deploymentId: string): string {
+    return `/v1/projects/${projectRef}/frontend/deployments/${deploymentId}/releases`;
+}
+
 describe("supacloud-cli process contract", () => {
     test("prints the installed package version without project context", async () => {
         const response = await runProjectCli(["--version"]);
@@ -194,6 +198,23 @@ describe("supacloud-cli process contract", () => {
         expect(response.stderr).toContain("delete_bucket");
         expect(response.stderr).toContain("--file_size_limit");
         expect(response.stderr).toContain("--allowed_mime_types");
+    });
+
+    test("keeps immutable frontend release help without project configuration", async () => {
+        const workspace = mkdtempSync(join(tmpdir(), "supacloud-cli-frontend-help-"));
+        temporaryDirectories.push(workspace);
+
+        const response = await runProjectCli(["frontend", "--help"], {}, workspace);
+
+        expect(response.exitCode).toBe(0);
+        expect(response.stderr).toContain("list_releases");
+        expect(response.stderr).toContain("get_release");
+        expect(response.stderr).toContain("upload_release");
+        expect(response.stderr).toContain("activate_release");
+        expect(response.stderr).toContain("--zip_path");
+        expect(response.stderr).toContain("--expected_active_release_id");
+        expect(response.stderr).toContain("--expected_activation_id");
+        expect(response.stderr).toContain("--mutation_id");
     });
 
     test("runs migration lint locally without project credentials", async () => {
@@ -322,6 +343,163 @@ describe("supacloud-cli process contract", () => {
         expect(crossRef.exitCode).toBe(1);
         expect(crossRef.stderr).toContain("cannot target a different project");
         expect(requestedPaths).toEqual(["/v1/projects/prod-ref/pause"]);
+    });
+
+    test("blocks production frontend release upload before file or HTTP without exact confirmation", async () => {
+        const workspace = mkdtempSync(join(tmpdir(), "supacloud-cli-production-frontend-"));
+        temporaryDirectories.push(workspace);
+        let requestCount = 0;
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch() {
+                requestCount += 1;
+                return Response.json({});
+            },
+        });
+        servers.push(server);
+        writeFileSync(join(workspace, ".env.supacloud.production"), [
+            "SUPACLOUD_ENV=production",
+            `SUPACLOUD_API_URL=http://127.0.0.1:${server.port}`,
+            "SUPACLOUD_API_TOKEN=frontend-production-token",
+            "SUPACLOUD_PROJECT_REF=prod-ref",
+        ].join("\n") + "\n");
+
+        const response = await runProjectCli([
+            "frontend", "upload_release", "--ref", "prod-ref", "--id", "web",
+            "--zip_path", join(workspace, "missing.zip"), "--env", "production",
+        ], {}, workspace);
+
+        expect(response.exitCode).toBe(1);
+        expect(response.stderr).toContain("--confirm-production prod-ref");
+        expect(response.stdout + response.stderr).not.toContain("frontend-production-token");
+        expect(requestCount).toBe(0);
+    });
+
+    test("runs authoritative immutable frontend release list, upload, and activation flows", async () => {
+        const workspace = mkdtempSync(join(tmpdir(), "supacloud-cli-frontend-release-"));
+        temporaryDirectories.push(workspace);
+        const archivePath = join(workspace, "site.zip");
+        writeFileSync(archivePath, "zip");
+        const projectRef = "abc123";
+        const deploymentId = "web";
+        const releaseId = createHash("sha256").update("zip").digest("hex");
+        const treeSha256 = "b".repeat(64);
+        const mutationId = SCHEDULE_ID;
+        const requested: Array<{ method: string; path: string; body?: unknown; sha256?: string }> = [];
+        const release = {
+            schema: "supacloud.frontend-release.v1",
+            project_ref: projectRef,
+            deployment_id: deploymentId,
+            release_id: releaseId,
+            sha256: releaseId,
+            tree_sha256: treeSha256,
+            size_bytes: 3,
+            file_count: 1,
+            created_at: "2026-08-20T00:00:00.000Z",
+            kind: "prebuilt_static",
+        };
+        const inventory = (active: boolean) => ({
+            project_ref: projectRef,
+            deployment_id: deploymentId,
+            active_release_id: active ? releaseId : null,
+            active_activation_id: active ? mutationId : null,
+            releases: [release],
+            next_cursor: null,
+        });
+        let active = false;
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            async fetch(request) {
+                const url = new URL(request.url);
+                const entry: { method: string; path: string; body?: unknown; sha256?: string } = {
+                    method: request.method,
+                    path: `${url.pathname}${url.search}`,
+                };
+                requested.push(entry);
+                const releaseBase = `/v1/projects/${projectRef}/frontend/deployments/${deploymentId}/releases`;
+                if (request.method === "GET" && url.pathname === releaseBase) {
+                    return Response.json(inventory(active));
+                }
+                if (request.method === "POST" && url.pathname === releaseBase) {
+                    entry.sha256 = request.headers.get("x-supacloud-content-sha256") || undefined;
+                    expect(new TextDecoder().decode(await request.arrayBuffer())).toBe("zip");
+                    return Response.json({ project_ref: projectRef, deployment_id: deploymentId, release }, {
+                        status: 201,
+                    });
+                }
+                if (request.method === "GET" && url.pathname === `${releaseBase}/${releaseId}`) {
+                    return Response.json({ project_ref: projectRef, deployment_id: deploymentId, release });
+                }
+                if (request.method === "POST" && url.pathname === `${releaseBase}/${releaseId}/activate`) {
+                    entry.body = await request.json();
+                    active = true;
+                    return Response.json({
+                        project_ref: projectRef,
+                        deployment_id: deploymentId,
+                        active_release_id: releaseId,
+                        activation_id: mutationId,
+                        release,
+                        mutation: { mutation_id: mutationId, status: "succeeded", replayed: false },
+                    });
+                }
+                return Response.json({}, { status: 404 });
+            },
+        });
+        servers.push(server);
+        const environment = {
+            SUPACLOUD_ENV: "test",
+            SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+            SUPACLOUD_API_TOKEN: "frontend-test-token",
+            SUPACLOUD_PROJECT_REF: projectRef,
+        };
+
+        const listed = await runProjectCli([
+            "frontend", "list_releases", "--ref", projectRef, "--id", deploymentId,
+        ], environment, workspace);
+        const uploaded = await runProjectCli([
+            "frontend", "upload_release", "--ref", projectRef, "--id", deploymentId,
+            "--zip_path", archivePath,
+        ], environment, workspace);
+        const activated = await runProjectCli([
+            "frontend", "activate_release", "--ref", projectRef, "--id", deploymentId,
+            "--release_id", releaseId,
+            "--expected_active_release_id", "absent",
+            "--expected_activation_id", "absent",
+            "--mutation_id", mutationId,
+        ], environment, workspace);
+
+        expect(listed.exitCode).toBe(0);
+        expect(JSON.parse(listed.stdout).releases).toHaveLength(1);
+        expect(uploaded.exitCode).toBe(0);
+        expect(JSON.parse(uploaded.stdout).release.release_id).toBe(releaseId);
+        expect(activated.exitCode).toBe(0);
+        expect(JSON.parse(activated.stdout)).toMatchObject({
+            active_release_id: releaseId,
+            activation_id: mutationId,
+        });
+        expect(requested).toEqual([
+            { method: "GET", path: `${releaseBasePath(projectRef, deploymentId)}?limit=50` },
+            {
+                method: "POST",
+                path: releaseBasePath(projectRef, deploymentId),
+                sha256: releaseId,
+            },
+            { method: "GET", path: `${releaseBasePath(projectRef, deploymentId)}/${releaseId}` },
+            {
+                method: "POST",
+                path: `${releaseBasePath(projectRef, deploymentId)}/${releaseId}/activate`,
+                body: {
+                    expected_active_release_id: "absent",
+                    expected_activation_id: "absent",
+                    mutation_id: mutationId,
+                },
+            },
+            { method: "GET", path: `${releaseBasePath(projectRef, deploymentId)}?limit=100` },
+            { method: "GET", path: `${releaseBasePath(projectRef, deploymentId)}/${releaseId}` },
+        ]);
+        expect(listed.stdout + uploaded.stdout + activated.stdout).not.toContain("frontend-test-token");
     });
 
     test("protects a release-canary OAuth client create and keeps upstream secrets out of the process receipt", async () => {

@@ -40,7 +40,7 @@ afterEach(async () => {
     roots.clear();
 });
 
-describe("admin immutable frontend release control", () => {
+describe("immutable frontend release control", () => {
     test("lists and gets only strict secret-free release projections", async () => {
         const inventory = {
             project_ref: PROJECT_REF,
@@ -74,7 +74,7 @@ describe("admin immutable frontend release control", () => {
     });
 
     test("uploads raw verified bytes and requires exact immutable readback", async () => {
-        const root = await mkdtemp(join(tmpdir(), "supacloud-admin-frontend-release-"));
+        const root = await mkdtemp(join(tmpdir(), "supacloud-cli-frontend-release-"));
         roots.add(root);
         const path = join(root, "site.zip");
         await writeFile(path, "zip");
@@ -119,7 +119,7 @@ describe("admin immutable frontend release control", () => {
     });
 
     test("streams archive bytes in bounded chunks without buffering the file", async () => {
-        const root = await mkdtemp(join(tmpdir(), "supacloud-admin-frontend-release-stream-"));
+        const root = await mkdtemp(join(tmpdir(), "supacloud-cli-frontend-release-stream-"));
         roots.add(root);
         const path = join(root, "site.zip");
         const archiveBytes = new Uint8Array(64 * 1024 * 2 + 17).fill(0x61);
@@ -169,7 +169,7 @@ describe("admin immutable frontend release control", () => {
     });
 
     test("rejects upload readback envelopes and records for another deployment", async () => {
-        const root = await mkdtemp(join(tmpdir(), "supacloud-admin-frontend-release-identity-"));
+        const root = await mkdtemp(join(tmpdir(), "supacloud-cli-frontend-release-identity-"));
         roots.add(root);
         const path = join(root, "site.zip");
         await writeFile(path, "zip");
@@ -208,8 +208,8 @@ describe("admin immutable frontend release control", () => {
         expect(parsed(response).error).toEqual({ code: "OUTCOME_UNKNOWN", http_status: 200 });
     });
 
-    test("converges on the content-addressed release after an upload response is lost", async () => {
-        const root = await mkdtemp(join(tmpdir(), "supacloud-admin-frontend-release-readback-"));
+    test("converges on the content-addressed release after the upload response body times out", async () => {
+        const root = await mkdtemp(join(tmpdir(), "supacloud-cli-frontend-release-readback-"));
         roots.add(root);
         const path = join(root, "site.zip");
         await writeFile(path, "zip");
@@ -217,7 +217,12 @@ describe("admin immutable frontend release control", () => {
         const response = await uploadFrontendRelease({
             postBinary: async (_endpoint: string, _body: unknown, options: Record<string, unknown>) => {
                 digest = String(options.contentSha256);
-                return { ok: false, status: 500, data: { token: "must-not-escape" }, transportError: true };
+                return {
+                    ok: false,
+                    status: 201,
+                    data: { token: "must-not-escape" },
+                    responseReadError: true,
+                };
             },
             get: async () => ({
                 ok: true,
@@ -238,7 +243,7 @@ describe("admin immutable frontend release control", () => {
     test.each([400, 401, 403, 409, 429])(
         "preserves deterministic HTTP %s upload failures without readback",
         async (status) => {
-            const root = await mkdtemp(join(tmpdir(), "supacloud-admin-frontend-release-4xx-"));
+            const root = await mkdtemp(join(tmpdir(), "supacloud-cli-frontend-release-4xx-"));
             roots.add(root);
             const path = join(root, "site.zip");
             await writeFile(path, "zip");
@@ -263,7 +268,7 @@ describe("admin immutable frontend release control", () => {
     );
 
     test("reads back an HTTP 408 upload outcome", async () => {
-        const root = await mkdtemp(join(tmpdir(), "supacloud-admin-frontend-release-408-"));
+        const root = await mkdtemp(join(tmpdir(), "supacloud-cli-frontend-release-408-"));
         roots.add(root);
         const path = join(root, "site.zip");
         await writeFile(path, "zip");
@@ -293,7 +298,7 @@ describe("admin immutable frontend release control", () => {
     });
 
     test("rejects a symlink archive before any HTTP request", async () => {
-        const root = await mkdtemp(join(tmpdir(), "supacloud-admin-frontend-release-link-"));
+        const root = await mkdtemp(join(tmpdir(), "supacloud-cli-frontend-release-link-"));
         roots.add(root);
         await writeFile(join(root, "site.zip"), "zip");
         await symlink(join(root, "site.zip"), join(root, "link.zip"));
@@ -312,7 +317,10 @@ describe("admin immutable frontend release control", () => {
         const http = {
             post: async (_path: string, body: unknown, options: Record<string, unknown>) => {
                 calls.push({ method: "POST", body });
-                expect(options).toEqual({ maxJsonBytes: 1024 * 1024 });
+                expect(options).toEqual({
+                    maxJsonBytes: 1024 * 1024,
+                    responseTimeoutMs: 5_000,
+                });
                 return {
                     ok: true,
                     status: 200,
@@ -591,6 +599,81 @@ describe("admin immutable frontend release control", () => {
                         active_activation_id: MUTATION_ID,
                         releases: olderReleases,
                         next_cursor: olderReleases.at(-1)!.release_id,
+                    },
+                };
+            },
+        } as never, {
+            projectRef: PROJECT_REF,
+            deploymentId: DEPLOYMENT_ID,
+            releaseId: RELEASE_ID,
+            expectedActiveReleaseId: "absent",
+            expectedActivationId: "absent",
+            mutationId: MUTATION_ID,
+        });
+
+        expect(response.isError).not.toBe(true);
+        expect(parsed(response).activation_id).toBe(MUTATION_ID);
+        expect(reads).toBe(3);
+    });
+
+    test("proves activation after the mutation response body times out", async () => {
+        let reads = 0;
+        const response = await activateFrontendRelease({
+            post: async () => ({
+                ok: false,
+                status: 200,
+                data: { error: "Response body unavailable" },
+                responseReadError: true,
+            }),
+            get: async (path: string) => {
+                reads += 1;
+                if (reads === 1) {
+                    return {
+                        ok: true,
+                        status: 200,
+                        data: {
+                            project_ref: PROJECT_REF,
+                            mutation: {
+                                project_ref: PROJECT_REF,
+                                mutation_id: MUTATION_ID,
+                                operation: "frontend.release.activate",
+                                resource_key: "v1/frontend_release/ZmEtd2Vi",
+                                request_fingerprint: "bca02488f799ea07a4aebfb2d73f8a00d058d3f96763d9653a36b88d3e7c8939",
+                                principal: { type: "project", id: `project:${PROJECT_REF}` },
+                                status: "succeeded",
+                                checkpoint: {},
+                                receipt: {},
+                                response_status: 200,
+                                failure_code: null,
+                                lease: { owner: null, expires_at: null, fencing_epoch: 1 },
+                                completed_at: "2026-08-12T00:00:00.000Z",
+                                created_at: "2026-08-12T00:00:00.000Z",
+                                updated_at: "2026-08-12T00:00:00.000Z",
+                            },
+                        },
+                    };
+                }
+                if (path.endsWith(`/${RELEASE_ID}`)) {
+                    return {
+                        ok: true,
+                        status: 200,
+                        data: {
+                            project_ref: PROJECT_REF,
+                            deployment_id: DEPLOYMENT_ID,
+                            release: release(),
+                        },
+                    };
+                }
+                return {
+                    ok: true,
+                    status: 200,
+                    data: {
+                        project_ref: PROJECT_REF,
+                        deployment_id: DEPLOYMENT_ID,
+                        active_release_id: RELEASE_ID,
+                        active_activation_id: MUTATION_ID,
+                        releases: [release()],
+                        next_cursor: null,
                     },
                 };
             },

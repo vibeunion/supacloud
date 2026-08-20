@@ -135,6 +135,7 @@ supacloud-cli status
 supacloud-cli project get
 supacloud-cli project logs --log_type database
 supacloud-cli frontend list --ref <project-ref>
+supacloud-cli frontend list_releases --ref <project-ref> --id <deployment-id>
 ```
 
 `supacloud-cli` defaults to project context and auto-links from the current workspace `.env` when available.
@@ -327,6 +328,10 @@ supacloud-cli database query --ref <ref> --file ./queries/vector-search.sql
 supacloud-cli database push_migrations --ref <ref> --dir supabase/migrations --dry_run
 supacloud-cli auth list_providers --ref <ref>
 supacloud-cli frontend list --ref <ref>
+supacloud-cli frontend upload_release --ref <ref> --id <deployment-id> --zip_path ./dist.zip
+supacloud-cli frontend activate_release --ref <ref> --id <deployment-id> \
+  --release_id <sha256> --expected_active_release_id <sha256-or-absent> \
+  --expected_activation_id <uuid-v4-or-absent> --mutation_id <uuid-v4>
 supacloud-cli edge_functions list --ref <ref>
 supacloud-cli edge_functions source --ref <ref> --slug hello --version 1 --output ./hello-v1.ts
 supacloud-cli edge_functions deploy --ref <ref> --slug hello --path ./supabase/functions/hello --expected-active-version absent
@@ -335,6 +340,11 @@ supacloud-cli edge_functions deploy_bundle --ref <ref> --slug supauth --bundle-d
 supacloud-cli edge_functions activate --ref <ref> --slug hello --version 2 --expected-active-version 3
 supacloud-cli storage list_buckets --ref <ref>
 ```
+
+Immutable frontend uploads are streamed from a held regular-file descriptor and
+bound to the archive SHA-256. Activation uses release and activation compare-and-
+swap values from `frontend list_releases`, followed by authoritative readback.
+The existing Git and legacy ZIP deployment actions remain available.
 
 Function deploy and activation commands require the active version observed via
 `edge_functions list`; `absent` is valid only for a new slug. Stale mutations

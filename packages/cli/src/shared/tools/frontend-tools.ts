@@ -6,18 +6,25 @@ import { basename } from "node:path";
 import { Type } from "@sinclair/typebox";
 import { optional, stringEnum, withDescription } from "../schema";
 import type { HttpTransport } from "../transports/http";
+import {
+    activateFrontendRelease,
+    getFrontendRelease,
+    listFrontendReleases,
+    uploadFrontendRelease,
+} from "./frontend-release-control";
 
 export function registerFrontendTools(server: { tool: (...args: any[]) => void }, http: HttpTransport): void {
     server.tool(
         "frontend",
-        `Frontend hosting (static sites & SSR). Supports: static, react, vue, svelte, sveltekit, sveltekit-static, nextjs, nuxt, astro.
-Actions: list, get, create, update, delete, deploy_git, deploy_upload, redeploy, build_logs, add_domain, remove_domain, set_env, list_frameworks, list_records`,
+        `Frontend hosting and immutable prebuilt releases. Supports: static, react, vue, svelte, sveltekit, sveltekit-static, nextjs, nuxt, astro.
+Actions: list, get, create, update, delete, deploy_git, deploy_upload, redeploy, build_logs, add_domain, remove_domain, set_env, list_frameworks, list_records, list_releases, get_release, upload_release, activate_release`,
         {
             action: withDescription(stringEnum([
                 "list", "get", "create", "update", "delete",
                 "deploy_git", "deploy_upload", "redeploy", "build_logs",
                 "add_domain", "remove_domain", "set_env",
                 "list_frameworks", "list_records",
+                "list_releases", "get_release", "upload_release", "activate_release",
             ]), "Action"),
             ref: optional(Type.String(), "Project ref"),
             id: optional(Type.String(), "Deployment ID"),
@@ -34,10 +41,20 @@ Actions: list, get, create, update, delete, deploy_git, deploy_upload, redeploy,
             // deploy_git params
             git_url: optional(Type.String(), "[deploy_git] Git repository URL"),
             branch: optional(Type.String(), "[deploy_git] Branch (default: main)"),
-            zip_path: optional(Type.String(), "[deploy_upload] Local zip file path"),
+            zip_path: optional(Type.String(), "[deploy_upload/upload_release] Local ZIP file path"),
+            release_id: optional(Type.String(), "[get_release/activate_release] SHA-256 release ID"),
+            expected_active_release_id: optional(Type.String(), "[activate_release] Current release SHA-256 or absent"),
+            expected_activation_id: optional(Type.String(), "[activate_release] Current activation UUIDv4 or absent"),
+            mutation_id: optional(Type.String(), "[activate_release] Required retry-stable UUIDv4"),
+            cursor: optional(Type.String(), "[list_releases] Last release SHA-256 cursor"),
+            limit: optional(Type.Number(), "[list_releases] Page size, 1-100 (default 50)"),
         },
         async (args: any) => {
-            const { action, ref, id, name, framework, domain, build_command, output_dir, install_command, node_version, health_check_path, env_vars, git_url, branch, zip_path } = args;
+            const {
+                action, ref, id, name, framework, domain, build_command, output_dir, install_command,
+                node_version, health_check_path, env_vars, git_url, branch, zip_path, release_id,
+                expected_active_release_id, expected_activation_id, mutation_id, cursor, limit,
+            } = args;
             const need = (f: string, v: any) => { if (!v) throw new Error(`'${f}' required for '${action}'`); };
             const ok = (res: any) => res.ok ? JSON.stringify(res.data, null, 2) : `❌ Failed (${res.status}): ${JSON.stringify(res.data)}`;
 
@@ -121,6 +138,28 @@ Actions: list, get, create, update, delete, deploy_git, deploy_upload, redeploy,
                     need("ref", ref); need("id", id);
                     text = ok(await http.get(`/v1/projects/${ref}/frontend/deployments/${id}/records`));
                     break;
+                case "list_releases":
+                    need("ref", ref); need("id", id);
+                    return listFrontendReleases(http, ref, id, cursor, limit);
+                case "get_release":
+                    need("ref", ref); need("id", id); need("release_id", release_id);
+                    return getFrontendRelease(http, ref, id, release_id);
+                case "upload_release":
+                    need("ref", ref); need("id", id); need("zip_path", zip_path);
+                    return uploadFrontendRelease(http, ref, id, zip_path);
+                case "activate_release":
+                    need("ref", ref); need("id", id); need("release_id", release_id);
+                    need("expected_active_release_id", expected_active_release_id);
+                    need("expected_activation_id", expected_activation_id);
+                    need("mutation_id", mutation_id);
+                    return activateFrontendRelease(http, {
+                        projectRef: ref,
+                        deploymentId: id,
+                        releaseId: release_id,
+                        expectedActiveReleaseId: expected_active_release_id,
+                        expectedActivationId: expected_activation_id,
+                        mutationId: mutation_id,
+                    });
                 default: text = `❌ Unknown action`;
             }
             return { content: [{ type: "text" as const, text }] };

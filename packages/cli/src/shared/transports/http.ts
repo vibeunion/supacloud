@@ -28,10 +28,25 @@ export interface HttpGetOptions {
 export interface HttpPostOptions {
     timeoutMs?: number;
     maxJsonBytes?: number;
+    responseTimeoutMs?: number;
 }
 
 export interface HttpReleaseMutationOptions {
     timeoutMs?: number;
+}
+
+export interface HttpBinaryPostOptions {
+    contentType: string;
+    contentLength: number;
+    contentSha256: string;
+    maxJsonBytes: number;
+    timeoutMs?: number;
+    responseTimeoutMs?: number;
+}
+
+export interface HttpBinaryBody {
+    stream: ReadableStream<Uint8Array>;
+    byteLength: number;
 }
 
 const DEFAULT_TIMEOUT = 30_000;
@@ -386,6 +401,7 @@ export class HttpTransport {
     async post<T = unknown>(path: string, body?: unknown, options?: HttpPostOptions): Promise<HttpResult<T>> {
         const timeoutMs = validatedPostTimeout(options);
         const maxJsonBytes = validatedJsonResponseLimit(options?.maxJsonBytes);
+        const responseTimeoutMs = validatedResponseTimeout(options?.responseTimeoutMs);
         try {
             if (maxJsonBytes === undefined) {
                 return await this.mutationWithResponseReader(
@@ -401,7 +417,7 @@ export class HttpTransport {
                 headers: this.headers(),
                 body: serializedRequestBody(body),
             }, timeoutMs);
-            const data = await boundedResponseJson(response, maxJsonBytes);
+            const data = await boundedResponseJson(response, maxJsonBytes, responseTimeoutMs);
             return data === null
                 ? responseReadFailure<T>(response.status)
                 : { ok: response.ok, status: response.status, data: data as T };
@@ -423,6 +439,47 @@ export class HttpTransport {
             releaseMutationResponseJson<T>,
             timeoutMs,
         );
+    }
+
+    async postBinary<T = unknown>(
+        path: string,
+        body: HttpBinaryBody,
+        options: HttpBinaryPostOptions,
+    ): Promise<HttpResult<T>> {
+        if (options.contentType !== "application/zip") {
+            throw new Error("Binary HTTP content type is invalid");
+        }
+        if (!Number.isSafeInteger(options.contentLength) || options.contentLength < 1
+            || options.contentLength !== body.byteLength) {
+            throw new RangeError("Binary HTTP body length is invalid");
+        }
+        if (!/^[0-9a-f]{64}$/u.test(options.contentSha256)) {
+            throw new Error("Binary HTTP body SHA-256 is invalid");
+        }
+        const maxJsonBytes = validatedJsonResponseLimit(options.maxJsonBytes)!;
+        const timeoutMs = validatedPostTimeout(options);
+        const responseTimeoutMs = validatedResponseTimeout(options.responseTimeoutMs);
+        try {
+            const request = {
+                method: "POST",
+                headers: {
+                    Authorization: `Bearer ${this.token}`,
+                    "Content-Type": options.contentType,
+                    "Content-Length": String(options.contentLength),
+                    "x-supacloud-content-sha256": options.contentSha256,
+                    ...(this.apiKey ? { apikey: this.apiKey } : {}),
+                },
+                body: body.stream,
+                duplex: "half",
+            } as RequestInit & { duplex: "half" };
+            const response = await fetchWithRetry(`${this.baseUrl}${path}`, request, timeoutMs);
+            const data = await boundedResponseJson(response, maxJsonBytes, responseTimeoutMs);
+            return data === null
+                ? responseReadFailure<T>(response.status)
+                : { ok: response.ok, status: response.status, data: data as T };
+        } catch (error: unknown) {
+            return transportFailure<T>(error);
+        }
     }
 
     async patchReleaseMutation<T = unknown>(path: string, body?: unknown): Promise<HttpResult<T>> {

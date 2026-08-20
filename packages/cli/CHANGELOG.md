@@ -5,6 +5,7 @@
 ### Features
 
 * **cli:** add atomic named and explicit environment profiles with secret-safe status output
+* **cli:** add immutable frontend release upload, activation, and authoritative readback
 * **functions:** deploy caller-hash-bound prebuilt runtime artifacts without rebundling
 
 ### Bug Fixes

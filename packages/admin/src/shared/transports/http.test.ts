@@ -263,6 +263,23 @@ describe("HttpTransport retry policy", () => {
         expect(fetchCalls).toBe(0);
     });
 
+    test.each([0, 36 * 60_000 + 1, 1.5])(
+        "rejects invalid POST response timeout %d before dispatch",
+        async responseTimeoutMs => {
+            let fetchCalls = 0;
+            globalThis.fetch = (async () => {
+                fetchCalls++;
+                return Response.json({ ok: true });
+            }) as unknown as typeof fetch;
+
+            await expect(createTransport().post("/resource", {}, {
+                maxJsonBytes: 1024,
+                responseTimeoutMs,
+            })).rejects.toThrow("HTTP response timeout must be between");
+            expect(fetchCalls).toBe(0);
+        },
+    );
+
     test("bounds selected GET response bodies before JSON projection", async () => {
         const remoteSecret = "oversized-get-response-sentinel";
         globalThis.fetch = (async () => new Response(JSON.stringify({
@@ -531,5 +548,37 @@ describe("HttpTransport raw binary mutations", () => {
         });
         expect(response.responseError).toBe(true);
         expect(JSON.stringify(response)).not.toContain(privateMarker);
+    });
+
+    test.each([
+        ["JSON activation", (transport: HttpTransport) => transport.post("/frontend/activate", {}, {
+            maxJsonBytes: 1024,
+            responseTimeoutMs: 10,
+        })],
+        ["ZIP upload", (transport: HttpTransport) => transport.postBinary(
+            "/frontend/releases",
+            binaryBody([1]),
+            {
+                contentType: "application/zip",
+                contentLength: 1,
+                contentSha256: "a".repeat(64),
+                maxJsonBytes: 1024,
+                responseTimeoutMs: 10,
+            },
+        )],
+    ] as const)("ends a stalled %s response body as invalid", async (_label, request) => {
+        globalThis.setTimeout = originalSetTimeout;
+        globalThis.clearTimeout = originalClearTimeout;
+        globalThis.fetch = (async () => new Response(new ReadableStream<Uint8Array>({
+            start(controller) {
+                controller.enqueue(new TextEncoder().encode('{"committed":true'));
+            },
+        }), { status: 200 })) as unknown as typeof fetch;
+
+        const startedAt = Date.now();
+        const response = await request(createTransport());
+
+        expect(Date.now() - startedAt).toBeLessThan(1_000);
+        expect(response.responseError).toBe(true);
     });
 });
