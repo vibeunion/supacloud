@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.65.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.65.0...management-api-v0.65.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* **management-api:** release snapshot inspection locks ([#1025](https://github.com/vibeunion/supacloud/issues/1025)) ([70ca938](https://github.com/vibeunion/supacloud/commit/70ca93862ff75bc0c5a30b4c9ade35e86649f183))
+
 ## [0.65.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.64.0...management-api-v0.65.0) (2026-08-20)
 
 
