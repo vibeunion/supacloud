@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.65.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.64.0...management-api-v0.65.0) (2026-08-20)
+
+
+### Features
+
+* complete Lite application primitives and PowerSync profile ([#1017](https://github.com/vibeunion/supacloud/issues/1017)) ([134444f](https://github.com/vibeunion/supacloud/commit/134444f98d310f65bf376be1ef7bb92445701b6b))
+
 ## [0.64.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.63.0...management-api-v0.64.0) (2026-08-20)
 
 
