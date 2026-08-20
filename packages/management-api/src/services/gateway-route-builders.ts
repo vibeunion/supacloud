@@ -26,6 +26,7 @@ export interface CustomGatewayRouteConfig {
     managed_upstream?: CustomGatewayManagedUpstream;
     upstream_tls_insecure_skip_verify?: boolean;
     static_root?: string;
+    spa?: boolean;
     protocol?: CustomGatewayProtocol;
     redirect_to?: string;
     redirect_status?: CustomGatewayRedirectStatus;
@@ -288,6 +289,9 @@ export function normalizeCustomGatewayRoute(input: CustomGatewayRouteConfig): Cu
     if ([hasUpstream, hasManagedUpstream, hasStaticRoot, hasRedirect].filter(Boolean).length !== 1) {
         throw new Error("Custom route must set exactly one of upstream, managed_upstream, static_root or redirect_to");
     }
+    if (input.spa === true && !hasStaticRoot) {
+        throw new Error("Custom route spa option requires static_root");
+    }
 
     const rewriteUri = normalizeCustomRewriteUri(input.rewrite_uri);
     const stripPrefix = normalizeCustomStripPrefix(input.strip_prefix);
@@ -310,6 +314,7 @@ export function normalizeCustomGatewayRoute(input: CustomGatewayRouteConfig): Cu
         managed_upstream: managedUpstream,
         upstream_tls_insecure_skip_verify: input.upstream_tls_insecure_skip_verify === true,
         static_root: hasStaticRoot ? normalizeCustomStaticRoot(input.static_root!) : undefined,
+        spa: hasStaticRoot && input.spa === true ? true : undefined,
         protocol: normalizeCustomProtocol(input.protocol),
         redirect_to: redirectTo,
         redirect_status: normalizeCustomRedirectStatus(input.redirect_status, hasRedirect),
@@ -496,7 +501,32 @@ export function makeCustomGatewayRoute(projectRef: string, input: CustomGatewayR
         }
         if (route.rewrite_uri) handle.push({ handler: "rewrite", uri: route.rewrite_uri });
         else if (route.strip_prefix) handle.push({ handler: "rewrite", strip_path_prefix: route.strip_prefix });
-        handle.push(makeStaticFileServer(route.static_root));
+        if (route.spa) {
+            handle.push({
+                handler: "subroute",
+                routes: [
+                    {
+                        match: [
+                            {
+                                file: {
+                                    root: route.static_root,
+                                    try_files: ["{http.request.uri.path}", "{http.request.uri.path}/", "/index.html"],
+                                },
+                            },
+                        ],
+                        handle: [
+                            {
+                                handler: "rewrite",
+                                uri: "{http.matchers.file.relative}",
+                            },
+                        ],
+                    },
+                    makeStaticFileServer(route.static_root),
+                ],
+            });
+        } else {
+            handle.push(makeStaticFileServer(route.static_root));
+        }
     } else if (route.redirect_to) {
         const responseHeaders = Object.fromEntries(
             Object.entries(route.headers || {}).map(([key, value]) => [key, [value]]),
