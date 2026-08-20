@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.65.2](https://github.com/vibeunion/supacloud/compare/management-api-v0.65.1...management-api-v0.65.2) (2026-08-20)
+
+
+### Bug Fixes
+
+* **management-api:** serialize Caddy vars matchers ([#1028](https://github.com/vibeunion/supacloud/issues/1028)) ([97340a3](https://github.com/vibeunion/supacloud/commit/97340a3df6699f09f176a8ea9b88c7111df6b9e7))
+
 ## [0.65.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.65.0...management-api-v0.65.1) (2026-08-20)
 
 
