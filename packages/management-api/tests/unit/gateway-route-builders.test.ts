@@ -231,7 +231,7 @@ describe("gateway route builders", () => {
         } as any)).toThrow("managed_upstream must be edge-functions");
     });
 
-    test("renders a protocol-scoped permanent redirect and preserves the request URI", () => {
+    test("renders a Caddy-compatible protocol-scoped redirect and preserves the request URI", () => {
         const normalized = normalizeCustomGatewayRoute({
             id: "canonical-https",
             hosts: ["WWW.EXAMPLE.COM"],
@@ -247,7 +247,7 @@ describe("gateway route builders", () => {
             host: ["www.example.com"],
             path: ["/*"],
             vars: {
-                "{http.request.scheme}": "http",
+                "{http.request.scheme}": ["http"],
             },
         }]);
         expect(route.handle).toEqual([{
