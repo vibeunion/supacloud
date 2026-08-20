@@ -13,6 +13,13 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.32.0](https://github.com/vibeunion/supacloud/compare/cli-v0.31.0...cli-v0.32.0) (2026-08-20)
+
+
+### Features
+
+* **gateway:** support SPA fallback mode for custom static routes ([#1011](https://github.com/vibeunion/supacloud/issues/1011)) ([455bf23](https://github.com/vibeunion/supacloud/commit/455bf2348442b8c7fa3d2b3c76653ed5cd1fbc83))
+
 ## [0.31.0](https://github.com/vibeunion/supacloud/compare/cli-v0.30.0...cli-v0.31.0) (2026-08-19)
 
 
