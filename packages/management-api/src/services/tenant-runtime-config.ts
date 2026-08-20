@@ -1,6 +1,7 @@
 import { renderGoTrueEmailTemplateEnv } from "../utils/auth-email-templates";
 import { serializedProviderLinkingDomains } from "../utils/provider-linking";
 import { renderSystemdEnvLine } from "../utils/systemd-env";
+import { effectivePostgrestSchemas } from "../utils/postgrest-schema-config";
 
 export { renderGoTrueSessionPolicyEnv } from "./auth-session-policy";
 export { renderSystemdEnvLine } from "../utils/systemd-env";
@@ -84,12 +85,11 @@ export function pickPositivePort(value: unknown): number | null {
     return Math.trunc(port);
 }
 
-const DEFAULT_POSTGREST_SCHEMAS = ["public", "storage", "graphql_public"] as const;
-
-export function renderPostgrestDbSchemas(includePgmqPublic = false): string {
-    const schemas: string[] = [...DEFAULT_POSTGREST_SCHEMAS];
-    if (includePgmqPublic) schemas.push("pgmq_public");
-    return schemas.join(", ");
+export function renderPostgrestDbSchemas(
+    includePgmqPublic = false,
+    customSchemas: readonly string[] = [],
+): string {
+    return effectivePostgrestSchemas(customSchemas, includePgmqPublic).join(", ");
 }
 
 export function renderTenantInternalRuntimeEnv(pgrstPort: number, gotruePort: number): string {

@@ -570,5 +570,7 @@ ${SQL_MODULES["background-task-mirror-up"]}
 -- Keep existing tenant databases aligned with the durable workflow runtime.
 ${SQL_MODULES["pgmq-public"]}
 ${SQL_MODULES["workflows-public"]}
+${SQL_MODULES["commands-public"]}
+${SQL_MODULES["artifacts-public"]}
 
 `;

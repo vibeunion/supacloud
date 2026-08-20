@@ -8,6 +8,11 @@ import { FsStorageDriver } from './runtime/node/fs-driver.js'
 import { loadProjectConfig, type ProjectConfig } from './runtime/node/load-config.js'
 import { loadFunctionEnv, loadFunctions } from './runtime/node/load-functions.js'
 import { createNativeEngine, isNativeEngineSupported } from './runtime/node/native/engine.js'
+import {
+  ensurePowerSyncReplicationCatalog,
+  validatePowerSyncReplicationOptions,
+  type NativeReplicationOptions,
+} from './runtime/node/native/replication.js'
 import { loadSupabaseProject } from './runtime/node/project.js'
 import { MemoryStorageDriver } from './runtime/storage/driver.js'
 import { S3StorageDriver, type S3StorageDriverOptions } from './runtime/storage/s3-driver.js'
@@ -46,6 +51,14 @@ export interface ProjectRuntimeOptions {
   siteUrl?: string
   memory?: boolean
   engine?: DatabaseEngine
+  replicationProfile?: ReplicationProfile
+  replicationHost?: string
+  replicationPort?: number
+  replicationAllowCidrs?: string[]
+  powersyncPublicationTables?: string[]
+  powersyncPassword?: string
+  replicationTlsCertFile?: string
+  replicationTlsKeyFile?: string
   applyMigrations?: boolean
   includeFunctions?: boolean
   includeWebhooks?: boolean
@@ -66,9 +79,11 @@ export interface ProjectBackend {
   webhookCount: number
   storageBackend: StorageBackend
   databaseEngine: DatabaseEngine
+  replicationProfile?: ReplicationProfile
 }
 
 export type DatabaseEngine = 'pglite' | 'native'
+export type ReplicationProfile = 'powersync'
 export type StorageBackend = 'fs' | 'memory' | 's3' | 'custom'
 export type ConfiguredStorageBackend = Exclude<StorageBackend, 'custom'>
 
@@ -259,6 +274,7 @@ export async function createProjectBackend(options: ProjectRuntimeOptions = {}):
   const configuredStorageBackend = options.storageDriver ? 'fs' : resolveStorageBackend(options.storageBackend)
   const storageBackend: StorageBackend = options.storageDriver ? 'custom' : configuredStorageBackend
   const databaseEngine = paths.databaseEngine
+  const replication = resolveNativeReplicationOptions(options, databaseEngine)
 
   if (paths.dataDir) {
     await mkdir(paths.dataDir, { recursive: true, mode: 0o700 })
@@ -269,9 +285,9 @@ export async function createProjectBackend(options: ProjectRuntimeOptions = {}):
 
   const storageDriver = options.storageDriver ?? createStorageDriver(configuredStorageBackend, paths.storageDir, options.s3)
   const engine = databaseEngine === 'native'
-    ? await createNativeEngine({ dataDir: paths.dataDir!, log: options.log })
+    ? await createNativeEngine({ dataDir: paths.dataDir!, log: options.log, replication })
     : undefined
-  let backend: SupaCloudLiteBackend
+  let backend: SupaCloudLiteBackend | undefined
   try {
     backend = await createBackend({
       engine,
@@ -306,8 +322,17 @@ export async function createProjectBackend(options: ProjectRuntimeOptions = {}):
       storageDriver,
       log: options.log,
     })
+    if (replication && options.applyMigrations !== false) {
+      await ensurePowerSyncReplicationCatalog(backend.db.engine, replication)
+    }
   } catch (error) {
-    if (engine) {
+    if (backend) {
+      try {
+        await backend.close()
+      } catch (cleanupError) {
+        throw new AggregateError([error, cleanupError], 'project database startup cleanup failed')
+      }
+    } else if (engine) {
       try {
         await engine.close()
       } catch (cleanupError) {
@@ -329,7 +354,38 @@ export async function createProjectBackend(options: ProjectRuntimeOptions = {}):
     webhookCount: webhooks.length,
     storageBackend,
     databaseEngine,
+    replicationProfile: replication?.profile,
   }
+}
+
+export function resolveNativeReplicationOptions(
+  options: ProjectRuntimeOptions,
+  databaseEngine = resolveDatabaseEngine(options.engine, options.memory),
+): NativeReplicationOptions | undefined {
+  const profile = options.replicationProfile ?? process.env.SUPACLOUD_LITE_REPLICATION_PROFILE
+  if (!profile) return undefined
+  if (profile !== 'powersync') throw new Error(`unsupported SUPACLOUD_LITE_REPLICATION_PROFILE: ${profile}`)
+  if (databaseEngine !== 'native') throw new Error('PowerSync replication is only supported by --engine native')
+
+  const tlsCertFile = options.replicationTlsCertFile ?? process.env.SUPACLOUD_LITE_REPLICATION_TLS_CERT_FILE
+  const tlsKeyFile = options.replicationTlsKeyFile ?? process.env.SUPACLOUD_LITE_REPLICATION_TLS_KEY_FILE
+  if (Boolean(tlsCertFile) !== Boolean(tlsKeyFile)) {
+    throw new Error('PowerSync replication TLS requires both certificate and key files')
+  }
+
+  return validatePowerSyncReplicationOptions({
+    profile,
+    host: options.replicationHost ?? process.env.SUPACLOUD_LITE_REPLICATION_HOST ?? '127.0.0.1',
+    port: options.replicationPort ?? parsePort(process.env.SUPACLOUD_LITE_REPLICATION_PORT, 54322),
+    allowCidrs: options.replicationAllowCidrs
+      ?? commaSeparated(process.env.SUPACLOUD_LITE_REPLICATION_ALLOW_CIDRS, ['127.0.0.1/32', '::1/128']),
+    publicationTables: options.powersyncPublicationTables
+      ?? commaSeparated(process.env.SUPACLOUD_LITE_POWERSYNC_TABLES),
+    password: options.powersyncPassword ?? process.env.SUPACLOUD_LITE_POWERSYNC_PASSWORD ?? '',
+    tls: tlsCertFile && tlsKeyFile
+      ? { certFile: tlsCertFile, keyFile: tlsKeyFile }
+      : undefined,
+  })
 }
 
 export function resolveDatabaseEngine(value?: DatabaseEngine, memory = false): DatabaseEngine {
@@ -441,6 +497,12 @@ function parsePort(value: string | undefined, fallback: number): number {
   const port = Number.parseInt(value, 10)
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error(`invalid port: ${value}`)
   return port
+}
+
+function commaSeparated(value: string | undefined, fallback: string[] = []): string[] {
+  return value === undefined
+    ? fallback
+    : value.split(',').map((entry) => entry.trim()).filter(Boolean)
 }
 
 function displayHost(host: string): string {

@@ -14,6 +14,7 @@ import {
     normalizeProjectConfig,
     resolveProjectExternalAuthEndpointConfig,
 } from "../utils/project-config";
+import { projectCustomPostgrestSchemas } from "../utils/postgrest-schema-config";
 import {
     buildSharedProjectJwtVerificationMaterial,
     normalizeProjectJwtKeys,
@@ -369,6 +370,7 @@ interface PostgrestCredentialMaterial {
     thirdPartyJwtPolicy: ThirdPartyJwtPolicy | null;
     dbName: string;
     apiUrl: string;
+    customPostgrestSchemas: string[];
 }
 
 export function renderDesiredPostgrestConfig(
@@ -1207,7 +1209,8 @@ class TenantRuntimeService {
             postgrestDesired: project.postgrest_desired,
             siteUrl,
             uriAllowList,
-            authConfig
+            authConfig,
+            customPostgrestSchemas: projectCustomPostgrestSchemas(projectConfig),
         };
     }
 
@@ -1472,6 +1475,7 @@ class TenantRuntimeService {
     ): Promise<string> {
         const databaseSchemas = renderPostgrestDbSchemas(
             await this.hasPgmqPublicSchema(ref, credentials.dbName, credentials.dbPassword),
+            credentials.customPostgrestSchemas,
         );
         return this.renderPostgrestCredentialConfig(
             ref,
@@ -1490,6 +1494,7 @@ class TenantRuntimeService {
         }
         const databaseSchemas = renderPostgrestDbSchemas(
             await this.queryPgmqPublicSchema(ref, credentials.dbName, credentials.dbPassword),
+            credentials.customPostgrestSchemas,
         );
         const content = this.renderPostgrestCredentialConfig(
             ref,

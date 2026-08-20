@@ -38,7 +38,7 @@
     "dev": "bun run src/cli.ts start",
     "start": "bun run src/cli.ts start",
     "test": "bun test --timeout 20000",
-    "test:native": "SUPACLOUD_LITE_TEST_NATIVE=1 bun test test/native-engine.test.ts test/qauth-workflow-matrix.test.ts --timeout 180000",
+    "test:native": "SUPACLOUD_LITE_TEST_NATIVE=1 bun test test/native-engine.test.ts test/qauth-workflow-matrix.test.ts test/maker-checker-workflow.test.ts test/commands-artifacts.test.ts --timeout 180000",
     "parity": "bun run parity/harness.ts",
     "parity:native": "SUPACLOUD_LITE_TEST_NATIVE=1 bun run parity/harness.ts --engine native",
     "check:native": "bun run test:native && bun run parity:native",

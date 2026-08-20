@@ -1,6 +1,8 @@
 import authJwtHelpersSql from "./sql-modules/auth-jwt-helpers.sql" with { type: "text" };
+import artifactsPublicSql from "./sql-modules/artifacts-public.sql" with { type: "text" };
 import backgroundTaskMirrorDownSql from "./sql-modules/background-task-mirror-down.sql" with { type: "text" };
 import backgroundTaskMirrorUpSql from "./sql-modules/background-task-mirror-up.sql" with { type: "text" };
+import commandsPublicSql from "./sql-modules/commands-public.sql" with { type: "text" };
 import pgmqPublicSql from "./sql-modules/pgmq-public.sql" with { type: "text" };
 import postgrestRequestContextSql from "./sql-modules/postgrest-request-context.sql" with { type: "text" };
 import realtimeAutoAttachTriggerSql from "./sql-modules/realtime-auto-attach-trigger.sql" with { type: "text" };
@@ -10,8 +12,10 @@ import workflowsPublicSql from "./sql-modules/workflows-public.sql" with { type:
 
 export const SQL_MODULES = {
   "auth-jwt-helpers": authJwtHelpersSql.trim(),
+  "artifacts-public": artifactsPublicSql.trim(),
   "background-task-mirror-down": backgroundTaskMirrorDownSql.trim(),
   "background-task-mirror-up": backgroundTaskMirrorUpSql.trim(),
+  "commands-public": commandsPublicSql.trim(),
   "pgmq-public": pgmqPublicSql.trim(),
   "postgrest-request-context": postgrestRequestContextSql.trim(),
   "realtime-auto-attach-trigger": realtimeAutoAttachTriggerSql.trim(),

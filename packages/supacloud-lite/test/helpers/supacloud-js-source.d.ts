@@ -34,6 +34,31 @@ interface WorkflowRun {
   }>
 }
 
+interface CommandReceipt {
+  commandId: string
+  commandType: string
+  idempotent: boolean
+  workflow: WorkflowRun & { output?: Record<string, unknown> }
+}
+
+interface CommandClient {
+  submit(request: Record<string, unknown>): Promise<CommandReceipt>
+  get(commandId: string): Promise<CommandReceipt | null>
+}
+
+interface Artifact {
+  artifactId: string
+  objectVersion: string
+  idempotent: boolean
+  parents: Array<{ artifactId: string; relationType: string }>
+}
+
+interface ArtifactClient {
+  register(request: Record<string, unknown>): Promise<Artifact>
+  get(artifactId: string): Promise<Artifact | null>
+  link(request: Record<string, unknown>): Promise<Artifact>
+}
+
 interface WorkflowClient {
   start(request: Record<string, unknown>): Promise<WorkflowRun>
   claim(request: Record<string, unknown>): Promise<Record<string, unknown> | null>
@@ -53,4 +78,6 @@ export function createSupaCloudClient(options: {
 }): {
   queue(name: string): QueueClient
   workflows: WorkflowClient
+  commands: CommandClient
+  artifacts: ArtifactClient
 }

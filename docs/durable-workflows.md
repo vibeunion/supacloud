@@ -8,6 +8,8 @@ Workflow durability belongs beside Queues and Scheduled Functions because it own
 
 Applications still own business meaning. Approval decisions, document signing states, role assignments, and domain records stay in application tables protected by their own RBAC and RLS policies. A durable workflow may coordinate those operations, but it does not become their source of truth.
 
+For application commands that need an idempotent receipt and atomic enqueue, use the [Application Platform Primitives](./application-platform-primitives.md) command layer. It creates the receipt and starts a `command.*` workflow in the caller's PostgreSQL transaction without moving domain state into the workflow ledger.
+
 ## Relationship to DBOS
 
 [DBOS Transact TypeScript](https://github.com/dbos-inc/dbos-transact-ts) is a useful reference for durable execution semantics: deterministic workflow identity, PostgreSQL checkpoints, durable steps, retry, and recovery after process failure.
@@ -117,6 +119,6 @@ browser provide neither atomicity nor durable recovery.
 - A worker completion is accepted only for the exact message ID, attempt number, and worker ID that claimed the step.
 - Inputs, outputs, and errors are durable project data. Do not place secrets or customer-sensitive plaintext in them unless the project data policy explicitly permits it.
 
-Fresh tenants install the schema during bootstrap. Existing tenants receive the same idempotent module through the tenant schema migration path. SupaCloud Lite installs the identical SQL contract on its PGlite-backed PGMQ emulation.
+Fresh tenants install the schema during bootstrap. Existing tenants receive the same idempotent module through the tenant schema migration path. SupaCloud Lite installs the identical SQL contract on both its PGlite and embedded native PostgreSQL engines.
 
 To roll back application adoption, stop workers and stop starting new runs first. The safest platform rollback leaves the private ledger intact while removing callers; deleting workflow tables would discard recovery and audit evidence.

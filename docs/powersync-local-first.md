@@ -2,8 +2,10 @@
 
 PowerSync is the selected external Local-First integration for SupaCloud
 applications that require a durable local SQLite database, offline writes, and
-recovery after weak or unavailable networks. SupaCloud does not start, stop,
-create, or delete PowerSync replication resources automatically in this phase.
+recovery after weak or unavailable networks. Full SupaCloud exposes read-only
+replication readiness. Native Lite additionally provides an explicit
+`powersync` source profile. Neither runtime starts or stops PowerSync, and
+neither creates or deletes PowerSync replication slots.
 
 Use the official PowerSync Supabase integration and self-hosting documentation
 for the exact release-specific service configuration:
@@ -74,6 +76,55 @@ storage, validate Sync Streams against a non-production tenant, start the
 pinned PowerSync service, read back its exact slot from the SupaCloud
 replication endpoint, then enable token issuance for a small client cohort.
 SupaCloud never creates the slot on the service's behalf.
+
+## SupaCloud Lite boundary
+
+PGlite is not a PowerSync replication source and `supacloud-lite doctor --json`
+reports both `logical_replication` and `powersync_source` as `unsupported`.
+Do not emulate PostgreSQL replication catalogs or infer readiness from Lite
+Realtime. For a single field workstation, PGlite can remain the local
+single-project server. For multiple offline devices, use one of these explicit
+topologies:
+
+1. clients synchronize through central SupaCloud + PowerSync;
+2. Native Lite runs the opt-in PowerSync profile on the site server; or
+3. an application-owned idempotent outbox uploads PGlite data to central
+   SupaCloud, which remains the PowerSync source.
+
+Native Lite keeps replication disabled by default. Enable it only with an
+explicit table allowlist and a secret-store password:
+
+```bash
+export SUPACLOUD_LITE_POWERSYNC_PASSWORD='<at-least-32-characters>'
+supacloud-lite migrate \
+  --engine native \
+  --replication-profile powersync \
+  --powersync-tables public.eln_entries,public.eln_observations
+```
+
+The default profile listens on `127.0.0.1:54322`, uses SCRAM, creates the
+dedicated `supacloud_powersync` role and explicit `powersync` publication, and
+sets bounded capacity: four WAL senders, four replication slots, and 1024MB
+maximum retained WAL per slot. It never creates a slot. A non-loopback listener
+is rejected unless TLS certificate/key files and explicit client CIDRs are
+provided. Keep the default loopback connection when PowerSync shares the host;
+otherwise terminate and verify PostgreSQL TLS rather than exposing plaintext
+database traffic.
+
+After migration, inspect the live native catalog without slot DDL:
+
+```bash
+supacloud-lite doctor --json \
+  --engine native \
+  --replication-profile powersync \
+  --powersync-tables public.eln_entries,public.eln_observations
+```
+
+The report includes the stable Lite capability fields plus
+`powersync_readiness`: connection/TLS policy, WAL and slot capacity, role
+attributes, exact publication tables, replica identity blockers, and existing
+logical slot health. `ready=true` remains a source preflight, not proof that the
+PowerSync service, tokens, Sync Streams, uploads, or clients are correct.
 
 ## Readiness inspection
 
@@ -259,6 +310,22 @@ Validate with production-shaped but non-production data:
    the pinned PowerSync release and existing clients.
 9. A forced slot interruption produces a visible warning and follows the
    documented resnapshot path without deleting an unrelated slot.
+
+Record evidence for each independent plane rather than treating source
+readiness as end-to-end acceptance:
+
+- **JWKS and custom auth:** issue a token with the pinned PowerSync audience,
+  verify accepted and rejected issuer/audience/key-rotation cases, and confirm
+  removed membership prevents new token issuance.
+- **Sync Streams:** validate the pinned service configuration against two
+  tenants and prove that each initial snapshot and incremental change remains
+  inside its membership scope.
+- **RLS writeback:** upload through authenticated narrow RPCs, then test tenant
+  denial, Maker-Checker separation, stale row version, duplicate idempotency
+  keys, and immutable artifact handling.
+- **Resnapshot:** stop the test service until its bounded slot becomes invalid,
+  capture `doctor`/Management API evidence, follow the pinned PowerSync
+  resnapshot procedure, and prove no unrelated slot or publication was changed.
 
 ## Disable and cleanup
 
