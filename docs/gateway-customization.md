@@ -49,6 +49,7 @@ POST/PUT 的 body schema（字段语义与 `normalizeCustomGatewayRoute` 一致�
 | `upstream` | string | 四选一 | 反代上游，`host:port` 或 `http(s)://host[:port]`；URL 形式不允许带 path/query/hash |
 | `managed_upstream` | `"edge-functions"` | 四选一 | 使用当前 SupaCloud 配置的 Edge Runtime 内部地址；DB/API 保留符号值，重建时动态解析 |
 | `static_root` | string | 四选一 | 静态文件根目录，绝对路径，禁止 `..` 与 `\0` |
+| `spa` | boolean | 否 | 与 `static_root` 配合使用，启用 SPA 单页应用路由回退（自动将子路径回退至 `/index.html`） |
 | `redirect_to` | string | 四选一 | 带固定 host 的绝对 `http(s)` 重定向目标；可在末尾使用一次 `{http.request.uri}` 保留路径和查询参数 |
 | `redirect_status` | `301 \| 302 \| 307 \| 308` | 否 | 重定向状态码，默认 `308`；只能与 `redirect_to` 一起使用 |
 | `protocol` | `"http" \| "https"` | 否 | 只匹配指定请求协议；可用于将 HTTP 请求重定向到 HTTPS |

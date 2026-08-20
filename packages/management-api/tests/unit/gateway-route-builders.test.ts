@@ -323,4 +323,33 @@ describe("gateway route builders", () => {
             })).toThrow();
         }
     });
+    test("renders static SPA route with try_files fallback", () => {
+        const route = makeCustomGatewayRoute("proj1", {
+            id: "spa-admin",
+            hosts: ["admin.example.com"],
+            path: "/admin*",
+            static_root: "/opt/app/build",
+            strip_prefix: "/admin",
+            spa: true,
+        });
+
+        expect(route).toBeDefined();
+        expect(route?.["@id"]).toBe("route-custom-gateway-proj1-spa-admin");
+        const handle = route?.handle as any[];
+        expect(handle).toHaveLength(2);
+        expect(handle[0]).toEqual({ handler: "rewrite", strip_path_prefix: "/admin" });
+        expect(handle[1].handler).toBe("subroute");
+        const subroutes = handle[1].routes;
+        expect(subroutes[0].match[0].file.try_files).toEqual(["{http.request.uri.path}", "{http.request.uri.path}/", "/index.html"]);
+        expect(subroutes[0].handle[0]).toEqual({ handler: "rewrite", uri: "{http.matchers.file.relative}" });
+        expect(subroutes[1].handler).toBe("file_server");
+
+        expect(() => normalizeCustomGatewayRoute({
+            id: "spa-without-static",
+            hosts: ["admin.example.com"],
+            path: "/*",
+            upstream: "127.0.0.1:3000",
+            spa: true,
+        })).toThrow("Custom route spa option requires static_root");
+    });
 });

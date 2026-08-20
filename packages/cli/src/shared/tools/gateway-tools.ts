@@ -105,6 +105,7 @@ Actions: routes, upsert_route, update_route, delete_route, config, get_certifica
             managed_upstream: optional(stringEnum(["edge-functions"]), "[upsert_route/update_route] 托管上游（同步 Edge Function）"),
             upstream_tls_insecure_skip_verify: optional(Type.Boolean(), "[upsert_route/update_route] 上游 TLS 跳过校验"),
             static_root: optional(Type.String(), "[upsert_route/update_route] 静态站点根目录"),
+            spa: optional(Type.Boolean(), "[upsert_route/update_route] 是否启用 SPA 单页回退"),
             protocol: optional(stringEnum(["http", "https"]), "[upsert_route/update_route] 可选请求协议匹配"),
             redirect_to: optional(Type.String(), "[upsert_route/update_route] 带固定 host 的绝对 http(s) 目标，可在末尾使用 {http.request.uri}"),
             redirect_status: withDescription(redirectStatus, "[upsert_route/update_route] 重定向状态码，默认 308"),
@@ -147,7 +148,7 @@ Actions: routes, upsert_route, update_route, delete_route, config, get_certifica
 
             const {
                 action, ref, route_id, hosts, paths, upstream, managed_upstream, upstream_tls_insecure_skip_verify,
-                static_root, protocol, redirect_to, redirect_status, rewrite_uri, strip_prefix, headers, cors, priority, enabled,
+                static_root, spa, protocol, redirect_to, redirect_status, rewrite_uri, strip_prefix, headers, cors, priority, enabled,
                 rate_limit_tier, cors_origins, jwt_enabled, jwt_secret,
                 cert_mode, challenge, email, dns_provider, dns_env, domains, auto_renew, renew,
                 cert, key, clean, custom_hostname,
@@ -174,6 +175,7 @@ Actions: routes, upsert_route, update_route, delete_route, config, get_certifica
                     if (managed_upstream !== undefined) body.managed_upstream = managed_upstream;
                     if (upstream_tls_insecure_skip_verify !== undefined) body.upstream_tls_insecure_skip_verify = upstream_tls_insecure_skip_verify;
                     if (static_root !== undefined) body.static_root = static_root;
+                    if (spa !== undefined) body.spa = spa;
                     if (protocol !== undefined) body.protocol = protocol;
                     if (redirect_to !== undefined) body.redirect_to = redirect_to;
                     if (redirect_status !== undefined) body.redirect_status = redirect_status;
@@ -199,6 +201,7 @@ Actions: routes, upsert_route, update_route, delete_route, config, get_certifica
                     if (managed_upstream !== undefined) body.managed_upstream = managed_upstream;
                     if (upstream_tls_insecure_skip_verify !== undefined) body.upstream_tls_insecure_skip_verify = upstream_tls_insecure_skip_verify;
                     if (static_root !== undefined) body.static_root = static_root;
+                    if (spa !== undefined) body.spa = spa;
                     if (protocol !== undefined) body.protocol = protocol;
                     if (redirect_to !== undefined) body.redirect_to = redirect_to;
                     if (redirect_status !== undefined) body.redirect_status = redirect_status;
