@@ -104,10 +104,14 @@ type ControlPlaneSafetyOperations = {
     target: DatabaseTarget,
     inspection: ControlPlaneInspection,
   ) => Promise<ControlPlaneUpgradeSafetyEvidence>;
-  withInspection: <T>(
+  inspect: (
     databaseUrl: string,
     currentKey: string,
-    operation: (inspection: ControlPlaneInspection) => Promise<T>,
+    snapshotId: string,
+  ) => Promise<ControlPlaneInspection>;
+  withSnapshot: <T>(
+    databaseUrl: string,
+    operation: (snapshotId: string) => Promise<T>,
   ) => Promise<T>;
 };
 
@@ -241,6 +245,7 @@ async function inspectControlPlane(
   database: SQL,
   target: DatabaseTarget,
   currentKey: string,
+  snapshotId: string,
 ): Promise<ControlPlaneInspection> {
   const identity = await inspectControlPlaneDatabaseIdentity(database);
   const [controlPlane] = await database`
@@ -256,11 +261,6 @@ async function inspectControlPlane(
     throw new Error("DATABASE_URL resolves to a registered tenant database");
   }
   const projects = await projectCandidateCounts(database);
-  const [snapshot] = await database`SELECT pg_export_snapshot() AS snapshot_id`;
-  if (typeof snapshot?.snapshot_id !== "string") {
-    throw new Error("Control-plane database did not export a valid backup snapshot");
-  }
-  const snapshotId = parseExpectedControlPlaneDatabaseSnapshot(snapshot.snapshot_id);
   return {
     candidateCounts: {
       deprecated_webhook_secrets: await optionalTableCount(
@@ -280,17 +280,39 @@ async function inspectControlPlane(
   };
 }
 
-async function withControlPlaneInspection<T>(
+async function inspectControlPlaneSnapshot(
   databaseUrl: string,
   currentKey: string,
-  operation: (inspection: ControlPlaneInspection) => Promise<T>,
+  rawSnapshotId: string,
+): Promise<ControlPlaneInspection> {
+  const target = databaseTarget(databaseUrl);
+  const snapshotId = parseExpectedControlPlaneDatabaseSnapshot(rawSnapshotId);
+  const database = new SQL({ url: databaseUrl, database: target.database, max: 1 });
+  try {
+    return await database.begin(async (transaction) => {
+      await transaction.unsafe("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY");
+      await transaction.unsafe(`SET TRANSACTION SNAPSHOT '${snapshotId}'`);
+      return inspectControlPlane(transaction, target, currentKey, snapshotId);
+    });
+  } finally {
+    await database.close();
+  }
+}
+
+async function withControlPlaneSnapshot<T>(
+  databaseUrl: string,
+  operation: (snapshotId: string) => Promise<T>,
 ): Promise<T> {
   const target = databaseTarget(databaseUrl);
   const database = new SQL({ url: databaseUrl, database: target.database, max: 1 });
   try {
     return await database.begin(async (transaction) => {
       await transaction.unsafe("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY");
-      return operation(await inspectControlPlane(transaction, target, currentKey));
+      const [snapshot] = await transaction`SELECT pg_export_snapshot() AS snapshot_id`;
+      if (typeof snapshot?.snapshot_id !== "string") {
+        throw new Error("Control-plane database did not export a valid backup snapshot");
+      }
+      return operation(parseExpectedControlPlaneDatabaseSnapshot(snapshot.snapshot_id));
     });
   } finally {
     await database.close();
@@ -700,7 +722,8 @@ async function createControlPlaneBackup(
 function defaultSafetyOperations(): ControlPlaneSafetyOperations {
   return {
     backup: (target, inspection) => createControlPlaneBackup(target, inspection),
-    withInspection: withControlPlaneInspection,
+    inspect: inspectControlPlaneSnapshot,
+    withSnapshot: withControlPlaneSnapshot,
   };
 }
 
@@ -719,7 +742,11 @@ export async function withControlPlaneUpgradeSafety(
   operations: ControlPlaneSafetyOperations = defaultSafetyOperations(),
 ): Promise<ControlPlaneUpgradeSafetyEvidence> {
   const target = databaseTarget(databaseUrl);
-  return operations.withInspection(databaseUrl, currentKey, async (inspection) => {
+  return operations.withSnapshot(databaseUrl, async (snapshotId) => {
+    const inspection = await operations.inspect(databaseUrl, currentKey, snapshotId);
+    if (inspection.snapshotId !== snapshotId) {
+      throw new Error("Control-plane inspection did not use the exported backup snapshot");
+    }
     if (inspection.databaseTargetFingerprint !== databaseTargetFingerprint(target)) {
       throw new Error("Control-plane database identity changed before backup");
     }
@@ -739,7 +766,9 @@ export const controlPlaneUpgradeSafetyInternals = {
   databaseTarget,
   dumpArguments,
   inactiveBackupUnit,
+  inspectControlPlaneSnapshot,
   pgpassField,
   reconcileBackupUnit,
   verifyArguments,
+  withControlPlaneSnapshot,
 };

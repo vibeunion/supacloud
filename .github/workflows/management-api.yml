@@ -402,6 +402,12 @@ jobs:
         # E2E Storage fixture that init.ts enables when CI variables are set.
         run: env -u CI -u GITHUB_ACTIONS bun src/db/init.ts
 
+      - name: Verify control-plane snapshot lock lifetime on PostgreSQL 18
+        working-directory: packages/management-api
+        env:
+          CONTROL_PLANE_SNAPSHOT_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+        run: bun test tests/integration/control-plane-snapshot-lock.test.ts
+
       - name: Verify audit chain migration on PostgreSQL 18
         working-directory: packages/management-api
         env:
