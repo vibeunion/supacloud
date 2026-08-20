@@ -312,7 +312,7 @@ supacloud-lite doctor --json \
   --powersync-tables public.eln_entries,public.eln_observations
 ```
 
-该 profile 使用独立 `supacloud_powersync` 登录角色、显式 `powersync` publication、`wal_level=logical`、4 个 sender、4 个 slot 和 `max_slot_wal_keep_size=1024MB`。默认只允许 loopback 上的 SCRAM 连接；非 loopback 监听必须同时提供 TLS 证书、权限受限的私钥和显式 CIDR allowlist。
+该 profile 使用独立 `supacloud_powersync` 登录角色、显式 `powersync` publication、`wal_level=logical`、4 个 sender、4 个 slot 和 `max_slot_wal_keep_size=1024MB`。默认只允许 loopback 上的 SCRAM 连接；非 loopback 监听必须同时提供 TLS 证书、权限受限的私钥和显式 CIDR allowlist。POSIX 平台要求私钥 mode 不向 group/other 开放；Windows 部署应通过文件 ACL 达到同等限制。
 
 Lite 会创建或更新 replication role 与 publication allowlist，但**不会创建、删除或猜测 replication slot**。slot 由固定版本的 PowerSync 服务和运维流程持有。`doctor` 只读检查 WAL、sender/slot 容量、角色、publication、replica identity 和现有 slot 的滞留/失效状态。
 
@@ -683,7 +683,7 @@ supacloud-lite doctor --json --engine native --replication-profile powersync \
   --powersync-tables public.eln_entries,public.eln_observations
 ```
 
-The profile manages the dedicated `supacloud_powersync` login role and explicit `powersync` publication, with four WAL senders, four slots, and `max_slot_wal_keep_size=1024MB`. It uses loopback SCRAM by default; non-loopback listeners require TLS files and explicit CIDRs. Lite never creates or deletes a replication slot. PowerSync and the operator remain responsible for the exact slot lifecycle.
+The profile manages the dedicated `supacloud_powersync` login role and explicit `powersync` publication, with four WAL senders, four slots, and `max_slot_wal_keep_size=1024MB`. It uses loopback SCRAM by default; non-loopback listeners require TLS files and explicit CIDRs. POSIX systems reject group/other-readable private keys; Windows deployments must enforce the equivalent file ACL. Lite never creates or deletes a replication slot. PowerSync and the operator remain responsible for the exact slot lifecycle.
 
 ### Migrating from Supabase
 

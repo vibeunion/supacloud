@@ -261,7 +261,7 @@ function validateTlsOptions(options: NativeReplicationTlsOptions): NativeReplica
   for (const path of [tls.certFile, tls.keyFile]) {
     if (!existsSync(path) || !statSync(path).isFile()) throw new Error(`PowerSync TLS file does not exist: ${path}`)
   }
-  if ((statSync(tls.keyFile).mode & 0o077) !== 0) {
+  if (process.platform !== 'win32' && (statSync(tls.keyFile).mode & 0o077) !== 0) {
     throw new Error('PowerSync TLS private key must not be readable by group or other users')
   }
   return tls
