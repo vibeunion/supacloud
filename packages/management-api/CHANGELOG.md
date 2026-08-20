@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.64.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.63.0...management-api-v0.64.0) (2026-08-20)
+
+
+### Features
+
+* add application state and PowerSync readiness references ([#1015](https://github.com/vibeunion/supacloud/issues/1015)) ([7f6e11c](https://github.com/vibeunion/supacloud/commit/7f6e11c3ba1d43b948609cf47d8db96c615136c4))
+
 ## [0.63.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.62.0...management-api-v0.63.0) (2026-08-20)
 
 
