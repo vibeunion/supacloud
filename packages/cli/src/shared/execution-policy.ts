@@ -25,6 +25,12 @@ const ACTION_POLICY: Record<string, ModulePolicy> = {
         local: ["version", "migration_new", "db_diff", "db_reset", "db_pull", "db_dump", "migration_list", "gen_types"],
         write: ["push"],
     },
+    lite: {
+        local: [
+            "version", "start", "migrate", "status", "keys", "gen_types", "db_reset", "db_diff", "db_pull",
+            "snapshot_create", "snapshot_restore", "upgrade", "inspect", "doctor",
+        ],
+    },
     auth: {
         read: ["list_users", "get_user", "list_providers", "get_provider", "supported_providers", "get_settings", "get_config", "get_oauth_server"],
         write: ["generate_link", "configure_provider", "update_provider", "disable_provider", "wechat_mini", "wechat_open", "update_settings", "update_config", "migrate_oauth_server"],

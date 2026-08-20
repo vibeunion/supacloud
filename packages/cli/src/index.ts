@@ -22,6 +22,7 @@ import { registerQueueTools } from "./shared/tools/queue-tools";
 import { registerGatewayTools } from "./shared/tools/gateway-tools";
 import { registerBranchTools } from "./shared/tools/branch-tools";
 import { registerSupabaseCliTools } from "./shared/tools/supabase-cli-tools";
+import { registerLiteCliTools } from "./shared/tools/lite-cli-tools";
 import { registerAiTools } from "./shared/tools/ai-tools";
 import { registerScheduledFunctionTools } from "./shared/tools/scheduled-function-tools";
 import { registerMutationTools } from "./shared/tools/mutation-tools";
@@ -303,6 +304,9 @@ EXAMPLES
   ${preferredCommand} supabase db_diff --schema public --name add_accounts
   ${preferredCommand} supabase push --ref abc123 --dir supabase/migrations --dry_run
   ${preferredCommand} supabase db_dump --db_url "postgresql://..." --file backups/schema.sql
+  ${preferredCommand} lite migrate --project_dir .
+  ${preferredCommand} lite start --project_dir . --port 54321
+  ${preferredCommand} lite doctor --project_dir . --json
   ${preferredCommand} branch create --name feature-auth --data_mode schema_only
   ${preferredCommand} branch promotion_plan --branch_ref preview123
   ${preferredCommand} branch promote --branch_ref preview123 --plan_checksum <sha256>
@@ -362,6 +366,7 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
         projectRef: context.projectRef || undefined,
         readOnly: context.readOnly,
     })));
+    Object.assign(tools, captureTools((server) => registerLiteCliTools(server as any)));
     Object.assign(tools, captureTools((server) => registerAiTools(server as any)));
 
     const registerContextAwareHelp = () => {
@@ -531,7 +536,7 @@ async function main() {
     }
 
     const cliTools = createCliTools(context, globalOptions.confirmProduction);
-    if (args.length === 1 && !["ai", "supabase"].includes(args[0]) && cliTools[args[0]]) {
+    if (args.length === 1 && !["ai", "supabase", "lite"].includes(args[0]) && cliTools[args[0]]) {
         const result = await cliTools[args[0]].callback({});
         if (result?.content && Array.isArray(result.content)) {
             for (const chunk of result.content) {

@@ -440,6 +440,35 @@ Use `--data_mode full_clone` only for an explicitly approved non-sensitive or
 masked debugging dataset. Whole-database replacement is an administrator-only
 break-glass API mode and is intentionally not exposed by this project CLI.
 
+## SupaCloud Lite CLI adapter
+
+Lite can be used from its standalone `supacloud-lite` CLI and from the main
+`supacloud-cli` through the local-only `lite` module. The adapter never calls
+the Management API, never invokes the official Supabase CLI, and never treats a
+PGlite data directory as a Postgres DSN.
+
+```bash
+supacloud-cli lite migrate --project_dir .
+supacloud-cli lite status --project_dir .
+supacloud-cli lite db_diff --project_dir . --file add_accounts
+supacloud-cli lite db_pull --project_dir . --file remote_schema
+supacloud-cli lite gen_types --project_dir . --output src/database.types.ts
+supacloud-cli lite snapshot_create --project_dir . --output backups/lite.tar.gz
+supacloud-cli lite doctor --project_dir . --json
+supacloud-cli lite start --project_dir . --port 54321
+```
+
+The adapter resolves the executable in this order:
+
+1. `SUPACLOUD_LITE_CLI_BIN`
+2. `<workdir>/node_modules/@supacloud/lite/dist/launcher.cjs`
+3. `supacloud-lite` on `PATH`
+
+Install `@supacloud/lite` or provide an explicit binary before using the
+adapter. Lite actions are local-only, so Management API context and project
+refs are not required. The `supabase` module remains the official CLI adapter;
+use it for upstream Supabase CLI actions and Management-backed remote pushes.
+
 ## Official Supabase CLI adapter
 
 The `supabase` command group is a thin, allowlisted adapter around the official
