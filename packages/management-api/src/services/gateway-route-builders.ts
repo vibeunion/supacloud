@@ -547,7 +547,7 @@ export function makeCustomGatewayRoute(projectRef: string, input: CustomGatewayR
     };
     if (route.protocol) {
         match.vars = {
-            "{http.request.scheme}": route.protocol,
+            "{http.request.scheme}": [route.protocol],
         };
     }
 

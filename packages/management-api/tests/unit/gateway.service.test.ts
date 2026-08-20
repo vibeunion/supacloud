@@ -628,7 +628,7 @@ describe("CaddyGatewayProvider", () => {
             host: ["studio.example.com"],
             path: ["/*"],
             vars: {
-                "{http.request.scheme}": "http",
+                "{http.request.scheme}": ["http"],
             },
         });
         expect(redirect?.handle?.[0]).toMatchObject({
