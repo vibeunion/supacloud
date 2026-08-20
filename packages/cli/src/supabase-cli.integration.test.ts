@@ -43,6 +43,15 @@ async function runCli(args: string[], environment: Record<string, string> = {}) 
 }
 
 describe("supacloud-cli official Supabase CLI surface", () => {
+    test("exposes the local Lite action surface without project credentials", async () => {
+        const result = await runCli(["lite"]);
+
+        expect(result.exitCode).toBe(0);
+        expect(result.stderr).toContain("Available actions");
+        expect(result.stderr).toContain("snapshot_create");
+        expect(result.stderr).toContain("doctor");
+    });
+
     test("shows action help when the command group is invoked without an action", async () => {
         const result = await runCli(["supabase"]);
 

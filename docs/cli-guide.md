@@ -105,6 +105,29 @@ The packaged Skill enforces these defaults for agents:
 Restart or reload the agent after installing/updating a Skill so its discovery
 catalog is refreshed.
 
+### SupaCloud Lite CLI adapter
+
+Lite supports CLI workflows through its standalone `supacloud-lite` binary and
+through `supacloud-cli lite`. The main CLI adapter is local-only: it does not
+use Management API credentials, the official Supabase CLI, or a Postgres DSN
+for the PGlite state directory.
+
+```bash
+supacloud-cli lite migrate --project_dir .
+supacloud-cli lite status --project_dir .
+supacloud-cli lite db_diff --project_dir . --file add_accounts
+supacloud-cli lite db_pull --project_dir . --file remote_schema
+supacloud-cli lite gen_types --project_dir . --output src/database.types.ts
+supacloud-cli lite snapshot_create --project_dir . --output backups/lite.tar.gz
+supacloud-cli lite doctor --project_dir . --json
+supacloud-cli lite start --project_dir . --port 54321
+```
+
+Executable resolution is `SUPACLOUD_LITE_CLI_BIN`, then the project-local
+`@supacloud/lite` launcher, then `supacloud-lite` on `PATH`. The `supabase`
+module remains reserved for the official Supabase CLI and Management-backed
+remote project operations.
+
 ### Official Supabase CLI adapter
 
 `supacloud-cli supabase` is a thin, allowlisted adapter around the official
