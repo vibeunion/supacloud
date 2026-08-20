@@ -427,24 +427,37 @@ describe("control-plane upgrade safety", () => {
     }
   });
 
-  test("holds the exported snapshot inspection open through backup", async () => {
+  test("closes inspection locks while retaining the exported snapshot through backup and migration", async () => {
     let inspectionOpen = false;
+    let snapshotOpen = false;
     await withControlPlaneUpgradeSafety(databaseUrl, "k".repeat(32), async (lease) => {
-      expect(inspectionOpen).toBe(true);
+      expect(inspectionOpen).toBe(false);
+      expect(snapshotOpen).toBe(true);
       expect(lease.snapshotId).toBe(inspection.snapshotId);
       expect(lease.databaseFingerprint).toBe(inspection.databaseFingerprint);
       expect(lease.evidence).not.toHaveProperty("database_fingerprint");
     }, {
-      withInspection: async (_databaseUrl, _currentKey, operation) => {
+      withSnapshot: async (_databaseUrl, operation) => {
+        snapshotOpen = true;
+        try {
+          return await operation(inspection.snapshotId);
+        } finally {
+          snapshotOpen = false;
+        }
+      },
+      inspect: async (_databaseUrl, _currentKey, snapshotId) => {
+        expect(snapshotOpen).toBe(true);
+        expect(snapshotId).toBe(inspection.snapshotId);
         inspectionOpen = true;
         try {
-          return await operation(inspection);
+          return inspection;
         } finally {
           inspectionOpen = false;
         }
       },
       backup: async (_target, inspected) => {
-        expect(inspectionOpen).toBe(true);
+        expect(inspectionOpen).toBe(false);
+        expect(snapshotOpen).toBe(true);
         expect(inspected.snapshotId).toBe(inspection.snapshotId);
         return {
           schema: "supacloud.control-plane-upgrade-safety.v1",
@@ -459,16 +472,29 @@ describe("control-plane upgrade safety", () => {
       },
     });
     expect(inspectionOpen).toBe(false);
+    expect(snapshotOpen).toBe(false);
   });
 
   test("fails closed when inspection and backup resolve different database identities", async () => {
     await expect(prepareControlPlaneUpgradeSafety(databaseUrl, "k".repeat(32), {
-      withInspection: async (_databaseUrl, _currentKey, operation) => operation({
+      withSnapshot: async (_databaseUrl, operation) => operation(inspection.snapshotId),
+      inspect: async () => ({
         ...inspection,
         databaseTargetFingerprint: "0".repeat(64),
       }),
       backup: async () => { throw new Error("backup must not run"); },
     })).rejects.toThrow("database identity changed");
+  });
+
+  test("fails closed when inspection did not import the exported snapshot", async () => {
+    await expect(prepareControlPlaneUpgradeSafety(databaseUrl, "k".repeat(32), {
+      withSnapshot: async (_databaseUrl, operation) => operation(inspection.snapshotId),
+      inspect: async () => ({
+        ...inspection,
+        snapshotId: "00000003-0000001B-2",
+      }),
+      backup: async () => { throw new Error("backup must not run"); },
+    })).rejects.toThrow("did not use the exported backup snapshot");
   });
 
   test("rejects incomplete or non-PostgreSQL database targets", () => {
