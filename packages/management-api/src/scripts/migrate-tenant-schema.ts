@@ -620,6 +620,12 @@ ${SQL_MODULES["pgmq-public"]}
 -- 17a. Service-role-only durable workflow execution built on PGMQ.
 ${SQL_MODULES["workflows-public"]}
 
+-- 17b. Transactional command receipts backed by durable workflows.
+${SQL_MODULES["commands-public"]}
+
+-- 17c. Immutable Storage artifact metadata and lineage.
+${SQL_MODULES["artifacts-public"]}
+
 -- 18. Realtime WAL logical replication support
 DO $$
 BEGIN

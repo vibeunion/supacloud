@@ -4,8 +4,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createBackend } from '../src/runtime/index.js'
 import { createNativeEngine, isNativeEngineSupported } from '../src/runtime/node/native/engine.js'
+import { ensurePowerSyncReplicationCatalog } from '../src/runtime/node/native/replication.js'
+import { inspectPowerSyncReadiness } from '../src/runtime/node/native/readiness.js'
 import { buildWireEngine } from '../src/runtime/node/native/wire-engine.js'
-import { decodeValue, parsePgArray, type PgWireClient } from '../src/runtime/node/native/wire.js'
+import { decodeValue, parsePgArray, PgWireClient } from '../src/runtime/node/native/wire.js'
 
 const nativeIntegrationEnabled = process.env.SUPACLOUD_LITE_TEST_NATIVE === '1' && isNativeEngineSupported()
 const temporaryDirectories: string[] = []
@@ -118,6 +120,125 @@ describe.skipIf(!nativeIntegrationEnabled)('native PostgreSQL engine', () => {
       await backend.close()
     }
   }, 120_000)
+
+  test('enables a bounded PowerSync source only through the explicit profile', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'supacloud-lite-native-powersync-'))
+    temporaryDirectories.push(projectRoot)
+    const port = await freePort()
+    const password = `powersync-${crypto.randomUUID()}-${crypto.randomUUID()}`
+    const replication = {
+      profile: 'powersync' as const,
+      host: '127.0.0.1',
+      port,
+      allowCidrs: ['127.0.0.1/32'],
+      publicationTables: ['public.lab_entries'],
+      password,
+    }
+    const engine = await createNativeEngine({ dataDir: join(projectRoot, 'pgdata'), replication })
+    const backend = await createBackend({
+      engine,
+      migrations: [{
+        name: '20260820010000_powersync_source',
+        sql: `
+          create table public.lab_entries (
+            id uuid primary key default gen_random_uuid(),
+            payload jsonb not null default '{}'::jsonb
+          );
+        `,
+      }],
+      startRuntimeServices: false,
+    })
+    try {
+      await ensurePowerSyncReplicationCatalog(backend.db.engine, replication)
+      const readiness = await inspectPowerSyncReadiness(backend.db.engine, replication)
+      expect(readiness).toMatchObject({
+        ready: true,
+        blockers: [],
+        wal: {
+          level: 'logical',
+          max_senders: 4,
+          max_replication_slots: 4,
+          used_replication_slots: 0,
+          max_slot_wal_keep_size: '1024',
+        },
+        role: {
+          name: 'supacloud_powersync',
+          present: true,
+          login: true,
+          replication: true,
+          bypass_rls: true,
+        },
+        publication: {
+          name: 'powersync',
+          present: true,
+          all_tables: false,
+          tables: ['public.lab_entries'],
+          expected_tables: ['public.lab_entries'],
+        },
+        slots: [],
+      })
+
+      const powersync = await PgWireClient.connect({
+        host: '127.0.0.1',
+        port,
+        user: 'supacloud_powersync',
+        database: 'postgres',
+        password,
+      })
+      try {
+        expect((await powersync.query<{ count: number }>('select count(*)::integer as count from public.lab_entries')).rows)
+          .toEqual([{ count: 0 }])
+        await expect(powersync.query('create table public.forbidden (id integer)')).rejects.toMatchObject({ code: '42501' })
+      } finally {
+        await powersync.close()
+      }
+
+      await backend.db.exec(`
+        create table public.not_published (id integer primary key);
+        grant select on public.not_published to supacloud_powersync;
+      `)
+      const drifted = await inspectPowerSyncReadiness(backend.db.engine, replication)
+      expect(drifted.ready).toBe(false)
+      expect(drifted.blockers).toContain('POWERSYNC_ROLE_SELECT_OUTSIDE_ALLOWLIST')
+      expect(drifted.role.unexpected_selectable_tables).toEqual(['public.not_published'])
+    } finally {
+      await backend.close()
+    }
+  }, 180_000)
+
+  test('returns an existing native data directory to the lightweight defaults after profile shutdown', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'supacloud-lite-native-profile-reset-'))
+    temporaryDirectories.push(projectRoot)
+    const dataDir = join(projectRoot, 'pgdata')
+    const replication = {
+      profile: 'powersync' as const,
+      host: '127.0.0.1',
+      port: await freePort(),
+      allowCidrs: ['127.0.0.1/32'],
+      publicationTables: ['public.placeholder'],
+      password: `powersync-${crypto.randomUUID()}-${crypto.randomUUID()}`,
+    }
+    const profiled = await createNativeEngine({ dataDir, replication })
+    expect((await replicationSettings(profiled)).rows).toEqual([{
+      listen_addresses: '127.0.0.1',
+      wal_level: 'logical',
+      max_wal_senders: '4',
+      max_replication_slots: '4',
+    }])
+    await profiled.close()
+
+    const lightweight = await createNativeEngine({ dataDir })
+    try {
+      expect((await replicationSettings(lightweight)).rows).toEqual([{
+        listen_addresses: '',
+        wal_level: 'minimal',
+        max_wal_senders: '0',
+        max_replication_slots: '0',
+      }])
+    } finally {
+      await lightweight.close()
+    }
+  }, 180_000)
 })
 
 function wireClient(): PgWireClient {
@@ -127,4 +248,26 @@ function wireClient(): PgWireClient {
     exec: async () => [],
     close: async () => undefined,
   } as unknown as PgWireClient
+}
+
+async function freePort(): Promise<number> {
+  const server = Bun.listen({ hostname: '127.0.0.1', port: 0, socket: { data() {} } })
+  const port = server.port
+  server.stop(true)
+  return port
+}
+
+function replicationSettings(engine: Awaited<ReturnType<typeof createNativeEngine>>) {
+  return engine.query<{
+    listen_addresses: string
+    wal_level: string
+    max_wal_senders: string
+    max_replication_slots: string
+  }>(`
+    SELECT
+      current_setting('listen_addresses') AS listen_addresses,
+      current_setting('wal_level') AS wal_level,
+      current_setting('max_wal_senders') AS max_wal_senders,
+      current_setting('max_replication_slots') AS max_replication_slots
+  `)
 }

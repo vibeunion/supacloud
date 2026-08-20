@@ -14,6 +14,11 @@ import { join } from 'node:path'
 import { extract as extractTar } from 'tar'
 import { acquireDataDirLock } from '../../db/data-dir-lock.js'
 import type { DbEngine } from '../../db/engine.js'
+import {
+  buildPowerSyncPostgresArgs,
+  writePowerSyncHba,
+  type NativeReplicationOptions,
+} from './replication.js'
 import { PgWireClient } from './wire.js'
 import { buildWireEngine } from './wire-engine.js'
 
@@ -52,6 +57,8 @@ export interface NativeEngineOptions {
   log?: (msg: string) => void
   /** Optional HTTPS or loopback HTTP prefix for proxying the PostgreSQL release download. */
   downloadMirror?: string
+  /** Optional externally reachable logical-replication profile. Disabled by default. */
+  replication?: NativeReplicationOptions
 }
 
 export function isNativeEngineSupported(): boolean {
@@ -249,6 +256,7 @@ dynamic_shared_memory_type = posix
 max_connections = 10
 wal_level = minimal
 max_wal_senders = 0
+max_replication_slots = 0
 logging_collector = off
 `
 
@@ -284,10 +292,24 @@ export async function createNativeEngine(opts: NativeEngineOptions): Promise<DbE
     socketDirectory = mkdtempSync(join(tmpdir(), 'scl-'))
     chmodSync(socketDirectory, 0o700)
 
-    postgres = spawn(bin('postgres'), ['-D', opts.dataDir, '-k', socketDirectory, '-c', 'timezone=UTC'], {
-      stdio: ['ignore', 'ignore', 'pipe'],
-      detached: false,
-    })
+    const replicationHba = opts.replication ? join(opts.dataDir, 'supacloud-powersync-hba.conf') : undefined
+    if (opts.replication && replicationHba) writePowerSyncHba(replicationHba, opts.replication)
+    const replicationArgs = opts.replication && replicationHba
+      ? buildPowerSyncPostgresArgs(opts.replication, replicationHba)
+      : [
+          '-c', 'listen_addresses=',
+          '-c', 'wal_level=minimal',
+          '-c', 'max_wal_senders=0',
+          '-c', 'max_replication_slots=0',
+        ]
+    postgres = spawn(
+      bin('postgres'),
+      ['-D', opts.dataDir, '-k', socketDirectory, '-c', 'timezone=UTC', ...replicationArgs],
+      {
+        stdio: ['ignore', 'ignore', 'pipe'],
+        detached: false,
+      }
+    )
     let postgresExited = false
     let postgresStderr = ''
     postgres.stderr?.on('data', (chunk: Buffer) => {
@@ -301,7 +323,8 @@ export async function createNativeEngine(opts: NativeEngineOptions): Promise<DbE
     process.once('exit', killPostgres)
     removeExitHandler = () => process.off('exit', killPostgres)
 
-    const socketPath = join(socketDirectory, '.s.PGSQL.5432')
+    const postgresPort = opts.replication?.port ?? 5432
+    const socketPath = join(socketDirectory, `.s.PGSQL.${postgresPort}`)
     const connect = async (): Promise<PgWireClient> => {
       const deadline = Date.now() + 20_000
       while (Date.now() <= deadline) {

@@ -15,6 +15,25 @@ afterEach(async () => {
 })
 
 describe('read-only CLI commands', () => {
+  test('doctor --json reports the stable PGlite capability contract without initializing a database', async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), 'supacloud-lite-cli-doctor-'))
+    temporaryDirectories.push(projectDir)
+    const doctor = await runCli(projectDir, ['doctor', '--json'])
+
+    expect(doctor.exitCode).toBe(0)
+    expect(doctor.stderr).toBe('')
+    expect(JSON.parse(doctor.stdout)).toEqual({
+      engine: 'pglite',
+      state_machine_sql: 'supported',
+      durable_workflows: 'supported',
+      commands: 'supported',
+      artifacts: 'supported',
+      postgrest_schema_config: 'static',
+      logical_replication: 'unsupported',
+      powersync_source: 'unsupported',
+    })
+  })
+
   test('inspect reports the live schema without applying pending migrations or seed', async () => {
     const projectDir = await projectWithPendingMigration()
     const inspection = await runCli(projectDir, ['inspect'])
@@ -112,5 +131,13 @@ function isolatedProjectEnvironment(): Record<string, string | undefined> {
   delete environment.SUPACLOUD_LITE_DATA_DIR
   delete environment.SUPACLOUD_LITE_STORAGE_DIR
   delete environment.SUPACLOUD_LITE_STORAGE_BACKEND
+  delete environment.SUPACLOUD_LITE_REPLICATION_PROFILE
+  delete environment.SUPACLOUD_LITE_REPLICATION_HOST
+  delete environment.SUPACLOUD_LITE_REPLICATION_PORT
+  delete environment.SUPACLOUD_LITE_REPLICATION_ALLOW_CIDRS
+  delete environment.SUPACLOUD_LITE_POWERSYNC_TABLES
+  delete environment.SUPACLOUD_LITE_POWERSYNC_PASSWORD
+  delete environment.SUPACLOUD_LITE_REPLICATION_TLS_CERT_FILE
+  delete environment.SUPACLOUD_LITE_REPLICATION_TLS_KEY_FILE
   return environment
 }

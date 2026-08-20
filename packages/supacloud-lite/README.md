@@ -106,6 +106,7 @@ supacloud-lite snapshot create [-o backup.tar.gz]
 supacloud-lite snapshot restore <backup.tar.gz> [--force]
 supacloud-lite upgrade [-o pre-upgrade.tar.gz]
 supacloud-lite inspect
+supacloud-lite doctor [--json]
 supacloud-lite version
 ```
 
@@ -136,6 +137,13 @@ supacloud-lite version
 - `SUPACLOUD_LITE_STORAGE_BACKEND`：`fs`（默认）、`memory` 或 `s3`
 - `SUPACLOUD_LITE_S3_PREFIX`：S3 对象 key 前缀，可被 `--s3-prefix` 覆盖
 - `SUPACLOUD_LITE_POSTGRES_MIRROR`：native 引擎下载 PostgreSQL 发布包时使用的 HTTPS 镜像前缀，例如 `https://ghproxy.net/`
+- `SUPACLOUD_LITE_ENGINE`：`pglite`（默认）或 `native`
+- `SUPACLOUD_LITE_REPLICATION_PROFILE`：仅支持显式值 `powersync`，且仅用于 native 引擎
+- `SUPACLOUD_LITE_REPLICATION_HOST` / `SUPACLOUD_LITE_REPLICATION_PORT`：PowerSync 数据库监听地址和端口，默认 `127.0.0.1:54322`
+- `SUPACLOUD_LITE_REPLICATION_ALLOW_CIDRS`：逗号分隔的 PowerSync 客户端 CIDR allowlist
+- `SUPACLOUD_LITE_POWERSYNC_TABLES`：逗号分隔、带 schema 的 publication 表 allowlist
+- `SUPACLOUD_LITE_POWERSYNC_PASSWORD`：独立 replication role 密码，至少 32 字符；不支持 CLI 密码参数
+- `SUPACLOUD_LITE_REPLICATION_TLS_CERT_FILE` / `SUPACLOUD_LITE_REPLICATION_TLS_KEY_FILE`：非 loopback 监听必需
 - `SUPACLOUD_LITE_JWT_SECRET`
 - `SUPACLOUD_LITE_VAULT_KEY`
 
@@ -254,12 +262,59 @@ S3 模式的快照只包含数据库中的 Storage 元数据和密钥，不复�
 | Edge Functions `SupaCloud.pgredis` | 已验证核心 | 提供单项目持久 KV、TTL、原子 `getset`/`getdel`；绑定只在当前函数请求内可用 |
 | Supabase migrations | 支持 | 按文件名排序，记录到 `supabase_migrations` |
 | PostgreSQL RLS | 支持 | 使用 `anon`、`authenticated`、`service_role` 数据库角色执行 |
+| Maker-Checker SQL | 支持 | 参考 migration 在 PGlite/native 自动测试中覆盖角色分离、行版本、幂等、非法跃迁和只增审计 |
+| Commands / Artifacts | 支持 | 与完整 SupaCloud 使用相同 SQL contract；PGlite/native 均通过 `@supacloud/js` 端到端测试 |
+| Logical Replication / PowerSync source | 有条件支持 | PGlite 不支持；native 仅在显式 `powersync` profile 下支持，默认关闭 |
 | PostgREST 完整线协议 | 部分支持 | 目标是常用 `supabase-js` 行为，不承诺所有 PostgREST 边角行为 |
 | PostgreSQL 扩展 | 部分支持 | 仅支持 PGlite 内置或 Lite 模拟的扩展能力 |
 | Supabase Studio | 不支持 | V1 不提供管理 UI |
 | 多项目控制面 | 不支持 | V1 每个进程只运行一个项目，可通过多个进程部署多个项目 |
 
 RLS 表的 Realtime DELETE 无法在行删除后安全重放 SELECT policy，因此 V1 只向 `service_role` 订阅者发送这类 DELETE 事件。普通用户仍可收到通过逐行 RLS 校验的 INSERT/UPDATE 事件。
+
+### Capability doctor 与 PowerSync profile
+
+`doctor` 输出 Lite 自己的稳定能力契约，不复制完整 Management API：
+
+```bash
+supacloud-lite doctor --json
+```
+
+默认 PGlite 输出会明确包含：
+
+```json
+{
+  "engine": "pglite",
+  "state_machine_sql": "supported",
+  "durable_workflows": "supported",
+  "commands": "supported",
+  "artifacts": "supported",
+  "postgrest_schema_config": "static",
+  "logical_replication": "unsupported",
+  "powersync_source": "unsupported"
+}
+```
+
+PGlite 永远不伪造 WAL、publication 或 replication slot。单机现场 ELN 可以直接把 Lite 当作本地服务器；多设备离线同步应使用中央 SupaCloud + PowerSync，或由应用 outbox 把本地 Lite 数据推送到中央 SupaCloud。PowerSync 客户端本地数据库是 SQLite，与 Lite/PGlite 不是同一层能力。
+
+Native Lite 默认仍使用 `wal_level=minimal`、关闭 WAL sender 并且不监听数据库 TCP。只有显式启用 profile 才配置有界 Logical Replication：
+
+```bash
+export SUPACLOUD_LITE_POWERSYNC_PASSWORD='<secret-store-value-at-least-32-characters>'
+supacloud-lite migrate \
+  --engine native \
+  --replication-profile powersync \
+  --powersync-tables public.eln_entries,public.eln_observations
+
+supacloud-lite doctor --json \
+  --engine native \
+  --replication-profile powersync \
+  --powersync-tables public.eln_entries,public.eln_observations
+```
+
+该 profile 使用独立 `supacloud_powersync` 登录角色、显式 `powersync` publication、`wal_level=logical`、4 个 sender、4 个 slot 和 `max_slot_wal_keep_size=1024MB`。默认只允许 loopback 上的 SCRAM 连接；非 loopback 监听必须同时提供 TLS 证书、权限受限的私钥和显式 CIDR allowlist。
+
+Lite 会创建或更新 replication role 与 publication allowlist，但**不会创建、删除或猜测 replication slot**。slot 由固定版本的 PowerSync 服务和运维流程持有。`doctor` 只读检查 WAL、sender/slot 容量、角色、publication、replica identity 和现有 slot 的滞留/失效状态。
 
 ### 从 Supabase 迁移
 
@@ -448,6 +503,7 @@ supacloud-lite snapshot create [-o backup.tar.gz]
 supacloud-lite snapshot restore <backup.tar.gz> [--force]
 supacloud-lite upgrade [-o pre-upgrade.tar.gz]
 supacloud-lite inspect
+supacloud-lite doctor [--json]
 supacloud-lite version
 ```
 
@@ -478,6 +534,13 @@ Environment variables:
 - `SUPACLOUD_LITE_STORAGE_BACKEND`: `fs` (default), `memory`, or `s3`
 - `SUPACLOUD_LITE_S3_PREFIX`: S3 object key prefix, can be overridden by `--s3-prefix`
 - `SUPACLOUD_LITE_POSTGRES_MIRROR`: HTTPS prefix used to proxy native-engine PostgreSQL release downloads, for example `https://ghproxy.net/`
+- `SUPACLOUD_LITE_ENGINE`: `pglite` (default) or `native`
+- `SUPACLOUD_LITE_REPLICATION_PROFILE`: explicit `powersync` opt-in for the native engine only
+- `SUPACLOUD_LITE_REPLICATION_HOST` / `SUPACLOUD_LITE_REPLICATION_PORT`: PowerSync database listener, default `127.0.0.1:54322`
+- `SUPACLOUD_LITE_REPLICATION_ALLOW_CIDRS`: comma-separated PowerSync client CIDR allowlist
+- `SUPACLOUD_LITE_POWERSYNC_TABLES`: comma-separated schema-qualified publication table allowlist
+- `SUPACLOUD_LITE_POWERSYNC_PASSWORD`: dedicated replication-role password of at least 32 characters; no CLI password flag is provided
+- `SUPACLOUD_LITE_REPLICATION_TLS_CERT_FILE` / `SUPACLOUD_LITE_REPLICATION_TLS_KEY_FILE`: required for non-loopback listeners
 - `SUPACLOUD_LITE_JWT_SECRET`
 - `SUPACLOUD_LITE_VAULT_KEY`
 
@@ -596,12 +659,31 @@ In-memory databases have no persistable data, so `snapshot` and `upgrade` reject
 | Edge Functions `SupaCloud.pgredis` | Verified core | Provides single-project persistent KV, TTL, and atomic `getset`/`getdel`; the binding is only available within the current function request |
 | Supabase migrations | Supported | Sorted by filename, recorded in `supabase_migrations` |
 | PostgreSQL RLS | Supported | Executed using the `anon`, `authenticated`, and `service_role` database roles |
+| Maker-Checker SQL | Supported | The reference migration is tested on PGlite/native for role separation, row versions, idempotency, illegal transitions, and append-only audit |
+| Commands / Artifacts | Supported | Uses the same SQL contract as full SupaCloud; PGlite/native are both exercised end-to-end through `@supacloud/js` |
+| Logical Replication / PowerSync source | Conditional | PGlite is unsupported; native requires the explicit `powersync` profile and remains disabled by default |
 | Full PostgREST wire protocol | Partial | Targets common `supabase-js` behavior; does not promise all PostgREST edge-case behavior |
 | PostgreSQL extensions | Partial | Only supports extensions built into PGlite or emulated by Lite |
 | Supabase Studio | Not supported | V1 does not provide an admin UI |
 | Multi-project control plane | Not supported | V1 runs only one project per process; multiple projects can be deployed via multiple processes |
 
 Realtime DELETE on RLS tables cannot safely replay SELECT policies after a row is deleted, so V1 only sends such DELETE events to `service_role` subscribers. Regular users can still receive INSERT/UPDATE events that pass row-by-row RLS validation.
+
+### Capability doctor and PowerSync profile
+
+`supacloud-lite doctor --json` reports a stable Lite capability contract without copying the full Management API. PGlite explicitly reports Logical Replication and PowerSync source support as `unsupported`; it never emulates WAL, publications, or slots. Multi-device offline deployments should use central SupaCloud + PowerSync, while a single field workstation can use Lite as a local project server or upload through an application-owned outbox.
+
+Native Lite keeps `wal_level=minimal`, WAL senders, and database TCP disabled by default. The explicit profile enables bounded Logical Replication:
+
+```bash
+export SUPACLOUD_LITE_POWERSYNC_PASSWORD='<secret-store-value-at-least-32-characters>'
+supacloud-lite migrate --engine native --replication-profile powersync \
+  --powersync-tables public.eln_entries,public.eln_observations
+supacloud-lite doctor --json --engine native --replication-profile powersync \
+  --powersync-tables public.eln_entries,public.eln_observations
+```
+
+The profile manages the dedicated `supacloud_powersync` login role and explicit `powersync` publication, with four WAL senders, four slots, and `max_slot_wal_keep_size=1024MB`. It uses loopback SCRAM by default; non-loopback listeners require TLS files and explicit CIDRs. Lite never creates or deletes a replication slot. PowerSync and the operator remain responsible for the exact slot lifecycle.
 
 ### Migrating from Supabase
 

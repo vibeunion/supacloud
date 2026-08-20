@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { existsSync } from 'node:fs'
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import packageJson from '../package.json' with { type: 'json' }
@@ -6,6 +7,7 @@ import { generateTypes, inspectDb } from './runtime/index.js'
 import { computeDbDiff, createTemporaryNativeEngine, pullSchema } from './runtime/node/db-diff.js'
 import { assertDataDirUnlocked } from './runtime/db/data-dir-lock.js'
 import { createNativeEngine } from './runtime/node/native/engine.js'
+import { inspectPowerSyncReadiness, liteCapabilities } from './runtime/node/native/readiness.js'
 import { loadSupabaseProject } from './runtime/node/project.js'
 import {
   createProjectBackend,
@@ -14,6 +16,7 @@ import {
   mintProjectKeys,
   resolveStorageBackend,
   resolveProjectPaths,
+  resolveNativeReplicationOptions,
   startProjectServer,
   type ProjectRuntimeOptions,
 } from './project-runtime.js'
@@ -27,6 +30,7 @@ interface CliOptions extends ProjectRuntimeOptions {
   diffFile?: string
   serviceRole: boolean
   force: boolean
+  json: boolean
 }
 
 function parseArgs(argv: string[]): CliOptions {
@@ -42,6 +46,7 @@ function parseArgs(argv: string[]): CliOptions {
       : 54321,
     serviceRole: false,
     force: false,
+    json: false,
   }
 
   for (let index = 0; index < args.length; index++) {
@@ -62,11 +67,21 @@ function parseArgs(argv: string[]): CliOptions {
     else if (argument === '--storage-backend') options.storageBackend = next() as ProjectRuntimeOptions['storageBackend']
     else if (argument === '--s3-prefix') options.s3 = { ...options.s3, prefix: next() }
     else if (argument === '--engine') options.engine = next() as ProjectRuntimeOptions['engine']
+    else if (argument === '--replication-profile') {
+      options.replicationProfile = next() as ProjectRuntimeOptions['replicationProfile']
+    }
+    else if (argument === '--replication-host') options.replicationHost = next()
+    else if (argument === '--replication-port') options.replicationPort = Number.parseInt(next(), 10)
+    else if (argument === '--replication-allow-cidrs') options.replicationAllowCidrs = commaSeparated(next())
+    else if (argument === '--powersync-tables') options.powersyncPublicationTables = commaSeparated(next())
+    else if (argument === '--replication-tls-cert') options.replicationTlsCertFile = resolve(next())
+    else if (argument === '--replication-tls-key') options.replicationTlsKeyFile = resolve(next())
     else if (argument === '--memory') options.memory = true
     else if (argument === '--output' || argument === '-o') options.output = resolve(next())
     else if (argument === '--file' || argument === '-f') options.diffFile = next()
     else if (argument === '--service-role') options.serviceRole = true
     else if (argument === '--force') options.force = true
+    else if (argument === '--json') options.json = true
     else if (argument === '--version') {
       console.log(packageJson.version)
       process.exit(0)
@@ -156,6 +171,25 @@ async function main(): Promise<void> {
     return
   }
 
+  if (options.command === 'doctor') {
+    const replication = resolveNativeReplicationOptions(options, paths.databaseEngine)
+    const report = liteCapabilities(paths.databaseEngine, replication?.profile)
+    if (paths.databaseEngine === 'native' && replication) {
+      if (!paths.dataDir || !existsSync(join(paths.dataDir, 'PG_VERSION'))) {
+        throw new Error('PowerSync readiness requires an initialized native database; run migrate first')
+      }
+      const engine = await createNativeEngine({ dataDir: paths.dataDir, log: quietLog, replication })
+      try {
+        report.powersync_readiness = await inspectPowerSyncReadiness(engine, replication)
+      } finally {
+        await engine.close()
+      }
+    }
+    if (options.json) await writeStandardOutput(`${JSON.stringify(report, null, 2)}\n`)
+    else await printDoctor(report)
+    return
+  }
+
   if (options.command === 'migrate' || options.command === 'status') {
     const project = await createProjectBackend({
       ...options,
@@ -233,7 +267,11 @@ async function runDbCommand(options: CliOptions): Promise<void> {
   const project = await loadSupabaseProject(resolve(options.projectDir ?? process.cwd()))
   if (subcommand === 'diff') {
     const liveEngine = paths.databaseEngine === 'native'
-      ? await createNativeEngine({ dataDir: paths.dataDir!, log: quietLog })
+      ? await createNativeEngine({
+          dataDir: paths.dataDir!,
+          log: quietLog,
+          replication: resolveNativeReplicationOptions(options, paths.databaseEngine),
+        })
       : undefined
     const ddl = await computeDbDiff({
       liveDataDir: paths.databaseEngine === 'pglite' ? paths.dataDir : undefined,
@@ -258,7 +296,11 @@ async function runDbCommand(options: CliOptions): Promise<void> {
 
   if (subcommand === 'pull') {
     const liveEngine = paths.databaseEngine === 'native'
-      ? await createNativeEngine({ dataDir: paths.dataDir!, log: quietLog })
+      ? await createNativeEngine({
+          dataDir: paths.dataDir!,
+          log: quietLog,
+          replication: resolveNativeReplicationOptions(options, paths.databaseEngine),
+        })
       : undefined
     const result = await pullSchema({
       liveDataDir: paths.databaseEngine === 'pglite' ? paths.dataDir : undefined,
@@ -360,6 +402,18 @@ async function printInspection(rows: Awaited<ReturnType<typeof inspectDb>>): Pro
   await writeStandardOutput(`${output.join('\n')}\n`)
 }
 
+async function printDoctor(report: ReturnType<typeof liteCapabilities>): Promise<void> {
+  const output = Object.entries(report)
+    .filter(([, value]) => typeof value !== 'object')
+    .map(([name, value]) => `${name}: ${value}`)
+  if (report.powersync_readiness) {
+    output.push(`powersync_ready: ${report.powersync_readiness.ready}`)
+    for (const blocker of report.powersync_readiness.blockers) output.push(`blocker: ${blocker}`)
+    for (const warning of report.powersync_readiness.warnings) output.push(`warning: ${warning}`)
+  }
+  await writeStandardOutput(`${output.join('\n')}\n`)
+}
+
 async function writeStandardOutput(output: string): Promise<void> {
   await Bun.write(Bun.stdout, output)
 }
@@ -374,8 +428,12 @@ function timestamp(): string {
 
 function quietLog(): void {}
 
+function commaSeparated(value: string): string[] {
+  return value.split(',').map((entry) => entry.trim()).filter(Boolean)
+}
+
 function printHelp(): void {
-  console.log(`supacloud-lite - Bun-native Supabase-compatible backend on PGlite
+  console.log(`supacloud-lite - Bun-native Supabase-compatible backend on PGlite or native PostgreSQL
 
 Usage: supacloud-lite [command] [options]
 
@@ -393,6 +451,7 @@ Commands:
   snapshot restore <f>  restore a snapshot into an empty target
   upgrade               snapshot first, then apply pending migrations
   inspect               show table rows and sizes
+  doctor                report Lite capability and replication readiness
   version               print the package version
 
 Fresh projects must run "supacloud-lite migrate" before "db reset".
@@ -409,7 +468,15 @@ Options:
       --storage-backend <b> fs, memory, or s3 (default fs)
       --s3-prefix <p>      optional key prefix for the s3 backend
       --engine <e>         pglite (default) or native (macOS/glibc Linux x64/arm64)
+      --replication-profile <p> optional powersync profile (native only)
+      --replication-host <ip> database listener (default 127.0.0.1)
+      --replication-port <n> database listener port (default 54322)
+      --replication-allow-cidrs <list> explicit client CIDRs
+      --powersync-tables <list> schema-qualified publication table allowlist
+      --replication-tls-cert <p> PostgreSQL TLS certificate
+      --replication-tls-key <p> PostgreSQL TLS private key
       --memory            use an in-memory PGlite database
+      --json              emit machine-readable doctor output
   -o, --output <p>        output file for gen types
   -f, --file <name>       migration suffix for db diff
       --force             replace non-empty restore targets and retain rollback copies

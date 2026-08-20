@@ -72,6 +72,35 @@ import {
   type ReplicationSettingRow,
   summarizePowerSyncReadiness,
 } from "../services/replication-readiness";
+import {
+  tenantRuntimeService,
+  type PostgrestRuntimeStatus,
+} from "../services/tenant-runtime.service";
+import {
+  effectivePostgrestSchemas,
+  normalizeCustomPostgrestSchemas,
+  postgrestSchemasRevision,
+  PostgrestSchemaConfigError,
+  projectCustomPostgrestSchemas,
+} from "../utils/postgrest-schema-config";
+
+type ProjectSettings = Record<string, unknown>;
+
+interface PostgrestSchemaPatchRequest {
+  exposed_schemas: string[];
+  expected_revision?: string;
+}
+
+class PostgrestSchemaUpdateError extends Error {
+  constructor(
+    readonly httpStatus: 400 | 409 | 503,
+    readonly code: string,
+    message: string,
+    readonly details: Record<string, unknown> = {},
+  ) {
+    super(message);
+  }
+}
 
 /** Map PostgreSQL column types to TypeScript types */
 function pgTypeToTs(udtName: string, dataType: string): string {
@@ -218,6 +247,208 @@ async function projectDatabaseConnection(projectRef: string) {
   const databaseName = await resolveDbName(projectRef);
   quoteDatabaseIdentifier(databaseName);
   return { databaseName, database: getProjectDb(databaseName) };
+}
+
+async function readPostgrestSchemaState(
+  projectRef: string,
+  settings: ProjectSettings,
+) {
+  const customSchemas = projectCustomPostgrestSchemas(settings);
+  const { database } = await projectDatabaseConnection(projectRef);
+  const rows = await database.unsafe(
+    "SELECT nspname FROM pg_namespace ORDER BY nspname",
+  ) as Array<{ nspname: string }>;
+  const availableSchemas = new Set(rows.map((row) => row.nspname));
+  const missingSchemas = customSchemas.filter(
+    (schema) => !availableSchemas.has(schema),
+  );
+  return {
+    exposed_schemas: customSchemas,
+    effective_schemas: effectivePostgrestSchemas(
+      customSchemas,
+      availableSchemas.has("pgmq_public"),
+    ),
+    revision: postgrestSchemasRevision(customSchemas),
+    missing_schemas: missingSchemas,
+  };
+}
+
+type PostgrestSchemaState = Awaited<
+  ReturnType<typeof readPostgrestSchemaState>
+>;
+
+function currentPostgrestSettings(settings: ProjectSettings) {
+  return (settings.postgrest as ProjectSettings | undefined) || {};
+}
+
+function settingsWithPostgrestSchemas(
+  settings: ProjectSettings,
+  exposedSchemas: string[],
+) {
+  return {
+    ...settings,
+    postgrest: {
+      ...currentPostgrestSettings(settings),
+      exposed_schemas: exposedSchemas,
+    },
+  };
+}
+
+function assertPostgrestRevision(
+  settings: ProjectSettings,
+  expectedRevision?: string,
+) {
+  const currentRevision = postgrestSchemasRevision(
+    projectCustomPostgrestSchemas(settings),
+  );
+  if (!expectedRevision || expectedRevision === currentRevision) {
+    return currentRevision;
+  }
+  throw new PostgrestSchemaUpdateError(
+    409,
+    "POSTGREST_SCHEMA_REVISION_CONFLICT",
+    "PostgREST schema configuration changed since it was read",
+    { revision: currentRevision },
+  );
+}
+
+async function validatePostgrestSchemas(
+  projectRef: string,
+  settings: ProjectSettings,
+  exposedSchemas: string[],
+): Promise<PostgrestSchemaState> {
+  let schemaState: PostgrestSchemaState;
+  try {
+    schemaState = await readPostgrestSchemaState(
+      projectRef,
+      settingsWithPostgrestSchemas(settings, exposedSchemas),
+    );
+  } catch (error: unknown) {
+    logger.warn("[project-config] Failed to validate PostgREST schemas", {
+      projectRef,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw new PostgrestSchemaUpdateError(
+      503,
+      "POSTGREST_SCHEMA_VALIDATION_FAILED",
+      "Failed to validate schemas against the project database",
+    );
+  }
+  if (schemaState.missing_schemas.length === 0) return schemaState;
+  throw new PostgrestSchemaUpdateError(
+    400,
+    "POSTGREST_SCHEMA_NOT_FOUND",
+    "Every exposed schema must exist before it can be configured",
+    { missing_schemas: schemaState.missing_schemas },
+  );
+}
+
+async function readPostgrestRuntimeState(projectRef: string) {
+  try {
+    return await tenantRuntimeService.statusPostgrest(projectRef);
+  } catch (error: unknown) {
+    logger.warn("[project-config] Failed to read PostgREST runtime state", {
+      projectRef,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw new PostgrestSchemaUpdateError(
+      503,
+      "POSTGREST_RUNTIME_READ_FAILED",
+      "Failed to read PostgREST runtime state; persisted configuration was not changed",
+    );
+  }
+}
+
+interface PostgrestSchemaApplyContext {
+  projectRef: string;
+  settings: ProjectSettings;
+  exposedSchemas: string[];
+  schemaState: PostgrestSchemaState;
+  runtimeBefore: PostgrestRuntimeStatus;
+}
+
+async function restorePostgrestSchemaConfig(
+  context: PostgrestSchemaApplyContext,
+) {
+  try {
+    await projectService.updateProjectSettings(context.projectRef, {
+      ...context.settings,
+      postgrest: currentPostgrestSettings(context.settings),
+    });
+    if (context.runtimeBefore.desired === "running") {
+      await tenantRuntimeService.restartPostgrest(context.projectRef);
+    }
+    return true;
+  } catch (error: unknown) {
+    logger.error("[project-config] Failed to roll back PostgREST schema config", {
+      projectRef: context.projectRef,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
+}
+
+async function applyPostgrestSchemaConfig(
+  context: PostgrestSchemaApplyContext,
+) {
+  try {
+    const persisted = await projectService.updateProjectSettings(
+      context.projectRef,
+      settingsWithPostgrestSchemas(context.settings, context.exposedSchemas),
+    );
+    if (!persisted) throw new Error("Project settings update returned no result");
+    const runtimeApplied = context.runtimeBefore.desired === "running";
+    const runtime = runtimeApplied
+      ? await tenantRuntimeService.restartPostgrest(context.projectRef)
+      : context.runtimeBefore;
+    return {
+      ...context.schemaState,
+      idempotent: false,
+      runtime_applied: runtimeApplied,
+      restart_required: !runtimeApplied,
+      runtime,
+    };
+  } catch (error: unknown) {
+    logger.warn("[project-config] Failed to apply PostgREST schema config", {
+      projectRef: context.projectRef,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    const rollbackSucceeded = await restorePostgrestSchemaConfig(context);
+    throw new PostgrestSchemaUpdateError(
+      503,
+      "POSTGREST_SCHEMA_APPLY_FAILED",
+      "Failed to apply PostgREST schema configuration",
+      { rollback: { attempted: true, succeeded: rollbackSucceeded } },
+    );
+  }
+}
+
+async function updatePostgrestSchemaConfig(
+  projectRef: string,
+  settings: ProjectSettings,
+  request: PostgrestSchemaPatchRequest,
+) {
+  const exposedSchemas = normalizeCustomPostgrestSchemas(request.exposed_schemas);
+  const currentRevision = assertPostgrestRevision(
+    settings,
+    request.expected_revision,
+  );
+  const schemaState = await validatePostgrestSchemas(
+    projectRef,
+    settings,
+    exposedSchemas,
+  );
+  if (schemaState.revision === currentRevision) {
+    return { ...schemaState, idempotent: true, runtime_applied: false };
+  }
+  const runtimeBefore = await readPostgrestRuntimeState(projectRef);
+  return applyPostgrestSchemaConfig({
+    projectRef,
+    settings,
+    exposedSchemas,
+    schemaState,
+    runtimeBefore,
+  });
 }
 
 const CustomGatewayHostsSchema = t.Array(t.String(), {
@@ -1618,7 +1849,59 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       detail: { tags: ["projects"], summary: "Update database config" },
 },
   )
-  .use(addConfigRoutes("postgrest"))
+  .get(
+    "/:ref/config/postgrest",
+    async ({ params }) => {
+      const settings = await projectService.getProjectSettings(params.ref);
+      if (!settings) return status(404, { message: "Project not found", code: "404" });
+      try {
+        return await readPostgrestSchemaState(params.ref, settings);
+      } catch (error: unknown) {
+        logger.warn("[project-config] Failed to read PostgREST schema state", {
+          projectRef: params.ref,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return status(503, {
+          code: "POSTGREST_SCHEMA_READ_FAILED",
+          message: "Failed to read the project PostgREST schema state",
+        });
+      }
+    },
+    {
+      params: t.Object({ ref: t.String() }),
+      detail: { tags: ["projects"], summary: "Get PostgREST exposed schemas" },
+    },
+  )
+  .patch(
+    "/:ref/config/postgrest",
+    async ({ params, body }) => {
+      const settings = await projectService.getProjectSettings(params.ref);
+      if (!settings) return status(404, { message: "Project not found", code: "404" });
+      try {
+        return await updatePostgrestSchemaConfig(params.ref, settings, body);
+      } catch (error: unknown) {
+        if (error instanceof PostgrestSchemaConfigError) {
+          return status(400, { code: error.code, message: error.message });
+        }
+        if (error instanceof PostgrestSchemaUpdateError) {
+          return status(error.httpStatus, {
+            code: error.code,
+            message: error.message,
+            ...error.details,
+          });
+        }
+        throw error;
+      }
+    },
+    {
+      params: t.Object({ ref: t.String() }),
+      body: t.Object({
+        exposed_schemas: t.Array(t.String(), { maxItems: 16 }),
+        expected_revision: t.Optional(t.String({ pattern: "^[0-9a-f]{64}$" })),
+      }),
+      detail: { tags: ["projects"], summary: "Update PostgREST exposed schemas" },
+    },
+  )
 
   // Config Storage — with official default fields
   .get(

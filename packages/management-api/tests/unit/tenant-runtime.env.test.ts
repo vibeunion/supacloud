@@ -116,6 +116,15 @@ describe("TenantRuntimeService PostgREST schema rendering", () => {
     expect(renderPostgrestDbSchemas(true)).toBe("public, storage, graphql_public, pgmq_public");
   });
 
+  test("appends validated project-owned schemas after platform schemas", () => {
+    expect(renderPostgrestDbSchemas(false, ["api", "rpc"])).toBe(
+      "public, storage, graphql_public, api, rpc",
+    );
+    expect(renderPostgrestDbSchemas(true, ["api"])).toBe(
+      "public, storage, graphql_public, pgmq_public, api",
+    );
+  });
+
   test("renders tenant-local internal runtime env for Edge Functions", () => {
     expect(renderTenantInternalRuntimeEnv(3272, 4272)).toBe([
       "SUPACLOUD_INTERNAL_POSTGREST_PORT=3272",

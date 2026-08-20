@@ -29,11 +29,13 @@ export const SQL_MODULE_TARGETS = [
       "postgrest-request-context",
       "pgmq-public",
       "workflows-public",
+      "commands-public",
+      "artifacts-public",
     ],
   },
   {
     relativePath: "packages/supacloud-lite/src/runtime/db/emulated.ts",
-    moduleIds: ["pgmq-public", "workflows-public"],
+    moduleIds: ["pgmq-public", "workflows-public", "commands-public", "artifacts-public"],
   },
   {
     relativePath: "scripts/004_background_task_mirror_migration.sql",

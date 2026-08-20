@@ -41,10 +41,29 @@ export {
   type NativeEngineOptions,
 } from './runtime/node/native/engine.js'
 export {
+  POWERSYNC_PUBLICATION,
+  POWERSYNC_REPLICATION_ROLE,
+  buildPowerSyncPostgresArgs,
+  ensurePowerSyncReplicationCatalog,
+  validatePowerSyncReplicationOptions,
+  writePowerSyncHba,
+  type NativeReplicationOptions,
+  type NativeReplicationTlsOptions,
+  type PowerSyncReplicationOptions,
+} from './runtime/node/native/replication.js'
+export {
+  inspectPowerSyncReadiness,
+  liteCapabilities,
+  type LiteCapabilityStatus,
+  type LiteDoctorReport,
+  type PowerSyncReadiness,
+} from './runtime/node/native/readiness.js'
+export {
   createProjectBackend,
   ensureProjectSecrets,
   mintProjectKeys,
   resolveDatabaseEngine,
+  resolveNativeReplicationOptions,
   resolveStorageBackend,
   resolveProjectPaths,
   startProjectServer,
@@ -64,6 +83,7 @@ export type {
   ProjectPaths,
   ProjectRuntimeOptions,
   ProjectSecrets,
+  ReplicationProfile,
   RunningProjectServer,
   StorageBackend,
 } from './project-runtime.js'

@@ -97,3 +97,9 @@ transition, for example to render a report, notify a customer, archive an
 artifact, or retry an external integration. Use the transactional outbox above
 when workflow availability must not block the business transition, and never
 let a workflow become the authoritative business state.
+
+SupaCloud Lite runs the reference state-machine migration and workflow bridge
+as an automated PGlite/native matrix. The test exercises illegal ordering,
+Maker-Checker separation, stale versions, idempotent replay, direct-update and
+append-only fences, outbox creation, dispatcher acknowledgement, and the full
+`@supacloud/js` Durable Workflow start/claim/complete path.

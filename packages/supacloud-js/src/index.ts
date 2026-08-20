@@ -3,12 +3,16 @@ import type {
   SupabaseClient,
 } from "@supabase/supabase-js";
 import { SupaCloudWorkflowsClient } from "./workflows.js";
+import { SupaCloudCommandsClient } from "./commands.js";
+import { SupaCloudArtifactsClient } from "./artifacts.js";
 
 export {
   createSupaCloudOAuthFetch,
   type SupaCloudOAuthFetchOptions,
 } from "./auth-fetch.js";
 export * from "./workflows.js";
+export * from "./commands.js";
+export * from "./artifacts.js";
 
 export type SupaCloudTaskStatus =
   | "pending"
@@ -1338,6 +1342,8 @@ export function createSupaCloudClient<TClient extends SupabaseClient = SupabaseC
   const supauth = new SupaCloudSupAuthClient(normalized);
   const queues = new SupaCloudQueuesClient(normalized);
   const workflows = new SupaCloudWorkflowsClient(options.supabase);
+  const commands = new SupaCloudCommandsClient(options.supabase);
+  const artifacts = new SupaCloudArtifactsClient(options.supabase);
 
   return {
     supabase: options.supabase,
@@ -1349,6 +1355,8 @@ export function createSupaCloudClient<TClient extends SupabaseClient = SupabaseC
     },
     tasks,
     workflows,
+    commands,
+    artifacts,
     supauth,
     queues,
     queue: (name: string) => new SupaCloudQueueClient(normalized, name),

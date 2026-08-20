@@ -10,6 +10,8 @@ It does **not** replace [`@supabase/supabase-js`](https://www.npmjs.com/package/
 - Realtime subscription with polling fallback
 - Supabase Queues helpers backed by the official `pgmq_public` RPC API, plus SupaCloud management extensions for queue administration and diagnostics
 - Service-role-only durable workflow helpers backed by PostgreSQL and PGMQ
+- Service-role-only transactional command receipts backed by Durable Workflows
+- Immutable Storage artifact registration and lineage helpers
 - project OAuth/OIDC migration and OAuth client management
 - SupAuth provisioning and runtime verification helpers
 
@@ -178,6 +180,11 @@ The current package focuses on:
 - `supauth.rollback`
 - `supauth.getClientConfig`
 - `supauth.verify`
+- `commands.submit`
+- `commands.get`
+- `artifacts.register`
+- `artifacts.get`
+- `artifacts.link`
 
 ## Status Subscription
 
