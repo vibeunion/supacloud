@@ -20,7 +20,7 @@
     "@sinclair/typebox": "^0.34.52",
     "@supabase/supabase-js": "^2.112.3",
     "elysia": "^1.4.29",
-    "es-module-lexer": "2.3.1",
+    "es-module-lexer": "2.3.2",
     "jose": "^6.2.8"
   },
   "devDependencies": {
