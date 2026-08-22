@@ -1,5 +1,11 @@
 # Release Control Automation and Headless Canary Specification
 
+> **Status: Proposed architecture.** Command and API examples in this document
+> describe target contracts, not necessarily released interfaces. Use the
+> [CLI guide](./cli-guide.md) as the source of truth for currently supported
+> commands. In particular, `edge_functions deploy_manifest --atomic` is not
+> implemented in the current main release.
+
 This specification defines platform-level mechanisms for automated application deployment, headless canary verification, batch function activations, and zero-downtime rollbacks across SupaCloud project instances.
 
 ## Background & Motivation
@@ -68,9 +74,12 @@ supacloud-cli auth canary-probe \
 
 ---
 
-## 2. Atomic Release Manifest & Multi-Function Batch Activation
+## 2. Proposed Atomic Release Manifest & Multi-Function Batch Activation
 
-Enables applications with multiple Edge Functions to deploy, activate, and roll back atomically as a single release unit.
+The target design enables applications with multiple Edge Functions to deploy,
+activate, and roll back atomically as a single release unit. The CLI and
+Management API do not currently implement this batch contract; do not emulate
+atomicity with an untracked sequence of single-Function mutations.
 
 ### Release Manifest Schema (`deploy-manifest.json`)
 
@@ -90,7 +99,7 @@ Enables applications with multiple Edge Functions to deploy, activate, and roll 
 }
 ```
 
-### Batch Deployment Command
+### Proposed Batch Deployment Command
 
 ```bash
 supacloud-cli edge_functions deploy_manifest \
@@ -111,7 +120,6 @@ supacloud-cli edge_functions deploy_manifest \
 supacloud-cli edge_functions delete \
   --ref "$PROJECT_REF" \
   --slug "legacy-function" \
-  --expected-active-version "1.2.0" \
   --expected-activation-id "22222222-2222-4222-8222-222222222222"
 ```
 
@@ -187,13 +195,13 @@ supacloud-cli frontend activate_release \
 
 ---
 
-## Benefits & Impact
+## Target Benefits & Impact
 
-| Capability | Previous Client Workaround | Native SupaCloud Primitive |
+| Capability | Current Client Workaround | Target SupaCloud Primitive |
 | :--- | :--- | :--- |
 | **PKCE Auth Canary** | Local loopback HTTP listener + browser consent | Native headless `auth canary-probe` API/CLI |
-| **Multi-Function Deploy** | Sequential CLI calls + client reverse rollback loop | `edge_functions deploy_manifest --atomic` |
-| **Function Cleanup** | Manual dashboard deletion (no CLI CAS delete) | `edge_functions delete --expected-version ...` |
+| **Multi-Function Deploy** | Sequential CAS calls + authoritative readback + client reverse rollback | Proposed `edge_functions deploy_manifest --atomic` |
+| **Function Cleanup** | Manual dashboard deletion (no CLI CAS delete) | `edge_functions delete --expected-activation-id ...` |
 | **Secrets Update** | Blind upsert without mutation receipt | CAS-checked `secrets upsert` with revision receipt |
 | **Schema Reload** | Manual `postgrest_restart` + client table polling | Native reload notification & status confirmation |
 | **Frontend Rollback** | Client re-compilation and re-upload of old zip | Instant immutable release activation by SHA-256 with CAS |

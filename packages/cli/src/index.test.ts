@@ -1260,7 +1260,7 @@ describe("supacloud-cli process contract", () => {
         }
     });
 
-    test("documents get_config as the atomic Function identity read", async () => {
+    test("documents current single-Function release controls", async () => {
         const response = await runProjectCli(["edge_functions", "--help"], {
             SUPACLOUD_API_URL: "http://127.0.0.1:1",
             SUPACLOUD_API_TOKEN: "test-token",
@@ -1269,6 +1269,18 @@ describe("supacloud-cli process contract", () => {
 
         expect(response.exitCode).toBe(0);
         expect(response.stderr).toContain("get_config");
+        expect(response.stderr).not.toContain("deploy_manifest");
+    });
+
+    test("marks the atomic Function manifest as a proposed contract", () => {
+        const spec = readFileSync(
+            join(PACKAGE_ROOT, "../../docs/release-control-automation-spec.md"),
+            "utf8",
+        );
+
+        expect(spec).toContain("> **Status: Proposed architecture.");
+        expect(spec).toContain("`edge_functions deploy_manifest --atomic` is not");
+        expect(spec).toContain("Proposed `edge_functions deploy_manifest --atomic`");
     });
 
     test("reads an allowlisted tombstone identity through get_config", async () => {

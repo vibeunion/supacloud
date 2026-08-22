@@ -332,6 +332,13 @@ Version `0` is reserved for a listed legacy Function's active-version CAS token.
 The public CLI and Management API accept it only as the expected active version;
 immutable source reads and activation targets still require positive versions.
 
+Multi-Function atomic deployment is not currently available. Release runners
+must deploy each Function with its observed version and activation identity,
+stop on `OUTCOME_UNKNOWN`, and reconcile with `edge_functions list` plus an
+immutable `source --version <N>` read before retrying or applying reverse-order
+CAS compensation. The `edge_functions deploy_manifest --atomic` interface in
+the release-control automation specification is a proposed contract.
+
 The readback contract stays simple for automation: `edge_functions list`
 prints a JSON array whose entries have a string `slug` and a non-negative safe
 integer numeric `version`; `edge_functions source` prints exactly
