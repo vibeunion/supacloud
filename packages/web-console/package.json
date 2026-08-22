@@ -42,7 +42,7 @@
   "dependencies": {
     "@svadmin/core": "^0.36.2",
     "@svadmin/elysia": "^0.11.0",
-    "@svadmin/sveltekit": "^0.9.9",
+    "@svadmin/sveltekit": "^0.9.10",
     "@svadmin/ui": "0.42.0",
     "@tanstack/svelte-query": "^6.1.38",
     "highlight.js": "^11.12.0",
