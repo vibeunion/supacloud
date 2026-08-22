@@ -40,7 +40,7 @@
     "vite": "8.2.1"
   },
   "dependencies": {
-    "@svadmin/core": "^0.36.0",
+    "@svadmin/core": "^0.36.2",
     "@svadmin/elysia": "^0.11.0",
     "@svadmin/sveltekit": "^0.9.9",
     "@svadmin/ui": "0.42.0",
