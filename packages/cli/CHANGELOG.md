@@ -14,6 +14,13 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.34.1](https://github.com/vibeunion/supacloud/compare/cli-v0.34.0...cli-v0.34.1) (2026-08-22)
+
+
+### Documentation
+
+* **release-control:** mark atomic manifests as proposed ([#1039](https://github.com/vibeunion/supacloud/issues/1039)) ([9ad7de1](https://github.com/vibeunion/supacloud/commit/9ad7de10c98902908873b4d7bb4d4ebee69f2574))
+
 ## [0.34.0](https://github.com/vibeunion/supacloud/compare/cli-v0.33.0...cli-v0.34.0) (2026-08-20)
 
 
