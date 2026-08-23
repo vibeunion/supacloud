@@ -11,7 +11,7 @@ async function linuxPidfdOperations(): Promise<LinuxPidfdOperations> {
   if (process.platform !== "linux" || !["arm64", "x64"].includes(process.arch)) {
     throw new Error("Linux pidfd is unavailable on this platform");
   }
-  // Bun 1.3.14 does not expose pidfd, so termination uses the kernel handle through libc.
+  // Bun does not expose pidfd here, so termination uses the kernel handle through libc.
   const { dlopen, FFIType } = await import("bun:ffi");
   const libc = dlopen("libc.so.6", {
     syscall: {

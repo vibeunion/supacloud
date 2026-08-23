@@ -34,7 +34,7 @@
     "@sinclair/typebox": "^0.34.52"
   },
   "devDependencies": {
-    "@types/bun": "^1.3.14",
+    "@types/bun": "^1.4.0",
     "typescript": "^7.0.2"
   }
 }

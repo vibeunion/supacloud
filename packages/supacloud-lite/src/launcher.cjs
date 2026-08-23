@@ -21,7 +21,7 @@ process.once('SIGTERM', forwardSigterm)
 
 bunProcess.once('error', (error) => {
   if (error.code === 'ENOENT') {
-    console.error('Bun executable not found on PATH. Install Bun 1.3.14 or newer, then retry.')
+    console.error('Bun executable not found on PATH. Install Bun 1.4.0 or newer, then retry.')
   } else {
     console.error(`Unable to start Bun: ${error.message}`)
   }

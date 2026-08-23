@@ -3,7 +3,7 @@ name: Release Please
 env:
   LANG: C.UTF-8
   LC_ALL: C.UTF-8
-  BUN_VERSION: "1.3.14"
+  BUN_VERSION: "1.4.0"
   XCADDY_VERSION: "v0.4.5"
 
 on:
