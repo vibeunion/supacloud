@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.65.3](https://github.com/vibeunion/supacloud/compare/management-api-v0.65.2...management-api-v0.65.3) (2026-08-23)
+
+
+### Miscellaneous Chores
+
+* **runtime:** upgrade Bun to 1.4.0 ([a1e4178](https://github.com/vibeunion/supacloud/commit/a1e4178c6a02127e4b71b0976d0f34a5a7940061))
+
 ## [0.65.2](https://github.com/vibeunion/supacloud/compare/management-api-v0.65.1...management-api-v0.65.2) (2026-08-20)
 
 

@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.10.22](https://github.com/vibeunion/supacloud/compare/supacloud-v0.10.21...supacloud-v0.10.22) (2026-08-23)
+
+
+### Bug Fixes
+
+* **supacloud:** sync published CLI dependencies ([3728223](https://github.com/vibeunion/supacloud/commit/3728223a147cfca01f04daaabdff33dbdb70a281))
+
+
+### Miscellaneous Chores
+
+* **runtime:** upgrade Bun to 1.4.0 ([a1e4178](https://github.com/vibeunion/supacloud/commit/a1e4178c6a02127e4b71b0976d0f34a5a7940061))
+
 ## [0.10.21](https://github.com/vibeunion/supacloud/compare/supacloud-v0.10.20...supacloud-v0.10.21) (2026-08-20)
 
 
