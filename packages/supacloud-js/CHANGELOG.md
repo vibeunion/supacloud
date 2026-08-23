@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.1](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.23.0...supacloud-js-v0.23.1) (2026-08-23)
+
+
+### Miscellaneous Chores
+
+* **runtime:** upgrade Bun to 1.4.0 ([a1e4178](https://github.com/vibeunion/supacloud/commit/a1e4178c6a02127e4b71b0976d0f34a5a7940061))
+
 ## [0.23.0](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.22.1...supacloud-js-v0.23.0) (2026-08-20)
 
 

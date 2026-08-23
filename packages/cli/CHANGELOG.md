@@ -14,6 +14,13 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.34.2](https://github.com/vibeunion/supacloud/compare/cli-v0.34.1...cli-v0.34.2) (2026-08-23)
+
+
+### Miscellaneous Chores
+
+* **runtime:** upgrade Bun to 1.4.0 ([a1e4178](https://github.com/vibeunion/supacloud/commit/a1e4178c6a02127e4b71b0976d0f34a5a7940061))
+
 ## [0.34.1](https://github.com/vibeunion/supacloud/compare/cli-v0.34.0...cli-v0.34.1) (2026-08-22)
 
 
