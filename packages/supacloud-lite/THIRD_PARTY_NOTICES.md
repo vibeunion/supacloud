@@ -56,15 +56,15 @@ SupaCloud Lite 使用 `tar` 作为跨平台流式快照归档依赖，避免把�
 
 ## Bun runtime
 
-SupaCloud Lite 单二进制由 Bun 1.3.14 编译并内嵌 Bun runtime，最终用户无需另外安装 Bun、Node.js 或 npm。
+SupaCloud Lite 单二进制由 Bun 1.4.0 编译并内嵌 Bun runtime，最终用户无需另外安装 Bun、Node.js 或 npm。
 
-- Version: 1.3.14
+- Version: 1.4.0
 - Bun license: MIT
 - Upstream: `https://github.com/oven-sh/bun`
-- Local runtime notice: `LICENSES/BUN-1.3.14-RUNTIME-NOTICES.txt`
-- Notice source: Bun 1.3.14 `docs/project/license.mdx` 的逐字副本
-- Linked-library coverage: JavaScriptCore/WebKit、`boringssl`、`brotli`、`libarchive`、`lol-html`、`mimalloc`、`picohttp`、`zstd`、`simdutf`、`tinycc`、`uSockets`、`zlib-ng`、`c-ares`、`libicu` 72、`libbase64`、Windows 上的 `libuv`、`libdeflate`、uWebSockets fork 和 Tigerbeetle IO 代码
-- Polyfill coverage: `assert`、`browserify-zlib`、`buffer`、`constants-browserify`、`crypto-browserify`、`domain-browser`、`events`、`https-browserify`、`os-browserify`、`path-browserify`、`process`、`punycode`、`querystring-es3`、`stream-browserify`、`stream-http`、`string_decoder`、`timers-browserify`、`tty-browserify`、`url`、`util`、`vm-browserify`
+- Local runtime notice: `LICENSES/BUN-1.4.0-RUNTIME-NOTICES.txt`
+- Notice source: Bun 1.4.0 `docs/project/license.mdx` 的逐字副本
+- Linked-library coverage: JavaScriptCore/WebKit、`boringssl`、`brotli`、`libarchive`、`lol-html`、`ls-hpack`、`ls-qpack`、`lsquic`、`mimalloc`、`picohttp`、`zstd`、`simdutf`、`tinycc`、`uSockets`、`zlib-ng`、`c-ares`、`libicu` 78、`libbase64`、Windows 上的 `libuv`、`libdeflate`、`libjpeg-turbo`、`libspng`、`libwebp`、`highway`、`HdrHistogram_c`、Linux/Windows 上的 `sqlite`、uWebSockets fork 和 Tigerbeetle IO 代码
+- Polyfill coverage: `acorn`、`acorn-walk`、`assert`、`browserify-zlib`、`buffer`、`constants-browserify`、`crypto-browserify`、`domain-browser`、`events`、`https-browserify`、`os-browserify`、`path-browserify`、`process`、`punycode`、`querystring-es3`、`stream-browserify`、`stream-http`、`string_decoder`、`timers-browserify`、`tty-browserify`、`url`、`util`、`vm-browserify`
 
 Bun runtime notice 包含 JavaScriptCore/WebKit 的 LGPL-2 说明、静态链接库许可证链接及内嵌 polyfill 许可证清单；发布资产按原文分发，不以本摘要替代。
 

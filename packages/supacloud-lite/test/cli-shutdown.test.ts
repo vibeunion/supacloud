@@ -88,7 +88,7 @@ test('runs project cleanup once after duplicate signals', async () => {
   await assertShutdownHandlerClosesProject('SIGINT')
 })
 
-test('keeps the Windows CLI referenced through output and clears it before exit', async () => {
+test('lets the Windows CLI exit after output without a global lifecycle interval', async () => {
   const probeDir = await mkdtemp(join(tmpdir(), 'supacloud-lite-windows-lifecycle-'))
   const eventsPath = join(probeDir, 'events.log')
   const preloadPath = join(probeDir, 'preload.js')
@@ -99,7 +99,7 @@ test('keeps the Windows CLI referenced through output and clears it before exit'
     expect(cliRun.exitCode).toBe(0)
     expect(cliRun.stderr).toBe('')
     expect(cliRun.stdout).not.toBe('')
-    expect(await readFile(eventsPath, 'utf8')).toBe('ref\nstdout\nclear\nexit:0\n')
+    expect(await readFile(eventsPath, 'utf8')).toBe('stdout\nexit:0\n')
   } finally {
     await rm(probeDir, { recursive: true, force: true })
   }
