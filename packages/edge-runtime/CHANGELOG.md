@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.6](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.18.5...edge-runtime-v0.18.6) (2026-08-25)
+
+
+### Bug Fixes
+
+* **edge-runtime:** make recycle budget configurable ([#1046](https://github.com/vibeunion/supacloud/issues/1046)) ([08e98d6](https://github.com/vibeunion/supacloud/commit/08e98d643ff380654c152208e94a329e299758ca))
+
 ## [0.18.5](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.18.4...edge-runtime-v0.18.5) (2026-08-23)
 
 
