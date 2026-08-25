@@ -3,6 +3,7 @@ import { Elysia } from "elysia";
 import cors from "@elysiajs/cors";
 import {
   WorkerPool,
+  resolveWorkerReplacementBudget,
   type WorkerPoolPreheatResult,
   type WorkerPoolVersionPreheatResult,
 } from "./worker-pool";
@@ -81,6 +82,12 @@ const MGMT_API = process.env.MANAGEMENT_API_URL || "http://127.0.0.1:9090";
 const FUNCTION_REQUEST_TIMEOUT_MS = Number(process.env.EDGE_FUNCTION_TIMEOUT_MS) || 60_000;
 const BACKGROUND_FUNCTION_TIMEOUT_MS = Number(process.env.EDGE_BACKGROUND_FUNCTION_TIMEOUT_MS) || 300_000;
 const WORKER_RECYCLE_RESPONSE_GRACE_MS = 100;
+const WORKER_REPLACEMENT_BUDGET = resolveWorkerReplacementBudget(
+  process.env.EDGE_MAX_WORKER_REPLACEMENTS_BEFORE_RECYCLE,
+);
+const WORKER_REPLACEMENT_BUDGET_OPTIONS = WORKER_REPLACEMENT_BUDGET === undefined
+  ? {}
+  : { maxWorkerReplacementsBeforeRecycle: WORKER_REPLACEMENT_BUDGET };
 const INTERNAL_TOKEN = process.env.EDGE_RUNTIME_MASTER_KEY || process.env.MASTER_TOKEN || "";
 const RUNTIME_INSTANCE_ID = process.env.EDGE_RUNTIME_INSTANCE_ID?.trim() || crypto.randomUUID();
 const PROJECT_REF_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
@@ -317,6 +324,7 @@ const pool = new WorkerPool({
   size: POOL_SIZE,
   requestTimeout: FUNCTION_REQUEST_TIMEOUT_MS,
   smol: FOREGROUND_WORKER_SMOL,
+  ...WORKER_REPLACEMENT_BUDGET_OPTIONS,
   onWorkerRecycleRequired: requestRuntimeRecycle,
 });
 
@@ -324,6 +332,7 @@ const backgroundPool = new WorkerPool({
   size: BACKGROUND_POOL_SIZE,
   requestTimeout: BACKGROUND_FUNCTION_TIMEOUT_MS,
   smol: BACKGROUND_WORKER_SMOL,
+  ...WORKER_REPLACEMENT_BUDGET_OPTIONS,
   onWorkerRecycleRequired: requestRuntimeRecycle,
 });
 

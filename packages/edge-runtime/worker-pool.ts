@@ -68,6 +68,19 @@ const DEFAULT_MAX_RETIREMENT_AGE_MS = 60_000;
 const DEFAULT_PREHEAT_TIMEOUT_MS = 10_000;
 // Bun/JSC retains fixed host memory after Worker exit, so bound churn before recycling the process.
 const DEFAULT_MAX_WORKER_REPLACEMENTS_BEFORE_RECYCLE = 128;
+const MAX_WORKER_REPLACEMENTS_ENV = "EDGE_MAX_WORKER_REPLACEMENTS_BEFORE_RECYCLE";
+
+export function resolveWorkerReplacementBudget(rawBudget?: string): number | undefined {
+  if (rawBudget === undefined || rawBudget === "") return undefined;
+  if (!/^[1-9]\d*$/.test(rawBudget)) {
+    throw new Error(`${MAX_WORKER_REPLACEMENTS_ENV} must be a positive integer`);
+  }
+  const parsedBudget = Number(rawBudget);
+  if (!Number.isSafeInteger(parsedBudget)) {
+    throw new Error(`${MAX_WORKER_REPLACEMENTS_ENV} must be a safe integer`);
+  }
+  return parsedBudget;
+}
 
 function cancelledResponse(): Response {
   return new Response(JSON.stringify({ error: "Task cancelled" }), {
