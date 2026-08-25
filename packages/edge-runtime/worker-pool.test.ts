@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { createHash } from "node:crypto";
-import { WorkerPool } from "./worker-pool";
+import { resolveWorkerReplacementBudget, WorkerPool } from "./worker-pool";
 import {
   EDGE_RUNTIME_PREHEAT_ATTESTATION_SCHEMA,
   type EdgeRuntimePreheatIdentity,
@@ -2766,6 +2766,17 @@ describe("WorkerPool Bun plugin project isolation", () => {
 });
 
 describe("WorkerPool module cache", () => {
+  test("parses only explicit safe worker replacement budget overrides", () => {
+    expect(resolveWorkerReplacementBudget(undefined)).toBeUndefined();
+    expect(resolveWorkerReplacementBudget("")).toBeUndefined();
+    expect(resolveWorkerReplacementBudget("256")).toBe(256);
+    for (const invalidBudget of ["0", "-1", "1.5", " 256", "256 ", "1e3", "9007199254740992"]) {
+      expect(() => resolveWorkerReplacementBudget(invalidBudget)).toThrow(
+        "EDGE_MAX_WORKER_REPLACEMENTS_BEFORE_RECYCLE",
+      );
+    }
+  });
+
   function moduleLoadCounterSource(counterPath: string): string {
     return `
       const counterPath = ${JSON.stringify(counterPath)};
