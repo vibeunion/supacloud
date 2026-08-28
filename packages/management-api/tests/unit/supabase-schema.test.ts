@@ -518,6 +518,16 @@ describe("supabase bootstrap schema", () => {
     expect(bootstrap).toContain("'pgmq'");
   });
 
+  test("self-host postgres image preinstalls database test tools without enabling them for every tenant", () => {
+    const dockerfile = readRepoFile("../../docker/self-host/postgres/Dockerfile");
+    const bootstrap = readRepoFile("../../docker/self-host/postgres/initdb/01-bootstrap-extensions.sql");
+
+    expect(dockerfile).toContain("postgresql-18-plpgsql-check");
+    expect(dockerfile).toContain("postgresql-18-pgtap");
+    expect(bootstrap).not.toContain("'plpgsql_check'");
+    expect(bootstrap).not.toContain("'pgtap'");
+  });
+
   test("SupaCloud leaves official Realtime objects to the upstream migrator", () => {
     const bootstrap = readRepoFile("src/db/schemas/supabase.sql");
     const tenantMigrationSources = [

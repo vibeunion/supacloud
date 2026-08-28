@@ -29,6 +29,8 @@ RUN set -eux; \
       postgresql-18-pg-stat-kcache \
       postgresql-18-pg-plan-filter \
       postgresql-18-pgmq \
+      postgresql-18-plpgsql-check \
+      postgresql-18-pgtap \
       postgresql-18-supautils \
       postgresql-18-vault \
       postgresql-18-wal2json \

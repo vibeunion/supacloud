@@ -34,6 +34,9 @@ import {
   tryNotifyPostgrestSchemaReload,
 } from "../services/database-schema-notify";
 import { logger } from "../utils/logger";
+import { normalizeDatabaseSchema, normalizeRpcSchemas } from "../services/database-governance-input";
+import { runDatabaseLinter } from "../services/database-linter.service";
+import { readRpcCatalog } from "../services/database-rpc-catalog.service";
 
 export type MigrationBody =
   | { query: string; version?: number | string }
@@ -2188,4 +2191,110 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
             }
         },
         { params: t.Object({ ref: t.String({ minLength: 1 }) }), detail: { tags: ["projects"], summary: "List database publications" } }
+    )
+    .get(
+        "/linter",
+        async ({ params, query, set, request }) => {
+            const authError = await requireProjectOrAdminAuth(request, params.ref);
+            if (authError) return projectAuthResponse(authError, set);
+
+            const project = await projectService.getProject(params.ref);
+            if (!project) {
+                set.status = 404;
+                return { message: "Project not found", code: "404", status: 404 };
+            }
+            let targetSchema: string;
+            try {
+                targetSchema = normalizeDatabaseSchema(query.schema as string | undefined);
+            } catch (error: unknown) {
+                set.status = 400;
+                return {
+                    message: error instanceof Error ? error.message : "Invalid schema",
+                    code: "INVALID_SCHEMA",
+                    status: 400,
+                };
+            }
+            try {
+                const projectDb = await getProjectSql(params.ref);
+                if (!projectDb) {
+                    set.status = 404;
+                    return { message: "Project database credentials not found", code: "404", status: 404 };
+                }
+                const issues = await runDatabaseLinter(projectDb, targetSchema);
+                return {
+                    schema: targetSchema,
+                    total_issues: issues.length,
+                    danger_count: issues.filter((i) => i.severity === "danger").length,
+                    warning_count: issues.filter((i) => i.severity === "warning").length,
+                    info_count: issues.filter((i) => i.severity === "info").length,
+                    issues,
+                };
+            } catch (error: unknown) {
+                logger.error("[database] linter execution failed", {
+                    projectRef: params.ref,
+                    error: error instanceof Error ? error.message : String(error),
+                });
+                set.status = 500;
+                return { message: "Database linter failed", code: "LINTER_FAILED", status: 500 };
+            }
+        },
+        {
+            params: t.Object({ ref: t.String({ minLength: 1 }) }),
+            query: t.Object({ schema: t.Optional(t.String()) }),
+            detail: { tags: ["projects"], summary: "Run built-in database linter on project database" },
+        }
+    )
+    .get(
+        "/rpc-catalog",
+        async ({ params, query, set, request }) => {
+            const authError = await requireProjectOrAdminAuth(request, params.ref);
+            if (authError) return projectAuthResponse(authError, set);
+
+            const project = await projectService.getProject(params.ref);
+            if (!project) {
+                set.status = 404;
+                return { message: "Project not found", code: "404", status: 404 };
+            }
+            let schemasParam: string[];
+            try {
+                schemasParam = normalizeRpcSchemas(
+                    query.schemas ? query.schemas.split(",").filter(Boolean) : undefined,
+                );
+            } catch (error: unknown) {
+                set.status = 400;
+                return {
+                    message: error instanceof Error ? error.message : "Invalid schemas",
+                    code: "INVALID_SCHEMAS",
+                    status: 400,
+                };
+            }
+            try {
+                const projectDb = await getProjectSql(params.ref);
+                if (!projectDb) {
+                    set.status = 404;
+                    return { message: "Project database credentials not found", code: "404", status: 404 };
+                }
+                const rpcs = await readRpcCatalog(projectDb, schemasParam);
+                return {
+                    schemas: schemasParam,
+                    total_rpcs: rpcs.length,
+                    commands: rpcs.filter((r) => r.inferred_kind === "command").length,
+                    queries: rpcs.filter((r) => r.inferred_kind === "query").length,
+                    internal: rpcs.filter((r) => r.inferred_kind === "internal").length,
+                    rpcs,
+                };
+            } catch (error: unknown) {
+                logger.error("[database] rpc catalog introspection failed", {
+                    projectRef: params.ref,
+                    error: error instanceof Error ? error.message : String(error),
+                });
+                set.status = 500;
+                return { message: "RPC catalog inspection failed", code: "RPC_CATALOG_FAILED", status: 500 };
+            }
+        },
+        {
+            params: t.Object({ ref: t.String({ minLength: 1 }) }),
+            query: t.Object({ schemas: t.Optional(t.String()) }),
+            detail: { tags: ["projects"], summary: "Introspect RPC catalog with smart tags and signatures" },
+        }
     );

@@ -3,106 +3,34 @@
 
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
-  import { Loader2, ShieldCheck, AlertTriangle, ShieldAlert, Info, CheckCircle2 } from "lucide-svelte";
+  import { Loader2, AlertTriangle, ShieldAlert, Info, CheckCircle2 } from "lucide-svelte";
   import { createQuery } from "@tanstack/svelte-query";
 
   interface LintIssue {
-    type: "no_primary_key" | "no_rls" | "no_index_on_fk";
+    type: "no_primary_key" | "no_rls" | "no_index_on_fk" | "security_definer_no_search_path" | string;
     severity: "danger" | "warning" | "info";
-    table_schema: string;
-    table_name: string;
+    category: "security" | "performance" | "integrity";
+    schema_name: string;
+    object_name: string;
     detail: string;
+    recommendation: string;
     fix_sql: string;
-    column_name?: string;
+    column_name?: string | null;
+    column_names?: string[];
+    identity_args?: string | null;
   }
-
-  type RawLintIssue = Omit<LintIssue, "fix_sql">;
 
   const projectRef = $derived(page.params.ref);
-
-  const LINT_SQL = `
-    SELECT
-      'no_primary_key' as type, 'danger' as severity,
-      t.table_schema, t.table_name,
-      null::text as column_name,
-      'Table has no primary key' as detail
-    FROM information_schema.tables t
-    LEFT JOIN information_schema.table_constraints tc
-      ON tc.table_schema = t.table_schema AND tc.table_name = t.table_name AND tc.constraint_type = 'PRIMARY KEY'
-    WHERE t.table_schema = 'public' AND t.table_type = 'BASE TABLE' AND tc.constraint_name IS NULL
-
-    UNION ALL
-
-    SELECT
-      'no_rls' as type, 'warning' as severity,
-      schemaname as table_schema, tablename as table_name,
-      null::text as column_name,
-      'Row Level Security is not enabled' as detail
-    FROM pg_tables
-    WHERE schemaname = 'public'
-      AND NOT EXISTS (
-        SELECT 1 FROM pg_class c
-        JOIN pg_namespace n ON n.oid = c.relnamespace
-        WHERE n.nspname = pg_tables.schemaname
-          AND c.relname = pg_tables.tablename
-          AND c.relrowsecurity = true
-      )
-
-    UNION ALL
-
-    SELECT
-      'no_index_on_fk' as type, 'info' as severity,
-      tc.table_schema, tc.table_name,
-      kcu.column_name,
-      'Foreign key column "' || kcu.column_name || '" has no index' as detail
-    FROM information_schema.table_constraints tc
-    JOIN information_schema.key_column_usage kcu
-      ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
-    WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public'
-      AND NOT EXISTS (
-        SELECT 1 FROM pg_indexes pi
-        WHERE pi.schemaname = tc.table_schema
-          AND pi.tablename = tc.table_name
-          AND pi.indexdef LIKE '%' || kcu.column_name || '%'
-      )
-    ORDER BY severity, type, table_name;
-  `;
-
-  function quoteIdent(identifier: string): string {
-    return `"${identifier.replaceAll('"', '""')}"`;
-  }
-
-  function qualifiedTable(issue: RawLintIssue): string {
-    return `${quoteIdent(issue.table_schema)}.${quoteIdent(issue.table_name)}`;
-  }
-
-  function buildFixSql(issue: RawLintIssue): string {
-    if (issue.type === "no_primary_key") {
-      return `ALTER TABLE ${qualifiedTable(issue)} ADD COLUMN id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY;`;
-    }
-    if (issue.type === "no_rls") {
-      return `ALTER TABLE ${qualifiedTable(issue)} ENABLE ROW LEVEL SECURITY;`;
-    }
-    if (issue.type === "no_index_on_fk" && issue.column_name) {
-      return `CREATE INDEX ON ${qualifiedTable(issue)} (${quoteIdent(issue.column_name)});`;
-    }
-    return "";
-  }
 
   const lintQuery = createQuery(() => ({
     queryKey: ["database-lint", projectRef],
     queryFn: async () => {
-      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sql: LINT_SQL })
+      const res = await apiClient(`/v1/projects/${projectRef}/database/linter`, {
+        method: "GET",
       });
       const data = await res.json();
       if (!res.ok || data.error) throw new Error(data.message || data.error || "Database linter query failed");
-      return ((data.rows || []) as RawLintIssue[]).map((issue) => ({
-        ...issue,
-        fix_sql: buildFixSql(issue)
-      }));
+      return (data.issues || []) as LintIssue[];
     }
   }));
 
@@ -117,17 +45,15 @@
   }
 
   function getTypeLabel(type: string): string {
-    if (type === "no_primary_key") return $t("DatabaseLinter.no_primary_key");
-    if (type === "no_rls") return $t("DatabaseLinter.no_rls");
-    if (type === "no_index_on_fk") return $t("DatabaseLinter.no_index_on_fk");
-    return type;
+    const key = `DatabaseLinter.${type}`;
+    const translated = $t(key);
+    return translated !== key ? translated : type;
   }
 
   function getTypeDesc(type: string): string {
-    if (type === "no_primary_key") return $t("DatabaseLinter.no_primary_key_desc");
-    if (type === "no_rls") return $t("DatabaseLinter.no_rls_desc");
-    if (type === "no_index_on_fk") return $t("DatabaseLinter.no_index_on_fk_desc");
-    return "";
+    const key = `DatabaseLinter.${type}_desc`;
+    const translated = $t(key);
+    return translated !== key ? translated : "";
   }
 
   function getSeverityLabel(severity: string): string {
@@ -164,7 +90,7 @@
         <p class="text-sm font-medium">{$t("DatabaseLinter.no_issues")}</p>
       </div>
     {:else}
-      {#each issues as issue (`${issue.type}-${issue.table_schema}-${issue.table_name}-${issue.column_name || ""}`)}
+      {#each issues as issue (`${issue.type}-${issue.schema_name}-${issue.object_name}-${issue.column_name || issue.column_names?.join(",") || issue.identity_args || ""}`)}
         <div class="rounded-lg border {getSeverityColor(issue.severity)} p-4 transition-all hover:shadow-sm">
           <div class="flex items-start justify-between gap-4">
             <div class="flex items-start gap-3 flex-1">
@@ -182,10 +108,10 @@
                   <span class="font-semibold text-sm">{getTypeLabel(issue.type)}</span>
                   <span class="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded {getSeverityColor(issue.severity)}">{getSeverityLabel(issue.severity)}</span>
                 </div>
-                <p class="text-xs text-muted-foreground mb-2">{getTypeDesc(issue.type)}</p>
+                <p class="text-xs text-muted-foreground mb-2">{getTypeDesc(issue.type) || issue.detail}</p>
                 <div class="flex items-center gap-2 text-xs">
                   <span class="font-medium">{$t("DatabaseLinter.table")}:</span>
-                  <code class="px-1.5 py-0.5 bg-muted/50 rounded font-mono text-[11px]">{issue.table_schema}.{issue.table_name}</code>
+                  <code class="px-1.5 py-0.5 bg-muted/50 rounded font-mono text-[11px]">{issue.schema_name}.{issue.object_name}{issue.identity_args ? `(${issue.identity_args})` : ""}</code>
                 </div>
               </div>
             </div>

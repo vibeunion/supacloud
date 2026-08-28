@@ -514,6 +514,7 @@ export function registerDatabaseTools(
         "list_auth_users", "get_auth_user",
         "connections", "stats", "slow_queries",
         "list_migrations", "migration_inventory", "project_url", "generate_types",
+        "database_lint", "db_lint", "rpc_catalog", "list_rpcs",
     ] as const;
     const writeActions = ["apply_migration", "push_migrations", "baseline_migrations", "create_table_rls"] as const;
     const remoteActions = [...readActions, ...localActions] as const;
@@ -535,14 +536,14 @@ Actions: ${allActions.join(", ")}${localOnly ? " (local-only mode)" : readOnly ?
             file: optional(Type.String(), "[query/apply_migration/lint_migrations/lint] Read SQL from local file path (avoids shell escaping issues with $$ and multi-statement DDL)"),
             dir: optional(Type.String(), "[push_migrations/baseline_migrations/lint_migrations/lint] Directory containing .sql migration files (default: supabase/migrations)"),
             dry_run: optional(Type.Boolean(), "[push_migrations/baseline_migrations] Preview changes without applying them"),
-            strict: optional(Type.Boolean(), "[push_migrations/lint_migrations/lint] Exit with error if high-risk destructive migrations are detected"),
-            fail_on_high: optional(Type.Boolean(), "[push_migrations/lint_migrations/lint] Alias for --strict"),
+            strict: optional(Type.Boolean(), "[push_migrations/lint_migrations/lint/database_lint] Exit with error if high-risk issues or migrations are detected"),
+            fail_on_high: optional(Type.Boolean(), "[push_migrations/lint_migrations/lint/database_lint] Alias for --strict"),
             fail_on_medium: optional(Type.Boolean(), "[push_migrations/lint_migrations/lint] Exit with error if medium-risk or high-risk migrations are detected"),
-            json: optional(Type.Boolean(), "[lint_migrations/lint] Output structured JSON analysis"),
+            json: optional(Type.Boolean(), "[lint_migrations/lint/database_lint/rpc_catalog] Output structured JSON analysis"),
             // schema
-            schema: optional(Type.String(), "[describe_columns/list_indexes/list_constraints/rls_status/rls_policies/create_table_rls] Schema name (default: public)"),
+            schema: optional(Type.String(), "[describe_columns/list_indexes/list_constraints/rls_status/rls_policies/create_table_rls/database_lint] Schema name (default: public)"),
             table: optional(Type.String(), "[describe_columns/indexes/constraints/rls_*] Table name"),
-            schemas: optional(Type.Array(Type.String()), "[list_tables/generate_types] Schemas array"),
+            schemas: optional(Type.Array(Type.String()), "[list_tables/generate_types/rpc_catalog] Schemas array"),
             // auth users
             user_id: optional(Type.String(), "[get_auth_user] User UUID"),
             limit: optional(Type.Number(), "[list_auth_users] Max users (default: 20)"),
@@ -1002,6 +1003,41 @@ Actions: ${allActions.join(", ")}${localOnly ? " (local-only mode)" : readOnly ?
                     text = `✅ Table '${schema}.${args.table}' created with RLS (${policyMode === "owner" ? "auth.uid() owner policy" : "deny-all by default"})`;
                     break;
                 }
+                case "database_lint":
+                case "db_lint": {
+                    const targetSchema = args.schema || "public";
+                    const safeRef = projectRefPathSegment(ref, "database_lint");
+                    const r = await managementHttp().get(`/v1/projects/${safeRef}/database/linter?schema=${encodeURIComponent(targetSchema)}`);
+                    if (!r.ok) {
+                        return { content: [{ type: "text" as const, text: `❌ Database lint request failed (${r.status})` }], isError: true };
+                    }
+                    if (args.json) {
+                        text = JSON.stringify(r.data, null, 2);
+                    } else {
+                        text = formatDatabaseLintReport(r.data);
+                    }
+                    const strict = args.strict === true || args.fail_on_high === true;
+                    const dangerCount = (r.data as any)?.danger_count || 0;
+                    if (strict && dangerCount > 0) {
+                        return { content: [{ type: "text" as const, text }], isError: true };
+                    }
+                    break;
+                }
+                case "rpc_catalog":
+                case "list_rpcs": {
+                    const schemasList = args.schemas && args.schemas.length > 0 ? args.schemas : (args.schema ? [args.schema] : ["public", "api"]);
+                    const safeRef = projectRefPathSegment(ref, "rpc_catalog");
+                    const r = await managementHttp().get(`/v1/projects/${safeRef}/database/rpc-catalog?schemas=${encodeURIComponent(schemasList.join(","))}`);
+                    if (!r.ok) {
+                        return { content: [{ type: "text" as const, text: `❌ RPC catalog request failed (${r.status})` }], isError: true };
+                    }
+                    if (args.json) {
+                        text = JSON.stringify(r.data, null, 2);
+                    } else {
+                        text = formatRpcCatalog(r.data);
+                    }
+                    break;
+                }
                 default: text = `❌ Unknown action: ${action}`;
             }
             return { content: [{ type: "text" as const, text }] };
@@ -1057,6 +1093,93 @@ function buildRlsPolicySql(
 }
 
 // ── Format Helpers ──
+function formatDatabaseLintReport(data: unknown): string {
+    if (!data || typeof data !== "object") return JSON.stringify(data, null, 2);
+    const d = data as {
+        schema?: string;
+        total_issues?: number;
+        danger_count?: number;
+        warning_count?: number;
+        info_count?: number;
+        issues?: Array<{
+            type: string;
+            severity: string;
+            category: string;
+            schema_name: string;
+            object_name: string;
+            detail: string;
+            recommendation: string;
+            fix_sql: string;
+        }>;
+    };
+
+    if (!d.issues || d.issues.length === 0) {
+        return "✅ Database Lint: No issues found! Schema follows best practices for RLS, primary keys, and function security.";
+    }
+
+    const lines: string[] = [];
+    const icon = (d.danger_count || 0) > 0 ? "🔴" : (d.warning_count || 0) > 0 ? "🟡" : "ℹ️";
+    lines.push(`${icon} Database Lint (${d.schema || "public"}): ${d.total_issues} issue(s) detected [${d.danger_count || 0} Danger, ${d.warning_count || 0} Warning, ${d.info_count || 0} Info]`);
+    lines.push("");
+
+    for (const issue of d.issues) {
+        const itemIcon = issue.severity === "danger" ? "🔴" : issue.severity === "warning" ? "🟡" : "ℹ️";
+        lines.push(`  ${itemIcon} [${issue.severity.toUpperCase()}] ${issue.schema_name}.${issue.object_name} (${issue.type})`);
+        lines.push(`     Detail: ${issue.detail}`);
+        lines.push(`     Recommendation: ${issue.recommendation}`);
+        if (issue.fix_sql) {
+            lines.push(`     Fix SQL: ${issue.fix_sql}`);
+        }
+        lines.push("");
+    }
+
+    return lines.join("\n").trimEnd();
+}
+
+function formatRpcCatalog(data: unknown): string {
+    if (!data || typeof data !== "object") return JSON.stringify(data, null, 2);
+    const d = data as {
+        schemas?: string[];
+        total_rpcs?: number;
+        commands?: number;
+        queries?: number;
+        internal?: number;
+        rpcs?: Array<{
+            schema_name: string;
+            function_name: string;
+            identity_args: string;
+            arguments_display: string;
+            return_type: string;
+            volatility: string;
+            security: string;
+            search_path: string | null;
+            inferred_kind: string;
+            smart_tags: Record<string, unknown>;
+        }>;
+    };
+
+    if (!d.rpcs || d.rpcs.length === 0) {
+        return `No RPC functions found in schema(s): ${(d.schemas || []).join(", ")}`;
+    }
+
+    const lines: string[] = [];
+    lines.push(`📋 RPC Catalog (${d.total_rpcs || d.rpcs.length} total: ${d.commands || 0} commands, ${d.queries || 0} queries, ${d.internal || 0} internal)`);
+    lines.push("");
+
+    for (const rpc of d.rpcs) {
+        const kindBadge = rpc.inferred_kind === "command" ? "⚡ [COMMAND]" : rpc.inferred_kind === "query" ? "🔍 [QUERY]" : "🔒 [INTERNAL]";
+        const secBadge = rpc.security === "DEFINER" ? "🛡️ DEFINER" : "👤 INVOKER";
+        lines.push(`  ${kindBadge} ${rpc.schema_name}.${rpc.function_name}(${rpc.identity_args}) -> ${rpc.return_type}`);
+        lines.push(`     Security: ${secBadge} | Volatility: ${rpc.volatility}${rpc.search_path ? ` | search_path: ${rpc.search_path}` : ""}`);
+        const tagEntries = Object.entries(rpc.smart_tags || {});
+        if (tagEntries.length > 0) {
+            lines.push(`     Tags: ${tagEntries.map(([k, v]) => `@${k}${v === true ? "" : ` ${v}`}`).join(", ")}`);
+        }
+    }
+
+    return lines.join("\n");
+}
+
 function formatSqlResult(data: unknown): string {
     if (!data || typeof data !== "object") return JSON.stringify(data, null, 2);
     const r = data as { rows?: unknown[]; rowCount?: number };
