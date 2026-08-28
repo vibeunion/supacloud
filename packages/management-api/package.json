@@ -39,7 +39,7 @@
     "acorn": "^8.18.0",
     "aws4fetch": "^1.0.20",
     "elysia": "^1.4.29",
-    "jose": "^6.2.9",
+    "jose": "^6.2.10",
     "nanoid": "^6.0.1"
   },
   "devDependencies": {
