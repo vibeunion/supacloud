@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.35.0](https://github.com/vibeunion/supacloud/compare/web-console-v0.34.3...web-console-v0.35.0) (2026-08-28)
+
+
+### Features
+
+* **database:** add governance linter and RPC catalog ([#1048](https://github.com/vibeunion/supacloud/issues/1048)) ([c0d1192](https://github.com/vibeunion/supacloud/commit/c0d1192296420fb997766af1a134a227f1d205ad))
+
 ## [0.34.3](https://github.com/vibeunion/supacloud/compare/web-console-v0.34.2...web-console-v0.34.3) (2026-08-19)
 
 
