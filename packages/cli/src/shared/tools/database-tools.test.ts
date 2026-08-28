@@ -1937,4 +1937,131 @@ describe("database migration helpers", () => {
       file: "migration.sql",
     })).rejects.toThrow("Use only one of --sql, --file, or --dir");
   });
+
+  test("database_lint action formats issues and supports strict mode and json mode", async () => {
+    const lintPayload = {
+      schema: "public",
+      total_issues: 2,
+      danger_count: 1,
+      warning_count: 1,
+      info_count: 0,
+      issues: [
+        {
+          type: "security_definer_no_search_path",
+          severity: "danger",
+          category: "security",
+          schema_name: "public",
+          object_name: "approve_order",
+          detail: "Function public.approve_order() is SECURITY DEFINER with no search_path",
+          recommendation: "Set search_path = pg_catalog",
+          fix_sql: "ALTER FUNCTION public.approve_order() SET search_path = pg_catalog;",
+        },
+        {
+          type: "no_rls",
+          severity: "warning",
+          category: "security",
+          schema_name: "public",
+          object_name: "orders",
+          detail: "RLS disabled on public.orders",
+          recommendation: "Enable RLS",
+          fix_sql: "ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;",
+        },
+      ],
+    };
+
+    const callback = captureDatabaseTool({
+      get: async (path: string) => {
+        expect(path).toBe("/v1/projects/proj/database/linter?schema=public");
+        return { ok: true, status: 200, data: lintPayload };
+      },
+    });
+
+    const result = await callback({ action: "database_lint", ref: "proj" });
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0].text).toContain("Database Lint (public): 2 issue(s) detected [1 Danger, 1 Warning, 0 Info]");
+    expect(result.content[0].text).toContain("approve_order");
+    expect(result.content[0].text).toContain("ALTER FUNCTION public.approve_order() SET search_path = pg_catalog;");
+
+    const jsonResult = await callback({ action: "db_lint", ref: "proj", json: true });
+    expect(JSON.parse(jsonResult.content[0].text).total_issues).toBe(2);
+
+    const strictResult = await callback({ action: "database_lint", ref: "proj", strict: true });
+    expect(strictResult.isError).toBe(true);
+  });
+
+  test("rpc_catalog action formats RPC catalog and outputs json", async () => {
+    const catalogPayload = {
+      schemas: ["public", "api"],
+      total_rpcs: 2,
+      commands: 1,
+      queries: 1,
+      internal: 0,
+      rpcs: [
+        {
+          schema_name: "public",
+          function_name: "approve_case",
+          identity_args: "p_id uuid",
+          arguments_display: "p_id uuid",
+          return_type: "json",
+          volatility: "VOLATILE",
+          security: "DEFINER",
+          search_path: "pg_catalog",
+          inferred_kind: "command",
+          smart_tags: { domain: "approval", api: "command" },
+        },
+        {
+          schema_name: "public",
+          function_name: "get_case",
+          identity_args: "p_id uuid",
+          arguments_display: "p_id uuid",
+          return_type: "json",
+          volatility: "STABLE",
+          security: "INVOKER",
+          search_path: null,
+          inferred_kind: "query",
+          smart_tags: {},
+        },
+      ],
+    };
+
+    const callback = captureDatabaseTool({
+      get: async (path: string) => {
+        expect(path).toBe("/v1/projects/proj/database/rpc-catalog?schemas=public%2Capi");
+        return { ok: true, status: 200, data: catalogPayload };
+      },
+    });
+
+    const result = await callback({ action: "rpc_catalog", ref: "proj", schemas: ["public", "api"] });
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0].text).toContain("RPC Catalog (2 total: 1 commands, 1 queries, 0 internal)");
+    expect(result.content[0].text).toContain("approve_case");
+    expect(result.content[0].text).toContain("⚡ [COMMAND]");
+    expect(result.content[0].text).toContain("🔍 [QUERY]");
+
+    const jsonResult = await callback({ action: "list_rpcs", ref: "proj", json: true });
+    expect(JSON.parse(jsonResult.content[0].text).total_rpcs).toBe(2);
+  });
+
+  test("database governance reads reject unsafe refs and do not reflect failed response bodies", async () => {
+    let requests = 0;
+    const callback = captureDatabaseTool({
+      get: async () => {
+        requests += 1;
+        return { ok: false, status: 500, data: { detail: "postgresql://secret" } };
+      },
+    });
+
+    await expect(callback({ action: "database_lint", ref: "../other" })).rejects.toThrow();
+    expect(requests).toBe(0);
+
+    const lintFailure = await callback({ action: "database_lint", ref: "proj" });
+    expect(lintFailure.isError).toBe(true);
+    expect(lintFailure.content[0].text).toBe("❌ Database lint request failed (500)");
+    expect(lintFailure.content[0].text).not.toContain("secret");
+
+    const catalogFailure = await callback({ action: "rpc_catalog", ref: "proj" });
+    expect(catalogFailure.isError).toBe(true);
+    expect(catalogFailure.content[0].text).toBe("❌ RPC catalog request failed (500)");
+    expect(catalogFailure.content[0].text).not.toContain("secret");
+  });
 });

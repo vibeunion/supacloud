@@ -1266,7 +1266,9 @@
     "severity_danger": "危险",
     "severity_info": "信息",
     "table": "表",
-    "fix_hint": "建议修复"
+    "fix_hint": "建议修复",
+    "security_definer_no_search_path": "SECURITY DEFINER 缺少 search_path",
+    "security_definer_no_search_path_desc": "SECURITY DEFINER 函数未固定 search_path，存在被提权攻击的风险。"
   },
   "Logs": {
     "title": "日志探索器",

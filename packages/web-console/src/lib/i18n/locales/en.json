@@ -1266,7 +1266,9 @@
     "severity_danger": "Danger",
     "severity_info": "Info",
     "table": "Table",
-    "fix_hint": "Suggested Fix"
+    "fix_hint": "Suggested Fix",
+    "security_definer_no_search_path": "SECURITY DEFINER Missing search_path",
+    "security_definer_no_search_path_desc": "SECURITY DEFINER functions without a fixed search_path are vulnerable to privilege escalation."
   },
   "Logs": {
     "title": "Logs Explorer",
