@@ -75,7 +75,7 @@ services:
       - supacloud-dev
 
   postgrest:
-    image: postgrest/postgrest:v16.1
+    image: postgrest/postgrest:v16.2
     restart: always
     environment:
       PGRST_DB_URI: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/postgres
