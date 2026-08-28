@@ -43,7 +43,7 @@
     "nanoid": "^6.0.1"
   },
   "devDependencies": {
-    "@supabase/supabase-js": "^2.112.3",
+    "@supabase/supabase-js": "^2.112.4",
     "@types/bun": "^1.4.0",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
