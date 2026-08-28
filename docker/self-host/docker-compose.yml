@@ -67,7 +67,7 @@ services:
       GOTRUE_WEBAUTHN_RP_ORIGINS: ${WEBAUTHN_RP_ORIGINS:-${STUDIO_URL}}
 
   postgrest:
-    image: postgrest/postgrest:v16.1
+    image: postgrest/postgrest:v16.2
     restart: unless-stopped
     depends_on:
       postgres:
