@@ -44,7 +44,7 @@ services:
       - pgredis-database
 
   gotrue:
-    image: supabase/gotrue:v2.195.0
+    image: supabase/gotrue:v2.196.0
     restart: always
     environment:
       GOTRUE_SITE_URL: http://localhost:${CADDY_HTTP_PORT:-8000}
