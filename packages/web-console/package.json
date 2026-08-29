@@ -8,26 +8,27 @@
     "build": "bun --bun vite build",
     "preview": "bun --bun vite preview",
     "prepare": "svelte-kit sync || echo ''",
-    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
-    "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch"
+    "check": "svelte-kit sync && svelte-check --tsgo-experimental-api --tsconfig ./tsconfig.json",
+    "check:watch": "svelte-kit sync && svelte-check --tsgo-experimental-api --tsconfig ./tsconfig.json --watch"
   },
   "devDependencies": {
     "@sveltejs/adapter-static": "^3.0.10",
-    "@sveltejs/kit": "^2.70.2",
+    "@sveltejs/kit": "^2.70.3",
     "@sveltejs/vite-plugin-svelte": "^7.3.0",
     "@tailwindcss/forms": "^0.5.11",
     "@tailwindcss/postcss": "^4.3.3",
     "@tailwindcss/typography": "^0.5.20",
     "@tailwindcss/vite": "^4.3.3",
+    "@typescript/native": "npm:typescript@^7.0.2",
     "autoprefixer": "^10.5.4",
-    "bits-ui": "^2.18.1",
+    "bits-ui": "^2.19.0",
     "clsx": "^2.1.1",
     "jsdom": "30.0.1",
     "mode-watcher": "^1.1.0",
     "next-themes": "^0.4.6",
     "paneforge": "^1.0.2",
     "postcss": "^8.5.26",
-    "svelte": "^5.56.9",
+    "svelte": "^5.57.0",
     "svelte-check": "^4.7.6",
     "svelte-sonner": "^1.2.1",
     "sveltekit-superforms": "^2.30.2",
@@ -35,28 +36,28 @@
     "tailwind-merge": "^3.6.0",
     "tailwind-variants": "^3.3.1",
     "tailwindcss": "^4.3.3",
-    "typescript": "6.0.3",
+    "typescript": "~6.0.3",
     "vaul-svelte": "^0.3.2",
-    "vite": "8.2.1"
+    "vite": "8.2.2"
   },
   "dependencies": {
-    "@svadmin/core": "^0.36.2",
+    "@svadmin/core": "^0.47.0",
     "@svadmin/elysia": "^0.11.0",
-    "@svadmin/sveltekit": "^0.9.10",
-    "@svadmin/ui": "0.42.0",
-    "@tanstack/svelte-query": "^6.1.38",
+    "@svadmin/sveltekit": "^0.10.2",
+    "@svadmin/ui": "0.65.0",
+    "@tanstack/svelte-query": "^6.1.48",
     "highlight.js": "^11.12.0",
-    "isomorphic-dompurify": "^3.22.0",
+    "isomorphic-dompurify": "^3.23.0",
     "lucide-svelte": "^1.0.1",
-    "marked": "^18.0.10",
+    "marked": "^18.0.11",
     "marked-highlight": "^2.2.4",
     "monaco-editor": "^0.56.0",
     "svelte-i18n": "^4.0.1"
   },
   "overrides": {
     "cookie": "0.7.2",
-    "dompurify": "3.4.13",
-    "esbuild": "0.28.1",
-    "joi": "17.13.4"
+    "dompurify": "3.4.14",
+    "esbuild": "0.28.2",
+    "joi": "18.2.5"
   }
 }
