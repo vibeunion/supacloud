@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { fileURLToPath } from "node:url";
 import {
     chmodSync,
@@ -22,6 +22,11 @@ import packageMetadata from "../package.json" with { type: "json" };
 
 const PACKAGE_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const ADMIN_ENTRYPOINT = join(PACKAGE_ROOT, "src/index.ts");
+
+beforeAll(() => {
+    const build = Bun.spawnSync([process.execPath, "run", "build"], { cwd: PACKAGE_ROOT });
+    expect(build.exitCode).toBe(0);
+});
 const ADMIN_CONTEXT_KEYS = new Set([
     "SUPABASE_URL",
     "SUPABASE_SERVICE_ROLE_KEY",
@@ -299,8 +304,6 @@ describe("supacloud-admin process contract", () => {
     });
 
     test("runs through an npm-style bin symlink", async () => {
-        const build = Bun.spawnSync([process.execPath, "run", "build"], { cwd: PACKAGE_ROOT });
-        expect(build.exitCode).toBe(0);
         const sandbox = mkdtempSync(join(tmpdir(), "supacloud-admin-bin-"));
         const binDir = join(sandbox, "node_modules/.bin");
         mkdirSync(binDir, { recursive: true });
@@ -327,8 +330,6 @@ describe("supacloud-admin process contract", () => {
     });
 
     test("build output bundles the shared release-manifest contract", async () => {
-        const build = Bun.spawnSync([process.execPath, "run", "build"], { cwd: PACKAGE_ROOT });
-        expect(build.exitCode).toBe(0);
         const sandbox = mkdtempSync(join(tmpdir(), "supacloud-admin-standalone-dist-"));
         const isolatedEntry = join(sandbox, "supacloud-admin");
         copyFileSync(join(PACKAGE_ROOT, "dist/index.js"), isolatedEntry);

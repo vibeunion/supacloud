@@ -49,11 +49,11 @@
     "typecheck": "bun x tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@electric-sql/pglite": "0.5.4",
+    "@electric-sql/pglite": "0.5.8",
     "tar": "^7.5.22"
   },
   "devDependencies": {
-    "@supabase/supabase-js": "^2.112.2",
+    "@supabase/supabase-js": "^2.112.4",
     "@types/bun": "^1.4.0",
     "typescript": "^7.0.2"
   },

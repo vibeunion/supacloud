@@ -10,7 +10,7 @@ import { compile, compileModule, preprocess } from "svelte/compiler";
 import { initialTableColumns, tableColumnWithType } from "./table-draft";
 
 const packageRoot = new URL("../../../../../", import.meta.url);
-const visibilityStorageKey = "svadmin-columns-users";
+const visibilityStorageKey = "svadmin-columns-v2-r:users|p:default|t:u";
 let browserDom: JSDOM;
 
 function svelteTestCompiler() {
@@ -168,7 +168,9 @@ function expectEmailVisible(visible: boolean): void {
 }
 
 async function toggleEmailColumn(): Promise<void> {
-  elementWithText("button", "Columns").click();
+  const columnsButton = document.querySelector<HTMLButtonElement>('button[aria-label="Columns"]');
+  if (!columnsButton) throw new Error("Cannot find the Columns button");
+  columnsButton.click();
   await eventually(() => expect(elementWithText('[role="menuitemcheckbox"]', "Email")).toBeTruthy());
   elementWithText('[role="menuitemcheckbox"]', "Email").click();
 }
@@ -216,9 +218,9 @@ describe("database tables column visibility", () => {
     const packageJson = await Bun.file(new URL("package.json", packageRoot)).json();
     const lockSource = await Bun.file(new URL("bun.lock", packageRoot)).text();
 
-    expect(packageJson.dependencies["@svadmin/ui"]).toBe("0.42.0");
-    expect(lockSource).toContain('"@svadmin/ui": "0.42.0"');
-    expect(lockSource).toContain('"@svadmin/ui@0.42.0"');
+    expect(packageJson.dependencies["@svadmin/ui"]).toBe("0.65.0");
+    expect(lockSource).toContain('"@svadmin/ui": "0.65.0"');
+    expect(lockSource).toContain('"@svadmin/ui@0.65.0"');
   });
 
   test("keeps unavailable row estimates from rendering as negative counts", async () => {

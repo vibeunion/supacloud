@@ -18,15 +18,15 @@
   "dependencies": {
     "@elysiajs/cors": "^1.4.2",
     "@sinclair/typebox": "^0.34.52",
-    "@supabase/supabase-js": "^2.112.3",
-    "elysia": "^1.4.29",
+    "@supabase/supabase-js": "^2.112.4",
+    "elysia": "^1.4.30",
     "es-module-lexer": "2.3.2",
-    "jose": "^6.2.9"
+    "jose": "^6.2.10"
   },
   "devDependencies": {
     "@types/bun": "^1.4.0",
     "@types/jsonwebtoken": "^9.0.10",
-    "@types/node": "^26.2.0",
+    "@types/node": "^26.4.0",
     "jsonwebtoken": "^9.0.3",
     "typescript": "^7.0.2"
   }

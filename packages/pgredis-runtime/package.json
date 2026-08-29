@@ -18,8 +18,8 @@
   },
   "dependencies": {
     "@postgresx/bun-listen": "0.3.2",
-    "@postgresx/noredis": "0.7.0",
-    "elysia": "^1.4.29"
+    "@postgresx/noredis": "0.7.1",
+    "elysia": "^1.4.30"
   },
   "devDependencies": {
     "@types/bun": "^1.4.0",
