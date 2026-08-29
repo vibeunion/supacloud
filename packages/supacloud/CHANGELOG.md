@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.25](https://github.com/vibeunion/supacloud/compare/supacloud-v0.10.24...supacloud-v0.10.25) (2026-08-29)
+
+
+### Miscellaneous Chores
+
+* **deps:** upgrade workspace dependencies and svadmin ([#1067](https://github.com/vibeunion/supacloud/issues/1067)) ([9cd8ed6](https://github.com/vibeunion/supacloud/commit/9cd8ed6e81f11da1b26bf491ca745b5599115cc0))
+
 ## [0.10.24](https://github.com/vibeunion/supacloud/compare/supacloud-v0.10.23...supacloud-v0.10.24) (2026-08-28)
 
 

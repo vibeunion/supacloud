@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.2](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.9.1...supacloud-lite-v0.9.2) (2026-08-29)
+
+
+### Miscellaneous Chores
+
+* **deps:** upgrade workspace dependencies and svadmin ([#1067](https://github.com/vibeunion/supacloud/issues/1067)) ([9cd8ed6](https://github.com/vibeunion/supacloud/commit/9cd8ed6e81f11da1b26bf491ca745b5599115cc0))
+
 ## [0.9.1](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.9.0...supacloud-lite-v0.9.1) (2026-08-23)
 
 
