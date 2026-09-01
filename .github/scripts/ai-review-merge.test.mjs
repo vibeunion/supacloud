@@ -131,7 +131,7 @@ describe('trusted review workflow', () => {
     const releaseWorkflow = readFileSync(new URL('../workflows/release-please.yml', import.meta.url), 'utf8');
     const managementPackage = readFileSync(new URL('../../packages/management-api/package.json', import.meta.url), 'utf8');
     const unitRunner = readFileSync(new URL('../../packages/management-api/scripts/run-unit-tests.ts', import.meta.url), 'utf8');
-    for (const packagePath of ['packages/admin/**', 'packages/cli/**', 'packages/supacloud/**']) {
+    for (const packagePath of ['packages/admin/**', 'packages/cli/**', 'packages/supacloud/**', 'packages/function-adapter/**']) {
       assert.match(workflow, new RegExp(packagePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
     }
     assert.match(workflow, /working-directory: packages\/admin[\s\S]*?bun run typecheck[\s\S]*?bun test/);
@@ -166,11 +166,11 @@ describe('trusted review workflow', () => {
     assert.match(releaseWorkflow, /npm --version/);
     assert.equal(
       releaseWorkflow.match(/node "\$GITHUB_WORKSPACE\/\.github\/scripts\/publish-npm-package\.mjs"/g)?.length,
-      5,
+      6,
       'all npm packages must use the retry-safe publisher',
     );
     assert.doesNotMatch(releaseWorkflow, /^\s+npm publish/m);
-    for (const packageName of ['management-api', 'web-console', 'supacloud-js', 'edge-runtime', 'admin', 'cli', 'supacloud']) {
+    for (const packageName of ['management-api', 'web-console', 'supacloud-js', 'edge-runtime', 'admin', 'cli', 'supacloud', 'function-adapter']) {
       assert.equal(
         existsSync(new URL(`../../packages/${packageName}/bun.lock`, import.meta.url)),
         true,
