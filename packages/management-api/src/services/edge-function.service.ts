@@ -1220,7 +1220,6 @@ async function migrateImmutableVersionArtifact(
     if (!isMissingPathError(error)) throw error;
   }
   if (metadata?.artifact_sha256) {
-    await getVersionedArtifactPath(ref, slug, version);
     return false;
   }
   await preflightFunctionMutation(ref, slug);

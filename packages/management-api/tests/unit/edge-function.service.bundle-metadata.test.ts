@@ -608,6 +608,9 @@ describe("edgeFunctionService bundle metadata", () => {
     try {
       await Bun.write(firstArtifact!, "corrupt unrelated history");
 
+      await expect(migrateLegacyVersionArtifacts()).resolves.toMatchObject({
+        moved: expect.any(Number),
+      });
       await expect(edgeFunctionService.listVersions(ref, slug))
         .rejects.toThrow("Function version artifact does not match its immutable metadata");
       await expect(edgeFunctionService.getVersion(ref, slug, first.version!))
