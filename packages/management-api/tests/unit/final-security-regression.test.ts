@@ -198,6 +198,7 @@ describe("final security regressions", () => {
         slug: "hello",
         active_version: "absent",
         verify_jwt: false,
+        framework: "fetch",
         background_routes: ["/jobs/*"],
         activation_id: nextActivationId,
       });

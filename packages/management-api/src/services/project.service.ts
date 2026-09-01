@@ -127,6 +127,7 @@ export interface FunctionResponse {
   version: number;
   activation_id: string;
   verify_jwt: boolean;
+  framework: "fetch" | "elysia" | "hono" | "sveltekit-function";
   background_routes?: string[];
   import_map: boolean;
   entrypoint_path: string;
@@ -867,6 +868,7 @@ export class ProjectService {
         version,
         activation_id: cfg.activation_id,
         verify_jwt: cfg.verify_jwt,
+        framework: cfg.framework ?? "fetch",
         background_routes: cfg.background_routes || [],
         import_map: !!cfg.import_map,
         entrypoint_path: `file:///home/deno/functions/${slug}/index.ts`,

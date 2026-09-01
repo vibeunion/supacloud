@@ -94,6 +94,7 @@ type ExecuteMessage = Omit<PreheatMessage, "type"> & {
   headers: Record<string, string | string[]>;
   body?: ArrayBuffer | null;
   internalBindings?: Omit<PgredisRuntimeBindingConfig, "signal">;
+  framework?: "fetch" | "elysia" | "hono" | "sveltekit-function";
 };
 type ParentMessage =
   | InvalidateModuleMessage
@@ -543,7 +544,9 @@ async function executeFunction(handler: unknown, request: Request): Promise<Resp
 function isFrameworkRouterHandler(handler: unknown): handler is FrameworkRouterHandler {
   if (!handler || typeof handler !== "object") return false;
   const candidate = handler as Record<string, unknown>;
-  return Array.isArray(candidate.routes)
+  const metadata = candidate.__supacloud as Record<string, unknown> | undefined;
+  return metadata?.routeAware === true
+    || Array.isArray(candidate.routes)
     && (typeof candidate.handle === "function" || typeof candidate.fetch === "function");
 }
 
@@ -773,7 +776,7 @@ async function onParentMessage(msg: unknown): Promise<void> {
     await runWithPgredisBinding(internalBindings
       ? { ...internalBindings, signal: requestAbortController.signal }
       : undefined, async () => {
-        const handlerUrl = isFrameworkRouterHandler(handler)
+        const handlerUrl = (msg.framework && msg.framework !== "fetch") || isFrameworkRouterHandler(handler)
           ? toFunctionLocalUrl(url)
           : url;
         const req = new Request(handlerUrl, {

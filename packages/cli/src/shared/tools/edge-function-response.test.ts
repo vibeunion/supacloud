@@ -20,6 +20,7 @@ function configReceipt(overrides: Record<string, unknown> = {}) {
         activation_id: COMMITTED_ACTIVATION_ID,
         verify_jwt: false,
         background_routes: ["/queue/*"],
+        framework: "hono",
         ...overrides,
     };
 }
@@ -86,7 +87,7 @@ describe("Edge Function response projection", () => {
                 projectRef: "proj",
                 slug: "hook",
                 expectedActivationId: EXPECTED_ACTIVATION_ID,
-                config: { verify_jwt: false, background_routes: ["/queue/*"] },
+                config: { verify_jwt: false, background_routes: ["/queue/*"], framework: "hono" },
             },
         );
 
@@ -97,6 +98,7 @@ describe("Edge Function response projection", () => {
             activation_id: COMMITTED_ACTIVATION_ID,
             verify_jwt: false,
             background_routes: ["/queue/*"],
+            framework: "hono",
         });
         expect(JSON.stringify(confirmed)).not.toContain("sentinel");
     });
@@ -108,12 +110,13 @@ describe("Edge Function response projection", () => {
         ["unchanged activation", { activation_id: EXPECTED_ACTIVATION_ID }],
         ["legacy committed activation", { activation_id: "legacy" }],
         ["wrong confirmed policy", { verify_jwt: true }],
+        ["wrong framework", { framework: "fetch" }],
     ])("rejects a config mutation with %s", (_label, override) => {
         const confirmed = confirmedFunctionConfigMutation(configReceipt(override), {
             projectRef: "proj",
             slug: "hook",
             expectedActivationId: EXPECTED_ACTIVATION_ID,
-            config: { verify_jwt: false, background_routes: ["/queue/*"] },
+            config: { verify_jwt: false, background_routes: ["/queue/*"], framework: "hono" },
         });
 
         expect(confirmed).toBeNull();

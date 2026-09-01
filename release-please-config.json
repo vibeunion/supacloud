@@ -50,6 +50,12 @@
       "component": "admin",
       "changelog-path": "CHANGELOG.md"
     },
+    "packages/function-adapter": {
+      "release-type": "node",
+      "component": "function-adapter",
+      "initial-version": "0.1.0",
+      "changelog-path": "CHANGELOG.md"
+    },
     "packages/supacloud": {
       "release-type": "node",
       "component": "supacloud",

@@ -26,11 +26,22 @@ import {
 /** Per-function configuration (mirrors Supabase config.toml [functions.xxx]) */
 export interface EdgeFunctionConfig {
   verify_jwt: boolean;
+  /** Runtime adapter profile. `fetch` preserves legacy functions. */
+  framework?: EdgeFunctionFramework;
   import_map?: string;
   entrypoint?: string;
   version?: string;
   background_routes?: string[];
 }
+
+export const EDGE_FUNCTION_FRAMEWORKS = [
+  "fetch",
+  "elysia",
+  "hono",
+  "sveltekit-function",
+] as const;
+
+export type EdgeFunctionFramework = typeof EDGE_FUNCTION_FRAMEWORKS[number];
 
 export interface EdgeFunctionVersionRecord {
   version: string;
@@ -98,7 +109,7 @@ export interface EdgeFunctionActivationResult {
 
 export type EdgeFunctionDeploymentConfig = Pick<
   Partial<EdgeFunctionConfig>,
-  "verify_jwt" | "background_routes"
+  "verify_jwt" | "background_routes" | "framework"
 >;
 
 type EdgeFunctionReleaseBase = {
@@ -518,6 +529,10 @@ function validatedFunctionConfig(
   configRecord: Record<string, unknown>,
 ): EdgeFunctionConfig {
   const functionConfig = { ...DEFAULT_FUNCTION_CONFIG, ...configRecord } as EdgeFunctionConfig;
+  if (functionConfig.framework !== undefined
+    && !EDGE_FUNCTION_FRAMEWORKS.includes(functionConfig.framework)) {
+    throw new Error("Function config contains an unsupported framework");
+  }
   if (functionConfig.version !== undefined) {
     functionConfig.version = canonicalFunctionVersion(functionConfig.version);
   }
@@ -743,6 +758,7 @@ type FunctionVersionMetadata = {
   background_routes: string[];
   import_map: string | null;
   entrypoint: string | null;
+  framework: EdgeFunctionFramework;
 };
 
 type PreparedFunctionRelease = {
@@ -950,6 +966,10 @@ function functionVersionMetadata(
   if (typeof functionConfig.verify_jwt !== "boolean") {
     throw new Error("Function version config contains an invalid verify_jwt policy");
   }
+  const framework = functionConfig.framework ?? "fetch";
+  if (!EDGE_FUNCTION_FRAMEWORKS.includes(framework)) {
+    throw new Error("Function version config contains an unsupported framework");
+  }
   const backgroundRoutes = functionConfig.background_routes ?? [];
   if (!backgroundRoutes.every((route) => typeof route === "string" && route.trim().length > 0)) {
     throw new Error("Function version config contains invalid background routes");
@@ -961,6 +981,7 @@ function functionVersionMetadata(
     background_routes: backgroundRoutes,
     import_map: functionConfig.import_map ?? null,
     entrypoint: functionConfig.entrypoint ?? null,
+    framework,
   };
 }
 
@@ -1070,7 +1091,11 @@ async function readFunctionVersionMetadata(
     background_routes: metadataRecord.background_routes as string[],
     import_map: nullableMetadataPath(metadataRecord, "import_map"),
     entrypoint: nullableMetadataPath(metadataRecord, "entrypoint"),
+    framework: metadataRecord.framework === undefined ? "fetch" : metadataRecord.framework as EdgeFunctionFramework,
   };
+  if (!EDGE_FUNCTION_FRAMEWORKS.includes(metadata.framework)) {
+    throw new Error("Function version metadata contains an unsupported framework");
+  }
   await validateFunctionVersionMetadataPaths(versionDir, metadata);
   return metadata;
 }
@@ -2034,6 +2059,7 @@ function restoredFunctionConfig(
     verify_jwt: metadata.verify_jwt,
     background_routes: metadata.background_routes,
     version: metadata.version,
+    framework: metadata.framework,
   };
   if (metadata.import_map === null) delete restored.import_map;
   else restored.import_map = metadata.import_map;

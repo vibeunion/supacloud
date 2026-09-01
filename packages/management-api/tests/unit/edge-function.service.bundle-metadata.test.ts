@@ -1192,6 +1192,22 @@ describe("edgeFunctionService bundle metadata", () => {
     expect(deployed.config).toMatchObject({ verify_jwt: true, version: "1" });
   });
 
+  test("persists and restores the selected framework profile", async () => {
+    const ref = "proj_framework_profile";
+    const slug = "svelte-api";
+    const deployed = await deployConditionalRelease({
+      ref,
+      slug,
+      code: "export default { fetch: () => new Response('api') };",
+      config: { framework: "sveltekit-function" },
+    });
+
+    expect(deployed.config).toMatchObject({ framework: "sveltekit-function" });
+    expect(JSON.parse(await readFile(join(functionsRoot, ref, ".versions", slug, "1", ".supacloud-version.json"), "utf8")))
+      .toMatchObject({ framework: "sveltekit-function" });
+    expect((await edgeFunctionService.getConfig(ref, slug)).framework).toBe("sveltekit-function");
+  });
+
   test("snapshots frozen legacy aliases before first deploy and restores version zero", async () => {
     const ref = "proj_legacy_migration";
     const slug = "legacy-hook";

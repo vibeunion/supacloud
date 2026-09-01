@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "module": "esnext",
+    "target": "esnext",
+    "rootDir": "src",
+    "types": ["bun"]
+  },
+  "include": [
+    "src/index.ts",
+    "src/sveltekit.ts",
+    "src/sveltekit-adapter.ts"
+  ]
+}

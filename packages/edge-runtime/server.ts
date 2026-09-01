@@ -360,6 +360,7 @@ type FunctionActivationSnapshot = {
   activeVersion: string | null;
   responseVersion: string | null;
   verifyJwt: boolean;
+  framework: "fetch" | "elysia" | "hono" | "sveltekit-function";
   moduleVersion: string;
   artifactSha256: string;
   activationId: string | null;
@@ -477,6 +478,7 @@ async function resolvedFunctionPath(
       activeVersion,
       responseVersion,
       verifyJwt: resolvedConfig.verify_jwt,
+      framework: resolvedConfig.framework,
       artifactSha256: artifact.sha256,
       activationId: resolvedConfig.activationId,
       authorityKind: resolvedConfig.authorityKind,
@@ -598,6 +600,7 @@ async function dispatchFunction(
       functionPath,
       projectRoot,
       projectRef,
+      framework: activation.framework,
       functionVersion: responseVersion,
       internalBindings: PGREDIS_RUNTIME_ENDPOINT
         ? {
@@ -691,6 +694,7 @@ const CONFIG_CACHE_TTL = 10_000;
 
 type FunctionConfig = {
   verify_jwt: boolean;
+  framework: "fetch" | "elysia" | "hono" | "sveltekit-function";
   version: string | null;
   activationId: string | null;
   targetState: "active" | "absent" | null;
@@ -740,6 +744,7 @@ async function getFunctionConfig(
   if (cached && cached.expiresAt > Date.now()) {
     return {
       verify_jwt: cached.verify_jwt,
+      framework: cached.framework,
       version: cached.version,
       activationId: cached.activationId,
       targetState: cached.targetState,
@@ -756,6 +761,7 @@ async function getFunctionConfig(
   const config = manifest === null
     ? {
         verify_jwt: true,
+        framework: "fetch" as const,
         version: null,
         activationId: null,
         targetState: null,
@@ -764,6 +770,11 @@ async function getFunctionConfig(
       }
     : {
         verify_jwt: manifest.config.verify_jwt,
+        framework: manifest.config.framework === "elysia"
+          || manifest.config.framework === "hono"
+          || manifest.config.framework === "sveltekit-function"
+          ? manifest.config.framework
+          : "fetch" as const,
         version: manifest.config.version,
         activationId: activationAuthorityId(manifest),
         targetState: manifest.authority?.target_state ?? null,
@@ -799,6 +810,11 @@ async function immutableVersionConfig(
   }
   return {
     verify_jwt: record.verify_jwt,
+    framework: record.framework === "elysia"
+      || record.framework === "hono"
+      || record.framework === "sveltekit-function"
+      ? record.framework
+      : "fetch",
     version,
     activationId: null,
     targetState: "active",
@@ -824,6 +840,7 @@ async function assertDispatchAuthorityCurrent(
     || current.activationId !== activation.activationId
     || current.version !== activation.activeVersion
     || current.verify_jwt !== activation.verifyJwt
+    || current.framework !== activation.framework
     || current.targetState !== "active"
     || current.artifactSha256 !== activation.artifactSha256) {
     configCache.delete(`${projectRef}/${functionName}`);
@@ -842,6 +859,7 @@ async function activeFunctionConfig(
   const manifest = await activeActivationManifest(projectRoot, functionName);
   return {
     verify_jwt: manifest.config.verify_jwt,
+    framework: manifest.config.framework,
     version: manifest.config.version,
     activationId: activationAuthorityId(manifest),
     targetState: manifest.authority?.target_state ?? null,
