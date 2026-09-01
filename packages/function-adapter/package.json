@@ -1,6 +1,6 @@
 {
   "name": "@supacloud/function-adapter",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Fetch-based adapters for SupaCloud Edge Functions",
   "type": "module",
   "main": "./dist/index.js",
@@ -19,7 +19,10 @@
       "import": "./dist/sveltekit-adapter.js"
     }
   },
-  "files": ["dist", "README.md"],
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
     "prebuild": "bun -e \"import { rm } from 'node:fs/promises'; await rm('dist', { recursive: true, force: true })\"",
     "build": "bun build src/index.ts --outfile dist/index.js --target bun --format esm && bun build src/sveltekit.ts --outfile dist/sveltekit.js --target bun --format esm && bun build src/sveltekit-adapter.ts --outfile dist/sveltekit-adapter.js --target bun --format esm && bun x tsc -p tsconfig.json --emitDeclarationOnly --declaration --outDir dist",
@@ -31,7 +34,9 @@
     "@sveltejs/kit": "^2.0.0"
   },
   "peerDependenciesMeta": {
-    "@sveltejs/kit": { "optional": true }
+    "@sveltejs/kit": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@sveltejs/kit": "^2.70.3",
