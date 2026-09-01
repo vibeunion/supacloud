@@ -112,7 +112,7 @@ export const chatProvider: ChatProvider = {
         },
         body: JSON.stringify({
           model: 'gpt-4o-mini', // Update dynamically if needed
-          messages: messages.map(m => ({ role: m.role, content: m.content })),
+          messages: messages.map(m => ({ role: m.role, content: m.parts?.map(p => ("text" in p ? p.text : "")).join("") ?? "" })),
           stream: true
         }),
         signal: options?.signal,
