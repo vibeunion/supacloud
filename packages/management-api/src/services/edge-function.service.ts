@@ -1855,6 +1855,47 @@ async function statIso(filePath: string | null): Promise<string | null> {
   }
 }
 
+async function functionVersionRecord(
+  ref: string,
+  slug: string,
+  version: string,
+  activeVersion: string | null,
+): Promise<EdgeFunctionVersionRecord | null> {
+  const versionDir = getFunctionVersionDir(ref, slug, version);
+  try {
+    if (!(await fs.lstat(versionDir)).isDirectory()) return null;
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+  const bundlePath = await getVersionedArtifactPath(ref, slug, version);
+  const sourcePath = getVersionedSrcPath(ref, slug, version);
+  const sourceDirPath = assertInside(versionDir, path.join(versionDir, "src"));
+  const [hasBundle, hasSource, hasSourceDir] = await Promise.all([
+    bundlePath ? fileExists(bundlePath) : Promise.resolve(false),
+    fileExists(sourcePath),
+    fileExists(sourceDirPath),
+  ]);
+  const updatedAt =
+    (await statIso(bundlePath)) ||
+    (await statIso(sourcePath)) ||
+    (await statIso(sourceDirPath)) ||
+    new Date().toISOString();
+
+  return {
+    version,
+    is_active: version === activeVersion,
+    created_at: updatedAt,
+    updated_at: updatedAt,
+    bundle_path: hasBundle ? bundlePath : null,
+    source_path: hasSource ? sourcePath : null,
+    source_dir_path: hasSourceDir ? sourceDirPath : null,
+    has_bundle: hasBundle,
+    has_source: hasSource,
+    has_source_dir: hasSourceDir,
+  };
+}
+
 function parseLegacyVersionedFile(entry: string): { slug: string; version: string; kind: "js" | "src" } | null {
   const jsMatch = entry.match(/^(.*)\.v(\d+)\.js$/);
   if (jsMatch) {
@@ -2618,40 +2659,9 @@ export const edgeFunctionService = {
     const activeVersion = cfg.version ?? null;
     const versions = await listVersionDirectories(ref, slug);
 
-    const records = await Promise.all(
-      versions.map(async (version) => {
-        const versionDir = getFunctionVersionDir(ref, slug, version);
-        const bundlePath = await getVersionedArtifactPath(ref, slug, version);
-        const sourcePath = getVersionedSrcPath(ref, slug, version);
-        const sourceDirPath = assertInside(versionDir, path.join(versionDir, "src"));
-        const [hasBundle, hasSource, hasSourceDir] = await Promise.all([
-          bundlePath ? fileExists(bundlePath) : Promise.resolve(false),
-          fileExists(sourcePath),
-          fileExists(sourceDirPath),
-        ]);
-
-        const updatedAt =
-          (await statIso(bundlePath)) ||
-          (await statIso(sourcePath)) ||
-          (await statIso(sourceDirPath)) ||
-          new Date().toISOString();
-
-        const createdAt = updatedAt;
-
-        return {
-          version,
-          is_active: version === activeVersion,
-          created_at: createdAt,
-          updated_at: updatedAt,
-          bundle_path: hasBundle ? bundlePath : null,
-          source_path: hasSource ? sourcePath : null,
-          source_dir_path: hasSourceDir ? sourceDirPath : null,
-          has_bundle: hasBundle,
-          has_source: hasSource,
-          has_source_dir: hasSourceDir,
-        } satisfies EdgeFunctionVersionRecord;
-      }),
-    );
+    const records = (await Promise.all(
+      versions.map((version) => functionVersionRecord(ref, slug, version, activeVersion)),
+    )).filter((record): record is EdgeFunctionVersionRecord => record !== null);
 
     if (activeVersion !== null) {
       const activeRecord = records.find((record) => record.version === activeVersion);
@@ -2670,9 +2680,13 @@ export const edgeFunctionService = {
     slug: string,
     version: string,
   ): Promise<EdgeFunctionVersionDetail | null> {
-    const versions = await this.listVersions(ref, slug);
-    const record = versions.find((item) => item.version === version);
+    const cfg = await this.getConfig(ref, slug);
+    const activeVersion = cfg.version ?? null;
+    const record = await functionVersionRecord(ref, slug, version, activeVersion);
     if (!record) return null;
+    if (record.is_active && !record.has_bundle) {
+      throw new Error(EDGE_FUNCTION_ACTIVE_ARTIFACT_MISSING_MESSAGE);
+    }
 
     const [bundleCode, sourceCode] = await Promise.all([
       record.has_bundle ? readVersionedFunctionCode(ref, slug, version) : Promise.resolve(null),
