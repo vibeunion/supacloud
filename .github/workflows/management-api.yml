@@ -688,7 +688,7 @@ jobs:
         run: |
           echo "Restarting Auth and Realtime Containers..."
           docker start $(docker ps -a -q --filter "ancestor=supabase/gotrue:v2.196.0") || true
-          docker start $(docker ps -a -q --filter "ancestor=public.ecr.aws/supabase/realtime:v2.132.0") || true
+          docker start $(docker ps -a -q --filter "ancestor=public.ecr.aws/supabase/realtime:v2.133.0") || true
           sleep 4
 
       - name: Launch API & Execute Full Defenses

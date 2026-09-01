@@ -26,7 +26,7 @@ describe("Realtime systemd deployment", () => {
       "printf 'STALE_CONTAINER_KEY=remove-me\\nAPI_JWT_SECRET=stale-secret\\n' > \"$env_file\"",
       "printf 'STALE_SERVICE_KEY=remove-me\\nREALTIME_API_SECRET=stale-secret\\n' > \"$service_env_file\"",
       "write_realtime_container_env \"$env_file\"",
-      "write_realtime_service_env \"$service_env_file\" \"${REALTIME_IMAGE:-public.ecr.aws/supabase/realtime:v2.132.0}\" \"$env_file\"",
+      "write_realtime_service_env \"$service_env_file\" \"${REALTIME_IMAGE:-public.ecr.aws/supabase/realtime:v2.133.0}\" \"$env_file\"",
       "render_realtime_systemd_unit \"$source_unit\" \"$rendered_unit\" \"$env_file\" \"$service_env_file\"",
     ].join("\n");
     const childEnv = { ...process.env } as Record<string, string>;
@@ -70,7 +70,7 @@ describe("Realtime systemd deployment", () => {
     expect(unit).toContain("SupaCloud Realtime Service");
     expect(unit).toContain("podman run --replace");
     expect(unit).toContain("LogsDirectory=supacloud");
-    expect(unit).toContain("Environment=REALTIME_IMAGE=public.ecr.aws/supabase/realtime:v2.132.0");
+    expect(unit).toContain("Environment=REALTIME_IMAGE=public.ecr.aws/supabase/realtime:v2.133.0");
     expect(unit).toContain("Environment=REALTIME_CONTAINER_NAME=supacloud-realtime");
     expect(unit).toContain("Environment=REALTIME_DB_USER=supabase_admin");
     expect(unit).toContain("Environment=PG_DATABASE=supacloud_meta");
@@ -176,7 +176,7 @@ describe("Realtime systemd deployment", () => {
     for (const [key, value] of serviceEnvironment) effectiveEnvironment.set(key, value);
 
     expect(effectiveEnvironment.get("REALTIME_IMAGE")).toBe(
-      "public.ecr.aws/supabase/realtime:v2.132.0",
+      "public.ecr.aws/supabase/realtime:v2.133.0",
     );
     expect(effectiveEnvironment.get("REALTIME_CONTAINER_NAME")).toBe("supacloud-realtime");
     expect(effectiveEnvironment.get("REALTIME_DB_USER")).toBe("supabase_admin");
@@ -199,11 +199,11 @@ describe("Realtime systemd deployment", () => {
     expect(effectiveCommand).toContain(
       "podman run --replace --name supacloud-realtime --network host --env-file ",
     );
-    expect(effectiveCommand).toContain("public.ecr.aws/supabase/realtime:v2.132.0");
+    expect(effectiveCommand).toContain("public.ecr.aws/supabase/realtime:v2.133.0");
     expect(effectiveCommand).not.toContain("v2.129.0");
     expect(effectiveCommand).not.toContain("stale-realtime");
 
-    const customImage = "registry.example.test/supabase/realtime:v2.132.0-custom";
+    const customImage = "registry.example.test/supabase/realtime:v2.133.0-custom";
     const custom = renderRealtimeEnv(undefined, undefined, customImage);
     expect(custom.result.status).toBe(0);
     expect(custom.serviceEnvText).toContain(`REALTIME_IMAGE="${customImage}"\n`);

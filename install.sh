@@ -3621,7 +3621,7 @@ install_management_api() {
         REALTIME_DB_ENC_KEY "$REALTIME_DB_ENC_KEY" \
         REALTIME_API_SECRET "$JWT_SECRET" \
         SUPACLOUD_REALTIME_CONTAINER_ENV_FILE "${SUPACLOUD_REALTIME_CONTAINER_ENV_FILE:-/etc/supabase/realtime-container.env}" \
-        REALTIME_IMAGE "${REALTIME_IMAGE:-public.ecr.aws/supabase/realtime:v2.132.0}" \
+        REALTIME_IMAGE "${REALTIME_IMAGE:-public.ecr.aws/supabase/realtime:v2.133.0}" \
         REALTIME_CONTAINER_NAME "${REALTIME_CONTAINER_NAME:-supacloud-realtime}" \
         REALTIME_DB_USER supabase_admin \
         PG_HOST 127.0.0.1 \
@@ -4153,7 +4153,7 @@ deploy_service_containers() {
 
     # --- 2. Deploy Supabase Realtime (Multi-tenant WebSocket) ---
     local REALTIME_UNIT_SRC="${SCRIPT_DIR}/infrastructure/systemd/supacloud-realtime.service"
-    local REALTIME_IMAGE_VALUE="${REALTIME_IMAGE:-public.ecr.aws/supabase/realtime:v2.132.0}"
+    local REALTIME_IMAGE_VALUE="${REALTIME_IMAGE:-public.ecr.aws/supabase/realtime:v2.133.0}"
     local REALTIME_CONTAINER_ENV_FILE="${SUPACLOUD_REALTIME_CONTAINER_ENV_FILE:-/etc/supabase/realtime-container.env}"
     if [[ -f "$REALTIME_UNIT_SRC" ]]; then
         log_info "Registering SupaCloud Realtime systemd unit..."

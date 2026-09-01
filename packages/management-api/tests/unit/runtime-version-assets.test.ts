@@ -1365,7 +1365,7 @@ describe("runtime companion version assets", () => {
     expect(runtime).toContain('POSTGREST_DEFAULT_VERSION="v16.2"');
     expect(runtime).toContain('GOTRUE_DEFAULT_VERSION="v2.196.0"');
     for (const source of [installer, realtimeUnit, workflow]) {
-      expect(source).toContain("public.ecr.aws/supabase/realtime:v2.132.0");
+      expect(source).toContain("public.ecr.aws/supabase/realtime:v2.133.0");
     }
     for (const compose of [devCompose, selfHostCompose]) {
       expect(compose).toContain("image: supacloud-caddy:2.11.4-ratelimit");
