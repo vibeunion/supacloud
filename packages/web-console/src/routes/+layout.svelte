@@ -34,7 +34,6 @@
   import { createSvelteKitRouterProvider } from "@svadmin/sveltekit";
   import {
     Button,
-    ChatDialog,
     DevTools,
     Header,
     PageSkeleton,
@@ -429,7 +428,6 @@
 
   <SvadminToast />
   {#if !isRawPage}
-    <ChatDialog />
     <DevTools />
   {/if}
 </QueryClientProvider>
