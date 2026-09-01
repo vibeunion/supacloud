@@ -8,6 +8,7 @@ import {
     existsSync,
     fstatSync,
     lstatSync,
+    mkdirSync,
     mkdtempSync,
     openSync,
     readFileSync,
@@ -43,6 +44,69 @@ import {
 const execFileAsync = promisify(execFile);
 const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/;
 const FORBIDDEN_BUNDLE_SEGMENTS = new Set(["node_modules", ".git"]);
+const FUNCTION_FRAMEWORKS = ["fetch", "elysia", "hono", "sveltekit-function"] as const;
+type FunctionFramework = typeof FUNCTION_FRAMEWORKS[number];
+
+function scaffoldFiles(framework: FunctionFramework, slug: string): Record<string, string> {
+    if (framework === "elysia") {
+        return {
+            "package.json": JSON.stringify({
+                private: true,
+                type: "module",
+                dependencies: { elysia: "^1.4.30" },
+            }, null, 2) + "\n",
+            "index.ts": `import { Elysia } from "elysia";\n\nexport default new Elysia()\n  .get("/", () => ({ function: "${slug}", framework: "elysia" }));\n`,
+        };
+    }
+    if (framework === "hono") {
+        return {
+            "package.json": JSON.stringify({
+                private: true,
+                type: "module",
+                dependencies: { hono: "^4.13.5" },
+            }, null, 2) + "\n",
+            "index.ts": `import { Hono } from "hono";\n\nconst app = new Hono();\napp.get("/", (context) => context.json({ function: "${slug}", framework: "hono" }));\n\nexport default app;\n`,
+        };
+    }
+    if (framework === "sveltekit-function") {
+        return {
+            "package.json": JSON.stringify({
+                private: true,
+                type: "module",
+                scripts: { build: "vite build" },
+                devDependencies: {
+                    "@supacloud/function-adapter": "^0.1.0",
+                    "@sveltejs/kit": "^2.70.3",
+                    "@sveltejs/vite-plugin-svelte": "^7.3.0",
+                    svelte: "^5.57.0",
+                    vite: "^8.2.2",
+                },
+            }, null, 2) + "\n",
+            "svelte.config.js": `import adapter from "@supacloud/function-adapter/sveltekit-adapter";\n\nexport default { kit: { adapter: adapter() } };\n`,
+            "vite.config.ts": `import { sveltekit } from "@sveltejs/kit/vite";\nimport { defineConfig } from "vite";\n\nexport default defineConfig({ plugins: [sveltekit()] });\n`,
+            "src/routes/+server.ts": `export function GET() {\n  return Response.json({ function: "${slug}", framework: "sveltekit-function" });\n}\n`,
+        };
+    }
+    return { "index.ts": `export default function handler(request: Request) {\n  return Response.json({ function: "${slug}", path: new URL(request.url).pathname });\n}\n` };
+}
+
+function scaffoldFunction(pathArg: unknown, slug: unknown, framework: unknown): string {
+    if (typeof slug !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(slug)) {
+        throw new Error("'slug' required for 'scaffold'");
+    }
+    if (typeof framework !== "string" || !FUNCTION_FRAMEWORKS.includes(framework as FunctionFramework)) {
+        throw new Error("'framework' required for 'scaffold'");
+    }
+    const target = resolve(typeof pathArg === "string" ? pathArg : join("supabase", "functions", slug));
+    if (existsSync(target)) throw new Error(`Scaffold target already exists: ${target}`);
+    const files = scaffoldFiles(framework as FunctionFramework, slug);
+    for (const [relativePath, contents] of Object.entries(files)) {
+        const destination = join(target, relativePath);
+        mkdirSync(resolve(destination, ".."), { recursive: true });
+        writeFileSync(destination, contents, { flag: "wx" });
+    }
+    return JSON.stringify({ success: true, framework, path: target, files: Object.keys(files) }, null, 2);
+}
 
 type OpenFileIdentity = {
     dev: bigint;
@@ -523,6 +587,7 @@ function confirmedFunctionConfig(payload: unknown, expected: EdgeFunctionConfigI
     const response = objectRecord(payload);
     if (!response) return false;
     if (expected.verify_jwt !== undefined && response.verify_jwt !== expected.verify_jwt) return false;
+    if (expected.framework !== undefined && response.framework !== expected.framework) return false;
     if (expected.background_routes !== undefined) {
         if (!Array.isArray(response.background_routes)) return false;
         if (JSON.stringify(response.background_routes) !== JSON.stringify(expected.background_routes)) return false;
@@ -609,6 +674,7 @@ interface ConfirmedFunctionMutation {
     activeVersion: string;
     activationId: string;
     verifyJwt: boolean;
+    framework?: EdgeFunctionConfigInput["framework"];
 }
 
 function mutationIdentityMatches(
@@ -708,7 +774,17 @@ function confirmedFunctionMutation(
         || config.activation_id !== activationId
         || typeof config.verify_jwt !== "boolean"
         || !confirmedFunctionConfig(config, expectation.config ?? {})) return null;
-    return { activeVersion, activationId, verifyJwt: config.verify_jwt };
+    const framework = config.framework;
+    if (framework !== undefined
+        && (typeof framework !== "string" || !FUNCTION_FRAMEWORKS.includes(framework as FunctionFramework))) {
+        return null;
+    }
+    return {
+        activeVersion,
+        activationId,
+        verifyJwt: config.verify_jwt,
+        ...(framework === undefined ? {} : { framework: framework as FunctionFramework }),
+    };
 }
 
 function functionMutationResponse(
@@ -729,6 +805,7 @@ function functionMutationResponse(
         active_version: confirmed.activeVersion,
         version: confirmed.activeVersion,
         verify_jwt: confirmed.verifyJwt,
+        ...(confirmed.framework === undefined ? {} : { framework: confirmed.framework }),
     });
 }
 
@@ -814,14 +891,14 @@ export function registerAdvancedTools(
     server.tool(
         "edge_functions",
         `Edge Function management (Deno/Bun serverless). Source deploys are bundled; verified prebuilt artifacts stay byte-exact.
-Actions: list, get_config, deploy, deploy_bundle, config, source, activate, delete, check`,
+Actions: list, get_config, deploy, deploy_bundle, config, source, activate, delete, check, scaffold`,
         {
-            action: withDescription(stringEnum(["list", "get_config", "deploy", "deploy_bundle", "config", "source", "activate", "delete", "check"]), "Action"),
-            ref: withDescription(Type.String(), "Project ref"),
+            action: withDescription(stringEnum(["list", "get_config", "deploy", "deploy_bundle", "config", "source", "activate", "delete", "check", "scaffold"]), "Action"),
+            ref: optional(Type.String(), "Project ref (not used by scaffold)"),
             slug: optional(Type.String(), "[get_config/deploy/deploy_bundle/config/source/activate/delete/check] Function name"),
             version: withDescription(functionVersionSchema, "[source/activate] Existing immutable Function version; source requires a positive version"),
             code: optional(Type.String(), "[deploy/check] Function source code (TypeScript)"),
-            path: optional(Type.String(), "[deploy/check] Local file path to read code from (alternative to code)"),
+            path: optional(Type.String(), "[deploy/check] Source path; [scaffold] optional target directory"),
             "prebundled-path": optional(
                 Type.String(),
                 "[deploy] Prebuilt runtime bundle to upload without rebuilding; requires expected-sha256",
@@ -837,6 +914,7 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
             minify: optional(Type.Boolean(), "[deploy/deploy_bundle] Minify bundle"),
             verify_jwt: optional(Type.Boolean(), "[deploy/deploy_bundle/config] Set JWT verification for this function"),
             background_routes: withDescription(backgroundRoutesSchema, "[deploy/deploy_bundle/config] Background route paths; pass comma-separated or JSON array in CLI"),
+            framework: optional(withDescription(stringEnum(["fetch", "elysia", "hono", "sveltekit-function"]), "[deploy/deploy_bundle/config/scaffold] Fetch framework adapter profile")),
             "expected-active-version": withDescription(
                 expectedActiveVersionSchema,
                 "[deploy/deploy_bundle/activate] Required current active version, or 'absent' when none exists",
@@ -848,7 +926,10 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
         },
         async (args: any) => {
             if (args.action === "activate") return activateFunctionVersion(http, args, options.readOnly);
-            const { action, ref, slug, path: pathArg, output, entrypoint, minify, verify_jwt, background_routes } = args;
+            if (args.action === "scaffold") {
+                return { content: [{ type: "text" as const, text: scaffoldFunction(args.path, args.slug, args.framework) }] };
+            }
+            const { action, ref, slug, path: pathArg, output, entrypoint, minify, verify_jwt, background_routes, framework } = args;
             rejectActionSpecificFlags(action, args);
             const expectedActiveVersion = action === "deploy" || action === "deploy_bundle"
                 ? requiredExpectedActiveVersion(args, action)
@@ -864,6 +945,7 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
             const functionConfig = (): EdgeFunctionConfigInput => ({
                 ...(typeof verify_jwt === "boolean" ? { verify_jwt } : {}),
                 ...(Array.isArray(background_routes) ? { background_routes } : {}),
+                ...(typeof framework === "string" ? { framework: framework as EdgeFunctionConfigInput["framework"] } : {}),
             });
 
             const hasFunctionConfig = () => Object.keys(functionConfig()).length > 0;
@@ -955,7 +1037,7 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
                 case "config":
                     need("slug", slug);
                     if (!hasFunctionConfig()) {
-                        throw new Error("'verify_jwt' or 'background_routes' required for 'config'");
+                        throw new Error("'verify_jwt', 'background_routes', or 'framework' required for 'config'");
                     }
                     return updateFunctionConfiguration(http, {
                         projectRef: ref,

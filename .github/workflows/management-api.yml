@@ -13,6 +13,7 @@ on:
       - "packages/admin/**"
       - "packages/cli/**"
       - "packages/supacloud/**"
+      - "packages/function-adapter/**"
       - "docker/**"
       - "scripts/**"
       - "install.sh"
@@ -159,6 +160,15 @@ jobs:
           bun install --frozen-lockfile
           bun run typecheck
           bun test src
+          bun run build
+          bun audit --audit-level high
+
+      - name: Check Function adapters
+        working-directory: packages/function-adapter
+        run: |
+          bun install --frozen-lockfile
+          bun run typecheck
+          bun test
           bun run build
           bun audit --audit-level high
 

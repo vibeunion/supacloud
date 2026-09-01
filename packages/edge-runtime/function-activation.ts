@@ -28,6 +28,7 @@ export type EdgeFunctionActivationAuthority = {
 
 export type EdgeFunctionActivationConfig = {
   verify_jwt: boolean;
+  framework: "fetch" | "elysia" | "hono" | "sveltekit-function";
   version: string | null;
 };
 
@@ -98,8 +99,16 @@ function parseConfig(document: Record<string, unknown>): EdgeFunctionActivationC
     && (typeof rawVersion !== "string" || !VERSION_PATTERN.test(rawVersion))) {
     throw new Error("Function activation config contains an invalid version");
   }
+  const framework = document.framework ?? "fetch";
+  if (framework !== "fetch"
+    && framework !== "elysia"
+    && framework !== "hono"
+    && framework !== "sveltekit-function") {
+    throw new Error("Function activation config contains an unsupported framework");
+  }
   return {
     verify_jwt: document.verify_jwt !== false,
+    framework,
     version: rawVersion ?? null,
   };
 }

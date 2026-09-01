@@ -127,14 +127,19 @@ export default new Elysia()
   .get("/", () => "hello")
   .get("/users/:id", ({ params }) => ({ id: params.id }));
 
-// Option C: Any framework (Hono, itty-router, etc.)
+// Option C: Hono (first-class Fetch profile)
 import { Hono } from "hono";
 export default new Hono().get("/", (c) => c.text("hello"));
+
+// Option D: SvelteKit API-only
+// Configure @supacloud/function-adapter/sveltekit-adapter in svelte.config.js.
+// It emits a Fetch handler for +server.ts routes and hooks.server.
 ```
 
 Framework router instances expose a `routes` collection plus `handle()` or
-`fetch()`. SupaCloud gives those routers a function-local URL so public requests
-map as follows:
+`fetch()`. First-class adapters can also expose explicit
+`__supacloud: { routeAware: true }` metadata. SupaCloud gives those routers a
+function-local URL so public requests map as follows:
 
 ```text
 /functions/v1/catalog                 -> /
@@ -146,6 +151,22 @@ definitions. Plain functions and Supabase-style `{ fetch(request) {} }` exports
 continue to receive the original public URL for compatibility. Edge Functions
 must export a handler or router instance; do not call `.listen()` or bind a
 TCP/UDP port inside a function.
+
+### Framework profiles
+
+Function configuration accepts `framework: "fetch" | "elysia" | "hono" |
+"sveltekit-function"`. Omitted values remain `fetch` for legacy compatibility.
+The `sveltekit-function` profile is API-only: page routes, prerendered output,
+static assets, server asset reads, instrumentation, and listeners are
+rejected by the SupaCloud adapter. Complete SvelteKit SSR apps should use
+Frontend Hosting with `framework: "sveltekit"`.
+
+CLI scaffolding is available locally through the `edge_functions` tool:
+
+```text
+edge_functions scaffold --slug catalog --framework hono
+edge_functions scaffold --slug api --framework sveltekit-function --path ./api
+```
 
 ## SDK Compatibility
 

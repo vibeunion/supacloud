@@ -19,6 +19,7 @@ interface DispatchOptions {
   functionPath: string;
   projectRoot: string;
   projectRef: string;
+  framework?: "fetch" | "elysia" | "hono" | "sveltekit-function";
   functionVersion?: string | null;
   moduleVersion?: string;
   envProof?: string;
@@ -885,6 +886,7 @@ export class WorkerPool {
         functionPath: opts.functionPath,
         projectRoot: opts.projectRoot,
         projectRef: opts.projectRef,
+        framework: opts.framework,
         moduleVersion: opts.moduleVersion,
         envProof: opts.envProof,
         artifactSha256: opts.artifactSha256,

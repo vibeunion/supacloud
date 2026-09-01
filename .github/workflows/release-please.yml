@@ -38,6 +38,7 @@ jobs:
       supacloud_js_released: ${{ steps.release.outputs['packages/supacloud-js--release_created'] }}
       cli_released: ${{ steps.release.outputs['packages/cli--release_created'] }}
       admin_released: ${{ steps.release.outputs['packages/admin--release_created'] }}
+      function_adapter_released: ${{ steps.release.outputs['packages/function-adapter--release_created'] }}
       supacloud_released: ${{ steps.release.outputs['packages/supacloud--release_created'] }}
     steps:
       - uses: googleapis/release-please-action@v5
@@ -426,6 +427,14 @@ jobs:
       - name: Publish admin to NPM
         if: ${{ needs.release-please.outputs.admin_released == 'true' }}
         working-directory: packages/admin
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+          node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
+
+      - name: Publish function adapter to NPM
+        if: ${{ needs.release-please.outputs.function_adapter_released == 'true' }}
+        working-directory: packages/function-adapter
         run: |
           bun install --frozen-lockfile
           bun run build

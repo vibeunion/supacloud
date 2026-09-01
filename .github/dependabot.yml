@@ -43,6 +43,12 @@ updates:
     open-pull-requests-limit: 5
 
   - package-ecosystem: "bun"
+    directory: "/packages/function-adapter"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: "bun"
     directory: "/packages/supacloud-js"
     schedule:
       interval: "weekly"

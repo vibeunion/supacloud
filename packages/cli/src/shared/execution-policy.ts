@@ -45,7 +45,7 @@ const ACTION_POLICY: Record<string, ModulePolicy> = {
     },
     edge_functions: {
         read: ["list", "get_config", "source"],
-        local: ["check"],
+        local: ["check", "scaffold"],
         write: ["deploy", "deploy_bundle", "config", "activate", "delete"],
     },
     scheduled_functions: { read: ["list", "get"], write: ["create", "update", "delete"] },
