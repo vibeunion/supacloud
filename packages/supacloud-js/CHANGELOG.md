@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.3](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.23.2...supacloud-js-v0.23.3) (2026-09-01)
+
+
+### Miscellaneous Chores
+
+* **deps:** upgrade workspace dependencies and svadmin ([#1071](https://github.com/vibeunion/supacloud/issues/1071)) ([2e14fad](https://github.com/vibeunion/supacloud/commit/2e14fadef89c59336d71e237b961176e3611c55b))
+
 ## [0.23.2](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.23.1...supacloud-js-v0.23.2) (2026-08-29)
 
 

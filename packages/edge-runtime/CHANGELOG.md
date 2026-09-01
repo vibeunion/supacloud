@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.0](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.18.7...edge-runtime-v0.19.0) (2026-09-01)
+
+
+### Features
+
+* add first-class edge function framework adapters ([#1072](https://github.com/vibeunion/supacloud/issues/1072)) ([d99f3ea](https://github.com/vibeunion/supacloud/commit/d99f3ea04b333913ad97d302cd722048ea091f44))
+
 ## [0.18.7](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.18.6...edge-runtime-v0.18.7) (2026-08-29)
 
 
