@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.4](https://github.com/vibeunion/supacloud/compare/pgredis-runtime-v0.3.3...pgredis-runtime-v0.3.4) (2026-08-29)
+
+
+### Miscellaneous Chores
+
+* **deps:** upgrade workspace dependencies and svadmin ([#1067](https://github.com/vibeunion/supacloud/issues/1067)) ([9cd8ed6](https://github.com/vibeunion/supacloud/commit/9cd8ed6e81f11da1b26bf491ca745b5599115cc0))
+
 ## [0.3.3](https://github.com/vibeunion/supacloud/compare/pgredis-runtime-v0.3.2...pgredis-runtime-v0.3.3) (2026-08-23)
 
 

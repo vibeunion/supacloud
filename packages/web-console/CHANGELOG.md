@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.35.1](https://github.com/vibeunion/supacloud/compare/web-console-v0.35.0...web-console-v0.35.1) (2026-08-29)
+
+
+### Miscellaneous Chores
+
+* **deps:** upgrade workspace dependencies and svadmin ([#1067](https://github.com/vibeunion/supacloud/issues/1067)) ([9cd8ed6](https://github.com/vibeunion/supacloud/commit/9cd8ed6e81f11da1b26bf491ca745b5599115cc0))
+
 ## [0.35.0](https://github.com/vibeunion/supacloud/compare/web-console-v0.34.3...web-console-v0.35.0) (2026-08-28)
 
 
