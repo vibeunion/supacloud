@@ -89,6 +89,93 @@ function captureTaskEventsTool(http: Record<string, unknown>) {
 }
 
 describe("edge_functions CLI tool", () => {
+    test("scaffolds an API-only SvelteKit Function without HTTP access", async () => {
+        const root = mkdtempSync(join(tmpdir(), "supacloud-sveltekit-scaffold-"));
+        const target = join(root, "api");
+        let requestCount = 0;
+        const { callback } = captureEdgeFunctionsTool({
+            post: async () => {
+                requestCount += 1;
+                throw new Error("unexpected HTTP request");
+            },
+        });
+        try {
+            const response = await callback({
+                action: "scaffold",
+                slug: "api",
+                framework: "sveltekit-function",
+                path: target,
+            });
+            expect(requestCount).toBe(0);
+            expect(JSON.parse(response.content[0].text)).toMatchObject({
+                success: true,
+                framework: "sveltekit-function",
+                path: target,
+            });
+            expect(await Bun.file(join(target, "svelte.config.js")).text())
+                .toContain("sveltekit-adapter");
+            expect(await Bun.file(join(target, "src/routes/+server.ts")).text())
+                .toContain("export function GET");
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    test.each([
+        ["elysia", "elysia", "^1.4.30"],
+        ["hono", "hono", "^4.13.5"],
+    ] as const)("scaffolds installable %s functions", async (framework, dependency, version) => {
+        const root = mkdtempSync(join(tmpdir(), `supacloud-${framework}-scaffold-`));
+        const target = join(root, "api");
+        const { schema, callback } = captureEdgeFunctionsTool({});
+        try {
+            const args = parseToolArguments(schema, {
+                action: "scaffold",
+                slug: "api",
+                framework,
+                path: target,
+            });
+            await callback(args);
+            expect(JSON.parse(await Bun.file(join(target, "package.json")).text()))
+                .toMatchObject({ dependencies: { [dependency]: version } });
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    test("rejects a deploy receipt that confirms the wrong framework", async () => {
+        const { callback } = captureEdgeFunctionsTool({
+            post: async () => ({
+                ...confirmedFunctionMutation("api"),
+                data: {
+                    ...confirmedFunctionMutation("api").data,
+                    config: {
+                        version: "4",
+                        verify_jwt: true,
+                        framework: "fetch",
+                        activation_id: COMMITTED_ACTIVATION_ID,
+                    },
+                },
+            }),
+        });
+
+        const response = await callback({
+            action: "deploy",
+            ref: "proj",
+            slug: "api",
+            code: "export default () => new Response('ok');",
+            framework: "hono",
+            "expected-active-version": "3",
+            "expected-activation-id": EXPECTED_ACTIVATION_ID,
+        });
+
+        expect(JSON.parse(response.content[0].text)).toMatchObject({
+            ok: false,
+            operation: "edge_functions.deploy",
+            error: { code: "OUTCOME_UNKNOWN" },
+        });
+    });
+
     test("parses a bundle file map from a CLI JSON string", () => {
         const { schema } = captureEdgeFunctionsTool({});
         const parsed = parseToolArguments(schema, {

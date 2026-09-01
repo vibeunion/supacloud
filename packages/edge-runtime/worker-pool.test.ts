@@ -1555,6 +1555,38 @@ describe("WorkerPool framework routing", () => {
       await rm(projectRoot, { recursive: true, force: true });
     }
   });
+
+  test.each(["hono", "sveltekit-function"] as const)(
+    "routes explicit %s profiles with function-local paths",
+    async (framework) => {
+      const projectRoot = await mkdtemp(join(tmpdir(), `supacloud-${framework}-routing-`));
+      const functionPath = join(projectRoot, "index.ts");
+      await Bun.write(functionPath, `
+        export default {
+          fetch(request) {
+            const url = new URL(request.url);
+            return Response.json({ pathname: url.pathname, query: url.searchParams.get("source") });
+          }
+        };
+      `);
+      const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+      pools.push(pool);
+      try {
+        const response = await pool.dispatch({
+          functionId: `proj_${framework}`,
+          functionPath,
+          projectRoot,
+          projectRef: `proj_${framework}`,
+          framework,
+          env: {},
+          request: new Request("http://edge.local/functions/v1/api/users?source=sdk"),
+        });
+        expect(await response.json()).toEqual({ pathname: "/users", query: "sdk" });
+      } finally {
+        await rm(projectRoot, { recursive: true, force: true });
+      }
+    },
+  );
 });
 
 describe("WorkerPool cancellation and replacement", () => {

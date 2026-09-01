@@ -220,6 +220,11 @@ GET /v1/projects/:ref/frontend/frameworks
   `x-forwarded-host` 和 `x-forwarded-port`，以便 form actions、重定向和
   服务端 URL 推导使用外部访问地址。
 
+如果 SvelteKit 项目只提供 `+server.ts` API 路由，也可以部署为 Edge
+Function：使用 `@supacloud/function-adapter/sveltekit-adapter`，并在函数配置
+中设置 `framework: "sveltekit-function"`。该模式不托管页面、静态资源或长
+生命周期 SSR 进程；完整应用仍使用上面的 `sveltekit` Hosting 模式。
+
 ### 1. 创建并部署 React 应用
 
 ```bash
