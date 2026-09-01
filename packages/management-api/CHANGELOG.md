@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.67.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.67.0...management-api-v0.67.1) (2026-09-01)
+
+
+### Bug Fixes
+
+* **management-api:** skip migrated function history at startup ([#1074](https://github.com/vibeunion/supacloud/issues/1074)) ([15f25d1](https://github.com/vibeunion/supacloud/commit/15f25d1e0e1dcfd17101d7b0985e11dab1db82f9))
+
 ## [0.67.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.66.1...management-api-v0.67.0) (2026-09-01)
 
 
