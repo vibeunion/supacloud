@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { assertManagedSystemdUnitContent } from "../../src/services/systemd-unit-broker";
+import {
+  assertManagedSystemdUnitContent,
+  hasCanonicalStartLimitDirectives,
+} from "../../src/services/systemd-unit-broker";
 import { renderPostgrestSystemdTemplate } from "../../src/services/postgrest-systemd-template";
 
 function frontendUnit(user = "supacloud-demo", extra = ""): string {
@@ -34,7 +37,7 @@ WantedBy=multi-user.target
 function canonicalPostgrestUnit(): string {
   return renderPostgrestSystemdTemplate({
     postgrestRts: "-N2 -A8m",
-    postgrestBinary: "/opt/supacloud/postgrest-v16.1/bin/postgrest",
+    postgrestBinary: "/opt/supacloud/postgrest-v16.2/bin/postgrest",
     tenantConfigDir: "/etc/supabase/tenants",
     memoryMax: "64M",
     cpuWeight: 20,
@@ -47,6 +50,20 @@ describe("systemd unit broker policy", () => {
       "supacloud-pgrst@.service",
       canonicalPostgrestUnit(),
     )).not.toThrow();
+  });
+
+  test("requires start limits under Unit instead of Service", () => {
+    const canonical = canonicalPostgrestUnit();
+    expect(hasCanonicalStartLimitDirectives(canonical)).toBe(true);
+
+    const misplaced = canonical
+      .replace("StartLimitBurst=3\nStartLimitIntervalSec=60\n\n[Service]", "[Service]")
+      .replace("RestartSec=5\n", "RestartSec=5\nStartLimitBurst=3\nStartLimitIntervalSec=60\n");
+    expect(hasCanonicalStartLimitDirectives(misplaced)).toBe(false);
+    expect(() => assertManagedSystemdUnitContent(
+      "supacloud-pgrst@.service",
+      misplaced,
+    )).toThrow(/unsupported directive/);
   });
 
   test("allows only an approved optional PostgREST environment file", () => {

@@ -402,6 +402,38 @@ function getFunctionsRoot(): string {
   return path.resolve(process.env.EDGE_FUNCTIONS_DIR || config.edgeFunctionsDir);
 }
 
+type FunctionLogsIdentity = {
+  user: string;
+  group: string;
+  isRoot: boolean;
+};
+
+type FunctionLogsOperations = {
+  lstat: typeof fs.lstat;
+  mkdir: typeof fs.mkdir;
+  chmod: typeof fs.chmod;
+  run: (command: string[]) => Promise<void>;
+};
+
+const defaultFunctionLogsOperations: FunctionLogsOperations = {
+  lstat: fs.lstat,
+  mkdir: fs.mkdir,
+  chmod: fs.chmod,
+  run: async (command: string[]) => {
+    const child = Bun.spawn(command, {
+      cwd: "/",
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [exitCode, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stderr).text().catch(() => ""),
+    ]);
+    if (exitCode === 0) return;
+    throw new Error(stderr.trim() || `Command failed: ${command.join(" ")}`);
+  },
+};
+
 function assertInside(base: string, target: string): string {
   const resolvedBase = path.resolve(base);
   const resolvedTarget = path.resolve(target);
@@ -432,6 +464,80 @@ async function preflightFunctionMutation(ref: string, slug: string): Promise<voi
   });
 }
 
+export async function ensureFunctionLogsDirectory(
+  functionDirectory: string,
+  identity: FunctionLogsIdentity = {
+    user: config.edgeRuntimeUser,
+    group: config.edgeRuntimeGroup,
+    isRoot: process.getuid?.() === 0,
+  },
+  operations: FunctionLogsOperations = defaultFunctionLogsOperations,
+): Promise<void> {
+  const logDirectory = path.join(functionDirectory, ".logs");
+  const info = await operations.lstat(logDirectory).catch((error: unknown) => {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  });
+  if (info?.isSymbolicLink()) {
+    throw new Error("Function log directory is not trusted");
+  }
+  if (info && !info.isDirectory()) {
+    throw new Error("Function log directory is not trusted");
+  }
+  if (!info) {
+    await operations.mkdir(logDirectory, { mode: 0o755 });
+  }
+  if (identity.isRoot) {
+    await operations.chmod(logDirectory, 0o755);
+    if (identity.user) {
+      await operations.run([
+        "chown",
+        "-h",
+        `${identity.user}:${identity.group || identity.user}`,
+        logDirectory,
+      ]);
+    }
+  }
+}
+
+export async function ensureEdgeFunctionLogsForProject(
+  ref: string,
+  operations: FunctionLogsOperations = defaultFunctionLogsOperations,
+): Promise<void> {
+  const projectDirectory = getFuncDir(ref);
+  const info = await fs.lstat(projectDirectory).catch((error: unknown) => {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  });
+  if (!info?.isDirectory() || info.isSymbolicLink()) return;
+  await ensureFunctionLogsDirectory(projectDirectory, undefined, operations);
+}
+
+export async function ensureEdgeFunctionLogsForExistingProjects(
+  functionsRoot = getFunctionsRoot(),
+  operations: FunctionLogsOperations = defaultFunctionLogsOperations,
+): Promise<number> {
+  const entries = await fs.readdir(functionsRoot, { withFileTypes: true }).catch(() => []);
+  let prepared = 0;
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+    try {
+      validateRef(entry.name);
+    } catch {
+      continue;
+    }
+    const projectDirectory = path.join(functionsRoot, entry.name);
+    const info = await fs.lstat(projectDirectory).catch((error: unknown) => {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    });
+    if (!info?.isDirectory() || info.isSymbolicLink()) continue;
+    await ensureFunctionLogsDirectory(projectDirectory, undefined, operations);
+    prepared += 1;
+  }
+  return prepared;
+}
+
 async function prepareTrustedFunctionProjectDirectory(
   ref: string,
   slug: string,
@@ -443,6 +549,7 @@ async function prepareTrustedFunctionProjectDirectory(
     if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
   }
   await preflightFunctionMutation(ref, slug);
+  await ensureFunctionLogsDirectory(functionDirectory);
   return functionDirectory;
 }
 
@@ -2801,8 +2908,14 @@ export const edgeFunctionService = {
     }>
   > {
     try {
-      const logDir = path.join(getFunctionsRoot(), ref, ".logs");
-      await fs.mkdir(logDir, { recursive: true }).catch(() => {});
+      const projectDirectory = getFuncDir(ref);
+      const info = await fs.lstat(projectDirectory).catch((error: unknown) => {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+        throw error;
+      });
+      if (!info?.isDirectory() || info.isSymbolicLink()) return [];
+      await ensureFunctionLogsDirectory(projectDirectory);
+      const logDir = path.join(projectDirectory, ".logs");
       const logFile = path.join(logDir, `${slug}.log`);
       const content = await Bun.file(logFile)
         .text()

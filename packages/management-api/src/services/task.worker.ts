@@ -21,6 +21,7 @@ import { mergeProjectConfig, normalizeProjectConfig } from "../utils/project-con
 import { runtimeEnvService } from "./runtime-env.service";
 import { jwtService } from "./jwt.service";
 import { resolveStoredServiceRoleKey } from "../utils/service-role";
+import { resolveProjectVerificationJwks } from "../utils/project-jwt";
 
 async function repairInvalidServiceRoleKey(project: Project): Promise<void> {
     if (resolveStoredServiceRoleKey(project)) return;
@@ -253,6 +254,7 @@ export class TaskWorker {
                     const res = await realtimeService.registerTenant({
                         projectRef: project_ref,
                         jwtSecret: project.jwt_secret,
+                        jwtJwks: resolveProjectVerificationJwks(project.config, project.jwt_secret),
                         dbName,
                         dbPassword: project.db_password,
                     });

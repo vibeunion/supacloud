@@ -26,12 +26,16 @@ StandardError=journal
 SyslogIdentifier=supacloud-realtime
 LogsDirectory=supacloud
 
-Environment=REALTIME_IMAGE=public.ecr.aws/supabase/realtime:v2.129.0
+EnvironmentFile=-/etc/supabase/management-api.env
+# EnvironmentFile values override Environment values regardless of directive
+# order. Keep release-owned, non-secret selectors in the required service file
+# loaded last so stale management-api.env values cannot select an old runtime.
+Environment=REALTIME_IMAGE=public.ecr.aws/supabase/realtime:v2.132.0
 Environment=REALTIME_CONTAINER_NAME=supacloud-realtime
 Environment=REALTIME_DB_USER=supabase_admin
 Environment=PG_DATABASE=supacloud_meta
 Environment=REALTIME_CONTAINER_ENV_FILE=/etc/supabase/realtime-container.env
-EnvironmentFile=-/etc/supabase/management-api.env
+EnvironmentFile=/etc/supabase/realtime-service.env
 
 ExecStartPre=/bin/sh -c 'test -n "$$REALTIME_SECRET_KEY_BASE" && test -n "$$REALTIME_DB_ENC_KEY" && test "$${#REALTIME_DB_ENC_KEY}" -eq 16 && test -n "$$SUPACLOUD_JWT_SECRET" && test -n "$$REALTIME_IMAGE" && test -n "$$REALTIME_CONTAINER_NAME" && test -n "$$REALTIME_DB_USER" && test -n "$$PGPASSWORD"'
 ExecStartPre=-/usr/bin/podman rm -f ${REALTIME_CONTAINER_NAME}

@@ -44,7 +44,7 @@ services:
       - pgredis-database
 
   gotrue:
-    image: supabase/gotrue:v2.195.0
+    image: supabase/gotrue:v2.196.0
     restart: always
     environment:
       GOTRUE_SITE_URL: http://localhost:${CADDY_HTTP_PORT:-8000}
@@ -75,7 +75,7 @@ services:
       - supacloud-dev
 
   postgrest:
-    image: postgrest/postgrest:v16.1
+    image: postgrest/postgrest:v16.2
     restart: always
     environment:
       PGRST_DB_URI: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/postgres

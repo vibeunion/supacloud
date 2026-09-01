@@ -135,7 +135,7 @@ jobs:
         run: |
           bun install --frozen-lockfile
           bun run typecheck
-          bun test internal-bindings.test.ts pgredis-capability.test.ts function-version.test.ts function-source.test.ts server-cache.test.ts server-function-config.test.ts worker-pool.test.ts
+          bun test internal-bindings.test.ts pgredis-capability.test.ts function-version.test.ts function-source.test.ts runtime-source-identity.test.ts server-cache.test.ts server-function-config.test.ts worker-pool.test.ts
           bun audit --audit-level high
 
       - name: Check pgredis runtime
@@ -278,6 +278,7 @@ jobs:
           bash scripts/lib/installer_pg_hba.test.sh
           bash scripts/lib/tenant_user.test.sh
           bash scripts/lib/systemd_unit_broker.test.sh
+          bash scripts/lib/edge_runtime_source.test.sh
 
       - name: Validate CI scripts
         run: |
@@ -471,7 +472,7 @@ jobs:
           --health-timeout 5s
           --health-retries 5
       postgrest:
-        image: postgrest/postgrest:v16.1
+        image: postgrest/postgrest:v16.2
         ports:
           - 3000:3000
         env:
@@ -480,7 +481,7 @@ jobs:
           PGRST_DB_ANON_ROLE: anon
           PGRST_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
       gotrue:
-        image: supabase/gotrue:v2.195.0
+        image: supabase/gotrue:v2.196.0
         ports:
           - 9999:9999
         env:
@@ -676,8 +677,8 @@ jobs:
       - name: Restart flaky services
         run: |
           echo "Restarting Auth and Realtime Containers..."
-          docker start $(docker ps -a -q --filter "ancestor=supabase/gotrue:v2.195.0") || true
-          docker start $(docker ps -a -q --filter "ancestor=public.ecr.aws/supabase/realtime:v2.129.0") || true
+          docker start $(docker ps -a -q --filter "ancestor=supabase/gotrue:v2.196.0") || true
+          docker start $(docker ps -a -q --filter "ancestor=public.ecr.aws/supabase/realtime:v2.132.0") || true
           sleep 4
 
       - name: Launch API & Execute Full Defenses
@@ -755,7 +756,7 @@ jobs:
 
       - name: Lint shell scripts
         run: |
-          ignored_rules="SC1090,SC1091,SC2012,SC2015,SC2016,SC2030,SC2031,SC2034,SC2046,SC2086,SC2155,SC2207,SC2317"
+          ignored_rules="SC1090,SC1091,SC2012,SC2015,SC2016,SC2030,SC2031,SC2034,SC2046,SC2086,SC2155,SC2207,SC2317,SC2329"
 
           echo "=== Checking scripts/*.sh and scripts/lib/*.sh ==="
           shellcheck -s bash -e "$ignored_rules" scripts/*.sh scripts/lib/*.sh

@@ -15,6 +15,8 @@ Description=SupaCloud PostgREST for tenant %i
 Documentation=https://github.com/supacloud/supacloud
 After=network.target patroni.service
 Wants=patroni.service
+StartLimitBurst=3
+StartLimitIntervalSec=60
 
 [Service]
 Type=simple
@@ -29,8 +31,6 @@ Environment="SUPACLOUD_POSTGREST_CONTROL_UID=0"
 ExecStart=/usr/local/libexec/supacloud/postgrest-launcher %i +RTS ${options.postgrestRts} -RTS
 Restart=on-failure
 RestartSec=5
-StartLimitBurst=3
-StartLimitIntervalSec=60
 
 NoNewPrivileges=true
 ProtectSystem=strict

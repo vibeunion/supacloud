@@ -5,12 +5,14 @@ const REQUEST_DIR = "/run/supacloud-unit-requests";
 const MANAGED_UNIT_PATTERN = /^(?:supacloud-(?:pgrst|gotrue)@\.service|supacloud-frontend-[a-z0-9-]{1,64}\.service)$/;
 const MANAGED_IDENTITY_PATTERN = /^supacloud-(?:%i|[a-z0-9-]{1,20})$/;
 const MAX_UNIT_BYTES = 16 * 1024;
-const UNIT_DIRECTIVES = new Set(["After", "Description", "Documentation", "Wants"]);
+const UNIT_DIRECTIVES = new Set([
+  "After", "Description", "Documentation", "StartLimitBurst", "StartLimitIntervalSec", "Wants",
+]);
 const SERVICE_DIRECTIVES = new Set([
   "CPUWeight", "Environment", "EnvironmentFile", "ExecReload", "ExecStart",
   "Group", "LimitNOFILE", "MemoryMax", "NoNewPrivileges", "ProtectHome",
-  "ProtectSystem", "ReadOnlyPaths", "Restart", "RestartSec", "StartLimitBurst",
-  "StartLimitIntervalSec", "SyslogIdentifier", "Type", "User", "WorkingDirectory",
+  "ProtectSystem", "ReadOnlyPaths", "Restart", "RestartSec", "SyslogIdentifier",
+  "Type", "User", "WorkingDirectory",
 ]);
 const INSTALL_DIRECTIVES = new Set(["WantedBy"]);
 
@@ -34,6 +36,27 @@ function allowedDirectives(section: string): ReadonlySet<string> | undefined {
   if (section === "Service") return SERVICE_DIRECTIVES;
   if (section === "Install") return INSTALL_DIRECTIVES;
   return undefined;
+}
+
+function hasDirectiveInSection(content: string, targetSection: string, targetDirective: string): boolean {
+  let section = "";
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    const sectionMatch = line.match(/^\[([A-Za-z]+)\]$/);
+    if (sectionMatch) {
+      section = sectionMatch[1]!;
+      continue;
+    }
+    if (section === targetSection && line.startsWith(`${targetDirective}=`)) return true;
+  }
+  return false;
+}
+
+export function hasCanonicalStartLimitDirectives(content: string): boolean {
+  return hasDirectiveInSection(content, "Unit", "StartLimitBurst")
+    && hasDirectiveInSection(content, "Unit", "StartLimitIntervalSec")
+    && !hasDirectiveInSection(content, "Service", "StartLimitBurst")
+    && !hasDirectiveInSection(content, "Service", "StartLimitIntervalSec");
 }
 
 type UnitPolicyState = {

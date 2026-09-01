@@ -431,6 +431,12 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         set.headers['sb-gateway-version'] = '1.0.0';
     })
 
+    // Keep the Supabase-compatible health path inside the tenant-bound storage
+    // surface so it cannot fall through to the Web Console SPA catch-all.
+    .get('/status', async () => {
+        return await StorageService.getStatus();
+    })
+
     // ════════════════════════════════════════════════════════
     // BUCKET Operations
     // ════════════════════════════════════════════════════════

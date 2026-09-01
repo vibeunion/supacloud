@@ -469,10 +469,9 @@ describe("database route helpers", () => {
     await expect(ensureTasksRealtimePublication(projectDb)).resolves.toBeUndefined();
   });
 
-  test("tenant bootstrap and reconcile scripts publish public.tasks for realtime", () => {
+  test("tenant bootstrap and dedicated reconcile script publish public.tasks for realtime", () => {
     const root = join(import.meta.dirname, "../..");
     const files = [
-      "src/scripts/migrate-tenant-schema.ts",
       "src/db/schemas/supabase.sql",
       "scripts/reconcile-realtime-schema-privileges.ts",
     ];

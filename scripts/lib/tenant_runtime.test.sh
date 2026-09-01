@@ -7,10 +7,10 @@ RUNTIME_SCRIPT="${SCRIPT_DIR}/tenant_runtime.sh"
 
 grep -Eq '^umask 077$' "$RUNTIME_SCRIPT"
 grep -Fq 'PGPASSWORD="$db_password" psql' "$RUNTIME_SCRIPT"
-grep -Fq 'v16.1' "$RUNTIME_SCRIPT"
-grep -Fq 'b986c926cf16a1c5d97954c57d3a6edd894a5da225c3f3fc0c25dc4105009dd7' "$RUNTIME_SCRIPT"
-grep -Fq '90c801ef53671677d1c9bef4181579fe876c5a2b0c1ba51bb71ace4eebccc1c5' "$RUNTIME_SCRIPT"
-grep -Fq 'v2.195.0' "$RUNTIME_SCRIPT"
+grep -Fq 'v16.2' "$RUNTIME_SCRIPT"
+grep -Fq '4712595baae0f5d84a527d55a11166d6bf4d9b0f1d102505c5e9d59219787f08' "$RUNTIME_SCRIPT"
+grep -Fq '4c83974272acb56e6091e969ba4ee345fbc053cde457b0c8a9399e0d2a12c32d' "$RUNTIME_SCRIPT"
+grep -Fq 'v2.196.0' "$RUNTIME_SCRIPT"
 grep -Fq 'GOTRUE_EXPERIMENTAL_PROVIDER_LINKING_DOMAINS' "$RUNTIME_SCRIPT"
 grep -Fq 'run the explicit SupaCloud installer/upgrade' "$RUNTIME_SCRIPT"
 
@@ -49,6 +49,31 @@ trap 'rm -rf "$tmp_dir"' EXIT
 # shellcheck source=tenant_runtime.sh
 source "$RUNTIME_SCRIPT"
 export SECRETS_ENCRYPTION_KEY='tenant-runtime-test-encryption-key-0123456789abcdef'
+
+canonical_unit="$tmp_dir/canonical.service"
+cat > "$canonical_unit" <<'EOF'
+[Unit]
+Description=canonical
+StartLimitBurst=3
+StartLimitIntervalSec=60
+[Service]
+RestartSec=5
+EOF
+systemd_unit_has_canonical_start_limits "$canonical_unit"
+
+misplaced_unit="$tmp_dir/misplaced.service"
+cat > "$misplaced_unit" <<'EOF'
+[Unit]
+Description=misplaced
+[Service]
+RestartSec=5
+StartLimitBurst=3
+StartLimitIntervalSec=60
+EOF
+if systemd_unit_has_canonical_start_limits "$misplaced_unit"; then
+    echo "service-scoped start limits were treated as canonical" >&2
+    exit 1
+fi
 
 unset POSTGREST_DB_POOL
 [[ "$(resolve_postgrest_db_pool)" == "3" ]]
@@ -146,8 +171,29 @@ if render_gotrue_provider_linking_env >/dev/null 2>&1; then
 fi
 unset GOTRUE_EXPERIMENTAL_PROVIDERS_WITH_OWN_LINKING_DOMAIN
 
+(
+    mkdir -p "$tmp_dir/postgrest-bin"
+    fake_postgrest="$tmp_dir/postgrest-bin/postgrest"
+    printf '#!/bin/sh\nprintf "PostgREST 16.2\\n"\n' > "$fake_postgrest"
+    chmod 755 "$fake_postgrest"
+    PATH="$tmp_dir/postgrest-bin:$PATH"
+    POSTGREST_BIN="$fake_postgrest"
+    ensure_postgrest
+
+    printf '#!/bin/sh\nprintf "PostgREST 14.16\\n"\n' > "$fake_postgrest"
+    if ensure_postgrest >/dev/null 2>&1; then
+        echo "tenant start accepted an outdated PostgREST binary" >&2
+        exit 1
+    fi
+    POSTGREST_VERSION=16.2
+    if ensure_postgrest >/dev/null 2>&1; then
+        echo "tenant start accepted a PostgREST version without the v prefix" >&2
+        exit 1
+    fi
+)
+
 fake_gotrue="$tmp_dir/gotrue"
-printf '#!/bin/sh\n[ "$1" = version ] && printf "v2.195.0\\n"\n' > "$fake_gotrue"
+printf '#!/bin/sh\n[ "$1" = version ] && printf "v2.196.0\\n"\n' > "$fake_gotrue"
 chmod 755 "$fake_gotrue"
 GOTRUE_BIN="$fake_gotrue"
 ensure_gotrue
@@ -203,12 +249,12 @@ fi
 unset -f curl
 unset SUPACLOUD_GITHUB_PROXY
 
-if resolve_release_sha256 "PostgREST" "v99.0.0" "v16.1" "default-digest" "" >/dev/null 2>&1; then
+if resolve_release_sha256 "PostgREST" "v99.0.0" "v16.2" "default-digest" "" >/dev/null 2>&1; then
     echo "non-default PostgREST version reused the default digest" >&2
     exit 1
 fi
 explicit_digest=$(printf 'e%.0s' {1..64})
-[[ "$(resolve_release_sha256 "PostgREST" "v99.0.0" "v16.1" "$(printf 'd%.0s' {1..64})" "$explicit_digest")" == "$explicit_digest" ]]
+[[ "$(resolve_release_sha256 "PostgREST" "v99.0.0" "v16.2" "$(printf 'd%.0s' {1..64})" "$explicit_digest")" == "$explicit_digest" ]]
 
 # Archive validation rejects digest mismatches and link/special-file payloads.
 mkdir -p "$tmp_dir/archive/valid" "$tmp_dir/archive/link"
@@ -538,5 +584,6 @@ printf 'LEGACY=true\n' > "$legacy_stop_dir/legacystop_gotrue.d/runtime.env"
 grep -Fq 'userdel supacloud-legacystop' "$legacy_stop_log"
 
 bash "${SCRIPT_DIR}/gotrue_upgrade.test.sh"
+bash "${SCRIPT_DIR}/postgrest_upgrade.test.sh"
 
 echo "tenant runtime security checks passed"

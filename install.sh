@@ -29,7 +29,10 @@ INSTALL_INPUT_FILE="${SUPACLOUD_INSTALL_CONFIG_FILE:-/etc/supabase/install.env}"
 JWT_KEYS_FILE="${SUPACLOUD_JWT_KEYS_FILE:-/etc/supabase/jwt-keys.env}"
 MANAGEMENT_ENV_FILE="${SUPACLOUD_MANAGEMENT_ENV_FILE:-/etc/supabase/management-api.env}"
 EDGE_RUNTIME_ENV_FILE="${SUPACLOUD_EDGE_RUNTIME_ENV_FILE:-/etc/supabase/edge-runtime.env}"
+EDGE_RUNTIME_SOURCE_DIR="${SUPACLOUD_EDGE_RUNTIME_SOURCE_DIR:-/opt/supacloud/edge-runtime}"
+EDGE_RUNTIME_SOURCE_INPUT_DIR="${SUPACLOUD_EDGE_RUNTIME_SOURCE_INPUT_DIR:-${SCRIPT_DIR}/packages/edge-runtime}"
 PGREDIS_RUNTIME_ENV_FILE="${SUPACLOUD_PGREDIS_RUNTIME_ENV_FILE:-/etc/supabase/pgredis-runtime.env}"
+REALTIME_SERVICE_ENV_FILE="${SUPACLOUD_REALTIME_SERVICE_ENV_FILE:-/etc/supabase/realtime-service.env}"
 PGREDIS_RUNTIME_BIN_FILE="${SUPACLOUD_PGREDIS_RUNTIME_BIN_FILE:-/usr/local/bin/supacloud-pgredis-runtime}"
 PGREDIS_RUNTIME_UNIT_FILE="${SUPACLOUD_PGREDIS_RUNTIME_UNIT_FILE:-/etc/systemd/system/supacloud-pgredis-runtime.service}"
 PGREDIS_RUNTIME_SOURCE_DIR="${SUPACLOUD_PGREDIS_RUNTIME_SOURCE_DIR:-/opt/supacloud/pgredis-runtime}"
@@ -41,6 +44,8 @@ SUPACLOUD_LOGS_ENV_FILE="${SUPACLOUD_LOGS_ENV_FILE:-/etc/supabase/victorialogs.e
 SUPACLOUD_VICTORIALOGS_UNIT_FILE="${SUPACLOUD_VICTORIALOGS_UNIT_FILE:-/etc/systemd/system/supacloud-victorialogs.service}"
 VICTORIALOGS_BINARY_FILE="${VICTORIALOGS_BINARY_FILE:-/usr/local/bin/victoria-logs-prod}"
 MANAGEMENT_EDGE_PRIVILEGE_DROPIN="${SUPACLOUD_EMBEDDED_EDGE_PRIVILEGE_DROPIN:-/etc/systemd/system/supacloud.service.d/50-embedded-edge-privilege.conf}"
+EDGE_RUNTIME_SOURCE_TRANSACTION_MARKER="edge-runtime-source-transaction"
+EDGE_RUNTIME_SOURCE_TRANSACTION_DIR=""
 PGREDIS_INSTALL_TRANSACTION_DIR=""
 CREDENTIALS_FILE="${SUPACLOUD_CREDENTIALS_FILE:-/etc/supabase/supacloud-credentials.env}"
 MASTER_TOKEN_FILE="${SUPACLOUD_MASTER_TOKEN_FILE:-/etc/supabase/master-token.env}"
@@ -49,10 +54,16 @@ XCADDY_VERSION="${XCADDY_VERSION:-v0.4.5}"
 
 # shellcheck source=scripts/lib/install_config.sh
 source "${SCRIPT_DIR}/scripts/lib/install_config.sh"
+# shellcheck source=scripts/lib/edge_runtime_source.sh
+source "${SCRIPT_DIR}/scripts/lib/edge_runtime_source.sh"
+EDGE_RUNTIME_EXTERNAL_IDENTITY_MODE="source"
+EDGE_RUNTIME_EXTERNAL_SOURCE_IDENTITY_FILE="${EDGE_RUNTIME_SOURCE_DIR}/${SUPACLOUD_EDGE_RUNTIME_SOURCE_IDENTITY_NAME}"
 # shellcheck source=scripts/lib/release_assets.sh
 source "${SCRIPT_DIR}/scripts/lib/release_assets.sh"
 # shellcheck source=scripts/lib/gotrue_upgrade.sh
 source "${SCRIPT_DIR}/scripts/lib/gotrue_upgrade.sh"
+# shellcheck source=scripts/lib/postgrest_upgrade.sh
+source "${SCRIPT_DIR}/scripts/lib/postgrest_upgrade.sh"
 
 # Installation values are layered deterministically:
 # explicit environment/CLI > persisted root-only input > legacy root state >
@@ -1524,7 +1535,8 @@ render_edge_runtime_systemd_unit() {
     local target_file="$2"
     local exec_start="$3"
     local runtime_port="$4"
-    python3 - "$source_file" "$target_file" "$exec_start" "$runtime_port" <<'PY'
+    local source_dir="${5:-}"
+    python3 - "$source_file" "$target_file" "$exec_start" "$runtime_port" "$source_dir" <<'PY'
 import os
 import sys
 import tempfile
@@ -1534,6 +1546,7 @@ source = Path(sys.argv[1])
 target = Path(sys.argv[2])
 exec_start = sys.argv[3]
 runtime_port = sys.argv[4]
+source_dir = sys.argv[5]
 lines = source.read_text().splitlines()
 rendered = []
 replaced = False
@@ -1542,6 +1555,8 @@ for line in lines:
     if line.startswith("ExecStart="):
         rendered.append(f"ExecStart={exec_start}")
         replaced = True
+    elif source_dir and line.startswith("WorkingDirectory="):
+        rendered.append(f"WorkingDirectory={source_dir}")
     elif "/opt/supacloud/config.env" not in line:
         rendered.append(line)
 if not replaced:
@@ -1606,7 +1621,7 @@ install_edge_runtime() {
 
     # 1. Create the unprivileged runtime identity and directories.
     ensure_edge_runtime_user || return 1
-    mkdir -p /var/supacloud/frontends /opt/supacloud/edge-runtime /opt/supacloud/functions /etc/supabase
+    mkdir -p /var/supacloud/frontends /opt/supacloud/functions /etc/supabase
 
     # 2. Select the compiled artifact. Forced release mode is fail-closed and
     # accepts only the verified dist/${arch asset} downloaded by setup.sh.
@@ -1629,58 +1644,30 @@ install_edge_runtime() {
         log_info "Compiled Edge Runtime binary installed to $EDGE_RT_BIN_TARGET"
     fi
 
+    if [[ "$USE_COMPILED_BINARY" == "true" ]]; then
+        EDGE_RUNTIME_EXTERNAL_IDENTITY_MODE="compiled"
+        EDGE_RUNTIME_EXTERNAL_SOURCE_IDENTITY_FILE=""
+    else
+        EDGE_RUNTIME_EXTERNAL_IDENTITY_MODE="source"
+        EDGE_RUNTIME_EXTERNAL_SOURCE_IDENTITY_FILE="${EDGE_RUNTIME_SOURCE_DIR}/${SUPACLOUD_EDGE_RUNTIME_SOURCE_IDENTITY_NAME}"
+    fi
+
     if [[ "$USE_COMPILED_BINARY" == "false" \
         && "$SUPACLOUD_RESOLVED_ARTIFACT_MODE" != "local" ]]; then
         log_error "Bun Edge Runtime source mode requires explicit SUPACLOUD_SETUP_ARTIFACT_MODE=local"
         return 1
     fi
 
-    # 3. Deploy Edge Runtime source (fallback for non-compiled mode)
-    local EDGE_RT_SRC="${SCRIPT_DIR}/packages/edge-runtime"
-    if [[ -d "$EDGE_RT_SRC" ]]; then
-        cp -rf "$EDGE_RT_SRC"/* /opt/supacloud/edge-runtime/
-
-        # The Edge Runtime source is always deployed under /opt/supacloud/edge-runtime
-        # and the management API always spawns it via `bun run .../server.ts` when
-        # EDGE_RUNTIME_MODE=embedded (see packages/management-api/src/plugins/edge-runtime-manager.ts).
-        # The compiled supacloud-edge-runtime binary is only used by the standalone
-        # supacloud-edge-runtime.service in external mode, so installing it does NOT
-        # remove the embedded path's dependency on node_modules. Previously bun install
-        # was skipped whenever USE_COMPILED_BINARY=true, leaving the embedded runner
-        # without elysia/@elysiajs/cors and causing a crash loop
-        # ("Cannot find package elysia from .../server.ts") right after install.
-        if command -v bun &> /dev/null; then
-            ensure_bun_version
-            (cd /opt/supacloud/edge-runtime && bun install --frozen-lockfile 2>/dev/null) || \
-                (cd /opt/supacloud/edge-runtime && bun install)
-        else
-            log_warn "Bun not found; Edge Runtime dependencies not installed. Embedded mode will fail to start until Bun is available and bun install is run in /opt/supacloud/edge-runtime"
-        fi
-
-        if [[ "$USE_COMPILED_BINARY" == "false" ]]; then
-            if [[ "$EDGE_RUNTIME_MODE" == "external" ]]; then
-                log_info "External Edge Runtime mode requires Bun $BUN_VERSION"
-                ensure_bun_version
-                cd /opt/supacloud/edge-runtime && bun install --frozen-lockfile 2>/dev/null || bun install
-                touch /etc/supabase/.bun_installed
-            else
-                if command -v bun &> /dev/null; then
-                    ensure_bun_version
-                    cd /opt/supacloud/edge-runtime && bun install --frozen-lockfile 2>/dev/null || bun install
-                    log_info "Edge Runtime dependencies installed (Bun available)"
-                else
-                    log_info "Edge Runtime deployed (embedded mode, no compiled binary found, no Bun available)"
-                    log_info "Note: Edge Functions will not work until Bun is installed or a compiled binary is provided"
-                fi
-            fi
-        else
-            log_info "Edge Runtime source deployed to /opt/supacloud/edge-runtime (functions directory)"
-        fi
-        configure_edge_runtime_source_access /opt/supacloud/edge-runtime || return 1
-        log_info "Edge Runtime deployed to /opt/supacloud/edge-runtime"
-    else
-        log_warn "Edge Runtime source not found at $EDGE_RT_SRC, skipping source deployment"
+    # 3. Validate the source and Bun prerequisites. The source tree itself is
+    # staged and atomically activated later inside the Management API rollback
+    # transaction, after database initialization has reached a durable state.
+    local EDGE_RT_SRC="$EDGE_RUNTIME_SOURCE_INPUT_DIR"
+    if [[ ! -d "$EDGE_RT_SRC" ]]; then
+        log_error "Edge Runtime source not found at $EDGE_RT_SRC"
+        return 1
     fi
+    ensure_bun_version || return 1
+    log_info "Edge Runtime source validated; transactional activation will occur with the Management API"
 
     # 4. Determine ExecStart command
     local EXEC_START_CMD=""
@@ -1699,7 +1686,8 @@ install_edge_runtime() {
             "${SYSTEMD_SRC}/supacloud-edge-runtime.service" \
             /etc/systemd/system/supacloud-edge-runtime.service \
             "$EXEC_START_CMD" \
-            "${EDGE_RUNTIME_PORT:-9005}"
+            "${EDGE_RUNTIME_PORT:-9005}" \
+            "$EDGE_RUNTIME_SOURCE_DIR"
         log_info "Rendered checked-in supacloud-edge-runtime.service with $EXEC_START_CMD"
     else
         cat > /etc/systemd/system/supacloud-edge-runtime.service <<SVCEOF
@@ -1712,7 +1700,7 @@ Wants=supacloud.service
 Type=simple
 User=supacloud-edge
 Group=supacloud-edge
-WorkingDirectory=/opt/supacloud/edge-runtime
+WorkingDirectory=${EDGE_RUNTIME_SOURCE_DIR}
 ExecStart=${EXEC_START_CMD}
 Restart=always
 RestartSec=5
@@ -1953,7 +1941,8 @@ install_pgredis_runtime() {
         return 1
     fi
     render_edge_runtime_systemd_unit "$systemd_src" \
-        "$PGREDIS_RUNTIME_UNIT_FILE" "$PGR_EXEC_START" "$PGREDIS_RUNTIME_PORT"
+        "$PGREDIS_RUNTIME_UNIT_FILE" "$PGR_EXEC_START" "$PGREDIS_RUNTIME_PORT" \
+        "$PGREDIS_RUNTIME_SOURCE_DIR"
     systemctl daemon-reload || return 1
     systemctl enable supacloud-pgredis-runtime || return 1
     systemctl restart supacloud-pgredis-runtime || return 1
@@ -2952,6 +2941,8 @@ Description=SupaCloud Management API Server
 Documentation=https://github.com/supacloud/supacloud
 After=network.target patroni.service
 Wants=patroni.service
+StartLimitBurst=5
+StartLimitIntervalSec=60
 
 [Service]
 Type=simple
@@ -2960,8 +2951,6 @@ ExecStartPre=/opt/supacloud/scripts/pre_start_recovery.sh
 ExecStart=${binary_path}
 Restart=always
 RestartSec=10
-StartLimitBurst=5
-StartLimitIntervalSec=60
 LimitNOFILE=65536
 CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_SETGID CAP_SETUID
 
@@ -3012,6 +3001,224 @@ install_postgrest_launcher() {
     install -D -m 0755 "$launcher_src" "$launcher_target"
 }
 
+management_edge_runtime_source_transaction() {
+    local management_transaction_dir="$1"
+    local marker="${management_transaction_dir}/${EDGE_RUNTIME_SOURCE_TRANSACTION_MARKER}"
+    local transaction_dir target_parent
+    [[ -f "$marker" && ! -L "$marker" ]] || return 1
+    transaction_dir=$(<"$marker")
+    target_parent=$(dirname "$EDGE_RUNTIME_SOURCE_DIR")
+    [[ "$transaction_dir" == "$target_parent"/.edge-runtime-source.* ]] || return 1
+    [[ -d "$transaction_dir" && ! -L "$transaction_dir" ]] || return 1
+    printf '%s\n' "$transaction_dir"
+}
+
+capture_management_edge_runtime_source_state() {
+    local snapshot_dir="$1"
+    local identity
+    mkdir -p "$snapshot_dir" || return 1
+    chmod 700 "$snapshot_dir" || return 1
+    if [[ -L "$EDGE_RUNTIME_SOURCE_DIR" || ( -e "$EDGE_RUNTIME_SOURCE_DIR" && ! -d "$EDGE_RUNTIME_SOURCE_DIR" ) ]]; then
+        log_error "Existing Edge Runtime source path is not a real directory: $EDGE_RUNTIME_SOURCE_DIR"
+        return 1
+    fi
+    if identity=$(supacloud_read_edge_runtime_source_identity "$EDGE_RUNTIME_SOURCE_DIR" 2>/dev/null); then
+        printf 'attested\n' > "${snapshot_dir}/state"
+        printf '%s\n' "$identity" > "${snapshot_dir}/identity"
+    elif [[ -e "$EDGE_RUNTIME_SOURCE_DIR" || -L "$EDGE_RUNTIME_SOURCE_DIR" ]]; then
+        printf 'legacy\n' > "${snapshot_dir}/state"
+    else
+        printf 'absent\n' > "${snapshot_dir}/state"
+    fi
+}
+
+capture_management_edge_runtime_service_state() {
+    local snapshot_dir="$1"
+    local enabled_state
+    mkdir -p "$snapshot_dir" || return 1
+    chmod 700 "$snapshot_dir" || return 1
+    if systemctl is-active --quiet supacloud-edge-runtime >/dev/null 2>&1; then
+        printf 'active\n' > "${snapshot_dir}/state"
+    else
+        printf 'inactive\n' > "${snapshot_dir}/state"
+    fi
+    enabled_state=$(systemctl is-enabled supacloud-edge-runtime 2>/dev/null || true)
+    case "$enabled_state" in
+        enabled) printf 'enabled\n' > "${snapshot_dir}/enabled" ;;
+        disabled) printf 'disabled\n' > "${snapshot_dir}/enabled" ;;
+        *) printf 'unknown\n' > "${snapshot_dir}/enabled" ;;
+    esac
+}
+
+management_edge_runtime_service_prior_state() {
+    local management_transaction_dir="$1"
+    local state_file="${management_transaction_dir}/edge-service-prior/state"
+    local state
+    [[ -f "$state_file" && ! -L "$state_file" ]] || {
+        printf 'unknown\n'
+        return 0
+    }
+    state=$(<"$state_file")
+    case "$state" in
+        active|inactive) printf '%s\n' "$state" ;;
+        *)
+            printf 'unknown\n'
+            return 1
+            ;;
+    esac
+}
+
+management_edge_runtime_service_prior_enabled_state() {
+    local management_transaction_dir="$1"
+    local enabled_file="${management_transaction_dir}/edge-service-prior/enabled"
+    local enabled_state
+    [[ -f "$enabled_file" && ! -L "$enabled_file" ]] || {
+        printf 'unknown\n'
+        return 0
+    }
+    enabled_state=$(<"$enabled_file")
+    case "$enabled_state" in
+        enabled|disabled|unknown) printf '%s\n' "$enabled_state" ;;
+        *)
+            printf 'unknown\n'
+            return 1
+            ;;
+    esac
+}
+
+prepare_management_edge_runtime_source() {
+    local management_transaction_dir="$1"
+    local source_dir="$EDGE_RUNTIME_SOURCE_INPUT_DIR"
+    local marker="${management_transaction_dir}/${EDGE_RUNTIME_SOURCE_TRANSACTION_MARKER}"
+    local transaction_dir staged_dir identity version sha256
+
+    [[ -d "$source_dir" && ! -L "$source_dir" ]] || {
+        log_error "Edge Runtime source is missing or unsafe: $source_dir"
+        return 1
+    }
+    command -v bun >/dev/null 2>&1 || {
+        log_error "Bun is required to stage Edge Runtime dependencies"
+        return 1
+    }
+    transaction_dir=$(supacloud_stage_edge_runtime_source "$source_dir" "$EDGE_RUNTIME_SOURCE_DIR") || return 1
+    EDGE_RUNTIME_SOURCE_TRANSACTION_DIR="$transaction_dir"
+    printf '%s\n' "$transaction_dir" > "$marker" || {
+        supacloud_rollback_edge_runtime_source "$transaction_dir" "$EDGE_RUNTIME_SOURCE_DIR" || true
+        EDGE_RUNTIME_SOURCE_TRANSACTION_DIR=""
+        return 1
+    }
+    chmod 600 "$marker" || {
+        supacloud_rollback_edge_runtime_source "$transaction_dir" "$EDGE_RUNTIME_SOURCE_DIR" || true
+        rm -f "$marker"
+        EDGE_RUNTIME_SOURCE_TRANSACTION_DIR=""
+        return 1
+    }
+    staged_dir="${transaction_dir}/staged"
+
+    log_info "Installing Edge Runtime dependencies in the staged source tree..."
+    if [[ "$SUPACLOUD_RESOLVED_ARTIFACT_MODE" == "release" ]]; then
+        (cd "$staged_dir" && bun install --frozen-lockfile) || {
+            log_error "Release Edge Runtime dependencies do not match the lockfile"
+            supacloud_rollback_edge_runtime_source "$transaction_dir" "$EDGE_RUNTIME_SOURCE_DIR" || true
+            rm -f "$marker"
+            EDGE_RUNTIME_SOURCE_TRANSACTION_DIR=""
+            return 1
+        }
+    elif ! { (cd "$staged_dir" && bun install --frozen-lockfile 2>/dev/null) || \
+        (cd "$staged_dir" && bun install); }; then
+        log_error "Failed to install staged Edge Runtime dependencies"
+        supacloud_rollback_edge_runtime_source "$transaction_dir" "$EDGE_RUNTIME_SOURCE_DIR" || true
+        rm -f "$marker"
+        EDGE_RUNTIME_SOURCE_TRANSACTION_DIR=""
+        return 1
+    fi
+    if ! configure_edge_runtime_source_access "$staged_dir"; then
+        supacloud_rollback_edge_runtime_source "$transaction_dir" "$EDGE_RUNTIME_SOURCE_DIR" || true
+        rm -f "$marker"
+        EDGE_RUNTIME_SOURCE_TRANSACTION_DIR=""
+        return 1
+    fi
+    if ! identity=$(supacloud_refresh_edge_runtime_source_identity "$staged_dir"); then
+        supacloud_rollback_edge_runtime_source "$transaction_dir" "$EDGE_RUNTIME_SOURCE_DIR" || true
+        rm -f "$marker"
+        EDGE_RUNTIME_SOURCE_TRANSACTION_DIR=""
+        return 1
+    fi
+    if ! printf '%s\n' "$identity" > "${transaction_dir}/expected-identity"; then
+        supacloud_rollback_edge_runtime_source "$transaction_dir" "$EDGE_RUNTIME_SOURCE_DIR" || true
+        rm -f "$marker"
+        EDGE_RUNTIME_SOURCE_TRANSACTION_DIR=""
+        return 1
+    fi
+    if ! chmod 600 "${transaction_dir}/expected-identity"; then
+        supacloud_rollback_edge_runtime_source "$transaction_dir" "$EDGE_RUNTIME_SOURCE_DIR" || true
+        rm -f "$marker"
+        EDGE_RUNTIME_SOURCE_TRANSACTION_DIR=""
+        return 1
+    fi
+    IFS=$'\t' read -r version sha256 <<< "$identity"
+    if ! supacloud_verify_edge_runtime_source_identity "$staged_dir" "$version" "$sha256"; then
+        supacloud_rollback_edge_runtime_source "$transaction_dir" "$EDGE_RUNTIME_SOURCE_DIR" || true
+        rm -f "$marker"
+        EDGE_RUNTIME_SOURCE_TRANSACTION_DIR=""
+        return 1
+    fi
+    log_info "Edge Runtime source staged: package ${version}, source ${sha256}"
+}
+
+activate_management_edge_runtime_source() {
+    local management_transaction_dir="$1"
+    local transaction_dir
+    transaction_dir=$(management_edge_runtime_source_transaction "$management_transaction_dir") || return 1
+    supacloud_activate_edge_runtime_source "$transaction_dir" "$EDGE_RUNTIME_SOURCE_DIR"
+}
+
+rollback_management_edge_runtime_source() {
+    local management_transaction_dir="$1"
+    local marker="${management_transaction_dir}/${EDGE_RUNTIME_SOURCE_TRANSACTION_MARKER}"
+    local transaction_dir
+    [[ -e "$marker" || -L "$marker" ]] || return 0
+    transaction_dir=$(management_edge_runtime_source_transaction "$management_transaction_dir") || return 1
+    supacloud_rollback_edge_runtime_source "$transaction_dir" "$EDGE_RUNTIME_SOURCE_DIR" || return 1
+    rm -f "$marker"
+    [[ "$EDGE_RUNTIME_SOURCE_TRANSACTION_DIR" == "$transaction_dir" ]] && EDGE_RUNTIME_SOURCE_TRANSACTION_DIR=""
+}
+
+verify_recovered_management_edge_runtime_source() {
+    local management_transaction_dir="$1"
+    local snapshot_dir="${management_transaction_dir}/edge-source-prior"
+    local state expected version sha256
+    [[ -f "${snapshot_dir}/state" && ! -L "${snapshot_dir}/state" ]] || return 1
+    state=$(<"${snapshot_dir}/state")
+    case "$state" in
+        attested)
+            [[ -f "${snapshot_dir}/identity" && ! -L "${snapshot_dir}/identity" ]] || return 1
+            expected=$(<"${snapshot_dir}/identity")
+            IFS=$'\t' read -r version sha256 <<< "$expected"
+            supacloud_verify_edge_runtime_source_identity "$EDGE_RUNTIME_SOURCE_DIR" "$version" "$sha256"
+            ;;
+        legacy)
+            [[ -d "$EDGE_RUNTIME_SOURCE_DIR" && ! -L "$EDGE_RUNTIME_SOURCE_DIR" ]]
+            ;;
+        absent)
+            [[ ! -e "$EDGE_RUNTIME_SOURCE_DIR" && ! -L "$EDGE_RUNTIME_SOURCE_DIR" ]]
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+commit_management_edge_runtime_source() {
+    local management_transaction_dir="$1"
+    local marker="${management_transaction_dir}/${EDGE_RUNTIME_SOURCE_TRANSACTION_MARKER}"
+    local transaction_dir
+    transaction_dir=$(management_edge_runtime_source_transaction "$management_transaction_dir") || return 1
+    supacloud_commit_edge_runtime_source "$transaction_dir" "$EDGE_RUNTIME_SOURCE_DIR" || return 1
+    rm -f "$marker"
+    [[ "$EDGE_RUNTIME_SOURCE_TRANSACTION_DIR" == "$transaction_dir" ]] && EDGE_RUNTIME_SOURCE_TRANSACTION_DIR=""
+}
+
 capture_management_api_install() {
     local transaction_dir="$1"
     supacloud_capture_file_snapshot /usr/local/bin/supacloud "${transaction_dir}/binary" &&
@@ -3023,7 +3230,9 @@ capture_management_api_install() {
         supacloud_capture_file_snapshot /etc/systemd/system/supacloud-tenant-user@.service "${transaction_dir}/tenant-user-unit" &&
         supacloud_capture_file_snapshot /usr/local/libexec/supacloud/systemd-unit "${transaction_dir}/systemd-unit-helper" &&
         supacloud_capture_file_snapshot /etc/systemd/system/supacloud-systemd-unit@.service "${transaction_dir}/systemd-unit-unit" &&
-        supacloud_capture_file_snapshot /usr/local/libexec/supacloud/postgrest-launcher "${transaction_dir}/postgrest-launcher"
+        supacloud_capture_file_snapshot /usr/local/libexec/supacloud/postgrest-launcher "${transaction_dir}/postgrest-launcher" &&
+        capture_management_edge_runtime_source_state "${transaction_dir}/edge-source-prior" &&
+        capture_management_edge_runtime_service_state "${transaction_dir}/edge-service-prior"
 }
 
 disable_external_edge_runtime_for_embedded_mode() {
@@ -3034,6 +3243,18 @@ disable_external_edge_runtime_for_embedded_mode() {
     systemctl disable --now supacloud-edge-runtime || return 1
 }
 
+restore_management_edge_runtime_enabled_state() {
+    local management_transaction_dir="$1"
+    local enabled_state
+    enabled_state=$(management_edge_runtime_service_prior_enabled_state "$management_transaction_dir") || return 1
+    case "$enabled_state" in
+        enabled) systemctl enable supacloud-edge-runtime >/dev/null 2>&1 || return 1 ;;
+        disabled) systemctl disable supacloud-edge-runtime >/dev/null 2>&1 || return 1 ;;
+        unknown) : ;;
+        *) return 1 ;;
+    esac
+}
+
 recover_management_api_install() {
     local transaction_dir="$1"
     local service_was_active="$2"
@@ -3041,6 +3262,14 @@ recover_management_api_install() {
     if systemctl is-active --quiet supacloud; then
         systemctl stop supacloud >/dev/null 2>&1 || return 1
         systemctl is-active --quiet supacloud && return 1
+    fi
+    if systemctl is-active --quiet supacloud-edge-runtime; then
+        systemctl stop supacloud-edge-runtime >/dev/null 2>&1 || return 1
+        systemctl is-active --quiet supacloud-edge-runtime && return 1
+    fi
+    rollback_management_edge_runtime_source "$transaction_dir" || return 1
+    if [[ -d "${transaction_dir}/edge-source-prior" ]]; then
+        verify_recovered_management_edge_runtime_source "$transaction_dir" || return 1
     fi
     supacloud_restore_file_snapshot /usr/local/bin/supacloud "${transaction_dir}/binary" || return 1
     supacloud_restore_file_snapshot /etc/systemd/system/supacloud.service "${transaction_dir}/unit" || return 1
@@ -3054,8 +3283,10 @@ recover_management_api_install() {
         supacloud_restore_file_snapshot "$MANAGEMENT_ENV_FILE" "${transaction_dir}/env" || return 1
     fi
     supacloud_restore_file_snapshot "$EDGE_RUNTIME_ENV_FILE" "${transaction_dir}/edge-env" || return 1
-    local restored_edge_runtime_mode
+    local restored_edge_runtime_mode edge_runtime_service_prior_state edge_runtime_service_prior_enabled_state
     restored_edge_runtime_mode=$(management_edge_runtime_mode) || return 1
+    edge_runtime_service_prior_state=$(management_edge_runtime_service_prior_state "$transaction_dir") || return 1
+    edge_runtime_service_prior_enabled_state=$(management_edge_runtime_service_prior_enabled_state "$transaction_dir") || return 1
     if [[ "$keep_current_env" == "true" ]]; then
         configure_management_edge_privilege_dropin "$restored_edge_runtime_mode" || return 1
     fi
@@ -3066,7 +3297,27 @@ recover_management_api_install() {
     if [[ "$service_was_active" == "true" ]]; then
         systemctl start supacloud >/dev/null 2>&1 || return 1
         supacloud_wait_http_health http://127.0.0.1:9090/health || return 1
-        ensure_management_edge_runtime_ready "$restored_edge_runtime_mode" || return 1
+    fi
+    if [[ "$restored_edge_runtime_mode" == "embedded" ]]; then
+        if [[ "$service_was_active" == "true" ]]; then
+            ensure_management_edge_runtime_ready embedded allow-unattested || return 1
+        fi
+    elif [[ "$edge_runtime_service_prior_state" == "active" ]]; then
+        if [[ "$edge_runtime_service_prior_enabled_state" == "disabled" ]]; then
+            ensure_management_edge_runtime_ready external allow-unattested start || return 1
+        else
+            ensure_management_edge_runtime_ready external allow-unattested enable || return 1
+        fi
+        systemctl is-active --quiet supacloud-edge-runtime || return 1
+    elif [[ "$edge_runtime_service_prior_state" == "inactive" ]]; then
+        systemctl stop supacloud-edge-runtime >/dev/null 2>&1 || return 1
+        systemctl is-active --quiet supacloud-edge-runtime && return 1
+        restore_management_edge_runtime_enabled_state "$transaction_dir" || return 1
+        return 0
+    else
+        # Backward-compatible recovery for snapshots created before the
+        # standalone Edge Runtime state was captured.
+        ensure_management_edge_runtime_ready external allow-unattested || return 1
     fi
 }
 
@@ -3085,7 +3336,10 @@ management_edge_runtime_mode() {
 
 ensure_management_edge_runtime_ready() {
     local runtime_mode="$1"
+    local identity_policy="${2:-optional}"
+    local external_service_action="${3:-enable}"
     local runtime_port
+    local expected_identity expected_version expected_sha256 identity_mode
     runtime_port=$(supacloud_env_value "$MANAGEMENT_ENV_FILE" EDGE_RUNTIME_PORT)
     runtime_port="${runtime_port:-9005}"
     if [[ ! "$runtime_port" =~ ^[0-9]+$ ]] || (( runtime_port < 1 || runtime_port > 65535 )); then
@@ -3093,9 +3347,46 @@ ensure_management_edge_runtime_ready() {
         return 1
     fi
     if [[ "$runtime_mode" == "external" ]]; then
-        systemctl enable --now supacloud-edge-runtime || log_warn "systemctl enable --now supacloud-edge-runtime returned non-zero; deferring readiness to the health check"
+        case "$external_service_action" in
+            enable)
+                systemctl enable --now supacloud-edge-runtime || log_warn "systemctl enable --now supacloud-edge-runtime returned non-zero; deferring readiness to the health check"
+                ;;
+            start)
+                systemctl start supacloud-edge-runtime || log_warn "systemctl start supacloud-edge-runtime returned non-zero; deferring readiness to the health check"
+                ;;
+            skip) ;;
+            *)
+                log_error "Invalid external Edge Runtime service action: $external_service_action"
+                return 1
+                ;;
+        esac
     fi
-    supacloud_wait_http_health "http://127.0.0.1:${runtime_port}/health"
+    if [[ -n "$EDGE_RUNTIME_SOURCE_TRANSACTION_DIR" ]]; then
+        expected_identity=$(supacloud_edge_runtime_transaction_identity "$EDGE_RUNTIME_SOURCE_TRANSACTION_DIR") || return 1
+    elif expected_identity=$(supacloud_read_edge_runtime_source_identity "$EDGE_RUNTIME_SOURCE_DIR" 2>/dev/null); then
+        :
+    else
+        expected_identity=""
+    fi
+    if [[ -n "$expected_identity" ]]; then
+        IFS=$'\t' read -r expected_version expected_sha256 <<< "$expected_identity"
+        identity_mode=$(supacloud_env_value "$EDGE_RUNTIME_ENV_FILE" SUPACLOUD_EDGE_RUNTIME_IDENTITY_MODE)
+        if [[ "$runtime_mode" == "external" && "$identity_mode" == "compiled" ]]; then
+            supacloud_wait_edge_runtime_compiled_identity \
+                "http://127.0.0.1:${runtime_port}/health" \
+                "$expected_version" || return 1
+        else
+            supacloud_wait_edge_runtime_source_identity \
+                "http://127.0.0.1:${runtime_port}/health" \
+                "$expected_version" \
+                "$expected_sha256" || return 1
+        fi
+    elif [[ "$identity_policy" == "required" ]]; then
+        log_error "Edge Runtime health identity is unavailable"
+        return 1
+    else
+        supacloud_wait_http_health "http://127.0.0.1:${runtime_port}/health"
+    fi
 }
 
 configure_management_edge_privilege_dropin() {
@@ -3134,6 +3425,11 @@ install_management_api() {
     local ROOT_SCRIPTS_INSTALL_DIR="/opt/supacloud/scripts"
     local SCRIPTS_INSTALL_DIR="${ROOT_SCRIPTS_INSTALL_DIR}/lib"
     local API_DATA_DIR="/opt/supacloud/management-api"
+    # These values are also used when the Management API environment is
+    # rewritten.  Keep them local to this transaction so `set -u` cannot
+    # depend on dynamic scope from the preceding pgredis installation.
+    local edge_tls_ca_file="${SUPACLOUD_EDGE_TLS_CA_FILE:-$(supacloud_env_value "$MANAGEMENT_ENV_FILE" SUPACLOUD_EDGE_TLS_CA_FILE)}"
+    local edge_tls_insecure_skip_verify="${SUPACLOUD_EDGE_TLS_INSECURE_SKIP_VERIFY:-$(supacloud_env_value "$MANAGEMENT_ENV_FILE" SUPACLOUD_EDGE_TLS_INSECURE_SKIP_VERIFY)}"
 
     mkdir -p "$ROOT_SCRIPTS_INSTALL_DIR"
     mkdir -p "$SCRIPTS_INSTALL_DIR"
@@ -3177,6 +3473,10 @@ install_management_api() {
     trap 'abort_management_install_transaction "$management_transaction_dir" "$management_service_was_active" "$management_keep_current_env_on_abort" 129' HUP
     trap 'abort_management_install_transaction "$management_transaction_dir" "$management_service_was_active" "$management_keep_current_env_on_abort" 130' INT
     trap 'abort_management_install_transaction "$management_transaction_dir" "$management_service_was_active" "$management_keep_current_env_on_abort" 143' TERM
+    if ! prepare_management_edge_runtime_source "$management_transaction_dir"; then
+        log_error "Could not stage a complete Edge Runtime source transaction"
+        abort_management_install_transaction "$management_transaction_dir" "$management_service_was_active" false 1
+    fi
     staged_management_binary="${management_transaction_dir}/supacloud.staged"
     log_info "Staging validated Management API binary from $SELECTED_BIN_SOURCE"
     supacloud_atomic_install_binary "$SELECTED_BIN_SOURCE" "$CI_BIN" "$staged_management_binary"
@@ -3275,6 +3575,8 @@ install_management_api() {
         EDGE_RUNTIME_MODE "${EDGE_RUNTIME_MODE:-embedded}" \
         EDGE_RUNTIME_PORT "${EDGE_RUNTIME_PORT:-9005}" \
         EDGE_RUNTIME_INTERNAL "${EDGE_RUNTIME_INTERNAL:-127.0.0.1:${EDGE_RUNTIME_PORT:-9005}}" \
+        EDGE_RUNTIME_SERVER_PATH "${EDGE_RUNTIME_SOURCE_DIR}/server.ts" \
+        SUPACLOUD_EDGE_RUNTIME_SOURCE_IDENTITY_FILE "${EDGE_RUNTIME_SOURCE_DIR}/${SUPACLOUD_EDGE_RUNTIME_SOURCE_IDENTITY_NAME}" \
         EDGE_RUNTIME_USER supacloud-edge \
         EDGE_RUNTIME_GROUP supacloud-edge \
         PGREDIS_RUNTIME_INTERNAL_URL "${PGREDIS_RUNTIME_INTERNAL_URL:-http://127.0.0.1:${PGREDIS_RUNTIME_PORT:-9011}}" \
@@ -3319,7 +3621,7 @@ install_management_api() {
         REALTIME_DB_ENC_KEY "$REALTIME_DB_ENC_KEY" \
         REALTIME_API_SECRET "$JWT_SECRET" \
         SUPACLOUD_REALTIME_CONTAINER_ENV_FILE "${SUPACLOUD_REALTIME_CONTAINER_ENV_FILE:-/etc/supabase/realtime-container.env}" \
-        REALTIME_IMAGE "${REALTIME_IMAGE:-public.ecr.aws/supabase/realtime:v2.129.0}" \
+        REALTIME_IMAGE "${REALTIME_IMAGE:-public.ecr.aws/supabase/realtime:v2.132.0}" \
         REALTIME_CONTAINER_NAME "${REALTIME_CONTAINER_NAME:-supacloud-realtime}" \
         REALTIME_DB_USER supabase_admin \
         PG_HOST 127.0.0.1 \
@@ -3351,6 +3653,8 @@ install_management_api() {
     if ! supacloud_write_service_env_pairs "$EDGE_RUNTIME_ENV_FILE" \
         EDGE_RUNTIME_PORT "${EDGE_RUNTIME_PORT:-9005}" \
         EDGE_RUNTIME_MASTER_KEY "$MASTER_TOKEN" \
+        SUPACLOUD_EDGE_RUNTIME_IDENTITY_MODE "$EDGE_RUNTIME_EXTERNAL_IDENTITY_MODE" \
+        SUPACLOUD_EDGE_RUNTIME_SOURCE_IDENTITY_FILE "$EDGE_RUNTIME_EXTERNAL_SOURCE_IDENTITY_FILE" \
         MANAGEMENT_API_URL http://127.0.0.1:9090 \
         TENANTS_DIR /etc/supabase/tenants \
         SUPACLOUD_EDGE_TLS_CA_FILE "$edge_tls_ca_file" \
@@ -3426,6 +3730,15 @@ install_management_api() {
     if (( activation_status == 0 )); then
         install_postgrest_launcher || activation_status=$?
     fi
+    if (( activation_status == 0 )) && systemctl is-active --quiet supacloud-edge-runtime; then
+        systemctl stop supacloud-edge-runtime || activation_status=$?
+        if (( activation_status == 0 )) && systemctl is-active --quiet supacloud-edge-runtime; then
+            activation_status=1
+        fi
+    fi
+    if (( activation_status == 0 )); then
+        activate_management_edge_runtime_source "$management_transaction_dir" || activation_status=$?
+    fi
     if (( activation_status == 0 )); then
         mv -f "$staged_management_binary" "$BIN_TARGET" || activation_status=$?
     fi
@@ -3455,7 +3768,7 @@ install_management_api() {
         supacloud_wait_http_health http://127.0.0.1:9090/health || activation_status=$?
     fi
     if (( activation_status == 0 )); then
-        ensure_management_edge_runtime_ready "$active_edge_runtime_mode" || activation_status=$?
+        ensure_management_edge_runtime_ready "$active_edge_runtime_mode" required || activation_status=$?
     fi
     if (( activation_status != 0 )); then
         management_keep_current_env_on_abort="true"
@@ -3463,6 +3776,12 @@ install_management_api() {
         abort_management_install_transaction "$management_transaction_dir" "$management_service_was_active" true "$activation_status"
     fi
     log_info "SupaCloud Management API and Edge Runtime are healthy"
+
+    if ! commit_management_edge_runtime_source "$management_transaction_dir"; then
+        management_keep_current_env_on_abort="true"
+        log_error "Could not commit the attested Edge Runtime source transaction"
+        abort_management_install_transaction "$management_transaction_dir" "$management_service_was_active" true 1
+    fi
 
     # Management and pgredis are now one healthy control-plane baseline. Commit
     # both before optional watchdog and GoTrue follow-up work can fail.
@@ -3483,6 +3802,16 @@ install_management_api() {
         systemctl start supacloud-postgrest-watchdog.timer || log_warn "PostgREST watchdog timer start failed, please check journalctl -u supacloud-postgrest-watchdog.service"
     fi
 
+    # 7a. Upgrade the shared PostgREST binary as one global runtime transaction.
+    local POSTGREST_BIN="${POSTGREST_BIN:-/usr/local/bin/postgrest}"
+    local POSTGREST_VERSION="${POSTGREST_VERSION:-$SUPACLOUD_POSTGREST_DEFAULT_VERSION}"
+    log_info "Verifying PostgREST ${POSTGREST_VERSION} with staged upgrade and rollback protection..."
+    supacloud_upgrade_postgrest_binary "$POSTGREST_BIN" || {
+        log_error "PostgREST ${POSTGREST_VERSION} upgrade failed"
+        return 1
+    }
+    log_info "PostgREST ${POSTGREST_VERSION} is installed; backup: ${SUPACLOUD_POSTGREST_LAST_BACKUP_DIR:-not-required}"
+
     # 7b. Upgrade GoTrue only from this explicit install/upgrade transaction.
     local GOTRUE_BIN="${GOTRUE_BIN:-/usr/local/bin/gotrue}"
     local GOTRUE_VERSION="${GOTRUE_VERSION:-$SUPACLOUD_GOTRUE_DEFAULT_VERSION}"
@@ -3492,45 +3821,6 @@ install_management_api() {
         return 1
     }
     log_info "GoTrue ${GOTRUE_VERSION} is installed; backup: ${SUPACLOUD_GOTRUE_LAST_BACKUP_DIR:-not-required}"
-
-    if [[ ! -f /etc/systemd/system/supacloud-gotrue@.service ]] || \
-       ! grep -q -- '--config-dir /etc/supabase/tenants/%i_gotrue.d' /etc/systemd/system/supacloud-gotrue@.service; then
-        log_info "Installing supacloud-gotrue@.service systemd template..."
-        cat > /etc/systemd/system/supacloud-gotrue@.service << 'GOTRUE_SVC'
-[Unit]
-Description=SupaCloud GoTrue for tenant %i
-After=network.target patroni.service
-Wants=patroni.service
-
-[Service]
-Type=simple
-User=nobody
-Group=nobody
-EnvironmentFile=/etc/supabase/tenants/%i_gotrue.env
-Environment="GOMEMLIMIT=15MiB"
-Environment="GOGC=20"
-ExecStart=GOTRUE_BIN_PLACEHOLDER --config-dir /etc/supabase/tenants/%i_gotrue.d
-ExecReload=/bin/kill -USR1 $MAINPID
-Restart=on-failure
-RestartSec=5
-StartLimitBurst=3
-
-# Security and resource sandboxing
-NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=true
-ReadOnlyPaths=/etc/supabase/tenants
-MemoryMax=30M
-CPUWeight=20
-
-[Install]
-WantedBy=multi-user.target
-GOTRUE_SVC
-        sed -i "s|GOTRUE_BIN_PLACEHOLDER|${GOTRUE_BIN}|" /etc/systemd/system/supacloud-gotrue@.service
-        log_info "supacloud-gotrue@.service template installed"
-    else
-        log_info "supacloud-gotrue@.service template already exists"
-    fi
 
     # Ensure tenant config directory exists. A previous Pigsty/legacy-supabase
     # install may have left /etc/supabase/tenants as a symlink whose target no
@@ -3578,6 +3868,69 @@ deploy_web_console_tar_atomic() (
     backup_dir=""
 )
 
+deploy_web_console_directory_atomic() (
+    local source_dir="$1"
+    local target_dir="$2"
+    local staging_dir backup_dir target_parent releases_dir target_link target_path resolved_target release_name
+    [[ -d "$source_dir" && ! -L "$source_dir" \
+        && -f "$source_dir/index.html" && ! -L "$source_dir/index.html" ]] || {
+        log_error "Local Web Console build is missing or unsafe: $source_dir"
+        return 1
+    }
+    if [[ -L "$target_dir" ]]; then
+        target_parent=$(cd -P -- "$(dirname -- "$target_dir")" && pwd -P) || return 1
+        releases_dir="$target_parent/releases"
+        [[ -d "$releases_dir" && ! -L "$releases_dir" ]] || {
+            log_error "Existing Web Console target does not use a managed releases directory: $target_dir"
+            return 1
+        }
+        releases_dir=$(cd -P -- "$releases_dir" && pwd -P) || return 1
+        target_link=$(readlink "$target_dir") || return 1
+        if [[ "$target_link" == /* ]]; then
+            target_path="$target_link"
+        else
+            target_path="$target_parent/$target_link"
+        fi
+        [[ -d "$target_path" && ! -L "$target_path" ]] || {
+            log_error "Existing Web Console release link is missing or unsafe: $target_dir"
+            return 1
+        }
+        resolved_target=$(cd -P -- "$target_path" && pwd -P) || return 1
+        release_name="${resolved_target#"$releases_dir"/}"
+        [[ "$resolved_target" == "$releases_dir/"* \
+            && -n "$release_name" && "$release_name" != */* \
+            && -f "$resolved_target/index.html" && ! -L "$resolved_target/index.html" ]] || {
+            log_error "Existing Web Console release link escapes the managed release directory: $target_dir"
+            return 1
+        }
+    elif [[ -e "$target_dir" ]]; then
+        [[ -d "$target_dir" ]] || {
+            log_error "Existing Web Console target is not a real directory: $target_dir"
+            return 1
+        }
+    fi
+    mkdir -p "$(dirname "$target_dir")"
+    staging_dir=$(mktemp -d "${target_dir}.staging.XXXXXX")
+    backup_dir=$(mktemp -d "${target_dir}.backup.XXXXXX")
+    rmdir "$backup_dir"
+    trap 'rm -rf "${staging_dir:-}" "${backup_dir:-}"' EXIT HUP INT TERM
+    cp -a "$source_dir"/. "$staging_dir"/ || return 1
+    [[ -f "$staging_dir/index.html" && ! -L "$staging_dir/index.html" ]] || {
+        log_error "Staged Web Console build did not produce a safe index.html"
+        return 1
+    }
+    if [[ -e "$target_dir" || -L "$target_dir" ]]; then
+        mv "$target_dir" "$backup_dir" || return 1
+    fi
+    if ! mv "$staging_dir" "$target_dir"; then
+        [[ ! -e "$backup_dir" && ! -L "$backup_dir" ]] || mv "$backup_dir" "$target_dir"
+        return 1
+    fi
+    staging_dir=""
+    rm -rf "$backup_dir"
+    backup_dir=""
+)
+
 # ========== Install Web Console (Studio UI) ==========
 install_web_console() {
     log_step "Installing Web Console (Studio UI)..."
@@ -3588,19 +3941,13 @@ install_web_console() {
     local SELECTED_WEB_CONSOLE_SOURCE=""
     supacloud_resolve_artifact_policy || return 1
 
-    if [[ -f "$WEB_CONSOLE_DIR/index.html" && "$SUPACLOUD_RESOLVED_ARTIFACT_MODE" == "local" ]]; then
-        log_info "Web Console already deployed at $WEB_CONSOLE_DIR, skipping"
-        return 0
-    fi
-
     SELECTED_WEB_CONSOLE_SOURCE=$(select_web_console_source) || return 1
     if [[ "$SELECTED_WEB_CONSOLE_SOURCE" == "$WEB_CONSOLE_TAR" ]]; then
         deploy_web_console_tar_atomic "$SELECTED_WEB_CONSOLE_SOURCE" "$WEB_CONSOLE_DIR"
         log_info "Web Console atomically deployed from the verified release archive"
     elif [[ "$SELECTED_WEB_CONSOLE_SOURCE" == "$WEB_CONSOLE_SRC" ]]; then
-        mkdir -p "$WEB_CONSOLE_DIR"
-        cp -rf "$WEB_CONSOLE_SRC"/* "$WEB_CONSOLE_DIR/"
-        log_info "Web Console deployed from local source build"
+        deploy_web_console_directory_atomic "$WEB_CONSOLE_SRC" "$WEB_CONSOLE_DIR"
+        log_info "Web Console atomically deployed from local source build"
     else
         log_info "Resolving the Management API component release for Web Console..."
         local MANAGEMENT_BIN_NAME=""
@@ -3683,7 +4030,7 @@ write_realtime_container_env() {
             return 1
         fi
     done
-    supacloud_write_raw_env_pairs "$target_file" \
+    supacloud_replace_raw_env_pairs "$target_file" \
         PORT 4000 \
         DB_HOST "${INTERNAL_IP:-127.0.0.1}" \
         DB_PORT 5432 \
@@ -3717,20 +4064,37 @@ write_realtime_container_env() {
     fi
 }
 
+write_realtime_service_env() {
+    local target_file="$1"
+    local image="$2"
+    local container_env_file="$3"
+    local container_name="${REALTIME_CONTAINER_NAME:-supacloud-realtime}"
+    local database_user="${REALTIME_DB_USER:-supabase_admin}"
+    supacloud_replace_service_env_pairs "$target_file" \
+        REALTIME_IMAGE "$image" \
+        REALTIME_CONTAINER_NAME "$container_name" \
+        REALTIME_DB_USER "$database_user" \
+        PG_DATABASE supacloud_meta \
+        REALTIME_CONTAINER_ENV_FILE "$container_env_file"
+}
+
 render_realtime_systemd_unit() {
     local source_file="$1"
     local target_file="$2"
     local env_file="$3"
-    python3 - "$source_file" "$target_file" "$env_file" <<'PY'
+    local service_env_file="$4"
+    python3 - "$source_file" "$target_file" "$env_file" "$service_env_file" <<'PY'
 from pathlib import Path
 import sys
 
-source, target, env_file = map(Path, sys.argv[1:])
+source, target, env_file, service_env_file = map(Path, sys.argv[1:])
 lines = source.read_text().splitlines()
 result = []
 for line in lines:
     if line.startswith("Environment=REALTIME_CONTAINER_ENV_FILE="):
         result.append(f"Environment=REALTIME_CONTAINER_ENV_FILE={env_file}")
+    elif line == "EnvironmentFile=/etc/supabase/realtime-service.env":
+        result.append(f"EnvironmentFile={service_env_file}")
     else:
         result.append(line)
 target.write_text("\n".join(result) + "\n")
@@ -3789,12 +4153,20 @@ deploy_service_containers() {
 
     # --- 2. Deploy Supabase Realtime (Multi-tenant WebSocket) ---
     local REALTIME_UNIT_SRC="${SCRIPT_DIR}/infrastructure/systemd/supacloud-realtime.service"
-    local REALTIME_IMAGE_VALUE="${REALTIME_IMAGE:-public.ecr.aws/supabase/realtime:v2.129.0}"
+    local REALTIME_IMAGE_VALUE="${REALTIME_IMAGE:-public.ecr.aws/supabase/realtime:v2.132.0}"
     local REALTIME_CONTAINER_ENV_FILE="${SUPACLOUD_REALTIME_CONTAINER_ENV_FILE:-/etc/supabase/realtime-container.env}"
     if [[ -f "$REALTIME_UNIT_SRC" ]]; then
         log_info "Registering SupaCloud Realtime systemd unit..."
         write_realtime_container_env "$REALTIME_CONTAINER_ENV_FILE"
-        render_realtime_systemd_unit "$REALTIME_UNIT_SRC" /etc/systemd/system/supacloud-realtime.service "$REALTIME_CONTAINER_ENV_FILE"
+        write_realtime_service_env \
+            "$REALTIME_SERVICE_ENV_FILE" \
+            "$REALTIME_IMAGE_VALUE" \
+            "$REALTIME_CONTAINER_ENV_FILE"
+        render_realtime_systemd_unit \
+            "$REALTIME_UNIT_SRC" \
+            /etc/systemd/system/supacloud-realtime.service \
+            "$REALTIME_CONTAINER_ENV_FILE" \
+            "$REALTIME_SERVICE_ENV_FILE"
         systemctl daemon-reload
         systemctl enable supacloud-realtime
 
@@ -3810,7 +4182,10 @@ deploy_service_containers() {
             $RUNTIME pull "$REALTIME_IMAGE_VALUE"
         fi
 
-        systemctl restart supacloud-realtime || log_warn "Realtime service start failed, please check journalctl -u supacloud-realtime"
+        if ! systemctl restart supacloud-realtime; then
+            log_error "Realtime service restart failed; refusing to report a successful installation. Check journalctl -u supacloud-realtime"
+            return 1
+        fi
     elif $RUNTIME ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "${REALTIME_CONTAINER_NAME:-supacloud-realtime}"; then
         log_info "Realtime container already exists, skipping"
     else
@@ -4058,8 +4433,8 @@ EOF
 EOF
 
     # 3. Edge Functions Deno/Bun Hint
-    mkdir -p /opt/supacloud/edge-runtime/functions
-    cat << "EOF" > /opt/supacloud/edge-runtime/functions/deno.json
+    mkdir -p /opt/supacloud/functions
+    cat << "EOF" > /opt/supacloud/functions/deno.json
 {
   "==============================================================================": "",
   "🤖 HELLO AI AGENT 🤖 (BREADCRUMB FILE)": "",

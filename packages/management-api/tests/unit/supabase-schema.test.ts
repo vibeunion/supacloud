@@ -18,9 +18,9 @@ describe("supabase bootstrap schema", () => {
 
     expect(service).toContain('import { ALTER_TENANT_SQL } from "./tenant-runtime-migration"');
     expect(service).toContain("Bun.write(tmpFile, ALTER_TENANT_SQL)");
-    expect(ALTER_TENANT_SQL.length).toBeGreaterThan(25_000);
+    expect(ALTER_TENANT_SQL.length).toBeGreaterThan(20_000);
     expect(ALTER_TENANT_SQL).not.toContain("CREATE TABLE IF NOT EXISTS auth.webauthn_credentials");
-    expect(ALTER_TENANT_SQL).toContain("CREATE OR REPLACE FUNCTION realtime.notify_postgres_changes()");
+    expect(ALTER_TENANT_SQL).not.toContain("CREATE OR REPLACE FUNCTION realtime.notify_postgres_changes()");
     expect(ALTER_TENANT_SQL).toContain("CREATE TABLE IF NOT EXISTS public.background_task_mirrors");
     expect(ALTER_TENANT_SQL).not.toContain("CREATE TRIGGER auth_users_delete_fence");
   });
@@ -65,19 +65,19 @@ describe("supabase bootstrap schema", () => {
     }
   });
 
-  test("tenant migrations reuse the fail-closed realtime auto-attach module", () => {
+  test("tenant migrations leave realtime trigger ownership to the upstream migrator", () => {
     const autoAttachSql = SQL_MODULES["realtime-auto-attach-trigger"];
 
     for (const filePath of [
       "src/services/tenant-runtime-migration.ts",
       "src/scripts/migrate-tenant-schema.ts",
     ]) {
-      expect(readRepoFile(filePath)).toContain(
+      expect(readRepoFile(filePath)).not.toContain(
         sqlModuleInterpolation("realtime-auto-attach-trigger"),
       );
     }
 
-    expect(ALTER_TENANT_SQL).toContain(autoAttachSql);
+    expect(ALTER_TENANT_SQL).not.toContain(autoAttachSql);
     expect(autoAttachSql).toContain(
       "ddl.classid = 'pg_catalog.pg_class'::pg_catalog.regclass",
     );
@@ -116,14 +116,14 @@ describe("supabase bootstrap schema", () => {
 
     for (const filePath of migrationPaths) {
       const migrationSource = readRepoFile(filePath);
-      expect(migrationSource).toContain(sqlModuleInterpolation("realtime-notify-payload"));
-      expect(migrationSource).toContain("PERFORM realtime.notify_change_payload(payload)");
+      expect(migrationSource).not.toContain(sqlModuleInterpolation("realtime-notify-payload"));
+      expect(migrationSource).not.toContain("PERFORM realtime.notify_change_payload(payload)");
       expect(migrationSource).not.toContain(
         "PERFORM pg_notify('realtime_changes', payload::text)",
       );
     }
 
-    expect(ALTER_TENANT_SQL).toContain(notifyPayloadSql);
+    expect(ALTER_TENANT_SQL).not.toContain(notifyPayloadSql);
 
     const realtimeBunSource = readRepoFile("src/services/realtime-bun.service.ts");
     expect(realtimeBunSource).toContain(sqlModuleInterpolation("realtime-notify-payload"));
@@ -560,11 +560,24 @@ describe("supabase bootstrap schema", () => {
     expect(bootstrap).toContain("CREATE OR REPLACE FUNCTION realtime.ensure_tasks_publication()");
     expect(bootstrap).toContain("CREATE OR REPLACE FUNCTION realtime.auto_publish_tasks_table()");
     for (const source of tenantMigrationSources) {
-      expect(source).toContain(sqlModuleInterpolation("realtime-notify-payload"));
-      expect(source).toContain(sqlModuleInterpolation("realtime-auto-attach-trigger"));
-      expect(source).toContain("CREATE OR REPLACE FUNCTION realtime.notify_postgres_changes()");
-      expect(source).toContain("CREATE OR REPLACE FUNCTION realtime.ensure_tasks_publication()");
-      expect(source).toContain("CREATE OR REPLACE FUNCTION realtime.auto_publish_tasks_table()");
+      expect(source).not.toContain(sqlModuleInterpolation("realtime-notify-payload"));
+      expect(source).not.toContain(sqlModuleInterpolation("realtime-auto-attach-trigger"));
+      expect(source).not.toContain("CREATE OR REPLACE FUNCTION realtime.notify_postgres_changes()");
+      expect(source).not.toContain("CREATE OR REPLACE FUNCTION realtime.ensure_tasks_publication()");
+      expect(source).not.toContain("CREATE OR REPLACE FUNCTION realtime.auto_publish_tasks_table()");
+    }
+  });
+
+  test("ordinary tenant migrations never mutate legacy Realtime protocol functions", () => {
+    for (const source of [
+      readRepoFile("src/services/tenant-runtime-migration.ts"),
+      readRepoFile("src/scripts/migrate-tenant-schema.ts"),
+    ]) {
+      expect(source).not.toContain("to_regprocedure('realtime.apply_rls(jsonb,integer)')");
+      expect(source).not.toMatch(/DROP FUNCTION\s+(?:IF\s+EXISTS\s+)?realtime\.apply_rls/i);
+      expect(source).not.toContain("realtime_notify_trigger");
+      expect(source).not.toContain("realtime_auto_attach_trigger");
+      expect(source).not.toContain("realtime_auto_publish_tasks_trigger");
     }
   });
 

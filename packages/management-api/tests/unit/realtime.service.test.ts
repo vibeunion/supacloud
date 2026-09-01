@@ -25,6 +25,7 @@ describe("RealtimeService tenant payloads", () => {
 
     expect(payload.tenant.external_id).toBe("testref");
     expect(payload.tenant.jwt_secret).toBe("jwt-secret");
+    expect(payload.tenant.jwt_jwks).toBeNull();
     expect(payload.tenant.extensions).toHaveLength(1);
     const extension = payload.tenant.extensions[0];
     expect(extension).toEqual({
@@ -51,6 +52,62 @@ describe("RealtimeService tenant payloads", () => {
       .filter(([, settingValue]) => settingValue === "database-secret")
       .map(([settingName]) => settingName))
       .toEqual(["db_password"]);
+  });
+
+  test("adds only public asymmetric verification keys to the Realtime tenant", () => {
+    const payload = buildRealtimeTenantPayload({
+      projectRef: "testref",
+      dbHost: "postgres",
+      dbPort: "5432",
+      dbName: "supa_testref",
+      adminDbPassword: "database-secret",
+      jwtSecret: "jwt-secret",
+      jwtJwks: {
+        keys: [
+          { kty: "EC", alg: "ES256", kid: "public-es256", crv: "P-256", x: "x", y: "y" },
+          { kty: "oct", alg: "HS256", kid: "legacy", k: "symmetric-secret" },
+          { kty: "EC", alg: "ES256", kid: "private-es256", crv: "P-256", x: "x", y: "y", d: "private" },
+        ],
+      },
+      slotName: "supabase_realtime_testref",
+    });
+
+    expect(payload.tenant.jwt_jwks).toEqual({
+      keys: [{
+        kty: "EC",
+        alg: "ES256",
+        kid: "public-es256",
+        crv: "P-256",
+        x: "x",
+        y: "y",
+        key_ops: ["verify"],
+      }],
+    });
+    expect(JSON.stringify(payload.tenant.jwt_jwks)).not.toContain("symmetric-secret");
+    expect(JSON.stringify(payload.tenant.jwt_jwks)).not.toContain("private");
+  });
+
+  test("explicitly revokes an old Realtime JWKS when asymmetric verification is disabled", () => {
+    const existingTenant: Record<string, unknown> = {
+      jwt_jwks: {
+        keys: [{ kty: "EC", alg: "ES256", kid: "old-key", crv: "P-256", x: "x", y: "y" }],
+      },
+    };
+    const disabledPayload = buildRealtimeTenantPayload({
+      projectRef: "testref",
+      dbHost: "postgres",
+      dbPort: "5432",
+      dbName: "supa_testref",
+      adminDbPassword: "database-secret",
+      jwtSecret: "jwt-secret",
+      jwtJwks: null,
+      slotName: "supabase_realtime_testref",
+    });
+
+    // Realtime updates only fields present in the PUT body. An explicit null is
+    // therefore required to replace the previously persisted verification set.
+    Object.assign(existingTenant, disabledPayload.tenant);
+    expect(existingTenant.jwt_jwks).toBeNull();
   });
 
   test("fails closed when the API or container verification secret drifts", () => {
@@ -106,6 +163,9 @@ describe("RealtimeService tenant payloads", () => {
       dbName: "postgres",
       dbPassword: "postgres",
       jwtSecret: "super-secret-jwt-token-with-at-least-32-characters-long",
+      jwtJwks: {
+        keys: [{ kty: "EC", alg: "ES256", kid: "key-1", crv: "P-256", x: "x", y: "y" }],
+      },
     };
     const registered = await service.registerTenant(tenantConfig);
     const updated = await service.updateTenant(tenantConfig);
@@ -116,6 +176,7 @@ describe("RealtimeService tenant payloads", () => {
     const registerBody = JSON.parse(String(calls[0]?.init?.body ?? "{}"));
     const updateBody = JSON.parse(String(calls[1]?.init?.body ?? "{}"));
     expect(updateBody).toEqual(registerBody);
+    expect(registerBody.tenant.jwt_jwks.keys).toHaveLength(1);
     const settings = registerBody.tenant.extensions[0].settings;
     expect(settings.ssl_enforced).toBe(false);
     expect(settings.db_user).toBe("supabase_admin");

@@ -4,11 +4,13 @@ import { existsSync } from "node:fs";
 import {
   chmod,
   chown,
+  lstat,
   mkdir,
   mkdtemp,
   open,
   readFile,
   readdir,
+  stat,
   realpath,
   rename,
   rm,
@@ -30,6 +32,8 @@ process.env.EDGE_RUNTIME_INTERNAL = "127.0.0.1:65535";
 const {
   EDGE_FUNCTION_ACTIVE_VERSION_CONFLICT_CODE,
   edgeFunctionService,
+  ensureEdgeFunctionLogsForExistingProjects,
+  ensureFunctionLogsDirectory,
   getVersionedArtifactPath,
 } = await import("../../src/services/edge-function.service");
 const { config } = await import("../../src/config");
@@ -848,4 +852,75 @@ describe("edgeFunctionService mutation directory preflight", () => {
       expect(await directoryShape(projectDirectory)).toEqual(before);
     },
   );
+});
+
+describe("edgeFunctionService log directory preparation", () => {
+  test("prepares writable per-project .logs directories without changing project directory permissions", async () => {
+    const projectDirectory = join(functionsRoot, "proj_logs");
+    await mkdir(projectDirectory, { recursive: true, mode: 0o700 });
+    await chmod(projectDirectory, 0o700);
+
+    const calls: string[][] = [];
+    await ensureFunctionLogsDirectory(
+      projectDirectory,
+      { user: "supacloud-edge", group: "supacloud-edge", isRoot: true },
+      {
+        lstat,
+        mkdir,
+        chmod,
+        run: async (command) => {
+          calls.push(command);
+        },
+      },
+    );
+
+    expect(calls).toEqual([[
+      "chown",
+      "-h",
+      "supacloud-edge:supacloud-edge",
+      join(projectDirectory, ".logs"),
+    ]]);
+    expect((await stat(projectDirectory)).mode & 0o777).toBe(0o700);
+    expect((await stat(join(projectDirectory, ".logs"))).mode & 0o777).toBe(0o755);
+  });
+
+  test("repairs existing project log directories while ignoring hidden directories", async () => {
+    const rootDirectory = join(functionsRoot, "logs-sweep");
+    const validProject = join(rootDirectory, "proj_1");
+    const hiddenProject = join(rootDirectory, ".activation-generations");
+    await mkdir(validProject, { recursive: true, mode: 0o700 });
+    await mkdir(hiddenProject, { recursive: true, mode: 0o700 });
+    await chmod(validProject, 0o700);
+    await chmod(hiddenProject, 0o700);
+
+    const prepared = await ensureEdgeFunctionLogsForExistingProjects(rootDirectory, {
+      lstat,
+      mkdir,
+      chmod,
+      run: async () => {},
+    });
+
+    expect(prepared).toBe(1);
+    expect((await stat(join(validProject, ".logs"))).mode & 0o777).toBe(0o755);
+    expect(existsSync(join(hiddenProject, ".logs"))).toBe(false);
+  });
+
+  test("rejects a symlinked .logs directory instead of following it", async () => {
+    const projectDirectory = join(functionsRoot, "proj_symlink_logs");
+    const outsideDirectory = join(functionsRoot, "outside-logs");
+    await mkdir(projectDirectory, { recursive: true, mode: 0o700 });
+    await mkdir(outsideDirectory, { recursive: true, mode: 0o700 });
+    await symlink(outsideDirectory, join(projectDirectory, ".logs"), "dir");
+
+    await expect(ensureFunctionLogsDirectory(
+      projectDirectory,
+      { user: "supacloud-edge", group: "supacloud-edge", isRoot: false },
+      {
+        lstat,
+        mkdir,
+        chmod,
+        run: async () => {},
+      },
+    )).rejects.toThrow("Function log directory is not trusted");
+  });
 });
