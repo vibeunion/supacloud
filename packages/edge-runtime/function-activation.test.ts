@@ -37,3 +37,32 @@ describe("Edge Function framework profiles", () => {
       .toThrow("unsupported framework");
   });
 });
+
+describe("Edge Function capability and limit profiles", () => {
+  test("defaults omitted capability and limit profiles to empty objects", () => {
+    const config = parseEdgeFunctionActivationManifest('{"verify_jwt":true,"version":"1"}').config;
+    expect(config.capabilities).toEqual({});
+    expect(config.limits).toEqual({});
+  });
+
+  test("preserves declared capability and limit profiles", () => {
+    const config = parseEdgeFunctionActivationManifest(JSON.stringify({
+      version: "2",
+      capabilities: { secrets: ["A"], outbound_hosts: ["api.example.com"], bindings: ["pgredis"] },
+      limits: { timeout_ms: 5000, max_request_body_bytes: 1024 },
+    })).config;
+    expect(config.capabilities).toEqual({
+      secrets: ["A"],
+      outbound_hosts: ["api.example.com"],
+      bindings: ["pgredis"],
+    });
+    expect(config.limits).toEqual({ timeout_ms: 5000, max_request_body_bytes: 1024 });
+  });
+
+  test("rejects malformed capability and limit profiles", () => {
+    expect(() => parseEdgeFunctionActivationManifest(JSON.stringify({ capabilities: { secrets: [1] } })))
+      .toThrow("invalid capabilities.secrets");
+    expect(() => parseEdgeFunctionActivationManifest(JSON.stringify({ limits: { timeout_ms: 0 } })))
+      .toThrow("invalid limits.timeout_ms");
+  });
+});

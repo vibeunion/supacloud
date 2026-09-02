@@ -8,6 +8,9 @@ const ACTIVATION_ID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][
 const FUNCTION_SLUG_PATTERN = /^[a-zA-Z0-9_-]{1,128}$/;
 const VERSION_PATTERN = /^(?:0|[1-9]\d*)$/;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+const MAX_FUNCTION_TIMEOUT_MS = 900_000;
+const MAX_FUNCTION_BODY_BYTES = 30 * 1024 * 1024;
+const MAX_WAIT_UNTIL_TIMEOUT_MS = 900_000;
 const AUTHORITY_KEYS = [
   "activation_generation",
   "activation_id",
@@ -30,6 +33,18 @@ export type EdgeFunctionActivationConfig = {
   verify_jwt: boolean;
   framework: "fetch" | "elysia" | "hono" | "sveltekit-function";
   version: string | null;
+  capabilities: {
+    secrets?: string[];
+    outbound_hosts?: string[];
+    bindings?: string[];
+    background?: boolean;
+  };
+  limits: {
+    timeout_ms?: number;
+    max_request_body_bytes?: number;
+    max_response_body_bytes?: number;
+    wait_until_timeout_ms?: number;
+  };
 };
 
 export type EdgeFunctionActivationManifest = {
@@ -110,6 +125,56 @@ function parseConfig(document: Record<string, unknown>): EdgeFunctionActivationC
     verify_jwt: document.verify_jwt !== false,
     framework,
     version: rawVersion ?? null,
+    capabilities: parseCapabilities(document.capabilities),
+    limits: parseLimits(document.limits),
+  };
+}
+
+function parseCapabilities(value: unknown): EdgeFunctionActivationConfig["capabilities"] {
+  if (value === undefined) return {};
+  if (!isPlainRecord(value)) throw new Error("Function activation config contains invalid capabilities");
+  const strings = (candidate: unknown): string[] | undefined => Array.isArray(candidate)
+    && candidate.length <= 128
+    && candidate.every((entry) => typeof entry === "string" && entry.trim().length > 0)
+      ? candidate as string[]
+      : undefined;
+  for (const key of ["secrets", "outbound_hosts", "bindings"] as const) {
+    if (value[key] !== undefined && !strings(value[key])) {
+      throw new Error(`Function activation config contains invalid capabilities.${key}`);
+    }
+  }
+  if (value.background !== undefined && typeof value.background !== "boolean") {
+    throw new Error("Function activation config contains invalid capabilities.background");
+  }
+  return {
+    ...(strings(value.secrets) ? { secrets: strings(value.secrets) } : {}),
+    ...(strings(value.outbound_hosts) ? { outbound_hosts: strings(value.outbound_hosts) } : {}),
+    ...(strings(value.bindings) ? { bindings: strings(value.bindings) } : {}),
+    ...(typeof value.background === "boolean" ? { background: value.background } : {}),
+  };
+}
+
+function parseLimits(value: unknown): EdgeFunctionActivationConfig["limits"] {
+  if (value === undefined) return {};
+  if (!isPlainRecord(value)) throw new Error("Function activation config contains invalid limits");
+  const maxima = {
+    timeout_ms: MAX_FUNCTION_TIMEOUT_MS,
+    max_request_body_bytes: MAX_FUNCTION_BODY_BYTES,
+    max_response_body_bytes: MAX_FUNCTION_BODY_BYTES,
+    wait_until_timeout_ms: MAX_WAIT_UNTIL_TIMEOUT_MS,
+  } as const;
+  const positive = (candidate: unknown, max: number): candidate is number =>
+    typeof candidate === "number" && Number.isSafeInteger(candidate) && candidate > 0 && candidate <= max;
+  for (const key of Object.keys(maxima) as Array<keyof typeof maxima>) {
+    if (value[key] !== undefined && !positive(value[key], maxima[key])) {
+      throw new Error(`Function activation config contains invalid limits.${key}`);
+    }
+  }
+  return {
+    ...(positive(value.timeout_ms, maxima.timeout_ms) ? { timeout_ms: value.timeout_ms } : {}),
+    ...(positive(value.max_request_body_bytes, maxima.max_request_body_bytes) ? { max_request_body_bytes: value.max_request_body_bytes } : {}),
+    ...(positive(value.max_response_body_bytes, maxima.max_response_body_bytes) ? { max_response_body_bytes: value.max_response_body_bytes } : {}),
+    ...(positive(value.wait_until_timeout_ms, maxima.wait_until_timeout_ms) ? { wait_until_timeout_ms: value.wait_until_timeout_ms } : {}),
   };
 }
 

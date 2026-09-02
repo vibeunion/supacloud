@@ -32,6 +32,23 @@ export interface EdgeFunctionConfig {
   entrypoint?: string;
   version?: string;
   background_routes?: string[];
+  /** Explicit host capabilities and enforceable execution limits. */
+  capabilities?: EdgeFunctionCapabilities;
+  limits?: EdgeFunctionLimits;
+}
+
+export interface EdgeFunctionCapabilities {
+  secrets?: string[];
+  outbound_hosts?: string[];
+  bindings?: string[];
+  background?: boolean;
+}
+
+export interface EdgeFunctionLimits {
+  timeout_ms?: number;
+  max_request_body_bytes?: number;
+  max_response_body_bytes?: number;
+  wait_until_timeout_ms?: number;
 }
 
 export const EDGE_FUNCTION_FRAMEWORKS = [
@@ -109,7 +126,7 @@ export interface EdgeFunctionActivationResult {
 
 export type EdgeFunctionDeploymentConfig = Pick<
   Partial<EdgeFunctionConfig>,
-  "verify_jwt" | "background_routes" | "framework"
+  "verify_jwt" | "background_routes" | "framework" | "capabilities" | "limits"
 >;
 
 type EdgeFunctionReleaseBase = {
@@ -536,7 +553,94 @@ function validatedFunctionConfig(
   if (functionConfig.version !== undefined) {
     functionConfig.version = canonicalFunctionVersion(functionConfig.version);
   }
+  if (functionConfig.capabilities !== undefined) {
+    functionConfig.capabilities = validatedFunctionCapabilities(functionConfig.capabilities);
+  }
+  if (functionConfig.limits !== undefined) {
+    functionConfig.limits = validatedFunctionLimits(functionConfig.limits);
+  }
   return functionConfig;
+}
+
+const MAX_FUNCTION_TIMEOUT_MS = 900_000;
+const MAX_FUNCTION_BODY_BYTES = 30 * 1024 * 1024;
+const MAX_WAIT_UNTIL_TIMEOUT_MS = 900_000;
+const FUNCTION_HOST_PATTERN = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i;
+
+function validatedStringList(value: unknown, field: string): string[] {
+  if (!Array.isArray(value) || value.length > 128
+    || value.some((entry) => typeof entry !== "string" || entry.trim().length === 0)) {
+    throw new Error(`Function config contains invalid ${field}`);
+  }
+  return [...new Set(value.map((entry) => entry.trim()))];
+}
+
+function validatedFunctionCapabilities(value: unknown): EdgeFunctionCapabilities {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Function config contains invalid capabilities");
+  }
+  const record = value as Record<string, unknown>;
+  const capabilities: EdgeFunctionCapabilities = {};
+  if (record.secrets !== undefined) {
+    capabilities.secrets = validatedStringList(record.secrets, "capabilities.secrets");
+  }
+  if (record.outbound_hosts !== undefined) {
+    const hosts = validatedStringList(record.outbound_hosts, "capabilities.outbound_hosts");
+    if (hosts.some((host) => !FUNCTION_HOST_PATTERN.test(host))) {
+      throw new Error("Function config contains invalid capabilities.outbound_hosts");
+    }
+    capabilities.outbound_hosts = hosts.map((host) => host.toLowerCase());
+  }
+  if (record.bindings !== undefined) {
+    capabilities.bindings = validatedStringList(record.bindings, "capabilities.bindings");
+  }
+  if (record.background !== undefined) {
+    if (typeof record.background !== "boolean") {
+      throw new Error("Function config contains invalid capabilities.background");
+    }
+    capabilities.background = record.background;
+  }
+  return capabilities;
+}
+
+function validatedPositiveLimit(value: unknown, field: string, max: number): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1 || value > max) {
+    throw new Error(`Function config contains invalid ${field}`);
+  }
+  return value;
+}
+
+function validatedFunctionLimits(value: unknown): EdgeFunctionLimits {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Function config contains invalid limits");
+  }
+  const record = value as Record<string, unknown>;
+  const limits: EdgeFunctionLimits = {};
+  if (record.timeout_ms !== undefined) {
+    limits.timeout_ms = validatedPositiveLimit(record.timeout_ms, "limits.timeout_ms", MAX_FUNCTION_TIMEOUT_MS);
+  }
+  if (record.max_request_body_bytes !== undefined) {
+    limits.max_request_body_bytes = validatedPositiveLimit(
+      record.max_request_body_bytes,
+      "limits.max_request_body_bytes",
+      MAX_FUNCTION_BODY_BYTES,
+    );
+  }
+  if (record.max_response_body_bytes !== undefined) {
+    limits.max_response_body_bytes = validatedPositiveLimit(
+      record.max_response_body_bytes,
+      "limits.max_response_body_bytes",
+      MAX_FUNCTION_BODY_BYTES,
+    );
+  }
+  if (record.wait_until_timeout_ms !== undefined) {
+    limits.wait_until_timeout_ms = validatedPositiveLimit(
+      record.wait_until_timeout_ms,
+      "limits.wait_until_timeout_ms",
+      MAX_WAIT_UNTIL_TIMEOUT_MS,
+    );
+  }
+  return limits;
 }
 
 type FunctionManifestState = {
@@ -759,6 +863,8 @@ type FunctionVersionMetadata = {
   import_map: string | null;
   entrypoint: string | null;
   framework: EdgeFunctionFramework;
+  capabilities?: EdgeFunctionCapabilities;
+  limits?: EdgeFunctionLimits;
 };
 
 type PreparedFunctionRelease = {
@@ -982,6 +1088,8 @@ function functionVersionMetadata(
     import_map: functionConfig.import_map ?? null,
     entrypoint: functionConfig.entrypoint ?? null,
     framework,
+    ...(functionConfig.capabilities ? { capabilities: functionConfig.capabilities } : {}),
+    ...(functionConfig.limits ? { limits: functionConfig.limits } : {}),
   };
 }
 
@@ -1092,6 +1200,12 @@ async function readFunctionVersionMetadata(
     import_map: nullableMetadataPath(metadataRecord, "import_map"),
     entrypoint: nullableMetadataPath(metadataRecord, "entrypoint"),
     framework: metadataRecord.framework === undefined ? "fetch" : metadataRecord.framework as EdgeFunctionFramework,
+    ...(metadataRecord.capabilities === undefined
+      ? {}
+      : { capabilities: validatedFunctionCapabilities(metadataRecord.capabilities) }),
+    ...(metadataRecord.limits === undefined
+      ? {}
+      : { limits: validatedFunctionLimits(metadataRecord.limits) }),
   };
   if (!EDGE_FUNCTION_FRAMEWORKS.includes(metadata.framework)) {
     throw new Error("Function version metadata contains an unsupported framework");
@@ -2101,6 +2215,8 @@ function restoredFunctionConfig(
     version: metadata.version,
     framework: metadata.framework,
   };
+  if (metadata.capabilities) restored.capabilities = metadata.capabilities;
+  if (metadata.limits) restored.limits = metadata.limits;
   if (metadata.import_map === null) delete restored.import_map;
   else restored.import_map = metadata.import_map;
   if (metadata.entrypoint === null) delete restored.entrypoint;

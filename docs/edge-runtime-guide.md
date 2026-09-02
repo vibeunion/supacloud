@@ -170,6 +170,44 @@ edge_functions scaffold --slug api --framework sveltekit-function --path ./api
 
 ## SDK Compatibility
 
+### Function Manifest v2
+
+Each Function may declare a runtime profile alongside `verify_jwt` and
+`framework`. The profile is persisted with the activation and is rechecked by
+the runtime before dispatch:
+
+```json
+{
+  "framework": "hono",
+  "capabilities": {
+    "secrets": ["STRIPE_SECRET_KEY"],
+    "outbound_hosts": ["api.stripe.com"],
+    "bindings": ["pgredis"],
+    "background": true
+  },
+  "limits": {
+    "timeout_ms": 30000,
+    "max_request_body_bytes": 1048576,
+    "max_response_body_bytes": 4194304,
+    "wait_until_timeout_ms": 60000
+  }
+}
+```
+
+`secrets` is an allow-list for injected tenant secrets. When it is omitted,
+legacy injection behavior is retained; when present, only named secrets are
+injected. `outbound_hosts` restricts HTTPS and HTTP `fetch()` destinations by
+hostname. `bindings` controls optional host bindings such as `pgredis`.
+`background: false` rejects `EdgeRuntime.waitUntil()` for that Function;
+omitting it preserves legacy behavior. Limits are upper-bounded by the host
+policy, so a Function cannot raise the runtime-wide maximum. A timed-out
+`waitUntil` execution retires its worker to prevent leaked tenant state.
+
+This is a host capability and resource contract, not a claim of hard process
+isolation: Functions in the same project still share the configured Worker
+Pool. Use separate runtime processes or systemd/cgroup boundaries when hard
+memory or CPU isolation is required.
+
 The Edge Runtime is fully compatible with `supabase.functions.invoke()`:
 
 ```typescript

@@ -21,6 +21,8 @@ function configReceipt(overrides: Record<string, unknown> = {}) {
         verify_jwt: false,
         background_routes: ["/queue/*"],
         framework: "hono",
+        capabilities: { background: true },
+        limits: { wait_until_timeout_ms: 5000 },
         ...overrides,
     };
 }
@@ -49,6 +51,8 @@ describe("Edge Function response projection", () => {
             version: 4,
             activation_id: EXPECTED_ACTIVATION_ID,
             verify_jwt: true,
+            capabilities: { outbound_hosts: ["api.example.com"], background: false },
+            limits: { timeout_ms: 5000 },
             private: "list-private-sentinel",
         }]);
         const projectedIdentity = projectedFunctionIdentity({
@@ -59,6 +63,8 @@ describe("Edge Function response projection", () => {
             activation_id: EXPECTED_ACTIVATION_ID,
             verify_jwt: true,
             background_routes: [],
+            capabilities: { secrets: ["API_KEY"] },
+            limits: { max_response_body_bytes: 1024 },
             private: "config-private-sentinel",
         }, "proj", "hook");
 
@@ -67,6 +73,8 @@ describe("Edge Function response projection", () => {
             version: 4,
             activation_id: EXPECTED_ACTIVATION_ID,
             verify_jwt: true,
+            capabilities: { outbound_hosts: ["api.example.com"], background: false },
+            limits: { timeout_ms: 5000 },
         }]);
         expect(projectedIdentity).toEqual({
             project_ref: "proj",
@@ -76,6 +84,8 @@ describe("Edge Function response projection", () => {
             verify_jwt: true,
             background_routes: [],
             version: "4",
+            capabilities: { secrets: ["API_KEY"] },
+            limits: { max_response_body_bytes: 1024 },
         });
         expect(JSON.stringify({ projectedList, projectedIdentity })).not.toContain("sentinel");
     });
@@ -87,7 +97,13 @@ describe("Edge Function response projection", () => {
                 projectRef: "proj",
                 slug: "hook",
                 expectedActivationId: EXPECTED_ACTIVATION_ID,
-                config: { verify_jwt: false, background_routes: ["/queue/*"], framework: "hono" },
+                config: {
+                    verify_jwt: false,
+                    background_routes: ["/queue/*"],
+                    framework: "hono",
+                    capabilities: { background: true },
+                    limits: { wait_until_timeout_ms: 5000 },
+                },
             },
         );
 
@@ -99,6 +115,8 @@ describe("Edge Function response projection", () => {
             verify_jwt: false,
             background_routes: ["/queue/*"],
             framework: "hono",
+            capabilities: { background: true },
+            limits: { wait_until_timeout_ms: 5000 },
         });
         expect(JSON.stringify(confirmed)).not.toContain("sentinel");
     });
