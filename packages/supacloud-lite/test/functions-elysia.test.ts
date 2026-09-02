@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test'
+import { testTimeout } from './helpers/timeouts.js'
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -50,4 +51,4 @@ test('loads an Elysia function with framework profile and routes function-local 
   } finally {
     await rm(projectDir, { recursive: true, force: true })
   }
-}, 60_000)
+}, testTimeout(60_000))

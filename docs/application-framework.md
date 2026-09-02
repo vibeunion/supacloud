@@ -58,7 +58,11 @@ export class AcceptCaseCommand { /* ... */ }
 export class CaseController {
   constructor(private readonly acceptCase: AcceptCaseCommand) {}
 
-  @Post("/:caseId/accept", { body: CaseAcceptInput, response: CaseAcceptResult })
+  @Post("/:caseId/accept", {
+    body: CaseAcceptInput,
+    response: CaseAcceptResult,
+    command: AcceptCaseCommand,
+  })
   accept(ctx: { body: unknown; params: Record<string, string> }) {
     return this.acceptCase.execute(ctx.params.caseId, ctx.body);
   }
@@ -90,7 +94,7 @@ const result = await compileProject({
 });
 ```
 
-诊断码：`circular-dependency`、`scope-violation`、`module-boundary`、`unresolved-token`、`duplicate-token`、`command-missing-permission`（strict 下为 error）、`missing-deps`。
+诊断码：`circular-dependency`、`scope-violation`、`module-boundary`、`unresolved-token`、`duplicate-token`、`duplicate-module`、`duplicate-command`、`duplicate-route`、`route-command-unresolved`、`command-missing-permission`（strict 下为 error）、`missing-deps`。
 
 产物：
 
@@ -106,12 +110,18 @@ import { createCompiledModules } from "./generated/application";
 export default createApplication({
   name: "fa-api",
   modules: createCompiledModules({ dbClient, /* 平台依赖 */ }),
+  commandExecutor: async (invocation, next) => {
+    await authorize(invocation.requestContext, invocation.command.permission);
+    return next();
+  },
 });
 ```
 
 - application 级服务经 `.decorate()` 挂载，全实例共享
 - request 级 provider 经 `.resolve()` 每请求新建，并发请求互不串扰
 - 路由自动接 TypeBox body/params/query/response 校验（失败返回 422）
+- 绑定 `command` 的路由必须通过 `commandExecutor`；未配置执行器时 fail-closed
+- `errorMapper` 可把业务异常映射为统一错误协议
 - 部署清单使用 `framework: "elysia"`，Edge Runtime 直接调用 `app.handle(request)`
 
 ## 大型项目迁移模式（Strangler）
@@ -128,7 +138,7 @@ export default createApplication({
 `@supacloud/testing` 提供：
 
 - `createTestModule(meta, overrides)`：Provider 替换（fake repository、fake OCR provider 等）
-- `testRequest` / `testJson`：HTTP 级测试
+- `testRequest` / `testJson` / `testJsonError`：HTTP 与统一错误协议测试
 - `runSqlTests` / `assertPolicyAllows` / `assertPolicyDenies`：数据库与 RLS 测试
 
 参见 [Database Governance](./database-governance.md)。

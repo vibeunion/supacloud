@@ -75,6 +75,8 @@ export interface RouteOptions {
   query?: unknown;
   /** TypeBox schema for the response. */
   response?: unknown;
+  /** Command class whose governance metadata must be enforced for this route. */
+  command?: Type<unknown>;
 }
 
 export interface RouteDefinition extends RouteOptions {

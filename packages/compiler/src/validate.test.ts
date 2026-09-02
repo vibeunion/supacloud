@@ -97,4 +97,23 @@ describe("validateGraph：坏 fixture 诊断", () => {
   test("HIDDEN_TOKEN 有 provider，不算 externalToken", () => {
     expect(graph.externalTokens).not.toContain("HIDDEN_TOKEN");
   });
+
+  test("duplicate-command：拒绝重复的业务命令名", () => {
+    const duplicates = byCode("duplicate-command");
+    expect(duplicates).toHaveLength(1);
+    expect(duplicates[0].message).toContain("bad.duplicate");
+  });
+
+  test("duplicate-route：拒绝规范化后重复的方法和路径", () => {
+    const duplicates = byCode("duplicate-route");
+    expect(duplicates).toHaveLength(1);
+    expect(duplicates[0].message).toContain("POST /duplicate");
+  });
+
+  test("route-command-unresolved：路由只能绑定本模块声明的命令", () => {
+    const unresolved = byCode("route-command-unresolved");
+    expect(unresolved).toHaveLength(1);
+    expect(unresolved[0].message).toContain("MissingCommand");
+    expect(unresolved[0].message).toContain("route-two");
+  });
 });

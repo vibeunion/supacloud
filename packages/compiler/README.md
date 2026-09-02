@@ -64,6 +64,10 @@ interface ApplicationGraph {
 | `module-boundary` | error | 依赖的 token 由未 import 的模块提供 |
 | `unresolved-token` | error | 依赖的 token 无法解析且不属于平台注入 |
 | `duplicate-token` | error | 同一 token 在同模块重复注册 |
+| `duplicate-module` | error | 应用中存在重复模块名 |
+| `duplicate-command` | error | 应用中存在重复业务 command 名 |
+| `duplicate-route` | error | 规范化后 HTTP method + path 冲突 |
+| `route-command-unresolved` | error | 路由绑定了本模块未声明的 command 类 |
 | `command-missing-permission` | warn（strict 时 error） | `@Command` 未声明 permission |
 | `missing-deps` | warn（strict 时 error） | 构造/工厂依赖无法静态解析 |
 

@@ -52,6 +52,7 @@ describe("generate：application.ts 关键内容", () => {
     expect(applicationCode).toContain("export interface CompiledModule {");
     expect(applicationCode).toContain("export interface CompiledController {");
     expect(applicationCode).toContain("export interface CompiledRoute {");
+    expect(applicationCode).toContain("export interface CompiledCommand {");
     expect(applicationCode).not.toContain("@supacloud/app");
     expect(applicationCode).not.toContain("@supacloud/elysia");
   });
@@ -100,7 +101,7 @@ describe("generate：application.ts 关键内容", () => {
   test("request 工厂：REQUEST_CONTEXT 传 ctx，其余从 services 解析", () => {
     expect(applicationCode).toContain("createCaseRequestScope");
     expect(applicationCode).toContain(
-      "const caseController = new CaseController(services.caseRepository, ctx);",
+      "const caseController = new CaseController(services.caseRepository, imported.audit.auditService, ctx);",
     );
   });
 
@@ -108,7 +109,7 @@ describe("generate：application.ts 关键内容", () => {
     expect(applicationCode).toContain('serviceKey: "caseController"');
     expect(applicationCode).toContain('path: "/cases"');
     expect(applicationCode).toContain(
-      '{ method: "POST", path: "/:caseId/accept", handler: "accept", body: CreateCaseBody, params: AcceptParams, response: AcceptResult }',
+      '{ method: "POST", path: "/:caseId/accept", handler: "accept", body: CreateCaseBody, params: AcceptParams, response: AcceptResult, command: "AcceptCaseCommand" }',
     );
   });
 });
@@ -130,6 +131,11 @@ describe("generate：application.ts 可被 bun 直接执行", () => {
       "health",
     ]);
     expect(modules[0].controllers).toEqual([]);
+    expect(modules[1].commands[0]).toMatchObject({
+      className: "AcceptCaseCommand",
+      name: "case.accept",
+      permission: "case.accept",
+    });
     expect(typeof modules[1].createRequestScope).toBe("function");
     expect(modules[2].createRequestScope).toBeUndefined();
   });
@@ -164,11 +170,13 @@ describe("generate：application.ts 可被 bun 直接执行", () => {
 
     const ctx1 = { requestId: "r1" };
     const ctx2 = { requestId: "r2" };
-    const scope1 = caseModule.createRequestScope(services, ctx1);
-    const scope2 = caseModule.createRequestScope(services, ctx2);
+    const imported = { audit: modules[0].createServices(deps, {}) };
+    const scope1 = caseModule.createRequestScope(services, ctx1, imported);
+    const scope2 = caseModule.createRequestScope(services, ctx2, imported);
 
     expect(scope1.caseController.ctx).toBe(ctx1);
     expect(scope1.caseController.repository).toBe(services.caseRepository);
+    expect(scope1.caseController.audit).toBe(imported.audit.auditService);
     expect(scope2.caseController.ctx).toBe(ctx2);
     expect(scope2.caseController).not.toBe(scope1.caseController);
   });

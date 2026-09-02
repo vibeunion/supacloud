@@ -27,3 +27,37 @@ export async function testJson<T = unknown>(
   const body = (await response.json()) as T;
   return { status: response.status, body };
 }
+
+export interface JsonErrorBody {
+  ok: false;
+  code: string;
+  message: string;
+  details?: unknown;
+}
+
+/** Dispatch a request and assert the standard SupaCloud JSON error contract. */
+export async function testJsonError(
+  app: HandleLike,
+  path: string,
+  expected: { status: number; code: string },
+  init: RequestInit = {},
+): Promise<JsonErrorBody> {
+  const response = await testRequest(app, path, init);
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    throw new Error(`Expected JSON error response, received status ${response.status}`);
+  }
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw new Error("Expected JSON error response body to be an object");
+  }
+  const error = body as Record<string, unknown>;
+  if (response.status !== expected.status) {
+    throw new Error(`Expected status ${expected.status}, received ${response.status}`);
+  }
+  if (error.ok !== false || error.code !== expected.code || typeof error.message !== "string") {
+    throw new Error(`Expected error code ${expected.code}, received ${String(error.code)}`);
+  }
+  return error as unknown as JsonErrorBody;
+}

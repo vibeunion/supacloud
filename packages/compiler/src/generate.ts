@@ -24,6 +24,16 @@ const INTERFACES = `export interface CompiledRoute {
   params?: unknown;
   query?: unknown;
   response?: unknown;
+  command?: string;
+}
+
+export interface CompiledCommand {
+  className: string;
+  name: string;
+  permission?: string;
+  transaction?: string;
+  audit?: string;
+  idempotency?: string;
 }
 
 export interface CompiledController {
@@ -42,12 +52,15 @@ export interface CompiledModule {
   createRequestScope?(
     services: Record<string, unknown>,
     ctx: unknown,
+    imported?: Record<string, Record<string, unknown>>,
   ): Record<string, unknown>;
   createJobScope?(
     services: Record<string, unknown>,
     ctx: unknown,
+    imported?: Record<string, Record<string, unknown>>,
   ): Record<string, unknown>;
   controllers: CompiledController[];
+  commands: CompiledCommand[];
 }`;
 
 export interface GenerateOptions {
@@ -232,6 +245,7 @@ class ModuleGenerator {
       lines.push(`  createJobScope: create${this.pascal}JobScope,`);
     }
     lines.push(`  controllers: ${this.renderControllers()},`);
+    lines.push(`  commands: ${JSON.stringify(this.module.commands)},`);
     lines.push(`}`);
     return lines.join("\n");
   }
@@ -259,6 +273,7 @@ class ModuleGenerator {
             fields.push(`${field}: ${local}`);
           }
         }
+        if (route.command) fields.push(`command: ${JSON.stringify(route.command)}`);
         return `{ ${fields.join(", ")} }`;
       });
       return [
@@ -290,6 +305,7 @@ class ModuleGenerator {
       `function create${this.pascal}${suffix}(`,
       `  services: Record<string, unknown>,`,
       `  ctx: unknown,`,
+      `  imported: Record<string, Record<string, unknown>> = {},`,
       `): Record<string, unknown> {`,
       indent(this.renderFactoryBody(kind), 2),
       `}`,
@@ -412,7 +428,7 @@ class ModuleGenerator {
       const imported = this.graph.modules.find((m) => m.name === importName);
       if (!imported?.exports.includes(token)) continue;
       if (kind === "services") return `imported.${importName}.${camelName(token)}`;
-      return `services.${camelName(token)}`;
+      return `imported.${importName}.${camelName(token)}`;
     }
 
     if (kind === "services") return `deps.${camelName(token)}`;

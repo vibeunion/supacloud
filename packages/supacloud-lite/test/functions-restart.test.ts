@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test'
+import { testTimeout } from './helpers/timeouts.js'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -36,4 +37,4 @@ test('reloads Deno.serve and default fetch-object functions after an in-process 
   } finally {
     await rm(projectDir, { recursive: true, force: true })
   }
-}, 60_000)
+}, testTimeout(60_000))
