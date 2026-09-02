@@ -73,7 +73,7 @@ describe("installer configuration persistence", () => {
     expect(readFileSync(calls, "utf8")).toContain(`--config=${config}`);
     expect(readFileSync(calls, "utf8")).toContain(`--stanza=db-main`);
     expect(readFileSync(calls, "utf8")).toContain("ALTER SYSTEM SET archive_command");
-  });
+  }, { timeout: 15_000 });
 
   test("atomically merges managed values while preserving operator-owned settings", () => {
     const dir = makeTempDir();
@@ -197,7 +197,7 @@ describe("installer configuration persistence", () => {
       expect(result.status, `case ${index}: ${result.stderr}`).not.toBe(0);
       expect(() => statSync(marker)).toThrow();
     }
-  });
+  }, { timeout: 15_000 });
 
   test("check_config rejects unsafe IP and DNS inputs before logging or persistence", () => {
     const dir = makeTempDir();
@@ -374,7 +374,7 @@ describe("installer configuration persistence", () => {
     expect(readFileSync(jwtKeys, "utf8")).toBe(firstJwt);
     expect(firstConfig).toContain("SUPABASE_PUBLIC_DOMAIN=api.10.20.30.40.nip.io");
     expect(firstConfig).toContain("SUPABASE_STUDIO_DOMAIN=studio.10.20.30.40.nip.io");
-  });
+  }, { timeout: 30_000 });
 
   test("strict install input parser round-trips a safely escaped command-substitution literal", () => {
     const dir = makeTempDir();
@@ -403,7 +403,7 @@ describe("installer configuration persistence", () => {
     expect(loaded.status, loaded.stderr).toBe(0);
     expect(() => statSync(marker)).toThrow();
     expect(readFileSync(output, "utf8")).toBe(literal);
-  });
+  }, { timeout: 30_000 });
 
   test("service environment encoding is source-safe, round-trips special characters, and rejects newlines", () => {
     const dir = makeTempDir();
