@@ -109,7 +109,8 @@ import { createCompiledModules } from "./generated/application";
 
 export default createApplication({
   name: "fa-api",
-  modules: createCompiledModules({ dbClient, /* 平台依赖 */ }),
+  modules: createCompiledModules(),
+  deps: { dbClient, /* 平台依赖 */ },
   commandExecutor: async (invocation, next) => {
     await authorize(invocation.requestContext, invocation.command.permission);
     return next();
