@@ -37,7 +37,6 @@ import {
   withProjectMigrationLocks,
 } from "./migration-lock";
 import { ProjectStateTransitionLockedError } from "./project-database-lock";
-import { resolveProjectVerificationJwks } from "../utils/project-jwt";
 
 export interface CreateProjectRequest {
   name: string;
@@ -1064,7 +1063,7 @@ export class ProjectService {
       dbName,
       dbPassword: project.db_password,
       jwtSecret,
-      jwtJwks: resolveProjectVerificationJwks(project.config, jwtSecret),
+      projectConfig: project.config,
     });
 
     // 5. Restart PostgREST and GoTrue to pickup new keys

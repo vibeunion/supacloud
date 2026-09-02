@@ -8,7 +8,12 @@ import {
   resolveTenantPorts,
 } from "../utils/project-routing";
 import { decryptSecretIfNeeded } from "../utils/secret-crypto";
-import { resolveStoredServiceRoleKey } from "../utils/service-role";
+import {
+  resolveAlignedServiceRoleKey,
+  resolveProjectServiceRoleKey,
+  isStoredServiceRoleKeyAligned,
+  resolveStoredServiceRoleKey,
+} from "../utils/service-role";
 import {
   buildSharedProjectJwtVerificationMaterial,
   normalizeProjectJwtKeys,
@@ -78,9 +83,23 @@ export async function buildProjectRuntimeEnv(projectRef: string): Promise<Record
     (authPorts ? localServiceBaseUrl(authPorts.gotruePort) : `${internalSupabaseUrl}/auth/v1`),
   );
 
-  const serviceRoleKey = resolveStoredServiceRoleKey(project);
+  const storedServiceRoleKey = resolveStoredServiceRoleKey(project);
+  let serviceRoleKey = await resolveProjectServiceRoleKey(project);
+  if (serviceRoleKey === storedServiceRoleKey && !(await isStoredServiceRoleKeyAligned(project))) {
+    serviceRoleKey = await resolveAlignedServiceRoleKey(project);
+  }
   if (!serviceRoleKey) {
     throw new Error(`Project ${projectRef} has no valid service-role key`);
+  }
+  if (serviceRoleKey !== storedServiceRoleKey) {
+    const repaired = await projectRepository.updateApiKeys(projectRef, {
+      jwt_secret: project.jwt_secret,
+      anon_key: project.anon_key,
+      service_role_key: serviceRoleKey,
+    });
+    if (!repaired) {
+      throw new Error(`Project ${projectRef} service-role key repair was not persisted`);
+    }
   }
 
   const customSecrets = await databaseService.getSecrets(projectRef);

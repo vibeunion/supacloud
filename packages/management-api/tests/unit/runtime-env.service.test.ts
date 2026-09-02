@@ -3,25 +3,34 @@ import { runtimeEnvService } from "../../src/services/runtime-env.service";
 import { projectRepository } from "../../src/repositories/project.repository";
 import { databaseService } from "../../src/services/database.service";
 import { config } from "../../src/config";
+import { jwtService } from "../../src/services/jwt.service";
+import { isStoredServiceRoleKeyAligned } from "../../src/utils/service-role";
 
 describe("runtimeEnvService", () => {
-  test("includes project JWKS for Bun Edge Runtime JWT verification", async () => {
-    const findByRefSpy = spyOn(projectRepository, "findByRef").mockResolvedValue({
+  test("repairs stale HS256 service-role keys before exposing runtime env", async () => {
+    const currentSecret = "current-jwt-secret-with-at-least-32-characters";
+    const staleKey = await jwtService.generateServiceRoleKey(
+      "old-jwt-secret-with-at-least-32-characters",
+    );
+    let storedProject = {
       id: "proj_id",
       ref: "proj_1",
       name: "Project 1",
       db_name: "supa_proj_1",
       db_user: "role_proj_1",
       db_password: "pw",
-      jwt_secret: "legacy-secret",
+      jwt_secret: currentSecret,
       anon_key: "anon.header.signature",
-      service_role_key: "service.header.signature",
+      service_role_key: staleKey,
       s3_bucket: "bucket",
       s3_access_key: null,
       s3_secret_key: null,
       region: "local",
       status: "active",
       organization_id: "org_1",
+      created_at: new Date(),
+      updated_at: new Date(),
+      deleted_at: null,
       config: {
         auth: {
           oauth_server: {
@@ -31,22 +40,30 @@ describe("runtimeEnvService", () => {
         },
         api_url: "https://api.example.com",
       },
-      created_at: new Date(),
-      updated_at: new Date(),
-      deleted_at: null,
-    } as never);
+    } as any;
+    const findByRefSpy = spyOn(projectRepository, "findByRef").mockImplementation(async () => storedProject);
+    const updateApiKeysSpy = spyOn(projectRepository, "updateApiKeys").mockImplementation(async (_ref, keys) => {
+      storedProject = { ...storedProject, ...keys };
+      return storedProject;
+    });
     const secretsSpy = spyOn(databaseService, "getSecrets").mockResolvedValue([]);
 
     try {
       const env = await runtimeEnvService.buildProjectRuntimeEnv("proj_1");
 
-      expect(env?.JWT_SECRET).toBe("legacy-secret");
+      expect(updateApiKeysSpy).toHaveBeenCalledTimes(1);
+      expect(env?.JWT_SECRET).toBe(currentSecret);
       expect(env?.JWT_KEYS).toContain("kid_1");
       expect(env?.JWT_KEYS).not.toContain("legacy-hs256");
       expect(env?.JWT_JWKS).toContain("kid_1");
-      expect(env?.SUPABASE_SERVICE_ROLE_KEY).toBe("service.header.signature");
+      expect(env?.SUPABASE_SERVICE_ROLE_KEY).toBe(storedProject.service_role_key);
+      await expect(isStoredServiceRoleKeyAligned({
+        service_role_key: String(env?.SUPABASE_SERVICE_ROLE_KEY || ""),
+        jwt_secret: currentSecret,
+      })).resolves.toBe(true);
     } finally {
       findByRefSpy.mockRestore();
+      updateApiKeysSpy.mockRestore();
       secretsSpy.mockRestore();
     }
   });

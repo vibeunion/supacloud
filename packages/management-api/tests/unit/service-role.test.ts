@@ -1,9 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
+  isStoredServiceRoleKeyAligned,
+  resolveAlignedServiceRoleKey,
   resolveProjectServiceRoleKey,
   resolveStoredServiceRoleKey,
 } from "../../src/utils/service-role";
 import { generateOidcJwtKeyMaterial } from "../../src/utils/project-jwt";
+import { jwtService } from "../../src/services/jwt.service";
 
 describe("service-role utils", () => {
   test("resolves only JWT-shaped stored runtime credentials", () => {
@@ -16,6 +19,46 @@ describe("service-role utils", () => {
       service_role_key_encrypted: "encrypted.service.role",
     })).toBe("encrypted.service.role");
     expect(resolveStoredServiceRoleKey({ service_role_key: "invalid" })).toBeNull();
+  });
+
+  test("detects a legacy service-role key signed by a different project secret", async () => {
+    const key = await jwtService.generateServiceRoleKey("old-secret-with-at-least-32-characters");
+
+    await expect(isStoredServiceRoleKeyAligned({
+      service_role_key: key,
+      jwt_secret: "old-secret-with-at-least-32-characters",
+    })).resolves.toBe(true);
+    await expect(isStoredServiceRoleKeyAligned({
+      service_role_key: key,
+      jwt_secret: "current-secret-with-at-least-32-characters",
+    })).resolves.toBe(false);
+  });
+
+  test("derives an aligned replacement for a stale legacy key", async () => {
+    const staleKey = await jwtService.generateServiceRoleKey("old-secret-with-at-least-32-characters");
+    const currentSecret = "current-secret-with-at-least-32-characters";
+    const replacement = await resolveAlignedServiceRoleKey({
+      service_role_key: staleKey,
+      jwt_secret: currentSecret,
+    });
+
+    expect(replacement).toBeTruthy();
+    expect(replacement).not.toBe(staleKey);
+    await expect(isStoredServiceRoleKeyAligned({
+      service_role_key: replacement,
+      jwt_secret: currentSecret,
+    })).resolves.toBe(true);
+  });
+
+  test("preserves non-HS256 and opaque compatibility keys", async () => {
+    await expect(isStoredServiceRoleKeyAligned({
+      service_role_key: "service.header.signature",
+      jwt_secret: "current-secret-with-at-least-32-characters",
+    })).resolves.toBe(true);
+    await expect(resolveAlignedServiceRoleKey({
+      service_role_key: "service.header.signature",
+      jwt_secret: "current-secret-with-at-least-32-characters",
+    })).resolves.toBe("service.header.signature");
   });
 
   test("signs an ES256 service_role key from migrated OAuth server material", async () => {

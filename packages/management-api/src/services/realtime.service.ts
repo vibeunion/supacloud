@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { config } from "../config";
 import { sql, resolveSlotName } from "../db";
 import { buildRealtimeTenantPayload } from "./realtime-tenant-payload";
+import { resolveProjectJwtVerificationMaterial } from "../utils/project-jwt";
 /**
  * RealtimeService - Manages Supabase Realtime tenant registration
  * 
@@ -88,6 +89,7 @@ interface RealtimeTenantConfig {
     dbUser?: string;
     dbPassword: string;
     jwtSecret: string;
+    projectConfig?: unknown;
     jwtJwks?: unknown;
 }
 
@@ -145,6 +147,10 @@ export class RealtimeService {
 
     private async authoritativeTenantPayload(tenantConfig: RealtimeTenantConfig) {
         const globalConfig = (await import("../config")).config;
+        const jwtMaterial = resolveProjectJwtVerificationMaterial(
+            tenantConfig.projectConfig,
+            tenantConfig.jwtSecret,
+        );
         return buildRealtimeTenantPayload({
             projectRef: tenantConfig.projectRef,
             dbHost: PG_HOST,
@@ -152,7 +158,9 @@ export class RealtimeService {
             dbName: tenantConfig.dbName,
             adminDbPassword: globalConfig.pgPassword || tenantConfig.dbPassword || "postgres",
             jwtSecret: tenantConfig.jwtSecret,
-            jwtJwks: tenantConfig.jwtJwks,
+            jwtJwks: tenantConfig.projectConfig !== undefined
+                ? jwtMaterial.jwtJwks
+                : tenantConfig.jwtJwks,
             slotName: resolveSlotName(tenantConfig.projectRef),
         });
     }

@@ -3,7 +3,7 @@ import { sql, resolveDbName, resolveSlotName } from "../src/db";
 import { buildRealtimeTenantPayload } from "../src/services/realtime-tenant-payload";
 import { logger } from "../src/utils/logger";
 import { createHmac } from "node:crypto";
-import { resolveProjectVerificationJwks } from "../src/utils/project-jwt";
+import { resolveProjectJwtVerificationMaterial } from "../src/utils/project-jwt";
 
 type ProjectRow = {
   ref: string;
@@ -92,6 +92,7 @@ async function authoritativeTenantPayload(project: ProjectRow) {
   const dbName = project.db_name || (await resolveDbName(project.ref));
   const dbPassword = config.pgPassword || project.db_password;
   const jwtSecret = project.jwt_secret;
+  const jwtMaterial = resolveProjectJwtVerificationMaterial(project.config, jwtSecret || "");
 
   if (!dbPassword || !jwtSecret) {
     throw new Error(
@@ -106,7 +107,7 @@ async function authoritativeTenantPayload(project: ProjectRow) {
     dbName,
     adminDbPassword: dbPassword,
     jwtSecret,
-    jwtJwks: resolveProjectVerificationJwks(project.config, jwtSecret),
+    jwtJwks: jwtMaterial.jwtJwks,
     slotName: resolveSlotName(project.ref),
   });
 }
