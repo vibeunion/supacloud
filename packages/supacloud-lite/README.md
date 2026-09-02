@@ -153,6 +153,7 @@ supacloud-lite gen types [-o database.types.ts]
 supacloud-lite db reset
 supacloud-lite db diff [-f migration_name]
 supacloud-lite db pull [migration_name]
+supacloud-lite db check [--module-file supabase/db/modules.ts]
 supacloud-lite snapshot create [-o backup.tar.gz]
 supacloud-lite snapshot restore <backup.tar.gz> [--force]
 supacloud-lite upgrade [-o pre-upgrade.tar.gz]
@@ -162,6 +163,8 @@ supacloud-lite version
 ```
 
 首次初始化或 state 目录不存在/为空时，先运行 `supacloud-lite migrate`。`db reset` 只接受已经初始化且保留有效 `secrets.json` 标记的 state；它不会为 reset 创建或覆盖项目 secrets。
+
+`db check` 是只读治理命令：加载 `@supacloud/db` 的 `defineDatabaseModule` 清单（默认 `supabase/db/modules.ts`），对声明的 SQL 源做静态 lint，并把声明的表/RLS 策略/RPC/授权与 Lite 数据库的真实 Catalog 对账（pg_policy、pg_proc、grants）。存在 error 级问题（声明缺失、RLS 未启用、security definer 未固定 search_path、PUBLIC 授权）时以非零退出码结束，可接入 CI；不会修改数据库。
 
 通用参数：
 
@@ -550,6 +553,7 @@ supacloud-lite gen types [-o database.types.ts]
 supacloud-lite db reset
 supacloud-lite db diff [-f migration_name]
 supacloud-lite db pull [migration_name]
+supacloud-lite db check [--module-file supabase/db/modules.ts]
 supacloud-lite snapshot create [-o backup.tar.gz]
 supacloud-lite snapshot restore <backup.tar.gz> [--force]
 supacloud-lite upgrade [-o pre-upgrade.tar.gz]
