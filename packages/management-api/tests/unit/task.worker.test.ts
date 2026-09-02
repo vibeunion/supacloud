@@ -286,6 +286,65 @@ describe("TaskWorker provision_secrets", () => {
     expect(secrets.get("SUPACLOUD_PROJECT_API_HOST")).toBe("api.app.example.com");
     expect(secrets.get("X_PROJECT_REF")).toBe("proj-ref");
   });
+
+  test("repairs a well-formed legacy key whose signature uses an old JWT secret", async () => {
+    const worker = new TaskWorker();
+    const currentSecret = "current-jwt-secret-with-at-least-32-characters";
+    const staleKey = await jwtService.generateServiceRoleKey(
+      "old-jwt-secret-with-at-least-32-characters",
+    );
+    const upsertSecretSpy = spyOn(databaseService, "upsertSecret").mockResolvedValue(true);
+    spyOn(databaseService, "getSecrets").mockResolvedValue([]);
+    let storedProject = {
+      ref: "proj-ref",
+      name: "proj",
+      db_name: "proj_ref",
+      db_user: "postgres",
+      db_password: "dbpass",
+      jwt_secret: currentSecret,
+      anon_key: "header.payload.signature",
+      service_role_key: staleKey,
+      s3_bucket: "proj-ref",
+      s3_access_key: null,
+      s3_secret_key: null,
+      region: "local",
+      status: "active",
+      config: { custom_domain: "app.example.com" },
+      created_at: new Date(),
+      updated_at: new Date(),
+      deleted_at: null,
+    } as any;
+    spyOn(projectRepository, "findByRef").mockImplementation(async () => storedProject);
+    const updateApiKeysSpy = spyOn(projectRepository, "updateApiKeys").mockImplementation(async (
+      _ref,
+      keys,
+    ) => {
+      storedProject = { ...storedProject, ...keys };
+      return storedProject;
+    });
+
+    const ok = await (worker as any).executeTask({
+      id: "task-stale-key",
+      project_ref: "proj-ref",
+      task_type: "provision_secrets",
+      payload: {},
+    });
+
+    expect(ok).toBe(true);
+    expect(updateApiKeysSpy).toHaveBeenCalledTimes(1);
+    expect(updateApiKeysSpy.mock.calls[0][1]).toMatchObject({
+      jwt_secret: currentSecret,
+      service_role_key: expect.any(String),
+    });
+    expect(updateApiKeysSpy.mock.calls[0][1].service_role_key).not.toBe(staleKey);
+    const secrets = new Map(upsertSecretSpy.mock.calls.map((call) => [call[1], call[2]]));
+    expect(secrets.get("SUPABASE_SERVICE_ROLE_KEY")).toMatch(/^[^.]+\.[^.]+\.[^.]+$/);
+    expect(secrets.get("SUPACLOUD_INTERNAL_SUPABASE_URL")).toBe("http://127.0.0.1");
+    expect(secrets.get("SUPACLOUD_INTERNAL_AUTH_URL")).toBe("http://127.0.0.1/auth/v1");
+    expect(secrets.get("SUPACLOUD_INTERNAL_REST_URL")).toBe("http://127.0.0.1/rest/v1");
+
+    updateApiKeysSpy.mockRestore();
+  });
 });
 
 describe("TaskWorker project activation", () => {

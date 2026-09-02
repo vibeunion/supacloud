@@ -1063,6 +1063,7 @@ export class ProjectService {
       dbName,
       dbPassword: project.db_password,
       jwtSecret,
+      projectConfig: project.config,
     });
 
     // 5. Restart PostgREST and GoTrue to pickup new keys
