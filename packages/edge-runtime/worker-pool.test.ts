@@ -290,6 +290,67 @@ describe("WorkerPool EdgeRuntime.waitUntil", () => {
       await rm(projectRoot, { recursive: true, force: true });
     }
   });
+
+  test("rejects waitUntil when background execution is explicitly disabled", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-waituntil-disabled-"));
+    const functionPath = join(projectRoot, "fn.ts");
+    await Bun.write(functionPath, `
+      export default async () => {
+        try {
+          EdgeRuntime.waitUntil(Promise.resolve());
+          return new Response("unexpected");
+        } catch (error) {
+          return new Response(error instanceof Error ? error.message : String(error), { status: 400 });
+        }
+      }
+    `);
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+    try {
+      const response = await pool.dispatch({
+        functionId: "proj_waituntil_disabled",
+        projectRef: "test-project",
+        functionPath,
+        projectRoot,
+        env: {},
+        capabilities: { background: false },
+        request: new Request("http://edge.local/functions/v1/waituntil-disabled"),
+      });
+      expect(response.status).toBe(400);
+      expect(await response.text()).toContain("not enabled by the Function capability policy");
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("applies the function waitUntil timeout limit", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-waituntil-limit-"));
+    const functionPath = join(projectRoot, "fn.ts");
+    await Bun.write(functionPath, `
+      export default async () => {
+        EdgeRuntime.waitUntil(new Promise((resolve) => setTimeout(resolve, 2_000)));
+        return new Response("queued", { status: 202 });
+      }
+    `);
+    const pool = new WorkerPool({ size: 1, requestTimeout: 5_000 });
+    pools.push(pool);
+    try {
+      const response = await pool.dispatch({
+        functionId: "proj_waituntil_limit",
+        projectRef: "test-project",
+        functionPath,
+        projectRoot,
+        env: {},
+        limits: { wait_until_timeout_ms: 25 },
+        request: new Request("http://edge.local/functions/v1/waituntil-limit"),
+      });
+      expect(response.status).toBe(202);
+      await Bun.sleep(100);
+      expect(pool.snapshotMetrics("waituntil_limit")["waituntil_limit_total_worker_retirements"]).toBe(1);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("WorkerPool subprocess guard", () => {
@@ -3669,6 +3730,82 @@ describe("WorkerPool module cache", () => {
 });
 
 describe("WorkerPool body size limit", () => {
+  test("enforces per-function request and response limits", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-function-limits-"));
+    const functionPath = join(projectRoot, "fn.ts");
+    await Bun.write(functionPath, `
+      export default {
+        async fetch(request) {
+          if (new URL(request.url).pathname.endsWith("/response")) return new Response("12345");
+          return new Response("ok");
+        }
+      }
+    `);
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+    try {
+      const request = new Request("http://edge.local/functions/v1/test", {
+        method: "POST",
+        body: "12345",
+      });
+      const requestResult = await pool.dispatch({
+        functionId: "test_function_limits_request",
+        projectRef: "test-project",
+        functionPath,
+        projectRoot,
+        env: {},
+        limits: { max_request_body_bytes: 4 },
+        request,
+      });
+      expect(requestResult.status).toBe(413);
+
+      const responseResult = await pool.dispatch({
+        functionId: "test_function_limits_response",
+        projectRef: "test-project",
+        functionPath,
+        projectRoot,
+        env: {},
+        limits: { max_response_body_bytes: 4 },
+        request: new Request("http://edge.local/functions/v1/test/response"),
+      });
+      expect(responseResult.status).toBe(502);
+      expect(await responseResult.json()).toMatchObject({ name: "FunctionResponseLimitError" });
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("enforces outbound host capability", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-function-capability-"));
+    const functionPath = join(projectRoot, "fn.ts");
+    await Bun.write(functionPath, `
+      export default async () => {
+        try {
+          await fetch("https://blocked.example.com/");
+          return new Response("unexpected");
+        } catch (error) {
+          return new Response(error instanceof Error ? error.message : String(error));
+        }
+      }
+    `);
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+    try {
+      const result = await pool.dispatch({
+        functionId: "test_function_capability",
+        projectRef: "test-project",
+        functionPath,
+        projectRoot,
+        env: {},
+        capabilities: { outbound_hosts: ["allowed.example.com"] },
+        request: new Request("http://edge.local/functions/v1/test"),
+      });
+      expect(await result.text()).toContain("Outbound host is not allowed");
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   test("rejects request with content-length exceeding default limit (30MB)", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-body-limit-"));
     const functionPath = join(projectRoot, "fn.ts");

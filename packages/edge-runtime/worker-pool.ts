@@ -20,6 +20,18 @@ interface DispatchOptions {
   projectRoot: string;
   projectRef: string;
   framework?: "fetch" | "elysia" | "hono" | "sveltekit-function";
+  capabilities?: {
+    secrets?: string[];
+    outbound_hosts?: string[];
+    bindings?: string[];
+    background?: boolean;
+  };
+  limits?: {
+    timeout_ms?: number;
+    max_request_body_bytes?: number;
+    max_response_body_bytes?: number;
+    wait_until_timeout_ms?: number;
+  };
   functionVersion?: string | null;
   moduleVersion?: string;
   envProof?: string;
@@ -59,6 +71,12 @@ function resolveMaxBodySizeBytes(value = process.env.EDGE_MAX_BODY_SIZE_MB): num
     ? configuredMb
     : DEFAULT_MAX_BODY_SIZE_MB;
   return maxBodySizeMb * 1024 * 1024;
+}
+
+function formatBodyLimit(bytes: number): string {
+  return bytes % (1024 * 1024) === 0
+    ? `${bytes / (1024 * 1024)}MB`
+    : `${bytes} bytes`;
 }
 
 const MAX_BODY_SIZE = resolveMaxBodySizeBytes();
@@ -574,7 +592,7 @@ export class WorkerPool {
       clearCancellationState();
       resolveOnce(new Response("Gateway Timeout", { status: 504 }));
       this.retireWorker(worker);
-    }, this.config.requestTimeout);
+    }, Math.min(this.config.requestTimeout, opts.limits?.timeout_ms ?? this.config.requestTimeout));
 
     const replaceCancelledWorker = () => {
       detachResponseListeners();
@@ -635,12 +653,13 @@ export class WorkerPool {
     let body: ArrayBuffer | null = null;
     if (opts.request.body && !["GET", "HEAD"].includes(opts.request.method)) {
       const contentLength = opts.request.headers.get("content-length");
-      if (contentLength && parseInt(contentLength) > MAX_BODY_SIZE) {
+      const maxRequestBody = Math.min(MAX_BODY_SIZE, opts.limits?.max_request_body_bytes ?? MAX_BODY_SIZE);
+      if (contentLength && parseInt(contentLength) > maxRequestBody) {
         releaseBeforeExecution();
         resolveOnce(
           new Response(
             JSON.stringify({
-              error: `Request body too large (max ${MAX_BODY_SIZE / 1024 / 1024}MB)`,
+              error: `Request body too large (max ${formatBodyLimit(maxRequestBody)})`,
             }),
             {
               status: 413,
@@ -658,12 +677,12 @@ export class WorkerPool {
         throw error;
       }
       if (finishCancelledBeforeExecution()) return;
-      if (body.byteLength > MAX_BODY_SIZE) {
+      if (body.byteLength > maxRequestBody) {
         releaseBeforeExecution();
         resolveOnce(
           new Response(
             JSON.stringify({
-              error: `Request body too large (max ${MAX_BODY_SIZE / 1024 / 1024}MB)`,
+              error: `Request body too large (max ${formatBodyLimit(maxRequestBody)})`,
             }),
             {
               status: 413,
@@ -756,7 +775,7 @@ export class WorkerPool {
           clearCancellationState();
           console.error("[Pool] EdgeRuntime.waitUntil timed out; replacing worker");
           this.retireWorker(worker);
-        }, WAIT_UNTIL_TIMEOUT_MS);
+        }, Math.min(WAIT_UNTIL_TIMEOUT_MS, opts.limits?.wait_until_timeout_ms ?? WAIT_UNTIL_TIMEOUT_MS));
       } else {
         worker.removeListener("message", onMsg);
       }
@@ -887,6 +906,8 @@ export class WorkerPool {
         projectRoot: opts.projectRoot,
         projectRef: opts.projectRef,
         framework: opts.framework,
+        capabilities: opts.capabilities,
+        limits: opts.limits,
         moduleVersion: opts.moduleVersion,
         envProof: opts.envProof,
         artifactSha256: opts.artifactSha256,

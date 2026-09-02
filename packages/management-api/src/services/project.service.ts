@@ -13,6 +13,8 @@ import {
   type EdgeFunctionActivationId,
   type EdgeFunctionActivationResult,
   type EdgeFunctionDeploymentRequest,
+  type EdgeFunctionCapabilities,
+  type EdgeFunctionLimits,
 } from "./edge-function.service";
 import { logger } from "../utils/logger";
 import { config } from "../config";
@@ -129,6 +131,8 @@ export interface FunctionResponse {
   verify_jwt: boolean;
   framework: "fetch" | "elysia" | "hono" | "sveltekit-function";
   background_routes?: string[];
+  capabilities?: EdgeFunctionCapabilities;
+  limits?: EdgeFunctionLimits;
   import_map: boolean;
   entrypoint_path: string;
   created_at: string;
@@ -870,6 +874,8 @@ export class ProjectService {
         verify_jwt: cfg.verify_jwt,
         framework: cfg.framework ?? "fetch",
         background_routes: cfg.background_routes || [],
+        capabilities: cfg.capabilities ?? {},
+        limits: cfg.limits ?? {},
         import_map: !!cfg.import_map,
         entrypoint_path: `file:///home/deno/functions/${slug}/index.ts`,
         created_at,
