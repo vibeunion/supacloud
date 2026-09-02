@@ -77,6 +77,13 @@ const FULL_ROWS = [
     ],
   },
   {
+    match: 'pg_trigger',
+    rows: [
+      { schema: 'public', table: 'cases', name: 'cases_updated_at', enabled: true },
+      { schema: 'public', table: 'cases', name: 'cases_legacy_audit', enabled: false },
+    ],
+  },
+  {
     match: 'role_table_grants',
     rows: [
       {
@@ -93,7 +100,7 @@ describe('readCatalog', () => {
   test('默认 schema 过滤为 public 且参数化 $1', async () => {
     const { executor, calls } = mockExecutor([]);
     await readCatalog(executor);
-    expect(calls).toHaveLength(4);
+    expect(calls).toHaveLength(5);
     for (const call of calls) {
       expect(call.sql).toContain('$1');
       expect(call.params).toEqual([['public']]);
@@ -132,6 +139,25 @@ describe('readCatalog', () => {
     expect(catalog.functions[0].language).toBe('plpgsql');
     expect(catalog.functions[1].security).toBe('invoker');
     expect(catalog.functions[1].searchPath).toBeNull();
+  });
+
+  test('triggers 行映射 schema/table/name/enabled', async () => {
+    const { executor } = mockExecutor(FULL_ROWS);
+    const catalog = await readCatalog(executor);
+    expect(catalog.triggers).toEqual([
+      { schema: 'public', table: 'cases', name: 'cases_updated_at', enabled: true },
+      { schema: 'public', table: 'cases', name: 'cases_legacy_audit', enabled: false },
+    ]);
+  });
+
+  test('trigger 查询排除内部触发器并按 tgenabled 判定 enabled', async () => {
+    const { executor, calls } = mockExecutor([]);
+    await readCatalog(executor);
+    const triggerCall = calls.find((call) => call.sql.includes('pg_trigger'));
+    expect(triggerCall).toBeDefined();
+    expect(triggerCall?.sql).toContain('NOT t.tgisinternal');
+    expect(triggerCall?.sql).toContain("t.tgenabled <> 'D'");
+    expect(triggerCall?.params).toEqual([['public']]);
   });
 
   test('grants 行原样映射', async () => {

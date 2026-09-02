@@ -18,17 +18,23 @@ export {
   type CatalogGrant,
   type CatalogPolicy,
   type CatalogTable,
+  type CatalogTrigger,
   type DatabaseCatalog,
   type QueryExecutor,
 } from './catalog.js';
 
 export {
   reconcileModule,
+  splitQualifiedName,
   type ReconcileIssue,
   type ReconcileReport,
 } from './reconcile.js';
 
 export { lintModule, lintSql, type LintIssue } from './lint.js';
+
+export { planModule, type ModulePlan, type PlanStep } from './plan.js';
+
+export { applyModulePlan, type ApplyResult } from './apply.js';
 
 export {
   buildDatabaseManifest,
