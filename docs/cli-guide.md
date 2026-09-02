@@ -69,6 +69,41 @@ One-off execution without global install:
 npm exec --package @supacloud/cli -- supacloud-cli status
 ```
 
+### Application framework commands
+
+Local commands for the application framework (`@supacloud/app` +
+`@supacloud/compiler`) and database governance (`@supacloud/db`). They run
+without a Management API context and never mutate the database.
+
+```bash
+# scaffold modules, commands, queries and controllers
+supacloud-cli app generate --kind module --name case
+supacloud-cli app generate --kind command --name accept --module case
+
+# compile decorator metadata into static factories + app.manifest.json
+supacloud-cli app compile --root . --out_dir generated --strict
+
+# validate only (no files written), print the module dependency tree,
+# or explain a single provider/command/controller
+supacloud-cli app check
+supacloud-cli app graph --format json
+supacloud-cli app explain --target CaseService
+
+# SQL governance over defineDatabaseModule sources
+supacloud-cli db lint --module_file db/modules.ts
+supacloud-cli db explain --target public.case_create
+
+# read-only catalog reconcile against a live database
+supacloud-cli db module_check --module_file db/modules.ts --database_url "$DATABASE_URL"
+```
+
+`db module_check` is classified read-only: it introspects `pg_policy`,
+`pg_proc`, `pg_class` and grants, and reports drift between the declared
+manifest and the live catalog (missing policies, RLS disabled, security
+definer without a pinned `search_path`, PUBLIC grants). See
+[Database Governance](./database-governance.md) and
+[Application Framework](./application-framework.md).
+
 ### AI/Agent Skill
 
 `@supacloud/cli` ships a `supacloud-cli` Skill for Codex and other Skill-compatible
