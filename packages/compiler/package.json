@@ -1,0 +1,50 @@
+{
+  "name": "@supacloud/compiler",
+  "version": "0.1.0",
+  "description": "Static compiler for @supacloud/app metadata: builds the application graph from AST, validates it, and generates reflection-free factory code",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "bun run clean && bun run build:js && bun run build:types",
+    "build:js": "bun build src/index.ts --outdir dist --target node --external ts-morph",
+    "build:types": "tsc -p tsconfig.json --emitDeclarationOnly",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "bun run build",
+    "test": "bun test",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck:test": "tsc -p tsconfig.test.json --noEmit"
+  },
+  "keywords": [
+    "supacloud",
+    "compiler",
+    "di",
+    "codegen",
+    "elysia"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vibeunion/supacloud.git",
+    "directory": "packages/compiler"
+  },
+  "dependencies": {
+    "ts-morph": "^26.0.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.0",
+    "typescript": "^7.0.2"
+  }
+}
