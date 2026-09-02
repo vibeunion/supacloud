@@ -215,26 +215,14 @@ Caddy dynamically routes requests for different projects based on `Host` header 
 
 ```
 /opt/supacloud/scripts/lib/
-├── db_manager.sh      # Database management
 ├── storage_manager.sh # Storage management (JuiceFS/S3)
-├── gateway service    # Caddy routing is managed in the Management API gateway provider
-└── jwt_manager.sh     # JWT key management
+├── s3_manager.sh      # Storage backend management
+├── backup_manager.sh  # Backup operations
+├── ha_manager.sh      # High availability
+└── security_manager.sh # Firewall & SSL
 ```
 
 ### 5.2 Script Interface
-
-#### db_manager.sh
-
-```bash
-# Create project database and role
-db_manager.sh create <project_ref> <password>
-
-# Delete project database and role
-db_manager.sh delete <project_ref>
-
-# Check database status
-db_manager.sh status <project_ref>
-```
 
 #### storage_manager.sh
 
@@ -252,15 +240,6 @@ storage_manager.sh credentials <project_ref>
 #### Gateway routing
 
 Caddy routing is no longer managed through a standalone shell helper. The Management API publishes tenant routes, rate limiting, CORS, and TLS state directly to the Caddy Admin API.
-
-#### jwt_manager.sh
-
-```bash
-# Generate project JWT key
-jwt_manager.sh generate <project_ref>
-
-# Output: JWT_SECRET, ANON_KEY, SERVICE_ROLE_KEY
-```
 
 ---
 

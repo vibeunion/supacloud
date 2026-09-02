@@ -84,9 +84,10 @@ create policy cases_select on public.cases for select to authenticated using (tr
     "db/functions/case_create.sql": `create or replace function public.case_create()
 returns void language plpgsql security definer as $$ begin end; $$;
 `,
-    "db/grants/cases.sql": `grant select on public.cases to authenticated;
+   "db/grants/cases.sql": `grant select on public.cases to authenticated;
 `,
     "db/policies/clean_select.sql": `alter table public.clean enable row level security;
+drop policy if exists clean_select on public.clean;
 create policy clean_select on public.clean for select to authenticated using (true);
 `,
     // 供 loader 边界测试：必须在任何同目录 import 发生前落盘（Bun 会缓存目录列表）
