@@ -2,7 +2,9 @@ import { expect, test } from 'bun:test'
 import {
   createBackend,
   isFrameworkRouterHandler,
+  signJwt,
   toFunctionLocalUrl,
+  VERIFIED_JWT_SUBJECT_HEADER,
   type FrameworkObjectHandler,
 } from '../src/runtime/index.js'
 
@@ -28,6 +30,10 @@ function invoke(backend: Backend, path: string) {
   return backend.fetch(new Request(`http://localhost/functions/v1${path}`, {
     headers: { apikey: backend.anonKey, authorization: `Bearer ${backend.anonKey}` },
   }))
+}
+
+function invokeWithHeaders(backend: Backend, path: string, headers: HeadersInit) {
+  return backend.fetch(new Request(`http://localhost/functions/v1${path}`, { headers }))
 }
 
 test('toFunctionLocalUrl strips the function prefix', () => {
@@ -154,6 +160,70 @@ test('explicit framework entry rewrites URLs even without router shape', async (
     expect(res.status).toBe(200)
     expect(seen).toEqual(['/cases'])
   })
+})
+
+test('forwards only the subject from a verified user JWT', async () => {
+  const seen: Array<string | null> = []
+  const handlers = new Map<string, Parameters<Backend['functions']['register']>[1]>([
+    ['plain', (req: Request) => {
+      seen.push(req.headers.get(VERIFIED_JWT_SUBJECT_HEADER))
+      return Response.json({ ok: true })
+    }],
+    ['router', {
+      handle: (req: Request) => {
+        seen.push(req.headers.get(VERIFIED_JWT_SUBJECT_HEADER))
+        return Response.json({ ok: true })
+      },
+    }],
+  ])
+
+  await withBackend(handlers, async (backend) => {
+    const token = await signJwt({ role: 'authenticated', sub: 'user-42' }, backend.jwtSecret)
+    for (const path of ['/plain', '/router']) {
+      const res = await invokeWithHeaders(backend, path, {
+        apikey: backend.anonKey,
+        authorization: `Bearer ${token}`,
+        [VERIFIED_JWT_SUBJECT_HEADER]: 'spoofed-user',
+      })
+      expect(res.status).toBe(200)
+    }
+  })
+
+  expect(seen).toEqual(['user-42', 'user-42'])
+})
+
+test('removes spoofed verified-subject headers from unverified function requests', async () => {
+  const seen: Array<string | null> = []
+  const handler = (req: Request) => {
+    seen.push(req.headers.get(VERIFIED_JWT_SUBJECT_HEADER))
+    return Response.json({ ok: true })
+  }
+  const backend = await createBackend({
+    startRuntimeServices: false,
+    log: () => {},
+    functions: new Map([
+      ['apikey', handler],
+      ['public', handler],
+    ]),
+    functionVerifyJwt: { public: false },
+  })
+  try {
+    const apikeyRes = await invokeWithHeaders(backend, '/apikey', {
+      apikey: backend.anonKey,
+      authorization: `Bearer ${backend.anonKey}`,
+      [VERIFIED_JWT_SUBJECT_HEADER]: 'spoofed-user',
+    })
+    expect(apikeyRes.status).toBe(200)
+
+    const publicRes = await invokeWithHeaders(backend, '/public', {
+      [VERIFIED_JWT_SUBJECT_HEADER]: 'spoofed-user',
+    })
+    expect(publicRes.status).toBe(200)
+  } finally {
+    await backend.close()
+  }
+
+  expect(seen).toEqual([null, null])
 })
 
 test('framework fetch entry does not rewrite URLs', async () => {

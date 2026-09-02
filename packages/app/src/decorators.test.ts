@@ -122,6 +122,18 @@ describe("@Command / @Query", () => {
     class GetCaseQuery {}
     expect(getQueryMeta(GetCaseQuery)).toEqual({ name: "case.get" });
   });
+
+  test("defaults transaction and idempotency to none", () => {
+    @Command({ name: "case.publish", permission: "case.publish" })
+    class PublishCaseCommand {}
+
+    expect(getCommandMeta(PublishCaseCommand)).toEqual({
+      name: "case.publish",
+      permission: "case.publish",
+      transaction: "none",
+      idempotency: "none",
+    });
+  });
 });
 
 describe("@Controller and route decorators", () => {

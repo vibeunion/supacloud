@@ -1,10 +1,16 @@
 import { describe, expect, test } from "bun:test";
 import { Elysia, t } from "elysia";
 import {
+  ApplicationError,
   createApplication,
+  createSupaCloudRequestContext,
   createModulePlugin,
   createTestApp,
+  defaultErrorResponse,
+  requireIdempotencyKey,
+  requireTrustedIdentity,
   type ApplicationOptions,
+  type CommandGovernance,
   type CompiledModule,
 } from "./index";
 import { testRequest } from "./testing";
@@ -35,6 +41,7 @@ function createAuditModule(captured: Captured): CompiledModule {
       return { auditService: captured.auditService };
     },
     controllers: [],
+    commands: [],
   };
 }
 
@@ -47,6 +54,7 @@ class CaseService {
   }
 
   create(input: { title: string }): { id: string; title: string } {
+    if (input.title === "fail") throw new Error("create failed");
     this.audit.record(`case.create:${input.title}`);
     return { id: "case-1", title: input.title };
   }
@@ -129,10 +137,21 @@ const requestIdFromHeader: ApplicationOptions["requestContext"] = (request) => (
   request,
 });
 
+const passthroughGovernance: CommandGovernance = {
+  authorize: () => {},
+  idempotency: (_invocation, next) => next(),
+  transaction: (_invocation, next) => next(),
+  audit: {
+    succeeded: () => {},
+    failed: () => {},
+  },
+};
+
 function createApp(captured: Captured, options?: Partial<ApplicationOptions>) {
   return createTestApp({
     modules: [createAuditModule(captured), createCaseModule(captured)],
     requestContext: requestIdFromHeader,
+    commandGovernance: passthroughGovernance,
     ...options,
   });
 }
@@ -143,7 +162,7 @@ function createApp(captured: Captured, options?: Partial<ApplicationOptions>) {
 
 describe("createApplication", () => {
   test("serves GET and POST routes with JSON responses", async () => {
-    const app = createApp({}, { commandExecutor: (_invocation, next) => next() });
+    const app = createApp({});
 
     const getRes = await testRequest(app, "/cases/42", {
       headers: { "x-request-id": "req-get" },
@@ -165,7 +184,7 @@ describe("createApplication", () => {
   });
 
   test("rejects invalid bodies with 422 via Elysia validation", async () => {
-    const app = createApp({}, { commandExecutor: (_invocation, next) => next() });
+    const app = createApp({});
 
     const res = await testRequest(app, "/cases", {
       method: "POST",
@@ -190,6 +209,7 @@ describe("createApplication", () => {
     // Default context factory assigns a fresh requestId per request.
     const defaultApp = createApplication({
       modules: [createAuditModule({}), createCaseModule({})],
+      commandGovernance: passthroughGovernance,
     });
     const [first, second] = await Promise.all([
       testRequest(defaultApp, "/cases/1"),
@@ -215,12 +235,33 @@ describe("createApplication", () => {
     expect(captured.auditService?.entries).toEqual(["case.get:7"]);
   });
 
-  test("enforces command-bound routes through the configured executor", async () => {
+  test("executes command governance in authorization, idempotency, transaction and audit order", async () => {
     const events: string[] = [];
     const app = createApp({}, {
-      commandExecutor: async (invocation, next) => {
-        events.push(`${invocation.command.name}:${invocation.command.permission}`);
-        return next();
+      commandGovernance: {
+        authorize: (invocation) => {
+          events.push(`authorize:${invocation.command.permission}`);
+        },
+        idempotency: async (_invocation, next) => {
+          events.push("idempotency:before");
+          const result = await next();
+          events.push("idempotency:after");
+          return result;
+        },
+        transaction: async (_invocation, next) => {
+          events.push("transaction:before");
+          const result = await next();
+          events.push("transaction:after");
+          return result;
+        },
+        audit: {
+          succeeded: (invocation) => {
+            events.push(`audit:success:${invocation.command.audit}`);
+          },
+          failed: () => {
+            events.push("audit:failure");
+          },
+        },
       },
     });
 
@@ -231,11 +272,76 @@ describe("createApplication", () => {
     });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ id: "case-1", title: "governed" });
-    expect(events).toEqual(["case.create:case.create"]);
+    expect(events).toEqual([
+      "authorize:case.create",
+      "idempotency:before",
+      "transaction:before",
+      "audit:success:case.created",
+      "transaction:after",
+      "idempotency:after",
+    ]);
   });
 
-  test("fails closed when a command-bound route has no executor", async () => {
-    const app = createApp({});
+  test("records command failure only after the transaction has rolled back", async () => {
+    const events: string[] = [];
+    const app = createApp({}, {
+      commandGovernance: {
+        authorize: () => {
+          events.push("authorize");
+        },
+        idempotency: async (_invocation, next) => {
+          events.push("idempotency:before");
+          return next();
+        },
+        transaction: async (_invocation, next) => {
+          events.push("transaction:before");
+          try {
+            return await next();
+          } catch (error) {
+            events.push("transaction:rollback");
+            throw error;
+          }
+        },
+        audit: {
+          succeeded: () => {
+            events.push("audit:success");
+          },
+          failed: (_invocation, error) => {
+            events.push(`audit:failure:${error instanceof Error ? error.message : String(error)}`);
+          },
+        },
+      },
+    });
+
+    const res = await testRequest(app, "/cases", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "fail" }),
+    });
+    expect(res.status).toBe(500);
+    expect(events).toEqual([
+      "authorize",
+      "idempotency:before",
+      "transaction:before",
+      "transaction:rollback",
+      "audit:failure:create failed",
+    ]);
+  });
+
+  test("fails during application construction without command governance", () => {
+    expect(() => createTestApp({
+      modules: [createAuditModule({}), createCaseModule({})],
+    })).toThrow("has command routes but no commandGovernance");
+  });
+
+  test("fails closed when declared transaction governance is unavailable", async () => {
+    const app = createApp({}, {
+      commandGovernance: {
+        authorize: () => {},
+        idempotency: (_invocation, next) => next(),
+        audit: { succeeded: () => {}, failed: () => {} },
+      },
+    });
     const res = await testRequest(app, "/cases", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -244,12 +350,18 @@ describe("createApplication", () => {
     expect(res.status).toBe(501);
     expect(await res.json()).toMatchObject({
       ok: false,
-      code: "COMMAND_EXECUTOR_UNAVAILABLE",
+      code: "COMMAND_TRANSACTION_UNAVAILABLE",
     });
   });
 
   test("allows applications to map errors to their public envelope", async () => {
     const app = createApp({}, {
+      commandGovernance: {
+        ...passthroughGovernance,
+        authorize: () => {
+          throw new ApplicationError("case conflict", { status: 409, code: "CASE_CONFLICT" });
+        },
+      },
       errorMapper: (error, context) => Response.json({
         ok: false,
         code: context.frameworkCode,
@@ -266,6 +378,75 @@ describe("createApplication", () => {
   });
 });
 
+describe("SupaCloud request context", () => {
+  test("uses only the Edge Runtime verified subject and keeps tokens out of JSON", async () => {
+    const request = new Request("https://example.test/cases", {
+      headers: {
+        authorization: "Bearer signed-token",
+        "x-supacloud-jwt-sub": "user-42",
+        "x-sb-execution-id": "exec-1",
+        "idempotency-key": "idem-1",
+      },
+    });
+    const context = await createSupaCloudRequestContext(request) as {
+      requestId: string;
+      identity: { authenticated: boolean; subject?: string; accessToken?: string };
+      idempotencyKey?: string;
+    };
+
+    expect(context.requestId).toBe("exec-1");
+    expect(context.identity).toMatchObject({ authenticated: true, subject: "user-42" });
+    expect(context.identity.accessToken).toBe("signed-token");
+    expect(context.idempotencyKey).toBe("idem-1");
+    expect(JSON.stringify(context.identity)).not.toContain("signed-token");
+  });
+
+  test("requires both verified identity and bearer credentials", async () => {
+    const anonymous = await createSupaCloudRequestContext(
+      new Request("https://example.test/cases", {
+        headers: { authorization: "Bearer unverified-token" },
+      }),
+    );
+    expect(() => requireTrustedIdentity(anonymous)).toThrow("Authenticated user context is required");
+  });
+
+  test("requires an idempotency key for idempotent commands", async () => {
+    const request = new Request("https://example.test/cases");
+    const requestContext = await createSupaCloudRequestContext(request);
+    expect(() => requireIdempotencyKey({
+      command: {
+        className: "CreateCaseCommand",
+        name: "case.create",
+        permission: "case.create",
+        transaction: "required",
+        idempotency: "required",
+      },
+      input: { body: {}, params: {}, query: {} },
+      request,
+      requestContext,
+      services: {},
+    })).toThrow("Idempotency-Key header is required");
+  });
+});
+
+describe("defaultErrorResponse", () => {
+  test("accepts structural public errors from platform packages", async () => {
+    const error = Object.assign(new Error("Service role reason is not allowed"), {
+      expose: true as const,
+      status: 403,
+      code: "SERVICE_ROLE_REASON_NOT_ALLOWED",
+    });
+    const response = defaultErrorResponse(error);
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({
+      ok: false,
+      code: "SERVICE_ROLE_REASON_NOT_ALLOWED",
+      message: "Service role reason is not allowed",
+    });
+  });
+});
+
 describe("createModulePlugin", () => {
   test("works standalone on a plain Elysia app", async () => {
     const captured: Captured = {};
@@ -276,7 +457,9 @@ describe("createModulePlugin", () => {
     const caseServices = caseModule.createServices({}, { audit: auditServices });
 
     const app = new Elysia().use(
-      createModulePlugin(caseModule, caseServices, requestIdFromHeader),
+      createModulePlugin(caseModule, caseServices, requestIdFromHeader, {
+        commandGovernance: passthroughGovernance,
+      }),
     );
 
     const res = await testRequest(app, "/cases/9", {
