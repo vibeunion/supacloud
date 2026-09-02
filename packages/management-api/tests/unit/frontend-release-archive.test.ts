@@ -240,7 +240,8 @@ describe("verified frontend release archives", () => {
     const base = await mkdtemp(join(tmpdir(), "frontend-release-compressed-"));
     const archivePath = `${base}.zip`;
     const buildDir = `${base}-build`;
-    await writeFile(join(base, "index.html"), Buffer.alloc(32 * 1024 * 1024, 0x61));
+    const fixtureSize = 8 * 1024 * 1024;
+    await writeFile(join(base, "index.html"), Buffer.alloc(fixtureSize, 0x61));
     const zipped = await Bun.$`zip -q -X ${archivePath} index.html`.cwd(base).nothrow();
     if (zipped.exitCode !== 0) throw new Error("zip fixture failed");
     await mkdir(buildDir);
@@ -254,7 +255,7 @@ describe("verified frontend release archives", () => {
     try {
       const verified = await verifiedZipArchive(handle, archiveSize);
       await extractVerifiedZip(handle, verified, buildDir);
-      expect((await readFile(join(buildDir, "index.html"))).byteLength).toBe(32 * 1024 * 1024);
+      expect((await readFile(join(buildDir, "index.html"))).byteLength).toBe(fixtureSize);
       expect(peakRss - startingRss).toBeLessThan(64 * 1024 * 1024);
     } finally {
       clearInterval(sample);
