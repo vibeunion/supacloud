@@ -77,8 +77,8 @@ export interface BackendConfig {
   seedSql?: string
   /** Where object storage bytes live. Default: in-memory. Node CLI passes a fs driver. */
   storageDriver?: StorageDriver
-  /** Edge functions: name → fetch handler, served at /functions/v1/<name>. */
-  functions?: Map<string, import('./functions/handler.js').EdgeFunction> | Record<string, import('./functions/handler.js').EdgeFunction>
+  /** Edge functions: name → fetch handler or framework router (Elysia/Hono), served at /functions/v1/<name>. */
+  functions?: Map<string, import('./functions/handler.js').FunctionRegistryValue> | Record<string, import('./functions/handler.js').FunctionRegistryValue>
   /** Per-function JWT verification setting from config.toml; false makes the function public. */
   functionVerifyJwt?: Record<string, boolean>
   /** Extra env/secrets exposed to functions via Deno.env and ctx.env (e.g. from supabase/functions/.env). */

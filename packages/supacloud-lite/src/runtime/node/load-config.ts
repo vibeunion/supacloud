@@ -93,6 +93,8 @@ export interface FunctionOptions {
   verifyJwt?: boolean
   /** [functions.<name>].entrypoint, relative to the project root */
   entrypoint?: string
+  /** [functions.<name>].framework: fetch (default), elysia, or hono */
+  framework?: import('../functions/handler.js').FunctionFramework
 }
 
 /** Parse supabase/config.toml once and project it into a {@link ProjectConfig}. */
@@ -333,6 +335,14 @@ function readFunctions(root: ConfigTable): Record<string, FunctionOptions> {
     if (verifyJwt !== undefined) opts.verifyJwt = verifyJwt
     const entrypoint = getString(t, 'entrypoint')
     if (entrypoint !== undefined) opts.entrypoint = entrypoint
+    const framework = getString(t, 'framework')
+    if (framework !== undefined) {
+      if (framework === 'fetch' || framework === 'elysia' || framework === 'hono') {
+        opts.framework = framework
+      } else {
+        console.warn(`  warning: [functions.${name}] framework "${framework}" is not one of fetch/elysia/hono; falling back to fetch`)
+      }
+    }
     out[name] = opts
   }
   return out

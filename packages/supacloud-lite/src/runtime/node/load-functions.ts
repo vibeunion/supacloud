@@ -2,7 +2,7 @@
 import { readdir, readFile, realpath, rm, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import type { EdgeFunction } from '../functions/handler.js'
+import type { EdgeFunction, FrameworkObjectHandler, FunctionFramework, LoadedFunction } from '../functions/handler.js'
 import { installDenoShim, resetCapturedHandler, takeCapturedHandler } from '../functions/deno-shim.js'
 import { bundleFunction } from './bundle-function.js'
 
@@ -40,6 +40,17 @@ export interface LoadFunctionOptions {
   enabled?: boolean
   /** Custom entrypoint path, relative to the project root. */
   entrypoint?: string
+  /** Framework profile: fetch (default, legacy routing), elysia, or hono. */
+  framework?: FunctionFramework
+}
+
+const FUNCTION_FRAMEWORKS: ReadonlySet<string> = new Set(['fetch', 'elysia', 'hono'])
+
+function resolveFramework(name: string, value: string | undefined): FunctionFramework | undefined {
+  if (value === undefined) return undefined
+  if (FUNCTION_FRAMEWORKS.has(value)) return value as FunctionFramework
+  console.warn(`  warning: function "${name}" has unsupported framework "${value}", expected one of fetch/elysia/hono; falling back to fetch`)
+  return undefined
 }
 
 let loadQueue: Promise<void> = Promise.resolve()
@@ -49,14 +60,15 @@ let loadQueue: Promise<void> = Promise.resolve()
  * directory name. Dirs starting with `_` or `.` are skipped (shared code), as
  * are functions disabled in config.toml. Each function is bundled with esbuild
  * when available (falling back to a plain import), then its handler is taken
- * from a default function export, a default `{ fetch() }` export, or a captured
- * `Deno.serve()` call. Load failures warn and skip rather than throwing, so one
- * broken function can't block startup.
+ * from a default function export, a default `{ fetch() }` / `{ handle() }`
+ * object export (Elysia/Hono routers), or a captured `Deno.serve()` call.
+ * Load failures warn and skip rather than throwing, so one broken function
+ * can't block startup.
  */
 export async function loadFunctions(
   projectDir: string,
   options: Record<string, LoadFunctionOptions> = {}
-): Promise<Map<string, EdgeFunction>> {
+): Promise<Map<string, LoadedFunction>> {
   let releaseQueue!: () => void
   const previous = loadQueue
   loadQueue = new Promise<void>((resolveQueue) => {
@@ -73,8 +85,8 @@ export async function loadFunctions(
 async function loadFunctionsUnlocked(
   projectDir: string,
   options: Record<string, LoadFunctionOptions>
-): Promise<Map<string, EdgeFunction>> {
-  const functions = new Map<string, EdgeFunction>()
+): Promise<Map<string, LoadedFunction>> {
+  const functions = new Map<string, LoadedFunction>()
   const root = join(projectDir, 'supabase', 'functions')
 
   let entries: string[] = []
@@ -117,21 +129,26 @@ async function loadFunctionsUnlocked(
         }
         resetCapturedHandler()
         const mod = (await import(importUrl)) as {
-          default?: EdgeFunction | { fetch?: EdgeFunction }
+          default?: EdgeFunction | FrameworkObjectHandler
         }
         const denoHandler = takeCapturedHandler()
         const defaultExport = mod.default
-        const handler = typeof defaultExport === 'function'
-          ? defaultExport
-          : defaultExport && typeof defaultExport.fetch === 'function'
-            ? defaultExport.fetch.bind(defaultExport)
-            : denoHandler
-              ? (req: Request) => denoHandler(req)
-              : undefined
+        const handler: EdgeFunction | FrameworkObjectHandler | undefined =
+          typeof defaultExport === 'function'
+            ? defaultExport
+            : defaultExport &&
+                (typeof defaultExport.handle === 'function' || typeof defaultExport.fetch === 'function')
+              ? defaultExport
+              : denoHandler
+                ? (req: Request) => denoHandler(req)
+                : undefined
         if (handler) {
-          functions.set(name, handler as EdgeFunction)
+          functions.set(name, {
+            handler,
+            framework: resolveFramework(name, options[name]?.framework),
+          })
         } else {
-          console.warn(`  warning: function "${name}" has no default function, fetch object, or Deno.serve() handler, skipped`)
+          console.warn(`  warning: function "${name}" has no default function, handle/fetch object, or Deno.serve() handler, skipped`)
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
