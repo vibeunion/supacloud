@@ -86,6 +86,29 @@ export interface LoadedFunction {
 /** Registry value: a bare handler or a {@link LoadedFunction} entry. */
 export type FunctionRegistryValue = FunctionHandler | LoadedFunction
 
+/** Header written only after Lite has verified the request JWT. */
+export const VERIFIED_JWT_SUBJECT_HEADER = 'x-supacloud-jwt-sub'
+
+const UNSAFE_VERIFIED_JWT_SUBJECT = /[\u0000-\u001F\u007F-\u009F\u0100-\u{10FFFF}]/u
+
+function verifiedSubject(value: unknown): string | null {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 1_024) return null
+  if (value.trim() !== value || UNSAFE_VERIFIED_JWT_SUBJECT.test(value)) return null
+  return value
+}
+
+/**
+ * Client values are never trusted. A verified JWT subject is forwarded only
+ * after the request has passed the backend's JWT verification step.
+ */
+function withVerifiedJwtSubject(request: Request, ctx: RequestContext): Request {
+  const trustedRequest = request.clone()
+  trustedRequest.headers.delete(VERIFIED_JWT_SUBJECT_HEADER)
+  const subject = verifiedSubject(ctx.claims?.sub)
+  if (subject !== null) trustedRequest.headers.set(VERIFIED_JWT_SUBJECT_HEADER, subject)
+  return trustedRequest
+}
+
 /** Second argument passed to every {@link EdgeFunction} invocation. */
 export interface FunctionContext {
   /** verified request context (role + JWT claims) resolved by the router */
@@ -192,14 +215,14 @@ export class FunctionsHandler {
     const routeAware =
       (entry.framework !== undefined && entry.framework !== 'fetch') ||
       isFrameworkRouterHandler(entry.handler)
-    if (routeAware) request = new Request(toFunctionLocalUrl(req.url), request)
+    request = withVerifiedJwtSubject(request, ctx)
+    if (routeAware) request = new Request(toFunctionLocalUrl(request.url), request)
 
     // 2. Invocation timeout: the abort signal rides on the forwarded Request so
     // a cooperative handler (or its body reads) can cancel early.
     const timeoutMs = limits?.timeoutMs
     const abort = timeoutMs !== undefined ? new AbortController() : undefined
     if (abort) request = withSignal(request, abort.signal)
-
     try {
       // 4. Secrets allowlist: the function sees the SUPABASE_* base trio plus
       // only the declared secret keys - both via Deno.env and ctx.env.

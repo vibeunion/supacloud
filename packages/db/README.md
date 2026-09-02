@@ -16,7 +16,8 @@ db/
 ```
 
 ```ts
-import { defineDatabaseModule } from '@supacloud/db';
+import { createDatabaseAccessBoundary, defineDatabaseModule } from '@supacloud/db';
+import { requireTrustedIdentity } from '@supacloud/elysia';
 import { cases } from './schema'; // drizzle 表对象
 
 export const casesModule = defineDatabaseModule({
@@ -57,6 +58,24 @@ export const casesModule = defineDatabaseModule({
 | `lintSql(sql, file)` / `lintModule(module, readFile)` | 纯 SQL 文本静态分析，无需数据库 |
 | `buildDatabaseManifest(modules)` | 汇总模块为可 JSON 序列化的 `DatabaseManifest`（version 1） |
 | `explainObject(manifest, name)` | 人类可读地解释对象的所属模块、类型、源文件、权限、测试 |
+| `createDatabaseAccessBoundary(options)` | 统一用户 RLS 客户端与显式 service-role 客户端的访问边界 |
+
+### 数据库访问边界
+
+业务请求只应通过 `forUser({ subject, accessToken })` 创建 RLS-preserving 客户端；
+后台任务才可以通过 `forService("declared-reason")` 获取缓存的 service-role 客户端。
+service-role 原因必须预先加入 `allowedServiceReasons`，缺少身份、令牌或理由时会 fail-closed。
+
+```ts
+const database = createDatabaseAccessBoundary({
+  createUserClient: ({ accessToken }) => createSupabaseClient(accessToken),
+  createServiceClient: () => createServiceRoleClient(),
+  allowedServiceReasons: ["scheduled-worker", "migration-check"],
+});
+
+const userDb = await database.forUser(requireTrustedIdentity(requestContext));
+const workerDb = await database.forService("scheduled-worker");
+```
 
 ## 诊断码
 

@@ -36,3 +36,12 @@ export {
   type DatabaseManifest,
   type DatabaseManifestModule,
 } from './manifest.js';
+
+export {
+  createDatabaseAccessBoundary,
+  DatabaseAccessError,
+  type AuthenticatedDatabaseIdentity,
+  type DatabaseAccessBoundary,
+  type DatabaseAccessBoundaryOptions,
+  type DatabaseAccessErrorCode,
+} from './access.js';

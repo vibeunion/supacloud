@@ -64,9 +64,9 @@ export interface CommandNode {
   className: string;
   name: string;
   permission?: string;
-  transaction?: string;
+  transaction: "required" | "none";
   audit?: string;
-  idempotency?: string;
+  idempotency: "required" | "none";
 }
 
 export interface QueryNode {

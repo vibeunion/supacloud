@@ -43,16 +43,19 @@ export interface ModuleMeta extends Required<Omit<ModuleOptions, "exports">> {
 export interface CommandOptions {
   name: string;
   /** Permission identifier required to execute (e.g. "case.create"). */
-  permission?: string;
+  permission: string;
   /** Transaction requirement for the underlying write, e.g. "required". */
-  transaction?: string;
+  transaction?: "required" | "none";
   /** Audit event name recorded on success, e.g. "case.created". */
   audit?: string;
   /** Idempotency strategy, e.g. "required". */
-  idempotency?: string;
+  idempotency?: "required" | "none";
 }
 
-export type CommandMeta = CommandOptions;
+export type CommandMeta = Omit<CommandOptions, "transaction" | "idempotency"> & {
+  transaction: "required" | "none";
+  idempotency: "required" | "none";
+};
 
 export interface QueryOptions {
   name: string;
@@ -156,7 +159,11 @@ export function getModuleMeta(target: object): ModuleMeta | undefined {
 
 export function Command(options: CommandOptions): ClassDecorator {
   return (target) => {
-    defineMetadata(target, COMMAND_METADATA, { ...options });
+    defineMetadata(target, COMMAND_METADATA, {
+      ...options,
+      transaction: options.transaction ?? "none",
+      idempotency: options.idempotency ?? "none",
+    });
   };
 }
 

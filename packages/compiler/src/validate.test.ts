@@ -71,10 +71,10 @@ describe("validateGraph：坏 fixture 诊断", () => {
     );
   });
 
-  test("command-missing-permission：warn，strict 时升级 error", () => {
+  test("command-missing-permission：始终为 error", () => {
     const missing = byCode("command-missing-permission");
     expect(missing).toHaveLength(1);
-    expect(missing[0].severity).toBe("warn");
+    expect(missing[0].severity).toBe("error");
     expect(missing[0].message).toContain("bad.noperm");
 
     const strictDiagnostics = allDiagnostics(true).filter(
