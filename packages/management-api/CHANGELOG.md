@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.68.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.67.1...management-api-v0.68.0) (2026-09-02)
+
+
+### Features
+
+* add first-class Function capability and limit profiles ([e7d19b3](https://github.com/vibeunion/supacloud/commit/e7d19b394f72136f16c1a4b68fa14b710ca46617))
+
+
+### Bug Fixes
+
+* include realtime jwks for owner tenants ([#1076](https://github.com/vibeunion/supacloud/issues/1076)) ([de30e70](https://github.com/vibeunion/supacloud/commit/de30e70cc0f4810d39eb59526db03b9f62ebc948))
+
 ## [0.67.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.67.0...management-api-v0.67.1) (2026-09-01)
 
 

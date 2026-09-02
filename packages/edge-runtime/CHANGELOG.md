@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.0](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.19.0...edge-runtime-v0.20.0) (2026-09-02)
+
+
+### Features
+
+* add first-class Function capability and limit profiles ([e7d19b3](https://github.com/vibeunion/supacloud/commit/e7d19b394f72136f16c1a4b68fa14b710ca46617))
+
 ## [0.19.0](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.18.7...edge-runtime-v0.19.0) (2026-09-01)
 
 
