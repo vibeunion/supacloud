@@ -1,0 +1,47 @@
+{
+  "name": "@supacloud/db",
+  "version": "0.1.0",
+  "description": "Database governance layer for SupaCloud: RLS policies, RPC functions and grants as first-class resources, with manifest/catalog reconciliation",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "bun run clean && bun run build:js && bun run build:types",
+    "build:js": "bun build src/index.ts --outdir dist --target node",
+    "build:types": "tsc -p tsconfig.json --emitDeclarationOnly",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "bun run build",
+    "test": "bun test",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck:test": "tsc -p tsconfig.test.json --noEmit"
+  },
+  "keywords": [
+    "supacloud",
+    "database",
+    "governance",
+    "rls",
+    "postgresql"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vibeunion/supacloud.git",
+    "directory": "packages/db"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.0",
+    "typescript": "^7.0.2"
+  }
+}
