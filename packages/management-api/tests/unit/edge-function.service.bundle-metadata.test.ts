@@ -588,6 +588,58 @@ describe("edgeFunctionService bundle metadata", () => {
     }
   });
 
+  test("reads a valid immutable version without traversing corrupt unrelated history", async () => {
+    const ref = "proj_version_read_isolation";
+    const slug = "isolated-source";
+    globalThis.fetch = runtimeSuccessFetch();
+    const first = await deployConditionalRelease({
+      ref,
+      slug,
+      code: "export default { fetch: () => new Response('first') };",
+    });
+    const second = await deployConditionalRelease({
+      ref,
+      slug,
+      code: "export default { fetch: () => new Response('second') };",
+    });
+    const firstArtifact = await getVersionedArtifactPath(ref, slug, first.version!);
+    const firstArtifactContent = await readFile(firstArtifact!);
+    await fs.chmod(firstArtifact!, 0o644);
+    try {
+      await Bun.write(firstArtifact!, "corrupt unrelated history");
+
+      await expect(migrateLegacyVersionArtifacts()).resolves.toMatchObject({
+        moved: expect.any(Number),
+      });
+      await expect(edgeFunctionService.listVersions(ref, slug))
+        .rejects.toThrow("Function version artifact does not match its immutable metadata");
+      await expect(edgeFunctionService.getVersion(ref, slug, first.version!))
+        .rejects.toThrow("Function version artifact does not match its immutable metadata");
+      expect(await edgeFunctionService.getVersion(ref, slug, second.version!)).toMatchObject({
+        version: second.version,
+        is_active: true,
+        source_code: "export default { fetch: () => new Response('second') };",
+      });
+
+      const { projectFunctionsRoutes } = await import("../../src/routes/project-functions");
+      const app = new Elysia().use(projectFunctionsRoutes);
+      const request = (suffix: string) => app.handle(new Request(
+        `http://localhost/v1/projects/${ref}/functions/${slug}/versions${suffix}`,
+        { headers: { Authorization: "Bearer dev-master-token" } },
+      ));
+      expect((await request("")).status).toBe(500);
+      const versionResponse = await request(`/${second.version}`);
+      expect(versionResponse.status).toBe(200);
+      expect(await versionResponse.json()).toMatchObject({
+        version: second.version,
+        source_code: "export default { fetch: () => new Response('second') };",
+      });
+    } finally {
+      await Bun.write(firstArtifact!, firstArtifactContent);
+      await fs.chmod(firstArtifact!, 0o444);
+    }
+  });
+
   test("keeps manifest-less legacy version zero readable without a versioned bundle", async () => {
     const ref = "proj_manifestless_legacy_zero";
     const slug = "legacy-zero";

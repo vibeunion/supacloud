@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.67.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.67.0...management-api-v0.67.1) (2026-09-01)
+
+
+### Bug Fixes
+
+* **management-api:** skip migrated function history at startup ([#1074](https://github.com/vibeunion/supacloud/issues/1074)) ([15f25d1](https://github.com/vibeunion/supacloud/commit/15f25d1e0e1dcfd17101d7b0985e11dab1db82f9))
+
+## [0.67.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.66.1...management-api-v0.67.0) (2026-09-01)
+
+
+### Features
+
+* add first-class edge function framework adapters ([#1072](https://github.com/vibeunion/supacloud/issues/1072)) ([d99f3ea](https://github.com/vibeunion/supacloud/commit/d99f3ea04b333913ad97d302cd722048ea091f44))
+
+
+### Bug Fixes
+
+* **management-api:** isolate immutable function version reads ([#1073](https://github.com/vibeunion/supacloud/issues/1073)) ([1b5cce0](https://github.com/vibeunion/supacloud/commit/1b5cce0f09f8de2de70181eb4fc500334339e9dd))
+
 ## [0.66.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.66.0...management-api-v0.66.1) (2026-08-29)
 
 
