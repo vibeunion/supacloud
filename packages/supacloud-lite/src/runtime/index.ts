@@ -13,7 +13,7 @@ import { InboxMailer } from './auth/inbox.js'
 import { SmsInbox } from './auth/sms-inbox.js'
 import { loadAuthSettings } from './auth/settings.js'
 import { LogBuffer } from './log-buffer.js'
-import { FunctionsHandler, type EdgeFunction } from './functions/handler.js'
+import { FunctionsHandler, type FunctionRegistryValue } from './functions/handler.js'
 import { installDenoShim } from './functions/deno-shim.js'
 import { installPgredisShim, PgredisCache } from './functions/pgredis.js'
 import { Database } from './db/database.js'
@@ -38,7 +38,18 @@ export { SmsInbox, type SmsInboxEntry } from './auth/sms-inbox.js'
 export { LogBuffer, type LogEntry, type LogLevel } from './log-buffer.js'
 export { RealtimeEngine, type RealtimeSocketLike } from './realtime/engine.js'
 export { signJwt, verifyJwt, decodeJwt } from './jwt.js'
-export { FunctionsHandler, type EdgeFunction, type FunctionContext } from './functions/handler.js'
+export {
+  FunctionsHandler,
+  isFrameworkRouterHandler,
+  toFunctionLocalUrl,
+  type EdgeFunction,
+  type FrameworkObjectHandler,
+  type FunctionContext,
+  type FunctionFramework,
+  type FunctionHandler,
+  type FunctionRegistryValue,
+  type LoadedFunction,
+} from './functions/handler.js'
 export { type PgredisCacheBinding } from './functions/pgredis.js'
 export { generateTypes } from './gen-types.js'
 export { installDenoShim } from './functions/deno-shim.js'
@@ -267,7 +278,7 @@ export async function createBackend(config: BackendConfig = {}): Promise<SupaClo
   } catch (error) {
     await failStartup(error)
   }
-  const functions = new FunctionsHandler(fnMap as Map<string, EdgeFunction>, fnEnv, pgredis)
+  const functions = new FunctionsHandler(fnMap as Map<string, FunctionRegistryValue>, fnEnv, pgredis)
 
   async function resolveContext(req: Request, url: URL): Promise<RequestContext | Response> {
     const authz = req.headers.get('authorization')

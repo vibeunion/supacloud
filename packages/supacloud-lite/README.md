@@ -74,6 +74,28 @@ supabase/
 
 `config.toml` 当前支持 Auth、API schema/max rows、Storage bucket/size limit、seed 和 function entrypoint 等常用配置。
 
+#### Function 框架契约（Elysia / Hono）
+
+Function 默认导出除 fetch 函数与 `Deno.serve()` 外，也支持框架路由器对象——Elysia 实例（`handle()`）与 Hono 应用（`fetch()`），与 SupaCloud Edge Runtime 的契约一致：
+
+```ts
+// functions/api/index.ts
+import { Elysia } from 'elysia'
+
+export default new Elysia()
+  .get('/', () => ({ ok: true }))
+  .get('/cases/:id', ({ params }) => params)
+```
+
+框架路由器按 function-local 路径接收请求（`/functions/v1/api/cases/42` → `/cases/42`），与生产 Edge Runtime 的 `toFunctionLocalUrl` 行为一致；普通 fetch 函数与不带 `routes` 的 `{ fetch }` 对象保持原有完整 URL 不变。也可在 `config.toml` 显式声明：
+
+```toml
+[functions.api]
+framework = "elysia"   # fetch（默认）| elysia | hono
+```
+
+注意：浏览器预检（OPTIONS）会转发给框架应用，框架函数应自行挂载 CORS（如 `@elysiajs/cors`），与生产 Edge Runtime 行为一致。
+
 #### Auth 运行方式
 
 Lite 不下载、安装或启动独立的 GoTrue 进程。`/auth/v1/*` 由同一个 Bun 进程中的内置 Auth 实现处理，并与该 Lite 项目的 PGlite `auth` schema 共享生命周期；这避免了 sidecar 的配置、端口和会话一致性负担。
