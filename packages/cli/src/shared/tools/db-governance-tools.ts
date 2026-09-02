@@ -32,11 +32,16 @@ export interface DbToolArguments {
     target?: string;
     database_url?: string;
     schema?: string;
+    lite?: boolean;
+    project_dir?: string;
 }
 
 export interface DbGovernanceToolOptions {
     environment?: NodeJS.ProcessEnv;
     currentWorkingDirectory?: string;
+    liteSpawn?: LiteSpawn;
+    /** Overrides the supacloud-lite binary lookup; null simulates a missing binary (tests). */
+    liteBinary?: string | null;
 }
 
 interface ToolResult {
@@ -158,14 +163,53 @@ async function runExplain(args: DbToolArguments, root: string): Promise<ToolResu
     return textResult(text, text.startsWith("未找到对象"));
 }
 
+interface LiteSubprocessResult {
+    exitCode: number;
+    stdout: string;
+    stderr: string;
+}
+
+type LiteSpawn = (command: string[], cwd: string) => Promise<LiteSubprocessResult>;
+
+const defaultLiteSpawn: LiteSpawn = async (command, cwd) => {
+    const proc = Bun.spawn({ cmd: command, cwd, stdout: "pipe", stderr: "pipe" });
+    const [exitCode, stdout, stderr] = await Promise.all([
+        proc.exited,
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+    ]);
+    return { exitCode, stdout, stderr };
+};
+
+async function runModuleCheckLite(
+    args: DbToolArguments,
+    root: string,
+    spawn: LiteSpawn,
+    liteBinary?: string | null,
+): Promise<ToolResult> {
+    const projectDir = resolve(args.project_dir?.trim() || root);
+    const binary = liteBinary === undefined ? Bun.which("supacloud-lite") : liteBinary;
+    if (!binary) {
+        throw new Error("db module_check --lite 需要本机可用的 supacloud-lite（npm i -g @supacloud/lite，或加入 PATH）");
+    }
+    const command = [binary, "db", "check", "--project-dir", projectDir];
+    if (args.module_file?.trim()) command.push("--module-file", resolve(root, args.module_file.trim()));
+    const result = await spawn(command, projectDir);
+    const output = [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join("\n");
+    return textResult(output || "lite db check 无输出", result.exitCode !== 0);
+}
+
 async function runModuleCheckAction(
     args: DbToolArguments,
     root: string,
     environment: NodeJS.ProcessEnv,
+    spawn: LiteSpawn,
+    liteBinary?: string | null,
 ): Promise<ToolResult> {
+    if (args.lite) return runModuleCheckLite(args, root, spawn, liteBinary);
     const databaseUrl = args.database_url?.trim() || environment.DATABASE_URL?.trim();
     if (!databaseUrl) {
-        throw new Error("db module_check requires --database_url 或环境变量 DATABASE_URL");
+        throw new Error("db module_check requires --database_url、环境变量 DATABASE_URL 或 --lite");
     }
     const modules = await loadDatabaseModules(root, args.module_file);
     const schemas = parseSchemas(args.schema);
@@ -194,9 +238,10 @@ async function runModuleCheckAction(
 export function registerDbGovernanceTools(server: ToolServer, options: DbGovernanceToolOptions = {}): void {
     const environment = options.environment || process.env;
     const fallbackRoot = options.currentWorkingDirectory || process.cwd();
+    const liteSpawn = options.liteSpawn || defaultLiteSpawn;
     server.tool(
         "db",
-        "Local database governance (@supacloud/db): lint declared modules, explain objects, reconcile against a live catalog. Actions: lint, explain, module_check",
+        "Local database governance (@supacloud/db): lint declared modules, explain objects, reconcile against a live catalog or a local SupaCloud Lite project. Actions: lint, explain, module_check",
         {
             action: withDescription(stringEnum(["lint", "explain", "module_check"]), "Database governance action"),
             module: optional(Type.String(), "[lint] Only lint this manifest module (default: all)"),
@@ -205,13 +250,15 @@ export function registerDbGovernanceTools(server: ToolServer, options: DbGoverna
             target: optional(Type.String(), "[explain] Policy / function / table name to explain"),
             database_url: optional(Type.String(), "[module_check] Postgres connection URL (default: DATABASE_URL)"),
             schema: optional(Type.String(), "[module_check] Comma-separated schemas to inspect (default: public)"),
+            lite: optional(Type.Boolean(), "[module_check] Reconcile against a local SupaCloud Lite project (runs supacloud-lite db check)"),
+            project_dir: optional(Type.String(), "[module_check] Lite project directory (with --lite; default: --root)"),
         },
         async (request) => {
             const root = resolve(request.root || fallbackRoot);
             switch (request.action) {
                 case "lint": return runLint(request, root);
                 case "explain": return runExplain(request, root);
-                case "module_check": return runModuleCheckAction(request, root, environment);
+                case "module_check": return runModuleCheckAction(request, root, environment, liteSpawn, options.liteBinary);
                 default:
                     return textResult(`Unknown db action: ${String(request.action)}`, true);
             }

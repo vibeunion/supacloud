@@ -328,6 +328,7 @@ EXAMPLES
   ${preferredCommand} db lint --root . --module_file db/modules.ts
   ${preferredCommand} db explain --target public.cases --module_file db/modules.ts
   ${preferredCommand} db module_check --module_file db/modules.ts --database_url "postgresql://..."
+  ${preferredCommand} db module_check --lite --project_dir .
   ${preferredCommand} edge_functions get_config --ref abc123 --slug hello
   ${preferredCommand} edge_functions deploy --ref abc123 --slug hello --path ./supabase/functions/hello --expected-active-version absent --expected-activation-id legacy
   ${preferredCommand} edge_functions deploy --ref abc123 --slug hello --prebundled-path ./dist/hello.js --expected-sha256 <sha256> --expected-active-version 4 --expected-activation-id <uuid>
