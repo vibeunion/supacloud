@@ -884,6 +884,37 @@ describe("edgeFunctionService log directory preparation", () => {
     expect((await stat(join(projectDirectory, ".logs"))).mode & 0o777).toBe(0o755);
   });
 
+  test("accepts a concurrently created trusted .logs directory", async () => {
+    const projectDirectory = join(functionsRoot, "proj_concurrent_logs");
+    await mkdir(projectDirectory, { recursive: true, mode: 0o700 });
+    const directoryInfo = await lstat(projectDirectory);
+    let lstatCalls = 0;
+    let mkdirCalls = 0;
+
+    await ensureFunctionLogsDirectory(
+      projectDirectory,
+      { user: "supacloud-edge", group: "supacloud-edge", isRoot: false },
+      {
+        lstat: (async () => {
+          lstatCalls += 1;
+          if (lstatCalls === 1) {
+            throw Object.assign(new Error("missing"), { code: "ENOENT" });
+          }
+          return directoryInfo;
+        }) as typeof lstat,
+        mkdir: (async () => {
+          mkdirCalls += 1;
+          throw Object.assign(new Error("created by peer"), { code: "EEXIST" });
+        }) as typeof mkdir,
+        chmod,
+        run: async () => {},
+      },
+    );
+
+    expect(lstatCalls).toBe(2);
+    expect(mkdirCalls).toBe(1);
+  });
+
   test("repairs existing project log directories while ignoring hidden directories", async () => {
     const rootDirectory = join(functionsRoot, "logs-sweep");
     const validProject = join(rootDirectory, "proj_1");

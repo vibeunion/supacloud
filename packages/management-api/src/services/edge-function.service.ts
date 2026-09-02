@@ -503,18 +503,23 @@ export async function ensureFunctionLogsDirectory(
   operations: FunctionLogsOperations = defaultFunctionLogsOperations,
 ): Promise<void> {
   const logDirectory = path.join(functionDirectory, ".logs");
-  const info = await operations.lstat(logDirectory).catch((error: unknown) => {
+  let info = await operations.lstat(logDirectory).catch((error: unknown) => {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw error;
   });
+  if (!info) {
+    try {
+      await operations.mkdir(logDirectory, { mode: 0o755 });
+    } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
+    info = await operations.lstat(logDirectory);
+  }
   if (info?.isSymbolicLink()) {
     throw new Error("Function log directory is not trusted");
   }
   if (info && !info.isDirectory()) {
     throw new Error("Function log directory is not trusted");
-  }
-  if (!info) {
-    await operations.mkdir(logDirectory, { mode: 0o755 });
   }
   if (identity.isRoot) {
     await operations.chmod(logDirectory, 0o755);
