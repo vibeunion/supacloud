@@ -19,13 +19,18 @@ import {
 } from "../utils/project-routing";
 import { mergeProjectConfig, normalizeProjectConfig } from "../utils/project-config";
 import { runtimeEnvService } from "./runtime-env.service";
-import { jwtService } from "./jwt.service";
-import { resolveStoredServiceRoleKey } from "../utils/service-role";
+import {
+    isStoredServiceRoleKeyAligned,
+    resolveAlignedServiceRoleKey,
+} from "../utils/service-role";
 
 async function repairInvalidServiceRoleKey(project: Project): Promise<void> {
-    if (resolveStoredServiceRoleKey(project)) return;
+    if (await isStoredServiceRoleKeyAligned(project)) return;
 
-    const serviceRoleKey = await jwtService.generateServiceRoleKey(project.jwt_secret);
+    const serviceRoleKey = await resolveAlignedServiceRoleKey(project);
+    if (!serviceRoleKey) {
+        throw new Error(`Project ${project.ref} has no usable JWT secret for service-role key repair`);
+    }
     await projectRepository.updateApiKeys(project.ref, {
         jwt_secret: project.jwt_secret,
         anon_key: project.anon_key,
@@ -253,6 +258,7 @@ export class TaskWorker {
                     const res = await realtimeService.registerTenant({
                         projectRef: project_ref,
                         jwtSecret: project.jwt_secret,
+                        projectConfig: project.config,
                         dbName,
                         dbPassword: project.db_password,
                     });

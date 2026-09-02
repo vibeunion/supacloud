@@ -106,6 +106,15 @@ describe("RealtimeService tenant payloads", () => {
       dbName: "postgres",
       dbPassword: "postgres",
       jwtSecret: "super-secret-jwt-token-with-at-least-32-characters-long",
+      projectConfig: {
+        auth: {
+          oauth_server: {
+            jwt_jwks: {
+              keys: [{ kty: "EC", kid: "owner-public", alg: "ES256", crv: "P-256", x: "public-x", y: "public-y" }],
+            },
+          },
+        },
+      },
     };
     const registered = await service.registerTenant(tenantConfig);
     const updated = await service.updateTenant(tenantConfig);
@@ -127,6 +136,18 @@ describe("RealtimeService tenant payloads", () => {
     expect(settings.db_pool).toBe(1);
     expect(settings.subcriber_pool_size).toBe(1);
     expect(settings.subs_pool_size).toBe(1);
+    expect(registerBody.tenant.jwt_jwks).toEqual({
+      keys: [
+        { kty: "EC", kid: "owner-public", alg: "ES256", crv: "P-256", x: "public-x", y: "public-y" },
+        {
+          kty: "oct",
+          kid: "legacy-hs256",
+          alg: "HS256",
+          k: "c3VwZXItc2VjcmV0LWp3dC10b2tlbi13aXRoLWF0LWxlYXN0LTMyLWNoYXJhY3RlcnMtbG9uZw",
+          use: "sig",
+        },
+      ],
+    });
   });
 
   test("reconcile uses the shared authoritative payload builder", () => {

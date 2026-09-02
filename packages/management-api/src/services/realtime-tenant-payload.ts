@@ -1,3 +1,5 @@
+import type { JWK } from "jose";
+
 interface RealtimeTenantPayloadInput {
     projectRef: string;
     dbHost: string;
@@ -5,6 +7,7 @@ interface RealtimeTenantPayloadInput {
     dbName: string;
     adminDbPassword: string;
     jwtSecret: string;
+    jwtJwks?: { keys: JWK[] } | null;
     slotName: string;
 }
 
@@ -39,6 +42,7 @@ export function buildRealtimeTenantPayload(input: RealtimeTenantPayloadInput) {
             external_id: input.projectRef,
             name: `Project ${input.projectRef}`,
             jwt_secret: input.jwtSecret,
+            ...(input.jwtJwks ? { jwt_jwks: input.jwtJwks } : {}),
             extensions: [{
                 type: "postgres_cdc_rls",
                 settings: postgresCdcSettings(input),
