@@ -25,6 +25,13 @@ const baseModule = defineDatabaseModule({
       permission: 'case.create',
     },
   ],
+  triggers: [
+    {
+      name: 'cases_updated_at',
+      table: 'public.cases',
+      source: 'db/triggers/cases_updated_at.sql',
+    },
+  ],
   grants: [
     {
       object: 'public.cases',
@@ -57,6 +64,9 @@ const baseCatalog: DatabaseCatalog = {
       searchPath: 'public',
       language: 'plpgsql',
     },
+  ],
+  triggers: [
+    { schema: 'public', table: 'cases', name: 'cases_updated_at', enabled: true },
   ],
   grants: [
     {
@@ -181,5 +191,40 @@ describe('reconcileModule', () => {
     const report = reconcileModule(baseModule, catalog);
     expect(codes(report)).toContain('grant-drift');
     expect(report.ok).toBe(true);
+  });
+
+  test('missing-trigger：声明的触发器在 catalog 中不存在', () => {
+    const catalog = cloneCatalog();
+    catalog.triggers = [];
+    const report = reconcileModule(baseModule, catalog);
+    expect(report.ok).toBe(false);
+    expect(codes(report)).toContain('missing-trigger');
+  });
+
+  test('undeclared-trigger：归属表上的额外触发器告警（含已禁用），非归属表不告警', () => {
+    const catalog = cloneCatalog();
+    catalog.triggers.push(
+      { schema: 'public', table: 'cases', name: 'cases_extra', enabled: true },
+      { schema: 'public', table: 'cases', name: 'cases_disabled', enabled: false },
+      { schema: 'public', table: 'other_table', name: 'other_trigger', enabled: true },
+    );
+    const report = reconcileModule(baseModule, catalog);
+    const undeclared = report.issues.filter((i) => i.code === 'undeclared-trigger');
+    expect(undeclared).toHaveLength(2);
+    expect(undeclared.every((i) => i.severity === 'warn')).toBe(true);
+    expect(undeclared.map((i) => i.object)).toEqual([
+      'public.cases.cases_extra',
+      'public.cases.cases_disabled',
+    ]);
+    expect(undeclared[1].message).toContain('已禁用');
+    expect(report.ok).toBe(true);
+  });
+
+  test('已声明的禁用触发器不报 undeclared-trigger', () => {
+    const catalog = cloneCatalog();
+    catalog.triggers[0].enabled = false;
+    const report = reconcileModule(baseModule, catalog);
+    expect(codes(report)).not.toContain('undeclared-trigger');
+    expect(codes(report)).not.toContain('missing-trigger');
   });
 });

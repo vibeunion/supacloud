@@ -7,6 +7,11 @@ import type { PolicyOperation } from './module.js';
 
 export interface QueryExecutor {
   query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T[]>;
+  /**
+   * 可选事务封装：提供时 apply 用它包裹 begin/commit/rollback；
+   * 缺省时退化为在 executor 上顺序执行 begin/commit/rollback 语句（mock 友好）。
+   */
+  transaction?<T>(fn: (executor: QueryExecutor) => Promise<T>): Promise<T>;
 }
 
 export interface CatalogTable {
@@ -34,6 +39,14 @@ export interface CatalogFunction {
   language: string;
 }
 
+export interface CatalogTrigger {
+  schema: string;
+  table: string;
+  name: string;
+  /** tgenabled !== 'D'（未被 disable） */
+  enabled: boolean;
+}
+
 export interface CatalogGrant {
   objectSchema: string;
   objectName: string;
@@ -45,6 +58,7 @@ export interface DatabaseCatalog {
   tables: CatalogTable[];
   policies: CatalogPolicy[];
   functions: CatalogFunction[];
+  triggers: CatalogTrigger[];
   grants: CatalogGrant[];
 }
 
@@ -91,6 +105,19 @@ WHERE n.nspname = ANY($1)
 ORDER BY n.nspname, p.proname
 `;
 
+const TRIGGERS_SQL = `
+SELECT n.nspname AS schema,
+       c.relname AS table,
+       t.tgname AS name,
+       t.tgenabled <> 'D' AS enabled
+FROM pg_trigger t
+JOIN pg_class c ON c.oid = t.tgrelid
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE NOT t.tgisinternal
+  AND n.nspname = ANY($1)
+ORDER BY n.nspname, c.relname, t.tgname
+`;
+
 const GRANTS_SQL = `
 SELECT table_schema AS object_schema,
        table_name AS object_name,
@@ -132,6 +159,13 @@ interface FunctionRow {
   language: string;
 }
 
+interface TriggerRow {
+  schema: string;
+  table: string;
+  name: string;
+  enabled: boolean;
+}
+
 interface GrantRow {
   object_schema: string;
   object_name: string;
@@ -161,10 +195,11 @@ export async function readCatalog(
   schemas: string[] = ['public'],
 ): Promise<DatabaseCatalog> {
   const params = [schemas];
-  const [tableRows, policyRows, functionRows, grantRows] = await Promise.all([
+  const [tableRows, policyRows, functionRows, triggerRows, grantRows] = await Promise.all([
     executor.query<TableRow>(TABLES_SQL, params),
     executor.query<PolicyRow>(POLICIES_SQL, params),
     executor.query<FunctionRow>(FUNCTIONS_SQL, params),
+    executor.query<TriggerRow>(TRIGGERS_SQL, params),
     executor.query<GrantRow>(GRANTS_SQL, params),
   ]);
 
@@ -190,6 +225,12 @@ export async function readCatalog(
       security: row.security_definer ? 'definer' : 'invoker',
       searchPath: extractSearchPath(row.config),
       language: row.language,
+    })),
+    triggers: triggerRows.map((row) => ({
+      schema: row.schema,
+      table: row.table,
+      name: row.name,
+      enabled: row.enabled,
     })),
     grants: grantRows.map((row) => ({
       objectSchema: row.object_schema,

@@ -53,12 +53,33 @@ describe('lintSql', () => {
     const issues = lintSql(sql, 'm.sql');
     expect(issues[0].line).toBe(3);
   });
+
+  test('non-idempotent-policy：create policy 前缺少 drop policy if exists', () => {
+    const issues = lintSql(
+      'create policy cases_select on public.cases for select to authenticated using (true);',
+      'p.sql',
+    );
+    expect(codes(issues)).toContain('non-idempotent-policy');
+    expect(issues[0].severity).toBe('warn');
+  });
+
+  test('non-idempotent-policy：先 drop policy if exists 则不命中', () => {
+    const sql =
+      'drop policy if exists cases_select on public.cases;\ncreate policy cases_select on public.cases for select to authenticated using (true);';
+    expect(codes(lintSql(sql, 'p.sql'))).not.toContain('non-idempotent-policy');
+  });
+
+  test('non-idempotent-policy：drop 在 create 之后仍然命中', () => {
+    const sql =
+      'create policy cases_select on public.cases for select to authenticated using (true);\ndrop policy if exists cases_select on public.cases;';
+    expect(codes(lintSql(sql, 'p.sql'))).toContain('non-idempotent-policy');
+  });
 });
 
 describe('lintModule', () => {
   const files: Record<string, string> = {
     'db/policies/cases_select.sql':
-      'alter table public.cases enable row level security;\ncreate policy cases_select on public.cases for select to authenticated using (true);',
+      'alter table public.cases enable row level security;\ndrop policy if exists cases_select on public.cases;\ncreate policy cases_select on public.cases for select to authenticated using (true);',
     'db/functions/case_create.sql':
       'create function public.case_create() returns int language sql security definer set search_path = public as $$ select 1 $$;',
   };
