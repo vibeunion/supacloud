@@ -74,6 +74,7 @@ const ACTION_POLICY: Record<string, ModulePolicy> = {
     ai: { local: ["show_skill", "install_skill"] },
     app: { local: ["generate", "compile", "check", "graph", "explain"] },
     db: { local: ["lint", "explain"], read: ["module_check"] },
+    dev: { read: ["status"], write: ["sync", "watch", "migrate"] },
 };
 
 export interface ExecutionAuthorization {
@@ -100,6 +101,7 @@ export function executionMode(moduleName: string, action: string, args: Record<s
         && ["push_migrations", "baseline_migrations"].includes(action)
         && args.dry_run === true) return "read";
     if (moduleName === "supabase" && action === "push" && args.dry_run === true) return "read";
+    if (moduleName === "dev" && action === "migrate" && args.apply !== true) return "read";
     return declaredMode(moduleName, action);
 }
 
