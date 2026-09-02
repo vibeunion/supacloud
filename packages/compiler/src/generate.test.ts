@@ -124,7 +124,7 @@ describe("generate：application.ts 可被 bun 直接执行", () => {
   });
 
   test("createCompiledModules 返回拓扑序模块描述", () => {
-    const modules = compiled.createCompiledModules({});
+    const modules = compiled.createCompiledModules();
     expect(modules.map((m: { name: string }) => m.name)).toEqual([
       "audit",
       "case",
@@ -141,7 +141,7 @@ describe("generate：application.ts 可被 bun 直接执行", () => {
   });
 
   test("services 实例化与跨模块依赖注入", () => {
-    const modules = compiled.createCompiledModules({});
+    const modules = compiled.createCompiledModules();
     const deps = { dbClient: { kind: "fake-db" } };
 
     const auditServices = modules[0].createServices(deps, {});
@@ -161,7 +161,7 @@ describe("generate：application.ts 可被 bun 直接执行", () => {
   });
 
   test("request scope：ctx 注入且两次调用相互隔离", () => {
-    const modules = compiled.createCompiledModules({});
+    const modules = compiled.createCompiledModules();
     const deps = { dbClient: {} };
     const caseModule = modules[1];
     const services = caseModule.createServices(deps, {
@@ -185,7 +185,7 @@ describe("generate：application.ts 可被 bun 直接执行", () => {
     const contracts = await import(
       pathToFileURL(join(rootDir, "src/features/case/contracts.ts")).href
     );
-    const modules = compiled.createCompiledModules({});
+    const modules = compiled.createCompiledModules();
     const controller = modules[1].controllers[0];
     expect(controller.path).toBe("/cases");
     expect(controller.serviceKey).toBe("caseController");

@@ -181,10 +181,10 @@ export function validateGraph(graph: ApplicationGraph, strict = false): Diagnost
       }
     }
 
-    // command-missing-permission。
+    // command-missing-permission：命令没有权限声明时禁止生成可采用的应用。
     for (const command of module.commands) {
       if (!command.permission) {
-        warn(
+        error(
           "command-missing-permission",
           `模块 ${module.name} 的 command ${command.name} (${command.className}) 未声明 permission`,
           module.file,

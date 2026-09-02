@@ -30,10 +30,10 @@ const INTERFACES = `export interface CompiledRoute {
 export interface CompiledCommand {
   className: string;
   name: string;
-  permission?: string;
-  transaction?: string;
+  permission: string;
+  transaction: "required" | "none";
   audit?: string;
-  idempotency?: string;
+  idempotency: "required" | "none";
 }
 
 export interface CompiledController {
@@ -94,7 +94,7 @@ export async function generateApplication(
     ...(imports.size > 0 ? [""] : []),
     INTERFACES,
     "",
-    "export function createCompiledModules(deps: Record<string, unknown>): CompiledModule[] {",
+    "export function createCompiledModules(): CompiledModule[] {",
     "  return [",
     ...descriptorEntries.map((entry) => indent(entry, 4) + ","),
     "  ];",

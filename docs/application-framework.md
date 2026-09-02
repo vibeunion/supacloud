@@ -94,25 +94,36 @@ const result = await compileProject({
 });
 ```
 
-诊断码：`circular-dependency`、`scope-violation`、`module-boundary`、`unresolved-token`、`duplicate-token`、`duplicate-module`、`duplicate-command`、`duplicate-route`、`route-command-unresolved`、`command-missing-permission`（strict 下为 error）、`missing-deps`。
+诊断码：`circular-dependency`、`scope-violation`、`module-boundary`、`unresolved-token`、`duplicate-token`、`duplicate-module`、`duplicate-command`、`duplicate-route`、`route-command-unresolved`、`command-missing-permission`（始终为 error）、`missing-deps`。
 
 产物：
 
-- `generated/application.ts`：拓扑序静态工厂 `createCompiledModules(deps)`，纯 `new` 实例化
+- `generated/application.ts`：拓扑序静态工厂 `createCompiledModules()`，纯 `new` 实例化
 - `generated/app.manifest.json`：模块/Provider/路由/Command 清单，供 CLI 与部署治理使用
 
 ## 运行（Elysia）
 
 ```ts
-import { createApplication } from "@supacloud/elysia";
+import { createApplication, requireIdempotencyKey } from "@supacloud/elysia";
 import { createCompiledModules } from "./generated/application";
 
 export default createApplication({
   name: "fa-api",
-  modules: createCompiledModules({ dbClient, /* 平台依赖 */ }),
-  commandExecutor: async (invocation, next) => {
-    await authorize(invocation.requestContext, invocation.command.permission);
-    return next();
+  modules: createCompiledModules(),
+  deps: { dbClient },
+  commandGovernance: {
+    authorize: async (invocation) => {
+      await authorize(invocation.requestContext, invocation.command.permission);
+    },
+    idempotency: async (invocation, next) => {
+      const key = requireIdempotencyKey(invocation);
+      return idempotencyStore.run(key, next);
+    },
+    transaction: (invocation, next) => transactionManager.run(invocation, next),
+    audit: {
+      succeeded: (invocation, result) => auditLog.record(invocation, result),
+      failed: (invocation, error) => auditLog.recordFailure(invocation, error),
+    },
   },
 });
 ```
@@ -120,7 +131,8 @@ export default createApplication({
 - application 级服务经 `.decorate()` 挂载，全实例共享
 - request 级 provider 经 `.resolve()` 每请求新建，并发请求互不串扰
 - 路由自动接 TypeBox body/params/query/response 校验（失败返回 422）
-- 绑定 `command` 的路由必须通过 `commandExecutor`；未配置执行器时 fail-closed
+- 绑定 `command` 的路由必须配置 `commandGovernance`；缺少治理配置时应用启动即失败
+- 治理链按授权 → 幂等 → 事务 → 业务处理 → 审计执行；具体存储和事务语义由平台适配器提供
 - `errorMapper` 可把业务异常映射为统一错误协议
 - 部署清单使用 `framework: "elysia"`，Edge Runtime 直接调用 `app.handle(request)`
 

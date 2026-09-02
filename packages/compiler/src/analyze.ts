@@ -279,9 +279,9 @@ function parseModule(
           className: cls.getName() ?? "<anonymous>",
           name: stringLiteralProp(meta, "name") ?? cls.getName() ?? "<anonymous>",
           permission: stringLiteralProp(meta, "permission"),
-          transaction: stringLiteralProp(meta, "transaction"),
+          transaction: commandModeProp(meta, "transaction") ?? "none",
           audit: stringLiteralProp(meta, "audit"),
-          idempotency: stringLiteralProp(meta, "idempotency"),
+          idempotency: commandModeProp(meta, "idempotency") ?? "none",
         });
       }
     }
@@ -309,6 +309,14 @@ function parseModule(
     queries,
     exports,
   };
+}
+
+function commandModeProp(
+  object: ObjectLiteralExpression,
+  name: string,
+): "required" | "none" | undefined {
+  const value = stringLiteralProp(object, name);
+  return value === "required" || value === "none" ? value : undefined;
 }
 
 function parseProvider(

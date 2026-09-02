@@ -40,6 +40,7 @@ export { RealtimeEngine, type RealtimeSocketLike } from './realtime/engine.js'
 export { signJwt, verifyJwt, decodeJwt } from './jwt.js'
 export {
   FunctionsHandler,
+  VERIFIED_JWT_SUBJECT_HEADER,
   isFrameworkRouterHandler,
   toFunctionLocalUrl,
   type EdgeFunction,

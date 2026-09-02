@@ -24,10 +24,10 @@ interface CompiledRoute {
 interface CompiledCommand {
   className: string;
   name: string;
-  permission?: string;
-  transaction?: string;
+  permission: string;
+  transaction: "required" | "none";
   audit?: string;
-  idempotency?: string;
+  idempotency: "required" | "none";
 }
 
 interface CompiledController {
@@ -49,7 +49,7 @@ interface CompiledModule {
     imported?: Record<string, Record<string, unknown>>,
   ): Record<string, unknown>;
   controllers: CompiledController[];
-  commands?: CompiledCommand[];
+  commands: CompiledCommand[];
 }
 ```
 
@@ -61,7 +61,7 @@ Elysia's default behavior (422).
 ## Usage
 
 ```ts
-import { createApplication } from "@supacloud/elysia";
+import { createApplication, requireIdempotencyKey } from "@supacloud/elysia";
 import AuditModule from "./.generated/audit.module";
 import CaseModule from "./.generated/case.module";
 
@@ -69,13 +69,14 @@ const app = createApplication({
   name: "case-service",
   modules: [AuditModule, CaseModule], // topological import order
   deps: { db: createDbClient() },     // platform deps, passed to createServices
-  requestContext: (request) => ({
-    requestId: request.headers.get("x-request-id") ?? crypto.randomUUID(),
-    request,
-  }),
-  commandExecutor: async (invocation, next) => {
-    await authorize(invocation.requestContext, invocation.command.permission);
-    return next();
+  commandGovernance: {
+    authorize: (invocation) => authorize(invocation.requestContext, invocation.command.permission),
+    idempotency: (invocation, next) => idempotencyStore.run(requireIdempotencyKey(invocation), next),
+    transaction: (invocation, next) => transactionManager.run(invocation, next),
+    audit: {
+      succeeded: (invocation, result) => auditLog.record(invocation, result),
+      failed: (invocation, error) => auditLog.recordFailure(invocation, error),
+    },
   },
 });
 
@@ -94,8 +95,11 @@ export default app;
 - Full route paths are `controller.path + route.path` (slashes normalized);
   schema options (`body` / `params` / `query` / `response`) are passed to
   Elysia only when the corresponding field exists.
-- A route with `command` must pass through `commandExecutor`. Missing executors
-  fail closed with `501 COMMAND_EXECUTOR_UNAVAILABLE`.
+- A route with `command` must have `commandGovernance`; missing governance fails
+  at application construction with `COMMAND_GOVERNANCE_UNCONFIGURED`.
+- `createSupaCloudRequestContext` exposes the verified subject from
+  `x-supacloud-jwt-sub`, the request id, bearer token, and idempotency key.
+  The bearer token is intentionally non-enumerable to avoid accidental logs.
 - `errorMapper` can map failures to an application-specific envelope. The
   default response is `{ ok: false, code, message, details? }`.
 
