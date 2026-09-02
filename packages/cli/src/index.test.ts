@@ -778,7 +778,13 @@ describe("supacloud-cli process contract", () => {
             port: 0,
             fetch(request) {
                 requestedPaths.push(new URL(request.url).pathname);
-                return Response.json({ source_code: immutableSource, private: "immutable-source-sentinel" });
+                return Response.json({
+                    source_code: null,
+                    bundle_code: immutableSource,
+                    has_source: false,
+                    has_bundle: true,
+                    private: "immutable-source-sentinel",
+                });
             },
         });
         servers.push(server);
