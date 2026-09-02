@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.11.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.10.0...supacloud-lite-v0.11.0) (2026-09-02)
+
+
+### Features
+
+* **app:** add command governance boundaries ([#1104](https://github.com/vibeunion/supacloud/issues/1104)) ([48b6f4f](https://github.com/vibeunion/supacloud/commit/48b6f4f1dc9c8f474faa325172ee9f20b42d8332))
+* **lite:** add read-only db check against the live catalog ([#1100](https://github.com/vibeunion/supacloud/issues/1100)) ([f5b2efd](https://github.com/vibeunion/supacloud/commit/f5b2efd7635a72c5b21fb9197f1fe2da5bc5a3f6))
+* **lite:** add response body limits and EdgeRuntime.waitUntil support ([#1099](https://github.com/vibeunion/supacloud/issues/1099)) ([4500d9d](https://github.com/vibeunion/supacloud/commit/4500d9d4abc291b7e76add4a6f936463ff9c6d08))
+* **lite:** enforce function limits and capability declarations locally ([#1097](https://github.com/vibeunion/supacloud/issues/1097)) ([1ec0cfb](https://github.com/vibeunion/supacloud/commit/1ec0cfb43226ed2b3b5d4246d55b7cd8b7504a91))
+
 ## [0.10.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.9.2...supacloud-lite-v0.10.0) (2026-09-02)
 
 

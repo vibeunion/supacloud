@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.1.0...compiler-v0.2.0) (2026-09-02)
+
+
+### Features
+
+* **app:** add command governance boundaries ([#1104](https://github.com/vibeunion/supacloud/issues/1104)) ([48b6f4f](https://github.com/vibeunion/supacloud/commit/48b6f4f1dc9c8f474faa325172ee9f20b42d8332))
+* **app:** enforce command governance at runtime ([#1096](https://github.com/vibeunion/supacloud/issues/1096)) ([63f59e0](https://github.com/vibeunion/supacloud/commit/63f59e09bb98835ba3dc414e9fcc3806295850e4))
+* **compiler:** default compiled modules dependency injection to empty map ([#1102](https://github.com/vibeunion/supacloud/issues/1102)) ([9e6f911](https://github.com/vibeunion/supacloud/commit/9e6f911456ef33156fe138a07681b8c5dca0828d))
+
 ## 0.1.0 (2026-09-02)
 
 

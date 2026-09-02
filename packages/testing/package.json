@@ -1,6 +1,6 @@
 {
   "name": "@supacloud/testing",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Testing utilities for SupaCloud applications: provider-override test modules, HTTP test helpers and SQL/RLS test runners",
   "type": "module",
   "main": "./dist/index.js",
