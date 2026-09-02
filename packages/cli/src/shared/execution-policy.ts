@@ -11,6 +11,7 @@ interface ModulePolicy {
 }
 
 const ACTION_POLICY: Record<string, ModulePolicy> = {
+    deploy: { write: ["deploy"] },
     project: {
         read: ["get", "endpoints", "health", "logs", "api_keys", "settings", "tasks", "task_detail", "task_stats", "dlq", "background_settings"],
         write: ["pause", "restore", "task_cancel", "task_retry", "update_background_settings"],
@@ -94,6 +95,7 @@ function declaredMode(moduleName: string, action: string): ExecutionMode | undef
 }
 
 export function executionMode(moduleName: string, action: string, args: Record<string, unknown>): ExecutionMode | undefined {
+    if (moduleName === "deploy" && args.dry_run === true) return "read";
     if (moduleName === "database"
         && ["push_migrations", "baseline_migrations"].includes(action)
         && args.dry_run === true) return "read";
@@ -106,7 +108,7 @@ export function authorizeExecution(
     args: Record<string, unknown>,
     authorization: ExecutionAuthorization,
 ): void {
-    const action = typeof args.action === "string" ? args.action : "";
+    const action = typeof args.action === "string" ? args.action : moduleName === "deploy" ? "deploy" : "";
     if (!action) return;
     const mode = executionMode(moduleName, action, args);
     const { context, confirmProduction } = authorization;

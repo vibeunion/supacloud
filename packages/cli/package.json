@@ -33,7 +33,8 @@
   "dependencies": {
     "@sinclair/typebox": "^0.34.52",
     "@supacloud/compiler": "^0.1.0",
-    "@supacloud/db": "^0.1.0"
+    "@supacloud/db": "^0.1.0",
+    "fflate": "^0.8.3"
   },
   "devDependencies": {
     "@types/bun": "^1.4.0",

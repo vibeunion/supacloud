@@ -46,6 +46,7 @@ explicitly to override host inference.
 npm install -g @supacloud/cli
 
 supacloud-cli status
+supacloud-cli deploy
 supacloud-cli project get
 supacloud-cli project logs --log_type database
 supacloud-cli database query --sql "select now()"
@@ -57,6 +58,43 @@ supacloud-cli supabase push --ref abc123 --dir supabase/migrations --dry_run
 supacloud-cli frontend list --ref abc123
 supacloud-cli frontend list_releases --ref abc123 --id web
 supacloud-cli frontend upload_release --ref abc123 --id web --zip_path ./dist.zip
+```
+
+### One-command frontend deploy
+
+`supacloud-cli deploy` is the normal developer path for a linked frontend. It
+selects the only configured frontend (or matches `frontend.id`), runs the build,
+creates a deterministic immutable release archive, uploads it, activates it with
+optimistic concurrency, and reads the final deployment URL back.
+
+Simple projects usually need no file. Monorepos and nonstandard build layouts
+can add `supacloud.json` once:
+
+```json
+{
+  "frontend": {
+    "id": "web",
+    "buildCommand": "bun run build:web",
+    "outputDirectory": "apps/web/dist"
+  }
+}
+```
+
+```bash
+# Build and deploy the linked frontend.
+supacloud-cli deploy
+
+# Inspect the resolved plan without building or writing remotely.
+supacloud-cli deploy --dry_run
+
+# Publish an output directory already built by CI.
+supacloud-cli deploy --skip_build --output_dir dist
+```
+
+Production profiles retain the standard explicit confirmation gate:
+
+```bash
+supacloud-cli --env production --confirm-production abc123 deploy
 ```
 
 Both `--key value` and `--key=value` syntax are supported. `supacloud-cli status`

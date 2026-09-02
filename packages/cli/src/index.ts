@@ -29,6 +29,7 @@ import { registerDbGovernanceTools } from "./shared/tools/db-governance-tools";
 import { registerScheduledFunctionTools } from "./shared/tools/scheduled-function-tools";
 import { registerMutationTools } from "./shared/tools/mutation-tools";
 import { registerReleaseTools } from "./shared/tools/release-tools";
+import { deployToolSchema, registerDeployTools } from "./shared/tools/deploy-tools";
 import packageMetadata from "../package.json" with { type: "json" };
 
 type ToolEntry = { schema: any; callback: (args: any) => Promise<any> };
@@ -251,6 +252,7 @@ function printHelp(context: ResolvedContext) {
 
 USAGE
 
+  ${preferredCommand} [global flags] deploy [--flags]
   ${preferredCommand} [global flags] <module> <action> [--flags]
   ${preferredCommand} [global flags] status
   ${preferredCommand} --help
@@ -285,6 +287,7 @@ DEFAULT CONTEXT
 EXAMPLES
 
   ${preferredCommand} status
+  ${preferredCommand} deploy
   ${preferredCommand} project get
   ${preferredCommand} project logs --log_type database
   ${preferredCommand} project task_stats
@@ -447,6 +450,16 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
 
     if (context.credentialScope !== "management" || !context.apiUrl || !context.apiToken) {
         registerContextAwareHelp();
+        tools.deploy = {
+            schema: deployToolSchema,
+            callback: async () => ({
+                isError: true,
+                content: [{
+                    type: "text" as const,
+                    text: `⚠️ Deploy requires Management API context. Run \`${preferredCommand} status\` to inspect current detection.`,
+                }],
+            }),
+        };
         Object.assign(tools, captureTools((server) => registerDatabaseTools(server as any, undefined, {
             localOnly: true,
         })));
@@ -522,6 +535,10 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
         applicationOrigin: context.inferredSupabaseUrl || undefined,
     })));
     assign(captureTools((server) => registerFrontendTools(server as any, http)));
+    assign(captureTools((server) => registerDeployTools(server as any, http, {
+        projectRef: context.projectRef || undefined,
+        cwd: process.cwd(),
+    })));
     assign(captureTools((server) => registerGatewayTools(server as any, http, {
         projectRef: context.projectRef || undefined,
     })));
