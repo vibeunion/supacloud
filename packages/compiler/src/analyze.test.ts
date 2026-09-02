@@ -108,7 +108,7 @@ describe("analyzeProject：controller 与路由", () => {
     expect(controller.className).toBe("CaseController");
     expect(controller.path).toBe("/cases");
     expect(controller.scope).toBe("request");
-    expect(controller.deps).toEqual(["CASE_REPOSITORY", "REQUEST_CONTEXT"]);
+    expect(controller.deps).toEqual(["CASE_REPOSITORY", "AUDIT_SERVICE", "REQUEST_CONTEXT"]);
     expect(controller.importPath).toBe("src/features/case/case.controller");
   });
 
@@ -122,6 +122,7 @@ describe("analyzeProject：controller 与路由", () => {
       body: "CreateCaseBody",
       params: "AcceptParams",
       response: "AcceptResult",
+      command: "AcceptCaseCommand",
     });
     expect(controller.schemaImports).toEqual({
       CreateCaseBody: "src/features/case/contracts",

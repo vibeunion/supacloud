@@ -480,6 +480,13 @@ function parseController(el: Expression, ctx: AnalysisContext): ControllerNode |
             if (importPath) schemaImports[schemaExpr.getText()] = importPath;
           }
         }
+        const commandExpr = getProp(optionsArg, "command");
+        if (commandExpr && Node.isIdentifier(commandExpr)) {
+          const commandDecl = resolveDeclaration(commandExpr)[0];
+          route.command = commandDecl && Node.isClassDeclaration(commandDecl)
+            ? (commandDecl.getName() ?? commandExpr.getText())
+            : commandExpr.getText();
+        }
       }
       routes.push(route);
     }

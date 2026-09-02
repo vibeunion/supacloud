@@ -106,8 +106,19 @@ function createCaseModule(captured: Captured): CompiledModule {
             handler: "create",
             body: t.Object({ title: t.String() }),
             response: t.Object({ id: t.String(), title: t.String() }),
+            command: "CreateCaseCommand",
           },
         ],
+      },
+    ],
+    commands: [
+      {
+        className: "CreateCaseCommand",
+        name: "case.create",
+        permission: "case.create",
+        transaction: "required",
+        audit: "case.created",
+        idempotency: "required",
       },
     ],
   };
@@ -132,7 +143,7 @@ function createApp(captured: Captured, options?: Partial<ApplicationOptions>) {
 
 describe("createApplication", () => {
   test("serves GET and POST routes with JSON responses", async () => {
-    const app = createApp({});
+    const app = createApp({}, { commandExecutor: (_invocation, next) => next() });
 
     const getRes = await testRequest(app, "/cases/42", {
       headers: { "x-request-id": "req-get" },
@@ -154,7 +165,7 @@ describe("createApplication", () => {
   });
 
   test("rejects invalid bodies with 422 via Elysia validation", async () => {
-    const app = createApp({});
+    const app = createApp({}, { commandExecutor: (_invocation, next) => next() });
 
     const res = await testRequest(app, "/cases", {
       method: "POST",
@@ -202,6 +213,56 @@ describe("createApplication", () => {
     const res = await testRequest(app, "/cases/7");
     expect(res.status).toBe(200);
     expect(captured.auditService?.entries).toEqual(["case.get:7"]);
+  });
+
+  test("enforces command-bound routes through the configured executor", async () => {
+    const events: string[] = [];
+    const app = createApp({}, {
+      commandExecutor: async (invocation, next) => {
+        events.push(`${invocation.command.name}:${invocation.command.permission}`);
+        return next();
+      },
+    });
+
+    const res = await testRequest(app, "/cases", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "governed" }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ id: "case-1", title: "governed" });
+    expect(events).toEqual(["case.create:case.create"]);
+  });
+
+  test("fails closed when a command-bound route has no executor", async () => {
+    const app = createApp({});
+    const res = await testRequest(app, "/cases", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "blocked" }),
+    });
+    expect(res.status).toBe(501);
+    expect(await res.json()).toMatchObject({
+      ok: false,
+      code: "COMMAND_EXECUTOR_UNAVAILABLE",
+    });
+  });
+
+  test("allows applications to map errors to their public envelope", async () => {
+    const app = createApp({}, {
+      errorMapper: (error, context) => Response.json({
+        ok: false,
+        code: context.frameworkCode,
+        message: error instanceof Error ? error.message : String(error),
+      }, { status: 409 }),
+    });
+    const res = await testRequest(app, "/cases", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "blocked" }),
+    });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ ok: false });
   });
 });
 

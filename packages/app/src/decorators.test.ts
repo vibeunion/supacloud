@@ -128,19 +128,28 @@ describe("@Controller and route decorators", () => {
   test("accumulates routes in declaration order", () => {
     const CreateCaseInput = { type: "object" };
 
+    @Command({ name: "case.create", permission: "case.create" })
+    class CreateCaseCommand {}
+
     @Controller("/cases")
     class CaseController {
       @Get("/:id")
       get() {}
 
-      @Post("/", { body: CreateCaseInput })
+      @Post("/", { body: CreateCaseInput, command: CreateCaseCommand })
       create() {}
     }
 
     expect(getControllerMeta(CaseController)).toEqual({ path: "/cases" });
     expect(getRoutes(CaseController)).toEqual([
       { method: "GET", path: "/:id", handler: "get" },
-      { method: "POST", path: "/", handler: "create", body: CreateCaseInput },
+      {
+        method: "POST",
+        path: "/",
+        handler: "create",
+        body: CreateCaseInput,
+        command: CreateCaseCommand,
+      },
     ]);
   });
 });

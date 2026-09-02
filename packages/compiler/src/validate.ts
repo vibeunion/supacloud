@@ -65,6 +65,66 @@ export function validateGraph(graph: ApplicationGraph, strict = false): Diagnost
     diagnostics.push({ severity: strict ? "error" : "warn", code, message, file, line });
   };
 
+  const modulesByName = new Map<string, ModuleNode>();
+  const commandsByName = new Map<string, { module: ModuleNode; className: string }>();
+  const routesByKey = new Map<string, { module: ModuleNode; controller: ControllerNode }>();
+
+  for (const module of graph.modules) {
+    const previousModule = modulesByName.get(module.name);
+    if (previousModule) {
+      error(
+        "duplicate-module",
+        `模块名 ${module.name} 重复（首次声明于 ${previousModule.file}:${previousModule.line}）`,
+        module.file,
+        module.line,
+      );
+    } else {
+      modulesByName.set(module.name, module);
+    }
+
+    for (const command of module.commands) {
+      const previousName = commandsByName.get(command.name);
+      if (previousName) {
+        error(
+          "duplicate-command",
+          `command 名 ${command.name} 重复（首次由模块 ${previousName.module.name} 的 ${previousName.className} 声明）`,
+          module.file,
+          module.line,
+        );
+      } else {
+        commandsByName.set(command.name, { module, className: command.className });
+      }
+    }
+
+  }
+
+  for (const module of graph.modules) {
+    for (const controller of module.controllers) {
+      for (const route of controller.routes) {
+        const fullPath = joinRoutePaths(controller.path, route.path);
+        const key = `${route.method} ${fullPath}`;
+        const previous = routesByKey.get(key);
+        if (previous) {
+          error(
+            "duplicate-route",
+            `路由 ${key} 重复（首次声明于模块 ${previous.module.name} 的 ${previous.controller.className}）`,
+            controller.file,
+          );
+        } else {
+          routesByKey.set(key, { module, controller });
+        }
+
+        if (route.command && !module.commands.some((command) => command.className === route.command)) {
+          error(
+            "route-command-unresolved",
+            `路由 ${key} 绑定的 command 类 ${route.command} 未在模块 ${module.name} 声明`,
+            controller.file,
+          );
+        }
+      }
+    }
+  }
+
   for (const module of graph.modules) {
     // duplicate-token：同一 token 在同模块重复注册。
     const seen = new Map<string, ProviderNode>();
@@ -136,6 +196,12 @@ export function validateGraph(graph: ApplicationGraph, strict = false): Diagnost
 
   diagnostics.push(...detectCycles(graph, resolveDep));
   return diagnostics;
+}
+
+function joinRoutePaths(prefix: string, path: string): string {
+  const joined = `${prefix}/${path}`.replace(/\/{2,}/g, "/");
+  const normalized = joined.length > 1 ? joined.replace(/\/+$/, "") : joined;
+  return normalized.replace(/:[^/]+/g, ":param");
 }
 
 /** provider 级循环依赖检测（DFS，报环路径）。 */

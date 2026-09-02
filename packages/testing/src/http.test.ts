@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { testJson, testRequest } from "./http";
+import { testJson, testJsonError, testRequest } from "./http";
 import type { HandleLike } from "./http";
 
 /** Echo handle: reports the request method and URL as JSON. */
@@ -43,5 +43,36 @@ describe("testJson", () => {
     expect(status).toBe(201);
     expect(body.method).toBe("PUT");
     expect(body.url).toBe("http://localhost/cases?page=1");
+  });
+});
+
+describe("testJsonError", () => {
+  test("validates the standard error envelope", async () => {
+    const app: HandleLike = {
+      handle: () => Response.json({
+        ok: false,
+        code: "FORBIDDEN",
+        message: "Forbidden",
+      }, { status: 403 }),
+    };
+    const body = await testJsonError(app, "/cases", {
+      status: 403,
+      code: "FORBIDDEN",
+    });
+    expect(body.message).toBe("Forbidden");
+  });
+
+  test("rejects mismatched status or code", async () => {
+    const app: HandleLike = {
+      handle: () => Response.json({
+        ok: false,
+        code: "NOT_FOUND",
+        message: "Not Found",
+      }, { status: 404 }),
+    };
+    expect(testJsonError(app, "/cases", {
+      status: 403,
+      code: "FORBIDDEN",
+    })).rejects.toThrow("Expected status 403");
   });
 });

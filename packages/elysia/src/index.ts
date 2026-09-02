@@ -14,6 +14,17 @@ export interface CompiledRoute {
   params?: unknown;
   query?: unknown;
   response?: unknown;
+  /** Class name of the @Command explicitly bound to this route. */
+  command?: string;
+}
+
+export interface CompiledCommand {
+  className: string;
+  name: string;
+  permission?: string;
+  transaction?: string;
+  audit?: string;
+  idempotency?: string;
 }
 
 export interface CompiledController {
@@ -34,8 +45,11 @@ export interface CompiledModule {
   createRequestScope?(
     services: Record<string, unknown>,
     ctx: unknown,
+    imported?: Record<string, Record<string, unknown>>,
   ): Record<string, unknown>;
   controllers: CompiledController[];
+  /** Optional for compatibility with previously generated modules. */
+  commands?: CompiledCommand[];
 }
 
 // ---------------------------------------------------------------------------
@@ -46,6 +60,55 @@ export type RequestContextFactory = (
   request: Request,
 ) => unknown | Promise<unknown>;
 
+export interface CommandInvocation {
+  command: CompiledCommand;
+  input: {
+    body: unknown;
+    params: Record<string, string>;
+    query: Record<string, unknown>;
+  };
+  request: Request;
+  requestContext: unknown;
+  scope?: Record<string, unknown>;
+  services: Record<string, unknown>;
+}
+
+export type CommandExecutor = (
+  invocation: CommandInvocation,
+  next: () => unknown | Promise<unknown>,
+) => unknown | Promise<unknown>;
+
+export interface ApplicationErrorOptions {
+  status?: number;
+  code?: string;
+  details?: unknown;
+}
+
+export class ApplicationError extends Error {
+  readonly status: number;
+  readonly code: string;
+  readonly details?: unknown;
+
+  constructor(message: string, options: ApplicationErrorOptions = {}) {
+    super(message);
+    this.name = "ApplicationError";
+    this.status = options.status ?? 500;
+    this.code = options.code ?? "INTERNAL_ERROR";
+    this.details = options.details;
+  }
+}
+
+export interface ErrorContext {
+  request: Request;
+  requestContext: unknown;
+  frameworkCode: string | number | undefined;
+}
+
+export type ErrorMapper = (
+  error: unknown,
+  context: ErrorContext,
+) => Response | undefined | Promise<Response | undefined>;
+
 export interface ApplicationOptions {
   name?: string;
   /** Modules in topological import order. */
@@ -54,6 +117,10 @@ export interface ApplicationOptions {
   deps?: Record<string, unknown>;
   /** Builds the per-request context object. Defaults to { requestId, request }. */
   requestContext?: RequestContextFactory;
+  /** Enforces permission/audit/idempotency policy for command-bound routes. */
+  commandExecutor?: CommandExecutor;
+  /** Maps framework or application failures to the public HTTP contract. */
+  errorMapper?: ErrorMapper;
 }
 
 const defaultRequestContext: RequestContextFactory = (request) => ({
@@ -73,6 +140,7 @@ interface HttpContext {
   query: Record<string, unknown>;
   request: Request;
   scope?: Record<string, unknown>;
+  requestContext?: unknown;
 }
 
 type ControllerInstance = Record<
@@ -98,18 +166,21 @@ export function createModulePlugin(
   compiled: CompiledModule,
   services: Record<string, unknown>,
   ctxFactory: RequestContextFactory = defaultRequestContext,
+  options: Pick<ApplicationOptions, "commandExecutor" | "errorMapper"> = {},
+  imported: Record<string, Record<string, unknown>> = {},
 ): Elysia {
+  const requestContexts = new WeakMap<Request, unknown>();
   const plugin = new Elysia({ name: `supacloud:${compiled.name}` }).decorate(
     "services",
     services,
   );
 
-  if (compiled.createRequestScope) {
-    const createRequestScope = compiled.createRequestScope;
-    plugin.resolve(async ({ request }) => ({
-      scope: createRequestScope(services, await ctxFactory(request)),
-    }));
-  }
+  const createRequestScope = compiled.createRequestScope;
+  plugin.resolve(async ({ request }) => {
+    const requestContext = await ctxFactory(request);
+    requestContexts.set(request, requestContext);
+    return { requestContext };
+  });
 
   for (const controller of compiled.controllers) {
     for (const route of controller.routes) {
@@ -121,8 +192,12 @@ export function createModulePlugin(
       if (route.response !== undefined) schema.response = route.response;
 
       const handler = async (ctx: HttpContext) => {
+        const requestContext = ctx.requestContext ?? await ctxFactory(ctx.request);
+        const requestScope = createRequestScope
+          ? createRequestScope(services, requestContext, imported)
+          : undefined;
         const source =
-          controller.scope === "request" ? ctx.scope : services;
+          controller.scope === "request" ? requestScope : services;
         const instance = source?.[controller.serviceKey] as
           | ControllerInstance
           | undefined;
@@ -132,13 +207,37 @@ export function createModulePlugin(
             `supacloud: controller "${controller.serviceKey}" has no handler "${route.handler}" in scope "${controller.scope}"`,
           );
         }
-        return method.call(instance, {
+        const input = {
           body: ctx.body,
           params: ctx.params,
           query: ctx.query,
           request: ctx.request,
-          scope: ctx.scope,
-        });
+          scope: requestScope,
+          requestContext,
+        };
+        const invoke = () => method.call(instance, input);
+        if (!route.command) return invoke();
+
+        const command = compiled.commands?.find((item) => item.className === route.command);
+        if (!command) {
+          throw new ApplicationError(`Command "${route.command}" is not registered`, {
+            code: "COMMAND_NOT_REGISTERED",
+          });
+        }
+        if (!options.commandExecutor) {
+          throw new ApplicationError(`Command "${command.name}" has no executor`, {
+            status: 501,
+            code: "COMMAND_EXECUTOR_UNAVAILABLE",
+          });
+        }
+        return options.commandExecutor({
+          command,
+          input,
+          request: ctx.request,
+          requestContext,
+          scope: requestScope,
+          services,
+        }, invoke);
       };
 
       switch (route.method) {
@@ -161,7 +260,43 @@ export function createModulePlugin(
     }
   }
 
+  plugin.onError({ as: "global" }, async ({ code, error, request }) => {
+    const context: ErrorContext = {
+      request,
+      requestContext: requestContexts.get(request),
+      frameworkCode: code,
+    };
+    const mapped = await options.errorMapper?.(error, context);
+    return mapped ?? defaultErrorResponse(error, code);
+  });
+
   return plugin as unknown as Elysia;
+}
+
+export function defaultErrorResponse(
+  error: unknown,
+  frameworkCode?: string | number,
+): Response {
+  if (error instanceof ApplicationError) {
+    return Response.json({
+      ok: false,
+      code: error.code,
+      message: error.message,
+      ...(error.details === undefined ? {} : { details: error.details }),
+    }, { status: error.status });
+  }
+  if (frameworkCode === "VALIDATION") {
+    return Response.json({
+      ok: false,
+      code: "VALIDATION_ERROR",
+      message: "Request validation failed",
+    }, { status: 422 });
+  }
+  return Response.json({
+    ok: false,
+    code: "INTERNAL_ERROR",
+    message: "Internal Server Error",
+  }, { status: 500 });
 }
 
 /**
@@ -173,13 +308,21 @@ export function createModulePlugin(
  */
 export function createApplication(options: ApplicationOptions): Elysia {
   const app = new Elysia({ name: options.name ?? "supacloud:app" });
-  const ctxFactory = options.requestContext ?? defaultRequestContext;
+  const configuredContextFactory = options.requestContext ?? defaultRequestContext;
+  const contextCache = new WeakMap<Request, Promise<unknown>>();
+  const ctxFactory: RequestContextFactory = (request) => {
+    const cached = contextCache.get(request);
+    if (cached) return cached;
+    const pending = Promise.resolve(configuredContextFactory(request));
+    contextCache.set(request, pending);
+    return pending;
+  };
   const imported: Record<string, Record<string, unknown>> = {};
 
   for (const module of options.modules) {
     const services = module.createServices(options.deps ?? {}, imported);
     imported[module.name] = services;
-    app.use(createModulePlugin(module, services, ctxFactory));
+    app.use(createModulePlugin(module, services, ctxFactory, options, imported));
   }
 
   return app as unknown as Elysia;
