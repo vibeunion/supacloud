@@ -114,4 +114,41 @@ export class MysteryService {
 })
 export class MiscModule {}
 `,
+
+  "src/routes.ts": `import { Command, Controller, Module, Post } from "./runtime";
+
+@Command({ name: "bad.duplicate", permission: "bad.write" })
+export class FirstCommand {}
+
+@Command({ name: "bad.duplicate", permission: "bad.write" })
+export class SecondCommand {}
+
+export class MissingCommand {}
+
+@Controller("/duplicate")
+export class FirstController {
+  @Post("/", { command: FirstCommand })
+  execute() {}
+}
+
+@Controller("/duplicate")
+export class SecondController {
+  @Post("/", { command: MissingCommand })
+  execute() {}
+}
+
+@Module({
+  name: "route-one",
+  providers: [FirstCommand],
+  controllers: [FirstController],
+})
+export class FirstRouteModule {}
+
+@Module({
+  name: "route-two",
+  providers: [SecondCommand],
+  controllers: [SecondController],
+})
+export class SecondRouteModule {}
+`,
 };

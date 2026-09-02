@@ -18,6 +18,16 @@ interface CompiledRoute {
   params?: unknown;
   query?: unknown;
   response?: unknown;
+  command?: string;  // @Command class name bound to the route
+}
+
+interface CompiledCommand {
+  className: string;
+  name: string;
+  permission?: string;
+  transaction?: string;
+  audit?: string;
+  idempotency?: string;
 }
 
 interface CompiledController {
@@ -36,8 +46,10 @@ interface CompiledModule {
   createRequestScope?(
     services: Record<string, unknown>,
     ctx: unknown,
+    imported?: Record<string, Record<string, unknown>>,
   ): Record<string, unknown>;
   controllers: CompiledController[];
+  commands?: CompiledCommand[];
 }
 ```
 
@@ -61,6 +73,10 @@ const app = createApplication({
     requestId: request.headers.get("x-request-id") ?? crypto.randomUUID(),
     request,
   }),
+  commandExecutor: async (invocation, next) => {
+    await authorize(invocation.requestContext, invocation.command.permission);
+    return next();
+  },
 });
 
 export default app;
@@ -78,6 +94,10 @@ export default app;
 - Full route paths are `controller.path + route.path` (slashes normalized);
   schema options (`body` / `params` / `query` / `response`) are passed to
   Elysia only when the corresponding field exists.
+- A route with `command` must pass through `commandExecutor`. Missing executors
+  fail closed with `501 COMMAND_EXECUTOR_UNAVAILABLE`.
+- `errorMapper` can map failures to an application-specific envelope. The
+  default response is `{ ok: false, code, message, details? }`.
 
 Lower-level building blocks:
 

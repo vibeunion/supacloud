@@ -30,17 +30,22 @@ assertions. Circular dependencies throw with the ring path. Only
 application-level instantiation is supported — re-create request/job scoped
 providers yourself with a context object.
 
-## HTTP helpers — `testRequest` / `testJson`
+## HTTP helpers — `testRequest` / `testJson` / `testJsonError`
 
 Dispatch in-memory requests against any fetch-style handle (Elysia included):
 
 ```ts
-import { testJson, testRequest } from "@supacloud/testing";
+import { testJson, testJsonError, testRequest } from "@supacloud/testing";
 
 const res = await testRequest(app, "/health");
 const { status, body } = await testJson<{ id: string }>(app, "/cases", {
   method: "POST",
   body: JSON.stringify({ title: "hello" }),
+});
+
+await testJsonError(app, "/cases/forbidden", {
+  status: 403,
+  code: "FORBIDDEN",
 });
 ```
 

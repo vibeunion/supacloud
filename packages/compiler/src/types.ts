@@ -44,6 +44,8 @@ export interface RouteNode {
   params?: string;
   query?: string;
   response?: string;
+  /** @Command-decorated class explicitly bound by the route. */
+  command?: string;
 }
 
 export interface ControllerNode {

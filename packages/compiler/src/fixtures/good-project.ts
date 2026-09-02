@@ -115,13 +115,15 @@ export class AcceptCaseCommand {
 `,
 
   "src/features/case/case.controller.ts": `import { Controller, Inject, Post, REQUEST_CONTEXT } from "../../runtime";
-import { CASE_REPOSITORY } from "../shared/tokens";
+import { AUDIT_SERVICE, CASE_REPOSITORY } from "../shared/tokens";
+import { AcceptCaseCommand } from "./accept-case.command";
 import { AcceptParams, AcceptResult, CreateCaseBody } from "./contracts";
 
 @Controller("/cases")
 export class CaseController {
   constructor(
     @Inject(CASE_REPOSITORY) readonly repository: unknown,
+    @Inject(AUDIT_SERVICE) readonly audit: unknown,
     @Inject(REQUEST_CONTEXT) readonly ctx: unknown,
   ) {}
 
@@ -129,6 +131,7 @@ export class CaseController {
     body: CreateCaseBody,
     params: AcceptParams,
     response: AcceptResult,
+    command: AcceptCaseCommand,
   })
   accept(): { ok: boolean } {
     return { ok: true };
