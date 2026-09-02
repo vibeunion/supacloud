@@ -29,7 +29,7 @@ import { registerDbGovernanceTools } from "./shared/tools/db-governance-tools";
 import { registerScheduledFunctionTools } from "./shared/tools/scheduled-function-tools";
 import { registerMutationTools } from "./shared/tools/mutation-tools";
 import { registerReleaseTools } from "./shared/tools/release-tools";
-import { deployToolSchema, registerDeployTools } from "./shared/tools/deploy-tools";
+import { deployToolSchema, findDeployConfigRoot, registerDeployTools } from "./shared/tools/deploy-tools";
 import packageMetadata from "../package.json" with { type: "json" };
 
 type ToolEntry = { schema: any; callback: (args: any) => Promise<any> };
@@ -288,6 +288,8 @@ EXAMPLES
 
   ${preferredCommand} status
   ${preferredCommand} deploy
+  ${preferredCommand} deploy --target web
+  ${preferredCommand} deploy --target api
   ${preferredCommand} project get
   ${preferredCommand} project logs --log_type database
   ${preferredCommand} project task_stats
@@ -522,9 +524,10 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
     assign(captureTools((server) => registerAuthTools(server as any, http)));
     assign(captureTools((server) => registerOAuthClientTools(server as any, http)));
     assign(captureTools((server) => registerStorageTools(server as any, http)));
-    assign(captureTools((server) => registerAdvancedTools(server as any, http, process.env, {
+    const advancedTools = captureTools((server) => registerAdvancedTools(server as any, http, process.env, {
         readOnly: context.readOnly,
-    })));
+    }));
+    assign(advancedTools);
     assign(captureTools((server) => registerScheduledFunctionTools(server as any, http, process.env, {
         readOnly: context.readOnly,
     })));
@@ -538,6 +541,7 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
     assign(captureTools((server) => registerDeployTools(server as any, http, {
         projectRef: context.projectRef || undefined,
         cwd: process.cwd(),
+        edgeFunctionDeploy: advancedTools.edge_functions?.callback,
     })));
     assign(captureTools((server) => registerGatewayTools(server as any, http, {
         projectRef: context.projectRef || undefined,
@@ -562,7 +566,8 @@ async function main() {
     }
     const globalOptions = parseGlobalOptions(rawArgs);
     const args = globalOptions.args;
-    const context = resolveSupaCloudContext(process.env, process.cwd(), {
+    const contextDirectory = args[0] === "deploy" ? await findDeployConfigRoot(process.cwd()) : process.cwd();
+    const context = resolveSupaCloudContext(process.env, contextDirectory, {
         environmentName: globalOptions.environmentName,
         envFile: globalOptions.envFile,
     });

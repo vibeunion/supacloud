@@ -60,35 +60,77 @@ supacloud-cli frontend list_releases --ref abc123 --id web
 supacloud-cli frontend upload_release --ref abc123 --id web --zip_path ./dist.zip
 ```
 
-### One-command frontend deploy
+### One-command deploy
 
-`supacloud-cli deploy` is the normal developer path for a linked frontend. It
-selects the only configured frontend (or matches `frontend.id`), runs the build,
-creates a deterministic immutable release archive, uploads it, activates it with
-optimistic concurrency, and reads the final deployment URL back.
+`supacloud-cli deploy` is the normal developer path for a linked application. It
+supports a frontend and backend living in separate directories. Frontend targets
+use immutable static releases; `edge_function` targets use the existing verified
+Edge Function bundle protocol. The command runs the target build, publishes only
+that target, and reads the final identity back.
 
-Simple projects usually need no file. Monorepos and nonstandard build layouts
-can add `supacloud.json` once:
+Simple single-frontend projects usually need no file. Monorepos should add a
+repository-root `supacloud.json`:
 
 ```json
 {
-  "frontend": {
-    "id": "web",
-    "buildCommand": "bun run build:web",
-    "outputDirectory": "apps/web/dist"
+  "defaultTarget": "web",
+  "targets": {
+    "web": {
+      "type": "frontend",
+      "root": "apps/web",
+      "id": "web",
+      "buildCommand": "bun run build",
+      "outputDirectory": "dist"
+    },
+    "api": {
+      "type": "edge_function",
+      "root": "apps/api",
+      "slug": "api",
+      "buildCommand": "bun run bundle",
+      "bundleDirectory": "dist",
+      "entrypoint": "index.ts",
+      "verifyJwt": true,
+      "minify": true
+    }
   }
 }
 ```
 
 ```bash
-# Build and deploy the linked frontend.
+# From a target workspace, the target is selected automatically.
+cd apps/web
+supacloud-cli deploy
+cd ../api
 supacloud-cli deploy
 
+# From the repository root, select a target explicitly.
+supacloud-cli deploy --target web
+supacloud-cli deploy --target api
+
 # Inspect the resolved plan without building or writing remotely.
-supacloud-cli deploy --dry_run
+supacloud-cli deploy --target web --dry_run
 
 # Publish an output directory already built by CI.
-supacloud-cli deploy --skip_build --output_dir dist
+supacloud-cli deploy --target web --skip_build --output_dir dist
+```
+
+When multiple targets exist and the command runs at the repository root, it
+fails closed unless `defaultTarget` or `--target` is provided. Running inside a
+target directory selects the deepest matching `root`. Relative output and bundle
+directories are resolved against that target root, while lockfiles are detected
+from the target root up to the repository root.
+
+The legacy shape remains supported:
+
+```json
+{
+  "frontend": {
+    "id": "web",
+    "root": "apps/web",
+    "buildCommand": "bun run build",
+    "outputDirectory": "dist"
+  }
+}
 ```
 
 Production profiles retain the standard explicit confirmation gate:
