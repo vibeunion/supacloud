@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
+import { testTimeout } from './helpers/timeouts.js'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -43,7 +44,7 @@ describe('read-only CLI commands', () => {
     expect(inspection.stdout).toContain('current_schema')
     expect(inspection.stdout).not.toContain('pending_schema')
     await expectLiveSchemaUnchanged(projectDir)
-  }, 30_000)
+  }, testTimeout(30_000))
 
   test('gen types reads the live schema without applying pending migrations or seed', async () => {
     const projectDir = await projectWithPendingMigration()
@@ -54,7 +55,7 @@ describe('read-only CLI commands', () => {
     expect(generatedTypes.stdout).toContain('current_schema')
     expect(generatedTypes.stdout).not.toContain('pending_schema')
     await expectLiveSchemaUnchanged(projectDir)
-  }, 30_000)
+  }, testTimeout(30_000))
 })
 
 async function projectWithPendingMigration(): Promise<string> {

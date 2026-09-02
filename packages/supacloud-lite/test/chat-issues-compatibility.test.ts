@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test'
+import { testTimeout } from './helpers/timeouts.js'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -82,4 +83,4 @@ test('兼容 Supabase 聊天项目的 messages 迁移、即时读取、Realtime 
     await running.close()
     await rm(projectDir, { recursive: true, force: true })
   }
-}, 60_000)
+}, testTimeout(60_000))
