@@ -8,8 +8,8 @@ import type { PolicyOperation } from './module.js';
 export interface QueryExecutor {
   query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T[]>;
   /**
-   * 可选事务封装：提供时 apply 用它包裹 begin/commit/rollback；
-   * 缺省时退化为在 executor 上顺序执行 begin/commit/rollback 语句（mock 友好）。
+   * 事务封装。回调收到的 executor 必须绑定到同一个数据库连接。
+   * 只读 catalog 操作不要求实现；applyModulePlan 会 fail-closed。
    */
   transaction?<T>(fn: (executor: QueryExecutor) => Promise<T>): Promise<T>;
 }

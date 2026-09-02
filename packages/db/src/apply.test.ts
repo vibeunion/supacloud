@@ -120,13 +120,15 @@ const HAPPY_CATALOG_ROUTES = [
 interface MockOptions {
   /** step.sql 含此片段时抛错，模拟执行失败 */
   failOn?: string;
-  /** 提供 transaction(fn)，走托管事务路径 */
-  withTransaction?: boolean;
+  /** 不提供 transaction(fn)，验证 apply fail-closed。 */
+  withoutTransaction?: boolean;
+  /** Catalog 回读时返回已禁用 trigger。 */
+  disabledTrigger?: boolean;
 }
 
 /**
  * 内存版 mock executor：用 Map 模拟 _supacloud.db_object_ledger，
- * begin/commit/rollback 语义真实生效（事务内写入 pending，commit 落账，rollback 丢弃）。
+ * transaction(fn) 语义真实生效（事务内写入 pending，commit 落账，rollback 丢弃）。
  */
 function mockApplyExecutor(options: MockOptions = {}): {
   executor: QueryExecutor;
@@ -153,19 +155,6 @@ function mockApplyExecutor(options: MockOptions = {}): {
   const executor: QueryExecutor = {
     query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T[]> {
       calls.push({ sql, params });
-      const head = sql.trim().toLowerCase();
-      if (head === 'begin') {
-        beginTx();
-        return Promise.resolve([]);
-      }
-      if (head === 'commit') {
-        commitTx();
-        return Promise.resolve([]);
-      }
-      if (head === 'rollback') {
-        rollbackTx();
-        return Promise.resolve([]);
-      }
       if (options.failOn && sql.includes(options.failOn)) {
         return Promise.reject(new Error(`boom: ${options.failOn}`));
       }
@@ -184,19 +173,27 @@ function mockApplyExecutor(options: MockOptions = {}): {
         return Promise.resolve([]);
       }
       const route = HAPPY_CATALOG_ROUTES.find((r) => sql.includes(r.match));
+      if (options.disabledTrigger && route?.match === 'pg_trigger') {
+        return Promise.resolve([
+          { schema: 'public', table: 'cases', name: 'cases_updated_at', enabled: false },
+        ] as T[]);
+      }
       return Promise.resolve((route?.rows ?? []) as T[]);
     },
   };
 
-  if (options.withTransaction) {
+  if (!options.withoutTransaction) {
     executor.transaction = async <T>(fn: (tx: QueryExecutor) => Promise<T>): Promise<T> => {
+      calls.push({ sql: '<transaction:begin>' });
       beginTx();
       try {
         const value = await fn(executor);
         commitTx();
+        calls.push({ sql: '<transaction:commit>' });
         return value;
       } catch (error) {
         rollbackTx();
+        calls.push({ sql: '<transaction:rollback>' });
         throw error;
       }
     };
@@ -242,7 +239,7 @@ describe('applyModulePlan', () => {
     expect(executed.some((sql) => sql.includes('create policy'))).toBe(false);
   });
 
-  test('失败回滚：第二步抛错则 ROLLBACK，ledger 无写入，后续 step 不执行', async () => {
+  test('失败回滚：第二步抛错时 ledger 无写入，后续 step 不执行', async () => {
     const { executor, calls, ledger } = mockApplyExecutor({ failOn: 'create policy' });
     const result = await applyModulePlan(executor, await makePlan());
     expect(result.failed?.step).toBe('public.cases.cases_select');
@@ -250,8 +247,8 @@ describe('applyModulePlan', () => {
     expect(result.applied).toEqual([]);
     expect(result.verified).toEqual([]);
     const executed = sqls(calls);
-    expect(executed.filter((sql) => sql.trim() === 'rollback')).toHaveLength(1);
-    expect(executed.some((sql) => sql.trim() === 'commit')).toBe(false);
+    expect(executed).toContain('<transaction:rollback>');
+    expect(executed).not.toContain('<transaction:commit>');
     expect(executed.some((sql) => sql.includes('create trigger'))).toBe(false);
     expect(ledger.size).toBe(0);
   });
@@ -271,27 +268,27 @@ describe('applyModulePlan', () => {
     expect(calls).toHaveLength(0);
   });
 
-  test('advisory lock/unlock 成对调用且包裹事务', async () => {
+  test('transaction-scoped advisory lock runs inside the transaction', async () => {
     const { executor, calls } = mockApplyExecutor();
     await applyModulePlan(executor, await makePlan());
     const executed = sqls(calls);
-    const lockIndex = executed.findIndex((sql) => sql.includes('pg_advisory_lock'));
-    const unlockIndex = executed.findIndex((sql) => sql.includes('pg_advisory_unlock'));
-    const beginIndex = executed.findIndex((sql) => sql.trim() === 'begin');
-    const commitIndex = executed.findIndex((sql) => sql.trim() === 'commit');
+    const lockIndex = executed.findIndex((sql) => sql.includes('pg_advisory_xact_lock'));
+    const beginIndex = executed.indexOf('<transaction:begin>');
+    const commitIndex = executed.indexOf('<transaction:commit>');
     expect(lockIndex).toBeGreaterThanOrEqual(0);
-    expect(unlockIndex).toBeGreaterThan(commitIndex);
-    expect(lockIndex).toBeLessThan(beginIndex);
-    // 失败路径同样必须 unlock
+    expect(lockIndex).toBeGreaterThan(beginIndex);
+    expect(lockIndex).toBeLessThan(commitIndex);
+    expect(executed.some((sql) => sql.includes('pg_advisory_lock('))).toBe(false);
+    expect(executed.some((sql) => sql.includes('pg_advisory_unlock'))).toBe(false);
+    // 失败路径同样获取事务锁，回滚自动释放
     const failing = mockApplyExecutor({ failOn: 'create policy' });
     await applyModulePlan(failing.executor, await makePlan());
     const failingSqls = sqls(failing.calls);
-    expect(failingSqls.some((sql) => sql.includes('pg_advisory_lock'))).toBe(true);
-    expect(failingSqls.some((sql) => sql.includes('pg_advisory_unlock'))).toBe(true);
+    expect(failingSqls.some((sql) => sql.includes('pg_advisory_xact_lock'))).toBe(true);
   });
 
-  test('executor 提供 transaction 时走托管事务，不直接执行 begin/commit', async () => {
-    const { executor, calls, ledger } = mockApplyExecutor({ withTransaction: true });
+  test('executor 提供 transaction 时不直接执行 begin/commit SQL', async () => {
+    const { executor, calls, ledger } = mockApplyExecutor();
     const result = await applyModulePlan(executor, await makePlan());
     expect(result.applied).toEqual(STEP_NAMES);
     expect(result.failed).toBeUndefined();
@@ -303,11 +300,28 @@ describe('applyModulePlan', () => {
 
   test('托管事务路径失败同样回滚并返回 failed', async () => {
     const { executor, ledger } = mockApplyExecutor({
-      withTransaction: true,
       failOn: 'create policy',
     });
     const result = await applyModulePlan(executor, await makePlan());
     expect(result.failed?.step).toBe('public.cases.cases_select');
     expect(ledger.size).toBe(0);
+  });
+
+  test('缺少 transaction adapter 时 fail-closed，且不触碰数据库', async () => {
+    const { executor, calls } = mockApplyExecutor({ withoutTransaction: true });
+    await expect(applyModulePlan(executor, await makePlan())).rejects.toThrow(
+      'requires QueryExecutor.transaction',
+    );
+    expect(calls).toHaveLength(0);
+  });
+
+  test('catalog 回读发现 trigger 已禁用时验证失败', async () => {
+    const { executor } = mockApplyExecutor({ disabledTrigger: true });
+    const result = await applyModulePlan(executor, await makePlan());
+    expect(result.failed).toEqual({
+      step: 'public.cases.cases_updated_at',
+      error: '应用后 catalog 中未找到或未启用 trigger public.cases.cases_updated_at',
+    });
+    expect(result.verified).not.toContain('public.cases.cases_updated_at');
   });
 });

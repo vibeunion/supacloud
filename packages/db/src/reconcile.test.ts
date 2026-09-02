@@ -220,11 +220,13 @@ describe('reconcileModule', () => {
     expect(report.ok).toBe(true);
   });
 
-  test('已声明的禁用触发器不报 undeclared-trigger', () => {
+  test('已声明但禁用的触发器报 disabled-trigger', () => {
     const catalog = cloneCatalog();
     catalog.triggers[0].enabled = false;
     const report = reconcileModule(baseModule, catalog);
     expect(codes(report)).not.toContain('undeclared-trigger');
     expect(codes(report)).not.toContain('missing-trigger');
+    expect(codes(report)).toContain('disabled-trigger');
+    expect(report.ok).toBe(false);
   });
 });

@@ -25,8 +25,10 @@ const LEDGER_TABLE_SQL = `create table if not exists _supacloud.db_object_ledger
   sha256 text not null,
   applied_at timestamptz not null default now()
 )`;
-const LOCK_SQL = `select pg_advisory_lock(hashtext('supacloud-db-apply'))`;
-const UNLOCK_SQL = `select pg_advisory_unlock(hashtext('supacloud-db-apply'))`;
+// Transaction-scoped lock: must execute through the transaction-bound executor.
+// A session lock acquired before transaction() can land on a different pool
+// connection and fail to serialize the actual apply operation.
+const LOCK_SQL = `select pg_advisory_xact_lock(hashtext('supacloud-db-apply'))`;
 const LEDGER_READ_SQL =
   'select sha256 from _supacloud.db_object_ledger where object_identity = $1';
 const LEDGER_UPSERT_SQL = `insert into _supacloud.db_object_ledger (object_identity, module, sha256)
@@ -50,31 +52,25 @@ function toFailure(error: unknown): { step: string; error: string } {
 }
 
 /**
- * 在事务中执行 fn：executor 提供 transaction 时交给它管理 begin/commit/rollback，
- * 否则在当前 executor 上顺序执行 begin/commit/rollback 语句。
+ * 在事务中执行 fn。transaction callback 必须提供绑定到同一连接的 executor，
+ * 否则 advisory lock 无法可靠覆盖实际写入。
  * 失败时回滚并返回失败信息（不抛出）。
  */
 async function runInTransaction(
   executor: QueryExecutor,
   fn: (tx: QueryExecutor) => Promise<void>,
 ): Promise<{ step: string; error: string } | undefined> {
-  if (executor.transaction) {
-    try {
-      await executor.transaction(fn);
-      return undefined;
-    } catch (error) {
-      return toFailure(error);
-    }
+  if (!executor.transaction) {
+    throw new Error(
+      'applyModulePlan requires QueryExecutor.transaction with a connection-bound executor',
+    );
   }
-  await executor.query('begin');
   try {
-    await fn(executor);
+    await executor.transaction(fn);
+    return undefined;
   } catch (error) {
-    await executor.query('rollback');
     return toFailure(error);
   }
-  await executor.query('commit');
-  return undefined;
 }
 
 /** step 声明的对象在 catalog 中是否存在 */
@@ -95,7 +91,7 @@ function existsInCatalog(step: PlanStep, catalog: DatabaseCatalog): boolean {
       const [schema, table, ...rest] = step.name.split('.');
       const name = rest.join('.');
       return catalog.triggers.some(
-        (t) => t.schema === schema && t.table === table && t.name === name,
+        (t) => t.schema === schema && t.table === table && t.name === name && t.enabled,
       );
     }
     case 'grant': {
@@ -143,41 +139,36 @@ export async function applyModulePlan(
     verified: [],
   };
 
-  // 确保账本表存在
-  await executor.query(LEDGER_SCHEMA_SQL);
-  await executor.query(LEDGER_TABLE_SQL);
-
-  await executor.query(LOCK_SQL);
-  try {
-    // 事务内先写入局部数组，提交成功后才算真正 applied/skipped（回滚则丢弃）
-    const applied: string[] = [];
-    const skipped: string[] = [];
-    const failed = await runInTransaction(executor, async (tx) => {
-      for (const step of plan.steps) {
-        const identity = `${step.kind}:${step.name}`;
-        const rows = await tx.query<{ sha256: string }>(LEDGER_READ_SQL, [identity]);
-        if (rows[0]?.sha256 === step.sha256) {
-          skipped.push(step.name);
-          continue;
-        }
-        try {
-          await tx.query(step.sql);
-          await tx.query(LEDGER_UPSERT_SQL, [identity, plan.module, step.sha256]);
-        } catch (error) {
-          throw new StepFailure(step.name, error);
-        }
-        applied.push(step.name);
+  // 事务内先写入局部数组，提交成功后才算真正 applied/skipped（回滚则丢弃）。
+  // 锁也在同一事务内获取，确保连接池/托管 transaction 实现下锁覆盖实际执行。
+  const applied: string[] = [];
+  const skipped: string[] = [];
+  const failed = await runInTransaction(executor, async (tx) => {
+    await tx.query(LOCK_SQL);
+    await tx.query(LEDGER_SCHEMA_SQL);
+    await tx.query(LEDGER_TABLE_SQL);
+    for (const step of plan.steps) {
+      const identity = `${step.kind}:${step.name}`;
+      const rows = await tx.query<{ sha256: string }>(LEDGER_READ_SQL, [identity]);
+      if (rows[0]?.sha256 === step.sha256) {
+        skipped.push(step.name);
+        continue;
       }
-    });
-    if (failed) {
-      result.failed = failed;
-      return result;
+      try {
+        await tx.query(step.sql);
+        await tx.query(LEDGER_UPSERT_SQL, [identity, plan.module, step.sha256]);
+      } catch (error) {
+        throw new StepFailure(step.name, error);
+      }
+      applied.push(step.name);
     }
-    result.applied = applied;
-    result.skipped = skipped;
-  } finally {
-    await executor.query(UNLOCK_SQL);
+  });
+  if (failed) {
+    result.failed = failed;
+    return result;
   }
+  result.applied = applied;
+  result.skipped = skipped;
 
   // 应用后读回 catalog，验证声明对象真实存在
   const catalog = await readCatalog(executor, planSchemas(plan));
@@ -187,7 +178,7 @@ export async function applyModulePlan(
     } else {
       result.failed = {
         step: step.name,
-        error: `应用后 catalog 中未找到 ${step.kind} ${step.name}`,
+        error: `应用后 catalog 中未找到或未启用 ${step.kind} ${step.name}`,
       };
       break;
     }

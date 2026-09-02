@@ -116,7 +116,7 @@ export function reconcileModule(
   // missing-trigger：声明的触发器在 catalog 中不存在（按 schema.table + name 匹配）
   for (const trigger of module.triggers) {
     const [schema, table] = splitQualifiedName(trigger.table);
-    const found = catalog.triggers.some(
+    const found = catalog.triggers.find(
       (ct) => ct.schema === schema && ct.table === table && ct.name === trigger.name,
     );
     if (!found) {
@@ -125,6 +125,13 @@ export function reconcileModule(
         'missing-trigger',
         `${trigger.table}.${trigger.name}`,
         `声明的触发器 ${trigger.name} 在表 ${trigger.table} 的 catalog 中不存在`,
+      );
+    } else if (!found.enabled) {
+      push(
+        'error',
+        'disabled-trigger',
+        `${trigger.table}.${trigger.name}`,
+        `声明的触发器 ${trigger.name} 在表 ${trigger.table} 上已禁用`,
       );
     }
   }
