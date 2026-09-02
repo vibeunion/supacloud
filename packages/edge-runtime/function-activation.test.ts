@@ -65,4 +65,10 @@ describe("Edge Function capability and limit profiles", () => {
     expect(() => parseEdgeFunctionActivationManifest(JSON.stringify({ limits: { timeout_ms: 0 } })))
       .toThrow("invalid limits.timeout_ms");
   });
+
+  test("rejects system-managed secrets in capability profiles", () => {
+    expect(() => parseEdgeFunctionActivationManifest(JSON.stringify({
+      capabilities: { secrets: ["SUPABASE_SERVICE_ROLE_KEY"] },
+    }))).toThrow("reserved capabilities.secrets");
+  });
 });

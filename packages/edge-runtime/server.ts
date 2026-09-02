@@ -931,6 +931,19 @@ function functionCapabilities(value: unknown): FunctionCapabilities {
   const secrets = list("secrets");
   const outboundHosts = list("outbound_hosts");
   const bindings = list("bindings");
+  if (secrets?.some((name) => {
+    const normalized = name.trim().toUpperCase();
+    return normalized === "JWT_SECRET"
+      || normalized === "JWT_KEYS"
+      || normalized === "JWT_JWKS"
+      || normalized === "X_PROJECT_REF"
+      || normalized.startsWith("SUPABASE_")
+      || normalized.startsWith("SUPACLOUD_")
+      || normalized.startsWith("SUPAOAUTH_")
+      || normalized.startsWith("ADMIN_SSO_");
+  })) {
+    throw new Error("Function activation capabilities.secrets contains a reserved system secret");
+  }
   return {
     ...(secrets ? { secrets } : {}),
     ...(outboundHosts ? { outbound_hosts: outboundHosts } : {}),

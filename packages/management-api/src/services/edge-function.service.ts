@@ -6,6 +6,7 @@ import path from "path";
 import fs from "fs/promises";
 import type { Dirent } from "node:fs";
 import { acquireSupaCloudUpgradeLock, type SupaCloudUpgradeLock } from "../upgrade-lock";
+import { isSystemManagedProjectSecretName } from "../utils/project-secret-visibility";
 import {
   validateEdgeRuntimePreheat,
   type ExpectedEdgeRuntimePreheat,
@@ -582,7 +583,11 @@ function validatedFunctionCapabilities(value: unknown): EdgeFunctionCapabilities
   const record = value as Record<string, unknown>;
   const capabilities: EdgeFunctionCapabilities = {};
   if (record.secrets !== undefined) {
-    capabilities.secrets = validatedStringList(record.secrets, "capabilities.secrets");
+    const secrets = validatedStringList(record.secrets, "capabilities.secrets");
+    if (secrets.some((name) => isSystemManagedProjectSecretName(name))) {
+      throw new Error("Function config contains reserved capabilities.secrets");
+    }
+    capabilities.secrets = secrets;
   }
   if (record.outbound_hosts !== undefined) {
     const hosts = validatedStringList(record.outbound_hosts, "capabilities.outbound_hosts");

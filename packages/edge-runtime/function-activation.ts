@@ -143,11 +143,25 @@ function parseCapabilities(value: unknown): EdgeFunctionActivationConfig["capabi
       throw new Error(`Function activation config contains invalid capabilities.${key}`);
     }
   }
+  const secrets = strings(value.secrets);
+  if (secrets?.some((name) => {
+    const normalized = name.trim().toUpperCase();
+    return normalized === "JWT_SECRET"
+      || normalized === "JWT_KEYS"
+      || normalized === "JWT_JWKS"
+      || normalized === "X_PROJECT_REF"
+      || normalized.startsWith("SUPABASE_")
+      || normalized.startsWith("SUPACLOUD_")
+      || normalized.startsWith("SUPAOAUTH_")
+      || normalized.startsWith("ADMIN_SSO_");
+  })) {
+    throw new Error("Function activation config contains reserved capabilities.secrets");
+  }
   if (value.background !== undefined && typeof value.background !== "boolean") {
     throw new Error("Function activation config contains invalid capabilities.background");
   }
   return {
-    ...(strings(value.secrets) ? { secrets: strings(value.secrets) } : {}),
+    ...(secrets ? { secrets } : {}),
     ...(strings(value.outbound_hosts) ? { outbound_hosts: strings(value.outbound_hosts) } : {}),
     ...(strings(value.bindings) ? { bindings: strings(value.bindings) } : {}),
     ...(typeof value.background === "boolean" ? { background: value.background } : {}),
