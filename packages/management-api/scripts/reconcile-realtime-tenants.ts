@@ -2,8 +2,8 @@ import { config } from "../src/config";
 import { sql, resolveDbName, resolveSlotName } from "../src/db";
 import { buildRealtimeTenantPayload } from "../src/services/realtime-tenant-payload";
 import { logger } from "../src/utils/logger";
-import { resolveProjectJwtVerificationMaterial } from "../src/utils/project-jwt";
 import { createHmac } from "node:crypto";
+import { resolveProjectJwtVerificationMaterial } from "../src/utils/project-jwt";
 
 type ProjectRow = {
   ref: string;

@@ -3,6 +3,7 @@ import { logger } from "../utils/logger";
 import path from "node:path";
 import { existsSync, mkdirSync } from "node:fs";
 import { config } from "../config";
+import { ensureEdgeFunctionLogsForExistingProjects } from "../services/edge-function.service";
 
 const EDGE_RUNTIME_CHILD_ENV_KEYS = [
   "PATH",
@@ -14,6 +15,7 @@ const EDGE_RUNTIME_CHILD_ENV_KEYS = [
   "EDGE_RUNTIME_PORT",
   "EDGE_RUNTIME_VERSION",
   "EDGE_RUNTIME_WORKER_PATH",
+  "SUPACLOUD_EDGE_RUNTIME_SOURCE_IDENTITY_FILE",
   "EDGE_FUNCTION_TIMEOUT_MS",
   "EDGE_BACKGROUND_FUNCTION_TIMEOUT_MS",
   "EDGE_BACKGROUND_PREHEAT_MODE",
@@ -152,6 +154,7 @@ export class EdgeRuntimeManager {
 
     const edgeFunctionsDir = this.resolveFunctionsDir();
     mkdirSync(edgeFunctionsDir, { recursive: true });
+    await ensureEdgeFunctionLogsForExistingProjects(edgeFunctionsDir);
     const instanceId = crypto.randomUUID();
 
     this.proc = Bun.spawn(edgeRuntimeCommand(runnerPath), {

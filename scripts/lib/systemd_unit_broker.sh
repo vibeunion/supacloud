@@ -74,11 +74,12 @@ validate_unit_content() {
         key="${BASH_REMATCH[1]}"
         value="${BASH_REMATCH[2]}"
         case "$section:$key" in
-            Unit:After|Unit:Description|Unit:Documentation|Unit:Wants|\
+            Unit:After|Unit:Description|Unit:Documentation|Unit:StartLimitBurst|\
+            Unit:StartLimitIntervalSec|Unit:Wants|\
             Service:CPUWeight|Service:Environment|Service:EnvironmentFile|Service:ExecReload|Service:ExecStart|\
             Service:Group|Service:LimitNOFILE|Service:MemoryMax|Service:NoNewPrivileges|Service:ProtectHome|\
-            Service:ProtectSystem|Service:ReadOnlyPaths|Service:Restart|Service:RestartSec|Service:StartLimitBurst|\
-            Service:StartLimitIntervalSec|Service:SyslogIdentifier|Service:Type|Service:User|Service:WorkingDirectory|\
+            Service:ProtectSystem|Service:ReadOnlyPaths|Service:Restart|Service:RestartSec|\
+            Service:SyslogIdentifier|Service:Type|Service:User|Service:WorkingDirectory|\
             Install:WantedBy) ;;
             *) return 1 ;;
         esac

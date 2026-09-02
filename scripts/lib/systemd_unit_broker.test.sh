@@ -28,7 +28,7 @@ render_canonical_postgrest_unit() {
       import { renderPostgrestSystemdTemplate } from "./src/services/postgrest-systemd-template";
       process.stdout.write(renderPostgrestSystemdTemplate({
         postgrestRts: "-N2 -A8m",
-        postgrestBinary: "/opt/supacloud/postgrest-v16.1/bin/postgrest",
+        postgrestBinary: "/opt/supacloud/postgrest-v16.2/bin/postgrest",
         tenantConfigDir: "/etc/supabase/tenants",
         memoryMax: "64M",
         cpuWeight: 20,
@@ -49,6 +49,13 @@ PATH="$TMP_DIR/bin:$PATH" bash "$TMP_DIR/broker.sh" "$token"
 grep -Fq 'ExecStart=/usr/local/libexec/supacloud/postgrest-launcher %i' "$TMP_DIR/units/supacloud-pgrst@.service"
 [[ ! -e "$TMP_DIR/requests/$token.request" ]]
 [[ ! -e "$TMP_DIR/requests/$token.unit" ]]
+
+printf 'operation=install\nunit_name=supacloud-pgrst@.service\n' > "$TMP_DIR/requests/$token.request"
+printf '[Unit]\nDescription=misplaced\n[Service]\nType=oneshot\nUser=supacloud-%%i\nGroup=supacloud-%%i\nNoNewPrivileges=true\nStartLimitBurst=3\nStartLimitIntervalSec=60\nEnvironmentFile=/etc/supabase/tenants/%%i.env\nExecStart=/usr/local/libexec/supacloud/postgrest-launcher %%i\n[Install]\nWantedBy=multi-user.target\n' > "$TMP_DIR/requests/$token.unit"
+if PATH="$TMP_DIR/bin:$PATH" bash "$TMP_DIR/broker.sh" "$token" >/dev/null 2>&1; then
+  echo "broker accepted Service-scoped start limits" >&2
+  exit 1
+fi
 
 printf 'operation=install\nunit_name=supacloud-pgrst@.service\n' > "$TMP_DIR/requests/$token.request"
 printf '[Unit]\nDescription=test\n[Service]\nType=oneshot\nUser=supacloud-%%i\nGroup=supacloud-%%i\nNoNewPrivileges=true\nEnvironmentFile=/etc/supabase/tenants/%%i.env\nExecStart=/usr/local/libexec/supacloud/postgrest-launcher %%i\n[Install]\nWantedBy=multi-user.target\n' > "$TMP_DIR/requests/$token.unit"

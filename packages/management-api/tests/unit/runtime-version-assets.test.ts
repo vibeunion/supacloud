@@ -32,10 +32,27 @@ function readDocumentedComponentVersion(notes: string, component: string): strin
   return currentVersion;
 }
 
+function systemdDirectiveSections(source: string, directive: string): string[] {
+  let section = "";
+  const sections: string[] = [];
+  for (const rawLine of source.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    const sectionMatch = line.match(/^\[([A-Za-z]+)\]$/);
+    if (sectionMatch) {
+      section = sectionMatch[1]!;
+      continue;
+    }
+    if (line.startsWith(`${directive}=`)) sections.push(section);
+  }
+  return sections;
+}
+
 function readRealtimeImageVersion(systemdUnit: string): string {
-  const version = systemdUnit.match(/^Environment=REALTIME_IMAGE=.*:(v[^\s]+)$/m)?.[1];
+  const version = systemdUnit.match(
+    /^Environment=REALTIME_SLOT_ISOLATION_RUNTIME_VERSION=([^\s]+)$/m,
+  )?.[1];
   if (!version) throw new Error("Missing Realtime image version");
-  return version;
+  return `v${version}`;
 }
 
 describe("runtime companion version assets", () => {
@@ -392,6 +409,13 @@ describe("runtime companion version assets", () => {
     expect(edgeUnit).not.toContain("lsof -iTCP");
     expect(edgeUnit).not.toContain("kill -9");
     expect(installer).toContain("render_edge_runtime_systemd_unit");
+    expect(installer).toContain("prepare_management_edge_runtime_source");
+    expect(installer).toContain("activate_management_edge_runtime_source");
+    expect(installer).toContain("commit_management_edge_runtime_source");
+    expect(installer).toContain("rollback_management_edge_runtime_source");
+    expect(installer).toContain("supacloud_wait_edge_runtime_source_identity");
+    expect(installer).not.toContain('cp -rf "$EDGE_RT_SRC"/* /opt/supacloud/edge-runtime/');
+    expect(installer).toContain('SUPACLOUD_EDGE_RUNTIME_SOURCE_IDENTITY_FILE');
     expect(installer).not.toContain('cp "${SYSTEMD_SRC}/supacloud-edge-runtime.service" /etc/systemd/system/supacloud-edge-runtime.service');
     expect(installer).not.toContain("lsof -iTCP");
     expect(installer).not.toContain("kill -9 \\${pid}");
@@ -426,7 +450,7 @@ describe("runtime companion version assets", () => {
     expect(installer).toContain(
       'supacloud_restore_file_snapshot "$MANAGEMENT_EDGE_PRIVILEGE_DROPIN" "${transaction_dir}/edge-privilege-dropin"',
     );
-    expect(installer.match(/ensure_management_edge_runtime_ready/g)).toHaveLength(3);
+    expect(installer.match(/ensure_management_edge_runtime_ready/g)?.length ?? 0).toBeGreaterThanOrEqual(3);
     expect(installer).toContain("systemctl enable --now supacloud-edge-runtime");
     expect(installer).toContain('http://127.0.0.1:${runtime_port}/health');
     expect(managementUnit).toContain("SystemCallFilter=@system-service @chown");
@@ -1244,7 +1268,7 @@ describe("runtime companion version assets", () => {
     const installer = readRepoFile("install.sh");
     const upgrade = readRepoFile("scripts/lib/gotrue_upgrade.sh");
 
-    expect(readShellConstant(upgrade, "SUPACLOUD_GOTRUE_DEFAULT_VERSION")).toBe("v2.195.0");
+    expect(readShellConstant(upgrade, "SUPACLOUD_GOTRUE_DEFAULT_VERSION")).toBe("v2.196.0");
     expect(installer).toContain('source "${SCRIPT_DIR}/scripts/lib/gotrue_upgrade.sh"');
     expect(installer).toContain(
       'local GOTRUE_VERSION="${GOTRUE_VERSION:-$SUPACLOUD_GOTRUE_DEFAULT_VERSION}"',
@@ -1255,24 +1279,36 @@ describe("runtime companion version assets", () => {
     expect(upgrade).toContain(
       'SUPACLOUD_GOTRUE_RELEASE_ASSET="auth-${target_version}-${SUPACLOUD_GOTRUE_RELEASE_ARCH}.tar.xz"',
     );
-    expect(upgrade).toContain("6f8065fcd708df7c09c83e1fb96b0c9507f6e2600e6a78a540153b92a49cd1f9");
-    expect(upgrade).toContain("49aa6a9578756d4f19e6f65aa9298021de8fbb9d952bf86b3806cf8e760932ae");
+    expect(upgrade).toContain("0d35d4c06a9ae673d06bc8579aeef6bba6f7551fa7842f9fcdac33ec926e360c");
+    expect(upgrade).toContain("6a769c0995578dcf208f43036a814daee741c560078d29df7821025f58652d9b");
     expect(upgrade).toContain("supacloud_download_url");
     expect(upgrade).toContain("supacloud_install_pinned_tar_xz_binary");
     expect(upgrade).not.toContain(".tar.gz");
   });
 
-  test("tenant runtime installs PostgREST and requires the pinned GoTrue release", () => {
+  test("installer upgrades PostgREST globally while tenant starts only attest pinned runtimes", () => {
+    const installer = readRepoFile("install.sh");
     const runtime = readRepoFile("scripts/lib/tenant_runtime.sh");
-    const upgrade = readRepoFile("scripts/lib/gotrue_upgrade.sh");
+    const gotrueUpgrade = readRepoFile("scripts/lib/gotrue_upgrade.sh");
+    const postgrestUpgrade = readRepoFile("scripts/lib/postgrest_upgrade.sh");
 
-    expect(runtime).toContain('local version="${POSTGREST_VERSION:-v16.1}"');
-    expect(runtime).toContain('x86_64) arch="linux-static-x86-64"');
-    expect(runtime).toContain('aarch64) arch="linux-static-aarch64"');
-    expect(runtime).toContain("postgrest-${version}-${arch}.tar.xz");
+    expect(runtime).toContain('local version="${POSTGREST_VERSION:-$POSTGREST_DEFAULT_VERSION}"');
+    expect(runtime).toContain('installed_version=$(postgrest_binary_version "$POSTGREST_BIN")');
+    expect(runtime).toContain('if [ "$installed_version" = "$version" ]; then');
+    expect(runtime).toContain("run the explicit SupaCloud installer/upgrade");
+    expect(runtime).toContain("POSTGREST_VERSION must be a v-prefixed release");
+    expect(installer).toContain('source "${SCRIPT_DIR}/scripts/lib/postgrest_upgrade.sh"');
+    expect(installer).toContain('supacloud_upgrade_postgrest_binary "$POSTGREST_BIN"');
+    expect(postgrestUpgrade).toContain('SUPACLOUD_POSTGREST_RELEASE_ARCH="linux-static-x86-64"');
+    expect(postgrestUpgrade).toContain('SUPACLOUD_POSTGREST_RELEASE_ARCH="linux-static-aarch64"');
+    expect(postgrestUpgrade).toContain('supacloud_postgrest_active_units > "$active_units"');
+    expect(postgrestUpgrade).toContain('supacloud_stop_postgrest_units "$active_units" "$stopped_units"');
+    expect(postgrestUpgrade).toContain('supacloud_restart_postgrest_units "$active_units" "$binary_path" "$target_version"');
+    expect(postgrestUpgrade).toContain("supacloud_rollback_postgrest_upgrade");
+    expect(postgrestUpgrade).toContain("expected v-prefixed release");
 
     expect(readShellConstant(runtime, "GOTRUE_DEFAULT_VERSION")).toBe(
-      readShellConstant(upgrade, "SUPACLOUD_GOTRUE_DEFAULT_VERSION"),
+      readShellConstant(gotrueUpgrade, "SUPACLOUD_GOTRUE_DEFAULT_VERSION"),
     );
     expect(runtime).toContain('local required_version="${GOTRUE_VERSION:-$GOTRUE_DEFAULT_VERSION}"');
     expect(runtime).toContain('installed_version=$(gotrue_binary_version "$GOTRUE_BIN")');
@@ -1282,6 +1318,34 @@ describe("runtime companion version assets", () => {
     expect(runtime).not.toContain('local version="v12.2.3"');
     expect(runtime).not.toContain('local version="v2.189.0"');
     expect(runtime).not.toContain("linux-static-x64");
+  });
+
+  test("systemd start limits remain Unit-scoped and legacy templates are rewritten", () => {
+    const sources = [
+      readRepoFile("install.sh"),
+      readRepoFile("infrastructure/systemd/supacloud.service"),
+      readRepoFile("scripts/lib/tenant_runtime.sh"),
+      readRepoFile("scripts/lib/gotrue_upgrade.sh"),
+      readRepoFile("packages/management-api/src/services/postgrest-systemd-template.ts"),
+      readRepoFile("packages/management-api/src/services/tenant-runtime.service.ts"),
+    ];
+
+    for (const source of sources) {
+      for (const directive of ["StartLimitBurst", "StartLimitIntervalSec"]) {
+        const sections = systemdDirectiveSections(source, directive);
+        expect(sections.length).toBeGreaterThan(0);
+        expect(sections.every((section) => section === "Unit")).toBe(true);
+      }
+      const restartSections = systemdDirectiveSections(source, "RestartSec");
+      expect(restartSections.length).toBeGreaterThan(0);
+      expect(restartSections.every((section) => section === "Service")).toBe(true);
+    }
+
+    expect(sources[3]).toContain("supacloud_render_gotrue_systemd_unit");
+    expect(sources[3]).toContain('User=supacloud-%i');
+    expect(sources[3]).toContain('supacloud_restart_gotrue_units "$active_units" "$target_version" true');
+    expect(sources[2]).toContain('! systemd_unit_has_canonical_start_limits "$pgrst_unit"');
+    expect(sources[2]).toContain('! systemd_unit_has_canonical_start_limits "$gotrue_unit"');
   });
 
   test("platform component defaults stay aligned across installers, CI, and Compose", () => {
@@ -1300,18 +1364,29 @@ describe("runtime companion version assets", () => {
     expect(installer).toContain('CADDY_VERSION:-2.11.4');
     expect(caddyBuilder).toContain('CADDY_VERSION="${CADDY_VERSION:-v2.11.4}"');
 
-    expect(runtime).toContain('POSTGREST_DEFAULT_VERSION="v16.1"');
-    expect(runtime).toContain('GOTRUE_DEFAULT_VERSION="v2.195.0"');
-    for (const source of [installer, realtimeUnit, workflow]) {
-      expect(source).toContain("public.ecr.aws/supabase/realtime:v2.129.0");
-    }
+    expect(runtime).toContain('POSTGREST_DEFAULT_VERSION="v16.2"');
+    expect(runtime).toContain('GOTRUE_DEFAULT_VERSION="v2.196.0"');
+    const realtimeDigest =
+      "sha256:974f7db71f140f54c63c8d7a8d8643109704c3ee99ff735678a803fdfbfdcefb";
+    expect(installer).toContain('REALTIME_BASE_IMAGE="public.ecr.aws/supabase/realtime:v2.133.0"');
+    expect(installer).toContain(
+      `REALTIME_PINNED_IMAGE="public.ecr.aws/supabase/realtime@${realtimeDigest}"`,
+    );
+    expect(realtimeUnit).toContain(
+      `Environment=REALTIME_IMAGE=public.ecr.aws/supabase/realtime@${realtimeDigest}`,
+    );
+    expect(realtimeUnit).toContain(
+      "Environment=REALTIME_SLOT_ISOLATION_RUNTIME_VERSION=2.133.0",
+    );
+    expect(workflow).toContain("image: public.ecr.aws/supabase/realtime:v2.133.0");
+    expect(workflow).not.toContain("public.ecr.aws/supabase/realtime:v2.129.0");
     for (const compose of [devCompose, selfHostCompose]) {
       expect(compose).toContain("image: supacloud-caddy:2.11.4-ratelimit");
-      expect(compose).toContain("supabase/gotrue:v2.195.0");
-      expect(compose).toContain("postgrest/postgrest:v16.1");
+      expect(compose).toContain("supabase/gotrue:v2.196.0");
+      expect(compose).toContain("postgrest/postgrest:v16.2");
     }
-    expect(workflow).toContain("postgrest/postgrest:v16.1");
-    expect(workflow).toContain("supabase/gotrue:v2.195.0");
+    expect(workflow).toContain("postgrest/postgrest:v16.2");
+    expect(workflow).toContain("supabase/gotrue:v2.196.0");
     expect(postgresDockerfile).toContain("FROM postgres:18-bookworm");
     expect(devCompose).toContain("context: ../self-host/postgres");
     expect(selfHostCompose).toContain("context: ./postgres");

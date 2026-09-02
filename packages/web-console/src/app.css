@@ -1,7 +1,9 @@
 @import "tailwindcss";
+@import "@svadmin/ai-elements/ai.css";
 
 @source "../node_modules/@svadmin/ui";
 @source "../node_modules/@svadmin/core";
+@source "../node_modules/@svadmin/ai-elements";
 
 @theme {
   --color-brand: hsl(153 60% 53%);

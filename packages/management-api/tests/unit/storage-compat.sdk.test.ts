@@ -47,6 +47,34 @@ afterEach(() => {
 });
 
 describe("storageCompatRoutes supabase-js compatibility", () => {
+  test("serves the tenant storage health path instead of falling through to the SPA", async () => {
+    const getStatusSpy = spyOn(StorageService, "getStatus").mockResolvedValue({
+      status: "mounted",
+      backend: "s3",
+      healthy: true,
+    });
+
+    try {
+      const response = await request("/storage/v1/status", {
+        headers: {
+          "x-project-ref": "test_mock",
+          apikey: "test-token",
+        },
+      });
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toContain("application/json");
+      expect(await response.json()).toEqual({
+        status: "mounted",
+        backend: "s3",
+        healthy: true,
+      });
+      expect(getStatusSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      getStatusSpy.mockRestore();
+    }
+  });
+
   test("does not report bucket deletion when an object arrives after physical deletion", async () => {
     const deleteBucketSpy = spyOn(StorageService, "deleteBucket").mockImplementation(async () => {
       mockObjects.set("avatars/arrived-during-delete.txt", { metadata: {}, updated: new Date().toISOString() });

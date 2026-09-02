@@ -62,6 +62,7 @@ import {
   type EdgeFunctionActivationManifest,
   type EdgeFunctionActivationState,
 } from "./function-activation";
+import { runtimeSourceIdentity } from "./runtime-source-identity";
 
 const PORT = Number(process.env.EDGE_RUNTIME_PORT) || Number(process.env.PORT) || 9005;
 const HOST = process.env.EDGE_RUNTIME_HOST || process.env.HOST || "127.0.0.1";
@@ -1417,6 +1418,8 @@ const app = new Elysia()
   .get("/health", () => ({
     status: "ok",
     instanceId: RUNTIME_INSTANCE_ID,
+    packageVersion: runtimeSourceIdentity.packageVersion,
+    sourceSha256: runtimeSourceIdentity.sourceSha256,
   }))
   .get("/metrics", (c) => {
     const authError = requireInternalAuth(c.request);

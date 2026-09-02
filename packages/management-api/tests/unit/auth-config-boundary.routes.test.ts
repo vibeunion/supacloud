@@ -29,10 +29,14 @@ const authApplyInternals = tenantRuntimeService as unknown as {
     status: unknown;
   }>;
   refreshProjectPostgrestVerifier: (ref: string) => Promise<void>;
+  refreshProjectRealtimeVerifier: (ref: string) => Promise<void>;
+  listSharedAuthDependentRefs: (ownerRef: string) => Promise<string[]>;
   refreshSharedAuthDependents: (ownerRef: string) => Promise<void>;
 };
 const originalApplyGotrueAuthConfig = authApplyInternals.applyGotrueAuthConfig;
 const originalRefreshProjectPostgrestVerifier = authApplyInternals.refreshProjectPostgrestVerifier;
+const originalRefreshProjectRealtimeVerifier = authApplyInternals.refreshProjectRealtimeVerifier;
+const originalListSharedAuthDependentRefs = authApplyInternals.listSharedAuthDependentRefs;
 const originalRefreshSharedAuthDependents = authApplyInternals.refreshSharedAuthDependents;
 
 function request(path: string, init: RequestInit = {}) {
@@ -60,6 +64,8 @@ afterEach(() => {
   projectControlSecretsService.readValue = originalReadControlSecret;
   authApplyInternals.applyGotrueAuthConfig = originalApplyGotrueAuthConfig;
   authApplyInternals.refreshProjectPostgrestVerifier = originalRefreshProjectPostgrestVerifier;
+  authApplyInternals.refreshProjectRealtimeVerifier = originalRefreshProjectRealtimeVerifier;
+  authApplyInternals.listSharedAuthDependentRefs = originalListSharedAuthDependentRefs;
   authApplyInternals.refreshSharedAuthDependents = originalRefreshSharedAuthDependents;
 });
 
@@ -1226,6 +1232,9 @@ describe("TenantRuntimeService auth config runtime impact", () => {
     authApplyInternals.refreshProjectPostgrestVerifier = async () => {
       events.push("postgrest");
     };
+    authApplyInternals.refreshProjectRealtimeVerifier = async () => {
+      events.push("realtime");
+    };
     authApplyInternals.refreshSharedAuthDependents = async () => {
       events.push("dependents");
     };
@@ -1249,6 +1258,9 @@ describe("TenantRuntimeService auth config runtime impact", () => {
     authApplyInternals.refreshProjectPostgrestVerifier = async (ref) => {
       events.push(`postgrest:${ref}`);
     };
+    authApplyInternals.refreshProjectRealtimeVerifier = async (ref) => {
+      events.push(`realtime:${ref}`);
+    };
     authApplyInternals.refreshSharedAuthDependents = async (ownerRef) => {
       events.push(`dependents:${ownerRef}`);
     };
@@ -1263,7 +1275,28 @@ describe("TenantRuntimeService auth config runtime impact", () => {
     expect(events).toEqual([
       "gotrue",
       "postgrest:auth-owner",
+      "realtime:auth-owner",
       "dependents:auth-owner",
+    ]);
+  });
+
+  test("owner signing changes refresh PostgREST and Realtime for every dependent", async () => {
+    const events: string[] = [];
+    authApplyInternals.listSharedAuthDependentRefs = async () => ["tenant-a", "tenant-b"];
+    authApplyInternals.refreshProjectPostgrestVerifier = async (ref) => {
+      events.push(`postgrest:${ref}`);
+    };
+    authApplyInternals.refreshProjectRealtimeVerifier = async (ref) => {
+      events.push(`realtime:${ref}`);
+    };
+
+    await originalRefreshSharedAuthDependents.call(tenantRuntimeService, "auth-owner");
+
+    expect(events).toEqual([
+      "postgrest:tenant-a",
+      "realtime:tenant-a",
+      "postgrest:tenant-b",
+      "realtime:tenant-b",
     ]);
   });
 });

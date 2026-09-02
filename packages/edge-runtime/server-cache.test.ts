@@ -4,6 +4,16 @@ import { readFileSync } from "node:fs";
 const source = readFileSync(new URL("./server.ts", import.meta.url), "utf8");
 
 describe("Edge Runtime auth material invalidation", () => {
+  test("health reports the deployed package and source identity", () => {
+    const healthEndpoint = source.slice(
+      source.indexOf('.get("/health"'),
+      source.indexOf('.get("/metrics"'),
+    );
+    expect(source).toContain('import { runtimeSourceIdentity } from "./runtime-source-identity"');
+    expect(healthEndpoint).toContain("packageVersion: runtimeSourceIdentity.packageVersion");
+    expect(healthEndpoint).toContain("sourceSha256: runtimeSourceIdentity.sourceSha256");
+  });
+
   test("runtime env invalidation clears tenant environment material", () => {
     const endpoint = source.slice(
       source.indexOf('.post("/invalidate-env/:ref"'),

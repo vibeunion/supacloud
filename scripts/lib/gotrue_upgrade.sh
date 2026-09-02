@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
-SUPACLOUD_GOTRUE_DEFAULT_VERSION="v2.195.0"
-SUPACLOUD_GOTRUE_AMD64_SHA256="6f8065fcd708df7c09c83e1fb96b0c9507f6e2600e6a78a540153b92a49cd1f9"
-SUPACLOUD_GOTRUE_ARM64_SHA256="49aa6a9578756d4f19e6f65aa9298021de8fbb9d952bf86b3806cf8e760932ae"
+SUPACLOUD_GOTRUE_DEFAULT_VERSION="v2.196.0"
+SUPACLOUD_GOTRUE_AMD64_SHA256="0d35d4c06a9ae673d06bc8579aeef6bba6f7551fa7842f9fcdac33ec926e360c"
+SUPACLOUD_GOTRUE_ARM64_SHA256="6a769c0995578dcf208f43036a814daee741c560078d29df7821025f58652d9b"
 
 supacloud_gotrue_binary_version() {
     local binary_path="$1"
@@ -157,6 +157,48 @@ supacloud_gotrue_unit_ref() {
     printf '%s' "$ref"
 }
 
+supacloud_render_gotrue_systemd_unit() (
+    umask 022
+    local binary_path="$1"
+    local target_file="$2"
+    [[ "$binary_path" == /* && "$binary_path" != *$'\n'* && "$binary_path" != *$'\r'* ]] || {
+        printf 'GoTrue binary path must be an absolute single-line path: %s\n' "$binary_path" >&2
+        return 1
+    }
+    cat > "$target_file" <<EOF
+[Unit]
+Description=SupaCloud GoTrue for tenant %i
+Documentation=https://github.com/supacloud/supacloud
+After=network.target patroni.service
+Wants=patroni.service
+StartLimitBurst=3
+StartLimitIntervalSec=60
+
+[Service]
+Type=simple
+User=supacloud-%i
+Group=supacloud-%i
+EnvironmentFile=/etc/supabase/tenants/%i_gotrue.env
+Environment="GOMEMLIMIT=15MiB"
+Environment="GOGC=20"
+ExecStart=${binary_path} --config-dir /etc/supabase/tenants/%i_gotrue.d
+ExecReload=/bin/kill -USR1 \$MAINPID
+Restart=on-failure
+RestartSec=5
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/etc/supabase/tenants
+MemoryMax=30M
+CPUWeight=20
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    chmod 644 "$target_file"
+)
+
 supacloud_gotrue_health_version() {
     local unit="$1"
     local tenant_dir="${SUPACLOUD_GOTRUE_TENANT_CONFIG_DIR:-/etc/supabase/tenants}"
@@ -183,9 +225,24 @@ supacloud_wait_gotrue_unit_version() {
     return 1
 }
 
+supacloud_attest_gotrue_unit_identity() {
+    local unit="$1"
+    local ref expected_identity actual_user actual_group
+    ref=$(supacloud_gotrue_unit_ref "$unit") || return 1
+    expected_identity="supacloud-${ref}"
+    actual_user=$(systemctl show --property=User --value "$unit") || return 1
+    actual_group=$(systemctl show --property=Group --value "$unit") || return 1
+    if [[ "$actual_user" != "$expected_identity" || "$actual_group" != "$expected_identity" ]]; then
+        printf 'GoTrue runtime identity mismatch for %s: expected %s:%s, got %s:%s\n' \
+            "$unit" "$expected_identity" "$expected_identity" "${actual_user:-unset}" "${actual_group:-unset}" >&2
+        return 1
+    fi
+}
+
 supacloud_restart_gotrue_units() {
     local units_file="$1"
     local expected_version="$2"
+    local attest_identity="${3:-false}"
     local unit
     while IFS= read -r unit; do
         [[ -n "$unit" ]] || continue
@@ -194,6 +251,9 @@ supacloud_restart_gotrue_units() {
     while IFS= read -r unit; do
         [[ -n "$unit" ]] || continue
         supacloud_wait_gotrue_unit_version "$unit" "$expected_version" || return 1
+        if [[ "$attest_identity" == true ]]; then
+            supacloud_attest_gotrue_unit_identity "$unit" || return 1
+        fi
     done < "$units_file"
 }
 
@@ -230,7 +290,13 @@ supacloud_upgrade_gotrue_binary_transaction() (
     local binary_path="$1"
     local result_file="$2"
     local target_version="${GOTRUE_VERSION:-$SUPACLOUD_GOTRUE_DEFAULT_VERSION}"
-    local current_version="" transaction_dir archive staged_binary backup_dir active_units stopped_units status=0
+    local unit_path="${SUPACLOUD_GOTRUE_UNIT_PATH:-/etc/systemd/system/supacloud-gotrue@.service}"
+    local current_version="" transaction_dir archive staged_binary="" staged_unit backup_dir active_units stopped_units status=0
+    local binary_requires_upgrade=false unit_requires_upgrade=false
+    [[ "$target_version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][A-Za-z0-9._-]+)?$ ]] || {
+        printf 'Invalid GoTrue version: %s\n' "$target_version" >&2
+        return 1
+    }
     if [[ -e "$binary_path" ]]; then
         [[ -f "$binary_path" && ! -L "$binary_path" ]] || {
             printf 'Existing GoTrue target must be a regular file: %s\n' "$binary_path" >&2
@@ -241,24 +307,37 @@ supacloud_upgrade_gotrue_binary_transaction() (
             return 1
         }
     fi
-    [[ "$current_version" != "$target_version" ]] || return 0
-    supacloud_resolve_gotrue_release "$target_version" || return 1
+    if [[ "$current_version" != "$target_version" ]]; then
+        binary_requires_upgrade=true
+        supacloud_resolve_gotrue_release "$target_version" || return 1
+    fi
 
     transaction_dir=$(mktemp -d "${TMPDIR:-/tmp}/supacloud-gotrue-upgrade.XXXXXX") || return 1
     chmod 700 "$transaction_dir"
-    archive="${transaction_dir}/${SUPACLOUD_GOTRUE_RELEASE_ASSET}"
-    staged_binary="${binary_path}.staged.$$"
+    staged_unit="${transaction_dir}/supacloud-gotrue@.service"
     active_units="${transaction_dir}/active-units"
     stopped_units="${transaction_dir}/stopped-units"
     trap 'rm -rf -- "${transaction_dir:-}"; [[ -z "${staged_binary:-}" ]] || rm -f -- "$staged_binary"' EXIT HUP INT TERM
 
-    supacloud_download_url "$SUPACLOUD_GOTRUE_RELEASE_URL" "$archive" || return 1
-    supacloud_install_pinned_tar_xz_binary "$archive" auth "$SUPACLOUD_GOTRUE_RELEASE_SHA256" \
-        "$SUPACLOUD_GOTRUE_RELEASE_ARCH" "$staged_binary" || return 1
-    [[ "$(supacloud_gotrue_binary_version "$staged_binary")" == "$target_version" ]] || {
-        printf 'Staged GoTrue binary version does not match %s\n' "$target_version" >&2
-        return 1
-    }
+    supacloud_render_gotrue_systemd_unit "$binary_path" "$staged_unit" || return 1
+    if [[ ! -f "$unit_path" || -L "$unit_path" ]] || ! cmp -s "$staged_unit" "$unit_path"; then
+        unit_requires_upgrade=true
+    fi
+    if [[ "$binary_requires_upgrade" == false && "$unit_requires_upgrade" == false ]]; then
+        return 0
+    fi
+
+    if [[ "$binary_requires_upgrade" == true ]]; then
+        archive="${transaction_dir}/${SUPACLOUD_GOTRUE_RELEASE_ASSET}"
+        staged_binary="${binary_path}.staged.$$"
+        supacloud_download_url "$SUPACLOUD_GOTRUE_RELEASE_URL" "$archive" || return 1
+        supacloud_install_pinned_tar_xz_binary "$archive" auth "$SUPACLOUD_GOTRUE_RELEASE_SHA256" \
+            "$SUPACLOUD_GOTRUE_RELEASE_ARCH" "$staged_binary" || return 1
+        [[ "$(supacloud_gotrue_binary_version "$staged_binary")" == "$target_version" ]] || {
+            printf 'Staged GoTrue binary version does not match %s\n' "$target_version" >&2
+            return 1
+        }
+    fi
 
     mkdir -p "${SUPACLOUD_GOTRUE_BACKUP_ROOT:-/var/lib/supacloud/backups/gotrue}" || return 1
     chmod 700 "${SUPACLOUD_GOTRUE_BACKUP_ROOT:-/var/lib/supacloud/backups/gotrue}" || return 1
@@ -274,18 +353,27 @@ supacloud_upgrade_gotrue_binary_transaction() (
         return 1
     fi
 
-    mkdir -p "$(dirname "$binary_path")"
-    if mv -f "$staged_binary" "$binary_path"; then
-        staged_binary=""
-    else
-        status=$?
+    if [[ "$binary_requires_upgrade" == true ]]; then
+        mkdir -p "$(dirname "$binary_path")"
+        if mv -f "$staged_binary" "$binary_path"; then
+            staged_binary=""
+        else
+            status=$?
+        fi
     fi
     if (( status == 0 )); then chmod 755 "$binary_path" || status=$?; fi
     if (( status == 0 )) && [[ "$(supacloud_gotrue_binary_version "$binary_path" 2>/dev/null || true)" != "$target_version" ]]; then
         status=1
     fi
+    if (( status == 0 )) && [[ "$unit_requires_upgrade" == true ]]; then
+        mkdir -p "$(dirname "$unit_path")" || status=$?
+    fi
+    if (( status == 0 )) && [[ "$unit_requires_upgrade" == true ]]; then
+        mv -f "$staged_unit" "$unit_path" || status=$?
+    fi
+    if (( status == 0 )); then chmod 644 "$unit_path" || status=$?; fi
     if (( status == 0 )); then systemctl daemon-reload || status=$?; fi
-    if (( status == 0 )); then supacloud_restart_gotrue_units "$active_units" "$target_version" || status=$?; fi
+    if (( status == 0 )); then supacloud_restart_gotrue_units "$active_units" "$target_version" true || status=$?; fi
     if (( status != 0 )); then
         supacloud_rollback_gotrue_upgrade "$binary_path" "$backup_dir" "$active_units" "$current_version" || {
             printf 'GoTrue rollback failed; recovery backup: %s\n' "$backup_dir" >&2

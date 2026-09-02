@@ -611,10 +611,19 @@ function confirmedFunctionConfig(payload: unknown, expected: EdgeFunctionConfigI
     return true;
 }
 
-function functionSourceCode(payload: unknown, field: "code" | "source_code" = "code"): string | null {
+type FunctionSourceField = "code" | "source_code" | "bundle_code";
+
+function functionSourceCode(
+    payload: unknown,
+    fields: readonly FunctionSourceField[] = ["code"],
+): string | null {
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
-    const code = (payload as Record<string, unknown>)[field];
-    return typeof code === "string" ? code : null;
+    const record = payload as Record<string, unknown>;
+    for (const field of fields) {
+        const code = record[field];
+        if (typeof code === "string") return code;
+    }
+    return null;
 }
 
 function requestedSourceVersion(candidate: unknown): string | undefined {
@@ -669,7 +678,7 @@ async function readFunctionSource(
     if (!response.ok) return invalidFunctionReadResponse(`❌ Failed (${response.status})`);
     const sourceCode = functionSourceCode(
         response.data,
-        sourceVersion === undefined ? "code" : "source_code",
+        sourceVersion === undefined ? ["code"] : ["source_code", "bundle_code"],
     );
     return sourceCode === null
         ? invalidFunctionReadResponse(INVALID_FUNCTION_SOURCE_RESPONSE)

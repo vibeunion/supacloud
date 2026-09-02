@@ -9,6 +9,7 @@ import {
 
 const PROJECT_REF_PATTERN = /^[a-z0-9-]{1,64}$/;
 const GENERATION_TARGET_PATTERN = /^([a-z0-9-]{1,64})_postgrest\.d\/([a-f0-9]{64})\.conf$/;
+const MANAGED_POSTGREST_CONFIG_PREFIX = "# Managed by SupaCloud Management API.";
 
 export interface PostgrestGenerationLayout {
   generationDirectory: string;
@@ -44,6 +45,15 @@ export interface RemovePostgrestPointerRequest {
   projectRef: string;
   expectedPointerTarget: string;
   ownership: PostgrestControlOwnership;
+}
+
+export interface ReadCurrentPostgrestGenerationRequest {
+  tenantDirectory: string;
+  projectRef: string;
+  controlOwnerUid: number;
+  runtimeOwnerUid: number;
+  runtimeGroupGid: number;
+  setControlOwnership: (path: string) => Promise<void>;
 }
 
 function assertProjectRef(projectRef: string): void {
@@ -118,6 +128,20 @@ async function assertImmutableGeneration(
   assertControlMetadata(metadata, 0o440, ownership, "Existing PostgREST generation");
   if (content !== expectedContent) {
     throw new Error("Existing PostgREST generation does not match its revision");
+  }
+}
+
+function assertLegacyGenerationMetadata(
+  metadata: Awaited<ReturnType<typeof lstat>>,
+  runtimeOwnerUid: number,
+  runtimeGroupGid: number,
+): void {
+  if (!metadata.isFile() || metadata.isSymbolicLink()
+    || metadata.nlink !== 1
+    || metadata.uid !== runtimeOwnerUid
+    || metadata.gid !== runtimeGroupGid
+    || (Number(metadata.mode) & 0o7777) !== 0o600) {
+    throw new Error("Legacy PostgREST generation has unsafe metadata");
   }
 }
 
@@ -273,6 +297,84 @@ export async function removePostgrestPointerIfCurrent(
     throw error;
   }
   throw new Error("PostgREST generation pointer reappeared during cleanup");
+}
+
+export async function readCurrentPostgrestGeneration(
+  request: ReadCurrentPostgrestGenerationRequest,
+): Promise<{ content: string; pointerTarget: string; revision: string }> {
+  const pointerPath = join(request.tenantDirectory, `${request.projectRef}_postgrest.current`);
+  const pointerTarget = await readPostgrestPointerTarget(
+    pointerPath,
+    request.projectRef,
+    {
+      controlOwnerUid: request.controlOwnerUid,
+      runtimeGroupGid: request.runtimeGroupGid,
+    },
+  );
+  if (pointerTarget) {
+    const validated = await validatePostgrestGenerationTarget(
+      request.tenantDirectory,
+      request.projectRef,
+      pointerTarget,
+      {
+        controlOwnerUid: request.controlOwnerUid,
+        runtimeGroupGid: request.runtimeGroupGid,
+      },
+    );
+    return {
+      content: await readFile(validated.path, "utf8"),
+      pointerTarget,
+      revision: validated.revision,
+    };
+  }
+  const legacyPath = join(request.tenantDirectory, `${request.projectRef}.conf`);
+  let metadata: Awaited<ReturnType<typeof lstat>>;
+  try {
+    metadata = await lstat(legacyPath);
+  } catch (legacyError: unknown) {
+    if (legacyError instanceof Error && "code" in legacyError && legacyError.code === "ENOENT") {
+      throw new Error(`PostgREST generation is unavailable for ${request.projectRef}`);
+    }
+    throw legacyError;
+  }
+  assertLegacyGenerationMetadata(metadata, request.runtimeOwnerUid, request.runtimeGroupGid);
+  const legacyContent = await readFile(legacyPath, "utf8");
+  if (!legacyContent.startsWith(MANAGED_POSTGREST_CONFIG_PREFIX)) {
+    throw new Error(`PostgREST generation is unavailable for ${request.projectRef}`);
+  }
+  await activatePostgrestGeneration({
+    tenantDirectory: request.tenantDirectory,
+    projectRef: request.projectRef,
+    content: legacyContent,
+    controlOwnerUid: request.controlOwnerUid,
+    runtimeGroupGid: request.runtimeGroupGid,
+    setControlOwnership: request.setControlOwnership,
+  });
+  const activatedPointerTarget = await readPostgrestPointerTarget(
+    join(request.tenantDirectory, `${request.projectRef}_postgrest.current`),
+    request.projectRef,
+    {
+      controlOwnerUid: request.controlOwnerUid,
+      runtimeGroupGid: request.runtimeGroupGid,
+    },
+  );
+  if (!activatedPointerTarget) {
+    throw new Error(`PostgREST generation is unavailable for ${request.projectRef}`);
+  }
+  const validated = await validatePostgrestGenerationTarget(
+    request.tenantDirectory,
+    request.projectRef,
+    activatedPointerTarget,
+    {
+      controlOwnerUid: request.controlOwnerUid,
+      runtimeGroupGid: request.runtimeGroupGid,
+    },
+  );
+  return {
+    content: await readFile(validated.path, "utf8"),
+    pointerTarget: activatedPointerTarget,
+    revision: validated.revision,
+  };
 }
 
 async function restorePointerAfterActivationFailure(

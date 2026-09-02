@@ -68,6 +68,13 @@ systemctl() {
         daemon-reload)
             printf 'daemon-reload\n' >> "$systemctl_log"
             ;;
+        show)
+            case "$2" in
+                --property=User) printf 'supacloud-tenant1\n' ;;
+                --property=Group) printf 'supacloud-tenant1\n' ;;
+                *) return 1 ;;
+            esac
+            ;;
         *) return 1 ;;
     esac
 }
@@ -128,14 +135,27 @@ supacloud_upgrade_gotrue_binary "$old_binary"
 [[ "$("$old_binary" version)" == v2.194.0 ]]
 grep -Fq 'stop supacloud-gotrue@tenant1.service' "$systemctl_log"
 grep -Fq 'start supacloud-gotrue@tenant1.service' "$systemctl_log"
+grep -Fqx 'User=supacloud-%i' "$unit_path"
+grep -Fqx 'Group=supacloud-%i' "$unit_path"
 [[ -f "${SUPACLOUD_GOTRUE_LAST_BACKUP_DIR}/auth-tenantdb.dump" ]]
 [[ -f "${SUPACLOUD_GOTRUE_LAST_BACKUP_DIR}/project-config.dump" ]]
 [[ -f "${SUPACLOUD_GOTRUE_LAST_BACKUP_DIR}/secret-inventory.json" ]]
 
-# A target-version binary is read before write and never downloads again.
+# A target-version binary still repairs a stale unit inside the same transaction.
+: > "$systemctl_log"
 : > "$download_log"
+printf 'User=nobody\nGroup=nobody\nExecStart=%s\n' "$old_binary" > "$unit_path"
 supacloud_upgrade_gotrue_binary "$old_binary"
 [[ ! -s "$download_log" ]]
+grep -Fq 'stop supacloud-gotrue@tenant1.service' "$systemctl_log"
+grep -Fq 'daemon-reload' "$systemctl_log"
+grep -Fq 'start supacloud-gotrue@tenant1.service' "$systemctl_log"
+grep -Fqx 'User=supacloud-%i' "$unit_path"
+
+# Once both the binary and unit are canonical, the transaction is idempotent.
+: > "$systemctl_log"
+supacloud_upgrade_gotrue_binary "$old_binary"
+[[ ! -s "$systemctl_log" ]]
 
 # A checksum mismatch and a staged version mismatch both leave the old runtime untouched.
 write_binary v2.192.0
@@ -158,12 +178,14 @@ fi
 GOTRUE_SHA256="$good_checksum"
 download_source="$good_archive"
 FORCE_NEW_HEALTH_MISMATCH=true
+printf 'User=nobody\nGroup=nobody\nExecStart=%s\n' "$old_binary" > "$unit_path"
 if supacloud_upgrade_gotrue_binary "$old_binary" >/dev/null 2>&1; then
     echo "GoTrue health version mismatch was accepted" >&2
     exit 1
 fi
 unset FORCE_NEW_HEALTH_MISMATCH
 [[ "$("$old_binary" version)" == v2.192.0 ]]
+grep -Fqx 'User=nobody' "$unit_path"
 if grep -Eq 'pg_restore|DROP[[:space:]]+COLUMN|custom_claims_allowlist' "$pg_dump_log"; then
     echo "GoTrue application rollback attempted to reverse the additive auth migration" >&2
     exit 1

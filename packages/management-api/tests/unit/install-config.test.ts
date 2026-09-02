@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -29,6 +29,41 @@ function runBash(script: string, env: Record<string, string> = {}) {
 }
 
 describe("installer configuration persistence", () => {
+  test("recognizes only Unit-scoped systemd start limits as canonical", () => {
+    const dir = makeTempDir();
+    const canonical = join(dir, "canonical.service");
+    const misplaced = join(dir, "misplaced.service");
+    writeFileSync(canonical, [
+      "[Unit]",
+      "StartLimitBurst=3",
+      "StartLimitIntervalSec=60",
+      "[Service]",
+      "RestartSec=5",
+      "",
+    ].join("\n"));
+    writeFileSync(misplaced, [
+      "[Unit]",
+      "Description=test",
+      "[Service]",
+      "RestartSec=5",
+      "StartLimitBurst=3",
+      "StartLimitIntervalSec=60",
+      "",
+    ].join("\n"));
+
+    const accepted = runBash(
+      'source scripts/lib/install_config.sh && supacloud_systemd_unit_has_canonical_start_limits "$UNIT"',
+      { UNIT: canonical },
+    );
+    const rejected = runBash(
+      'source scripts/lib/install_config.sh && supacloud_systemd_unit_has_canonical_start_limits "$UNIT"',
+      { UNIT: misplaced },
+    );
+
+    expect(accepted.status, accepted.stderr).toBe(0);
+    expect(rejected.status).not.toBe(0);
+  });
+
   test("configures a dedicated pgBackRest file and archive command without using Pigsty defaults", () => {
     const dir = makeTempDir();
     const fakeBin = join(dir, "bin");
@@ -525,7 +560,8 @@ describe("installer configuration persistence", () => {
     expect(installer).toContain('postgresql://postgres:${encoded_postgres_password}@');
     expect(installer).not.toContain('-e DB_PASSWORD="${POSTGRES_PASSWORD}"');
     expect(installer).not.toContain('-e JWT_SECRET="${JWT_SECRET}"');
-    expect(installer).toContain('--env-file "$realtime_env_file"');
+    expect(installer).toContain('REALTIME_CONTAINER_ENV_FILE="$realtime_env_file"');
+    expect(installer).toContain('"$launcher"');
     expect(installer).toContain('supacloud_write_shell_env_pairs "$JWT_KEYS_FILE"');
     expect(installer).toContain('supacloud_write_service_env_pairs "$CREDENTIALS_FILE"');
     expect(installer).toContain('supacloud_write_service_env_pairs "$MANAGEMENT_ENV_FILE"');
@@ -637,10 +673,17 @@ describe("installer configuration persistence", () => {
 
   test("Realtime container receives secrets through a 0600 env file that is removed by the EXIT trap", () => {
     const dir = makeTempDir();
+    const launcher = join(dir, "realtime-launcher");
     const argsFile = join(dir, "args.txt");
     const envCopy = join(dir, "env-copy.txt");
     const modeFile = join(dir, "mode.txt");
     const pathFile = join(dir, "path.txt");
+    writeFileSync(launcher, [
+      "#!/usr/bin/env bash",
+      "set -euo pipefail",
+      '"$CONTAINER_RUNTIME" run -d --name "$REALTIME_CONTAINER_NAME" --network "$REALTIME_NETWORK_MODE" --env-file "$REALTIME_CONTAINER_ENV_FILE" "$REALTIME_IMAGE"',
+      "",
+    ].join("\n"), { mode: 0o755 });
     const result = runBash([
       "source install.sh",
       'fake_runtime() { printf "%s\\n" "$*" > "$ARGS_FILE"; while [ "$#" -gt 0 ]; do if [ "$1" = "--env-file" ]; then printf "%s" "$2" > "$PATH_FILE"; cp "$2" "$ENV_COPY"; python3 -c "import os,sys; print(oct(os.stat(sys.argv[1]).st_mode & 0o777))" "$2" > "$MODE_FILE"; shift 2; else shift; fi; done; }',
@@ -651,6 +694,7 @@ describe("installer configuration persistence", () => {
       ENV_COPY: envCopy,
       MODE_FILE: modeFile,
       PATH_FILE: pathFile,
+      SUPACLOUD_REALTIME_SLOT_ISOLATION_LAUNCHER_FILE: launcher,
       INTERNAL_IP: "10.0.0.8",
       POSTGRES_PASSWORD: "db-secret",
       JWT_SECRET: "jwt-secret",
@@ -975,6 +1019,20 @@ describe("installer configuration persistence", () => {
     );
   });
 
+  test("management installer resolves TLS settings in its own scope", () => {
+    const installer = readFileSync(join(repoRoot, "install.sh"), "utf8");
+    const installFunction = installer.slice(
+      installer.indexOf("install_management_api() {"),
+      installer.indexOf("deploy_web_console_tar_atomic()"),
+    );
+    expect(installFunction).toContain(
+      'local edge_tls_ca_file="${SUPACLOUD_EDGE_TLS_CA_FILE:-$(supacloud_env_value "$MANAGEMENT_ENV_FILE" SUPACLOUD_EDGE_TLS_CA_FILE)}"',
+    );
+    expect(installFunction).toContain(
+      'local edge_tls_insecure_skip_verify="${SUPACLOUD_EDGE_TLS_INSECURE_SKIP_VERIFY:-$(supacloud_env_value "$MANAGEMENT_ENV_FILE" SUPACLOUD_EDGE_TLS_INSECURE_SKIP_VERIFY)}"',
+    );
+  });
+
   test("installer snapshots restore file contents, permissions, and prior absence", () => {
     const dir = makeTempDir();
     const existing = join(dir, "management-api.env");
@@ -1068,6 +1126,357 @@ describe("installer configuration persistence", () => {
 
     expect(custom.status, custom.stderr).toBe(0);
     expect(readFileSync(customCalls, "utf8")).toBe("health:http://127.0.0.1:9123/health\n");
+
+    const identityCalls = join(dir, "identity-calls");
+    const digest = "a".repeat(64);
+    const attested = runBash([
+      "source install.sh",
+      `supacloud_read_edge_runtime_source_identity() { printf '0.18.7\\t${digest}'; }`,
+      'supacloud_wait_edge_runtime_source_identity() { printf "identity:%s:%s:%s\\n" "$1" "$2" "$3" >> "$CALLS"; }',
+      "ensure_management_edge_runtime_ready embedded required",
+    ].join("; "), { CALLS: identityCalls });
+    expect(attested.status, attested.stderr).toBe(0);
+    expect(readFileSync(identityCalls, "utf8")).toBe(
+      `identity:http://127.0.0.1:9005/health:0.18.7:${digest}\n`,
+    );
+
+    const compiledCalls = join(dir, "compiled-calls");
+    const edgeEnv = join(dir, "edge-runtime.env");
+    writeFileSync(edgeEnv, "SUPACLOUD_EDGE_RUNTIME_IDENTITY_MODE=compiled\n");
+    const compiled = runBash([
+      "source install.sh",
+      'systemctl() { return 0; }',
+      `supacloud_read_edge_runtime_source_identity() { printf '0.18.7\\t${digest}'; }`,
+      'supacloud_wait_edge_runtime_compiled_identity() { printf "compiled:%s:%s\\n" "$1" "$2" >> "$CALLS"; }',
+      "ensure_management_edge_runtime_ready external required",
+    ].join("; "), {
+      CALLS: compiledCalls,
+      SUPACLOUD_EDGE_RUNTIME_ENV_FILE: edgeEnv,
+    });
+    expect(compiled.status, compiled.stderr).toBe(0);
+    expect(readFileSync(compiledCalls, "utf8")).toBe(
+      "compiled:http://127.0.0.1:9005/health:0.18.7\n",
+    );
+
+    const missingIdentity = runBash([
+      "source install.sh",
+      "supacloud_read_edge_runtime_source_identity() { return 1; }",
+      "ensure_management_edge_runtime_ready embedded required",
+    ].join("; "));
+    expect(missingIdentity.status).not.toBe(0);
+    expect(missingIdentity.stdout).toContain("health identity is unavailable");
+  });
+
+  test("management Edge source transaction removes stale files and restores the prior tree", () => {
+    const dir = makeTempDir();
+    const sourceDir = join(dir, "source");
+    const targetDir = join(dir, "target");
+    const managementTransaction = join(dir, "management-transaction");
+    const fakeBin = join(dir, "bin");
+    mkdirSync(sourceDir);
+    mkdirSync(targetDir);
+    mkdirSync(managementTransaction);
+    mkdirSync(fakeBin);
+    writeFileSync(join(sourceDir, "package.json"), JSON.stringify({
+      name: "@supacloud/edge-runtime",
+      version: "1.2.3",
+    }));
+    writeFileSync(join(sourceDir, "server.ts"), "new-runtime\n");
+    writeFileSync(join(targetDir, "server.ts"), "old-runtime\n");
+    writeFileSync(join(targetDir, "removed.ts"), "old-only\n");
+    writeFileSync(join(fakeBin, "bun"), [
+      "#!/usr/bin/env bash",
+      "mkdir -p node_modules",
+      "printf 'installed\\n' > node_modules/installed.txt",
+      "",
+    ].join("\n"), { mode: 0o755 });
+
+    const result = runBash([
+      "source install.sh",
+      'configure_edge_runtime_source_access() { chmod -R g-w,g+rX "$1"; }',
+      'capture_management_edge_runtime_source_state "$MANAGEMENT_TRANSACTION/edge-source-prior"',
+      'prepare_management_edge_runtime_source "$MANAGEMENT_TRANSACTION"',
+      'activate_management_edge_runtime_source "$MANAGEMENT_TRANSACTION"',
+      'test "$(cat "$EDGE_RUNTIME_SOURCE_DIR/server.ts")" = new-runtime',
+      'test ! -e "$EDGE_RUNTIME_SOURCE_DIR/removed.ts"',
+      'test -f "$EDGE_RUNTIME_SOURCE_DIR/.supacloud-source-identity.json"',
+      'rollback_management_edge_runtime_source "$MANAGEMENT_TRANSACTION"',
+      'verify_recovered_management_edge_runtime_source "$MANAGEMENT_TRANSACTION"',
+      'test "$(cat "$EDGE_RUNTIME_SOURCE_DIR/server.ts")" = old-runtime',
+      'test -f "$EDGE_RUNTIME_SOURCE_DIR/removed.ts"',
+    ].join(" && "), {
+      PATH: `${fakeBin}:${process.env.PATH}`,
+      MANAGEMENT_TRANSACTION: managementTransaction,
+      SUPACLOUD_EDGE_RUNTIME_SOURCE_INPUT_DIR: sourceDir,
+      SUPACLOUD_EDGE_RUNTIME_SOURCE_DIR: targetDir,
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(readFileSync(join(targetDir, "server.ts"), "utf8")).toBe("old-runtime\n");
+    expect(readFileSync(join(targetDir, "removed.ts"), "utf8")).toBe("old-only\n");
+  });
+
+  test("management Edge release staging fails closed when the lockfile install fails", () => {
+    const dir = makeTempDir();
+    const sourceDir = join(dir, "source");
+    const targetDir = join(dir, "target");
+    const managementTransaction = join(dir, "management-transaction");
+    const fakeBin = join(dir, "bin");
+    const calls = join(dir, "bun-calls");
+    mkdirSync(sourceDir);
+    mkdirSync(managementTransaction);
+    mkdirSync(fakeBin);
+    writeFileSync(join(sourceDir, "package.json"), JSON.stringify({
+      name: "@supacloud/edge-runtime",
+      version: "1.2.3",
+    }));
+    writeFileSync(join(sourceDir, "bun.lock"), "{}\n");
+    writeFileSync(join(sourceDir, "server.ts"), "runtime\n");
+    writeFileSync(join(fakeBin, "bun"), [
+      "#!/usr/bin/env bash",
+      'printf "%s\\n" "$*" >> "$CALLS"',
+      '[[ "$*" != *"--frozen-lockfile"* ]]',
+      "",
+    ].join("\n"), { mode: 0o755 });
+
+    const result = runBash([
+      "source install.sh",
+      "supacloud_resolve_artifact_policy",
+      'prepare_management_edge_runtime_source "$MANAGEMENT_TRANSACTION"',
+    ].join(" && "), {
+      PATH: `${fakeBin}:${process.env.PATH}`,
+      CALLS: calls,
+      MANAGEMENT_TRANSACTION: managementTransaction,
+      SUPACLOUD_SETUP_ARTIFACT_MODE: "release",
+      SUPACLOUD_EDGE_RUNTIME_SOURCE_INPUT_DIR: sourceDir,
+      SUPACLOUD_EDGE_RUNTIME_SOURCE_DIR: targetDir,
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(readFileSync(calls, "utf8").trim().split("\n")).toEqual([
+      "install --frozen-lockfile",
+    ]);
+    expect(result.stdout).toContain("do not match the lockfile");
+    expect(existsSync(targetDir)).toBe(false);
+  });
+
+  test("local Web Console deployment atomically replaces the complete prior build", () => {
+    const dir = makeTempDir();
+    const sourceDir = join(dir, "source");
+    const targetDir = join(dir, "current");
+    mkdirSync(sourceDir);
+    mkdirSync(targetDir);
+    writeFileSync(join(sourceDir, "index.html"), "new-index\n");
+    writeFileSync(join(sourceDir, "new.js"), "new-asset\n");
+    chmodSync(sourceDir, 0o700);
+    chmodSync(join(sourceDir, "index.html"), 0o600);
+    chmodSync(join(sourceDir, "new.js"), 0o700);
+    writeFileSync(join(targetDir, "index.html"), "old-index\n");
+    writeFileSync(join(targetDir, "stale.js"), "stale-asset\n");
+
+    const deployed = runBash(
+      'source install.sh; deploy_web_console_directory_atomic "$SOURCE" "$TARGET"',
+      { SOURCE: sourceDir, TARGET: targetDir },
+    );
+
+    expect(deployed.status, deployed.stderr).toBe(0);
+    expect(lstatSync(targetDir).isSymbolicLink()).toBe(true);
+    const firstTarget = readlinkSync(targetDir);
+    const releasesRoot = realpathSync(join(dir, "releases"));
+    expect(firstTarget.startsWith(`${releasesRoot}/`)).toBe(true);
+    expect(firstTarget.slice(`${releasesRoot}/`.length)).not.toContain("/");
+    expect(readFileSync(join(targetDir, "index.html"), "utf8")).toBe("new-index\n");
+    expect(readFileSync(join(targetDir, "new.js"), "utf8")).toBe("new-asset\n");
+    expect(statSync(targetDir).mode & 0o777).toBe(0o755);
+    expect(statSync(join(targetDir, "index.html")).mode & 0o777).toBe(0o644);
+    expect(statSync(join(targetDir, "new.js")).mode & 0o777).toBe(0o644);
+    expect(() => statSync(join(targetDir, "stale.js"))).toThrow();
+    expect(readdirSync(join(dir, "releases"))).toEqual([firstTarget.split("/").at(-1)]);
+
+    rmSync(join(sourceDir, "index.html"));
+    const rejected = runBash(
+      'source install.sh; deploy_web_console_directory_atomic "$SOURCE" "$TARGET"',
+      { SOURCE: sourceDir, TARGET: targetDir },
+    );
+    expect(rejected.status).not.toBe(0);
+    expect(readFileSync(join(targetDir, "index.html"), "utf8")).toBe("new-index\n");
+    expect(readlinkSync(targetDir)).toBe(firstTarget);
+    expect(readdirSync(join(dir, "releases"))).toEqual([firstTarget.split("/").at(-1)]);
+  });
+
+  test("local Web Console deployment replaces a managed historical release symlink", () => {
+    const dir = makeTempDir();
+    const sourceDir = join(dir, "source");
+    const releasesDir = join(dir, "releases");
+    const priorRelease = join(releasesDir, "management-api-v0.66.0");
+    const targetDir = join(dir, "current");
+    mkdirSync(sourceDir);
+    mkdirSync(releasesDir);
+    mkdirSync(priorRelease);
+    writeFileSync(join(sourceDir, "index.html"), "new-index\n");
+    writeFileSync(join(priorRelease, "index.html"), "old-index\n");
+    symlinkSync(priorRelease, targetDir);
+
+    const deployed = runBash(
+      'source install.sh; deploy_web_console_directory_atomic "$SOURCE" "$TARGET"',
+      { SOURCE: sourceDir, TARGET: targetDir },
+    );
+
+    expect(deployed.status, deployed.stderr).toBe(0);
+    expect(lstatSync(targetDir).isSymbolicLink()).toBe(true);
+    const nextTarget = readlinkSync(targetDir);
+    const releasesRoot = realpathSync(releasesDir);
+    expect(nextTarget.startsWith(`${releasesRoot}/`)).toBe(true);
+    expect(nextTarget.slice(`${releasesRoot}/`.length)).not.toContain("/");
+    expect(nextTarget).not.toBe(priorRelease);
+    expect(readFileSync(join(targetDir, "index.html"), "utf8")).toBe("new-index\n");
+    expect(readFileSync(join(priorRelease, "index.html"), "utf8")).toBe("old-index\n");
+    expect(readdirSync(releasesDir).sort()).toEqual([
+      priorRelease.split("/").at(-1),
+      nextTarget.split("/").at(-1),
+    ].sort());
+  });
+
+  test("local Web Console deployment restores a legacy current directory when link activation fails", () => {
+    const dir = makeTempDir();
+    const sourceDir = join(dir, "source");
+    const targetDir = join(dir, "current");
+    mkdirSync(sourceDir);
+    mkdirSync(targetDir);
+    writeFileSync(join(sourceDir, "index.html"), "new-index\n");
+    writeFileSync(join(targetDir, "index.html"), "old-index\n");
+    writeFileSync(join(targetDir, "stale.js"), "old-asset\n");
+
+    const result = runBash(
+      'source install.sh; supacloud_atomic_switch_web_console_link() { return 1; }; deploy_web_console_directory_atomic "$SOURCE" "$TARGET"',
+      { SOURCE: sourceDir, TARGET: targetDir },
+    );
+
+    expect(result.status).not.toBe(0);
+    expect(lstatSync(targetDir).isDirectory()).toBe(true);
+    expect(readFileSync(join(targetDir, "index.html"), "utf8")).toBe("old-index\n");
+    expect(readFileSync(join(targetDir, "stale.js"), "utf8")).toBe("old-asset\n");
+    expect(readdirSync(join(dir, "releases"))).toEqual([]);
+  });
+
+  test("local Web Console deployment rejects nested links and special files before activation", () => {
+    const dir = makeTempDir();
+    const sourceDir = join(dir, "source");
+    const targetDir = join(dir, "current");
+    mkdirSync(sourceDir);
+    mkdirSync(targetDir);
+    writeFileSync(join(sourceDir, "index.html"), "new-index\n");
+    writeFileSync(join(targetDir, "index.html"), "old-index\n");
+
+    symlinkSync("/etc/passwd", join(sourceDir, "secret.txt"));
+    const linked = runBash(
+      'source install.sh; deploy_web_console_directory_atomic "$SOURCE" "$TARGET"',
+      { SOURCE: sourceDir, TARGET: targetDir },
+    );
+    expect(linked.status).not.toBe(0);
+    expect(readFileSync(join(targetDir, "index.html"), "utf8")).toBe("old-index\n");
+    expect(readdirSync(join(dir, "releases"))).toEqual([]);
+
+    rmSync(join(sourceDir, "secret.txt"));
+    const fifo = join(sourceDir, "named-pipe");
+    expect(spawnSync("mkfifo", [fifo]).status).toBe(0);
+    const special = runBash(
+      'source install.sh; deploy_web_console_directory_atomic "$SOURCE" "$TARGET"',
+      { SOURCE: sourceDir, TARGET: targetDir },
+    );
+    expect(special.status).not.toBe(0);
+    expect(readFileSync(join(targetDir, "index.html"), "utf8")).toBe("old-index\n");
+    expect(readdirSync(join(dir, "releases"))).toEqual([]);
+  });
+
+  test("local Web Console deployment restores legacy current when interrupted", () => {
+    const dir = makeTempDir();
+    const sourceDir = join(dir, "source");
+    const targetDir = join(dir, "current");
+    mkdirSync(sourceDir);
+    mkdirSync(targetDir);
+    writeFileSync(join(sourceDir, "index.html"), "new-index\n");
+    writeFileSync(join(targetDir, "index.html"), "old-index\n");
+
+    const interrupted = runBash(
+      "source install.sh; supacloud_atomic_switch_web_console_link() { supacloud_replace_path_atomic \"$1\" \"$2\"; python3 -c 'import os, signal; os.kill(os.getppid(), signal.SIGTERM)'; sleep 1; }; deploy_web_console_directory_atomic \"$SOURCE\" \"$TARGET\"",
+      { SOURCE: sourceDir, TARGET: targetDir },
+    );
+
+    expect(interrupted.status).toBe(143);
+    expect(lstatSync(targetDir).isDirectory()).toBe(true);
+    expect(readFileSync(join(targetDir, "index.html"), "utf8")).toBe("old-index\n");
+    expect(readdirSync(join(dir, "releases"))).toEqual([]);
+  });
+
+  test("tar Web Console deployment uses a unique release and current symlink", () => {
+    const dir = makeTempDir();
+    const sourceDir = join(dir, "source");
+    const archive = join(dir, "web-console-build.tar.gz");
+    const targetDir = join(dir, "current");
+    mkdirSync(sourceDir);
+    writeFileSync(join(sourceDir, "index.html"), "tar-index\n");
+    writeFileSync(join(sourceDir, "app.js"), "tar-app\n");
+    const packed = spawnSync("tar", ["-czf", archive, "-C", sourceDir, "."]);
+    expect(packed.status, packed.stderr).toBe(0);
+
+    const result = runBash(
+      'source install.sh; deploy_web_console_tar_atomic "$ARCHIVE" "$TARGET"',
+      { ARCHIVE: archive, TARGET: targetDir },
+    );
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(lstatSync(targetDir).isSymbolicLink()).toBe(true);
+    const releaseTarget = readlinkSync(targetDir);
+    expect(releaseTarget.startsWith(`${realpathSync(join(dir, "releases"))}/`)).toBe(true);
+    expect(readFileSync(join(targetDir, "index.html"), "utf8")).toBe("tar-index\n");
+    expect(readFileSync(join(targetDir, "app.js"), "utf8")).toBe("tar-app\n");
+    expect(readdirSync(join(dir, "releases"))).toEqual([releaseTarget.split("/").at(-1)]);
+  });
+
+  test("tar Web Console deployment rejects oversized expanded content before extraction", () => {
+    const dir = makeTempDir();
+    const sourceDir = join(dir, "source");
+    const archive = join(dir, "web-console-build.tar.gz");
+    const targetDir = join(dir, "current");
+    mkdirSync(sourceDir);
+    writeFileSync(join(sourceDir, "index.html"), "tar-index\n");
+    const oversized = join(sourceDir, "oversized.bin");
+    writeFileSync(oversized, "");
+    truncateSync(oversized, 257 * 1024 * 1024);
+    expect(spawnSync("tar", ["-czf", archive, "-C", sourceDir, "."]).status).toBe(0);
+
+    const rejected = runBash(
+      'source install.sh; deploy_web_console_tar_atomic "$ARCHIVE" "$TARGET"',
+      { ARCHIVE: archive, TARGET: targetDir },
+    );
+
+    expect(rejected.status).not.toBe(0);
+    expect(existsSync(targetDir)).toBe(false);
+    expect(existsSync(join(dir, "releases"))).toBe(false);
+  });
+
+  test("local Web Console deployment rejects a symlink outside managed releases", () => {
+    const dir = makeTempDir();
+    const sourceDir = join(dir, "source");
+    const releasesDir = join(dir, "releases");
+    const outsideRelease = join(dir, "outside-release");
+    const targetDir = join(dir, "current");
+    mkdirSync(sourceDir);
+    mkdirSync(releasesDir);
+    mkdirSync(outsideRelease);
+    writeFileSync(join(sourceDir, "index.html"), "new-index\n");
+    writeFileSync(join(outsideRelease, "index.html"), "old-index\n");
+    symlinkSync(outsideRelease, targetDir);
+
+    const rejected = runBash(
+      'source install.sh; deploy_web_console_directory_atomic "$SOURCE" "$TARGET"',
+      { SOURCE: sourceDir, TARGET: targetDir },
+    );
+
+    expect(rejected.status).not.toBe(0);
+    expect(lstatSync(targetDir).isSymbolicLink()).toBe(true);
+    expect(readFileSync(join(targetDir, "index.html"), "utf8")).toBe("old-index\n");
   });
 
   test("installer grants the dedicated runtime group read-only source access", () => {
@@ -1210,17 +1619,24 @@ describe("installer configuration persistence", () => {
     const edgeRuntimeEnv = join(dir, "edge-runtime.env");
     const privilegeDropIn = join(dir, "supacloud.service.d", "50-embedded-edge-privilege.conf");
     const calls = join(dir, "calls");
+    const edgeState = join(dir, "edge-state");
+    const snapshot = join(dir, "snapshot");
+    mkdirSync(join(snapshot, "edge-service-prior"), { recursive: true });
     writeFileSync(runtimeEnv, "EDGE_RUNTIME_MODE=external\n");
+    writeFileSync(join(snapshot, "edge-service-prior/state"), "active\n");
+    writeFileSync(join(snapshot, "edge-service-prior/enabled"), "enabled\n");
+    writeFileSync(edgeState, "inactive\n");
 
     const recovery = runBash([
       "source install.sh",
       'supacloud_restore_file_snapshot() { return 0; }',
-      'systemctl() { printf "systemctl:%s\\n" "$*" >> "$CALLS"; if [[ "$1" == "is-active" ]]; then return 1; fi; return 0; }',
+      'systemctl() { printf "systemctl:%s\\n" "$*" >> "$CALLS"; if [[ "$1" == is-active ]]; then [[ "$3" == supacloud-edge-runtime && "$(cat "$EDGE_STATE")" == active ]]; return; fi; if [[ "$1:$3" == enable:supacloud-edge-runtime ]]; then printf active > "$EDGE_STATE"; fi; return 0; }',
       'supacloud_wait_http_health() { printf "health:%s\\n" "$1" >> "$CALLS"; }',
       'recover_management_api_install "$SNAPSHOT" true true',
     ].join("; "), {
       CALLS: calls,
-      SNAPSHOT: join(dir, "snapshot"),
+      EDGE_STATE: edgeState,
+      SNAPSHOT: snapshot,
       SUPACLOUD_MANAGEMENT_ENV_FILE: runtimeEnv,
       SUPACLOUD_EDGE_RUNTIME_ENV_FILE: edgeRuntimeEnv,
       SUPACLOUD_EMBEDDED_EDGE_PRIVILEGE_DROPIN: privilegeDropIn,
@@ -1231,6 +1647,74 @@ describe("installer configuration persistence", () => {
     expect(recoveryCalls).toContain("systemctl:enable --now supacloud-edge-runtime");
     expect(recoveryCalls.indexOf("systemctl:start supacloud"))
       .toBeLessThan(recoveryCalls.indexOf("systemctl:enable --now supacloud-edge-runtime"));
+  });
+
+  test("management recovery keeps an active but disabled external runtime disabled", () => {
+    const dir = makeTempDir();
+    const runtimeEnv = join(dir, "management-api.env");
+    const edgeRuntimeEnv = join(dir, "edge-runtime.env");
+    const privilegeDropIn = join(dir, "supacloud.service.d", "50-embedded-edge-privilege.conf");
+    const calls = join(dir, "calls");
+    const edgeState = join(dir, "edge-state");
+    const snapshot = join(dir, "snapshot");
+    mkdirSync(join(snapshot, "edge-service-prior"), { recursive: true });
+    writeFileSync(runtimeEnv, "EDGE_RUNTIME_MODE=external\n");
+    writeFileSync(join(snapshot, "edge-service-prior/state"), "active\n");
+    writeFileSync(join(snapshot, "edge-service-prior/enabled"), "disabled\n");
+    writeFileSync(edgeState, "inactive\n");
+
+    const recovery = runBash([
+      "source install.sh",
+      'supacloud_restore_file_snapshot() { return 0; }',
+      'systemctl() { printf "systemctl:%s\\n" "$*" >> "$CALLS"; if [[ "$1" == is-active ]]; then [[ "$3" == supacloud-edge-runtime && "$(cat "$EDGE_STATE")" == active ]]; return; fi; if [[ "$1:$2" == start:supacloud-edge-runtime ]]; then printf active > "$EDGE_STATE"; fi; return 0; }',
+      'supacloud_wait_http_health() { printf "health:%s\\n" "$1" >> "$CALLS"; }',
+      'recover_management_api_install "$SNAPSHOT" true true',
+    ].join("; "), {
+      CALLS: calls,
+      EDGE_STATE: edgeState,
+      SNAPSHOT: snapshot,
+      SUPACLOUD_MANAGEMENT_ENV_FILE: runtimeEnv,
+      SUPACLOUD_EDGE_RUNTIME_ENV_FILE: edgeRuntimeEnv,
+      SUPACLOUD_EMBEDDED_EDGE_PRIVILEGE_DROPIN: privilegeDropIn,
+    });
+
+    expect(recovery.status, recovery.stderr).toBe(0);
+    const recoveryCalls = readFileSync(calls, "utf8");
+    expect(recoveryCalls).toContain("systemctl:start supacloud-edge-runtime");
+    expect(recoveryCalls).not.toContain("systemctl:enable --now supacloud-edge-runtime");
+  });
+
+  test("management recovery keeps a previously inactive external runtime stopped", () => {
+    const dir = makeTempDir();
+    const runtimeEnv = join(dir, "management-api.env");
+    const edgeRuntimeEnv = join(dir, "edge-runtime.env");
+    const privilegeDropIn = join(dir, "supacloud.service.d", "50-embedded-edge-privilege.conf");
+    const calls = join(dir, "calls");
+    const edgeState = join(dir, "edge-state");
+    const snapshot = join(dir, "snapshot");
+    mkdirSync(join(snapshot, "edge-service-prior"), { recursive: true });
+    writeFileSync(runtimeEnv, "EDGE_RUNTIME_MODE=external\n");
+    writeFileSync(join(snapshot, "edge-service-prior/state"), "inactive\n");
+    writeFileSync(join(snapshot, "edge-service-prior/enabled"), "disabled\n");
+    writeFileSync(edgeState, "active\n");
+
+    const recovery = runBash([
+      "source install.sh",
+      'supacloud_restore_file_snapshot() { return 0; }',
+      'systemctl() { printf "systemctl:%s\\n" "$*" >> "$CALLS"; if [[ "$1" == is-active ]]; then [[ "$3" == supacloud-edge-runtime && "$(cat "$EDGE_STATE")" == active ]]; return; fi; if [[ "$1:$2" == stop:supacloud-edge-runtime ]]; then printf inactive > "$EDGE_STATE"; fi; return 0; }',
+      'recover_management_api_install "$SNAPSHOT" false true',
+    ].join("; "), {
+      CALLS: calls,
+      EDGE_STATE: edgeState,
+      SNAPSHOT: snapshot,
+      SUPACLOUD_MANAGEMENT_ENV_FILE: runtimeEnv,
+      SUPACLOUD_EDGE_RUNTIME_ENV_FILE: edgeRuntimeEnv,
+      SUPACLOUD_EMBEDDED_EDGE_PRIVILEGE_DROPIN: privilegeDropIn,
+    });
+
+    expect(recovery.status, recovery.stderr).toBe(0);
+    expect(readFileSync(edgeState, "utf8")).toBe("inactive");
+    expect(readFileSync(calls, "utf8")).not.toContain("enable --now supacloud-edge-runtime");
   });
 
   test("pgredis transaction restores the previous data plane after a later install failure", () => {

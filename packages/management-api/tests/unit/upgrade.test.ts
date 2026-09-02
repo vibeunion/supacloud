@@ -58,6 +58,7 @@ import {
     parseSystemdEnabledState,
     parseSystemdMainPid,
     prepareWebConsoleLinkActivation,
+    prepareWebConsoleLayoutMigration,
     prepareUpgradeSecrets,
     resolveArtifactVerificationMode,
     resolveEdgeRuntimeCapacityConfig,
@@ -93,6 +94,7 @@ import {
     verifyWebConsoleArchiveExpandedSize,
     verifyWebConsoleReleaseTree,
     restoreWebConsoleLink,
+    restoreWebConsoleLayoutMigration,
     waitForManagementHealth,
     waitForEdgeRuntimeHealth,
     waitForUpgradeHealth,
@@ -1489,6 +1491,94 @@ describe("upgrade release selection", () => {
       expect(existsSync(activation.nextLink)).toBe(false);
       restoreWebConsoleLink(activation);
       expect(readlinkSync(current)).toBe(previous);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("migrates a legacy Web Console current directory into a managed release and restores it", () => {
+    const directory = realpathSync(mkdtempSync(join(tmpdir(), "supacloud-web-console-legacy-layout-")));
+    const current = join(directory, "current");
+    const releases = join(directory, "releases");
+    const owner = { uid: process.getuid?.() ?? 0, gid: process.getgid?.() ?? 0 };
+    try {
+      chmodSync(directory, 0o755);
+      mkdirSync(current);
+      writeFileSync(join(current, "index.html"), "legacy-index\n");
+      writeFileSync(join(current, "old.js"), "legacy-app\n");
+      chmodSync(current, 0o700);
+      chmodSync(join(current, "index.html"), 0o600);
+      chmodSync(join(current, "old.js"), 0o600);
+
+      const migration = prepareWebConsoleLayoutMigration(current, { releasesDir: releases, owner });
+      expect(migration.migrated).toBe(true);
+      expect(migration.legacyDir).toBeString();
+      expect(lstatSync(current).isSymbolicLink()).toBe(true);
+      expect(readlinkSync(current)).toBe(migration.legacyDir);
+      expect(readFileSync(join(current, "index.html"), "utf8")).toBe("legacy-index\n");
+      expect(readdirSync(releases)).toEqual([migration.legacyDir!.split("/").at(-1)]);
+
+      restoreWebConsoleLayoutMigration(migration);
+      expect(migration.migrated).toBe(false);
+      expect(lstatSync(current).isDirectory()).toBe(true);
+      expect(readFileSync(join(current, "old.js"), "utf8")).toBe("legacy-app\n");
+      expect(readdirSync(releases)).toEqual([]);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("validates an existing Web Console release symlink and rejects an unmanaged target", () => {
+    const directory = realpathSync(mkdtempSync(join(tmpdir(), "supacloud-web-console-layout-validation-")));
+    const current = join(directory, "current");
+    const releases = join(directory, "releases");
+    const release = join(releases, "management-api-v0.66.0");
+    const outside = join(directory, "outside");
+    const owner = { uid: process.getuid?.() ?? 0, gid: process.getgid?.() ?? 0 };
+    try {
+      chmodSync(directory, 0o755);
+      mkdirSync(release, { recursive: true });
+      mkdirSync(outside);
+      writeFileSync(join(release, "index.html"), "release-index\n");
+      writeFileSync(join(outside, "index.html"), "outside-index\n");
+      symlinkSync(release, current);
+
+      const existing = prepareWebConsoleLayoutMigration(current, { releasesDir: releases, owner });
+      expect(existing.migrated).toBe(false);
+      expect(readlinkSync(current)).toBe(release);
+
+      rmSync(current);
+      symlinkSync(outside, current);
+      expect(() => prepareWebConsoleLayoutMigration(current, { releasesDir: releases, owner }))
+        .toThrow("escapes the managed releases directory");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects nested links in legacy and managed Web Console layouts", () => {
+    const directory = realpathSync(mkdtempSync(join(tmpdir(), "supacloud-web-console-layout-tree-")));
+    const current = join(directory, "current");
+    const releases = join(directory, "releases");
+    const release = join(releases, "management-api-v0.66.0");
+    const owner = { uid: process.getuid?.() ?? 0, gid: process.getgid?.() ?? 0 };
+    try {
+      chmodSync(directory, 0o755);
+      mkdirSync(current);
+      writeFileSync(join(current, "index.html"), "legacy-index\n");
+      symlinkSync("/etc/passwd", join(current, "secret.txt"));
+      expect(() => prepareWebConsoleLayoutMigration(current, { releasesDir: releases, owner }))
+        .toThrow("link or special file");
+      expect(lstatSync(current).isDirectory()).toBe(true);
+
+      rmSync(current, { recursive: true });
+      mkdirSync(release, { recursive: true });
+      writeFileSync(join(release, "index.html"), "release-index\n");
+      symlinkSync("/etc/passwd", join(release, "secret.txt"));
+      symlinkSync(release, current);
+      expect(() => prepareWebConsoleLayoutMigration(current, { releasesDir: releases, owner }))
+        .toThrow("link or special file");
+      expect(readlinkSync(current)).toBe(release);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

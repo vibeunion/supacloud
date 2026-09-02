@@ -435,7 +435,11 @@ describe("edge_functions CLI tool", () => {
                     return {
                         ok: true,
                         status: 200,
-                        data: { source_code: "export const immutable = 7;", private: "source-response-sentinel" },
+                        data: {
+                            source_code: "export const immutable = 7;",
+                            bundle_code: "export const bundled = 7;",
+                            private: "source-response-sentinel",
+                        },
                     };
                 }
                 return {
@@ -465,6 +469,33 @@ describe("edge_functions CLI tool", () => {
             "/v1/projects/proj/functions",
         ]);
         expect(source.content[0].text).not.toContain("sentinel");
+    });
+
+    test("falls back to an immutable Function bundle when original source is unavailable", async () => {
+        const { callback } = captureEdgeFunctionsTool({
+            get: async () => ({
+                ok: true,
+                status: 200,
+                data: {
+                    source_code: null,
+                    bundle_code: "export const bundled = 60;",
+                    has_source: false,
+                    has_bundle: true,
+                    private: "version-source-response-sentinel",
+                },
+            }),
+        });
+
+        const response = await callback({
+            action: "source",
+            ref: "proj",
+            slug: "supauth",
+            version: "60",
+        });
+
+        expect(response.isError).toBeUndefined();
+        expect(JSON.parse(response.content[0].text)).toEqual({ code: "export const bundled = 60;" });
+        expect(response.content[0].text).not.toContain("sentinel");
     });
 
     test.each([-1, 0, "0", "01", 1.5, "9007199254740992", true, {}])(

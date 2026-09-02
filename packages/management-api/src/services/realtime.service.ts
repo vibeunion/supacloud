@@ -90,6 +90,7 @@ interface RealtimeTenantConfig {
     dbPassword: string;
     jwtSecret: string;
     projectConfig?: unknown;
+    jwtJwks?: unknown;
 }
 
 export interface RealtimeCdcPrerequisites {
@@ -157,7 +158,9 @@ export class RealtimeService {
             dbName: tenantConfig.dbName,
             adminDbPassword: globalConfig.pgPassword || tenantConfig.dbPassword || "postgres",
             jwtSecret: tenantConfig.jwtSecret,
-            jwtJwks: jwtMaterial.jwtJwks,
+            jwtJwks: tenantConfig.projectConfig !== undefined
+                ? jwtMaterial.jwtJwks
+                : tenantConfig.jwtJwks,
             slotName: resolveSlotName(tenantConfig.projectRef),
         });
     }

@@ -2,7 +2,6 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { SQL, type ReservedSQL } from "bun";
 import { SQL_MODULES } from "../../src/db/sql-modules";
-import { ALTER_TENANT_SQL } from "../../src/services/tenant-runtime-migration";
 
 interface PayloadBoundary {
   label: string;
@@ -32,19 +31,40 @@ const fixtureTable = `realtime_payload_${fixtureSuffix}`;
 const fixtureRole = `realtime_notify_owner_${fixtureSuffix}`;
 const database = new SQL({ url: databaseUrl, max: 3 });
 
+const notifyTriggerFixtureSql = `
+CREATE OR REPLACE FUNCTION realtime.notify_postgres_changes() RETURNS trigger AS $fn$
+DECLARE
+  payload jsonb;
+BEGIN
+  payload = jsonb_build_object(
+    'topic', 'realtime:' || TG_TABLE_SCHEMA,
+    'event', 'postgres_changes',
+    'payload', jsonb_build_object(
+      'type', TG_OP,
+      'schema', TG_TABLE_SCHEMA,
+      'table', TG_TABLE_NAME,
+      'commit_timestamp', now()::text,
+      'record', CASE WHEN TG_OP IN ('INSERT', 'UPDATE') THEN row_to_json(NEW)::jsonb ELSE null END,
+      'old_record', CASE WHEN TG_OP IN ('UPDATE', 'DELETE') THEN row_to_json(OLD)::jsonb ELSE null END,
+      'columns', (
+        SELECT COALESCE(jsonb_agg(jsonb_build_object('name', column_name, 'type', udt_name)), '[]'::jsonb)
+        FROM (
+          SELECT column_name, udt_name
+          FROM information_schema.columns
+          WHERE table_schema = TG_TABLE_SCHEMA AND table_name = TG_TABLE_NAME
+          ORDER BY ordinal_position
+        ) cols
+      )
+    )
+  );
+  PERFORM realtime.notify_change_payload(payload);
+  IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+END;
+$fn$ LANGUAGE plpgsql SECURITY DEFINER;
+`;
+
 function quoteIdentifier(identifier: string): string {
   return `"${identifier.replaceAll('"', '""')}"`;
-}
-
-function canonicalTriggerFunctionSql(): string {
-  const signature = "CREATE OR REPLACE FUNCTION realtime.notify_postgres_changes()";
-  const terminator = "$fn$ LANGUAGE plpgsql SECURITY DEFINER;";
-  const functionStart = ALTER_TENANT_SQL.indexOf(signature);
-  const functionEnd = ALTER_TENANT_SQL.indexOf(terminator, functionStart);
-  if (functionStart < 0 || functionEnd < 0) {
-    throw new Error("Canonical realtime trigger function is missing");
-  }
-  return ALTER_TENANT_SQL.slice(functionStart, functionEnd + terminator.length);
 }
 
 async function collectListenerOutput(
@@ -103,7 +123,7 @@ async function notificationFrom(action: () => Promise<unknown>): Promise<string 
 async function installRealtimeFixture(): Promise<void> {
   await database.unsafe("CREATE SCHEMA IF NOT EXISTS realtime");
   await database.unsafe(SQL_MODULES["realtime-notify-payload"]);
-  await database.unsafe(canonicalTriggerFunctionSql());
+  await database.unsafe(notifyTriggerFixtureSql);
   await database.unsafe(`CREATE TABLE public.${quoteIdentifier(fixtureTable)} (id integer PRIMARY KEY, body text NOT NULL)`);
   await database.unsafe(`DROP TRIGGER IF EXISTS realtime_notify_trigger ON public.${quoteIdentifier(fixtureTable)}`);
   await database.unsafe(`

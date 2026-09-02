@@ -496,6 +496,16 @@ describe("Auth config PostgREST verifier impact", () => {
 });
 
 describe("TenantRuntimeService auth-only apply boundary", () => {
+  test("rewrites PostgREST and GoTrue templates with misplaced start limits", () => {
+    const source = readFileSync(
+      join(import.meta.dir, "../../src/services/tenant-runtime.service.ts"),
+      "utf8",
+    );
+
+    expect(source).toContain("!hasCanonicalStartLimitDirectives(currentPgrstUnit)");
+    expect(source).toContain("!hasCanonicalStartLimitDirectives(currentGotrueUnit)");
+  });
+
   test("uses checked GoTrue calls and attested PostgREST refreshes in the auth apply path", () => {
     const source = readFileSync(
       join(import.meta.dir, "../../src/services/tenant-runtime.service.ts"),

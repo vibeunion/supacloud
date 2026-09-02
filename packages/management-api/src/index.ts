@@ -25,7 +25,10 @@ import { checkRateLimit } from "./middleware/rate-limit";
 import { logAuditEvent, shouldAuditRequest } from "./services/audit.service";
 import { closeDb } from "./db";
 import { authRuntimeRoutes, storageCompatRoutes } from "./routes";
-import { migrateLegacyVersionArtifacts } from "./services/edge-function.service";
+import {
+  ensureEdgeFunctionLogsForExistingProjects,
+  migrateLegacyVersionArtifacts,
+} from "./services/edge-function.service";
 import { resolveProjectApiKey } from "./utils/project-auth";
 import { translateRealtimeProxyCredentials } from "./utils/realtime-proxy-auth";
 import { recordRequestPeerAddress } from "./utils/client-ip";
@@ -1385,6 +1388,8 @@ async function bootstrap() {
 
     const { postgresMajorUpgradeService } = await import("./services/postgres-major-upgrade.service");
     postgresMajorUpgradeService.startWorker();
+
+    await ensureEdgeFunctionLogsForExistingProjects();
 
     if (config.edgeRuntimeMode === "embedded") {
       const { edgeRuntimeManager } =

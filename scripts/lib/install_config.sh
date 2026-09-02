@@ -1,5 +1,34 @@
 #!/usr/bin/env bash
 
+supacloud_systemd_unit_has_directive_in_section() {
+    local unit_path="$1"
+    local target_section="$2"
+    local target_directive="$3"
+    [[ -f "$unit_path" ]] || return 1
+    awk -v target_section="$target_section" -v target_directive="$target_directive" '
+        /^[[:space:]]*\[[^][]+\][[:space:]]*$/ {
+            section = $0
+            sub(/^[[:space:]]*\[/, "", section)
+            sub(/\][[:space:]]*$/, "", section)
+            next
+        }
+        {
+            line = $0
+            sub(/^[[:space:]]*/, "", line)
+            if (section == target_section && index(line, target_directive "=") == 1) found = 1
+        }
+        END { exit found ? 0 : 1 }
+    ' "$unit_path"
+}
+
+supacloud_systemd_unit_has_canonical_start_limits() {
+    local unit_path="$1"
+    supacloud_systemd_unit_has_directive_in_section "$unit_path" Unit StartLimitBurst \
+        && supacloud_systemd_unit_has_directive_in_section "$unit_path" Unit StartLimitIntervalSec \
+        && ! supacloud_systemd_unit_has_directive_in_section "$unit_path" Service StartLimitBurst \
+        && ! supacloud_systemd_unit_has_directive_in_section "$unit_path" Service StartLimitIntervalSec
+}
+
 # Merge installer-owned environment keys without deleting operator-owned keys.
 # The replacement is written beside the target and atomically renamed so a
 # failed install cannot leave a partially written credential file behind.
@@ -381,6 +410,39 @@ supacloud_write_service_env_pairs() (
     supacloud_atomic_merge_env "$target_file" "$desired_file"
 )
 
+# Replace an installer-owned systemd EnvironmentFile with an exact allow-list.
+# Unlike the merge helper above, this deliberately removes stale keys while
+# retaining atomic replacement and root-only permissions.
+supacloud_replace_service_env_pairs() (
+    local target_file="$1"
+    shift
+    local desired_file key value escaped
+    if (( $# % 2 != 0 )); then
+        return 1
+    fi
+    mkdir -p "$(dirname "$target_file")"
+    desired_file=$(mktemp "$(dirname "$target_file")/.$(basename "$target_file").XXXXXX")
+    chmod 600 "$desired_file"
+    trap 'rm -f "$desired_file"' EXIT HUP INT TERM
+    while [[ $# -gt 0 ]]; do
+        key="$1"
+        value="$2"
+        shift 2
+        [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || return 1
+        if [[ "$value" == *$'\n'* || "$value" == *$'\r'* ]]; then
+            printf 'Environment value %s must be a single line\n' "$key" >&2
+            return 1
+        fi
+        escaped=${value//\\/\\\\}
+        escaped=${escaped//\"/\\\"}
+        escaped=${escaped//\$/\\\$}
+        escaped=${escaped//\`/\\\`}
+        printf '%s="%s"\n' "$key" "$escaped" >> "$desired_file"
+    done
+    mv -f "$desired_file" "$target_file"
+    chmod 600 "$target_file"
+)
+
 # Write env files for consumers such as Podman or legacy Compose that expect
 # the bytes after '=' verbatim. Values remain single-line to prevent assignment
 # injection; the protected temporary file is removed on every exit path.
@@ -406,6 +468,32 @@ supacloud_write_raw_env_pairs() (
         printf '%s=%s\n' "$key" "$value" >> "$desired_file"
     done
     supacloud_atomic_merge_env "$target_file" "$desired_file"
+)
+
+supacloud_replace_raw_env_pairs() (
+    local target_file="$1"
+    shift
+    local desired_file key value
+    if (( $# % 2 != 0 )); then
+        return 1
+    fi
+    mkdir -p "$(dirname "$target_file")"
+    desired_file=$(mktemp "$(dirname "$target_file")/.$(basename "$target_file").XXXXXX")
+    chmod 600 "$desired_file"
+    trap 'rm -f "$desired_file"' EXIT HUP INT TERM
+    while [[ $# -gt 0 ]]; do
+        key="$1"
+        value="$2"
+        shift 2
+        [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || return 1
+        if [[ "$value" == *$'\n'* || "$value" == *$'\r'* ]]; then
+            printf 'Environment value %s must be a single line\n' "$key" >&2
+            return 1
+        fi
+        printf '%s=%s\n' "$key" "$value" >> "$desired_file"
+    done
+    mv -f "$desired_file" "$target_file"
+    chmod 600 "$target_file"
 )
 
 supacloud_urlencode_stdin() {

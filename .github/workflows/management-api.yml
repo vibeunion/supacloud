@@ -16,6 +16,8 @@ on:
       - "packages/function-adapter/**"
       - "docker/**"
       - "scripts/**"
+      - "infrastructure/realtime/**"
+      - "infrastructure/systemd/supacloud-realtime.service"
       - "install.sh"
       - "setup.sh"
       - "switch.sh"
@@ -136,7 +138,7 @@ jobs:
         run: |
           bun install --frozen-lockfile
           bun run typecheck
-          bun test internal-bindings.test.ts pgredis-capability.test.ts function-version.test.ts function-source.test.ts server-cache.test.ts server-function-config.test.ts worker-pool.test.ts
+          bun test internal-bindings.test.ts pgredis-capability.test.ts function-version.test.ts function-source.test.ts runtime-source-identity.test.ts server-cache.test.ts server-function-config.test.ts worker-pool.test.ts
           bun audit --audit-level high
 
       - name: Check pgredis runtime
@@ -332,12 +334,16 @@ jobs:
 
       - name: Validate shell script syntax
         run: |
-          bash -n install.sh setup.sh switch.sh deploy_all.sh scripts/pre_start_recovery.sh
+          bash -n install.sh setup.sh switch.sh deploy_all.sh scripts/pre_start_recovery.sh infrastructure/realtime/*.sh
           find scripts -name "*.sh" -print0 | xargs -0 -n1 bash -n
           bash scripts/lib/tenant_runtime.test.sh
           bash scripts/lib/installer_pg_hba.test.sh
           bash scripts/lib/tenant_user.test.sh
           bash scripts/lib/systemd_unit_broker.test.sh
+          bash scripts/lib/edge_runtime_source.test.sh
+
+      - name: Validate Realtime slot-isolation trust root
+        run: python3 -m unittest infrastructure/realtime/test_apply_slot_isolation.py
 
       - name: Validate CI scripts
         run: |
@@ -531,7 +537,7 @@ jobs:
           --health-timeout 5s
           --health-retries 5
       postgrest:
-        image: postgrest/postgrest:v16.1
+        image: postgrest/postgrest:v16.2
         ports:
           - 3000:3000
         env:
@@ -540,7 +546,7 @@ jobs:
           PGRST_DB_ANON_ROLE: anon
           PGRST_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
       gotrue:
-        image: supabase/gotrue:v2.195.0
+        image: supabase/gotrue:v2.196.0
         ports:
           - 9999:9999
         env:
@@ -563,7 +569,7 @@ jobs:
           API_EXTERNAL_URL: http://127.0.0.1:9090
           GOTRUE_OPERATOR_TOKEN: super-secret-jwt-token-with-at-least-32-characters-long
       realtime:
-        image: public.ecr.aws/supabase/realtime:v2.129.0
+        image: public.ecr.aws/supabase/realtime:v2.133.0
         ports:
           - 4000:4000
         env:
@@ -686,8 +692,8 @@ jobs:
           done
           if [ "${realtime_ready}" != "true" ]; then
             echo "::error title=Realtime service not ready::Realtime did not become reachable on :4000"
-            docker ps -a --filter "ancestor=public.ecr.aws/supabase/realtime:v2.129.0" || true
-            realtime_container_id="$(docker ps -a -q --filter "ancestor=public.ecr.aws/supabase/realtime:v2.129.0" | head -n1)"
+            docker ps -a --filter "ancestor=public.ecr.aws/supabase/realtime:v2.133.0" || true
+            realtime_container_id="$(docker ps -a -q --filter "ancestor=public.ecr.aws/supabase/realtime:v2.133.0" | head -n1)"
             if [ -n "${realtime_container_id}" ]; then
               echo "--- Realtime container status ---"
               docker inspect --format='{{.State.Status}} exit={{.State.ExitCode}} err={{.State.Error}} oom={{.State.OOMKilled}} restart={{.RestartCount}}' "${realtime_container_id}" || true
@@ -736,8 +742,8 @@ jobs:
       - name: Restart flaky services
         run: |
           echo "Restarting Auth and Realtime Containers..."
-          docker start $(docker ps -a -q --filter "ancestor=supabase/gotrue:v2.195.0") || true
-          docker start $(docker ps -a -q --filter "ancestor=public.ecr.aws/supabase/realtime:v2.129.0") || true
+          docker start $(docker ps -a -q --filter "ancestor=supabase/gotrue:v2.196.0") || true
+          docker start $(docker ps -a -q --filter "ancestor=public.ecr.aws/supabase/realtime:v2.133.0") || true
           sleep 4
 
       - name: Launch API & Execute Full Defenses
@@ -815,7 +821,7 @@ jobs:
 
       - name: Lint shell scripts
         run: |
-          ignored_rules="SC1090,SC1091,SC2012,SC2015,SC2016,SC2030,SC2031,SC2034,SC2046,SC2086,SC2155,SC2207,SC2317"
+          ignored_rules="SC1090,SC1091,SC2012,SC2015,SC2016,SC2030,SC2031,SC2034,SC2046,SC2086,SC2155,SC2207,SC2317,SC2329"
 
           echo "=== Checking scripts/*.sh and scripts/lib/*.sh ==="
           shellcheck -s bash -e "$ignored_rules" scripts/*.sh scripts/lib/*.sh
@@ -828,6 +834,9 @@ jobs:
             fi
           done
           shellcheck -s bash -e "$ignored_rules" "${root_scripts[@]}"
+
+          echo "=== Checking Realtime shell scripts ==="
+          shellcheck -s bash -e "$ignored_rules" infrastructure/realtime/*.sh
 
   caddy-edge-proxy-smoke:
     name: Caddy Edge Proxy Smoke

@@ -6,7 +6,8 @@ const config: Config = {
 	content: [
 		"./src/**/*.{html,js,svelte,ts}",
 		"./node_modules/@svadmin/ui/src/**/*.{html,js,svelte,ts}",
-		"./node_modules/@svadmin/core/src/**/*.{html,js,svelte,ts}"
+		"./node_modules/@svadmin/core/src/**/*.{html,js,svelte,ts}",
+		"./node_modules/@svadmin/ai-elements/src/**/*.{html,js,svelte,ts}"
 	],
 	safelist: ["dark"],
 	theme: {

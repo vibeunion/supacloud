@@ -16,6 +16,7 @@ import {
     readFileSync,
     readlinkSync,
     readdirSync,
+    realpathSync,
     renameSync,
     rmSync,
     statSync,
@@ -1432,6 +1433,21 @@ export type WebConsoleLinkActivationState = {
     target: string;
 };
 
+export type WebConsoleLayoutMigrationState = {
+    currentLink: string;
+    legacyDir: string | null;
+    migrated: boolean;
+    owner: WebConsoleReleaseOwner;
+    parent: string;
+    releasesDir: string;
+    rollbackLink?: string | null;
+};
+
+export type WebConsoleLayoutMigrationOptions = {
+    releasesDir?: string;
+    owner?: WebConsoleReleaseOwner;
+};
+
 type WebConsoleReleaseOwner = {
     uid: number;
     gid: number;
@@ -1462,7 +1478,7 @@ type WebConsoleFileEntry = {
 
 type WebConsoleTreeEntry = WebConsoleDirectoryEntry | WebConsoleFileEntry;
 
-type WebConsoleInspectionPhase = "extracted" | "final";
+type WebConsoleInspectionPhase = "existing" | "extracted" | "final";
 
 function assertWebConsoleDirectory(
     directory: string,
@@ -1520,6 +1536,9 @@ function webConsoleDirectoryEntry(
     if (phase === "final" && (stats.mode & 0o7777) !== 0o755) {
         throw new Error(`Web Console directory mode is not 0755: ${relative}`);
     }
+    if (phase === "existing" && (stats.mode & 0o022) !== 0) {
+        throw new Error(`Web Console directory is group- or world-writable: ${relative}`);
+    }
     if ((stats.mode & 0o7000) !== 0) {
         throw new Error(`Web Console release contains special directory mode bits: ${relative}`);
     }
@@ -1539,6 +1558,9 @@ function webConsoleFileEntry(
     }
     if (phase === "final" && (stats.mode & 0o7777) !== 0o644) {
         throw new Error(`Web Console file mode is not 0644: ${relative}`);
+    }
+    if (phase === "existing" && (stats.mode & 0o022) !== 0) {
+        throw new Error(`Web Console file is group- or world-writable: ${relative}`);
     }
     if ((stats.mode & 0o7000) !== 0) {
         throw new Error(`Web Console release contains special file mode bits: ${relative}`);
@@ -1667,6 +1689,182 @@ function readWebConsoleLinkTarget(currentLink: string): string | null {
     const target = readlinkSync(currentLink);
     if (!target) throw new Error("Web Console current symbolic link target is empty");
     return target;
+}
+
+function assertWebConsoleCurrentIndex(
+    directory: string,
+    owner: WebConsoleReleaseOwner,
+    label: string,
+): void {
+    const stats = lstatSync(path.join(directory, "index.html"), { throwIfNoEntry: false });
+    if (!stats?.isFile() || stats.isSymbolicLink() || stats.uid !== owner.uid || stats.gid !== owner.gid
+        || (stats.mode & 0o7022) !== 0) {
+        throw new Error(`${label} must contain a safe index.html owned by the upgrade operator`);
+    }
+}
+
+function assertManagedWebConsoleCurrent(
+    currentLink: string,
+    releasesDir: string,
+    owner: WebConsoleReleaseOwner,
+): void {
+    const target = readWebConsoleLinkTarget(currentLink);
+    if (!target) throw new Error("Web Console current symbolic link target is empty");
+    assertWebConsoleLink(currentLink, target, owner);
+    const targetPath = path.isAbsolute(target)
+        ? target
+        : path.resolve(path.dirname(currentLink), target);
+    const resolvedReleases = realpathSync(releasesDir);
+    const resolvedTarget = realpathSync(targetPath);
+    const releaseName = resolvedTarget.slice(`${resolvedReleases}/`.length);
+    if (!resolvedTarget.startsWith(`${resolvedReleases}/`)
+        || !releaseName || releaseName.includes("/")) {
+        throw new Error("Web Console current symbolic link escapes the managed releases directory");
+    }
+    assertWebConsoleDirectory(targetPath, owner, "Web Console current release");
+    assertWebConsoleCurrentIndex(targetPath, owner, "Web Console current release");
+    inspectWebConsoleTree(targetPath, owner, "existing");
+}
+
+export function prepareWebConsoleLayoutMigration(
+    currentLink: string = WEB_CONSOLE_CURRENT_LINK,
+    options: WebConsoleLayoutMigrationOptions = {},
+): WebConsoleLayoutMigrationState {
+    const normalizedCurrentLink = path.resolve(currentLink);
+    const parent = path.dirname(normalizedCurrentLink);
+    const releasesDir = path.resolve(
+        options.releasesDir ?? (normalizedCurrentLink === WEB_CONSOLE_CURRENT_LINK
+            ? WEB_CONSOLE_RELEASES_DIR
+            : path.join(parent, "releases")),
+    );
+    const owner = options.owner ?? { uid: 0, gid: 0 };
+    if (path.dirname(releasesDir) !== parent) {
+        throw new Error("Web Console releases directory must be a direct child of the Web Console root");
+    }
+    ensureWebConsoleReleasesDir(releasesDir, owner);
+
+    const currentStats = lstatSync(normalizedCurrentLink, { throwIfNoEntry: false });
+    if (!currentStats) {
+        return {
+            currentLink: normalizedCurrentLink,
+            legacyDir: null,
+            migrated: false,
+            owner,
+            parent,
+            releasesDir,
+            rollbackLink: null,
+        };
+    }
+    if (currentStats.isSymbolicLink()) {
+        assertManagedWebConsoleCurrent(normalizedCurrentLink, releasesDir, owner);
+        return {
+            currentLink: normalizedCurrentLink,
+            legacyDir: null,
+            migrated: false,
+            owner,
+            parent,
+            releasesDir,
+            rollbackLink: null,
+        };
+    }
+    assertWebConsoleDirectory(normalizedCurrentLink, owner, "Web Console current");
+    assertWebConsoleCurrentIndex(normalizedCurrentLink, owner, "Web Console legacy current directory");
+    inspectWebConsoleTree(normalizedCurrentLink, owner, "existing");
+
+    const legacyDir = path.join(
+        releasesDir,
+        `legacy-current-${process.pid}-${randomUUID()}`,
+    );
+    renameSync(normalizedCurrentLink, legacyDir);
+    const nextLink = `${normalizedCurrentLink}.legacy-${randomUUID()}`;
+    try {
+        symlinkSync(legacyDir, nextLink);
+        assertWebConsoleLink(nextLink, legacyDir, owner);
+        renameSync(nextLink, normalizedCurrentLink);
+        assertManagedWebConsoleCurrent(normalizedCurrentLink, releasesDir, owner);
+        syncFilesystemDirectory(releasesDir);
+        syncFilesystemDirectory(parent);
+    } catch (error: unknown) {
+        rmSync(nextLink, { force: true });
+        let restoreError: unknown;
+        try {
+            const currentAfterFailure = lstatSync(normalizedCurrentLink, { throwIfNoEntry: false });
+            if (currentAfterFailure) {
+                if (!currentAfterFailure.isSymbolicLink()
+                    || readlinkSync(normalizedCurrentLink) !== legacyDir) {
+                    throw new Error("Web Console current path changed during legacy layout migration");
+                }
+                rmSync(normalizedCurrentLink, { force: true });
+            }
+            renameSync(legacyDir, normalizedCurrentLink);
+            syncFilesystemDirectory(releasesDir);
+            syncFilesystemDirectory(parent);
+        } catch (candidate: unknown) {
+            restoreError = candidate;
+        }
+        if (restoreError) {
+            throw new AggregateError(
+                [error, restoreError],
+                "Web Console legacy layout migration failed and the previous directory could not be restored",
+            );
+        }
+        throw error;
+    }
+    return {
+        currentLink: normalizedCurrentLink,
+        legacyDir,
+        migrated: true,
+        owner,
+        parent,
+        releasesDir,
+        rollbackLink: null,
+    };
+}
+
+export function restoreWebConsoleLayoutMigration(state: WebConsoleLayoutMigrationState): void {
+    if (!state.migrated || !state.legacyDir) return;
+    if (readWebConsoleLinkTarget(state.currentLink) !== state.legacyDir) {
+        throw new Error("Web Console legacy layout changed before rollback");
+    }
+    const legacyStats = lstatSync(state.legacyDir, { throwIfNoEntry: false });
+    if (!legacyStats) throw new Error("Web Console legacy release is missing before rollback");
+    assertWebConsoleDirectory(state.legacyDir, state.owner, "Web Console legacy release");
+    assertWebConsoleCurrentIndex(state.legacyDir, state.owner, "Web Console legacy release");
+
+    const displacedLink = `${state.currentLink}.rollback-${randomUUID()}`;
+    renameSync(state.currentLink, displacedLink);
+    state.rollbackLink = displacedLink;
+    try {
+        renameSync(state.legacyDir, state.currentLink);
+        syncFilesystemDirectory(state.releasesDir);
+        syncFilesystemDirectory(state.parent);
+        rmSync(displacedLink, { force: true });
+        state.rollbackLink = null;
+        state.migrated = false;
+    } catch (error: unknown) {
+        let restoreError: unknown;
+        try {
+            const currentStats = lstatSync(state.currentLink, { throwIfNoEntry: false });
+            if (currentStats && !currentStats.isSymbolicLink()) {
+                renameSync(state.currentLink, state.legacyDir);
+            }
+            if (lstatSync(displacedLink, { throwIfNoEntry: false })) {
+                renameSync(displacedLink, state.currentLink);
+            }
+            syncFilesystemDirectory(state.releasesDir);
+            syncFilesystemDirectory(state.parent);
+            state.rollbackLink = null;
+        } catch (candidate: unknown) {
+            restoreError = candidate;
+        }
+        if (restoreError) {
+            throw new AggregateError(
+                [error, restoreError],
+                "Web Console legacy layout rollback failed",
+            );
+        }
+        throw error;
+    }
 }
 
 function assertWebConsoleLink(
@@ -2487,6 +2685,7 @@ export type UpgradeActivationState = {
     postgrestLauncher: PostgrestLauncherActivationState | null;
     systemdUnitBroker: PrivilegedHelperActivationState | null;
     webConsoleLink: WebConsoleLinkActivationState | null;
+    webConsoleLayoutMigration?: WebConsoleLayoutMigrationState | null;
     managementEnvState: FileState | null;
     edgeRuntimeEnvState: FileState | null;
     edgeRuntimeDropInState: FileState | null;
@@ -2543,6 +2742,7 @@ type UpgradeExecutionState = {
     stagedSystemdUnitBroker: StagedPrivilegedHelper | null;
     stagedWebConsole: StagedWebConsole | null;
     webConsoleEndpointLabel: string | null;
+    webConsoleLayoutMigration: WebConsoleLayoutMigrationState | null;
 };
 
 type UpgradeExecutionContext = {
@@ -2572,6 +2772,11 @@ export type UpgradeRecoveryPathState = {
     stagedPostgrestLauncher?: { path: string } | null;
     stagedSystemdUnitBroker?: { path: string } | null;
     stagedWebConsole?: { releaseDir: string } | null;
+    webConsoleLayoutMigration?: {
+        legacyDir: string | null;
+        migrated: boolean;
+        rollbackLink?: string | null;
+    } | null;
 };
 
 type ActivateArtifactsRequest = {
@@ -2594,7 +2799,20 @@ async function activateArtifacts(request: ActivateArtifactsRequest) {
         stagedWeb,
         state,
     } = request;
-    if (stagedWeb) verifyWebConsoleReleaseTree(stagedWeb.releaseDir, stagedWeb.treeSha256);
+    if (stagedWeb) {
+        verifyWebConsoleReleaseTree(stagedWeb.releaseDir, stagedWeb.treeSha256);
+        if (lstatSync(WEB_CONSOLE_CURRENT_LINK, { throwIfNoEntry: false })) {
+            assertManagedWebConsoleCurrent(
+                WEB_CONSOLE_CURRENT_LINK,
+                WEB_CONSOLE_RELEASES_DIR,
+                { uid: 0, gid: 0 },
+            );
+        }
+        state.webConsoleLink = prepareWebConsoleLinkActivation(
+            WEB_CONSOLE_CURRENT_LINK,
+            stagedWeb.releaseDir,
+        );
+    }
     const preparedSystemdUnitBroker = prepareSystemdUnitBrokerActivation({
         staged: stagedSystemdUnitBroker,
         targetPath: SYSTEMD_UNIT_BROKER_TARGET,
@@ -2615,13 +2833,7 @@ async function activateArtifacts(request: ActivateArtifactsRequest) {
         activateStagedBinary(stagedEdgeBinary.path, state.edgeBinary);
     }
 
-    if (stagedWeb) {
-        state.webConsoleLink = prepareWebConsoleLinkActivation(
-            WEB_CONSOLE_CURRENT_LINK,
-            stagedWeb.releaseDir,
-        );
-        activatePreparedWebConsoleLink(state.webConsoleLink);
-    }
+    if (state.webConsoleLink) activatePreparedWebConsoleLink(state.webConsoleLink);
 }
 
 export async function executeUpgradeRecoveryActions(actions: UpgradeRecoveryAction[]): Promise<void> {
@@ -2650,6 +2862,11 @@ function artifactRecoveryActions(state: UpgradeActivationState): UpgradeRecovery
     if (webConsoleLink) actions.push({
         description: "restore Web Console current target",
         run: () => restoreWebConsoleLink(webConsoleLink),
+    });
+    const webConsoleLayoutMigration = state.webConsoleLayoutMigration;
+    if (webConsoleLayoutMigration) actions.push({
+        description: "restore Web Console legacy layout",
+        run: () => restoreWebConsoleLayoutMigration(webConsoleLayoutMigration),
     });
     const managementEnvState = state.managementEnvState;
     if (managementEnvState) actions.push({
@@ -2728,13 +2945,17 @@ export async function rollbackArtifacts(
     ]);
 }
 
-function createActivationState(edgeRuntimeTarget: string | null): UpgradeActivationState {
+function createActivationState(
+    edgeRuntimeTarget: string | null,
+    webConsoleLayoutMigration: WebConsoleLayoutMigrationState | null,
+): UpgradeActivationState {
     return {
         binary: createBinaryBackupState(BIN_TARGET),
         edgeBinary: edgeRuntimeTarget ? createBinaryBackupState(edgeRuntimeTarget) : null,
         postgrestLauncher: null,
         systemdUnitBroker: null,
         webConsoleLink: null,
+        webConsoleLayoutMigration,
         managementEnvState: null,
         edgeRuntimeEnvState: null,
         edgeRuntimeDropInState: null,
@@ -2877,6 +3098,7 @@ function createUpgradeExecutionState(plan: UpgradeReleasePlan): UpgradeExecution
         stagedSystemdUnitBroker: null,
         stagedWebConsole: null,
         webConsoleEndpointLabel: null,
+        webConsoleLayoutMigration: null,
     };
 }
 
@@ -3009,11 +3231,26 @@ async function stageUpgradeArtifacts(context: UpgradeExecutionContext): Promise<
 async function migrateUpgradeMetadata(context: UpgradeExecutionContext): Promise<void> {
     const stagedManagement = context.state.stagedManagement;
     if (!stagedManagement) throw new Error("Upgrade binary was not staged");
-    context.spinner.start("Creating a verified control-plane backup before applying metadata migrations");
-    context.state.controlPlaneSafety = await runStagedDatabaseMigration(
-        stagedManagement.path,
-        context.preparedSecrets,
-    );
+    context.state.webConsoleLayoutMigration = prepareWebConsoleLayoutMigration();
+    try {
+        context.spinner.start("Creating a verified control-plane backup before applying metadata migrations");
+        context.state.controlPlaneSafety = await runStagedDatabaseMigration(
+            stagedManagement.path,
+            context.preparedSecrets,
+        );
+    } catch (error: unknown) {
+        const layoutMigration = context.state.webConsoleLayoutMigration;
+        if (!layoutMigration?.migrated) throw error;
+        try {
+            restoreWebConsoleLayoutMigration(layoutMigration);
+        } catch (restoreError: unknown) {
+            throw new AggregateError(
+                [error, restoreError],
+                "Database migration failed and the Web Console legacy layout could not be restored",
+            );
+        }
+        throw error;
+    }
 }
 
 async function activateUpgradeArtifacts(context: UpgradeExecutionContext): Promise<void> {
@@ -3026,7 +3263,10 @@ async function activateUpgradeArtifacts(context: UpgradeExecutionContext): Promi
         throw new Error("Upgrade PostgREST launcher preflight is unavailable");
     }
     context.spinner.start("Atomically activating staged SupaCloud artifacts");
-    state.activation = createActivationState(plan.edgeRuntime?.targetPath || null);
+    state.activation = createActivationState(
+        plan.edgeRuntime?.targetPath || null,
+        state.webConsoleLayoutMigration,
+    );
     await activateArtifacts({
         stagedBinary: state.stagedManagement,
         stagedEdgeBinary: state.stagedEdgeRuntime,
@@ -3094,9 +3334,17 @@ async function verifyUpgradeActivation(context: UpgradeExecutionContext): Promis
 
 async function rollbackUpgradeActivation(context: UpgradeExecutionContext): Promise<void> {
     const activation = context.state.activation;
-    if (!activation) return;
+    const layoutMigration = context.state.webConsoleLayoutMigration;
+    if (!activation && !layoutMigration?.migrated) return;
     p.log.warn("Upgrade activation failed; restoring the previous binary and Web Console target.");
-    await rollbackArtifacts(activation);
+    if (activation) {
+        await rollbackArtifacts(activation);
+    } else if (layoutMigration?.migrated) {
+        await executeUpgradeRecoveryActions([{
+            description: "restore Web Console legacy layout",
+            run: () => restoreWebConsoleLayoutMigration(layoutMigration),
+        }]);
+    }
     context.state.rollbackSucceeded = true;
 }
 
@@ -3161,10 +3409,28 @@ function activatedBackupCleanupActions(state: UpgradeExecutionState): UpgradeCle
     return actions;
 }
 
+function migratedWebConsoleCleanupActions(state: UpgradeExecutionState): UpgradeCleanupAction[] {
+    const migration = state.webConsoleLayoutMigration;
+    if (!state.committed || !migration?.migrated || !migration.legacyDir) return [];
+    const legacyDir = migration.legacyDir;
+    return [{
+        description: `remove legacy Web Console release ${legacyDir}`,
+        run: () => {
+            assertManagedWebConsoleCurrent(migration.currentLink, migration.releasesDir, migration.owner);
+            if (readWebConsoleLinkTarget(migration.currentLink) === legacyDir) {
+                throw new Error("Refusing to remove the active legacy Web Console release");
+            }
+            rmSync(legacyDir, { force: true, recursive: true });
+            migration.legacyDir = null;
+        },
+    }];
+}
+
 function upgradeCleanupActions(context: UpgradeExecutionContext): UpgradeCleanupAction[] {
     return [
         ...stagedArtifactCleanupActions(context.state),
         ...activatedBackupCleanupActions(context.state),
+        ...migratedWebConsoleCleanupActions(context.state),
     ];
 }
 
@@ -3215,6 +3481,8 @@ function recoveryPathHasDirectoryEntry(filePath: string): boolean {
 
 export function upgradeRecoveryPaths(state: UpgradeRecoveryPathState | null): string[] {
     if (!state) return [];
+    const webConsoleLayoutMigration = state.webConsoleLayoutMigration
+        ?? state.activation?.webConsoleLayoutMigration;
     const absentLauncherTarget = state.activation?.postgrestLauncher?.activated
         && state.activation.postgrestLauncher.previous === null
         ? state.activation.postgrestLauncher.targetPath
@@ -3229,6 +3497,10 @@ export function upgradeRecoveryPaths(state: UpgradeRecoveryPathState | null): st
             ? state.activation.postgrestLauncher.backupPath
             : null,
         state.activation?.webConsoleLink?.nextLink,
+        webConsoleLayoutMigration?.migrated
+            ? webConsoleLayoutMigration.legacyDir
+            : null,
+        webConsoleLayoutMigration?.rollbackLink,
         state.stagedManagement?.path,
         state.stagedEdgeRuntime?.path,
         state.stagedPostgrestLauncher?.path,

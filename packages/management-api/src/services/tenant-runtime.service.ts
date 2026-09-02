@@ -49,7 +49,7 @@ import {
 import { authConfigChangesPostgrestVerifier } from "./auth-runtime-impact";
 import { runtimeCacheService } from "./runtime-cache.service";
 import { projectControlSecretsService } from "./project-control-secrets.service";
-import { installManagedSystemdUnit } from "./systemd-unit-broker";
+import { hasCanonicalStartLimitDirectives, installManagedSystemdUnit } from "./systemd-unit-broker";
 import { renderPostgrestSystemdTemplate } from "./postgrest-systemd-template";
 import {
     PostgrestPoolMigrationGate,
@@ -61,6 +61,7 @@ import {
 import {
     activatePostgrestGeneration,
     postgrestGenerationLayout,
+    readCurrentPostgrestGeneration,
     readPostgrestPointerTarget,
     removePostgrestPointerIfCurrent,
     replacePostgrestPointer,
@@ -118,6 +119,7 @@ type PostgrestActivationMode = "ensure-running" | "restart-running" | "refresh-i
 type PostgrestPoolContext = {
     ref: string;
     runtimeUser: string;
+    runtimeUserUid: number;
     ownership: PostgrestControlOwnership;
 };
 type RenderedPostgrestGenerationRequest = {
@@ -821,23 +823,18 @@ class TenantRuntimeService {
     private async readPostgrestPoolGeneration(
         context: PostgrestPoolContext,
     ): Promise<PostgrestPoolGeneration> {
-        const pointerPath = path.join(this.TENANT_CONFIG_DIR, `${context.ref}_postgrest.current`);
-        const pointerTarget = await readPostgrestPointerTarget(
-            pointerPath,
-            context.ref,
-            context.ownership,
-        );
-        if (!pointerTarget) throw new Error(`PostgREST generation is unavailable for ${context.ref}`);
-        const validated = await validatePostgrestGenerationTarget(
-            this.TENANT_CONFIG_DIR,
-            context.ref,
-            pointerTarget,
-            context.ownership,
-        );
+        const generation = await readCurrentPostgrestGeneration({
+            tenantDirectory: this.TENANT_CONFIG_DIR,
+            projectRef: context.ref,
+            controlOwnerUid: context.ownership.controlOwnerUid,
+            runtimeOwnerUid: context.runtimeUserUid,
+            runtimeGroupGid: context.ownership.runtimeGroupGid,
+            setControlOwnership: (targetPath) => this.chownPath(targetPath, `root:${context.runtimeUser}`),
+        });
         return {
-            content: await fs.readFile(validated.path, "utf8"),
-            pointerTarget,
-            revision: validated.revision,
+            content: generation.content,
+            pointerTarget: generation.pointerTarget,
+            revision: generation.revision,
         };
     }
 
@@ -1311,6 +1308,15 @@ class TenantRuntimeService {
             throw new Error(`Tenant runtime group ${runtimeUser} is unavailable`);
         }
         return Number(rawGroupId);
+    }
+
+    private async tenantRuntimeUserId(runtimeUser: string): Promise<number> {
+        const user = await this.runStructuredCommand(["id", "-u", runtimeUser]);
+        const rawUserId = user.stdout.trim();
+        if (user.exitCode !== 0 || !/^\d+$/.test(rawUserId)) {
+            throw new Error(`Tenant runtime user ${runtimeUser} is unavailable`);
+        }
+        return Number(rawUserId);
     }
 
     private async activateRenderedPostgrestGeneration(
@@ -1827,7 +1833,8 @@ GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE=/auth/v1/verify
             || !currentPgrstUnit.includes("User=supacloud-%i")
             || !currentPgrstUnit.includes("Group=supacloud-%i")
             || !currentPgrstUnit.includes("/usr/local/libexec/supacloud/postgrest-launcher %i")
-            || currentPgrstUnit.includes(`EnvironmentFile=${this.TENANT_CONFIG_DIR}/%i.env`);
+            || currentPgrstUnit.includes(`EnvironmentFile=${this.TENANT_CONFIG_DIR}/%i.env`)
+            || !hasCanonicalStartLimitDirectives(currentPgrstUnit);
         if (shouldWritePgrstUnit) {
             const pgrstUnit = renderPostgrestSystemdTemplate({
                 postgrestRts: this.POSTGREST_RTS,
@@ -1847,7 +1854,8 @@ GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE=/auth/v1/verify
             || !currentGotrueUnit.includes("--config-dir")
             || !currentGotrueUnit.includes("ExecReload=/bin/kill -USR1 $MAINPID")
             || !currentGotrueUnit.includes("User=supacloud-%i")
-            || !currentGotrueUnit.includes("Group=supacloud-%i");
+            || !currentGotrueUnit.includes("Group=supacloud-%i")
+            || !hasCanonicalStartLimitDirectives(currentGotrueUnit);
         if (shouldWriteGotrueUnit) {
             const gotrueUnit = `
 [Unit]
@@ -1855,6 +1863,8 @@ Description=SupaCloud GoTrue for tenant %i
 Documentation=https://github.com/supacloud/supacloud
 After=network.target patroni.service
 Wants=patroni.service
+StartLimitBurst=3
+StartLimitIntervalSec=60
 
 [Service]
 Type=simple
@@ -1867,8 +1877,6 @@ ExecStart=${this.GOTRUE_BIN} --config-dir ${this.TENANT_CONFIG_DIR}/%i_gotrue.d
 ExecReload=/bin/kill -USR1 $MAINPID
 Restart=on-failure
 RestartSec=5
-StartLimitBurst=3
-StartLimitIntervalSec=60
 
 NoNewPrivileges=true
 ProtectSystem=strict
@@ -3075,6 +3083,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
             const context: PostgrestPoolContext = {
                 ref,
                 runtimeUser,
+                runtimeUserUid: await this.tenantRuntimeUserId(runtimeUser),
                 ownership: {
                     controlOwnerUid: 0,
                     runtimeGroupGid: await this.tenantRuntimeGroupId(runtimeUser),
@@ -3101,6 +3110,21 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
         await this.restartActivePostgrestOrThrow(ref);
     }
 
+    private async refreshProjectRealtimeVerifier(ref: string): Promise<void> {
+        const jwtPolicy = await this.getTenantCredentials(ref);
+        const { realtimeService } = await import("./realtime.service");
+        const updated = await realtimeService.updateTenant({
+            projectRef: ref,
+            dbName: jwtPolicy.dbName,
+            dbPassword: jwtPolicy.dbPassword,
+            jwtSecret: jwtPolicy.jwtSecret,
+            jwtJwks: jwtPolicy.jwtJwks,
+        });
+        if (!updated) {
+            throw new Error(`Failed to refresh Realtime JWT verification material for ${ref}`);
+        }
+    }
+
     public async applyAuthConfig(
         ref: string,
         previousAuth: Record<string, unknown>,
@@ -3110,6 +3134,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
         if (!authConfigChangesPostgrestVerifier(previousAuth, nextAuth)) return applied.status;
 
         await this.refreshProjectPostgrestVerifier(ref);
+        await this.refreshProjectRealtimeVerifier(ref);
         if (applied.authRuntime.mode === "owner") {
             await this.refreshSharedAuthDependents(ref);
         }
@@ -3139,14 +3164,8 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
         const failures: string[] = [];
         for (const ref of await this.listSharedAuthDependentRefs(ownerRef)) {
             try {
-                const jwtPolicy = await this.getTenantCredentials(ref);
-                await this.ensurePostgrestPrerequest(
-                    ref,
-                    jwtPolicy.thirdPartyJwtPolicy,
-                    jwtPolicy.localJwtIssuer,
-                );
-                await runtimeCacheService.invalidateProjectRuntimeEnv(ref);
-                await this.restartActivePostgrestOrThrow(ref);
+                await this.refreshProjectPostgrestVerifier(ref);
+                await this.refreshProjectRealtimeVerifier(ref);
             } catch (error: unknown) {
                 failures.push(ref);
                 logger.error(`[TenantRuntime] Failed to refresh shared auth dependent ${ref}`, {

@@ -20,6 +20,8 @@ Documentation=https://github.com/supacloud/supacloud
 After=network.target patroni.service supacloud-pgredis-runtime.service
 Wants=patroni.service
 Requires=supacloud-pgredis-runtime.service
+StartLimitBurst=5
+StartLimitIntervalSec=60
 
 [Service]
 Type=simple
@@ -29,8 +31,6 @@ ExecStartPre=/opt/supacloud/scripts/pre_start_recovery.sh
 ExecStart=/usr/local/bin/supacloud
 Restart=on-failure
 RestartSec=10
-StartLimitBurst=5
-StartLimitIntervalSec=60
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=supacloud

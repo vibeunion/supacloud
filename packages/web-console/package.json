@@ -41,10 +41,11 @@
     "vite": "8.2.2"
   },
   "dependencies": {
-    "@svadmin/core": "^0.48.0",
+    "@svadmin/ai-elements": "0.3.0",
+    "@svadmin/core": "^0.49.0",
     "@svadmin/elysia": "^0.11.0",
-    "@svadmin/sveltekit": "^0.10.4",
-    "@svadmin/ui": "0.67.0",
+    "@svadmin/sveltekit": "^0.10.5",
+    "@svadmin/ui": "0.67.1",
     "@tanstack/svelte-query": "^6.1.48",
     "highlight.js": "^11.12.0",
     "isomorphic-dompurify": "^4.1.0",

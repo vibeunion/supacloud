@@ -39,6 +39,7 @@
     PageSkeleton,
     Toast as SvadminToast,
   } from "@svadmin/ui";
+  import { ChatDialog } from "@svadmin/ai-elements";
   import { QueryClient, QueryClientProvider } from "@tanstack/svelte-query";
   import { Menu, Plug, X } from "lucide-svelte";
   import { dataProvider, chatProvider } from "$lib/admin/provider";
@@ -428,6 +429,7 @@
 
   <SvadminToast />
   {#if !isRawPage}
+    <ChatDialog />
     <DevTools />
   {/if}
 </QueryClientProvider>

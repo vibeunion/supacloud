@@ -22,10 +22,21 @@ SUPACLOUD_META_DB="${SUPACLOUD_META_DB:-supacloud_meta}"
 POSTGREST_RTS="${POSTGREST_RTS:--N1 -M256m -I0.5 -A4m}"
 POSTGREST_MEMORY_MAX="${POSTGREST_MEMORY_MAX:-384M}"
 POSTGREST_CPU_WEIGHT="${POSTGREST_CPU_WEIGHT:-40}"
-POSTGREST_DEFAULT_VERSION="v16.1"
-POSTGREST_X86_64_SHA256="b986c926cf16a1c5d97954c57d3a6edd894a5da225c3f3fc0c25dc4105009dd7"
-POSTGREST_ARM64_SHA256="90c801ef53671677d1c9bef4181579fe876c5a2b0c1ba51bb71ace4eebccc1c5"
-GOTRUE_DEFAULT_VERSION="v2.195.0"
+POSTGREST_DEFAULT_VERSION="v16.2"
+POSTGREST_X86_64_SHA256="4712595baae0f5d84a527d55a11166d6bf4d9b0f1d102505c5e9d59219787f08"
+POSTGREST_ARM64_SHA256="4c83974272acb56e6091e969ba4ee345fbc053cde457b0c8a9399e0d2a12c32d"
+GOTRUE_DEFAULT_VERSION="v2.196.0"
+
+postgrest_binary_version() {
+    local binary_path="$1"
+    local version
+    [ -x "$binary_path" ] || return 1
+    version=$("$binary_path" --version 2>/dev/null | head -1) || return 1
+    version="${version#PostgREST }"
+    version="${version#v}"
+    [[ "$version" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?([+-][A-Za-z0-9._-]+)?$ ]] || return 1
+    printf 'v%s' "$version"
+}
 
 gotrue_binary_version() {
     local binary_path="$1"
@@ -699,42 +710,28 @@ install_verified_tar_binary() (
 
 # ========== Ensure PostgREST binary is available ==========
 ensure_postgrest() {
+    local version="${POSTGREST_VERSION:-$POSTGREST_DEFAULT_VERSION}"
+    assert_safe_config_value "POSTGREST_VERSION" "$version" || exit 1
+    [[ "$version" =~ ^v[0-9]+\.[0-9]+(\.[0-9]+)?([+-][A-Za-z0-9._-]+)?$ ]] || {
+        echo "ERROR: POSTGREST_VERSION must be a v-prefixed release" >&2
+        return 1
+    }
+
     if command -v postgrest &>/dev/null; then
         POSTGREST_BIN=$(command -v postgrest)
-        return
     fi
-
-    if [ -x "$POSTGREST_BIN" ]; then
-        return
+    local installed_version
+    installed_version=$(postgrest_binary_version "$POSTGREST_BIN") || {
+        echo "ERROR: PostgREST is missing or has no readable version at $POSTGREST_BIN; run the explicit SupaCloud installer/upgrade" >&2
+        return 1
+    }
+    if [ "$installed_version" = "$version" ]; then
+        return 0
     fi
-
-    echo "PostgREST binary not found. Installing..."
-
-    local machine arch default_sha256
-    machine=$(uname -m)
-    case "$machine" in
-        x86_64) arch="linux-static-x86-64"; default_sha256="$POSTGREST_X86_64_SHA256" ;;
-        aarch64) arch="linux-static-aarch64"; default_sha256="$POSTGREST_ARM64_SHA256" ;;
-        *) echo "ERROR: Unsupported architecture: $machine" >&2; exit 1 ;;
-    esac
-
-    local version="${POSTGREST_VERSION:-v16.1}"
-    local expected_sha256
-    assert_safe_config_value "POSTGREST_VERSION" "$version" || exit 1
-    case "$version" in *[!A-Za-z0-9._-]*|"") echo "ERROR: Invalid POSTGREST_VERSION" >&2; exit 1 ;; esac
-    expected_sha256=$(resolve_release_sha256 "PostgREST" "$version" "$POSTGREST_DEFAULT_VERSION" "$default_sha256" "${POSTGREST_SHA256:-}") || exit 1
-    local url="https://github.com/PostgREST/postgrest/releases/download/${version}/postgrest-${version}-${arch}.tar.xz"
-    echo "Downloading PostgREST ${version}..."
-
-    (
-        set -e
-        local tmp_dir
-        tmp_dir=$(mktemp -d) || exit 1
-        trap 'rm -rf -- "$tmp_dir"' EXIT HUP INT TERM
-        download_release_asset "$url" "${tmp_dir}/postgrest.tar.xz" || exit 1
-        install_verified_tar_binary "${tmp_dir}/postgrest.tar.xz" "$expected_sha256" "$POSTGREST_BIN" "$machine" postgrest || exit 1
-    ) || { echo "ERROR: Failed to install PostgREST" >&2; exit 1; }
-    echo "PostgREST installed to $POSTGREST_BIN"
+    if [ "$installed_version" != "$version" ]; then
+        echo "ERROR: PostgREST $installed_version does not match required $version; run the explicit SupaCloud installer/upgrade" >&2
+        return 1
+    fi
 }
 
 # ========== Ensure GoTrue binary is available ==========
@@ -964,17 +961,49 @@ GOTRUE_SMTP_SENDER_NAME=$(systemd_env_quote "SupaCloud")"
 }
 
 # ========== Install systemd template unit ==========
+systemd_unit_has_directive_in_section() {
+    local unit_path="$1"
+    local target_section="$2"
+    local target_directive="$3"
+    [ -f "$unit_path" ] || return 1
+    awk -v target_section="$target_section" -v target_directive="$target_directive" '
+        /^[[:space:]]*\[[^][]+\][[:space:]]*$/ {
+            section = $0
+            sub(/^[[:space:]]*\[/, "", section)
+            sub(/\][[:space:]]*$/, "", section)
+            next
+        }
+        {
+            line = $0
+            sub(/^[[:space:]]*/, "", line)
+            if (section == target_section && index(line, target_directive "=") == 1) found = 1
+        }
+        END { exit found ? 0 : 1 }
+    ' "$unit_path"
+}
+
+systemd_unit_has_canonical_start_limits() {
+    local unit_path="$1"
+    systemd_unit_has_directive_in_section "$unit_path" Unit StartLimitBurst \
+        && systemd_unit_has_directive_in_section "$unit_path" Unit StartLimitIntervalSec \
+        && ! systemd_unit_has_directive_in_section "$unit_path" Service StartLimitBurst \
+        && ! systemd_unit_has_directive_in_section "$unit_path" Service StartLimitIntervalSec
+}
+
 install_systemd_template() {
     local pgrst_unit="/etc/systemd/system/supacloud-pgrst@.service"
     if [ ! -f "$pgrst_unit" ] \
         || grep -Eq -- '-M30m|MemoryMax=45M|^User=nobody$|^EnvironmentFile=/etc/supabase/tenants/%i\.env$' "$pgrst_unit" \
-        || ! grep -Fq 'ExecStart=/usr/local/libexec/supacloud/postgrest-launcher %i' "$pgrst_unit"; then
+        || ! grep -Fq 'ExecStart=/usr/local/libexec/supacloud/postgrest-launcher %i' "$pgrst_unit" \
+        || ! systemd_unit_has_canonical_start_limits "$pgrst_unit"; then
         cat > "$pgrst_unit" <<EOF
 [Unit]
 Description=SupaCloud PostgREST for tenant %i
 Documentation=https://github.com/supacloud/supacloud
 After=network.target patroni.service
 Wants=patroni.service
+StartLimitBurst=3
+StartLimitIntervalSec=60
 
 [Service]
 Type=simple
@@ -990,8 +1019,6 @@ Environment="SUPACLOUD_POSTGREST_CONTROL_UID=0"
 ExecStart=/usr/local/libexec/supacloud/postgrest-launcher %i +RTS ${POSTGREST_RTS} -RTS
 Restart=on-failure
 RestartSec=5
-StartLimitBurst=3
-StartLimitIntervalSec=60
 
 # Security and resource sandboxing
 NoNewPrivileges=true
@@ -1007,13 +1034,18 @@ EOF
     fi
 
     local gotrue_unit="/etc/systemd/system/supacloud-gotrue@.service"
-    if [ ! -f "$gotrue_unit" ] || ! grep -q -- '--config-dir /etc/supabase/tenants/%i_gotrue.d' "$gotrue_unit" || grep -q '^User=nobody$' "$gotrue_unit"; then
+    if [ ! -f "$gotrue_unit" ] \
+        || ! grep -q -- '--config-dir /etc/supabase/tenants/%i_gotrue.d' "$gotrue_unit" \
+        || grep -q '^User=nobody$' "$gotrue_unit" \
+        || ! systemd_unit_has_canonical_start_limits "$gotrue_unit"; then
         cat > "$gotrue_unit" <<EOF
 [Unit]
 Description=SupaCloud GoTrue for tenant %i
 Documentation=https://github.com/supacloud/supacloud
 After=network.target patroni.service
 Wants=patroni.service
+StartLimitBurst=3
+StartLimitIntervalSec=60
 
 [Service]
 Type=simple
@@ -1027,8 +1059,6 @@ ExecStart=${GOTRUE_BIN} --config-dir /etc/supabase/tenants/%i_gotrue.d
 ExecReload=/bin/kill -USR1 \$MAINPID
 Restart=on-failure
 RestartSec=5
-StartLimitBurst=3
-StartLimitIntervalSec=60
 
 # Security and resource sandboxing
 NoNewPrivileges=true
