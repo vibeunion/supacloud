@@ -71,6 +71,8 @@ const ACTION_POLICY: Record<string, ModulePolicy> = {
         write: ["send", "receive", "ack", "release", "fail", "retry", "delete_message", "update_settings"],
     },
     ai: { local: ["show_skill", "install_skill"] },
+    app: { local: ["generate", "compile", "check", "graph", "explain"] },
+    db: { local: ["lint", "explain"], read: ["module_check"] },
 };
 
 export interface ExecutionAuthorization {
