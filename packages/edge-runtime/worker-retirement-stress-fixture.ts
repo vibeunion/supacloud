@@ -5,8 +5,9 @@ import { WorkerPool } from "./worker-pool";
 
 const CHURN_BATCHES = 4;
 const REQUESTS_PER_BATCH = 6;
-const REQUEST_TIMEOUT_MS = 400;
-const HELD_FETCH_DELAY_MS = 800;
+// Leave enough room for worker cold start while still forcing the held fetch to time out.
+const REQUEST_TIMEOUT_MS = 800;
+const HELD_FETCH_DELAY_MS = 1_200;
 
 async function waitForNaturalExits(pool: WorkerPool, expected: number): Promise<void> {
   const deadline = Date.now() + 3_000;
