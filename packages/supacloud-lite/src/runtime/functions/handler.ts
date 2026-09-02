@@ -100,8 +100,10 @@ export function isFrameworkRouterHandler(handler: unknown): boolean {
   if (!handler || typeof handler !== 'object') return false
   const candidate = handler as FrameworkObjectHandler
   if (candidate.__supacloud?.routeAware === true) return true
-  if (typeof candidate.handle === 'function') return true
-  return Array.isArray(candidate.routes) && typeof candidate.fetch === 'function'
+  return (
+    Array.isArray(candidate.routes) &&
+    (typeof candidate.handle === 'function' || typeof candidate.fetch === 'function')
+  )
 }
 
 /**
