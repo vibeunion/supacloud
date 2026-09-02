@@ -435,7 +435,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     // surface so it cannot fall through to the Web Console SPA catch-all.
     .get('/status', async () => {
         return await StorageService.getStatus();
-    })
+    }, { detail: { tags: ["storage"], summary: "Get storage service status" } })
 
     // ════════════════════════════════════════════════════════
     // BUCKET Operations

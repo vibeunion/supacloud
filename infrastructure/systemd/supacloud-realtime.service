@@ -30,18 +30,26 @@ EnvironmentFile=-/etc/supabase/management-api.env
 # EnvironmentFile values override Environment values regardless of directive
 # order. Keep release-owned, non-secret selectors in the required service file
 # loaded last so stale management-api.env values cannot select an old runtime.
-Environment=REALTIME_IMAGE=public.ecr.aws/supabase/realtime:v2.133.0
+Environment=REALTIME_IMAGE=public.ecr.aws/supabase/realtime@sha256:974f7db71f140f54c63c8d7a8d8643109704c3ee99ff735678a803fdfbfdcefb
 Environment=REALTIME_CONTAINER_NAME=supacloud-realtime
 Environment=REALTIME_DB_USER=supabase_admin
 Environment=PG_DATABASE=supacloud_meta
 Environment=REALTIME_CONTAINER_ENV_FILE=/etc/supabase/realtime-container.env
+Environment=REALTIME_SLOT_ISOLATION_RUNTIME_VERSION=2.133.0
+Environment=REALTIME_SLOT_ISOLATION_ARTIFACT_DIR=/opt/supacloud/realtime-slot-isolation
+Environment=REALTIME_SLOT_ISOLATION_MANIFEST=/opt/supacloud/realtime-slot-isolation/manifest.json
+Environment=REALTIME_SLOT_ISOLATION_BEAM=/opt/supacloud/realtime-slot-isolation/Elixir.Realtime.Tenants.ReplicationConnection.beam
+Environment=REALTIME_SLOT_ISOLATION_LAUNCHER=/usr/local/libexec/supacloud/realtime-launcher
+Environment=REALTIME_SLOT_ISOLATION_VERIFY_SCRIPT=/usr/local/libexec/supacloud/verify_slot_isolation_artifact.py
+Environment=CONTAINER_RUNTIME=/usr/bin/podman
 EnvironmentFile=/etc/supabase/realtime-service.env
 
 ExecStartPre=/bin/sh -c 'test -n "$$REALTIME_SECRET_KEY_BASE" && test -n "$$REALTIME_DB_ENC_KEY" && test "$${#REALTIME_DB_ENC_KEY}" -eq 16 && test -n "$$SUPACLOUD_JWT_SECRET" && test -n "$$REALTIME_IMAGE" && test -n "$$REALTIME_CONTAINER_NAME" && test -n "$$REALTIME_DB_USER" && test -n "$$PGPASSWORD"'
+ExecStartPre=/usr/local/libexec/supacloud/realtime-launcher --validate-only
 ExecStartPre=-/usr/bin/podman rm -f ${REALTIME_CONTAINER_NAME}
-ExecStart=/usr/bin/podman run --replace --name ${REALTIME_CONTAINER_NAME} --network host --env-file ${REALTIME_CONTAINER_ENV_FILE} ${REALTIME_IMAGE}
+ExecStart=/usr/local/libexec/supacloud/realtime-launcher
 
-ExecStop=/usr/bin/podman stop -t 10 ${REALTIME_CONTAINER_NAME}
+ExecStop=-/usr/bin/podman stop -t 10 ${REALTIME_CONTAINER_NAME}
 
 NoNewPrivileges=true
 ProtectSystem=full

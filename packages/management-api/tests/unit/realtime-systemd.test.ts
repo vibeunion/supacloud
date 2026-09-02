@@ -26,7 +26,7 @@ describe("Realtime systemd deployment", () => {
       "printf 'STALE_CONTAINER_KEY=remove-me\\nAPI_JWT_SECRET=stale-secret\\n' > \"$env_file\"",
       "printf 'STALE_SERVICE_KEY=remove-me\\nREALTIME_API_SECRET=stale-secret\\n' > \"$service_env_file\"",
       "write_realtime_container_env \"$env_file\"",
-      "write_realtime_service_env \"$service_env_file\" \"${REALTIME_IMAGE:-public.ecr.aws/supabase/realtime:v2.133.0}\" \"$env_file\"",
+      "write_realtime_service_env \"$service_env_file\" \"${REALTIME_IMAGE:-$REALTIME_PINNED_IMAGE}\" \"$env_file\"",
       "render_realtime_systemd_unit \"$source_unit\" \"$rendered_unit\" \"$env_file\" \"$service_env_file\"",
     ].join("\n");
     const childEnv = { ...process.env } as Record<string, string>;
@@ -68,46 +68,91 @@ describe("Realtime systemd deployment", () => {
     );
 
     expect(unit).toContain("SupaCloud Realtime Service");
-    expect(unit).toContain("podman run --replace");
+    expect(unit).toContain("ExecStart=/usr/local/libexec/supacloud/realtime-launcher");
+    expect(unit).toContain("ExecStartPre=/usr/local/libexec/supacloud/realtime-launcher --validate-only");
     expect(unit).toContain("LogsDirectory=supacloud");
-    expect(unit).toContain("Environment=REALTIME_IMAGE=public.ecr.aws/supabase/realtime:v2.133.0");
+    expect(unit).toContain(
+      "Environment=REALTIME_IMAGE=public.ecr.aws/supabase/realtime@sha256:974f7db71f140f54c63c8d7a8d8643109704c3ee99ff735678a803fdfbfdcefb",
+    );
     expect(unit).toContain("Environment=REALTIME_CONTAINER_NAME=supacloud-realtime");
     expect(unit).toContain("Environment=REALTIME_DB_USER=supabase_admin");
     expect(unit).toContain("Environment=PG_DATABASE=supacloud_meta");
     expect(unit).toContain("Environment=REALTIME_CONTAINER_ENV_FILE=/etc/supabase/realtime-container.env");
+    expect(unit).toContain("Environment=REALTIME_SLOT_ISOLATION_RUNTIME_VERSION=2.133.0");
+    expect(unit).toContain("Environment=REALTIME_SLOT_ISOLATION_ARTIFACT_DIR=/opt/supacloud/realtime-slot-isolation");
+    expect(unit).toContain("Environment=REALTIME_SLOT_ISOLATION_MANIFEST=/opt/supacloud/realtime-slot-isolation/manifest.json");
+    expect(unit).toContain("Environment=REALTIME_SLOT_ISOLATION_BEAM=/opt/supacloud/realtime-slot-isolation/Elixir.Realtime.Tenants.ReplicationConnection.beam");
+    expect(unit).toContain("Environment=REALTIME_SLOT_ISOLATION_LAUNCHER=/usr/local/libexec/supacloud/realtime-launcher");
+    expect(unit).toContain("Environment=REALTIME_SLOT_ISOLATION_VERIFY_SCRIPT=/usr/local/libexec/supacloud/verify_slot_isolation_artifact.py");
     expect(unit).toContain("EnvironmentFile=-/etc/supabase/management-api.env");
     expect(unit).toContain("EnvironmentFile=/etc/supabase/realtime-service.env");
     expect(unit).toContain("$${#REALTIME_DB_ENC_KEY}");
     expect(unit).toContain("test -n \"$$PGPASSWORD\"");
-    expect(unit).toContain("--env-file ${REALTIME_CONTAINER_ENV_FILE}");
+    expect(unit).toContain("ExecStop=-/usr/bin/podman stop -t 10 ${REALTIME_CONTAINER_NAME}");
+    expect(unit).not.toContain("podman run");
     expect(unit).not.toContain("-e DB_PASS_REALTIME=");
     expect(unit).not.toContain("-e JWT_SECRET=");
     expect(unit).not.toContain("-e SECRET_KEY_BASE=");
     expect(unit).not.toContain("SystemCallFilter=");
     expect(unit).not.toContain("DB_AFTER_CONNECT_QUERY");
+
+    const launcher = readFileSync(join(repoRoot, "infrastructure/realtime/realtime-launcher.sh"), "utf8");
+    expect(launcher).toContain("run --replace --pull=never --name");
+    expect(launcher).toContain("--env-file \"$REALTIME_CONTAINER_ENV_FILE\"");
+    expect(launcher).toContain("--volume \"$REALTIME_SLOT_ISOLATION_BEAM:$REALTIME_SLOT_ISOLATION_CONTAINER_PATH:ro,Z\"");
+    expect(launcher).toContain('case "$runtime_name" in');
+    expect(launcher).toContain("Docker has no Podman-compatible --replace flag");
   });
 
-  test("installer pre-pulls and tags the Realtime image before systemd restart", () => {
+  test("installer validates a complete candidate before activation and rolls back failures", () => {
     const installer = readFileSync(join(repoRoot, "install.sh"), "utf8");
     const realtimeSection = installer.slice(
       installer.indexOf("# --- 2. Deploy Supabase Realtime"),
-      installer.indexOf("# --- 3. Update management API env"),
+      installer.indexOf("# --- 3. Atomically merge management API container references"),
     );
 
-    expect(realtimeSection).toContain("REALTIME_IMAGE_PULL");
-    expect(realtimeSection).toContain("$RUNTIME pull \"$REALTIME_IMAGE_PULL\"");
-    expect(realtimeSection).toContain("$RUNTIME tag \"$REALTIME_IMAGE_PULL\" \"$REALTIME_IMAGE_VALUE\"");
-    expect(realtimeSection).toContain("start_realtime_container");
-    expect(installer).toContain('--env-file "$realtime_env_file"');
-    expect(realtimeSection).toContain("render_realtime_systemd_unit");
+    const transaction = installer.slice(
+      installer.indexOf("deploy_realtime_service_transaction() ("),
+      installer.indexOf("\n)\n\nstart_realtime_container()"),
+    );
+
+    expect(realtimeSection).toContain("REALTIME_IMAGE_VALUE");
+    expect(realtimeSection).toContain("deploy_realtime_service_transaction");
+    expect(realtimeSection).not.toContain("start_realtime_container");
     expect(realtimeSection).not.toContain("-e DB_PASS_REALTIME");
     expect(realtimeSection).not.toContain("-e JWT_SECRET");
-    expect(realtimeSection.indexOf("$RUNTIME pull")).toBeLessThan(
-      realtimeSection.indexOf("systemctl restart supacloud-realtime"),
+    expect(transaction).toContain('pull_realtime_image "$runtime_bin" "$image"');
+    expect(transaction).toContain(
+      'prepare_realtime_install_candidate "$transaction_dir" "$runtime_bin" "$image" "$unit_source"',
     );
-    expect(realtimeSection).toContain("if ! systemctl restart supacloud-realtime; then");
-    expect(realtimeSection).not.toContain(
-      'systemctl restart supacloud-realtime || log_warn',
+    expect(transaction).toContain('capture_realtime_install_state "$transaction_dir"');
+    expect(transaction).toContain('activate_realtime_artifact_generation "$transaction_dir"');
+    expect(transaction).toContain('install_realtime_candidate_files "$transaction_dir"');
+    expect(transaction).toContain("systemctl daemon-reload");
+    expect(transaction).toContain("systemctl enable supacloud-realtime");
+    expect(transaction).toContain("systemctl restart supacloud-realtime");
+    expect(transaction).toContain("wait_realtime_health");
+    expect(installer).toContain(
+      '"${SUPACLOUD_REALTIME_HEALTH_ATTEMPTS:-30}"',
+    );
+    expect(installer).toContain(
+      '"${SUPACLOUD_REALTIME_HEALTH_DELAY_SECONDS:-1}"',
+    );
+    expect(transaction).toContain(
+      'rollback_realtime_install_transaction "$transaction_dir" "$runtime_bin"',
+    );
+    expect(transaction).toContain('commit_realtime_install_transaction "$transaction_dir"');
+    expect(transaction.indexOf("prepare_realtime_install_candidate")).toBeLessThan(
+      transaction.indexOf("capture_realtime_install_state"),
+    );
+    expect(transaction.indexOf("capture_realtime_install_state")).toBeLessThan(
+      transaction.indexOf("activate_realtime_artifact_generation"),
+    );
+    expect(transaction.indexOf("systemctl restart supacloud-realtime")).toBeLessThan(
+      transaction.indexOf("wait_realtime_health"),
+    );
+    expect(transaction.indexOf("wait_realtime_health")).toBeLessThan(
+      transaction.indexOf("commit_realtime_install_transaction"),
     );
   });
 
@@ -121,7 +166,11 @@ describe("Realtime systemd deployment", () => {
     expect(rendered.envText).not.toContain("stale-secret");
     expect(rendered.serviceEnvText).not.toContain("STALE_SERVICE_KEY");
     expect(rendered.serviceEnvText).not.toContain("REALTIME_API_SECRET");
-    expect(rendered.unitText).toContain("--env-file ");
+    expect(rendered.unitText).toContain("ExecStart=/usr/local/libexec/supacloud/realtime-launcher");
+    expect(rendered.serviceEnvText).toContain("REALTIME_SLOT_ISOLATION_RUNTIME_VERSION=\"2.133.0\"");
+    expect(rendered.serviceEnvText).toContain("REALTIME_SLOT_ISOLATION_MANIFEST=");
+    expect(rendered.serviceEnvText).toContain("REALTIME_SLOT_ISOLATION_BEAM=");
+    expect(rendered.serviceEnvText).toContain("REALTIME_SLOT_ISOLATION_VERIFY_SCRIPT=");
     expect(rendered.unitText).not.toContain("SEED_SELF_HOST=true");
   });
 
@@ -176,7 +225,7 @@ describe("Realtime systemd deployment", () => {
     for (const [key, value] of serviceEnvironment) effectiveEnvironment.set(key, value);
 
     expect(effectiveEnvironment.get("REALTIME_IMAGE")).toBe(
-      "public.ecr.aws/supabase/realtime:v2.133.0",
+      "public.ecr.aws/supabase/realtime@sha256:974f7db71f140f54c63c8d7a8d8643109704c3ee99ff735678a803fdfbfdcefb",
     );
     expect(effectiveEnvironment.get("REALTIME_CONTAINER_NAME")).toBe("supacloud-realtime");
     expect(effectiveEnvironment.get("REALTIME_DB_USER")).toBe("supabase_admin");
@@ -196,12 +245,17 @@ describe("Realtime systemd deployment", () => {
       if (value === undefined) throw new Error(`Missing effective systemd value: ${key}`);
       return value;
     });
-    expect(effectiveCommand).toContain(
-      "podman run --replace --name supacloud-realtime --network host --env-file ",
+    expect(effectiveCommand).toBe("/usr/local/libexec/supacloud/realtime-launcher");
+    expect(effectiveEnvironment.get("REALTIME_SLOT_ISOLATION_RUNTIME_VERSION")).toBe("2.133.0");
+    expect(effectiveEnvironment.get("REALTIME_SLOT_ISOLATION_ARTIFACT_DIR")).toBe(
+      "/opt/supacloud/realtime-slot-isolation",
     );
-    expect(effectiveCommand).toContain("public.ecr.aws/supabase/realtime:v2.133.0");
-    expect(effectiveCommand).not.toContain("v2.129.0");
-    expect(effectiveCommand).not.toContain("stale-realtime");
+    expect(effectiveEnvironment.get("REALTIME_SLOT_ISOLATION_LAUNCHER")).toBe(
+      "/usr/local/libexec/supacloud/realtime-launcher",
+    );
+    expect(effectiveEnvironment.get("REALTIME_SLOT_ISOLATION_VERIFY_SCRIPT")).toBe(
+      "/usr/local/libexec/supacloud/verify_slot_isolation_artifact.py",
+    );
 
     const customImage = "registry.example.test/supabase/realtime:v2.133.0-custom";
     const custom = renderRealtimeEnv(undefined, undefined, customImage);

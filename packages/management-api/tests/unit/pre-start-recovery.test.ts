@@ -109,7 +109,8 @@ describe("Management pre-start recovery sandbox", () => {
     expect(managementUnit).toContain("SystemCallFilter=~@mount");
     expect(managementUnit).toContain("ExecStartPre=/opt/supacloud/scripts/pre_start_recovery.sh");
     expect(managementUnit).not.toContain("ExecStartPre=/usr/bin/podman");
-    expect(realtimeUnit).toContain("ExecStart=/usr/bin/podman run");
+    expect(realtimeUnit).toContain("ExecStart=/usr/local/libexec/supacloud/realtime-launcher");
+    expect(realtimeUnit).toContain("Environment=CONTAINER_RUNTIME=/usr/bin/podman");
     expect(realtimeUnit).not.toContain("SystemCallFilter=");
     expect(imaginarySection).toContain("--restart=always");
   });

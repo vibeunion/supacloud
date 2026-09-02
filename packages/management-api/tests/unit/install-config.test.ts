@@ -560,7 +560,8 @@ describe("installer configuration persistence", () => {
     expect(installer).toContain('postgresql://postgres:${encoded_postgres_password}@');
     expect(installer).not.toContain('-e DB_PASSWORD="${POSTGRES_PASSWORD}"');
     expect(installer).not.toContain('-e JWT_SECRET="${JWT_SECRET}"');
-    expect(installer).toContain('--env-file "$realtime_env_file"');
+    expect(installer).toContain('REALTIME_CONTAINER_ENV_FILE="$realtime_env_file"');
+    expect(installer).toContain('"$launcher"');
     expect(installer).toContain('supacloud_write_shell_env_pairs "$JWT_KEYS_FILE"');
     expect(installer).toContain('supacloud_write_service_env_pairs "$CREDENTIALS_FILE"');
     expect(installer).toContain('supacloud_write_service_env_pairs "$MANAGEMENT_ENV_FILE"');
@@ -672,10 +673,17 @@ describe("installer configuration persistence", () => {
 
   test("Realtime container receives secrets through a 0600 env file that is removed by the EXIT trap", () => {
     const dir = makeTempDir();
+    const launcher = join(dir, "realtime-launcher");
     const argsFile = join(dir, "args.txt");
     const envCopy = join(dir, "env-copy.txt");
     const modeFile = join(dir, "mode.txt");
     const pathFile = join(dir, "path.txt");
+    writeFileSync(launcher, [
+      "#!/usr/bin/env bash",
+      "set -euo pipefail",
+      '"$CONTAINER_RUNTIME" run -d --name "$REALTIME_CONTAINER_NAME" --network "$REALTIME_NETWORK_MODE" --env-file "$REALTIME_CONTAINER_ENV_FILE" "$REALTIME_IMAGE"',
+      "",
+    ].join("\n"), { mode: 0o755 });
     const result = runBash([
       "source install.sh",
       'fake_runtime() { printf "%s\\n" "$*" > "$ARGS_FILE"; while [ "$#" -gt 0 ]; do if [ "$1" = "--env-file" ]; then printf "%s" "$2" > "$PATH_FILE"; cp "$2" "$ENV_COPY"; python3 -c "import os,sys; print(oct(os.stat(sys.argv[1]).st_mode & 0o777))" "$2" > "$MODE_FILE"; shift 2; else shift; fi; done; }',
@@ -686,6 +694,7 @@ describe("installer configuration persistence", () => {
       ENV_COPY: envCopy,
       MODE_FILE: modeFile,
       PATH_FILE: pathFile,
+      SUPACLOUD_REALTIME_SLOT_ISOLATION_LAUNCHER_FILE: launcher,
       INTERNAL_IP: "10.0.0.8",
       POSTGRES_PASSWORD: "db-secret",
       JWT_SECRET: "jwt-secret",

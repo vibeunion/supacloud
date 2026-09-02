@@ -48,9 +48,11 @@ function systemdDirectiveSections(source: string, directive: string): string[] {
 }
 
 function readRealtimeImageVersion(systemdUnit: string): string {
-  const version = systemdUnit.match(/^Environment=REALTIME_IMAGE=.*:(v[^\s]+)$/m)?.[1];
+  const version = systemdUnit.match(
+    /^Environment=REALTIME_SLOT_ISOLATION_RUNTIME_VERSION=([^\s]+)$/m,
+  )?.[1];
   if (!version) throw new Error("Missing Realtime image version");
-  return version;
+  return `v${version}`;
 }
 
 describe("runtime companion version assets", () => {
@@ -1364,9 +1366,20 @@ describe("runtime companion version assets", () => {
 
     expect(runtime).toContain('POSTGREST_DEFAULT_VERSION="v16.2"');
     expect(runtime).toContain('GOTRUE_DEFAULT_VERSION="v2.196.0"');
-    for (const source of [installer, realtimeUnit, workflow]) {
-      expect(source).toContain("public.ecr.aws/supabase/realtime:v2.133.0");
-    }
+    const realtimeDigest =
+      "sha256:974f7db71f140f54c63c8d7a8d8643109704c3ee99ff735678a803fdfbfdcefb";
+    expect(installer).toContain('REALTIME_BASE_IMAGE="public.ecr.aws/supabase/realtime:v2.133.0"');
+    expect(installer).toContain(
+      `REALTIME_PINNED_IMAGE="public.ecr.aws/supabase/realtime@${realtimeDigest}"`,
+    );
+    expect(realtimeUnit).toContain(
+      `Environment=REALTIME_IMAGE=public.ecr.aws/supabase/realtime@${realtimeDigest}`,
+    );
+    expect(realtimeUnit).toContain(
+      "Environment=REALTIME_SLOT_ISOLATION_RUNTIME_VERSION=2.133.0",
+    );
+    expect(workflow).toContain("image: public.ecr.aws/supabase/realtime:v2.133.0");
+    expect(workflow).not.toContain("public.ecr.aws/supabase/realtime:v2.129.0");
     for (const compose of [devCompose, selfHostCompose]) {
       expect(compose).toContain("image: supacloud-caddy:2.11.4-ratelimit");
       expect(compose).toContain("supabase/gotrue:v2.196.0");

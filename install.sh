@@ -33,6 +33,19 @@ EDGE_RUNTIME_SOURCE_DIR="${SUPACLOUD_EDGE_RUNTIME_SOURCE_DIR:-/opt/supacloud/edg
 EDGE_RUNTIME_SOURCE_INPUT_DIR="${SUPACLOUD_EDGE_RUNTIME_SOURCE_INPUT_DIR:-${SCRIPT_DIR}/packages/edge-runtime}"
 PGREDIS_RUNTIME_ENV_FILE="${SUPACLOUD_PGREDIS_RUNTIME_ENV_FILE:-/etc/supabase/pgredis-runtime.env}"
 REALTIME_SERVICE_ENV_FILE="${SUPACLOUD_REALTIME_SERVICE_ENV_FILE:-/etc/supabase/realtime-service.env}"
+REALTIME_SLOT_ISOLATION_RUNTIME_VERSION="${SUPACLOUD_REALTIME_SLOT_ISOLATION_RUNTIME_VERSION:-2.133.0}"
+REALTIME_BASE_IMAGE="public.ecr.aws/supabase/realtime:v2.133.0"
+REALTIME_PINNED_IMAGE="public.ecr.aws/supabase/realtime@sha256:974f7db71f140f54c63c8d7a8d8643109704c3ee99ff735678a803fdfbfdcefb"
+REALTIME_SLOT_ISOLATION_ARTIFACT_DIR="${SUPACLOUD_REALTIME_SLOT_ISOLATION_ARTIFACT_DIR:-/opt/supacloud/realtime-slot-isolation}"
+REALTIME_SLOT_ISOLATION_LAUNCHER_FILE="${SUPACLOUD_REALTIME_SLOT_ISOLATION_LAUNCHER_FILE:-/usr/local/libexec/supacloud/realtime-launcher}"
+REALTIME_SLOT_ISOLATION_BUILD_FILE="${SUPACLOUD_REALTIME_SLOT_ISOLATION_BUILD_FILE:-/usr/local/libexec/supacloud/build-realtime-slot-isolation}"
+REALTIME_SLOT_ISOLATION_APPLY_FILE="${SUPACLOUD_REALTIME_SLOT_ISOLATION_APPLY_FILE:-/usr/local/libexec/supacloud/apply-slot-isolation.py}"
+REALTIME_SLOT_ISOLATION_VERIFY_FILE="${SUPACLOUD_REALTIME_SLOT_ISOLATION_VERIFY_FILE:-/usr/local/libexec/supacloud/verify_slot_isolation_artifact.py}"
+REALTIME_SLOT_ISOLATION_MANIFEST="${SUPACLOUD_REALTIME_SLOT_ISOLATION_MANIFEST:-${REALTIME_SLOT_ISOLATION_ARTIFACT_DIR}/manifest.json}"
+REALTIME_SLOT_ISOLATION_BEAM="${SUPACLOUD_REALTIME_SLOT_ISOLATION_BEAM:-${REALTIME_SLOT_ISOLATION_ARTIFACT_DIR}/Elixir.Realtime.Tenants.ReplicationConnection.beam}"
+REALTIME_CONTAINER_ENV_FILE="${SUPACLOUD_REALTIME_CONTAINER_ENV_FILE:-/etc/supabase/realtime-container.env}"
+REALTIME_UNIT_FILE="${SUPACLOUD_REALTIME_UNIT_FILE:-/etc/systemd/system/supacloud-realtime.service}"
+REALTIME_HEALTH_URL="${SUPACLOUD_REALTIME_HEALTH_URL:-http://127.0.0.1:4000/healthcheck}"
 PGREDIS_RUNTIME_BIN_FILE="${SUPACLOUD_PGREDIS_RUNTIME_BIN_FILE:-/usr/local/bin/supacloud-pgredis-runtime}"
 PGREDIS_RUNTIME_UNIT_FILE="${SUPACLOUD_PGREDIS_RUNTIME_UNIT_FILE:-/etc/systemd/system/supacloud-pgredis-runtime.service}"
 PGREDIS_RUNTIME_SOURCE_DIR="${SUPACLOUD_PGREDIS_RUNTIME_SOURCE_DIR:-/opt/supacloud/pgredis-runtime}"
@@ -3001,6 +3014,36 @@ install_postgrest_launcher() {
     install -D -m 0755 "$launcher_src" "$launcher_target"
 }
 
+install_realtime_file() {
+    local source_file="$1"
+    local target_file="$2"
+    local mode="$3"
+    mkdir -p "$(dirname "$target_file")" || return 1
+    install -m "$mode" "$source_file" "$target_file"
+}
+
+install_realtime_slot_isolation_tools() {
+    local source_dir="${1:-${SCRIPT_DIR}/infrastructure/realtime}"
+    local launcher_target="${2:-$REALTIME_SLOT_ISOLATION_LAUNCHER_FILE}"
+    local build_target="${3:-$REALTIME_SLOT_ISOLATION_BUILD_FILE}"
+    local apply_target="${4:-$REALTIME_SLOT_ISOLATION_APPLY_FILE}"
+    local verify_target="${5:-$REALTIME_SLOT_ISOLATION_VERIFY_FILE}"
+    local launcher_src="${source_dir}/realtime-launcher.sh"
+    local build_src="${source_dir}/build_realtime_slot_isolation_beam.sh"
+    local apply_src="${source_dir}/apply-slot-isolation.py"
+    local verify_src="${source_dir}/verify_slot_isolation_artifact.py"
+
+    if [[ ! -f "$launcher_src" || ! -f "$build_src" || ! -f "$apply_src" || ! -f "$verify_src" ]]; then
+        log_error "Realtime slot-isolation assets are missing"
+        return 1
+    fi
+
+    install_realtime_file "$launcher_src" "$launcher_target" 0755 || return 1
+    install_realtime_file "$build_src" "$build_target" 0755 || return 1
+    install_realtime_file "$apply_src" "$apply_target" 0755 || return 1
+    install_realtime_file "$verify_src" "$verify_target" 0755 || return 1
+}
+
 management_edge_runtime_source_transaction() {
     local management_transaction_dir="$1"
     local marker="${management_transaction_dir}/${EDGE_RUNTIME_SOURCE_TRANSACTION_MARKER}"
@@ -3621,7 +3664,7 @@ install_management_api() {
         REALTIME_DB_ENC_KEY "$REALTIME_DB_ENC_KEY" \
         REALTIME_API_SECRET "$JWT_SECRET" \
         SUPACLOUD_REALTIME_CONTAINER_ENV_FILE "${SUPACLOUD_REALTIME_CONTAINER_ENV_FILE:-/etc/supabase/realtime-container.env}" \
-        REALTIME_IMAGE "${REALTIME_IMAGE:-public.ecr.aws/supabase/realtime:v2.133.0}" \
+        REALTIME_IMAGE "${REALTIME_IMAGE:-$REALTIME_PINNED_IMAGE}" \
         REALTIME_CONTAINER_NAME "${REALTIME_CONTAINER_NAME:-supacloud-realtime}" \
         REALTIME_DB_USER supabase_admin \
         PG_HOST 127.0.0.1 \
@@ -4070,12 +4113,21 @@ write_realtime_service_env() {
     local container_env_file="$3"
     local container_name="${REALTIME_CONTAINER_NAME:-supacloud-realtime}"
     local database_user="${REALTIME_DB_USER:-supabase_admin}"
+    local artifact_dir="${REALTIME_SLOT_ISOLATION_ARTIFACT_DIR:-/opt/supacloud/realtime-slot-isolation}"
+    local manifest_file="${REALTIME_SLOT_ISOLATION_MANIFEST:-${artifact_dir}/manifest.json}"
+    local beam_file="${REALTIME_SLOT_ISOLATION_BEAM:-${artifact_dir}/Elixir.Realtime.Tenants.ReplicationConnection.beam}"
     supacloud_replace_service_env_pairs "$target_file" \
         REALTIME_IMAGE "$image" \
         REALTIME_CONTAINER_NAME "$container_name" \
         REALTIME_DB_USER "$database_user" \
         PG_DATABASE supacloud_meta \
-        REALTIME_CONTAINER_ENV_FILE "$container_env_file"
+        REALTIME_CONTAINER_ENV_FILE "$container_env_file" \
+        REALTIME_SLOT_ISOLATION_RUNTIME_VERSION "${REALTIME_SLOT_ISOLATION_RUNTIME_VERSION:-2.133.0}" \
+        REALTIME_SLOT_ISOLATION_ARTIFACT_DIR "$artifact_dir" \
+        REALTIME_SLOT_ISOLATION_MANIFEST "$manifest_file" \
+        REALTIME_SLOT_ISOLATION_BEAM "$beam_file" \
+        REALTIME_SLOT_ISOLATION_LAUNCHER "$REALTIME_SLOT_ISOLATION_LAUNCHER_FILE" \
+        REALTIME_SLOT_ISOLATION_VERIFY_SCRIPT "$REALTIME_SLOT_ISOLATION_VERIFY_FILE"
 }
 
 render_realtime_systemd_unit() {
@@ -4083,41 +4135,635 @@ render_realtime_systemd_unit() {
     local target_file="$2"
     local env_file="$3"
     local service_env_file="$4"
-    python3 - "$source_file" "$target_file" "$env_file" "$service_env_file" <<'PY'
+    local launcher_file="${5:-$REALTIME_SLOT_ISOLATION_LAUNCHER_FILE}"
+    local runtime_bin="${6:-/usr/bin/podman}"
+    local artifact_dir="${7:-$REALTIME_SLOT_ISOLATION_ARTIFACT_DIR}"
+    local manifest_file="${8:-${artifact_dir}/manifest.json}"
+    local beam_file="${9:-${artifact_dir}/Elixir.Realtime.Tenants.ReplicationConnection.beam}"
+    python3 - "$source_file" "$target_file" "$env_file" "$service_env_file" \
+        "$launcher_file" "$runtime_bin" "$artifact_dir" "$manifest_file" "$beam_file" <<'PY'
 from pathlib import Path
 import sys
 
-source, target, env_file, service_env_file = map(Path, sys.argv[1:])
+source = Path(sys.argv[1])
+target = Path(sys.argv[2])
+env_file = sys.argv[3]
+service_env_file = sys.argv[4]
+launcher_file = sys.argv[5]
+runtime_bin = sys.argv[6]
+artifact_dir = sys.argv[7]
+manifest_file = sys.argv[8]
+beam_file = sys.argv[9]
 lines = source.read_text().splitlines()
 result = []
 for line in lines:
     if line.startswith("Environment=REALTIME_CONTAINER_ENV_FILE="):
         result.append(f"Environment=REALTIME_CONTAINER_ENV_FILE={env_file}")
+    elif line.startswith("Environment=REALTIME_SLOT_ISOLATION_ARTIFACT_DIR="):
+        result.append(f"Environment=REALTIME_SLOT_ISOLATION_ARTIFACT_DIR={artifact_dir}")
+    elif line.startswith("Environment=REALTIME_SLOT_ISOLATION_MANIFEST="):
+        result.append(f"Environment=REALTIME_SLOT_ISOLATION_MANIFEST={manifest_file}")
+    elif line.startswith("Environment=REALTIME_SLOT_ISOLATION_BEAM="):
+        result.append(f"Environment=REALTIME_SLOT_ISOLATION_BEAM={beam_file}")
+    elif line.startswith("Environment=REALTIME_SLOT_ISOLATION_LAUNCHER="):
+        result.append(f"Environment=REALTIME_SLOT_ISOLATION_LAUNCHER={launcher_file}")
+    elif line.startswith("Environment=REALTIME_SLOT_ISOLATION_VERIFY_SCRIPT="):
+        result.append(f"Environment=REALTIME_SLOT_ISOLATION_VERIFY_SCRIPT={Path(launcher_file).parent / 'verify_slot_isolation_artifact.py'}")
+    elif line.startswith("Environment=CONTAINER_RUNTIME="):
+        result.append(f"Environment=CONTAINER_RUNTIME={runtime_bin}")
+    elif line.startswith("ExecStartPre=") and "realtime-launcher --validate-only" in line:
+        result.append(f"ExecStartPre={launcher_file} --validate-only")
+    elif line.startswith("ExecStartPre=-") and "podman rm -f" in line:
+        result.append(f"ExecStartPre=-{runtime_bin} rm -f ${{REALTIME_CONTAINER_NAME}}")
+    elif line.startswith("ExecStart="):
+        result.append(f"ExecStart={launcher_file}")
+    elif line.startswith("ExecStop=") and "podman stop" in line:
+        result.append(f"ExecStop=-{runtime_bin} stop -t 10 ${{REALTIME_CONTAINER_NAME}}")
     elif line == "EnvironmentFile=/etc/supabase/realtime-service.env":
         result.append(f"EnvironmentFile={service_env_file}")
     else:
         result.append(line)
+target.parent.mkdir(parents=True, exist_ok=True)
 target.write_text("\n".join(result) + "\n")
 PY
 }
+build_realtime_slot_isolation_artifact() {
+    local image="$1"
+    local artifact_dir="${2:-$REALTIME_SLOT_ISOLATION_ARTIFACT_DIR}"
+    local build_file="${3:-$REALTIME_SLOT_ISOLATION_BUILD_FILE}"
+    local launcher_file="${4:-$REALTIME_SLOT_ISOLATION_LAUNCHER_FILE}"
+    local apply_file="${5:-$REALTIME_SLOT_ISOLATION_APPLY_FILE}"
+
+    if [[ -L "$artifact_dir" || ( -e "$artifact_dir" && ! -d "$artifact_dir" ) ]]; then
+        log_error "Realtime slot-isolation artifact path is not a real directory: $artifact_dir"
+        return 1
+    fi
+    install -d -m 0755 "$artifact_dir"
+
+    log_info "Building Realtime ${REALTIME_SLOT_ISOLATION_RUNTIME_VERSION} slot-isolation artifact..."
+    REALTIME_IMAGE="$image" \
+        REALTIME_SLOT_ISOLATION_RUNTIME_VERSION="$REALTIME_SLOT_ISOLATION_RUNTIME_VERSION" \
+        REALTIME_SLOT_ISOLATION_OUTPUT_DIR="$artifact_dir" \
+        REALTIME_SLOT_ISOLATION_APPLY_SCRIPT="$apply_file" \
+        "$build_file" "$artifact_dir"
+
+    REALTIME_IMAGE="$image" \
+        REALTIME_SLOT_ISOLATION_RUNTIME_VERSION="$REALTIME_SLOT_ISOLATION_RUNTIME_VERSION" \
+        REALTIME_SLOT_ISOLATION_ARTIFACT_DIR="$artifact_dir" \
+        REALTIME_SLOT_ISOLATION_MANIFEST="${artifact_dir}/manifest.json" \
+        REALTIME_SLOT_ISOLATION_BEAM="${artifact_dir}/Elixir.Realtime.Tenants.ReplicationConnection.beam" \
+        "$launcher_file" --validate-only
+}
+
+validate_realtime_install_path() {
+    local target_path="$1"
+    local expected_kind="$2"
+    local label="$3"
+    python3 - "$target_path" "$expected_kind" "$label" <<'PY'
+import os
+import pathlib
+import stat
+import sys
+
+raw_path, expected_kind, label = sys.argv[1:]
+if not raw_path.startswith("/") or raw_path == "/" or any(character in raw_path for character in "\r\n\t"):
+    raise SystemExit(f"{label} must be an absolute single-line path")
+path = pathlib.Path(raw_path)
+for parent in reversed(path.parents):
+    try:
+        info = parent.lstat()
+    except FileNotFoundError:
+        continue
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+        raise SystemExit(f"{label} has an unsafe parent: {parent}")
+try:
+    info = path.lstat()
+except FileNotFoundError:
+    raise SystemExit(0)
+if stat.S_ISLNK(info.st_mode):
+    raise SystemExit(f"{label} must not be a symlink: {path}")
+if expected_kind == "file" and not stat.S_ISREG(info.st_mode):
+    raise SystemExit(f"{label} is not a regular file: {path}")
+if expected_kind == "directory" and not stat.S_ISDIR(info.st_mode):
+    raise SystemExit(f"{label} is not a directory: {path}")
+PY
+}
+
+resolve_realtime_container_runtime() {
+    local runtime="$1"
+    local resolved_runtime
+    if [[ "$runtime" == */* ]]; then
+        resolved_runtime="$runtime"
+    else
+        resolved_runtime=$(command -v "$runtime") || return 1
+    fi
+    [[ "$resolved_runtime" == /* && "$resolved_runtime" != *$'\n'* \
+        && "$resolved_runtime" != *$'\r'* && -x "$resolved_runtime" ]] || {
+        log_error "Realtime container runtime is not an executable absolute path: $resolved_runtime"
+        return 1
+    }
+    printf '%s\n' "$resolved_runtime"
+}
+
+realtime_service_enabled_state() {
+    local state
+    state=$(systemctl is-enabled supacloud-realtime 2>/dev/null || true)
+    state=${state%%$'\n'*}
+    case "$state" in
+        enabled|enabled-runtime|disabled|masked|masked-runtime|static|indirect|generated|transient|alias|linked|linked-runtime)
+            printf '%s\n' "$state"
+            ;;
+        ""|not-found)
+            printf 'not-found\n'
+            ;;
+        *)
+            log_error "Unexpected supacloud-realtime enabled state: $state"
+            return 1
+            ;;
+    esac
+}
+
+realtime_service_active_state() {
+    local state
+    state=$(systemctl is-active supacloud-realtime 2>/dev/null || true)
+    state=${state%%$'\n'*}
+    case "$state" in
+        active|inactive)
+            printf '%s\n' "$state"
+            ;;
+        *)
+            log_error "Cannot transact Realtime while service is in state: ${state:-unknown}" >&2
+            return 1
+            ;;
+    esac
+}
+
+capture_realtime_file_snapshot() {
+    local target_file="$1"
+    local snapshot_dir="$2"
+    mkdir -p "$snapshot_dir" || return 1
+    chmod 700 "$snapshot_dir" || return 1
+    if [[ -e "$target_file" || -L "$target_file" ]]; then
+        [[ -f "$target_file" && ! -L "$target_file" ]] || return 1
+        cp -a "$target_file" "$snapshot_dir/content" || return 1
+        printf 'present\n' > "$snapshot_dir/state" || return 1
+    else
+        printf 'absent\n' > "$snapshot_dir/state" || return 1
+    fi
+}
+
+restore_realtime_file_snapshot() {
+    local target_file="$1"
+    local snapshot_dir="$2"
+    local state temporary_file
+    [[ -f "$snapshot_dir/state" && ! -L "$snapshot_dir/state" ]] || return 1
+    state=$(<"$snapshot_dir/state")
+    if [[ "$state" == "absent" ]]; then
+        rm -f -- "$target_file" || return 1
+        return 0
+    fi
+    [[ "$state" == "present" && -f "$snapshot_dir/content" \
+        && ! -L "$snapshot_dir/content" ]] || return 1
+    mkdir -p "$(dirname "$target_file")" || return 1
+    temporary_file=$(mktemp "${target_file}.restore.XXXXXX") || return 1
+    rm -f -- "$temporary_file" || return 1
+    if ! cp -a "$snapshot_dir/content" "$temporary_file"; then
+        rm -f -- "$temporary_file"
+        return 1
+    fi
+    mv -f "$temporary_file" "$target_file" || {
+        rm -f -- "$temporary_file"
+        return 1
+    }
+}
+
+validate_realtime_install_targets() {
+    local path
+    for path in "$REALTIME_SLOT_ISOLATION_LAUNCHER_FILE" \
+        "$REALTIME_SLOT_ISOLATION_BUILD_FILE" \
+        "$REALTIME_SLOT_ISOLATION_APPLY_FILE" \
+        "$REALTIME_SLOT_ISOLATION_VERIFY_FILE" \
+        "$REALTIME_CONTAINER_ENV_FILE" \
+        "$REALTIME_SERVICE_ENV_FILE" \
+        "$REALTIME_UNIT_FILE" \
+        "$MANAGEMENT_ENV_FILE"; do
+        validate_realtime_install_path "$path" file "Realtime install target" || return 1
+    done
+    validate_realtime_install_path "$REALTIME_SLOT_ISOLATION_ARTIFACT_DIR" directory \
+        "Realtime artifact directory" || return 1
+    [[ "$REALTIME_SLOT_ISOLATION_MANIFEST" == \
+        "${REALTIME_SLOT_ISOLATION_ARTIFACT_DIR}/manifest.json" ]] || {
+        log_error "Realtime manifest must use the verified artifact path"
+        return 1
+    }
+    [[ "$REALTIME_SLOT_ISOLATION_BEAM" == \
+        "${REALTIME_SLOT_ISOLATION_ARTIFACT_DIR}/Elixir.Realtime.Tenants.ReplicationConnection.beam" ]] || {
+        log_error "Realtime BEAM must use the verified artifact path"
+        return 1
+    }
+    [[ "$REALTIME_SLOT_ISOLATION_VERIFY_FILE" == \
+        "$(dirname "$REALTIME_SLOT_ISOLATION_LAUNCHER_FILE")/verify_slot_isolation_artifact.py" ]] || {
+        log_error "Realtime verifier must be installed next to the launcher"
+        return 1
+    }
+    local artifact_parent
+    artifact_parent=$(dirname "$REALTIME_SLOT_ISOLATION_ARTIFACT_DIR") || return 1
+    [[ -d "$artifact_parent" && ! -L "$artifact_parent" ]] || {
+        log_error "Realtime artifact parent must already be a real directory: $artifact_parent"
+        return 1
+    }
+}
+
+create_realtime_install_transaction() {
+    local artifact_parent transaction_dir
+    artifact_parent=$(dirname "$REALTIME_SLOT_ISOLATION_ARTIFACT_DIR") || return 1
+    transaction_dir=$(mktemp -d "${artifact_parent}/.supacloud-realtime-install.XXXXXX") || return 1
+    chmod 700 "$transaction_dir" || {
+        rm -rf -- "$transaction_dir"
+        return 1
+    }
+    printf '%s\n' "$transaction_dir"
+}
+
+validate_realtime_install_transaction() {
+    local transaction_dir="$1"
+    local artifact_parent
+    artifact_parent=$(dirname "$REALTIME_SLOT_ISOLATION_ARTIFACT_DIR") || return 1
+    [[ "$transaction_dir" == "$artifact_parent"/.supacloud-realtime-install.* \
+        && -d "$transaction_dir" && ! -L "$transaction_dir" ]]
+}
+
+prepare_realtime_install_candidate() {
+    local transaction_dir="$1"
+    local runtime_bin="$2"
+    local image="$3"
+    local unit_source="$4"
+    local candidate_tools="${transaction_dir}/candidate-tools"
+    local candidate_artifact="${transaction_dir}/candidate-artifact"
+    local candidate_container_env="${transaction_dir}/candidate-container.env"
+    local candidate_service_env="${transaction_dir}/candidate-service.env"
+    local candidate_unit="${transaction_dir}/candidate-realtime.service"
+    local candidate_launcher="${candidate_tools}/realtime-launcher"
+    local candidate_builder="${candidate_tools}/build-realtime-slot-isolation"
+    local candidate_apply="${candidate_tools}/apply-slot-isolation.py"
+    local candidate_verify="${candidate_tools}/verify_slot_isolation_artifact.py"
+
+    validate_realtime_install_transaction "$transaction_dir" || return 1
+    [[ -f "$unit_source" && ! -L "$unit_source" ]] || {
+        log_error "Realtime systemd unit source is missing or unsafe: $unit_source"
+        return 1
+    }
+    mkdir -p "$candidate_tools" || return 1
+    chmod 700 "$candidate_tools" || return 1
+    install_realtime_slot_isolation_tools \
+        "${SCRIPT_DIR}/infrastructure/realtime" \
+        "$candidate_launcher" \
+        "$candidate_builder" \
+        "$candidate_apply" \
+        "$candidate_verify" || return 1
+    CONTAINER_RUNTIME="$runtime_bin" \
+        build_realtime_slot_isolation_artifact \
+        "$image" \
+        "$candidate_artifact" \
+        "$candidate_builder" \
+        "$candidate_launcher" \
+        "$candidate_apply" || return 1
+    write_realtime_container_env "$candidate_container_env" || return 1
+    write_realtime_service_env "$candidate_service_env" "$image" "$REALTIME_CONTAINER_ENV_FILE" || return 1
+    render_realtime_systemd_unit \
+        "$unit_source" \
+        "$candidate_unit" \
+        "$REALTIME_CONTAINER_ENV_FILE" \
+        "$REALTIME_SERVICE_ENV_FILE" \
+        "$REALTIME_SLOT_ISOLATION_LAUNCHER_FILE" \
+        "$runtime_bin" \
+        "$REALTIME_SLOT_ISOLATION_ARTIFACT_DIR" \
+        "$REALTIME_SLOT_ISOLATION_MANIFEST" \
+        "$REALTIME_SLOT_ISOLATION_BEAM" || return 1
+    chmod 600 "$candidate_container_env" "$candidate_service_env" || return 1
+    chmod 644 "$candidate_unit" || return 1
+}
+
+capture_realtime_install_state() {
+    local transaction_dir="$1"
+    local artifact_state enabled_state active_state
+    validate_realtime_install_transaction "$transaction_dir" || return 1
+    active_state=$(realtime_service_active_state) || return 1
+    capture_realtime_file_snapshot "$REALTIME_SLOT_ISOLATION_LAUNCHER_FILE" "${transaction_dir}/launcher" || return 1
+    capture_realtime_file_snapshot "$REALTIME_SLOT_ISOLATION_BUILD_FILE" "${transaction_dir}/builder" || return 1
+    capture_realtime_file_snapshot "$REALTIME_SLOT_ISOLATION_APPLY_FILE" "${transaction_dir}/patcher" || return 1
+    capture_realtime_file_snapshot "$REALTIME_SLOT_ISOLATION_VERIFY_FILE" "${transaction_dir}/verifier" || return 1
+    capture_realtime_file_snapshot "$REALTIME_CONTAINER_ENV_FILE" "${transaction_dir}/container-env" || return 1
+    capture_realtime_file_snapshot "$REALTIME_SERVICE_ENV_FILE" "${transaction_dir}/service-env" || return 1
+    capture_realtime_file_snapshot "$REALTIME_UNIT_FILE" "${transaction_dir}/unit" || return 1
+    capture_realtime_file_snapshot "$MANAGEMENT_ENV_FILE" "${transaction_dir}/management-env" || return 1
+    if [[ -e "$REALTIME_SLOT_ISOLATION_ARTIFACT_DIR" || -L "$REALTIME_SLOT_ISOLATION_ARTIFACT_DIR" ]]; then
+        [[ -d "$REALTIME_SLOT_ISOLATION_ARTIFACT_DIR" && ! -L "$REALTIME_SLOT_ISOLATION_ARTIFACT_DIR" ]] || return 1
+        artifact_state=present
+    else
+        artifact_state=absent
+    fi
+    printf '%s\n' "$artifact_state" > "${transaction_dir}/artifact-state" || return 1
+    printf '%s\n' "$active_state" > "${transaction_dir}/service-active-state" || return 1
+    enabled_state=$(realtime_service_enabled_state) || return 1
+    printf '%s\n' "$enabled_state" > "${transaction_dir}/service-enabled-state" || return 1
+    touch "${transaction_dir}/state-captured" || return 1
+}
+
+activate_realtime_artifact_generation() {
+    local transaction_dir="$1"
+    local candidate_artifact="${transaction_dir}/candidate-artifact"
+    local prior_artifact="${transaction_dir}/prior-artifact"
+    local artifact_state
+    validate_realtime_install_transaction "$transaction_dir" || return 1
+    [[ -d "$candidate_artifact" && ! -L "$candidate_artifact" ]] || return 1
+    artifact_state=$(<"${transaction_dir}/artifact-state") || return 1
+    touch "${transaction_dir}/artifact-activation-started" || return 1
+    if [[ "$artifact_state" == "present" ]]; then
+        if ! mv "$REALTIME_SLOT_ISOLATION_ARTIFACT_DIR" "$prior_artifact"; then
+            rm -f "${transaction_dir}/artifact-activation-started"
+            return 1
+        fi
+    elif [[ "$artifact_state" != "absent" ]]; then
+        rm -f "${transaction_dir}/artifact-activation-started"
+        return 1
+    fi
+    if ! mv "$candidate_artifact" "$REALTIME_SLOT_ISOLATION_ARTIFACT_DIR"; then
+        if [[ "$artifact_state" == "present" && -d "$prior_artifact" && ! -L "$prior_artifact" ]]; then
+            mv "$prior_artifact" "$REALTIME_SLOT_ISOLATION_ARTIFACT_DIR" || true
+        fi
+        rm -f "${transaction_dir}/artifact-activation-started"
+        return 1
+    fi
+    chmod 0755 "$REALTIME_SLOT_ISOLATION_ARTIFACT_DIR" || return 1
+    if [[ "$(id -u)" == "0" ]]; then
+        chown -R 0:0 "$REALTIME_SLOT_ISOLATION_ARTIFACT_DIR" || return 1
+    fi
+    if command -v restorecon >/dev/null 2>&1; then
+        restorecon -RF "$REALTIME_SLOT_ISOLATION_ARTIFACT_DIR" || return 1
+    fi
+}
+
+install_realtime_candidate_files() {
+    local transaction_dir="$1"
+    validate_realtime_install_transaction "$transaction_dir" || return 1
+    install_realtime_file "${transaction_dir}/candidate-tools/realtime-launcher" \
+        "$REALTIME_SLOT_ISOLATION_LAUNCHER_FILE" 0755 || return 1
+    install_realtime_file "${transaction_dir}/candidate-tools/build-realtime-slot-isolation" \
+        "$REALTIME_SLOT_ISOLATION_BUILD_FILE" 0755 || return 1
+    install_realtime_file "${transaction_dir}/candidate-tools/apply-slot-isolation.py" \
+        "$REALTIME_SLOT_ISOLATION_APPLY_FILE" 0755 || return 1
+    install_realtime_file "${transaction_dir}/candidate-tools/verify_slot_isolation_artifact.py" \
+        "$REALTIME_SLOT_ISOLATION_VERIFY_FILE" 0755 || return 1
+    install_realtime_file "${transaction_dir}/candidate-container.env" \
+        "$REALTIME_CONTAINER_ENV_FILE" 0600 || return 1
+    install_realtime_file "${transaction_dir}/candidate-service.env" \
+        "$REALTIME_SERVICE_ENV_FILE" 0600 || return 1
+    install_realtime_file "${transaction_dir}/candidate-realtime.service" \
+        "$REALTIME_UNIT_FILE" 0644 || return 1
+    if command -v restorecon >/dev/null 2>&1; then
+        restorecon -F \
+            "$REALTIME_SLOT_ISOLATION_LAUNCHER_FILE" \
+            "$REALTIME_SLOT_ISOLATION_BUILD_FILE" \
+            "$REALTIME_SLOT_ISOLATION_APPLY_FILE" \
+            "$REALTIME_SLOT_ISOLATION_VERIFY_FILE" \
+            "$REALTIME_CONTAINER_ENV_FILE" \
+            "$REALTIME_SERVICE_ENV_FILE" \
+            "$REALTIME_UNIT_FILE" || return 1
+    fi
+}
+
+restore_realtime_enabled_state() {
+    local prior_state="$1"
+    systemctl disable supacloud-realtime >/dev/null 2>&1 || true
+    case "$prior_state" in
+        enabled)
+            systemctl unmask supacloud-realtime >/dev/null 2>&1 || true
+            systemctl enable supacloud-realtime >/dev/null 2>&1 || return 1
+            ;;
+        enabled-runtime)
+            systemctl unmask supacloud-realtime >/dev/null 2>&1 || true
+            systemctl enable --runtime supacloud-realtime >/dev/null 2>&1 || return 1
+            ;;
+        masked)
+            systemctl mask supacloud-realtime >/dev/null 2>&1 || return 1
+            ;;
+        masked-runtime)
+            systemctl mask --runtime supacloud-realtime >/dev/null 2>&1 || return 1
+            ;;
+        disabled|static|indirect|generated|transient|alias|linked|linked-runtime|not-found)
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+restore_realtime_artifact_generation() {
+    local transaction_dir="$1"
+    local artifact_state prior_artifact rollback_artifact moved_current=false
+    validate_realtime_install_transaction "$transaction_dir" || return 1
+    [[ -f "${transaction_dir}/artifact-activation-started" ]] || return 0
+    artifact_state=$(<"${transaction_dir}/artifact-state") || return 1
+    prior_artifact="${transaction_dir}/prior-artifact"
+    rollback_artifact="${transaction_dir}/rollback-current-artifact"
+    case "$artifact_state" in
+        present)
+            [[ -d "$prior_artifact" && ! -L "$prior_artifact" ]] || {
+                log_error "Realtime rollback snapshot is missing its prior artifact"
+                return 1
+            }
+            ;;
+        absent) ;;
+        *)
+            log_error "Realtime rollback snapshot has an invalid artifact state: $artifact_state"
+            return 1
+            ;;
+    esac
+    if [[ -e "$REALTIME_SLOT_ISOLATION_ARTIFACT_DIR" || -L "$REALTIME_SLOT_ISOLATION_ARTIFACT_DIR" ]]; then
+        [[ -d "$REALTIME_SLOT_ISOLATION_ARTIFACT_DIR" && ! -L "$REALTIME_SLOT_ISOLATION_ARTIFACT_DIR" ]] || return 1
+        rm -rf -- "$rollback_artifact" || return 1
+        mv "$REALTIME_SLOT_ISOLATION_ARTIFACT_DIR" "$rollback_artifact" || return 1
+        moved_current=true
+    fi
+    if [[ "$artifact_state" == "present" ]]; then
+        if ! mv "$prior_artifact" "$REALTIME_SLOT_ISOLATION_ARTIFACT_DIR"; then
+            if [[ "$moved_current" == "true" ]]; then
+                mv "$rollback_artifact" "$REALTIME_SLOT_ISOLATION_ARTIFACT_DIR" || true
+            fi
+            return 1
+        fi
+    fi
+    if [[ "$moved_current" == "true" ]]; then
+        if ! rm -rf -- "$rollback_artifact"; then
+            log_error "Unable to remove the failed Realtime artifact generation"
+            return 1
+        fi
+    fi
+    if [[ -d "$REALTIME_SLOT_ISOLATION_ARTIFACT_DIR" ]] && command -v restorecon >/dev/null 2>&1; then
+        restorecon -RF "$REALTIME_SLOT_ISOLATION_ARTIFACT_DIR" || return 1
+    fi
+}
+
+wait_realtime_health() {
+    supacloud_wait_http_health \
+        "$REALTIME_HEALTH_URL" \
+        "${SUPACLOUD_REALTIME_HEALTH_ATTEMPTS:-30}" \
+        "${SUPACLOUD_REALTIME_HEALTH_DELAY_SECONDS:-1}"
+}
+
+rollback_realtime_install_transaction() {
+    local transaction_dir="$1"
+    local runtime_bin="$2"
+    local rollback_status=0
+    local active_state enabled_state
+    validate_realtime_install_transaction "$transaction_dir" || return 1
+    [[ -f "${transaction_dir}/state-captured" ]] || {
+        rm -rf -- "$transaction_dir"
+        return 0
+    }
+    active_state=$(<"${transaction_dir}/service-active-state") || return 1
+    enabled_state=$(<"${transaction_dir}/service-enabled-state") || return 1
+    systemctl stop supacloud-realtime >/dev/null 2>&1 || true
+    "$runtime_bin" rm -f "${REALTIME_CONTAINER_NAME:-supacloud-realtime}" >/dev/null 2>&1 || true
+    restore_realtime_file_snapshot "$REALTIME_SLOT_ISOLATION_LAUNCHER_FILE" "${transaction_dir}/launcher" || rollback_status=1
+    restore_realtime_file_snapshot "$REALTIME_SLOT_ISOLATION_BUILD_FILE" "${transaction_dir}/builder" || rollback_status=1
+    restore_realtime_file_snapshot "$REALTIME_SLOT_ISOLATION_APPLY_FILE" "${transaction_dir}/patcher" || rollback_status=1
+    restore_realtime_file_snapshot "$REALTIME_SLOT_ISOLATION_VERIFY_FILE" "${transaction_dir}/verifier" || rollback_status=1
+    restore_realtime_file_snapshot "$REALTIME_CONTAINER_ENV_FILE" "${transaction_dir}/container-env" || rollback_status=1
+    restore_realtime_file_snapshot "$REALTIME_SERVICE_ENV_FILE" "${transaction_dir}/service-env" || rollback_status=1
+    restore_realtime_file_snapshot "$REALTIME_UNIT_FILE" "${transaction_dir}/unit" || rollback_status=1
+    restore_realtime_file_snapshot "$MANAGEMENT_ENV_FILE" "${transaction_dir}/management-env" || rollback_status=1
+    restore_realtime_artifact_generation "$transaction_dir" || rollback_status=1
+    systemctl daemon-reload >/dev/null 2>&1 || rollback_status=1
+    restore_realtime_enabled_state "$enabled_state" || rollback_status=1
+    if [[ "$active_state" == "active" ]]; then
+        systemctl start supacloud-realtime >/dev/null 2>&1 || rollback_status=1
+        wait_realtime_health || rollback_status=1
+    elif [[ "$active_state" == "inactive" ]]; then
+        systemctl stop supacloud-realtime >/dev/null 2>&1 || true
+        systemctl is-active --quiet supacloud-realtime && rollback_status=1
+    else
+        rollback_status=1
+    fi
+    if (( rollback_status == 0 )); then
+        rm -rf -- "$transaction_dir"
+    fi
+    return "$rollback_status"
+}
+
+commit_realtime_install_transaction() {
+    local transaction_dir="$1"
+    validate_realtime_install_transaction "$transaction_dir" || return 1
+    rm -rf -- "$transaction_dir"
+}
+
+pull_realtime_image() {
+    local runtime_bin="$1"
+    local image="$2"
+    local mirror_prefix="${DOCKER_MIRROR_PREFIX:-docker.1ms.run/}"
+    case "$image" in
+        "$REALTIME_BASE_IMAGE"|"$REALTIME_PINNED_IMAGE") ;;
+        *)
+            log_error "Realtime image is outside the pinned trust root: $image"
+            return 1
+            ;;
+    esac
+    if [[ "$image" == *@sha256:* ]]; then
+        "$runtime_bin" pull "$image"
+        return
+    fi
+    local mirror_image="${mirror_prefix}${image}"
+    if [[ -n "$mirror_prefix" ]] && "$runtime_bin" pull "$mirror_image" 2>/dev/null; then
+        "$runtime_bin" tag "$mirror_image" "$image"
+    else
+        "$runtime_bin" pull "$image"
+    fi
+}
+
+deploy_realtime_service_transaction() (
+    local runtime="$1"
+    local image="$2"
+    local unit_source="$3"
+    local runtime_bin transaction_dir status=0 state_captured=false
+    runtime_bin=$(resolve_realtime_container_runtime "$runtime") || return 1
+    validate_realtime_install_targets || return 1
+    realtime_service_active_state >/dev/null || return 1
+    transaction_dir=$(create_realtime_install_transaction) || return 1
+    trap 'if [[ "$state_captured" == "true" ]]; then rollback_realtime_install_transaction "$transaction_dir" "$runtime_bin" || true; else rm -rf -- "$transaction_dir"; fi; exit 129' HUP
+    trap 'if [[ "$state_captured" == "true" ]]; then rollback_realtime_install_transaction "$transaction_dir" "$runtime_bin" || true; else rm -rf -- "$transaction_dir"; fi; exit 130' INT
+    trap 'if [[ "$state_captured" == "true" ]]; then rollback_realtime_install_transaction "$transaction_dir" "$runtime_bin" || true; else rm -rf -- "$transaction_dir"; fi; exit 143' TERM
+
+    if ! pull_realtime_image "$runtime_bin" "$image"; then
+        log_error "Unable to pull the verified Realtime image: $image"
+        rm -rf -- "$transaction_dir"
+        trap - HUP INT TERM
+        return 1
+    fi
+    if ! prepare_realtime_install_candidate "$transaction_dir" "$runtime_bin" "$image" "$unit_source"; then
+        log_error "Realtime candidate build or validation failed before live state was changed"
+        rm -rf -- "$transaction_dir"
+        trap - HUP INT TERM
+        return 1
+    fi
+    if ! capture_realtime_install_state "$transaction_dir"; then
+        log_error "Could not capture a complete Realtime rollback snapshot"
+        rm -rf -- "$transaction_dir"
+        trap - HUP INT TERM
+        return 1
+    fi
+    state_captured=true
+    if ! activate_realtime_artifact_generation "$transaction_dir"; then
+        status=1
+    elif ! install_realtime_candidate_files "$transaction_dir"; then
+        status=1
+    elif ! systemctl daemon-reload; then
+        status=1
+    elif ! systemctl enable supacloud-realtime; then
+        status=1
+    elif ! systemctl restart supacloud-realtime; then
+        status=1
+    elif ! wait_realtime_health; then
+        status=1
+    elif ! persist_service_container_runtime_env; then
+        status=1
+    fi
+    if (( status != 0 )); then
+        log_error "Realtime activation failed; restoring the previous service generation"
+        if ! rollback_realtime_install_transaction "$transaction_dir" "$runtime_bin"; then
+            log_error "Realtime rollback failed; snapshot retained: $transaction_dir"
+        fi
+        trap - HUP INT TERM
+        return "$status"
+    fi
+    commit_realtime_install_transaction "$transaction_dir" || return 1
+    state_captured=false
+    trap - HUP INT TERM
+    log_info "SupaCloud Realtime is healthy at $REALTIME_HEALTH_URL"
+)
 
 start_realtime_container() {
     local runtime="$1"
     local image="$2"
     local container_name="$3"
+    local launcher="$REALTIME_SLOT_ISOLATION_LAUNCHER_FILE"
+    if [[ ! -x "$launcher" ]]; then
+        log_error "Realtime slot-isolation launcher is missing or not executable: $launcher"
+        return 1
+    fi
     (
         local realtime_env_file
         umask 077
         realtime_env_file=$(mktemp)
         trap 'rm -f "$realtime_env_file"' EXIT HUP INT TERM
         write_realtime_container_env "$realtime_env_file"
-        "$runtime" run -d \
-            --name "$container_name" \
-            --restart=always \
-            --privileged \
-            -p 127.0.0.1:4000:4000 \
-            --env-file "$realtime_env_file" \
-            "$image"
+        CONTAINER_RUNTIME="$runtime" \
+            REALTIME_IMAGE="$image" \
+            REALTIME_CONTAINER_NAME="$container_name" \
+            REALTIME_CONTAINER_ENV_FILE="$realtime_env_file" \
+            REALTIME_RUN_DETACHED=true \
+            REALTIME_NETWORK_MODE=host \
+            "$launcher"
     )
 }
 
@@ -4153,59 +4799,16 @@ deploy_service_containers() {
 
     # --- 2. Deploy Supabase Realtime (Multi-tenant WebSocket) ---
     local REALTIME_UNIT_SRC="${SCRIPT_DIR}/infrastructure/systemd/supacloud-realtime.service"
-    local REALTIME_IMAGE_VALUE="${REALTIME_IMAGE:-public.ecr.aws/supabase/realtime:v2.133.0}"
-    local REALTIME_CONTAINER_ENV_FILE="${SUPACLOUD_REALTIME_CONTAINER_ENV_FILE:-/etc/supabase/realtime-container.env}"
+    local REALTIME_IMAGE_VALUE="${REALTIME_IMAGE:-$REALTIME_PINNED_IMAGE}"
     if [[ -f "$REALTIME_UNIT_SRC" ]]; then
-        log_info "Registering SupaCloud Realtime systemd unit..."
-        write_realtime_container_env "$REALTIME_CONTAINER_ENV_FILE"
-        write_realtime_service_env \
-            "$REALTIME_SERVICE_ENV_FILE" \
-            "$REALTIME_IMAGE_VALUE" \
-            "$REALTIME_CONTAINER_ENV_FILE"
-        render_realtime_systemd_unit \
-            "$REALTIME_UNIT_SRC" \
-            /etc/systemd/system/supacloud-realtime.service \
-            "$REALTIME_CONTAINER_ENV_FILE" \
-            "$REALTIME_SERVICE_ENV_FILE"
-        systemctl daemon-reload
-        systemctl enable supacloud-realtime
-
-        # The systemd unit uses the canonical REALTIME_IMAGE name. Pre-pull it
-        # here so installs behind registry mirrors still work without editing
-        # the unit file. When a mirror pull succeeds, tag it back to the
-        # canonical name expected by the unit.
-        local REALTIME_IMAGE_PULL="${MIRROR_PREFIX}${REALTIME_IMAGE_VALUE}"
-        log_info "Pulling Supabase Realtime image: ${REALTIME_IMAGE_VALUE}"
-        if [[ -n "$MIRROR_PREFIX" ]] && $RUNTIME pull "$REALTIME_IMAGE_PULL" 2>/dev/null; then
-            $RUNTIME tag "$REALTIME_IMAGE_PULL" "$REALTIME_IMAGE_VALUE" 2>/dev/null || true
-        else
-            $RUNTIME pull "$REALTIME_IMAGE_VALUE"
-        fi
-
-        if ! systemctl restart supacloud-realtime; then
-            log_error "Realtime service restart failed; refusing to report a successful installation. Check journalctl -u supacloud-realtime"
-            return 1
-        fi
-    elif $RUNTIME ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "${REALTIME_CONTAINER_NAME:-supacloud-realtime}"; then
-        log_info "Realtime container already exists, skipping"
+        log_info "Building and activating a transactional SupaCloud Realtime generation..."
+        deploy_realtime_service_transaction "$RUNTIME" "$REALTIME_IMAGE_VALUE" "$REALTIME_UNIT_SRC" || return 1
     else
-        log_info "Pulling and deploying Supabase Realtime (multi-tenant)..."
-        $RUNTIME pull "$REALTIME_IMAGE_VALUE"
-
-        if [[ -n "${POSTGRES_PASSWORD:-}" ]]; then
-            ensure_realtime_database_role "$POSTGRES_PASSWORD" 2>/dev/null \
-                || log_warn "Unable to initialize the Realtime database role"
-        fi
-
-        $RUNTIME rm -f "${REALTIME_CONTAINER_NAME:-supacloud-realtime}" >/dev/null 2>&1 || true
-        start_realtime_container "$RUNTIME" "$REALTIME_IMAGE_VALUE" \
-            "${REALTIME_CONTAINER_NAME:-supacloud-realtime}"
-
-        log_info "Realtime deployed on port 4000 (multi-tenant mode)"
+        log_error "SupaCloud Realtime systemd unit is missing; refusing an unpatched container fallback"
+        return 1
     fi
 
     # --- 3. Atomically merge management API container references ---
-    persist_service_container_runtime_env
     log_info "Container endpoints merged into $MANAGEMENT_ENV_FILE"
 
     log_info "Service containers deployed successfully!"

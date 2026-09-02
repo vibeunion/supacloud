@@ -16,6 +16,8 @@ on:
       - "packages/function-adapter/**"
       - "docker/**"
       - "scripts/**"
+      - "infrastructure/realtime/**"
+      - "infrastructure/systemd/supacloud-realtime.service"
       - "install.sh"
       - "setup.sh"
       - "switch.sh"
@@ -282,13 +284,16 @@ jobs:
 
       - name: Validate shell script syntax
         run: |
-          bash -n install.sh setup.sh switch.sh deploy_all.sh scripts/pre_start_recovery.sh
+          bash -n install.sh setup.sh switch.sh deploy_all.sh scripts/pre_start_recovery.sh infrastructure/realtime/*.sh
           find scripts -name "*.sh" -print0 | xargs -0 -n1 bash -n
           bash scripts/lib/tenant_runtime.test.sh
           bash scripts/lib/installer_pg_hba.test.sh
           bash scripts/lib/tenant_user.test.sh
           bash scripts/lib/systemd_unit_broker.test.sh
           bash scripts/lib/edge_runtime_source.test.sh
+
+      - name: Validate Realtime slot-isolation trust root
+        run: python3 -m unittest infrastructure/realtime/test_apply_slot_isolation.py
 
       - name: Validate CI scripts
         run: |
@@ -514,7 +519,7 @@ jobs:
           API_EXTERNAL_URL: http://127.0.0.1:9090
           GOTRUE_OPERATOR_TOKEN: super-secret-jwt-token-with-at-least-32-characters-long
       realtime:
-        image: public.ecr.aws/supabase/realtime:v2.129.0
+        image: public.ecr.aws/supabase/realtime:v2.133.0
         ports:
           - 4000:4000
         env:
@@ -637,8 +642,8 @@ jobs:
           done
           if [ "${realtime_ready}" != "true" ]; then
             echo "::error title=Realtime service not ready::Realtime did not become reachable on :4000"
-            docker ps -a --filter "ancestor=public.ecr.aws/supabase/realtime:v2.129.0" || true
-            realtime_container_id="$(docker ps -a -q --filter "ancestor=public.ecr.aws/supabase/realtime:v2.129.0" | head -n1)"
+            docker ps -a --filter "ancestor=public.ecr.aws/supabase/realtime:v2.133.0" || true
+            realtime_container_id="$(docker ps -a -q --filter "ancestor=public.ecr.aws/supabase/realtime:v2.133.0" | head -n1)"
             if [ -n "${realtime_container_id}" ]; then
               echo "--- Realtime container status ---"
               docker inspect --format='{{.State.Status}} exit={{.State.ExitCode}} err={{.State.Error}} oom={{.State.OOMKilled}} restart={{.RestartCount}}' "${realtime_container_id}" || true
@@ -779,6 +784,9 @@ jobs:
             fi
           done
           shellcheck -s bash -e "$ignored_rules" "${root_scripts[@]}"
+
+          echo "=== Checking Realtime shell scripts ==="
+          shellcheck -s bash -e "$ignored_rules" infrastructure/realtime/*.sh
 
   caddy-edge-proxy-smoke:
     name: Caddy Edge Proxy Smoke

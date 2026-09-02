@@ -12,7 +12,7 @@ const DATABASE_OID_PATTERN = /^[1-9]\d{0,9}$/;
 const REPLACEMENT_EPOCH_PATTERN = /^(none|[0-9a-f]{64})$/;
 const TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
-const OFFICIAL_REALTIME_RUNTIME_VERSION = "2.132.0";
+const OFFICIAL_REALTIME_RUNTIME_VERSION = "2.133.0";
 const OFFICIAL_REALTIME_MANIFEST_SHA256 =
   "4cbd8c1a606febe2c8740ca5e1ff3f2026a9db34ea09aec537457f901fb8382a";
 const OFFICIAL_REALTIME_PROFILE_SHA256 =
@@ -22,28 +22,28 @@ const OFFICIAL_REALTIME_SCHEMA_TREE_SHA256 =
 const OFFICIAL_PGDELTA_WRAPPER_SHA256 =
   "65a2ac788d7b2f4f177b759b37642c9e5d0c2c4841b2d0e611f2e31be995d799";
 const OFFICIAL_PGDELTA_BUNDLE_SHA256_BY_ARCH = {
-  aarch64: "29afc91144f935e3276d1e02da628555085bba3d92dba470f14e2e9350878cd2",
-  arm64: "29afc91144f935e3276d1e02da628555085bba3d92dba470f14e2e9350878cd2",
-  x86_64: "963f3c4cbf4278bad0dbff4952846740ae22f7a6f22c0e4c9ecd3ce6f8a0bf74",
-  amd64: "963f3c4cbf4278bad0dbff4952846740ae22f7a6f22c0e4c9ecd3ce6f8a0bf74",
+  aarch64: "0b6d8b76389bd06edb10f5baf4c5b6a1abf53e08475b53d5eb08a550a66ae206",
+  arm64: "0b6d8b76389bd06edb10f5baf4c5b6a1abf53e08475b53d5eb08a550a66ae206",
+  x86_64: "a6e37b881ad25b64358747a848cc381a9e81295add4de325716741411b0f38e4",
+  amd64: "a6e37b881ad25b64358747a848cc381a9e81295add4de325716741411b0f38e4",
 } as const;
 const OFFICIAL_PGDELTA_EXPANDED_SHA256_BY_ARCH = {
-  aarch64: "de0136aef72ddddcecaf8e597e095e157669f5484eb8fb3ef2147348f81b4eef",
-  arm64: "de0136aef72ddddcecaf8e597e095e157669f5484eb8fb3ef2147348f81b4eef",
-  x86_64: "ab14b17e48bb0bc27de455a108f1f8e527ec771d818582b8b1b9d2e35085a51d",
-  amd64: "ab14b17e48bb0bc27de455a108f1f8e527ec771d818582b8b1b9d2e35085a51d",
+  aarch64: "e2a20edc8cf280f68524357471fd5245cd0ad0c6bc7114cbfde3cc439f904529",
+  arm64: "e2a20edc8cf280f68524357471fd5245cd0ad0c6bc7114cbfde3cc439f904529",
+  x86_64: "9a565254d7e03b77c8424b74a13941518bb5cfeb80d06995175fd9f06e2ee6a8",
+  amd64: "9a565254d7e03b77c8424b74a13941518bb5cfeb80d06995175fd9f06e2ee6a8",
 } as const;
 // The image digest is part of the reviewed release identity. A mutable tag is
 // not sufficient for a destructive tenant-schema reconciliation.
 export const OFFICIAL_REALTIME_IMAGE_DIGEST =
-  "sha256:11cba49c0834d8c1a02972bfa41e355b218d1f5e1b9a4639d64ae82f2c5f8981";
+  "sha256:974f7db71f140f54c63c8d7a8d8643109704c3ee99ff735678a803fdfbfdcefb";
 const OFFICIAL_REALTIME_IMAGE_MANIFEST_DIGEST_BY_ARCH = {
-  amd64: "sha256:5f3c3f08af89a0f8a2ec189caaf9d883e4531c786dd8ddef97701aa901a3fd43",
-  arm64: "sha256:dd39996b4673e6f63646706e178dd48e038b2c1ef201207d03969d0928cd273a",
+  amd64: "sha256:109c6ea8ecd6c84c3b36047fe78a055c27702f6d9e19c441958b129a9bd468c3",
+  arm64: "sha256:172c1b386ed7b5969bd7fbce8e31b3c65050e0c39f4191bd637d6de811b81315",
 } as const;
 const OFFICIAL_REALTIME_IMAGE_CONFIG_DIGEST_BY_ARCH = {
-  amd64: "sha256:efc9f62be695b8a60dccbb650f16ebff4586ff936449d6c19c17a5fce7d8ed29",
-  arm64: "sha256:3714a0a2c1fbfa347fb5aa972f81576e75e7ddb363292c681a627095abbcc68f",
+  amd64: "sha256:bcaec521eb08dc811d88119ee5bcac7671188d8937cffc12d3bf23c890bb636b",
+  arm64: "sha256:1ee6d7247f3f3809289524539cd06f6f86d4c50e5639d1ef28f388a9e4fefaa4",
 } as const;
 export type EffectiveAclEntry = [grantee: string, grantor: string, privilege: string, grantable: boolean];
 
@@ -1174,7 +1174,7 @@ function schemaTreeHash(files: readonly { path: string; sql: string }[]): string
 
 function assertOfficialWalColumnRepairFiles(files: readonly { path: string; sql: string }[]): void {
   if (walColumnRepairArtifactHash(files) !== OFFICIAL_WAL_COLUMN_REPAIR_AGGREGATE_SHA256) {
-    throw new Error("running Realtime wal_column repair SQL aggregate checksum is not the verified v2.132.0 artifact");
+    throw new Error(`running Realtime wal_column repair SQL aggregate checksum is not the verified ${OFFICIAL_REALTIME_RUNTIME_VERSION} artifact`);
   }
   for (const file of files) {
     const expected = OFFICIAL_WAL_COLUMN_REPAIR_FILE_SHA256.get(file.path);
@@ -1235,7 +1235,7 @@ function validateRealtimeTenantSchemaManifest(contents: string): {
   }
   const sha256 = manifestSha256(contents);
   if (sha256 !== OFFICIAL_REALTIME_MANIFEST_SHA256) {
-    throw new Error("running Realtime tenant schema manifest checksum is not the verified v2.132.0 manifest");
+    throw new Error(`running Realtime tenant schema manifest checksum is not the verified ${OFFICIAL_REALTIME_RUNTIME_VERSION} manifest`);
   }
   return { sha256, files, loadOrder };
 }
@@ -2447,7 +2447,7 @@ export class ContainerRealtimeTenantSchemaRpc implements RealtimeTenantSchemaRpc
       }
       const manifest = validateRealtimeTenantSchemaManifest(manifestResult.stdout);
       if (manifest.sha256 !== OFFICIAL_REALTIME_MANIFEST_SHA256) {
-        throw new Error("running Realtime tenant schema manifest is not the verified v2.132.0 manifest");
+        throw new Error(`running Realtime tenant schema manifest is not the verified ${OFFICIAL_REALTIME_RUNTIME_VERSION} manifest`);
       }
       const schemaFiles: NonNullable<RealtimeWalColumnRepairArtifact["schemaFiles"]> = [];
       for (const path of manifest.loadOrder) {
@@ -2472,7 +2472,7 @@ export class ContainerRealtimeTenantSchemaRpc implements RealtimeTenantSchemaRpc
       if (this.options.verifyOfficialArtifacts !== false) {
         assertOfficialWalColumnRepairFiles(files);
         if (schemaTreeHash(schemaFiles) !== OFFICIAL_REALTIME_SCHEMA_TREE_SHA256) {
-          throw new Error("running Realtime tenant schema tree is not the verified v2.132.0 artifact");
+          throw new Error(`running Realtime tenant schema tree is not the verified ${OFFICIAL_REALTIME_RUNTIME_VERSION} artifact`);
         }
       }
       const profileResult = await this.run([
@@ -2504,7 +2504,7 @@ export class ContainerRealtimeTenantSchemaRpc implements RealtimeTenantSchemaRpc
         this.options.verifyOfficialArtifacts !== false
         && repairArtifact.profileSha256 !== OFFICIAL_REALTIME_PROFILE_SHA256
       ) {
-        throw new Error("running Realtime pgdelta profile is not the verified v2.132.0 profile");
+        throw new Error(`running Realtime pgdelta profile is not the verified ${OFFICIAL_REALTIME_RUNTIME_VERSION} profile`);
       }
       return repairArtifact;
     })();
