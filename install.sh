@@ -1473,7 +1473,7 @@ supacloud_select_binary_source() {
     shift
     local candidate
     supacloud_resolve_artifact_policy || return 1
-    if [[ "$SUPACLOUD_RESOLVED_ARTIFACT_MODE" == "release" ]]; then
+    if [[ "${SUPACLOUD_RESOLVED_ARTIFACT_MODE:-}" == "release" ]]; then
         candidate="${SCRIPT_DIR}/dist/${asset_name}"
         [[ -f "$candidate" ]] && supacloud_validate_binary "$candidate" "$asset_name" || {
             log_error "Release artifact policy requires a valid dist/${asset_name}"
@@ -1605,7 +1605,7 @@ ensure_edge_runtime_user() {
 
 configure_edge_runtime_source_access() {
     local source_dir="$1"
-    chmod -R g-w,g+rX "$source_dir" || {
+    chmod -R go-w,g+rX "$source_dir" || {
         log_error "Failed to grant Edge Runtime source access"
         return 1
     }
@@ -3047,12 +3047,109 @@ management_edge_runtime_source_transaction() {
     local management_transaction_dir="$1"
     local marker="${management_transaction_dir}/${EDGE_RUNTIME_SOURCE_TRANSACTION_MARKER}"
     local transaction_dir target_parent
-    [[ -f "$marker" && ! -L "$marker" ]] || return 1
-    transaction_dir=$(<"$marker")
     target_parent=$(dirname "$EDGE_RUNTIME_SOURCE_DIR")
-    [[ "$transaction_dir" == "$target_parent"/.edge-runtime-source.* ]] || return 1
-    [[ -d "$transaction_dir" && ! -L "$transaction_dir" ]] || return 1
+    transaction_dir=$(python3 - "$marker" "$target_parent" <<'PY'
+import os
+import re
+import stat
+import sys
+from pathlib import Path
+
+marker = Path(sys.argv[1])
+target_parent = Path(sys.argv[2])
+metadata = marker.lstat()
+if not stat.S_ISREG(metadata.st_mode) or marker.is_symlink() \
+        or metadata.st_uid != os.geteuid() or metadata.st_gid != os.getegid() \
+        or stat.S_IMODE(metadata.st_mode) != 0o600 or metadata.st_nlink != 1:
+    raise SystemExit("Edge Runtime source transaction marker is unsafe")
+value = marker.read_text()
+if not value.endswith("\n") or value.count("\n") != 1 or not value[:-1].startswith("/"):
+    raise SystemExit("Edge Runtime source transaction marker is invalid")
+transaction_value = value[:-1]
+transaction = Path(transaction_value)
+if str(transaction) != transaction_value or transaction.parent != target_parent \
+        or not re.fullmatch(r"\.edge-runtime-source\.[A-Za-z0-9]+", transaction.name):
+    raise SystemExit("Edge Runtime source transaction marker path is outside the target parent")
+print(transaction_value, end="")
+PY
+    ) || return 1
+    if [[ -d "$transaction_dir" && ! -L "$transaction_dir" ]]; then
+        [[ ! -e "${transaction_dir}.cleanup" && ! -L "${transaction_dir}.cleanup" ]] || return 1
+    elif [[ -d "${transaction_dir}.cleanup" && ! -L "${transaction_dir}.cleanup" ]]; then
+        [[ ! -e "$transaction_dir" && ! -L "$transaction_dir" ]] || return 1
+    elif [[ -f "${transaction_dir}.outcome" && ! -L "${transaction_dir}.outcome" ]]; then
+        supacloud_edge_runtime_source_transaction_outcome "$transaction_dir" >/dev/null || return 1
+    else
+        return 1
+    fi
     printf '%s\n' "$transaction_dir"
+}
+
+write_management_edge_runtime_source_transaction_marker() {
+    local management_transaction_dir="$1"
+    local transaction_dir="$2"
+    local marker="${management_transaction_dir}/${EDGE_RUNTIME_SOURCE_TRANSACTION_MARKER}"
+    python3 - "$management_transaction_dir" "$marker" "$transaction_dir" <<'PY'
+import os
+import stat
+import sys
+import tempfile
+from pathlib import Path
+
+management_transaction = Path(sys.argv[1])
+marker = Path(sys.argv[2])
+transaction = sys.argv[3]
+metadata = management_transaction.lstat()
+if not stat.S_ISDIR(metadata.st_mode) or management_transaction.is_symlink() \
+        or metadata.st_uid != os.geteuid() or metadata.st_gid != os.getegid():
+    raise SystemExit("Management transaction directory is unsafe")
+if marker.exists() or marker.is_symlink():
+    raise SystemExit("Edge Runtime source transaction marker already exists")
+fd, temporary = tempfile.mkstemp(prefix=f".{marker.name}.", dir=management_transaction)
+try:
+    with os.fdopen(fd, "w") as handle:
+        handle.write(transaction + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.chmod(temporary, 0o600)
+    os.replace(temporary, marker)
+    directory_fd = os.open(management_transaction, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+finally:
+    if os.path.exists(temporary):
+        os.unlink(temporary)
+PY
+}
+
+remove_management_edge_runtime_source_transaction_marker() {
+    local management_transaction_dir="$1"
+    local transaction_dir="$2"
+    local marker="${management_transaction_dir}/${EDGE_RUNTIME_SOURCE_TRANSACTION_MARKER}"
+    python3 - "$management_transaction_dir" "$marker" "$transaction_dir" <<'PY'
+import os
+import stat
+import sys
+from pathlib import Path
+
+management_transaction = Path(sys.argv[1])
+marker = Path(sys.argv[2])
+expected = sys.argv[3] + "\n"
+metadata = marker.lstat()
+if not stat.S_ISREG(metadata.st_mode) or marker.is_symlink() \
+        or metadata.st_uid != os.geteuid() or metadata.st_gid != os.getegid() \
+        or stat.S_IMODE(metadata.st_mode) != 0o600 or metadata.st_nlink != 1 \
+        or marker.read_text() != expected:
+    raise SystemExit("Edge Runtime source transaction marker is unsafe or changed")
+marker.unlink()
+directory_fd = os.open(management_transaction, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+try:
+    os.fsync(directory_fd)
+finally:
+    os.close(directory_fd)
+PY
 }
 
 capture_management_edge_runtime_source_state() {
@@ -3131,7 +3228,6 @@ management_edge_runtime_service_prior_enabled_state() {
 prepare_management_edge_runtime_source() {
     local management_transaction_dir="$1"
     local source_dir="$EDGE_RUNTIME_SOURCE_INPUT_DIR"
-    local marker="${management_transaction_dir}/${EDGE_RUNTIME_SOURCE_TRANSACTION_MARKER}"
     local transaction_dir staged_dir identity version sha256
 
     [[ -d "$source_dir" && ! -L "$source_dir" ]] || {
@@ -3144,64 +3240,51 @@ prepare_management_edge_runtime_source() {
     }
     transaction_dir=$(supacloud_stage_edge_runtime_source "$source_dir" "$EDGE_RUNTIME_SOURCE_DIR") || return 1
     EDGE_RUNTIME_SOURCE_TRANSACTION_DIR="$transaction_dir"
-    printf '%s\n' "$transaction_dir" > "$marker" || {
-        supacloud_rollback_edge_runtime_source "$transaction_dir" "$EDGE_RUNTIME_SOURCE_DIR" || true
+    if ! write_management_edge_runtime_source_transaction_marker \
+        "$management_transaction_dir" "$transaction_dir"; then
+        if supacloud_rollback_edge_runtime_source "$transaction_dir" "$EDGE_RUNTIME_SOURCE_DIR"; then
+            supacloud_clear_edge_runtime_source_transaction_outcome \
+                "$transaction_dir" rollback || true
+        fi
         EDGE_RUNTIME_SOURCE_TRANSACTION_DIR=""
         return 1
-    }
-    chmod 600 "$marker" || {
-        supacloud_rollback_edge_runtime_source "$transaction_dir" "$EDGE_RUNTIME_SOURCE_DIR" || true
-        rm -f "$marker"
-        EDGE_RUNTIME_SOURCE_TRANSACTION_DIR=""
-        return 1
-    }
+    fi
     staged_dir="${transaction_dir}/staged"
 
     log_info "Installing Edge Runtime dependencies in the staged source tree..."
     if [[ "$SUPACLOUD_RESOLVED_ARTIFACT_MODE" == "release" ]]; then
-        (cd "$staged_dir" && bun install --frozen-lockfile) || {
+        (cd "$staged_dir" && bun install --backend=copyfile --frozen-lockfile) || {
             log_error "Release Edge Runtime dependencies do not match the lockfile"
-            supacloud_rollback_edge_runtime_source "$transaction_dir" "$EDGE_RUNTIME_SOURCE_DIR" || true
-            rm -f "$marker"
+            rollback_management_edge_runtime_source "$management_transaction_dir" || true
             EDGE_RUNTIME_SOURCE_TRANSACTION_DIR=""
             return 1
         }
-    elif ! { (cd "$staged_dir" && bun install --frozen-lockfile 2>/dev/null) || \
-        (cd "$staged_dir" && bun install); }; then
+    elif ! { (cd "$staged_dir" && bun install --backend=copyfile --frozen-lockfile 2>/dev/null) || \
+        (cd "$staged_dir" && bun install --backend=copyfile); }; then
         log_error "Failed to install staged Edge Runtime dependencies"
-        supacloud_rollback_edge_runtime_source "$transaction_dir" "$EDGE_RUNTIME_SOURCE_DIR" || true
-        rm -f "$marker"
+        rollback_management_edge_runtime_source "$management_transaction_dir" || true
         EDGE_RUNTIME_SOURCE_TRANSACTION_DIR=""
         return 1
     fi
     if ! configure_edge_runtime_source_access "$staged_dir"; then
-        supacloud_rollback_edge_runtime_source "$transaction_dir" "$EDGE_RUNTIME_SOURCE_DIR" || true
-        rm -f "$marker"
+        rollback_management_edge_runtime_source "$management_transaction_dir" || true
         EDGE_RUNTIME_SOURCE_TRANSACTION_DIR=""
         return 1
     fi
     if ! identity=$(supacloud_refresh_edge_runtime_source_identity "$staged_dir"); then
-        supacloud_rollback_edge_runtime_source "$transaction_dir" "$EDGE_RUNTIME_SOURCE_DIR" || true
-        rm -f "$marker"
+        rollback_management_edge_runtime_source "$management_transaction_dir" || true
         EDGE_RUNTIME_SOURCE_TRANSACTION_DIR=""
         return 1
     fi
-    if ! printf '%s\n' "$identity" > "${transaction_dir}/expected-identity"; then
-        supacloud_rollback_edge_runtime_source "$transaction_dir" "$EDGE_RUNTIME_SOURCE_DIR" || true
-        rm -f "$marker"
-        EDGE_RUNTIME_SOURCE_TRANSACTION_DIR=""
-        return 1
-    fi
-    if ! chmod 600 "${transaction_dir}/expected-identity"; then
-        supacloud_rollback_edge_runtime_source "$transaction_dir" "$EDGE_RUNTIME_SOURCE_DIR" || true
-        rm -f "$marker"
+    if ! supacloud_write_edge_runtime_transaction_identity \
+        "$transaction_dir" expected-identity "$identity"; then
+        rollback_management_edge_runtime_source "$management_transaction_dir" || true
         EDGE_RUNTIME_SOURCE_TRANSACTION_DIR=""
         return 1
     fi
     IFS=$'\t' read -r version sha256 <<< "$identity"
     if ! supacloud_verify_edge_runtime_source_identity "$staged_dir" "$version" "$sha256"; then
-        supacloud_rollback_edge_runtime_source "$transaction_dir" "$EDGE_RUNTIME_SOURCE_DIR" || true
-        rm -f "$marker"
+        rollback_management_edge_runtime_source "$management_transaction_dir" || true
         EDGE_RUNTIME_SOURCE_TRANSACTION_DIR=""
         return 1
     fi
@@ -3222,7 +3305,10 @@ rollback_management_edge_runtime_source() {
     [[ -e "$marker" || -L "$marker" ]] || return 0
     transaction_dir=$(management_edge_runtime_source_transaction "$management_transaction_dir") || return 1
     supacloud_rollback_edge_runtime_source "$transaction_dir" "$EDGE_RUNTIME_SOURCE_DIR" || return 1
-    rm -f "$marker"
+    remove_management_edge_runtime_source_transaction_marker \
+        "$management_transaction_dir" "$transaction_dir" || return 1
+    supacloud_clear_edge_runtime_source_transaction_outcome \
+        "$transaction_dir" rollback || return 1
     [[ "$EDGE_RUNTIME_SOURCE_TRANSACTION_DIR" == "$transaction_dir" ]] && EDGE_RUNTIME_SOURCE_TRANSACTION_DIR=""
 }
 
@@ -3253,11 +3339,13 @@ verify_recovered_management_edge_runtime_source() {
 
 commit_management_edge_runtime_source() {
     local management_transaction_dir="$1"
-    local marker="${management_transaction_dir}/${EDGE_RUNTIME_SOURCE_TRANSACTION_MARKER}"
     local transaction_dir
     transaction_dir=$(management_edge_runtime_source_transaction "$management_transaction_dir") || return 1
     supacloud_commit_edge_runtime_source "$transaction_dir" "$EDGE_RUNTIME_SOURCE_DIR" || return 1
-    rm -f "$marker"
+    remove_management_edge_runtime_source_transaction_marker \
+        "$management_transaction_dir" "$transaction_dir" || return 1
+    supacloud_clear_edge_runtime_source_transaction_outcome \
+        "$transaction_dir" commit || return 1
     [[ "$EDGE_RUNTIME_SOURCE_TRANSACTION_DIR" == "$transaction_dir" ]] && EDGE_RUNTIME_SOURCE_TRANSACTION_DIR=""
 }
 
