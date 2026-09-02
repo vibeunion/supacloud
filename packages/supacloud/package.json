@@ -31,7 +31,7 @@
     "directory": "packages/supacloud"
   },
   "dependencies": {
-    "@supacloud/cli": "^0.39.0",
+    "@supacloud/cli": "^0.40.0",
     "@supacloud/admin": "^0.18.2"
   },
   "devDependencies": {
