@@ -123,8 +123,8 @@ When a function is deployed via the Management API:
 
 ### authenticator Role CONNECT Privilege
 
-`db_manager.sh` now grants `CONNECT ON DATABASE` to the `authenticator` role and creates it if missing. This is required for PostgREST to connect to tenant databases.
+`DatabaseService` grants `CONNECT ON DATABASE` to the `authenticator` role and creates it if missing. This is required for PostgREST to connect to tenant databases.
 
 ### Disk Space Pre-Check
 
-`db_manager.sh` now checks available disk space (default: 10GB minimum) before creating databases, preventing WAL write failures that can crash the entire Patroni cluster.
+`DatabaseService` checks available disk space before creating databases, preventing WAL write failures that can crash the entire Patroni cluster.

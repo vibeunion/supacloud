@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "test": "bun test",
     "dev": "bun run --watch server.ts",
     "start": "bun run server.ts",
     "build:amd64": "bun run scripts/build-compiled.ts --target bun-linux-x64 --outfile supacloud-edge-runtime-linux-amd64",
@@ -13,7 +14,7 @@
     "build:macos-arm64": "bun run scripts/build-compiled.ts --target bun-macos-arm64 --outfile supacloud-edge-runtime-macos-arm64",
     "build:macos": "bun run build:macos-amd64 && bun run build:macos-arm64",
     "release:manifest": "bun run ../../scripts/generate_release_manifest.ts --component edge-runtime --package-json package.json",
-    "typecheck": "bun x tsc --noEmit --skipLibCheck --allowImportingTsExtensions --moduleResolution bundler --module esnext --target esnext --types bun --strict cli.ts server.ts worker-executor.ts worker-pool.ts internal-bindings.ts pgredis-capability.ts auto-deps.ts deno-compat.ts fetch-tls-policy.ts url-import-plugin.ts runtime-source-identity.ts shims/*.ts"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@elysiajs/cors": "^1.4.2",
@@ -25,9 +26,7 @@
   },
   "devDependencies": {
     "@types/bun": "^1.4.0",
-    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^26.4.0",
-    "jsonwebtoken": "^9.0.3",
     "typescript": "^7.0.2"
   }
 }

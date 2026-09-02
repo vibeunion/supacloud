@@ -641,7 +641,6 @@ supacloud/
 ├── install.sh                  # One-click deployment script
 ├── setup.sh                    # Remote setup bootstrap
 ├── switch.sh                   # Runtime/storage switching tool
-├── supacloud                   # CLI management tool (shell wrapper)
 ├── config.env                  # Read-only tracked defaults template
 ├── packages/
 │   ├── management-api/         # REST API server (Bun + Elysia)
@@ -673,17 +672,14 @@ supacloud/
 │       └── src/                # Components, routes, assets
 ├── scripts/
 │   └── lib/                    # Shell script modules
-│       ├── db_manager.sh       # Database lifecycle
 │       ├── gateway provider    # Caddy route publishing is managed in management-api
 │       ├── tenant_runtime.sh   # Tenant PostgREST & GoTrue runtime
 │       ├── function_manager.sh # Edge Functions management
 │       ├── s3_manager.sh       # Storage backend management
-│       ├── jwt_manager.sh      # JWT key generation
 │       ├── backup_manager.sh   # Backup operations
 │       ├── ha_manager.sh       # High availability
 │       ├── security_manager.sh # Firewall & SSL
 │       ├── storage_manager.sh  # Storage operations
-│       ├── extension_manager.sh# PostgreSQL extensions
 │       ├── global_router.ts    # Global routing logic
 │       └── worker_runner.ts    # Background worker
 ├── infra/

@@ -572,7 +572,6 @@ supacloud/
 ├── install.sh                  # Guión de despliegue con un clic
 ├── setup.sh                    # Bootstrap de configuración remota
 ├── switch.sh                   # Herramienta de cambio de runtime/almacenamiento
-├── supacloud                   # Herramienta de gestión CLI (envoltorio shell)
 ├── config.env                  # Plantilla de valores por defecto solo lectura rastreada
 ├── packages/
 │   ├── management-api/         # Servidor de API REST (Bun + Elysia)
@@ -604,17 +603,14 @@ supacloud/
 │       └── src/                # Componentes, rutas, recursos
 ├── scripts/
 │   └── lib/                    # Módulos de guiones shell
-│       ├── db_manager.sh       # Ciclo de vida de la base de datos
 │       ├── gateway provider    # La publicación de rutas Caddy es gestionada internamente por management-api
 │       ├── tenant_runtime.sh   # Runtime PostgREST & GoTrue del tenant
 │       ├── function_manager.sh # Gestión de funciones edge
 │       ├── s3_manager.sh       # Gestión del backend de almacenamiento
-│       ├── jwt_manager.sh      # Generación de claves JWT
 │       ├── backup_manager.sh   # Operaciones de copia de seguridad
 │       ├── ha_manager.sh       # Alta disponibilidad
 │       ├── security_manager.sh # Firewall y SSL
 │       ├── storage_manager.sh  # Operaciones de almacenamiento
-│       ├── extension_manager.sh# Extensiones PostgreSQL
 │       ├── global_router.ts    # Lógica de enrutamiento global
 │       └── worker_runner.ts    # Trabajador en segundo plano
 ├── infra/

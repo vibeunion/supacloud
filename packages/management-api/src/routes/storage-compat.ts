@@ -739,8 +739,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             logger.error('SDK upload error:', { error: err instanceof Error ? err.message : String(err) });
             return status(500, { statusCode: "500", error: 'Internal', message: 'Upload failed' });
         }
-    }, // @ts-ignore
-    { type: 'none', detail: { tags: ["storage"], summary: "Upload a file" } })
+    },
+    { parse: 'none', detail: { tags: ["storage"], summary: "Upload a file" } })
 
     // PUT /object/:bucket/* — Upsert (same as upload but always overwrites)
     .put('/object/:bucket/*', async ({ params, headers, request }) => {
@@ -779,8 +779,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             }
             return status(500, { statusCode: "500", error: 'Internal', message: 'Upsert failed' });
         }
-    }, // @ts-ignore
-    { type: 'none', detail: { tags: ["storage"], summary: "Upsert a file" } })
+    },
+    { parse: 'none', detail: { tags: ["storage"], summary: "Upsert a file" } })
 
     // ════════════════════════════════════════════════════════
     // OBJECT DOWNLOAD — GET /object/public/:bucket/*
@@ -1170,8 +1170,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         } catch (err: unknown) {
             return status(500, { statusCode: "500", error: 'Internal', message: err instanceof Error ? err.message : String(err) });
         }
-    }, // @ts-ignore
-    { type: 'none', detail: { tags: ["storage"], summary: "Upload using signed URL" } })
+    },
+    { parse: 'none', detail: { tags: ["storage"], summary: "Upload using signed URL" } })
 
     // GET /object/sign/:bucket/* — Serve signed file (validates token)
     .get('/object/sign/:bucket/*', async ({ params, headers, query, set }) => {
