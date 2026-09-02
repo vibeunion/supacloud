@@ -95,6 +95,18 @@ type ExecuteMessage = Omit<PreheatMessage, "type"> & {
   body?: ArrayBuffer | null;
   internalBindings?: Omit<PgredisRuntimeBindingConfig, "signal">;
   framework?: "fetch" | "elysia" | "hono" | "sveltekit-function";
+  capabilities?: {
+    secrets?: string[];
+    outbound_hosts?: string[];
+    bindings?: string[];
+    background?: boolean;
+  };
+  limits?: {
+    timeout_ms?: number;
+    max_request_body_bytes?: number;
+    max_response_body_bytes?: number;
+    wait_until_timeout_ms?: number;
+  };
 };
 type ParentMessage =
   | InvalidateModuleMessage
@@ -423,10 +435,13 @@ function runCleanup(cleanup: () => void): void {
   }
 }
 
-function setupEdgeRuntimeCompat() {
+function setupEdgeRuntimeCompat(backgroundAllowed = true) {
   currentWaitUntilTasks = [];
   (globalThis as any).EdgeRuntime = {
     waitUntil(promise: PromiseLike<unknown> | unknown) {
+      if (!backgroundAllowed) {
+        throw new Error("EdgeRuntime.waitUntil is not enabled by the Function capability policy");
+      }
       const task = Promise.resolve(promise).catch((error) => {
         console.error("[EdgeRuntime.waitUntil] background task failed", error);
       });
@@ -640,6 +655,29 @@ function postToParent(message: unknown) {
   parentPort!.postMessage(message);
 }
 
+function installOutboundHostPolicy(allowedHosts: string[] | undefined): () => void {
+  if (allowedHosts === undefined) return () => {};
+  const originalFetch = globalThis.fetch;
+  const allowed = new Set(allowedHosts.map((host) => host.toLowerCase()));
+  globalThis.fetch = ((input, init) => {
+    const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+    if (!allowed.has(url.hostname.toLowerCase())) {
+      throw new Error(`Outbound host is not allowed by Function capability policy: ${url.hostname}`);
+    }
+    return originalFetch(input, init);
+  }) as typeof globalThis.fetch;
+  return () => {
+    globalThis.fetch = originalFetch;
+  };
+}
+
+class FunctionResponseLimitError extends Error {
+  constructor(readonly maxBytes: number) {
+    super(`Function response exceeded the configured limit of ${maxBytes} bytes`);
+    this.name = "FunctionResponseLimitError";
+  }
+}
+
 async function onParentMessage(msg: unknown): Promise<void> {
   if (!isParentMessage(msg)) {
     console.warn("[Worker] Ignoring invalid parent message");
@@ -738,16 +776,18 @@ async function onParentMessage(msg: unknown): Promise<void> {
   const requestAbortController = new AbortController();
   currentAbortController = requestAbortController;
   let restoreFetchTlsPolicy = () => {};
+  let restoreOutboundHostPolicy = () => {};
 
   try {
     setProjectRoot(projectRoot || path.dirname(functionPath));
     injectEnv(env);
     setInjectedEnv(env);
     setupConsoleCapture(functionId);
-    setupEdgeRuntimeCompat();
+    setupEdgeRuntimeCompat(msg.capabilities?.background !== false);
     restoreFetchTlsPolicy = installEdgeFetchTlsPolicy(
       await resolveMessageTlsPolicy(tlsPolicy),
     );
+    restoreOutboundHostPolicy = installOutboundHostPolicy(msg.capabilities?.outbound_hosts);
     const moduleLoad = await loadModule({
       functionId,
       functionPath,
@@ -787,6 +827,7 @@ async function onParentMessage(msg: unknown): Promise<void> {
         });
 
         const response = await executeFunction(handler, req);
+        const maxResponseBody = msg.limits?.max_response_body_bytes;
 
         if (
           response.body &&
@@ -804,6 +845,7 @@ async function onParentMessage(msg: unknown): Promise<void> {
 
           try {
             const reader = response.body.getReader();
+            let responseBytes = 0;
             while (true) {
               const { done, value } = await reader.read();
               if (done) {
@@ -813,6 +855,11 @@ async function onParentMessage(msg: unknown): Promise<void> {
                   done: true,
                 });
                 break;
+              }
+              responseBytes += value.byteLength;
+              if (maxResponseBody !== undefined && responseBytes > maxResponseBody) {
+                await reader.cancel();
+                throw new FunctionResponseLimitError(maxResponseBody);
               }
               postToParent({
                 type: "stream_chunk",
@@ -836,6 +883,9 @@ async function onParentMessage(msg: unknown): Promise<void> {
         const resBody = response.body
           ? Buffer.from(await response.arrayBuffer()).buffer
           : null;
+        if (maxResponseBody !== undefined && resBody && resBody.byteLength > maxResponseBody) {
+          throw new FunctionResponseLimitError(maxResponseBody);
+        }
 
         const resHeaders: Record<string, string | string[]> = {};
         response.headers.forEach((v, k) => {
@@ -863,13 +913,14 @@ async function onParentMessage(msg: unknown): Promise<void> {
     const aborted = currentAbortController?.signal.aborted || err?.name === "AbortError";
     const message = err instanceof Error ? err.message : String(err);
     postToParent({
-      status: aborted ? 499 : 500,
+      status: aborted ? 499 : err instanceof FunctionResponseLimitError ? 502 : 500,
       headers: { "Content-Type": "application/json" },
       body: Buffer.from(
         JSON.stringify({ error: message, name: err.name }),
       ).buffer,
     });
   } finally {
+    runCleanup(restoreOutboundHostPolicy);
     runCleanup(restoreFetchTlsPolicy);
     currentAbortController = null;
     runCleanup(clearEdgeRuntimeCompat);

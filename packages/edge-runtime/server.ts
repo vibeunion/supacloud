@@ -362,6 +362,8 @@ type FunctionActivationSnapshot = {
   responseVersion: string | null;
   verifyJwt: boolean;
   framework: "fetch" | "elysia" | "hono" | "sveltekit-function";
+  capabilities: FunctionCapabilities;
+  limits: FunctionLimits;
   moduleVersion: string;
   artifactSha256: string;
   activationId: string | null;
@@ -480,6 +482,8 @@ async function resolvedFunctionPath(
       responseVersion,
       verifyJwt: resolvedConfig.verify_jwt,
       framework: resolvedConfig.framework,
+      capabilities: resolvedConfig.capabilities,
+      limits: resolvedConfig.limits,
       artifactSha256: artifact.sha256,
       activationId: resolvedConfig.activationId,
       authorityKind: resolvedConfig.authorityKind,
@@ -575,7 +579,14 @@ async function dispatchFunction(
     const functionId = `${projectRef}_${functionName}${versionSuffix}`;
     const targetPool = opts?.background ? backgroundPool : pool;
     const tenantEnvLoad = opts?.tenantEnvLoad || await loadTenantRuntimeEnv(projectRef);
-    const dispatchEnv = opts?.tenantEnv || tenantEnvLoad.env;
+    const completeDispatchEnv = opts?.tenantEnv || tenantEnvLoad.env;
+    const dispatchEnv = activation.capabilities.secrets === undefined
+      ? completeDispatchEnv
+      : Object.fromEntries(
+          activation.capabilities.secrets
+            .filter((name) => Object.hasOwn(completeDispatchEnv, name))
+            .map((name) => [name, completeDispatchEnv[name]]),
+        );
     const executionProfile = opts?.background ? "background" : "foreground";
     const moduleEnvProof = tenantEnvModuleProof(
       projectRef,
@@ -602,8 +613,12 @@ async function dispatchFunction(
       projectRoot,
       projectRef,
       framework: activation.framework,
+      capabilities: activation.capabilities,
+      limits: activation.limits,
       functionVersion: responseVersion,
       internalBindings: PGREDIS_RUNTIME_ENDPOINT
+        && (activation.capabilities.bindings === undefined
+          || activation.capabilities.bindings.includes("pgredis"))
         ? {
             baseUrl: PGREDIS_RUNTIME_ENDPOINT.baseUrl,
             capabilityToken: createPgredisCapability(PGREDIS_RUNTIME_ENDPOINT.signingSecret, {
@@ -701,6 +716,22 @@ type FunctionConfig = {
   targetState: "active" | "absent" | null;
   artifactSha256: string | null;
   authorityKind: "active" | "historical" | "legacy";
+  capabilities: FunctionCapabilities;
+  limits: FunctionLimits;
+};
+
+type FunctionCapabilities = {
+  secrets?: string[];
+  outbound_hosts?: string[];
+  bindings?: string[];
+  background?: boolean;
+};
+
+type FunctionLimits = {
+  timeout_ms?: number;
+  max_request_body_bytes?: number;
+  max_response_body_bytes?: number;
+  wait_until_timeout_ms?: number;
 };
 
 type ActivationPoolControl = Awaited<ReturnType<WorkerPool["invalidateProject"]>>;
@@ -746,6 +777,8 @@ async function getFunctionConfig(
     return {
       verify_jwt: cached.verify_jwt,
       framework: cached.framework,
+      capabilities: cached.capabilities,
+      limits: cached.limits,
       version: cached.version,
       activationId: cached.activationId,
       targetState: cached.targetState,
@@ -768,6 +801,8 @@ async function getFunctionConfig(
         targetState: null,
         artifactSha256: null,
         authorityKind: "legacy" as const,
+        capabilities: {},
+        limits: {},
       }
     : {
         verify_jwt: manifest.config.verify_jwt,
@@ -781,6 +816,8 @@ async function getFunctionConfig(
         targetState: manifest.authority?.target_state ?? null,
         artifactSha256: manifest.authority?.artifact_sha256 ?? null,
         authorityKind: manifest.authority === null ? "legacy" as const : "active" as const,
+        capabilities: functionCapabilities(manifest.config.capabilities),
+        limits: functionLimits(manifest.config.limits),
       };
   configCache.set(key, { ...config, expiresAt: Date.now() + CONFIG_CACHE_TTL });
   return config;
@@ -821,6 +858,8 @@ async function immutableVersionConfig(
     targetState: "active",
     artifactSha256: record.artifact_sha256,
     authorityKind: "historical",
+    capabilities: functionCapabilities(record.capabilities),
+    limits: functionLimits(record.limits),
   };
 }
 
@@ -842,6 +881,8 @@ async function assertDispatchAuthorityCurrent(
     || current.version !== activation.activeVersion
     || current.verify_jwt !== activation.verifyJwt
     || current.framework !== activation.framework
+    || JSON.stringify(current.capabilities) !== JSON.stringify(activation.capabilities)
+    || JSON.stringify(current.limits) !== JSON.stringify(activation.limits)
     || current.targetState !== "active"
     || current.artifactSha256 !== activation.artifactSha256) {
     configCache.delete(`${projectRef}/${functionName}`);
@@ -866,6 +907,70 @@ async function activeFunctionConfig(
     targetState: manifest.authority?.target_state ?? null,
     artifactSha256: manifest.authority?.artifact_sha256 ?? null,
     authorityKind: manifest.authority === null ? "legacy" : "active",
+    capabilities: functionCapabilities(manifest.config.capabilities),
+    limits: functionLimits(manifest.config.limits),
+  };
+}
+
+function functionCapabilities(value: unknown): FunctionCapabilities {
+  if (value === undefined) return {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Function activation capabilities must be an object");
+  }
+  const record = value as Record<string, unknown>;
+  const list = (field: string): string[] | undefined => {
+    const candidate = record[field];
+    if (candidate === undefined) return undefined;
+    if (!Array.isArray(candidate) || candidate.some((entry) => typeof entry !== "string")) {
+      throw new Error(`Function activation capabilities.${field} is invalid`);
+    }
+    return candidate as string[];
+  };
+  if (record.background !== undefined && typeof record.background !== "boolean") {
+    throw new Error("Function activation capabilities.background is invalid");
+  }
+  const secrets = list("secrets");
+  const outboundHosts = list("outbound_hosts");
+  const bindings = list("bindings");
+  if (secrets?.some((name) => {
+    const normalized = name.trim().toUpperCase();
+    return normalized === "JWT_SECRET"
+      || normalized === "JWT_KEYS"
+      || normalized === "JWT_JWKS"
+      || normalized === "X_PROJECT_REF"
+      || normalized.startsWith("SUPABASE_")
+      || normalized.startsWith("SUPACLOUD_")
+      || normalized.startsWith("SUPAOAUTH_")
+      || normalized.startsWith("ADMIN_SSO_");
+  })) {
+    throw new Error("Function activation capabilities.secrets contains a reserved system secret");
+  }
+  return {
+    ...(secrets ? { secrets } : {}),
+    ...(outboundHosts ? { outbound_hosts: outboundHosts } : {}),
+    ...(bindings ? { bindings } : {}),
+    ...(typeof record.background === "boolean" ? { background: record.background } : {}),
+  };
+}
+
+function functionLimits(value: unknown): FunctionLimits {
+  if (value === undefined) return {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Function activation limits must be an object");
+  }
+  const record = value as Record<string, unknown>;
+  const integer = (candidate: unknown): candidate is number =>
+    typeof candidate === "number" && Number.isSafeInteger(candidate) && candidate > 0;
+  for (const field of ["timeout_ms", "max_request_body_bytes", "max_response_body_bytes", "wait_until_timeout_ms"]) {
+    if (record[field] !== undefined && !integer(record[field])) {
+      throw new Error(`Function activation limits.${field} is invalid`);
+    }
+  }
+  return {
+    ...(integer(record.timeout_ms) ? { timeout_ms: record.timeout_ms } : {}),
+    ...(integer(record.max_request_body_bytes) ? { max_request_body_bytes: record.max_request_body_bytes } : {}),
+    ...(integer(record.max_response_body_bytes) ? { max_response_body_bytes: record.max_response_body_bytes } : {}),
+    ...(integer(record.wait_until_timeout_ms) ? { wait_until_timeout_ms: record.wait_until_timeout_ms } : {}),
   };
 }
 

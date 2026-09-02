@@ -352,6 +352,18 @@ const backgroundRoutesSchema = Type.Optional(decodedSchema(
 ));
 
 const functionFilesRecordSchema = Type.Record(Type.String(), Type.String());
+const functionCapabilitiesSchema = Type.Object({
+    secrets: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { maxItems: 128 })),
+    outbound_hosts: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { maxItems: 128 })),
+    bindings: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { maxItems: 128 })),
+    background: Type.Optional(Type.Boolean()),
+}, { additionalProperties: false });
+const functionLimitsSchema = Type.Object({
+    timeout_ms: Type.Optional(Type.Integer({ minimum: 1, maximum: 900_000 })),
+    max_request_body_bytes: Type.Optional(Type.Integer({ minimum: 1, maximum: 30 * 1024 * 1024 })),
+    max_response_body_bytes: Type.Optional(Type.Integer({ minimum: 1, maximum: 30 * 1024 * 1024 })),
+    wait_until_timeout_ms: Type.Optional(Type.Integer({ minimum: 1, maximum: 900_000 })),
+}, { additionalProperties: false });
 
 function parseFunctionFiles(input: string | Record<string, string>): unknown {
     if (typeof input !== "string") return input;
@@ -592,6 +604,10 @@ function confirmedFunctionConfig(payload: unknown, expected: EdgeFunctionConfigI
         if (!Array.isArray(response.background_routes)) return false;
         if (JSON.stringify(response.background_routes) !== JSON.stringify(expected.background_routes)) return false;
     }
+    if (expected.capabilities !== undefined
+        && JSON.stringify(response.capabilities) !== JSON.stringify(expected.capabilities)) return false;
+    if (expected.limits !== undefined
+        && JSON.stringify(response.limits) !== JSON.stringify(expected.limits)) return false;
     return true;
 }
 
@@ -675,6 +691,8 @@ interface ConfirmedFunctionMutation {
     activationId: string;
     verifyJwt: boolean;
     framework?: EdgeFunctionConfigInput["framework"];
+    capabilities?: EdgeFunctionConfigInput["capabilities"];
+    limits?: EdgeFunctionConfigInput["limits"];
 }
 
 function mutationIdentityMatches(
@@ -784,6 +802,8 @@ function confirmedFunctionMutation(
         activationId,
         verifyJwt: config.verify_jwt,
         ...(framework === undefined ? {} : { framework: framework as FunctionFramework }),
+        ...(config.capabilities === undefined ? {} : { capabilities: config.capabilities as EdgeFunctionConfigInput["capabilities"] }),
+        ...(config.limits === undefined ? {} : { limits: config.limits as EdgeFunctionConfigInput["limits"] }),
     };
 }
 
@@ -806,6 +826,8 @@ function functionMutationResponse(
         version: confirmed.activeVersion,
         verify_jwt: confirmed.verifyJwt,
         ...(confirmed.framework === undefined ? {} : { framework: confirmed.framework }),
+        ...(confirmed.capabilities === undefined ? {} : { capabilities: confirmed.capabilities }),
+        ...(confirmed.limits === undefined ? {} : { limits: confirmed.limits }),
     });
 }
 
@@ -915,6 +937,8 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
             verify_jwt: optional(Type.Boolean(), "[deploy/deploy_bundle/config] Set JWT verification for this function"),
             background_routes: withDescription(backgroundRoutesSchema, "[deploy/deploy_bundle/config] Background route paths; pass comma-separated or JSON array in CLI"),
             framework: optional(withDescription(stringEnum(["fetch", "elysia", "hono", "sveltekit-function"]), "[deploy/deploy_bundle/config/scaffold] Fetch framework adapter profile")),
+            capabilities: optional(functionCapabilitiesSchema, "[deploy/deploy_bundle/config] Host capabilities: secrets, outbound_hosts, bindings, background"),
+            limits: optional(functionLimitsSchema, "[deploy/deploy_bundle/config] Execution limits in milliseconds/bytes"),
             "expected-active-version": withDescription(
                 expectedActiveVersionSchema,
                 "[deploy/deploy_bundle/activate] Required current active version, or 'absent' when none exists",
@@ -929,7 +953,7 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
             if (args.action === "scaffold") {
                 return { content: [{ type: "text" as const, text: scaffoldFunction(args.path, args.slug, args.framework) }] };
             }
-            const { action, ref, slug, path: pathArg, output, entrypoint, minify, verify_jwt, background_routes, framework } = args;
+            const { action, ref, slug, path: pathArg, output, entrypoint, minify, verify_jwt, background_routes, framework, capabilities, limits } = args;
             rejectActionSpecificFlags(action, args);
             const expectedActiveVersion = action === "deploy" || action === "deploy_bundle"
                 ? requiredExpectedActiveVersion(args, action)
@@ -946,6 +970,8 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
                 ...(typeof verify_jwt === "boolean" ? { verify_jwt } : {}),
                 ...(Array.isArray(background_routes) ? { background_routes } : {}),
                 ...(typeof framework === "string" ? { framework: framework as EdgeFunctionConfigInput["framework"] } : {}),
+                ...(capabilities === undefined ? {} : { capabilities }),
+                ...(limits === undefined ? {} : { limits }),
             });
 
             const hasFunctionConfig = () => Object.keys(functionConfig()).length > 0;
@@ -1037,7 +1063,7 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
                 case "config":
                     need("slug", slug);
                     if (!hasFunctionConfig()) {
-                        throw new Error("'verify_jwt', 'background_routes', or 'framework' required for 'config'");
+                        throw new Error("'verify_jwt', 'background_routes', 'framework', 'capabilities', or 'limits' required for 'config'");
                     }
                     return updateFunctionConfiguration(http, {
                         projectRef: ref,

@@ -1244,20 +1244,60 @@ describe("edgeFunctionService bundle metadata", () => {
     expect(deployed.config).toMatchObject({ verify_jwt: true, version: "1" });
   });
 
-  test("persists and restores the selected framework profile", async () => {
+  test("persists and restores the selected framework, capability, and limit profiles", async () => {
     const ref = "proj_framework_profile";
     const slug = "svelte-api";
     const deployed = await deployConditionalRelease({
       ref,
       slug,
       code: "export default { fetch: () => new Response('api') };",
-      config: { framework: "sveltekit-function" },
+      config: {
+        framework: "sveltekit-function",
+        capabilities: {
+          secrets: ["API_KEY"],
+          outbound_hosts: ["api.example.com"],
+          bindings: ["pgredis"],
+          background: true,
+        },
+        limits: {
+          timeout_ms: 10_000,
+          max_request_body_bytes: 1_048_576,
+          max_response_body_bytes: 2_097_152,
+          wait_until_timeout_ms: 20_000,
+        },
+      },
     });
 
-    expect(deployed.config).toMatchObject({ framework: "sveltekit-function" });
+    expect(deployed.config).toMatchObject({
+      framework: "sveltekit-function",
+      capabilities: {
+        secrets: ["API_KEY"],
+        outbound_hosts: ["api.example.com"],
+        bindings: ["pgredis"],
+        background: true,
+      },
+      limits: {
+        timeout_ms: 10_000,
+        max_request_body_bytes: 1_048_576,
+        max_response_body_bytes: 2_097_152,
+        wait_until_timeout_ms: 20_000,
+      },
+    });
     expect(JSON.parse(await readFile(join(functionsRoot, ref, ".versions", slug, "1", ".supacloud-version.json"), "utf8")))
       .toMatchObject({ framework: "sveltekit-function" });
     expect((await edgeFunctionService.getConfig(ref, slug)).framework).toBe("sveltekit-function");
+    expect((await edgeFunctionService.getConfig(ref, slug)).capabilities).toEqual({
+      secrets: ["API_KEY"],
+      outbound_hosts: ["api.example.com"],
+      bindings: ["pgredis"],
+      background: true,
+    });
+    expect((await edgeFunctionService.getConfig(ref, slug)).limits).toEqual({
+      timeout_ms: 10_000,
+      max_request_body_bytes: 1_048_576,
+      max_response_body_bytes: 2_097_152,
+      wait_until_timeout_ms: 20_000,
+    });
   });
 
   test("snapshots frozen legacy aliases before first deploy and restores version zero", async () => {
