@@ -104,16 +104,24 @@ framework = "elysia"   # fetch（默认）| elysia | hono
 [functions.api]
 timeout_ms = 15000                        # limits.timeout_ms
 max_request_body_bytes = 1048576          # limits.max_request_body_bytes
+max_response_body_bytes = 524288          # limits.max_response_body_bytes
+wait_until_timeout_ms = 2000              # limits.wait_until_timeout_ms
 outbound_hosts = ["api.example.com"]      # capabilities.outbound_hosts
 secrets = ["OPENAI_API_KEY"]              # capabilities.secrets
+background = true                         # capabilities.background
 ```
 
 | config.toml 字段 | 类型 | 语义 | 生产 Edge Runtime 对应 |
 | --- | --- | --- | --- |
 | `timeout_ms` | integer | 单次调用超时；超时返回 504 并 abort 请求 | `limits.timeout_ms` |
 | `max_request_body_bytes` | integer | 请求体上限；content-length 超限返回 413，无长度声明的流式 body 超限则中断读取 | `limits.max_request_body_bytes` |
+| `max_response_body_bytes` | integer | 响应体上限；content-length 超限直接替换为 502，流式 body 超限则在传输中截断（状态行已提交，客户端看到流中断） | `limits.max_response_body_bytes` |
+| `wait_until_timeout_ms` | integer | 响应返回后等待 `EdgeRuntime.waitUntil` 后台任务的最长时间；超时不再等待（任务继续运行，记录警告） | `limits.wait_until_timeout_ms` |
 | `outbound_hosts` | string[] | `fetch` 出站 host 白名单（精确匹配，不含端口）；loopback（localhost/127.0.0.1/::1）始终放行，未声明的 host 直接抛错 | `capabilities.outbound_hosts` |
 | `secrets` | string[] | 函数可见的环境变量白名单：基础三键（`SUPABASE_URL`/`SUPABASE_ANON_KEY`/`SUPABASE_SERVICE_ROLE_KEY`）+ 声明的 key，同时约束 `Deno.env` 与 `ctx.env` | `capabilities.secrets` |
+| `background` | boolean | 是否允许 `EdgeRuntime.waitUntil`；设为 `false` 时调用抛出与生产一致的错误 | `capabilities.background` |
+
+`EdgeRuntime.waitUntil(promise)` 注册跨响应的后台任务：响应照常返回，任务在响应后等待 allSettled（上限 `wait_until_timeout_ms`），任务中再次调用 `waitUntil` 的嵌套任务同样被追踪。Lite 面向本地开发默认**允许** `waitUntil`（向后兼容）；生产 Edge Runtime 需要声明 `background` capability。`backend.close()` 不等待仍在漂移的后台任务。
 
 与生产的差异：Lite 面向本地开发，未声明时默认**不限制**（不包 fetch、env 全量可见）；生产 Edge Runtime 有 900s 超时与 30MB 请求体的默认上限。OPTIONS 预检与正常请求走同一路径、受同一组限制约束。
 

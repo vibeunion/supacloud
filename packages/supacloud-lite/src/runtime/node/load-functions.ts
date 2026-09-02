@@ -46,10 +46,16 @@ export interface LoadFunctionOptions {
   timeoutMs?: number
   /** Max inbound request body bytes (Edge Runtime limits.max_request_body_bytes). */
   maxRequestBodyBytes?: number
+  /** Max outbound response body bytes (Edge Runtime limits.max_response_body_bytes). */
+  maxResponseBodyBytes?: number
+  /** Max wait for EdgeRuntime.waitUntil tasks after the response (Edge Runtime limits.wait_until_timeout_ms). */
+  waitUntilTimeoutMs?: number
   /** Outbound fetch host allowlist (Edge Runtime capabilities.outbound_hosts). */
   outboundHosts?: string[]
   /** Env keys exposed to the function beyond the SUPABASE_* base trio (Edge Runtime capabilities.secrets). */
   secrets?: string[]
+  /** EdgeRuntime.waitUntil gate (Edge Runtime capabilities.background); lite defaults to allowed. */
+  background?: boolean
 }
 
 const FUNCTION_FRAMEWORKS: ReadonlySet<string> = new Set(['fetch', 'elysia', 'hono'])
@@ -153,17 +159,24 @@ async function loadFunctionsUnlocked(
         if (handler) {
           const opts = options[name]
           const limits =
-            opts && (opts.timeoutMs !== undefined || opts.maxRequestBodyBytes !== undefined)
+            opts &&
+            (opts.timeoutMs !== undefined ||
+              opts.maxRequestBodyBytes !== undefined ||
+              opts.maxResponseBodyBytes !== undefined ||
+              opts.waitUntilTimeoutMs !== undefined)
               ? {
                   ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
                   ...(opts.maxRequestBodyBytes !== undefined ? { maxRequestBodyBytes: opts.maxRequestBodyBytes } : {}),
+                  ...(opts.maxResponseBodyBytes !== undefined ? { maxResponseBodyBytes: opts.maxResponseBodyBytes } : {}),
+                  ...(opts.waitUntilTimeoutMs !== undefined ? { waitUntilTimeoutMs: opts.waitUntilTimeoutMs } : {}),
                 }
               : undefined
           const capabilities =
-            opts && (opts.outboundHosts !== undefined || opts.secrets !== undefined)
+            opts && (opts.outboundHosts !== undefined || opts.secrets !== undefined || opts.background !== undefined)
               ? {
                   ...(opts.outboundHosts !== undefined ? { outboundHosts: opts.outboundHosts } : {}),
                   ...(opts.secrets !== undefined ? { secrets: opts.secrets } : {}),
+                  ...(opts.background !== undefined ? { background: opts.background } : {}),
                 }
               : undefined
           functions.set(name, {
