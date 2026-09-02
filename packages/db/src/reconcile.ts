@@ -21,7 +21,7 @@ export interface ReconcileReport {
 }
 
 /** 'public.cases' → ['public', 'cases']；无 schema 前缀时默认 public */
-function splitQualifiedName(name: string): [string, string] {
+export function splitQualifiedName(name: string): [string, string] {
   const dot = name.indexOf('.');
   if (dot === -1) return ['public', name];
   return [name.slice(0, dot), name.slice(dot + 1)];
@@ -109,6 +109,37 @@ export function reconcileModule(
         'definer-without-search-path',
         fn.name,
         `security definer 函数 ${fn.name} 未设置固定 search_path（当前: ${cf.searchPath ?? '未设置'}）`,
+      );
+    }
+  }
+
+  // missing-trigger：声明的触发器在 catalog 中不存在（按 schema.table + name 匹配）
+  for (const trigger of module.triggers) {
+    const [schema, table] = splitQualifiedName(trigger.table);
+    const found = catalog.triggers.some(
+      (ct) => ct.schema === schema && ct.table === table && ct.name === trigger.name,
+    );
+    if (!found) {
+      push(
+        'error',
+        'missing-trigger',
+        `${trigger.table}.${trigger.name}`,
+        `声明的触发器 ${trigger.name} 在表 ${trigger.table} 的 catalog 中不存在`,
+      );
+    }
+  }
+
+  // undeclared-trigger：归属表上 catalog 有但 manifest 未声明的触发器（含已禁用的，
+  // 禁用的触发器同样属于漂移，需要显式声明或清理）
+  const declaredTriggerKeys = new Set(module.triggers.map((t) => `${t.table}::${t.name}`));
+  for (const ct of catalog.triggers) {
+    const qualified = `${ct.schema}.${ct.table}`;
+    if (ownedTables.has(qualified) && !declaredTriggerKeys.has(`${qualified}::${ct.name}`)) {
+      push(
+        'warn',
+        'undeclared-trigger',
+        `${qualified}.${ct.name}`,
+        `归属表 ${qualified} 上存在未声明的触发器 ${ct.name}${ct.enabled ? '' : '（已禁用）'}，可能发生漂移`,
       );
     }
   }

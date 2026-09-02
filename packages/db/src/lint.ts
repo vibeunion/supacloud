@@ -17,6 +17,8 @@ const SET_SEARCH_PATH_RE = /\bset\s+search_path\b/i;
 const GRANT_TO_PUBLIC_RE = /\bgrant\b[^;]*\bto\s+public\b/i;
 const DROP_WITHOUT_IF_EXISTS_RE = /\bdrop\s+(?:table|column)\s+(?!if\s+exists\b)/i;
 const ENABLE_RLS_RE = /\benable\s+row\s+level\s+security\b/i;
+const CREATE_POLICY_RE = /\bcreate\s+policy\b/i;
+const DROP_POLICY_IF_EXISTS_RE = /\bdrop\s+policy\s+if\s+exists\b/i;
 
 function lineOf(sql: string, index: number): number {
   let line = 1;
@@ -60,6 +62,21 @@ export function lintSql(sql: string, file: string): LintIssue[] {
       file,
       line: lineOf(sql, drop.index),
     });
+  }
+
+  // PostgreSQL CREATE POLICY 不支持 IF NOT EXISTS，不先 drop 就不可重复执行
+  const createPolicy = CREATE_POLICY_RE.exec(sql);
+  if (createPolicy) {
+    const dropPolicy = DROP_POLICY_IF_EXISTS_RE.exec(sql);
+    if (!dropPolicy || dropPolicy.index > createPolicy.index) {
+      issues.push({
+        severity: 'warn',
+        code: 'non-idempotent-policy',
+        message: 'create policy 前缺少 drop policy if exists，策略不可重复执行',
+        file,
+        line: lineOf(sql, createPolicy.index),
+      });
+    }
   }
 
   return issues;

@@ -59,6 +59,8 @@ export const casesModule = defineDatabaseModule({
 | `buildDatabaseManifest(modules)` | 汇总模块为可 JSON 序列化的 `DatabaseManifest`（version 1） |
 | `explainObject(manifest, name)` | 人类可读地解释对象的所属模块、类型、源文件、权限、测试 |
 | `createDatabaseAccessBoundary(options)` | 统一用户 RLS 客户端与显式 service-role 客户端的访问边界 |
+| `planModule(module, readFile)` | 把模块声明编译为有序 `ModulePlan`（step 依赖序：function → policy → trigger → grant），含 sha256 与 lint 风险 |
+| `applyModulePlan(executor, plan)` | 按 plan 落库：账本幂等 + advisory lock + 单事务 + catalog 回读验证 |
 
 ### 数据库访问边界
 
@@ -85,7 +87,9 @@ const workerDb = await database.forService("scheduled-worker");
 | --- | --- | --- |
 | `missing-policy` | error | 声明的策略在 catalog 中不存在 |
 | `missing-function` | error | 声明的 RPC 函数在 catalog 中不存在 |
+| `missing-trigger` | error | 声明的触发器在 catalog 中不存在（按 schema.table + name 匹配） |
 | `undeclared-policy` | warn | 归属表上存在 manifest 未声明的策略（漂移） |
+| `undeclared-trigger` | warn | 归属表上存在 manifest 未声明的触发器（含已禁用的，漂移） |
 | `rls-disabled` | error | 归属表 `relrowsecurity = false` |
 | `definer-without-search-path` | error | security definer 函数未设置固定 search_path（含空元素或 `pg_temp` 也算不固定） |
 | `security-mismatch` | warn | 声明的 invoker/definer 与 catalog 实际不一致 |
@@ -102,7 +106,24 @@ const workerDb = await database.forService("scheduled-worker");
 | `grant-to-public` | error | `grant ... to public` |
 | `missing-rls-enable` | warn | 声明了策略但所有策略源文件都没有 `enable row level security` |
 | `drop-without-if-exists` | warn | `drop table/column` 缺少 `if exists` |
+| `non-idempotent-policy` | warn | `create policy` 前缺少 `drop policy if exists`（PostgreSQL CREATE POLICY 无 IF NOT EXISTS，不先 drop 就不可重复执行） |
 | `policy-without-test` | warn | 声明的策略/函数没有 `tests` 条目 |
+
+## Plan / Apply
+
+`planModule` 把模块声明编译为 `ModulePlan`（version 1）：每个声明对象（函数/策略/触发器/授权）对应一个 `PlanStep`，按依赖序 **function → policy → trigger → grant** 排列；每个 step 携带源文件内容的 sha256、`lintSql` 静态分析得出的 `risk`（error 级 lint 原样保留 severity=error），plan 级 `digest` 为全部 step sha256 的组合哈希。step 的 `name` 是对象标识：函数为 schema 限定名，策略/触发器为 `table.name`，授权为 `object:privilege:role`。
+
+`applyModulePlan` 的语义：
+
+1. plan 含任何 error 级 risk → 直接抛错拒绝执行，不触碰数据库。
+2. 确保账本：`create schema if not exists _supacloud` + `create table if not exists _supacloud.db_object_ledger(object_identity text primary key, module text, sha256 text, applied_at timestamptz default now())`。
+3. `pg_advisory_lock(hashtext('supacloud-db-apply'))` 串行化并发 apply，`finally` 中 unlock。
+4. 单事务内逐 step 执行：`object_identity = ${kind}:${name}` 查账本，sha256 一致则 `skipped`；否则执行 step.sql 并 upsert 账本。任何 step 失败 → ROLLBACK 并返回 `failed`；全成功 → COMMIT。
+5. 提交后 `readCatalog` 回读验证声明对象真实存在，结果进 `verified`，缺失进 `failed`。
+
+**幂等要求**：step.sql 必须可重复执行（`create or replace function`、`drop policy if exists` + `create policy`、`drop trigger if exists` + `create trigger`、`grant` 天然幂等）。sha256 一致即跳过，因此改源文件才会触发重放。executor 提供可选 `transaction(fn)` 时用它管理事务，否则退化为顺序执行 `begin/commit/rollback` 语句。
+
+**与 migration 的边界**：本执行器只管模块声明的**可重复 SQL 对象**（函数/策略/触发器/授权），不做表结构变更 —— 建表、加列等表结构演进仍走前向 migration（Drizzle/SQL migration 文件）。
 
 ## 与 Supabase / PostgreSQL 的关系
 
