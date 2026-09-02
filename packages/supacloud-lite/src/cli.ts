@@ -5,6 +5,7 @@ import { dirname, join, resolve } from 'node:path'
 import packageJson from '../package.json' with { type: 'json' }
 import { generateTypes, inspectDb } from './runtime/index.js'
 import { computeDbDiff, createTemporaryNativeEngine, pullSchema } from './runtime/node/db-diff.js'
+import { checkDatabaseModules, formatDatabaseModuleCheck } from './runtime/node/db-check.js'
 import { assertDataDirUnlocked } from './runtime/db/data-dir-lock.js'
 import { createNativeEngine } from './runtime/node/native/engine.js'
 import { inspectPowerSyncReadiness, liteCapabilities } from './runtime/node/native/readiness.js'
@@ -28,6 +29,8 @@ interface CliOptions extends ProjectRuntimeOptions {
   positionals: string[]
   output?: string
   diffFile?: string
+  /** db check: database module manifest path (default supabase/db/modules.ts). */
+  moduleFile?: string
   serviceRole: boolean
   force: boolean
   json: boolean
@@ -79,6 +82,7 @@ function parseArgs(argv: string[]): CliOptions {
     else if (argument === '--memory') options.memory = true
     else if (argument === '--output' || argument === '-o') options.output = resolve(next())
     else if (argument === '--file' || argument === '-f') options.diffFile = next()
+    else if (argument === '--module-file') options.moduleFile = resolve(next())
     else if (argument === '--service-role') options.serviceRole = true
     else if (argument === '--force') options.force = true
     else if (argument === '--json') options.json = true
@@ -315,6 +319,30 @@ async function runDbCommand(options: CliOptions): Promise<void> {
     return
   }
 
+  if (subcommand === 'check') {
+    const moduleFile = options.moduleFile ?? join(paths.projectDir, 'supabase', 'db', 'modules.ts')
+    const project = await createProjectBackend({
+      ...options,
+      applyMigrations: false,
+      includeFunctions: false,
+      includeWebhooks: false,
+      startRuntimeServices: false,
+      log: quietLog,
+    })
+    try {
+      const executor = {
+        query: async <T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T[]> =>
+          (await project.backend.db.query<T>(sql, params)).rows,
+      }
+      const result = await checkDatabaseModules({ moduleFile, executor })
+      await writeStandardOutput(formatDatabaseModuleCheck(result))
+      if (!result.ok) throw new Error('db check found error-level issues')
+    } finally {
+      await project.backend.close()
+    }
+    return
+  }
+
   throw new Error(`unknown db subcommand: ${subcommand ?? '(none)'}`)
 }
 
@@ -447,6 +475,7 @@ Commands:
   db reset              reset initialized database/storage and re-run migrations
   db diff               print schema changes outside migrations
   db pull [name]        write live schema changes as an applied migration
+  db check              reconcile database module manifests (@supacloud/db) against the live catalog
   snapshot create       create a compressed database/storage/secrets snapshot
   snapshot restore <f>  restore a snapshot into an empty target
   upgrade               snapshot first, then apply pending migrations
@@ -479,6 +508,7 @@ Options:
       --json              emit machine-readable doctor output
   -o, --output <p>        output file for gen types
   -f, --file <name>       migration suffix for db diff
+      --module-file <p>   database module manifest for db check (default supabase/db/modules.ts)
       --force             replace non-empty restore targets and retain rollback copies
 `)
 }
