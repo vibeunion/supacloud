@@ -11,6 +11,7 @@
  */
 import type { RequestContext } from '../types.js'
 import { runWithDenoEnv } from './deno-shim.js'
+import { runWithBackgroundTasks } from './edge-runtime-shim.js'
 import { runWithFetchPolicy } from './fetch-policy.js'
 import { type PgredisCache, runWithPgredisCache } from './pgredis.js'
 
@@ -38,7 +39,8 @@ export type FunctionHandler = EdgeFunction | FrameworkObjectHandler
 
 /**
  * Per-invocation resource limits, aligned with the Edge Runtime Manifest v2
- * `limits` block (timeout_ms / max_request_body_bytes). Lite defaults to no
+ * `limits` block (timeout_ms / max_request_body_bytes /
+ * max_response_body_bytes / wait_until_timeout_ms). Lite defaults to no
  * limit when undeclared; production caps at 900s / 30MB.
  */
 export interface FunctionLimits {
@@ -46,18 +48,28 @@ export interface FunctionLimits {
   timeoutMs?: number
   /** limits.max_request_body_bytes: max inbound body size; oversized bodies get a 413. */
   maxRequestBodyBytes?: number
+  /** limits.max_response_body_bytes: max outbound body size; oversized responses get a 502 / cut stream. */
+  maxResponseBodyBytes?: number
+  /** limits.wait_until_timeout_ms: max time to wait for EdgeRuntime.waitUntil tasks after the response. */
+  waitUntilTimeoutMs?: number
 }
 
 /**
  * Declared capabilities, aligned with the Edge Runtime Manifest v2
- * `capabilities` block (secrets / outbound_hosts). Undeclared means
- * unrestricted (back-compat).
+ * `capabilities` block (secrets / outbound_hosts / background). Undeclared
+ * means unrestricted (back-compat).
  */
 export interface FunctionCapabilities {
   /** capabilities.secrets: env keys (beyond the SUPABASE_* base trio) visible to the function. */
   secrets?: string[]
   /** capabilities.outbound_hosts: exact fetch host allowlist (no port); loopback is always allowed. */
   outboundHosts?: string[]
+  /**
+   * capabilities.background: whether EdgeRuntime.waitUntil is enabled. Lite
+   * defaults to allowed (local back-compat); only an explicit `false` takes
+   * the production error path.
+   */
+  background?: boolean
 }
 
 /** A loaded function plus its declared framework profile, limits, and capabilities. */
@@ -65,9 +77,9 @@ export interface LoadedFunction {
   handler: FunctionHandler
   /** config.toml [functions.<name>].framework; `fetch` keeps legacy routing. */
   framework?: FunctionFramework
-  /** config.toml [functions.<name>] timeout_ms / max_request_body_bytes. */
+  /** config.toml [functions.<name>] timeout_ms / max_request_body_bytes / max_response_body_bytes / wait_until_timeout_ms. */
   limits?: FunctionLimits
-  /** config.toml [functions.<name>] secrets / outbound_hosts. */
+  /** config.toml [functions.<name>] secrets / outbound_hosts / background. */
   capabilities?: FunctionCapabilities
 }
 
@@ -145,7 +157,8 @@ export class FunctionsHandler {
    * Dispatch a /functions/v1/<name> request to its handler, returning a 404 when
    * unknown and a 500 when the handler throws or returns a non-Response.
    * Declared limits/capabilities are enforced in order: request body size (413),
-   * invocation timeout (504), outbound host allowlist, secrets allowlist.
+   * invocation timeout (504), outbound host allowlist, secrets allowlist,
+   * EdgeRuntime.waitUntil background scope, response body size (502).
    */
   async handle(req: Request, ctx: RequestContext, url: URL): Promise<Response> {
     const name = url.pathname.replace(/^\/functions\/v1\/?/, '').split('/')[0]
@@ -198,11 +211,26 @@ export class FunctionsHandler {
       const run = capabilities?.outboundHosts
         ? () => runWithFetchPolicy(capabilities.outboundHosts!, inner)
         : inner
-      const res = timeoutMs !== undefined ? await this.withTimeout(name, timeoutMs, run, abort!) : await run()
+      // 5. EdgeRuntime.waitUntil scope. Always installed (ALS overhead is
+      // negligible) so the lite default of allowing background tasks holds;
+      // an explicit capabilities.background=false gates waitUntil like
+      // production, and waitUntilTimeoutMs caps the post-response flush.
+      const invokeWithBackground = () =>
+        runWithBackgroundTasks(
+          { allowed: capabilities?.background !== false, timeoutMs: limits?.waitUntilTimeoutMs },
+          run
+        )
+      const res =
+        timeoutMs !== undefined
+          ? await this.withTimeout(name, timeoutMs, invokeWithBackground, abort!)
+          : await invokeWithBackground()
       if (!(res instanceof Response)) {
         return json(500, { error: `function "${name}" did not return a Response` })
       }
-      return res
+      // 6. Response body limit: declared content-length is checked up front;
+      // a streamed body is counted while streaming to the client.
+      const maxResponse = limits?.maxResponseBodyBytes
+      return maxResponse !== undefined ? withResponseLimit(name, res, maxResponse) : res
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
       return json(500, { error: message })
@@ -289,6 +317,35 @@ function withCountedBody(req: Request, limit: number): Request {
   })
   // `duplex: 'half'` is required when the body is a stream (undici; harmless in Bun).
   return new Request(req, { body: req.body!.pipeThrough(counter), duplex: 'half' } as RequestInit)
+}
+
+/**
+ * Enforce limits.max_response_body_bytes on a function response. A declared
+ * content-length over the limit is replaced with a clean 502 up front (the
+ * production FunctionResponseLimitError -> 502 path). Otherwise the body is
+ * counted while streaming; on overflow the stream errors, so the client sees
+ * a cut-off body after an already-committed status line - the local
+ * equivalent of production's reader.cancel(), since the status line can no
+ * longer be rewritten mid-stream.
+ */
+function withResponseLimit(name: string, res: Response, limit: number): Response {
+  const contentLength = res.headers.get('content-length')
+  if (contentLength !== null && Number(contentLength) > limit) {
+    return json(502, { error: `function "${name}" response exceeded ${limit} bytes` })
+  }
+  if (!res.body) return res
+  let seen = 0
+  const counter = new TransformStream<Uint8Array, Uint8Array>({
+    transform(chunk, controller) {
+      seen += chunk.byteLength
+      if (seen > limit) {
+        controller.error(new Error(`function "${name}" response exceeded ${limit} bytes`))
+        return
+      }
+      controller.enqueue(chunk)
+    },
+  })
+  return new Response(res.body.pipeThrough(counter), res)
 }
 
 /** Clone a request carrying an abort signal (Bun accepts `new Request(req, { signal })`). */
