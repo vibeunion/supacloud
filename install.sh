@@ -3885,50 +3885,202 @@ install_management_api() {
     log_info "SupaCloud Control Plane deployed successfully!"
 }
 
-deploy_web_console_tar_atomic() (
-    local archive="$1"
-    local target_dir="$2"
-    local staging_dir backup_dir
-    supacloud_validate_tar "$archive" || return 1
-    mkdir -p "$(dirname "$target_dir")"
-    staging_dir=$(mktemp -d "${target_dir}.staging.XXXXXX")
-    backup_dir="${target_dir}.backup.$$"
-    trap 'rm -rf "${staging_dir:-}" "${backup_dir:-}"' EXIT HUP INT TERM
-    tar --no-same-owner --no-same-permissions -xzf "$archive" -C "$staging_dir"
-    [[ -f "$staging_dir/index.html" ]] || {
-        log_error "Verified Web Console archive did not produce index.html"
-        return 1
-    }
-    if [[ -e "$target_dir" ]]; then
-        mv "$target_dir" "$backup_dir"
-    fi
-    if ! mv "$staging_dir" "$target_dir"; then
-        [[ ! -e "$backup_dir" ]] || mv "$backup_dir" "$target_dir"
-        return 1
-    fi
-    staging_dir=""
-    rm -rf "$backup_dir"
-    backup_dir=""
-)
+supacloud_replace_path_atomic() {
+    local next_link="$1"
+    local current_link="$2"
+    python3 - "$next_link" "$current_link" <<'PY'
+import os
+import sys
 
-deploy_web_console_directory_atomic() (
-    local source_dir="$1"
-    local target_dir="$2"
-    local staging_dir backup_dir target_parent releases_dir target_link target_path resolved_target release_name
-    [[ -d "$source_dir" && ! -L "$source_dir" \
-        && -f "$source_dir/index.html" && ! -L "$source_dir/index.html" ]] || {
-        log_error "Local Web Console build is missing or unsafe: $source_dir"
-        return 1
+next_link, current_link = sys.argv[1:]
+os.replace(next_link, current_link)
+PY
+}
+
+supacloud_atomic_switch_web_console_link() {
+    supacloud_replace_path_atomic "$1" "$2"
+}
+
+supacloud_validate_web_console_tree() {
+    local root="$1"
+    local mode="${2:-managed}"
+    python3 - "$root" "$mode" <<'PY'
+import os
+import stat
+import sys
+
+root, mode = sys.argv[1:]
+if mode not in {"normalize", "legacy", "managed"}:
+    raise SystemExit(f"Unknown Web Console tree validation mode: {mode}")
+
+expected_uid = os.geteuid()
+expected_gid = os.getegid()
+directories = []
+files = []
+entry_count = 0
+total_bytes = 0
+
+
+def fail(message):
+    raise SystemExit(f"Unsafe Web Console tree: {message}")
+
+
+def inspect(candidate, relative):
+    global entry_count, total_bytes
+    metadata = os.lstat(candidate)
+    if stat.S_ISLNK(metadata.st_mode):
+        fail(f"symbolic link at {relative}")
+    if mode in {"legacy", "managed"}:
+        if metadata.st_mode & 0o7022:
+            fail(f"unsafe mode at {relative}")
+        if metadata.st_uid != expected_uid or metadata.st_gid != expected_gid:
+            fail(f"unexpected owner at {relative}")
+
+    if stat.S_ISDIR(metadata.st_mode):
+        if mode == "managed" and stat.S_IMODE(metadata.st_mode) != 0o755:
+            fail(f"directory mode is not 0755 at {relative}")
+        directories.append(candidate)
+        with os.scandir(candidate) as entries:
+            for entry in sorted(entries, key=lambda item: item.name):
+                if any(ord(character) < 32 or ord(character) == 127 for character in entry.name):
+                    fail("control character in filename")
+                entry_count += 1
+                if entry_count > 10_000:
+                    fail("more than 10000 entries")
+                child_relative = entry.name if relative == "." else f"{relative}/{entry.name}"
+                inspect(entry.path, child_relative)
+        return
+
+    if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+        fail(f"link or special file at {relative}")
+    if mode == "managed" and stat.S_IMODE(metadata.st_mode) != 0o644:
+        fail(f"file mode is not 0644 at {relative}")
+    total_bytes += metadata.st_size
+    if total_bytes > 256 * 1024 * 1024:
+        fail("more than 256 MiB of files")
+    files.append(candidate)
+
+
+inspect(root, ".")
+index_path = os.path.join(root, "index.html")
+try:
+    index_metadata = os.lstat(index_path)
+except FileNotFoundError:
+    fail("missing index.html")
+if not stat.S_ISREG(index_metadata.st_mode) or stat.S_ISLNK(index_metadata.st_mode):
+    fail("index.html is not a direct regular file")
+
+if mode == "normalize":
+    for candidate in files:
+        os.chown(candidate, expected_uid, expected_gid)
+        os.chmod(candidate, 0o644)
+    for candidate in reversed(directories):
+        os.chown(candidate, expected_uid, expected_gid)
+        os.chmod(candidate, 0o755)
+PY
+}
+
+supacloud_validate_web_console_tar_bounds() {
+    local archive="$1"
+    python3 - "$archive" <<'PY'
+import sys
+import tarfile
+
+entry_count = 0
+expanded_bytes = 0
+try:
+    with tarfile.open(sys.argv[1], "r:gz") as archive:
+        for member in archive:
+            entry_count += 1
+            if entry_count > 10_000:
+                raise ValueError("more than 10000 entries")
+            if member.isfile():
+                expanded_bytes += member.size
+                if expanded_bytes > 256 * 1024 * 1024:
+                    raise ValueError("more than 256 MiB of files")
+except (OSError, tarfile.TarError, ValueError) as error:
+    raise SystemExit(f"Unsafe Web Console archive: {error}")
+PY
+}
+
+deploy_web_console_release_atomic() (
+    local source_kind="$1"
+    local source_path="$2"
+    local target_dir="$3"
+    local target_parent releases_dir release_dir next_dir next_link legacy_dir
+    local legacy_moved=false deployment_committed=false prior_was_link=false prior_link_target=""
+    local target_link target_path resolved_target release_name
+
+    cleanup_web_console_release_deployment() {
+        local active_target="" restore_dir="" restore_link=""
+        if [[ -L "$target_dir" ]]; then
+            active_target=$(readlink "$target_dir" 2>/dev/null || true)
+        fi
+        if [[ "$deployment_committed" != "true" && -n "${release_dir:-}" \
+            && "$active_target" == "$release_dir" ]]; then
+            if [[ "$legacy_moved" == "true" ]]; then
+                rm -f "$target_dir" || log_error "Web Console cleanup could not remove the interrupted current link"
+            elif [[ "$prior_was_link" == "true" ]]; then
+                restore_dir=$(mktemp -d "${target_parent}/.current.restore.XXXXXX" 2>/dev/null || true)
+                restore_link="${restore_dir}/link"
+                if [[ -z "$restore_dir" ]] \
+                    || ! ln -s "$prior_link_target" "$restore_link" \
+                    || ! supacloud_replace_path_atomic "$restore_link" "$target_dir"; then
+                    log_error "Web Console cleanup could not restore the previous current link"
+                fi
+                rm -rf "$restore_dir" || true
+            else
+                rm -f "$target_dir" || log_error "Web Console cleanup could not remove the interrupted current link"
+            fi
+        fi
+        if [[ "$legacy_moved" == "true" && -n "${legacy_dir:-}" \
+            && -d "$legacy_dir" && ! -L "$legacy_dir" ]]; then
+            if [[ ! -e "$target_dir" && ! -L "$target_dir" ]]; then
+                if mv "$legacy_dir" "$target_dir"; then
+                    legacy_moved=false
+                    legacy_dir=""
+                else
+                    log_error "Web Console cleanup could not restore the legacy directory; retained at $legacy_dir"
+                fi
+            elif [[ ! -L "$target_dir" || "$(readlink "$target_dir" 2>/dev/null || true)" != "${release_dir:-}" ]]; then
+                log_error "Web Console cleanup found a changed current target; retained the legacy directory at $legacy_dir"
+            fi
+        elif [[ -n "${legacy_dir:-}" && -d "$legacy_dir" && ! -L "$legacy_dir" ]]; then
+            rmdir "$legacy_dir" 2>/dev/null || true
+        fi
+        if [[ -n "${release_dir:-}" ]]; then
+            if [[ ! -L "$target_dir" || "$(readlink "$target_dir" 2>/dev/null || true)" != "$release_dir" ]]; then
+                rm -rf "$release_dir" || true
+            fi
+        fi
+        rm -rf "${next_dir:-}" || true
     }
-    if [[ -L "$target_dir" ]]; then
-        target_parent=$(cd -P -- "$(dirname -- "$target_dir")" && pwd -P) || return 1
-        releases_dir="$target_parent/releases"
+
+    abort_web_console_release_deployment() {
+        local exit_status="$1"
+        trap - EXIT HUP INT TERM
+        cleanup_web_console_release_deployment
+        exit "$exit_status"
+    }
+
+    mkdir -p "$(dirname -- "$target_dir")"
+    target_parent=$(cd -P -- "$(dirname -- "$target_dir")" && pwd -P) || return 1
+    releases_dir="$target_parent/releases"
+    if [[ -e "$releases_dir" || -L "$releases_dir" ]]; then
         [[ -d "$releases_dir" && ! -L "$releases_dir" ]] || {
-            log_error "Existing Web Console target does not use a managed releases directory: $target_dir"
+            log_error "Web Console releases path is not a real directory: $releases_dir"
             return 1
         }
-        releases_dir=$(cd -P -- "$releases_dir" && pwd -P) || return 1
+    else
+        mkdir "$releases_dir" || return 1
+    fi
+    releases_dir=$(cd -P -- "$releases_dir" && pwd -P) || return 1
+    chmod 0755 "$target_parent" "$releases_dir" || return 1
+
+    if [[ -L "$target_dir" ]]; then
         target_link=$(readlink "$target_dir") || return 1
+        prior_was_link=true
+        prior_link_target="$target_link"
         if [[ "$target_link" == /* ]]; then
             target_path="$target_link"
         else
@@ -3946,33 +4098,92 @@ deploy_web_console_directory_atomic() (
             log_error "Existing Web Console release link escapes the managed release directory: $target_dir"
             return 1
         }
+        supacloud_validate_web_console_tree "$resolved_target" managed || return 1
     elif [[ -e "$target_dir" ]]; then
-        [[ -d "$target_dir" ]] || {
-            log_error "Existing Web Console target is not a real directory: $target_dir"
+        [[ -d "$target_dir" && ! -L "$target_dir" \
+            && -f "$target_dir/index.html" && ! -L "$target_dir/index.html" ]] || {
+            log_error "Existing Web Console target is not a safe legacy directory: $target_dir"
             return 1
         }
+        supacloud_validate_web_console_tree "$target_dir" legacy || return 1
     fi
-    mkdir -p "$(dirname "$target_dir")"
-    staging_dir=$(mktemp -d "${target_dir}.staging.XXXXXX")
-    backup_dir=$(mktemp -d "${target_dir}.backup.XXXXXX")
-    rmdir "$backup_dir"
-    trap 'rm -rf "${staging_dir:-}" "${backup_dir:-}"' EXIT HUP INT TERM
-    cp -a "$source_dir"/. "$staging_dir"/ || return 1
-    [[ -f "$staging_dir/index.html" && ! -L "$staging_dir/index.html" ]] || {
-        log_error "Staged Web Console build did not produce a safe index.html"
+
+    trap cleanup_web_console_release_deployment EXIT
+    trap 'abort_web_console_release_deployment 129' HUP
+    trap 'abort_web_console_release_deployment 130' INT
+    trap 'abort_web_console_release_deployment 143' TERM
+    release_dir=$(mktemp -d "${releases_dir}/install-$(date -u +%Y%m%dT%H%M%SZ)-$$.XXXXXX") || return 1
+    next_dir=$(mktemp -d "${target_parent}/.current.next.XXXXXX") || return 1
+    next_link="$next_dir/link"
+
+    case "$source_kind" in
+        tar) (umask 077; tar --no-same-owner --no-same-permissions -xzf "$source_path" -C "$release_dir") || return 1 ;;
+        directory) (umask 077; cp -R -P "$source_path"/. "$release_dir"/) || return 1 ;;
+        *) log_error "Unknown Web Console source kind: $source_kind"; return 1 ;;
+    esac
+    supacloud_validate_web_console_tree "$release_dir" normalize || return 1
+    supacloud_validate_web_console_tree "$release_dir" managed || return 1
+    ln -s "$release_dir" "$next_link" || return 1
+
+    if [[ -e "$target_dir" && ! -L "$target_dir" ]]; then
+        legacy_dir=$(mktemp -d "${releases_dir}/legacy-current-$(date -u +%Y%m%dT%H%M%SZ)-$$.XXXXXX") || return 1
+        rmdir "$legacy_dir" || return 1
+        legacy_moved=true
+        mv "$target_dir" "$legacy_dir" || return 1
+    fi
+    if ! supacloud_atomic_switch_web_console_link "$next_link" "$target_dir"; then
+        if [[ -L "$target_dir" && "$(readlink "$target_dir")" == "$release_dir" ]]; then
+            log_warn "Web Console link switch reported a failure after activation; verified the new current target"
+        else
+            if [[ -n "$legacy_dir" && -d "$legacy_dir" && ! -L "$legacy_dir" ]]; then
+                if [[ -e "$target_dir" || -L "$target_dir" ]]; then
+                    log_error "Web Console activation failed after current changed; the legacy directory remains at $legacy_dir"
+                    legacy_dir=""
+                    return 1
+                fi
+                mv "$legacy_dir" "$target_dir" || {
+                    log_error "Web Console activation failed and the legacy directory remains at $legacy_dir"
+                    legacy_dir=""
+                    return 1
+                }
+                legacy_moved=false
+                legacy_dir=""
+            fi
+            return 1
+        fi
+    fi
+    [[ -L "$target_dir" && "$(readlink "$target_dir")" == "$release_dir" ]] || {
+        log_error "Web Console activation did not produce the expected current symlink"
         return 1
     }
-    if [[ -e "$target_dir" || -L "$target_dir" ]]; then
-        mv "$target_dir" "$backup_dir" || return 1
-    fi
-    if ! mv "$staging_dir" "$target_dir"; then
-        [[ ! -e "$backup_dir" && ! -L "$backup_dir" ]] || mv "$backup_dir" "$target_dir"
-        return 1
-    fi
-    staging_dir=""
-    rm -rf "$backup_dir"
-    backup_dir=""
+
+    deployment_committed=true
+    release_dir=""
+    rm -rf "${legacy_dir:-}" || log_warn "Web Console legacy directory cleanup failed; retaining ${legacy_dir}"
+    legacy_moved=false
+    legacy_dir=""
+    rm -rf "$next_dir" || log_warn "Web Console temporary link cleanup failed; retaining ${next_dir}"
+    next_dir=""
 )
+
+deploy_web_console_tar_atomic() {
+    local archive="$1"
+    local target_dir="$2"
+    supacloud_validate_tar "$archive" || return 1
+    supacloud_validate_web_console_tar_bounds "$archive" || return 1
+    deploy_web_console_release_atomic tar "$archive" "$target_dir"
+}
+
+deploy_web_console_directory_atomic() {
+    local source_dir="$1"
+    local target_dir="$2"
+    [[ -d "$source_dir" && ! -L "$source_dir" \
+        && -f "$source_dir/index.html" && ! -L "$source_dir/index.html" ]] || {
+        log_error "Local Web Console build is missing or unsafe: $source_dir"
+        return 1
+    }
+    deploy_web_console_release_atomic directory "$source_dir" "$target_dir"
+}
 
 # ========== Install Web Console (Studio UI) ==========
 install_web_console() {
@@ -3986,10 +4197,10 @@ install_web_console() {
 
     SELECTED_WEB_CONSOLE_SOURCE=$(select_web_console_source) || return 1
     if [[ "$SELECTED_WEB_CONSOLE_SOURCE" == "$WEB_CONSOLE_TAR" ]]; then
-        deploy_web_console_tar_atomic "$SELECTED_WEB_CONSOLE_SOURCE" "$WEB_CONSOLE_DIR"
+        deploy_web_console_tar_atomic "$SELECTED_WEB_CONSOLE_SOURCE" "$WEB_CONSOLE_DIR" || return 1
         log_info "Web Console atomically deployed from the verified release archive"
     elif [[ "$SELECTED_WEB_CONSOLE_SOURCE" == "$WEB_CONSOLE_SRC" ]]; then
-        deploy_web_console_directory_atomic "$WEB_CONSOLE_SRC" "$WEB_CONSOLE_DIR"
+        deploy_web_console_directory_atomic "$WEB_CONSOLE_SRC" "$WEB_CONSOLE_DIR" || return 1
         log_info "Web Console atomically deployed from local source build"
     else
         log_info "Resolving the Management API component release for Web Console..."
@@ -4011,7 +4222,10 @@ install_web_console() {
             log_warn "Verified Web Console download failed, Studio UI will not be available"
             return 1
         fi
-        deploy_web_console_tar_atomic "$TMP_TAR" "$WEB_CONSOLE_DIR"
+        if ! deploy_web_console_tar_atomic "$TMP_TAR" "$WEB_CONSOLE_DIR"; then
+            rm -f "$TMP_TAR"
+            return 1
+        fi
         rm -f "$TMP_TAR"
         log_info "Web Console deployed from verified Management API release"
     fi

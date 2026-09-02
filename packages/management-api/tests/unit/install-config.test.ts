@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -1268,6 +1268,9 @@ describe("installer configuration persistence", () => {
     mkdirSync(targetDir);
     writeFileSync(join(sourceDir, "index.html"), "new-index\n");
     writeFileSync(join(sourceDir, "new.js"), "new-asset\n");
+    chmodSync(sourceDir, 0o700);
+    chmodSync(join(sourceDir, "index.html"), 0o600);
+    chmodSync(join(sourceDir, "new.js"), 0o700);
     writeFileSync(join(targetDir, "index.html"), "old-index\n");
     writeFileSync(join(targetDir, "stale.js"), "stale-asset\n");
 
@@ -1277,9 +1280,18 @@ describe("installer configuration persistence", () => {
     );
 
     expect(deployed.status, deployed.stderr).toBe(0);
+    expect(lstatSync(targetDir).isSymbolicLink()).toBe(true);
+    const firstTarget = readlinkSync(targetDir);
+    const releasesRoot = realpathSync(join(dir, "releases"));
+    expect(firstTarget.startsWith(`${releasesRoot}/`)).toBe(true);
+    expect(firstTarget.slice(`${releasesRoot}/`.length)).not.toContain("/");
     expect(readFileSync(join(targetDir, "index.html"), "utf8")).toBe("new-index\n");
     expect(readFileSync(join(targetDir, "new.js"), "utf8")).toBe("new-asset\n");
+    expect(statSync(targetDir).mode & 0o777).toBe(0o755);
+    expect(statSync(join(targetDir, "index.html")).mode & 0o777).toBe(0o644);
+    expect(statSync(join(targetDir, "new.js")).mode & 0o777).toBe(0o644);
     expect(() => statSync(join(targetDir, "stale.js"))).toThrow();
+    expect(readdirSync(join(dir, "releases"))).toEqual([firstTarget.split("/").at(-1)]);
 
     rmSync(join(sourceDir, "index.html"));
     const rejected = runBash(
@@ -1288,6 +1300,8 @@ describe("installer configuration persistence", () => {
     );
     expect(rejected.status).not.toBe(0);
     expect(readFileSync(join(targetDir, "index.html"), "utf8")).toBe("new-index\n");
+    expect(readlinkSync(targetDir)).toBe(firstTarget);
+    expect(readdirSync(join(dir, "releases"))).toEqual([firstTarget.split("/").at(-1)]);
   });
 
   test("local Web Console deployment replaces a managed historical release symlink", () => {
@@ -1309,9 +1323,137 @@ describe("installer configuration persistence", () => {
     );
 
     expect(deployed.status, deployed.stderr).toBe(0);
-    expect(lstatSync(targetDir).isDirectory()).toBe(true);
+    expect(lstatSync(targetDir).isSymbolicLink()).toBe(true);
+    const nextTarget = readlinkSync(targetDir);
+    const releasesRoot = realpathSync(releasesDir);
+    expect(nextTarget.startsWith(`${releasesRoot}/`)).toBe(true);
+    expect(nextTarget.slice(`${releasesRoot}/`.length)).not.toContain("/");
+    expect(nextTarget).not.toBe(priorRelease);
     expect(readFileSync(join(targetDir, "index.html"), "utf8")).toBe("new-index\n");
     expect(readFileSync(join(priorRelease, "index.html"), "utf8")).toBe("old-index\n");
+    expect(readdirSync(releasesDir).sort()).toEqual([
+      priorRelease.split("/").at(-1),
+      nextTarget.split("/").at(-1),
+    ].sort());
+  });
+
+  test("local Web Console deployment restores a legacy current directory when link activation fails", () => {
+    const dir = makeTempDir();
+    const sourceDir = join(dir, "source");
+    const targetDir = join(dir, "current");
+    mkdirSync(sourceDir);
+    mkdirSync(targetDir);
+    writeFileSync(join(sourceDir, "index.html"), "new-index\n");
+    writeFileSync(join(targetDir, "index.html"), "old-index\n");
+    writeFileSync(join(targetDir, "stale.js"), "old-asset\n");
+
+    const result = runBash(
+      'source install.sh; supacloud_atomic_switch_web_console_link() { return 1; }; deploy_web_console_directory_atomic "$SOURCE" "$TARGET"',
+      { SOURCE: sourceDir, TARGET: targetDir },
+    );
+
+    expect(result.status).not.toBe(0);
+    expect(lstatSync(targetDir).isDirectory()).toBe(true);
+    expect(readFileSync(join(targetDir, "index.html"), "utf8")).toBe("old-index\n");
+    expect(readFileSync(join(targetDir, "stale.js"), "utf8")).toBe("old-asset\n");
+    expect(readdirSync(join(dir, "releases"))).toEqual([]);
+  });
+
+  test("local Web Console deployment rejects nested links and special files before activation", () => {
+    const dir = makeTempDir();
+    const sourceDir = join(dir, "source");
+    const targetDir = join(dir, "current");
+    mkdirSync(sourceDir);
+    mkdirSync(targetDir);
+    writeFileSync(join(sourceDir, "index.html"), "new-index\n");
+    writeFileSync(join(targetDir, "index.html"), "old-index\n");
+
+    symlinkSync("/etc/passwd", join(sourceDir, "secret.txt"));
+    const linked = runBash(
+      'source install.sh; deploy_web_console_directory_atomic "$SOURCE" "$TARGET"',
+      { SOURCE: sourceDir, TARGET: targetDir },
+    );
+    expect(linked.status).not.toBe(0);
+    expect(readFileSync(join(targetDir, "index.html"), "utf8")).toBe("old-index\n");
+    expect(readdirSync(join(dir, "releases"))).toEqual([]);
+
+    rmSync(join(sourceDir, "secret.txt"));
+    const fifo = join(sourceDir, "named-pipe");
+    expect(spawnSync("mkfifo", [fifo]).status).toBe(0);
+    const special = runBash(
+      'source install.sh; deploy_web_console_directory_atomic "$SOURCE" "$TARGET"',
+      { SOURCE: sourceDir, TARGET: targetDir },
+    );
+    expect(special.status).not.toBe(0);
+    expect(readFileSync(join(targetDir, "index.html"), "utf8")).toBe("old-index\n");
+    expect(readdirSync(join(dir, "releases"))).toEqual([]);
+  });
+
+  test("local Web Console deployment restores legacy current when interrupted", () => {
+    const dir = makeTempDir();
+    const sourceDir = join(dir, "source");
+    const targetDir = join(dir, "current");
+    mkdirSync(sourceDir);
+    mkdirSync(targetDir);
+    writeFileSync(join(sourceDir, "index.html"), "new-index\n");
+    writeFileSync(join(targetDir, "index.html"), "old-index\n");
+
+    const interrupted = runBash(
+      "source install.sh; supacloud_atomic_switch_web_console_link() { supacloud_replace_path_atomic \"$1\" \"$2\"; python3 -c 'import os, signal; os.kill(os.getppid(), signal.SIGTERM)'; sleep 1; }; deploy_web_console_directory_atomic \"$SOURCE\" \"$TARGET\"",
+      { SOURCE: sourceDir, TARGET: targetDir },
+    );
+
+    expect(interrupted.status).toBe(143);
+    expect(lstatSync(targetDir).isDirectory()).toBe(true);
+    expect(readFileSync(join(targetDir, "index.html"), "utf8")).toBe("old-index\n");
+    expect(readdirSync(join(dir, "releases"))).toEqual([]);
+  });
+
+  test("tar Web Console deployment uses a unique release and current symlink", () => {
+    const dir = makeTempDir();
+    const sourceDir = join(dir, "source");
+    const archive = join(dir, "web-console-build.tar.gz");
+    const targetDir = join(dir, "current");
+    mkdirSync(sourceDir);
+    writeFileSync(join(sourceDir, "index.html"), "tar-index\n");
+    writeFileSync(join(sourceDir, "app.js"), "tar-app\n");
+    const packed = spawnSync("tar", ["-czf", archive, "-C", sourceDir, "."]);
+    expect(packed.status, packed.stderr).toBe(0);
+
+    const result = runBash(
+      'source install.sh; deploy_web_console_tar_atomic "$ARCHIVE" "$TARGET"',
+      { ARCHIVE: archive, TARGET: targetDir },
+    );
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(lstatSync(targetDir).isSymbolicLink()).toBe(true);
+    const releaseTarget = readlinkSync(targetDir);
+    expect(releaseTarget.startsWith(`${realpathSync(join(dir, "releases"))}/`)).toBe(true);
+    expect(readFileSync(join(targetDir, "index.html"), "utf8")).toBe("tar-index\n");
+    expect(readFileSync(join(targetDir, "app.js"), "utf8")).toBe("tar-app\n");
+    expect(readdirSync(join(dir, "releases"))).toEqual([releaseTarget.split("/").at(-1)]);
+  });
+
+  test("tar Web Console deployment rejects oversized expanded content before extraction", () => {
+    const dir = makeTempDir();
+    const sourceDir = join(dir, "source");
+    const archive = join(dir, "web-console-build.tar.gz");
+    const targetDir = join(dir, "current");
+    mkdirSync(sourceDir);
+    writeFileSync(join(sourceDir, "index.html"), "tar-index\n");
+    const oversized = join(sourceDir, "oversized.bin");
+    writeFileSync(oversized, "");
+    truncateSync(oversized, 257 * 1024 * 1024);
+    expect(spawnSync("tar", ["-czf", archive, "-C", sourceDir, "."]).status).toBe(0);
+
+    const rejected = runBash(
+      'source install.sh; deploy_web_console_tar_atomic "$ARCHIVE" "$TARGET"',
+      { ARCHIVE: archive, TARGET: targetDir },
+    );
+
+    expect(rejected.status).not.toBe(0);
+    expect(existsSync(targetDir)).toBe(false);
+    expect(existsSync(join(dir, "releases"))).toBe(false);
   });
 
   test("local Web Console deployment rejects a symlink outside managed releases", () => {
