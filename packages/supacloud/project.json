@@ -1,0 +1,7 @@
+{
+  "name": "supacloud",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "tags": ["scope:meta", "type:distribution"],
+  "projectType": "library",
+  "sourceRoot": "packages/supacloud"
+}

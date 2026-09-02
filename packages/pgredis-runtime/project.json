@@ -1,0 +1,7 @@
+{
+  "name": "@supacloud/pgredis-runtime",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "tags": ["scope:runtime", "type:runtime"],
+  "projectType": "application",
+  "sourceRoot": "packages/pgredis-runtime/src"
+}

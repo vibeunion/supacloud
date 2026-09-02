@@ -214,6 +214,10 @@ function parseModule(
   const { options, className, file, line } = candidate;
   const name = nameByNode.get(candidate.node) ?? className;
 
+  const tags = arrayProp(options, "tags")
+    .map((el) => (Node.isStringLiteral(el) ? el.getLiteralText() : el.getText().replace(/['"]/g, "")))
+    .filter(Boolean);
+
   const imports = arrayProp(options, "imports")
     .map((el) => {
       const decl = Node.isIdentifier(el) ? resolveDeclaration(el)[0] : undefined;
@@ -300,6 +304,7 @@ function parseModule(
   return {
     name,
     className,
+    tags: tags.length > 0 ? tags : undefined,
     file: sourcePath(ctx.rootDir, file),
     line,
     imports,

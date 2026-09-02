@@ -2,6 +2,7 @@ import type {
   ApplicationGraph,
   ControllerNode,
   Diagnostic,
+  ModuleBoundaryRule,
   ModuleNode,
   ProviderNode,
   Scope,
@@ -22,7 +23,12 @@ interface ProviderRef {
  * 校验 ApplicationGraph，产出诊断列表。
  * strict 时 warn 级诊断升级为 error。
  */
-export function validateGraph(graph: ApplicationGraph, strict = false): Diagnostic[] {
+export function validateGraph(
+  graph: ApplicationGraph,
+  options: boolean | { strict?: boolean; moduleBoundaries?: ModuleBoundaryRule[] } = false,
+): Diagnostic[] {
+  const strict = typeof options === "boolean" ? options : (options.strict ?? false);
+  const moduleBoundaries = typeof options === "object" ? options.moduleBoundaries : undefined;
   const diagnostics: Diagnostic[] = [];
 
   // 全局 token → provider 索引（同模块重复注册由 duplicate-token 报告，索引取第一个）。
@@ -190,6 +196,48 @@ export function validateGraph(graph: ApplicationGraph, strict = false): Diagnost
           module.file,
           module.line,
         );
+      }
+    }
+  }
+
+  // module-boundary-violation：基于模块标签（Tags）与边界规则进行架构分层与依赖流向校验。
+  if (moduleBoundaries && moduleBoundaries.length > 0) {
+    for (const module of graph.modules) {
+      const sourceTags = module.tags ?? [];
+      for (const importName of module.imports) {
+        const targetModule = graph.modules.find((m) => m.name === importName);
+        if (!targetModule) continue;
+        const targetTags = targetModule.tags ?? [];
+
+        for (const rule of moduleBoundaries) {
+          const matchesSource = rule.sourceTag === "*" || sourceTags.includes(rule.sourceTag);
+          if (!matchesSource) continue;
+
+          if (rule.bannedDependenciesWithTags) {
+            for (const bannedTag of rule.bannedDependenciesWithTags) {
+              if (targetTags.includes(bannedTag)) {
+                error(
+                  "module-boundary-violation",
+                  `模块 ${module.name} (tags: [${sourceTags.join(", ")}]) 禁止依赖带有标签 '${bannedTag}' 的模块 ${targetModule.name} (tags: [${targetTags.join(", ")}])`,
+                  module.file,
+                  module.line,
+                );
+              }
+            }
+          }
+
+          if (rule.onlyDependOnLibsWithTags && rule.onlyDependOnLibsWithTags.length > 0) {
+            const hasAllowed = targetTags.some((t) => rule.onlyDependOnLibsWithTags!.includes(t));
+            if (!hasAllowed && targetTags.length > 0) {
+              error(
+                "module-boundary-violation",
+                `模块 ${module.name} (tags: [${sourceTags.join(", ")}]) 仅允许依赖带有 [${rule.onlyDependOnLibsWithTags.join(", ")}] 标签的模块，但模块 ${targetModule.name} 的标签为 [${targetTags.join(", ")}]`,
+                module.file,
+                module.line,
+              );
+            }
+          }
+        }
       }
     }
   }

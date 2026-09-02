@@ -1,0 +1,7 @@
+{
+  "name": "@supacloud/cli",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "tags": ["scope:tooling", "type:cli"],
+  "projectType": "application",
+  "sourceRoot": "packages/cli/src"
+}

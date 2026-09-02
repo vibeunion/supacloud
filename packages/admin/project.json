@@ -1,0 +1,7 @@
+{
+  "name": "@supacloud/admin",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "tags": ["scope:cloud", "type:admin"],
+  "projectType": "library",
+  "sourceRoot": "packages/admin/src"
+}

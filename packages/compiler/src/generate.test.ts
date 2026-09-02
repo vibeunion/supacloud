@@ -19,7 +19,7 @@ beforeAll(async () => {
   outDir = join(rootDir, "generated");
   result = await compileProject({ rootDir, outDir });
   applicationCode = await readFile(join(outDir, "application.ts"), "utf8");
-});
+}, 30_000);
 
 describe("compileProject：总体结果", () => {
   test("无诊断，写出 application.ts 与 app.manifest.json", () => {

@@ -116,4 +116,100 @@ describe("validateGraph：坏 fixture 诊断", () => {
     expect(unresolved[0].message).toContain("MissingCommand");
     expect(unresolved[0].message).toContain("route-two");
   });
+
+  test("module-boundary-violation：根据 Nx 风格 Tag 规则拦截越权依赖", () => {
+    const sampleGraph: ApplicationGraph = {
+      modules: [
+        {
+          name: "ui",
+          className: "UiModule",
+          tags: ["type:ui", "scope:case"],
+          file: "src/ui.module.ts",
+          line: 1,
+          imports: ["data-access"],
+          providers: [],
+          controllers: [],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+        {
+          name: "data-access",
+          className: "DataAccessModule",
+          tags: ["type:data-access", "scope:case"],
+          file: "src/data-access.module.ts",
+          line: 1,
+          imports: [],
+          providers: [],
+          controllers: [],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    // Rule: type:ui 不能依赖 type:data-access (只能依赖 type:ui 或 type:contracts)
+    const diags = validateGraph(sampleGraph, {
+      moduleBoundaries: [
+        {
+          sourceTag: "type:ui",
+          bannedDependenciesWithTags: ["type:data-access"],
+        },
+      ],
+    });
+
+    const violations = diags.filter((d) => d.code === "module-boundary-violation");
+    expect(violations).toHaveLength(1);
+    expect(violations[0].severity).toBe("error");
+    expect(violations[0].message).toContain("禁止依赖带有标签 'type:data-access'");
+  });
+
+  test("module-boundary-violation：onlyDependOnLibsWithTags 白名单约束", () => {
+    const sampleGraph: ApplicationGraph = {
+      modules: [
+        {
+          name: "contracts",
+          className: "ContractsModule",
+          tags: ["type:contracts"],
+          file: "src/contracts.module.ts",
+          line: 1,
+          imports: ["feature-case"],
+          providers: [],
+          controllers: [],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+        {
+          name: "feature-case",
+          className: "FeatureCaseModule",
+          tags: ["type:feature"],
+          file: "src/feature.module.ts",
+          line: 1,
+          imports: [],
+          providers: [],
+          controllers: [],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(sampleGraph, {
+      moduleBoundaries: [
+        {
+          sourceTag: "type:contracts",
+          onlyDependOnLibsWithTags: ["type:contracts", "type:util"],
+        },
+      ],
+    });
+
+    const violations = diags.filter((d) => d.code === "module-boundary-violation");
+    expect(violations).toHaveLength(1);
+    expect(violations[0].message).toContain("仅允许依赖带有 [type:contracts, type:util]");
+  });
 });

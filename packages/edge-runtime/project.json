@@ -1,0 +1,7 @@
+{
+  "name": "@supacloud/edge-runtime",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "tags": ["scope:runtime", "type:runtime"],
+  "projectType": "application",
+  "sourceRoot": "packages/edge-runtime"
+}

@@ -26,6 +26,7 @@ import { Module, DB_CLIENT } from "@supacloud/app";
 
 @Module({
   name: "case",
+  tags: ["scope:case", "type:feature"],
   imports: [AuditModule],
   providers: [
     CaseService,
@@ -93,10 +94,20 @@ const result = await compileProject({
   include: ["src/**/*.ts"],
   outDir: "generated",
   strict: true,
+  moduleBoundaries: [
+    {
+      sourceTag: "type:ui",
+      bannedDependenciesWithTags: ["type:data-access"],
+    },
+    {
+      sourceTag: "type:feature",
+      onlyDependOnLibsWithTags: ["type:feature", "type:ui", "type:data-access", "type:contracts"],
+    },
+  ],
 });
 ```
 
-诊断码：`circular-dependency`、`scope-violation`、`module-boundary`、`unresolved-token`、`duplicate-token`、`duplicate-module`、`duplicate-command`、`duplicate-route`、`route-command-unresolved`、`command-missing-permission`（始终为 error）、`missing-deps`。
+诊断码：`circular-dependency`、`scope-violation`、`module-boundary`、`module-boundary-violation`、`unresolved-token`、`duplicate-token`、`duplicate-module`、`duplicate-command`、`duplicate-route`、`route-command-unresolved`、`command-missing-permission`（始终为 error）、`missing-deps`。
 
 产物：
 

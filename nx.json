@@ -1,0 +1,47 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nrwl/nx/master/packages/nx/schemas/nx-schema.json",
+  "namedInputs": {
+    "default": ["{projectRoot}/**/*", "sharedGlobals"],
+    "production": [
+      "default",
+      "!{projectRoot}/**/?(*.)+(spec|test).[jt]s?(x)?(.snap)",
+      "!{projectRoot}/tsconfig.test.json",
+      "!{projectRoot}/**/__tests__/**"
+    ],
+    "sharedGlobals": []
+  },
+  "targetDefaults": {
+    "build": {
+      "dependsOn": ["^build"],
+      "inputs": ["production", "^production"],
+      "cache": true
+    },
+    "build:js": {
+      "inputs": ["production", "^production"],
+      "cache": true
+    },
+    "build:types": {
+      "inputs": ["production", "^production"],
+      "cache": true
+    },
+    "test": {
+      "inputs": ["default", "^production"],
+      "cache": true
+    },
+    "typecheck": {
+      "inputs": ["default", "^production"],
+      "cache": true
+    },
+    "typecheck:test": {
+      "inputs": ["default", "^production"],
+      "cache": true
+    },
+    "clean": {
+      "cache": false
+    },
+    "check": {
+      "inputs": ["default", "^production"],
+      "cache": true
+    }
+  }
+}

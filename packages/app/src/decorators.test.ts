@@ -66,6 +66,7 @@ describe("@Module", () => {
 
     expect(getModuleMeta(CaseModule)).toEqual({
       name: "case",
+      tags: [],
       imports: [],
       providers: [],
       controllers: [],
@@ -94,6 +95,17 @@ describe("@Module", () => {
     expect(meta?.providers).toEqual([CaseService]);
     expect(meta?.controllers).toEqual([CaseController]);
     expect(meta?.exports).toEqual([CaseService]);
+  });
+
+  test("records module tags for boundary governance", () => {
+    @Module({
+      name: "case",
+      tags: ["scope:case", "type:feature"],
+    })
+    class CaseModule {}
+
+    const meta = getModuleMeta(CaseModule);
+    expect(meta?.tags).toEqual(["scope:case", "type:feature"]);
   });
 });
 
