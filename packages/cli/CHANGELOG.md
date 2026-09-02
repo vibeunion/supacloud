@@ -14,6 +14,13 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.40.0](https://github.com/vibeunion/supacloud/compare/cli-v0.39.0...cli-v0.40.0) (2026-09-02)
+
+
+### Features
+
+* **cli:** db module_check --lite for local SupaCloud Lite projects ([#1105](https://github.com/vibeunion/supacloud/issues/1105)) ([9ca7503](https://github.com/vibeunion/supacloud/commit/9ca7503c145738e61e23fc09d1151d022951cbd4))
+
 ## [0.39.0](https://github.com/vibeunion/supacloud/compare/cli-v0.38.0...cli-v0.39.0) (2026-09-02)
 
 

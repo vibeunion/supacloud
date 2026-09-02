@@ -1,6 +1,6 @@
 {
   "name": "@supacloud/db",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Database governance layer for SupaCloud: RLS policies, RPC functions and grants as first-class resources, with manifest/catalog reconciliation",
   "type": "module",
   "main": "./dist/index.js",
