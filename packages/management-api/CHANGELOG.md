@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.68.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.68.0...management-api-v0.68.1) (2026-09-02)
+
+
+### Bug Fixes
+
+* harden GoTrue upgrade runtime and CLI compatibility ([#1084](https://github.com/vibeunion/supacloud/issues/1084)) ([3ad2bac](https://github.com/vibeunion/supacloud/commit/3ad2bacad53cdff314d7120c77c9bffff067b2fe))
+
 ## [0.68.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.67.1...management-api-v0.68.0) (2026-09-02)
 
 

@@ -14,6 +14,18 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.38.0](https://github.com/vibeunion/supacloud/compare/cli-v0.37.0...cli-v0.38.0) (2026-09-02)
+
+
+### Features
+
+* **cli:** add app framework and database governance commands ([#1087](https://github.com/vibeunion/supacloud/issues/1087)) ([108b5d7](https://github.com/vibeunion/supacloud/commit/108b5d75de404d7d943eab64d17ebf8b7bba5f63))
+
+
+### Bug Fixes
+
+* harden GoTrue upgrade runtime and CLI compatibility ([#1084](https://github.com/vibeunion/supacloud/issues/1084)) ([3ad2bac](https://github.com/vibeunion/supacloud/commit/3ad2bacad53cdff314d7120c77c9bffff067b2fe))
+
 ## [0.37.0](https://github.com/vibeunion/supacloud/compare/cli-v0.36.0...cli-v0.37.0) (2026-09-02)
 
 
