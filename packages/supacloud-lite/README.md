@@ -96,6 +96,27 @@ framework = "elysia"   # fetch（默认）| elysia | hono
 
 注意：浏览器预检（OPTIONS）会转发给框架应用，框架函数应自行挂载 CORS（如 `@elysiajs/cors`），与生产 Edge Runtime 行为一致。
 
+#### Function 限制与能力声明
+
+`[functions.<name>]` 可声明运行限制（limits）与能力（capabilities），字段与生产 Edge Runtime Manifest v2 一一对应：
+
+```toml
+[functions.api]
+timeout_ms = 15000                        # limits.timeout_ms
+max_request_body_bytes = 1048576          # limits.max_request_body_bytes
+outbound_hosts = ["api.example.com"]      # capabilities.outbound_hosts
+secrets = ["OPENAI_API_KEY"]              # capabilities.secrets
+```
+
+| config.toml 字段 | 类型 | 语义 | 生产 Edge Runtime 对应 |
+| --- | --- | --- | --- |
+| `timeout_ms` | integer | 单次调用超时；超时返回 504 并 abort 请求 | `limits.timeout_ms` |
+| `max_request_body_bytes` | integer | 请求体上限；content-length 超限返回 413，无长度声明的流式 body 超限则中断读取 | `limits.max_request_body_bytes` |
+| `outbound_hosts` | string[] | `fetch` 出站 host 白名单（精确匹配，不含端口）；loopback（localhost/127.0.0.1/::1）始终放行，未声明的 host 直接抛错 | `capabilities.outbound_hosts` |
+| `secrets` | string[] | 函数可见的环境变量白名单：基础三键（`SUPABASE_URL`/`SUPABASE_ANON_KEY`/`SUPABASE_SERVICE_ROLE_KEY`）+ 声明的 key，同时约束 `Deno.env` 与 `ctx.env` | `capabilities.secrets` |
+
+与生产的差异：Lite 面向本地开发，未声明时默认**不限制**（不包 fetch、env 全量可见）；生产 Edge Runtime 有 900s 超时与 30MB 请求体的默认上限。OPTIONS 预检与正常请求走同一路径、受同一组限制约束。
+
 #### Auth 运行方式
 
 Lite 不下载、安装或启动独立的 GoTrue 进程。`/auth/v1/*` 由同一个 Bun 进程中的内置 Auth 实现处理，并与该 Lite 项目的 PGlite `auth` schema 共享生命周期；这避免了 sidecar 的配置、端口和会话一致性负担。

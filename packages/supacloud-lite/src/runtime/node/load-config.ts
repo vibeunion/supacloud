@@ -95,6 +95,14 @@ export interface FunctionOptions {
   entrypoint?: string
   /** [functions.<name>].framework: fetch (default), elysia, or hono */
   framework?: import('../functions/handler.js').FunctionFramework
+  /** [functions.<name>].timeout_ms: invocation timeout (Edge Runtime limits.timeout_ms) */
+  timeoutMs?: number
+  /** [functions.<name>].max_request_body_bytes (Edge Runtime limits.max_request_body_bytes) */
+  maxRequestBodyBytes?: number
+  /** [functions.<name>].outbound_hosts: fetch host allowlist (Edge Runtime capabilities.outbound_hosts) */
+  outboundHosts?: string[]
+  /** [functions.<name>].secrets: env keys exposed to the function (Edge Runtime capabilities.secrets) */
+  secrets?: string[]
 }
 
 /** Parse supabase/config.toml once and project it into a {@link ProjectConfig}. */
@@ -343,6 +351,14 @@ function readFunctions(root: ConfigTable): Record<string, FunctionOptions> {
         console.warn(`  warning: [functions.${name}] framework "${framework}" is not one of fetch/elysia/hono; falling back to fetch`)
       }
     }
+    const timeoutMs = getInt(t, 'timeout_ms')
+    if (timeoutMs !== undefined && timeoutMs > 0) opts.timeoutMs = timeoutMs
+    const maxRequestBodyBytes = getInt(t, 'max_request_body_bytes')
+    if (maxRequestBodyBytes !== undefined && maxRequestBodyBytes > 0) opts.maxRequestBodyBytes = maxRequestBodyBytes
+    const outboundHosts = getStringArray(t, 'outbound_hosts')
+    if (outboundHosts !== undefined) opts.outboundHosts = outboundHosts
+    const secrets = getStringArray(t, 'secrets')
+    if (secrets !== undefined) opts.secrets = secrets
     out[name] = opts
   }
   return out

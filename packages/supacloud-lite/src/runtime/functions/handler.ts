@@ -11,6 +11,7 @@
  */
 import type { RequestContext } from '../types.js'
 import { runWithDenoEnv } from './deno-shim.js'
+import { runWithFetchPolicy } from './fetch-policy.js'
 import { type PgredisCache, runWithPgredisCache } from './pgredis.js'
 
 /** An edge function: a fetch handler invoked with the resolved request context. */
@@ -35,11 +36,39 @@ export interface FrameworkObjectHandler {
 /** Anything registerable as a function: plain fetch handler or router object. */
 export type FunctionHandler = EdgeFunction | FrameworkObjectHandler
 
-/** A loaded function plus its declared framework profile. */
+/**
+ * Per-invocation resource limits, aligned with the Edge Runtime Manifest v2
+ * `limits` block (timeout_ms / max_request_body_bytes). Lite defaults to no
+ * limit when undeclared; production caps at 900s / 30MB.
+ */
+export interface FunctionLimits {
+  /** limits.timeout_ms: max wall time per invocation; on expiry the request is aborted and a 504 returned. */
+  timeoutMs?: number
+  /** limits.max_request_body_bytes: max inbound body size; oversized bodies get a 413. */
+  maxRequestBodyBytes?: number
+}
+
+/**
+ * Declared capabilities, aligned with the Edge Runtime Manifest v2
+ * `capabilities` block (secrets / outbound_hosts). Undeclared means
+ * unrestricted (back-compat).
+ */
+export interface FunctionCapabilities {
+  /** capabilities.secrets: env keys (beyond the SUPABASE_* base trio) visible to the function. */
+  secrets?: string[]
+  /** capabilities.outbound_hosts: exact fetch host allowlist (no port); loopback is always allowed. */
+  outboundHosts?: string[]
+}
+
+/** A loaded function plus its declared framework profile, limits, and capabilities. */
 export interface LoadedFunction {
   handler: FunctionHandler
   /** config.toml [functions.<name>].framework; `fetch` keeps legacy routing. */
   framework?: FunctionFramework
+  /** config.toml [functions.<name>] timeout_ms / max_request_body_bytes. */
+  limits?: FunctionLimits
+  /** config.toml [functions.<name>] secrets / outbound_hosts. */
+  capabilities?: FunctionCapabilities
 }
 
 /** Registry value: a bare handler or a {@link LoadedFunction} entry. */
@@ -112,7 +141,12 @@ export class FunctionsHandler {
     return [...this.functions.keys()]
   }
 
-  /** Dispatch a /functions/v1/<name> request to its handler, returning a 404 when unknown and a 500 when the handler throws or returns a non-Response. */
+  /**
+   * Dispatch a /functions/v1/<name> request to its handler, returning a 404 when
+   * unknown and a 500 when the handler throws or returns a non-Response.
+   * Declared limits/capabilities are enforced in order: request body size (413),
+   * invocation timeout (504), outbound host allowlist, secrets allowlist.
+   */
   async handle(req: Request, ctx: RequestContext, url: URL): Promise<Response> {
     const name = url.pathname.replace(/^\/functions\/v1\/?/, '').split('/')[0]
     if (!name) {
@@ -123,16 +157,48 @@ export class FunctionsHandler {
       return json(404, { error: `function "${name}" not found` })
     }
     const entry = normalizeEntry(value)
+    const limits = entry.limits
+    const capabilities = entry.capabilities
+
+    // 1. Request body limit. A declared content-length is checked up front;
+    // a chunked/lengthless body is counted while streaming below.
+    const maxBody = limits?.maxRequestBodyBytes
+    let request = req
+    if (maxBody !== undefined) {
+      const contentLength = req.headers.get('content-length')
+      if (contentLength !== null && Number(contentLength) > maxBody) {
+        return json(413, { error: `function "${name}" request body exceeded ${maxBody} bytes` })
+      }
+      if (contentLength === null && req.body) {
+        request = withCountedBody(request, maxBody)
+      }
+    }
+
     const routeAware =
       (entry.framework !== undefined && entry.framework !== 'fetch') ||
       isFrameworkRouterHandler(entry.handler)
-    const target = routeAware ? new Request(toFunctionLocalUrl(req.url), req) : req
+    if (routeAware) request = new Request(toFunctionLocalUrl(req.url), request)
+
+    // 2. Invocation timeout: the abort signal rides on the forwarded Request so
+    // a cooperative handler (or its body reads) can cancel early.
+    const timeoutMs = limits?.timeoutMs
+    const abort = timeoutMs !== undefined ? new AbortController() : undefined
+    if (abort) request = withSignal(request, abort.signal)
+
     try {
+      // 4. Secrets allowlist: the function sees the SUPABASE_* base trio plus
+      // only the declared secret keys - both via Deno.env and ctx.env.
+      const env = capabilities?.secrets ? filterSecretsEnv(this.env, capabilities.secrets) : this.env
       // Bind Deno.env to this backend's function env for the call so a
       // Deno.serve/Deno.env-style function reads its own secrets, not another
       // backend's or the host process.env.
-      const invoke = () => this.invoke(entry.handler, target, ctx)
-      const res = await runWithDenoEnv(this.env, () => runWithPgredisCache(this.pgredis, invoke))
+      const invoke = () => this.invoke(entry.handler, request, ctx, env)
+      const inner = () => runWithDenoEnv(env, () => runWithPgredisCache(this.pgredis, invoke))
+      // 3. Outbound host allowlist; undeclared means fetch is not wrapped at all.
+      const run = capabilities?.outboundHosts
+        ? () => runWithFetchPolicy(capabilities.outboundHosts!, inner)
+        : inner
+      const res = timeoutMs !== undefined ? await this.withTimeout(name, timeoutMs, run, abort!) : await run()
       if (!(res instanceof Response)) {
         return json(500, { error: `function "${name}" did not return a Response` })
       }
@@ -143,9 +209,43 @@ export class FunctionsHandler {
     }
   }
 
-  private invoke(handler: FunctionHandler, req: Request, ctx: RequestContext): Promise<Response> {
+  /** Race the invocation against `timeoutMs`; on timeout abort the request and answer 504. */
+  private async withTimeout(
+    name: string,
+    timeoutMs: number,
+    run: () => Promise<Response>,
+    abort: AbortController
+  ): Promise<Response> {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const pending = run()
+    try {
+      const winner = await Promise.race([
+        pending.then((res) => ({ timedOut: false as const, res })),
+        new Promise<{ timedOut: true }>((resolve) => {
+          timer = setTimeout(() => resolve({ timedOut: true }), timeoutMs)
+        }),
+      ])
+      if (winner.timedOut) {
+        abort.abort()
+        // the handler may still settle after the timeout; swallow its late
+        // result/rejection so it never surfaces as an unhandled rejection
+        pending.then(() => {}, () => {})
+        return json(504, { error: `function "${name}" timed out after ${timeoutMs}ms` })
+      }
+      return winner.res
+    } finally {
+      if (timer) clearTimeout(timer)
+    }
+  }
+
+  private invoke(
+    handler: FunctionHandler,
+    req: Request,
+    ctx: RequestContext,
+    env: FunctionContext['env']
+  ): Promise<Response> {
     if (typeof handler === 'function') {
-      return Promise.resolve(handler(req, { auth: ctx, env: this.env }))
+      return Promise.resolve(handler(req, { auth: ctx, env }))
     }
     if (typeof handler.handle === 'function') {
       return Promise.resolve(handler.handle.call(handler, req))
@@ -155,6 +255,45 @@ export class FunctionsHandler {
     }
     throw new Error('function handler must be a function or an object with handle()/fetch()')
   }
+}
+
+/** The base env every function sees; declared secrets are added on top. */
+const BASE_ENV_KEYS = ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY'] as const
+
+/** Base trio + declared secret keys only (Manifest v2 capabilities.secrets). */
+function filterSecretsEnv(env: FunctionContext['env'], secrets: string[]): FunctionContext['env'] {
+  const out: Record<string, string> = {}
+  for (const key of BASE_ENV_KEYS) out[key] = env[key]
+  for (const key of secrets) {
+    if (env[key] !== undefined) out[key] = env[key]
+  }
+  return out as FunctionContext['env']
+}
+
+/**
+ * Count a lengthless (chunked) request body against `limit`. On overflow the
+ * stream errors, so the handler's body read rejects and surfaces as a 500 -
+ * once the body is streaming in, there is no way to turn it into a clean 413.
+ */
+function withCountedBody(req: Request, limit: number): Request {
+  let seen = 0
+  const counter = new TransformStream<Uint8Array, Uint8Array>({
+    transform(chunk, controller) {
+      seen += chunk.byteLength
+      if (seen > limit) {
+        controller.error(new Error(`request body exceeded ${limit} bytes`))
+        return
+      }
+      controller.enqueue(chunk)
+    },
+  })
+  // `duplex: 'half'` is required when the body is a stream (undici; harmless in Bun).
+  return new Request(req, { body: req.body!.pipeThrough(counter), duplex: 'half' } as RequestInit)
+}
+
+/** Clone a request carrying an abort signal (Bun accepts `new Request(req, { signal })`). */
+function withSignal(req: Request, signal: AbortSignal): Request {
+  return new Request(req, { signal, ...(req.body ? { duplex: 'half' } : {}) } as RequestInit)
 }
 
 function json(status: number, body: unknown): Response {
