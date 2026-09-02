@@ -51,6 +51,7 @@ afterEach(() => {
 });
 
 beforeEach(() => {
+  process.exit = exitSpy as unknown as typeof process.exit;
   resetMocks();
 });
 
@@ -116,5 +117,13 @@ describe("project CLI URL rendering", () => {
     expect(rendered.join("\n")).toContain("Studio URL: https://legacy-studio.example");
     expect(rendered.join("\n")).toContain("Database: supa_legacy");
     expect(exitSpy).not.toHaveBeenCalled();
+  });
+
+  test("intercepts project get failures without terminating the test process", async () => {
+    globalThis.fetch = mock(async () => new Response("upstream failed", { status: 502 })) as typeof fetch;
+
+    await expect(handleProjectGet("missing")).rejects.toThrow("process.exit:1");
+
+    expect(exitSpy).toHaveBeenCalledWith(1);
   });
 });
