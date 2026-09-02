@@ -1,67 +1,34 @@
 # @supacloud/elysia
 
-Elysia runtime adapter for SupaCloud applications: it adapts the plain-data
-`CompiledModule` produced by `@supacloud/compiler` into Elysia plugins and
-manages the `application` / `request` scopes at runtime.
+Runtime adapter that turns `@supacloud/compiler` output into a production-ready
+[Elysia](https://elysiajs.com/) application.
 
-This package does **not** depend on the compiler. The contract below is
-declared and re-exported locally; any object matching it works.
+## Features
 
-## Compiled module contract
+- **Decoupled compilation**: takes the output of `@supacloud/compiler` directly.
+- **Topological initialization**: modules are registered in dependency order,
+  passing exported services downstream via Elysia plugins.
+- **Request-scoped providers**: creates a fresh scope per HTTP request via
+  `createRequestScope`, mapping request-scoped controllers and services.
+- **TypeBox schema binding**: attaches compiled parameter, query, body, and
+  response TypeBox schemas directly to Elysia route definitions.
+- **Unified Command Pipeline**: runs `@Command`-decorated handlers through a
+  structured `commandGovernance` adapter chain or a custom `composeCommandExecutors`
+  pipeline (fail-closed if command routes lack an executor).
+- **Public error mapping**: transforms framework / application errors via
+  `errorMapper` with standard `ApplicationError` envelope support, preserving
+  Elysia's default behavior (422) for schema validation errors.
 
-```ts
-interface CompiledRoute {
-  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
-  path: string;
-  handler: string;   // method name on the controller instance
-  body?: unknown;    // TypeBox schema; validation enabled only when present
-  params?: unknown;
-  query?: unknown;
-  response?: unknown;
-  command?: string;  // @Command class name bound to the route
-}
+## Installation
 
-interface CompiledCommand {
-  className: string;
-  name: string;
-  permission: string;
-  transaction: "required" | "none";
-  audit?: string;
-  idempotency: "required" | "none";
-}
-
-interface CompiledController {
-  path: string;                       // controller prefix, e.g. "/cases"
-  serviceKey: string;                 // key on services or the request scope
-  scope: "application" | "request" | "job";
-  routes: CompiledRoute[];
-}
-
-interface CompiledModule {
-  name: string;
-  createServices(
-    deps: Record<string, unknown>,
-    imported: Record<string, Record<string, unknown>>,
-  ): Record<string, unknown>;
-  createRequestScope?(
-    services: Record<string, unknown>,
-    ctx: unknown,
-    imported?: Record<string, Record<string, unknown>>,
-  ): Record<string, unknown>;
-  controllers: CompiledController[];
-  commands: CompiledCommand[];
-}
+```bash
+bun add @supacloud/elysia elysia
 ```
-
-Controller methods are invoked as
-`controller[handler]({ body, params, query, request, scope })`; non-`Response`
-return values are serialized to JSON by Elysia. Validation failures use
-Elysia's default behavior (422).
 
 ## Usage
 
 ```ts
-import { createApplication, requireIdempotencyKey } from "@supacloud/elysia";
+import { composeCommandExecutors, createApplication, requireIdempotencyKey } from "@supacloud/elysia";
 import AuditModule from "./.generated/audit.module";
 import CaseModule from "./.generated/case.module";
 
@@ -78,48 +45,29 @@ const app = createApplication({
       failed: (invocation, error) => auditLog.recordFailure(invocation, error),
     },
   },
+  // Or custom onion-style command pipeline:
+  // commandExecutor: composeCommandExecutors(outerMiddleware, innerMiddleware),
 });
 
 export default app;
 ```
 
-- Each module is instantiated in order: `createServices(deps, imported)`
-  receives platform `deps` plus the services of all previously created
-  modules, keyed by module name.
-- Each module becomes a named Elysia plugin (`supacloud:<module.name>`) that
-  decorates the context with `services`.
-- When a module defines `createRequestScope`, a **fresh** request scope is
-  resolved per request and exposed on the `scope` context key — never reused
-  across requests. Request-scoped controller instances are looked up on
-  `scope`; application-scoped instances on `services`.
-- Full route paths are `controller.path + route.path` (slashes normalized);
-  schema options (`body` / `params` / `query` / `response`) are passed to
-  Elysia only when the corresponding field exists.
-- A route with `command` must have `commandGovernance`; missing governance fails
-  at application construction with `COMMAND_GOVERNANCE_UNCONFIGURED`.
-- `createSupaCloudRequestContext` exposes the verified subject from
-  `x-supacloud-jwt-sub`, the request id, bearer token, and idempotency key.
-  The bearer token is intentionally non-enumerable to avoid accidental logs.
-- `errorMapper` can map failures to an application-specific envelope. The
-  default response is `{ ok: false, code, message, details? }`.
+## API
 
-Lower-level building blocks:
+### `createApplication(options: ApplicationOptions): Elysia`
 
-- `createModulePlugin(compiled, services, ctxFactory?)` — adapt a single
-  module into an Elysia plugin (useful for tests and embedding).
-- `createTestApp(options)` — semantic alias of `createApplication`.
-- `testRequest(app, path, init?)` (from `@supacloud/elysia` source
-  `src/testing.ts`) — in-process `app.handle(new Request(...))` helper.
+Creates the root Elysia application from compiled modules.
 
-## Edge runtime integration
+### `createModulePlugin(compiled, services, ctxFactory?, options?, imported?): Elysia`
 
-SupaCloud's edge runtime (`@supacloud/edge-runtime`) supports Elysia as a
-first-class function framework. Default-export the Elysia instance from your
-function entrypoint and set the activation manifest to:
+Creates an Elysia plugin from a single compiled module. Can be mounted
+directly onto an existing Elysia app.
 
-```json
-{ "framework": "elysia" }
-```
+### `composeCommandExecutors(...executors): CommandExecutor`
 
-The runtime then routes requests through `app.handle(request)` instead of a
-plain `fetch` handler.
+Composes multiple `CommandExecutor` middleware functions into an onion-style pipeline.
+
+### `ApplicationError`
+
+Lightweight error class carrying HTTP `status`, machine-readable `code`, and
+optional structured `details`.

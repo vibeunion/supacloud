@@ -2,9 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { Elysia, t } from "elysia";
 import {
   ApplicationError,
+  composeCommandExecutors,
   createApplication,
-  createSupaCloudRequestContext,
   createModulePlugin,
+  createSupaCloudRequestContext,
   createTestApp,
   defaultErrorResponse,
   requireIdempotencyKey,
@@ -354,6 +355,27 @@ describe("createApplication", () => {
     });
   });
 
+  test("enforces command-bound routes through the configured executor", async () => {
+    const events: string[] = [];
+    const app = createTestApp({
+      modules: [createAuditModule({}), createCaseModule({})],
+      requestContext: requestIdFromHeader,
+      commandExecutor: async (invocation, next) => {
+        events.push(`${invocation.command.name}:${invocation.command.permission}`);
+        return next();
+      },
+    });
+
+    const res = await testRequest(app, "/cases", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "governed" }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ id: "case-1", title: "governed" });
+    expect(events).toEqual(["case.create:case.create"]);
+  });
+
   test("allows applications to map errors to their public envelope", async () => {
     const app = createApp({}, {
       commandGovernance: {
@@ -472,5 +494,140 @@ describe("createModulePlugin", () => {
       requestId: "req-standalone",
     });
     expect(captured.auditService?.entries).toEqual(["case.get:9"]);
+  });
+});
+
+describe("composeCommandExecutors", () => {
+  test("chains multiple executors in onion order", async () => {
+    const trace: string[] = [];
+    const pipeline = composeCommandExecutors(
+      async (inv, next) => {
+        trace.push(`outer:before:${inv.command.name}`);
+        const res = await next();
+        trace.push(`outer:after:${inv.command.name}`);
+        return res;
+      },
+      null,
+      async (inv, next) => {
+        trace.push(`inner:before:${inv.command.name}`);
+        const res = await next();
+        trace.push(`inner:after:${inv.command.name}`);
+        return res;
+      },
+      undefined,
+    );
+
+    const fakeInvocation = {
+      command: { className: "Cmd", name: "test.cmd" },
+      input: { body: {}, params: {}, query: {} },
+      request: new Request("http://localhost"),
+      requestContext: {},
+      services: {},
+    };
+
+    const result = await pipeline(fakeInvocation, () => {
+      trace.push("handler");
+      return { ok: true };
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(trace).toEqual([
+      "outer:before:test.cmd",
+      "inner:before:test.cmd",
+      "handler",
+      "inner:after:test.cmd",
+      "outer:after:test.cmd",
+    ]);
+  });
+
+  test("handles empty executors list as identity", async () => {
+    const pipeline = composeCommandExecutors();
+    const fakeInvocation = {
+      command: { className: "Cmd", name: "test.cmd" },
+      input: { body: {}, params: {}, query: {} },
+      request: new Request("http://localhost"),
+      requestContext: {},
+      services: {},
+    };
+    const result = await pipeline(fakeInvocation, () => 123);
+    expect(result).toBe(123);
+  });
+
+  test("short-circuits when an outer executor throws or rejects", async () => {
+    const trace: string[] = [];
+    const pipeline = composeCommandExecutors(
+      async () => {
+        trace.push("guard:rejected");
+        throw new Error("unauthorized");
+      },
+      async (_inv, next) => {
+        trace.push("inner");
+        return next();
+      },
+    );
+
+    const fakeInvocation = {
+      command: { className: "Cmd", name: "test.cmd" },
+      input: { body: {}, params: {}, query: {} },
+      request: new Request("http://localhost"),
+      requestContext: {},
+      services: {},
+    };
+
+    expect(pipeline(fakeInvocation, () => {
+      trace.push("handler");
+      return { ok: true };
+    })).rejects.toThrow("unauthorized");
+    expect(trace).toEqual(["guard:rejected"]);
+  });
+
+  test("rejects multiple next() calls in the same executor", async () => {
+    const pipeline = composeCommandExecutors(async (_inv, next) => {
+      await next();
+      return next();
+    });
+
+    const fakeInvocation = {
+      command: { className: "Cmd", name: "test.cmd" },
+      input: { body: {}, params: {}, query: {} },
+      request: new Request("http://localhost"),
+      requestContext: {},
+      services: {},
+    };
+
+    expect(pipeline(fakeInvocation, () => "ok")).rejects.toThrow(
+      "next() called multiple times",
+    );
+  });
+
+  test("works inside createApplication with pipeline middleware", async () => {
+    const logs: string[] = [];
+    const app = createApp({}, {
+      commandExecutor: composeCommandExecutors(
+        async (invocation, next) => {
+          logs.push(`auth:${invocation.command.permission}`);
+          return next();
+        },
+        async (invocation, next) => {
+          logs.push(`audit:start:${invocation.command.audit}`);
+          const result = await next();
+          logs.push(`audit:end:${invocation.command.audit}`);
+          return result;
+        },
+      ),
+    });
+
+    const res = await testRequest(app, "/cases", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "pipelined" }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ id: "case-1", title: "pipelined" });
+    expect(logs).toEqual([
+      "auth:case.create",
+      "audit:start:case.created",
+      "audit:end:case.created",
+    ]);
   });
 });
