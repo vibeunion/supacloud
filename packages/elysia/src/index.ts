@@ -21,10 +21,10 @@ export interface CompiledRoute {
 export interface CompiledCommand {
   className: string;
   name: string;
-  permission: string;
-  transaction: "required" | "none";
+  permission?: string;
+  transaction?: "required" | "none" | string;
   audit?: string;
-  idempotency: "required" | "none";
+  idempotency?: "required" | "none" | string;
 }
 
 export interface CompiledController {
@@ -48,7 +48,7 @@ export interface CompiledModule {
     imported?: Record<string, Record<string, unknown>>,
   ): Record<string, unknown>;
   controllers: CompiledController[];
-  commands: CompiledCommand[];
+  commands?: CompiledCommand[];
 }
 
 // ---------------------------------------------------------------------------
@@ -117,6 +117,37 @@ export interface CommandGovernance {
   audit?: CommandAudit;
 }
 
+/**
+ * Compose multiple CommandExecutors into a single onion-style pipeline.
+ * Outer executors run first before calling `next()`, and complete last.
+ */
+export function composeCommandExecutors(
+  ...executors: (CommandExecutor | undefined | null)[]
+): CommandExecutor {
+  const active = executors.filter(
+    (e): e is CommandExecutor => typeof e === "function",
+  );
+  if (active.length === 0) return (_inv, next) => next();
+  return (invocation, next) => {
+    let index = -1;
+    const dispatch = (i: number): Promise<unknown> => {
+      if (i <= index) {
+        return Promise.reject(new Error("next() called multiple times"));
+      }
+      index = i;
+      if (i === active.length) {
+        return Promise.resolve(next());
+      }
+      const fn = active[i];
+      if (!fn) {
+        return Promise.resolve(next());
+      }
+      return Promise.resolve(fn(invocation, () => dispatch(i + 1)));
+    };
+    return dispatch(0);
+  };
+}
+
 export interface ApplicationErrorOptions {
   status?: number;
   code?: string;
@@ -166,6 +197,8 @@ export interface ApplicationOptions {
   requestContext?: RequestContextFactory;
   /** Enforces permission/audit/idempotency policy for command-bound routes. */
   commandGovernance?: CommandGovernance;
+  /** Optional custom or composed executor. When provided alongside commandGovernance, it wraps or composes with governance. */
+  commandExecutor?: CommandExecutor;
   /** Maps framework or application failures to the public HTTP contract. */
   errorMapper?: ErrorMapper;
 }
@@ -357,20 +390,20 @@ export function createModulePlugin(
   compiled: CompiledModule,
   services: Record<string, unknown>,
   ctxFactory: RequestContextFactory = defaultRequestContext,
-  options: Pick<ApplicationOptions, "commandGovernance" | "errorMapper"> = {},
+  options: Pick<ApplicationOptions, "commandGovernance" | "commandExecutor" | "errorMapper"> = {},
   imported: Record<string, Record<string, unknown>> = {},
 ): Elysia {
   const hasCommandRoutes = compiled.controllers.some((controller) =>
     controller.routes.some((route) => route.command !== undefined),
   );
-  if (hasCommandRoutes && !options.commandGovernance) {
+  if (hasCommandRoutes && !options.commandGovernance && !options.commandExecutor) {
     throw new ApplicationError(
       `Module "${compiled.name}" has command routes but no commandGovernance`,
       { code: "COMMAND_GOVERNANCE_UNCONFIGURED" },
     );
   }
   const commandsByClassName = new Map(
-    compiled.commands.map((command) => [command.className, command]),
+    (compiled.commands ?? []).map((command) => [command.className, command]),
   );
   for (const controller of compiled.controllers) {
     for (const route of controller.routes) {
@@ -382,9 +415,13 @@ export function createModulePlugin(
     }
   }
   const requestContexts = new WeakMap<Request, unknown>();
-  const commandExecutor = options.commandGovernance
+  const governanceExecutor = options.commandGovernance
     ? createCommandExecutor(options.commandGovernance)
     : undefined;
+  const commandExecutor = options.commandExecutor && governanceExecutor
+    ? composeCommandExecutors(options.commandExecutor, governanceExecutor)
+    : (options.commandExecutor ?? governanceExecutor);
+
   const plugin = new Elysia({ name: `supacloud:${compiled.name}` }).decorate(
     "services",
     services,
@@ -434,7 +471,13 @@ export function createModulePlugin(
         if (!route.command) return invoke();
 
         const command = commandsByClassName.get(route.command)!;
-        return commandExecutor!({
+        if (!commandExecutor) {
+          throw new ApplicationError(`Command "${command.name}" has no executor`, {
+            status: 501,
+            code: "COMMAND_EXECUTOR_UNAVAILABLE",
+          });
+        }
+        return commandExecutor({
           command,
           input,
           request: ctx.request,
@@ -540,6 +583,7 @@ export function createApplication(options: ApplicationOptions): Elysia {
     imported[module.name] = services;
     app.use(createModulePlugin(module, services, ctxFactory, {
       commandGovernance: options.commandGovernance,
+      commandExecutor: options.commandExecutor,
       errorMapper: options.errorMapper,
     }, imported));
   }

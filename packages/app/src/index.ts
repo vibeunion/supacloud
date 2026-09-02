@@ -59,4 +59,4 @@ export type {
   RouteOptions,
 } from "./decorators";
 export { defineModule } from "./module";
-export { JOB_CONTEXT, REQUEST_CONTEXT } from "./context";
+export { DB_CLIENT, JOB_CONTEXT, REQUEST_CONTEXT } from "./context";

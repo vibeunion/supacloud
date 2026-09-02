@@ -18,3 +18,11 @@ export const REQUEST_CONTEXT = new InjectionToken<unknown>("supacloud.request-co
 export const JOB_CONTEXT = new InjectionToken<unknown>("supacloud.job-context", {
   scope: "job",
 });
+
+/**
+ * Built-in token for the platform database client (PostgreSQL/Drizzle client)
+ * passed to `createApplication({ deps: { dbClient } })`.
+ */
+export const DB_CLIENT = new InjectionToken<unknown>("supacloud.db-client", {
+  scope: "application",
+});

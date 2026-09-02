@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { DB_CLIENT, JOB_CONTEXT, REQUEST_CONTEXT } from "./context";
 import { InjectionToken } from "./token";
 import { isScopeViolation, SCOPE_LIFETIME_RANK } from "./scope";
 
@@ -31,6 +32,18 @@ describe("InjectionToken", () => {
       factory: () => config,
     });
     expect(withFactory.factory?.().url).toBe("https://example.com");
+  });
+});
+
+describe("built-in tokens", () => {
+  test("DB_CLIENT defaults to application scope", () => {
+    expect(DB_CLIENT.name).toBe("supacloud.db-client");
+    expect(DB_CLIENT.scope).toBe("application");
+  });
+
+  test("context tokens carry request and job scope", () => {
+    expect(REQUEST_CONTEXT.scope).toBe("request");
+    expect(JOB_CONTEXT.scope).toBe("job");
   });
 });
 
