@@ -1,5 +1,9 @@
 # @supacloud/compiler
 
+[中文](#中文) | [English](#english)
+
+## 中文
+
 SupaCloud 应用静态编译器：读取 `@supacloud/app` 装饰器元数据的源码 AST（ts-morph），构建 ApplicationGraph，做静态校验，并生成**无反射、无容器**的工厂代码与 manifest。
 
 本包不依赖 `@supacloud/app`：AST 只按装饰器名匹配（`Module`/`Injectable`/`Inject`/`Command`/`Query`/`Controller`/`Get`/`Post`/`Put`/`Patch`/`Delete`/`defineModule`/`InjectionToken`），不校验 import 来源。
@@ -80,5 +84,55 @@ bun run build
 ```
 
 ## License
+
+MIT
+
+## English
+
+`@supacloud/compiler` is the static compiler for SupaCloud applications. It reads the source AST with `ts-morph`, discovers `@supacloud/app` metadata, builds an `ApplicationGraph`, validates it, and generates reflection-free factories plus an application manifest.
+
+The package does not depend on `@supacloud/app`. It matches decorator and helper names in the AST (`Module`, `Injectable`, `Inject`, `Command`, `Query`, `Controller`, route decorators, `defineModule`, and `InjectionToken`) without checking the import source.
+
+### Install
+
+```bash
+bun add @supacloud/compiler
+```
+
+### API
+
+```ts
+import { analyzeProject, compileProject, validateGraph } from "@supacloud/compiler";
+
+const result = await compileProject({
+  rootDir: "/path/to/app",
+  include: ["**/*.ts"],
+  outDir: "/path/to/app/generated",
+  strict: false,
+});
+```
+
+`compileProject` performs analysis, validation, and generation. It returns diagnostics, the application graph, and the absolute paths written to disk. Use `analyzeProject` for analysis only and `validateGraph` for validation only.
+
+### Generated files
+
+- `application.ts`: static module factories and controller route descriptions, with no runtime reflection or external package imports.
+- `app.manifest.json`: a JSON-serializable `{ version: 1, modules, externalTokens }` manifest for CLI graph and explain commands.
+
+### Diagnostics
+
+The compiler reports circular dependencies, scope violations, module-boundary violations, unresolved tokens, duplicate tokens, missing dependencies, and commands without permissions. Platform-provided tokens are recorded in `externalTokens` rather than treated as errors.
+
+### Development
+
+```bash
+bun install
+bun run typecheck
+bun run typecheck:test
+bun test
+bun run build
+```
+
+### License
 
 MIT

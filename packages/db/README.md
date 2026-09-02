@@ -1,5 +1,9 @@
 # @supacloud/db
 
+[中文](#中文) | [English](#english)
+
+## 中文
+
 SupaCloud 的数据库治理层：把 RLS 策略、RPC 函数、触发器、授权（grant）作为**一等资源**做声明式管理，并与 PostgreSQL 真实 Catalog 对账。
 
 定位：它是 Drizzle（schema/迁移）之上的治理层 —— Drizzle 负责表结构，本包负责表结构之外的安全与业务对象（策略、函数、权限）的声明、静态检查与漂移检测。**driver 无关**：所有 Catalog 读取都通过注入的 `QueryExecutor` 完成，不依赖任何数据库客户端，也不 import drizzle-orm（仅类型层兼容 drizzle Table 的内部形状）。
@@ -98,3 +102,59 @@ bun run typecheck
 bun run typecheck:test
 bun run build       # bun build --target node + tsc 声明文件
 ```
+
+## English
+
+`@supacloud/db` is the SupaCloud database governance layer. It treats RLS policies, RPC functions, triggers, and grants as first-class declarative resources and reconciles them with the real PostgreSQL catalog.
+
+It sits above Drizzle schema and migrations: Drizzle owns table structure, while this package owns security and business objects outside the table definition. The package is driver-independent. Catalog reads use an injected `QueryExecutor`; no database client or `drizzle-orm` runtime dependency is required.
+
+### Example
+
+```ts
+import { defineDatabaseModule } from "@supacloud/db";
+
+export const casesModule = defineDatabaseModule({
+  name: "cases",
+  tables: ["public.cases"],
+  policies: [{
+    name: "cases_select",
+    table: "public.cases",
+    operation: "select",
+    roles: ["authenticated"],
+    source: "db/policies/cases_select.sql",
+    tests: ["db/tests/cases_select.sql"],
+  }],
+});
+```
+
+### API
+
+| Export | Description |
+|---|---|
+| `defineDatabaseModule(options)` | Declare a database module and normalize table names to `schema.name`. |
+| `readCatalog(executor, schemas?)` | Read the PostgreSQL catalog through an injected executor. |
+| `reconcileModule(module, catalog)` | Compare a manifest module with the live catalog. |
+| `lintSql(sql, file)` / `lintModule(module, readFile)` | Run database-independent SQL and module checks. |
+| `buildDatabaseManifest(modules)` | Build a JSON-serializable version 1 database manifest. |
+| `explainObject(manifest, name)` | Explain an object's module, type, source, permissions, and tests. |
+
+### Checks
+
+Reconciliation detects missing or undeclared policies and functions, disabled RLS, unsafe `security definer` search paths, security mismatches, wildcard grants, and grant drift. SQL linting detects unsafe definer functions, grants to `PUBLIC`, missing RLS enablement, destructive drops without `IF EXISTS`, and policies or functions without tests.
+
+`ReconcileReport.ok` is true only when there are no error-level findings.
+
+### Development
+
+```bash
+bun install
+bun test
+bun run typecheck
+bun run typecheck:test
+bun run build
+```
+
+### License
+
+MIT
