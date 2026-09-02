@@ -68,6 +68,57 @@ use immutable static releases; `edge_function` targets use the existing verified
 Edge Function bundle protocol. The command runs the target build, publishes only
 that target, and reads the final identity back.
 
+### Remote test development sync
+
+For a dedicated test server, use `dev` to synchronize source files over SSH and
+reload only the affected development target. This path is separate from
+immutable Function releases and is rejected for production environments.
+
+```bash
+supacloud-cli --env test dev sync --target functions --function api
+supacloud-cli --env test dev sync --target db
+supacloud-cli --env test dev watch --target project
+supacloud-cli --env test dev status
+```
+
+The selected environment supplies `SUPACLOUD_DEV_HOST` (or `SUPACLOUD_HOST`)
+and the existing `SUPACLOUD_SSH_*` settings. A repository may add a `dev` section to
+`supacloud.json`:
+
+```json
+{
+  "dev": {
+    "remoteRoot": "/var/lib/supacloud/dev/test-project",
+    "reloadCommand": "supacloud-dev-agent reload",
+    "compile": true,
+    "compileRoot": ".",
+    "compileOutDir": "generated",
+    "compileStrict": true,
+    "database": {
+      "drizzleConfig": "drizzle.config.ts",
+      "migrationsDir": "supabase/migrations",
+      "strict": true
+    },
+    "excludes": ["node_modules", ".git", ".env*", "dist"]
+  }
+}
+```
+
+The syncer creates the target directory remotely, transfers the selected source
+tree with checksum-aware `rsync`, and invokes the configured reload agent over
+SSH. Secrets and environment files are excluded by default. Database syncing is
+explicit (`dev sync --target db`); file watching does not execute migrations
+automatically. When `dev.compile` is enabled, `@supacloud/compiler` runs before
+sync; generated factories and `app.manifest.json` must be written inside the
+selected sync tree or be included by the project target. Compilation errors stop
+the sync and reload. `dev migrate` runs `drizzle-kit generate`, performs a
+SupaCloud migration dry-run, and only applies when `--apply` is explicitly set:
+
+```bash
+supacloud-cli --env test dev migrate
+supacloud-cli --env test dev migrate --apply
+```
+
 Simple single-frontend projects usually need no file. Monorepos should add a
 repository-root `supacloud.json`:
 
