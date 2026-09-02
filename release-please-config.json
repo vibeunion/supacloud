@@ -60,6 +60,36 @@
       "release-type": "node",
       "component": "supacloud",
       "changelog-path": "CHANGELOG.md"
+    },
+    "packages/app": {
+      "release-type": "node",
+      "component": "app",
+      "initial-version": "0.1.0",
+      "changelog-path": "CHANGELOG.md"
+    },
+    "packages/compiler": {
+      "release-type": "node",
+      "component": "compiler",
+      "initial-version": "0.1.0",
+      "changelog-path": "CHANGELOG.md"
+    },
+    "packages/elysia": {
+      "release-type": "node",
+      "component": "elysia",
+      "initial-version": "0.1.0",
+      "changelog-path": "CHANGELOG.md"
+    },
+    "packages/db": {
+      "release-type": "node",
+      "component": "db",
+      "initial-version": "0.1.0",
+      "changelog-path": "CHANGELOG.md"
+    },
+    "packages/testing": {
+      "release-type": "node",
+      "component": "testing",
+      "initial-version": "0.1.0",
+      "changelog-path": "CHANGELOG.md"
     }
   },
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json"
