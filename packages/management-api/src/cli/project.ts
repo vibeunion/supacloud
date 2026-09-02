@@ -14,6 +14,32 @@ async function getMasterToken(): Promise<string> {
 
 let cachedToken: string | null = null;
 
+function resolveProjectUrl(project: Record<string, unknown>, key: "api" | "studio"): string {
+    const nested = project[key];
+    if (nested && typeof nested === "object") {
+        const nestedUrl = (nested as Record<string, unknown>).url;
+        if (typeof nestedUrl === "string" && nestedUrl.trim()) {
+            return nestedUrl;
+        }
+    }
+
+    for (const flatKey of [`${key}_url`, `${key}Url`] as const) {
+        const value = project[flatKey];
+        if (typeof value === "string" && value.trim()) {
+            return value;
+        }
+    }
+
+    return "";
+}
+
+function printProjectUrls(project: Record<string, unknown>): void {
+    const apiUrl = resolveProjectUrl(project, "api");
+    const studioUrl = resolveProjectUrl(project, "studio");
+    console.log(`     API: ${apiUrl || "N/A"}`);
+    console.log(`     Studio: ${studioUrl || "N/A"}`);
+}
+
 async function apiRequest(method: string, path: string, body?: unknown) {
     if (!cachedToken) {
         cachedToken = await getMasterToken();
@@ -104,8 +130,9 @@ export async function handleProjectCreate(args: string[]) {
         p.log.success(`Project: ${result.name}`);
         p.log.info(`Ref: ${result.ref}`);
         p.log.info(`Status: ${result.status}`);
-        p.log.info(`API URL: ${result.api.url}`);
-        p.log.info(`Studio URL: ${result.studio.url}`);
+        const projectRecord = result as Record<string, unknown>;
+        p.log.info(`API URL: ${resolveProjectUrl(projectRecord, "api") || "N/A"}`);
+        p.log.info(`Studio URL: ${resolveProjectUrl(projectRecord, "studio") || "N/A"}`);
 
         console.log("\n  API credentials (shown once):");
         console.log(`  Publishable key: ${result.publishable_key}`);
@@ -137,10 +164,10 @@ export async function handleProjectList() {
         } else {
             console.log("\n");
             for (const project of result) {
-                console.log(`  📦 ${project.name} (${project.ref})`);
-                console.log(`     Status: ${project.status}`);
-                console.log(`     API: ${project.api.url}`);
-                console.log(`     Studio: ${project.studio.url}`);
+                const projectRecord = project as Record<string, unknown>;
+                console.log(`  📦 ${String(projectRecord.name ?? "")} (${String(projectRecord.ref ?? "")})`);
+                console.log(`     Status: ${String(projectRecord.status ?? "")}`);
+                printProjectUrls(projectRecord);
                 console.log("");
             }
         }
@@ -169,9 +196,10 @@ export async function handleProjectGet(ref: string) {
         console.log(`  Status: ${result.status}`);
         console.log(`  Region: ${result.region}`);
         console.log(`  Created: ${result.created_at}`);
-        console.log(`  API URL: ${result.api.url}`);
-        console.log(`  Studio URL: ${result.studio.url}`);
-        console.log(`  Database: ${result.database.name}`);
+        const projectRecord = result as Record<string, unknown>;
+        console.log(`  API URL: ${resolveProjectUrl(projectRecord, "api") || "N/A"}`);
+        console.log(`  Studio URL: ${resolveProjectUrl(projectRecord, "studio") || "N/A"}`);
+        console.log(`  Database: ${String((projectRecord.database as Record<string, unknown> | undefined)?.name ?? "")}`);
         console.log("");
 
         p.outro("Done");
