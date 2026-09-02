@@ -1,5 +1,6 @@
 import path from "path";
 import { fileURLToPath } from "node:url";
+import { isFrameworkRouterHandler, toFunctionLocalUrl, type FrameworkRouterHandler } from "./function-routing";
 import {
   initSync as initModuleLexerSync,
   parse as parseModuleImports,
@@ -65,10 +66,6 @@ type LoadModuleResult = {
   handler: unknown;
   cacheHit: boolean;
   moduleCacheSize: number;
-};
-
-type FrameworkRouterHandler = Record<string, unknown> & {
-  routes: unknown[];
 };
 
 type InvalidateModuleMessage = { type: "invalidate_module"; functionId: string };
@@ -556,29 +553,6 @@ async function executeFunction(handler: unknown, request: Request): Promise<Resp
   );
 }
 
-function isFrameworkRouterHandler(handler: unknown): handler is FrameworkRouterHandler {
-  if (!handler || typeof handler !== "object") return false;
-  const candidate = handler as Record<string, unknown>;
-  const metadata = candidate.__supacloud as Record<string, unknown> | undefined;
-  return metadata?.routeAware === true
-    || Array.isArray(candidate.routes)
-    && (typeof candidate.handle === "function" || typeof candidate.fetch === "function");
-}
-
-function toFunctionLocalUrl(requestUrl: string): string {
-  const url = new URL(requestUrl);
-  const publicRoute = url.pathname.match(/^\/functions\/v1\/[^/]+(\/.*)?$/);
-  if (publicRoute) {
-    url.pathname = publicRoute[1] || "/";
-    return url.toString();
-  }
-
-  const internalRoute = url.pathname.match(/^\/[^/]+(\/.*)?$/);
-  if (internalRoute) {
-    url.pathname = internalRoute[1] || "/";
-  }
-  return url.toString();
-}
 
 function isStringRecord(candidate: unknown): candidate is Record<string, string> {
   if (!candidate || typeof candidate !== "object") return false;
