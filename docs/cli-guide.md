@@ -175,12 +175,17 @@ supacloud-cli db explain --target public.case_create
 
 # read-only catalog reconcile against a live database
 supacloud-cli db module_check --module_file db/modules.ts --database_url "$DATABASE_URL"
+
+# or reconcile against a local SupaCloud Lite project (delegates to supacloud-lite db check)
+supacloud-cli db module_check --lite --project_dir .
 ```
 
 `db module_check` is classified read-only: it introspects `pg_policy`,
 `pg_proc`, `pg_class` and grants, and reports drift between the declared
 manifest and the live catalog (missing policies, RLS disabled, security
-definer without a pinned `search_path`, PUBLIC grants). See
+definer without a pinned `search_path`, PUBLIC grants). With `--lite` the
+check runs against a local SupaCloud Lite project instead of a connection
+URL (requires `supacloud-lite` on PATH). See
 [Database Governance](./database-governance.md) and
 [Application Framework](./application-framework.md).
 

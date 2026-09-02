@@ -226,6 +226,72 @@ describe("db governance tools", () => {
             .rejects.toThrow("无法读取数据库 catalog");
     });
 
+    test("module_check --lite delegates to supacloud-lite db check", async () => {
+        const calls: string[][] = [];
+        let callback: DbCallback | undefined;
+        registerDbGovernanceTools({
+            tool(_name, _description, _schema, registered) {
+                callback = registered as DbCallback;
+            },
+        }, {
+            environment: {},
+            liteBinary: "/fake/supacloud-lite",
+            liteSpawn: async (command) => {
+                calls.push(command);
+                return { exitCode: 0, stdout: "module docs:\n  ok\n", stderr: "" };
+            },
+        });
+        if (!callback) throw new Error("db tool was not registered");
+
+        const result = await callback({ action: "module_check", root, lite: true });
+        expect(result.isError).toBe(false);
+        expect(result.content[0].text).toContain("module docs:");
+        expect(calls).toHaveLength(1);
+        expect(calls[0].slice(0, 3)).toEqual(["/fake/supacloud-lite", "db", "check"]);
+        expect(calls[0]).toContain("--project-dir");
+        expect(calls[0]).toContain(root);
+    });
+
+    test("module_check --lite propagates a failing exit code and module_file", async () => {
+        const calls: string[][] = [];
+        let callback: DbCallback | undefined;
+        registerDbGovernanceTools({
+            tool(_name, _description, _schema, registered) {
+                callback = registered as DbCallback;
+            },
+        }, {
+            environment: {},
+            liteBinary: "/fake/supacloud-lite",
+            liteSpawn: async (command) => {
+                calls.push(command);
+                return { exitCode: 1, stdout: "missing-policy here\n", stderr: "" };
+            },
+        });
+        if (!callback) throw new Error("db tool was not registered");
+
+        const result = await callback({ action: "module_check", root, lite: true, module_file: "db/modules.ts" });
+        expect(result.isError).toBe(true);
+        expect(result.content[0].text).toContain("missing-policy");
+        expect(calls[0]).toContain("--module-file");
+    });
+
+    test("module_check --lite requires the supacloud-lite binary", async () => {
+        let callback: DbCallback | undefined;
+        registerDbGovernanceTools({
+            tool(_name, _description, _schema, registered) {
+                callback = registered as DbCallback;
+            },
+        }, {
+            environment: {},
+            liteBinary: null,
+            liteSpawn: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
+        });
+        if (!callback) throw new Error("db tool was not registered");
+
+        await expect(callback({ action: "module_check", root, lite: true }))
+            .rejects.toThrow("supacloud-lite");
+    });
+
     test("db actions are classified in the execution policy", () => {
         expect(executionMode("db", "lint", {})).toBe("local");
         expect(executionMode("db", "explain", {})).toBe("local");
