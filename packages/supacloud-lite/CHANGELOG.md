@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.9.2...supacloud-lite-v0.10.0) (2026-09-02)
+
+
+### Features
+
+* **lite:** support Elysia/Hono framework functions with function-local routing ([#1093](https://github.com/vibeunion/supacloud/issues/1093)) ([e92dbea](https://github.com/vibeunion/supacloud/commit/e92dbeaacb4386d17f64985b74f97b146090bbf9))
+
 ## [0.9.2](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.9.1...supacloud-lite-v0.9.2) (2026-08-29)
 
 
