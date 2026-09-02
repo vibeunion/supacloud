@@ -67,6 +67,12 @@ export class CaseModule {}
 The compiler rejects scope violations (e.g. an `application` provider
 depending on a `request` provider) at build time.
 
+## Built-in Tokens
+
+- `DB_CLIENT` — Platform database / Drizzle client (`application` scope).
+- `REQUEST_CONTEXT` — HTTP request context (`request` scope).
+- `JOB_CONTEXT` — Background job execution context (`job` scope).
+
 ## Non-decorator usage
 
 `defineModule(options)` produces the same metadata as `@Module(options)` and
