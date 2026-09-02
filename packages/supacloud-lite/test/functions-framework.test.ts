@@ -39,7 +39,7 @@ test('toFunctionLocalUrl strips the function prefix', () => {
 })
 
 test('isFrameworkRouterHandler detects router objects and markers', () => {
-  expect(isFrameworkRouterHandler({ handle: () => new Response() })).toBe(true)
+  expect(isFrameworkRouterHandler({ handle: () => new Response() })).toBe(false)
   expect(isFrameworkRouterHandler({ fetch: () => new Response(), routes: [] })).toBe(true)
   expect(isFrameworkRouterHandler({ fetch: () => new Response() })).toBe(false)
   expect(isFrameworkRouterHandler({ __supacloud: { routeAware: true } })).toBe(true)
@@ -50,6 +50,7 @@ test('isFrameworkRouterHandler detects router objects and markers', () => {
 test('elysia-style handle() object receives the function-local URL', async () => {
   const seen: string[] = []
   const elysiaLike: FrameworkObjectHandler = {
+    routes: [],
     handle: (req) => {
       seen.push(new URL(req.url).pathname + new URL(req.url).search)
       if (new URL(req.url).pathname === '/cases/42') return Response.json({ ok: true })
@@ -71,6 +72,7 @@ test('elysia-style handle() object receives the function-local URL', async () =>
 test('elysia-style handle() object sees / for the function root', async () => {
   const seen: string[] = []
   const elysiaLike: FrameworkObjectHandler = {
+    routes: [],
     handle: (req) => {
       seen.push(new URL(req.url).pathname)
       return Response.json({ ok: true })

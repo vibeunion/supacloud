@@ -1,0 +1,74 @@
+{
+  "$comment": "Shared parity vectors for function URL routing. Consumed by both packages/supacloud-lite (FunctionsHandler) and packages/edge-runtime (worker-executor) tests so the local runtime and the production runtime can never drift on these rules.",
+  "urlRewrite": [
+    {
+      "input": "http://localhost/functions/v1/api/cases/42?debug=1",
+      "expected": "http://localhost/cases/42?debug=1"
+    },
+    {
+      "input": "http://localhost/functions/v1/api",
+      "expected": "http://localhost/"
+    },
+    {
+      "input": "http://localhost/functions/v1/api/",
+      "expected": "http://localhost/"
+    },
+    {
+      "input": "https://tenant.example.com/functions/v1/billing/report",
+      "expected": "https://tenant.example.com/report"
+    },
+    {
+      "input": "http://localhost/internal-api/deep/path?q=2",
+      "expected": "http://localhost/deep/path?q=2"
+    },
+    {
+      "input": "http://localhost/single",
+      "expected": "http://localhost/"
+    }
+  ],
+  "routerDetection": [
+    {
+      "shape": {
+        "handle": true
+      },
+      "expected": false,
+      "note": "bare handle without a route table is not a router (real Elysia instances expose routes)"
+    },
+    {
+      "shape": {
+        "fetch": true,
+        "routes": true
+      },
+      "expected": true,
+      "note": "Hono-style router with route table"
+    },
+    {
+      "shape": {
+        "fetch": true
+      },
+      "expected": false,
+      "note": "plain fetch object keeps legacy routing"
+    },
+    {
+      "shape": {
+        "routeAware": true
+      },
+      "expected": true,
+      "note": "__supacloud.routeAware marker"
+    },
+    {
+      "shape": {
+        "routeAware": false
+      },
+      "expected": false,
+      "note": "explicit opt-out"
+    },
+    {
+      "shape": {
+        "routes": true
+      },
+      "expected": false,
+      "note": "routes without handle/fetch is not a router"
+    }
+  ]
+}
