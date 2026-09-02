@@ -123,13 +123,13 @@ describe("generate：application.ts 可被 bun 直接执行", () => {
     compiled = await import(url);
   });
 
-  test("createCompiledModules 返回拓扑序模块描述", () => {
-    const modules = compiled.createCompiledModules({});
-    expect(modules.map((m: { name: string }) => m.name)).toEqual([
-      "audit",
-      "case",
-      "health",
-    ]);
+ test("createCompiledModules 返回拓扑序模块描述", () => {
+   const modules = compiled.createCompiledModules();
+   expect(modules.map((m: { name: string }) => m.name)).toEqual([
+     "audit",
+     "case",
+     "health",
+   ]);
     expect(modules[0].controllers).toEqual([]);
     expect(modules[1].commands[0]).toMatchObject({
       className: "AcceptCaseCommand",
