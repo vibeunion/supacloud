@@ -531,7 +531,6 @@ supacloud/
 ├── install.sh                  # 一键部署脚本
 ├── setup.sh                    # 远程安装引导
 ├── switch.sh                   # 运行时/存储切换工具
-├── supacloud                   # CLI 管理工具 (Shell 入口)
 ├── config.env                  # 只读、受 Git 跟踪的默认模板
 ├── packages/
 │   ├── management-api/         # REST API 服务 (Bun + Elysia)
@@ -563,17 +562,14 @@ supacloud/
 │       └── src/                # 组件, 路由, 资源
 ├── scripts/
 │   └── lib/                    # Shell 脚本模块
-│       ├── db_manager.sh       # 数据库生命周期
 │       ├── gateway provider    # Caddy 路由发布由 management-api 内部管理
 │       ├── tenant_runtime.sh   # 租户 PostgREST & GoTrue 运行时
 │       ├── function_manager.sh # 云函数管理
 │       ├── s3_manager.sh       # 存储后端管理
-│       ├── jwt_manager.sh      # JWT 密钥生成
 │       ├── backup_manager.sh   # 备份操作
 │       ├── ha_manager.sh       # 高可用
 │       ├── security_manager.sh # 防火墙 & SSL
 │       ├── storage_manager.sh  # 存储操作
-│       ├── extension_manager.sh# PostgreSQL 扩展
 │       ├── global_router.ts    # 全局路由逻辑
 │       └── worker_runner.ts    # 后台 Worker
 ├── infra/

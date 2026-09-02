@@ -1496,8 +1496,7 @@ select_management_binary_source() {
     supacloud_select_binary_source "$asset_name" \
         "${SCRIPT_DIR}/packages/management-api/dist/${asset_name}" \
         "${SCRIPT_DIR}/packages/management-api/${asset_name}" \
-        "${SCRIPT_DIR}/${asset_name}" \
-        "${SCRIPT_DIR}/supacloud"
+        "${SCRIPT_DIR}/${asset_name}"
 }
 
 select_edge_runtime_binary_source() {

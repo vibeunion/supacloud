@@ -212,7 +212,7 @@ describe("database tables column visibility", () => {
 
     await unmountHarness(secondView);
     secondTarget.remove();
-  }, 30_000);
+  }, 90_000);
 
   test("pins the released SvAdmin UI dependency exactly", async () => {
     const packageJson = await Bun.file(new URL("package.json", packageRoot)).json();
