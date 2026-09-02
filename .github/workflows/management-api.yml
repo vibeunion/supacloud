@@ -192,6 +192,56 @@ jobs:
           bun run build
           bun audit --audit-level high
 
+      - name: Check app framework metadata
+        working-directory: packages/app
+        run: |
+          bun install --frozen-lockfile
+          bun run typecheck
+          bun run typecheck:test
+          bun test
+          bun run build
+          bun audit --audit-level high
+
+      - name: Check app compiler
+        working-directory: packages/compiler
+        run: |
+          bun install --frozen-lockfile
+          bun run typecheck
+          bun run typecheck:test
+          bun test
+          bun run build
+          bun audit --audit-level high
+
+      - name: Check elysia adapter
+        working-directory: packages/elysia
+        run: |
+          bun install --frozen-lockfile
+          bun run typecheck
+          bun run typecheck:test
+          bun test
+          bun run build
+          bun audit --audit-level high
+
+      - name: Check database governance
+        working-directory: packages/db
+        run: |
+          bun install --frozen-lockfile
+          bun run typecheck
+          bun run typecheck:test
+          bun test
+          bun run build
+          bun audit --audit-level high
+
+      - name: Check testing utilities
+        working-directory: packages/testing
+        run: |
+          bun install --frozen-lockfile
+          bun run typecheck
+          bun run typecheck:test
+          bun test
+          bun run build
+          bun audit --audit-level high
+
       - name: Generate CycloneDX SBOM
         uses: anchore/sbom-action@v0
         with:

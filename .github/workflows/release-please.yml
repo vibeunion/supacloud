@@ -40,6 +40,11 @@ jobs:
       admin_released: ${{ steps.release.outputs['packages/admin--release_created'] }}
       function_adapter_released: ${{ steps.release.outputs['packages/function-adapter--release_created'] }}
       supacloud_released: ${{ steps.release.outputs['packages/supacloud--release_created'] }}
+      app_released: ${{ steps.release.outputs['packages/app--release_created'] }}
+      compiler_released: ${{ steps.release.outputs['packages/compiler--release_created'] }}
+      elysia_released: ${{ steps.release.outputs['packages/elysia--release_created'] }}
+      db_released: ${{ steps.release.outputs['packages/db--release_created'] }}
+      testing_released: ${{ steps.release.outputs['packages/testing--release_created'] }}
     steps:
       - uses: googleapis/release-please-action@v5
         id: release
@@ -445,6 +450,58 @@ jobs:
         working-directory: packages/supacloud
         run: |
           bun install --frozen-lockfile --registry https://registry.npmjs.org
+          bun run build
+          node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
+
+      # App-framework packages. NODE_AUTH_TOKEN supports the first publish of
+      # each new package before npm trusted publishing is linked.
+      - name: Publish app framework metadata to NPM
+        if: ${{ needs.release-please.outputs.app_released == 'true' }}
+        working-directory: packages/app
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+          node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
+
+      - name: Publish app compiler to NPM
+        if: ${{ needs.release-please.outputs.compiler_released == 'true' }}
+        working-directory: packages/compiler
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+          node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
+
+      - name: Publish elysia adapter to NPM
+        if: ${{ needs.release-please.outputs.elysia_released == 'true' }}
+        working-directory: packages/elysia
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+          node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
+
+      - name: Publish database governance to NPM
+        if: ${{ needs.release-please.outputs.db_released == 'true' }}
+        working-directory: packages/db
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+          node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
+
+      - name: Publish testing utilities to NPM
+        if: ${{ needs.release-please.outputs.testing_released == 'true' }}
+        working-directory: packages/testing
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
+        run: |
+          bun install --frozen-lockfile
           bun run build
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
