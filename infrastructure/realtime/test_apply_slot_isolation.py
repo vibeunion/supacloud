@@ -8,8 +8,8 @@ import subprocess
 import stat
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
-from unittest import mock
 
 
 SCRIPT_PATH = Path(__file__).with_name("apply-slot-isolation.py")
@@ -152,7 +152,7 @@ class ApplySlotIsolationTests(unittest.TestCase):
     def test_atomic_write_failure_leaves_original_untouched(self) -> None:
         original = self.source_path.read_text(encoding="utf-8")
         patched = PATCHER.render_source(original)
-        with mock.patch.object(PATCHER.os, "replace", side_effect=OSError("rename failed")):
+        with unittest.mock.patch.object(PATCHER.os, "replace", side_effect=OSError("rename failed")):
             with self.assertRaises(OSError):
                 PATCHER.atomic_write(self.source_path, patched, original)
         self.assertEqual(self.source_path.read_text(encoding="utf-8"), original)

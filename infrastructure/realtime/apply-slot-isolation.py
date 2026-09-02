@@ -247,6 +247,7 @@ def atomic_write(path: Path, content: str, expected_original: str) -> None:
             try:
                 os.unlink(temporary_path)
             except FileNotFoundError:
+                # A concurrent cleanup or failed replace may already remove it.
                 pass
         os.close(directory_fd)
 
