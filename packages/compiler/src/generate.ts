@@ -94,7 +94,7 @@ export async function generateApplication(
     ...(imports.size > 0 ? [""] : []),
     INTERFACES,
     "",
-    "export function createCompiledModules(deps: Record<string, unknown>): CompiledModule[] {",
+    "export function createCompiledModules(deps: Record<string, unknown> = {}): CompiledModule[] {",
     "  return [",
     ...descriptorEntries.map((entry) => indent(entry, 4) + ","),
     "  ];",

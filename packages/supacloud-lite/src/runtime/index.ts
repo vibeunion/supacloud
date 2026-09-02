@@ -55,6 +55,7 @@ export {
 export { type PgredisCacheBinding } from './functions/pgredis.js'
 export { generateTypes } from './gen-types.js'
 export { installDenoShim } from './functions/deno-shim.js'
+export { installEdgeRuntimeShim } from './functions/edge-runtime-shim.js'
 export { WebhooksService, type WebhookConfig, type WebhookDelivery } from './webhooks/service.js'
 export { CronService, cronMatches } from './cron/service.js'
 export { NetService, type NetDelivery } from './net/service.js'
