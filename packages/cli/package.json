@@ -31,7 +31,9 @@
     "directory": "packages/cli"
   },
   "dependencies": {
-    "@sinclair/typebox": "^0.34.52"
+    "@sinclair/typebox": "^0.34.52",
+    "@supacloud/compiler": "^0.1.0",
+    "@supacloud/db": "^0.1.0"
   },
   "devDependencies": {
     "@types/bun": "^1.4.0",

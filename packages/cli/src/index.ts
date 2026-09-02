@@ -24,6 +24,8 @@ import { registerBranchTools } from "./shared/tools/branch-tools";
 import { registerSupabaseCliTools } from "./shared/tools/supabase-cli-tools";
 import { registerLiteCliTools } from "./shared/tools/lite-cli-tools";
 import { registerAiTools } from "./shared/tools/ai-tools";
+import { registerAppTools } from "./shared/tools/app-tools";
+import { registerDbGovernanceTools } from "./shared/tools/db-governance-tools";
 import { registerScheduledFunctionTools } from "./shared/tools/scheduled-function-tools";
 import { registerMutationTools } from "./shared/tools/mutation-tools";
 import { registerReleaseTools } from "./shared/tools/release-tools";
@@ -312,6 +314,15 @@ EXAMPLES
   ${preferredCommand} branch promote --branch_ref preview123 --plan_checksum <sha256>
   ${preferredCommand} ai show_skill
   ${preferredCommand} ai install_skill --dry_run
+  ${preferredCommand} app generate --kind module --name billing
+  ${preferredCommand} app generate --kind command --module billing --name issue-invoice
+  ${preferredCommand} app compile --root .
+  ${preferredCommand} app check --root . --strict
+  ${preferredCommand} app graph --root . --format json
+  ${preferredCommand} app explain --target CaseService
+  ${preferredCommand} db lint --root . --module_file db/modules.ts
+  ${preferredCommand} db explain --target public.cases --module_file db/modules.ts
+  ${preferredCommand} db module_check --module_file db/modules.ts --database_url "postgresql://..."
   ${preferredCommand} edge_functions get_config --ref abc123 --slug hello
   ${preferredCommand} edge_functions deploy --ref abc123 --slug hello --path ./supabase/functions/hello --expected-active-version absent --expected-activation-id legacy
   ${preferredCommand} edge_functions deploy --ref abc123 --slug hello --prebundled-path ./dist/hello.js --expected-sha256 <sha256> --expected-active-version 4 --expected-activation-id <uuid>
@@ -368,6 +379,8 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
     })));
     Object.assign(tools, captureTools((server) => registerLiteCliTools(server as any)));
     Object.assign(tools, captureTools((server) => registerAiTools(server as any)));
+    Object.assign(tools, captureTools((server) => registerAppTools(server as any)));
+    Object.assign(tools, captureTools((server) => registerDbGovernanceTools(server as any)));
 
     const registerContextAwareHelp = () => {
         tools.project = {
@@ -543,7 +556,7 @@ async function main() {
     }
 
     const cliTools = createCliTools(context, globalOptions.confirmProduction);
-    if (args.length === 1 && !["ai", "supabase", "lite"].includes(args[0]) && cliTools[args[0]]) {
+    if (args.length === 1 && !["ai", "supabase", "lite", "app", "db"].includes(args[0]) && cliTools[args[0]]) {
         const result = await cliTools[args[0]].callback({});
         if (result?.content && Array.isArray(result.content)) {
             for (const chunk of result.content) {
