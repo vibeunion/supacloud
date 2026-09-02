@@ -6,7 +6,7 @@
       "name": "supacloud",
       "dependencies": {
         "@supacloud/admin": "^0.18.2",
-        "@supacloud/cli": "^0.38.0",
+        "@supacloud/cli": "^0.39.0",
       },
       "devDependencies": {
         "@types/bun": "^1.4.0",
@@ -25,7 +25,7 @@
 
     "@supacloud/admin": ["@supacloud/admin@0.18.2", "", { "dependencies": { "@sinclair/typebox": "^0.34.52", "ssh2": "^1.17.0" }, "bin": { "supacloud-admin": "dist/index.js" } }, "sha512-zKpDqSoyxa3qcOMh8j/eBduJVvstZKyOQmFtQkNOpC3rjAwfYQTGhzsU/H9QJ88xMz6y8zizdBwafaafuLriLg=="],
 
-    "@supacloud/cli": ["@supacloud/cli@0.38.0", "", { "dependencies": { "@sinclair/typebox": "^0.34.52", "@supacloud/compiler": "^0.1.0", "@supacloud/db": "^0.1.0" }, "bin": { "supacloud-cli": "dist/index.js" } }, "sha512-/QdPnDwbz0tfoXPNZPfclFsB6mB4E1iJk3VWRE4XD3ol9x5/ME6Z86S5NL4yk6/ze/czM90BG/3jM6RWVqbtjg=="],
+    "@supacloud/cli": ["@supacloud/cli@0.39.0", "", { "dependencies": { "@sinclair/typebox": "^0.34.52", "@supacloud/compiler": "^0.1.0", "@supacloud/db": "^0.1.0", "fflate": "^0.8.3" }, "bin": { "supacloud-cli": "dist/index.js" } }, "sha512-rpzWpwzYo6R3QVJ3A4qNa7f1qSwP76eMHeHRp9hTPsf/4uV3LzUSsDjgIh5xvVLMur7OsDZyliVD1zLpUfelNw=="],
 
     "@supacloud/compiler": ["@supacloud/compiler@0.1.0", "", { "dependencies": { "ts-morph": "^26.0.0" } }, "sha512-bQpxB9VmsfI4lFsAKDfLmFgaLnUQn1jsnvcCyPPFXrbT1ZUau+EQb01NV3lpJQRvqhxiQiFoMkir7eP6rSGZLg=="],
 
@@ -98,6 +98,8 @@
     "fast-glob": ["fast-glob@3.3.3", "", { "dependencies": { "@nodelib/fs.stat": "^2.0.2", "@nodelib/fs.walk": "^1.2.3", "glob-parent": "^5.1.2", "merge2": "^1.3.0", "micromatch": "^4.0.8" } }, "sha512-7MptL8U0cqcFdzIzwOTHoilX9x5BrNqye7Z/LuC7kCMRio1EMSyqRK3BEAUD7sXRq4iT4AzTVuZdhgQ2TCvYLg=="],
 
     "fastq": ["fastq@1.20.3", "", { "dependencies": { "reusify": "^1.0.4" } }, "sha512-XKv5nnLs6nLF71NgiKJLIZFLkPyIEuOselLG7ujZnGrRfQK8HpvY+WqKhAJUAdLomwVHErVS4LfxFlPq0/FTAw=="],
+
+    "fflate": ["fflate@0.8.3", "", {}, "sha512-tbZNuJrLwGUp3zshBtdy4W+ORxZuIh8a5ilyIEQDC5rY1f3U20JMry0Ll3WBzU58EZKsEuJFXhb5gwv8CsPvgA=="],
 
     "fill-range": ["fill-range@7.1.1", "", { "dependencies": { "to-regex-range": "^5.0.1" } }, "sha512-YsGpe3WHLK8ZYi4tWDg2Jy3ebRz2rXowDxnld4bkQB00cc/1Zw9AWnC0i9ztDJitivtQvaI9KaLyKrc+hBW0yg=="],
 
