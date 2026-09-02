@@ -79,6 +79,8 @@ as $$ select count(*) from public.docs $$;
     join(projectDir, 'supabase', 'db', 'sql', 'docs_select.sql'),
     `alter table public.docs enable row level security;
 
+drop policy if exists docs_select on public.docs;
+
 create policy docs_select on public.docs
   for select to authenticated
   using (true);
