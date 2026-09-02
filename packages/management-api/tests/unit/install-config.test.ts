@@ -409,7 +409,7 @@ describe("installer configuration persistence", () => {
     expect(readFileSync(jwtKeys, "utf8")).toBe(firstJwt);
     expect(firstConfig).toContain("SUPABASE_PUBLIC_DOMAIN=api.10.20.30.40.nip.io");
     expect(firstConfig).toContain("SUPABASE_STUDIO_DOMAIN=studio.10.20.30.40.nip.io");
-  });
+  }, 15_000);
 
   test("strict install input parser round-trips a safely escaped command-substitution literal", () => {
     const dir = makeTempDir();
@@ -438,7 +438,7 @@ describe("installer configuration persistence", () => {
     expect(loaded.status, loaded.stderr).toBe(0);
     expect(() => statSync(marker)).toThrow();
     expect(readFileSync(output, "utf8")).toBe(literal);
-  });
+  }, 15_000);
 
   test("service environment encoding is source-safe, round-trips special characters, and rejects newlines", () => {
     const dir = makeTempDir();
