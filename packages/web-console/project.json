@@ -1,0 +1,7 @@
+{
+  "name": "@supacloud/web-console",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "tags": ["scope:cloud", "type:app"],
+  "projectType": "application",
+  "sourceRoot": "packages/web-console/src"
+}

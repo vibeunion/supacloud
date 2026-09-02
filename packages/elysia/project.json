@@ -1,0 +1,7 @@
+{
+  "name": "@supacloud/elysia",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "tags": ["scope:runtime", "type:adapter"],
+  "projectType": "library",
+  "sourceRoot": "packages/elysia/src"
+}

@@ -1,0 +1,7 @@
+{
+  "name": "@supacloud/lite",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "tags": ["scope:cloud", "type:cli"],
+  "projectType": "application",
+  "sourceRoot": "packages/supacloud-lite/src"
+}

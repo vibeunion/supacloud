@@ -11,7 +11,10 @@ export async function compileProject(options: CompileOptions): Promise<CompileRe
   const graph = await analyzeProject(options.rootDir, options.include);
   const diagnostics: Diagnostic[] = [
     ...(graph.diagnostics ?? []),
-    ...validateGraph(graph, options.strict),
+    ...validateGraph(graph, {
+      strict: options.strict,
+      moduleBoundaries: options.moduleBoundaries,
+    }),
   ];
   if (options.strict) {
     for (const diagnostic of diagnostics) {

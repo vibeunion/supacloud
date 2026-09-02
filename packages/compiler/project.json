@@ -1,0 +1,7 @@
+{
+  "name": "@supacloud/compiler",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "tags": ["scope:tooling", "type:compiler"],
+  "projectType": "library",
+  "sourceRoot": "packages/compiler/src"
+}

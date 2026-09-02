@@ -28,6 +28,8 @@ export interface InjectableMeta {
 
 export interface ModuleOptions {
   name: string;
+  /** Tags for architectural boundary governance (e.g. ['scope:case', 'type:feature']). */
+  tags?: string[];
   imports?: Array<Type<unknown>>;
   providers?: Provider[];
   controllers?: Array<Type<unknown>>;
@@ -36,7 +38,8 @@ export interface ModuleOptions {
   exports?: Token[];
 }
 
-export interface ModuleMeta extends Required<Omit<ModuleOptions, "exports">> {
+export interface ModuleMeta extends Required<Omit<ModuleOptions, "exports" | "tags">> {
+  tags?: string[];
   exports: Token[];
 }
 
@@ -142,6 +145,7 @@ export function Module(options: ModuleOptions): ClassDecorator {
   return (target) => {
     const meta: ModuleMeta = {
       name: options.name,
+      tags: options.tags ?? [],
       imports: options.imports ?? [],
       providers: options.providers ?? [],
       controllers: options.controllers ?? [],

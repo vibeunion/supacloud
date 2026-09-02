@@ -38,6 +38,10 @@ describe("analyzeProject：模块发现", () => {
   test("imports 解析为被引用模块的 name", () => {
     expect(moduleByName("case").imports).toEqual(["audit"]);
   });
+
+  test("tags 属性正确解析（无 tags 时为 undefined）", () => {
+    expect(moduleByName("case").tags).toBeUndefined();
+  });
 });
 
 describe("analyzeProject：provider 解析", () => {

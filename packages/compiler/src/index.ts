@@ -11,6 +11,7 @@ export type {
   CompileResult,
   ControllerNode,
   Diagnostic,
+  ModuleBoundaryRule,
   ModuleNode,
   ProviderKind,
   ProviderNode,

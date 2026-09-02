@@ -1,5 +1,8 @@
 {
   "version": "0.0.2",
+  "scripts": {
+    "check:boundaries": "bun run scripts/check_workspace_boundaries.ts"
+  },
   "dependencies": {
     "@types/ws": "^8.18.1",
     "ws": "^8.21.3"

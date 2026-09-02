@@ -78,6 +78,8 @@ export interface ModuleNode {
   /** @Module({ name }) 或 defineModule 的 name。 */
   name: string;
   className: string;
+  /** 模块标签（如 ['scope:case', 'type:feature']），用于架构边界治理。 */
+  tags?: string[];
   file: string;
   line: number;
   /** 被 import 模块的 name。 */
@@ -116,6 +118,17 @@ export interface CompileOptions {
   outDir: string;
   /** warn 级诊断升级为 error。 */
   strict?: boolean;
+  /** 模块边界与架构治理规则（受 Nx enforce-module-boundaries 启发）。 */
+  moduleBoundaries?: ModuleBoundaryRule[];
+}
+
+export interface ModuleBoundaryRule {
+  /** 源模块标签模式或标签（如 'type:ui', 'scope:case', '*'）。 */
+  sourceTag: string;
+  /** 源模块仅允许依赖具有这些标签的模块。 */
+  onlyDependOnLibsWithTags?: string[];
+  /** 源模块禁止依赖具有这些标签的模块。 */
+  bannedDependenciesWithTags?: string[];
 }
 
 export interface CompileResult {

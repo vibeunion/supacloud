@@ -1,0 +1,7 @@
+{
+  "name": "@supacloud/db",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "tags": ["scope:core", "type:database"],
+  "projectType": "library",
+  "sourceRoot": "packages/db/src"
+}
