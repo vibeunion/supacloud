@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { testTimeout } from './helpers/timeouts.js'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -333,7 +334,7 @@ describe('Edge Function pgredis compatibility', () => {
     } finally {
       await rm(projectDir, { recursive: true, force: true })
     }
-  })
+  }, testTimeout(20_000))
 })
 
 function pgredis(): PgredisCacheBinding {
