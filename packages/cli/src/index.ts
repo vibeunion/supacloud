@@ -29,6 +29,7 @@ import { registerDbGovernanceTools } from "./shared/tools/db-governance-tools";
 import { registerScheduledFunctionTools } from "./shared/tools/scheduled-function-tools";
 import { registerMutationTools } from "./shared/tools/mutation-tools";
 import { registerReleaseTools } from "./shared/tools/release-tools";
+import { deployToolSchema, findDeployConfigRoot, registerDeployTools } from "./shared/tools/deploy-tools";
 import packageMetadata from "../package.json" with { type: "json" };
 
 type ToolEntry = { schema: any; callback: (args: any) => Promise<any> };
@@ -251,6 +252,7 @@ function printHelp(context: ResolvedContext) {
 
 USAGE
 
+  ${preferredCommand} [global flags] deploy [--flags]
   ${preferredCommand} [global flags] <module> <action> [--flags]
   ${preferredCommand} [global flags] status
   ${preferredCommand} --help
@@ -285,6 +287,9 @@ DEFAULT CONTEXT
 EXAMPLES
 
   ${preferredCommand} status
+  ${preferredCommand} deploy
+  ${preferredCommand} deploy --target web
+  ${preferredCommand} deploy --target api
   ${preferredCommand} project get
   ${preferredCommand} project logs --log_type database
   ${preferredCommand} project task_stats
@@ -447,6 +452,16 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
 
     if (context.credentialScope !== "management" || !context.apiUrl || !context.apiToken) {
         registerContextAwareHelp();
+        tools.deploy = {
+            schema: deployToolSchema,
+            callback: async () => ({
+                isError: true,
+                content: [{
+                    type: "text" as const,
+                    text: `⚠️ Deploy requires Management API context. Run \`${preferredCommand} status\` to inspect current detection.`,
+                }],
+            }),
+        };
         Object.assign(tools, captureTools((server) => registerDatabaseTools(server as any, undefined, {
             localOnly: true,
         })));
@@ -509,9 +524,10 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
     assign(captureTools((server) => registerAuthTools(server as any, http)));
     assign(captureTools((server) => registerOAuthClientTools(server as any, http)));
     assign(captureTools((server) => registerStorageTools(server as any, http)));
-    assign(captureTools((server) => registerAdvancedTools(server as any, http, process.env, {
+    const advancedTools = captureTools((server) => registerAdvancedTools(server as any, http, process.env, {
         readOnly: context.readOnly,
-    })));
+    }));
+    assign(advancedTools);
     assign(captureTools((server) => registerScheduledFunctionTools(server as any, http, process.env, {
         readOnly: context.readOnly,
     })));
@@ -522,6 +538,11 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
         applicationOrigin: context.inferredSupabaseUrl || undefined,
     })));
     assign(captureTools((server) => registerFrontendTools(server as any, http)));
+    assign(captureTools((server) => registerDeployTools(server as any, http, {
+        projectRef: context.projectRef || undefined,
+        cwd: process.cwd(),
+        edgeFunctionDeploy: advancedTools.edge_functions?.callback,
+    })));
     assign(captureTools((server) => registerGatewayTools(server as any, http, {
         projectRef: context.projectRef || undefined,
     })));
@@ -545,7 +566,8 @@ async function main() {
     }
     const globalOptions = parseGlobalOptions(rawArgs);
     const args = globalOptions.args;
-    const context = resolveSupaCloudContext(process.env, process.cwd(), {
+    const contextDirectory = args[0] === "deploy" ? await findDeployConfigRoot(process.cwd()) : process.cwd();
+    const context = resolveSupaCloudContext(process.env, contextDirectory, {
         environmentName: globalOptions.environmentName,
         envFile: globalOptions.envFile,
     });

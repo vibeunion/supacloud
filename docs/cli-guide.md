@@ -46,6 +46,7 @@ explicitly to override host inference.
 npm install -g @supacloud/cli
 
 supacloud-cli status
+supacloud-cli deploy
 supacloud-cli project get
 supacloud-cli project logs --log_type database
 supacloud-cli database query --sql "select now()"
@@ -57,6 +58,85 @@ supacloud-cli supabase push --ref abc123 --dir supabase/migrations --dry_run
 supacloud-cli frontend list --ref abc123
 supacloud-cli frontend list_releases --ref abc123 --id web
 supacloud-cli frontend upload_release --ref abc123 --id web --zip_path ./dist.zip
+```
+
+### One-command deploy
+
+`supacloud-cli deploy` is the normal developer path for a linked application. It
+supports a frontend and backend living in separate directories. Frontend targets
+use immutable static releases; `edge_function` targets use the existing verified
+Edge Function bundle protocol. The command runs the target build, publishes only
+that target, and reads the final identity back.
+
+Simple single-frontend projects usually need no file. Monorepos should add a
+repository-root `supacloud.json`:
+
+```json
+{
+  "defaultTarget": "web",
+  "targets": {
+    "web": {
+      "type": "frontend",
+      "root": "apps/web",
+      "id": "web",
+      "buildCommand": "bun run build",
+      "outputDirectory": "dist"
+    },
+    "api": {
+      "type": "edge_function",
+      "root": "apps/api",
+      "slug": "api",
+      "buildCommand": "bun run bundle",
+      "bundleDirectory": "dist",
+      "entrypoint": "index.ts",
+      "verifyJwt": true,
+      "minify": true
+    }
+  }
+}
+```
+
+```bash
+# From a target workspace, the target is selected automatically.
+cd apps/web
+supacloud-cli deploy
+cd ../api
+supacloud-cli deploy
+
+# From the repository root, select a target explicitly.
+supacloud-cli deploy --target web
+supacloud-cli deploy --target api
+
+# Inspect the resolved plan without building or writing remotely.
+supacloud-cli deploy --target web --dry_run
+
+# Publish an output directory already built by CI.
+supacloud-cli deploy --target web --skip_build --output_dir dist
+```
+
+When multiple targets exist and the command runs at the repository root, it
+fails closed unless `defaultTarget` or `--target` is provided. Running inside a
+target directory selects the deepest matching `root`. Relative output and bundle
+directories are resolved against that target root, while lockfiles are detected
+from the target root up to the repository root.
+
+The legacy shape remains supported:
+
+```json
+{
+  "frontend": {
+    "id": "web",
+    "root": "apps/web",
+    "buildCommand": "bun run build",
+    "outputDirectory": "dist"
+  }
+}
+```
+
+Production profiles retain the standard explicit confirmation gate:
+
+```bash
+supacloud-cli --env production --confirm-production abc123 deploy
 ```
 
 Both `--key value` and `--key=value` syntax are supported. `supacloud-cli status`

@@ -66,6 +66,21 @@ function context(overrides: Partial<ResolvedContext> = {}): ResolvedContext {
 }
 
 describe("CLI execution policy", () => {
+    test("treats one-command deploy as a protected write and dry run as read-only", () => {
+        expect(executionMode("deploy", "deploy", {})).toBe("write");
+        expect(executionMode("deploy", "deploy", { dry_run: true })).toBe("read");
+        expect(() => authorizeExecution("deploy", { ref: "prod-ref" }, {
+            context: context(),
+        })).toThrow("--confirm-production prod-ref");
+        expect(() => authorizeExecution("deploy", { ref: "prod-ref" }, {
+            context: context(),
+            confirmProduction: "prod-ref",
+        })).not.toThrow();
+        expect(() => authorizeExecution("deploy", { ref: "prod-ref", dry_run: true }, {
+            context: context(),
+        })).not.toThrow();
+    });
+
     test("requires an exact production confirmation for remote writes", () => {
         for (const action of ["pause", "restore"]) {
             expect(executionMode("project", action, {})).toBe("write");
