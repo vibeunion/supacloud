@@ -44,9 +44,11 @@ export {
   toFunctionLocalUrl,
   type EdgeFunction,
   type FrameworkObjectHandler,
+  type FunctionCapabilities,
   type FunctionContext,
   type FunctionFramework,
   type FunctionHandler,
+  type FunctionLimits,
   type FunctionRegistryValue,
   type LoadedFunction,
 } from './functions/handler.js'

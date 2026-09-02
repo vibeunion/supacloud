@@ -42,6 +42,14 @@ export interface LoadFunctionOptions {
   entrypoint?: string
   /** Framework profile: fetch (default, legacy routing), elysia, or hono. */
   framework?: FunctionFramework
+  /** Invocation timeout in ms (Edge Runtime limits.timeout_ms). */
+  timeoutMs?: number
+  /** Max inbound request body bytes (Edge Runtime limits.max_request_body_bytes). */
+  maxRequestBodyBytes?: number
+  /** Outbound fetch host allowlist (Edge Runtime capabilities.outbound_hosts). */
+  outboundHosts?: string[]
+  /** Env keys exposed to the function beyond the SUPABASE_* base trio (Edge Runtime capabilities.secrets). */
+  secrets?: string[]
 }
 
 const FUNCTION_FRAMEWORKS: ReadonlySet<string> = new Set(['fetch', 'elysia', 'hono'])
@@ -143,9 +151,26 @@ async function loadFunctionsUnlocked(
                 ? (req: Request) => denoHandler(req)
                 : undefined
         if (handler) {
+          const opts = options[name]
+          const limits =
+            opts && (opts.timeoutMs !== undefined || opts.maxRequestBodyBytes !== undefined)
+              ? {
+                  ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+                  ...(opts.maxRequestBodyBytes !== undefined ? { maxRequestBodyBytes: opts.maxRequestBodyBytes } : {}),
+                }
+              : undefined
+          const capabilities =
+            opts && (opts.outboundHosts !== undefined || opts.secrets !== undefined)
+              ? {
+                  ...(opts.outboundHosts !== undefined ? { outboundHosts: opts.outboundHosts } : {}),
+                  ...(opts.secrets !== undefined ? { secrets: opts.secrets } : {}),
+                }
+              : undefined
           functions.set(name, {
             handler,
-            framework: resolveFramework(name, options[name]?.framework),
+            framework: resolveFramework(name, opts?.framework),
+            ...(limits ? { limits } : {}),
+            ...(capabilities ? { capabilities } : {}),
           })
         } else {
           console.warn(`  warning: function "${name}" has no default function, handle/fetch object, or Deno.serve() handler, skipped`)
