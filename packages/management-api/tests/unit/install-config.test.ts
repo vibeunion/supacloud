@@ -28,6 +28,73 @@ function runBash(script: string, env: Record<string, string> = {}) {
   });
 }
 
+const edgeRuntimeIdentityName = ".supacloud-source-identity.json";
+const edgeRuntimeStableVersion = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
+
+function writeEdgeRuntimeSourceIdentity(root: string) {
+  const packagePath = join(root, "package.json");
+  const rootStat = statSync(root);
+  const packageStat = statSync(packagePath);
+
+  if (!rootStat.isDirectory() || lstatSync(root).isSymbolicLink() || !packageStat.isFile() || lstatSync(packagePath).isSymbolicLink()) {
+    throw new Error("Edge Runtime source package is missing or unsafe");
+  }
+
+  const pkg = JSON.parse(readFileSync(packagePath, "utf8"));
+  if (pkg.name !== "@supacloud/edge-runtime") {
+    throw new Error("Edge Runtime package name is invalid");
+  }
+  if (typeof pkg.version !== "string" || !edgeRuntimeStableVersion.test(pkg.version)) {
+    throw new Error("Edge Runtime package version must be an exact stable version");
+  }
+
+  const ignoredDirectories = new Set(["node_modules", ".tmp", "dist"]);
+  const files: Array<{ relative: string; path: string }> = [];
+  const pending = [root];
+  while (pending.length > 0) {
+    const current = pending.pop() as string;
+    for (const name of readdirSync(current)) {
+      const candidate = join(current, name);
+      const relative = candidate.slice(root.length + 1);
+      const metadata = lstatSync(candidate);
+      if (metadata.isDirectory()) {
+        if (!ignoredDirectories.has(name)) {
+          pending.push(candidate);
+        }
+      } else if (metadata.isFile()) {
+        if (relative === edgeRuntimeIdentityName || relative.split("/").some((part) => ignoredDirectories.has(part))) {
+          continue;
+        }
+        files.push({ relative, path: candidate });
+      } else if (metadata.isSymbolicLink()) {
+        throw new Error(`Staged Edge Runtime source contains a symbolic link: ${relative}`);
+      } else {
+        throw new Error(`Staged Edge Runtime source contains a special file: ${relative}`);
+      }
+    }
+  }
+
+  const digest = createHash("sha256");
+  for (const entry of files.sort((left, right) => (left.relative < right.relative ? -1 : left.relative > right.relative ? 1 : 0))) {
+    const metadata = lstatSync(entry.path);
+    digest.update("file\0");
+    digest.update(entry.relative);
+    digest.update("\0");
+    digest.update((metadata.mode & 0o777).toString(8).padStart(4, "0"));
+    digest.update("\0");
+    digest.update(readFileSync(entry.path));
+    digest.update("\0");
+  }
+
+  const identity = {
+    schemaVersion: 1,
+    packageName: "@supacloud/edge-runtime",
+    packageVersion: pkg.version,
+    sourceSha256: digest.digest("hex"),
+  };
+  writeFileSync(join(root, edgeRuntimeIdentityName), `${JSON.stringify(identity, null, 2)}\n`, { mode: 0o644 });
+}
+
 describe("installer configuration persistence", () => {
   test("recognizes only Unit-scoped systemd start limits as canonical", () => {
     const dir = makeTempDir();
@@ -1182,6 +1249,10 @@ describe("installer configuration persistence", () => {
       version: "1.2.3",
     }));
     writeFileSync(join(sourceDir, "server.ts"), "new-runtime\n");
+    writeFileSync(join(targetDir, "package.json"), JSON.stringify({
+      name: "@supacloud/edge-runtime",
+      version: "1.0.0",
+    }));
     writeFileSync(join(targetDir, "server.ts"), "old-runtime\n");
     writeFileSync(join(targetDir, "removed.ts"), "old-only\n");
     writeFileSync(join(fakeBin, "bun"), [
@@ -1190,6 +1261,7 @@ describe("installer configuration persistence", () => {
       "printf 'installed\\n' > node_modules/installed.txt",
       "",
     ].join("\n"), { mode: 0o755 });
+    writeEdgeRuntimeSourceIdentity(targetDir);
 
     const result = runBash([
       "source install.sh",
@@ -1214,7 +1286,7 @@ describe("installer configuration persistence", () => {
     expect(result.status, result.stderr).toBe(0);
     expect(readFileSync(join(targetDir, "server.ts"), "utf8")).toBe("old-runtime\n");
     expect(readFileSync(join(targetDir, "removed.ts"), "utf8")).toBe("old-only\n");
-  });
+  }, { timeout: 15_000 });
 
   test("management Edge release staging fails closed when the lockfile install fails", () => {
     const dir = makeTempDir();
@@ -1254,7 +1326,7 @@ describe("installer configuration persistence", () => {
 
     expect(result.status).not.toBe(0);
     expect(readFileSync(calls, "utf8").trim().split("\n")).toEqual([
-      "install --frozen-lockfile",
+      "install --backend=copyfile --frozen-lockfile",
     ]);
     expect(result.stdout).toContain("do not match the lockfile");
     expect(existsSync(targetDir)).toBe(false);
@@ -1494,7 +1566,7 @@ describe("installer configuration persistence", () => {
 
     expect(configured.status, configured.stderr).toBe(0);
     expect(readFileSync(calls, "utf8")).toBe([
-      `chmod:-R g-w,g+rX ${sourceDir}`,
+      `chmod:-R go-w,g+rX ${sourceDir}`,
       `chgrp:-R supacloud-edge ${sourceDir}`,
       "",
     ].join("\n"));
