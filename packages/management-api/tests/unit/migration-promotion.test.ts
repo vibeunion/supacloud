@@ -160,8 +160,8 @@ describe("branch migration promotion planning", () => {
     );
   });
 
-  test("blocks opaque DO blocks from the controlled migration path", () => {
-    const sql = "DO $$ BEGIN DROP TABLE accounts; END $$;";
+  test("blocks DO blocks with privileged bodies from the controlled migration path", () => {
+    const sql = "DO $$ BEGIN PERFORM pg_read_file('/etc/passwd'); END $$;";
     const plan = buildBranchMigrationPromotionPlan({
       parentRef: "production",
       branchRef: "preview",

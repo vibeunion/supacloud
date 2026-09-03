@@ -36,6 +36,38 @@ describe("project migration SQL policy", () => {
     ])).toEqual([]);
   });
 
+  test("tolerates one outer BEGIN/COMMIT wrapper around a migration file", () => {
+    expect(projectMigrationSqlViolations([
+      "BEGIN",
+      "CREATE TABLE public.example(id integer)",
+      "COMMIT",
+    ])).toEqual([]);
+    expect(projectMigrationSqlViolations([
+      "BEGIN;\nCREATE TABLE public.example(id integer);\nCOMMIT;",
+    ])).toEqual([]);
+    expect(projectMigrationSqlViolations(["START TRANSACTION", "SELECT 1", "END"])).toEqual([]);
+    expect(projectMigrationSqlViolations([
+      "-- generated migration\nBEGIN TRANSACTION;",
+      "CREATE TABLE public.example(id integer);",
+      "COMMIT WORK;",
+    ])).toEqual([]);
+  });
+
+  test("still rejects non-wrapper transaction control statements", () => {
+    expect(projectMigrationSqlViolations(["ROLLBACK"])).toContain("transaction control");
+    expect(projectMigrationSqlViolations(["ABORT AND CHAIN"])).toContain("transaction control");
+    expect(projectMigrationSqlViolations(["BEGIN", "SELECT 1", "ROLLBACK"]))
+      .toContain("transaction control");
+    expect(projectMigrationSqlViolations(["CREATE TABLE public.example(id integer)", "COMMIT"]))
+      .toContain("transaction control");
+    expect(projectMigrationSqlViolations(["BEGIN", "SAVEPOINT sp", "SELECT 1", "COMMIT"]))
+      .toContain("transaction control");
+    expect(projectMigrationSqlViolations(["BEGIN", "SELECT 1", "RELEASE SAVEPOINT sp", "COMMIT"]))
+      .toContain("transaction control");
+    expect(projectMigrationSqlViolations(["BEGIN", "SELECT 1", "PREPARE TRANSACTION 't'", "COMMIT"]))
+      .toContain("transaction control");
+  });
+
   test("blocks quoted and unquoted public schema removal", () => {
     expect(projectMigrationSqlViolations(["DROP SCHEMA public CASCADE"]))
       .toContain("public schema removal");
@@ -80,13 +112,17 @@ describe("project migration SQL policy", () => {
       "analyze public.schema_migrations",
       "grant select on public.accounts, public.schema_migrations to authenticated",
       "grant select on all tables in schema supabase_migrations to authenticated",
-      "grant all on all tables in schema public to authenticated",
+      "grant select on supabase_migrations.schema_migrations to authenticated",
       "select supabase_migrations.record_schema_migration('2', array['select 1'], 'fake', 'checksum')",
     ])).toEqual(expect.arrayContaining([
       "migration ledger modification",
       "migration ledger privilege modification",
       "migration ledger recorder access",
     ]));
+    expect(projectMigrationSqlViolations(["grant all on all tables in schema public to authenticated"]))
+      .not.toContain("migration ledger privilege modification");
+    expect(projectMigrationSqlViolations(["revoke all on all tables in schema public from anon, authenticated"]))
+      .not.toContain("migration ledger privilege modification");
     expect(projectMigrationSqlViolations(["grant select on public.accounts to schema_migrations"]))
       .not.toContain("migration ledger privilege modification");
     expect(projectMigrationSqlViolations(["grant execute on function public.audit(schema_migrations) to authenticated"]))
@@ -115,18 +151,44 @@ describe("project migration SQL policy", () => {
     expect(projectMigrationSqlViolations([functionDefinition])).not.toContain("advisory lock control");
     expect(projectMigrationSqlViolations([functionDefinition])).not.toContain("session role control");
     expect(projectMigrationSqlViolations(["DO $$ BEGIN PERFORM 1; END $$;"]))
-      .toContain("opaque procedural SQL");
+      .toEqual([]);
   });
 
-  test("blocks every supported top-level DO body form", () => {
+  test("accepts an idempotent DO block guard", () => {
+    const guardedDo = `
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'mood') THEN
+          CREATE TYPE public.mood AS ENUM ('happy', 'sad');
+        END IF;
+      END
+      $$;
+    `;
+    expect(projectMigrationSqlViolations([guardedDo])).toEqual([]);
+  });
+
+  test("rescans top-level DO bodies for privileged operations", () => {
     for (const statement of [
       "DO LANGUAGE plpgsql $$ BEGIN PERFORM pg_advisory_lock(1); END $$;",
-      "DO /* generated */ LANGUAGE plpgsql $$ BEGIN SET ROLE postgres; END $$;",
       "DO 'BEGIN PERFORM pg_advisory_lock(1); END';",
+    ]) {
+      expect(projectMigrationSqlViolations([statement])).toContain("advisory lock control");
+    }
+    for (const statement of [
+      "DO /* generated */ LANGUAGE plpgsql $$ BEGIN SET ROLE postgres; END $$;",
       "DO LANGUAGE plpgsql 'BEGIN SET ROLE postgres; END';",
     ]) {
-      expect(projectMigrationSqlViolations([statement])).toContain("opaque procedural SQL");
+      expect(projectMigrationSqlViolations([statement])).toContain("session role control");
     }
+    expect(projectMigrationSqlViolations([
+      "DO $$ BEGIN PERFORM pg_read_file('/etc/passwd'); END $$;",
+    ])).toContain("server file access");
+    expect(projectMigrationSqlViolations([
+      "DO $$ BEGIN PERFORM dblink('host=other', 'select 1'); END $$;",
+    ])).toContain("external database access");
+    expect(projectMigrationSqlViolations([
+      "DO $$ BEGIN INSERT INTO supabase_migrations.schema_migrations(version) VALUES ('1'); END $$;",
+    ])).toContain("migration ledger modification");
   });
 
   test("continues to block privileged operations at the migration top level", () => {
