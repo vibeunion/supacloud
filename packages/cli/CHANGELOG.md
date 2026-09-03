@@ -14,6 +14,13 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.42.0](https://github.com/vibeunion/supacloud/compare/cli-v0.41.0...cli-v0.42.0) (2026-09-03)
+
+
+### Features
+
+* **cli:** add remote test dev sync with drizzle migration flow ([#1119](https://github.com/vibeunion/supacloud/issues/1119)) ([f62c8a0](https://github.com/vibeunion/supacloud/commit/f62c8a093c41ad7fc717692ea24f611e8475a9d0))
+
 ## [0.41.0](https://github.com/vibeunion/supacloud/compare/cli-v0.40.0...cli-v0.41.0) (2026-09-03)
 
 
