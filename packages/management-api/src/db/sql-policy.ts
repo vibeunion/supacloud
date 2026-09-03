@@ -1,3 +1,5 @@
+import { splitSqlStatements, stripOuterTransactionStatements } from "./sql-statements";
+
 export const WRITE_SQL_PATTERN = /^\s*(INSERT|UPDATE|DELETE|MERGE|UPSERT|CREATE|ALTER|DROP|TRUNCATE|GRANT|REVOKE|COMMENT|REINDEX|VACUUM|ANALYZE|REFRESH|CALL|DO|COPY|SET|RESET|LOCK)\b/i;
 export const MULTI_STATEMENT_PATTERN = /;\s*\S/;
 
@@ -32,7 +34,7 @@ const MIGRATION_LEDGER_PRIVILEGE_PATTERN = new RegExp(
   + String.raw`)(?:(?!\b(?:TO|FROM)\b)[^;])*?`
   + MIGRATION_LEDGER_RELATION
   + MIGRATION_LEDGER_RELATION_END
-  + String.raw`(?=[^;]*\b(?:TO|FROM)\b)|ALL\s+TABLES\s+IN\s+SCHEMA\s+"?(?:supabase_migrations|public)"?(?=$|[\s,;]))`,
+  + String.raw`(?=[^;]*\b(?:TO|FROM)\b)|ALL\s+TABLES\s+IN\s+SCHEMA\s+"?supabase_migrations"?(?=$|[\s,;]))`,
   "i",
 );
 
@@ -56,7 +58,6 @@ const PRIVILEGED_MIGRATION_PATTERNS: readonly SqlPattern[] = [
   { label: "tablespace management", pattern: /\b(?:CREATE|DROP)\s+TABLESPACE\b/i },
   { label: "subscription management", pattern: /\b(?:CREATE|ALTER|DROP)\s+SUBSCRIPTION\b/i },
   { label: "dynamic library loading", pattern: /\bLOAD\b/i },
-  { label: "opaque procedural SQL", pattern: /(?:^|;)\s*DO\b/i },
   { label: "transaction control", pattern: TRANSACTION_CONTROL_PATTERN },
   { label: "session role control", pattern: /\b(?:SET\s+(?:(?:LOCAL|SESSION)\s+)?(?:ROLE|SESSION\s+AUTHORIZATION)|RESET\s+(?:ROLE|SESSION\s+AUTHORIZATION)|DISCARD\s+ALL)\b/i },
   { label: "advisory lock control", pattern: /\bpg_(?:try_)?advisory_(?:xact_)?(?:lock|unlock)(?:_shared|_all)?\s*\(/i },
@@ -87,6 +88,7 @@ const LEGACY_DANGEROUS_SQL_PATTERNS: readonly RegExp[] = [
   /\bALTER\s+(ROLE|USER|SYSTEM)\b/i,
   /\bCREATE\s+(FUNCTION|PROCEDURE|RULE)\b/i,
   /\bDO\s+\$[^$]*\$/i,
+  /(?:^|;)\s*DO\b/i,
   /\bCOPY\s+.*\bTO\s+PROGRAM\b/i,
   /\bCOPY\s+.*\bFROM\s+PROGRAM\b/i,
   /\bdblink_(connect|exec|open|fetch|send_query)\b/i,
@@ -197,6 +199,89 @@ export function normalizeSqlForPolicy(sqlQuery: string): string {
   return maskSqlPolicyNoise(sqlQuery).replace(/\s+/g, " ").trim();
 }
 
+function skipSqlTrivia(sql: string, start: number): number {
+  let cursor = start;
+  for (;;) {
+    while (cursor < sql.length && /\s/.test(sql[cursor]!)) cursor += 1;
+    if (sql.startsWith("--", cursor)) {
+      cursor = lineCommentEnd(sql, cursor);
+      continue;
+    }
+    if (sql.startsWith("/*", cursor)) {
+      cursor = blockCommentEnd(sql, cursor);
+      continue;
+    }
+    return cursor;
+  }
+}
+
+/**
+ * Extract the source body of a top-level `DO [LANGUAGE lang] body` statement
+ * whose DO keyword ends at `keywordEnd`. Returns null when the statement does
+ * not carry a recognizable dollar-quoted or single-quoted body.
+ */
+function doStatementBody(sql: string, keywordEnd: number): string | null {
+  let cursor = skipSqlTrivia(sql, keywordEnd);
+  if (/^LANGUAGE\b/i.test(sql.slice(cursor))) {
+    cursor += "LANGUAGE".length;
+    cursor = skipSqlTrivia(sql, cursor);
+    if (sql[cursor] === "'") cursor = singleQuotedLiteralEnd(sql, cursor);
+    else if (sql[cursor] === '"') cursor = doubleQuotedIdentifierEnd(sql, cursor);
+    else {
+      const languageName = /^[A-Za-z_][A-Za-z0-9_]*/.exec(sql.slice(cursor));
+      if (!languageName) return null;
+      cursor += languageName[0].length;
+    }
+    cursor = skipSqlTrivia(sql, cursor);
+  }
+  if (sql[cursor] === "'") {
+    const end = singleQuotedLiteralEnd(sql, cursor);
+    return sql.slice(cursor + 1, Math.max(cursor + 1, end - 1));
+  }
+  const tag = sql[cursor] === "$" ? dollarQuoteTagAt(sql, cursor) : "";
+  if (!tag) return null;
+  const bodyEnd = sql.indexOf(tag, cursor + tag.length);
+  return bodyEnd === -1 ? null : sql.slice(cursor + tag.length, bodyEnd);
+}
+
+function topLevelDoBodies(sql: string): string[] {
+  const masked = maskSqlPolicyNoise(sql);
+  const doKeywordPattern = /(?:^|;)\s*DO\b/gi;
+  const bodies: string[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = doKeywordPattern.exec(masked)) !== null) {
+    const body = doStatementBody(sql, doKeywordPattern.lastIndex);
+    if (body !== null) bodies.push(body);
+  }
+  return bodies;
+}
+
+/**
+ * A DO body is PL/pgSQL source, so BEGIN/END transaction keywords are part of
+ * the language block structure rather than transaction control. Every other
+ * privileged pattern is re-applied to the body (depth 1) so a DO block cannot
+ * smuggle server file access, dblink calls, or ledger modifications.
+ */
+function doBodyViolations(body: string): string[] {
+  const normalized = normalizeSqlForPolicy(body);
+  return PRIVILEGED_MIGRATION_PATTERNS
+    .filter(({ label, pattern }) => label !== "transaction control" && pattern.test(normalized))
+    .map(({ label }) => label);
+}
+
+function splitPolicyStatements(statements: readonly string[]): string[] {
+  const split: string[] = [];
+  for (const statement of statements) {
+    try {
+      split.push(...splitSqlStatements(statement));
+    } catch {
+      // Keep malformed SQL as-is so the pattern scan below still reviews it.
+      split.push(statement);
+    }
+  }
+  return split;
+}
+
 export function isDangerousSQL(sqlQuery: string): boolean {
   const normalized = normalizeSqlForPolicy(sqlQuery);
   return LEGACY_DANGEROUS_SQL_PATTERNS.some((pattern) => pattern.test(normalized))
@@ -208,8 +293,16 @@ export function sqlContainsTransactionControl(sqlQuery: string): boolean {
 }
 
 export function projectMigrationSqlViolations(statements: readonly string[]): string[] {
-  const normalized = statements.map(normalizeSqlForPolicy).join("; ");
-  return [...new Set(PRIVILEGED_MIGRATION_PATTERNS
+  // Migration files are conventionally wrapped in one outer BEGIN/COMMIT pair;
+  // the executor already owns the transaction, so tolerate that wrapper while
+  // still rejecting any other transaction control (ROLLBACK, SAVEPOINT, ...).
+  const executable = stripOuterTransactionStatements(splitPolicyStatements(statements));
+  const normalized = executable.map(normalizeSqlForPolicy).join("; ");
+  const violations = new Set(PRIVILEGED_MIGRATION_PATTERNS
     .filter(({ pattern }) => pattern.test(normalized))
-    .map(({ label }) => label))];
+    .map(({ label }) => label));
+  for (const body of topLevelDoBodies(executable.join(";\n"))) {
+    for (const label of doBodyViolations(body)) violations.add(label);
+  }
+  return [...violations];
 }

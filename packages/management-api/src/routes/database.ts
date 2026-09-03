@@ -89,12 +89,24 @@ export function resolveMigrationStatements(body: MigrationBody): string[] {
  * contents while retaining the original statements for checksums and history.
  */
 export function migrationExecutionStatements(statements: readonly string[]): string[] {
+  return deriveMigrationExecution(statements).statements;
+}
+
+export interface MigrationExecutionDerivation {
+  statements: string[];
+  strippedTransactionWrappers: number;
+}
+
+export function deriveMigrationExecution(statements: readonly string[]): MigrationExecutionDerivation {
   const normalized = statements.flatMap((statement) => splitSqlStatements(statement));
   const executionStatements = stripOuterTransactionStatements(normalized);
   if (executionStatements.length === 0) {
     throw new MigrationRouteError(400, "empty_migration", "Migration contains no executable statements");
   }
-  return executionStatements;
+  return {
+    statements: executionStatements,
+    strippedTransactionWrappers: normalized.length - executionStatements.length,
+  };
 }
 
 const MAX_MIGRATION_VERSION = 9_223_372_036_854_775_807n;
@@ -1015,9 +1027,10 @@ async function withMigrationRoleSession<T>(
 async function applyRecordedMigration(input: RecordedMigrationInput): Promise<{
   checksum: string;
   alreadyApplied: boolean;
+  strippedTransactionWrappers: number;
 }> {
   const checksum = calculateMigrationChecksum(input);
-  const executionStatements = migrationExecutionStatements(input.statements);
+  const execution = deriveMigrationExecution(input.statements);
 
   return withProjectMigrationLocks({ projectRefs: [input.projectRef] }, async () => {
     await branchReplacementJournal.assertInactive([input.projectRef]);
@@ -1026,10 +1039,10 @@ async function applyRecordedMigration(input: RecordedMigrationInput): Promise<{
         connection,
         adminDb,
         input,
-        { checksum, statements: executionStatements },
+        { checksum, statements: execution.statements },
       );
       await ensureTasksRealtimePublication(adminDb);
-      return { checksum, alreadyApplied };
+      return { checksum, alreadyApplied, strippedTransactionWrappers: execution.strippedTransactionWrappers };
     });
   });
 }
@@ -1911,9 +1924,9 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                 });
                 if (result.alreadyApplied) {
                     set.status = 409;
-                    return { message: "Migration already applied", code: "409", version, name, checksum: result.checksum };
+                    return { message: "Migration already applied", code: "409", version, name, checksum: result.checksum, stripped_transaction_statements: result.strippedTransactionWrappers };
                 }
-                return { version, ...(isStructuredFormat ? { name } : {}), statements, checksum: result.checksum };
+                return { version, ...(isStructuredFormat ? { name } : {}), statements, checksum: result.checksum, stripped_transaction_statements: result.strippedTransactionWrappers };
             } catch (error: unknown) {
                 const failure = migrationRouteFailure(error);
                 set.status = failure.status;
