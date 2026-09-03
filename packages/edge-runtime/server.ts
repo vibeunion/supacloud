@@ -1414,7 +1414,11 @@ async function handleFunctionRequest(
 }
 
 const app = new Elysia()
-  .use(cors())
+  // Functions own their CORS policy (origin allowlists, custom headers), so
+  // OPTIONS preflight must reach the function instead of being answered by the
+  // platform. Non-preflight responses still get the default CORS headers when
+  // the function did not set them itself.
+  .use(cors({ preflight: false }))
   .get("/health", () => ({
     status: "ok",
     instanceId: RUNTIME_INSTANCE_ID,
