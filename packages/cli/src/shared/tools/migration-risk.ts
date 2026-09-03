@@ -198,6 +198,63 @@ function migrationExecutionStatements(statements: readonly string[]): string[] {
     return hasOuterTransaction ? statements.slice(1, -1) : [...statements];
 }
 
+function skipSqlTrivia(sql: string, start: number): number {
+    let cursor = start;
+    for (;;) {
+        while (cursor < sql.length && /\s/.test(sql[cursor])) cursor++;
+        if (sql.startsWith("--", cursor)) {
+            cursor = lineCommentEnd(sql, cursor);
+            continue;
+        }
+        if (sql.startsWith("/*", cursor)) {
+            cursor = blockCommentEnd(sql, cursor);
+            continue;
+        }
+        return cursor;
+    }
+}
+
+/**
+ * Extract the source body of a top-level `DO [LANGUAGE lang] body` statement
+ * whose DO keyword ends at `keywordEnd`. Returns null when the statement does
+ * not carry a recognizable dollar-quoted or single-quoted body.
+ */
+function doStatementBody(sql: string, keywordEnd: number): string | null {
+    let cursor = skipSqlTrivia(sql, keywordEnd);
+    if (/^LANGUAGE\b/i.test(sql.slice(cursor))) {
+        cursor += "LANGUAGE".length;
+        cursor = skipSqlTrivia(sql, cursor);
+        if (sql[cursor] === "'") cursor = maskSingleQuotedString(sql, cursor).end;
+        else if (sql[cursor] === '"') cursor = maskDoubleQuotedIdentifier(sql, cursor).end;
+        else {
+            const languageName = /^[A-Za-z_][A-Za-z0-9_]*/.exec(sql.slice(cursor));
+            if (!languageName) return null;
+            cursor += languageName[0].length;
+        }
+        cursor = skipSqlTrivia(sql, cursor);
+    }
+    if (sql[cursor] === "'") {
+        const end = maskSingleQuotedString(sql, cursor).end;
+        return sql.slice(cursor + 1, Math.max(cursor + 1, end - 1));
+    }
+    const tag = sql[cursor] === "$" ? dollarQuoteTagAt(sql, cursor) : "";
+    if (!tag) return null;
+    const bodyEnd = sql.indexOf(tag, cursor + tag.length);
+    return bodyEnd === -1 ? null : sql.slice(cursor + tag.length, bodyEnd);
+}
+
+function topLevelDoBodies(sql: string): string[] {
+    const masked = maskSqlPolicyNoise(sql);
+    const doKeywordPattern = /(?:^|;)\s*DO\b/gi;
+    const bodies: string[] = [];
+    let match: RegExpExecArray | null;
+    while ((match = doKeywordPattern.exec(masked)) !== null) {
+        const body = doStatementBody(sql, doKeywordPattern.lastIndex);
+        if (body !== null) bodies.push(body);
+    }
+    return bodies;
+}
+
 function splitTopLevelClauses(sql: string): string[] {
     const masked = maskSqlNoise(sql);
     const clauses: string[] = [];
@@ -296,14 +353,6 @@ const RISK_RULES: readonly RiskRule[] = [
         pattern: /\bALTER\s+TABLE\b[\s\S]*?\bRENAME\s+TO\b/i,
         description: "Renames table. Causes immediate downtime for application code.",
         recommendation: "Follow Expand-Contract: Create a view or alias table during transition.",
-    },
-    {
-        type: "manual_review_do_block",
-        level: "HIGH",
-        pattern: /^\s*DO\b/i,
-        description: "DO blocks can execute dynamic or procedural DDL that static rules cannot inspect safely.",
-        recommendation: "Move schema changes into explicit SQL statements; push_migrations rejects opaque procedural SQL.",
-        blocksTransactionalPush: true,
     },
     {
         type: "manual_review_procedural_definition",
@@ -426,7 +475,7 @@ const MIGRATION_LEDGER_PRIVILEGE_PATTERN = new RegExp(
     + String.raw`)(?:(?!\b(?:TO|FROM)\b)[^;])*?`
     + MIGRATION_LEDGER_RELATION
     + MIGRATION_LEDGER_RELATION_END
-    + String.raw`(?=[^;]*\b(?:TO|FROM)\b)|ALL\s+TABLES\s+IN\s+SCHEMA\s+"?(?:supabase_migrations|public)"?(?=$|[\s,;]))`,
+    + String.raw`(?=[^;]*\b(?:TO|FROM)\b)|ALL\s+TABLES\s+IN\s+SCHEMA\s+"?supabase_migrations"?(?=$|[\s,;]))`,
     "i",
 );
 
@@ -559,6 +608,15 @@ const MIGRATION_LEDGER_BLOCKER_RULES: readonly RiskRule[] = [
     },
 ];
 
+/**
+ * A DO body is PL/pgSQL source, so BEGIN/END keywords are block structure, not
+ * transaction control. Every other push blocker is re-applied to the body
+ * (depth 1) so a DO block cannot smuggle server access, dblink calls, session
+ * control, or ledger modifications past static analysis.
+ */
+const DO_BODY_BLOCKER_RULES: readonly RiskRule[] = PUSH_BLOCKER_RULES
+    .filter((rule) => rule.type !== "unsupported_transaction_control");
+
 function matchingRisks(
     rawStatement: string,
     maskedStatement: string,
@@ -645,6 +703,13 @@ export function analyzeMigrationSql(sql: string): MigrationRiskItem[] {
         risks.push(...matchingRisks(rawStatement, masked, PUSH_BLOCKER_RULES));
         risks.push(...matchingRisks(rawStatement, policyMasked, QUOTED_FUNCTION_BLOCKER_RULES));
         risks.push(...matchingRisks(rawStatement, policyMasked, MIGRATION_LEDGER_BLOCKER_RULES));
+        for (const body of topLevelDoBodies(rawStatement)) {
+            const maskedBody = maskSqlNoise(body);
+            const policyMaskedBody = maskSqlPolicyNoise(body);
+            risks.push(...matchingRisks(body, maskedBody, DO_BODY_BLOCKER_RULES));
+            risks.push(...matchingRisks(body, policyMaskedBody, QUOTED_FUNCTION_BLOCKER_RULES));
+            risks.push(...matchingRisks(body, policyMaskedBody, MIGRATION_LEDGER_BLOCKER_RULES));
+        }
     }
 
     return risks;

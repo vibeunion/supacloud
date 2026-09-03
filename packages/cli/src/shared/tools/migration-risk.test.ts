@@ -222,27 +222,59 @@ describe("migration risk analysis", () => {
         expect(analyzeMigrationSql(sql)).toHaveLength(0);
     });
 
-    test("requires manual review for DO blocks even when their body is dollar-quoted", () => {
-        const risks = analyzeMigrationSql(`DO $$ BEGIN EXECUTE 'DROP TABLE users'; END $$;`);
-        expect(risks).toEqual([
+    test("accepts benign DO blocks and rescans their bodies for privileged operations", () => {
+        expect(analyzeMigrationSql(`DO $$ BEGIN EXECUTE 'DROP TABLE users'; END $$;`))
+            .toHaveLength(0);
+        expect(analyzeMigrationSql(`
+            DO $$
+            BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'mood') THEN
+                    CREATE TYPE public.mood AS ENUM ('happy', 'sad');
+                END IF;
+            END
+            $$;
+        `)).toHaveLength(0);
+        expect(analyzeMigrationSql(`DO $$ BEGIN PERFORM pg_read_file('/etc/passwd'); END $$;`))
+            .toEqual([
+                expect.objectContaining({
+                    level: "HIGH",
+                    type: "unsupported_server_access",
+                    blocksTransactionalPush: true,
+                }),
+            ]);
+        expect(analyzeMigrationSql(`DO $$ BEGIN PERFORM dblink('host=remote', 'SELECT 1'); END $$;`))
+            .toEqual([
+                expect.objectContaining({
+                    level: "HIGH",
+                    type: "unsupported_external_database_access",
+                    blocksTransactionalPush: true,
+                }),
+            ]);
+        expect(analyzeMigrationSql(
+            `DO $$ BEGIN INSERT INTO supabase_migrations.schema_migrations(version) VALUES ('1'); END $$;`,
+        )).toEqual(expect.arrayContaining([
             expect.objectContaining({
                 level: "HIGH",
-                type: "manual_review_do_block",
+                type: "unsupported_migration_ledger_access",
                 blocksTransactionalPush: true,
             }),
-        ]);
+        ]));
     });
 
-    test("requires manual review for a DO block inside the allowed outer transaction wrapper", () => {
-        const risks = analyzeMigrationSql(`
+    test("accepts a benign DO block inside the allowed outer transaction wrapper", () => {
+        expect(analyzeMigrationSql(`
             BEGIN;
-            DO $migration$ BEGIN EXECUTE 'DROP TABLE users'; END $migration$;
+            DO $migration$ BEGIN PERFORM 1; END $migration$;
             COMMIT;
-        `);
-        expect(risks).toEqual([
+        `)).toHaveLength(0);
+        expect(analyzeMigrationSql(`
+            BEGIN;
+            DO $migration$ BEGIN PERFORM pg_advisory_lock(1); END $migration$;
+            COMMIT;
+        `)).toEqual([
             expect.objectContaining({
                 level: "HIGH",
-                type: "manual_review_do_block",
+                type: "unsupported_advisory_lock_control",
                 blocksTransactionalPush: true,
             }),
         ]);
@@ -342,13 +374,17 @@ describe("migration risk analysis", () => {
             "ANALYZE public.schema_migrations;",
             "GRANT SELECT ON public.accounts, public.schema_migrations TO authenticated;",
             "GRANT SELECT ON ALL TABLES IN SCHEMA supabase_migrations TO authenticated;",
-            "GRANT ALL ON ALL TABLES IN SCHEMA public TO authenticated;",
+            "GRANT SELECT ON supabase_migrations.schema_migrations TO authenticated;",
             "SELECT \"supabase_migrations\".\"record_schema_migration\"('1', ARRAY['SELECT 1'], 'fake', 'checksum');",
         ]) {
             expect(analyzeMigrationSql(sql)).toEqual(expect.arrayContaining([
                 expect.objectContaining({ level: "HIGH", blocksTransactionalPush: true }),
             ]));
         }
+        expect(analyzeMigrationSql("GRANT ALL ON ALL TABLES IN SCHEMA public TO authenticated;"))
+            .toHaveLength(0);
+        expect(analyzeMigrationSql("REVOKE ALL ON ALL TABLES IN SCHEMA public FROM anon, authenticated;"))
+            .toHaveLength(0);
         expect(analyzeMigrationSql("GRANT SELECT ON public.accounts TO schema_migrations;"))
             .toHaveLength(0);
         expect(analyzeMigrationSql("GRANT EXECUTE ON FUNCTION public.audit(schema_migrations) TO authenticated;"))

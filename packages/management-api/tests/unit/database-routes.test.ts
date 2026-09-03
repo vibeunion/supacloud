@@ -13,6 +13,7 @@ import {
   buildRlsTesterLimitedQuery,
   collectRlsPlanRelations,
   MIGRATION_SESSION_RESET_SQL,
+  deriveMigrationExecution,
   migrationExecutionStatements,
   migrationLedgerEntryMatches,
   normalizeMigrationVersion,
@@ -137,7 +138,26 @@ describe("database route helpers", () => {
     expect(projectMigrationSqlViolations(migrationExecutionStatements(wrappedDoBlock)))
       .not.toContain("transaction control");
     expect(projectMigrationSqlViolations(migrationExecutionStatements(wrappedDoBlock)))
-      .toContain("opaque procedural SQL");
+      .toEqual([]);
+  });
+
+  test("records how many outer transaction wrapper statements were stripped", () => {
+    expect(deriveMigrationExecution([
+      "BEGIN;\nCREATE TABLE public.example(id integer);\nCOMMIT;",
+    ])).toEqual({
+      statements: ["CREATE TABLE public.example(id integer)"],
+      strippedTransactionWrappers: 2,
+    });
+    expect(deriveMigrationExecution(["CREATE TABLE public.example(id integer);"]))
+      .toEqual({
+        statements: ["CREATE TABLE public.example(id integer)"],
+        strippedTransactionWrappers: 0,
+      });
+    expect(deriveMigrationExecution(["CREATE TABLE a(id int); COMMIT;"]))
+      .toEqual({
+        statements: ["CREATE TABLE a(id int)", "COMMIT"],
+        strippedTransactionWrappers: 0,
+      });
   });
 
   test("derives xigu-style function execution without changing ledger input", () => {
@@ -235,7 +255,7 @@ describe("database route helpers", () => {
         "migration ledger modification",
       ],
       ["SELECT '$$'; SELECT pg_advisory_lock(1); SELECT $$x$$;", "advisory lock control"],
-      ["SELECT '$$'; DO $$ BEGIN PERFORM 1; END $$;", "opaque procedural SQL"],
+      ["SELECT '$$'; DO $$ BEGIN PERFORM pg_read_file('/etc/passwd'); END $$;", "server file access"],
     ];
 
     for (const [sql, expectedViolation] of adversarialCases) {
