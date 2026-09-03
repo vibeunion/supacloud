@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.69.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.69.0...management-api-v0.69.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* **management-api:** forward OPTIONS preflight to upstreams and preserve function CORS ([#1116](https://github.com/vibeunion/supacloud/issues/1116)) ([9d6ebd9](https://github.com/vibeunion/supacloud/commit/9d6ebd9ef62361af7987c031d1cf8a67aab99a79))
+* **management-api:** grant BYPASSRLS to the project migration role ([#1118](https://github.com/vibeunion/supacloud/issues/1118)) ([be8619b](https://github.com/vibeunion/supacloud/commit/be8619b16d63c31573b872fb6157fa1a63c9faa1))
+
 ## [0.69.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.68.2...management-api-v0.69.0) (2026-09-03)
 
 
