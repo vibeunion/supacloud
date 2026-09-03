@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.1](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.21.0...edge-runtime-v0.21.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* **edge-runtime:** let OPTIONS preflight reach functions instead of platform short-circuit ([#1114](https://github.com/vibeunion/supacloud/issues/1114)) ([76b4665](https://github.com/vibeunion/supacloud/commit/76b466588a83a619613160f3ed6794467085472a))
+
 ## [0.21.0](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.20.1...edge-runtime-v0.21.0) (2026-09-03)
 
 
