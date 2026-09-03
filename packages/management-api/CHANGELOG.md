@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.69.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.68.2...management-api-v0.69.0) (2026-09-03)
+
+
+### Features
+
+* **compiler,app:** add module tags and boundary governance with Nx workspace configuration ([#1110](https://github.com/vibeunion/supacloud/issues/1110)) ([dda9635](https://github.com/vibeunion/supacloud/commit/dda96355ba25a53f1b550e8e95011b1c806a2003))
+
+
+### Bug Fixes
+
+* **management-api,cli:** tolerate legacy migration wrappers in project SQL policy ([fe56e62](https://github.com/vibeunion/supacloud/commit/fe56e626c5b622dfd05868199db4536cd28c5a57))
+* **upgrade:** harden embedded edge source recovery ([bddfd25](https://github.com/vibeunion/supacloud/commit/bddfd259a18ce945442b6e888acca7da85d07d70))
+
+
+### Miscellaneous Chores
+
+* clean up obsolete scripts, deprecated files and tech debt ([#1109](https://github.com/vibeunion/supacloud/issues/1109)) ([3df42f7](https://github.com/vibeunion/supacloud/commit/3df42f7a3ddfb57866427c648c08fbcac699b7dc))
+
 ## [0.68.2](https://github.com/vibeunion/supacloud/compare/management-api-v0.68.1...management-api-v0.68.2) (2026-09-02)
 
 

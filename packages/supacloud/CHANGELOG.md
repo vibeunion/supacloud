@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/vibeunion/supacloud/compare/supacloud-v0.10.30...supacloud-v0.11.0) (2026-09-03)
+
+
+### Features
+
+* **compiler,app:** add module tags and boundary governance with Nx workspace configuration ([#1110](https://github.com/vibeunion/supacloud/issues/1110)) ([dda9635](https://github.com/vibeunion/supacloud/commit/dda96355ba25a53f1b550e8e95011b1c806a2003))
+
 ## [0.10.30](https://github.com/vibeunion/supacloud/compare/supacloud-v0.10.29...supacloud-v0.10.30) (2026-09-02)
 
 
