@@ -6,6 +6,7 @@ describe("project migration role preparation", () => {
     const sql = renderProjectMigrationRoleSql("supa_parent", "role_parent");
 
     expect(sql).toContain('GRANT CREATE ON DATABASE "supa_parent" TO "role_parent"');
+    expect(sql).toContain('ALTER ROLE "role_parent" BYPASSRLS');
     expect(sql).toContain('ALTER SCHEMA public OWNER TO "role_parent"');
     expect(sql).toContain("c.relname <> 'schema_migrations'");
     expect(sql).toContain("d.deptype = 'e'");
@@ -30,5 +31,25 @@ describe("project migration role preparation", () => {
   test("rejects unsafe database and role identifiers", () => {
     expect(() => renderProjectMigrationRoleSql("supa_parent; drop database x", "role_parent")).toThrow();
     expect(() => renderProjectMigrationRoleSql("supa_parent", "role_parent; alter role postgres")).toThrow();
+  });
+
+  test("grants BYPASSRLS idempotently so migrations can write RLS-protected platform tables", async () => {
+    const { prepareProjectMigrationRole } = await import("../../src/services/project-migration-role");
+    const executed: string[] = [];
+    const adminDb = {
+      unsafe(statement: string) {
+        executed.push(statement);
+        return Promise.resolve([]);
+      },
+    };
+
+    await prepareProjectMigrationRole(adminDb, "supa_parent", "role_parent");
+    await prepareProjectMigrationRole(adminDb, "supa_parent", "role_parent");
+
+    expect(executed).toHaveLength(2);
+    for (const statement of executed) {
+      expect(statement).toContain('ALTER ROLE "role_parent" BYPASSRLS');
+      expect(statement).not.toContain("SUPERUSER");
+    }
   });
 });

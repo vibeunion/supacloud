@@ -21,6 +21,10 @@ export function renderProjectMigrationRoleSql(dbName: string, dbUser: string): s
 
   return `
     GRANT CREATE ON DATABASE ${quotedDatabase} TO ${quotedUser};
+    -- 迁移 SQL 经 sql-policy 特权扫描后由服务端在受控事务 + ledger lease 中执行，
+    -- 不开放客户端直达面；平台表（如 storage.buckets）启用 RLS，迁移角色需要
+    -- BYPASSRLS 才能初始化项目私有的平台对象。ALTER ROLE 幂等，重复执行无副作用。
+    ALTER ROLE ${quotedUser} BYPASSRLS;
     ALTER SCHEMA public OWNER TO ${quotedUser};
     GRANT USAGE ON SCHEMA supabase_migrations TO ${quotedUser};
     REVOKE ALL ON TABLE supabase_migrations.schema_migrations FROM PUBLIC, anon, authenticated, service_role, ${quotedUser};
