@@ -622,9 +622,11 @@ export class CaddyGatewayProvider implements GatewayProvider {
 
         const migrated = JSON.parse(JSON.stringify(route)) as CaddyRoute;
         const handle = Array.isArray(migrated.handle) ? migrated.handle as Record<string, unknown>[] : [];
-        const migratedHandle = isStorageRoute
-            ? handle.filter((handler) => handler.strip_path_prefix !== "/storage/v1")
-            : handle;
+        // Functions and storage routes own their upstream CORS policy; drop any
+        // gateway-rendered CORS subroute left over from older route shapes.
+        const migratedHandle = handle.filter((handler) =>
+            !(isStorageRoute && handler.strip_path_prefix === "/storage/v1")
+            && !isCorsSubroute(handler));
         migrated.handle = migratedHandle;
 
         const proxy = migratedHandle.find((handler) => handler.handler === "reverse_proxy") as Record<string, any> | undefined;
@@ -644,6 +646,14 @@ export class CaddyGatewayProvider implements GatewayProvider {
             proxy.headers.response = proxy.headers.response && typeof proxy.headers.response === "object" ? proxy.headers.response : {};
             delete proxy.headers.response.delete;
             delete proxy.flush_interval;
+        }
+
+        if (isFunctionsRoute) {
+            // Preserve function-owned CORS headers on existing deployments.
+            if (proxy.headers.response && typeof proxy.headers.response === "object") {
+                delete proxy.headers.response.delete;
+                if (Object.keys(proxy.headers.response).length === 0) delete proxy.headers.response;
+            }
         }
 
         return migrated;
@@ -1786,6 +1796,9 @@ export class CaddyGatewayProvider implements GatewayProvider {
                     ],
                     readTimeout: 500_000,
                     corsOrigins,
+                    // Functions own their CORS policy (origin allowlists, custom
+                    // headers); preflight must reach the function itself.
+                    preserveUpstreamCors: true,
                 }),
                 this.makeRoute({
                     id: caddyRouteId(projectRef, "storage-resumable"),
