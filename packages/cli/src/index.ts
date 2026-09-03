@@ -30,6 +30,7 @@ import { registerScheduledFunctionTools } from "./shared/tools/scheduled-functio
 import { registerMutationTools } from "./shared/tools/mutation-tools";
 import { registerReleaseTools } from "./shared/tools/release-tools";
 import { deployToolSchema, findDeployConfigRoot, registerDeployTools } from "./shared/tools/deploy-tools";
+import { registerRemoteDevTools } from "./shared/tools/remote-dev-tools";
 import packageMetadata from "../package.json" with { type: "json" };
 
 type ToolEntry = { schema: any; callback: (args: any) => Promise<any> };
@@ -290,6 +291,11 @@ EXAMPLES
   ${preferredCommand} deploy
   ${preferredCommand} deploy --target web
   ${preferredCommand} deploy --target api
+  ${preferredCommand} dev sync --env test --target functions --function api
+  ${preferredCommand} dev status --env test
+  ${preferredCommand} dev watch --env test --target project
+  ${preferredCommand} dev sync --env test --target db
+  ${preferredCommand} dev migrate --env test
   ${preferredCommand} project get
   ${preferredCommand} project logs --log_type database
   ${preferredCommand} project task_stats
@@ -387,7 +393,6 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
     Object.assign(tools, captureTools((server) => registerAiTools(server as any)));
     Object.assign(tools, captureTools((server) => registerAppTools(server as any)));
     Object.assign(tools, captureTools((server) => registerDbGovernanceTools(server as any)));
-
     const registerContextAwareHelp = () => {
         tools.project = {
             schema: { action: projectActionSchema },
@@ -466,6 +471,15 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
         Object.assign(tools, captureTools((server) => registerDatabaseTools(server as any, undefined, {
             localOnly: true,
         })));
+        Object.assign(tools, captureTools((server) => registerRemoteDevTools(server as any, {
+            cwd: process.cwd(),
+            host: process.env.SUPACLOUD_DEV_HOST || context.host,
+            sshUser: context.sshUser,
+            sshPort: context.sshPort,
+            sshKey: context.sshKey,
+            projectRef: context.projectRef || undefined,
+            environment: context.environment,
+        })));
         tools.setup_help = {
             schema: {},
             callback: async () => ({
@@ -522,6 +536,16 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
     }));
     pushMigrations = databaseTools.database?.callback;
     assign(databaseTools);
+    assign(captureTools((server) => registerRemoteDevTools(server as any, {
+        cwd: process.cwd(),
+        host: process.env.SUPACLOUD_DEV_HOST || context.host,
+        sshUser: context.sshUser,
+        sshPort: context.sshPort,
+        sshKey: context.sshKey,
+        projectRef: context.projectRef || undefined,
+        environment: context.environment,
+        runDatabase: databaseTools.database?.callback,
+    })));
     assign(captureTools((server) => registerAuthTools(server as any, http)));
     assign(captureTools((server) => registerOAuthClientTools(server as any, http)));
     assign(captureTools((server) => registerStorageTools(server as any, http)));
