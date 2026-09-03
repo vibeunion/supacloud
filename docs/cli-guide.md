@@ -219,6 +219,8 @@ supacloud-cli app compile --root . --out_dir generated --strict
 supacloud-cli app check
 supacloud-cli app graph --format json
 supacloud-cli app explain --target CaseService
+supacloud-cli app export-tools
+supacloud-cli app export-tools --format json
 
 # SQL governance over defineDatabaseModule sources
 supacloud-cli db lint --module_file db/modules.ts
@@ -230,6 +232,13 @@ supacloud-cli db module_check --module_file db/modules.ts --database_url "$DATAB
 # or reconcile against a local SupaCloud Lite project (delegates to supacloud-lite db check)
 supacloud-cli db module_check --lite --project_dir .
 ```
+
+`app export-tools` reads `generated/app.manifest.json` and exports commands with
+declared permissions as OpenAI Function Calling and MCP tool contracts. The
+default mode writes `generated/tool-definitions.openai.json` and
+`generated/tool-definitions.mcp.json`; `--format json` prints both contracts
+without writing files. Input schemas retain their source TypeBox symbol names
+as references until a schema exporter is added to the compiler.
 
 `db module_check` is classified read-only: it introspects `pg_policy`,
 `pg_proc`, `pg_class` and grants, and reports drift between the declared

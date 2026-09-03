@@ -11,6 +11,7 @@ import {
 } from "@supacloud/compiler";
 import { optional, stringEnum, withDescription } from "../schema";
 import type { ToolSchema } from "../schema";
+import { buildToolDefinitions, type AppManifest } from "./app-tool-export";
 
 type ToolServer = {
     tool: (
@@ -22,7 +23,7 @@ type ToolServer = {
 };
 
 export interface AppToolArguments {
-    action: "generate" | "compile" | "check" | "graph" | "explain";
+    action: "generate" | "compile" | "check" | "graph" | "explain" | "export-tools";
     kind?: "module" | "command" | "query" | "controller";
     name?: string;
     module?: string;
@@ -209,12 +210,6 @@ async function runCheck(args: AppToolArguments): Promise<ToolResult> {
     return textResult(`${formatDiagnostics(diagnostics)}\n\n${summary}`, hasError);
 }
 
-interface AppManifest {
-    version: number;
-    modules: ModuleNode[];
-    externalTokens: string[];
-}
-
 async function readManifest(root: string): Promise<AppManifest> {
     const manifestPath = join(root, "generated", "app.manifest.json");
     if (!existsSync(manifestPath)) {
@@ -376,22 +371,50 @@ async function runExplain(args: AppToolArguments): Promise<ToolResult> {
     return textResult(`未找到对象: ${target}`, true);
 }
 
+async function runExportTools(args: AppToolArguments): Promise<ToolResult> {
+    const root = resolve(args.root || process.cwd());
+    const manifest = await readManifest(root);
+    const definitions = buildToolDefinitions(manifest);
+
+    const outDir = resolve(args.out_dir || join(root, "generated"));
+    await mkdir(outDir, { recursive: true });
+
+    if (args.format === "json") {
+        // JSON mode returns the combined contract on stdout without writing artifacts.
+        return textResult(JSON.stringify(definitions, null, 2));
+    }
+
+    const openaiPath = join(outDir, "tool-definitions.openai.json");
+    const mcpPath = join(outDir, "tool-definitions.mcp.json");
+    await writeFile(openaiPath, JSON.stringify(definitions.openai, null, 2), "utf8");
+    await writeFile(mcpPath, JSON.stringify(definitions.mcp, null, 2), "utf8");
+
+    const summary = [
+        `exported ${definitions.openai.length} tool(s):`,
+        `  openai → ${openaiPath}`,
+        `  mcp    → ${mcpPath}`,
+        "",
+        definitions.openai.map((t) => `  ${t.function.name}`).join("\n"),
+    ].join("\n");
+    return textResult(summary);
+}
+
 export function registerAppTools(server: ToolServer): void {
     server.tool(
         "app",
-        "Local @supacloud/app framework commands: scaffold, compile, check, graph and explain. Actions: generate, compile, check, graph, explain",
+        "Local @supacloud/app framework commands: scaffold, compile, check, graph, explain and export-tools. Actions: generate, compile, check, graph, explain, export-tools",
         {
-            action: withDescription(stringEnum(["generate", "compile", "check", "graph", "explain"]), "App action"),
+            action: withDescription(stringEnum(["generate", "compile", "check", "graph", "explain", "export-tools"]), "App action"),
             kind: optional(stringEnum(["module", "command", "query", "controller"]), "[generate] Scaffold kind"),
             name: optional(Type.String(), "[generate] Object name (module name / command / query name)"),
             module: optional(Type.String(), "[generate] Target feature module (required for command/query/controller)"),
             dir: optional(Type.String(), "[generate] Feature root directory (default: src/features)"),
             force: optional(Type.Boolean(), "[generate] Overwrite existing files"),
-            root: optional(Type.String(), "[generate/compile/check/graph/explain] Project root (default: current directory)"),
+            root: optional(Type.String(), "[generate/compile/check/graph/explain/export-tools] Project root (default: current directory)"),
             include: optional(Type.String(), "[compile/check] Comma-separated glob patterns for source files"),
-            out_dir: optional(Type.String(), "[compile] Output directory (default: <root>/generated)"),
+            out_dir: optional(Type.String(), "[compile/export-tools] Output directory (default: <root>/generated)"),
             strict: optional(Type.Boolean(), "[compile/check] Promote warnings to errors"),
-            format: optional(stringEnum(["text", "json"]), "[graph] Output format (default: text)"),
+            format: optional(stringEnum(["text", "json"]), "[graph/export-tools] Output format (default: text)"),
             target: optional(Type.String(), "[explain] Provider class name / token name / command name"),
         },
         async (request) => {
@@ -401,6 +424,7 @@ export function registerAppTools(server: ToolServer): void {
                 case "check": return runCheck(request);
                 case "graph": return runGraph(request);
                 case "explain": return runExplain(request);
+                case "export-tools": return runExportTools(request);
                 default:
                     return textResult(`Unknown app action: ${String(request.action)}`, true);
             }
