@@ -404,7 +404,23 @@ export function isCorsSubroute(handler: Record<string, unknown>): boolean {
     );
 }
 
+/**
+ * Routes whose upstream owns the CORS policy (functions, storage) keep the
+ * upstream access-control-* headers instead of deleting them at the gateway.
+ */
+export function routePreservesUpstreamCors(route: CaddyRoute): boolean {
+    const handle = Array.isArray(route.handle) ? route.handle as Array<Record<string, any>> : [];
+    return handle.some((handler) => {
+        if (handler?.handler !== "reverse_proxy") return false;
+        const deletions = handler?.headers?.response?.delete;
+        return !(Array.isArray(deletions) && deletions.includes("Access-Control-Allow-Origin"));
+    });
+}
+
 export function setRouteCors(route: CaddyRoute, origins: string[]): void {
+    // Routes that preserve upstream CORS (functions, storage) answer preflight
+    // themselves; never re-attach the gateway CORS subroute to them.
+    if (routePreservesUpstreamCors(route)) return;
     const corsSubroute = makeCorsSubroute(origins);
     const handle = Array.isArray(route.handle) ? route.handle as Record<string, unknown>[] : [];
     const withoutCors = handle.filter((handler) => !isCorsHeaderHandler(handler) && !isCorsSubroute(handler));

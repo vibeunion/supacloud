@@ -577,10 +577,9 @@ type ProxyInterceptors = {
 
 async function executeProxy(request: Request, targetUrl: string, interceptors: ProxyInterceptors) {
     try {
-        if (request.method === 'OPTIONS') {
-             return new Response(null, { status: 204 });
-        }
-
+        // OPTIONS preflight is forwarded like any other method: each upstream
+        // owns its CORS policy (edge-runtime dispatches preflight to the
+        // function itself; PostgREST/GoTrue/Realtime answer natively).
         const body = ["GET", "HEAD"].includes(request.method) ? undefined : request.body;
         
         const reqHeaders = new Headers(request.headers);
@@ -646,11 +645,9 @@ async function executeProxy(request: Request, targetUrl: string, interceptors: P
         response.headers.forEach((val, key) => {
             const lowerKey = key.toLowerCase();
             if (lowerKey === 'set-cookie') return;
-            if (lowerKey === 'access-control-allow-origin') return;
-            if (lowerKey === 'access-control-allow-credentials') return;
-            if (lowerKey === 'access-control-allow-methods') return;
-            if (lowerKey === 'access-control-allow-headers') return;
-            if (lowerKey === 'access-control-expose-headers') return;
+            // Upstream access-control-* headers are preserved: the upstream owns
+            // its CORS policy. Gateway routes that manage CORS themselves drop
+            // these headers at the Caddy layer (see preserveUpstreamCors).
 
             if (lowerKey === 'link' && interceptors.linkOrigin) {
                 const rewritten = val.replace(/<(https?:\/\/[^>]+)(\/[^>]*)>/g, `<${interceptors.linkOrigin}$2>`);

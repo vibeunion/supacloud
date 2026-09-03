@@ -192,8 +192,29 @@ describe("sdkProxyRoutes functions proxy", () => {
     });
   });
 
-  test("OPTIONS /functions/v1 stops at the SDK proxy without emitting CORS headers", async () => {
-    await withSdkProxyTestContext(async ({ calls }) => {
+  test("OPTIONS /functions/v1 forwards preflight upstream and passes through its CORS headers", async () => {
+    await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
+      trackSpy(spyOn(edgeFunctionService, "getConfig").mockResolvedValue({
+        verify_jwt: false,
+        version: "7",
+      } as Awaited<ReturnType<typeof edgeFunctionService.getConfig>>));
+      setSdkProxyFetchForTests(((input: string | URL | Request, init?: RequestInit & { duplex?: "half" }) => {
+        const url = typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url;
+        calls.push({ url, init });
+        return Promise.resolve(new Response(null, {
+          status: 204,
+          headers: {
+            "access-control-allow-origin": "https://aorist.net",
+            "access-control-allow-headers": "authorization, content-type, x-supacloud-async",
+            "access-control-allow-methods": "GET, POST, OPTIONS",
+          },
+        }));
+      }) as typeof fetch);
+
       const response = await request("/functions/v1/aorist-generation/generate/crop", {
         method: "OPTIONS",
         headers: {
@@ -206,9 +227,48 @@ describe("sdkProxyRoutes functions proxy", () => {
       });
 
       expect(response.status).toBe(204);
-      expect(calls).toHaveLength(0);
-      expect(response.headers.has("access-control-allow-origin")).toBe(false);
-      expect(response.headers.has("access-control-allow-headers")).toBe(false);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.url).toBe("http://127.0.0.1:9005/functions/v1/aorist-generation/generate/crop");
+      expect(calls[0]?.init?.method).toBe("OPTIONS");
+      expect(response.headers.get("access-control-allow-origin")).toBe("https://aorist.net");
+      expect(response.headers.get("access-control-allow-headers")).toBe("authorization, content-type, x-supacloud-async");
+      expect(response.headers.get("access-control-allow-methods")).toBe("GET, POST, OPTIONS");
+    });
+  });
+
+  test("POST /functions/v1 preserves upstream CORS headers on actual responses", async () => {
+    await withSdkProxyTestContext(async ({ calls }) => {
+      setSdkProxyFetchForTests(((input: string | URL | Request, init?: RequestInit & { duplex?: "half" }) => {
+        const url = typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url;
+        calls.push({ url, init });
+        return Promise.resolve(new Response(JSON.stringify({ ok: true }), {
+          headers: {
+            "Content-Type": "application/json",
+            "access-control-allow-origin": "https://aorist.net",
+            "access-control-expose-headers": "x-custom-token",
+          },
+        }));
+      }) as typeof fetch);
+
+      const response = await request("/functions/v1/hello", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-project-ref": "proj_1",
+          apikey: "anon",
+          origin: "https://aorist.net",
+        },
+        body: JSON.stringify({ ping: true }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(calls).toHaveLength(1);
+      expect(response.headers.get("access-control-allow-origin")).toBe("https://aorist.net");
+      expect(response.headers.get("access-control-expose-headers")).toBe("x-custom-token");
     });
   });
 
