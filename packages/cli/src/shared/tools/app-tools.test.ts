@@ -106,8 +106,13 @@ export class AcceptCaseCommand {
 }
 `,
 
-    "src/features/case/case.controller.ts": `import { Controller, Get, Inject } from "../../runtime";
+    "src/features/case/case.controller.ts": `import { Controller, Get, Inject, Post } from "../../runtime";
 import { CaseService } from "./case.service";
+import { AcceptCaseCommand } from "./accept-case.command";
+
+const AcceptCaseBody = { type: "object" };
+const AcceptCaseParams = { type: "object" };
+const AcceptCaseQuery = { type: "object" };
 
 @Controller("/cases")
 export class CaseController {
@@ -115,6 +120,16 @@ export class CaseController {
 
   @Get("/:caseId")
   detail(): { ok: boolean } {
+    return { ok: true };
+  }
+
+  @Post("/accept", {
+    command: AcceptCaseCommand,
+    body: AcceptCaseBody,
+    params: AcceptCaseParams,
+    query: AcceptCaseQuery,
+  })
+  accept(): { ok: boolean } {
     return { ok: true };
   }
 }
@@ -264,6 +279,42 @@ describe("app tools", () => {
         expect(missing.content[0].text).toContain("未找到对象: Nope");
     });
 
+    test("export-tools writes OpenAI and MCP definitions from command governance metadata", async () => {
+        await app({ action: "compile", root });
+        const result = await app({ action: "export-tools", root });
+        expect(result.isError).toBe(false);
+        expect(result.content[0].text).toContain("case_accept");
+
+        const openai = JSON.parse(readFileSync(join(root, "generated/tool-definitions.openai.json"), "utf8"));
+        expect(openai).toHaveLength(1);
+        expect(openai[0].function.name).toBe("case_accept");
+        expect(openai[0].function.description).toContain("permission case.accept");
+        expect(openai[0].function.description).toContain("HTTP POST /cases/accept");
+        expect(openai[0].function.parameters.properties).toEqual(expect.objectContaining({
+            body: expect.any(Object),
+            params: expect.any(Object),
+            query: expect.any(Object),
+        }));
+
+        const mcp = JSON.parse(readFileSync(join(root, "generated/tool-definitions.mcp.json"), "utf8"));
+        expect(mcp[0].annotations).toEqual(expect.objectContaining({
+            readOnly: false,
+            audited: true,
+            permission: "case.accept",
+            httpMethod: "POST",
+            httpPath: "/cases/accept",
+        }));
+    });
+
+    test("export-tools json format returns both contracts without writing artifacts", async () => {
+        const result = await app({ action: "export-tools", root, format: "json" });
+        expect(result.isError).toBe(false);
+        const payload = JSON.parse(result.content[0].text);
+        expect(payload.openai[0].function.name).toBe("case_accept");
+        expect(payload.mcp[0].inputSchema.properties.body.description)
+            .toContain("AcceptCaseBody");
+    });
+
     test("graph/explain fail with a clear error when the manifest is missing", async () => {
         const emptyRoot = mkdtempSync(join(tmpdir(), "supacloud-app-tools-empty-"));
         try {
@@ -277,7 +328,7 @@ describe("app tools", () => {
     });
 
     test("all app actions are classified as local in the execution policy", () => {
-        for (const action of ["generate", "compile", "check", "graph", "explain"]) {
+        for (const action of ["generate", "compile", "check", "graph", "explain", "export-tools"]) {
             expect(executionMode("app", action, {})).toBe("local");
         }
     });
