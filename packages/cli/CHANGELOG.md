@@ -14,6 +14,23 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.41.0](https://github.com/vibeunion/supacloud/compare/cli-v0.40.0...cli-v0.41.0) (2026-09-03)
+
+
+### Features
+
+* **compiler,app:** add module tags and boundary governance with Nx workspace configuration ([#1110](https://github.com/vibeunion/supacloud/issues/1110)) ([dda9635](https://github.com/vibeunion/supacloud/commit/dda96355ba25a53f1b550e8e95011b1c806a2003))
+
+
+### Bug Fixes
+
+* **management-api,cli:** tolerate legacy migration wrappers in project SQL policy ([fe56e62](https://github.com/vibeunion/supacloud/commit/fe56e626c5b622dfd05868199db4536cd28c5a57))
+
+
+### Miscellaneous Chores
+
+* clean up obsolete scripts, deprecated files and tech debt ([#1109](https://github.com/vibeunion/supacloud/issues/1109)) ([3df42f7](https://github.com/vibeunion/supacloud/commit/3df42f7a3ddfb57866427c648c08fbcac699b7dc))
+
 ## [0.40.0](https://github.com/vibeunion/supacloud/compare/cli-v0.39.0...cli-v0.40.0) (2026-09-02)
 
 

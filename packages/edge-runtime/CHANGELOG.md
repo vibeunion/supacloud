@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.21.0](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.20.1...edge-runtime-v0.21.0) (2026-09-03)
+
+
+### Features
+
+* **compiler,app:** add module tags and boundary governance with Nx workspace configuration ([#1110](https://github.com/vibeunion/supacloud/issues/1110)) ([dda9635](https://github.com/vibeunion/supacloud/commit/dda96355ba25a53f1b550e8e95011b1c806a2003))
+
+
+### Miscellaneous Chores
+
+* clean up obsolete scripts, deprecated files and tech debt ([#1109](https://github.com/vibeunion/supacloud/issues/1109)) ([3df42f7](https://github.com/vibeunion/supacloud/commit/3df42f7a3ddfb57866427c648c08fbcac699b7dc))
+
 ## [0.20.1](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.20.0...edge-runtime-v0.20.1) (2026-09-02)
 
 
