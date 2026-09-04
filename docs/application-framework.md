@@ -94,9 +94,9 @@ const result = await compileProject({
   include: ["src/**/*.ts"],
   outDir: "generated",
   strict: true,
-  // 内置架构边界预设：'modular-monolith' | 'angular-enterprise' | 'clean-architecture'
+  // Built-in architecture boundary preset: 'modular-monolith' | 'angular-enterprise' | 'clean-architecture'
   moduleBoundaryPreset: "modular-monolith",
-  // 可选：叠加自定义规则（与 preset 自动合并）
+  // Optional: merge custom rules with the preset.
   moduleBoundaries: [
     {
       sourceTag: "type:ui",
@@ -106,15 +106,15 @@ const result = await compileProject({
 });
 ```
 
-诊断码：`circular-dependency`、`scope-violation`、`module-boundary`、`module-boundary-violation`、`invalid-boundary-preset`、`unresolved-token`、`duplicate-token`、`duplicate-module`、`duplicate-command`、`duplicate-route`、`route-command-unresolved`、`command-missing-permission`（始终为 error）、`missing-deps`。
+Diagnostic codes: `circular-dependency`, `scope-violation`, `module-boundary`, `module-boundary-violation`, `invalid-boundary-preset`, `unresolved-token`, `duplicate-token`, `duplicate-module`, `duplicate-command`, `duplicate-route`, `route-command-unresolved`, `command-missing-permission` (always an error), and `missing-deps`.
 
-### 模块边界治理预设（Module Boundary Profiles）
+### Module Boundary Profiles
 
-`@supacloud/compiler` 内置三套开箱即用的架构治理预设 Profile：
+`@supacloud/compiler` includes three built-in architecture governance profiles:
 
-- **`modular-monolith`**（别名 `feature-slices`、`vertical-slices`）：适用于业务垂直切片/模块化单体。禁止 `type:feature` 之间交叉依赖；`type:root` / `type:app` 仅允许聚合 `feature` / `core` / `shared` / `domain` 模块；`type:core` / `type:shared` 禁止向上反向依赖业务切片。
-- **`angular-enterprise`**（别名 `angular`）：适用于 Angular / Nx 企业级 monorepo。约束 `type:feature`、`type:ui`、`type:data-access`、`type:util`、`type:shared`、`type:core` 的单向流向。
-- **`clean-architecture`**（别名 `domain-driven`）：适用于 Clean Architecture / Spring Boot DDD 分层。严格限制 `Presentation/API -> Application -> Domain <- Infrastructure` 的依赖倒置与领域层纯净性。
+- **`modular-monolith`** (aliases: `feature-slices`, `vertical-slices`): for vertical slices and modular monoliths. Blocks cross-feature dependencies; `type:root` / `type:app` may aggregate only `feature` / `core` / `shared` / `domain` modules; `type:core` / `type:shared` cannot depend upward on feature slices.
+- **`angular-enterprise`** (alias: `angular`): for Angular / Nx enterprise monorepos. Enforces one-way flow across `type:feature`, `type:ui`, `type:data-access`, `type:util`, `type:shared`, and `type:core`.
+- **`clean-architecture`** (alias: `domain-driven`): for Clean Architecture / Spring Boot DDD layering. Enforces `presentation/API -> application -> domain <- infrastructure` dependency inversion and domain purity.
 
 产物：
 

@@ -10,8 +10,8 @@ import {
 } from "./profiles";
 import type { ModuleBoundaryRule } from "./types";
 
-describe("架构治理预设 Profile (profiles.ts)", () => {
-  test("内置预设完整性：覆盖 modular-monolith / angular-enterprise / clean-architecture 及常用别名", () => {
+describe("Architecture governance presets (profiles.ts)", () => {
+  test("includes the built-in presets and their aliases", () => {
     const presetNames = Object.keys(MODULE_BOUNDARY_PROFILES);
     expect(presetNames).toContain("modular-monolith");
     expect(presetNames).toContain("feature-slices");
@@ -22,48 +22,48 @@ describe("架构治理预设 Profile (profiles.ts)", () => {
     expect(presetNames).toContain("domain-driven");
   });
 
-  test("getModuleBoundaryProfile：获取预设元数据与规则副本（防外部篡改）", () => {
+  test("getModuleBoundaryProfile returns metadata and defensive rule copies", () => {
     const profile = getModuleBoundaryProfile("modular-monolith");
     expect(profile.name).toBe("modular-monolith");
-    expect(profile.description).toContain("模块化单体");
+    expect(profile.description).toContain("Modular monolith");
     expect(profile.rules.length).toBeGreaterThan(0);
 
-    // 修改返回数组不影响预设原始定义
+    // Mutating the returned array must not affect the original preset definition.
     const originalLength = profile.rules.length;
     profile.rules.push({ sourceTag: "test" });
     const reloaded = getModuleBoundaryProfile("modular-monolith");
     expect(reloaded.rules.length).toBe(originalLength);
   });
 
-  test("getModuleBoundaryPreset：直接获取规则列表副本", () => {
+  test("getModuleBoundaryPreset returns a defensive rule copy", () => {
     const rules = getModuleBoundaryPreset("angular-enterprise");
     expect(rules).toEqual(ANGULAR_ENTERPRISE_RULES);
-    expect(rules).not.toBe(ANGULAR_ENTERPRISE_RULES); // 独立引用
+    expect(rules).not.toBe(ANGULAR_ENTERPRISE_RULES); // Independent reference.
   });
 
-  test("getModuleBoundaryProfile：未知预设抛出友好异常提示", () => {
+  test("getModuleBoundaryProfile rejects unknown presets with a useful error", () => {
     expect(() => getModuleBoundaryProfile("unknown-preset" as any)).toThrow(
-      "未知的模块边界预设 Profile: 'unknown-preset'",
+      "Unknown module boundary preset: 'unknown-preset'",
     );
   });
 
-  test("resolveModuleBoundaries：无入参返回 undefined", () => {
+  test("resolveModuleBoundaries returns undefined without options", () => {
     expect(resolveModuleBoundaries()).toBeUndefined();
     expect(resolveModuleBoundaries({})).toBeUndefined();
   });
 
-  test("resolveModuleBoundaries：仅指定 preset 时加载内置规则", () => {
+  test("resolveModuleBoundaries loads built-in rules for a preset", () => {
     const resolved = resolveModuleBoundaries({ preset: "modular-monolith" });
     expect(resolved).toEqual(MODULAR_MONOLITH_RULES);
   });
 
-  test("resolveModuleBoundaries：仅指定 custom rules 时保留自定义规则", () => {
+  test("resolveModuleBoundaries preserves custom rules without a preset", () => {
     const custom: ModuleBoundaryRule[] = [{ sourceTag: "custom", bannedDependenciesWithTags: ["bad"] }];
     const resolved = resolveModuleBoundaries({ rules: custom });
     expect(resolved).toEqual(custom);
   });
 
-  test("resolveModuleBoundaries：叠加 preset 与 custom rules（preset 在前，custom 在后）", () => {
+  test("resolveModuleBoundaries appends custom rules after preset rules", () => {
     const custom: ModuleBoundaryRule[] = [{ sourceTag: "custom", bannedDependenciesWithTags: ["bad"] }];
     const resolved = resolveModuleBoundaries({ preset: "domain-driven", rules: custom });
     expect(resolved).toBeDefined();

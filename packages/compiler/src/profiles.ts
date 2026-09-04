@@ -1,11 +1,11 @@
 import type { ModuleBoundaryPresetName, ModuleBoundaryProfile, ModuleBoundaryRule } from "./types";
 
 /**
- * 模块化单体 / 垂直切片架构规则集：
- * - type:feature 业务垂直切片之间禁止相互依赖（高内聚低耦合），禁止反向依赖 root/app；
- * - type:root / type:app 顶层入口模块仅允许汇聚组装 feature、core、shared、domain 模块；
- * - type:core 底层核心单例/基础设施禁止向上依赖 feature 或 root/app；
- * - type:shared 通用公共工具/组件禁止依赖 feature 或 root/app。
+ * Modular monolith / vertical slice architecture rules:
+ * - type:feature slices cannot depend on one another or on root/app modules;
+ * - type:root / type:app entry modules may aggregate feature, core, shared, and domain modules;
+ * - type:core foundational modules cannot depend upward on feature or root/app modules;
+ * - type:shared common utilities/components cannot depend on feature or root/app modules.
  */
 export const MODULAR_MONOLITH_RULES: ModuleBoundaryRule[] = [
   {
@@ -31,11 +31,11 @@ export const MODULAR_MONOLITH_RULES: ModuleBoundaryRule[] = [
 ];
 
 /**
- * Angular / Nx 企业级 monorepo 架构分层规则集：
- * 遵循 Nx / Angular Enterprise Monorepo 推荐规范：
- * - feature 业务切片禁止互相直接依赖；
- * - ui / data-access / util / shared 库禁止反向上层依赖 feature 或 root；
- * - root / app 仅作为组装入口。
+ * Angular / Nx enterprise monorepo layering rules:
+ * follows the recommended Nx / Angular enterprise workspace conventions:
+ * - feature slices cannot directly depend on one another;
+ * - ui / data-access / util / shared libraries cannot depend upward on feature or root modules;
+ * - root / app modules serve only as composition entry points.
  */
 export const ANGULAR_ENTERPRISE_RULES: ModuleBoundaryRule[] = [
   {
@@ -73,11 +73,11 @@ export const ANGULAR_ENTERPRISE_RULES: ModuleBoundaryRule[] = [
 ];
 
 /**
- * Clean Architecture / DDD 经典分层架构规则集（类似 Spring Boot DDD 规范）：
- * - 控制/展现层（api/controller/presentation）仅能依赖应用服务层、领域层与公共层；
- * - 应用服务层（application/service）编排业务用例，仅依赖领域层与公共层；
- * - 领域核心层（domain）保持绝对纯净，禁止依赖任何表现层、应用服务层、基础设施层或根模块；
- * - 基础设施层（infrastructure/infra）依赖倒置，实现领域接口，仅允许依赖领域层与公共层。
+ * Clean Architecture / DDD layering rules (similar to Spring Boot DDD conventions):
+ * - presentation layers (api/controller/presentation) may depend only on application, domain, and shared layers;
+ * - application layers (application/service) orchestrate use cases and depend only on domain and shared layers;
+ * - the domain layer remains pure and cannot depend on presentation, application, infrastructure, or root modules;
+ * - infrastructure layers (infrastructure/infra) implement domain ports and may depend only on domain and shared layers.
  */
 export const CLEAN_ARCHITECTURE_RULES: ModuleBoundaryRule[] = [
   {
@@ -124,53 +124,51 @@ export const CLEAN_ARCHITECTURE_RULES: ModuleBoundaryRule[] = [
   },
 ];
 
-/** 内置支持的模块边界 Profile 注册表。 */
+/** Registry of built-in module boundary profiles. */
 export const MODULE_BOUNDARY_PROFILES: Record<ModuleBoundaryPresetName, ModuleBoundaryProfile> = {
   "modular-monolith": {
     name: "modular-monolith",
-    description: "模块化单体 / 垂直业务切片预设（禁止 Feature 交叉依赖，Root 模块仅聚合 Feature/Core/Shared/Domain）",
+    description: "Modular monolith / vertical slice preset (blocks cross-feature dependencies and limits root aggregation to feature/core/shared/domain)",
     rules: MODULAR_MONOLITH_RULES,
   },
   "feature-slices": {
     name: "feature-slices",
-    description: "垂直业务切片预设（modular-monolith 别名）",
+    description: "Vertical slice preset (alias for modular-monolith)",
     rules: MODULAR_MONOLITH_RULES,
   },
   "vertical-slices": {
     name: "vertical-slices",
-    description: "垂直切片架构预设（modular-monolith 别名）",
+    description: "Vertical slice architecture preset (alias for modular-monolith)",
     rules: MODULAR_MONOLITH_RULES,
   },
   "angular-enterprise": {
     name: "angular-enterprise",
-    description: "Angular / Nx 企业级 monorepo 预设（约束 Feature、UI、Data-Access、Util、Shared 与 Root 分层流向）",
+    description: "Angular / Nx enterprise monorepo preset (enforces one-way layering across feature, UI, data-access, util, shared, and root modules)",
     rules: ANGULAR_ENTERPRISE_RULES,
   },
   "angular": {
     name: "angular",
-    description: "Angular 企业级分层预设（angular-enterprise 别名）",
+    description: "Angular enterprise layering preset (alias for angular-enterprise)",
     rules: ANGULAR_ENTERPRISE_RULES,
   },
   "clean-architecture": {
     name: "clean-architecture",
-    description: "Clean Architecture / DDD 分层预设（API/Presentation -> Application -> Domain <- Infrastructure）",
+    description: "Clean Architecture / DDD layering preset (API/presentation -> application -> domain <- infrastructure)",
     rules: CLEAN_ARCHITECTURE_RULES,
   },
   "domain-driven": {
     name: "domain-driven",
-    description: "DDD 分层架构预设（clean-architecture 别名）",
+    description: "DDD layering preset (alias for clean-architecture)",
     rules: CLEAN_ARCHITECTURE_RULES,
   },
 };
 
-/**
- * 根据预设名称获取对应的架构治理规则集合。
- */
+/** Return the architecture governance rules for a preset name. */
 export function getModuleBoundaryProfile(name: ModuleBoundaryPresetName): ModuleBoundaryProfile {
   const profile = MODULE_BOUNDARY_PROFILES[name];
   if (!profile) {
     throw new Error(
-      `未知的模块边界预设 Profile: '${name}'。支持的预设包括: ${Object.keys(MODULE_BOUNDARY_PROFILES).join(", ")}`,
+      `Unknown module boundary preset: '${name}'. Supported presets: ${Object.keys(MODULE_BOUNDARY_PROFILES).join(", ")}`,
     );
   }
   return {
@@ -183,16 +181,12 @@ export function getModuleBoundaryProfile(name: ModuleBoundaryPresetName): Module
   };
 }
 
-/**
- * 获取指定预设包含的规则列表副本。
- */
+/** Return a copy of the rules included in a preset. */
 export function getModuleBoundaryPreset(name: ModuleBoundaryPresetName): ModuleBoundaryRule[] {
   return getModuleBoundaryProfile(name).rules;
 }
 
-/**
- * 解析并合并模块边界规则（支持 preset 预设 + 用户自定义 rules 叠加扩展）。
- */
+/** Resolve and merge preset rules with optional user-defined rules. */
 export function resolveModuleBoundaries(options?: {
   preset?: ModuleBoundaryPresetName;
   rules?: ModuleBoundaryRule[];

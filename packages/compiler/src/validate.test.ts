@@ -213,7 +213,7 @@ describe("validateGraph：坏 fixture 诊断", () => {
     expect(violations[0].message).toContain("仅允许依赖带有 [type:contracts, type:util]");
   });
 
-  test("moduleBoundaryPreset：modular-monolith 预设拦截 Feature 之间交叉依赖与 Core 反向依赖", () => {
+  test("moduleBoundaryPreset blocks cross-feature dependencies and core-to-feature dependencies", () => {
     const sampleGraph: ApplicationGraph = {
       modules: [
         {
@@ -235,7 +235,7 @@ describe("validateGraph：坏 fixture 诊断", () => {
           tags: ["type:feature"],
           file: "src/case.module.ts",
           line: 1,
-          imports: ["feature-billing"], // 违规：Feature 之间禁止交叉依赖
+          imports: ["feature-billing"], // Violation: feature slices cannot depend on one another.
           providers: [],
           controllers: [],
           commands: [],
@@ -261,7 +261,7 @@ describe("validateGraph：坏 fixture 诊断", () => {
           tags: ["type:core"],
           file: "src/core.module.ts",
           line: 1,
-          imports: ["feature-billing"], // 违规：Core 禁止反向依赖 Feature
+          imports: ["feature-billing"], // Violation: core modules cannot depend upward on features.
           providers: [],
           controllers: [],
           commands: [],
@@ -279,12 +279,12 @@ describe("validateGraph：坏 fixture 诊断", () => {
     const violations = diags.filter((d) => d.code === "module-boundary-violation");
     expect(violations).toHaveLength(2);
     expect(violations[0].message).toContain("feature-case");
-    expect(violations[0].message).toContain("禁止依赖带有标签 'type:feature'");
+    expect(violations[0].message).toContain("feature-billing");
     expect(violations[1].message).toContain("core-auth");
-    expect(violations[1].message).toContain("禁止依赖带有标签 'type:feature'");
+    expect(violations[1].message).toContain("feature-billing");
   });
 
-  test("moduleBoundaryPreset：clean-architecture 预设保护领域层纯净与分层依赖流向", () => {
+  test("moduleBoundaryPreset protects domain purity and layering direction", () => {
     const sampleGraph: ApplicationGraph = {
       modules: [
         {
@@ -293,7 +293,7 @@ describe("validateGraph：坏 fixture 诊断", () => {
           tags: ["type:domain"],
           file: "src/domain.module.ts",
           line: 1,
-          imports: ["api-controller"], // 违规：Domain 绝不能依赖上层 API/Controller
+          imports: ["api-controller"], // Violation: the domain cannot depend on API/controller layers.
           providers: [],
           controllers: [],
           commands: [],
@@ -324,10 +324,10 @@ describe("validateGraph：坏 fixture 诊断", () => {
     const violations = diags.filter((d) => d.code === "module-boundary-violation");
     expect(violations).toHaveLength(1);
     expect(violations[0].message).toContain("domain-case");
-    expect(violations[0].message).toContain("禁止依赖带有标签 'type:api'");
+    expect(violations[0].message).toContain("api-controller");
   });
 
-  test("moduleBoundaryPreset：预设与自定义规则合并生效", () => {
+  test("moduleBoundaryPreset merges with custom rules", () => {
     const sampleGraph: ApplicationGraph = {
       modules: [
         {
@@ -336,7 +336,7 @@ describe("validateGraph：坏 fixture 诊断", () => {
           tags: ["type:feature", "scope:case"],
           file: "src/case.module.ts",
           line: 1,
-          imports: ["feature-billing"], // 违规 1：modular-monolith 预设拦截 feature 间依赖
+          imports: ["feature-billing"], // Violation 1: the modular-monolith preset blocks cross-feature dependencies.
           providers: [],
           controllers: [],
           commands: [],
@@ -365,7 +365,7 @@ describe("validateGraph：坏 fixture 诊断", () => {
       moduleBoundaries: [
         {
           sourceTag: "scope:case",
-          bannedDependenciesWithTags: ["scope:billing"], // 违规 2：自定义 scope 隔离规则
+          bannedDependenciesWithTags: ["scope:billing"], // Violation 2: custom scope isolation rule.
         },
       ],
     });
@@ -374,7 +374,7 @@ describe("validateGraph：坏 fixture 诊断", () => {
     expect(violations).toHaveLength(2);
   });
 
-  test("moduleBoundaryPreset：传入未知预设时产生明确的 invalid-boundary-preset 错误诊断", () => {
+  test("moduleBoundaryPreset reports invalid-boundary-preset for unknown presets", () => {
     const sampleGraph: ApplicationGraph = {
       modules: [],
       externalTokens: [],
@@ -387,6 +387,6 @@ describe("validateGraph：坏 fixture 诊断", () => {
     const errors = diags.filter((d) => d.code === "invalid-boundary-preset");
     expect(errors).toHaveLength(1);
     expect(errors[0].severity).toBe("error");
-    expect(errors[0].message).toContain("未知的模块边界预设 Profile");
+    expect(errors[0].message).toContain("Unknown module boundary preset");
   });
 });

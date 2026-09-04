@@ -118,22 +118,22 @@ export interface CompileOptions {
   outDir: string;
   /** warn 级诊断升级为 error。 */
   strict?: boolean;
-  /** 内置架构边界预设 Profile（如 'modular-monolith' | 'angular-enterprise' | 'clean-architecture'）。 */
+  /** Built-in architecture boundary preset (for example, 'modular-monolith'). */
   moduleBoundaryPreset?: ModuleBoundaryPresetName;
-  /** 模块边界与架构治理规则（受 Nx enforce-module-boundaries 启发）。 */
+  /** Module boundary and architecture governance rules inspired by Nx enforce-module-boundaries. */
   moduleBoundaries?: ModuleBoundaryRule[];
 }
 
 export interface ModuleBoundaryRule {
-  /** 源模块标签模式或标签（如 'type:ui', 'scope:case', '*'）。 */
+  /** Source module tag pattern or tag (for example, 'type:ui', 'scope:case', or '*'). */
   sourceTag: string;
-  /** 源模块仅允许依赖具有这些标签的模块。 */
+  /** Tags allowed for modules imported by the source module. */
   onlyDependOnLibsWithTags?: string[];
-  /** 源模块禁止依赖具有这些标签的模块。 */
+  /** Tags forbidden for modules imported by the source module. */
   bannedDependenciesWithTags?: string[];
 }
 
-/** 内置的模块边界预设 Profile 名称。 */
+/** Names of built-in module boundary presets. */
 export type ModuleBoundaryPresetName =
   | "modular-monolith"
   | "feature-slices"
