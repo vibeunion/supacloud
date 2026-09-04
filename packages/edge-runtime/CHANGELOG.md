@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.21.2](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.21.1...edge-runtime-v0.21.2) (2026-09-04)
+
+
+### Bug Fixes
+
+* **edge-runtime:** preserve function-owned CORS policy ([#1127](https://github.com/vibeunion/supacloud/issues/1127)) ([398bab5](https://github.com/vibeunion/supacloud/commit/398bab50fb198fda47fef7938c88afb3253894d1))
+
+
+### Miscellaneous Chores
+
+* **deps:** bump supabase-js, ts-morph and type definitions ([#1129](https://github.com/vibeunion/supacloud/issues/1129)) ([c56c38e](https://github.com/vibeunion/supacloud/commit/c56c38e54d3b293a9a86359d79a2f3ff1db7da64))
+
 ## [0.21.1](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.21.0...edge-runtime-v0.21.1) (2026-09-03)
 
 

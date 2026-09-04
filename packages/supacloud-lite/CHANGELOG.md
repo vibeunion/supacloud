@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.1](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.12.0...supacloud-lite-v0.12.1) (2026-09-04)
+
+
+### Miscellaneous Chores
+
+* **deps:** bump supabase-js, ts-morph and type definitions ([#1129](https://github.com/vibeunion/supacloud/issues/1129)) ([c56c38e](https://github.com/vibeunion/supacloud/commit/c56c38e54d3b293a9a86359d79a2f3ff1db7da64))
+
 ## [0.12.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.11.0...supacloud-lite-v0.12.0) (2026-09-03)
 
 
