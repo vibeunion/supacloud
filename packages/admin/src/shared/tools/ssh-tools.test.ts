@@ -2560,4 +2560,67 @@ describe("ssh admin tool", () => {
         expect(parsed.transaction_id).toBe("550E8400-E29B-41D4-A716-446655440000");
     });
 
+    test("backup cleanup plan is read-only and pins the managed backup root", async () => {
+        const ssh = new FakeSsh();
+        const tool = captureSshTool(ssh);
+
+        await tool.invoke({
+            action: "backup_cleanup_plan",
+            before: "2026-09-03",
+            keep_latest: 2,
+        });
+
+        expect(ssh.commands).toHaveLength(1);
+        const command = ssh.commands[0]!;
+        expect(command).toContain("ROOT='/opt/supacloud/backups'");
+        expect(command).toContain("sort -t $'\\t' -k1,1r");
+        expect(command).toContain("NR > keep");
+        expect(command).toContain("committed|rolled_back");
+        expect(command).not.toContain("find -P -- \\\"$path\\\" -xdev -depth -delete");
+    });
+
+    test("backup cleanup apply requires an exact plan digest and uses a bounded delete", async () => {
+        const ssh = new FakeSsh();
+        const tool = captureSshTool(ssh);
+
+        await tool.invoke({
+            action: "backup_cleanup_apply",
+            before: "2026-09-03",
+            keep_latest: 2,
+            plan_sha256: "a".repeat(64),
+        });
+
+        const command = ssh.commands[0]!;
+        expect(command).toContain("expected='" + "a".repeat(64) + "'");
+        expect(command).toContain("plan_sha256 mismatch; refusing cleanup");
+        expect(command).toContain('find -P -- "$path" -xdev -depth -delete');
+        expect(command).toContain('case "$path" in "$ROOT"/supacloud-*)');
+    });
+
+    test("backup cleanup rejects invalid dates, retention counts, and digests before SSH", async () => {
+        const ssh = new FakeSsh();
+        const tool = captureSshTool(ssh);
+
+        for (const before of ["2026-02-30", "20260903"]) {
+            await expect(tool.invoke({ action: "backup_cleanup_plan", before }))
+                .rejects.toThrow("before");
+        }
+        await expect(tool.invoke({ action: "backup_cleanup_plan", before: "2026-09-03;rm" }))
+            .rejects.toThrow("before");
+        for (const keep_latest of [0, 101, 1.5]) {
+            await expect(tool.invoke({ action: "backup_cleanup_plan", before: "2026-09-03", keep_latest }))
+                .rejects.toThrow("keep_latest");
+        }
+        expect(() => tool.invoke({ action: "backup_cleanup_plan", before: "2026-09-03", keep_latest: "2" }))
+            .toThrow("Expected number");
+        await expect(tool.invoke({ action: "backup_cleanup_apply", before: "2026-09-03" }))
+            .rejects.toThrow("plan_sha256");
+        await expect(tool.invoke({
+            action: "backup_cleanup_apply",
+            before: "2026-09-03",
+            plan_sha256: "A".repeat(64),
+        })).rejects.toThrow("lowercase SHA-256");
+        expect(ssh.commands).toHaveLength(0);
+    });
+
 });

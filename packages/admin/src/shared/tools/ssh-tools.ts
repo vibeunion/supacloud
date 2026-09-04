@@ -1,6 +1,6 @@
 /**
  * SSH — Compound tool (13→1)
- * Install, upgrade, diagnose, exec, tenant mgmt — all via SSH
+ * Install, upgrade, diagnose, exec, backup cleanup, tenant mgmt — all via SSH
  */
 import { Buffer } from "node:buffer";
 import { randomUUID } from "node:crypto";
@@ -71,6 +71,9 @@ const WEB_TREE_AFTER_LABEL = "SUPACLOUD_WEB_TREE_SHA256_AFTER=";
 const WEB_MARKER_AFTER_LABEL = "SUPACLOUD_WEB_MARKER_BASE64_AFTER=";
 const WEB_ROOT_REAL_AFTER_LABEL = "SUPACLOUD_WEB_ROOT_REAL_AFTER=";
 const WEB_ROOT_ID_AFTER_LABEL = "SUPACLOUD_WEB_ROOT_ID_AFTER=";
+const BACKUP_CLEANUP_ROOT = "/opt/supacloud/backups";
+const BACKUP_CLEANUP_PLAN_SHA256 = /^[a-f0-9]{64}$/;
+const BACKUP_CLEANUP_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 type ComponentProbeStatus = "ok" | "unknown" | "error";
 
@@ -218,6 +221,89 @@ function assertSafeReleaseTag(value: string): string {
         throw new Error("Invalid release version");
     }
     return value;
+}
+
+function assertBackupCleanupDate(value: string): string {
+    if (!BACKUP_CLEANUP_DATE.test(value)) throw new Error("before must be an ISO date (YYYY-MM-DD)");
+    const parsed = Date.parse(`${value}T00:00:00Z`);
+    if (!Number.isFinite(parsed) || new Date(parsed).toISOString().slice(0, 10) !== value) {
+        throw new Error("before must be a valid ISO date (YYYY-MM-DD)");
+    }
+    return value;
+}
+
+function assertBackupCleanupKeepLatest(value: unknown): number {
+    if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 100) {
+        throw new Error("keep_latest must be an integer between 1 and 100");
+    }
+    return value;
+}
+
+function assertBackupCleanupPlanSha256(value: string): string {
+    if (!BACKUP_CLEANUP_PLAN_SHA256.test(value)) throw new Error("plan_sha256 must be a lowercase SHA-256 digest");
+    return value;
+}
+
+function backupCleanupCommand(args: {
+    before: string;
+    keepLatest: number;
+    planSha256?: string;
+    apply: boolean;
+}): string {
+    const before = quoteEnvValue(args.before);
+    const keepLatest = String(args.keepLatest);
+    const expectedPlan = args.planSha256 ? quoteEnvValue(args.planSha256) : "";
+    const manifest = [
+        "set -euo pipefail",
+        "export TMPDIR=/dev/shm",
+        ...(args.apply ? [buildUpgradeLockScript(SUPACLOUD_UPGRADE_LOCK_PATH)] : []),
+        `ROOT=${quoteEnvValue(BACKUP_CLEANUP_ROOT)}`,
+        `BEFORE=${before}`,
+        `KEEP_LATEST=${keepLatest}`,
+        "collect() {",
+        "  find -P \"$ROOT\" -mindepth 1 -maxdepth 1 -type d -name 'supacloud-*' -print0 |",
+        "    while IFS= read -r -d '' path; do",
+        "      base=${path##*/}",
+        "      case \"$base\" in supacloud-[A-Za-z0-9._-]*-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z-[A-Za-z0-9._-]*) ;; *) continue ;; esac",
+        "      status_file=\"$path/transaction-status.json\"",
+        "      [ -f \"$status_file\" ] && [ ! -L \"$status_file\" ] || continue",
+        "      status=$(sed -nE 's/^[[:space:]]*\"status\"[[:space:]]*:[[:space:]]*\"([^\"]+)\".*$/\\1/p' \"$status_file\" | head -1)",
+        "      case \"$status\" in committed|rolled_back) ;; *) continue ;; esac",
+        "      finished=$(sed -nE 's/^[[:space:]]*\"finishedAt\"[[:space:]]*:[[:space:]]*\"([^\"]+)\".*$/\\1/p' \"$status_file\" | head -1)",
+        "      finished_date=${finished:0:10}",
+        "      [[ \"$finished_date\" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || continue",
+        "      bytes=$(du -sb -- \"$path\" | awk '{print $1}')",
+        "      printf '%s\\t%s\\t%s\\t%s\\n' \"$finished\" \"$status\" \"$bytes\" \"$path\"",
+        "    done",
+        "}",
+        "manifest=$(collect | sort -t $'\\t' -k1,1r | awk -F '\\t' -v keep=\"$KEEP_LATEST\" -v before=\"$BEFORE\" 'NR > keep && substr($1,1,10) < before')",
+        "plan_sha256=$(printf '%s' \"$manifest\" | sha256sum | awk '{print $1}')",
+        "echo \"plan_sha256=$plan_sha256\"",
+        "echo \"before=$BEFORE keep_latest=$KEEP_LATEST\"",
+        "if [ -n \"$manifest\" ]; then printf '%s\\n' \"$manifest\"; else echo 'candidates=0'; fi",
+    ];
+    if (!args.apply) return manifest.join("\n");
+    manifest.push(
+        `expected=${expectedPlan}`,
+        "[ \"$plan_sha256\" = \"$expected\" ] || { echo 'plan_sha256 mismatch; refusing cleanup' >&2; exit 65; }",
+        "freed=0",
+        "deleted=0",
+        "if [ -n \"$manifest\" ]; then",
+        "  while IFS=$'\\t' read -r finished status bytes path; do",
+        "    [ -n \"$path\" ] || continue",
+        "    case \"$path\" in \"$ROOT\"/supacloud-*) ;; *) echo 'candidate escaped backup root' >&2; exit 66 ;; esac",
+        "    [ -d \"$path\" ] && [ ! -L \"$path\" ] || { echo \"candidate changed: $path\" >&2; exit 67; }",
+        "    mountpoint -q -- \"$path\" && { echo \"mountpoint candidate: $path\" >&2; exit 68; }",
+        "    find -P -- \"$path\" -xdev -depth -delete",
+        "    [ ! -e \"$path\" ] || { echo \"candidate was not removed: $path\" >&2; exit 69; }",
+        "    freed=$((freed + bytes))",
+        "    deleted=$((deleted + 1))",
+        "  done <<< \"$manifest\"",
+        "fi",
+        "echo \"deleted=$deleted freed_bytes=$freed\"",
+        "df -B1 / | tail -1",
+    );
+    return manifest.join("\n");
 }
 
 function assertExactStableVersion(value: string, fieldName: string): string {
@@ -1088,11 +1174,11 @@ export function registerSshTools(server: { tool: (...args: any[]) => void }, ssh
     server.tool(
         "ssh",
         `Server management via SSH. Available before & after SupaCloud installation.
-Actions: ping, setup, install, upgrade, upgrade_status, versions, diagnose, exec, troubleshoot, container_logs, tenant_manage, tenant_list, tenant_inspect, tenant_diagnose, tenant_migrate`,
+Actions: ping, setup, install, upgrade, upgrade_status, versions, diagnose, exec, troubleshoot, container_logs, backup_cleanup_plan, backup_cleanup_apply, tenant_manage, tenant_list, tenant_inspect, tenant_diagnose, tenant_migrate`,
         {
             action: withDescription(stringEnum([
                 "ping", "setup", "install", "upgrade", "upgrade_status", "versions", "diagnose", "exec",
-                "troubleshoot", "container_logs",
+                "troubleshoot", "container_logs", "backup_cleanup_plan", "backup_cleanup_apply",
                 "tenant_manage", "tenant_list", "tenant_inspect", "tenant_diagnose", "tenant_migrate",
             ]), "Action to perform"),
             command: optional(Type.String(), "[exec] Restricted shell command to execute"),
@@ -1109,6 +1195,9 @@ Actions: ping, setup, install, upgrade, upgrade_status, versions, diagnose, exec
             artifact_transport: optional(stringEnum(["local", "remote"]), "[upgrade] Download verified release assets locally or on the server (default: remote)"),
             github_proxy: optional(Type.String(), "[install/upgrade] Explicit GitHub proxy prefix, or direct/none"),
             focus: optional(stringEnum(["all", "containers", "database", "network", "disk", "logs"]), "[troubleshoot] Focus area"),
+            before: optional(Type.String(), "[backup_cleanup_*] Delete only completed rollback directories finished before YYYY-MM-DD"),
+            keep_latest: optional(Type.Number(), "[backup_cleanup_*] Keep this many newest completed rollback directories (default: 2)"),
+            plan_sha256: optional(Type.String(), "[backup_cleanup_apply] Exact plan_sha256 returned by backup_cleanup_plan"),
             container: optional(Type.String(), "[container_logs] Container name"),
             lines: optional(Type.Number(), "[container_logs] Number of log lines (default: 100)"),
             project_ref: optional(Type.String(), "[tenant_*] Project reference ID"),
@@ -1318,6 +1407,26 @@ Actions: ping, setup, install, upgrade, upgrade_status, versions, diagnose, exec
                 }
                 case "versions": {
                     return platformVersionsToolResult(await platformVersions(ssh));
+                }
+                case "backup_cleanup_plan":
+                case "backup_cleanup_apply": {
+                    if (typeof args.before !== "string") throw new Error("'before' required");
+                    const before = assertBackupCleanupDate(args.before);
+                    const keepLatest = args.keep_latest === undefined
+                        ? 2
+                        : assertBackupCleanupKeepLatest(args.keep_latest);
+                    const apply = action === "backup_cleanup_apply";
+                    const planSha256 = args.plan_sha256 === undefined
+                        ? undefined
+                        : assertBackupCleanupPlanSha256(String(args.plan_sha256));
+                    if (apply && !planSha256) throw new Error("'plan_sha256' required for backup_cleanup_apply");
+                    if (!apply && planSha256) throw new Error("plan_sha256 is only valid for backup_cleanup_apply");
+                    const r = await ssh.exec(backupCleanupCommand({ before, keepLatest, planSha256, apply }), 120_000);
+                    if (!r.success) {
+                        throw new Error(`Backup cleanup ${apply ? "apply" : "plan"} failed (exit ${r.code}): ${(r.stderr || r.stdout).slice(-1000)}`);
+                    }
+                    text = r.stdout;
+                    break;
                 }
                 case "diagnose": {
                     const cmds = [

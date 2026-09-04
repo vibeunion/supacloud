@@ -101,6 +101,9 @@ npx @supacloud/admin ssh ping
 npx @supacloud/admin ssh versions
 npx @supacloud/admin ssh diagnose
 npx @supacloud/admin ssh upgrade_status --transaction_id 11111111-1111-4111-8111-111111111111
+npx @supacloud/admin ssh backup_cleanup_plan --before 2026-09-03 --keep_latest 2
+npx @supacloud/admin ssh backup_cleanup_apply --before 2026-09-03 --keep_latest 2 \
+  --plan_sha256 <plan_sha256>
 npx @supacloud/admin project create --name my-app --domain example.com \
   --env_file /secure/path/.env.project-credentials.test --environment test
 npx @supacloud/admin project list
@@ -117,6 +120,29 @@ systemd `ExecStart`, and Web Console evidence comes from its component marker
 plus an explicit `tree_sha256` digest. An `unknown` component remains a valid
 inventory result, while any `error` component makes the CLI exit non-zero after
 printing the structured report.
+
+## Managed rollback backup cleanup
+
+Use the two-step SSH cleanup flow when old platform rollback directories consume
+disk space:
+
+```bash
+npx @supacloud/admin ssh backup_cleanup_plan \
+  --before 2026-09-03 --keep_latest 2
+# review plan_sha256 and the candidate list
+npx @supacloud/admin ssh backup_cleanup_apply \
+  --before 2026-09-03 --keep_latest 2 \
+  --plan_sha256 <plan_sha256>
+```
+
+The plan is read-only. Apply requires the exact digest from the plan and
+recomputes it immediately before deletion. Only completed `committed` or
+`rolled_back` transaction directories directly under
+`/opt/supacloud/backups` are eligible; the newest `keep_latest` directories
+are retained, and candidates must be older than `before`. Symlinks,
+mountpoints, malformed transaction names, missing status files, and every path
+outside the managed backup root are refused. Production runs also require the
+normal `--confirm-production host:<ssh-host>[:port]` confirmation.
 
 ## Verified platform upgrades
 
