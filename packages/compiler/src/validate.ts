@@ -25,6 +25,7 @@ export const COMPILER_DIAGNOSTIC_CODES: Record<string, { code: string; docsUrl: 
   "circular-module-import": { code: "SC1004", docsUrl: "https://supacloud.dev/errors/SC1004" },
   "orphan-module": { code: "SC1005", docsUrl: "https://supacloud.dev/errors/SC1005" },
   "invalid-boundary-preset": { code: "SC1006", docsUrl: "https://supacloud.dev/errors/SC1006" },
+  "circular-existing-alias": { code: "SC1007", docsUrl: "https://supacloud.dev/errors/SC1007" },
   "missing-deps": { code: "SC2001", docsUrl: "https://supacloud.dev/errors/SC2001" },
   "unresolved-token": { code: "SC2001", docsUrl: "https://supacloud.dev/errors/SC2001" },
   "duplicate-token": { code: "SC2002", docsUrl: "https://supacloud.dev/errors/SC2002" },
@@ -39,6 +40,8 @@ export const COMPILER_DIAGNOSTIC_CODES: Record<string, { code: string; docsUrl: 
   "unmatched-route-parameter": { code: "SC3005", docsUrl: "https://supacloud.dev/errors/SC3005" },
   "missing-route-parameter-binding": { code: "SC3006", docsUrl: "https://supacloud.dev/errors/SC3006" },
   "duplicate-route": { code: "SC3007", docsUrl: "https://supacloud.dev/errors/SC3007" },
+  "missing-body-schema": { code: "SC3008", docsUrl: "https://supacloud.dev/errors/SC3008" },
+  "unused-route-schema": { code: "SC3009", docsUrl: "https://supacloud.dev/errors/SC3009" },
   "command-missing-permission": { code: "SC4001", docsUrl: "https://supacloud.dev/errors/SC4001" },
   "duplicate-command": { code: "SC4002", docsUrl: "https://supacloud.dev/errors/SC4002" },
   "route-command-unresolved": { code: "SC4003", docsUrl: "https://supacloud.dev/errors/SC4003" },
@@ -282,6 +285,22 @@ export function validateGraph(
             undefined,
             `Use POST, PUT, or PATCH for routes accepting a request body, or bind parameters via @Query() / @Param().`,
           );
+        } else if (route.hasBodyBinding && !route.body) {
+          warn(
+            "missing-body-schema",
+            `Route handler ${controller.className}.${route.handler} binds @Body() on route '${route.path}', but route definition does not specify a body validation schema.`,
+            controller.file,
+            undefined,
+            `Add schema to route options (e.g. body: Schema) for compile-time and runtime validation.`,
+          );
+        } else if (route.body && !route.hasBodyBinding && !route.command) {
+          warn(
+            "unused-route-schema",
+            `Route '${route.path}' defines body schema '${route.body}', but handler ${controller.className}.${route.handler} does not bind @Body().`,
+            controller.file,
+            undefined,
+            `Bind parameter with @Body() in ${controller.className}.${route.handler} or remove unused body schema option.`,
+          );
         }
       }
 
@@ -353,6 +372,46 @@ export function validateGraph(
             suggestion ? `Did you mean '${suggestion}'?` : undefined,
           );
         }
+      }
+    }
+  }
+
+  // Multi-hop circular redirect detection (e.g. /a -> /b -> /a)
+  const routeByRawPath = new Map<string, typeof declaredRoutes[0]>();
+  for (const item of declaredRoutes) {
+    if (!routeByRawPath.has(item.rawFullPath)) {
+      routeByRawPath.set(item.rawFullPath, item);
+    }
+  }
+  const reportedRedirectCycles = new Set<string>();
+  for (const item of declaredRoutes) {
+    if (item.redirectTo) {
+      const chain = [item.rawFullPath];
+      let curr = item;
+      while (curr && curr.redirectTo) {
+        const target = curr.redirectTo.replace(/\/+$/, "") || "/";
+        if (chain.includes(target)) {
+          const cycle = [...chain.slice(chain.indexOf(target)), target];
+          if (cycle.length > 2) {
+            const cycleKey = [...cycle].sort().join("|");
+            if (!reportedRedirectCycles.has(cycleKey)) {
+              reportedRedirectCycles.add(cycleKey);
+              const meta = COMPILER_DIAGNOSTIC_CODES["circular-route-redirect"];
+              error(
+                "circular-route-redirect",
+                `Route redirect chain forms a cycle: ${cycle.join(" -> ")}`,
+                item.controller.file,
+                undefined,
+                "Break the redirect loop by terminating at a concrete non-redirect route.",
+              );
+            }
+          }
+          break;
+        }
+        chain.push(target);
+        const next = routeByRawPath.get(target);
+        if (!next || !next.redirectTo) break;
+        curr = next;
       }
     }
   }
@@ -588,6 +647,7 @@ export function validateGraph(
   }
 
   diagnostics.push(...detectCycles(graph, resolveDep));
+  diagnostics.push(...detectExistingAliasCycles(graph, resolveDep));
   diagnostics.push(...detectModuleCycles(graph));
   if (typeof options === "object" && options.detectOrphanModules) {
     diagnostics.push(...detectOrphanModules(graph));
@@ -701,6 +761,57 @@ function detectCycles(
   };
 
   for (const ref of nodes) visit(ref);
+  return diagnostics;
+}
+
+/** Provider-level circular alias detection for useExisting (DFS, reporting cycle path). */
+function detectExistingAliasCycles(
+  graph: ApplicationGraph,
+  resolveDep: (module: ModuleNode, token: string) => ProviderRef | undefined,
+): Diagnostic[] {
+  const diagnostics: Diagnostic[] = [];
+  const existingProviders: ProviderRef[] = [];
+  for (const module of graph.modules) {
+    for (const provider of module.providers) {
+      if (provider.useExisting) {
+        existingProviders.push({ module, provider });
+      }
+    }
+  }
+
+  const reported = new Set<string>();
+
+  for (const start of existingProviders) {
+    const visited: string[] = [start.provider.token];
+    let current: ProviderRef | undefined = start;
+
+    while (current && current.provider.useExisting) {
+      const targetToken = current.provider.useExisting;
+      if (visited.includes(targetToken)) {
+        const cycle = [...visited.slice(visited.indexOf(targetToken)), targetToken];
+        const cycleKey = [...cycle].sort().join("|");
+        if (!reported.has(cycleKey)) {
+          reported.add(cycleKey);
+          const meta = COMPILER_DIAGNOSTIC_CODES["circular-existing-alias"];
+          diagnostics.push({
+            severity: "error",
+            code: "circular-existing-alias",
+            message: `Provider alias cycle detected in useExisting: ${cycle.join(" -> ")}`,
+            file: start.provider.file,
+            line: start.provider.line,
+            suggestion: "Break the alias cycle by pointing useExisting to a concrete provider instead of a circular alias.",
+            errorCode: meta?.code,
+            docsUrl: meta?.docsUrl,
+          });
+        }
+        break;
+      }
+
+      visited.push(targetToken);
+      current = resolveDep(current.module, targetToken);
+    }
+  }
+
   return diagnostics;
 }
 

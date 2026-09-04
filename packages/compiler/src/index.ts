@@ -7,7 +7,7 @@ export { createDependencyGraphCache } from "./incremental";
 export { generateApplication, renderApplication } from "./generate";
 export type { GenerateOptions, RenderedArtifacts } from "./generate";
 export type { DoctorResult } from "./inspect";
-export { validateGraph } from "./validate";
+export { validateGraph, COMPILER_DIAGNOSTIC_CODES } from "./validate";
 export { camelName } from "./util";
 export {
   ANGULAR_ENTERPRISE_RULES,
