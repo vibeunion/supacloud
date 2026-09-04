@@ -2,9 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { appendFile, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createDependencyGraphCache, createIncrementalCompiler } from "./incremental";
+import { createDependencyGraphCache, createIncrementalCompiler, ModuleDependencyGraph } from "./incremental";
 import { GOOD_PROJECT_FILES } from "./fixtures/good-project";
 import { writeFixtureProject } from "./fixtures/helpers";
+import type { ModuleNode } from "./types";
 
 describe("createIncrementalCompiler", () => {
   test("相同输入命中缓存，单文件修改计算受影响模块", async () => {
@@ -62,5 +63,62 @@ describe("createIncrementalCompiler", () => {
     expect(second.stats.reusedModules).toContain("case");
     // audit 模块对象从缓存原样复用，未重新扫描
     expect(cache.modules.get("audit")?.module).toBe(auditEntryBefore?.module);
+  });
+
+  test("ModuleDependencyGraph tracks forward imports, reverse dependents, and computes affected closures", () => {
+    const modules: ModuleNode[] = [
+      {
+        name: "core",
+        className: "CoreModule",
+        file: "src/core/core.module.ts",
+        line: 1,
+        imports: [],
+        providers: [{ token: "CoreService", tokenKind: "class", kind: "class", scope: "application", deps: [], file: "src/core/core.service.ts", line: 1, exported: true }],
+        controllers: [],
+        commands: [],
+        queries: [],
+        exports: ["CoreService"],
+      },
+      {
+        name: "auth",
+        className: "AuthModule",
+        file: "src/auth/auth.module.ts",
+        line: 1,
+        imports: ["core"],
+        providers: [{ token: "AuthService", tokenKind: "class", kind: "class", scope: "application", deps: ["CoreService"], file: "src/auth/auth.service.ts", line: 1, exported: true }],
+        controllers: [],
+        commands: [],
+        queries: [],
+        exports: ["AuthService"],
+      },
+      {
+        name: "dashboard",
+        className: "DashboardModule",
+        file: "src/dashboard/dashboard.module.ts",
+        line: 1,
+        imports: ["auth"],
+        providers: [],
+        controllers: [],
+        commands: [],
+        queries: [],
+        exports: [],
+      },
+    ];
+
+    const graph = new ModuleDependencyGraph(modules);
+    expect(graph.getDirectImports("auth")).toEqual(["core"]);
+    expect(graph.getDirectImports("dashboard")).toEqual(["auth"]);
+    expect(graph.getDirectDependents("core")).toEqual(["auth"]);
+    expect(graph.getDirectDependents("auth")).toEqual(["dashboard"]);
+
+    // Modifying core file affects core, auth (depends on core), and dashboard (depends on auth)
+    const affectedByCore = graph.getAffectedModules(["src/core/core.service.ts"]);
+    expect(affectedByCore).toContain("core");
+    expect(affectedByCore).toContain("auth");
+    expect(affectedByCore).toContain("dashboard");
+
+    // Modifying dashboard only affects dashboard
+    const affectedByDashboard = graph.getAffectedModules(["src/dashboard/dashboard.module.ts"]);
+    expect(affectedByDashboard).toEqual(["dashboard"]);
   });
 });
