@@ -3,7 +3,7 @@
 # Prevent Windows development environments from committing CRLF, avoiding /bin/bash^M errors on Linux
 
 # Shell scripts
- *.sh            text eol=lf
+*.sh            text eol=lf
 supacloud       text eol=lf
 *.bash          text eol=lf
 
@@ -19,11 +19,11 @@ supacloud       text eol=lf
 *.env.*         text eol=lf
 config.env      text eol=lf
 
- # Markdown
- *.md            text eol=lf
+# Markdown
+*.md            text eol=lf
 
 # Binary files - do not convert
- *.png           binary
+*.png           binary
 *.jpg           binary
 *.gif           binary
 *.woff          binary
