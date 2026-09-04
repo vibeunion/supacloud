@@ -3,6 +3,11 @@
   "version": "0.4.0",
   "private": true,
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/vibeunion/postgresx.git",
+    "directory": "packages/pgredis"
+  },
   "scripts": {
     "dev": "bun run --watch server.ts",
     "start": "bun run server.ts",

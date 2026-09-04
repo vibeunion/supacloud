@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { Elysia, t } from "elysia";
 import { TenantCapacityError, type TenantCache, type TenantCacheRegistry } from "./cache-registry";
 import { InvalidCapabilityError, verifyPgredisCapability } from "./capability";
+import { pgredisExtensionPolicy } from "./extension-policy";
 import { PROJECT_REF_PATTERN, TenantConfigError } from "./tenant-config";
 
 type CacheOperation = "get" | "set" | "delete" | "ttl" | "getset" | "getdel";
@@ -181,6 +182,7 @@ export function createPgredisRuntimeApp(options: PgredisRuntimeAppOptions) {
       l1: true,
       queue: false,
       rateLimit: false,
+      extensions: pgredisExtensionPolicy(),
       activeTenants: options.registry.size(),
     }))
     .get("/internal/v1/admin/status", ({ request }) => {
@@ -191,6 +193,7 @@ export function createPgredisRuntimeApp(options: PgredisRuntimeAppOptions) {
         namespace: "supacloud-edge-runtime",
         queue: false,
         rateLimit: false,
+        extensions: pgredisExtensionPolicy(),
         ...options.registry.snapshot(),
       };
     })

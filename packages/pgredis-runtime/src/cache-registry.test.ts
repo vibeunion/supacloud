@@ -136,6 +136,39 @@ describe("TenantCacheRegistry", () => {
     await registry.shutdown();
   });
 
+  test("sweeps expired rows without racing active request leases", async () => {
+    let cleanupCalls = 0;
+    const registry = new TenantCacheRegistry({
+      tenantsDir: "/unused",
+      maxTenants: 1,
+      connectionsPerTenant: 1,
+      tenantIdleMs: 10_000,
+      l1MaxEntries: 10,
+      l1TtlMs: 1_000,
+      cleanupBatchSize: 25,
+      loadConfig: async () => ({
+        databaseUrl: "postgresql://role_tenant-a:secret@postgres/db",
+        fingerprint: "one",
+      }),
+      createBackend: async () => ({
+        cache: {
+          ...fakeCache(),
+          async cleanupExpired(limit?: number) {
+            expect(limit).toBe(25);
+            cleanupCalls++;
+            return 3;
+          },
+        },
+        async close() {},
+      }),
+    });
+    const lease = await registry.acquire("tenant-a");
+    lease.release();
+    expect(await registry.sweepExpired()).toBe(3);
+    expect(cleanupCalls).toBe(1);
+    await registry.shutdown();
+  });
+
   test("does not publish a backend when credentials rotate during creation", async () => {
     let fingerprint = "one";
     let releaseFirst: (() => void) | undefined;
@@ -459,5 +492,31 @@ describe("createTransactionalTenantCache", () => {
       "COMMIT",
       "INVALIDATE_ALL",
     ]);
+  });
+
+  test("delegates expired-row cleanup to the upstream PgKvCache", async () => {
+    let cleanupLimit = 0;
+    const cache = createTransactionalTenantCache(
+      {
+        async unsafe<T>(): Promise<T[]> { return []; },
+        async begin<T>(operation: (transaction: PgSqlLike) => Promise<T>): Promise<T> {
+          return operation({ async unsafe<U>(): Promise<U[]> { return []; } });
+        },
+      },
+      {
+        async get() { return null; },
+        async ttl() { return null; },
+        invalidate() {},
+        invalidateAll() {},
+      },
+      () => fakeCache(),
+      async (limit) => {
+        cleanupLimit = limit || 0;
+        return 1;
+      },
+    );
+
+    expect(await cache.cleanupExpired?.(20_000)).toBe(1);
+    expect(cleanupLimit).toBe(10_000);
   });
 });
