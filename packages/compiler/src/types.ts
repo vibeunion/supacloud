@@ -88,6 +88,10 @@ export interface RouteNode {
   queryTransforms?: Record<string, "number" | "boolean" | "string">;
   /** Query defaults declared via @Query({ default: ... }) */
   queryDefaults?: Record<string, unknown>;
+  /** Route title (Angular Route.title style). */
+  title?: string;
+  /** Route static metadata dictionary (Angular Route.data style). */
+  data?: Record<string, unknown>;
 }
 
 export interface ControllerNode {

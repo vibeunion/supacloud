@@ -473,4 +473,50 @@ describe("Angular-style functional inject() & injection context", () => {
       expect(typeof ref.onDestroy).toBe("function");
     });
   });
+
+  test("forwardRef wraps and resolveForwardRef unwraps lazily evaluated token", () => {
+    const { forwardRef, resolveForwardRef, isForwardRef } = require("./index");
+    class TargetService {}
+    const ref = forwardRef(() => TargetService);
+    expect(isForwardRef(ref)).toBe(true);
+    expect(resolveForwardRef(ref)).toBe(TargetService);
+    expect(resolveForwardRef("plain")).toBe("plain");
+  });
+
+  test("DestroyRef.signal aborts when destroyed and injectDestroySignal returns signal", async () => {
+    const { createDestroyRef, injectDestroySignal, runInInjectionContext, DESTROY_REF } = require("./index");
+    const destroyRef = createDestroyRef();
+    expect(destroyRef.signal.aborted).toBe(false);
+
+    let caughtSignal: AbortSignal | undefined;
+    const injector = {
+      get: (token: any) => token === DESTROY_REF ? destroyRef : undefined,
+    };
+    runInInjectionContext(injector, () => {
+      caughtSignal = injectDestroySignal();
+    });
+
+    expect(caughtSignal).toBe(destroyRef.signal);
+    await destroyRef.destroy();
+    expect(destroyRef.signal.aborted).toBe(true);
+  });
+
+  test("Title and Data route metadata can be declared via options and decorators", () => {
+    const { Get, Title, Data, getRoutes } = require("./index");
+    class MetadataController {
+      @Get("/profile", { title: "User Profile", data: { role: "admin" } })
+      profile() {}
+
+      @Get("/settings")
+      @Title("Settings Page")
+      @Data({ flag: "experimental" })
+      settings() {}
+    }
+
+    const routes = getRoutes(MetadataController);
+    expect(routes[0].title).toBe("User Profile");
+    expect(routes[0].data).toEqual({ role: "admin" });
+    expect(routes[1].title).toBe("Settings Page");
+    expect(routes[1].data).toEqual({ flag: "experimental" });
+  });
 });

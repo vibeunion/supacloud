@@ -454,7 +454,8 @@ function parseModule(
 
   const imports = arrayProp(options, "imports")
     .map((el) => {
-      const decl = Node.isIdentifier(el) ? resolveDeclaration(el)[0] : undefined;
+      const unwrapped = unwrapForwardRef(el);
+      const decl = Node.isIdentifier(unwrapped) ? resolveDeclaration(unwrapped)[0] : undefined;
       if (decl) {
         const known = nameByNode.get(decl);
         if (known) return known;
@@ -567,11 +568,12 @@ function parseProvider(
   const file = sourcePath(ctx.rootDir, el.getSourceFile().getFilePath());
   const line = el.getStartLineNumber();
 
+  const unwrappedEl = unwrapForwardRef(el);
   // Bare class reference -> class provider, token = class name
-  if (Node.isIdentifier(el)) {
-    const decl = resolveDeclaration(el)[0];
+  if (Node.isIdentifier(unwrappedEl)) {
+    const decl = resolveDeclaration(unwrappedEl)[0];
     const cls = decl && Node.isClassDeclaration(decl) ? decl : undefined;
-    const className = cls?.getName() ?? el.getText();
+    const className = cls?.getName() ?? unwrappedEl.getText();
     const { deps, optionalDeps, selfDeps, skipSelfDeps, hostDeps, missing } = cls
       ? classDeps(cls, ctx)
       : { deps: [], optionalDeps: [], selfDeps: [], skipSelfDeps: [], hostDeps: [], missing: false };
@@ -613,9 +615,10 @@ function parseProvider(
   const useExistingExpr = getProp(el, "useExisting");
 
   if (useClassExpr) {
-    const decl = Node.isIdentifier(useClassExpr) ? resolveDeclaration(useClassExpr)[0] : undefined;
+    const unwrappedClass = unwrapForwardRef(useClassExpr);
+    const decl = Node.isIdentifier(unwrappedClass) ? resolveDeclaration(unwrappedClass)[0] : undefined;
     const cls = decl && Node.isClassDeclaration(decl) ? decl : undefined;
-    const useClass = cls?.getName() ?? useClassExpr.getText();
+    const useClass = cls?.getName() ?? unwrappedClass.getText();
     let deps = explicitDeps;
     let optionalDeps: string[] = [];
     let selfDeps: string[] = [];
@@ -724,8 +727,9 @@ function parseController(
   let decl: ClassDeclaration | undefined;
   if (Node.isClassDeclaration(input)) {
     decl = input;
-  } else if (Node.isIdentifier(input)) {
-    const resolved = resolveDeclaration(input)[0];
+  } else {
+    const unwrapped = unwrapForwardRef(input);
+    const resolved = Node.isIdentifier(unwrapped) ? resolveDeclaration(unwrapped)[0] : undefined;
     if (resolved && Node.isClassDeclaration(resolved)) {
       decl = resolved;
     }
@@ -821,9 +825,21 @@ function parseController(
 
       const routeGuards: string[] = [...classGuards];
       for (const mDec of method.getDecorators()) {
-        if (decoratorName(mDec) === "UseGuards") {
-          for (const gArg of mDec.getArguments()) {
+        const dName = decoratorName(mDec);
+        const mArgs = mDec.getArguments();
+        if (dName === "UseGuards") {
+          for (const gArg of mArgs) {
             routeGuards.push(tokenText(gArg as Expression));
+          }
+        } else if (dName === "Title") {
+          const tArg = mArgs[0];
+          if (tArg && Node.isStringLiteral(tArg)) {
+            route.title = tArg.getLiteralText();
+          }
+        } else if (dName === "Data") {
+          const dArg = mArgs[0];
+          if (dArg && Node.isObjectLiteralExpression(dArg)) {
+            route.data = { ...route.data, ...parseObjectLiteralValues(dArg) };
           }
         }
       }
@@ -885,6 +901,14 @@ function parseController(
           if (val === "full" || val === "prefix") {
             route.pathMatch = val;
           }
+        }
+        const titleExpr = getProp(optionsArg, "title");
+        if (titleExpr && Node.isStringLiteral(titleExpr)) {
+          route.title = titleExpr.getLiteralText();
+        }
+        const dataExpr = getProp(optionsArg, "data");
+        if (dataExpr && Node.isObjectLiteralExpression(dataExpr)) {
+          route.data = { ...route.data, ...parseObjectLiteralValues(dataExpr) };
         }
       }
       if (routeGuards.length > 0) {
@@ -984,6 +1008,18 @@ function classDeps(
               if (isOptional && !optionalDeps.includes(tokenName)) {
                 optionalDeps.push(tokenName);
               }
+              const isSelf = booleanProp(optionsArg, "self");
+              if (isSelf && !selfDeps.includes(tokenName)) {
+                selfDeps.push(tokenName);
+              }
+              const isSkipSelf = booleanProp(optionsArg, "skipSelf");
+              if (isSkipSelf && !skipSelfDeps.includes(tokenName)) {
+                skipSelfDeps.push(tokenName);
+              }
+              const isHost = booleanProp(optionsArg, "host");
+              if (isHost && !hostDeps.includes(tokenName)) {
+                hostDeps.push(tokenName);
+              }
             }
           }
         }
@@ -1069,14 +1105,31 @@ function parseModifierParams(cls: ClassDeclaration, modifierName: string): Set<n
   return result;
 }
 
+function unwrapForwardRef(expr: Expression): Expression {
+  if (Node.isCallExpression(expr)) {
+    const exprText = expr.getExpression().getText();
+    if (exprText === "forwardRef" || exprText.endsWith(".forwardRef")) {
+      const arg = expr.getArguments()[0];
+      if (arg && (Node.isArrowFunction(arg) || Node.isFunctionExpression(arg))) {
+        const body = arg.getBody();
+        if (body && Node.isExpression(body)) {
+          return unwrapForwardRef(body);
+        }
+      }
+    }
+  }
+  return expr;
+}
+
 function tokenText(expr: Expression): string {
-  if (Node.isStringLiteral(expr)) return expr.getLiteralText();
-  if (Node.isIdentifier(expr)) {
-    const decl = resolveDeclaration(expr)[0];
-    if (decl && Node.isClassDeclaration(decl)) return decl.getName() ?? expr.getText();
+  const unwrapped = unwrapForwardRef(expr);
+  if (Node.isStringLiteral(unwrapped)) return unwrapped.getLiteralText();
+  if (Node.isIdentifier(unwrapped)) {
+    const decl = resolveDeclaration(unwrapped)[0];
+    if (decl && Node.isClassDeclaration(decl)) return decl.getName() ?? unwrapped.getText();
     if (decl && Node.isVariableDeclaration(decl)) return decl.getName();
   }
-  return expr.getText();
+  return unwrapped.getText();
 }
 
 function resolveScope(
@@ -1095,8 +1148,9 @@ function resolveScope(
 
 /** Identifier -> token name + kind (resolves across imports to declaration). */
 function tokenNameOf(expr: Expression, ctx: AnalysisContext): { name: string; kind: TokenKind } {
-  if (Node.isIdentifier(expr)) {
-    const decl = resolveDeclaration(expr)[0];
+  const unwrapped = unwrapForwardRef(expr);
+  if (Node.isIdentifier(unwrapped)) {
+    const decl = resolveDeclaration(unwrapped)[0];
     if (decl && Node.isClassDeclaration(decl)) {
       return { name: decl.getName() ?? expr.getText(), kind: "class" };
     }
@@ -1247,7 +1301,27 @@ function parseLiteralValue(node: Node): unknown {
   if (Node.isNumericLiteral(node)) return node.getLiteralValue();
   if (node.getKindName() === "TrueKeyword") return true;
   if (node.getKindName() === "FalseKeyword") return false;
+  if (Node.isArrayLiteralExpression(node)) {
+    return node.getElements().map(parseLiteralValue);
+  }
+  if (Node.isObjectLiteralExpression(node)) {
+    return parseObjectLiteralValues(node);
+  }
   return undefined;
+}
+
+function parseObjectLiteralValues(obj: ObjectLiteralExpression): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const prop of obj.getProperties()) {
+    if (Node.isPropertyAssignment(prop)) {
+      const name = prop.getName();
+      const init = prop.getInitializer();
+      if (init) {
+        result[name] = parseLiteralValue(init);
+      }
+    }
+  }
+  return result;
 }
 
 /** Absolute path -> posix-style module path relative to rootDir without extension (for import generation). */

@@ -488,4 +488,50 @@ describe("generate：client.ts 与 permissions.ts 端到端代码生成", () => 
       "firstService",
     ]);
   });
+
+  test("renderApplication and renderClient generate route title and static data metadata", () => {
+    const rendered = renderApplication(
+      {
+        modules: [
+          {
+            name: "meta",
+            className: "MetaModule",
+            file: "src/meta.module.ts",
+            line: 1,
+            imports: [],
+            providers: [],
+            controllers: [
+              {
+                className: "MetaController",
+                path: "/meta",
+                scope: "request",
+                deps: [],
+                routes: [
+                  {
+                    method: "GET",
+                    path: "/info",
+                    handler: "getInfo",
+                    title: "System Information",
+                    data: { tier: "enterprise", public: false },
+                  },
+                ],
+                file: "src/meta.controller.ts",
+                importPath: "./meta.controller",
+              },
+            ],
+            commands: [],
+            queries: [],
+            exports: [],
+          },
+        ],
+        externalTokens: [],
+      },
+      { rootDir: "/app", outDir: "/app/gen", generateClient: true },
+    );
+
+    expect(rendered.applicationCode).toContain('title: "System Information"');
+    expect(rendered.applicationCode).toContain('data: {"tier":"enterprise","public":false}');
+    expect(rendered.clientCode).toContain('"title": "System Information"');
+    expect(rendered.clientCode).toContain('"tier": "enterprise"');
+  });
 });

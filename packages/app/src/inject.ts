@@ -1,9 +1,17 @@
 import type { Token } from "./provider";
+import { DESTROY_REF } from "./context";
+import { resolveForwardRef } from "./forward_ref";
 import { InjectionToken } from "./token";
 
 export interface InjectFlags {
   /** If true, returns undefined instead of throwing when token is not found. */
   optional?: boolean;
+  /** If true, requires token to be resolved from current local injector. */
+  self?: boolean;
+  /** If true, skips current local injector and resolves from parent. */
+  skipSelf?: boolean;
+  /** If true, resolves from host injector. */
+  host?: boolean;
 }
 
 export interface InjectorLike {
@@ -52,15 +60,16 @@ export function inject<T>(token: Token<T>, options?: InjectFlags): T {
     );
   }
 
-  const value = currentInjector.get(token);
+  const resolved = resolveForwardRef(token);
+  const value = currentInjector.get(resolved);
   if (value === undefined) {
     if (options?.optional) {
       return undefined as unknown as T;
     }
-    if (token instanceof InjectionToken && token.factory) {
-      return token.factory();
+    if (resolved instanceof InjectionToken && resolved.factory) {
+      return resolved.factory();
     }
-    throw new Error(`NullInjectorError: No provider for ${tokenToString(token)}`);
+    throw new Error(`NullInjectorError: No provider for ${tokenToString(resolved)}`);
   }
   return value as T;
 }
@@ -79,13 +88,14 @@ export function createChildInjector(
 
   return {
     get<T>(token: Token<T>): T | undefined {
-      if (providerMap.has(token)) {
-        return providerMap.get(token) as T;
+      const resolved = resolveForwardRef(token);
+      if (providerMap.has(resolved)) {
+        return providerMap.get(resolved) as T;
       }
-      if (token instanceof InjectionToken && providerMap.has(token.name)) {
-        return providerMap.get(token.name) as T;
+      if (resolved instanceof InjectionToken && providerMap.has(resolved.name)) {
+        return providerMap.get(resolved.name) as T;
       }
-      return parent.get(token);
+      return parent.get(resolved);
     },
   };
 }
@@ -98,6 +108,17 @@ export function assertInInjectionContext(fnName: string): void {
   if (!currentInjector) {
     throw new Error(`${fnName} must be called from an active injection context.`);
   }
+}
+
+/**
+ * Injects the AbortSignal of the active DestroyRef.
+ * Automatically aborted when the active context or service is destroyed.
+ * Modeled after Angular's DestroyRef signal pattern.
+ */
+export function injectDestroySignal(): AbortSignal {
+  const ref = inject(DESTROY_REF);
+  if (ref.signal) return ref.signal;
+  throw new Error("Active DestroyRef does not provide an AbortSignal");
 }
 
 function tokenToString(token: Token<any>): string {

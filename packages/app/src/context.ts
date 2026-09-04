@@ -51,6 +51,7 @@ export interface OnDestroy {
  * Modeled directly after Angular's DestroyRef.
  */
 export interface DestroyRef {
+  readonly signal?: AbortSignal;
   onDestroy(callback: () => void | Promise<void>): () => void;
 }
 
@@ -68,15 +69,20 @@ export const DESTROY_REF = new InjectionToken<DestroyRef>("supacloud.destroy-ref
  */
 export function createDestroyRef(): DestroyRef & {
   readonly destroyed: boolean;
+  readonly signal: AbortSignal;
   destroy(): Promise<void>;
   _teardowns: Array<() => void | Promise<void>>;
 } {
   let isDestroyed = false;
+  const abortController = new AbortController();
   const callbacks: Array<() => void | Promise<void>> = [];
 
   return {
     get destroyed() {
       return isDestroyed;
+    },
+    get signal() {
+      return abortController.signal;
     },
     onDestroy(callback: () => void | Promise<void>): () => void {
       if (isDestroyed) {
@@ -91,6 +97,7 @@ export function createDestroyRef(): DestroyRef & {
     async destroy(): Promise<void> {
       if (isDestroyed) return;
       isDestroyed = true;
+      abortController.abort();
       const reversed = [...callbacks].reverse();
       callbacks.length = 0;
       for (const cb of reversed) {
