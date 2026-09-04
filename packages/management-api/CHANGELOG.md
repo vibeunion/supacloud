@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.71.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.70.0...management-api-v0.71.0) (2026-09-04)
+
+
+### Features
+
+* **storage:** support conditional writes in JuiceFS S3 gateway ([#1135](https://github.com/vibeunion/supacloud/issues/1135)) ([9a06eb1](https://github.com/vibeunion/supacloud/commit/9a06eb1c1a747c3c43ce018a18b95233d77b6b5d))
+
+
+### Miscellaneous Chores
+
+* unify all code comments to English across packages ([#1136](https://github.com/vibeunion/supacloud/issues/1136)) ([2587201](https://github.com/vibeunion/supacloud/commit/2587201347494975cd313ff3aa4b0c5c3af48780))
+
 ## [0.70.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.69.1...management-api-v0.70.0) (2026-09-04)
 
 

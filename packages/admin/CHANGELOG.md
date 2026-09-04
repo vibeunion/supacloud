@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.1](https://github.com/vibeunion/supacloud/compare/admin-v0.20.0...admin-v0.20.1) (2026-09-04)
+
+
+### Miscellaneous Chores
+
+* unify all code comments to English across packages ([#1136](https://github.com/vibeunion/supacloud/issues/1136)) ([2587201](https://github.com/vibeunion/supacloud/commit/2587201347494975cd313ff3aa4b0c5c3af48780))
+
 ## [0.20.0](https://github.com/vibeunion/supacloud/compare/admin-v0.19.0...admin-v0.20.0) (2026-09-04)
 
 
