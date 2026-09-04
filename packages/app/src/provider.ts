@@ -12,6 +12,10 @@ export type Token<T = any> = InjectionToken<T> | Type<T>;
 interface BaseProvider {
   /** Overrides the scope derived from @Injectable / token defaults. */
   scope?: Scope;
+  /**
+   * When true, multiple providers can contribute to this token as an array of instances (Angular multi-providers).
+   */
+  multi?: boolean;
 }
 
 export interface ClassProvider<T = any> extends BaseProvider {

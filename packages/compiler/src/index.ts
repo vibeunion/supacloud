@@ -3,6 +3,7 @@ export { checkProject, compileProject } from "./compile";
 export { watchProject } from "./watch";
 export { doctorProject, explainGraph, formatGraph } from "./inspect";
 export { createIncrementalCompiler } from "./incremental";
+export { createDependencyGraphCache } from "./incremental";
 export { generateApplication, renderApplication } from "./generate";
 export type { GenerateOptions, RenderedArtifacts } from "./generate";
 export type { DoctorResult } from "./inspect";
@@ -19,6 +20,7 @@ export {
 } from "./profiles";
 export type {
   ApplicationGraph,
+  CachedModuleEntry,
   CheckProjectResult,
   CommandExecutionCapabilities,
   CommandNode,
@@ -26,6 +28,7 @@ export type {
   CompileResult,
   CompileStats,
   ControllerNode,
+  DependencyGraphCache,
   Diagnostic,
   ModuleBoundaryPresetName,
   ModuleBoundaryProfile,

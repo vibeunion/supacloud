@@ -14,15 +14,19 @@ export const QUERY_METADATA = "supacloud:query";
 export const CONTROLLER_METADATA = "supacloud:controller";
 export const ROUTES_METADATA = "supacloud:routes";
 export const INJECT_PARAMS_METADATA = "supacloud:inject-params";
+export const OPTIONAL_PARAMS_METADATA = "supacloud:optional-params";
 
 export interface InjectableOptions {
   scope?: Scope;
+  /** Automatically provide this service in root scope without manual module declaration (Angular-style). */
+  providedIn?: "root";
   /** Explicit constructor dependency tokens, in parameter order. */
   deps?: Token[];
 }
 
 export interface InjectableMeta {
   scope: Scope;
+  providedIn?: "root";
   deps: Token[];
 }
 
@@ -108,6 +112,7 @@ export function Injectable(options: InjectableOptions = {}): ClassDecorator {
   return (target) => {
     const meta: InjectableMeta = {
       scope: options.scope ?? DEFAULT_SCOPE,
+      providedIn: options.providedIn,
       deps: options.deps ?? [],
     };
     defineMetadata(target, INJECTABLE_METADATA, meta);
@@ -139,6 +144,26 @@ export function Inject(token: Token): ParameterDecorator {
 
 export function getInjectParams(target: object): Record<number, Token> {
   return readOwnOrInherited(target, INJECT_PARAMS_METADATA) ?? {};
+}
+
+/**
+ * Parameter decorator marking a constructor parameter as optional.
+ * Modeled after Angular's @Optional(); if unresolved, the parameter receives undefined.
+ */
+export function Optional(): ParameterDecorator {
+  return (target, propertyKey, parameterIndex) => {
+    if (propertyKey !== undefined) {
+      throw new Error("@Optional() is only supported on constructor parameters");
+    }
+    const cls = target as Type<unknown>;
+    const list = [...(readOwnOrInherited<number[]>(cls, OPTIONAL_PARAMS_METADATA) ?? [])];
+    if (!list.includes(parameterIndex)) list.push(parameterIndex);
+    defineMetadata(cls, OPTIONAL_PARAMS_METADATA, list);
+  };
+}
+
+export function getOptionalParams(target: object): number[] {
+  return readOwnOrInherited(target, OPTIONAL_PARAMS_METADATA) ?? [];
 }
 
 export function Module(options: ModuleOptions): ClassDecorator {

@@ -57,3 +57,10 @@ export function isJobContextToken(
 ): boolean {
   return token === "JOB_CONTEXT" || tokenNames?.[token] === JOB_CONTEXT_TOKEN_NAME;
 }
+
+/** Normalizes and combines controller path and route path. */
+export function joinRoutePaths(prefix: string, path: string): string {
+  const joined = `${prefix}/${path}`.replace(/\/{2,}/g, "/");
+  const normalized = joined.length > 1 ? joined.replace(/\/+$/, "") : joined;
+  return normalized;
+}

@@ -30,6 +30,8 @@ Options:
   --root, -r <dir>    Application source root (default: current directory or first positional argument)
   --out, -o <dir>     Artifact output directory (default: <rootDir>/generated)
   --strict            Treat all warnings as errors
+  --client            Generate typed API client in client.ts
+  --permissions       Generate typed permissions registry in permissions.ts
   --debounce <ms>     Debounce source changes in dev mode (default: 100)
   --json              Print machine-readable output for graph/explain/doctor
   --preset, -p <name> Architecture preset ('modular-monolith' | 'angular-enterprise' | 'clean-architecture')
@@ -54,6 +56,8 @@ async function run(): Promise<void> {
   let rootDir = ".";
   let outDir: string | undefined;
   let strict = false;
+  let generateClient = false;
+  let generatePermissions = false;
   let preset: ModuleBoundaryPresetName | undefined;
   let debounceMs = 100;
   let query: string | undefined;
@@ -67,6 +71,10 @@ async function run(): Promise<void> {
       outDir = args[++i];
     } else if (arg === "--strict") {
       strict = true;
+    } else if (arg === "--client") {
+      generateClient = true;
+    } else if (arg === "--permissions") {
+      generatePermissions = true;
     } else if (arg === "--debounce") {
       debounceMs = Number(args[++i]);
       if (!Number.isFinite(debounceMs) || debounceMs < 0) {
@@ -94,13 +102,11 @@ async function run(): Promise<void> {
       outDir: resolvedOut,
       strict,
       moduleBoundaryPreset: preset,
+      generateClient,
+      generatePermissions,
     });
 
-    for (const diag of result.diagnostics) {
-      const loc = diag.file ? ` ${diag.file}${diag.line ? `:${diag.line}` : ""}` : "";
-      const log = diag.severity === "error" ? console.error : console.warn;
-      log(`[${diag.severity}] ${diag.code}${loc}: ${diag.message}`);
-    }
+    printDiagnostics(result.diagnostics);
 
     const errors = result.diagnostics.filter((d) => d.severity === "error");
     if (errors.length > 0) {
@@ -115,13 +121,11 @@ async function run(): Promise<void> {
       outDir: resolvedOut,
       strict,
       moduleBoundaryPreset: preset,
+      generateClient,
+      generatePermissions,
     });
 
-    for (const diag of result.diagnostics) {
-      const loc = diag.file ? ` ${diag.file}${diag.line ? `:${diag.line}` : ""}` : "";
-      const log = diag.severity === "error" ? console.error : console.warn;
-      log(`[${diag.severity}] ${diag.code}${loc}: ${diag.message}`);
-    }
+    printDiagnostics(result.diagnostics);
 
     const errors = result.diagnostics.filter((d) => d.severity === "error");
     if (errors.length > 0) {
@@ -146,16 +150,14 @@ async function run(): Promise<void> {
       strict,
       moduleBoundaryPreset: preset,
       debounceMs,
+      generateClient,
+      generatePermissions,
       onEvent: (event) => {
         if (event.type === "compile-start") {
           console.log(event.initial ? "\nInitial compilation..." : "\nSource change detected; compiling...");
           return;
         }
-        for (const diag of event.diagnostics) {
-          const loc = diag.file ? ` ${diag.file}${diag.line ? `:${diag.line}` : ""}` : "";
-          const log = diag.severity === "error" ? console.error : console.warn;
-          log(`[${diag.severity}] ${diag.code}${loc}: ${diag.message}`);
-        }
+        printDiagnostics(event.diagnostics);
         if (event.type === "compile-error") {
           console.error(`Compilation failed; keeping the last successful artifacts (${event.durationMs}ms).`);
         } else {
@@ -217,6 +219,9 @@ function printDiagnostics(diagnostics: Diagnostic[]): void {
     const loc = diag.file ? ` ${diag.file}${diag.line ? `:${diag.line}` : ""}` : "";
     const log = diag.severity === "error" ? console.error : console.warn;
     log(`[${diag.severity}] ${diag.code}${loc}: ${diag.message}`);
+    if (diag.suggestion) {
+      console.log(`  Hint: ${diag.suggestion}`);
+    }
   }
 }
 

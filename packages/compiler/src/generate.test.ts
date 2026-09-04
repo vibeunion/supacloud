@@ -232,3 +232,45 @@ describe("generate：application.ts 可被 bun 直接执行", () => {
     expect(await readFile(join(badOut, "application.ts"), "utf8")).toBe(original);
   });
 });
+
+describe("generate：client.ts 与 permissions.ts 端到端代码生成", () => {
+  test("compileProject 带 generateClient 和 generatePermissions 生成 client.ts 与 permissions.ts", async () => {
+    const fullOut = join(rootDir, "generated-full");
+    const fullResult = await compileProject({
+      rootDir,
+      outDir: fullOut,
+      generateClient: true,
+      generatePermissions: true,
+    });
+    expect(fullResult.diagnostics).toEqual([]);
+    expect(fullResult.written).toContain(join(fullOut, "client.ts"));
+    expect(fullResult.written).toContain(join(fullOut, "permissions.ts"));
+
+    const clientCode = await readFile(join(fullOut, "client.ts"), "utf8");
+    expect(clientCode).toContain("export function createApiClient");
+    expect(clientCode).toContain("export const API_ROUTES =");
+    expect(clientCode).toContain("case: {");
+    expect(clientCode).toContain("accept: (options:");
+
+    const permissionsCode = await readFile(join(fullOut, "permissions.ts"), "utf8");
+    expect(permissionsCode).toContain("export const AppPermissions =");
+    expect(permissionsCode).toContain('CaseAccept: "case.accept"');
+    expect(permissionsCode).toContain("export const RoutePermissions:");
+    expect(permissionsCode).toContain("export function hasPermission");
+
+    const clientModule = await import(pathToFileURL(join(fullOut, "client.ts")).href);
+    expect(Array.isArray(clientModule.API_ROUTES)).toBe(true);
+    expect(clientModule.API_ROUTES[0]).toMatchObject({
+      method: "POST",
+      path: "/cases/:caseId/accept",
+      controller: "CaseController",
+      handler: "accept",
+    });
+
+    const permissionsModule = await import(pathToFileURL(join(fullOut, "permissions.ts")).href);
+    expect(permissionsModule.AppPermissions.CaseAccept).toBe("case.accept");
+    expect(permissionsModule.hasPermission(["case.accept"], "case.accept")).toBe(true);
+    expect(permissionsModule.hasPermission(["*"], "case.accept")).toBe(true);
+    expect(permissionsModule.hasPermission(["other"], "case.accept")).toBe(false);
+  });
+});

@@ -15,6 +15,8 @@ export interface Diagnostic {
   message: string;
   file?: string;
   line?: number;
+  /** Actionable Angular Ivy-style remediation hint. */
+  suggestion?: string;
 }
 
 export interface ProviderNode {
@@ -29,6 +31,12 @@ export interface ProviderNode {
   scope: Scope;
   /** Token names in constructor/factory parameter order. */
   deps: string[];
+  /** Parameter tokens that are marked @Optional() (receive undefined if unresolved). */
+  optionalDeps?: string[];
+  /** When true, multiple providers can contribute to this token as an array of instances (Angular multi-providers). */
+  multi?: boolean;
+  /** Automatically provided in the root injector context without manual module declaration (Angular-style). */
+  providedIn?: "root";
   exported: boolean;
   file: string;
   line: number;
@@ -53,6 +61,8 @@ export interface ControllerNode {
   path: string;
   scope: Scope;
   deps: string[];
+  /** Parameter tokens marked @Optional(). */
+  optionalDeps?: string[];
   routes: RouteNode[];
   file: string;
   importPath: string;
@@ -107,6 +117,11 @@ export interface ApplicationGraph {
    * Omitted from app.manifest.json.
    */
   tokenNames?: Record<string, string>;
+  /** Incremental cache statistics (modules reused vs reanalyzed). */
+  cacheStats?: {
+    reusedModules: string[];
+    reanalyzedModules: string[];
+  };
 }
 
 export interface CompileOptions {
@@ -132,6 +147,12 @@ export interface CompileOptions {
   detectOrphanModules?: boolean;
   /** Write generated artifacts even when error-level diagnostics exist (default: true). */
   writeOnError?: boolean;
+  /** Generate typed API client in client.ts (default: false). */
+  generateClient?: boolean;
+  /** Generate typed permissions registry in permissions.ts (default: false). */
+  generatePermissions?: boolean;
+  /** Incremental dependency graph cache. */
+  cache?: DependencyGraphCache;
 }
 
 export interface ModuleBoundaryRule {
@@ -201,6 +222,8 @@ export interface CompileStats {
   cacheHit: boolean;
   changedFiles: string[];
   affectedModules: string[];
+  reanalyzedModules?: string[];
+  reusedModules?: string[];
 }
 
 export interface CheckProjectResult {
@@ -231,4 +254,25 @@ export interface WatchHandle {
   /** Resolves after the initial compile has completed. */
   ready: Promise<WatchEvent>;
   close(): Promise<void>;
+}
+
+export interface CachedModuleEntry {
+  module: ModuleNode;
+  /** Files owned by this module (normalized relative paths). */
+  ownedFiles: string[];
+  /** File hash mapping for owned files. */
+  fileHashes: Record<string, string>;
+  /** Diagnostics captured during this module's analysis. */
+  diagnostics?: Diagnostic[];
+}
+
+export interface DependencyGraphCache {
+  /** Cached modules by module name. */
+  modules: Map<string, CachedModuleEntry>;
+  /** Global file hashes by relative file path. */
+  fileHashes: Map<string, string>;
+  lastStats?: {
+    reusedModules: string[];
+    reanalyzedModules: string[];
+  };
 }

@@ -629,4 +629,153 @@ describe("validateGraph：坏 fixture 诊断", () => {
     expect(errors[0].severity).toBe("error");
     expect(errors[0].message).toContain("violating presentation layer separation");
   });
+
+  test("multi: true allows duplicate tokens without duplicate-token diagnostic", () => {
+    const sampleGraph: ApplicationGraph = {
+      modules: [
+        {
+          name: "plugins",
+          className: "PluginsModule",
+          file: "src/plugins.module.ts",
+          line: 1,
+          imports: [],
+          providers: [
+            {
+              token: "INTERCEPTOR",
+              tokenKind: "token",
+              kind: "class",
+              useClass: "AuthInterceptor",
+              scope: "application",
+              deps: [],
+              multi: true,
+              exported: true,
+              file: "src/auth.interceptor.ts",
+              line: 1,
+              importPath: "./auth.interceptor",
+            },
+            {
+              token: "INTERCEPTOR",
+              tokenKind: "token",
+              kind: "class",
+              useClass: "LogInterceptor",
+              scope: "application",
+              deps: [],
+              multi: true,
+              exported: true,
+              file: "src/log.interceptor.ts",
+              line: 1,
+              importPath: "./log.interceptor",
+            },
+          ],
+          controllers: [],
+          commands: [],
+          queries: [],
+          exports: ["INTERCEPTOR"],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(sampleGraph);
+    expect(diags.filter((d) => d.code === "duplicate-token")).toHaveLength(0);
+  });
+
+  test("optionalDeps suppresses missing-token errors and attaches actionable suggestions", () => {
+    const sampleGraph: ApplicationGraph = {
+      modules: [
+        {
+          name: "test",
+          className: "TestModule",
+          file: "src/test.module.ts",
+          line: 1,
+          imports: [],
+          providers: [
+            {
+              token: "ServiceWithOptional",
+              tokenKind: "class",
+              kind: "class",
+              useClass: "ServiceWithOptional",
+              scope: "application",
+              deps: ["OPTIONAL_LOGGER"],
+              optionalDeps: ["OPTIONAL_LOGGER"],
+              exported: true,
+              file: "src/service.ts",
+              line: 1,
+              importPath: "./service",
+            },
+          ],
+          controllers: [],
+          commands: [],
+          queries: [],
+          exports: ["ServiceWithOptional"],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(sampleGraph);
+    expect(diags.filter((d) => d.code === "module-boundary" || d.code === "missing-token")).toHaveLength(0);
+  });
+
+  test("providedIn: 'root' resolves dependencies across modules without imports", () => {
+    const sampleGraph: ApplicationGraph = {
+      modules: [
+        {
+          name: "root",
+          className: "RootModule",
+          file: "src/root.module.ts",
+          line: 1,
+          imports: [],
+          providers: [
+            {
+              token: "RootConfigService",
+              tokenKind: "class",
+              kind: "class",
+              useClass: "RootConfigService",
+              scope: "application",
+              providedIn: "root",
+              deps: [],
+              exported: true,
+              file: "src/config.ts",
+              line: 1,
+              importPath: "./config",
+            },
+          ],
+          controllers: [],
+          commands: [],
+          queries: [],
+          exports: ["RootConfigService"],
+        },
+        {
+          name: "feature",
+          className: "FeatureModule",
+          file: "src/feature.module.ts",
+          line: 1,
+          imports: [], // Did not explicitly import RootModule
+          providers: [
+            {
+              token: "FeatureService",
+              tokenKind: "class",
+              kind: "class",
+              useClass: "FeatureService",
+              scope: "application",
+              deps: ["RootConfigService"],
+              exported: true,
+              file: "src/feature.service.ts",
+              line: 1,
+              importPath: "./feature.service",
+            },
+          ],
+          controllers: [],
+          commands: [],
+          queries: [],
+          exports: ["FeatureService"],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(sampleGraph);
+    expect(diags.filter((d) => d.code === "module-boundary")).toHaveLength(0);
+  });
 });

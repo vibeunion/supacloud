@@ -2,7 +2,13 @@ import { createHash } from "node:crypto";
 import { access, readdir, readFile } from "node:fs/promises";
 import { relative, resolve, sep } from "node:path";
 import { compileProject } from "./compile";
-import type { CompileOptions, CompileResult, CompileStats, ModuleNode } from "./types";
+import type {
+  CompileOptions,
+  CompileResult,
+  CompileStats,
+  DependencyGraphCache,
+  ModuleNode,
+} from "./types";
 
 export interface IncrementalCompileResult extends CompileResult {
   stats: CompileStats;
@@ -11,6 +17,14 @@ export interface IncrementalCompileResult extends CompileResult {
 export interface IncrementalCompiler {
   compile(options: CompileOptions, changedPaths?: string[]): Promise<IncrementalCompileResult>;
   reset(): void;
+  getCache?(): DependencyGraphCache;
+}
+
+export function createDependencyGraphCache(): DependencyGraphCache {
+  return {
+    modules: new Map(),
+    fileHashes: new Map(),
+  };
 }
 
 interface Snapshot {
@@ -22,6 +36,7 @@ interface Snapshot {
 export function createIncrementalCompiler(): IncrementalCompiler {
   let previousSnapshot: Snapshot | undefined;
   let previousResult: CompileResult | undefined;
+  const cache: DependencyGraphCache = createDependencyGraphCache();
 
   return {
     async compile(options, changedPaths): Promise<IncrementalCompileResult> {
@@ -36,7 +51,13 @@ export function createIncrementalCompiler(): IncrementalCompiler {
       if (cacheHit && previousResult) {
         return {
           ...previousResult,
-          stats: { cacheHit: true, changedFiles: [], affectedModules: [] },
+          stats: {
+            cacheHit: true,
+            changedFiles: [],
+            affectedModules: [],
+            reusedModules: previousResult.graph.modules.map((m) => m.name),
+            reanalyzedModules: [],
+          },
         };
       }
 
@@ -45,16 +66,26 @@ export function createIncrementalCompiler(): IncrementalCompiler {
           cacheHit: true,
           changedFiles,
           affectedModules: findAffectedModules(previousResult.graph.modules, previousResult.graph.modules, changedFiles),
+          reusedModules: previousResult.graph.modules.map((m) => m.name),
+          reanalyzedModules: [],
         };
         previousSnapshot = snapshot;
         return { ...previousResult, written: [], stats };
       }
 
-      const result = await compileProject(options);
+      const result = await compileProject({ ...options, cache: options.cache ?? cache });
       const affectedModules = previousResult
         ? findAffectedModules(previousResult.graph.modules, result.graph.modules, changedFiles)
         : result.graph.modules.map((module) => module.name);
-      const stats: CompileStats = { cacheHit: false, changedFiles, affectedModules };
+      const reusedModules = result.graph.cacheStats?.reusedModules ?? [];
+      const reanalyzedModules = result.graph.cacheStats?.reanalyzedModules ?? affectedModules;
+      const stats: CompileStats = {
+        cacheHit: false,
+        changedFiles,
+        affectedModules,
+        reusedModules,
+        reanalyzedModules,
+      };
       previousSnapshot = snapshot;
       previousResult = result;
       return { ...result, stats };
@@ -62,6 +93,11 @@ export function createIncrementalCompiler(): IncrementalCompiler {
     reset(): void {
       previousSnapshot = undefined;
       previousResult = undefined;
+      cache.modules.clear();
+      cache.fileHashes.clear();
+    },
+    getCache(): DependencyGraphCache {
+      return cache;
     },
   };
 }
@@ -107,6 +143,8 @@ function optionsKeyOf(options: CompileOptions): string {
     commandCapabilities: options.commandCapabilities,
     disallowControllerDirectDb: options.disallowControllerDirectDb,
     detectOrphanModules: options.detectOrphanModules,
+    generateClient: options.generateClient,
+    generatePermissions: options.generatePermissions,
   });
 }
 

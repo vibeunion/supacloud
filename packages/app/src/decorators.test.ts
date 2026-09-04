@@ -8,6 +8,7 @@ import {
   Inject,
   Injectable,
   Module,
+  Optional,
   Options,
   Patch,
   Post,
@@ -16,6 +17,7 @@ import {
   getCommandMeta,
   getControllerMeta,
   getInjectParams,
+  getOptionalParams,
   getInjectableMeta,
   getModuleMeta,
   getQueryMeta,
@@ -36,6 +38,12 @@ describe("@Injectable", () => {
     @Injectable({ scope: "request", deps: [DB_CLIENT] })
     class Service {}
     expect(getInjectableMeta(Service)).toEqual({ scope: "request", deps: [DB_CLIENT] });
+  });
+
+  test("accepts providedIn: 'root'", () => {
+    @Injectable({ providedIn: "root" })
+    class RootService {}
+    expect(getInjectableMeta(RootService)).toEqual({ scope: "application", providedIn: "root", deps: [] });
   });
 });
 
@@ -61,6 +69,37 @@ describe("@Inject", () => {
       }
       return Service;
     }).toThrow("@Inject() is only supported on constructor parameters");
+  });
+
+  test("records optional constructor parameters", () => {
+    const OPTIONAL_LOG = new InjectionToken("log");
+
+    @Injectable()
+    class ServiceWithOptional {
+      constructor(
+        @Inject(DB_CLIENT) private readonly db: unknown,
+        @Optional() @Inject(OPTIONAL_LOG) private readonly log?: unknown,
+      ) {}
+    }
+
+    expect(getInjectParams(ServiceWithOptional)).toEqual({ 0: DB_CLIENT, 1: OPTIONAL_LOG });
+    expect(getOptionalParams(ServiceWithOptional)).toEqual([1]);
+  });
+
+  test("rejects @Optional() usage on non-constructor parameters", () => {
+    expect(() => {
+      class Service {
+        method(@Optional() _value: unknown) {}
+      }
+      return Service;
+    }).toThrow("@Optional() is only supported on constructor parameters");
+  });
+});
+
+describe("Provider multi flag", () => {
+  test("provider interfaces accept multi: true", () => {
+    const provider = { provide: DB_CLIENT, useClass: class Fake {}, multi: true };
+    expect(provider.multi).toBe(true);
   });
 });
 
