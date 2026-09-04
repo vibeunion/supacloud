@@ -6,6 +6,9 @@
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "supacloud-compiler": "./dist/cli.js"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -19,7 +22,7 @@
   ],
   "scripts": {
     "build": "bun run clean && bun run build:js && bun run build:types",
-    "build:js": "bun build src/index.ts --outdir dist --target node --external ts-morph",
+    "build:js": "bun build src/index.ts src/cli.ts --outdir dist --target node --external ts-morph",
     "build:types": "tsc -p tsconfig.json --emitDeclarationOnly",
     "clean": "rm -rf dist",
     "prepublishOnly": "bun run build",

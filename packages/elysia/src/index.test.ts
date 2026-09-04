@@ -630,4 +630,38 @@ describe("composeCommandExecutors", () => {
       "audit:end:case.created",
     ]);
   });
+
+  test("supports HEAD and OPTIONS route methods", async () => {
+    const app = createApplication({
+      modules: [
+        {
+          name: "status",
+          createServices: () => ({
+            statusController: {
+              headCheck: () => new Response(null, { status: 200 }),
+              optionsCheck: () => new Response(null, { status: 204, headers: { allow: "GET, HEAD, OPTIONS" } }),
+            },
+          }),
+          controllers: [
+            {
+              path: "/status",
+              serviceKey: "statusController",
+              scope: "application",
+              routes: [
+                { method: "HEAD", path: "", handler: "headCheck" },
+                { method: "OPTIONS", path: "", handler: "optionsCheck" },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    const headRes = await testRequest(app, "/status", { method: "HEAD" });
+    expect(headRes.status).toBe(200);
+
+    const optRes = await testRequest(app, "/status", { method: "OPTIONS" });
+    expect(optRes.status).toBe(204);
+    expect(optRes.headers.get("allow")).toBe("GET, HEAD, OPTIONS");
+  });
 });

@@ -70,7 +70,7 @@ export interface ControllerMeta {
   path: string;
 }
 
-export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
 
 export interface RouteOptions {
   /** TypeBox schema (or compatible) for the request body. */
@@ -217,6 +217,8 @@ export const Post = createRouteDecorator("POST");
 export const Put = createRouteDecorator("PUT");
 export const Patch = createRouteDecorator("PATCH");
 export const Delete = createRouteDecorator("DELETE");
+export const Head = createRouteDecorator("HEAD");
+export const Options = createRouteDecorator("OPTIONS");
 
 export function getRoutes(target: object): RouteDefinition[] {
   return readOwnOrInherited(target, ROUTES_METADATA) ?? [];

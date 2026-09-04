@@ -389,4 +389,244 @@ describe("validateGraph：坏 fixture 诊断", () => {
     expect(errors[0].severity).toBe("error");
     expect(errors[0].message).toContain("Unknown module boundary preset");
   });
+
+  test("commandCapabilities：校验平台运行期能力，防范编译期元数据剧场", () => {
+    const sampleGraph: ApplicationGraph = {
+      modules: [
+        {
+          name: "case",
+          className: "CaseModule",
+          file: "src/case.module.ts",
+          line: 1,
+          imports: [],
+          providers: [],
+          controllers: [],
+          commands: [
+            {
+              className: "CreateCaseCommand",
+              name: "case.create",
+              permission: "case:write",
+              audit: "case.created",
+              idempotency: "required",
+              transaction: "required",
+            },
+          ],
+          queries: [],
+          exports: [],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    // 1. 当能力未开启时报错
+    const diags1 = validateGraph(sampleGraph, {
+      commandCapabilities: {
+        permission: false,
+        audit: false,
+        idempotency: false,
+        transaction: "rpc-only",
+      },
+    });
+
+    expect(diags1.some((d) => d.code === "command-permission-unsupported" && d.severity === "error")).toBe(true);
+    expect(diags1.some((d) => d.code === "command-audit-unsupported" && d.severity === "error")).toBe(true);
+    expect(diags1.some((d) => d.code === "command-idempotency-unsupported" && d.severity === "error")).toBe(true);
+    expect(diags1.some((d) => d.code === "command-transaction-rpc-only" && d.severity === "warn")).toBe(true);
+
+    // 2. 当 transaction 为 false 时报错
+    const diags2 = validateGraph(sampleGraph, {
+      commandCapabilities: {
+        transaction: false,
+      },
+    });
+    expect(diags2.some((d) => d.code === "command-transaction-unsupported" && d.severity === "error")).toBe(true);
+  });
+
+  test("allowRouteCommandBindings：配置为 false 时禁止路由级命令绑定", () => {
+    const sampleGraph: ApplicationGraph = {
+      modules: [
+        {
+          name: "case",
+          className: "CaseModule",
+          file: "src/case.module.ts",
+          line: 1,
+          imports: [],
+          providers: [],
+          controllers: [
+            {
+              className: "CaseController",
+              path: "/cases",
+              scope: "request",
+              deps: [],
+              file: "src/case.controller.ts",
+              importPath: "./case.controller",
+              routes: [
+                {
+                  method: "POST",
+                  path: "",
+                  handler: "create",
+                  command: "CreateCaseCommand",
+                },
+              ],
+            },
+          ],
+          commands: [
+            {
+              className: "CreateCaseCommand",
+              name: "case.create",
+              permission: "case:write",
+              idempotency: "none",
+              transaction: "none",
+            },
+          ],
+          queries: [],
+          exports: [],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    // 默认允许
+    const defaultDiags = validateGraph(sampleGraph);
+    expect(defaultDiags.filter((d) => d.code === "route-command-binding-disallowed")).toHaveLength(0);
+
+    // 策略显式禁止
+    const disallowedDiags = validateGraph(sampleGraph, {
+      allowRouteCommandBindings: false,
+    });
+    const errors = disallowedDiags.filter((d) => d.code === "route-command-binding-disallowed");
+    expect(errors).toHaveLength(1);
+    expect(errors[0].severity).toBe("error");
+    expect(errors[0].message).toContain("禁止路由级命令绑定");
+  });
+
+  test("circular-module-import：检测模块层级循环引用", () => {
+    const sampleGraph: ApplicationGraph = {
+      modules: [
+        {
+          name: "moduleA",
+          className: "ModuleA",
+          file: "src/a.module.ts",
+          line: 1,
+          imports: ["moduleB"],
+          providers: [],
+          controllers: [],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+        {
+          name: "moduleB",
+          className: "ModuleB",
+          file: "src/b.module.ts",
+          line: 1,
+          imports: ["moduleA"],
+          providers: [],
+          controllers: [],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(sampleGraph);
+    const cycles = diags.filter((d) => d.code === "circular-module-import");
+    expect(cycles).toHaveLength(1);
+    expect(cycles[0].severity).toBe("error");
+    expect(cycles[0].message).toContain("moduleA -> moduleB -> moduleA");
+  });
+
+  test("orphan-module：检测根模块存在时未被引入的孤立模块", () => {
+    const sampleGraph: ApplicationGraph = {
+      modules: [
+        {
+          name: "app",
+          className: "AppModule",
+          tags: ["type:root"],
+          file: "src/app.module.ts",
+          line: 1,
+          imports: ["connected"],
+          providers: [],
+          controllers: [],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+        {
+          name: "connected",
+          className: "ConnectedModule",
+          tags: ["type:feature"],
+          file: "src/connected.module.ts",
+          line: 1,
+          imports: [],
+          providers: [],
+          controllers: [],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+        {
+          name: "orphan",
+          className: "OrphanModule",
+          tags: ["type:feature"],
+          file: "src/orphan.module.ts",
+          line: 1,
+          imports: [],
+          providers: [],
+          controllers: [],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(sampleGraph, { detectOrphanModules: true });
+    const orphans = diags.filter((d) => d.code === "orphan-module");
+    expect(orphans).toHaveLength(1);
+    expect(orphans[0].severity).toBe("warn");
+    expect(orphans[0].message).toContain("Module 'orphan' is declared but not reachable");
+  });
+
+  test("disallowControllerDirectDb：禁止控制器直接依赖底层数据库客户端", () => {
+    const sampleGraph: ApplicationGraph = {
+      modules: [
+        {
+          name: "case",
+          className: "CaseModule",
+          file: "src/case.module.ts",
+          line: 1,
+          imports: [],
+          providers: [],
+          controllers: [
+            {
+              className: "CaseController",
+              path: "/cases",
+              scope: "request",
+              deps: ["DB_CLIENT"],
+              file: "src/case.controller.ts",
+              importPath: "./case.controller",
+              routes: [],
+            },
+          ],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+      ],
+      externalTokens: ["DB_CLIENT"],
+    };
+
+    const defaultDiags = validateGraph(sampleGraph);
+    expect(defaultDiags.filter((d) => d.code === "controller-direct-db-access")).toHaveLength(0);
+
+    const strictDiags = validateGraph(sampleGraph, { disallowControllerDirectDb: true });
+    const errors = strictDiags.filter((d) => d.code === "controller-direct-db-access");
+    expect(errors).toHaveLength(1);
+    expect(errors[0].severity).toBe("error");
+    expect(errors[0].message).toContain("violating presentation layer separation");
+  });
 });

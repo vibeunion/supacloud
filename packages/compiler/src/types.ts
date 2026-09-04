@@ -122,6 +122,14 @@ export interface CompileOptions {
   moduleBoundaryPreset?: ModuleBoundaryPresetName;
   /** Module boundary and architecture governance rules inspired by Nx enforce-module-boundaries. */
   moduleBoundaries?: ModuleBoundaryRule[];
+  /** 是否允许路由级直接绑定 @Command（默认 true；设为 false 时禁止路由级绑定，强制走应用服务层）。 */
+  allowRouteCommandBindings?: boolean;
+  /** 运行期 Command 执行器能力声明（用于防范编译期“元数据剧场”）。 */
+  commandCapabilities?: CommandExecutionCapabilities;
+  /** Disallow controllers from directly injecting DB clients (enforces presentation layer separation). */
+  disallowControllerDirectDb?: boolean;
+  /** Detect modules declared in the project that are unreachable from any root module. */
+  detectOrphanModules?: boolean;
 }
 
 export interface ModuleBoundaryRule {
@@ -153,10 +161,44 @@ export interface ValidateOptions {
   strict?: boolean;
   moduleBoundaryPreset?: ModuleBoundaryPresetName;
   moduleBoundaries?: ModuleBoundaryRule[];
+  /** 是否允许路由级直接绑定 @Command（默认 true；设为 false 时禁止路由级绑定，强制走应用服务层）。 */
+  allowRouteCommandBindings?: boolean;
+  /** 运行期 Command 执行器能力声明（用于防范编译期“元数据剧场”）。 */
+  commandCapabilities?: CommandExecutionCapabilities;
+  /** Disallow controllers from directly injecting DB clients. */
+  disallowControllerDirectDb?: boolean;
+  /** Detect modules declared in the project that are unreachable from any root module. */
+  detectOrphanModules?: boolean;
+}
+
+/** Command 执行器运行期能力配置。 */
+export interface CommandExecutionCapabilities {
+  /** 是否支持权限判定。若为 false 而命令声明了 permission，则报 error。 */
+  permission?: boolean;
+  /** 是否支持审计日志。若为 false 而命令声明了 audit，则报 error。 */
+  audit?: boolean;
+  /** 是否支持幂等。若为 false 而命令声明了 idempotency: 'required'，则报 error。 */
+  idempotency?: boolean;
+  /**
+   * 事务执行能力：
+   * - true: 支持完整事务边界；
+   * - 'rpc-only': 不支持应用级事务，事务必须落在单个 DB RPC 内（声明 transaction: 'required' 时报 warn）；
+   * - false: 事务支持已禁用（声明 transaction: 'required' 时报 error）。
+   */
+  transaction?: boolean | "rpc-only";
 }
 
 export interface CompileResult {
   diagnostics: Diagnostic[];
   graph: ApplicationGraph;
   written: string[];
+}
+
+export interface CheckProjectResult {
+  /** 产物是否完全与磁盘一致且未漂移。 */
+  upToDate: boolean;
+  /** 不一致或缺失的产物相对路径列表。 */
+  mismatches: string[];
+  diagnostics: Diagnostic[];
+  graph: ApplicationGraph;
 }

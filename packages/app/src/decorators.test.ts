@@ -2,11 +2,16 @@ import { describe, expect, test } from "bun:test";
 import {
   Command,
   Controller,
+  Delete,
   Get,
+  Head,
   Inject,
   Injectable,
   Module,
+  Options,
+  Patch,
   Post,
+  Put,
   Query,
   getCommandMeta,
   getControllerMeta,
@@ -174,6 +179,22 @@ describe("@Controller and route decorators", () => {
         body: CreateCaseInput,
         command: CreateCaseCommand,
       },
+    ]);
+  });
+
+  test("accumulates Head and Options routes", () => {
+    @Controller("/status")
+    class StatusController {
+      @Head("/")
+      head() {}
+
+      @Options("/")
+      options() {}
+    }
+
+    expect(getRoutes(StatusController)).toEqual([
+      { method: "HEAD", path: "/", handler: "head" },
+      { method: "OPTIONS", path: "/", handler: "options" },
     ]);
   });
 });
