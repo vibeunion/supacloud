@@ -196,13 +196,13 @@ describe("generate：application.ts 可被 bun 直接执行", () => {
     expect(controller.routes[0].response).toBe(contracts.AcceptResult);
   });
 
-  test("checkProject：产物一致时返回 upToDate: true，有漂移时准确报告 mismatch", async () => {
-    // 1. 刚生成完，产物一致
+  test("checkProject reports matching artifacts and detects drift", async () => {
+    // 1. Freshly generated artifacts match.
     const check1 = await checkProject({ rootDir, outDir });
     expect(check1.upToDate).toBe(true);
     expect(check1.mismatches).toHaveLength(0);
 
-    // 2. 篡改文件，应检测到漂移
+    // 2. Tampering with a file must be detected.
     const manifestPath = join(outDir, "app.manifest.json");
     const originalContent = await readFile(manifestPath, "utf8");
     await writeFile(manifestPath, '{"tampered": true}\n', "utf8");

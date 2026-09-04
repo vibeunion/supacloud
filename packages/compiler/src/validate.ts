@@ -150,7 +150,7 @@ export function validateGraph(
         if (typeof options === "object" && options.allowRouteCommandBindings === false && route.command) {
           error(
             "route-command-binding-disallowed",
-            `路由 ${key} 绑定了 command ${route.command}：当前架构策略禁止路由级命令绑定，请通过应用服务层调度（${controller.className}.${route.handler}，${controller.file}）`,
+            `Route ${key} binds command ${route.command}, but route-level command bindings are disabled by policy. Use an application service (${controller.className}.${route.handler}, ${controller.file}).`,
             controller.file,
           );
         }
@@ -247,7 +247,7 @@ export function validateGraph(
         if (command.permission && caps.permission === false) {
           error(
             "command-permission-unsupported",
-            `命令 ${command.name} 声明了 permission，但 Command Executor 未启用运行期权限判定（${location}）`,
+            `Command ${command.name} declares permission, but runtime permission checks are unavailable (${location}).`,
             module.file,
             module.line,
           );
@@ -255,7 +255,7 @@ export function validateGraph(
         if (command.audit && caps.audit === false) {
           error(
             "command-audit-unsupported",
-            `命令 ${command.name} 声明了 audit，但审计存储未接入（${location}）`,
+            `Command ${command.name} declares audit, but audit persistence is unavailable (${location}).`,
             module.file,
             module.line,
           );
@@ -263,7 +263,7 @@ export function validateGraph(
         if (command.idempotency === "required" && caps.idempotency === false) {
           error(
             "command-idempotency-unsupported",
-            `命令 ${command.name} 声明了 idempotency，但幂等 receipt 存储未接入（${location}）`,
+            `Command ${command.name} declares idempotency, but idempotency receipt persistence is unavailable (${location}).`,
             module.file,
             module.line,
           );
@@ -272,14 +272,14 @@ export function validateGraph(
           if (caps.transaction === "rpc-only") {
             warn(
               "command-transaction-rpc-only",
-              `命令 ${command.name} 声明了 transaction: 'required'：运行期不执行事务边界，该命令的多表写必须落在单个 DB RPC 内（${location}）`,
+              `Command ${command.name} declares transaction: 'required', but only DB RPC transactions are available; multi-table writes must use one DB RPC (${location}).`,
               module.file,
               module.line,
             );
           } else if (caps.transaction === false) {
             error(
               "command-transaction-unsupported",
-              `命令 ${command.name} 声明了 transaction: 'required'，但事务支持未接入（${location}）`,
+              `Command ${command.name} declares transaction: 'required', but transaction support is unavailable (${location}).`,
               module.file,
               module.line,
             );

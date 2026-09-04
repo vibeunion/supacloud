@@ -390,7 +390,7 @@ describe("validateGraph：坏 fixture 诊断", () => {
     expect(errors[0].message).toContain("Unknown module boundary preset");
   });
 
-  test("commandCapabilities：校验平台运行期能力，防范编译期元数据剧场", () => {
+  test("commandCapabilities validates runtime governance support", () => {
     const sampleGraph: ApplicationGraph = {
       modules: [
         {
@@ -418,7 +418,7 @@ describe("validateGraph：坏 fixture 诊断", () => {
       externalTokens: [],
     };
 
-    // 1. 当能力未开启时报错
+    // 1. Report unsupported capabilities.
     const diags1 = validateGraph(sampleGraph, {
       commandCapabilities: {
         permission: false,
@@ -433,7 +433,7 @@ describe("validateGraph：坏 fixture 诊断", () => {
     expect(diags1.some((d) => d.code === "command-idempotency-unsupported" && d.severity === "error")).toBe(true);
     expect(diags1.some((d) => d.code === "command-transaction-rpc-only" && d.severity === "warn")).toBe(true);
 
-    // 2. 当 transaction 为 false 时报错
+    // 2. Report disabled transaction support.
     const diags2 = validateGraph(sampleGraph, {
       commandCapabilities: {
         transaction: false,
@@ -442,7 +442,7 @@ describe("validateGraph：坏 fixture 诊断", () => {
     expect(diags2.some((d) => d.code === "command-transaction-unsupported" && d.severity === "error")).toBe(true);
   });
 
-  test("allowRouteCommandBindings：配置为 false 时禁止路由级命令绑定", () => {
+  test("allowRouteCommandBindings rejects route-level command bindings when disabled", () => {
     const sampleGraph: ApplicationGraph = {
       modules: [
         {
@@ -486,21 +486,21 @@ describe("validateGraph：坏 fixture 诊断", () => {
       externalTokens: [],
     };
 
-    // 默认允许
+    // Route-level bindings are allowed by default.
     const defaultDiags = validateGraph(sampleGraph);
     expect(defaultDiags.filter((d) => d.code === "route-command-binding-disallowed")).toHaveLength(0);
 
-    // 策略显式禁止
+    // Explicitly disable route-level bindings.
     const disallowedDiags = validateGraph(sampleGraph, {
       allowRouteCommandBindings: false,
     });
     const errors = disallowedDiags.filter((d) => d.code === "route-command-binding-disallowed");
     expect(errors).toHaveLength(1);
     expect(errors[0].severity).toBe("error");
-    expect(errors[0].message).toContain("禁止路由级命令绑定");
+    expect(errors[0].message).toContain("route-level command bindings are disabled");
   });
 
-  test("circular-module-import：检测模块层级循环引用", () => {
+  test("circular-module-import detects module-level cycles", () => {
     const sampleGraph: ApplicationGraph = {
       modules: [
         {
@@ -538,7 +538,7 @@ describe("validateGraph：坏 fixture 诊断", () => {
     expect(cycles[0].message).toContain("moduleA -> moduleB -> moduleA");
   });
 
-  test("orphan-module：检测根模块存在时未被引入的孤立模块", () => {
+  test("orphan-module detects unreachable modules when a root exists", () => {
     const sampleGraph: ApplicationGraph = {
       modules: [
         {
@@ -591,7 +591,7 @@ describe("validateGraph：坏 fixture 诊断", () => {
     expect(orphans[0].message).toContain("Module 'orphan' is declared but not reachable");
   });
 
-  test("disallowControllerDirectDb：禁止控制器直接依赖底层数据库客户端", () => {
+  test("disallowControllerDirectDb rejects direct database client injection", () => {
     const sampleGraph: ApplicationGraph = {
       modules: [
         {

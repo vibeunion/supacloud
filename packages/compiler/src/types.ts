@@ -37,7 +37,7 @@ export interface ProviderNode {
 }
 
 export interface RouteNode {
-  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
   path: string;
   handler: string;
   body?: string;
@@ -122,9 +122,9 @@ export interface CompileOptions {
   moduleBoundaryPreset?: ModuleBoundaryPresetName;
   /** Module boundary and architecture governance rules inspired by Nx enforce-module-boundaries. */
   moduleBoundaries?: ModuleBoundaryRule[];
-  /** 是否允许路由级直接绑定 @Command（默认 true；设为 false 时禁止路由级绑定，强制走应用服务层）。 */
+  /** Allow routes to bind directly to @Command (defaults to true). */
   allowRouteCommandBindings?: boolean;
-  /** 运行期 Command 执行器能力声明（用于防范编译期“元数据剧场”）。 */
+  /** Runtime Command executor capabilities used to validate declared governance metadata. */
   commandCapabilities?: CommandExecutionCapabilities;
   /** Disallow controllers from directly injecting DB clients (enforces presentation layer separation). */
   disallowControllerDirectDb?: boolean;
@@ -161,9 +161,9 @@ export interface ValidateOptions {
   strict?: boolean;
   moduleBoundaryPreset?: ModuleBoundaryPresetName;
   moduleBoundaries?: ModuleBoundaryRule[];
-  /** 是否允许路由级直接绑定 @Command（默认 true；设为 false 时禁止路由级绑定，强制走应用服务层）。 */
+  /** Allow routes to bind directly to @Command (defaults to true). */
   allowRouteCommandBindings?: boolean;
-  /** 运行期 Command 执行器能力声明（用于防范编译期“元数据剧场”）。 */
+  /** Runtime Command executor capabilities used to validate declared governance metadata. */
   commandCapabilities?: CommandExecutionCapabilities;
   /** Disallow controllers from directly injecting DB clients. */
   disallowControllerDirectDb?: boolean;
@@ -171,19 +171,19 @@ export interface ValidateOptions {
   detectOrphanModules?: boolean;
 }
 
-/** Command 执行器运行期能力配置。 */
+/** Runtime capabilities declared by the Command executor. */
 export interface CommandExecutionCapabilities {
-  /** 是否支持权限判定。若为 false 而命令声明了 permission，则报 error。 */
+  /** Whether runtime permission checks are supported. */
   permission?: boolean;
-  /** 是否支持审计日志。若为 false 而命令声明了 audit，则报 error。 */
+  /** Whether runtime audit persistence is supported. */
   audit?: boolean;
-  /** 是否支持幂等。若为 false 而命令声明了 idempotency: 'required'，则报 error。 */
+  /** Whether idempotency receipts are supported. */
   idempotency?: boolean;
   /**
-   * 事务执行能力：
-   * - true: 支持完整事务边界；
-   * - 'rpc-only': 不支持应用级事务，事务必须落在单个 DB RPC 内（声明 transaction: 'required' 时报 warn）；
-   * - false: 事务支持已禁用（声明 transaction: 'required' 时报 error）。
+   * Transaction execution capability:
+   * - true: full transaction boundaries are supported;
+   * - 'rpc-only': application-level transactions are unavailable and multi-table writes must use one DB RPC (warn);
+   * - false: transaction support is disabled (error).
    */
   transaction?: boolean | "rpc-only";
 }
@@ -195,9 +195,9 @@ export interface CompileResult {
 }
 
 export interface CheckProjectResult {
-  /** 产物是否完全与磁盘一致且未漂移。 */
+  /** Whether generated artifacts exactly match the files on disk. */
   upToDate: boolean;
-  /** 不一致或缺失的产物相对路径列表。 */
+  /** Relative paths of missing or mismatched artifacts. */
   mismatches: string[];
   diagnostics: Diagnostic[];
   graph: ApplicationGraph;

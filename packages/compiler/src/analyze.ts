@@ -35,6 +35,8 @@ const ROUTE_DECORATORS: Record<string, RouteNode["method"]> = {
   Put: "PUT",
   Patch: "PATCH",
   Delete: "DELETE",
+  Head: "HEAD",
+  Options: "OPTIONS",
 };
 const SCOPES: Scope[] = ["application", "request", "job"];
 

@@ -73,9 +73,7 @@ export interface RenderedArtifacts {
   manifestJson: string;
 }
 
-/**
- * 渲染静态工厂代码（application.ts）与 app.manifest.json 内容（纯计算，无文件 IO）。
- */
+/** Render application.ts and app.manifest.json content without file I/O. */
 export function renderApplication(
   graph: ApplicationGraph,
   options: GenerateOptions,
@@ -121,8 +119,8 @@ export function renderApplication(
 }
 
 /**
- * 生成静态工厂代码（application.ts）与 app.manifest.json，返回写入的绝对路径。
- * 生成代码只 import 业务类/schema，不 import @supacloud/app，运行期无反射、无容器。
+ * Generate static factory code (application.ts) and app.manifest.json.
+ * Generated code imports only application classes and schemas, with no runtime reflection or container lookup.
  */
 export async function generateApplication(
   graph: ApplicationGraph,

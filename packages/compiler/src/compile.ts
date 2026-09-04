@@ -36,8 +36,8 @@ export async function compileProject(options: CompileOptions): Promise<CompileRe
 }
 
 /**
- * 产物漂移检测（纯比对，不覆写磁盘文件）：
- * 分析 AST、执行架构与能力校验，并与当前磁盘上的 application.ts / app.manifest.json 比对。
+ * Check generated artifacts without writing files to disk.
+ * Analyze the AST, run governance checks, and compare application.ts and app.manifest.json.
  */
 export async function checkProject(options: CompileOptions): Promise<CheckProjectResult> {
   const graph = await analyzeProject(options.rootDir, options.include);
@@ -73,12 +73,12 @@ export async function checkProject(options: CompileOptions): Promise<CheckProjec
   for (const [filename, expectedContent] of Object.entries(expectedFiles)) {
     const diskPath = join(options.outDir, filename);
     if (!existsSync(diskPath)) {
-      mismatches.push(`${filename}: 磁盘缺少已生成产物`);
+      mismatches.push(`${filename}: generated artifact is missing from disk`);
       continue;
     }
     const diskContent = readFileSync(diskPath, "utf8");
     if (diskContent !== expectedContent) {
-      mismatches.push(`${filename}: 磁盘产物与当前编译输出不一致`);
+      mismatches.push(`${filename}: disk artifact differs from current compiler output`);
     }
   }
 
