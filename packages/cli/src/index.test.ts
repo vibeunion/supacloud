@@ -162,6 +162,24 @@ describe("supacloud-cli process contract", () => {
         expect(build.exitCode).toBe(0);
         const builtEntry = join(buildDirectory, "index.js");
         expect(readFileSync(builtEntry, "utf8").split("\n", 1)[0]).toBe("#!/usr/bin/env node");
+
+        const bunPath = join(sandbox, "bun-bin");
+        mkdirSync(bunPath);
+        const bunProcess = Bun.spawn([process.execPath, builtEntry, "--version"], {
+            cwd: PACKAGE_ROOT,
+            env: cleanEnvironment({ PATH: bunPath }),
+            stdout: "pipe",
+            stderr: "pipe",
+        });
+        const [bunExitCode, bunStdout, bunStderr] = await Promise.all([
+            bunProcess.exited,
+            new Response(bunProcess.stdout).text(),
+            new Response(bunProcess.stderr).text(),
+        ]);
+        expect(bunExitCode).toBe(0);
+        expect(bunStdout.trim()).toBe(packageMetadata.version);
+        expect(bunStderr).toBe("");
+
         const binDirectory = join(sandbox, "node_modules/.bin");
         mkdirSync(binDirectory, { recursive: true });
         const linkedEntry = join(binDirectory, "supacloud-cli");

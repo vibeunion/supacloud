@@ -141,6 +141,14 @@ supacloud-cli frontend list_releases --ref <project-ref> --id <deployment-id>
 `supacloud-cli` defaults to project context and auto-links from the current workspace `.env` when available.
 There is no project-CLI compatibility alias named `supacloud`: that name is reserved for the compiled server binary at `/usr/local/bin/supacloud`. Use `supacloudctl` only for the optional local unified dispatcher.
 
+The npm-style entry uses Node.js by default. Bun users can run the package
+explicitly with Bun, including from Windows terminals, without installing
+Node.js or a separate wrapper:
+
+```bash
+bunx --bun --package @supacloud/cli supacloud-cli status
+```
+
 - `SUPABASE_URL` or `SUPACLOUD_API_URL`
 - `SUPABASE_SERVICE_ROLE_KEY` or `SUPACLOUD_API_TOKEN`
 
