@@ -36,9 +36,10 @@ const ACTION_POLICY: Record<string, ModulePolicy> = {
     ssh: {
         read: [
             "ping", "versions", "diagnose", "exec", "troubleshoot", "container_logs",
+            "backup_cleanup_plan",
             "tenant_list", "tenant_inspect", "tenant_diagnose", "upgrade_status",
         ],
-        write: ["setup", "install", "upgrade", "tenant_migrate"],
+        write: ["setup", "install", "upgrade", "backup_cleanup_apply", "tenant_migrate"],
     },
 };
 
@@ -52,6 +53,7 @@ const REFLESS_WRITE_ACTIONS = new Set([
     "ssh.setup",
     "ssh.install",
     "ssh.upgrade",
+    "ssh.backup_cleanup_apply",
 ]);
 const SSH_PROJECT_REF_ACTIONS = new Set(["tenant_manage", "tenant_inspect", "tenant_diagnose"]);
 const PLATFORM_PROJECT_REF_ACTIONS = new Set([
