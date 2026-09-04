@@ -2106,6 +2106,18 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 const projectRoute = this.routesById.get(id);
                 if (projectRoute) setRouteCors(projectRoute, origins);
             }
+            const authOwnerRef = config.authRuntimeOwnerRef?.trim();
+            if (authOwnerRef && authOwnerRef !== route.projectRef) {
+                const ownerRouteIds = this.projectRouteIds(authOwnerRef);
+                const ownerOrigins = buildTenantCorsOrigins(authOwnerRef, undefined, [
+                    ...this.hostsForProjectRoutes(authOwnerRef),
+                    ...route.hosts,
+                ]);
+                for (const id of ownerRouteIds) {
+                    const ownerRoute = this.routesById.get(id);
+                    if (ownerRoute) setRouteCors(ownerRoute, ownerOrigins);
+                }
+            }
             const frontendRoute = route.mode === "static" || route.root
                 ? this.makeStaticFrontendRoute(route)
                 : this.proxyFrontendRoute(route, routeId);
