@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.72.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.71.0...management-api-v0.72.0) (2026-09-04)
+
+
+### Features
+
+* **pgredis:** add extension policy and expired row cleanup ([#1141](https://github.com/vibeunion/supacloud/issues/1141)) ([6d0ea1d](https://github.com/vibeunion/supacloud/commit/6d0ea1de317bf1fee3f57771bee338fb7cff475d))
+
 ## [0.71.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.70.0...management-api-v0.71.0) (2026-09-04)
 
 
