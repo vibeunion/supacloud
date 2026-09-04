@@ -108,6 +108,9 @@ jobs:
         with:
           bun-version: ${{ env.BUN_VERSION }}
 
+      - name: Check business invariants and schema governance
+        run: bun run check:invariants
+
       - name: Show runtime versions
         run: |
           node --version
