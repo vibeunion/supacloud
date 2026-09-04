@@ -1,5 +1,6 @@
 import type { CanActivateFn, CanDeactivateFn, CanMatchFn, ResolveFn } from "./decorators";
 import { executeResolvers } from "./decorators";
+import { DefaultTitleStrategy, type TitleStrategy } from "./title_strategy";
 
 export interface RoutePipelineContext {
   url: string;
@@ -55,6 +56,7 @@ export interface RouterEvent {
 
 export interface RoutePipelineOptions {
   onEvent?: (event: RouterEvent) => void;
+  titleStrategy?: TitleStrategy;
 }
 
 /**
@@ -172,6 +174,11 @@ export async function executeRoutePipeline<T = unknown>(
       }
     }
     emit("GuardsCheckEnd", { stage: "canDeactivate", allowed: true });
+  }
+
+  if (route.title) {
+    const titleStrategy = options?.titleStrategy ?? new DefaultTitleStrategy();
+    titleStrategy.updateTitle(route.title, ctx);
   }
 
   emit("NavigationEnd");

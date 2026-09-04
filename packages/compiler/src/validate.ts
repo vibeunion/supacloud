@@ -34,6 +34,7 @@ export const COMPILER_DIAGNOSTIC_CODES: Record<string, { code: string; docsUrl: 
   "self-dependency-violation": { code: "SC2004", docsUrl: "https://supacloud.dev/errors/SC2004" },
   "skip-self-dependency-violation": { code: "SC2005", docsUrl: "https://supacloud.dev/errors/SC2005" },
   "export-unprovided-token": { code: "SC2006", docsUrl: "https://supacloud.dev/errors/SC2006" },
+  "unresolved-alias-target": { code: "SC2007", docsUrl: "https://supacloud.dev/errors/SC2007" },
   "shadowed-route": { code: "SC3001", docsUrl: "https://supacloud.dev/errors/SC3001" },
   "unresolved-route-redirect": { code: "SC3002", docsUrl: "https://supacloud.dev/errors/SC3002" },
   "circular-route-redirect": { code: "SC3003", docsUrl: "https://supacloud.dev/errors/SC3003" },
@@ -45,6 +46,7 @@ export const COMPILER_DIAGNOSTIC_CODES: Record<string, { code: string; docsUrl: 
   "unused-route-schema": { code: "SC3009", docsUrl: "https://supacloud.dev/errors/SC3009" },
   "malformed-route-path": { code: "SC3010", docsUrl: "https://supacloud.dev/errors/SC3010" },
   "duplicate-path-param": { code: "SC3011", docsUrl: "https://supacloud.dev/errors/SC3011" },
+  "wildcard-not-trailing": { code: "SC3012", docsUrl: "https://supacloud.dev/errors/SC3012" },
   "command-missing-permission": { code: "SC4001", docsUrl: "https://supacloud.dev/errors/SC4001" },
   "duplicate-command": { code: "SC4002", docsUrl: "https://supacloud.dev/errors/SC4002" },
   "route-command-unresolved": { code: "SC4003", docsUrl: "https://supacloud.dev/errors/SC4003" },
@@ -219,6 +221,21 @@ export function validateGraph(
             undefined,
             "Declare query parameters using @Query() decorators instead of in the route path.",
           );
+        }
+
+        // Wildcard '**' position checking (SC3012, Angular Router style)
+        if (route.path.includes("**")) {
+          const segments = route.path.split("/").filter(Boolean);
+          const wildcardIdx = segments.indexOf("**");
+          if (wildcardIdx !== -1 && wildcardIdx !== segments.length - 1) {
+            error(
+              "wildcard-not-trailing",
+              `Route ${route.method} '${route.path}' defines wildcard '**' in the middle of the path. In Angular Router semantics, wildcard '**' must be the trailing segment.`,
+              controller.file,
+              undefined,
+              `Move the wildcard '**' to the end of the route path, e.g. '${segments.slice(0, wildcardIdx).join("/")}/**'.`,
+            );
+          }
         }
 
         const fullPath = joinRoutePaths(controller.path, route.path);
@@ -704,6 +721,25 @@ export function validateGraph(
         module.line,
         `Add a provider for '${expToken}' to '${module.name}.providers', or remove '${expToken}' from exports.`,
       );
+    }
+  }
+
+  // Angular Ivy-style useExisting target validation (SC2007)
+  for (const module of graph.modules) {
+    for (const provider of module.providers) {
+      if (provider.useExisting) {
+        const target = provider.useExisting;
+        const resolved = resolveDep(module, target);
+        if (!resolved && !graph.externalTokens.includes(target)) {
+          error(
+            "unresolved-alias-target",
+            `Module '${module.name}' defines provider '${provider.token}' with useExisting: '${target}', but '${target}' is neither provided in '${module.name}' nor imported from an imported module.`,
+            provider.file ?? module.file,
+            provider.line ?? module.line,
+            `Add a provider for '${target}' to '${module.name}.providers' or an imported module, or update useExisting to reference an available token.`,
+          );
+        }
+      }
     }
   }
 

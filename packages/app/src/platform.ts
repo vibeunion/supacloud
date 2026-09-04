@@ -20,6 +20,20 @@ export function detectPlatform(): PlatformId {
 }
 
 /**
+ * A DI Token representing the main rendering context's Document.
+ * Modeled directly after Angular's DOCUMENT token in @angular/common.
+ */
+export const DOCUMENT = new InjectionToken<any>("supacloud.document", {
+  scope: "application",
+  factory: () => {
+    if (typeof globalThis !== "undefined" && (globalThis as any).document) {
+      return (globalThis as any).document;
+    }
+    return undefined;
+  },
+});
+
+/**
  * Built-in injection token for platform identification.
  * Modeled directly after Angular's PLATFORM_ID.
  */
