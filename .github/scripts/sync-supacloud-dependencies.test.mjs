@@ -195,7 +195,7 @@ describe('SupaCloud umbrella dependency sync', () => {
     assert.doesNotMatch(workflow, /bun add --no-save '@supacloud\/cli@file:\.\.\/cli'/);
 
     const packageChecks = readFileSync(new URL('../workflows/management-api.yml', import.meta.url), 'utf8');
-    assert.match(packageChecks, /working-directory: packages\/supacloud\n\s+run: \|\n\s+bun install --frozen-lockfile/);
+    assert.match(packageChecks, /working-directory: packages\/supacloud\n\s+script: \|\n\s+bun install --frozen-lockfile/);
     assert.doesNotMatch(packageChecks, /supacloud-install-mode/);
   });
 });
