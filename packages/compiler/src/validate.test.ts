@@ -629,4 +629,397 @@ describe("validateGraph：坏 fixture 诊断", () => {
     expect(errors[0].severity).toBe("error");
     expect(errors[0].message).toContain("violating presentation layer separation");
   });
+
+  test("multi: true allows duplicate tokens without duplicate-token diagnostic", () => {
+    const sampleGraph: ApplicationGraph = {
+      modules: [
+        {
+          name: "plugins",
+          className: "PluginsModule",
+          file: "src/plugins.module.ts",
+          line: 1,
+          imports: [],
+          providers: [
+            {
+              token: "INTERCEPTOR",
+              tokenKind: "injection-token",
+              kind: "class",
+              useClass: "AuthInterceptor",
+              scope: "application",
+              deps: [],
+              multi: true,
+              exported: true,
+              file: "src/auth.interceptor.ts",
+              line: 1,
+              importPath: "./auth.interceptor",
+            },
+            {
+              token: "INTERCEPTOR",
+              tokenKind: "injection-token",
+              kind: "class",
+              useClass: "LogInterceptor",
+              scope: "application",
+              deps: [],
+              multi: true,
+              exported: true,
+              file: "src/log.interceptor.ts",
+              line: 1,
+              importPath: "./log.interceptor",
+            },
+          ],
+          controllers: [],
+          commands: [],
+          queries: [],
+          exports: ["INTERCEPTOR"],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(sampleGraph);
+    expect(diags.filter((d) => d.code === "duplicate-token")).toHaveLength(0);
+  });
+
+  test("optionalDeps suppresses missing-token errors and attaches actionable suggestions", () => {
+    const sampleGraph: ApplicationGraph = {
+      modules: [
+        {
+          name: "test",
+          className: "TestModule",
+          file: "src/test.module.ts",
+          line: 1,
+          imports: [],
+          providers: [
+            {
+              token: "ServiceWithOptional",
+              tokenKind: "class",
+              kind: "class",
+              useClass: "ServiceWithOptional",
+              scope: "application",
+              deps: ["OPTIONAL_LOGGER"],
+              optionalDeps: ["OPTIONAL_LOGGER"],
+              exported: true,
+              file: "src/service.ts",
+              line: 1,
+              importPath: "./service",
+            },
+          ],
+          controllers: [],
+          commands: [],
+          queries: [],
+          exports: ["ServiceWithOptional"],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(sampleGraph);
+    expect(diags.filter((d) => d.code === "module-boundary" || d.code === "missing-token")).toHaveLength(0);
+  });
+
+  test("providedIn: 'root' resolves dependencies across modules without imports", () => {
+    const sampleGraph: ApplicationGraph = {
+      modules: [
+        {
+          name: "root",
+          className: "RootModule",
+          file: "src/root.module.ts",
+          line: 1,
+          imports: [],
+          providers: [
+            {
+              token: "RootConfigService",
+              tokenKind: "class",
+              kind: "class",
+              useClass: "RootConfigService",
+              scope: "application",
+              providedIn: "root",
+              deps: [],
+              exported: true,
+              file: "src/config.ts",
+              line: 1,
+              importPath: "./config",
+            },
+          ],
+          controllers: [],
+          commands: [],
+          queries: [],
+          exports: ["RootConfigService"],
+        },
+        {
+          name: "feature",
+          className: "FeatureModule",
+          file: "src/feature.module.ts",
+          line: 1,
+          imports: [], // Did not explicitly import RootModule
+          providers: [
+            {
+              token: "FeatureService",
+              tokenKind: "class",
+              kind: "class",
+              useClass: "FeatureService",
+              scope: "application",
+              deps: ["RootConfigService"],
+              exported: true,
+              file: "src/feature.service.ts",
+              line: 1,
+              importPath: "./feature.service",
+            },
+          ],
+          controllers: [],
+          commands: [],
+          queries: [],
+          exports: ["FeatureService"],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(sampleGraph);
+    expect(diags.filter((d) => d.code === "module-boundary")).toHaveLength(0);
+  });
+
+  test("selfDeps requires provider to be declared in current module", () => {
+    const sampleGraph: ApplicationGraph = {
+      modules: [
+        {
+          name: "feature",
+          className: "FeatureModule",
+          file: "src/feature.module.ts",
+          line: 1,
+          imports: ["core"],
+          providers: [
+            {
+              token: "FeatureService",
+              tokenKind: "class",
+              kind: "class",
+              useClass: "FeatureService",
+              scope: "application",
+              deps: ["ConfigToken"],
+              selfDeps: ["ConfigToken"],
+              exported: true,
+              file: "src/feature.service.ts",
+              line: 1,
+            },
+          ],
+          controllers: [],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+        {
+          name: "core",
+          className: "CoreModule",
+          file: "src/core.module.ts",
+          line: 1,
+          imports: [],
+          providers: [
+            {
+              token: "ConfigToken",
+              tokenKind: "class",
+              kind: "class",
+              scope: "application",
+              deps: [],
+              exported: true,
+              file: "src/core.ts",
+              line: 1,
+            },
+          ],
+          controllers: [],
+          commands: [],
+          queries: [],
+          exports: ["ConfigToken"],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(sampleGraph);
+    const selfDiag = diags.find((d) => d.code === "self-resolution-failed");
+    expect(selfDiag).toBeDefined();
+    expect(selfDiag?.message).toContain("@Self()");
+  });
+
+  test("skipSelfDeps rejects provider declared in own module", () => {
+    const sampleGraph: ApplicationGraph = {
+      modules: [
+        {
+          name: "feature",
+          className: "FeatureModule",
+          file: "src/feature.module.ts",
+          line: 1,
+          imports: [],
+          providers: [
+            {
+              token: "LocalToken",
+              tokenKind: "class",
+              kind: "class",
+              scope: "application",
+              deps: [],
+              exported: true,
+              file: "src/local.ts",
+              line: 1,
+            },
+            {
+              token: "FeatureService",
+              tokenKind: "class",
+              kind: "class",
+              useClass: "FeatureService",
+              scope: "application",
+              deps: ["LocalToken"],
+              skipSelfDeps: ["LocalToken"],
+              exported: true,
+              file: "src/feature.service.ts",
+              line: 1,
+            },
+          ],
+          controllers: [],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(sampleGraph);
+    const skipDiag = diags.find((d) => d.code === "skip-self-resolution-failed");
+    expect(skipDiag).toBeDefined();
+    expect(skipDiag?.message).toContain("@SkipSelf()");
+  });
+
+  test("circular redirectTo reports circular-route-redirect diagnostic", () => {
+    const sampleGraph: ApplicationGraph = {
+      modules: [
+        {
+          name: "feature",
+          className: "FeatureModule",
+          file: "src/feature.module.ts",
+          line: 1,
+          imports: [],
+          providers: [],
+          controllers: [
+            {
+              className: "RedirectController",
+              path: "/cases",
+              scope: "request",
+              deps: [],
+              routes: [
+                {
+                  method: "GET",
+                  path: "/cases",
+                  handler: "index",
+                  redirectTo: "/cases",
+                },
+              ],
+              file: "src/redirect.controller.ts",
+              importPath: "./redirect.controller",
+            },
+          ],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(sampleGraph);
+    const redirectDiag = diags.find((d) => d.code === "circular-route-redirect");
+    expect(redirectDiag).toBeDefined();
+    expect(redirectDiag?.message).toContain("circular redirectTo");
+  });
+
+  test("Ivy-style route parameter checking: unmatched and missing path parameters report actionable diagnostics", () => {
+    const sampleGraph: ApplicationGraph = {
+      modules: [
+        {
+          name: "users",
+          className: "UserModule",
+          file: "src/user.module.ts",
+          line: 1,
+          imports: [],
+          providers: [],
+          controllers: [
+            {
+              className: "UserController",
+              path: "/users",
+              scope: "request",
+              deps: [],
+              routes: [
+                {
+                  method: "GET",
+                  path: "/:userId/roles/:roleId",
+                  handler: "getRole",
+                  pathParams: ["userId", "roleId"],
+                  paramBindings: ["user_id"], // Typo: user_id instead of userId
+                },
+              ],
+              file: "src/user.controller.ts",
+              importPath: "./user.controller",
+            },
+          ],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(sampleGraph);
+    const unmatchedDiag = diags.find((d) => d.code === "unmatched-path-param");
+    expect(unmatchedDiag).toBeDefined();
+    expect(unmatchedDiag?.severity).toBe("error");
+    expect(unmatchedDiag?.message).toContain("binds @Param('user_id')");
+    expect(unmatchedDiag?.suggestion).toContain("Did you mean @Param('userId')?");
+
+    const missingDiags = diags.filter((d) => d.code === "missing-path-param");
+    expect(missingDiags.length).toBeGreaterThan(0);
+    expect(missingDiags.some((d) => d.message.includes("roleId"))).toBe(true);
+  });
+
+  test("Ivy-style route parameter checking: invalid @Body() binding on GET reports error", () => {
+    const sampleGraph: ApplicationGraph = {
+      modules: [
+        {
+          name: "items",
+          className: "ItemModule",
+          file: "src/item.module.ts",
+          line: 1,
+          imports: [],
+          providers: [],
+          controllers: [
+            {
+              className: "ItemController",
+              path: "/items",
+              scope: "request",
+              deps: [],
+              routes: [
+                {
+                  method: "GET",
+                  path: "/",
+                  handler: "listItems",
+                  hasBodyBinding: true,
+                },
+              ],
+              file: "src/item.controller.ts",
+              importPath: "./item.controller",
+            },
+          ],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(sampleGraph);
+    const bodyDiag = diags.find((d) => d.code === "invalid-body-binding");
+    expect(bodyDiag).toBeDefined();
+    expect(bodyDiag?.severity).toBe("error");
+    expect(bodyDiag?.message).toContain("binds @Body() on HTTP GET route");
+    expect(bodyDiag?.suggestion).toContain("Use POST, PUT, or PATCH");
+  });
 });

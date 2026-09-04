@@ -57,3 +57,25 @@ export function isJobContextToken(
 ): boolean {
   return token === "JOB_CONTEXT" || tokenNames?.[token] === JOB_CONTEXT_TOKEN_NAME;
 }
+
+/** Normalizes and combines controller path and route path. */
+export function joinRoutePaths(prefix: string, path: string): string {
+  const joined = `${prefix}/${path}`.replace(/\/{2,}/g, "/");
+  const normalized = joined.length > 1 ? joined.replace(/\/+$/, "") : joined;
+  return normalized;
+}
+
+/** Finds the closest match from a list of candidate strings (case/delimiter-insensitive). */
+export function findClosestMatch(target: string, candidates: string[]): string | undefined {
+  if (candidates.length === 0) return undefined;
+  if (candidates.length === 1) return candidates[0];
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const targetNorm = norm(target);
+  for (const c of candidates) {
+    if (norm(c) === targetNorm) return c;
+  }
+  for (const c of candidates) {
+    if (norm(c).includes(targetNorm) || targetNorm.includes(norm(c))) return c;
+  }
+  return candidates[0];
+}

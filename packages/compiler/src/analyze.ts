@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { join, relative, sep } from "node:path";
 import {
   Node,
@@ -17,8 +18,10 @@ import {
 } from "ts-morph";
 import type {
   ApplicationGraph,
+  CachedModuleEntry,
   CommandNode,
   ControllerNode,
+  DependencyGraphCache,
   Diagnostic,
   ModuleNode,
   ProviderNode,
@@ -46,7 +49,10 @@ interface TokenInfo {
   /** InjectionToken string name, e.g. "supacloud.case-repository". */
   stringName?: string;
   scope?: Scope;
+  providedIn?: "root";
+  hasFactory?: boolean;
   file: string;
+  line?: number;
 }
 
 interface ClassInfo {
@@ -71,10 +77,20 @@ interface AnalysisContext {
 export async function analyzeProject(
   rootDir: string,
   include?: string[],
+  cache?: DependencyGraphCache,
 ): Promise<ApplicationGraph> {
-  const project = createProject(rootDir);
-  const patterns = (include ?? DEFAULT_INCLUDE).map((glob) => join(rootDir, glob));
-  project.addSourceFilesAtPaths(patterns);
+  let project: Project;
+  if (cache?.project) {
+    project = cache.project;
+    for (const sf of project.getSourceFiles()) {
+      sf.refreshFromFileSystemSync();
+    }
+  } else {
+    project = createProject(rootDir);
+    const patterns = (include ?? DEFAULT_INCLUDE).map((glob) => join(rootDir, glob));
+    project.addSourceFilesAtPaths(patterns);
+    if (cache) cache.project = project;
+  }
   const sourceFiles = project
     .getSourceFiles()
     .filter((sf) => !sf.getFilePath().includes("node_modules") && !sf.isDeclarationFile())
@@ -134,7 +150,213 @@ export async function analyzeProject(
     nameByNode.set(c.node, stringLiteralProp(c.options, "name") ?? c.className);
   }
 
-  const modules = candidates.map((c) => parseModule(c, nameByNode, ctx));
+  let modules: ModuleNode[] = [];
+  let reusedModules: string[] = [];
+  let reanalyzedModules: string[] = [];
+
+  if (cache) {
+    const currentFileHashes = new Map<string, string>();
+    for (const sf of sourceFiles) {
+      const rel = sourcePath(rootDir, sf.getFilePath());
+      const hash = createHash("sha256").update(sf.getFullText()).digest("hex");
+      currentFileHashes.set(rel, hash);
+    }
+
+    const changedFiles = new Set<string>();
+    for (const [file, hash] of currentFileHashes.entries()) {
+      if (cache.fileHashes.get(file) !== hash) {
+        changedFiles.add(file);
+      }
+    }
+    for (const file of cache.fileHashes.keys()) {
+      if (!currentFileHashes.has(file)) {
+        changedFiles.add(file);
+      }
+    }
+
+    const modulesToKeep = new Map<string, CachedModuleEntry>();
+    const finalModules: ModuleNode[] = [];
+    const finalDiagnostics: Diagnostic[] = [];
+
+    for (const [modName, entry] of cache.modules.entries()) {
+      const hasChangedFile = entry.ownedFiles.some((f) => changedFiles.has(f));
+      const moduleFileExists = currentFileHashes.has(entry.module.file);
+      if (!hasChangedFile && moduleFileExists) {
+        modulesToKeep.set(modName, entry);
+        reusedModules.push(modName);
+        finalModules.push(entry.module);
+        if (entry.diagnostics) finalDiagnostics.push(...entry.diagnostics);
+      }
+    }
+
+    for (const c of candidates) {
+      const modName = nameByNode.get(c.node) ?? c.className;
+      if (modulesToKeep.has(modName)) {
+        continue;
+      }
+      const diagBefore = ctx.diagnostics.length;
+      const parsed = parseModule(c, nameByNode, ctx);
+      const moduleDiagnostics = ctx.diagnostics.slice(diagBefore);
+
+      const ownedFiles = new Set<string>();
+      ownedFiles.add(parsed.file);
+      for (const p of parsed.providers) if (p.file) ownedFiles.add(p.file);
+      for (const ctrl of parsed.controllers) if (ctrl.file) ownedFiles.add(ctrl.file);
+
+      const fileHashes: Record<string, string> = {};
+      for (const f of ownedFiles) {
+        fileHashes[f] = currentFileHashes.get(f) ?? "";
+      }
+
+      cache.modules.set(parsed.name, {
+        module: parsed,
+        ownedFiles: [...ownedFiles],
+        fileHashes,
+        diagnostics: moduleDiagnostics,
+      });
+      reanalyzedModules.push(parsed.name);
+      finalModules.push(parsed);
+      finalDiagnostics.push(...moduleDiagnostics);
+    }
+
+    for (const modName of [...cache.modules.keys()]) {
+      if (!modulesToKeep.has(modName) && !reanalyzedModules.includes(modName)) {
+        cache.modules.delete(modName);
+      }
+    }
+
+    cache.fileHashes = currentFileHashes;
+    cache.lastStats = { reusedModules, reanalyzedModules };
+    ctx.diagnostics = finalDiagnostics;
+    modules = finalModules;
+  } else {
+    modules = candidates.map((c) => parseModule(c, nameByNode, ctx));
+  }
+
+  // Auto-collect standalone @Injectable({ providedIn: 'root' }) services
+  // standalone @Controller({ standalone: true }) controllers,
+  // and standalone @Command({ standalone: true }) commands.
+  const allRegisteredClasses = new Set<string>();
+  const allRegisteredControllers = new Set<string>();
+  const allRegisteredCommands = new Set<string>();
+  for (const m of modules) {
+    for (const p of m.providers) {
+      if (p.useClass) allRegisteredClasses.add(p.useClass);
+      if (p.kind === "class") allRegisteredClasses.add(p.token);
+    }
+    for (const c of m.controllers) {
+      allRegisteredControllers.add(c.className);
+    }
+    for (const cmd of m.commands) {
+      allRegisteredCommands.add(cmd.className);
+    }
+  }
+  const rootProviders: ProviderNode[] = [];
+  const standaloneControllers: ControllerNode[] = [];
+  const standaloneCommands: CommandNode[] = [];
+
+  for (const [name, classInfo] of ctx.classesByName.entries()) {
+    if (!allRegisteredClasses.has(name)) {
+      const injectable = parseInjectableOptions(classInfo.decl, ctx);
+      if (injectable?.providedIn === "root") {
+        const { deps, optionalDeps, selfDeps, skipSelfDeps, hostDeps, missing } = classDeps(classInfo.decl, ctx);
+        const file = sourcePath(ctx.rootDir, classInfo.file);
+        const line = classInfo.decl.getStartLineNumber();
+        if (missing) {
+          warn(ctx, "missing-deps", `root provider ${name} 的部分构造依赖无法静态解析`, file, line);
+        }
+        rootProviders.push({
+          token: name,
+          tokenKind: "class",
+          kind: "class",
+          useClass: name,
+          scope: injectable.scope ?? "application",
+          deps,
+          optionalDeps: optionalDeps.length > 0 ? optionalDeps : undefined,
+          selfDeps: selfDeps.length > 0 ? selfDeps : undefined,
+          skipSelfDeps: skipSelfDeps.length > 0 ? skipSelfDeps : undefined,
+          hostDeps: hostDeps.length > 0 ? hostDeps : undefined,
+          providedIn: "root",
+          exported: true,
+          file,
+          line,
+          importPath: modulePath(ctx.rootDir, classInfo.file),
+        });
+      }
+    }
+
+    if (!allRegisteredControllers.has(name)) {
+      const controllerDec = findDecorator(classInfo.decl, "Controller");
+      if (controllerDec) {
+        const arg = controllerDec.getArguments()[0];
+        const isStandalone = arg && Node.isObjectLiteralExpression(arg) && booleanProp(arg, "standalone");
+        if (isStandalone) {
+          const ctrl = parseController(classInfo.decl, ctx);
+          if (ctrl) standaloneControllers.push(ctrl);
+        }
+      }
+    }
+
+    if (!allRegisteredCommands.has(name)) {
+      const commandDec = findDecorator(classInfo.decl, "Command");
+      if (commandDec) {
+        const meta = decoratorObjectArg(commandDec);
+        if (meta && booleanProp(meta, "standalone")) {
+          standaloneCommands.push({
+            className: classInfo.decl.getName() ?? name,
+            name: stringLiteralProp(meta, "name") ?? classInfo.decl.getName() ?? name,
+            permission: stringLiteralProp(meta, "permission"),
+            transaction: commandModeProp(meta, "transaction") ?? "none",
+            audit: stringLiteralProp(meta, "audit"),
+            idempotency: commandModeProp(meta, "idempotency") ?? "none",
+            standalone: true,
+          });
+        }
+      }
+    }
+  }
+
+  for (const [name, tokenInfo] of ctx.tokensByName.entries()) {
+    if (tokenInfo.providedIn === "root" && !allRegisteredClasses.has(name)) {
+      rootProviders.push({
+        token: name,
+        tokenKind: "injection-token",
+        kind: "factory",
+        scope: tokenInfo.scope ?? "application",
+        deps: [],
+        providedIn: "root",
+        exported: true,
+        file: sourcePath(ctx.rootDir, tokenInfo.file),
+        line: tokenInfo.line ?? 1,
+      });
+    }
+  }
+
+  if (rootProviders.length > 0 || standaloneControllers.length > 0 || standaloneCommands.length > 0) {
+    const existingRoot = modules.find((m) => m.name === "root" || m.name === "app");
+    if (existingRoot) {
+      existingRoot.providers.push(...rootProviders);
+      existingRoot.controllers.push(...standaloneControllers);
+      existingRoot.commands.push(...standaloneCommands);
+      for (const p of rootProviders) {
+        if (!existingRoot.exports.includes(p.token)) existingRoot.exports.push(p.token);
+      }
+    } else {
+      const fallbackFile = rootProviders[0]?.file ?? standaloneControllers[0]?.file ?? "root.ts";
+      modules.unshift({
+        name: "root",
+        className: "RootModule",
+        file: fallbackFile,
+        line: 1,
+        imports: [],
+        providers: rootProviders,
+        controllers: standaloneControllers,
+        commands: standaloneCommands,
+        queries: [],
+        exports: rootProviders.map((p) => p.token),
+      });
+    }
+  }
 
   const providedTokens = new Set(
     modules.flatMap((m) => m.providers.map((p) => p.token)),
@@ -158,6 +380,7 @@ export async function analyzeProject(
     externalTokens,
     diagnostics: ctx.diagnostics,
     tokenNames,
+    cacheStats: cache ? { reusedModules, reanalyzedModules } : undefined,
   };
 }
 
@@ -195,7 +418,7 @@ function parseTokenVariable(decl: VariableDeclaration, file: string): TokenInfo 
   if (!init || !Node.isNewExpression(init)) return undefined;
   if (init.getExpression().getText() !== "InjectionToken") return undefined;
   const [nameArg, optionsArg] = init.getArguments();
-  const info: TokenInfo = { name: decl.getName(), file };
+  const info: TokenInfo = { name: decl.getName(), file, line: decl.getStartLineNumber() };
   if (nameArg && Node.isStringLiteral(nameArg)) {
     info.stringName = nameArg.getLiteralText();
   }
@@ -203,6 +426,14 @@ function parseTokenVariable(decl: VariableDeclaration, file: string): TokenInfo 
     const scope = stringLiteralProp(optionsArg, "scope");
     if (scope && (SCOPES as string[]).includes(scope)) {
       info.scope = scope as Scope;
+    }
+    const providedIn = stringLiteralProp(optionsArg, "providedIn");
+    if (providedIn === "root") {
+      info.providedIn = "root";
+    }
+    const factory = getProp(optionsArg, "factory");
+    if (factory) {
+      info.hasFactory = true;
     }
   }
   return info;
@@ -288,6 +519,7 @@ function parseModule(
           transaction: commandModeProp(meta, "transaction") ?? "none",
           audit: stringLiteralProp(meta, "audit"),
           idempotency: commandModeProp(meta, "idempotency") ?? "none",
+          standalone: booleanProp(meta, "standalone") || undefined,
         });
       }
     }
@@ -339,7 +571,10 @@ function parseProvider(
     const decl = resolveDeclaration(el)[0];
     const cls = decl && Node.isClassDeclaration(decl) ? decl : undefined;
     const className = cls?.getName() ?? el.getText();
-    const { deps, missing } = cls ? classDeps(cls, ctx) : { deps: [], missing: false };
+    const { deps, optionalDeps, selfDeps, skipSelfDeps, hostDeps, missing } = cls
+      ? classDeps(cls, ctx)
+      : { deps: [], optionalDeps: [], selfDeps: [], skipSelfDeps: [], hostDeps: [], missing: false };
+    const injectable = cls ? parseInjectableOptions(cls, ctx) : undefined;
     if (missing) {
       warn(ctx, "missing-deps", `provider ${className} 的部分构造依赖无法静态解析`, file, line);
     }
@@ -350,6 +585,11 @@ function parseProvider(
       useClass: className,
       scope: resolveScope({ cls, tokenName: className }, ctx),
       deps,
+      optionalDeps: optionalDeps.length > 0 ? optionalDeps : undefined,
+      selfDeps: selfDeps.length > 0 ? selfDeps : undefined,
+      skipSelfDeps: skipSelfDeps.length > 0 ? skipSelfDeps : undefined,
+      hostDeps: hostDeps.length > 0 ? hostDeps : undefined,
+      providedIn: injectable?.providedIn,
       exported: exportsSet.has(className),
       file,
       line,
@@ -363,6 +603,7 @@ function parseProvider(
   const { name: token, kind: tokenKind } = tokenNameOf(provideExpr, ctx);
   const explicitScope = parseScopeProp(el);
   const explicitDeps = arrayProp(el, "deps").map((d) => tokenNameOf(d, ctx).name);
+  const multi = booleanProp(el, "multi");
 
   const useClassExpr = getProp(el, "useClass");
   const useValueExpr = getProp(el, "useValue");
@@ -374,13 +615,22 @@ function parseProvider(
     const cls = decl && Node.isClassDeclaration(decl) ? decl : undefined;
     const useClass = cls?.getName() ?? useClassExpr.getText();
     let deps = explicitDeps;
+    let optionalDeps: string[] = [];
+    let selfDeps: string[] = [];
+    let skipSelfDeps: string[] = [];
+    let hostDeps: string[] = [];
     if (deps.length === 0 && cls) {
       const result = classDeps(cls, ctx);
       deps = result.deps;
+      optionalDeps = result.optionalDeps;
+      selfDeps = result.selfDeps;
+      skipSelfDeps = result.skipSelfDeps;
+      hostDeps = result.hostDeps;
       if (result.missing) {
         warn(ctx, "missing-deps", `provider ${token} (useClass ${useClass}) 的部分构造依赖无法静态解析`, file, line);
       }
     }
+    const injectable = cls ? parseInjectableOptions(cls, ctx) : undefined;
     return {
       token,
       tokenKind,
@@ -388,6 +638,12 @@ function parseProvider(
       useClass,
       scope: resolveScope({ explicit: explicitScope, cls, tokenName: token }, ctx),
       deps,
+      optionalDeps: optionalDeps.length > 0 ? optionalDeps : undefined,
+      selfDeps: selfDeps.length > 0 ? selfDeps : undefined,
+      skipSelfDeps: skipSelfDeps.length > 0 ? skipSelfDeps : undefined,
+      hostDeps: hostDeps.length > 0 ? hostDeps : undefined,
+      multi: multi ?? undefined,
+      providedIn: injectable?.providedIn,
       exported: exportsSet.has(token),
       file,
       line,
@@ -403,6 +659,7 @@ function parseProvider(
       useValueExpr: useValueExpr.getText(),
       scope: resolveScope({ explicit: explicitScope, tokenName: token }, ctx),
       deps: [],
+      multi: multi ?? undefined,
       exported: exportsSet.has(token),
       file,
       line,
@@ -428,6 +685,7 @@ function parseProvider(
       useFactoryName: factoryName,
       scope: resolveScope({ explicit: explicitScope, tokenName: token }, ctx),
       deps: explicitDeps,
+      multi: multi ?? undefined,
       exported: exportsSet.has(token),
       file,
       line,
@@ -446,6 +704,7 @@ function parseProvider(
       useExisting: target,
       scope: resolveScope({ explicit: explicitScope, tokenName: token }, ctx),
       deps: [target],
+      multi: multi ?? undefined,
       exported: exportsSet.has(token),
       file,
       line,
@@ -455,16 +714,36 @@ function parseProvider(
   return undefined;
 }
 
-function parseController(el: Expression, ctx: AnalysisContext): ControllerNode | undefined {
-  if (!Node.isIdentifier(el)) return undefined;
-  const decl = resolveDeclaration(el)[0];
-  if (!decl || !Node.isClassDeclaration(decl)) return undefined;
+function parseController(
+  input: Expression | ClassDeclaration,
+  ctx: AnalysisContext,
+): ControllerNode | undefined {
+  let decl: ClassDeclaration | undefined;
+  if (Node.isClassDeclaration(input)) {
+    decl = input;
+  } else if (Node.isIdentifier(input)) {
+    const resolved = resolveDeclaration(input)[0];
+    if (resolved && Node.isClassDeclaration(resolved)) {
+      decl = resolved;
+    }
+  }
+  if (!decl) return undefined;
   const controllerDec = findDecorator(decl, "Controller");
   if (!controllerDec) return undefined;
+  let path = "/";
+  let standalone: boolean | undefined;
   const pathArg = controllerDec.getArguments()[0];
-  const path = pathArg && Node.isStringLiteral(pathArg) ? pathArg.getLiteralText() : "/";
+  if (pathArg) {
+    if (Node.isStringLiteral(pathArg)) {
+      path = pathArg.getLiteralText();
+    } else if (Node.isObjectLiteralExpression(pathArg)) {
+      const p = stringLiteralProp(pathArg, "path");
+      if (p) path = p;
+      standalone = booleanProp(pathArg, "standalone");
+    }
+  }
 
-  const { deps, missing } = classDeps(decl, ctx);
+  const { deps, optionalDeps, selfDeps, skipSelfDeps, missing } = classDeps(decl, ctx);
   const file = sourcePath(ctx.rootDir, decl.getSourceFile().getFilePath());
   if (missing) {
     warn(ctx, "missing-deps", `controller ${decl.getName()} 的部分构造依赖无法静态解析`, file, decl.getStartLineNumber());
@@ -473,6 +752,15 @@ function parseController(el: Expression, ctx: AnalysisContext): ControllerNode |
   const injectable = parseInjectableOptions(decl, ctx);
   const routes: RouteNode[] = [];
   const schemaImports: Record<string, string> = {};
+  const classGuards: string[] = [];
+  for (const dec of decl.getDecorators()) {
+    if (decoratorName(dec) === "UseGuards") {
+      for (const gArg of dec.getArguments()) {
+        classGuards.push(tokenText(gArg as Expression));
+      }
+    }
+  }
+
   for (const method of decl.getMethods()) {
     for (const dec of method.getDecorators()) {
       const name = decoratorName(dec);
@@ -480,11 +768,51 @@ function parseController(el: Expression, ctx: AnalysisContext): ControllerNode |
       if (!httpMethod) continue;
       const args = dec.getArguments();
       const pathArg = args[0];
+      const routePath = pathArg && Node.isStringLiteral(pathArg) ? pathArg.getLiteralText() : "/";
       const route: RouteNode = {
         method: httpMethod,
-        path: pathArg && Node.isStringLiteral(pathArg) ? pathArg.getLiteralText() : "/",
+        path: routePath,
         handler: method.getName(),
       };
+      const pathParams: string[] = [];
+      const paramRegex = /:([a-zA-Z0-9_]+)/g;
+      let match: RegExpExecArray | null;
+      while ((match = paramRegex.exec(routePath)) !== null) {
+        pathParams.push(match[1]);
+      }
+      if (pathParams.length > 0) route.pathParams = pathParams;
+
+      const paramBindings: string[] = [];
+      const queryBindings: string[] = [];
+      let hasBodyBinding = false;
+      for (const p of method.getParameters()) {
+        for (const pDec of p.getDecorators()) {
+          const dName = decoratorName(pDec);
+          const firstArg = pDec.getArguments()[0];
+          if (dName === "Param") {
+            const pName = firstArg && Node.isStringLiteral(firstArg) ? firstArg.getLiteralText() : p.getName();
+            paramBindings.push(pName);
+          } else if (dName === "Query") {
+            const qName = firstArg && Node.isStringLiteral(firstArg) ? firstArg.getLiteralText() : p.getName();
+            queryBindings.push(qName);
+          } else if (dName === "Body") {
+            hasBodyBinding = true;
+          }
+        }
+      }
+      if (paramBindings.length > 0) route.paramBindings = paramBindings;
+      if (queryBindings.length > 0) route.queryBindings = queryBindings;
+      if (hasBodyBinding) route.hasBodyBinding = true;
+
+      const routeGuards: string[] = [...classGuards];
+      for (const mDec of method.getDecorators()) {
+        if (decoratorName(mDec) === "UseGuards") {
+          for (const gArg of mDec.getArguments()) {
+            routeGuards.push(tokenText(gArg as Expression));
+          }
+        }
+      }
+
       const optionsArg = args[1];
       if (optionsArg && Node.isObjectLiteralExpression(optionsArg)) {
         for (const field of ["body", "params", "query", "response"] as const) {
@@ -502,6 +830,40 @@ function parseController(el: Expression, ctx: AnalysisContext): ControllerNode |
             ? (commandDecl.getName() ?? commandExpr.getText())
             : commandExpr.getText();
         }
+        const guardsExpr = getProp(optionsArg, "guards");
+        if (guardsExpr && Node.isArrayLiteralExpression(guardsExpr)) {
+          for (const el of guardsExpr.getElements()) {
+            routeGuards.push(tokenText(el));
+          }
+        }
+        const resolversExpr = getProp(optionsArg, "resolvers");
+        if (resolversExpr && Node.isObjectLiteralExpression(resolversExpr)) {
+          const resolvers: Record<string, string> = {};
+          for (const prop of resolversExpr.getProperties()) {
+            if (Node.isPropertyAssignment(prop)) {
+              const rName = prop.getName();
+              const init = prop.getInitializer();
+              if (init) resolvers[rName] = tokenText(init);
+            }
+          }
+          if (Object.keys(resolvers).length > 0) {
+            route.resolvers = resolvers;
+          }
+        }
+        const redirectToExpr = getProp(optionsArg, "redirectTo");
+        if (redirectToExpr && Node.isStringLiteral(redirectToExpr)) {
+          route.redirectTo = redirectToExpr.getLiteralText();
+        }
+        const pathMatchExpr = getProp(optionsArg, "pathMatch");
+        if (pathMatchExpr && Node.isStringLiteral(pathMatchExpr)) {
+          const val = pathMatchExpr.getLiteralText();
+          if (val === "full" || val === "prefix") {
+            route.pathMatch = val;
+          }
+        }
+      }
+      if (routeGuards.length > 0) {
+        route.guards = routeGuards;
       }
       routes.push(route);
     }
@@ -512,6 +874,10 @@ function parseController(el: Expression, ctx: AnalysisContext): ControllerNode |
     path,
     scope: injectable?.scope ?? "request",
     deps,
+    optionalDeps: optionalDeps.length > 0 ? optionalDeps : undefined,
+    selfDeps: selfDeps.length > 0 ? selfDeps : undefined,
+    skipSelfDeps: skipSelfDeps.length > 0 ? skipSelfDeps : undefined,
+    standalone: standalone || undefined,
     routes,
     file,
     importPath: modulePath(ctx.rootDir, decl.getSourceFile().getFilePath()),
@@ -524,30 +890,83 @@ function parseController(el: Expression, ctx: AnalysisContext): ControllerNode |
  * @Injectable({ deps }) > constructor @Inject parameter decorator > constructor parameter type name
  * (only when type name is a known class / known token); otherwise marked missing.
  */
-function classDeps(cls: ClassDeclaration, ctx: AnalysisContext): { deps: string[]; missing: boolean } {
+function classDeps(
+  cls: ClassDeclaration,
+  ctx: AnalysisContext,
+): {
+  deps: string[];
+  optionalDeps: string[];
+  selfDeps: string[];
+  skipSelfDeps: string[];
+  hostDeps: string[];
+  missing: boolean;
+} {
   const injectable = parseInjectableOptions(cls, ctx);
-  if (injectable?.deps) return { deps: injectable.deps, missing: false };
+  if (injectable?.deps) {
+    return {
+      deps: injectable.deps,
+      optionalDeps: [],
+      selfDeps: [],
+      skipSelfDeps: [],
+      hostDeps: [],
+      missing: false,
+    };
+  }
 
   const ctor = cls.getConstructors()[0];
-  if (!ctor || ctor.getParameters().length === 0) return { deps: [], missing: false };
-
-  const injectParams = parseInjectParams(cls);
   const deps: string[] = [];
+  const optionalDeps: string[] = [];
+  const selfDeps: string[] = [];
+  const skipSelfDeps: string[] = [];
+  const hostDeps: string[] = [];
   let missing = false;
-  ctor.getParameters().forEach((param, index) => {
-    const injected = injectParams.get(index);
-    if (injected) {
-      deps.push(injected);
-      return;
+
+  if (ctor && ctor.getParameters().length > 0) {
+    const injectParams = parseInjectParams(cls);
+    const optionalIndices = parseOptionalParams(cls);
+    const selfIndices = parseModifierParams(cls, "Self");
+    const skipSelfIndices = parseModifierParams(cls, "SkipSelf");
+    const hostIndices = parseModifierParams(cls, "Host");
+    ctor.getParameters().forEach((param, index) => {
+      const isOptional = optionalIndices.has(index);
+      const injected = injectParams.get(index);
+      const tokenName = injected ?? paramTypeTokenName(param, ctx);
+      if (tokenName) {
+        deps.push(tokenName);
+        if (isOptional) optionalDeps.push(tokenName);
+        if (selfIndices.has(index)) selfDeps.push(tokenName);
+        if (skipSelfIndices.has(index)) skipSelfDeps.push(tokenName);
+        if (hostIndices.has(index)) hostDeps.push(tokenName);
+      } else {
+        if (!isOptional) missing = true;
+      }
+    });
+  }
+
+  // Property-level inject() calls (Angular functional DI syntax: private foo = inject(TOKEN))
+  for (const prop of cls.getProperties()) {
+    const init = prop.getInitializer();
+    if (init && Node.isCallExpression(init)) {
+      const callName = init.getExpression().getText().split(".").pop();
+      if (callName === "inject") {
+        const [tokenArg, optionsArg] = init.getArguments();
+        if (tokenArg) {
+          const tokenName = tokenText(tokenArg as Expression);
+          if (tokenName) {
+            if (!deps.includes(tokenName)) deps.push(tokenName);
+            if (optionsArg && Node.isObjectLiteralExpression(optionsArg)) {
+              const isOptional = booleanProp(optionsArg, "optional");
+              if (isOptional && !optionalDeps.includes(tokenName)) {
+                optionalDeps.push(tokenName);
+              }
+            }
+          }
+        }
+      }
     }
-    const byType = paramTypeTokenName(param, ctx);
-    if (byType) {
-      deps.push(byType);
-    } else {
-      missing = true;
-    }
-  });
-  return { deps, missing };
+  }
+
+  return { deps, optionalDeps, selfDeps, skipSelfDeps, hostDeps, missing };
 }
 
 /** Fallback for constructor parameter type name: only used if type name references a known class or known InjectionToken variable. */
@@ -567,15 +986,17 @@ function paramTypeTokenName(param: ParameterDeclaration, ctx: AnalysisContext): 
 function parseInjectableOptions(
   cls: ClassDeclaration,
   ctx?: AnalysisContext,
-): { scope?: Scope; deps?: string[] } | undefined {
+): { scope?: Scope; providedIn?: "root"; deps?: string[] } | undefined {
   const dec = findDecorator(cls, "Injectable");
   if (!dec) return undefined;
   const obj = decoratorObjectArg(dec);
   if (!obj) return {};
   const scope = stringLiteralProp(obj, "scope");
+  const providedIn = stringLiteralProp(obj, "providedIn");
   const depsExpr = getProp(obj, "deps");
   return {
     scope: scope && (SCOPES as string[]).includes(scope) ? (scope as Scope) : undefined,
+    providedIn: providedIn === "root" ? "root" : undefined,
     deps: depsExpr
       ? arrayProp(obj, "deps").map((el) => (ctx ? tokenNameOf(el, ctx).name : el.getText()))
       : undefined,
@@ -597,7 +1018,34 @@ function parseInjectParams(cls: ClassDeclaration): Map<number, string> {
   return result;
 }
 
+/** Constructor @Optional() parameter decorator or question token -> parameter indices. */
+function parseOptionalParams(cls: ClassDeclaration): Set<number> {
+  const result = new Set<number>();
+  const ctor = cls.getConstructors()[0];
+  if (!ctor) return result;
+  ctor.getParameters().forEach((param, index) => {
+    for (const dec of param.getDecorators()) {
+      if (decoratorName(dec) === "Optional") result.add(index);
+    }
+    if (param.hasQuestionToken()) result.add(index);
+  });
+  return result;
+}
+
+function parseModifierParams(cls: ClassDeclaration, modifierName: string): Set<number> {
+  const result = new Set<number>();
+  const ctor = cls.getConstructors()[0];
+  if (!ctor) return result;
+  ctor.getParameters().forEach((param, index) => {
+    for (const dec of param.getDecorators()) {
+      if (decoratorName(dec) === modifierName) result.add(index);
+    }
+  });
+  return result;
+}
+
 function tokenText(expr: Expression): string {
+  if (Node.isStringLiteral(expr)) return expr.getLiteralText();
   if (Node.isIdentifier(expr)) {
     const decl = resolveDeclaration(expr)[0];
     if (decl && Node.isClassDeclaration(decl)) return decl.getName() ?? expr.getText();
@@ -705,6 +1153,14 @@ function stringLiteralProp(obj: ObjectLiteralExpression, name: string): string |
 function arrayProp(obj: ObjectLiteralExpression, name: string): Expression[] {
   const expr = getProp(obj, name);
   return expr && Node.isArrayLiteralExpression(expr) ? expr.getElements() : [];
+}
+
+function booleanProp(obj: ObjectLiteralExpression, name: string): boolean | undefined {
+  const expr = getProp(obj, name);
+  if (!expr) return undefined;
+  if (expr.getKind() === SyntaxKind.TrueKeyword) return true;
+  if (expr.getKind() === SyntaxKind.FalseKeyword) return false;
+  return undefined;
 }
 
 function parseScopeProp(obj: ObjectLiteralExpression): Scope | undefined {

@@ -9,6 +9,7 @@ import type {
   ValidateOptions,
 } from "./types";
 import { resolveModuleBoundaries } from "./profiles";
+import { findClosestMatch } from "./util";
 
 const SCOPE_LIFETIME_RANK: Record<Scope, number> = {
   application: 0,
@@ -70,6 +71,11 @@ export function validateGraph(
       const provider = imported.providers.find((p) => p.token === token);
       if (provider) return { module: imported, provider };
     }
+    // Check if any module provides it as root-scoped (Angular providedIn: 'root')
+    for (const mod of graph.modules) {
+      const rootProvider = mod.providers.find((p) => p.token === token && p.providedIn === "root");
+      if (rootProvider) return { module: mod, provider: rootProvider };
+    }
     return undefined;
   }
 
@@ -78,16 +84,18 @@ export function validateGraph(
     message: string,
     file?: string,
     line?: number,
+    suggestion?: string,
   ): void => {
-    diagnostics.push({ severity: "error", code, message, file, line });
+    diagnostics.push({ severity: "error", code, message, file, line, suggestion });
   };
   const warn = (
     code: string,
     message: string,
     file?: string,
     line?: number,
+    suggestion?: string,
   ): void => {
-    diagnostics.push({ severity: strict ? "error" : "warn", code, message, file, line });
+    diagnostics.push({ severity: strict ? "error" : "warn", code, message, file, line, suggestion });
   };
 
   const modulesByName = new Map<string, ModuleNode>();
@@ -154,6 +162,58 @@ export function validateGraph(
             controller.file,
           );
         }
+
+        if (route.redirectTo) {
+          const target = route.redirectTo.replace(/\/+$/, "");
+          const current = fullPath.replace(/\/+$/, "");
+          if (target === current || target === route.path.replace(/\/+$/, "")) {
+            error(
+              "circular-route-redirect",
+              `Route ${key} defines circular redirectTo '${route.redirectTo}'`,
+              controller.file,
+            );
+          }
+        }
+
+        const pathParams = route.pathParams ?? [];
+        const paramBindings = route.paramBindings ?? [];
+
+        for (const binding of paramBindings) {
+          if (!pathParams.includes(binding)) {
+            const suggestion = findClosestMatch(binding, pathParams);
+            error(
+              "unmatched-path-param",
+              `Controller ${controller.className} handler ${route.handler} binds @Param('${binding}'), but route path '${route.path}' does not define parameter ':${binding}'.`,
+              controller.file,
+              undefined,
+              suggestion ? `Did you mean @Param('${suggestion}')?` : undefined,
+            );
+          }
+        }
+
+        if (paramBindings.length > 0) {
+          for (const param of pathParams) {
+            if (!paramBindings.includes(param)) {
+              warn(
+                "missing-path-param",
+                `Route path '${route.path}' defines parameter ':${param}', but handler ${controller.className}.${route.handler} does not bind it with @Param('${param}').`,
+                controller.file,
+                undefined,
+                `Add @Param('${param}') to ${route.handler} arguments.`,
+              );
+            }
+          }
+        }
+
+        if (route.hasBodyBinding && (route.method === "GET" || route.method === "HEAD" || route.method === "OPTIONS")) {
+          error(
+            "invalid-body-binding",
+            `Route handler ${controller.className}.${route.handler} binds @Body() on HTTP ${route.method} route '${route.path}'. Request bodies are not supported on ${route.method} requests.`,
+            controller.file,
+            undefined,
+            `Use POST, PUT, or PATCH for routes accepting a request body, or bind parameters via @Query() / @Param().`,
+          );
+        }
       }
 
       if (typeof options === "object" && options.disallowControllerDirectDb) {
@@ -171,6 +231,35 @@ export function validateGraph(
           }
         }
       }
+
+      if (controller.selfDeps && controller.selfDeps.length > 0) {
+        for (const dep of controller.selfDeps) {
+          const own = module.providers.find((p) => p.token === dep);
+          if (!own) {
+            error(
+              "self-resolution-failed",
+              `模块 ${module.name} 的 controller ${controller.className} 参数标记了 @Self()，但 ${dep} 未在当前模块内部提供`,
+              controller.file,
+              undefined,
+              `Provide '${dep}' in module '${module.name}' or remove @Self().`,
+            );
+          }
+        }
+      }
+      if (controller.skipSelfDeps && controller.skipSelfDeps.length > 0) {
+        for (const dep of controller.skipSelfDeps) {
+          const own = module.providers.find((p) => p.token === dep);
+          if (own) {
+            error(
+              "skip-self-resolution-failed",
+              `模块 ${module.name} 的 controller ${controller.className} 参数标记了 @SkipSelf()，但 ${dep} 在当前模块内部声明了 provider`,
+              controller.file,
+              undefined,
+              `Remove '${dep}' from module '${module.name}' providers or remove @SkipSelf().`,
+            );
+          }
+        }
+      }
     }
   }
 
@@ -180,11 +269,15 @@ export function validateGraph(
     for (const provider of module.providers) {
       const first = seen.get(provider.token);
       if (first) {
+        if (first.multi && provider.multi) {
+          continue;
+        }
         error(
           "duplicate-token",
           `模块 ${module.name} 重复注册 token ${provider.token}（首次注册于 ${first.file}:${first.line}）`,
           provider.file,
           provider.line,
+          "If multiple providers are intended for this token, specify 'multi: true' on each provider definition (Angular multi-providers pattern).",
         );
       } else {
         seen.set(provider.token, provider);
@@ -193,9 +286,41 @@ export function validateGraph(
 
     // scope-violation / module boundary: check dependencies of each provider.
     for (const provider of module.providers) {
+      if (provider.selfDeps && provider.selfDeps.length > 0) {
+        for (const dep of provider.selfDeps) {
+          const own = module.providers.find((p) => p.token === dep);
+          if (!own) {
+            error(
+              "self-resolution-failed",
+              `模块 ${module.name} 的 provider ${provider.token} 参数标记了 @Self()，但 ${dep} 未在当前模块内部提供`,
+              provider.file,
+              provider.line,
+              `Provide '${dep}' in module '${module.name}' or remove @Self().`,
+            );
+          }
+        }
+      }
+      if (provider.skipSelfDeps && provider.skipSelfDeps.length > 0) {
+        for (const dep of provider.skipSelfDeps) {
+          const own = module.providers.find((p) => p.token === dep);
+          if (own) {
+            error(
+              "skip-self-resolution-failed",
+              `模块 ${module.name} 的 provider ${provider.token} 参数标记了 @SkipSelf()，但 ${dep} 在当前模块内部声明了 provider`,
+              provider.file,
+              provider.line,
+              `Remove '${dep}' from module '${module.name}' providers or remove @SkipSelf().`,
+            );
+          }
+        }
+      }
       for (const dep of provider.deps) {
+        const isOptional = provider.optionalDeps?.includes(dep);
         const resolved = resolveDep(module, dep);
         if (!resolved) {
+          if (isOptional) {
+            continue;
+          }
           if (!graph.externalTokens.includes(dep)) {
             if (globalProviders.has(dep)) {
               const owner = globalProviders.get(dep)!;
@@ -204,6 +329,7 @@ export function validateGraph(
                 `模块 ${module.name} 的 provider ${provider.token} 依赖 ${dep}，该 token 由模块 ${owner.module.name} 提供但未被 import`,
                 provider.file,
                 provider.line,
+                `Import module '${owner.module.name}' in '${module.name}', add '${dep}' to '${owner.module.name}' exports, or mark @Injectable({ providedIn: 'root' }).`,
               );
             } else {
               error(
@@ -211,6 +337,7 @@ export function validateGraph(
                 `模块 ${module.name} 的 provider ${provider.token} 依赖的 token ${dep} 无法解析`,
                 provider.file,
                 provider.line,
+                `Provide '${dep}' in a module, mark constructor parameter @Optional(), or define @Injectable({ providedIn: 'root' }).`,
               );
             }
           }
@@ -225,6 +352,7 @@ export function validateGraph(
             `模块 ${module.name} 的 ${provider.scope} provider ${provider.token} 不能依赖 ${resolved.provider.scope} provider ${dep}`,
             provider.file,
             provider.line,
+            `Change provider '${provider.token}' scope to '${resolved.provider.scope}', or inject a factory/context instead.`,
           );
         }
       }
@@ -238,6 +366,7 @@ export function validateGraph(
           `模块 ${module.name} 的 command ${command.name} (${command.className}) 未声明 permission`,
           module.file,
           module.line,
+          "Add 'permission: string' to @Command({ ... }) or configure command execution capabilities permission=false.",
         );
       }
 
@@ -379,6 +508,7 @@ function detectCycles(
           message: `provider 循环依赖: ${path}`,
           file: ref.provider.file,
           line: ref.provider.line,
+          suggestion: "Break the cycle by extracting common dependencies into a separate service or injecting @Optional().",
         });
       }
       return;
@@ -420,6 +550,7 @@ function detectModuleCycles(graph: ApplicationGraph): Diagnostic[] {
           message: `Module circular import detected: ${cycle.join(" -> ")}`,
           file: mod?.file,
           line: mod?.line,
+          suggestion: "Refactor module imports into a unidirectional acyclic graph.",
         });
       }
       return;

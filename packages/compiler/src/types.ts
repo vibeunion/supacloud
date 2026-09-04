@@ -15,6 +15,8 @@ export interface Diagnostic {
   message: string;
   file?: string;
   line?: number;
+  /** Actionable Angular Ivy-style remediation hint. */
+  suggestion?: string;
 }
 
 export interface ProviderNode {
@@ -29,6 +31,18 @@ export interface ProviderNode {
   scope: Scope;
   /** Token names in constructor/factory parameter order. */
   deps: string[];
+  /** Parameter tokens that are marked @Optional() (receive undefined if unresolved). */
+  optionalDeps?: string[];
+  /** Parameter tokens marked @Self() (must be resolved from current module's own providers). */
+  selfDeps?: string[];
+  /** Parameter tokens marked @SkipSelf() (must NOT be resolved from current module's own providers). */
+  skipSelfDeps?: string[];
+  /** Parameter tokens marked @Host(). */
+  hostDeps?: string[];
+  /** When true, multiple providers can contribute to this token as an array of instances (Angular multi-providers). */
+  multi?: boolean;
+  /** Automatically provided in the root injector context without manual module declaration (Angular-style). */
+  providedIn?: "root";
   exported: boolean;
   file: string;
   line: number;
@@ -46,6 +60,22 @@ export interface RouteNode {
   response?: string;
   /** @Command-decorated class explicitly bound by the route. */
   command?: string;
+  /** Route guards executed before handler (Angular CanActivateFn style). */
+  guards?: string[];
+  /** Route resolvers executed before handler (Angular ResolveFn style). */
+  resolvers?: Record<string, string>;
+  /** Route redirect target (Angular Router style). */
+  redirectTo?: string;
+  /** Route redirect matching rule (Angular Router style). */
+  pathMatch?: "full" | "prefix";
+  /** Path parameters parsed from route path (e.g. :id -> 'id'). */
+  pathParams?: string[];
+  /** Handler method parameter bindings declared via @Param('name'). */
+  paramBindings?: string[];
+  /** Handler method query bindings declared via @Query('name'). */
+  queryBindings?: string[];
+  /** Handler method has @Body() binding. */
+  hasBodyBinding?: boolean;
 }
 
 export interface ControllerNode {
@@ -53,6 +83,12 @@ export interface ControllerNode {
   path: string;
   scope: Scope;
   deps: string[];
+  /** Parameter tokens marked @Optional(). */
+  optionalDeps?: string[];
+  selfDeps?: string[];
+  skipSelfDeps?: string[];
+  /** Automatically registered without manual module declaration (Angular standalone controller style). */
+  standalone?: boolean;
   routes: RouteNode[];
   file: string;
   importPath: string;
@@ -67,6 +103,8 @@ export interface CommandNode {
   transaction: "required" | "none";
   audit?: string;
   idempotency: "required" | "none";
+  /** Automatically registered without manual module declaration. */
+  standalone?: boolean;
 }
 
 export interface QueryNode {
@@ -107,6 +145,11 @@ export interface ApplicationGraph {
    * Omitted from app.manifest.json.
    */
   tokenNames?: Record<string, string>;
+  /** Incremental cache statistics (modules reused vs reanalyzed). */
+  cacheStats?: {
+    reusedModules: string[];
+    reanalyzedModules: string[];
+  };
 }
 
 export interface CompileOptions {
@@ -130,6 +173,14 @@ export interface CompileOptions {
   disallowControllerDirectDb?: boolean;
   /** Detect modules declared in the project that are unreachable from any root module. */
   detectOrphanModules?: boolean;
+  /** Write generated artifacts even when error-level diagnostics exist (default: true). */
+  writeOnError?: boolean;
+  /** Generate typed API client in client.ts (default: false). */
+  generateClient?: boolean;
+  /** Generate typed permissions registry in permissions.ts (default: false). */
+  generatePermissions?: boolean;
+  /** Incremental dependency graph cache. */
+  cache?: DependencyGraphCache;
 }
 
 export interface ModuleBoundaryRule {
@@ -192,6 +243,15 @@ export interface CompileResult {
   diagnostics: Diagnostic[];
   graph: ApplicationGraph;
   written: string[];
+  stats?: CompileStats;
+}
+
+export interface CompileStats {
+  cacheHit: boolean;
+  changedFiles: string[];
+  affectedModules: string[];
+  reanalyzedModules?: string[];
+  reusedModules?: string[];
 }
 
 export interface CheckProjectResult {
@@ -201,4 +261,48 @@ export interface CheckProjectResult {
   mismatches: string[];
   diagnostics: Diagnostic[];
   graph: ApplicationGraph;
+}
+
+export interface WatchEvent {
+  type: "compile-start" | "compiled" | "compile-error";
+  initial: boolean;
+  durationMs: number;
+  diagnostics: Diagnostic[];
+  written: string[];
+  stats?: CompileStats;
+}
+
+export interface WatchOptions extends CompileOptions {
+  /** Debounce source changes before starting a compile (default: 100ms). */
+  debounceMs?: number;
+  onEvent?: (event: WatchEvent) => void;
+}
+
+export interface WatchHandle {
+  /** Resolves after the initial compile has completed. */
+  ready: Promise<WatchEvent>;
+  close(): Promise<void>;
+}
+
+export interface CachedModuleEntry {
+  module: ModuleNode;
+  /** Files owned by this module (normalized relative paths). */
+  ownedFiles: string[];
+  /** File hash mapping for owned files. */
+  fileHashes: Record<string, string>;
+  /** Diagnostics captured during this module's analysis. */
+  diagnostics?: Diagnostic[];
+}
+
+export interface DependencyGraphCache {
+  /** Cached modules by module name. */
+  modules: Map<string, CachedModuleEntry>;
+  /** Global file hashes by relative file path. */
+  fileHashes: Map<string, string>;
+  /** Retained AST project for true incremental graph re-analysis. */
+  project?: any;
+  lastStats?: {
+    reusedModules: string[];
+    reanalyzedModules: string[];
+  };
 }

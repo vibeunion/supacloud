@@ -10,7 +10,7 @@ import { join } from "node:path";
  * Files are emitted even when error-level diagnostics exist; caller decides adoption based on diagnostics.
  */
 export async function compileProject(options: CompileOptions): Promise<CompileResult> {
-  const graph = await analyzeProject(options.rootDir, options.include);
+  const graph = await analyzeProject(options.rootDir, options.include, options.cache);
   const diagnostics: Diagnostic[] = [
     ...(graph.diagnostics ?? []),
     ...validateGraph(graph, {
@@ -28,11 +28,25 @@ export async function compileProject(options: CompileOptions): Promise<CompileRe
       if (diagnostic.severity === "warn") diagnostic.severity = "error";
     }
   }
-  const written = await generateApplication(graph, {
-    rootDir: options.rootDir,
-    outDir: options.outDir,
-  });
-  return { diagnostics, graph, written };
+  const hasErrors = diagnostics.some((diagnostic) => diagnostic.severity === "error");
+  const written = !hasErrors || options.writeOnError !== false
+    ? await generateApplication(graph, {
+        rootDir: options.rootDir,
+        outDir: options.outDir,
+        generateClient: options.generateClient,
+        generatePermissions: options.generatePermissions,
+      })
+    : [];
+  const stats = graph.cacheStats
+    ? {
+        cacheHit: graph.cacheStats.reanalyzedModules.length === 0,
+        changedFiles: [],
+        affectedModules: graph.cacheStats.reanalyzedModules,
+        reanalyzedModules: graph.cacheStats.reanalyzedModules,
+        reusedModules: graph.cacheStats.reusedModules,
+      }
+    : undefined;
+  return { diagnostics, graph, written, stats };
 }
 
 /**
@@ -40,7 +54,7 @@ export async function compileProject(options: CompileOptions): Promise<CompileRe
  * Analyze the AST, run governance checks, and compare application.ts and app.manifest.json.
  */
 export async function checkProject(options: CompileOptions): Promise<CheckProjectResult> {
-  const graph = await analyzeProject(options.rootDir, options.include);
+  const graph = await analyzeProject(options.rootDir, options.include, options.cache);
   const diagnostics: Diagnostic[] = [
     ...(graph.diagnostics ?? []),
     ...validateGraph(graph, {
@@ -62,12 +76,20 @@ export async function checkProject(options: CompileOptions): Promise<CheckProjec
   const rendered = renderApplication(graph, {
     rootDir: options.rootDir,
     outDir: options.outDir,
+    generateClient: options.generateClient,
+    generatePermissions: options.generatePermissions,
   });
 
   const expectedFiles: Record<string, string> = {
     "application.ts": rendered.applicationCode,
     "app.manifest.json": rendered.manifestJson,
   };
+  if (rendered.clientCode) {
+    expectedFiles["client.ts"] = rendered.clientCode;
+  }
+  if (rendered.permissionsCode) {
+    expectedFiles["permissions.ts"] = rendered.permissionsCode;
+  }
 
   const mismatches: string[] = [];
   for (const [filename, expectedContent] of Object.entries(expectedFiles)) {

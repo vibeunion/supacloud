@@ -26,3 +26,14 @@ export const JOB_CONTEXT = new InjectionToken<unknown>("supacloud.job-context", 
 export const DB_CLIENT = new InjectionToken<unknown>("supacloud.db-client", {
   scope: "application",
 });
+
+/**
+ * Built-in multi-provider token for application startup lifecycle hooks.
+ * Modeled after Angular's APP_INITIALIZER.
+ * Initializer providers can return void or a Promise<void>; the application startup sequence
+ * executes all registered initializers before accepting traffic.
+ */
+export const APP_INITIALIZER = new InjectionToken<() => void | Promise<void>>(
+  "supacloud.app-initializer",
+  { scope: "application" },
+);

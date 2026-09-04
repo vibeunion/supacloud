@@ -1,4 +1,5 @@
 import type { InjectionToken } from "./token";
+import { APP_INITIALIZER } from "./context";
 import type { Scope } from "./scope";
 
 /** A class usable as a DI token / provider implementation. */
@@ -12,6 +13,10 @@ export type Token<T = any> = InjectionToken<T> | Type<T>;
 interface BaseProvider {
   /** Overrides the scope derived from @Injectable / token defaults. */
   scope?: Scope;
+  /**
+   * When true, multiple providers can contribute to this token as an array of instances (Angular multi-providers).
+   */
+  multi?: boolean;
 }
 
 export interface ClassProvider<T = any> extends BaseProvider {
@@ -59,4 +64,61 @@ export function isFactoryProvider<T>(provider: Provider<T>): provider is Factory
 
 export function isExistingProvider<T>(provider: Provider<T>): provider is ExistingProvider<T> {
   return typeof provider === "object" && provider !== null && "useExisting" in provider;
+}
+
+/**
+ * Encapsulates a set of providers created by functional provideXxx APIs.
+ * Modeled directly after Angular's EnvironmentProviders.
+ */
+export interface EnvironmentProviders {
+  ɵproviders: Provider[];
+}
+
+export function makeEnvironmentProviders(providers: Provider[]): EnvironmentProviders {
+  return { ɵproviders: providers };
+}
+
+export function isEnvironmentProviders(value: unknown): value is EnvironmentProviders {
+  return typeof value === "object" && value !== null && "ɵproviders" in value && Array.isArray((value as EnvironmentProviders).ɵproviders);
+}
+
+export function flattenProviders(providers: Array<Provider | EnvironmentProviders>): Provider[] {
+  const result: Provider[] = [];
+  for (const p of providers) {
+    if (isEnvironmentProviders(p)) {
+      result.push(...p.ɵproviders);
+    } else {
+      result.push(p);
+    }
+  }
+  return result;
+}
+
+/**
+ * Configures an application initializer function that executes during startup before accepting requests.
+ * Modeled after Angular's provideAppInitializer.
+ */
+export function provideAppInitializer(
+  initializerFn: () => void | Promise<void>,
+): EnvironmentProviders {
+  return makeEnvironmentProviders([
+    {
+      provide: APP_INITIALIZER,
+      useValue: initializerFn,
+      multi: true,
+    },
+  ]);
+}
+
+/**
+ * Functional provider helper to register an InjectionToken with a static value or factory.
+ * Modeled after Angular's provideToken pattern.
+ */
+export function provideToken<T>(token: Token<T>, value: T): EnvironmentProviders {
+  return makeEnvironmentProviders([
+    {
+      provide: token,
+      useValue: value,
+    },
+  ]);
 }

@@ -8,20 +8,33 @@ import {
   Inject,
   Injectable,
   Module,
+  Optional,
   Options,
   Patch,
   Post,
   Put,
   Query,
+  Host,
+  Self,
+  SkipSelf,
+  UseGuards,
   getCommandMeta,
   getControllerMeta,
+  getGuards,
+  getHostParams,
   getInjectParams,
+  getOptionalParams,
+  getSelfParams,
+  getSkipSelfParams,
   getInjectableMeta,
   getModuleMeta,
   getQueryMeta,
   getRoutes,
 } from "./decorators";
 import { InjectionToken } from "./token";
+import { makeEnvironmentProviders } from "./provider";
+import { APP_INITIALIZER } from "./context";
+import { assertInInjectionContext, inject, runInInjectionContext } from "./inject";
 
 const DB_CLIENT = new InjectionToken<{ query: (sql: string) => unknown }>("db.client");
 
@@ -36,6 +49,12 @@ describe("@Injectable", () => {
     @Injectable({ scope: "request", deps: [DB_CLIENT] })
     class Service {}
     expect(getInjectableMeta(Service)).toEqual({ scope: "request", deps: [DB_CLIENT] });
+  });
+
+  test("accepts providedIn: 'root'", () => {
+    @Injectable({ providedIn: "root" })
+    class RootService {}
+    expect(getInjectableMeta(RootService)).toEqual({ scope: "application", providedIn: "root", deps: [] });
   });
 });
 
@@ -61,6 +80,68 @@ describe("@Inject", () => {
       }
       return Service;
     }).toThrow("@Inject() is only supported on constructor parameters");
+  });
+
+  test("records optional constructor parameters", () => {
+    const OPTIONAL_LOG = new InjectionToken("log");
+
+    @Injectable()
+    class ServiceWithOptional {
+      constructor(
+        @Inject(DB_CLIENT) private readonly db: unknown,
+        @Optional() @Inject(OPTIONAL_LOG) private readonly log?: unknown,
+      ) {}
+    }
+
+    expect(getInjectParams(ServiceWithOptional)).toEqual({ 0: DB_CLIENT, 1: OPTIONAL_LOG });
+    expect(getOptionalParams(ServiceWithOptional)).toEqual([1]);
+  });
+
+  test("rejects @Optional() usage on non-constructor parameters", () => {
+    expect(() => {
+      class Service {
+        method(@Optional() _value: unknown) {}
+      }
+      return Service;
+    }).toThrow("@Optional() is only supported on constructor parameters");
+  });
+
+  test("records @Self, @SkipSelf, and @Host parameter modifiers", () => {
+    const TOKEN_A = new InjectionToken("A");
+    const TOKEN_B = new InjectionToken("B");
+    const TOKEN_C = new InjectionToken("C");
+
+    @Injectable()
+    class ServiceWithModifiers {
+      constructor(
+        @Self() @Inject(TOKEN_A) private readonly a: unknown,
+        @SkipSelf() @Inject(TOKEN_B) private readonly b: unknown,
+        @Host() @Inject(TOKEN_C) private readonly c: unknown,
+      ) {}
+    }
+
+    expect(getSelfParams(ServiceWithModifiers)).toEqual([0]);
+    expect(getSkipSelfParams(ServiceWithModifiers)).toEqual([1]);
+    expect(getHostParams(ServiceWithModifiers)).toEqual([2]);
+  });
+});
+
+describe("Provider multi flag", () => {
+  test("provider interfaces accept multi: true", () => {
+    const provider = { provide: DB_CLIENT, useClass: class Fake {}, multi: true };
+    expect(provider.multi).toBe(true);
+  });
+
+  test("makeEnvironmentProviders flattens into module providers", () => {
+    const env = makeEnvironmentProviders([
+      { provide: DB_CLIENT, useClass: class Fake {} },
+    ]);
+    @Module({
+      name: "env-mod",
+      providers: [env],
+    })
+    class EnvModule {}
+    expect(getModuleMeta(EnvModule)?.providers).toHaveLength(1);
   });
 });
 
@@ -134,6 +215,12 @@ describe("@Command / @Query", () => {
     });
   });
 
+  test("supports standalone: true on @Command", () => {
+    @Command({ name: "case.standalone", permission: "case.standalone", standalone: true })
+    class StandaloneCommand {}
+    expect(getCommandMeta(StandaloneCommand)?.standalone).toBe(true);
+  });
+
   test("stores query metadata", () => {
     @Query({ name: "case.get" })
     class GetCaseQuery {}
@@ -196,5 +283,127 @@ describe("@Controller and route decorators", () => {
       { method: "HEAD", path: "/", handler: "head" },
       { method: "OPTIONS", path: "/", handler: "options" },
     ]);
+  });
+
+  test("accepts ControllerOptions with standalone: true", () => {
+    @Controller({ path: "/api/v2", standalone: true })
+    class StandaloneController {}
+
+    expect(getControllerMeta(StandaloneController)).toEqual({
+      path: "/api/v2",
+      standalone: true,
+    });
+  });
+
+  test("attaches route guards via @UseGuards", () => {
+    const authGuard = () => true;
+    const adminGuard = () => true;
+
+    @UseGuards(authGuard)
+    @Controller("/admin")
+    class AdminController {
+      @UseGuards(adminGuard)
+      @Get("/dashboard")
+      dashboard() {}
+    }
+
+    expect(getGuards(AdminController)).toEqual([authGuard]);
+    expect(getGuards(AdminController, "dashboard")).toEqual([authGuard, adminGuard]);
+  });
+
+  test("supports redirectTo and pathMatch on route decorators", () => {
+    @Controller("/cases")
+    class RedirectController {
+      @Get("/", { redirectTo: "/cases/active", pathMatch: "full" })
+      index() {}
+    }
+
+    const routes = getRoutes(RedirectController);
+    expect(routes[0].redirectTo).toBe("/cases/active");
+    expect(routes[0].pathMatch).toBe("full");
+  });
+});
+
+describe("Angular-style functional inject() & injection context", () => {
+  const FOO = new InjectionToken<string>("foo");
+  const BAR = new InjectionToken<number>("bar", { factory: () => 42 });
+
+  test("inject() throws when called outside injection context", () => {
+    expect(() => inject(FOO)).toThrow("inject() can only be used within an active injection context");
+  });
+
+  test("assertInInjectionContext asserts active context", () => {
+    expect(() => assertInInjectionContext("myGuard")).toThrow("myGuard must be called from an active injection context");
+  });
+
+  test("runInInjectionContext resolves tokens via inject()", () => {
+    const map = new Map<unknown, unknown>([[FOO, "hello"]]);
+    const injector = {
+      get: <T>(token: unknown) => map.get(token) as T | undefined,
+    };
+
+    const result = runInInjectionContext(injector, () => {
+      assertInInjectionContext("testScope");
+      return inject(FOO);
+    });
+    expect(result).toBe("hello");
+  });
+
+  test("inject() supports { optional: true }", () => {
+    const injector = { get: () => undefined };
+    const result = runInInjectionContext(injector, () => inject(FOO, { optional: true }));
+    expect(result).toBeUndefined();
+  });
+
+  test("inject() falls back to token factory when not in injector", () => {
+    const injector = { get: () => undefined };
+    const result = runInInjectionContext(injector, () => inject(BAR));
+    expect(result).toBe(42);
+  });
+
+  test("APP_INITIALIZER has application scope", () => {
+    expect(APP_INITIALIZER.scope).toBe("application");
+    expect(APP_INITIALIZER.name).toBe("supacloud.app-initializer");
+  });
+
+  test("Param, Query, Body, Headers decorators record route parameter bindings", () => {
+    const { Param, Query, Body, Headers, getRouteParams } = require("./index");
+    class UserController {
+      getUser(
+        @Param("id") id: string,
+        @Query("filter") filter: string,
+        @Body() body: any,
+        @Headers("authorization") auth: string,
+      ) {
+        return { id, filter, body, auth };
+      }
+    }
+
+    const params = getRouteParams(UserController, "getUser");
+    expect(params).toHaveLength(4);
+    expect(params.find((p: any) => p.type === "param")).toEqual({ index: 0, type: "param", name: "id" });
+    expect(params.find((p: any) => p.type === "query")).toEqual({ index: 1, type: "query", name: "filter" });
+    expect(params.find((p: any) => p.type === "body")).toEqual({ index: 2, type: "body" });
+    expect(params.find((p: any) => p.type === "headers")).toEqual({ index: 3, type: "headers", name: "authorization" });
+  });
+
+  test("provideAppInitializer and provideToken produce valid EnvironmentProviders", () => {
+    const { provideAppInitializer, provideToken, isEnvironmentProviders } = require("./index");
+    const fn = async () => {};
+    const initEp = provideAppInitializer(fn);
+    expect(isEnvironmentProviders(initEp)).toBe(true);
+    expect(initEp.ɵproviders[0]).toMatchObject({
+      provide: APP_INITIALIZER,
+      useValue: fn,
+      multi: true,
+    });
+
+    const customToken = new InjectionToken<string>("custom");
+    const tokenEp = provideToken(customToken, "custom-val");
+    expect(isEnvironmentProviders(tokenEp)).toBe(true);
+    expect(tokenEp.ɵproviders[0]).toMatchObject({
+      provide: customToken,
+      useValue: "custom-val",
+    });
   });
 });

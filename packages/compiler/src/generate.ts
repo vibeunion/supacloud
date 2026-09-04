@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type {
   ApplicationGraph,
@@ -11,6 +11,7 @@ import {
   camelName,
   isJobContextToken,
   isRequestContextToken,
+  joinRoutePaths,
   relativeImportPath,
 } from "./util";
 
@@ -25,6 +26,10 @@ const INTERFACES = `export interface CompiledRoute {
   query?: unknown;
   response?: unknown;
   command?: string;
+  guards?: string[];
+  resolvers?: Record<string, string>;
+  redirectTo?: string;
+  pathMatch?: "full" | "prefix";
 }
 
 export interface CompiledCommand {
@@ -34,6 +39,7 @@ export interface CompiledCommand {
   transaction: "required" | "none";
   audit?: string;
   idempotency: "required" | "none";
+  standalone?: boolean;
 }
 
 export interface CompiledController {
@@ -66,11 +72,15 @@ export interface CompiledModule {
 export interface GenerateOptions {
   rootDir: string;
   outDir: string;
+  generateClient?: boolean;
+  generatePermissions?: boolean;
 }
 
 export interface RenderedArtifacts {
   applicationCode: string;
   manifestJson: string;
+  clientCode?: string;
+  permissionsCode?: string;
 }
 
 /** Render application.ts and app.manifest.json content without file I/O. */
@@ -102,6 +112,17 @@ export function renderApplication(
     "  ];",
     "}",
     "",
+    "export async function initializeApplication(services: Record<string, unknown>): Promise<void> {",
+    '  const initializers = (services.appInitializer ?? (services as any)["supacloud.app-initializer"]) as unknown;',
+    "  if (Array.isArray(initializers)) {",
+    "    for (const init of initializers) {",
+    '      if (typeof init === "function") await init();',
+    "    }",
+    '  } else if (typeof initializers === "function") {',
+    "    await (initializers as () => unknown)();",
+    "  }",
+    "}",
+    "",
     ...factorySections,
     "",
   ].join("\n");
@@ -112,9 +133,14 @@ export function renderApplication(
     externalTokens: graph.externalTokens,
   };
 
+  const clientCode = options.generateClient ? renderClient(graph, options) : undefined;
+  const permissionsCode = options.generatePermissions ? renderPermissions(graph) : undefined;
+
   return {
     applicationCode: code,
     manifestJson: JSON.stringify(manifest, null, 2) + "\n",
+    clientCode,
+    permissionsCode,
   };
 }
 
@@ -131,9 +157,32 @@ export async function generateApplication(
   await mkdir(options.outDir, { recursive: true });
   const applicationPath = join(options.outDir, "application.ts");
   const manifestPath = join(options.outDir, "app.manifest.json");
-  await writeFile(applicationPath, rendered.applicationCode, "utf8");
-  await writeFile(manifestPath, rendered.manifestJson, "utf8");
-  return [applicationPath, manifestPath];
+  await writeFileAtomic(applicationPath, rendered.applicationCode);
+  await writeFileAtomic(manifestPath, rendered.manifestJson);
+
+  const written = [applicationPath, manifestPath];
+  if (rendered.clientCode) {
+    const clientPath = join(options.outDir, "client.ts");
+    await writeFileAtomic(clientPath, rendered.clientCode);
+    written.push(clientPath);
+  }
+  if (rendered.permissionsCode) {
+    const permissionsPath = join(options.outDir, "permissions.ts");
+    await writeFileAtomic(permissionsPath, rendered.permissionsCode);
+    written.push(permissionsPath);
+  }
+  return written;
+}
+
+async function writeFileAtomic(path: string, content: string): Promise<void> {
+  const temporaryPath = `${path}.tmp-${process.pid}-${Math.random().toString(36).slice(2)}`;
+  try {
+    await writeFile(temporaryPath, content, "utf8");
+    await rename(temporaryPath, path);
+  } catch (error) {
+    await unlink(temporaryPath).catch(() => undefined);
+    throw error;
+  }
 }
 
 type FactoryKind = "services" | "request" | "job";
@@ -292,6 +341,18 @@ class ModuleGenerator {
           }
         }
         if (route.command) fields.push(`command: ${JSON.stringify(route.command)}`);
+        if (route.guards && route.guards.length > 0) {
+          fields.push(`guards: ${JSON.stringify(route.guards)}`);
+        }
+        if (route.resolvers && Object.keys(route.resolvers).length > 0) {
+          fields.push(`resolvers: ${JSON.stringify(route.resolvers)}`);
+        }
+        if (route.redirectTo) {
+          fields.push(`redirectTo: ${JSON.stringify(route.redirectTo)}`);
+        }
+        if (route.pathMatch) {
+          fields.push(`pathMatch: ${JSON.stringify(route.pathMatch)}`);
+        }
         return `{ ${fields.join(", ")} }`;
       });
       return [
@@ -341,10 +402,23 @@ class ModuleGenerator {
 
     const lines: string[] = [];
     const returns = new Map<string, string>();
+    const multiGroups = new Map<string, string[]>();
+
     for (const provider of providers) {
-      const emitted = this.emitProvider(provider, kind);
-      if (emitted.constLine) lines.push(emitted.constLine);
-      returns.set(emitted.key, emitted.expr);
+      if (provider.multi) {
+        const emitted = this.emitProvider(provider, kind, true);
+        if (emitted.constLine) lines.push(emitted.constLine);
+        const list = multiGroups.get(emitted.key) ?? [];
+        list.push(emitted.expr);
+        multiGroups.set(emitted.key, list);
+      } else {
+        const emitted = this.emitProvider(provider, kind, false);
+        if (emitted.constLine) lines.push(emitted.constLine);
+        returns.set(emitted.key, emitted.expr);
+      }
+    }
+    for (const [key, exprs] of multiGroups) {
+      returns.set(key, `[${exprs.join(", ")}]`);
     }
     for (const controller of controllers) {
       const emitted = this.emitController(controller, kind);
@@ -361,31 +435,36 @@ class ModuleGenerator {
   private emitProvider(
     provider: ProviderNode,
     kind: FactoryKind,
+    isMulti = false,
   ): { constLine?: string; key: string; expr: string } {
     const key = camelName(provider.token);
     switch (provider.kind) {
       case "class": {
         const useClass = this.imports.add(provider.useClass ?? provider.token, provider.importPath);
-        const args = provider.deps.map((dep) => this.depExpr(dep, kind)).join(", ");
-        const local = this.localVar(provider.token, kind);
+        const args = provider.deps
+          .map((dep) => this.depExpr(dep, kind, provider.optionalDeps?.includes(dep)))
+          .join(", ");
+        const local = this.localVar(isMulti ? (provider.useClass ?? `${provider.token}Item`) : provider.token, kind);
         return { constLine: `const ${local} = new ${useClass}(${args});`, key, expr: local };
       }
       case "value": {
         const expr = provider.importPath
           ? this.imports.add(provider.useValueExpr ?? "undefined", provider.importPath)
           : (provider.useValueExpr ?? "undefined");
-        const local = this.localVar(provider.token, kind);
+        const local = this.localVar(isMulti ? `${provider.token}Item` : provider.token, kind);
         return { constLine: `const ${local} = ${expr};`, key, expr: local };
       }
       case "factory": {
         const factory = this.imports.add(provider.useFactoryName ?? "", provider.importPath);
-        const args = provider.deps.map((dep) => this.depExpr(dep, kind)).join(", ");
-        const local = this.localVar(provider.token, kind);
+        const args = provider.deps
+          .map((dep) => this.depExpr(dep, kind, provider.optionalDeps?.includes(dep)))
+          .join(", ");
+        const local = this.localVar(isMulti ? (provider.useFactoryName ?? `${provider.token}Item`) : provider.token, kind);
         return { constLine: `const ${local} = ${factory}(${args});`, key, expr: local };
       }
       case "existing": {
         // Alias provider: does not create a new instance, directly references target expression.
-        return { key, expr: this.depExpr(provider.useExisting ?? provider.token, kind) };
+        return { key, expr: this.depExpr(provider.useExisting ?? provider.token, kind, provider.optionalDeps?.includes(provider.token)) };
       }
     }
   }
@@ -395,7 +474,9 @@ class ModuleGenerator {
     kind: FactoryKind,
   ): { constLine: string; key: string; expr: string } {
     const className = this.imports.add(controller.className, controller.importPath);
-    const args = controller.deps.map((dep) => this.depExpr(dep, kind)).join(", ");
+    const args = controller.deps
+      .map((dep) => this.depExpr(dep, kind, controller.optionalDeps?.includes(dep)))
+      .join(", ");
     const key = camelName(controller.className);
     const local = this.localVar(controller.className, kind);
     return { constLine: `const ${local} = new ${className}(${args});`, key, expr: local };
@@ -423,7 +504,7 @@ class ModuleGenerator {
    * Services exported by imported modules (imported.<module>.<key>, accessed via services param in
    * request/job factories) > Platform deps (deps.<camelName>).
    */
-  private depExpr(token: string, kind: FactoryKind): string {
+  private depExpr(token: string, kind: FactoryKind, isOptional = false): string {
     if (kind === "request" && isRequestContextToken(token, this.graph.tokenNames)) return "ctx";
     if (kind === "job" && isJobContextToken(token, this.graph.tokenNames)) return "ctx";
 
@@ -433,7 +514,7 @@ class ModuleGenerator {
         return this.locals[kind].get(token) ?? camelName(token);
       }
       if (own.kind === "existing" && factoryOfScope(own.scope) === kind) {
-        return this.depExpr(own.useExisting ?? token, kind);
+        return this.depExpr(own.useExisting ?? token, kind, isOptional);
       }
       if (kind === "services") {
         // Application factory referencing request/job provider: scope-violation, already flagged by validator.
@@ -449,9 +530,20 @@ class ModuleGenerator {
       return `imported.${importName}.${camelName(token)}`;
     }
 
-    if (kind === "services") return `deps.${camelName(token)}`;
+    for (const mod of this.graph.modules) {
+      const rootProv = mod.providers.find((p) => p.token === token && p.providedIn === "root");
+      if (rootProv) {
+        return `imported.${mod.name}.${camelName(token)}`;
+      }
+    }
+
+    if (isOptional && !this.graph.externalTokens.includes(token)) {
+      return "undefined";
+    }
+
+    if (kind === "services") return isOptional ? `(deps.${camelName(token)} ?? undefined)` : `deps.${camelName(token)}`;
     // request/job factories have no deps parameter; platform/external tokens are also passed via services.
-    return `services.${camelName(token)}`;
+    return isOptional ? `(services.${camelName(token)} ?? undefined)` : `services.${camelName(token)}`;
   }
 }
 
@@ -473,8 +565,221 @@ function orderProviders(providers: ProviderNode[]): ProviderNode[] {
       break;
     }
     const [provider] = remaining.splice(index, 1);
-    emitted.add(provider.token);
-    result.push(provider);
+  emitted.add(provider.token);
+  result.push(provider);
+}
+return result;
+}
+
+/**
+ * Generates typed API client in client.ts from discovered Controllers and Routes.
+ * Modeled after Angular HttpClient and typed contract clients.
+ */
+export function renderClient(graph: ApplicationGraph, _options?: GenerateOptions): string {
+  const controllerEntries: string[] = [];
+  const allRoutes: Array<{
+    method: string;
+    path: string;
+    controller: string;
+    handler: string;
+    command?: string;
+    guards?: string[];
+    resolvers?: Record<string, string>;
+    redirectTo?: string;
+    pathMatch?: "full" | "prefix";
+  }> = [];
+
+  for (const module of graph.modules) {
+    for (const controller of module.controllers) {
+      const controllerKey = camelName(controller.className.replace(/Controller$/, ""));
+      const routeMethods: string[] = [];
+
+      for (const route of controller.routes) {
+        const fullPath = joinRoutePaths(controller.path, route.path);
+        allRoutes.push({
+          method: route.method,
+          path: fullPath,
+          controller: controller.className,
+          handler: route.handler,
+          command: route.command,
+          guards: route.guards,
+          resolvers: route.resolvers,
+          redirectTo: route.redirectTo,
+          pathMatch: route.pathMatch,
+        });
+
+        routeMethods.push(`
+    ${route.handler}: (options: {
+      params?: Record<string, string | number>;
+      query?: Record<string, unknown>;
+      body?: unknown;
+      headers?: Record<string, string>;
+    } = {}) => request(${JSON.stringify(route.method)}, ${JSON.stringify(fullPath)}, options),`);
+      }
+
+      controllerEntries.push(`
+  ${controllerKey}: {${routeMethods.join("")}
+  },`);
+    }
   }
-  return result;
+
+  return [
+    HEADER,
+    "",
+    "export interface ClientRequestOptions {",
+    "  params?: Record<string, string | number>;",
+    "  query?: Record<string, unknown>;",
+    "  body?: unknown;",
+    "  headers?: Record<string, string>;",
+    "}",
+    "",
+    "export type HttpInterceptorFn = (",
+    "  req: { method: string; url: string; headers: Record<string, string>; body?: unknown },",
+    "  next: (req: { method: string; url: string; headers: Record<string, string>; body?: unknown }) => Promise<Response>,",
+    ") => Promise<Response>;",
+    "",
+    "export interface ApiClientConfig {",
+    "  baseUrl?: string;",
+    "  fetch?: typeof fetch;",
+    "  headers?: Record<string, string> | (() => Record<string, string> | Promise<Record<string, string>>);",
+    "  interceptors?: HttpInterceptorFn[];",
+    "}",
+    "",
+    "export const API_ROUTES = " + JSON.stringify(allRoutes, null, 2) + " as const;",
+    "",
+    "export function createApiClient(config: ApiClientConfig = {}) {",
+    "  const fetcher = config.fetch ?? globalThis.fetch.bind(globalThis);",
+    '  const baseUrl = (config.baseUrl ?? "").replace(/\\/+$/, "");',
+    "",
+    "  async function request<T = unknown>(",
+    "    method: string,",
+    "    path: string,",
+    "    options: ClientRequestOptions = {},",
+    "  ): Promise<T> {",
+    "    let url = `${baseUrl}${path}`;",
+    "    if (options.params) {",
+    "      for (const [key, value] of Object.entries(options.params)) {",
+    "        url = url.replace(`:${key}`, encodeURIComponent(String(value)));",
+    "      }",
+    "    }",
+    "    if (options.query) {",
+    "      const searchParams = new URLSearchParams();",
+    "      for (const [k, v] of Object.entries(options.query)) {",
+    "        if (v !== undefined && v !== null) searchParams.set(k, String(v));",
+    "      }",
+    "      const qs = searchParams.toString();",
+    '      if (qs) url += (url.includes("?") ? "&" : "?") + qs;',
+    "    }",
+    '    const customHeaders = typeof config.headers === "function" ? await config.headers() : config.headers;',
+    "    const headers: Record<string, string> = {",
+    '      "content-type": "application/json",',
+    "      ...customHeaders,",
+    "      ...options.headers,",
+    "    };",
+    "    const interceptors = config.interceptors ?? [];",
+    "    const executeChain = (",
+    "      index: number,",
+    "      reqPayload: { method: string; url: string; headers: Record<string, string>; body?: unknown },",
+    "    ): Promise<Response> => {",
+    "      if (index < interceptors.length) {",
+    "        return interceptors[index](reqPayload, (nextPayload) => executeChain(index + 1, nextPayload));",
+    "      }",
+    "      return fetcher(reqPayload.url, {",
+    "        method: reqPayload.method,",
+    "        headers: reqPayload.headers,",
+    "        body: reqPayload.body !== undefined ? JSON.stringify(reqPayload.body) : undefined,",
+    "      });",
+    "    };",
+    "    const response = await executeChain(0, { method, url, headers, body: options.body });",
+    "    if (!response.ok) {",
+    "      const errBody = await response.text();",
+    "      throw new Error(`API request failed: ${method} ${path} -> ${response.status} ${errBody}`);",
+    "    }",
+    '    const contentType = response.headers?.get("content-type") ?? "";',
+    '    if (contentType.includes("application/json")) {',
+    "      return response.json() as Promise<T>;",
+    "    }",
+    "    return response.text() as Promise<T>;",
+    "  }",
+    "",
+    "  return {",
+    "    request,",
+    ...controllerEntries,
+    "  };",
+    "}",
+    "",
+    "export type ApiClient = ReturnType<typeof createApiClient>;",
+    "",
+  ].join("\n");
+}
+
+/**
+ * Generates static permissions and route permission bindings in permissions.ts.
+ */
+export function renderPermissions(graph: ApplicationGraph): string {
+  const permissions = new Set<string>();
+  const bindings: Array<{
+    method: string;
+    path: string;
+    controller: string;
+    handler: string;
+    command?: string;
+    permission?: string;
+  }> = [];
+
+  for (const module of graph.modules) {
+    for (const command of module.commands) {
+      if (command.permission) permissions.add(command.permission);
+    }
+    for (const controller of module.controllers) {
+      for (const route of controller.routes) {
+        let perm: string | undefined;
+        if (route.command) {
+          const cmd = module.commands.find((c) => c.className === route.command);
+          perm = cmd?.permission;
+        }
+        if (perm) permissions.add(perm);
+        bindings.push({
+          method: route.method,
+          path: joinRoutePaths(controller.path, route.path),
+          controller: controller.className,
+          handler: route.handler,
+          command: route.command,
+          permission: perm,
+        });
+      }
+    }
+  }
+
+  const sortedPerms = [...permissions].sort();
+  const enumEntries = sortedPerms.map((perm) => {
+    const key = pascalName(perm.replace(/[^A-Za-z0-9]+/g, " "));
+    return `  ${key}: ${JSON.stringify(perm)},`;
+  });
+
+  return [
+    HEADER,
+    "",
+    "export const AppPermissions = {",
+    ...enumEntries,
+    "} as const;",
+    "",
+    "export type AppPermission = (typeof AppPermissions)[keyof typeof AppPermissions];",
+    "",
+    "export interface RoutePermissionBinding {",
+    "  method: string;",
+    "  path: string;",
+    "  controller: string;",
+    "  handler: string;",
+    "  command?: string;",
+    "  permission?: string;",
+    "}",
+    "",
+    "export const RoutePermissions: RoutePermissionBinding[] = " + JSON.stringify(bindings, null, 2) + ";",
+    "",
+    "export function hasPermission(granted: string[], required: AppPermission | string): boolean {",
+    '  return granted.includes("*") || granted.includes(required);',
+    "}",
+    "",
+  ].join("\n");
 }

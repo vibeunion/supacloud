@@ -1,7 +1,12 @@
 export { analyzeProject } from "./analyze";
 export { checkProject, compileProject } from "./compile";
+export { watchProject } from "./watch";
+export { doctorProject, explainGraph, formatGraph } from "./inspect";
+export { createIncrementalCompiler } from "./incremental";
+export { createDependencyGraphCache } from "./incremental";
 export { generateApplication, renderApplication } from "./generate";
 export type { GenerateOptions, RenderedArtifacts } from "./generate";
+export type { DoctorResult } from "./inspect";
 export { validateGraph } from "./validate";
 export { camelName } from "./util";
 export {
@@ -15,12 +20,15 @@ export {
 } from "./profiles";
 export type {
   ApplicationGraph,
+  CachedModuleEntry,
   CheckProjectResult,
   CommandExecutionCapabilities,
   CommandNode,
   CompileOptions,
   CompileResult,
+  CompileStats,
   ControllerNode,
+  DependencyGraphCache,
   Diagnostic,
   ModuleBoundaryPresetName,
   ModuleBoundaryProfile,
@@ -33,4 +41,7 @@ export type {
   Scope,
   TokenKind,
   ValidateOptions,
+  WatchEvent,
+  WatchHandle,
+  WatchOptions,
 } from "./types";

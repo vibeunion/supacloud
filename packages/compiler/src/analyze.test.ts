@@ -128,6 +128,7 @@ describe("analyzeProject：controller 与路由", () => {
       params: "AcceptParams",
       response: "AcceptResult",
       command: "AcceptCaseCommand",
+      pathParams: ["caseId"],
     });
     expect(controller.schemaImports).toEqual({
       CreateCaseBody: "src/features/case/contracts",
@@ -183,5 +184,30 @@ describe("analyzeProject：command 与 externalTokens", () => {
 
   test("正常项目无诊断", () => {
     expect(graph.diagnostics ?? []).toEqual([]);
+  });
+
+  test("analyzes property-level inject() dependencies", async () => {
+    const root = await mkdtemp(join(tmpdir(), "supacloud-inject-prop-"));
+    await writeFixtureProject(root, {
+      "tsconfig.json": GOOD_PROJECT_FILES["tsconfig.json"],
+      "src/test.service.ts": `
+        import { Injectable, inject, InjectionToken } from "@supacloud/app";
+        const CONFIG = new InjectionToken<string>("config");
+        const CACHE = new InjectionToken<string>("cache");
+
+        @Injectable({ providedIn: 'root' })
+        export class StandaloneService {
+          private config = inject(CONFIG);
+          private cache = inject(CACHE, { optional: true });
+        }
+      `,
+    });
+
+    const analyzed = await analyzeProject(root);
+    const rootMod = analyzed.modules.find((m) => m.name === "root");
+    const prov = rootMod?.providers.find((p) => p.token === "StandaloneService");
+    expect(prov?.deps).toContain("CONFIG");
+    expect(prov?.deps).toContain("CACHE");
+    expect(prov?.optionalDeps).toContain("CACHE");
   });
 });
