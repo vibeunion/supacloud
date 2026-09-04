@@ -35,6 +35,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: management-api-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 # Demo JWT signed with the Supabase public demo key (not a real credential).
 # Source: https://supabase.com/docs/guides/self-hosting/docker#generate-api-keys
 # gitleaks:allow
@@ -68,6 +72,14 @@ jobs:
         with:
           bun-version: ${{ env.BUN_VERSION }}
 
+      - name: Restore Bun package cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ env.BUN_VERSION }}-${{ hashFiles('packages/management-api/bun.lock') }}
+          restore-keys: |
+            bun-${{ runner.os }}-${{ env.BUN_VERSION }}-
+
       - name: Show runtime versions
         run: |
           node --version
@@ -90,9 +102,129 @@ jobs:
         run: bun run scripts/check-swagger-coverage.ts --strict
 
   package-checks:
-    name: Package Checks
+    name: Package Checks (${{ matrix.name }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        include:
+          - name: Web Console
+            working-directory: packages/web-console
+            script: |
+              bun install --frozen-lockfile
+              bun test
+              bun run check
+              bun run build
+              bun run ../../scripts/audit_dependencies.ts
+          - name: SupaCloud JS SDK
+            working-directory: packages/supacloud-js
+            script: |
+              bun install --frozen-lockfile
+              bun run typecheck
+              bun run typecheck:test
+              bun run build
+              bun run typecheck:consumer
+              bun test
+              bun run ../../scripts/audit_dependencies.ts
+          - name: Edge Runtime
+            working-directory: packages/edge-runtime
+            script: |
+              bun install --frozen-lockfile
+              bun run typecheck
+              bun test
+              bun run ../../scripts/audit_dependencies.ts
+          - name: Pgredis Runtime
+            working-directory: packages/pgredis-runtime
+            script: |
+              bun install --frozen-lockfile
+              bun run typecheck
+              bun test
+              bun run ../../scripts/audit_dependencies.ts
+          - name: SupaCloud Lite
+            working-directory: packages/supacloud-lite
+            script: |
+              bun install --frozen-lockfile
+              bun run check
+              bun run ../../scripts/audit_dependencies.ts
+          - name: Project CLI
+            working-directory: packages/cli
+            script: |
+              bun install --frozen-lockfile
+              bun run typecheck
+              bun test src
+              bun run build
+              bun run ../../scripts/audit_dependencies.ts
+          - name: Function Adapters
+            working-directory: packages/function-adapter
+            script: |
+              bun install --frozen-lockfile
+              bun run typecheck
+              bun test
+              bun run build
+              bun run ../../scripts/audit_dependencies.ts
+          - name: Admin CLI
+            working-directory: packages/admin
+            script: |
+              bun install --frozen-lockfile
+              bun run typecheck
+              bun test src
+              bun run build
+              bun run ../../scripts/audit_dependencies.ts
+          - name: Unified supacloudctl CLI
+            working-directory: packages/supacloud
+            script: |
+              bun install --frozen-lockfile
+              bun run typecheck
+              bun test src/index.test.ts
+              bun run build
+              bun run ../../scripts/audit_dependencies.ts
+          - name: App Framework Metadata
+            working-directory: packages/app
+            script: |
+              bun install --frozen-lockfile
+              bun run typecheck
+              bun run typecheck:test
+              bun test
+              bun run build
+              bun run ../../scripts/audit_dependencies.ts
+          - name: App Compiler
+            working-directory: packages/compiler
+            script: |
+              bun install --frozen-lockfile
+              bun run typecheck
+              bun run typecheck:test
+              bun test
+              bun run build
+              bun run ../../scripts/audit_dependencies.ts
+          - name: Elysia Adapter
+            working-directory: packages/elysia
+            script: |
+              bun install --frozen-lockfile
+              bun run typecheck
+              bun run typecheck:test
+              bun test
+              bun run build
+              bun run ../../scripts/audit_dependencies.ts
+          - name: Database Governance
+            working-directory: packages/db
+            script: |
+              bun install --frozen-lockfile
+              bun run typecheck
+              bun run typecheck:test
+              bun test
+              bun run build
+              bun run ../../scripts/audit_dependencies.ts
+          - name: Testing Utilities
+            working-directory: packages/testing
+            script: |
+              bun install --frozen-lockfile
+              bun run typecheck
+              bun run typecheck:test
+              bun test
+              bun run build
+              bun run ../../scripts/audit_dependencies.ts
 
     steps:
       - name: Checkout code
@@ -108,139 +240,39 @@ jobs:
         with:
           bun-version: ${{ env.BUN_VERSION }}
 
+      - name: Restore Bun package cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ env.BUN_VERSION }}-${{ matrix.working-directory }}-${{ hashFiles(format('{0}/bun.lock', matrix.working-directory)) }}
+          restore-keys: |
+            bun-${{ runner.os }}-${{ env.BUN_VERSION }}-${{ matrix.working-directory }}-
+
       - name: Show runtime versions
         run: |
           node --version
           bun --version
 
-      - name: Check web console
-        working-directory: packages/web-console
-        run: |
-          bun install --frozen-lockfile
-          bun test
-          bun run check
-          bun run build
-          bun run ../../scripts/audit_dependencies.ts
+      - name: Run package checks
+        working-directory: ${{ matrix.working-directory }}
+        run: ${{ matrix.script }}
 
-      - name: Check SupaCloud JS SDK
-        working-directory: packages/supacloud-js
-        run: |
-          bun install --frozen-lockfile
-          bun run typecheck
-          bun run typecheck:test
-          bun run build
-          bun run typecheck:consumer
-          bun test
-          bun run ../../scripts/audit_dependencies.ts
+  generate-sbom:
+    name: Generate CycloneDX SBOM
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
 
-      - name: Check edge runtime
-        working-directory: packages/edge-runtime
-        run: |
-          bun install --frozen-lockfile
-          bun run typecheck
-          bun test
-          bun run ../../scripts/audit_dependencies.ts
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
 
-      - name: Check pgredis runtime
-        working-directory: packages/pgredis-runtime
-        run: |
-          bun install --frozen-lockfile
-          bun run typecheck
-          bun test
-          bun run ../../scripts/audit_dependencies.ts
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
 
-      - name: Check SupaCloud Lite
-        working-directory: packages/supacloud-lite
-        run: |
-          bun install --frozen-lockfile
-          bun run check
-          bun run ../../scripts/audit_dependencies.ts
-
-      - name: Check project CLI
-        working-directory: packages/cli
-        run: |
-          bun install --frozen-lockfile
-          bun run typecheck
-          bun test src
-          bun run build
-          bun run ../../scripts/audit_dependencies.ts
-
-      - name: Check Function adapters
-        working-directory: packages/function-adapter
-        run: |
-          bun install --frozen-lockfile
-          bun run typecheck
-          bun test
-          bun run build
-          bun run ../../scripts/audit_dependencies.ts
-
-      - name: Check admin CLI
-        working-directory: packages/admin
-        run: |
-          bun install --frozen-lockfile
-          bun run typecheck
-          bun test src
-          bun run build
-          bun run ../../scripts/audit_dependencies.ts
-
-      - name: Check unified supacloudctl CLI
-        working-directory: packages/supacloud
-        run: |
-          bun install --frozen-lockfile
-          bun run typecheck
-          bun test src/index.test.ts
-          bun run build
-          bun run ../../scripts/audit_dependencies.ts
-
-      - name: Check app framework metadata
-        working-directory: packages/app
-        run: |
-          bun install --frozen-lockfile
-          bun run typecheck
-          bun run typecheck:test
-          bun test
-          bun run build
-          bun run ../../scripts/audit_dependencies.ts
-
-      - name: Check app compiler
-        working-directory: packages/compiler
-        run: |
-          bun install --frozen-lockfile
-          bun run typecheck
-          bun run typecheck:test
-          bun test
-          bun run build
-          bun run ../../scripts/audit_dependencies.ts
-
-      - name: Check elysia adapter
-        working-directory: packages/elysia
-        run: |
-          bun install --frozen-lockfile
-          bun run typecheck
-          bun run typecheck:test
-          bun test
-          bun run build
-          bun run ../../scripts/audit_dependencies.ts
-
-      - name: Check database governance
-        working-directory: packages/db
-        run: |
-          bun install --frozen-lockfile
-          bun run typecheck
-          bun run typecheck:test
-          bun test
-          bun run build
-          bun run ../../scripts/audit_dependencies.ts
-
-      - name: Check testing utilities
-        working-directory: packages/testing
-        run: |
-          bun install --frozen-lockfile
-          bun run typecheck
-          bun run typecheck:test
-          bun test
-          bun run build
-          bun run ../../scripts/audit_dependencies.ts
+      - name: Check business invariants and schema governance
+        run: bun run check:invariants
 
       - name: Generate CycloneDX SBOM
         uses: anchore/sbom-action@v0
@@ -298,6 +330,14 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Restore Bun package cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ env.BUN_VERSION }}-${{ hashFiles('**/bun.lock') }}
+          restore-keys: |
+            bun-${{ runner.os }}-${{ env.BUN_VERSION }}-
 
       - name: Install dependencies
         working-directory: packages/supacloud-lite
@@ -378,6 +418,14 @@ jobs:
         with:
           bun-version: ${{ env.BUN_VERSION }}
 
+      - name: Restore Bun package cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ env.BUN_VERSION }}-${{ hashFiles('**/bun.lock') }}
+          restore-keys: |
+            bun-${{ runner.os }}-${{ env.BUN_VERSION }}-
+
       - name: Show runtime versions
         run: |
           node --version
@@ -422,6 +470,14 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Restore Bun package cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ env.BUN_VERSION }}-${{ hashFiles('**/bun.lock') }}
+          restore-keys: |
+            bun-${{ runner.os }}-${{ env.BUN_VERSION }}-
 
       - name: Build and start SupaCloud PostgreSQL 18
         run: docker compose -f docker/self-host/docker-compose.yml up -d --build postgres
@@ -613,6 +669,14 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Restore Bun package cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ env.BUN_VERSION }}-${{ hashFiles('**/bun.lock') }}
+          restore-keys: |
+            bun-${{ runner.os }}-${{ env.BUN_VERSION }}-
 
       - name: Build Caddy integration image
         run: docker build --tag supacloud-caddy:2.11.4-ratelimit docker/self-host/caddy
@@ -857,6 +921,14 @@ jobs:
         with:
           bun-version: ${{ env.BUN_VERSION }}
 
+      - name: Restore Bun package cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ env.BUN_VERSION }}-${{ hashFiles('**/bun.lock') }}
+          restore-keys: |
+            bun-${{ runner.os }}-${{ env.BUN_VERSION }}-
+
       - name: Setup Go
         uses: actions/setup-go@v7
         with:
@@ -889,6 +961,7 @@ jobs:
       - integration-test
       - shell-scripts-lint
       - caddy-edge-proxy-smoke
+      - generate-sbom
     runs-on: ubuntu-latest
     timeout-minutes: 2
 
@@ -904,6 +977,7 @@ jobs:
           INTEGRATION_TESTS: ${{ needs.integration-test.result }}
           SHELL_SCRIPTS_LINT: ${{ needs.shell-scripts-lint.result }}
           CADDY_EDGE_PROXY: ${{ needs.caddy-edge-proxy-smoke.result }}
+          SBOM: ${{ needs.generate-sbom.result }}
         run: |
           for result in \
             "$LINT_AND_TYPECHECK" \
@@ -914,7 +988,8 @@ jobs:
             "$POSTGRES_18" \
             "$INTEGRATION_TESTS" \
             "$SHELL_SCRIPTS_LINT" \
-            "$CADDY_EDGE_PROXY"; do
+            "$CADDY_EDGE_PROXY" \
+            "$SBOM"; do
             if [[ "$result" != "success" ]]; then
               echo "Required CI job did not succeed: $result" >&2
               exit 1
@@ -923,7 +998,7 @@ jobs:
 
   build-binaries:
     name: Build Binaries
-    needs: [lint-and-typecheck, package-checks, docker-and-scripts-checks, unit-test, integration-test, shell-scripts-lint, caddy-edge-proxy-smoke]
+    needs: [lint-and-typecheck, package-checks, generate-sbom, docker-and-scripts-checks, unit-test, integration-test, shell-scripts-lint, caddy-edge-proxy-smoke]
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
 
