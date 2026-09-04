@@ -6,6 +6,7 @@ import { resolveBucketName } from "../db";
 import * as fs from "node:fs/promises";
 import * as syncFs from "node:fs";
 import * as path from "node:path";
+import { createHash } from "node:crypto";
 import { S3Client } from "bun";
 import { AwsClient } from "aws4fetch";
 
@@ -66,6 +67,14 @@ export interface StorageDriver {
     data: Blob | Buffer | Uint8Array | ArrayBuffer | ReadableStream,
     contentType: string,
   ): Promise<boolean>;
+  uploadFileConditional?(
+    projectRef: string,
+    bucket: string,
+    key: string,
+    data: Blob | Buffer | Uint8Array | ArrayBuffer | ReadableStream,
+    contentType: string,
+    expectedEtag: string | null,
+  ): Promise<ConditionalUploadResult>;
   copyFile(
     projectRef: string,
     srcBucket: string,
@@ -87,6 +96,10 @@ export interface StorageDriver {
     key: string,
   ): Promise<Response | null>;
 }
+
+export type ConditionalUploadResult =
+  | { outcome: "created" | "replaced"; etag: string }
+  | { outcome: "exists" | "etag_mismatch" };
 
 export type BucketDeletionResult =
   | { success: true }
@@ -113,6 +126,10 @@ async function createObjectParent(bucketPath: string, objectKey: string): Promis
       }
     }
   }
+}
+
+function objectEtag(bytes: Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
 }
 
 export class JuiceFSDriver implements StorageDriver {
@@ -220,6 +237,66 @@ export class JuiceFSDriver implements StorageDriver {
         error: e instanceof Error ? e.message : String(e),
       });
       return false;
+    }
+  }
+
+  /**
+   * Best-effort conditional write for the filesystem-backed JuiceFS driver.
+   * Create-only writes use O_EXCL; replacements validate the current content
+   * before an atomic temp-file rename. External SMB writers can still race a
+   * replacement after validation, so callers must treat this as an adapter
+   * capability rather than a distributed CAS primitive.
+   */
+  async uploadFileConditional(
+    projectRef: string,
+    bucket: string,
+    key: string,
+    data: Blob | Buffer | Uint8Array | ArrayBuffer | ReadableStream,
+    _contentType: string,
+    expectedEtag: string | null,
+  ): Promise<ConditionalUploadResult> {
+    const cleanKey = normalizeObjectKey(key);
+    const bucketPath = this.getBasePath(projectRef, bucket);
+    await createObjectParent(bucketPath, cleanKey);
+    const filePath = this.getBasePath(projectRef, bucket, cleanKey);
+    const bytes = await toUint8Array(data);
+
+    if (expectedEtag === null) {
+      let handle: fs.FileHandle | undefined;
+      try {
+        handle = await fs.open(filePath, "wx");
+        await handle.writeFile(bytes);
+        return { outcome: "created", etag: objectEtag(bytes) };
+      } catch (error: unknown) {
+        if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+          return { outcome: "exists" };
+        }
+        throw error;
+      } finally {
+        await handle?.close().catch(() => undefined);
+      }
+    }
+
+    let currentBytes: Buffer;
+    try {
+      currentBytes = await fs.readFile(filePath);
+    } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return { outcome: "etag_mismatch" };
+      }
+      throw error;
+    }
+    if (objectEtag(currentBytes) !== expectedEtag.replace(/^"|"$/g, "")) {
+      return { outcome: "etag_mismatch" };
+    }
+
+    const temporaryPath = `${filePath}.supacloud-${crypto.randomUUID()}.tmp`;
+    try {
+      await fs.writeFile(temporaryPath, bytes, { flag: "wx" });
+      await fs.rename(temporaryPath, filePath);
+      return { outcome: "replaced", etag: objectEtag(bytes) };
+    } finally {
+      await fs.rm(temporaryPath, { force: true }).catch(() => undefined);
     }
   }
 

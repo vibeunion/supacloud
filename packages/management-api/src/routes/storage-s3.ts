@@ -11,6 +11,8 @@
  *   DELETE /:bucket        DeleteBucket
  *   HEAD /:bucket          HeadBucket
  *   PUT /:bucket/:key      PutObject
+ *                           (If-None-Match: * and If-Match supported when the
+ *                            configured driver exposes conditional writes)
  *   GET /:bucket/:key      GetObject
  *   HEAD /:bucket/:key     HeadObject
  *   DELETE /:bucket/:key   DeleteObject
@@ -308,6 +310,42 @@ export const storageS3Routes = new Elysia({ prefix: "/v1/storage/:ref/s3" })
     if (!body) return s3Error("IncompleteBody", "Missing request body", 400);
 
     const contentType = request.headers.get("content-type") || "application/octet-stream";
+    const ifNoneMatch = request.headers.get("if-none-match");
+    const ifMatch = request.headers.get("if-match");
+    if (ifNoneMatch !== null && ifMatch !== null) {
+      return s3Error("InvalidRequest", "If-None-Match and If-Match cannot be combined", 400);
+    }
+    if (ifNoneMatch !== null && ifNoneMatch.trim() !== "*") {
+      return s3Error("InvalidRequest", "Only If-None-Match: * is supported", 400);
+    }
+    const expectedEtag = ifMatch === null ? null : ifMatch.trim();
+    if (ifMatch !== null && (!expectedEtag || expectedEtag === "*")) {
+      return s3Error("InvalidRequest", "If-Match requires an object ETag", 400);
+    }
+
+    if (ifNoneMatch !== null || ifMatch !== null) {
+      const conditionalResult = await StorageService.uploadFileConditional(
+        params.ref,
+        params.bucket,
+        key,
+        await request.arrayBuffer(),
+        contentType,
+        ifNoneMatch !== null ? null : expectedEtag,
+      );
+      if (!conditionalResult) {
+        return s3Error("NotImplemented", "Conditional writes are not supported by this storage backend", 501);
+      }
+      if (conditionalResult.outcome === "exists" || conditionalResult.outcome === "etag_mismatch") {
+        return s3Error("PreconditionFailed", "The object precondition was not met", 412);
+      }
+      if (!("etag" in conditionalResult)) {
+        return s3Error("InternalError", "Conditional write returned an invalid result", 500);
+      }
+      set.headers["ETag"] = `"${conditionalResult.etag}"`;
+      set.status = 200;
+      return "";
+    }
+
     const ok = await StorageService.uploadFile(params.ref, params.bucket, key, body as ReadableStream, contentType);
     if (!ok) return s3Error("InternalError", "Failed to store object", 500);
 

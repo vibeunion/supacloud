@@ -7,6 +7,7 @@ const mockListBuckets = mock(() => Promise.resolve([]));
 const mockCreateBucket = mock(() => Promise.resolve({ success: true }));
 const mockListFiles = mock(() => Promise.resolve([]));
 const mockUploadFile = mock(() => Promise.resolve(true));
+const mockUploadFileConditional = mock(() => Promise.resolve<{ outcome: "created" | "replaced"; etag: string }>({ outcome: "created", etag: "etag-conditional" }));
 const mockDeleteFile = mock(() => Promise.resolve(true));
 const mockDeleteBucket = mock(() => Promise.resolve({ success: true }));
 const mockGetDownloadResponse = mock(() => Promise.resolve(null));
@@ -27,6 +28,7 @@ const storageSpies = [
   spyOn(StorageService, "createBucket").mockImplementation(mockCreateBucket as never),
   spyOn(StorageService, "listFiles").mockImplementation(mockListFiles as never),
   spyOn(StorageService, "uploadFile").mockImplementation(mockUploadFile as never),
+  spyOn(StorageService, "uploadFileConditional").mockImplementation(mockUploadFileConditional as never),
   spyOn(StorageService, "deleteFile").mockImplementation(mockDeleteFile as never),
   spyOn(StorageService, "deleteBucket").mockImplementation(mockDeleteBucket as never),
   spyOn(StorageService, "getDownloadResponse").mockImplementation(mockGetDownloadResponse as never),
@@ -71,6 +73,7 @@ beforeEach(() => {
   mockCreateBucket.mockReset();
   mockListFiles.mockReset();
   mockUploadFile.mockReset();
+  mockUploadFileConditional.mockReset();
   mockDeleteFile.mockReset();
   mockDeleteBucket.mockReset();
   mockGetDownloadResponse.mockReset();
@@ -253,6 +256,47 @@ describe("storageS3Routes", () => {
     expect(res.status).toBe(500);
     const xml = await res.text();
     expect(xml).toContain("InternalError");
+  });
+
+  test("PUT /:bucket/* honors If-None-Match and returns a stable ETag", async () => {
+    mockUploadFileConditional.mockResolvedValue({ outcome: "created", etag: "abc123" });
+    const res = await authedRequest("/v1/storage/testproj/s3/mybucket/file.txt", {
+      method: "PUT",
+      body: "hello",
+      headers: { "if-none-match": "*" },
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("etag")).toBe('"abc123"');
+    expect(mockUploadFileConditional).toHaveBeenCalledWith(
+      "testproj", "mybucket", "file.txt", expect.any(ArrayBuffer), "application/octet-stream", null,
+    );
+  });
+
+  test("PUT /:bucket/* returns 412 for conditional conflicts and 501 when unsupported", async () => {
+    mockUploadFileConditional.mockResolvedValue({ outcome: "exists" });
+    const exists = await authedRequest("/v1/storage/testproj/s3/mybucket/file.txt", {
+      method: "PUT",
+      body: "hello",
+      headers: { "if-none-match": "*" },
+    });
+    expect(exists.status).toBe(412);
+    expect(await exists.text()).toContain("PreconditionFailed");
+
+    mockUploadFileConditional.mockResolvedValue({ outcome: "etag_mismatch" });
+    const mismatch = await authedRequest("/v1/storage/testproj/s3/mybucket/file.txt", {
+      method: "PUT",
+      body: "hello",
+      headers: { "if-match": '"stale"' },
+    });
+    expect(mismatch.status).toBe(412);
+
+    mockUploadFileConditional.mockResolvedValue(null as never);
+    const unsupported = await authedRequest("/v1/storage/testproj/s3/mybucket/file.txt", {
+      method: "PUT",
+      body: "hello",
+      headers: { "if-none-match": "*" },
+    });
+    expect(unsupported.status).toBe(501);
   });
 
   // --- GetObject ----------------------------------------------------------
